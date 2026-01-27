@@ -25,7 +25,7 @@ use marginfi_type_crate::types::{Bank, FeeState};
 /// Remaining accounts should be passed in the order required by Drift's withdraw instruction:
 /// 1. Oracle accounts (optional)
 /// 2. Spot market accounts (always required)
-/// 3. Token mint (optional for Token-2022)
+/// 3. Token mint (required for Token-2022)
 pub fn drift_harvest_reward<'info>(
     ctx: Context<'_, '_, 'info, 'info, DriftHarvestReward<'info>>,
 ) -> MarginfiResult {
