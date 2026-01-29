@@ -188,6 +188,9 @@ pub enum OracleSetup {
     DriftSwitchboardPull,
     SolendPythPull,
     SolendSwitchboardPull,
+    FixedStakedWithPythPush,
+    FixedKaminoPythPush,
+    FixedKaminoSwitchboardPull,
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
@@ -208,6 +211,9 @@ impl OracleSetup {
             10 => Some(Self::DriftSwitchboardPull),
             11 => Some(Self::SolendPythPull),
             12 => Some(Self::SolendSwitchboardPull),
+            13 => Some(Self::FixedStakedWithPythPush),
+            14 => Some(Self::FixedKaminoPythPush),
+            15 => Some(Self::FixedKaminoSwitchboardPull),
             _ => None,
         }
     }

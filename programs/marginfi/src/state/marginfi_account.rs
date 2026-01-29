@@ -24,12 +24,23 @@ use marginfi_type_crate::{
 };
 use std::cmp::{max, min};
 
-/// 4 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool), 3 for `ASSET_TAG_KAMINO`, `ASSET_TAG_DRIFT`, and `ASSET_TAG_SOLEND`, 2 for most others (bank, oracle), 1 for Fixed
+/// Returns the number of remaining accounts required for a bank (bank account + oracle/venue accounts).
+///
+/// Account counts by oracle setup and asset tag:
+/// - `Fixed`: 1 (bank only)
+/// - `FixedStakedWithPythPush`: 3 (bank + lst_mint + stake_pool)
+/// - `FixedKaminoPythPush` / `FixedKaminoSwitchboardPull`: 2 (bank + reserve)
+/// - `ASSET_TAG_STAKED`: 4 (bank + oracle + lst_mint + stake_pool)
+/// - `ASSET_TAG_KAMINO` / `ASSET_TAG_DRIFT` / `ASSET_TAG_SOLEND`: 3 (bank + oracle + reserve)
+/// - `ASSET_TAG_DEFAULT` / `ASSET_TAG_SOL`: 2 (bank + oracle)
 pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
-    if bank.config.oracle_setup == OracleSetup::Fixed {
-        Ok(1)
-    } else {
-        get_remaining_accounts_per_asset_tag(bank.config.asset_tag)
+    match bank.config.oracle_setup {
+        OracleSetup::Fixed => Ok(1),
+        // Fixed + staking: bank + lst_mint + stake_pool (no oracle)
+        OracleSetup::FixedStakedWithPythPush => Ok(3),
+        // Fixed + Kamino: bank + reserve (no oracle)
+        OracleSetup::FixedKaminoPythPush | OracleSetup::FixedKaminoSwitchboardPull => Ok(2),
+        _ => get_remaining_accounts_per_asset_tag(bank.config.asset_tag),
     }
 }
 

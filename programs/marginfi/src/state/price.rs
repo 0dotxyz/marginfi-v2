@@ -574,6 +574,147 @@ impl OraclePriceFeedAdapter {
 
                 Ok(OraclePriceFeedAdapter::SwitchboardPull(price_feed))
             }
+            OracleSetup::FixedStakedWithPythPush => {
+                // Fixed base price + staking pool exchange rate
+                // Requires: lst_mint, stake_pool (no Pyth oracle needed)
+                check!(ais.len() == 2, MarginfiError::WrongNumberOfOracleAccounts);
+
+                if ais[0].key != &bank_config.oracle_keys[1]
+                    || ais[1].key != &bank_config.oracle_keys[2]
+                {
+                    msg!(
+                        "Expected oracle keys: [1] {:?}, [2] {:?}, got: [0] {:?}, [1] {:?}",
+                        bank_config.oracle_keys[1],
+                        bank_config.oracle_keys[2],
+                        ais[0].key,
+                        ais[1].key
+                    );
+                    return Err(error!(MarginfiError::WrongOracleAccountKeys));
+                }
+
+                let lst_mint = Account::<'info, Mint>::try_from(&ais[0]).unwrap();
+                let stake_state = try_from_slice_unchecked::<StakeStateV2>(&ais[1].data.borrow())?;
+                let (_, stake) = match stake_state {
+                    StakeStateV2::Stake(meta, stake, _) => (meta, stake),
+                    _ => panic!("unsupported stake state"),
+                };
+                let sol_pool_balance = stake.delegation.stake;
+                let lamports_per_sol: u64 = 1_000_000_000;
+                let sol_pool_adjusted_balance = sol_pool_balance
+                    .checked_sub(lamports_per_sol)
+                    .ok_or_else(math_error!())?;
+
+                let lst_supply = lst_mint.supply;
+                check!(lst_supply > 0, MarginfiError::ZeroSupplyInStakePool);
+
+                // Get fixed base price
+                let base_price: I80F48 = bank.config.fixed_price.into();
+                check!(
+                    base_price >= I80F48::ZERO,
+                    MarginfiError::FixedOraclePriceNegative
+                );
+
+                // Apply exchange rate: price * sol_pool_adjusted_balance / lst_supply
+                let adjusted_price = base_price
+                    .checked_mul(I80F48::from_num(sol_pool_adjusted_balance))
+                    .ok_or_else(math_error!())?
+                    .checked_div(I80F48::from_num(lst_supply))
+                    .ok_or_else(math_error!())?;
+
+                Ok(OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                    price: adjusted_price,
+                }))
+            }
+            OracleSetup::FixedKaminoPythPush => {
+                // Fixed base price + Kamino reserve exchange rate
+                // Requires: Kamino reserve (no Pyth oracle needed)
+                check!(ais.len() == 1, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let reserve_info = &ais[0];
+
+                check_eq!(
+                    *reserve_info.key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::KaminoReserveValidationFailed
+                );
+
+                // Verifies owner + discriminator automatically
+                let reserve_loader: AccountLoader<MinimalReserve> =
+                    AccountLoader::try_from(reserve_info)
+                        .map_err(|_| MarginfiError::KaminoReserveValidationFailed)?;
+                let reserve = reserve_loader.load()?;
+                let is_stale = reserve.is_stale(clock.slot);
+                if is_stale {
+                    return err!(MarginfiError::ReserveStale);
+                }
+
+                // Get fixed base price
+                let base_price: I80F48 = bank.config.fixed_price.into();
+                check!(
+                    base_price >= I80F48::ZERO,
+                    MarginfiError::FixedOraclePriceNegative
+                );
+
+                // Apply Kamino exchange rate
+                let (total_liq, total_col) = reserve.scaled_supplies()?;
+                let adjusted_price = if total_col > I80F48::ZERO {
+                    let liq_to_col_ratio = total_liq / total_col;
+                    base_price
+                        .checked_mul(liq_to_col_ratio)
+                        .ok_or_else(math_error!())?
+                } else {
+                    base_price
+                };
+
+                Ok(OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                    price: adjusted_price,
+                }))
+            }
+            OracleSetup::FixedKaminoSwitchboardPull => {
+                // Fixed base price + Kamino reserve exchange rate
+                // Requires: Kamino reserve (no Switchboard oracle needed)
+                check!(ais.len() == 1, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let reserve_info = &ais[0];
+
+                require_keys_eq!(
+                    *reserve_info.key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::KaminoReserveValidationFailed
+                );
+
+                // Verifies owner + discriminator automatically
+                let reserve_loader: AccountLoader<MinimalReserve> =
+                    AccountLoader::try_from(reserve_info)
+                        .map_err(|_| MarginfiError::KaminoReserveValidationFailed)?;
+                let reserve = reserve_loader.load()?;
+                let is_stale = reserve.is_stale(clock.slot);
+                if is_stale {
+                    return err!(MarginfiError::ReserveStale);
+                }
+
+                // Get fixed base price
+                let base_price: I80F48 = bank.config.fixed_price.into();
+                check!(
+                    base_price >= I80F48::ZERO,
+                    MarginfiError::FixedOraclePriceNegative
+                );
+
+                // Apply Kamino exchange rate
+                let (total_liq, total_col) = reserve.scaled_supplies()?;
+                let adjusted_price = if total_col > I80F48::ZERO {
+                    let liq_to_col_ratio = total_liq / total_col;
+                    base_price
+                        .checked_mul(liq_to_col_ratio)
+                        .ok_or_else(math_error!())?
+                } else {
+                    base_price
+                };
+
+                Ok(OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                    price: adjusted_price,
+                }))
+            }
         }
     }
 
@@ -838,6 +979,91 @@ impl OraclePriceFeedAdapter {
                     oracle_ais[1].key(),
                     bank_config.oracle_keys[1],
                     MarginfiError::SolendReserveValidationFailed
+                );
+                Ok(())
+            }
+            OracleSetup::FixedStakedWithPythPush => {
+                // Fixed base price with staking pool exchange rate
+                // Validation similar to StakedWithPythPush but without oracle validation
+                if lst_mint.is_some() && stake_pool.is_some() && sol_pool.is_some() {
+                    check!(
+                        oracle_ais.len() == 2,
+                        MarginfiError::WrongNumberOfOracleAccounts
+                    );
+
+                    let lst_mint = lst_mint.unwrap();
+                    let stake_pool = stake_pool.unwrap();
+                    let sol_pool = sol_pool.unwrap();
+
+                    let program_id = &SPL_SINGLE_POOL_ID;
+                    let stake_pool_bytes = &stake_pool.to_bytes();
+                    // Validate the given stake_pool derives the same lst_mint
+                    let (exp_mint, _) =
+                        Pubkey::find_program_address(&[b"mint", stake_pool_bytes], program_id);
+                    check_eq!(exp_mint, lst_mint, MarginfiError::StakePoolValidationFailed);
+                    // Validate the now-proven stake_pool derives the given sol_pool
+                    let (exp_pool, _) =
+                        Pubkey::find_program_address(&[b"stake", stake_pool_bytes], program_id);
+                    check_eq!(exp_pool, sol_pool, MarginfiError::StakePoolValidationFailed);
+
+                    // Sanity check the mint (spl-single-pool uses classic Token)
+                    check!(
+                        oracle_ais[0].owner == &SPL_TOKEN_PROGRAM_ID,
+                        MarginfiError::StakePoolValidationFailed
+                    );
+                    check_eq!(
+                        oracle_ais[0].key(),
+                        lst_mint,
+                        MarginfiError::StakePoolValidationFailed
+                    );
+                    // Sanity check the pool is a native stake pool
+                    check!(
+                        oracle_ais[1].owner == &NATIVE_STAKE_ID,
+                        MarginfiError::StakePoolValidationFailed
+                    );
+                    check_eq!(
+                        oracle_ais[1].key(),
+                        sol_pool,
+                        MarginfiError::StakePoolValidationFailed
+                    );
+
+                    Ok(())
+                } else {
+                    // Light validation (no oracle to validate for fixed price)
+                    check!(
+                        oracle_ais.is_empty(),
+                        MarginfiError::WrongNumberOfOracleAccounts
+                    );
+                    Ok(())
+                }
+            }
+            OracleSetup::FixedKaminoPythPush => {
+                // Fixed base price with Kamino reserve exchange rate
+                require_eq!(
+                    oracle_ais.len(),
+                    1,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                require_keys_eq!(
+                    *oracle_ais[0].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::KaminoReserveValidationFailed
+                );
+                Ok(())
+            }
+            OracleSetup::FixedKaminoSwitchboardPull => {
+                // Fixed base price with Kamino reserve exchange rate
+                require_eq!(
+                    oracle_ais.len(),
+                    1,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                require_keys_eq!(
+                    *oracle_ais[0].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::KaminoReserveValidationFailed
                 );
                 Ok(())
             }
