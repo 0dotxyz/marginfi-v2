@@ -177,7 +177,7 @@ export const genericMultiBankTestSetup = async (
             group: throwawayGroup.publicKey,
             feePayer: groupAdmin.wallet.publicKey,
             bankMint: ecosystem.tokenAMint.publicKey,
-            driftSpotMarket,
+            integrationAcc1: driftSpotMarket,
             oracle: oracles.tokenAOracle.publicKey,
           },
           { config: defaultConfig, seed },

@@ -17,7 +17,7 @@ import {
 import { configureBank, setFixedPrice } from "./utils/group-instructions";
 import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { assert } from "chai";
-import { defaultBankConfigOptRaw } from "./utils/types";
+import { defaultBankConfigOptRaw, MAX_BALANCES } from "./utils/types";
 import {
   borrowIx,
   composeRemainingAccounts,
@@ -34,8 +34,6 @@ import { assertI80F48Approx, assertKeyDefault } from "./utils/genericTests";
 const startingSeed: number = 199;
 const groupBuff = Buffer.from("MARGINFI_GROUP_SEED_1234000000M1");
 
-/** This is the program-enforced maximum enforced number of balances per account. */
-const MAX_BALANCES = 16;
 const USER_ACCOUNT_THROWAWAY = "throwaway_account1";
 
 let banks: PublicKey[] = [];

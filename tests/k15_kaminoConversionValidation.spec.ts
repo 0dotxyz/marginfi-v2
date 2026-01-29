@@ -115,7 +115,7 @@ export const makePulseHealthIx = async (
     .instruction();
 };
 
-describe("k16: Kamino Conversion Validation", () => {
+describe("k15: Kamino Conversion Validation", () => {
   let usdcBank: PublicKey;
   let tokenABank: PublicKey;
   let usdcReserve: PublicKey;

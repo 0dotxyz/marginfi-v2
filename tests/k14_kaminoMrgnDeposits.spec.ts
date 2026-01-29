@@ -43,7 +43,7 @@ import {
 import { createMintToInstruction } from "@solana/spl-token";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 
-describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
+describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
   let userA: MockUser;
   let userB: MockUser;
 

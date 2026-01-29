@@ -220,7 +220,7 @@ describe("Account freeze", () => {
       async () => {
         await freezeUser.mrgnProgram.provider.sendAndConfirm(
           new Transaction().add(
-            dummyTx(freezeUser.wallet.publicKey, users[1].wallet.publicKey),
+            dummyIx(freezeUser.wallet.publicKey, users[1].wallet.publicKey),
             await withdrawIx(freezeUser.mrgnProgram, {
               marginfiAccount: frozenAccount.publicKey,
               bank: bankKeypairUsdc.publicKey,
