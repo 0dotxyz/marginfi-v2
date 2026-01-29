@@ -7,8 +7,8 @@ First you will need:
 * Solana tools 2.1.20 or later (`agave-install init 2.1.20`)
 * solana-verify (`cargo install solana-verify`)
 * Docker (https://docs.docker.com/engine/install/ubuntu/)
-* A wallet with at least 10 SOL (this guide will assume your wallet is at `~/keys/mainnet-deploy.json`). Verify the pubkey of your wallet with `solana-keygen pubkey ~/keys/mainnet-deploy.json` and verify you have at least 10 SOL with `solana balance -k ~/keys/mainnet-deploy.json`
-* An RPC provider connected to mainnet (`solana config set --url https://api.mainnet-beta.solana.com`). The solana public api is usually fine.
+* A wallet with at least 15 SOL (this guide will assume your wallet is at `~/keys/mainnet-deploy.json`). Verify the pubkey of your wallet with `solana-keygen pubkey ~/keys/mainnet-deploy.json` and verify you have at least 15 SOL with `solana balance -k ~/keys/mainnet-deploy.json`
+* An RPC provider connected to mainnet (`solana config set --url https://api.mainnet-beta.solana.com`). The Solana public api is usually not sufficient, and a custom rpc is suggested.
 
 
 Steps:
@@ -20,6 +20,17 @@ Steps:
 ```
 solana program set-buffer-authority <BUFFER> --new-buffer-authority <MULTISIG> -k ~/keys/mainnet-deploy.json
 ```
+* Remember to send any residual funds to a hardware wallet:
+```
+solana balance <DEPLOY_WALLET>
+>> N SOL
+
+solana transfer \                                          
+  --from ~/keys/mainnet-deploy.json \
+  <HARDWARE_WALLET> \
+  <N>>
+```
+
 * Back up the current working program somewhere with `solana -um program dump MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA mfi_backup.so`
 * Click the pending upgrade to start a vote.
 * Execute after the vote passes.
@@ -121,3 +132,7 @@ Here we list recent deployments to staging/mainnet. The hash is always the first
 * 0.1.4: July 28, 2025 ~1:00pm ET -- Hash 1229b8
 * 0.1.4 (transfer hotfix): October 2, 2025 ~4:30 ET -- Hash 866e5a
 * 0.1.5 Oct 10, 2025 ~9:00am ET -- Hash 4e7867
+* 0.1.6 Dec 18, 2025 ~11:00am ET -- Hash 65e54c
+* 0.1.6a Dec 18, 2025 ~11:00am ET -- Hash not recorded
+* 0.1.6b Dec 26, 2025 ~5:00pm ET -- Hash not recorded
+* 0.1.7 Jan 26, 2026 ~11:00am ET -- Hash 918bd0
