@@ -14,8 +14,6 @@ marginfi offers bug bounties for marginfi's on-chain program code. Bugs related 
 The severity scale is based on [Immunefi's classification system](https://immunefi.com/immunefi-vulnerability-severity-classification-system-v2-3/). 
 Note that these are simply guidelines for the severity of the bugs. Each bug bounty submission will be evaluated on a case-by-case basis.
 
-Critical bounties may be paid in up to 80\% token, with the rest in USDC. Others are paid in USDC.
-
 ## Infrastructure Bug Bounties
 Bug bounties for infrastructure components (networking, UI, SDK) are first-come-first-serve. The bounty amount is at the discretion of the team based on severity.
 
@@ -28,12 +26,12 @@ Bug bounties for infrastructure components (networking, UI, SDK) are first-come-
 ## Submission
 Please email security@mrgn.group with a detailed description of the attack vector.
 ​
-For critical- and high-severity bugs, we require a proof of concept reproducible on a privately deployed mainnet contract (**NOT** our official deployment).
+For critical- and high-severity bugs, we may require a proof of concept reproducible on a privately deployed mainnet contract or localnet (**NOT** our official deployment).
 ​
 You should expect a reply within 1 business day with additional questions or next steps regarding the bug bounty.
 ​
 ## Bug Bounty Payment
-Bug bounties will be paid in USDC or equivalent.
+Bug bounties will be paid in USDC or equivalent. Critical bounties may be paid in up to 80\% token, with the rest in USDC.
 ​
 ## Invalid Bug Bounties
 A number of attacks are out of scope for the bug bounty, including but not limited to:
