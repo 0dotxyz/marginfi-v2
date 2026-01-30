@@ -24,7 +24,10 @@ use anchor_spl::{
 };
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::{ASSET_TAG_DEFAULT, ASSET_TAG_KAMINO, ASSET_TAG_SOL, ASSET_TAG_STAKED},
+    constants::{
+        ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_KAMINO, ASSET_TAG_SOL, ASSET_TAG_SOLEND,
+        ASSET_TAG_STAKED,
+    },
     types::{Bank, BankOperationalState, MarginfiAccount, WrappedI80F48},
 };
 
@@ -214,30 +217,35 @@ pub fn validate_asset_tags(bank: &Bank, marginfi_account: &MarginfiAccount) -> M
     let mut has_default_asset = false;
     let mut has_staked_asset = false;
 
+    let is_default_like = |asset_tag: u8| {
+        matches!(
+            asset_tag,
+            ASSET_TAG_DEFAULT | ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND
+        )
+    };
+
     for balance in marginfi_account.lending_account.balances.iter() {
         if balance.is_active() {
             match balance.bank_asset_tag {
                 ASSET_TAG_DEFAULT => has_default_asset = true,
                 ASSET_TAG_SOL => { /* Do nothing, SOL can mix with any asset type */ }
                 ASSET_TAG_STAKED => has_staked_asset = true,
-                // Kamino isn't strictly a default asset but it's close enough
-                ASSET_TAG_KAMINO => has_default_asset = true,
+                // Kamino/Drift/Solend assets behave like default assets
+                ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND => has_default_asset = true,
                 _ => panic!("unsupported asset tag"),
             }
         }
     }
 
-    // 1. Regular assets (DEFAULT) cannot mix with Staked assets
-    if bank.config.asset_tag == ASSET_TAG_DEFAULT && has_staked_asset {
+    // 1. Default-like assets cannot mix with Staked assets
+    if is_default_like(bank.config.asset_tag) && has_staked_asset {
         return err!(MarginfiError::AssetTagMismatch);
     }
 
-    // 2. Staked SOL cannot mix with Regular asset (DEFAULT)
+    // 2. Staked SOL cannot mix with Default-like assets
     if bank.config.asset_tag == ASSET_TAG_STAKED && has_default_asset {
         return err!(MarginfiError::AssetTagMismatch);
     }
-
-    // TODO maybe we should allow kamino assets to mix with staked: what's the risk?
 
     Ok(())
 }
@@ -255,9 +263,16 @@ pub fn validate_asset_tags(bank: &Bank, marginfi_account: &MarginfiAccount) -> M
 ///
 /// Returns an error if the two banks have mismatching asset tags according to the above.
 pub fn validate_bank_asset_tags(bank_a: &Bank, bank_b: &Bank) -> MarginfiResult {
-    let is_bank_a_default = bank_a.config.asset_tag == ASSET_TAG_DEFAULT;
+    let is_default_like = |asset_tag: u8| {
+        matches!(
+            asset_tag,
+            ASSET_TAG_DEFAULT | ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND
+        )
+    };
+
+    let is_bank_a_default = is_default_like(bank_a.config.asset_tag);
     let is_bank_a_staked = bank_a.config.asset_tag == ASSET_TAG_STAKED;
-    let is_bank_b_default = bank_b.config.asset_tag == ASSET_TAG_DEFAULT;
+    let is_bank_b_default = is_default_like(bank_b.config.asset_tag);
     let is_bank_b_staked = bank_b.config.asset_tag == ASSET_TAG_STAKED;
     // Note: Sol is compatible with all other tags and doesn't matter...
 
@@ -418,7 +433,172 @@ pub fn is_marginfi_asset_tag(asset_tag: u8) -> bool {
     )
 }
 
-/// Helper function for constraint validation - checks if asset tag is valid for Kamino operations  
+/// Helper function for constraint validation - checks if asset tag is valid for Kamino operations
 pub fn is_kamino_asset_tag(asset_tag: u8) -> bool {
     asset_tag == ASSET_TAG_KAMINO
+}
+
+/// Helper function for constraint validation - checks if asset tag is valid for Drift operations
+pub fn is_drift_asset_tag(asset_tag: u8) -> bool {
+    asset_tag == ASSET_TAG_DRIFT
+}
+
+/// Helper function for constraint validation - checks if asset tag is valid for Solend operations
+pub fn is_solend_asset_tag(asset_tag: u8) -> bool {
+    asset_tag == ASSET_TAG_SOLEND
+}
+
+/// Helper function - checks if asset tag is an integration type (Kamino, Drift, or Solend)
+/// These integrations share a position limit due to their 3-account-per-position overhead
+pub fn is_integration_asset_tag(asset_tag: u8) -> bool {
+    matches!(
+        asset_tag,
+        ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_asset_tags;
+    use crate::MarginfiError;
+    use bytemuck::Zeroable;
+    use marginfi_type_crate::constants::{
+        ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_KAMINO, ASSET_TAG_SOL, ASSET_TAG_SOLEND,
+        ASSET_TAG_STAKED,
+    };
+    use marginfi_type_crate::types::{Bank, MarginfiAccount};
+
+    fn bank_with_tag(asset_tag: u8) -> Bank {
+        let mut bank = Bank::zeroed();
+        bank.config.asset_tag = asset_tag;
+        bank
+    }
+
+    fn account_with_tag(asset_tag: u8) -> MarginfiAccount {
+        let mut account = MarginfiAccount::zeroed();
+        account.lending_account.balances[0].active = 1;
+        account.lending_account.balances[0].bank_asset_tag = asset_tag;
+        account
+    }
+
+    fn account_with_tags(asset_tags: &[u8]) -> MarginfiAccount {
+        let mut account = MarginfiAccount::zeroed();
+        for (idx, tag) in asset_tags.iter().enumerate() {
+            account.lending_account.balances[idx].active = 1;
+            account.lending_account.balances[idx].bank_asset_tag = *tag;
+        }
+        account
+    }
+
+    #[test]
+    fn staked_blocks_kamino() {
+        let bank = bank_with_tag(ASSET_TAG_KAMINO);
+        let account = account_with_tag(ASSET_TAG_STAKED);
+        let result = validate_asset_tags(&bank, &account);
+        assert_eq!(
+            result.err().unwrap(),
+            MarginfiError::AssetTagMismatch.into()
+        );
+    }
+
+    #[test]
+    fn staked_blocks_drift() {
+        let bank = bank_with_tag(ASSET_TAG_DRIFT);
+        let account = account_with_tag(ASSET_TAG_STAKED);
+        let result = validate_asset_tags(&bank, &account);
+        assert_eq!(
+            result.err().unwrap(),
+            MarginfiError::AssetTagMismatch.into()
+        );
+    }
+
+    #[test]
+    fn staked_blocks_solend() {
+        let bank = bank_with_tag(ASSET_TAG_SOLEND);
+        let account = account_with_tag(ASSET_TAG_STAKED);
+        let result = validate_asset_tags(&bank, &account);
+        assert_eq!(
+            result.err().unwrap(),
+            MarginfiError::AssetTagMismatch.into()
+        );
+    }
+
+    #[test]
+    fn staked_blocks_default_like_inverse_cases() {
+        let bank = bank_with_tag(ASSET_TAG_STAKED);
+
+        let account = account_with_tag(ASSET_TAG_KAMINO);
+        let result = validate_asset_tags(&bank, &account);
+        assert_eq!(
+            result.err().unwrap(),
+            MarginfiError::AssetTagMismatch.into()
+        );
+
+        let account = account_with_tag(ASSET_TAG_DRIFT);
+        let result = validate_asset_tags(&bank, &account);
+        assert_eq!(
+            result.err().unwrap(),
+            MarginfiError::AssetTagMismatch.into()
+        );
+
+        let account = account_with_tag(ASSET_TAG_SOLEND);
+        let result = validate_asset_tags(&bank, &account);
+        assert_eq!(
+            result.err().unwrap(),
+            MarginfiError::AssetTagMismatch.into()
+        );
+    }
+
+    #[test]
+    fn staked_blocks_default() {
+        let bank = bank_with_tag(ASSET_TAG_DEFAULT);
+        let account = account_with_tag(ASSET_TAG_STAKED);
+        let result = validate_asset_tags(&bank, &account);
+        assert_eq!(
+            result.err().unwrap(),
+            MarginfiError::AssetTagMismatch.into()
+        );
+
+        let bank = bank_with_tag(ASSET_TAG_STAKED);
+        let account = account_with_tag(ASSET_TAG_DEFAULT);
+        let result = validate_asset_tags(&bank, &account);
+        assert_eq!(
+            result.err().unwrap(),
+            MarginfiError::AssetTagMismatch.into()
+        );
+    }
+
+    #[test]
+    fn sol_and_staked_can_coexist() {
+        let bank = bank_with_tag(ASSET_TAG_SOL);
+        let account = account_with_tags(&[ASSET_TAG_STAKED, ASSET_TAG_SOL]);
+        assert!(validate_asset_tags(&bank, &account).is_ok());
+
+        let bank = bank_with_tag(ASSET_TAG_STAKED);
+        let account = account_with_tags(&[ASSET_TAG_SOL]);
+        assert!(validate_asset_tags(&bank, &account).is_ok());
+    }
+
+    #[test]
+    fn default_like_tags_can_coexist_with_each_other_and_sol() {
+        let account = account_with_tags(&[
+            ASSET_TAG_DEFAULT,
+            ASSET_TAG_KAMINO,
+            ASSET_TAG_DRIFT,
+            ASSET_TAG_SOLEND,
+            ASSET_TAG_SOL,
+        ]);
+
+        let bank = bank_with_tag(ASSET_TAG_DEFAULT);
+        assert!(validate_asset_tags(&bank, &account).is_ok());
+
+        let bank = bank_with_tag(ASSET_TAG_KAMINO);
+        assert!(validate_asset_tags(&bank, &account).is_ok());
+
+        let bank = bank_with_tag(ASSET_TAG_DRIFT);
+        assert!(validate_asset_tags(&bank, &account).is_ok());
+
+        let bank = bank_with_tag(ASSET_TAG_SOLEND);
+        assert!(validate_asset_tags(&bank, &account).is_ok());
+    }
 }

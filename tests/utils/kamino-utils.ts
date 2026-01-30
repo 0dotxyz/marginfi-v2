@@ -4,7 +4,7 @@ import { KaminoLending } from "../fixtures/kamino_lending";
 import { I80F48_ONE, PYTH_PULL_MIGRATED, OperationalStateRaw } from "./types";
 import { WrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { RiskTierRaw } from "@mrgnlabs/marginfi-client-v2";
-import { lendingMarketAuthPda, Reserve } from "@kamino-finance/klend-sdk";
+import { Reserve } from "@kamino-finance/klend-sdk";
 import Decimal from "decimal.js";
 import { Fraction } from "@kamino-finance/klend-sdk";
 import BigNumber from "bignumber.js";
@@ -16,10 +16,6 @@ export const OBLIGATION_SIZE = 3336;
 // Oracle setups specific to Kamino
 export const ORACLE_SETUP_KAMINO_PYTH_PUSH = 6;
 export const ORACLE_SETUP_KAMINO_SWITCHBOARD_PULL = 7;
-
-// Asset tag defaults
-export const ASSET_TAG_DEFAULT = 0;
-export const ASSET_TAG_KAMINO = 3;
 
 const INITIAL_COLLATERAL_RATIO = 1;
 export const INITIAL_COLLATERAL_RATE = new Decimal(INITIAL_COLLATERAL_RATIO);

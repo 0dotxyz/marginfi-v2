@@ -276,7 +276,7 @@ performing a withdraw, and ComputeBudget instructions as needed.
         swbPullFeeds.push(oracle); // still a switchboard feed
         activeBalances.push([bal.bankPk, oracle, keys[1]]);
 
-        const kaminoReservePk: PublicKey = bankAcc.kaminoReserve;
+        const kaminoReservePk: PublicKey = bankAcc.integrationAcc1;
         let reserve = await kaminoProgram.account.reserve.fetch(
           kaminoReservePk
         );
@@ -297,7 +297,7 @@ performing a withdraw, and ComputeBudget instructions as needed.
         console.log(`  extra key: ${keys[1]}`);
         activeBalances.push([bal.bankPk, oracle, keys[1]]);
 
-        const kaminoReservePk: PublicKey = bankAcc.kaminoReserve;
+        const kaminoReservePk: PublicKey = bankAcc.integrationAcc1;
         let reserve = await kaminoProgram.account.reserve.fetch(
           kaminoReservePk
         );

@@ -1,14 +1,17 @@
-import { Program, workspace } from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
 import {
   Keypair,
   Transaction,
-  PublicKey,
   SYSVAR_INSTRUCTIONS_PUBKEY,
-  SystemProgram,
 } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import { Mocks } from "../target/types/mocks";
-import { marginfiGroup, users } from "./rootHooks";
+import {
+  marginfiGroup,
+  users,
+  bankrunProgram,
+  mocksBankrunProgram,
+} from "./rootHooks";
 import {
   assertKeysEqual,
   assertKeyDefault,
@@ -17,9 +20,14 @@ import {
 import { assert } from "chai";
 import { deriveMarginfiAccountPda } from "./utils/pdas";
 
+let marginfiProgram: Program<Marginfi>;
+let mocksProgram: Program<Mocks>;
+
 describe("Initialize user account with PDA via CPI", () => {
-  const marginfiProgram = workspace.Marginfi as Program<Marginfi>;
-  const mocksProgram = workspace.Mocks as Program<Mocks>;
+  before(() => {
+    marginfiProgram = bankrunProgram;
+    mocksProgram = mocksBankrunProgram;
+  });
 
   it("(user 0) Initialize PDA user account via CPI - happy path", async () => {
     const accountIndex = 50; // Use high index to avoid conflicts with other tests

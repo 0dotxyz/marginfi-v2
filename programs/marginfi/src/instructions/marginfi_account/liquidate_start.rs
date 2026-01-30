@@ -1,6 +1,6 @@
 use crate::{
     check,
-    constants::COMPUTE_PROGRAM_KEY,
+    constants::{ASSOCIATED_TOKEN_KEY, COMPUTE_PROGRAM_KEY, DRIFT_PROGRAM_ID, JUP_KEY, TITAN_KEY},
     ix_utils::{
         get_discrim_hash, load_and_validate_instructions, validate_ix_first, validate_ix_last,
         validate_ixes_exclusive, validate_not_cpi_by_stack_height, validate_not_cpi_with_sysvar,
@@ -14,12 +14,13 @@ use crate::{
 };
 use anchor_lang::{prelude::*, solana_program::sysvar};
 use bytemuck::Zeroable;
+use drift_mocks::drift::client::args as drift;
 use kamino_mocks::kamino_lending::client::args as kamino;
 use marginfi_type_crate::{
     constants::ix_discriminators,
     types::{
         HealthCache, LiquidationRecord, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -64,6 +65,7 @@ pub fn start_deleverage<'info>(
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     liq_record.liquidation_receiver = ctx.accounts.risk_admin.key();
+    marginfi_account.set_flag(ACCOUNT_IN_DELEVERAGE, false);
     start_receivership(
         &mut marginfi_account,
         &mut liq_record,
@@ -130,6 +132,11 @@ pub fn validate_instructions(
         COMPUTE_PROGRAM_KEY,
         id_crate::ID,
         kamino_mocks::kamino_lending::ID,
+        DRIFT_PROGRAM_ID,
+        JUP_KEY,
+        TITAN_KEY,
+        ASSOCIATED_TOKEN_KEY,
+        DRIFT_PROGRAM_ID,
     ];
     let ixes = load_and_validate_instructions(sysvar, Some(allowed_program_ids))?;
     validate_ix_first(
@@ -146,6 +153,10 @@ pub fn validate_instructions(
                 kamino::RefreshObligation::DISCRIMINATOR,
             ),
             (id_crate::ID, &ix_discriminators::INIT_LIQUIDATION_RECORD),
+            (
+                DRIFT_PROGRAM_ID,
+                drift::UpdateSpotMarketCumulativeInterest::DISCRIMINATOR,
+            ),
         ],
     )?;
     validate_ix_last(&ixes, program_id, end_ix)?;
@@ -162,6 +173,7 @@ pub fn validate_instructions(
             &ix_discriminators::LENDING_ACCOUNT_WITHDRAW,
             &ix_discriminators::LENDING_ACCOUNT_REPAY,
             &ix_discriminators::KAMINO_WITHDRAW,
+            &ix_discriminators::DRIFT_WITHDRAW,
             // TODO add withdraw/repay from integrator as they are added to the program. Also
             // remember to add a test to ix_utils to validate you added the correct hash.
 

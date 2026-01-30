@@ -1,21 +1,14 @@
-import {
-  AnchorProvider,
-  BN,
-  getProvider,
-  Program,
-  Wallet,
-  workspace,
-} from "@coral-xyz/anchor";
-import { Keypair, Transaction } from "@solana/web3.js";
+import { BN, Program } from "@coral-xyz/anchor";
 import { Marginfi } from "../target/types/marginfi";
+import { Keypair, Transaction } from "@solana/web3.js";
 import {
-  bankKeypairSol,
-  bankKeypairUsdc,
+  stakedBankKeypairSol,
+  stakedBankKeypairUsdc,
   bankrunContext,
   bankrunProgram,
   banksClient,
   ecosystem,
-  marginfiGroup,
+  stakedMarginfiGroup,
   users,
   validators,
 } from "./rootHooks";
@@ -26,12 +19,21 @@ import { LST_ATA, USER_ACCOUNT } from "./utils/mocks";
 import { createMintToInstruction } from "@solana/spl-token";
 import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 
+let program: Program<Marginfi>;
+let marginfiGroup: Keypair;
+let bankKeypairSol: Keypair;
+let bankKeypairUsdc: Keypair;
+
 describe("Deposit funds (included staked assets)", () => {
-  const program = workspace.Marginfi as Program<Marginfi>;
-  const provider = getProvider() as AnchorProvider;
-  const wallet = provider.wallet as Wallet;
+  before(() => {
+    program = bankrunProgram;
+    marginfiGroup = stakedMarginfiGroup;
+    bankKeypairSol = stakedBankKeypairSol;
+    bankKeypairUsdc = stakedBankKeypairUsdc;
+  });
 
   it("(Fund user 0 and user 1 USDC/WSOL token accounts", async () => {
+    const payer = bankrunContext.payer;
     let tx = new Transaction();
     for (let i = 0; i < users.length; i++) {
       // Note: WSOL is really just an spl token in this implementation, we don't simulate the
@@ -40,7 +42,7 @@ describe("Deposit funds (included staked assets)", () => {
         createMintToInstruction(
           ecosystem.wsolMint.publicKey,
           users[i].wsolAccount,
-          wallet.publicKey,
+          payer.publicKey,
           100 * 10 ** ecosystem.wsolDecimals
         )
       );
@@ -48,13 +50,13 @@ describe("Deposit funds (included staked assets)", () => {
         createMintToInstruction(
           ecosystem.usdcMint.publicKey,
           users[i].usdcAccount,
-          wallet.publicKey,
+          payer.publicKey,
           10000 * 10 ** ecosystem.usdcDecimals
         )
       );
     }
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(wallet.payer);
+    tx.sign(payer);
     await banksClient.processTransaction(tx);
   });
 

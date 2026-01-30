@@ -1,21 +1,22 @@
-import {
-  AnchorProvider,
-  BN,
-  getProvider,
-  Program,
-  workspace,
-} from "@coral-xyz/anchor";
+import { BN, Program } from "@coral-xyz/anchor";
+import { BankrunProvider } from "anchor-bankrun";
 import { Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairA,
   bankKeypairSol,
   bankKeypairUsdc,
+  bankrunContext,
+  bankrunProgram,
+  bankRunProvider,
+  banksClient,
   ecosystem,
   oracles,
   users,
   verbose,
 } from "./rootHooks";
+import { Clock } from "solana-bankrun";
+import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import {
   assertBNApproximately,
   assertKeysEqual,
@@ -34,10 +35,16 @@ import {
 import { USER_ACCOUNT } from "./utils/mocks";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { u64MAX_BN } from "./utils/types";
+import { getBankrunTime } from "./utils/tools";
+
+let program: Program<Marginfi>;
+let provider: BankrunProvider;
 
 describe("Withdraw funds", () => {
-  const program = workspace.Marginfi as Program<Marginfi>;
-  const provider = getProvider() as AnchorProvider;
+  before(() => {
+    provider = bankRunProvider;
+    program = bankrunProgram;
+  });
 
   const withdrawAmountTokenA = 0.1;
   const withdrawAmountTokenA_native = new BN(
@@ -48,6 +55,28 @@ describe("Withdraw funds", () => {
   const repayAmountUsdc_native = new BN(
     repayAmountUsdc * 10 ** ecosystem.usdcDecimals
   );
+
+  /**
+   * Advance bankrun clock by specified seconds and refresh oracles.
+   * Required for emissions to accrue since bankrun clock is frozen.
+   *
+   * Note: setTimeout does NOT advance bankrun's Clock sysvar - it's frozen.
+   * We must use setClock() to advance blockchain time explicitly.
+   */
+  const advanceClockAndRefreshOracles = async (seconds: number = 2) => {
+    const clock = await banksClient.getClock();
+    const newClock = new Clock(
+      clock.slot + BigInt(1),
+      clock.epochStartTimestamp,
+      clock.epoch,
+      clock.leaderScheduleEpoch,
+      clock.unixTimestamp + BigInt(seconds)
+    );
+    bankrunContext.setClock(newClock);
+
+    // Refresh oracles so publish times match new clock
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+  };
 
   it("(user 0) withdraws some token A - happy path", async () => {
     const user = users[0];
@@ -86,7 +115,7 @@ describe("Withdraw funds", () => {
         getTokenBalance(provider, bankAfter.liquidityVault),
       ]
     );
-    let now = Math.floor(Date.now() / 1000);
+    let now = await getBankrunTime(bankrunContext);
     assertBNApproximately(userAccAfter.lastUpdate, now, 2);
 
     const balancesAfter = userAccAfter.lendingAccount.balances;
@@ -162,7 +191,7 @@ describe("Withdraw funds", () => {
       getTokenBalance(provider, user.usdcAccount),
       getTokenBalance(provider, bankAfter.liquidityVault),
     ]);
-    let now = Math.floor(Date.now() / 1000);
+    let now = await getBankrunTime(bankrunContext);
     assertBNApproximately(userAccAfter.lastUpdate, now, 2);
 
     // Partial repay only, still has debt
@@ -211,6 +240,9 @@ describe("Withdraw funds", () => {
     const userAccKey = user.accounts.get(USER_ACCOUNT);
     const bank = bankKeypairUsdc.publicKey;
 
+    // Ensure emissions accrue by advancing bankrun clock
+    await advanceClockAndRefreshOracles(2);
+
     await expectFailedTxWithError(
       async () => {
         await user.mrgnProgram.provider.sendAndConfirm(
@@ -239,9 +271,13 @@ describe("Withdraw funds", () => {
     const userAccKey = user.accounts.get(USER_ACCOUNT);
     const bank = bankKeypairUsdc.publicKey;
 
+    // Make this test independent: ensure emissions accrue even when run standalone.
+    await advanceClockAndRefreshOracles(2);
+
     const userBBefore = await getTokenBalance(provider, user.tokenBAccount);
     const userAccBefore = await program.account.marginfiAccount.fetch(userAccKey);
 
+    // Only claim emissions here - the actual repayAll happens in the next test
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await withdrawEmissionsIx(user.mrgnProgram, {
@@ -255,7 +291,7 @@ describe("Withdraw funds", () => {
     const userBAfter = await getTokenBalance(provider, user.tokenBAccount);
     const userAccAfter = await program.account.marginfiAccount.fetch(userAccKey);
 
-    let now = Math.floor(Date.now() / 1000);
+    let now = await getBankrunTime(bankrunContext);
     assert(userAccBefore.lastUpdate != userAccAfter.lastUpdate);
     assertBNApproximately(userAccAfter.lastUpdate, now, 2);
 
@@ -274,6 +310,10 @@ describe("Withdraw funds", () => {
     const user = users[0];
     const userAccKey = user.accounts.get(USER_ACCOUNT);
 
+    // Note: In bankrun we don't advance the clock here since the previous test already
+    // advanced it and claimed emissions. The withdrawEmissionsIx in this transaction
+    // will claim any remaining emissions before repaying.
+
     const bank = bankKeypairUsdc.publicKey;
     const bankBefore = await program.account.bank.fetch(bank);
     const [userAccBefore, userUsdcBefore, vaultUsdcBefore] = await Promise.all([
@@ -289,13 +329,6 @@ describe("Withdraw funds", () => {
 
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
-        // Needs to occur within the same tx bundle even though we just collected it (a trivial
-        // amount can build up even in a single slot, and we don't want this to mess up accounting)
-        await withdrawEmissionsIx(user.mrgnProgram, {
-          marginfiAccount: userAccKey,
-          bank: bank,
-          tokenAccount: user.tokenBAccount,
-        }),
         await repayIx(user.mrgnProgram, {
           marginfiAccount: userAccKey,
           bank: bank,
@@ -317,7 +350,7 @@ describe("Withdraw funds", () => {
       getTokenBalance(provider, bankAfter.liquidityVault),
     ]);
 
-    let now = Math.floor(Date.now() / 1000);
+    let now = await getBankrunTime(bankrunContext);
     assert(userAccBefore.lastUpdate != userAccAfter.lastUpdate);
     assertBNApproximately(userAccAfter.lastUpdate, now, 2);
 
@@ -342,7 +375,8 @@ describe("Withdraw funds", () => {
     const sharesAfter = wrappedI80F48toBigNumber(
       balancesAfter[1].liabilityShares
     ).toNumber();
-    assert.approximately(sharesAfter, sharesBefore - actualOwed, 2);
+    // repayAll should burn *all* liability shares (the amount paid is shares * shareValue).
+    assert.approximately(sharesAfter, 0, 0.000001);
     // This balance is now inactive
     assert.equal(balancesAfter[1].active, 0);
     assertKeysEqual(balancesAfter[0].bankPk, bankKeypairA.publicKey);
@@ -354,7 +388,7 @@ describe("Withdraw funds", () => {
     const bankSharesAfter = wrappedI80F48toBigNumber(
       bankAfter.totalLiabilityShares
     ).toNumber();
-    assert.approximately(bankSharesAfter, bankSharesBefore - actualOwed, 2);
+    assert.approximately(bankSharesAfter, bankSharesBefore - sharesBefore, 2);
   });
 
   it("(user 0) withdraws all token A balance - happy path", async () => {
@@ -402,7 +436,7 @@ describe("Withdraw funds", () => {
     ]);
     const balancesAfter = userAccAfter.lendingAccount.balances;
 
-    let now = Math.floor(Date.now() / 1000);
+    let now = await getBankrunTime(bankrunContext);
     assert(userAccBefore.lastUpdate != userAccAfter.lastUpdate);
     assertBNApproximately(userAccAfter.lastUpdate, now, 2);
 

@@ -124,7 +124,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
           group: throwawayGroup.publicKey,
           feePayer: groupAdmin.wallet.publicKey,
           bankMint: ecosystem.tokenAMint.publicKey,
-          kaminoReserve: tokenAReserve,
+          integrationAcc1: tokenAReserve,
           kaminoMarket: market,
           oracle: oracles.tokenAOracle.publicKey,
         },

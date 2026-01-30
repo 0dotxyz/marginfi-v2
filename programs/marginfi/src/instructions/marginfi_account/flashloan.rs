@@ -12,7 +12,10 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::sysvar::{self, instructions};
 use marginfi_type_crate::{
     constants::ix_discriminators::END_FLASHLOAN,
-    types::{MarginfiAccount, ACCOUNT_DISABLED, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_RECEIVERSHIP},
+    types::{
+        MarginfiAccount, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
+        ACCOUNT_IN_RECEIVERSHIP,
+    },
 };
 
 pub fn lending_account_start_flashloan(
@@ -113,7 +116,10 @@ pub fn check_flashloan_can_start(
         !marginf_account.get_flag(ACCOUNT_IN_RECEIVERSHIP),
         MarginfiError::ForbiddenIx
     );
-
+    check!(
+        !marginf_account.get_flag(ACCOUNT_FROZEN),
+        MarginfiError::AccountFrozen
+    );
     Ok(())
 }
 
@@ -134,6 +140,10 @@ pub fn lending_account_end_flashloan<'info>(
         MarginfiError::ForbiddenIx
     );
 
+    check!(
+        !marginfi_account.get_flag(ACCOUNT_FROZEN),
+        MarginfiError::AccountFrozen
+    );
     marginfi_account.unset_flag(ACCOUNT_IN_FLASHLOAN, false);
 
     check_account_init_health(&marginfi_account, ctx.remaining_accounts, &mut None)?;

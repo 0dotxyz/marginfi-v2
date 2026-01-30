@@ -9,6 +9,8 @@ export const I80F48_ONE = bigNumberToWrappedI80F48(1);
 /** Equivalent in value to u64::MAX in Rust */
 export const u64MAX_BN = new BN("18446744073709551615");
 export const u32_MAX: number = 4294967295;
+/** Token account size in bytes */
+export const TOKEN_ACCOUNT_SIZE = 165;
 export const SINGLE_POOL_PROGRAM_ID = new PublicKey(
   "SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE"
 );
@@ -17,6 +19,24 @@ export const KLEND_PROGRAM_ID = new PublicKey(
 );
 export const FARMS_PROGRAM_ID = new PublicKey(
   "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr"
+);
+export const DRIFT_PROGRAM_ID = new PublicKey(
+  "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH"
+);
+/**
+ * Drift Oracle Receiver Program ID
+ *
+ * IMPORTANT: This is the REQUIRED owner for Drift Pyth Pull oracle accounts.
+ * When creating oracle accounts for Drift spot markets with OracleSource::PythPull,
+ * the oracle account MUST be owned by this program ID, NOT the Mocks program.
+ *
+ * See: drift-protocol/protocol-v2 oracle validation (EXTERNAL_ORACLE_PROGRAM_IDS)
+ */
+export const DRIFT_ORACLE_RECEIVER_PROGRAM_ID = new PublicKey(
+  "G6EoTTTgpkNBtVXo96EQp2m6uwwVh2Kt6YidjkmQqoha"
+);
+export const SOLEND_PROGRAM_ID = new PublicKey(
+  "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
 );
 
 export const EMISSIONS_FLAG_NONE = 0;
@@ -32,6 +52,8 @@ export const ASSET_TAG_DEFAULT = 0;
 export const ASSET_TAG_SOL = 1;
 export const ASSET_TAG_STAKED = 2;
 export const ASSET_TAG_KAMINO = 3;
+export const ASSET_TAG_DRIFT = 4;
+export const ASSET_TAG_SOLEND = 5;
 
 export const ORACLE_SETUP_NONE = 0;
 export const ORACLE_SETUP_SWITCHBOARD_v2 = 2;
@@ -68,6 +90,8 @@ export const EMODE_LST_TAG = 157;
 export const PYTH_PULL_MIGRATED = 1;
 /** In marginfiAccount.flags, indicates an account is disabled and cannot be used. */
 export const ACCOUNT_DISABLED = 1;
+/** In marginfiAccount.flags, indicates the admin has frozen the account. */
+export const ACCOUNT_FROZEN = 1 << 6;
 
 /** In lamports, charged when transfering to a new account */
 export const ACCOUNT_TRANSFER_FEE = 5_000_000;

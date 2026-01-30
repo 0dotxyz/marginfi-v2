@@ -3,7 +3,12 @@ use crate::{
     constants::{is_allowed_cpi_for_third_party_id, ACCOUNT_TRANSFER_FEE},
     events::{AccountEventHeader, MarginfiAccountTransferToNewAccount},
     prelude::*,
-    state::{marginfi_account::MarginfiAccountImpl, marginfi_group::MarginfiGroupImpl},
+    state::{
+        marginfi_account::{
+            account_not_frozen_for_authority, is_signer_authorized, MarginfiAccountImpl,
+        },
+        marginfi_group::MarginfiGroupImpl,
+    },
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::sysvar::Sysvar;
@@ -89,7 +94,15 @@ pub struct TransferToNewAccount<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = authority @ MarginfiError::Unauthorized
+        constraint = {
+            let a = old_marginfi_account.load()?;
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = old_marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), false)
+        } @ MarginfiError::Unauthorized
     )]
     pub old_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
@@ -217,7 +230,15 @@ pub struct TransferToNewAccountPda<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = authority @ MarginfiError::Unauthorized
+        constraint = {
+            let a = old_marginfi_account.load()?;
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = old_marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), false)
+        } @ MarginfiError::Unauthorized
     )]
     pub old_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 

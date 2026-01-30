@@ -1052,7 +1052,6 @@ fn initialize_marginfi_group<'a>(
             &[],
             Default::default(),
         ),
-        false,
     )
     .unwrap();
 
@@ -1080,7 +1079,6 @@ fn initialize_marginfi_group<'a>(
         admin.key(), // emissions_admin
         admin.key(), // metadata_admin
         admin.key(), // risk_admin
-        false,       // is_arena_group
         None,        // emode_max_init_leverage
         None,        // emode_max_maint_leverage
     )

@@ -2,7 +2,7 @@
 
 This is a general overview of the Project Zero ecosystem and key features. Want the latest details
 for developers, emode, fees, bankruptcies, liquidation, etc? Check the [guides
-folder](https://github.com/mrgnlabs/marginfi-v2/tree/main/guides)!
+folder](./guides)!
 
 ## Overview
 
@@ -15,11 +15,11 @@ as Kamino.
 
 - **Group** - A collection of banks. Groups have a single administrator (typically a secure
   governance MS) who has broad authority over them, and several delegate admins (limit, emode, etc)
-  that can perform less risky modifications. All the assets you see at app.0.xyz are in a single
-  group overseen by the foundation.
-- **Bank** - Each asset available to borrow and lend on mrgnlend has a Bank, this account controls
+  that can perform less risky modifications. All the assets you see at 
+  [app.0.xyz](https://app.0.xyz) are in a single group overseen by the foundation.
+- **Bank** - Each asset available to borrow and lend on `mrgnlend` has a Bank, this account controls
   all the settings for the asset. Many banks might exist for the same asset. Every asset on
-  app.0.xyz is a Bank.
+  [app.0.xyz](https://app.0.xyz) is a Bank.
 - **Account** - Users can create as many Accounts as they want. Accounts are per `Group`, and each
   account can have up to 16 positions in any `Bank`. The Account contains various user-specific
   settings and cached values in addition to their `LendingAccount`, where `Balances` are stored.
@@ -31,10 +31,11 @@ as Kamino.
   rates. The Maintenance rate is always higher. If attempting to execute a borrow, collateral is
   valued at (price x initial weight). If a liquidator is attempting a liquidation, collateral is
   valued at (price x maintenance weight). The range between these is sometimes called the health
-  buffer. For example, if a user has collateral worth \$10, and init/maint rates are 50\% and 60\%
-  respectively, the user can borrow \$10 x .5 = \$5 in collateral. For liquidation purposes, their
-  collateral is worth \$10 x .6 = \$6. The LTV you see on app.0.xyz is the "Initial" Weight, while
-  the health displayed on the portfolio page uses the "Maintenance" Weight.
+  buffer. For example, if a user has collateral worth \$10, and initial/maintenance rates are 50\%
+  and 60\% respectively, the user can borrow \$10 x .5 = \$5 in collateral. For liquidation purposes,
+  their collateral is worth \$10 x .6 = \$6. The LTV (loan-to-value) you see on
+  [app.0.xyz](https://app.0.xyz) is the "Initial" Weight, while the health displayed on the
+  portfolio page uses the "Maintenance" Weight.
 - **Liability Weight** - Each asset also has a liability weight! Like the `Asset Weight`, this is
   split into "Initial" and "Maintenance", where the Maintenance rate is always lower. If attempting
   to execute a borrow, liabilities are valued at (price x initial weight). If a liquidator is
@@ -43,7 +44,8 @@ as Kamino.
   would get if lending an asset with an Asset Weight of 1.
 - **Oracle** - Each `Bank` has an oracle it uses to determine the price of the asset it transacts
   in. The `Group` admin is responsible for picking and maintaining the Oracle. Typically,
-  Switchboard is the oracle provider, but Pyth is also supported, and some banks have a Fixed price.
+  [Switchboard](https://switchboard.xyz/) is the oracle provider, but [Pyth](https://pyth.network/)
+  is also supported, and some banks have a Fixed price.
   An Oracle may use multiple accounts, for example a Kamino bank uses a price source and the Kamino
   reserve.
 - **Oracle Confidence Interval** - Some Oracles report a price with Confidence, e.g. P +/- c. When
@@ -119,12 +121,12 @@ balance change, or send a (permissionless) accrue interest instruction to force 
 
 ### Curve Details
 
-The "Base Rate" or `r` is the rate linearly interpolated between the two nearest points (x0, y0) and
-(x1, y1), where there is always a point at (0, y0) and (100, yn).
+The "Base Rate" or `r` is the rate linearly interpolated between the two nearest points
+$(x_0, y_0)$ and $(x_1, y_1)$, where there is always a point at $(0, y_0)$ and $(100, y_n)$.
 
-```
-r = (ur-x0)/(x1-x0) * (y1-y0) + y0
-```
+
+$r = (ur-x_0)/(x_1-x_0) * (y_1-y_0) + y_0$
+
 
 Examples:
 
@@ -132,19 +134,19 @@ If the `zero_util_rate` is 10%, and there is a point at (50%, 100%), and the UR 
 currently 25%, then
 
 ```
-r = (25-0)/(50-0) * (100-10) + 10 = 55%`
+r = (25-0)/(50-0) * (100-10) + 10 = 55%
 ```
 
 If there is a point at (50%, 100%) and (80%, 150%), and the UR is currently 60%,
 then
 
 ```
-r = (60-50)/(80-50) * (150-100) + 100 = 116.67%`
+r = (60-50)/(80-50) * (150-100) + 100 = 116.67%
 ```
 
 ### Rate Details
 
-There are two other notable interest rates that follow from r, and all of three these are reported
+There are two other notable interest rates that follow from `r`, and all of three these are reported
 in the bank cache:
 
 ```
@@ -156,7 +158,7 @@ Where fees include insurance and protocol fees. Notice that borrowers always pay
 get, because there are fees, and more importantly because there are more lenders than there are
 borrowers!
 
-The difference between the what borrowers pay and lenders receive is called the `spread`. When the
+The difference between what borrowers pay and lenders receive is called the `spread`. When the
 lending interest in some asset exceeds the borrow rate for the same asset on another venue, we call
 this opportunity an `interest arbitrage` (or `arb` for short).
 
@@ -182,11 +184,11 @@ continuously compounded APY. The exceptions are rare cases where an asset has a 
 lot of activity.
 
 Different venues and providers handle the APR -> APY conversion in different ways, which can lead to
-slightly different rates depending on the source of the data The rates displayed on 0.xyz assume
-compounding roughly hourly for native banks. Some other venues directly generate on-chain APY
-compounded every 400ms (the Solana slot time) using a Taylor series approximation instead of an APR,
-so they may have no APR to compare against. Those APYs are fetched using best-practices as defined
-in the venue's SDK.
+slightly different rates depending on the source of the data. The rates displayed on
+[app.0.xyz](https://app.0.xyz) assume compounding roughly hourly for native banks. Some other venues
+use on-chain APY compounded every 400ms (the Solana slot time) using a Taylor series approximation
+instead of an APR, so they may have no APR to compare against. Those APYs are fetched using best-
+practices as defined in the venue's SDK.
 
 ### Interest, Previewed Amounts, and Closing Positions
 
@@ -305,7 +307,7 @@ oracles are kept up-to-date by their administrator. For Switchboard Oracles, the
 crank instruction just before the tx consuming that price. Some callers prefer to use bundles for
 this, but it typically suffices to send a crank instruction and briefly wait. When tx size permits,
 callers might even prepend the Switchboard crank to the tx consuming the Oracle data, although this
-runs into account and CU constraints for larger txes. For Kamino banks, refresh_reserve must also
+runs into account and CU constraints for larger txes. For Kamino banks, `refresh_reserve` must also
 execute within 1 slot.
 
 In some instructions, limited Oracle staleness is permitted. For example, when borrowing, the caller
@@ -335,7 +337,7 @@ tax authority). Your SOL earns all the yields it would normally earn, including 
 only SOL can be borrowed against native stake positions.
 
 Under the hood, this feature depends on the Single Validator Stake Pool, [published and maintained
-by Solana Foundation](https://github.com/solana-labs/solana-program-library/tree/master/single-pool)
+by Solana Foundation](https://github.com/solana-program/single-pool)
 
 Don't see your validator listed? Adding Staked Collateral is permissionless!
 

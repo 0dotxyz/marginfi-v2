@@ -25,6 +25,7 @@ import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { assert } from "chai";
 import { MockUser, USER_ACCOUNT_K } from "./utils/mocks";
 import { omitPadding, processBankrunTransaction } from "./utils/tools";
+import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { makeKaminoDepositIx } from "./utils/kamino-instructions";
 import { ProgramTestContext } from "solana-bankrun";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
@@ -72,6 +73,10 @@ describe("k06: Kamino Deposit Tests", () => {
       market,
       ecosystem.usdcMint.publicKey
     );
+
+    // Refresh oracles to ensure they have current timestamps
+    // This prevents stale oracle issues when other test suites run first
+    await refreshPullOraclesBankrun(oracles, ctx, banksClient);
   });
 
   async function executeDeposit(

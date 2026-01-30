@@ -4,7 +4,7 @@
  */
 import { Keypair, Transaction } from "@solana/web3.js";
 import {
-  bankKeypairSol,
+  stakedBankKeypairSol,
   bankrunContext,
   bankrunProgram,
   bankRunProvider,
@@ -32,7 +32,13 @@ import {
 import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-token";
 import { deriveFeeVault } from "./utils/pdas";
 
+let bankKeypairSol: Keypair;
+
 describe("Set up permissionless fee claiming", () => {
+  before(() => {
+    bankKeypairSol = stakedBankKeypairSol;
+  });
+
   /// Some wallet the admin wants to use to claim. This could also be their own wallet, user can
   /// pick arbitrarily.
   const externalWallet: Keypair = Keypair.generate();
@@ -56,8 +62,8 @@ describe("Set up permissionless fee claiming", () => {
     let result = await banksClient.tryProcessTransaction(tx);
     // dumpBankrunLogs(result);
 
-    // 6042 generic has_one failure (group admin)
-    assertBankrunTxFailed(result, 6042);
+    // 6042 = Unauthorized (program uses more specific error than generic has_one)
+    assertBankrunTxFailed(result, "0x179a");
   });
 
   it("(admin) set a claim destination - happy path", async () => {

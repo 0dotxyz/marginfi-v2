@@ -412,8 +412,11 @@ export async function expectFailedTxWithMessage(
     console.log("tx exec");
   } catch (err) {
     let errString = err.toString();
+    // Also check logs array if available (bankrun puts detailed logs there)
+    const logsString = err.logs ? err.logs.join("\n") : "";
+    const fullString = errString + " " + logsString;
     assert.ok(
-      errString.includes(expectedString),
+      fullString.includes(expectedString),
       `Expected error code '${expectedString}' was not found in logs. Log dump: ${err} or ${err.logs}`
     );
 

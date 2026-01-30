@@ -216,7 +216,6 @@ pub fn group_create(
     profile: Profile,
     admin: Option<Pubkey>,
     override_existing_profile_group: bool,
-    is_arena_group: bool,
 ) -> Result<()> {
     let rpc_client = config.mfi_program.rpc();
     let admin = admin.unwrap_or_else(|| config.authority());
@@ -242,7 +241,7 @@ pub fn group_create(
             fee_state: find_fee_state_pda(&marginfi::ID).0,
             system_program: system_program::id(),
         })
-        .args(marginfi::instruction::MarginfiGroupInitialize { is_arena_group })
+        .args(marginfi::instruction::MarginfiGroupInitialize {})
         .instructions()?;
 
     let recent_blockhash = rpc_client.get_latest_blockhash().unwrap();
@@ -274,7 +273,6 @@ pub fn group_configure(
     new_emissions_admin: Pubkey,
     new_metadata_admin: Pubkey,
     new_risk_admin: Pubkey,
-    is_arena_group: bool,
 ) -> Result<()> {
     let rpc_client = config.mfi_program.rpc();
 
@@ -301,7 +299,6 @@ pub fn group_configure(
             new_emissions_admin,
             new_metadata_admin,
             new_risk_admin,
-            is_arena_group,
             emode_max_init_leverage: None,
             emode_max_maint_leverage: None,
         })
@@ -968,15 +965,6 @@ fn make_bankruptcy_ix(
         ));
 
     Ok(handle_bankruptcy_ix)
-}
-
-pub fn process_set_user_flag(
-    _config: Config,
-    _profile: &Profile,
-    _marginfi_account_pk: Pubkey,
-    _flag: u64,
-) -> Result<()> {
-    panic!("deprecated");
 }
 
 pub fn initialize_fee_state(

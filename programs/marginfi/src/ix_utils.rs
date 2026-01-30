@@ -211,9 +211,10 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use crate::{
-        EndDeleverage, EndLiquidation, InitLiquidationRecord, LendingAccountEndFlashloan,
-        LendingAccountRepay, LendingAccountSettleEmissions, LendingAccountStartFlashloan,
-        LendingAccountWithdraw, LendingAccountWithdrawEmissions, StartDeleverage, StartLiquidation,
+        DriftWithdraw, EndDeleverage, EndLiquidation, InitLiquidationRecord, KaminoWithdraw,
+        LendingAccountEndFlashloan, LendingAccountRepay, LendingAccountSettleEmissions,
+        LendingAccountStartFlashloan, LendingAccountWithdraw, LendingAccountWithdrawEmissions,
+        StartDeleverage, StartLiquidation,
     };
 
     use super::*;
@@ -307,5 +308,15 @@ mod tests {
         let got_end = EndDeleverage::get_hash();
         let want_end = ix_discriminators::END_DELEVERAGE;
         assert_eq!(got_end, want_end);
+
+        // ─── DriftWithdraw ─────────────────────────────────────────────────────
+        let got_drift = DriftWithdraw::get_hash();
+        let want_drift = ix_discriminators::DRIFT_WITHDRAW;
+        assert_eq!(got_drift, want_drift);
+
+        // ─── KaminoWithdraw ────────────────────────────────────────────────────
+        let got_kamino = KaminoWithdraw::get_hash();
+        let want_kamino = ix_discriminators::KAMINO_WITHDRAW;
+        assert_eq!(got_kamino, want_kamino);
     }
 }

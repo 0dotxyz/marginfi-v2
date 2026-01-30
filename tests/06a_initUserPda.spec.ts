@@ -1,7 +1,7 @@
-import { Program, workspace } from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
 import { Keypair, Transaction, PublicKey } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
-import { marginfiGroup, users } from "./rootHooks";
+import { bankrunProgram, marginfiGroup, users } from "./rootHooks";
 import {
   assertBNEqual,
   assertI80F48Equal,
@@ -14,8 +14,12 @@ import { accountInitPda } from "./utils/user-instructions";
 import { USER_ACCOUNT } from "./utils/mocks";
 import { deriveMarginfiAccountPda } from "./utils/pdas";
 
+let program: Program<Marginfi>;
+
 describe("Initialize user account with PDA", () => {
-  const program = workspace.Marginfi as Program<Marginfi>;
+  before(() => {
+    program = bankrunProgram;
+  });
 
   it("(user 0) Initialize PDA user account - happy path", async () => {
     const accountIndex = 555;

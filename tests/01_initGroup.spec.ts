@@ -1,4 +1,4 @@
-import { BN, Program, workspace } from "@coral-xyz/anchor";
+import { BN, Program } from "@coral-xyz/anchor";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import {
   editStakedSettings,
@@ -7,6 +7,7 @@ import {
 } from "./utils/group-instructions";
 import { Marginfi } from "../target/types/marginfi";
 import {
+  bankrunProgram,
   globalFeeWallet,
   groupAdmin,
   marginfiGroup,
@@ -29,8 +30,12 @@ import {
   StakedSettingsEdit,
 } from "./utils/types";
 
+let program: Program<Marginfi>;
+
 describe("Init group", () => {
-  const program = workspace.Marginfi as Program<Marginfi>;
+  before(() => {
+    program = bankrunProgram;
+  });
 
   it("(admin) Init group - happy path", async () => {
     let tx = new Transaction();

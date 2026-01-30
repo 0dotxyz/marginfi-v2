@@ -7,7 +7,6 @@ use marginfi_type_crate::{constants::DAILY_RESET_INTERVAL, types::MarginfiGroup}
 use std::fmt::Debug;
 
 pub const PROGRAM_FEES_ENABLED: u64 = 1;
-pub const ARENA_GROUP: u64 = 2;
 
 pub trait MarginfiGroupImpl {
     fn update_admin(&mut self, new_admin: Pubkey);
@@ -20,9 +19,7 @@ pub trait MarginfiGroupImpl {
     fn set_initial_configuration(&mut self, admin_pk: Pubkey);
     fn get_group_bank_config(&self) -> GroupBankConfig;
     fn set_program_fee_enabled(&mut self, fee_enabled: bool);
-    fn set_arena_group(&mut self, is_arena: bool) -> MarginfiResult;
     fn program_fees_enabled(&self) -> bool;
-    fn is_arena_group(&self) -> bool;
     fn add_bank(&mut self) -> MarginfiResult;
     fn is_protocol_paused(&self) -> bool;
     fn update_withdrawn_equity(
@@ -138,7 +135,7 @@ impl MarginfiGroupImpl for MarginfiGroup {
 
     fn get_group_bank_config(&self) -> GroupBankConfig {
         GroupBankConfig {
-            program_fees: self.group_flags == PROGRAM_FEES_ENABLED,
+            program_fees: self.program_fees_enabled(),
         }
     }
 
@@ -150,44 +147,14 @@ impl MarginfiGroupImpl for MarginfiGroup {
         }
     }
 
-    /// Set the `ARENA_GROUP` if `is_arena` is true. If trying to set as arena and the group already
-    /// has more than two banks, fails. If trying to set an arena bank as non-arena, fails.
-    fn set_arena_group(&mut self, is_arena: bool) -> MarginfiResult {
-        // If enabling arena mode, ensure the group doesn't already have more than two banks.
-        if is_arena && self.banks > 2 {
-            return err!(MarginfiError::ArenaBankLimit);
-        }
-
-        // If the group is currently marked as arena, disallow switching it back to non-arena.
-        if self.is_arena_group() && !is_arena {
-            return err!(MarginfiError::ArenaSettingCannotChange);
-        }
-
-        if is_arena {
-            self.group_flags |= ARENA_GROUP;
-        } else {
-            self.group_flags &= !ARENA_GROUP;
-        }
-        Ok(())
-    }
-
     /// True if program fees are enabled
     fn program_fees_enabled(&self) -> bool {
         (self.group_flags & PROGRAM_FEES_ENABLED) != 0
     }
 
-    /// True if this is an arena group
-    fn is_arena_group(&self) -> bool {
-        (self.group_flags & ARENA_GROUP) != 0
-    }
-
-    // Increment the bank count by 1. If this is an arena group, which only supports two banks,
-    // errors if trying to add a third bank. If you managed to create 16,000 banks, congrats, does
+    // Increment the bank count by 1. If you managed to create 16,000 banks, congrats, does
     // nothing.
     fn add_bank(&mut self) -> MarginfiResult {
-        if self.is_arena_group() && self.banks >= 2 {
-            return err!(MarginfiError::ArenaBankLimit);
-        }
         self.banks = self.banks.saturating_add(1);
 
         let clock = Clock::get()?;

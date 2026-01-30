@@ -1,9 +1,9 @@
-import { workspace, Program } from "@coral-xyz/anchor";
-import { PublicKey, Transaction } from "@solana/web3.js";
+import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import BN from "bn.js";
+import { Program } from "@coral-xyz/anchor";
 import { Marginfi } from "../target/types/marginfi";
 import {
-  marginfiGroup,
+  stakedMarginfiGroup,
   validators,
   groupAdmin,
   oracles,
@@ -28,13 +28,16 @@ import {
   StakedSettingsEdit,
 } from "./utils/types";
 
-describe("Edit and propagate staked settings", () => {
-  const program = workspace.Marginfi as Program<Marginfi>;
+let program: Program<Marginfi>;
+let marginfiGroup: Keypair;
 
+describe("Edit and propagate staked settings", () => {
   let settingsKey: PublicKey;
   let bankKey: PublicKey;
 
   before(async () => {
+    program = bankrunProgram;
+    marginfiGroup = stakedMarginfiGroup;
     [settingsKey] = deriveStakedSettings(
       program.programId,
       marginfiGroup.publicKey

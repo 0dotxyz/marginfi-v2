@@ -1,15 +1,13 @@
-import {
-  AnchorProvider,
-  BN,
-  getProvider,
-  Program,
-  workspace,
-} from "@coral-xyz/anchor";
+import { BN, Program } from "@coral-xyz/anchor";
+import { BankrunProvider } from "anchor-bankrun";
 import { ComputeBudgetProgram, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairA,
   bankKeypairUsdc,
+  bankrunContext,
+  bankrunProgram,
+  bankRunProvider,
   ecosystem,
   groupAdmin,
   oracles,
@@ -35,10 +33,16 @@ import {
 } from "@mrgnlabs/mrgn-common";
 import { CONF_INTERVAL_MULTIPLE, defaultBankConfigOptRaw } from "./utils/types";
 import { configureBank } from "./utils/group-instructions";
+import { getBankrunTime } from "./utils/tools";
+
+let program: Program<Marginfi>;
+let provider: BankrunProvider;
 
 describe("Liquidate user", () => {
-  const program = workspace.Marginfi as Program<Marginfi>;
-  const provider = getProvider() as AnchorProvider;
+  before(() => {
+    provider = bankRunProvider;
+    program = bankrunProgram;
+  });
 
   const confidenceInterval = 0.01 * CONF_INTERVAL_MULTIPLE;
   const liquidateAmountA = 0.2;
@@ -428,7 +432,7 @@ describe("Liquidate user", () => {
       );
     }
 
-    let now = Math.floor(Date.now() / 1000);
+    let now = await getBankrunTime(bankrunContext);
     assertBNApproximately(liquidatorBalancesAfter[0].lastUpdate, now, 2);
     assertBNApproximately(liquidatorBalancesAfter[1].lastUpdate, now, 2);
     assertBNApproximately(liquidatorMarginfiAccountAfter.lastUpdate, now, 2);

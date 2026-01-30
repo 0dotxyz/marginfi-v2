@@ -3,6 +3,7 @@ mod bankruptcy;
 mod bankruptcy_auth;
 mod create_marginfi_group;
 mod deleverage;
+mod freeze;
 mod interest_accrual;
 mod panic_mode;
 mod setup_bank;

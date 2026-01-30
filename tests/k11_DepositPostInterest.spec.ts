@@ -17,7 +17,7 @@ import {
   klendBankrunProgram,
   bankRunProvider,
   banksClient,
-  KAMINO_TOKENA_BANK as KAMINO_TOKEN_A_BANK,
+  KAMINO_TOKEN_A_BANK as KAMINO_TOKEN_A_BANK,
   TOKEN_A_RESERVE,
 } from "./rootHooks";
 import {

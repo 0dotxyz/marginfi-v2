@@ -1,17 +1,14 @@
-import {
-  AnchorProvider,
-  BN,
-  getProvider,
-  Program,
-  Wallet,
-  workspace,
-} from "@coral-xyz/anchor";
-import { AccountMeta, Transaction } from "@solana/web3.js";
+import { BN, Program } from "@coral-xyz/anchor";
+import { BankrunProvider } from "anchor-bankrun";
+import { AccountMeta, PublicKey, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairA,
   bankKeypairSol,
   bankKeypairUsdc,
+  bankrunContext,
+  bankrunProgram,
+  bankRunProvider,
   ecosystem,
   groupAdmin,
   marginfiGroup,
@@ -36,11 +33,19 @@ import {
   ORACLE_SETUP_PYTH_PUSH,
   u64MAX_BN,
 } from "./utils/types";
+import { getBankrunTime } from "./utils/tools";
+
+let program: Program<Marginfi>;
+let mintAuthority: PublicKey;
+let provider: BankrunProvider;
 
 describe("Deposit funds", () => {
-  const program = workspace.Marginfi as Program<Marginfi>;
-  const provider = getProvider() as AnchorProvider;
-  const wallet = provider.wallet as Wallet;
+  before(() => {
+    provider = bankRunProvider;
+    program = bankrunProgram;
+    // Use bankrun payer as mint authority (same as when mints were created)
+    mintAuthority = bankrunContext.payer.publicKey;
+  });
   const depositAmountA = 2;
   const depositAmountA_native = new BN(
     depositAmountA * 10 ** ecosystem.tokenADecimals
@@ -63,7 +68,7 @@ describe("Deposit funds", () => {
         createMintToInstruction(
           ecosystem.tokenAMint.publicKey,
           users[i].tokenAAccount,
-          wallet.publicKey,
+          mintAuthority,
           100 * 10 ** ecosystem.tokenADecimals
         )
       );
@@ -71,7 +76,7 @@ describe("Deposit funds", () => {
         createMintToInstruction(
           ecosystem.usdcMint.publicKey,
           users[i].usdcAccount,
-          wallet.publicKey,
+          mintAuthority,
           10000 * 10 ** ecosystem.usdcDecimals
         )
       );
@@ -79,12 +84,13 @@ describe("Deposit funds", () => {
         createMintToInstruction(
           ecosystem.wsolMint.publicKey,
           users[i].wsolAccount,
-          wallet.publicKey,
+          mintAuthority,
           10000 * 10 ** ecosystem.wsolDecimals
         )
       );
     }
-    await program.provider.sendAndConfirm(tx);
+    // Use provider which has payer as wallet (the mint authority)
+    await provider.sendAndConfirm(tx);
   });
 
   it("(user 0) deposit token A to bank - happy path", async () => {
@@ -127,7 +133,7 @@ describe("Deposit funds", () => {
     assertI80F48Equal(balances[0].liabilityShares, 0);
     assertI80F48Equal(balances[0].emissionsOutstanding, 0);
 
-    let now = Math.floor(Date.now() / 1000);
+    let now = await getBankrunTime(bankrunContext);
     assertBNApproximately(balances[0].lastUpdate, now, 2);
     assertBNApproximately(userAcc.lastUpdate, now, 2);
 
@@ -175,7 +181,7 @@ describe("Deposit funds", () => {
     assertI80F48Equal(balances[0].liabilityShares, 0);
     assertI80F48Equal(balances[0].emissionsOutstanding, 0);
 
-    let now = Math.floor(Date.now() / 1000);
+    let now = await getBankrunTime(bankrunContext);
     assertBNApproximately(balances[0].lastUpdate, now, 2);
     assertBNApproximately(userAcc.lastUpdate, now, 2);
 
@@ -311,7 +317,7 @@ describe("Deposit funds", () => {
       balance.bankPk.equals(bankKey)
     );
     assertI80F48Approx(balances[depositIndex].assetShares, expected);
-    let now = Math.floor(Date.now() / 1000);
+    let now = await getBankrunTime(bankrunContext);
     assertBNApproximately(balances[depositIndex].lastUpdate, now, 2);
     assertBNApproximately(userAcc.lastUpdate, now, 2);
 
@@ -395,7 +401,7 @@ describe("Deposit funds", () => {
     assertI80F48Equal(balances[depositIndex].liabilityShares, 0);
     assertI80F48Equal(balances[depositIndex].emissionsOutstanding, 0);
 
-    let now = Math.floor(Date.now() / 1000);
+    let now = await getBankrunTime(bankrunContext);
     assertBNApproximately(balances[depositIndex].lastUpdate, now, 2);
     assertBNApproximately(userAcc.lastUpdate, now, 2);
 

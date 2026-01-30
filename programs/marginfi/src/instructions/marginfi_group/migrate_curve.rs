@@ -1,4 +1,4 @@
-// TODO deprecate in 1.7
+// TODO deprecate in 1.8
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{

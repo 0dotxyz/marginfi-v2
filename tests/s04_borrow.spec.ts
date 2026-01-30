@@ -1,8 +1,8 @@
 import { BN } from "@coral-xyz/anchor";
-import { Transaction } from "@solana/web3.js";
+import { Keypair, Transaction } from "@solana/web3.js";
 import {
-  bankKeypairSol,
-  bankKeypairUsdc,
+  stakedBankKeypairSol,
+  stakedBankKeypairUsdc,
   bankrunContext,
   bankrunProgram,
   banksClient,
@@ -18,11 +18,16 @@ import { USER_ACCOUNT } from "./utils/mocks";
 import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 
+let bankKeypairSol: Keypair;
+let bankKeypairUsdc: Keypair;
+
 describe("Deposit funds (included staked assets)", () => {
   // User 0 has a USDC deposit position
   // User 1 has a SOL [0] and validator 0 Staked [1] deposit position
 
   before(async () => {
+    bankKeypairSol = stakedBankKeypairSol;
+    bankKeypairUsdc = stakedBankKeypairUsdc;
     // Refresh oracles to ensure they're up to date
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
   });
@@ -58,11 +63,19 @@ describe("Deposit funds (included staked assets)", () => {
       userAccount
     );
     const balances = userAcc.lendingAccount.balances;
-    assert.equal(balances[1].active, 1);
 
-    // Note: the newly added SOL balance is at index 0 because of the sorting by bank pubkey
-    assertKeysEqual(balances[0].bankPk, bankKeypairSol.publicKey);
-    assertKeysEqual(balances[1].bankPk, bankKeypairUsdc.publicKey);
+    // Find balances by bank key (order may vary due to pubkey sorting)
+    const solBalanceIndex = balances.findIndex((b) =>
+      b.bankPk.equals(bankKeypairSol.publicKey)
+    );
+    const usdcBalanceIndex = balances.findIndex((b) =>
+      b.bankPk.equals(bankKeypairUsdc.publicKey)
+    );
+
+    assert.notEqual(solBalanceIndex, -1, "SOL balance not found");
+    assert.notEqual(usdcBalanceIndex, -1, "USDC balance not found");
+    assert.equal(balances[solBalanceIndex].active, 1);
+    assert.equal(balances[usdcBalanceIndex].active, 1);
   });
 
   // Note: Borrowing STAKED assets is generally forbidden (their borrow cap is set to 0)

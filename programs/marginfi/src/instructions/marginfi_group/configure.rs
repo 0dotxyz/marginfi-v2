@@ -21,7 +21,6 @@ pub fn configure(
     new_emissions_admin: Pubkey,
     new_metadata_admin: Pubkey,
     new_risk_admin: Pubkey,
-    is_arena_group: bool,
     emode_max_init_leverage: Option<WrappedI80F48>,
     emode_max_maint_leverage: Option<WrappedI80F48>,
 ) -> MarginfiResult {
@@ -34,7 +33,6 @@ pub fn configure(
     marginfi_group.update_emissions_admin(new_emissions_admin);
     marginfi_group.update_metadata_admin(new_metadata_admin);
     marginfi_group.update_risk_admin(new_risk_admin);
-    marginfi_group.set_arena_group(is_arena_group)?;
 
     // Update emode max leverage - if None, set to default max emode leverage
     let max_init_leverage =

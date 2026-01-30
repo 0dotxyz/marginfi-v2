@@ -95,7 +95,6 @@ describe("Limits on number of accounts, with emode in effect", () => {
         marginfiGroup: throwawayGroup.publicKey,
         newAdmin: groupAdmin.wallet.publicKey,
         newEmodeAdmin: groupAdmin.wallet.publicKey,
-        isArena: false,
       })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);

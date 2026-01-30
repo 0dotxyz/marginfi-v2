@@ -105,7 +105,6 @@ export const makeKaminoHarvestRewardIx = async (
     .accounts({
       bank: accounts.bank,
       feeState: accounts.feeState,
-      destinationTokenAccount: accounts.destinationTokenAccount,
       userState: accounts.userState,
       farmState: accounts.farmState,
       globalConfig: accounts.globalConfig,
@@ -117,6 +116,9 @@ export const makeKaminoHarvestRewardIx = async (
       scopePrices: accounts.scopePrices || null,
       tokenProgram: TOKEN_PROGRAM_ID,
     })
+    .accountsPartial({
+      destinationTokenAccount: accounts.destinationTokenAccount,
+    })
     .instruction();
 };
 
@@ -124,7 +126,7 @@ export interface AddKaminoBankAccounts {
   group: PublicKey;
   feePayer: PublicKey;
   bankMint: PublicKey;
-  kaminoReserve: PublicKey;
+  integrationAcc1: PublicKey;
   kaminoMarket: PublicKey;
   oracle: PublicKey;
   tokenProgram?: PublicKey;
@@ -157,7 +159,7 @@ export const makeAddKaminoBankIx = (
     isWritable: false,
   };
   const reserveMeta: AccountMeta = {
-    pubkey: accounts.kaminoReserve,
+    pubkey: accounts.integrationAcc1,
     isSigner: false,
     isWritable: false,
   };
@@ -180,7 +182,7 @@ export const makeAddKaminoBankIx = (
   const ix = program.methods
     .lendingPoolAddBankKamino(args.config, args.seed)
     .accounts({
-      kaminoObligation,
+      integrationAcc2: kaminoObligation,
       tokenProgram: accounts.tokenProgram || TOKEN_PROGRAM_ID,
       ...accounts,
     })

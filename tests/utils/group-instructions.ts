@@ -140,7 +140,6 @@ export const addBankWithSeed = (
  * newMetadataAdmin - (Optional) pass null to keep current meta admin
  * newRiskAdmin - (Optional) pass null to keep current risk admin
  * marginfiGroup's admin - must sign
- * isArena - default false
  */
 export type GroupConfigureArgs = {
   newAdmin?: PublicKey | null; // optional; pass null or leave undefined to keep current admin
@@ -151,7 +150,6 @@ export type GroupConfigureArgs = {
   newMetadataAdmin?: PublicKey | null;
   newRiskAdmin?: PublicKey | null;
   marginfiGroup: PublicKey;
-  isArena?: boolean; // optional; defaults to false if not provided
   emodeMaxInitLeverage?: WrappedI80F48 | null; 
   emodeMaxMaintLeverage?: WrappedI80F48 | null; 
 };
@@ -169,7 +167,6 @@ export const groupConfigure = async (
     args.newEmissionsAdmin ?? group.delegateEmissionsAdmin;
   const newMetadataAdmin = args.newMetadataAdmin ?? group.metadataAdmin;
   const newRiskAdmin = args.newRiskAdmin ?? group.riskAdmin;
-  const isArena = args.isArena ?? false;
   const emodeMaxInitLeverage = args.emodeMaxInitLeverage ?? null;
   const emodeMaxMaintLeverage = args.emodeMaxMaintLeverage ?? null;
 
@@ -182,7 +179,6 @@ export const groupConfigure = async (
       newEmissionsAdmin,
       newMetadataAdmin,
       newRiskAdmin,
-      isArena,
       emodeMaxInitLeverage,
       emodeMaxMaintLeverage
     )
@@ -198,16 +194,14 @@ export const groupConfigure = async (
 export type GroupInitializeArgs = {
   marginfiGroup: PublicKey;
   admin: PublicKey;
-  isArena?: boolean; // optional; defaults to false if not provided
 };
 
 export const groupInitialize = (
   program: Program<Marginfi>,
   args: GroupInitializeArgs
 ) => {
-  const isArena = args.isArena ?? false;
   const ix = program.methods
-    .marginfiGroupInitialize(isArena)
+    .marginfiGroupInitialize()
     .accounts({
       marginfiGroup: args.marginfiGroup,
       // feeState: deriveGlobalFeeState(id),

@@ -93,7 +93,6 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
         marginfiGroup: throwawayGroup.publicKey,
         newAdmin: groupAdmin.wallet.publicKey,
         newEmodeAdmin: groupAdmin.wallet.publicKey,
-        isArena: false,
       })
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);

@@ -1,7 +1,12 @@
-import { Program, workspace } from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
 import { Keypair, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
-import { marginfiGroup, users } from "./rootHooks";
+import {
+  bankrunContext,
+  bankrunProgram,
+  marginfiGroup,
+  users,
+} from "./rootHooks";
 import {
   assertBNApproximately,
   assertBNEqual,
@@ -12,9 +17,14 @@ import {
 import { assert } from "chai";
 import { accountInit } from "./utils/user-instructions";
 import { USER_ACCOUNT } from "./utils/mocks";
+import { getBankrunTime } from "./utils/tools";
+
+let program: Program<Marginfi>;
 
 describe("Initialize user account", () => {
-  const program = workspace.Marginfi as Program<Marginfi>;
+  before(() => {
+    program = bankrunProgram;
+  });
 
   it("(user 0) Initialize user account - happy path", async () => {
     const accountKeypair = Keypair.generate();
@@ -45,7 +55,7 @@ describe("Initialize user account", () => {
       assertBNEqual(balances[i].lastUpdate, 0);
     }
     assertBNEqual(userAcc.accountFlags, 0);
-    let now = Math.floor(Date.now() / 1000);
+    let now = await getBankrunTime(bankrunContext);
     assertBNApproximately(userAcc.lastUpdate, now, 2);
   });
 

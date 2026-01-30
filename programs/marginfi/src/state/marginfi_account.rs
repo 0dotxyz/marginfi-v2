@@ -4,26 +4,26 @@ use crate::{
     check, check_eq, debug, math_error,
     prelude::{MarginfiError, MarginfiResult},
     state::{bank::BankImpl, bank_config::BankConfigImpl},
-    utils::NumTraitsWithTolerance,
+    utils::{is_integration_asset_tag, NumTraitsWithTolerance},
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        ASSET_TAG_DEFAULT, ASSET_TAG_KAMINO, ASSET_TAG_SOL, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD,
-        EMISSIONS_FLAG_BORROW_ACTIVE, EMISSIONS_FLAG_LENDING_ACTIVE, EXP_10_I80F48,
+        ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_KAMINO, ASSET_TAG_SOL, ASSET_TAG_SOLEND,
+        ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, EMISSIONS_FLAG_BORROW_ACTIVE,
+        EMISSIONS_FLAG_LENDING_ACTIVE, EXP_10_I80F48, MAX_INTEGRATION_POSITIONS,
         MIN_EMISSIONS_START_TIME, SECONDS_PER_YEAR, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
         reconcile_emode_configs, Balance, BalanceSide, Bank, BankOperationalState, EmodeConfig,
         HealthCache, LendingAccount, MarginfiAccount, OracleSetup, RiskTier, ACCOUNT_DISABLED,
-        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 use std::cmp::{max, min};
 
-/// 4 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool), 2 for most others (bank, oracle), 3
-/// for Kamino (bank, oracle, reserve), 1 for Fixed
+/// 4 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool), 3 for `ASSET_TAG_KAMINO`, `ASSET_TAG_DRIFT`, and `ASSET_TAG_SOLEND`, 2 for most others (bank, oracle), 1 for Fixed
 pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
     if bank.config.oracle_setup == OracleSetup::Fixed {
         Ok(1)
@@ -34,16 +34,10 @@ pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
 
 /// 4 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool), 2 for most others (bank, oracle), 3
 /// for Kamino (bank, oracle, reserve), 1 for Fixed
-fn get_remaining_accounts_per_balance(balance: &Balance) -> MarginfiResult<usize> {
-    get_remaining_accounts_per_asset_tag(balance.bank_asset_tag)
-}
-
-/// 4 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool), 2 for most others (bank, oracle), 3
-/// for Kamino (bank, oracle, reserve), 1 for Fixed
 fn get_remaining_accounts_per_asset_tag(asset_tag: u8) -> MarginfiResult<usize> {
     match asset_tag {
         ASSET_TAG_DEFAULT | ASSET_TAG_SOL => Ok(2),
-        ASSET_TAG_KAMINO => Ok(3),
+        ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND => Ok(3),
         ASSET_TAG_STAKED => Ok(4),
         _ => err!(MarginfiError::AssetTagMismatch),
     }
@@ -51,11 +45,52 @@ fn get_remaining_accounts_per_asset_tag(asset_tag: u8) -> MarginfiResult<usize> 
 
 pub trait MarginfiAccountImpl {
     fn initialize(&mut self, group: Pubkey, authority: Pubkey, current_timestamp: u64);
-    fn get_remaining_accounts_len(&self) -> MarginfiResult<usize>;
     fn set_flag(&mut self, flag: u64, msg: bool);
     fn unset_flag(&mut self, flag: u64, msg: bool);
     fn get_flag(&self, flag: u64) -> bool;
     fn can_be_closed(&self) -> bool;
+}
+
+/// Checks if a signer is authorized to perform actions on a marginfi account.
+///
+/// Returns `true` if the signer is authorized, `false` otherwise.
+///
+/// Authorization rules (checked in order):
+/// 1. If `allow_receivership` is true and the account is in receivership → `true`
+/// 2. If the account is frozen → `true` only if signer is the group admin
+/// 3. Otherwise → `true` only if signer is the account authority
+pub fn is_signer_authorized(
+    marginfi_account: &MarginfiAccount,
+    group_admin: Pubkey,
+    signer: Pubkey,
+    allow_receivership: bool,
+) -> bool {
+    if allow_receivership && marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
+        return true;
+    }
+
+    if marginfi_account.get_flag(ACCOUNT_FROZEN) {
+        return group_admin == signer;
+    }
+
+    marginfi_account.authority == signer
+}
+
+/// Checks if the account authority is allowed to act on their account based on frozen status.
+///
+/// Returns `true` if the action is allowed, `false` if blocked.
+///
+/// Returns `false` when both conditions are met:
+/// - The account is frozen
+/// - The signer is the account authority
+///
+/// This is intentionally separate from [`is_signer_authorized`] to return a distinct
+/// `AccountFrozen` error in the instruction context  rather than `Unauthorized`.
+pub fn account_not_frozen_for_authority(
+    marginfi_account: &MarginfiAccount,
+    signer: Pubkey,
+) -> bool {
+    !(marginfi_account.get_flag(ACCOUNT_FROZEN) && marginfi_account.authority == signer)
 }
 
 impl MarginfiAccountImpl for MarginfiAccount {
@@ -67,22 +102,6 @@ impl MarginfiAccountImpl for MarginfiAccount {
         self.migrated_from = Pubkey::default();
         self.last_update = current_timestamp;
         self.migrated_to = Pubkey::default();
-    }
-
-    /// Expected length of remaining accounts to be passed in borrow/liquidate, INCLUDING the bank
-    /// key, oracle, and optional accounts like lst mint/pool, etc.
-    fn get_remaining_accounts_len(&self) -> MarginfiResult<usize> {
-        let mut total = 0usize;
-        for balance in self
-            .lending_account
-            .balances
-            .iter()
-            .filter(|b| b.is_active())
-        {
-            let num_accounts = get_remaining_accounts_per_balance(balance)?;
-            total += num_accounts;
-        }
-        Ok(total)
     }
 
     fn set_flag(&mut self, flag: u64, msg: bool) {
@@ -1385,7 +1404,7 @@ impl<'a> BankAccountWrapper<'a> {
             let emissions = calc_emissions(
                 period,
                 balance_amount,
-                self.bank.mint_decimals as usize,
+                self.bank.get_balance_decimals() as usize,
                 emissions_rate,
             )?;
 

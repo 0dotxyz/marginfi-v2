@@ -1,9 +1,4 @@
-import {
-  getProvider,
-  AnchorProvider,
-  Wallet,
-  Program,
-} from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
 import { createMintToInstruction } from "@solana/spl-token";
 import {
   PublicKey,
@@ -11,8 +6,6 @@ import {
   Transaction,
   AccountMeta,
   ComputeBudgetProgram,
-  SystemProgram,
-  SYSVAR_RENT_PUBKEY,
 } from "@solana/web3.js";
 import BN from "bn.js";
 import {
@@ -26,13 +19,9 @@ import {
   users,
   kaminoAccounts,
   MARKET,
-  USDC_RESERVE,
   TOKEN_A_RESERVE,
   A_FARM_STATE,
-  A_OBLIGATION_USER_STATE,
   farmAccounts,
-  bankRunProvider,
-  klendBankrunProgram,
   FARMS_PROGRAM_ID,
 } from "./rootHooks";
 import { addBankWithSeed, groupInitialize } from "./utils/group-instructions";
@@ -52,16 +41,12 @@ import {
 } from "./utils/types";
 import {
   defaultKaminoBankConfig,
-  ORACLE_SETUP_KAMINO_PYTH_PUSH,
 } from "./utils/kamino-utils";
 import {
   makeAddKaminoBankIx,
   makeInitObligationIx,
 } from "./utils/kamino-instructions";
 import { processBankrunTransaction } from "./utils/tools";
-import { Farms } from "./fixtures/kamino_farms";
-import farmsIdl from "../idls/kamino_farms.json";
-import { lendingMarketAuthPda } from "@kamino-finance/klend-sdk";
 
 /**
  * Initialize a group, create N banks, fund everyone, and init accounts.
@@ -128,8 +113,8 @@ export const genericMultiBankTestSetup = async (
 
   // 3) fund users + admin
   {
-    const provider = getProvider() as AnchorProvider;
-    const wallet = provider.wallet as Wallet;
+    // Use bankrun payer as mint authority (it created the mints in rootHooks.ts)
+    const payer = bankrunContext.payer;
 
     for (const u of users) {
       const tx = new Transaction();
@@ -137,12 +122,12 @@ export const genericMultiBankTestSetup = async (
         createMintToInstruction(
           ecosystem.lstAlphaMint.publicKey,
           u.lstAlphaAccount,
-          wallet.publicKey,
+          payer.publicKey,
           10_000 * 10 ** ecosystem.lstAlphaDecimals
         )
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(wallet.payer);
+      tx.sign(payer);
       await banksClient.processTransaction(tx);
     }
 
@@ -151,12 +136,12 @@ export const genericMultiBankTestSetup = async (
       createMintToInstruction(
         ecosystem.lstAlphaMint.publicKey,
         groupAdmin.lstAlphaAccount,
-        wallet.publicKey,
+        payer.publicKey,
         10_000 * 10 ** ecosystem.lstAlphaDecimals
       )
     );
     txAdmin.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    txAdmin.sign(wallet.payer);
+    txAdmin.sign(payer);
     await banksClient.processTransaction(txAdmin);
   }
 
@@ -391,8 +376,8 @@ export const genericKaminoMultiBankTestSetup = async (
 
   // 3) fund users + admin
   {
-    const provider = getProvider() as AnchorProvider;
-    const wallet = provider.wallet as Wallet;
+    // Use bankrun payer as mint authority (it created the mints in rootHooks.ts)
+    const payer = bankrunContext.payer;
 
     for (const u of users) {
       const tx = new Transaction();
@@ -400,12 +385,12 @@ export const genericKaminoMultiBankTestSetup = async (
         createMintToInstruction(
           ecosystem.lstAlphaMint.publicKey,
           u.lstAlphaAccount,
-          wallet.publicKey,
+          payer.publicKey,
           10_000 * 10 ** ecosystem.lstAlphaDecimals
         )
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(wallet.payer);
+      tx.sign(payer);
       await banksClient.processTransaction(tx);
     }
 
@@ -414,12 +399,12 @@ export const genericKaminoMultiBankTestSetup = async (
       createMintToInstruction(
         ecosystem.lstAlphaMint.publicKey,
         groupAdmin.lstAlphaAccount,
-        wallet.publicKey,
+        payer.publicKey,
         10_000 * 10 ** ecosystem.lstAlphaDecimals
       )
     );
     txAdmin.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    txAdmin.sign(wallet.payer);
+    txAdmin.sign(payer);
     await banksClient.processTransaction(txAdmin);
   }
 
@@ -515,7 +500,7 @@ async function addGenericKaminoBank(
         group: throwawayGroup.publicKey,
         feePayer: groupAdmin.wallet.publicKey,
         bankMint: mint,
-        kaminoReserve: reserve,
+        integrationAcc1: reserve,
         kaminoMarket: market,
         oracle: oracle,
       },

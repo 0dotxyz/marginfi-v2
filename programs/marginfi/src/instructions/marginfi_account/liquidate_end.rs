@@ -17,7 +17,7 @@ use marginfi_type_crate::{
     constants::FEE_STATE_SEED,
     types::{
         FeeState, HealthCache, LiquidationRecord, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -93,6 +93,7 @@ pub fn end_deleverage<'info>(
 
     validate_not_cpi_by_stack_height()?;
 
+    marginfi_account.unset_flag(ACCOUNT_IN_DELEVERAGE, false);
     let (_, seized_f64, _, repaid_f64) = end_receivership(
         &mut marginfi_account,
         &mut liq_record,

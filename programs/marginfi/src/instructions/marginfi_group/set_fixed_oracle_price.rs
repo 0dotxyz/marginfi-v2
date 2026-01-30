@@ -25,7 +25,7 @@ pub fn lending_pool_set_fixed_oracle_price(
     // to do this anyways.
     if bank.config.asset_tag == ASSET_TAG_STAKED {
         msg!("Staked banks cannot set a fixed price");
-        return err!(MarginfiError::StakedPythPushWrongAccountOwner);
+        return err!(MarginfiError::Unauthorized);
     }
 
     bank.config.oracle_setup = OracleSetup::Fixed;

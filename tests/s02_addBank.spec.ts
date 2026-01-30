@@ -1,4 +1,5 @@
-import { BN, Program, workspace } from "@coral-xyz/anchor";
+import { BN, Program } from "@coral-xyz/anchor";
+import { Marginfi } from "../target/types/marginfi";
 import { AccountMeta, Keypair, Transaction } from "@solana/web3.js";
 import {
   addBank,
@@ -6,16 +7,15 @@ import {
   groupInitialize,
   initStakedSettings,
 } from "./utils/group-instructions";
-import { Marginfi } from "../target/types/marginfi";
 import {
-  bankKeypairSol,
-  bankKeypairUsdc,
+  stakedBankKeypairSol,
+  stakedBankKeypairUsdc,
   bankrunContext,
   bankrunProgram,
   banksClient,
   ecosystem,
   groupAdmin,
-  marginfiGroup,
+  stakedMarginfiGroup,
   oracles,
   users,
   validators,
@@ -54,8 +54,18 @@ import {
 } from "./utils/pdas";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 
+let program: Program<Marginfi>;
+let marginfiGroup: Keypair;
+let bankKeypairSol: Keypair;
+let bankKeypairUsdc: Keypair;
+
 describe("Init group and add banks with asset category flags", () => {
-  const program = workspace.Marginfi as Program<Marginfi>;
+  before(() => {
+    program = bankrunProgram;
+    marginfiGroup = stakedMarginfiGroup;
+    bankKeypairSol = stakedBankKeypairSol;
+    bankKeypairUsdc = stakedBankKeypairUsdc;
+  });
 
   it("(admin) Init group - happy path", async () => {
     let tx = new Transaction();

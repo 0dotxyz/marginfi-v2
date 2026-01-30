@@ -102,7 +102,7 @@ describe("k10: Kamino Liquidation", () => {
           group: throwawayGroup.publicKey,
           feePayer: groupAdmin.wallet.publicKey,
           bankMint: ecosystem.usdcMint.publicKey,
-          kaminoReserve: usdcReserve,
+          integrationAcc1: usdcReserve,
           kaminoMarket: market,
           oracle: oracles.usdcOracle.publicKey,
         },

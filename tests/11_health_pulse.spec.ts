@@ -1,9 +1,11 @@
-import { Program, workspace } from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
 import { Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairA,
   bankKeypairUsdc,
+  bankrunContext,
+  bankrunProgram,
   groupAdmin,
   oracles,
   users,
@@ -26,11 +28,15 @@ import {
   ORACLE_CONF_INTERVAL,
 } from "./utils/types";
 import { configureBank } from "./utils/group-instructions";
-import { bytesToF64 } from "./utils/tools";
+import { bytesToF64, getBankrunTime } from "./utils/tools";
 import { assertBNEqual } from "./utils/genericTests";
 
+let program: Program<Marginfi>;
+
 describe("Health pulse", () => {
-  const program = workspace.Marginfi as Program<Marginfi>;
+  before(() => {
+    program = bankrunProgram;
+  });
   /** Tolerance for float inaccuracy */
   const t = 0.00001;
   const confidence = ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
@@ -52,7 +58,7 @@ describe("Health pulse", () => {
 
     const accAfter = await program.account.marginfiAccount.fetch(acc);
     const cacheAfter = accAfter.healthCache;
-    const now = Date.now() / 1000;
+    let now = await getBankrunTime(bankrunContext);
     const assetValue = wrappedI80F48toBigNumber(cacheAfter.assetValue);
     const liabValue = wrappedI80F48toBigNumber(cacheAfter.liabilityValue);
 
@@ -110,7 +116,7 @@ describe("Health pulse", () => {
     const accAfter = await program.account.marginfiAccount.fetch(acc);
     assertBNEqual(accBefore.lastUpdate, accAfter.lastUpdate);
     const cA = accAfter.healthCache;
-    const now = Date.now() / 1000;
+    let now = await getBankrunTime(bankrunContext);
 
     const assetValue = wrappedI80F48toBigNumber(cA.assetValue);
     const liabValue = wrappedI80F48toBigNumber(cA.liabilityValue);
@@ -177,7 +183,7 @@ describe("Health pulse", () => {
 
     const accAfter = await program.account.marginfiAccount.fetch(acc);
     const cacheAfter = accAfter.healthCache;
-    const now = Date.now() / 1000;
+    let now = await getBankrunTime(bankrunContext);
 
     const assetValue = wrappedI80F48toBigNumber(cacheAfter.assetValue);
     const liabValue = wrappedI80F48toBigNumber(cacheAfter.liabilityValue);
@@ -299,7 +305,7 @@ describe("Health pulse", () => {
 
     const accAfter = await program.account.marginfiAccount.fetch(acc);
     const cacheAfter = accAfter.healthCache;
-    const now = Date.now() / 1000;
+    let now = await getBankrunTime(bankrunContext);
 
     const assetValue = wrappedI80F48toBigNumber(cacheAfter.assetValue);
     const liabValue = wrappedI80F48toBigNumber(cacheAfter.liabilityValue);

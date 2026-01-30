@@ -1,7 +1,12 @@
 import { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
-import { Program, workspace } from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
 import { Marginfi } from "../target/types/marginfi";
-import { marginfiGroup, users, globalFeeWallet } from "./rootHooks";
+import {
+  bankrunProgram,
+  marginfiGroup,
+  users,
+  globalFeeWallet,
+} from "./rootHooks";
 import {
   accountInit,
   transferAccountAuthorityIx,
@@ -22,8 +27,12 @@ import {
 } from "./utils/types";
 import { dumpAccBalances } from "./utils/tools";
 
+let program: Program<Marginfi>;
+
 describe("Transfer account authority", () => {
-  const program = workspace.Marginfi as Program<Marginfi>;
+  before(() => {
+    program = bankrunProgram;
+  });
 
   const oldAccKeypair = Keypair.generate();
   const newAccKeypair = Keypair.generate();

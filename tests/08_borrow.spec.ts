@@ -1,16 +1,14 @@
-import {
-  AnchorProvider,
-  BN,
-  getProvider,
-  Program,
-  workspace,
-} from "@coral-xyz/anchor";
+import { BN, Program } from "@coral-xyz/anchor";
+import { BankrunProvider } from "anchor-bankrun";
 import { Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairA,
   bankKeypairSol,
   bankKeypairUsdc,
+  bankrunContext,
+  bankrunProgram,
+  bankRunProvider,
   ecosystem,
   oracles,
   users,
@@ -31,10 +29,16 @@ import {
 } from "./utils/user-instructions";
 import { USER_ACCOUNT } from "./utils/mocks";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
+import { getBankrunTime } from "./utils/tools";
+
+let program: Program<Marginfi>;
+let provider: BankrunProvider;
 
 describe("Borrow funds", () => {
-  const program = workspace.Marginfi as Program<Marginfi>;
-  const provider = getProvider() as AnchorProvider;
+  before(() => {
+    provider = bankRunProvider;
+    program = bankrunProgram;
+  });
 
   // Bank has 100 USDC available to borrow
   // User has 2 Token A (worth $20) deposited
@@ -200,7 +204,7 @@ describe("Borrow funds", () => {
     );
     assertI80F48Equal(balances[borrowIndex].emissionsOutstanding, 0);
 
-    let now = Math.floor(Date.now() / 1000);
+    let now = await getBankrunTime(bankrunContext);
     assertBNApproximately(balances[borrowIndex].lastUpdate, now, 2);
     assertBNApproximately(userAcc.lastUpdate, now, 2);
 

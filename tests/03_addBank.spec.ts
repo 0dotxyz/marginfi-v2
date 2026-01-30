@@ -1,4 +1,4 @@
-import { BN, Program, workspace } from "@coral-xyz/anchor";
+import { BN, Program } from "@coral-xyz/anchor";
 import { AccountMeta, PublicKey, Transaction } from "@solana/web3.js";
 import { addBank, configureBankOracle } from "./utils/group-instructions";
 import { Marginfi } from "../target/types/marginfi";
@@ -6,6 +6,8 @@ import {
   bankKeypairA,
   bankKeypairSol,
   bankKeypairUsdc,
+  bankrunContext,
+  bankrunProgram,
   ecosystem,
   globalFeeWallet,
   groupAdmin,
@@ -22,6 +24,7 @@ import {
   assertKeyDefault,
   assertKeysEqual,
 } from "./utils/genericTests";
+import { printBufferGroups, getBankrunTime } from "./utils/tools";
 import {
   aprToU32,
   ASSET_TAG_DEFAULT,
@@ -42,18 +45,21 @@ import {
   deriveFeeVault,
 } from "./utils/pdas";
 import { assert } from "chai";
-import { printBufferGroups } from "./utils/tools";
 import { RiskTier } from "@mrgnlabs/marginfi-client-v2";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 
+let program: Program<Marginfi>;
+
 describe("Lending pool add bank (add bank to group)", () => {
-  const program = workspace.Marginfi as Program<Marginfi>;
+  before(() => {
+    program = bankrunProgram;
+  });
 
   it("(admin) Add bank (USDC) - happy path", async () => {
     let setConfig = defaultBankConfig();
     let bankKey = bankKeypairUsdc.publicKey;
 
-    const now = Date.now() / 1000;
+    const now = await getBankrunTime(bankrunContext);
 
     const feeAccSolBefore = await program.provider.connection.getBalance(
       globalFeeWallet

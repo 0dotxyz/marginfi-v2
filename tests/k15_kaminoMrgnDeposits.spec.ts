@@ -14,7 +14,7 @@ import {
   kaminoAccounts,
   users,
   KAMINO_USDC_BANK,
-  KAMINO_TOKENA_BANK,
+  KAMINO_TOKEN_A_BANK,
   USDC_RESERVE,
   TOKEN_A_RESERVE,
   MARKET,
@@ -61,7 +61,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
 
     // Get banks and reserves from kaminoAccounts map
     usdcBank = kaminoAccounts.get(KAMINO_USDC_BANK)!;
-    tokenABank = kaminoAccounts.get(KAMINO_TOKENA_BANK)!;
+    tokenABank = kaminoAccounts.get(KAMINO_TOKEN_A_BANK)!;
     usdcReserve = kaminoAccounts.get(USDC_RESERVE)!;
     tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE)!;
 
@@ -1331,7 +1331,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
             kaminoAccounts.get(USDC_RESERVE)!,
           ]);
         } else if (
-          balance.bankPk.equals(kaminoAccounts.get(KAMINO_TOKENA_BANK)!)
+          balance.bankPk.equals(kaminoAccounts.get(KAMINO_TOKEN_A_BANK)!)
         ) {
           activePositions.push([
             balance.bankPk,

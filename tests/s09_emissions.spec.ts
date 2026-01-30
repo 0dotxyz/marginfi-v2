@@ -4,7 +4,7 @@
  * staked collateral.
  */
 
-import { AnchorProvider, BN, getProvider, Wallet } from "@coral-xyz/anchor";
+import { BN } from "@coral-xyz/anchor";
 import {
   Keypair,
   LAMPORTS_PER_SOL,
@@ -18,7 +18,7 @@ import {
   banksClient,
   ecosystem,
   groupAdmin,
-  marginfiGroup,
+  stakedMarginfiGroup,
   numUsers,
   users,
   validators,
@@ -56,9 +56,12 @@ import { getEpochAndSlot } from "./utils/stake-utils";
 import { createMintToInstruction } from "@solana/spl-token";
 import { Clock } from "solana-bankrun";
 
+let marginfiGroup: Keypair;
+
 describe("Set up emissions on staked collateral assets", () => {
-  const provider = getProvider() as AnchorProvider;
-  const wallet = provider.wallet as Wallet;
+  before(() => {
+    marginfiGroup = stakedMarginfiGroup;
+  });
 
   const emissionRate = new BN(500_000 * 10 ** ecosystem.tokenBDecimals);
   const totalEmissions = new BN(1_000_000 * 10 ** ecosystem.tokenBDecimals);
@@ -78,17 +81,18 @@ describe("Set up emissions on staked collateral assets", () => {
   let lastUpdate: BN;
 
   it("(admin) emissions setup - happy path", async () => {
+    const payer = bankrunContext.payer;
     // Fund the group admin with a bunch of Token B for emissions
     let fundTx: Transaction = new Transaction().add(
       createMintToInstruction(
         ecosystem.tokenBMint.publicKey,
         groupAdmin.tokenBAccount,
-        wallet.publicKey,
+        payer.publicKey,
         BigInt(100_000_000) * BigInt(10 ** ecosystem.tokenBDecimals)
       )
     );
     fundTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    fundTx.sign(wallet.payer);
+    fundTx.sign(payer);
     await banksClient.processTransaction(fundTx);
 
     let setupTx = new Transaction().add(
@@ -341,6 +345,7 @@ describe("Set up emissions on staked collateral assets", () => {
   });
 
   it("(user 2) settle is always permissionless (does nothing here, no time elapsed)", async () => {
+    const payer = bankrunContext.payer;
     const user = users[2];
     const userAccount = user.accounts.get(USER_ACCOUNT);
     let tx = new Transaction().add(
@@ -350,7 +355,7 @@ describe("Set up emissions on staked collateral assets", () => {
       })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(wallet.payer); // Provider wallet has to sign to pay tx fees
+    tx.sign(payer); // Payer has to sign to pay tx fees
     await banksClient.processTransaction(tx);
 
     const userAcc = await bankrunProgram.account.marginfiAccount.fetch(
@@ -382,16 +387,17 @@ describe("Set up emissions on staked collateral assets", () => {
   });
 
   it("(user 2) sets up a wallet to accept permissionless emission claims", async () => {
+    const payer = bankrunContext.payer;
     // Note that the payer wallet pays here, just to get some SOL into this wallet for rent since
     // this is what most users would do
     let tx = new Transaction().add(
       SystemProgram.transfer({
-        fromPubkey: wallet.publicKey,
+        fromPubkey: payer.publicKey,
         toPubkey: externalWallet.publicKey,
         lamports: 0.1 * LAMPORTS_PER_SOL,
       }),
       createAssociatedTokenAccountInstruction(
-        wallet.publicKey,
+        payer.publicKey,
         bAta,
         externalWallet.publicKey,
         ecosystem.tokenBMint.publicKey
@@ -399,7 +405,7 @@ describe("Set up emissions on staked collateral assets", () => {
     );
 
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(wallet.payer);
+    tx.sign(payer);
     await banksClient.processTransaction(tx);
   });
 
@@ -458,6 +464,7 @@ describe("Set up emissions on staked collateral assets", () => {
 
   let user2PermissionlessClaim: number;
   it("(user 2) permissionless withdraw after opt-in - happy path", async () => {
+    const payer = bankrunContext.payer;
     const user = users[2];
     const userAccount = user.accounts.get(USER_ACCOUNT);
 
@@ -477,7 +484,7 @@ describe("Set up emissions on staked collateral assets", () => {
     );
 
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(wallet.payer); // Note: not the user!
+    tx.sign(payer); // Note: not the user!
     await banksClient.processTransaction(tx);
 
     const tokenAfter = await getTokenBalance(bankRunProvider, bAta);

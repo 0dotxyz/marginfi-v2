@@ -239,10 +239,12 @@ describe("Init e-mode settings for a set of banks", () => {
       })
     );
 
-    const now = Date.now() / 1000;
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(emodeAdmin.wallet);
     await banksClient.processTransaction(tx);
+
+    const clock = await banksClient.getClock();
+    const now = Number(clock.unixTimestamp);
 
     let lstBBankAcc = await bankrunProgram.account.bank.fetch(lstBBank);
     let emode = lstBBankAcc.emode;
@@ -250,7 +252,7 @@ describe("Init e-mode settings for a set of banks", () => {
     assertBNEqual(emode.flags, 1); // is active
 
     let lastUpdate = emode.timestamp.toNumber();
-    // Date checks in bankrun are wonky, this is close enough...
+    // Compare against bankrun clock, not wall clock
     assert.approximately(lastUpdate, now, 100);
 
     // When the entries are sorted ascending, sol (501) will be last, and lst (157) just prior.

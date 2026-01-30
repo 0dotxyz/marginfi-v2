@@ -1,4 +1,4 @@
-import { BN, Program, workspace } from "@coral-xyz/anchor";
+import { BN, Program } from "@coral-xyz/anchor";
 import {
   configureBank,
   configureBankOracle,
@@ -10,6 +10,7 @@ import { Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairUsdc,
+  bankrunProgram,
   groupAdmin,
   marginfiGroup,
   oracles,
@@ -38,8 +39,12 @@ import {
 } from "./utils/types";
 import { deriveBankMetadata } from "./utils/pdas";
 
+let program: Program<Marginfi>;
+
 describe("Lending pool configure bank", () => {
-  const program = workspace.Marginfi as Program<Marginfi>;
+  before(() => {
+    program = bankrunProgram;
+  });
 
   it("(admin) Configure bank (USDC) - happy path", async () => {
     const bankKey = bankKeypairUsdc.publicKey;

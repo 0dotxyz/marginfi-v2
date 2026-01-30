@@ -39,6 +39,9 @@ pub struct MarginfiAccount {
     /// - 16: `ACCOUNT_IN_RECEIVERSHIP` - the account is eligible to be liquidated and has entered
     ///   receivership, a liquidator is able to control borrows and withdraws until the end of the
     ///   tx. This flag will only appear within a tx.
+    /// - 32: `ACCOUNT_IN_DELEVERAGE - the account is being deleveraged by the risk admin
+    /// - 64: `ACCOUNT_FROZEN` - the admin has frozen the account; only the group admin may perform
+    ///   actions until unfrozen.
     pub account_flags: u64, // 8
     /// Set with `update_emissions_destination_account`. Emissions rewards can be withdrawn to the
     /// cannonical ATA of this wallet without the user's input (withdraw_emissions_permissionless).
@@ -107,6 +110,8 @@ pub const ACCOUNT_IN_FLASHLOAN: u64 = 1 << 1;
 pub const ACCOUNT_FLAG_DEPRECATED: u64 = 1 << 2;
 pub const ACCOUNT_TRANSFER_AUTHORITY_DEPRECATED: u64 = 1 << 3;
 pub const ACCOUNT_IN_RECEIVERSHIP: u64 = 1 << 4;
+pub const ACCOUNT_IN_DELEVERAGE: u64 = 1 << 5;
+pub const ACCOUNT_FROZEN: u64 = 1 << 6;
 pub const MAX_LENDING_ACCOUNT_BALANCES: usize = 16;
 
 assert_struct_size!(LendingAccount, 1728);

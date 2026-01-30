@@ -53,5 +53,4 @@ enough funds - proportional to the liabilities held by bankrupt users.
 
 ### When Does This Matter?
 
-Bankruptcy is very rare in the main pool (as of November 2025, it has never once been executed).
-Almost all bankruptcies occur in Arena, where riskier assets tend to have extremely volatile moves.
+Ideally, never. As of November 2025, bankruptcy has never been executed in the main pool.

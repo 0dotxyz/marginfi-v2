@@ -136,7 +136,8 @@ describe("Panic Mode state test (Bankrun)", () => {
     const fs = await bankrunProgram.account.feeState.fetch(feeStateKey);
     assert.equal(fs.panicState.pauseFlags, 1);
 
-    const now = Math.round(Date.now() / 1000);
+    const clock = await banksClient.getClock();
+    const now = Number(clock.unixTimestamp);
     assertBNApproximately(fs.panicState.pauseStartTimestamp, now, 100);
     assertBNApproximately(fs.panicState.lastDailyResetTimestamp, now, 100);
 
@@ -203,7 +204,6 @@ describe("Panic Mode state test (Bankrun)", () => {
   // should init a pause should also propagate it, otherwise were will be a lag when it's actually
   // needed. Likewise to unpause, don't forget to propagate.
   it("(permissionless) propagate a pause state to a group - happy path", async () => {
-    const now = Math.round(Date.now() / 1000);
     const tx = new Transaction();
     tx.add(
       await propagateFeeState(globalProgramAdmin.mrgnBankrunProgram, {
@@ -214,6 +214,9 @@ describe("Panic Mode state test (Bankrun)", () => {
     tx.sign(globalProgramAdmin.wallet);
 
     await banksClient.processTransaction(tx);
+
+    const clock = await banksClient.getClock();
+    const now = Number(clock.unixTimestamp);
 
     const fs = await bankrunProgram.account.feeState.fetch(feeStateKey);
     const group = await bankrunProgram.account.marginfiGroup.fetch(
@@ -467,7 +470,6 @@ describe("Panic Mode state test (Bankrun)", () => {
   });
 
   it("(permissionless) propagate unpause state to a group - happy path", async () => {
-    const now = Math.round(Date.now() / 1000);
     const tx = new Transaction();
     tx.add(
       await propagateFeeState(globalProgramAdmin.mrgnBankrunProgram, {
@@ -478,6 +480,9 @@ describe("Panic Mode state test (Bankrun)", () => {
     tx.sign(globalProgramAdmin.wallet);
 
     await banksClient.processTransaction(tx);
+
+    const clock = await banksClient.getClock();
+    const now = Number(clock.unixTimestamp);
 
     const fs = await bankrunProgram.account.feeState.fetch(feeStateKey);
     const group = await bankrunProgram.account.marginfiGroup.fetch(

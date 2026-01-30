@@ -5,10 +5,7 @@ use fixtures::{assert_custom_error, prelude::*};
 use marginfi::{
     constants::INIT_BANK_ORIGINATION_FEE_DEFAULT,
     prelude::MarginfiError,
-    state::{
-        bank::{BankImpl, BankVaultType},
-        marginfi_group::MarginfiGroupImpl,
-    },
+    state::bank::{BankImpl, BankVaultType},
 };
 use marginfi_type_crate::{
     constants::{
@@ -23,10 +20,10 @@ use marginfi_type_crate::{
 };
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
-use solana_sdk::signer::Signer;
 use solana_sdk::{
     clock::Clock, instruction::Instruction, pubkey::Pubkey, transaction::Transaction,
 };
+use solana_sdk::{signature::Keypair, signer::Signer};
 use test_case::test_case;
 
 #[tokio::test]
@@ -124,8 +121,9 @@ async fn add_bank_success() -> anyhow::Result<()> {
             lending_position_count,
             borrowing_position_count,
             _padding_0,
-            kamino_reserve,
-            kamino_obligation,
+            integration_acc_1,
+            integration_acc_2,
+            integration_acc_3,
             _padding_1,
             .. // ignore internal padding
         } = bank_f.load().await;
@@ -161,9 +159,10 @@ async fn add_bank_success() -> anyhow::Result<()> {
             assert_eq!(lending_position_count, 0);
             assert_eq!(borrowing_position_count, 0);
             assert_eq!(_padding_0, <[u8; 16] as Default>::default());
-            assert_eq!(kamino_reserve, Pubkey::default());
-            assert_eq!(kamino_obligation, Pubkey::default());
-            assert_eq!(_padding_1, <[[u64; 2]; 15] as Default>::default());
+            assert_eq!(integration_acc_1, Pubkey::default());
+            assert_eq!(integration_acc_2, Pubkey::default());
+            assert_eq!(integration_acc_3, Pubkey::default());
+            assert_eq!(_padding_1, <[[u64; 2]; 13] as Default>::default());
 
             // this is the only loosely checked field
             assert!(last_update >= 0 && last_update <= 5);
@@ -265,8 +264,9 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             lending_position_count,
             borrowing_position_count,
             _padding_0,
-            kamino_reserve,
-            kamino_obligation,
+            integration_acc_1,
+            integration_acc_2,
+            integration_acc_3,
             _padding_1,
             .. // ignore internal padding
         } = bank_f.load().await;
@@ -302,9 +302,10 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(lending_position_count, 0);
             assert_eq!(borrowing_position_count, 0);
             assert_eq!(_padding_0, <[u8; 16] as Default>::default());
-            assert_eq!(kamino_reserve, Pubkey::default());
-            assert_eq!(kamino_obligation, Pubkey::default());
-            assert_eq!(_padding_1, <[[u64; 2]; 15] as Default>::default());
+            assert_eq!(integration_acc_1, Pubkey::default());
+            assert_eq!(integration_acc_2, Pubkey::default());
+            assert_eq!(integration_acc_3, Pubkey::default());
+            assert_eq!(_padding_1, <[[u64; 2]; 13] as Default>::default());
 
             // this is the only loosely checked field
             assert!(last_update >= 0 && last_update <= 5);
@@ -594,143 +595,6 @@ async fn configure_bank_success(bank_mint: BankMint) -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn add_too_many_arena_banks() -> anyhow::Result<()> {
-    let test_f = TestFixture::new(None).await;
-    let group_before = test_f.marginfi_group.load().await;
-
-    let res = test_f
-        .marginfi_group
-        .try_update(
-            group_before.admin,
-            group_before.emode_admin,
-            group_before.delegate_curve_admin,
-            group_before.delegate_limit_admin,
-            group_before.delegate_emissions_admin,
-            group_before.metadata_admin,
-            group_before.risk_admin,
-            true,
-        )
-        .await;
-    assert!(res.is_ok());
-    let group_after = test_f.marginfi_group.load().await;
-    assert_eq!(group_after.is_arena_group(), true);
-
-    // The first two banks/mints, which will succeed
-    let mints = vec![
-        (
-            MintFixture::new(test_f.context.clone(), None, None).await,
-            *DEFAULT_USDC_TEST_BANK_CONFIG,
-        ),
-        (
-            MintFixture::new_token_22(
-                test_f.context.clone(),
-                None,
-                None,
-                &[SupportedExtension::TransferFee],
-            )
-            .await,
-            *DEFAULT_T22_WITH_FEE_TEST_BANK_CONFIG,
-        ),
-    ];
-
-    for (mint_f, bank_config) in mints {
-        let res = test_f
-            .marginfi_group
-            .try_lending_pool_add_bank(&mint_f, None, bank_config, None)
-            .await;
-        assert!(res.is_ok());
-    }
-
-    // Adding a third bank fails
-    let another_mint =
-        MintFixture::new_from_file(&test_f.context.clone(), "src/fixtures/pyUSD.json");
-    let another_config = *DEFAULT_PYUSD_TEST_BANK_CONFIG;
-
-    let res = test_f
-        .marginfi_group
-        .try_lending_pool_add_bank(&another_mint, None, another_config, None)
-        .await;
-
-    assert!(res.is_err());
-    assert_custom_error!(res.unwrap_err(), MarginfiError::ArenaBankLimit);
-
-    // Arena banks cannot be restored to non-arena
-
-    let res = test_f
-        .marginfi_group
-        .try_update(
-            group_before.admin,
-            group_before.emode_admin,
-            group_before.delegate_curve_admin,
-            group_before.delegate_limit_admin,
-            group_before.delegate_emissions_admin,
-            group_before.metadata_admin,
-            group_before.risk_admin,
-            false,
-        )
-        .await;
-    assert!(res.is_err());
-    assert_custom_error!(res.unwrap_err(), MarginfiError::ArenaSettingCannotChange);
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn config_group_as_arena_too_many_banks() -> anyhow::Result<()> {
-    let test_f = TestFixture::new(None).await;
-
-    // Add three banks
-    let mints = vec![
-        (
-            MintFixture::new(test_f.context.clone(), None, None).await,
-            *DEFAULT_USDC_TEST_BANK_CONFIG,
-        ),
-        (
-            MintFixture::new_token_22(
-                test_f.context.clone(),
-                None,
-                None,
-                &[SupportedExtension::TransferFee],
-            )
-            .await,
-            *DEFAULT_T22_WITH_FEE_TEST_BANK_CONFIG,
-        ),
-        (
-            MintFixture::new_from_file(&test_f.context.clone(), "src/fixtures/pyUSD.json"),
-            *DEFAULT_PYUSD_TEST_BANK_CONFIG,
-        ),
-    ];
-
-    for (mint_f, bank_config) in mints {
-        let res = test_f
-            .marginfi_group
-            .try_lending_pool_add_bank(&mint_f, None, bank_config, None)
-            .await;
-        assert!(res.is_ok());
-    }
-
-    let group_before = test_f.marginfi_group.load().await;
-    let res = test_f
-        .marginfi_group
-        .try_update(
-            group_before.admin,
-            group_before.emode_admin,
-            group_before.delegate_curve_admin,
-            group_before.delegate_limit_admin,
-            group_before.delegate_emissions_admin,
-            group_before.metadata_admin,
-            group_before.risk_admin,
-            true,
-        )
-        .await;
-
-    assert!(res.is_err());
-    assert_custom_error!(res.unwrap_err(), MarginfiError::ArenaBankLimit);
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn config_group_admins() -> anyhow::Result<()> {
     let test_f = TestFixture::new(None).await;
 
@@ -752,7 +616,6 @@ async fn config_group_admins() -> anyhow::Result<()> {
             new_emissions_admin,
             new_metadata_admin,
             new_risk_admin,
-            false,
         )
         .await;
 
@@ -854,6 +717,140 @@ async fn configure_bank_emode_success(bank_mint: BankMint) -> anyhow::Result<()>
     Ok(())
 }
 
+#[tokio::test]
+async fn lending_pool_clone_emode_success() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let copy_from_bank = test_f.get_bank(&BankMint::Usdc);
+    let copy_to_bank_admin = test_f.get_bank(&BankMint::Sol);
+    let copy_to_bank_emode_admin = test_f.get_bank(&BankMint::PyUSD);
+
+    let copy_to_before = copy_to_bank_admin.load().await;
+    assert_eq!(copy_to_before.emode.flags, 0);
+    assert_eq!(copy_to_before.emode.emode_tag, 0);
+
+    let copy_from_before = copy_from_bank.load().await;
+    let liab_init_w = I80F48::from(copy_from_before.config.liability_weight_init);
+    let liab_maint_w = I80F48::from(copy_from_before.config.liability_weight_maint);
+    let asset_init_w = liab_init_w * I80F48::from_num(0.7);
+    let asset_maint_w = liab_maint_w * I80F48::from_num(0.9);
+
+    let emode_tag = 2u16;
+    let emode_entries = vec![EmodeEntry {
+        collateral_bank_emode_tag: emode_tag,
+        flags: 1,
+        pad0: [0, 0, 0, 0, 0],
+        asset_weight_init: asset_init_w.into(),
+        asset_weight_maint: asset_maint_w.into(),
+    }];
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(&copy_from_bank, emode_tag, &emode_entries)
+        .await?;
+
+    // Admin can clone emode settings.
+    test_f
+        .marginfi_group
+        .try_lending_pool_clone_emode(&copy_from_bank, &copy_to_bank_admin)
+        .await?;
+
+    let copy_from_after = copy_from_bank.load().await;
+    let copy_to_after = copy_to_bank_admin.load().await;
+
+    assert_eq!(copy_to_after.emode, copy_from_after.emode);
+    assert_eq!(copy_to_after.config, copy_to_before.config);
+
+    // A dedicated emode admin can also clone emode settings.
+    let group_before = test_f.marginfi_group.load().await;
+    let new_emode_admin = Keypair::new();
+    test_f
+        .marginfi_group
+        .try_update(
+            group_before.admin,
+            new_emode_admin.pubkey(),
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+        )
+        .await?;
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_clone_emode_with_signer(
+            &new_emode_admin,
+            &copy_from_bank,
+            &copy_to_bank_emode_admin,
+        )
+        .await?;
+
+    let copy_to_after = copy_to_bank_emode_admin.load().await;
+    assert_eq!(copy_to_after.emode, copy_from_after.emode);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn lending_pool_clone_emode_unauthorized_fails() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let copy_from_bank = test_f.get_bank(&BankMint::Usdc);
+    let copy_to_bank = test_f.get_bank(&BankMint::Sol);
+
+    let copy_to_before = copy_to_bank.load().await;
+
+    let copy_from_before = copy_from_bank.load().await;
+    let liab_init_w = I80F48::from(copy_from_before.config.liability_weight_init);
+    let liab_maint_w = I80F48::from(copy_from_before.config.liability_weight_maint);
+    let asset_init_w = liab_init_w * I80F48::from_num(0.7);
+    let asset_maint_w = liab_maint_w * I80F48::from_num(0.9);
+
+    let emode_tag = 2u16;
+    let emode_entries = vec![EmodeEntry {
+        collateral_bank_emode_tag: emode_tag,
+        flags: 1,
+        pad0: [0, 0, 0, 0, 0],
+        asset_weight_init: asset_init_w.into(),
+        asset_weight_maint: asset_maint_w.into(),
+    }];
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(&copy_from_bank, emode_tag, &emode_entries)
+        .await?;
+
+    // Other group roles must not be able to clone emode settings.
+    let group_before = test_f.marginfi_group.load().await;
+    let new_risk_admin = Keypair::new();
+    test_f
+        .marginfi_group
+        .try_update(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            new_risk_admin.pubkey(),
+        )
+        .await?;
+
+    let err = test_f
+        .marginfi_group
+        .try_lending_pool_clone_emode_with_signer(&new_risk_admin, &copy_from_bank, &copy_to_bank)
+        .await
+        .unwrap_err();
+    assert_custom_error!(err, MarginfiError::Unauthorized);
+
+    let copy_to_after = copy_to_bank.load().await;
+    assert_eq!(copy_to_after.emode, copy_to_before.emode);
+    assert_eq!(copy_to_after.config, copy_to_before.config);
+
+    Ok(())
+}
+
 #[test_case(BankMint::Usdc)]
 #[test_case(BankMint::PyUSD)]
 #[test_case(BankMint::T22WithFee)]
@@ -929,7 +926,6 @@ async fn configure_bank_emode_valid_leverage(bank_mint: BankMint) -> anyhow::Res
             group_before.delegate_emissions_admin,
             group_before.metadata_admin,
             group_before.risk_admin,
-            false,
             Some(max_init_leverage.into()),
             Some(max_maint_leverage.into()),
         )
@@ -994,7 +990,6 @@ async fn configure_bank_emode_invalid_cw_exceeds_lw_init(
             group_before.delegate_emissions_admin,
             group_before.metadata_admin,
             group_before.risk_admin,
-            false,
             Some(max_init_leverage.into()),
             Some(max_maint_leverage.into()),
         )
@@ -1054,7 +1049,6 @@ async fn configure_bank_emode_invalid_cw_exceeds_lw_maint(
             group_before.delegate_emissions_admin,
             group_before.metadata_admin,
             group_before.risk_admin,
-            false,
             Some(max_init_leverage.into()),
             Some(max_maint_leverage.into()),
         )
@@ -1113,7 +1107,6 @@ async fn configure_bank_emode_invalid_excessive_leverage(
             group_before.delegate_emissions_admin,
             group_before.metadata_admin,
             group_before.risk_admin,
-            false,
             Some(max_init_leverage.into()),
             Some(max_maint_leverage.into()),
         )
@@ -1152,6 +1145,70 @@ async fn configure_bank_emode_invalid_excessive_leverage(
 #[test_case(BankMint::PyUSD)]
 #[test_case(BankMint::SolSwbPull)]
 #[tokio::test]
+async fn configure_bank_rejects_invalid_emode_leverage_on_weight_update(
+    bank_mint: BankMint,
+) -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let bank = test_f.get_bank(&bank_mint);
+
+    let liab_init_w = I80F48::from_num(1.5);
+    let liab_maint_w = I80F48::from_num(1.5);
+    bank.update_config(
+        BankConfigOpt {
+            liability_weight_init: Some(liab_init_w.into()),
+            liability_weight_maint: Some(liab_maint_w.into()),
+            ..BankConfigOpt::default()
+        },
+        None,
+    )
+    .await?;
+
+    let asset_init_w = liab_init_w * I80F48::from_num(0.9);
+    let asset_maint_w = liab_maint_w * I80F48::from_num(0.9);
+
+    let emode_tag = 1u16;
+    let emode_entries = vec![EmodeEntry {
+        collateral_bank_emode_tag: emode_tag,
+        flags: 0,
+        pad0: [0, 0, 0, 0, 0],
+        asset_weight_init: asset_init_w.into(),
+        asset_weight_maint: asset_maint_w.into(),
+    }];
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank_emode(&bank, emode_tag, &emode_entries)
+        .await?;
+
+    // Tighten base weights to push emode leverage above max while remaining a valid bank config.
+    let new_liab_init_w = asset_init_w / I80F48::from_num(0.96);
+    let new_liab_maint_w = asset_maint_w / I80F48::from_num(0.96);
+
+    let res = test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank(
+            &bank,
+            BankConfigOpt {
+                liability_weight_init: Some(new_liab_init_w.into()),
+                liability_weight_maint: Some(new_liab_maint_w.into()),
+                ..BankConfigOpt::default()
+            },
+        )
+        .await;
+
+    assert!(
+        res.is_err(),
+        "Updating base weights that push emode leverage above limits should fail"
+    );
+    assert_custom_error!(res.unwrap_err(), MarginfiError::BadEmodeConfig);
+
+    Ok(())
+}
+
+#[test_case(BankMint::Usdc)]
+#[test_case(BankMint::PyUSD)]
+#[test_case(BankMint::SolSwbPull)]
+#[tokio::test]
 async fn configure_bank_emode_max_leverage_boundary(bank_mint: BankMint) -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let bank = test_f.get_bank(&bank_mint);
@@ -1170,7 +1227,6 @@ async fn configure_bank_emode_max_leverage_boundary(bank_mint: BankMint) -> anyh
             group_before.delegate_emissions_admin,
             group_before.metadata_admin,
             group_before.risk_admin,
-            false,
             Some(max_init_leverage.into()),
             Some(max_maint_leverage.into()),
         )
@@ -1336,7 +1392,6 @@ async fn configure_bank_interest_only_not_admin() -> anyhow::Result<()> {
             group_before.delegate_emissions_admin,
             group_before.metadata_admin,
             group_before.risk_admin,
-            false,
         )
         .await?;
 
@@ -1403,7 +1458,6 @@ async fn configure_bank_limits_only_not_admin() -> anyhow::Result<()> {
             group_before.delegate_emissions_admin,
             group_before.metadata_admin,
             group_before.risk_admin,
-            false,
         )
         .await?;
 
@@ -1441,7 +1495,6 @@ async fn configure_group_max_emode_leverage_propagates_to_bank_cache(
             group_before.delegate_emissions_admin,
             group_before.metadata_admin,
             group_before.risk_admin,
-            false,
             Some(custom_max_init_leverage.into()),
             Some(custom_max_maint_leverage.into()),
         )
@@ -1484,7 +1537,6 @@ async fn configure_group_max_emode_leverage_propagates_to_bank_cache(
             group_before.delegate_emissions_admin,
             group_before.metadata_admin,
             group_before.risk_admin,
-            false,
             None, // Should default to 15
             None, // Should default to 20
         )
@@ -1521,6 +1573,63 @@ async fn configure_group_max_emode_leverage_propagates_to_bank_cache(
     };
     let res = bank.update_config(config_bank_opt2, None).await;
     assert!(res.is_ok());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn configure_bank_oracle_min_age_validation() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let bank = test_f.get_bank(&BankMint::Usdc);
+
+    // Try to set oracle_max_age below ORACLE_MIN_AGE (10 seconds) - should fail
+    let res = test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank(
+            &bank,
+            BankConfigOpt {
+                oracle_max_age: Some(9),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    assert!(res.is_err());
+    assert_custom_error!(res.unwrap_err(), MarginfiError::InvalidOracleSetup);
+
+    // Try to set oracle_max_age exactly at ORACLE_MIN_AGE (10 seconds) - should succeed
+    let res = test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank(
+            &bank,
+            BankConfigOpt {
+                oracle_max_age: Some(10),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    assert!(res.is_ok());
+
+    let bank_after: Bank = test_f.load_and_deserialize(&bank.key).await;
+    assert_eq!(bank_after.config.oracle_max_age, 10);
+
+    // Try to set oracle_max_age above ORACLE_MIN_AGE - should succeed
+    let res = test_f
+        .marginfi_group
+        .try_lending_pool_configure_bank(
+            &bank,
+            BankConfigOpt {
+                oracle_max_age: Some(30),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    assert!(res.is_ok());
+
+    let bank_after: Bank = test_f.load_and_deserialize(&bank.key).await;
+    assert_eq!(bank_after.config.oracle_max_age, 30);
 
     Ok(())
 }

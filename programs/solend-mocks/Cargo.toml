@@ -1,0 +1,25 @@
+[package]
+name = "solend-mocks"
+version = "0.1.0"
+description = "Solend mock program for integration testing"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "solend_mocks"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = { workspace = true }
+bytemuck = { workspace = true }
+fixed = { workspace = true }
+fixed-macro = { workspace = true }
+static_assertions = { workspace = true }
+marginfi-type-crate = { workspace = true }

@@ -89,12 +89,12 @@ export const depositToSinglePoolIxes = async (
 
   const ixes: TransactionInstruction[] = [];
   const lstAta = getAssociatedTokenAddressSync(splMint, userWallet);
-  try {
-    await connection.getAccountInfo(lstAta);
+  const ataInfo = await connection.getAccountInfo(lstAta);
+  if (ataInfo !== null) {
     if (verbose) {
       console.log("Existing LST ata at: " + lstAta);
     }
-  } catch (err) {
+  } else {
     if (verbose) {
       console.log("Failed to find ata, creating: " + lstAta);
     }

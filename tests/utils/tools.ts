@@ -6,7 +6,6 @@ import { ProgramTestContext } from "solana-bankrun";
 import { Transaction, PublicKey, AccountInfo } from "@solana/web3.js";
 import { Keypair } from "@solana/web3.js";
 import { AccountLayout } from "@solana/spl-token";
-import { bankrunContext } from "tests/rootHooks";
 import { getBankrunBlockhash } from "./spl-staking-utils";
 import { MarginfiAccountRaw } from "@mrgnlabs/marginfi-client-v2";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
@@ -56,6 +55,7 @@ export const processBankrunTransaction = async (
     }
     return await bankrunContext.banksClient.processTransaction(tx);
   }
+
 };
 
 /**
@@ -225,6 +225,7 @@ export function dumpAccBalances(
 
   for (let b of balances) {
     if (b.active == 0) {
+
       activeBalances.push({
         "Bank PK": "empty",
         // Tag: "-",
@@ -303,4 +304,16 @@ export function omitPadding(obj: any) {
     }, {});
   }
   return obj;
+}
+
+/**
+ * Get the current bankrun blockchain time in seconds.
+ * Use this instead of Date.now()/1000 to avoid clock contamination issues
+ * when tests advance the clock using setClock/warpToSlot.
+ * @param ctx - The bankrun ProgramTestContext
+ * @returns The current unix timestamp from the bankrun clock
+ */
+export async function getBankrunTime(ctx: ProgramTestContext): Promise<number> {
+  const clock = await ctx.banksClient.getClock();
+  return Number(clock.unixTimestamp);
 }

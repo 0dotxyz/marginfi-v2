@@ -1,10 +1,5 @@
 import { BN } from "@coral-xyz/anchor";
-import {
-  ComputeBudgetProgram,
-  Keypair,
-  PublicKey,
-  Transaction,
-} from "@solana/web3.js";
+import { ComputeBudgetProgram, PublicKey, Transaction } from "@solana/web3.js";
 import {
   ecosystem,
   groupAdmin,
@@ -20,9 +15,8 @@ import {
   bankRunProvider,
   bankrunProgram,
   klendBankrunProgram,
-  globalProgramAdmin,
   TOKEN_A_RESERVE,
-  KAMINO_TOKENA_BANK,
+  KAMINO_TOKEN_A_BANK,
 } from "./rootHooks";
 import {
   assertBNEqual,
@@ -34,13 +28,12 @@ import {
   assertBankrunTxFailed,
 } from "./utils/genericTests";
 import {
-  ASSET_TAG_KAMINO,
   defaultKaminoBankConfig,
   simpleRefreshObligation,
   simpleRefreshReserve,
 } from "./utils/kamino-utils";
 import { assert } from "chai";
-import { processBankrunTransaction, safeGetAccountInfo } from "./utils/tools";
+import { processBankrunTransaction, safeGetAccountInfo, getBankrunTime } from "./utils/tools";
 import { lendingMarketAuthPda } from "@kamino-finance/klend-sdk";
 import { createAssociatedTokenAccountInstruction } from "@mrgnlabs/mrgn-common";
 import { createMintToInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
@@ -56,10 +49,9 @@ import {
   deriveInsuranceVault,
   deriveLiquidityVault,
   deriveLiquidityVaultAuthority,
-  deriveObligation,
   deriveUserMetadata,
 } from "./utils/pdas";
-import { KLEND_PROGRAM_ID } from "./utils/types";
+import { ASSET_TAG_KAMINO, KLEND_PROGRAM_ID } from "./utils/types";
 
 let ctx: ProgramTestContext;
 const seed = new BN(555);
@@ -83,7 +75,7 @@ describe("k05: Init Kamino banks", () => {
     let defaultConfig = defaultKaminoBankConfig(
       oracles.usdcOracle.publicKey
     );
-    const now = Date.now() / 1000;
+    const now = await getBankrunTime(ctx);
 
     const [bankKey] = deriveBankWithSeed(
       mrgnID,
@@ -99,7 +91,7 @@ describe("k05: Init Kamino banks", () => {
           group: kaminoGroup.publicKey,
           feePayer: groupAdmin.wallet.publicKey,
           bankMint: ecosystem.usdcMint.publicKey,
-          kaminoReserve: usdcReserve,
+          integrationAcc1: usdcReserve,
           kaminoMarket: market,
           oracle: oracles.usdcOracle.publicKey,
         },
@@ -155,20 +147,17 @@ describe("k05: Init Kamino banks", () => {
     assertKeysEqual(bank.feeVault, feeVault);
 
     // Kamino specific fields
-    assertKeysEqual(bank.kaminoReserve, usdcReserve);
+    assertKeysEqual(bank.integrationAcc1, usdcReserve);
     const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
       mrgnID,
       bankKey
     );
     const [obligation] = deriveBaseObligation(liquidityVaultAuthority, market);
-    assertKeysEqual(bank.kaminoObligation, obligation);
+    assertKeysEqual(bank.integrationAcc2, obligation);
     assert.equal(config.assetTag, ASSET_TAG_KAMINO);
-    assertKeysEqual(
-      bank.config.oracleKeys[0],
-      oracles.usdcOracle.publicKey
-    );
+    assertKeysEqual(bank.config.oracleKeys[0], oracles.usdcOracle.publicKey);
     assertKeysEqual(bank.config.oracleKeys[1], usdcReserve);
-    assertKeysEqual(bank.kaminoReserve, usdcReserve);
+    assertKeysEqual(bank.integrationAcc1, usdcReserve);
 
     // Compare against the underlying Kamino reserve
     const usdcReserveData = await klendBankrunProgram.account.reserve.fetch(
@@ -314,9 +303,7 @@ describe("k05: Init Kamino banks", () => {
 
   it("(admin) Init Token A bank + obligation", async () => {
     const user = groupAdmin;
-    let defaultConfig = defaultKaminoBankConfig(
-      oracles.tokenAOracle.publicKey
-    );
+    let defaultConfig = defaultKaminoBankConfig(oracles.tokenAOracle.publicKey);
 
     const [tokenABankKey] = deriveBankWithSeed(
       mrgnID,
@@ -332,7 +319,7 @@ describe("k05: Init Kamino banks", () => {
           group: kaminoGroup.publicKey,
           feePayer: user.wallet.publicKey,
           bankMint: ecosystem.tokenAMint.publicKey,
-          kaminoReserve: tokenAReserve,
+          integrationAcc1: tokenAReserve,
           kaminoMarket: market,
           oracle: oracles.tokenAOracle.publicKey,
         },
@@ -343,7 +330,7 @@ describe("k05: Init Kamino banks", () => {
       )
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
-    kaminoAccounts.set(KAMINO_TOKENA_BANK, tokenABankKey);
+    kaminoAccounts.set(KAMINO_TOKEN_A_BANK, tokenABankKey);
 
     let initObligationTx = new Transaction().add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),
@@ -363,22 +350,32 @@ describe("k05: Init Kamino banks", () => {
     await processBankrunTransaction(ctx, initObligationTx, [user.wallet]);
 
     // Store the Token A bank obligation (same as USDC bank pattern)
-    const [tokenAAuthority] = deriveLiquidityVaultAuthority(mrgnID, tokenABankKey);
-    const [tokenAUserMetadata] = deriveUserMetadata(KLEND_PROGRAM_ID, tokenAAuthority);
+    const [tokenAAuthority] = deriveLiquidityVaultAuthority(
+      mrgnID,
+      tokenABankKey
+    );
+    const [tokenAUserMetadata] = deriveUserMetadata(
+      KLEND_PROGRAM_ID,
+      tokenAAuthority
+    );
     const [tokenAObligation] = deriveBaseObligation(tokenAAuthority, market);
 
     const tokenABankKey_str = tokenABankKey.toString();
-    kaminoAccounts.set(`${tokenABankKey_str}_LIQUIDITY_VAULT_AUTHORITY`, tokenAAuthority);
+    kaminoAccounts.set(
+      `${tokenABankKey_str}_LIQUIDITY_VAULT_AUTHORITY`,
+      tokenAAuthority
+    );
     kaminoAccounts.set(`${tokenABankKey_str}_OBLIGATION`, tokenAObligation);
-    kaminoAccounts.set(`${tokenABankKey_str}_USER_METADATA`, tokenAUserMetadata);
+    kaminoAccounts.set(
+      `${tokenABankKey_str}_USER_METADATA`,
+      tokenAUserMetadata
+    );
   });
 
   it("(user 0) Tries to init bank - admin only, should fail", async () => {
     const throwawaySeed = new BN(999);
     const user = users[0];
-    let defaultConfig = defaultKaminoBankConfig(
-      oracles.tokenAOracle.publicKey
-    );
+    let defaultConfig = defaultKaminoBankConfig(oracles.tokenAOracle.publicKey);
 
     const tx = new Transaction().add(
       await makeAddKaminoBankIx(
@@ -387,7 +384,7 @@ describe("k05: Init Kamino banks", () => {
           group: kaminoGroup.publicKey,
           feePayer: user.wallet.publicKey,
           bankMint: ecosystem.tokenAMint.publicKey,
-          kaminoReserve: tokenAReserve,
+          integrationAcc1: tokenAReserve,
           kaminoMarket: market,
           oracle: oracles.tokenAOracle.publicKey,
         },
@@ -405,9 +402,7 @@ describe("k05: Init Kamino banks", () => {
   it("(admin) Tries pass the wrong reserve/mint for this asset - should fail", async () => {
     const throwawaySeed = new BN(999);
     const usr = groupAdmin;
-    let defaultConfig = defaultKaminoBankConfig(
-      oracles.tokenAOracle.publicKey
-    );
+    let defaultConfig = defaultKaminoBankConfig(oracles.tokenAOracle.publicKey);
 
     const tx1 = new Transaction().add(
       await makeAddKaminoBankIx(
@@ -416,7 +411,7 @@ describe("k05: Init Kamino banks", () => {
           group: kaminoGroup.publicKey,
           feePayer: usr.wallet.publicKey,
           bankMint: ecosystem.tokenAMint.publicKey,
-          kaminoReserve: usdcReserve,
+          integrationAcc1: usdcReserve,
           kaminoMarket: market,
           oracle: oracles.tokenAOracle.publicKey,
         },
@@ -437,7 +432,7 @@ describe("k05: Init Kamino banks", () => {
           group: kaminoGroup.publicKey,
           feePayer: usr.wallet.publicKey,
           bankMint: ecosystem.usdcMint.publicKey,
-          kaminoReserve: tokenAReserve,
+          integrationAcc1: tokenAReserve,
           kaminoMarket: market,
           oracle: oracles.tokenAOracle.publicKey,
         },
@@ -455,9 +450,7 @@ describe("k05: Init Kamino banks", () => {
   it("(admin) Tries to use the wrong oracle type - should fail", async () => {
     const throwawaySeed = new BN(999);
     const usr = groupAdmin;
-    let config1 = defaultKaminoBankConfig(
-      oracles.tokenAOracleFeed.publicKey
-    );
+    let config1 = defaultKaminoBankConfig(oracles.tokenAOracleFeed.publicKey);
     config1.oracleSetup = {
       pythPushOracle: {},
     };
@@ -468,7 +461,7 @@ describe("k05: Init Kamino banks", () => {
           group: kaminoGroup.publicKey,
           feePayer: usr.wallet.publicKey,
           bankMint: ecosystem.tokenAMint.publicKey,
-          kaminoReserve: tokenAReserve,
+          integrationAcc1: tokenAReserve,
           kaminoMarket: market,
           oracle: oracles.tokenAOracle.publicKey,
         },
@@ -482,9 +475,7 @@ describe("k05: Init Kamino banks", () => {
     // KaminoInvalidOracleSetup
     assertBankrunTxFailed(result1, 6211);
 
-    let config2 = defaultKaminoBankConfig(
-      oracles.tokenAOracleFeed.publicKey
-    );
+    let config2 = defaultKaminoBankConfig(oracles.tokenAOracleFeed.publicKey);
     // For Pyth pull, should be the feed, not the oracle itself
     config2.oracle = oracles.tokenAOracle.publicKey;
     const tx2 = new Transaction().add(
@@ -494,7 +485,7 @@ describe("k05: Init Kamino banks", () => {
           group: kaminoGroup.publicKey,
           feePayer: usr.wallet.publicKey,
           bankMint: ecosystem.usdcMint.publicKey,
-          kaminoReserve: tokenAReserve,
+          integrationAcc1: tokenAReserve,
           kaminoMarket: market,
           oracle: oracles.tokenAOracle.publicKey,
         },

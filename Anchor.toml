@@ -17,11 +17,13 @@ skip-lint = false
 
 [programs.localnet]
 marginfi = "2jGhuVUuy3umdzByFx8sNWUAaf5vaeuDm78RDPEnhrMr"
-mocks = "5XaaR94jBubdbrRrNW7DtRvZeWvLhSHkEGU3jHTEXV3C"
+mocks = "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ"
 spl_single_pool = "SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE" # cloned from solana-labs repo (see below)
 # liquidity_incentive_program = "Lip1111111111111111111111111111111111111111"
 kamino_lending = "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD"
 kamino_farms = "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr"
+drift_v2 = "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH"
+solend = "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
 
 [programs.mainnet]
 # liquidity_incentive_program = "LipsxuAkFkwa4RKNzn51wAsW7Dedzt1RNHMkTkDEZUW"
@@ -37,6 +39,52 @@ wallet = "~/.config/solana/id.json"
 # (remove RUST_LOG= to see bankRun logs)
 [scripts]
 test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.ts --exit --require tests/rootHooks.ts"
+
+# All tests (for CI)
+all-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.ts --exit --require tests/rootHooks.ts"
+
+# Bankrun-only runner (no local validator)
+# Use: anchor run kamino-tests
+kamino-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/k*.spec.ts --exit --require tests/rootHooks.ts"
+
+# Basic tests (01-13)
+basic-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/0*.spec.ts tests/1*.spec.ts --exit --require tests/rootHooks.ts"
+
+# Emode tests (e01-e06)
+emode-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/e*.spec.ts --exit --require tests/rootHooks.ts"
+
+# Pyth pull tests (p01)
+pyth-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/p*.spec.ts --exit --require tests/rootHooks.ts"
+
+# Multi-limits tests (m01-m02)
+limits-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/m*.spec.ts --exit --require tests/rootHooks.ts"
+
+# Drift tests (d01-d14)
+drift-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/d*.spec.ts --exit --require tests/rootHooks.ts"
+
+# Solend tests (sl01-sl09)
+solend-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/sl*.spec.ts --exit --require tests/rootHooks.ts"
+
+# Bankruptcy tests (z*, zb*)
+bankruptcy-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/z*.spec.ts tests/zb*.spec.ts --exit --require tests/rootHooks.ts"
+
+# Staked collateral tests only (s01-s10) - excludes solend (sl*) via pattern
+staked-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 'tests/s[0-9]*.spec.ts' --exit --require tests/rootHooks.ts"
+
+# Kamino FIRST - to test if order matters (state pollution check)
+kamino-first-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/k*.spec.ts tests/0*.spec.ts tests/1*.spec.ts tests/e*.spec.ts tests/p*.spec.ts tests/m*.spec.ts tests/d*.spec.ts tests/sl*.spec.ts tests/z*.spec.ts tests/zb*.spec.ts --exit --require tests/rootHooks.ts"
+
+# Drift FIRST - state pollution check
+drift-first-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/d*.spec.ts tests/0*.spec.ts tests/1*.spec.ts tests/e*.spec.ts tests/p*.spec.ts tests/m*.spec.ts tests/sl*.spec.ts tests/z*.spec.ts tests/zb*.spec.ts tests/k*.spec.ts --exit --require tests/rootHooks.ts"
+
+# Solend FIRST - state pollution check
+solend-first-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/sl*.spec.ts tests/0*.spec.ts tests/1*.spec.ts tests/e*.spec.ts tests/p*.spec.ts tests/m*.spec.ts tests/d*.spec.ts tests/z*.spec.ts tests/zb*.spec.ts tests/k*.spec.ts --exit --require tests/rootHooks.ts"
+
+# Basic tests LAST - state pollution check
+basic-last-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/k*.spec.ts tests/d*.spec.ts tests/sl*.spec.ts tests/e*.spec.ts tests/p*.spec.ts tests/m*.spec.ts tests/z*.spec.ts tests/zb*.spec.ts tests/0*.spec.ts tests/1*.spec.ts --exit --require tests/rootHooks.ts"
+
+# Emode FIRST - state pollution check
+emode-first-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/e*.spec.ts tests/0*.spec.ts tests/1*.spec.ts tests/p*.spec.ts tests/m*.spec.ts tests/d*.spec.ts tests/sl*.spec.ts tests/z*.spec.ts tests/zb*.spec.ts tests/k*.spec.ts --exit --require tests/rootHooks.ts"
 
 # Staked collateral tests only
 # test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/s*.spec.ts --exit --require tests/rootHooks.ts"
@@ -59,6 +107,12 @@ test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.t
 # Kamino tests only
 # test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/k*.spec.ts --exit --require tests/rootHooks.ts"
 
+# Drift tests only
+# test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/d*.spec.ts --exit --require tests/rootHooks.ts"
+
+# Solend tests only
+# test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/sl*.spec.ts --exit --require tests/rootHooks.ts"
+
 # Multiple account limits test only
 # test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/m*.spec.ts --exit --require tests/rootHooks.ts"
 
@@ -67,6 +121,9 @@ test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.t
 
 # Bankruptcy only
 # test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/zb*.spec.ts --exit --require tests/rootHooks.ts"
+
+# Drift and Solend tests only
+# test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/d*.spec.ts tests/sl*.spec.ts --exit --require tests/rootHooks.ts"
 
 [test]
 startup_wait = 60000
@@ -84,6 +141,14 @@ program = "tests/fixtures/kamino_farms.so"
 [[test.genesis]]
 address = "SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE"
 program = "tests/fixtures/spl_single_pool.so"
+
+[[test.genesis]]
+address = "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH"
+program = "tests/fixtures/drift_v2.so"
+
+[[test.genesis]]
+address = "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
+program = "tests/fixtures/solend.so"
 
 [test.validator]
 bind_address = "0.0.0.0"

@@ -27,10 +27,7 @@ async fn marginfi_group_create_success() -> anyhow::Result<()> {
     let init_marginfi_group_ix = Instruction {
         program_id: marginfi::ID,
         accounts: accounts.to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiGroupInitialize {
-            is_arena_group: false,
-        }
-        .data(),
+        data: marginfi::instruction::MarginfiGroupInitialize {}.data(),
     };
     let tx = Transaction::new_signed_with_payer(
         &[init_marginfi_group_ix],
@@ -57,7 +54,6 @@ async fn marginfi_group_create_success() -> anyhow::Result<()> {
     // Program fees are always enabled by default (Note that mostly elsewhere in the test fixture,
     // we send a config to disable them, to simplify testing)
     assert_eq!(marginfi_group.program_fees_enabled(), true);
-    assert_eq!(marginfi_group.is_arena_group(), false);
     assert_eq!(marginfi_group.fee_state_cache.last_update, 0);
 
     Ok(())

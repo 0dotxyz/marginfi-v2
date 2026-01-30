@@ -58,8 +58,8 @@ pub struct KaminoInitObligation<'info> {
 
     #[account(
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
-        has_one = kamino_reserve @ MarginfiError::InvalidKaminoReserve,
-        has_one = kamino_obligation @ MarginfiError::InvalidKaminoObligation,
+        has_one = integration_acc_1 @ MarginfiError::InvalidKaminoReserve,
+        has_one = integration_acc_2 @ MarginfiError::InvalidKaminoObligation,
         has_one = mint @ MarginfiError::InvalidMint,
         constraint = is_kamino_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongAssetTagForKaminoInstructions
@@ -107,7 +107,7 @@ pub struct KaminoInitObligation<'info> {
         bump,
         seeds::program = KAMINO_PROGRAM_ID
     )]
-    pub kamino_obligation: SystemAccount<'info>,
+    pub integration_acc_2: SystemAccount<'info>,
 
     /// CHECK: validated by the Kamino program
     #[account(mut)]
@@ -121,7 +121,7 @@ pub struct KaminoInitObligation<'info> {
 
     /// CHECK: validated by the Kamino program
     #[account(mut)]
-    pub kamino_reserve: AccountLoader<'info, MinimalReserve>,
+    pub integration_acc_1: AccountLoader<'info, MinimalReserve>,
 
     /// Bank's liquidity token mint (e.g., USDC). Kamino calls this the `reserve_liquidity_mint`
     #[account(mut)]
@@ -188,7 +188,7 @@ pub struct KaminoInitObligation<'info> {
 impl<'info> KaminoInitObligation<'info> {
     pub fn cpi_refresh_reserve(&self) -> MarginfiResult {
         let accounts = RefreshReserve {
-            reserve: self.kamino_reserve.to_account_info(),
+            reserve: self.integration_acc_1.to_account_info(),
             lending_market: self.lending_market.to_account_info(),
             pyth_oracle: optional_account!(self.pyth_oracle),
             switchboard_price_oracle: optional_account!(self.switchboard_price_oracle),
@@ -225,7 +225,7 @@ impl<'info> KaminoInitObligation<'info> {
         let accounts = InitObligation {
             fee_payer: self.fee_payer.to_account_info(),
             lending_market: self.lending_market.to_account_info(),
-            obligation: self.kamino_obligation.to_account_info(),
+            obligation: self.integration_acc_2.to_account_info(),
             obligation_owner: self.liquidity_vault_authority.to_account_info(),
             owner_user_metadata: self.user_metadata.to_account_info(),
             rent: self.rent.to_account_info(),
@@ -246,7 +246,7 @@ impl<'info> KaminoInitObligation<'info> {
     pub fn cpi_refresh_obligation(&self) -> MarginfiResult {
         let accounts = RefreshObligation {
             lending_market: self.lending_market.to_account_info(),
-            obligation: self.kamino_obligation.to_account_info(),
+            obligation: self.integration_acc_2.to_account_info(),
         };
         let program = self.kamino_program.to_account_info();
         let cpi_ctx = CpiContext::new(program, accounts);
@@ -272,9 +272,9 @@ impl<'info> KaminoInitObligation<'info> {
         let accounts = InitObligationFarmsForReserve {
             payer: self.fee_payer.to_account_info(),
             owner: self.liquidity_vault_authority.to_account_info(),
-            obligation: self.kamino_obligation.to_account_info(),
+            obligation: self.integration_acc_2.to_account_info(),
             lending_market_authority: self.lending_market_authority.to_account_info(),
-            reserve: self.kamino_reserve.to_account_info(),
+            reserve: self.integration_acc_1.to_account_info(),
             reserve_farm_state: optional_account!(self.reserve_farm_state).unwrap(),
             obligation_farm: optional_account!(self.obligation_farm_user_state).unwrap(),
             lending_market: self.lending_market.to_account_info(),
@@ -295,10 +295,10 @@ impl<'info> KaminoInitObligation<'info> {
     pub fn cpi_kamino_deposit(&self, amount: u64) -> MarginfiResult {
         let deposit_accounts = DepositReserveLiquidityAndObligationCollateral {
             owner: self.liquidity_vault_authority.to_account_info(),
-            obligation: self.kamino_obligation.to_account_info(),
+            obligation: self.integration_acc_2.to_account_info(),
             lending_market: self.lending_market.to_account_info(),
             lending_market_authority: self.lending_market_authority.to_account_info(),
-            reserve: self.kamino_reserve.to_account_info(),
+            reserve: self.integration_acc_1.to_account_info(),
             reserve_liquidity_mint: self.mint.to_account_info(),
             reserve_liquidity_supply: self.reserve_liquidity_supply.to_account_info(),
             reserve_collateral_mint: self.reserve_collateral_mint.to_account_info(),

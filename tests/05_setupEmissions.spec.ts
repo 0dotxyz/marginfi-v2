@@ -1,12 +1,6 @@
-import {
-  AnchorProvider,
-  BN,
-  getProvider,
-  Program,
-  Wallet,
-  workspace,
-} from "@coral-xyz/anchor";
-import { Transaction } from "@solana/web3.js";
+import { BN, Program } from "@coral-xyz/anchor";
+import { BankrunProvider } from "anchor-bankrun";
+import { PublicKey, Transaction } from "@solana/web3.js";
 import {
   groupConfigure,
   setupEmissions,
@@ -15,6 +9,9 @@ import {
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairUsdc,
+  bankrunContext,
+  bankrunProgram,
+  bankRunProvider,
   ecosystem,
   groupAdmin,
   marginfiGroup,
@@ -36,10 +33,16 @@ import {
 import { createMintToInstruction } from "@solana/spl-token";
 import { deriveEmissionsAuth, deriveEmissionsTokenAccount } from "./utils/pdas";
 
+let program: Program<Marginfi>;
+let mintAuthority: PublicKey;
+let provider: BankrunProvider;
+
 describe("Lending pool set up emissions", () => {
-  const program = workspace.Marginfi as Program<Marginfi>;
-  const provider = getProvider() as AnchorProvider;
-  const wallet = provider.wallet as Wallet;
+  before(() => {
+    provider = bankRunProvider;
+    program = bankrunProgram;
+    mintAuthority = bankrunContext.payer.publicKey;
+  });
 
   const emissionRate = new BN(500_000 * 10 ** ecosystem.tokenBDecimals);
   const totalEmissions = new BN(1_000_000 * 10 ** ecosystem.tokenBDecimals);
@@ -73,11 +76,11 @@ describe("Lending pool set up emissions", () => {
       createMintToInstruction(
         ecosystem.tokenBMint.publicKey,
         emissionsAdmin.tokenBAccount,
-        wallet.publicKey,
+        mintAuthority,
         BigInt(100_000_000) * BigInt(10 ** ecosystem.tokenBDecimals)
       )
     );
-    await program.provider.sendAndConfirm(tx);
+    await provider.sendAndConfirm(tx);
   });
 
   it("(user 1) Set up to token B emissions on (USDC) bank - happy path", async () => {

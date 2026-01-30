@@ -1,6 +1,6 @@
 [package]
 name = "marginfi"
-version = "0.1.7"
+version = "0.1.8"
 description = "Borrow Lending Prime Broker"
 edition = "2021"
 
@@ -50,6 +50,8 @@ enum_dispatch = "0.3.13"
 solana-security-txt = "1.1.1"
 
 kamino-mocks = { path = "../kamino-mocks" , features = ["no-entrypoint"]}
+drift-mocks = { path = "../drift-mocks" , features = ["no-entrypoint"]}
+solend-mocks = { path = "../solend-mocks" , features = ["no-entrypoint"]}
 
 [dev-dependencies]
 solana-account-decoder = { workspace = true }

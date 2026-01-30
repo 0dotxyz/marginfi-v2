@@ -224,7 +224,15 @@ pub struct LendingAccountBorrow<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = authority @ MarginfiError::Unauthorized
+        constraint = {
+            let a = marginfi_account.load()?;
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), false)
+        } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 

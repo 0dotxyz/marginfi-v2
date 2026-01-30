@@ -1,7 +1,7 @@
-import { PublicKey, Transaction } from "@solana/web3.js";
+import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import BN from "bn.js";
 import {
-  marginfiGroup,
+  stakedMarginfiGroup,
   validators,
   oracles,
   bankrunContext,
@@ -9,7 +9,7 @@ import {
   bankrunProgram,
   users,
   ecosystem,
-  bankKeypairSol,
+  stakedBankKeypairSol,
   bankRunProvider,
 } from "./rootHooks";
 import { deriveBankWithSeed, deriveStakedSettings } from "./utils/pdas";
@@ -27,14 +27,19 @@ import {
 } from "./utils/user-instructions";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 
+let marginfiGroup: Keypair;
+let bankKeypairSol: Keypair;
+
 describe("Withdraw staked asset", () => {
   let settingsKey: PublicKey;
   let bankKey: PublicKey;
 
   before(async () => {
+    marginfiGroup = stakedMarginfiGroup;
+    bankKeypairSol = stakedBankKeypairSol;
     // Refresh oracles to ensure they're up to date
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
-    
+
     [settingsKey] = deriveStakedSettings(
       bankrunProgram.programId,
       marginfiGroup.publicKey

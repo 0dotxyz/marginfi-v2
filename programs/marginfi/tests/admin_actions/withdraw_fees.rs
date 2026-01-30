@@ -108,7 +108,6 @@ async fn marginfi_group_withdraw_fees_and_insurance_fund_as_non_admin_failure(
             Pubkey::new_unique(),
             Pubkey::new_unique(),
             Pubkey::new_unique(),
-            false,
         )
         .await?;
 

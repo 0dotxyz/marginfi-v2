@@ -78,6 +78,27 @@ export const transferAccountAuthorityIx = (
   return ix;
 };
 
+export type SetAccountFreezeArgs = {
+  group: PublicKey;
+  marginfiAccount: PublicKey;
+  admin: PublicKey;
+  frozen: boolean;
+};
+
+export const setAccountFreezeIx = (
+  program: Program<Marginfi>,
+  args: SetAccountFreezeArgs
+) => {
+  return program.methods
+    .marginfiAccountSetFreeze(args.frozen)
+    .accounts({
+      group: args.group,
+      marginfiAccount: args.marginfiAccount,
+      admin: args.admin,
+    })
+    .instruction();
+};
+
 export type DepositArgs = {
   marginfiAccount: PublicKey;
   bank: PublicKey;

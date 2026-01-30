@@ -29,7 +29,7 @@ import {
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { dumpAccBalances, processBankrunTransaction } from "./utils/tools";
 import { genericMultiBankTestSetup } from "./genericSetups";
-import { refreshPullOracles } from "./utils/pyth-pull-mocks";
+import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { assertI80F48Approx, assertKeyDefault } from "./utils/genericTests";
 
 const startingSeed: number = 199;
@@ -55,15 +55,7 @@ describe("Limits on number of accounts when using Kamino", () => {
   });
 
   it("Refresh oracles", async () => {
-    let clock = await banksClient.getClock();
-    await refreshPullOracles(
-      oracles,
-      globalProgramAdmin.wallet,
-      new BN(Number(clock.slot)),
-      Number(clock.unixTimestamp),
-      bankrunContext,
-      false
-    );
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
   });
 
   it("(admin) Seeds liquidity in all banks - validates 16 deposits is possible", async () => {

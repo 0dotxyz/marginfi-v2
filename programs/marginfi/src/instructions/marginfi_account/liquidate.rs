@@ -83,12 +83,14 @@ use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_I
 ///    liquidatee_observation_ais...,
 ///  ]
 ///
-/// For Kamino positions:
-/// The `q_a` (asset quantity) represents the number of collateral tokens to liquidate,
-/// NOT the underlying dollar value or liquidity tokens. Collateral tokens are Kamino's
-/// representation of a user's share in the pool. Liquidators must understand they are
-/// specifying how many of these position tokens to take, rather than a specific amount
-/// of the underlying asset.
+/// For external protocol positions (Kamino, Drift, and Solend):
+/// The `q_a` (asset quantity) represents the number of protocol-specific position tokens
+/// to liquidate, NOT the underlying dollar value or liquidity tokens:
+/// - Kamino: collateral tokens (user's share in the pool)
+/// - Drift: scaled balance (Drift's internal position representation)
+/// - Solend: cTokens (collateral tokens)
+/// Liquidators must understand they are specifying how many of these position tokens
+/// to take, rather than a specific amount of the underlying asset.
 
 pub fn lending_account_liquidate<'info>(
     mut ctx: Context<'_, '_, 'info, 'info, LendingAccountLiquidate<'info>>,
@@ -234,11 +236,11 @@ pub fn lending_account_liquidate<'info>(
             calc_value(
                 asset_amount,
                 asset_price,
-                asset_bank.mint_decimals,
+                asset_bank.get_balance_decimals(),
                 Some(liquidator_discount),
             )?,
             liab_price,
-            liab_bank.mint_decimals,
+            liab_bank.get_balance_decimals(),
         )?;
 
         // Quantity of liability to be received by liquidatee
@@ -246,11 +248,11 @@ pub fn lending_account_liquidate<'info>(
             calc_value(
                 asset_amount,
                 asset_price,
-                asset_bank.mint_decimals,
+                asset_bank.get_balance_decimals(),
                 Some(final_discount),
             )?,
             liab_price,
-            liab_bank.mint_decimals,
+            liab_bank.get_balance_decimals(),
         )?;
 
         // Insurance fund fee
@@ -500,11 +502,19 @@ pub struct LendingAccountLiquidate<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = authority @ MarginfiError::Unauthorized,
         constraint = {
             let a = liquidator_marginfi_account.load()?;
             !a.get_flag(ACCOUNT_IN_RECEIVERSHIP)
-        } @MarginfiError::ForbiddenIx
+        } @ MarginfiError::ForbiddenIx,
+        constraint = {
+            let a = liquidator_marginfi_account.load()?;
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = liquidator_marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), false)
+        } @ MarginfiError::Unauthorized
     )]
     pub liquidator_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 

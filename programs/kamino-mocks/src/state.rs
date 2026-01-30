@@ -1,7 +1,10 @@
 use crate::{assert_struct_align, assert_struct_size, math_error, KaminoMocksError};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
-use marginfi_type_crate::constants::EXP_10_I80F48;
+use marginfi_type_crate::types::price::{
+    collateral_to_liquidity_from_scaled, convert_decimals as shared_convert_decimals,
+    liquidity_to_collateral_from_scaled, scale_supplies,
+};
 
 // Constants for account discriminators
 pub const RESERVE_DISCRIMINATOR: [u8; 8] = [43, 242, 204, 202, 26, 247, 59, 127];
@@ -124,15 +127,13 @@ impl MinimalReserve {
     /// Returns `(total_liquidity_tokens, total_collateral_tokens)` both in “no-decimals” I80F48
     /// form (i.e. scaled down by 10^mint_decimals).
     pub fn scaled_supplies(&self) -> Result<(I80F48, I80F48)> {
-        let decimals: I80F48 = EXP_10_I80F48[self.mint_decimals as usize];
-        let total_liq = self
-            .calculate_total_supply_i80f48()
-            .checked_div(decimals)
-            .ok_or_else(math_error!())?;
-        let total_col = I80F48::from_num(self.mint_total_supply)
-            .checked_div(decimals)
-            .ok_or_else(math_error!())?;
-
+        let total_liq_raw = self.calculate_total_supply_i80f48();
+        let (total_liq, total_col) = scale_supplies(
+            total_liq_raw,
+            self.mint_total_supply,
+            self.mint_decimals as u8,
+        )
+        .ok_or_else(math_error!())?;
         Ok((total_liq, total_col))
     }
 
@@ -145,15 +146,7 @@ impl MinimalReserve {
     /// * Returns liquidity tokens (uses `mint_decimals`)
     pub fn collateral_to_liquidity(&self, collateral: u64) -> Result<u64> {
         let (total_liq, total_col) = self.scaled_supplies()?;
-
-        let liquidity: I80F48 = I80F48::from_num(collateral)
-            .checked_mul(total_liq)
-            .ok_or_else(math_error!())?
-            .checked_div(total_col)
-            .ok_or_else(math_error!())?;
-
-        liquidity
-            .checked_to_num::<u64>()
+        collateral_to_liquidity_from_scaled(collateral, total_liq, total_col)
             .ok_or(KaminoMocksError::MathError.into())
     }
 
@@ -161,15 +154,7 @@ impl MinimalReserve {
     /// * Returns collateral equivalent (in `mint_decimals`)
     pub fn liquidity_to_collateral(&self, liquidity: u64) -> Result<u64> {
         let (total_liq, total_col) = self.scaled_supplies()?;
-
-        let collateral: I80F48 = I80F48::from_num(liquidity)
-            .checked_mul(total_col)
-            .ok_or_else(math_error!())?
-            .checked_div(total_liq)
-            .ok_or_else(math_error!())?;
-
-        collateral
-            .checked_to_num::<u64>()
+        liquidity_to_collateral_from_scaled(liquidity, total_liq, total_col)
             .ok_or(KaminoMocksError::MathError.into())
     }
 
@@ -210,50 +195,6 @@ impl MinimalReserve {
         // Slot expired
         self.slot < current_slot
     }
-}
-
-/// Safe conversion from i128 to I80F48
-#[inline]
-fn i80_from_i128_checked(x: i128) -> Option<I80F48> {
-    const FRAC_BITS: u32 = 48;
-    const SHIFTED_MAX_I128: i128 = i128::MAX >> FRAC_BITS;
-    const SHIFTED_MIN_I128: i128 = i128::MIN >> FRAC_BITS;
-
-    if !(SHIFTED_MIN_I128..=SHIFTED_MAX_I128).contains(&x) {
-        return None;
-    }
-    // Safe: (x << 48) cannot overflow by the guard above
-    Some(I80F48::from_bits(x << FRAC_BITS))
-}
-
-/// Wrapper for i128 values (used by Switchboard)
-#[inline]
-pub fn adjust_i128(raw: i128, liq_to_col_ratio: I80F48) -> Result<i128> {
-    let raw_fx = i80_from_i128_checked(raw).ok_or_else(math_error!())?;
-    let adj_fx = raw_fx
-        .checked_mul(liq_to_col_ratio)
-        .ok_or_else(math_error!())?;
-    Ok(adj_fx.checked_to_num::<i128>().ok_or_else(math_error!())?)
-}
-
-/// Wrapper for i64 values (used by Pyth prices)
-#[inline]
-pub fn adjust_i64(raw: i64, liq_to_col_ratio: I80F48) -> Result<i64> {
-    let adj = I80F48::from_num(raw)
-        .checked_mul(liq_to_col_ratio)
-        .ok_or_else(math_error!())?;
-    adj.checked_to_num::<i64>()
-        .ok_or(KaminoMocksError::MathError.into())
-}
-
-/// Wrapper for u64 values (used by Pyth confidence)
-#[inline]
-pub fn adjust_u64(raw: u64, liq_to_col_ratio: I80F48) -> Result<u64> {
-    let adj = I80F48::from_num(raw)
-        .checked_mul(liq_to_col_ratio)
-        .ok_or_else(math_error!())?;
-    adj.checked_to_num::<u64>()
-        .ok_or(KaminoMocksError::MathError.into())
 }
 
 /// A minimal copy of Kamino's Obligation for zero-copy deserialization
@@ -338,30 +279,7 @@ pub fn u68f60_to_i80f48(bits_le: [u8; 16]) -> I80F48 {
 
 /// Given a value that is currently using `from_dec` decimals, convert into `to_dec` decimals
 pub fn convert_decimals(n: I80F48, from_dec: u8, to_dec: u8) -> Result<I80F48> {
-    // no change, escape
-    if from_dec == to_dec {
-        return Ok(n);
-    }
-
-    // compute how many decimals to shift by
-    let diff = (to_dec as i32) - (from_dec as i32);
-    let abs = diff.unsigned_abs() as usize;
-
-    // The largest amount we support in `EXP_10_I80F48`
-    if abs > 23 {
-        panic!("this many decimals is not supported.")
-    }
-    let scale = EXP_10_I80F48[abs];
-
-    // if diff > 0, we need more decimals → multiply
-    // if diff < 0, we need fewer decimals → divide
-    let out = if diff > 0 {
-        n.checked_mul(scale).ok_or_else(math_error!())?
-    } else {
-        n.checked_div(scale).ok_or_else(math_error!())?
-    };
-
-    Ok(out)
+    Ok(shared_convert_decimals(n, from_dec, to_dec).ok_or_else(math_error!())?)
 }
 
 // Note: see "local_tests.rs" in the mrgnfi program for cargo tests for above functions. We

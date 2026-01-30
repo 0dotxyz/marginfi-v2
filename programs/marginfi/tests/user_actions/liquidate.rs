@@ -1234,7 +1234,6 @@ async fn marginfi_account_liquidation_emode(
             admin,
             admin,
             admin,
-            false,
             Some(I80F48!(99).into()), // init must be < maint
             Some(I80F48!(100).into()),
         )
@@ -1282,6 +1281,9 @@ async fn marginfi_account_liquidation_emode(
             )
             .await?;
     }
+
+    // Refresh blockhash to prevent expiry during long test
+    test_f.refresh_blockhash().await;
 
     // Liquidatee
 
@@ -1337,6 +1339,9 @@ async fn marginfi_account_liquidation_emode(
         (liquidatee_mfi_account_f, borrow_amount_actual)
     };
 
+    // Refresh blockhash to prevent expiry during long test
+    test_f.refresh_blockhash().await;
+
     // Liquidator
 
     let liquidator_mfi_account_f = {
@@ -1362,6 +1367,9 @@ async fn marginfi_account_liquidation_emode(
     // -------------------------------------------------------------------------
     // Test
     // -------------------------------------------------------------------------
+
+    // Refresh blockhash to prevent expiry during long test
+    test_f.refresh_blockhash().await;
 
     // First decrease the default weights to make liquidatee unhealthy
     {
@@ -1476,6 +1484,9 @@ async fn marginfi_account_liquidation_emode(
     // liquidatee's collateral is still in emode and is weighted as 0.6 whereas liquidator's collateral is NOT
     // in emode (see below) and is weighted by default - as 0.4. So even though the liquidator would actually gain
     // some money, its health would become worse.
+
+    // Refresh blockhash to prevent expiry during long test
+    test_f.refresh_blockhash().await;
 
     // This borrowing of another asset disables emode for the liquidator
     let liquidator_debt_token_account_f = {

@@ -181,6 +181,12 @@ pub struct MarginfiAccountTransferToNewAccount {
 }
 
 #[event]
+pub struct MarginfiAccountFreezeEvent {
+    pub header: AccountEventHeader,
+    pub frozen: bool,
+}
+
+#[event]
 pub struct HealthPulseEvent {
     pub account: Pubkey,
     pub health_cache: HealthCache,

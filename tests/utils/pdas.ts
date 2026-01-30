@@ -353,3 +353,93 @@ export function deriveUserState(
     programId
   );
 }
+
+// ************* Drift Related ****************
+
+export const deriveDriftStatePDA = (programId: PublicKey): [PublicKey, number] => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("drift_state")],
+    programId
+  );
+};
+
+export const deriveDriftSignerPDA = (programId: PublicKey): [PublicKey, number] => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("drift_signer")],
+    programId
+  );
+};
+
+export const deriveSpotMarketPDA = (
+  programId: PublicKey,
+  marketIndex: number
+): [PublicKey, number] => {
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("spot_market"),
+      new BN(marketIndex).toArrayLike(Buffer, "le", 2),
+    ],
+    programId
+  );
+};
+
+export const deriveSpotMarketVaultPDA = (
+  programId: PublicKey,
+  marketIndex: number
+): [PublicKey, number] => {
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("spot_market_vault"),
+      new BN(marketIndex).toArrayLike(Buffer, "le", 2),
+    ],
+    programId
+  );
+};
+
+export const deriveInsuranceFundVaultPDA = (
+  programId: PublicKey,
+  marketIndex: number
+): [PublicKey, number] => {
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("insurance_fund_vault"),
+      new BN(marketIndex).toArrayLike(Buffer, "le", 2),
+    ],
+    programId
+  );
+};
+
+export const deriveUserPDA = (
+  programId: PublicKey,
+  authority: PublicKey,
+  subAccountId: number
+): [PublicKey, number] => {
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("user"),
+      authority.toBuffer(),
+      new BN(subAccountId).toArrayLike(Buffer, "le", 2),
+    ],
+    programId
+  );
+};
+
+export const deriveUserStatsPDA = (
+  programId: PublicKey,
+  authority: PublicKey
+): [PublicKey, number] => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("user_stats"), authority.toBuffer()],
+    programId
+  );
+};
+
+export const deriveSolendObligation = (
+  programId: PublicKey,
+  bank: PublicKey
+): [PublicKey, number] => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("solend_obligation"), bank.toBuffer()],
+    programId
+  );
+};

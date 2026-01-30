@@ -7,7 +7,8 @@ use crate::{
     state::{
         bank::BankImpl,
         marginfi_account::{
-            calc_value, check_account_init_health, BankAccountWrapper, LendingAccountImpl,
+            account_not_frozen_for_authority, calc_value, check_account_init_health, is_signer_authorized, BankAccountWrapper,
+            LendingAccountImpl,
             MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
@@ -35,9 +36,12 @@ use kamino_mocks::{
     },
     state::{MinimalObligation, MinimalReserve},
 };
-use marginfi_type_crate::constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED};
 use marginfi_type_crate::types::{
     Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+};
+use marginfi_type_crate::{
+    constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED},
+    types::ACCOUNT_IN_DELEVERAGE,
 };
 
 /// Withdraw from a Kamino reserve through a marginfi account
@@ -78,7 +82,7 @@ pub fn kamino_withdraw<'info>(
     let pre_transfer_vault_balance =
         accessor::amount(&ctx.accounts.liquidity_vault.to_account_info())?;
     let initial_deposit_amount =
-        ctx.accounts.kamino_obligation.load()?.deposits[0].deposited_amount;
+        ctx.accounts.integration_acc_2.load()?.deposits[0].deposited_amount;
 
     let collateral_amount;
     let bank_key = ctx.accounts.bank.key();
@@ -127,11 +131,11 @@ pub fn kamino_withdraw<'info>(
             amount
         };
         // Note: we only care about the withdraw limit in case of deleverage
-        if ctx.accounts.authority.key() == group.risk_admin {
+        if marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE) {
             let withdrawn_equity = calc_value(
                 I80F48::from_num(collateral_amount),
                 price,
-                bank.mint_decimals,
+                bank.get_balance_decimals(),
                 None,
             )?;
             group.update_withdrawn_equity(withdrawn_equity, clock.unix_timestamp)?;
@@ -145,14 +149,14 @@ pub fn kamino_withdraw<'info>(
 
     let expected_liquidity_amount = ctx
         .accounts
-        .kamino_reserve
+        .integration_acc_1
         .load()?
         .collateral_to_liquidity(collateral_amount)?;
 
     ctx.accounts.cpi_kamino_withdraw(collateral_amount)?;
 
     // Really just a sanity check, vault balance change is more important
-    let final_deposit_amount = ctx.accounts.kamino_obligation.load()?.deposits[0].deposited_amount;
+    let final_deposit_amount = ctx.accounts.integration_acc_2.load()?.deposits[0].deposited_amount;
     let actual_deposit_decrease = initial_deposit_amount - final_deposit_amount;
     require_eq!(
         actual_deposit_decrease,
@@ -248,8 +252,13 @@ pub struct KaminoWithdraw<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
             let a = marginfi_account.load()?;
-            a.authority == authority.key() || a.get_flag(ACCOUNT_IN_RECEIVERSHIP)
-        } @MarginfiError::Unauthorized
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), true)
+        } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
@@ -259,8 +268,8 @@ pub struct KaminoWithdraw<'info> {
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
-        has_one = kamino_reserve @ MarginfiError::InvalidKaminoReserve,
-        has_one = kamino_obligation @ MarginfiError::InvalidKaminoObligation,
+        has_one = integration_acc_1 @ MarginfiError::InvalidKaminoReserve,
+        has_one = integration_acc_2 @ MarginfiError::InvalidKaminoObligation,
         constraint = is_kamino_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongAssetTagForKaminoInstructions,
         // Block withdraw of zero-weight assets during receivership - prevents unfair liquidation
@@ -301,16 +310,16 @@ pub struct KaminoWithdraw<'info> {
     #[account(mut,
         // Only one reserve should be active on the obligation
         constraint = {
-            let obligation = kamino_obligation.load()?;
+            let obligation = integration_acc_2.load()?;
             obligation.deposits.iter().skip(1).all(|d| d.deposited_amount == 0)
         } @ MarginfiError::InvalidObligationDepositCount,
         // The only reserve active should be the bank's linked reserve
         constraint = {
-            let obligation = kamino_obligation.load()?;
-            obligation.deposits[0].deposit_reserve == kamino_reserve.key()
+            let obligation = integration_acc_2.load()?;
+            obligation.deposits[0].deposit_reserve == integration_acc_1.key()
         } @ MarginfiError::ObligationDepositReserveMismatch
     )]
-    pub kamino_obligation: AccountLoader<'info, MinimalObligation>,
+    pub integration_acc_2: AccountLoader<'info, MinimalObligation>,
 
     /// The Kamino lending market
     /// CHECK: This is validated by the Kamino program
@@ -322,7 +331,7 @@ pub struct KaminoWithdraw<'info> {
 
     /// The Kamino reserve that holds liquidity
     #[account(mut)]
-    pub kamino_reserve: AccountLoader<'info, MinimalReserve>,
+    pub integration_acc_1: AccountLoader<'info, MinimalReserve>,
 
     /// The liquidity token mint (e.g., USDC)
     /// Needs serde to get the mint decimals for transfer checked
@@ -382,7 +391,7 @@ impl<'info> KaminoWithdraw<'info> {
             lending_market: self.lending_market.to_account_info(),
             lending_market_authority: self.lending_market_authority.to_account_info(),
             liquidity_token_program: self.liquidity_token_program.to_account_info(),
-            obligation: self.kamino_obligation.to_account_info(),
+            obligation: self.integration_acc_2.to_account_info(),
             owner: self.liquidity_vault_authority.to_account_info(),
             placeholder_user_destination_collateral: None,
             reserve_collateral_mint: self.reserve_collateral_mint.to_account_info(),
@@ -390,7 +399,7 @@ impl<'info> KaminoWithdraw<'info> {
             reserve_liquidity_supply: self.reserve_liquidity_supply.to_account_info(),
             reserve_source_collateral: self.reserve_source_collateral.to_account_info(),
             user_destination_liquidity: self.liquidity_vault.to_account_info(),
-            withdraw_reserve: self.kamino_reserve.to_account_info(),
+            withdraw_reserve: self.integration_acc_1.to_account_info(),
         };
         let farms_accounts = SocializeLossV2FarmsAccounts {
             obligation_farm_user_state: optional_account!(self.obligation_farm_user_state),

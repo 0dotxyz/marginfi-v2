@@ -33,13 +33,9 @@ pub async fn load_and_deserialize<T: AccountDeserialize>(
     ctx: Rc<RefCell<ProgramTestContext>>,
     address: &Pubkey,
 ) -> T {
-    let ai = ctx
-        .borrow_mut()
-        .banks_client
-        .get_account(*address)
-        .await
-        .unwrap()
-        .unwrap();
+    // Clone the client so we don't hold a RefCell borrow across await.
+    let banks_client = ctx.borrow().banks_client.clone();
+    let ai = banks_client.get_account(*address).await.unwrap().unwrap();
 
     T::try_deserialize(&mut ai.data.as_slice()).unwrap()
 }

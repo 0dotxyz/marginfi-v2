@@ -5,7 +5,7 @@ use anchor_spl::{
 };
 use marginfi_type_crate::{
     constants::{EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED},
-    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED},
+    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_FROZEN},
 };
 
 use crate::{
@@ -13,7 +13,10 @@ use crate::{
     ix_utils::{get_discrim_hash, Hashable},
     prelude::{MarginfiError, MarginfiResult},
     state::{
-        marginfi_account::{BankAccountWrapper, MarginfiAccountImpl},
+        marginfi_account::{
+            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
+            MarginfiAccountImpl,
+        },
         marginfi_group::MarginfiGroupImpl,
     },
     utils::is_marginfi_asset_tag,
@@ -82,7 +85,15 @@ pub struct LendingAccountWithdrawEmissions<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = authority @ MarginfiError::Unauthorized
+        constraint = {
+            let a = marginfi_account.load()?;
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), false)
+        } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
@@ -185,6 +196,10 @@ pub fn marginfi_account_update_emissions_destination_account<'info>(
         MarginfiError::AccountDisabled
     );
 
+    check!(
+        !marginfi_account.get_flag(ACCOUNT_FROZEN),
+        MarginfiError::AccountFrozen
+    );
     marginfi_account.emissions_destination_account = ctx.accounts.destination_account.key();
     marginfi_account.last_update = Clock::get()?.unix_timestamp as u64;
 
@@ -216,6 +231,10 @@ pub fn lending_account_withdraw_emissions_permissionless<'info>(
     check!(
         !marginfi_account.get_flag(ACCOUNT_DISABLED),
         MarginfiError::AccountDisabled
+    );
+    check!(
+        !marginfi_account.get_flag(ACCOUNT_FROZEN),
+        MarginfiError::AccountFrozen
     );
 
     let emissions_dest_wallet = &marginfi_account.emissions_destination_account;

@@ -1,7 +1,7 @@
-import { AnchorProvider, BN, getProvider, Wallet } from "@coral-xyz/anchor";
-import { LAMPORTS_PER_SOL, SystemProgram, Transaction } from "@solana/web3.js";
+import { BN } from "@coral-xyz/anchor";
+import { Keypair, LAMPORTS_PER_SOL, SystemProgram, Transaction } from "@solana/web3.js";
 import {
-  bankKeypairSol,
+  stakedBankKeypairSol,
   bankrunContext,
   bankrunProgram,
   banksClient,
@@ -22,9 +22,12 @@ import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { dumpBankrunLogs } from "./utils/tools";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 
+let bankKeypairSol: Keypair;
+
 describe("Borrow power grows as v0 Staked SOL gains value from appreciation", () => {
-  const provider = getProvider() as AnchorProvider;
-  const wallet = provider.wallet as Wallet;
+  before(() => {
+    bankKeypairSol = stakedBankKeypairSol;
+  });
 
   // User 2 has a validator 0 staked depost [0] position - net value = 1 LST token Users 0/1/2
   // deposited 10 SOL each, so a total of 30 is staked with validator 0 (minus the 1 SOL staked to
@@ -76,16 +79,17 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
 
   // Here we try to a troll exploit by sending SOL directly to the stake pool's sol balance.
   it("v0 stake sol pool grows by " + appreciation + " SOL", async () => {
+    const payer = bankrunContext.payer;
     let tx = new Transaction();
     tx.add(
       SystemProgram.transfer({
-        fromPubkey: wallet.publicKey,
+        fromPubkey: payer.publicKey,
         toPubkey: validators[0].splSolPool,
         lamports: appreciation * LAMPORTS_PER_SOL,
       })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(wallet.payer);
+    tx.sign(payer);
     await banksClient.processTransaction(tx);
   });
 

@@ -12,7 +12,12 @@ use crate::MarginfiResult;
 // 2. or the ones dependant on some 3rd party crates which are not part of type-crate dependency tree
 
 /// Mocks program ID for third-party ID restrictions
-pub const MOCKS_PROGRAM_ID: Pubkey = pubkey!("5XaaR94jBubdbrRrNW7DtRvZeWvLhSHkEGU3jHTEXV3C");
+pub const MOCKS_PROGRAM_ID: Pubkey = pubkey!("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ");
+
+pub const DRIFT_USER_SEED: &str = "user";
+pub const DRIFT_USER_STATS_SEED: &str = "user_stats";
+
+pub const SOLEND_OBLIGATION_SEED: &str = "solend_obligation";
 
 /// Used for the health cache to track which version of the program generated it.
 /// * 0 = invalid
@@ -27,9 +32,12 @@ cfg_if::cfg_if! {
         pub const PYTH_ID: Pubkey = pubkey!("gSbePebfvPy7tRqimPoVecS2UsBvYv46ynrzWocc92s");
     } else if #[cfg(any(feature = "mainnet-beta", feature = "staging", feature = "stagingalt"))] {
         pub const PYTH_ID: Pubkey = pubkey!("FsJ3A3u2vn5cTVofAjvy6y5kwABJAqYWpe4975bi2epH");
+        // NOTE: There is some weirdness around addresses used by Drift and Solend integrations
+        // that we haven't quite figured out yet. The mock program key below may be needed:
+        // pub const PYTH_ID: Pubkey = pubkey!("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ");
     } else {
         // The key of the mock program on localnet (see its declared id)
-        pub const PYTH_ID: Pubkey = pubkey!("5XaaR94jBubdbrRrNW7DtRvZeWvLhSHkEGU3jHTEXV3C");
+        pub const PYTH_ID: Pubkey = pubkey!("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ");
     }
 }
 
@@ -53,11 +61,21 @@ cfg_if::cfg_if! {
 }
 
 pub const COMPUTE_PROGRAM_KEY: Pubkey = pubkey!("ComputeBudget111111111111111111111111111111");
+pub const JUP_KEY: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
+pub const TITAN_KEY: Pubkey = pubkey!("T1TANpTeScyeqVzzgNViGDNrkQ6qHz9KrSBS4aNXvGT");
+pub const ASSOCIATED_TOKEN_KEY: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
 // Note: We mock Kamino/Kamino Farms with the same keys on localnet
 pub const KAMINO_PROGRAM_ID: Pubkey = pubkey!("KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
 pub const FARMS_PROGRAM_ID: Pubkey = pubkey!("FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr");
 
+pub const DRIFT_PROGRAM_ID: Pubkey = pubkey!("dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH");
+
+/// Drift uses a fixed 9 decimal precision for all spot market scaled balances,
+/// regardless of the underlying token's decimals
+pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
+
+pub const SOLEND_PROGRAM_ID: Pubkey = pubkey!("So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo");
 pub const NATIVE_STAKE_ID: Pubkey = pubkey!("Stake11111111111111111111111111111111111111");
 
 /// The default fee, in native SOL in native decimals (i.e. lamports) used in testing
