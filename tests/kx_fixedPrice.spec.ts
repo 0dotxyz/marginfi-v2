@@ -57,7 +57,7 @@ import {
   deriveLiquidityVaultAuthority,
 } from "./utils/pdas";
 import { assert } from "chai";
-import { expectFailedTxWithError, getTokenBalance } from "./utils/genericTests";
+import { assertBankrunTxFailed, getTokenBalance } from "./utils/genericTests";
 import {
   bigNumberToWrappedI80F48,
   wrappedI80F48toBigNumber,
@@ -257,22 +257,15 @@ describe("kx: Fixed Kamino price bank", () => {
 
   it("(attacker) pulse bank price with wrong reserve - should fail", async () => {
     const user = users[3];
-    await expectFailedTxWithError(
-      async () => {
-        await user.mrgnBankrunProgram.provider.sendAndConfirm(
-          new Transaction().add(
-            await pulseBankPrice(user.mrgnBankrunProgram, {
-              group: kaminoGroup.publicKey,
-              bank: fixedKaminoBank,
-              remaining: [tokenAReserve],
-            }),
-          ),
-          [user.wallet],
-        );
-      },
-      "KaminoReserveValidationFailed",
-      6210,
+    const tx = new Transaction().add(
+      await pulseBankPrice(user.mrgnBankrunProgram, {
+        group: kaminoGroup.publicKey,
+        bank: fixedKaminoBank,
+        remaining: [tokenAReserve],
+      }),
     );
+    const result = await processBankrunTransaction(ctx, tx, [user.wallet], true);
+    assertBankrunTxFailed(result, 6210);
   });
 
   it("(user 3) deposit into fixed Kamino bank - happy path", async () => {
