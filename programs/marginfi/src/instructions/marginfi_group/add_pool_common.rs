@@ -29,11 +29,17 @@ pub fn log_pool_info(bank: &Bank) {
         conf.asset_tag
     );
     msg!(
-        "oracle conf {:?} age: {:?} flags: {:?}",
-        conf.oracle_max_confidence,
+        "oracle setup: {:?} conf: {:.4} age: {:?} flags: {:?}",
+        conf.oracle_setup as u8,
+        u32_to_centi(conf.oracle_max_confidence).to_num::<f64>(),
         conf.oracle_max_age,
         bank.flags as u8
     );
+    for (i, key) in conf.oracle_keys.iter().enumerate() {
+        if *key != Pubkey::default() {
+            msg!("  oracle key {}: {:?}", i, key);
+        }
+    }
     let interest = conf.interest_rate_config;
     msg!(
         "Insurance fixed: {:?} ir: {:?}",

@@ -2,9 +2,9 @@
 
 New developer getting started working on the mrgnv2 program side? Read on.
 
-### Things to Install (April 2025)
+### Things to Install (January 2026)
 
-- rust/cargo - latest stable
+- rust toolchain - 1.79.0
 - node - 23.0.0
 - yarn - 1.22.22
 - avm - 0.30.1 or later
@@ -15,7 +15,7 @@ New developer getting started working on the mrgnv2 program side? Read on.
 
 ## Running tests
 
-### For unit tests:
+### For Rust unit tests:
 
 ```
 cargo test --lib
@@ -29,7 +29,8 @@ anchor build -p marginfi -- --no-default-features
 anchor test --skip-build
 ```
 
-Note: you may need to build the other programs (mock, liquidity incentive, etc) if you have never run anchor build before.
+Note: you may need to build the other programs (mock, liquidity incentive, etc) if you have never
+run `anchor build` before.
 
 Note: you need to `yarn install` before your first run
 
@@ -37,8 +38,8 @@ Segmentation fault? Just try again. That happens sometimes, generally on the fir
 Sometimes it happens on the CI pipeline as well, just kick it again it that occurs.
 
 Each letter prefix is referred to as a "suite" and is broadly end-to-end. The localnet tests
-multithread with bankrun and will create a fairly substantial CPU load. Completetion varies
-substantially by hardware. If you your workflow is too slow, go to this portion of Anchor.toml and
+multithread with bankrun will create a fairly substantial CPU load. Completetion varies
+substantially by hardware. If you your workflow is too slow, go to this portion of `Anchor.toml` and
 comment out the top line, comment in the suite you actually want to run:
 
 ```
@@ -58,11 +59,11 @@ test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.t
 Note: You cannot run individual tests, most of the tests in a suite must run in order, where the
 number after the prefix determines their run order through the magic of filenames.
 
-### For the Rust test suite:
+### For the Anchor test suite:
 
 ```
-anchor build -p marginfi
-./scripts/test-program.sh marginfi mainnet-beta
+anchor build --no-idl
+./scripts/test-program.sh all
 ```
 
 This is much slower than the remix test command, but stable on any system.
@@ -88,17 +89,25 @@ Benchmarks:
 | 9700X | `[  12.203s] 226 tests run: 226 passed, 0 skipped`
 
 0.1.6
+
 | 9700X (8 threads)  | `[  27.718s] 373 tests run: 373 passed, 0 skipped`
+
 | 9700X (16 threads) | `[  19.343s] 373 tests run: 373 passed (3 flaky), 0 skipped`
 
 ### To run just one Rust test:
 
 ```
 ./scripts/single-test.sh marginfi accrue_interest --verbose
-./scripts/single-test.sh test_name --verbose
+./scripts/single-test.sh <program_name> <test_name> --verbose
 ```
 
-This will run all tests prefixed with the given name, and all test cases for them.
+This will run all tests prefixed with the given test_name, and all test cases for them.
+
+For a complete list of all programs/tests, run the following command:
+
+```
+cargo nextest list
+```
 
 ### To run the fuzz suite
 
@@ -124,7 +133,7 @@ Make sure you build the correct version, Rust requires the mainnet version (defa
 
 ### Program not deployed errors, when build seemingly worked otherwise
 
-Adding a msg! that tries to print any I80F48 without first converting it to a float or similar will
+Adding a msg! that tries to print any `I80F48` without first converting it to a float or similar will
 cause the entire project to silently fail to build, resulting in `Program not deployed` errors
 downstream when testing
 
