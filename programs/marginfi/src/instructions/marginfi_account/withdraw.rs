@@ -7,8 +7,8 @@ use crate::{
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            calc_value, check_account_init_health, BankAccountWrapper, LendingAccountImpl,
-            MarginfiAccountImpl,
+            account_not_frozen_for_authority, calc_value, check_account_init_health,
+            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         price::OraclePriceWithConfidence,

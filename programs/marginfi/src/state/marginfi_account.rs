@@ -4,7 +4,7 @@ use crate::{
     check, check_eq, debug, math_error,
     prelude::{MarginfiError, MarginfiResult},
     state::{bank::BankImpl, bank_config::BankConfigImpl},
-    utils::{is_integration_asset_tag, NumTraitsWithTolerance},
+    utils::NumTraitsWithTolerance,
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
@@ -12,8 +12,8 @@ use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_KAMINO, ASSET_TAG_SOL, ASSET_TAG_SOLEND,
         ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, EMISSIONS_FLAG_BORROW_ACTIVE,
-        EMISSIONS_FLAG_LENDING_ACTIVE, EXP_10_I80F48, MAX_INTEGRATION_POSITIONS,
-        MIN_EMISSIONS_START_TIME, SECONDS_PER_YEAR, ZERO_AMOUNT_THRESHOLD,
+        EMISSIONS_FLAG_LENDING_ACTIVE, EXP_10_I80F48, MIN_EMISSIONS_START_TIME, SECONDS_PER_YEAR,
+        ZERO_AMOUNT_THRESHOLD,
     },
     types::{
         reconcile_emode_configs, Balance, BalanceSide, Bank, BankOperationalState, EmodeConfig,
@@ -865,7 +865,7 @@ fn calc_weighted_asset_value_standalone(
             let value = calc_value(
                 bank.get_asset_amount(balance.asset_shares.into())?,
                 lower_price,
-                bank.mint_decimals,
+                bank.get_balance_decimals(),
                 Some(asset_weight),
             )?;
 
@@ -914,7 +914,7 @@ fn calc_weighted_liab_value_standalone(
     let value = calc_value(
         bank.get_liability_amount(balance.liability_shares.into())?,
         higher_price,
-        bank.mint_decimals,
+        bank.get_balance_decimals(),
         Some(liability_weight),
     )?;
 

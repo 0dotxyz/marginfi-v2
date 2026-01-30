@@ -1,10 +1,10 @@
 use crate::events::{AccountEventHeader, LendingAccountLiquidateEvent, LiquidationBalances};
 use crate::state::bank::{BankImpl, BankVaultType};
 use crate::state::marginfi_account::{
-    calc_amount, calc_value, check_account_init_health,
+    account_not_frozen_for_authority, calc_amount, calc_value, check_account_init_health,
     check_post_liquidation_condition_and_get_account_health,
     check_pre_liquidation_condition_and_get_account_health, get_remaining_accounts_per_bank,
-    LendingAccountImpl, MarginfiAccountImpl,
+    is_signer_authorized, LendingAccountImpl, MarginfiAccountImpl,
 };
 use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::state::price::{OraclePriceFeedAdapter, OraclePriceType, PriceAdapter, PriceBias};

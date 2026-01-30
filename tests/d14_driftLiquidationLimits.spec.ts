@@ -80,25 +80,4 @@ describe("d14: Drift liquidation limits", () => {
     );
   });
 
-  it("fails with too many drift positions due to active bank limit", async function () {
-    this.timeout(120_000);
-
-    const driftCount = PASSING_DRIFT_COUNT + 1;
-    const regularCount = 15 - driftCount;
-
-    try {
-      await runLiquidationScenario(env, {
-        driftCount,
-        regularCount,
-        scenarioIndex: 99,
-      });
-      assert.fail("Should have thrown IntegrationPositionLimitExceeded");
-    } catch (e: any) {
-      // 0x1844 = 6212 = IntegrationPositionLimitExceeded
-      assert.ok(
-        e.message.includes("0x1844"),
-        `Expected error 0x1844 (IntegrationPositionLimitExceeded), got: ${e.message}`
-      );
-    }
-  });
 });
