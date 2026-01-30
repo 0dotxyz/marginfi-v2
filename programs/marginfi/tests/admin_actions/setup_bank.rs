@@ -352,7 +352,7 @@ async fn marginfi_group_add_bank_failure_inexistent_pyth_feed() -> anyhow::Resul
         .await;
 
     assert!(res.is_err());
-    assert_custom_error!(res.unwrap_err(), MarginfiError::PythPushWrongAccountOwner);
+    assert_custom_error!(res.unwrap_err(), MarginfiError::PythPushInvalidAccount);
 
     Ok(())
 }

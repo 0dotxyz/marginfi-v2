@@ -128,7 +128,7 @@ describe("k09: Withdraw from Kamino reserve with accrued interest", () => {
         },
         {
           amount: withdrawAmt,
-          isFinalWithdrawal,
+          isWithdrawAll: isFinalWithdrawal,
           remaining,
         }
       )
