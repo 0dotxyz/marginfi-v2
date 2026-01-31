@@ -58,13 +58,14 @@ import {
   makeDriftDepositIx,
   makeDriftWithdrawIx,
 } from "./utils/drift-instructions";
-import { TOKEN_A_MARKET_INDEX } from "./utils/drift-utils";
+import { TOKEN_A_MARKET_INDEX, refreshDriftOracles } from "./utils/drift-utils";
 import { makeUpdateSpotMarketCumulativeInterestIx } from "./utils/drift-sdk";
 import {
   deriveBaseObligation,
   deriveLiquidityVaultAuthority,
 } from "./utils/pdas";
 import { getEpochAndSlot } from "./utils/stake-utils";
+import { assert } from "chai";
 
 const startingSeed: number = 42;
 
@@ -129,13 +130,17 @@ SCENARIOS.forEach(({ kaminoDeposits }, scenarioIndex) => {
       const remaining = liquidateeRemainingAccounts;
       const withdrawTokenAAmount = new BN(1 * 10 ** ecosystem.tokenADecimals);
       const repayLstAmount = new BN(0.1 * 10 ** ecosystem.lstAlphaDecimals);
+      // Note: Kamino's withdraw function is most costly in CU, so we'll use that one if a Kamino
+      // reserve is available to represent the worst-case example.
+      const useKaminoWithdraw = kaminoBanks.length > 0;
+      const useDriftWithdraw = !useKaminoWithdraw && driftBanks.length > 0;
 
       const preInstructions = [
         ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),
       ];
       const withdrawInstructions = [];
 
-      if (kaminoBanks.length > 0) {
+      if (useKaminoWithdraw) {
         const bank = kaminoBanks[0];
         const kaminoRemaining = composeRemainingAccounts([
           [bank, oracles.tokenAOracle.publicKey, tokenAReserve],
@@ -194,7 +199,7 @@ SCENARIOS.forEach(({ kaminoDeposits }, scenarioIndex) => {
         );
       }
 
-      if (driftBanks.length > 0) {
+      if (useDriftWithdraw) {
         const bank = driftBanks[0];
         const driftRemaining = composeRemainingAccounts([
           [bank, oracles.tokenAOracle.publicKey, driftSpotMarket],
@@ -654,6 +659,17 @@ SCENARIOS.forEach(({ kaminoDeposits }, scenarioIndex) => {
       const slotsToAdvance = ONE_MINUTE * 0.4;
       let { epoch: _, slot } = await getEpochAndSlot(banksClient);
       bankrunContext.warpToSlot(BigInt(slot + slotsToAdvance));
+
+      // Refresh oracles in case we advanced into staleness
+      const clock = await banksClient.getClock();
+      await refreshPullOracles(
+        oracles,
+        globalProgramAdmin.wallet,
+        new BN(Number(clock.slot)),
+        Number(clock.unixTimestamp),
+        bankrunContext,
+        false,
+      );
     });
 
     it("(admin) Receivership liquidates user 0 with start/end (Kamino/Drift)", async () => {
@@ -663,6 +679,15 @@ SCENARIOS.forEach(({ kaminoDeposits }, scenarioIndex) => {
 
       if (kaminoBanks.length === 0 && driftBanks.length === 0) {
         return;
+      }
+
+      if (kaminoBanks.length === 0 && driftBanks.length > 0) {
+        await refreshDriftOracles(
+          oracles,
+          driftAccounts,
+          bankrunContext,
+          banksClient,
+        );
       }
 
       const initTx = new Transaction().add(
@@ -695,9 +720,21 @@ SCENARIOS.forEach(({ kaminoDeposits }, scenarioIndex) => {
       }).compileToV0Message([lutAccount]);
       const versionedTx = new VersionedTransaction(messageV0);
       versionedTx.sign([liquidator.wallet]);
-      await banksClient.processTransaction(versionedTx);
-      // let result = await banksClient.tryProcessTransaction(versionedTx);
-      // dumpBankrunLogs(result);
+      // await banksClient.processTransaction(versionedTx);
+      let result = await banksClient.tryProcessTransaction(versionedTx);
+      let lastLog = result.meta.logMessages[result.meta.logMessages.length - 1];
+      if (lastLog.includes("failed")) {
+        if (lastLog.includes("exceeded CUs meter at BPF instruction")) {
+          console.error("❌ Failed due to CU limits ❌");
+          dumpBankrunLogs(result);
+        } else {
+          console.error("Failed due to something other than CU limits");
+          dumpBankrunLogs(result);
+          assert.ok(false);
+        }
+      } else {
+        // passed, log nothing...
+      }
     });
   });
 });
