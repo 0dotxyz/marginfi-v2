@@ -52,8 +52,19 @@ pub struct BankCache {
     /// * Zero if never updated
     /// * Note: this value is the confidence reported by oracles, multiplied by `STD_DEV_MULTIPLE`
     pub last_oracle_price_confidence: WrappedI80F48,
-    _padding: [u8; 24],
-    _reserved0: [u8; 64],
+    /// Liquidation cache flags, set during receivership flow.
+    pub liq_cache_flags: u8,
+    _padding: [u8; 23],
+    // INFO: these are duplicative of `last_oracle_price` and `last_oracle_price_timestamp` so if
+    // space is ever needed we can recycle at least two of these (32 bytes)
+    /// Cached real-time price for receivership liquidation.
+    pub liquidation_price_rt: WrappedI80F48,
+    /// Cached real-time price confidence for receivership liquidation.
+    pub liquidation_price_rt_confidence: WrappedI80F48,
+    /// Cached TWAP price for receivership liquidation.
+    pub liquidation_price_twap: WrappedI80F48,
+    /// Cached TWAP price confidence for receivership liquidation.
+    pub liquidation_price_twap_confidence: WrappedI80F48,
 }
 
 impl Default for BankCache {
@@ -63,6 +74,8 @@ impl Default for BankCache {
 }
 
 impl BankCache {
+    pub const LIQ_CACHE_LOCKED_FLAG: u8 = 1 << 0;
+
     /// Reset cached rate metrics while preserving the last oracle price snapshot.
     pub fn reset_preserving_oracle_price(&mut self) {
         let last_oracle_price = self.last_oracle_price;
@@ -74,5 +87,17 @@ impl BankCache {
         self.last_oracle_price = last_oracle_price;
         self.last_oracle_price_timestamp = last_oracle_price_timestamp;
         self.last_oracle_price_confidence = last_oracle_price_confidence;
+    }
+
+    pub fn is_liquidation_price_cache_locked(&self) -> bool {
+        self.liq_cache_flags & Self::LIQ_CACHE_LOCKED_FLAG != 0
+    }
+
+    pub fn set_liquidation_price_cache_locked(&mut self) {
+        self.liq_cache_flags |= Self::LIQ_CACHE_LOCKED_FLAG;
+    }
+
+    pub fn clear_liquidation_price_cache_locked(&mut self) {
+        self.liq_cache_flags &= !Self::LIQ_CACHE_LOCKED_FLAG;
     }
 }

@@ -4,7 +4,9 @@ use crate::{
     events::{DeleverageEvent, LiquidationReceiverEvent},
     ix_utils::{get_discrim_hash, validate_not_cpi_by_stack_height, Hashable},
     prelude::*,
-    state::marginfi_account::{MarginfiAccountImpl, RiskEngine, RiskRequirementType},
+    state::marginfi_account::{
+        CachedRiskEngine, MarginfiAccountImpl, RiskRequirementType,
+    },
 };
 use anchor_lang::prelude::*;
 use bytemuck::Zeroable;
@@ -122,16 +124,18 @@ pub fn end_receivership<'info>(
     let pre_health: I80F48 = pre_assets - pre_liabs;
 
     let mut post_hc = HealthCache::zeroed();
-    let risk_engine = RiskEngine::new(marginfi_account, remaining_ais)?;
+    let cached_risk_engine = CachedRiskEngine::new(marginfi_account, remaining_ais)?;
 
-    let (post_health, _post_assets, _post_liabs) = risk_engine
-        .check_pre_liquidation_condition_and_get_account_health(
+    let (post_health, _post_assets, _post_liabs) = cached_risk_engine
+        .check_pre_liquidation_condition_and_get_account_health_cached(
             None,
             &mut Some(&mut post_hc),
             ignore_healthy,
         )?;
-    let (post_assets_equity, post_liabilities_equity) = risk_engine
-        .get_account_health_components(RiskRequirementType::Equity, &mut Some(&mut post_hc))?;
+    let (post_assets_equity, post_liabilities_equity) = cached_risk_engine
+        .get_account_health_components_cached(RiskRequirementType::Equity, &mut Some(&mut post_hc))?;
+
+    cached_risk_engine.clear_liquidation_price_cache_locks()?;
     marginfi_account.health_cache = post_hc;
 
     // health must not get worse

@@ -39,6 +39,8 @@ import {
 import {
   borrowIx,
   composeRemainingAccounts,
+  composeRemainingAccountsMetaBanksOnly,
+  composeRemainingAccountsWriteableMeta,
   depositIx,
   liquidateIx,
   initLiquidationRecordIx,
@@ -426,7 +428,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
         marginfiAccount: liquidateeAccount,
         // liquidationRecord: liqRecord,
         liquidationReceiver: liquidator.wallet.publicKey,
-        remaining: composeRemainingAccounts(remainingAccounts),
+        remaining: composeRemainingAccountsWriteableMeta(remainingAccounts),
       }),
       await withdrawIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
@@ -444,7 +446,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       }),
       await endLiquidationIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
-        remaining: composeRemainingAccounts(remainingAccounts),
+        remaining: composeRemainingAccountsMetaBanksOnly(remainingAccounts),
       })
     );
     const blockhash = await getBankrunBlockhash(bankrunContext);
@@ -538,7 +540,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       await startDeleverageIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
         riskAdmin: riskAdmin.wallet.publicKey,
-        remaining: composeRemainingAccounts(remainingAccounts),
+        remaining: composeRemainingAccountsWriteableMeta(remainingAccounts),
       }),
       await withdrawIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
@@ -559,7 +561,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       }),
       await endDeleverageIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
-        remaining: composeRemainingAccounts(
+        remaining: composeRemainingAccountsMetaBanksOnly(
           remainingAccounts.filter((a) => a[0] != banks[2])
         ),
       })
@@ -663,7 +665,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       await startDeleverageIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
         riskAdmin: riskAdmin.wallet.publicKey,
-        remaining: composeRemainingAccounts(remainingAccounts),
+        remaining: composeRemainingAccountsWriteableMeta(remainingAccounts),
       }),
       await withdrawIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
@@ -684,7 +686,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       }),
       await endDeleverageIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
-        remaining: composeRemainingAccounts(
+        remaining: composeRemainingAccountsMetaBanksOnly(
           remainingAccounts.filter((a) => a[0] != banks[3])
         ),
       })
@@ -766,7 +768,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       await startDeleverageIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
         riskAdmin: riskAdmin.wallet.publicKey,
-        remaining: composeRemainingAccounts(remainingAccounts),
+        remaining: composeRemainingAccountsWriteableMeta(remainingAccounts),
       }),
       await withdrawIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
@@ -787,7 +789,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       }),
       await endDeleverageIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
-        remaining: composeRemainingAccounts(
+        remaining: composeRemainingAccountsMetaBanksOnly(
           remainingAccounts.filter((a) => a[0] != banks[4])
         ),
       })
@@ -877,7 +879,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
         marginfiAccount: liquidateeAccount,
         // liquidationRecord: liqRecord,
         liquidationReceiver: liquidator.wallet.publicKey,
-        remaining: composeRemainingAccounts(remainingAccounts),
+        remaining: composeRemainingAccountsWriteableMeta(remainingAccounts),
       }),
       await withdrawIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
@@ -895,7 +897,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       }),
       await endLiquidationIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
-        remaining: composeRemainingAccounts(remainingAccounts),
+        remaining: composeRemainingAccountsMetaBanksOnly(remainingAccounts),
       })
     );
     const blockhash = await getBankrunBlockhash(bankrunContext);

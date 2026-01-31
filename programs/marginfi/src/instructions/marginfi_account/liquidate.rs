@@ -172,6 +172,7 @@ pub fn lending_account_liquidate<'info>(
         .check_pre_liquidation_condition_and_get_account_health(
             Some(&liab_bank_key),
             &mut None,
+            &mut None,
             false,
         )?;
     // To record in the bank's price cache

@@ -566,6 +566,9 @@ impl BankImpl for Bank {
     /// # Arguments
     /// * `group` - The marginfi group
     fn update_bank_cache(&mut self, group: &MarginfiGroup) -> MarginfiResult<()> {
+        if self.cache.is_liquidation_price_cache_locked() {
+            return Ok(());
+        }
         let total_assets_amount: I80F48 = self.get_asset_amount(self.total_asset_shares.into())?;
         let total_liabilities_amount: I80F48 =
             self.get_liability_amount(self.total_liability_shares.into())?;
@@ -605,6 +608,9 @@ impl BankImpl for Bank {
         &mut self,
         oracle_price: Option<OraclePriceWithConfidence>,
     ) -> MarginfiResult<()> {
+        if self.cache.is_liquidation_price_cache_locked() {
+            return Ok(());
+        }
         if let Some(price_with_confidence) = oracle_price {
             self.cache.last_oracle_price = price_with_confidence.price.into();
             self.cache.last_oracle_price_confidence = price_with_confidence.confidence.into();
