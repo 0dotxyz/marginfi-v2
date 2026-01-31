@@ -1,5 +1,13 @@
 import { BN } from "@coral-xyz/anchor";
-import { ComputeBudgetProgram, PublicKey, Transaction } from "@solana/web3.js";
+import {
+  AddressLookupTableAccount,
+  AddressLookupTableProgram,
+  ComputeBudgetProgram,
+  PublicKey,
+  Transaction,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import {
   groupAdmin,
   bankrunContext,
@@ -17,6 +25,7 @@ import {
   A_FARM_STATE,
   FARMS_PROGRAM_ID,
   driftAccounts,
+  driftBankrunProgram,
   DRIFT_TOKEN_A_PULL_ORACLE,
   DRIFT_TOKEN_A_SPOT_MARKET,
 } from "./rootHooks";
@@ -27,22 +36,35 @@ import {
   composeRemainingAccounts,
   depositIx,
   liquidateIx,
+  initLiquidationRecordIx,
+  startLiquidationIx,
+  endLiquidationIx,
+  repayIx,
 } from "./utils/user-instructions";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
-import { processBankrunTransaction } from "./utils/tools";
+import { dumpBankrunLogs, processBankrunTransaction } from "./utils/tools";
 import { genericMultiBankTestSetup } from "./genericSetups";
 import { refreshPullOracles } from "./utils/pyth-pull-mocks";
+import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import {
   simpleRefreshObligation,
   simpleRefreshReserve,
 } from "./utils/kamino-utils";
-import { makeKaminoDepositIx } from "./utils/kamino-instructions";
-import { makeDriftDepositIx } from "./utils/drift-instructions";
+import {
+  makeKaminoDepositIx,
+  makeKaminoWithdrawIx,
+} from "./utils/kamino-instructions";
+import {
+  makeDriftDepositIx,
+  makeDriftWithdrawIx,
+} from "./utils/drift-instructions";
 import { TOKEN_A_MARKET_INDEX } from "./utils/drift-utils";
+import { makeUpdateSpotMarketCumulativeInterestIx } from "./utils/drift-sdk";
 import {
   deriveBaseObligation,
   deriveLiquidityVaultAuthority,
 } from "./utils/pdas";
+import { getEpochAndSlot } from "./utils/stake-utils";
 
 const startingSeed: number = 42;
 
@@ -98,6 +120,133 @@ SCENARIOS.forEach(({ kaminoDeposits }, scenarioIndex) => {
     let liquidateeRemainingAccounts: PublicKey[] = [];
     let liquidatorRemainingAccounts: PublicKey[] = [];
     let driftSpotMarket: PublicKey;
+    let lookupTable: PublicKey;
+
+    const buildReceivershipInstructions = async (
+      liquidator: any,
+      liquidateeAccount: PublicKey,
+    ) => {
+      const remaining = liquidateeRemainingAccounts;
+      const withdrawTokenAAmount = new BN(1 * 10 ** ecosystem.tokenADecimals);
+      const repayLstAmount = new BN(0.1 * 10 ** ecosystem.lstAlphaDecimals);
+
+      const preInstructions = [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),
+      ];
+      const withdrawInstructions = [];
+
+      if (kaminoBanks.length > 0) {
+        const bank = kaminoBanks[0];
+        const kaminoRemaining = composeRemainingAccounts([
+          [bank, oracles.tokenAOracle.publicKey, tokenAReserve],
+        ]);
+        const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
+          bankrunProgram.programId,
+          bank,
+        );
+        const [obligation] = deriveBaseObligation(
+          lendingVaultAuthority,
+          lendingMarket,
+        );
+        const [obligationFarmUserState] = PublicKey.findProgramAddressSync(
+          [
+            Buffer.from("user"),
+            reserveFarmState.toBuffer(),
+            obligation.toBuffer(),
+          ],
+          FARMS_PROGRAM_ID,
+        );
+
+        preInstructions.push(
+          await simpleRefreshReserve(
+            klendBankrunProgram,
+            tokenAReserve,
+            lendingMarket,
+            oracles.tokenAOracle.publicKey,
+          ),
+          await simpleRefreshObligation(
+            klendBankrunProgram,
+            lendingMarket,
+            obligation,
+            [tokenAReserve],
+          ),
+        );
+
+        withdrawInstructions.push(
+          await makeKaminoWithdrawIx(
+            liquidator.mrgnBankrunProgram,
+            {
+              marginfiAccount: liquidateeAccount,
+              authority: liquidator.wallet.publicKey,
+              bank,
+              destinationTokenAccount: liquidator.tokenAAccount,
+              lendingMarket,
+              reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+              obligationFarmUserState,
+              reserveFarmState,
+            },
+            {
+              amount: withdrawTokenAAmount,
+              isFinalWithdrawal: false,
+              remaining: kaminoRemaining,
+            },
+          ),
+        );
+      }
+
+      if (driftBanks.length > 0) {
+        const bank = driftBanks[0];
+        const driftRemaining = composeRemainingAccounts([
+          [bank, oracles.tokenAOracle.publicKey, driftSpotMarket],
+        ]);
+        preInstructions.push(
+          await makeUpdateSpotMarketCumulativeInterestIx(
+            driftBankrunProgram,
+            { oracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE) },
+            TOKEN_A_MARKET_INDEX,
+          ),
+        );
+        withdrawInstructions.push(
+          await makeDriftWithdrawIx(
+            liquidator.mrgnBankrunProgram,
+            {
+              marginfiAccount: liquidateeAccount,
+              bank,
+              destinationTokenAccount: liquidator.tokenAAccount,
+              driftOracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE),
+            },
+            {
+              amount: withdrawTokenAAmount,
+              withdraw_all: false,
+              remaining: driftRemaining,
+            },
+            driftBankrunProgram,
+          ),
+        );
+      }
+
+      const instructions = [
+        ...preInstructions,
+        await startLiquidationIx(liquidator.mrgnBankrunProgram, {
+          marginfiAccount: liquidateeAccount,
+          liquidationReceiver: liquidator.wallet.publicKey,
+          remaining,
+        }),
+        ...withdrawInstructions,
+        await repayIx(liquidator.mrgnBankrunProgram, {
+          marginfiAccount: liquidateeAccount,
+          bank: banks[0], // regular debt bank
+          tokenAccount: liquidator.lstAlphaAccount,
+          amount: repayLstAmount,
+        }),
+        await endLiquidationIx(liquidator.mrgnBankrunProgram, {
+          marginfiAccount: liquidateeAccount,
+          remaining,
+        }),
+      ];
+
+      return instructions;
+    };
 
     before(() => {
       console.log(
@@ -444,6 +593,111 @@ SCENARIOS.forEach(({ kaminoDeposits }, scenarioIndex) => {
           groupAdmin.wallet,
         ]);
       }
+    });
+
+    it("(admin) Creates LUT", async () => {
+      const liquidator = groupAdmin;
+      const liquidateeAccount = users[0].accounts.get(USER_ACCOUNT_THROWAWAY);
+      const receiverInstructions = await buildReceivershipInstructions(
+        liquidator,
+        liquidateeAccount,
+      );
+      const lutAddresses: PublicKey[] = [];
+      const seen = new Set<string>();
+      const addAddress = (address: PublicKey) => {
+        const key = address.toBase58();
+        if (!seen.has(key)) {
+          seen.add(key);
+          lutAddresses.push(address);
+        }
+      };
+
+      for (const ix of receiverInstructions) {
+        addAddress(ix.programId);
+        for (const keyMeta of ix.keys) {
+          addAddress(keyMeta.pubkey);
+        }
+      }
+
+      const recentSlot = Number(await banksClient.getSlot());
+      const [createLutIx, lutAddress] =
+        AddressLookupTableProgram.createLookupTable({
+          authority: liquidator.wallet.publicKey,
+          payer: liquidator.wallet.publicKey,
+          recentSlot: recentSlot - 1,
+        });
+      lookupTable = lutAddress;
+
+      const createLutTx = new Transaction().add(createLutIx);
+      createLutTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+      createLutTx.sign(liquidator.wallet);
+      await banksClient.processTransaction(createLutTx);
+
+      const LUT_CHUNK_SIZE = 20;
+      const LUT_MAX_ADDRESSES = 256;
+      const addressesToLoad = lutAddresses.slice(0, LUT_MAX_ADDRESSES);
+      for (let i = 0; i < addressesToLoad.length; i += LUT_CHUNK_SIZE) {
+        const extendIx = AddressLookupTableProgram.extendLookupTable({
+          authority: liquidator.wallet.publicKey,
+          payer: liquidator.wallet.publicKey,
+          lookupTable,
+          addresses: addressesToLoad.slice(i, i + LUT_CHUNK_SIZE),
+        });
+        const extendTx = new Transaction().add(extendIx);
+        extendTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+        extendTx.sign(liquidator.wallet);
+        await banksClient.processTransaction(extendTx);
+      }
+
+      // We must advance the bankrun slot to allow the lut to activate
+      const ONE_MINUTE = 60;
+      const slotsToAdvance = ONE_MINUTE * 0.4;
+      let { epoch: _, slot } = await getEpochAndSlot(banksClient);
+      bankrunContext.warpToSlot(BigInt(slot + slotsToAdvance));
+    });
+
+    it("(admin) Receivership liquidates user 0 with start/end (Kamino/Drift)", async () => {
+      const liquidatee = users[0];
+      const liquidator = groupAdmin;
+      const liquidateeAccount = liquidatee.accounts.get(USER_ACCOUNT_THROWAWAY);
+
+      if (kaminoBanks.length === 0 && driftBanks.length === 0) {
+        return;
+      }
+
+      const initTx = new Transaction().add(
+        await initLiquidationRecordIx(liquidator.mrgnBankrunProgram, {
+          marginfiAccount: liquidateeAccount,
+          feePayer: liquidator.wallet.publicKey,
+        }),
+      );
+      await processBankrunTransaction(bankrunContext, initTx, [
+        liquidator.wallet,
+      ]);
+
+      const receiverInstructions = await buildReceivershipInstructions(
+        liquidator,
+        liquidateeAccount,
+      );
+      const tx = new Transaction().add(...receiverInstructions);
+
+      const blockhash = await getBankrunBlockhash(bankrunContext);
+      const lutRaw = await banksClient.getAccount(lookupTable);
+      const lutState = AddressLookupTableAccount.deserialize(lutRaw.data);
+      const lutAccount = new AddressLookupTableAccount({
+        key: lookupTable,
+        state: lutState,
+      });
+      const messageV0 = new TransactionMessage({
+        payerKey: liquidator.wallet.publicKey,
+        recentBlockhash: blockhash,
+        instructions: [...tx.instructions],
+      }).compileToV0Message([lutAccount]);
+      const versionedTx = new VersionedTransaction(messageV0);
+      versionedTx.sign([liquidator.wallet]);
+      await banksClient.processTransaction(versionedTx);
+      // let result = await banksClient.tryProcessTransaction(versionedTx);
+      // dumpBankrunLogs(result);
     });
   });
 });
