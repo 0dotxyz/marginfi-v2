@@ -4,9 +4,7 @@ use crate::{
     events::{DeleverageEvent, LiquidationReceiverEvent},
     ix_utils::{get_discrim_hash, validate_not_cpi_by_stack_height, Hashable},
     prelude::*,
-    state::marginfi_account::{
-        CachedRiskEngine, MarginfiAccountImpl, RiskRequirementType,
-    },
+    state::marginfi_account::{CachedRiskEngine, MarginfiAccountImpl, RiskRequirementType},
 };
 use anchor_lang::prelude::*;
 use bytemuck::Zeroable;
@@ -133,7 +131,10 @@ pub fn end_receivership<'info>(
             ignore_healthy,
         )?;
     let (post_assets_equity, post_liabilities_equity) = cached_risk_engine
-        .get_account_health_components_cached(RiskRequirementType::Equity, &mut Some(&mut post_hc))?;
+        .get_account_health_components_cached(
+            RiskRequirementType::Equity,
+            &mut Some(&mut post_hc),
+        )?;
 
     cached_risk_engine.clear_liquidation_price_cache_locks()?;
     marginfi_account.health_cache = post_hc;

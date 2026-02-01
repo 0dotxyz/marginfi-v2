@@ -101,12 +101,11 @@ pub fn start_receivership<'info>(
             &mut Some(&mut liq_price_cache),
             ignore_healthy,
         )?;
-    let (assets_equity, liabs_equity) = risk_engine
-        .get_account_health_components(
-            RiskRequirementType::Equity,
-            &mut Some(&mut health_cache),
-            &mut Some(&mut liq_price_cache),
-        )?;
+    let (assets_equity, liabs_equity) = risk_engine.get_account_health_components(
+        RiskRequirementType::Equity,
+        &mut Some(&mut health_cache),
+        &mut Some(&mut liq_price_cache),
+    )?;
     risk_engine.write_liquidation_price_cache_from(&liq_price_cache)?;
     marginfi_account.health_cache = health_cache;
     marginfi_account.set_flag(ACCOUNT_IN_RECEIVERSHIP, false);
