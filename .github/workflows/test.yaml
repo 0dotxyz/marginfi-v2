@@ -195,7 +195,7 @@ jobs:
 
     # ─── Marginfi always builds from scratch ─────────────────────────
     - name: Build marginfi
-      run: anchor build -p marginfi -- --no-default-features
+      run: anchor build -p marginfi -- --no-default-features --features custom-heap
 
     - name: Run Anchor tests (retry on segfault)
       run: |

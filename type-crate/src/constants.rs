@@ -175,7 +175,6 @@ pub const ASSET_TAG_SOLEND: u8 = 5;
 /// Note: it's disabled in local integration tests so that we can measure the performance and
 /// eventually get rid of this limit altogether.
 pub const MAX_INTEGRATION_POSITIONS: usize = 8;
-
 // WARN: You can set anything here, including a discrim that's technically "wrong" for the struct
 // with that name, and prod will use that hash anyways. Don't change these hashes once a struct is
 // live in prod.

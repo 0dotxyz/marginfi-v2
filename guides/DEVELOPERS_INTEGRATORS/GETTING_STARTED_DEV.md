@@ -25,7 +25,7 @@ cargo test --lib
 
 ```
 anchor build
-anchor build -p marginfi -- --no-default-features
+anchor build -p marginfi -- --no-default-features --features custom-heap
 anchor test --skip-build
 ```
 

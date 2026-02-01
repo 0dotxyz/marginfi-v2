@@ -43,9 +43,8 @@ import {
   composeRemainingAccounts,
 } from "./utils/user-instructions";
 import { configBankEmode } from "./utils/group-instructions";
-import { logHealthCache } from "./utils/tools";
+import { bytesToF64, logHealthCache } from "./utils/tools";
 import { assert } from "chai";
-import { bytesToF64 } from "./utils/tools";
 import { dummyIx } from "./utils/bankrunConnection";
 
 // Banks are listed here in the sorted-by-public-keys order - the same used in the lending account balances

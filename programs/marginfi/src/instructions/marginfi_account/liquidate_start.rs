@@ -8,7 +8,9 @@ use crate::{
     },
     prelude::*,
     state::marginfi_account::{
-        LiquidationPriceCache, MarginfiAccountImpl, RiskEngine, RiskRequirementType,
+        check_pre_liquidation_condition_and_get_account_health, get_health_components,
+        write_liquidation_price_cache_from, LiquidationPriceCache, MarginfiAccountImpl,
+        RiskRequirementType,
     },
 };
 use anchor_lang::{prelude::*, solana_program::sysvar};
@@ -92,21 +94,25 @@ pub fn start_receivership<'info>(
     // liquidation/deleverage strategy.
     let mut health_cache = HealthCache::zeroed();
     let mut liq_price_cache = LiquidationPriceCache::default();
-    let risk_engine = RiskEngine::new(marginfi_account, remaining_ais)?;
+    let (_pre_health, assets, liabs) = check_pre_liquidation_condition_and_get_account_health(
+        marginfi_account,
+        remaining_ais,
+        None,
+        &mut Some(&mut health_cache),
+        &mut Some(&mut liq_price_cache),
+        ignore_healthy,
+    )?;
 
-    let (_pre_health, assets, liabs) = risk_engine
-        .check_pre_liquidation_condition_and_get_account_health(
-            None,
-            &mut Some(&mut health_cache),
-            &mut Some(&mut liq_price_cache),
-            ignore_healthy,
-        )?;
-    let (assets_equity, liabs_equity) = risk_engine.get_account_health_components(
+    // Use heap-efficient equity calculation
+    let (assets_equity, liabs_equity) = get_health_components(
+        marginfi_account,
+        remaining_ais,
         RiskRequirementType::Equity,
         &mut Some(&mut health_cache),
         &mut Some(&mut liq_price_cache),
     )?;
-    risk_engine.write_liquidation_price_cache_from(&liq_price_cache)?;
+
+    write_liquidation_price_cache_from(marginfi_account, remaining_ais, &liq_price_cache)?;
     marginfi_account.health_cache = health_cache;
     marginfi_account.set_flag(ACCOUNT_IN_RECEIVERSHIP, false);
 
