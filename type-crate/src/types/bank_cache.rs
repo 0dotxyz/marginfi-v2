@@ -53,6 +53,11 @@ pub struct BankCache {
     /// * Note: this value is the confidence reported by oracles, multiplied by `STD_DEV_MULTIPLE`
     pub last_oracle_price_confidence: WrappedI80F48,
     /// Liquidation cache flags, set during receivership flow.
+    /// * 1 (LIQ_CACHE_LOCKED_FLAG) - We "lock" the liquidation cache when writing to it in Start
+    /// Liquidate as an additional safeguard, if the liquidation prices stored here were to be
+    /// edited between start and end, it would completely break the risk engine. End validates that
+    /// the lock is set, panics if not, and removes it - which prevents footguns if the cache was
+    /// e.g. accidently set to default.
     pub liq_cache_flags: u8,
     _padding: [u8; 23],
     // INFO: these are duplicative of `last_oracle_price` and `last_oracle_price_timestamp` so if
