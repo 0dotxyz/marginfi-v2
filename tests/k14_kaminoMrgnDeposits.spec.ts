@@ -43,7 +43,7 @@ import {
 import { createMintToInstruction } from "@solana/spl-token";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 
-describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
+describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
   let userA: MockUser;
   let userB: MockUser;
 
@@ -67,10 +67,10 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
 
     // Get bank-specific obligations
     usdcBankObligation = kaminoAccounts.get(
-      `${usdcBank.toString()}_OBLIGATION`
+      `${usdcBank.toString()}_OBLIGATION`,
     )!;
     tokenABankObligation = kaminoAccounts.get(
-      `${tokenABank.toString()}_OBLIGATION`
+      `${tokenABank.toString()}_OBLIGATION`,
     )!;
   });
 
@@ -78,7 +78,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
     describe("1.1 Large Amount Tests ($1M)", () => {
       it("User A - Deposit and withdraw 1M USDC", async () => {
         const DEPOSIT_AMOUNT = new BN(1_000_000).mul(
-          new BN(10 ** ecosystem.usdcDecimals)
+          new BN(10 ** ecosystem.usdcDecimals),
         );
 
         // Fund user A with 1M USDC
@@ -87,8 +87,8 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
             ecosystem.usdcMint.publicKey,
             userA.usdcAccount,
             globalProgramAdmin.wallet.publicKey,
-            DEPOSIT_AMOUNT.toNumber()
-          )
+            DEPOSIT_AMOUNT.toNumber(),
+          ),
         );
         await processBankrunTransaction(bankrunContext, fundTx, [
           globalProgramAdmin.wallet,
@@ -100,16 +100,16 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         // Get initial balances
         const userBalanceBefore = await getTokenBalance(
           bankRunProvider,
-          userA.usdcAccount
+          userA.usdcAccount,
         );
         const marginfiAccountBeforeDeposit =
           await userA.mrgnBankrunProgram.account.marginfiAccount.fetch(
-            userA.accounts.get(USER_ACCOUNT_K)!
+            userA.accounts.get(USER_ACCOUNT_K)!,
           );
 
         const balanceBeforeDeposit =
           marginfiAccountBeforeDeposit.lendingAccount.balances.find(
-            (b) => b.active === 1 && b.bankPk.equals(usdcBank)
+            (b) => b.active === 1 && b.bankPk.equals(usdcBank),
           );
 
         const collateralSharesBefore = balanceBeforeDeposit
@@ -122,14 +122,14 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
             klendBankrunProgram,
             usdcReserve,
             kaminoAccounts.get(MARKET)!,
-            oracles.usdcOracle.publicKey
+            oracles.usdcOracle.publicKey,
           ),
           await simpleRefreshObligation(
             klendBankrunProgram,
             kaminoAccounts.get(MARKET)!,
             usdcBankObligation,
-            [usdcReserve]
-          )
+            [usdcReserve],
+          ),
         );
         await processBankrunTransaction(bankrunContext, refreshTx, [
           globalProgramAdmin.wallet,
@@ -147,8 +147,8 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
               lendingMarket: kaminoAccounts.get(MARKET)!,
               reserveLiquidityMint: ecosystem.usdcMint.publicKey,
             },
-            DEPOSIT_AMOUNT // Separate amount parameter
-          )
+            DEPOSIT_AMOUNT, // Separate amount parameter
+          ),
         );
         await processBankrunTransaction(bankrunContext, depositTx, [
           userA.wallet,
@@ -157,31 +157,31 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         // Verify deposit
         const userBalanceAfterDeposit = await getTokenBalance(
           bankRunProvider,
-          userA.usdcAccount
+          userA.usdcAccount,
         );
         const marginfiAccountAfterDeposit =
           await userA.mrgnBankrunProgram.account.marginfiAccount.fetch(
-            userA.accounts.get(USER_ACCOUNT_K)!
+            userA.accounts.get(USER_ACCOUNT_K)!,
           );
 
         const balanceAfterDeposit =
           marginfiAccountAfterDeposit.lendingAccount.balances.find(
-            (b) => b.active === 1 && b.bankPk.equals(usdcBank)
+            (b) => b.active === 1 && b.bankPk.equals(usdcBank),
           )!;
 
         // Get collateral amount from marginfi balance difference (since user had existing deposits)
         const collateralSharesAfterDeposit = wrappedI80F48toBigNumber(
-          balanceAfterDeposit.assetShares
+          balanceAfterDeposit.assetShares,
         );
         const collateralDifference = collateralSharesAfterDeposit.minus(
-          collateralSharesBefore
+          collateralSharesBefore,
         );
         const collateralAmount = new BN(collateralDifference.toString());
 
         // Verify deposit
         assert.ok(
           userBalanceAfterDeposit ===
-            userBalanceBefore - DEPOSIT_AMOUNT.toNumber()
+            userBalanceBefore - DEPOSIT_AMOUNT.toNumber(),
         );
         assert.ok(collateralAmount.gt(new BN(0)));
 
@@ -189,11 +189,11 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         console.log("DEBUG: Expected bank (usdcBank):", usdcBank.toString());
         console.log(
           "DEBUG: Actual bank in account:",
-          balanceAfterDeposit.bankPk.toString()
+          balanceAfterDeposit.bankPk.toString(),
         );
         console.log(
           "DEBUG: Banks match:",
-          usdcBank.equals(balanceAfterDeposit.bankPk)
+          usdcBank.equals(balanceAfterDeposit.bankPk),
         );
 
         // Debug: Check ALL active balances on the account
@@ -205,10 +205,10 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           if (balance.active === 1) {
             const assetShares = wrappedI80F48toBigNumber(balance.assetShares);
             const liabilityShares = wrappedI80F48toBigNumber(
-              balance.liabilityShares
+              balance.liabilityShares,
             );
             console.log(
-              `  Balance ${index}: Bank ${balance.bankPk.toString()}, Asset shares: ${assetShares.toString()}, Liability shares: ${liabilityShares.toString()}`
+              `  Balance ${index}: Bank ${balance.bankPk.toString()}, Asset shares: ${assetShares.toString()}, Liability shares: ${liabilityShares.toString()}`,
             );
           }
         }
@@ -218,28 +218,28 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           userA,
           usdcBank,
           collateralAmount,
-          false
+          false,
         );
 
         // Verify withdrawal
         const userBalanceFinal = await getTokenBalance(
           bankRunProvider,
-          userA.usdcAccount
+          userA.usdcAccount,
         );
         const marginfiAccountFinal =
           await userA.mrgnBankrunProgram.account.marginfiAccount.fetch(
-            userA.accounts.get(USER_ACCOUNT_K)!
+            userA.accounts.get(USER_ACCOUNT_K)!,
           );
 
         const balanceFinal = marginfiAccountFinal.lendingAccount.balances.find(
-          (b) => b.bankPk.equals(usdcBank)
+          (b) => b.bankPk.equals(usdcBank),
         );
 
         assert.approximately(
           userBalanceFinal,
           userBalanceBefore,
           10, // Allow small rounding difference
-          "User should recover full deposit amount"
+          "User should recover full deposit amount",
         );
       });
 
@@ -248,7 +248,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         const tokenAPrice = 10;
         const tokenAAmount = 50_000; // 50k Token A = $500k
         const DEPOSIT_AMOUNT = new BN(tokenAAmount).mul(
-          new BN(10 ** ecosystem.tokenADecimals)
+          new BN(10 ** ecosystem.tokenADecimals),
         );
 
         // Fund user B with Token A
@@ -257,8 +257,8 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
             ecosystem.tokenAMint.publicKey,
             userB.tokenAAccount,
             globalProgramAdmin.wallet.publicKey,
-            DEPOSIT_AMOUNT.toNumber()
-          )
+            DEPOSIT_AMOUNT.toNumber(),
+          ),
         );
         await processBankrunTransaction(bankrunContext, fundTx, [
           globalProgramAdmin.wallet,
@@ -267,16 +267,16 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         // Get initial balances
         const userBalanceBefore = await getTokenBalance(
           bankRunProvider,
-          userB.tokenAAccount
+          userB.tokenAAccount,
         );
         const marginfiAccountBeforeDeposit =
           await userB.mrgnBankrunProgram.account.marginfiAccount.fetch(
-            userB.accounts.get(USER_ACCOUNT_K)!
+            userB.accounts.get(USER_ACCOUNT_K)!,
           );
 
         const balanceBeforeDeposit =
           marginfiAccountBeforeDeposit.lendingAccount.balances.find(
-            (b) => b.active === 1 && b.bankPk.equals(tokenABank)
+            (b) => b.active === 1 && b.bankPk.equals(tokenABank),
           );
 
         const collateralSharesBefore = balanceBeforeDeposit
@@ -289,14 +289,14 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
             klendBankrunProgram,
             tokenAReserve,
             kaminoAccounts.get(MARKET)!,
-            oracles.tokenAOracle.publicKey
+            oracles.tokenAOracle.publicKey,
           ),
           await simpleRefreshObligation(
             klendBankrunProgram,
             kaminoAccounts.get(MARKET)!,
             tokenABankObligation,
-            [tokenAReserve]
-          )
+            [tokenAReserve],
+          ),
         );
         await processBankrunTransaction(bankrunContext, refreshTx, [
           globalProgramAdmin.wallet,
@@ -314,12 +314,12 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
               lendingMarket: kaminoAccounts.get(MARKET)!,
               reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
               obligationFarmUserState: farmAccounts.get(
-                A_OBLIGATION_USER_STATE
+                A_OBLIGATION_USER_STATE,
               ),
               reserveFarmState: farmAccounts.get(A_FARM_STATE),
             },
-            DEPOSIT_AMOUNT
-          )
+            DEPOSIT_AMOUNT,
+          ),
         );
         await processBankrunTransaction(bankrunContext, depositTx, [
           userB.wallet,
@@ -328,32 +328,32 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         // Get balances after deposit
         const userBalanceAfterDeposit = await getTokenBalance(
           bankRunProvider,
-          userB.tokenAAccount
+          userB.tokenAAccount,
         );
         const marginfiAccountAfterDeposit =
           await userB.mrgnBankrunProgram.account.marginfiAccount.fetch(
-            userB.accounts.get(USER_ACCOUNT_K)!
+            userB.accounts.get(USER_ACCOUNT_K)!,
           );
 
         // Find the balance for Token A bank
         const balanceAfterDeposit =
           marginfiAccountAfterDeposit.lendingAccount.balances.find(
-            (b) => b.active === 1 && b.bankPk.equals(tokenABank)
+            (b) => b.active === 1 && b.bankPk.equals(tokenABank),
           )!;
 
         // Get collateral amount from marginfi balance difference (since user had existing deposits)
         const collateralSharesAfterDeposit = wrappedI80F48toBigNumber(
-          balanceAfterDeposit.assetShares
+          balanceAfterDeposit.assetShares,
         );
         const collateralDifference = collateralSharesAfterDeposit.minus(
-          collateralSharesBefore
+          collateralSharesBefore,
         );
         const collateralAmount = new BN(collateralDifference.toString());
 
         // Verify deposit
         assert.ok(
           userBalanceAfterDeposit ===
-            userBalanceBefore - DEPOSIT_AMOUNT.toNumber()
+            userBalanceBefore - DEPOSIT_AMOUNT.toNumber(),
         );
         assert.ok(collateralAmount.gt(new BN(0)));
 
@@ -362,13 +362,13 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           userB,
           tokenABank,
           collateralAmount,
-          false
+          false,
         );
 
         // Get final balances
         const userBalanceFinal = await getTokenBalance(
           bankRunProvider,
-          userB.tokenAAccount
+          userB.tokenAAccount,
         );
 
         // Verify withdrawal
@@ -376,7 +376,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           userBalanceFinal,
           userBalanceBefore,
           10,
-          "User should recover full deposit amount"
+          "User should recover full deposit amount",
         );
       });
     });
@@ -388,16 +388,16 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         // Get initial balance
         const userBalanceBefore = await getTokenBalance(
           bankRunProvider,
-          userA.usdcAccount
+          userA.usdcAccount,
         );
         const marginfiAccountBeforeDeposit =
           await userA.mrgnBankrunProgram.account.marginfiAccount.fetch(
-            userA.accounts.get(USER_ACCOUNT_K)!
+            userA.accounts.get(USER_ACCOUNT_K)!,
           );
 
         const balanceBeforeDeposit =
           marginfiAccountBeforeDeposit.lendingAccount.balances.find(
-            (b) => b.active === 1 && b.bankPk.equals(usdcBank)
+            (b) => b.active === 1 && b.bankPk.equals(usdcBank),
           );
 
         const collateralSharesBefore = balanceBeforeDeposit
@@ -410,14 +410,14 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
             klendBankrunProgram,
             usdcReserve,
             kaminoAccounts.get(MARKET)!,
-            oracles.usdcOracle.publicKey
+            oracles.usdcOracle.publicKey,
           ),
           await simpleRefreshObligation(
             klendBankrunProgram,
             kaminoAccounts.get(MARKET)!,
             usdcBankObligation,
-            [usdcReserve]
-          )
+            [usdcReserve],
+          ),
         );
         await processBankrunTransaction(bankrunContext, refreshTx, [
           globalProgramAdmin.wallet,
@@ -435,8 +435,8 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
               lendingMarket: kaminoAccounts.get(MARKET)!,
               reserveLiquidityMint: ecosystem.usdcMint.publicKey,
             },
-            DEPOSIT_AMOUNT
-          )
+            DEPOSIT_AMOUNT,
+          ),
         );
         await processBankrunTransaction(bankrunContext, depositTx, [
           userA.wallet,
@@ -445,29 +445,29 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         // Get collateral amount from marginfi balance difference (since user had existing deposits)
         const marginfiAccountAfterDeposit =
           await userA.mrgnBankrunProgram.account.marginfiAccount.fetch(
-            userA.accounts.get(USER_ACCOUNT_K)!
+            userA.accounts.get(USER_ACCOUNT_K)!,
           );
         const balanceAfterDeposit =
           marginfiAccountAfterDeposit.lendingAccount.balances.find(
-            (b) => b.active === 1 && b.bankPk.equals(usdcBank)
+            (b) => b.active === 1 && b.bankPk.equals(usdcBank),
           )!;
 
         const collateralSharesAfterDeposit = wrappedI80F48toBigNumber(
-          balanceAfterDeposit.assetShares
+          balanceAfterDeposit.assetShares,
         );
         const collateralDifference = collateralSharesAfterDeposit.minus(
-          collateralSharesBefore
+          collateralSharesBefore,
         );
         const collateralAmount = new BN(collateralDifference.toString());
 
         // Verify deposit
         const userBalanceAfterDeposit = await getTokenBalance(
           bankRunProvider,
-          userA.usdcAccount
+          userA.usdcAccount,
         );
         assert.ok(
           userBalanceAfterDeposit ===
-            userBalanceBefore - DEPOSIT_AMOUNT.toNumber()
+            userBalanceBefore - DEPOSIT_AMOUNT.toNumber(),
         );
         assert.ok(collateralAmount.gt(new BN(0)));
 
@@ -476,13 +476,13 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           userA,
           usdcBank,
           collateralAmount,
-          false
+          false,
         );
 
         // Get final balance
         const userBalanceFinal = await getTokenBalance(
           bankRunProvider,
-          userA.usdcAccount
+          userA.usdcAccount,
         );
 
         // For tiny amounts (10 units), rounding can be significant but should still be close
@@ -490,7 +490,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           userBalanceFinal,
           userBalanceBefore,
           1, // Very small tolerance for 10 unit amount
-          "User should recover deposit amount within rounding tolerance"
+          "User should recover deposit amount within rounding tolerance",
         );
       });
 
@@ -500,16 +500,16 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         // Get initial balance
         const userBalanceBefore = await getTokenBalance(
           bankRunProvider,
-          userB.tokenAAccount
+          userB.tokenAAccount,
         );
         const marginfiAccountBeforeDeposit =
           await userB.mrgnBankrunProgram.account.marginfiAccount.fetch(
-            userB.accounts.get(USER_ACCOUNT_K)!
+            userB.accounts.get(USER_ACCOUNT_K)!,
           );
 
         const balanceBeforeDeposit =
           marginfiAccountBeforeDeposit.lendingAccount.balances.find(
-            (b) => b.active === 1 && b.bankPk.equals(tokenABank)
+            (b) => b.active === 1 && b.bankPk.equals(tokenABank),
           );
 
         const collateralSharesBefore = balanceBeforeDeposit
@@ -522,14 +522,14 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
             klendBankrunProgram,
             tokenAReserve,
             kaminoAccounts.get(MARKET)!,
-            oracles.tokenAOracle.publicKey
+            oracles.tokenAOracle.publicKey,
           ),
           await simpleRefreshObligation(
             klendBankrunProgram,
             kaminoAccounts.get(MARKET)!,
             tokenABankObligation,
-            [tokenAReserve]
-          )
+            [tokenAReserve],
+          ),
         );
         await processBankrunTransaction(bankrunContext, refreshTx, [
           globalProgramAdmin.wallet,
@@ -547,12 +547,12 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
               lendingMarket: kaminoAccounts.get(MARKET)!,
               reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
               obligationFarmUserState: farmAccounts.get(
-                A_OBLIGATION_USER_STATE
+                A_OBLIGATION_USER_STATE,
               ),
               reserveFarmState: farmAccounts.get(A_FARM_STATE),
             },
-            DEPOSIT_AMOUNT
-          )
+            DEPOSIT_AMOUNT,
+          ),
         );
         await processBankrunTransaction(bankrunContext, depositTx, [
           userB.wallet,
@@ -561,29 +561,29 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         // Get collateral amount from marginfi balance difference (since user had existing deposits)
         const marginfiAccountAfterDeposit =
           await userB.mrgnBankrunProgram.account.marginfiAccount.fetch(
-            userB.accounts.get(USER_ACCOUNT_K)!
+            userB.accounts.get(USER_ACCOUNT_K)!,
           );
         const balanceAfterDeposit =
           marginfiAccountAfterDeposit.lendingAccount.balances.find(
-            (b) => b.active === 1 && b.bankPk.equals(tokenABank)
+            (b) => b.active === 1 && b.bankPk.equals(tokenABank),
           )!;
 
         const collateralSharesAfterDeposit = wrappedI80F48toBigNumber(
-          balanceAfterDeposit.assetShares
+          balanceAfterDeposit.assetShares,
         );
         const collateralDifference = collateralSharesAfterDeposit.minus(
-          collateralSharesBefore
+          collateralSharesBefore,
         );
         const collateralAmount = new BN(collateralDifference.toString());
 
         // Verify deposit
         const userBalanceAfterDeposit = await getTokenBalance(
           bankRunProvider,
-          userB.tokenAAccount
+          userB.tokenAAccount,
         );
         assert.ok(
           userBalanceAfterDeposit ===
-            userBalanceBefore - DEPOSIT_AMOUNT.toNumber()
+            userBalanceBefore - DEPOSIT_AMOUNT.toNumber(),
         );
         assert.ok(collateralAmount.gt(new BN(0)));
 
@@ -592,13 +592,13 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           userB,
           tokenABank,
           collateralAmount,
-          false
+          false,
         );
 
         // Get final balance
         const userBalanceFinal = await getTokenBalance(
           bankRunProvider,
-          userB.tokenAAccount
+          userB.tokenAAccount,
         );
 
         // For tiny amounts (10 units), rounding can be significant but should still be close
@@ -606,7 +606,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           userBalanceFinal,
           userBalanceBefore,
           1, // Very small tolerance for 10 unit amount
-          "User should recover deposit amount within rounding tolerance"
+          "User should recover deposit amount within rounding tolerance",
         );
       });
     });
@@ -615,7 +615,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
   describe("2. Reserve Refresh Requirement Tests (Expected Failures)", () => {
     it("Verify reserve refresh is required for deposits after time advancement", async () => {
       const DEPOSIT_AMOUNT = new BN(10_000).mul(
-        new BN(10 ** ecosystem.usdcDecimals)
+        new BN(10 ** ecosystem.usdcDecimals),
       );
 
       // Fund user
@@ -624,8 +624,8 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           ecosystem.usdcMint.publicKey,
           userA.usdcAccount,
           globalProgramAdmin.wallet.publicKey,
-          DEPOSIT_AMOUNT.toNumber()
-        )
+          DEPOSIT_AMOUNT.toNumber(),
+        ),
       );
       await processBankrunTransaction(bankrunContext, fundTx, [
         globalProgramAdmin.wallet,
@@ -637,14 +637,14 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           klendBankrunProgram,
           usdcReserve,
           kaminoAccounts.get(MARKET)!,
-          oracles.usdcOracle.publicKey
+          oracles.usdcOracle.publicKey,
         ),
         await simpleRefreshObligation(
           klendBankrunProgram,
           kaminoAccounts.get(MARKET)!,
           usdcBankObligation,
-          [usdcReserve]
-        )
+          [usdcReserve],
+        ),
       );
       await processBankrunTransaction(bankrunContext, refreshTx, [
         globalProgramAdmin.wallet,
@@ -661,8 +661,8 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
             lendingMarket: kaminoAccounts.get(MARKET)!,
             reserveLiquidityMint: ecosystem.usdcMint.publicKey,
           },
-          DEPOSIT_AMOUNT
-        )
+          DEPOSIT_AMOUNT,
+        ),
       );
       await processBankrunTransaction(bankrunContext, depositTx, [
         userA.wallet,
@@ -677,7 +677,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         0n,
         currentClock.epoch,
         0n,
-        newTimestamp
+        newTimestamp,
       );
       bankrunContext.setClock(newClock);
 
@@ -695,8 +695,8 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
             lendingMarket: kaminoAccounts.get(MARKET)!,
             reserveLiquidityMint: ecosystem.usdcMint.publicKey,
           },
-          DEPOSIT_AMOUNT
-        )
+          DEPOSIT_AMOUNT,
+        ),
       );
 
       const result = await processBankrunTransaction(
@@ -704,7 +704,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         secondDepositTx,
         [userA.wallet],
         true, // trySend=true
-        false // dumpLogOnFail=false
+        false, // dumpLogOnFail=false
       );
 
       // Assert that we get the expected ReserveStale error (same error as Solend)
@@ -715,10 +715,10 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
       // Get current user position
       const marginfiAccountBefore =
         await userA.mrgnBankrunProgram.account.marginfiAccount.fetch(
-          userA.accounts.get(USER_ACCOUNT_K)!
+          userA.accounts.get(USER_ACCOUNT_K)!,
         );
       const balanceBefore = marginfiAccountBefore.lendingAccount.balances.find(
-        (b) => b.active === 1 && b.bankPk.equals(usdcBank)
+        (b) => b.active === 1 && b.bankPk.equals(usdcBank),
       );
 
       if (!balanceBefore) {
@@ -726,7 +726,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
       }
 
       const assetSharesBefore = wrappedI80F48toBigNumber(
-        balanceBefore.assetShares
+        balanceBefore.assetShares,
       );
       const halfAmount = new BN(assetSharesBefore.toString()).div(new BN(2));
 
@@ -739,7 +739,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         0n,
         currentClock.epoch,
         0n,
-        newTimestamp
+        newTimestamp,
       );
       bankrunContext.setClock(newClock);
 
@@ -764,8 +764,8 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
             remaining: composeRemainingAccounts([
               [usdcBank, oracles.usdcOracle.publicKey, usdcReserve],
             ]),
-          }
-        )
+          },
+        ),
       );
 
       const result = await processBankrunTransaction(
@@ -773,7 +773,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         withdrawTx,
         [userA.wallet],
         true, // trySend=true
-        false // dumpLogOnFail=false
+        false, // dumpLogOnFail=false
       );
 
       // Assert that we get the expected ReserveStale error (6005 = 0x1775)
@@ -784,7 +784,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
   describe("3. Time-Based Interest Accrual Tests", () => {
     it("Deposit USDC, advance time, verify interest accrual", async () => {
       const DEPOSIT_AMOUNT = new BN(10_000).mul(
-        new BN(10 ** ecosystem.usdcDecimals)
+        new BN(10 ** ecosystem.usdcDecimals),
       );
 
       // Fund user
@@ -793,8 +793,8 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           ecosystem.usdcMint.publicKey,
           userA.usdcAccount,
           globalProgramAdmin.wallet.publicKey,
-          DEPOSIT_AMOUNT.toNumber()
-        )
+          DEPOSIT_AMOUNT.toNumber(),
+        ),
       );
       await processBankrunTransaction(bankrunContext, fundTx, [
         globalProgramAdmin.wallet,
@@ -802,7 +802,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
 
       const userBalanceBeforeDeposit = await getTokenBalance(
         bankRunProvider,
-        userA.usdcAccount
+        userA.usdcAccount,
       );
 
       // Refresh and deposit
@@ -811,14 +811,14 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           klendBankrunProgram,
           usdcReserve,
           kaminoAccounts.get(MARKET)!,
-          oracles.usdcOracle.publicKey
+          oracles.usdcOracle.publicKey,
         ),
         await simpleRefreshObligation(
           klendBankrunProgram,
           kaminoAccounts.get(MARKET)!,
           usdcBankObligation,
-          [usdcReserve]
-        )
+          [usdcReserve],
+        ),
       );
       await processBankrunTransaction(bankrunContext, refreshTx, [
         globalProgramAdmin.wallet,
@@ -835,8 +835,8 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
             lendingMarket: kaminoAccounts.get(MARKET)!,
             reserveLiquidityMint: ecosystem.usdcMint.publicKey,
           },
-          DEPOSIT_AMOUNT
-        )
+          DEPOSIT_AMOUNT,
+        ),
       );
       await processBankrunTransaction(bankrunContext, depositTx, [
         userA.wallet,
@@ -845,13 +845,13 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
       // Get initial collateral balance
       const marginfiAccountBefore =
         await userA.mrgnBankrunProgram.account.marginfiAccount.fetch(
-          userA.accounts.get(USER_ACCOUNT_K)!
+          userA.accounts.get(USER_ACCOUNT_K)!,
         );
       const balanceBefore = marginfiAccountBefore.lendingAccount.balances.find(
-        (b) => b.active === 1 && b.bankPk.equals(usdcBank)
+        (b) => b.active === 1 && b.bankPk.equals(usdcBank),
       )!;
       const collateralTokensBefore = new BN(
-        wrappedI80F48toBigNumber(balanceBefore.assetShares).toString()
+        wrappedI80F48toBigNumber(balanceBefore.assetShares).toString(),
       );
 
       // Advance time by 1 day (86400 seconds)
@@ -863,7 +863,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         0n,
         currentClock.epoch,
         0n,
-        newTimestamp
+        newTimestamp,
       );
       bankrunContext.setClock(newClock);
 
@@ -876,19 +876,19 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         userA,
         usdcBank,
         collateralTokensBefore,
-        false
+        false,
       );
 
       const userBalanceFinal = await getTokenBalance(
         bankRunProvider,
-        userA.usdcAccount
+        userA.usdcAccount,
       );
       const receivedAmount = userBalanceFinal - userBalanceBeforeDeposit;
 
       // Should have received at least the deposit amount (interest might be very small)
       assert.ok(
         receivedAmount >= DEPOSIT_AMOUNT.toNumber(),
-        `Expected at least ${DEPOSIT_AMOUNT.toString()}, got ${receivedAmount}`
+        `Expected at least ${DEPOSIT_AMOUNT.toString()}, got ${receivedAmount}`,
       );
     });
   });
@@ -907,32 +907,32 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
             ecosystem.usdcMint.publicKey,
             userA.usdcAccount,
             globalProgramAdmin.wallet.publicKey,
-            fundAmount.mul(new BN(10 ** ecosystem.usdcDecimals)).toNumber()
-          )
+            fundAmount.mul(new BN(10 ** ecosystem.usdcDecimals)).toNumber(),
+          ),
         )
         .add(
           createMintToInstruction(
             ecosystem.tokenAMint.publicKey,
             userA.tokenAAccount,
             globalProgramAdmin.wallet.publicKey,
-            fundAmount.mul(new BN(10 ** ecosystem.tokenADecimals)).toNumber()
-          )
+            fundAmount.mul(new BN(10 ** ecosystem.tokenADecimals)).toNumber(),
+          ),
         )
         .add(
           createMintToInstruction(
             ecosystem.usdcMint.publicKey,
             userB.usdcAccount,
             globalProgramAdmin.wallet.publicKey,
-            fundAmount.mul(new BN(10 ** ecosystem.usdcDecimals)).toNumber()
-          )
+            fundAmount.mul(new BN(10 ** ecosystem.usdcDecimals)).toNumber(),
+          ),
         )
         .add(
           createMintToInstruction(
             ecosystem.tokenAMint.publicKey,
             userB.tokenAAccount,
             globalProgramAdmin.wallet.publicKey,
-            fundAmount.mul(new BN(10 ** ecosystem.tokenADecimals)).toNumber()
-          )
+            fundAmount.mul(new BN(10 ** ecosystem.tokenADecimals)).toNumber(),
+          ),
         );
       await processBankrunTransaction(bankrunContext, fundTx, [
         globalProgramAdmin.wallet,
@@ -961,10 +961,10 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         // Check current account value (simplified - just checking if position exists)
         const marginfiAccount =
           await user.mrgnBankrunProgram.account.marginfiAccount.fetch(
-            user.accounts.get(USER_ACCOUNT_K)!
+            user.accounts.get(USER_ACCOUNT_K)!,
           );
         const existingBalance = marginfiAccount.lendingAccount.balances.find(
-          (b) => b.active === 1 && b.bankPk.equals(bank)
+          (b) => b.active === 1 && b.bankPk.equals(bank),
         );
 
         const hasPosition =
@@ -979,7 +979,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           // Withdraw - helper will handle refresh internally
           const withdrawAll = Math.random() < 0.5;
           const cTokenAmount = new BN(
-            wrappedI80F48toBigNumber(existingBalance!.assetShares).toString()
+            wrappedI80F48toBigNumber(existingBalance!.assetShares).toString(),
           );
           const withdrawAmount = withdrawAll
             ? cTokenAmount
@@ -991,7 +991,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
             user,
             bank,
             withdrawAmount,
-            false
+            false,
           );
         } else {
           // Deposit - refresh before deposit
@@ -1000,20 +1000,20 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
               klendBankrunProgram,
               reserve,
               kaminoAccounts.get(MARKET)!,
-              oracle
+              oracle,
             ),
             await simpleRefreshObligation(
               klendBankrunProgram,
               kaminoAccounts.get(MARKET)!,
               obligation,
-              [reserve]
+              [reserve],
             ),
             // dummy tx to trick bankrun
             SystemProgram.transfer({
               fromPubkey: globalProgramAdmin.wallet.publicKey,
               toPubkey: groupAdmin.wallet.publicKey,
               lamports: Math.round(Math.random() * 10000),
-            })
+            }),
           );
           await processBankrunTransaction(bankrunContext, refreshTx, [
             globalProgramAdmin.wallet,
@@ -1024,7 +1024,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
             Math.random() * (MAX_DEPOSIT_USD - MIN_DEPOSIT_USD);
           const tokenAmount = depositUsdValue / tokenPrice;
           const depositAmount = new BN(Math.floor(tokenAmount)).mul(
-            new BN(10 ** decimals)
+            new BN(10 ** decimals),
           );
 
           const depositTx = new Transaction().add(
@@ -1045,14 +1045,14 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
                   ? farmAccounts.get(A_FARM_STATE)
                   : null,
               },
-              depositAmount
+              depositAmount,
             ),
             // dummy tx to trick bankrun
             SystemProgram.transfer({
               fromPubkey: user.wallet.publicKey,
               toPubkey: groupAdmin.wallet.publicKey,
               lamports: Math.round(Math.random() * 10000),
-            })
+            }),
           );
           await processBankrunTransaction(bankrunContext, depositTx, [
             user.wallet,
@@ -1069,7 +1069,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           0n,
           currentClock.epoch,
           0n,
-          currentClock.unixTimestamp + BigInt(timeAdvance)
+          currentClock.unixTimestamp + BigInt(timeAdvance),
         );
         bankrunContext.setClock(newClock);
 
@@ -1093,16 +1093,16 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
               klendBankrunProgram,
               usdcReserve,
               kaminoAccounts.get(MARKET)!,
-              oracles.usdcOracle.publicKey
-            )
+              oracles.usdcOracle.publicKey,
+            ),
           )
           .add(
             await simpleRefreshObligation(
               klendBankrunProgram,
               kaminoAccounts.get(MARKET)!,
               usdcBankObligation,
-              [usdcReserve]
-            )
+              [usdcReserve],
+            ),
           )
           .add(
             await makeKaminoDepositIx(
@@ -1114,8 +1114,8 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
                 lendingMarket: kaminoAccounts.get(MARKET)!,
                 reserveLiquidityMint: ecosystem.usdcMint.publicKey,
               },
-              DEPOSIT1
-            )
+              DEPOSIT1,
+            ),
           );
         await processBankrunTransaction(bankrunContext, tx, [userA.wallet]);
 
@@ -1127,7 +1127,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           0n,
           clock1.epoch,
           0n,
-          clock1.unixTimestamp + BigInt(300)
+          clock1.unixTimestamp + BigInt(300),
         );
         bankrunContext.setClock(newClock);
 
@@ -1142,16 +1142,16 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
               klendBankrunProgram,
               usdcReserve,
               kaminoAccounts.get(MARKET)!,
-              oracles.usdcOracle.publicKey
-            )
+              oracles.usdcOracle.publicKey,
+            ),
           )
           .add(
             await simpleRefreshObligation(
               klendBankrunProgram,
               kaminoAccounts.get(MARKET)!,
               usdcBankObligation,
-              [usdcReserve]
-            )
+              [usdcReserve],
+            ),
           )
           .add(
             await makeKaminoDepositIx(
@@ -1163,8 +1163,8 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
                 lendingMarket: kaminoAccounts.get(MARKET)!,
                 reserveLiquidityMint: ecosystem.usdcMint.publicKey,
               },
-              DEPOSIT2
-            )
+              DEPOSIT2,
+            ),
           );
         await processBankrunTransaction(bankrunContext, tx, [userA.wallet]);
 
@@ -1173,21 +1173,21 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           userA,
           usdcBank,
           new BN(0),
-          true
+          true,
         );
 
         // Verify position is completely closed
         const finalAccount =
           await userA.mrgnBankrunProgram.account.marginfiAccount.fetch(
-            userA.accounts.get(USER_ACCOUNT_K)!
+            userA.accounts.get(USER_ACCOUNT_K)!,
           );
         const finalBalance = finalAccount.lendingAccount.balances.find((b) =>
-          b.bankPk.equals(usdcBank)
+          b.bankPk.equals(usdcBank),
         );
 
         assert.ok(
           !finalBalance || finalBalance.active === 0,
-          "Position should be completely closed"
+          "Position should be completely closed",
         );
       });
     });
@@ -1201,7 +1201,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         // Get fresh account state
         const currentAccount =
           await userA.mrgnBankrunProgram.account.marginfiAccount.fetch(
-            userA.accounts.get(USER_ACCOUNT_K)!
+            userA.accounts.get(USER_ACCOUNT_K)!,
           );
 
         // Find first active position with shares > 0
@@ -1233,7 +1233,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         // Get fresh account state for User B
         const currentAccountB =
           await userB.mrgnBankrunProgram.account.marginfiAccount.fetch(
-            userB.accounts.get(USER_ACCOUNT_K)!
+            userB.accounts.get(USER_ACCOUNT_K)!,
           );
 
         // Find first active position with shares > 0
@@ -1262,11 +1262,11 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
       // Final verification
       const finalAccountA =
         await userA.mrgnBankrunProgram.account.marginfiAccount.fetch(
-          userA.accounts.get(USER_ACCOUNT_K)!
+          userA.accounts.get(USER_ACCOUNT_K)!,
         );
       const finalAccountB =
         await userB.mrgnBankrunProgram.account.marginfiAccount.fetch(
-          userB.accounts.get(USER_ACCOUNT_K)!
+          userB.accounts.get(USER_ACCOUNT_K)!,
         );
 
       // Check all balances are inactive or zero
@@ -1291,7 +1291,7 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
     user: MockUser,
     bank: PublicKey,
     amount: BN,
-    isFinalWithdrawal: boolean = false
+    isFinalWithdrawal: boolean = false,
   ): Promise<void> {
     const userAccount = user.accounts.get(USER_ACCOUNT_K)!;
 
@@ -1348,20 +1348,20 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
         klendBankrunProgram,
         reserve,
         kaminoAccounts.get(MARKET)!,
-        oracle
+        oracle,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         kaminoAccounts.get(MARKET)!,
         obligation,
-        [reserve]
+        [reserve],
       ),
       // dummy tx to trick bankrun
       SystemProgram.transfer({
         fromPubkey: globalProgramAdmin.wallet.publicKey,
         toPubkey: groupAdmin.wallet.publicKey,
         lamports: Math.round(Math.random() * 10000),
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, refreshTx, [
       globalProgramAdmin.wallet,
@@ -1389,14 +1389,14 @@ describe("k15: Kamino - Marginfi Deposits & Withdrawals", () => {
           amount: isFinalWithdrawal ? new BN(0) : amount,
           isFinalWithdrawal,
           remaining: composeRemainingAccounts(activePositions),
-        }
+        },
       ),
       // dummy tx to trick bankrun
       SystemProgram.transfer({
         fromPubkey: user.wallet.publicKey,
         toPubkey: groupAdmin.wallet.publicKey,
         lamports: Math.round(Math.random() * 10000),
-      })
+      }),
     );
 
     await processBankrunTransaction(bankrunContext, withdrawTx, [user.wallet]);

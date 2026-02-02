@@ -269,7 +269,7 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
             group: kaminoGroup.publicKey,
             feePayer: groupAdmin.wallet.publicKey,
             bankMint: mint,
-            integrationAcc1: reserveKeypair.publicKey,
+            kaminoReserve: reserveKeypair.publicKey,
             kaminoMarket: marketKeypair.publicKey,
             oracle: oracles.tokenAOracle.publicKey,
           },

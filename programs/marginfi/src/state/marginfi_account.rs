@@ -1,10 +1,10 @@
 use super::price::{OraclePriceFeedAdapter, OraclePriceType, PriceAdapter, PriceBias};
 use crate::{
     allocator::{heap_pos, heap_restore},
-    check, check_eq, debug, math_error,
+    check, check_eq, debug, live, math_error,
     prelude::{MarginfiError, MarginfiResult},
     state::{bank::BankImpl, bank_config::BankConfigImpl},
-    utils::NumTraitsWithTolerance,
+    utils::{is_integration_asset_tag, NumTraitsWithTolerance},
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
@@ -12,8 +12,8 @@ use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_KAMINO, ASSET_TAG_SOL, ASSET_TAG_SOLEND,
         ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, EMISSIONS_FLAG_BORROW_ACTIVE,
-        EMISSIONS_FLAG_LENDING_ACTIVE, EXP_10_I80F48, MIN_EMISSIONS_START_TIME, SECONDS_PER_YEAR,
-        ZERO_AMOUNT_THRESHOLD,
+        EMISSIONS_FLAG_LENDING_ACTIVE, EXP_10_I80F48, MAX_INTEGRATION_POSITIONS,
+        MIN_EMISSIONS_START_TIME, SECONDS_PER_YEAR, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
         reconcile_emode_configs, Balance, BalanceSide, Bank, BankOperationalState, EmodeConfig,
@@ -1019,6 +1019,23 @@ impl<'a> BankAccountWrapper<'a> {
                 Ok(Self { balance, bank })
             }
             None => {
+                // Enforce integration position limit before creating a new integration position
+                if is_integration_asset_tag(bank.config.asset_tag) {
+                    let integration_position_count = lending_account
+                        .balances
+                        .iter()
+                        .filter(|b| b.is_active() && is_integration_asset_tag(b.bank_asset_tag))
+                        .count();
+
+                    // Note: this check is disabled in local integration tests so that we can measure the performance and
+                    // eventually get rid of this limit altogether.
+                    if live!() {
+                        check!(
+                            integration_position_count < MAX_INTEGRATION_POSITIONS,
+                            MarginfiError::IntegrationPositionLimitExceeded
+                        );
+                    }
+                }
                 let empty_index = lending_account
                     .get_first_empty_balance()
                     .ok_or_else(|| error!(MarginfiError::LendingAccountBalanceSlotsFull))?;

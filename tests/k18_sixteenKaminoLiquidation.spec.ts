@@ -281,7 +281,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
             group: kaminoGroup.publicKey,
             feePayer: groupAdmin.wallet.publicKey,
             bankMint: mint,
-            integrationAcc1: reserveKeypair.publicKey,
+            kaminoReserve: reserveKeypair.publicKey,
             kaminoMarket: marketKeypair.publicKey,
             oracle: oracles.tokenAOracle.publicKey,
           },

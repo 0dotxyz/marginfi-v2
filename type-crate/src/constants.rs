@@ -168,6 +168,13 @@ pub const ASSET_TAG_DRIFT: u8 = 4;
 /// assets (`ASSET_TAG_DEFAULT`).
 pub const ASSET_TAG_SOLEND: u8 = 5;
 
+/// Maximum number of integration positions (Kamino + Drift + Solend) allowed per account. Hardcoded
+/// limit to prevent accounts from becoming unliquidatable due to CU/heap memory issues in
+/// liquidation. These integrations require 3 accounts per position for health checks (bank + oracle
+/// + reserve/spot-market), so they share the same limit.
+/// Note: it's disabled in local integration tests so that we can measure the performance and
+/// eventually get rid of this limit altogether.
+pub const MAX_INTEGRATION_POSITIONS: usize = 8;
 // WARN: You can set anything here, including a discrim that's technically "wrong" for the struct
 // with that name, and prod will use that hash anyways. Don't change these hashes once a struct is
 // live in prod.

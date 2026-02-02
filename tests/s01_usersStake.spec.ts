@@ -2,7 +2,6 @@ import { BN } from "@coral-xyz/anchor";
 import {
   LAMPORTS_PER_SOL,
   PublicKey,
-  SystemProgram,
   Transaction,
 } from "@solana/web3.js";
 import {
@@ -12,7 +11,6 @@ import {
   validators,
   verbose,
   banksClient,
-  bankrunProgram,
 } from "./rootHooks";
 import {
   createStakeAccount,
@@ -189,7 +187,7 @@ describe("User stakes some native and creates an account", () => {
       console.log("");
     }
 
-    // Advance a few slots and send some dummy txes to end the rewards period
+    // Advance a few slots to end the rewards period
 
     // NOTE: ALL STAKE PROGRAM IXES ARE DISABLED DURING THE REWARDS PERIOD. THIS MUST OCCUR OR THE
     // STAKE PROGRAM CANNOT RUN
@@ -199,17 +197,6 @@ describe("User stakes some native and creates an account", () => {
     }
     for (let i = 0; i < 3; i++) {
       bankrunContext.warpToSlot(BigInt(i + slotAfterWarp + 1));
-      const dummyTx = new Transaction();
-      dummyTx.add(
-        SystemProgram.transfer({
-          fromPubkey: users[0].wallet.publicKey,
-          toPubkey: bankrunProgram.provider.publicKey,
-          lamports: i,
-        })
-      );
-      dummyTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      dummyTx.sign(users[0].wallet);
-      await banksClient.processTransaction(dummyTx);
     }
 
     let { epoch, slot } = await getEpochAndSlot(banksClient);

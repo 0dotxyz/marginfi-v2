@@ -32,6 +32,7 @@ import { assert } from "chai";
 import {
   CONF_INTERVAL_MULTIPLE,
   defaultBankConfigOptRaw,
+  MAX_BALANCES,
   newEmodeEntry,
   ORACLE_CONF_INTERVAL,
 } from "./utils/types";
@@ -68,7 +69,6 @@ const startingSeed: number = 299;
 const groupBuff = Buffer.from("MARGINFI_GROUP_SEED_1234000000M2");
 
 /** This is the program-enforced maximum enforced number of balances per account. */
-const MAX_BALANCES = 16;
 const USER_ACCOUNT_THROWAWAY = "throwaway_account3";
 
 let banks: PublicKey[] = [];
@@ -76,7 +76,7 @@ let throwawayGroup: Keypair;
 let remainingAccounts: PublicKey[][] = [];
 let lookupTable: PublicKey;
 
-describe("Limits on number of accounts, with emode in effect", () => {
+describe("m02: Limits on number of accounts, with emode in effect", () => {
   it("init group, init banks, and fund banks", async () => {
     const result = await genericMultiBankTestSetup(
       MAX_BALANCES,

@@ -40,7 +40,7 @@ import {
   dumpAccBalances,
   processBankrunTransaction,
 } from "./utils/tools";
-import { genericKaminoMultiBankTestSetup } from "./genericSetups";
+import { genericMultiBankTestSetup } from "./genericSetups";
 import {
   makeKaminoDepositIx,
   makeKaminoWithdrawIx,
@@ -76,14 +76,15 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
   });
 
   it("init group, init banks, and fund banks", async () => {
-    const result = await genericKaminoMultiBankTestSetup(
+    const result = await genericMultiBankTestSetup(
       MAX_BALANCES,
       USER_ACCOUNT_THROWAWAY,
       groupBuff,
-      startingSeed
+      startingSeed,
+      KAMINO_POSITIONS + 1
     );
     kaminoBanks = result.kaminoBanks;
-    regularBanks = result.regularBanks;
+    regularBanks = result.banks;
     throwawayGroup = result.throwawayGroup;
   });
 

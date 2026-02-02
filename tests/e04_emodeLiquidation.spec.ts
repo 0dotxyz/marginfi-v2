@@ -45,7 +45,7 @@ import {
 import { configBankEmode } from "./utils/group-instructions";
 import { bytesToF64, logHealthCache } from "./utils/tools";
 import { assert } from "chai";
-import { dummyTx } from "./utils/bankrunConnection";
+import { dummyIx } from "./utils/bankrunConnection";
 
 // Banks are listed here in the sorted-by-public-keys order - the same used in the lending account balances
 const seed = new BN(EMODE_SEED);
@@ -603,7 +603,7 @@ describe("Emode liquidation", () => {
     remaining: Array<PublicKey>
   ) => {
     const tx = new Transaction().add(
-      dummyTx(user.wallet.publicKey, users[1].wallet.publicKey),
+      dummyIx(user.wallet.publicKey, users[1].wallet.publicKey),
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         remaining,
