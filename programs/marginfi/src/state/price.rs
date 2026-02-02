@@ -83,23 +83,11 @@ fn check_primary_oracle_key(
     bank_config: &BankConfig,
     account_info: &AccountInfo,
 ) -> MarginfiResult<()> {
-    check_oracle_key(
-        bank_config,
-        account_info,
-        0,
-        MarginfiError::WrongOracleAccountKeys,
-    )?;
-    Ok(())
-}
-
-/// Returns the given error if config.oracle_keys[key_index] != account_info.key, otherwise OK
-fn check_oracle_key(
-    bank_config: &BankConfig,
-    account_info: &AccountInfo,
-    key_index: usize,
-    err: MarginfiError,
-) -> MarginfiResult<()> {
-    require_keys_eq!(*account_info.key, bank_config.oracle_keys[key_index], err);
+    require_keys_eq!(
+        *account_info.key,
+        bank_config.oracle_keys[0],
+        MarginfiError::WrongOracleAccountKeys
+    );
     Ok(())
 }
 
@@ -258,11 +246,6 @@ impl OraclePriceFeedAdapter {
                 let account_info = &ais[0];
                 check_primary_oracle_key(bank_config, account_info)?;
 
-                // On localnet, allow the mock program ID OR the real one (for regression tests against
-                // actual mainnet accounts).
-                // * Note: Typically price updates are owned by `pyth_solana_receiver_sdk` and the oracle
-                // feed account itself is owned by PYTH ID. On localnet, the mock program may own both for
-                // simplicity.
                 let mut feed = PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
 
                 let adjusted_price = (feed.price.price as i128)
@@ -573,12 +556,11 @@ impl OraclePriceFeedAdapter {
 
                 load_price_update_v2_checked(&oracle_ais[0])?;
 
-                check_oracle_key(
-                    bank_config,
-                    &oracle_ais[1],
-                    1,
-                    MarginfiError::KaminoReserveValidationFailed,
-                )?;
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::KaminoReserveValidationFailed
+                );
                 Ok(())
             }
             OracleSetup::KaminoSwitchboardPull => {
@@ -592,12 +574,11 @@ impl OraclePriceFeedAdapter {
 
                 SwitchboardPullPriceFeed::check_ais(&oracle_ais[0])?;
 
-                check_oracle_key(
-                    bank_config,
-                    &oracle_ais[1],
-                    1,
-                    MarginfiError::KaminoReserveValidationFailed,
-                )?;
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::KaminoReserveValidationFailed
+                );
                 Ok(())
             }
             OracleSetup::PythLegacy => {
@@ -706,12 +687,11 @@ impl OraclePriceFeedAdapter {
 
                 load_price_update_v2_checked(&oracle_ais[0])?;
 
-                check_oracle_key(
-                    bank_config,
-                    &oracle_ais[1],
-                    1,
-                    MarginfiError::DriftSpotMarketValidationFailed,
-                )?;
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::DriftSpotMarketValidationFailed
+                );
                 Ok(())
             }
             OracleSetup::DriftSwitchboardPull => {
@@ -725,12 +705,11 @@ impl OraclePriceFeedAdapter {
 
                 SwitchboardPullPriceFeed::check_ais(&oracle_ais[0])?;
 
-                check_oracle_key(
-                    bank_config,
-                    &oracle_ais[1],
-                    1,
-                    MarginfiError::DriftSpotMarketValidationFailed,
-                )?;
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::DriftSpotMarketValidationFailed
+                );
                 Ok(())
             }
             OracleSetup::SolendPythPull => {
@@ -744,12 +723,11 @@ impl OraclePriceFeedAdapter {
 
                 load_price_update_v2_checked(&oracle_ais[0])?;
 
-                check_oracle_key(
-                    bank_config,
-                    &oracle_ais[1],
-                    1,
-                    MarginfiError::SolendReserveValidationFailed,
-                )?;
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::SolendReserveValidationFailed
+                );
                 Ok(())
             }
             OracleSetup::SolendSwitchboardPull => {
@@ -763,12 +741,11 @@ impl OraclePriceFeedAdapter {
 
                 SwitchboardPullPriceFeed::check_ais(&oracle_ais[0])?;
 
-                check_oracle_key(
-                    bank_config,
-                    &oracle_ais[1],
-                    1,
-                    MarginfiError::SolendReserveValidationFailed,
-                )?;
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::SolendReserveValidationFailed
+                );
                 Ok(())
             }
             OracleSetup::FixedDrift => {
@@ -779,12 +756,11 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::WrongNumberOfOracleAccounts
                 );
 
-                check_oracle_key(
-                    bank_config,
-                    &oracle_ais[0],
-                    1,
-                    MarginfiError::DriftSpotMarketValidationFailed,
-                )?;
+                require_keys_eq!(
+                    *oracle_ais[0].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::DriftSpotMarketValidationFailed
+                );
                 Ok(())
             }
             OracleSetup::FixedKamino => {
@@ -795,12 +771,11 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::WrongNumberOfOracleAccounts
                 );
 
-                check_oracle_key(
-                    bank_config,
-                    &oracle_ais[0],
-                    1,
-                    MarginfiError::KaminoReserveValidationFailed,
-                )?;
+                require_keys_eq!(
+                    *oracle_ais[0].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::KaminoReserveValidationFailed
+                );
                 Ok(())
             }
         }

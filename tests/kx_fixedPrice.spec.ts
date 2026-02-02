@@ -171,20 +171,10 @@ describe("kx: Fixed Kamino price bank", () => {
       await setFixedPrice(groupAdmin.mrgnBankrunProgram, {
         bank: fixedKaminoBank,
         price: FIXED_PRICE,
+        remaining: [usdcReserve],
       }),
     );
     await processBankrunTransaction(ctx, setFixedTx, [groupAdmin.wallet]);
-
-    const configureFixedKaminoTx = new Transaction().add(
-      await configureBankOracle(groupAdmin.mrgnBankrunProgram, {
-        bank: fixedKaminoBank,
-        type: FIXED_KAMINO_SETUP,
-        oracle: usdcReserve,
-      }),
-    );
-    await processBankrunTransaction(ctx, configureFixedKaminoTx, [
-      groupAdmin.wallet,
-    ]);
 
     if (verbose) {
       console.log("Fixed Kamino bank:", fixedKaminoBank.toString());
