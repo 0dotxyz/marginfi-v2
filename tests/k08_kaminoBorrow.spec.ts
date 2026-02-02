@@ -20,7 +20,6 @@ import { lendingMarketAuthPda } from "@kamino-finance/klend-sdk";
 import {
   SYSVAR_INSTRUCTIONS_PUBKEY,
   Transaction,
-  SystemProgram,
   PublicKey,
 } from "@solana/web3.js";
 import { KAMINO_OBLIGATION, MockUser } from "./utils/mocks";
@@ -30,7 +29,7 @@ import {
   simpleRefreshReserve,
   wrappedU68F60toBigNumber,
 } from "./utils/kamino-utils";
-import { assert, expect } from "chai";
+import { assert } from "chai";
 import { processBankrunTransaction } from "./utils/tools";
 import { getTokenBalance } from "./utils/genericTests";
 import { Clock, ProgramTestContext } from "solana-bankrun";

@@ -76,7 +76,6 @@ describe("d06: Init Drift banks", () => {
 
   it("(admin) Add Drift bank (drift USDC) and init user - happy path", async () => {
     let defaultConfig = defaultDriftBankConfig(oracles.usdcOracle.publicKey);
-    const now = await getBankrunTime(ctx);
 
     const [bankKey] = deriveBankWithSeed(
       mrgnID,

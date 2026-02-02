@@ -217,17 +217,6 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
 
     bankrunContext.setClock(newClock);
 
-    const dummyTx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: globalProgramAdmin.wallet.publicKey,
-        toPubkey: globalProgramAdmin.wallet.publicKey,
-        lamports: 1,
-      })
-    );
-    await processBankrunTransaction(bankrunContext, dummyTx, [
-      globalProgramAdmin.wallet,
-    ]);
-
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 
     const updateUsdcIx = await makeUpdateSpotMarketCumulativeInterestIx(

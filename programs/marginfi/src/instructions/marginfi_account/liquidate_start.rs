@@ -7,7 +7,10 @@ use crate::{
         Hashable,
     },
     prelude::*,
-    state::marginfi_account::{MarginfiAccountImpl, RiskEngine, RiskRequirementType},
+    state::marginfi_account::{
+        check_pre_liquidation_condition_and_get_account_health, get_health_components,
+        MarginfiAccountImpl, RiskRequirementType,
+    },
 };
 use anchor_lang::{prelude::*, solana_program::sysvar};
 use bytemuck::Zeroable;
@@ -89,16 +92,23 @@ pub fn start_receivership<'info>(
     // Note: the receiver can use the health cache state after this ix concludes to plan their
     // liquidation/deleverage strategy.
     let mut health_cache = HealthCache::zeroed();
-    let risk_engine = RiskEngine::new(marginfi_account, remaining_ais)?;
 
-    let (_pre_health, assets, liabs) = risk_engine
-        .check_pre_liquidation_condition_and_get_account_health(
-            None,
-            &mut Some(&mut health_cache),
-            ignore_healthy,
-        )?;
-    let (assets_equity, liabs_equity) = risk_engine
-        .get_account_health_components(RiskRequirementType::Equity, &mut Some(&mut health_cache))?;
+    let (_pre_health, assets, liabs) = check_pre_liquidation_condition_and_get_account_health(
+        marginfi_account,
+        remaining_ais,
+        None,
+        &mut Some(&mut health_cache),
+        ignore_healthy,
+    )?;
+
+    // Use heap-efficient equity calculation
+    let (assets_equity, liabs_equity) = get_health_components(
+        marginfi_account,
+        remaining_ais,
+        RiskRequirementType::Equity,
+        &mut Some(&mut health_cache),
+    )?;
+
     marginfi_account.health_cache = health_cache;
     marginfi_account.set_flag(ACCOUNT_IN_RECEIVERSHIP, false);
 

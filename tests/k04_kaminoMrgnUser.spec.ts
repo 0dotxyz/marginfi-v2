@@ -8,7 +8,6 @@ import {
   kaminoGroup,
 } from "./rootHooks";
 import { USER_ACCOUNT_K } from "./utils/mocks";
-import { Marginfi } from "../target/types/marginfi";
 import {
   assertBNEqual,
   assertI80F48Equal,
