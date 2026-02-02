@@ -222,320 +222,6 @@ fn apply_price_bias(price: OraclePriceWithConfidence, bias: PriceBias) -> Margin
     Ok(price)
 }
 
-pub struct BankAccountWithPriceFeed<'a, 'info> {
-    bank: AccountLoader<'info, Bank>,
-    price_feed: Box<MarginfiResult<OraclePriceFeedAdapter>>,
-    balance: &'a Balance,
-}
-
-impl<'info> BankAccountWithPriceFeed<'_, 'info> {
-    pub fn load<'a>(
-        lending_account: &'a LendingAccount,
-        remaining_ais: &'info [AccountInfo<'info>],
-    ) -> MarginfiResult<Vec<BankAccountWithPriceFeed<'a, 'info>>> {
-        let clock = Clock::get()?;
-        let mut account_index = 0;
-
-        lending_account
-            .balances
-            .iter()
-            .filter(|balance| balance.is_active())
-            .map(|balance| {
-                // Get the bank
-                let bank_ai: Option<&AccountInfo<'info>> = remaining_ais.get(account_index);
-                if bank_ai.is_none() {
-                    msg!("Ran out of remaining accounts at {:?}", account_index);
-                    return err!(MarginfiError::InvalidBankAccount);
-                }
-                let bank_ai = bank_ai.unwrap();
-                let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
-                let bank = bank_al.load()?;
-
-                // Determine number of accounts to process for this bank
-                let num_accounts = get_remaining_accounts_per_bank(&bank)?;
-                check_eq!(
-                    balance.bank_pk,
-                    *bank_ai.key,
-                    MarginfiError::InvalidBankAccount
-                );
-
-                // Get the oracle, and the LST mint and sol pool if applicable (staked only)
-                let oracle_ai_idx = account_index + 1;
-                let end_idx = oracle_ai_idx + num_accounts - 1;
-                require_gte!(
-                    remaining_ais.len(),
-                    end_idx,
-                    MarginfiError::WrongNumberOfOracleAccounts
-                );
-                let oracle_ais = &remaining_ais[oracle_ai_idx..end_idx];
-
-                let price_adapter = Box::new(OraclePriceFeedAdapter::try_from_bank(
-                    &bank, oracle_ais, &clock,
-                ));
-
-                account_index += num_accounts;
-
-                Ok(BankAccountWithPriceFeed {
-                    bank: bank_al.clone(),
-                    price_feed: price_adapter,
-                    balance,
-                })
-            })
-            .collect::<Result<Vec<_>>>()
-    }
-
-    #[inline(always)]
-    /// Calculate the value of the balance, which is either an asset or a liability. If it is an
-    /// asset, returns (asset_value, 0, price, 0), and if it is a liability, returns (0, liabilty
-    /// value, price, 0), where price is the actual oracle price used to determine the value after
-    /// bias adjustments, etc.
-    ///
-    /// err_code is an internal oracle error code in the event the oracle did not load. This applies
-    /// only to assets and the return type will always be (0, 0, 0, err_code).
-    ///
-    /// Nuances:
-    /// 1. Maintenance requirement is calculated using the real time price feed.
-    /// 2. Initial requirement is calculated using the time weighted price feed, if available.
-    /// 3. Initial requirement is discounted by the initial discount, if enabled and the usd limit
-    ///    is exceeded.
-    /// 4. Assets are only calculated for collateral risk tier.
-    /// 5. Oracle errors are ignored for deposits in isolated risk tier.
-    fn calc_weighted_value(
-        &self,
-        requirement_type: RequirementType,
-        emode_config: &EmodeConfig,
-        liq_cache: &mut Option<&mut LiquidationPriceCache>,
-        index: usize,
-    ) -> MarginfiResult<(I80F48, I80F48, I80F48, u32)> {
-        match self.balance.get_side() {
-            Some(side) => {
-                let bank = &self.bank.load()?;
-
-                match side {
-                    BalanceSide::Assets => {
-                        let (value, price, err_code) = self.calc_weighted_asset_value(
-                            requirement_type,
-                            bank,
-                            emode_config,
-                            liq_cache,
-                            index,
-                        )?;
-                        Ok((value, I80F48::ZERO, price, err_code))
-                    }
-
-                    BalanceSide::Liabilities => {
-                        let (value, price) = self.calc_weighted_liab_value(
-                            requirement_type,
-                            bank,
-                            liq_cache,
-                            index,
-                        )?;
-                        Ok((I80F48::ZERO, value, price, 0))
-                    }
-                }
-            }
-            None => Ok((I80F48::ZERO, I80F48::ZERO, I80F48::ZERO, 0)),
-        }
-    }
-
-    /// Returns value, the price used to determine that value, and an error code if applicable. In
-    /// most cases, returns (value, price, 0). If there was an error loading the price feed, treats
-    /// the price as zero, and passes the u32 argument that contains the error code, i.e. the return
-    /// type is (0, 0, err_code). Other types of errors (e.g. math) will still throw.
-    #[inline(always)]
-    fn calc_weighted_asset_value(
-        &self,
-        requirement_type: RequirementType,
-        bank: &Bank,
-        emode_config: &EmodeConfig,
-        liq_cache: &mut Option<&mut LiquidationPriceCache>,
-        index: usize,
-    ) -> MarginfiResult<(I80F48, I80F48, u32)> {
-        match bank.config.risk_tier {
-            RiskTier::Collateral => {
-                // ReduceOnly banks should not be counted as collateral for new loans (Initial checks)
-                // but should maintain their value for existing positions (Maintenance checks)
-                if matches!(
-                    (bank.config.operational_state, requirement_type),
-                    (BankOperationalState::ReduceOnly, RequirementType::Initial)
-                ) {
-                    debug!("ReduceOnly bank assets worth 0 for Initial margin");
-                    return Ok((I80F48::ZERO, I80F48::ZERO, 0));
-                }
-
-                let (price_feed, err_code) = self.try_get_price_feed();
-
-                if matches!(
-                    (&price_feed, requirement_type),
-                    (&Err(_), RequirementType::Initial)
-                ) {
-                    debug!("Skipping stale oracle");
-                    return Ok((I80F48::ZERO, I80F48::ZERO, err_code));
-                }
-
-                let price_feed = price_feed?;
-
-                // If an emode entry exists for this bank's emode tag in the reconciled config of
-                // all borrowing banks, use its weight, otherwise use the weight designated on the
-                // collateral bank itself. If the bank's weight is higher, always use that weight.
-                let mut asset_weight =
-                    if let Some(emode_entry) = emode_config.find_with_tag(bank.emode.emode_tag) {
-                        let bank_weight = bank
-                            .config
-                            .get_weight(requirement_type, BalanceSide::Assets);
-                        let emode_weight = match requirement_type {
-                            RequirementType::Initial => I80F48::from(emode_entry.asset_weight_init),
-                            RequirementType::Maintenance => {
-                                I80F48::from(emode_entry.asset_weight_maint)
-                            }
-                            // Note: For equity (which is only used for bankruptcies) emode does not
-                            // apply, as the asset weight is always 1
-                            RequirementType::Equity => I80F48::ONE,
-                        };
-                        max(bank_weight, emode_weight)
-                    } else {
-                        bank.config
-                            .get_weight(requirement_type, BalanceSide::Assets)
-                    };
-
-                let lower_price = if let Some(cache) = liq_cache.as_mut() {
-                    let price_with_confidence = price_feed.get_price_and_confidence_of_type(
-                        requirement_type.get_oracle_price_type(),
-                        bank.config.oracle_max_confidence,
-                    )?;
-                    cache.record(requirement_type, index, price_with_confidence);
-                    apply_price_bias(price_with_confidence, PriceBias::Low)?
-                } else {
-                    price_feed.get_price_of_type(
-                        requirement_type.get_oracle_price_type(),
-                        Some(PriceBias::Low),
-                        bank.config.oracle_max_confidence,
-                    )?
-                };
-
-                if matches!(requirement_type, RequirementType::Initial) {
-                    if let Some(discount) =
-                        bank.maybe_get_asset_weight_init_discount(lower_price)?
-                    {
-                        asset_weight = asset_weight
-                            .checked_mul(discount)
-                            .ok_or_else(math_error!())?;
-                    }
-                }
-                let value = calc_value(
-                    bank.get_asset_amount(self.balance.asset_shares.into())?,
-                    lower_price,
-                    bank.get_balance_decimals(),
-                    Some(asset_weight),
-                )?;
-
-                Ok((value, lower_price, 0))
-            }
-            RiskTier::Isolated => Ok((I80F48::ZERO, I80F48::ZERO, 0)),
-        }
-    }
-
-    /// Returns value, the net liability value in $, and the price used to determine that value.
-    /// Note that an error in liability value always throws, unlike assets which simply return 0.
-    #[inline(always)]
-    fn calc_weighted_liab_value(
-        &self,
-        requirement_type: RequirementType,
-        bank: &Bank,
-        liq_cache: &mut Option<&mut LiquidationPriceCache>,
-        index: usize,
-    ) -> MarginfiResult<(I80F48, I80F48)> {
-        let (price_feed, _) = self.try_get_price_feed();
-        let price_feed = price_feed?;
-        let liability_weight = bank
-            .config
-            .get_weight(requirement_type, BalanceSide::Liabilities);
-
-        let higher_price = if let Some(cache) = liq_cache.as_mut() {
-            let price_with_confidence = price_feed.get_price_and_confidence_of_type(
-                requirement_type.get_oracle_price_type(),
-                bank.config.oracle_max_confidence,
-            )?;
-            cache.record(requirement_type, index, price_with_confidence);
-            apply_price_bias(price_with_confidence, PriceBias::High)?
-        } else {
-            price_feed.get_price_of_type(
-                requirement_type.get_oracle_price_type(),
-                Some(PriceBias::High),
-                bank.config.oracle_max_confidence,
-            )?
-        };
-
-        // If `ASSET_TAG_STAKED` assets can ever be borrowed, accomodate for that here...
-
-        let value = calc_value(
-            bank.get_liability_amount(self.balance.liability_shares.into())?,
-            higher_price,
-            bank.get_balance_decimals(),
-            Some(liability_weight),
-        )?;
-
-        Ok((value, higher_price))
-    }
-
-    fn try_get_price_feed(&self) -> (MarginfiResult<&OraclePriceFeedAdapter>, u32) {
-        match self.price_feed.as_ref() {
-            Ok(a) => (Ok(a), 0),
-            #[allow(unused_variables)]
-            Err(e) => match e {
-                anchor_lang::error::Error::AnchorError(inner) => {
-                    let error_code = inner.as_ref().error_code_number;
-                    let custom_error = MarginfiError::from(error_code);
-                    (Err(error!(custom_error)), error_code)
-                }
-                anchor_lang::error::Error::ProgramError(inner) => {
-                    match inner.as_ref().program_error {
-                        ProgramError::Custom(error_code) => {
-                            let custom_error = MarginfiError::from(error_code);
-                            (Err(error!(custom_error)), error_code)
-                        }
-                        _ => (
-                            Err(error!(MarginfiError::InternalLogicError)),
-                            MarginfiError::InternalLogicError as u32,
-                        ),
-                    }
-                }
-            },
-        }
-    }
-
-    #[inline]
-    pub fn is_empty(&self, side: BalanceSide) -> bool {
-        self.balance.is_empty(side)
-    }
-
-    fn write_liquidation_price_cache_from(
-        &self,
-        liq_cache: &LiquidationPriceCache,
-        index: usize,
-    ) -> MarginfiResult<()> {
-        let mut bank = self.bank.load_mut()?;
-        let zero_price = OraclePriceWithConfidence {
-            price: I80F48::ZERO,
-            confidence: I80F48::ZERO,
-        };
-        let price_rt = liq_cache
-            .get_price(OraclePriceType::RealTime, index)
-            .unwrap_or(zero_price);
-        let price_twap = liq_cache
-            .get_price(OraclePriceType::TimeWeighted, index)
-            .unwrap_or(zero_price);
-
-        bank.cache.liquidation_price_rt = price_rt.price.into();
-        bank.cache.liquidation_price_rt_confidence = price_rt.confidence.into();
-        bank.cache.liquidation_price_twap = price_twap.price.into();
-        bank.cache.liquidation_price_twap_confidence = price_twap.confidence.into();
-        bank.cache.set_liquidation_price_cache_locked();
-
-        Ok(())
-    }
-}
-
 pub struct BankAccountWithCache<'a, 'info> {
     bank: AccountLoader<'info, Bank>,
     balance: &'a Balance,
@@ -596,137 +282,6 @@ impl<'info> BankAccountWithCache<'_, 'info> {
             .collect::<Result<Vec<_>>>()
     }
 
-    fn calc_weighted_value_cached(
-        &self,
-        requirement_type: RequirementType,
-        emode_config: &EmodeConfig,
-    ) -> MarginfiResult<(I80F48, I80F48, I80F48)> {
-        match self.balance.get_side() {
-            Some(side) => {
-                let bank = &self.bank.load()?;
-
-                match side {
-                    BalanceSide::Assets => {
-                        let (value, price) = self.calc_weighted_asset_value_cached(
-                            requirement_type,
-                            bank,
-                            emode_config,
-                        )?;
-                        Ok((value, I80F48::ZERO, price))
-                    }
-
-                    BalanceSide::Liabilities => {
-                        let (value, price) =
-                            self.calc_weighted_liab_value_cached(requirement_type, bank)?;
-                        Ok((I80F48::ZERO, value, price))
-                    }
-                }
-            }
-            None => Ok((I80F48::ZERO, I80F48::ZERO, I80F48::ZERO)),
-        }
-    }
-
-    fn get_cached_price_with_confidence(
-        &self,
-        bank: &Bank,
-        requirement_type: RequirementType,
-    ) -> OraclePriceWithConfidence {
-        match requirement_type.get_oracle_price_type() {
-            OraclePriceType::RealTime => OraclePriceWithConfidence {
-                price: bank.cache.liquidation_price_rt.into(),
-                confidence: bank.cache.liquidation_price_rt_confidence.into(),
-            },
-            OraclePriceType::TimeWeighted => OraclePriceWithConfidence {
-                price: bank.cache.liquidation_price_twap.into(),
-                confidence: bank.cache.liquidation_price_twap_confidence.into(),
-            },
-        }
-    }
-
-    #[inline(always)]
-    fn calc_weighted_asset_value_cached(
-        &self,
-        requirement_type: RequirementType,
-        bank: &Bank,
-        emode_config: &EmodeConfig,
-    ) -> MarginfiResult<(I80F48, I80F48)> {
-        match bank.config.risk_tier {
-            RiskTier::Collateral => {
-                if matches!(
-                    (bank.config.operational_state, requirement_type),
-                    (BankOperationalState::ReduceOnly, RequirementType::Initial)
-                ) {
-                    debug!("ReduceOnly bank assets worth 0 for Initial margin");
-                    return Ok((I80F48::ZERO, I80F48::ZERO));
-                }
-
-                let mut asset_weight =
-                    if let Some(emode_entry) = emode_config.find_with_tag(bank.emode.emode_tag) {
-                        let bank_weight = bank
-                            .config
-                            .get_weight(requirement_type, BalanceSide::Assets);
-                        let emode_weight = match requirement_type {
-                            RequirementType::Initial => I80F48::from(emode_entry.asset_weight_init),
-                            RequirementType::Maintenance => {
-                                I80F48::from(emode_entry.asset_weight_maint)
-                            }
-                            RequirementType::Equity => I80F48::ONE,
-                        };
-                        max(bank_weight, emode_weight)
-                    } else {
-                        bank.config
-                            .get_weight(requirement_type, BalanceSide::Assets)
-                    };
-
-                let price_with_confidence =
-                    self.get_cached_price_with_confidence(bank, requirement_type);
-                let lower_price = apply_price_bias(price_with_confidence, PriceBias::Low)?;
-
-                if matches!(requirement_type, RequirementType::Initial) {
-                    if let Some(discount) =
-                        bank.maybe_get_asset_weight_init_discount(lower_price)?
-                    {
-                        asset_weight = asset_weight
-                            .checked_mul(discount)
-                            .ok_or_else(math_error!())?;
-                    }
-                }
-                let value = calc_value(
-                    bank.get_asset_amount(self.balance.asset_shares.into())?,
-                    lower_price,
-                    bank.get_balance_decimals(),
-                    Some(asset_weight),
-                )?;
-
-                Ok((value, lower_price))
-            }
-            RiskTier::Isolated => Ok((I80F48::ZERO, I80F48::ZERO)),
-        }
-    }
-
-    #[inline(always)]
-    fn calc_weighted_liab_value_cached(
-        &self,
-        requirement_type: RequirementType,
-        bank: &Bank,
-    ) -> MarginfiResult<(I80F48, I80F48)> {
-        let liability_weight = bank
-            .config
-            .get_weight(requirement_type, BalanceSide::Liabilities);
-
-        let price_with_confidence = self.get_cached_price_with_confidence(bank, requirement_type);
-        let higher_price = apply_price_bias(price_with_confidence, PriceBias::High)?;
-
-        let value = calc_value(
-            bank.get_liability_amount(self.balance.liability_shares.into())?,
-            higher_price,
-            bank.get_balance_decimals(),
-            Some(liability_weight),
-        )?;
-
-        Ok((value, higher_price))
-    }
-
     fn write_liquidation_price_cache_from(
         &self,
         liq_cache: &LiquidationPriceCache,
@@ -770,6 +325,130 @@ pub(crate) fn write_liquidation_price_cache_from<'info>(
         bank_account.write_liquidation_price_cache_from(liq_cache, i)?;
     }
     Ok(())
+}
+
+fn get_cached_price_with_confidence(
+    bank: &Bank,
+    requirement_type: RequirementType,
+) -> OraclePriceWithConfidence {
+    match requirement_type.get_oracle_price_type() {
+        OraclePriceType::RealTime => OraclePriceWithConfidence {
+            price: bank.cache.liquidation_price_rt.into(),
+            confidence: bank.cache.liquidation_price_rt_confidence.into(),
+        },
+        OraclePriceType::TimeWeighted => OraclePriceWithConfidence {
+            price: bank.cache.liquidation_price_twap.into(),
+            confidence: bank.cache.liquidation_price_twap_confidence.into(),
+        },
+    }
+}
+
+#[inline(always)]
+fn calc_weighted_asset_value_cached_standalone(
+    balance: &Balance,
+    bank: &Bank,
+    requirement_type: RequirementType,
+    emode_config: &EmodeConfig,
+) -> MarginfiResult<(I80F48, I80F48)> {
+    match bank.config.risk_tier {
+        RiskTier::Collateral => {
+            if matches!(
+                (bank.config.operational_state, requirement_type),
+                (BankOperationalState::ReduceOnly, RequirementType::Initial)
+            ) {
+                debug!("ReduceOnly bank assets worth 0 for Initial margin");
+                return Ok((I80F48::ZERO, I80F48::ZERO));
+            }
+
+            let mut asset_weight = if let Some(emode_entry) =
+                emode_config.find_with_tag(bank.emode.emode_tag)
+            {
+                let bank_weight = bank
+                    .config
+                    .get_weight(requirement_type, BalanceSide::Assets);
+                let emode_weight = match requirement_type {
+                    RequirementType::Initial => I80F48::from(emode_entry.asset_weight_init),
+                    RequirementType::Maintenance => I80F48::from(emode_entry.asset_weight_maint),
+                    RequirementType::Equity => I80F48::ONE,
+                };
+                max(bank_weight, emode_weight)
+            } else {
+                bank.config
+                    .get_weight(requirement_type, BalanceSide::Assets)
+            };
+
+            let price_with_confidence = get_cached_price_with_confidence(bank, requirement_type);
+            let lower_price = apply_price_bias(price_with_confidence, PriceBias::Low)?;
+
+            if matches!(requirement_type, RequirementType::Initial) {
+                if let Some(discount) = bank.maybe_get_asset_weight_init_discount(lower_price)? {
+                    asset_weight = asset_weight
+                        .checked_mul(discount)
+                        .ok_or_else(math_error!())?;
+                }
+            }
+            let value = calc_value(
+                bank.get_asset_amount(balance.asset_shares.into())?,
+                lower_price,
+                bank.get_balance_decimals(),
+                Some(asset_weight),
+            )?;
+
+            Ok((value, lower_price))
+        }
+        RiskTier::Isolated => Ok((I80F48::ZERO, I80F48::ZERO)),
+    }
+}
+
+#[inline(always)]
+fn calc_weighted_liab_value_cached_standalone(
+    balance: &Balance,
+    bank: &Bank,
+    requirement_type: RequirementType,
+) -> MarginfiResult<(I80F48, I80F48)> {
+    let liability_weight = bank
+        .config
+        .get_weight(requirement_type, BalanceSide::Liabilities);
+
+    let price_with_confidence = get_cached_price_with_confidence(bank, requirement_type);
+    let higher_price = apply_price_bias(price_with_confidence, PriceBias::High)?;
+
+    let value = calc_value(
+        bank.get_liability_amount(balance.liability_shares.into())?,
+        higher_price,
+        bank.get_balance_decimals(),
+        Some(liability_weight),
+    )?;
+
+    Ok((value, higher_price))
+}
+
+#[inline(always)]
+fn calc_weighted_value_cached_for_balance(
+    balance: &Balance,
+    bank: &Bank,
+    requirement_type: RequirementType,
+    emode_config: &EmodeConfig,
+) -> MarginfiResult<(I80F48, I80F48, I80F48)> {
+    match balance.get_side() {
+        Some(side) => match side {
+            BalanceSide::Assets => {
+                let (value, price) = calc_weighted_asset_value_cached_standalone(
+                    balance,
+                    bank,
+                    requirement_type,
+                    emode_config,
+                )?;
+                Ok((value, I80F48::ZERO, price))
+            }
+            BalanceSide::Liabilities => {
+                let (value, price) =
+                    calc_weighted_liab_value_cached_standalone(balance, bank, requirement_type)?;
+                Ok((I80F48::ZERO, value, price))
+            }
+        },
+        None => Ok((I80F48::ZERO, I80F48::ZERO, I80F48::ZERO)),
+    }
 }
 /// Calculate the value of an asset, given its quantity with a decimal exponent, and a price with a decimal exponent, and an optional weight.
 #[inline]
@@ -835,6 +514,13 @@ impl RiskRequirementType {
     }
 }
 
+pub enum HealthPriceMode<'a> {
+    Live {
+        liq_cache: Option<&'a mut LiquidationPriceCache>,
+    },
+    Cached,
+}
+
 // =============================================================================
 // RISK ENGINE - HEAP-EFFICIENT HEALTH CALCULATION
 // =============================================================================
@@ -875,18 +561,21 @@ struct EmodeConfigIterator<'a, 'info> {
     remaining_ais: &'info [AccountInfo<'info>],
     balance_index: usize,
     account_index: usize,
+    banks_only: bool,
 }
 
 impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
     fn new(
         lending_account: &'a LendingAccount,
         remaining_ais: &'info [AccountInfo<'info>],
+        banks_only: bool,
     ) -> Self {
         Self {
             lending_account,
             remaining_ais,
             balance_index: 0,
             account_index: 0,
+            banks_only,
         }
     }
 }
@@ -912,7 +601,11 @@ impl<'a, 'info> Iterator for EmodeConfigIterator<'a, 'info> {
                 return None;
             }
 
-            let num_accounts = get_remaining_accounts_per_bank(&bank).ok()?;
+            let num_accounts = if self.banks_only {
+                1
+            } else {
+                get_remaining_accounts_per_bank(&bank).ok()?
+            };
 
             // Advance indices
             self.account_index += num_accounts;
@@ -957,14 +650,19 @@ pub fn get_health_components<'info>(
     remaining_ais: &'info [AccountInfo<'info>],
     requirement_type: RiskRequirementType,
     health_cache: &mut Option<&mut HealthCache>,
-    liq_cache: &mut Option<&mut LiquidationPriceCache>,
+    price_mode: HealthPriceMode<'_>,
 ) -> MarginfiResult<(I80F48, I80F48)> {
     check!(
         !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
         MarginfiError::AccountInFlashloan
     );
 
-    let clock = Clock::get()?;
+    let (is_cached, mut liq_cache) = match price_mode {
+        HealthPriceMode::Live { liq_cache } => (false, liq_cache),
+        HealthPriceMode::Cached => (true, None),
+    };
+
+    let clock = if is_cached { None } else { Some(Clock::get()?) };
     let lending_account = &marginfi_account.lending_account;
 
     // =========================================================================
@@ -973,7 +671,7 @@ pub fn get_health_components<'info>(
 
     let emode_checkpoint = heap_pos();
     let reconciled_emode_config = {
-        let emode_iter = EmodeConfigIterator::new(lending_account, remaining_ais);
+        let emode_iter = EmodeConfigIterator::new(lending_account, remaining_ais, is_cached);
         reconcile_emode_configs(emode_iter)
     };
     let reconciled_emode_config: EmodeConfig = reconciled_emode_config;
@@ -1010,43 +708,62 @@ pub fn get_health_components<'info>(
             MarginfiError::InvalidBankAccount
         );
 
-        let num_accounts = get_remaining_accounts_per_bank(&bank)?;
-
-        // Load oracle (this is the heap-intensive operation)
-        let oracle_ai_idx = account_index + 1;
-        let end_idx = oracle_ai_idx + num_accounts - 1;
-        require_gte!(
-            remaining_ais.len(),
-            end_idx,
-            MarginfiError::WrongNumberOfOracleAccounts
-        );
-        let oracle_ais = &remaining_ais[oracle_ai_idx..end_idx];
-
-        // Create oracle adapter (heap allocation happens here)
-        let price_adapter_result = OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock);
-
-        // Log heap usage per position for measurement/debugging
-        // Measured results: Pyth ~64 bytes, Switchboard ~128 bytes per position
-        #[cfg(target_os = "solana")]
-        {
-            let heap_after_oracle = heap_pos();
-            let _heap_used = heap_after_oracle.saturating_sub(heap_checkpoint);
-            debug!(
-                "HEAP_MEASURE: position={} heap_used={} bytes",
-                position_index, _heap_used
+        let num_accounts = if is_cached {
+            check!(
+                bank.cache.is_liquidation_price_cache_locked(),
+                MarginfiError::InternalLogicError
             );
-        }
+            1
+        } else {
+            get_remaining_accounts_per_bank(&bank)?
+        };
 
-        // Calculate weighted value for this position
-        let (asset_val, liab_val, price, err_code) = calc_weighted_value_for_balance(
-            balance,
-            &bank,
-            &price_adapter_result,
-            requirement_type.to_weight_type(),
-            &reconciled_emode_config,
-            liq_cache,
-            position_index,
-        )?;
+        let (asset_val, liab_val, price, err_code) = if is_cached {
+            let (asset_val, liab_val, price) = calc_weighted_value_cached_for_balance(
+                balance,
+                &bank,
+                requirement_type.to_weight_type(),
+                &reconciled_emode_config,
+            )?;
+            (asset_val, liab_val, price, 0)
+        } else {
+            // Load oracle (this is the heap-intensive operation)
+            let oracle_ai_idx = account_index + 1;
+            let end_idx = oracle_ai_idx + num_accounts - 1;
+            require_gte!(
+                remaining_ais.len(),
+                end_idx,
+                MarginfiError::WrongNumberOfOracleAccounts
+            );
+            let oracle_ais = &remaining_ais[oracle_ai_idx..end_idx];
+
+            // Create oracle adapter (heap allocation happens here)
+            let price_adapter_result =
+                OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, clock.as_ref().unwrap());
+
+            // Log heap usage per position for measurement/debugging
+            // Measured results: Pyth ~64 bytes, Switchboard ~128 bytes per position
+            #[cfg(target_os = "solana")]
+            {
+                let heap_after_oracle = heap_pos();
+                let _heap_used = heap_after_oracle.saturating_sub(heap_checkpoint);
+                debug!(
+                    "HEAP_MEASURE: position={} heap_used={} bytes",
+                    position_index, _heap_used
+                );
+            }
+
+            // Calculate weighted value for this position
+            calc_weighted_value_for_balance(
+                balance,
+                &bank,
+                &price_adapter_result,
+                requirement_type.to_weight_type(),
+                &reconciled_emode_config,
+                &mut liq_cache,
+                position_index,
+            )?
+        };
 
         // Record error index if applicable
         if err_code != 0 && first_err_index == NO_INDEX_FOUND {
@@ -1113,7 +830,7 @@ pub fn check_pre_liquidation_condition_and_get_account_health<'info>(
     remaining_ais: &'info [AccountInfo<'info>],
     liability_bank_pk: Option<&Pubkey>,
     health_cache: &mut Option<&mut HealthCache>,
-    liq_cache: &mut Option<&mut LiquidationPriceCache>,
+    price_mode: HealthPriceMode<'_>,
     ignore_healthy: bool,
 ) -> MarginfiResult<(I80F48, I80F48, I80F48)> {
     check!(
@@ -1146,7 +863,7 @@ pub fn check_pre_liquidation_condition_and_get_account_health<'info>(
         remaining_ais,
         RiskRequirementType::Maintenance,
         health_cache,
-        liq_cache,
+        price_mode,
     )?;
 
     let account_health = assets.checked_sub(liabs).ok_or_else(math_error!())?;
@@ -1188,7 +905,7 @@ pub fn check_account_bankrupt<'info>(
         remaining_ais,
         RiskRequirementType::Equity,
         health_cache,
-        &mut None,
+        HealthPriceMode::Live { liq_cache: None },
     )?;
 
     let has_liabilities = equity_liabs > I80F48::ZERO;
@@ -1253,6 +970,20 @@ fn check_account_risk_tiers<'info>(
     Ok(())
 }
 
+pub fn clear_liquidation_price_cache_locks<'info>(
+    marginfi_account: &MarginfiAccount,
+    remaining_ais: &'info [AccountInfo<'info>],
+) -> MarginfiResult<()> {
+    let bank_accounts_with_cache =
+        BankAccountWithCache::load(&marginfi_account.lending_account, remaining_ais)?;
+
+    for account in bank_accounts_with_cache.iter() {
+        let mut bank = account.bank.load_mut()?;
+        bank.cache.clear_liquidation_price_cache_locked();
+    }
+    Ok(())
+}
+
 /// Initial health check using the heap-reuse health calculator.
 ///
 /// - Skips risk checks when the account is in a flashloan
@@ -1273,7 +1004,7 @@ pub fn check_account_init_health<'info>(
         remaining_ais,
         RiskRequirementType::Initial,
         health_cache,
-        &mut None,
+        HealthPriceMode::Live { liq_cache: None },
     )?;
 
     let healthy = assets >= liabs;
@@ -1326,7 +1057,7 @@ pub fn check_post_liquidation_condition_and_get_account_health<'info>(
         remaining_ais,
         RiskRequirementType::Maintenance,
         &mut None,
-        &mut None,
+        HealthPriceMode::Live { liq_cache: None },
     )?;
 
     let account_health = assets.checked_sub(liabs).ok_or_else(math_error!())?;
@@ -1554,160 +1285,6 @@ fn calc_weighted_liab_value_standalone(
     )?;
 
     Ok((value, higher_price))
-}
-
-pub struct CachedRiskEngine<'a, 'info> {
-    marginfi_account: &'a MarginfiAccount,
-    bank_accounts_with_cache: Vec<BankAccountWithCache<'a, 'info>>,
-    emode_config: EmodeConfig,
-}
-
-impl<'info> CachedRiskEngine<'_, 'info> {
-    pub fn new<'a>(
-        marginfi_account: &'a MarginfiAccount,
-        remaining_ais: &'info [AccountInfo<'info>],
-    ) -> MarginfiResult<CachedRiskEngine<'a, 'info>> {
-        check!(
-            !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
-            MarginfiError::AccountInFlashloan
-        );
-
-        let bank_accounts_with_cache =
-            BankAccountWithCache::load(&marginfi_account.lending_account, remaining_ais)?;
-
-        for account in bank_accounts_with_cache.iter() {
-            let bank = account.bank.load()?;
-            check!(
-                bank.cache.is_liquidation_price_cache_locked(),
-                MarginfiError::InternalLogicError
-            );
-        }
-
-        let reconciled_emode_config = reconcile_emode_configs(
-            bank_accounts_with_cache
-                .iter()
-                .filter(|b| !b.balance.is_empty(BalanceSide::Liabilities))
-                .map(|b| b.bank.load().unwrap().emode.emode_config),
-        );
-
-        Ok(CachedRiskEngine {
-            marginfi_account,
-            bank_accounts_with_cache,
-            emode_config: reconciled_emode_config,
-        })
-    }
-
-    pub fn get_account_health_components_cached(
-        &self,
-        requirement_type: RiskRequirementType,
-        health_cache: &mut Option<&mut HealthCache>,
-    ) -> MarginfiResult<(I80F48, I80F48)> {
-        let mut total_assets: I80F48 = I80F48::ZERO;
-        let mut total_liabilities: I80F48 = I80F48::ZERO;
-
-        for (i, bank_account) in self.bank_accounts_with_cache.iter().enumerate() {
-            let requirement_type = requirement_type.to_weight_type();
-            let (asset_val, liab_val, price) =
-                bank_account.calc_weighted_value_cached(requirement_type, &self.emode_config)?;
-
-            if let Some(health_cache) = health_cache {
-                if let RequirementType::Initial = requirement_type {
-                    health_cache.prices[i] = price.to_num::<f64>().to_le_bytes();
-                }
-            }
-
-            debug!(
-                "Balance {}, assets: {}, liabilities: {}",
-                bank_account.balance.bank_pk, asset_val, liab_val
-            );
-
-            total_assets = total_assets
-                .checked_add(asset_val)
-                .ok_or_else(math_error!())?;
-            total_liabilities = total_liabilities
-                .checked_add(liab_val)
-                .ok_or_else(math_error!())?;
-        }
-
-        if let Some(health_cache) = health_cache {
-            match requirement_type {
-                RiskRequirementType::Initial => {
-                    health_cache.asset_value = total_assets.into();
-                    health_cache.liability_value = total_liabilities.into();
-                }
-                RiskRequirementType::Maintenance => {
-                    health_cache.asset_value_maint = total_assets.into();
-                    health_cache.liability_value_maint = total_liabilities.into();
-                }
-                RiskRequirementType::Equity => {
-                    health_cache.asset_value_equity = total_assets.into();
-                    health_cache.liability_value_equity = total_liabilities.into();
-                }
-            }
-        }
-
-        Ok((total_assets, total_liabilities))
-    }
-
-    pub fn check_pre_liquidation_condition_and_get_account_health_cached(
-        &self,
-        bank_pk: Option<&Pubkey>,
-        health_cache: &mut Option<&mut HealthCache>,
-        ignore_healthy: bool,
-    ) -> MarginfiResult<(I80F48, I80F48, I80F48)> {
-        check!(
-            !self.marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
-            MarginfiError::AccountInFlashloan
-        );
-
-        if bank_pk.is_some() {
-            let liability_bank_balance = self
-                .bank_accounts_with_cache
-                .iter()
-                .find(|a| a.balance.bank_pk == *bank_pk.unwrap())
-                .ok_or(MarginfiError::LendingAccountBalanceNotFound)?;
-
-            check!(
-                !liability_bank_balance.is_empty(BalanceSide::Liabilities),
-                MarginfiError::NoLiabilitiesInLiabilityBank
-            );
-
-            check!(
-                liability_bank_balance.is_empty(BalanceSide::Assets),
-                MarginfiError::AssetsInLiabilityBank
-            );
-        }
-
-        let (assets, liabs) = self
-            .get_account_health_components_cached(RiskRequirementType::Maintenance, health_cache)?;
-
-        let account_health = assets.checked_sub(liabs).ok_or_else(math_error!())?;
-        let healthy = account_health > I80F48::ZERO;
-
-        if let Some(cache) = health_cache {
-            cache.set_healthy(healthy);
-        }
-
-        if healthy && !ignore_healthy {
-            msg!(
-                "pre_liquidation_health: {} ({} - {})",
-                account_health,
-                assets,
-                liabs
-            );
-            return err!(MarginfiError::HealthyAccount);
-        }
-
-        Ok((account_health, assets, liabs))
-    }
-
-    pub fn clear_liquidation_price_cache_locks(&self) -> MarginfiResult<()> {
-        for account in self.bank_accounts_with_cache.iter() {
-            let mut bank = account.bank.load_mut()?;
-            bank.cache.clear_liquidation_price_cache_locked();
-        }
-        Ok(())
-    }
 }
 
 pub trait LendingAccountImpl {

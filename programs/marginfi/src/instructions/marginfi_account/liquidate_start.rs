@@ -9,8 +9,8 @@ use crate::{
     prelude::*,
     state::marginfi_account::{
         check_pre_liquidation_condition_and_get_account_health, get_health_components,
-        write_liquidation_price_cache_from, LiquidationPriceCache, MarginfiAccountImpl,
-        RiskRequirementType,
+        write_liquidation_price_cache_from, HealthPriceMode, LiquidationPriceCache,
+        MarginfiAccountImpl, RiskRequirementType,
     },
 };
 use anchor_lang::{prelude::*, solana_program::sysvar};
@@ -99,7 +99,9 @@ pub fn start_receivership<'info>(
         remaining_ais,
         None,
         &mut Some(&mut health_cache),
-        &mut Some(&mut liq_price_cache),
+        HealthPriceMode::Live {
+            liq_cache: Some(&mut liq_price_cache),
+        },
         ignore_healthy,
     )?;
 
@@ -109,7 +111,9 @@ pub fn start_receivership<'info>(
         remaining_ais,
         RiskRequirementType::Equity,
         &mut Some(&mut health_cache),
-        &mut Some(&mut liq_price_cache),
+        HealthPriceMode::Live {
+            liq_cache: Some(&mut liq_price_cache),
+        },
     )?;
 
     write_liquidation_price_cache_from(marginfi_account, remaining_ais, &liq_price_cache)?;

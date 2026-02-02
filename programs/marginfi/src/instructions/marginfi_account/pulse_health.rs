@@ -8,7 +8,7 @@ use crate::{
     events::HealthPulseEvent,
     state::marginfi_account::{
         check_account_bankrupt, check_account_init_health,
-        check_pre_liquidation_condition_and_get_account_health,
+        check_pre_liquidation_condition_and_get_account_health, HealthPriceMode,
     },
     MarginfiError, MarginfiResult,
 };
@@ -67,7 +67,7 @@ pub fn lending_account_pulse_health<'info>(
         ctx.remaining_accounts,
         None,
         &mut Some(&mut health_cache),
-        &mut None,
+        HealthPriceMode::Live { liq_cache: None },
         false,
     );
     if liq_result.is_err() {

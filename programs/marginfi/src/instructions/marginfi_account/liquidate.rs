@@ -4,7 +4,7 @@ use crate::state::marginfi_account::{
     account_not_frozen_for_authority, calc_amount, calc_value, check_account_init_health,
     check_post_liquidation_condition_and_get_account_health,
     check_pre_liquidation_condition_and_get_account_health, get_remaining_accounts_per_bank,
-    is_signer_authorized, LendingAccountImpl, MarginfiAccountImpl,
+    is_signer_authorized, HealthPriceMode, LendingAccountImpl, MarginfiAccountImpl,
 };
 use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::state::price::{OraclePriceFeedAdapter, OraclePriceType, PriceAdapter, PriceBias};
@@ -173,7 +173,7 @@ pub fn lending_account_liquidate<'info>(
         liquidatee_remaining_accounts,
         Some(&liab_bank_key),
         &mut None,
-        &mut None,
+        HealthPriceMode::Live { liq_cache: None },
         false,
     )?;
 
