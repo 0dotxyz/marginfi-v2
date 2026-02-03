@@ -6,6 +6,8 @@ import {
 } from "@solana/web3.js";
 import { Marginfi } from "../../target/types/marginfi";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { deriveExecuteOrderPda, deriveGlobalFeeState, deriveOrderPda } from "./pdas";
+import { WrappedI80F48 } from "@mrgnlabs/mrgn-common";
 
 export type AccountInitArgs = {
   marginfiGroup: PublicKey;
@@ -745,4 +747,196 @@ export const purgeDeveleragedBalance = (
     .instruction();
 
   return ix;
+};
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+export type OrderTriggerArgs =
+  | { stopLoss: { threshold: WrappedI80F48; maxSlippage: BN } }
+  | { takeProfit: { threshold: WrappedI80F48; maxSlippage: BN } }
+  | { both: { stopLoss: WrappedI80F48; takeProfit: WrappedI80F48; maxSlippage: BN } };
+
+export type PlaceOrderArgs = {
+  marginfiAccount: PublicKey;
+  authority: PublicKey;
+  feePayer: PublicKey;
+  bankKeys: PublicKey[];
+  trigger: OrderTriggerArgs;
+  feeState?: PublicKey;
+  globalFeeWallet?: PublicKey;
+};
+
+export const placeOrderIx = async (
+  program: Program<Marginfi>,
+  args: PlaceOrderArgs
+) => {
+  const [orderPda] = deriveOrderPda(
+    program.programId,
+    args.marginfiAccount,
+    args.bankKeys
+  );
+
+  const feeState = args.feeState ?? deriveGlobalFeeState(program.programId)[0];
+  const globalFeeWallet = args.globalFeeWallet
+    ?? (await program.account.feeState.fetch(feeState)).globalFeeWallet;
+
+  const accounts = {
+    authority: args.authority,
+    marginfiAccount: args.marginfiAccount,
+    feePayer: args.feePayer,
+    order: orderPda,
+    feeState,
+    globalFeeWallet,
+  };
+
+  return program.methods
+    .marginfiAccountPlaceOrder(args.bankKeys, args.trigger)
+    .accounts(accounts)
+    .instruction();
+};
+
+export type CloseOrderArgs = {
+  marginfiAccount: PublicKey;
+  authority: PublicKey;
+  order: PublicKey;
+  feeRecipient: PublicKey;
+};
+
+export const closeOrderIx = (
+  program: Program<Marginfi>,
+  args: CloseOrderArgs
+) => {
+  const accounts = {
+    marginfiAccount: args.marginfiAccount,
+    authority: args.authority,
+    order: args.order,
+    feeRecipient: args.feeRecipient,
+  };
+
+  return program.methods
+    .marginfiAccountCloseOrder()
+    .accounts(accounts)
+    .instruction();
+};
+
+export type KeeperCloseOrderArgs = {
+  marginfiAccount: PublicKey;
+  order: PublicKey;
+  feeRecipient: PublicKey;
+};
+
+export const keeperCloseOrderIx = (
+  program: Program<Marginfi>,
+  args: KeeperCloseOrderArgs
+) => {
+  const accounts = {
+    marginfiAccount: args.marginfiAccount,
+    order: args.order,
+    feeRecipient: args.feeRecipient,
+  };
+
+  return program.methods
+    .marginfiAccountKeeperCloseOrder()
+    .accounts(accounts)
+    .instruction();
+};
+
+export type SetKeeperCloseFlagsArgs = {
+  marginfiAccount: PublicKey;
+  authority: PublicKey;
+  bankKeysOpt?: PublicKey[] | null;
+};
+
+export const setLiquidatorCloseFlagsIx = (
+  program: Program<Marginfi>,
+  args: SetKeeperCloseFlagsArgs
+) => {
+  const accounts: any = {
+    marginfiAccount: args.marginfiAccount,
+    authority: args.authority,
+  };
+
+  return program.methods
+    .marginfiAccountSetKeeperCloseFlags(args.bankKeysOpt ?? null)
+    .accounts(accounts)
+    .instruction();
+};
+
+export type StartExecuteOrderArgs = {
+  group: PublicKey;
+  marginfiAccount: PublicKey;
+  feePayer: PublicKey;
+  executor: PublicKey;
+  order: PublicKey;
+  remaining: PublicKey[];
+};
+
+export const startExecuteOrderIx = (
+  program: Program<Marginfi>,
+  args: StartExecuteOrderArgs
+) => {
+  const [executeRecord] = deriveExecuteOrderPda(program.programId, args.order);
+
+  const rem: AccountMeta[] = args.remaining.map((pubkey) => ({
+    pubkey,
+    isSigner: false,
+    isWritable: false,
+  }));
+
+  const accounts: any = {
+    group: args.group,
+    marginfiAccount: args.marginfiAccount,
+    feePayer: args.feePayer,
+    executor: args.executor,
+    order: args.order,
+    executeRecord,
+    instructionSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+  };
+
+  return program.methods
+    .marginfiAccountStartExecuteOrder()
+    .accounts(accounts)
+    .remainingAccounts(rem)
+    .instruction();
+};
+
+export type EndExecuteOrderArgs = {
+  group: PublicKey;
+  marginfiAccount: PublicKey;
+  executor: PublicKey;
+  order: PublicKey;
+  executeRecord: PublicKey;
+  feeRecipient: PublicKey;
+  remaining: PublicKey[];
+  feeState?: PublicKey;
+};
+
+export const endExecuteOrderIx = (
+  program: Program<Marginfi>,
+  args: EndExecuteOrderArgs
+) => {
+  const feeState = args.feeState ?? deriveGlobalFeeState(program.programId)[0];
+  const rem: AccountMeta[] = args.remaining.map((pubkey) => ({
+    pubkey,
+    isSigner: false,
+    isWritable: false,
+  }));
+
+  const accounts: any = {
+    group: args.group,
+    marginfiAccount: args.marginfiAccount,
+    executor: args.executor,
+    feeRecipient: args.feeRecipient,
+    order: args.order,
+    executeRecord: args.executeRecord,
+    feeState,
+  };
+
+  return program.methods
+    .marginfiAccountEndExecuteOrder()
+    .accountsStrict(accounts)
+    .remainingAccounts(rem)
+    .instruction();
 };

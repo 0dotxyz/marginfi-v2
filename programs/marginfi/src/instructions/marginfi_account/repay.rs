@@ -170,15 +170,15 @@ pub struct LendingAccountRepay<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), true)
+            is_signer_authorized(&a, g.admin, authority.key(), true, true)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
-    /// Must be marginfi_account's authority, unless in liquidation/deleverage receivership
+    /// Must be marginfi_account's authority, unless in liquidation/deleverage receivership or order execution
     ///
-    /// Note: during receivership, there are no signer checks whatsoever: any key can repay as
-    /// long as the invariants checked at the end of receivership are met.
+    /// Note: during receivership and order execution, there are no signer checks whatsoever: any key can repay as
+    /// long as the invariants checked at the end of execution are met.
     pub authority: Signer<'info>,
 
     #[account(

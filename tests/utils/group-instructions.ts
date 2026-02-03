@@ -150,8 +150,8 @@ export type GroupConfigureArgs = {
   newMetadataAdmin?: PublicKey | null;
   newRiskAdmin?: PublicKey | null;
   marginfiGroup: PublicKey;
-  emodeMaxInitLeverage?: WrappedI80F48 | null; 
-  emodeMaxMaintLeverage?: WrappedI80F48 | null; 
+  emodeMaxInitLeverage?: WrappedI80F48 | null;
+  emodeMaxMaintLeverage?: WrappedI80F48 | null;
 };
 
 export const groupConfigure = async (
@@ -329,9 +329,11 @@ export type InitGlobalFeeStateArgs = {
   wallet: PublicKey;
   bankInitFlatSolFee: number;
   liquidationFlatSolFee: number;
+  orderInitFlatFeeDefault: number;
   programFeeFixed: WrappedI80F48;
   programFeeRate: WrappedI80F48;
   liquidationMaxFee: WrappedI80F48;
+  orderExecutionMaxFee: WrappedI80F48;
 };
 
 export const initGlobalFeeState = (
@@ -344,9 +346,11 @@ export const initGlobalFeeState = (
       args.wallet,
       args.bankInitFlatSolFee,
       args.liquidationFlatSolFee,
+      args.orderInitFlatFeeDefault,
       args.programFeeFixed,
       args.programFeeRate,
-      args.liquidationMaxFee
+      args.liquidationMaxFee,
+      args.orderExecutionMaxFee
     )
     .accounts({
       payer: args.payer,
@@ -364,9 +368,11 @@ export type EditGlobalFeeStateArgs = {
   wallet: PublicKey;
   bankInitFlatSolFee: number;
   liquidationFlatSolFee: number;
+  orderInitFlatFeeDefault: number;
   programFeeFixed: WrappedI80F48;
   programFeeRate: WrappedI80F48;
   liquidationMaxFee: WrappedI80F48;
+  orderExecutionMaxFee: WrappedI80F48;
   newAdmin?: PublicKey;
 };
 
@@ -381,9 +387,11 @@ export const editGlobalFeeState = (
       args.wallet,
       args.bankInitFlatSolFee,
       args.liquidationFlatSolFee,
+      args.orderInitFlatFeeDefault,
       args.programFeeFixed,
       args.programFeeRate,
-      args.liquidationMaxFee
+      args.liquidationMaxFee,
+      args.orderExecutionMaxFee
     )
     .accounts({
       globalFeeAdmin: args.admin,
@@ -476,12 +484,12 @@ export const propagateStakedSettings = (
 ) => {
   const remainingAccounts = args.oracle
     ? [
-        {
-          pubkey: args.oracle,
-          isSigner: false,
-          isWritable: false,
-        } as AccountMeta,
-      ]
+      {
+        pubkey: args.oracle,
+        isSigner: false,
+        isWritable: false,
+      } as AccountMeta,
+    ]
     : [];
 
   const ix = program.methods

@@ -1,10 +1,12 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::hash::hashv;
 use anchor_lang::solana_program::instruction::Instruction;
 use anchor_lang::Discriminator;
 use anchor_spl::token_2022::spl_token_2022::extension::transfer_fee::MAX_FEE_BASIS_POINTS;
 use marginfi::constants::SWITCHBOARD_PULL_ID;
 use marginfi_type_crate::constants::EMISSIONS_AUTH_SEED;
 use marginfi_type_crate::constants::EMISSIONS_TOKEN_ACCOUNT_SEED;
+use marginfi_type_crate::constants::{EXECUTE_ORDER_SEED, ORDER_SEED};
 use pyth_solana_receiver_sdk::price_update::FeedId;
 use pyth_solana_receiver_sdk::price_update::PriceUpdateV2;
 use pyth_solana_receiver_sdk::price_update::VerificationLevel;
@@ -390,4 +392,25 @@ pub fn load_account_from_file(relative_path: &str) -> (Pubkey, AccountSharedData
         acc.set_lamports(need);
     }
     (address, acc)
+}
+
+pub fn keys_sha256_hash(keys: &[Pubkey]) -> [u8; 32] {
+    let mut slices: Vec<&[u8]> = keys.iter().map(|pk| pk.as_ref()).collect();
+    slices.sort_unstable();
+    hashv(&slices).to_bytes()
+}
+
+pub fn find_order_pda(marginfi_account: &Pubkey, bank_keys: &[Pubkey]) -> (Pubkey, u8) {
+    let hash = keys_sha256_hash(bank_keys);
+    Pubkey::find_program_address(
+        &[ORDER_SEED.as_bytes(), marginfi_account.as_ref(), &hash],
+        &marginfi::ID,
+    )
+}
+
+pub fn find_execute_order_pda(order: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[EXECUTE_ORDER_SEED.as_bytes(), order.as_ref()],
+        &marginfi::ID,
+    )
 }

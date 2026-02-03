@@ -37,7 +37,7 @@ pub struct FeeState {
     // Pad to next 8-byte multiple
     _padding0: [u8; 3],
     /// Liquidators can claim at this premium, when liquidating an asset in receivership
-    /// liquidation, e.g. (1 + this) * amount repaid <= asset seized
+    /// liquidation, e.g. (1 + this) * amount repaid >= asset seized
     /// * A percentage
     pub liquidation_max_fee: WrappedI80F48,
     /// Fee collected by the program owner from all groups
@@ -54,8 +54,13 @@ pub struct FeeState {
     /// Flat fee assessed for insurance/program use when a liquidation is executed
     /// * In SOL, in native decimals.
     pub liquidation_flat_sol_fee: u32,
-    // Reserved for future use
-    _reserved0: [u8; 20],
+    /// Flat fee assessed for preventing spam use when creating an order
+    /// * In SOL, in native decimals.
+    pub order_init_flat_sol_fee: u32,
+    /// Orders can be executed at this premium
+    /// e.g. (1 + this) * amount repaid >= asset seized
+    /// * A percentage    
+    pub order_execution_max_fee: WrappedI80F48,
     _reserved1: [u8; 32],
 }
 

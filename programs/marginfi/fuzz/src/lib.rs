@@ -1114,8 +1114,10 @@ fn initialize_fee_state<'a>(
         // because the fuzz suite does not yet support the system program.
         0,
         0,
+        0,
         I80F48!(0).into(),
         I80F48!(0).into(),
+        I80F48!(0.05).into(),
         I80F48!(0.05).into(),
     )
     .unwrap();

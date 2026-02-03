@@ -1,7 +1,10 @@
 use anchor_lang::solana_program::sysvar::instructions::*;
 use anchor_lang::{
     prelude::*,
-    solana_program::instruction::{get_stack_height, Instruction, TRANSACTION_LEVEL_STACK_HEIGHT},
+    solana_program::{
+        hash::hashv,
+        instruction::{get_stack_height, Instruction, TRANSACTION_LEVEL_STACK_HEIGHT},
+    },
 };
 
 use crate::constants::COMPUTE_PROGRAM_KEY;
@@ -203,6 +206,13 @@ pub fn load_and_validate_instructions(
     Ok(ixes)
 }
 
+/// Finds the hash of a slice of keys, sorting them before hashing
+pub fn keys_sha256_hash(keys: &[Pubkey]) -> [u8; 32] {
+    let mut slices: Vec<&[u8]> = keys.iter().map(|pk| pk.as_ref()).collect();
+    slices.sort_unstable();
+    hashv(&slices).to_bytes()
+}
+
 // TODO eventually compare these against the generated discrim in the IDL to prevent sausage fingers
 // from changing an ix name and thusly the hash.
 #[cfg(test)]
@@ -211,10 +221,11 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use crate::{
-        DriftWithdraw, EndDeleverage, EndLiquidation, InitLiquidationRecord, KaminoWithdraw,
-        LendingAccountEndFlashloan, LendingAccountRepay, LendingAccountSettleEmissions,
-        LendingAccountStartFlashloan, LendingAccountWithdraw, LendingAccountWithdrawEmissions,
-        StartDeleverage, StartLiquidation,
+        DriftWithdraw, EndDeleverage, EndExecuteOrder, EndLiquidation, InitLiquidationRecord,
+        KaminoWithdraw, LendingAccountEndFlashloan, LendingAccountRepay,
+        LendingAccountSettleEmissions, LendingAccountStartFlashloan, LendingAccountWithdraw,
+        LendingAccountWithdrawEmissions, LendingAccountWithdrawEmissionsPermissionless,
+        StartDeleverage, StartExecuteOrder, StartLiquidation,
     };
 
     use super::*;
@@ -250,6 +261,16 @@ mod tests {
         let got_liquidation = get_discrim_hash("account", "LiquidationRecord");
         let want_liquidation = discriminators::LIQUIDATION_RECORD;
         assert_eq!(got_liquidation, want_liquidation);
+
+        // ─── Order ──────────────────────────────────────────────────
+        let got_order = get_discrim_hash("account", "Order");
+        let want_order = discriminators::ORDER;
+        assert_eq!(got_order, want_order);
+
+        // ─── ExecuteOrderRecord ─────────────────────────────────────
+        let got_exec_record = get_discrim_hash("account", "ExecuteOrderRecord");
+        let want_exec_record = discriminators::EXECUTE_ORDER_RECORD;
+        assert_eq!(got_exec_record, want_exec_record);
     }
 
     #[test]
@@ -280,14 +301,19 @@ mod tests {
         assert_eq!(got_repay, want_repay);
 
         // ─── LendingAccountWithdrawEmissions ─────────────────────────────────────────────────
-        let got_repay = LendingAccountWithdrawEmissions::get_hash();
-        let want_repay = ix_discriminators::LENDING_SETTLE_EMISSIONS;
-        assert_eq!(got_repay, want_repay);
+        let got_emissions = LendingAccountWithdrawEmissions::get_hash();
+        let want_emissions = ix_discriminators::LENDING_WITHDRAW_EMISSIONS;
+        assert_eq!(got_emissions, want_emissions);
 
-        // ─── LendingAccountSettleEmissions ─────────────────────────────────────────────────
-        let got_repay = LendingAccountSettleEmissions::get_hash();
-        let want_repay = ix_discriminators::LENDING_WITHDRAW_EMISSIONS;
-        assert_eq!(got_repay, want_repay);
+        // ─── LendingAccountWithdrawEmissionsPermissionless ───────────────────────────────────
+        let got_emissions = LendingAccountWithdrawEmissionsPermissionless::get_hash();
+        let want_emissions = ix_discriminators::LENDING_WITHDRAW_EMISSIONS_PERMISSIONLESS;
+        assert_eq!(got_emissions, want_emissions);
+
+        // ─── LendingAccountSettleEmissions ────────────────────────────────────────────────
+        let got_emissions = LendingAccountSettleEmissions::get_hash();
+        let want_emissions = ix_discriminators::LENDING_SETTLE_EMISSIONS;
+        assert_eq!(got_emissions, want_emissions);
 
         // ─── LendingAccountStartFlashloan ─────────────────────────────────────────────────
         let got_flash = LendingAccountStartFlashloan::get_hash();
@@ -318,5 +344,15 @@ mod tests {
         let got_kamino = KaminoWithdraw::get_hash();
         let want_kamino = ix_discriminators::KAMINO_WITHDRAW;
         assert_eq!(got_kamino, want_kamino);
+
+        // ─── StartExecuteOrder ───────────────────────────────────────────────────
+        let got_start_exec = StartExecuteOrder::get_hash();
+        let want_start_exec = ix_discriminators::START_EXECUTE_ORDER;
+        assert_eq!(got_start_exec, want_start_exec);
+
+        // ─── EndExecuteOrder ─────────────────────────────────────────────────────
+        let got_end_exec = EndExecuteOrder::get_hash();
+        let want_end_exec = ix_discriminators::END_EXECUTE_ORDER;
+        assert_eq!(got_end_exec, want_end_exec);
     }
 }

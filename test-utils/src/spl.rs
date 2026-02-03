@@ -293,15 +293,33 @@ impl MintFixture {
         self.create_token_account_and_mint_to(0.0).await
     }
 
+    pub async fn create_empty_token_account_with_owner(
+        &self,
+        owner: &Pubkey,
+    ) -> TokenAccountFixture {
+        self.create_token_account_and_mint_to_with_owner(owner, 0.0)
+            .await
+    }
+
     pub async fn create_token_account_and_mint_to<'a, T: Into<f64>>(
         &self,
+        ui_amount: T,
+    ) -> TokenAccountFixture {
+        let payer = self.ctx.borrow().payer.pubkey();
+        self.create_token_account_and_mint_to_with_owner(&payer, ui_amount)
+            .await
+    }
+
+    pub async fn create_token_account_and_mint_to_with_owner<'a, T: Into<f64>>(
+        &self,
+        owner: &Pubkey,
         ui_amount: T,
     ) -> TokenAccountFixture {
         let payer = self.ctx.borrow().payer.pubkey();
         let token_account_f = TokenAccountFixture::new_with_token_program(
             self.ctx.clone(),
             &self.key,
-            &payer,
+            owner,
             &self.token_program,
         )
         .await;
@@ -315,7 +333,7 @@ impl MintFixture {
 
         let tx = Transaction::new_signed_with_payer(
             &[mint_to_ix],
-            Some(&ctx.payer.pubkey()),
+            Some(&payer),
             &[&ctx.payer],
             ctx.last_blockhash,
         );

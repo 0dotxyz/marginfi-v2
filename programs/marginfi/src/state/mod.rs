@@ -9,6 +9,7 @@ pub mod kamino;
 pub mod liquidation_record;
 pub mod marginfi_account;
 pub mod marginfi_group;
+pub mod order;
 pub mod panic_state;
 pub mod price;
 pub mod solend;

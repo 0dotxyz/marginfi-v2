@@ -91,6 +91,13 @@ pub const LIQUIDATION_BONUS_FEE_MINIMUM: I80F48 = I80F48!(0.05);
 /// of liquidation bonus, etc) if it has net assets worth less than this amount in dollars. This
 /// roughly covers the fee to open a liquidation record plus a little extra.
 pub const LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD: I80F48 = I80F48!(5);
+/// Maximum order execution fee as a percent of the order size
+/// * This value is used together with the slippage set by the user.
+pub const ORDER_EXECUTION_MAX_FEE: I80F48 = I80F48!(0.05); // 5%
+/// The default fee, in native SOL in native decimals (i.e. lamports) used in testing
+pub const ORDER_INIT_FLAT_FEE_DEFAULT: u32 = 100_000;
+/// Maximum basis points (100%)
+pub const MAX_BPS: u16 = 10_000;
 
 pub const MIN_PYTH_PUSH_VERIFICATION_LEVEL: VerificationLevel = VerificationLevel::Full;
 

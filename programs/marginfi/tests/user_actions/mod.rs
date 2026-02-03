@@ -10,6 +10,7 @@ mod flash_loan;
 mod liquidate;
 mod liquidate_receiver;
 mod liquidate_receiver_cpi;
+mod order;
 mod panic_mode_user_interactions;
 mod repay;
 mod transfer_account_pda;
