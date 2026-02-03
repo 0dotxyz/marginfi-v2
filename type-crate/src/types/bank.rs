@@ -210,8 +210,8 @@ impl OracleSetup {
             10 => Some(Self::DriftSwitchboardPull),
             11 => Some(Self::SolendPythPull),
             12 => Some(Self::SolendSwitchboardPull),
-            14 | 15 => Some(Self::FixedKamino),
-            16 | 17 => Some(Self::FixedDrift),
+            13 => Some(Self::FixedKamino),
+            14 => Some(Self::FixedDrift),
             _ => None,
         }
     }
