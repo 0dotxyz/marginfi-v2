@@ -9,6 +9,7 @@ use crate::{
     prelude::*,
     state::marginfi_account::{
         check_pre_liquidation_condition_and_get_account_health, get_health_components,
+        write_liquidation_price_cache_from, HealthPriceMode, LiquidationPriceCache,
         MarginfiAccountImpl, RiskRequirementType,
     },
 };
@@ -92,12 +93,15 @@ pub fn start_receivership<'info>(
     // Note: the receiver can use the health cache state after this ix concludes to plan their
     // liquidation/deleverage strategy.
     let mut health_cache = HealthCache::zeroed();
-
+    let mut liq_price_cache = LiquidationPriceCache::default();
     let (_pre_health, assets, liabs) = check_pre_liquidation_condition_and_get_account_health(
         marginfi_account,
         remaining_ais,
         None,
         &mut Some(&mut health_cache),
+        HealthPriceMode::Live {
+            liq_cache: Some(&mut liq_price_cache),
+        },
         ignore_healthy,
     )?;
 
@@ -107,8 +111,12 @@ pub fn start_receivership<'info>(
         remaining_ais,
         RiskRequirementType::Equity,
         &mut Some(&mut health_cache),
+        HealthPriceMode::Live {
+            liq_cache: Some(&mut liq_price_cache),
+        },
     )?;
 
+    write_liquidation_price_cache_from(marginfi_account, remaining_ais, &liq_price_cache)?;
     marginfi_account.health_cache = health_cache;
     marginfi_account.set_flag(ACCOUNT_IN_RECEIVERSHIP, false);
 

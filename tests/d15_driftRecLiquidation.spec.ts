@@ -1,6 +1,7 @@
 import { BN } from "@coral-xyz/anchor";
 import {
   ComputeBudgetProgram,
+  AccountMeta,
   Keypair,
   PublicKey,
   Transaction,
@@ -43,6 +44,8 @@ import { makeUpdateSpotMarketCumulativeInterestIx } from "./utils/drift-sdk";
 import {
   borrowIx,
   composeRemainingAccounts,
+  composeRemainingAccountsMetaBanksOnly,
+  composeRemainingAccountsWriteableMeta,
   depositIx,
   endLiquidationIx,
   healthPulse,
@@ -71,6 +74,8 @@ describe("d15: Drift rec liquidation", () => {
   let driftTokenAPullOracle: PublicKey;
   let driftTokenAPullFeed: PublicKey;
   let liabBank: PublicKey;
+  let remainingStartMeta: AccountMeta[] = [];
+  let remainingEndMeta: AccountMeta[] = [];
 
   before(async () => {
     const result = await genericMultiBankTestSetup(
@@ -190,6 +195,10 @@ describe("d15: Drift rec liquidation", () => {
       [liabBank, oracles.pythPullLst.publicKey],
     ];
     const remaining = composeRemainingAccounts(remainingAccounts);
+    remainingStartMeta =
+      composeRemainingAccountsWriteableMeta(remainingAccounts);
+    remainingEndMeta =
+      composeRemainingAccountsMetaBanksOnly(remainingAccounts);
 
     const fundTokenATx = new Transaction().add(
       createMintToInstruction(
@@ -316,7 +325,7 @@ describe("d15: Drift rec liquidation", () => {
       await startLiquidationIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
         liquidationReceiver: liquidator.wallet.publicKey,
-        remaining,
+        remaining: remainingStartMeta,
       }),
       await makeDriftWithdrawIx(
         liquidator.mrgnBankrunProgram,
@@ -341,7 +350,7 @@ describe("d15: Drift rec liquidation", () => {
       }),
       await endLiquidationIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
-        remaining,
+        remaining: remainingEndMeta,
       }),
     );
 
@@ -411,7 +420,7 @@ describe("d15: Drift rec liquidation", () => {
     const startLiqIx = await startLiquidationIx(liquidator.mrgnBankrunProgram, {
       marginfiAccount: liquidateeAccount,
       liquidationReceiver: liquidator.wallet.publicKey,
-      remaining,
+      remaining: remainingStartMeta,
     });
     const repayLiqIx = await repayIx(liquidator.mrgnBankrunProgram, {
       marginfiAccount: liquidateeAccount,
@@ -421,7 +430,7 @@ describe("d15: Drift rec liquidation", () => {
     });
     const endLiqIx = await endLiquidationIx(liquidator.mrgnBankrunProgram, {
       marginfiAccount: liquidateeAccount,
-      remaining,
+      remaining: remainingEndMeta,
     });
     const liquidationTx = new Transaction().add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
