@@ -1,3 +1,5 @@
+use anchor_lang::{InstructionData, ToAccountMetas};
+use bytemuck::from_bytes_mut;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use fixtures::{assert_custom_error, assert_eq_noise, native, prelude::*};
@@ -8,12 +10,12 @@ use marginfi::{
 };
 use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
-    types::{BankConfigOpt, ACCOUNT_IN_RECEIVERSHIP},
+    types::{Bank, BankConfigOpt, ACCOUNT_IN_RECEIVERSHIP},
 };
 use solana_program_test::*;
 use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction, pubkey::Pubkey, signer::Signer,
-    transaction::Transaction,
+    compute_budget::ComputeBudgetInstruction, instruction::Instruction, pubkey::Pubkey,
+    signer::Signer, transaction::Transaction,
 };
 
 #[tokio::test]
@@ -603,6 +605,145 @@ async fn liquidate_receiver_happy_path() -> anyhow::Result<()> {
         LIQUIDATION_FLAT_FEE_DEFAULT as u64 + 5000
     );
     assert_eq!(fee_post - fee_pre, LIQUIDATION_FLAT_FEE_DEFAULT as u64);
+    Ok(())
+}
+
+// Repay during receivership should not require remaining accounts even when rate limits are enabled.
+// This currently fails because repay fetches a rate-limit price before checking the receivership flag.
+#[tokio::test]
+async fn liquidate_receiver_repay_without_oracles_should_succeed() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    // Enable group rate limiting so repay attempts to fetch a rate-limit price.
+    {
+        let ctx = test_f.context.borrow_mut();
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::ConfigureGroupRateLimits {
+                marginfi_group: test_f.marginfi_group.key,
+                admin: ctx.payer.pubkey(),
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::ConfigureGroupRateLimits {
+                hourly_max_outflow_usd: Some(1_000_000),
+                daily_max_outflow_usd: None,
+            }
+            .data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.last_blockhash,
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidatee = test_f.create_marginfi_account().await;
+
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    let liquidator_usdc_acc = test_f.usdc_mint.create_token_account_and_mint_to(200).await;
+    liquidator
+        .try_bank_deposit(liquidator_usdc_acc.key, usdc_bank, 100, None)
+        .await?;
+
+    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    liquidatee
+        .try_bank_deposit(user_token_sol.key, sol_bank, 2.0, None)
+        .await?;
+    liquidatee
+        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .await?;
+
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.25).into()),
+                asset_weight_maint: Some(I80F48!(0.4).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let (record_pk, _bump) = Pubkey::find_program_address(
+        &[LIQUIDATION_RECORD_SEED.as_bytes(), liquidatee.key.as_ref()],
+        &marginfi::ID,
+    );
+
+    {
+        let ctx = test_f.context.borrow_mut();
+        let init_ix = liquidatee
+            .make_init_liquidation_record_ix(record_pk, ctx.payer.pubkey())
+            .await;
+        let init_tx = Transaction::new_signed_with_payer(
+            &[init_ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.last_blockhash,
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(init_tx)
+            .await?;
+    }
+
+    // Clear the cached oracle timestamp to force InvalidRateLimitPrice when no oracles are passed.
+    let mut bank_ai = test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .get_account(usdc_bank.key)
+        .await
+        .unwrap()
+        .unwrap();
+    let bank = from_bytes_mut::<Bank>(&mut bank_ai.data.as_mut_slice()[8..]);
+    bank.cache.last_oracle_price = I80F48::ZERO.into();
+    bank.cache.last_oracle_price_timestamp = 0;
+    test_f
+        .context
+        .borrow_mut()
+        .set_account(&usdc_bank.key, &bank_ai.into());
+
+    let payer = test_f.payer().clone();
+    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
+    let withdraw_ix = liquidatee
+        .make_bank_withdraw_ix(liquidator_sol_acc.key, sol_bank, 0.0001, None, true)
+        .await;
+    let repay_ix = liquidatee
+        .make_bank_repay_ix(liquidator_usdc_acc.key, usdc_bank, 0.001, None)
+        .await;
+    let end_ix = liquidatee
+        .make_end_liquidation_ix(
+            record_pk,
+            payer,
+            test_f.marginfi_group.fee_state,
+            test_f.marginfi_group.fee_wallet,
+            vec![],
+        )
+        .await;
+
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(
+        &[start_ix, withdraw_ix, repay_ix, end_ix],
+        Some(&ctx.payer.pubkey()),
+        &[&ctx.payer],
+        ctx.last_blockhash,
+    );
+    let res = ctx
+        .banks_client
+        .process_transaction_with_preflight(tx)
+        .await;
+    assert!(
+        res.is_ok(),
+        "repay during receivership without remaining accounts should succeed"
+    );
     Ok(())
 }
 

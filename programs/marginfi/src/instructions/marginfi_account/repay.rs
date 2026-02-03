@@ -82,18 +82,7 @@ pub fn lending_account_repay<'info>(
         bank_loader.key(),
     )?;
 
-    // Fetch oracle price for group rate limiting (fall back to cache when oracles are omitted).
     let group_rate_limit_enabled = group.rate_limiter.is_enabled();
-    let rate_limit_price = if group_rate_limit_enabled {
-        fetch_rate_limit_price_for_inflow(
-            &bank_loader.key(),
-            &bank,
-            &clock,
-            ctx.remaining_accounts,
-        )?
-    } else {
-        I80F48::ZERO
-    };
 
     let lending_account = &mut marginfi_account.lending_account;
     let mut bank_account =
@@ -118,6 +107,12 @@ pub fn lending_account_repay<'info>(
 
         // Group-level rate limiting (USD) - prefer live price, fall back to cached.
         if group_rate_limit_enabled {
+            let rate_limit_price = fetch_rate_limit_price_for_inflow(
+                &bank_loader.key(),
+                &bank,
+                &clock,
+                ctx.remaining_accounts,
+            )?;
             let usd_value = calc_value(
                 I80F48::from_num(repay_amount_post_fee),
                 rate_limit_price,
