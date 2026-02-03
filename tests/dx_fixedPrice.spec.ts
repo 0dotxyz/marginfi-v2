@@ -12,31 +12,15 @@ import {
   banksClient,
   ecosystem,
   groupAdmin,
-  kaminoAccounts,
-  klendBankrunProgram,
-  MARKET,
   oracles,
-  TOKEN_A_RESERVE,
-  USDC_RESERVE,
   users,
   verbose,
-  kaminoGroup,
+  driftGroup,
+  driftAccounts,
+  DRIFT_USDC_SPOT_MARKET,
+  DRIFT_TOKEN_A_SPOT_MARKET,
+  driftBankrunProgram,
 } from "./rootHooks";
-import {
-  defaultKaminoBankConfig,
-  getCollateralExchangeRate,
-  getLiquidityAvailableAmount,
-  getLiquidityExchangeRate,
-  getTotalSupply,
-  simpleRefreshObligation,
-  simpleRefreshReserve,
-} from "./utils/kamino-utils";
-import {
-  makeAddKaminoBankIx,
-  makeInitObligationIx,
-  makeKaminoDepositIx,
-  makeKaminoWithdrawIx,
-} from "./utils/kamino-instructions";
 import {
   accountInit,
   depositIx,
@@ -51,13 +35,14 @@ import {
   configureBankOracle,
   setFixedPrice,
 } from "./utils/group-instructions";
-import {
-  deriveBankWithSeed,
-  deriveBaseObligation,
-  deriveLiquidityVaultAuthority,
-} from "./utils/pdas";
+import { deriveBankWithSeed } from "./utils/pdas";
 import { assert } from "chai";
-import { assertBankrunTxFailed, getTokenBalance } from "./utils/genericTests";
+import {
+  assertBankrunTxFailed,
+  assertBNApproximately,
+  assertBNEqual,
+  getTokenBalance,
+} from "./utils/genericTests";
 import {
   bigNumberToWrappedI80F48,
   wrappedI80F48toBigNumber,
@@ -70,31 +55,42 @@ import {
   defaultBankConfig,
   ORACLE_SETUP_PYTH_PUSH,
 } from "./utils/types";
-import { Reserve } from "@kamino-finance/klend-sdk";
+import {
+  defaultDriftBankConfig,
+  getDriftUserAccount,
+  getSpotMarketAccount,
+  scaledBalanceToTokenAmount,
+  tokenAmountToScaledBalance,
+  USDC_INIT_DEPOSIT_AMOUNT,
+  USDC_SCALING_FACTOR,
+} from "./utils/drift-utils";
+import {
+  makeAddDriftBankIx,
+  makeDriftDepositIx,
+  makeDriftWithdrawIx,
+  makeInitDriftUserIx,
+} from "./utils/drift-instructions";
 
 let ctx: ProgramTestContext;
-let market: PublicKey;
-let usdcReserve: PublicKey;
-let tokenAReserve: PublicKey;
-let fixedKaminoBank: PublicKey;
-let fixedKaminoObligation: PublicKey;
+let usdcSpotMarket: PublicKey;
+let tokenASpotMarket: PublicKey;
+let fixedDriftBank: PublicKey;
 let userAccount: PublicKey;
 let borrowBank: PublicKey;
 let adminAccount: PublicKey;
 let userUsdcStart = 0;
 
-const FIXED_SEED = new BN(7778);
-const BORROW_SEED = new BN(8888);
+const FIXED_SEED = new BN(7742);
+const BORROW_SEED = new BN(8842);
 // Note: USDC is not worth $2, so this test is silly
 const FIXED_PRICE = 2;
 const BORROW_AMOUNT = new BN(10 * 10 ** ecosystem.tokenADecimals);
 
-describe("kx: Fixed Kamino price bank", () => {
+describe("dx: Fixed Drift price bank", () => {
   before(async () => {
     ctx = bankrunContext;
-    market = kaminoAccounts.get(MARKET);
-    usdcReserve = kaminoAccounts.get(USDC_RESERVE);
-    tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE);
+    usdcSpotMarket = driftAccounts.get(DRIFT_USDC_SPOT_MARKET);
+    tokenASpotMarket = driftAccounts.get(DRIFT_TOKEN_A_SPOT_MARKET);
   });
 
   it("(user 3) initialize marginfi account for main group", async () => {
@@ -104,7 +100,7 @@ describe("kx: Fixed Kamino price bank", () => {
 
     const tx = new Transaction().add(
       await accountInit(user.mrgnBankrunProgram, {
-        marginfiGroup: kaminoGroup.publicKey,
+        marginfiGroup: driftGroup.publicKey,
         marginfiAccount: userAccount,
         authority: user.wallet.publicKey,
         feePayer: user.wallet.publicKey,
@@ -113,25 +109,24 @@ describe("kx: Fixed Kamino price bank", () => {
     await processBankrunTransaction(ctx, tx, [user.wallet, accountKeypair]);
   });
 
-  it("(admin) add fixed Kamino USDC bank + init obligation", async () => {
-    const defaultConfig = defaultKaminoBankConfig(oracles.usdcOracle.publicKey);
+  it("(admin) add fixed Drift USDC bank + init user", async () => {
+    const defaultConfig = defaultDriftBankConfig(oracles.usdcOracle.publicKey);
     const [bankKey] = deriveBankWithSeed(
       bankrunProgram.programId,
-      kaminoGroup.publicKey,
+      driftGroup.publicKey,
       ecosystem.usdcMint.publicKey,
       FIXED_SEED,
     );
-    fixedKaminoBank = bankKey;
+    fixedDriftBank = bankKey;
 
     const addBankTx = new Transaction().add(
-      await makeAddKaminoBankIx(
+      await makeAddDriftBankIx(
         groupAdmin.mrgnBankrunProgram,
         {
-          group: kaminoGroup.publicKey,
+          group: driftGroup.publicKey,
           feePayer: groupAdmin.wallet.publicKey,
           bankMint: ecosystem.usdcMint.publicKey,
-          kaminoReserve: usdcReserve,
-          kaminoMarket: market,
+          integrationAcc1: usdcSpotMarket,
           oracle: oracles.usdcOracle.publicKey,
         },
         {
@@ -142,41 +137,34 @@ describe("kx: Fixed Kamino price bank", () => {
     );
     await processBankrunTransaction(ctx, addBankTx, [groupAdmin.wallet]);
 
-    const [authority] = deriveLiquidityVaultAuthority(
-      bankrunProgram.programId,
-      fixedKaminoBank,
-    );
-    const [obligation] = deriveBaseObligation(authority, market);
-    fixedKaminoObligation = obligation;
-
-    const initObligationTx = new Transaction().add(
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),
-      await makeInitObligationIx(
+    const initUserTx = new Transaction().add(
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+      await makeInitDriftUserIx(
         groupAdmin.mrgnBankrunProgram,
         {
           feePayer: users[3].wallet.publicKey,
-          bank: fixedKaminoBank,
+          bank: fixedDriftBank,
           signerTokenAccount: users[3].usdcAccount,
-          lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
-          pythOracle: oracles.usdcOracle.publicKey,
         },
-        new BN(100),
+        {
+          amount: USDC_INIT_DEPOSIT_AMOUNT,
+        },
+        0,
       ),
     );
-    await processBankrunTransaction(ctx, initObligationTx, [users[3].wallet]);
+    await processBankrunTransaction(ctx, initUserTx, [users[3].wallet]);
 
     const setFixedTx = new Transaction().add(
       await setFixedPrice(groupAdmin.mrgnBankrunProgram, {
-        bank: fixedKaminoBank,
+        bank: fixedDriftBank,
         price: FIXED_PRICE,
-        remaining: [usdcReserve],
+        remaining: [usdcSpotMarket],
       }),
     );
     await processBankrunTransaction(ctx, setFixedTx, [groupAdmin.wallet]);
 
     if (verbose) {
-      console.log("Fixed Kamino bank:", fixedKaminoBank.toString());
+      console.log("Fixed Drift bank:", fixedDriftBank.toString());
     }
   });
 
@@ -186,7 +174,7 @@ describe("kx: Fixed Kamino price bank", () => {
 
     const initAdminTx = new Transaction().add(
       await accountInit(groupAdmin.mrgnBankrunProgram, {
-        marginfiGroup: kaminoGroup.publicKey,
+        marginfiGroup: driftGroup.publicKey,
         marginfiAccount: adminAccount,
         authority: groupAdmin.wallet.publicKey,
         feePayer: groupAdmin.wallet.publicKey,
@@ -202,7 +190,7 @@ describe("kx: Fixed Kamino price bank", () => {
 
     const [bankKey] = deriveBankWithSeed(
       bankrunProgram.programId,
-      kaminoGroup.publicKey,
+      driftGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
       BORROW_SEED,
     );
@@ -214,7 +202,7 @@ describe("kx: Fixed Kamino price bank", () => {
 
     const addBankTx = new Transaction().add(
       await addBankWithSeed(groupAdmin.mrgnBankrunProgram, {
-        marginfiGroup: kaminoGroup.publicKey,
+        marginfiGroup: driftGroup.publicKey,
         feePayer: groupAdmin.wallet.publicKey,
         bankMint: ecosystem.tokenAMint.publicKey,
         config,
@@ -244,21 +232,26 @@ describe("kx: Fixed Kamino price bank", () => {
     await processBankrunTransaction(ctx, seedTx, [groupAdmin.wallet]);
   });
 
-  it("(attacker) pulse bank price with wrong reserve - should fail", async () => {
+  it("(attacker) pulse bank price with wrong spot market - should fail", async () => {
     const user = users[3];
     const tx = new Transaction().add(
       await pulseBankPrice(user.mrgnBankrunProgram, {
-        group: kaminoGroup.publicKey,
-        bank: fixedKaminoBank,
-        remaining: [tokenAReserve],
+        group: driftGroup.publicKey,
+        bank: fixedDriftBank,
+        remaining: [tokenASpotMarket],
       }),
     );
-    const result = await processBankrunTransaction(ctx, tx, [user.wallet], true);
-    // KaminoReserveValidationFailed
-    assertBankrunTxFailed(result, 6210);
+    const result = await processBankrunTransaction(
+      ctx,
+      tx,
+      [user.wallet],
+      true,
+    );
+    // DriftSpotMarketValidationFailed
+    assertBankrunTxFailed(result, 6304);
   });
 
-  it("(user 3) deposit into fixed Kamino bank - happy path", async () => {
+  it("(user 3) deposit into fixed Drift bank - happy path", async () => {
     const user = users[3];
     const depositAmount = new BN(1_000 * 10 ** ecosystem.usdcDecimals);
 
@@ -271,28 +264,15 @@ describe("kx: Fixed Kamino price bank", () => {
     userUsdcStart = userUsdcBefore;
 
     const tx = new Transaction().add(
-      await simpleRefreshReserve(
-        klendBankrunProgram,
-        usdcReserve,
-        market,
-        oracles.usdcOracle.publicKey,
-      ),
-      await simpleRefreshObligation(
-        klendBankrunProgram,
-        market,
-        fixedKaminoObligation,
-        [usdcReserve],
-      ),
-      await makeKaminoDepositIx(
+      await makeDriftDepositIx(
         user.mrgnBankrunProgram,
         {
           marginfiAccount: userAccount,
-          bank: fixedKaminoBank,
+          bank: fixedDriftBank,
           signerTokenAccount: user.usdcAccount,
-          lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
         },
         depositAmount,
+        0,
       ),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
@@ -305,23 +285,21 @@ describe("kx: Fixed Kamino price bank", () => {
     console.log("deposited: " + diff.toLocaleString());
     assert.equal(userUsdcBefore - userUsdcAfter, depositAmount.toNumber());
 
-    const reserveAfterDepositRaw =
-      await klendBankrunProgram.account.reserve.fetch(usdcReserve);
-    const reserveAfterDeposit = { ...reserveAfterDepositRaw } as Reserve;
-    console.log(
-      "Kamino reserve after deposit:",
-      "\n available",
-      getLiquidityAvailableAmount(reserveAfterDeposit).toString(),
-      "\n total",
-      getTotalSupply(reserveAfterDeposit).toString(),
-      "\n liq/coll",
-      getLiquidityExchangeRate(reserveAfterDeposit).toString(),
-      "\n coll/liq",
-      getCollateralExchangeRate(reserveAfterDeposit).toString(),
+    const bank = await bankrunProgram.account.bank.fetch(fixedDriftBank);
+    const driftUserAfterDeposit = await getDriftUserAccount(
+      driftBankrunProgram,
+      bank.integrationAcc2,
     );
+    const scaledBalanceAfterDeposit =
+      driftUserAfterDeposit.spotPositions[0].scaledBalance;
+
+    const spotMarket = await getSpotMarketAccount(driftBankrunProgram, 0);
+    const scaledBalance = tokenAmountToScaledBalance(depositAmount.add(USDC_INIT_DEPOSIT_AMOUNT), spotMarket);
+
+    assertBNApproximately(scaledBalanceAfterDeposit, scaledBalance, 1);
   });
 
-  it("(user 3) borrow Token A against fixed Kamino collateral - happy path", async () => {
+  it("(user 3) borrow Token A against fixed Drift collateral - happy path", async () => {
     const user = users[3];
 
     await refreshPullOraclesBankrun(oracles, ctx, banksClient);
@@ -332,17 +310,11 @@ describe("kx: Fixed Kamino price bank", () => {
     );
 
     const remaining = composeRemainingAccounts([
-      [fixedKaminoBank, usdcReserve],
+      [fixedDriftBank, usdcSpotMarket],
       [borrowBank, oracles.tokenAOracle.publicKey],
     ]);
 
     const tx = new Transaction().add(
-      await simpleRefreshReserve(
-        klendBankrunProgram,
-        usdcReserve,
-        market,
-        oracles.usdcOracle.publicKey,
-      ),
       await borrowIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         bank: borrowBank,
@@ -365,17 +337,11 @@ describe("kx: Fixed Kamino price bank", () => {
     await refreshPullOraclesBankrun(oracles, ctx, banksClient);
 
     const remaining = composeRemainingAccounts([
-      [fixedKaminoBank, usdcReserve],
+      [fixedDriftBank, usdcSpotMarket],
       [borrowBank, oracles.tokenAOracle.publicKey],
     ]);
 
     const tx = new Transaction().add(
-      await simpleRefreshReserve(
-        klendBankrunProgram,
-        usdcReserve,
-        market,
-        oracles.usdcOracle.publicKey,
-      ),
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         remaining,
@@ -396,7 +362,7 @@ describe("kx: Fixed Kamino price bank", () => {
       cache.liabilityValue,
     ).toNumber();
 
-    // Note: The way this actually works is convoluted: Before the Fixed Price update to Kamino, the
+    // Note: The way this actually works is convoluted: Before the Fixed Price update to Drift, the
     // internal value that would be reported is liqudity * (col/liq exchange rate, e.g. 1000 USDC
     // value * (1 / 1.00258) here). When we now multiply by the (liq/col) ratio in
     // `try_from_bank_with_max_age`, we're just undoing that to get back to the actual value of your
@@ -417,16 +383,17 @@ describe("kx: Fixed Kamino price bank", () => {
     );
   });
 
-  it("(user 3) withdraw from fixed Kamino bank - happy path", async () => {
+  it("(user 3) withdraw from fixed Drift bank - happy path", async () => {
     const user = users[3];
     const withdrawAmount = new BN(100 * 10 ** ecosystem.usdcDecimals);
 
-    const reserveBeforeWithdrawRaw =
-      await klendBankrunProgram.account.reserve.fetch(usdcReserve);
-    const reserveBeforeWithdraw = { ...reserveBeforeWithdrawRaw } as Reserve;
-    const exchangeRateBeforeWithdraw = getLiquidityExchangeRate(
-      reserveBeforeWithdraw,
+    const bank = await bankrunProgram.account.bank.fetch(fixedDriftBank);
+    const driftUserBeforeWithdraw = await getDriftUserAccount(
+      driftBankrunProgram,
+      bank.integrationAcc2,
     );
+    const scaledBalanceBeforeWithdraw =
+      driftUserBeforeWithdraw.spotPositions[0].scaledBalance;
 
     const userUsdcBefore = await getTokenBalance(
       bankRunProvider,
@@ -434,38 +401,24 @@ describe("kx: Fixed Kamino price bank", () => {
     );
 
     const remaining = composeRemainingAccounts([
-      [fixedKaminoBank, usdcReserve],
+      [fixedDriftBank, usdcSpotMarket],
       [borrowBank, oracles.tokenAOracle.publicKey],
     ]);
 
     const tx = new Transaction().add(
-      await simpleRefreshReserve(
-        klendBankrunProgram,
-        usdcReserve,
-        market,
-        oracles.usdcOracle.publicKey,
-      ),
-      await simpleRefreshObligation(
-        klendBankrunProgram,
-        market,
-        fixedKaminoObligation,
-        [usdcReserve],
-      ),
-      await makeKaminoWithdrawIx(
+      await makeDriftWithdrawIx(
         user.mrgnBankrunProgram,
         {
           marginfiAccount: userAccount,
-          authority: user.wallet.publicKey,
-          bank: fixedKaminoBank,
+          bank: fixedDriftBank,
           destinationTokenAccount: user.usdcAccount,
-          lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
         },
         {
           amount: withdrawAmount,
-          isWithdrawAll: false,
+          withdrawAll: false,
           remaining,
         },
+        driftBankrunProgram,
       ),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
@@ -477,34 +430,17 @@ describe("kx: Fixed Kamino price bank", () => {
     const diff = userUsdcAfter - userUsdcBefore;
     console.log("withdrew: " + diff.toLocaleString());
 
-    const expectedWithdraw = exchangeRateBeforeWithdraw
-      .mul(withdrawAmount.toString())
-      .toNumber();
-    assert.approximately(diff, expectedWithdraw, 2);
-
-    const reserveAfterWithdrawRaw =
-      await klendBankrunProgram.account.reserve.fetch(usdcReserve);
-    const reserveAfterWithdraw = { ...reserveAfterWithdrawRaw } as Reserve;
-    const availableDelta = getLiquidityAvailableAmount(
-      reserveBeforeWithdraw,
-    ).sub(getLiquidityAvailableAmount(reserveAfterWithdraw));
-    const totalDelta = getTotalSupply(reserveBeforeWithdraw).sub(
-      getTotalSupply(reserveAfterWithdraw),
+    const driftUserAfterWithdraw = await getDriftUserAccount(
+      driftBankrunProgram,
+      bank.integrationAcc2,
     );
+    const scaledBalanceAfterWithdraw =
+      driftUserAfterWithdraw.spotPositions[0].scaledBalance;
 
-    assert.approximately(availableDelta.toNumber(), diff, 2);
-    assert.approximately(totalDelta.toNumber(), diff, 2);
-    console.log(
-      "Kamino reserve after withdraw:",
-      "\n available",
-      getLiquidityAvailableAmount(reserveAfterWithdraw).toString(),
-      "\n total",
-      getTotalSupply(reserveAfterWithdraw).toString(),
-      "\n liq/coll",
-      getLiquidityExchangeRate(reserveAfterWithdraw).toString(),
-      "\n coll/liq",
-      getCollateralExchangeRate(reserveAfterWithdraw).toString(),
-    );
+    const spotMarket = await getSpotMarketAccount(driftBankrunProgram, 0);
+    const scaledBalanceDiff = tokenAmountToScaledBalance(withdrawAmount, spotMarket);
+
+    assertBNApproximately(scaledBalanceBeforeWithdraw.sub(scaledBalanceAfterWithdraw), scaledBalanceDiff, 1);
   });
 
   it("(user 3) repay borrow and withdraw all - gets initial deposit back", async () => {
@@ -522,38 +458,24 @@ describe("kx: Fixed Kamino price bank", () => {
     await processBankrunTransaction(ctx, repayTx, [user.wallet]);
 
     const remaining = composeRemainingAccounts([
-      [fixedKaminoBank, usdcReserve],
+      [fixedDriftBank, usdcSpotMarket],
       [borrowBank, oracles.tokenAOracle.publicKey],
     ]);
 
     const withdrawAllTx = new Transaction().add(
-      await simpleRefreshReserve(
-        klendBankrunProgram,
-        usdcReserve,
-        market,
-        oracles.usdcOracle.publicKey,
-      ),
-      await simpleRefreshObligation(
-        klendBankrunProgram,
-        market,
-        fixedKaminoObligation,
-        [usdcReserve],
-      ),
-      await makeKaminoWithdrawIx(
+      await makeDriftWithdrawIx(
         user.mrgnBankrunProgram,
         {
           marginfiAccount: userAccount,
-          authority: user.wallet.publicKey,
-          bank: fixedKaminoBank,
+          bank: fixedDriftBank,
           destinationTokenAccount: user.usdcAccount,
-          lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
         },
         {
           amount: new BN(0),
-          isWithdrawAll: true,
+          withdrawAll: true,
           remaining,
         },
+        driftBankrunProgram,
       ),
     );
     await processBankrunTransaction(ctx, withdrawAllTx, [user.wallet]);
@@ -562,8 +484,8 @@ describe("kx: Fixed Kamino price bank", () => {
       bankRunProvider,
       user.usdcAccount,
     );
-    // Note: you lose 1-2 lamports for Kamino withdraws
-    assert.approximately(userUsdcAfter, userUsdcStart, 2);
-    assert.isAtMost(userUsdcAfter, userUsdcStart);
+
+    // We lose 1 lamport when deposit and immediately withdraw all (see details in drift_withdraw instruction)
+    assert.equal(userUsdcAfter, userUsdcStart - 1);
   });
 });

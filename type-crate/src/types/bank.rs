@@ -188,8 +188,8 @@ pub enum OracleSetup {
     DriftSwitchboardPull = 10,
     SolendPythPull = 11,
     SolendSwitchboardPull = 12,
-    FixedKamino = 14,
-    FixedDrift = 16,
+    FixedKamino = 13,
+    FixedDrift = 14,
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}

@@ -443,7 +443,7 @@ describe("d10: Drift Interest Simulation", () => {
       },
       {
         amount: withdrawAll ? new BN(0) : amount,
-        withdraw_all: withdrawAll,
+        withdrawAll: withdrawAll,
         remaining: composeRemainingAccounts(activePositions),
       },
       driftBankrunProgram
