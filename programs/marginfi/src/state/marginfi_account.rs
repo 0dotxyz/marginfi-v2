@@ -1,4 +1,6 @@
-use super::price::{OraclePriceFeedAdapter, OraclePriceType, PriceAdapter, PriceBias};
+use super::price::{
+    OraclePriceFeedAdapter, OraclePriceType, OraclePriceWithConfidence, PriceAdapter, PriceBias,
+};
 use crate::{
     allocator::{heap_pos, heap_restore},
     check, check_eq, debug, live, math_error,
@@ -592,6 +594,96 @@ impl<'a, 'info> Iterator for EmodeConfigIterator<'a, 'info> {
     }
 }
 
+pub struct RiskEngine<'a, 'info> {
+    bank_accounts_with_price: Vec<BankAccountWithPriceFeed<'a, 'info>>,
+    emode_config: EmodeConfig,
+}
+
+impl<'a, 'info> RiskEngine<'a, 'info> {
+    pub fn new(
+        marginfi_account: &'a MarginfiAccount,
+        remaining_ais: &'info [AccountInfo<'info>],
+    ) -> MarginfiResult<Self> {
+        check!(
+            !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
+            MarginfiError::AccountInFlashloan
+        );
+
+        let bank_accounts_with_price =
+            BankAccountWithPriceFeed::load(&marginfi_account.lending_account, remaining_ais)?;
+
+        let emode_iter =
+            EmodeConfigIterator::new(&marginfi_account.lending_account, remaining_ais);
+        let emode_config = reconcile_emode_configs(emode_iter);
+
+        Ok(Self {
+            bank_accounts_with_price,
+            emode_config,
+        })
+    }
+
+    /// Returns the total assets and liabilities of the account in the form of (assets, liabilities).
+    pub fn get_account_health_components(
+        &self,
+        requirement_type: RiskRequirementType,
+        health_cache: &mut Option<&mut HealthCache>,
+    ) -> MarginfiResult<(I80F48, I80F48)> {
+        let mut total_assets: I80F48 = I80F48::ZERO;
+        let mut total_liabilities: I80F48 = I80F48::ZERO;
+        const NO_INDEX_FOUND: usize = 255;
+        let mut first_err_index = NO_INDEX_FOUND;
+
+        for (i, bank_account) in self.bank_accounts_with_price.iter().enumerate() {
+            let requirement_type = requirement_type.to_weight_type();
+            let (asset_val, liab_val, price, err_code) =
+                bank_account.calc_weighted_value(requirement_type, &self.emode_config)?;
+            if err_code != 0 && first_err_index == NO_INDEX_FOUND {
+                first_err_index = i;
+                if let Some(cache) = health_cache {
+                    cache.err_index = i as u8;
+                    cache.internal_err = err_code;
+                }
+            }
+
+            if let Some(cache) = health_cache {
+                if let RequirementType::Initial = requirement_type {
+                    cache.prices[i] = price.to_num::<f64>().to_le_bytes();
+                }
+            }
+
+            debug!(
+                "Balance {}, assets: {}, liabilities: {}",
+                bank_account.balance.bank_pk, asset_val, liab_val
+            );
+
+            total_assets = total_assets
+                .checked_add(asset_val)
+                .ok_or_else(math_error!())?;
+            total_liabilities = total_liabilities
+                .checked_add(liab_val)
+                .ok_or_else(math_error!())?;
+        }
+
+        if let Some(cache) = health_cache {
+            match requirement_type {
+                RiskRequirementType::Initial => {
+                    cache.asset_value = total_assets.into();
+                    cache.liability_value = total_liabilities.into();
+                }
+                RiskRequirementType::Maintenance => {
+                    cache.asset_value_maint = total_assets.into();
+                    cache.liability_value_maint = total_liabilities.into();
+                }
+                RiskRequirementType::Equity => {
+                    cache.asset_value_equity = total_assets.into();
+                    cache.liability_value_equity = total_liabilities.into();
+                }
+            }
+        }
+
+        Ok((total_assets, total_liabilities))
+    }
+
     /// Returns the total assets and liabilities restricted to the provided set of bank pubkeys
     pub fn get_tagged_account_health_components(
         &self,
@@ -641,6 +733,17 @@ impl<'a, 'info> Iterator for EmodeConfigIterator<'a, 'info> {
             .iter()
             .find(|b| b.balance.bank_pk == *bank_pk)
             .ok_or_else(|| error!(MarginfiError::BankAccountNotFound))?;
+        let bank = bank_account.bank.load()?;
+        let (price_feed, _) = bank_account.try_get_price_feed();
+        let price_feed = price_feed?;
+
+        price_feed.get_price_and_confidence_of_type(
+            OraclePriceType::RealTime,
+            bank.config.oracle_max_confidence,
+        )
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Public API - Risk Engine Functions
 // -----------------------------------------------------------------------------
