@@ -880,7 +880,7 @@ export const setFixedPrice = (
   program: Program<Marginfi>,
   args: SetFixedPriceArgs
 ) => {
-  const oracleMeta: AccountMeta[] = args.remaining?.map((pubkey) => {
+  const oracleMeta: AccountMeta[] = (args.remaining ?? []).map((pubkey) => {
     return { pubkey, isSigner: false, isWritable: false };
   });
 
