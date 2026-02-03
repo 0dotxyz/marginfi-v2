@@ -22,9 +22,9 @@ pub trait BankConfigImpl {
     fn is_deposit_limit_active(&self) -> bool;
     fn is_borrow_limit_active(&self) -> bool;
     fn update_config_flag(&mut self, value: bool, flag: u8);
-    fn validate_oracle_setup<'a, 'info>(
+    fn validate_oracle_setup(
         &self,
-        ais: &'a [AccountInfo<'info>],
+        ais: &[AccountInfo<'_>],
         lst_mint: Option<Pubkey>,
         stake_pool: Option<Pubkey>,
         sol_pool: Option<Pubkey>,
@@ -123,9 +123,9 @@ impl BankConfigImpl for BankConfig {
     /// * lst_mint, stake_pool, sol_pool - required only if configuring
     ///   `OracleSetup::StakedWithPythPush` on initial setup. If configuring a staked bank after
     ///   initial setup, can be omitted
-    fn validate_oracle_setup<'a, 'info>(
+    fn validate_oracle_setup(
         &self,
-        ais: &'a [AccountInfo<'info>],
+        ais: &[AccountInfo<'_>],
         lst_mint: Option<Pubkey>,
         stake_pool: Option<Pubkey>,
         sol_pool: Option<Pubkey>,

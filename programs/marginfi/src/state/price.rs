@@ -536,9 +536,9 @@ impl OraclePriceFeedAdapter {
     /// * lst_mint, stake_pool, sol_pool - required only if configuring
     ///   `OracleSetup::StakedWithPythPush` initially. (subsequent validations of staked banks can
     ///   omit these)
-    pub fn validate_bank_config<'a, 'info>(
+    pub fn validate_bank_config(
         bank_config: &BankConfig,
-        oracle_ais: &'a [AccountInfo<'info>],
+        oracle_ais: &[AccountInfo<'_>],
         lst_mint: Option<Pubkey>,
         stake_pool: Option<Pubkey>,
         sol_pool: Option<Pubkey>,
