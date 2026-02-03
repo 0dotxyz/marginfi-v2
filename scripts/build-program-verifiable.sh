@@ -17,13 +17,13 @@ if [ -z "$program_lib_name" ] || [ -z "$deployment" ]; then
 fi
 
 if [ "$deployment" = "mainnet" ]; then
-    features="--features mainnet-beta"
+    features="--features mainnet-beta,custom-heap"
 elif [ "$deployment" = "devnet" ]; then
-    features="--features devnet --no-default-features"
+    features="--features devnet,custom-heap --no-default-features"
 elif [ "$deployment" = "staging" ]; then
-    features="--features staging --no-default-features"
+    features="--features staging,custom-heap --no-default-features"
 elif [ "$deployment" = "stagingalt" ]; then
-    features="--features stagingalt --no-default-features"
+    features="--features stagingalt,custom-heap --no-default-features"
 else
     echo "Error: Unknown deployment: $deployment"
     exit 1

@@ -2,7 +2,6 @@ import { BN } from "@coral-xyz/anchor";
 import {
   PublicKey,
   Transaction,
-  SystemProgram,
   Keypair,
   ComputeBudgetProgram,
 } from "@solana/web3.js";
@@ -36,7 +35,6 @@ import {
   refreshDriftOracles,
   USDC_MARKET_INDEX,
   TOKEN_A_MARKET_INDEX,
-  DRIFT_SCALED_BALANCE_DECIMALS,
 } from "./utils/drift-utils";
 import {
   makeAddDriftBankIx,
@@ -44,7 +42,7 @@ import {
   makeDriftDepositIx,
   makeDriftWithdrawIx,
 } from "./utils/drift-instructions";
-import { getTokenBalance, assertBNEqual } from "./utils/genericTests";
+import { getTokenBalance } from "./utils/genericTests";
 import { composeRemainingAccounts } from "./utils/user-instructions";
 import { createMintToInstruction } from "@solana/spl-token";
 import { Clock } from "solana-bankrun";
@@ -620,23 +618,6 @@ describe("d10: Drift Interest Simulation", () => {
 
     bankrunContext.setClock(newClock);
 
-    const nonce = driftTxNonce++;
-    const computeUnits = 1_200_000 + (nonce % 1000);
-
-    const dummyTx = new Transaction()
-      .add(ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }))
-      .add(
-        SystemProgram.transfer({
-          fromPubkey: groupAdmin.wallet.publicKey,
-          toPubkey: groupAdmin.wallet.publicKey,
-          lamports: 1,
-        })
-      );
-    await processBankrunTransaction(bankrunContext, dummyTx, [
-      groupAdmin.wallet,
-    ]);
-
-    const refreshedClock = await banksClient.getClock();
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 
     await refreshDriftOracles(

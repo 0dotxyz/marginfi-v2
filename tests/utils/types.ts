@@ -105,6 +105,9 @@ export const DAILY_RESET_INTERVAL = 24 * 60 * 60; // 24 hours
 export const INTEREST_CURVE_LEGACY = 0;
 export const INTEREST_CURVE_SEVEN_POINT = 1;
 
+/** Program-enforced max enforced number of balances per account. */
+export const MAX_BALANCES = 16;
+
 /**
  * The default bank config has
  * * all weights are 1

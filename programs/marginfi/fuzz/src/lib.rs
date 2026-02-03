@@ -1131,7 +1131,7 @@ fn initialize_fee_state<'a>(
 mod tests {
     use anchor_lang::AnchorDeserialize;
     use fixed::types::I80F48;
-    use marginfi::state::marginfi_account::RiskEngine;
+    use marginfi::state::marginfi_account::{get_health_components, RiskRequirementType};
     use marginfi_type_crate::types::MarginfiGroup;
     use pyth_solana_receiver_sdk::price_update::PriceUpdateV2;
 
@@ -1238,14 +1238,13 @@ mod tests {
             let remaining_accounts =
                 margin_account.get_remaining_accounts(&bank_map, vec![], vec![]);
 
-            let re = RiskEngine::new(&marginfi_account, aisls(&remaining_accounts)).unwrap();
-
-            let (_assets, _liabs) = re
-                .get_account_health_components(
-                    marginfi::state::marginfi_account::RiskRequirementType::Maintenance,
-                    &mut None,
-                )
-                .unwrap();
+            let (_assets, _liabs) = get_health_components(
+                &marginfi_account,
+                aisls(&remaining_accounts),
+                RiskRequirementType::Maintenance,
+                &mut None,
+            )
+            .unwrap();
         }
 
         a.process_action_deposit(&AccountIdx(2), &BankIdx(1), &AssetAmount(1000), None)
@@ -1297,14 +1296,13 @@ mod tests {
             let remaining_accounts =
                 margin_account.get_remaining_accounts(&bank_map, vec![], vec![]);
 
-            let re = RiskEngine::new(&marginfi_account, aisls(&remaining_accounts)).unwrap();
-
-            let (_assets, _liabs) = re
-                .get_account_health_components(
-                    marginfi::state::marginfi_account::RiskRequirementType::Maintenance,
-                    &mut None,
-                )
-                .unwrap();
+            let (_assets, _liabs) = get_health_components(
+                &marginfi_account,
+                aisls(&remaining_accounts),
+                RiskRequirementType::Maintenance,
+                &mut None,
+            )
+            .unwrap();
         }
 
         a.process_action_deposit(&AccountIdx(2), &BankIdx(1), &AssetAmount(1000), None)

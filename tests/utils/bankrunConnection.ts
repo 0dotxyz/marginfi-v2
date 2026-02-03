@@ -122,7 +122,7 @@ export function patchBankrunConnection(
  * @param to
  * @returns
  */
-export function dummyTx(
+export function dummyIx(
   from: PublicKey,
   to: PublicKey
 ): TransactionInstruction {

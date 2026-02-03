@@ -7,10 +7,13 @@ use crate::{
     prelude::MarginfiError,
     state::{
         bank::{BankImpl, BankVaultType},
-        marginfi_account::{BankAccountWrapper, MarginfiAccountImpl, RiskEngine},
+        marginfi_account::{check_account_bankrupt, BankAccountWrapper, MarginfiAccountImpl},
         marginfi_group::MarginfiGroupImpl,
     },
-    utils::{self, is_marginfi_asset_tag, validate_bank_state, InstructionKind},
+    utils::{
+        self, fetch_unbiased_price_for_bank, is_marginfi_asset_tag, validate_bank_state,
+        InstructionKind,
+    },
     MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -69,11 +72,18 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     health_cache.timestamp = clock.unix_timestamp;
     health_cache.program_version = PROGRAM_VERSION;
 
-    let risk_engine = RiskEngine::new(&marginfi_account, ctx.remaining_accounts)?;
-    risk_engine.check_account_bankrupt(&mut Some(&mut health_cache))?;
-    let cached_price = risk_engine
-        .get_unbiased_price_for_bank(&bank_loader.key())
-        .ok();
+    check_account_bankrupt(
+        &marginfi_account,
+        ctx.remaining_accounts,
+        &mut Some(&mut health_cache),
+    )?;
+
+    let bank = bank_loader.load()?;
+    let cached_price =
+        fetch_unbiased_price_for_bank(&bank_loader.key(), &bank, &clock, ctx.remaining_accounts)
+            .ok();
+    drop(bank);
+
     health_cache.set_engine_ok(true);
     marginfi_account.health_cache = health_cache;
 
