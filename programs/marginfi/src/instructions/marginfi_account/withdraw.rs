@@ -13,7 +13,10 @@ use crate::{
         },
         marginfi_group::MarginfiGroupImpl,
         price::OraclePriceWithConfidence,
-        rate_limiter::{should_skip_rate_limit, BankRateLimiterImpl, GroupRateLimiterImpl},
+        rate_limiter::{
+            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
+            GroupRateLimiterImpl,
+        },
     },
     utils::{
         self, fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank,
@@ -169,10 +172,22 @@ pub fn lending_account_withdraw<'info>(
             // Group-level rate limiting (USD) - use fresh oracle price (fetched above)
             if group_rate_limit_enabled {
                 check!(price > I80F48::ZERO, MarginfiError::InvalidRateLimitPrice);
+
+                // Apply any pending untracked inflows before recording the outflow
+                if bank.rate_limiter.untracked_inflow != 0 {
+                    let mint_decimals = bank.mint_decimals;
+                    bank.rate_limiter.apply_untracked_inflow(
+                        &mut group.rate_limiter,
+                        price,
+                        mint_decimals,
+                        clock.unix_timestamp,
+                    )?;
+                }
+
                 let usd_value = calc_value(
                     I80F48::from_num(rate_limit_amount),
                     price,
-                    bank.get_balance_decimals(),
+                    bank.mint_decimals,
                     None,
                 )?;
                 group

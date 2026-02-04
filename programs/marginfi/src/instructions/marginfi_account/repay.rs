@@ -11,7 +11,10 @@ use crate::{
             LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        rate_limiter::{should_skip_rate_limit, BankRateLimiterImpl, GroupRateLimiterImpl},
+        rate_limiter::{
+            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
+            GroupRateLimiterImpl,
+        },
     },
     utils::{
         self, fetch_rate_limit_price_for_inflow, is_marginfi_asset_tag, validate_bank_state,
@@ -86,13 +89,11 @@ pub fn lending_account_repay<'info>(
     let group_rate_limit_enabled = group.rate_limiter.is_enabled();
     let rate_limit_price = if group_rate_limit_enabled {
         fetch_rate_limit_price_for_inflow(
-            &bank_loader.key(),
             &bank,
             &clock,
-            ctx.remaining_accounts,
         )?
     } else {
-        I80F48::ZERO
+        None
     };
 
     let lending_account = &mut marginfi_account.lending_account;
@@ -118,15 +119,24 @@ pub fn lending_account_repay<'info>(
 
         // Group-level rate limiting (USD) - prefer live price, fall back to cached.
         if group_rate_limit_enabled {
-            let usd_value = calc_value(
-                I80F48::from_num(repay_amount_post_fee),
-                rate_limit_price,
-                bank.mint_decimals,
-                None,
-            )?;
-            group
-                .rate_limiter
-                .record_inflow(usd_value.to_num::<u64>(), clock.unix_timestamp);
+            match rate_limit_price {
+                Some(price) => {
+                    // Valid price available - record directly to group limiter
+                    let usd_value = calc_value(
+                        I80F48::from_num(repay_amount_post_fee),
+                        price,
+                        bank.mint_decimals,
+                        None,
+                    )?;
+                    group
+                        .rate_limiter
+                        .record_inflow(usd_value.to_num::<u64>(), clock.unix_timestamp);
+                }
+                None => {
+                    // No valid price - track at bank level to apply later
+                    bank.rate_limiter.record_untracked_inflow(repay_amount_post_fee);
+                }
+            }
         }
     }
 
