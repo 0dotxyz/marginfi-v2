@@ -7,6 +7,7 @@ mod create_account_pda;
 mod create_account_pda_cpi;
 mod deposit;
 mod flash_loan;
+mod limit_orders;
 mod liquidate;
 mod liquidate_receiver;
 mod liquidate_receiver_cpi;
