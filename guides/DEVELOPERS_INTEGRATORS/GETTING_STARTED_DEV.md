@@ -2,7 +2,7 @@
 
 New developer getting started working on the mrgnv2 program side? Read on.
 
-### Things to Install (January 2026)
+## Things to Install (January 2026)
 
 - rust toolchain - 1.79.0
 - node - 23.0.0
@@ -13,15 +13,15 @@ New developer getting started working on the mrgnv2 program side? Read on.
 - cargo-nextest - use `cargo install cargo-nextest --version "0.9.81" --locked` exactly
 - cargo-fuzz - 0.12.0
 
-## Running tests
+# Running tests
 
-### For Rust unit tests:
+## For Rust unit tests:
 
 ```
 cargo test --lib
 ```
 
-### For the TS test suite:
+## For the TS test suite:
 
 ```
 anchor build
@@ -59,7 +59,7 @@ test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.t
 Note: You cannot run individual tests, most of the tests in a suite must run in order, where the
 number after the prefix determines their run order through the magic of filenames.
 
-### For the Anchor test suite:
+## For the Anchor test suite:
 
 ```
 anchor build --no-idl
@@ -68,7 +68,7 @@ anchor build --no-idl
 
 This is much slower than the remix test command, but stable on any system.
 
-### Customize Your Rust testing experience:
+## Customize Your Rust testing experience:
 
 ```
 ./scripts/test-program-remix.sh -p marginfi -l warn -c mainnet-beta -f mainnet-beta -j 8
@@ -94,7 +94,7 @@ Benchmarks:
 
 | 9700X (16 threads) | `[  19.343s] 373 tests run: 373 passed (3 flaky), 0 skipped`
 
-### To run just one Rust test:
+## To run just one Rust test:
 
 ```
 ./scripts/single-test.sh marginfi accrue_interest --verbose
@@ -109,7 +109,7 @@ For a complete list of all programs/tests, run the following command:
 cargo nextest list
 ```
 
-### To run the fuzz suite
+## To run the fuzz suite
 
 Don't.
 
@@ -121,17 +121,17 @@ typically no need to wait for the suite to finish locally.
 
 See the Readme within the Fuzz directory for more details.
 
-## Common issues
+# Common issues
 
-### The TS suite fails with `Environment supports crypto:  false` at the top
+## The TS suite fails with `Environment supports crypto:  false` at the top
 
 Update Node
 
-### All the tests are failing in Rust and/or TS
+## All the tests are failing in Rust and/or TS
 
 Make sure you build the correct version, Rust requires the mainnet version (default features), TS wants localnet (no features)
 
-### Program not deployed errors, when build seemingly worked otherwise
+## Program not deployed errors, when build seemingly worked otherwise
 
 Adding a msg! that tries to print any `I80F48` without first converting it to a float or similar will
 cause the entire project to silently fail to build, resulting in `Program not deployed` errors
@@ -141,7 +141,7 @@ downstream when testing
 msg!("recorded price: {:?}", price);
 ```
 
-### Metadata corruption
+## Metadata corruption
 
 Seeing this:
 
@@ -157,10 +157,22 @@ error[E0786]: found invalid metadata files for crate `transfer_hook`
 
 Just `anchor clean` and rebuild. This is particularly likely to occur when switching between build environments e.g. cargo test --lib then anchor build because the former does not use SBF and the latter does.
 
-### Rust tests fail with `Error: simulation error: BlockhashNotFound, logs: [], units_consumed: 0`
+## Rust tests fail with `Error: simulation error: BlockhashNotFound, logs: [], units_consumed: 0`
 
 Ensure your machine is not in Low Power battery mode (or in any other mode decreasing performance).
 
-## Common Footguns
+## BlockhashNotFound errors in Rust test suite
+
+On slower machines, or in tests with many txes, this error can be consistent or sometimes intermittent. Try
+refreshing the blockhash in longer tests: `test_f.refresh_blockhash().await;` and switching usage of
+`ctx.last_blockhash` to 
+```
+let blockhash = {
+    let banks_client = self.ctx.borrow().banks_client.clone();
+    banks_client.get_latest_blockhash().await.unwrap()
+};
+```
+
+# Common Footguns
 
 Debugging `I80F48`s by `msg!("val: {:?}", some_val_I80F48);` can cause silent build issues leading to `Program is not deployed`. Convert these values to string or float before printing them.

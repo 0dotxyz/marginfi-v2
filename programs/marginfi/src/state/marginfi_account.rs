@@ -612,8 +612,7 @@ impl<'a, 'info> RiskEngine<'a, 'info> {
         let bank_accounts_with_price =
             BankAccountWithPriceFeed::load(&marginfi_account.lending_account, remaining_ais)?;
 
-        let emode_iter =
-            EmodeConfigIterator::new(&marginfi_account.lending_account, remaining_ais);
+        let emode_iter = EmodeConfigIterator::new(&marginfi_account.lending_account, remaining_ais);
         let emode_config = reconcile_emode_configs(emode_iter);
 
         Ok(Self {
@@ -684,7 +683,9 @@ impl<'a, 'info> RiskEngine<'a, 'info> {
         Ok((total_assets, total_liabilities))
     }
 
-    /// Returns the total assets and liabilities restricted to the provided set of bank pubkeys
+    /// Returns the total assets and liabilities restricted to the provided set of bank pubkeys.
+    /// Equivalent to computing the equity health of just the balances with matching tags.
+    /// * If tags are empty or not found, returns (0, 0, 0, 0)
     pub fn get_tagged_account_health_components(
         &self,
         balance_tags: &[u16],
@@ -707,10 +708,11 @@ impl<'a, 'info> RiskEngine<'a, 'info> {
             let (asset_val, liab_val, _price, _err_code) =
                 bank_account.calc_weighted_value(requirement_type, &self.emode_config)?;
 
-            if asset_val.ne(&I80F48::ZERO) {
-                asset_count += 1;
-            } else {
-                liab_count += 1;
+            let side = bank_account.balance.get_side();
+            match side {
+                Some(BalanceSide::Assets) => asset_count += 1,
+                Some(BalanceSide::Liabilities) => liab_count += 1,
+                None => continue, // empty balance, skip
             }
 
             total_assets = total_assets

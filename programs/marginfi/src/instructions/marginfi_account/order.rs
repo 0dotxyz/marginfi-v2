@@ -506,17 +506,22 @@ pub fn end_execute_order<'info>(
         }
     }
 
-    // Only one asset and liab are currently involved in a balance, with the
-    // single liability being closed.
+    // Only one asset and liab are currently involved in a balance, with the single liability being
+    // closed. 
+    // * Note: There is a trivial edge case where e.g. a user has $50 A, $50 B, borrowing $50 C,
+    // sets an order that would normally close A AND C but cannot execute because orders cannot
+    // close two balances. See `limit_orders_overlap_ab_nearly_closes_a_ad_fails_start` for a demo.
+    // We expect to eventually handle this once orders can support multiple positions (allowing the
+    // keeper e.g. take $25 each from A/B and repay $50 C instead)
     let closed_order_balances_count = 1;
 
     // order_liab_in_equity = 0
     let order_current_health = order_assets_in_equity;
 
-    // Check that the non-order balances remain unchanged, including inactive ones.
-    // Also check that the account is at least as healthy as it was at the start of execution,
-    // If it wasn't since the user specified the slippage, we at least make sure the account is
-    // still health after execution to avoid the position taking on more risk.
+    // Check that the non-order balances remain unchanged, including inactive ones. Also check that
+    // the account is at least as healthy as it was at the start of execution, If it wasn't since
+    // the user specified the slippage, we at least make sure the account is still healthy after
+    // execution to avoid the position taking on more risk.
     execute_record.check_health_and_verify_unchanged(
         &marginfi_account,
         closed_order_balances_count,
