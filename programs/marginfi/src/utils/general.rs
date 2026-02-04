@@ -390,14 +390,13 @@ pub fn fetch_unbiased_price_for_bank<'info>(
 }
 
 /// Fetch a rate-limit price for inflow accounting (deposit/repay).
-/// 
+///
 /// Returns `Some(price)` if a valid price is available (live oracle or fresh cache),
 /// or `None` if no valid price is available.
-pub fn fetch_rate_limit_price_for_inflow<'info>(
+pub fn fetch_rate_limit_price_for_inflow(
     bank: &Bank,
     clock: &Clock,
 ) -> MarginfiResult<Option<I80F48>> {
-
     // Fall back to cached price if fresh enough
     let cached_price: I80F48 = bank.cache.last_oracle_price.into();
     let cached_ts = bank.cache.last_oracle_price_timestamp;

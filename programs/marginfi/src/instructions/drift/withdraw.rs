@@ -1,16 +1,26 @@
 use crate::{
-    MarginfiError, MarginfiResult, bank_signer, check, constants::{DRIFT_PROGRAM_ID, PROGRAM_VERSION}, events::{AccountEventHeader, LendingAccountWithdrawEvent}, ix_utils::{Hashable, get_discrim_hash}, state::{
+    bank_signer, check,
+    constants::{DRIFT_PROGRAM_ID, PROGRAM_VERSION},
+    events::{AccountEventHeader, LendingAccountWithdrawEvent},
+    ix_utils::{get_discrim_hash, Hashable},
+    state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl, account_not_frozen_for_authority, calc_value, check_account_init_health, is_signer_authorized, validate_remaining_accounts_for_balances_close_last
+            account_not_frozen_for_authority, calc_value, check_account_init_health,
+            is_signer_authorized, validate_remaining_accounts_for_balances_close_last,
+            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         rate_limiter::{
-            BankRateLimiterImpl, BankRateLimiterUntrackedImpl, GroupRateLimiterImpl, should_skip_rate_limit
+            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
+            GroupRateLimiterImpl,
         },
-    }, utils::{
-        InstructionKind, fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank, is_drift_asset_tag, validate_bank_state
-    }
+    },
+    utils::{
+        fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank, is_drift_asset_tag,
+        validate_bank_state, InstructionKind,
+    },
+    MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;

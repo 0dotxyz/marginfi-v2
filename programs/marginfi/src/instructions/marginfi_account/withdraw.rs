@@ -2,21 +2,25 @@ use crate::{
     bank_signer, check,
     constants::PROGRAM_VERSION,
     events::{AccountEventHeader, LendingAccountWithdrawEvent},
-    ix_utils::{Hashable, get_discrim_hash},
+    ix_utils::{get_discrim_hash, Hashable},
     prelude::*,
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl, account_not_frozen_for_authority, calc_value, check_account_init_health, is_signer_authorized, validate_remaining_accounts_for_balances_close_last
+            account_not_frozen_for_authority, calc_value, check_account_init_health,
+            is_signer_authorized, validate_remaining_accounts_for_balances_close_last,
+            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         price::OraclePriceWithConfidence,
         rate_limiter::{
-            BankRateLimiterImpl, BankRateLimiterUntrackedImpl, GroupRateLimiterImpl, should_skip_rate_limit
+            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
+            GroupRateLimiterImpl,
         },
     },
     utils::{
-        self, InstructionKind, fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank, is_marginfi_asset_tag, validate_bank_state
+        self, fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank,
+        is_marginfi_asset_tag, validate_bank_state, InstructionKind,
     },
 };
 use anchor_lang::prelude::*;

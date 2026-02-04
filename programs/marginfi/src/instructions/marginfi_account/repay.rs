@@ -87,10 +87,7 @@ pub fn lending_account_repay<'info>(
 
     let group_rate_limit_enabled = group.rate_limiter.is_enabled();
     let rate_limit_price = if group_rate_limit_enabled {
-        fetch_rate_limit_price_for_inflow(
-            &bank,
-            &clock,
-        )?
+        fetch_rate_limit_price_for_inflow(&bank, &clock)?
     } else {
         None
     };
@@ -133,7 +130,8 @@ pub fn lending_account_repay<'info>(
                 }
                 None => {
                     // No valid price - track at bank level to apply later
-                    bank.rate_limiter.record_untracked_inflow(repay_amount_post_fee);
+                    bank.rate_limiter
+                        .record_untracked_inflow(repay_amount_post_fee);
                 }
             }
         }

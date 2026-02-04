@@ -90,10 +90,7 @@ pub fn lending_account_deposit<'info>(
     // Fetch oracle price for group rate limiting (fall back to cache when oracles are omitted).
     let group_rate_limit_enabled = group.rate_limiter.is_enabled();
     let rate_limit_price = if group_rate_limit_enabled {
-        fetch_rate_limit_price_for_inflow(
-            &bank,
-            &clock,
-        )?
+        fetch_rate_limit_price_for_inflow(&bank, &clock)?
     } else {
         None
     };
