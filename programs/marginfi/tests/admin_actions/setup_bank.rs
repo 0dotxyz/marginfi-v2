@@ -162,7 +162,7 @@ async fn add_bank_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[[u64; 2]; 7] as Default>::default());
+            assert_eq!(_padding_1, <[[u64; 2]; 8] as Default>::default());
 
             // this is the only loosely checked field
             assert!(last_update >= 0 && last_update <= 5);
@@ -305,7 +305,7 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[[u64; 2]; 7] as Default>::default());
+            assert_eq!(_padding_1, <[[u64; 2]; 8] as Default>::default());
 
             // this is the only loosely checked field
             assert!(last_update >= 0 && last_update <= 5);

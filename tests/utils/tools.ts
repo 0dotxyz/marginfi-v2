@@ -1,4 +1,3 @@
-import { BN } from "@coral-xyz/anchor";
 import {
   BanksTransactionMeta,
   BanksTransactionResultWithMeta,
@@ -6,19 +5,17 @@ import {
 import { ProgramTestContext } from "solana-bankrun";
 import { Transaction, PublicKey, AccountInfo } from "@solana/web3.js";
 import { Keypair } from "@solana/web3.js";
+import { AccountLayout } from "@solana/spl-token";
 import { getBankrunBlockhash } from "./spl-staking-utils";
 import { MarginfiAccountRaw } from "@mrgnlabs/marginfi-client-v2";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { HEALTH_CACHE_HEALTHY } from "./types";
 
-/**
- * Convert a human-readable amount to native token units based on decimals.
- * @param amount - The human-readable amount
- * @param decimals - The number of decimals for the token
- * @returns The amount in native units as a BN
- */
-export const toNative = (amount: number, decimals: number): BN =>
-  new BN(amount).mul(new BN(10).pow(new BN(decimals)));
+// TODO: Add these as options instead of args
+interface ProcessBankrunTransactionOptions {
+  trySend?: boolean;
+  dumpLogOnFail?: boolean;
+}
 
 /**
  * Process a transaction in a bankrun context and return the transaction result
@@ -35,7 +32,9 @@ export const processBankrunTransaction = async (
   signers: Keypair[],
   trySend: boolean = false,
   dumpLogOnFail: boolean = false
+  //   options: ProcessBankrunTransactionOptions = {}
 ): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta> => {
+  // const { trySend = false, dumpLogOnFail = false } = options;
   tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
   tx.sign(...signers);
 
@@ -321,6 +320,8 @@ export async function getBankrunTime(ctx: ProgramTestContext): Promise<number> {
 
 /**
  * Advance the bankrun clock by a specified number of seconds.
+ * This is useful for testing time-dependent features like rate limiting,
+ * emissions, and interest accrual.
  *
  * @param ctx - The bankrun ProgramTestContext
  * @param seconds - Number of seconds to advance the clock

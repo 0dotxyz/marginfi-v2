@@ -16,6 +16,7 @@ import {
   LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
+  SYSVAR_STAKE_HISTORY_PUBKEY,
   Transaction,
   VoteInit,
   VoteProgram,
@@ -50,6 +51,7 @@ const MOCKS_PROGRAM_ID = new PublicKey(
 );
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { initGlobalFeeState } from "./utils/group-instructions";
+import { deriveGlobalFeeState } from "./utils/pdas";
 import { KaminoLending } from "./fixtures/kamino_lending";
 import klendIdl from "./fixtures/kamino_lending.json";
 import { Drift } from "./fixtures/drift_v2";

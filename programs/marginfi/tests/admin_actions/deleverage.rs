@@ -76,7 +76,7 @@ async fn deleverage_happy_path() -> anyhow::Result<()> {
 
     // Seize 1.0 * 10 = $10.0 ($8 weighted)
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 1.0, None)
+        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 1.0, None, true)
         .await;
 
     // Repay $10
@@ -182,7 +182,7 @@ async fn deleverage_happy_path() -> anyhow::Result<()> {
 
     // Seize .210 * 10 = $2.10
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 0.210, None)
+        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 0.210, None, true)
         .await;
 
     // Repay $2
@@ -314,7 +314,7 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
 
     // Seize 1.0 * 10 = $10.0
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 1.0, None)
+        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 1.0, None, true)
         .await;
 
     // Repay $10 (even though tokenless repayments are allowed, if withdraw_all is false, we will repay WITH tokens)
@@ -354,7 +354,7 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
 
     // Seize 1.0 * 10 = $10.0
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 1.0, None)
+        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 1.0, None, true)
         .await;
 
     // "Repay" $10 with nothing
@@ -440,7 +440,7 @@ async fn deleverage_cannot_worsen_health() -> anyhow::Result<()> {
 
     // Seize 1.2 * 10 = $12
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 1.2, None)
+        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 1.2, None, true)
         .await;
 
     // Repay $10
@@ -538,7 +538,7 @@ async fn deleverage_not_risk_admin() -> anyhow::Result<()> {
 
     // Seize 0.8 * 10 = $8
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(payer_sol_acc.key, sol_bank, 0.8, None)
+        .make_bank_withdraw_ix(payer_sol_acc.key, sol_bank, 0.8, None, true)
         .await;
 
     // Repay $10
@@ -621,7 +621,7 @@ async fn deleverage_rejects_zero_weight_asset() -> anyhow::Result<()> {
         .await;
 
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 0.1, None)
+        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 0.1, None, true)
         .await;
 
     let repay_ix = deleveragee
@@ -709,7 +709,7 @@ async fn deleverage_can_close_out_balances() -> anyhow::Result<()> {
     // NOTE: In deleveraging, you MUST PASS the oracle for the withdrawn asset even for
     // a withdraw-all. The entire balance is still withdrawn!
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 0.0, Some(true))
+        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 0.0, Some(true), true)
         .await;
 
     // The entire liability

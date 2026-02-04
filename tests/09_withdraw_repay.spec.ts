@@ -520,19 +520,72 @@ describe("Withdraw funds", () => {
         })
       )
     );
+
     const bankAfter = await program.account.bank.fetch(bank);
-    const userAccAfter = await program.account.marginfiAccount.fetch(
-      userAccKey
-    );
+    const userAccAfter = await program.account.marginfiAccount.fetch(userAccKey);
     const balancesAfter = userAccAfter.lendingAccount.balances;
     assert.equal(bankAfter.lendingPositionCount, 0);
 
-    // This balance is now inactive
-    assert.equal(balancesAfter[1].active, 0);
-
+    // The SOL balance should now be inactive (either not found or active=0)
+    const solBalanceAfter = balancesAfter.find((b) =>
+      b.bankPk.equals(bankKeypairSol.publicKey)
+    );
+    // After withdraw_all, balance is either cleared (not found) or marked inactive
+    if (solBalanceAfter) {
+      assert.equal(solBalanceAfter.active, 0);
+    }
+    // If not found, that's also correct - the balance was fully closed
   });
 
+  it("(user 1) withdraws all Token A balance - cleanup for liquidation test", async () => {
+    // User 1 received Token A from the deposit-up-to-limit test in 07_deposit.
+    // We need to withdraw it so user 1 only has USDC before the liquidation test.
+    const user = users[1];
+    const userAccKey = user.accounts.get(USER_ACCOUNT);
+    const bank = bankKeypairA.publicKey;
 
+    const userAccBefore = await program.account.marginfiAccount.fetch(userAccKey);
+
+    // Check if user 1 has Token A balance
+    const tokenABalanceIdx = userAccBefore.lendingAccount.balances.findIndex(
+      (b) => b.active !== 0 && b.bankPk.equals(bank)
+    );
+
+    if (tokenABalanceIdx === -1) {
+      // No Token A balance to withdraw, skip
+      return;
+    }
+
+    // For withdrawAll, include all active balances, including the closing bank.
+    const remaining = composeRemainingAccountsByBalances(
+      userAccBefore.lendingAccount.balances,
+      [
+        [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+        [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
+        [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
+      ],
+      bank
+    );
+
+    await user.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await withdrawIx(user.mrgnProgram, {
+          marginfiAccount: userAccKey,
+          bank: bank,
+          tokenAccount: user.tokenAAccount,
+          remaining,
+          amount: new BN(0),
+          withdrawAll: true,
+        })
+      )
+    );
+
+    const userAccAfter = await program.account.marginfiAccount.fetch(userAccKey);
+    const tokenABalanceAfter = userAccAfter.lendingAccount.balances.find((b) =>
+      b.bankPk.equals(bank)
+    );
+    assert.equal(tokenABalanceAfter.active, 0);
+  });
 
   it("(user 0) restores previous Token A deposits and USDC borrows", async () => {
     const user = users[0];

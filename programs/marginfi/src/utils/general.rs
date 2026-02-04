@@ -392,26 +392,35 @@ pub fn fetch_unbiased_price_for_bank<'info>(
 }
 
 /// Fetch a rate-limit price for inflow accounting (deposit/repay).
-/// 
-/// Returns `Some(price)` if a valid price is available (live oracle or fresh cache),
-/// or `None` if no valid price is available.
+///
+/// Prefers a live oracle price when available, but falls back to the cached price
+/// to avoid blocking inflows when oracles are omitted. Cached prices must be fresh.
 pub fn fetch_rate_limit_price_for_inflow<'info>(
+    bank_key: &Pubkey,
     bank: &Bank,
     clock: &Clock,
-) -> MarginfiResult<Option<I80F48>> {
+    remaining_accounts: &'info [AccountInfo<'info>],
+) -> MarginfiResult<I80F48> {
+    if !remaining_accounts.is_empty() {
+        if let Ok(price) =
+            fetch_asset_price_for_bank_low_bias(bank_key, bank, clock, remaining_accounts)
+        {
+            if price > I80F48::ZERO {
+                return Ok(price);
+            }
+        }
+    }
 
-    // Fall back to cached price if fresh enough
     let cached_price: I80F48 = bank.cache.last_oracle_price.into();
     let cached_ts = bank.cache.last_oracle_price_timestamp;
     let max_age = bank.config.get_oracle_max_age() as i64;
     let age = clock.unix_timestamp.saturating_sub(cached_ts);
 
     if cached_price <= I80F48::ZERO || cached_ts == 0 || age < 0 || age > max_age {
-        // No valid price available - return None instead of erroring
-        return Ok(None);
+        return err!(MarginfiError::InvalidRateLimitPrice);
     }
 
-    Ok(Some(cached_price))
+    Ok(cached_price)
 }
 
 /// Locate a bank's oracle information from a properly formatted slice of remaining accounts.

@@ -697,8 +697,7 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(bank.integration_acc_1, Pubkey::default());
     assert_eq!(bank.integration_acc_2, Pubkey::default());
     assert_eq!(bank.integration_acc_3, Pubkey::default());
-    assert_eq!(bank._pad_0, [0u8; 8]);
-    assert_eq!(bank._padding_1, [[0u64; 2]; 7]);
+    assert_eq!(bank._padding_1, [[0, 0]; 8]);
 
     Ok(())
 }

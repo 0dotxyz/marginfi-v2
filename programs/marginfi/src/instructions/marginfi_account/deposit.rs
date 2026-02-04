@@ -9,10 +9,7 @@ use crate::{
             LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        rate_limiter::{
-            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
-            GroupRateLimiterImpl,
-        },
+        rate_limiter::{should_skip_rate_limit, BankRateLimiterImpl, GroupRateLimiterImpl},
     },
     utils::{
         self, fetch_rate_limit_price_for_inflow, is_marginfi_asset_tag, validate_asset_tags,
@@ -91,11 +88,13 @@ pub fn lending_account_deposit<'info>(
     let group_rate_limit_enabled = group.rate_limiter.is_enabled();
     let rate_limit_price = if group_rate_limit_enabled {
         fetch_rate_limit_price_for_inflow(
+            &bank_loader.key(),
             &bank,
             &clock,
+            ctx.remaining_accounts,
         )?
     } else {
-        None
+        I80F48::ZERO
     };
 
     let mut bank_account = BankAccountWrapper::find_or_create(
@@ -117,24 +116,15 @@ pub fn lending_account_deposit<'info>(
 
         // Group-level rate limiting (USD) - prefer live price, fall back to cached.
         if group_rate_limit_enabled {
-            match rate_limit_price {
-                Some(price) => {
-                    // Valid price available - record directly to group limiter
-                    let usd_value = calc_value(
-                        I80F48::from_num(deposit_amount),
-                        price,
-                        bank.mint_decimals,
-                        None,
-                    )?;
-                    group
-                        .rate_limiter
-                        .record_inflow(usd_value.to_num::<u64>(), clock.unix_timestamp);
-                }
-                None => {
-                    // No valid price - track at bank level to apply later
-                    bank.rate_limiter.record_untracked_inflow(deposit_amount);
-                }
-            }
+            let usd_value = calc_value(
+                I80F48::from_num(deposit_amount),
+                rate_limit_price,
+                bank.mint_decimals,
+                None,
+            )?;
+            group
+                .rate_limiter
+                .record_inflow(usd_value.to_num::<u64>(), clock.unix_timestamp);
         }
     }
 

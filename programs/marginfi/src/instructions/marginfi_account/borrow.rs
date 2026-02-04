@@ -11,10 +11,7 @@ use crate::{
             LendingAccountImpl, MarginfiAccountImpl, RiskEngine,
         },
         marginfi_group::MarginfiGroupImpl,
-        rate_limiter::{
-            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
-            GroupRateLimiterImpl,
-        },
+        rate_limiter::{should_skip_rate_limit, BankRateLimiterImpl, GroupRateLimiterImpl},
     },
     utils::{
         self, is_marginfi_asset_tag, validate_asset_tags, validate_bank_state, InstructionKind,
@@ -226,18 +223,6 @@ pub fn lending_account_borrow<'info>(
                 rate_limit_price > I80F48::ZERO,
                 MarginfiError::InvalidRateLimitPrice
             );
-
-            // Apply any pending untracked inflows before recording the outflow
-            if bank.rate_limiter.untracked_inflow != 0 {
-                let mint_decimals = bank.mint_decimals;
-                bank.rate_limiter.apply_untracked_inflow(
-                    &mut group.rate_limiter,
-                    rate_limit_price,
-                    mint_decimals,
-                    clock.unix_timestamp,
-                )?;
-            }
-
             let usd_value = calc_value(
                 I80F48::from_num(amount),
                 rate_limit_price,

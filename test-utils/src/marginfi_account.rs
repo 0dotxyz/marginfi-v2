@@ -264,6 +264,7 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
         ui_amount: T,
         withdraw_all: Option<bool>,
+        _is_liquidate: bool,
         authority: Pubkey,
     ) -> Instruction {
         let marginfi_account = self.load().await;
@@ -313,12 +314,14 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
         ui_amount: T,
         withdraw_all: Option<bool>,
+        is_liquidate: bool,
     ) -> Instruction {
         self.make_bank_withdraw_ix_internal(
             destination_account,
             bank,
             ui_amount,
             withdraw_all,
+            is_liquidate,
             self.ctx.borrow().payer.pubkey(),
         )
         .await
@@ -355,6 +358,7 @@ impl MarginfiAccountFixture {
                 bank,
                 ui_amount,
                 withdraw_all,
+                false,
                 authority.pubkey(),
             )
             .await;
