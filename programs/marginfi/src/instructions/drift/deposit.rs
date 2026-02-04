@@ -9,7 +9,10 @@ use crate::{
             LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        rate_limiter::{should_skip_rate_limit, BankRateLimiterImpl, GroupRateLimiterImpl},
+        rate_limiter::{
+            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
+            GroupRateLimiterImpl,
+        },
     },
     utils::{
         fetch_rate_limit_price_for_inflow, is_drift_asset_tag, validate_asset_tags,
@@ -114,20 +117,25 @@ pub fn drift_deposit<'info>(
 
             if group.rate_limiter.is_enabled() {
                 let rate_limit_price = fetch_rate_limit_price_for_inflow(
-                    &ctx.accounts.bank.key(),
                     &bank,
                     &clock,
-                    ctx.remaining_accounts,
                 )?;
-                let usd_value = calc_value(
-                    I80F48::from_num(amount),
-                    rate_limit_price,
-                    bank.mint_decimals,
-                    None,
-                )?;
-                group
-                    .rate_limiter
-                    .record_inflow(usd_value.to_num::<u64>(), clock.unix_timestamp);
+                match rate_limit_price {
+                    Some(price) => {
+                        let usd_value = calc_value(
+                            I80F48::from_num(amount),
+                            price,
+                            bank.mint_decimals,
+                            None,
+                        )?;
+                        group
+                            .rate_limiter
+                            .record_inflow(usd_value.to_num::<u64>(), clock.unix_timestamp);
+                    }
+                    None => {
+                        bank.rate_limiter.record_untracked_inflow(amount);
+                    }
+                }
             }
         }
 

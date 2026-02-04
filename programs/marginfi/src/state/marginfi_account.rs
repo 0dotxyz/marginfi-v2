@@ -33,49 +33,6 @@ pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
     }
 }
 
-/// Validate remaining accounts for active balances, optionally skipping a specific bank.
-///
-/// When `skip_bank` is provided, the balance for that bank is excluded from validation.
-/// This is used when closing a balance via withdraw_all - the remaining accounts only need
-/// to cover the balances that will remain active after the close.
-pub fn validate_remaining_accounts_for_balances<'info>(
-    lending_account: &LendingAccount,
-    remaining_ais: &'info [AccountInfo<'info>],
-    skip_bank: Option<&Pubkey>,
-) -> MarginfiResult<()> {
-    let mut account_index = 0;
-
-    for balance in lending_account
-        .balances
-        .iter()
-        .filter(|balance| balance.is_active())
-        .filter(|balance| skip_bank.map_or(true, |skip| balance.bank_pk != *skip))
-    {
-        let bank_ai = remaining_ais
-            .get(account_index)
-            .ok_or(MarginfiError::InvalidBankAccount)?;
-        let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
-        let bank = bank_al.load()?;
-
-        check_eq!(
-            balance.bank_pk,
-            *bank_ai.key,
-            MarginfiError::InvalidBankAccount
-        );
-
-        let num_accounts = get_remaining_accounts_per_bank(&bank)?;
-        let end_idx = account_index + num_accounts;
-        require_gte!(
-            remaining_ais.len(),
-            end_idx,
-            MarginfiError::WrongNumberOfOracleAccounts
-        );
-        account_index = end_idx;
-    }
-
-    Ok(())
-}
-
 /// Validate remaining accounts for active balances, requiring the closing bank group to appear
 /// after all other active balances.
 ///
