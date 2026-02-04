@@ -252,10 +252,19 @@ async fn execute_order_with_withdraw(
 }
 
 // User has $50 SOL, $200 Fixed, borrowing $50 USDC/PyUSD. We put an order for SOL/USDC (A/B) and
-// SOL/PyUSD (A/D). We note two things here:
+// SOL/PyUSD (A/D). We note several things here:
 // * (1) that the SOL/USDC order cannot execute if it attempts to close the entire $50 SOL balance
-// using withdraw-all, because orders can only close the liability side.
-// * (2) the SOL/PyUSD order can't execute at all once the SOL balance is closed.
+// using withdraw-all, because orders can only close one position (the liability side).
+// * (2) the SOL/PyUSD order can't execute at all once the SOL balance is consumed to execute
+//   SOL/USDC, because there is not enough SOL to do so.
+// * (3) The SOL/PyUSD order STAYS ON THE BOOKS. It does not automatically close, if the user
+//   deposits SOL again later, it could become eligible to execute again! However, if the user
+//   closes the SOL Balance and deposits SOL later, then this Order CANNOT EXECUTE, it is orphaned
+//   from that Balance because it doesn't share a tag with it.
+//
+// This is pretty consistent with e.g. Drift, which leaves open orders on the books when a perp is
+//   closed, so a stop loss might stay open when a take-profit is executed, etc. Here there is much
+//   more naunce, since A could be involved in up to 30 orders (15x stop losses and take profits).
 #[tokio::test]
 async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails_start() -> anyhow::Result<()> {
     // ---------------------------------------------------------------------
@@ -352,6 +361,16 @@ async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails_start() -> anyhow::Res
     )
     .await?;
 
+    // Keeper cannot close A/D yet because both tags are still live (SOL not closed yet).
+    test_f.refresh_blockhash().await;
+    let result = borrower
+        .try_keeper_close_order(order_ad, &keeper, keeper.pubkey())
+        .await;
+    assert_custom_error!(
+        result.unwrap_err(),
+        MarginfiError::LiquidatorOrderCloseNotAllowed
+    );
+
     // Now close A outside of order execution.
     test_f.refresh_blockhash().await;
     let sol_destination = sol_bank.mint.create_empty_token_account().await;
@@ -364,19 +383,37 @@ async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails_start() -> anyhow::Res
     let (start_ix, _execute_record) =
         make_start_execute_ix(&borrower, order_ad, keeper.pubkey()).await?;
 
-    let ctx = test_f.context.borrow_mut();
-    let tx = Transaction::new_signed_with_payer(
-        &[start_ix],
-        Some(&keeper.pubkey()),
-        &[&keeper],
-        ctx.last_blockhash,
-    );
-
-    let result = ctx.banks_client.process_transaction(tx).await;
+    let result = {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[start_ix],
+            Some(&keeper.pubkey()),
+            &[&keeper],
+            ctx.last_blockhash,
+        );
+        ctx.banks_client.process_transaction(tx).await
+    };
 
     assert_custom_error!(
         result.unwrap_err(),
         MarginfiError::LendingAccountBalanceNotFound
+    );
+
+    // The SOL/USDC order should have been closed as part of execution.
+    let order_ab_after = test_f.try_load(&order_ab).await?;
+    assert!(
+        order_ab_after.is_none(),
+        "SOL/USDC order should already be closed"
+    );
+
+    // The user can close the SOL/PyUSD order explicitly. Note: once the SOL balance is closed,
+    // a later SOL deposit creates a new tag, so the old order is no longer executable.
+    let fee_recipient = test_f.payer();
+    borrower.try_close_order(order_ad, fee_recipient).await?;
+    let order_ad_after = test_f.try_load(&order_ad).await?;
+    assert!(
+        order_ad_after.is_none(),
+        "SOL/PyUSD order should be closed after close_order"
     );
 
     Ok(())
@@ -467,6 +504,129 @@ async fn limit_orders_overlap_ab_nearly_closes_a_no_withdraw_all_ok() -> anyhow:
         .iter()
         .find(|b| b.bank_pk == usdc_bank.key);
     assert!(usdc_balance.is_none(), "USDC liability should be closed");
+
+    Ok(())
+}
+
+// Here we demonstrate that fully closing the SOL balance and re-opening it later doesn't work, the
+// SOL/PyUSD Order was created with a different Balance tag and cannot use the new SOL Balance. If
+// the user had deposited SOL without first doing withdraw_all to close the SOL balance, then the
+// SOL/PyUSD order would still be able to execute.
+#[tokio::test]
+async fn limit_orders_overlap_ab_close_a_reopen_sol_ad_fails_start() -> anyhow::Result<()> {
+    // ---------------------------------------------------------------------
+    // Setup
+    // ---------------------------------------------------------------------
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let assets = vec![(BankMint::Sol, 5.0), (BankMint::Fixed, 100.0)];
+    let liabilities = vec![(BankMint::Usdc, 50.0), (BankMint::PyUSD, 50.0)];
+
+    let borrower = create_account_with_positions(&test_f, &assets, &liabilities).await?;
+
+    // set emissions destination to the authority before placing order
+    let authority = borrower.load().await.authority;
+    borrower.try_set_emissions_destination(authority).await?;
+
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    let pyusd_bank = test_f.get_bank(&BankMint::PyUSD);
+
+    // Order on A/B
+    let order_ab = borrower
+        .try_place_order(
+            vec![sol_bank.key, usdc_bank.key],
+            OrderTrigger::StopLoss {
+                threshold: fp!(1.0).into(),
+                max_slippage: 0,
+            },
+        )
+        .await?;
+
+    // Order on A/D
+    let order_ad = borrower
+        .try_place_order(
+            vec![sol_bank.key, pyusd_bank.key],
+            OrderTrigger::StopLoss {
+                threshold: fp!(1.0).into(),
+                max_slippage: 0,
+            },
+        )
+        .await?;
+
+    let keeper = Keypair::new();
+    fund_keeper_for_fees(&test_f, &keeper).await?;
+    let keeper_usdc_account = usdc_bank
+        .mint
+        .create_token_account_and_mint_to_with_owner(&keeper.pubkey(), 500.0)
+        .await
+        .key;
+    let keeper_sol_account = sol_bank
+        .mint
+        .create_empty_token_account_with_owner(&keeper.pubkey())
+        .await
+        .key;
+
+    // Execute A/B and leave a tiny SOL balance so the order can complete.
+    execute_order_with_withdraw(
+        &test_f,
+        &borrower,
+        order_ab,
+        &keeper,
+        usdc_bank,
+        keeper_usdc_account,
+        sol_bank,
+        keeper_sol_account,
+        4.9,
+        None,
+        vec![usdc_bank.key],
+    )
+    .await?;
+
+    // Close SOL outside order execution.
+    test_f.refresh_blockhash().await;
+    let sol_destination = sol_bank.mint.create_empty_token_account().await;
+    borrower
+        .try_bank_withdraw(sol_destination.key, sol_bank, 0.0, Some(true))
+        .await?;
+
+    // Reopen SOL with a new deposit (new tag, old order tag is now orphaned).
+    test_f.refresh_blockhash().await;
+    let sol_deposit = sol_bank.mint.create_token_account_and_mint_to(1.0).await;
+    borrower
+        .try_bank_deposit(sol_deposit.key, sol_bank, 1.0, None)
+        .await?;
+
+    let order_ad_after = borrower.load_order(order_ad).await;
+    let mfi_after = borrower.load().await;
+    let sol_balance = mfi_after
+        .lending_account
+        .balances
+        .iter()
+        .find(|b| b.bank_pk == sol_bank.key)
+        .unwrap();
+    assert_ne!(
+        sol_balance.tag, order_ad_after.tags[0],
+        "reopened SOL balance should not reuse the old order tag"
+    );
+
+    test_f.refresh_blockhash().await;
+    let (start_ix, _execute_record) =
+        make_start_execute_ix(&borrower, order_ad, keeper.pubkey()).await?;
+    let result = {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[start_ix],
+            Some(&keeper.pubkey()),
+            &[&keeper],
+            ctx.last_blockhash,
+        );
+        ctx.banks_client.process_transaction(tx).await
+    };
+    assert_custom_error!(
+        result.unwrap_err(),
+        MarginfiError::LendingAccountBalanceNotFound
+    );
 
     Ok(())
 }

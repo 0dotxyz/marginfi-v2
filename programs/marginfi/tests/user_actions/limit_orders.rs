@@ -938,7 +938,7 @@ async fn limit_order_stop_loss_max_profit_with_slippage() -> anyhow::Result<()> 
         (asset_deposit * asset_price) - (liability_borrow * liability_price);
     let expected_min = start_health * (1.0 - profit_pct);
     assert!(asset_value >= expected_min);
-    assert_eq_noise!(asset_value, expected_min, 0.5);
+    assert_eq_noise!(asset_value, expected_min, 0.0001);
 
     Ok(())
 }
