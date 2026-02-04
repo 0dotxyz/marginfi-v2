@@ -353,7 +353,6 @@ pub fn wrapped_i80f48_to_f64(n: WrappedI80F48) -> f64 {
 /// passed to any risk check.
 ///
 /// * Errors if bank not found or bank/oracles don't appear in the slice in the correct order
-/// * If a RiskEngine available, consider `get_unbiased_price_for_bank` instead
 pub fn fetch_asset_price_for_bank_low_bias<'info>(
     bank_key: &Pubkey,
     bank: &Bank,
@@ -374,7 +373,6 @@ pub fn fetch_asset_price_for_bank_low_bias<'info>(
 /// Fetch an unbiased oracle price (no safety bias) for a given bank.
 ///
 /// * Errors if bank not found or bank/oracles don't appear in the slice in the correct order
-/// * If a RiskEngine available, consider `get_unbiased_price_for_bank` instead
 pub fn fetch_unbiased_price_for_bank<'info>(
     bank_key: &Pubkey,
     bank: &Bank,

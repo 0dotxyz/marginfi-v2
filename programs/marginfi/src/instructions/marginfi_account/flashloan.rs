@@ -6,7 +6,7 @@ use crate::{
         get_discrim_hash, validate_not_cpi_by_stack_height, validate_not_cpi_with_sysvar, Hashable,
     },
     prelude::*,
-    state::marginfi_account::{MarginfiAccountImpl, RiskEngine},
+    state::marginfi_account::{check_account_init_health, MarginfiAccountImpl},
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::sysvar::{self, instructions};
@@ -146,9 +146,7 @@ pub fn lending_account_end_flashloan<'info>(
     );
     marginfi_account.unset_flag(ACCOUNT_IN_FLASHLOAN, false);
 
-    let (risk_result, _engine) =
-        RiskEngine::check_account_init_health(&marginfi_account, ctx.remaining_accounts, &mut None);
-    risk_result?;
+    check_account_init_health(&marginfi_account, ctx.remaining_accounts, &mut None)?;
 
     Ok(())
 }

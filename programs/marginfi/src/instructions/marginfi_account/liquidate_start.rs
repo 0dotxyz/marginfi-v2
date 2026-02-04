@@ -7,7 +7,11 @@ use crate::{
         Hashable,
     },
     prelude::*,
-    state::marginfi_account::{MarginfiAccountImpl, RiskEngine, RiskRequirementType},
+    state::marginfi_account::{
+        check_pre_liquidation_condition_and_get_account_health, get_health_components,
+        write_liquidation_price_cache_from, HealthPriceMode, LiquidationPriceCache,
+        MarginfiAccountImpl, RiskRequirementType,
+    },
 };
 use anchor_lang::{prelude::*, solana_program::sysvar};
 use bytemuck::Zeroable;
@@ -89,16 +93,30 @@ pub fn start_receivership<'info>(
     // Note: the receiver can use the health cache state after this ix concludes to plan their
     // liquidation/deleverage strategy.
     let mut health_cache = HealthCache::zeroed();
-    let risk_engine = RiskEngine::new(marginfi_account, remaining_ais)?;
+    let mut liq_price_cache = LiquidationPriceCache::default();
+    let (_pre_health, assets, liabs) = check_pre_liquidation_condition_and_get_account_health(
+        marginfi_account,
+        remaining_ais,
+        None,
+        &mut Some(&mut health_cache),
+        HealthPriceMode::Live {
+            liq_cache: Some(&mut liq_price_cache),
+        },
+        ignore_healthy,
+    )?;
 
-    let (_pre_health, assets, liabs) = risk_engine
-        .check_pre_liquidation_condition_and_get_account_health(
-            None,
-            &mut Some(&mut health_cache),
-            ignore_healthy,
-        )?;
-    let (assets_equity, liabs_equity) = risk_engine
-        .get_account_health_components(RiskRequirementType::Equity, &mut Some(&mut health_cache))?;
+    // Use heap-efficient equity calculation
+    let (assets_equity, liabs_equity) = get_health_components(
+        marginfi_account,
+        remaining_ais,
+        RiskRequirementType::Equity,
+        &mut Some(&mut health_cache),
+        HealthPriceMode::Live {
+            liq_cache: Some(&mut liq_price_cache),
+        },
+    )?;
+
+    write_liquidation_price_cache_from(marginfi_account, remaining_ais, &liq_price_cache)?;
     marginfi_account.health_cache = health_cache;
     marginfi_account.set_flag(ACCOUNT_IN_RECEIVERSHIP, false);
 
@@ -122,9 +140,11 @@ pub fn validate_instructions(
         COMPUTE_PROGRAM_KEY,
         id_crate::ID,
         kamino_mocks::kamino_lending::ID,
+        DRIFT_PROGRAM_ID,
         JUP_KEY,
         TITAN_KEY,
         ASSOCIATED_TOKEN_KEY,
+        DRIFT_PROGRAM_ID,
     ];
     let ixes = load_and_validate_instructions(sysvar, Some(allowed_program_ids))?;
     validate_ix_first(

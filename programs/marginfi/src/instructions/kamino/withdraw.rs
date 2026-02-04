@@ -7,9 +7,8 @@ use crate::{
     state::{
         bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, calc_value, is_signer_authorized,
-            validate_remaining_accounts_for_balances_close_last, BankAccountWrapper,
-            LendingAccountImpl, MarginfiAccountImpl, RiskEngine,
+            account_not_frozen_for_authority, calc_value, check_account_init_health,
+            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         rate_limiter::{
@@ -260,21 +259,26 @@ pub fn kamino_withdraw<'info>(
     if !in_receivership {
         // Check account health, if below threshold fail transaction
         // Assuming `ctx.remaining_accounts` holds only oracle accounts
-        let (risk_result, risk_engine) = RiskEngine::check_account_init_health(
+        check_account_init_health(
             &marginfi_account,
             ctx.remaining_accounts,
             &mut Some(&mut health_cache),
-        );
-        risk_result?;
+        )?;
         health_cache.program_version = PROGRAM_VERSION;
 
-        // Note: in flashloans, risk_engine is None, and we skip the cache price update.
         let bank_loader = &ctx.accounts.bank;
-        if let Some(engine) = risk_engine {
-            if let Ok(price) = engine.get_unbiased_price_for_bank(&bank_loader.key()) {
-                bank_loader.load_mut()?.update_cache_price(Some(price))?;
-            }
-        }
+        let bank = bank_loader.load()?;
+        let price_for_cache = fetch_unbiased_price_for_bank(
+            &bank_loader.key(),
+            &bank,
+            &clock,
+            ctx.remaining_accounts,
+        )
+        .ok();
+        drop(bank);
+        bank_loader
+            .load_mut()?
+            .update_cache_price(price_for_cache)?;
 
         health_cache.set_engine_ok(true);
         marginfi_account.health_cache = health_cache;

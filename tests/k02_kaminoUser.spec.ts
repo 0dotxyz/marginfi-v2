@@ -1,4 +1,3 @@
-import { AnchorProvider, Wallet } from "@coral-xyz/anchor";
 import { PublicKey, SYSVAR_RENT_PUBKEY, Transaction } from "@solana/web3.js";
 import {
   kaminoAccounts,
@@ -6,7 +5,6 @@ import {
   users,
   verbose,
   bankrunContext,
-  bankRunProvider,
   klendBankrunProgram,
   ecosystem,
   globalProgramAdmin,

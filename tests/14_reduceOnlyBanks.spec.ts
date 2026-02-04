@@ -31,7 +31,7 @@ import {
 } from "./utils/user-instructions";
 import { USER_ACCOUNT } from "./utils/mocks";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
-import { dummyTx } from "./utils/bankrunConnection";
+import { dummyIx } from "./utils/bankrunConnection";
 
 describe("Reduce-Only Bank Tests", () => {
   let program: Program<Marginfi>;
@@ -110,7 +110,7 @@ describe("Reduce-Only Bank Tests", () => {
       // Ensure cleanup even if test fails
       await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
         new Transaction().add(
-          dummyTx(groupAdmin.wallet.publicKey, users[1].wallet.publicKey),
+          dummyIx(groupAdmin.wallet.publicKey, users[1].wallet.publicKey),
           await configureBank(groupAdmin.mrgnProgram, {
             bank: bankKey,
             bankConfigOpt: {
@@ -202,7 +202,7 @@ describe("Reduce-Only Bank Tests", () => {
       // Health pulse AFTER configuring bank to ReduceOnly
       await user.mrgnProgram.provider.sendAndConfirm!(
         new Transaction().add(
-          dummyTx(user.wallet.publicKey, users[1].wallet.publicKey),
+          dummyIx(user.wallet.publicKey, users[1].wallet.publicKey),
           await healthPulse(user.mrgnProgram, {
             marginfiAccount: userAccount,
             remaining: composeRemainingAccounts([

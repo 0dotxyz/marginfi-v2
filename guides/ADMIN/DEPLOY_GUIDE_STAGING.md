@@ -10,7 +10,7 @@ Staging is different from mainnet only in that it uses a different key. Ensure t
 
 ## Preferred Steps
 
-- Build with `anchor build -p marginfi -- --no-default-features --features staging`
+- Build with `anchor build -p marginfi -- --no-default-features --features staging,custom-heap`
 - Run:
 
 ```
@@ -51,8 +51,8 @@ solana program extend \
 ### Alternative Steps With Anchor
 
 - Note: this rarely works, the program is probably too chonky.
-- Build with `anchor build -p marginfi -- --no-default-features --features staging`
-- If this is your first time deploying (to a new key), with `anchor build -p marginfi -- --no-default-features --features staging`
+- Build with `anchor build -p marginfi -- --no-default-features --features staging,custom-heap`
+- If this is your first time deploying (to a new key), with `anchor build -p marginfi -- --no-default-features --features staging,custom-heap`
 - Ensure anchor.toml is configured like this:
 
 ```
@@ -130,5 +130,5 @@ solana program deploy \
 
 A second deployment of the staging program is used for internal testing e.g. the Kamino integration feature.
 
-Follow the same steps as `Preferred Steps`, except you build with stagingalt and use key
+Follow the same steps as `Preferred Steps`, except you build with `--features stagingalt,custom-heap` and use key
 `5UDghkpgW1HfYSrmEj2iAApHShqU44H6PKTAar9LL9bY` for the program id.

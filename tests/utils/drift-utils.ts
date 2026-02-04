@@ -37,6 +37,8 @@ import {
   globalFeeWallet,
   globalProgramAdmin,
   groupAdmin,
+  DRIFT_TOKEN_B_PULL_ORACLE,
+  DRIFT_TOKEN_B_PULL_FEED,
 } from "../rootHooks";
 import { makeInitializeSpotMarketIx, makeAdminDepositIx } from "./drift-sdk";
 import { deriveSpotMarketPDA } from "./pdas";
@@ -66,7 +68,7 @@ export const isDriftPositionBorrow = (position: DriftSpotPosition): boolean => {
  * @returns True if the position is a deposit (positive cumulative deposits)
  */
 export const isDriftPositionDeposit = (
-  position: DriftSpotPosition
+  position: DriftSpotPosition,
 ): boolean => {
   // In Drift, positive cumulativeDeposits indicates a deposit position
   return new BN(position.cumulativeDeposits).gt(new BN(0));
@@ -135,16 +137,16 @@ export const DriftAssetTierValues = {
 // Create deterministic keypairs for Drift entities
 export const DRIFT_STATE_SEED = Buffer.from("DRIFT_STATE_SEED_000000000000000");
 export const DRIFT_USDC_MARKET_SEED = Buffer.from(
-  "DRIFT_USDC_MARKET_SEED_000000000"
+  "DRIFT_USDC_MARKET_SEED_000000000",
 );
 export const DRIFT_TOKEN_A_MARKET_SEED = Buffer.from(
-  "DRIFT_TOKEN_A_MARKET_SEED_000000"
+  "DRIFT_TOKEN_A_MARKET_SEED_000000",
 );
 
 export const driftStateKeypair = Keypair.fromSeed(DRIFT_STATE_SEED);
 export const driftUsdcMarketKeypair = Keypair.fromSeed(DRIFT_USDC_MARKET_SEED);
 export const driftTokenAMarketKeypair = Keypair.fromSeed(
-  DRIFT_TOKEN_A_MARKET_SEED
+  DRIFT_TOKEN_A_MARKET_SEED,
 );
 
 // Drift market index constants
@@ -227,14 +229,14 @@ export const quoteAssetSpotMarketConfig = (): SpotMarketConfig => {
  */
 export const getSpotMarketAccount = async (
   program: Program<Drift>,
-  marketIndex: number
+  marketIndex: number,
 ): Promise<DriftSpotMarket> => {
   const [spotMarketPDA] = PublicKey.findProgramAddressSync(
     [
       Buffer.from("spot_market"),
       new BN(marketIndex).toArrayLike(Buffer, "le", 2),
     ],
-    program.programId
+    program.programId,
   );
 
   return await program.account.spotMarket.fetch(spotMarketPDA);
@@ -250,7 +252,7 @@ export const getSpotMarketAccount = async (
 export const getUserAccount = async (
   program: Program<Drift>,
   authority: PublicKey,
-  subAccountId: number
+  subAccountId: number,
 ): Promise<DriftUser> => {
   const [userPDA] = PublicKey.findProgramAddressSync(
     [
@@ -258,7 +260,7 @@ export const getUserAccount = async (
       authority.toBuffer(),
       new BN(subAccountId).toArrayLike(Buffer, "le", 2),
     ],
-    program.programId
+    program.programId,
   );
 
   return await program.account.user.fetch(userPDA);
@@ -272,11 +274,11 @@ export const getUserAccount = async (
  */
 export const getUserStatsAccount = async (
   program: Program<Drift>,
-  authority: PublicKey
+  authority: PublicKey,
 ): Promise<DriftUserStats> => {
   const [userStatsPDA] = PublicKey.findProgramAddressSync(
     [Buffer.from("user_stats"), authority.toBuffer()],
-    program.programId
+    program.programId,
   );
 
   return await program.account.userStats.fetch(userStatsPDA);
@@ -288,11 +290,11 @@ export const getUserStatsAccount = async (
  * @returns The Drift state account containing global protocol data
  */
 export const getDriftStateAccount = async (
-  program: Program<Drift>
+  program: Program<Drift>,
 ): Promise<DriftState> => {
   const [statePDA] = PublicKey.findProgramAddressSync(
     [Buffer.from("drift_state")],
-    program.programId
+    program.programId,
   );
 
   return await program.account.state.fetch(statePDA);
@@ -310,10 +312,10 @@ export const getDriftStateAccount = async (
 export function getTokenAmount(
   balanceAmount: BN,
   spotMarket: DriftSpotMarket,
-  isDeposit: boolean
+  isDeposit: boolean,
 ): BN {
   const precisionDecrease = TEN.pow(
-    new BN(DRIFT_PRECISION_EXP - spotMarket.decimals)
+    new BN(DRIFT_PRECISION_EXP - spotMarket.decimals),
   );
 
   if (isDeposit) {
@@ -323,7 +325,7 @@ export function getTokenAmount(
   } else {
     return divCeil(
       balanceAmount.mul(spotMarket.cumulativeBorrowInterest),
-      precisionDecrease
+      precisionDecrease,
     );
   }
 }
@@ -343,17 +345,17 @@ export const divCeil = (a: BN, b: BN): BN => {
 // copied from Drift: https://github.com/drift-labs/protocol-v2/blob/1fed025269eed8ea5159dc56e2143fb904dbf14e/sdk/src/math/spotBalance.ts#L266
 export const calculateUtilization = (
   spotMarket: DriftSpotMarket,
-  delta = ZERO
+  delta = ZERO,
 ): BN => {
   let tokenDepositAmount = getTokenAmount(
     spotMarket.depositBalance,
     spotMarket,
-    true
+    true,
   );
   let tokenBorrowAmount = getTokenAmount(
     spotMarket.borrowBalance,
     spotMarket,
-    false
+    false,
   );
 
   if (delta.gt(ZERO)) {
@@ -380,7 +382,7 @@ export const calculateUtilization = (
 export const calculateInterestRate = (
   spotMarket: DriftSpotMarket,
   delta = ZERO,
-  currentUtilization: BN = null
+  currentUtilization: BN = null,
 ): BN => {
   const utilization =
     currentUtilization || calculateUtilization(spotMarket, delta);
@@ -389,7 +391,7 @@ export const calculateInterestRate = (
   const optimalRate = new BN(spotMarket.optimalBorrowRate);
   const maxRate = new BN(spotMarket.maxBorrowRate);
   const minRate = new BN(spotMarket.minBorrowRate).mul(
-    DRIFT_UTILIZATION_PRECISION.divn(200)
+    DRIFT_UTILIZATION_PRECISION.divn(200),
   );
 
   const weightsDivisor = new BN(1000);
@@ -460,7 +462,7 @@ export const getDriftScalingFactor = (tokenDecimals: number): BN => {
 export const formatTokenAmount = (
   amount: BN | number | string,
   decimals: number,
-  symbol: string = ""
+  symbol: string = "",
 ): string => {
   const amountStr = amount.toString();
   const divisor = Math.pow(10, decimals);
@@ -482,13 +484,13 @@ const DRIFT_DISPLAY_DECIMALS = 9;
 export const DRIFT_SCALED_BALANCE_DECIMALS = 9;
 
 export const USDC_SCALING_FACTOR = getDriftScalingFactor(
-  ecosystem.usdcDecimals
+  ecosystem.usdcDecimals,
 ); // 10^3 = 1,000
 export const TOKEN_A_SCALING_FACTOR = getDriftScalingFactor(
-  ecosystem.tokenADecimals
+  ecosystem.tokenADecimals,
 ); // 10^1 = 10
 export const TOKEN_B_SCALING_FACTOR = getDriftScalingFactor(
-  ecosystem.tokenBDecimals
+  ecosystem.tokenBDecimals,
 ); // 10^3 = 1000
 
 /**
@@ -499,7 +501,7 @@ export const TOKEN_B_SCALING_FACTOR = getDriftScalingFactor(
  */
 export const formatDepositAmount = (
   amount: BN | number | string,
-  symbol: string = ""
+  symbol: string = "",
 ): string => {
   const amountStr = amount.toString();
   const divisor = Math.pow(10, DRIFT_DISPLAY_DECIMALS);
@@ -545,12 +547,13 @@ export const hasActivePositions = (spotMarket: DriftSpotMarket): boolean => {
 export const getUserPositions = async (
   program: Program<Drift>,
   authority: PublicKey,
-  subAccountId: number
+  subAccountId: number,
 ) => {
   const user = await getUserAccount(program, authority, subAccountId);
 
-  return user.spotPositions
-    .filter((pos) => pos.marketIndex !== 0 || !pos.scaledBalance.isZero());
+  return user.spotPositions.filter(
+    (pos) => pos.marketIndex !== 0 || !pos.scaledBalance.isZero(),
+  );
 };
 
 /**
@@ -562,11 +565,11 @@ export const getUserPositions = async (
  */
 export const tokenAmountToScaledBalance = (
   tokenAmount: BN,
-  spotMarket: DriftSpotMarket
+  spotMarket: DriftSpotMarket,
 ): BN => {
   const decimals = spotMarket.decimals;
   const cumulativeInterest = new BN(
-    spotMarket.cumulativeDepositInterest.toString()
+    spotMarket.cumulativeDepositInterest.toString(),
   );
 
   // Calculate precision increase: 10^(19 - decimals)
@@ -591,7 +594,7 @@ export const tokenAmountToScaledBalance = (
 export const scaledBalanceToTokenAmount = (
   scaledBalance: BN,
   spotMarket: DriftSpotMarket,
-  isDeposit: boolean = true
+  isDeposit: boolean = true,
 ): BN => {
   const decimals = spotMarket.decimals;
   const cumulativeInterest = isDeposit
@@ -628,7 +631,7 @@ export interface DriftConfigCompact {
  * @returns A DriftConfigCompact with sensible defaults for testing
  */
 export const defaultDriftBankConfig = (
-  oracle: PublicKey
+  oracle: PublicKey,
 ): DriftConfigCompact => {
   const config: DriftConfigCompact = {
     oracle: oracle,
@@ -657,7 +660,7 @@ export const defaultDriftBankConfig = (
  */
 export const getDriftUserAccount = async (
   program: Program<Drift>,
-  driftUserPubkey: PublicKey
+  driftUserPubkey: PublicKey,
 ): Promise<DriftUser> => {
   return await program.account.user.fetch(driftUserPubkey);
 };
@@ -675,14 +678,17 @@ export async function refreshDriftOracles(
   oracles: Oracles,
   driftAccounts: Map<string, PublicKey>,
   bankrunContext: ProgramTestContext,
-  banksClient: BanksClient
+  banksClient: BanksClient,
 ) {
   // Get the Drift Token A oracle and feed from the map
   const tokenAOracle = driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE);
   const tokenAFeed = driftAccounts.get(DRIFT_TOKEN_A_PULL_FEED);
 
+  const tokenBOracle = driftAccounts.get(DRIFT_TOKEN_B_PULL_ORACLE);
+  const tokenBFeed = driftAccounts.get(DRIFT_TOKEN_B_PULL_FEED);
+
   if (tokenAOracle && tokenAFeed) {
-    // Update Drift's Token A oracle with mainnet Pyth program ID
+    // console.log("refresh oracle A");
     await setPythPullOraclePrice(
       bankrunContext,
       banksClient,
@@ -690,7 +696,20 @@ export async function refreshDriftOracles(
       tokenAFeed,
       oracles.tokenAPrice,
       oracles.tokenADecimals,
-      ORACLE_CONF_INTERVAL
+      ORACLE_CONF_INTERVAL,
+    );
+  }
+
+  if (tokenBOracle && tokenBFeed) {
+    // console.log("refresh oracle B");
+    await setPythPullOraclePrice(
+      bankrunContext,
+      banksClient,
+      tokenBOracle,
+      tokenBFeed,
+      oracles.tokenBPrice,
+      oracles.tokenBDecimals,
+      ORACLE_CONF_INTERVAL,
     );
   }
 }
@@ -741,14 +760,14 @@ export const calculateDriftPositionValuation = async (
   oraclePrice: BN,
   tokenSymbol: string,
   decimals: number,
-  initialScaledBalance?: BN
+  initialScaledBalance?: BN,
 ): Promise<DriftPositionValuation> => {
   const scalingFactor = getDriftScalingFactor(decimals);
   const scaledBalance = new BN(position.scaledBalance.toString());
 
   // Determine balance type based on cumulative deposits
   const isDeposit = new BN(position.cumulativeDeposits.toString()).gte(
-    new BN(0)
+    new BN(0),
   );
   const balanceType = isDeposit ? "deposit" : "borrow";
 
@@ -760,7 +779,7 @@ export const calculateDriftPositionValuation = async (
   const tokenAmount = scaledBalanceToTokenAmount(
     scaledBalance,
     spotMarket,
-    isDeposit
+    isDeposit,
   );
 
   // Calculate adjusted oracle price (what MarginFi sees)
@@ -810,7 +829,7 @@ export const getDriftAccountValuation = async (
       symbol: string;
       decimals: number;
     };
-  }
+  },
 ): Promise<DriftAccountValuation> => {
   // Fetch user account
   const driftUser = await getDriftUserAccount(driftProgram, userPubkey);
@@ -829,20 +848,20 @@ export const getDriftAccountValuation = async (
     // Get spot market
     const spotMarket = await getSpotMarketAccount(
       driftProgram,
-      position.marketIndex
+      position.marketIndex,
     );
 
     // Get oracle price
     const oracleAccount = await banksClient.getAccount(marketInfo.oracle);
     if (!oracleAccount) {
       console.warn(
-        `Oracle account not found for market ${position.marketIndex}`
+        `Oracle account not found for market ${position.marketIndex}`,
       );
       continue;
     }
 
     const oracleData = decodePriceUpdateV2(
-      Buffer.from(oracleAccount.data).toString("base64")
+      Buffer.from(oracleAccount.data).toString("base64"),
     );
     const oraclePrice = new BN(oracleData.price_message.price.toString());
 
@@ -852,7 +871,7 @@ export const getDriftAccountValuation = async (
       spotMarket,
       oraclePrice,
       marketInfo.symbol,
-      marketInfo.decimals
+      marketInfo.decimals,
     );
 
     positions.push(valuation);
@@ -882,7 +901,7 @@ export const getDriftAccountValuation = async (
 // Pretty print valuation for debugging
 export const printDriftAccountValuation = (
   valuation: DriftAccountValuation,
-  title: string = "Drift Account Valuation"
+  title: string = "Drift Account Valuation",
 ) => {
   console.log(`\n${"=".repeat(80)}`);
   console.log(`${title}`);
@@ -896,35 +915,35 @@ export const printDriftAccountValuation = (
     console.log(`    Type: ${pos.balanceType}`);
     console.log(`    Scaled Balance: ${formatRawAmount(pos.scaledBalance)}`);
     console.log(
-      `    Cumulative Interest: ${formatRawAmount(pos.cumulativeInterest)}`
+      `    Cumulative Interest: ${formatRawAmount(pos.cumulativeInterest)}`,
     );
     console.log(
       `    Token Amount: ${formatTokenAmount(
         pos.tokenAmount,
         pos.decimals,
-        pos.tokenSymbol
-      )}`
+        pos.tokenSymbol,
+      )}`,
     );
     console.log(
       `    Oracle Price: $${
         pos.oraclePrice.toNumber() / Math.pow(10, 6)
-      } (raw: ${formatRawAmount(pos.oraclePrice)})`
+      } (raw: ${formatRawAmount(pos.oraclePrice)})`,
     );
     console.log(
       `    Adjusted Oracle Price: $${
         pos.adjustedOraclePrice.toNumber() / Math.pow(10, 6)
-      } (raw: ${formatRawAmount(pos.adjustedOraclePrice)})`
+      } (raw: ${formatRawAmount(pos.adjustedOraclePrice)})`,
     );
     console.log(
-      `    Token Value: $${pos.tokenValue.toNumber() / Math.pow(10, 6)}`
+      `    Token Value: $${pos.tokenValue.toNumber() / Math.pow(10, 6)}`,
     );
     if (!pos.interestEarned.isZero()) {
       console.log(
         `    Interest Earned: ${formatTokenAmount(
           pos.interestEarned,
           pos.decimals,
-          pos.tokenSymbol
-        )}`
+          pos.tokenSymbol,
+        )}`,
       );
     }
   }
@@ -933,15 +952,15 @@ export const printDriftAccountValuation = (
   console.log(
     `  Total Collateral: $${
       valuation.totalCollateral.toNumber() / Math.pow(10, 6)
-    }`
+    }`,
   );
   console.log(
     `  Total Liabilities: $${
       valuation.totalLiabilities.toNumber() / Math.pow(10, 6)
-    }`
+    }`,
   );
   console.log(
-    `  Net Value: $${valuation.netValue.toNumber() / Math.pow(10, 6)}`
+    `  Net Value: $${valuation.netValue.toNumber() / Math.pow(10, 6)}`,
   );
   console.log(`${"=".repeat(80)}\n`);
 };
@@ -952,7 +971,7 @@ export const printDriftAccountValuation = (
 export const printMarginfiHealthCache = async (
   program: Program<Marginfi>,
   marginfiAccount: PublicKey,
-  label: string = "MarginFi Account Health Cache"
+  label: string = "MarginFi Account Health Cache",
 ) => {
   const account = await program.account.marginfiAccount.fetch(marginfiAccount);
   const healthCache = account.healthCache;
@@ -965,7 +984,7 @@ export const printMarginfiHealthCache = async (
   const liabilityValue = wrappedI80F48toBigNumber(healthCache.liabilityValue);
   const assetValueMaint = wrappedI80F48toBigNumber(healthCache.assetValueMaint);
   const liabilityValueMaint = wrappedI80F48toBigNumber(
-    healthCache.liabilityValueMaint
+    healthCache.liabilityValueMaint,
   );
 
   // Health status
@@ -989,7 +1008,7 @@ export const printMarginfiHealthCache = async (
   console.log(`  Asset Value: $${assetValueMaint.toFixed(6)}`);
   console.log(`  Liability Value: $${liabilityValueMaint.toFixed(6)}`);
   console.log(
-    `  Net Value: $${assetValueMaint.minus(liabilityValueMaint).toFixed(6)}`
+    `  Net Value: $${assetValueMaint.minus(liabilityValueMaint).toFixed(6)}`,
   );
 
   // Health ratios
@@ -998,7 +1017,7 @@ export const printMarginfiHealthCache = async (
     console.log(
       `\nInit Health Ratio: ${initHealthRatio.toFixed(4)} (${(
         initHealthRatio.toNumber() * 100
-      ).toFixed(2)}%)`
+      ).toFixed(2)}%)`,
     );
   }
 
@@ -1007,7 +1026,7 @@ export const printMarginfiHealthCache = async (
     console.log(
       `Maint Health Ratio: ${maintHealthRatio.toFixed(4)} (${(
         maintHealthRatio.toNumber() * 100
-      ).toFixed(2)}%)`
+      ).toFixed(2)}%)`,
     );
   }
 
@@ -1050,7 +1069,7 @@ export const printMarginfiHealthCache = async (
 export const makePulseHealthIx = async (
   program: Program<Marginfi>,
   marginfiAccount: PublicKey,
-  remainingAccounts: AccountMeta[] = []
+  remainingAccounts: AccountMeta[] = [],
 ): Promise<TransactionInstruction> => {
   return program.methods
     .lendingAccountPulseHealth()
@@ -1069,7 +1088,7 @@ export const compareDriftValuations = async (
   marginfiAccount: PublicKey,
   driftBank: PublicKey,
   integrationAcc2: PublicKey,
-  oracleInfo: { oracle: PublicKey; symbol: string; decimals: number }
+  oracleInfo: { oracle: PublicKey; symbol: string; decimals: number },
 ): Promise<{
   marginfiAssetShares: BN;
   marginfiLiabilityShares: BN;
@@ -1081,10 +1100,10 @@ export const compareDriftValuations = async (
 }> => {
   // Get MarginFi's view of the account
   const mfiAccount = await marginfiProgram.account.marginfiAccount.fetch(
-    marginfiAccount
+    marginfiAccount,
   );
   const balance = mfiAccount.lendingAccount.balances.find(
-    (b: any) => b.active && b.bankPk.equals(driftBank)
+    (b: any) => b.active && b.bankPk.equals(driftBank),
   );
 
   if (!balance) {
@@ -1094,7 +1113,7 @@ export const compareDriftValuations = async (
   // Convert shares to BigNumber/BN
   const assetSharesBigNumber = wrappedI80F48toBigNumber(balance.assetShares);
   const liabilitySharesBigNumber = wrappedI80F48toBigNumber(
-    balance.liabilityShares
+    balance.liabilityShares,
   );
   const assetShares = new BN(assetSharesBigNumber.toString());
   const liabilityShares = new BN(liabilitySharesBigNumber.toString());
@@ -1137,7 +1156,7 @@ export const compareDriftValuations = async (
   const tokenAmount = scaledBalanceToTokenAmount(
     scaledBalance.abs(),
     spotMarket,
-    isDeposit
+    isDeposit,
   );
 
   // Get oracle price to calculate USD value
@@ -1147,7 +1166,7 @@ export const compareDriftValuations = async (
   }
 
   const oracleData = decodePriceUpdateV2(
-    Buffer.from(oracleAccount.data).toString("base64")
+    Buffer.from(oracleAccount.data).toString("base64"),
   );
   const oraclePrice = new BN(oracleData.price_message.price.toString());
 
@@ -1162,7 +1181,7 @@ export const compareDriftValuations = async (
     driftProgram,
     banksClient,
     driftUser,
-    { [marketIndex]: oracleInfo }
+    { [marketIndex]: oracleInfo },
   );
 
   const calculatedValuation = driftValuation.netValue;
@@ -1174,27 +1193,27 @@ export const compareDriftValuations = async (
   console.log(`\n📊 Valuation Comparison:`);
   console.log(`  MarginFi asset shares: ${formatRawAmount(assetShares)}`);
   console.log(
-    `  MarginFi liability shares: ${formatRawAmount(liabilityShares)}`
+    `  MarginFi liability shares: ${formatRawAmount(liabilityShares)}`,
   );
   console.log(`  Net scaled balance: ${formatRawAmount(scaledBalance)}`);
   console.log(
     `  Token amount: ${formatTokenAmount(
       tokenAmount,
       oracleInfo.decimals,
-      oracleInfo.symbol
-    )}`
+      oracleInfo.symbol,
+    )}`,
   );
   console.log(`  Oracle price: $${oraclePrice.toNumber() / Math.pow(10, 6)}`);
   console.log(
-    `  MarginFi valuation: $${marginfiValuation.toNumber() / Math.pow(10, 6)}`
+    `  MarginFi valuation: $${marginfiValuation.toNumber() / Math.pow(10, 6)}`,
   );
   console.log(
-    `  Our calculation: $${calculatedValuation.toNumber() / Math.pow(10, 6)}`
+    `  Our calculation: $${calculatedValuation.toNumber() / Math.pow(10, 6)}`,
   );
   console.log(
     `  Difference: $${
       difference.toNumber() / Math.pow(10, 6)
-    } (${percentDiff.toFixed(4)}%)`
+    } (${percentDiff.toFixed(4)}%)`,
   );
 
   return {
@@ -1212,7 +1231,7 @@ export const compareDriftValuations = async (
 export const getDriftUser = async (
   driftProgram: Program<Drift>,
   authority: PublicKey,
-  subAccountId: number
+  subAccountId: number,
 ): Promise<DriftUser> => {
   const [userPDA] = PublicKey.findProgramAddressSync(
     [
@@ -1220,7 +1239,7 @@ export const getDriftUser = async (
       authority.toBuffer(),
       new BN(subAccountId).toArrayLike(Buffer, "le", 2),
     ],
-    driftProgram.programId
+    driftProgram.programId,
   );
 
   return await driftProgram.account.user.fetch(userPDA);
@@ -1230,14 +1249,14 @@ export async function assertBankBalance(
   marginfiAccount: PublicKey,
   bankPubkey: PublicKey,
   expectedBalance: BN | number | null,
-  isLiability: boolean = false
+  isLiability: boolean = false,
 ) {
   const userAcc = await bankrunProgram.account.marginfiAccount.fetch(
-    marginfiAccount
+    marginfiAccount,
   );
 
   const balance = userAcc.lendingAccount.balances.find(
-    (b) => b.bankPk.equals(bankPubkey) && b.active === 1
+    (b) => b.bankPk.equals(bankPubkey) && b.active === 1,
   );
 
   if (expectedBalance === null) {
@@ -1263,24 +1282,24 @@ export async function assertBankBalance(
 
 export const createIntermediaryTokenAccountIfNeeded = async (
   bank: PublicKey,
-  mint: PublicKey
+  mint: PublicKey,
 ) => {
   const [liquidityVaultAuthority] = PublicKey.findProgramAddressSync(
     [Buffer.from("liquidity_vault_auth"), bank.toBuffer()],
-    bankrunProgram.programId
+    bankrunProgram.programId,
   );
 
   const intermediaryTokenAccount = getAssociatedTokenAddressSync(
     mint,
     liquidityVaultAuthority,
-    true
+    true,
   );
 
   const createAtaIx = createAssociatedTokenAccountIdempotentInstruction(
     groupAdmin.wallet.publicKey,
     intermediaryTokenAccount,
     liquidityVaultAuthority,
-    mint
+    mint,
   );
 
   const tx = new Transaction().add(createAtaIx);
@@ -1289,7 +1308,7 @@ export const createIntermediaryTokenAccountIfNeeded = async (
     tx,
     [groupAdmin.wallet],
     false,
-    true
+    true,
   );
 };
 
@@ -1301,8 +1320,8 @@ export const createGlobalFeeWalletTokenAccount = async (mint: PublicKey) => {
       groupAdmin.wallet.publicKey,
       destinationAta,
       globalFeeWallet,
-      mint
-    )
+      mint,
+    ),
   );
 
   await processBankrunTransaction(
@@ -1310,7 +1329,7 @@ export const createGlobalFeeWalletTokenAccount = async (mint: PublicKey) => {
     tx,
     [groupAdmin.wallet],
     false,
-    true
+    true,
   );
 };
 
@@ -1319,14 +1338,14 @@ export const createDriftSpotMarketWithOracle = async (
   tokenSymbol: string,
   marketIndex: number,
   price: number,
-  decimals: number
+  decimals: number,
 ) => {
   const config = defaultSpotMarketConfig();
   const normalizedSymbol = tokenSymbol.toLowerCase();
 
   const [spotMarketPDA] = deriveSpotMarketPDA(
     driftBankrunProgram.programId,
-    marketIndex
+    marketIndex,
   );
 
   const pullOracle = Keypair.generate();
@@ -1336,12 +1355,12 @@ export const createDriftSpotMarketWithOracle = async (
     bankrunContext,
     banksClient,
     pullOracle,
-    DRIFT_ORACLE_RECEIVER_PROGRAM_ID
+    DRIFT_ORACLE_RECEIVER_PROGRAM_ID,
   );
 
   driftAccounts.set(
     `drift_${normalizedSymbol}_pull_oracle`,
-    pullOracle.publicKey
+    pullOracle.publicKey,
   );
   driftAccounts.set(`drift_${normalizedSymbol}_pull_feed`, pullFeed.publicKey);
 
@@ -1353,7 +1372,7 @@ export const createDriftSpotMarketWithOracle = async (
     price,
     decimals,
     ORACLE_CONF_INTERVAL,
-    DRIFT_ORACLE_RECEIVER_PROGRAM_ID
+    DRIFT_ORACLE_RECEIVER_PROGRAM_ID,
   );
 
   const initMarketIx = await makeInitializeSpotMarketIx(
@@ -1373,7 +1392,7 @@ export const createDriftSpotMarketWithOracle = async (
       initialLiabilityWeight: config.initialLiabilityWeight,
       maintenanceLiabilityWeight: config.maintenanceLiabilityWeight,
       marketIndex,
-    }
+    },
   );
 
   const tx = new Transaction().add(initMarketIx);
@@ -1382,7 +1401,7 @@ export const createDriftSpotMarketWithOracle = async (
     tx,
     [groupAdmin.wallet],
     false,
-    true
+    true,
   );
 
   driftAccounts.set(`drift_${normalizedSymbol}_spot_market`, spotMarketPDA);
@@ -1395,28 +1414,28 @@ export const fundAndDepositAdminReward = async (
   bank: PublicKey,
   tokenMint: PublicKey,
   marketIndex: number,
-  amount: BN
+  amount: BN,
 ) => {
   await createIntermediaryTokenAccountIfNeeded(bank, tokenMint);
   await createGlobalFeeWalletTokenAccount(tokenMint);
 
   const adminTokenAccount = getAssociatedTokenAddressSync(
     tokenMint,
-    driftAdmin.publicKey
+    driftAdmin.publicKey,
   );
 
   const createAdminAtaIx = createAssociatedTokenAccountIdempotentInstruction(
     globalProgramAdmin.wallet.publicKey,
     adminTokenAccount,
     driftAdmin.publicKey,
-    tokenMint
+    tokenMint,
   );
 
   const mintToAdminIx = createMintToInstruction(
     tokenMint,
     adminTokenAccount,
     globalProgramAdmin.wallet.publicKey,
-    amount.toNumber()
+    amount.toNumber(),
   );
 
   const fundTx = new Transaction().add(createAdminAtaIx).add(mintToAdminIx);
@@ -1425,17 +1444,17 @@ export const fundAndDepositAdminReward = async (
     fundTx,
     [globalProgramAdmin.wallet],
     false,
-    true
+    true,
   );
 
   const bankAccount = await bankrunProgram.account.bank.fetch(bank);
   const spotMarket = await getSpotMarketAccount(
     driftBankrunProgram,
-    marketIndex
+    marketIndex,
   );
   const [spotMarketPDA] = deriveSpotMarketPDA(
     driftBankrunProgram.programId,
-    marketIndex
+    marketIndex,
   );
 
   const remainingAccounts: PublicKey[] = [];
@@ -1455,7 +1474,7 @@ export const fundAndDepositAdminReward = async (
       marketIndex,
       amount,
       remainingAccounts,
-    }
+    },
   );
 
   const depositTx = new Transaction().add(adminDepositIx);
@@ -1464,13 +1483,13 @@ export const fundAndDepositAdminReward = async (
     depositTx,
     [driftAdmin],
     false,
-    true
+    true,
   );
 };
 
 export const createThrowawayMarginfiAccount = async (
   user: MockUser,
-  group: PublicKey
+  group: PublicKey,
 ) => {
   const accountKeypair = Keypair.generate();
   const initAccountIx = await accountInit(user.mrgnBankrunProgram, {
@@ -1486,7 +1505,7 @@ export const createThrowawayMarginfiAccount = async (
     initTx,
     [user.wallet, accountKeypair],
     false,
-    true
+    true,
   );
 
   return accountKeypair.publicKey;

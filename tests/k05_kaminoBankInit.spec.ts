@@ -33,10 +33,7 @@ import {
   simpleRefreshReserve,
 } from "./utils/kamino-utils";
 import { assert } from "chai";
-import { processBankrunTransaction, safeGetAccountInfo, getBankrunTime } from "./utils/tools";
-import { lendingMarketAuthPda } from "@kamino-finance/klend-sdk";
-import { createAssociatedTokenAccountInstruction } from "@mrgnlabs/mrgn-common";
-import { createMintToInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { processBankrunTransaction, getBankrunTime } from "./utils/tools";
 import { ProgramTestContext } from "solana-bankrun";
 import {
   makeAddKaminoBankIx,
@@ -75,7 +72,6 @@ describe("k05: Init Kamino banks", () => {
     let defaultConfig = defaultKaminoBankConfig(
       oracles.usdcOracle.publicKey
     );
-    const now = await getBankrunTime(ctx);
 
     const [bankKey] = deriveBankWithSeed(
       mrgnID,
@@ -91,7 +87,7 @@ describe("k05: Init Kamino banks", () => {
           group: kaminoGroup.publicKey,
           feePayer: groupAdmin.wallet.publicKey,
           bankMint: ecosystem.usdcMint.publicKey,
-          integrationAcc1: usdcReserve,
+          kaminoReserve: usdcReserve,
           kaminoMarket: market,
           oracle: oracles.usdcOracle.publicKey,
         },
@@ -319,7 +315,7 @@ describe("k05: Init Kamino banks", () => {
           group: kaminoGroup.publicKey,
           feePayer: user.wallet.publicKey,
           bankMint: ecosystem.tokenAMint.publicKey,
-          integrationAcc1: tokenAReserve,
+          kaminoReserve: tokenAReserve,
           kaminoMarket: market,
           oracle: oracles.tokenAOracle.publicKey,
         },
@@ -384,7 +380,7 @@ describe("k05: Init Kamino banks", () => {
           group: kaminoGroup.publicKey,
           feePayer: user.wallet.publicKey,
           bankMint: ecosystem.tokenAMint.publicKey,
-          integrationAcc1: tokenAReserve,
+          kaminoReserve: tokenAReserve,
           kaminoMarket: market,
           oracle: oracles.tokenAOracle.publicKey,
         },
@@ -411,7 +407,7 @@ describe("k05: Init Kamino banks", () => {
           group: kaminoGroup.publicKey,
           feePayer: usr.wallet.publicKey,
           bankMint: ecosystem.tokenAMint.publicKey,
-          integrationAcc1: usdcReserve,
+          kaminoReserve: usdcReserve,
           kaminoMarket: market,
           oracle: oracles.tokenAOracle.publicKey,
         },
@@ -432,7 +428,7 @@ describe("k05: Init Kamino banks", () => {
           group: kaminoGroup.publicKey,
           feePayer: usr.wallet.publicKey,
           bankMint: ecosystem.usdcMint.publicKey,
-          integrationAcc1: tokenAReserve,
+          kaminoReserve: tokenAReserve,
           kaminoMarket: market,
           oracle: oracles.tokenAOracle.publicKey,
         },
@@ -461,7 +457,7 @@ describe("k05: Init Kamino banks", () => {
           group: kaminoGroup.publicKey,
           feePayer: usr.wallet.publicKey,
           bankMint: ecosystem.tokenAMint.publicKey,
-          integrationAcc1: tokenAReserve,
+          kaminoReserve: tokenAReserve,
           kaminoMarket: market,
           oracle: oracles.tokenAOracle.publicKey,
         },
@@ -485,7 +481,7 @@ describe("k05: Init Kamino banks", () => {
           group: kaminoGroup.publicKey,
           feePayer: usr.wallet.publicKey,
           bankMint: ecosystem.usdcMint.publicKey,
-          integrationAcc1: tokenAReserve,
+          kaminoReserve: tokenAReserve,
           kaminoMarket: market,
           oracle: oracles.tokenAOracle.publicKey,
         },

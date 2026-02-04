@@ -33,6 +33,8 @@ import {
 import {
   borrowIx,
   composeRemainingAccounts,
+  composeRemainingAccountsMetaBanksOnly,
+  composeRemainingAccountsWriteableMeta,
   composeRemainingAccountsByBalances,
   depositIx,
   endDeleverageIx,
@@ -694,7 +696,7 @@ describe("Bank e2e sunset due to illiquid asset", () => {
       await startDeleverageIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
         riskAdmin: riskAdmin.wallet.publicKey,
-        remaining: composeRemainingAccounts(remainingAccounts),
+        remaining: composeRemainingAccountsWriteableMeta(remainingAccounts),
       }),
       await withdrawIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
@@ -717,7 +719,7 @@ describe("Bank e2e sunset due to illiquid asset", () => {
       }),
       await endDeleverageIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
-        remaining: composeRemainingAccounts(
+        remaining: composeRemainingAccountsMetaBanksOnly(
           endAccounts ? endAccounts : remainingAccounts
         ),
       })

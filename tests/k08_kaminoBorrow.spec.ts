@@ -20,7 +20,6 @@ import { lendingMarketAuthPda } from "@kamino-finance/klend-sdk";
 import {
   SYSVAR_INSTRUCTIONS_PUBKEY,
   Transaction,
-  SystemProgram,
   PublicKey,
 } from "@solana/web3.js";
 import { KAMINO_OBLIGATION, MockUser } from "./utils/mocks";
@@ -30,11 +29,12 @@ import {
   simpleRefreshReserve,
   wrappedU68F60toBigNumber,
 } from "./utils/kamino-utils";
-import { assert, expect } from "chai";
+import { assert } from "chai";
 import { processBankrunTransaction } from "./utils/tools";
 import { getTokenBalance } from "./utils/genericTests";
 import { Clock, ProgramTestContext } from "solana-bankrun";
 import { getEpochAndSlot } from "./utils/stake-utils";
+import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 
 let ctx: ProgramTestContext;
 let usdcReserve: PublicKey;
@@ -92,7 +92,7 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
     // Note: Kamino obligation direct obligation (not through marginfi)
     const obligation = user.accounts.get(KAMINO_OBLIGATION);
     const reserveData = await klendBankrunProgram.account.reserve.fetch(
-      tokenAReserve
+      tokenAReserve,
     );
     const tokenALiquidityMint = reserveData.liquidity.mintPubkey;
     const tokenAReserveLiquiditySupply = reserveData.liquidity.supplyVault;
@@ -100,7 +100,7 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
     const tokenACollateralVault = reserveData.collateral.supplyVault;
     const [lendingMarketAuthority] = lendingMarketAuthPda(
       market,
-      klendBankrunProgram.programId
+      klendBankrunProgram.programId,
     );
     const depositAmount = 200_000 * 10 ** ecosystem.tokenADecimals;
 
@@ -109,13 +109,13 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
         klendBankrunProgram,
         tokenAReserve,
         market,
-        oracles.tokenAOracle.publicKey
+        oracles.tokenAOracle.publicKey,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         obligation,
-        []
+        [],
       ),
       await klendBankrunProgram.methods
         .depositReserveLiquidityAndObligationCollateral(new BN(depositAmount))
@@ -135,7 +135,7 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
           liquidityTokenProgram: TOKEN_PROGRAM_ID,
           instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
         })
-        .instruction()
+        .instruction(),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
@@ -155,12 +155,12 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
     const initialBalances = await getBalances(user);
 
     const borrowReserveData = await klendBankrunProgram.account.reserve.fetch(
-      usdcReserve
+      usdcReserve,
     );
     const usdcFeesVault = borrowReserveData.liquidity.feeVault;
     const [lendingMarketAuthority] = lendingMarketAuthPda(
       market,
-      klendBankrunProgram.programId
+      klendBankrunProgram.programId,
     );
     // Note: Kamino obligation direct obligation (not through marginfi)
     const obligation = user.accounts.get(KAMINO_OBLIGATION);
@@ -182,7 +182,7 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
           reserve: usdcReserve,
           lendingMarket: market,
         })
-        .instruction()
+        .instruction(),
     );
     await processBankrunTransaction(ctx, elevationTx, [groupAdmin.wallet]);
 
@@ -191,13 +191,13 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
         klendBankrunProgram,
         tokenAReserve,
         market,
-        oracles.tokenAOracle.publicKey
+        oracles.tokenAOracle.publicKey,
       ),
       await simpleRefreshReserve(
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       ),
       await simpleRefreshObligation(klendBankrunProgram, market, obligation, [
         tokenAReserve,
@@ -218,7 +218,7 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
           tokenProgram: TOKEN_PROGRAM_ID,
           instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
         })
-        .instruction()
+        .instruction(),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
@@ -236,7 +236,7 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
         "reserve supply before: " +
           initialBalances.usdcReserveSupplyBalance +
           " after " +
-          postBorrowBalances.usdcReserveSupplyBalance
+          postBorrowBalances.usdcReserveSupplyBalance,
       );
     }
   });
@@ -247,7 +247,7 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
     const obligation = user.accounts.get(KAMINO_OBLIGATION);
     const [lendingMarketAuthority] = lendingMarketAuthPda(
       market,
-      klendBankrunProgram.programId
+      klendBankrunProgram.programId,
     );
     const depositAmount = 80_000_000 * 10 ** ecosystem.usdcDecimals;
     const borrowAmount = 8_000 * 10 ** ecosystem.tokenADecimals;
@@ -265,14 +265,14 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
           reserve: tokenAReserve,
           lendingMarket: market,
         })
-        .instruction()
+        .instruction(),
     );
     await processBankrunTransaction(ctx, elevationTx, [groupAdmin.wallet]);
 
     // Deposit some USDC first
 
     const usdcReserveData = await klendBankrunProgram.account.reserve.fetch(
-      usdcReserve
+      usdcReserve,
     );
     const usdcLiquidityMint = usdcReserveData.liquidity.mintPubkey;
     const usdcLiquiditySupply = usdcReserveData.liquidity.supplyVault;
@@ -285,7 +285,7 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       ),
       await simpleRefreshObligation(klendBankrunProgram, market, obligation),
       await klendBankrunProgram.methods
@@ -306,13 +306,13 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
           liquidityTokenProgram: TOKEN_PROGRAM_ID,
           instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
         })
-        .instruction()
+        .instruction(),
     );
 
     await processBankrunTransaction(ctx, depositTx, [user.wallet]);
 
     const borrowReserveData = await klendBankrunProgram.account.reserve.fetch(
-      tokenAReserve
+      tokenAReserve,
     );
     const tokenALiquidityMint = borrowReserveData.liquidity.mintPubkey;
     const tokenALiquiditySupply = borrowReserveData.liquidity.supplyVault;
@@ -323,13 +323,13 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       ),
       await simpleRefreshReserve(
         klendBankrunProgram,
         tokenAReserve,
         market,
-        oracles.tokenAOracle.publicKey
+        oracles.tokenAOracle.publicKey,
       ),
       await simpleRefreshObligation(klendBankrunProgram, market, obligation, [
         usdcReserve,
@@ -350,18 +350,18 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
           tokenProgram: TOKEN_PROGRAM_ID,
           instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
         })
-        .instruction()
+        .instruction(),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
   });
 
   it("Should accrue interest on USDC reserve by advancing the clock", async () => {
     const resBefore = await klendBankrunProgram.account.reserve.fetch(
-      usdcReserve
+      usdcReserve,
     );
     const availableBefore = resBefore.liquidity.availableAmount.toNumber();
     const borrowedBefore = wrappedU68F60toBigNumber(
-      resBefore.liquidity.borrowedAmountSf
+      resBefore.liquidity.borrowedAmountSf,
     );
 
     // Warp to 1 hour in the future (1 hour = 3600 seconds, at ~2.4s per slot = ~1500 slots)
@@ -373,17 +373,18 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
       0n, // epochStartTimestamp
       0n, // epoch
       0n, // leaderScheduleEpoch
-      targetUnix
+      targetUnix,
     );
     bankrunContext.setClock(newClock);
     let { epoch: _epoch, slot } = await getEpochAndSlot(banksClient);
     const targetSlot = BigInt(slot + 1500);
     if (verbose) {
       console.log(
-        `Warping slot ${targetSlot}  time ${timeTarget} (~1hr later)`
+        `Warping slot ${targetSlot}  time ${timeTarget} (~1hr later)`,
       );
     }
     ctx.warpToSlot(targetSlot);
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 
     // Capture the interest accrual from the time jump
     let refreshTx = new Transaction().add(
@@ -391,17 +392,23 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
-      )
+        oracles.usdcOracle.publicKey,
+      ),
     );
-    await processBankrunTransaction(ctx, refreshTx, [groupAdmin.wallet]);
+    await processBankrunTransaction(
+      ctx,
+      refreshTx,
+      [groupAdmin.wallet],
+      false,
+      true,
+    );
 
     const resAfter = await klendBankrunProgram.account.reserve.fetch(
-      usdcReserve
+      usdcReserve,
     );
     const availableAfter = resAfter.liquidity.availableAmount.toNumber();
     const borrowedAfter = wrappedU68F60toBigNumber(
-      resAfter.liquidity.borrowedAmountSf
+      resAfter.liquidity.borrowedAmountSf,
     );
     const borrowedDiff = Number(borrowedAfter.minus(borrowedBefore));
 
@@ -412,7 +419,7 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
           " after " +
           borrowedAfter.toString() +
           " diff " +
-          borrowedDiff
+          borrowedDiff,
       );
     }
 

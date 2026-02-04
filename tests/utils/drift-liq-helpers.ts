@@ -68,7 +68,9 @@ export const THROWAWAY_GROUP_SEED_D14 = Buffer.from(
 const USER_ACCOUNT_D14 = "d14_account";
 const STARTING_SEED = 100;
 
-// Max drift banks that should pass (9th will fail due to active bank limit)
+// Number of drift banks used in liquidation limit tests
+// NOTE: There's no longer a limit on integration positions with the
+// forward_allocating_bump_heap_allocator feature
 export const PASSING_DRIFT_COUNT = 8;
 // Regular banks needed: 15 - 1 = 14 minimum (when driftCount=1, regularCount=14)
 const REGULAR_BANK_COUNT = 15;

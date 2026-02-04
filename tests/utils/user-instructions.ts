@@ -671,6 +671,79 @@ export const composeRemainingAccounts = (
 };
 
 /**
+ * Use in place of `composeRemainingAccounts` when building Meta for Start Liquidate (marks banks as
+ * mutable, which is required)
+ * @param banksAndOracles 
+ * @returns 
+ */
+export const composeRemainingAccountsWriteableMeta = (
+  banksAndOracles: PublicKey[][]
+): AccountMeta[] => {
+  banksAndOracles.sort((a, b) => {
+    const A = a[0].toBytes();
+    const B = b[0].toBytes();
+    for (let i = 0; i < 32; i++) {
+      if (A[i] !== B[i]) {
+        return B[i] - A[i];
+      }
+    }
+    return 0;
+  });
+
+  return banksAndOracles.flatMap((accs) =>
+    accs.map((pubkey, idx) => ({
+      pubkey,
+      isSigner: false,
+      isWritable: idx === 0,
+    }))
+  );
+};
+
+/**
+ * Use in place of `composeRemainingAccounts` when building Meta for End Liquidate (marks banks as
+ * mutable and ignores/excludes all other accounts)
+ * @param banksAndOracles 
+ * @returns 
+ */
+export const composeRemainingAccountsMetaBanksOnly = (
+  banksAndOracles: PublicKey[][]
+): AccountMeta[] => {
+  banksAndOracles.sort((a, b) => {
+    const A = a[0].toBytes();
+    const B = b[0].toBytes();
+    for (let i = 0; i < 32; i++) {
+      if (A[i] !== B[i]) {
+        return B[i] - A[i];
+      }
+    }
+    return 0;
+  });
+
+  return banksAndOracles.map((accs) => ({
+    pubkey: accs[0],
+    isSigner: false,
+    isWritable: true,
+  }));
+};
+
+const toWritableAccountMetas = (
+  remaining: Array<PublicKey | AccountMeta>
+): AccountMeta[] => {
+  if (remaining.length === 0) {
+    return [];
+  }
+  const first = remaining[0] as AccountMeta;
+  if (first.pubkey !== undefined) {
+    return remaining as AccountMeta[];
+  }
+  return (remaining as PublicKey[]).map((pubkey) => ({
+    pubkey,
+    isSigner: false,
+    isWritable: true,
+  }));
+};
+
+/**
  * Flattens bank-oracle groups in the exact order of active balances.
  * If closingBank is provided, its group is placed last.
  * Throws if a balance's bank is missing from banksAndOracles.
