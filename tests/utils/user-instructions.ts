@@ -419,21 +419,41 @@ export const initLiquidationRecordIx = (
     .instruction();
 };
 
+/**
+ * Converts an array that can be either PublicKey[] or AccountMeta[] into AccountMeta[].
+ * If the input is already AccountMeta[], it preserves the existing isWritable flags.
+ * If the input is PublicKey[], it converts using the provided default isWritable flag.
+ */
+const toAccountMetas = (
+  remaining: Array<PublicKey | AccountMeta>,
+  defaultWritable: boolean = false
+): AccountMeta[] => {
+  if (remaining.length === 0) {
+    return [];
+  }
+  const first = remaining[0] as AccountMeta;
+  if (first.pubkey !== undefined) {
+    return remaining as AccountMeta[];
+  }
+  // Convert PublicKey[] to AccountMeta[]
+  return (remaining as PublicKey[]).map((pubkey) => ({
+    pubkey,
+    isSigner: false,
+    isWritable: defaultWritable,
+  }));
+};
+
 export type StartLiquidationArgs = {
   marginfiAccount: PublicKey;
   liquidationReceiver: PublicKey;
-  remaining: PublicKey[];
+  remaining: PublicKey[] | AccountMeta[];
 };
 
 export const startLiquidationIx = (
   program: Program<Marginfi>,
   args: StartLiquidationArgs
 ) => {
-  const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => ({
-    pubkey,
-    isSigner: false,
-    isWritable: false,
-  }));
+  const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
   return program.methods
     .startLiquidation()
     .accounts({
@@ -449,18 +469,14 @@ export const startLiquidationIx = (
 
 export type EndLiquidationArgs = {
   marginfiAccount: PublicKey;
-  remaining: PublicKey[];
+  remaining: PublicKey[] | AccountMeta[];
 };
 
 export const endLiquidationIx = (
   program: Program<Marginfi>,
   args: EndLiquidationArgs
 ) => {
-  const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => ({
-    pubkey,
-    isSigner: false,
-    isWritable: false,
-  }));
+  const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
   return program.methods
     .endLiquidation()
     .accounts({
@@ -478,18 +494,14 @@ export const endLiquidationIx = (
 export type StartDeleverageArgs = {
   marginfiAccount: PublicKey;
   riskAdmin: PublicKey;
-  remaining: PublicKey[];
+  remaining: PublicKey[] | AccountMeta[];
 };
 
 export const startDeleverageIx = (
   program: Program<Marginfi>,
   args: StartDeleverageArgs
 ) => {
-  const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => ({
-    pubkey,
-    isSigner: false,
-    isWritable: false,
-  }));
+  const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
   return program.methods
     .startDeleverage()
     .accounts({
@@ -501,18 +513,14 @@ export const startDeleverageIx = (
 
 export type EndDeleverageArgs = {
   marginfiAccount: PublicKey;
-  remaining: PublicKey[];
+  remaining: PublicKey[] | AccountMeta[];
 };
 
 export const endDeleverageIx = (
   program: Program<Marginfi>,
   args: EndDeleverageArgs
 ) => {
-  const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => ({
-    pubkey,
-    isSigner: false,
-    isWritable: false,
-  }));
+  const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
   return program.methods
     .endDeleverage()
     .accounts({
@@ -721,23 +729,6 @@ export const composeRemainingAccountsMetaBanksOnly = (
 
   return banksAndOracles.map((accs) => ({
     pubkey: accs[0],
-    isSigner: false,
-    isWritable: true,
-  }));
-};
-
-const toWritableAccountMetas = (
-  remaining: Array<PublicKey | AccountMeta>
-): AccountMeta[] => {
-  if (remaining.length === 0) {
-    return [];
-  }
-  const first = remaining[0] as AccountMeta;
-  if (first.pubkey !== undefined) {
-    return remaining as AccountMeta[];
-  }
-  return (remaining as PublicKey[]).map((pubkey) => ({
-    pubkey,
     isSigner: false,
     isWritable: true,
   }));

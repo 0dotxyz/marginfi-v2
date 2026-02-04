@@ -244,7 +244,7 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
 
     // Remaining accounts include all active banks; closing bank ordered last.
     const remainingPositions = [];
-    for (let i = 1; i < KAMINO_POSITIONS; i++) {
+    for (let i = 0; i < KAMINO_POSITIONS; i++) {
       remainingPositions.push([
         kaminoBanks[i],
         oracles.tokenAOracle.publicKey,
