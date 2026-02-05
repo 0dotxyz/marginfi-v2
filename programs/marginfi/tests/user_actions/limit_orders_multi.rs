@@ -266,7 +266,7 @@ async fn execute_order_with_withdraw(
 //   closed, so a stop loss might stay open when a take-profit is executed, etc. Here there is much
 //   more naunce, since A could be involved in up to 30 orders (15x stop losses and take profits).
 #[tokio::test]
-async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails_start() -> anyhow::Result<()> {
+async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails() -> anyhow::Result<()> {
     // ---------------------------------------------------------------------
     // Setup
     // ---------------------------------------------------------------------
@@ -513,7 +513,7 @@ async fn limit_orders_overlap_ab_nearly_closes_a_no_withdraw_all_ok() -> anyhow:
 // the user had deposited SOL without first doing withdraw_all to close the SOL balance, then the
 // SOL/PyUSD order would still be able to execute.
 #[tokio::test]
-async fn limit_orders_overlap_ab_close_a_reopen_sol_ad_fails_start() -> anyhow::Result<()> {
+async fn limit_orders_overlap_ab_close_a_reopen_a_ad_fails() -> anyhow::Result<()> {
     // ---------------------------------------------------------------------
     // Setup
     // ---------------------------------------------------------------------
@@ -631,6 +631,7 @@ async fn limit_orders_overlap_ab_close_a_reopen_sol_ad_fails_start() -> anyhow::
     Ok(())
 }
 
+// Here we hit OrderTriggerNotMet by attempting to withdraw too much.
 #[tokio::test]
 async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> {
     // ---------------------------------------------------------------------
@@ -657,6 +658,7 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
             vec![sol_bank.key, usdc_bank.key],
             OrderTrigger::StopLoss {
                 threshold: fp!(200.0).into(),
+                // Note: the user is a silly person that sets 99% slippage.
                 max_slippage: 9_999,
             },
         )
@@ -708,6 +710,8 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
     )
     .await?;
 
+    // At this point there is 6 SOL left ($60) and a debt of $50 PyUSD
+
     test_f.refresh_blockhash().await;
     // Execute A/D, but withdraw slightly too much from remaining A (end should fail)
     let result = execute_order_with_withdraw(
@@ -726,6 +730,24 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
     .await;
 
     assert_custom_error!(result.unwrap_err(), MarginfiError::OrderTriggerNotMet);
+
+    // Executing A/D with just enough still works as expected.
+    let result = execute_order_with_withdraw(
+        &test_f,
+        &borrower,
+        order_ad,
+        &keeper,
+        pyusd_bank,
+        keeper_pyusd_account,
+        sol_bank,
+        keeper_sol_account,
+        5.0,
+        None,
+        vec![pyusd_bank.key],
+    )
+    .await;
+
+    assert!(result.is_ok());
     Ok(())
 }
 
