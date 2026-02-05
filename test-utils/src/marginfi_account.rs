@@ -902,6 +902,17 @@ impl MarginfiAccountFixture {
         include_banks: Vec<Pubkey>,
         exclude_banks: Vec<Pubkey>,
     ) -> Vec<AccountMeta> {
+        self.load_observation_account_metas_with_flags(include_banks, exclude_banks, false, false)
+            .await
+    }
+
+    pub async fn load_observation_account_metas_with_flags(
+        &self,
+        include_banks: Vec<Pubkey>,
+        exclude_banks: Vec<Pubkey>,
+        bank_writable: bool,
+        banks_only: bool,
+    ) -> Vec<AccountMeta> {
         let marginfi_account = self.load().await;
         // Check all active banks in marginfi account balances
         let mut bank_pks = marginfi_account
@@ -945,8 +956,12 @@ impl MarginfiAccountFixture {
                 let mut metas = vec![AccountMeta {
                     pubkey: *bank_pk,
                     is_signer: false,
-                    is_writable: false,
+                    is_writable: bank_writable,
                 }];
+
+                if banks_only {
+                    return metas;
+                }
 
                 // Oracle meta is included for all but fixed-price banks
                 if bank.config.oracle_setup != OracleSetup::Fixed {
@@ -1145,8 +1160,11 @@ impl MarginfiAccountFixture {
             .to_account_metas(Some(true)),
             data: marginfi::instruction::StartLiquidation {}.data(),
         };
-        ix.accounts
-            .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
+        ix.accounts.extend_from_slice(
+            &self
+                .load_observation_account_metas_with_flags(vec![], vec![], true, false)
+                .await,
+        );
         ix
     }
 
@@ -1173,7 +1191,7 @@ impl MarginfiAccountFixture {
         };
         ix.accounts.extend_from_slice(
             &self
-                .load_observation_account_metas(vec![], exclude_banks)
+                .load_observation_account_metas_with_flags(vec![], exclude_banks, true, true)
                 .await,
         );
         ix
@@ -1279,8 +1297,11 @@ impl MarginfiAccountFixture {
             .to_account_metas(Some(true)),
             data: marginfi::instruction::StartDeleverage {}.data(),
         };
-        ix.accounts
-            .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
+        ix.accounts.extend_from_slice(
+            &self
+                .load_observation_account_metas_with_flags(vec![], vec![], true, false)
+                .await,
+        );
         ix
     }
 
@@ -1305,7 +1326,7 @@ impl MarginfiAccountFixture {
         };
         ix.accounts.extend_from_slice(
             &self
-                .load_observation_account_metas(vec![], exclude_banks)
+                .load_observation_account_metas_with_flags(vec![], exclude_banks, true, true)
                 .await,
         );
         ix

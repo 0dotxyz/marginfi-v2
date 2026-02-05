@@ -1131,7 +1131,9 @@ fn initialize_fee_state<'a>(
 mod tests {
     use anchor_lang::AnchorDeserialize;
     use fixed::types::I80F48;
-    use marginfi::state::marginfi_account::{get_health_components, RiskRequirementType};
+    use marginfi::state::marginfi_account::{
+        get_health_components, HealthPriceMode, RiskRequirementType,
+    };
     use marginfi_type_crate::types::MarginfiGroup;
     use pyth_solana_receiver_sdk::price_update::PriceUpdateV2;
 
@@ -1243,6 +1245,7 @@ mod tests {
                 aisls(&remaining_accounts),
                 RiskRequirementType::Maintenance,
                 &mut None,
+                HealthPriceMode::Live { liq_cache: None },
             )
             .unwrap();
         }
@@ -1301,6 +1304,7 @@ mod tests {
                 aisls(&remaining_accounts),
                 RiskRequirementType::Maintenance,
                 &mut None,
+                HealthPriceMode::Live { liq_cache: None },
             )
             .unwrap();
         }

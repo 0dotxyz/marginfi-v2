@@ -6,12 +6,15 @@ use crate::instructions::marginfi_account::liquidate_start::validate_instruction
 use crate::ix_utils::{
     get_discrim_hash, keys_sha256_hash, validate_not_cpi_by_stack_height, Hashable,
 };
-use crate::state::marginfi_account::RiskRequirementType;
+use crate::state::marginfi_account::{
+    get_health_components, get_tagged_account_health_components, HealthPriceMode,
+    RiskRequirementType,
+};
 use crate::{
     check,
     prelude::*,
     state::{
-        marginfi_account::{LendingAccountImpl, MarginfiAccountImpl, RiskEngine},
+        marginfi_account::{LendingAccountImpl, MarginfiAccountImpl},
         marginfi_group::MarginfiGroupImpl,
         order::{ExecuteOrderRecordImpl, OrderImpl},
     },
@@ -313,11 +316,12 @@ pub fn start_execute_order<'info>(
 
     marginfi_account.set_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
 
-    let (order_assets_in_equity, order_liabs_in_equity, order_asset_count, order_liab_count) = {
-        let risk_engine = RiskEngine::new(&marginfi_account, ctx.remaining_accounts)?;
-
-        risk_engine.get_tagged_account_health_components(&order.tags)?
-    };
+    let (order_assets_in_equity, order_liabs_in_equity, order_asset_count, order_liab_count) =
+        get_tagged_account_health_components(
+            &marginfi_account,
+            ctx.remaining_accounts,
+            &order.tags,
+        )?;
 
     check!(
         order_asset_count + order_liab_count == ORDER_ACTIVE_TAGS,
@@ -392,11 +396,12 @@ pub fn end_execute_order<'info>(
         (order_assets_in_equity, _order_liabs_in_equity, _order_asset_count, order_liab_count),
         is_healthy,
     ) = {
-        let risk_engine = RiskEngine::new(&marginfi_account, ctx.remaining_accounts)?;
-
-        let (assets, liabs) = risk_engine.get_account_health_components(
+        let (assets, liabs) = get_health_components(
+            &marginfi_account,
+            ctx.remaining_accounts,
             RiskRequirementType::Maintenance,
             &mut Some(&mut health_cache),
+            HealthPriceMode::Live { liq_cache: None },
         )?;
 
         let account_health = assets.checked_sub(liabs).ok_or_else(math_error!())?;
@@ -406,7 +411,11 @@ pub fn end_execute_order<'info>(
         health_cache.set_healthy(is_healthy);
 
         (
-            risk_engine.get_tagged_account_health_components(&order.tags)?,
+            get_tagged_account_health_components(
+                &marginfi_account,
+                ctx.remaining_accounts,
+                &order.tags,
+            )?,
             is_healthy,
         )
     };

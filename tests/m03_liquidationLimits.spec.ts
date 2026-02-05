@@ -34,6 +34,8 @@ import { defaultBankConfigOptRaw, MAX_BALANCES } from "./utils/types";
 import {
   borrowIx,
   composeRemainingAccounts,
+  composeRemainingAccountsMetaBanksOnly,
+  composeRemainingAccountsWriteableMeta,
   depositIx,
   liquidateIx,
   initLiquidationRecordIx,
@@ -119,6 +121,7 @@ SCENARIOS.forEach(({ kaminoDeposits }, scenarioIndex) => {
     let reserveFarmState: PublicKey;
     let tokenAReserve: PublicKey;
     let liquidateeRemainingAccounts: PublicKey[] = [];
+    let liquidateeRemainingGroups: PublicKey[][] = [];
     let liquidatorRemainingAccounts: PublicKey[] = [];
     let driftSpotMarket: PublicKey;
     let lookupTable: PublicKey;
@@ -127,7 +130,12 @@ SCENARIOS.forEach(({ kaminoDeposits }, scenarioIndex) => {
       liquidator: any,
       liquidateeAccount: PublicKey,
     ) => {
-      const remaining = liquidateeRemainingAccounts;
+      const startRemainingMetas = composeRemainingAccountsWriteableMeta(
+        liquidateeRemainingGroups,
+      );
+      const endRemainingMetas = composeRemainingAccountsMetaBanksOnly(
+        liquidateeRemainingGroups,
+      );
       const withdrawTokenAAmount = new BN(1 * 10 ** ecosystem.tokenADecimals);
       const repayLstAmount = new BN(0.1 * 10 ** ecosystem.lstAlphaDecimals);
       // Note: Kamino's withdraw function is most costly in CU, so we'll use that one if a Kamino
@@ -235,7 +243,7 @@ SCENARIOS.forEach(({ kaminoDeposits }, scenarioIndex) => {
         await startLiquidationIx(liquidator.mrgnBankrunProgram, {
           marginfiAccount: liquidateeAccount,
           liquidationReceiver: liquidator.wallet.publicKey,
-          remaining,
+          remaining: startRemainingMetas,
         }),
         ...withdrawInstructions,
         await repayIx(liquidator.mrgnBankrunProgram, {
@@ -246,7 +254,7 @@ SCENARIOS.forEach(({ kaminoDeposits }, scenarioIndex) => {
         }),
         await endLiquidationIx(liquidator.mrgnBankrunProgram, {
           marginfiAccount: liquidateeAccount,
-          remaining,
+          remaining: endRemainingMetas,
         }),
       ];
 
@@ -501,6 +509,7 @@ SCENARIOS.forEach(({ kaminoDeposits }, scenarioIndex) => {
       }
 
       remainingAccounts.push([banks[0], oracles.pythPullLst.publicKey]);
+      liquidateeRemainingGroups = remainingAccounts;
       liquidateeRemainingAccounts = composeRemainingAccounts(remainingAccounts);
 
       const tx = new Transaction();
@@ -727,6 +736,7 @@ SCENARIOS.forEach(({ kaminoDeposits }, scenarioIndex) => {
         if (lastLog.includes("exceeded CUs meter at BPF instruction")) {
           console.error("❌ Failed due to CU limits ❌");
           dumpBankrunLogs(result);
+          assert.ok(false);
         } else {
           console.error("Failed due to something other than CU limits");
           dumpBankrunLogs(result);
