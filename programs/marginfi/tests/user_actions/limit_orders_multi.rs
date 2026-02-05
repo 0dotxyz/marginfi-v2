@@ -756,6 +756,8 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
     Ok(())
 }
 
+// Here we demonstrate the theoretical max orders, 64. This would be quite silly to do in practice,
+// but hey, it's your life, and they still execute as expected.
 #[tokio::test]
 async fn limit_orders_open_max_count() -> anyhow::Result<()> {
     // ---------------------------------------------------------------------
@@ -793,19 +795,116 @@ async fn limit_orders_open_max_count() -> anyhow::Result<()> {
     // ---------------------------------------------------------------------
     // Test
     // ---------------------------------------------------------------------
-    for ((asset_mint, _), (liab_mint, _)) in assets.iter().zip(liabilities.iter()) {
+    let mut all_orders: Vec<Pubkey> = Vec::new();
+    let mut exec_orders: Vec<(Pubkey, BankFixture, BankFixture, f64)> = Vec::new();
+
+    for (asset_idx, (asset_mint, _)) in assets.iter().enumerate() {
         let asset_bank = test_f.get_bank(asset_mint);
-        let liab_bank = test_f.get_bank(liab_mint);
-        test_f.refresh_blockhash().await;
-        borrower
-            .try_place_order(
-                vec![asset_bank.key, liab_bank.key],
-                OrderTrigger::StopLoss {
-                    threshold: fp!(10.0).into(),
-                    max_slippage: 0,
-                },
-            )
-            .await?;
+        let asset_price = get_mint_price(asset_mint.clone());
+
+        for (liab_idx, (liab_mint, liab_amount)) in liabilities.iter().enumerate() {
+            let liab_bank = test_f.get_bank(liab_mint);
+            let liab_price = get_mint_price(liab_mint.clone());
+            let withdraw_amount = (liab_amount * liab_price) / asset_price;
+
+            test_f.refresh_blockhash().await;
+            let order = borrower
+                .try_place_order(
+                    vec![asset_bank.key, liab_bank.key],
+                    OrderTrigger::StopLoss {
+                        threshold: fp!(1_000_000.0).into(),
+                        max_slippage: 0,
+                    },
+                )
+                .await?;
+
+            if asset_idx == liab_idx {
+                // Leave a tiny buffer to avoid rounding pushing end net below start net.
+                exec_orders.push((
+                    order,
+                    asset_bank.clone(),
+                    liab_bank.clone(),
+                    withdraw_amount * 0.999,
+                ));
+            }
+
+            all_orders.push(order);
+        }
+    }
+
+    assert_eq!(
+        all_orders.len(),
+        assets.len() * liabilities.len(),
+        "expected max orders"
+    );
+
+    let keeper = Keypair::new();
+    fund_keeper_for_fees(&test_f, &keeper).await?;
+
+    let mut keeper_asset_accounts: std::collections::HashMap<Pubkey, Pubkey> =
+        std::collections::HashMap::new();
+    let mut keeper_liab_accounts: std::collections::HashMap<Pubkey, Pubkey> =
+        std::collections::HashMap::new();
+
+    for (bank_mint, _) in assets.iter() {
+        let bank = test_f.get_bank(bank_mint);
+        let account = bank
+            .mint
+            .create_empty_token_account_with_owner(&keeper.pubkey())
+            .await
+            .key;
+        keeper_asset_accounts.insert(bank.key, account);
+    }
+
+    for (bank_mint, amount) in liabilities.iter() {
+        let bank = test_f.get_bank(bank_mint);
+        let mint_amount = get_max_deposit_amount_pre_fee(*amount);
+        let account = bank
+            .mint
+            .create_token_account_and_mint_to_with_owner(&keeper.pubkey(), mint_amount)
+            .await
+            .key;
+        keeper_liab_accounts.insert(bank.key, account);
+    }
+
+    let mut executed = std::collections::HashSet::new();
+
+    // Execute a subset of orders (one per corresponding asset/liability index).
+    for (order_pda, asset_bank, liab_bank, withdraw_amount) in exec_orders.iter() {
+        execute_order_with_withdraw(
+            &test_f,
+            &borrower,
+            *order_pda,
+            &keeper,
+            liab_bank,
+            *keeper_liab_accounts
+                .get(&liab_bank.key)
+                .expect("missing keeper liab account"),
+            asset_bank,
+            *keeper_asset_accounts
+                .get(&asset_bank.key)
+                .expect("missing keeper asset account"),
+            *withdraw_amount,
+            None,
+            vec![liab_bank.key],
+        )
+        .await?;
+
+        executed.insert(*order_pda);
+
+        let order_after = test_f.try_load(order_pda).await?;
+        assert!(
+            order_after.is_none(),
+            "stop-loss order should be closed after execution"
+        );
+    }
+
+    for order_pda in all_orders.iter() {
+        if executed.contains(order_pda) {
+            continue;
+        }
+        let order_after = test_f.try_load(order_pda).await?;
+        assert!(order_after.is_some(), "order should remain open");
     }
 
     Ok(())

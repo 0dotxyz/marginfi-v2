@@ -527,7 +527,7 @@ pub fn end_execute_order<'info>(
 
     // At this point we know that all non order balances were not touched and the order
     // balances that were touched:-
-    // 1) Is still above or equal to the trigger price(in equity terms).
+    // 1) Is still above or equal to the trigger price (in equity terms).
     // 2) Did not make the account less healthy and if at all we did, the account is
     //    still healthy overall.
 
