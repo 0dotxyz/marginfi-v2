@@ -87,10 +87,12 @@ describe("orders", () => {
     await refreshPullOracles(oracles, wallet.payer, slot, now);
   };
 
-  const stopLossThreshold = bigNumberToWrappedI80F48(100);
-  const takeProfitThreshold = bigNumberToWrappedI80F48(250);
-  const highTakeProfit = bigNumberToWrappedI80F48(50);
-  const maxSlippage = new BN(100);
+const stopLossThreshold = bigNumberToWrappedI80F48(100);
+const takeProfitThreshold = bigNumberToWrappedI80F48(250);
+const highTakeProfit = bigNumberToWrappedI80F48(50);
+const U32_MAX = 0xffff_ffff;
+const bpsToU32 = (bps: number) => Math.floor((bps / 10_000) * U32_MAX);
+const maxSlippage = bpsToU32(100);
 
   before(async () => {
     // We make changes to the oracle so we need to revert the changes after.

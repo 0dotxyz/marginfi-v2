@@ -11,7 +11,7 @@ use anyhow::Result;
 use clap::{clap_derive::ArgEnum, Parser};
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{
-    make_points, Balance, Bank, BankConfig, BankConfigOpt, BankOperationalState,
+    centi_to_u32, make_points, Balance, Bank, BankConfig, BankConfigOpt, BankOperationalState,
     InterestRateConfig, InterestRateConfigOpt, LendingAccount, MarginfiAccount, MarginfiGroup,
     OrderTrigger, RatePoint, RiskTier, WrappedI80F48, CURVE_POINTS,
 };
@@ -295,8 +295,10 @@ impl OrderTriggerTypeArg {
         self,
         stop_loss: Option<f64>,
         take_profit: Option<f64>,
-        max_slippage_bps: u16,
+        max_slippage_bps: u32,
     ) -> Result<OrderTrigger> {
+        let max_slippage =
+            centi_to_u32(I80F48::from_num(max_slippage_bps as f64 / 10_000.0));
         match self {
             OrderTriggerTypeArg::StopLoss => {
                 let threshold = stop_loss.ok_or_else(|| {
@@ -304,7 +306,7 @@ impl OrderTriggerTypeArg {
                 })?;
                 Ok(OrderTrigger::StopLoss {
                     threshold: I80F48::from_num(threshold).into(),
-                    max_slippage: max_slippage_bps,
+                    max_slippage,
                 })
             }
             OrderTriggerTypeArg::TakeProfit => {
@@ -313,7 +315,7 @@ impl OrderTriggerTypeArg {
                 })?;
                 Ok(OrderTrigger::TakeProfit {
                     threshold: I80F48::from_num(threshold).into(),
-                    max_slippage: max_slippage_bps,
+                    max_slippage,
                 })
             }
             OrderTriggerTypeArg::Both => {
@@ -326,7 +328,7 @@ impl OrderTriggerTypeArg {
                 Ok(OrderTrigger::Both {
                     stop_loss: I80F48::from_num(sl).into(),
                     take_profit: I80F48::from_num(tp).into(),
-                    max_slippage: max_slippage_bps,
+                    max_slippage,
                 })
             }
         }
@@ -590,7 +592,7 @@ pub enum AccountCommand {
         take_profit: Option<f64>,
         /// Max slippage in basis points (bps). Required by program; defaults to 0 if omitted.
         #[clap(long)]
-        max_slippage_bps: u16,
+        max_slippage_bps: u32,
     },
     CloseOrder {
         /// The order account to close

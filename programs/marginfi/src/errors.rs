@@ -229,7 +229,7 @@ pub enum MarginfiError {
     WorseHealthPostExecution,
     #[msg("TP must be > 0, SL must be > 0 and TP > SL if both are set")] // 6112
     InvalidOrderTakeProfitOrStopLoss,
-    #[msg("Max slippage must be less than 10000 bps")] // 6113
+    #[msg("Max slippage must be less than 100%")] // 6113
     InvalidSlippage,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)

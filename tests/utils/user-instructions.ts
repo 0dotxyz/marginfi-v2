@@ -754,9 +754,9 @@ export const purgeDeveleragedBalance = (
 // ---------------------------------------------------------------------------
 
 export type OrderTriggerArgs =
-  | { stopLoss: { threshold: WrappedI80F48; maxSlippage: BN } }
-  | { takeProfit: { threshold: WrappedI80F48; maxSlippage: BN } }
-  | { both: { stopLoss: WrappedI80F48; takeProfit: WrappedI80F48; maxSlippage: BN } };
+  | { stopLoss: { threshold: WrappedI80F48; maxSlippage: number } }
+  | { takeProfit: { threshold: WrappedI80F48; maxSlippage: number } }
+  | { both: { stopLoss: WrappedI80F48; takeProfit: WrappedI80F48; maxSlippage: number } };
 
 export type PlaceOrderArgs = {
   marginfiAccount: PublicKey;

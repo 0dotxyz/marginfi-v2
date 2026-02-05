@@ -1,11 +1,12 @@
 use anchor_lang::{InstructionData, ToAccountMetas};
+use fixed::types::I80F48;
 use fixed_macro::types::I80F48 as fp;
 use fixtures::assert_custom_error;
 use fixtures::{
     bank::BankFixture, marginfi_account::MarginfiAccountFixture, prelude::*, ui_to_native,
 };
 use marginfi::{prelude::MarginfiError, state::bank::BankVaultType};
-use marginfi_type_crate::types::{BalanceSide, OrderTrigger};
+use marginfi_type_crate::types::{centi_to_u32, BalanceSide, OrderTrigger};
 use solana_program_test::tokio;
 use solana_sdk::{
     account::Account,
@@ -31,6 +32,10 @@ async fn fund_keeper_for_fees(test_f: &TestFixture, keeper: &Keypair) -> anyhow:
     };
     ctx.set_account(&keeper.pubkey(), &account.into());
     Ok(())
+}
+
+fn slippage_bps(bps: u32) -> u32 {
+    centi_to_u32(I80F48::from_num(bps as f64 / 10_000.0))
 }
 
 async fn make_start_execute_ix(
@@ -658,8 +663,8 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
             vec![sol_bank.key, usdc_bank.key],
             OrderTrigger::StopLoss {
                 threshold: fp!(200.0).into(),
-                // Note: the user is a silly person that sets 99% slippage.
-                max_slippage: 9_999,
+                // Note: the user is a silly person that sets 99.99% slippage.
+                max_slippage: slippage_bps(9_999),
             },
         )
         .await?;

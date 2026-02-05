@@ -96,8 +96,8 @@ pub const LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD: I80F48 = I80F48!(5);
 pub const ORDER_EXECUTION_MAX_FEE: I80F48 = I80F48!(0.05); // 5%
 /// The default fee, in native SOL in native decimals (i.e. lamports) used in testing
 pub const ORDER_INIT_FLAT_FEE_DEFAULT: u32 = 100_000;
-/// Maximum basis points (100%)
-pub const MAX_BPS: u16 = 10_000;
+/// Maximum percent encoded as u32 (100% == u32::MAX)
+pub const MAX_BPS: u32 = u32::MAX;
 
 pub const MIN_PYTH_PUSH_VERIFICATION_LEVEL: VerificationLevel = VerificationLevel::Full;
 

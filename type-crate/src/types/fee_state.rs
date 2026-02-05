@@ -57,8 +57,8 @@ pub struct FeeState {
     /// Flat fee assessed for preventing spam use when creating an order
     /// * In SOL, in native decimals.
     pub order_init_flat_sol_fee: u32,
-    /// Orders can be executed at this premium
-    /// e.g. (1 + this) * amount repaid >= asset seized
+    /// Take-profit Orders can be executed at this premium, which Keepers are allowed to keep (no
+    /// pun intended) e.g. (1 + this) * amount repaid >= asset seized
     /// * A percentage    
     pub order_execution_max_fee: WrappedI80F48,
     _reserved1: [u8; 32],

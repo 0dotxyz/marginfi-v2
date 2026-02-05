@@ -1,4 +1,3 @@
-use crate::constants::MAX_BPS;
 use crate::events::{
     AccountEventHeader, KeeperCloseOrderEvent, MarginfiAccountCloseOrderEvent,
     MarginfiAccountPlaceOrderEvent, SetKeeperCloseFlagsEvent,
@@ -422,7 +421,8 @@ pub fn end_execute_order<'info>(
     let net = order_assets_in_equity;
 
     // The user slippage constraint we want to enforce is:-
-    // net >= (1 - slippage/MAX_BPS) * (tp or sl)
+    // net >= (1 - slippage) * (tp or sl)
+    // where slippage is encoded as a u32 percent (0..100% mapped to 0..u32::MAX).
 
     // For the TP case another constraint(the max fee constraint) we want to enforce is:-
     // net >= (1 - max_fee) * (start health)
@@ -434,13 +434,9 @@ pub fn end_execute_order<'info>(
     // Check that the liquidator did not over-withdraw.
 
     let slippage_frac = || -> MarginfiResult<I80F48> {
-        let slippage: I80F48 = order.max_slippage.into();
+        let slippage = marginfi_type_crate::types::u32_to_centi(order.max_slippage);
         Ok(I80F48::ONE
-            .checked_sub(
-                slippage
-                    .checked_div(MAX_BPS.into())
-                    .ok_or_else(math_error!())?,
-            )
+            .checked_sub(slippage)
             .ok_or_else(math_error!())?)
     };
 

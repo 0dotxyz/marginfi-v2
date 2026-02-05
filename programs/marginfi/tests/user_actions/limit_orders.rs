@@ -5,8 +5,8 @@ use fixtures::{
     assert_custom_error, assert_eq_noise, bank::BankFixture,
     marginfi_account::MarginfiAccountFixture, prelude::*, ui_to_native,
 };
-use marginfi::{constants::MAX_BPS, prelude::MarginfiError, state::bank::BankVaultType};
-use marginfi_type_crate::types::{OrderTrigger, WrappedI80F48};
+use marginfi::{prelude::MarginfiError, state::bank::BankVaultType};
+use marginfi_type_crate::types::{centi_to_u32, u32_to_centi, OrderTrigger, WrappedI80F48};
 use solana_program_test::tokio;
 use solana_sdk::{
     account::Account,
@@ -18,7 +18,7 @@ use solana_sdk::{
 };
 
 /// Helper to create an OrderTrigger with a stop-loss threshold.
-fn stop_loss_trigger(threshold: I80F48, max_slippage: u16) -> OrderTrigger {
+fn stop_loss_trigger(threshold: I80F48, max_slippage: u32) -> OrderTrigger {
     OrderTrigger::StopLoss {
         threshold: WrappedI80F48::from(threshold),
         max_slippage,
@@ -26,11 +26,15 @@ fn stop_loss_trigger(threshold: I80F48, max_slippage: u16) -> OrderTrigger {
 }
 
 /// Helper to create an OrderTrigger with a take-profit threshold.
-fn take_profit_trigger(threshold: I80F48, max_slippage: u16) -> OrderTrigger {
+fn take_profit_trigger(threshold: I80F48, max_slippage: u32) -> OrderTrigger {
     OrderTrigger::TakeProfit {
         threshold: WrappedI80F48::from(threshold),
         max_slippage,
     }
+}
+
+fn slippage_bps(bps: u32) -> u32 {
+    centi_to_u32(I80F48::from_num(bps as f64 / 10_000.0))
 }
 
 async fn setup_limit_order_fixture(
@@ -513,9 +517,8 @@ async fn limit_order_take_profit_happy_path() -> anyhow::Result<()> {
     let asset_native =
         post_asset_shares.to_num::<f64>() / 10f64.powi(asset_bank_f.mint.mint.decimals as i32);
     let asset_value = asset_native * price;
-    let max_bps: f64 = MAX_BPS.into();
-    let max_slippage: f64 = 0.0;
-    assert!(asset_value >= 100.0 * (1.0 - (max_slippage / max_bps)));
+    let max_slippage = u32_to_centi(0).to_num::<f64>();
+    assert!(asset_value >= 100.0 * (1.0 - max_slippage));
     assert_eq_noise!(asset_value, 400.0, 0.5);
 
     Ok(())
@@ -865,7 +868,7 @@ async fn limit_order_stop_loss_max_profit_with_slippage() -> anyhow::Result<()> 
     let liability_mint = BankMint::Usdc;
     let asset_deposit = 20.0;
     let liability_borrow = 150.0;
-    let max_slippage: u16 = 500; // 5%
+    let max_slippage = slippage_bps(500); // 5%
     let trigger = stop_loss_trigger(fp!(100), max_slippage);
 
     let (
@@ -891,9 +894,8 @@ async fn limit_order_stop_loss_max_profit_with_slippage() -> anyhow::Result<()> 
     // ---------------------------------------------------------------------
     let asset_price = default_price_for_mint(&asset_mint);
     let liability_price = default_price_for_mint(&liability_mint);
-    let max_bps: f64 = MAX_BPS.into();
     // 4.99% to avoid issues due to rounding
-    let profit_pct = ((max_slippage - 1) as f64) / max_bps;
+    let profit_pct = u32_to_centi(max_slippage - 1).to_num::<f64>();
     let withdraw_scale = withdraw_scale_for_profit_pct(
         asset_deposit,
         liability_borrow,

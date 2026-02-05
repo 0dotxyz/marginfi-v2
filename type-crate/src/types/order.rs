@@ -31,20 +31,20 @@ unsafe impl Pod for OrderTriggerType {}
 pub enum OrderTrigger {
     StopLoss {
         threshold: WrappedI80F48,
-        max_slippage: u16,
+        max_slippage: u32,
     },
     TakeProfit {
         threshold: WrappedI80F48,
-        max_slippage: u16,
+        max_slippage: u32,
     },
     Both {
         stop_loss: WrappedI80F48,
         take_profit: WrappedI80F48,
-        max_slippage: u16,
+        max_slippage: u32,
     },
 }
 
-assert_struct_size!(Order, 224);
+assert_struct_size!(Order, 256);
 assert_struct_align!(Order, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy), derive(Default, PartialEq, Eq))]
@@ -54,15 +54,27 @@ pub struct Order {
     pub marginfi_account: Pubkey,
     pub stop_loss: WrappedI80F48,
     pub take_profit: WrappedI80F48,
-    pub max_slippage: u16,
+    /// Reserved for future use
+    pub placeholder: u64,
+    /// * a %, as u32, out of 100%, e.g. 50% = .5 * u32::MAX
+    pub max_slippage: u32,
+    pub pad0: [u8; 4],
+
     /// Active tags (currently 2). Remaining capacity is stored in padding for layout compatibility.
-    /// Padding byte `ORDER_TAG_PADDING - 1` stores the tag count for forward compatibility.
+    /// Padding byte `ORDER_TAG_PADDING - 1` stores the tag count for forward compatibility. (u16 *
+    /// 2 = 4 bytes)
     pub tags: [u16; ORDER_ACTIVE_TAGS],
+    pub pad1: [u8; 4],
+    // Note: if ever adding support for additional tags in the future, use this buffer space to
+    // expand the tags slice, which should ensure older orders are backwards compatible.
     _tags_padding: [u8; ORDER_TAG_PADDING],
+
+    /// Stop Loss (0), Take Profit (1), or Both (2)
     pub trigger: OrderTriggerType,
+    /// Bump to derive this pda
     pub bump: u8,
-    _reserved0: [u8; 3],
-    _reserved1: [u64; 15],
+    pub pad2: [u8; 6],
+    _reserved1: [[u8; 32]; 4],
 }
 
 impl Order {
