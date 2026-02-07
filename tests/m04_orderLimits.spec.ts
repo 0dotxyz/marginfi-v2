@@ -640,9 +640,9 @@ SCENARIOS.forEach(({ kaminoDeposits, driftDeposits }, scenarioIndex) => {
         endIx,
         ...preIxs,
       ]);
-      console.log(
-        `m04 LUT addresses: ${lutAddresses.length} (remaining: ${remainingAccounts.length}, preIxs: ${preIxs.length})`,
-      );
+      // console.log(
+      //   `m04 LUT addresses: ${lutAddresses.length} (remaining: ${remainingAccounts.length}, preIxs: ${preIxs.length})`,
+      // );
       lutAccount = await createLut(user, lutAddresses);
 
       // low price -> should fail trigger
@@ -656,6 +656,9 @@ SCENARIOS.forEach(({ kaminoDeposits, driftDeposits }, scenarioIndex) => {
         bankrunContext,
         false,
       );
+      let assetValueBefore = 0;
+      let liabilityValueBefore = 0;
+      let netValueBefore = 0;
       {
         const refreshIxs = await buildKaminoReserveRefreshIxs();
         const pulseIx = await healthPulse(user.mrgnBankrunProgram, {
@@ -723,10 +726,15 @@ SCENARIOS.forEach(({ kaminoDeposits, driftDeposits }, scenarioIndex) => {
           false,
           true,
         );
-        // const acc = await bankrunProgram.account.marginfiAccount.fetch(
-        //   userAccount,
-        // );
-        // logHealthCache("m04 health cache (high price)", acc.healthCache);
+        const acc = await bankrunProgram.account.marginfiAccount.fetch(
+          userAccount,
+        );
+        const cache = acc.healthCache;
+        assetValueBefore = wrappedI80F48toBigNumber(cache.assetValue).toNumber();
+        liabilityValueBefore = wrappedI80F48toBigNumber(
+          cache.liabilityValue,
+        ).toNumber();
+        netValueBefore = assetValueBefore - liabilityValueBefore;
       }
 
       const successTx = await buildExecuteOrderTx(
@@ -739,8 +747,68 @@ SCENARIOS.forEach(({ kaminoDeposits, driftDeposits }, scenarioIndex) => {
       );
       await banksClient.processTransaction(successTx);
 
+      {
+        const refreshIxs = await buildKaminoReserveRefreshIxs();
+        const pulseIx = await healthPulse(user.mrgnBankrunProgram, {
+          marginfiAccount: userAccount,
+          remaining: remainingAccountsPostRepay,
+        });
+        const pulseTx = new Transaction().add(
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+          ...refreshIxs,
+          pulseIx,
+        );
+        await processBankrunTransaction(
+          bankrunContext,
+          pulseTx,
+          [user.wallet],
+          false,
+          true,
+        );
+      }
+
       const accountAfter = await bankrunProgram.account.marginfiAccount.fetch(
         userAccount,
+      );
+      const cacheAfter = accountAfter.healthCache;
+      const assetValueAfter = wrappedI80F48toBigNumber(
+        cacheAfter.assetValue,
+      ).toNumber();
+      const liabilityValueAfter = wrappedI80F48toBigNumber(
+        cacheAfter.liabilityValue,
+      ).toNumber();
+      const netValueAfter = assetValueAfter - liabilityValueAfter;
+
+      const liabDecrease = liabilityValueBefore - liabilityValueAfter;
+      const assetDecrease = assetValueBefore - assetValueAfter;
+      const netDecrease = netValueBefore - netValueAfter;
+
+      const maxSlippageFrac = 0.05;
+      const netLowerBound = netValueBefore * (1 - maxSlippageFrac) - 1;
+
+      assert.ok(
+        netValueAfter <= netValueBefore + 1,
+        "net value should not increase after execution",
+      );
+      assert.ok(
+        netValueAfter >= netLowerBound,
+        "net value should not drop beyond allowed slippage",
+      );
+      assert.ok(
+        liabilityValueAfter <= 0.01,
+        "liability should be fully repaid",
+      );
+      assert.ok(
+        assetDecrease >= liabDecrease - 0.01,
+        "asset decrease should be at least liability decrease",
+      );
+      assert.ok(
+        assetDecrease - liabDecrease <= netValueBefore * maxSlippageFrac + 1,
+        "keeper profit should be bounded by slippage",
+      );
+      assert.ok(
+        Math.abs(netDecrease - (assetDecrease - liabDecrease)) <= 1,
+        "net decrease should match keeper profit (within tolerance)",
       );
       const liabBalance = accountAfter.lendingAccount.balances.find(
         (b: any) => b.bankPk && b.bankPk.equals(banks[0]),
