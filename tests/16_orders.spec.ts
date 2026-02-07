@@ -1,10 +1,10 @@
 // todo test position extremes (e.g. 16 balances, many involved balances etc. test integrations.)
+import { BN, Program, Wallet } from "@coral-xyz/anchor";
 import {
-  BN,
-  Program,
-  Wallet,
-} from "@coral-xyz/anchor";
-import { bigNumberToWrappedI80F48, TOKEN_PROGRAM_ID, wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
+  bigNumberToWrappedI80F48,
+  TOKEN_PROGRAM_ID,
+  wrappedI80F48toBigNumber,
+} from "@mrgnlabs/mrgn-common";
 import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "./utils/types";
 import {
   createMintToInstruction,
@@ -25,7 +25,7 @@ import {
   setLiquidatorCloseFlagsIx,
   depositIx,
   borrowIx,
-  updateEmissionsDestination
+  updateEmissionsDestination,
 } from "./utils/user-instructions";
 import { deriveOrderPda, deriveExecuteOrderPda } from "./utils/pdas";
 import { refreshOracles as refreshPullOracles } from "./utils/pyth-pull-mocks";
@@ -41,9 +41,11 @@ import {
   oracles,
 } from "./rootHooks";
 import { MockUser, USER_ACCOUNT } from "./utils/mocks";
-import { expectFailedTxWithError, expectFailedTxWithMessage } from "./utils/genericTests";
+import {
+  expectFailedTxWithError,
+  expectFailedTxWithMessage,
+} from "./utils/genericTests";
 import { BankrunProvider } from "anchor-bankrun";
-
 
 let program: Program<Marginfi>;
 let provider: BankrunProvider;
@@ -51,10 +53,13 @@ let wallet: Wallet;
 let keeperUser: MockUser;
 let keeperProgram: Program<Marginfi>;
 let keeperMarginfiAccount: PublicKey;
-let oracleBaseline: { tokenAPrice: number; wsolPrice: number; usdcPrice: number };
+let oracleBaseline: {
+  tokenAPrice: number;
+  wsolPrice: number;
+  usdcPrice: number;
+};
 
 describe("orders", () => {
-
   let user: MockUser;
   let userProgram: Program<Marginfi>;
   let userMarginfiAccount: PublicKey;
@@ -87,12 +92,12 @@ describe("orders", () => {
     await refreshPullOracles(oracles, wallet.payer, slot, now);
   };
 
-const stopLossThreshold = bigNumberToWrappedI80F48(100);
-const takeProfitThreshold = bigNumberToWrappedI80F48(250);
-const highTakeProfit = bigNumberToWrappedI80F48(50);
-const U32_MAX = 0xffff_ffff;
-const bpsToU32 = (bps: number) => Math.floor((bps / 10_000) * U32_MAX);
-const maxSlippage = bpsToU32(100);
+  const stopLossThreshold = bigNumberToWrappedI80F48(100);
+  const takeProfitThreshold = bigNumberToWrappedI80F48(250);
+  const highTakeProfit = bigNumberToWrappedI80F48(50);
+  const U32_MAX = 0xffff_ffff;
+  const bpsToU32 = (bps: number) => Math.floor((bps / 10_000) * U32_MAX);
+  const maxSlippage = bpsToU32(100);
 
   before(async () => {
     // We make changes to the oracle so we need to revert the changes after.
@@ -115,16 +120,16 @@ const maxSlippage = bpsToU32(100);
         ecosystem.tokenAMint.publicKey,
         user.tokenAAccount,
         wallet.publicKey,
-        50 * 10 ** ecosystem.tokenADecimals
-      )
+        50 * 10 ** ecosystem.tokenADecimals,
+      ),
     );
     fundTx.add(
       createMintToInstruction(
         ecosystem.wsolMint.publicKey,
         user.wsolAccount,
         wallet.publicKey,
-        10 * 10 ** ecosystem.wsolDecimals
-      )
+        10 * 10 ** ecosystem.wsolDecimals,
+      ),
     );
 
     await provider.sendAndConfirm(fundTx, [wallet.payer]);
@@ -137,7 +142,9 @@ const maxSlippage = bpsToU32(100);
       depositUpToLimit: false,
     });
 
-    await userProgram.provider.sendAndConfirm(new Transaction().add(depositSolIx));
+    await userProgram.provider.sendAndConfirm(
+      new Transaction().add(depositSolIx),
+    );
 
     const depositAIx = await depositIx(user.mrgnProgram, {
       marginfiAccount: userMarginfiAccount,
@@ -147,7 +154,9 @@ const maxSlippage = bpsToU32(100);
       depositUpToLimit: false,
     });
 
-    await userProgram.provider.sendAndConfirm(new Transaction().add(depositAIx));
+    await userProgram.provider.sendAndConfirm(
+      new Transaction().add(depositAIx),
+    );
 
     const oracleMeta = composeRemainingAccounts([
       [bankUsdc, oracles.usdcOracle.publicKey],
@@ -163,15 +172,21 @@ const maxSlippage = bpsToU32(100);
       remaining: oracleMeta,
     });
 
-    await userProgram.provider.sendAndConfirm(new Transaction().add(borrowUsdcIx));
+    await userProgram.provider.sendAndConfirm(
+      new Transaction().add(borrowUsdcIx),
+    );
 
     // Set emissions destination to the authority before placing any orders
-    const setEmissionsDestIx = await updateEmissionsDestination(user.mrgnProgram, {
-      marginfiAccount: userMarginfiAccount,
-      destinationAccount: user.wallet.publicKey,
-    });
-    await userProgram.provider.sendAndConfirm(new Transaction().add(setEmissionsDestIx));
-
+    const setEmissionsDestIx = await updateEmissionsDestination(
+      user.mrgnProgram,
+      {
+        marginfiAccount: userMarginfiAccount,
+        destinationAccount: user.wallet.publicKey,
+      },
+    );
+    await userProgram.provider.sendAndConfirm(
+      new Transaction().add(setEmissionsDestIx),
+    );
   });
 
   after(async () => {
@@ -199,15 +214,15 @@ const maxSlippage = bpsToU32(100);
       const [orderPk] = deriveOrderPda(
         program.programId,
         userMarginfiAccount,
-        bankKeys
+        bankKeys,
       );
       const orderAccount = await program.account.order.fetch(orderPk);
       const userAccount = await program.account.marginfiAccount.fetch(
-        userMarginfiAccount
+        userMarginfiAccount,
       );
 
       expect(orderAccount.marginfiAccount.toBase58()).to.equal(
-        userMarginfiAccount.toBase58()
+        userMarginfiAccount.toBase58(),
       );
       expect(orderAccount.tags.length).to.equal(2);
       assert.isAbove(Number(orderAccount.tags[0]), 0);
@@ -215,14 +230,14 @@ const maxSlippage = bpsToU32(100);
 
       assert.notDeepEqual(
         Number(orderAccount.tags[0]),
-        Number(orderAccount.tags[1])
+        Number(orderAccount.tags[1]),
       );
 
       const index0 = userAccount.lendingAccount.balances.findIndex(
-        (balance) => balance.tag == orderAccount.tags[0]
+        (balance) => balance.tag == orderAccount.tags[0],
       );
       const index1 = userAccount.lendingAccount.balances.findIndex(
-        (balance) => balance.tag == orderAccount.tags[1]
+        (balance) => balance.tag == orderAccount.tags[1],
       );
 
       assert.notDeepEqual(index0, -1);
@@ -237,13 +252,15 @@ const maxSlippage = bpsToU32(100);
             authority: user.wallet.publicKey,
             feePayer: user.wallet.publicKey,
             bankKeys: [bankA, bankA],
-            trigger: { stopLoss: { threshold: stopLossThreshold, maxSlippage } },
+            trigger: {
+              stopLoss: { threshold: stopLossThreshold, maxSlippage },
+            },
           });
 
           await userProgram.provider.sendAndConfirm(new Transaction().add(ix));
         },
         "DuplicateBalance",
-        6103
+        6103,
       );
     });
 
@@ -255,13 +272,15 @@ const maxSlippage = bpsToU32(100);
             authority: user.wallet.publicKey,
             feePayer: user.wallet.publicKey,
             bankKeys: [bankA, bankSol],
-            trigger: { stopLoss: { threshold: stopLossThreshold, maxSlippage } },
+            trigger: {
+              stopLoss: { threshold: stopLossThreshold, maxSlippage },
+            },
           });
 
           await userProgram.provider.sendAndConfirm(new Transaction().add(ix));
         },
         "InvalidAssetOrLiabilitiesCount",
-        6110
+        6110,
       );
     });
 
@@ -274,7 +293,13 @@ const maxSlippage = bpsToU32(100);
           authority: user.wallet.publicKey,
           feePayer: user.wallet.publicKey,
           bankKeys,
-          trigger: { both: { stopLoss: stopLossThreshold, takeProfit: takeProfitThreshold, maxSlippage } },
+          trigger: {
+            both: {
+              stopLoss: stopLossThreshold,
+              takeProfit: takeProfitThreshold,
+              maxSlippage,
+            },
+          },
         });
 
         await userProgram.provider.sendAndConfirm(new Transaction().add(ix));
@@ -283,7 +308,9 @@ const maxSlippage = bpsToU32(100);
   });
 
   describe("order maintenance", () => {
-    const placeTestOrder = async (bankKeys: PublicKey[] = [bankA, bankUsdc]) => {
+    const placeTestOrder = async (
+      bankKeys: PublicKey[] = [bankA, bankUsdc],
+    ) => {
       const ix = await placeOrderIx(program, {
         marginfiAccount: userMarginfiAccount,
         authority: user.wallet.publicKey,
@@ -293,13 +320,21 @@ const maxSlippage = bpsToU32(100);
       });
 
       await userProgram.provider.sendAndConfirm(new Transaction().add(ix));
-      const [orderPk] = deriveOrderPda(program.programId, userMarginfiAccount, bankKeys);
+      const [orderPk] = deriveOrderPda(
+        program.programId,
+        userMarginfiAccount,
+        bankKeys,
+      );
       return orderPk;
     };
 
     it("closes an order as the authority - happy path", async () => {
       const bankKeys = [bankA, bankUsdc];
-      const [orderPk] = deriveOrderPda(program.programId, userMarginfiAccount, bankKeys);
+      const [orderPk] = deriveOrderPda(
+        program.programId,
+        userMarginfiAccount,
+        bankKeys,
+      );
 
       const ix = await closeOrderIx(program, {
         marginfiAccount: userMarginfiAccount,
@@ -337,15 +372,16 @@ const maxSlippage = bpsToU32(100);
       const emissionsMint = bankAccount.emissionsMint;
       const emissionsAta = getAssociatedTokenAddressSync(
         emissionsMint,
-        user.wallet.publicKey
+        user.wallet.publicKey,
       );
 
-      const createEmissionsAtaIx = createAssociatedTokenAccountIdempotentInstruction(
-        user.wallet.publicKey,
-        emissionsAta,
-        user.wallet.publicKey,
-        emissionsMint
-      );
+      const createEmissionsAtaIx =
+        createAssociatedTokenAccountIdempotentInstruction(
+          user.wallet.publicKey,
+          emissionsAta,
+          user.wallet.publicKey,
+          emissionsMint,
+        );
 
       // Claim emissions on the liability balance before closing it
       const withdrawEmissionsInstruction = await program.methods
@@ -363,7 +399,7 @@ const maxSlippage = bpsToU32(100);
         new Transaction()
           .add(createEmissionsAtaIx)
           .add(withdrawEmissionsInstruction)
-          .add(repayInstruction)
+          .add(repayInstruction),
       );
 
       const ix = await keeperCloseOrderIx(program, {
@@ -396,7 +432,9 @@ const maxSlippage = bpsToU32(100);
         .remainingAccounts(oracleMeta)
         .instruction();
 
-      await userProgram.provider.sendAndConfirm(new Transaction().add(borrowIx));
+      await userProgram.provider.sendAndConfirm(
+        new Transaction().add(borrowIx),
+      );
     });
 
     it("keeper close fails when the condition is not satisfied - should fail", async () => {
@@ -411,10 +449,12 @@ const maxSlippage = bpsToU32(100);
             order: orderPk,
             feeRecipient: keeper.wallet.publicKey,
           });
-          await keeperProgram.provider.sendAndConfirm(new Transaction().add(ix));
+          await keeperProgram.provider.sendAndConfirm(
+            new Transaction().add(ix),
+          );
         },
         "LiquidatorOrderCloseNotAllowed",
-        6105
+        6105,
       );
     });
 
@@ -427,13 +467,19 @@ const maxSlippage = bpsToU32(100);
 
       await userProgram.provider.sendAndConfirm(new Transaction().add(ix));
 
-      const acc = await program.account.marginfiAccount.fetch(userMarginfiAccount);
+      const acc = await program.account.marginfiAccount.fetch(
+        userMarginfiAccount,
+      );
       expect(acc).to.exist;
     });
 
     it("keeper closes order after setLiquidatorCloseFlags - happy path", async () => {
       const bankKeys = [bankA, bankUsdc];
-      const [orderPk] = deriveOrderPda(program.programId, userMarginfiAccount, bankKeys);
+      const [orderPk] = deriveOrderPda(
+        program.programId,
+        userMarginfiAccount,
+        bankKeys,
+      );
 
       const keeper = users[1];
       const keeperProgram = keeper.mrgnProgram as Program<Marginfi>;
@@ -460,7 +506,11 @@ const maxSlippage = bpsToU32(100);
     let keeperTokenAata: PublicKey;
     const confFactor = ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
 
-    const buildRemaining = (includeUsdc = true, includeA = true, includeSol = true) => {
+    const buildRemaining = (
+      includeUsdc = true,
+      includeA = true,
+      includeSol = true,
+    ) => {
       const pairs: [PublicKey, PublicKey][] = [];
 
       if (includeUsdc) {
@@ -481,18 +531,32 @@ const maxSlippage = bpsToU32(100);
     const fetchPricingInputs = async () => {
       const bankAAccount = await program.account.bank.fetch(bankA);
       const bankUsdcAccount = await program.account.bank.fetch(bankUsdc);
-      const accBeforePricing = await program.account.marginfiAccount.fetch(userMarginfiAccount);
+      const accBeforePricing = await program.account.marginfiAccount.fetch(
+        userMarginfiAccount,
+      );
 
-      const balA = accBeforePricing.lendingAccount.balances.find((b: any) => b.bankPk && b.bankPk.equals(bankA));
-      const balUsdc = accBeforePricing.lendingAccount.balances.find((b: any) => b.bankPk && b.bankPk.equals(bankUsdc));
+      const balA = accBeforePricing.lendingAccount.balances.find(
+        (b: any) => b.bankPk && b.bankPk.equals(bankA),
+      );
+      const balUsdc = accBeforePricing.lendingAccount.balances.find(
+        (b: any) => b.bankPk && b.bankPk.equals(bankUsdc),
+      );
 
       const assetShares = wrappedI80F48toBigNumber(balA.assetShares).toNumber();
-      const assetShareValue = wrappedI80F48toBigNumber(bankAAccount.assetShareValue).toNumber();
-      const assetNative = (assetShares * assetShareValue) / (10 ** bankAAccount.mintDecimals);
+      const assetShareValue = wrappedI80F48toBigNumber(
+        bankAAccount.assetShareValue,
+      ).toNumber();
+      const assetNative =
+        (assetShares * assetShareValue) / 10 ** bankAAccount.mintDecimals;
 
-      const liabShares = wrappedI80F48toBigNumber(balUsdc.liabilityShares).toNumber();
-      const liabShareValue = wrappedI80F48toBigNumber(bankUsdcAccount.liabilityShareValue).toNumber();
-      const liabNative = (liabShares * liabShareValue) / (10 ** bankUsdcAccount.mintDecimals);
+      const liabShares = wrappedI80F48toBigNumber(
+        balUsdc.liabilityShares,
+      ).toNumber();
+      const liabShareValue = wrappedI80F48toBigNumber(
+        bankUsdcAccount.liabilityShareValue,
+      ).toNumber();
+      const liabNative =
+        (liabShares * liabShareValue) / 10 ** bankUsdcAccount.mintDecimals;
 
       return { assetNative, liabNative };
     };
@@ -502,24 +566,35 @@ const maxSlippage = bpsToU32(100);
       liabNative: number,
       threshold: number,
       confFactor: number,
-      offset: number
+      offset: number,
     ) => {
-      const biasedLiabValue = liabNative * (oracles.usdcPrice * (1 + confFactor));
-      const targetBiased = (threshold + offset) + biasedLiabValue;
+      const biasedLiabValue =
+        liabNative * (oracles.usdcPrice * (1 + confFactor));
+      const targetBiased = threshold + offset + biasedLiabValue;
       const basePriceNeeded = targetBiased / assetNative;
       return basePriceNeeded / (1 - confFactor);
     };
 
     const calcWithdrawAmount = (assetPrice: number) => {
-      const liabilityAmountFloat = Number(borrowUsdc) / 10 ** ecosystem.usdcDecimals;
+      const liabilityAmountFloat =
+        Number(borrowUsdc) / 10 ** ecosystem.usdcDecimals;
       const liabilityValue = liabilityAmountFloat * oracles.usdcPrice;
       const assetAmountFloat = liabilityValue / assetPrice;
-      const assetAmountUnits = Math.ceil(assetAmountFloat * 10 ** ecosystem.tokenADecimals);
+      const assetAmountUnits = Math.ceil(
+        assetAmountFloat * 10 ** ecosystem.tokenADecimals,
+      );
       return new BN(assetAmountUnits);
     };
 
-    const buildExecutionIxs = async (startRemaining: PublicKey[], endRemaining: PublicKey[], withdrawAmount: BN) => {
-      const [executeRecordPk] = deriveExecuteOrderPda(program.programId, orderPk);
+    const buildExecutionIxs = async (
+      startRemaining: PublicKey[],
+      endRemaining: PublicKey[],
+      withdrawAmount: BN,
+    ) => {
+      const [executeRecordPk] = deriveExecuteOrderPda(
+        program.programId,
+        orderPk,
+      );
 
       const startIx = await startExecuteOrderIx(program, {
         group: marginfiGroup.publicKey,
@@ -577,11 +652,16 @@ const maxSlippage = bpsToU32(100);
         remaining: endRemaining,
       });
 
-      return { startIx, withdrawEmissionsPermIx, repayInstruction, withdrawInstruction, endIx };
+      return {
+        startIx,
+        withdrawEmissionsPermIx,
+        repayInstruction,
+        withdrawInstruction,
+        endIx,
+      };
     };
 
     before(async () => {
-
       const ixPlace = await placeOrderIx(program, {
         marginfiAccount: userMarginfiAccount,
         authority: user.wallet.publicKey,
@@ -592,19 +672,27 @@ const maxSlippage = bpsToU32(100);
 
       await userProgram.provider.sendAndConfirm(new Transaction().add(ixPlace));
 
-      [orderPk] = deriveOrderPda(program.programId, userMarginfiAccount, bankKeys);
+      [orderPk] = deriveOrderPda(
+        program.programId,
+        userMarginfiAccount,
+        bankKeys,
+      );
 
       // Ensure emissions destination is registered for the user
       const bankAccount = await program.account.bank.fetch(bankUsdc);
       const emissionsMint = bankAccount.emissionsMint;
-      userEmissionsAta = getAssociatedTokenAddressSync(emissionsMint, user.wallet.publicKey);
-
-      const ensureUserEmissionsAtaIx = createAssociatedTokenAccountIdempotentInstruction(
+      userEmissionsAta = getAssociatedTokenAddressSync(
+        emissionsMint,
         user.wallet.publicKey,
-        userEmissionsAta,
-        user.wallet.publicKey,
-        emissionsMint
       );
+
+      const ensureUserEmissionsAtaIx =
+        createAssociatedTokenAccountIdempotentInstruction(
+          user.wallet.publicKey,
+          userEmissionsAta,
+          user.wallet.publicKey,
+          emissionsMint,
+        );
 
       const updateEmissionsIx = await program.methods
         .marginfiAccountUpdateEmissionsDestinationAccount()
@@ -615,7 +703,7 @@ const maxSlippage = bpsToU32(100);
         })
         .instruction();
       await userProgram.provider.sendAndConfirm(
-        new Transaction().add(ensureUserEmissionsAtaIx).add(updateEmissionsIx)
+        new Transaction().add(ensureUserEmissionsAtaIx).add(updateEmissionsIx),
       );
 
       // Fund keeper with USDC so they can repay during execution
@@ -628,33 +716,46 @@ const maxSlippage = bpsToU32(100);
           ecosystem.usdcMint.publicKey,
           keeper.usdcAccount,
           wallet.publicKey,
-          Number(borrowUsdc) * 10
-        )
+          Number(borrowUsdc) * 10,
+        ),
       );
       await program.provider.sendAndConfirm(mintUsdcToKeeperTx, [wallet.payer]);
 
       keeperTokenAata = getAssociatedTokenAddressSync(
         ecosystem.tokenAMint.publicKey,
-        keeper.wallet.publicKey
+        keeper.wallet.publicKey,
       );
 
       const ensureKeeperAta = createAssociatedTokenAccountIdempotentInstruction(
         keeper.wallet.publicKey,
         keeperTokenAata,
         keeper.wallet.publicKey,
-        ecosystem.tokenAMint.publicKey
+        ecosystem.tokenAMint.publicKey,
       );
-      await keeperProgram.provider.sendAndConfirm(new Transaction().add(ensureKeeperAta));
+      await keeperProgram.provider.sendAndConfirm(
+        new Transaction().add(ensureKeeperAta),
+      );
     });
 
     it("fails when trigger not yet reached - should fail", async () => {
       const { assetNative, liabNative } = await fetchPricingInputs();
       const threshold = wrappedI80F48toBigNumber(highTakeProfit).toNumber();
-      const biasedPrice = computeBiasedPrice(assetNative, liabNative, threshold, confFactor, -1);
+      const biasedPrice = computeBiasedPrice(
+        assetNative,
+        liabNative,
+        threshold,
+        confFactor,
+        -1,
+      );
 
       oracles.tokenAPrice = biasedPrice;
       const slot = new BN(Math.floor(Date.now() / 1000));
-      await refreshPullOracles(oracles, wallet.payer, slot, Math.floor(Date.now() / 1000));
+      await refreshPullOracles(
+        oracles,
+        wallet.payer,
+        slot,
+        Math.floor(Date.now() / 1000),
+      );
 
       const remaining = buildRemaining();
       const withdrawAmount = calcWithdrawAmount(oracles.tokenAPrice);
@@ -674,27 +775,42 @@ const maxSlippage = bpsToU32(100);
               .add(withdrawEmissionsPermIx)
               .add(repayInstruction)
               .add(withdrawInstruction)
-              .add(endIx)
+              .add(endIx),
           );
         },
         "OrderTriggerNotMet",
-        6107
+        6107,
       );
 
       oracles.tokenAPrice = 10; // Reset price for other tests
-      await refreshPullOracles(oracles, wallet.payer, slot, Math.floor(Date.now() / 1000));
-
+      await refreshPullOracles(
+        oracles,
+        wallet.payer,
+        slot,
+        Math.floor(Date.now() / 1000),
+      );
     });
 
     it("fails when touching uninvolved balance - should fail", async () => {
       const { assetNative, liabNative } = await fetchPricingInputs();
       const threshold = wrappedI80F48toBigNumber(highTakeProfit).toNumber();
-      const biasedPrice = computeBiasedPrice(assetNative, liabNative, threshold, confFactor, 1);
+      const biasedPrice = computeBiasedPrice(
+        assetNative,
+        liabNative,
+        threshold,
+        confFactor,
+        1,
+      );
 
       // Place price above trigger
       oracles.tokenAPrice = biasedPrice;
       const slot = new BN(Math.floor(Date.now() / 1000));
-      await refreshPullOracles(oracles, wallet.payer, slot, Math.floor(Date.now() / 1000));
+      await refreshPullOracles(
+        oracles,
+        wallet.payer,
+        slot,
+        Math.floor(Date.now() / 1000),
+      );
 
       const startRemaining = buildRemaining();
       const endRemaining = buildRemaining(false, true, true);
@@ -708,15 +824,21 @@ const maxSlippage = bpsToU32(100);
       } = await buildExecutionIxs(startRemaining, endRemaining, withdrawAmount);
 
       // Ensure the keeper has a wSOL ATA
-      const keeperWsolAta = getAssociatedTokenAddressSync(ecosystem.wsolMint.publicKey, keeper.wallet.publicKey);
-      const ensureKeeperWsolAtaIx = createAssociatedTokenAccountIdempotentInstruction(
+      const keeperWsolAta = getAssociatedTokenAddressSync(
+        ecosystem.wsolMint.publicKey,
         keeper.wallet.publicKey,
-        keeperWsolAta,
-        keeper.wallet.publicKey,
-        ecosystem.wsolMint.publicKey
       );
+      const ensureKeeperWsolAtaIx =
+        createAssociatedTokenAccountIdempotentInstruction(
+          keeper.wallet.publicKey,
+          keeperWsolAta,
+          keeper.wallet.publicKey,
+          ecosystem.wsolMint.publicKey,
+        );
 
-      await keeperProgram.provider.sendAndConfirm(new Transaction().add(ensureKeeperWsolAtaIx));
+      await keeperProgram.provider.sendAndConfirm(
+        new Transaction().add(ensureKeeperWsolAtaIx),
+      );
       keeper.wsolAccount = keeperWsolAta;
 
       const withdrawSolRemaining = composeRemainingAccounts([
@@ -744,28 +866,46 @@ const maxSlippage = bpsToU32(100);
               .add(repayInstruction)
               .add(withdrawInstruction)
               .add(withdrawSol) // This touches an uninvolved balance
-              .add(endIx)
+              .add(endIx),
           );
         },
         "IllegalBalanceState",
-        6040
+        6040,
       );
 
       oracles.tokenAPrice = 10; // Reset price
-      await refreshPullOracles(oracles, wallet.payer, slot, Math.floor(Date.now() / 1000));
+      await refreshPullOracles(
+        oracles,
+        wallet.payer,
+        slot,
+        Math.floor(Date.now() / 1000),
+      );
     });
 
     it("Take-profit!!! - happy path", async () => {
       const { assetNative, liabNative } = await fetchPricingInputs();
       const threshold = wrappedI80F48toBigNumber(highTakeProfit).toNumber();
-      const biasedPrice = computeBiasedPrice(assetNative, liabNative, threshold, confFactor, 1);
+      const biasedPrice = computeBiasedPrice(
+        assetNative,
+        liabNative,
+        threshold,
+        confFactor,
+        1,
+      );
 
       oracles.tokenAPrice = biasedPrice;
       const slot = new BN(Math.floor(Date.now() / 1000));
-      await refreshPullOracles(oracles, wallet.payer, slot, Math.floor(Date.now() / 1000));
+      await refreshPullOracles(
+        oracles,
+        wallet.payer,
+        slot,
+        Math.floor(Date.now() / 1000),
+      );
 
       const orderBefore = await program.account.order.fetch(orderPk);
-      const accBefore = await program.account.marginfiAccount.fetch(userMarginfiAccount);
+      const accBefore = await program.account.marginfiAccount.fetch(
+        userMarginfiAccount,
+      );
 
       const startRemaining = buildRemaining();
       const endRemaining = buildRemaining();
@@ -784,32 +924,53 @@ const maxSlippage = bpsToU32(100);
           .add(withdrawEmissionsPermIx)
           .add(repayInstruction)
           .add(withdrawInstruction)
-          .add(endIx)
+          .add(endIx),
       );
 
       // Verify the order account has been closed
-      const orderInfo = await program.provider.connection.getAccountInfo(orderPk);
-      assert.isNull(orderInfo, "expected order account to be closed after execution");
+      const orderInfo = await program.provider.connection.getAccountInfo(
+        orderPk,
+      );
+      assert.isNull(
+        orderInfo,
+        "expected order account to be closed after execution",
+      );
 
       // Fetch post-execution marginfi account
-      const accAfter = await program.account.marginfiAccount.fetch(userMarginfiAccount);
+      const accAfter = await program.account.marginfiAccount.fetch(
+        userMarginfiAccount,
+      );
 
       // Determine bank PKs for the asset and liability balances from pre-exec state
       const assetTag = orderBefore.tags[0];
       const liabilityTag = orderBefore.tags[1];
-      const preAsset = accBefore.lendingAccount.balances.find((b: any) => Number(b.tag) === Number(assetTag));
-      const preLiability = accBefore.lendingAccount.balances.find((b: any) => Number(b.tag) === Number(liabilityTag));
+      const preAsset = accBefore.lendingAccount.balances.find(
+        (b: any) => Number(b.tag) === Number(assetTag),
+      );
+      const preLiability = accBefore.lendingAccount.balances.find(
+        (b: any) => Number(b.tag) === Number(liabilityTag),
+      );
 
       const assetBankPk = preAsset.bankPk.toString();
       const liabilityBankPk = preLiability.bankPk.toString();
 
       // Asset should still exist
-      const postAsset = accAfter.lendingAccount.balances.find((b: any) => b.bankPk && b.bankPk.toString() === assetBankPk);
-      assert.exists(postAsset, `expected asset balance for bank ${assetBankPk} to still exist after execution`);
+      const postAsset = accAfter.lendingAccount.balances.find(
+        (b: any) => b.bankPk && b.bankPk.toString() === assetBankPk,
+      );
+      assert.exists(
+        postAsset,
+        `expected asset balance for bank ${assetBankPk} to still exist after execution`,
+      );
 
       // Liability should no longer exist
-      const postLiability = accAfter.lendingAccount.balances.find((b: any) => b.bankPk && b.bankPk.toString() === liabilityBankPk);
-      assert.isUndefined(postLiability, `expected liability balance for bank ${liabilityBankPk} to be removed after execution`);
+      const postLiability = accAfter.lendingAccount.balances.find(
+        (b: any) => b.bankPk && b.bankPk.toString() === liabilityBankPk,
+      );
+      assert.isUndefined(
+        postLiability,
+        `expected liability balance for bank ${liabilityBankPk} to be removed after execution`,
+      );
 
       // Balances not part of the order must remain unchanged
       const orderBankSet = new Set([assetBankPk, liabilityBankPk]);
@@ -817,22 +978,37 @@ const maxSlippage = bpsToU32(100);
         const preBank = preBal.bankPk.toString();
         if (orderBankSet.has(preBank)) continue;
 
-        const postBal = accAfter.lendingAccount.balances.find((b: any) => b.bankPk && b.bankPk.toString() === preBank);
-        assert.exists(postBal, `expected other balance for bank ${preBank} to still exist after execution`);
-        assert.deepEqual(preBal, postBal, `pre balance to equal post balance ${preBank}`);
+        const postBal = accAfter.lendingAccount.balances.find(
+          (b: any) => b.bankPk && b.bankPk.toString() === preBank,
+        );
+        assert.exists(
+          postBal,
+          `expected other balance for bank ${preBank} to still exist after execution`,
+        );
+        assert.deepEqual(
+          preBal,
+          postBal,
+          `pre balance to equal post balance ${preBank}`,
+        );
       }
 
       // Compute asset-value estimate and assert it exceeds the trigger threshold.
-      // We don't take advantage of the max-fee or slippage here, so we compare it 
+      // We don't take advantage of the max-fee or slippage here, so we compare it
       // directly to the threshold.
       const singleAssetPrice = oracles.tokenAPrice;
       const singleAssetDecimals = ecosystem.tokenADecimals;
 
-      const assetSharesPost = wrappedI80F48toBigNumber(postAsset.assetShares).toNumber();
+      const assetSharesPost = wrappedI80F48toBigNumber(
+        postAsset.assetShares,
+      ).toNumber();
       const assetNativeAmount = assetSharesPost / 10 ** singleAssetDecimals;
       const assetValue = assetNativeAmount * singleAssetPrice;
 
-      assert.isAbove(assetValue, wrappedI80F48toBigNumber(highTakeProfit).toNumber(), `expected asset value (${assetValue}) to exceed 800`);
+      assert.isAbove(
+        assetValue,
+        wrappedI80F48toBigNumber(highTakeProfit).toNumber(),
+        `expected asset value (${assetValue}) to exceed 800`,
+      );
     });
   });
 });

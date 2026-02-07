@@ -936,8 +936,7 @@ async fn limit_order_stop_loss_max_profit_with_slippage() -> anyhow::Result<()> 
     let asset_native =
         post_asset_shares.to_num::<f64>() / 10f64.powi(asset_bank_f.mint.mint.decimals as i32);
     let asset_value = asset_native * asset_price;
-    let start_health =
-        (asset_deposit * asset_price) - (liability_borrow * liability_price);
+    let start_health = (asset_deposit * asset_price) - (liability_borrow * liability_price);
     let expected_min = start_health * (1.0 - profit_pct);
     assert!(asset_value >= expected_min);
     assert_eq_noise!(asset_value, expected_min, 0.0001);

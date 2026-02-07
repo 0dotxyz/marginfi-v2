@@ -36,7 +36,8 @@ use kamino_mocks::{
     state::{MinimalObligation, MinimalReserve},
 };
 use marginfi_type_crate::types::{
-    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+    ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
 };
 use marginfi_type_crate::{
     constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED},
@@ -99,8 +100,9 @@ pub fn kamino_withdraw<'info>(
             MarginfiError::AccountDisabled
         );
 
-        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
-        let price = if in_receivership {
+        let in_receivership_or_order_execution =
+            marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
+        let price = if in_receivership_or_order_execution {
             let price = fetch_asset_price_for_bank_low_bias(
                 &bank_key,
                 &bank,
@@ -193,11 +195,12 @@ pub fn kamino_withdraw<'info>(
 
     marginfi_account.lending_account.sort_balances();
 
-    let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
+    let in_receivership_or_order_execution =
+        marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
 
-    // Note: during liquidation/receivership, we skip health checks until the end of the transaction,
-    // but we still update the price cache.
-    if !in_receivership {
+    // Note: during liquidation/receivership or order execution, we skip health checks until the end
+    // of the transaction, but we still update the price cache.
+    if !in_receivership_or_order_execution {
         // Check account health, if below threshold fail transaction
         // Assuming `ctx.remaining_accounts` holds only oracle accounts
         check_account_init_health(
@@ -256,7 +259,7 @@ pub struct KaminoWithdraw<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), true, false)
+            is_signer_authorized(&a, g.admin, authority.key(), true, true)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

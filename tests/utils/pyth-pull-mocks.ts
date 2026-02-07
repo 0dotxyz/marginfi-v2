@@ -390,7 +390,7 @@ export async function refreshOracles(
   slot: BN,
   publishTime: number,
   bankrunContext?: ProgramTestContext,
-  verbose: boolean = false
+  verbose: boolean = false,
 ) {
   // Discover all "*OracleFeed" "*Pull" "*Price" "*Decimals" entries
   const feeds = (Object.keys(oracles) as Array<keyof Oracles>)
@@ -398,7 +398,9 @@ export async function refreshOracles(
     .map((feedKey) => {
       const baseKey = feedKey.replace(/OracleFeed$/, "") as keyof Oracles;
       const feedId: PublicKey = (oracles[feedKey] as Keypair).publicKey;
-      const account = oracles[`${baseKey as string}Oracle` as keyof Oracles] as Keypair;
+      const account = oracles[
+        `${baseKey as string}Oracle` as keyof Oracles
+      ] as Keypair;
 
       const tokenName = (baseKey as string).replace(/Pull$/, "");
       const priceKey = `${tokenName}Price` as keyof Oracles;
@@ -428,7 +430,7 @@ export async function refreshOracles(
     ({ base, feedId, account, price, conf, emaPrice, emaConf, exponent }) => {
       if (verbose) {
         console.log(
-          `[batchUpdate] ${base}: price=${price.toString()}, conf=${conf.toString()}, slot=${slot.toString()}, exp=${exponent}`
+          `[batchUpdate] ${base}: price=${price.toString()}, conf=${conf.toString()}, slot=${slot.toString()}, exp=${exponent}`,
         );
       }
       return initOrUpdatePriceUpdateV2(
@@ -444,9 +446,9 @@ export async function refreshOracles(
         undefined,
         bankrunContext,
         verbose,
-        publishTime
+        publishTime,
       );
-    }
+    },
   );
 
   await Promise.all(tasks);
@@ -456,6 +458,9 @@ export async function refreshOracles(
 /**
  * Refreshes any oracle in Oracles that is EXACTLY NAMED *Pull with *OracleFeed to the same
  * price/conf/etc it currently has but the given slot/time
+ *
+ * If you've created a new Oracle in Oracles, make sure you follow the naming convention and add it
+ * to this function.
  * @param oracles
  * @param wallet
  * @param publishTime
@@ -470,37 +475,101 @@ export async function refreshPullOracles(
   bankrunContext?: ProgramTestContext,
   verbose: boolean = false,
 ) {
-  // Discover all "*PullOracleFeed" "*Pull" "*Price" "*Decimals" entries
-  const feeds = (Object.keys(oracles) as Array<keyof Oracles>)
-    .filter((k) => k.endsWith("PullOracleFeed"))
-    .map((feedKey) => {
-      const baseKey = feedKey.replace(/OracleFeed$/, "") as keyof Oracles;
-      const feedId: PublicKey = (oracles[feedKey] as Keypair).publicKey;
-      const account = oracles[baseKey] as Keypair;
+  const feeds: Array<{
+    base: string;
+    feedId: PublicKey;
+    account: Keypair;
+    price: BN;
+    conf: BN;
+    emaPrice: BN;
+    emaConf: BN;
+    exponent: number;
+  }> = [];
 
-      const tokenName = (baseKey as string).replace(/Pull$/, "");
-      const priceKey = `${tokenName}Price` as keyof Oracles;
-      const decimalsKey = `${tokenName}Decimals` as keyof Oracles;
+  const configs: Array<{
+    base: string;
+    oracleKey: keyof Oracles;
+    feedKey: keyof Oracles;
+    priceKey: keyof Oracles;
+    decimalsKey: keyof Oracles;
+  }> = [
+    {
+      base: "wsol",
+      oracleKey: "wsolOracle",
+      feedKey: "wsolOracleFeed",
+      priceKey: "wsolPrice",
+      decimalsKey: "wsolDecimals",
+    },
+    {
+      base: "usdc",
+      oracleKey: "usdcOracle",
+      feedKey: "usdcOracleFeed",
+      priceKey: "usdcPrice",
+      decimalsKey: "usdcDecimals",
+    },
+    {
+      base: "tokenA",
+      oracleKey: "tokenAOracle",
+      feedKey: "tokenAOracleFeed",
+      priceKey: "tokenAPrice",
+      decimalsKey: "tokenADecimals",
+    },
+    {
+      base: "tokenB",
+      oracleKey: "tokenBOracle",
+      feedKey: "tokenBOracleFeed",
+      priceKey: "tokenBPrice",
+      decimalsKey: "tokenBDecimals",
+    },
+    {
+      base: "pythPullLst",
+      oracleKey: "pythPullLst",
+      feedKey: "pythPullLstOracleFeed",
+      priceKey: "lstAlphaPrice",
+      decimalsKey: "lstAlphaDecimals",
+    },
+  ];
 
-      const priceNum = (oracles as any)[priceKey] as number;
-      const dec = (oracles as any)[decimalsKey] as number;
-      const price = new BN(priceNum * 10 ** dec);
-      const conf = new BN(priceNum * ORACLE_CONF_INTERVAL * 10 ** dec);
-      const emaPrice = price.clone();
-      const emaConf = conf.clone();
-      const exponent = -dec;
+  for (const cfg of configs) {
+    const feed = oracles[cfg.feedKey];
+    const account = oracles[cfg.oracleKey];
+    if (!(account instanceof Keypair)) {
+      if (verbose) {
+        console.log(`[batchUpdate] skip ${cfg.base}: missing oracle account`);
+      }
+      continue;
+    }
+    let feedId: PublicKey | null = null;
+    if (feed instanceof Keypair) {
+      feedId = feed.publicKey;
+    } else if (feed instanceof PublicKey) {
+      feedId = feed;
+    }
+    if (!feedId) {
+      if (verbose) {
+        console.log(`[batchUpdate] skip ${cfg.base}: missing oracle feed`);
+      }
+      continue;
+    }
+    const priceNum = (oracles as any)[cfg.priceKey] as number;
+    const dec = (oracles as any)[cfg.decimalsKey] as number;
+    const price = new BN(priceNum * 10 ** dec);
+    const conf = new BN(priceNum * ORACLE_CONF_INTERVAL * 10 ** dec);
+    const emaPrice = price.clone();
+    const emaConf = conf.clone();
+    const exponent = -dec;
 
-      return {
-        base: baseKey,
-        feedId,
-        account,
-        price,
-        conf,
-        emaPrice,
-        emaConf,
-        exponent,
-      };
+    feeds.push({
+      base: cfg.base,
+      feedId,
+      account,
+      price,
+      conf,
+      emaPrice,
+      emaConf,
+      exponent,
     });
+  }
 
   const tasks = feeds.map(
     ({ base, feedId, account, price, conf, emaPrice, emaConf, exponent }) => {

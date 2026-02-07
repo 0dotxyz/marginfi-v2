@@ -44,7 +44,7 @@ import {
   repayIx,
 } from "./utils/user-instructions";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
-import { dumpBankrunLogs, processBankrunTransaction } from "./utils/tools";
+import { dumpBankrunLogs, logHealthCache, processBankrunTransaction } from "./utils/tools";
 import { genericMultiBankTestSetup } from "./genericSetups";
 import { refreshPullOracles } from "./utils/pyth-pull-mocks";
 import { getBankrunBlockhash } from "./utils/spl-staking-utils";

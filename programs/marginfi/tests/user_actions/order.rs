@@ -1080,10 +1080,7 @@ async fn execute_order_success(
             let pre_liab_value = pre_liab_native * default_price_for_mint(&liability_mint);
 
             let max_slippage_frac = u32_to_centi(max_slippage).to_num::<f64>();
-            assert!(
-                asset_value
-                    >= (pre_asset_value - pre_liab_value) * (1.0 - max_slippage_frac)
-            );
+            assert!(asset_value >= (pre_asset_value - pre_liab_value) * (1.0 - max_slippage_frac));
         }
         OrderTrigger::Both {
             stop_loss: _,
@@ -1111,8 +1108,7 @@ async fn execute_order_success(
 
             // any
             assert!(
-                ((asset_value >= tp_threshold * (1.0 - max_slippage_frac))
-                    && is_take_profit)
+                ((asset_value >= tp_threshold * (1.0 - max_slippage_frac)) && is_take_profit)
                     || ((asset_value
                         >= (pre_asset_value - pre_liab_value) * (1.0 - max_slippage_frac))
                         && !is_take_profit)

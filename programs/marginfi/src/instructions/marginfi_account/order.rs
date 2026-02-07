@@ -512,7 +512,7 @@ pub fn end_execute_order<'info>(
     }
 
     // Only one asset and liab are currently involved in a balance, with the single liability being
-    // closed. 
+    // closed.
     // * Note: There is a trivial edge case where e.g. a user has $50 A, $50 B, borrowing $50 C,
     // sets an order that would normally close A AND C but cannot execute because orders cannot
     // close two balances. See `limit_orders_overlap_ab_nearly_closes_a_ad_fails_start` for a demo.

@@ -173,6 +173,17 @@ let blockhash = {
 };
 ```
 
+## Validator Crashes at Startup
+
+Usually manifests as something like:
+```
+Starting bankrun with pure bankrun setup...
+thread 'tokio-runtime-worker' panicked at /usr/local/cargo/registry/src/index.crates.io-6f17d22bba15001f/solana-program-test-1.18.0/src/lib.rs:716:17:
+Program file data not available <SOME GARBAGE>
+```
+
+Run `lsof -i :8899` to find the validator and then `kill -9 VALIDATOR_PID
+
 # Common Footguns
 
 Debugging `I80F48`s by `msg!("val: {:?}", some_val_I80F48);` can cause silent build issues leading to `Program is not deployed`. Convert these values to string or float before printing them.
