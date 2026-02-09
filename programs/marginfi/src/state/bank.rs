@@ -380,14 +380,29 @@ impl BankImpl for Bank {
                 new_state != BankOperationalState::KilledByBankruptcy,
                 MarginfiError::Unauthorized
             );
+            // Log operational state change
+            let old_state = self.config.operational_state;
             self.config.operational_state = new_state;
+            msg!(
+                "Operational state changed from {:?} to {:?}",
+                old_state, new_state
+            );
         }
 
         if let Some(ir_config) = &config.interest_rate_config {
             self.config.interest_rate_config.update(ir_config);
         }
 
-        set_if_some!(self.config.risk_tier, config.risk_tier);
+        // Log risk tier change
+        if let Some(new_risk_tier) = config.risk_tier {
+            let old_risk_tier = self.config.risk_tier;
+            self.config.risk_tier = new_risk_tier;
+            msg!(
+                "Risk tier changed from {:?} to {:?}",
+                old_risk_tier,
+                new_risk_tier
+            );
+        }
 
         set_if_some!(self.config.asset_tag, config.asset_tag);
 
