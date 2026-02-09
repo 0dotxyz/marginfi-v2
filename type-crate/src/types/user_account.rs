@@ -125,7 +125,7 @@ pub struct LendingAccount {
     /// Array of balance positions (max 16). Sorted in descending order by bank_pk.
     pub balances: [Balance; MAX_LENDING_ACCOUNT_BALANCES], // 104 * 16 = 1664
     /// Reserved for future use
-    pub _padding: [u64; 8],                                // 8 * 8 = 64
+    pub _padding: [u64; 8], // 8 * 8 = 64
 }
 
 impl LendingAccount {
