@@ -11,7 +11,7 @@ use anchor_spl::token_2022::{transfer_checked, TransferChecked};
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::{EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED, FREEZE_SETTINGS},
+    constants::{EMISSION_FLAGS, EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED, FREEZE_SETTINGS},
     types::{Bank, BankConfigOpt, MarginfiGroup},
 };
 
@@ -202,8 +202,13 @@ pub fn lending_pool_update_emissions_parameters(
     );
 
     if let Some(flags) = emissions_flags {
+        check!(
+            Bank::verify_emissions_flags(flags),
+            MarginfiError::InvalidConfig
+        );
         msg!("Updating emissions flags to {:#010b}", flags);
-        bank.flags = flags;
+        // Clear old emission bits, then set new ones, preserving all other flags
+        bank.flags = (bank.flags & !EMISSION_FLAGS) | flags;
     }
 
     if let Some(rate) = emissions_rate {
