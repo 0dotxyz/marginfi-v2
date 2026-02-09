@@ -399,8 +399,7 @@ impl BankImpl for Bank {
             self.config.risk_tier = new_risk_tier;
             msg!(
                 "Risk tier changed from {:?} to {:?}",
-                old_risk_tier,
-                new_risk_tier
+                old_risk_tier, new_risk_tier
             );
         }
 
