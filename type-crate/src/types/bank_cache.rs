@@ -16,13 +16,13 @@ assert_struct_align!(BankCache, 8);
 pub struct BankCache {
     /// Actual (spot) interest/fee rates of the bank, based on utilization
     /// * APR (annual percentage rate) values
-    /// * From 0-1000%, as u32, e.g. u32::MAX = 1000%, u:32::MAX/2 = 500%, etc
+    /// * From 0-1000%, as u32, e.g. u32::MAX = 1000%, u32::MAX/2 = 500%, etc
     pub base_rate: u32,
     /// Equivalent to `base_rate` * utilization
-    /// * From 0-1000%, as u32, e.g. u32::MAX = 1000%, u:32::MAX/2 = 500%, etc
+    /// * From 0-1000%, as u32, e.g. u32::MAX = 1000%, u32::MAX/2 = 500%, etc
     pub lending_rate: u32,
     /// Equivalent to `base_rate` * (1 + ir_fees) + fixed_fees
-    /// * From 0-1000%, as u32, e.g. u32::MAX = 1000%, u:32::MAX/2 = 500%, etc
+    /// * From 0-1000%, as u32, e.g. u32::MAX = 1000%, u32::MAX/2 = 500%, etc
     pub borrowing_rate: u32,
 
     /// * in seconds

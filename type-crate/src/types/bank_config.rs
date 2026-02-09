@@ -26,25 +26,40 @@ assert_struct_align!(BankConfig, 8);
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Debug, PartialEq, Pod, Zeroable, Copy, Clone, Eq)]
 pub struct BankConfig {
+    /// Discount factor for asset values in initial margin calculation (0 to 1).
+    /// E.g., 0.8 means assets count as 80% of their value for borrowing purposes.
     pub asset_weight_init: WrappedI80F48,
+    /// Discount factor for asset values in maintenance margin calculation (0 to 2).
+    /// Used for liquidation eligibility. Generally >= asset_weight_init.
     pub asset_weight_maint: WrappedI80F48,
 
+    /// Premium factor for liability values in initial margin calculation (>= 1).
+    /// E.g., 1.2 means liabilities count as 120% of their value for borrowing purposes.
     pub liability_weight_init: WrappedI80F48,
+    /// Premium factor for liability values in maintenance margin calculation (>= 1).
+    /// Used for liquidation eligibility. Generally <= liability_weight_init.
     pub liability_weight_maint: WrappedI80F48,
 
+    /// Maximum total deposits allowed in this bank, in native token units (0 = no limit)
     pub deposit_limit: u64,
 
+    /// Interest rate model configuration
     pub interest_rate_config: InterestRateConfig,
+    /// Current operational state of the bank (Paused, Operational, ReduceOnly, KilledByBankruptcy)
     pub operational_state: BankOperationalState,
 
+    /// Oracle type used for price feeds
     pub oracle_setup: OracleSetup,
+    /// Oracle account keys (usage depends on oracle_setup type)
     pub oracle_keys: [Pubkey; MAX_ORACLE_KEYS],
 
     // Note: Pubkey is aligned 1, so borrow_limit is the first aligned-8 value after deposit_limit
     pub _pad0: [u8; 6], // Bank state (1) + Oracle Setup (1) + 6 = 8
 
+    /// Maximum total borrows allowed in this bank, in native token units (0 = no limit)
     pub borrow_limit: u64,
 
+    /// Risk tier for this bank (Collateral or Isolated)
     pub risk_tier: RiskTier,
 
     /// Determines what kinds of assets users of this bank can interact with. Options:
@@ -73,7 +88,7 @@ pub struct BankConfig {
     /// assets will be discounted by 50%.
     ///
     /// In other words the max value of liabilities that can be backed by the asset is $500K. This
-    /// is useful for limiting the damage of orcale attacks.
+    /// is useful for limiting the damage of oracle attacks.
     ///
     /// Value is UI USD value, for example value 100 -> $100
     pub total_asset_value_init_limit: u64,
@@ -198,7 +213,7 @@ pub struct BankConfigCompact {
     /// assets will be discounted by 50%.
     ///
     /// In other words the max value of liabilities that can be backed by the asset is $500K. This
-    /// is useful for limiting the damage of orcale attacks.
+    /// is useful for limiting the damage of oracle attacks.
     ///
     /// Value is UI USD value, for example value 100 -> $100
     pub total_asset_value_init_limit: u64,

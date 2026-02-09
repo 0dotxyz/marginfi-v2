@@ -226,8 +226,8 @@ pub struct LendingPoolHandleBankruptcy<'info> {
     )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    /// CHECK: The risk_admin signer constraint is only validated (in handler) if bank
-    /// PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG is not set
+    /// Must be risk_admin or admin, unless the bank has PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
+    /// set, in which case any signer is accepted.
     pub signer: Signer<'info>,
 
     #[account(

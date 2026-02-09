@@ -56,7 +56,7 @@ pub struct HealthCache {
     pub liability_value_equity: WrappedI80F48,
     /// Unix timestamp from the system clock when this cache was last updated
     pub timestamp: i64,
-    /// The flags that indicate the state of the health cache. This is a u64 bitfield, where each
+    /// The flags that indicate the state of the health cache. This is a u32 bitfield, where each
     /// bit represents a flag.
     ///
     /// * HEALTHY = 1 - If set, the account cannot be liquidated. If 0, the account is unhealthy and
@@ -87,7 +87,9 @@ pub struct HealthCache {
     /// Since 0.1.3, the version will be encoded here. See PROGRAM_VERSION.
     pub program_version: u8,
     pub pad0: [u8; 2],
+    /// Error code from the liquidation health check during the last health pulse (0 if none)
     pub internal_liq_err: u32,
+    /// Error code from the bankruptcy check during the last health pulse (0 if none)
     pub internal_bankruptcy_err: u32,
     // Note: the largest on-chain deployed cache was 304 bytes so all future caches must be at least
     // this big to avoid data corruption in the empty space.

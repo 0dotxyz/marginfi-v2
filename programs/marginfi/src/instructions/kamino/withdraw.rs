@@ -281,8 +281,8 @@ pub struct KaminoWithdraw<'info> {
     )]
     pub bank: AccountLoader<'info, Bank>,
 
-    /// Token account that will get tokens back
-    /// WARN: Completely unchecked!
+    /// Token account that will receive the withdrawn tokens. Mint/owner are validated by the
+    /// SPL transfer; the caller controls the destination.
     #[account(mut)]
     pub destination_token_account: InterfaceAccount<'info, TokenAccount>,
 
