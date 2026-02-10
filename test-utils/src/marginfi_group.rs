@@ -81,13 +81,13 @@ impl MarginfiGroupFixture {
                     // Payer is all admins in most test cases for simplicity, generally this is not
                     // true in production - the MS is the main admin and others are lower-impact
                     // wallets with a smaller threshold.
-                    new_admin: admin,
-                    new_emode_admin: admin,
-                    new_curve_admin: admin,
-                    new_limit_admin: admin,
-                    new_emissions_admin: admin,
-                    new_metadata_admin: admin,
-                    new_risk_admin: admin,
+                    new_admin: Some(admin),
+                    new_emode_admin: Some(admin),
+                    new_curve_admin: Some(admin),
+                    new_limit_admin: Some(admin),
+                    new_emissions_admin: Some(admin),
+                    new_metadata_admin: Some(admin),
+                    new_risk_admin: Some(admin),
                     emode_max_init_leverage: None,
                     emode_max_maint_leverage: None,
                 }
@@ -789,13 +789,13 @@ impl MarginfiGroupFixture {
             }
             .to_account_metas(Some(true)),
             data: MarginfiGroupConfigure {
-                new_admin,
-                new_emode_admin,
-                new_curve_admin,
-                new_limit_admin,
-                new_emissions_admin,
-                new_metadata_admin,
-                new_risk_admin,
+                new_admin: Some(new_admin),
+                new_emode_admin: Some(new_emode_admin),
+                new_curve_admin: Some(new_curve_admin),
+                new_limit_admin: Some(new_limit_admin),
+                new_emissions_admin: Some(new_emissions_admin),
+                new_metadata_admin: Some(new_metadata_admin),
+                new_risk_admin: Some(new_risk_admin),
                 emode_max_init_leverage,
                 emode_max_maint_leverage,
             }
