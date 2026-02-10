@@ -11,7 +11,9 @@ use anchor_spl::token_2022::{transfer_checked, TransferChecked};
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::{EMISSION_FLAGS, EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED, FREEZE_SETTINGS},
+    constants::{
+        EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED, EMISSION_FLAGS, FREEZE_SETTINGS,
+    },
     types::{Bank, BankConfigOpt, MarginfiGroup},
 };
 
