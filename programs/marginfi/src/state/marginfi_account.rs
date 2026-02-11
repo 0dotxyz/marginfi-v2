@@ -36,11 +36,6 @@ pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
 }
 
 /// 4 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool), 3 for `ASSET_TAG_KAMINO`, `ASSET_TAG_DRIFT`, `ASSET_TAG_SOLEND`, and `ASSET_TAG_JUPLEND`, 2 for most others (bank, oracle), 1 for Fixed
-fn get_remaining_accounts_per_balance(balance: &Balance) -> MarginfiResult<usize> {
-    get_remaining_accounts_per_asset_tag(balance.bank_asset_tag)
-}
-
-/// 4 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool), 3 for `ASSET_TAG_KAMINO`, `ASSET_TAG_DRIFT`, `ASSET_TAG_SOLEND`, and `ASSET_TAG_JUPLEND`, 2 for most others (bank, oracle), 1 for Fixed
 fn get_remaining_accounts_per_asset_tag(asset_tag: u8) -> MarginfiResult<usize> {
     match asset_tag {
         ASSET_TAG_DEFAULT | ASSET_TAG_SOL => Ok(2),
