@@ -738,6 +738,8 @@ pub struct EndExecuteOrder<'info> {
                 && !acc.get_flag(ACCOUNT_IN_FLASHLOAN)
                 && !acc.get_flag(ACCOUNT_FROZEN)
                 && !acc.get_flag(ACCOUNT_DISABLED)
+                && !acc.get_flag(ACCOUNT_IN_RECEIVERSHIP)
+                && !acc.get_flag(ACCOUNT_IN_DELEVERAGE)
         } @MarginfiError::UnexpectedOrderExecutionState
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
