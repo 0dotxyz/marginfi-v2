@@ -129,15 +129,15 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
                 continue;
             }
 
-            check!(
-                idx < self.balance_states.len(),
-                MarginfiError::IllegalBalanceState
-            );
-
             // Skip balances that belong to this order, they can be changed by the keeper
             if balance.tag != 0 && order_tags.iter().any(|t| *t == balance.tag) {
                 continue;
             }
+
+            check!(
+                idx < self.balance_states.len(),
+                MarginfiError::IllegalBalanceState
+            );
 
             let ExecuteOrderBalanceRecord {
                 bank,

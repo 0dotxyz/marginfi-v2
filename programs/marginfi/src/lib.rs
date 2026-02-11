@@ -221,6 +221,11 @@ pub mod marginfi {
         marginfi_account::initialize_account_pda(ctx, account_index, third_party_id)
     }
 
+    /// (user) Create a new Order.
+    /// * bank_keys - Currently only two keys: the lending position and borrowing position in the
+    ///   users's Balances for which the order is being placed
+    /// * trigger - the type of order (stop loss, take profit, or both), and the threshold at which
+    ///   to trigger the order, in dollars
     pub fn marginfi_account_place_order(
         ctx: Context<PlaceOrder>,
         bank_keys: Vec<Pubkey>,
@@ -229,14 +234,21 @@ pub mod marginfi {
         marginfi_account::place_order(ctx, bank_keys, trigger)
     }
 
+    /// (user) Close an existing Order, returning rent to the user
     pub fn marginfi_account_close_order(ctx: Context<CloseOrder>) -> MarginfiResult {
         marginfi_account::close_order(ctx)
     }
 
+    /// (permissionless keeper) Close an existing Order after the user account was closed, or it no
+    /// longer as the associated positions, or the user has executed
+    /// `marginfi_account_set_keeper_close_flags`. Keeper keeps the rent.
     pub fn marginfi_account_keeper_close_order(ctx: Context<KeeperCloseOrder>) -> MarginfiResult {
         marginfi_account::keeper_close_order(ctx)
     }
 
+    /// (user) Purge flags from some balances, enabling a Keeper to call
+    /// `marginfi_account_keeper_close_order` on associated Orders. Typically, use
+    /// `marginfi_account_close_order` instead if trying to close an Order.
     pub fn marginfi_account_set_keeper_close_flags(
         ctx: Context<SetKeeperCloseFlags>,
         bank_keys_opt: Option<Vec<Pubkey>>,
@@ -244,12 +256,30 @@ pub mod marginfi {
         marginfi_account::set_keeper_close_flags(ctx, bank_keys_opt)
     }
 
+    /// (permissionless keeper) Begin Order execution
+    /// * Enables the Keeper to withdraw/repay associated positions until the end of the tx
+    /// * Only one `StartExecuteOrder` is allowed per tx
+    /// * Must appear before `EndExecuteOrder` in the tx, and before any instructions except certain
+    ///   allowed ones (compute budget, kamino refresh, etc)
+    /// * `EndExecuteOrder` must also appear in the tx
+    /// * CPI is forbidden
+    /// * Costs a small amount of rent, which is returned at the end of the tx, make sure you have
+    ///   enough SOL to start the tx.
     pub fn marginfi_account_start_execute_order<'info>(
         ctx: Context<'_, '_, 'info, 'info, StartExecuteOrder<'info>>,
     ) -> MarginfiResult {
         marginfi_account::start_execute_order(ctx)
     }
 
+    /// (permissionless keeper) End Order execution
+    /// * Closes the Order (keeper keeps the rent)
+    /// * Closes the borrow position involved in the Order, the lending position remains open
+    /// * User health must be "unchanged" (within Order requirements i.e. minus slippage). Keeper
+    ///   may keep any slippage in excess of what was needed to complete the Order as profit.
+    /// * `StartExecuteOrder` must appear earlier in the tx
+    /// * Must appear last in the tx
+    /// * CPI is forbidden
+    /// * Returns rent for ephemeral accounts created during `StartExecuteOrder`
     pub fn marginfi_account_end_execute_order<'info>(
         ctx: Context<'_, '_, 'info, 'info, EndExecuteOrder<'info>>,
     ) -> MarginfiResult {

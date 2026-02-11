@@ -1375,11 +1375,7 @@ impl MarginfiAccountFixture {
                 system_program: system_program::ID,
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountPlaceOrder {
-                mint_keys: bank_keys,
-                trigger,
-            }
-            .data(),
+            data: marginfi::instruction::MarginfiAccountPlaceOrder { bank_keys, trigger }.data(),
         };
 
         let tx = Transaction::new_signed_with_payer(
