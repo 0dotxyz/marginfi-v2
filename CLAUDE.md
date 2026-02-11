@@ -1,6 +1,6 @@
 ## Build Notes
 
-- Can only build the program or check if it's building using `anchor build -p marginfi -- --no-default-features`
+- Can only build the program or check if it's building using `anchor build -p marginfi -- --no-default-features --features custom-heap`
 
 ## Test Notes
 
