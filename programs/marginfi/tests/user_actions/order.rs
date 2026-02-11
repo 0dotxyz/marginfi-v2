@@ -515,12 +515,13 @@ async fn execute_order_fails_pre_trigger_not_met(
     )
     .await?;
 
+    let blockhash = test_f.get_latest_blockhash().await;
     let ctx = test_f.context.borrow_mut();
     let tx = Transaction::new_signed_with_payer(
         &[start_ix, repay_ix, withdraw_ix, end_ix],
         Some(&keeper.pubkey()),
         &[&keeper],
-        ctx.last_blockhash,
+        blockhash,
     );
 
     let result = ctx.banks_client.process_transaction(tx).await;
@@ -619,12 +620,13 @@ async fn execute_order_fails_post_trigger_not_met(
     )
     .await?;
 
+    let blockhash = test_f.get_latest_blockhash().await;
     let ctx = test_f.context.borrow_mut();
     let tx = Transaction::new_signed_with_payer(
         &[start_ix, repay_ix, withdraw_ix, end_ix],
         Some(&keeper.pubkey()),
         &[&keeper],
-        ctx.last_blockhash,
+        blockhash,
     );
 
     let result = ctx.banks_client.process_transaction(tx).await;
@@ -734,12 +736,13 @@ async fn execute_order_fails_touch_uninvolved_balance(
     )
     .await?;
 
+    let blockhash = test_f.get_latest_blockhash().await;
     let ctx = test_f.context.borrow_mut();
     let tx = Transaction::new_signed_with_payer(
         &[start_ix, repay_ix, withdraw_ix, withdraw_sol_ix, end_ix],
         Some(&keeper.pubkey()),
         &[&keeper],
-        ctx.last_blockhash,
+        blockhash,
     );
 
     let result = ctx.banks_client.process_transaction(tx).await;
@@ -875,12 +878,13 @@ async fn execute_order_fails_health_check(
     )
     .await?;
 
+    let blockhash = test_f.get_latest_blockhash().await;
     let ctx = test_f.context.borrow_mut();
     let tx = Transaction::new_signed_with_payer(
         &[start_ix, repay_ix, withdraw_ix, end_ix],
         Some(&keeper.pubkey()),
         &[&keeper],
-        ctx.last_blockhash,
+        blockhash,
     );
 
     let result = ctx.banks_client.process_transaction(tx).await;
@@ -983,12 +987,13 @@ async fn execute_order_success(
     )
     .await?;
 
+    let blockhash = test_f.get_latest_blockhash().await;
     let ctx = test_f.context.borrow_mut();
     let tx = Transaction::new_signed_with_payer(
         &[start_ix, repay_ix, withdraw_ix, end_ix],
         Some(&keeper.pubkey()),
         &[&keeper],
-        ctx.last_blockhash,
+        blockhash,
     );
 
     ctx.banks_client.process_transaction(tx).await?;

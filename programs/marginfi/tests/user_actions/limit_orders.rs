@@ -411,7 +411,7 @@ async fn execute_order_with_withdraw_scale(
         &[start_ix, repay_ix, withdraw_ix, end_ix],
         Some(&keeper.pubkey()),
         &[keeper],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     ctx.banks_client.process_transaction(tx).await
@@ -984,7 +984,7 @@ async fn limit_order_start_fails_when_trigger_not_met() -> anyhow::Result<()> {
         &[start_ix],
         Some(&keeper.pubkey()),
         &[&keeper],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     let result = ctx.banks_client.process_transaction(tx).await;
@@ -1034,7 +1034,7 @@ async fn limit_order_start_succeeds_after_fixed_price_shift() -> anyhow::Result<
             &[set_fixed_ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         ctx.banks_client.process_transaction(tx).await?;
     }
@@ -1059,7 +1059,7 @@ async fn limit_order_start_succeeds_after_fixed_price_shift() -> anyhow::Result<
         &[start_ix, end_ix],
         Some(&keeper.pubkey()),
         &[&keeper],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     let result = ctx.banks_client.process_transaction(tx).await;
@@ -1145,7 +1145,7 @@ async fn limit_order_fails_keeper_overwithdraw() -> anyhow::Result<()> {
         &[start_ix, repay_ix, withdraw_ix, end_ix],
         Some(&keeper.pubkey()),
         &[&keeper],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     let result = ctx.banks_client.process_transaction(tx).await;
@@ -1212,7 +1212,7 @@ async fn limit_order_fails_with_spoofed_oracle() -> anyhow::Result<()> {
         &[start_ix],
         Some(&keeper.pubkey()),
         &[&keeper],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     let result = ctx.banks_client.process_transaction(tx).await;

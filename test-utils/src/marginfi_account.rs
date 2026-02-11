@@ -21,13 +21,13 @@ use transfer_hook::TEST_HOOK_ID;
 #[derive(Default, Clone)]
 pub struct MarginfiAccountConfig {}
 
-fn ctx_parts(ctx: &Rc<RefCell<ProgramTestContext>>) -> (BanksClient, Keypair, Hash) {
-    let ctx_ref = ctx.borrow();
-    (
-        ctx_ref.banks_client.clone(),
-        ctx_ref.payer.insecure_clone(),
-        ctx_ref.last_blockhash,
-    )
+async fn ctx_parts(ctx: &Rc<RefCell<ProgramTestContext>>) -> (BanksClient, Keypair, Hash) {
+    let (banks_client, payer) = {
+        let ctx_ref = ctx.borrow();
+        (ctx_ref.banks_client.clone(), ctx_ref.payer.insecure_clone())
+    };
+    let blockhash = banks_client.get_latest_blockhash().await.unwrap();
+    (banks_client, payer, blockhash)
 }
 
 pub struct MarginfiAccountFixture {
@@ -52,7 +52,7 @@ impl MarginfiAccountFixture {
         let ctx_ref = ctx.clone();
         let account_key = Keypair::new();
 
-        let (banks_client, payer, blockhash) = ctx_parts(&ctx_ref);
+        let (banks_client, payer, blockhash) = ctx_parts(&ctx_ref).await;
         let accounts = marginfi::accounts::MarginfiAccountInitialize {
             marginfi_account: account_key.pubkey(),
             marginfi_group: *marginfi_group,
@@ -223,7 +223,7 @@ impl MarginfiAccountFixture {
             }
         }
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let mut signers: Vec<&Keypair> = vec![&payer];
         if authority.pubkey() != payer.pubkey() {
             signers.push(authority);
@@ -250,7 +250,7 @@ impl MarginfiAccountFixture {
             data: marginfi::instruction::MarginfiAccountSetFreeze { frozen }.data(),
         };
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
 
@@ -369,7 +369,7 @@ impl MarginfiAccountFixture {
             )
             .await;
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let mut signers: Vec<&Keypair> = vec![&payer];
         if authority.pubkey() != payer.pubkey() {
             signers.push(authority);
@@ -515,7 +515,7 @@ impl MarginfiAccountFixture {
         let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_400_000);
         let nonce_ix = ComputeBudgetInstruction::set_compute_unit_price(nonce);
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let mut signers: Vec<&Keypair> = vec![&payer];
         if authority.pubkey() != payer.pubkey() {
             signers.push(authority);
@@ -636,7 +636,7 @@ impl MarginfiAccountFixture {
                 authority.pubkey(),
             )
             .await;
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let mut signers: Vec<&Keypair> = vec![&payer];
         if authority.pubkey() != payer.pubkey() {
             signers.push(authority);
@@ -654,7 +654,7 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
     ) -> anyhow::Result<(), BanksClientError> {
         let marginfi_account = self.load().await;
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
 
         let ix = Instruction {
             program_id: marginfi::ID,
@@ -780,7 +780,7 @@ impl MarginfiAccountFixture {
 
         let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_400_000);
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let tx = Transaction::new_signed_with_payer(
             &[compute_budget_ix, ix],
             Some(&payer.pubkey()),
@@ -816,7 +816,7 @@ impl MarginfiAccountFixture {
             data: marginfi::instruction::LendingAccountWithdrawEmissions {}.data(),
         };
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
 
@@ -881,7 +881,7 @@ impl MarginfiAccountFixture {
         ixs.insert(0, start_ix);
         ixs.push(end_ix);
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
 
         let signers = if let Some(signer) = signer {
             vec![&payer, signer]
@@ -1047,7 +1047,7 @@ impl MarginfiAccountFixture {
             &[transfer_account_ix],
             Some(&fee_payer.pubkey()),
             &signers,
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         )
     }
 
@@ -1074,7 +1074,7 @@ impl MarginfiAccountFixture {
                 global_fee_wallet,
             )
             .await;
-        let (banks_client, _, _) = ctx_parts(&self.ctx);
+        let (banks_client, _, _) = ctx_parts(&self.ctx).await;
         banks_client
             .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
             .await
@@ -1105,7 +1105,7 @@ impl MarginfiAccountFixture {
     }
 
     pub async fn try_close_account(&self, nonce: u64) -> std::result::Result<(), BanksClientError> {
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
 
         let ix = Instruction {
             program_id: marginfi::ID,
@@ -1269,7 +1269,7 @@ impl MarginfiAccountFixture {
         ix.accounts
             .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
 
@@ -1382,7 +1382,7 @@ impl MarginfiAccountFixture {
             &[ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         drop(ctx);
@@ -1419,7 +1419,7 @@ impl MarginfiAccountFixture {
             &[ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         drop(ctx);
@@ -1453,7 +1453,7 @@ impl MarginfiAccountFixture {
             &[ix],
             Some(&keeper.pubkey()),
             &[keeper],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         drop(ctx);
@@ -1485,7 +1485,7 @@ impl MarginfiAccountFixture {
             &[ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         drop(ctx);
@@ -1521,7 +1521,7 @@ impl MarginfiAccountFixture {
             &[ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         drop(ctx);

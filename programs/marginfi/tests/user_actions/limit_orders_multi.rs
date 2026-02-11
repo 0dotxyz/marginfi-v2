@@ -250,7 +250,7 @@ async fn execute_order_with_withdraw(
         &[start_ix, repay_ix, withdraw_ix, end_ix],
         Some(&keeper.pubkey()),
         &[keeper],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     ctx.banks_client.process_transaction(tx).await
@@ -394,7 +394,7 @@ async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails() -> anyhow::Result<()
             &[start_ix],
             Some(&keeper.pubkey()),
             &[&keeper],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         ctx.banks_client.process_transaction(tx).await
     };
@@ -624,7 +624,7 @@ async fn limit_orders_overlap_ab_close_a_reopen_a_ad_fails() -> anyhow::Result<(
             &[start_ix],
             Some(&keeper.pubkey()),
             &[&keeper],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         ctx.banks_client.process_transaction(tx).await
     };

@@ -255,7 +255,7 @@ async fn flashloan_fail_missing_fe_ix() -> anyhow::Result<()> {
         &ixs,
         Some(&ctx.payer.pubkey().clone()),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     let res = ctx.banks_client.process_transaction(tx).await;
@@ -330,7 +330,7 @@ async fn flashloan_fail_missing_invalid_sysvar_ixs() -> anyhow::Result<()> {
         &ixs,
         Some(&ctx.payer.pubkey().clone()),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     let res = ctx.banks_client.process_transaction(tx).await;
@@ -386,7 +386,7 @@ async fn flashloan_fail_invalid_end_fl_order() -> anyhow::Result<()> {
         &ixs,
         Some(&ctx.payer.pubkey().clone()),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     let res = ctx.banks_client.process_transaction(tx).await;
@@ -442,7 +442,7 @@ async fn flashloan_fail_invalid_end_fl_different_m_account() -> anyhow::Result<(
         &ixs,
         Some(&ctx.payer.pubkey().clone()),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     let res = ctx.banks_client.process_transaction(tx).await;
@@ -499,7 +499,7 @@ async fn flashloan_fail_already_in_flashloan() -> anyhow::Result<()> {
         &ixs,
         Some(&ctx.payer.pubkey().clone()),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     let res = ctx.banks_client.process_transaction(tx).await;

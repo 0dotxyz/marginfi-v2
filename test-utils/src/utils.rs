@@ -15,7 +15,8 @@ use solana_program_test::*;
 use solana_sdk::account::ReadableAccount;
 use solana_sdk::account::WritableAccount;
 use solana_sdk::{
-    account::Account, account::AccountSharedData, pubkey::Pubkey, rent::Rent, signature::Keypair,
+    account::Account, account::AccountSharedData, hash::Hash, pubkey::Pubkey, rent::Rent,
+    signature::Keypair,
 };
 use std::fs::File;
 use std::io::Read;
@@ -40,6 +41,11 @@ pub async fn load_and_deserialize<T: AccountDeserialize>(
     let ai = banks_client.get_account(*address).await.unwrap().unwrap();
 
     T::try_deserialize(&mut ai.data.as_slice()).unwrap()
+}
+
+pub async fn latest_blockhash(ctx: &Rc<RefCell<ProgramTestContext>>) -> Hash {
+    let banks_client = ctx.borrow().banks_client.clone();
+    banks_client.get_latest_blockhash().await.unwrap()
 }
 
 pub fn make_ix<T>(accounts: T, ix_data: Vec<u8>) -> Instruction

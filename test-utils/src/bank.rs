@@ -1,4 +1,4 @@
-use super::utils::load_and_deserialize;
+use super::utils::{latest_blockhash, load_and_deserialize};
 use crate::{
     kamino::KaminoFixture,
     prelude::{
@@ -147,7 +147,7 @@ impl BankFixture {
             &instructions,
             Some(&self.ctx.borrow().payer.pubkey()),
             &[&self.ctx.borrow().payer],
-            self.ctx.borrow().last_blockhash,
+            latest_blockhash(&self.ctx).await,
         );
 
         self.ctx
@@ -201,7 +201,7 @@ impl BankFixture {
                 &[ix],
                 Some(&ctx.payer.pubkey()),
                 &[&ctx.payer],
-                ctx.last_blockhash,
+                ctx.banks_client.get_latest_blockhash().await.unwrap(),
             )
         };
 
@@ -254,7 +254,7 @@ impl BankFixture {
                 &[ix],
                 Some(&ctx.payer.pubkey()),
                 &[&ctx.payer],
-                ctx.last_blockhash,
+                ctx.banks_client.get_latest_blockhash().await.unwrap(),
             )
         };
 
@@ -304,7 +304,7 @@ impl BankFixture {
             &[ix],
             Some(&ctx.payer.pubkey().clone()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client.process_transaction(tx).await?;
@@ -347,7 +347,7 @@ impl BankFixture {
             &[ix],
             Some(&ctx.payer.pubkey().clone()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client
@@ -386,7 +386,7 @@ impl BankFixture {
             &[ix],
             Some(&ctx.payer.pubkey().clone()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client.process_transaction(tx).await?;
@@ -431,7 +431,7 @@ impl BankFixture {
             &[ix],
             Some(&ctx.payer.pubkey().clone()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client.process_transaction(tx).await?;

@@ -228,7 +228,7 @@ async fn marginfi_account_deposit_failure_wrong_token_program() -> anyhow::Resul
             &[deposit_ix],
             Some(&ctx.payer.pubkey().clone()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         )
     };
 
