@@ -52,10 +52,21 @@ pub fn end_liquidation<'info>(
         I80F48!(1) + LIQUIDATION_BONUS_FEE_MINIMUM,
     );
 
-    // Ensure seized asset‐value ≤ N% of repaid liability‐value, where N = 100% + the bonus fee
+    // Ensure seized asset-value ≤ N% of repaid liability-value, where N = 100% + the bonus fee.
+    // SECURITY FIX: Apply fee cap check even for small (ignore_healthy) accounts.
+    // Previously, accounts below LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD ($5) had no
+    // cap on the seized/repaid ratio, allowing liquidators to seize disproportionate
+    // value. We now use a relaxed 2x cap for small accounts to still allow efficient
+    // dust cleanup while preventing abuse.
     if !ignore_healthy {
         check!(
             seized <= repaid * max_fee,
+            MarginfiError::LiquidationPremiumTooHigh
+        );
+    } else if repaid > I80F48::ZERO {
+        // For small accounts: allow up to 2x the repaid amount (generous but bounded)
+        check!(
+            seized <= repaid * I80F48!(2),
             MarginfiError::LiquidationPremiumTooHigh
         );
     }
