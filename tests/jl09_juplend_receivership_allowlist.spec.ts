@@ -20,7 +20,7 @@ import { assertBankrunTxFailed } from "./utils/genericTests";
 import { processBankrunTransaction } from "./utils/tools";
 import {
   accountInit,
-  composeRemainingAccounts,
+  composeRemainingAccountsWriteableMeta,
   endDeleverageIx,
   initLiquidationRecordIx,
   startDeleverageIx,
@@ -241,7 +241,7 @@ describe("jl09: JupLend receivership allowlist (start_deleverage + update_rate)"
     // Refresh Pyth pull oracles so oracle staleness doesn't mask Juplend staleness.
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 
-    const remaining = composeRemainingAccounts([
+    const remaining = composeRemainingAccountsWriteableMeta([
       juplendHealthRemainingAccounts(
         juplendBank,
         oracles.usdcOracle.publicKey,
