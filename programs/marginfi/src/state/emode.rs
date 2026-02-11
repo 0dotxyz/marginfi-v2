@@ -112,13 +112,13 @@ impl EmodeSettingsImpl for EmodeSettings {
             let max_leverage_init = calculate_max_leverage(asset_init_w, liab_init_w)?;
             check!(
                 max_leverage_init <= max_allowed_init_leverage,
-                MarginfiError::BadEmodeConfig
+                MarginfiError::MaxInitLeverageExceeded
             );
 
             let max_leverage_maint = calculate_max_leverage(asset_maint_w, liab_maint_w)?;
             check!(
                 max_leverage_maint <= max_allowed_maint_leverage,
-                MarginfiError::BadEmodeConfig
+                MarginfiError::MaxMaintLeverageExceeded
             );
         }
 

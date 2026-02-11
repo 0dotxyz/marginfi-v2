@@ -1095,6 +1095,7 @@ async fn configure_bank_emode_invalid_excessive_leverage(
     let loaded_bank = bank.load().await;
 
     let group_before = test_f.marginfi_group.load().await;
+
     let max_init_leverage = I80F48::from_num(19);
     let max_maint_leverage = I80F48::from_num(20);
     test_f
@@ -1200,7 +1201,7 @@ async fn configure_bank_rejects_invalid_emode_leverage_on_weight_update(
         res.is_err(),
         "Updating base weights that push emode leverage above limits should fail"
     );
-    assert_custom_error!(res.unwrap_err(), MarginfiError::BadEmodeConfig);
+    assert_custom_error!(res.unwrap_err(), MarginfiError::MaxInitLeverageExceeded);
 
     Ok(())
 }
@@ -1537,8 +1538,8 @@ async fn configure_group_max_emode_leverage_propagates_to_bank_cache(
             group_before.delegate_emissions_admin,
             group_before.metadata_admin,
             group_before.risk_admin,
-            None, // Should default to 15
-            None, // Should default to 20
+            Some(I80F48::from_num(15).into()),
+            Some(I80F48::from_num(20).into()),
         )
         .await;
 
