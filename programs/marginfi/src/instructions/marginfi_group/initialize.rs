@@ -7,14 +7,10 @@ use marginfi_type_crate::{
     types::{FeeState, MarginfiGroup},
 };
 
-pub fn initialize_group(
-    ctx: Context<MarginfiGroupInitialize>,
-    is_arena_group: bool,
-) -> MarginfiResult {
+pub fn initialize_group(ctx: Context<MarginfiGroupInitialize>) -> MarginfiResult {
     let marginfi_group = &mut ctx.accounts.marginfi_group.load_init()?;
 
     marginfi_group.set_initial_configuration(ctx.accounts.admin.key());
-    marginfi_group.set_arena_group(is_arena_group)?;
 
     msg!(
         "Group admin: {:?} flags: {:?}",

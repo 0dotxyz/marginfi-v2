@@ -29,7 +29,6 @@ pub trait BankConfigImpl {
         stake_pool: Option<Pubkey>,
         sol_pool: Option<Pubkey>,
     ) -> MarginfiResult;
-    fn validate_oracle_age(&self) -> MarginfiResult;
     fn usd_init_limit_active(&self) -> bool;
     fn get_oracle_max_age(&self) -> u64;
 }
@@ -95,6 +94,11 @@ impl BankConfigImpl for BankConfig {
             check!(asset_maint_w == I80F48::ZERO, MarginfiError::InvalidConfig);
         }
 
+        check!(
+            self.oracle_max_age >= ORACLE_MIN_AGE,
+            MarginfiError::InvalidOracleSetup
+        );
+
         Ok(())
     }
 
@@ -127,14 +131,6 @@ impl BankConfigImpl for BankConfig {
         sol_pool: Option<Pubkey>,
     ) -> MarginfiResult {
         OraclePriceFeedAdapter::validate_bank_config(self, ais, lst_mint, stake_pool, sol_pool)?;
-        Ok(())
-    }
-
-    fn validate_oracle_age(&self) -> MarginfiResult {
-        check!(
-            self.oracle_max_age >= ORACLE_MIN_AGE,
-            MarginfiError::InvalidOracleSetup
-        );
         Ok(())
     }
 

@@ -615,8 +615,8 @@ async fn emode_borrows() -> anyhow::Result<()> {
         collateral_bank_emode_tag: sol_eq_emode_tag,
         flags: 0,
         pad0: [0, 0, 0, 0, 0],
-        asset_weight_init: I80F48!(1.0).into(),  // up from 0.4
-        asset_weight_maint: I80F48!(1.0).into(), // up from 0.4
+        asset_weight_init: I80F48!(0.9).into(), // up from 0.4, gives 10x leverage
+        asset_weight_maint: I80F48!(0.9).into(), // up from 0.4, gives 10x leverage
     }];
 
     let res = test_f
@@ -625,9 +625,9 @@ async fn emode_borrows() -> anyhow::Result<()> {
         .await;
     assert!(res.is_ok());
 
-    // Verify that we CAN now borrow up to ~1000 SOL (i.e. +600 to existing liability)
+    // Verify that we CAN now borrow up to ~900 SOL (i.e. +500 to existing 399 liability)
     let res = borrower_mfi_account_f
-        .try_bank_borrow(borrower_token_account_f_sol.key, sol_bank, 600)
+        .try_bank_borrow(borrower_token_account_f_sol.key, sol_bank, 500)
         .await;
     assert!(res.is_ok());
     let res = borrower_mfi_account_f
@@ -647,7 +647,7 @@ async fn emode_borrows() -> anyhow::Result<()> {
 
     // Repay part of the debt so that we can borrow some USDC (even though this would turn off the emode)
     let res = borrower_mfi_account_f
-        .try_bank_repay(borrower_token_account_f_sol.key, sol_bank, 650, None)
+        .try_bank_repay(borrower_token_account_f_sol.key, sol_bank, 550, None)
         .await;
     assert!(res.is_ok());
 
@@ -658,7 +658,7 @@ async fn emode_borrows() -> anyhow::Result<()> {
 
     // Check that we cannot re-borrow ~the same amount (- borrowed USDC) of SOL anymore.
     let res = borrower_mfi_account_f
-        .try_bank_borrow(borrower_token_account_f_sol.key, sol_bank, 500)
+        .try_bank_borrow(borrower_token_account_f_sol.key, sol_bank, 400)
         .await;
     assert!(res.is_err());
 
@@ -672,7 +672,7 @@ async fn emode_borrows() -> anyhow::Result<()> {
     assert!(res.is_ok());
 
     let res = borrower_mfi_account_f
-        .try_bank_borrow(borrower_token_account_f_sol.key, sol_bank, 650)
+        .try_bank_borrow(borrower_token_account_f_sol.key, sol_bank, 550)
         .await;
     assert!(res.is_ok());
 

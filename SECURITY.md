@@ -6,7 +6,7 @@ marginfi offers bug bounties for marginfi's on-chain program code. Bugs related 
 ​
 |Severity|Bounty|
 |-----------|-------------|
-|Critical|10% of the value of the hack, up to $500,000|
+|Critical|2% of the value of the hack, up to $500,000. Minimum $50,000|
 |High|$10,000 to $50,000 per bug, assessed on a case by case basis|
 |Medium/Low|$1,000 to $5,000 per bug, assessed on a case by case basis|
 ​
@@ -26,12 +26,12 @@ Bug bounties for infrastructure components (networking, UI, SDK) are first-come-
 ## Submission
 Please email security@mrgn.group with a detailed description of the attack vector.
 ​
-For critical- and high-severity bugs, we require a proof of concept reproducible on a privately deployed mainnet contract (**NOT** our official deployment).
+For critical- and high-severity bugs, we may require a proof of concept reproducible on a privately deployed mainnet contract or localnet (**NOT** our official deployment).
 ​
 You should expect a reply within 1 business day with additional questions or next steps regarding the bug bounty.
 ​
 ## Bug Bounty Payment
-Bug bounties will be paid in USDC or equivalent.
+Bug bounties will be paid in USDC or equivalent. Critical bounties may be paid in up to 80\% token, with the rest in USDC.
 ​
 ## Invalid Bug Bounties
 A number of attacks are out of scope for the bug bounty, including but not limited to:

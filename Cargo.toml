@@ -4,14 +4,9 @@ members = [
     "programs/marginfi",
     "programs/mocks",
     "programs/test_transfer_hook",
-    "clients/rust/marginfi-cli",
     "type-crate",
     "id-crate"
 ]
-# exclude = [
-#   "programs/liquidity-incentive-program",
-#   "programs/brick",
-# ]
 
 [workspace.dependencies]
 solana-cli-output = "=2.1.20"

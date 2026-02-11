@@ -127,7 +127,6 @@ pub fn lending_pool_add_bank_permissionless(
         Some(stake_pool),
         Some(sol_pool),
     )?;
-    bank.config.validate_oracle_age()?;
 
     emit!(LendingPoolBankCreateEvent {
         header: GroupEventHeader {

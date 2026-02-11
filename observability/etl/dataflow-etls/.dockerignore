@@ -1,6 +1,0 @@
-# Ignore everything except for Python files and the requirements file.
-*
-!setup.py
-!MANIFEST.in
-!dataflow_etls/
-!jobs/

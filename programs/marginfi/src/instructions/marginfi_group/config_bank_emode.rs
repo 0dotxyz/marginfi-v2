@@ -10,6 +10,7 @@ pub fn lending_pool_configure_bank_emode(
     entries: [EmodeEntry; MAX_EMODE_ENTRIES],
 ) -> MarginfiResult {
     let mut bank = ctx.accounts.bank.load_mut()?;
+    let group = ctx.accounts.group.load()?;
 
     let mut sorted_entries = entries;
     sorted_entries.sort_by_key(|e| e.collateral_bank_emode_tag);
@@ -24,7 +25,12 @@ pub fn lending_pool_configure_bank_emode(
     bank.emode.emode_tag = emode_tag;
     bank.emode.emode_config.entries = sorted_entries;
     bank.emode.timestamp = Clock::get()?.unix_timestamp;
-    bank.emode.validate_entries()?;
+
+    bank.emode.validate_entries_with_liability_weights(
+        &bank.config,
+        group.emode_max_init_leverage,
+        group.emode_max_maint_leverage,
+    )?;
 
     if bank.emode.emode_config.has_entries() {
         msg!("emode entries detected and activated");

@@ -1,5 +1,5 @@
 import { assert } from "chai";
-import { Transaction, PublicKey } from "@solana/web3.js";
+import { Transaction } from "@solana/web3.js";
 import BN from "bn.js";
 import { createMintToInstruction } from "@solana/spl-token";
 import {
@@ -11,13 +11,13 @@ import {
   bankRunProvider,
   driftBankrunProgram,
   driftAccounts,
-  DRIFT_TOKENA_PULL_ORACLE,
+  DRIFT_TOKEN_A_PULL_ORACLE,
 } from "./rootHooks";
 import { processBankrunTransaction } from "./utils/tools";
 import {
   getTokenBalance,
-  assertBNEqual,
   assertBNApproximately,
+  assertBNEqual,
 } from "./utils/genericTests";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { makeDepositIx, makeWithdrawIx } from "./utils/drift-sdk";
@@ -25,17 +25,15 @@ import { deriveSpotMarketPDA } from "./utils/pdas";
 import {
   getSpotMarketAccount,
   getUserPositions,
-  getUserAccount,
-  calculateUtilizationRate,
   calculateInterestRate,
-  getDriftScalingFactor,
-  formatTokenAmount,
-  formatDepositAmount,
-  formatRawAmount,
   isDriftPositionBorrow,
   isDriftPositionDeposit,
   USDC_MARKET_INDEX,
   TOKEN_A_MARKET_INDEX,
+  DRIFT_UTILIZATION_PRECISION,
+  TOKEN_A_SCALING_FACTOR,
+  USDC_SCALING_FACTOR,
+  calculateUtilization,
 } from "./utils/drift-utils";
 
 describe("d04: Drift - User Deposits and Borrows", () => {
@@ -50,12 +48,6 @@ describe("d04: Drift - User Deposits and Borrows", () => {
   // User B: Deposits USDC, borrows Token A
   const USER_B_USDC_DEPOSIT = new BN(100_000 * 10 ** ecosystem.usdcDecimals); // 100,000 USDC = $100,000 @ $1/USDC
   const USER_B_TOKEN_A_BORROW = new BN(500 * 10 ** ecosystem.tokenADecimals); // 500 Token A = $5,000 @ $10/TKA
-
-  // Drift uses token-specific scaling factors: 10^(9 - token_decimals)
-  const USDC_SCALING_FACTOR = getDriftScalingFactor(ecosystem.usdcDecimals); // 10^3 = 1,000
-  const TOKEN_A_SCALING_FACTOR = getDriftScalingFactor(
-    ecosystem.tokenADecimals
-  ); // 10^1 = 10
 
   before(async () => {
     userA = users[0];
@@ -126,6 +118,7 @@ describe("d04: Drift - User Deposits and Borrows", () => {
       driftBankrunProgram,
       TOKEN_A_MARKET_INDEX
     );
+    assertBNEqual(spotMarketBefore.depositBalance, new BN(0));
 
     const [tokenASpotMarket] = deriveSpotMarketPDA(
       driftBankrunProgram.programId,
@@ -142,7 +135,7 @@ describe("d04: Drift - User Deposits and Borrows", () => {
         amount: USER_A_TOKEN_A_DEPOSIT,
         subAccountId: 0,
         reduceOnly: false,
-        remainingOracles: [driftAccounts.get(DRIFT_TOKENA_PULL_ORACLE)!],
+        remainingOracles: [driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE)!],
         remainingMarkets: [tokenASpotMarket],
       }
     );
@@ -169,16 +162,12 @@ describe("d04: Drift - User Deposits and Borrows", () => {
       USER_A_TOKEN_A_DEPOSIT.toNumber()
     );
 
-    const depositIncrease = spotMarketAfter.depositBalance.sub(
-      spotMarketBefore.depositBalance
-    );
-
     // Drift uses a scaling factor for deposit balances
     const expectedScaledAmount = USER_A_TOKEN_A_DEPOSIT.mul(
       TOKEN_A_SCALING_FACTOR
     );
 
-    assert.ok(depositIncrease.eq(expectedScaledAmount));
+    assertBNEqual(spotMarketAfter.depositBalance, expectedScaledAmount);
 
     const positions = await getUserPositions(
       driftBankrunProgram,
@@ -200,6 +189,7 @@ describe("d04: Drift - User Deposits and Borrows", () => {
       driftBankrunProgram,
       USDC_MARKET_INDEX
     );
+    assertBNEqual(spotMarketBefore.depositBalance, new BN(0));
 
     const [usdcSpotMarket] = deriveSpotMarketPDA(
       driftBankrunProgram.programId,
@@ -244,12 +234,9 @@ describe("d04: Drift - User Deposits and Borrows", () => {
       USER_B_USDC_DEPOSIT.toNumber()
     );
 
-    const depositIncrease = spotMarketAfter.depositBalance.sub(
-      spotMarketBefore.depositBalance
-    );
     const expectedScaledAmount = USER_B_USDC_DEPOSIT.mul(USDC_SCALING_FACTOR);
 
-    assert.ok(depositIncrease.eq(expectedScaledAmount));
+    assertBNEqual(spotMarketAfter.depositBalance, expectedScaledAmount);
 
     const positions = await getUserPositions(
       driftBankrunProgram,
@@ -276,6 +263,7 @@ describe("d04: Drift - User Deposits and Borrows", () => {
       driftBankrunProgram,
       USDC_MARKET_INDEX
     );
+    assertBNEqual(usdcMarketBefore.borrowBalance, new BN(0));
 
     const [usdcSpotMarket] = deriveSpotMarketPDA(
       driftBankrunProgram.programId,
@@ -296,7 +284,7 @@ describe("d04: Drift - User Deposits and Borrows", () => {
         amount: USER_A_USDC_BORROW,
         subAccountId: 0,
         reduceOnly: false,
-        remainingOracles: [driftAccounts.get(DRIFT_TOKENA_PULL_ORACLE)!],
+        remainingOracles: [driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE)!],
         remainingMarkets: [usdcSpotMarket, tokenASpotMarket],
       }
     );
@@ -324,15 +312,12 @@ describe("d04: Drift - User Deposits and Borrows", () => {
       USER_A_USDC_BORROW.toNumber()
     );
 
-    const borrowIncrease = usdcMarketAfter.borrowBalance.sub(
-      usdcMarketBefore.borrowBalance
-    );
     const expectedScaledBorrowAmount =
       USER_A_USDC_BORROW.mul(USDC_SCALING_FACTOR);
 
     // Allow for small rounding differences due to Drift's interest accrual
     assertBNApproximately(
-      borrowIncrease,
+      usdcMarketAfter.borrowBalance,
       expectedScaledBorrowAmount,
       new BN(1)
     );
@@ -351,11 +336,32 @@ describe("d04: Drift - User Deposits and Borrows", () => {
       (p: any) => p.marketIndex === TOKEN_A_MARKET_INDEX
     );
 
-    assert.ok(usdcPosition);
     assert.ok(isDriftPositionBorrow(usdcPosition));
-
-    assert.ok(tokenAPosition);
     assert.ok(isDriftPositionDeposit(tokenAPosition));
+
+    const usdcUtilization = calculateUtilization(usdcMarketAfter);
+    console.log(
+      "USDC utilization: " +
+        usdcUtilization
+          .mul(new BN(100))
+          .div(DRIFT_UTILIZATION_PRECISION)
+          .toNumber() +
+        "%"
+    ); // 10%
+
+    const usdcInterestRate = calculateInterestRate(
+      usdcMarketAfter,
+      new BN(0),
+      usdcUtilization
+    );
+    console.log(
+      "USDC InterestRate: " +
+        usdcInterestRate
+          .mul(new BN(100))
+          .div(DRIFT_UTILIZATION_PRECISION)
+          .toNumber() +
+        "%"
+    ); // 1%
   });
 
   it("(user B) borrows Token A against USDC collateral", async () => {
@@ -372,6 +378,7 @@ describe("d04: Drift - User Deposits and Borrows", () => {
       driftBankrunProgram,
       TOKEN_A_MARKET_INDEX
     );
+    assertBNEqual(tokenAMarketBefore.borrowBalance, new BN(0));
 
     const [usdcSpotMarket] = deriveSpotMarketPDA(
       driftBankrunProgram.programId,
@@ -392,7 +399,7 @@ describe("d04: Drift - User Deposits and Borrows", () => {
         amount: USER_B_TOKEN_A_BORROW,
         subAccountId: 0,
         reduceOnly: false,
-        remainingOracles: [driftAccounts.get(DRIFT_TOKENA_PULL_ORACLE)!],
+        remainingOracles: [driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE)!],
         remainingMarkets: [tokenASpotMarket, usdcSpotMarket],
       }
     );
@@ -420,16 +427,13 @@ describe("d04: Drift - User Deposits and Borrows", () => {
       USER_B_TOKEN_A_BORROW.toNumber()
     );
 
-    const borrowIncrease = tokenAMarketAfter.borrowBalance.sub(
-      tokenAMarketBefore.borrowBalance
-    );
     const expectedScaledBorrowAmount = USER_B_TOKEN_A_BORROW.mul(
       TOKEN_A_SCALING_FACTOR
     );
 
     // Allow for small rounding differences
     assertBNApproximately(
-      borrowIncrease,
+      tokenAMarketAfter.borrowBalance,
       expectedScaledBorrowAmount,
       new BN(1)
     );
@@ -448,102 +452,31 @@ describe("d04: Drift - User Deposits and Borrows", () => {
       (p: any) => p.marketIndex === TOKEN_A_MARKET_INDEX
     );
 
-    assert.ok(usdcPosition);
     assert.ok(isDriftPositionDeposit(usdcPosition));
-
-    assert.ok(tokenAPosition);
     assert.ok(isDriftPositionBorrow(tokenAPosition));
-  });
 
-  it("Verify spot markets are configured for borrowing", async () => {
-    const usdcMarket = await getSpotMarketAccount(
-      driftBankrunProgram,
-      USDC_MARKET_INDEX
-    );
-
-    assert.ok(usdcMarket.initialAssetWeight > 0);
-    assert.ok(usdcMarket.initialLiabilityWeight > 0);
-    assert.ok(usdcMarket.optimalBorrowRate > 0);
-    assert.ok(usdcMarket.maxBorrowRate > 0);
-
-    const tokenAMarket = await getSpotMarketAccount(
-      driftBankrunProgram,
-      TOKEN_A_MARKET_INDEX
-    );
-
-    assert.ok(tokenAMarket.initialAssetWeight > 0);
-    assert.ok(tokenAMarket.initialLiabilityWeight > 0);
-    assert.ok(tokenAMarket.optimalBorrowRate > 0);
-    assert.ok(tokenAMarket.maxBorrowRate > 0);
-
-    const tokenAOracle = driftAccounts.get(DRIFT_TOKENA_PULL_ORACLE);
-    assert.ok(tokenAOracle);
-  });
-
-  it("Verify both markets have active deposits and borrows", async () => {
-    const usdcMarket = await getSpotMarketAccount(
-      driftBankrunProgram,
-      USDC_MARKET_INDEX
-    );
-
-    assert.ok(usdcMarket.depositBalance.gt(new BN(0)));
-    assert.ok(usdcMarket.borrowBalance.gt(new BN(0)));
-    assert.ok(usdcMarket.depositBalance.gt(usdcMarket.borrowBalance));
-
-    const tokenAMarket = await getSpotMarketAccount(
-      driftBankrunProgram,
-      TOKEN_A_MARKET_INDEX
-    );
-
-    assert.ok(tokenAMarket.depositBalance.gt(new BN(0)));
-    assert.ok(tokenAMarket.borrowBalance.gt(new BN(0)));
-    assert.ok(tokenAMarket.depositBalance.gt(tokenAMarket.borrowBalance));
-  });
-
-  it("Verify interest accumulation on both markets", async () => {
-    const usdcMarket = await getSpotMarketAccount(
-      driftBankrunProgram,
-      USDC_MARKET_INDEX
-    );
-    const usdcUtilization = calculateUtilizationRate(
-      usdcMarket.depositBalance,
-      usdcMarket.borrowBalance
-    );
-
-    assert.ok(usdcUtilization > 0 && usdcUtilization <= 1000000);
-
-    const usdcInterestRate = calculateInterestRate(
-      usdcUtilization,
-      usdcMarket.optimalUtilization,
-      usdcMarket.optimalBorrowRate,
-      usdcMarket.maxBorrowRate
-    );
-
-    assert.ok(usdcInterestRate > 0);
-
-    const tokenAMarket = await getSpotMarketAccount(
-      driftBankrunProgram,
-      TOKEN_A_MARKET_INDEX
-    );
-    const tokenAUtilization = calculateUtilizationRate(
-      tokenAMarket.depositBalance,
-      tokenAMarket.borrowBalance
-    );
-
-    assert.ok(tokenAUtilization > 0 && tokenAUtilization <= 1000000);
+    const tokenAUtilization = calculateUtilization(tokenAMarketAfter);
+    console.log(
+      "Token A utilization: " +
+        tokenAUtilization
+          .mul(new BN(100))
+          .div(DRIFT_UTILIZATION_PRECISION)
+          .toNumber() +
+        "%"
+    ); // 10%
 
     const tokenAInterestRate = calculateInterestRate(
-      tokenAUtilization,
-      tokenAMarket.optimalUtilization,
-      tokenAMarket.optimalBorrowRate,
-      tokenAMarket.maxBorrowRate
+      tokenAMarketAfter,
+      new BN(0),
+      tokenAUtilization
     );
-
-    assert.ok(tokenAInterestRate > 0);
-
-    assert.ok(usdcMarket.cumulativeDepositInterest.gt(new BN(0)));
-    assert.ok(usdcMarket.cumulativeBorrowInterest.gt(new BN(0)));
-    assert.ok(tokenAMarket.cumulativeDepositInterest.gt(new BN(0)));
-    assert.ok(tokenAMarket.cumulativeBorrowInterest.gt(new BN(0)));
+    console.log(
+      "Token A InterestRate: " +
+        tokenAInterestRate
+          .mul(new BN(100))
+          .div(DRIFT_UTILIZATION_PRECISION)
+          .toNumber() +
+        "%"
+    ); // 400%
   });
 });

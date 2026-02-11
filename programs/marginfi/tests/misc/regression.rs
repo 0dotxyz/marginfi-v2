@@ -694,16 +694,10 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(bank.lending_position_count, 0);
     assert_eq!(bank.borrowing_position_count, 0);
     assert_eq!(bank._padding_0, [0; 16]);
-    assert_eq!(bank.kamino_reserve, Pubkey::default());
-    assert_eq!(bank.kamino_obligation, Pubkey::default());
-    assert_eq!(bank.drift_spot_market, Pubkey::default());
-    assert_eq!(bank.drift_user, Pubkey::default());
-    assert_eq!(bank.drift_user_stats, Pubkey::default());
-    assert_eq!(bank.solend_reserve, Pubkey::default());
-    assert_eq!(bank.solend_obligation, Pubkey::default());
-    assert_eq!(bank.juplend_lending, Pubkey::default());
-    assert_eq!(bank.juplend_f_token_vault, Pubkey::default());
-    assert_eq!(bank._padding_1, [0, 0]);
+    assert_eq!(bank.integration_acc_1, Pubkey::default());
+    assert_eq!(bank.integration_acc_2, Pubkey::default());
+    assert_eq!(bank.integration_acc_3, Pubkey::default());
+    assert_eq!(bank._padding_1, [[0, 0]; 13]);
 
     Ok(())
 }

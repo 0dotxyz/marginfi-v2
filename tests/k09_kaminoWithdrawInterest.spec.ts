@@ -36,7 +36,6 @@ import { composeRemainingAccounts } from "./utils/user-instructions";
 import { getTokenBalance } from "./utils/genericTests";
 import { BankrunProvider } from "anchor-bankrun";
 import { ONE_WEEK_IN_SECONDS } from "./utils/types";
-import { refreshPullOracles } from "./utils/pyth-pull-mocks";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { getEpochAndSlot } from "./utils/stake-utils";
 import Decimal from "decimal.js";

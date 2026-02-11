@@ -153,7 +153,7 @@ describe("jl01: JupLend - basic deposit/withdraw (bankrun)", () => {
       bankMint: ecosystem.usdcMint.publicKey,
       bankSeed: BANK_SEED,
       oracle: oracles.usdcOracle.publicKey,
-      juplendLending: pool.lending,
+      integrationAcc1: pool.lending,
       fTokenMint: pool.fTokenMint,
       config,
     });
@@ -172,7 +172,7 @@ describe("jl01: JupLend - basic deposit/withdraw (bankrun)", () => {
     assertKeysEqual(bank.group, juplendGroup.publicKey);
     assert.equal(bank.config.assetTag, ASSET_TAG_JUPLEND);
 
-    assertKeysEqual(bank.juplendLending, pool.lending);
+    assertKeysEqual(bank.integrationAcc1, pool.lending);
     assertKeysEqual(bank.config.oracleKeys[0], oracles.usdcOracle.publicKey);
     assertKeysEqual(bank.config.oracleKeys[1], pool.lending);
     assert.ok(Object.keys(bank.config.oracleSetup).includes("juplendPythPull"));

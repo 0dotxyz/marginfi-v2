@@ -4,9 +4,11 @@ import {
   Transaction,
   VersionedTransaction,
   Commitment,
+  SystemProgram,
+  TransactionInstruction,
 } from "@solana/web3.js";
 import { BanksClient } from "solana-bankrun";
-import { utils } from "@coral-xyz/anchor";
+import { Instruction, utils } from "@coral-xyz/anchor";
 
 /**
  * Patches a bankrun connection to add missing methods that tests need.
@@ -17,7 +19,18 @@ export function patchBankrunConnection(
   connection: Connection,
   banksClient: BanksClient
 ): void {
-  const conn = connection as Record<string, unknown>;
+  type PatchedConnection = Connection & {
+    getBalance: (publicKey: PublicKey) => Promise<number>;
+    getLatestBlockhash: () => Promise<{
+      blockhash: string;
+      lastValidBlockHeight: number;
+    }>;
+    sendRawTransaction: (
+      rawTransaction: Buffer | Uint8Array
+    ) => Promise<string>;
+  };
+
+  const conn = connection as PatchedConnection;
 
   // BankrunConnectionProxy throws "Could not find" for unknown accounts.
   // Real RPC connections return `null` for missing accounts.
@@ -91,14 +104,32 @@ export function patchBankrunConnection(
     return signature ? utils.bytes.bs58.encode(signature) : "unsigned-tx";
   };
 
-  conn.confirmTransaction = async () => {
+  conn.confirmTransaction = async (_strategy, _commitment) => {
     // Bankrun transactions are confirmed immediately (errors thrown above in sendRawTransaction)
-    return { value: { err: null } };
+    return { context: { slot: 0 }, value: { err: null } };
   };
 
   // Shim for SPL single pool staked tests
-  conn.getStakeMinimumDelegation = async () => {
+  conn.getStakeMinimumDelegation = async (_config) => {
     // Minimum stake delegation on mainnet is 1 SOL
-    return { value: 1_000_000_000 };
+    return { context: { slot: 0 }, value: 1_000_000_000 };
   };
+}
+
+/**
+ * A random dummy ix to trick bankrun.
+ * @param from - must sign
+ * @param to
+ * @returns
+ */
+export function dummyIx(
+  from: PublicKey,
+  to: PublicKey
+): TransactionInstruction {
+  let ix = SystemProgram.transfer({
+    fromPubkey: from,
+    toPubkey: to,
+    lamports: Math.round(Math.random() * 123456),
+  });
+  return ix;
 }

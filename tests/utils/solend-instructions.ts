@@ -22,7 +22,7 @@ export interface AddSolendBankAccounts {
   group: PublicKey;
   feePayer: PublicKey;
   bankMint: PublicKey;
-  solendReserve: PublicKey;
+  integrationAcc1: PublicKey;
   solendMarket: PublicKey;
   oracle: PublicKey;
   tokenProgram?: PublicKey;
@@ -41,7 +41,7 @@ export interface AddSolendBankArgs {
  * - group: The marginfi group to add the bank to (must be admin)
  * - feePayer: Account that pays for the transaction
  * - bankMint: The token mint that matches the Solend reserve mint
- * - solendReserve: The Solend reserve account
+ * - integrationAcc1: The Solend reserve account
  * - solendMarket: The Solend lending market account
  * - oracle: The oracle account for price feeds
  *
@@ -75,7 +75,7 @@ export const makeAddSolendBankIx = async (
       group: accounts.group,
       feePayer: accounts.feePayer,
       bankMint: accounts.bankMint,
-      solendReserve: accounts.solendReserve,
+      integrationAcc1: accounts.integrationAcc1,
       tokenProgram: accounts.tokenProgram || TOKEN_PROGRAM_ID,
     })
     .remainingAccounts([
@@ -85,7 +85,7 @@ export const makeAddSolendBankIx = async (
         isWritable: false,
       },
       {
-        pubkey: accounts.solendReserve,
+        pubkey: accounts.integrationAcc1,
         isSigner: false,
         isWritable: false,
       },
@@ -130,14 +130,14 @@ export const makeSolendInitObligationIx = async (
 
   // Load the Solend reserve to get liquidity supply and collateral mint
   const reserveData = await program.provider.connection.getAccountInfo(
-    bank.solendReserve
+    bank.integrationAcc1
   );
   if (!reserveData) {
     throw new Error("Solend reserve not found");
   }
 
   // Parse the reserve using the SDK
-  const reserve = parseSolendReserve(bank.solendReserve, reserveData);
+  const reserve = parseSolendReserve(bank.integrationAcc1, reserveData);
   const liquiditySupplyPubkey = reserve.info.liquidity.supplyPubkey;
   const collateralMintPubkey = reserve.info.collateral.mintPubkey;
   const collateralSupplyPubkey = reserve.info.collateral.supplyPubkey;
@@ -216,14 +216,14 @@ export const makeSolendDepositIx = async (
 
   // Load the Solend reserve to get liquidity supply and collateral mint
   const reserveData = await program.provider.connection.getAccountInfo(
-    bank.solendReserve
+    bank.integrationAcc1
   );
   if (!reserveData) {
     throw new Error("Solend reserve not found");
   }
 
   // Parse the reserve using the SDK
-  const reserve = parseSolendReserve(bank.solendReserve, reserveData);
+  const reserve = parseSolendReserve(bank.integrationAcc1, reserveData);
   const liquiditySupplyPubkey = reserve.info.liquidity.supplyPubkey;
   const collateralMintPubkey = reserve.info.collateral.mintPubkey;
   const collateralSupplyPubkey = reserve.info.collateral.supplyPubkey;
@@ -306,14 +306,14 @@ export const makeSolendWithdrawIx = async (
 
   // Load the Solend reserve to get liquidity supply and collateral mint
   const reserveData = await program.provider.connection.getAccountInfo(
-    bank.solendReserve
+    bank.integrationAcc1
   );
   if (!reserveData) {
     throw new Error("Solend reserve not found");
   }
 
   // Parse the reserve using the SDK
-  const reserve = parseSolendReserve(bank.solendReserve, reserveData);
+  const reserve = parseSolendReserve(bank.integrationAcc1, reserveData);
   const liquiditySupplyPubkey = reserve.info.liquidity.supplyPubkey;
   const collateralMintPubkey = reserve.info.collateral.mintPubkey;
   const collateralSupplyPubkey = reserve.info.collateral.supplyPubkey;

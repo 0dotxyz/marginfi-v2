@@ -3,19 +3,15 @@ import {
   Keypair,
   Transaction,
   SystemProgram,
-  PublicKey,
 } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, createMintToInstruction } from "@solana/spl-token";
+import { createMintToInstruction } from "@solana/spl-token";
 import {
   bankrunContext,
-  groupAdmin,
   globalProgramAdmin,
   ecosystem,
   users,
   solendAccounts,
   SOLEND_MARKET,
-  SOLEND_USDC_RESERVE,
-  SOLEND_TOKENA_RESERVE,
   bankRunProvider,
 } from "./rootHooks";
 import { processBankrunTransaction } from "./utils/tools";

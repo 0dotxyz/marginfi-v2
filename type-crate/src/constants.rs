@@ -29,9 +29,9 @@ pub const DAILY_RESET_INTERVAL: i64 = 24 * 60 * 60; // 24 hours
 
 /// Due to real-world constraints, oracles using an age less than this value are typically too
 /// unreliable, and we want to restrict pools from picking an oracle that is effectively unusable
-pub const ORACLE_MIN_AGE: u16 = 30;
+/// Switchboard oracles are cranked on demand, so we can use a lower value (10 seconds)
+pub const ORACLE_MIN_AGE: u16 = 10;
 pub const MAX_PYTH_ORACLE_AGE: u64 = 60;
-pub const MAX_SWB_ORACLE_AGE: u64 = 3 * 60;
 
 /// Range that contains 95% price data distribution
 ///
@@ -49,8 +49,8 @@ pub const USDC_EXPONENT: i32 = 6;
 
 pub const MAX_ORACLE_KEYS: usize = 5;
 
-/// Any balance below 1 SPL token amount is treated as none,
-/// this is to account for any artifacts resulting from binary fraction arithemtic.
+/// Any balance below 1 SPL token unit is treated as empty.
+/// This is to account for any artifacts resulting from binary fraction arithmetic.
 pub const EMPTY_BALANCE_THRESHOLD: I80F48 = I80F48!(1);
 
 /// Any account with assets below this threshold is considered bankrupt.
@@ -59,7 +59,7 @@ pub const EMPTY_BALANCE_THRESHOLD: I80F48 = I80F48!(1);
 /// This is USD denominated, so 0.001 = $0.1
 pub const BANKRUPT_THRESHOLD: I80F48 = I80F48!(0.1);
 
-/// Comparios threshold used to account for arithmetic artifacts on balances
+/// Comparison threshold used to account for arithmetic artifacts on balances
 pub const ZERO_AMOUNT_THRESHOLD: I80F48 = I80F48!(0.0001);
 
 pub const EMISSIONS_FLAG_BORROW_ACTIVE: u64 = 1 << 0;
@@ -175,8 +175,9 @@ pub const ASSET_TAG_JUPLEND: u8 = 6;
 /// limit to prevent accounts from becoming unliquidatable due to CU/heap memory issues in
 /// liquidation. These integrations require 3 accounts per position for health checks (bank + oracle
 /// + reserve/spot-market), so they share the same limit.
+/// Note: it's disabled in local integration tests so that we can measure the performance and
+/// eventually get rid of this limit altogether.
 pub const MAX_INTEGRATION_POSITIONS: usize = 8;
-
 // WARN: You can set anything here, including a discrim that's technically "wrong" for the struct
 // with that name, and prod will use that hash anyways. Don't change these hashes once a struct is
 // live in prod.

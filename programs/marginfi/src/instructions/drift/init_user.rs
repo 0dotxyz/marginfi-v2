@@ -30,9 +30,9 @@ pub fn drift_init_user(ctx: Context<DriftInitUser>, amount: u64) -> MarginfiResu
         let bank = ctx.accounts.bank.load()?;
         authority_bump = bank.liquidity_vault_authority_bump;
 
-        let drift_spot_market = ctx.accounts.drift_spot_market.load()?;
-        market_index = drift_spot_market.market_index;
-        pool_id = drift_spot_market.pool_id;
+        let integration_acc_1 = ctx.accounts.integration_acc_1.load()?;
+        market_index = integration_acc_1.market_index;
+        pool_id = integration_acc_1.pool_id;
     }
 
     // Arbitrarily setting minimum deposit to 10 absolute units to always keep the account alive.
@@ -74,9 +74,9 @@ pub struct DriftInitUser<'info> {
 
     #[account(
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
-        has_one = drift_spot_market @ MarginfiError::InvalidDriftSpotMarket,
-        has_one = drift_user @ MarginfiError::InvalidDriftUser,
-        has_one = drift_user_stats @ MarginfiError::InvalidDriftUserStats,
+        has_one = integration_acc_1 @ MarginfiError::InvalidDriftSpotMarket,
+        has_one = integration_acc_2 @ MarginfiError::InvalidDriftUser,
+        has_one = integration_acc_3 @ MarginfiError::InvalidDriftUserStats,
         has_one = mint @ MarginfiError::InvalidMint,
         constraint = is_drift_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongBankAssetTagForDriftOperation
@@ -111,7 +111,7 @@ pub struct DriftInitUser<'info> {
         bump,
         seeds::program = DRIFT_PROGRAM_ID
     )]
-    pub drift_user_stats: SystemAccount<'info>,
+    pub integration_acc_3: SystemAccount<'info>,
 
     /// The user account to be created (sub_account_id = 0)
     #[account(
@@ -124,7 +124,7 @@ pub struct DriftInitUser<'info> {
         bump,
         seeds::program = DRIFT_PROGRAM_ID
     )]
-    pub drift_user: SystemAccount<'info>,
+    pub integration_acc_2: SystemAccount<'info>,
 
     /// CHECK: validated by the Drift program
     #[account(mut)]
@@ -132,7 +132,7 @@ pub struct DriftInitUser<'info> {
 
     /// CHECK: validated by the Drift program
     #[account(mut)]
-    pub drift_spot_market: AccountLoader<'info, MinimalSpotMarket>,
+    pub integration_acc_1: AccountLoader<'info, MinimalSpotMarket>,
 
     /// The Drift spot market vault where tokens will be deposited
     /// CHECK: validated by the Drift program
@@ -155,7 +155,7 @@ pub struct DriftInitUser<'info> {
 impl<'info> DriftInitUser<'info> {
     pub fn cpi_init_user_stats(&self, authority_bump: u8) -> MarginfiResult {
         let accounts = InitializeUserStats {
-            user_stats: self.drift_user_stats.to_account_info(),
+            user_stats: self.integration_acc_3.to_account_info(),
             state: self.drift_state.to_account_info(),
             authority: self.liquidity_vault_authority.to_account_info(),
             payer: self.fee_payer.to_account_info(),
@@ -172,8 +172,8 @@ impl<'info> DriftInitUser<'info> {
 
     pub fn cpi_init_user(&self, authority_bump: u8) -> MarginfiResult {
         let accounts = InitializeUser {
-            user: self.drift_user.to_account_info(),
-            user_stats: self.drift_user_stats.to_account_info(),
+            user: self.integration_acc_2.to_account_info(),
+            user_stats: self.integration_acc_3.to_account_info(),
             state: self.drift_state.to_account_info(),
             authority: self.liquidity_vault_authority.to_account_info(),
             payer: self.fee_payer.to_account_info(),
@@ -212,8 +212,8 @@ impl<'info> DriftInitUser<'info> {
     ) -> MarginfiResult {
         let accounts = Deposit {
             state: self.drift_state.to_account_info(),
-            user: self.drift_user.to_account_info(),
-            user_stats: self.drift_user_stats.to_account_info(),
+            user: self.integration_acc_2.to_account_info(),
+            user_stats: self.integration_acc_3.to_account_info(),
             authority: self.liquidity_vault_authority.to_account_info(),
             spot_market_vault: self.drift_spot_market_vault.to_account_info(),
             user_token_account: self.liquidity_vault.to_account_info(),
@@ -236,7 +236,7 @@ impl<'info> DriftInitUser<'info> {
         }
 
         // Always add spot market account
-        remaining_accounts.push(self.drift_spot_market.to_account_info());
+        remaining_accounts.push(self.integration_acc_1.to_account_info());
 
         // Add token mint (needed for Token-2022 support)
         remaining_accounts.push(self.mint.to_account_info());
@@ -250,7 +250,7 @@ impl<'info> DriftInitUser<'info> {
 
     pub fn cpi_update_user_pool_id(&self, pool_id: u8, authority_bump: u8) -> MarginfiResult {
         let accounts = UpdateUserPoolId {
-            user: self.drift_user.to_account_info(),
+            user: self.integration_acc_2.to_account_info(),
             authority: self.liquidity_vault_authority.to_account_info(),
         };
         let program = self.drift_program.to_account_info();

@@ -2,7 +2,6 @@ import { Keypair, Transaction } from "@solana/web3.js";
 import {
   groupAdmin,
   users,
-  verbose,
   bankrunContext,
   bankrunProgram,
   driftGroup,
@@ -35,10 +34,6 @@ describe("d05: Initialize Marginfi-Drift integration", () => {
       })
     );
     await processBankrunTransaction(ctx, tx, [groupAdmin.wallet, driftGroup]);
-
-    let group = await bankrunProgram.account.marginfiGroup.fetch(
-      driftGroup.publicKey
-    );
   });
 
   it("(users 0/1) Initialize marginfi accounts", async () => {

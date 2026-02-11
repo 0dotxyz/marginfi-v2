@@ -59,7 +59,7 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
     ctx.accounts.cpi_update_rate()?;
 
     let expected_shares = {
-        let lending = ctx.accounts.juplend_lending.load()?;
+        let lending = ctx.accounts.integration_acc_1.load()?;
         // Compute expected shares minted (round-down) using the same math as JupLend.
         lending
             .expected_shares_for_deposit(amount)
@@ -67,14 +67,14 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
     };
 
     let pre_f_token_balance =
-        accessor::amount(&ctx.accounts.juplend_f_token_vault.to_account_info())?;
+        accessor::amount(&ctx.accounts.integration_acc_2.to_account_info())?;
 
     // Move underlying into the vault and deposit into JupLend.
     ctx.accounts.cpi_transfer_user_to_liquidity_vault(amount)?;
     ctx.accounts.cpi_juplend_deposit(amount, authority_bump)?;
 
     let post_f_token_balance =
-        accessor::amount(&ctx.accounts.juplend_f_token_vault.to_account_info())?;
+        accessor::amount(&ctx.accounts.integration_acc_2.to_account_info())?;
     let minted_shares = post_f_token_balance
         .checked_sub(pre_f_token_balance)
         .ok_or_else(|| error!(MarginfiError::MathError))?;
@@ -143,8 +143,8 @@ pub struct JuplendDeposit<'info> {
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
-        has_one = juplend_lending @ MarginfiError::InvalidJuplendLending,
-        has_one = juplend_f_token_vault @ MarginfiError::InvalidJuplendFTokenVault,
+        has_one = integration_acc_1 @ MarginfiError::InvalidJuplendLending,
+        has_one = integration_acc_2 @ MarginfiError::InvalidJuplendFTokenVault,
         has_one = mint @ MarginfiError::InvalidMint,
         constraint = is_juplend_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongBankAssetTagForJuplendOperation
@@ -176,7 +176,7 @@ pub struct JuplendDeposit<'info> {
 
     /// JupLend lending state account.
     #[account(mut, has_one = f_token_mint @ MarginfiError::InvalidJuplendLending)]
-    pub juplend_lending: AccountLoader<'info, JuplendLending>,
+    pub integration_acc_1: AccountLoader<'info, JuplendLending>,
 
     /// JupLend fToken mint.
     #[account(mut)]
@@ -184,7 +184,7 @@ pub struct JuplendDeposit<'info> {
 
     /// Bank's fToken vault (validated via has_one on bank).
     #[account(mut)]
-    pub juplend_f_token_vault: InterfaceAccount<'info, TokenAccount>,
+    pub integration_acc_2: InterfaceAccount<'info, TokenAccount>,
 
     // ---- JupLend CPI accounts ----
     /// CHECK: validated by the JupLend program
@@ -192,14 +192,14 @@ pub struct JuplendDeposit<'info> {
     /// CHECK: validated by the JupLend program
     #[account(
         mut,
-        constraint = supply_token_reserves_liquidity.key() == juplend_lending.load()?.token_reserves_liquidity
+        constraint = supply_token_reserves_liquidity.key() == integration_acc_1.load()?.token_reserves_liquidity
             @ MarginfiError::InvalidJuplendLending,
     )]
     pub supply_token_reserves_liquidity: UncheckedAccount<'info>,
     /// CHECK: validated by the JupLend program
     #[account(
         mut,
-        constraint = lending_supply_position_on_liquidity.key() == juplend_lending.load()?.supply_position_on_liquidity
+        constraint = lending_supply_position_on_liquidity.key() == integration_acc_1.load()?.supply_position_on_liquidity
             @ MarginfiError::InvalidJuplendLending,
     )]
     pub lending_supply_position_on_liquidity: UncheckedAccount<'info>,
@@ -243,7 +243,7 @@ impl<'info> JuplendDeposit<'info> {
 
     pub fn cpi_update_rate(&self) -> MarginfiResult {
         let accounts = UpdateRate {
-            lending: self.juplend_lending.to_account_info(),
+            lending: self.integration_acc_1.to_account_info(),
             mint: self.mint.to_account_info(),
             f_token_mint: self.f_token_mint.to_account_info(),
             supply_token_reserves_liquidity: self.supply_token_reserves_liquidity.to_account_info(),
@@ -258,10 +258,10 @@ impl<'info> JuplendDeposit<'info> {
         let accounts = Deposit {
             signer: self.liquidity_vault_authority.to_account_info(),
             depositor_token_account: self.liquidity_vault.to_account_info(),
-            recipient_token_account: self.juplend_f_token_vault.to_account_info(),
+            recipient_token_account: self.integration_acc_2.to_account_info(),
             mint: self.mint.to_account_info(),
             lending_admin: self.lending_admin.to_account_info(),
-            lending: self.juplend_lending.to_account_info(),
+            lending: self.integration_acc_1.to_account_info(),
             f_token_mint: self.f_token_mint.to_account_info(),
             supply_token_reserves_liquidity: self.supply_token_reserves_liquidity.to_account_info(),
             lending_supply_position_on_liquidity: self

@@ -16,15 +16,15 @@ import {
   solendAccounts,
   SOLEND_MARKET,
   SOLEND_USDC_RESERVE,
-  SOLEND_TOKENA_RESERVE,
+  SOLEND_TOKEN_A_RESERVE,
   SOLEND_USDC_LIQUIDITY_SUPPLY,
   SOLEND_USDC_COLLATERAL_MINT,
   SOLEND_USDC_COLLATERAL_SUPPLY,
   SOLEND_USDC_FEE_RECEIVER,
-  SOLEND_TOKENA_LIQUIDITY_SUPPLY,
-  SOLEND_TOKENA_COLLATERAL_MINT,
-  SOLEND_TOKENA_COLLATERAL_SUPPLY,
-  SOLEND_TOKENA_FEE_RECEIVER,
+  SOLEND_TOKEN_A_LIQUIDITY_SUPPLY,
+  SOLEND_TOKEN_A_COLLATERAL_MINT,
+  SOLEND_TOKEN_A_COLLATERAL_SUPPLY,
+  SOLEND_TOKEN_A_FEE_RECEIVER,
   bankRunProvider,
   oracles,
 } from "./rootHooks";
@@ -60,7 +60,7 @@ describe("sl04: Solend - Deposits and Borrows", () => {
     userB = users[1];
 
     usdcReserve = solendAccounts.get(SOLEND_USDC_RESERVE);
-    tokenAReserve = solendAccounts.get(SOLEND_TOKENA_RESERVE);
+    tokenAReserve = solendAccounts.get(SOLEND_TOKEN_A_RESERVE);
   });
 
   it("(user A) Create collateral token account and deposit Token A", async () => {
@@ -68,13 +68,13 @@ describe("sl04: Solend - Deposits and Borrows", () => {
     const userAObligation = solendAccounts.get("user_a_obligation");
 
     const tokenACollateralMint = solendAccounts.get(
-      SOLEND_TOKENA_COLLATERAL_MINT
+      SOLEND_TOKEN_A_COLLATERAL_MINT
     );
     const tokenALiquiditySupply = solendAccounts.get(
-      SOLEND_TOKENA_LIQUIDITY_SUPPLY
+      SOLEND_TOKEN_A_LIQUIDITY_SUPPLY
     );
     const tokenACollateralSupply = solendAccounts.get(
-      SOLEND_TOKENA_COLLATERAL_SUPPLY
+      SOLEND_TOKEN_A_COLLATERAL_SUPPLY
     );
 
     userACTokenA = Keypair.generate();
@@ -312,9 +312,9 @@ describe("sl04: Solend - Deposits and Borrows", () => {
     const userBObligation = solendAccounts.get("user_b_obligation");
 
     const tokenALiquiditySupply = solendAccounts.get(
-      SOLEND_TOKENA_LIQUIDITY_SUPPLY
+      SOLEND_TOKEN_A_LIQUIDITY_SUPPLY
     );
-    const tokenAFeeReceiver = solendAccounts.get(SOLEND_TOKENA_FEE_RECEIVER);
+    const tokenAFeeReceiver = solendAccounts.get(SOLEND_TOKEN_A_FEE_RECEIVER);
 
     const refreshDepositReserveIx = makeSolendRefreshReserveIx({
       reserve: usdcReserve,

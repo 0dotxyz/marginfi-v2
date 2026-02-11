@@ -6,7 +6,6 @@ import {
   ecosystem,
   kaminoAccounts,
   KAMINO_USDC_BANK,
-  kaminoGroup,
   MARKET,
   oracles,
   USDC_RESERVE,
@@ -17,7 +16,7 @@ import {
   klendBankrunProgram,
   bankRunProvider,
   banksClient,
-  KAMINO_TOKENA_BANK as KAMINO_TOKEN_A_BANK,
+  KAMINO_TOKEN_A_BANK as KAMINO_TOKEN_A_BANK,
   TOKEN_A_RESERVE,
 } from "./rootHooks";
 import {
@@ -27,17 +26,14 @@ import {
   simpleRefreshReserve,
   wrappedU68F60toBigNumber,
 } from "./utils/kamino-utils";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { assert } from "chai";
 import { MockUser, USER_ACCOUNT_K } from "./utils/mocks";
-import { omitPadding, processBankrunTransaction } from "./utils/tools";
+import { processBankrunTransaction } from "./utils/tools";
 import { makeKaminoDepositIx } from "./utils/kamino-instructions";
 import { ProgramTestContext } from "solana-bankrun";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import {
   assertBNEqual,
-  assertU68F60Approx,
-  assertI68F60Equal,
   assertI80F48Approx,
   assertI80F48Equal,
   assertKeysEqual,

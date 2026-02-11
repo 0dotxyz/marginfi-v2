@@ -136,7 +136,7 @@ describe("jl05: JupLend - deposit/withdraw matrix (bankrun)", () => {
       bankMint: ecosystem.usdcMint.publicKey,
       bankSeed: BANK_SEED,
       oracle: oracles.usdcOracle.publicKey,
-      juplendLending: pool.lending,
+      integrationAcc1: pool.lending,
       fTokenMint: pool.fTokenMint,
       config,
     });

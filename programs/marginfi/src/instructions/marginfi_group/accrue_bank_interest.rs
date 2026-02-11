@@ -16,7 +16,7 @@ pub fn lending_pool_accrue_bank_interest(
         ctx.accounts.bank.key(),
     )?;
 
-    // TODO see if we can move this within accrue_interest to save some CU
+    // TODO see if we can recycle some things like the InterestRateCalc from accrue to save some CU
     bank.update_bank_cache(group)?;
 
     Ok(())

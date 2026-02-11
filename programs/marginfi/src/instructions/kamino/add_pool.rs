@@ -31,15 +31,15 @@ pub fn lending_pool_add_bank_kamino(
     let LendingPoolAddBankKamino {
         bank_mint,
         bank: bank_loader,
-        kamino_reserve: reserve_loader,
-        kamino_obligation,
+        integration_acc_1: reserve_loader,
+        integration_acc_2: obligation_account,
         ..
     } = ctx.accounts;
 
     let mut bank = bank_loader.load_init()?;
     let mut group = ctx.accounts.group.load_mut()?;
     let reserve_key = reserve_loader.key();
-    let obligation_key = kamino_obligation.key();
+    let obligation_key = obligation_account.key();
 
     // Validate that we're using a supported Kamino oracle setup type
     require!(
@@ -76,8 +76,8 @@ pub fn lending_pool_add_bank_kamino(
         fee_vault_authority_bump,
     );
 
-    bank.kamino_reserve = reserve_key;
-    bank.kamino_obligation = obligation_key;
+    bank.integration_acc_1 = reserve_key;
+    bank.integration_acc_2 = obligation_key;
 
     log_pool_info(&bank);
 
@@ -113,8 +113,8 @@ pub struct LendingPoolAddBankKamino<'info> {
     #[account(mut)]
     pub fee_payer: Signer<'info>,
 
-    /// Must match the mint used by `kamino_reserve`, Kamino calls this the `reserve_liquidity_mint`
-    /// aka `liquidity.mint_pubkey`
+    /// Must match the mint used by the Kamino reserve (integration_acc_1), Kamino calls this the
+    /// `reserve_liquidity_mint` aka `liquidity.mint_pubkey`
     pub bank_mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
@@ -131,10 +131,10 @@ pub struct LendingPoolAddBankKamino<'info> {
     pub bank: AccountLoader<'info, Bank>,
 
     #[account(
-        constraint = kamino_reserve.load()?.mint_pubkey == bank_mint.key()
+        constraint = integration_acc_1.load()?.mint_pubkey == bank_mint.key()
             @ MarginfiError::KaminoReserveMintAddressMismatch,
     )]
-    pub kamino_reserve: AccountLoader<'info, MinimalReserve>,
+    pub integration_acc_1: AccountLoader<'info, MinimalReserve>,
 
     /// Note: not yet initialized in this instruction, run `init_obligation` after.
     #[account(
@@ -142,16 +142,18 @@ pub struct LendingPoolAddBankKamino<'info> {
             &[0u8],
             &[0u8],
             liquidity_vault_authority.key().as_ref(),
-            kamino_reserve.load()?.lending_market.as_ref(),
+            integration_acc_1.load()?.lending_market.as_ref(),
             system_program::ID.as_ref(),
             system_program::ID.as_ref()
         ],
         bump,
         seeds::program = KAMINO_PROGRAM_ID
     )]
-    pub kamino_obligation: SystemAccount<'info>,
+    pub integration_acc_2: SystemAccount<'info>,
 
-    /// Will be authority of the bank's `kamino_obligation`. Note: When depositing/withdrawing
+    /// Will be authority of the bank's Kamino obligation (integration_acc_2). Note: When
+    /// depositing/withdrawing Kamino assets, the source/destination must also be owned by the
+    /// obligation authority.
     /// Kamino assets, the source/destination must also be owned by the obligation authority. This
     /// account owns the `liquidity_vault`, and thus acts as intermediary for deposits/withdraws
     #[account(

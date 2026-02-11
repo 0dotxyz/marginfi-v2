@@ -196,7 +196,7 @@ describe("jl04: JupLend oracle price conversion tracks token_exchange_price", ()
       bankMint: ecosystem.usdcMint.publicKey,
       bankSeed: BANK_SEED,
       oracle: oracles.usdcOracle.publicKey,
-      juplendLending: pool.lending,
+      integrationAcc1: pool.lending,
       fTokenMint: pool.fTokenMint,
       config,
       tokenProgram: pool.tokenProgram,

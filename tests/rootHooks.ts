@@ -29,7 +29,7 @@ import { patchBankrunConnection } from "./utils/bankrunConnection";
 // Kamino farms (liquidity-incentive) program
 // ---------------------------------------------------------------------------
 export const FARMS_PROGRAM_ID = new PublicKey(
-  "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr"
+  "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr",
 );
 
 import { BankrunProvider, startAnchor } from "anchor-bankrun";
@@ -43,11 +43,11 @@ import {
 
 /** Marginfi program ID (from Anchor.toml) */
 const MARGINFI_PROGRAM_ID = new PublicKey(
-  "2jGhuVUuy3umdzByFx8sNWUAaf5vaeuDm78RDPEnhrMr"
+  "2jGhuVUuy3umdzByFx8sNWUAaf5vaeuDm78RDPEnhrMr",
 );
 /** Mocks program ID (from Anchor.toml) */
 const MOCKS_PROGRAM_ID = new PublicKey(
-  "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ"
+  "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
 );
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { initGlobalFeeState } from "./utils/group-instructions";
@@ -145,12 +145,12 @@ export const stakedBankKeypairSol = Keypair.fromSeed(STAKED_SOL_SEED);
 /** Multibank group created for liquidation test k10 that's recycled for time saving purposes where
  * applicable. */
 export const THROWAWAY_GROUP_SEED_K10 = Buffer.from(
-  "MARGINFI_GROUP_SEED_123400000010"
+  "MARGINFI_GROUP_SEED_123400000010",
 );
 
 /** Multibank group created for drift liquidation test d09 */
 export const THROWAWAY_GROUP_SEED_D09 = Buffer.from(
-  "MARGINFI_GROUP_SEED_123400000019"
+  "MARGINFI_GROUP_SEED_123400000019",
 );
 
 export let bankrunContext: ProgramTestContext;
@@ -162,33 +162,36 @@ export let driftBankrunProgram: Program<Drift>;
 export let banksClient: BanksClient;
 /** A mainnet Pyth pull feed (Jup's Sol feed) */
 export const PYTH_ORACLE_FEED_SAMPLE = new PublicKey(
-  "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
+  "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
 );
 /** A mainnet Pyth pull oracle (Jup's Sol feed) */
 export const PYTH_ORACLE_SAMPLE = new PublicKey(
-  "H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG"
+  "H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG",
 );
 /** An account with gaps */
 export const GAPPY3_SAMPLE = new PublicKey(
-  "7qoe1Xmd3WUfPFHQaMYMGwSJT2mU55t3d4C4ZXZ1GJmn"
+  "7qoe1Xmd3WUfPFHQaMYMGwSJT2mU55t3d4C4ZXZ1GJmn",
 );
 /** An account with gaps */
 export const GAPPY4_SAMPLE = new PublicKey(
-  "6pbRghQuRw9AsPJqhrGLFRVYDcvfXeGh4zNdYMt8mods"
+  "6pbRghQuRw9AsPJqhrGLFRVYDcvfXeGh4zNdYMt8mods",
 );
 /** The production BONK bank, with owner artificially swapped for the localnet program. */
 export const LEGACY_BANK_SAMPLE = new PublicKey(
-  "DeyH7QxWvnbbaVB4zFrf4hoq7Q8z1ZT14co42BGwGtfM"
+  "DeyH7QxWvnbbaVB4zFrf4hoq7Q8z1ZT14co42BGwGtfM",
 );
 /** The production group (LEGACY_BANK_SAMPLE's group) */
 export const MAINNET_GROUP = new PublicKey(
-  "4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8"
+  "4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8",
 );
 
 /** Banks in the emode test suite use this seed */
 export const EMODE_SEED = 44;
-export const EMODE_INIT_RATE_SOL_TO_LST = 0.9;
-export const EMODE_MAINT_RATE_SOL_TO_LST = 0.95;
+// Adjusted to avoid hitting exact leverage limits due to floating point precision
+// SOL_TO_LST: init ~9.5x, maint ~19x (vs limits of 15x/20x)
+export const EMODE_INIT_RATE_SOL_TO_LST = 0.8947; // ~9.5x leverage
+export const EMODE_MAINT_RATE_SOL_TO_LST = 0.9474; // ~19x leverage
+// LST_TO_LST: init ~5x, maint ~6.7x (well under limits)
 export const EMODE_INIT_RATE_LST_TO_LST = 0.8;
 export const EMODE_MAINT_RATE_LST_TO_LST = 0.85;
 
@@ -202,22 +205,25 @@ export const TOKEN_A_RESERVE = "token_a_reserve";
 /** mrgn USDC bank trading on `USDC_RESERVE` (the reserve for ecosystem.usdcMint) */
 export const KAMINO_USDC_BANK = "kamino_usdc_bank";
 /** mrgn Token A bank trading on `TOKEN_A_RESERVE` (the reserve for ecosystem.tokenAMint) */
-export const KAMINO_TOKENA_BANK = "kamino_tokenA_bank";
+export const KAMINO_TOKEN_A_BANK = "kamino_tokenA_bank";
 
 // TODO: This should really be an object with defined fields not a dict
 export let driftAccounts: Map<string, PublicKey>;
 /** Drift USDC Spot Market */
 export const DRIFT_USDC_SPOT_MARKET = "drift_usdc_spot_market";
 /** Drift Token A Spot Market */
-export const DRIFT_TOKENA_SPOT_MARKET = "drift_tokenA_spot_market";
+export const DRIFT_TOKEN_A_SPOT_MARKET = "drift_tokenA_spot_market";
 /** mrgn USDC bank trading on `DRIFT_USDC_SPOT_MARKET` */
 export const DRIFT_USDC_BANK = "drift_usdc_bank";
-/** mrgn Token A bank trading on `DRIFT_TOKENA_SPOT_MARKET` */
-export const DRIFT_TOKENA_BANK = "drift_tokenA_bank";
+/** mrgn Token A bank trading on `DRIFT_TOKEN_A_SPOT_MARKET` */
+export const DRIFT_TOKEN_A_BANK = "drift_tokenA_bank";
 /** Drift Token A Pyth Pull Oracle (with mainnet owner) */
-export const DRIFT_TOKENA_PULL_ORACLE = "drift_tokenA_pull_oracle";
+export const DRIFT_TOKEN_A_PULL_ORACLE = "drift_tokenA_pull_oracle";
 /** Drift Token A Pyth Pull Feed */
-export const DRIFT_TOKENA_PULL_FEED = "drift_tokenA_pull_feed";
+export const DRIFT_TOKEN_A_PULL_FEED = "drift_tokenA_pull_feed";
+export const DRIFT_TOKEN_B_SPOT_MARKET = "drift_token_b_spot_market";
+export const DRIFT_TOKEN_B_PULL_ORACLE = "drift_token_b_pull_oracle";
+export const DRIFT_TOKEN_B_PULL_FEED = "drift_token_b_pull_feed";
 
 // Solend related accounts
 export let solendAccounts: Map<string, PublicKey>;
@@ -230,7 +236,7 @@ export const SOLEND_MARKET_AUTHORITY = "solend_market_authority";
 /** Solend USDC Reserve */
 export const SOLEND_USDC_RESERVE = "solend_usdc_reserve";
 /** Solend Token A Reserve */
-export const SOLEND_TOKENA_RESERVE = "solend_tokena_reserve";
+export const SOLEND_TOKEN_A_RESERVE = "solend_tokena_reserve";
 
 // Reserve component accounts (critical for operations)
 /** USDC Reserve liquidity supply */
@@ -243,20 +249,20 @@ export const SOLEND_USDC_COLLATERAL_SUPPLY = "solend_usdc_collateral_supply";
 export const SOLEND_USDC_FEE_RECEIVER = "solend_usdc_fee_receiver";
 
 /** Token A Reserve liquidity supply */
-export const SOLEND_TOKENA_LIQUIDITY_SUPPLY = "solend_tokena_liquidity_supply";
+export const SOLEND_TOKEN_A_LIQUIDITY_SUPPLY = "solend_tokena_liquidity_supply";
 /** Token A Reserve collateral mint */
-export const SOLEND_TOKENA_COLLATERAL_MINT = "solend_tokena_collateral_mint";
+export const SOLEND_TOKEN_A_COLLATERAL_MINT = "solend_tokena_collateral_mint";
 /** Token A Reserve collateral supply */
 export const SOLEND_TOKENA_COLLATERAL_SUPPLY =
   "solend_tokena_collateral_supply";
 /** Token A Reserve fee receiver */
-export const SOLEND_TOKENA_FEE_RECEIVER = "solend_tokena_fee_receiver";
+export const SOLEND_TOKEN_A_FEE_RECEIVER = "solend_tokena_fee_receiver";
 
 // Bank accounts (for MarginFi integration)
 /** mrgn USDC bank for Solend integration */
 export const SOLEND_USDC_BANK = "solend_usdc_bank";
 /** mrgn Token A bank for Solend integration */
-export const SOLEND_TOKENA_BANK = "solend_tokena_bank";
+export const SOLEND_TOKEN_A_BANK = "solend_tokena_bank";
 
 // Kamino farms related accounts
 export const farmAccounts = new Map<string, PublicKey>();
@@ -285,7 +291,7 @@ async function createValidatorBankrun(index: number): Promise<Validator> {
 
   const rentForVote =
     await bankRunProvider.connection.getMinimumBalanceForRentExemption(
-      VoteProgram.space
+      VoteProgram.space,
     );
 
   const voteInit = new VoteInit(node.publicKey, authorized, authorized, 0);
@@ -304,7 +310,7 @@ async function createValidatorBankrun(index: number): Promise<Validator> {
       space: VoteProgram.space,
       programId: VoteProgram.programId,
     }),
-    initIx
+    initIx,
   );
 
   await processBankrunTransaction(bankrunContext, tx, [
@@ -315,7 +321,7 @@ async function createValidatorBankrun(index: number): Promise<Validator> {
 
   if (verbose) {
     console.log(
-      `*init validator ${index}: vote=${voteAccount.publicKey.toBase58()}`
+      `*init validator ${index}: vote=${voteAccount.publicKey.toBase58()}`,
     );
   }
 
@@ -338,7 +344,7 @@ async function createValidatorBankrun(index: number): Promise<Validator> {
  * Initialize a SPL single pool for a given validator vote account.
  */
 async function createSplStakePoolBankrun(
-  validator: Validator
+  validator: Validator,
 ): Promise<Validator> {
   // SinglePoolProgram.initialize returns a ready-to-send Transaction.
   const payer = users[0].wallet;
@@ -346,28 +352,28 @@ async function createSplStakePoolBankrun(
     bankRunProvider.connection,
     validator.voteAccount,
     payer.publicKey,
-    true
+    true,
   );
   await processBankrunTransaction(bankrunContext, initTx, [payer]);
 
   // Derive pool PDA keys (these return PublicKey directly, not [PublicKey, bump])
   const poolKey = await findPoolAddress(
     SINGLE_POOL_PROGRAM_ID,
-    validator.voteAccount
+    validator.voteAccount,
   );
   const poolMintKey = await findPoolMintAddress(
     SINGLE_POOL_PROGRAM_ID,
-    poolKey
+    poolKey,
   );
   const poolAuthority = await findPoolStakeAuthorityAddress(
     SINGLE_POOL_PROGRAM_ID,
-    poolKey
+    poolKey,
   );
   const poolStake = await findPoolStakeAddress(SINGLE_POOL_PROGRAM_ID, poolKey);
 
   if (verbose) {
     console.log(
-      `*init single-pool: pool=${poolKey.toBase58()} mint=${poolMintKey.toBase58()}`
+      `*init single-pool: pool=${poolKey.toBase58()} mint=${poolMintKey.toBase58()}`,
     );
   }
 
@@ -389,10 +395,10 @@ function loadJsonFixture(filepath: string): AddedAccount {
   return {
     address: new PublicKey(json.pubkey),
     info: {
-      lamports: BigInt(json.account.lamports),
+      lamports: Number(json.account.lamports),
       owner: new PublicKey(json.account.owner),
       executable: json.account.executable,
-      rentEpoch: BigInt(json.account.rentEpoch ?? 0),
+      rentEpoch: Number(json.account.rentEpoch ?? 0),
       data: Buffer.from(json.account.data[0], json.account.data[1]),
     },
   };
@@ -493,7 +499,7 @@ export const mochaHooks = {
     bankrunContext = await startAnchor(
       path.resolve(__dirname, ".."),
       extraPrograms,
-      genesisAccounts
+      genesisAccounts,
     );
     bankRunProvider = new BankrunProvider(bankrunContext);
     banksClient = bankrunContext.banksClient;
@@ -506,7 +512,7 @@ export const mochaHooks = {
     const anchorProvider = new AnchorProvider(
       bankRunProvider.connection,
       new Wallet(bankrunContext.payer),
-      {}
+      {},
     );
     anchor.setProvider(anchorProvider);
 
@@ -535,19 +541,19 @@ export const mochaHooks = {
 
     bankrunProgram = new Program<Marginfi>(
       marginfiIdlWithAddress as Marginfi,
-      anchorProvider
+      anchorProvider,
     );
     mocksBankrunProgram = new Program<Mocks>(
       mocksIdlWithAddress as Mocks,
-      anchorProvider
+      anchorProvider,
     );
     klendBankrunProgram = new Program<KaminoLending>(
       klendIdlWithAddress as KaminoLending,
-      anchorProvider
+      anchorProvider,
     );
     driftBankrunProgram = new Program<Drift>(
       driftIdlWithAddress as Drift,
-      anchorProvider
+      anchorProvider,
     );
 
     const payer = bankrunContext.payer;
@@ -561,31 +567,31 @@ export const mochaHooks = {
       bankrunContext,
       payer,
       ecosystem.wsolDecimals,
-      ecosystem.wsolMint
+      ecosystem.wsolMint,
     );
     await createMintBankrun(
       bankrunContext,
       payer,
       ecosystem.usdcDecimals,
-      ecosystem.usdcMint
+      ecosystem.usdcMint,
     );
     await createMintBankrun(
       bankrunContext,
       payer,
       ecosystem.tokenADecimals,
-      ecosystem.tokenAMint
+      ecosystem.tokenAMint,
     );
     await createMintBankrun(
       bankrunContext,
       payer,
       ecosystem.tokenBDecimals,
-      ecosystem.tokenBMint
+      ecosystem.tokenBMint,
     );
     await createMintBankrun(
       bankrunContext,
       payer,
       ecosystem.lstAlphaDecimals,
-      ecosystem.lstAlphaMint
+      ecosystem.lstAlphaMint,
     );
 
     // -------------------------------------------------------------------------
@@ -604,7 +610,7 @@ export const mochaHooks = {
         fromPubkey: payer.publicKey,
         toPubkey: globalFeeWallet,
         lamports: 10 * LAMPORTS_PER_SOL,
-      })
+      }),
     );
     // Init the global fee state
     miscSetupTx.add(
@@ -617,14 +623,14 @@ export const mochaHooks = {
         programFeeFixed: bigNumberToWrappedI80F48(PROGRAM_FEE_FIXED),
         programFeeRate: bigNumberToWrappedI80F48(PROGRAM_FEE_RATE),
         liquidationMaxFee: bigNumberToWrappedI80F48(LIQUIDATION_MAX_FEE),
-      })
+      }),
     );
     await processBankrunTransaction(
       bankrunContext,
       miscSetupTx,
       [payer],
       false,
-      true
+      true,
     );
 
     // -------------------------------------------------------------------------
@@ -643,29 +649,29 @@ export const mochaHooks = {
     groupAdmin = await setupTestUserBankrun(
       bankrunContext,
       payer,
-      setupUserOptions
+      setupUserOptions,
     );
     emodeAdmin = await setupTestUserBankrun(
       bankrunContext,
       payer,
-      setupUserOptions
+      setupUserOptions,
     );
     validatorAdmin = await setupTestUserBankrun(
       bankrunContext,
       payer,
-      setupUserOptions
+      setupUserOptions,
     );
     riskAdmin = await setupTestUserBankrun(
       bankrunContext,
       payer,
-      setupUserOptions
+      setupUserOptions,
     );
 
     for (let i = 0; i < numUsers; i++) {
       const user = await setupTestUserBankrun(
         bankrunContext,
         payer,
-        setupUserOptions
+        setupUserOptions,
       );
       users.push(user);
     }
@@ -694,14 +700,14 @@ export const mochaHooks = {
       ecosystem.tokenBDecimals,
       ecosystem.lstAlphaPrice,
       ecosystem.lstAlphaDecimals,
-      verbose
+      verbose,
     );
 
     // ---------------------------------------------------------------------
     // Step 5b: Create validators + SPL single pools (staked collateral tests)
     // ---------------------------------------------------------------------
     console.log(
-      "Setting up validators and SPL single pools for staked tests..."
+      "Setting up validators and SPL single pools for staked tests...",
     );
     for (let i = 0; i < numValidators; i++) {
       const v = await createValidatorBankrun(i);
@@ -719,38 +725,38 @@ export const mochaHooks = {
       const userProvider = makeProvider(users[i].wallet);
       users[i].mrgnBankrunProgram = new Program<Marginfi>(
         marginfiIdlWithAddress as Marginfi,
-        userProvider
+        userProvider,
       );
       users[i].mrgnProgram = users[i].mrgnBankrunProgram;
     }
 
     globalProgramAdmin.mrgnBankrunProgram = new Program<Marginfi>(
       marginfiIdlWithAddress as Marginfi,
-      makeProvider(globalProgramAdmin.wallet)
+      makeProvider(globalProgramAdmin.wallet),
     );
     globalProgramAdmin.mrgnProgram = globalProgramAdmin.mrgnBankrunProgram;
 
     groupAdmin.mrgnBankrunProgram = new Program<Marginfi>(
       marginfiIdlWithAddress as Marginfi,
-      makeProvider(groupAdmin.wallet)
+      makeProvider(groupAdmin.wallet),
     );
     groupAdmin.mrgnProgram = groupAdmin.mrgnBankrunProgram;
 
     validatorAdmin.mrgnBankrunProgram = new Program<Marginfi>(
       marginfiIdlWithAddress as Marginfi,
-      makeProvider(validatorAdmin.wallet)
+      makeProvider(validatorAdmin.wallet),
     );
     validatorAdmin.mrgnProgram = validatorAdmin.mrgnBankrunProgram;
 
     emodeAdmin.mrgnBankrunProgram = new Program<Marginfi>(
       marginfiIdlWithAddress as Marginfi,
-      makeProvider(emodeAdmin.wallet)
+      makeProvider(emodeAdmin.wallet),
     );
     emodeAdmin.mrgnProgram = emodeAdmin.mrgnBankrunProgram;
 
     riskAdmin.mrgnBankrunProgram = new Program<Marginfi>(
       marginfiIdlWithAddress as Marginfi,
-      makeProvider(riskAdmin.wallet)
+      makeProvider(riskAdmin.wallet),
     );
     riskAdmin.mrgnProgram = riskAdmin.mrgnBankrunProgram;
 

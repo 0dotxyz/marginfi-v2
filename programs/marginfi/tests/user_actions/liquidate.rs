@@ -1222,6 +1222,24 @@ async fn marginfi_account_liquidation_emode(
 
     let mut test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
+    // Configure group to allow higher max emode leverage (100x instead of default 20x)
+    let admin = test_f.payer();
+    test_f
+        .marginfi_group
+        .try_update_with_emode_leverage(
+            admin,
+            admin,
+            admin,
+            admin,
+            admin,
+            admin,
+            admin,
+            Some(I80F48!(99).into()), // init must be < maint
+            Some(I80F48!(100).into()),
+        )
+        .await
+        .unwrap();
+
     let emode_breaker_bank_mint = if collateral_mint == BankMint::Usdc {
         BankMint::SolEquivalent
     } else {
@@ -1400,8 +1418,8 @@ async fn marginfi_account_liquidation_emode(
             collateral_bank_emode_tag,
             flags: 0,
             pad0: [0, 0, 0, 0, 0],
-            asset_weight_init: I80F48!(1.0).into(), // up from 0.1
-            asset_weight_maint: I80F48!(1.0).into(), // up from 0.1
+            asset_weight_init: I80F48!(0.989).into(), // up from 0.1, gives ~90.9x leverage
+            asset_weight_maint: I80F48!(0.989).into(), // up from 0.1, gives ~90.9x leverage
         }];
 
         let res = test_f

@@ -1,5 +1,5 @@
 import { assert } from "chai";
-import { PublicKey, Transaction } from "@solana/web3.js";
+import { Transaction } from "@solana/web3.js";
 import {
   ecosystem,
   groupAdmin,

@@ -148,10 +148,10 @@ pub enum MarginfiError {
     TooSevereLiquidation,
     #[msg("Liquidation would worsen account health")] // 6072
     WorseHealthPostLiquidation,
-    #[msg("Arena groups can only support two banks")] // 6073
-    ArenaBankLimit,
-    #[msg("Arena groups cannot return to non-arena status")] // 6074
-    ArenaSettingCannotChange,
+    #[msg("Exceeded the maximum allowed integration positions")] // 6073
+    IntegrationPositionLimitExceeded,
+    #[msg("Vacated1")] // 6074
+    Vacated1,
     #[msg("The Emode config was invalid")] // 6075
     BadEmodeConfig,
     #[msg("TWAP window size does not match expected duration")] // 6076
@@ -208,6 +208,8 @@ pub enum MarginfiError {
     DailyWithdrawalLimitExceeded,
     #[msg("Cannot set daily withdrawal limit to zero")] // 6102
     ZeroWithdrawalLimit,
+    #[msg("Account is frozen by the group admin")] // 6103
+    AccountFrozen,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -234,8 +236,8 @@ pub enum MarginfiError {
     KaminoReserveValidationFailed, // 6210
     #[msg("Invalid oracle setup: only KaminoPythPush and KaminoSwitchboardPull are supported")]
     KaminoInvalidOracleSetup, // 6211
-    #[msg("Maximum integration positions limit exceeded (max 8 Kamino/Drift/Solend/JupLend positions per account)")]
-    IntegrationPositionLimitExceeded, // 6212
+    #[msg("Deprecated: Kamino position limit no longer enforced separately")]
+    VacatedError1, // 6212
     #[msg("Invalid Kamino reserve: account constraint violated")]
     InvalidKaminoReserve, // 6213
     #[msg("Invalid Kamino obligation: account constraint violated")]
@@ -295,6 +297,8 @@ pub enum MarginfiError {
     InvalidDriftUser, // 6324
     #[msg("Invalid Drift user stats: account constraint violated")]
     InvalidDriftUserStats, // 6325
+    #[msg("Drift cannot support tokens with more than 19 decimals")]
+    DriftUnsupportedTokenDecimals, // 6326
     // **************END DRIFT ERRORS
 
     // ************** BEGIN SOLEND ERRORS (starting at 6400)
@@ -456,8 +460,8 @@ impl From<u32> for MarginfiError {
             6070 => MarginfiError::TooSeverePayoff,
             6071 => MarginfiError::TooSevereLiquidation,
             6072 => MarginfiError::WorseHealthPostLiquidation,
-            6073 => MarginfiError::ArenaBankLimit,
-            6074 => MarginfiError::ArenaSettingCannotChange,
+            6073 => MarginfiError::IntegrationPositionLimitExceeded,
+            6074 => MarginfiError::Vacated1,
             6075 => MarginfiError::BadEmodeConfig,
             6076 => MarginfiError::PythPushInvalidWindowSize,
             6077 => MarginfiError::InvalidFeesDestinationAccount,
@@ -500,7 +504,7 @@ impl From<u32> for MarginfiError {
             6209 => MarginfiError::ObligationInitDepositInsufficient,
             6210 => MarginfiError::KaminoReserveValidationFailed,
             6211 => MarginfiError::KaminoInvalidOracleSetup,
-            6212 => MarginfiError::IntegrationPositionLimitExceeded,
+            6212 => MarginfiError::VacatedError1,
             6213 => MarginfiError::InvalidKaminoReserve,
             6214 => MarginfiError::InvalidKaminoObligation,
 
@@ -531,6 +535,7 @@ impl From<u32> for MarginfiError {
             6323 => MarginfiError::InvalidDriftSpotMarket,
             6324 => MarginfiError::InvalidDriftUser,
             6325 => MarginfiError::InvalidDriftUserStats,
+            6326 => MarginfiError::DriftUnsupportedTokenDecimals,
 
             // Solend-specific errors (starting at 6400)
             6400 => MarginfiError::SolendInvalidOracleSetup,

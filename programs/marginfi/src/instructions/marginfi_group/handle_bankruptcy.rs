@@ -7,10 +7,13 @@ use crate::{
     prelude::MarginfiError,
     state::{
         bank::{BankImpl, BankVaultType},
-        marginfi_account::{BankAccountWrapper, MarginfiAccountImpl, RiskEngine},
+        marginfi_account::{check_account_bankrupt, BankAccountWrapper, MarginfiAccountImpl},
         marginfi_group::MarginfiGroupImpl,
     },
-    utils::{self, is_marginfi_asset_tag, validate_bank_state, InstructionKind},
+    utils::{
+        self, fetch_unbiased_price_for_bank, is_marginfi_asset_tag, validate_bank_state,
+        InstructionKind,
+    },
     MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -68,8 +71,19 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     let mut health_cache = HealthCache::zeroed();
     health_cache.timestamp = clock.unix_timestamp;
     health_cache.program_version = PROGRAM_VERSION;
-    RiskEngine::new(&marginfi_account, ctx.remaining_accounts)?
-        .check_account_bankrupt(&mut Some(&mut health_cache))?;
+
+    check_account_bankrupt(
+        &marginfi_account,
+        ctx.remaining_accounts,
+        &mut Some(&mut health_cache),
+    )?;
+
+    let bank = bank_loader.load()?;
+    let cached_price =
+        fetch_unbiased_price_for_bank(&bank_loader.key(), &bank, &clock, ctx.remaining_accounts)
+            .ok();
+    drop(bank);
+
     health_cache.set_engine_ok(true);
     marginfi_account.health_cache = health_cache;
 
@@ -175,7 +189,9 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     )?
     .repay(bad_debt)?;
 
+    // Update bank cache after all manipulations (interest accrual, loss socialization, repay)
     bank.update_bank_cache(group)?;
+    bank.update_cache_price(cached_price)?;
 
     marginfi_account.set_flag(ACCOUNT_DISABLED, true);
     marginfi_account.last_update = clock.unix_timestamp as u64;
@@ -210,8 +226,8 @@ pub struct LendingPoolHandleBankruptcy<'info> {
     )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    /// CHECK: The risk_admin signer constraint is only validated (in handler) if bank
-    /// PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG is not set
+    /// Must be risk_admin or admin, unless the bank has PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
+    /// set, in which case any signer is accepted.
     pub signer: Signer<'info>,
 
     #[account(

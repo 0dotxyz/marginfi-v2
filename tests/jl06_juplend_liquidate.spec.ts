@@ -157,7 +157,7 @@ describe("jl06: JupLend liquidation (bankrun)", () => {
       bankMint: ecosystem.usdcMint.publicKey,
       bankSeed: JUplend_BANK_SEED,
       oracle: oracles.usdcOracle.publicKey,
-      juplendLending: pool.lending,
+      integrationAcc1: pool.lending,
       fTokenMint: pool.fTokenMint,
       config,
       tokenProgram: pool.tokenProgram,

@@ -136,9 +136,9 @@ export function deriveJuplendMrgnAddresses(
 export function juplendHealthRemainingAccounts(
   bank: PublicKey,
   pythPriceUpdateV2: PublicKey,
-  juplendLending: PublicKey
+  integrationAcc1: PublicKey
 ): PublicKey[] {
-  return [bank, pythPriceUpdateV2, juplendLending];
+  return [bank, pythPriceUpdateV2, integrationAcc1];
 }
 
 // ---------------------------------------------------------------------------
@@ -155,7 +155,7 @@ export type AddJuplendBankAccounts = {
   /** Pyth price update account (oracle_keys[0]) */
   oracle: PublicKey;
   /** JupLend lending state (oracle_keys[1]) */
-  juplendLending: PublicKey;
+  integrationAcc1: PublicKey;
   /** JupLend fToken mint (needed to create fToken vault ATA) */
   fTokenMint: PublicKey;
 
@@ -218,7 +218,7 @@ export const makeAddJuplendBankIx = async (
   };
 
   const lendingMeta: AccountMeta = {
-    pubkey: accounts.juplendLending,
+    pubkey: accounts.integrationAcc1,
     isSigner: false,
     isWritable: false,
   };
@@ -231,7 +231,7 @@ export const makeAddJuplendBankIx = async (
       feePayer: accounts.feePayer,
       bankMint: accounts.bankMint,
       bank,
-      juplendLending: accounts.juplendLending,
+      integrationAcc1: accounts.integrationAcc1,
       liquidityVaultAuthority,
       liquidityVault,
       insuranceVaultAuthority,
@@ -239,7 +239,7 @@ export const makeAddJuplendBankIx = async (
       feeVaultAuthority,
       feeVault,
       fTokenMint: accounts.fTokenMint,
-      juplendFTokenVault: fTokenVault,
+      integrationAcc2: fTokenVault,
       tokenProgram,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
@@ -290,11 +290,11 @@ export const makeJuplendInitPositionIx = async (
       bank: accounts.bank,
       liquidityVaultAuthority: accounts.liquidityVaultAuthority,
       liquidityVault: accounts.liquidityVault,
-      juplendFTokenVault: accounts.fTokenVault,
+      integrationAcc2: accounts.fTokenVault,
 
       mint: accounts.mint,
       lendingAdmin: accounts.pool.lendingAdmin,
-      juplendLending: accounts.pool.lending,
+      integrationAcc1: accounts.pool.lending,
       fTokenMint: accounts.pool.fTokenMint,
       supplyTokenReservesLiquidity: accounts.pool.tokenReserve,
       lendingSupplyPositionOnLiquidity:
@@ -353,11 +353,11 @@ export const makeJuplendDepositIx = async (
       bank: accounts.bank,
       liquidityVaultAuthority: accounts.liquidityVaultAuthority,
       liquidityVault: accounts.liquidityVault,
-      juplendFTokenVault: accounts.fTokenVault,
+      integrationAcc2: accounts.fTokenVault,
 
       mint: accounts.mint,
       lendingAdmin: accounts.pool.lendingAdmin,
-      juplendLending: accounts.pool.lending,
+      integrationAcc1: accounts.pool.lending,
       fTokenMint: accounts.pool.fTokenMint,
       supplyTokenReservesLiquidity: accounts.pool.tokenReserve,
       lendingSupplyPositionOnLiquidity:
@@ -435,12 +435,12 @@ export const makeJuplendWithdrawIx = async (
       bank: accounts.bank,
       liquidityVaultAuthority: accounts.liquidityVaultAuthority,
       liquidityVault: accounts.liquidityVault,
-      juplendFTokenVault: accounts.fTokenVault,
+      integrationAcc2: accounts.fTokenVault,
       claimAccount: accounts.claimAccount,
 
       mint: accounts.mint,
       lendingAdmin: accounts.pool.lendingAdmin,
-      juplendLending: accounts.pool.lending,
+      integrationAcc1: accounts.pool.lending,
       fTokenMint: accounts.pool.fTokenMint,
       supplyTokenReservesLiquidity: accounts.pool.tokenReserve,
       lendingSupplyPositionOnLiquidity:

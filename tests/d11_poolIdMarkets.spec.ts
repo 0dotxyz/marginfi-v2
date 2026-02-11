@@ -1,12 +1,7 @@
 import { assert } from "chai";
-import {
-  PublicKey,
-  Transaction,
-  SystemProgram,
-  SYSVAR_RENT_PUBKEY,
-} from "@solana/web3.js";
+import { PublicKey, Transaction } from "@solana/web3.js";
 import { BN } from "@coral-xyz/anchor";
-import { TOKEN_PROGRAM_ID, createMintToInstruction } from "@solana/spl-token";
+import { createMintToInstruction } from "@solana/spl-token";
 import {
   bankrunContext,
   ecosystem,
@@ -18,7 +13,7 @@ import {
   driftBankrunProgram,
   driftAccounts,
   driftGroup,
-  DRIFT_TOKENA_PULL_ORACLE,
+  DRIFT_TOKEN_A_PULL_ORACLE,
   bankRunProvider,
 } from "./rootHooks";
 import { USER_ACCOUNT_D } from "./utils/mocks";
@@ -31,8 +26,6 @@ import {
   getSpotMarketAccount,
   defaultSpotMarketConfig,
   DriftOracleSourceValues,
-  DriftAssetTierValues,
-  formatTokenAmount,
   defaultDriftBankConfig,
   USDC_POOL2_MARKET_INDEX,
   TOKEN_A_POOL3_MARKET_INDEX,
@@ -141,7 +134,7 @@ describe("d11: Drift Pool ID Markets", () => {
     it("Initialize Token A spot market with pool ID 3", async () => {
       const marketIndex = TOKEN_A_POOL3_MARKET_INDEX;
 
-      const tokenAOracle = driftAccounts.get(DRIFT_TOKENA_PULL_ORACLE);
+      const tokenAOracle = driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE);
 
       const config = defaultSpotMarketConfig();
 
@@ -203,7 +196,7 @@ describe("d11: Drift Pool ID Markets", () => {
       );
 
       tokenAPool3Market = spotMarketPDA;
-      driftAccounts.set("DRIFT_TOKENA_POOL3_MARKET", spotMarketPDA);
+      driftAccounts.set("DRIFT_TOKEN_A_POOL3_MARKET", spotMarketPDA);
 
       const spotMarket = await getSpotMarketAccount(
         driftBankrunProgram,
@@ -232,7 +225,7 @@ describe("d11: Drift Pool ID Markets", () => {
           group: driftGroup.publicKey,
           feePayer: groupAdmin.wallet.publicKey,
           bankMint: ecosystem.usdcMint.publicKey,
-          driftSpotMarket: usdcPool2Market,
+          integrationAcc1: usdcPool2Market,
           oracle: oracles.usdcOracle.publicKey,
         },
         { config, seed }
@@ -253,7 +246,7 @@ describe("d11: Drift Pool ID Markets", () => {
       const bank = await groupAdmin.mrgnBankrunProgram.account.bank.fetch(
         bankKey
       );
-      assertKeysEqual(bank.driftSpotMarket, usdcPool2Market);
+      assertKeysEqual(bank.integrationAcc1, usdcPool2Market);
     });
 
     it("Add Drift bank for Token A (pool ID 3)", async () => {
@@ -273,7 +266,7 @@ describe("d11: Drift Pool ID Markets", () => {
           group: driftGroup.publicKey,
           feePayer: groupAdmin.wallet.publicKey,
           bankMint: ecosystem.tokenAMint.publicKey,
-          driftSpotMarket: tokenAPool3Market,
+          integrationAcc1: tokenAPool3Market,
           oracle: oracles.tokenAOracle.publicKey,
         },
         { config, seed }
@@ -289,12 +282,12 @@ describe("d11: Drift Pool ID Markets", () => {
       );
 
       tokenAPool3Bank = bankKey;
-      driftAccounts.set("DRIFT_TOKENA_POOL3_BANK", bankKey);
+      driftAccounts.set("DRIFT_TOKEN_A_POOL3_BANK", bankKey);
 
       const bank = await groupAdmin.mrgnBankrunProgram.account.bank.fetch(
         bankKey
       );
-      assertKeysEqual(bank.driftSpotMarket, tokenAPool3Market);
+      assertKeysEqual(bank.integrationAcc1, tokenAPool3Market);
     });
   });
 
@@ -357,7 +350,7 @@ describe("d11: Drift Pool ID Markets", () => {
             feePayer: groupAdmin.wallet.publicKey,
             bank: tokenAPool3Bank,
             signerTokenAccount: groupAdmin.tokenAAccount,
-            driftOracle: driftAccounts.get(DRIFT_TOKENA_PULL_ORACLE),
+            driftOracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE),
           },
           {
             amount: initUserAmount,
@@ -412,7 +405,7 @@ describe("d11: Drift Pool ID Markets", () => {
         usdcPool2Bank
       );
       const driftUserAccount = await driftBankrunProgram.account.user.fetch(
-        bankAccount.driftUser
+        bankAccount.integrationAcc2
       );
       assert.equal(driftUserAccount.poolId, POOL2_ID);
 
@@ -450,7 +443,7 @@ describe("d11: Drift Pool ID Markets", () => {
           marginfiAccount: userAccount,
           bank: tokenAPool3Bank,
           signerTokenAccount: users[1].tokenAAccount,
-          driftOracle: driftAccounts.get(DRIFT_TOKENA_PULL_ORACLE),
+          driftOracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE),
         },
         depositAmount,
         TOKEN_A_POOL3_MARKET_INDEX // marketIndex for Token A pool 3
@@ -469,7 +462,7 @@ describe("d11: Drift Pool ID Markets", () => {
         tokenAPool3Bank
       );
       const driftUserAccount = await driftBankrunProgram.account.user.fetch(
-        bankAccount.driftUser
+        bankAccount.integrationAcc2
       );
       assert.equal(driftUserAccount.poolId, POOL3_ID);
 

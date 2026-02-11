@@ -4,7 +4,10 @@ use crate::{
     events::{AccountEventHeader, LendingAccountDepositEvent},
     state::{
         bank::{BankImpl, BankVaultType},
-        marginfi_account::{BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl},
+        marginfi_account::{
+            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
+            LendingAccountImpl, MarginfiAccountImpl,
+        },
         marginfi_group::MarginfiGroupImpl,
     },
     utils::{
@@ -39,8 +42,8 @@ use solend_mocks::state::{
 pub fn solend_deposit(ctx: Context<SolendDeposit>, amount: u64) -> MarginfiResult {
     // Forced to validate here as unable to load obligation as ref in constraints
     validate_solend_obligation(
-        ctx.accounts.solend_obligation.as_ref(),
-        ctx.accounts.solend_reserve.key(),
+        ctx.accounts.integration_acc_2.as_ref(),
+        ctx.accounts.integration_acc_1.key(),
     )?;
 
     let authority_bump: u8;
@@ -61,11 +64,11 @@ pub fn solend_deposit(ctx: Context<SolendDeposit>, amount: u64) -> MarginfiResul
 
     // Get initial obligation data to verify deposit amount later
     let initial_obligation_deposited_amount =
-        get_solend_obligation_deposit_amount(&ctx.accounts.solend_obligation)?;
+        get_solend_obligation_deposit_amount(&ctx.accounts.integration_acc_2)?;
 
     let expected_collateral_amount = ctx
         .accounts
-        .solend_reserve
+        .integration_acc_1
         .load()?
         .liquidity_to_collateral(amount)?;
 
@@ -73,7 +76,7 @@ pub fn solend_deposit(ctx: Context<SolendDeposit>, amount: u64) -> MarginfiResul
     ctx.accounts.cpi_solend_deposit(amount, authority_bump)?;
 
     let final_obligation_deposited_amount =
-        get_solend_obligation_deposit_amount(&ctx.accounts.solend_obligation)?;
+        get_solend_obligation_deposit_amount(&ctx.accounts.integration_acc_2)?;
 
     // Verify the deposit was successful by checking obligation balance increased by correct amount
     let obligation_collateral_change =
@@ -134,7 +137,15 @@ pub struct SolendDeposit<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = authority @ MarginfiError::Unauthorized
+        constraint = {
+            let a = marginfi_account.load()?;
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), false)
+        } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
@@ -144,8 +155,8 @@ pub struct SolendDeposit<'info> {
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
-        has_one = solend_reserve @ MarginfiError::InvalidSolendReserve,
-        has_one = solend_obligation @ MarginfiError::InvalidSolendObligation,
+        has_one = integration_acc_1 @ MarginfiError::InvalidSolendReserve,
+        has_one = integration_acc_2 @ MarginfiError::InvalidSolendObligation,
         has_one = mint @ MarginfiError::InvalidMint,
         constraint = is_solend_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongBankAssetTagForSolendOperation
@@ -174,9 +185,9 @@ pub struct SolendDeposit<'info> {
     /// CHECK: Validated in instruction body
     #[account(
         mut,
-        constraint = solend_obligation.owner == &SOLEND_PROGRAM_ID @ MarginfiError::InvalidSolendAccount
+        constraint = integration_acc_2.owner == &SOLEND_PROGRAM_ID @ MarginfiError::InvalidSolendAccount
     )]
-    pub solend_obligation: UncheckedAccount<'info>,
+    pub integration_acc_2: UncheckedAccount<'info>,
 
     /// CHECK: validated by the Solend program
     pub lending_market: UncheckedAccount<'info>,
@@ -188,9 +199,9 @@ pub struct SolendDeposit<'info> {
     /// The Solend reserve that holds liquidity
     #[account(
         mut,
-        constraint = !solend_reserve.load()?.is_stale()? @ MarginfiError::SolendReserveStale
+        constraint = !integration_acc_1.load()?.is_stale()? @ MarginfiError::SolendReserveStale
     )]
-    pub solend_reserve: AccountLoader<'info, SolendMinimalReserve>,
+    pub integration_acc_1: AccountLoader<'info, SolendMinimalReserve>,
 
     /// Bank's liquidity token mint (e.g., USDC)
     pub mint: Box<InterfaceAccount<'info, Mint>>,
@@ -248,13 +259,13 @@ impl<'info> SolendDeposit<'info> {
         let accounts = DepositReserveLiquidityAndObligationCollateral {
             source_liquidity_info: self.liquidity_vault.to_account_info(),
             user_collateral_info: self.user_collateral.to_account_info(),
-            reserve_info: self.solend_reserve.to_account_info(),
+            reserve_info: self.integration_acc_1.to_account_info(),
             reserve_liquidity_supply_info: self.reserve_liquidity_supply.to_account_info(),
             reserve_collateral_mint_info: self.reserve_collateral_mint.to_account_info(),
             lending_market_info: self.lending_market.to_account_info(),
             lending_market_authority_info: self.lending_market_authority.to_account_info(),
             destination_deposit_collateral_info: self.reserve_collateral_supply.to_account_info(),
-            obligation_info: self.solend_obligation.to_account_info(),
+            obligation_info: self.integration_acc_2.to_account_info(),
             obligation_owner_info: self.liquidity_vault_authority.to_account_info(),
             pyth_price_info: self.pyth_price.to_account_info(),
             switchboard_feed_info: self.switchboard_feed.to_account_info(),

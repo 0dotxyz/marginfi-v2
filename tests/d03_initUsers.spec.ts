@@ -11,8 +11,10 @@ import {
   getUserAccount,
   getUserStatsAccount,
   getDriftStateAccount,
+  DriftUser,
 } from "./utils/drift-utils";
 import { MockUser } from "./utils/mocks";
+import { deriveUserPDA } from "./utils/pdas";
 
 describe("d03: Drift - Initialize User Accounts", () => {
   let userA: MockUser;
@@ -43,11 +45,18 @@ describe("d03: Drift - Initialize User Accounts", () => {
     assertKeysEqual(userAStats.authority, userA.wallet.publicKey);
     assert.equal(userAStats.numberOfSubAccounts, 0);
 
+    const [userPublicKey] = deriveUserPDA(
+      driftBankrunProgram.programId,
+      userA.wallet.publicKey,
+      0 // sub_account_id is always zero in our case
+    );
+
     const initUserAIx = await makeInitializeUserIx(
       driftBankrunProgram,
       {
         authority: userA.wallet.publicKey,
         payer: userA.wallet.publicKey,
+        user: userPublicKey,
       },
       {
         subAccountId: 0,
@@ -75,6 +84,11 @@ describe("d03: Drift - Initialize User Accounts", () => {
       userA.wallet.publicKey
     );
     assert.equal(updatedUserAStats.numberOfSubAccounts, 1);
+
+    const driftUserA = await driftBankrunProgram.account.user.fetch(
+      userPublicKey
+    );
+    assert.equal(driftUserA.subAccountId, 0);
   });
 
   it("Initialize User B stats and account", async () => {
@@ -96,11 +110,18 @@ describe("d03: Drift - Initialize User Accounts", () => {
     assert.ok(userBStats);
     assertKeysEqual(userBStats.authority, userB.wallet.publicKey);
 
+    const [userPublicKey] = deriveUserPDA(
+      driftBankrunProgram.programId,
+      userB.wallet.publicKey,
+      0 // sub_account_id is always zero in our case
+    );
+
     const initUserBIx = await makeInitializeUserIx(
       driftBankrunProgram,
       {
         authority: userB.wallet.publicKey,
         payer: userB.wallet.publicKey,
+        user: userPublicKey,
       },
       {
         subAccountId: 0,
@@ -122,21 +143,10 @@ describe("d03: Drift - Initialize User Accounts", () => {
 
     const state = await getDriftStateAccount(driftBankrunProgram);
     assert.equal(state.numberOfSubAccounts.toNumber(), 2);
-  });
 
-  it("Verify user PDAs are correctly derived", async () => {
-    const userAAccount = await getUserAccount(
-      driftBankrunProgram,
-      userA.wallet.publicKey,
-      0
+    const driftUserB = await driftBankrunProgram.account.user.fetch(
+      userPublicKey
     );
-    assert.ok(userAAccount);
-
-    const userBAccount = await getUserAccount(
-      driftBankrunProgram,
-      userB.wallet.publicKey,
-      0
-    );
-    assert.ok(userBAccount);
+    assert.equal(driftUserB.subAccountId, 0);
   });
 });

@@ -11,16 +11,20 @@ import {
   users,
   SOLEND_MARKET,
   SOLEND_USDC_BANK,
-  SOLEND_TOKENA_BANK,
+  SOLEND_TOKEN_A_BANK,
   SOLEND_USDC_RESERVE,
-  SOLEND_TOKENA_RESERVE,
+  SOLEND_TOKEN_A_RESERVE,
   bankRunProvider,
   ecosystem,
   oracles,
 } from "./rootHooks";
 import { MockUser, USER_ACCOUNT_SL } from "./utils/mocks";
 import { processBankrunTransaction } from "./utils/tools";
-import { getTokenBalance, assertBankrunTxFailed } from "./utils/genericTests";
+import {
+  getTokenBalance,
+  assertBankrunTxFailed,
+  assertI80F48Approx,
+} from "./utils/genericTests";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { composeRemainingAccounts } from "./utils/user-instructions";
 import {
@@ -31,6 +35,7 @@ import { makeSolendRefreshReserveIx } from "./utils/solend-sdk";
 import { SOLEND_NULL_PUBKEY } from "./utils/solend-utils";
 import { createMintToInstruction } from "@solana/spl-token";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
+import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "./utils/types";
 
 describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
   let userA: MockUser;
@@ -46,9 +51,9 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
     userB = users[1];
 
     usdcBank = solendAccounts.get(SOLEND_USDC_BANK)!;
-    tokenABank = solendAccounts.get(SOLEND_TOKENA_BANK)!;
+    tokenABank = solendAccounts.get(SOLEND_TOKEN_A_BANK)!;
     usdcReserve = solendAccounts.get(SOLEND_USDC_RESERVE)!;
-    tokenAReserve = solendAccounts.get(SOLEND_TOKENA_RESERVE)!;
+    tokenAReserve = solendAccounts.get(SOLEND_TOKEN_A_RESERVE)!;
   });
 
   describe("1. Instant Deposit/Withdraw Tests", () => {
@@ -140,6 +145,13 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
         await processBankrunTransaction(bankrunContext, withdrawTx, [
           userA.wallet,
         ]);
+
+        const bankAfter = await bankrunProgram.account.bank.fetch(usdcBank);
+        const expectedPrice = oracles.usdcPrice;
+        const expectedConf =
+          expectedPrice * ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
+        assertI80F48Approx(bankAfter.cache.lastOraclePrice, expectedPrice);
+        assertI80F48Approx(bankAfter.cache.lastOraclePriceConfidence, expectedConf);
 
         const userBalanceFinal = await getTokenBalance(
           bankRunProvider,

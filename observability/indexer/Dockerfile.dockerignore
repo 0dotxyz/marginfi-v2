@@ -1,8 +1,0 @@
-# Ignore everything except for Cargo and src files
-**/.env
-**/.git
-**/target
-**/.DS_Store
-**/Dockerfile
-**/docs
-**/*.log

@@ -3,7 +3,7 @@ use std::str::FromStr;
 use crate::processor::oracle::find_pyth_push_oracles_for_feed_id;
 use crate::{
     config::GlobalOptions,
-    processor::{self, process_set_user_flag},
+    processor::{self},
     profile::{load_profile, Profile},
 };
 use anchor_client::Cluster;
@@ -13,8 +13,7 @@ use fixed::types::I80F48;
 use marginfi_type_crate::types::{
     make_points, Balance, Bank, BankConfig, BankConfigOpt, BankOperationalState,
     InterestRateConfig, InterestRateConfigOpt, LendingAccount, MarginfiAccount, MarginfiGroup,
-    RatePoint, RiskTier, WrappedI80F48, ACCOUNT_FLAG_DEPRECATED,
-    ACCOUNT_TRANSFER_AUTHORITY_DEPRECATED, CURVE_POINTS,
+    RatePoint, RiskTier, WrappedI80F48, CURVE_POINTS,
 };
 use pyth_solana_receiver_sdk::price_update::get_feed_id_from_hex;
 use rand::Rng;
@@ -81,8 +80,6 @@ pub enum GroupCommand {
         admin: Option<Pubkey>,
         #[clap(short = 'f', long = "override")]
         override_existing_profile_group: bool,
-        #[clap(long)]
-        is_arena_group: bool,
     },
     Update {
         #[clap(long)]
@@ -99,8 +96,6 @@ pub enum GroupCommand {
         new_metadata_admin: Pubkey,
         #[clap(long)]
         new_risk_admin: Pubkey,
-        #[clap(long)]
-        is_arena_group: bool,
     },
     AddBank {
         #[clap(long)]
@@ -511,13 +506,6 @@ pub enum AccountCommand {
     },
     Create,
     Close,
-    SetFlag {
-        account_pk: Pubkey,
-        #[clap(long)]
-        flashloans_enabled: bool,
-        #[clap(long)]
-        account_migration_enabled: bool,
-    },
 }
 
 pub fn entry(opts: Opts) -> Result<()> {
@@ -651,14 +639,7 @@ fn group(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<()> {
         GroupCommand::Create {
             admin,
             override_existing_profile_group,
-            is_arena_group,
-        } => processor::group_create(
-            config,
-            profile,
-            admin,
-            override_existing_profile_group,
-            is_arena_group,
-        ),
+        } => processor::group_create(config, profile, admin, override_existing_profile_group),
 
         GroupCommand::Update {
             new_admin,
@@ -668,7 +649,6 @@ fn group(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<()> {
             new_emissions_admin,
             new_metadata_admin,
             new_risk_admin,
-            is_arena_group,
         } => processor::group_configure(
             config,
             profile,
@@ -679,7 +659,6 @@ fn group(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<()> {
             new_emissions_admin,
             new_metadata_admin,
             new_risk_admin,
-            is_arena_group,
         ),
 
         GroupCommand::AddBank {
@@ -1005,30 +984,6 @@ fn process_account_subcmd(subcmd: AccountCommand, global_options: &GlobalOptions
         ),
         AccountCommand::Create => processor::marginfi_account_create(&profile, &config),
         AccountCommand::Close => processor::marginfi_account_close(&profile, &config),
-        AccountCommand::SetFlag {
-            flashloans_enabled: flashloan,
-            account_pk,
-            account_migration_enabled,
-        } => {
-            let mut flag = 0;
-
-            if flashloan {
-                println!("Setting flashloan flag");
-                flag |= ACCOUNT_FLAG_DEPRECATED;
-            }
-
-            if account_migration_enabled {
-                println!("Setting account migration flag");
-                flag |= ACCOUNT_TRANSFER_AUTHORITY_DEPRECATED;
-            }
-
-            if flag == 0 {
-                println!("No flag provided");
-                std::process::exit(1);
-            }
-
-            process_set_user_flag(config, &profile, account_pk, flag)
-        }
     }?;
 
     Ok(())

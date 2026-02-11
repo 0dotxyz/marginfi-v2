@@ -66,6 +66,9 @@ describe("Liquidate user", () => {
       async () => {
         await liquidator.mrgnProgram.provider.sendAndConfirm(
           new Transaction().add(
+            ComputeBudgetProgram.setComputeUnitLimit({
+              units: 300_000,
+            }),
             await liquidateIx(liquidator.mrgnProgram, {
               assetBankKey,
               liabilityBankKey,
@@ -109,6 +112,10 @@ describe("Liquidate user", () => {
       async () => {
         await liquidator.mrgnProgram.provider.sendAndConfirm(
           new Transaction().add(
+
+            ComputeBudgetProgram.setComputeUnitLimit({
+              units: 300_000,
+            }),
             await liquidateIx(liquidator.mrgnProgram, {
               assetBankKey,
               liabilityBankKey,
@@ -235,45 +242,45 @@ describe("Liquidate user", () => {
       console.log("BEFORE");
       console.log(
         "liability bank insurance vault before: " +
-          insuranceVaultBalance.toLocaleString()
+        insuranceVaultBalance.toLocaleString()
       );
       console.log(
         "user 0 (liquidatee) Token A asset shares: " + sharesA.toString()
       );
       console.log(
         "  value (in Token A native): " +
-          (sharesA * shareValueA).toLocaleString()
+        (sharesA * shareValueA).toLocaleString()
       );
       console.log(
         "  value (in dollars): $" +
-          (
-            (sharesA * shareValueA * oracles.tokenAPrice) /
-            10 ** oracles.tokenADecimals
-          ).toLocaleString()
+        (
+          (sharesA * shareValueA * oracles.tokenAPrice) /
+          10 ** oracles.tokenADecimals
+        ).toLocaleString()
       );
       console.log(
         "user 0 (liquidatee) USDC liability shares: " + sharesUsdc.toString()
       );
       console.log(
         "  debt (in USDC native): " +
-          (sharesUsdc * shareValueUsdc).toLocaleString()
+        (sharesUsdc * shareValueUsdc).toLocaleString()
       );
       console.log(
         "  debt (in dollars): $" +
-          (
-            (sharesUsdc * shareValueUsdc * oracles.usdcPrice) /
-            10 ** oracles.usdcDecimals
-          ).toLocaleString()
+        (
+          (sharesUsdc * shareValueUsdc * oracles.usdcPrice) /
+          10 ** oracles.usdcDecimals
+        ).toLocaleString()
       );
       console.log(
         "user 1 (liquidator) USDC asset shares: " +
-          wrappedI80F48toBigNumber(liquidatorBalances[0].assetShares).toString()
+        wrappedI80F48toBigNumber(liquidatorBalances[0].assetShares).toString()
       );
       console.log(
         "user 1 (liquidator) USDC liability shares: " +
-          wrappedI80F48toBigNumber(
-            liquidatorBalances[0].liabilityShares
-          ).toString()
+        wrappedI80F48toBigNumber(
+          liquidatorBalances[0].liabilityShares
+        ).toString()
       );
     }
 
@@ -336,7 +343,7 @@ describe("Liquidate user", () => {
     assertI80F48Equal(
       liquidateeBalancesAfter[0].assetShares,
       wrappedI80F48toBigNumber(liquidateeBalances[0].assetShares).toNumber() -
-        liquidateAmountA_native.toNumber()
+      liquidateAmountA_native.toNumber()
     );
     assertI80F48Equal(liquidateeBalancesAfter[0].liabilityShares, 0);
     assertI80F48Equal(liquidateeBalancesAfter[1].assetShares, 0);
@@ -367,61 +374,61 @@ describe("Liquidate user", () => {
       console.log("AFTER");
       console.log(
         "liability bank insurance vault after (usdc): " +
-          insuranceVaultBalanceAfter.toLocaleString()
+        insuranceVaultBalanceAfter.toLocaleString()
       );
       console.log(
         "user 0 (liquidatee) Token A asset shares after: " +
-          sharesAAfter.toString()
+        sharesAAfter.toString()
       );
       console.log(
         "  value (in Token A native): " +
-          (sharesAAfter * shareValueA).toLocaleString()
+        (sharesAAfter * shareValueA).toLocaleString()
       );
       console.log(
         "  value (in dollars): $" +
-          (
-            (sharesAAfter * shareValueA * oracles.tokenAPrice) /
-            10 ** oracles.tokenADecimals
-          ).toLocaleString()
+        (
+          (sharesAAfter * shareValueA * oracles.tokenAPrice) /
+          10 ** oracles.tokenADecimals
+        ).toLocaleString()
       );
       console.log(
         "user 0 (liquidatee) USDC liability shares after: " +
-          sharesUsdcAfter.toString()
+        sharesUsdcAfter.toString()
       );
       console.log(
         "  debt (in USDC native): " +
-          (sharesUsdcAfter * shareValueUsdc).toLocaleString()
+        (sharesUsdcAfter * shareValueUsdc).toLocaleString()
       );
       console.log(
         "  debt (in dollars): $" +
-          (
-            (sharesUsdcAfter * shareValueUsdc * oracles.usdcPrice) /
-            10 ** oracles.usdcDecimals
-          ).toLocaleString()
+        (
+          (sharesUsdcAfter * shareValueUsdc * oracles.usdcPrice) /
+          10 ** oracles.usdcDecimals
+        ).toLocaleString()
       );
       console.log(
         "user 1 (liquidator) USDC asset shares after: " +
-          wrappedI80F48toBigNumber(
-            liquidatorBalancesAfter[0].assetShares
-          ).toString()
+        wrappedI80F48toBigNumber(
+          liquidatorBalancesAfter[0].assetShares
+        ).toString()
       );
       console.log(
         "user 1 (liquidator) USDC liability shares after: " +
-          wrappedI80F48toBigNumber(
-            liquidatorBalancesAfter[0].liabilityShares
-          ).toString()
+        wrappedI80F48toBigNumber(
+          liquidatorBalancesAfter[0].liabilityShares
+        ).toString()
       );
       console.log(
         "user 1 (liquidator) Token A asset shares after: " +
-          wrappedI80F48toBigNumber(
-            liquidatorBalancesAfter[1].assetShares
-          ).toString()
+        wrappedI80F48toBigNumber(
+          liquidatorBalancesAfter[1].assetShares
+        ).toString()
       );
       console.log(
         "user 1 (liquidator) Token A liability shares after: " +
-          wrappedI80F48toBigNumber(
-            liquidatorBalancesAfter[1].liabilityShares
-          ).toString()
+        wrappedI80F48toBigNumber(
+          liquidatorBalancesAfter[1].liabilityShares
+        ).toString()
       );
     }
 

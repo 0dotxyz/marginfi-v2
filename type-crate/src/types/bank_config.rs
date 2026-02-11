@@ -26,53 +26,69 @@ assert_struct_align!(BankConfig, 8);
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Debug, PartialEq, Pod, Zeroable, Copy, Clone, Eq)]
 pub struct BankConfig {
-    /// TODO: Convert weights to (u64, u64) to avoid precision loss (maybe?)
+    /// Discount factor for asset values in initial margin calculation (0 to 1).
+    /// E.g., 0.8 means assets count as 80% of their value for borrowing purposes.
     pub asset_weight_init: WrappedI80F48,
+    /// Discount factor for asset values in maintenance margin calculation (0 to 2).
+    /// Used for liquidation eligibility. Generally >= asset_weight_init.
     pub asset_weight_maint: WrappedI80F48,
 
+    /// Premium factor for liability values in initial margin calculation (>= 1).
+    /// E.g., 1.2 means liabilities count as 120% of their value for borrowing purposes.
     pub liability_weight_init: WrappedI80F48,
+    /// Premium factor for liability values in maintenance margin calculation (>= 1).
+    /// Used for liquidation eligibility. Generally <= liability_weight_init.
     pub liability_weight_maint: WrappedI80F48,
 
+    /// Maximum total deposits allowed in this bank, in native token units (0 = no limit)
     pub deposit_limit: u64,
 
+    /// Interest rate model configuration
     pub interest_rate_config: InterestRateConfig,
+    /// Current operational state of the bank (Paused, Operational, ReduceOnly, KilledByBankruptcy)
     pub operational_state: BankOperationalState,
 
+    /// Oracle type used for price feeds
     pub oracle_setup: OracleSetup,
+    /// Oracle account keys (usage depends on oracle_setup type)
     pub oracle_keys: [Pubkey; MAX_ORACLE_KEYS],
 
     // Note: Pubkey is aligned 1, so borrow_limit is the first aligned-8 value after deposit_limit
     pub _pad0: [u8; 6], // Bank state (1) + Oracle Setup (1) + 6 = 8
 
+    /// Maximum total borrows allowed in this bank, in native token units (0 = no limit)
     pub borrow_limit: u64,
 
+    /// Risk tier for this bank (Collateral or Isolated)
     pub risk_tier: RiskTier,
 
-    /// Determines what kinds of assets users of this bank can interact with.
-    /// Options:
-    /// * ASSET_TAG_DEFAULT (0) - A regular asset that can be comingled with any other regular asset
-    ///   or with `ASSET_TAG_SOL`
-    /// * ASSET_TAG_SOL (1) - Accounts with a SOL position can comingle with **either**
+    /// Determines what kinds of assets users of this bank can interact with. Options:
+    /// * `ASSET_TAG_DEFAULT` (0) - A regular asset that can be comingled with any other regular
+    ///   asset or with `ASSET_TAG_SOL`
+    /// * `ASSET_TAG_SOL` (1) - Accounts with a SOL position can comingle with **either**
     /// `ASSET_TAG_DEFAULT` or `ASSET_TAG_STAKED` positions, but not both
-    /// * ASSET_TAG_STAKED (2) - Staked SOL assets. Accounts with a STAKED position can only deposit
-    /// other STAKED assets or SOL (`ASSET_TAG_SOL`) and can only borrow SOL
+    /// * `ASSET_TAG_STAKED` (2) - Staked SOL assets. Accounts with a STAKED position can only
+    /// deposit other STAKED assets or SOL (`ASSET_TAG_SOL`) and can only borrow SOL
+    /// * `ASSET_TAG_KAMINO` (3) - Treated the same as `ASSET_TAG_DEFAULT`
+    /// * `ASSET_TAG_DRIFT` (4) - Treated the same as `ASSET_TAG_DEFAULT`
+    /// * `ASSET_TAG_SOLEND` (5) - Treated the same as `ASSET_TAG_DEFAULT`
     pub asset_tag: u8,
 
     /// Flags for various config options
-    /// * 1 - Always set if bank created in 0.1.4 or later, or if migrated to the new pyth
-    ///   oracle setup from a prior version. Not set in 0.1.3 or earlier banks using pyth that have
-    ///   not yet migrated. Does nothing for banks that use switchboard.
+    /// * 1 - Always set if bank created in 0.1.4 or later, or if migrated to the new pyth oracle
+    ///   setup from a prior version. Not set in 0.1.3 or earlier banks using pyth that have not yet
+    ///   migrated. Does nothing for banks that use switchboard.
     /// * 2, 4, 8, 16, etc - reserved for future use.
     pub config_flags: u8,
 
     pub _pad1: [u8; 5],
 
     /// USD denominated limit for calculating asset value for initialization margin requirements.
-    /// Example, if total SOL deposits are equal to $1M and the limit it set to $500K,
-    /// then SOL assets will be discounted by 50%.
+    /// Example, if total SOL deposits are equal to $1M and the limit it set to $500K, then SOL
+    /// assets will be discounted by 50%.
     ///
-    /// In other words the max value of liabilities that can be backed by the asset is $500K.
-    /// This is useful for limiting the damage of orcale attacks.
+    /// In other words the max value of liabilities that can be backed by the asset is $500K. This
+    /// is useful for limiting the damage of oracle attacks.
     ///
     /// Value is UI USD value, for example value 100 -> $100
     pub total_asset_value_init_limit: u64,
@@ -157,7 +173,6 @@ pub struct BankConfigOpt {
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Debug, PartialEq, Eq)]
-/// TODO: Convert weights to (u64, u64) to avoid precision loss (maybe?)
 pub struct BankConfigCompact {
     pub asset_weight_init: WrappedI80F48,
     pub asset_weight_maint: WrappedI80F48,
@@ -174,29 +189,31 @@ pub struct BankConfigCompact {
 
     pub risk_tier: RiskTier,
 
-    /// Determines what kinds of assets users of this bank can interact with.
-    /// Options:
-    /// * ASSET_TAG_DEFAULT (0) - A regular asset that can be comingled with any other regular asset
-    ///   or with `ASSET_TAG_SOL`
-    /// * ASSET_TAG_SOL (1) - Accounts with a SOL position can comingle with **either**
+    /// Determines what kinds of assets users of this bank can interact with. Options:
+    /// * `ASSET_TAG_DEFAULT` (0) - A regular asset that can be comingled with any other regular
+    ///   asset or with `ASSET_TAG_SOL`
+    /// * `ASSET_TAG_SOL` (1) - Accounts with a SOL position can comingle with **either**
     /// `ASSET_TAG_DEFAULT` or `ASSET_TAG_STAKED` positions, but not both
-    /// * ASSET_TAG_STAKED (2) - Staked SOL assets. Accounts with a STAKED position can only deposit
-    /// other STAKED assets or SOL (`ASSET_TAG_SOL`) and can only borrow SOL
+    /// * `ASSET_TAG_STAKED` (2) - Staked SOL assets. Accounts with a STAKED position can only
+    /// deposit other STAKED assets or SOL (`ASSET_TAG_SOL`) and can only borrow SOL
+    /// * `ASSET_TAG_KAMINO` (3) - Treated the same as `ASSET_TAG_DEFAULT`
+    /// * `ASSET_TAG_DRIFT` (4) - Treated the same as `ASSET_TAG_DEFAULT`
+    /// * `ASSET_TAG_SOLEND` (5) - Treated the same as `ASSET_TAG_DEFAULT`
     pub asset_tag: u8,
 
     /// Flags for various config options
-    /// * 1 - Always set if bank created in 0.1.4 or later, or if migrated to the new oracle
-    ///   setup from a prior version. Not set in 0.1.3 or earlier banks that have not yet migrated.
+    /// * 1 - Always set if bank created in 0.1.4 or later, or if migrated to the new oracle setup
+    ///   from a prior version. Not set in 0.1.3 or earlier banks that have not yet migrated.
     /// * 2, 4, 8, 16, etc - reserved for future use.
     pub config_flags: u8,
     pub _pad0: [u8; 5],
 
     /// USD denominated limit for calculating asset value for initialization margin requirements.
-    /// Example, if total SOL deposits are equal to $1M and the limit it set to $500K,
-    /// then SOL assets will be discounted by 50%.
+    /// Example, if total SOL deposits are equal to $1M and the limit it set to $500K, then SOL
+    /// assets will be discounted by 50%.
     ///
-    /// In other words the max value of liabilities that can be backed by the asset is $500K.
-    /// This is useful for limiting the damage of orcale attacks.
+    /// In other words the max value of liabilities that can be backed by the asset is $500K. This
+    /// is useful for limiting the damage of oracle attacks.
     ///
     /// Value is UI USD value, for example value 100 -> $100
     pub total_asset_value_init_limit: u64,

@@ -4,7 +4,6 @@ import {
   Transaction,
   ComputeBudgetProgram,
   Keypair,
-  SystemProgram,
 } from "@solana/web3.js";
 import {
   createMintToInstruction,
@@ -25,7 +24,6 @@ import {
   users,
   solendAccounts,
   SOLEND_USDC_RESERVE,
-  SOLEND_TOKENA_RESERVE,
   SOLEND_MARKET,
   SOLEND_USDC_COLLATERAL_MINT,
   SOLEND_USDC_LIQUIDITY_SUPPLY,
@@ -46,10 +44,9 @@ import {
 import {
   deriveBankWithSeed,
   deriveLiquidityVaultAuthority,
-  deriveSolendObligation,
 } from "./utils/pdas";
 import { genericMultiBankTestSetup } from "./genericSetups";
-import { SOLEND_PROGRAM_ID, HEALTH_CACHE_HEALTHY } from "./utils/types";
+import { HEALTH_CACHE_HEALTHY } from "./utils/types";
 import { defaultSolendBankConfig } from "./utils/solend-utils";
 import {
   processBankrunTransaction as processBankrunTx,
@@ -137,7 +134,7 @@ describe("sl08: 16 Banks Stress Test", () => {
             group: throwawayGroup.publicKey,
             feePayer: groupAdmin.wallet.publicKey,
             bankMint: config.mint,
-            solendReserve: solendAccounts.get(config.reserve)!,
+            integrationAcc1: solendAccounts.get(config.reserve)!,
             solendMarket: solendAccounts.get(SOLEND_MARKET)!,
             oracle: config.oracle,
           },

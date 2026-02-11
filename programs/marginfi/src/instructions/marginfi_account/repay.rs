@@ -5,7 +5,10 @@ use crate::{
     prelude::{MarginfiError, MarginfiResult},
     state::{
         bank::BankImpl,
-        marginfi_account::{BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl},
+        marginfi_account::{
+            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
+            LendingAccountImpl, MarginfiAccountImpl,
+        },
         marginfi_group::MarginfiGroupImpl,
     },
     utils::{self, is_marginfi_asset_tag, validate_bank_state, InstructionKind},
@@ -14,11 +17,12 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{clock::Clock, sysvar::Sysvar};
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
+use fixed_macro::types::I80F48;
 use marginfi_type_crate::{
     constants::{
         TOKENLESS_REPAYMENTS_ALLOWED, TOKENLESS_REPAYMENTS_COMPLETE, ZERO_AMOUNT_THRESHOLD,
     },
-    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP},
+    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED},
 };
 
 /// 1. Accrue interest
@@ -122,12 +126,13 @@ pub fn lending_account_repay<'info>(
     // During deleverage, once the last repayment is complete, and the bank's debts have been fully
     // discharged, the risk admin becomes empowered to purge the balances of lenders
     let liabs: I80F48 = bank.total_liability_shares.into();
-    if bank.get_flag(TOKENLESS_REPAYMENTS_ALLOWED) && liabs.abs() < ZERO_AMOUNT_THRESHOLD {
+    if bank.get_flag(TOKENLESS_REPAYMENTS_ALLOWED)
+        && liabs.abs() < ZERO_AMOUNT_THRESHOLD * I80F48!(10)
+    {
         bank.update_flag(true, TOKENLESS_REPAYMENTS_COMPLETE);
     }
 
     bank.update_bank_cache(group)?;
-
     emit!(LendingAccountRepayEvent {
         header: AccountEventHeader {
             signer: Some(ctx.accounts.authority.key()),
@@ -160,8 +165,13 @@ pub struct LendingAccountRepay<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
             let a = marginfi_account.load()?;
-            a.authority == authority.key() || a.get_flag(ACCOUNT_IN_RECEIVERSHIP)
-        } @MarginfiError::Unauthorized
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), true)
+        } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 

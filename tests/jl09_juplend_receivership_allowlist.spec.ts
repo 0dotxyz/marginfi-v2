@@ -128,7 +128,7 @@ describe("jl09: JupLend receivership allowlist (start_deleverage + update_rate)"
       bankMint: ecosystem.usdcMint.publicKey,
       bankSeed: BANK_SEED,
       oracle: oracles.usdcOracle.publicKey,
-      juplendLending: pool.lending,
+      integrationAcc1: pool.lending,
       fTokenMint: pool.fTokenMint,
       config: cfg,
       tokenProgram: pool.tokenProgram,

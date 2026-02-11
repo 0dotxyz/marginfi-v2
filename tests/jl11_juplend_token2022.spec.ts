@@ -251,7 +251,7 @@ describe("jl11: JupLend - Token-2022 smoke test", () => {
       bankMint: token2022Mint.publicKey,
       bankSeed: BANK_SEED,
       oracle: oracles.tokenAOracle.publicKey,
-      juplendLending: pool.lending,
+      integrationAcc1: pool.lending,
       fTokenMint: pool.fTokenMint,
       config,
       tokenProgram: TOKEN_2022_PROGRAM_ID,

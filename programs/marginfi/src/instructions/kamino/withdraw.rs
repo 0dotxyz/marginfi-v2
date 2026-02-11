@@ -7,13 +7,14 @@ use crate::{
     state::{
         bank::BankImpl,
         marginfi_account::{
-            calc_value, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl, RiskEngine,
+            account_not_frozen_for_authority, calc_value, check_account_init_health,
+            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
     },
     utils::{
-        assert_within_one_token, fetch_asset_price_for_bank, is_kamino_asset_tag,
-        validate_bank_state, InstructionKind,
+        assert_within_one_token, fetch_asset_price_for_bank_low_bias,
+        fetch_unbiased_price_for_bank, is_kamino_asset_tag, validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -34,9 +35,12 @@ use kamino_mocks::{
     },
     state::{MinimalObligation, MinimalReserve},
 };
-use marginfi_type_crate::constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED};
 use marginfi_type_crate::types::{
     Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+};
+use marginfi_type_crate::{
+    constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED},
+    types::ACCOUNT_IN_DELEVERAGE,
 };
 
 /// Withdraw from a Kamino reserve through a marginfi account
@@ -77,16 +81,17 @@ pub fn kamino_withdraw<'info>(
     let pre_transfer_vault_balance =
         accessor::amount(&ctx.accounts.liquidity_vault.to_account_info())?;
     let initial_deposit_amount =
-        ctx.accounts.kamino_obligation.load()?.deposits[0].deposited_amount;
+        ctx.accounts.integration_acc_2.load()?.deposits[0].deposited_amount;
 
     let collateral_amount;
     let bank_key = ctx.accounts.bank.key();
+    let bank_mint = ctx.accounts.bank.load()?.mint;
+    let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
+    let clock = Clock::get()?;
+
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
-        let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut group = ctx.accounts.group.load_mut()?;
-        let clock = Clock::get()?;
-
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
 
         check!(
@@ -96,8 +101,12 @@ pub fn kamino_withdraw<'info>(
 
         let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
         let price = if in_receivership {
-            let price =
-                fetch_asset_price_for_bank(&bank_key, &bank, &clock, ctx.remaining_accounts)?;
+            let price = fetch_asset_price_for_bank_low_bias(
+                &bank_key,
+                &bank,
+                &clock,
+                ctx.remaining_accounts,
+            )?;
 
             // Validate price is non-zero during liquidation/deleverage to prevent exploits with stale oracles
             check!(price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
@@ -121,11 +130,11 @@ pub fn kamino_withdraw<'info>(
             amount
         };
         // Note: we only care about the withdraw limit in case of deleverage
-        if ctx.accounts.authority.key() == group.risk_admin {
+        if marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE) {
             let withdrawn_equity = calc_value(
                 I80F48::from_num(collateral_amount),
                 price,
-                bank.mint_decimals,
+                bank.get_balance_decimals(),
                 None,
             )?;
             group.update_withdrawn_equity(withdrawn_equity, clock.unix_timestamp)?;
@@ -139,14 +148,14 @@ pub fn kamino_withdraw<'info>(
 
     let expected_liquidity_amount = ctx
         .accounts
-        .kamino_reserve
+        .integration_acc_1
         .load()?
         .collateral_to_liquidity(collateral_amount)?;
 
     ctx.accounts.cpi_kamino_withdraw(collateral_amount)?;
 
     // Really just a sanity check, vault balance change is more important
-    let final_deposit_amount = ctx.accounts.kamino_obligation.load()?.deposits[0].deposited_amount;
+    let final_deposit_amount = ctx.accounts.integration_acc_2.load()?.deposits[0].deposited_amount;
     let actual_deposit_decrease = initial_deposit_amount - final_deposit_amount;
     require_eq!(
         actual_deposit_decrease,
@@ -165,43 +174,63 @@ pub fn kamino_withdraw<'info>(
 
     ctx.accounts
         .cpi_transfer_obligation_owner_to_destination(received)?;
-    {
-        let bank = ctx.accounts.bank.load()?;
-        let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
 
-        emit!(LendingAccountWithdrawEvent {
-            header: AccountEventHeader {
-                signer: Some(ctx.accounts.authority.key()),
-                marginfi_account: ctx.accounts.marginfi_account.key(),
-                marginfi_account_authority: marginfi_account.authority,
-                marginfi_group: marginfi_account.group,
-            },
-            bank: ctx.accounts.bank.key(),
-            mint: bank.mint,
-            amount: collateral_amount,
-            close_balance: withdraw_all,
-        });
+    emit!(LendingAccountWithdrawEvent {
+        header: AccountEventHeader {
+            signer: Some(ctx.accounts.authority.key()),
+            marginfi_account: ctx.accounts.marginfi_account.key(),
+            marginfi_account_authority: marginfi_account.authority,
+            marginfi_group: marginfi_account.group,
+        },
+        bank: ctx.accounts.bank.key(),
+        mint: bank_mint,
+        amount: collateral_amount,
+        close_balance: withdraw_all,
+    });
 
-        let mut health_cache = HealthCache::zeroed();
-        health_cache.timestamp = Clock::get()?.unix_timestamp;
+    let mut health_cache = HealthCache::zeroed();
+    health_cache.timestamp = clock.unix_timestamp;
 
-        marginfi_account.lending_account.sort_balances();
+    marginfi_account.lending_account.sort_balances();
 
-        // Note: during liquidating, we skip all health checks until the end of the transaction.
-        if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
-            // Check account health, if below threshold fail transaction
-            // Assuming `ctx.remaining_accounts` holds only oracle accounts
-            let (risk_result, _engine) = RiskEngine::check_account_init_health(
-                &marginfi_account,
-                ctx.remaining_accounts,
-                &mut Some(&mut health_cache),
-            );
-            risk_result?;
-            health_cache.program_version = PROGRAM_VERSION;
+    let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
 
-            health_cache.set_engine_ok(true);
-            marginfi_account.health_cache = health_cache;
-        }
+    // Note: during liquidation/receivership, we skip health checks until the end of the transaction,
+    // but we still update the price cache.
+    if !in_receivership {
+        // Check account health, if below threshold fail transaction
+        // Assuming `ctx.remaining_accounts` holds only oracle accounts
+        check_account_init_health(
+            &marginfi_account,
+            ctx.remaining_accounts,
+            &mut Some(&mut health_cache),
+        )?;
+        health_cache.program_version = PROGRAM_VERSION;
+
+        let bank_loader = &ctx.accounts.bank;
+        let bank = bank_loader.load()?;
+        let price_for_cache = fetch_unbiased_price_for_bank(
+            &bank_loader.key(),
+            &bank,
+            &clock,
+            ctx.remaining_accounts,
+        )
+        .ok();
+        drop(bank);
+        bank_loader
+            .load_mut()?
+            .update_cache_price(price_for_cache)?;
+
+        health_cache.set_engine_ok(true);
+        marginfi_account.health_cache = health_cache;
+    } else {
+        // Note: the caller can simply omit risk accounts since the risk check is ignored here, in
+        // that case the cache doesn't update and this does nothing.
+        let mut bank = ctx.accounts.bank.load_mut()?;
+        let price_for_cache =
+            fetch_unbiased_price_for_bank(&bank_key, &bank, &clock, ctx.remaining_accounts).ok();
+
+        bank.update_cache_price(price_for_cache)?;
     }
 
     Ok(())
@@ -222,8 +251,13 @@ pub struct KaminoWithdraw<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
             let a = marginfi_account.load()?;
-            a.authority == authority.key() || a.get_flag(ACCOUNT_IN_RECEIVERSHIP)
-        } @MarginfiError::Unauthorized
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), true)
+        } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
@@ -233,8 +267,8 @@ pub struct KaminoWithdraw<'info> {
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
-        has_one = kamino_reserve @ MarginfiError::InvalidKaminoReserve,
-        has_one = kamino_obligation @ MarginfiError::InvalidKaminoObligation,
+        has_one = integration_acc_1 @ MarginfiError::InvalidKaminoReserve,
+        has_one = integration_acc_2 @ MarginfiError::InvalidKaminoObligation,
         constraint = is_kamino_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongAssetTagForKaminoInstructions,
         // Block withdraw of zero-weight assets during receivership - prevents unfair liquidation
@@ -247,8 +281,8 @@ pub struct KaminoWithdraw<'info> {
     )]
     pub bank: AccountLoader<'info, Bank>,
 
-    /// Token account that will get tokens back
-    /// WARN: Completely unchecked!
+    /// Token account that will receive the withdrawn tokens. Mint/owner are validated by the
+    /// SPL transfer; the caller controls the destination.
     #[account(mut)]
     pub destination_token_account: InterfaceAccount<'info, TokenAccount>,
 
@@ -275,16 +309,16 @@ pub struct KaminoWithdraw<'info> {
     #[account(mut,
         // Only one reserve should be active on the obligation
         constraint = {
-            let obligation = kamino_obligation.load()?;
+            let obligation = integration_acc_2.load()?;
             obligation.deposits.iter().skip(1).all(|d| d.deposited_amount == 0)
         } @ MarginfiError::InvalidObligationDepositCount,
         // The only reserve active should be the bank's linked reserve
         constraint = {
-            let obligation = kamino_obligation.load()?;
-            obligation.deposits[0].deposit_reserve == kamino_reserve.key()
+            let obligation = integration_acc_2.load()?;
+            obligation.deposits[0].deposit_reserve == integration_acc_1.key()
         } @ MarginfiError::ObligationDepositReserveMismatch
     )]
-    pub kamino_obligation: AccountLoader<'info, MinimalObligation>,
+    pub integration_acc_2: AccountLoader<'info, MinimalObligation>,
 
     /// The Kamino lending market
     /// CHECK: This is validated by the Kamino program
@@ -296,7 +330,7 @@ pub struct KaminoWithdraw<'info> {
 
     /// The Kamino reserve that holds liquidity
     #[account(mut)]
-    pub kamino_reserve: AccountLoader<'info, MinimalReserve>,
+    pub integration_acc_1: AccountLoader<'info, MinimalReserve>,
 
     /// The liquidity token mint (e.g., USDC)
     /// Needs serde to get the mint decimals for transfer checked
@@ -356,7 +390,7 @@ impl<'info> KaminoWithdraw<'info> {
             lending_market: self.lending_market.to_account_info(),
             lending_market_authority: self.lending_market_authority.to_account_info(),
             liquidity_token_program: self.liquidity_token_program.to_account_info(),
-            obligation: self.kamino_obligation.to_account_info(),
+            obligation: self.integration_acc_2.to_account_info(),
             owner: self.liquidity_vault_authority.to_account_info(),
             placeholder_user_destination_collateral: None,
             reserve_collateral_mint: self.reserve_collateral_mint.to_account_info(),
@@ -364,7 +398,7 @@ impl<'info> KaminoWithdraw<'info> {
             reserve_liquidity_supply: self.reserve_liquidity_supply.to_account_info(),
             reserve_source_collateral: self.reserve_source_collateral.to_account_info(),
             user_destination_liquidity: self.liquidity_vault.to_account_info(),
-            withdraw_reserve: self.kamino_reserve.to_account_info(),
+            withdraw_reserve: self.integration_acc_1.to_account_info(),
         };
         let farms_accounts = SocializeLossV2FarmsAccounts {
             obligation_farm_user_state: optional_account!(self.obligation_farm_user_state),

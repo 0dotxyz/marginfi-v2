@@ -7,12 +7,14 @@ use crate::{
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl, RiskEngine,
+            account_not_frozen_for_authority, check_account_init_health, is_signer_authorized,
+            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
     },
     utils::{
-        self, is_marginfi_asset_tag, validate_asset_tags, validate_bank_state, InstructionKind,
+        self, fetch_unbiased_price_for_bank, is_marginfi_asset_tag, validate_asset_tags,
+        validate_bank_state, InstructionKind,
     },
 };
 use anchor_lang::prelude::*;
@@ -138,8 +140,7 @@ pub fn lending_account_borrow<'info>(
             ctx.remaining_accounts,
         )?;
 
-        bank.update_bank_cache(group)?;
-
+        // Fetch liability price to cache it (borrow creates a liability)
         emit!(LendingAccountBorrowEvent {
             header: AccountEventHeader {
                 signer: Some(ctx.accounts.authority.key()),
@@ -190,13 +191,22 @@ pub fn lending_account_borrow<'info>(
 
     // Check account health, if below threshold fail transaction
     // Assuming `ctx.remaining_accounts` holds only oracle accounts
-    let (risk_result, _engine) = RiskEngine::check_account_init_health(
+    check_account_init_health(
         &marginfi_account,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
-    );
-    risk_result?;
+    )?;
     health_cache.program_version = PROGRAM_VERSION;
+
+    let bank_pk = ctx.accounts.bank.key();
+    let bank = ctx.accounts.bank.load()?;
+    let price = fetch_unbiased_price_for_bank(&bank_pk, &bank, &clock, ctx.remaining_accounts).ok();
+    drop(bank);
+
+    let mut bank = ctx.accounts.bank.load_mut()?;
+    bank.update_bank_cache(group)?;
+    bank.update_cache_price(price)?;
+
     health_cache.set_engine_ok(true);
     marginfi_account.health_cache = health_cache;
 
@@ -215,7 +225,15 @@ pub struct LendingAccountBorrow<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = authority @ MarginfiError::Unauthorized
+        constraint = {
+            let a = marginfi_account.load()?;
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), false)
+        } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 

@@ -44,7 +44,10 @@ wallet = "~/.config/solana/id.json"
 
 # (remove RUST_LOG= to see bankRun logs)
 [scripts]
-test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/k*.spec.ts --exit --require tests/rootHooks.ts"
+test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.ts --exit --require tests/rootHooks.ts"
+
+# All tests (for CI)
+all-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.ts --exit --require tests/rootHooks.ts"
 
 # Bankrun-only runner (no local validator)
 # Use: anchor run kamino-tests
@@ -79,9 +82,6 @@ bankruptcy-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 te
 
 # Staked collateral tests only (s01-s10) - excludes solend (sl*) via pattern
 staked-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 'tests/s[0-9]*.spec.ts' --exit --require tests/rootHooks.ts"
-
-# All tests
-all-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.ts --exit --require tests/rootHooks.ts"
 
 # Kamino FIRST - to test if order matters (state pollution check)
 kamino-first-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/k*.spec.ts tests/0*.spec.ts tests/1*.spec.ts tests/e*.spec.ts tests/p*.spec.ts tests/m*.spec.ts tests/d*.spec.ts tests/sl*.spec.ts tests/z*.spec.ts tests/zb*.spec.ts --exit --require tests/rootHooks.ts"

@@ -4,7 +4,10 @@ use crate::{
     events::{AccountEventHeader, LendingAccountDepositEvent},
     state::{
         bank::{BankImpl, BankVaultType},
-        marginfi_account::{BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl},
+        marginfi_account::{
+            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
+            LendingAccountImpl, MarginfiAccountImpl,
+        },
         marginfi_group::MarginfiGroupImpl,
     },
     utils::{is_drift_asset_tag, validate_asset_tags, validate_bank_state, InstructionKind},
@@ -49,20 +52,20 @@ pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult 
             MarginfiError::AccountDisabled
         );
 
-        let drift_spot_market = ctx.accounts.drift_spot_market.load()?;
-        market_index = drift_spot_market.market_index;
+        let integration_acc_1 = ctx.accounts.integration_acc_1.load()?;
+        market_index = integration_acc_1.market_index;
     }
 
     ctx.accounts.cpi_update_spot_market_cumulative_interest()?;
     let expected_scaled_balance_change = ctx
         .accounts
-        .drift_spot_market
+        .integration_acc_1
         .load()?
         .get_scaled_balance_increment(amount)?;
 
     let initial_scaled_balance = {
-        let drift_user = ctx.accounts.drift_user.load()?;
-        drift_user.get_scaled_balance(market_index)
+        let integration_acc_2 = ctx.accounts.integration_acc_2.load()?;
+        integration_acc_2.get_scaled_balance(market_index)
     };
 
     ctx.accounts.cpi_transfer_user_to_liquidity_vault(amount)?;
@@ -70,8 +73,8 @@ pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult 
         .cpi_drift_deposit(market_index, amount, authority_bump)?;
 
     let final_scaled_balance = {
-        let drift_user = ctx.accounts.drift_user.load()?;
-        drift_user.get_scaled_balance(market_index)
+        let integration_acc_2 = ctx.accounts.integration_acc_2.load()?;
+        integration_acc_2.get_scaled_balance(market_index)
     };
     let scaled_balance_change = final_scaled_balance - initial_scaled_balance;
     require_eq!(
@@ -128,7 +131,15 @@ pub struct DriftDeposit<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = authority @ MarginfiError::Unauthorized
+        constraint = {
+            let a = marginfi_account.load()?;
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), false)
+        } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
@@ -138,9 +149,9 @@ pub struct DriftDeposit<'info> {
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
-        has_one = drift_spot_market @ MarginfiError::InvalidDriftSpotMarket,
-        has_one = drift_user @ MarginfiError::InvalidDriftUser,
-        has_one = drift_user_stats @ MarginfiError::InvalidDriftUserStats,
+        has_one = integration_acc_1 @ MarginfiError::InvalidDriftSpotMarket,
+        has_one = integration_acc_2 @ MarginfiError::InvalidDriftUser,
+        has_one = integration_acc_3 @ MarginfiError::InvalidDriftUserStats,
         has_one = mint @ MarginfiError::InvalidMint,
         constraint = is_drift_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongBankAssetTagForDriftOperation
@@ -177,25 +188,25 @@ pub struct DriftDeposit<'info> {
     #[account(
         mut,
         constraint = {
-            let user = drift_user.load()?;
-            let spot_market = drift_spot_market.load()?;
+            let user = integration_acc_2.load()?;
+            let spot_market = integration_acc_1.load()?;
             user.validate_spot_position(spot_market.market_index).is_ok()
         } @ MarginfiError::DriftInvalidSpotPositions
     )]
-    pub drift_user: AccountLoader<'info, MinimalUser>,
+    pub integration_acc_2: AccountLoader<'info, MinimalUser>,
 
     /// The Drift user stats account owned by liquidity_vault_authority
     /// CHECK: validated by the Drift program
     #[account(mut)]
-    pub drift_user_stats: UncheckedAccount<'info>,
+    pub integration_acc_3: UncheckedAccount<'info>,
 
     /// The Drift spot market for this asset
     #[account(
         mut,
-        constraint = drift_spot_market.load()?.mint == mint.key()
+        constraint = integration_acc_1.load()?.mint == mint.key()
             @ MarginfiError::DriftSpotMarketMintMismatch
     )]
-    pub drift_spot_market: AccountLoader<'info, drift_mocks::state::MinimalSpotMarket>,
+    pub integration_acc_1: AccountLoader<'info, drift_mocks::state::MinimalSpotMarket>,
 
     /// The Drift spot market vault that will receive tokens
     /// CHECK: validated by the Drift program
@@ -217,7 +228,7 @@ impl<'info> DriftDeposit<'info> {
     pub fn cpi_update_spot_market_cumulative_interest(&self) -> MarginfiResult {
         let accounts = UpdateSpotMarketCumulativeInterest {
             state: self.drift_state.to_account_info(),
-            spot_market: self.drift_spot_market.to_account_info(),
+            spot_market: self.integration_acc_1.to_account_info(),
             oracle: self
                 .drift_oracle
                 .as_ref()
@@ -253,8 +264,8 @@ impl<'info> DriftDeposit<'info> {
     ) -> MarginfiResult {
         let accounts = Deposit {
             state: self.drift_state.to_account_info(),
-            user: self.drift_user.to_account_info(),
-            user_stats: self.drift_user_stats.to_account_info(),
+            user: self.integration_acc_2.to_account_info(),
+            user_stats: self.integration_acc_3.to_account_info(),
             authority: self.liquidity_vault_authority.to_account_info(),
             spot_market_vault: self.drift_spot_market_vault.to_account_info(),
             user_token_account: self.liquidity_vault.to_account_info(),
@@ -278,7 +289,7 @@ impl<'info> DriftDeposit<'info> {
         }
 
         // Always add spot market account
-        remaining_accounts.push(self.drift_spot_market.to_account_info());
+        remaining_accounts.push(self.integration_acc_1.to_account_info());
 
         // Always add token mint (needed for Token-2022 support)
         remaining_accounts.push(self.mint.to_account_info());

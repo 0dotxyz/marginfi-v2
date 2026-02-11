@@ -30,15 +30,15 @@ pub fn lending_pool_add_bank_solend(
     let LendingPoolAddBankSolend {
         bank_mint,
         bank: bank_loader,
-        solend_reserve: reserve_loader,
-        solend_obligation,
+        integration_acc_1: reserve_loader,
+        integration_acc_2: obligation_loader,
         ..
     } = ctx.accounts;
 
     let mut bank = bank_loader.load_init()?;
     let mut group = ctx.accounts.group.load_mut()?;
     let reserve_key = reserve_loader.key();
-    let obligation_key = solend_obligation.key();
+    let obligation_key = obligation_loader.key();
 
     // Validate that we're using a supported Solend oracle setup type
     require!(
@@ -76,8 +76,8 @@ pub fn lending_pool_add_bank_solend(
     );
 
     // Set Solend-specific fields
-    bank.solend_reserve = reserve_key;
-    bank.solend_obligation = obligation_key;
+    bank.integration_acc_1 = reserve_key;
+    bank.integration_acc_2 = obligation_key;
 
     log_pool_info(&bank);
 
@@ -86,7 +86,6 @@ pub fn lending_pool_add_bank_solend(
     bank.config.validate()?;
     bank.config
         .validate_oracle_setup(ctx.remaining_accounts, None, None, None)?;
-    bank.config.validate_oracle_age()?;
 
     emit!(LendingPoolBankCreateEvent {
         header: GroupEventHeader {
@@ -114,7 +113,7 @@ pub struct LendingPoolAddBankSolend<'info> {
     #[account(mut)]
     pub fee_payer: Signer<'info>,
 
-    /// Must match the mint used by `solend_reserve`, Solend calls this the `liquidity.mint_pubkey`
+    /// Must match the mint used by `integration_acc_1`, Solend calls this the `liquidity.mint_pubkey`
     pub bank_mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
@@ -132,10 +131,10 @@ pub struct LendingPoolAddBankSolend<'info> {
 
     /// Solend reserve account that must match the bank mint
     #[account(
-        constraint = solend_reserve.load()?.liquidity_mint_pubkey == bank_mint.key()
+        constraint = integration_acc_1.load()?.liquidity_mint_pubkey == bank_mint.key()
             @ MarginfiError::SolendReserveMintMismatch,
     )]
-    pub solend_reserve: AccountLoader<'info, SolendMinimalReserve>,
+    pub integration_acc_1: AccountLoader<'info, SolendMinimalReserve>,
 
     /// Obligation PDA for this bank in Solend
     /// Will be initialized and transferred to Solend in init_obligation instruction
@@ -146,7 +145,7 @@ pub struct LendingPoolAddBankSolend<'info> {
         ],
         bump,
     )]
-    pub solend_obligation: SystemAccount<'info>,
+    pub integration_acc_2: SystemAccount<'info>,
 
     /// Will be authority of the bank's liquidity vault. Used as intermediary for deposits/withdraws
     #[account(

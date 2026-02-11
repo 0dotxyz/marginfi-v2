@@ -9,10 +9,24 @@ Be aware of:
 - Our TS packages:
   - https://www.npmjs.com/package/@mrgnlabs/marginfi-client-v2
   - https://www.npmjs.com/package/@mrgnlabs/mrgn-common
-- Our RUST CLI: https://github.com/mrgnlabs/marginfi-v2/tree/main/clients/rust/marginfi-cli
 - Our example scripts: https://github.com/mrgnlabs/mrgn-ts-scripts/tree/master/scripts
 - Rust and TS examples of all instructions are available in our test suites, just search this repo
   for the instruction name (or remember to change to camelCase if searching for TS examples)
+
+## Be Aware of Breaking Changes!
+
+* Please add https://github.com/mrgnlabs/marginfi-v2 to your "Watch" list and make sure you are notified when we create a release.
+  * Releases (except hotfixes) will stay in "pre-release" for **at least seven days** before we merge them into mainnet
+  * Only the last release candidate (rc) will go live on mainnet, e.g. if there is an rc1, rc2, and rc3, then rc3 will go to mainnet.
+  * When there is a pre-release pending, the staging program
+    (stag8sTKds2h4KzjUw3zKTsxbqvT4XKHdaR9X9E6Rct) will be updated to match it, typically on the same
+    day the pre-release is published. See
+    https://github.com/mrgnlabs/mrgn-ts-scripts/blob/master/scripts/accounts_ref.md for various test
+    groups/banks you might use on staging, or create your own group and use the clone_bank
+    instruction to quickly copy mainnet banks into staging (Note: clone_bank only works on the
+    staging program)
+* Contact us on telegram to be added to our "Integrators" list. We will make a best effort to ping
+  you at least one week before any program update goes live.
 
 ## Important Instructions (click to learn more)
 

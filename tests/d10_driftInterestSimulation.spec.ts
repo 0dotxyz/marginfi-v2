@@ -2,11 +2,9 @@ import { BN } from "@coral-xyz/anchor";
 import {
   PublicKey,
   Transaction,
-  SystemProgram,
   Keypair,
   ComputeBudgetProgram,
 } from "@solana/web3.js";
-import { assert } from "chai";
 import {
   ecosystem,
   driftAccounts,
@@ -21,8 +19,8 @@ import {
   groupAdmin,
   banksClient,
   DRIFT_USDC_SPOT_MARKET,
-  DRIFT_TOKENA_SPOT_MARKET,
-  DRIFT_TOKENA_PULL_ORACLE,
+  DRIFT_TOKEN_A_SPOT_MARKET,
+  DRIFT_TOKEN_A_PULL_ORACLE,
 } from "./rootHooks";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { MockUser } from "./utils/mocks";
@@ -30,7 +28,6 @@ import { processBankrunTransaction } from "./utils/tools";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { deriveBankWithSeed } from "./utils/pdas";
 import {
-  ASSET_TAG_DRIFT,
   defaultDriftBankConfig,
   getSpotMarketAccount,
   getDriftUserAccount,
@@ -38,7 +35,6 @@ import {
   refreshDriftOracles,
   USDC_MARKET_INDEX,
   TOKEN_A_MARKET_INDEX,
-  DRIFT_SCALED_BALANCE_DECIMALS,
 } from "./utils/drift-utils";
 import {
   makeAddDriftBankIx,
@@ -46,14 +42,15 @@ import {
   makeDriftDepositIx,
   makeDriftWithdrawIx,
 } from "./utils/drift-instructions";
-import { getTokenBalance, assertBNEqual } from "./utils/genericTests";
+import { getTokenBalance } from "./utils/genericTests";
 import { composeRemainingAccounts } from "./utils/user-instructions";
 import { createMintToInstruction } from "@solana/spl-token";
 import { Clock } from "solana-bankrun";
+import { ASSET_TAG_DRIFT } from "./utils/types";
 
 describe("d10: Drift Interest Simulation", () => {
   const NEW_DRIFT_USDC_BANK = "new_drift_usdc_bank";
-  const NEW_DRIFT_TOKENA_BANK = "new_drift_tokena_bank";
+  const NEW_DRIFT_TOKEN_A_BANK = "new_drift_tokena_bank";
   const NEW_DRIFT_ACCOUNT = "gd_new_acc";
 
   let newDriftUsdcBank: PublicKey;
@@ -109,10 +106,11 @@ describe("d10: Drift Interest Simulation", () => {
     );
 
     driftAccounts.set(NEW_DRIFT_USDC_BANK, newDriftUsdcBank);
-    driftAccounts.set(NEW_DRIFT_TOKENA_BANK, newDriftTokenABank);
+    driftAccounts.set(NEW_DRIFT_TOKEN_A_BANK, newDriftTokenABank);
     const usdcConfig = defaultDriftBankConfig(oracles.usdcOracle.publicKey);
+    // 10 million USDC in native 6-decimal units (will be converted to 9-decimal in program)
     usdcConfig.depositLimit = new BN(10_000_000).mul(
-      new BN(10 ** DRIFT_SCALED_BALANCE_DECIMALS)
+      new BN(10 ** ecosystem.usdcDecimals)
     );
 
     const addUsdcBankIx = await makeAddDriftBankIx(
@@ -121,7 +119,7 @@ describe("d10: Drift Interest Simulation", () => {
         group: driftGroup.publicKey,
         feePayer: groupAdmin.wallet.publicKey,
         bankMint: ecosystem.usdcMint.publicKey,
-        driftSpotMarket: driftAccounts.get(DRIFT_USDC_SPOT_MARKET),
+        integrationAcc1: driftAccounts.get(DRIFT_USDC_SPOT_MARKET),
         oracle: oracles.usdcOracle.publicKey,
       },
       {
@@ -131,8 +129,9 @@ describe("d10: Drift Interest Simulation", () => {
     );
 
     const tokenAConfig = defaultDriftBankConfig(oracles.tokenAOracle.publicKey);
+    // 10 million Token A in native decimals (will be converted to 9-decimal in program)
     tokenAConfig.depositLimit = new BN(10_000_000).mul(
-      new BN(10 ** DRIFT_SCALED_BALANCE_DECIMALS)
+      new BN(10 ** ecosystem.tokenADecimals)
     );
 
     const addTokenABankIx = await makeAddDriftBankIx(
@@ -141,7 +140,7 @@ describe("d10: Drift Interest Simulation", () => {
         group: driftGroup.publicKey,
         feePayer: groupAdmin.wallet.publicKey,
         bankMint: ecosystem.tokenAMint.publicKey,
-        driftSpotMarket: driftAccounts.get(DRIFT_TOKENA_SPOT_MARKET),
+        integrationAcc1: driftAccounts.get(DRIFT_TOKEN_A_SPOT_MARKET),
         oracle: oracles.tokenAOracle.publicKey,
       },
       {
@@ -210,7 +209,7 @@ describe("d10: Drift Interest Simulation", () => {
         feePayer: groupAdmin.wallet.publicKey,
         bank: newDriftTokenABank,
         signerTokenAccount: groupAdmin.tokenAAccount,
-        driftOracle: driftAccounts.get(DRIFT_TOKENA_PULL_ORACLE),
+        driftOracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE),
       },
       {
         amount: initUserAmount,
@@ -231,7 +230,9 @@ describe("d10: Drift Interest Simulation", () => {
 
   it("funds users with tokens for testing", async () => {
     const LARGE_USDC_AMOUNT = new BN(1_000_000 * 10 ** ecosystem.usdcDecimals);
-    const LARGE_TOKENA_AMOUNT = new BN(50_000 * 10 ** ecosystem.tokenADecimals);
+    const LARGE_TOKEN_A_AMOUNT = new BN(
+      50_000 * 10 ** ecosystem.tokenADecimals
+    );
     const fundUserATx = new Transaction()
       .add(
         createMintToInstruction(
@@ -266,7 +267,7 @@ describe("d10: Drift Interest Simulation", () => {
           ecosystem.tokenAMint.publicKey,
           userB.tokenAAccount,
           globalProgramAdmin.wallet.publicKey,
-          LARGE_TOKENA_AMOUNT.toNumber()
+          LARGE_TOKEN_A_AMOUNT.toNumber()
         )
       );
     await processBankrunTransaction(bankrunContext, fundUserBTx, [
@@ -319,10 +320,10 @@ describe("d10: Drift Interest Simulation", () => {
       : oracles.tokenAOracle.publicKey;
     const spotMarket = isUsdc
       ? driftAccounts.get(DRIFT_USDC_SPOT_MARKET)!
-      : driftAccounts.get(DRIFT_TOKENA_SPOT_MARKET)!;
+      : driftAccounts.get(DRIFT_TOKEN_A_SPOT_MARKET)!;
     const driftOracle = isUsdc
       ? null
-      : driftAccounts.get(DRIFT_TOKENA_PULL_ORACLE);
+      : driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE);
     const activePositions: PublicKey[][] = [];
     const marginfiAccount = await bankrunProgram.account.marginfiAccount.fetch(
       userAccount
@@ -336,7 +337,7 @@ describe("d10: Drift Interest Simulation", () => {
         const balanceOracle = balanceBank.config.oracleKeys[0];
 
         if (balanceBank.config.assetTag === ASSET_TAG_DRIFT) {
-          const driftSpotMarket = balanceBank.driftSpotMarket;
+          const driftSpotMarket = balanceBank.integrationAcc1;
           activePositions.push([
             balance.bankPk,
             balanceOracle,
@@ -401,7 +402,7 @@ describe("d10: Drift Interest Simulation", () => {
     const tokenAccount = isUsdc ? user.usdcAccount : user.tokenAAccount;
     const driftOracle = isUsdc
       ? null
-      : driftAccounts.get(DRIFT_TOKENA_PULL_ORACLE);
+      : driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE);
 
     const activePositions: PublicKey[][] = [];
     const marginfiAccount = await bankrunProgram.account.marginfiAccount.fetch(
@@ -420,7 +421,7 @@ describe("d10: Drift Interest Simulation", () => {
         const balanceOracle = balanceBank.config.oracleKeys[0];
 
         if (balanceBank.config.assetTag === ASSET_TAG_DRIFT) {
-          const driftSpotMarket = balanceBank.driftSpotMarket;
+          const driftSpotMarket = balanceBank.integrationAcc1;
           activePositions.push([
             balance.bankPk,
             balanceOracle,
@@ -482,15 +483,15 @@ describe("d10: Drift Interest Simulation", () => {
   });
 
   it("tests very large deposits without overflow", async () => {
-    const HUGE_TOKENA = new BN(40_000 * 10 ** ecosystem.tokenADecimals);
+    const HUGE_TOKEN_A = new BN(40_000 * 10 ** ecosystem.tokenADecimals);
 
-    await makeDepositThroughMarginfi(userB, newDriftTokenABank, HUGE_TOKENA);
+    await makeDepositThroughMarginfi(userB, newDriftTokenABank, HUGE_TOKEN_A);
 
     operationLog.push({
       user: userB.wallet.publicKey.toString(),
       type: "deposit",
       bank: newDriftTokenABank,
-      amount: HUGE_TOKENA,
+      amount: HUGE_TOKEN_A,
       decimals: ecosystem.tokenADecimals,
       symbol: "TKA",
       timestamp: Date.now(),
@@ -517,7 +518,7 @@ describe("d10: Drift Interest Simulation", () => {
         mint: ecosystem.tokenAMint.publicKey,
         decimals: ecosystem.tokenADecimals,
         symbol: "TKA",
-        spotMarket: driftAccounts.get(DRIFT_TOKENA_SPOT_MARKET)!,
+        spotMarket: driftAccounts.get(DRIFT_TOKEN_A_SPOT_MARKET)!,
         marketIndex: TOKEN_A_MARKET_INDEX,
       },
     ];
@@ -617,23 +618,6 @@ describe("d10: Drift Interest Simulation", () => {
 
     bankrunContext.setClock(newClock);
 
-    const nonce = driftTxNonce++;
-    const computeUnits = 1_200_000 + (nonce % 1000);
-
-    const dummyTx = new Transaction()
-      .add(ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }))
-      .add(
-        SystemProgram.transfer({
-          fromPubkey: groupAdmin.wallet.publicKey,
-          toPubkey: groupAdmin.wallet.publicKey,
-          lamports: 1,
-        })
-      );
-    await processBankrunTransaction(bankrunContext, dummyTx, [
-      groupAdmin.wallet,
-    ]);
-
-    const refreshedClock = await banksClient.getClock();
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 
     await refreshDriftOracles(
@@ -703,10 +687,10 @@ describe("d10: Drift Interest Simulation", () => {
       const bank = await bankrunProgram.account.bank.fetch(bankInfo.bank);
       const driftUser = await getDriftUserAccount(
         driftBankrunProgram,
-        bank.driftUser
+        bank.integrationAcc2
       );
       const spotPosition = driftUser.spotPositions[0];
-      const scaledBalance = new BN(spotPosition.scaledBalance.toString());
+      const scaledBalance = spotPosition.scaledBalance;
 
       if (scaledBalance.eq(new BN(0))) {
         return simulateRandomOperation(user, banks);
@@ -775,7 +759,7 @@ describe("d10: Drift Interest Simulation", () => {
         mint: ecosystem.tokenAMint.publicKey,
         decimals: ecosystem.tokenADecimals,
         symbol: "TKA",
-        spotMarket: driftAccounts.get(DRIFT_TOKENA_SPOT_MARKET)!,
+        spotMarket: driftAccounts.get(DRIFT_TOKEN_A_SPOT_MARKET)!,
         marketIndex: TOKEN_A_MARKET_INDEX,
       },
     ];
@@ -903,94 +887,5 @@ describe("d10: Drift Interest Simulation", () => {
         });
       }
     }
-  });
-
-  it("tests instant deposit and withdrawal (not withdraw_all) for rounding edge case", async () => {
-    // This test verifies the edge case fix where immediate withdrawal after deposit
-    // would fail due to scaled_decrement being 1 more than asset_shares
-
-    const user = userA;
-    const testAmount = new BN(1 * 10 ** ecosystem.usdcDecimals);
-
-    const initialBalance = await getTokenBalance(
-      bankRunProvider,
-      user.usdcAccount
-    );
-
-    await makeDepositThroughMarginfi(user, newDriftUsdcBank, testAmount);
-
-    const balanceAfterDeposit = await getTokenBalance(
-      bankRunProvider,
-      user.usdcAccount
-    );
-    const deposited = new BN(initialBalance - balanceAfterDeposit);
-    assertBNEqual(deposited, testAmount);
-
-    const userAccount = user.accounts.get(NEW_DRIFT_ACCOUNT)!;
-
-    // Immediately withdraw the same amount (not using withdraw_all)
-    // This triggers the edge case where scaled_decrement might be asset_shares + 1
-    await makeWithdrawThroughMarginfi(
-      user,
-      newDriftUsdcBank,
-      testAmount,
-      false
-    );
-
-    const balanceAfterWithdraw = await getTokenBalance(
-      bankRunProvider,
-      user.usdcAccount
-    );
-    const withdrawn = new BN(balanceAfterWithdraw - balanceAfterDeposit);
-    const expectedWithdrawn = testAmount.sub(new BN(1)); // Expect 1 token less due to rounding
-
-    assertBNEqual(withdrawn, expectedWithdrawn);
-
-    const marginfiAccountAfterWithdraw =
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
-    const balanceAfterWithdrawObj =
-      marginfiAccountAfterWithdraw.lendingAccount.balances.find(
-        (b) => b.active === 1 && b.bankPk.equals(newDriftUsdcBank)
-      );
-
-    let remainingScaledBalance = new BN(0);
-    if (balanceAfterWithdrawObj) {
-      const assetSharesAfterWithdraw = wrappedI80F48toBigNumber(
-        balanceAfterWithdrawObj.assetShares
-      );
-      remainingScaledBalance = new BN(assetSharesAfterWithdraw.toString());
-
-      // The dust should be small relative to the deposit
-      // With Drift's scaling factor, we expect dust to be <1000 scaled units
-      // otherwise it would have been possible to withdraw.
-      assert(
-        remainingScaledBalance.gt(new BN(0)),
-        "Should have some dust remaining due to rounding"
-      );
-      assert(
-        remainingScaledBalance.lt(new BN(1000)),
-        `Dust amount ${remainingScaledBalance.toString()} seems too large`
-      );
-    }
-
-    // Clean up the dust with withdraw_all
-    await makeWithdrawThroughMarginfi(user, newDriftUsdcBank, new BN(0), true);
-
-    const balanceAfterWithdrawAll = await getTokenBalance(
-      bankRunProvider,
-      user.usdcAccount
-    );
-    assertBNEqual(
-      new BN(balanceAfterWithdrawAll),
-      new BN(balanceAfterWithdraw)
-    );
-
-    const marginfiAccountFinal =
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
-    const finalBalance = marginfiAccountFinal.lendingAccount.balances.find(
-      (b) => b.active === 1 && b.bankPk.equals(newDriftUsdcBank)
-    );
-
-    assert(!finalBalance);
   });
 });

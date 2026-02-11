@@ -1,7 +1,12 @@
 import { Keypair, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import { createMockAccount, Oracles, storeMockAccount } from "./mocks";
-import { ORACLE_CONF_INTERVAL } from "./types";
+import {
+  ASSET_TAG_DRIFT,
+  ASSET_TAG_KAMINO,
+  ASSET_TAG_SOLEND,
+  ORACLE_CONF_INTERVAL,
+} from "./types";
 import { Mocks } from "../../target/types/mocks";
 import { Marginfi } from "../../target/types/marginfi";
 import { Program, Wallet, workspace } from "@coral-xyz/anchor";
@@ -117,7 +122,6 @@ export function decodePriceUpdateV2(base64Data: string): PriceUpdateV2 {
   };
 }
 
-
 // ----- slop ------
 
 /**
@@ -126,7 +130,7 @@ export function decodePriceUpdateV2(base64Data: string): PriceUpdateV2 {
 export async function debugPrintOracleData(
   banksClient: BanksClient,
   oracleAccount: PublicKey,
-  oracleName: string = "Oracle"
+  oracleName: string = "Oracle",
 ) {
   const account = await banksClient.getAccount(oracleAccount);
   if (!account) {
@@ -135,7 +139,9 @@ export async function debugPrintOracleData(
     return;
   }
 
-  const oracleData = decodePriceUpdateV2(Buffer.from(account.data).toString('base64'));
+  const oracleData = decodePriceUpdateV2(
+    Buffer.from(account.data).toString("base64"),
+  );
   const price = oracleData.price_message.price.toNumber();
   const conf = oracleData.price_message.conf.toNumber();
   const exponent = oracleData.price_message.exponent;
@@ -168,7 +174,7 @@ export async function debugPrintOracleData(
 export async function debugPrintBankConfig(
   program: Program<Marginfi>,
   bankPubkey: PublicKey,
-  bankName: string = "Bank"
+  bankName: string = "Bank",
 ) {
   try {
     const bank = await program.account.bank.fetch(bankPubkey);
@@ -185,23 +191,40 @@ export async function debugPrintBankConfig(
 
     // Bank type specific fields
     console.log(`Asset Tag: ${bank.config.assetTag}`);
-    console.log(`Operational State: ${JSON.stringify(bank.config.operationalState)}`);
+    console.log(
+      `Operational State: ${JSON.stringify(bank.config.operationalState)}`,
+    );
 
     // Check which type of bank it is
-    const isDrift = !bank.driftSpotMarket.equals(PublicKey.default);
-    const isSolend = !bank.solendReserve.equals(PublicKey.default);
-    const isKamino = !bank.kaminoReserve.equals(PublicKey.default);
+    const isDrift = bank.config.assetTag === ASSET_TAG_DRIFT;
+    const isSolend = bank.config.assetTag === ASSET_TAG_SOLEND;
+    const isKamino = bank.config.assetTag === ASSET_TAG_KAMINO;
 
-    console.log(`Bank Type: ${isDrift ? 'Drift' : isSolend ? 'Solend' : isKamino ? 'Kamino' : 'Regular'}`);
+    console.log(
+      `Bank Type: ${
+        isDrift
+          ? "Drift"
+          : isSolend
+          ? "Solend"
+          : isKamino
+          ? "Kamino"
+          : "Regular"
+      }`,
+    );
+
+    if (isKamino) {
+      console.log(`Kamino Reserve: ${bank.integrationAcc1.toString()}`);
+      console.log(`Kamino Obligation: ${bank.integrationAcc2.toString()}`);
+    }
 
     if (isDrift) {
-      console.log(`Drift Spot Market: ${bank.driftSpotMarket.toString()}`);
-      console.log(`Drift User: ${bank.driftUser.toString()}`);
+      console.log(`Drift Spot Market: ${bank.integrationAcc1.toString()}`);
+      console.log(`Drift User: ${bank.integrationAcc2.toString()}`);
     }
 
     if (isSolend) {
-      console.log(`Solend Reserve: ${bank.solendReserve.toString()}`);
-      console.log(`Solend Obligation: ${bank.solendObligation.toString()}`);
+      console.log(`Solend Reserve: ${bank.integrationAcc1.toString()}`);
+      console.log(`Solend Obligation: ${bank.integrationAcc2.toString()}`);
     }
 
     console.log(`========================================\n`);
@@ -246,7 +269,7 @@ export async function initOrUpdatePriceUpdateV2(
   oracleKeypair?: Keypair,
   bankrunContext?: ProgramTestContext,
   verbose: boolean = false,
-  publishTime?: number
+  publishTime?: number,
 ) {
   const space = 134;
   // Compute publish times.
@@ -255,9 +278,9 @@ export async function initOrUpdatePriceUpdateV2(
     if (existingAccount) {
       console.log(
         "publish price to " +
-        existingAccount.publicKey.toString() +
-        " at: " +
-        now
+          existingAccount.publicKey.toString() +
+          " at: " +
+          now,
       );
     } else {
       console.log("publish price to a new feed at " + now);
@@ -313,7 +336,7 @@ export async function initOrUpdatePriceUpdateV2(
   conf.toArrayLike(Buffer, "le", 8).copy(buf, offset);
   offset += 8;
   // posted_slot (u64, 8 bytes)
-  (new BN(0)).toArrayLike(Buffer, "le", 8).copy(buf, offset);
+  new BN(0).toArrayLike(Buffer, "le", 8).copy(buf, offset);
   offset += 8;
 
   if (printBuffers) {
@@ -329,7 +352,7 @@ export async function initOrUpdatePriceUpdateV2(
       existingAccount,
       0,
       buf,
-      bankrunContext
+      bankrunContext,
     );
     return existingAccount;
   } else {
@@ -338,9 +361,16 @@ export async function initOrUpdatePriceUpdateV2(
       space,
       wallet,
       oracleKeypair,
-      bankrunContext
+      bankrunContext,
     );
-    await storeMockAccount(mockProgram, wallet, account, 0, buf, bankrunContext);
+    await storeMockAccount(
+      mockProgram,
+      wallet,
+      account,
+      0,
+      buf,
+      bankrunContext,
+    );
     return account;
   }
 }
@@ -361,7 +391,7 @@ export async function refreshPullOracles(
   slot: BN,
   publishTime: number,
   bankrunContext?: ProgramTestContext,
-  verbose: boolean = false
+  verbose: boolean = false,
 ) {
   // Discover all "*PullOracleFeed" "*Pull" "*Price" "*Decimals" entries
   const feeds = (Object.keys(oracles) as Array<keyof Oracles>)
@@ -399,7 +429,7 @@ export async function refreshPullOracles(
     ({ base, feedId, account, price, conf, emaPrice, emaConf, exponent }) => {
       if (verbose) {
         console.log(
-          `[batchUpdate] ${base}: price=${price.toString()}, conf=${conf.toString()}, slot=${slot.toString()}, exp=${exponent}`
+          `[batchUpdate] ${base}: price=${price.toString()}, conf=${conf.toString()}, slot=${slot.toString()}, exp=${exponent}`,
         );
       }
       return initOrUpdatePriceUpdateV2(
@@ -413,9 +443,9 @@ export async function refreshPullOracles(
         undefined,
         bankrunContext,
         verbose,
-        publishTime
+        publishTime,
       );
-    }
+    },
   );
 
   await Promise.all(tasks);

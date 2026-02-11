@@ -109,10 +109,40 @@ pub fn milli_to_u32(value: I80F48) -> u32 {
 /// Useful when converting an I80F48 (e.g. utilization rate) into a percentage from 0-100. Clamps to
 /// 100% if exceeding that amount. Clamps to zero for negative inputs.
 pub fn centi_to_u32(value: I80F48) -> u32 {
-    let max_percent: I80F48 = I80F48::from_num(1.0); // 1000%
+    let max_percent: I80F48 = I80F48::from_num(1.0); // 100%
     let clamped: I80F48 = value.min(max_percent).max(I80F48::ZERO);
     let ratio: I80F48 = clamped / max_percent;
     (ratio * I80F48::from_num(u32::MAX)).to_num::<u32>()
+}
+
+/// Converts a rate u32 (0-1000% APR range) to I80F48 decimal.
+/// Inverse of `milli_to_u32`.
+/// Example: u32::MAX -> 10.0 (1000%), u32::MAX/10 -> ~1.0 (100%)
+pub fn u32_to_milli(rate: u32) -> I80F48 {
+    let ratio: I80F48 = I80F48::from_num(rate) / I80F48::from_num(u32::MAX);
+    ratio * I80F48::from_num(10.0)
+}
+
+/// Converts a utilization u32 (0-100% range) to I80F48 decimal.
+/// Inverse of `centi_to_u32`.
+/// Example: u32::MAX -> 1.0 (100%), u32::MAX/2 -> ~0.5 (50%)
+pub fn u32_to_centi(util: u32) -> I80F48 {
+    I80F48::from_num(util) / I80F48::from_num(u32::MAX)
+}
+
+/// Useful when converting an I80F48 (e.g. leverage) into a value from 0-100. Clamps to 100 if
+/// exceeding that amount. Clamps to zero for negative inputs.
+pub fn basis_to_u32(value: I80F48) -> u32 {
+    let max_value: I80F48 = I80F48::from_num(100.0); // 0-100 range
+    let clamped: I80F48 = value.min(max_value).max(I80F48::ZERO);
+    let ratio: I80F48 = clamped / max_value;
+    (ratio * I80F48::from_num(u32::MAX)).to_num::<u32>()
+}
+
+/// Converts u32 back to leverage value (0-100 range)
+pub fn u32_to_basis(value: u32) -> I80F48 {
+    let ratio: I80F48 = I80F48::from_num(value) / I80F48::from_num(u32::MAX);
+    ratio * I80F48::from_num(100.0)
 }
 
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]

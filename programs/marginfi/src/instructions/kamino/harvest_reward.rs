@@ -10,7 +10,7 @@ use anchor_spl::token_interface::{
 };
 use kamino_mocks::kamino_farms::cpi::accounts::HarvestReward;
 use kamino_mocks::kamino_farms::cpi::harvest_reward;
-use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
+use marginfi_type_crate::constants::{FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED};
 use marginfi_type_crate::types::{Bank, FeeState};
 
 pub fn kamino_harvest_reward(
@@ -35,6 +35,10 @@ pub struct KaminoHarvestReward<'info> {
     pub bank: AccountLoader<'info, Bank>,
 
     /// Global fee state that contains the global_fee_admin
+    #[account(
+        seeds = [FEE_STATE_SEED.as_bytes()],
+        bump
+    )]
     pub fee_state: AccountLoader<'info, FeeState>,
 
     /// Destination token account must be owned by the global fee admin

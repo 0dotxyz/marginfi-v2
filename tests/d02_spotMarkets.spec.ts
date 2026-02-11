@@ -1,6 +1,5 @@
 import { assert } from "chai";
 import { PublicKey, Transaction, Keypair } from "@solana/web3.js";
-import { BN } from "@coral-xyz/anchor";
 import {
   ecosystem,
   groupAdmin,
@@ -9,9 +8,9 @@ import {
   driftBankrunProgram,
   driftAccounts,
   DRIFT_USDC_SPOT_MARKET,
-  DRIFT_TOKENA_SPOT_MARKET,
-  DRIFT_TOKENA_PULL_ORACLE,
-  DRIFT_TOKENA_PULL_FEED,
+  DRIFT_TOKEN_A_SPOT_MARKET,
+  DRIFT_TOKEN_A_PULL_ORACLE,
+  DRIFT_TOKEN_A_PULL_FEED,
   banksClient,
 } from "./rootHooks";
 import { processBankrunTransaction } from "./utils/tools";
@@ -27,10 +26,7 @@ import {
   USDC_MARKET_INDEX,
   TOKEN_A_MARKET_INDEX,
 } from "./utils/drift-utils";
-import {
-  ORACLE_CONF_INTERVAL,
-  DRIFT_ORACLE_RECEIVER_PROGRAM_ID,
-} from "./utils/types";
+import { DRIFT_ORACLE_RECEIVER_PROGRAM_ID } from "./utils/types";
 import { createBankrunPythOracleAccount } from "./utils/bankrun-oracles";
 import { refreshDriftOracles } from "./utils/drift-utils";
 
@@ -83,6 +79,23 @@ describe("d02: Drift - Initialize Spot Markets", () => {
       DriftOracleSourceValues.quoteAsset
     );
 
+    assert.equal(usdcMarket.optimalUtilization, config.optimalUtilization);
+    assert.equal(usdcMarket.optimalBorrowRate, config.optimalRate);
+    assert.equal(usdcMarket.maxBorrowRate, config.maxRate);
+    assert.equal(usdcMarket.initialAssetWeight, config.initialAssetWeight);
+    assert.equal(
+      usdcMarket.maintenanceAssetWeight,
+      config.maintenanceAssetWeight
+    );
+    assert.equal(
+      usdcMarket.initialLiabilityWeight,
+      config.initialLiabilityWeight
+    );
+    assert.equal(
+      usdcMarket.maintenanceLiabilityWeight,
+      config.maintenanceLiabilityWeight
+    );
+
     const state = await getDriftStateAccount(driftBankrunProgram);
     assert.equal(state.numberOfSpotMarkets, 1);
 
@@ -107,10 +120,10 @@ describe("d02: Drift - Initialize Spot Markets", () => {
     );
 
     driftAccounts.set(
-      DRIFT_TOKENA_PULL_ORACLE,
+      DRIFT_TOKEN_A_PULL_ORACLE,
       driftTokenAPullOracle.publicKey
     );
-    driftAccounts.set(DRIFT_TOKENA_PULL_FEED, driftTokenAPullFeed.publicKey);
+    driftAccounts.set(DRIFT_TOKEN_A_PULL_FEED, driftTokenAPullFeed.publicKey);
 
     await refreshDriftOracles(
       oracles,
@@ -166,6 +179,22 @@ describe("d02: Drift - Initialize Spot Markets", () => {
     assert.equal(tokenAMarket.optimalUtilization, config.optimalUtilization);
     assert.equal(tokenAMarket.optimalBorrowRate, config.optimalRate);
     assert.equal(tokenAMarket.maxBorrowRate, config.maxRate);
+    assert.equal(tokenAMarket.initialAssetWeight, config.initialAssetWeight);
+    assert.equal(
+      tokenAMarket.maintenanceAssetWeight,
+      config.maintenanceAssetWeight
+    );
+    assert.equal(
+      tokenAMarket.initialLiabilityWeight,
+      config.initialLiabilityWeight
+    );
+    assert.equal(
+      tokenAMarket.maintenanceLiabilityWeight,
+      config.maintenanceLiabilityWeight
+    );
+
+    const tokenAOracle = driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE);
+    assert.ok(tokenAOracle);
 
     const state = await getDriftStateAccount(driftBankrunProgram);
     assert.equal(state.numberOfSpotMarkets, 2);
@@ -174,7 +203,7 @@ describe("d02: Drift - Initialize Spot Markets", () => {
       driftBankrunProgram.programId,
       TOKEN_A_MARKET_INDEX
     );
-    driftAccounts.set(DRIFT_TOKENA_SPOT_MARKET, tokenAMarketPDA);
+    driftAccounts.set(DRIFT_TOKEN_A_SPOT_MARKET, tokenAMarketPDA);
   });
 
   it("Verify spot market PDAs are correctly derived", async () => {

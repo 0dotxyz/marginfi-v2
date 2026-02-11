@@ -4,7 +4,10 @@ use crate::{
     prelude::*,
     state::{
         bank::BankImpl,
-        marginfi_account::{BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl},
+        marginfi_account::{
+            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
+            LendingAccountImpl, MarginfiAccountImpl,
+        },
         marginfi_group::MarginfiGroupImpl,
     },
     utils::{
@@ -16,8 +19,9 @@ use anchor_lang::solana_program::clock::Clock;
 use anchor_lang::solana_program::sysvar::Sysvar;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
-use marginfi_type_crate::types::{
-    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+use marginfi_type_crate::{
+    constants::TOKENLESS_REPAYMENTS_ALLOWED,
+    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP},
 };
 
 /// 1. Accrue interest
@@ -52,7 +56,6 @@ pub fn lending_account_deposit<'info>(
     let mut bank = bank_loader.load_mut()?;
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
     let group = &marginfi_group_loader.load()?;
-
     validate_asset_tags(&bank, &marginfi_account)?;
     validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
 
@@ -111,7 +114,6 @@ pub fn lending_account_deposit<'info>(
     )?;
 
     bank.update_bank_cache(group)?;
-
     emit!(LendingAccountDepositEvent {
         header: AccountEventHeader {
             signer: Some(signer.key()),
@@ -141,7 +143,15 @@ pub struct LendingAccountDeposit<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = authority @ MarginfiError::Unauthorized
+        constraint = {
+            let a = marginfi_account.load()?;
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), false)
+        } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
@@ -152,7 +162,9 @@ pub struct LendingAccountDeposit<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
         constraint = is_marginfi_asset_tag(bank.load()?.config.asset_tag)
-            @ MarginfiError::WrongAssetTagForStandardInstructions
+            @ MarginfiError::WrongAssetTagForStandardInstructions,
+        constraint = !(bank.load()?.get_flag(TOKENLESS_REPAYMENTS_ALLOWED))
+            @ MarginfiError::BankReduceOnly
     )]
     pub bank: AccountLoader<'info, Bank>,
 

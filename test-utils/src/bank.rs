@@ -445,6 +445,25 @@ impl BankFixture {
         TokenAccountFixture::fetch(self.ctx.clone(), vault).await
     }
 
+    pub async fn set_cache_price_and_confidence(&self, price: I80F48, confidence: I80F48) {
+        let mut bank_ai = self
+            .ctx
+            .borrow_mut()
+            .banks_client
+            .get_account(self.key)
+            .await
+            .unwrap()
+            .unwrap();
+        let bank = bytemuck::from_bytes_mut::<Bank>(&mut bank_ai.data.as_mut_slice()[8..]);
+
+        bank.cache.last_oracle_price = price.into();
+        bank.cache.last_oracle_price_confidence = confidence.into();
+
+        self.ctx
+            .borrow_mut()
+            .set_account(&self.key, &bank_ai.into());
+    }
+
     pub async fn set_asset_share_value(&self, value: I80F48) {
         let mut bank_ai = self
             .ctx

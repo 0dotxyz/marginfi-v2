@@ -5,12 +5,14 @@ use crate::{
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            calc_value, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl, RiskEngine,
+            calc_value, check_account_init_health, BankAccountWrapper, LendingAccountImpl,
+            MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
     },
     utils::{
-        fetch_asset_price_for_bank, is_juplend_asset_tag, validate_bank_state, InstructionKind,
+        fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank,
+        is_juplend_asset_tag, validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -82,7 +84,7 @@ pub fn juplend_withdraw<'info>(
         let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
         let price = if in_receivership {
             let price =
-                fetch_asset_price_for_bank(&bank_key, &bank, &clock, ctx.remaining_accounts)?;
+                fetch_asset_price_for_bank_low_bias(&bank_key, &bank, &clock, ctx.remaining_accounts)?;
             check!(price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
             price
         } else {
@@ -102,7 +104,7 @@ pub fn juplend_withdraw<'info>(
             // Then recalculate shares_to_burn from token_amount to guarantee we match
             // JupLend's expected burn amount (should be identical, but this is safer).
             let (token_amount, shares_to_burn) = {
-                let lending = ctx.accounts.juplend_lending.load()?;
+                let lending = ctx.accounts.integration_acc_1.load()?;
                 let token_amount = lending
                     .expected_assets_for_redeem(total_shares)
                     .map_err(|_| error!(MarginfiError::MathError))?;
@@ -119,7 +121,7 @@ pub fn juplend_withdraw<'info>(
         } else {
             // shares = ceil(assets * 1e12 / token_exchange_price)
             let shares_to_burn = {
-                let lending = ctx.accounts.juplend_lending.load()?;
+                let lending = ctx.accounts.integration_acc_1.load()?;
                 lending
                     .expected_shares_for_withdraw(amount)
                     .map_err(|_| error!(MarginfiError::MathError))?
@@ -148,7 +150,7 @@ pub fn juplend_withdraw<'info>(
     let pre_liquidity_vault_balance =
         accessor::amount(&ctx.accounts.liquidity_vault.to_account_info())?;
     let pre_f_token_balance =
-        accessor::amount(&ctx.accounts.juplend_f_token_vault.to_account_info())?;
+        accessor::amount(&ctx.accounts.integration_acc_2.to_account_info())?;
 
     // Handle potential dust case where remaining shares are worth less than 1 underlying unit.
     //
@@ -182,7 +184,7 @@ pub fn juplend_withdraw<'info>(
         let post_liquidity_vault_balance =
             accessor::amount(&ctx.accounts.liquidity_vault.to_account_info())?;
         let post_f_token_balance =
-            accessor::amount(&ctx.accounts.juplend_f_token_vault.to_account_info())?;
+            accessor::amount(&ctx.accounts.integration_acc_2.to_account_info())?;
 
         let received_underlying = post_liquidity_vault_balance
             .checked_sub(pre_liquidity_vault_balance)
@@ -241,16 +243,41 @@ pub fn juplend_withdraw<'info>(
         drop(bank);
 
         // Skip health checks during liquidation; checked at end of tx.
+        // During receivership we still update the price cache but skip the risk check.
         if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
-            let (risk_result, _engine) = RiskEngine::check_account_init_health(
+            check_account_init_health(
                 &marginfi_account,
                 ctx.remaining_accounts,
                 &mut Some(&mut health_cache),
-            );
-            risk_result?;
+            )?;
             health_cache.program_version = PROGRAM_VERSION;
+
+            let bank_loader = &ctx.accounts.bank;
+            let bank = bank_loader.load()?;
+            let clock = Clock::get()?;
+            let price_for_cache = fetch_unbiased_price_for_bank(
+                &bank_loader.key(),
+                &bank,
+                &clock,
+                ctx.remaining_accounts,
+            )
+            .ok();
+            drop(bank);
+            bank_loader
+                .load_mut()?
+                .update_cache_price(price_for_cache)?;
+
             health_cache.set_engine_ok(true);
             marginfi_account.health_cache = health_cache;
+        } else {
+            // Note: the caller can simply omit risk accounts since the risk check is ignored here,
+            // in that case the cache doesn't update and this does nothing.
+            let mut bank = ctx.accounts.bank.load_mut()?;
+            let clock = Clock::get()?;
+            let price_for_cache =
+                fetch_unbiased_price_for_bank(&bank_key, &bank, &clock, ctx.remaining_accounts)
+                    .ok();
+            bank.update_cache_price(price_for_cache)?;
         }
     }
 
@@ -283,8 +310,8 @@ pub struct JuplendWithdraw<'info> {
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
-        has_one = juplend_lending @ MarginfiError::InvalidJuplendLending,
-        has_one = juplend_f_token_vault @ MarginfiError::InvalidJuplendFTokenVault,
+        has_one = integration_acc_1 @ MarginfiError::InvalidJuplendLending,
+        has_one = integration_acc_2 @ MarginfiError::InvalidJuplendFTokenVault,
         has_one = mint @ MarginfiError::InvalidMint,
         constraint = is_juplend_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongBankAssetTagForJuplendOperation,
@@ -324,7 +351,7 @@ pub struct JuplendWithdraw<'info> {
 
     /// JupLend lending state account.
     #[account(mut, has_one = f_token_mint @ MarginfiError::InvalidJuplendLending)]
-    pub juplend_lending: AccountLoader<'info, JuplendLending>,
+    pub integration_acc_1: AccountLoader<'info, JuplendLending>,
 
     /// JupLend fToken mint.
     #[account(mut)]
@@ -332,7 +359,7 @@ pub struct JuplendWithdraw<'info> {
 
     /// Bank's fToken vault (validated via has_one on bank).
     #[account(mut)]
-    pub juplend_f_token_vault: InterfaceAccount<'info, TokenAccount>,
+    pub integration_acc_2: InterfaceAccount<'info, TokenAccount>,
 
     // ---- JupLend CPI accounts ----
     /// CHECK: validated by the JupLend program
@@ -341,7 +368,7 @@ pub struct JuplendWithdraw<'info> {
     /// CHECK: validated by the JupLend program
     #[account(
         mut,
-        constraint = supply_token_reserves_liquidity.key() == juplend_lending.load()?.token_reserves_liquidity
+        constraint = supply_token_reserves_liquidity.key() == integration_acc_1.load()?.token_reserves_liquidity
             @ MarginfiError::InvalidJuplendLending,
     )]
     pub supply_token_reserves_liquidity: UncheckedAccount<'info>,
@@ -349,7 +376,7 @@ pub struct JuplendWithdraw<'info> {
     /// CHECK: validated by the JupLend program
     #[account(
         mut,
-        constraint = lending_supply_position_on_liquidity.key() == juplend_lending.load()?.supply_position_on_liquidity
+        constraint = lending_supply_position_on_liquidity.key() == integration_acc_1.load()?.supply_position_on_liquidity
             @ MarginfiError::InvalidJuplendLending,
     )]
     pub lending_supply_position_on_liquidity: UncheckedAccount<'info>,
@@ -393,7 +420,7 @@ pub struct JuplendWithdraw<'info> {
 impl<'info> JuplendWithdraw<'info> {
     pub fn cpi_update_rate(&self) -> MarginfiResult {
         let accounts = UpdateRate {
-            lending: self.juplend_lending.to_account_info(),
+            lending: self.integration_acc_1.to_account_info(),
             mint: self.mint.to_account_info(),
             f_token_mint: self.f_token_mint.to_account_info(),
             supply_token_reserves_liquidity: self.supply_token_reserves_liquidity.to_account_info(),
@@ -407,10 +434,10 @@ impl<'info> JuplendWithdraw<'info> {
     pub fn cpi_juplend_withdraw(&self, amount: u64, authority_bump: u8) -> MarginfiResult {
         let accounts = WithdrawCpi {
             signer: self.liquidity_vault_authority.to_account_info(),
-            owner_token_account: self.juplend_f_token_vault.to_account_info(),
+            owner_token_account: self.integration_acc_2.to_account_info(),
             recipient_token_account: self.liquidity_vault.to_account_info(),
             lending_admin: self.lending_admin.to_account_info(),
-            lending: self.juplend_lending.to_account_info(),
+            lending: self.integration_acc_1.to_account_info(),
             mint: self.mint.to_account_info(),
             f_token_mint: self.f_token_mint.to_account_info(),
             supply_token_reserves_liquidity: self.supply_token_reserves_liquidity.to_account_info(),

@@ -33,7 +33,7 @@ interface InitializeDriftAccounts {
 
 export const makeInitializeDriftIx = async (
   program: Program<Drift>,
-  accounts: InitializeDriftAccounts
+  accounts: InitializeDriftAccounts,
 ): Promise<TransactionInstruction> => {
   const [statePublicKey] = deriveDriftStatePDA(program.programId);
   const [driftSigner] = deriveDriftSignerPDA(program.programId);
@@ -75,20 +75,20 @@ interface InitializeSpotMarketArgs {
 export const makeInitializeSpotMarketIx = async (
   program: Program<Drift>,
   accounts: InitializeSpotMarketAccounts,
-  args: InitializeSpotMarketArgs
+  args: InitializeSpotMarketArgs,
 ): Promise<TransactionInstruction> => {
   const [statePublicKey] = deriveDriftStatePDA(program.programId);
   const [spotMarketPublicKey] = deriveSpotMarketPDA(
     program.programId,
-    args.marketIndex
+    args.marketIndex,
   );
   const [spotMarketVault] = deriveSpotMarketVaultPDA(
     program.programId,
-    args.marketIndex
+    args.marketIndex,
   );
   const [insuranceFundVault] = deriveInsuranceFundVaultPDA(
     program.programId,
-    args.marketIndex
+    args.marketIndex,
   );
   const [driftSigner] = deriveDriftSignerPDA(program.programId);
 
@@ -112,8 +112,8 @@ export const makeInitializeSpotMarketIx = async (
       new BN(10_000_000_000_000), // withdrawGuardThreshold
       new BN(1), // orderTickSize
       new BN(1), // orderStepSize
-      new BN(0), // ifTotalFactor
-      Array(32).fill(0) // name
+      0, // ifTotalFactor
+      Array(32).fill(0), // name
     )
     .accounts({
       spotMarket: spotMarketPublicKey,
@@ -138,11 +138,11 @@ interface InitializeUserStatsAccounts {
 
 export const makeInitializeUserStatsIx = async (
   program: Program<Drift>,
-  accounts: InitializeUserStatsAccounts
+  accounts: InitializeUserStatsAccounts,
 ): Promise<TransactionInstruction> => {
   const [userStatsPublicKey] = deriveUserStatsPDA(
     program.programId,
-    accounts.authority
+    accounts.authority,
   );
   const [statePublicKey] = deriveDriftStatePDA(program.programId);
 
@@ -162,6 +162,7 @@ export const makeInitializeUserStatsIx = async (
 interface InitializeUserAccounts {
   authority: PublicKey;
   payer: PublicKey;
+  user: PublicKey;
 }
 
 interface InitializeUserArgs {
@@ -172,23 +173,18 @@ interface InitializeUserArgs {
 export const makeInitializeUserIx = async (
   program: Program<Drift>,
   accounts: InitializeUserAccounts,
-  args: InitializeUserArgs
+  args: InitializeUserArgs,
 ): Promise<TransactionInstruction> => {
-  const [userPublicKey] = deriveUserPDA(
-    program.programId,
-    accounts.authority,
-    args.subAccountId
-  );
   const [userStatsPublicKey] = deriveUserStatsPDA(
     program.programId,
-    accounts.authority
+    accounts.authority,
   );
   const [statePublicKey] = deriveDriftStatePDA(program.programId);
 
   return program.methods
     .initializeUser(args.subAccountId, args.name)
     .accounts({
-      user: userPublicKey,
+      user: accounts.user,
       userStats: userStatsPublicKey,
       state: statePublicKey,
       authority: accounts.authority,
@@ -228,21 +224,21 @@ interface DepositArgs {
 export const makeDepositIx = async (
   program: Program<Drift>,
   accounts: DepositAccounts,
-  args: DepositArgs
+  args: DepositArgs,
 ): Promise<TransactionInstruction> => {
   const [statePublicKey] = deriveDriftStatePDA(program.programId);
   const [userPublicKey] = deriveUserPDA(
     program.programId,
     accounts.authority,
-    args.subAccountId
+    args.subAccountId,
   );
   const [userStatsPublicKey] = deriveUserStatsPDA(
     program.programId,
-    accounts.authority
+    accounts.authority,
   );
   const [spotMarketVault] = deriveSpotMarketVaultPDA(
     program.programId,
-    args.marketIndex
+    args.marketIndex,
   );
 
   // CRITICAL: Build remaining accounts in exact loading order:
@@ -292,7 +288,7 @@ export const makeDepositIx = async (
 
 interface AdminDepositAccounts {
   admin: PublicKey;
-  driftUser: PublicKey; // The drift user account to deposit into
+  integrationAcc2: PublicKey; // The drift user account to deposit into
   adminTokenAccount: PublicKey; // Admin's token account (source of funds)
 }
 
@@ -315,7 +311,7 @@ interface AdminDepositArgs {
 export const makeAdminDepositIx = async (
   program: Program<Drift>,
   accounts: AdminDepositAccounts,
-  args: AdminDepositArgs
+  args: AdminDepositArgs,
 ): Promise<TransactionInstruction> => {
   // Calculate discriminator for "admin_deposit"
   // Anchor uses first 8 bytes of sha256("global:admin_deposit")
@@ -337,7 +333,7 @@ export const makeAdminDepositIx = async (
   const [driftState] = deriveDriftStatePDA(program.programId);
   const [spotMarketVault] = deriveSpotMarketVaultPDA(
     program.programId,
-    args.marketIndex
+    args.marketIndex,
   );
 
   // Build accounts array in the order expected by AdminDeposit context
@@ -350,7 +346,7 @@ export const makeAdminDepositIx = async (
   // 6. token_program
   const keys = [
     { pubkey: driftState, isSigner: false, isWritable: false }, // state
-    { pubkey: accounts.driftUser, isSigner: false, isWritable: true }, // user
+    { pubkey: accounts.integrationAcc2, isSigner: false, isWritable: true }, // user
     { pubkey: accounts.admin, isSigner: true, isWritable: false }, // admin (signer)
     { pubkey: spotMarketVault, isSigner: false, isWritable: true }, // spot_market_vault
     { pubkey: accounts.adminTokenAccount, isSigner: false, isWritable: true }, // admin_token_account
@@ -397,21 +393,21 @@ interface WithdrawArgs {
 export const makeWithdrawIx = async (
   program: Program<Drift>,
   accounts: WithdrawAccounts,
-  args: WithdrawArgs
+  args: WithdrawArgs,
 ): Promise<TransactionInstruction> => {
   const [statePublicKey] = deriveDriftStatePDA(program.programId);
   const [userPublicKey] = deriveUserPDA(
     program.programId,
     accounts.authority,
-    args.subAccountId
+    args.subAccountId,
   );
   const [userStatsPublicKey] = deriveUserStatsPDA(
     program.programId,
-    accounts.authority
+    accounts.authority,
   );
   const [spotMarketVault] = deriveSpotMarketVaultPDA(
     program.programId,
-    args.marketIndex
+    args.marketIndex,
   );
   const [driftSigner] = deriveDriftSignerPDA(program.programId);
 
@@ -469,16 +465,16 @@ export interface UpdateSpotMarketCumulativeInterestAccounts {
 export const makeUpdateSpotMarketCumulativeInterestIx = async (
   program: Program<Drift>,
   accounts: UpdateSpotMarketCumulativeInterestAccounts,
-  marketIndex: number
+  marketIndex: number,
 ): Promise<TransactionInstruction> => {
   const [statePublicKey] = deriveDriftStatePDA(program.programId);
   const [spotMarketPublicKey] = deriveSpotMarketPDA(
     program.programId,
-    marketIndex
+    marketIndex,
   );
   const [spotMarketVaultPublicKey] = deriveSpotMarketVaultPDA(
     program.programId,
-    marketIndex
+    marketIndex,
   );
 
   // Build instruction - oracle can be system program if not provided

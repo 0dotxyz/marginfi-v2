@@ -16,13 +16,13 @@ assert_struct_align!(BankCache, 8);
 pub struct BankCache {
     /// Actual (spot) interest/fee rates of the bank, based on utilization
     /// * APR (annual percentage rate) values
-    /// * From 0-1000%, as u32, e.g. u32::MAX = 1000%, u:32::MAX/2 = 500%, etc
+    /// * From 0-1000%, as u32, e.g. u32::MAX = 1000%, u32::MAX/2 = 500%, etc
     pub base_rate: u32,
     /// Equivalent to `base_rate` * utilization
-    /// * From 0-1000%, as u32, e.g. u32::MAX = 1000%, u:32::MAX/2 = 500%, etc
+    /// * From 0-1000%, as u32, e.g. u32::MAX = 1000%, u32::MAX/2 = 500%, etc
     pub lending_rate: u32,
     /// Equivalent to `base_rate` * (1 + ir_fees) + fixed_fees
-    /// * From 0-1000%, as u32, e.g. u32::MAX = 1000%, u:32::MAX/2 = 500%, etc
+    /// * From 0-1000%, as u32, e.g. u32::MAX = 1000%, u32::MAX/2 = 500%, etc
     pub borrowing_rate: u32,
 
     /// * in seconds
@@ -35,11 +35,74 @@ pub struct BankCache {
     /// * in token, in native decimals, as I80F48
     pub accumulated_since_last_update: WrappedI80F48,
 
-    _reserved0: [u8; 128],
+    /// Oracle price used in the last instruction that consumed an oracle price
+    /// * Only updated when instruction uses an oracle price, not updated for operations that don't
+    ///   require prices (e.g., deposit, repay)
+    /// * Price in USD, with no price bias
+    /// * Zero if never updated
+    pub last_oracle_price: WrappedI80F48,
+
+    /// Unix timestamp (seconds) when last_oracle_price was last updated
+    /// * Used to determine staleness of cached price
+    /// * Zero if never updated
+    pub last_oracle_price_timestamp: i64,
+
+    /// Confidence interval reported by the oracle when last_oracle_price was fetched
+    /// * Always non-negative
+    /// * Zero if never updated
+    /// * Note: this value is the confidence reported by oracles, multiplied by `STD_DEV_MULTIPLE`
+    pub last_oracle_price_confidence: WrappedI80F48,
+    /// Liquidation cache flags, set during receivership flow.
+    /// * 1 (LIQ_CACHE_LOCKED_FLAG) - We "lock" the liquidation cache when writing to it in Start
+    /// Liquidate as an additional safeguard, if the liquidation prices stored here were to be
+    /// edited between start and end, it would completely break the risk engine. End validates that
+    /// the lock is set, panics if not, and removes it - which prevents footguns if the cache was
+    /// e.g. accidently set to default.
+    pub liq_cache_flags: u8,
+    _padding: [u8; 23],
+    // INFO: these are duplicative of `last_oracle_price` and `last_oracle_price_timestamp` so if
+    // space is ever needed we can recycle at least two of these (32 bytes)
+    /// Cached real-time price for receivership liquidation.
+    pub liquidation_price_rt: WrappedI80F48,
+    /// Cached real-time price confidence for receivership liquidation.
+    pub liquidation_price_rt_confidence: WrappedI80F48,
+    /// Cached TWAP price for receivership liquidation.
+    pub liquidation_price_twap: WrappedI80F48,
+    /// Cached TWAP price confidence for receivership liquidation.
+    pub liquidation_price_twap_confidence: WrappedI80F48,
 }
 
 impl Default for BankCache {
     fn default() -> Self {
         Self::zeroed()
+    }
+}
+
+impl BankCache {
+    pub const LIQ_CACHE_LOCKED_FLAG: u8 = 1 << 0;
+
+    /// Reset cached rate metrics while preserving the last oracle price snapshot.
+    pub fn reset_preserving_oracle_price(&mut self) {
+        let last_oracle_price = self.last_oracle_price;
+        let last_oracle_price_timestamp = self.last_oracle_price_timestamp;
+        let last_oracle_price_confidence = self.last_oracle_price_confidence;
+
+        *self = Self::default();
+
+        self.last_oracle_price = last_oracle_price;
+        self.last_oracle_price_timestamp = last_oracle_price_timestamp;
+        self.last_oracle_price_confidence = last_oracle_price_confidence;
+    }
+
+    pub fn is_liquidation_price_cache_locked(&self) -> bool {
+        self.liq_cache_flags & Self::LIQ_CACHE_LOCKED_FLAG != 0
+    }
+
+    pub fn set_liquidation_price_cache_locked(&mut self) {
+        self.liq_cache_flags |= Self::LIQ_CACHE_LOCKED_FLAG;
+    }
+
+    pub fn clear_liquidation_price_cache_locked(&mut self) {
+        self.liq_cache_flags &= !Self::LIQ_CACHE_LOCKED_FLAG;
     }
 }

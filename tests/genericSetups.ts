@@ -6,8 +6,6 @@ import {
   Transaction,
   AccountMeta,
   ComputeBudgetProgram,
-  SystemProgram,
-  SYSVAR_RENT_PUBKEY,
 } from "@solana/web3.js";
 import BN from "bn.js";
 import {
@@ -21,14 +19,14 @@ import {
   users,
   kaminoAccounts,
   MARKET,
-  USDC_RESERVE,
   TOKEN_A_RESERVE,
   A_FARM_STATE,
-  A_OBLIGATION_USER_STATE,
   farmAccounts,
-  bankRunProvider,
-  klendBankrunProgram,
   FARMS_PROGRAM_ID,
+  driftAccounts,
+  DRIFT_TOKEN_A_SPOT_MARKET,
+  DRIFT_TOKEN_A_PULL_ORACLE,
+  globalProgramAdmin,
 } from "./rootHooks";
 import { addBankWithSeed, groupInitialize } from "./utils/group-instructions";
 import {
@@ -45,37 +43,47 @@ import {
   makeRatePoints,
   ORACLE_SETUP_PYTH_PUSH,
 } from "./utils/types";
-import {
-  defaultKaminoBankConfig,
-  ORACLE_SETUP_KAMINO_PYTH_PUSH,
-} from "./utils/kamino-utils";
+import { defaultKaminoBankConfig } from "./utils/kamino-utils";
 import {
   makeAddKaminoBankIx,
   makeInitObligationIx,
 } from "./utils/kamino-instructions";
 import { processBankrunTransaction } from "./utils/tools";
-import { Farms } from "./fixtures/kamino_farms";
-import farmsIdl from "../idls/kamino_farms.json";
-import { lendingMarketAuthPda } from "@kamino-finance/klend-sdk";
+import {
+  defaultDriftBankConfig,
+  TOKEN_A_MARKET_INDEX,
+} from "./utils/drift-utils";
+import {
+  makeAddDriftBankIx,
+  makeInitDriftUserIx,
+} from "./utils/drift-instructions";
 
 /**
- * Initialize a group, create N banks, fund everyone, and init accounts.
+ * Initialize a group, create N banks (in total ≤ MAX_BALANCES), fund everyone, and init accounts.
  *
- * @param numberOfBanks - how many banks to add (≤ MAX_BALANCES)
- * @returns the globals you’ll want in your tests (list of banks, group keypair)
+ * @param numberOfBanks - how many banks to add
+ * @param numberOfKaminoBanks - how many Kamino banks to add (optional)
+ * @param numberOfDriftBanks - how many Drift banks to add (optional)
+ * @returns the globals you’ll want in your tests (lists of banks, group keypair)
  */
 export const genericMultiBankTestSetup = async (
   numberOfBanks: number,
   userAccountName: string,
   groupSeed: Buffer,
-  startingSeed: number
+  startingSeed: number,
+  numberOfKaminoBanks: number = 0,
+  numberOfDriftBanks: number = 0,
 ): Promise<{
   banks: PublicKey[];
+  kaminoBanks: PublicKey[];
+  driftBanks: PublicKey[];
   throwawayGroup: Keypair;
 }> => {
   const USER_ACCOUNT_THROWAWAY = userAccountName;
 
   let banks: PublicKey[] = [];
+  let kaminoBanks: PublicKey[] = [];
+  let driftBanks: PublicKey[] = [];
   const throwawayGroup = Keypair.fromSeed(groupSeed);
 
   // 1) init the group
@@ -85,7 +93,7 @@ export const genericMultiBankTestSetup = async (
       await groupInitialize(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
         admin: groupAdmin.wallet.publicKey,
-      })
+      }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet, throwawayGroup);
@@ -94,7 +102,7 @@ export const genericMultiBankTestSetup = async (
     if (verbose) console.log(`*init group: ${throwawayGroup.publicKey}`);
   }
 
-  // 2) add banks
+  // 2.0) add regular (p0) banks
   {
     // Process banks sequentially to avoid "Account in use" error
     for (let i = 0; i < numberOfBanks; i++) {
@@ -115,9 +123,102 @@ export const genericMultiBankTestSetup = async (
         bankrunProgram.programId,
         throwawayGroup.publicKey,
         ecosystem.lstAlphaMint.publicKey,
-        new BN(seed)
+        new BN(seed),
       );
       banks.push(bankPk);
+    }
+  }
+
+  // 2.1) add Kamino banks
+  const market = kaminoAccounts.get(MARKET);
+  const tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE);
+  const farmState = farmAccounts.get(A_FARM_STATE);
+
+  for (let i = 0; i < numberOfKaminoBanks; i++) {
+    const seed = startingSeed + numberOfBanks + i;
+
+    await addGenericKaminoBank(
+      throwawayGroup,
+      market,
+      tokenAReserve,
+      ecosystem.tokenAMint.publicKey,
+      oracles.tokenAOracle.publicKey,
+      new BN(seed),
+      verbose ? `*init Token A #${seed}:` : undefined,
+      farmState ? farmState : null,
+    );
+
+    const [bankPk] = deriveBankWithSeed(
+      bankrunProgram.programId,
+      throwawayGroup.publicKey,
+      ecosystem.tokenAMint.publicKey,
+      new BN(seed),
+    );
+    kaminoBanks.push(bankPk);
+  }
+
+  // 2.2) add Drift banks
+  {
+    const ctx = bankrunContext;
+    const driftSpotMarket = driftAccounts.get(DRIFT_TOKEN_A_SPOT_MARKET);
+    const driftOracle = driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE);
+
+    for (let i = 0; i < numberOfDriftBanks; i++) {
+      const seed = new BN(
+        startingSeed + numberOfBanks + numberOfKaminoBanks + i,
+      );
+      const defaultConfig = defaultDriftBankConfig(
+        oracles.tokenAOracle.publicKey,
+      );
+      const tx = new Transaction().add(
+        await makeAddDriftBankIx(
+          groupAdmin.mrgnBankrunProgram,
+          {
+            group: throwawayGroup.publicKey,
+            feePayer: groupAdmin.wallet.publicKey,
+            bankMint: ecosystem.tokenAMint.publicKey,
+            integrationAcc1: driftSpotMarket,
+            oracle: oracles.tokenAOracle.publicKey,
+          },
+          { config: defaultConfig, seed },
+        ),
+      );
+      await processBankrunTransaction(ctx, tx, [groupAdmin.wallet]);
+
+      const initUserAmount = new BN(100 + i);
+
+      const fundTx = new Transaction().add(
+        createMintToInstruction(
+          ecosystem.tokenAMint.publicKey,
+          groupAdmin.tokenAAccount,
+          globalProgramAdmin.wallet.publicKey,
+          initUserAmount.toNumber(),
+        ),
+      );
+      await processBankrunTransaction(ctx, fundTx, [globalProgramAdmin.wallet]);
+
+      const [bankPk] = deriveBankWithSeed(
+        bankrunProgram.programId,
+        throwawayGroup.publicKey,
+        ecosystem.tokenAMint.publicKey,
+        new BN(seed),
+      );
+      const initUserTx = new Transaction().add(
+        await makeInitDriftUserIx(
+          groupAdmin.mrgnBankrunProgram,
+          {
+            feePayer: groupAdmin.wallet.publicKey,
+            bank: bankPk,
+            signerTokenAccount: groupAdmin.tokenAAccount,
+            driftOracle,
+          },
+          { amount: initUserAmount },
+          TOKEN_A_MARKET_INDEX,
+        ),
+      );
+      await processBankrunTransaction(ctx, initUserTx, [groupAdmin.wallet]);
+
+      driftBanks.push(bankPk);
     }
   }
 
@@ -133,8 +234,14 @@ export const genericMultiBankTestSetup = async (
           ecosystem.lstAlphaMint.publicKey,
           u.lstAlphaAccount,
           payer.publicKey,
-          10_000 * 10 ** ecosystem.lstAlphaDecimals
-        )
+          10_000 * 10 ** ecosystem.lstAlphaDecimals,
+        ),
+        createMintToInstruction(
+          ecosystem.tokenAMint.publicKey,
+          u.tokenAAccount,
+          payer.publicKey,
+          10_000 * 10 ** ecosystem.tokenADecimals,
+        ),
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(payer);
@@ -147,8 +254,14 @@ export const genericMultiBankTestSetup = async (
         ecosystem.lstAlphaMint.publicKey,
         groupAdmin.lstAlphaAccount,
         payer.publicKey,
-        10_000 * 10 ** ecosystem.lstAlphaDecimals
-      )
+        10_000 * 10 ** ecosystem.lstAlphaDecimals,
+      ),
+      createMintToInstruction(
+        ecosystem.tokenAMint.publicKey,
+        groupAdmin.tokenAAccount,
+        payer.publicKey,
+        10_000 * 10 ** ecosystem.tokenADecimals,
+      ),
     );
     txAdmin.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     txAdmin.sign(payer);
@@ -172,7 +285,7 @@ export const genericMultiBankTestSetup = async (
             marginfiAccount: kp.publicKey,
             authority: u.wallet.publicKey,
             feePayer: u.wallet.publicKey,
-          })
+          }),
         );
         tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
         tx.sign(u.wallet, kp);
@@ -193,7 +306,7 @@ export const genericMultiBankTestSetup = async (
           marginfiAccount: adminKp.publicKey,
           authority: groupAdmin.wallet.publicKey,
           feePayer: groupAdmin.wallet.publicKey,
-        })
+        }),
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(groupAdmin.wallet, adminKp);
@@ -203,7 +316,7 @@ export const genericMultiBankTestSetup = async (
     }
   }
 
-  return { banks, throwawayGroup };
+  return { banks, kaminoBanks, driftBanks, throwawayGroup };
 };
 
 /**
@@ -228,7 +341,7 @@ async function addGenericBank(
     // Function to adjust the seed (for example, seed.addn(1))
     seed: BN;
     verboseMessage: string;
-  }
+  },
 ) {
   const { assetTag, bankMint, oracle, oracleMeta, seed, verboseMessage } =
     options;
@@ -252,7 +365,7 @@ async function addGenericBank(
     bankrunProgram.programId,
     throwawayGroup.publicKey,
     bankMint,
-    seed
+    seed,
   );
 
   const setupType = ORACLE_SETUP_PYTH_PUSH;
@@ -286,201 +399,12 @@ async function addGenericBank(
 }
 
 /**
- * Initialize a group, create N banks, fund everyone, and init accounts.
- *
- * @param numberOfBanks - how many banks to add (≤ MAX_BALANCES)
- * @returns the globals you’ll want in your tests (list of banks, group keypair)
- */
-export const genericKaminoMultiBankTestSetup = async (
-  numberOfBanks: number,
-  userAccountName: string,
-  groupSeed: Buffer,
-  startingSeed: number
-): Promise<{
-  kaminoBanks: PublicKey[];
-  regularBanks: PublicKey[];
-  throwawayGroup: Keypair;
-}> => {
-  const USER_ACCOUNT_THROWAWAY = userAccountName;
-  const market = kaminoAccounts.get(MARKET);
-  const tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE);
-  const farmState = farmAccounts.get(A_FARM_STATE);
-
-  let kaminoBanks: PublicKey[] = [];
-  let regularBanks: PublicKey[] = [];
-  const throwawayGroup = Keypair.fromSeed(groupSeed);
-
-  // 1) init the group
-  {
-    const tx = new Transaction();
-    tx.add(
-      await groupInitialize(groupAdmin.mrgnBankrunProgram, {
-        marginfiGroup: throwawayGroup.publicKey,
-        admin: groupAdmin.wallet.publicKey,
-      })
-    );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet, throwawayGroup);
-    await banksClient.processTransaction(tx);
-
-    if (verbose) console.log(`*init group: ${throwawayGroup.publicKey}`);
-  }
-
-  // 2) add kamino banks (all use the same Kamino reserve for simplicity.)
-  {
-    // Process banks sequentially to avoid "Account in use" error
-    for (let i = 0; i < numberOfBanks; i++) {
-      const seed = startingSeed + i;
-
-      // Execute addGenericKaminoBank sequentially
-      await addGenericKaminoBank(
-        throwawayGroup,
-        market,
-        tokenAReserve,
-        ecosystem.tokenAMint.publicKey,
-        oracles.tokenAOracle.publicKey,
-        oracles.tokenAOracleFeed.publicKey,
-        new BN(seed),
-        verbose ? `*init Token A #${seed}:` : undefined,
-        farmState ? farmState : null
-      );
-
-      const [bankPk] = deriveBankWithSeed(
-        bankrunProgram.programId,
-        throwawayGroup.publicKey,
-        ecosystem.tokenAMint.publicKey,
-        new BN(seed)
-      );
-      kaminoBanks.push(bankPk);
-    }
-  }
-
-  // 2.5 Init regular banks
-  {
-    // Process banks sequentially to avoid "Account in use" error
-    for (let i = 0; i < numberOfBanks; i++) {
-      const seed = startingSeed + i;
-
-      // Execute addGenericBank sequentially
-      await addGenericBank(throwawayGroup, {
-        bankMint: ecosystem.lstAlphaMint.publicKey,
-        oracle: oracles.pythPullLst.publicKey,
-        oracleMeta: {
-          pubkey: oracles.pythPullLst.publicKey,
-          isSigner: false,
-          isWritable: false,
-        },
-        seed: new BN(seed),
-        verboseMessage: verbose ? `*init LST #${seed}:` : undefined,
-      });
-
-      const [bankPk] = deriveBankWithSeed(
-        bankrunProgram.programId,
-        throwawayGroup.publicKey,
-        ecosystem.lstAlphaMint.publicKey,
-        new BN(seed)
-      );
-      regularBanks.push(bankPk);
-    }
-  }
-
-  // 3) fund users + admin
-  {
-    // Use bankrun payer as mint authority (it created the mints in rootHooks.ts)
-    const payer = bankrunContext.payer;
-
-    for (const u of users) {
-      const tx = new Transaction();
-      tx.add(
-        createMintToInstruction(
-          ecosystem.lstAlphaMint.publicKey,
-          u.lstAlphaAccount,
-          payer.publicKey,
-          10_000 * 10 ** ecosystem.lstAlphaDecimals
-        )
-      );
-      tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(payer);
-      await banksClient.processTransaction(tx);
-    }
-
-    const txAdmin = new Transaction();
-    txAdmin.add(
-      createMintToInstruction(
-        ecosystem.lstAlphaMint.publicKey,
-        groupAdmin.lstAlphaAccount,
-        payer.publicKey,
-        10_000 * 10 ** ecosystem.lstAlphaDecimals
-      )
-    );
-    txAdmin.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    txAdmin.sign(payer);
-    await banksClient.processTransaction(txAdmin);
-  }
-
-  // 4) init user accounts (and admin) if not already init
-  {
-    for (const [i, u] of users.entries()) {
-      if (u.accounts.has(USER_ACCOUNT_THROWAWAY)) {
-        if (verbose) console.log(`Skipped creating user account #${i}`);
-      } else {
-        const kp = Keypair.generate();
-        u.accounts.set(USER_ACCOUNT_THROWAWAY, kp.publicKey);
-        if (verbose) console.log(`Initialized user #${i}: ${kp.publicKey}`);
-
-        const tx = new Transaction();
-        tx.add(
-          await accountInit(u.mrgnBankrunProgram, {
-            marginfiGroup: throwawayGroup.publicKey,
-            marginfiAccount: kp.publicKey,
-            authority: u.wallet.publicKey,
-            feePayer: u.wallet.publicKey,
-          })
-        );
-        tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-        tx.sign(u.wallet, kp);
-        await banksClient.processTransaction(tx);
-      }
-    }
-
-    if (!groupAdmin.accounts.has(USER_ACCOUNT_THROWAWAY)) {
-      const adminKp = Keypair.generate();
-      groupAdmin.accounts.set(USER_ACCOUNT_THROWAWAY, adminKp.publicKey);
-      if (verbose)
-        console.log(`Initialized admin account: ${adminKp.publicKey}`);
-
-      const tx = new Transaction();
-      tx.add(
-        await accountInit(groupAdmin.mrgnBankrunProgram, {
-          marginfiGroup: throwawayGroup.publicKey,
-          marginfiAccount: adminKp.publicKey,
-          authority: groupAdmin.wallet.publicKey,
-          feePayer: groupAdmin.wallet.publicKey,
-        })
-      );
-      tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(groupAdmin.wallet, adminKp);
-      await banksClient.processTransaction(tx);
-    } else if (verbose) {
-      console.log("Skipped creating admin account");
-    }
-  }
-
-  return {
-    kaminoBanks,
-    regularBanks,
-    throwawayGroup,
-  };
-};
-
-/**
  *
  * @param throwawayGroup
  * @param market
  * @param reserve
  * @param mint
  * @param oracle
- * @param oracleFeedId
  * @param seed
  * @param verboseMessage
  * @param farmState - required if reserve has a farm enabled
@@ -491,17 +415,16 @@ async function addGenericKaminoBank(
   reserve: PublicKey,
   mint: PublicKey,
   oracle: PublicKey,
-  oracleFeedId: PublicKey,
   seed: BN,
   verboseMessage: string,
-  farmState: PublicKey | null
+  farmState: PublicKey | null,
 ) {
   const config = defaultKaminoBankConfig(oracle);
   const [bankKey] = deriveBankWithSeed(
     bankrunProgram.programId,
     throwawayGroup.publicKey,
     mint,
-    seed
+    seed,
   );
   let initBankTx = new Transaction().add(
     await makeAddKaminoBankIx(
@@ -514,18 +437,18 @@ async function addGenericKaminoBank(
         kaminoMarket: market,
         oracle: oracle,
       },
-      { config: config, seed }
-    )
+      { config: config, seed },
+    ),
   );
 
   const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
     bankrunProgram.programId,
-    bankKey
+    bankKey,
   );
   const [obligation] = deriveBaseObligation(lendingVaultAuthority, market);
   const [userState] = PublicKey.findProgramAddressSync(
     [Buffer.from("user"), farmState.toBuffer(), obligation.toBuffer()],
-    FARMS_PROGRAM_ID
+    FARMS_PROGRAM_ID,
   );
   // console.log("farm state passed: " + farmState + " user " + userState);
 
@@ -546,8 +469,8 @@ async function addGenericKaminoBank(
         reserveFarmState: farmState,
         obligationFarmUserState: userState,
       },
-      new BN(100)
-    )
+      new BN(100),
+    ),
   );
   await processBankrunTransaction(bankrunContext, initObligationTx, [
     groupAdmin.wallet,

@@ -1,14 +1,17 @@
-use crate::{constants::*, math_error, DriftMocksError};
+use crate::{assert_struct_align, assert_struct_size, constants::*, math_error, DriftMocksError};
 use anchor_lang::prelude::*;
+use bytemuck::{Pod, Zeroable};
 
 // Account discriminators from Drift IDL
 pub const SPOT_MARKET_DISCRIMINATOR: [u8; 8] = [100, 177, 8, 107, 168, 65, 65, 39];
 pub const USER_DISCRIMINATOR: [u8; 8] = [159, 117, 95, 227, 239, 151, 58, 236];
 pub const USER_STATS_DISCRIMINATOR: [u8; 8] = [176, 223, 136, 27, 122, 79, 32, 227];
 
+assert_struct_size!(SpotPosition, 40);
+assert_struct_align!(SpotPosition, 8);
 /// Minimal representation of a spot position within a User account
-#[zero_copy(unsafe)]
 #[repr(C)]
+#[zero_copy]
 pub struct SpotPosition {
     /// The scaled balance of the position.
     /// * Precision: SPOT_BALANCE_PRECISION
@@ -39,11 +42,17 @@ pub enum SpotBalanceType {
     Borrow = 1,
 }
 
+unsafe impl Zeroable for SpotBalanceType {}
+unsafe impl Pod for SpotBalanceType {}
+
+assert_struct_size!(MinimalSpotMarket, 768);
+assert_struct_align!(MinimalSpotMarket, 8);
 /// Minimal representation of Drift's SpotMarket account
 /// Only includes the fields we actually need for marginfi integration
 /// https://github.com/drift-labs/protocol-v2/tree/master/programs/drift/src/state/spot_market.rs#L35
-#[account(zero_copy(unsafe), discriminator = &SPOT_MARKET_DISCRIMINATOR)]
+#[account(zero_copy, discriminator = &SPOT_MARKET_DISCRIMINATOR)]
 #[repr(C)]
+#[derive(Default)]
 pub struct MinimalSpotMarket {
     /// The address of the spot market. It is a pda of the market index
     pub pubkey: Pubkey,
@@ -54,35 +63,54 @@ pub struct MinimalSpotMarket {
     /// The vault used to store the market's deposits
     pub vault: Pubkey,
 
-    pub padding_1: [u8; 296],
+    pub _padding1: [[u64; 4]; 9],
+    pub _padding2: [u8; 8],
 
     /// All the fields we need for testing (stored as raw bytes for simplicity)
-    pub deposit_balance: u128,
-    pub borrow_balance: u128,
-    pub cumulative_deposit_interest: u128,
-    pub cumulative_borrow_interest: u128,
+    pub deposit_balance: [u8; 16], // u128 in Drift
+    pub borrow_balance: [u8; 16],              // u128 in Drift
+    pub cumulative_deposit_interest: [u8; 16], // u128 in Drift
+    pub cumulative_borrow_interest: [u8; 16],  // u128 in Drift
 
-    pub padding_2: [u8; 72],
+    pub _padding3: [u64; 9],
 
     /// Last time the cumulative deposit and borrow interest was updated
-    /// Offset: 568 bytes from start of struct
+    /// Offset: 568 bytes from start of struct (including discriminator)
     pub last_interest_ts: u64,
 
-    pub padding_2b: [u8; 104],
+    pub _padding4: [u64; 13],
 
     pub decimals: u32,
     pub market_index: u16,
 
-    pub padding_3: [u8; 49],
+    pub _padding5: [u16; 24],
+    pub _padding6: [u8; 1],
 
     pub pool_id: u8,
-    /// Padding to reach 776 bytes total
-    pub padding_4: [u8; 40],
+
+    /// Padding to reach 776 bytes total (including discriminator)
+    pub _padding7: [u64; 5],
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, AnchorSerialize, AnchorDeserialize)]
+#[repr(u8)]
+pub enum UserStatus {
+    Active = 0,
+    BeingLiquidated = 0b00000001,
+    Bankrupt = 0b00000010,
+    ReduceOnly = 0b00000100,
+    AdvancedLp = 0b00001000,
+    ProtectedMakerOrders = 0b00010000,
+}
+
+unsafe impl Zeroable for UserStatus {}
+unsafe impl Pod for UserStatus {}
+
+assert_struct_size!(MinimalUser, 4368);
+assert_struct_align!(MinimalUser, 8);
 /// Minimal representation of Drift's User account
 /// Only includes the fields we actually need
-#[account(zero_copy(unsafe), discriminator = &USER_DISCRIMINATOR)]
+#[account(zero_copy, discriminator = &USER_DISCRIMINATOR)]
 #[repr(C)]
 pub struct MinimalUser {
     /// The owner/authority of the account
@@ -96,41 +124,61 @@ pub struct MinimalUser {
     pub spot_positions: [SpotPosition; 8],
 
     /// Skip to the fields we need at the end
-    /// Total size needed: 4376 - 96 (header) - 352 (positions) = 3928 bytes
-    pub _padding1: [u8; 3920],
+    pub _padding1: [u64; 256],
+    pub _padding2: [u64; 128],
+    pub _padding3: [u64; 64],
+    pub _padding4: [u64; 32],
+    pub _padding5: [u64; 8],
+    pub _padding6: [u64; 2],
+    pub _padding7: [u16; 1],
 
     /// Sub account id for this user account
     pub sub_account_id: u16,
 
     // Status and flags
-    pub status: u8,
+    pub status: UserStatus,
 
-    /// Whether the user is being liquidated
-    pub is_being_liquidated: u8,
-
-    // Final padding to reach exactly 4376 bytes
-    pub _padding2: [u8; 4],
+    // Final padding to reach exactly 4376 bytes (including discriminator)
+    pub _padding8: [u8; 27],
 }
 
+impl MinimalUser {
+    pub fn is_being_liquidated(&self) -> bool {
+        matches!(
+            self.status,
+            UserStatus::BeingLiquidated | UserStatus::Bankrupt
+        )
+    }
+}
+
+assert_struct_size!(MinimalUserStats, 240);
+assert_struct_align!(MinimalUserStats, 8);
 /// Minimal representation of Drift's UserStats account
 /// Only includes the authority field we need
-#[account(zero_copy(unsafe), discriminator = &USER_STATS_DISCRIMINATOR)]
-#[repr(C)]
+#[account(zero_copy, discriminator = &USER_STATS_DISCRIMINATOR)]
+#[repr(C, align(8))]
 pub struct MinimalUserStats {
     /// The authority for all of a user's sub accounts
     pub authority: Pubkey,
 
     /// Padding to reach 240 bytes total
-    pub _padding: [u8; 208],
+    pub _padding1: [u64; 16],
+    pub _padding2: [u64; 8],
+    pub _padding3: [u64; 2],
 }
 
 // Implementation methods for MinimalSpotMarket
 impl MinimalSpotMarket {
-    pub fn get_scaled_balance_decrement(&self, amount: u64) -> Result<u64> {
-        // See `get_spot_balance` function on drift program
+    /// Core scaled balance calculation used by both increment and decrement.
+    /// See `get_spot_balance` function on Drift program.
+    /// https://github.com/drift-labs/protocol-v2/blob/master/programs/drift/src/math/spot_balance.rs#L16
+    ///
+    /// # Parameters
+    /// * `amount` - Token amount in native mint precision
+    /// * `round_up` - If true, rounds up by 1 (used for withdrawals/decrements to prevent dust)
+    fn get_scaled_balance(&self, amount: u64, round_up: bool) -> Result<u64> {
         let precision_increase = get_precision_increase(self.decimals)?;
-
-        let cumulative_interest = self.cumulative_deposit_interest;
+        let cumulative_interest = u128::from_le_bytes(self.cumulative_deposit_interest);
 
         let mut balance: u64 = (amount as u128)
             .checked_mul(precision_increase)
@@ -139,8 +187,8 @@ impl MinimalSpotMarket {
             .ok_or_else(math_error!())?
             .try_into()?;
 
-        // Drift rounds up withdrawals
-        if balance != 0 {
+        // Drift rounds up withdrawals to prevent dust accumulation
+        if round_up && balance != 0 {
             balance = balance
                 .checked_add(1)
                 .ok_or(error!(DriftMocksError::MathError))?;
@@ -149,23 +197,14 @@ impl MinimalSpotMarket {
         Ok(balance)
     }
 
-    /// Calculate how much scaled balance is expected to increase on deposit
-    /// See `get_spot_balance` function on drift program
-    /// https://github.com/drift-labs/protocol-v2/blob/master/programs/drift/src/math/spot_balance.rs#L16
+    /// Calculate scaled balance decrement for withdrawals (rounds up).
+    pub fn get_scaled_balance_decrement(&self, amount: u64) -> Result<u64> {
+        self.get_scaled_balance(amount, true)
+    }
+
+    /// Calculate scaled balance increment for deposits (floors).
     pub fn get_scaled_balance_increment(&self, amount: u64) -> Result<u64> {
-        let precision_increase = get_precision_increase(self.decimals)?;
-
-        let cumulative_interest = self.cumulative_deposit_interest;
-
-        // No rounding up for deposits
-        let balance: u64 = (amount as u128)
-            .checked_mul(precision_increase)
-            .ok_or_else(math_error!())?
-            .checked_div(cumulative_interest)
-            .ok_or_else(math_error!())?
-            .try_into()?;
-
-        Ok(balance)
+        self.get_scaled_balance(amount, false)
     }
 
     /// Convert scaled balance back to token amount for withdrawals
@@ -179,7 +218,7 @@ impl MinimalSpotMarket {
         // See `get_token_amount` function on drift
         let precision_increase = get_precision_increase(self.decimals)?;
 
-        let cumulative_interest = self.cumulative_deposit_interest;
+        let cumulative_interest = u128::from_le_bytes(self.cumulative_deposit_interest);
 
         let floored_token_amount: u64 = (scaled_balance as u128)
             .checked_mul(cumulative_interest)
@@ -196,11 +235,15 @@ impl MinimalSpotMarket {
     /// For Drift integration, we need to apply the exchange rate to the oracle price
     /// so that MarginFi's valuation calculations are correct.
     ///
-    /// The goal is: valuation = scaled_balance * adjusted_oracle_price
-    /// Where: valuation = token_amount * oracle_price
-    /// And: token_amount = scaled_balance * cumulative_interest / SPOT_BALANCE_PRECISION
+    /// By definition: valuation = oracle_price * token_amount
+    /// Where: token_amount = scaled_balance * cumulative_interest / SPOT_CUMULATIVE_INTEREST_PRECISION
     ///
-    /// Therefore: adjusted_oracle_price = oracle_price * cumulative_interest / SPOT_BALANCE_PRECISION
+    /// The goal here is to calculate such adjusted_oracle_price that:
+    /// valuation = adjusted_oracle_price * scaled_balance
+    ///
+    /// Thus: adjusted_oracle_price * scaled_balance = oracle_price * scaled_balance * cumulative_interest / SPOT_CUMULATIVE_INTEREST_PRECISION
+    ///
+    /// Therefore: adjusted_oracle_price = oracle_price * cumulative_interest / SPOT_CUMULATIVE_INTEREST_PRECISION
     pub fn adjust_oracle_price(&self, oracle_price: i64) -> Result<i64> {
         // Apply essentially the same logic as `get_withdraw_token_amount`
         // but without the rounding:
@@ -218,7 +261,7 @@ impl MinimalSpotMarket {
     /// Core adjustment method using u128 for intermediate calculations.
     /// Applies Drift's exchange rate: adjusted = raw * cumulative_interest / precision
     fn adjust_oracle_value_u128(&self, raw: u128) -> Result<u128> {
-        let cumulative_interest = self.cumulative_deposit_interest;
+        let cumulative_interest = u128::from_le_bytes(self.cumulative_deposit_interest);
 
         let adjusted_value = raw
             .checked_mul(cumulative_interest)
@@ -365,48 +408,40 @@ impl MinimalUser {
     pub fn validate_spot_position(&self, market_index: u16) -> Result<()> {
         let expected_position_index = if market_index == 0 { 0 } else { 1 };
 
-        // Only validate positions 0 and 1 for the standard pattern
-        for i in 0..2 {
-            let position = &self.spot_positions[i];
+        let position = &self.spot_positions[expected_position_index];
 
-            if position.scaled_balance > 0 {
-                // This position has balance - validate it only if it's our market
-                if position.market_index == market_index {
-                    // 1. Must be at the expected index
-                    if i != expected_position_index {
-                        msg!(
-                            "Position {} has balance for market {} but expected position {}",
-                            i,
-                            market_index,
-                            expected_position_index
-                        );
-                        return Err(DriftMocksError::InvalidPositionIndex.into());
-                    }
-
-                    // 2. Must be deposit type
-                    if position.balance_type != SpotBalanceType::Deposit {
-                        msg!(
-                            "Position {} has balance_type {:?} but expected Deposit",
-                            i,
-                            position.balance_type
-                        );
-                        return Err(DriftMocksError::InvalidBalanceType.into());
-                    }
-                }
-            } else {
-                // This position is empty - just ensure it's truly empty
-                if position.market_index != 0 {
-                    msg!(
-                        "Position {} should be empty but has market_index {}",
-                        i,
-                        position.market_index
-                    );
-                    return Err(DriftMocksError::InvalidPositionState.into());
-                }
+        if position.scaled_balance > 0 {
+            // This position has balance - validate if it's our market
+            if position.market_index != market_index {
+                // 1. Must be at the expected index
+                msg!(
+                    "Position {} has balance for market {} but expected market {}",
+                    expected_position_index,
+                    position.market_index,
+                    market_index
+                );
+                return Err(DriftMocksError::InvalidPositionIndex.into());
+            }
+            // 2. Must be deposit type
+            if position.balance_type != SpotBalanceType::Deposit {
+                msg!(
+                    "Position {} has balance_type {:?} but expected Deposit",
+                    expected_position_index,
+                    position.balance_type
+                );
+                return Err(DriftMocksError::InvalidBalanceType.into());
+            }
+        } else {
+            // This position is empty - just ensure it's truly empty
+            if position.cumulative_deposits != 0 {
+                msg!(
+                    "Position {} should be empty but has cumulative_deposits {}",
+                    expected_position_index,
+                    position.cumulative_deposits
+                );
+                return Err(DriftMocksError::InvalidPositionState.into());
             }
         }
-
-        // Positions 2+ can have admin deposits, so we don't validate them
 
         Ok(())
     }

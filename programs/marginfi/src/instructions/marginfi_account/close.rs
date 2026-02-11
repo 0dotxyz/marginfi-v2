@@ -1,10 +1,14 @@
 use anchor_lang::prelude::*;
-use marginfi_type_crate::types::MarginfiAccount;
+use marginfi_type_crate::types::{MarginfiAccount, ACCOUNT_FROZEN};
 
 use crate::{check, state::marginfi_account::MarginfiAccountImpl, MarginfiError, MarginfiResult};
 
 pub fn close_account(ctx: Context<MarginfiAccountClose>) -> MarginfiResult {
     let marginfi_account = &ctx.accounts.marginfi_account.load()?;
+
+    if marginfi_account.get_flag(ACCOUNT_FROZEN) {
+        return err!(MarginfiError::AccountFrozen);
+    }
 
     check!(
         marginfi_account.can_be_closed(),

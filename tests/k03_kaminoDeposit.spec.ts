@@ -1,6 +1,5 @@
 import { BN } from "@coral-xyz/anchor";
 import {
-  ecosystem,
   kaminoAccounts,
   MARKET,
   oracles,
@@ -9,7 +8,6 @@ import {
   bankrunContext,
   bankRunProvider,
   klendBankrunProgram,
-  globalProgramAdmin,
 } from "./rootHooks";
 import { lendingMarketAuthPda, Reserve } from "@kamino-finance/klend-sdk";
 import { SYSVAR_INSTRUCTIONS_PUBKEY, Transaction } from "@solana/web3.js";
@@ -19,7 +17,6 @@ import {
   simpleRefreshObligation,
   simpleRefreshReserve,
 } from "./utils/kamino-utils";
-import { createMintToInstruction } from "@solana/spl-token";
 import { processBankrunTransaction } from "./utils/tools";
 import { ProgramTestContext } from "solana-bankrun";
 import { assert } from "chai";

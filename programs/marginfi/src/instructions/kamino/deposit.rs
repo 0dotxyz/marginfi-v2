@@ -6,7 +6,10 @@ use crate::{
     optional_account,
     state::{
         bank::BankImpl,
-        marginfi_account::{BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl},
+        marginfi_account::{
+            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
+            LendingAccountImpl, MarginfiAccountImpl,
+        },
         marginfi_group::MarginfiGroupImpl,
     },
     utils::is_kamino_asset_tag,
@@ -60,10 +63,10 @@ pub fn kamino_deposit(ctx: Context<KaminoDeposit>, amount: u64) -> MarginfiResul
 
     // Get initial obligation data to verify deposit amount later
     let initial_obligation_deposited_amount =
-        ctx.accounts.kamino_obligation.load()?.deposits[0].deposited_amount;
+        ctx.accounts.integration_acc_2.load()?.deposits[0].deposited_amount;
     let expected_collateral_amount = ctx
         .accounts
-        .kamino_reserve
+        .integration_acc_1
         .load()?
         .liquidity_to_collateral(amount)?;
 
@@ -71,7 +74,7 @@ pub fn kamino_deposit(ctx: Context<KaminoDeposit>, amount: u64) -> MarginfiResul
     ctx.accounts.cpi_kamino_deposit(amount, authority_bump)?;
 
     let final_obligation_deposited_amount =
-        ctx.accounts.kamino_obligation.load()?.deposits[0].deposited_amount;
+        ctx.accounts.integration_acc_2.load()?.deposits[0].deposited_amount;
 
     // Verifying the deposit was successful by checking obligation balance increased by the correct amount
     let obligation_collateral_change =
@@ -131,7 +134,15 @@ pub struct KaminoDeposit<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = authority @ MarginfiError::Unauthorized
+        constraint = {
+            let a = marginfi_account.load()?;
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), false)
+        } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
@@ -141,8 +152,8 @@ pub struct KaminoDeposit<'info> {
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
-        has_one = kamino_reserve @ MarginfiError::InvalidKaminoReserve,
-        has_one = kamino_obligation @ MarginfiError::InvalidKaminoObligation,
+        has_one = integration_acc_1 @ MarginfiError::InvalidKaminoReserve,
+        has_one = integration_acc_2 @ MarginfiError::InvalidKaminoObligation,
         has_one = mint @ MarginfiError::InvalidMint,
         constraint = is_kamino_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongAssetTagForKaminoInstructions
@@ -172,18 +183,18 @@ pub struct KaminoDeposit<'info> {
 
     #[account(
         mut,
-        // The first deposit in the obligation is for `kamino_reserve`.
+        // The first deposit in the obligation is for `integration_acc_1`.
         constraint = {
-            let obligation = kamino_obligation.load()?;
-            obligation.deposits[0].deposit_reserve == kamino_reserve.key()
+            let obligation = integration_acc_2.load()?;
+            obligation.deposits[0].deposit_reserve == integration_acc_1.key()
         } @ MarginfiError::ObligationDepositReserveMismatch,
         // The rest of the obligation is always empty
         constraint = {
-            let obligation = kamino_obligation.load()?;
+            let obligation = integration_acc_2.load()?;
             obligation.deposits.iter().skip(1).all(|d| d.deposited_amount == 0)
         } @ MarginfiError::InvalidObligationDepositCount
     )]
-    pub kamino_obligation: AccountLoader<'info, MinimalObligation>,
+    pub integration_acc_2: AccountLoader<'info, MinimalObligation>,
 
     /// CHECK: validated by the Kamino program
     pub lending_market: UncheckedAccount<'info>,
@@ -193,7 +204,7 @@ pub struct KaminoDeposit<'info> {
 
     /// The Kamino reserve that holds liquidity
     #[account(mut)]
-    pub kamino_reserve: AccountLoader<'info, MinimalReserve>,
+    pub integration_acc_1: AccountLoader<'info, MinimalReserve>,
 
     /// Bank's liquidity token mint (e.g., USDC). Kamino calls this the `reserve_liquidity_mint`
     pub mint: Box<InterfaceAccount<'info, Mint>>,
@@ -258,10 +269,10 @@ impl<'info> KaminoDeposit<'info> {
     pub fn cpi_kamino_deposit(&self, amount: u64, authority_bump: u8) -> MarginfiResult {
         let deposit_accounts = DepositReserveLiquidityAndObligationCollateral {
             owner: self.liquidity_vault_authority.to_account_info(),
-            obligation: self.kamino_obligation.to_account_info(),
+            obligation: self.integration_acc_2.to_account_info(),
             lending_market: self.lending_market.to_account_info(),
             lending_market_authority: self.lending_market_authority.to_account_info(),
-            reserve: self.kamino_reserve.to_account_info(),
+            reserve: self.integration_acc_1.to_account_info(),
             reserve_liquidity_mint: self.mint.to_account_info(),
             reserve_liquidity_supply: self.reserve_liquidity_supply.to_account_info(),
             reserve_collateral_mint: self.reserve_collateral_mint.to_account_info(),

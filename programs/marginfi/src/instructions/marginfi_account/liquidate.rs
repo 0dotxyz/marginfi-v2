@@ -1,14 +1,16 @@
 use crate::events::{AccountEventHeader, LendingAccountLiquidateEvent, LiquidationBalances};
 use crate::state::bank::{BankImpl, BankVaultType};
 use crate::state::marginfi_account::{
-    calc_amount, calc_value, get_remaining_accounts_per_bank, LendingAccountImpl,
-    MarginfiAccountImpl, RiskEngine,
+    account_not_frozen_for_authority, calc_amount, calc_value, check_account_init_health,
+    check_post_liquidation_condition_and_get_account_health,
+    check_pre_liquidation_condition_and_get_account_health, get_remaining_accounts_per_bank,
+    is_signer_authorized, HealthPriceMode, LendingAccountImpl, MarginfiAccountImpl,
 };
 use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::state::price::{OraclePriceFeedAdapter, OraclePriceType, PriceAdapter, PriceBias};
 use crate::utils::{
-    fetch_asset_price_for_bank, is_marginfi_asset_tag, validate_asset_tags,
-    validate_bank_asset_tags, validate_bank_state, InstructionKind,
+    fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank, is_marginfi_asset_tag,
+    validate_asset_tags, validate_bank_asset_tags, validate_bank_state, InstructionKind,
 };
 use crate::{bank_signer, state::marginfi_account::BankAccountWrapper};
 use crate::{check, debug, prelude::*, utils};
@@ -164,24 +166,46 @@ pub fn lending_account_liquidate<'info>(
 
     liquidatee_marginfi_account.lending_account.sort_balances();
 
-    let (pre_liquidation_health, _, _) =
-        RiskEngine::new(&liquidatee_marginfi_account, liquidatee_remaining_accounts)?
-            .check_pre_liquidation_condition_and_get_account_health(
-                Some(&ctx.accounts.liab_bank.key()),
-                &mut None,
-                false,
-            )?;
+    let asset_bank_key = ctx.accounts.asset_bank.key();
+    let liab_bank_key = ctx.accounts.liab_bank.key();
+    let (pre_liquidation_health, _, _) = check_pre_liquidation_condition_and_get_account_health(
+        &liquidatee_marginfi_account,
+        liquidatee_remaining_accounts,
+        Some(&liab_bank_key),
+        &mut None,
+        HealthPriceMode::Live { liq_cache: None },
+        false,
+    )?;
+
+    let asset_bank = ctx.accounts.asset_bank.load()?;
+    let asset_price_unbiased = fetch_unbiased_price_for_bank(
+        &asset_bank_key,
+        &asset_bank,
+        &clock,
+        liquidatee_remaining_accounts,
+    )
+    .ok();
+    drop(asset_bank);
+
+    let liab_bank = ctx.accounts.liab_bank.load()?;
+    let liab_price_unbiased = fetch_unbiased_price_for_bank(
+        &liab_bank_key,
+        &liab_bank,
+        &clock,
+        liquidatee_remaining_accounts,
+    )
+    .ok();
+    drop(liab_bank);
 
     // ##Accounting changes##
 
     let (pre_balances, post_balances) = {
         let asset_amount: I80F48 = I80F48::from_num(asset_amount);
 
-        let asset_bank_key = ctx.accounts.asset_bank.key();
         let mut asset_bank = ctx.accounts.asset_bank.load_mut()?;
         let asset_bank_remaining_accounts_len = get_remaining_accounts_per_bank(&asset_bank)? - 1;
 
-        let asset_price: I80F48 = fetch_asset_price_for_bank(
+        let asset_price: I80F48 = fetch_asset_price_for_bank_low_bias(
             &asset_bank_key,
             &asset_bank,
             &clock,
@@ -212,11 +236,11 @@ pub fn lending_account_liquidate<'info>(
             calc_value(
                 asset_amount,
                 asset_price,
-                asset_bank.mint_decimals,
+                asset_bank.get_balance_decimals(),
                 Some(liquidator_discount),
             )?,
             liab_price,
-            liab_bank.mint_decimals,
+            liab_bank.get_balance_decimals(),
         )?;
 
         // Quantity of liability to be received by liquidatee
@@ -224,11 +248,11 @@ pub fn lending_account_liquidate<'info>(
             calc_value(
                 asset_amount,
                 asset_price,
-                asset_bank.mint_decimals,
+                asset_bank.get_balance_decimals(),
                 Some(final_discount),
             )?,
             liab_price,
-            liab_bank.mint_decimals,
+            liab_bank.get_balance_decimals(),
         )?;
 
         // Insurance fund fee
@@ -247,7 +271,7 @@ pub fn lending_account_liquidate<'info>(
         // Liquidator pays off liability (by gaining the liability on their books)
         let (liquidator_liability_pre_balance, liquidator_liability_post_balance) = {
             let mut bank_account = BankAccountWrapper::find_or_create(
-                &ctx.accounts.liab_bank.key(),
+                &liab_bank_key,
                 &mut liab_bank,
                 &mut liquidator_marginfi_account.lending_account,
             )?;
@@ -382,8 +406,10 @@ pub fn lending_account_liquidate<'info>(
                 .into();
 
         asset_bank.update_bank_cache(group)?;
+        asset_bank.update_cache_price(asset_price_unbiased)?;
 
         liab_bank.update_bank_cache(group)?;
+        liab_bank.update_cache_price(liab_price_unbiased)?;
 
         (
             LiquidationBalances {
@@ -409,29 +435,24 @@ pub fn lending_account_liquidate<'info>(
     let liquidator_remaining_accounts =
         &ctx.remaining_accounts[liquidator_accounts_starting_pos..liquidatee_accounts_starting_pos];
 
-    // TODO why call RiskEngine::new here again instead of reusing the one we made in line ~151? Is
-    // it because we mutated the liab bank and corresponding balance? Is reloading the entire engine
-    // more CU intensive than mutating the old engine with the updated balance + bank
-
-    // Verify liquidatee liquidation post health
-    let post_liquidation_health =
-        RiskEngine::new(&liquidatee_marginfi_account, liquidatee_remaining_accounts)?
-            .check_post_liquidation_condition_and_get_account_health(
-                &ctx.accounts.liab_bank.key(),
-                pre_liquidation_health,
-            )?;
+    // Verify liquidatee liquidation post health using heap-efficient parity checks
+    let post_liquidation_health = check_post_liquidation_condition_and_get_account_health(
+        &liquidatee_marginfi_account,
+        liquidatee_remaining_accounts,
+        &ctx.accounts.liab_bank.key(),
+        pre_liquidation_health,
+    )?;
 
     // TODO consider if health cache update here is worth blowing the extra CU
 
     liquidator_marginfi_account.lending_account.sort_balances();
 
-    // Verify liquidator account health
-    let (risk_result, _engine) = RiskEngine::check_account_init_health(
+    // Verify liquidator account health using heap-efficient version (includes isolated-tier check)
+    check_account_init_health(
         &liquidator_marginfi_account,
         liquidator_remaining_accounts,
         &mut None,
-    );
-    risk_result?;
+    )?;
 
     emit!(LendingAccountLiquidateEvent {
         header: AccountEventHeader {
@@ -481,11 +502,19 @@ pub struct LendingAccountLiquidate<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = authority @ MarginfiError::Unauthorized,
         constraint = {
             let a = liquidator_marginfi_account.load()?;
             !a.get_flag(ACCOUNT_IN_RECEIVERSHIP)
-        } @MarginfiError::ForbiddenIx
+        } @ MarginfiError::ForbiddenIx,
+        constraint = {
+            let a = liquidator_marginfi_account.load()?;
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = liquidator_marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), false)
+        } @ MarginfiError::Unauthorized
     )]
     pub liquidator_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 

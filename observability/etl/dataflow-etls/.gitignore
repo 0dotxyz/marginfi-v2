@@ -1,7 +1,0 @@
-__pycache__
-.mypy_cache
-.venv
-poetry.lock
-parsed_event_*
-.idea*
-beam-temp-*

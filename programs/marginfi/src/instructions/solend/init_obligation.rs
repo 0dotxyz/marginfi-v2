@@ -46,8 +46,8 @@ pub struct SolendInitObligation<'info> {
 
     #[account(
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
-        has_one = solend_reserve @ MarginfiError::InvalidSolendReserve,
-        has_one = solend_obligation @ MarginfiError::InvalidSolendObligation,
+        has_one = integration_acc_1 @ MarginfiError::InvalidSolendReserve,
+        has_one = integration_acc_2 @ MarginfiError::InvalidSolendObligation,
         has_one = mint @ MarginfiError::InvalidMint,
         constraint = is_solend_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongBankAssetTagForSolendOperation
@@ -89,7 +89,7 @@ pub struct SolendInitObligation<'info> {
         ],
         bump,
     )]
-    pub solend_obligation: UncheckedAccount<'info>,
+    pub integration_acc_2: UncheckedAccount<'info>,
 
     /// CHECK: validated by the Solend program
     pub lending_market: UncheckedAccount<'info>,
@@ -100,7 +100,7 @@ pub struct SolendInitObligation<'info> {
 
     /// CHECK: validated by the Solend program
     #[account(mut)]
-    pub solend_reserve: AccountLoader<'info, SolendMinimalReserve>,
+    pub integration_acc_1: AccountLoader<'info, SolendMinimalReserve>,
 
     /// Bank's liquidity token mint (e.g., USDC)
     #[account(mut)]
@@ -144,7 +144,7 @@ pub struct SolendInitObligation<'info> {
 impl<'info> SolendInitObligation<'info> {
     pub fn cpi_init_obligation(&self, authority_bump: u8) -> MarginfiResult {
         let accounts = InitObligation {
-            obligation_info: self.solend_obligation.to_account_info(),
+            obligation_info: self.integration_acc_2.to_account_info(),
             lending_market_info: self.lending_market.to_account_info(),
             obligation_owner_info: self.liquidity_vault_authority.to_account_info(),
             rent_info: self.rent.to_account_info(),
@@ -181,13 +181,13 @@ impl<'info> SolendInitObligation<'info> {
         let accounts = DepositReserveLiquidityAndObligationCollateral {
             source_liquidity_info: self.liquidity_vault.to_account_info(),
             user_collateral_info: self.user_collateral.to_account_info(),
-            reserve_info: self.solend_reserve.to_account_info(),
+            reserve_info: self.integration_acc_1.to_account_info(),
             reserve_liquidity_supply_info: self.reserve_liquidity_supply.to_account_info(),
             reserve_collateral_mint_info: self.reserve_collateral_mint.to_account_info(),
             lending_market_info: self.lending_market.to_account_info(),
             lending_market_authority_info: self.lending_market_authority.to_account_info(),
             destination_deposit_collateral_info: self.reserve_collateral_supply.to_account_info(),
-            obligation_info: self.solend_obligation.to_account_info(),
+            obligation_info: self.integration_acc_2.to_account_info(),
             obligation_owner_info: self.liquidity_vault_authority.to_account_info(),
             pyth_price_info: self.pyth_price.to_account_info(),
             switchboard_feed_info: self.switchboard_feed.to_account_info(),

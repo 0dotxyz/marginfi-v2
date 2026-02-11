@@ -1,7 +1,9 @@
 #[cfg(not(feature = "client"))]
 use crate::events::{GroupEventHeader, LendingPoolBankAccrueInterestEvent};
 use crate::{
-    check, debug,
+    check,
+    constants::DRIFT_SCALED_BALANCE_DECIMALS,
+    debug,
     errors::MarginfiError,
     math_error,
     prelude::MarginfiResult,
@@ -14,6 +16,7 @@ use crate::{
             InterestRateStateChanges,
         },
         marginfi_account::calc_value,
+        price::OraclePriceWithConfidence,
     },
 };
 use anchor_lang::prelude::*;
@@ -28,18 +31,16 @@ use anchor_spl::{
     token_interface::Mint,
 };
 use bytemuck::Zeroable;
+use drift_mocks::constants::scale_drift_deposit_limit;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        CLOSE_ENABLED_FLAG, EMISSION_FLAGS, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED,
-        FREEZE_SETTINGS, GROUP_FLAGS, INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED,
-        LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+        ASSET_TAG_DRIFT, CLOSE_ENABLED_FLAG, EMISSION_FLAGS, FEE_VAULT_AUTHORITY_SEED,
+        FEE_VAULT_SEED, FREEZE_SETTINGS, GROUP_FLAGS, INSURANCE_VAULT_AUTHORITY_SEED,
+        INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
-    types::{
-        Bank, BankCache, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings,
-        MarginfiGroup,
-    },
+    types::{Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup},
 };
 
 pub trait BankImpl {
@@ -66,6 +67,7 @@ pub trait BankImpl {
     fn get_asset_amount(&self, shares: I80F48) -> MarginfiResult<I80F48>;
     fn get_liability_shares(&self, value: I80F48) -> MarginfiResult<I80F48>;
     fn get_asset_shares(&self, value: I80F48) -> MarginfiResult<I80F48>;
+    fn get_balance_decimals(&self) -> u8;
     fn get_remaining_deposit_capacity(&self) -> MarginfiResult<u64>;
     fn change_asset_shares(&mut self, shares: I80F48, bypass_deposit_limit: bool)
         -> MarginfiResult;
@@ -86,6 +88,10 @@ pub trait BankImpl {
         #[cfg(not(feature = "client"))] bank: Pubkey,
     ) -> MarginfiResult<()>;
     fn update_bank_cache(&mut self, group: &MarginfiGroup) -> MarginfiResult<()>;
+    fn update_cache_price(
+        &mut self,
+        oracle_price: Option<OraclePriceWithConfidence>,
+    ) -> MarginfiResult<()>;
     fn deposit_spl_transfer<'info>(
         &self,
         amount: u64,
@@ -168,8 +174,8 @@ impl BankImpl for Bank {
             lending_position_count: 0,
             borrowing_position_count: 0,
             _padding_0: [0; 16],
-            kamino_reserve: Pubkey::default(),
-            kamino_obligation: Pubkey::default(),
+            integration_acc_1: Pubkey::default(),
+            integration_acc_2: Pubkey::default(),
             ..Default::default()
         }
     }
@@ -201,13 +207,26 @@ impl BankImpl for Bank {
             .ok_or_else(math_error!())?)
     }
 
+    fn get_balance_decimals(&self) -> u8 {
+        if self.config.asset_tag == ASSET_TAG_DRIFT {
+            DRIFT_SCALED_BALANCE_DECIMALS
+        } else {
+            self.mint_decimals
+        }
+    }
+
     fn get_remaining_deposit_capacity(&self) -> MarginfiResult<u64> {
         if !self.config.is_deposit_limit_active() {
             return Ok(u64::MAX);
         }
 
         let current_assets = self.get_asset_amount(self.total_asset_shares.into())?;
-        let limit = I80F48::from_num(self.config.deposit_limit);
+
+        let limit = if self.config.asset_tag == ASSET_TAG_DRIFT {
+            scale_drift_deposit_limit(self.config.deposit_limit, self.mint_decimals)?
+        } else {
+            I80F48::from_num(self.config.deposit_limit)
+        };
 
         if current_assets >= limit {
             return Ok(0);
@@ -239,7 +258,14 @@ impl BankImpl for Bank {
 
         if shares.is_positive() && self.config.is_deposit_limit_active() && !bypass_deposit_limit {
             let total_deposits_amount = self.get_asset_amount(self.total_asset_shares.into())?;
-            let deposit_limit = I80F48::from_num(self.config.deposit_limit);
+
+            // For Drift banks, deposit_limit is in native decimals but total_deposits_amount
+            // is in 9-decimal (DRIFT_SCALED_BALANCE_DECIMALS). We Scale deposit_limit to match.
+            let deposit_limit = if self.config.asset_tag == ASSET_TAG_DRIFT {
+                scale_drift_deposit_limit(self.config.deposit_limit, self.mint_decimals)?
+            } else {
+                I80F48::from_num(self.config.deposit_limit)
+            };
 
             if total_deposits_amount >= deposit_limit {
                 let deposits_num: f64 = total_deposits_amount.to_num();
@@ -260,7 +286,7 @@ impl BankImpl for Bank {
             let bank_total_assets_value = calc_value(
                 self.get_asset_amount(self.total_asset_shares.into())?,
                 price,
-                self.mint_decimals,
+                self.get_balance_decimals(),
                 None,
             )?;
 
@@ -536,13 +562,19 @@ impl BankImpl for Bank {
     /// Updates bank cache with the actual values for interest/fee rates.
     ///
     /// Should be called in the end of each instruction calling `accrue_interest` to ensure the cache is up to date.
+    ///
+    /// # Arguments
+    /// * `group` - The marginfi group
     fn update_bank_cache(&mut self, group: &MarginfiGroup) -> MarginfiResult<()> {
-        let total_assets_amount = self.get_asset_amount(self.total_asset_shares.into())?;
-        let total_liabilities_amount =
+        if self.cache.is_liquidation_price_cache_locked() {
+            return Ok(());
+        }
+        let total_assets_amount: I80F48 = self.get_asset_amount(self.total_asset_shares.into())?;
+        let total_liabilities_amount: I80F48 =
             self.get_liability_amount(self.total_liability_shares.into())?;
 
         if (total_assets_amount == I80F48::ZERO) || (total_liabilities_amount == I80F48::ZERO) {
-            self.cache = BankCache::default();
+            self.cache.reset_preserving_oracle_price();
             return Ok(());
         }
 
@@ -551,7 +583,7 @@ impl BankImpl for Bank {
             .interest_rate_config
             .create_interest_rate_calculator(group);
 
-        let utilization_rate = total_liabilities_amount
+        let utilization_rate: I80F48 = total_liabilities_amount
             .checked_div(total_assets_amount)
             .ok_or_else(math_error!())?;
         let interest_rates = ir_calc
@@ -559,6 +591,34 @@ impl BankImpl for Bank {
             .ok_or_else(math_error!())?;
 
         update_interest_rates(&mut self.cache, &interest_rates);
+
+        // Update banks last update timestamp
+        self.last_update = Clock::get()?.unix_timestamp;
+        Ok(())
+    }
+
+    /// Updates bank cache with the last used oracle price.
+    ///
+    /// Should be called in instructions that consume a bank's price to record the last-used value.
+    ///
+    /// # Arguments
+    /// * `group` - The marginfi group
+    /// * `oracle_price` - Optional oracle price (with confidence) used in this instruction (if any)
+    fn update_cache_price(
+        &mut self,
+        oracle_price: Option<OraclePriceWithConfidence>,
+    ) -> MarginfiResult<()> {
+        if self.cache.is_liquidation_price_cache_locked() {
+            return Ok(());
+        }
+        if let Some(price_with_confidence) = oracle_price {
+            self.cache.last_oracle_price = price_with_confidence.price.into();
+            self.cache.last_oracle_price_confidence = price_with_confidence.confidence.into();
+            self.cache.last_oracle_price_timestamp = Clock::get()?.unix_timestamp;
+        } else {
+            // no cache update, nothing...
+        }
+
         Ok(())
     }
 
@@ -706,7 +766,7 @@ impl BankImpl for Bank {
 
     fn override_emissions_flag(&mut self, flag: u64) {
         assert!(Self::verify_emissions_flags(flag));
-        self.flags = flag;
+        self.flags = (self.flags & !EMISSION_FLAGS) | flag;
     }
 
     fn update_flag(&mut self, value: bool, flag: u64) {

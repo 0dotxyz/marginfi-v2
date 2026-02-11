@@ -34,15 +34,15 @@ pub fn lending_pool_add_bank_juplend(
     let LendingPoolAddBankJuplend {
         bank_mint,
         bank: bank_loader,
-        juplend_lending,
-        juplend_f_token_vault,
+        integration_acc_1,
+        integration_acc_2,
         ..
     } = ctx.accounts;
 
     let mut bank = bank_loader.load_init()?;
     let mut group = ctx.accounts.group.load_mut()?;
-    let lending_key = juplend_lending.key();
-    let f_token_vault_key = juplend_f_token_vault.key();
+    let lending_key = integration_acc_1.key();
+    let f_token_vault_key = integration_acc_2.key();
 
     // Validate that we're using a supported Juplend oracle setup type
     require!(
@@ -84,8 +84,8 @@ pub fn lending_pool_add_bank_juplend(
     );
 
     // Set JupLend-specific fields
-    bank.juplend_lending = lending_key;
-    bank.juplend_f_token_vault = f_token_vault_key;
+    bank.integration_acc_1 = lending_key;
+    bank.integration_acc_2 = f_token_vault_key;
 
     log_pool_info(&bank);
 
@@ -94,7 +94,6 @@ pub fn lending_pool_add_bank_juplend(
     bank.config.validate()?;
     bank.config
         .validate_oracle_setup(ctx.remaining_accounts, None, None, None)?;
-    bank.config.validate_oracle_age()?;
 
     emit!(LendingPoolBankCreateEvent {
         header: GroupEventHeader {
@@ -140,11 +139,11 @@ pub struct LendingPoolAddBankJuplend<'info> {
 
     /// JupLend lending state account that must match the bank mint.
     #[account(
-        constraint = juplend_lending.load()?.mint == bank_mint.key()
+        constraint = integration_acc_1.load()?.mint == bank_mint.key()
             @ MarginfiError::JuplendLendingMintMismatch,
         has_one = f_token_mint @ MarginfiError::InvalidJuplendLending,
     )]
-    pub juplend_lending: AccountLoader<'info, JuplendLending>,
+    pub integration_acc_1: AccountLoader<'info, JuplendLending>,
 
     /// Will be authority of the bank's liquidity vault. Used as intermediary for deposits/withdraws.
     #[account(
@@ -234,7 +233,7 @@ pub struct LendingPoolAddBankJuplend<'info> {
         associated_token::authority = liquidity_vault_authority,
         associated_token::token_program = token_program,
     )]
-    pub juplend_f_token_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub integration_acc_2: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Token program for both underlying mint and fToken mint (SPL Token or Token-2022).
     /// JupLend creates fToken mints using the same token program as the underlying.

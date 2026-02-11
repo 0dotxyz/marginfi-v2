@@ -201,7 +201,7 @@ describe("Juplend integration: interest accrual + exact share maths", () => {
       bankMint: ecosystem.usdcMint.publicKey,
       bankSeed: BANK_SEED,
       oracle: oracles.usdcOracle.publicKey,
-      juplendLending: pool.lending,
+      integrationAcc1: pool.lending,
       fTokenMint: pool.fTokenMint,
       config,
     });

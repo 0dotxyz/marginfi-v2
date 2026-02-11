@@ -1,10 +1,5 @@
 import { BN } from "@coral-xyz/anchor";
-import {
-  ComputeBudgetProgram,
-  Keypair,
-  PublicKey,
-  Transaction,
-} from "@solana/web3.js";
+import { PublicKey, Transaction } from "@solana/web3.js";
 import {
   ecosystem,
   groupAdmin,
@@ -13,30 +8,37 @@ import {
   driftGroup,
   DRIFT_USDC_SPOT_MARKET,
   oracles,
-  DRIFT_TOKENA_SPOT_MARKET,
-  DRIFT_TOKENA_BANK,
-  DRIFT_TOKENA_PULL_ORACLE,
-  verbose,
+  DRIFT_TOKEN_A_SPOT_MARKET,
+  DRIFT_TOKEN_A_BANK,
+  DRIFT_TOKEN_A_PULL_ORACLE,
   users,
   bankrunContext,
-  bankRunProvider,
   bankrunProgram,
   driftBankrunProgram,
-  globalProgramAdmin,
 } from "./rootHooks";
 import {
   assertBNEqual,
   assertI80F48Equal,
   assertKeysEqual,
-  getTokenBalance,
   assertBankrunTxFailed,
 } from "./utils/genericTests";
 import {
-  ASSET_TAG_DRIFT,
   defaultDriftBankConfig,
   DRIFT_SCALED_BALANCE_DECIMALS,
+  getDriftUserAccount,
+  TOKEN_A_INIT_DEPOSIT_AMOUNT,
+  TOKEN_A_MARKET_INDEX,
+  TOKEN_A_SCALING_FACTOR,
+  USDC_INIT_DEPOSIT_AMOUNT,
+  USDC_MARKET_INDEX,
+  USDC_SCALING_FACTOR,
 } from "./utils/drift-utils";
-import { CLOSE_ENABLED_FLAG } from "./utils/types";
+import {
+  ASSET_TAG_DRIFT,
+  ASSET_TAG_KAMINO,
+  CLOSE_ENABLED_FLAG,
+  blankBankConfigOptRaw,
+} from "./utils/types";
 import { assert } from "chai";
 import { processBankrunTransaction, safeGetAccountInfo, getBankrunTime } from "./utils/tools";
 import { ProgramTestContext } from "solana-bankrun";
@@ -54,7 +56,7 @@ import {
   deriveUserStatsPDA,
 } from "./utils/pdas";
 import { DRIFT_PROGRAM_ID } from "./utils/types";
-import { deriveSpotMarketPDA } from "./utils/pdas";
+import { configureBank } from "./utils/group-instructions";
 
 let ctx: ProgramTestContext;
 const seed = new BN(555);
@@ -69,12 +71,11 @@ describe("d06: Init Drift banks", () => {
     mrgnID = bankrunProgram.programId;
 
     usdcSpotMarket = driftAccounts.get(DRIFT_USDC_SPOT_MARKET);
-    tokenASpotMarket = driftAccounts.get(DRIFT_TOKENA_SPOT_MARKET);
+    tokenASpotMarket = driftAccounts.get(DRIFT_TOKEN_A_SPOT_MARKET);
   });
 
   it("(admin) Add Drift bank (drift USDC) and init user - happy path", async () => {
     let defaultConfig = defaultDriftBankConfig(oracles.usdcOracle.publicKey);
-    const now = await getBankrunTime(ctx);
 
     const [bankKey] = deriveBankWithSeed(
       mrgnID,
@@ -90,7 +91,7 @@ describe("d06: Init Drift banks", () => {
           group: driftGroup.publicKey,
           feePayer: groupAdmin.wallet.publicKey,
           bankMint: ecosystem.usdcMint.publicKey,
-          driftSpotMarket: usdcSpotMarket,
+          integrationAcc1: usdcSpotMarket,
           oracle: oracles.usdcOracle.publicKey,
         },
         {
@@ -102,7 +103,6 @@ describe("d06: Init Drift banks", () => {
     await processBankrunTransaction(ctx, tx, [groupAdmin.wallet], false, true);
 
     driftAccounts.set(DRIFT_USDC_BANK, bankKey);
-    const initUserAmount = new BN(100); // 100 smallest units (0.0001 USDC)
     const initUserTx = new Transaction().add(
       await makeInitDriftUserIx(
         users[0].mrgnBankrunProgram,
@@ -112,7 +112,7 @@ describe("d06: Init Drift banks", () => {
           signerTokenAccount: users[0].usdcAccount,
         },
         {
-          amount: initUserAmount,
+          amount: USDC_INIT_DEPOSIT_AMOUNT,
         },
         0 // USDC market index
       )
@@ -134,7 +134,7 @@ describe("d06: Init Drift banks", () => {
     const config = bank.config;
 
     assertKeysEqual(bank.mint, ecosystem.usdcMint.publicKey);
-    assert.equal(bank.mintDecimals, DRIFT_SCALED_BALANCE_DECIMALS);
+    assert.equal(bank.mintDecimals, ecosystem.usdcDecimals);
     assertKeysEqual(bank.group, driftGroup.publicKey);
 
     assertKeysEqual(config.oracleKeys[0], oracles.usdcOracle.publicKey);
@@ -143,10 +143,10 @@ describe("d06: Init Drift banks", () => {
 
     assertI80F48Equal(config.assetWeightInit, 1);
     assertI80F48Equal(config.assetWeightMaint, 1);
-    assertBNEqual(
-      config.depositLimit,
-      new BN(100_000_000 * 10 ** ecosystem.usdcDecimals)
-    ); // 100mil USDC because big interest needed
+    // deposit_limit is stored in native decimals for Drift banks
+    // Input: 100M USDC in native decimals = 100_000_000 * 10^usdcDecimals
+    const inputDepositLimit = new BN(100_000_000).mul(new BN(10 ** ecosystem.usdcDecimals));
+    assertBNEqual(config.depositLimit, inputDepositLimit);
 
     assert.deepEqual(config.operationalState, { operational: {} });
     assert.deepEqual(config.oracleSetup, { driftPythPull: {} });
@@ -165,7 +165,7 @@ describe("d06: Init Drift banks", () => {
     const [feeVault] = deriveFeeVault(mrgnID, bankKey);
     assertKeysEqual(bank.feeVault, feeVault);
 
-    assertKeysEqual(bank.driftSpotMarket, usdcSpotMarket);
+    assertKeysEqual(bank.integrationAcc1, usdcSpotMarket);
     const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
       mrgnID,
       bankKey
@@ -179,8 +179,8 @@ describe("d06: Init Drift banks", () => {
       DRIFT_PROGRAM_ID,
       liquidityVaultAuthority
     );
-    assertKeysEqual(bank.driftUser, driftUser);
-    assertKeysEqual(bank.driftUserStats, driftUserStats);
+    assertKeysEqual(bank.integrationAcc2, driftUser);
+    assertKeysEqual(bank.integrationAcc3, driftUserStats);
     assert.equal(config.assetTag, ASSET_TAG_DRIFT);
     assertKeysEqual(bank.config.oracleKeys[1], usdcSpotMarket);
 
@@ -188,9 +188,20 @@ describe("d06: Init Drift banks", () => {
       await driftBankrunProgram.account.spotMarket.fetch(usdcSpotMarket);
     assertKeysEqual(usdcSpotMarketData.mint, bank.mint);
     assert.equal(usdcSpotMarketData.decimals, ecosystem.usdcDecimals);
+
+    const driftUserAccount = await getDriftUserAccount(
+      driftBankrunProgram,
+      bank.integrationAcc2
+    );
+    const usdcPosition = driftUserAccount.spotPositions[0];
+    assert.equal(usdcPosition.marketIndex, USDC_MARKET_INDEX);
+    assertBNEqual(
+      usdcPosition.scaledBalance,
+      USDC_INIT_DEPOSIT_AMOUNT.mul(USDC_SCALING_FACTOR)
+    );
   });
 
-  it("(admin) Init Token A bank and init user", async () => {
+  it("(admin) Init Token A bank - happy path", async () => {
     const user = groupAdmin;
     let defaultConfig = defaultDriftBankConfig(oracles.tokenAOracle.publicKey);
 
@@ -208,7 +219,7 @@ describe("d06: Init Drift banks", () => {
           group: driftGroup.publicKey,
           feePayer: user.wallet.publicKey,
           bankMint: ecosystem.tokenAMint.publicKey,
-          driftSpotMarket: tokenASpotMarket,
+          integrationAcc1: tokenASpotMarket,
           oracle: oracles.tokenAOracle.publicKey,
         },
         {
@@ -218,17 +229,44 @@ describe("d06: Init Drift banks", () => {
       )
     );
     await processBankrunTransaction(ctx, tx, [user.wallet], false, true);
-    driftAccounts.set(DRIFT_TOKENA_BANK, tokenABankKey);
+    driftAccounts.set(DRIFT_TOKEN_A_BANK, tokenABankKey);
 
+    const bank = await bankrunProgram.account.bank.fetch(tokenABankKey);
+    assert.equal(bank.mintDecimals, ecosystem.tokenADecimals);
+  });
+
+  it("(admin) Configure wrong asset tag for Token A bank - happy path (but all Drift operations will now fail on it)", async () => {
+    const user = groupAdmin;
+    let bankConfigOpt = blankBankConfigOptRaw();
+    bankConfigOpt.assetTag = ASSET_TAG_KAMINO;
+
+    const configureTx = new Transaction().add(
+      await configureBank(user.mrgnBankrunProgram, {
+        bank: driftAccounts.get(DRIFT_TOKEN_A_BANK),
+        bankConfigOpt,
+      })
+    );
+
+    await processBankrunTransaction(
+      ctx,
+      configureTx,
+      [user.wallet],
+      false,
+      true
+    );
+  });
+
+  it("(user 1) Tries to init Drift user for Token A bank - wrong asset tag", async () => {
+    const user = users[1];
     const initUserAmount = new BN(100);
     const initUserTx = new Transaction().add(
       await makeInitDriftUserIx(
-        users[1].mrgnBankrunProgram,
+        user.mrgnBankrunProgram,
         {
-          feePayer: users[1].wallet.publicKey,
-          bank: tokenABankKey,
+          feePayer: user.wallet.publicKey,
+          bank: driftAccounts.get(DRIFT_TOKEN_A_BANK),
           signerTokenAccount: users[1].tokenAAccount,
-          driftOracle: driftAccounts.get(DRIFT_TOKENA_PULL_ORACLE)!,
+          driftOracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE)!,
         },
         {
           amount: initUserAmount,
@@ -236,16 +274,111 @@ describe("d06: Init Drift banks", () => {
         1
       )
     );
+    const result = await processBankrunTransaction(
+      ctx,
+      initUserTx,
+      [user.wallet],
+      true,
+      true
+    );
+    // WrongBankAssetTagForDriftOperation
+    assertBankrunTxFailed(result, 6302);
+  });
+
+  it("(admin) Restore proper asset tag for Token A bank - happy path", async () => {
+    const user = groupAdmin;
+    let bankConfigOpt = blankBankConfigOptRaw();
+    bankConfigOpt.assetTag = ASSET_TAG_DRIFT;
+
+    const configureTx = new Transaction().add(
+      await configureBank(user.mrgnBankrunProgram, {
+        bank: driftAccounts.get(DRIFT_TOKEN_A_BANK),
+        bankConfigOpt,
+      })
+    );
+
+    await processBankrunTransaction(
+      ctx,
+      configureTx,
+      [user.wallet],
+      false,
+      true
+    );
+  });
+
+  it("(user 1) Tries to init Drift user for Token A bank - too small deposit", async () => {
+    const user = users[1];
+    const initUserAmount = new BN(9); // minimal allowed amount is 10
+    const initUserTx = new Transaction().add(
+      await makeInitDriftUserIx(
+        user.mrgnBankrunProgram,
+        {
+          feePayer: user.wallet.publicKey,
+          bank: driftAccounts.get(DRIFT_TOKEN_A_BANK),
+          signerTokenAccount: user.tokenAAccount,
+          driftOracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE)!,
+        },
+        {
+          amount: initUserAmount,
+        },
+        1
+      )
+    );
+    const result = await processBankrunTransaction(
+      ctx,
+      initUserTx,
+      [user.wallet],
+      true,
+      true
+    );
+    // DriftUserInitDepositInsufficient
+    assertBankrunTxFailed(result, 6310);
+  });
+
+  it("(user 1) Init Drift user for Token A bank - happy path", async () => {
+    const user = users[1];
+    const bankKey = driftAccounts.get(DRIFT_TOKEN_A_BANK);
+    const initUserTx = new Transaction().add(
+      await makeInitDriftUserIx(
+        user.mrgnBankrunProgram,
+        {
+          feePayer: user.wallet.publicKey,
+          bank: bankKey,
+          signerTokenAccount: user.tokenAAccount,
+          driftOracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE)!,
+        },
+        {
+          amount: TOKEN_A_INIT_DEPOSIT_AMOUNT,
+        },
+        1
+      )
+    );
     await processBankrunTransaction(
       ctx,
       initUserTx,
-      [users[1].wallet],
+      [user.wallet],
       false,
       true
     );
 
-    const bank = await bankrunProgram.account.bank.fetch(tokenABankKey);
-    assert.equal(bank.mintDecimals, DRIFT_SCALED_BALANCE_DECIMALS);
+    const bank = await bankrunProgram.account.bank.fetch(bankKey);
+    const driftUserAccount = await getDriftUserAccount(
+      driftBankrunProgram,
+      bank.integrationAcc2
+    );
+
+    // All non-USDC tokens are deposited to position 1
+    const tokenAPosition = driftUserAccount.spotPositions[1];
+    assert.equal(tokenAPosition.marketIndex, TOKEN_A_MARKET_INDEX);
+    assertBNEqual(
+      tokenAPosition.scaledBalance,
+      TOKEN_A_INIT_DEPOSIT_AMOUNT.mul(TOKEN_A_SCALING_FACTOR)
+    );
+
+    // USDC is still zero
+    const usdcPosition = driftUserAccount.spotPositions[0];
+    assert.equal(usdcPosition.marketIndex, USDC_MARKET_INDEX);
+    assertBNEqual(usdcPosition.scaledBalance, 0);
   });
 
   it("(user 0) Tries to init bank - admin only, should fail", async () => {
@@ -260,7 +393,7 @@ describe("d06: Init Drift banks", () => {
           group: driftGroup.publicKey,
           feePayer: user.wallet.publicKey,
           bankMint: ecosystem.tokenAMint.publicKey,
-          driftSpotMarket: tokenASpotMarket,
+          integrationAcc1: tokenASpotMarket,
           oracle: oracles.tokenAOracle.publicKey,
         },
         {
@@ -270,7 +403,8 @@ describe("d06: Init Drift banks", () => {
       )
     );
     let result = await processBankrunTransaction(ctx, tx, [user.wallet], true);
-    assertBankrunTxFailed(result, 6042); // MarginfiError::Unauthorized
+    // Unauthorized
+    assertBankrunTxFailed(result, 6042);
   });
 
   it("(admin) Tries pass the wrong spot market/mint for this asset - should fail", async () => {
@@ -285,7 +419,7 @@ describe("d06: Init Drift banks", () => {
           group: driftGroup.publicKey,
           feePayer: usr.wallet.publicKey,
           bankMint: ecosystem.tokenAMint.publicKey,
-          driftSpotMarket: usdcSpotMarket,
+          integrationAcc1: usdcSpotMarket,
           oracle: oracles.tokenAOracle.publicKey,
         },
         {
@@ -311,7 +445,7 @@ describe("d06: Init Drift banks", () => {
           group: driftGroup.publicKey,
           feePayer: usr.wallet.publicKey,
           bankMint: ecosystem.usdcMint.publicKey,
-          driftSpotMarket: tokenASpotMarket, // wrong
+          integrationAcc1: tokenASpotMarket, // wrong
           oracle: oracles.usdcOracle.publicKey,
         },
         {
@@ -345,7 +479,7 @@ describe("d06: Init Drift banks", () => {
           group: driftGroup.publicKey,
           feePayer: usr.wallet.publicKey,
           bankMint: ecosystem.tokenAMint.publicKey,
-          driftSpotMarket: tokenASpotMarket,
+          integrationAcc1: tokenASpotMarket,
           oracle: oracles.tokenAOracle.publicKey,
         },
         {
@@ -375,7 +509,7 @@ describe("d06: Init Drift banks", () => {
           group: driftGroup.publicKey,
           feePayer: user.wallet.publicKey,
           bankMint: ecosystem.usdcMint.publicKey,
-          driftSpotMarket: usdcSpotMarket,
+          integrationAcc1: usdcSpotMarket,
           oracle: oracles.usdcOracle.publicKey,
         },
         {

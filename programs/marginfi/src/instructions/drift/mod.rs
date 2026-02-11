@@ -2,8 +2,8 @@ mod add_pool;
 mod deposit;
 mod harvest_reward;
 mod init_user;
+mod local_tests;
 mod withdraw;
-// mod local_tests;
 
 pub use add_pool::*;
 pub use deposit::*;

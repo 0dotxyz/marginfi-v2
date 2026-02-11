@@ -19,16 +19,16 @@ import {
   bankRunProvider,
   SOLEND_MARKET,
   SOLEND_USDC_BANK,
-  SOLEND_TOKENA_BANK,
+  SOLEND_TOKEN_A_BANK,
   SOLEND_USDC_RESERVE,
-  SOLEND_TOKENA_RESERVE,
+  SOLEND_TOKEN_A_RESERVE,
 } from "./rootHooks";
 import { processBankrunTransaction } from "./utils/tools";
 import { getTokenBalance, assertBNApproximately } from "./utils/genericTests";
 import { accountInit } from "./utils/user-instructions";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import BigNumber from "bignumber.js";
-import { BanksTransactionResultWithMeta, Clock } from "solana-bankrun";
+import { Clock } from "solana-bankrun";
 import assert from "assert";
 import { createMintToInstruction } from "@solana/spl-token";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
@@ -59,9 +59,9 @@ describe("sl09: cToken Conversion Math Validation", () => {
 
   before(async () => {
     usdcBank = solendAccounts.get(SOLEND_USDC_BANK)!;
-    tokenABank = solendAccounts.get(SOLEND_TOKENA_BANK)!;
+    tokenABank = solendAccounts.get(SOLEND_TOKEN_A_BANK)!;
     usdcReserve = solendAccounts.get(SOLEND_USDC_RESERVE)!;
-    tokenAReserve = solendAccounts.get(SOLEND_TOKENA_RESERVE)!;
+    tokenAReserve = solendAccounts.get(SOLEND_TOKEN_A_RESERVE)!;
   });
 
   it("Creates temporary-seed marginfi accounts for testing", async () => {
@@ -252,17 +252,6 @@ describe("sl09: cToken Conversion Math Validation", () => {
 
     bankrunContext.setClock(newClock);
 
-    const dummyTx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: globalProgramAdmin.wallet.publicKey,
-        toPubkey: globalProgramAdmin.wallet.publicKey,
-        lamports: 1,
-      })
-    );
-    await processBankrunTransaction(bankrunContext, dummyTx, [
-      globalProgramAdmin.wallet,
-    ]);
-
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 
     const refreshTx = new Transaction()
@@ -359,7 +348,7 @@ describe("sl09: cToken Conversion Math Validation", () => {
       wrappedI80F48toBigNumber(balance1.assetShares).toString()
     );
     const tokenAReserve = await fetchAndParseReserve(
-      solendAccounts.get(SOLEND_TOKENA_RESERVE)!
+      solendAccounts.get(SOLEND_TOKEN_A_RESERVE)!
     );
     const tokenAPrice = new BN(oracles.tokenAPrice * 10 ** 6);
     const pulseHealthIx1 = await makePulseHealthIx(
@@ -373,7 +362,7 @@ describe("sl09: cToken Conversion Math Validation", () => {
           isWritable: false,
         },
         {
-          pubkey: solendAccounts.get(SOLEND_TOKENA_RESERVE)!,
+          pubkey: solendAccounts.get(SOLEND_TOKEN_A_RESERVE)!,
           isSigner: false,
           isWritable: false,
         },
@@ -493,7 +482,7 @@ describe("sl09: cToken Conversion Math Validation", () => {
 
   it("Validates full withdrawal and final exchange rate", async () => {
     const tokenAReserve = await fetchAndParseReserve(
-      solendAccounts.get(SOLEND_TOKENA_RESERVE)!
+      solendAccounts.get(SOLEND_TOKEN_A_RESERVE)!
     );
     const expectedTokens = calculateWithdrawalTokens(
       user1InitialCTokens,
@@ -522,7 +511,7 @@ describe("sl09: cToken Conversion Math Validation", () => {
             [
               tokenABank,
               oracles.tokenAOracle.publicKey,
-              solendAccounts.get(SOLEND_TOKENA_RESERVE)!,
+              solendAccounts.get(SOLEND_TOKEN_A_RESERVE)!,
             ],
           ]),
         }

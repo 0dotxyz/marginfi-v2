@@ -257,7 +257,7 @@ describe("jl12: JupLend Switchboard Pull oracle conversion tracks token_exchange
       bankMint: ecosystem.usdcMint.publicKey,
       bankSeed: BANK_SEED,
       oracle: switchboardFeed.publicKey,
-      juplendLending: pool.lending,
+      integrationAcc1: pool.lending,
       fTokenMint: pool.fTokenMint,
       config,
       tokenProgram: pool.tokenProgram,

@@ -48,8 +48,8 @@ export const SOLEND_MARKET_SEED = Buffer.from(
 export const SOLEND_USDC_RESERVE_SEED = Buffer.from(
   "SOLEND_USDC_RESERVE_SEED_0000000"
 );
-export const SOLEND_TOKENA_RESERVE_SEED = Buffer.from(
-  "SOLEND_TOKENA_RESERVE_SEED_00000"
+export const SOLEND_TOKEN_A_RESERVE_SEED = Buffer.from(
+  "SOLEND_TOKEN_A_RESERVE_SEED_0000"
 );
 /**
  * Max number of deposits/borrows in an obligation

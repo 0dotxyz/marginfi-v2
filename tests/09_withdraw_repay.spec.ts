@@ -329,11 +329,6 @@ describe("Withdraw funds", () => {
 
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
-        await withdrawEmissionsIx(user.mrgnProgram, {
-          marginfiAccount: userAccKey,
-          bank: bank,
-          tokenAccount: user.tokenBAccount,
-        }),
         await repayIx(user.mrgnProgram, {
           marginfiAccount: userAccKey,
           bank: bank,

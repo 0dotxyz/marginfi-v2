@@ -38,9 +38,12 @@ runs:
     if: ${{ inputs.include-anchor == 'true' }}
     uses: ./.github/actions/setup-anchor-cli/
 
-  - name: Cache Anchor build output
+  - name: Cache Anchor build artifacts
     if: ${{ inputs.include-anchor == 'true' }}
     uses: actions/cache@v3
     with:
-      path: target/
-      key: anchor-build-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('programs/**/Cargo.lock') }}
+      path: |
+        target/deploy
+        target/idl
+        target/types
+      key: anchor-build-slim-v1-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('programs/**/Cargo.lock') }}

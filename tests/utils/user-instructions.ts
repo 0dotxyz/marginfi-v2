@@ -78,6 +78,27 @@ export const transferAccountAuthorityIx = (
   return ix;
 };
 
+export type SetAccountFreezeArgs = {
+  group: PublicKey;
+  marginfiAccount: PublicKey;
+  admin: PublicKey;
+  frozen: boolean;
+};
+
+export const setAccountFreezeIx = (
+  program: Program<Marginfi>,
+  args: SetAccountFreezeArgs
+) => {
+  return program.methods
+    .marginfiAccountSetFreeze(args.frozen)
+    .accounts({
+      group: args.group,
+      marginfiAccount: args.marginfiAccount,
+      admin: args.admin,
+    })
+    .instruction();
+};
+
 export type DepositArgs = {
   marginfiAccount: PublicKey;
   bank: PublicKey;
@@ -390,18 +411,14 @@ export const initLiquidationRecordIx = (
 export type StartLiquidationArgs = {
   marginfiAccount: PublicKey;
   liquidationReceiver: PublicKey;
-  remaining: PublicKey[];
+  remaining: AccountMeta[];
 };
 
 export const startLiquidationIx = (
   program: Program<Marginfi>,
   args: StartLiquidationArgs
 ) => {
-  const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => ({
-    pubkey,
-    isSigner: false,
-    isWritable: false,
-  }));
+  const oracleMeta: AccountMeta[] = args.remaining;
   return program.methods
     .startLiquidation()
     .accounts({
@@ -417,18 +434,14 @@ export const startLiquidationIx = (
 
 export type EndLiquidationArgs = {
   marginfiAccount: PublicKey;
-  remaining: PublicKey[];
+  remaining: Array<PublicKey | AccountMeta>;
 };
 
 export const endLiquidationIx = (
   program: Program<Marginfi>,
   args: EndLiquidationArgs
 ) => {
-  const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => ({
-    pubkey,
-    isSigner: false,
-    isWritable: false,
-  }));
+  const oracleMeta: AccountMeta[] = toWritableAccountMetas(args.remaining);
   return program.methods
     .endLiquidation()
     .accounts({
@@ -446,18 +459,14 @@ export const endLiquidationIx = (
 export type StartDeleverageArgs = {
   marginfiAccount: PublicKey;
   riskAdmin: PublicKey;
-  remaining: PublicKey[];
+  remaining: AccountMeta[];
 };
 
 export const startDeleverageIx = (
   program: Program<Marginfi>,
   args: StartDeleverageArgs
 ) => {
-  const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => ({
-    pubkey,
-    isSigner: false,
-    isWritable: false,
-  }));
+  const oracleMeta: AccountMeta[] = args.remaining;
   return program.methods
     .startDeleverage()
     .accounts({
@@ -469,18 +478,14 @@ export const startDeleverageIx = (
 
 export type EndDeleverageArgs = {
   marginfiAccount: PublicKey;
-  remaining: PublicKey[];
+  remaining: Array<PublicKey | AccountMeta>;
 };
 
 export const endDeleverageIx = (
   program: Program<Marginfi>,
   args: EndDeleverageArgs
 ) => {
-  const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => ({
-    pubkey,
-    isSigner: false,
-    isWritable: false,
-  }));
+  const oracleMeta: AccountMeta[] = toWritableAccountMetas(args.remaining);
   return program.methods
     .endDeleverage()
     .accounts({
@@ -544,6 +549,12 @@ export type HealthPulseArgs = {
   remaining: PublicKey[];
 };
 
+export type PulseBankPriceArgs = {
+  group: PublicKey;
+  bank: PublicKey;
+  remaining: PublicKey[];
+};
+
 /**
  * Creates a Health pulse instruction. This tx sets the user's risk engine health cache, a read-only
  * way to access the on-chain risk engine's current state, typically for debugging purposes.
@@ -567,6 +578,29 @@ export const healthPulse = (
     .lendingAccountPulseHealth()
     .accounts({
       marginfiAccount: args.marginfiAccount,
+    })
+    .remainingAccounts(oracleMeta)
+    .instruction();
+};
+
+/**
+ * Creates a bank price pulse instruction. This ix refreshes the cached oracle price
+ * for a given bank without modifying user positions.
+ * * `remaining` - pass the oracle accounts required for this bank
+ *   in the same order as used for other oracle reads for that bank.
+ */
+export const pulseBankPrice = (
+  program: Program<Marginfi>,
+  args: PulseBankPriceArgs
+) => {
+  const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => {
+    return { pubkey, isSigner: false, isWritable: false };
+  });
+
+  return program.methods
+    .lendingPoolPulseBankPriceCache()
+    .accounts({
+      bank: args.bank,
     })
     .remainingAccounts(oracleMeta)
     .instruction();
@@ -607,6 +641,79 @@ export const composeRemainingAccounts = (
 
   // flatten out [bank, oracle…, oracle…] → [bank, oracle…, bank, oracle…, …]
   return banksAndOracles.flat();
+};
+
+/**
+ * Use in place of `composeRemainingAccounts` when building Meta for Start Liquidate (marks banks as
+ * mutable, which is required)
+ * @param banksAndOracles 
+ * @returns 
+ */
+export const composeRemainingAccountsWriteableMeta = (
+  banksAndOracles: PublicKey[][]
+): AccountMeta[] => {
+  banksAndOracles.sort((a, b) => {
+    const A = a[0].toBytes();
+    const B = b[0].toBytes();
+    for (let i = 0; i < 32; i++) {
+      if (A[i] !== B[i]) {
+        return B[i] - A[i];
+      }
+    }
+    return 0;
+  });
+
+  return banksAndOracles.flatMap((accs) =>
+    accs.map((pubkey, idx) => ({
+      pubkey,
+      isSigner: false,
+      isWritable: idx === 0,
+    }))
+  );
+};
+
+/**
+ * Use in place of `composeRemainingAccounts` when building Meta for End Liquidate (marks banks as
+ * mutable and ignores/excludes all other accounts)
+ * @param banksAndOracles 
+ * @returns 
+ */
+export const composeRemainingAccountsMetaBanksOnly = (
+  banksAndOracles: PublicKey[][]
+): AccountMeta[] => {
+  banksAndOracles.sort((a, b) => {
+    const A = a[0].toBytes();
+    const B = b[0].toBytes();
+    for (let i = 0; i < 32; i++) {
+      if (A[i] !== B[i]) {
+        return B[i] - A[i];
+      }
+    }
+    return 0;
+  });
+
+  return banksAndOracles.map((accs) => ({
+    pubkey: accs[0],
+    isSigner: false,
+    isWritable: true,
+  }));
+};
+
+const toWritableAccountMetas = (
+  remaining: Array<PublicKey | AccountMeta>
+): AccountMeta[] => {
+  if (remaining.length === 0) {
+    return [];
+  }
+  const first = remaining[0] as AccountMeta;
+  if (first.pubkey !== undefined) {
+    return remaining as AccountMeta[];
+  }
+  return (remaining as PublicKey[]).map((pubkey) => ({
+    pubkey,
+    isSigner: false,
+    isWritable: true,
+  }));
 };
 
 export type AccountInitPdaArgs = {

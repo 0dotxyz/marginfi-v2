@@ -91,6 +91,8 @@ export const EMODE_LST_TAG = 157;
 export const PYTH_PULL_MIGRATED = 1;
 /** In marginfiAccount.flags, indicates an account is disabled and cannot be used. */
 export const ACCOUNT_DISABLED = 1;
+/** In marginfiAccount.flags, indicates the admin has frozen the account. */
+export const ACCOUNT_FROZEN = 1 << 6;
 
 /** In lamports, charged when transfering to a new account */
 export const ACCOUNT_TRANSFER_FEE = 5_000_000;
@@ -103,6 +105,9 @@ export const DAILY_RESET_INTERVAL = 24 * 60 * 60; // 24 hours
 
 export const INTEREST_CURVE_LEGACY = 0;
 export const INTEREST_CURVE_SEVEN_POINT = 1;
+
+/** Program-enforced max enforced number of balances per account. */
+export const MAX_BALANCES = 16;
 
 /**
  * The default bank config has

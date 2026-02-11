@@ -18,7 +18,7 @@ import {
   MARKET,
   oracles,
   TOKEN_A_RESERVE,
-  KAMINO_TOKENA_BANK,
+  KAMINO_TOKEN_A_BANK,
   users,
   verbose,
   bankrunProgram,
@@ -362,7 +362,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
     const farmState = farmAccounts.get(A_FARM_STATE);
     const market = kaminoAccounts.get(MARKET);
     const tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE);
-    const tokenABank = kaminoAccounts.get(KAMINO_TOKENA_BANK);
+    const tokenABank = kaminoAccounts.get(KAMINO_TOKEN_A_BANK);
 
     const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
@@ -422,7 +422,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
     const marginfiAccount = user.accounts.get(USER_ACCOUNT_K);
     const market = kaminoAccounts.get(MARKET);
     const tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE);
-    const tokenABank = kaminoAccounts.get(KAMINO_TOKENA_BANK);
+    const tokenABank = kaminoAccounts.get(KAMINO_TOKEN_A_BANK);
     const farmState = farmAccounts.get(A_FARM_STATE);
     const userState = farmAccounts.get(A_OBLIGATION_USER_STATE);
     console.log("farm state actual: " + farmState + " user " + userState);
@@ -522,7 +522,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
     const marginfiAccount = user.accounts.get(USER_ACCOUNT_K);
     const market = kaminoAccounts.get(MARKET);
     const tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE);
-    const tokenABank = kaminoAccounts.get(KAMINO_TOKENA_BANK);
+    const tokenABank = kaminoAccounts.get(KAMINO_TOKEN_A_BANK);
     const farmState = farmAccounts.get(A_FARM_STATE);
     const userState = farmAccounts.get(A_OBLIGATION_USER_STATE);
     const usdcReserve = kaminoAccounts.get(USDC_RESERVE);
@@ -616,7 +616,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
   });
 
   it("(negative test) Should fail to harvest with wrong destination token account owner", async () => {
-    const tokenABank = kaminoAccounts.get(KAMINO_TOKENA_BANK);
+    const tokenABank = kaminoAccounts.get(KAMINO_TOKEN_A_BANK);
 
     const farmState = farmAccounts.get(A_FARM_STATE);
     const globalConfig = farmAccounts.get(GLOBAL_CONFIG);
@@ -697,7 +697,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
   });
 
   it("Harvest reward from farm via marginfi", async () => {
-    const tokenABank = kaminoAccounts.get(KAMINO_TOKENA_BANK);
+    const tokenABank = kaminoAccounts.get(KAMINO_TOKEN_A_BANK);
 
     const farmState = farmAccounts.get(A_FARM_STATE);
     const globalConfig = farmAccounts.get(GLOBAL_CONFIG);

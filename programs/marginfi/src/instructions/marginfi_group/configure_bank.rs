@@ -3,7 +3,7 @@ use crate::events::{
 };
 use crate::prelude::MarginfiError;
 use crate::state::bank::BankImpl;
-use crate::state::bank_config::BankConfigImpl;
+use crate::state::emode::EmodeSettingsImpl;
 use crate::MarginfiResult;
 use crate::{check, math_error, utils};
 use anchor_lang::prelude::*;
@@ -11,7 +11,9 @@ use anchor_spl::token_2022::{transfer_checked, TransferChecked};
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::{EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED, FREEZE_SETTINGS},
+    constants::{
+        EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED, EMISSION_FLAGS, FREEZE_SETTINGS,
+    },
     types::{Bank, BankConfigOpt, MarginfiGroup},
 };
 
@@ -42,9 +44,12 @@ pub fn lending_pool_configure_bank(
         bank.configure(&bank_config)?;
         msg!("Bank configured!");
 
-        if bank_config.oracle_max_age.is_some() {
-            bank.config.validate_oracle_age()?;
-        }
+        let group = ctx.accounts.group.load()?;
+        bank.emode.validate_entries_with_liability_weights(
+            &bank.config,
+            group.emode_max_init_leverage,
+            group.emode_max_maint_leverage,
+        )?;
 
         emit!(LendingPoolBankConfigureEvent {
             header: GroupEventHeader {
@@ -199,8 +204,13 @@ pub fn lending_pool_update_emissions_parameters(
     );
 
     if let Some(flags) = emissions_flags {
+        check!(
+            Bank::verify_emissions_flags(flags),
+            MarginfiError::InvalidConfig
+        );
         msg!("Updating emissions flags to {:#010b}", flags);
-        bank.flags = flags;
+        // Clear old emission bits, then set new ones, preserving all other flags
+        bank.flags = (bank.flags & !EMISSION_FLAGS) | flags;
     }
 
     if let Some(rate) = emissions_rate {

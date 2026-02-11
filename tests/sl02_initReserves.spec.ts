@@ -14,15 +14,15 @@ import {
   solendAccounts,
   SOLEND_MARKET,
   SOLEND_USDC_RESERVE,
-  SOLEND_TOKENA_RESERVE,
+  SOLEND_TOKEN_A_RESERVE,
   SOLEND_USDC_LIQUIDITY_SUPPLY,
   SOLEND_USDC_COLLATERAL_MINT,
   SOLEND_USDC_COLLATERAL_SUPPLY,
   SOLEND_USDC_FEE_RECEIVER,
-  SOLEND_TOKENA_LIQUIDITY_SUPPLY,
-  SOLEND_TOKENA_COLLATERAL_MINT,
-  SOLEND_TOKENA_COLLATERAL_SUPPLY,
-  SOLEND_TOKENA_FEE_RECEIVER,
+  SOLEND_TOKEN_A_LIQUIDITY_SUPPLY,
+  SOLEND_TOKEN_A_COLLATERAL_MINT,
+  SOLEND_TOKEN_A_COLLATERAL_SUPPLY,
+  SOLEND_TOKEN_A_FEE_RECEIVER,
   bankRunProvider,
 } from "./rootHooks";
 import { processBankrunTransaction } from "./utils/tools";
@@ -36,12 +36,12 @@ import {
 import {
   SOLEND_RESERVE_SIZE,
   SOLEND_USDC_RESERVE_SEED,
-  SOLEND_TOKENA_RESERVE_SEED,
+  SOLEND_TOKEN_A_RESERVE_SEED,
 } from "./utils/solend-utils";
 
 describe("sl02: Init Solend reserves", () => {
   const usdcReserve = Keypair.fromSeed(SOLEND_USDC_RESERVE_SEED);
-  const tokenAReserve = Keypair.fromSeed(SOLEND_TOKENA_RESERVE_SEED);
+  const tokenAReserve = Keypair.fromSeed(SOLEND_TOKEN_A_RESERVE_SEED);
 
   const usdcCollateralMint = Keypair.generate();
   const tokenACollateralMint = Keypair.generate();
@@ -385,21 +385,21 @@ describe("sl02: Init Solend reserves", () => {
       true
     );
 
-    solendAccounts.set(SOLEND_TOKENA_RESERVE, tokenAReserve.publicKey);
+    solendAccounts.set(SOLEND_TOKEN_A_RESERVE, tokenAReserve.publicKey);
     solendAccounts.set(
-      SOLEND_TOKENA_LIQUIDITY_SUPPLY,
+      SOLEND_TOKEN_A_LIQUIDITY_SUPPLY,
       tokenALiquiditySupply.publicKey
     );
     solendAccounts.set(
-      SOLEND_TOKENA_COLLATERAL_MINT,
+      SOLEND_TOKEN_A_COLLATERAL_MINT,
       tokenACollateralMint.publicKey
     );
     solendAccounts.set(
-      SOLEND_TOKENA_COLLATERAL_SUPPLY,
+      SOLEND_TOKEN_A_COLLATERAL_SUPPLY,
       tokenACollateralSupply.publicKey
     );
     solendAccounts.set(
-      SOLEND_TOKENA_FEE_RECEIVER,
+      SOLEND_TOKEN_A_FEE_RECEIVER,
       tokenALiquidityFeeReceiver.publicKey
     );
 

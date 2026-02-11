@@ -152,7 +152,7 @@ describe("jl07: JupLend integration position limit (8 positions)", () => {
         bankMint: ecosystem.usdcMint.publicKey,
         bankSeed: seed,
         oracle: oracles.usdcOracle.publicKey,
-        juplendLending: pool.lending,
+        integrationAcc1: pool.lending,
         fTokenMint: pool.fTokenMint,
         config,
         tokenProgram: pool.tokenProgram,

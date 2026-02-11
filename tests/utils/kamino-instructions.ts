@@ -39,7 +39,7 @@ export interface KaminoDepositAccounts {
 export const makeKaminoDepositIx = async (
   program: Program<Marginfi>,
   accounts: KaminoDepositAccounts,
-  amount: BN
+  amount: BN,
 ): Promise<TransactionInstruction> => {
   // Merge with defaults...
   const accs = {
@@ -49,22 +49,22 @@ export const makeKaminoDepositIx = async (
 
   const [lendingMarketAuthority] = deriveLendingMarketAuthority(
     KLEND_PROGRAM_ID,
-    accounts.lendingMarket
+    accounts.lendingMarket,
   );
   const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
     KLEND_PROGRAM_ID,
     accounts.lendingMarket,
-    accounts.reserveLiquidityMint
+    accounts.reserveLiquidityMint,
   );
   const [reserveCollateralMint] = deriveReserveCollateralMint(
     KLEND_PROGRAM_ID,
     accounts.lendingMarket,
-    accounts.reserveLiquidityMint
+    accounts.reserveLiquidityMint,
   );
   const [reserveCollateralSupply] = deriveReserveCollateralSupply(
     KLEND_PROGRAM_ID,
     accounts.lendingMarket,
-    accounts.reserveLiquidityMint
+    accounts.reserveLiquidityMint,
   );
 
   return program.methods
@@ -98,14 +98,12 @@ export interface KaminoHarvestRewardAccounts {
 export const makeKaminoHarvestRewardIx = async (
   program: Program<Marginfi>,
   accounts: KaminoHarvestRewardAccounts,
-  rewardIndex: BN
+  rewardIndex: BN,
 ): Promise<TransactionInstruction> => {
   return program.methods
     .kaminoHarvestReward(rewardIndex)
     .accounts({
       bank: accounts.bank,
-      feeState: accounts.feeState,
-      destinationTokenAccount: accounts.destinationTokenAccount,
       userState: accounts.userState,
       farmState: accounts.farmState,
       globalConfig: accounts.globalConfig,
@@ -116,6 +114,10 @@ export const makeKaminoHarvestRewardIx = async (
       farmVaultsAuthority: accounts.farmVaultsAuthority,
       scopePrices: accounts.scopePrices || null,
       tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .accountsPartial({
+      // feeState: accounts.feeState,
+      destinationTokenAccount: accounts.destinationTokenAccount,
     })
     .instruction();
 };
@@ -149,7 +151,7 @@ export interface AddKaminoBankArgs {
 export const makeAddKaminoBankIx = (
   program: Program<Marginfi>,
   accounts: AddKaminoBankAccounts,
-  args: AddKaminoBankArgs
+  args: AddKaminoBankArgs,
 ): Promise<TransactionInstruction> => {
   const oracleMeta: AccountMeta = {
     pubkey: accounts.oracle,
@@ -166,21 +168,22 @@ export const makeAddKaminoBankIx = (
     program.programId,
     accounts.group,
     accounts.bankMint,
-    args.seed
+    args.seed,
   );
   const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
     program.programId,
-    bankKey
+    bankKey,
   );
   const [kaminoObligation] = deriveBaseObligation(
     liquidityVaultAuthority,
-    accounts.kaminoMarket
+    accounts.kaminoMarket,
   );
 
   const ix = program.methods
     .lendingPoolAddBankKamino(args.config, args.seed)
     .accounts({
-      kaminoObligation,
+      integrationAcc1: accounts.kaminoReserve,
+      integrationAcc2: kaminoObligation,
       tokenProgram: accounts.tokenProgram || TOKEN_PROGRAM_ID,
       ...accounts,
     })
@@ -235,7 +238,7 @@ export interface InitObligationAccounts {
 export const makeInitObligationIx = async (
   program: Program<Marginfi>,
   accounts: InitObligationAccounts,
-  amount?: BN
+  amount?: BN,
 ): Promise<TransactionInstruction> => {
   // Merge with defaults...
   const accs = {
@@ -245,30 +248,30 @@ export const makeInitObligationIx = async (
 
   const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
     program.programId,
-    accounts.bank
+    accounts.bank,
   );
   const [userMetadata] = deriveUserMetadata(
     KLEND_PROGRAM_ID,
-    liquidityVaultAuthority
+    liquidityVaultAuthority,
   );
   const [lendingMarketAuthority] = deriveLendingMarketAuthority(
     KLEND_PROGRAM_ID,
-    accounts.lendingMarket
+    accounts.lendingMarket,
   );
   const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
     KLEND_PROGRAM_ID,
     accounts.lendingMarket,
-    accounts.reserveLiquidityMint
+    accounts.reserveLiquidityMint,
   );
   const [reserveCollateralMint] = deriveReserveCollateralMint(
     KLEND_PROGRAM_ID,
     accounts.lendingMarket,
-    accounts.reserveLiquidityMint
+    accounts.reserveLiquidityMint,
   );
   const [reserveCollateralSupply] = deriveReserveCollateralSupply(
     KLEND_PROGRAM_ID,
     accounts.lendingMarket,
-    accounts.reserveLiquidityMint
+    accounts.reserveLiquidityMint,
   );
 
   const ix = await program.methods
@@ -315,7 +318,7 @@ export interface KaminoWithdrawArgs {
 export const makeKaminoWithdrawIx = async (
   program: Program<Marginfi>,
   accounts: KaminoWithdrawAccounts,
-  args: KaminoWithdrawArgs
+  args: KaminoWithdrawArgs,
 ): Promise<TransactionInstruction> => {
   // Merge with defaults...
   const accs = {
@@ -331,22 +334,22 @@ export const makeKaminoWithdrawIx = async (
 
   const [lendingMarketAuthority] = deriveLendingMarketAuthority(
     KLEND_PROGRAM_ID,
-    accounts.lendingMarket
+    accounts.lendingMarket,
   );
   const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
     KLEND_PROGRAM_ID,
     accounts.lendingMarket,
-    accounts.reserveLiquidityMint
+    accounts.reserveLiquidityMint,
   );
   const [reserveCollateralMint] = deriveReserveCollateralMint(
     KLEND_PROGRAM_ID,
     accounts.lendingMarket,
-    accounts.reserveLiquidityMint
+    accounts.reserveLiquidityMint,
   );
   const [reserveCollateralSupply] = deriveReserveCollateralSupply(
     KLEND_PROGRAM_ID,
     accounts.lendingMarket,
-    accounts.reserveLiquidityMint
+    accounts.reserveLiquidityMint,
   );
 
   const ix = await program.methods
