@@ -260,11 +260,7 @@ impl MintFixture {
             let ctx = self.ctx.borrow();
             let mint_to_ix =
                 self.make_mint_to_ix(dest, ui_to_native!(ui_amount.into(), self.mint.decimals));
-            let blockhash = ctx
-                .banks_client
-                .get_latest_blockhash()
-                .await
-                .unwrap();
+            let blockhash = ctx.banks_client.get_latest_blockhash().await.unwrap();
             Transaction::new_signed_with_payer(
                 &[mint_to_ix],
                 Some(&ctx.payer.pubkey()),

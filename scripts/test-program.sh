@@ -16,6 +16,9 @@ JOBS="${NEXTEST_JOBS:-1}"
 RETRIES="${NEXTEST_RETRIES:-2}" 
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 
+# CI-only: keep host builds separate from SBF artifacts
+export CARGO_TARGET_DIR="$ROOT/target/host"
+
 if [[ "${program_lib_name}" == "all" ]]; then
   package_filter=()
 else
@@ -26,7 +29,7 @@ shift 1 || true
 extra_params=( "$@" )
 
 # Minimal logging
-export SBF_OUT_DIR="$ROOT/target/deploy"
+export SBF_OUT_DIR="$ROOT/target/sbf/deploy"
 export RUST_LOG="solana_runtime::message_processor::stable_log=warn"
 
 cmd=(cargo nextest run
