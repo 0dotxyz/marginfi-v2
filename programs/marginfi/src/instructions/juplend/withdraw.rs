@@ -11,8 +11,8 @@ use crate::{
         marginfi_group::MarginfiGroupImpl,
     },
     utils::{
-        fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank,
-        is_juplend_asset_tag, validate_bank_state, InstructionKind,
+        fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank, is_juplend_asset_tag,
+        validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -83,8 +83,12 @@ pub fn juplend_withdraw<'info>(
         // Validate price is non-zero during liquidation/deleverage to prevent exploits with stale oracles.
         let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
         let price = if in_receivership {
-            let price =
-                fetch_asset_price_for_bank_low_bias(&bank_key, &bank, &clock, ctx.remaining_accounts)?;
+            let price = fetch_asset_price_for_bank_low_bias(
+                &bank_key,
+                &bank,
+                &clock,
+                ctx.remaining_accounts,
+            )?;
             check!(price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
             price
         } else {
@@ -149,8 +153,7 @@ pub fn juplend_withdraw<'info>(
     // Record balances to verify exact deltas.
     let pre_liquidity_vault_balance =
         accessor::amount(&ctx.accounts.liquidity_vault.to_account_info())?;
-    let pre_f_token_balance =
-        accessor::amount(&ctx.accounts.integration_acc_2.to_account_info())?;
+    let pre_f_token_balance = accessor::amount(&ctx.accounts.integration_acc_2.to_account_info())?;
 
     // Handle potential dust case where remaining shares are worth less than 1 underlying unit.
     //

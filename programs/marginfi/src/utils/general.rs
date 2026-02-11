@@ -220,7 +220,11 @@ pub fn validate_asset_tags(bank: &Bank, marginfi_account: &MarginfiAccount) -> M
     let is_default_like = |asset_tag: u8| {
         matches!(
             asset_tag,
-            ASSET_TAG_DEFAULT | ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND
+            ASSET_TAG_DEFAULT
+                | ASSET_TAG_KAMINO
+                | ASSET_TAG_DRIFT
+                | ASSET_TAG_SOLEND
+                | ASSET_TAG_JUPLEND
         )
     };
 
@@ -231,7 +235,9 @@ pub fn validate_asset_tags(bank: &Bank, marginfi_account: &MarginfiAccount) -> M
                 ASSET_TAG_SOL => { /* Do nothing, SOL can mix with any asset type */ }
                 ASSET_TAG_STAKED => has_staked_asset = true,
                 // Kamino/Drift/Solend/JupLend assets behave like default assets
-                ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND => has_default_asset = true,
+                ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND => {
+                    has_default_asset = true
+                }
                 _ => panic!("unsupported asset tag"),
             }
         }
@@ -266,7 +272,11 @@ pub fn validate_bank_asset_tags(bank_a: &Bank, bank_b: &Bank) -> MarginfiResult 
     let is_default_like = |asset_tag: u8| {
         matches!(
             asset_tag,
-            ASSET_TAG_DEFAULT | ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND
+            ASSET_TAG_DEFAULT
+                | ASSET_TAG_KAMINO
+                | ASSET_TAG_DRIFT
+                | ASSET_TAG_SOLEND
+                | ASSET_TAG_JUPLEND
         )
     };
 
