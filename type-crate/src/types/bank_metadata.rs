@@ -21,7 +21,7 @@ pub struct BankMetadata {
     /// The token's ticker name, e.g. USDC
     /// * utf-8
     pub ticker: [u8; 64],
-    /// The token's plain english descripion, e.g US Dollar Coin
+    /// The token's plain english description, e.g US Dollar Coin
     /// * utf-8
     pub description: [u8; 128],
     /// Reserved for future use. Room for a very small icon or something else cool

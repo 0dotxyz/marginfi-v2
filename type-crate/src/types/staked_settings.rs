@@ -16,7 +16,7 @@ assert_struct_size!(StakedSettings, 256);
 assert_struct_align!(StakedSettings, 8);
 /// Unique per-group. Staked Collateral banks created under a group automatically use these
 /// settings. Groups that have not created this struct cannot create staked collateral banks. When
-/// this struct updates, changes must be permissionlessly propogated to staked collateral banks.
+/// this struct updates, changes must be permissionlessly propagated to staked collateral banks.
 /// Administrators can also edit the bank manually, i.e. with configure_bank, to temporarily make
 /// changes such as raising the deposit limit for a single bank.
 #[repr(C)]

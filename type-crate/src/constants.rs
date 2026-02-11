@@ -59,8 +59,8 @@ pub const USDC_EXPONENT: i32 = 6;
 
 pub const MAX_ORACLE_KEYS: usize = 5;
 
-/// Any balance below 1 SPL token amount is treated as none,
-/// this is to account for any artifacts resulting from binary fraction arithemtic.
+/// Any balance below 1 SPL token unit is treated as empty.
+/// This is to account for any artifacts resulting from binary fraction arithmetic.
 pub const EMPTY_BALANCE_THRESHOLD: I80F48 = I80F48!(1);
 
 /// Any account with assets below this threshold is considered bankrupt.
@@ -69,7 +69,7 @@ pub const EMPTY_BALANCE_THRESHOLD: I80F48 = I80F48!(1);
 /// This is USD denominated, so 0.001 = $0.1
 pub const BANKRUPT_THRESHOLD: I80F48 = I80F48!(0.1);
 
-/// Comparios threshold used to account for arithmetic artifacts on balances
+/// Comparison threshold used to account for arithmetic artifacts on balances
 pub const ZERO_AMOUNT_THRESHOLD: I80F48 = I80F48!(0.0001);
 
 pub const EMISSIONS_FLAG_BORROW_ACTIVE: u64 = 1 << 0;
