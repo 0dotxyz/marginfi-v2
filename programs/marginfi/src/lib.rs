@@ -223,10 +223,10 @@ pub mod marginfi {
 
     pub fn marginfi_account_place_order(
         ctx: Context<PlaceOrder>,
-        mint_keys: Vec<Pubkey>,
+        bank_keys: Vec<Pubkey>,
         trigger: OrderTrigger,
     ) -> MarginfiResult {
-        marginfi_account::place_order(ctx, mint_keys, trigger)
+        marginfi_account::place_order(ctx, bank_keys, trigger)
     }
 
     pub fn marginfi_account_close_order(ctx: Context<CloseOrder>) -> MarginfiResult {

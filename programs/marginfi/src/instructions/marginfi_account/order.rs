@@ -27,7 +27,7 @@ use fixed::types::I80F48;
 use marginfi_type_crate::constants::{ix_discriminators, FEE_STATE_SEED, ORDER_ACTIVE_TAGS};
 use marginfi_type_crate::types::{
     BalanceSide, ExecuteOrderRecord, FeeState, HealthCache, OrderTriggerType, ACCOUNT_FROZEN,
-    ACCOUNT_IN_ORDER_EXECUTION,
+    ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
 };
 use marginfi_type_crate::{
     constants::{EXECUTE_ORDER_SEED, ORDER_SEED},
@@ -49,21 +49,6 @@ pub fn place_order(
     } = &ctx.accounts;
 
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
-
-    check!(
-        !marginfi_account.get_flag(ACCOUNT_DISABLED),
-        MarginfiError::AccountDisabled
-    );
-
-    check!(
-        !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
-        MarginfiError::AccountInFlashloan
-    );
-
-    check!(
-        !marginfi_account.get_flag(ACCOUNT_FROZEN),
-        MarginfiError::AccountFrozen
-    );
 
     check!(
         bank_keys.len() == ORDER_ACTIVE_TAGS,
@@ -556,7 +541,16 @@ pub struct PlaceOrder<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = authority @ MarginfiError::Unauthorized
+        has_one = authority @ MarginfiError::Unauthorized,
+        constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_IN_ORDER_EXECUTION)
+                && !acc.get_flag(ACCOUNT_IN_FLASHLOAN)
+                && !acc.get_flag(ACCOUNT_FROZEN)
+                && !acc.get_flag(ACCOUNT_DISABLED)
+                && !acc.get_flag(ACCOUNT_IN_RECEIVERSHIP)
+                && !acc.get_flag(ACCOUNT_IN_DELEVERAGE)
+        } @MarginfiError::UnexpectedOrderExecutionState
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
@@ -636,7 +630,6 @@ pub struct KeeperCloseOrder<'info> {
     /// CHECK: This uses an unchecked account here so the instruction can be called even when the
     /// marginfi account was closed.
     /// The ownership check is checked in the handler or/and type checks are made in the handler.
-    #[account(mut)]
     pub marginfi_account: UncheckedAccount<'info>,
 
     /// CHECK: no checks whatsoever, keeper decides this without restriction
@@ -679,6 +672,8 @@ pub struct StartExecuteOrder<'info> {
                 && !acc.get_flag(ACCOUNT_IN_FLASHLOAN)
                 && !acc.get_flag(ACCOUNT_FROZEN)
                 && !acc.get_flag(ACCOUNT_DISABLED)
+                && !acc.get_flag(ACCOUNT_IN_RECEIVERSHIP)
+                && !acc.get_flag(ACCOUNT_IN_DELEVERAGE)
         } @MarginfiError::UnexpectedOrderExecutionState
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
