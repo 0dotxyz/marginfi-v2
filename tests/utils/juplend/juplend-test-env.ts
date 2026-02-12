@@ -8,8 +8,8 @@ import {
 } from "@solana/web3.js";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddressSync,
   TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 
 import { Marginfi } from "../../../target/types/marginfi";
@@ -18,6 +18,7 @@ import {
   deriveBankWithSeed,
   deriveFeeVault,
   deriveFeeVaultAuthority,
+  deriveJuplendFTokenVault,
   deriveInsuranceVault,
   deriveInsuranceVaultAuthority,
   deriveLiquidityVaultAuthority,
@@ -43,7 +44,7 @@ export type JuplendMrgnAddresses = {
   feeVaultAuthority: PublicKey;
   feeVault: PublicKey;
   /**
-   * ATA owned by the bank's liquidity vault authority, for the protocol fToken mint.
+   * PDA owned by the bank's liquidity vault authority, for the protocol fToken mint.
    * This is where JupLend CPI mints/burns fTokens on deposit/withdraw.
    */
   fTokenVault: PublicKey;
@@ -65,7 +66,7 @@ export type DeriveJuplendMrgnAddressesArgs = {
 };
 
 /**
- * Deterministically derive the Marginfi PDAs + fToken ATA used by a JupLend bank.
+ * Deterministically derive the Marginfi PDAs used by a JupLend bank.
  */
 export function deriveJuplendMrgnAddresses(
   args: DeriveJuplendMrgnAddressesArgs
@@ -80,14 +81,13 @@ export function deriveJuplendMrgnAddresses(
     args.mrgnProgramId,
     bank
   );
-  // TEMPORARY: liquidityVault uses ATA instead of PDA. Mainnet Fluid currently requires ATA for
-  // depositor_token_account but this is expected to be removed soon. Revert to deriveLiquidityVault() after.
-  const tokenProgram = args.tokenProgram ?? TOKEN_PROGRAM_ID;
+  // liquidity_vault must be an ATA — the Fluid liquidity program's Operate instruction
+  // enforces associated_token::authority = withdraw_to on the withdrawal destination.
   const liquidityVault = getAssociatedTokenAddressSync(
     args.bankMint,
     liquidityVaultAuthority,
-    true, // allowOwnerOffCurve
-    tokenProgram,
+    true, // allowOwnerOffCurve (PDA authority)
+    args.tokenProgram ?? TOKEN_PROGRAM_ID,
     ASSOCIATED_TOKEN_PROGRAM_ID
   );
 
@@ -100,15 +100,7 @@ export function deriveJuplendMrgnAddresses(
   const [feeVaultAuthority] = deriveFeeVaultAuthority(args.mrgnProgramId, bank);
   const [feeVault] = deriveFeeVault(args.mrgnProgramId, bank);
 
-  // JupLend creates fToken mints using the same token program as the underlying mint,
-  // so for Token-2022 underlying mints, fToken mints are also Token-2022.
-  const fTokenVault = getAssociatedTokenAddressSync(
-    args.fTokenMint,
-    liquidityVaultAuthority,
-    true,
-    tokenProgram,
-    ASSOCIATED_TOKEN_PROGRAM_ID
-  );
+  const [fTokenVault] = deriveJuplendFTokenVault(args.mrgnProgramId, bank);
 
   const [claimAccount] = findJuplendClaimAccountPda(
     liquidityVaultAuthority,
@@ -156,7 +148,7 @@ export type AddJuplendBankAccounts = {
   oracle: PublicKey;
   /** JupLend lending state (oracle_keys[1]) */
   integrationAcc1: PublicKey;
-  /** JupLend fToken mint (needed to create fToken vault ATA) */
+  /** JupLend fToken mint */
   fTokenMint: PublicKey;
 
   /** Compact bank config (same struct used by other add_bank instructions) */
@@ -184,7 +176,6 @@ export const makeAddJuplendBankIx = async (
     program.programId,
     bank
   );
-  // TEMPORARY: ATA instead of PDA - mainnet requires ATA for now (see deriveJuplendMrgnAddresses)
   const liquidityVault = getAssociatedTokenAddressSync(
     accounts.bankMint,
     liquidityVaultAuthority,
@@ -199,17 +190,7 @@ export const makeAddJuplendBankIx = async (
   const [insuranceVault] = deriveInsuranceVault(program.programId, bank);
   const [feeVaultAuthority] = deriveFeeVaultAuthority(program.programId, bank);
   const [feeVault] = deriveFeeVault(program.programId, bank);
-
-  // fToken vault is an ATA owned by liquidityVaultAuthority for the fToken mint
-  // Note: JupLend creates fToken mints using the same token program as the underlying mint,
-  // so for Token-2022 underlying mints, fToken mints are also Token-2022.
-  const fTokenVault = getAssociatedTokenAddressSync(
-    accounts.fTokenMint,
-    liquidityVaultAuthority,
-    true,
-    tokenProgram,
-    ASSOCIATED_TOKEN_PROGRAM_ID
-  );
+  const [fTokenVault] = deriveJuplendFTokenVault(program.programId, bank);
 
   const oracleMeta: AccountMeta = {
     pubkey: accounts.oracle,
@@ -243,7 +224,6 @@ export const makeAddJuplendBankIx = async (
       tokenProgram,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
-      rent: SYSVAR_RENT_PUBKEY,
     })
     .remainingAccounts([oracleMeta, lendingMeta])
     .instruction();

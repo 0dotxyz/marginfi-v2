@@ -1,6 +1,7 @@
 // Adds a JupLend type bank to a group with sane defaults. Used to integrate with JupLend
 // allowing users to interact with JupLend lending pools through marginfi.
 use crate::{
+    constants::JUPLEND_F_TOKEN_VAULT_SEED,
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{
@@ -20,7 +21,7 @@ use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 
 /// Add a JupLend bank to the marginfi lending pool.
 ///
-/// Bank starts `Paused` because once the fToken vault ATA exists, the bank can be interacted
+/// Bank starts `Paused` because once the fToken vault exists, the bank can be interacted
 /// with even without a seed deposit. Call `juplend_init_position` to activate.
 ///
 /// Remaining accounts: 0. oracle feed, 1. JupLend `Lending` state
@@ -55,10 +56,10 @@ pub fn lending_pool_add_bank_juplend(
 
     let config = bank_config.to_bank_config(lending_key);
 
-    // TEMPORARY: liquidity_vault uses ATA derivation instead of LIQUIDITY_VAULT_SEED PDA.
-    // Mainnet Fluid currently requires ATA for depositor_token_account, but this constraint
-    // is expected to be removed in an upcoming upgrade. Once that happens, revert to
-    // LIQUIDITY_VAULT_SEED like other integrations.
+    // liquidity_vault is an ATA (not a PDA of this program), so no bump to store.
+    // The Fluid liquidity program's `Operate` instruction enforces `associated_token::`
+    // constraints on `withdraw_to_account`, requiring it to be the canonical ATA of
+    // liquidity_vault_authority. Using a PDA here would break withdrawals.
     let liquidity_vault_bump = 0u8;
     let liquidity_vault_authority_bump = ctx.bumps.liquidity_vault_authority;
     let insurance_vault_bump = ctx.bumps.insurance_vault;
@@ -155,12 +156,13 @@ pub struct LendingPoolAddBankJuplend<'info> {
     )]
     pub liquidity_vault_authority: SystemAccount<'info>,
 
-    /// For JupLend banks, the `liquidity_vault` is used as an intermediary when depositing/
-    /// withdrawing, e.g., withdrawn funds move from JupLend -> here -> the user's token account.
+    /// For JupLend banks, the `liquidity_vault` is the ATA of `liquidity_vault_authority`.
     ///
-    /// TEMPORARY: Uses ATA derivation instead of LIQUIDITY_VAULT_SEED PDA. Mainnet Fluid
-    /// currently requires ATA for depositor_token_account, but this is expected to be removed
-    /// in an upcoming upgrade. Once that happens, revert to PDA seeds like other integrations.
+    /// Unlike Drift/Kamino (which use seed-derived PDA vaults), JupLend requires this to be an
+    /// ATA because the Fluid liquidity program's `Operate` instruction enforces
+    /// `associated_token::authority = withdraw_to` on the withdrawal destination account.
+    /// During withdrawals, `withdraw_to` = `liquidity_vault_authority`, so this account must
+    /// match `ATA(liquidity_vault_authority, bank_mint)`.
     #[account(
         init,
         payer = fee_payer,
@@ -220,18 +222,18 @@ pub struct LendingPoolAddBankJuplend<'info> {
 
     /// The bank's fToken vault holds the fTokens received when depositing into JupLend.
     ///
-    /// TEMPORARY: Uses ATA derivation instead of a seed-based PDA. Mainnet Fluid currently
-    /// requires ATA for depositor_token_account, but this constraint is expected to be removed
-    /// in an upcoming upgrade. Once that happens, revert to a PDA with seeds like other vaults.
-    ///
     /// NOTE: JupLend creates fToken mints using the same token program as the underlying mint,
     /// so for Token-2022 underlying mints, fToken mints are also Token-2022.
     #[account(
         init,
         payer = fee_payer,
-        associated_token::mint = f_token_mint,
-        associated_token::authority = liquidity_vault_authority,
-        associated_token::token_program = token_program,
+        seeds = [
+            JUPLEND_F_TOKEN_VAULT_SEED.as_bytes(),
+            bank.key().as_ref(),
+        ],
+        bump,
+        token::mint = f_token_mint,
+        token::authority = liquidity_vault_authority,
     )]
     pub integration_acc_2: Box<InterfaceAccount<'info, TokenAccount>>,
 

@@ -1,7 +1,6 @@
 import { BN } from "@coral-xyz/anchor";
 import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { assert } from "chai";
-import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-token";
 
 import {
   bankrunContext,
@@ -41,7 +40,6 @@ describe("jl08: JupLend - bank activation gating (paused -> operational)", () =>
 
   // NOTE: users array is populated by root hooks, so we must access it after hooks run
   let userA: typeof users[0];
-  let userB: typeof users[0]; // used as a random fee payer to create ATA permissionlessly
 
   let pool: Awaited<ReturnType<typeof ensureJuplendPoolForMint>>;
 
@@ -54,7 +52,6 @@ describe("jl08: JupLend - bank activation gating (paused -> operational)", () =>
   before(async () => {
     // Access users after root hooks have populated the array
     userA = users[0];
-    userB = users[1];
 
     pool = await ensureJuplendPoolForMint({
       admin: groupAdmin.wallet,
@@ -136,7 +133,7 @@ describe("jl08: JupLend - bank activation gating (paused -> operational)", () =>
     );
   });
 
-  it("ATA creation is permissionless, but deposits are blocked until init_position activates bank", async () => {
+  it("deposits are blocked until init_position activates bank", async () => {
     const bankBefore = await bankrunProgram.account.bank.fetch(juplendBank);
 
     assert.equal(bankBefore.config.assetTag, ASSET_TAG_JUPLEND);
@@ -145,28 +142,8 @@ describe("jl08: JupLend - bank activation gating (paused -> operational)", () =>
       "expected new juplend bank to start paused"
     );
 
-    // Create the fToken ATA permissionlessly. This must NOT activate the bank.
-    const createAtaIx = createAssociatedTokenAccountIdempotentInstruction(
-      userB.wallet.publicKey,
-      fTokenVault,
-      liquidityVaultAuthority,
-      pool.fTokenMint,
-      pool.tokenProgram
-    );
-
-    await processBankrunTransaction(
-      bankrunContext,
-      new Transaction().add(createAtaIx),
-      [userB.wallet],
-      false,
-      true
-    );
-
-    const bankAfterAta = await bankrunProgram.account.bank.fetch(juplendBank);
-    assert.ok(
-      Object.keys(bankAfterAta.config.operationalState).includes("paused"),
-      "bank must remain paused after ATA creation"
-    );
+    // fToken vault is now a PDA created during add_pool (not a permissionless ATA),
+    // so the old attack vector of creating the ATA early no longer applies.
 
     // Deposit should fail with MarginfiError::BankPaused (6016).
     const depositIx = await makeJuplendDepositIx(userA.mrgnBankrunProgram!, {
