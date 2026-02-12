@@ -98,19 +98,42 @@ impl Lending {
 
     /// Expected fToken shares minted when depositing `assets` underlying.
     ///
-    /// Mirrors JupLend's ERC-4626 style `preview_deposit` semantics: **round down**.
+    /// Mirrors JupLend's actual deposit flow: **round down** via the liquidity layer.
     ///
-    /// Formula (1e12 precision): `shares = floor(assets * 1e12 / token_exchange_price)`.
-    /// https://github.com/Instadapp/fluid-solana-programs/blob/830458299be42eaeb6e1fe8fef6aa23444430a10/programs/lending/src/utils/deposit.rs#L68-L74
+    /// The deposit goes through a two-step conversion in the liquidity layer before
+    /// computing shares. The intermediate floor divisions can cause up to 1 unit of
+    /// rounding loss vs the naive single-step formula when exchange prices != 1e12.
+    ///
+    /// Formula (1e12 precision):
+    /// ```text
+    /// raw   = floor(assets * 1e12 / liquidity_exchange_price)
+    /// norm  = floor(raw * liquidity_exchange_price / 1e12)
+    /// shares = floor(norm * 1e12 / token_exchange_price)
+    /// ```
+    /// https://github.com/Instadapp/fluid-solana-programs/blob/830458299be42eaeb6e1fe8fef6aa23444430a10/programs/lending/src/utils/deposit.rs#L68-L86
     #[inline]
     pub fn expected_shares_for_deposit(&self, assets: u64) -> Result<u64> {
-        let token_exchange_price = self.token_exchange_price as u128;
-        require!(token_exchange_price > 0, JuplendMocksError::MathError);
+        let liquidity_ex_price = self.liquidity_exchange_price as u128;
+        let token_ex_price = self.token_exchange_price as u128;
+        require!(liquidity_ex_price > 0, JuplendMocksError::MathError);
+        require!(token_ex_price > 0, JuplendMocksError::MathError);
 
-        let shares_u128 = (assets as u128)
+        let registered_amount_raw = (assets as u128)
             .checked_mul(EXCHANGE_PRICES_PRECISION)
             .ok_or_else(|| error!(JuplendMocksError::MathError))?
-            .checked_div(token_exchange_price)
+            .checked_div(liquidity_ex_price)
+            .ok_or_else(|| error!(JuplendMocksError::MathError))?;
+
+        let registered_amount = registered_amount_raw
+            .checked_mul(liquidity_ex_price)
+            .ok_or_else(|| error!(JuplendMocksError::MathError))?
+            .checked_div(EXCHANGE_PRICES_PRECISION)
+            .ok_or_else(|| error!(JuplendMocksError::MathError))?;
+
+        let shares_u128 = registered_amount
+            .checked_mul(EXCHANGE_PRICES_PRECISION)
+            .ok_or_else(|| error!(JuplendMocksError::MathError))?
+            .checked_div(token_ex_price)
             .ok_or_else(|| error!(JuplendMocksError::MathError))?;
 
         shares_u128

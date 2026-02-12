@@ -405,7 +405,6 @@ pub struct JuplendWithdraw<'info> {
     pub liquidity: UncheckedAccount<'info>,
 
     /// CHECK: validated by the JupLend program
-    #[account(mut)]
     pub liquidity_program: UncheckedAccount<'info>,
 
     /// CHECK: validated by the JupLend program

@@ -290,7 +290,8 @@ describe("Juplend integration: interest accrual + exact share maths", () => {
 
     const expected = expectedSharesForDeposit(
       BigInt(DEPOSIT_AMOUNT.toString()),
-      lendingState.tokenExchangePrice
+      lendingState.tokenExchangePrice,
+      lendingState.liquidityExchangePrice
     );
 
     assert.equal(mintedShares1.toString(), expected.toString());
@@ -530,7 +531,8 @@ describe("Juplend integration: interest accrual + exact share maths", () => {
 
     const expected = expectedSharesForDeposit(
       BigInt(DEPOSIT_AMOUNT.toString()),
-      lendingState.tokenExchangePrice
+      lendingState.tokenExchangePrice,
+      lendingState.liquidityExchangePrice
     );
 
     assert.equal(mintedShares2.toString(), expected.toString());

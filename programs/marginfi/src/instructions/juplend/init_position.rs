@@ -137,8 +137,6 @@ pub struct JuplendInitPosition<'info> {
     pub liquidity: UncheckedAccount<'info>,
 
     /// CHECK: validated by the JupLend program
-    /// NOTE: JupLend marks this as writable in their Lending program (unusual for a program account)
-    #[account(mut)]
     pub liquidity_program: UncheckedAccount<'info>,
 
     /// CHECK: validated by the JupLend program

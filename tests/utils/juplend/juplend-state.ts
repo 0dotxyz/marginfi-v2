@@ -70,16 +70,36 @@ export function decodeJuplendLendingState(data: Buffer): JuplendLendingState {
 }
 
 /**
- * JupLend uses token_exchange_price to convert fTokens ↔ underlying.
+ * Expected fToken shares minted when depositing `assets` underlying.
  *
- * shares = floor(assets * 1e12 / token_exchange_price)
+ * Mirrors JupLend's actual deposit flow: **round down** via the liquidity layer.
+ *
+ * The deposit goes through a two-step conversion in the liquidity layer before
+ * computing shares. The intermediate floor divisions can cause up to 1 unit of
+ * rounding loss vs the naive single-step formula when exchange prices != 1e12.
+ *
+ * Formula (1e12 precision):
+ * ```text
+ * raw   = floor(assets * 1e12 / liquidity_exchange_price)
+ * norm  = floor(raw * liquidity_exchange_price / 1e12)
+ * shares = floor(norm * 1e12 / token_exchange_price)
+ * ```
  */
 export function expectedSharesForDeposit(
   assets: bigint,
-  tokenExchangePrice: bigint
+  tokenExchangePrice: bigint,
+  liquidityExchangePrice: bigint
 ): bigint {
   if (tokenExchangePrice <= 0n) throw new Error("tokenExchangePrice must be > 0");
-  return (assets * EXCHANGE_PRICE_PRECISION) / tokenExchangePrice;
+  if (liquidityExchangePrice <= 0n) throw new Error("liquidityExchangePrice must be > 0");
+
+  const registeredAmountRaw =
+    (assets * EXCHANGE_PRICE_PRECISION) / liquidityExchangePrice;
+
+  const registeredAmount =
+    (registeredAmountRaw * liquidityExchangePrice) / EXCHANGE_PRICE_PRECISION;
+
+  return (registeredAmount * EXCHANGE_PRICE_PRECISION) / tokenExchangePrice;
 }
 
 /**

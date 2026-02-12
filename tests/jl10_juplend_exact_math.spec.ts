@@ -94,12 +94,22 @@ describe("jl10: JupLend - exact math verification (zero tolerance)", () => {
     return BigInt(wrappedI80F48toBigNumber(x).toFixed(0));
   }
 
-  // Helper: fetch current exchange price
-  async function fetchTokenExchangePrice(): Promise<bigint> {
+  // Helper: fetch current exchange prices
+  async function fetchExchangePrices(): Promise<{
+    tokenExchangePrice: bigint;
+    liquidityExchangePrice: bigint;
+  }> {
     const info = await bankRunProvider.connection.getAccountInfo(pool.lending);
     assert.ok(info, "missing lending state");
     const st = decodeJuplendLendingState(info!.data);
-    return st.tokenExchangePrice;
+    return {
+      tokenExchangePrice: st.tokenExchangePrice,
+      liquidityExchangePrice: st.liquidityExchangePrice,
+    };
+  }
+
+  async function fetchTokenExchangePrice(): Promise<bigint> {
+    return (await fetchExchangePrices()).tokenExchangePrice;
   }
 
   // Helper: fetch marginfi asset shares for a user
@@ -462,13 +472,13 @@ describe("jl10: JupLend - exact math verification (zero tolerance)", () => {
     let userAcc: PublicKey;
     let depositAmount: BN;
     let sharesAfterDeposit: bigint;
-    let priceAtDeposit: bigint;
+    let pricesAtDeposit: { tokenExchangePrice: bigint; liquidityExchangePrice: bigint };
 
     it("deposit before interest", async () => {
       userAcc = await createMarginfiAccount();
       depositAmount = new BN(100 * 10 ** ecosystem.usdcDecimals);
 
-      priceAtDeposit = await fetchTokenExchangePrice();
+      pricesAtDeposit = await fetchExchangePrices();
 
       const depositIx = await makeJuplendDepositIx(userA.mrgnBankrunProgram!, {
         group: juplendGroup.publicKey,
@@ -497,7 +507,8 @@ describe("jl10: JupLend - exact math verification (zero tolerance)", () => {
       // Verify exact shares minted
       const expectedShares = expectedSharesForDeposit(
         BigInt(depositAmount.toString()),
-        priceAtDeposit
+        pricesAtDeposit.tokenExchangePrice,
+        pricesAtDeposit.liquidityExchangePrice
       );
       assert.equal(
         sharesAfterDeposit.toString(),
@@ -616,10 +627,10 @@ describe("jl10: JupLend - exact math verification (zero tolerance)", () => {
       // Use an amount that won't divide evenly (most amounts)
       const amount = new BN(100 * 10 ** ecosystem.usdcDecimals);
 
-      const price = await fetchTokenExchangePrice();
+      const { tokenExchangePrice: price, liquidityExchangePrice: liqPrice } = await fetchExchangePrices();
 
       // Calculate shares: deposit gets floor, withdraw needs ceiling
-      const depositShares = expectedSharesForDeposit(BigInt(amount.toString()), price);
+      const depositShares = expectedSharesForDeposit(BigInt(amount.toString()), price, liqPrice);
       const withdrawSharesNeeded = expectedSharesForWithdraw(BigInt(amount.toString()), price);
 
       // Verify this is a case where ceiling > floor (rounding mismatch exists)
@@ -728,13 +739,13 @@ describe("jl10: JupLend - exact math verification (zero tolerance)", () => {
           true
         );
 
-        const priceAfter = await fetchTokenExchangePrice();
+        const pricesAfter = await fetchExchangePrices();
         const sharesAfter = await fetchMarginfiAssetShares(userAcc);
         const sharesMinted = sharesAfter - sharesBefore;
 
         // Note: price may change slightly due to update_rate CPI in deposit
         // Use the price AFTER the deposit for exact comparison
-        const expectedMinted = expectedSharesForDeposit(BigInt(amt.toString()), priceAfter);
+        const expectedMinted = expectedSharesForDeposit(BigInt(amt.toString()), pricesAfter.tokenExchangePrice, pricesAfter.liquidityExchangePrice);
 
         assert.equal(
           sharesMinted.toString(),
@@ -808,8 +819,8 @@ describe("jl10: JupLend - exact math verification (zero tolerance)", () => {
       const userAcc = await createMarginfiAccount();
       const amount = new BN(1); // 1 unit (smallest possible)
 
-      const price = await fetchTokenExchangePrice();
-      const expectedShares = expectedSharesForDeposit(1n, price);
+      const { tokenExchangePrice: price, liquidityExchangePrice: liqPrice } = await fetchExchangePrices();
+      const expectedShares = expectedSharesForDeposit(1n, price, liqPrice);
 
       if (verbose) {
         console.log(`  price: ${price.toString()}`);
@@ -895,7 +906,7 @@ describe("jl10: JupLend - exact math verification (zero tolerance)", () => {
 
   describe("Test 5: evenly divisible amount (no rounding loss)", () => {
     it("when amount * 1e12 % price == 0, deposit and withdraw shares are equal", async () => {
-      const price = await fetchTokenExchangePrice();
+      const { tokenExchangePrice: price, liquidityExchangePrice: liqPrice } = await fetchExchangePrices();
 
       // To find an evenly divisible amount, we need: amount * 1e12 % price == 0
       // This means: amount must be a multiple of price / gcd(1e12, price)
@@ -928,7 +939,7 @@ describe("jl10: JupLend - exact math verification (zero tolerance)", () => {
       const amount = new BN(amountBigInt.toString());
 
       // Verify floor and ceiling give same result for evenly divisible amount
-      const depositShares = expectedSharesForDeposit(amountBigInt, price);
+      const depositShares = expectedSharesForDeposit(amountBigInt, price, liqPrice);
       const withdrawShares = expectedSharesForWithdraw(amountBigInt, price);
 
       assert.equal(
@@ -977,7 +988,7 @@ describe("jl10: JupLend - exact math verification (zero tolerance)", () => {
 
   describe("Test 6: withdrawAll with minimal shares", () => {
     it("minimal shares redeem for exact floor(shares * price / 1e12)", async () => {
-      const price = await fetchTokenExchangePrice();
+      const { tokenExchangePrice: price, liquidityExchangePrice: liqPrice } = await fetchExchangePrices();
 
       // JupLend rejects very small amounts with OperateAmountsNearlyZero error.
       // Use a larger amount that still tests the redeem math without hitting the minimum.
@@ -987,7 +998,7 @@ describe("jl10: JupLend - exact math verification (zero tolerance)", () => {
       // amount = ceil(shares * price / 1e12)
       const minAmount = (targetShares * price + EXCHANGE_PRICE_PRECISION - 1n) / EXCHANGE_PRICE_PRECISION;
 
-      const expectedSharesFromDeposit = expectedSharesForDeposit(minAmount, price);
+      const expectedSharesFromDeposit = expectedSharesForDeposit(minAmount, price, liqPrice);
       if (expectedSharesFromDeposit < targetShares) {
         console.log(`  minAmount ${minAmount} yields ${expectedSharesFromDeposit} shares (< ${targetShares}), skipping`);
         return;
@@ -1154,7 +1165,7 @@ describe("jl10: JupLend - exact math verification (zero tolerance)", () => {
 
   describe("Test 8: minimum deposit/withdraw thresholds", () => {
     it("find minimum deposit amount accepted by JupLend", async () => {
-      const price = await fetchTokenExchangePrice();
+      const { tokenExchangePrice: price, liquidityExchangePrice: liqPrice } = await fetchExchangePrices();
 
       // Binary search for minimum deposit
       let low = 1n;
@@ -1201,7 +1212,7 @@ describe("jl10: JupLend - exact math verification (zero tolerance)", () => {
         }
       }
 
-      const expectedShares = minAccepted ? expectedSharesForDeposit(minAccepted, price) : 0n;
+      const expectedShares = minAccepted ? expectedSharesForDeposit(minAccepted, price, liqPrice) : 0n;
 
       console.log(`  Minimum deposit accepted: ${minAccepted?.toString() ?? "none found"} units`);
       console.log(`  At price ${price}, this yields ~${expectedShares} shares`);
