@@ -217,6 +217,14 @@ pub mod marginfi {
         marginfi_account::initialize_liquidation_record(ctx)
     }
 
+    /// (risk_admin only) Close a LiquidationRecord account to reclaim rent. The record must not
+    /// be actively in use by an ongoing liquidation.
+    pub fn risk_admin_close_liquidation_record(
+        ctx: Context<RiskAdminCloseLiquidationRecord>,
+    ) -> MarginfiResult {
+        marginfi_account::risk_admin_close_liquidation_record(ctx)
+    }
+
     /// The same as `marginfi_account_initialize`, except the created marginfi account uses a PDA
     /// (Program Derived Address)
     ///

@@ -1,6 +1,7 @@
 mod account_transfer;
 mod bankruptcy;
 mod bankruptcy_auth;
+mod close_liq_record;
 mod create_marginfi_group;
 mod deleverage;
 mod freeze;
