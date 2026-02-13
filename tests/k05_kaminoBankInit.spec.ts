@@ -201,7 +201,7 @@ describe("k05: Init Kamino banks", () => {
       )
     );
     let result2 = await processBankrunTransaction(ctx, tx2, [usr.wallet], true);
-    // PythPushWrongAccountOwner
+    // WrongOracleAccountKeys
     assertBankrunTxFailed(result2, 6054);
   });
 

@@ -19,23 +19,22 @@ pub struct MarginfiGroup {
     /// Broadly able to modify anything, and can set/remove other admins at will.
     pub admin: Pubkey,
     /// Bitmask for group settings flags.
-    /// * 0: `PROGRAM_FEES_ENABLED` If set, program-level fees are enabled.
-    /// * 1: `ARENA_GROUP` Deprecated, available for future use.
+    /// * Bit 0 (1): `PROGRAM_FEES_ENABLED` — If set, program-level fees are enabled.
     /// * Bits 1-63: Reserved for future use.
     pub group_flags: u64,
     /// Caches information from the global `FeeState` so the FeeState can be omitted on certain ixes
     pub fee_state_cache: FeeStateCache,
-    // For groups initialized in versions 0.1.2 or greater, this is an authoritative count
-    // of the number of banks under this group. For groups initialized prior to 0.1.2,
-    // a non-authoritative count of the number of banks initiated after 0.1.2 went live.
+    /// For groups initialized in versions 0.1.2 or greater, this is an authoritative count
+    /// of the number of banks under this group. For groups initialized prior to 0.1.2,
+    /// a non-authoritative count of the number of banks initiated after 0.1.2 went live.
     pub banks: u16,
     pub pad0: [u8; 6],
     /// This admin can configure collateral ratios above (but not below) the collateral ratio of
     /// certain banks , e.g. allow SOL to count as 90% collateral when borrowing an LST instead of
     /// the default rate.
     pub emode_admin: Pubkey,
-    // Can modify the fields in `config.interest_rate_config` but nothing else, for every bank under
-    // this group
+    /// Can modify the fields in `config.interest_rate_config` but nothing else, for every bank
+    /// under this group
     pub delegate_curve_admin: Pubkey,
     /// Can modify the `deposit_limit`, `borrow_limit`, `total_asset_value_init_limit` but nothing
     /// else, for every bank under this group
@@ -56,9 +55,14 @@ pub struct MarginfiGroup {
     /// Can modify a Bank's metadata, and nothing else.
     pub metadata_admin: Pubkey,
 
+    /// Maximum leverage allowed for emode positions (initial margin), stored as u32 basis.
+    /// Use `u32_to_basis` to convert to I80F48. Range: 1-100.
     pub emode_max_init_leverage: u32,
+    /// Maximum leverage allowed for emode positions (maintenance margin), stored as u32 basis.
+    /// Must be > emode_max_init_leverage. Range: 1-100.
     pub emode_max_maint_leverage: u32,
 
+    /// Reserved for future use
     pub _padding: [u8; 8],
 
     /// Rate limiter for controlling aggregate withdraw/borrow outflow across all banks.
@@ -77,18 +81,27 @@ impl MarginfiGroup {
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
 #[derive(Default, Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)]
+/// Cached fee configuration propagated from the global FeeState
 pub struct FeeStateCache {
+    /// The wallet that receives program-level fees
     pub global_fee_wallet: Pubkey,
+    /// Fixed fee APR charged to borrowers (program-level)
     pub program_fee_fixed: WrappedI80F48,
+    /// Proportional fee rate on interest (program-level)
     pub program_fee_rate: WrappedI80F48,
+    /// Unix timestamp of the last fee state propagation
     pub last_update: i64,
 }
 
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
 #[derive(Default, Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)]
+/// Tracks deleverage withdrawal limits to protect against compromised risk admin
 pub struct WithdrawWindowCache {
+    /// Maximum USD value that can be withdrawn per day via deleverage (0 = no limit)
     pub daily_limit: u32,
-    pub withdrawn_today: u32, // in USD, approximate and rounded
+    /// USD value withdrawn today via deleverage (approximate, rounded)
+    pub withdrawn_today: u32,
+    /// Unix timestamp of the last daily counter reset
     pub last_daily_reset_timestamp: i64,
 }

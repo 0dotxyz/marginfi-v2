@@ -101,6 +101,9 @@ export const PROGRAM_FEE_FIXED = 0.01;
 export const PROGRAM_FEE_RATE = 0.02;
 /** The most a liquidator can earn in profit from receivership liquidation events */
 export const LIQUIDATION_MAX_FEE = 0.5;
+export const ORDER_EXECUTION_MAX_FEE = 0.05; // 5%
+export const ORDER_INIT_FLAT_FEE_DEFAULT = 100_000;
+
 
 // All groups and banks below need to be deterministic to ensure the same ordering of balances in
 // lending accounts
@@ -601,9 +604,11 @@ export const mochaHooks = {
         wallet: globalFeeWallet,
         bankInitFlatSolFee: INIT_POOL_ORIGINATION_FEE,
         liquidationFlatSolFee: LIQUIDATION_FLAT_FEE,
+        orderInitFlatFeeDefault: ORDER_INIT_FLAT_FEE_DEFAULT,
         programFeeFixed: bigNumberToWrappedI80F48(PROGRAM_FEE_FIXED),
         programFeeRate: bigNumberToWrappedI80F48(PROGRAM_FEE_RATE),
         liquidationMaxFee: bigNumberToWrappedI80F48(LIQUIDATION_MAX_FEE),
+        orderExecutionMaxFee: bigNumberToWrappedI80F48(ORDER_EXECUTION_MAX_FEE),
       }),
     );
     await processBankrunTransaction(

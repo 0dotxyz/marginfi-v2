@@ -41,7 +41,8 @@ use kamino_mocks::{
     state::{MinimalObligation, MinimalReserve},
 };
 use marginfi_type_crate::types::{
-    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+    ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
 };
 use marginfi_type_crate::{
     constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED},
@@ -113,12 +114,12 @@ pub fn kamino_withdraw<'info>(
             MarginfiError::AccountDisabled
         );
 
-        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
-
+        let in_receivership_or_order_execution =
+            marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
         // Fetch oracle price for rate limiting and deleverage tracking
         // When group rate limiter is enabled, oracle is required
         let group_rate_limit_enabled = group.rate_limiter.is_enabled();
-        let price = if in_receivership || group_rate_limit_enabled {
+        let price = if in_receivership_or_order_execution || group_rate_limit_enabled {
             let price = fetch_asset_price_for_bank_low_bias(
                 &bank_key,
                 &bank,
@@ -127,7 +128,7 @@ pub fn kamino_withdraw<'info>(
             )?;
 
             // Validate price is non-zero during liquidation/deleverage to prevent exploits with stale oracles
-            if in_receivership {
+            if in_receivership_or_order_execution {
                 check!(price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
             }
 
@@ -253,11 +254,12 @@ pub fn kamino_withdraw<'info>(
 
     marginfi_account.lending_account.sort_balances();
 
-    let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
+    let in_receivership_or_order_execution =
+        marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
 
-    // Note: during liquidation/receivership, we skip health checks until the end of the transaction,
-    // but we still update the price cache.
-    if !in_receivership {
+    // Note: during liquidation/receivership or order execution, we skip health checks until the end
+    // of the transaction, but we still update the price cache.
+    if !in_receivership_or_order_execution {
         // Check account health, if below threshold fail transaction
         // Assuming `ctx.remaining_accounts` holds only oracle accounts
         check_account_init_health(
@@ -316,7 +318,7 @@ pub struct KaminoWithdraw<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), true)
+            is_signer_authorized(&a, g.admin, authority.key(), true, true)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
@@ -341,8 +343,8 @@ pub struct KaminoWithdraw<'info> {
     )]
     pub bank: AccountLoader<'info, Bank>,
 
-    /// Token account that will get tokens back
-    /// WARN: Completely unchecked!
+    /// Token account that will receive the withdrawn tokens. Mint/owner are validated by the
+    /// SPL transfer; the caller controls the destination.
     #[account(mut)]
     pub destination_token_account: InterfaceAccount<'info, TokenAccount>,
 

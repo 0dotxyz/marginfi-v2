@@ -763,7 +763,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
           },
           {
             amount: halfAmount,
-            isFinalWithdrawal: false,
+            isWithdrawAll: false,
             remaining: composeRemainingAccounts([
               [usdcBank, oracles.usdcOracle.publicKey, usdcReserve],
             ]),
@@ -937,9 +937,13 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
             fundAmount.mul(new BN(10 ** ecosystem.tokenADecimals)).toNumber(),
           ),
         );
-      await processBankrunTransaction(bankrunContext, fundTx, [
-        globalProgramAdmin.wallet,
-      ]);
+      await processBankrunTransaction(
+        bankrunContext,
+        fundTx,
+        [globalProgramAdmin.wallet],
+        false,
+        true,
+      );
 
       for (let i = 0; i < NUM_ITERATIONS; i++) {
         // Randomly choose user and token
@@ -1057,9 +1061,13 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
               lamports: Math.round(Math.random() * 10000),
             }),
           );
-          await processBankrunTransaction(bankrunContext, depositTx, [
-            user.wallet,
-          ]);
+          await processBankrunTransaction(
+            bankrunContext,
+            depositTx,
+            [user.wallet],
+            false,
+            true,
+          );
         }
 
         // Advance time randomly between 1 hour and 7 days
@@ -1385,14 +1393,14 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
         },
         {
           amount: isFinalWithdrawal ? new BN(0) : amount,
-          isFinalWithdrawal,
+          isWithdrawAll:isFinalWithdrawal,
           remaining: isFinalWithdrawal
             ? composeRemainingAccountsByBalances(
                 marginfiAccount.lendingAccount.balances,
                 activePositions,
                 bank
               )
-            : activePositions.flat(),
+            : composeRemainingAccounts(activePositions),
         }
       ),
       // dummy tx to trick bankrun

@@ -106,7 +106,7 @@ async fn deleverage_happy_path() -> anyhow::Result<()> {
             &[init_ix, start_ix, withdraw_ix, repay_ix, end_ix],
             Some(&risk_admin),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client
@@ -206,7 +206,7 @@ async fn deleverage_happy_path() -> anyhow::Result<()> {
             ],
             Some(&risk_admin),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client
@@ -334,7 +334,7 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
             &[init_ix, start_ix, withdraw_ix, repay_ix, end_ix],
             Some(&risk_admin),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client
@@ -372,7 +372,7 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
         &[start_ix, withdraw_ix, repay_ix, end_ix],
         Some(&risk_admin),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     let res = ctx
@@ -458,7 +458,7 @@ async fn deleverage_cannot_worsen_health() -> anyhow::Result<()> {
         &[init_ix, start_ix, withdraw_ix, repay_ix, end_ix],
         Some(&risk_admin),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     let res = ctx
@@ -556,7 +556,7 @@ async fn deleverage_not_risk_admin() -> anyhow::Result<()> {
         &[init_ix, start_ix, withdraw_ix, repay_ix, end_ix],
         Some(&payer),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     let res = ctx
@@ -637,7 +637,7 @@ async fn deleverage_rejects_zero_weight_asset() -> anyhow::Result<()> {
         &[init_ix, start_ix, withdraw_ix, repay_ix, end_ix],
         Some(&risk_admin),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
     let res = ctx
         .banks_client
@@ -728,7 +728,7 @@ async fn deleverage_can_close_out_balances() -> anyhow::Result<()> {
             &[init_ix, start_ix, withdraw_ix, repay_ix, end_ix],
             Some(&risk_admin),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         let res = ctx
             .banks_client

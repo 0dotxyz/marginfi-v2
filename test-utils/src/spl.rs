@@ -78,12 +78,12 @@ impl MintFixture {
             )
             .unwrap();
 
-            let recent_blockhash = ctx.banks_client.get_latest_blockhash().await.unwrap();
+            let blockhash = ctx.banks_client.get_latest_blockhash().await.unwrap();
             let tx = Transaction::new_signed_with_payer(
                 &[init_account_ix, init_mint_ix],
                 Some(&ctx.payer.pubkey()),
                 &[&ctx.payer, &keypair],
-                recent_blockhash,
+                blockhash,
             );
 
             ctx.banks_client
@@ -169,12 +169,12 @@ impl MintFixture {
                 ));
             }
 
-            let recent_blockhash = ctx.banks_client.get_latest_blockhash().await.unwrap();
+            let blockhash = ctx.banks_client.get_latest_blockhash().await.unwrap();
             let tx = Transaction::new_signed_with_payer(
                 &ixs,
                 Some(&ctx.payer.pubkey()),
                 &[&ctx.payer, &keypair],
-                recent_blockhash,
+                blockhash,
             );
 
             ctx.banks_client
@@ -260,12 +260,12 @@ impl MintFixture {
             let ctx = self.ctx.borrow();
             let mint_to_ix =
                 self.make_mint_to_ix(dest, ui_to_native!(ui_amount.into(), self.mint.decimals));
-            let recent_blockhash = ctx.banks_client.get_latest_blockhash().await.unwrap();
+            let blockhash = ctx.banks_client.get_latest_blockhash().await.unwrap();
             Transaction::new_signed_with_payer(
                 &[mint_to_ix],
                 Some(&ctx.payer.pubkey()),
                 &[&ctx.payer],
-                recent_blockhash,
+                blockhash,
             )
         };
 
@@ -296,15 +296,33 @@ impl MintFixture {
         self.create_token_account_and_mint_to(0.0).await
     }
 
+    pub async fn create_empty_token_account_with_owner(
+        &self,
+        owner: &Pubkey,
+    ) -> TokenAccountFixture {
+        self.create_token_account_and_mint_to_with_owner(owner, 0.0)
+            .await
+    }
+
     pub async fn create_token_account_and_mint_to<'a, T: Into<f64>>(
         &self,
+        ui_amount: T,
+    ) -> TokenAccountFixture {
+        let payer = self.ctx.borrow().payer.pubkey();
+        self.create_token_account_and_mint_to_with_owner(&payer, ui_amount)
+            .await
+    }
+
+    pub async fn create_token_account_and_mint_to_with_owner<'a, T: Into<f64>>(
+        &self,
+        owner: &Pubkey,
         ui_amount: T,
     ) -> TokenAccountFixture {
         let payer = self.ctx.borrow().payer.pubkey();
         let token_account_f = TokenAccountFixture::new_with_token_program(
             self.ctx.clone(),
             &self.key,
-            &payer,
+            owner,
             &self.token_program,
         )
         .await;
@@ -314,13 +332,17 @@ impl MintFixture {
             ui_to_native!(ui_amount.into(), self.mint.decimals),
         );
 
+        let blockhash = {
+            let banks_client = self.ctx.borrow().banks_client.clone();
+            banks_client.get_latest_blockhash().await.unwrap()
+        };
         let ctx = self.ctx.borrow_mut();
         let recent_blockhash = ctx.banks_client.get_latest_blockhash().await.unwrap();
         let tx = Transaction::new_signed_with_payer(
             &[mint_to_ix],
-            Some(&ctx.payer.pubkey()),
+            Some(&payer),
             &[&ctx.payer],
-            recent_blockhash,
+            blockhash,
         );
 
         ctx.banks_client
@@ -437,12 +459,12 @@ impl TokenAccountFixture {
         )
         .await;
 
-        let recent_blockhash = ctx.banks_client.get_latest_blockhash().await.unwrap();
+        let blockhash = ctx.banks_client.get_latest_blockhash().await.unwrap();
         let tx = Transaction::new_signed_with_payer(
             &ixs,
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer, &keypair],
-            recent_blockhash,
+            blockhash,
         );
 
         ctx.banks_client
@@ -479,7 +501,7 @@ impl TokenAccountFixture {
 
             // Token extensions
 
-            let recent_blockhash = ctx
+            let blockhash = ctx
                 .borrow_mut()
                 .banks_client
                 .get_latest_blockhash()
@@ -489,7 +511,7 @@ impl TokenAccountFixture {
                 &instructions,
                 Some(&ctx.borrow().payer.pubkey()),
                 &[&ctx.borrow().payer, keypair],
-                recent_blockhash,
+                blockhash,
             );
 
             ctx.borrow_mut()
@@ -535,7 +557,7 @@ impl TokenAccountFixture {
                 token_program,
             );
 
-            let recent_blockhash = ctx
+            let blockhash = ctx
                 .borrow_mut()
                 .banks_client
                 .get_latest_blockhash()
@@ -545,7 +567,7 @@ impl TokenAccountFixture {
                 &[create_ata_ix],
                 Some(&ctx.borrow().payer.pubkey()),
                 &[&ctx.borrow().payer],
-                recent_blockhash,
+                blockhash,
             );
 
             ctx.borrow_mut()

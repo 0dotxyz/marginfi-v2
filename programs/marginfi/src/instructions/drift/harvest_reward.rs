@@ -122,7 +122,7 @@ pub struct DriftHarvestReward<'info> {
     pub harvest_drift_spot_market_vault: UncheckedAccount<'info>,
 
     /// The Drift signer PDA
-    /// CHECK: Validated via seeds
+    /// CHECK: Validated by the Drift program during CPI
     pub drift_signer: UncheckedAccount<'info>,
 
     pub reward_mint: Box<InterfaceAccount<'info, Mint>>,

@@ -35,7 +35,7 @@ use marginfi_type_crate::{
     constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, TOKENLESS_REPAYMENTS_COMPLETE},
     types::{
         Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -77,8 +77,8 @@ pub fn lending_account_withdraw<'info>(
             utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?
         };
 
-        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
-
+let in_receivership_or_order_execution =
+            marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
         if withdraw_all {
             // Require remaining accounts for all active balances, including the one being closed.
             validate_remaining_accounts_for_balances_close_last(
@@ -95,7 +95,7 @@ pub fn lending_account_withdraw<'info>(
         // Fetch oracle price for rate limiting and deleverage tracking
         // When group rate limiter is enabled, oracle is required
         let group_rate_limit_enabled = group.rate_limiter.is_enabled();
-        let price = if in_receivership || group_rate_limit_enabled {
+        let price = if in_receivership_or_order_execution || group_rate_limit_enabled {
             let price = fetch_asset_price_for_bank_low_bias(
                 &bank_loader.key(),
                 &bank,
@@ -104,7 +104,7 @@ pub fn lending_account_withdraw<'info>(
             )?;
 
             // Validate price is non-zero during liquidation/deleverage to prevent exploits
-            if in_receivership {
+            if in_receivership_or_order_execution {
                 check!(price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
             }
 
@@ -248,8 +248,8 @@ pub fn lending_account_withdraw<'info>(
     let maybe_price: Option<OraclePriceWithConfidence>;
     let bank_pk = bank_loader.key();
 
-    // Note: during receivership, we skip all health checks until the end of the transaction.
-    if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
+    // Note: during receivership and order execution, we skip all health checks until the end of the transaction.
+    if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION) {
         // Check account health, if below threshold fail transaction
         // Assuming `ctx.remaining_accounts` holds only oracle accounts
         // Uses heap-efficient health check to support accounts with up to 16 positions
@@ -297,15 +297,15 @@ pub struct LendingAccountWithdraw<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), true)
+            is_signer_authorized(&a, g.admin, authority.key(), true, true)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
-    /// Must be marginfi_account's authority, unless in liquidation/deleverage receivership
+    /// Must be marginfi_account's authority, unless in liquidation/deleverage receivership or order execution
     ///
-    /// Note: during receivership, there are no signer checks whatsoever: any key can repay as
-    /// long as the invariants checked at the end of receivership are met.
+    /// Note: during receivership and order execution, there are no signer checks whatsoever: any key can repay as
+    /// long as the invariants checked at the end of execution are met.
     pub authority: Signer<'info>,
 
     #[account(

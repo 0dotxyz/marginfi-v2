@@ -11,7 +11,7 @@ use fixed::types::I80F48;
 use marginfi::{
     constants::{
         INIT_BANK_ORIGINATION_FEE_DEFAULT, LIQUIDATION_BONUS_FEE_MINIMUM,
-        LIQUIDATION_FLAT_FEE_DEFAULT,
+        LIQUIDATION_FLAT_FEE_DEFAULT, ORDER_EXECUTION_MAX_FEE, ORDER_INIT_FLAT_FEE_DEFAULT,
     },
     instruction::*,
     state::bank::BankVaultType,
@@ -81,13 +81,13 @@ impl MarginfiGroupFixture {
                     // Payer is all admins in most test cases for simplicity, generally this is not
                     // true in production - the MS is the main admin and others are lower-impact
                     // wallets with a smaller threshold.
-                    new_admin: admin,
-                    new_emode_admin: admin,
-                    new_curve_admin: admin,
-                    new_limit_admin: admin,
-                    new_emissions_admin: admin,
-                    new_metadata_admin: admin,
-                    new_risk_admin: admin,
+                    new_admin: Some(admin),
+                    new_emode_admin: Some(admin),
+                    new_curve_admin: Some(admin),
+                    new_limit_admin: Some(admin),
+                    new_emissions_admin: Some(admin),
+                    new_metadata_admin: Some(admin),
+                    new_risk_admin: Some(admin),
                     emode_max_init_leverage: None,
                     emode_max_maint_leverage: None,
                 }
@@ -109,7 +109,7 @@ impl MarginfiGroupFixture {
                         &[initialize_marginfi_group_ix, configure_marginfi_group_ix],
                         Some(&ctx.payer.pubkey().clone()),
                         &[&ctx.payer, &group_key],
-                        ctx.last_blockhash,
+                        ctx.banks_client.get_latest_blockhash().await.unwrap(),
                     );
                     ctx.banks_client.process_transaction(tx).await.unwrap();
                 } else {
@@ -134,10 +134,12 @@ impl MarginfiGroupFixture {
                         admin: ctx.payer.pubkey(),
                         fee_wallet: fee_wallet.pubkey(),
                         bank_init_flat_sol_fee: INIT_BANK_ORIGINATION_FEE_DEFAULT,
+                        order_init_flat_sol_fee: ORDER_INIT_FLAT_FEE_DEFAULT,
                         liquidation_flat_sol_fee: LIQUIDATION_FLAT_FEE_DEFAULT,
                         program_fee_fixed: PROTOCOL_FEE_FIXED_DEFAULT.into(),
                         program_fee_rate: PROTOCOL_FEE_RATE_DEFAULT.into(),
                         liquidation_max_fee: LIQUIDATION_BONUS_FEE_MINIMUM.into(),
+                        order_execution_max_fee: ORDER_EXECUTION_MAX_FEE.into(),
                     }
                     .data(),
                 };
@@ -150,7 +152,7 @@ impl MarginfiGroupFixture {
                     ],
                     Some(&ctx.payer.pubkey().clone()),
                     &[&ctx.payer, &group_key],
-                    ctx.last_blockhash,
+                    ctx.banks_client.get_latest_blockhash().await.unwrap(),
                 );
                 ctx.banks_client.process_transaction(tx).await.unwrap();
             }
@@ -247,7 +249,7 @@ impl MarginfiGroupFixture {
             &[init_ix, config_oracle_ix],
             Some(&self.ctx.borrow().payer.pubkey().clone()),
             &[&self.ctx.borrow().payer, &bank_key],
-            self.ctx.borrow().last_blockhash,
+            latest_blockhash(&self.ctx).await,
         );
 
         self.ctx
@@ -343,7 +345,7 @@ impl MarginfiGroupFixture {
             &[init_ix, config_oracle_ix],
             Some(&self.ctx.borrow().payer.pubkey().clone()),
             &[&self.ctx.borrow().payer],
-            self.ctx.borrow().last_blockhash,
+            latest_blockhash(&self.ctx).await,
         );
 
         self.ctx
@@ -429,7 +431,7 @@ impl MarginfiGroupFixture {
             &[ix],
             Some(&self.ctx.borrow().payer.pubkey().clone()),
             &[&self.ctx.borrow().payer],
-            self.ctx.borrow().last_blockhash,
+            latest_blockhash(&self.ctx).await,
         );
 
         self.ctx
@@ -473,7 +475,7 @@ impl MarginfiGroupFixture {
             &[ix],
             Some(&self.ctx.borrow().payer.pubkey()),
             &[&self.ctx.borrow().payer],
-            self.ctx.borrow().last_blockhash,
+            latest_blockhash(&self.ctx).await,
         );
 
         self.ctx
@@ -528,7 +530,7 @@ impl MarginfiGroupFixture {
             &[ix],
             Some(&self.ctx.borrow().payer.pubkey()),
             &[&self.ctx.borrow().payer],
-            self.ctx.borrow().last_blockhash,
+            latest_blockhash(&self.ctx).await,
         );
 
         self.ctx
@@ -595,7 +597,7 @@ impl MarginfiGroupFixture {
             &[ix],
             Some(&self.ctx.borrow().payer.pubkey().clone()),
             &[&self.ctx.borrow().payer],
-            self.ctx.borrow().last_blockhash,
+            latest_blockhash(&self.ctx).await,
         );
 
         self.ctx
@@ -651,7 +653,7 @@ impl MarginfiGroupFixture {
             &[ix],
             Some(&ctx.payer.pubkey()),
             &signers,
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client.process_transaction(tx).await?;
@@ -676,7 +678,7 @@ impl MarginfiGroupFixture {
             &[ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client.process_transaction(tx).await?;
@@ -701,7 +703,7 @@ impl MarginfiGroupFixture {
             &[ix],
             Some(&ctx.payer.pubkey().clone()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client.process_transaction(tx).await?;
@@ -739,7 +741,7 @@ impl MarginfiGroupFixture {
             &[ix],
             Some(&ctx.payer.pubkey().clone()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client.process_transaction(tx).await
@@ -789,13 +791,13 @@ impl MarginfiGroupFixture {
             }
             .to_account_metas(Some(true)),
             data: MarginfiGroupConfigure {
-                new_admin,
-                new_emode_admin,
-                new_curve_admin,
-                new_limit_admin,
-                new_emissions_admin,
-                new_metadata_admin,
-                new_risk_admin,
+                new_admin: Some(new_admin),
+                new_emode_admin: Some(new_emode_admin),
+                new_curve_admin: Some(new_curve_admin),
+                new_limit_admin: Some(new_limit_admin),
+                new_emissions_admin: Some(new_emissions_admin),
+                new_metadata_admin: Some(new_metadata_admin),
+                new_risk_admin: Some(new_risk_admin),
                 emode_max_init_leverage,
                 emode_max_maint_leverage,
             }
@@ -806,7 +808,7 @@ impl MarginfiGroupFixture {
             &[ix],
             Some(&self.ctx.borrow().payer.pubkey().clone()),
             &[&self.ctx.borrow().payer],
-            self.ctx.borrow().last_blockhash,
+            latest_blockhash(&self.ctx).await,
         );
 
         self.ctx
@@ -836,7 +838,7 @@ impl MarginfiGroupFixture {
             &[ix],
             Some(&self.ctx.borrow().payer.pubkey().clone()),
             &[&self.ctx.borrow().payer],
-            self.ctx.borrow().last_blockhash,
+            latest_blockhash(&self.ctx).await,
         );
 
         self.ctx
@@ -883,7 +885,7 @@ impl MarginfiGroupFixture {
             &[ix],
             Some(&ctx.payer.pubkey().clone()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client.process_transaction(tx).await?;
@@ -941,7 +943,7 @@ impl MarginfiGroupFixture {
             &[ix, nonce_ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client.process_transaction(tx).await
@@ -989,7 +991,7 @@ impl MarginfiGroupFixture {
             &[ix],
             Some(&self.ctx.borrow().payer.pubkey()),
             &[&self.ctx.borrow().payer],
-            self.ctx.borrow().last_blockhash,
+            latest_blockhash(&self.ctx).await,
         );
 
         self.ctx
@@ -1014,7 +1016,7 @@ impl MarginfiGroupFixture {
             &[ix],
             Some(&self.ctx.borrow().payer.pubkey()),
             &[&self.ctx.borrow().payer],
-            self.ctx.borrow().last_blockhash,
+            latest_blockhash(&self.ctx).await,
         );
 
         self.ctx
@@ -1039,7 +1041,7 @@ impl MarginfiGroupFixture {
             &[ix],
             Some(&self.ctx.borrow().payer.pubkey()),
             &[&self.ctx.borrow().payer],
-            self.ctx.borrow().last_blockhash,
+            latest_blockhash(&self.ctx).await,
         );
 
         self.ctx

@@ -44,7 +44,7 @@ import {
   repayIx,
 } from "./utils/user-instructions";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
-import { dumpBankrunLogs, processBankrunTransaction } from "./utils/tools";
+import { dumpBankrunLogs, logHealthCache, processBankrunTransaction } from "./utils/tools";
 import { genericMultiBankTestSetup } from "./genericSetups";
 import { refreshPullOracles } from "./utils/pyth-pull-mocks";
 import { getBankrunBlockhash } from "./utils/spl-staking-utils";
@@ -200,7 +200,7 @@ SCENARIOS.forEach(({ kaminoDeposits }, scenarioIndex) => {
             },
             {
               amount: withdrawTokenAAmount,
-              isFinalWithdrawal: false,
+              isWithdrawAll: false,
               remaining: kaminoRemaining,
             },
           ),
@@ -230,7 +230,7 @@ SCENARIOS.forEach(({ kaminoDeposits }, scenarioIndex) => {
             },
             {
               amount: withdrawTokenAAmount,
-              withdraw_all: false,
+              withdrawAll: false,
               remaining: driftRemaining,
             },
             driftBankrunProgram,

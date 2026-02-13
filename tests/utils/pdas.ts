@@ -1,5 +1,6 @@
 import { BN } from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
+import { createHash } from "crypto";
 import { KLEND_PROGRAM_ID } from "./types";
 
 export const deriveLiquidityVaultAuthority = (
@@ -49,6 +50,48 @@ export const deriveFeeVaultAuthority = (
 export const deriveFeeVault = (programId: PublicKey, bank: PublicKey) => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("fee_vault", "utf-8"), bank.toBuffer()],
+    programId
+  );
+};
+
+/**
+ * PDA for an order account.
+ * Seeds: ["order", marginfi_account, sha256(concat(bank_pubkeys))]
+ */
+export const deriveOrderPda = (
+  programId: PublicKey,
+  marginfiAccount: PublicKey,
+  bankKeys: PublicKey[]
+): [PublicKey, number] => {
+  const sorted = [...bankKeys].sort((a, b) => {
+    const A = a.toBuffer();
+    const B = b.toBuffer();
+    for (let i = 0; i < 32; i++) {
+      if (A[i] !== B[i]) return A[i] - B[i];
+    }
+    return 0;
+  });
+
+  const hasher = createHash("sha256");
+  sorted.forEach((k) => hasher.update(k.toBuffer()));
+  const hash = hasher.digest(); // 32 bytes
+
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("order", "utf-8"), marginfiAccount.toBuffer(), hash],
+    programId
+  );
+};
+
+/**
+ * PDA for an execute-order record account.
+ * Seeds: ["execute_order", order_pubkey]
+ */
+export const deriveExecuteOrderPda = (
+  programId: PublicKey,
+  order: PublicKey
+): [PublicKey, number] => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("execute_order", "utf-8"), order.toBuffer()],
     programId
   );
 };
@@ -338,10 +381,10 @@ export const deriveObligation = (
 /**
  * Somewhat contrary to the name, this is the rewards state of the farms program for an obligation
  * (like one owned by a bank), and has nothing to do with "users" in a margin context.
- * @param programId 
- * @param farmState 
- * @param obligation 
- * @returns 
+ * @param programId
+ * @param farmState
+ * @param obligation
+ * @returns
  */
 export function deriveUserState(
   programId: PublicKey,

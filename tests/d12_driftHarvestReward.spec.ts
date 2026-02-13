@@ -315,7 +315,7 @@ describe("d12: Drift Harvest Reward", () => {
       },
       {
         amount: depositAmount,
-        withdraw_all: false,
+        withdrawAll: false,
         remaining: composeRemainingAccounts([
           [driftTokenABank, tokenAOracle, tokenASpotMarket],
         ]),
@@ -357,7 +357,7 @@ describe("d12: Drift Harvest Reward", () => {
       },
       {
         amount: new BN(0),
-        withdraw_all: true,
+        withdrawAll: true,
         remaining,
       },
       driftBankrunProgram
@@ -1103,7 +1103,7 @@ describe("d12: Drift Harvest Reward", () => {
       },
       {
         amount: new BN(0),
-        withdraw_all: true,
+        withdrawAll: true,
         remaining,
       },
       driftBankrunProgram
@@ -1205,7 +1205,7 @@ describe("d12: Drift Harvest Reward", () => {
       },
       {
         amount: new BN(0),
-        withdraw_all: true,
+        withdrawAll: true,
         remaining,
       },
       driftBankrunProgram
@@ -1319,7 +1319,7 @@ describe("d12: Drift Harvest Reward", () => {
       },
       {
         amount: new BN(0),
-        withdraw_all: true,
+        withdrawAll: true,
         remaining,
       },
       driftBankrunProgram

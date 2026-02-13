@@ -50,7 +50,7 @@ async fn liquidate_start_fails_on_healthy_account() -> anyhow::Result<()> {
         &[init_ix],
         Some(&ctx.payer.pubkey()),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
     ctx.banks_client
         .process_transaction_with_preflight(init_tx)
@@ -61,7 +61,7 @@ async fn liquidate_start_fails_on_healthy_account() -> anyhow::Result<()> {
         &[start_ix, end_ix],
         Some(&ctx.payer.pubkey()),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
     let res = ctx
         .banks_client
@@ -141,7 +141,7 @@ async fn liquidate_start_must_be_first() -> anyhow::Result<()> {
             &[init_ix.clone()],
             Some(&payer),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         ctx.banks_client.process_transaction(init_tx).await?;
     } //release borrow of ctx
@@ -159,7 +159,7 @@ async fn liquidate_start_must_be_first() -> anyhow::Result<()> {
             &[deposit_ix, start_ix.clone(), end_ix.clone()],
             Some(&payer),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         let res = ctx
@@ -178,7 +178,7 @@ async fn liquidate_start_must_be_first() -> anyhow::Result<()> {
             &[start_ix.clone(), start_ix.clone(), end_ix.clone()],
             Some(&payer),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         let res = ctx
@@ -205,7 +205,7 @@ async fn liquidate_start_must_be_first() -> anyhow::Result<()> {
             &[fake_kamino_refresh_ix, start_ix.clone(), end_ix.clone()],
             Some(&payer),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         let res = ctx
@@ -246,7 +246,7 @@ async fn liquidate_start_must_be_first() -> anyhow::Result<()> {
         ],
         Some(&payer),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
     ctx.banks_client
         .process_transaction_with_preflight(tx)
@@ -317,7 +317,7 @@ async fn liquidate_end_missing_fails() -> anyhow::Result<()> {
             &[init_ix.clone()],
             Some(&payer),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         ctx.banks_client
             .process_transaction_with_preflight(init_tx)
@@ -327,7 +327,7 @@ async fn liquidate_end_missing_fails() -> anyhow::Result<()> {
             &[start_ix.clone()],
             Some(&payer),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         let res = ctx
             .banks_client
@@ -346,7 +346,7 @@ async fn liquidate_end_missing_fails() -> anyhow::Result<()> {
             &[start_ix.clone(), end_ix.clone(), compute_ix],
             Some(&payer),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         let res = ctx
             .banks_client
@@ -421,7 +421,7 @@ async fn liquidate_with_forbidden_ix_fails() -> anyhow::Result<()> {
         &[init_ix],
         Some(&ctx.payer.pubkey()),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
     ctx.banks_client
         .process_transaction_with_preflight(init_tx)
@@ -431,7 +431,7 @@ async fn liquidate_with_forbidden_ix_fails() -> anyhow::Result<()> {
         &[start_ix, forbidden_deposit_ix, end_ix],
         Some(&ctx.payer.pubkey()),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
     let res = ctx
         .banks_client
@@ -497,7 +497,7 @@ async fn liquidate_receiver_happy_path() -> anyhow::Result<()> {
             &[init_ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         ctx.banks_client
             .process_transaction_with_preflight(init_tx)
@@ -544,7 +544,7 @@ async fn liquidate_receiver_happy_path() -> anyhow::Result<()> {
             &[start_ix, withdraw_ix, repay_ix, end_ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client
@@ -794,7 +794,7 @@ async fn liquidate_receiver_premium_too_high() -> anyhow::Result<()> {
             &[init_ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         ctx.banks_client
             .process_transaction_with_preflight(init_tx)
@@ -827,7 +827,7 @@ async fn liquidate_receiver_premium_too_high() -> anyhow::Result<()> {
         &[start_ix, withdraw_ix, repay_ix, end_ix],
         Some(&ctx.payer.pubkey()),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
     let res = ctx
         .banks_client
@@ -885,7 +885,7 @@ async fn liquidate_receiver_rejects_zero_weight_asset() -> anyhow::Result<()> {
             &[init_ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         ctx.banks_client
             .process_transaction_with_preflight(init_tx)
@@ -916,7 +916,7 @@ async fn liquidate_receiver_rejects_zero_weight_asset() -> anyhow::Result<()> {
         &[start_ix, withdraw_ix, repay_ix, end_ix],
         Some(&ctx.payer.pubkey()),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
     let res = ctx
         .banks_client
@@ -976,7 +976,7 @@ async fn liquidate_receiver_closes_out_low_value_acc() -> anyhow::Result<()> {
             &[init_ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         ctx.banks_client
             .process_transaction_with_preflight(init_tx)
@@ -1011,7 +1011,7 @@ async fn liquidate_receiver_closes_out_low_value_acc() -> anyhow::Result<()> {
             &[start_ix, withdraw_ix, repay_ix, end_ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         let res = ctx
             .banks_client
@@ -1078,7 +1078,7 @@ async fn liquidate_receiver_allows_negative_profit() -> anyhow::Result<()> {
             &[init_ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         ctx.banks_client
             .process_transaction_with_preflight(init_tx)
@@ -1113,7 +1113,7 @@ async fn liquidate_receiver_allows_negative_profit() -> anyhow::Result<()> {
         &[start_ix, withdraw_ix, repay_ix, end_ix],
         Some(&ctx.payer.pubkey()),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
     ctx.banks_client
         .process_transaction_with_preflight(tx)

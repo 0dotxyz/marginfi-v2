@@ -352,7 +352,7 @@ async fn marginfi_group_add_bank_failure_inexistent_pyth_feed() -> anyhow::Resul
         .await;
 
     assert!(res.is_err());
-    assert_custom_error!(res.unwrap_err(), MarginfiError::PythPushWrongAccountOwner);
+    assert_custom_error!(res.unwrap_err(), MarginfiError::PythPushInvalidAccount);
 
     Ok(())
 }
@@ -395,7 +395,7 @@ async fn configure_bank_to_fixed_oracle() -> anyhow::Result<()> {
             &[ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client.process_transaction(tx).await?;
@@ -448,7 +448,7 @@ async fn update_fixed_bank_price() -> anyhow::Result<()> {
             &[ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client.process_transaction(tx).await?;

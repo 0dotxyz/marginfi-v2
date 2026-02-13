@@ -105,7 +105,7 @@ async fn liquidate_start_then_cpi_start_on_different_accounts_exploit() -> anyho
                 &[init_ix],
                 Some(&ctx.payer.pubkey()),
                 &[&ctx.payer],
-                ctx.last_blockhash,
+                ctx.banks_client.get_latest_blockhash().await.unwrap(),
             );
             ctx.banks_client
                 .process_transaction_with_preflight(tx)
@@ -170,7 +170,7 @@ async fn liquidate_start_then_cpi_start_on_different_accounts_exploit() -> anyho
             ],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         // Should fail: CPI call doesn't appear as a top-level mrgn ix, so introspection of the
@@ -264,7 +264,7 @@ async fn handle_bankruptcy_via_cpi_fails() -> anyhow::Result<()> {
             &[init_ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         ctx.banks_client
             .process_transaction_with_preflight(tx)
@@ -343,7 +343,7 @@ async fn handle_bankruptcy_via_cpi_fails() -> anyhow::Result<()> {
             &[start_ix, withdraw_ix, bankrupt_via_cpi_ix, end_ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         let result = ctx
             .banks_client
