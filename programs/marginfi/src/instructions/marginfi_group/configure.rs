@@ -11,20 +11,17 @@ fn validate_and_apply_emode_leverage(
     new_value: Option<WrappedI80F48>,
     current: &mut u32,
 ) -> MarginfiResult {
-    match new_value {
-        Some(wrapped) => {
-            let leverage: I80F48 = wrapped.into();
-            if leverage < I80F48::ONE {
-                msg!("emode leverage {} must be >= 1", leverage);
-                return Err(MarginfiError::BadEmodeConfig.into());
-            }
-            if leverage > I80F48::from_num(100) {
-                msg!("emode leverage {} must be <= 100", leverage);
-                return Err(MarginfiError::BadEmodeConfig.into());
-            }
-            *current = basis_to_u32(leverage);
+    if let Some(wrapped) = new_value {
+        let leverage: I80F48 = wrapped.into();
+        if leverage < I80F48::ONE {
+            msg!("emode leverage {} must be >= 1", leverage);
+            return Err(MarginfiError::BadEmodeConfig.into());
         }
-        None => {}
+        if leverage > I80F48::from_num(100) {
+            msg!("emode leverage {} must be <= 100", leverage);
+            return Err(MarginfiError::BadEmodeConfig.into());
+        }
+        *current = basis_to_u32(leverage);
     }
     Ok(())
 }
