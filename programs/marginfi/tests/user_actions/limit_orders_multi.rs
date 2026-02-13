@@ -734,7 +734,10 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
     )
     .await;
 
-    assert_custom_error!(result.unwrap_err(), MarginfiError::OrderExecutionOverWithdrawal);
+    assert_custom_error!(
+        result.unwrap_err(),
+        MarginfiError::OrderExecutionOverWithdrawal
+    );
 
     // Executing A/D with just enough still works as expected.
     let result = execute_order_with_withdraw(

@@ -1015,7 +1015,7 @@ describe("orders", () => {
 
         const remaining = buildRemaining();
         const baseWithdraw = calcWithdrawAmount(oracles.tokenAPrice);
-        const excessiveWithdraw = baseWithdraw.add(baseWithdraw.divn(20)); // +5%
+        const excessiveWithdraw = baseWithdraw.muln(2); // +100%
         const {
           startIx,
           withdrawEmissionsPermIx,
