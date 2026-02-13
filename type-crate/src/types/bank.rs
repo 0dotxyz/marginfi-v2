@@ -216,6 +216,7 @@ pub enum OracleSetup {
     FixedDrift = 14,
     JuplendPythPull = 15,
     JuplendSwitchboardPull = 16,
+    FixedJuplend = 17,
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
@@ -240,6 +241,7 @@ impl OracleSetup {
             14 => Some(Self::FixedDrift),
             15 => Some(Self::JuplendPythPull),
             16 => Some(Self::JuplendSwitchboardPull),
+            17 => Some(Self::FixedJuplend),
             _ => None,
         }
     }

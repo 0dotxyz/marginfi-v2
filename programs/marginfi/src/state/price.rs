@@ -9,7 +9,7 @@ use anchor_spl::token::Mint;
 use drift_mocks::state::MinimalSpotMarket;
 use enum_dispatch::enum_dispatch;
 use fixed::types::I80F48;
-use juplend_mocks::state::Lending as JuplendLending;
+use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION};
 use kamino_mocks::state::MinimalReserve;
 use marginfi_type_crate::{
     constants::{
@@ -161,6 +161,33 @@ fn load_solend_reserve<'info>(
 
 fn ensure_solend_reserve_fresh(reserve: &SolendMinimalReserve) -> MarginfiResult<()> {
     require!(!reserve.is_stale()?, MarginfiError::SolendReserveStale);
+    Ok(())
+}
+
+fn load_juplend_lending<'info>(
+    bank_config: &BankConfig,
+    lending_info: &'info AccountInfo<'info>,
+) -> MarginfiResult<AccountLoader<'info, JuplendLending>> {
+    require_keys_eq!(
+        *lending_info.key,
+        bank_config.oracle_keys[1],
+        MarginfiError::JuplendLendingValidationFailed
+    );
+
+    // Verifies owner + discriminator automatically
+    let lending_loader: AccountLoader<JuplendLending> = AccountLoader::try_from(lending_info)
+        .map_err(|_| MarginfiError::JuplendLendingValidationFailed)?;
+    Ok(lending_loader)
+}
+
+fn ensure_juplend_lending_fresh(
+    lending: &JuplendLending,
+    clock: &Clock,
+) -> MarginfiResult<()> {
+    require!(
+        !lending.is_stale(clock.unix_timestamp),
+        MarginfiError::JuplendLendingStale
+    );
     Ok(())
 }
 
@@ -532,6 +559,37 @@ impl OraclePriceFeedAdapter {
                 }))
             }
 
+            OracleSetup::FixedJuplend => {
+                // Fixed base price + JupLend Lending exchange rate
+                // Requires: JupLend Lending state (no oracle needed)
+                check!(ais.len() == 1, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let lending_info = &ais[0];
+
+                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
+                let lending = lending_loader.load()?;
+                ensure_juplend_lending_fresh(&lending, clock)?;
+
+                let base_price: I80F48 = bank.config.fixed_price.into();
+                check!(
+                    base_price >= I80F48::ZERO,
+                    MarginfiError::FixedOraclePriceNegative
+                );
+
+                // Apply JupLend exchange rate: base_price * token_exchange_price / 1e12
+                let rate = I80F48::from_num(lending.token_exchange_price);
+                let precision = I80F48::from_num(EXCHANGE_PRICES_PRECISION);
+                let adjusted_price = base_price
+                    .checked_mul(rate)
+                    .ok_or_else(math_error!())?
+                    .checked_div(precision)
+                    .ok_or_else(math_error!())?;
+
+                Ok(OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                    price: adjusted_price,
+                }))
+            }
+
             OracleSetup::JuplendPythPull => {
                 // (1) Pyth oracle (for price) and (2) JupLend Lending state (for exchange rate)
                 require_eq!(ais.len(), 2, MarginfiError::WrongNumberOfOracleAccounts);
@@ -539,33 +597,16 @@ impl OraclePriceFeedAdapter {
                 let oracle_info = &ais[0];
                 let lending_info = &ais[1];
 
-                // Validate oracle account matches expected key
                 require_keys_eq!(
                     *oracle_info.key,
                     bank_config.oracle_keys[0],
                     MarginfiError::WrongOracleAccountKeys
                 );
 
-                // Validate lending account matches expected key
-                require_keys_eq!(
-                    *lending_info.key,
-                    bank_config.oracle_keys[1],
-                    MarginfiError::JuplendLendingValidationFailed
-                );
-
-                // Verifies owner + discriminator automatically
-                let lending_loader: AccountLoader<JuplendLending> =
-                    AccountLoader::try_from(lending_info)
-                        .map_err(|_| MarginfiError::JuplendLendingValidationFailed)?;
+                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
                 let lending = lending_loader.load()?;
+                ensure_juplend_lending_fresh(&lending, clock)?;
 
-                // Strict freshness requirement: must be updated this slot/time
-                require!(
-                    !lending.is_stale(clock.unix_timestamp),
-                    MarginfiError::JuplendLendingStale
-                );
-
-                // Owner/discriminator validated inside load_checked -> load_price_update_v2_checked
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(oracle_info, clock, max_age)?;
 
@@ -591,21 +632,9 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::WrongOracleAccountKeys
                 );
 
-                require_keys_eq!(
-                    *lending_info.key,
-                    bank_config.oracle_keys[1],
-                    MarginfiError::JuplendLendingValidationFailed
-                );
-
-                let lending_loader: AccountLoader<JuplendLending> =
-                    AccountLoader::try_from(lending_info)
-                        .map_err(|_| MarginfiError::JuplendLendingValidationFailed)?;
+                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
                 let lending = lending_loader.load()?;
-
-                require!(
-                    !lending.is_stale(clock.unix_timestamp),
-                    MarginfiError::JuplendLendingStale
-                );
+                ensure_juplend_lending_fresh(&lending, clock)?;
 
                 let mut price_feed = SwitchboardPullPriceFeed::load_checked(
                     oracle_info,
@@ -865,6 +894,21 @@ impl OraclePriceFeedAdapter {
                     *oracle_ais[0].key,
                     bank_config.oracle_keys[1],
                     MarginfiError::KaminoReserveValidationFailed
+                );
+                Ok(())
+            }
+            OracleSetup::FixedJuplend => {
+                // Fixed base price with JupLend Lending exchange rate
+                require_eq!(
+                    oracle_ais.len(),
+                    1,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                require_keys_eq!(
+                    *oracle_ais[0].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::JuplendLendingValidationFailed
                 );
                 Ok(())
             }

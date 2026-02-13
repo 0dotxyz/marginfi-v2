@@ -65,6 +65,7 @@ export const ORACLE_SETUP_SWITCHBOARD_v2 = 2;
 export const ORACLE_SETUP_PYTH_PUSH = 3;
 export const ORACLE_SETUP_SWITCHBOARD_PULL = 4;
 export const ORACLE_SETUP_STAKED_WITH_PYTH_PUSH = 5;
+export const ORACLE_SETUP_FIXED_JUPLEND = 17;
 
 export const HEALTH_CACHE_NONE = 0;
 export const HEALTH_CACHE_HEALTHY = 1;

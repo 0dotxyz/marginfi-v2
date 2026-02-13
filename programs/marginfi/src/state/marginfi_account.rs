@@ -35,6 +35,7 @@ use std::{
 /// - `Fixed`: 1 (bank only)
 /// - `FixedKamino`: 2 (bank + reserve)
 /// - `FixedDrift`: 2 (bank + spot market)
+/// - `FixedJuplend`: 2 (bank + lending state)
 /// - `ASSET_TAG_STAKED`: 4 (bank + oracle + lst_mint + stake_pool)
 /// - `ASSET_TAG_KAMINO` / `ASSET_TAG_DRIFT` / `ASSET_TAG_SOLEND` / `ASSET_TAG_JUPLEND`: 3 (bank + oracle + reserve)
 /// - `ASSET_TAG_DEFAULT` / `ASSET_TAG_SOL`: 2 (bank + oracle)
@@ -45,6 +46,8 @@ pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
         OracleSetup::FixedKamino => Ok(2),
         // Fixed + Drift: bank + spot market (no oracle)
         OracleSetup::FixedDrift => Ok(2),
+        // Fixed + JupLend: bank + lending state (no oracle)
+        OracleSetup::FixedJuplend => Ok(2),
         _ => get_remaining_accounts_per_asset_tag(bank.config.asset_tag),
     }
 }
