@@ -11,6 +11,7 @@ use crate::{
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
+use anchor_spl::associated_token::get_associated_token_address_with_program_id;
 use anchor_spl::token_interface::*;
 use juplend_mocks::state::Lending as JuplendLending;
 use marginfi_type_crate::constants::{
@@ -81,8 +82,15 @@ pub fn lending_pool_add_bank_juplend(
     );
 
     // Set JupLend-specific fields
+    // - integration_acc_2: protocol fToken vault (PDA token account)
+    // - integration_acc_3: withdraw intermediary ATA expected by JupLend's withdraw constraints
     bank.integration_acc_1 = lending_key;
     bank.integration_acc_2 = f_token_vault_key;
+    bank.integration_acc_3 = get_associated_token_address_with_program_id(
+        &ctx.accounts.liquidity_vault_authority.key(),
+        &bank_mint.key(),
+        &ctx.accounts.token_program.key(),
+    );
 
     log_pool_info(&bank);
 

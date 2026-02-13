@@ -125,6 +125,11 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       false,
       true,
     );
+
+    juplendAccounts.set(
+      JUPLEND_STATE_KEYS.jlr02User0MarginfiAccount,
+      user0MarginfiAccount.publicKey,
+    );
   });
 
   it("(user 0) deposit into JupLend USDC bank - happy path", async () => {
@@ -496,8 +501,9 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     );
   });
 
-  it("(user 0) deposits into JupLend USDC bank after interest - happy path", async () => {
-    // We deposit natively here to measure post-interest share issuance directly from JupLend.
+  let nativeSupplyPositionRawDelta = new BN(0);
+  // We deposit natively here to measure post-interest share issuance directly from JupLend.
+  it("(user 0) deposits into native JupLend USDC bank after interest - happy path", async () => {
     const userUsdcFTokenAta = getAssociatedTokenAddressSync(
       usdcJupPool.fTokenMint,
       user.wallet.publicKey,
@@ -591,7 +597,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     );
     assert.isTrue(
       mintedSharesAfterInterest.lt(firstDepositMintedShares),
-      `expected fewer shares after interest; before=${firstDepositMintedShares.toString()} after=${mintedSharesAfterInterest.toString()}`,
+      `before=${firstDepositMintedShares.toString()} after=${mintedSharesAfterInterest.toString()}`,
     );
 
     assertBNGreaterThan(
@@ -618,10 +624,11 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     const supplyPositionRawDelta = supplyPositionAfter.amount.sub(
       supplyPositionBefore.amount,
     );
+    nativeSupplyPositionRawDelta = supplyPositionRawDelta;
     assertBNEqual(reserveRawSupplyDelta, supplyPositionRawDelta);
     assert.isTrue(
       reserveRawSupplyDelta.lt(USER_DEPOSIT_AMOUNT),
-      `expected raw supply delta to be < deposited assets after interest; raw=${reserveRawSupplyDelta.toString()} assets=${USER_DEPOSIT_AMOUNT.toString()}`,
+      `raw=${reserveRawSupplyDelta.toString()} assets=${USER_DEPOSIT_AMOUNT.toString()}`,
     );
 
     assertBNEqual(
@@ -630,17 +637,27 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     );
   });
 
-  it("(user 0) deposits into mrgn USDC bank after interest - happy path", async () => {
+  it("(user 0) deposits into (mrgn) Juplend USDC bank after interest - happy path", async () => {
     const [
       userUsdcBefore,
       fTokenVaultBefore,
+      jupReserveVaultBefore,
       lendingBefore,
+      tokenReserveBefore,
+      supplyPositionBefore,
       bankBefore,
       userAccountBefore,
     ] = await Promise.all([
       getTokenBalance(bankRunProvider, user.usdcAccount),
       getTokenBalance(bankRunProvider, fTokenVaultPk),
+      getTokenBalance(bankRunProvider, usdcJupPool.vault),
       juplendPrograms.lending.account.lending.fetch(usdcJupPool.lending),
+      juplendPrograms.liquidity.account.tokenReserve.fetch(
+        usdcJupPool.tokenReserve,
+      ),
+      juplendPrograms.liquidity.account.userSupplyPosition.fetch(
+        usdcJupPool.lendingSupplyPositionOnLiquidity,
+      ),
       bankrunProgram.account.bank.fetch(usdcJupBankPk),
       bankrunProgram.account.marginfiAccount.fetch(
         user0MarginfiAccount.publicKey,
@@ -676,13 +693,23 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     const [
       userUsdcAfter,
       fTokenVaultAfter,
+      jupReserveVaultAfter,
       lendingAfter,
+      tokenReserveAfter,
+      supplyPositionAfter,
       bankAfter,
       userAccountAfter,
     ] = await Promise.all([
       getTokenBalance(bankRunProvider, user.usdcAccount),
       getTokenBalance(bankRunProvider, fTokenVaultPk),
+      getTokenBalance(bankRunProvider, usdcJupPool.vault),
       juplendPrograms.lending.account.lending.fetch(usdcJupPool.lending),
+      juplendPrograms.liquidity.account.tokenReserve.fetch(
+        usdcJupPool.tokenReserve,
+      ),
+      juplendPrograms.liquidity.account.userSupplyPosition.fetch(
+        usdcJupPool.lendingSupplyPositionOnLiquidity,
+      ),
       bankrunProgram.account.bank.fetch(usdcJupBankPk),
       bankrunProgram.account.marginfiAccount.fetch(
         user0MarginfiAccount.publicKey,
@@ -714,6 +741,28 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     assertBNEqual(
       lendingAfter.liquidityExchangePrice,
       lendingBefore.liquidityExchangePrice,
+    );
+    assert.equal(
+      jupReserveVaultAfter - jupReserveVaultBefore,
+      USER_DEPOSIT_AMOUNT.toNumber(),
+    );
+
+    const reserveRawSupplyDelta = tokenReserveAfter.totalSupplyWithInterest.sub(
+      tokenReserveBefore.totalSupplyWithInterest,
+    );
+    const supplyPositionRawDelta = supplyPositionAfter.amount.sub(
+      supplyPositionBefore.amount,
+    );
+    // Here we confirm that a $50 into jup natively is equivalent to a $50 through p0
+    assertBNEqual(nativeSupplyPositionRawDelta, supplyPositionRawDelta);
+    assertBNEqual(reserveRawSupplyDelta, supplyPositionRawDelta);
+    assert.isTrue(
+      reserveRawSupplyDelta.lt(USER_DEPOSIT_AMOUNT),
+      `raw=${reserveRawSupplyDelta.toString()} assets=${USER_DEPOSIT_AMOUNT.toString()}`,
+    );
+    assertBNEqual(
+      tokenReserveAfter.totalBorrowWithInterest,
+      tokenReserveBefore.totalBorrowWithInterest,
     );
 
     const userAssetShareDelta = wrappedI80F48toBigNumber(

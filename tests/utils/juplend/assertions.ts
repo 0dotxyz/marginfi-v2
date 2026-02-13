@@ -241,6 +241,7 @@ export const assertJuplendBankState = (args: AssertJuplendBankArgs) => {
 
   assertKeysEqual(bank.integrationAcc1, pool.lending);
   assertKeysEqual(bank.integrationAcc2, addresses.fTokenVault);
+  assertKeysEqual(bank.integrationAcc3, addresses.withdrawIntermediaryAta);
 
   assertKeysEqual(bank.liquidityVault, addresses.liquidityVault);
   assertKeysEqual(bank.insuranceVault, addresses.insuranceVault);

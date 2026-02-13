@@ -38,9 +38,9 @@ use marginfi_type_crate::types::{
 /// 1. CPI `update_rate` to refresh `token_exchange_price`.
 /// 2. Compute expected fTokens burned: `ceil(assets * 1e12 / token_exchange_price)`.
 /// 3. Call `bank_account.withdraw()` for the expected burned shares.
-/// 4. CPI `withdraw` (burn fTokens, receive underlying into liquidity vault).
+/// 4. CPI `withdraw` (burn fTokens, receive underlying into withdraw intermediary ATA).
 /// 5. Verify received underlying == requested and burned fTokens == expected.
-/// 6. Transfer underlying from liquidity vault -> destination token account.
+/// 6. Transfer underlying from withdraw intermediary ATA -> destination token account.
 /// 7. Update health cache (unless receivership).
 pub fn juplend_withdraw<'info>(
     ctx: Context<'_, '_, 'info, 'info, JuplendWithdraw<'info>>,
@@ -151,8 +151,8 @@ pub fn juplend_withdraw<'info>(
     };
 
     // Record balances to verify exact deltas.
-    let pre_liquidity_vault_balance =
-        accessor::amount(&ctx.accounts.liquidity_vault.to_account_info())?;
+    let pre_withdraw_intermediary_ata_balance =
+        accessor::amount(&ctx.accounts.integration_acc_3.to_account_info())?;
     let pre_f_token_balance = accessor::amount(&ctx.accounts.integration_acc_2.to_account_info())?;
 
     // Handle potential dust case where remaining shares are worth less than 1 underlying unit.
@@ -180,17 +180,17 @@ pub fn juplend_withdraw<'info>(
     let received_underlying = if withdraw_all && token_amount == 0 {
         0
     } else {
-        // CPI withdraw: burns fTokens and credits underlying into liquidity vault.
+        // CPI withdraw: burns fTokens and credits underlying into withdraw intermediary ATA.
         ctx.accounts
             .cpi_juplend_withdraw(token_amount, authority_bump)?;
 
-        let post_liquidity_vault_balance =
-            accessor::amount(&ctx.accounts.liquidity_vault.to_account_info())?;
+        let post_withdraw_intermediary_ata_balance =
+            accessor::amount(&ctx.accounts.integration_acc_3.to_account_info())?;
         let post_f_token_balance =
             accessor::amount(&ctx.accounts.integration_acc_2.to_account_info())?;
 
-        let received_underlying = post_liquidity_vault_balance
-            .checked_sub(pre_liquidity_vault_balance)
+        let received_underlying = post_withdraw_intermediary_ata_balance
+            .checked_sub(pre_withdraw_intermediary_ata_balance)
             .ok_or_else(|| error!(MarginfiError::MathError))?;
         require_eq!(
             received_underlying,
@@ -207,9 +207,12 @@ pub fn juplend_withdraw<'info>(
             MarginfiError::JuplendWithdrawFailed
         );
 
-        // Transfer underlying from liquidity vault -> destination.
+        // Transfer underlying from withdraw intermediary ATA -> destination.
         ctx.accounts
-            .cpi_transfer_liquidity_vault_to_destination(received_underlying, authority_bump)?;
+            .cpi_transfer_withdraw_intermediary_ata_to_destination(
+                received_underlying,
+                authority_bump,
+            )?;
 
         received_underlying
     };
@@ -312,9 +315,9 @@ pub struct JuplendWithdraw<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
         has_one = integration_acc_1 @ MarginfiError::InvalidJuplendLending,
         has_one = integration_acc_2 @ MarginfiError::InvalidJuplendFTokenVault,
+        has_one = integration_acc_3 @ MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
         has_one = mint @ MarginfiError::InvalidMint,
         constraint = is_juplend_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongBankAssetTagForJuplendOperation,
@@ -345,10 +348,6 @@ pub struct JuplendWithdraw<'info> {
     )]
     pub liquidity_vault_authority: SystemAccount<'info>,
 
-    /// Bank liquidity vault (receives underlying from JupLend withdraw).
-    #[account(mut)]
-    pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
-
     /// Underlying mint.
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
@@ -363,6 +362,16 @@ pub struct JuplendWithdraw<'info> {
     /// Bank's fToken vault (validated via has_one on bank).
     #[account(mut)]
     pub integration_acc_2: InterfaceAccount<'info, TokenAccount>,
+
+    /// Withdraw intermediary ATA (authority = liquidity_vault_authority).
+    /// This must be an ATA to satisfy JupLend's withdraw constraints.
+    #[account(
+        mut,
+        token::mint = mint,
+        token::authority = liquidity_vault_authority,
+        token::token_program = token_program,
+    )]
+    pub integration_acc_3: InterfaceAccount<'info, TokenAccount>,
 
     // ---- JupLend CPI accounts ----
     /// CHECK: validated by the JupLend program
@@ -437,7 +446,7 @@ impl<'info> JuplendWithdraw<'info> {
         let accounts = WithdrawCpi {
             signer: self.liquidity_vault_authority.to_account_info(),
             owner_token_account: self.integration_acc_2.to_account_info(),
-            recipient_token_account: self.liquidity_vault.to_account_info(),
+            recipient_token_account: self.integration_acc_3.to_account_info(),
             lending_admin: self.lending_admin.to_account_info(),
             lending: self.integration_acc_1.to_account_info(),
             mint: self.mint.to_account_info(),
@@ -470,14 +479,14 @@ impl<'info> JuplendWithdraw<'info> {
         Ok(())
     }
 
-    pub fn cpi_transfer_liquidity_vault_to_destination(
+    pub fn cpi_transfer_withdraw_intermediary_ata_to_destination(
         &self,
         amount: u64,
         authority_bump: u8,
     ) -> MarginfiResult {
         let program = self.token_program.to_account_info();
         let accounts = TransferChecked {
-            from: self.liquidity_vault.to_account_info(),
+            from: self.integration_acc_3.to_account_info(),
             to: self.destination_token_account.to_account_info(),
             authority: self.liquidity_vault_authority.to_account_info(),
             mint: self.mint.to_account_info(),

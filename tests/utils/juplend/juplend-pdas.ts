@@ -349,6 +349,7 @@ export type JuplendMrgnAddresses = {
   bank: PublicKey;
   liquidityVaultAuthority: PublicKey;
   liquidityVault: PublicKey;
+  withdrawIntermediaryAta: PublicKey;
   insuranceVaultAuthority: PublicKey;
   insuranceVault: PublicKey;
   feeVaultAuthority: PublicKey;
@@ -362,6 +363,7 @@ export type DeriveJuplendMrgnAddressesArgs = {
   group: PublicKey;
   bankMint: PublicKey;
   bankSeed: BN;
+  tokenProgram?: PublicKey;
 };
 
 export function deriveJuplendMrgnAddresses(
@@ -378,6 +380,13 @@ export function deriveJuplendMrgnAddresses(
     bank,
   );
   const [liquidityVault] = deriveLiquidityVault(args.mrgnProgramId, bank);
+  const withdrawIntermediaryAta = getAssociatedTokenAddressSync(
+    args.bankMint,
+    liquidityVaultAuthority,
+    true,
+    args.tokenProgram ?? TOKEN_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+  );
 
   const [insuranceVaultAuthority] = deriveInsuranceVaultAuthority(
     args.mrgnProgramId,
@@ -399,6 +408,7 @@ export function deriveJuplendMrgnAddresses(
     bank,
     liquidityVaultAuthority,
     liquidityVault,
+    withdrawIntermediaryAta,
     insuranceVaultAuthority,
     insuranceVault,
     feeVaultAuthority,

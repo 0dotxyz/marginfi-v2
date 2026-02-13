@@ -3,6 +3,7 @@ export const JUPLEND_STATE_KEYS = {
   jlr01BankUsdc: "jlr01_bank_usdc",
   jlr01BankTokenA: "jlr01_bank_token_a",
   jlr01BankWsol: "jlr01_bank_wsol",
+  jlr02User0MarginfiAccount: "jlr02_user0_marginfi_account",
 } as const;
 
 export const jlr01BankStateKey = (bankName: string) => {

@@ -152,6 +152,7 @@ pub struct Bank {
     pub integration_acc_2: Pubkey,
     /// Integration account slot 3 (default Pubkey for non-integrations).
     /// - Drift: user stats
+    /// - JupLend: withdraw intermediary ATA (ATA of liquidity_vault_authority for bank mint)
     pub integration_acc_3: Pubkey,
 
     pub _padding_1: [[u64; 2]; 13], // 8 * 2 * 13 = 208B
