@@ -508,11 +508,12 @@ impl From<u32> for MarginfiError {
             6112 => MarginfiError::InvalidOrderTakeProfitOrStopLoss,
             6113 => MarginfiError::InvalidSlippage,
             6114 => MarginfiError::OrderExecutionOverWithdrawal,
-            6115 => MarginfiError::BankHourlyRateLimitExceeded,
-            6116 => MarginfiError::BankDailyRateLimitExceeded,
-            6117 => MarginfiError::GroupHourlyRateLimitExceeded,
-            6118 => MarginfiError::GroupDailyRateLimitExceeded,
-            6119 => MarginfiError::InvalidRateLimitPrice,
+            6115 => MarginfiError::AccountFrozen,
+            6116 => MarginfiError::BankHourlyRateLimitExceeded,
+            6117 => MarginfiError::BankDailyRateLimitExceeded,
+            6118 => MarginfiError::GroupHourlyRateLimitExceeded,
+            6119 => MarginfiError::GroupDailyRateLimitExceeded,
+            6120 => MarginfiError::InvalidRateLimitPrice,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,

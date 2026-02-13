@@ -468,7 +468,7 @@ impl<'state> MarginfiFuzzContext<'state> {
     }
 
     pub fn process_action_repay(
-        &'state self,
+        &self,
         account_idx: &AccountIdx,
         bank_idx: &BankIdx,
         asset_amount: &AssetAmount,
@@ -489,14 +489,6 @@ impl<'state> MarginfiFuzzContext<'state> {
         if bank.token_program.key() == anchor_spl::token_2022::ID {
             remaining_accounts.push(ails(bank.mint.clone()));
         }
-        // When repay_all is true, remaining accounts for all active balances are required
-        if repay_all {
-            remaining_accounts.extend(marginfi_account.get_remaining_accounts(
-                &self.get_bank_map(),
-                vec![],
-                vec![],
-            ));
-        }
 
         let res = marginfi::instructions::marginfi_account::lending_account_repay(
             Context::new(
@@ -516,7 +508,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                     ))?,
                     token_program: Interface::try_from(airls(&bank.token_program))?,
                 },
-                aisls(&remaining_accounts),
+                &remaining_accounts,
                 Default::default(),
             ),
             asset_amount.0,
