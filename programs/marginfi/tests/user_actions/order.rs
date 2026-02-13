@@ -247,7 +247,7 @@ async fn make_repay_ix(
         accounts.push(AccountMeta::new_readonly(bank_f.mint.key, false));
     }
 
-    let ix = Instruction {
+    let mut ix = Instruction {
         program_id: marginfi::ID,
         accounts,
         data: marginfi::instruction::LendingAccountRepay {
@@ -256,6 +256,14 @@ async fn make_repay_ix(
         }
         .data(),
     };
+
+    if repay_all.unwrap_or(false) {
+        ix.accounts.extend_from_slice(
+            &marginfi_account_f
+                .load_observation_account_metas(vec![bank_f.key], vec![])
+                .await,
+        );
+    }
 
     Ok(ix)
 }
@@ -296,11 +304,19 @@ async fn make_withdraw_ix(
         .data(),
     };
 
-    ix.accounts.extend_from_slice(
-        &marginfi_account_f
-            .load_observation_account_metas(vec![], vec![])
-            .await,
-    );
+    if withdraw_all.unwrap_or(false) {
+        ix.accounts.extend_from_slice(
+            &marginfi_account_f
+                .load_observation_account_metas_close_last(bank_f.key, vec![], vec![])
+                .await,
+        );
+    } else {
+        ix.accounts.extend_from_slice(
+            &marginfi_account_f
+                .load_observation_account_metas(vec![], vec![])
+                .await,
+        );
+    }
 
     Ok(ix)
 }

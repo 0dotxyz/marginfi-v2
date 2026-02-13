@@ -77,7 +77,7 @@ pub fn lending_account_withdraw<'info>(
             utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?
         };
 
-let in_receivership_or_order_execution =
+        let in_receivership_or_order_execution =
             marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
         if withdraw_all {
             // Require remaining accounts for all active balances, including the one being closed.

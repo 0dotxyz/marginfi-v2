@@ -15,6 +15,7 @@ import {
 import { tokenANative, usdcNative } from "./utils/token-utils";
 import type { MockUser } from "./utils/mocks";
 import {
+  configureBank,
   configureBankRateLimits,
   configureGroupRateLimits,
 } from "./utils/group-instructions";
@@ -37,6 +38,7 @@ import { advanceBankrunClock, getBankrunTime } from "./utils/tools";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { assert } from "chai";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
+import { blankBankConfigOptRaw } from "./utils/types";
 
 
 const RATE_LIMIT_ACCOUNT = "rate_limit_account";
@@ -113,6 +115,28 @@ describe("Rate limiter", () => {
       assert.ok(existing, "withdraw account missing from accounts map");
       withdrawAccount = existing;
     }
+
+    // Prior suites can leave restrictive caps; raise these so deposits in this suite are deterministic.
+    const highCapacity = new BN("1000000000000000");
+    const usdcCapConfig = blankBankConfigOptRaw();
+    usdcCapConfig.depositLimit = highCapacity;
+    usdcCapConfig.totalAssetValueInitLimit = highCapacity;
+    const tokenACapConfig = blankBankConfigOptRaw();
+    tokenACapConfig.depositLimit = highCapacity;
+    tokenACapConfig.totalAssetValueInitLimit = highCapacity;
+
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await configureBank(groupAdmin.mrgnProgram, {
+          bank: bankKeypairUsdc.publicKey,
+          bankConfigOpt: usdcCapConfig,
+        }),
+        await configureBank(groupAdmin.mrgnProgram, {
+          bank: bankKeypairA.publicKey,
+          bankConfigOpt: tokenACapConfig,
+        })
+      )
+    );
 
     // Deposit Token A collateral to rate limit account (for borrow tests)
     await userProgram().provider.sendAndConfirm(
@@ -371,7 +395,7 @@ describe("Rate limiter", () => {
         await borrowUsdc(usdcNative(10));
       },
       "GroupHourlyRateLimitExceeded",
-      6106
+      6117
     );
 
     // Repay 5 USDC at $1 = 5 USD inflow, reducing net outflow to 10

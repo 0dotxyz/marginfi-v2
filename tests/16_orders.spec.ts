@@ -356,6 +356,12 @@ describe("orders", () => {
       const keeperProgram = keeper.mrgnProgram as Program<Marginfi>;
 
       // Clear the liability, so at least one order tag has no active balance
+      const repayRemaining = composeRemainingAccounts([
+        [bankUsdc, oracles.usdcOracle.publicKey],
+        [bankA, oracles.tokenAOracle.publicKey],
+        [bankSol, oracles.wsolOracle.publicKey],
+      ]).map((pubkey) => ({ pubkey, isSigner: false, isWritable: false }));
+
       const repayInstruction = await program.methods
         .lendingAccountRepay(borrowUsdc, true)
         .accountsPartial({
@@ -365,6 +371,7 @@ describe("orders", () => {
           signerTokenAccount: user.usdcAccount,
           tokenProgram: TOKEN_PROGRAM_ID,
         })
+        .remainingAccounts(repayRemaining)
         .instruction();
 
       // Ensure the user's ATA exists
@@ -624,6 +631,13 @@ describe("orders", () => {
           signerTokenAccount: keeper.usdcAccount,
           tokenProgram: TOKEN_PROGRAM_ID,
         })
+        .remainingAccounts(
+          startRemaining.map((pubkey) => ({
+            pubkey,
+            isSigner: false,
+            isWritable: false,
+          })),
+        )
         .instruction();
 
       const withdrawRemaining = composeRemainingAccounts([
@@ -908,7 +922,7 @@ describe("orders", () => {
       );
 
       const startRemaining = buildRemaining();
-      const endRemaining = buildRemaining();
+      const endRemaining = buildRemaining(false, true, true);
       const withdrawAmount = calcWithdrawAmount(oracles.tokenAPrice);
       const {
         startIx,
