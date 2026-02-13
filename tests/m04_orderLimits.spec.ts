@@ -601,7 +601,7 @@ SCENARIOS.forEach(({ kaminoDeposits, driftDeposits }, scenarioIndex) => {
           },
           {
             amount: withdrawAmount,
-            isFinalWithdrawal: false,
+            isWithdrawAll: false,
             remaining: withdrawRemaining,
           },
         );
@@ -616,7 +616,7 @@ SCENARIOS.forEach(({ kaminoDeposits, driftDeposits }, scenarioIndex) => {
           },
           {
             amount: withdrawAmount,
-            withdraw_all: false,
+            withdrawAll: false,
             remaining: withdrawRemaining,
           },
           driftBankrunProgram,
