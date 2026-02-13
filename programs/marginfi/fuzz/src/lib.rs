@@ -1072,13 +1072,13 @@ fn initialize_marginfi_group<'a>(
             &[],
             Default::default(),
         ),
-        admin.key(), // admin
-        admin.key(), // emode_admin
-        admin.key(), // curve_admin
-        admin.key(), // limit_admin
-        admin.key(), // emissions_admin
-        admin.key(), // metadata_admin
-        admin.key(), // risk_admin
+        Some(admin.key()), // admin
+        Some(admin.key()), // emode_admin
+        Some(admin.key()), // curve_admin
+        Some(admin.key()), // limit_admin
+        Some(admin.key()), // emissions_admin
+        Some(admin.key()), // metadata_admin
+        Some(admin.key()), // risk_admin
         None,        // emode_max_init_leverage
         None,        // emode_max_maint_leverage
     )

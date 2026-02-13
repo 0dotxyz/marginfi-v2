@@ -289,7 +289,7 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
         },
         {
           amount: new BN(0),
-          isFinalWithdrawal: true,
+          isWithdrawAll: true,
           remaining: composeRemainingAccounts(remainingPositions),
         }
       )
