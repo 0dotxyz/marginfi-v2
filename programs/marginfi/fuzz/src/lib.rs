@@ -629,6 +629,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                     MarginfiError::RiskEngineInitRejected.into(),
                     MarginfiError::NoAssetFound.into(),
                     MarginfiError::BankAccountNotFound.into(),
+                    MarginfiError::InvalidBankAccount.into(),
                     MarginfiError::AccountDisabled.into(),
                 ]
                 .contains(&error),
