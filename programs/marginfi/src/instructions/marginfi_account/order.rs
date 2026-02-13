@@ -448,7 +448,10 @@ pub fn end_execute_order<'info>(
                 .checked_mul((slippage_frac)()?)
                 .ok_or_else(math_error!())?;
 
-            check!(net >= allowed_sl, MarginfiError::OrderTriggerNotMet);
+            check!(
+                net >= allowed_sl,
+                MarginfiError::OrderExecutionOverWithdrawal
+            );
         }
         OrderTriggerType::TakeProfit => {
             let tp: I80F48 = order.take_profit.into();
@@ -463,7 +466,7 @@ pub fn end_execute_order<'info>(
             check!(
                 ((net >= allowed_diff) && (allowed_diff >= allowed_tp))
                     || ((net >= allowed_tp) && (allowed_tp >= allowed_diff)),
-                MarginfiError::OrderTriggerNotMet
+                MarginfiError::OrderExecutionOverWithdrawal
             );
         }
         OrderTriggerType::Both => {
@@ -484,14 +487,17 @@ pub fn end_execute_order<'info>(
                 check!(
                     ((net >= allowed_diff) && (allowed_diff >= allowed_tp))
                         || ((net >= allowed_tp) && (allowed_tp >= allowed_diff)),
-                    MarginfiError::OrderTriggerNotMet
+                    MarginfiError::OrderExecutionOverWithdrawal
                 );
             } else {
                 let allowed_sl = sl
                     .checked_mul((slippage_frac)()?)
                     .ok_or_else(math_error!())?;
 
-                check!(net >= allowed_sl, MarginfiError::OrderTriggerNotMet);
+                check!(
+                    net >= allowed_sl,
+                    MarginfiError::OrderExecutionOverWithdrawal
+                );
             }
         }
     }

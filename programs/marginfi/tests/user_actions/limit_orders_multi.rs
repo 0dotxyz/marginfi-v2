@@ -636,7 +636,7 @@ async fn limit_orders_overlap_ab_close_a_reopen_a_ad_fails() -> anyhow::Result<(
     Ok(())
 }
 
-// Here we hit OrderTriggerNotMet by attempting to withdraw too much.
+// Here we hit OrderExecutionOverWithdrawal by attempting to withdraw too much.
 #[tokio::test]
 async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> {
     // ---------------------------------------------------------------------
@@ -734,7 +734,7 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
     )
     .await;
 
-    assert_custom_error!(result.unwrap_err(), MarginfiError::OrderTriggerNotMet);
+    assert_custom_error!(result.unwrap_err(), MarginfiError::OrderExecutionOverWithdrawal);
 
     // Executing A/D with just enough still works as expected.
     let result = execute_order_with_withdraw(

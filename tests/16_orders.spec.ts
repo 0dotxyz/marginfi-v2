@@ -39,12 +39,21 @@ import {
   bankRunProvider,
   ecosystem,
   oracles,
+  globalFeeWallet,
+  INIT_POOL_ORIGINATION_FEE,
+  LIQUIDATION_FLAT_FEE,
+  ORDER_INIT_FLAT_FEE_DEFAULT,
+  PROGRAM_FEE_FIXED,
+  PROGRAM_FEE_RATE,
+  LIQUIDATION_MAX_FEE,
+  ORDER_EXECUTION_MAX_FEE,
 } from "./rootHooks";
 import { MockUser, USER_ACCOUNT } from "./utils/mocks";
 import {
   expectFailedTxWithError,
   expectFailedTxWithMessage,
 } from "./utils/genericTests";
+import { editGlobalFeeState } from "./utils/group-instructions";
 import { BankrunProvider } from "anchor-bankrun";
 
 let program: Program<Marginfi>;
@@ -661,6 +670,39 @@ describe("orders", () => {
       };
     };
 
+    const reBorrowAndPlaceOrder = async (trigger: OrderTriggerArgs) => {
+      await restoreOracles();
+
+      const remaining = buildRemaining();
+      const reBorrowIx = await borrowIx(userProgram, {
+        marginfiAccount: userMarginfiAccount,
+        bank: bankUsdc,
+        amount: borrowUsdc,
+        tokenAccount: user.usdcAccount,
+        remaining,
+      });
+      await userProgram.provider.sendAndConfirm(
+        new Transaction().add(reBorrowIx),
+      );
+
+      const ixPlace = await placeOrderIx(program, {
+        marginfiAccount: userMarginfiAccount,
+        authority: user.wallet.publicKey,
+        feePayer: user.wallet.publicKey,
+        bankKeys,
+        trigger,
+      });
+      await userProgram.provider.sendAndConfirm(
+        new Transaction().add(ixPlace),
+      );
+
+      [orderPk] = deriveOrderPda(
+        program.programId,
+        userMarginfiAccount,
+        bankKeys,
+      );
+    };
+
     before(async () => {
       const ixPlace = await placeOrderIx(program, {
         marginfiAccount: userMarginfiAccount,
@@ -882,6 +924,139 @@ describe("orders", () => {
       );
     });
 
+    it("fails when slippage exceeded - should fail", async () => {
+      const { assetNative, liabNative } = await fetchPricingInputs();
+      const threshold = wrappedI80F48toBigNumber(highTakeProfit).toNumber();
+      const biasedPrice = computeBiasedPrice(
+        assetNative,
+        liabNative,
+        threshold,
+        confFactor,
+        1,
+      );
+
+      oracles.tokenAPrice = biasedPrice;
+      const slot = new BN(Math.floor(Date.now() / 1000));
+      await refreshPullOracles(
+        oracles,
+        wallet.payer,
+        slot,
+        Math.floor(Date.now() / 1000),
+      );
+
+      const remaining = buildRemaining();
+      const excessiveWithdraw = calcWithdrawAmount(oracles.tokenAPrice).muln(3);
+      const {
+        startIx,
+        withdrawEmissionsPermIx,
+        repayInstruction,
+        withdrawInstruction,
+        endIx,
+      } = await buildExecutionIxs(remaining, remaining, excessiveWithdraw);
+
+      await expectFailedTxWithError(
+        async () => {
+          await keeperProgram.provider.sendAndConfirm(
+            new Transaction()
+              .add(startIx)
+              .add(withdrawEmissionsPermIx)
+              .add(repayInstruction)
+              .add(withdrawInstruction)
+              .add(endIx),
+          );
+        },
+        "OrderExecutionOverWithdrawal",
+        6114,
+      );
+
+      oracles.tokenAPrice = 10;
+      await refreshPullOracles(
+        oracles,
+        wallet.payer,
+        slot,
+        Math.floor(Date.now() / 1000),
+      );
+    });
+
+    it("fails when max-fee exceeded - should fail", async () => {
+      const tightMaxFee = 0.001; // 0.1%
+      const editIx = await editGlobalFeeState(program, {
+        admin: wallet.publicKey,
+        wallet: globalFeeWallet,
+        bankInitFlatSolFee: INIT_POOL_ORIGINATION_FEE,
+        liquidationFlatSolFee: LIQUIDATION_FLAT_FEE,
+        orderInitFlatFeeDefault: ORDER_INIT_FLAT_FEE_DEFAULT,
+        programFeeFixed: bigNumberToWrappedI80F48(PROGRAM_FEE_FIXED),
+        programFeeRate: bigNumberToWrappedI80F48(PROGRAM_FEE_RATE),
+        liquidationMaxFee: bigNumberToWrappedI80F48(LIQUIDATION_MAX_FEE),
+        orderExecutionMaxFee: bigNumberToWrappedI80F48(tightMaxFee),
+      });
+      await program.provider.sendAndConfirm(new Transaction().add(editIx));
+
+      try {
+        const { assetNative, liabNative } = await fetchPricingInputs();
+        const threshold = wrappedI80F48toBigNumber(highTakeProfit).toNumber();
+        const biasedPrice = computeBiasedPrice(
+          assetNative,
+          liabNative,
+          threshold,
+          confFactor,
+          1,
+        );
+
+        oracles.tokenAPrice = biasedPrice;
+        const slot = new BN(Math.floor(Date.now() / 1000));
+        await refreshPullOracles(
+          oracles,
+          wallet.payer,
+          slot,
+          Math.floor(Date.now() / 1000),
+        );
+
+        const remaining = buildRemaining();
+        const baseWithdraw = calcWithdrawAmount(oracles.tokenAPrice);
+        const excessiveWithdraw = baseWithdraw.add(baseWithdraw.divn(20)); // +5%
+        const {
+          startIx,
+          withdrawEmissionsPermIx,
+          repayInstruction,
+          withdrawInstruction,
+          endIx,
+        } = await buildExecutionIxs(remaining, remaining, excessiveWithdraw);
+
+        await expectFailedTxWithError(
+          async () => {
+            await keeperProgram.provider.sendAndConfirm(
+              new Transaction()
+                .add(startIx)
+                .add(withdrawEmissionsPermIx)
+                .add(repayInstruction)
+                .add(withdrawInstruction)
+                .add(endIx),
+            );
+          },
+          "OrderExecutionOverWithdrawal",
+          6114,
+        );
+      } finally {
+        const resetIx = await editGlobalFeeState(program, {
+          admin: wallet.publicKey,
+          wallet: globalFeeWallet,
+          bankInitFlatSolFee: INIT_POOL_ORIGINATION_FEE,
+          liquidationFlatSolFee: LIQUIDATION_FLAT_FEE,
+          orderInitFlatFeeDefault: ORDER_INIT_FLAT_FEE_DEFAULT,
+          programFeeFixed: bigNumberToWrappedI80F48(PROGRAM_FEE_FIXED),
+          programFeeRate: bigNumberToWrappedI80F48(PROGRAM_FEE_RATE),
+          liquidationMaxFee: bigNumberToWrappedI80F48(LIQUIDATION_MAX_FEE),
+          orderExecutionMaxFee: bigNumberToWrappedI80F48(
+            ORDER_EXECUTION_MAX_FEE,
+          ),
+        });
+        await program.provider.sendAndConfirm(new Transaction().add(resetIx));
+        await restoreOracles();
+      }
+    });
+
     it("Take-profit!!! - happy path", async () => {
       const { assetNative, liabNative } = await fetchPricingInputs();
       const threshold = wrappedI80F48toBigNumber(highTakeProfit).toNumber();
@@ -1009,6 +1184,196 @@ describe("orders", () => {
         wrappedI80F48toBigNumber(highTakeProfit).toNumber(),
         `expected asset value (${assetValue}) to exceed 800`,
       );
+    });
+
+    it("Stop-loss execution - happy path", async () => {
+      const slThreshold = 30;
+      await reBorrowAndPlaceOrder({
+        stopLoss: {
+          threshold: bigNumberToWrappedI80F48(slThreshold),
+          maxSlippage,
+        },
+      });
+
+      const { assetNative, liabNative } = await fetchPricingInputs();
+      const biasedPrice = computeBiasedPrice(
+        assetNative,
+        liabNative,
+        slThreshold,
+        confFactor,
+        -1,
+      );
+
+      oracles.tokenAPrice = biasedPrice;
+      const slot = new BN(Math.floor(Date.now() / 1000));
+      await refreshPullOracles(
+        oracles,
+        wallet.payer,
+        slot,
+        Math.floor(Date.now() / 1000),
+      );
+
+      const accBefore = await program.account.marginfiAccount.fetch(
+        userMarginfiAccount,
+      );
+
+      const remaining = buildRemaining();
+      const withdrawAmount = calcWithdrawAmount(oracles.tokenAPrice);
+      const {
+        startIx,
+        withdrawEmissionsPermIx,
+        repayInstruction,
+        withdrawInstruction,
+        endIx,
+      } = await buildExecutionIxs(remaining, remaining, withdrawAmount);
+
+      await keeperProgram.provider.sendAndConfirm(
+        new Transaction()
+          .add(startIx)
+          .add(withdrawEmissionsPermIx)
+          .add(repayInstruction)
+          .add(withdrawInstruction)
+          .add(endIx),
+      );
+
+      const orderInfo = await program.provider.connection.getAccountInfo(
+        orderPk,
+      );
+      assert.isNull(
+        orderInfo,
+        "expected order to be closed after stop-loss execution",
+      );
+
+      const accAfter = await program.account.marginfiAccount.fetch(
+        userMarginfiAccount,
+      );
+
+      const postLiability = accAfter.lendingAccount.balances.find(
+        (b: any) => b.bankPk && b.bankPk.equals(bankUsdc),
+      );
+      assert.isUndefined(
+        postLiability,
+        "expected liability to be removed after stop-loss",
+      );
+
+      const postAsset = accAfter.lendingAccount.balances.find(
+        (b: any) => b.bankPk && b.bankPk.equals(bankA),
+      );
+      assert.exists(
+        postAsset,
+        "expected asset balance to still exist after stop-loss",
+      );
+
+      for (const preBal of accBefore.lendingAccount.balances) {
+        const preBank = preBal.bankPk.toString();
+        if (preBank === bankA.toString() || preBank === bankUsdc.toString())
+          continue;
+
+        const postBal = accAfter.lendingAccount.balances.find(
+          (b: any) => b.bankPk && b.bankPk.toString() === preBank,
+        );
+        assert.exists(
+          postBal,
+          `expected balance for bank ${preBank} to remain after stop-loss`,
+        );
+        assert.deepEqual(
+          preBal,
+          postBal,
+          `balance ${preBank} should be unchanged after stop-loss`,
+        );
+      }
+    });
+
+    it("Both trigger (stop-loss path) execution - happy path", async () => {
+      const bothSl = 25;
+      const bothTp = 200;
+      await reBorrowAndPlaceOrder({
+        both: {
+          stopLoss: bigNumberToWrappedI80F48(bothSl),
+          takeProfit: bigNumberToWrappedI80F48(bothTp),
+          maxSlippage,
+        },
+      });
+
+      const { assetNative, liabNative } = await fetchPricingInputs();
+      const biasedPrice = computeBiasedPrice(
+        assetNative,
+        liabNative,
+        bothSl,
+        confFactor,
+        -1,
+      );
+
+      oracles.tokenAPrice = biasedPrice;
+      const slot = new BN(Math.floor(Date.now() / 1000));
+      await refreshPullOracles(
+        oracles,
+        wallet.payer,
+        slot,
+        Math.floor(Date.now() / 1000),
+      );
+
+      const accBefore = await program.account.marginfiAccount.fetch(
+        userMarginfiAccount,
+      );
+
+      const remaining = buildRemaining();
+      const withdrawAmount = calcWithdrawAmount(oracles.tokenAPrice);
+      const {
+        startIx,
+        withdrawEmissionsPermIx,
+        repayInstruction,
+        withdrawInstruction,
+        endIx,
+      } = await buildExecutionIxs(remaining, remaining, withdrawAmount);
+
+      await keeperProgram.provider.sendAndConfirm(
+        new Transaction()
+          .add(startIx)
+          .add(withdrawEmissionsPermIx)
+          .add(repayInstruction)
+          .add(withdrawInstruction)
+          .add(endIx),
+      );
+
+      const orderInfo = await program.provider.connection.getAccountInfo(
+        orderPk,
+      );
+      assert.isNull(
+        orderInfo,
+        "expected order to be closed after both-trigger SL execution",
+      );
+
+      const accAfter = await program.account.marginfiAccount.fetch(
+        userMarginfiAccount,
+      );
+
+      const postLiability = accAfter.lendingAccount.balances.find(
+        (b: any) => b.bankPk && b.bankPk.equals(bankUsdc),
+      );
+      assert.isUndefined(
+        postLiability,
+        "expected liability to be removed after both-trigger SL",
+      );
+
+      for (const preBal of accBefore.lendingAccount.balances) {
+        const preBank = preBal.bankPk.toString();
+        if (preBank === bankA.toString() || preBank === bankUsdc.toString())
+          continue;
+
+        const postBal = accAfter.lendingAccount.balances.find(
+          (b: any) => b.bankPk && b.bankPk.toString() === preBank,
+        );
+        assert.exists(
+          postBal,
+          `expected balance for bank ${preBank} to remain after both-trigger`,
+        );
+        assert.deepEqual(
+          preBal,
+          postBal,
+          `balance ${preBank} should be unchanged after both-trigger`,
+        );
+      }
     });
   });
 });

@@ -663,7 +663,7 @@ async fn limit_order_take_profit_too_much_profit_fails() -> anyhow::Result<()> {
     )
     .await;
 
-    assert_custom_error!(result.unwrap_err(), MarginfiError::OrderTriggerNotMet);
+    assert_custom_error!(result.unwrap_err(), MarginfiError::OrderExecutionOverWithdrawal);
     Ok(())
 }
 
@@ -852,7 +852,7 @@ async fn limit_order_stop_loss_too_much_profit_fails() -> anyhow::Result<()> {
     )
     .await;
 
-    assert_custom_error!(result.unwrap_err(), MarginfiError::OrderTriggerNotMet);
+    assert_custom_error!(result.unwrap_err(), MarginfiError::OrderExecutionOverWithdrawal);
     Ok(())
 }
 
@@ -1149,7 +1149,7 @@ async fn limit_order_fails_keeper_overwithdraw() -> anyhow::Result<()> {
     );
 
     let result = ctx.banks_client.process_transaction(tx).await;
-    assert_custom_error!(result.unwrap_err(), MarginfiError::OrderTriggerNotMet);
+    assert_custom_error!(result.unwrap_err(), MarginfiError::OrderExecutionOverWithdrawal);
     Ok(())
 }
 

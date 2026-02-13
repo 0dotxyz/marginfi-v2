@@ -630,7 +630,7 @@ async fn execute_order_fails_post_trigger_not_met(
     );
 
     let result = ctx.banks_client.process_transaction(tx).await;
-    assert_custom_error!(result.unwrap_err(), MarginfiError::OrderTriggerNotMet);
+    assert_custom_error!(result.unwrap_err(), MarginfiError::OrderExecutionOverWithdrawal);
     Ok(())
 }
 

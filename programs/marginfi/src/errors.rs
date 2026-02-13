@@ -231,6 +231,8 @@ pub enum MarginfiError {
     InvalidOrderTakeProfitOrStopLoss,
     #[msg("Max slippage must be less than 100%")] // 6113
     InvalidSlippage,
+    #[msg("Executor withdrew too much: slippage or max fee constraint violated")] // 6114
+    OrderExecutionOverWithdrawal,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -495,6 +497,7 @@ impl From<u32> for MarginfiError {
             6111 => MarginfiError::WorseHealthPostExecution,
             6112 => MarginfiError::InvalidOrderTakeProfitOrStopLoss,
             6113 => MarginfiError::InvalidSlippage,
+            6114 => MarginfiError::OrderExecutionOverWithdrawal,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,
