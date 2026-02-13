@@ -337,7 +337,6 @@ impl MintFixture {
             banks_client.get_latest_blockhash().await.unwrap()
         };
         let ctx = self.ctx.borrow_mut();
-        let recent_blockhash = ctx.banks_client.get_latest_blockhash().await.unwrap();
         let tx = Transaction::new_signed_with_payer(
             &[mint_to_ix],
             Some(&payer),
