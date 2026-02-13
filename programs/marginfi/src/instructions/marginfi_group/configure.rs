@@ -7,20 +7,24 @@ use marginfi_type_crate::types::{basis_to_u32, MarginfiGroup, WrappedI80F48};
 
 /// Validate and apply an optional emode leverage value. If `Some`, validates it is in [1, 100] and
 /// writes the basis-point encoding. If `None`, requires the current on-chain value is non-zero.
-fn apply_emode_leverage(new_value: Option<WrappedI80F48>, current: &mut u32) -> MarginfiResult {
+fn validate_and_apply_emode_leverage(
+    new_value: Option<WrappedI80F48>,
+    current: &mut u32,
+) -> MarginfiResult {
     match new_value {
         Some(wrapped) => {
             let leverage: I80F48 = wrapped.into();
-            require!(leverage >= I80F48::ONE, MarginfiError::BadEmodeConfig);
-            require!(
-                leverage <= I80F48::from_num(100),
-                MarginfiError::BadEmodeConfig
-            );
+            if leverage < I80F48::ONE {
+                msg!("emode leverage {} must be >= 1", leverage);
+                return Err(MarginfiError::BadEmodeConfig.into());
+            }
+            if leverage > I80F48::from_num(100) {
+                msg!("emode leverage {} must be <= 100", leverage);
+                return Err(MarginfiError::BadEmodeConfig.into());
+            }
             *current = basis_to_u32(leverage);
         }
-        None => {
-            require!(*current != 0, MarginfiError::BadEmodeConfig);
-        }
+        None => {}
     }
     Ok(())
 }
@@ -53,20 +57,24 @@ pub fn configure(
     marginfi_group.update_metadata_admin(new_metadata_admin);
     marginfi_group.update_risk_admin(new_risk_admin);
 
-    apply_emode_leverage(
+    validate_and_apply_emode_leverage(
         emode_max_init_leverage,
         &mut marginfi_group.emode_max_init_leverage,
     )?;
-    apply_emode_leverage(
+    validate_and_apply_emode_leverage(
         emode_max_maint_leverage,
         &mut marginfi_group.emode_max_maint_leverage,
     )?;
 
     // Validate that init < maint
-    require!(
-        marginfi_group.emode_max_init_leverage < marginfi_group.emode_max_maint_leverage,
-        MarginfiError::BadEmodeConfig
-    );
+    if marginfi_group.emode_max_init_leverage >= marginfi_group.emode_max_maint_leverage {
+        msg!(
+            "emode init leverage ({}) must be < maint leverage ({})",
+            marginfi_group.emode_max_init_leverage,
+            marginfi_group.emode_max_maint_leverage
+        );
+        return Err(MarginfiError::BadEmodeConfig.into());
+    }
     // The fuzzer should ignore this because the "Clock" mock sysvar doesn't load until after the
     // group is init. Eventually we might fix the fuzzer to load the clock first...
     #[cfg(not(feature = "client"))]
