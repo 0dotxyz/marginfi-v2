@@ -180,10 +180,7 @@ fn load_juplend_lending<'info>(
     Ok(lending_loader)
 }
 
-fn ensure_juplend_lending_fresh(
-    lending: &JuplendLending,
-    clock: &Clock,
-) -> MarginfiResult<()> {
+fn ensure_juplend_lending_fresh(lending: &JuplendLending, clock: &Clock) -> MarginfiResult<()> {
     require!(
         !lending.is_stale(clock.unix_timestamp),
         MarginfiError::JuplendLendingStale
