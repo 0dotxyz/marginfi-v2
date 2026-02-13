@@ -29,6 +29,7 @@ import { assert } from "chai";
 import {
   EMISSIONS_FLAG_BORROW_ACTIVE,
   EMISSIONS_FLAG_LENDING_ACTIVE,
+  CLOSE_ENABLED_FLAG,
 } from "./utils/types";
 import { createMintToInstruction } from "@solana/spl-token";
 import { deriveEmissionsAuth, deriveEmissionsTokenAccount } from "./utils/pdas";
@@ -101,6 +102,12 @@ describe("Lending pool set up emissions", () => {
       ecosystem.tokenBMint.publicKey
     );
 
+    // Snapshot flags before to verify non-emission flags are preserved
+    const bankBefore = await program.account.bank.fetch(bankKeypairUsdc.publicKey);
+    const flagsBefore = bankBefore.flags.toNumber();
+    const emissionBitsMask = EMISSIONS_FLAG_BORROW_ACTIVE | EMISSIONS_FLAG_LENDING_ACTIVE;
+    const nonEmissionFlagsBefore = flagsBefore & ~emissionBitsMask;
+
     await emissionsAdmin.mrgnProgram.provider.sendAndConfirm!(
       new Transaction().add(
         await setupEmissions(emissionsAdmin.mrgnProgram, {
@@ -126,13 +133,32 @@ describe("Lending pool set up emissions", () => {
       getTokenBalance(provider, emissionsAccKey),
     ]);
 
+    const flagsAfter = bank.flags.toNumber();
+    const nonEmissionFlagsAfter = flagsAfter & ~emissionBitsMask;
+
     assertKeysEqual(bank.emissionsMint, ecosystem.tokenBMint.publicKey);
     assertBNEqual(bank.emissionsRate, emissionRate);
     assertI80F48Approx(bank.emissionsRemaining, totalEmissions);
-    assertBNEqual(
-      bank.flags,
-      new BN(EMISSIONS_FLAG_BORROW_ACTIVE + EMISSIONS_FLAG_LENDING_ACTIVE)
+
+    // Emission bits should be set
+    assert.equal(
+      flagsAfter & emissionBitsMask,
+      emissionBitsMask,
+      "emission flags (borrow + lending) should be set"
     );
+    // All non-emission flags must survive unchanged (e.g. CLOSE_ENABLED_FLAG, FREEZE_SETTINGS)
+    assert.equal(
+      nonEmissionFlagsAfter,
+      nonEmissionFlagsBefore,
+      `non-emission flags changed! before: 0b${nonEmissionFlagsBefore.toString(2)}, after: 0b${nonEmissionFlagsAfter.toString(2)}`
+    );
+    // Sanity: CLOSE_ENABLED_FLAG should still be on (set at bank creation)
+    assert.notEqual(
+      flagsAfter & CLOSE_ENABLED_FLAG,
+      0,
+      "CLOSE_ENABLED_FLAG must survive emissions setup"
+    );
+
     assert.equal(adminBBefore - adminBAfter, totalEmissions.toNumber());
     assert.equal(emissionsAccAfter, totalEmissions.toNumber());
   });
@@ -144,11 +170,19 @@ describe("Lending pool set up emissions", () => {
       bankKeypairUsdc.publicKey,
       ecosystem.tokenBMint.publicKey
     );
+
+    // Snapshot flags before to verify non-emission flags are preserved
+    const bankBefore = await program.account.bank.fetch(bankKeypairUsdc.publicKey);
+    const flagsBefore = bankBefore.flags.toNumber();
+    const emissionBitsMask = EMISSIONS_FLAG_BORROW_ACTIVE | EMISSIONS_FLAG_LENDING_ACTIVE;
+    const nonEmissionFlagsBefore = flagsBefore & ~emissionBitsMask;
+
     const [adminBBefore, emissionsAccBefore] = await Promise.all([
       getTokenBalance(provider, emissionsAdmin.tokenBAccount),
       getTokenBalance(provider, emissionsAccKey),
     ]);
 
+    // Note: emissionsFlags is null here — no flag change requested
     await emissionsAdmin.mrgnProgram.provider.sendAndConfirm!(
       new Transaction().add(
         await updateEmissions(emissionsAdmin.mrgnProgram, {
@@ -168,13 +202,32 @@ describe("Lending pool set up emissions", () => {
       getTokenBalance(provider, emissionsAccKey),
     ]);
 
+    const flagsAfter = bank.flags.toNumber();
+    const nonEmissionFlagsAfter = flagsAfter & ~emissionBitsMask;
+
     assertKeysEqual(bank.emissionsMint, ecosystem.tokenBMint.publicKey);
     assertBNEqual(bank.emissionsRate, emissionRate);
     assertI80F48Approx(bank.emissionsRemaining, totalEmissions.muln(2));
-    assertBNEqual(
-      bank.flags,
-      new BN(EMISSIONS_FLAG_BORROW_ACTIVE + EMISSIONS_FLAG_LENDING_ACTIVE)
+
+    // Emission bits should still be set from the previous test
+    assert.equal(
+      flagsAfter & emissionBitsMask,
+      emissionBitsMask,
+      "emission flags (borrow + lending) should still be set"
     );
+    // All non-emission flags must survive unchanged
+    assert.equal(
+      nonEmissionFlagsAfter,
+      nonEmissionFlagsBefore,
+      `non-emission flags changed! before: 0b${nonEmissionFlagsBefore.toString(2)}, after: 0b${nonEmissionFlagsAfter.toString(2)}`
+    );
+    // Sanity: CLOSE_ENABLED_FLAG should still be on
+    assert.notEqual(
+      flagsAfter & CLOSE_ENABLED_FLAG,
+      0,
+      "CLOSE_ENABLED_FLAG must survive emissions update"
+    );
+
     assert.equal(adminBBefore - adminBAfter, totalEmissions.toNumber());
     assert.equal(
       emissionsAccAfter,

@@ -23,19 +23,22 @@ pub use id_crate::ID;
 pub mod marginfi {
     use super::*;
 
+    /// (admin only) Initialize a new marginfi group. The signer becomes the group admin.
     pub fn marginfi_group_initialize(ctx: Context<MarginfiGroupInitialize>) -> MarginfiResult {
         marginfi_group::initialize_group(ctx)
     }
 
+    /// (admin only) Configure group admin keys and emode leverage caps. All admin keys must be
+    /// provided on every call. Emode leverage caps reset to defaults (15x/20x) if None is passed.
     pub fn marginfi_group_configure(
         ctx: Context<MarginfiGroupConfigure>,
-        new_admin: Pubkey,
-        new_emode_admin: Pubkey,
-        new_curve_admin: Pubkey,
-        new_limit_admin: Pubkey,
-        new_emissions_admin: Pubkey,
-        new_metadata_admin: Pubkey,
-        new_risk_admin: Pubkey,
+        new_admin: Option<Pubkey>,
+        new_emode_admin: Option<Pubkey>,
+        new_curve_admin: Option<Pubkey>,
+        new_limit_admin: Option<Pubkey>,
+        new_emissions_admin: Option<Pubkey>,
+        new_metadata_admin: Option<Pubkey>,
+        new_risk_admin: Option<Pubkey>,
         emode_max_init_leverage: Option<WrappedI80F48>,
         emode_max_maint_leverage: Option<WrappedI80F48>,
     ) -> MarginfiResult {
@@ -53,6 +56,7 @@ pub mod marginfi {
         )
     }
 
+    /// (admin only) Add a new bank to the lending pool
     pub fn lending_pool_add_bank(
         ctx: Context<LendingPoolAddBank>,
         bank_config: BankConfigCompact,
@@ -60,7 +64,7 @@ pub mod marginfi {
         marginfi_group::lending_pool_add_bank(ctx, bank_config)
     }
 
-    /// A copy of lending_pool_add_bank with an additional bank seed.
+    /// (admin only) A copy of lending_pool_add_bank with an additional bank seed.
     /// This seed is used to create a PDA for the bank's signature.
     /// lending_pool_add_bank is preserved for backwards compatibility.
     pub fn lending_pool_add_bank_with_seed(
@@ -71,7 +75,8 @@ pub mod marginfi {
         marginfi_group::lending_pool_add_bank_with_seed(ctx, bank_config, bank_seed)
     }
 
-    /// Staging or localnet only, panics on mainnet
+    /// (admin only) Staging or localnet only, panics on mainnet
+    /// This instruction is used to clone a bank to a new PDA.
     pub fn lending_pool_clone_bank(
         ctx: Context<LendingPoolCloneBank>,
         bank_seed: u64,
@@ -79,6 +84,7 @@ pub mod marginfi {
         marginfi_group::lending_pool_clone_bank(ctx, bank_seed)
     }
 
+    /// (permissionless) Add a staked collateral bank. Requires a valid SPL single-pool LST mint.
     pub fn lending_pool_add_bank_permissionless(
         ctx: Context<LendingPoolAddBankPermissionless>,
         bank_seed: u64,
@@ -86,7 +92,8 @@ pub mod marginfi {
         marginfi_group::lending_pool_add_bank_permissionless(ctx, bank_seed)
     }
 
-    /// (admin only)
+    /// (admin only) Configure bank parameters. If the bank has `FREEZE_SETTINGS`, only
+    /// deposit/borrow limits are updated and all other config changes are silently ignored.
     pub fn lending_pool_configure_bank(
         ctx: Context<LendingPoolConfigureBank>,
         bank_config_opt: BankConfigOpt,
@@ -94,7 +101,8 @@ pub mod marginfi {
         marginfi_group::lending_pool_configure_bank(ctx, bank_config_opt)
     }
 
-    /// (delegate_curve_admin only)
+    /// (delegate_curve_admin only) Update interest rate config. Does nothing if bank has
+    /// `FREEZE_SETTINGS`.
     pub fn lending_pool_configure_bank_interest_only(
         ctx: Context<LendingPoolConfigureBankInterestOnly>,
         interest_rate_config: InterestRateConfigOpt,
@@ -102,7 +110,7 @@ pub mod marginfi {
         marginfi_group::lending_pool_configure_bank_interest_only(ctx, interest_rate_config)
     }
 
-    /// (delegate_limits_admin only)
+    /// (delegate_limit_admin only) Update deposit/borrow/init limits only.
     pub fn lending_pool_configure_bank_limits_only(
         ctx: Context<LendingPoolConfigureBankLimitsOnly>,
         deposit_limit: Option<u64>,
@@ -183,7 +191,9 @@ pub mod marginfi {
         )
     }
 
-    /// Handle bad debt of a bankrupt marginfi account for a given bank.
+    /// (risk_admin or admin, unless `PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG` is set on the bank)
+    /// Handle bad debt of a bankrupt marginfi account for a given bank. Covers bad debt from the
+    /// insurance fund and socializes any remainder among depositors.
     pub fn lending_pool_handle_bankruptcy<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingPoolHandleBankruptcy<'info>>,
     ) -> MarginfiResult {
@@ -200,6 +210,8 @@ pub mod marginfi {
         marginfi_account::initialize_account(ctx)
     }
 
+    /// (permissionless) Initialize a liquidation record PDA for a marginfi account. The fee_payer
+    /// pays rent; the record is required for receivership liquidation.
     pub fn marginfi_account_init_liq_record(ctx: Context<InitLiquidationRecord>) -> MarginfiResult {
         marginfi_account::initialize_liquidation_record(ctx)
     }
@@ -221,6 +233,8 @@ pub mod marginfi {
         marginfi_account::initialize_account_pda(ctx, account_index, third_party_id)
     }
 
+    /// (account authority) Deposit assets into a bank. Accrues interest, records deposit, and
+    /// transfers tokens from the signer's token account to the bank's liquidity vault.
     pub fn lending_account_deposit<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingAccountDeposit<'info>>,
         amount: u64,
@@ -229,6 +243,8 @@ pub mod marginfi {
         marginfi_account::lending_account_deposit(ctx, amount, deposit_up_to_limit)
     }
 
+    /// (account authority, or any signer during receivership) Repay borrowed assets. Accrues
+    /// interest, records repayment, and transfers tokens to the bank's liquidity vault.
     pub fn lending_account_repay<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingAccountRepay<'info>>,
         amount: u64,
@@ -237,6 +253,9 @@ pub mod marginfi {
         marginfi_account::lending_account_repay(ctx, amount, repay_all)
     }
 
+    /// (account authority, or any signer during receivership) Withdraw assets from a bank. Accrues
+    /// interest, records withdrawal, transfers tokens, and runs a health check (skipped during
+    /// receivership).
     pub fn lending_account_withdraw<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingAccountWithdraw<'info>>,
         amount: u64,
@@ -245,6 +264,8 @@ pub mod marginfi {
         marginfi_account::lending_account_withdraw(ctx, amount, withdraw_all)
     }
 
+    /// (account authority) Borrow assets from a bank. Accrues interest, records liability, applies
+    /// origination fee, transfers tokens, and runs a health check.
     pub fn lending_account_borrow<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingAccountBorrow<'info>>,
         amount: u64,
@@ -252,25 +273,34 @@ pub mod marginfi {
         marginfi_account::lending_account_borrow(ctx, amount)
     }
 
+    /// (account authority) Close a balance position with dust-level amounts. Claims outstanding
+    /// emissions before closing.
     pub fn lending_account_close_balance(
         ctx: Context<LendingAccountCloseBalance>,
     ) -> MarginfiResult {
         marginfi_account::lending_account_close_balance(ctx)
     }
 
+    /// (account authority) Settle and withdraw emissions rewards to a destination token account.
     pub fn lending_account_withdraw_emissions<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingAccountWithdrawEmissions<'info>>,
     ) -> MarginfiResult {
         marginfi_account::lending_account_withdraw_emissions(ctx)
     }
 
+    /// (permissionless) Settle unclaimed emissions into a user's balance without withdrawing.
     pub fn lending_account_settle_emissions(
         ctx: Context<LendingAccountSettleEmissions>,
     ) -> MarginfiResult {
         marginfi_account::lending_account_settle_emissions(ctx)
     }
 
-    /// Liquidate a lending account balance of an unhealthy marginfi account
+    /// (permissionless) Liquidate a lending account balance of an unhealthy marginfi account.
+    /// The liquidator takes on the liability and receives discounted collateral (2.5% liquidator
+    /// fee + 2.5% insurance fee).
+    /// * `asset_amount` - amount of collateral to liquidate
+    /// * `liquidatee_accounts` - number of remaining accounts for the liquidatee
+    /// * `liquidator_accounts` - number of remaining accounts for the liquidator
     pub fn lending_account_liquidate<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingAccountLiquidate<'info>>,
         asset_amount: u64,
@@ -285,6 +315,8 @@ pub mod marginfi {
         )
     }
 
+    /// (account authority) Start a flash loan. Must have a corresponding `end_flashloan` ix in the
+    /// same tx. Health checks are skipped until the flash loan ends.
     pub fn lending_account_start_flashloan(
         ctx: Context<LendingAccountStartFlashloan>,
         end_index: u64,
@@ -292,12 +324,15 @@ pub mod marginfi {
         marginfi_account::lending_account_start_flashloan(ctx, end_index)
     }
 
+    /// (account authority) End a flash loan and run the health check.
     pub fn lending_account_end_flashloan<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingAccountEndFlashloan<'info>>,
     ) -> MarginfiResult {
         marginfi_account::lending_account_end_flashloan(ctx)
     }
 
+    /// (account authority) Set the wallet whose canonical ATA will receive permissionless emissions
+    /// withdrawals.
     pub fn marginfi_account_update_emissions_destination_account<'info>(
         ctx: Context<'_, '_, 'info, 'info, MarginfiAccountUpdateEmissionsDestinationAccount<'info>>,
     ) -> MarginfiResult {
@@ -305,18 +340,23 @@ pub mod marginfi {
     }
 
     // Operational instructions
+
+    /// (permissionless) Accrue interest on a bank, updating share values and collecting fees.
     pub fn lending_pool_accrue_bank_interest(
         ctx: Context<LendingPoolAccrueBankInterest>,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_accrue_bank_interest(ctx)
     }
 
+    /// (permissionless) Transfer accrued fees from the liquidity vault to insurance/fee/program
+    /// vaults.
     pub fn lending_pool_collect_bank_fees<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingPoolCollectBankFees<'info>>,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_collect_bank_fees(ctx)
     }
 
+    /// (admin only) Withdraw collected group fees from the fee vault.
     pub fn lending_pool_withdraw_fees<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingPoolWithdrawFees<'info>>,
         amount: u64,
@@ -324,6 +364,7 @@ pub mod marginfi {
         marginfi_group::lending_pool_withdraw_fees(ctx, amount)
     }
 
+    /// (permissionless) Withdraw group fees to the pre-configured `fees_destination_account`.
     pub fn lending_pool_withdraw_fees_permissionless<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingPoolWithdrawFeesPermissionless<'info>>,
         amount: u64,
@@ -331,12 +372,14 @@ pub mod marginfi {
         marginfi_group::lending_pool_withdraw_fees_permissionless(ctx, amount)
     }
 
+    /// (admin only) Set the destination wallet for permissionless fee withdrawals.
     pub fn lending_pool_update_fees_destination_account<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingPoolUpdateFeesDestinationAccount<'info>>,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_update_fees_destination_account(ctx)
     }
 
+    /// (admin only) Withdraw from the insurance vault.
     pub fn lending_pool_withdraw_insurance<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingPoolWithdrawInsurance<'info>>,
         amount: u64,
@@ -344,21 +387,24 @@ pub mod marginfi {
         marginfi_group::lending_pool_withdraw_insurance(ctx, amount)
     }
 
+    /// (admin only) Close a bank. Requires CLOSE_ENABLED_FLAG and zero positions/shares.
     pub fn lending_pool_close_bank(ctx: Context<LendingPoolCloseBank>) -> MarginfiResult {
         marginfi_group::lending_pool_close_bank(ctx)
     }
 
+    /// (account authority) Transfer all positions to a new account under a new authority. The old
+    /// account is disabled. Pays a flat SOL fee to the protocol.
     pub fn transfer_to_new_account(ctx: Context<TransferToNewAccount>) -> MarginfiResult {
         marginfi_account::transfer_to_new_account(ctx)
     }
 
-    /// Same as `transfer_to_new_account` except the resulting account is a PDA
+    /// (account authority) Same as `transfer_to_new_account` except the resulting account is a PDA
     ///
     /// seeds:
     /// - marginfi_group
     /// - authority: The account authority (owner)  
-    /// - account_index: A u32 value to allow multiple accounts per authority
-    /// - third_party_id: Optional u32 for third-party tagging. Seeds < PDA_FREE_THRESHOLD can be
+    /// - account_index: A u16 value to allow multiple accounts per authority
+    /// - third_party_id: Optional u16 for third-party tagging. Seeds < PDA_FREE_THRESHOLD can be
     ///   used freely. For a dedicated seed used by just your program (via CPI), contact us.
     pub fn transfer_to_new_account_pda(
         ctx: Context<TransferToNewAccountPda>,
@@ -368,6 +414,8 @@ pub mod marginfi {
         marginfi_account::transfer_to_new_account_pda(ctx, account_index, third_party_id)
     }
 
+    /// (admin only) Freeze or unfreeze a marginfi account. Frozen accounts can only be operated on
+    /// by the group admin.
     pub fn marginfi_account_set_freeze(
         ctx: Context<SetAccountFreeze>,
         frozen: bool,
@@ -375,10 +423,13 @@ pub mod marginfi {
         marginfi_account::set_account_freeze(ctx, frozen)
     }
 
+    /// (account authority) Close a marginfi account. Requires all balances to be empty and no
+    /// active flags (disabled, flashloan, receivership).
     pub fn marginfi_account_close(ctx: Context<MarginfiAccountClose>) -> MarginfiResult {
         marginfi_account::close_account(ctx)
     }
 
+    /// (permissionless) Withdraw emissions to the user's pre-configured emissions destination ATA.
     pub fn lending_account_withdraw_emissions_permissionless<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingAccountWithdrawEmissionsPermissionless<'info>>,
     ) -> MarginfiResult {
@@ -476,6 +527,7 @@ pub mod marginfi {
         marginfi_group::initialize_staked_settings(ctx, settings)
     }
 
+    /// (admin only) Edit the staked collateral settings for the group.
     pub fn edit_staked_settings(
         ctx: Context<EditStakedSettings>,
         settings: StakedSettingsEditConfig,
@@ -483,38 +535,49 @@ pub mod marginfi {
         marginfi_group::edit_staked_settings(ctx, settings)
     }
 
+    /// (permissionless) Propagate updated staked settings to a staked collateral bank.
     pub fn propagate_staked_settings(ctx: Context<PropagateStakedSettings>) -> MarginfiResult {
         marginfi_group::propagate_staked_settings(ctx)
     }
 
+    /// (permissionless) Begin receivership liquidation on an unhealthy account. Snapshots health
+    /// and marks the account in receivership. Must have `end_liquidation` as the last ix in the tx.
     pub fn start_liquidation<'info>(
         ctx: Context<'_, '_, 'info, 'info, StartLiquidation<'info>>,
     ) -> MarginfiResult {
         marginfi_account::start_liquidation(ctx)
     }
 
+    /// (liquidation_receiver, set in start_liquidation) End receivership liquidation. Validates
+    /// health improved and seized assets are within fee limits. Charges a flat SOL fee.
     pub fn end_liquidation<'info>(
         ctx: Context<'_, '_, 'info, 'info, EndLiquidation<'info>>,
     ) -> MarginfiResult {
         marginfi_account::end_liquidation(ctx)
     }
 
+    /// (risk_admin only) Begin forced deleverage on an account. Similar to start_liquidation but
+    /// does not require the account to be unhealthy.
     pub fn start_deleverage<'info>(
         ctx: Context<'_, '_, 'info, 'info, StartDeleverage<'info>>,
     ) -> MarginfiResult {
         marginfi_account::start_deleverage(ctx)
     }
 
+    /// (risk_admin only) End forced deleverage. Validates health did not worsen.
     pub fn end_deleverage<'info>(
         ctx: Context<'_, '_, 'info, 'info, EndDeleverage<'info>>,
     ) -> MarginfiResult {
         marginfi_account::end_deleverage(ctx)
     }
 
+    /// (global_fee_admin only) Pause the protocol. Auto-expires after 30 minutes. Limited to 3
+    /// pauses per day and 2 consecutive pauses.
     pub fn panic_pause(ctx: Context<PanicPause>) -> MarginfiResult {
         marginfi_group::panic_pause(ctx)
     }
 
+    /// (global_fee_admin only) Unpause the protocol before the auto-expiry.
     pub fn panic_unpause(ctx: Context<PanicUnpause>) -> MarginfiResult {
         marginfi_group::panic_unpause(ctx)
     }
@@ -538,8 +601,8 @@ pub mod marginfi {
         marginfi_group::init_bank_metadata(ctx)
     }
 
-    /// (metadata admin only) Write ticker/descrption information for a bank on-chain. Optional, not
-    /// all Banks are guranteed to have metadata.
+    /// (metadata admin only) Write ticker/description information for a bank on-chain. Optional, not
+    /// all Banks are guaranteed to have metadata.
     pub fn write_bank_metadata(
         ctx: Context<WriteBankMetadata>,
         ticker: Option<Vec<u8>>,
@@ -610,7 +673,8 @@ pub mod marginfi {
         kamino::lending_pool_add_bank_kamino(ctx, bank_config, bank_seed)
     }
 
-    /// (fee admin only) Harvest the specified reward index from the Kamino Farm attached to this bank.
+    /// (permissionless) Harvest the specified reward index from the Kamino Farm attached to this
+    /// bank. Rewards are always sent to the global fee wallet's canonical ATA.
     ///
     /// * `reward_index` — index of the reward token in the Kamino Farm's reward list
     pub fn kamino_harvest_reward(
@@ -656,8 +720,9 @@ pub mod marginfi {
         drift::drift_withdraw(ctx, amount, withdraw_all)
     }
 
-    /// (fee admin only) Harvest rewards from admin deposits in Drift spot markets
-    /// The harvest spot market must be different from the bank's main drift spot market
+    /// (permissionless) Harvest rewards from admin deposits in Drift spot markets.
+    /// Rewards are always sent to the global fee wallet's canonical ATA.
+    /// The harvest spot market must be different from the bank's main drift spot market.
     pub fn drift_harvest_reward<'info>(
         ctx: Context<'_, '_, 'info, 'info, DriftHarvestReward<'info>>,
     ) -> MarginfiResult {

@@ -20,9 +20,12 @@ assert_struct_align!(Bank, 8);
 #[cfg_attr(not(feature = "anchor"), derive(Zeroable))]
 #[derive(Debug)]
 pub struct Bank {
+    /// The SPL token mint this bank manages
     pub mint: Pubkey,
+    /// Number of decimals of the `mint`. Must be < 24.
     pub mint_decimals: u8,
 
+    /// The `MarginfiGroup` this bank belongs to
     pub group: Pubkey,
 
     // Note: The padding is here, not after mint_decimals. Pubkey has alignment 1, so those 32
@@ -40,12 +43,18 @@ pub struct Bank {
     /// * Initially 1
     pub liability_share_value: WrappedI80F48,
 
+    /// The SPL token account holding deposited liquidity
     pub liquidity_vault: Pubkey,
+    /// PDA bump for the liquidity vault
     pub liquidity_vault_bump: u8,
+    /// PDA bump for the liquidity vault authority
     pub liquidity_vault_authority_bump: u8,
 
+    /// The SPL token account holding insurance fund tokens
     pub insurance_vault: Pubkey,
+    /// PDA bump for the insurance vault
     pub insurance_vault_bump: u8,
+    /// PDA bump for the insurance vault authority
     pub insurance_vault_authority_bump: u8,
 
     pub _pad1: [u8; 4], // 4x u8 + 4 = 8
@@ -53,8 +62,11 @@ pub struct Bank {
     /// Fees collected and pending withdraw for the `insurance_vault`
     pub collected_insurance_fees_outstanding: WrappedI80F48,
 
+    /// The SPL token account holding collected group fees
     pub fee_vault: Pubkey,
+    /// PDA bump for the fee vault
     pub fee_vault_bump: u8,
+    /// PDA bump for the fee vault authority
     pub fee_vault_authority_bump: u8,
 
     pub _pad2: [u8; 6], // 2x u8 + 6 = 8
@@ -63,33 +75,37 @@ pub struct Bank {
     pub collected_group_fees_outstanding: WrappedI80F48,
 
     /// Sum of all liability shares held by all borrowers in this bank.
-    /// * Uses `mint_decimals`
+    /// Multiply by `liability_share_value` to get the total liability amount in native token units.
     pub total_liability_shares: WrappedI80F48,
     /// Sum of all asset shares held by all depositors in this bank.
-    /// * Uses `mint_decimals`
+    /// Multiply by `asset_share_value` to get the total asset amount in native token units.
     /// * For Kamino banks, this is the quantity of collateral tokens (NOT liquidity tokens) in the
     ///   bank, and also uses `mint_decimals`, though the mint itself will always show (6) decimals
     ///   exactly (i.e Kamino ignores this and treats it as if it was using `mint_decimals`)
     pub total_asset_shares: WrappedI80F48,
 
+    /// Unix timestamp (i64) of the last interest accrual
     pub last_update: i64,
 
+    /// The bank's configuration parameters (weights, limits, oracle setup, interest rate config)
     pub config: BankConfig,
 
-    /// Bank Config Flags
+    /// Bank flags bitfield (u64).
     ///
-    /// - EMISSIONS_FLAG_BORROW_ACTIVE: 1
-    /// - EMISSIONS_FLAG_LENDING_ACTIVE: 2
-    /// - PERMISSIONLESS_BAD_DEBT_SETTLEMENT: 4
-    /// - FREEZE_SETTINGS: 8
-    /// - CLOSE_ENABLED_FLAG: 16
-    /// - TOKENLESS_REPAYMENTS_ACTIVE: 32
-    ///
+    /// - Bit 0 (1): `EMISSIONS_FLAG_BORROW_ACTIVE` — borrow-side emissions are active
+    /// - Bit 1 (2): `EMISSIONS_FLAG_LENDING_ACTIVE` — lending-side emissions are active
+    /// - Bit 2 (4): `PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG` — anyone can settle bad debt
+    /// - Bit 3 (8): `FREEZE_SETTINGS` — bank configuration is frozen (only limits can change)
+    /// - Bit 4 (16): `CLOSE_ENABLED_FLAG` — bank can be closed (set at creation for banks >= 0.1.4)
+    /// - Bit 5 (32): `TOKENLESS_REPAYMENTS_ALLOWED` — risk admin can repay debt without tokens
+    /// - Bit 6 (64): `TOKENLESS_REPAYMENTS_COMPLETE` — all debt cleared, lender purge enabled
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.
     pub emissions_rate: u64,
+    /// Remaining emissions tokens available for distribution
     pub emissions_remaining: WrappedI80F48,
+    /// The SPL token mint used for emissions rewards
     pub emissions_mint: Pubkey,
 
     /// Fees collected and pending withdraw for the `FeeState.global_fee_wallet`'s canonical ATA for `mint`
@@ -104,6 +120,7 @@ pub struct Bank {
     /// bank doesn't support this feature, and the fees must be collected manually (withdraw_fees).
     pub fees_destination_account: Pubkey,
 
+    /// Cached bank metrics (interest rates, oracle price, etc.)
     pub cache: BankCache,
     /// Number of user lending positions currently open in this bank
     /// * For banks created prior to 0.1.4, this is the number of positions opened/closed after
@@ -118,6 +135,7 @@ pub struct Bank {
     ///   the bank may safely be closed if this is zero. Will never go negative.
     pub borrowing_position_count: i32,
 
+    /// Reserved for future use
     pub _padding_0: [u8; 16],
 
     /// Integration account slot 1 (default Pubkey for non-integrations).
@@ -149,7 +167,7 @@ pub enum RiskTier {
     #[default]
     Collateral = 0,
     /// ## Isolated Risk
-    /// Assets in this trance can be borrowed only in isolation.
+    /// Assets in this tier can be borrowed only in isolation.
     /// They can't be borrowed together with other assets.
     ///
     /// For example, if users has USDC, and wants to borrow XYZ which is isolated,
@@ -163,9 +181,13 @@ unsafe impl Pod for RiskTier {}
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum BankOperationalState {
+    /// All operations are halted
     Paused,
+    /// Normal operations
     Operational,
+    /// Only withdrawals and repayments are allowed (no new deposits or borrows)
     ReduceOnly,
+    /// Bank was killed by a bankruptcy event (irrecoverable)
     KilledByBankruptcy,
 }
 unsafe impl Zeroable for BankOperationalState {}
