@@ -271,7 +271,8 @@ describe("jl01: JupLend - basic deposit/withdraw (bankrun)", () => {
 
     const expectedSharesMinted = expectedSharesForDeposit(
       BigInt(USER_DEPOSIT_AMOUNT.toString()),
-      lendingAfterDeposit.tokenExchangePrice
+      lendingAfterDeposit.tokenExchangePrice,
+      lendingAfterDeposit.liquidityExchangePrice
     );
 
     const fTokenVaultAfterDeposit = BigInt(

@@ -2,7 +2,7 @@
   "address": "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9",
   "metadata": {
     "name": "lending",
-    "version": "0.1.0",
+    "version": "0.1.2",
     "spec": "0.1.0",
     "description": "Created with Anchor"
   },
@@ -75,7 +75,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": [
             "lending_admin"
           ]
@@ -171,7 +170,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": [
             "lending_admin"
           ]
@@ -552,7 +550,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": [
             "lending_admin"
           ]
@@ -648,7 +645,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": [
             "lending_admin"
           ]
@@ -798,7 +794,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": [
             "lending_admin"
           ]
@@ -893,7 +888,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": [
             "lending_admin"
           ]
@@ -994,7 +988,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": [
             "lending_admin"
           ]
@@ -1274,7 +1267,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": [
             "lending_admin"
           ]
@@ -1375,7 +1367,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": [
             "lending_admin"
           ]
@@ -1446,6 +1437,32 @@
         74,
         166,
         181
+      ]
+    },
+    {
+      "name": "TokenReserve",
+      "discriminator": [
+        21,
+        18,
+        59,
+        135,
+        120,
+        20,
+        31,
+        12
+      ]
+    },
+    {
+      "name": "UserSupplyPosition",
+      "discriminator": [
+        202,
+        219,
+        136,
+        118,
+        61,
+        177,
+        21,
+        146
       ]
     }
   ],
@@ -1932,6 +1949,146 @@
           {
             "name": "shares_burned",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenReserve",
+      "docs": [
+        "Token configuration and exchange prices"
+      ],
+      "serialization": "bytemuck",
+      "repr": {
+        "kind": "c",
+        "packed": true
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "borrow_rate",
+            "type": "u16"
+          },
+          {
+            "name": "fee_on_interest",
+            "type": "u16"
+          },
+          {
+            "name": "last_utilization",
+            "type": "u16"
+          },
+          {
+            "name": "last_update_timestamp",
+            "type": "u64"
+          },
+          {
+            "name": "supply_exchange_price",
+            "type": "u64"
+          },
+          {
+            "name": "borrow_exchange_price",
+            "type": "u64"
+          },
+          {
+            "name": "max_utilization",
+            "type": "u16"
+          },
+          {
+            "name": "total_supply_with_interest",
+            "type": "u64"
+          },
+          {
+            "name": "total_supply_interest_free",
+            "type": "u64"
+          },
+          {
+            "name": "total_borrow_with_interest",
+            "type": "u64"
+          },
+          {
+            "name": "total_borrow_interest_free",
+            "type": "u64"
+          },
+          {
+            "name": "total_claim_amount",
+            "type": "u64"
+          },
+          {
+            "name": "interacting_protocol",
+            "type": "pubkey"
+          },
+          {
+            "name": "interacting_timestamp",
+            "type": "u64"
+          },
+          {
+            "name": "interacting_balance",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserSupplyPosition",
+      "docs": [
+        "User supply position"
+      ],
+      "serialization": "bytemuck",
+      "repr": {
+        "kind": "c",
+        "packed": true
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "protocol",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "with_interest",
+            "type": "u8"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "withdrawal_limit",
+            "type": "u128"
+          },
+          {
+            "name": "last_update",
+            "type": "u64"
+          },
+          {
+            "name": "expand_pct",
+            "type": "u16"
+          },
+          {
+            "name": "expand_duration",
+            "type": "u64"
+          },
+          {
+            "name": "base_withdrawal_limit",
+            "type": "u64"
+          },
+          {
+            "name": "status",
+            "type": "u8"
           }
         ]
       }

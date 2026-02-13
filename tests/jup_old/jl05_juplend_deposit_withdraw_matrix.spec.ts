@@ -44,11 +44,21 @@ function i80f48ToBigInt(x: any): bigint {
   return BigInt(wrappedI80F48toBigNumber(x).toFixed(0));
 }
 
-async function fetchTokenExchangePrice(lending: PublicKey): Promise<bigint> {
+async function fetchExchangePrices(lending: PublicKey): Promise<{
+  tokenExchangePrice: bigint;
+  liquidityExchangePrice: bigint;
+}> {
   const info = await bankRunProvider.connection.getAccountInfo(lending);
   assert.ok(info, "missing lending state");
   const st = decodeJuplendLendingState(info!.data);
-  return st.tokenExchangePrice;
+  return {
+    tokenExchangePrice: st.tokenExchangePrice,
+    liquidityExchangePrice: st.liquidityExchangePrice,
+  };
+}
+
+async function fetchTokenExchangePrice(lending: PublicKey): Promise<bigint> {
+  return (await fetchExchangePrices(lending)).tokenExchangePrice;
 }
 
 async function fetchMarginfiAssetShares(
@@ -267,12 +277,12 @@ describe("jl05: JupLend - deposit/withdraw matrix (bankrun)", () => {
     );
 
     assert.equal(sharesAfter, 0n, "expected no remaining shares after withdraw_all");
-    // Due to floor rounding on both deposit (shares) and withdraw (underlying),
-    // user may lose at most 1 unit of underlying.
-    const maxRoundingLoss = 1n;
+    // Due to floor rounding in the deposit's liquidity-layer roundtrip (up to 1 unit)
+    // and ceiling rounding on withdraw (up to 1 unit), user may lose at most 2 units.
+    const maxRoundingLoss = 2n;
     assert.isTrue(
       usdcBefore - usdcAfter <= maxRoundingLoss,
-      `expected at most 1 unit rounding loss, got ${usdcBefore - usdcAfter}`
+      `expected at most 2 units rounding loss, got ${usdcBefore - usdcAfter}`
     );
     assert.equal(fTokenAfter, fTokenBefore, "expected no net fToken vault delta");
   });
@@ -339,8 +349,8 @@ describe("jl05: JupLend - deposit/withdraw matrix (bankrun)", () => {
     );
 
     const minted1 = fTokenAfter1 - fTokenBefore1;
-    const price1 = await fetchTokenExchangePrice(pool.lending);
-    const expectedMint1 = expectedSharesForDeposit(BigInt(deposit1.toString()), price1);
+    const prices1 = await fetchExchangePrices(pool.lending);
+    const expectedMint1 = expectedSharesForDeposit(BigInt(deposit1.toString()), prices1.tokenExchangePrice, prices1.liquidityExchangePrice);
 
     assert.equal(minted1.toString(), expectedMint1.toString(), "minted shares mismatch (deposit1)");
     assert.equal(
@@ -457,8 +467,8 @@ describe("jl05: JupLend - deposit/withdraw matrix (bankrun)", () => {
     );
 
     const minted2 = fTokenAfter2 - fTokenBefore2;
-    const price2 = await fetchTokenExchangePrice(pool.lending);
-    const expectedMint2 = expectedSharesForDeposit(BigInt(deposit2.toString()), price2);
+    const prices2 = await fetchExchangePrices(pool.lending);
+    const expectedMint2 = expectedSharesForDeposit(BigInt(deposit2.toString()), prices2.tokenExchangePrice, prices2.liquidityExchangePrice);
 
     assert.equal(minted2.toString(), expectedMint2.toString(), "minted shares mismatch (deposit2)");
     assert.equal(

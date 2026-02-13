@@ -21,7 +21,7 @@ use marginfi_type_crate::types::{Bank, BankOperationalState};
 /// 3. Flips the bank operational state from `Paused` -> `Operational`
 ///
 /// Notes:
-/// - The bank fToken vault is created during `add_pool`, not here.
+/// - The fToken vault is created during `add_pool`, not here.
 /// - The seed deposit is intentionally not credited to any marginfi account.
 /// - The bank is created in `Paused` state; this instruction is what activates it.
 pub fn juplend_init_position(ctx: Context<JuplendInitPosition>, amount: u64) -> MarginfiResult {
@@ -50,7 +50,7 @@ pub fn juplend_init_position(ctx: Context<JuplendInitPosition>, amount: u64) -> 
 
 #[derive(Accounts)]
 pub struct JuplendInitPosition<'info> {
-    /// Pays for the ATA creation (if needed) and provides a nominal deposit amount.
+    /// Provides a nominal deposit amount.
     #[account(mut)]
     pub fee_payer: Signer<'info>,
 
@@ -137,8 +137,6 @@ pub struct JuplendInitPosition<'info> {
     pub liquidity: UncheckedAccount<'info>,
 
     /// CHECK: validated by the JupLend program
-    /// NOTE: JupLend marks this as writable in their Lending program (unusual for a program account)
-    #[account(mut)]
     pub liquidity_program: UncheckedAccount<'info>,
 
     /// CHECK: validated by the JupLend program

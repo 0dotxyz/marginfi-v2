@@ -35,7 +35,7 @@ export const TOKEN_METADATA_PROGRAM_ID = new PublicKey(
 
 export const JUPLEND_LIQUIDITY_AUTH_LIST_SEED = "auth_list";
 export const JUPLEND_LENDING_REWARDS_ADMIN_SEED = "lending_rewards_admin";
-export const JUPLEND_F_TOKEN_VAULT_SEED = "juplend_f_token_vault";
+export const JUPLEND_F_TOKEN_VAULT_SEED = "f_token_vault";
 export const TOKEN_METADATA_SEED = "metadata";
 
 export type JuplendPoolKeysArgs = {

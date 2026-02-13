@@ -1,6 +1,7 @@
 // Adds a JupLend type bank to a group with sane defaults. Used to integrate with JupLend
 // allowing users to interact with JupLend lending pools through marginfi.
 use crate::{
+    constants::JUPLEND_F_TOKEN_VAULT_SEED,
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{
@@ -14,7 +15,7 @@ use anchor_spl::token_interface::*;
 use juplend_mocks::state::Lending as JuplendLending;
 use marginfi_type_crate::constants::{
     FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED,
-    JUPLEND_F_TOKEN_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+    LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
 };
 use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 
@@ -44,6 +45,7 @@ pub fn lending_pool_add_bank_juplend(
     let lending_key = integration_acc_1.key();
     let f_token_vault_key = integration_acc_2.key();
 
+    // Validate that we're using a supported Juplend oracle setup type
     require!(
         matches!(
             bank_config.oracle_setup,
@@ -215,6 +217,7 @@ pub struct LendingPoolAddBankJuplend<'info> {
     pub f_token_mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// The bank's fToken vault holds the fTokens received when depositing into JupLend.
+    ///
     #[account(
         init,
         payer = fee_payer,
