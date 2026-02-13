@@ -32,13 +32,13 @@ pub mod marginfi {
     /// provided on every call. Emode leverage caps reset to defaults (15x/20x) if None is passed.
     pub fn marginfi_group_configure(
         ctx: Context<MarginfiGroupConfigure>,
-        new_admin: Pubkey,
-        new_emode_admin: Pubkey,
-        new_curve_admin: Pubkey,
-        new_limit_admin: Pubkey,
-        new_emissions_admin: Pubkey,
-        new_metadata_admin: Pubkey,
-        new_risk_admin: Pubkey,
+        new_admin: Option<Pubkey>,
+        new_emode_admin: Option<Pubkey>,
+        new_curve_admin: Option<Pubkey>,
+        new_limit_admin: Option<Pubkey>,
+        new_emissions_admin: Option<Pubkey>,
+        new_metadata_admin: Option<Pubkey>,
+        new_risk_admin: Option<Pubkey>,
         emode_max_init_leverage: Option<WrappedI80F48>,
         emode_max_maint_leverage: Option<WrappedI80F48>,
     ) -> MarginfiResult {

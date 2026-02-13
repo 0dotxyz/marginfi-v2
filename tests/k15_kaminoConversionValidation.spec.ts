@@ -629,7 +629,7 @@ describe("k15: Kamino Conversion Validation", () => {
       },
       {
         amount: withdrawAmount,
-        isFinalWithdrawal: false,
+        isWithdrawAll: false,
         remaining: composeRemainingAccounts([
           [usdcBank, oracles.usdcOracle.publicKey, usdcReserve],
         ]),
@@ -696,7 +696,7 @@ describe("k15: Kamino Conversion Validation", () => {
       },
       {
         amount: new BN(0),
-        isFinalWithdrawal: true,
+        isWithdrawAll: true,
         remaining: composeRemainingAccounts([
           [tokenABank, oracles.tokenAOracle.publicKey, tokenAReserve],
         ]),

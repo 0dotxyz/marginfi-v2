@@ -31,7 +31,7 @@ pub struct MarginfiGroupCreateEvent {
 #[event]
 pub struct MarginfiGroupConfigureEvent {
     pub header: GroupEventHeader,
-    pub admin: Pubkey,
+    pub admin: Option<Pubkey>,
     pub flags: u64,
 }
 

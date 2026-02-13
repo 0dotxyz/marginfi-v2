@@ -881,12 +881,17 @@ export const initBankMetadata = (
 export type SetFixedPriceArgs = {
   bank: PublicKey;
   price: number;
+  remaining?: PublicKey[];
 };
 
 export const setFixedPrice = (
   program: Program<Marginfi>,
   args: SetFixedPriceArgs
 ) => {
+  const oracleMeta: AccountMeta[] = (args.remaining ?? []).map((pubkey) => {
+    return { pubkey, isSigner: false, isWritable: false };
+  });
+
   const ix = program.methods
     .lendingPoolSetFixedOraclePrice(bigNumberToWrappedI80F48(args.price))
     .accounts({
@@ -894,6 +899,7 @@ export const setFixedPrice = (
       // admin: // implied from group
       bank: args.bank,
     })
+    .remainingAccounts(oracleMeta)
     .instruction();
 
   return ix;

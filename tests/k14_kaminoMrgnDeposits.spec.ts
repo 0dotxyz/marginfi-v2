@@ -760,7 +760,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
           },
           {
             amount: halfAmount,
-            isFinalWithdrawal: false,
+            isWithdrawAll: false,
             remaining: composeRemainingAccounts([
               [usdcBank, oracles.usdcOracle.publicKey, usdcReserve],
             ]),
@@ -1395,7 +1395,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
         },
         {
           amount: isFinalWithdrawal ? new BN(0) : amount,
-          isFinalWithdrawal,
+          isWithdrawAll: isFinalWithdrawal,
           remaining: composeRemainingAccounts(activePositions),
         },
       ),

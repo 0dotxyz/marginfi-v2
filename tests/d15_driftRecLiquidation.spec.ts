@@ -337,7 +337,7 @@ describe("d15: Drift rec liquidation", () => {
         },
         {
           amount: withdrawAmount,
-          withdraw_all: false,
+          withdrawAll: false,
           remaining,
         },
         driftBankrunProgram,
@@ -410,7 +410,7 @@ describe("d15: Drift rec liquidation", () => {
       },
       {
         amount: withdrawAmount,
-        withdraw_all: false,
+        withdrawAll: false,
         remaining,
       },
       driftBankrunProgram,

@@ -1,6 +1,5 @@
 import { BN } from "@coral-xyz/anchor";
 import { PublicKey, Transaction } from "@solana/web3.js";
-import { assert } from "chai";
 import {
   ecosystem,
   driftAccounts,
@@ -75,7 +74,7 @@ describe("d08: Drift Withdraw Tests", () => {
       },
       {
         amount: new BN(0),
-        withdraw_all: true,
+        withdrawAll: true,
         remaining: composeRemainingAccounts([
           [
             driftTokenABank,
@@ -137,7 +136,7 @@ describe("d08: Drift Withdraw Tests", () => {
       },
       {
         amount: new BN(0),
-        withdraw_all: true,
+        withdrawAll: true,
         remaining: composeRemainingAccounts([
           [
             driftUsdcBank,
@@ -215,7 +214,7 @@ describe("d08: Drift Withdraw Tests", () => {
       },
       {
         amount,
-        withdraw_all: false,
+        withdrawAll: false,
         remaining: composeRemainingAccounts([
           [
             driftTokenABank,
@@ -281,7 +280,7 @@ describe("d08: Drift Withdraw Tests", () => {
       },
       {
         amount: excessiveAmount,
-        withdraw_all: false,
+        withdrawAll: false,
         remaining: composeRemainingAccounts([
           [
             driftTokenABank,
@@ -329,7 +328,7 @@ describe("d08: Drift Withdraw Tests", () => {
       },
       {
         amount: zeroAmount,
-        withdraw_all: false,
+        withdrawAll: false,
         remaining: composeRemainingAccounts([
           [
             driftTokenABank,
@@ -406,7 +405,7 @@ describe("d08: Drift Withdraw Tests", () => {
       },
       {
         amount: maxTokenAmount,
-        withdraw_all: false,
+        withdrawAll: false,
         remaining: composeRemainingAccounts([
           [
             driftTokenABank,
@@ -490,7 +489,7 @@ describe("d08: Drift Withdraw Tests", () => {
       },
       {
         amount: new BN(0),
-        withdraw_all: true,
+        withdrawAll: true,
         remaining: [],
       },
       driftBankrunProgram
