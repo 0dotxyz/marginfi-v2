@@ -21,7 +21,7 @@ use marginfi_type_crate::types::{Bank, BankOperationalState};
 /// 3. Flips the bank operational state from `Paused` -> `Operational`
 ///
 /// Notes:
-/// - The fToken ATA is created during `add_pool`, not here.
+/// - The bank fToken vault is created during `add_pool`, not here.
 /// - The seed deposit is intentionally not credited to any marginfi account.
 /// - The bank is created in `Paused` state; this instruction is what activates it.
 pub fn juplend_init_position(ctx: Context<JuplendInitPosition>, amount: u64) -> MarginfiResult {

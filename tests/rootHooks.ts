@@ -89,6 +89,7 @@ export let validatorAdmin: MockUser = undefined;
 export let riskAdmin: MockUser = undefined;
 export const users: MockUser[] = [];
 export const numUsers = 4;
+export const juplendAccounts: Map<string, PublicKey> = new Map();
 
 export const validators: Validator[] = [];
 export const numValidators = 2;

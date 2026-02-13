@@ -8,6 +8,7 @@ pub const FEE_VAULT_AUTHORITY_SEED: &str = "fee_vault_auth";
 pub const LIQUIDITY_VAULT_SEED: &str = "liquidity_vault";
 pub const INSURANCE_VAULT_SEED: &str = "insurance_vault";
 pub const FEE_VAULT_SEED: &str = "fee_vault";
+pub const JUPLEND_F_TOKEN_VAULT_SEED: &str = "juplend_f_token_vault";
 
 pub const FEE_STATE_SEED: &str = "feestate";
 pub const STAKED_SETTINGS_SEED: &str = "staked_settings";

@@ -5,11 +5,16 @@ import {
 import { ProgramTestContext } from "solana-bankrun";
 import { Transaction, PublicKey, AccountInfo } from "@solana/web3.js";
 import { Keypair } from "@solana/web3.js";
-import { AccountLayout } from "@solana/spl-token";
+import { AccountLayout, createMintToInstruction } from "@solana/spl-token";
 import { getBankrunBlockhash } from "./spl-staking-utils";
 import { MarginfiAccountRaw } from "@mrgnlabs/marginfi-client-v2";
-import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
+import {
+  TOKEN_PROGRAM_ID,
+  wrappedI80F48toBigNumber,
+} from "@mrgnlabs/mrgn-common";
 import { HEALTH_CACHE_HEALTHY } from "./types";
+import { BN } from "@coral-xyz/anchor";
+import { globalProgramAdmin, bankrunContext } from "../rootHooks";
 
 // TODO: Add these as options instead of args
 interface ProcessBankrunTransactionOptions {
@@ -31,7 +36,7 @@ export const processBankrunTransaction = async (
   tx: Transaction,
   signers: Keypair[],
   trySend: boolean = false,
-  dumpLogOnFail: boolean = false
+  dumpLogOnFail: boolean = false,
   //   options: ProcessBankrunTransactionOptions = {}
 ): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta> => {
   // const { trySend = false, dumpLogOnFail = false } = options;
@@ -48,14 +53,14 @@ export const processBankrunTransaction = async (
     // TODO throw on error?
     // If we want to dump logs on fail, simulate first
     if (dumpLogOnFail) {
-      const simulationResult = await bankrunContext.banksClient.simulateTransaction(tx);
+      const simulationResult =
+        await bankrunContext.banksClient.simulateTransaction(tx);
       if (simulationResult.result) {
         dumpBankrunLogs(simulationResult);
       }
     }
     return await bankrunContext.banksClient.processTransaction(tx);
   }
-
 };
 
 /**
@@ -69,7 +74,7 @@ export const printBufferGroups = (
   buffer: Buffer,
   groupLength: number,
   totalLength: number,
-  skipEmptyRows: boolean = true
+  skipEmptyRows: boolean = true,
 ) => {
   // Print the column headers
   let columnHeader = "        |";
@@ -174,7 +179,7 @@ export function bytesToF64(bytes: Uint8Array | number[]): number {
  */
 export const safeGetAccountInfo = async (
   connection: any,
-  publicKey: PublicKey
+  publicKey: PublicKey,
 ): Promise<AccountInfo<Buffer> | null> => {
   try {
     return await connection.getAccountInfo(publicKey);
@@ -193,7 +198,7 @@ export const safeGetAccountInfo = async (
  */
 export function formatPriceWithDecimals(
   price: bigint,
-  exponent: number
+  exponent: number,
 ): string {
   const powerFactor = Math.pow(10, Math.abs(exponent));
   const priceNumber = Number(price);
@@ -213,7 +218,7 @@ export function formatPriceWithDecimals(
  */
 export function dumpAccBalances(
   account: MarginfiAccountRaw,
-  bankValueMap = {}
+  bankValueMap = {},
 ) {
   const balances = account.lendingAccount.balances;
   const activeBalances = [];
@@ -225,7 +230,6 @@ export function dumpAccBalances(
 
   for (let b of balances) {
     if (b.active == 0) {
-
       activeBalances.push({
         "Bank PK": "empty",
         // Tag: "-",
@@ -317,3 +321,38 @@ export async function getBankrunTime(ctx: ProgramTestContext): Promise<number> {
   const clock = await ctx.banksClient.getClock();
   return Number(clock.unixTimestamp);
 }
+
+/** Shorthand to convert an I80F48 to BN (rounding off decimals) */
+export const toBnFromI80 = (value: any): BN =>
+  new BN(wrappedI80F48toBigNumber(value).toFixed(0));
+
+/** Shorthand to cast BN/number/bigint as BN */
+export const toBn = (value: BN | number | bigint) => {
+  if (typeof value === "bigint") return new BN(value.toString());
+  if (typeof value === "number") return new BN(value);
+  return value;
+};
+
+/** Shorthand to mint some tokens to a destination, globalProgramAdmin always sign/sends */
+export const mintToTokenAccount = async (
+  mint: PublicKey,
+  destination: PublicKey,
+  amount: BN,
+) => {
+  const ix = createMintToInstruction(
+    mint,
+    destination,
+    globalProgramAdmin.wallet.publicKey,
+    BigInt(amount.toString()),
+    [],
+    TOKEN_PROGRAM_ID,
+  );
+
+  await processBankrunTransaction(
+    bankrunContext,
+    new Transaction().add(ix),
+    [globalProgramAdmin.wallet],
+    false,
+    true,
+  );
+};

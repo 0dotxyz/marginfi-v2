@@ -92,7 +92,7 @@ export const setAccountFreezeIx = (
   return program.methods
     .marginfiAccountSetFreeze(args.frozen)
     .accounts({
-      group: args.group,
+      // group: args.group,
       marginfiAccount: args.marginfiAccount,
       admin: args.admin,
     })

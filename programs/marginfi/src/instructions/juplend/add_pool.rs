@@ -10,17 +10,17 @@ use crate::{
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
-use anchor_spl::{associated_token::AssociatedToken, token_interface::*};
+use anchor_spl::token_interface::*;
 use juplend_mocks::state::Lending as JuplendLending;
 use marginfi_type_crate::constants::{
     FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED,
-    LIQUIDITY_VAULT_AUTHORITY_SEED,
+    JUPLEND_F_TOKEN_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
 };
 use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 
 /// Add a JupLend bank to the marginfi lending pool.
 ///
-/// Bank starts `Paused` because once the fToken vault ATA exists, the bank can be interacted
+/// Bank starts `Paused` because once the fToken vault exists, the bank can be interacted
 /// with even without a seed deposit. Call `juplend_init_position` to activate.
 ///
 /// Remaining accounts: 0. oracle feed, 1. JupLend `Lending` state
@@ -44,7 +44,6 @@ pub fn lending_pool_add_bank_juplend(
     let lending_key = integration_acc_1.key();
     let f_token_vault_key = integration_acc_2.key();
 
-    // Validate that we're using a supported Juplend oracle setup type
     require!(
         matches!(
             bank_config.oracle_setup,
@@ -55,11 +54,7 @@ pub fn lending_pool_add_bank_juplend(
 
     let config = bank_config.to_bank_config(lending_key);
 
-    // TEMPORARY: liquidity_vault uses ATA derivation instead of LIQUIDITY_VAULT_SEED PDA.
-    // Mainnet Fluid currently requires ATA for depositor_token_account, but this constraint
-    // is expected to be removed in an upcoming upgrade. Once that happens, revert to
-    // LIQUIDITY_VAULT_SEED like other integrations.
-    let liquidity_vault_bump = 0u8;
+    let liquidity_vault_bump = ctx.bumps.liquidity_vault;
     let liquidity_vault_authority_bump = ctx.bumps.liquidity_vault_authority;
     let insurance_vault_bump = ctx.bumps.insurance_vault;
     let insurance_vault_authority_bump = ctx.bumps.insurance_vault_authority;
@@ -157,16 +152,17 @@ pub struct LendingPoolAddBankJuplend<'info> {
 
     /// For JupLend banks, the `liquidity_vault` is used as an intermediary when depositing/
     /// withdrawing, e.g., withdrawn funds move from JupLend -> here -> the user's token account.
-    ///
-    /// TEMPORARY: Uses ATA derivation instead of LIQUIDITY_VAULT_SEED PDA. Mainnet Fluid
-    /// currently requires ATA for depositor_token_account, but this is expected to be removed
-    /// in an upcoming upgrade. Once that happens, revert to PDA seeds like other integrations.
     #[account(
         init,
         payer = fee_payer,
-        associated_token::mint = bank_mint,
-        associated_token::authority = liquidity_vault_authority,
-        associated_token::token_program = token_program,
+        seeds = [
+            LIQUIDITY_VAULT_SEED.as_bytes(),
+            bank.key().as_ref(),
+        ],
+        bump,
+        token::mint = bank_mint,
+        token::authority = liquidity_vault_authority,
+        token::token_program = token_program,
     )]
     pub liquidity_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
@@ -219,25 +215,22 @@ pub struct LendingPoolAddBankJuplend<'info> {
     pub f_token_mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// The bank's fToken vault holds the fTokens received when depositing into JupLend.
-    ///
-    /// TEMPORARY: Uses ATA derivation instead of a seed-based PDA. Mainnet Fluid currently
-    /// requires ATA for depositor_token_account, but this constraint is expected to be removed
-    /// in an upcoming upgrade. Once that happens, revert to a PDA with seeds like other vaults.
-    ///
-    /// NOTE: JupLend creates fToken mints using the same token program as the underlying mint,
-    /// so for Token-2022 underlying mints, fToken mints are also Token-2022.
     #[account(
         init,
         payer = fee_payer,
-        associated_token::mint = f_token_mint,
-        associated_token::authority = liquidity_vault_authority,
-        associated_token::token_program = token_program,
+        seeds = [
+            JUPLEND_F_TOKEN_VAULT_SEED.as_bytes(),
+            bank.key().as_ref(),
+        ],
+        bump,
+        token::mint = f_token_mint,
+        token::authority = liquidity_vault_authority,
+        token::token_program = token_program,
     )]
     pub integration_acc_2: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Token program for both underlying mint and fToken mint (SPL Token or Token-2022).
     /// JupLend creates fToken mints using the same token program as the underlying.
     pub token_program: Interface<'info, TokenInterface>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
