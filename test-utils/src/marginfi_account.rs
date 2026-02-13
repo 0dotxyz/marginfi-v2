@@ -1,11 +1,12 @@
 use super::{bank::BankFixture, prelude::*};
 use crate::ui_to_native;
+use crate::utils::find_order_pda;
 use anchor_lang::{prelude::*, system_program, InstructionData, ToAccountMetas};
 use fixed::types::I80F48;
 use kamino_mocks::kamino_lending::client as kamino;
 use marginfi::state::bank::BankVaultType;
 use marginfi_type_crate::types::OracleSetup;
-use marginfi_type_crate::types::{Bank, MarginfiAccount};
+use marginfi_type_crate::types::{Bank, FeeState, MarginfiAccount, Order, OrderTrigger};
 use solana_program::{instruction::Instruction, sysvar};
 use solana_program_test::{BanksClient, BanksClientError, ProgramTestContext};
 use solana_sdk::{
@@ -20,13 +21,13 @@ use transfer_hook::TEST_HOOK_ID;
 #[derive(Default, Clone)]
 pub struct MarginfiAccountConfig {}
 
-fn ctx_parts(ctx: &Rc<RefCell<ProgramTestContext>>) -> (BanksClient, Keypair, Hash) {
-    let ctx_ref = ctx.borrow();
-    (
-        ctx_ref.banks_client.clone(),
-        ctx_ref.payer.insecure_clone(),
-        ctx_ref.last_blockhash,
-    )
+async fn ctx_parts(ctx: &Rc<RefCell<ProgramTestContext>>) -> (BanksClient, Keypair, Hash) {
+    let (banks_client, payer) = {
+        let ctx_ref = ctx.borrow();
+        (ctx_ref.banks_client.clone(), ctx_ref.payer.insecure_clone())
+    };
+    let blockhash = banks_client.get_latest_blockhash().await.unwrap();
+    (banks_client, payer, blockhash)
 }
 
 pub struct MarginfiAccountFixture {
@@ -51,7 +52,7 @@ impl MarginfiAccountFixture {
         let ctx_ref = ctx.clone();
         let account_key = Keypair::new();
 
-        let (banks_client, payer, blockhash) = ctx_parts(&ctx_ref);
+        let (banks_client, payer, blockhash) = ctx_parts(&ctx_ref).await;
         let accounts = marginfi::accounts::MarginfiAccountInitialize {
             marginfi_account: account_key.pubkey(),
             marginfi_group: *marginfi_group,
@@ -222,7 +223,7 @@ impl MarginfiAccountFixture {
             }
         }
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let mut signers: Vec<&Keypair> = vec![&payer];
         if authority.pubkey() != payer.pubkey() {
             signers.push(authority);
@@ -249,7 +250,7 @@ impl MarginfiAccountFixture {
             data: marginfi::instruction::MarginfiAccountSetFreeze { frozen }.data(),
         };
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
 
@@ -368,7 +369,7 @@ impl MarginfiAccountFixture {
             )
             .await;
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let mut signers: Vec<&Keypair> = vec![&payer];
         if authority.pubkey() != payer.pubkey() {
             signers.push(authority);
@@ -514,7 +515,7 @@ impl MarginfiAccountFixture {
         let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_400_000);
         let nonce_ix = ComputeBudgetInstruction::set_compute_unit_price(nonce);
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let mut signers: Vec<&Keypair> = vec![&payer];
         if authority.pubkey() != payer.pubkey() {
             signers.push(authority);
@@ -635,7 +636,7 @@ impl MarginfiAccountFixture {
                 authority.pubkey(),
             )
             .await;
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let mut signers: Vec<&Keypair> = vec![&payer];
         if authority.pubkey() != payer.pubkey() {
             signers.push(authority);
@@ -653,7 +654,7 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
     ) -> anyhow::Result<(), BanksClientError> {
         let marginfi_account = self.load().await;
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
 
         let ix = Instruction {
             program_id: marginfi::ID,
@@ -779,7 +780,7 @@ impl MarginfiAccountFixture {
 
         let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_400_000);
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let tx = Transaction::new_signed_with_payer(
             &[compute_budget_ix, ix],
             Some(&payer.pubkey()),
@@ -815,7 +816,7 @@ impl MarginfiAccountFixture {
             data: marginfi::instruction::LendingAccountWithdrawEmissions {}.data(),
         };
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
 
@@ -880,7 +881,7 @@ impl MarginfiAccountFixture {
         ixs.insert(0, start_ix);
         ixs.push(end_ix);
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
 
         let signers = if let Some(signer) = signer {
             vec![&payer, signer]
@@ -1046,7 +1047,7 @@ impl MarginfiAccountFixture {
             &[transfer_account_ix],
             Some(&fee_payer.pubkey()),
             &signers,
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         )
     }
 
@@ -1073,7 +1074,7 @@ impl MarginfiAccountFixture {
                 global_fee_wallet,
             )
             .await;
-        let (banks_client, _, _) = ctx_parts(&self.ctx);
+        let (banks_client, _, _) = ctx_parts(&self.ctx).await;
         banks_client
             .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
             .await
@@ -1104,7 +1105,7 @@ impl MarginfiAccountFixture {
     }
 
     pub async fn try_close_account(&self, nonce: u64) -> std::result::Result<(), BanksClientError> {
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
 
         let ix = Instruction {
             program_id: marginfi::ID,
@@ -1268,7 +1269,7 @@ impl MarginfiAccountFixture {
         ix.accounts
             .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
 
@@ -1329,5 +1330,205 @@ impl MarginfiAccountFixture {
                 .await,
         );
         ix
+    }
+
+    pub async fn try_place_order(
+        &self,
+        bank_keys: Vec<Pubkey>,
+        trigger: OrderTrigger,
+    ) -> std::result::Result<Pubkey, BanksClientError> {
+        let marginfi_account = self.load().await;
+        // Compute fee_state PDA and fetch the global_fee_wallet from it so we can pass both
+        // accounts to the PlaceOrder instruction.
+        let (fee_state_key, _bump) = Pubkey::find_program_address(
+            &[marginfi_type_crate::constants::FEE_STATE_SEED.as_bytes()],
+            &marginfi::ID,
+        );
+
+        // Clone banks_client so we don't hold the RefCell borrow across await points.
+        let banks_client = {
+            let ctx = self.ctx.borrow();
+            ctx.banks_client.clone()
+        };
+        let fee_state_account = banks_client
+            .get_account(fee_state_key)
+            .await?
+            .expect("fee_state account must exist for tests");
+        let fee_state_data: FeeState =
+            FeeState::try_deserialize(&mut &fee_state_account.data[..]).expect("invalid fee_state");
+        let global_fee_wallet = fee_state_data.global_fee_wallet;
+
+        let ctx = self.ctx.borrow();
+
+        let (order_pda, _) = find_order_pda(&self.key, &bank_keys);
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::PlaceOrder {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                fee_payer: ctx.payer.pubkey(),
+                authority: ctx.payer.pubkey(),
+                order: order_pda,
+                fee_state: fee_state_key,
+                global_fee_wallet,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountPlaceOrder { bank_keys, trigger }.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await?;
+
+        Ok(order_pda)
+    }
+
+    pub async fn try_close_order(
+        &self,
+        order: Pubkey,
+        fee_recipient: Pubkey,
+    ) -> std::result::Result<(), BanksClientError> {
+        let ctx = self.ctx.borrow();
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::CloseOrder {
+                marginfi_account: self.key,
+                authority: ctx.payer.pubkey(),
+                order,
+                fee_recipient,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountCloseOrder {}.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
+    pub async fn try_keeper_close_order(
+        &self,
+        order: Pubkey,
+        keeper: &Keypair,
+        fee_recipient: Pubkey,
+    ) -> std::result::Result<(), BanksClientError> {
+        let ctx = self.ctx.borrow();
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::KeeperCloseOrder {
+                marginfi_account: self.key,
+                order,
+                fee_recipient,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountKeeperCloseOrder {}.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&keeper.pubkey()),
+            &[keeper],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
+    pub async fn try_set_keeper_close_flags(
+        &self,
+        bank_keys_opt: Option<Vec<Pubkey>>,
+    ) -> std::result::Result<(), BanksClientError> {
+        let ctx = self.ctx.borrow();
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::SetKeeperCloseFlags {
+                marginfi_account: self.key,
+                authority: ctx.payer.pubkey(),
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountSetKeeperCloseFlags { bank_keys_opt }
+                .data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
+    pub async fn load_order(&self, order: Pubkey) -> Order {
+        load_and_deserialize::<Order>(self.ctx.clone(), &order).await
+    }
+
+    pub async fn try_set_emissions_destination(
+        &self,
+        destination_account: Pubkey,
+    ) -> std::result::Result<(), BanksClientError> {
+        let ctx = self.ctx.borrow();
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::MarginfiAccountUpdateEmissionsDestinationAccount {
+                marginfi_account: self.key,
+                authority: ctx.payer.pubkey(),
+                destination_account,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountUpdateEmissionsDestinationAccount {}.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
     }
 }

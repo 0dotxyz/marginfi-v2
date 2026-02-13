@@ -79,6 +79,8 @@ export const HEALTH_CACHE_PROGRAM_VERSION_0_1_4 = 2;
 export const HEALTH_CACHE_PROGRAM_VERSION_0_1_5 = 3;
 /** Confidence intervals are multiplied by this constant internally */
 export const CONF_INTERVAL_MULTIPLE = 2.12;
+/** Price = oracle Price * (1 +/- this value) */
+export const CONF_INTERVAL_MULTIPLE_FLOAT = 0.0212;
 /** Oracles return values with this confidence for testing purposes */
 export const ORACLE_CONF_INTERVAL = 0.01;
 export const ONE_WEEK_IN_SECONDS = 7 * 24 * 60 * 60;

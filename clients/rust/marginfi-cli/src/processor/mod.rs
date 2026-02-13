@@ -10,8 +10,8 @@ use {
         utils::{
             bank_to_oracle_key, calc_emissions_rate, find_bank_emssions_auth_pda,
             find_bank_emssions_token_account_pda, find_bank_vault_authority_pda,
-            find_bank_vault_pda, find_fee_state_pda, load_observation_account_metas,
-            process_transaction, EXP_10_I80F48,
+            find_bank_vault_pda, find_fee_state_pda, find_order_pda,
+            load_observation_account_metas, process_transaction, EXP_10_I80F48,
         },
         RatePointArg,
     },
@@ -41,8 +41,8 @@ use {
         },
         types::{
             make_points, BalanceSide, Bank, BankConfigCompact, BankConfigOpt, BankOperationalState,
-            InterestRateConfig, MarginfiAccount, MarginfiGroup, OracleSetup, RatePoint,
-            WrappedI80F48, CURVE_POINTS, INTEREST_CURVE_SEVEN_POINT,
+            FeeState, InterestRateConfig, MarginfiAccount, MarginfiGroup, OracleSetup,
+            OrderTrigger, RatePoint, WrappedI80F48, CURVE_POINTS, INTEREST_CURVE_SEVEN_POINT,
         },
     },
     pyth_solana_receiver_sdk::price_update::PriceUpdateV2,
@@ -976,10 +976,13 @@ pub fn initialize_fee_state(
     program_fee_fixed: f64,
     program_fee_rate: f64,
     liquidation_max_fee: f64,
+    order_init_flat_sol_fee: u32,
+    order_execution_max_fee: f64,
 ) -> Result<()> {
     let program_fee_fixed: WrappedI80F48 = I80F48::from_num(program_fee_fixed).into();
     let program_fee_rate: WrappedI80F48 = I80F48::from_num(program_fee_rate).into();
     let liquidation_max_fee: WrappedI80F48 = I80F48::from_num(liquidation_max_fee).into();
+    let order_execution_max_fee: WrappedI80F48 = I80F48::from_num(order_execution_max_fee).into();
 
     let rpc_client = config.mfi_program.rpc();
 
@@ -1001,6 +1004,8 @@ pub fn initialize_fee_state(
             program_fee_fixed,
             program_fee_rate,
             liquidation_max_fee,
+            order_init_flat_sol_fee,
+            order_execution_max_fee,
         })
         .instructions()?;
 
@@ -1029,10 +1034,13 @@ pub fn edit_fee_state(
     program_fee_fixed: f64,
     program_fee_rate: f64,
     liquidation_max_fee: f64,
+    order_init_flat_sol_fee: u32,
+    order_execution_max_fee: f64,
 ) -> Result<()> {
     let program_fee_fixed: WrappedI80F48 = I80F48::from_num(program_fee_fixed).into();
     let program_fee_rate: WrappedI80F48 = I80F48::from_num(program_fee_rate).into();
     let liquidation_max_fee: WrappedI80F48 = I80F48::from_num(liquidation_max_fee).into();
+    let order_execution_max_fee: WrappedI80F48 = I80F48::from_num(order_execution_max_fee).into();
 
     let rpc_client = config.mfi_program.rpc();
 
@@ -1053,6 +1061,8 @@ pub fn edit_fee_state(
             program_fee_fixed,
             program_fee_rate,
             liquidation_max_fee,
+            order_init_flat_sol_fee,
+            order_execution_max_fee,
         })
         .instructions()?;
 
@@ -1159,7 +1169,7 @@ pub fn bank_get(config: Config, bank_pk: Option<Pubkey>) -> Result<()> {
         let current_timestamp = current_timestamp.as_secs() as i64;
 
         bank.accrue_interest(current_timestamp, &group)?;
-        bank.update_bank_cache(&group, None)?;
+        bank.update_bank_cache(&group)?;
         println!(" Cranking interest at: {:?}", current_timestamp);
 
         print_bank(&address, &bank);
@@ -2546,6 +2556,170 @@ pub fn marginfi_account_close(profile: &Profile, config: &Config) -> Result<()> 
         Ok(sig) => println!("Marginfi account closed successfully (sig: {})", sig),
         Err(err) => println!("Error during marginfi account closure:\n{:#?}", err),
     };
+
+    Ok(())
+}
+
+pub fn marginfi_account_place_order(
+    profile: &Profile,
+    config: &Config,
+    bank_1: Pubkey,
+    bank_2: Pubkey,
+    trigger: OrderTrigger,
+) -> Result<()> {
+    let signer = config.get_non_ms_authority_keypair()?;
+    let rpc_client = config.mfi_program.rpc();
+
+    let marginfi_account_pk = profile.get_marginfi_account();
+    let group_pk = profile.marginfi_group.ok_or_else(|| {
+        anyhow!(
+            "Marginfi group does not exist for profile [{}]",
+            profile.name
+        )
+    })?;
+
+    let bank_keys = vec![bank_1, bank_2];
+
+    let (order_pda, _bump) = find_order_pda(&marginfi_account_pk, &bank_keys, &config.program_id);
+
+    // Fee state PDA is single-instance; load it to get the global fee wallet required by the ix.
+    let fee_state_pk = find_fee_state_pda(&config.program_id).0;
+    let fee_state: FeeState = config.mfi_program.account(fee_state_pk)?;
+
+    println!(
+        "Placing order for marginfi account: {}",
+        marginfi_account_pk
+    );
+    println!("Bank 1: {}", bank_1);
+    println!("Bank 2: {}", bank_2);
+    println!("Order PDA: {}", order_pda);
+
+    let ix = Instruction {
+        program_id: config.program_id,
+        accounts: marginfi::accounts::PlaceOrder {
+            group: group_pk,
+            marginfi_account: marginfi_account_pk,
+            fee_payer: signer.pubkey(),
+            authority: signer.pubkey(),
+            order: order_pda,
+            fee_state: fee_state_pk,
+            global_fee_wallet: fee_state.global_fee_wallet,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::MarginfiAccountPlaceOrder {
+            mint_keys: bank_keys,
+            trigger,
+        }
+        .data(),
+    };
+
+    let recent_blockhash = rpc_client.get_latest_blockhash()?;
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&signer.pubkey()),
+        &[signer],
+        recent_blockhash,
+    );
+
+    match process_transaction(&tx, &rpc_client, config.get_tx_mode()) {
+        Ok(sig) => println!("Order placed successfully (sig: {})", sig),
+        Err(err) => println!("Error during order placement:\n{:#?}", err),
+    }
+
+    Ok(())
+}
+
+pub fn marginfi_account_close_order(
+    profile: &Profile,
+    config: &Config,
+    order_pk: Pubkey,
+    fee_recipient: Option<Pubkey>,
+) -> Result<()> {
+    let signer = config.get_non_ms_authority_keypair()?;
+    let rpc_client = config.mfi_program.rpc();
+
+    let marginfi_account_pk = profile.get_marginfi_account();
+
+    // Default fee_recipient to signer if not provided
+    let fee_recipient = fee_recipient.unwrap_or(signer.pubkey());
+
+    println!("Closing order: {}", order_pk);
+    println!("Fee recipient: {}", fee_recipient);
+
+    let ix = Instruction {
+        program_id: config.program_id,
+        accounts: marginfi::accounts::CloseOrder {
+            marginfi_account: marginfi_account_pk,
+            authority: signer.pubkey(),
+            order: order_pk,
+            fee_recipient,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::MarginfiAccountCloseOrder.data(),
+    };
+
+    let recent_blockhash = rpc_client.get_latest_blockhash()?;
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&signer.pubkey()),
+        &[signer],
+        recent_blockhash,
+    );
+
+    match process_transaction(&tx, &rpc_client, config.get_tx_mode()) {
+        Ok(sig) => println!("Order closed successfully (sig: {})", sig),
+        Err(err) => println!("Error during order closure:\n{:#?}", err),
+    }
+
+    Ok(())
+}
+
+pub fn marginfi_account_set_keeper_close_flags(
+    profile: &Profile,
+    config: &Config,
+    bank_keys_opt: Option<Vec<Pubkey>>,
+) -> Result<()> {
+    let signer = config.get_non_ms_authority_keypair()?;
+    let rpc_client = config.mfi_program.rpc();
+
+    let marginfi_account_pk = profile.get_marginfi_account();
+
+    match &bank_keys_opt {
+        Some(keys) => {
+            println!("Setting liquidator close flags for specific banks:");
+            for key in keys {
+                println!("  - {}", key);
+            }
+        }
+        None => {
+            println!("Clearing all balance tags (liquidator will close all orders)");
+        }
+    }
+
+    let ix = Instruction {
+        program_id: config.program_id,
+        accounts: marginfi::accounts::SetKeeperCloseFlags {
+            marginfi_account: marginfi_account_pk,
+            authority: signer.pubkey(),
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::MarginfiAccountSetKeeperCloseFlags { bank_keys_opt }.data(),
+    };
+
+    let recent_blockhash = rpc_client.get_latest_blockhash()?;
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&signer.pubkey()),
+        &[signer],
+        recent_blockhash,
+    );
+
+    match process_transaction(&tx, &rpc_client, config.get_tx_mode()) {
+        Ok(sig) => println!("Liquidator close flags set successfully (sig: {})", sig),
+        Err(err) => println!("Error setting liquidator close flags:\n{:#?}", err),
+    }
 
     Ok(())
 }

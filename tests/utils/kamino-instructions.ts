@@ -310,7 +310,7 @@ export interface KaminoWithdrawAccounts {
 
 export interface KaminoWithdrawArgs {
   amount: BN;
-  isFinalWithdrawal: boolean;
+  isWithdrawAll: boolean;
   /** Oracle and other remaining accounts needed for health checks */
   remaining: PublicKey[];
 }
@@ -353,7 +353,7 @@ export const makeKaminoWithdrawIx = async (
   );
 
   const ix = await program.methods
-    .kaminoWithdraw(args.amount, args.isFinalWithdrawal)
+    .kaminoWithdraw(args.amount, args.isWithdrawAll)
     .accounts({
       lendingMarketAuthority, // derived
       reserveLiquiditySupply, // derived

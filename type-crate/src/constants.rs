@@ -17,6 +17,8 @@ pub const EMISSIONS_TOKEN_ACCOUNT_SEED: &str = "emissions_token_account_seed";
 
 pub const LIQUIDATION_RECORD_SEED: &str = "liq_record";
 pub const MARGINFI_ACCOUNT_SEED: &str = "marginfi_account";
+pub const ORDER_SEED: &str = "order";
+pub const EXECUTE_ORDER_SEED: &str = "execute_order";
 
 pub const METADATA_SEED: &str = "metadata";
 
@@ -32,6 +34,14 @@ pub const DAILY_RESET_INTERVAL: i64 = 24 * 60 * 60; // 24 hours
 /// Switchboard oracles are cranked on demand, so we can use a lower value (10 seconds)
 pub const ORACLE_MIN_AGE: u16 = 10;
 pub const MAX_PYTH_ORACLE_AGE: u64 = 60;
+/// Number of active tags currently supported for orders.
+pub const ORDER_ACTIVE_TAGS: usize = 2;
+/// Compile-time guard to ensure ORDER_ACTIVE_TAGS stays 2 as assumed
+/// in several places in the code for simplicity.
+/// It can be removed when orders are extended to allow more balances.
+pub const _: () = assert!(ORDER_ACTIVE_TAGS == 2);
+/// Padding length (in bytes) to preserve `Order` layout when more balances are added.
+pub const ORDER_TAG_PADDING: usize = 32;
 
 /// Range that contains 95% price data distribution
 ///
@@ -188,16 +198,22 @@ pub mod discriminators {
     pub const FEE_STATE: [u8; 8] = [63, 224, 16, 85, 193, 36, 235, 220];
     pub const STAKED_SETTINGS: [u8; 8] = [157, 140, 6, 77, 89, 173, 173, 125];
     pub const LIQUIDATION_RECORD: [u8; 8] = [95, 116, 23, 132, 89, 210, 245, 162];
+    pub const ORDER: [u8; 8] = [134, 173, 223, 185, 77, 86, 28, 51];
+    pub const EXECUTE_ORDER_RECORD: [u8; 8] = [6, 100, 107, 60, 164, 226, 56, 97];
 }
 
 pub mod ix_discriminators {
     pub const INIT_LIQUIDATION_RECORD: [u8; 8] = [236, 213, 238, 126, 147, 251, 164, 8];
     pub const START_LIQUIDATION: [u8; 8] = [244, 93, 90, 214, 192, 166, 191, 21];
     pub const END_LIQUIDATION: [u8; 8] = [110, 11, 244, 54, 229, 181, 22, 184];
+    pub const START_EXECUTE_ORDER: [u8; 8] = [1, 70, 140, 134, 183, 29, 208, 224];
+    pub const END_EXECUTE_ORDER: [u8; 8] = [115, 42, 20, 93, 121, 84, 178, 83];
     pub const LENDING_ACCOUNT_WITHDRAW: [u8; 8] = [36, 72, 74, 19, 210, 210, 192, 192];
     pub const LENDING_ACCOUNT_REPAY: [u8; 8] = [79, 209, 172, 177, 222, 51, 173, 151];
-    pub const LENDING_SETTLE_EMISSIONS: [u8; 8] = [234, 22, 84, 214, 118, 176, 140, 170];
-    pub const LENDING_WITHDRAW_EMISSIONS: [u8; 8] = [161, 58, 136, 174, 242, 223, 156, 176];
+    pub const LENDING_SETTLE_EMISSIONS: [u8; 8] = [161, 58, 136, 174, 242, 223, 156, 176];
+    pub const LENDING_WITHDRAW_EMISSIONS: [u8; 8] = [234, 22, 84, 214, 118, 176, 140, 170];
+    pub const LENDING_WITHDRAW_EMISSIONS_PERMISSIONLESS: [u8; 8] =
+        [4, 174, 124, 203, 44, 49, 145, 150];
     pub const KAMINO_WITHDRAW: [u8; 8] = [199, 101, 41, 45, 213, 98, 224, 200];
     pub const DRIFT_WITHDRAW: [u8; 8] = [86, 59, 186, 123, 183, 181, 234, 137];
     pub const JUPLEND_WITHDRAW: [u8; 8] = [245, 164, 253, 202, 53, 77, 251, 221];

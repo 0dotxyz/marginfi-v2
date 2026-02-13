@@ -199,21 +199,23 @@ unsafe impl Pod for BankOperationalState {}
 #[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum OracleSetup {
-    None,
-    PythLegacy,
-    SwitchboardV2,
-    PythPushOracle,
-    SwitchboardPull,
-    StakedWithPythPush,
-    KaminoPythPush,
-    KaminoSwitchboardPull,
-    Fixed,
-    DriftPythPull,
-    DriftSwitchboardPull,
-    SolendPythPull,
-    SolendSwitchboardPull,
-    JuplendPythPull,
-    JuplendSwitchboardPull,
+    None = 0,
+    PythLegacy = 1,
+    SwitchboardV2 = 2,
+    PythPushOracle = 3,
+    SwitchboardPull = 4,
+    StakedWithPythPush = 5,
+    KaminoPythPush = 6,
+    KaminoSwitchboardPull = 7,
+    Fixed = 8,
+    DriftPythPull = 9,
+    DriftSwitchboardPull = 10,
+    SolendPythPull = 11,
+    SolendSwitchboardPull = 12,
+    FixedKamino = 13,
+    FixedDrift = 14,
+    JuplendPythPull = 15,
+    JuplendSwitchboardPull = 16,
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
@@ -234,8 +236,10 @@ impl OracleSetup {
             10 => Some(Self::DriftSwitchboardPull),
             11 => Some(Self::SolendPythPull),
             12 => Some(Self::SolendSwitchboardPull),
-            13 => Some(Self::JuplendPythPull),
-            14 => Some(Self::JuplendSwitchboardPull),
+            13 => Some(Self::FixedKamino),
+            14 => Some(Self::FixedDrift),
+            15 => Some(Self::JuplendPythPull),
+            16 => Some(Self::JuplendSwitchboardPull),
             _ => None,
         }
     }

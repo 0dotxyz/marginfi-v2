@@ -13,9 +13,11 @@ pub fn edit_fee_state(
     fee_wallet: Pubkey,
     bank_init_flat_sol_fee: u32,
     liquidation_flat_sol_fee: u32,
+    order_init_flat_sol_fee: u32,
     program_fee_fixed: WrappedI80F48,
     program_fee_rate: WrappedI80F48,
     liquidation_max_fee: WrappedI80F48,
+    order_execution_max_fee: WrappedI80F48,
 ) -> Result<()> {
     let mut fee_state = ctx.accounts.fee_state.load_mut()?;
     fee_state.global_fee_admin = admin;
@@ -25,10 +27,13 @@ pub fn edit_fee_state(
     fee_state.program_fee_rate = program_fee_rate;
     fee_state.liquidation_max_fee = liquidation_max_fee;
     fee_state.liquidation_flat_sol_fee = liquidation_flat_sol_fee;
+    fee_state.order_execution_max_fee = order_execution_max_fee;
+    fee_state.order_init_flat_sol_fee = order_init_flat_sol_fee;
 
     let fixed_f64: f64 = wrapped_i80f48_to_f64(fee_state.program_fee_fixed);
     let rate_f64: f64 = wrapped_i80f48_to_f64(fee_state.program_fee_rate);
     let liq_f64: f64 = wrapped_i80f48_to_f64(fee_state.liquidation_max_fee);
+    let ord_f64: f64 = wrapped_i80f48_to_f64(fee_state.order_execution_max_fee);
     msg!("admin set to: {:?} fee wallet: {:?}", admin, fee_wallet);
     msg!(
         "flat sol: {:?} fixed: {:?} rate: {:?}",
@@ -40,6 +45,11 @@ pub fn edit_fee_state(
         "liquidation max fee: {:?}, flat fee: {:?}",
         liq_f64,
         fee_state.liquidation_flat_sol_fee
+    );
+    msg!(
+        "order execution max fee: {:?}, flat fee: {:?}",
+        ord_f64,
+        fee_state.order_init_flat_sol_fee
     );
 
     Ok(())

@@ -30,7 +30,8 @@ use drift_mocks::drift::cpi::{update_spot_market_cumulative_interest, withdraw};
 use drift_mocks::state::MinimalUser;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{
-    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+    ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
 };
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_IN_DELEVERAGE,
@@ -75,8 +76,9 @@ pub fn drift_withdraw<'info>(
         );
 
         // Validate price is non-zero during liquidation/deleverage to prevent exploits with stale oracles
-        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
-        let price = if in_receivership {
+        let in_receivership_or_order_execution =
+            marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
+        let price = if in_receivership_or_order_execution {
             let price = fetch_asset_price_for_bank_low_bias(
                 &bank_key,
                 &bank,
@@ -246,8 +248,9 @@ pub fn drift_withdraw<'info>(
         // Drop the bank mutable borrow before health check (bank is in remaining_accounts)
         drop(bank);
 
-        // Note: during liquidation, we skip all health checks until the end of the transaction.
-        if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
+        // Note: during liquidation/receivership or order execution, we skip all health checks until
+        // the end of the transaction.
+        if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION) {
             check_account_init_health(
                 &marginfi_account,
                 ctx.remaining_accounts,
@@ -305,7 +308,7 @@ pub struct DriftWithdraw<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), true)
+            is_signer_authorized(&a, g.admin, authority.key(), true, true)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

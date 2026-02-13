@@ -563,7 +563,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
         },
         {
           amount: withdrawAmount,
-          isFinalWithdrawal: false,
+          isWithdrawAll: false,
           remaining: composeRemainingAccounts([
             [usdcBank, oracles.usdcOracle.publicKey, usdcReserve],
             [tokenABank, oracles.tokenAOracle.publicKey, tokenAReserve],

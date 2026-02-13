@@ -63,7 +63,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
         pubkey!("2s37akK2eyBbp8DZgCm7RtsaEz8eJP3Nxd4urLHQv7yB")
     );
     assert_eq!(balance_1.bank_asset_tag, ASSET_TAG_DEFAULT);
-    assert_eq!(balance_1._pad0, [0; 6]);
+    assert_eq!(balance_1.tag, 0);
+    assert_eq!(balance_1._pad0, [0; 4]);
     assert_eq!(
         I80F48::from(balance_1.asset_shares),
         I80F48::from_str("1650216221.466876226897366").unwrap()
@@ -89,7 +90,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
         pubkey!("CCKtUs6Cgwo4aaQUmBPmyoApH2gUDErxNZCAntD6LYGh")
     );
     assert_eq!(balance_2.bank_asset_tag, ASSET_TAG_DEFAULT);
-    assert_eq!(balance_2._pad0, [0; 6]);
+    assert_eq!(balance_2.tag, 0);
+    assert_eq!(balance_2._pad0, [0; 4]);
     assert_eq!(
         I80F48::from(balance_2.asset_shares),
         I80F48::from_str("0").unwrap()
@@ -141,7 +143,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
         pubkey!("6hS9i46WyTq1KXcoa2Chas2Txh9TJAVr6n1t3tnrE23K")
     );
     assert_eq!(balance_1.bank_asset_tag, ASSET_TAG_DEFAULT);
-    assert_eq!(balance_1._pad0, [0; 6]);
+    assert_eq!(balance_1.tag, 0);
+    assert_eq!(balance_1._pad0, [0; 4]);
     assert_eq!(
         I80F48::from(balance_1.asset_shares),
         I80F48::from_str("470.952530958931234").unwrap()
@@ -167,7 +170,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
         pubkey!("11111111111111111111111111111111")
     );
     assert_eq!(balance_2.bank_asset_tag, ASSET_TAG_DEFAULT);
-    assert_eq!(balance_2._pad0, [0; 6]);
+    assert_eq!(balance_2.tag, 0);
+    assert_eq!(balance_2._pad0, [0; 4]);
     assert_eq!(
         I80F48::from(balance_2.asset_shares),
         I80F48::from_str("0").unwrap()
@@ -224,7 +228,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
         pubkey!("11111111111111111111111111111111")
     );
     assert_eq!(balance_1.bank_asset_tag, ASSET_TAG_DEFAULT);
-    assert_eq!(balance_1._pad0, [0; 6]);
+    assert_eq!(balance_1.tag, 0);
+    assert_eq!(balance_1._pad0, [0; 4]);
     assert_eq!(
         I80F48::from(balance_1.asset_shares),
         I80F48::from_str("0").unwrap()
