@@ -1,7 +1,5 @@
 use anchor_lang::prelude::*;
 
-use crate::JuplendMocksError;
-
 // Account discriminator from JupLend IDL for `Lending`.
 // Anchor discriminator = sha256("account:Lending")[0..8].
 pub const LENDING_DISCRIMINATOR: [u8; 8] = [135, 199, 82, 16, 249, 131, 182, 241];
@@ -10,6 +8,80 @@ pub const LENDING_DISCRIMINATOR: [u8; 8] = [135, 199, 82, 16, 249, 131, 182, 241
 ///
 /// Source: JupLend lending program constant `EXCHANGE_PRICES_PRECISION`.
 pub const EXCHANGE_PRICES_PRECISION: u128 = 1_000_000_000_000;
+
+/// Pure helper for JupLend withdraw preview math.
+///
+/// Formula (1e12 precision): `shares = ceil(assets * 1e12 / token_exchange_price)`.
+#[inline]
+pub fn expected_shares_for_withdraw_from_rate(
+    assets: u64,
+    token_exchange_price: u64,
+) -> Option<u64> {
+    let token_exchange_price = token_exchange_price as u128;
+    if token_exchange_price == 0 {
+        return None;
+    }
+
+    let numerator = (assets as u128)
+        .checked_mul(EXCHANGE_PRICES_PRECISION)?
+        .checked_add(token_exchange_price - 1)?;
+
+    let shares_u128 = numerator.checked_div(token_exchange_price)?;
+
+    shares_u128.try_into().ok()
+}
+
+/// Pure helper for JupLend redeem preview math.
+///
+/// Formula (1e12 precision): `assets = floor(shares * token_exchange_price / 1e12)`.
+#[inline]
+pub fn expected_assets_for_redeem_from_rate(shares: u64, token_exchange_price: u64) -> Option<u64> {
+    let token_exchange_price = token_exchange_price as u128;
+    if token_exchange_price == 0 {
+        return None;
+    }
+
+    let assets_u128 = (shares as u128)
+        .checked_mul(token_exchange_price)?
+        .checked_div(EXCHANGE_PRICES_PRECISION)?;
+
+    assets_u128.try_into().ok()
+}
+
+/// Pure helper for JupLend deposit preview math.
+///
+/// Mirrors lending + liquidity two-step conversion:
+/// ```text
+/// raw    = floor(assets * 1e12 / liquidity_exchange_price)
+/// norm   = floor(raw * liquidity_exchange_price / 1e12)
+/// shares = floor(norm * 1e12 / token_exchange_price)
+/// ```
+#[inline]
+pub fn expected_shares_for_deposit_from_rates(
+    assets: u64,
+    liquidity_exchange_price: u64,
+    token_exchange_price: u64,
+) -> Option<u64> {
+    let liquidity_ex_price = liquidity_exchange_price as u128;
+    let token_ex_price = token_exchange_price as u128;
+    if liquidity_ex_price == 0 || token_ex_price == 0 {
+        return None;
+    }
+
+    let registered_amount_raw = (assets as u128)
+        .checked_mul(EXCHANGE_PRICES_PRECISION)?
+        .checked_div(liquidity_ex_price)?;
+
+    let registered_amount = registered_amount_raw
+        .checked_mul(liquidity_ex_price)?
+        .checked_div(EXCHANGE_PRICES_PRECISION)?;
+
+    let shares_u128 = registered_amount
+        .checked_mul(EXCHANGE_PRICES_PRECISION)?
+        .checked_div(token_ex_price)?;
+
+    shares_u128.try_into().ok()
+}
 
 /// Minimal representation of the on-chain JupLend `Lending` account.
 ///
@@ -57,45 +129,6 @@ impl Lending {
         self.last_update_timestamp as i64 != current_timestamp
     }
 
-    /// Core adjustment: raw * token_exchange_price / EXCHANGE_PRICES_PRECISION
-    #[inline]
-    fn adjust_u128(&self, raw: u128) -> Result<u128> {
-        let rate = self.token_exchange_price as u128;
-        raw.checked_mul(rate)
-            .ok_or_else(|| error!(JuplendMocksError::MathError))?
-            .checked_div(EXCHANGE_PRICES_PRECISION)
-            .ok_or_else(|| error!(JuplendMocksError::MathError))
-    }
-
-    /// Adjust i64 oracle prices (Pyth price)
-    #[inline]
-    pub fn adjust_i64(&self, raw: i64) -> Result<i64> {
-        let raw_u128 = u128::try_from(raw).map_err(|_| error!(JuplendMocksError::MathError))?;
-        let adjusted = self.adjust_u128(raw_u128)?;
-        adjusted
-            .try_into()
-            .map_err(|_| error!(JuplendMocksError::MathError))
-    }
-
-    /// Adjust u64 oracle confidences (Pyth confidence interval)
-    #[inline]
-    pub fn adjust_u64(&self, raw: u64) -> Result<u64> {
-        let adjusted = self.adjust_u128(raw as u128)?;
-        adjusted
-            .try_into()
-            .map_err(|_| error!(JuplendMocksError::MathError))
-    }
-
-    /// Adjust i128 oracle values (Switchboard Pull value/std_dev)
-    #[inline]
-    pub fn adjust_i128(&self, raw: i128) -> Result<i128> {
-        let raw_u128 = u128::try_from(raw).map_err(|_| error!(JuplendMocksError::MathError))?;
-        let adjusted = self.adjust_u128(raw_u128)?;
-        adjusted
-            .try_into()
-            .map_err(|_| error!(JuplendMocksError::MathError))
-    }
-
     /// Expected fToken shares minted when depositing `assets` underlying.
     ///
     /// Mirrors JupLend's actual deposit flow: **round down** via the liquidity layer.
@@ -112,33 +145,12 @@ impl Lending {
     /// ```
     /// https://github.com/Instadapp/fluid-solana-programs/blob/830458299be42eaeb6e1fe8fef6aa23444430a10/programs/lending/src/utils/deposit.rs#L68-L86
     #[inline]
-    pub fn expected_shares_for_deposit(&self, assets: u64) -> Result<u64> {
-        let liquidity_ex_price = self.liquidity_exchange_price as u128;
-        let token_ex_price = self.token_exchange_price as u128;
-        require!(liquidity_ex_price > 0, JuplendMocksError::MathError);
-        require!(token_ex_price > 0, JuplendMocksError::MathError);
-
-        let registered_amount_raw = (assets as u128)
-            .checked_mul(EXCHANGE_PRICES_PRECISION)
-            .ok_or_else(|| error!(JuplendMocksError::MathError))?
-            .checked_div(liquidity_ex_price)
-            .ok_or_else(|| error!(JuplendMocksError::MathError))?;
-
-        let registered_amount = registered_amount_raw
-            .checked_mul(liquidity_ex_price)
-            .ok_or_else(|| error!(JuplendMocksError::MathError))?
-            .checked_div(EXCHANGE_PRICES_PRECISION)
-            .ok_or_else(|| error!(JuplendMocksError::MathError))?;
-
-        let shares_u128 = registered_amount
-            .checked_mul(EXCHANGE_PRICES_PRECISION)
-            .ok_or_else(|| error!(JuplendMocksError::MathError))?
-            .checked_div(token_ex_price)
-            .ok_or_else(|| error!(JuplendMocksError::MathError))?;
-
-        shares_u128
-            .try_into()
-            .map_err(|_| error!(JuplendMocksError::MathError))
+    pub fn expected_shares_for_deposit(&self, assets: u64) -> Option<u64> {
+        expected_shares_for_deposit_from_rates(
+            assets,
+            self.liquidity_exchange_price,
+            self.token_exchange_price,
+        )
     }
 
     /// Expected fToken shares burned when withdrawing `assets` underlying.
@@ -160,23 +172,8 @@ impl Lending {
     /// JupLend uses `safe_div_ceil()` which is mathematically equivalent.
     /// https://github.com/Instadapp/fluid-solana-programs/blob/830458299be42eaeb6e1fe8fef6aa23444430a10/programs/lending/src/utils/withdraw.rs#L52-L59
     #[inline]
-    pub fn expected_shares_for_withdraw(&self, assets: u64) -> Result<u64> {
-        let token_exchange_price = self.token_exchange_price as u128;
-        require!(token_exchange_price > 0, JuplendMocksError::MathError);
-
-        let numerator = (assets as u128)
-            .checked_mul(EXCHANGE_PRICES_PRECISION)
-            .ok_or_else(|| error!(JuplendMocksError::MathError))?
-            .checked_add(token_exchange_price - 1)
-            .ok_or_else(|| error!(JuplendMocksError::MathError))?;
-
-        let shares_u128 = numerator
-            .checked_div(token_exchange_price)
-            .ok_or_else(|| error!(JuplendMocksError::MathError))?;
-
-        shares_u128
-            .try_into()
-            .map_err(|_| error!(JuplendMocksError::MathError))
+    pub fn expected_shares_for_withdraw(&self, assets: u64) -> Option<u64> {
+        expected_shares_for_withdraw_from_rate(assets, self.token_exchange_price)
     }
 
     /// Expected underlying assets returned when redeeming `shares` fTokens.
@@ -187,18 +184,7 @@ impl Lending {
     /// https://github.com/Instadapp/fluid-solana-programs/blob/830458299be42eaeb6e1fe8fef6aa23444430a10/programs/lending/src/state/context.rs#L399-L411
     /// https://github.com/Instadapp/fluid-solana-programs/blob/830458299be42eaeb6e1fe8fef6aa23444430a10/programs/lending/src/utils/helpers.rs#L37-L41
     #[inline]
-    pub fn expected_assets_for_redeem(&self, shares: u64) -> Result<u64> {
-        let token_exchange_price = self.token_exchange_price as u128;
-        require!(token_exchange_price > 0, JuplendMocksError::MathError);
-
-        let assets_u128 = (shares as u128)
-            .checked_mul(token_exchange_price)
-            .ok_or_else(|| error!(JuplendMocksError::MathError))?
-            .checked_div(EXCHANGE_PRICES_PRECISION)
-            .ok_or_else(|| error!(JuplendMocksError::MathError))?;
-
-        assets_u128
-            .try_into()
-            .map_err(|_| error!(JuplendMocksError::MathError))
+    pub fn expected_assets_for_redeem(&self, shares: u64) -> Option<u64> {
+        expected_assets_for_redeem_from_rate(shares, self.token_exchange_price)
     }
 }

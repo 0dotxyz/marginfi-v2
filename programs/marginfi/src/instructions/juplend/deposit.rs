@@ -18,7 +18,7 @@ use anchor_spl::token_interface::{
 use fixed::types::I80F48;
 use juplend_mocks::juplend_earn::cpi::accounts::{Deposit, UpdateRate};
 use juplend_mocks::juplend_earn::cpi::{deposit, update_rate};
-use juplend_mocks::state::Lending as JuplendLending;
+use juplend_mocks::state::{expected_shares_for_deposit_from_rates, Lending as JuplendLending};
 use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
 use marginfi_type_crate::types::{
     Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
@@ -61,9 +61,12 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
     let expected_shares = {
         let lending = ctx.accounts.integration_acc_1.load()?;
         // Compute expected shares minted (round-down) using the same math as JupLend.
-        lending
-            .expected_shares_for_deposit(amount)
-            .map_err(|_| error!(MarginfiError::MathError))?
+        expected_shares_for_deposit_from_rates(
+            amount,
+            lending.liquidity_exchange_price,
+            lending.token_exchange_price,
+        )
+        .ok_or_else(|| error!(MarginfiError::MathError))?
     };
 
     let pre_f_token_balance = accessor::amount(&ctx.accounts.integration_acc_2.to_account_info())?;
@@ -283,5 +286,65 @@ impl<'info> JuplendDeposit<'info> {
         );
         deposit(cpi_ctx, amount)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shares_for_deposit_price_eq_1e12() {
+        let shares = expected_shares_for_deposit_from_rates(
+            50_000_000,
+            1_000_000_000_000,
+            1_000_000_000_000,
+        )
+        .unwrap();
+        assert_eq!(shares, 50_000_000);
+    }
+
+    #[test]
+    fn shares_for_deposit_token_price_above_1e12_mints_less() {
+        // floor(100 * 1e12 / 1.1e12) = floor(90.909...) = 90
+        let shares =
+            expected_shares_for_deposit_from_rates(100, 1_000_000_000_000, 1_100_000_000_000)
+                .unwrap();
+        assert_eq!(shares, 90);
+        assert!(shares < 100);
+    }
+
+    #[test]
+    fn shares_for_deposit_token_price_below_1e12_mints_more() {
+        // floor(100 * 1e12 / 0.9e12) = floor(111.111...) = 111
+        let shares =
+            expected_shares_for_deposit_from_rates(100, 1_000_000_000_000, 900_000_000_000)
+                .unwrap();
+        assert_eq!(shares, 111);
+        assert!(shares > 100);
+    }
+
+    #[test]
+    fn shares_for_deposit_zero_price_errors() {
+        assert!(expected_shares_for_deposit_from_rates(1, 1_000_000_000_000, 0).is_none());
+        assert!(expected_shares_for_deposit_from_rates(1, 0, 1_000_000_000_000).is_none());
+    }
+
+    #[test]
+    fn shares_for_deposit_non_divisible_rounds_down() {
+        // floor(7 * 1e12 / 3e12) = floor(2.333...) = 2
+        let shares =
+            expected_shares_for_deposit_from_rates(7, 1_000_000_000_000, 3_000_000_000_000)
+                .unwrap();
+        assert_eq!(shares, 2);
+    }
+
+    #[test]
+    fn shares_for_deposit_tiny_amount_can_floor_to_zero() {
+        // With liquidity_price > 1e12, raw floor can hit zero.
+        let shares =
+            expected_shares_for_deposit_from_rates(1, 1_100_000_000_000, 1_000_000_000_000)
+                .unwrap();
+        assert_eq!(shares, 0);
     }
 }

@@ -244,3 +244,28 @@ export const makeJuplendNativeBorrowIx = async (
     })
     .instruction();
 };
+
+export type JuplendNativeUpdateRateAccounts = {
+  pool: JuplendPoolKeys;
+};
+
+/**
+ * Build native JupLend `updateRate()`.
+ *
+ * Useful right before `healthPulse` so Jup lending state is fresh in the same tx.
+ */
+export const makeJuplendNativeUpdateRateIx = async (
+  program: Program<JuplendLendingIdl>,
+  accounts: JuplendNativeUpdateRateAccounts,
+): Promise<TransactionInstruction> => {
+  return program.methods
+    .updateRate()
+    .accountsPartial({
+      lending: accounts.pool.lending,
+      mint: accounts.pool.mint,
+      fTokenMint: accounts.pool.fTokenMint,
+      supplyTokenReservesLiquidity: accounts.pool.tokenReserve,
+      rewardsRateModel: accounts.pool.lendingRewardsRateModel,
+    })
+    .instruction();
+};

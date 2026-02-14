@@ -3,7 +3,12 @@ import {
   BanksTransactionResultWithMeta,
 } from "solana-bankrun";
 import { ProgramTestContext } from "solana-bankrun";
-import { Transaction, PublicKey, AccountInfo } from "@solana/web3.js";
+import {
+  Transaction,
+  PublicKey,
+  AccountInfo,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import { Keypair } from "@solana/web3.js";
 import { AccountLayout, createMintToInstruction } from "@solana/spl-token";
 import { getBankrunBlockhash } from "./spl-staking-utils";
@@ -12,20 +17,25 @@ import {
   TOKEN_PROGRAM_ID,
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
-import { HEALTH_CACHE_HEALTHY } from "./types";
+import {
+  ASSET_TAG_DRIFT,
+  ASSET_TAG_JUPLEND,
+  ASSET_TAG_KAMINO,
+  ASSET_TAG_SOLEND,
+  ASSET_TAG_STAKED,
+  HEALTH_CACHE_HEALTHY,
+} from "./types";
 import { BN } from "@coral-xyz/anchor";
-import { globalProgramAdmin, bankrunContext } from "../rootHooks";
-
-// TODO: Add these as options instead of args
-interface ProcessBankrunTransactionOptions {
-  trySend?: boolean;
-  dumpLogOnFail?: boolean;
-}
+import {
+  globalProgramAdmin,
+  bankrunContext,
+  bankrunProgram,
+} from "../rootHooks";
 
 /**
  * Process a transaction in a bankrun context and return the transaction result
  * @param bankrunContext - The bankrun context
- * @param tx - The transaction to process
+ * @param tx - The transaction to process (legacy or versioned)
  * @param signers - The signers for the transaction
  * @param trySend - true to use tryProcess instead
  * @param dumpLogOnFail - true to print a tx log on fail
@@ -33,18 +43,26 @@ interface ProcessBankrunTransactionOptions {
  */
 export const processBankrunTransaction = async (
   bankrunContext: ProgramTestContext,
-  tx: Transaction,
+  tx: Transaction | VersionedTransaction,
   signers: Keypair[],
   trySend: boolean = false,
   dumpLogOnFail: boolean = false,
-  //   options: ProcessBankrunTransactionOptions = {}
 ): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta> => {
-  // const { trySend = false, dumpLogOnFail = false } = options;
-  tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-  tx.sign(...signers);
+  // TODO improve this dumb hack.
+
+  // Stupid hack to detect tx vs v0tx without typeof
+  if ("recentBlockhash" in tx) {
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(...signers);
+  } else if (signers.length > 0) {
+    // @ts-ignore
+    tx.sign(signers);
+  }
 
   if (trySend) {
-    let result = await bankrunContext.banksClient.tryProcessTransaction(tx);
+    let result = await bankrunContext.banksClient.tryProcessTransaction(
+      tx as Transaction,
+    );
     if (dumpLogOnFail) {
       dumpBankrunLogs(result);
     }
@@ -54,12 +72,14 @@ export const processBankrunTransaction = async (
     // If we want to dump logs on fail, simulate first
     if (dumpLogOnFail) {
       const simulationResult =
-        await bankrunContext.banksClient.simulateTransaction(tx);
+        await bankrunContext.banksClient.simulateTransaction(tx as Transaction);
       if (simulationResult.result) {
         dumpBankrunLogs(simulationResult);
       }
     }
-    return await bankrunContext.banksClient.processTransaction(tx);
+    return await bankrunContext.banksClient.processTransaction(
+      tx as Transaction,
+    );
   }
 };
 
@@ -355,4 +375,56 @@ export const mintToTokenAccount = async (
     false,
     true,
   );
+};
+
+/**
+ * Useful when building risk accounts in tests where hand-construction is tedious or not neccessary
+ * for the flow being demonstrated.
+ * @param marginfiAccountPk
+ * @param excludedBankPks
+ * @returns
+ */
+export const buildHealthRemainingAccounts = async (
+  marginfiAccountPk: PublicKey,
+  excludedBankPks: PublicKey[] = [],
+): Promise<PublicKey[]> => {
+  const marginfiAccount = await bankrunProgram.account.marginfiAccount.fetch(
+    marginfiAccountPk,
+  );
+  const activeBankPks = marginfiAccount.lendingAccount.balances
+    .filter((b: any) => b.active)
+    .filter(
+      (b: any) =>
+        !excludedBankPks.some((excludedPk) => excludedPk.equals(b.bankPk)),
+    )
+    .map((b: any) => b.bankPk as PublicKey);
+
+  const banks = await Promise.all(
+    activeBankPks.map((bankPk) => bankrunProgram.account.bank.fetch(bankPk)),
+  );
+
+  const groups: PublicKey[][] = [];
+  for (let i = 0; i < activeBankPks.length; i++) {
+    const bankPk = activeBankPks[i];
+    const bank = banks[i];
+    const assetTag = bank.config.assetTag;
+    const group: PublicKey[] = [bankPk, bank.config.oracleKeys[0]];
+
+    if (
+      assetTag === ASSET_TAG_KAMINO ||
+      assetTag === ASSET_TAG_DRIFT ||
+      assetTag === ASSET_TAG_SOLEND ||
+      assetTag === ASSET_TAG_JUPLEND
+    ) {
+      group.push(bank.config.oracleKeys[1]);
+    }
+
+    if (assetTag === ASSET_TAG_STAKED) {
+      group.push(bank.config.oracleKeys[1], bank.config.oracleKeys[2]);
+    }
+
+    groups.push(group);
+  }
+
+  return groups.flat();
 };

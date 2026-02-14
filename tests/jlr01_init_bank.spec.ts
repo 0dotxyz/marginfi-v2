@@ -1,5 +1,10 @@
 import { BN } from "@coral-xyz/anchor";
-import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
+import {
+  AddressLookupTableProgram,
+  Keypair,
+  PublicKey,
+  Transaction,
+} from "@solana/web3.js";
 import { assert } from "chai";
 import { TOKEN_PROGRAM_ID, createMintToInstruction } from "@solana/spl-token";
 
@@ -7,6 +12,7 @@ import {
   bankrunContext,
   bankrunProgram,
   bankRunProvider,
+  banksClient,
   ecosystem,
   globalFeeWallet,
   globalProgramAdmin,
@@ -78,6 +84,7 @@ import {
 import {
   JUPLEND_STATE_KEYS,
   jlr01BankStateKey,
+  jlr01RegularBankStateKey,
 } from "./utils/juplend/test-state";
 
 const GROUP_SEED = Buffer.from("JLR01_GROUP_SEED_000000000000000");
@@ -302,6 +309,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
       );
 
       const bank = await bankrunProgram.account.bank.fetch(bankPk);
+      juplendAccounts.set(jlr01RegularBankStateKey(spec.name), bankPk);
 
       assertKeysEqual(bank.mint, spec.mint.publicKey);
       assert.equal(bank.mintDecimals, spec.decimals);
@@ -788,5 +796,82 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
       // Seed deposit mints protocol fTokens but does not create user lending shares on marginfi.
       assertI80F48Equal(bankAfter.totalAssetShares, 0);
     }
+  });
+
+  it("(admin) create JupLend LUT for downstream tests", async () => {
+    const lutAddresses: PublicKey[] = [];
+    const seen = new Set<string>();
+    const addAddress = (pk: PublicKey) => {
+      const key = pk.toBase58();
+      if (!seen.has(key)) {
+        seen.add(key);
+        lutAddresses.push(pk);
+      }
+    };
+
+    addAddress(groupAdmin.wallet.publicKey);
+    addAddress(jlrGroup.publicKey);
+    addAddress(bankrunProgram.programId);
+    addAddress(TOKEN_PROGRAM_ID);
+
+    for (const spec of regularSpecs) {
+      const [regularBankPk] = deriveBankWithSeed(
+        bankrunProgram.programId,
+        jlrGroup.publicKey,
+        spec.mint.publicKey,
+        spec.seed,
+      );
+      addAddress(spec.mint.publicKey);
+      addAddress(spec.oracle);
+      addAddress(regularBankPk);
+    }
+
+    for (const spec of juplendSpecs) {
+      const pool = juplendPools[spec.name];
+      const addresses = juplendAddresses[spec.name];
+
+      addAddress(spec.mint.publicKey);
+      addAddress(spec.oracle);
+
+      for (const pk of Object.values(pool)) addAddress(pk);
+      for (const pk of Object.values(addresses)) addAddress(pk);
+    }
+
+    const recentSlot = Number(await banksClient.getSlot());
+    const [createLutIx, lookupTable] = AddressLookupTableProgram.createLookupTable({
+      authority: groupAdmin.wallet.publicKey,
+      payer: groupAdmin.wallet.publicKey,
+      recentSlot: recentSlot - 1,
+    });
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(createLutIx),
+      [groupAdmin.wallet],
+      false,
+      true,
+    );
+
+    const LUT_CHUNK_SIZE = 20;
+    for (let i = 0; i < lutAddresses.length; i += LUT_CHUNK_SIZE) {
+      const extendLutIx = AddressLookupTableProgram.extendLookupTable({
+        authority: groupAdmin.wallet.publicKey,
+        payer: groupAdmin.wallet.publicKey,
+        lookupTable,
+        addresses: lutAddresses.slice(i, i + LUT_CHUNK_SIZE),
+      });
+
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(extendLutIx),
+        [groupAdmin.wallet],
+        false,
+        true,
+      );
+    }
+
+    const currentSlot = Number(await banksClient.getSlot());
+    bankrunContext.warpToSlot(BigInt(currentSlot + 10));
+
+    juplendAccounts.set(JUPLEND_STATE_KEYS.jlr01LookupTable, lookupTable);
   });
 });

@@ -26,10 +26,15 @@ use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use juplend_mocks::juplend_earn::cpi::accounts::{UpdateRate, Withdraw as WithdrawCpi};
 use juplend_mocks::juplend_earn::cpi::{update_rate, withdraw as cpi_withdraw};
-use juplend_mocks::state::Lending as JuplendLending;
-use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
+use juplend_mocks::state::{
+    expected_assets_for_redeem_from_rate, expected_shares_for_withdraw_from_rate,
+    Lending as JuplendLending,
+};
 use marginfi_type_crate::types::{
     Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+};
+use marginfi_type_crate::{
+    constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_IN_DELEVERAGE,
 };
 
 /// Withdraw underlying tokens from a JupLend lending pool through a marginfi account.
@@ -71,6 +76,7 @@ pub fn juplend_withdraw<'info>(
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut group = ctx.accounts.group.load_mut()?;
+        let lending = ctx.accounts.integration_acc_1.load()?;
 
         authority_bump = bank.liquidity_vault_authority_bump;
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
@@ -103,32 +109,33 @@ pub fn juplend_withdraw<'info>(
 
         let (token_amount, shares_to_burn) = if withdraw_all {
             // `withdraw_all` returns the user's full fToken share balance (u64).
-            let total_shares = bank_account.withdraw_all()?;
+            let f_tokens_balance = bank_account.withdraw_all()?;
             // Redeemable underlying = floor(shares * price / 1e12)
             // Then recalculate shares_to_burn from token_amount to guarantee we match
             // JupLend's expected burn amount (should be identical, but this is safer).
             let (token_amount, shares_to_burn) = {
-                let lending = ctx.accounts.integration_acc_1.load()?;
-                let token_amount = lending
-                    .expected_assets_for_redeem(total_shares)
-                    .map_err(|_| error!(MarginfiError::MathError))?;
-                let shares_to_burn = lending
-                    .expected_shares_for_withdraw(token_amount)
-                    .map_err(|_| error!(MarginfiError::MathError))?;
+                let token_amount = expected_assets_for_redeem_from_rate(
+                    f_tokens_balance,
+                    lending.token_exchange_price,
+                )
+                .ok_or_else(|| error!(MarginfiError::MathError))?;
+                let shares_to_burn = expected_shares_for_withdraw_from_rate(
+                    token_amount,
+                    lending.token_exchange_price,
+                )
+                .ok_or_else(|| error!(MarginfiError::MathError))?;
                 (token_amount, shares_to_burn)
             };
 
             // Sanity check: recalculated shares should never exceed what we have
-            require!(shares_to_burn <= total_shares, MarginfiError::MathError);
+            require!(shares_to_burn <= f_tokens_balance, MarginfiError::MathError);
 
             (token_amount, shares_to_burn)
         } else {
             // shares = ceil(assets * 1e12 / token_exchange_price)
             let shares_to_burn = {
-                let lending = ctx.accounts.integration_acc_1.load()?;
-                lending
-                    .expected_shares_for_withdraw(amount)
-                    .map_err(|_| error!(MarginfiError::MathError))?
+                expected_shares_for_withdraw_from_rate(amount, lending.token_exchange_price)
+                    .ok_or_else(|| error!(MarginfiError::MathError))?
             };
 
             bank_account.withdraw(I80F48::from_num(shares_to_burn))?;
@@ -137,7 +144,7 @@ pub fn juplend_withdraw<'info>(
         };
 
         // Track withdrawal limit for risk admin during deleverage.
-        if ctx.accounts.authority.key() == group.risk_admin {
+        if marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE) {
             let withdrawn_equity = calc_value(
                 I80F48::from_num(shares_to_burn),
                 price,
@@ -497,5 +504,90 @@ impl<'info> JuplendWithdraw<'info> {
         let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
         transfer_checked(cpi_ctx, amount, self.mint.decimals)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shares_for_withdraw_price_eq_1e12() {
+        let shares = expected_shares_for_withdraw_from_rate(50_000_000, 1_000_000_000_000).unwrap();
+        assert_eq!(shares, 50_000_000);
+    }
+
+    #[test]
+    fn shares_for_withdraw_price_above_1e12_burns_less_shares() {
+        // ceil(100 * 1e12 / 1.1e12) = ceil(90.909...) = 91
+        let shares = expected_shares_for_withdraw_from_rate(100, 1_100_000_000_000).unwrap();
+        assert_eq!(shares, 91);
+        assert!(shares < 100);
+    }
+
+    #[test]
+    fn shares_for_withdraw_price_below_1e12_burns_more_shares() {
+        // ceil(100 * 1e12 / 0.9e12) = ceil(111.111...) = 112
+        let shares = expected_shares_for_withdraw_from_rate(100, 900_000_000_000).unwrap();
+        assert_eq!(shares, 112);
+        assert!(shares > 100);
+    }
+
+    #[test]
+    fn shares_for_withdraw_price_zero_errors() {
+        assert!(expected_shares_for_withdraw_from_rate(1, 0).is_none());
+    }
+
+    #[test]
+    fn shares_for_withdraw_non_divisible_rounds_up() {
+        // ceil(7 * 1e12 / 3e12) = ceil(2.333...) = 3
+        let shares = expected_shares_for_withdraw_from_rate(7, 3_000_000_000_000).unwrap();
+        assert_eq!(shares, 3);
+    }
+
+    #[test]
+    fn shares_for_withdraw_tiny_amount_burns_min_one_share() {
+        // ceil(1 * 1e12 / 4e12) = ceil(0.25) = 1
+        let shares = expected_shares_for_withdraw_from_rate(1, 4_000_000_000_000).unwrap();
+        assert_eq!(shares, 1);
+    }
+
+    #[test]
+    fn assets_for_redeem_price_eq_1e12() {
+        let assets = expected_assets_for_redeem_from_rate(50_000_000, 1_000_000_000_000).unwrap();
+        assert_eq!(assets, 50_000_000);
+    }
+
+    #[test]
+    fn assets_for_redeem_price_above_1e12_returns_more_assets() {
+        // floor(100 * 1.1e12 / 1e12) = floor(110) = 110
+        let assets = expected_assets_for_redeem_from_rate(100, 1_100_000_000_000).unwrap();
+        assert_eq!(assets, 110);
+    }
+
+    #[test]
+    fn assets_for_redeem_price_below_1e12_returns_less_assets() {
+        // floor(100 * 0.9e12 / 1e12) = floor(90) = 90
+        let assets = expected_assets_for_redeem_from_rate(100, 900_000_000_000).unwrap();
+        assert_eq!(assets, 90);
+    }
+
+    #[test]
+    fn assets_for_redeem_price_zero_errors() {
+        assert!(expected_assets_for_redeem_from_rate(1, 0).is_none());
+    }
+
+    #[test]
+    fn assets_for_redeem_non_divisible_rounds_down() {
+        // floor(5 * 1_300_000_000_001 / 1e12) = floor(6.500000000005) = 6
+        let assets = expected_assets_for_redeem_from_rate(5, 1_300_000_000_001).unwrap();
+        assert_eq!(assets, 6);
+    }
+
+    #[test]
+    fn assets_for_redeem_tiny_position_can_floor_to_zero() {
+        // floor(1 * 0.5e12 / 1e12) = floor(0.5) = 0
+        let assets = expected_assets_for_redeem_from_rate(1, 500_000_000_000).unwrap();
+        assert_eq!(assets, 0);
     }
 }
