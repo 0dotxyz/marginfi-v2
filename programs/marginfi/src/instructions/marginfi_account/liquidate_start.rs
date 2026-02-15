@@ -191,7 +191,7 @@ pub fn validate_instructions(
             // the emissions feature in late 2025 and moving to a fully off-chain emissions
             // system anyways.
             // * &ix_discriminators::LENDING_SETTLE_EMISSIONS,
-            // * &ix_discriminators::LENDING_WITHDRAW_EMISSIONS,
+            &ix_discriminators::LENDING_WITHDRAW_EMISSIONS_PERMISSIONLESS,
         ],
     )?;
     validate_not_cpi_by_stack_height()?;

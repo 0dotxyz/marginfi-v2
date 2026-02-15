@@ -12,8 +12,8 @@ pub mod utils;
 use anchor_lang::prelude::*;
 use instructions::*;
 use marginfi_type_crate::types::{
-    BankConfigCompact, BankConfigOpt, EmodeEntry, InterestRateConfigOpt, WrappedI80F48,
-    MAX_EMODE_ENTRIES,
+    BankConfigCompact, BankConfigOpt, EmodeEntry, InterestRateConfigOpt, OrderTrigger,
+    WrappedI80F48, MAX_EMODE_ENTRIES,
 };
 use prelude::*;
 
@@ -33,13 +33,13 @@ pub mod marginfi {
     /// (non-zero) values are kept. Pass `Some(value)` to update, `None` to leave unchanged.
     pub fn marginfi_group_configure(
         ctx: Context<MarginfiGroupConfigure>,
-        new_admin: Pubkey,
-        new_emode_admin: Pubkey,
-        new_curve_admin: Pubkey,
-        new_limit_admin: Pubkey,
-        new_emissions_admin: Pubkey,
-        new_metadata_admin: Pubkey,
-        new_risk_admin: Pubkey,
+        new_admin: Option<Pubkey>,
+        new_emode_admin: Option<Pubkey>,
+        new_curve_admin: Option<Pubkey>,
+        new_limit_admin: Option<Pubkey>,
+        new_emissions_admin: Option<Pubkey>,
+        new_metadata_admin: Option<Pubkey>,
+        new_risk_admin: Option<Pubkey>,
         emode_max_init_leverage: Option<WrappedI80F48>,
         emode_max_maint_leverage: Option<WrappedI80F48>,
     ) -> MarginfiResult {
@@ -234,6 +234,70 @@ pub mod marginfi {
         marginfi_account::initialize_account_pda(ctx, account_index, third_party_id)
     }
 
+    /// (user) Create a new Order.
+    /// * bank_keys - Currently only two keys: the lending position and borrowing position in the
+    ///   users's Balances for which the order is being placed
+    /// * trigger - the type of order (stop loss, take profit, or both), and the threshold at which
+    ///   to trigger the order, in dollars
+    pub fn marginfi_account_place_order(
+        ctx: Context<PlaceOrder>,
+        bank_keys: Vec<Pubkey>,
+        trigger: OrderTrigger,
+    ) -> MarginfiResult {
+        marginfi_account::place_order(ctx, bank_keys, trigger)
+    }
+
+    /// (user) Close an existing Order, returning rent to the user
+    pub fn marginfi_account_close_order(ctx: Context<CloseOrder>) -> MarginfiResult {
+        marginfi_account::close_order(ctx)
+    }
+
+    /// (permissionless keeper) Close an existing Order after the user account was closed, or it no
+    /// longer as the associated positions, or the user has executed
+    /// `marginfi_account_set_keeper_close_flags`. Keeper keeps the rent.
+    pub fn marginfi_account_keeper_close_order(ctx: Context<KeeperCloseOrder>) -> MarginfiResult {
+        marginfi_account::keeper_close_order(ctx)
+    }
+
+    /// (user) Purge flags from some balances, enabling a Keeper to call
+    /// `marginfi_account_keeper_close_order` on associated Orders. Typically, use
+    /// `marginfi_account_close_order` instead if trying to close an Order.
+    pub fn marginfi_account_set_keeper_close_flags(
+        ctx: Context<SetKeeperCloseFlags>,
+        bank_keys_opt: Option<Vec<Pubkey>>,
+    ) -> MarginfiResult {
+        marginfi_account::set_keeper_close_flags(ctx, bank_keys_opt)
+    }
+
+    /// (permissionless keeper) Begin Order execution
+    /// * Enables the Keeper to withdraw/repay associated positions until the end of the tx
+    /// * Only one `StartExecuteOrder` is allowed per tx
+    /// * Must appear before `EndExecuteOrder` in the tx, and before any instructions except certain
+    ///   allowed ones (compute budget, kamino refresh, etc)
+    /// * `EndExecuteOrder` must also appear in the tx
+    /// * CPI is forbidden
+    /// * Costs a small amount of rent, which is returned at the end of the tx, make sure you have
+    ///   enough SOL to start the tx.
+    pub fn marginfi_account_start_execute_order<'info>(
+        ctx: Context<'_, '_, 'info, 'info, StartExecuteOrder<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::start_execute_order(ctx)
+    }
+
+    /// (permissionless keeper) End Order execution
+    /// * Closes the Order (keeper keeps the rent)
+    /// * Closes the borrow position involved in the Order, the lending position remains open
+    /// * User health must be "unchanged" (within Order requirements i.e. minus slippage). Keeper
+    ///   may keep any slippage in excess of what was needed to complete the Order as profit.
+    /// * `StartExecuteOrder` must appear earlier in the tx
+    /// * Must appear last in the tx
+    /// * CPI is forbidden
+    /// * Returns rent for ephemeral accounts created during `StartExecuteOrder`
+    pub fn marginfi_account_end_execute_order<'info>(
+        ctx: Context<'_, '_, 'info, 'info, EndExecuteOrder<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::end_execute_order(ctx)
+    }
     /// (account authority) Deposit assets into a bank. Accrues interest, records deposit, and
     /// transfers tokens from the signer's token account to the bank's liquidity vault.
     pub fn lending_account_deposit<'info>(
@@ -463,9 +527,11 @@ pub mod marginfi {
         fee_wallet: Pubkey,
         bank_init_flat_sol_fee: u32,
         liquidation_flat_sol_fee: u32,
+        order_init_flat_sol_fee: u32,
         program_fee_fixed: WrappedI80F48,
         program_fee_rate: WrappedI80F48,
         liquidation_max_fee: WrappedI80F48,
+        order_execution_max_fee: WrappedI80F48,
     ) -> MarginfiResult {
         marginfi_group::initialize_fee_state(
             ctx,
@@ -473,9 +539,11 @@ pub mod marginfi {
             fee_wallet,
             bank_init_flat_sol_fee,
             liquidation_flat_sol_fee,
+            order_init_flat_sol_fee,
             program_fee_fixed,
             program_fee_rate,
             liquidation_max_fee,
+            order_execution_max_fee,
         )
     }
 
@@ -486,9 +554,11 @@ pub mod marginfi {
         fee_wallet: Pubkey,
         bank_init_flat_sol_fee: u32,
         liquidation_flat_sol_fee: u32,
+        order_init_flat_sol_fee: u32,
         program_fee_fixed: WrappedI80F48,
         program_fee_rate: WrappedI80F48,
         liquidation_max_fee: WrappedI80F48,
+        order_execution_max_fee: WrappedI80F48,
     ) -> MarginfiResult {
         marginfi_group::edit_fee_state(
             ctx,
@@ -496,9 +566,11 @@ pub mod marginfi {
             fee_wallet,
             bank_init_flat_sol_fee,
             liquidation_flat_sol_fee,
+            order_init_flat_sol_fee,
             program_fee_fixed,
             program_fee_rate,
             liquidation_max_fee,
+            order_execution_max_fee,
         )
     }
 
@@ -620,6 +692,32 @@ pub mod marginfi {
         marginfi_group::configure_deleverage_withdrawal_limit(ctx, limit)
     }
 
+    /// (admin only) Configure bank-level rate limits for withdraw/borrow.
+    /// Rate limits track net outflow in native tokens. Deposits offset withdraws.
+    /// Set to 0 to disable. Hourly and daily windows are independent.
+    pub fn configure_bank_rate_limits(
+        ctx: Context<ConfigureBankRateLimits>,
+        hourly_max_outflow: Option<u64>,
+        daily_max_outflow: Option<u64>,
+    ) -> MarginfiResult {
+        marginfi_group::configure_bank_rate_limits(ctx, hourly_max_outflow, daily_max_outflow)
+    }
+
+    /// (admin only) Configure group-level rate limits for withdraw/borrow.
+    /// Rate limits track aggregate net outflow in USD.
+    /// Example: $10M = 10_000_000. Set to 0 to disable.
+    pub fn configure_group_rate_limits(
+        ctx: Context<ConfigureGroupRateLimits>,
+        hourly_max_outflow_usd: Option<u64>,
+        daily_max_outflow_usd: Option<u64>,
+    ) -> MarginfiResult {
+        marginfi_group::configure_group_rate_limits(
+            ctx,
+            hourly_max_outflow_usd,
+            daily_max_outflow_usd,
+        )
+    }
+
     // TODO deprecate and incorporate this functionality into forced-withdraw in 1.7+
     /// (risk admin only) Purge a user's lending balance without withdrawing anything. Only usable
     /// after all the debt has been settled on a bank in deleveraging mode, e.g. when
@@ -647,7 +745,10 @@ pub mod marginfi {
     /// (user) Deposit into a Kamino pool through a marginfi account
     /// * amount - in the liquidity token (e.g. if there is a Kamino USDC bank, pass the amount of
     ///   USDC desired), in native decimals.
-    pub fn kamino_deposit(ctx: Context<KaminoDeposit>, amount: u64) -> MarginfiResult {
+    pub fn kamino_deposit<'info>(
+        ctx: Context<'_, '_, 'info, 'info, KaminoDeposit<'info>>,
+        amount: u64,
+    ) -> MarginfiResult {
         kamino::kamino_deposit(ctx, amount)
     }
 
@@ -706,7 +807,10 @@ pub mod marginfi {
 
     /// (user) Deposit into a Drift spot market through a marginfi account
     /// * amount - in the underlying token (e.g., USDC), in native decimals
-    pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult {
+    pub fn drift_deposit<'info>(
+        ctx: Context<'_, '_, 'info, 'info, DriftDeposit<'info>>,
+        amount: u64,
+    ) -> MarginfiResult {
         drift::drift_deposit(ctx, amount)
     }
 
@@ -753,7 +857,10 @@ pub mod marginfi {
 
     /// (user) Deposit into a Solend reserve through a marginfi account
     /// * amount - in the underlying token (e.g., USDC), in native decimals
-    pub fn solend_deposit(ctx: Context<SolendDeposit>, amount: u64) -> MarginfiResult {
+    pub fn solend_deposit<'info>(
+        ctx: Context<'_, '_, 'info, 'info, SolendDeposit<'info>>,
+        amount: u64,
+    ) -> MarginfiResult {
         solend::solend_deposit(ctx, amount)
     }
 

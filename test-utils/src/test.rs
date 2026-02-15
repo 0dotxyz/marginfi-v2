@@ -170,26 +170,47 @@ pub struct TestBankSetting {
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum BankMint {
+    /// $1
     Usdc,
+    /// $2
     Fixed,
+    /// 0.0001
     FixedLow,
+    /// $10
     Sol,
+    /// $10
     SolSwbPull,
+    /// $10
     SolSwbOrigFee,
+    /// $10
     SolEquivalent,
+    /// $10
     SolEquivalent1,
+    /// $10
     SolEquivalent2,
+    /// $10
     SolEquivalent3,
+    /// $10
     SolEquivalent4,
+    /// $10
     SolEquivalent5,
+    /// $10
     SolEquivalent6,
+    /// $10
     SolEquivalent7,
+    /// $10
     SolEquivalent8,
+    /// $10
     SolEquivalent9,
+    /// $1
     UsdcT22,
+    /// $0.50 (50 cents)
     T22WithFee,
+    /// $1
     PyUSD,
+    /// $10
     SolEqIsolated,
+    /// $1
     KaminoUsdc,
 }
 

@@ -11,7 +11,7 @@ use bytemuck::{Pod, Zeroable};
 
 #[cfg(not(feature = "anchor"))]
 use super::Pubkey;
-use super::{EmodeSettings, WrappedI80F48};
+use super::{BankRateLimiter, EmodeSettings, WrappedI80F48};
 
 assert_struct_size!(Bank, 1856);
 assert_struct_align!(Bank, 8);
@@ -152,7 +152,12 @@ pub struct Bank {
     /// - Drift: user stats
     pub integration_acc_3: Pubkey,
 
-    pub _padding_1: [[u64; 2]; 13], // 8 * 2 * 13 = 208B
+    /// Rate limiter for controlling withdraw/borrow outflow.
+    /// Tracks net outflow (outflows - inflows) in native tokens.
+    pub rate_limiter: BankRateLimiter,
+
+    pub _pad_0: [u8; 8],           // 8B
+    pub _padding_1: [[u64; 2]; 7], // 8 * 2 * 7 = 112B
 }
 
 impl Bank {
@@ -197,19 +202,21 @@ unsafe impl Pod for BankOperationalState {}
 #[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum OracleSetup {
-    None,
-    PythLegacy,
-    SwitchboardV2,
-    PythPushOracle,
-    SwitchboardPull,
-    StakedWithPythPush,
-    KaminoPythPush,
-    KaminoSwitchboardPull,
-    Fixed,
-    DriftPythPull,
-    DriftSwitchboardPull,
-    SolendPythPull,
-    SolendSwitchboardPull,
+    None = 0,
+    PythLegacy = 1,
+    SwitchboardV2 = 2,
+    PythPushOracle = 3,
+    SwitchboardPull = 4,
+    StakedWithPythPush = 5,
+    KaminoPythPush = 6,
+    KaminoSwitchboardPull = 7,
+    Fixed = 8,
+    DriftPythPull = 9,
+    DriftSwitchboardPull = 10,
+    SolendPythPull = 11,
+    SolendSwitchboardPull = 12,
+    FixedKamino = 13,
+    FixedDrift = 14,
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
@@ -230,6 +237,8 @@ impl OracleSetup {
             10 => Some(Self::DriftSwitchboardPull),
             11 => Some(Self::SolendPythPull),
             12 => Some(Self::SolendSwitchboardPull),
+            13 => Some(Self::FixedKamino),
+            14 => Some(Self::FixedDrift),
             _ => None,
         }
     }

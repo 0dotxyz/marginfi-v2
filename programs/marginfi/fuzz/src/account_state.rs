@@ -32,7 +32,7 @@ impl AccountsState {
         Self { bump: Bump::new() }
     }
 
-    fn random_pubkey<'bump>(&'bump self) -> &Pubkey {
+    fn random_pubkey<'bump>(&'bump self) -> &'bump Pubkey {
         #[allow(deprecated)]
         self.bump.alloc(Pubkey::new_unique())
     }
@@ -314,7 +314,7 @@ impl AccountsState {
         )
     }
 
-    fn allocate_dex_owned_account<'bump>(&'bump self, unpadded_size: usize) -> &mut [u8] {
+    fn allocate_dex_owned_account<'bump>(&'bump self, unpadded_size: usize) -> &'bump mut [u8] {
         assert_eq!(unpadded_size % 8, 0);
         let padded_size = unpadded_size;
         let u64_data = self.bump.alloc_slice_fill_copy(padded_size / 8 + 1, 0u64);

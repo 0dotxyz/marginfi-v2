@@ -1,6 +1,6 @@
 import { BN, Program } from "@coral-xyz/anchor";
 import { BankrunProvider } from "anchor-bankrun";
-import { Transaction } from "@solana/web3.js";
+import { PublicKey, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairA,
@@ -27,6 +27,7 @@ import { assert } from "chai";
 import {
   borrowIx,
   composeRemainingAccounts,
+  composeRemainingAccountsByBalances,
   depositIx,
   repayIx,
   withdrawEmissionsIx,
@@ -41,9 +42,16 @@ let program: Program<Marginfi>;
 let provider: BankrunProvider;
 
 describe("Withdraw funds", () => {
+  let balanceAccountGroups: PublicKey[][] = [];
+
   before(() => {
     provider = bankRunProvider;
     program = bankrunProgram;
+    balanceAccountGroups = [
+      [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
+      [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+      [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
+    ];
   });
 
   const withdrawAmountTokenA = 0.1;
@@ -243,6 +251,14 @@ describe("Withdraw funds", () => {
     // Ensure emissions accrue by advancing bankrun clock
     await advanceClockAndRefreshOracles(2);
 
+    // For repayAll, include all active balances, including the closing bank.
+    const userAccBefore =
+      await program.account.marginfiAccount.fetch(userAccKey);
+    const remaining = composeRemainingAccountsByBalances(
+      userAccBefore.lendingAccount.balances,
+      balanceAccountGroups,
+      bank
+    );
     await expectFailedTxWithError(
       async () => {
         await user.mrgnProgram.provider.sendAndConfirm(
@@ -251,10 +267,7 @@ describe("Withdraw funds", () => {
               marginfiAccount: userAccKey,
               bank: bank,
               tokenAccount: user.usdcAccount,
-              remaining: composeRemainingAccounts([
-                [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
-                [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
-              ]),
+              remaining,
               amount: u64MAX_BN,
               repayAll: true,
             })
@@ -327,16 +340,19 @@ describe("Withdraw funds", () => {
       wrappedI80F48toBigNumber(balancesBefore[1].liabilityShares).toNumber() *
       wrappedI80F48toBigNumber(bankBefore.liabilityShareValue).toNumber();
 
+    // For repayAll, include all active balances, including the closing bank.
+    const remaining = composeRemainingAccountsByBalances(
+      userAccBefore.lendingAccount.balances,
+      balanceAccountGroups,
+      bank
+    );
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await repayIx(user.mrgnProgram, {
           marginfiAccount: userAccKey,
           bank: bank,
           tokenAccount: user.usdcAccount,
-          remaining: composeRemainingAccounts([
-            [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
-            [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
-          ]),
+          remaining,
           amount: u64MAX_BN,
           repayAll: true,
         })
@@ -409,18 +425,19 @@ describe("Withdraw funds", () => {
       wrappedI80F48toBigNumber(balancesBefore[0].assetShares).toNumber() *
       wrappedI80F48toBigNumber(bankBefore.liabilityShareValue).toNumber();
 
+    // For withdrawAll, include all active balances, including the closing bank.
+    const remaining = composeRemainingAccountsByBalances(
+      userAccBefore.lendingAccount.balances,
+      balanceAccountGroups,
+      bank
+    );
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await withdrawIx(user.mrgnProgram, {
           marginfiAccount: userAccKey,
           bank: bank,
           tokenAccount: user.tokenAAccount,
-          remaining: [
-            bankKeypairA.publicKey,
-            oracles.tokenAOracle.publicKey,
-            bankKeypairUsdc.publicKey,
-            oracles.usdcOracle.publicKey,
-          ],
+          remaining,
           amount: withdrawAmountTokenA_native,
           withdrawAll: true,
         })
@@ -474,25 +491,35 @@ describe("Withdraw funds", () => {
   });
 
   it("(user 1) withdraws all SOL balance - happy path", async () => {
-    // This is essentially the same test as the previous one but it's necessary to restore the state of the user 1
-    // account to only have a single USDC deposit. We don't repeat the checks for exact numbers here though.
+    // Restore user 1 to only have USDC deposit by withdrawing all SOL.
     const user = users[1];
     const userAccKey = user.accounts.get(USER_ACCOUNT);
     const bank = bankKeypairSol.publicKey;
 
+    // For withdrawAll, include all active balances, including the closing bank.
+    const userAccBefore =
+      await program.account.marginfiAccount.fetch(userAccKey);
+    const remaining = composeRemainingAccountsByBalances(
+      userAccBefore.lendingAccount.balances,
+      [
+        [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
+        [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
+        [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+      ],
+      bank
+    );
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await withdrawIx(user.mrgnProgram, {
           marginfiAccount: userAccKey,
           bank: bank,
           tokenAccount: user.wsolAccount,
-          remaining: [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
+          remaining,
           amount: new BN(0),
           withdrawAll: true,
         })
       )
     );
-
     const bankAfter = await program.account.bank.fetch(bank);
     const userAccAfter = await program.account.marginfiAccount.fetch(
       userAccKey
@@ -502,7 +529,10 @@ describe("Withdraw funds", () => {
 
     // This balance is now inactive
     assert.equal(balancesAfter[1].active, 0);
+
   });
+
+
 
   it("(user 0) restores previous Token A deposits and USDC borrows", async () => {
     const user = users[0];

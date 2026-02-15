@@ -91,6 +91,7 @@ cd "$ROOT"
 
 # Set environment variables for the tests.
 export SBF_OUT_DIR="$ROOT/target/deploy"
+export CARGO_TARGET_DIR="$ROOT/target/host"
 export RUST_LOG="solana_runtime::message_processor::stable_log=${loglevel}"
 
 # Set the chain environment variable if provided.

@@ -31,7 +31,10 @@ import { MockUser, USER_ACCOUNT_K } from "./utils/mocks";
 import { processBankrunTransaction } from "./utils/tools";
 import { getTokenBalance, assertBankrunTxFailed } from "./utils/genericTests";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
-import { composeRemainingAccounts } from "./utils/user-instructions";
+import {
+  composeRemainingAccounts,
+  composeRemainingAccountsByBalances,
+} from "./utils/user-instructions";
 import {
   makeKaminoDepositIx,
   makeKaminoWithdrawIx,
@@ -760,7 +763,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
           },
           {
             amount: halfAmount,
-            isFinalWithdrawal: false,
+            isWithdrawAll: false,
             remaining: composeRemainingAccounts([
               [usdcBank, oracles.usdcOracle.publicKey, usdcReserve],
             ]),
@@ -934,9 +937,13 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
             fundAmount.mul(new BN(10 ** ecosystem.tokenADecimals)).toNumber(),
           ),
         );
-      await processBankrunTransaction(bankrunContext, fundTx, [
-        globalProgramAdmin.wallet,
-      ]);
+      await processBankrunTransaction(
+        bankrunContext,
+        fundTx,
+        [globalProgramAdmin.wallet],
+        false,
+        true,
+      );
 
       for (let i = 0; i < NUM_ITERATIONS; i++) {
         // Randomly choose user and token
@@ -1054,9 +1061,13 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
               lamports: Math.round(Math.random() * 10000),
             }),
           );
-          await processBankrunTransaction(bankrunContext, depositTx, [
-            user.wallet,
-          ]);
+          await processBankrunTransaction(
+            bankrunContext,
+            depositTx,
+            [user.wallet],
+            false,
+            true,
+          );
         }
 
         // Advance time randomly between 1 hour and 7 days
@@ -1318,11 +1329,6 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
 
     for (const balance of marginfiAccount.lendingAccount.balances) {
       if (balance.active === 1) {
-        // KEY: Skip the bank we're withdrawing from if doing final withdrawal
-        if (isFinalWithdrawal && balance.bankPk.equals(bank)) {
-          continue;
-        }
-
         // Include all active Kamino banks with proper pattern
         if (balance.bankPk.equals(kaminoAccounts.get(KAMINO_USDC_BANK)!)) {
           activePositions.push([
@@ -1387,9 +1393,15 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
         },
         {
           amount: isFinalWithdrawal ? new BN(0) : amount,
-          isFinalWithdrawal,
-          remaining: composeRemainingAccounts(activePositions),
-        },
+          isWithdrawAll:isFinalWithdrawal,
+          remaining: isFinalWithdrawal
+            ? composeRemainingAccountsByBalances(
+                marginfiAccount.lendingAccount.balances,
+                activePositions,
+                bank
+              )
+            : composeRemainingAccounts(activePositions),
+        }
       ),
       // dummy tx to trick bankrun
       SystemProgram.transfer({

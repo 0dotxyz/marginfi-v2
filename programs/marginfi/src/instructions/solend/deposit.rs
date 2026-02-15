@@ -5,14 +5,18 @@ use crate::{
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
+            account_not_frozen_for_authority, calc_value, is_signer_authorized, BankAccountWrapper,
             LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
+        rate_limiter::{
+            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
+            GroupRateLimiterImpl,
+        },
     },
     utils::{
-        assert_within_one_token, is_solend_asset_tag, validate_asset_tags, validate_bank_state,
-        InstructionKind,
+        assert_within_one_token, fetch_rate_limit_price_for_inflow, is_solend_asset_tag,
+        validate_asset_tags, validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -39,7 +43,10 @@ use solend_mocks::state::{
 /// 2. Deposits the tokens into Solend through a CPI call
 /// 3. Verifies the obligation collateral was increased correctly
 /// 4. Updates the marginfi account's balance to reflect the deposit
-pub fn solend_deposit(ctx: Context<SolendDeposit>, amount: u64) -> MarginfiResult {
+pub fn solend_deposit<'info>(
+    ctx: Context<'_, '_, 'info, 'info, SolendDeposit<'info>>,
+    amount: u64,
+) -> MarginfiResult {
     // Forced to validate here as unable to load obligation as ref in constraints
     validate_solend_obligation(
         ctx.accounts.integration_acc_2.as_ref(),
@@ -91,7 +98,8 @@ pub fn solend_deposit(ctx: Context<SolendDeposit>, amount: u64) -> MarginfiResul
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let group = &ctx.accounts.group.load()?;
+        let mut group = ctx.accounts.group.load_mut()?;
+        let clock = Clock::get()?;
 
         let mut bank_account = BankAccountWrapper::find_or_create(
             &ctx.accounts.bank.key(),
@@ -103,10 +111,34 @@ pub fn solend_deposit(ctx: Context<SolendDeposit>, amount: u64) -> MarginfiResul
         let obligation_collateral_change_i80f48 = I80F48::from_num(obligation_collateral_change);
         bank_account.deposit_no_repay(obligation_collateral_change_i80f48)?;
 
-        // Update bank cache after modifying balances
-        bank.update_bank_cache(group)?;
+        // Record inflow so net-outflow windows release capacity.
+        if !should_skip_rate_limit(marginfi_account.account_flags) {
+            if bank.rate_limiter.is_enabled() {
+                bank.rate_limiter
+                    .record_inflow(amount, clock.unix_timestamp);
+            }
 
-        marginfi_account.last_update = Clock::get()?.unix_timestamp as u64;
+            if group.rate_limiter.is_enabled() {
+                let rate_limit_price = fetch_rate_limit_price_for_inflow(&bank, &clock)?;
+                match rate_limit_price {
+                    Some(price) => {
+                        let usd_value =
+                            calc_value(I80F48::from_num(amount), price, bank.mint_decimals, None)?;
+                        group
+                            .rate_limiter
+                            .record_inflow(usd_value.to_num::<u64>(), clock.unix_timestamp);
+                    }
+                    None => {
+                        bank.rate_limiter.record_untracked_inflow(amount);
+                    }
+                }
+            }
+        }
+
+        // Update bank cache after modifying balances
+        bank.update_bank_cache(&group)?;
+
+        marginfi_account.last_update = clock.unix_timestamp as u64;
         marginfi_account.lending_account.sort_balances();
 
         emit!(LendingAccountDepositEvent {
@@ -128,6 +160,7 @@ pub fn solend_deposit(ctx: Context<SolendDeposit>, amount: u64) -> MarginfiResul
 #[derive(Accounts)]
 pub struct SolendDeposit<'info> {
     #[account(
+        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused
@@ -144,7 +177,7 @@ pub struct SolendDeposit<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false)
+            is_signer_authorized(&a, g.admin, authority.key(), false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

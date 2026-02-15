@@ -5,12 +5,19 @@ use crate::{
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
+            account_not_frozen_for_authority, calc_value, is_signer_authorized, BankAccountWrapper,
             LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
+        rate_limiter::{
+            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
+            GroupRateLimiterImpl,
+        },
     },
-    utils::{is_drift_asset_tag, validate_asset_tags, validate_bank_state, InstructionKind},
+    utils::{
+        fetch_rate_limit_price_for_inflow, is_drift_asset_tag, validate_asset_tags,
+        validate_bank_state, InstructionKind,
+    },
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -35,7 +42,10 @@ use marginfi_type_crate::types::{
 /// 3. Deposits the tokens into Drift through a CPI call
 /// 4. Verifies the spot position was updated correctly
 /// 5. Updates the marginfi account's balance to reflect the deposit
-pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult {
+pub fn drift_deposit<'info>(
+    ctx: Context<'_, '_, 'info, 'info, DriftDeposit<'info>>,
+    amount: u64,
+) -> MarginfiResult {
     let authority_bump: u8;
     let market_index: u16;
     {
@@ -86,7 +96,8 @@ pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult 
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let group = &ctx.accounts.group.load()?;
+        let mut group = ctx.accounts.group.load_mut()?;
+        let clock = Clock::get()?;
 
         let mut bank_account = BankAccountWrapper::find_or_create(
             &ctx.accounts.bank.key(),
@@ -97,10 +108,34 @@ pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult 
         let scaled_balance_change_i80f48 = I80F48::from_num(scaled_balance_change);
         bank_account.deposit_no_repay(scaled_balance_change_i80f48)?;
 
-        // Update bank cache after modifying balances
-        bank.update_bank_cache(group)?;
+        // Record inflow so net-outflow windows release capacity.
+        if !should_skip_rate_limit(marginfi_account.account_flags) {
+            if bank.rate_limiter.is_enabled() {
+                bank.rate_limiter
+                    .record_inflow(amount, clock.unix_timestamp);
+            }
 
-        marginfi_account.last_update = Clock::get()?.unix_timestamp as u64;
+            if group.rate_limiter.is_enabled() {
+                let rate_limit_price = fetch_rate_limit_price_for_inflow(&bank, &clock)?;
+                match rate_limit_price {
+                    Some(price) => {
+                        let usd_value =
+                            calc_value(I80F48::from_num(amount), price, bank.mint_decimals, None)?;
+                        group
+                            .rate_limiter
+                            .record_inflow(usd_value.to_num::<u64>(), clock.unix_timestamp);
+                    }
+                    None => {
+                        bank.rate_limiter.record_untracked_inflow(amount);
+                    }
+                }
+            }
+        }
+
+        // Update bank cache after modifying balances
+        bank.update_bank_cache(&group)?;
+
+        marginfi_account.last_update = clock.unix_timestamp as u64;
         marginfi_account.lending_account.sort_balances();
 
         emit!(LendingAccountDepositEvent {
@@ -122,6 +157,7 @@ pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult 
 #[derive(Accounts)]
 pub struct DriftDeposit<'info> {
     #[account(
+        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused
@@ -138,7 +174,7 @@ pub struct DriftDeposit<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false)
+            is_signer_authorized(&a, g.admin, authority.key(), false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

@@ -5,7 +5,7 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::{assert_struct_size, constants::discriminators};
 
-use super::{PanicStateCache, WrappedI80F48};
+use super::{GroupRateLimiter, PanicStateCache, WrappedI80F48};
 
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
@@ -64,7 +64,12 @@ pub struct MarginfiGroup {
 
     /// Reserved for future use
     pub _padding: [u8; 8],
-    pub _padding_0: [[u64; 2]; 11],
+
+    /// Rate limiter for controlling aggregate withdraw/borrow outflow across all banks.
+    /// Tracks net outflow in USD.
+    pub rate_limiter: GroupRateLimiter,
+
+    pub _padding_0: [[u64; 2]; 6],
     pub _padding_1: [[u64; 2]; 32],
 }
 
