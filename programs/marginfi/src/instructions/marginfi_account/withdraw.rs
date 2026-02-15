@@ -8,10 +8,15 @@ use crate::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
-            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            is_signer_authorized, validate_remaining_accounts_for_balances_close_last,
+            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         price::OraclePriceWithConfidence,
+        rate_limiter::{
+            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
+            GroupRateLimiterImpl,
+        },
     },
     utils::{
         self, fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank,
@@ -67,16 +72,30 @@ pub fn lending_account_withdraw<'info>(
     );
 
     {
+        let maybe_bank_mint = {
+            let bank = bank_loader.load()?;
+            utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?
+        };
+
+        let in_receivership_or_order_execution =
+            marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
+        if withdraw_all {
+            // Require remaining accounts for all active balances, including the one being closed.
+            validate_remaining_accounts_for_balances_close_last(
+                &marginfi_account.lending_account,
+                ctx.remaining_accounts,
+                &bank_loader.key(),
+            )?;
+        }
+
         let mut group = marginfi_group_loader.load_mut()?;
         let mut bank = bank_loader.load_mut()?;
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
 
-        let maybe_bank_mint =
-            utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?;
-
-        let in_receivership_or_order_execution =
-            marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
-        let price = if in_receivership_or_order_execution {
+        // Fetch oracle price for rate limiting and deleverage tracking
+        // When group rate limiter is enabled, oracle is required
+        let group_rate_limit_enabled = group.rate_limiter.is_enabled();
+        let price = if in_receivership_or_order_execution || group_rate_limit_enabled {
             let price = fetch_asset_price_for_bank_low_bias(
                 &bank_loader.key(),
                 &bank,
@@ -84,12 +103,13 @@ pub fn lending_account_withdraw<'info>(
                 ctx.remaining_accounts,
             )?;
 
-            // Validate price is non-zero during liquidation/deleverage or order execution to prevent exploits
-            check!(price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
+            // Validate price is non-zero during liquidation/deleverage to prevent exploits
+            if in_receivership_or_order_execution {
+                check!(price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
+            }
 
             price
         } else {
-            // TODO: force callers to pass oracle, to support tracking withdraws outside delev
             I80F48::ZERO
         };
 
@@ -139,6 +159,42 @@ pub fn lending_account_withdraw<'info>(
         } else {
             amount_pre_fee
         };
+
+        // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
+        let rate_limit_amount = if withdraw_all { amount_pre_fee } else { amount };
+        if !should_skip_rate_limit(marginfi_account.account_flags) {
+            // Bank-level rate limiting (native tokens)
+            if bank.rate_limiter.is_enabled() {
+                bank.rate_limiter
+                    .try_record_outflow(rate_limit_amount, clock.unix_timestamp)?;
+            }
+
+            // Group-level rate limiting (USD) - use fresh oracle price (fetched above)
+            if group_rate_limit_enabled {
+                check!(price > I80F48::ZERO, MarginfiError::InvalidRateLimitPrice);
+
+                // Apply any pending untracked inflows before recording the outflow
+                if bank.rate_limiter.untracked_inflow != 0 {
+                    let mint_decimals = bank.mint_decimals;
+                    bank.rate_limiter.apply_untracked_inflow(
+                        &mut group.rate_limiter,
+                        price,
+                        mint_decimals,
+                        clock.unix_timestamp,
+                    )?;
+                }
+
+                let usd_value = calc_value(
+                    I80F48::from_num(rate_limit_amount),
+                    price,
+                    bank.mint_decimals,
+                    None,
+                )?;
+                group
+                    .rate_limiter
+                    .try_record_outflow(usd_value.to_num::<u64>(), clock.unix_timestamp)?;
+            }
+        }
 
         // Note: we only care about the withdraw limit in case of deleverage
         if marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE) {

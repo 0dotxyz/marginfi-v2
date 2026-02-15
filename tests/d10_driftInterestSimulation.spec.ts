@@ -43,7 +43,10 @@ import {
   makeDriftWithdrawIx,
 } from "./utils/drift-instructions";
 import { getTokenBalance } from "./utils/genericTests";
-import { composeRemainingAccounts } from "./utils/user-instructions";
+import {
+  composeRemainingAccounts,
+  composeRemainingAccountsByBalances,
+} from "./utils/user-instructions";
 import { createMintToInstruction } from "@solana/spl-token";
 import { Clock } from "solana-bankrun";
 import { ASSET_TAG_DRIFT } from "./utils/types";
@@ -411,10 +414,6 @@ describe("d10: Drift Interest Simulation", () => {
 
     for (const balance of marginfiAccount.lendingAccount.balances) {
       if (balance.active === 1) {
-        if (withdrawAll && balance.bankPk.equals(bank)) {
-          continue;
-        }
-
         const balanceBank = await bankrunProgram.account.bank.fetch(
           balance.bankPk,
         );
@@ -442,9 +441,15 @@ describe("d10: Drift Interest Simulation", () => {
         driftOracle: driftOracle,
       },
       {
-        amount,
-        withdrawAll,
-        remaining: composeRemainingAccounts(activePositions),
+        amount: withdrawAll ? new BN(0) : amount,
+        withdrawAll: withdrawAll,
+        remaining: withdrawAll
+          ? composeRemainingAccountsByBalances(
+              marginfiAccount.lendingAccount.balances,
+              activePositions,
+              bank
+            )
+          : composeRemainingAccounts(activePositions),
       },
       driftBankrunProgram,
     );

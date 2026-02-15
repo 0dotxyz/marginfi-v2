@@ -26,6 +26,7 @@ import {
   depositIx,
   borrowIx,
   composeRemainingAccounts,
+  composeRemainingAccountsByBalances,
   healthPulse,
   pulseBankPrice,
   repayIx,
@@ -453,14 +454,24 @@ describe("dx: Fixed Drift price bank", () => {
         tokenAccount: user.tokenAAccount,
         amount: BORROW_AMOUNT,
         repayAll: true,
+        remaining: composeRemainingAccounts([
+          [fixedDriftBank, usdcSpotMarket],
+          [borrowBank, oracles.tokenAOracle.publicKey],
+        ]),
       }),
     );
     await processBankrunTransaction(ctx, repayTx, [user.wallet]);
 
-    const remaining = composeRemainingAccounts([
-      [fixedDriftBank, usdcSpotMarket],
-      [borrowBank, oracles.tokenAOracle.publicKey],
-    ]);
+    const accountStateAfterRepay =
+      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
+    const remaining = composeRemainingAccountsByBalances(
+      accountStateAfterRepay.lendingAccount.balances,
+      [
+        [fixedDriftBank, usdcSpotMarket],
+        [borrowBank, oracles.tokenAOracle.publicKey],
+      ],
+      fixedDriftBank,
+    );
 
     const withdrawAllTx = new Transaction().add(
       await makeDriftWithdrawIx(

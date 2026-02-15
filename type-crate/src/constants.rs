@@ -28,6 +28,7 @@ pub const LIQUIDATION_INSURANCE_FEE: I80F48 = I80F48!(0.025);
 
 pub const SECONDS_PER_YEAR: I80F48 = I80F48!(31_536_000);
 pub const DAILY_RESET_INTERVAL: i64 = 24 * 60 * 60; // 24 hours
+pub const HOURLY_RESET_DURATION: u64 = 60 * 60; // 1 hour in seconds
 
 /// Due to real-world constraints, oracles using an age less than this value are typically too
 /// unreliable, and we want to restrict pools from picking an oracle that is effectively unusable

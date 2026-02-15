@@ -47,7 +47,7 @@ all-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.s
 # Use: anchor run kamino-tests
 kamino-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/k*.spec.ts --exit --require tests/rootHooks.ts"
 
-# Basic tests (01-13)
+# Basic tests (01-17)
 basic-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/0*.spec.ts tests/1*.spec.ts --exit --require tests/rootHooks.ts"
 
 # Emode tests (e01-e06)

@@ -231,6 +231,52 @@ export const configureBank = (
   return ix;
 };
 
+export type ConfigureBankRateLimitsArgs = {
+  group: PublicKey;
+  bank: PublicKey;
+  hourlyMaxOutflow?: BN | null;
+  dailyMaxOutflow?: BN | null;
+};
+
+export const configureBankRateLimits = (
+  program: Program<Marginfi>,
+  args: ConfigureBankRateLimitsArgs
+) => {
+  const ix = program.methods
+    .configureBankRateLimits(
+      args.hourlyMaxOutflow ?? null,
+      args.dailyMaxOutflow ?? null
+    )
+    .accounts({
+      group: args.group,
+      bank: args.bank,
+    })
+    .instruction();
+  return ix;
+};
+
+export type ConfigureGroupRateLimitsArgs = {
+  marginfiGroup: PublicKey;
+  hourlyMaxOutflowUsd?: BN | null;
+  dailyMaxOutflowUsd?: BN | null;
+};
+
+export const configureGroupRateLimits = (
+  program: Program<Marginfi>,
+  args: ConfigureGroupRateLimitsArgs
+) => {
+  const ix = program.methods
+    .configureGroupRateLimits(
+      args.hourlyMaxOutflowUsd ?? null,
+      args.dailyMaxOutflowUsd ?? null
+    )
+    .accounts({
+      marginfiGroup: args.marginfiGroup,
+    })
+    .instruction();
+  return ix;
+};
+
 export type ConfigureBankOracleArgs = {
   bank: PublicKey;
   type: number;

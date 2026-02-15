@@ -21,6 +21,7 @@ import { LST_ATA, USER_ACCOUNT } from "./utils/mocks";
 import {
   borrowIx,
   composeRemainingAccounts,
+  composeRemainingAccountsByBalances,
   depositIx,
   repayIx,
   withdrawIx,
@@ -198,21 +199,27 @@ describe("Withdraw staked asset", () => {
       ).toNumber() *
       wrappedI80F48toBigNumber(bankBefore.liabilityShareValue).toNumber();
 
+    const remaining = composeRemainingAccountsByBalances(
+      userAccBefore.lendingAccount.balances,
+      [
+        [
+          validators[0].bank,
+          oracles.wsolOracle.publicKey,
+          validators[0].splMint,
+          validators[0].splSolPool,
+        ],
+        [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
+      ]
+    );
+
     let tx = new Transaction().add(
       await repayIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         bank: bankKeypairSol.publicKey,
         tokenAccount: user.wsolAccount,
         amount: new BN(amtNative),
-        remaining: composeRemainingAccounts([
-          [
-            validators[0].bank,
-            oracles.wsolOracle.publicKey,
-            validators[0].splMint,
-            validators[0].splSolPool,
-          ],
-          [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
-        ]),
+        // For repayAll, include all active balances, including the closing bank.
+        remaining,
         repayAll: true,
       })
     );
@@ -252,21 +259,27 @@ describe("Withdraw staked asset", () => {
       ).toNumber() *
       wrappedI80F48toBigNumber(bankBefore.assetShareValue).toNumber();
 
+    const remaining = composeRemainingAccountsByBalances(
+      userAccBefore.lendingAccount.balances,
+      [
+        [
+          validators[0].bank,
+          oracles.wsolOracle.publicKey,
+          validators[0].splMint,
+          validators[0].splSolPool,
+        ],
+      ],
+      validators[0].bank
+    );
+
     let tx = new Transaction().add(
       await withdrawIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         bank: validators[0].bank,
         tokenAccount: userLstAta,
         amount: new BN(amtNative),
-        remaining: composeRemainingAccounts([
-          [
-            validators[0].bank,
-            oracles.wsolOracle.publicKey,
-            validators[0].splMint,
-            validators[0].splSolPool,
-          ],
-          [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
-        ]),
+        // For withdrawAll, include all active balances, including the closing bank.
+        remaining,
         withdrawAll: true,
       })
     );
