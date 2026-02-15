@@ -31,6 +31,7 @@ import {
   users,
 } from "./rootHooks";
 import {
+  assertBNApproximately,
   assertBNEqual,
   assertBNGreaterThan,
   assertBankrunTxFailed,
@@ -202,19 +203,6 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
         .toFixed(0),
     );
 
-  const assertBnDiffAtMost = (
-    actual: BN,
-    expected: BN,
-    maxDiff: number,
-    label: string,
-  ) => {
-    const diff = actual.sub(expected).abs();
-    assert.ok(
-      diff.lte(new BN(maxDiff)),
-      `${label} diff ${diff.toString()} exceeds ${maxDiff} (actual=${actual.toString()}, expected=${expected.toString()})`,
-    );
-  };
-
   const previewSharesForDeposit = (
     assets: BN,
     liquidityExchangePrice: BN,
@@ -232,10 +220,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     return registered.mul(EXCHANGE_PRICES_PRECISION).div(tokenExchangePrice);
   };
 
-  const previewSharesForWithdraw = (
-    assets: BN,
-    tokenExchangePrice: BN,
-  ): BN => {
+  const previewSharesForWithdraw = (assets: BN, tokenExchangePrice: BN): BN => {
     if (tokenExchangePrice.isZero()) {
       return undefined;
     }
@@ -372,7 +357,6 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     }
 
     if (useLut) {
-      assert.ok(jlrLutAccount, "jlr LUT account is not initialized");
       const blockhash = await getBankrunBlockhash(bankrunContext);
       const messageV0 = new TransactionMessage({
         payerKey: user.wallet.publicKey,
@@ -422,12 +406,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       before.lendingLiquidityExchangePrice,
       before.lendingTokenExchangePrice,
     );
-    assertBnDiffAtMost(
-      mintedShares,
-      expectedMintedShares!,
-      1,
-      "minted shares preview",
-    );
+    assertBNApproximately(mintedShares, expectedMintedShares!, 1);
     assertBNGreaterThan(mintedShares, 0);
 
     assertBNEqual(before.userUsdc.sub(after.userUsdc), amount);
@@ -444,12 +423,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       before.supplyPositionRaw,
     );
     assertBNEqual(reserveRawSupplyDelta, supplyPositionRawDelta);
-    assertBnDiffAtMost(
-      supplyPositionRawDelta,
-      mintedShares,
-      1,
-      "supply position raw vs minted shares",
-    );
+    assertBNApproximately(supplyPositionRawDelta, mintedShares, 1);
     assertBNEqual(after.tokenReserveBorrowRaw, before.tokenReserveBorrowRaw);
 
     assertBNEqual(
@@ -494,12 +468,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       after.supplyPositionRaw,
     );
     assertBNEqual(reserveRawSupplyDelta, supplyPositionRawDelta);
-    assertBnDiffAtMost(
-      supplyPositionRawDelta,
-      burnedShares,
-      1,
-      "supply position raw vs burned shares",
-    );
+    assertBNApproximately(supplyPositionRawDelta, burnedShares, 1);
     assertBNEqual(after.tokenReserveBorrowRaw, before.tokenReserveBorrowRaw);
 
     const userShareDelta = before.userAssetShares.sub(after.userAssetShares);
@@ -546,12 +515,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       after.supplyPositionRaw,
     );
     assertBNEqual(reserveRawSupplyDelta, supplyPositionRawDelta);
-    assertBnDiffAtMost(
-      supplyPositionRawDelta,
-      burnedShares,
-      1,
-      "withdraw-all supply position raw vs burned shares",
-    );
+    assertBNApproximately(supplyPositionRawDelta, burnedShares, 1);
     assertBNEqual(after.tokenReserveBorrowRaw, before.tokenReserveBorrowRaw);
 
     const userShareDelta = before.userAssetShares.sub(after.userAssetShares);
@@ -673,7 +637,6 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       beforeFullWithdraw.userAssetShares,
       beforeFullWithdraw.lendingTokenExchangePrice,
     );
-    assert.ok(fullRedeemAmount, "expected full redeem preview amount");
     assertBNGreaterThan(fullRedeemAmount!, 0);
 
     await executeWithdraw(fullRedeemAmount, false);
@@ -715,6 +678,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     }
 
     const beforeWithdrawAll = await fetchSnapshot();
+    // Note: amount doesn't matter when withdrawing all
     await executeWithdraw(new BN(0), true);
     const afterWithdrawAll = await fetchSnapshot();
     assertWithdrawAllDeltas(beforeWithdrawAll, afterWithdrawAll);

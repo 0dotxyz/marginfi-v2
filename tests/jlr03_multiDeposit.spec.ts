@@ -320,7 +320,8 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
       const bank = await bankrunProgram.account.bank.fetch(balance.bankPk);
 
       let expectedPrice = adjustedOraclePriceForMint(bank.mint);
-      // we only care juplend is priced correctly in this test suite
+      // juplend prices are expected to be adjusted by earned interest aka share exchange rate,
+      // though in this test only USDC has some interest, and it's nominal.
       if (bank.config.assetTag === ASSET_TAG_JUPLEND) {
         const jupCtx = jupCtxByBank.get(balance.bankPk.toBase58());
         const lending = await juplendPrograms.lending.account.lending.fetch(
@@ -355,12 +356,7 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
     const actualAssetValue = wrappedI80F48toBigNumber(healthCache.assetValue);
     const assetValueTolerance = expectedAssetValue.multipliedBy(0.002);
     const absDiff = actualAssetValue.minus(expectedAssetValue).abs();
-    assert.ok(
-      absDiff.lte(assetValueTolerance),
-      `unexpected health asset value, expected=${expectedAssetValue.toFixed(
-        8,
-      )} actual=${actualAssetValue.toFixed(8)}`,
-    );
+    assert.ok(absDiff.lte(assetValueTolerance));
   });
 });
 

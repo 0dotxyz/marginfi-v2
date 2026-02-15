@@ -25,6 +25,7 @@ import {
   ASSET_TAG_STAKED,
   HEALTH_CACHE_HEALTHY,
 } from "./types";
+import { composeRemainingAccounts } from "./user-instructions";
 import { BN } from "@coral-xyz/anchor";
 import {
   globalProgramAdmin,
@@ -286,6 +287,8 @@ export const logHealthCache = (header: string, healthCache: any) => {
   const lv = wrappedI80F48toBigNumber(healthCache.liabilityValue);
   const aValMaint = wrappedI80F48toBigNumber(healthCache.assetValueMaint);
   const lValMaint = wrappedI80F48toBigNumber(healthCache.liabilityValueMaint);
+  const aValEqui = wrappedI80F48toBigNumber(healthCache.assetValueEquity);
+  const lValEqui = wrappedI80F48toBigNumber(healthCache.liabilityValueEquity);
   console.log(`---${header}---`);
   if (healthCache.flags & HEALTH_CACHE_HEALTHY) {
     console.log("**HEALTHY**");
@@ -296,6 +299,8 @@ export const logHealthCache = (header: string, healthCache: any) => {
   console.log("liab value: " + lv.toString());
   console.log("asset value (maint): " + aValMaint.toString());
   console.log("liab value (maint): " + lValMaint.toString());
+  console.log("asset value (equity): " + aValEqui.toString());
+  console.log("liab value (equity): " + lValEqui.toString());
   console.log("prices: ");
   healthCache.prices.forEach((priceWrapped: any, i: number) => {
     const price = bytesToF64(priceWrapped);
@@ -386,8 +391,14 @@ export const mintToTokenAccount = async (
  */
 export const buildHealthRemainingAccounts = async (
   marginfiAccountPk: PublicKey,
-  excludedBankPks: PublicKey[] = [],
+  options: {
+    excludedBankPks?: PublicKey[];
+    includedBankPks?: PublicKey[];
+  } = {},
 ): Promise<PublicKey[]> => {
+  const excludedBankPks = options.excludedBankPks ?? [];
+  const includedBankPks = options.includedBankPks ?? [];
+
   const marginfiAccount = await bankrunProgram.account.marginfiAccount.fetch(
     marginfiAccountPk,
   );
@@ -399,13 +410,23 @@ export const buildHealthRemainingAccounts = async (
     )
     .map((b: any) => b.bankPk as PublicKey);
 
+  const bankPks: PublicKey[] = [...activeBankPks];
+  for (const bankPk of includedBankPks) {
+    if (excludedBankPks.some((excludedPk) => excludedPk.equals(bankPk))) {
+      continue;
+    }
+    if (!bankPks.some((existingBankPk) => existingBankPk.equals(bankPk))) {
+      bankPks.push(bankPk);
+    }
+  }
+
   const banks = await Promise.all(
-    activeBankPks.map((bankPk) => bankrunProgram.account.bank.fetch(bankPk)),
+    bankPks.map((bankPk) => bankrunProgram.account.bank.fetch(bankPk)),
   );
 
   const groups: PublicKey[][] = [];
-  for (let i = 0; i < activeBankPks.length; i++) {
-    const bankPk = activeBankPks[i];
+  for (let i = 0; i < bankPks.length; i++) {
+    const bankPk = bankPks[i];
     const bank = banks[i];
     const assetTag = bank.config.assetTag;
     const group: PublicKey[] = [bankPk, bank.config.oracleKeys[0]];
@@ -426,5 +447,5 @@ export const buildHealthRemainingAccounts = async (
     groups.push(group);
   }
 
-  return groups.flat();
+  return composeRemainingAccounts(groups);
 };
