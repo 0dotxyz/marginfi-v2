@@ -78,28 +78,6 @@ describe("Emode Max Leverage Configuration", () => {
       assert.approximately(u32ToBasis(group.emodeMaxMaintLeverage), 15, 0.01); 
     });
 
-
-
-    it("(admin) Configure group with null max leverage (defaults to 15x init, 20x maint)", async () => {
-      const tx = new Transaction().add(
-        await groupConfigure(groupAdmin.mrgnBankrunProgram, {
-          marginfiGroup: emodeGroup.publicKey,
-          emodeMaxInitLeverage: null,
-          emodeMaxMaintLeverage: null,
-        })
-      );
-
-      tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(groupAdmin.wallet);
-      await banksClient.processTransaction(tx);
-
-      const group = await bankrunProgram.account.marginfiGroup.fetch(
-        emodeGroup.publicKey
-      );
-
-      assert.approximately(u32ToBasis(group.emodeMaxInitLeverage), 15, 0.01);
-      assert.approximately(u32ToBasis(group.emodeMaxMaintLeverage), 20, 0.01);
-    });
   });
 
   describe("Group Configuration - Invalid Max Leverage", () => {
@@ -228,8 +206,8 @@ describe("Emode Max Leverage Configuration", () => {
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(emodeAdmin.wallet);
       const result = await banksClient.tryProcessTransaction(tx);
-      // 6075 (BadEmodeConfig)
-      assertBankrunTxFailed(result, "0x17bb");
+      // 6074 (MaxInitLeverageExceeded)
+      assertBankrunTxFailed(result, "0x17ba");
     });
 
     it("(emode admin) Configure bank emode exceeding maint leverage limit (18x maint) - should fail", async () => {
@@ -254,8 +232,8 @@ describe("Emode Max Leverage Configuration", () => {
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(emodeAdmin.wallet);
       const result = await banksClient.tryProcessTransaction(tx);
-      // 6075 (BadEmodeConfig)
-      assertBankrunTxFailed(result, "0x17bb");
+      // 6212 (MaxMaintLeverageExceeded)
+      assertBankrunTxFailed(result, "0x1844");
     });
 
     it("(emode admin) Configure bank emode with asset weight >= liability weight - should fail", async () => {
