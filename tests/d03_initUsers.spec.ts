@@ -11,7 +11,6 @@ import {
   getUserAccount,
   getUserStatsAccount,
   getDriftStateAccount,
-  DriftUser,
 } from "./utils/drift-utils";
 import { MockUser } from "./utils/mocks";
 import { deriveUserPDA } from "./utils/pdas";

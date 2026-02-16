@@ -6,9 +6,10 @@ import {
   Commitment,
   SystemProgram,
   TransactionInstruction,
+  SYSVAR_CLOCK_PUBKEY,
 } from "@solana/web3.js";
 import { BanksClient } from "solana-bankrun";
-import { Instruction, utils } from "@coral-xyz/anchor";
+import { BN, Instruction, utils } from "@coral-xyz/anchor";
 
 /**
  * Patches a bankrun connection to add missing methods that tests need.
@@ -133,3 +134,16 @@ export function dummyIx(
   });
   return ix;
 }
+
+
+export const getEpochAndSlot = async (banksClient: BanksClient) => {
+  let clock = await banksClient.getAccount(SYSVAR_CLOCK_PUBKEY);
+
+  // Slot is bytes 0-8
+  let slot = new BN(clock.data.slice(0, 8), 10, "le").toNumber();
+
+  // Epoch is bytes 16-24
+  let epoch = new BN(clock.data.slice(16, 24), 10, "le").toNumber();
+
+  return { epoch, slot };
+};

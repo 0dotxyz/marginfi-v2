@@ -21,7 +21,6 @@ import {
   banksClient,
   driftGroup,
   DRIFT_TOKEN_A_PULL_ORACLE,
-  globalFeeWallet,
   bankRunProvider,
 } from "./rootHooks";
 import { assert } from "chai";

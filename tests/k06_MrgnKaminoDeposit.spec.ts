@@ -40,8 +40,8 @@ import {
   deriveReserveCollateralSupply,
   deriveReserveLiquiditySupply,
 } from "./utils/pdas";
-import { getEpochAndSlot } from "./utils/stake-utils";
 import { BalanceRaw } from "@mrgnlabs/marginfi-client-v2";
+import { getEpochAndSlot } from "./utils/bankrunConnection";
 
 let ctx: ProgramTestContext;
 let bank: PublicKey;

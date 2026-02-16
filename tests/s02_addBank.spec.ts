@@ -41,7 +41,6 @@ import {
   ORACLE_SETUP_PYTH_PUSH,
 } from "./utils/types";
 import { assert } from "chai";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import {
   deriveBankWithSeed,
   deriveFeeVault,
@@ -53,6 +52,7 @@ import {
   deriveStakedSettings,
 } from "./utils/pdas";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { getBankrunBlockhash } from "./utils/tools";
 
 let program: Program<Marginfi>;
 let marginfiGroup: Keypair;

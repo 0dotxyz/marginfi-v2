@@ -4,25 +4,7 @@
         {
             "label": "Setup & Run Anchor Tests (+ IDL)",
             "type": "shell",
-            "command": "./scripts/build-workspace.sh && yarn install && anchor build -p marginfi -- --no-default-features && anchor build -p mocks && anchor test --skip-build",
-            "problemMatcher": [],
-            "group": {
-                "kind": "test",
-                "isDefault": true
-            },
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": true,
-                "panel": "shared",
-                "showReuseMessage": true,
-                "clear": true
-            }
-        },
-        {
-            "label": "Setup & Run Anchor Tests",
-            "type": "shell",
-            "command": "./scripts/build-workspace.sh && yarn install && anchor build --no-idl -p marginfi -- --no-default-features && anchor build --no-idl -p mocks && anchor test --skip-build",
+            "command": "./scripts/build-workspace.sh && yarn install && anchor build -p marginfi -- --no-default-features && anchor build -p test_transfer_hook --no-idl && anchor build -p mocks && anchor test --skip-build",
             "problemMatcher": [],
             "group": {
                 "kind": "test",

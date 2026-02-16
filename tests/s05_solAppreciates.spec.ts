@@ -18,9 +18,8 @@ import {
   depositIx,
 } from "./utils/user-instructions";
 import { LST_ATA, LST_ATA_v1, USER_ACCOUNT } from "./utils/mocks";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
-import { dumpBankrunLogs } from "./utils/tools";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
+import { getBankrunBlockhash } from "./utils/tools";
 
 let bankKeypairSol: Keypair;
 

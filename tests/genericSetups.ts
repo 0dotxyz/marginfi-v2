@@ -33,7 +33,6 @@ import {
   deriveBaseObligation,
   deriveLiquidityVaultAuthority,
 } from "./utils/pdas";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { accountInit } from "./utils/user-instructions";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import {
@@ -47,7 +46,7 @@ import {
   makeAddKaminoBankIx,
   makeInitObligationIx,
 } from "./utils/kamino-instructions";
-import { processBankrunTransaction } from "./utils/tools";
+import { getBankrunBlockhash, processBankrunTransaction } from "./utils/tools";
 import {
   defaultDriftBankConfig,
   TOKEN_A_MARKET_INDEX,

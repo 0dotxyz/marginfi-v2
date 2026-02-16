@@ -38,7 +38,6 @@ import {
 import { deriveBankWithSeed } from "./utils/pdas";
 import {
   refreshPullOraclesBankrun,
-  setPythPullOraclePrice,
 } from "./utils/bankrun-oracles";
 import { makeUpdateSpotMarketCumulativeInterestIx } from "./utils/drift-sdk";
 import {
@@ -53,12 +52,12 @@ import {
   repayIx,
   startLiquidationIx,
 } from "./utils/user-instructions";
-import { blankBankConfigOptRaw, ORACLE_CONF_INTERVAL } from "./utils/types";
+import { blankBankConfigOptRaw } from "./utils/types";
 import { configureBank } from "./utils/group-instructions";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { assertBankrunTxFailed } from "./utils/genericTests";
 import { Clock } from "solana-bankrun";
-import { getEpochAndSlot } from "./utils/stake-utils";
+import { getEpochAndSlot } from "./utils/bankrunConnection";
 
 const USER_ACCOUNT_D15 = "d15_account";
 const THROWAWAY_GROUP_SEED_D15 = Buffer.from(
@@ -67,7 +66,7 @@ const THROWAWAY_GROUP_SEED_D15 = Buffer.from(
 const STARTING_SEED = 150;
 const TIME_TO_WAIT = 0.1 * 60 * 60;
 
-describe("d15: Drift rec liquidation", () => {
+describe("d14: Drift rec liquidation", () => {
   let throwawayGroup: Keypair;
   let driftTokenABank: PublicKey;
   let driftTokenASpotMarket: PublicKey;

@@ -21,7 +21,6 @@ import {
   getTokenBalance,
 } from "./utils/genericTests";
 import { assert } from "chai";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { getAssociatedTokenAddressSync } from "@mrgnlabs/mrgn-common";
 import { u64MAX_BN } from "./utils/types";
 import {
@@ -31,6 +30,7 @@ import {
 } from "./utils/group-instructions";
 import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-token";
 import { deriveFeeVault } from "./utils/pdas";
+import { getBankrunBlockhash } from "./utils/tools";
 
 let bankKeypairSol: Keypair;
 

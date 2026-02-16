@@ -6,7 +6,6 @@ import {
 import { ProgramTestContext } from "solana-bankrun";
 import { Transaction, PublicKey, AccountInfo } from "@solana/web3.js";
 import { Keypair } from "@solana/web3.js";
-import { getBankrunBlockhash } from "./spl-staking-utils";
 import { MarginfiAccountRaw } from "@mrgnlabs/marginfi-client-v2";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { HEALTH_CACHE_HEALTHY } from "./types";
@@ -342,3 +341,15 @@ export async function advanceBankrunClock(
   ctx.setClock(newClock);
   return Number(newClock.unixTimestamp);
 }
+
+/**
+ * Generally, use this instead of `bankrunContext.lastBlockhash` (which does not work if the test
+ * has already run for some time and the blockhash has advanced)
+ * @param bankrunContext
+ * @returns
+ */
+export const getBankrunBlockhash = async (
+  bankrunContext: ProgramTestContext
+) => {
+  return (await bankrunContext.banksClient.getLatestBlockhash())[0];
+};

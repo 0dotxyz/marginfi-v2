@@ -12,6 +12,8 @@ import {
   SetupTestUserBankrunOptions,
 } from "./utils/mocks";
 import {
+  AddressLookupTableAccount,
+  AddressLookupTableProgram,
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
@@ -22,7 +24,10 @@ import {
 } from "@solana/web3.js";
 import fs from "fs";
 import path from "path";
-import { patchBankrunConnection } from "./utils/bankrunConnection";
+import {
+  getEpochAndSlot,
+  patchBankrunConnection,
+} from "./utils/bankrunConnection";
 
 // ---------------------------------------------------------------------------
 // Kamino farms (liquidity-incentive) program
@@ -59,7 +64,7 @@ import { Mocks } from "../target/types/mocks";
 import marginfiIdl from "../target/idl/marginfi.json";
 import mocksIdl from "../target/idl/mocks.json";
 import { setupPythOraclesBankrun } from "./utils/bankrun-oracles";
-import { processBankrunTransaction } from "./utils/tools";
+import { getBankrunBlockhash, processBankrunTransaction } from "./utils/tools";
 
 import {
   findPoolAddress,
@@ -103,7 +108,6 @@ export const PROGRAM_FEE_RATE = 0.02;
 export const LIQUIDATION_MAX_FEE = 0.5;
 export const ORDER_EXECUTION_MAX_FEE = 0.05; // 5%
 export const ORDER_INIT_FLAT_FEE_DEFAULT = 100_000;
-
 
 // All groups and banks below need to be deterministic to ensure the same ordering of balances in
 // lending accounts
@@ -254,7 +258,7 @@ export const SOLEND_TOKEN_A_LIQUIDITY_SUPPLY = "solend_tokena_liquidity_supply";
 /** Token A Reserve collateral mint */
 export const SOLEND_TOKEN_A_COLLATERAL_MINT = "solend_tokena_collateral_mint";
 /** Token A Reserve collateral supply */
-export const SOLEND_TOKENA_COLLATERAL_SUPPLY =
+export const SOLEND_TOKEN_A_COLLATERAL_SUPPLY =
   "solend_tokena_collateral_supply";
 /** Token A Reserve fee receiver */
 export const SOLEND_TOKEN_A_FEE_RECEIVER = "solend_tokena_fee_receiver";
@@ -751,4 +755,49 @@ export const mochaHooks = {
       console.log("");
     }
   },
+};
+
+export const createLut = async (
+  signer: MockUser,
+  addresses: PublicKey[],
+): Promise<AddressLookupTableAccount> => {
+  const recentSlot = Number(await banksClient.getSlot());
+  const [createLutIx, lutAddress] = AddressLookupTableProgram.createLookupTable(
+    {
+      authority: signer.wallet.publicKey,
+      payer: signer.wallet.publicKey,
+      recentSlot: recentSlot - 1,
+    },
+  );
+
+  const createLutTx = new Transaction().add(createLutIx);
+  createLutTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+  createLutTx.sign(signer.wallet);
+  await banksClient.processTransaction(createLutTx);
+
+  const CHUNK = 20;
+  for (let i = 0; i < addresses.length; i += CHUNK) {
+    const extendTx = new Transaction().add(
+      AddressLookupTableProgram.extendLookupTable({
+        authority: signer.wallet.publicKey,
+        payer: signer.wallet.publicKey,
+        lookupTable: lutAddress,
+        addresses: addresses.slice(i, i + CHUNK),
+      }),
+    );
+    extendTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    extendTx.sign(signer.wallet);
+    await banksClient.processTransaction(extendTx);
+  }
+
+  // allow LUT to activate
+  const { slot } = await getEpochAndSlot(banksClient);
+  bankrunContext.warpToSlot(BigInt(slot + 25));
+
+  const lutRaw = await banksClient.getAccount(lutAddress);
+  const lutState = AddressLookupTableAccount.deserialize(lutRaw.data);
+  return new AddressLookupTableAccount({
+    key: lutAddress,
+    state: lutState,
+  });
 };

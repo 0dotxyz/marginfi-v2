@@ -7,8 +7,6 @@ solana_version = "2.1.20"
 members = ["programs/marginfi", "programs/mocks", "programs/test_transfer_hook"]
 # exclude = [
 #   "programs/test_transfer_hook",
-#   "programs/liquidity-incentive-program",
-#   "programs/brick",
 # ]
 
 [features]

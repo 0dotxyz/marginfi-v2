@@ -24,7 +24,6 @@ import {
 } from "./utils/genericTests";
 import {
   defaultDriftBankConfig,
-  DRIFT_SCALED_BALANCE_DECIMALS,
   getDriftUserAccount,
   TOKEN_A_INIT_DEPOSIT_AMOUNT,
   TOKEN_A_MARKET_INDEX,
@@ -40,7 +39,7 @@ import {
   blankBankConfigOptRaw,
 } from "./utils/types";
 import { assert } from "chai";
-import { processBankrunTransaction, safeGetAccountInfo, getBankrunTime } from "./utils/tools";
+import { processBankrunTransaction } from "./utils/tools";
 import { ProgramTestContext } from "solana-bankrun";
 import {
   makeAddDriftBankIx,

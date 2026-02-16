@@ -22,7 +22,6 @@ import {
   verbose,
 } from "./rootHooks";
 import {
-  assertBNApproximately,
   assertI80F48Equal,
   getTokenBalance,
 } from "./utils/genericTests";
@@ -32,7 +31,6 @@ import {
   liquidateIx,
 } from "./utils/user-instructions";
 import { USER_ACCOUNT } from "./utils/mocks";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import {
   bigNumberToWrappedI80F48,
   getMint,
@@ -51,7 +49,7 @@ import {
 } from "./utils/group-instructions";
 import { deriveStakedSettings } from "./utils/pdas";
 import { getStakeAccount } from "./utils/stake-utils";
-import { dumpBankrunLogs } from "./utils/tools";
+import { getBankrunBlockhash } from "./utils/tools";
 
 let program: Program<Marginfi>;
 let marginfiGroup: Keypair;

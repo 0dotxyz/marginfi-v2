@@ -1,6 +1,6 @@
 import { BN, Program } from "@coral-xyz/anchor";
 import { configureBank } from "./utils/group-instructions";
-import { Keypair, SystemProgram, Transaction } from "@solana/web3.js";
+import { Keypair, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairA,

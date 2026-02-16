@@ -361,9 +361,6 @@ describe("orders", () => {
     it("keeper closes an order - happy path", async () => {
       const orderPk = await placeTestOrder();
 
-      const keeper = users[1];
-      const keeperProgram = keeper.mrgnProgram as Program<Marginfi>;
-
       // Clear the liability, so at least one order tag has no active balance
       const repayRemaining = composeRemainingAccounts([
         [bankUsdc, oracles.usdcOracle.publicKey],
@@ -421,7 +418,7 @@ describe("orders", () => {
       const ix = await keeperCloseOrderIx(program, {
         marginfiAccount: userMarginfiAccount,
         order: orderPk,
-        feeRecipient: keeper.wallet.publicKey,
+        feeRecipient: keeperUser.wallet.publicKey,
       });
 
       await keeperProgram.provider.sendAndConfirm(new Transaction().add(ix));

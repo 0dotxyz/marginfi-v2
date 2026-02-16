@@ -15,7 +15,6 @@ import {
 import {
   createStakeAccount,
   delegateStake,
-  getEpochAndSlot,
   getStakeAccount,
   getStakeActivation,
 } from "./utils/stake-utils";
@@ -28,12 +27,13 @@ import { u64MAX_BN } from "./utils/types";
 import { getAssociatedTokenAddressSync } from "@mrgnlabs/mrgn-common";
 import {
   depositToSinglePoolIxes,
-  getBankrunBlockhash,
 } from "./utils/spl-staking-utils";
 import { assert } from "chai";
 import { LST_ATA, LST_ATA_v1, STAKE_ACC, STAKE_ACC_v1 } from "./utils/mocks";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { oracles } from "./rootHooks";
+import { getBankrunBlockhash } from "./utils/tools";
+import { getEpochAndSlot } from "./utils/bankrunConnection";
 
 describe("User stakes some native and creates an account", () => {
   /** Users's validator 0 stake account */

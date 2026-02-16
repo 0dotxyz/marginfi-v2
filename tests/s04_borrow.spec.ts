@@ -15,8 +15,8 @@ import { assertBankrunTxFailed, assertKeysEqual } from "./utils/genericTests";
 import { assert } from "chai";
 import { borrowIx, composeRemainingAccounts } from "./utils/user-instructions";
 import { USER_ACCOUNT } from "./utils/mocks";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
+import { getBankrunBlockhash } from "./utils/tools";
 
 let bankKeypairSol: Keypair;
 let bankKeypairUsdc: Keypair;

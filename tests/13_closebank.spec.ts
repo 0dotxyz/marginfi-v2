@@ -16,7 +16,6 @@ import {
 import { defaultBankConfig, ORACLE_SETUP_PYTH_PUSH } from "./utils/types";
 import { addBankWithSeed } from "./utils/group-instructions";
 import {
-  composeRemainingAccounts,
   composeRemainingAccountsByBalances,
   depositIx,
   withdrawIx,

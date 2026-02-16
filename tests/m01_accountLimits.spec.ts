@@ -15,7 +15,6 @@ import {
   users,
 } from "./rootHooks";
 import { configureBank, setFixedPrice } from "./utils/group-instructions";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { assert } from "chai";
 import { defaultBankConfigOptRaw, MAX_BALANCES } from "./utils/types";
 import {
@@ -26,7 +25,7 @@ import {
   withdrawIx,
 } from "./utils/user-instructions";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
-import { dumpAccBalances, processBankrunTransaction } from "./utils/tools";
+import { dumpAccBalances, getBankrunBlockhash, processBankrunTransaction } from "./utils/tools";
 import { genericMultiBankTestSetup } from "./genericSetups";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { assertI80F48Approx, assertKeyDefault } from "./utils/genericTests";

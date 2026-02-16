@@ -24,9 +24,9 @@ import {
   EMODE_SOL_TAG,
   newEmodeEntry,
 } from "./utils/types";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { deriveBankWithSeed } from "./utils/pdas";
 import { assert } from "chai";
+import { getBankrunBlockhash } from "./utils/tools";
 
 const seed = new BN(EMODE_SEED);
 let solBank: any;

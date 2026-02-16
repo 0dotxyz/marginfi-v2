@@ -21,6 +21,7 @@ import {
   groupAdmin,
   oracles,
   users,
+  createLut,
 } from "../rootHooks";
 import { MockUser } from "./mocks";
 import {
@@ -38,8 +39,7 @@ import {
   liquidateIx,
 } from "./user-instructions";
 import { deriveBankWithSeed } from "./pdas";
-import { getBankrunBlockhash } from "./spl-staking-utils";
-import { processBankrunTransaction as processBankrunTx } from "./tools";
+import { getBankrunBlockhash, processBankrunTransaction as processBankrunTx } from "./tools";
 import {
   makeAddDriftBankIx,
   makeInitDriftUserIx,
@@ -321,7 +321,6 @@ export async function setupDriftLiqEnv(): Promise<DriftLiqEnv> {
 
   // 8. Create and extend LUT
   const lutAddress = await createAndExtendLUT(
-    ctx,
     liquidatorUser,
     throwawayGroup.publicKey,
     liquidatorAccount,
@@ -707,7 +706,6 @@ async function addGenericRegularBank(
 }
 
 async function createAndExtendLUT(
-  ctx: ProgramTestContext,
   user: MockUser,
   group: PublicKey,
   liquidatorAccount: PublicKey,
@@ -716,18 +714,6 @@ async function createAndExtendLUT(
   liabBank: PublicKey,
   driftSpotMarket: PublicKey
 ): Promise<PublicKey> {
-  const recentSlot = Number(await banksClient.getSlot());
-  const [createLutIx, lutAddress] = AddressLookupTableProgram.createLookupTable(
-    {
-      authority: user.wallet.publicKey,
-      payer: user.wallet.publicKey,
-      recentSlot: recentSlot - 1,
-    }
-  );
-
-  const createLutTx = new Transaction().add(createLutIx);
-  await processBankrunTx(ctx, createLutTx, [user.wallet]);
-
   const { TOKEN_PROGRAM_ID } = await import("@solana/spl-token");
 
   const allAddresses = [
@@ -743,19 +729,6 @@ async function createAndExtendLUT(
     oracles.pythPullLst.publicKey,
   ];
 
-  const chunkSize = 20;
-  for (let i = 0; i < allAddresses.length; i += chunkSize) {
-    const chunk = allAddresses.slice(i, i + chunkSize);
-    const extendLutTx = new Transaction().add(
-      AddressLookupTableProgram.extendLookupTable({
-        authority: user.wallet.publicKey,
-        payer: user.wallet.publicKey,
-        lookupTable: lutAddress,
-        addresses: chunk,
-      })
-    );
-    await processBankrunTx(ctx, extendLutTx, [user.wallet]);
-  }
-
-  return lutAddress;
+  const account = await createLut(user, allAddresses);
+  return account.key;
 }

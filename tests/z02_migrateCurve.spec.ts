@@ -13,8 +13,6 @@ import {
   verbose,
 } from "./rootHooks";
 import { accrueInterest, migrateCurve } from "./utils/group-instructions";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
-import { getEpochAndSlot } from "./utils/stake-utils";
 import {
   INTEREST_CURVE_LEGACY,
   INTEREST_CURVE_SEVEN_POINT,
@@ -23,6 +21,7 @@ import {
 } from "./utils/types";
 import { assertI80F48Equal } from "./utils/genericTests";
 import { processBankrunTransaction } from "./utils/tools";
+import { getEpochAndSlot } from "./utils/bankrunConnection";
 
 // one day
 const INTERVAL_SECONDS = 24 * 60 * 60;

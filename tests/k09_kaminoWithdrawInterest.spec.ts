@@ -37,8 +37,8 @@ import { getTokenBalance } from "./utils/genericTests";
 import { BankrunProvider } from "anchor-bankrun";
 import { ONE_WEEK_IN_SECONDS } from "./utils/types";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
-import { getEpochAndSlot } from "./utils/stake-utils";
 import Decimal from "decimal.js";
+import { getEpochAndSlot } from "./utils/bankrunConnection";
 
 let ctx: ProgramTestContext;
 let provider: BankrunProvider;
@@ -196,7 +196,6 @@ describe("k09: Withdraw from Kamino reserve with accrued interest", () => {
     let { epoch: _epoch, slot } = await getEpochAndSlot(banksClient);
     // ~241920 slots in 1 week (ONE_WEEK_IN_SECONDS * 0.4)
     const slotsPerWeek = ONE_WEEK_IN_SECONDS * 0.4;
-    const slotTarget = slot + slotsPerWeek;
     bankrunContext.warpToSlot(BigInt(slot + slotsPerWeek));
     clock = await banksClient.getClock();
 

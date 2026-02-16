@@ -1,7 +1,6 @@
 import { BN } from "@coral-xyz/anchor";
 import {
   AddressLookupTableAccount,
-  AddressLookupTableProgram,
   ComputeBudgetProgram,
   PublicKey,
   Transaction,
@@ -29,6 +28,7 @@ import {
   oracles,
   TOKEN_A_RESERVE,
   users,
+  createLut,
 } from "./rootHooks";
 import { genericMultiBankTestSetup } from "./genericSetups";
 import {
@@ -54,11 +54,9 @@ import {
   makeDriftDepositIx,
   makeDriftWithdrawIx,
 } from "./utils/drift-instructions";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { refreshPullOracles } from "./utils/pyth-pull-mocks";
 import {
-  dumpBankrunLogs,
-  logHealthCache,
+  getBankrunBlockhash,
   processBankrunTransaction,
 } from "./utils/tools";
 import {
@@ -67,7 +65,6 @@ import {
   deriveLiquidityVaultAuthority,
   deriveOrderPda,
 } from "./utils/pdas";
-import { getEpochAndSlot } from "./utils/stake-utils";
 import { assert } from "chai";
 import { TOKEN_A_MARKET_INDEX } from "./utils/drift-utils";
 import {
@@ -76,6 +73,7 @@ import {
 } from "@mrgnlabs/mrgn-common";
 import { assertBankrunTxFailed } from "./utils/genericTests";
 import type { MockUser } from "./utils/mocks";
+import { getEpochAndSlot } from "./utils/bankrunConnection";
 
 const startingSeed: number = 77;
 const U32_MAX = 2 ** 32 - 1;
@@ -141,50 +139,6 @@ SCENARIOS.forEach(({ kaminoDeposits, driftDeposits }, scenarioIndex) => {
         groups.push([bank, oracles.tokenAOracle.publicKey, driftSpotMarket]);
       }
       return groups;
-    };
-
-    const createLut = async (
-      signer: MockUser,
-      addresses: PublicKey[],
-    ): Promise<AddressLookupTableAccount> => {
-      const recentSlot = Number(await banksClient.getSlot());
-      const [createLutIx, lutAddress] =
-        AddressLookupTableProgram.createLookupTable({
-          authority: signer.wallet.publicKey,
-          payer: signer.wallet.publicKey,
-          recentSlot: recentSlot - 1,
-        });
-
-      const createLutTx = new Transaction().add(createLutIx);
-      createLutTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      createLutTx.sign(signer.wallet);
-      await banksClient.processTransaction(createLutTx);
-
-      const CHUNK = 20;
-      for (let i = 0; i < addresses.length; i += CHUNK) {
-        const extendTx = new Transaction().add(
-          AddressLookupTableProgram.extendLookupTable({
-            authority: signer.wallet.publicKey,
-            payer: signer.wallet.publicKey,
-            lookupTable: lutAddress,
-            addresses: addresses.slice(i, i + CHUNK),
-          }),
-        );
-        extendTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-        extendTx.sign(signer.wallet);
-        await banksClient.processTransaction(extendTx);
-      }
-
-      // allow LUT to activate
-      const { slot } = await getEpochAndSlot(banksClient);
-      bankrunContext.warpToSlot(BigInt(slot + 25));
-
-      const lutRaw = await banksClient.getAccount(lutAddress);
-      const lutState = AddressLookupTableAccount.deserialize(lutRaw.data);
-      return new AddressLookupTableAccount({
-        key: lutAddress,
-        state: lutState,
-      });
     };
 
     const buildExecuteOrderTx = async (

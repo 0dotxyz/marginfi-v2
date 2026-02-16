@@ -248,7 +248,6 @@ export const configureBankRateLimits = (
       args.dailyMaxOutflow ?? null
     )
     .accounts({
-      group: args.group,
       bank: args.bank,
     })
     .instruction();
