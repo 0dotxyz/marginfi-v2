@@ -1004,17 +1004,21 @@ pub fn get_tagged_account_health_components<'info>(
         );
         let oracle_ais = &remaining_ais[oracle_ai_idx..end_idx];
 
-        let price_adapter_result = OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock);
+        let (asset_val, liab_val) = {
+            let price_adapter_result =
+                OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock);
 
-        let (asset_val, liab_val, _price, _err_code) = calc_weighted_value_for_balance(
-            balance,
-            &bank,
-            &price_adapter_result,
-            requirement_type,
-            &reconciled_emode_config,
-            &mut None,
-            position_index,
-        )?;
+            let (asset_val, liab_val, _price, _err_code) = calc_weighted_value_for_balance(
+                balance,
+                &bank,
+                &price_adapter_result,
+                requirement_type,
+                &reconciled_emode_config,
+                &mut None,
+                position_index,
+            )?;
+            (asset_val, liab_val)
+        };
 
         match balance.get_side() {
             Some(BalanceSide::Assets) => asset_count += 1,
