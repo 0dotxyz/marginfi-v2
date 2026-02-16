@@ -1587,4 +1587,86 @@ impl MarginfiAccountFixture {
             .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
             .await
     }
+
+    pub async fn make_start_execute_ix(
+        &self,
+        order: Pubkey,
+        executor: Pubkey,
+    ) -> (Instruction, Pubkey) {
+        self.make_start_execute_ix_with_metas(order, executor, None)
+            .await
+    }
+
+    pub async fn make_start_execute_ix_with_metas(
+        &self,
+        order: Pubkey,
+        executor: Pubkey,
+        observation_metas: Option<Vec<AccountMeta>>,
+    ) -> (Instruction, Pubkey) {
+        let marginfi_account = self.load().await;
+        let (execute_record, _) = find_execute_order_pda(&order);
+
+        let mut ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::StartExecuteOrder {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                fee_payer: executor,
+                executor,
+                order,
+                execute_record,
+                instruction_sysvar: sysvar::instructions::id(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountStartExecuteOrder {}.data(),
+        };
+
+        let observation_metas = match observation_metas {
+            Some(metas) => metas,
+            None => self.load_observation_account_metas(vec![], vec![]).await,
+        };
+
+        ix.accounts.extend_from_slice(&observation_metas);
+
+        (ix, execute_record)
+    }
+
+    pub async fn make_end_execute_ix(
+        &self,
+        order: Pubkey,
+        execute_record: Pubkey,
+        executor: Pubkey,
+        fee_recipient: Pubkey,
+        exclude_banks: Vec<Pubkey>,
+    ) -> Instruction {
+        let marginfi_account = self.load().await;
+
+        let mut ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::EndExecuteOrder {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                executor,
+                fee_recipient,
+                order,
+                execute_record,
+                fee_state: Pubkey::find_program_address(
+                    &[marginfi_type_crate::constants::FEE_STATE_SEED.as_bytes()],
+                    &marginfi::ID,
+                )
+                .0,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountEndExecuteOrder {}.data(),
+        };
+
+        ix.accounts.extend_from_slice(
+            &self
+                .load_observation_account_metas(vec![], exclude_banks)
+                .await,
+        );
+
+        ix
+    }
 }

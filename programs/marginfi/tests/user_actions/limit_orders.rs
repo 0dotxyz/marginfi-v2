@@ -1,19 +1,17 @@
-use anchor_lang::{InstructionData, ToAccountMetas};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48 as fp;
 use fixtures::{
     assert_custom_error, assert_eq_noise, bank::BankFixture,
-    marginfi_account::MarginfiAccountFixture, prelude::*, ui_to_native,
+    marginfi_account::MarginfiAccountFixture, prelude::*,
 };
-use marginfi::{prelude::MarginfiError, state::bank::BankVaultType};
+use marginfi::prelude::MarginfiError;
 use marginfi_type_crate::types::{centi_to_u32, u32_to_centi, OrderTrigger, WrappedI80F48};
 use solana_program_test::tokio;
 use solana_sdk::{
     account::Account,
-    instruction::{AccountMeta, Instruction},
+    instruction::AccountMeta,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
-    system_program, sysvar,
     transaction::Transaction,
 };
 
@@ -124,83 +122,6 @@ fn withdraw_scale_for_profit_pct(
     1.0 + (start_health * profit_pct) / liability_value
 }
 
-async fn make_start_execute_ix(
-    marginfi_account_f: &MarginfiAccountFixture,
-    order: Pubkey,
-    executor: Pubkey,
-    observation_metas: Option<Vec<AccountMeta>>,
-) -> anyhow::Result<(Instruction, Pubkey)> {
-    let marginfi_account = marginfi_account_f.load().await;
-    let (execute_record, _) = find_execute_order_pda(&order);
-
-    let mut ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::StartExecuteOrder {
-            group: marginfi_account.group,
-            marginfi_account: marginfi_account_f.key,
-            fee_payer: executor,
-            executor,
-            order,
-            execute_record,
-            instruction_sysvar: sysvar::instructions::id(),
-            system_program: system_program::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountStartExecuteOrder {}.data(),
-    };
-
-    let observation_metas = match observation_metas {
-        Some(metas) => metas,
-        None => {
-            marginfi_account_f
-                .load_observation_account_metas(vec![], vec![])
-                .await
-        }
-    };
-
-    ix.accounts.extend_from_slice(&observation_metas);
-
-    Ok((ix, execute_record))
-}
-
-async fn make_end_execute_ix(
-    marginfi_account_f: &MarginfiAccountFixture,
-    order: Pubkey,
-    execute_record: Pubkey,
-    executor: Pubkey,
-    fee_recipient: Pubkey,
-    exclude_banks: Vec<Pubkey>,
-) -> anyhow::Result<Instruction> {
-    let marginfi_account = marginfi_account_f.load().await;
-
-    let mut ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::EndExecuteOrder {
-            group: marginfi_account.group,
-            marginfi_account: marginfi_account_f.key,
-            executor,
-            fee_recipient,
-            order,
-            execute_record,
-            fee_state: Pubkey::find_program_address(
-                &[marginfi_type_crate::constants::FEE_STATE_SEED.as_bytes()],
-                &marginfi::ID,
-            )
-            .0,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountEndExecuteOrder {}.data(),
-    };
-
-    ix.accounts.extend_from_slice(
-        &marginfi_account_f
-            .load_observation_account_metas(vec![], exclude_banks)
-            .await,
-    );
-
-    Ok(ix)
-}
-
 async fn fund_keeper_for_fees(test_f: &TestFixture, keeper: &Keypair) -> anyhow::Result<()> {
     let mut ctx = test_f.context.borrow_mut();
     let rent = ctx.banks_client.get_rent().await?;
@@ -281,10 +202,9 @@ async fn execute_order_with_withdraw_scale(
     let asset_bank_f = test_f.get_bank(asset_mint);
     let liability_bank_f = test_f.get_bank(liability_mint);
 
-    let (start_ix, execute_record) =
-        make_start_execute_ix(borrower_mfi_account_f, order_pda, keeper.pubkey(), None)
-            .await
-            .unwrap();
+    let (start_ix, execute_record) = borrower_mfi_account_f
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
 
     let repay_ix = borrower_mfi_account_f
         .make_repay_ix_with_authority(
@@ -310,16 +230,15 @@ async fn execute_order_with_withdraw_scale(
         )
         .await;
 
-    let end_ix = make_end_execute_ix(
-        borrower_mfi_account_f,
-        order_pda,
-        execute_record,
-        keeper.pubkey(),
-        keeper.pubkey(),
-        vec![liability_bank_f.key],
-    )
-    .await
-    .unwrap();
+    let end_ix = borrower_mfi_account_f
+        .make_end_execute_ix(
+            order_pda,
+            execute_record,
+            keeper.pubkey(),
+            keeper.pubkey(),
+            vec![liability_bank_f.key],
+        )
+        .await;
 
     let ctx = test_f.context.borrow_mut();
     let tx = Transaction::new_signed_with_payer(
@@ -897,8 +816,9 @@ async fn limit_order_start_fails_when_trigger_not_met() -> anyhow::Result<()> {
     // ---------------------------------------------------------------------
     // Test
     // ---------------------------------------------------------------------
-    let (start_ix, _execute_record) =
-        make_start_execute_ix(&borrower_mfi_account_f, order_pda, keeper.pubkey(), None).await?;
+    let (start_ix, _execute_record) = borrower_mfi_account_f
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
 
     let ctx = test_f.context.borrow_mut();
     let tx = Transaction::new_signed_with_payer(
@@ -963,17 +883,18 @@ async fn limit_order_start_succeeds_after_fixed_price_shift() -> anyhow::Result<
     // ---------------------------------------------------------------------
     // Test
     // ---------------------------------------------------------------------
-    let (start_ix, execute_record) =
-        make_start_execute_ix(&borrower_mfi_account_f, order_pda, keeper.pubkey(), None).await?;
-    let end_ix = make_end_execute_ix(
-        &borrower_mfi_account_f,
-        order_pda,
-        execute_record,
-        keeper.pubkey(),
-        keeper.pubkey(),
-        vec![],
-    )
-    .await?;
+    let (start_ix, execute_record) = borrower_mfi_account_f
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
+    let end_ix = borrower_mfi_account_f
+        .make_end_execute_ix(
+            order_pda,
+            execute_record,
+            keeper.pubkey(),
+            keeper.pubkey(),
+            vec![],
+        )
+        .await;
 
     let ctx = test_f.context.borrow_mut();
     let tx = Transaction::new_signed_with_payer(
@@ -1024,8 +945,9 @@ async fn limit_order_fails_keeper_overwithdraw() -> anyhow::Result<()> {
     let asset_bank_f = test_f.get_bank(&asset_mint);
     let liability_bank_f = test_f.get_bank(&liability_mint);
 
-    let (start_ix, execute_record) =
-        make_start_execute_ix(&borrower_mfi_account_f, order_pda, keeper.pubkey(), None).await?;
+    let (start_ix, execute_record) = borrower_mfi_account_f
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
 
     let repay_ix = borrower_mfi_account_f
         .make_repay_ix_with_authority(
@@ -1051,15 +973,15 @@ async fn limit_order_fails_keeper_overwithdraw() -> anyhow::Result<()> {
         )
         .await;
 
-    let end_ix = make_end_execute_ix(
-        &borrower_mfi_account_f,
-        order_pda,
-        execute_record,
-        keeper.pubkey(),
-        keeper.pubkey(),
-        vec![liability_bank_f.key],
-    )
-    .await?;
+    let end_ix = borrower_mfi_account_f
+        .make_end_execute_ix(
+            order_pda,
+            execute_record,
+            keeper.pubkey(),
+            keeper.pubkey(),
+            vec![liability_bank_f.key],
+        )
+        .await;
 
     let ctx = test_f.context.borrow_mut();
     let tx = Transaction::new_signed_with_payer(
@@ -1123,13 +1045,9 @@ async fn limit_order_fails_with_spoofed_oracle() -> anyhow::Result<()> {
     let oracle_index = bank_index + 1;
     observation_metas[oracle_index] = AccountMeta::new_readonly(wrong_oracle, false);
 
-    let (start_ix, _execute_record) = make_start_execute_ix(
-        &borrower_mfi_account_f,
-        order_pda,
-        keeper.pubkey(),
-        Some(observation_metas),
-    )
-    .await?;
+    let (start_ix, _execute_record) = borrower_mfi_account_f
+        .make_start_execute_ix_with_metas(order_pda, keeper.pubkey(), Some(observation_metas))
+        .await;
 
     let ctx = test_f.context.borrow_mut();
     let tx = Transaction::new_signed_with_payer(
