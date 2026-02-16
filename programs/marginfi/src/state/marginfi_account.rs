@@ -1127,7 +1127,8 @@ pub fn check_account_bankrupt<'info>(
 
     let has_liabilities = equity_liabs > I80F48::ZERO;
     let below_bankruptcy_threshold = equity_assets < BANKRUPT_THRESHOLD;
-    let is_bankrupt = has_liabilities && below_bankruptcy_threshold;
+    let liabilities_exceed_assets = equity_liabs > equity_assets;
+    let is_bankrupt = has_liabilities && below_bankruptcy_threshold && liabilities_exceed_assets;
 
     if !is_bankrupt {
         return err!(MarginfiError::AccountNotBankrupt);
