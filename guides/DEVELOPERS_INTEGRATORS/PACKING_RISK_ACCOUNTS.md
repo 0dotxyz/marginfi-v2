@@ -163,19 +163,30 @@ const ix = program.methods
 
 ## Removing Balances
 
-Sometimes, an instruction will remove a Balance. For example withdrawing an entire Balance removes
-it.
+Sometimes, an instruction will remove a Balance. For example, `withdraw_all` or `repay_all` closes
+the balance in that bank.
 
-Let's say we have a user with three balances: a deposit in a SOL Bank, a deposit in a USDC bank, and
-a borrow from a Token A Bank. They want to withdraw all of their USDC.
+When closing a balance, you **must still pass risk accounts for every active balance, including the
+one being closed**. The program uses those accounts for rate limiting and post-close health checks.
+
+**Withdraw all:** the closing bank's risk accounts must appear **last** in remaining accounts, with
+all other active balances first in the usual sorted order.
+
+**Repay all:** ordering is not enforced, but we recommend using the same sorted order for
+consistency.
+
+Example (withdraw all USDC when the user also has SOL + Token A balances):
 
 ```
-let remaining = composeRemainingAccounts([
-    [solBank, solOracle],
-    [tokenABank, tokenAOracle],
-    // We manually filter the bank to be withdrawn out!
-    // [usdcBank, usdcOracle],
-]);
+const remaining = composeRemainingAccountsByBalances(
+    marginfiAccount.lendingAccount.balances,
+    [
+        [solBank, solOracle],
+        [tokenABank, tokenAOracle],
+        [usdcBank, usdcOracle],
+    ],
+    usdcBank // closing bank goes last
+);
 ```
 
 ## Oracle Crank and Refresh Requirements

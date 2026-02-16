@@ -39,6 +39,7 @@ import {
 import {
   borrowIx,
   composeRemainingAccounts,
+  composeRemainingAccountsByBalances,
   composeRemainingAccountsMetaBanksOnly,
   composeRemainingAccountsWriteableMeta,
   depositIx,
@@ -528,6 +529,10 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
     const mrgnAccountBefore =
       await bankrunProgram.account.marginfiAccount.fetch(deleverageeAccount);
     dumpAccBalances(mrgnAccountBefore);
+    const repayRemaining = composeRemainingAccountsByBalances(
+      mrgnAccountBefore.lendingAccount.balances,
+      remainingAccounts
+    );
 
     const recordBefore = await bankrunProgram.account.liquidationRecord.fetch(
       liqRecordKey
@@ -549,13 +554,12 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
         remaining: composeRemainingAccounts(remainingAccounts),
         amount: new BN(1.0 * 10 ** ecosystem.lstAlphaDecimals),
       }),
+      // For repayAll, include all active balances, including the closing bank.
       await repayIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
         bank: banks[2],
         tokenAccount: riskAdmin.lstAlphaAccount,
-        remaining: composeRemainingAccounts(
-          remainingAccounts.filter((a) => a[0] != banks[2])
-        ),
+        remaining: repayRemaining,
         amount: new BN(0),
         repayAll: true,
       }),
@@ -653,6 +657,10 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
     const mrgnAccountBefore =
       await bankrunProgram.account.marginfiAccount.fetch(deleverageeAccount);
     dumpAccBalances(mrgnAccountBefore);
+    const repayRemaining = composeRemainingAccountsByBalances(
+      mrgnAccountBefore.lendingAccount.balances,
+      remainingAccounts
+    );
 
     const recordBefore = await bankrunProgram.account.liquidationRecord.fetch(
       liqRecordKey
@@ -674,13 +682,12 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
         remaining: composeRemainingAccounts(remainingAccounts),
         amount: new BN(1.0 * 10 ** ecosystem.lstAlphaDecimals),
       }),
+      // For repayAll, include all active balances, including the closing bank.
       await repayIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
         bank: banks[3],
         tokenAccount: riskAdmin.lstAlphaAccount,
-        remaining: composeRemainingAccounts(
-          remainingAccounts.filter((a) => a[0] != banks[3])
-        ),
+        remaining: repayRemaining,
         amount: new BN(0),
         repayAll: true,
       }),
@@ -762,6 +769,12 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
   it("(admin) Tries to deleverage user 0 by fully (tokenlessly) repaying bank 4's liabs - limit exceeded", async () => {
     const deleveragee = users[0];
     const deleverageeAccount = deleveragee.accounts.get(USER_ACCOUNT_THROWAWAY);
+    const mrgnAccountBefore =
+      await bankrunProgram.account.marginfiAccount.fetch(deleverageeAccount);
+    const repayRemaining = composeRemainingAccountsByBalances(
+      mrgnAccountBefore.lendingAccount.balances,
+      remainingAccounts
+    );
 
     let tx = new Transaction().add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),
@@ -777,13 +790,12 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
         remaining: composeRemainingAccounts(remainingAccounts),
         amount: new BN(1.0 * 10 ** ecosystem.lstAlphaDecimals),
       }),
+      // For repayAll, include all active balances, including the closing bank.
       await repayIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
         bank: banks[4],
         tokenAccount: riskAdmin.lstAlphaAccount,
-        remaining: composeRemainingAccounts(
-          remainingAccounts.filter((a) => a[0] != banks[4])
-        ),
+        remaining: repayRemaining,
         amount: new BN(0),
         repayAll: true,
       }),

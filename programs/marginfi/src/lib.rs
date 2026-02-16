@@ -29,7 +29,8 @@ pub mod marginfi {
     }
 
     /// (admin only) Configure group admin keys and emode leverage caps. All admin keys must be
-    /// provided on every call. Emode leverage caps reset to defaults (15x/20x) if None is passed.
+    /// provided on every call. Emode leverage caps are set if provided, otherwise the existing
+    /// (non-zero) values are kept. Pass `Some(value)` to update, `None` to leave unchanged.
     pub fn marginfi_group_configure(
         ctx: Context<MarginfiGroupConfigure>,
         new_admin: Option<Pubkey>,
@@ -691,6 +692,32 @@ pub mod marginfi {
         marginfi_group::configure_deleverage_withdrawal_limit(ctx, limit)
     }
 
+    /// (admin only) Configure bank-level rate limits for withdraw/borrow.
+    /// Rate limits track net outflow in native tokens. Deposits offset withdraws.
+    /// Set to 0 to disable. Hourly and daily windows are independent.
+    pub fn configure_bank_rate_limits(
+        ctx: Context<ConfigureBankRateLimits>,
+        hourly_max_outflow: Option<u64>,
+        daily_max_outflow: Option<u64>,
+    ) -> MarginfiResult {
+        marginfi_group::configure_bank_rate_limits(ctx, hourly_max_outflow, daily_max_outflow)
+    }
+
+    /// (admin only) Configure group-level rate limits for withdraw/borrow.
+    /// Rate limits track aggregate net outflow in USD.
+    /// Example: $10M = 10_000_000. Set to 0 to disable.
+    pub fn configure_group_rate_limits(
+        ctx: Context<ConfigureGroupRateLimits>,
+        hourly_max_outflow_usd: Option<u64>,
+        daily_max_outflow_usd: Option<u64>,
+    ) -> MarginfiResult {
+        marginfi_group::configure_group_rate_limits(
+            ctx,
+            hourly_max_outflow_usd,
+            daily_max_outflow_usd,
+        )
+    }
+
     // TODO deprecate and incorporate this functionality into forced-withdraw in 1.7+
     /// (risk admin only) Purge a user's lending balance without withdrawing anything. Only usable
     /// after all the debt has been settled on a bank in deleveraging mode, e.g. when
@@ -718,7 +745,10 @@ pub mod marginfi {
     /// (user) Deposit into a Kamino pool through a marginfi account
     /// * amount - in the liquidity token (e.g. if there is a Kamino USDC bank, pass the amount of
     ///   USDC desired), in native decimals.
-    pub fn kamino_deposit(ctx: Context<KaminoDeposit>, amount: u64) -> MarginfiResult {
+    pub fn kamino_deposit<'info>(
+        ctx: Context<'_, '_, 'info, 'info, KaminoDeposit<'info>>,
+        amount: u64,
+    ) -> MarginfiResult {
         kamino::kamino_deposit(ctx, amount)
     }
 
@@ -777,7 +807,10 @@ pub mod marginfi {
 
     /// (user) Deposit into a Drift spot market through a marginfi account
     /// * amount - in the underlying token (e.g., USDC), in native decimals
-    pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult {
+    pub fn drift_deposit<'info>(
+        ctx: Context<'_, '_, 'info, 'info, DriftDeposit<'info>>,
+        amount: u64,
+    ) -> MarginfiResult {
         drift::drift_deposit(ctx, amount)
     }
 
@@ -824,7 +857,10 @@ pub mod marginfi {
 
     /// (user) Deposit into a Solend reserve through a marginfi account
     /// * amount - in the underlying token (e.g., USDC), in native decimals
-    pub fn solend_deposit(ctx: Context<SolendDeposit>, amount: u64) -> MarginfiResult {
+    pub fn solend_deposit<'info>(
+        ctx: Context<'_, '_, 'info, 'info, SolendDeposit<'info>>,
+        amount: u64,
+    ) -> MarginfiResult {
         solend::solend_deposit(ctx, amount)
     }
 

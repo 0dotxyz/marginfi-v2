@@ -23,7 +23,12 @@ import {
   getTokenBalance,
 } from "./utils/genericTests";
 import { assert } from "chai";
-import { depositIx, withdrawIx } from "./utils/user-instructions";
+import {
+  composeRemainingAccounts,
+  composeRemainingAccountsByBalances,
+  depositIx,
+  withdrawIx,
+} from "./utils/user-instructions";
 import { USER_ACCOUNT } from "./utils/mocks";
 import { createMintToInstruction } from "@solana/spl-token";
 import { deriveBankWithSeed, deriveLiquidityVault } from "./utils/pdas";
@@ -323,36 +328,47 @@ describe("Deposit funds", () => {
 
     // withdraw amounts to restore to previous state...
 
+    // For withdrawAll, include all active balances, including the closing bank.
+    const remainingUser1 = composeRemainingAccountsByBalances(
+      userAcc.lendingAccount.balances,
+      [
+        [bankKey, oracles.tokenAOracle.publicKey],
+        [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
+      ],
+      bankKey
+    );
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await withdrawIx(user.mrgnProgram, {
           marginfiAccount: user1Account,
           bank: bankKey,
           tokenAccount: user.tokenAAccount,
-          remaining: [
-            bankKeypairUsdc.publicKey,
-            oracles.usdcOracle.publicKey,
-            bankKey,
-            oracles.tokenAOracle.publicKey,
-          ],
+          remaining: remainingUser1,
           amount: new BN(1), // doesn't matter when withdrawing all...
           withdrawAll: true,
         })
       )
     );
 
+    // For withdrawAll, include all active balances, including the closing bank.
+    const user0Acc = await users[0].mrgnProgram.account.marginfiAccount.fetch(
+      user0Account
+    );
+    const remainingUser0 = composeRemainingAccountsByBalances(
+      user0Acc.lendingAccount.balances,
+      [
+        [bankKey, oracles.tokenAOracle.publicKey],
+        [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+      ],
+      bankKey
+    );
     await users[0].mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await withdrawIx(users[0].mrgnProgram, {
           marginfiAccount: user0Account,
           bank: bankKey,
           tokenAccount: users[0].tokenAAccount,
-          remaining: [
-            bankKeypairA.publicKey,
-            oracles.tokenAOracle.publicKey,
-            bankKey,
-            oracles.tokenAOracle.publicKey,
-          ],
+          remaining: remainingUser0,
           amount: new BN(1), // doesn't matter when withdrawing all...
           withdrawAll: true,
         })

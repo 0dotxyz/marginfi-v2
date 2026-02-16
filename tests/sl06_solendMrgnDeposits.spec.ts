@@ -26,7 +26,10 @@ import {
   assertI80F48Approx,
 } from "./utils/genericTests";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
-import { composeRemainingAccounts } from "./utils/user-instructions";
+import {
+  composeRemainingAccounts,
+  composeRemainingAccountsByBalances,
+} from "./utils/user-instructions";
 import {
   makeSolendDepositIx,
   makeSolendWithdrawIx,
@@ -824,10 +827,6 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
 
     for (const balance of marginfiAccount.lendingAccount.balances) {
       if (balance.active === 1) {
-        if (withdrawAll && balance.bankPk.equals(bank)) {
-          continue;
-        }
-
         if (balance.bankPk.equals(usdcBank)) {
           activePositions.push([
             balance.bankPk,
@@ -862,7 +861,13 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
       {
         amount: withdrawAll ? new BN(0) : amount,
         withdrawAll,
-        remaining: composeRemainingAccounts(activePositions),
+        remaining: withdrawAll
+          ? composeRemainingAccountsByBalances(
+              marginfiAccount.lendingAccount.balances,
+              activePositions,
+              bank
+            )
+          : activePositions.flat(),
       }
     );
 

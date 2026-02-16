@@ -24,6 +24,7 @@ import {
   accountInit,
   borrowIx,
   composeRemainingAccounts,
+  composeRemainingAccountsByBalances,
   depositIx,
   healthPulse,
   withdrawIx,
@@ -274,15 +275,27 @@ describe("Reduce-Only Bank Tests", () => {
         )
       );
 
-      // Withdraw all Token A
+      // Withdraw all Token A.
+      // For withdrawAll, include all active balances, including the closing bank.
       try {
+        const userAccBefore =
+          await user.mrgnProgram.account.marginfiAccount.fetch(userAccount);
+        const remaining = composeRemainingAccountsByBalances(
+          userAccBefore.lendingAccount.balances,
+          [
+            [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
+            [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+            [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
+          ],
+          bankKeypairA.publicKey
+        );
         await user.mrgnProgram.provider.sendAndConfirm!(
           new Transaction().add(
             await withdrawIx(user.mrgnProgram, {
               marginfiAccount: userAccount,
               bank: bankKeypairA.publicKey,
               tokenAccount: user.tokenAAccount,
-              remaining: [oracles.tokenAOracle.publicKey],
+              remaining,
               amount: depositAmountTokenA_native,
               withdrawAll: true,
             })

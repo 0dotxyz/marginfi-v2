@@ -11,7 +11,7 @@ use bytemuck::{Pod, Zeroable};
 
 #[cfg(not(feature = "anchor"))]
 use super::Pubkey;
-use super::{EmodeSettings, WrappedI80F48};
+use super::{BankRateLimiter, EmodeSettings, WrappedI80F48};
 
 assert_struct_size!(Bank, 1856);
 assert_struct_align!(Bank, 8);
@@ -154,7 +154,12 @@ pub struct Bank {
     /// - Drift: user stats
     pub integration_acc_3: Pubkey,
 
-    pub _padding_1: [[u64; 2]; 13], // 8 * 2 * 13 = 208B
+    /// Rate limiter for controlling withdraw/borrow outflow.
+    /// Tracks net outflow (outflows - inflows) in native tokens.
+    pub rate_limiter: BankRateLimiter,
+
+    pub _pad_0: [u8; 8],           // 8B
+    pub _padding_1: [[u64; 2]; 7], // 8 * 2 * 7 = 112B
 }
 
 impl Bank {

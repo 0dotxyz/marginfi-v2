@@ -544,6 +544,7 @@ SCENARIOS.forEach(({ kaminoDeposits, driftDeposits }, scenarioIndex) => {
         tokenAccount: user.lstAlphaAccount,
         amount: new BN(1 * 10 ** ecosystem.lstAlphaDecimals),
         repayAll: true,
+        remaining: remainingAccounts,
       });
 
       const withdrawAmount = new BN(1 * 10 ** ecosystem.tokenADecimals);

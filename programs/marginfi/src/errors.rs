@@ -150,8 +150,8 @@ pub enum MarginfiError {
     WorseHealthPostLiquidation,
     #[msg("Exceeded the maximum allowed integration positions")] // 6073
     IntegrationPositionLimitExceeded,
-    #[msg("Vacated1")] // 6074
-    Vacated1,
+    #[msg("Maximum initial leverage exceeded")] // 6074
+    MaxInitLeverageExceeded,
     #[msg("The Emode config was invalid")] // 6075
     BadEmodeConfig,
     #[msg("TWAP window size does not match expected duration")] // 6076
@@ -231,6 +231,18 @@ pub enum MarginfiError {
     InvalidOrderTakeProfitOrStopLoss,
     #[msg("Max slippage must be less than 100%")] // 6113
     InvalidSlippage,
+    #[msg("Executor withdrew too much: slippage or max fee constraint violated")] // 6114
+    OrderExecutionOverWithdrawal,
+    #[msg("Bank hourly rate limit exceeded: try again later")] // 6115
+    BankHourlyRateLimitExceeded,
+    #[msg("Bank daily rate limit exceeded: try again later")] // 6116
+    BankDailyRateLimitExceeded,
+    #[msg("Group hourly rate limit exceeded: try again later")] // 6117
+    GroupHourlyRateLimitExceeded,
+    #[msg("Group daily rate limit exceeded: try again later")] // 6118
+    GroupDailyRateLimitExceeded,
+    #[msg("Invalid rate limit price: pass oracle or pre-crank cache")] // 6119
+    InvalidRateLimitPrice,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -257,8 +269,8 @@ pub enum MarginfiError {
     KaminoReserveValidationFailed, // 6210
     #[msg("Invalid oracle setup: only KaminoPythPush and KaminoSwitchboardPull are supported")]
     KaminoInvalidOracleSetup, // 6211
-    #[msg("Deprecated: Kamino position limit no longer enforced separately")]
-    VacatedError1, // 6212
+    #[msg("Maximum Maintenance leverage exceeded")]
+    MaxMaintLeverageExceeded, // 6212
     #[msg("Invalid Kamino reserve: account constraint violated")]
     InvalidKaminoReserve, // 6213
     #[msg("Invalid Kamino obligation: account constraint violated")]
@@ -482,7 +494,7 @@ impl From<u32> for MarginfiError {
             6071 => MarginfiError::TooSevereLiquidation,
             6072 => MarginfiError::WorseHealthPostLiquidation,
             6073 => MarginfiError::IntegrationPositionLimitExceeded,
-            6074 => MarginfiError::Vacated1,
+            6074 => MarginfiError::MaxInitLeverageExceeded,
             6075 => MarginfiError::BadEmodeConfig,
             6076 => MarginfiError::PythPushInvalidWindowSize,
             6077 => MarginfiError::InvalidFeesDestinationAccount,
@@ -522,6 +534,12 @@ impl From<u32> for MarginfiError {
             6111 => MarginfiError::WorseHealthPostExecution,
             6112 => MarginfiError::InvalidOrderTakeProfitOrStopLoss,
             6113 => MarginfiError::InvalidSlippage,
+            6114 => MarginfiError::OrderExecutionOverWithdrawal,
+            6115 => MarginfiError::BankHourlyRateLimitExceeded,
+            6116 => MarginfiError::BankDailyRateLimitExceeded,
+            6117 => MarginfiError::GroupHourlyRateLimitExceeded,
+            6118 => MarginfiError::GroupDailyRateLimitExceeded,
+            6119 => MarginfiError::InvalidRateLimitPrice,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,
@@ -536,7 +554,7 @@ impl From<u32> for MarginfiError {
             6209 => MarginfiError::ObligationInitDepositInsufficient,
             6210 => MarginfiError::KaminoReserveValidationFailed,
             6211 => MarginfiError::KaminoInvalidOracleSetup,
-            6212 => MarginfiError::VacatedError1,
+            6212 => MarginfiError::MaxMaintLeverageExceeded,
             6213 => MarginfiError::InvalidKaminoReserve,
             6214 => MarginfiError::InvalidKaminoObligation,
 

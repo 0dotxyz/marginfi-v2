@@ -135,7 +135,7 @@ async fn make_repay_ix(
         accounts.push(AccountMeta::new_readonly(bank_f.mint.key, false));
     }
 
-    let ix = Instruction {
+    let mut ix = Instruction {
         program_id: marginfi::ID,
         accounts,
         data: marginfi::instruction::LendingAccountRepay {
@@ -144,6 +144,14 @@ async fn make_repay_ix(
         }
         .data(),
     };
+
+    if repay_all.unwrap_or(false) {
+        ix.accounts.extend_from_slice(
+            &marginfi_account_f
+                .load_observation_account_metas(vec![bank_f.key], vec![])
+                .await,
+        );
+    }
 
     Ok(ix)
 }
@@ -155,6 +163,7 @@ async fn make_withdraw_ix(
     destination: Pubkey,
     ui_amount: f64,
     withdraw_all: Option<bool>,
+    exclude_banks: Vec<Pubkey>,
 ) -> anyhow::Result<Instruction> {
     let marginfi_account = marginfi_account_f.load().await;
 
@@ -184,11 +193,19 @@ async fn make_withdraw_ix(
         .data(),
     };
 
-    ix.accounts.extend_from_slice(
-        &marginfi_account_f
-            .load_observation_account_metas(vec![], vec![])
-            .await,
-    );
+    if withdraw_all.unwrap_or(false) {
+        ix.accounts.extend_from_slice(
+            &marginfi_account_f
+                .load_observation_account_metas_close_last(bank_f.key, vec![], exclude_banks)
+                .await,
+        );
+    } else {
+        ix.accounts.extend_from_slice(
+            &marginfi_account_f
+                .load_observation_account_metas(vec![], exclude_banks)
+                .await,
+        );
+    }
 
     Ok(ix)
 }
@@ -229,6 +246,7 @@ async fn execute_order_with_withdraw(
         asset_account,
         withdraw_amount,
         withdraw_all,
+        vec![liab_bank.key],
     )
     .await
     .unwrap();
@@ -636,7 +654,7 @@ async fn limit_orders_overlap_ab_close_a_reopen_a_ad_fails() -> anyhow::Result<(
     Ok(())
 }
 
-// Here we hit OrderTriggerNotMet by attempting to withdraw too much.
+// Here we hit OrderExecutionOverWithdrawal by attempting to withdraw too much.
 #[tokio::test]
 async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> {
     // ---------------------------------------------------------------------
@@ -734,7 +752,10 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
     )
     .await;
 
-    assert_custom_error!(result.unwrap_err(), MarginfiError::OrderTriggerNotMet);
+    assert_custom_error!(
+        result.unwrap_err(),
+        MarginfiError::OrderExecutionOverWithdrawal
+    );
 
     // Executing A/D with just enough still works as expected.
     let result = execute_order_with_withdraw(
