@@ -164,7 +164,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
         usdcJupPool.tokenReserve,
       ),
       juplendPrograms.liquidity.account.userSupplyPosition.fetch(
-        usdcJupPool.lendingSupplyPositionOnLiquidity,
+        usdcJupPool.supplyPositionOnLiquidity,
       ),
     ]);
 
@@ -215,7 +215,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
         usdcJupPool.tokenReserve,
       ),
       juplendPrograms.liquidity.account.userSupplyPosition.fetch(
-        usdcJupPool.lendingSupplyPositionOnLiquidity,
+        usdcJupPool.supplyPositionOnLiquidity,
       ),
     ]);
 
@@ -290,12 +290,10 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     const [adminUsdcSupplyPosition] = findJuplendLiquiditySupplyPositionPda(
       usdcJupPool.mint,
       groupAdmin.wallet.publicKey,
-      usdcJupPool.liquidityProgram,
     );
     const [adminUsdcBorrowPosition] = findJuplendLiquidityBorrowPositionPda(
       usdcJupPool.mint,
       groupAdmin.wallet.publicKey,
-      usdcJupPool.liquidityProgram,
     );
 
     adminTokenAFTokenAta = getAssociatedTokenAddressSync(
@@ -539,7 +537,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
         usdcJupPool.tokenReserve,
       ),
       juplendPrograms.liquidity.account.userSupplyPosition.fetch(
-        usdcJupPool.lendingSupplyPositionOnLiquidity,
+        usdcJupPool.supplyPositionOnLiquidity,
       ),
     ]);
 
@@ -577,7 +575,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
         usdcJupPool.tokenReserve,
       ),
       juplendPrograms.liquidity.account.userSupplyPosition.fetch(
-        usdcJupPool.lendingSupplyPositionOnLiquidity,
+        usdcJupPool.supplyPositionOnLiquidity,
       ),
     ]);
 
@@ -653,7 +651,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
         usdcJupPool.tokenReserve,
       ),
       juplendPrograms.liquidity.account.userSupplyPosition.fetch(
-        usdcJupPool.lendingSupplyPositionOnLiquidity,
+        usdcJupPool.supplyPositionOnLiquidity,
       ),
       bankrunProgram.account.bank.fetch(usdcJupBankPk),
       bankrunProgram.account.marginfiAccount.fetch(
@@ -704,7 +702,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
         usdcJupPool.tokenReserve,
       ),
       juplendPrograms.liquidity.account.userSupplyPosition.fetch(
-        usdcJupPool.lendingSupplyPositionOnLiquidity,
+        usdcJupPool.supplyPositionOnLiquidity,
       ),
       bankrunProgram.account.bank.fetch(usdcJupBankPk),
       bankrunProgram.account.marginfiAccount.fetch(

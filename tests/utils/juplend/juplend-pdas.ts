@@ -325,8 +325,6 @@ export const deriveJuplendPoolKeys = (
   return {
     mint: args.mint,
     tokenProgram: args.tokenProgram,
-    liquidityProgram: liquidityProgramId,
-    lendingProgram: lendingProgramId,
     liquidity,
     authList,
     tokenReserve,
@@ -340,21 +338,38 @@ export const deriveJuplendPoolKeys = (
     fTokenMetadata,
     supplyPositionOnLiquidity,
     borrowPositionOnLiquidity,
-    lendingSupplyPositionOnLiquidity: supplyPositionOnLiquidity,
-    lendingBorrowPositionOnLiquidity: borrowPositionOnLiquidity,
   };
 };
 
 export type JuplendMrgnAddresses = {
+  /** Marginfi bank PDA for this group + mint + bank seed. */
   bank: PublicKey;
+  /** PDA authority that signs for the bank's token vaults. */
   liquidityVaultAuthority: PublicKey;
+  /** Marginfi liquidity vault PDA (underlying token vault for this bank).
+   * * Note: for Juplend as of 02/2026, a PDA cannot accept withdrawn tokens, so the
+   *   `withdrawIntermediaryAta` takes its place and this does nothing. In a future version,
+   *   `withdrawIntermediaryAta` will be removed and this will again be used as the intermediary
+   *   when withdrawing.
+   */
   liquidityVault: PublicKey;
+  /** ATA owned by `liquidityVaultAuthority`. Jup withdraw intermediary, i.e. jup->here->user */
   withdrawIntermediaryAta: PublicKey;
+  /** PDA authority for the bank insurance vault. */
   insuranceVaultAuthority: PublicKey;
+  /** Marginfi insurance vault PDA for this bank. */
   insuranceVault: PublicKey;
+  /** PDA authority for the bank fee vault. */
   feeVaultAuthority: PublicKey;
+  /** Marginfi fee vault PDA for this bank. */
   feeVault: PublicKey;
+  /** Marginfi PDA token account that holds Jup fTokens for this bank.
+   * * Note: Unlike Kamino and Drift, which issue only ctokens, Juplend issues a second tier of
+   *   token called ftokens, which sit in this vault. Consider these like "shares". 
+   * * Generally 1:1 with the bank's shares (excluding the initial nominal deposit)
+   */
   fTokenVault: PublicKey;
+  /** JupLend claim-account PDA used to claim liquidity protocol rewards/fees. */
   claimAccount: PublicKey;
 };
 

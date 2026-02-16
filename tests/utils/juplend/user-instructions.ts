@@ -12,6 +12,7 @@ import type {
   JuplendLiquidityIdl,
   JuplendPoolKeys,
 } from "./types";
+import { JUPLEND_LIQUIDITY_PROGRAM_ID } from "./juplend-pdas";
 
 export type JuplendDepositAccounts = {
   marginfiAccount: PublicKey;
@@ -42,12 +43,11 @@ export const makeJuplendDepositIx = async (
       bank: accounts.bank,
       lendingAdmin: accounts.pool.lendingAdmin,
       supplyTokenReservesLiquidity: accounts.pool.tokenReserve,
-      lendingSupplyPositionOnLiquidity:
-        accounts.pool.lendingSupplyPositionOnLiquidity,
+      lendingSupplyPositionOnLiquidity: accounts.pool.supplyPositionOnLiquidity,
       rateModel: accounts.pool.rateModel,
       vault: accounts.pool.vault,
       liquidity: accounts.pool.liquidity,
-      liquidityProgram: accounts.pool.liquidityProgram,
+      liquidityProgram: JUPLEND_LIQUIDITY_PROGRAM_ID,
       rewardsRateModel: accounts.pool.lendingRewardsRateModel,
       // integrationAcc2: accounts.fTokenVault,
       tokenProgram:
@@ -98,13 +98,12 @@ export const makeJuplendWithdrawIx = async (
       // integrationAcc3: accounts.withdrawIntermediaryAta,
       lendingAdmin: accounts.pool.lendingAdmin,
       supplyTokenReservesLiquidity: accounts.pool.tokenReserve,
-      lendingSupplyPositionOnLiquidity:
-        accounts.pool.lendingSupplyPositionOnLiquidity,
+      lendingSupplyPositionOnLiquidity: accounts.pool.supplyPositionOnLiquidity,
       rateModel: accounts.pool.rateModel,
       vault: accounts.pool.vault,
       claimAccount: accounts.claimAccount,
       liquidity: accounts.pool.liquidity,
-      liquidityProgram: accounts.pool.liquidityProgram,
+      liquidityProgram: JUPLEND_LIQUIDITY_PROGRAM_ID,
       rewardsRateModel: accounts.pool.lendingRewardsRateModel,
       tokenProgram: accounts.tokenProgram ?? TOKEN_PROGRAM_ID,
       // systemProgram: accounts.systemProgram ?? SystemProgram.programId,
@@ -141,12 +140,11 @@ export const makeJuplendNativeLendingDepositIx = async (
       lendingAdmin: accounts.pool.lendingAdmin,
       lending: accounts.pool.lending,
       supplyTokenReservesLiquidity: accounts.pool.tokenReserve,
-      lendingSupplyPositionOnLiquidity:
-        accounts.pool.lendingSupplyPositionOnLiquidity,
+      lendingSupplyPositionOnLiquidity: accounts.pool.supplyPositionOnLiquidity,
       rateModel: accounts.pool.rateModel,
       vault: accounts.pool.vault,
       liquidity: accounts.pool.liquidity,
-      // liquidityProgram: accounts.pool.liquidityProgram,
+      // liquidityProgram is fixed for JupLend and inferred via constant in other builders.
       rewardsRateModel: accounts.pool.lendingRewardsRateModel,
       tokenProgram:
         accounts.tokenProgram ?? accounts.pool.tokenProgram ?? TOKEN_PROGRAM_ID,

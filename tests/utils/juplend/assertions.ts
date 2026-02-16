@@ -13,6 +13,8 @@ import {
 import {
   TOKEN_METADATA_PROGRAM_ID,
   JUPLEND_EARN_REWARDS_PROGRAM_ID,
+  JUPLEND_LENDING_PROGRAM_ID,
+  JUPLEND_LIQUIDITY_PROGRAM_ID,
   deriveJuplendLendingPdas,
   deriveJuplendLiquidityVaultAta,
   type JuplendMrgnAddresses,
@@ -72,23 +74,23 @@ export const assertJuplendPoolInitialized = async (
   const connection = bankRunProvider.connection;
   const programs = getJuplendPrograms();
 
-  const lendingPdas = deriveJuplendLendingPdas(mint, pool.lendingProgram);
+  const lendingPdas = deriveJuplendLendingPdas(mint, JUPLEND_LENDING_PROGRAM_ID);
   assertKeysEqual(pool.lendingAdmin, lendingPdas.lendingAdmin);
   assertKeysEqual(pool.fTokenMint, lendingPdas.fTokenMint);
   assertKeysEqual(pool.lending, lendingPdas.lending);
 
-  const [liquidity] = findJuplendLiquidityPda(pool.liquidityProgram);
+  const [liquidity] = findJuplendLiquidityPda(JUPLEND_LIQUIDITY_PROGRAM_ID);
   assertKeysEqual(pool.liquidity, liquidity);
 
   const [tokenReserve] = findJuplendLiquidityTokenReservePda(
     mint,
-    pool.liquidityProgram
+    JUPLEND_LIQUIDITY_PROGRAM_ID
   );
   assertKeysEqual(pool.tokenReserve, tokenReserve);
 
   const [rateModel] = findJuplendLiquidityRateModelPda(
     mint,
-    pool.liquidityProgram
+    JUPLEND_LIQUIDITY_PROGRAM_ID
   );
   assertKeysEqual(pool.rateModel, rateModel);
 
@@ -102,24 +104,16 @@ export const assertJuplendPoolInitialized = async (
   const [supplyPositionOnLiquidity] = findJuplendLiquiditySupplyPositionPda(
     mint,
     pool.lending,
-    pool.liquidityProgram
+    JUPLEND_LIQUIDITY_PROGRAM_ID
   );
   assertKeysEqual(pool.supplyPositionOnLiquidity, supplyPositionOnLiquidity);
-  assertKeysEqual(
-    pool.lendingSupplyPositionOnLiquidity,
-    supplyPositionOnLiquidity
-  );
 
   const [borrowPositionOnLiquidity] = findJuplendLiquidityBorrowPositionPda(
     mint,
     pool.lending,
-    pool.liquidityProgram
+    JUPLEND_LIQUIDITY_PROGRAM_ID
   );
   assertKeysEqual(pool.borrowPositionOnLiquidity, borrowPositionOnLiquidity);
-  assertKeysEqual(
-    pool.lendingBorrowPositionOnLiquidity,
-    borrowPositionOnLiquidity
-  );
 
   const [rewardsRateModel] = findJuplendRewardsRateModelPdaBestEffort(mint);
   assertKeysEqual(pool.lendingRewardsRateModel, rewardsRateModel);
@@ -168,16 +162,16 @@ export const assertJuplendPoolInitialized = async (
   assert.ok(vaultInfo, "missing vault");
   assert.ok(metadataInfo, "missing fToken metadata");
 
-  assertKeysEqual(lendingInfo.owner, pool.lendingProgram);
-  assertKeysEqual(liquidityInfo.owner, pool.liquidityProgram);
-  assertKeysEqual(authListInfo.owner, pool.liquidityProgram);
-  assertKeysEqual(reserveInfo.owner, pool.liquidityProgram);
-  assertKeysEqual(rateInfo.owner, pool.liquidityProgram);
-  assertKeysEqual(supplyPosInfo.owner, pool.liquidityProgram);
-  assertKeysEqual(borrowPosInfo.owner, pool.liquidityProgram);
+  assertKeysEqual(lendingInfo.owner, JUPLEND_LENDING_PROGRAM_ID);
+  assertKeysEqual(liquidityInfo.owner, JUPLEND_LIQUIDITY_PROGRAM_ID);
+  assertKeysEqual(authListInfo.owner, JUPLEND_LIQUIDITY_PROGRAM_ID);
+  assertKeysEqual(reserveInfo.owner, JUPLEND_LIQUIDITY_PROGRAM_ID);
+  assertKeysEqual(rateInfo.owner, JUPLEND_LIQUIDITY_PROGRAM_ID);
+  assertKeysEqual(supplyPosInfo.owner, JUPLEND_LIQUIDITY_PROGRAM_ID);
+  assertKeysEqual(borrowPosInfo.owner, JUPLEND_LIQUIDITY_PROGRAM_ID);
   assertKeysEqual(rewardsInfo.owner, JUPLEND_EARN_REWARDS_PROGRAM_ID);
   assertKeysEqual(rewardsAdminInfo.owner, JUPLEND_EARN_REWARDS_PROGRAM_ID);
-  assertKeysEqual(lendingAdminInfo.owner, pool.lendingProgram);
+  assertKeysEqual(lendingAdminInfo.owner, JUPLEND_LENDING_PROGRAM_ID);
   assertKeysEqual(fTokenMintInfo.owner, pool.tokenProgram);
   assertKeysEqual(vaultInfo.owner, pool.tokenProgram);
   assertKeysEqual(metadataInfo.owner, TOKEN_METADATA_PROGRAM_ID);
@@ -190,7 +184,7 @@ export const assertJuplendPoolInitialized = async (
   assertKeysEqual(lendingState.tokenReservesLiquidity, pool.tokenReserve);
   assertKeysEqual(
     lendingState.supplyPositionOnLiquidity,
-    pool.lendingSupplyPositionOnLiquidity
+    pool.supplyPositionOnLiquidity
   );
   assert.notEqual(lendingState.tokenExchangePrice.toString(), "0");
 

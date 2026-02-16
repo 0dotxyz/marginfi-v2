@@ -1,6 +1,10 @@
 import { BN } from "@coral-xyz/anchor";
 import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
-import { createMintToInstruction } from "@solana/spl-token";
+import {
+  createAssociatedTokenAccountIdempotentInstruction,
+  createMintToInstruction,
+  getAssociatedTokenAddressSync,
+} from "@solana/spl-token";
 import { assert } from "chai";
 
 import {
@@ -13,6 +17,7 @@ import {
   groupAdmin,
   oracles,
   users,
+  verbose,
 } from "./rootHooks";
 
 import {
@@ -25,6 +30,7 @@ import {
   accountInit,
   borrowIx,
   composeRemainingAccounts,
+  composeRemainingAccountsByBalances,
   depositIx,
   healthPulse,
   pulseBankPrice,
@@ -49,25 +55,42 @@ import {
 } from "./utils/types";
 
 import {
-  ensureJuplendPoolForMint,
-  ensureJuplendClaimAccount,
-} from "./utils/juplend/juplend-bankrun-builder";
-import {
+  deriveJuplendGlobalKeys,
   deriveJuplendMrgnAddresses,
-  makeAddJuplendBankIx,
-  makeJuplendDepositIx,
+} from "./utils/juplend/juplend-pdas";
+import {
+  DEFAULT_BORROW_CONFIG_MIN,
+  DEFAULT_RATE_CONFIG,
+  DEFAULT_SUPPLY_CONFIG,
+  DEFAULT_TOKEN_CONFIG,
+  defaultJuplendBankConfig,
+  type JuplendPoolKeys,
+} from "./utils/juplend/types";
+import {
+  configureJuplendProtocolPermissions,
+  initJuplendGlobals,
+  initJuplendPool,
+  fetchJuplendPool,
+} from "./utils/juplend/jlr-pool-setup";
+import {
+  addJuplendBankIx,
   makeJuplendInitPositionIx,
-  makeJuplendWithdrawIx,
-} from "./utils/juplend/juplend-test-env";
-import { defaultJuplendBankConfig } from "./utils/juplend/juplend-utils";
-import { juplendUpdateRateIx } from "./utils/juplend/juplend-instructions";
-import { deriveBankWithSeed } from "./utils/pdas";
+} from "./utils/juplend/group-instructions";
+import { makeJuplendDepositIx } from "./utils/juplend/user-instructions";
+import {
+  makeJuplendWithdrawSimpleIx,
+  refreshJupSimple,
+} from "./utils/juplend/shorthand-instructions";
+import {
+  deriveBankWithSeed,
+  deriveLiquidityVaultAuthority,
+} from "./utils/pdas";
 import { ProgramTestContext } from "solana-bankrun";
+import { getJuplendPrograms } from "./utils/juplend/programs";
+import { dummyIx } from "./utils/bankrunConnection";
 
 /** deterministic (32 bytes) */
-const JUPLEND_FX_GROUP_SEED = Buffer.from(
-  "JUPLEND_FX_GROUP_SEED_0000000000"
-);
+const JUPLEND_FX_GROUP_SEED = Buffer.from("JUPLEND_FX_GROUP_SEED_0000000000");
 
 const BANK_SEED = new BN(101);
 const BORROW_SEED = new BN(102);
@@ -77,22 +100,22 @@ const BORROW_AMOUNT = new BN(10 * 10 ** ecosystem.tokenADecimals);
 const SEED_DEPOSIT_AMOUNT = new BN(1_000_000); // 1 USDC (6 decimals)
 
 let ctx: ProgramTestContext;
-let pool: Awaited<ReturnType<typeof ensureJuplendPoolForMint>>;
+let pool: JuplendPoolKeys;
 let fixedJuplendBank: PublicKey;
 let liquidityVaultAuthority: PublicKey;
-let liquidityVault: PublicKey;
-let fTokenVault: PublicKey;
-let claimAccount: PublicKey;
+let withdrawIntermediaryAta: PublicKey;
 let userAccount: PublicKey;
 let borrowBank: PublicKey;
 let adminAccount: PublicKey;
 let userUsdcStart = 0;
+let juplendPrograms: ReturnType<typeof getJuplendPrograms>;
 
-describe("jlx: Fixed JupLend price bank", () => {
+describe("jlrx: Fixed JupLend price bank", () => {
   const juplendGroup = Keypair.fromSeed(JUPLEND_FX_GROUP_SEED);
 
   before(async () => {
     ctx = bankrunContext;
+    juplendPrograms = getJuplendPrograms();
 
     // Mint USDC to user 3 and admin
     const mintAmount = 10_000_000_000; // 10,000 USDC (6 decimals)
@@ -105,24 +128,23 @@ describe("jlx: Fixed JupLend price bank", () => {
         ecosystem.usdcMint.publicKey,
         usdcAccount,
         globalProgramAdmin.wallet.publicKey,
-        mintAmount
+        mintAmount,
       );
       await processBankrunTransaction(
         ctx,
         new Transaction().add(mintIx),
         [globalProgramAdmin.wallet],
         false,
-        true
+        true,
       );
     }
 
-    // Create JupLend pool for USDC
-    pool = await ensureJuplendPoolForMint({
-      admin: groupAdmin.wallet,
-      mint: ecosystem.usdcMint.publicKey,
-      symbol: "jlUSDC",
-      mintAuthority: globalProgramAdmin.wallet,
-    });
+    pool = (
+      await fetchJuplendPool({
+        mint: ecosystem.usdcMint.publicKey,
+        programs: juplendPrograms,
+      })
+    ).keys;
   });
 
   it("(admin) initialize juplend fixed-price group", async () => {
@@ -135,7 +157,7 @@ describe("jlx: Fixed JupLend price bank", () => {
       new Transaction().add(ix),
       [groupAdmin.wallet, juplendGroup],
       false,
-      true
+      true,
     );
   });
 
@@ -150,7 +172,7 @@ describe("jlx: Fixed JupLend price bank", () => {
         marginfiAccount: userAccount,
         authority: user.wallet.publicKey,
         feePayer: user.wallet.publicKey,
-      })
+      }),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet, accountKeypair]);
   });
@@ -161,33 +183,30 @@ describe("jlx: Fixed JupLend price bank", () => {
       group: juplendGroup.publicKey,
       bankMint: ecosystem.usdcMint.publicKey,
       bankSeed: BANK_SEED,
-      fTokenMint: pool.fTokenMint,
+      tokenProgram: pool.tokenProgram,
     });
 
     fixedJuplendBank = derived.bank;
     liquidityVaultAuthority = derived.liquidityVaultAuthority;
-    liquidityVault = derived.liquidityVault;
-    fTokenVault = derived.fTokenVault;
-    claimAccount = derived.claimAccount;
+    withdrawIntermediaryAta = derived.withdrawIntermediaryAta;
 
     const config = defaultJuplendBankConfig(
       oracles.usdcOracle.publicKey,
-      ecosystem.usdcDecimals
+      ecosystem.usdcDecimals,
     );
 
     // 1. Add bank
     const addBankTx = new Transaction().add(
-      await makeAddJuplendBankIx(groupAdmin.mrgnBankrunProgram, {
+      await addJuplendBankIx(groupAdmin.mrgnBankrunProgram, {
         group: juplendGroup.publicKey,
-        admin: groupAdmin.wallet.publicKey,
         feePayer: groupAdmin.wallet.publicKey,
         bankMint: ecosystem.usdcMint.publicKey,
         bankSeed: BANK_SEED,
         oracle: oracles.usdcOracle.publicKey,
-        integrationAcc1: pool.lending,
+        jupLendingState: pool.lending,
         fTokenMint: pool.fTokenMint,
         config,
-      })
+      }),
     );
     await processBankrunTransaction(ctx, addBankTx, [groupAdmin.wallet]);
 
@@ -197,13 +216,9 @@ describe("jlx: Fixed JupLend price bank", () => {
         feePayer: groupAdmin.wallet.publicKey,
         signerTokenAccount: groupAdmin.usdcAccount,
         bank: fixedJuplendBank,
-        liquidityVaultAuthority,
-        liquidityVault,
-        mint: ecosystem.usdcMint.publicKey,
         pool,
-        fTokenVault,
         seedDepositAmount: SEED_DEPOSIT_AMOUNT,
-      })
+      }),
     );
     await processBankrunTransaction(ctx, initPosTx, [groupAdmin.wallet]);
 
@@ -213,22 +228,27 @@ describe("jlx: Fixed JupLend price bank", () => {
         bank: fixedJuplendBank,
         price: FIXED_PRICE,
         remaining: [pool.lending],
-      })
+      }),
     );
     await processBankrunTransaction(ctx, setFixedTx, [groupAdmin.wallet]);
 
     // Verify bank config
     const bank = await bankrunProgram.account.bank.fetch(fixedJuplendBank);
     assert.equal(bank.config.assetTag, ASSET_TAG_JUPLEND);
-    assert.ok(
-      Object.keys(bank.config.oracleSetup).includes("fixedJuplend"),
-      "oracle setup should be fixedJuplend"
-    );
+    assert.deepEqual(bank.config.oracleSetup, { fixedJuplend: {} });
     assertKeysEqual(bank.config.oracleKeys[0], PublicKey.default);
+    // Note: the lending account persists, ftoken vault and ata are stored in integration accounts.
     assertKeysEqual(bank.config.oracleKeys[1], pool.lending);
+    assertKeysEqual(bank.integrationAcc2, derived.fTokenVault);
+    const expectedWithdrawIntermediaryAta = getAssociatedTokenAddressSync(
+      bank.mint,
+      derived.liquidityVaultAuthority,
+      true,
+    );
+    assertKeysEqual(bank.integrationAcc3, expectedWithdrawIntermediaryAta);
 
     const fixedPrice = wrappedI80F48toBigNumber(
-      bank.config.fixedPrice
+      bank.config.fixedPrice,
     ).toNumber();
     assert.approximately(fixedPrice, FIXED_PRICE, 0.001);
 
@@ -245,21 +265,21 @@ describe("jlx: Fixed JupLend price bank", () => {
         marginfiAccount: adminAccount,
         authority: groupAdmin.wallet.publicKey,
         feePayer: groupAdmin.wallet.publicKey,
-      })
+      }),
     );
     await processBankrunTransaction(
       ctx,
       initAdminTx,
       [groupAdmin.wallet, adminAccountKeypair],
       false,
-      true
+      true,
     );
 
     const [bankKey] = deriveBankWithSeed(
       bankrunProgram.programId,
       juplendGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
-      BORROW_SEED
+      BORROW_SEED,
     );
     borrowBank = bankKey;
 
@@ -274,7 +294,7 @@ describe("jlx: Fixed JupLend price bank", () => {
         bankMint: ecosystem.tokenAMint.publicKey,
         config,
         seed: BORROW_SEED,
-      })
+      }),
     );
     await processBankrunTransaction(ctx, addBankTx, [groupAdmin.wallet]);
 
@@ -283,18 +303,32 @@ describe("jlx: Fixed JupLend price bank", () => {
         bank: borrowBank,
         type: ORACLE_SETUP_PYTH_PUSH,
         oracle: oracles.tokenAOracle.publicKey,
-      })
+      }),
     );
     await processBankrunTransaction(ctx, configOracleTx, [groupAdmin.wallet]);
 
     const seedAmount = new BN(100 * 10 ** ecosystem.tokenADecimals);
+    const mintSeedLiquidityIx = createMintToInstruction(
+      ecosystem.tokenAMint.publicKey,
+      groupAdmin.tokenAAccount,
+      globalProgramAdmin.wallet.publicKey,
+      BigInt(seedAmount.toString()),
+    );
+    await processBankrunTransaction(
+      ctx,
+      new Transaction().add(mintSeedLiquidityIx),
+      [globalProgramAdmin.wallet],
+      false,
+      true,
+    );
+
     const seedTx = new Transaction().add(
       await depositIx(groupAdmin.mrgnBankrunProgram, {
         marginfiAccount: adminAccount,
         bank: borrowBank,
         tokenAccount: groupAdmin.tokenAAccount,
         amount: seedAmount,
-      })
+      }),
     );
     await processBankrunTransaction(ctx, seedTx, [groupAdmin.wallet]);
   });
@@ -308,13 +342,13 @@ describe("jlx: Fixed JupLend price bank", () => {
         group: juplendGroup.publicKey,
         bank: fixedJuplendBank,
         remaining: [wrongLending],
-      })
+      }),
     );
     const result = await processBankrunTransaction(
       ctx,
       tx,
       [user.wallet],
-      true
+      true,
     );
     // JuplendLendingValidationFailed = 6501
     assertBankrunTxFailed(result, 6501);
@@ -328,50 +362,39 @@ describe("jlx: Fixed JupLend price bank", () => {
 
     // Refresh JupLend rates to ensure lending state is fresh
     const updateRateTx = new Transaction().add(
-      juplendUpdateRateIx({
-        lending: pool.lending,
-        mint: ecosystem.usdcMint.publicKey,
-        fTokenMint: pool.fTokenMint,
-        supplyTokenReservesLiquidity: pool.tokenReserve,
-        rewardsRateModel: pool.lendingRewardsRateModel,
-      })
+      await refreshJupSimple(juplendPrograms.lending, { pool }),
+    );
+    updateRateTx.add(
+      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
     );
     await processBankrunTransaction(ctx, updateRateTx, [user.wallet]);
 
     const userUsdcBefore = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount
+      user.usdcAccount,
     );
     userUsdcStart = userUsdcBefore;
 
     const tx = new Transaction().add(
       await makeJuplendDepositIx(user.mrgnBankrunProgram, {
-        group: juplendGroup.publicKey,
         marginfiAccount: userAccount,
-        authority: user.wallet.publicKey,
         bank: fixedJuplendBank,
         signerTokenAccount: user.usdcAccount,
-        liquidityVaultAuthority,
-        liquidityVault,
-        mint: ecosystem.usdcMint.publicKey,
         pool,
-        fTokenVault,
         amount: depositAmount,
-      })
+      }),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
     const userUsdcAfter = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount
+      user.usdcAccount,
     );
     const diff = userUsdcBefore - userUsdcAfter;
-    console.log("deposited: " + diff.toLocaleString());
-    assert.equal(
-      userUsdcBefore - userUsdcAfter,
-      depositAmount.toNumber(),
-      "user USDC should decrease by deposit amount"
-    );
+    if (verbose) {
+      console.log("deposited: " + diff.toLocaleString());
+    }
+    assert.equal(userUsdcBefore - userUsdcAfter, depositAmount.toNumber());
   });
 
   it("(user 3) borrow Token A against fixed JupLend collateral - happy path", async () => {
@@ -381,19 +404,16 @@ describe("jlx: Fixed JupLend price bank", () => {
 
     // Refresh JupLend rates
     const updateRateTx = new Transaction().add(
-      juplendUpdateRateIx({
-        lending: pool.lending,
-        mint: ecosystem.usdcMint.publicKey,
-        fTokenMint: pool.fTokenMint,
-        supplyTokenReservesLiquidity: pool.tokenReserve,
-        rewardsRateModel: pool.lendingRewardsRateModel,
-      })
+      await refreshJupSimple(juplendPrograms.lending, { pool }),
+    );
+    updateRateTx.add(
+      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
     );
     await processBankrunTransaction(ctx, updateRateTx, [user.wallet]);
 
     const userTokenABefore = await getTokenBalance(
       bankRunProvider,
-      user.tokenAAccount
+      user.tokenAAccount,
     );
 
     // FixedJuplend remaining: [bank, lendingState] (only 2 accounts, no oracle)
@@ -409,13 +429,13 @@ describe("jlx: Fixed JupLend price bank", () => {
         tokenAccount: user.tokenAAccount,
         remaining,
         amount: BORROW_AMOUNT,
-      })
+      }),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet], false, true);
 
     const userTokenAAfter = await getTokenBalance(
       bankRunProvider,
-      user.tokenAAccount
+      user.tokenAAccount,
     );
     assert.equal(userTokenAAfter - userTokenABefore, BORROW_AMOUNT.toNumber());
   });
@@ -426,13 +446,10 @@ describe("jlx: Fixed JupLend price bank", () => {
 
     // Refresh JupLend rates
     const updateRateTx = new Transaction().add(
-      juplendUpdateRateIx({
-        lending: pool.lending,
-        mint: ecosystem.usdcMint.publicKey,
-        fTokenMint: pool.fTokenMint,
-        supplyTokenReservesLiquidity: pool.tokenReserve,
-        rewardsRateModel: pool.lendingRewardsRateModel,
-      })
+      await refreshJupSimple(juplendPrograms.lending, { pool }),
+    );
+    updateRateTx.add(
+      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
     );
     await processBankrunTransaction(ctx, updateRateTx, [user.wallet]);
 
@@ -445,21 +462,23 @@ describe("jlx: Fixed JupLend price bank", () => {
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         remaining,
-      })
+      }),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
     const accAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount
+      userAccount,
     );
     const cache = accAfter.healthCache;
-    logHealthCache("cache after deposit", cache);
+    if (verbose) {
+      logHealthCache("cache after deposit", cache);
+    }
 
     const actualAssetValue = wrappedI80F48toBigNumber(
-      cache.assetValue
+      cache.assetValue,
     ).toNumber();
     const actualLiabilityValue = wrappedI80F48toBigNumber(
-      cache.liabilityValue
+      cache.liabilityValue,
     ).toNumber();
 
     // Fixed price applied to the deposit amount, weighted by assetWeightInit (0.8).
@@ -477,7 +496,7 @@ describe("jlx: Fixed JupLend price bank", () => {
     assert.approximately(
       actualLiabilityValue,
       expectedLiabilityValue,
-      liabTolerance
+      liabTolerance,
     );
   });
 
@@ -489,26 +508,30 @@ describe("jlx: Fixed JupLend price bank", () => {
 
     // Refresh JupLend rates
     const updateRateTx = new Transaction().add(
-      juplendUpdateRateIx({
-        lending: pool.lending,
-        mint: ecosystem.usdcMint.publicKey,
-        fTokenMint: pool.fTokenMint,
-        supplyTokenReservesLiquidity: pool.tokenReserve,
-        rewardsRateModel: pool.lendingRewardsRateModel,
-      })
+      await refreshJupSimple(juplendPrograms.lending, { pool }),
+    );
+    updateRateTx.add(
+      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
     );
     await processBankrunTransaction(ctx, updateRateTx, [user.wallet]);
 
-    // Create claim account before first withdraw
-    await ensureJuplendClaimAccount({
-      payer: user.wallet,
-      user: liquidityVaultAuthority,
-      mint: ecosystem.usdcMint.publicKey,
-    });
+    const createWithdrawIntermediaryAtaIx =
+      createAssociatedTokenAccountIdempotentInstruction(
+        user.wallet.publicKey,
+        withdrawIntermediaryAta,
+        liquidityVaultAuthority,
+        ecosystem.usdcMint.publicKey,
+        pool.tokenProgram,
+      );
+    await processBankrunTransaction(
+      ctx,
+      new Transaction().add(createWithdrawIntermediaryAtaIx),
+      [user.wallet],
+    );
 
     const userUsdcBefore = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount
+      user.usdcAccount,
     );
 
     const remaining = composeRemainingAccounts([
@@ -517,30 +540,25 @@ describe("jlx: Fixed JupLend price bank", () => {
     ]);
 
     const tx = new Transaction().add(
-      await makeJuplendWithdrawIx(user.mrgnBankrunProgram, {
-        group: juplendGroup.publicKey,
+      await makeJuplendWithdrawSimpleIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
-        authority: user.wallet.publicKey,
         bank: fixedJuplendBank,
         destinationTokenAccount: user.usdcAccount,
-        liquidityVaultAuthority,
-        liquidityVault,
-        mint: ecosystem.usdcMint.publicKey,
         pool,
-        fTokenVault,
-        claimAccount,
         amount: withdrawAmount,
         remainingAccounts: remaining,
-      })
+      }),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
     const userUsdcAfter = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount
+      user.usdcAccount,
     );
     const diff = userUsdcAfter - userUsdcBefore;
-    console.log("withdrew: " + diff.toLocaleString());
+    if (verbose) {
+      console.log("withdrew: " + diff.toLocaleString());
+    }
 
     // JupLend withdraw should return approximately the requested amount
     assert.approximately(diff, withdrawAmount.toNumber(), 2);
@@ -556,52 +574,52 @@ describe("jlx: Fixed JupLend price bank", () => {
         tokenAccount: user.tokenAAccount,
         amount: BORROW_AMOUNT,
         repayAll: true,
-      })
+        remaining: composeRemainingAccounts([
+          [fixedJuplendBank, pool.lending],
+          [borrowBank, oracles.tokenAOracle.publicKey],
+        ]),
+      }),
     );
     await processBankrunTransaction(ctx, repayTx, [user.wallet]);
+
+    const accountStateAfterRepay =
+      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
+    const remaining = composeRemainingAccountsByBalances(
+      accountStateAfterRepay.lendingAccount.balances,
+      [
+        [fixedJuplendBank, pool.lending],
+        [borrowBank, oracles.tokenAOracle.publicKey],
+      ],
+      fixedJuplendBank,
+    );
 
     await refreshPullOraclesBankrun(oracles, ctx, banksClient);
 
     // Refresh JupLend rates
     const updateRateTx = new Transaction().add(
-      juplendUpdateRateIx({
-        lending: pool.lending,
-        mint: ecosystem.usdcMint.publicKey,
-        fTokenMint: pool.fTokenMint,
-        supplyTokenReservesLiquidity: pool.tokenReserve,
-        rewardsRateModel: pool.lendingRewardsRateModel,
-      })
+      await refreshJupSimple(juplendPrograms.lending, { pool }),
+    );
+    updateRateTx.add(
+      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
     );
     await processBankrunTransaction(ctx, updateRateTx, [user.wallet]);
 
-    const remaining = composeRemainingAccounts([
-      [fixedJuplendBank, pool.lending],
-      [borrowBank, oracles.tokenAOracle.publicKey],
-    ]);
-
     const withdrawAllTx = new Transaction().add(
-      await makeJuplendWithdrawIx(user.mrgnBankrunProgram, {
-        group: juplendGroup.publicKey,
+      await makeJuplendWithdrawSimpleIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
-        authority: user.wallet.publicKey,
         bank: fixedJuplendBank,
         destinationTokenAccount: user.usdcAccount,
-        liquidityVaultAuthority,
-        liquidityVault,
-        mint: ecosystem.usdcMint.publicKey,
         pool,
-        fTokenVault,
-        claimAccount,
         amount: new BN(0),
         withdrawAll: true,
         remainingAccounts: remaining,
-      })
+      }),
     );
     await processBankrunTransaction(ctx, withdrawAllTx, [user.wallet]);
 
     const userUsdcAfter = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount
+      user.usdcAccount,
     );
     // Note: JupLend round-trip rounding can lose a few lamports per operation
     assert.approximately(userUsdcAfter, userUsdcStart, 5);

@@ -257,7 +257,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
         usdcJupPool.tokenReserve,
       ),
       juplendPrograms.liquidity.account.userSupplyPosition.fetch(
-        usdcJupPool.lendingSupplyPositionOnLiquidity,
+        usdcJupPool.supplyPositionOnLiquidity,
       ),
       bankrunProgram.account.bank.fetch(usdcJupBankPk),
       bankrunProgram.account.marginfiAccount.fetch(activeMarginfiAccountPk),

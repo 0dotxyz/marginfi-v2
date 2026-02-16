@@ -9,6 +9,7 @@ import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { Marginfi } from "../../../target/types/marginfi";
 import type { JuplendConfigCompact } from "./types";
 import type { JuplendPoolKeys } from "./types";
+import { JUPLEND_LIQUIDITY_PROGRAM_ID } from "./juplend-pdas";
 
 export type AddJuplendBankAccounts = {
   group: PublicKey;
@@ -85,12 +86,11 @@ export const makeJuplendInitPositionIx = async (
         bank: accounts.bank,
         lendingAdmin: accounts.pool.lendingAdmin,
         supplyTokenReservesLiquidity: accounts.pool.tokenReserve,
-        lendingSupplyPositionOnLiquidity:
-          accounts.pool.lendingSupplyPositionOnLiquidity,
+        lendingSupplyPositionOnLiquidity: accounts.pool.supplyPositionOnLiquidity,
         rateModel: accounts.pool.rateModel,
         vault: accounts.pool.vault,
         liquidity: accounts.pool.liquidity,
-        liquidityProgram: accounts.pool.liquidityProgram,
+        liquidityProgram: JUPLEND_LIQUIDITY_PROGRAM_ID,
         rewardsRateModel: accounts.pool.lendingRewardsRateModel,
         tokenProgram: accounts.tokenProgram ?? TOKEN_PROGRAM_ID,
       })

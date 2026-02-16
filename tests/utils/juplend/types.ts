@@ -21,25 +21,36 @@ export type JuplendPrograms = {
 };
 
 export type JuplendPoolKeys = {
+  /** Underlying token mint used by this JupLend pool (e.g. USDC mint). */
   mint: PublicKey;
+  /** Token program owning the underlying mint (SPL Token or Token-2022). */
   tokenProgram: PublicKey;
-  liquidityProgram: PublicKey;
-  lendingProgram: PublicKey;
+  /** Global Liquidity account PDA (singleton per liquidity program). */
   liquidity: PublicKey;
+  /** Global authorization list PDA used by liquidity/lending permission checks. */
   authList: PublicKey;
+  /** TokenReserve PDA for this mint; links mint, vault, rate model, and positions. */
   tokenReserve: PublicKey;
+  /** Rate model PDA storing utilization->rate parameters for this reserve. */
   rateModel: PublicKey;
+  /** Liquidity vault PDA (underlying token vault on the native Jup side). */
   vault: PublicKey;
+  /** Global rewards-admin PDA used by lending rewards program instructions. */
   lendingRewardsAdmin: PublicKey;
+  /** Rewards rate model PDA associated with this pool's lending state. */
   lendingRewardsRateModel: PublicKey;
+  /** Global lending-admin PDA used for lending protocol configuration. */
   lendingAdmin: PublicKey;
+  /** Lending state PDA for this mint/fToken pair (exchange-rate source). */
   lending: PublicKey;
+  /** fToken mint PDA for this reserve (interest-bearing share token). */
   fTokenMint: PublicKey;
+  /** Metaplex metadata PDA for the pool's fToken mint. */
   fTokenMetadata: PublicKey;
+  /** Liquidity-side user supply position PDA owned by the lending state. */
   supplyPositionOnLiquidity: PublicKey;
+  /** Liquidity-side user borrow position PDA owned by the lending state. */
   borrowPositionOnLiquidity: PublicKey;
-  lendingSupplyPositionOnLiquidity: PublicKey;
-  lendingBorrowPositionOnLiquidity: PublicKey;
 };
 
 type LiquidityAccounts = IdlAccounts<JuplendLiquidityIdl>;
@@ -63,9 +74,13 @@ export type JuplendPoolFetched = {
 };
 
 export type JuplendGlobals = {
+  /** Global Liquidity account PDA (singleton per liquidity program). */
   liquidity: PublicKey;
+  /** Global authorization list PDA used by liquidity/lending permission checks. */
   authList: PublicKey;
+  /** Global lending-admin PDA used for lending protocol configuration. */
   lendingAdmin: PublicKey;
+  /** Global rewards-admin PDA used by lending rewards program instructions. */
   lendingRewardsAdmin: PublicKey;
 };
 

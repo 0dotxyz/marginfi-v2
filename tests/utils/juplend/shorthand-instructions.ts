@@ -58,7 +58,6 @@ export const makeJuplendWithdrawSimpleIx = (
   const [claimAccount] = findJuplendClaimAccountPda(
     liquidityVaultAuthority,
     args.pool.mint,
-    args.pool.liquidityProgram,
   );
 
   return makeJuplendWithdrawIx(program, {
