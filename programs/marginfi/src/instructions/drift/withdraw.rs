@@ -301,7 +301,7 @@ pub fn drift_withdraw<'info>(
         // Drop the bank mutable borrow before health check (bank is in remaining_accounts)
         drop(bank);
 
-        // Note: during liquidation/receivership or order execution, we skip all health checks until
+        // Note: during liquidation/deleverage or order execution, we skip all health checks until
         // the end of the transaction.
         if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION) {
             check_account_init_health(

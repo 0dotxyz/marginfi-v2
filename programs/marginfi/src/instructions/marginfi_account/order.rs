@@ -70,19 +70,8 @@ pub fn place_order(
 
     let lending_account = &mut marginfi_account.lending_account;
 
-    let balance_index_1 = lending_account
-        .balances
-        .binary_search_by(|balance| bank_key_1.cmp(&balance.bank_pk))
-        .ok()
-        .and_then(|index| lending_account.balances[index].is_active().then_some(index))
-        .ok_or(MarginfiError::LendingAccountBalanceNotFound)?;
-
-    let balance_index_2 = lending_account
-        .balances
-        .binary_search_by(|balance| bank_key_2.cmp(&balance.bank_pk))
-        .ok()
-        .and_then(|index| lending_account.balances[index].is_active().then_some(index))
-        .ok_or(MarginfiError::LendingAccountBalanceNotFound)?;
+    let balance_index_1 = lending_account.get_balance_index(bank_key_1)?;
+    let balance_index_2 = lending_account.get_balance_index(bank_key_2)?;
 
     // Ensure we have one asset and one liability
     match (
@@ -213,6 +202,7 @@ pub fn keeper_close_order(ctx: Context<KeeperCloseOrder>) -> MarginfiResult {
             bytemuck::from_bytes(&data[8..8 + std::mem::size_of::<MarginfiAccount>()]);
 
         let balances = &marginfi_account.lending_account.balances;
+        // Can close if any of the balances used in the order no longer exists (or if its tag was cleared)
         let can_close = order.tags.iter().any(|tag| {
             !balances
                 .iter()
@@ -250,21 +240,19 @@ pub fn set_keeper_close_flags(
 
     let mut marginfi_account = marginfi_account.load_mut()?;
 
-    let balances = &mut marginfi_account.lending_account.balances;
+    let lending_account = &mut marginfi_account.lending_account;
 
     match bank_keys_opt {
         Some(ref keys) => {
             for bank_key in keys.iter() {
-                let index = balances
-                    .binary_search_by(|balance| bank_key.cmp(&balance.bank_pk))
-                    .map_err(|_| error!(MarginfiError::LendingAccountBalanceNotFound))?;
+                let index = lending_account.get_balance_index(bank_key)?;
 
-                let balance = &mut balances[index];
+                let balance = &mut lending_account.balances[index];
                 balance.tag = 0;
             }
         }
         None => {
-            for balance in balances.iter_mut() {
+            for balance in lending_account.balances.iter_mut() {
                 balance.tag = 0;
             }
         }
@@ -427,16 +415,16 @@ pub fn end_execute_order<'info>(
 
     // Check that the liquidator did not over-withdraw.
 
-    let slippage_frac = || -> MarginfiResult<I80F48> {
+    let slippage_frac = {
         let slippage = marginfi_type_crate::types::u32_to_centi(order.max_slippage);
-        Ok(I80F48::ONE
+        I80F48::ONE
             .checked_sub(slippage)
-            .ok_or_else(math_error!())?)
+            .ok_or_else(math_error!())?
     };
 
-    let max_fee_frac = || -> MarginfiResult<I80F48> {
+    let max_fee_frac = {
         let max_fee: I80F48 = fee_state.order_execution_max_fee.into();
-        Ok(I80F48::ONE.checked_sub(max_fee).ok_or_else(math_error!())?)
+        I80F48::ONE.checked_sub(max_fee).ok_or_else(math_error!())?
     };
 
     let start_health = || -> I80F48 { execute_record.order_start_health.into() };
@@ -444,9 +432,7 @@ pub fn end_execute_order<'info>(
     match order.trigger {
         OrderTriggerType::StopLoss => {
             let sl: I80F48 = order.stop_loss.into();
-            let allowed_sl = sl
-                .checked_mul((slippage_frac)()?)
-                .ok_or_else(math_error!())?;
+            let allowed_sl = sl.checked_mul(slippage_frac).ok_or_else(math_error!())?;
 
             check!(
                 net >= allowed_sl,
@@ -455,17 +441,14 @@ pub fn end_execute_order<'info>(
         }
         OrderTriggerType::TakeProfit => {
             let tp: I80F48 = order.take_profit.into();
-            let allowed_tp = tp
-                .checked_mul((slippage_frac)()?)
-                .ok_or_else(math_error!())?;
+            let allowed_tp = tp.checked_mul(slippage_frac).ok_or_else(math_error!())?;
 
             let allowed_diff = (start_health)()
-                .checked_mul((max_fee_frac)()?)
+                .checked_mul(max_fee_frac)
                 .ok_or_else(math_error!())?;
 
             check!(
-                ((net >= allowed_diff) && (allowed_diff >= allowed_tp))
-                    || ((net >= allowed_tp) && (allowed_tp >= allowed_diff)),
+                net >= allowed_diff && net >= allowed_tp,
                 MarginfiError::OrderExecutionOverWithdrawal
             );
         }
@@ -476,23 +459,18 @@ pub fn end_execute_order<'info>(
 
             // This check relies on sl being < tp, which is enforced in the code to tell them apart
             if start_health >= tp {
-                let allowed_tp = tp
-                    .checked_mul((slippage_frac)()?)
-                    .ok_or_else(math_error!())?;
+                let allowed_tp = tp.checked_mul(slippage_frac).ok_or_else(math_error!())?;
 
                 let allowed_diff = start_health
-                    .checked_mul((max_fee_frac)()?)
+                    .checked_mul(max_fee_frac)
                     .ok_or_else(math_error!())?;
 
                 check!(
-                    ((net >= allowed_diff) && (allowed_diff >= allowed_tp))
-                        || ((net >= allowed_tp) && (allowed_tp >= allowed_diff)),
+                    net >= allowed_diff && net >= allowed_tp,
                     MarginfiError::OrderExecutionOverWithdrawal
                 );
             } else {
-                let allowed_sl = sl
-                    .checked_mul((slippage_frac)()?)
-                    .ok_or_else(math_error!())?;
+                let allowed_sl = sl.checked_mul(slippage_frac).ok_or_else(math_error!())?;
 
                 check!(
                     net >= allowed_sl,
