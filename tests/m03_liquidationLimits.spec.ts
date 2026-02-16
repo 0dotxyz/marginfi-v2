@@ -68,6 +68,7 @@ import {
 } from "./utils/pdas";
 import { getEpochAndSlot } from "./utils/stake-utils";
 import { assert } from "chai";
+import { ensureMultiSuiteIntegrationsSetup } from "./utils/multi-limits-setup";
 
 const startingSeed: number = 42;
 
@@ -261,7 +262,8 @@ SCENARIOS.forEach(({ kaminoDeposits }, scenarioIndex) => {
       return instructions;
     };
 
-    before(() => {
+    before(async () => {
+      await ensureMultiSuiteIntegrationsSetup();
       console.log(
         `Running the scenario with ${kaminoDeposits} Kamino banks, ${driftDeposits} Drift banks, ${P0_BORROWS} regular debt bank`,
       );

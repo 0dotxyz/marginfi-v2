@@ -76,6 +76,7 @@ import {
 } from "@mrgnlabs/mrgn-common";
 import { assertBankrunTxFailed } from "./utils/genericTests";
 import type { MockUser } from "./utils/mocks";
+import { ensureMultiSuiteIntegrationsSetup } from "./utils/multi-limits-setup";
 
 const startingSeed: number = 77;
 const U32_MAX = 2 ** 32 - 1;
@@ -125,7 +126,8 @@ SCENARIOS.forEach(({ kaminoDeposits, driftDeposits }, scenarioIndex) => {
     let user: MockUser;
     let userAccount: PublicKey;
 
-    before(() => {
+    before(async () => {
+      await ensureMultiSuiteIntegrationsSetup();
       user = users[0];
     });
 

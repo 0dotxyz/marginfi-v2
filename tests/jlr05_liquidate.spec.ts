@@ -8,7 +8,6 @@ import {
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import {
-  AddressLookupTableAccount,
   ComputeBudgetProgram,
   Keypair,
   PublicKey,
@@ -41,12 +40,8 @@ import {
   deriveLiquidityVaultAuthority,
   deriveLiquidationRecord,
 } from "./utils/pdas";
-import {
-  deriveJuplendPoolKeys,
-} from "./utils/juplend/juplend-pdas";
-import {
-  makeJuplendDepositIx,
-} from "./utils/juplend/user-instructions";
+import { deriveJuplendPoolKeys } from "./utils/juplend/juplend-pdas";
+import { makeJuplendDepositIx } from "./utils/juplend/user-instructions";
 import {
   makeJuplendWithdrawSimpleIx,
   refreshJupSimple,
@@ -78,13 +73,15 @@ import {
 import {
   bytesToF64,
   buildHealthRemainingAccounts,
+  createLookupTableForInstructions,
   logHealthCache,
   mintToTokenAccount,
   processBankrunTransaction,
+  processBankrunV0Transaction,
 } from "./utils/tools";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { getBankrunBlockhash } from "./utils/spl-staking-utils";
-import { advanceFiveMinutes } from "./utils/bankrunConnection";
+import { advanceFiveMinutes, dummyIx } from "./utils/bankrunConnection";
 
 const USER1_ACCOUNT_SEED = Buffer.from("JLR05_USER1_ACCOUNT_SEED_0000000");
 const user1MarginfiAccount = Keypair.fromSeed(USER1_ACCOUNT_SEED);
@@ -105,7 +102,6 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
   let jupUsdcBankPk = PublicKey.default;
   let regTokenBBankPk = PublicKey.default;
   let user0MarginfiAccountPk = PublicKey.default;
-  let jlrLutAccount: AddressLookupTableAccount | null = null;
 
   before(async () => {
     juplendPrograms = getJuplendPrograms();
@@ -118,13 +114,6 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
     user0MarginfiAccountPk = juplendAccounts.get(
       JUPLEND_STATE_KEYS.jlr02User0MarginfiAccount,
     );
-    const jlrLutPk = juplendAccounts.get(JUPLEND_STATE_KEYS.jlr01LookupTable);
-    const jlrLutRaw = await banksClient.getAccount(jlrLutPk);
-    const jlrLutState = AddressLookupTableAccount.deserialize(jlrLutRaw.data);
-    jlrLutAccount = new AddressLookupTableAccount({
-      key: jlrLutPk,
-      state: jlrLutState,
-    });
 
     await mintToTokenAccount(
       ecosystem.usdcMint.publicKey,
@@ -454,7 +443,10 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
     });
     await processBankrunTransaction(
       bankrunContext,
-      new Transaction().add(pulseBeforeRxIx),
+      new Transaction().add(
+        dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
+        pulseBeforeRxIx,
+      ),
       [user.wallet],
       false,
       true,
@@ -582,14 +574,19 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       }),
     ];
 
+    const rxLutAccount = await createLookupTableForInstructions(
+      bankrunContext,
+      liquidator.wallet,
+      rxLiquidationIxs,
+    );
     const blockhash = await getBankrunBlockhash(bankrunContext);
     const messageV0 = new TransactionMessage({
       payerKey: liquidator.wallet.publicKey,
       recentBlockhash: blockhash,
       instructions: rxLiquidationIxs,
-    }).compileToV0Message([jlrLutAccount!]);
+    }).compileToV0Message([rxLutAccount]);
     const rxLiquidationTx = new VersionedTransaction(messageV0);
-    await processBankrunTransaction(
+    await processBankrunV0Transaction(
       bankrunContext,
       rxLiquidationTx,
       [liquidator.wallet],

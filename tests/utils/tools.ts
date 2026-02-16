@@ -5,13 +5,17 @@ import {
 } from "solana-bankrun";
 import { ProgramTestContext } from "solana-bankrun";
 import {
+  AddressLookupTableAccount,
+  AddressLookupTableProgram,
   Transaction,
+  TransactionInstruction,
   PublicKey,
   AccountInfo,
   VersionedTransaction,
 } from "@solana/web3.js";
 import { Keypair } from "@solana/web3.js";
 import { AccountLayout, createMintToInstruction } from "@solana/spl-token";
+import { inspect } from "util";
 import { getBankrunBlockhash } from "./spl-staking-utils";
 import { MarginfiAccountRaw } from "@mrgnlabs/marginfi-client-v2";
 import {
@@ -43,55 +47,146 @@ export const toNative = (amount: number, decimals: number): BN =>
   new BN(amount).mul(new BN(10).pow(new BN(decimals)));
 
 /**
- * Process a transaction in a bankrun context and return the transaction result
+ * Process a signed transaction in a bankrun context and return the transaction result. This
+ * internal helper is shared between legacy and v0 wrappers. In edge cases (particularly with v0)
+ * bankrun can't pick up logs on failure.
+ */
+function processSignedBankrunTransaction(
+  bankrunContext: ProgramTestContext,
+  tx: Transaction | VersionedTransaction,
+  trySend: true,
+  dumpLogOnFail?: boolean,
+): Promise<BanksTransactionResultWithMeta>;
+function processSignedBankrunTransaction(
+  bankrunContext: ProgramTestContext,
+  tx: Transaction | VersionedTransaction,
+  trySend?: false,
+  dumpLogOnFail?: boolean,
+): Promise<BanksTransactionMeta>;
+function processSignedBankrunTransaction(
+  bankrunContext: ProgramTestContext,
+  tx: Transaction | VersionedTransaction,
+  trySend: boolean,
+  dumpLogOnFail?: boolean,
+): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta>;
+async function processSignedBankrunTransaction(
+  bankrunContext: ProgramTestContext,
+  tx: Transaction | VersionedTransaction,
+  trySend: boolean = false,
+  dumpLogOnFail: boolean = false,
+): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta> {
+  const bankrunTx = tx;
+
+  if (trySend) {
+    const result = await bankrunContext.banksClient.tryProcessTransaction(
+      bankrunTx,
+    );
+    if (dumpLogOnFail && result.result) {
+      dumpBankrunLogs(result);
+    }
+    return result;
+  }
+
+  try {
+    return await bankrunContext.banksClient.processTransaction(bankrunTx);
+  } catch (error) {
+    // If processing throws, re-simulate for diagnostics without mutating state.
+    if (dumpLogOnFail) {
+      try {
+        const failedResult =
+          await bankrunContext.banksClient.simulateTransaction(bankrunTx);
+        dumpBankrunLogs(failedResult);
+      } catch (diagnosticError) {
+        console.log(
+          "[bankrun] failed to collect fallback diagnostic logs:",
+          diagnosticError,
+        );
+      }
+    }
+    throw error;
+  }
+}
+
+/**
+ * Process a legacy transaction in a bankrun context and return the transaction result.
  * @param bankrunContext - The bankrun context
- * @param tx - The transaction to process (legacy or versioned)
+ * @param tx - The legacy transaction to process
  * @param signers - The signers for the transaction
  * @param trySend - true to use tryProcess instead
  * @param dumpLogOnFail - true to print a tx log on fail
  * @returns The transaction result with metadata
  */
-export const processBankrunTransaction = async (
+export function processBankrunTransaction(
   bankrunContext: ProgramTestContext,
-  tx: Transaction | VersionedTransaction,
+  tx: Transaction,
+  signers: Keypair[],
+  trySend: true,
+  dumpLogOnFail?: boolean,
+): Promise<BanksTransactionResultWithMeta>;
+export function processBankrunTransaction(
+  bankrunContext: ProgramTestContext,
+  tx: Transaction,
+  signers: Keypair[],
+  trySend?: false,
+  dumpLogOnFail?: boolean,
+): Promise<BanksTransactionMeta>;
+export async function processBankrunTransaction(
+  bankrunContext: ProgramTestContext,
+  tx: Transaction,
   signers: Keypair[],
   trySend: boolean = false,
   dumpLogOnFail: boolean = false,
-): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta> => {
-  // TODO improve this dumb hack.
+): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta> {
+  tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+  tx.sign(...signers);
+  return processSignedBankrunTransaction(
+    bankrunContext,
+    tx,
+    trySend,
+    dumpLogOnFail,
+  );
+}
 
-  // Stupid hack to detect tx vs v0tx without typeof
-  if ("recentBlockhash" in tx) {
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(...signers);
-  } else if (signers.length > 0) {
-    // @ts-ignore
+/**
+ * Process a v0 transaction in a bankrun context and return the transaction result.
+ * @param bankrunContext - The bankrun context
+ * @param tx - The v0 transaction to process
+ * @param signers - The signers for the transaction
+ * @param trySend - true to use tryProcess instead
+ * @param dumpLogOnFail - true to print a tx log on fail
+ * @returns The transaction result with metadata
+ */
+export function processBankrunV0Transaction(
+  bankrunContext: ProgramTestContext,
+  tx: VersionedTransaction,
+  signers: Keypair[],
+  trySend: true,
+  dumpLogOnFail?: boolean,
+): Promise<BanksTransactionResultWithMeta>;
+export function processBankrunV0Transaction(
+  bankrunContext: ProgramTestContext,
+  tx: VersionedTransaction,
+  signers: Keypair[],
+  trySend?: false,
+  dumpLogOnFail?: boolean,
+): Promise<BanksTransactionMeta>;
+export async function processBankrunV0Transaction(
+  bankrunContext: ProgramTestContext,
+  tx: VersionedTransaction,
+  signers: Keypair[],
+  trySend: boolean = false,
+  dumpLogOnFail: boolean = false,
+): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta> {
+  if (signers.length > 0) {
     tx.sign(signers);
   }
-
-  if (trySend) {
-    let result = await bankrunContext.banksClient.tryProcessTransaction(
-      tx as Transaction,
-    );
-    if (dumpLogOnFail) {
-      dumpBankrunLogs(result);
-    }
-    return result;
-  } else {
-    // TODO throw on error?
-    // If we want to dump logs on fail, simulate first
-    if (dumpLogOnFail) {
-      const simulationResult =
-        await bankrunContext.banksClient.simulateTransaction(tx as Transaction);
-      if (simulationResult.result) {
-        dumpBankrunLogs(simulationResult);
-      }
-    }
-    return await bankrunContext.banksClient.processTransaction(
-      tx as Transaction,
-    );
-  }
-};
+  return processSignedBankrunTransaction(
+    bankrunContext,
+    tx,
+    trySend,
+    dumpLogOnFail,
+  );
+}
 
 /**
  * Function to print bytes from a Buffer in groups with column labels and color highlighting for non-zero values
@@ -172,10 +267,99 @@ export const printBufferGroups = (
   }
 };
 
-export const dumpBankrunLogs = (result: BanksTransactionResultWithMeta) => {
-  for (let i = 0; i < result.meta.logMessages.length; i++) {
-    console.log(i + " " + result.meta.logMessages[i]);
+export const dumpBankrunLogs = (result: any) => {
+  const logMessages = result?.meta?.logMessages;
+  if (Array.isArray(logMessages) && logMessages.length > 0) {
+    for (let i = 0; i < logMessages.length; i++) {
+      console.log(i + " " + logMessages[i]);
+    }
+    return;
   }
+
+  // Some bankrun failure paths (notably with certain simulated/versioned failures)
+  // return `meta: null`. Preserve visibility instead of crashing.
+  const status =
+    result?.result === null || result?.result === undefined ? "ok" : "failed";
+  console.log(
+    `[bankrun] no logMessages available (status=${status}, meta=${
+      result?.meta === null ? "null" : typeof result?.meta
+    })`,
+  );
+  console.log(
+    "[bankrun] raw result preview:",
+    inspect(result, { depth: 4, colors: false, maxArrayLength: 50 }),
+  );
+};
+
+/**
+ * Create and activate a lookup table for the provided instruction set.
+ *
+ * This is useful for tests that need deterministic v0 execution without relying
+ * on a shared LUT that can drift as test state evolves.
+ */
+export const createLookupTableForInstructions = async (
+  bankrunContext: ProgramTestContext,
+  authority: Keypair,
+  instructions: TransactionInstruction[],
+): Promise<AddressLookupTableAccount> => {
+  const addresses: PublicKey[] = [];
+  const seen = new Set<string>();
+  const push = (pk: PublicKey) => {
+    const key = pk.toBase58();
+    if (seen.has(key)) return;
+    seen.add(key);
+    addresses.push(pk);
+  };
+
+  for (const ix of instructions) {
+    push(ix.programId);
+    for (const meta of ix.keys) {
+      push(meta.pubkey);
+    }
+  }
+
+  const recentSlot = Number(await bankrunContext.banksClient.getSlot());
+  const [createLutIx, lutAddress] = AddressLookupTableProgram.createLookupTable(
+    {
+      authority: authority.publicKey,
+      payer: authority.publicKey,
+      recentSlot: Math.max(0, recentSlot - 1),
+    },
+  );
+  await processBankrunTransaction(
+    bankrunContext,
+    new Transaction().add(createLutIx),
+    [authority],
+  );
+
+  const CHUNK_SIZE = 20;
+  for (let i = 0; i < addresses.length; i += CHUNK_SIZE) {
+    const extendIx = AddressLookupTableProgram.extendLookupTable({
+      authority: authority.publicKey,
+      payer: authority.publicKey,
+      lookupTable: lutAddress,
+      addresses: addresses.slice(i, i + CHUNK_SIZE),
+    });
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(extendIx),
+      [authority],
+    );
+  }
+
+  // LUTs are usable after a short warmup.
+  const currentSlot = Number(await bankrunContext.banksClient.getSlot());
+  bankrunContext.warpToSlot(BigInt(currentSlot + 5));
+
+  const lutRaw = await bankrunContext.banksClient.getAccount(lutAddress);
+  if (!lutRaw) {
+    throw new Error("Failed to fetch newly created lookup table");
+  }
+  const lutState = AddressLookupTableAccount.deserialize(lutRaw.data);
+  return new AddressLookupTableAccount({
+    key: lutAddress,
+    state: lutState,
+  });
 };
 
 /**
@@ -468,7 +652,7 @@ export const buildHealthRemainingAccounts = async (
  */
 export async function advanceBankrunClock(
   ctx: ProgramTestContext,
-  seconds: number
+  seconds: number,
 ): Promise<number> {
   const { Clock } = await import("solana-bankrun");
   const clock = await ctx.banksClient.getClock();
@@ -477,7 +661,7 @@ export async function advanceBankrunClock(
     clock.epochStartTimestamp,
     clock.epoch,
     clock.leaderScheduleEpoch,
-    clock.unixTimestamp + BigInt(seconds)
+    clock.unixTimestamp + BigInt(seconds),
   );
   ctx.setClock(newClock);
   return Number(newClock.unixTimestamp);

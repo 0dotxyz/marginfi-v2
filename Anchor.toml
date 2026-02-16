@@ -44,7 +44,7 @@ wallet = "~/.config/solana/id.json"
 
 # (remove RUST_LOG= to see bankRun logs)
 [scripts]
-test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/jlr*.spec.ts --exit --require tests/rootHooks.ts"
+test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.ts --exit --require tests/rootHooks.ts"
 
 # All tests (for CI)
 all-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.ts --exit --require tests/rootHooks.ts"

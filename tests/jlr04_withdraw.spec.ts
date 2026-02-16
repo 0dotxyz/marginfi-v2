@@ -5,7 +5,6 @@ import {
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import {
-  AddressLookupTableAccount,
   ComputeBudgetProgram,
   Keypair,
   PublicKey,
@@ -47,8 +46,10 @@ import { makeJuplendWithdrawSimpleIx } from "./utils/juplend/shorthand-instructi
 import { accountInit } from "./utils/user-instructions";
 import {
   buildHealthRemainingAccounts,
+  createLookupTableForInstructions,
   mintToTokenAccount,
   processBankrunTransaction,
+  processBankrunV0Transaction,
 } from "./utils/tools";
 import { advanceOneHour, dummyIx } from "./utils/bankrunConnection";
 import { getBankrunBlockhash } from "./utils/spl-staking-utils";
@@ -96,7 +97,6 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
   let liquidityVaultAuthorityPk = PublicKey.default;
   let fTokenVaultPk = PublicKey.default;
   let withdrawIntermediaryAtaPk = PublicKey.default;
-  let jlrLutAccount: AddressLookupTableAccount | null = null;
 
   before(async () => {
     juplendPrograms = getJuplendPrograms();
@@ -107,13 +107,6 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     user0MarginfiAccountPk = juplendAccounts.get(
       JUPLEND_STATE_KEYS.jlr02User0MarginfiAccount,
     );
-    const jlrLutPk = juplendAccounts.get(JUPLEND_STATE_KEYS.jlr01LookupTable);
-    const jlrLutRaw = await banksClient.getAccount(jlrLutPk);
-    const jlrLutState = AddressLookupTableAccount.deserialize(jlrLutRaw.data);
-    jlrLutAccount = new AddressLookupTableAccount({
-      key: jlrLutPk,
-      state: jlrLutState,
-    });
 
     const bank = await bankrunProgram.account.bank.fetch(usdcJupBankPk);
     usdcJupPool = deriveJuplendPoolKeys({ mint: bank.mint });
@@ -340,14 +333,19 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     }
 
     if (useLut) {
+      const lutAccount = await createLookupTableForInstructions(
+        bankrunContext,
+        user.wallet,
+        tx.instructions,
+      );
       const blockhash = await getBankrunBlockhash(bankrunContext);
       const messageV0 = new TransactionMessage({
         payerKey: user.wallet.publicKey,
         recentBlockhash: blockhash,
         instructions: tx.instructions,
-      }).compileToV0Message([jlrLutAccount!]);
+      }).compileToV0Message([lutAccount]);
       const vtx = new VersionedTransaction(messageV0);
-      return processBankrunTransaction(
+      return processBankrunV0Transaction(
         bankrunContext,
         vtx,
         [user.wallet],
