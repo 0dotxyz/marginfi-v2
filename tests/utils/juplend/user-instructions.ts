@@ -2,13 +2,9 @@ import { BN, Program } from "@coral-xyz/anchor";
 import {
   AccountMeta,
   PublicKey,
-  SystemProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
-import {
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-  TOKEN_PROGRAM_ID,
-} from "@solana/spl-token";
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 
 import { Marginfi } from "../../../target/types/marginfi";
 import type {
@@ -22,7 +18,6 @@ export type JuplendDepositAccounts = {
   // authority: PublicKey;
   signerTokenAccount: PublicKey;
   bank: PublicKey;
-  fTokenVault: PublicKey;
   pool: JuplendPoolKeys;
   amount: BN;
   tokenProgram?: PublicKey;
@@ -68,15 +63,12 @@ export type JuplendWithdrawAccounts = {
   marginfiAccount: PublicKey;
   destinationTokenAccount: PublicKey;
   bank: PublicKey;
-  withdrawIntermediaryAta: PublicKey;
   pool: JuplendPoolKeys;
   claimAccount: PublicKey;
   amount: BN;
   withdrawAll?: boolean;
   remainingAccounts?: PublicKey[];
   tokenProgram?: PublicKey;
-  associatedTokenProgram?: PublicKey;
-  systemProgram?: PublicKey;
 };
 
 /**
@@ -103,7 +95,7 @@ export const makeJuplendWithdrawIx = async (
       marginfiAccount: accounts.marginfiAccount,
       destinationTokenAccount: accounts.destinationTokenAccount,
       bank: accounts.bank,
-      integrationAcc3: accounts.withdrawIntermediaryAta,
+      // integrationAcc3: accounts.withdrawIntermediaryAta,
       lendingAdmin: accounts.pool.lendingAdmin,
       supplyTokenReservesLiquidity: accounts.pool.tokenReserve,
       lendingSupplyPositionOnLiquidity:
@@ -114,11 +106,8 @@ export const makeJuplendWithdrawIx = async (
       liquidity: accounts.pool.liquidity,
       liquidityProgram: accounts.pool.liquidityProgram,
       rewardsRateModel: accounts.pool.lendingRewardsRateModel,
-      tokenProgram:
-        accounts.tokenProgram ?? accounts.pool.tokenProgram ?? TOKEN_PROGRAM_ID,
-      associatedTokenProgram:
-        accounts.associatedTokenProgram ?? ASSOCIATED_TOKEN_PROGRAM_ID,
-      systemProgram: accounts.systemProgram ?? SystemProgram.programId,
+      tokenProgram: accounts.tokenProgram ?? TOKEN_PROGRAM_ID,
+      // systemProgram: accounts.systemProgram ?? SystemProgram.programId,
     })
     .accountsPartial({
       fTokenMint: accounts.pool.fTokenMint,
@@ -157,7 +146,7 @@ export const makeJuplendNativeLendingDepositIx = async (
       rateModel: accounts.pool.rateModel,
       vault: accounts.pool.vault,
       liquidity: accounts.pool.liquidity,
-      liquidityProgram: accounts.pool.liquidityProgram,
+      // liquidityProgram: accounts.pool.liquidityProgram,
       rewardsRateModel: accounts.pool.lendingRewardsRateModel,
       tokenProgram:
         accounts.tokenProgram ?? accounts.pool.tokenProgram ?? TOKEN_PROGRAM_ID,
@@ -188,26 +177,28 @@ export const makeJuplendNativePreOperateIx = async (
   return program.methods
     .preOperate(accounts.mint)
     .accounts({
-      protocol: accounts.protocol,
+      // protocol: accounts.protocol,
       liquidity: accounts.pool.liquidity,
       userSupplyPosition: accounts.userSupplyPosition,
       userBorrowPosition: accounts.userBorrowPosition,
-      vault: accounts.pool.vault,
+      // vault: accounts.pool.vault,
       tokenReserve: accounts.pool.tokenReserve,
-      tokenProgram:
-        accounts.tokenProgram ?? accounts.pool.tokenProgram ?? TOKEN_PROGRAM_ID,
+      tokenProgram: accounts.tokenProgram ?? TOKEN_PROGRAM_ID,
+    })
+    .accountsPartial({
+      // Same reason as `operate`: this account is relation-derived in IDL and
+      // Anchor TS resolution can fail with max-depth recursion.
+      protocol: accounts.protocol,
     })
     .instruction();
 };
 
 export type JuplendNativeBorrowAccounts = {
   protocol: PublicKey;
-  mint: PublicKey;
   pool: JuplendPoolKeys;
   userSupplyPosition: PublicKey;
   userBorrowPosition: PublicKey;
   borrowTo: PublicKey;
-  borrowToAccount: PublicKey;
   borrowAmount: BN;
   tokenProgram?: PublicKey;
 };
@@ -228,31 +219,34 @@ export const makeJuplendNativeBorrowIx = async (
       { direct: {} },
     )
     .accounts({
-      protocol: accounts.protocol,
       liquidity: accounts.pool.liquidity,
       tokenReserve: accounts.pool.tokenReserve,
-      mint: accounts.mint,
-      vault: accounts.pool.vault,
       userSupplyPosition: accounts.userSupplyPosition,
       userBorrowPosition: accounts.userBorrowPosition,
       rateModel: accounts.pool.rateModel,
-      borrowToAccount: accounts.borrowToAccount,
       borrowClaimAccount: null,
       withdrawClaimAccount: null,
-      tokenProgram:
-        accounts.tokenProgram ?? accounts.pool.tokenProgram ?? TOKEN_PROGRAM_ID,
+      tokenProgram: accounts.tokenProgram ?? TOKEN_PROGRAM_ID,
+    })
+    .accountsPartial({
+      // `protocol` in the Liquidity IDL is relation-only (derived from user positions),
+      // not seed-derived from args. Anchor's TS resolver often fails relation-only
+      // resolution here with recursive dependency/depth errors, so we pass it explicitly.
+      protocol: accounts.protocol,
     })
     .instruction();
 };
 
 export type JuplendNativeUpdateRateAccounts = {
-  pool: JuplendPoolKeys;
+  lending: PublicKey;
+  tokenReserve: PublicKey;
+  rewardsRateModel: PublicKey;
 };
 
 /**
  * Build native JupLend `updateRate()`.
  *
- * Useful right before `healthPulse` so Jup lending state is fresh in the same tx.
+ * Use before any risk check so Jup lending state is fresh in the same tx.
  */
 export const makeJuplendNativeUpdateRateIx = async (
   program: Program<JuplendLendingIdl>,
@@ -260,12 +254,10 @@ export const makeJuplendNativeUpdateRateIx = async (
 ): Promise<TransactionInstruction> => {
   return program.methods
     .updateRate()
-    .accountsPartial({
-      lending: accounts.pool.lending,
-      mint: accounts.pool.mint,
-      fTokenMint: accounts.pool.fTokenMint,
-      supplyTokenReservesLiquidity: accounts.pool.tokenReserve,
-      rewardsRateModel: accounts.pool.lendingRewardsRateModel,
+    .accounts({
+      lending: accounts.lending,
+      supplyTokenReservesLiquidity: accounts.tokenReserve,
+      rewardsRateModel: accounts.rewardsRateModel,
     })
     .instruction();
 };

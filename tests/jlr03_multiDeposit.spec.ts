@@ -35,10 +35,8 @@ import {
   ORACLE_CONF_INTERVAL,
 } from "./utils/types";
 import { deriveJuplendPoolKeys } from "./utils/juplend/juplend-pdas";
-import {
-  makeJuplendDepositIx,
-  makeJuplendNativeUpdateRateIx,
-} from "./utils/juplend/user-instructions";
+import { makeJuplendDepositIx } from "./utils/juplend/user-instructions";
+import { refreshJupSimple } from "./utils/juplend/shorthand-instructions";
 import { getJuplendPrograms } from "./utils/juplend/programs";
 import { JUPLEND_STATE_KEYS } from "./utils/juplend/test-state";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
@@ -171,18 +169,12 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
         getTokenBalance(bankRunProvider, user.lstAlphaAccount),
       ]);
 
-    const tokenAJupBank = await bankrunProgram.account.bank.fetch(
-      jupTokenABankPk,
-    );
-    const wsolJupBank = await bankrunProgram.account.bank.fetch(jupWsolBankPk);
-
     const depositTokenAJupIx = await makeJuplendDepositIx(
       user.mrgnBankrunProgram!,
       {
         marginfiAccount: userMarginfiAccountPk,
         signerTokenAccount: user.tokenAAccount,
         bank: jupTokenABankPk,
-        fTokenVault: tokenAJupBank.integrationAcc2,
         pool: jupCtxByBank.get(jupTokenABankPk.toBase58())!.pool,
         amount: JUP_TOKEN_A_DEPOSIT,
       },
@@ -194,7 +186,6 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
         marginfiAccount: userMarginfiAccountPk,
         signerTokenAccount: user.wsolAccount,
         bank: jupWsolBankPk,
-        fTokenVault: wsolJupBank.integrationAcc2,
         pool: jupCtxByBank.get(jupWsolBankPk.toBase58())!.pool,
         amount: JUP_WSOL_DEPOSIT,
       },
@@ -279,9 +270,7 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
       const jupCtx = jupCtxByBank.get(balance.bankPk.toBase58());
       if (jupCtx) {
         refreshRateIxs.push(
-          await makeJuplendNativeUpdateRateIx(juplendPrograms.lending, {
-            pool: jupCtx.pool,
-          }),
+          await refreshJupSimple(juplendPrograms.lending, { pool: jupCtx.pool }),
         );
       }
     }

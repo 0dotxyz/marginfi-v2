@@ -172,7 +172,6 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       marginfiAccount: user0MarginfiAccount.publicKey,
       signerTokenAccount: user.usdcAccount,
       bank: usdcJupBankPk,
-      fTokenVault: fTokenVaultPk,
       pool: usdcJupPool,
       amount: USER_DEPOSIT_AMOUNT,
     });
@@ -418,12 +417,10 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       }),
       makeJuplendNativeBorrowIx(juplendPrograms.liquidity, {
         protocol: groupAdmin.wallet.publicKey,
-        mint: usdcJupPool.mint,
         pool: usdcJupPool,
         userSupplyPosition: adminUsdcSupplyPosition,
         userBorrowPosition: adminUsdcBorrowPosition,
         borrowTo: groupAdmin.wallet.publicKey,
-        borrowToAccount: groupAdmin.usdcAccount,
         borrowAmount: NATIVE_USDC_BORROW_AMOUNT,
       }),
     ]);
@@ -677,7 +674,6 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       marginfiAccount: user0MarginfiAccount.publicKey,
       signerTokenAccount: user.usdcAccount,
       bank: usdcJupBankPk,
-      fTokenVault: fTokenVaultPk,
       pool: usdcJupPool,
       amount: USER_DEPOSIT_AMOUNT,
     });

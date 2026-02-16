@@ -1,10 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 
 import type { JuplendPrograms } from "./types";
-import type {
-  JuplendBorrowConfig,
-  JuplendUserClassEntry,
-} from "./types";
+import type { JuplendBorrowConfig, JuplendUserClassEntry } from "./types";
 import {
   JUPLEND_LENDING_PROGRAM_ID,
   JUPLEND_LIQUIDITY_PROGRAM_ID,
@@ -18,7 +15,7 @@ export type InitJuplendLiquidityArgs = {
 
 export const initJuplendLiquidityIx = (
   programs: JuplendPrograms,
-  args: InitJuplendLiquidityArgs
+  args: InitJuplendLiquidityArgs,
 ) => {
   return programs.liquidity.methods
     .initLiquidity(args.authority, args.revenueCollector)
@@ -36,12 +33,12 @@ export type InitJuplendLendingRewardsAdminArgs = {
 
 export const initJuplendLendingRewardsAdminIx = (
   programs: JuplendPrograms,
-  args: InitJuplendLendingRewardsAdminArgs
+  args: InitJuplendLendingRewardsAdminArgs,
 ) => {
   return programs.rewards.methods
     .initLendingRewardsAdmin(
       args.authority,
-      args.lendingProgram ?? JUPLEND_LENDING_PROGRAM_ID
+      args.lendingProgram ?? JUPLEND_LENDING_PROGRAM_ID,
     )
     .accounts({
       signer: args.signer,
@@ -58,13 +55,13 @@ export type InitJuplendLendingAdminArgs = {
 
 export const initJuplendLendingAdminIx = (
   programs: JuplendPrograms,
-  args: InitJuplendLendingAdminArgs
+  args: InitJuplendLendingAdminArgs,
 ) => {
   return programs.lending.methods
     .initLendingAdmin(
       args.liquidityProgram ?? JUPLEND_LIQUIDITY_PROGRAM_ID,
       args.adminAuthority,
-      args.rebalancer
+      args.rebalancer,
     )
     .accounts({
       authority: args.authority,
@@ -82,7 +79,7 @@ export type InitJuplendProtocolPositionsArgs = {
 
 export const initJuplendProtocolPositionsIx = (
   programs: JuplendPrograms,
-  args: InitJuplendProtocolPositionsArgs
+  args: InitJuplendProtocolPositionsArgs,
 ) => {
   return programs.liquidity.methods
     .initNewProtocol(args.supplyMint, args.borrowMint, args.protocol)
@@ -101,7 +98,7 @@ export type UpdateJuplendUserClassArgs = {
 
 export const updateJuplendUserClassIx = (
   programs: JuplendPrograms,
-  args: UpdateJuplendUserClassArgs
+  args: UpdateJuplendUserClassArgs,
 ) => {
   return programs.liquidity.methods
     .updateUserClass(args.entries)
@@ -125,7 +122,7 @@ export type UpdateJuplendUserBorrowConfigArgs = {
 
 export const updateJuplendUserBorrowConfigIx = (
   programs: JuplendPrograms,
-  args: UpdateJuplendUserBorrowConfigArgs
+  args: UpdateJuplendUserBorrowConfigArgs,
 ) => {
   return programs.liquidity.methods
     .updateUserBorrowConfig({
@@ -137,12 +134,15 @@ export const updateJuplendUserBorrowConfigIx = (
     })
     .accounts({
       authority: args.authority,
-      protocol: args.protocol,
+      // protocol: args.protocol,
       authList: args.authList,
       rateModel: args.rateModel,
-      mint: args.mint,
+      // mint: args.mint,
       tokenReserve: args.tokenReserve,
       userBorrowPosition: args.userBorrowPosition,
+    })
+    .accountsPartial({
+      protocol: args.protocol,
     })
     .instruction();
 };

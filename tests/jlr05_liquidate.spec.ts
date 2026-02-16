@@ -4,10 +4,17 @@ import {
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
 import {
+  createAssociatedTokenAccountIdempotentInstruction,
+  getAssociatedTokenAddressSync,
+} from "@solana/spl-token";
+import {
+  AddressLookupTableAccount,
   ComputeBudgetProgram,
   Keypair,
   PublicKey,
   Transaction,
+  TransactionMessage,
+  VersionedTransaction,
 } from "@solana/web3.js";
 import BigNumber from "bignumber.js";
 import { assert } from "chai";
@@ -24,18 +31,40 @@ import {
   users,
 } from "./rootHooks";
 import {
+  assertKeyDefault,
+  assertKeysEqual,
   assertBNEqual,
   assertBNGreaterThan,
   getTokenBalance,
 } from "./utils/genericTests";
-import { deriveJuplendPoolKeys } from "./utils/juplend/juplend-pdas";
-import { makeJuplendDepositIx } from "./utils/juplend/user-instructions";
+import {
+  deriveLiquidityVaultAuthority,
+  deriveLiquidationRecord,
+} from "./utils/pdas";
+import {
+  deriveJuplendPoolKeys,
+} from "./utils/juplend/juplend-pdas";
+import {
+  makeJuplendDepositIx,
+} from "./utils/juplend/user-instructions";
+import {
+  makeJuplendWithdrawSimpleIx,
+  refreshJupSimple,
+} from "./utils/juplend/shorthand-instructions";
+import { getJuplendPrograms } from "./utils/juplend/programs";
 import { JUPLEND_STATE_KEYS } from "./utils/juplend/test-state";
 import {
   accountInit,
   borrowIx,
+  composeRemainingAccounts,
+  composeRemainingAccountsMetaBanksOnly,
+  composeRemainingAccountsWriteableMeta,
+  endLiquidationIx,
   healthPulse,
+  initLiquidationRecordIx,
   liquidateIx,
+  repayIx,
+  startLiquidationIx,
 } from "./utils/user-instructions";
 import { configureBank } from "./utils/group-instructions";
 import {
@@ -47,12 +76,15 @@ import {
   defaultBankConfigOptRaw,
 } from "./utils/types";
 import {
+  bytesToF64,
   buildHealthRemainingAccounts,
   logHealthCache,
   mintToTokenAccount,
   processBankrunTransaction,
 } from "./utils/tools";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
+import { getBankrunBlockhash } from "./utils/spl-staking-utils";
+import { advanceFiveMinutes } from "./utils/bankrunConnection";
 
 const USER1_ACCOUNT_SEED = Buffer.from("JLR05_USER1_ACCOUNT_SEED_0000000");
 const user1MarginfiAccount = Keypair.fromSeed(USER1_ACCOUNT_SEED);
@@ -60,16 +92,23 @@ const user1MarginfiAccount = Keypair.fromSeed(USER1_ACCOUNT_SEED);
 const JUP_USDC_DEPOSIT_AMOUNT = new BN(100 * 10 ** ecosystem.usdcDecimals);
 const TOKEN_B_BORROW_AMOUNT = new BN(2.5 * 10 ** ecosystem.tokenBDecimals); // 2.5 TOKEN_B (~$50 nominal)
 const JUP_USDC_LIQUIDATION_AMOUNT = new BN(1 * 10 ** ecosystem.usdcDecimals); // 1 USDC
+const RECEIVERSHIP_WITHDRAW_USDC = new BN(1 * 10 ** ecosystem.usdcDecimals); // 1 USDC
+const RECEIVERSHIP_REPAY_TOKEN_B = new BN(
+  0.05 * 10 ** ecosystem.tokenBDecimals,
+); // 0.05 TOKEN_B ($1)
 const LIAB_WEIGHT_INDUCED = 2;
 
 describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () => {
+  let juplendPrograms: ReturnType<typeof getJuplendPrograms>;
   let user = users[1];
   let groupPk = PublicKey.default;
   let jupUsdcBankPk = PublicKey.default;
   let regTokenBBankPk = PublicKey.default;
   let user0MarginfiAccountPk = PublicKey.default;
+  let jlrLutAccount: AddressLookupTableAccount | null = null;
 
   before(async () => {
+    juplendPrograms = getJuplendPrograms();
     user = users[1];
     groupPk = juplendAccounts.get(JUPLEND_STATE_KEYS.jlr01Group);
     jupUsdcBankPk = juplendAccounts.get(JUPLEND_STATE_KEYS.jlr01BankUsdc);
@@ -79,6 +118,13 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
     user0MarginfiAccountPk = juplendAccounts.get(
       JUPLEND_STATE_KEYS.jlr02User0MarginfiAccount,
     );
+    const jlrLutPk = juplendAccounts.get(JUPLEND_STATE_KEYS.jlr01LookupTable);
+    const jlrLutRaw = await banksClient.getAccount(jlrLutPk);
+    const jlrLutState = AddressLookupTableAccount.deserialize(jlrLutRaw.data);
+    jlrLutAccount = new AddressLookupTableAccount({
+      key: jlrLutPk,
+      state: jlrLutState,
+    });
 
     await mintToTokenAccount(
       ecosystem.usdcMint.publicKey,
@@ -114,7 +160,6 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       marginfiAccount: user1MarginfiAccount.publicKey,
       signerTokenAccount: user.usdcAccount,
       bank: jupUsdcBankPk,
-      fTokenVault: jupUsdcBank.integrationAcc2,
       pool: usdcPool,
       amount: JUP_USDC_DEPOSIT_AMOUNT,
     });
@@ -244,10 +289,8 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
   });
 
   /**
-   * Before reweight:
-   * - Collateral is Jup USDC (haircut by oracle confidence + bank weight), around ~$100
-   * - Liability is TokenB debt, around ~$50
-   * - Net health > 0
+   * - Collateral is 100 Jup USDC, ~$100
+   * - Liability is 2.5 TokenB debt, ~$50
    */
   it("(user 0) partially liquidates user 1 after TokenB liability reweight - happy path", async () => {
     const reweightConfig = defaultBankConfigOptRaw();
@@ -309,6 +352,11 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       bankrunProgram.account.bank.fetch(jupUsdcBankPk),
       bankrunProgram.account.bank.fetch(regTokenBBankPk),
     ]);
+    const jupPool = deriveJuplendPoolKeys({ mint: assetBank.mint });
+
+    // Force oracles to be stale so we must refresh within the tx.
+    await advanceFiveMinutes(banksClient, bankrunContext);
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 
     const liquidatorRemaining = await buildHealthRemainingAccounts(
       user0MarginfiAccountPk,
@@ -338,6 +386,7 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       bankrunContext,
       new Transaction().add(
         ComputeBudgetProgram.setComputeUnitLimit({ units: 450_000 }),
+        await refreshJupSimple(juplendPrograms.lending, { pool: jupPool }),
         liqIx,
       ),
       [users[0].wallet],
@@ -377,6 +426,238 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
 
     logHealthCache(
       "jlr05 user 1 health after partial liquidation",
+      healthAfter,
+    );
+  });
+
+  it("(user 0) liquidates user 1 with receivership - happy path", async () => {
+    // Force oracles to be stale so we must refresh within the tx.
+    await advanceFiveMinutes(banksClient, bankrunContext);
+
+    const liquidator = users[0];
+    const liquidateeAccountPk = user1MarginfiAccount.publicKey;
+    const [liqRecordKey] = deriveLiquidationRecord(
+      bankrunProgram.programId,
+      liquidateeAccountPk,
+    );
+
+    await mintToTokenAccount(
+      ecosystem.tokenBMint.publicKey,
+      liquidator.tokenBAccount,
+      RECEIVERSHIP_REPAY_TOKEN_B.mul(new BN(4)),
+    );
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+
+    const pulseBeforeRxIx = await healthPulse(user.mrgnBankrunProgram!, {
+      marginfiAccount: liquidateeAccountPk,
+      remaining: await buildHealthRemainingAccounts(liquidateeAccountPk),
+    });
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(pulseBeforeRxIx),
+      [user.wallet],
+      false,
+      true,
+    );
+
+    const liquidateeBefore = await bankrunProgram.account.marginfiAccount.fetch(
+      liquidateeAccountPk,
+    );
+    assertKeyDefault(liquidateeBefore.liquidationRecord);
+    const healthBefore = liquidateeBefore.healthCache;
+    const netHealthBefore = wrappedI80F48toBigNumber(
+      healthBefore.assetValue,
+    ).minus(wrappedI80F48toBigNumber(healthBefore.liabilityValue));
+
+    const initLiqRecordIx = await initLiquidationRecordIx(
+      liquidator.mrgnBankrunProgram!,
+      {
+        marginfiAccount: liquidateeAccountPk,
+        feePayer: liquidator.wallet.publicKey,
+      },
+    );
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(initLiqRecordIx),
+      [liquidator.wallet],
+      false,
+      true,
+    );
+
+    const recordBefore = await bankrunProgram.account.liquidationRecord.fetch(
+      liqRecordKey,
+    );
+    assertKeysEqual(recordBefore.key, liqRecordKey);
+    assertKeysEqual(recordBefore.marginfiAccount, liquidateeAccountPk);
+    assertKeysEqual(recordBefore.recordPayer, liquidator.wallet.publicKey);
+
+    const [assetBank, liabBank] = await Promise.all([
+      bankrunProgram.account.bank.fetch(jupUsdcBankPk),
+      bankrunProgram.account.bank.fetch(regTokenBBankPk),
+    ]);
+    const jupPool = deriveJuplendPoolKeys({ mint: assetBank.mint });
+    const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
+      bankrunProgram.programId,
+      jupUsdcBankPk,
+    );
+    const withdrawIntermediaryAta = assetBank.integrationAcc3;
+    const expectedIntermediaryAta = getAssociatedTokenAddressSync(
+      assetBank.mint,
+      liquidityVaultAuthority,
+      true,
+      jupPool.tokenProgram,
+    );
+    assertKeysEqual(withdrawIntermediaryAta, expectedIntermediaryAta);
+
+    const createWithdrawIntermediaryAtaIx =
+      createAssociatedTokenAccountIdempotentInstruction(
+        liquidator.wallet.publicKey,
+        withdrawIntermediaryAta,
+        liquidityVaultAuthority,
+        assetBank.mint,
+        jupPool.tokenProgram,
+      );
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(createWithdrawIntermediaryAtaIx),
+      [liquidator.wallet],
+      false,
+      true,
+    );
+
+    const assetGroup: PublicKey[] = [
+      jupUsdcBankPk,
+      assetBank.config.oracleKeys[0],
+    ];
+    if (!assetBank.config.oracleKeys[1].equals(PublicKey.default)) {
+      assetGroup.push(assetBank.config.oracleKeys[1]);
+    }
+    const liabGroup: PublicKey[] = [
+      regTokenBBankPk,
+      liabBank.config.oracleKeys[0],
+    ];
+    if (!liabBank.config.oracleKeys[1].equals(PublicKey.default)) {
+      liabGroup.push(liabBank.config.oracleKeys[1]);
+    }
+    const remainingGroups: PublicKey[][] = [assetGroup, liabGroup];
+    const remaining = composeRemainingAccounts(remainingGroups);
+    const remainingStart =
+      composeRemainingAccountsWriteableMeta(remainingGroups);
+    const remainingEnd = composeRemainingAccountsMetaBanksOnly(remainingGroups);
+
+    const liquidatorUsdcBefore = await getTokenBalance(
+      bankRunProvider,
+      liquidator.usdcAccount,
+    );
+    const liquidatorTokenBBefore = await getTokenBalance(
+      bankRunProvider,
+      liquidator.tokenBAccount,
+    );
+
+    const rxLiquidationIxs = [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 1_300_000 }),
+      await refreshJupSimple(juplendPrograms.lending, { pool: jupPool }),
+      await startLiquidationIx(liquidator.mrgnBankrunProgram!, {
+        marginfiAccount: liquidateeAccountPk,
+        liquidationReceiver: liquidator.wallet.publicKey,
+        remaining: remainingStart,
+      }),
+      await makeJuplendWithdrawSimpleIx(liquidator.mrgnBankrunProgram!, {
+        marginfiAccount: liquidateeAccountPk,
+        destinationTokenAccount: liquidator.usdcAccount,
+        bank: jupUsdcBankPk,
+        pool: jupPool,
+        amount: RECEIVERSHIP_WITHDRAW_USDC,
+        remainingAccounts: remaining,
+      }),
+      await repayIx(liquidator.mrgnBankrunProgram!, {
+        marginfiAccount: liquidateeAccountPk,
+        bank: regTokenBBankPk,
+        tokenAccount: liquidator.tokenBAccount,
+        amount: RECEIVERSHIP_REPAY_TOKEN_B,
+      }),
+      await endLiquidationIx(liquidator.mrgnBankrunProgram!, {
+        marginfiAccount: liquidateeAccountPk,
+        remaining: remainingEnd,
+      }),
+    ];
+
+    const blockhash = await getBankrunBlockhash(bankrunContext);
+    const messageV0 = new TransactionMessage({
+      payerKey: liquidator.wallet.publicKey,
+      recentBlockhash: blockhash,
+      instructions: rxLiquidationIxs,
+    }).compileToV0Message([jlrLutAccount!]);
+    const rxLiquidationTx = new VersionedTransaction(messageV0);
+    await processBankrunTransaction(
+      bankrunContext,
+      rxLiquidationTx,
+      [liquidator.wallet],
+      false,
+      true,
+    );
+
+    const liquidatorUsdcAfter = await getTokenBalance(
+      bankRunProvider,
+      liquidator.usdcAccount,
+    );
+    const liquidatorTokenBAfter = await getTokenBalance(
+      bankRunProvider,
+      liquidator.tokenBAccount,
+    );
+    assertBNEqual(
+      new BN(liquidatorUsdcAfter - liquidatorUsdcBefore),
+      RECEIVERSHIP_WITHDRAW_USDC,
+    );
+    assertBNEqual(
+      new BN(liquidatorTokenBBefore - liquidatorTokenBAfter),
+      RECEIVERSHIP_REPAY_TOKEN_B,
+    );
+
+    const recordAfter = await bankrunProgram.account.liquidationRecord.fetch(
+      liqRecordKey,
+    );
+    const rxEntry = recordAfter.entries[3];
+    assert(rxEntry.timestamp.toNumber() > 0);
+
+    const seizedUsd = bytesToF64(rxEntry.assetAmountSeized);
+    const repaidUsd = bytesToF64(rxEntry.liabAmountRepaid);
+    const confBps = ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
+    const expectedSeizedUsd =
+      (RECEIVERSHIP_WITHDRAW_USDC.toNumber() / 10 ** ecosystem.usdcDecimals) *
+      ecosystem.usdcPrice *
+      (1 - confBps);
+    const expectedRepaidUsd =
+      (RECEIVERSHIP_REPAY_TOKEN_B.toNumber() / 10 ** ecosystem.tokenBDecimals) *
+      ecosystem.tokenBPrice *
+      (1 + confBps);
+
+    assert.approximately(seizedUsd, expectedSeizedUsd, 0.001);
+    assert.approximately(repaidUsd, expectedRepaidUsd, 0.001);
+
+    const pulseAfterRxIx = await healthPulse(user.mrgnBankrunProgram!, {
+      marginfiAccount: liquidateeAccountPk,
+      remaining: await buildHealthRemainingAccounts(liquidateeAccountPk),
+    });
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(pulseAfterRxIx),
+      [user.wallet],
+      false,
+      true,
+    );
+
+    const liquidateeAfter = await bankrunProgram.account.marginfiAccount.fetch(
+      liquidateeAccountPk,
+    );
+    const healthAfter = liquidateeAfter.healthCache;
+    const netHealthAfter = wrappedI80F48toBigNumber(
+      healthAfter.assetValue,
+    ).minus(wrappedI80F48toBigNumber(healthAfter.liabilityValue));
+    assert.ok(netHealthAfter.gt(netHealthBefore));
+
+    logHealthCache(
+      "jlr05 user 1 health after receivership liquidation",
       healthAfter,
     );
   });

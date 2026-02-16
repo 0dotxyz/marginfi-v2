@@ -1,3 +1,4 @@
+// Helps alias in which test an account originates and gives it a cleaner name
 export const JUPLEND_STATE_KEYS = {
   jlr01Group: "jlr01_group",
   jlr01BankUsdc: "jlr01_bank_usdc",

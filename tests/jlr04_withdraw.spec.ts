@@ -18,7 +18,6 @@ import BigNumber from "bignumber.js";
 import {
   BanksTransactionMeta,
   BanksTransactionResultWithMeta,
-  Clock,
 } from "solana-bankrun";
 
 import {
@@ -39,28 +38,22 @@ import {
   getTokenBalance,
 } from "./utils/genericTests";
 import { deriveLiquidityVaultAuthority } from "./utils/pdas";
-import {
-  deriveJuplendPoolKeys,
-  findJuplendClaimAccountPda,
-} from "./utils/juplend/juplend-pdas";
+import { deriveJuplendPoolKeys } from "./utils/juplend/juplend-pdas";
 import { getJuplendPrograms } from "./utils/juplend/programs";
 import type { JuplendPoolKeys } from "./utils/juplend/types";
 import { JUPLEND_STATE_KEYS } from "./utils/juplend/test-state";
-import {
-  makeJuplendDepositIx,
-  makeJuplendWithdrawIx,
-} from "./utils/juplend/user-instructions";
+import { makeJuplendDepositIx } from "./utils/juplend/user-instructions";
+import { makeJuplendWithdrawSimpleIx } from "./utils/juplend/shorthand-instructions";
 import { accountInit } from "./utils/user-instructions";
 import {
   buildHealthRemainingAccounts,
   mintToTokenAccount,
   processBankrunTransaction,
 } from "./utils/tools";
-import { dummyIx } from "./utils/bankrunConnection";
+import { advanceOneHour, dummyIx } from "./utils/bankrunConnection";
 import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 
 const EXCHANGE_PRICES_PRECISION = new BN("1000000000000");
-const ONE_HOUR_IN_SECONDS = 60 * 60;
 const USER1_ACCOUNT_SEED = Buffer.from("JLR04_USER1_ACCOUNT_SEED_0000000");
 const user1MarginfiAccount = Keypair.fromSeed(USER1_ACCOUNT_SEED);
 
@@ -103,7 +96,6 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
   let liquidityVaultAuthorityPk = PublicKey.default;
   let fTokenVaultPk = PublicKey.default;
   let withdrawIntermediaryAtaPk = PublicKey.default;
-  let claimAccountPk = PublicKey.default;
   let jlrLutAccount: AddressLookupTableAccount | null = null;
 
   before(async () => {
@@ -143,12 +135,6 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     assert.equal(
       withdrawIntermediaryAtaPk.toBase58(),
       expectedWithdrawIntermediaryAta.toBase58(),
-    );
-
-    [claimAccountPk] = findJuplendClaimAccountPda(
-      liquidityVaultAuthorityPk,
-      bank.mint,
-      usdcJupPool.liquidityProgram,
     );
 
     await mintToTokenAccount(
@@ -308,7 +294,6 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       marginfiAccount: activeMarginfiAccountPk,
       signerTokenAccount: user.usdcAccount,
       bank: usdcJupBankPk,
-      fTokenVault: fTokenVaultPk,
       pool: usdcJupPool,
       amount,
     });
@@ -335,13 +320,11 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       activeMarginfiAccountPk,
     );
 
-    const ix = await makeJuplendWithdrawIx(user.mrgnBankrunProgram!, {
+    const ix = await makeJuplendWithdrawSimpleIx(user.mrgnBankrunProgram!, {
       marginfiAccount: activeMarginfiAccountPk,
       destinationTokenAccount: user.usdcAccount,
       bank: usdcJupBankPk,
-      withdrawIntermediaryAta: withdrawIntermediaryAtaPk,
       pool: usdcJupPool,
-      claimAccount: claimAccountPk,
       amount,
       withdrawAll,
       remainingAccounts,
@@ -379,19 +362,6 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       [user.wallet],
       trySend,
       false,
-    );
-  };
-
-  const advanceOneHour = async () => {
-    const before = await banksClient.getClock();
-    bankrunContext.setClock(
-      new Clock(
-        before.slot,
-        before.epochStartTimestamp,
-        before.epoch,
-        before.leaderScheduleEpoch,
-        before.unixTimestamp + BigInt(ONE_HOUR_IN_SECONDS),
-      ),
     );
   };
 
@@ -572,7 +542,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       INTEREST_DEPOSIT_AMOUNT,
     );
 
-    await advanceOneHour();
+    await advanceOneHour(banksClient, bankrunContext);
 
     const beforeWithdrawAll = await fetchSnapshot();
     await executeWithdraw(new BN(0), true);
@@ -597,7 +567,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     );
 
     for (let i = 0; i < 3; i++) {
-      await advanceOneHour();
+    await advanceOneHour(banksClient, bankrunContext);
 
       const beforeWithdraw = await fetchSnapshot();
       await executeWithdraw(
