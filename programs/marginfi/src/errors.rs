@@ -108,10 +108,10 @@ pub enum MarginfiError {
     WrongNumberOfOracleAccounts,
     #[msg("Oracle error: wrong account keys")] // 6052
     WrongOracleAccountKeys,
-    #[msg("Pyth Push oracle: wrong account owner")] // 6053
-    PythPushWrongAccountOwner,
-    #[msg("Staked Pyth Push oracle: wrong account owner")] // 6054
-    StakedPythPushWrongAccountOwner,
+    #[msg("Vacated2")] // 6053
+    Vacated2,
+    #[msg("Vacated3")] // 6054
+    Vacated3,
     #[msg("Oracle max confidence exceeded: try again later")] // 6055
     OracleMaxConfidenceExceeded,
     #[msg("Pyth Push oracle: insufficient verification level")] // 6056
@@ -150,8 +150,8 @@ pub enum MarginfiError {
     WorseHealthPostLiquidation,
     #[msg("Exceeded the maximum allowed integration positions")] // 6073
     IntegrationPositionLimitExceeded,
-    #[msg("Vacated1")] // 6074
-    Vacated1,
+    #[msg("Maximum initial leverage exceeded")] // 6074
+    MaxInitLeverageExceeded,
     #[msg("The Emode config was invalid")] // 6075
     BadEmodeConfig,
     #[msg("TWAP window size does not match expected duration")] // 6076
@@ -210,6 +210,39 @@ pub enum MarginfiError {
     ZeroWithdrawalLimit,
     #[msg("Account is frozen by the group admin")] // 6103
     AccountFrozen,
+    #[msg("Cannot reference duplicate balances")] // 6104
+    DuplicateBalance,
+    #[msg("Invalid amount of balances referenced")] // 6105
+    InvalidBalanceCount,
+    #[msg("Liquidator not allowed to close order")] // 6106
+    LiquidatorOrderCloseNotAllowed,
+    #[msg("Order trigger is yet to be met")] // 6107
+    OrderTriggerNotMet,
+    #[msg("Order execution state issue. Check the necessary invariants i.e not in flashloan or disabled e.t.c")]
+    // 6108
+    UnexpectedOrderExecutionState,
+    #[msg("Order liability not closed")] // 6109
+    OrderLiabilityNotClosed,
+    #[msg("Invalid asset or liabilities count")] // 6110
+    InvalidAssetOrLiabilitiesCount,
+    #[msg("Account health can only worsen if account is healthy")] // 6111
+    WorseHealthPostExecution,
+    #[msg("TP must be > 0, SL must be > 0 and TP > SL if both are set")] // 6112
+    InvalidOrderTakeProfitOrStopLoss,
+    #[msg("Max slippage must be less than 100%")] // 6113
+    InvalidSlippage,
+    #[msg("Executor withdrew too much: slippage or max fee constraint violated")] // 6114
+    OrderExecutionOverWithdrawal,
+    #[msg("Bank hourly rate limit exceeded: try again later")] // 6115
+    BankHourlyRateLimitExceeded,
+    #[msg("Bank daily rate limit exceeded: try again later")] // 6116
+    BankDailyRateLimitExceeded,
+    #[msg("Group hourly rate limit exceeded: try again later")] // 6117
+    GroupHourlyRateLimitExceeded,
+    #[msg("Group daily rate limit exceeded: try again later")] // 6118
+    GroupDailyRateLimitExceeded,
+    #[msg("Invalid rate limit price: pass oracle or pre-crank cache")] // 6119
+    InvalidRateLimitPrice,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -236,8 +269,8 @@ pub enum MarginfiError {
     KaminoReserveValidationFailed, // 6210
     #[msg("Invalid oracle setup: only KaminoPythPush and KaminoSwitchboardPull are supported")]
     KaminoInvalidOracleSetup, // 6211
-    #[msg("Deprecated: Kamino position limit no longer enforced separately")]
-    VacatedError1, // 6212
+    #[msg("Maximum Maintenance leverage exceeded")]
+    MaxMaintLeverageExceeded, // 6212
     #[msg("Invalid Kamino reserve: account constraint violated")]
     InvalidKaminoReserve, // 6213
     #[msg("Invalid Kamino obligation: account constraint violated")]
@@ -442,8 +475,8 @@ impl From<u32> for MarginfiError {
             6050 => MarginfiError::PythPushStalePrice,
             6051 => MarginfiError::WrongNumberOfOracleAccounts,
             6052 => MarginfiError::WrongOracleAccountKeys,
-            6053 => MarginfiError::PythPushWrongAccountOwner,
-            6054 => MarginfiError::StakedPythPushWrongAccountOwner,
+            6053 => MarginfiError::Vacated2,
+            6054 => MarginfiError::Vacated3,
             6055 => MarginfiError::OracleMaxConfidenceExceeded,
             6056 => MarginfiError::PythPushInsufficientVerificationLevel,
             6057 => MarginfiError::ZeroAssetPrice,
@@ -463,7 +496,7 @@ impl From<u32> for MarginfiError {
             6071 => MarginfiError::TooSevereLiquidation,
             6072 => MarginfiError::WorseHealthPostLiquidation,
             6073 => MarginfiError::IntegrationPositionLimitExceeded,
-            6074 => MarginfiError::Vacated1,
+            6074 => MarginfiError::MaxInitLeverageExceeded,
             6075 => MarginfiError::BadEmodeConfig,
             6076 => MarginfiError::PythPushInvalidWindowSize,
             6077 => MarginfiError::InvalidFeesDestinationAccount,
@@ -492,6 +525,23 @@ impl From<u32> for MarginfiError {
             6100 => MarginfiError::FixedOraclePriceNegative,
             6101 => MarginfiError::DailyWithdrawalLimitExceeded,
             6102 => MarginfiError::ZeroWithdrawalLimit,
+            6103 => MarginfiError::AccountFrozen,
+            6104 => MarginfiError::DuplicateBalance,
+            6105 => MarginfiError::InvalidBalanceCount,
+            6106 => MarginfiError::LiquidatorOrderCloseNotAllowed,
+            6107 => MarginfiError::OrderTriggerNotMet,
+            6108 => MarginfiError::UnexpectedOrderExecutionState,
+            6109 => MarginfiError::OrderLiabilityNotClosed,
+            6110 => MarginfiError::InvalidAssetOrLiabilitiesCount,
+            6111 => MarginfiError::WorseHealthPostExecution,
+            6112 => MarginfiError::InvalidOrderTakeProfitOrStopLoss,
+            6113 => MarginfiError::InvalidSlippage,
+            6114 => MarginfiError::OrderExecutionOverWithdrawal,
+            6115 => MarginfiError::BankHourlyRateLimitExceeded,
+            6116 => MarginfiError::BankDailyRateLimitExceeded,
+            6117 => MarginfiError::GroupHourlyRateLimitExceeded,
+            6118 => MarginfiError::GroupDailyRateLimitExceeded,
+            6119 => MarginfiError::InvalidRateLimitPrice,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,
@@ -506,7 +556,7 @@ impl From<u32> for MarginfiError {
             6209 => MarginfiError::ObligationInitDepositInsufficient,
             6210 => MarginfiError::KaminoReserveValidationFailed,
             6211 => MarginfiError::KaminoInvalidOracleSetup,
-            6212 => MarginfiError::VacatedError1,
+            6212 => MarginfiError::MaxMaintLeverageExceeded,
             6213 => MarginfiError::InvalidKaminoReserve,
             6214 => MarginfiError::InvalidKaminoObligation,
 
@@ -595,8 +645,6 @@ impl MarginfiError {
                 | MarginfiError::PythPushInvalidAccount
                 | MarginfiError::SwitchboardWrongAccountOwner
                 | MarginfiError::PythPushInsufficientVerificationLevel
-                | MarginfiError::StakedPythPushWrongAccountOwner
-                | MarginfiError::PythPushWrongAccountOwner
                 | MarginfiError::WrongOracleAccountKeys
                 | MarginfiError::PythPushStalePrice
                 | MarginfiError::SwitchboardStalePrice

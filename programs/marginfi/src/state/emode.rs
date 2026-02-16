@@ -106,19 +106,40 @@ impl EmodeSettingsImpl for EmodeSettings {
             let asset_maint_w: I80F48 = I80F48::from(entry.asset_weight_maint);
 
             // Basic sanity checks
-            check!(asset_init_w >= I80F48::ZERO, MarginfiError::BadEmodeConfig);
-            check!(asset_maint_w >= asset_init_w, MarginfiError::BadEmodeConfig);
+            check!(
+                asset_init_w >= I80F48::ZERO,
+                MarginfiError::BadEmodeConfig,
+                "emode entry tag {}: asset_init_w ({}) must be >= 0",
+                entry.collateral_bank_emode_tag,
+                asset_init_w
+            );
+            check!(
+                asset_maint_w >= asset_init_w,
+                MarginfiError::BadEmodeConfig,
+                "emode entry tag {}: asset_maint_w ({}) must be >= asset_init_w ({})",
+                entry.collateral_bank_emode_tag,
+                asset_maint_w,
+                asset_init_w
+            );
 
             let max_leverage_init = calculate_max_leverage(asset_init_w, liab_init_w)?;
             check!(
                 max_leverage_init <= max_allowed_init_leverage,
-                MarginfiError::BadEmodeConfig
+                MarginfiError::MaxInitLeverageExceeded,
+                "emode entry tag {}: init leverage ({}) exceeds max allowed ({})",
+                entry.collateral_bank_emode_tag,
+                max_leverage_init,
+                max_allowed_init_leverage
             );
 
             let max_leverage_maint = calculate_max_leverage(asset_maint_w, liab_maint_w)?;
             check!(
                 max_leverage_maint <= max_allowed_maint_leverage,
-                MarginfiError::BadEmodeConfig
+                MarginfiError::MaxMaintLeverageExceeded,
+                "emode entry tag {}: maint leverage ({}) exceeds max allowed ({})",
+                entry.collateral_bank_emode_tag,
+                max_leverage_maint,
+                max_allowed_maint_leverage
             );
         }
 

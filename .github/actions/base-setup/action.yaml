@@ -46,4 +46,4 @@ runs:
         target/deploy
         target/idl
         target/types
-      key: anchor-build-slim-v1-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('programs/**/Cargo.lock') }}
+      key: anchor-build-slim-v2-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}

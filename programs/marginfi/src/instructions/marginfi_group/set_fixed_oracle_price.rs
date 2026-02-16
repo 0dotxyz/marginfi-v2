@@ -4,7 +4,9 @@ use crate::state::bank_config::BankConfigImpl;
 use crate::{check, errors::MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
-use marginfi_type_crate::constants::ASSET_TAG_STAKED;
+use marginfi_type_crate::constants::{
+    ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_STAKED,
+};
 use marginfi_type_crate::{
     constants::FREEZE_SETTINGS,
     types::{Bank, MarginfiGroup, OracleSetup, WrappedI80F48},
@@ -28,7 +30,16 @@ pub fn lending_pool_set_fixed_oracle_price(
         return err!(MarginfiError::Unauthorized);
     }
 
-    bank.config.oracle_setup = OracleSetup::Fixed;
+    bank.config.oracle_setup = if bank.config.asset_tag == ASSET_TAG_KAMINO {
+        OracleSetup::FixedKamino
+    } else if bank.config.asset_tag == ASSET_TAG_DRIFT {
+        OracleSetup::FixedDrift
+    } else if bank.config.asset_tag == ASSET_TAG_JUPLEND {
+        OracleSetup::FixedJuplend
+    } else {
+        OracleSetup::Fixed
+    };
+
     // Note: We leave the other keys in place to make it easier to restore Kamino/Staked/etc banks
     // to their original state. This can leave fixed banks in a somewhat awkward-looking state where
     // oracles[0] is empty and other slots are not.
@@ -45,7 +56,8 @@ pub fn lending_pool_set_fixed_oracle_price(
 
     bank.config.fixed_price = price;
 
-    bank.config.validate_oracle_setup(&[], None, None, None)?;
+    bank.config
+        .validate_oracle_setup(ctx.remaining_accounts, None, None, None)?;
 
     emit!(LendingPoolBankSetFixedOraclePriceEvent {
         header: GroupEventHeader {

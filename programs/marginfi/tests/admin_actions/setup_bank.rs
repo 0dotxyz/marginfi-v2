@@ -162,7 +162,7 @@ async fn add_bank_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[[u64; 2]; 13] as Default>::default());
+            assert_eq!(_padding_1, <[[u64; 2]; 7] as Default>::default());
 
             // this is the only loosely checked field
             assert!(last_update >= 0 && last_update <= 5);
@@ -305,7 +305,7 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[[u64; 2]; 13] as Default>::default());
+            assert_eq!(_padding_1, <[[u64; 2]; 7] as Default>::default());
 
             // this is the only loosely checked field
             assert!(last_update >= 0 && last_update <= 5);
@@ -352,7 +352,7 @@ async fn marginfi_group_add_bank_failure_inexistent_pyth_feed() -> anyhow::Resul
         .await;
 
     assert!(res.is_err());
-    assert_custom_error!(res.unwrap_err(), MarginfiError::PythPushWrongAccountOwner);
+    assert_custom_error!(res.unwrap_err(), MarginfiError::PythPushInvalidAccount);
 
     Ok(())
 }
@@ -395,7 +395,7 @@ async fn configure_bank_to_fixed_oracle() -> anyhow::Result<()> {
             &[ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client.process_transaction(tx).await?;
@@ -448,7 +448,7 @@ async fn update_fixed_bank_price() -> anyhow::Result<()> {
             &[ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client.process_transaction(tx).await?;
@@ -1095,6 +1095,7 @@ async fn configure_bank_emode_invalid_excessive_leverage(
     let loaded_bank = bank.load().await;
 
     let group_before = test_f.marginfi_group.load().await;
+
     let max_init_leverage = I80F48::from_num(19);
     let max_maint_leverage = I80F48::from_num(20);
     test_f
@@ -1200,7 +1201,7 @@ async fn configure_bank_rejects_invalid_emode_leverage_on_weight_update(
         res.is_err(),
         "Updating base weights that push emode leverage above limits should fail"
     );
-    assert_custom_error!(res.unwrap_err(), MarginfiError::BadEmodeConfig);
+    assert_custom_error!(res.unwrap_err(), MarginfiError::MaxInitLeverageExceeded);
 
     Ok(())
 }
@@ -1537,8 +1538,8 @@ async fn configure_group_max_emode_leverage_propagates_to_bank_cache(
             group_before.delegate_emissions_admin,
             group_before.metadata_admin,
             group_before.risk_admin,
-            None, // Should default to 15
-            None, // Should default to 20
+            Some(I80F48::from_num(15).into()),
+            Some(I80F48::from_num(20).into()),
         )
         .await;
 

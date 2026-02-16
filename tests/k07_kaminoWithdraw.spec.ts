@@ -82,7 +82,7 @@ describe("k07: Kamino Withdraw Tests", () => {
         },
         {
           amount: withdrawAmt,
-          isFinalWithdrawal: isFinalWithdrawal,
+          isWithdrawAll: isFinalWithdrawal,
           remaining: composeRemainingAccounts([
             [bank, oracles.usdcOracle.publicKey, usdcReserve],
           ]),
@@ -164,7 +164,7 @@ describe("k07: Kamino Withdraw Tests", () => {
         },
         {
           amount: excessiveWithdrawAmount,
-          isFinalWithdrawal: false,
+          isWithdrawAll: false,
           remaining: composeRemainingAccounts([
             [bank, oracles.usdcOracle.publicKey, usdcReserve],
           ]),

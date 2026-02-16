@@ -92,7 +92,7 @@ pub struct LendingAccountWithdrawEmissions<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false)
+            is_signer_authorized(&a, g.admin, authority.key(), false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
@@ -353,4 +353,13 @@ pub struct LendingAccountWithdrawEmissionsPermissionless<'info> {
     pub destination_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     pub token_program: Interface<'info, TokenInterface>,
+}
+
+impl Hashable for LendingAccountWithdrawEmissionsPermissionless<'_> {
+    fn get_hash() -> [u8; 8] {
+        get_discrim_hash(
+            "global",
+            "lending_account_withdraw_emissions_permissionless",
+        )
+    }
 }

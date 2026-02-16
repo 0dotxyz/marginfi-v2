@@ -2,48 +2,55 @@
 
 Marginfi program authority is managed by squads (https://app.squads.so/squads/J3oBkTkDXU3TcAggJEa3YeBZE5om5yNAdTtLVNXFD47/home) and uses verified builds.
 
-
 First you will need:
-* Solana tools 2.1.20 or later (`agave-install init 2.1.20`)
-* solana-verify (`cargo install solana-verify`)
-* Docker (https://docs.docker.com/engine/install/ubuntu/)
-* A wallet with at least 15 SOL (this guide will assume your wallet is at `~/keys/mainnet-deploy.json`). Verify the pubkey of your wallet with `solana-keygen pubkey ~/keys/mainnet-deploy.json` and verify you have at least 15 SOL with `solana balance -k ~/keys/mainnet-deploy.json`
-* An RPC provider connected to mainnet (`solana config set --url https://api.mainnet-beta.solana.com`). The Solana public api is usually not sufficient, and a custom rpc is suggested.
 
+- Solana tools 2.1.20 or later (`agave-install init 2.1.20`)
+- solana-verify (`cargo install solana-verify`)
+- Docker (https://docs.docker.com/engine/install/ubuntu/)
+- A wallet with at least 15 SOL (this guide will assume your wallet is at `~/keys/mainnet-deploy.json`). Verify the pubkey of your wallet with `solana-keygen pubkey ~/keys/mainnet-deploy.json` and verify you have at least 15 SOL with `solana balance -k ~/keys/mainnet-deploy.json`
+- An RPC provider connected to mainnet (`solana config set --url https://api.mainnet-beta.solana.com`). The Solana public api is usually not sufficient, and a custom rpc is suggested.
 
 Steps:
-* Make sure you are on the appropriate release tag branch and you have pulled latest.
-* Run `./scripts/build-program-verifiable.sh marginfi mainnet`. Other people signing on the multisig should also run this and validate that the hash matches. 
-* Deploy the buffer with `./scripts/deploy-buffer.sh marginfi <YOUR_RPC_ENDPOINT> ~/keys/mainnet-deploy.json`
-* Go to squads, developers, programs, pick marginfi. The buffer address is the output of the previous command. The buffer refund is the public key of the wallet you have used so far (`solana-keygen pubkey ~/keys/mainnet-deploy.json` if you don't know it). Click next.
-* Go back to your cli and paste the command Squads gave you in step 2. If this key is not the one used in your solana CLI, make sure it pass it with -k, e.g.:
+
+- Make sure you are on the appropriate release tag branch and you have pulled latest.
+- Run `./scripts/build-program-verifiable.sh marginfi mainnet`. Other people signing on the multisig should also run this and validate that the hash matches.
+- Deploy the buffer with `./scripts/deploy-buffer.sh marginfi <YOUR_RPC_ENDPOINT> ~/keys/mainnet-deploy.json`
+- Go to squads, developers, programs, pick marginfi. The buffer address is the output of the previous command. The buffer refund is the public key of the wallet you have used so far (`solana-keygen pubkey ~/keys/mainnet-deploy.json` if you don't know it). Click next.
+- Go back to your cli and paste the command Squads gave you in step 2. If this key is not the one used in your solana CLI, make sure it pass it with -k, e.g.:
+
 ```
 solana program set-buffer-authority <BUFFER> --new-buffer-authority <MULTISIG> -k ~/keys/mainnet-deploy.json
 ```
-* Remember to send any residual funds to a hardware wallet:
+
+- Remember to send any residual funds to a hardware wallet:
+
 ```
 solana balance <DEPLOY_WALLET>
 >> N SOL
 
-solana transfer \                                          
+solana transfer \
   --from ~/keys/mainnet-deploy.json \
   <HARDWARE_WALLET> \
   <N>>
 ```
 
-* Back up the current working program somewhere with `solana -um program dump MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA mfi_backup.so`
-* Click the pending upgrade to start a vote.
-* Execute after the vote passes.
-* Update the IDL with:
+- Back up the current working program somewhere with `solana -um program dump MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA mfi_backup.so`
+- Click the pending upgrade to start a vote.
+- Execute after the vote passes.
+- Update the IDL with (~.25 SOL required):
+
 ```
 anchor idl upgrade \
   MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA \
   -f target/idl/marginfi.json \
   --provider.cluster <your paid rpc> \
-  --provider.wallet ~/keys/staging-admin.json 
+  --provider.wallet ~/keys/staging-admin.json
 ```
 
-If you are getting `RequireGteViolated`, close the old IDL and open a new one:
+If you are getting `RequireGteViolated`, close the old IDL and open a new one (Note: The buffer you
+wrote to is probably gone forever. 96gCX1dFFPWUojM15NfEbnLxryErs91y5ckbkhzrxeDD is one such example.
+But hey, it's just rent):
+
 ```
 anchor idl close MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA \
   --provider.cluster <your paid rpc> \
@@ -55,22 +62,25 @@ anchor idl init MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA \
   --provider.wallet ~/keys/staging-admin.json
 ```
 
-If you aren't sure who the IDL authority is, you can check with: 
+If you aren't sure who the IDL authority is, you can check with:
+
 ```
-anchor idl authority \    
+anchor idl authority \
   MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA \
   --provider.cluster <your rpc (https://api.mainnet-beta.solana.com is usually fine)> \
   --provider.wallet   ~/keys/staging-admin.json
 ```
+
 Note that "staging admin" i.e. `H5U6dy9ch6puEFPY3t8jEaVQnVfYPUDANQkA4XG6peUo` owns the idl authority as of May 2025.
 
 Put up the verified build with:
 
 ```
-solana-verify export-pda-tx https://github.com/mrgnlabs/marginfi-v2 --program-id MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA --uploader J3oBkTkDXU3TcAggJEa3YeBZE5om5yNAdTtLVNXFD47 --encoding base58 --compute-unit-price 0 --library-name marginfi 
+solana-verify export-pda-tx https://github.com/mrgnlabs/marginfi-v2 --program-id MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA --uploader J3oBkTkDXU3TcAggJEa3YeBZE5om5yNAdTtLVNXFD47 --encoding base58 --compute-unit-price 0 --library-name marginfi
 ```
 
-* After the vote passes, verify the build with:
+- After the vote passes, verify the build with:
+
 ```
 solana-verify verify-from-repo \
   --remote \
@@ -81,19 +91,22 @@ solana-verify verify-from-repo \
 
 ### Voters:
 
-* Clone the branch being deployed (see the release tag the person who initated the upgrade has given you) and run: 
+- Clone the branch being deployed (see the release tag the person who initated the upgrade has given you) and run:
+
 ```
 ./scripts/build-program-verifiable.sh marginfi mainnet
 ```
-* Check that the program builds with the hash that the person who is deploying gave you. Check what characters other people have validated in Signal, post the next six characters of the hash to verify you have actually checked and aren't skipping this step out of laziness.
-* Check that the buffer contains this hash too `solana-verify get-buffer-hash <Buffer Address>`.
-* After the vote is executed and the contract is upgraded, check that the contract contains the same hash. For example for MFv2, this is `solana-verify get-program-hash MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA`
+
+- Check that the program builds with the hash that the person who is deploying gave you. Check what characters other people have validated in Signal, post the next six characters of the hash to verify you have actually checked and aren't skipping this step out of laziness.
+- Check that the buffer contains this hash too `solana-verify get-buffer-hash <Buffer Address>`.
+- After the vote is executed and the contract is upgraded, check that the contract contains the same hash. For example for MFv2, this is `solana-verify get-program-hash MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA`
 
 ### Known Issues:
 
 ```
 Error: parse error: parse error: invalid Cargo.lock format version: `4`
 ```
+
 Update solana-verify (`cargo install solana-verify`) or manually edit cargo.lock to change the
 version from 3 to 4
 
@@ -101,13 +114,15 @@ version from 3 to 4
 Unable to find docker image for Solana version 2.1.20
 Using backup docker image for Solana version 2.1.13
 ```
+
 No solution currently. The hash generated by 2.1.13 SHOULD BE the same as the hash generated by 2.1.20.
 
-
 Failing to verify build due to new multisig? Execute:
+
 ```
 solana-verify export-pda-tx https://github.com/mrgnlabs/marginfi-v2 --program-id MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA --uploader J3oBkTkDXU3TcAggJEa3YeBZE5om5yNAdTtLVNXFD47 --encoding base58 --compute-unit-price 0
 ```
+
 and sign with the MS.
 
 ## RECENT DEPLOY HASHES
@@ -116,23 +131,23 @@ Here we list recent deployments to staging/mainnet. The hash is always the first
 
 ### STAGING
 
-* 0.1.0: Jan 30, 2025 ~2:35pm ET -- Hash: a4dd3e7
-* 0.1.1: Feb 7, 2025 ~8:15am ET -- Hash: 03455c
-* 0.1.2: March 14, 2025 ~3:00pm ET -- Hash 65bbbe
-* 0.1.3: April 29, 2025 ~2:00pm ET -- Hash 1d8130
-* 0.1.3 memory hotfix: May 1, 2025 ~4:00pm ET -- (no hash)
-* 0.1.4: July 25, 2025 ~7:00pm ET -- (no hash)
+- 0.1.0: Jan 30, 2025 ~2:35pm ET -- Hash: a4dd3e7
+- 0.1.1: Feb 7, 2025 ~8:15am ET -- Hash: 03455c
+- 0.1.2: March 14, 2025 ~3:00pm ET -- Hash 65bbbe
+- 0.1.3: April 29, 2025 ~2:00pm ET -- Hash 1d8130
+- 0.1.3 memory hotfix: May 1, 2025 ~4:00pm ET -- (no hash)
+- 0.1.4: July 25, 2025 ~7:00pm ET -- (no hash)
 
 ### MAINNET
 
-* 0.1.0-alpha mainnet on Fev 3, 2024 ~2:45ET -- Hash: ea5d15
-* 0.1.1: Feb 17, 2025 ~3:00pm ET -- Hash: 03455c
-* 0.1.2: April 14, 2025 ~1:00pm ET -- Hash 65bbbe
-* 0.1.3: May 27, 2025 ~1:00pm ET -- Hash ae9adb7
-* 0.1.4: July 28, 2025 ~1:00pm ET -- Hash 1229b8
-* 0.1.4 (transfer hotfix): October 2, 2025 ~4:30 ET -- Hash 866e5a
-* 0.1.5 Oct 10, 2025 ~9:00am ET -- Hash 4e7867
-* 0.1.6 Dec 18, 2025 ~11:00am ET -- Hash 65e54c
-* 0.1.6a Dec 18, 2025 ~11:00am ET -- Hash not recorded
-* 0.1.6b Dec 26, 2025 ~5:00pm ET -- Hash not recorded
-* 0.1.7 Jan 26, 2026 ~11:00am ET -- Hash 918bd0
+- 0.1.0-alpha mainnet on Fev 3, 2024 ~2:45ET -- Hash: ea5d15
+- 0.1.1: Feb 17, 2025 ~3:00pm ET -- Hash: 03455c
+- 0.1.2: April 14, 2025 ~1:00pm ET -- Hash 65bbbe
+- 0.1.3: May 27, 2025 ~1:00pm ET -- Hash ae9adb7
+- 0.1.4: July 28, 2025 ~1:00pm ET -- Hash 1229b8
+- 0.1.4 (transfer hotfix): October 2, 2025 ~4:30 ET -- Hash 866e5a
+- 0.1.5 Oct 10, 2025 ~9:00am ET -- Hash 4e7867
+- 0.1.6 Dec 18, 2025 ~11:00am ET -- Hash 65e54c
+- 0.1.6a Dec 18, 2025 ~11:00am ET -- Hash not recorded
+- 0.1.6b Dec 26, 2025 ~5:00pm ET -- Hash not recorded
+- 0.1.7 Jan 26, 2026 ~11:00am ET -- Hash 918bd0

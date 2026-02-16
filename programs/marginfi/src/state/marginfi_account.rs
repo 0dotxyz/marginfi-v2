@@ -15,27 +15,138 @@ use marginfi_type_crate::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
         ASSET_TAG_SOLEND, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, EMISSIONS_FLAG_BORROW_ACTIVE,
         EMISSIONS_FLAG_LENDING_ACTIVE, EXP_10_I80F48, MAX_INTEGRATION_POSITIONS,
-        MIN_EMISSIONS_START_TIME, SECONDS_PER_YEAR, ZERO_AMOUNT_THRESHOLD,
+        MIN_EMISSIONS_START_TIME, ORDER_ACTIVE_TAGS, SECONDS_PER_YEAR, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
         reconcile_emode_configs, Balance, BalanceSide, Bank, BankOperationalState, EmodeConfig,
         HealthCache, LendingAccount, MarginfiAccount, OracleSetup, RiskTier, ACCOUNT_DISABLED,
-        ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
         MAX_LENDING_ACCOUNT_BALANCES,
     },
 };
-use std::cmp::{max, min};
+use std::{
+    cmp::{max, min},
+    collections::BTreeSet,
+};
 
-/// 4 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool), 3 for `ASSET_TAG_KAMINO`, `ASSET_TAG_DRIFT`, `ASSET_TAG_SOLEND`, and `ASSET_TAG_JUPLEND`, 2 for most others (bank, oracle), 1 for Fixed
+/// Returns the number of remaining accounts required for a bank (bank account + oracle/venue accounts).
+///
+/// Account counts by oracle setup and asset tag:
+/// - `Fixed`: 1 (bank only)
+/// - `FixedKamino`: 2 (bank + reserve)
+/// - `FixedDrift`: 2 (bank + spot market)
+/// - `FixedJuplend`: 2 (bank + lending state)
+/// - `ASSET_TAG_STAKED`: 4 (bank + oracle + lst_mint + stake_pool)
+/// - `ASSET_TAG_KAMINO` / `ASSET_TAG_DRIFT` / `ASSET_TAG_SOLEND` / `ASSET_TAG_JUPLEND`: 3 (bank + oracle + reserve)
+/// - `ASSET_TAG_DEFAULT` / `ASSET_TAG_SOL`: 2 (bank + oracle)
 pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
-    if bank.config.oracle_setup == OracleSetup::Fixed {
-        Ok(1)
-    } else {
-        get_remaining_accounts_per_asset_tag(bank.config.asset_tag)
+    match bank.config.oracle_setup {
+        OracleSetup::Fixed => Ok(1),
+        // Fixed + Kamino: bank + reserve (no oracle)
+        OracleSetup::FixedKamino => Ok(2),
+        // Fixed + Drift: bank + spot market (no oracle)
+        OracleSetup::FixedDrift => Ok(2),
+        // Fixed + JupLend: bank + lending state (no oracle)
+        OracleSetup::FixedJuplend => Ok(2),
+        _ => get_remaining_accounts_per_asset_tag(bank.config.asset_tag),
     }
 }
 
-/// 4 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool), 3 for `ASSET_TAG_KAMINO`, `ASSET_TAG_DRIFT`, `ASSET_TAG_SOLEND`, and `ASSET_TAG_JUPLEND`, 2 for most others (bank, oracle), 1 for Fixed
+/// Validate remaining accounts for active balances, requiring the closing bank group to appear
+/// after all other active balances.
+///
+/// This is used for withdraw_all where the caller must include the closing bank's risk accounts,
+/// but post-close health checks should still see active balances first.
+pub fn validate_remaining_accounts_for_balances_close_last<'info>(
+    lending_account: &LendingAccount,
+    remaining_ais: &'info [AccountInfo<'info>],
+    close_bank: &Pubkey,
+) -> MarginfiResult<()> {
+    let mut account_index = 0;
+
+    for balance in lending_account
+        .balances
+        .iter()
+        .filter(|balance| balance.is_active())
+        .filter(|balance| balance.bank_pk != *close_bank)
+    {
+        let bank_ai = remaining_ais
+            .get(account_index)
+            .ok_or(MarginfiError::InvalidBankAccount)?;
+        let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
+        let bank = bank_al.load()?;
+
+        check_eq!(
+            balance.bank_pk,
+            *bank_ai.key,
+            MarginfiError::InvalidBankAccount
+        );
+
+        let num_accounts = get_remaining_accounts_per_bank(&bank)?;
+        let end_idx = account_index + num_accounts;
+        require_gte!(
+            remaining_ais.len(),
+            end_idx,
+            MarginfiError::WrongNumberOfOracleAccounts
+        );
+        account_index = end_idx;
+    }
+
+    let bank_ai = remaining_ais
+        .get(account_index)
+        .ok_or(MarginfiError::InvalidBankAccount)?;
+    check_eq!(*bank_ai.key, *close_bank, MarginfiError::InvalidBankAccount);
+    let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
+    let bank = bank_al.load()?;
+    let num_accounts = get_remaining_accounts_per_bank(&bank)?;
+    let end_idx = account_index + num_accounts;
+    require_gte!(
+        remaining_ais.len(),
+        end_idx,
+        MarginfiError::WrongNumberOfOracleAccounts
+    );
+
+    Ok(())
+}
+
+/// Validate that remaining accounts include the risk accounts for each active balance,
+/// without enforcing any specific ordering between balance groups.
+///
+/// This is useful for repay_all where the instruction does not rely on ordered accounts.
+pub fn validate_remaining_accounts_for_balances_unordered<'info>(
+    lending_account: &LendingAccount,
+    remaining_ais: &'info [AccountInfo<'info>],
+) -> MarginfiResult<()> {
+    for balance in lending_account
+        .balances
+        .iter()
+        .filter(|balance| balance.is_active())
+    {
+        let bank_idx = remaining_ais
+            .iter()
+            .position(|ai| ai.key == &balance.bank_pk)
+            .ok_or(MarginfiError::InvalidBankAccount)?;
+
+        let bank_ai = remaining_ais
+            .get(bank_idx)
+            .ok_or(MarginfiError::InvalidBankAccount)?;
+        let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
+        let bank = bank_al.load()?;
+
+        let num_accounts = get_remaining_accounts_per_bank(&bank)?;
+        let end_idx = bank_idx + num_accounts;
+        require_gte!(
+            remaining_ais.len(),
+            end_idx,
+            MarginfiError::WrongNumberOfOracleAccounts
+        );
+    }
+
+    Ok(())
+}
+
+/// 4 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool), 2 for most others (bank, oracle), 3
+/// for Kamino (bank, oracle, reserve), 1 for Fixed
 fn get_remaining_accounts_per_asset_tag(asset_tag: u8) -> MarginfiResult<usize> {
     match asset_tag {
         ASSET_TAG_DEFAULT | ASSET_TAG_SOL => Ok(2),
@@ -59,15 +170,21 @@ pub trait MarginfiAccountImpl {
 ///
 /// Authorization rules (checked in order):
 /// 1. If `allow_receivership` is true and the account is in receivership → `true`
-/// 2. If the account is frozen → `true` only if signer is the group admin
-/// 3. Otherwise → `true` only if signer is the account authority
+/// 2. If `allow_order_execution` is true and the account is in order execution → `true`
+/// 3. If the account is frozen → `true` only if signer is the group admin
+/// 4. Otherwise → `true` only if signer is the account authority
 pub fn is_signer_authorized(
     marginfi_account: &MarginfiAccount,
     group_admin: Pubkey,
     signer: Pubkey,
     allow_receivership: bool,
+    allow_order_execution: bool,
 ) -> bool {
     if allow_receivership && marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
+        return true;
+    }
+
+    if allow_order_execution && marginfi_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION) {
         return true;
     }
 
@@ -818,6 +935,110 @@ pub fn get_health_components<'info>(
     Ok((total_assets, total_liabilities))
 }
 
+/// Returns the total assets and liabilities restricted to the provided set of balance tags.
+/// Equivalent to computing the equity health of just the balances with matching tags.
+/// * If tags are empty or not found, returns (0, 0, 0, 0)
+pub fn get_tagged_account_health_components<'info>(
+    marginfi_account: &MarginfiAccount,
+    remaining_ais: &'info [AccountInfo<'info>],
+    balance_tags: &[u16],
+) -> MarginfiResult<(I80F48, I80F48, usize, usize)> {
+    check!(
+        !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
+        MarginfiError::AccountInFlashloan
+    );
+
+    if balance_tags.is_empty() {
+        return Ok((I80F48::ZERO, I80F48::ZERO, 0, 0));
+    }
+
+    let lending_account = &marginfi_account.lending_account;
+    let clock = Clock::get()?;
+
+    let emode_checkpoint = heap_pos();
+    let reconciled_emode_config = {
+        let emode_iter = EmodeConfigIterator::new(lending_account, remaining_ais, false);
+        reconcile_emode_configs(emode_iter)
+    };
+    let reconciled_emode_config: EmodeConfig = reconciled_emode_config;
+    heap_restore(emode_checkpoint);
+
+    let requirement_type = RiskRequirementType::Equity.to_weight_type();
+    let mut total_assets: I80F48 = I80F48::ZERO;
+    let mut total_liabilities: I80F48 = I80F48::ZERO;
+    let mut asset_count = 0;
+    let mut liab_count = 0;
+
+    let mut account_index = 0usize;
+    for (position_index, balance) in lending_account
+        .balances
+        .iter()
+        .filter(|b| b.is_active())
+        .enumerate()
+    {
+        let heap_checkpoint = heap_pos();
+
+        let bank_ai = remaining_ais
+            .get(account_index)
+            .ok_or(MarginfiError::InvalidBankAccount)?;
+        let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
+        let bank = bank_al.load()?;
+
+        check_eq!(
+            balance.bank_pk,
+            *bank_ai.key,
+            MarginfiError::InvalidBankAccount
+        );
+
+        let num_accounts = get_remaining_accounts_per_bank(&bank)?;
+
+        if !balance_tags.iter().any(|tag| *tag == balance.tag) {
+            account_index += num_accounts;
+            heap_restore(heap_checkpoint);
+            continue;
+        }
+
+        let oracle_ai_idx = account_index + 1;
+        let end_idx = oracle_ai_idx + num_accounts - 1;
+        require_gte!(
+            remaining_ais.len(),
+            end_idx,
+            MarginfiError::WrongNumberOfOracleAccounts
+        );
+        let oracle_ais = &remaining_ais[oracle_ai_idx..end_idx];
+
+        let price_adapter_result = OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock);
+
+        let (asset_val, liab_val, _price, _err_code) = calc_weighted_value_for_balance(
+            balance,
+            &bank,
+            &price_adapter_result,
+            requirement_type,
+            &reconciled_emode_config,
+            &mut None,
+            position_index,
+        )?;
+
+        match balance.get_side() {
+            Some(BalanceSide::Assets) => asset_count += 1,
+            Some(BalanceSide::Liabilities) => liab_count += 1,
+            None => {}
+        }
+
+        total_assets = total_assets
+            .checked_add(asset_val)
+            .ok_or_else(math_error!())?;
+        total_liabilities = total_liabilities
+            .checked_add(liab_val)
+            .ok_or_else(math_error!())?;
+
+        account_index += num_accounts;
+        heap_restore(heap_checkpoint);
+    }
+
+    Ok((total_assets, total_liabilities, asset_count, liab_count))
+}
+
 /// Check pre-liquidation condition with heap reuse optimization.
 ///
 /// Uses heap reuse to process positions one at a time, enabling support for accounts
@@ -1289,6 +1510,7 @@ fn calc_weighted_liab_value_standalone(
 pub trait LendingAccountImpl {
     fn get_first_empty_balance(&self) -> Option<usize>;
     fn sort_balances(&mut self);
+    fn reserve_n_tags(&mut self, n: usize) -> [u16; ORDER_ACTIVE_TAGS];
 }
 
 impl LendingAccountImpl for LendingAccount {
@@ -1299,6 +1521,45 @@ impl LendingAccountImpl for LendingAccount {
     fn sort_balances(&mut self) {
         // Sort all balances in descending order by bank_pk
         self.balances.sort_by(|a, b| b.bank_pk.cmp(&a.bank_pk));
+    }
+
+    /// Finds n free tags for new orders, starting with newer ones first
+    /// n is expected to be <= [`ORDER_ACTIVE_TAGS`].
+    /// It fills only the first n, leaving the rest as 0.
+    fn reserve_n_tags(&mut self, n: usize) -> [u16; ORDER_ACTIVE_TAGS] {
+        assert!(n <= ORDER_ACTIVE_TAGS, "Invalid tag count");
+
+        let used: BTreeSet<u16> = self
+            .balances
+            .iter()
+            .filter(|b| b.is_active() && b.tag != 0)
+            .map(|b| b.tag)
+            .collect();
+
+        let mut tags = [0u16; ORDER_ACTIVE_TAGS];
+
+        let mut next = self.last_tag_used.wrapping_add(1);
+
+        let mut filled = 0;
+
+        while filled < n {
+            if next == 0 {
+                next = 1;
+            }
+
+            if !used.contains(&next) {
+                tags[filled] = next;
+                filled += 1;
+            }
+
+            next = next.wrapping_add(1);
+        }
+
+        if n > 0 {
+            self.last_tag_used = tags[n - 1];
+        }
+
+        tags
     }
 }
 
@@ -1409,7 +1670,8 @@ impl<'a> BankAccountWrapper<'a> {
                     active: 1,
                     bank_pk: *bank_pk,
                     bank_asset_tag: bank.config.asset_tag,
-                    _pad0: [0; 6],
+                    tag: 0,
+                    _pad0: [0; 4],
                     asset_shares: I80F48::ZERO.into(),
                     liability_shares: I80F48::ZERO.into(),
                     emissions_outstanding: I80F48::ZERO.into(),

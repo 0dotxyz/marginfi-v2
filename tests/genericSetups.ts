@@ -1,4 +1,3 @@
-import { Program } from "@coral-xyz/anchor";
 import { createMintToInstruction } from "@solana/spl-token";
 import {
   PublicKey,

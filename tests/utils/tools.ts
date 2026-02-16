@@ -1,3 +1,4 @@
+import { BN } from "@coral-xyz/anchor";
 import {
   BanksTransactionMeta,
   BanksTransactionResultWithMeta,
@@ -26,12 +27,20 @@ import {
   HEALTH_CACHE_HEALTHY,
 } from "./types";
 import { composeRemainingAccounts } from "./user-instructions";
-import { BN } from "@coral-xyz/anchor";
 import {
   globalProgramAdmin,
   bankrunContext,
   bankrunProgram,
 } from "../rootHooks";
+
+/**
+ * Convert a human-readable amount to native token units based on decimals.
+ * @param amount - The human-readable amount
+ * @param decimals - The number of decimals for the token
+ * @returns The amount in native units as a BN
+ */
+export const toNative = (amount: number, decimals: number): BN =>
+  new BN(amount).mul(new BN(10).pow(new BN(decimals)));
 
 /**
  * Process a transaction in a bankrun context and return the transaction result
@@ -449,3 +458,27 @@ export const buildHealthRemainingAccounts = async (
 
   return composeRemainingAccounts(groups);
 };
+
+/**
+ * Advance the bankrun clock by a specified number of seconds.
+ *
+ * @param ctx - The bankrun ProgramTestContext
+ * @param seconds - Number of seconds to advance the clock
+ * @returns The new unix timestamp after advancing
+ */
+export async function advanceBankrunClock(
+  ctx: ProgramTestContext,
+  seconds: number
+): Promise<number> {
+  const { Clock } = await import("solana-bankrun");
+  const clock = await ctx.banksClient.getClock();
+  const newClock = new Clock(
+    clock.slot + BigInt(1),
+    clock.epochStartTimestamp,
+    clock.epoch,
+    clock.leaderScheduleEpoch,
+    clock.unixTimestamp + BigInt(seconds)
+  );
+  ctx.setClock(newClock);
+  return Number(newClock.unixTimestamp);
+}

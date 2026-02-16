@@ -204,7 +204,7 @@ export interface DriftWithdrawAccounts {
 
 export interface DriftWithdrawArgs {
   amount: BN;
-  withdraw_all: boolean;
+  withdrawAll: boolean;
   remaining: PublicKey[];
 }
 
@@ -257,7 +257,7 @@ export const makeDriftWithdrawIx = async (
   );
 
   const ix = await program.methods
-    .driftWithdraw(args.amount, args.withdraw_all ? true : null)
+    .driftWithdraw(args.amount, args.withdrawAll)
     .accounts({
       marginfiAccount: accounts.marginfiAccount,
       bank: accounts.bank,
