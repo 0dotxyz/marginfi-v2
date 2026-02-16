@@ -53,7 +53,7 @@ async fn flashloan_success_1op() -> anyhow::Result<()> {
         .await;
 
     let repay_ix = borrower_mfi_account_f
-        .make_bank_repay_ix(
+        .make_repay_ix(
             borrower_token_account_f_sol.key,
             sol_bank,
             1_000,
@@ -101,7 +101,7 @@ async fn flashloan_success_3op() -> anyhow::Result<()> {
         ixs.push(borrow_ix);
 
         let repay_ix = borrower_mfi_account_f
-            .make_bank_repay_ix(
+            .make_repay_ix(
                 borrower_token_account_f_sol.key,
                 sol_bank,
                 1_000,
@@ -188,7 +188,7 @@ async fn flashloan_ok_missing_flag() -> anyhow::Result<()> {
         .await;
 
     let repay_ix = borrower_mfi_account_f
-        .make_bank_repay_ix(
+        .make_repay_ix(
             borrower_token_account_f_sol.key,
             sol_bank,
             1_000,
@@ -233,7 +233,7 @@ async fn flashloan_fail_missing_fe_ix() -> anyhow::Result<()> {
         .await;
 
     let repay_ix = borrower_mfi_account_f
-        .make_bank_repay_ix(
+        .make_repay_ix(
             borrower_token_account_f_sol.key,
             sol_bank,
             1_000,
@@ -293,7 +293,7 @@ async fn flashloan_fail_missing_invalid_sysvar_ixs() -> anyhow::Result<()> {
         .await;
 
     let repay_ix = borrower_mfi_account_f
-        .make_bank_repay_ix(
+        .make_repay_ix(
             borrower_token_account_f_sol.key,
             sol_bank,
             1_000,

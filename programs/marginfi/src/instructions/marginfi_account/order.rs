@@ -402,11 +402,11 @@ pub fn end_execute_order<'info>(
 
     let net = order_assets_in_equity;
 
-    // The user slippage constraint we want to enforce is:-
+    // The user slippage constraint we want to enforce is:
     // net >= (1 - slippage) * (tp or sl)
     // where slippage is encoded as a u32 percent (0..100% mapped to 0..u32::MAX).
 
-    // For the TP case another constraint(the max fee constraint) we want to enforce is:-
+    // For the TP case another constraint(the max fee constraint) we want to enforce is:
     // net >= (1 - max_fee) * (start health)
     // It may be possible that the value (1 - max_fee) * (start health) is less than the
     // min allowed value based on the user's slippage constraint alone, in that case
@@ -504,7 +504,7 @@ pub fn end_execute_order<'info>(
     )?;
 
     // At this point we know that all non order balances were not touched and the order
-    // balances that were touched:-
+    // balances that were touched:
     // 1) Is still above or equal to the trigger price (in equity terms).
     // 2) Did not make the account less healthy and if at all we did, the account is
     //    still healthy overall.

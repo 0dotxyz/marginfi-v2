@@ -259,7 +259,7 @@ impl MarginfiAccountFixture {
             .await
     }
 
-    async fn make_bank_withdraw_ix_internal<T: Into<f64>>(
+    pub async fn make_withdraw_ix_with_authority<T: Into<f64>>(
         &self,
         destination_account: Pubkey,
         bank: &BankFixture,
@@ -315,7 +315,7 @@ impl MarginfiAccountFixture {
         ui_amount: T,
         withdraw_all: Option<bool>,
     ) -> Instruction {
-        self.make_bank_withdraw_ix_internal(
+        self.make_withdraw_ix_with_authority(
             destination_account,
             bank,
             ui_amount,
@@ -351,7 +351,7 @@ impl MarginfiAccountFixture {
         authority: &Keypair,
     ) -> anyhow::Result<(), BanksClientError> {
         let ix = self
-            .make_bank_withdraw_ix_internal(
+            .make_withdraw_ix_with_authority(
                 destination_account,
                 bank,
                 ui_amount,
@@ -523,52 +523,24 @@ impl MarginfiAccountFixture {
             .await
     }
 
-    pub async fn make_bank_repay_ix<T: Into<f64>>(
+    pub async fn make_repay_ix<T: Into<f64>>(
         &self,
         funding_account: Pubkey,
         bank: &BankFixture,
         ui_amount: T,
         repay_all: Option<bool>,
     ) -> Instruction {
-        let marginfi_account = self.load().await;
-        let ctx = self.ctx.borrow();
-
-        let mut accounts = marginfi::accounts::LendingAccountRepay {
-            group: marginfi_account.group,
-            marginfi_account: self.key,
-            authority: ctx.payer.pubkey(),
-            bank: bank.key,
-            signer_token_account: funding_account,
-            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
-            token_program: bank.get_token_program(),
-        }
-        .to_account_metas(Some(true));
-        if bank.mint.token_program == anchor_spl::token_2022::ID {
-            accounts.push(AccountMeta::new_readonly(bank.mint.key, false));
-        }
-
-        let mut ix = Instruction {
-            program_id: marginfi::ID,
-            accounts,
-            data: marginfi::instruction::LendingAccountRepay {
-                amount: ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
-                repay_all,
-            }
-            .data(),
-        };
-
-        if repay_all.unwrap_or(false) {
-            ix.accounts.extend_from_slice(
-                &self
-                    .load_observation_account_metas(vec![bank.key], vec![])
-                    .await,
-            );
-        }
-
-        ix
+        self.make_repay_ix_with_authority(
+            funding_account,
+            bank,
+            ui_amount,
+            repay_all,
+            self.ctx.borrow().payer.pubkey(),
+        )
+        .await
     }
 
-    async fn make_bank_repay_ix_internal<T: Into<f64>>(
+    pub async fn make_repay_ix_with_authority<T: Into<f64>>(
         &self,
         funding_account: Pubkey,
         bank: &BankFixture,
@@ -639,7 +611,7 @@ impl MarginfiAccountFixture {
         authority: &Keypair,
     ) -> anyhow::Result<(), BanksClientError> {
         let ix = self
-            .make_bank_repay_ix_internal(
+            .make_repay_ix_with_authority(
                 funding_account,
                 bank,
                 ui_amount,

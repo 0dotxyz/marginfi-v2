@@ -142,7 +142,7 @@ async fn liquidate_start_then_cpi_start_on_different_accounts_exploit() -> anyho
         .make_bank_withdraw_ix(liq_sol_acc.key, sol_bank, 0.09, None)
         .await;
     let repay_ix = liquidatee_a
-        .make_bank_repay_ix(liq_usdc_acc.key, usdc_bank, 2.0, None)
+        .make_repay_ix(liq_usdc_acc.key, usdc_bank, 2.0, None)
         .await;
 
     // End for A

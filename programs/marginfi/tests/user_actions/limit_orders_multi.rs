@@ -109,107 +109,6 @@ async fn make_end_execute_ix(
     Ok(ix)
 }
 
-// Note: In limit orders, ui_amount generally doesn't matter, because repay_all must always be enabled.
-async fn make_repay_ix(
-    marginfi_account_f: &MarginfiAccountFixture,
-    bank_f: &BankFixture,
-    authority: Pubkey,
-    signer_token_account: Pubkey,
-    ui_amount: f64,
-    repay_all: Option<bool>,
-) -> anyhow::Result<Instruction> {
-    let marginfi_account = marginfi_account_f.load().await;
-
-    let mut accounts = marginfi::accounts::LendingAccountRepay {
-        group: marginfi_account.group,
-        marginfi_account: marginfi_account_f.key,
-        authority,
-        bank: bank_f.key,
-        signer_token_account,
-        liquidity_vault: bank_f.get_vault(BankVaultType::Liquidity).0,
-        token_program: bank_f.get_token_program(),
-    }
-    .to_account_metas(Some(true));
-
-    if bank_f.mint.token_program == anchor_spl::token_2022::ID {
-        accounts.push(AccountMeta::new_readonly(bank_f.mint.key, false));
-    }
-
-    let mut ix = Instruction {
-        program_id: marginfi::ID,
-        accounts,
-        data: marginfi::instruction::LendingAccountRepay {
-            amount: ui_to_native!(ui_amount, bank_f.mint.mint.decimals),
-            repay_all,
-        }
-        .data(),
-    };
-
-    if repay_all.unwrap_or(false) {
-        ix.accounts.extend_from_slice(
-            &marginfi_account_f
-                .load_observation_account_metas(vec![bank_f.key], vec![])
-                .await,
-        );
-    }
-
-    Ok(ix)
-}
-
-async fn make_withdraw_ix(
-    marginfi_account_f: &MarginfiAccountFixture,
-    bank_f: &BankFixture,
-    authority: Pubkey,
-    destination: Pubkey,
-    ui_amount: f64,
-    withdraw_all: Option<bool>,
-    exclude_banks: Vec<Pubkey>,
-) -> anyhow::Result<Instruction> {
-    let marginfi_account = marginfi_account_f.load().await;
-
-    let mut accounts = marginfi::accounts::LendingAccountWithdraw {
-        group: marginfi_account.group,
-        marginfi_account: marginfi_account_f.key,
-        authority,
-        bank: bank_f.key,
-        destination_token_account: destination,
-        bank_liquidity_vault_authority: bank_f.get_vault_authority(BankVaultType::Liquidity).0,
-        liquidity_vault: bank_f.get_vault(BankVaultType::Liquidity).0,
-        token_program: bank_f.get_token_program(),
-    }
-    .to_account_metas(Some(true));
-
-    if bank_f.mint.token_program == anchor_spl::token_2022::ID {
-        accounts.push(AccountMeta::new_readonly(bank_f.mint.key, false));
-    }
-
-    let mut ix = Instruction {
-        program_id: marginfi::ID,
-        accounts,
-        data: marginfi::instruction::LendingAccountWithdraw {
-            amount: ui_to_native!(ui_amount, bank_f.mint.mint.decimals),
-            withdraw_all,
-        }
-        .data(),
-    };
-
-    if withdraw_all.unwrap_or(false) {
-        ix.accounts.extend_from_slice(
-            &marginfi_account_f
-                .load_observation_account_metas_close_last(bank_f.key, vec![], exclude_banks)
-                .await,
-        );
-    } else {
-        ix.accounts.extend_from_slice(
-            &marginfi_account_f
-                .load_observation_account_metas(vec![], exclude_banks)
-                .await,
-        );
-    }
-
-    Ok(ix)
-}
-
 // Note: repay_all will be applied to the `liab_bank`
 async fn execute_order_with_withdraw(
     test_f: &TestFixture,
@@ -228,28 +127,19 @@ async fn execute_order_with_withdraw(
         .await
         .unwrap();
 
-    let repay_ix = make_repay_ix(
-        borrower,
-        liab_bank,
-        keeper.pubkey(),
-        liab_account,
-        0.0,
-        Some(true),
-    )
-    .await
-    .unwrap();
+    let withdraw_ix = borrower
+        .make_withdraw_ix_with_authority(
+            asset_account,
+            asset_bank,
+            withdraw_amount,
+            withdraw_all,
+            keeper.pubkey(),
+        )
+        .await;
 
-    let withdraw_ix = make_withdraw_ix(
-        borrower,
-        asset_bank,
-        keeper.pubkey(),
-        asset_account,
-        withdraw_amount,
-        withdraw_all,
-        vec![liab_bank.key],
-    )
-    .await
-    .unwrap();
+    let repay_ix = borrower
+        .make_repay_ix_with_authority(liab_account, liab_bank, 0.0, Some(true), keeper.pubkey())
+        .await;
 
     let end_ix = make_end_execute_ix(
         borrower,
@@ -265,7 +155,7 @@ async fn execute_order_with_withdraw(
     test_f.refresh_blockhash().await;
     let ctx = test_f.context.borrow_mut();
     let tx = Transaction::new_signed_with_payer(
-        &[start_ix, repay_ix, withdraw_ix, end_ix],
+        &[start_ix, withdraw_ix, repay_ix, end_ix],
         Some(&keeper.pubkey()),
         &[keeper],
         ctx.banks_client.get_latest_blockhash().await.unwrap(),

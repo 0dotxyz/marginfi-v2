@@ -22,7 +22,7 @@ import {
   endExecuteOrderIx,
   closeOrderIx,
   keeperCloseOrderIx,
-  setLiquidatorCloseFlagsIx,
+  setKeeperCloseFlagsIx,
   depositIx,
   borrowIx,
   updateEmissionsDestination,
@@ -475,7 +475,7 @@ describe("orders", () => {
     });
 
     it("sets liquidator close flags - happy path", async () => {
-      const ix = await setLiquidatorCloseFlagsIx(program, {
+      const ix = await setKeeperCloseFlagsIx(program, {
         marginfiAccount: userMarginfiAccount,
         authority: user.wallet.publicKey,
         bankKeysOpt: [bankA],
