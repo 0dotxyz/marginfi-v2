@@ -70,6 +70,7 @@ import {
 
 const startingSeed: number = 299;
 const groupBuff = Buffer.from("MARGINFI_GROUP_SEED_1234000000M2");
+const LIQ_CACHE_LOCKED_FLAG = 1;
 
 /** This is the program-enforced maximum enforced number of balances per account. */
 const USER_ACCOUNT_THROWAWAY = "throwaway_account3";
@@ -85,7 +86,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       MAX_BALANCES,
       USER_ACCOUNT_THROWAWAY,
       groupBuff,
-      startingSeed
+      startingSeed,
     );
     banks = result.banks;
     throwawayGroup = result.throwawayGroup;
@@ -98,7 +99,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
         marginfiGroup: throwawayGroup.publicKey,
         newAdmin: groupAdmin.wallet.publicKey,
         newEmodeAdmin: groupAdmin.wallet.publicKey,
-      })
+      }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
@@ -122,8 +123,8 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
           entryTag,
           1, // applies to isolated doesn't matter here
           bigNumberToWrappedI80F48(Math.random() * 0.2 + 0.6), // random 0.6–0.8 (~3.3x-5x leverage)
-          bigNumberToWrappedI80F48(Math.random() * 0.1 + 0.8) // random 0.8–0.9 (~5x-10x leverage)
-        )
+          bigNumberToWrappedI80F48(Math.random() * 0.1 + 0.8), // random 0.8–0.9 (~5x-10x leverage)
+        ),
       );
 
       // construct & send the tx for this bank
@@ -133,7 +134,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
           bank,
           tag: bankIndex, // bank’s own tag = its index
           entries,
-        })
+        }),
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(groupAdmin.wallet);
@@ -159,7 +160,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
             tokenAccount: user.lstAlphaAccount,
             amount,
             depositUpToLimit: false,
-          })
+          }),
         );
       }
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -183,7 +184,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
         tokenAccount: user.lstAlphaAccount,
         amount: depositAmount,
         depositUpToLimit: false,
-      })
+      }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(user.wallet);
@@ -205,7 +206,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
           tokenAccount: user.lstAlphaAccount,
           remaining: composeRemainingAccounts(remainingAccounts),
           amount: borrowAmount,
-        })
+        }),
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(user.wallet);
@@ -217,7 +218,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       if (result.result) {
         const logs = result.meta.logMessages;
         const isOOM = logs.some((msg) =>
-          msg.toLowerCase().includes("memory allocation failed, out of memory")
+          msg.toLowerCase().includes("memory allocation failed, out of memory"),
         );
 
         if (isOOM) {
@@ -229,7 +230,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
           // anything other than OOM should blow up the test
           throw new Error(
             `Unexpected borrowIx failure on bank ${banks[i].toBase58()}: ` +
-              logs.join("\n")
+              logs.join("\n"),
           );
         }
       }
@@ -246,7 +247,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       await configureBank(groupAdmin.mrgnBankrunProgram, {
         bank: banks[MAX_BALANCES - 1],
         bankConfigOpt: config,
-      })
+      }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
@@ -276,18 +277,18 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
         tokenAccount: liquidator.lstAlphaAccount,
         amount: depositAmount,
         depositUpToLimit: false,
-      })
+      }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(liquidator.wallet);
     await banksClient.tryProcessTransaction(tx);
 
     const liquidateeAcc = await bankrunProgram.account.marginfiAccount.fetch(
-      liquidateeAccount
+      liquidateeAccount,
     );
     dumpAccBalances(liquidateeAcc);
     const liquidatorAcc = await bankrunProgram.account.marginfiAccount.fetch(
-      liquidatorAccount
+      liquidatorAccount,
     );
     dumpAccBalances(liquidatorAcc);
     const liquidateeAccounts = composeRemainingAccounts(remainingAccounts);
@@ -314,7 +315,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
         amount: liquidateAmount,
         liquidateeAccounts: liquidateeAccounts.length,
         liquidatorAccounts: 4,
-      })
+      }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(liquidator.wallet);
@@ -325,7 +326,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
     if (result.result) {
       const logs = result.meta.logMessages;
       const isOOM = logs.some((msg) =>
-        msg.toLowerCase().includes("memory allocation failed, out of memory")
+        msg.toLowerCase().includes("memory allocation failed, out of memory"),
       );
 
       if (isOOM) {
@@ -364,7 +365,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
         payer: liquidator.wallet.publicKey,
         lookupTable,
         addresses: remainingAccounts.flat().slice(0, 20),
-      })
+      }),
     );
     extendLutTx1.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     extendLutTx1.sign(liquidator.wallet);
@@ -376,7 +377,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
         payer: liquidator.wallet.publicKey,
         lookupTable,
         addresses: remainingAccounts.flat().slice(20),
-      })
+      }),
     );
     extendLutTx2.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     extendLutTx2.sign(liquidator.wallet);
@@ -396,7 +397,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
 
     const [liqRecordKey] = deriveLiquidationRecord(
       bankrunProgram.programId,
-      liquidateeAccount
+      liquidateeAccount,
     );
 
     const mrgnAccountBefore =
@@ -410,14 +411,14 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
         marginfiAccount: liquidateeAccount,
         feePayer: liquidator.wallet.publicKey,
         // liquidationRecord: liqRecord,
-      })
+      }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(liquidator.wallet);
     await banksClient.processTransaction(tx);
 
     const recordBefore = await bankrunProgram.account.liquidationRecord.fetch(
-      liqRecordKey
+      liqRecordKey,
     );
     assertKeysEqual(recordBefore.key, liqRecordKey);
     assertKeysEqual(recordBefore.recordPayer, liquidator.wallet.publicKey);
@@ -448,7 +449,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       await endLiquidationIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
         remaining: composeRemainingAccountsMetaBanksOnly(remainingAccounts),
-      })
+      }),
     );
     const blockhash = await getBankrunBlockhash(bankrunContext);
     const lutRaw = await banksClient.getAccount(lookupTable);
@@ -467,10 +468,10 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
     await banksClient.processTransaction(versionedTx);
 
     const recordAfter = await bankrunProgram.account.liquidationRecord.fetch(
-      liqRecordKey
+      liqRecordKey,
     );
     const mrgnAccountAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      liquidateeAccount
+      liquidateeAccount,
     );
     dumpAccBalances(mrgnAccountAfter);
     assertKeysEqual(mrgnAccountAfter.liquidationRecord, liqRecordKey);
@@ -512,7 +513,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
         newRiskAdmin: riskAdmin.wallet.publicKey,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
   });
@@ -523,7 +524,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
 
     const [liqRecordKey] = deriveLiquidationRecord(
       bankrunProgram.programId,
-      deleverageeAccount
+      deleverageeAccount,
     );
 
     const mrgnAccountBefore =
@@ -531,11 +532,11 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
     dumpAccBalances(mrgnAccountBefore);
     const repayRemaining = composeRemainingAccountsByBalances(
       mrgnAccountBefore.lendingAccount.balances,
-      remainingAccounts
+      remainingAccounts,
     );
 
     const recordBefore = await bankrunProgram.account.liquidationRecord.fetch(
-      liqRecordKey
+      liqRecordKey,
     );
     assertKeysEqual(recordBefore.key, liqRecordKey);
     assertKeysEqual(recordBefore.marginfiAccount, deleverageeAccount);
@@ -566,9 +567,9 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       await endDeleverageIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
         remaining: composeRemainingAccountsMetaBanksOnly(
-          remainingAccounts.filter((a) => a[0] != banks[2])
+          remainingAccounts.filter((a) => a[0] != banks[2]),
         ),
-      })
+      }),
     );
     remainingAccounts = remainingAccounts.filter((a) => a[0] != banks[2]);
 
@@ -589,10 +590,10 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
     await banksClient.processTransaction(versionedTx);
 
     const recordAfter = await bankrunProgram.account.liquidationRecord.fetch(
-      liqRecordKey
+      liqRecordKey,
     );
     const mrgnAccountAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      deleverageeAccount
+      deleverageeAccount,
     );
     dumpAccBalances(mrgnAccountAfter);
     assertKeysEqual(mrgnAccountAfter.liquidationRecord, liqRecordKey);
@@ -639,7 +640,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
         await configureBank(groupAdmin.mrgnBankrunProgram, {
           bank: banks[i],
           bankConfigOpt: config,
-        })
+        }),
       );
     }
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
@@ -651,7 +652,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
 
     const [liqRecordKey] = deriveLiquidationRecord(
       bankrunProgram.programId,
-      deleverageeAccount
+      deleverageeAccount,
     );
 
     const mrgnAccountBefore =
@@ -659,11 +660,11 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
     dumpAccBalances(mrgnAccountBefore);
     const repayRemaining = composeRemainingAccountsByBalances(
       mrgnAccountBefore.lendingAccount.balances,
-      remainingAccounts
+      remainingAccounts,
     );
 
     const recordBefore = await bankrunProgram.account.liquidationRecord.fetch(
-      liqRecordKey
+      liqRecordKey,
     );
     assertKeysEqual(recordBefore.key, liqRecordKey);
     assertKeysEqual(recordBefore.marginfiAccount, deleverageeAccount);
@@ -694,9 +695,9 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       await endDeleverageIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
         remaining: composeRemainingAccountsMetaBanksOnly(
-          remainingAccounts.filter((a) => a[0] != banks[3])
+          remainingAccounts.filter((a) => a[0] != banks[3]),
         ),
-      })
+      }),
     );
     remainingAccounts = remainingAccounts.filter((a) => a[0] != banks[3]);
 
@@ -717,10 +718,10 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
     await banksClient.processTransaction(versionedTx);
 
     const recordAfter = await bankrunProgram.account.liquidationRecord.fetch(
-      liqRecordKey
+      liqRecordKey,
     );
     const mrgnAccountAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      deleverageeAccount
+      deleverageeAccount,
     );
     dumpAccBalances(mrgnAccountAfter);
     assertKeysEqual(mrgnAccountAfter.liquidationRecord, liqRecordKey);
@@ -753,6 +754,10 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
 
     // the first slot (0) should still be zero
     assert(recordAfter.entries[0].timestamp.toNumber() == 0);
+
+    for (let i = 0; i <= 4; i++) {
+      await assertBankLiqCacheUnlocked(banks[i]);
+    }
   });
 
   it("(admin) Sets the group withdrawal limit to $1 less than bank 4's liability", async () => {
@@ -761,7 +766,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       await configureDeleverageWithdrawalLimit(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
         limit: 1 * ecosystem.lstAlphaPrice - 1, // borrowAmount is 1 LST Alpha
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
   });
@@ -773,7 +778,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       await bankrunProgram.account.marginfiAccount.fetch(deleverageeAccount);
     const repayRemaining = composeRemainingAccountsByBalances(
       mrgnAccountBefore.lendingAccount.balances,
-      remainingAccounts
+      remainingAccounts,
     );
 
     let tx = new Transaction().add(
@@ -802,9 +807,9 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       await endDeleverageIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
         remaining: composeRemainingAccountsMetaBanksOnly(
-          remainingAccounts.filter((a) => a[0] != banks[4])
+          remainingAccounts.filter((a) => a[0] != banks[4]),
         ),
-      })
+      }),
     );
     const blockhash = await getBankrunBlockhash(bankrunContext);
     const lutRaw = await banksClient.getAccount(lookupTable);
@@ -843,7 +848,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       await setFixedPrice(groupAdmin.mrgnBankrunProgram, {
         bank: banks[MAX_BALANCES - 1],
         price: oracles.lstAlphaPrice,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
   });
@@ -871,7 +876,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
 
     const [liqRecordKey] = deriveLiquidationRecord(
       bankrunProgram.programId,
-      liquidateeAccount
+      liquidateeAccount,
     );
 
     const mrgnAccountBefore =
@@ -879,7 +884,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
     assertKeysEqual(mrgnAccountBefore.liquidationRecord, liqRecordKey);
 
     const recordBefore = await bankrunProgram.account.liquidationRecord.fetch(
-      liqRecordKey
+      liqRecordKey,
     );
     assertKeysEqual(recordBefore.key, liqRecordKey);
     assertKeysEqual(recordBefore.recordPayer, liquidator.wallet.publicKey);
@@ -910,7 +915,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       await endLiquidationIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
         remaining: composeRemainingAccountsMetaBanksOnly(remainingAccounts),
-      })
+      }),
     );
     const blockhash = await getBankrunBlockhash(bankrunContext);
     const lutRaw = await banksClient.getAccount(lookupTable);
@@ -931,10 +936,10 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
     dumpBankrunLogs(result);
 
     const recordAfter = await bankrunProgram.account.liquidationRecord.fetch(
-      liqRecordKey
+      liqRecordKey,
     );
     const mrgnAccountAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      liquidateeAccount
+      liquidateeAccount,
     );
     assertKeysEqual(mrgnAccountAfter.liquidationRecord, liqRecordKey);
 
@@ -956,7 +961,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
     assert.approximately(
       assetsExpected,
       bytesToF64(oldEntry.assetAmountSeized),
-      t
+      t,
     );
 
     // Same for liabilities, we sorta repaid less (in $) because the confidence interval didn't
@@ -967,7 +972,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
     assert.approximately(
       liabExpected,
       bytesToF64(oldEntry.liabAmountRepaid),
-      t
+      t,
     );
 
     // Note: asset seized and liability repaid are scaled to the oracle confidence adjustment
@@ -988,6 +993,107 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       assert(recordAfter.entries[i].timestamp.toNumber() != 0);
     }
   });
+
+  it("(admin) Deleverages user 0 with tiny deposit + withdrawAll close and clears the bank lock", async () => {
+    const deleveragee = users[0];
+    const deleverageeAccount = deleveragee.accounts.get(USER_ACCOUNT_THROWAWAY);
+    const tinyAmount = new BN(
+      Math.floor(0.0001 * 10 ** ecosystem.lstAlphaDecimals),
+    );
+
+    // Previous tests intentionally set a very low withdrawal limit; raise it here so we can isolate
+    // lock-clearing behavior.
+    const limitResetTx = new Transaction().add(
+      await configureDeleverageWithdrawalLimit(groupAdmin.mrgnBankrunProgram, {
+        marginfiGroup: throwawayGroup.publicKey,
+        limit: 1_000_000_000,
+      }),
+    );
+    await processBankrunTransaction(bankrunContext, limitResetTx, [
+      groupAdmin.wallet,
+    ]);
+
+    // Re-add bank 2 locally for this test to create/close a tiny unrelated asset position.
+    const remainingWithBank2: PublicKey[][] = [
+      [banks[2], oracles.pythPullLst.publicKey],
+      ...remainingAccounts,
+    ];
+
+    const depositTx = new Transaction().add(
+      await depositIx(deleveragee.mrgnBankrunProgram, {
+        marginfiAccount: deleverageeAccount,
+        bank: banks[2],
+        tokenAccount: deleveragee.lstAlphaAccount,
+        amount: tinyAmount,
+        depositUpToLimit: false,
+      }),
+    );
+    await processBankrunTransaction(bankrunContext, depositTx, [
+      deleveragee.wallet,
+    ]);
+
+    const mrgnAccountBefore =
+      await bankrunProgram.account.marginfiAccount.fetch(deleverageeAccount);
+    const withdrawAllRemaining = composeRemainingAccountsByBalances(
+      mrgnAccountBefore.lendingAccount.balances,
+      remainingWithBank2,
+      banks[2],
+    );
+
+    const tx = new Transaction().add(
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),
+      await startDeleverageIx(riskAdmin.mrgnBankrunProgram, {
+        marginfiAccount: deleverageeAccount,
+        riskAdmin: riskAdmin.wallet.publicKey,
+        remaining: composeRemainingAccountsWriteableMeta(remainingWithBank2),
+      }),
+      await withdrawIx(riskAdmin.mrgnBankrunProgram, {
+        marginfiAccount: deleverageeAccount,
+        bank: banks[2],
+        tokenAccount: riskAdmin.lstAlphaAccount,
+        remaining: withdrawAllRemaining,
+        amount: new BN(0),
+        withdrawAll: true,
+      }),
+      await repayIx(riskAdmin.mrgnBankrunProgram, {
+        marginfiAccount: deleverageeAccount,
+        bank: banks[4],
+        tokenAccount: riskAdmin.lstAlphaAccount,
+        remaining: composeRemainingAccounts(remainingWithBank2),
+        amount: tinyAmount,
+      }),
+      await endDeleverageIx(riskAdmin.mrgnBankrunProgram, {
+        marginfiAccount: deleverageeAccount,
+        remaining: composeRemainingAccountsMetaBanksOnly(remainingAccounts),
+      }),
+    );
+
+    const blockhash = await getBankrunBlockhash(bankrunContext);
+    const lutRaw = await banksClient.getAccount(lookupTable);
+    const lutState = AddressLookupTableAccount.deserialize(lutRaw.data);
+    const lutAccount = new AddressLookupTableAccount({
+      key: lookupTable,
+      state: lutState,
+    });
+    const messageV0 = new TransactionMessage({
+      payerKey: riskAdmin.wallet.publicKey,
+      recentBlockhash: blockhash,
+      instructions: [...tx.instructions],
+    }).compileToV0Message([lutAccount]);
+    const versionedTx = new VersionedTransaction(messageV0);
+    versionedTx.sign([riskAdmin.wallet]);
+    await banksClient.processTransaction(versionedTx);
+
+    for (let i = 0; i <= 4; i++) {
+      await assertBankLiqCacheUnlocked(banks[i]);
+    }
+  });
+
+  const assertBankLiqCacheUnlocked = async (bank: PublicKey) => {
+    const bankAccount = await bankrunProgram.account.bank.fetch(bank);
+    const liqCacheFlags = Number(bankAccount.cache.liqCacheFlags);
+    assert.equal(liqCacheFlags & LIQ_CACHE_LOCKED_FLAG, 0);
+  };
 
   // TODO try these with switchboard oracles.
 });
