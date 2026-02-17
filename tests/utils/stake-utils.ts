@@ -503,15 +503,3 @@ export async function getStakeActivation(
     inactive,
   };
 }
-
-export const getEpochAndSlot = async (banksClient: BanksClient) => {
-  let clock = await banksClient.getAccount(SYSVAR_CLOCK_PUBKEY);
-
-  // Slot is bytes 0-8
-  let slot = new BN(clock.data.slice(0, 8), 10, "le").toNumber();
-
-  // Epoch is bytes 16-24
-  let epoch = new BN(clock.data.slice(16, 24), 10, "le").toNumber();
-
-  return { epoch, slot };
-};

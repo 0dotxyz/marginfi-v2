@@ -33,7 +33,7 @@ import {
   simpleRefreshReserve,
 } from "./utils/kamino-utils";
 import { assert } from "chai";
-import { processBankrunTransaction, getBankrunTime } from "./utils/tools";
+import { processBankrunTransaction } from "./utils/tools";
 import { ProgramTestContext } from "solana-bankrun";
 import {
   makeAddKaminoBankIx,

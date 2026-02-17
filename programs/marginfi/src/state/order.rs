@@ -1,4 +1,7 @@
-use crate::{check, check_eq, constants::MAX_BPS, errors::MarginfiError, prelude::MarginfiResult};
+use crate::{
+    check, check_eq, constants::MAX_BPS, errors::MarginfiError, prelude::MarginfiResult,
+    state::marginfi_account::LendingAccountImpl,
+};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
@@ -43,7 +46,6 @@ impl OrderImpl for Order {
                     val > I80F48::ZERO,
                     MarginfiError::InvalidOrderTakeProfitOrStopLoss
                 );
-                check!(self.max_slippage < MAX_BPS, MarginfiError::InvalidSlippage);
             }
             OrderTrigger::TakeProfit {
                 threshold,
@@ -59,7 +61,6 @@ impl OrderImpl for Order {
                     val > I80F48::ZERO,
                     MarginfiError::InvalidOrderTakeProfitOrStopLoss
                 );
-                check!(self.max_slippage < MAX_BPS, MarginfiError::InvalidSlippage);
             }
             OrderTrigger::Both {
                 stop_loss,
@@ -77,9 +78,10 @@ impl OrderImpl for Order {
                     sl > I80F48::ZERO && tp > sl,
                     MarginfiError::InvalidOrderTakeProfitOrStopLoss
                 );
-                check!(self.max_slippage < MAX_BPS, MarginfiError::InvalidSlippage);
             }
         }
+
+        check!(self.max_slippage < MAX_BPS, MarginfiError::InvalidSlippage);
 
         self.tags = tags;
         self.bump = bump;
@@ -193,17 +195,9 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
         for record in self.balance_states[..self.active_balance_count as usize].iter() {
             let index = marginfi_account
                 .lending_account
-                .balances
-                .binary_search_by(|balance| record.bank.cmp(&balance.bank_pk))
-                .map_err(|_| MarginfiError::IllegalBalanceState)?;
+                .get_balance_index(&record.bank)?;
 
             let balance = &marginfi_account.lending_account.balances[index];
-
-            check_eq!(
-                record.bank,
-                balance.bank_pk,
-                MarginfiError::IllegalBalanceState
-            );
 
             let side = balance
                 .get_side()

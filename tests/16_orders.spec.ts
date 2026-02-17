@@ -22,7 +22,7 @@ import {
   endExecuteOrderIx,
   closeOrderIx,
   keeperCloseOrderIx,
-  setLiquidatorCloseFlagsIx,
+  setKeeperCloseFlagsIx,
   depositIx,
   borrowIx,
   updateEmissionsDestination,
@@ -55,6 +55,7 @@ import {
 } from "./utils/genericTests";
 import { editGlobalFeeState } from "./utils/group-instructions";
 import { BankrunProvider } from "anchor-bankrun";
+import { dummyIx } from "./utils/bankrunConnection";
 
 let program: Program<Marginfi>;
 let provider: BankrunProvider;
@@ -361,9 +362,6 @@ describe("orders", () => {
     it("keeper closes an order - happy path", async () => {
       const orderPk = await placeTestOrder();
 
-      const keeper = users[1];
-      const keeperProgram = keeper.mrgnProgram as Program<Marginfi>;
-
       // Clear the liability, so at least one order tag has no active balance
       const repayRemaining = composeRemainingAccounts([
         [bankUsdc, oracles.usdcOracle.publicKey],
@@ -421,7 +419,7 @@ describe("orders", () => {
       const ix = await keeperCloseOrderIx(program, {
         marginfiAccount: userMarginfiAccount,
         order: orderPk,
-        feeRecipient: keeper.wallet.publicKey,
+        feeRecipient: keeperUser.wallet.publicKey,
       });
 
       await keeperProgram.provider.sendAndConfirm(new Transaction().add(ix));
@@ -475,7 +473,7 @@ describe("orders", () => {
     });
 
     it("sets liquidator close flags - happy path", async () => {
-      const ix = await setLiquidatorCloseFlagsIx(program, {
+      const ix = await setKeeperCloseFlagsIx(program, {
         marginfiAccount: userMarginfiAccount,
         authority: user.wallet.publicKey,
         bankKeysOpt: [bankA],
@@ -506,7 +504,12 @@ describe("orders", () => {
         feeRecipient: keeper.wallet.publicKey,
       });
 
-      await keeperProgram.provider.sendAndConfirm(new Transaction().add(ix));
+      await keeperProgram.provider.sendAndConfirm(
+        new Transaction().add(
+          dummyIx(keeper.wallet.publicKey, user.wallet.publicKey),
+          ix,
+        ),
+      );
 
       const closed = await program.provider.connection.getAccountInfo(orderPk);
       expect(closed).to.be.null;
@@ -706,9 +709,7 @@ describe("orders", () => {
         bankKeys,
         trigger,
       });
-      await userProgram.provider.sendAndConfirm(
-        new Transaction().add(ixPlace),
-      );
+      await userProgram.provider.sendAndConfirm(new Transaction().add(ixPlace));
 
       [orderPk] = deriveOrderPda(
         program.programId,

@@ -253,7 +253,7 @@ pub mod marginfi {
     }
 
     /// (permissionless keeper) Close an existing Order after the user account was closed, or it no
-    /// longer as the associated positions, or the user has executed
+    /// longer has the associated positions, or the user has executed
     /// `marginfi_account_set_keeper_close_flags`. Keeper keeps the rent.
     pub fn marginfi_account_keeper_close_order(ctx: Context<KeeperCloseOrder>) -> MarginfiResult {
         marginfi_account::keeper_close_order(ctx)

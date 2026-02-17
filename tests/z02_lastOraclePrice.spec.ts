@@ -24,8 +24,6 @@ import {
   pulseBankPrice,
 } from "./utils/user-instructions";
 import { accrueInterest } from "./utils/group-instructions";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
-import { assert } from "chai";
 import {
   CONF_INTERVAL_MULTIPLE,
   ORACLE_CONF_INTERVAL,
@@ -33,6 +31,7 @@ import {
 } from "./utils/types";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { assertI80F48Approx, assertI80F48Equal } from "./utils/genericTests";
+import { getBankrunBlockhash } from "./utils/tools";
 
 const readCacheFields = (cache: any) => {
   const price = cache?.lastOraclePrice ?? 0;

@@ -4,11 +4,9 @@ solana_version = "2.1.20"
 # Getting "thread 'main' panicked at cli/src/lib.rs:545:18:"? Check your toolchain matches the above.
 
 [workspace]
-members = ["programs/marginfi", "programs/mocks", "programs/test_transfer_hook", "programs/juplend-mocks"]
+members = ["programs/marginfi", "programs/mocks", "programs/test_transfer_hook"]
 # exclude = [
 #   "programs/test_transfer_hook",
-#   "programs/liquidity-incentive-program",
-#   "programs/brick",
 # ]
 
 [features]

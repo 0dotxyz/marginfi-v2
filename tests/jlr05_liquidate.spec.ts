@@ -78,9 +78,9 @@ import {
   mintToTokenAccount,
   processBankrunTransaction,
   processBankrunV0Transaction,
+  getBankrunBlockhash,
 } from "./utils/tools";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { advanceFiveMinutes, dummyIx } from "./utils/bankrunConnection";
 
 const USER1_ACCOUNT_SEED = Buffer.from("JLR05_USER1_ACCOUNT_SEED_0000000");
@@ -313,7 +313,10 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
     );
     await processBankrunTransaction(
       bankrunContext,
-      new Transaction().add(pulseBeforeLiquidationIx),
+      new Transaction().add(
+        dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
+        pulseBeforeLiquidationIx,
+      ),
       [user.wallet],
       false,
       true,
@@ -575,7 +578,6 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
     ];
 
     const rxLutAccount = await createLookupTableForInstructions(
-      bankrunContext,
       liquidator.wallet,
       rxLiquidationIxs,
     );

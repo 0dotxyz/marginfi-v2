@@ -30,7 +30,6 @@ import {
   users,
 } from "./rootHooks";
 import { accrueInterest } from "./utils/group-instructions";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { assert } from "chai";
 import {
   borrowIx,
@@ -42,8 +41,9 @@ import { genericMultiBankTestSetup } from "./genericSetups";
 import { Clock } from "solana-bankrun";
 import { aprToU32 } from "./utils/genericTests";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
-import { getEpochAndSlot } from "./utils/stake-utils";
 import { u32_MAX } from "./utils/types";
+import { getBankrunBlockhash } from "./utils/tools";
+import { getEpochAndSlot } from "./utils/bankrunConnection";
 
 const startingSeed: number = 399;
 const groupBuff = Buffer.from("MARGINFI_GROUP_SEED_1234000000Z1");

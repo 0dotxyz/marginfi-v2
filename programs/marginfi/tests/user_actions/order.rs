@@ -1,20 +1,17 @@
-use anchor_lang::{InstructionData, ToAccountMetas};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48 as fp;
 use fixtures::{
     assert_anchor_error, assert_custom_error, bank::BankFixture,
-    marginfi_account::MarginfiAccountFixture, prelude::*, ui_to_native,
+    marginfi_account::MarginfiAccountFixture, prelude::*,
 };
-use marginfi::{prelude::MarginfiError, state::bank::BankVaultType};
+use marginfi::prelude::MarginfiError;
 use marginfi_type_crate::types::{centi_to_u32, u32_to_centi, OrderTrigger, WrappedI80F48};
 use solana_program_test::tokio;
 use solana_sdk::{
     account::Account,
-    instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     system_instruction::SystemError,
-    system_program, sysvar,
     transaction::Transaction,
 };
 use test_case::test_case;
@@ -151,176 +148,6 @@ fn default_price_for_mint(mint: &BankMint) -> f64 {
     }
 }
 
-async fn make_start_execute_ix(
-    marginfi_account_f: &MarginfiAccountFixture,
-    order: Pubkey,
-    executor: Pubkey,
-) -> anyhow::Result<(Instruction, Pubkey)> {
-    let marginfi_account = marginfi_account_f.load().await;
-    let (execute_record, _) = find_execute_order_pda(&order);
-
-    let mut ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::StartExecuteOrder {
-            group: marginfi_account.group,
-            marginfi_account: marginfi_account_f.key,
-            fee_payer: executor,
-            executor,
-            order,
-            execute_record,
-            instruction_sysvar: sysvar::instructions::id(),
-            system_program: system_program::ID,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountStartExecuteOrder {}.data(),
-    };
-
-    ix.accounts.extend_from_slice(
-        &marginfi_account_f
-            .load_observation_account_metas(vec![], vec![])
-            .await,
-    );
-
-    Ok((ix, execute_record))
-}
-
-async fn make_end_execute_ix(
-    marginfi_account_f: &MarginfiAccountFixture,
-    order: Pubkey,
-    execute_record: Pubkey,
-    executor: Pubkey,
-    fee_recipient: Pubkey,
-    exclude_banks: Vec<Pubkey>,
-) -> anyhow::Result<Instruction> {
-    let marginfi_account = marginfi_account_f.load().await;
-
-    let mut ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::EndExecuteOrder {
-            group: marginfi_account.group,
-            marginfi_account: marginfi_account_f.key,
-            executor,
-            fee_recipient,
-            order,
-            execute_record,
-            fee_state: Pubkey::find_program_address(
-                &[marginfi_type_crate::constants::FEE_STATE_SEED.as_bytes()],
-                &marginfi::ID,
-            )
-            .0,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountEndExecuteOrder {}.data(),
-    };
-
-    ix.accounts.extend_from_slice(
-        &marginfi_account_f
-            .load_observation_account_metas(vec![], exclude_banks)
-            .await,
-    );
-
-    Ok(ix)
-}
-
-async fn make_repay_ix(
-    marginfi_account_f: &MarginfiAccountFixture,
-    bank_f: &BankFixture,
-    authority: Pubkey,
-    signer_token_account: Pubkey,
-    ui_amount: f64,
-    repay_all: Option<bool>,
-) -> anyhow::Result<Instruction> {
-    let marginfi_account = marginfi_account_f.load().await;
-
-    let mut accounts = marginfi::accounts::LendingAccountRepay {
-        group: marginfi_account.group,
-        marginfi_account: marginfi_account_f.key,
-        authority,
-        bank: bank_f.key,
-        signer_token_account,
-        liquidity_vault: bank_f.get_vault(BankVaultType::Liquidity).0,
-        token_program: bank_f.get_token_program(),
-    }
-    .to_account_metas(Some(true));
-
-    if bank_f.mint.token_program == anchor_spl::token_2022::ID {
-        accounts.push(AccountMeta::new_readonly(bank_f.mint.key, false));
-    }
-
-    let mut ix = Instruction {
-        program_id: marginfi::ID,
-        accounts,
-        data: marginfi::instruction::LendingAccountRepay {
-            amount: ui_to_native!(ui_amount, bank_f.mint.mint.decimals),
-            repay_all,
-        }
-        .data(),
-    };
-
-    if repay_all.unwrap_or(false) {
-        ix.accounts.extend_from_slice(
-            &marginfi_account_f
-                .load_observation_account_metas(vec![bank_f.key], vec![])
-                .await,
-        );
-    }
-
-    Ok(ix)
-}
-
-async fn make_withdraw_ix(
-    marginfi_account_f: &MarginfiAccountFixture,
-    bank_f: &BankFixture,
-    authority: Pubkey,
-    destination: Pubkey,
-    ui_amount: f64,
-    withdraw_all: Option<bool>,
-) -> anyhow::Result<Instruction> {
-    let marginfi_account = marginfi_account_f.load().await;
-
-    let mut accounts = marginfi::accounts::LendingAccountWithdraw {
-        group: marginfi_account.group,
-        marginfi_account: marginfi_account_f.key,
-        authority,
-        bank: bank_f.key,
-        destination_token_account: destination,
-        bank_liquidity_vault_authority: bank_f.get_vault_authority(BankVaultType::Liquidity).0,
-        liquidity_vault: bank_f.get_vault(BankVaultType::Liquidity).0,
-        token_program: bank_f.get_token_program(),
-    }
-    .to_account_metas(Some(true));
-
-    if bank_f.mint.token_program == anchor_spl::token_2022::ID {
-        accounts.push(AccountMeta::new_readonly(bank_f.mint.key, false));
-    }
-
-    let mut ix = Instruction {
-        program_id: marginfi::ID,
-        accounts,
-        data: marginfi::instruction::LendingAccountWithdraw {
-            amount: ui_to_native!(ui_amount, bank_f.mint.mint.decimals),
-            withdraw_all,
-        }
-        .data(),
-    };
-
-    if withdraw_all.unwrap_or(false) {
-        ix.accounts.extend_from_slice(
-            &marginfi_account_f
-                .load_observation_account_metas_close_last(bank_f.key, vec![], vec![])
-                .await,
-        );
-    } else {
-        ix.accounts.extend_from_slice(
-            &marginfi_account_f
-                .load_observation_account_metas(vec![], vec![])
-                .await,
-        );
-    }
-
-    Ok(ix)
-}
-
 async fn fund_keeper_for_fees(test_f: &TestFixture, keeper: &Keypair) -> anyhow::Result<()> {
     let mut ctx = test_f.context.borrow_mut();
     let rent = ctx.banks_client.get_rent().await?;
@@ -416,8 +243,8 @@ async fn create_dual_asset_account(
 }
 
 // With these cases our aim is to test the success of the execute order instruction for some edge cases
-// The below constraint always has to be satisfied:-
-// For take profit:-
+// The below constraint always has to be satisfied:
+// For take profit:
 // Va_0 - Vl_0 >= tp (on entry)
 // Va_1 >= tp * (1 - slippage) (on leave)
 // Va_1 >= (Va_0 - Vl_0) * (1 - max_fee) (on leave)
@@ -429,7 +256,7 @@ async fn create_dual_asset_account(
 // Note also that the slippage check has more priority and Va_1 would be clamped to the max allowed by the
 // slippage where necessary as is enforced by the code.
 //
-// For stop loss:-
+// For stop loss:
 // Va_0 - Vl_0 <= sl (on entry)
 // Va_1 >= (Va_0 - Vl_0) * (1 - slippage) (on leave)
 //
@@ -493,43 +320,44 @@ async fn execute_order_fails_pre_trigger_not_met(
     let asset_bank_f = test_f.get_bank(&asset_mint);
     let liability_bank_f = test_f.get_bank(&liability_mint);
 
-    let (start_ix, execute_record) =
-        make_start_execute_ix(&borrower_mfi_account_f, order_pda, keeper.pubkey()).await?;
+    let (start_ix, execute_record) = borrower_mfi_account_f
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
 
-    let repay_ix = make_repay_ix(
-        &borrower_mfi_account_f,
-        &liability_bank_f,
-        keeper.pubkey(),
-        keeper_liab_account,
-        0.0,
-        Some(true),
-    )
-    .await?;
+    let repay_ix = borrower_mfi_account_f
+        .make_repay_ix_with_authority(
+            keeper_liab_account,
+            &liability_bank_f,
+            0.0,
+            Some(true),
+            keeper.pubkey(),
+        )
+        .await;
 
     let withdraw_amt = estimate_withdraw_amount(
         default_price_for_mint(&liability_mint) * liability_borrow,
         price,
     );
 
-    let withdraw_ix = make_withdraw_ix(
-        &borrower_mfi_account_f,
-        &asset_bank_f,
-        keeper.pubkey(),
-        keeper_asset_account,
-        withdraw_amt,
-        None,
-    )
-    .await?;
+    let withdraw_ix = borrower_mfi_account_f
+        .make_withdraw_ix_with_authority(
+            keeper_asset_account,
+            &asset_bank_f,
+            withdraw_amt,
+            None,
+            keeper.pubkey(),
+        )
+        .await;
 
-    let end_ix = make_end_execute_ix(
-        &borrower_mfi_account_f,
-        order_pda,
-        execute_record,
-        keeper.pubkey(),
-        keeper.pubkey(),
-        vec![liability_bank_f.key],
-    )
-    .await?;
+    let end_ix = borrower_mfi_account_f
+        .make_end_execute_ix(
+            order_pda,
+            execute_record,
+            keeper.pubkey(),
+            keeper.pubkey(),
+            vec![liability_bank_f.key],
+        )
+        .await;
 
     let blockhash = test_f.get_latest_blockhash().await;
     let ctx = test_f.context.borrow_mut();
@@ -598,43 +426,44 @@ async fn execute_order_fails_post_trigger_not_met(
     let asset_bank_f = test_f.get_bank(&asset_mint);
     let liability_bank_f = test_f.get_bank(&liability_mint);
 
-    let (start_ix, execute_record) =
-        make_start_execute_ix(&borrower_mfi_account_f, order_pda, keeper.pubkey()).await?;
+    let (start_ix, execute_record) = borrower_mfi_account_f
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
 
-    let repay_ix = make_repay_ix(
-        &borrower_mfi_account_f,
-        &liability_bank_f,
-        keeper.pubkey(),
-        keeper_liab_account,
-        0.0,
-        Some(true),
-    )
-    .await?;
+    let repay_ix = borrower_mfi_account_f
+        .make_repay_ix_with_authority(
+            keeper_liab_account,
+            &liability_bank_f,
+            0.0,
+            Some(true),
+            keeper.pubkey(),
+        )
+        .await;
 
     let withdraw_amt = estimate_withdraw_amount(
         default_price_for_mint(&liability_mint) * liability_borrow,
         price,
     ) * withdraw_scale;
 
-    let withdraw_ix = make_withdraw_ix(
-        &borrower_mfi_account_f,
-        &asset_bank_f,
-        keeper.pubkey(),
-        keeper_asset_account,
-        withdraw_amt,
-        None,
-    )
-    .await?;
+    let withdraw_ix = borrower_mfi_account_f
+        .make_withdraw_ix_with_authority(
+            keeper_asset_account,
+            &asset_bank_f,
+            withdraw_amt,
+            None,
+            keeper.pubkey(),
+        )
+        .await;
 
-    let end_ix = make_end_execute_ix(
-        &borrower_mfi_account_f,
-        order_pda,
-        execute_record,
-        keeper.pubkey(),
-        keeper.pubkey(),
-        vec![liability_bank_f.key],
-    )
-    .await?;
+    let end_ix = borrower_mfi_account_f
+        .make_end_execute_ix(
+            order_pda,
+            execute_record,
+            keeper.pubkey(),
+            keeper.pubkey(),
+            vec![liability_bank_f.key],
+        )
+        .await;
 
     let blockhash = test_f.get_latest_blockhash().await;
     let ctx = test_f.context.borrow_mut();
@@ -706,54 +535,55 @@ async fn execute_order_fails_touch_uninvolved_balance(
     let liability_bank_f = test_f.get_bank(&liability_mint);
     let uninvolved_bank_f = test_f.get_bank(&uninvolved_mint);
 
-    let (start_ix, execute_record) =
-        make_start_execute_ix(&borrower_mfi_account_f, order_pda, keeper.pubkey()).await?;
+    let (start_ix, execute_record) = borrower_mfi_account_f
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
 
-    let repay_ix = make_repay_ix(
-        &borrower_mfi_account_f,
-        &liability_bank_f,
-        keeper.pubkey(),
-        keeper_liab_account,
-        0.0,
-        Some(true),
-    )
-    .await?;
+    let repay_ix = borrower_mfi_account_f
+        .make_repay_ix_with_authority(
+            keeper_liab_account,
+            &liability_bank_f,
+            0.0,
+            Some(true),
+            keeper.pubkey(),
+        )
+        .await;
 
     let withdraw_amt = estimate_withdraw_amount(
         default_price_for_mint(&liability_mint) * liability_borrow,
         price,
     );
 
-    let withdraw_ix = make_withdraw_ix(
-        &borrower_mfi_account_f,
-        &asset_bank_f,
-        keeper.pubkey(),
-        keeper_asset_account,
-        withdraw_amt,
-        None,
-    )
-    .await?;
+    let withdraw_ix = borrower_mfi_account_f
+        .make_withdraw_ix_with_authority(
+            keeper_asset_account,
+            &asset_bank_f,
+            withdraw_amt,
+            None,
+            keeper.pubkey(),
+        )
+        .await;
 
     // touch unrelated SOL balance
-    let withdraw_sol_ix = make_withdraw_ix(
-        &borrower_mfi_account_f,
-        &uninvolved_bank_f,
-        keeper.pubkey(),
-        keeper_uninvolved_account,
-        0.001,
-        None,
-    )
-    .await?;
+    let withdraw_sol_ix = borrower_mfi_account_f
+        .make_withdraw_ix_with_authority(
+            keeper_uninvolved_account,
+            &uninvolved_bank_f,
+            0.001,
+            None,
+            keeper.pubkey(),
+        )
+        .await;
 
-    let end_ix = make_end_execute_ix(
-        &borrower_mfi_account_f,
-        order_pda,
-        execute_record,
-        keeper.pubkey(),
-        keeper.pubkey(),
-        vec![liability_bank_f.key],
-    )
-    .await?;
+    let end_ix = borrower_mfi_account_f
+        .make_end_execute_ix(
+            order_pda,
+            execute_record,
+            keeper.pubkey(),
+            keeper.pubkey(),
+            vec![liability_bank_f.key],
+        )
+        .await;
 
     let blockhash = test_f.get_latest_blockhash().await;
     let ctx = test_f.context.borrow_mut();
@@ -859,43 +689,44 @@ async fn execute_order_fails_health_check(
         .try_bank_borrow(keeper_uninvolved_account, uninvolved_bank_f, sol_borrow)
         .await?;
 
-    let (start_ix, execute_record) =
-        make_start_execute_ix(&borrower_mfi_account_f, order_pda, keeper.pubkey()).await?;
+    let (start_ix, execute_record) = borrower_mfi_account_f
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
 
-    let repay_ix = make_repay_ix(
-        &borrower_mfi_account_f,
-        &liability_bank_f,
-        keeper.pubkey(),
-        keeper_liab_account,
-        0.0,
-        Some(true),
-    )
-    .await?;
+    let repay_ix = borrower_mfi_account_f
+        .make_repay_ix_with_authority(
+            keeper_liab_account,
+            &liability_bank_f,
+            0.0,
+            Some(true),
+            keeper.pubkey(),
+        )
+        .await;
 
     let withdraw_amt = estimate_withdraw_amount(
         default_price_for_mint(&liability_mint) * liability_borrow,
         price,
     ) * withdraw_scale;
 
-    let withdraw_ix = make_withdraw_ix(
-        &borrower_mfi_account_f,
-        &asset_bank_f,
-        keeper.pubkey(),
-        keeper_asset_account,
-        withdraw_amt,
-        None,
-    )
-    .await?;
+    let withdraw_ix = borrower_mfi_account_f
+        .make_withdraw_ix_with_authority(
+            keeper_asset_account,
+            &asset_bank_f,
+            withdraw_amt,
+            None,
+            keeper.pubkey(),
+        )
+        .await;
 
-    let end_ix = make_end_execute_ix(
-        &borrower_mfi_account_f,
-        order_pda,
-        execute_record,
-        keeper.pubkey(),
-        keeper.pubkey(),
-        vec![liability_bank_f.key],
-    )
-    .await?;
+    let end_ix = borrower_mfi_account_f
+        .make_end_execute_ix(
+            order_pda,
+            execute_record,
+            keeper.pubkey(),
+            keeper.pubkey(),
+            vec![liability_bank_f.key],
+        )
+        .await;
 
     let blockhash = test_f.get_latest_blockhash().await;
     let ctx = test_f.context.borrow_mut();
@@ -968,43 +799,44 @@ async fn execute_order_success(
     let order_before = borrower_mfi_account_f.load_order(order_pda).await;
     let mfi_before = borrower_mfi_account_f.load().await;
 
-    let (start_ix, execute_record) =
-        make_start_execute_ix(&borrower_mfi_account_f, order_pda, keeper.pubkey()).await?;
+    let (start_ix, execute_record) = borrower_mfi_account_f
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
 
-    let repay_ix = make_repay_ix(
-        &borrower_mfi_account_f,
-        &liability_bank_f,
-        keeper.pubkey(),
-        keeper_liab_account,
-        0.0,
-        Some(true),
-    )
-    .await?;
+    let repay_ix = borrower_mfi_account_f
+        .make_repay_ix_with_authority(
+            keeper_liab_account,
+            &liability_bank_f,
+            0.0,
+            Some(true),
+            keeper.pubkey(),
+        )
+        .await;
 
     let withdraw_amt = estimate_withdraw_amount(
         default_price_for_mint(&liability_mint) * liability_borrow,
         price,
     ) * withdraw_scale;
 
-    let withdraw_ix = make_withdraw_ix(
-        &borrower_mfi_account_f,
-        &asset_bank_f,
-        keeper.pubkey(),
-        keeper_asset_account,
-        withdraw_amt,
-        None,
-    )
-    .await?;
+    let withdraw_ix = borrower_mfi_account_f
+        .make_withdraw_ix_with_authority(
+            keeper_asset_account,
+            &asset_bank_f,
+            withdraw_amt,
+            None,
+            keeper.pubkey(),
+        )
+        .await;
 
-    let end_ix = make_end_execute_ix(
-        &borrower_mfi_account_f,
-        order_pda,
-        execute_record,
-        keeper.pubkey(),
-        keeper.pubkey(),
-        vec![liability_bank_f.key],
-    )
-    .await?;
+    let end_ix = borrower_mfi_account_f
+        .make_end_execute_ix(
+            order_pda,
+            execute_record,
+            keeper.pubkey(),
+            keeper.pubkey(),
+            vec![liability_bank_f.key],
+        )
+        .await;
 
     let blockhash = test_f.get_latest_blockhash().await;
     let ctx = test_f.context.borrow_mut();

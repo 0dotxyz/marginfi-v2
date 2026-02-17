@@ -21,6 +21,9 @@ import {
   emodeGroup,
   oracles,
   LIQUIDATION_MAX_FEE,
+  ORDER_INIT_FLAT_FEE_DEFAULT,
+  LIQUIDATION_FLAT_FEE,
+  ORDER_EXECUTION_MAX_FEE,
 } from "./rootHooks";
 import { assert } from "chai";
 import { deriveBankWithSeed, deriveGlobalFeeState } from "./utils/pdas";
@@ -39,7 +42,6 @@ import {
   waitUntil,
 } from "./utils/genericTests";
 import { PAUSE_DURATION_SECONDS } from "./utils/types";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { USER_ACCOUNT_E } from "./utils/mocks";
 import {
   liquidateIx,
@@ -49,6 +51,7 @@ import {
   borrowIx,
   repayIx,
 } from "./utils/user-instructions";
+import { getBankrunBlockhash } from "./utils/tools";
 
 describe("Panic Mode state test (Bankrun)", () => {
   type FeeState = IdlAccounts<Marginfi>["feeState"];
@@ -79,10 +82,12 @@ describe("Panic Mode state test (Bankrun)", () => {
           admin: globalProgramAdmin.wallet.publicKey,
           wallet: globalFeeWallet,
           bankInitFlatSolFee: INIT_POOL_ORIGINATION_FEE,
+          liquidationFlatSolFee: LIQUIDATION_FLAT_FEE,
+          orderInitFlatFeeDefault: ORDER_INIT_FLAT_FEE_DEFAULT,
           programFeeFixed: bigNumberToWrappedI80F48(PROGRAM_FEE_FIXED),
           programFeeRate: bigNumberToWrappedI80F48(PROGRAM_FEE_RATE),
-          liquidationFlatSolFee: 12345,
           liquidationMaxFee: bigNumberToWrappedI80F48(LIQUIDATION_MAX_FEE),
+          orderExecutionMaxFee: bigNumberToWrappedI80F48(ORDER_EXECUTION_MAX_FEE),
         })
       );
 

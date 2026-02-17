@@ -943,11 +943,6 @@ pub fn get_tagged_account_health_components<'info>(
     remaining_ais: &'info [AccountInfo<'info>],
     balance_tags: &[u16],
 ) -> MarginfiResult<(I80F48, I80F48, usize, usize)> {
-    check!(
-        !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
-        MarginfiError::AccountInFlashloan
-    );
-
     if balance_tags.is_empty() {
         return Ok((I80F48::ZERO, I80F48::ZERO, 0, 0));
     }
@@ -1516,6 +1511,7 @@ pub trait LendingAccountImpl {
     fn get_first_empty_balance(&self) -> Option<usize>;
     fn sort_balances(&mut self);
     fn reserve_n_tags(&mut self, n: usize) -> [u16; ORDER_ACTIVE_TAGS];
+    fn get_balance_index(&self, bank_pk: &Pubkey) -> MarginfiResult<usize>;
 }
 
 impl LendingAccountImpl for LendingAccount {
@@ -1565,6 +1561,17 @@ impl LendingAccountImpl for LendingAccount {
         }
 
         tags
+    }
+
+    fn get_balance_index(&self, bank_pk: &Pubkey) -> MarginfiResult<usize> {
+        let index = self
+            .balances
+            .binary_search_by(|balance| bank_pk.cmp(&balance.bank_pk))
+            .ok()
+            .and_then(|index| self.balances[index].is_active().then_some(index))
+            .ok_or(MarginfiError::LendingAccountBalanceNotFound)?;
+
+        Ok(index)
     }
 }
 

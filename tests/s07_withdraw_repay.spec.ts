@@ -13,7 +13,6 @@ import {
   bankRunProvider,
 } from "./rootHooks";
 import { deriveBankWithSeed, deriveStakedSettings } from "./utils/pdas";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
 import { getTokenBalance, assertI80F48Equal } from "./utils/genericTests";
@@ -27,6 +26,7 @@ import {
   withdrawIx,
 } from "./utils/user-instructions";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
+import { getBankrunBlockhash } from "./utils/tools";
 
 let marginfiGroup: Keypair;
 let bankKeypairSol: Keypair;

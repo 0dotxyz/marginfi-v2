@@ -19,7 +19,6 @@ import {
   assertI80F48Approx,
 } from "./utils/genericTests";
 import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "./utils/types";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { deriveBankWithSeed } from "./utils/pdas";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { USER_ACCOUNT_E } from "./utils/mocks";
@@ -29,7 +28,7 @@ import {
   composeRemainingAccounts,
   depositIx,
 } from "./utils/user-instructions";
-import { bytesToF64 } from "./utils/tools";
+import { bytesToF64, getBankrunBlockhash } from "./utils/tools";
 
 // Banks are listed here in the sorted-by-public-keys order - the same used in the lending account balances
 const seed = new BN(EMODE_SEED);
