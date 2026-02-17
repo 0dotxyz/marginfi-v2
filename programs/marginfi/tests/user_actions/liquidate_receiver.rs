@@ -634,7 +634,7 @@ async fn liquidate_receiver_repay_without_oracles_should_succeed() -> anyhow::Re
             &[ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         ctx.banks_client
             .process_transaction_with_preflight(tx)
@@ -686,7 +686,7 @@ async fn liquidate_receiver_repay_without_oracles_should_succeed() -> anyhow::Re
             &[init_ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         ctx.banks_client
             .process_transaction_with_preflight(init_tx)
@@ -734,7 +734,7 @@ async fn liquidate_receiver_repay_without_oracles_should_succeed() -> anyhow::Re
         &[start_ix, withdraw_ix, repay_ix, end_ix],
         Some(&ctx.payer.pubkey()),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
     let res = ctx
         .banks_client
