@@ -344,49 +344,11 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       remainingAccounts.push([banks[i], oracles.pythPullLst.publicKey]);
     }
 
-    const recentSlot = Number(await banksClient.getSlot());
-    const [createLutIx, lutAddress] =
-      AddressLookupTableProgram.createLookupTable({
-        authority: liquidator.wallet.publicKey,
-        payer: liquidator.wallet.publicKey,
-        recentSlot: recentSlot - 1,
-      });
-    lookupTable = lutAddress;
-
-    let createLutTx = new Transaction().add(createLutIx);
-    createLutTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    createLutTx.sign(liquidator.wallet);
-    await banksClient.processTransaction(createLutTx);
-
-    let extendLutTx1 = new Transaction().add(
-      AddressLookupTableProgram.extendLookupTable({
-        authority: liquidator.wallet.publicKey,
-        payer: liquidator.wallet.publicKey,
-        lookupTable,
-        addresses: remainingAccounts.flat().slice(0, 20),
-      }),
+    const account = await createLut(
+      liquidator.wallet,
+      remainingAccounts.flat(),
     );
-    extendLutTx1.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    extendLutTx1.sign(liquidator.wallet);
-    await banksClient.processTransaction(extendLutTx1);
-
-    let extendLutTx2 = new Transaction().add(
-      AddressLookupTableProgram.extendLookupTable({
-        authority: liquidator.wallet.publicKey,
-        payer: liquidator.wallet.publicKey,
-        lookupTable,
-        addresses: remainingAccounts.flat().slice(20),
-      }),
-    );
-    extendLutTx2.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    extendLutTx2.sign(liquidator.wallet);
-    await banksClient.processTransaction(extendLutTx2);
-
-    // We must advance the bankrun slot to allow the lut to activate
-    const ONE_MINUTE = 60;
-    const slotsToAdvance = ONE_MINUTE * 0.4;
-    let { epoch: _, slot } = await getEpochAndSlot(banksClient);
-    bankrunContext.warpToSlot(BigInt(slot + slotsToAdvance));
+    lookupTable = account.key;
   });
 
   it("(user 1) Liquidates user 0 with start/end", async () => {
