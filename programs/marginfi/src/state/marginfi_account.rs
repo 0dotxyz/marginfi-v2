@@ -1002,17 +1002,21 @@ pub fn get_tagged_account_health_components<'info>(
         );
         let oracle_ais = &remaining_ais[oracle_ai_idx..end_idx];
 
-        let price_adapter_result = OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock);
+        let (asset_val, liab_val) = {
+            let price_adapter_result =
+                OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock);
 
-        let (asset_val, liab_val, _price, _err_code) = calc_weighted_value_for_balance(
-            balance,
-            &bank,
-            &price_adapter_result,
-            requirement_type,
-            &reconciled_emode_config,
-            &mut None,
-            position_index,
-        )?;
+            let (asset_val, liab_val, _price, _err_code) = calc_weighted_value_for_balance(
+                balance,
+                &bank,
+                &price_adapter_result,
+                requirement_type,
+                &reconciled_emode_config,
+                &mut None,
+                position_index,
+            )?;
+            (asset_val, liab_val)
+        };
 
         match balance.get_side() {
             Some(BalanceSide::Assets) => asset_count += 1,
@@ -1125,7 +1129,8 @@ pub fn check_account_bankrupt<'info>(
 
     let has_liabilities = equity_liabs > I80F48::ZERO;
     let below_bankruptcy_threshold = equity_assets < BANKRUPT_THRESHOLD;
-    let is_bankrupt = has_liabilities && below_bankruptcy_threshold;
+    let liabilities_exceed_assets = equity_liabs > equity_assets;
+    let is_bankrupt = has_liabilities && below_bankruptcy_threshold && liabilities_exceed_assets;
 
     if !is_bankrupt {
         return err!(MarginfiError::AccountNotBankrupt);
@@ -1756,6 +1761,11 @@ impl<'a> BankAccountWrapper<'a> {
         );
 
         balance.close(true)?;
+
+        // Note: We do this so that banks in the receivership/deleverage flow are unlocked, as
+        // closed-position banks will not make it to the "end" instruction to be unlocked there
+        bank.cache.clear_liquidation_price_cache_locked();
+
         bank.decrement_lending_position_count();
         bank.change_asset_shares(-total_asset_shares, false)?;
         bank.check_utilization_ratio()?;
@@ -1802,6 +1812,11 @@ impl<'a> BankAccountWrapper<'a> {
         );
 
         balance.close(true)?;
+
+        // Note: We do this so that banks in the receivership/deleverage flow are unlocked, as
+        // closed-position banks will not make it to the "end" instruction to be unlocked there
+        bank.cache.clear_liquidation_price_cache_locked();
+
         bank.decrement_borrowing_position_count();
         bank.change_liability_shares(-total_liability_shares, false)?;
 

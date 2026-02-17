@@ -69,6 +69,7 @@ import {
 
 const startingSeed: number = 299;
 const groupBuff = Buffer.from("MARGINFI_GROUP_SEED_1234000000M2");
+const LIQ_CACHE_LOCKED_FLAG = 1;
 
 /** This is the program-enforced maximum enforced number of balances per account. */
 const USER_ACCOUNT_THROWAWAY = "throwaway_account3";
@@ -343,8 +344,49 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       remainingAccounts.push([banks[i], oracles.pythPullLst.publicKey]);
     }
 
-    const account = await createLut(liquidator.wallet, remainingAccounts.flat());
-    lookupTable = account.key;
+    const recentSlot = Number(await banksClient.getSlot());
+    const [createLutIx, lutAddress] =
+      AddressLookupTableProgram.createLookupTable({
+        authority: liquidator.wallet.publicKey,
+        payer: liquidator.wallet.publicKey,
+        recentSlot: recentSlot - 1,
+      });
+    lookupTable = lutAddress;
+
+    let createLutTx = new Transaction().add(createLutIx);
+    createLutTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    createLutTx.sign(liquidator.wallet);
+    await banksClient.processTransaction(createLutTx);
+
+    let extendLutTx1 = new Transaction().add(
+      AddressLookupTableProgram.extendLookupTable({
+        authority: liquidator.wallet.publicKey,
+        payer: liquidator.wallet.publicKey,
+        lookupTable,
+        addresses: remainingAccounts.flat().slice(0, 20),
+      }),
+    );
+    extendLutTx1.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    extendLutTx1.sign(liquidator.wallet);
+    await banksClient.processTransaction(extendLutTx1);
+
+    let extendLutTx2 = new Transaction().add(
+      AddressLookupTableProgram.extendLookupTable({
+        authority: liquidator.wallet.publicKey,
+        payer: liquidator.wallet.publicKey,
+        lookupTable,
+        addresses: remainingAccounts.flat().slice(20),
+      }),
+    );
+    extendLutTx2.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    extendLutTx2.sign(liquidator.wallet);
+    await banksClient.processTransaction(extendLutTx2);
+
+    // We must advance the bankrun slot to allow the lut to activate
+    const ONE_MINUTE = 60;
+    const slotsToAdvance = ONE_MINUTE * 0.4;
+    let { epoch: _, slot } = await getEpochAndSlot(banksClient);
+    bankrunContext.warpToSlot(BigInt(slot + slotsToAdvance));
   });
 
   it("(user 1) Liquidates user 0 with start/end", async () => {
@@ -711,6 +753,10 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
 
     // the first slot (0) should still be zero
     assert(recordAfter.entries[0].timestamp.toNumber() == 0);
+
+    for (let i = 0; i <= 4; i++) {
+      await assertBankLiqCacheUnlocked(banks[i]);
+    }
   });
 
   it("(admin) Sets the group withdrawal limit to $1 less than bank 4's liability", async () => {
@@ -946,6 +992,107 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       assert(recordAfter.entries[i].timestamp.toNumber() != 0);
     }
   });
+
+  it("(admin) Deleverages user 0 with tiny deposit + withdrawAll close and clears the bank lock", async () => {
+    const deleveragee = users[0];
+    const deleverageeAccount = deleveragee.accounts.get(USER_ACCOUNT_THROWAWAY);
+    const tinyAmount = new BN(
+      Math.floor(0.0001 * 10 ** ecosystem.lstAlphaDecimals),
+    );
+
+    // Previous tests intentionally set a very low withdrawal limit; raise it here so we can isolate
+    // lock-clearing behavior.
+    const limitResetTx = new Transaction().add(
+      await configureDeleverageWithdrawalLimit(groupAdmin.mrgnBankrunProgram, {
+        marginfiGroup: throwawayGroup.publicKey,
+        limit: 1_000_000_000,
+      }),
+    );
+    await processBankrunTransaction(bankrunContext, limitResetTx, [
+      groupAdmin.wallet,
+    ]);
+
+    // Re-add bank 2 locally for this test to create/close a tiny unrelated asset position.
+    const remainingWithBank2: PublicKey[][] = [
+      [banks[2], oracles.pythPullLst.publicKey],
+      ...remainingAccounts,
+    ];
+
+    const depositTx = new Transaction().add(
+      await depositIx(deleveragee.mrgnBankrunProgram, {
+        marginfiAccount: deleverageeAccount,
+        bank: banks[2],
+        tokenAccount: deleveragee.lstAlphaAccount,
+        amount: tinyAmount,
+        depositUpToLimit: false,
+      }),
+    );
+    await processBankrunTransaction(bankrunContext, depositTx, [
+      deleveragee.wallet,
+    ]);
+
+    const mrgnAccountBefore =
+      await bankrunProgram.account.marginfiAccount.fetch(deleverageeAccount);
+    const withdrawAllRemaining = composeRemainingAccountsByBalances(
+      mrgnAccountBefore.lendingAccount.balances,
+      remainingWithBank2,
+      banks[2],
+    );
+
+    const tx = new Transaction().add(
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),
+      await startDeleverageIx(riskAdmin.mrgnBankrunProgram, {
+        marginfiAccount: deleverageeAccount,
+        riskAdmin: riskAdmin.wallet.publicKey,
+        remaining: composeRemainingAccountsWriteableMeta(remainingWithBank2),
+      }),
+      await withdrawIx(riskAdmin.mrgnBankrunProgram, {
+        marginfiAccount: deleverageeAccount,
+        bank: banks[2],
+        tokenAccount: riskAdmin.lstAlphaAccount,
+        remaining: withdrawAllRemaining,
+        amount: new BN(0),
+        withdrawAll: true,
+      }),
+      await repayIx(riskAdmin.mrgnBankrunProgram, {
+        marginfiAccount: deleverageeAccount,
+        bank: banks[4],
+        tokenAccount: riskAdmin.lstAlphaAccount,
+        remaining: composeRemainingAccounts(remainingWithBank2),
+        amount: tinyAmount,
+      }),
+      await endDeleverageIx(riskAdmin.mrgnBankrunProgram, {
+        marginfiAccount: deleverageeAccount,
+        remaining: composeRemainingAccountsMetaBanksOnly(remainingAccounts),
+      }),
+    );
+
+    const blockhash = await getBankrunBlockhash(bankrunContext);
+    const lutRaw = await banksClient.getAccount(lookupTable);
+    const lutState = AddressLookupTableAccount.deserialize(lutRaw.data);
+    const lutAccount = new AddressLookupTableAccount({
+      key: lookupTable,
+      state: lutState,
+    });
+    const messageV0 = new TransactionMessage({
+      payerKey: riskAdmin.wallet.publicKey,
+      recentBlockhash: blockhash,
+      instructions: [...tx.instructions],
+    }).compileToV0Message([lutAccount]);
+    const versionedTx = new VersionedTransaction(messageV0);
+    versionedTx.sign([riskAdmin.wallet]);
+    await banksClient.processTransaction(versionedTx);
+
+    for (let i = 0; i <= 4; i++) {
+      await assertBankLiqCacheUnlocked(banks[i]);
+    }
+  });
+
+  const assertBankLiqCacheUnlocked = async (bank: PublicKey) => {
+    const bankAccount = await bankrunProgram.account.bank.fetch(bank);
+    const liqCacheFlags = Number(bankAccount.cache.liqCacheFlags);
+    assert.equal(liqCacheFlags & LIQ_CACHE_LOCKED_FLAG, 0);
+  };
 
   // TODO try these with switchboard oracles.
 });
