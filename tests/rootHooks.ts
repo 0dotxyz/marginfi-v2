@@ -64,7 +64,7 @@ import { Mocks } from "../target/types/mocks";
 import marginfiIdl from "../target/idl/marginfi.json";
 import mocksIdl from "../target/idl/mocks.json";
 import { setupPythOraclesBankrun } from "./utils/bankrun-oracles";
-import { getBankrunBlockhash, processBankrunTransaction } from "./utils/tools";
+import { processBankrunTransaction } from "./utils/tools";
 
 import {
   findPoolAddress,

@@ -16,7 +16,6 @@ import {
   banksClient,
   verbose,
 } from "./rootHooks";
-import { lendingMarketAuthPda } from "@kamino-finance/klend-sdk";
 import {
   SYSVAR_INSTRUCTIONS_PUBKEY,
   Transaction,
@@ -35,6 +34,8 @@ import { getTokenBalance } from "./utils/genericTests";
 import { Clock, ProgramTestContext } from "solana-bankrun";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { getEpochAndSlot } from "./utils/bankrunConnection";
+import { deriveLendingMarketAuthority } from "./utils/pdas";
+import { KLEND_PROGRAM_ID } from "./utils/types";
 
 let ctx: ProgramTestContext;
 let usdcReserve: PublicKey;
@@ -98,9 +99,9 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
     const tokenAReserveLiquiditySupply = reserveData.liquidity.supplyVault;
     const tokenACollateralMint = reserveData.collateral.mintPubkey;
     const tokenACollateralVault = reserveData.collateral.supplyVault;
-    const [lendingMarketAuthority] = lendingMarketAuthPda(
+    const [lendingMarketAuthority] = deriveLendingMarketAuthority(
+      KLEND_PROGRAM_ID,
       market,
-      klendBankrunProgram.programId,
     );
     const depositAmount = 200_000 * 10 ** ecosystem.tokenADecimals;
 
@@ -158,9 +159,9 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
       usdcReserve,
     );
     const usdcFeesVault = borrowReserveData.liquidity.feeVault;
-    const [lendingMarketAuthority] = lendingMarketAuthPda(
+    const [lendingMarketAuthority] = deriveLendingMarketAuthority(
+      KLEND_PROGRAM_ID,
       market,
-      klendBankrunProgram.programId,
     );
     // Note: Kamino obligation direct obligation (not through marginfi)
     const obligation = user.accounts.get(KAMINO_OBLIGATION);
@@ -245,9 +246,9 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
     let user = users[2];
     // Note: Kamino obligation direct obligation (not through marginfi)
     const obligation = user.accounts.get(KAMINO_OBLIGATION);
-    const [lendingMarketAuthority] = lendingMarketAuthPda(
+    const [lendingMarketAuthority] = deriveLendingMarketAuthority(
+      KLEND_PROGRAM_ID,
       market,
-      klendBankrunProgram.programId,
     );
     const depositAmount = 80_000_000 * 10 ** ecosystem.usdcDecimals;
     const borrowAmount = 8_000 * 10 ** ecosystem.tokenADecimals;

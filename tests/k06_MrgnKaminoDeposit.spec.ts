@@ -35,11 +35,6 @@ import {
   assertKeysEqual,
   getTokenBalance,
 } from "./utils/genericTests";
-import { KLEND_PROGRAM_ID } from "./utils/types";
-import {
-  deriveReserveCollateralSupply,
-  deriveReserveLiquiditySupply,
-} from "./utils/pdas";
 import { BalanceRaw } from "@mrgnlabs/marginfi-client-v2";
 import { getEpochAndSlot } from "./utils/bankrunConnection";
 
@@ -59,17 +54,6 @@ describe("k06: Kamino Deposit Tests", () => {
     usdcReserve = kaminoAccounts.get(USDC_RESERVE);
     const bankKey = bank.toString();
     usdcBankObligation = kaminoAccounts.get(`${bankKey}_OBLIGATION`);
-
-    [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
-      KLEND_PROGRAM_ID,
-      market,
-      ecosystem.usdcMint.publicKey
-    );
-    [reserveCollateralSupply] = deriveReserveCollateralSupply(
-      KLEND_PROGRAM_ID,
-      market,
-      ecosystem.usdcMint.publicKey
-    );
 
     // Refresh oracles to ensure they have current timestamps
     // This prevents stale oracle issues when other test suites run first
@@ -155,7 +139,7 @@ describe("k06: Kamino Deposit Tests", () => {
           bank,
           signerTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
         amount
       )

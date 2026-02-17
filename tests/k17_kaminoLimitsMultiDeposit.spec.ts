@@ -22,6 +22,8 @@ import {
   users,
   verbose,
   bankrunProgram,
+  kaminoAccounts,
+  TOKEN_A_RESERVE,
 } from "./rootHooks";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import {
@@ -81,6 +83,10 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
   let regularBank: PublicKey;
   let lutAddress: PublicKey;
   let lut: AddressLookupTableAccount;
+  let tokenAReserve: PublicKey;
+  before(async () => {
+    tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE)!;
+  });
 
   it("Refresh oracles", async () => {
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
@@ -296,7 +302,7 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
             bank: bankKey,
             signerTokenAccount: groupAdmin.tokenAAccount,
             lendingMarket: marketKeypair.publicKey,
-            reserveLiquidityMint: mint,
+            reserve: tokenAReserve,
             pythOracle: oracles.tokenAOracle.publicKey,
           },
           new BN(100),
@@ -437,7 +443,7 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
             bank: bank,
             signerTokenAccount: user.tokenAAccount,
             lendingMarket: market,
-            reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+            reserve: tokenAReserve,
           },
           depositAmount,
         ),
@@ -809,7 +815,7 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
           bank: kaminoBanks[0],
           signerTokenAccount: user.tokenAAccount,
           lendingMarket: kaminoMarkets[0],
-          reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+          reserve: tokenAReserve,
         },
         depositAmountTokenA,
       ),

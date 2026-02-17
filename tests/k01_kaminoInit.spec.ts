@@ -34,10 +34,7 @@ import {
 } from "./utils/kamino-utils";
 // Note: there's some glitch in Kamino's lib based on a Raydium static init, it's currently patch-package hacked...
 import {
-  lendingMarketAuthPda,
   LendingMarket,
-  reserveLiqSupplyPda,
-  reserveFeeVaultPda,
   reserveCollateralMintPda,
   reserveCollateralSupplyPda,
   Reserve,
@@ -48,11 +45,21 @@ import {
   PriceFeed,
   AssetReserveConfig,
   updateEntireReserveConfigIx,
+  reserveLiqSupplyPda,
+  reserveFeeVaultPda,
 } from "@kamino-finance/klend-sdk";
 import { createMintToInstruction } from "@solana/spl-token";
 import { ProgramTestContext } from "solana-bankrun";
 
 let ctx: ProgramTestContext;
+import { KLEND_PROGRAM_ID } from "./utils/types";
+import {
+  deriveLendingMarketAuthority,
+  deriveReserveCollateralMint,
+  deriveReserveCollateralSupply,
+  deriveReserveLiquiditySupply,
+} from "./utils/pdas";
+import { address } from "@solana/addresses";
 
 describe("k01: Init Kamino instance", () => {
   before(async () => {
@@ -64,13 +71,13 @@ describe("k01: Init Kamino instance", () => {
   it("(admin) Init Kamino Market - happy path", async () => {
     const usdcString = "USDC";
     const quoteCurrency = Array.from(usdcString.padEnd(32, "\0")).map((c) =>
-      c.charCodeAt(0)
+      c.charCodeAt(0),
     );
 
     const lendingMarket = Keypair.generate();
-    const [lendingMarketAuthority] = lendingMarketAuthPda(
+    const [lendingMarketAuthority] = deriveLendingMarketAuthority(
+      KLEND_PROGRAM_ID,
       lendingMarket.publicKey,
-      klendBankrunProgram.programId
     );
 
     let tx = new Transaction();
@@ -82,7 +89,7 @@ describe("k01: Init Kamino instance", () => {
         space: LENDING_MARKET_SIZE + 8,
         lamports:
           await bankRunProvider.connection.getMinimumBalanceForRentExemption(
-            LENDING_MARKET_SIZE + 8
+            LENDING_MARKET_SIZE + 8,
           ),
         programId: klendBankrunProgram.programId,
       }),
@@ -96,7 +103,7 @@ describe("k01: Init Kamino instance", () => {
           systemProgram: SystemProgram.programId,
           rent: SYSVAR_RENT_PUBKEY,
         })
-        .instruction()
+        .instruction(),
     );
 
     await processBankrunTransaction(ctx, tx, [
@@ -110,9 +117,12 @@ describe("k01: Init Kamino instance", () => {
 
     const marketAcc: LendingMarket = LendingMarket.decode(
       (await bankRunProvider.connection.getAccountInfo(lendingMarket.publicKey))
-        .data
+        .data,
     );
-    assertKeysEqual(marketAcc.lendingMarketOwner, groupAdmin.wallet.publicKey);
+    assert.equal(
+      marketAcc.lendingMarketOwner.toString(),
+      groupAdmin.wallet.publicKey.toString(),
+    );
   });
 
   it("(admin) create USDC reserve", async () => {
@@ -122,8 +132,8 @@ describe("k01: Init Kamino instance", () => {
         ecosystem.usdcMint.publicKey,
         groupAdmin.usdcAccount,
         globalProgramAdmin.wallet.publicKey,
-        1000 * 10 ** ecosystem.usdcDecimals
-      )
+        1000 * 10 ** ecosystem.usdcDecimals,
+      ),
     );
     await processBankrunTransaction(ctx, tx, [globalProgramAdmin.wallet]);
 
@@ -135,7 +145,7 @@ describe("k01: Init Kamino instance", () => {
       // instead of Pyth, or any other spoof of Pyth with the same account structure, so be wary!
       // Using Pyth Pull oracle instead of legacy Pyth oracle
       oracles.usdcOracle.publicKey,
-      groupAdmin.usdcAccount
+      groupAdmin.usdcAccount,
     );
   });
 
@@ -146,8 +156,8 @@ describe("k01: Init Kamino instance", () => {
         ecosystem.tokenAMint.publicKey,
         groupAdmin.tokenAAccount,
         globalProgramAdmin.wallet.publicKey,
-        1000 * 10 ** ecosystem.tokenADecimals
-      )
+        1000 * 10 ** ecosystem.tokenADecimals,
+      ),
     );
     await processBankrunTransaction(ctx, tx, [globalProgramAdmin.wallet]);
 
@@ -157,7 +167,7 @@ describe("k01: Init Kamino instance", () => {
       ecosystem.tokenADecimals,
       // Using Pyth Pull oracle instead of legacy Pyth oracle
       oracles.tokenAOracle.publicKey,
-      groupAdmin.tokenAAccount
+      groupAdmin.tokenAAccount,
     );
   });
 
@@ -170,14 +180,14 @@ describe("k01: Init Kamino instance", () => {
         klendBankrunProgram,
         reserveKey,
         marketKey,
-        oracles.usdcOracle.publicKey
-      )
+        oracles.usdcOracle.publicKey,
+      ),
     );
 
     await processBankrunTransaction(ctx, tx, [users[0].wallet]);
 
     const reserveAcc: Reserve = Reserve.decode(
-      (await bankRunProvider.connection.getAccountInfo(reserveKey)).data
+      (await bankRunProvider.connection.getAccountInfo(reserveKey)).data,
     );
 
     // Note: prices are stored as scaled fraction (multiply price by 2^60)
@@ -186,7 +196,7 @@ describe("k01: Init Kamino instance", () => {
     assertBNApproximately(
       reserveAcc.liquidity.marketPriceSf,
       expected.valueSf,
-      100_000
+      100_000,
     );
   });
 
@@ -199,13 +209,13 @@ describe("k01: Init Kamino instance", () => {
         klendBankrunProgram,
         reserveKey,
         marketKey,
-        oracles.tokenAOracle.publicKey
-      )
+        oracles.tokenAOracle.publicKey,
+      ),
     );
     await processBankrunTransaction(ctx, tx, [groupAdmin.wallet]);
 
     const reserveAcc: Reserve = Reserve.decode(
-      (await bankRunProvider.connection.getAccountInfo(reserveKey)).data
+      (await bankRunProvider.connection.getAccountInfo(reserveKey)).data,
     );
 
     // Note: prices are stored as scaled fraction (multiply price by 2^60)
@@ -214,7 +224,7 @@ describe("k01: Init Kamino instance", () => {
     assertBNApproximately(
       reserveAcc.liquidity.marketPriceSf,
       expected.valueSf,
-      100_000
+      100_000,
     );
   });
 
@@ -223,17 +233,35 @@ describe("k01: Init Kamino instance", () => {
     reserveLabel: string,
     decimals: number,
     oracle: PublicKey,
-    liquiditySource: PublicKey
+    liquiditySource: PublicKey,
   ) {
     const reserve = Keypair.generate();
     const market = kaminoAccounts.get(MARKET);
-    const id = klendBankrunProgram.programId;
 
-    const [lendingMarketAuthority] = lendingMarketAuthPda(market, id);
-    const [reserveLiquiditySupply] = reserveLiqSupplyPda(market, mint, id);
-    const [reserveFeeVault] = reserveFeeVaultPda(market, mint, id);
-    const [collatMint] = reserveCollateralMintPda(market, mint, id);
-    const [collatSupply] = reserveCollateralSupplyPda(market, mint, id);
+    const [lendingMarketAuthority] = deriveLendingMarketAuthority(
+      KLEND_PROGRAM_ID,
+      market,
+    );
+
+    const [feeReceiver] = deriveLendingMarketAuthority(
+      KLEND_PROGRAM_ID,
+      reserve.publicKey,
+    );
+
+    const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
+      KLEND_PROGRAM_ID,
+      reserve.publicKey,
+    );
+
+    const [reserveCollateralMint] = deriveReserveCollateralMint(
+      KLEND_PROGRAM_ID,
+      reserve.publicKey,
+    );
+
+    const [reserveCollateralSupply] = deriveReserveCollateralSupply(
+      KLEND_PROGRAM_ID,
+      reserve.publicKey,
+    );
 
     const tx = new Transaction().add(
       SystemProgram.createAccount({
@@ -242,7 +270,7 @@ describe("k01: Init Kamino instance", () => {
         space: RESERVE_SIZE + 8,
         lamports:
           await bankRunProvider.connection.getMinimumBalanceForRentExemption(
-            RESERVE_SIZE + 8
+            RESERVE_SIZE + 8,
           ),
         programId: klendBankrunProgram.programId,
       }),
@@ -255,16 +283,16 @@ describe("k01: Init Kamino instance", () => {
           reserve: reserve.publicKey,
           reserveLiquidityMint: mint,
           reserveLiquiditySupply,
-          feeReceiver: reserveFeeVault,
-          reserveCollateralMint: collatMint,
-          reserveCollateralSupply: collatSupply,
+          feeReceiver,
+          reserveCollateralMint,
+          reserveCollateralSupply,
           initialLiquiditySource: liquiditySource,
           rent: SYSVAR_RENT_PUBKEY,
           liquidityTokenProgram: TOKEN_PROGRAM_ID,
           collateralTokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
         })
-        .instruction()
+        .instruction(),
     );
 
     await processBankrunTransaction(ctx, tx, [groupAdmin.wallet, reserve]);
@@ -275,18 +303,18 @@ describe("k01: Init Kamino instance", () => {
     }
 
     const marketAcc: LendingMarket = LendingMarket.decode(
-      (await bankRunProvider.connection.getAccountInfo(market)).data
+      (await bankRunProvider.connection.getAccountInfo(market)).data,
     );
     const reserveAcc: Reserve = Reserve.decode(
-      (await bankRunProvider.connection.getAccountInfo(reserve.publicKey)).data
+      (await bankRunProvider.connection.getAccountInfo(reserve.publicKey)).data,
     );
-    assertKeysEqual(reserveAcc.lendingMarket, market);
+    assert.equal(reserveAcc.lendingMarket.toString(), market.toString());
     // Reserves start in an unconfigured "Hidden" state
     assert.equal(reserveAcc.config.status, 2);
 
     // Update the reserve to a sane operational state
     const marketWithAddress: MarketWithAddress = {
-      address: market,
+      address: address(market.toString()),
       state: marketAcc,
     };
 
@@ -302,7 +330,7 @@ describe("k01: Init Kamino instance", () => {
         new CurvePoint({ utilizationRateBps: 10000, borrowRateBps: 1000000 }),
         // Fill remaining points to complete the curve
         ...Array(7).fill(
-          new CurvePoint({ utilizationRateBps: 10000, borrowRateBps: 1000000 })
+          new CurvePoint({ utilizationRateBps: 10000, borrowRateBps: 1000000 }),
         ),
       ],
     } as BorrowRateCurveFields);
@@ -315,7 +343,7 @@ describe("k01: Init Kamino instance", () => {
     };
 
     const priceFeed: PriceFeed = {
-      pythPrice: oracle,
+      pythPrice: address(oracle.toString()),
       // switchboardPrice: NULL_PUBKEY,
       // switchboardTwapPrice: NULL_PUBKEY,
       // scopePriceConfigAddress: NULL_PUBKEY,
@@ -324,8 +352,8 @@ describe("k01: Init Kamino instance", () => {
     };
 
     const assetReserveConfig = new AssetReserveConfig({
-      mint: mint,
-      mintTokenProgram: TOKEN_PROGRAM_ID,
+      mint: address(mint.toString()),
+      mintTokenProgram: address(TOKEN_PROGRAM_ID.toString()),
       tokenName: reserveLabel,
       mintDecimals: decimals,
       priceFeed: priceFeed,
@@ -333,17 +361,18 @@ describe("k01: Init Kamino instance", () => {
     }).getReserveConfig();
 
     const updateReserveIx = updateEntireReserveConfigIx(
-      marketWithAddress,
-      reserve.publicKey,
+      noopSigner(groupAdmin.wallet.publicKey.toString()),
+      marketWithAddress.address,
+      address(reserve.publicKey.toString()),
       assetReserveConfig,
-      klendBankrunProgram.programId
+      address(klendBankrunProgram.programId.toString()),
     );
 
     const updateTx = new Transaction().add(
       ComputeBudgetProgram.setComputeUnitLimit({
         units: 1_000_000,
       }),
-      updateReserveIx
+      updateReserveIx,
     );
 
     await processBankrunTransaction(ctx, updateTx, [groupAdmin.wallet]);
