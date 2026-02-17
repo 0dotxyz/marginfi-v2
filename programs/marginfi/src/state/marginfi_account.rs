@@ -1752,7 +1752,10 @@ impl<'a> BankAccountWrapper<'a> {
 
         balance.close(true)?;
 
+        // Note: We do this so that banks in the receivership/deleverage flow are unlocked, as
+        // closed-position banks will not make it to the "end" instruction to be unlocked there
         bank.cache.clear_liquidation_price_cache_locked();
+
         bank.decrement_lending_position_count();
         bank.change_asset_shares(-total_asset_shares, false)?;
         bank.check_utilization_ratio()?;
@@ -1800,7 +1803,10 @@ impl<'a> BankAccountWrapper<'a> {
 
         balance.close(true)?;
 
+        // Note: We do this so that banks in the receivership/deleverage flow are unlocked, as
+        // closed-position banks will not make it to the "end" instruction to be unlocked there
         bank.cache.clear_liquidation_price_cache_locked();
+
         bank.decrement_borrowing_position_count();
         bank.change_liability_shares(-total_liability_shares, false)?;
 
