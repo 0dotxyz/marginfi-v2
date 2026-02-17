@@ -39,6 +39,7 @@ import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { assert } from "chai";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { blankBankConfigOptRaw } from "./utils/types";
+import { dummyIx } from "./utils/bankrunConnection";
 
 const RATE_LIMIT_ACCOUNT = "rate_limit_account";
 const WITHDRAW_ACCOUNT = "withdraw_account";

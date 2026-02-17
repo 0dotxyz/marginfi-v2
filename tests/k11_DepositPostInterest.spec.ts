@@ -50,7 +50,7 @@ import {
 } from "./utils/pdas";
 import { BalanceRaw } from "@mrgnlabs/marginfi-client-v2";
 import { Reserve } from "@kamino-finance/klend-sdk";
-import { getEpochAndSlot } from "./utils/bankrunConnection";
+import { dummyIx, getEpochAndSlot } from "./utils/bankrunConnection";
 
 let ctx: ProgramTestContext;
 let bank: PublicKey;

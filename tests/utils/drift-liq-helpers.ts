@@ -21,7 +21,6 @@ import {
   groupAdmin,
   oracles,
   users,
-  createLut,
 } from "../rootHooks";
 import { MockUser } from "./mocks";
 import {
@@ -39,7 +38,11 @@ import {
   liquidateIx,
 } from "./user-instructions";
 import { deriveBankWithSeed } from "./pdas";
-import { getBankrunBlockhash, processBankrunTransaction as processBankrunTx } from "./tools";
+import {
+  createLut,
+  getBankrunBlockhash,
+  processBankrunTransaction as processBankrunTx,
+} from "./tools";
 import {
   makeAddDriftBankIx,
   makeInitDriftUserIx,
@@ -62,7 +65,7 @@ import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 
 // Group seed for d14 tests
 export const THROWAWAY_GROUP_SEED_D14 = Buffer.from(
-  "MARGINFI_GROUP_SEED_123400000014"
+  "MARGINFI_GROUP_SEED_123400000014",
 );
 
 const USER_ACCOUNT_D14 = "d14_account";
@@ -135,7 +138,7 @@ export async function setupDriftLiqEnv(): Promise<DriftLiqEnv> {
       await groupInitialize(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
         admin: groupAdmin.wallet.publicKey,
-      })
+      }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(ctx);
     tx.sign(groupAdmin.wallet, throwawayGroup);
@@ -149,11 +152,11 @@ export async function setupDriftLiqEnv(): Promise<DriftLiqEnv> {
       mrgnID,
       throwawayGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
-      seed
+      seed,
     );
 
     const defaultConfig = defaultDriftBankConfig(
-      oracles.tokenAOracle.publicKey
+      oracles.tokenAOracle.publicKey,
     );
     const tx = new Transaction().add(
       await makeAddDriftBankIx(
@@ -165,8 +168,8 @@ export async function setupDriftLiqEnv(): Promise<DriftLiqEnv> {
           integrationAcc1: driftSpotMarket,
           oracle: oracles.tokenAOracle.publicKey,
         },
-        { config: defaultConfig, seed }
-      )
+        { config: defaultConfig, seed },
+      ),
     );
     await processBankrunTx(ctx, tx, [groupAdmin.wallet]);
 
@@ -183,8 +186,8 @@ export async function setupDriftLiqEnv(): Promise<DriftLiqEnv> {
         ecosystem.tokenAMint.publicKey,
         groupAdmin.tokenAAccount,
         globalProgramAdmin.wallet.publicKey,
-        initUserAmount.toNumber()
-      )
+        initUserAmount.toNumber(),
+      ),
     );
     await processBankrunTx(ctx, fundTx, [globalProgramAdmin.wallet]);
 
@@ -198,8 +201,8 @@ export async function setupDriftLiqEnv(): Promise<DriftLiqEnv> {
           driftOracle: driftOracle,
         },
         { amount: initUserAmount },
-        TOKEN_A_MARKET_INDEX
-      )
+        TOKEN_A_MARKET_INDEX,
+      ),
     );
     await processBankrunTx(ctx, initUserTx, [groupAdmin.wallet]);
   }
@@ -213,7 +216,7 @@ export async function setupDriftLiqEnv(): Promise<DriftLiqEnv> {
       mrgnID,
       throwawayGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
-      seed
+      seed,
     );
     regularBanks.push(regularBank);
   }
@@ -225,7 +228,7 @@ export async function setupDriftLiqEnv(): Promise<DriftLiqEnv> {
     mrgnID,
     throwawayGroup.publicKey,
     ecosystem.lstAlphaMint.publicKey,
-    liabSeed
+    liabSeed,
   );
 
   // 6. Seed liquidity in liab bank (admin deposits)
@@ -239,8 +242,8 @@ export async function setupDriftLiqEnv(): Promise<DriftLiqEnv> {
         ecosystem.lstAlphaMint.publicKey,
         groupAdmin.lstAlphaAccount,
         wallet.publicKey,
-        seedAmount.toNumber()
-      )
+        seedAmount.toNumber(),
+      ),
     );
     await processBankrunTx(ctx, fundTx, [wallet]);
 
@@ -255,7 +258,7 @@ export async function setupDriftLiqEnv(): Promise<DriftLiqEnv> {
           marginfiAccount: adminKp.publicKey,
           authority: groupAdmin.wallet.publicKey,
           feePayer: groupAdmin.wallet.publicKey,
-        })
+        }),
       );
       await processBankrunTx(ctx, initTx, [groupAdmin.wallet, adminKp]);
     }
@@ -268,7 +271,7 @@ export async function setupDriftLiqEnv(): Promise<DriftLiqEnv> {
         tokenAccount: groupAdmin.lstAlphaAccount,
         amount: seedAmount,
         depositUpToLimit: false,
-      })
+      }),
     );
     await processBankrunTx(ctx, depositTx, [groupAdmin.wallet]);
   }
@@ -287,7 +290,7 @@ export async function setupDriftLiqEnv(): Promise<DriftLiqEnv> {
         marginfiAccount: kp.publicKey,
         authority: liquidatorUser.wallet.publicKey,
         feePayer: liquidatorUser.wallet.publicKey,
-      })
+      }),
     );
     await processBankrunTx(ctx, tx, [liquidatorUser.wallet, kp]);
   }
@@ -301,8 +304,8 @@ export async function setupDriftLiqEnv(): Promise<DriftLiqEnv> {
         ecosystem.lstAlphaMint.publicKey,
         liquidatorUser.lstAlphaAccount,
         globalProgramAdmin.wallet.publicKey,
-        lstAmount.toNumber()
-      )
+        lstAmount.toNumber(),
+      ),
     );
     await processBankrunTx(ctx, fundTx, [globalProgramAdmin.wallet]);
 
@@ -314,7 +317,7 @@ export async function setupDriftLiqEnv(): Promise<DriftLiqEnv> {
         tokenAccount: liquidatorUser.lstAlphaAccount,
         amount: lstAmount,
         depositUpToLimit: false,
-      })
+      }),
     );
     await processBankrunTx(ctx, depositTx, [liquidatorUser.wallet]);
   }
@@ -327,7 +330,7 @@ export async function setupDriftLiqEnv(): Promise<DriftLiqEnv> {
     driftBanks,
     regularBanks,
     liabBank,
-    driftSpotMarket
+    driftSpotMarket,
   );
 
   return {
@@ -351,7 +354,7 @@ export async function setupDriftLiqEnv(): Promise<DriftLiqEnv> {
  */
 export async function runLiquidationScenario(
   env: DriftLiqEnv,
-  opts: ScenarioOpts
+  opts: ScenarioOpts,
 ): Promise<ScenarioResult> {
   const { driftCount, regularCount, scenarioIndex } = opts;
   const {
@@ -377,7 +380,7 @@ export async function runLiquidationScenario(
       marginfiAccount: borrowerKp.publicKey,
       authority: borrowerUser.wallet.publicKey,
       feePayer: borrowerUser.wallet.publicKey,
-    })
+    }),
   );
   await processBankrunTx(ctx, initTx, [borrowerUser.wallet, borrowerKp]);
 
@@ -392,8 +395,8 @@ export async function runLiquidationScenario(
       ecosystem.tokenAMint.publicKey,
       borrowerUser.tokenAAccount,
       globalProgramAdmin.wallet.publicKey,
-      tokenAAmount.toNumber()
-    )
+      tokenAAmount.toNumber(),
+    ),
   );
   await processBankrunTx(ctx, fundTokenATx, [globalProgramAdmin.wallet]);
 
@@ -402,8 +405,8 @@ export async function runLiquidationScenario(
       ecosystem.lstAlphaMint.publicKey,
       borrowerUser.lstAlphaAccount,
       globalProgramAdmin.wallet.publicKey,
-      lstAmount.toNumber()
-    )
+      lstAmount.toNumber(),
+    ),
   );
   await processBankrunTx(ctx, fundLstTx, [globalProgramAdmin.wallet]);
 
@@ -420,8 +423,8 @@ export async function runLiquidationScenario(
           driftOracle,
         },
         driftDepositAmount,
-        TOKEN_A_MARKET_INDEX
-      )
+        TOKEN_A_MARKET_INDEX,
+      ),
     );
     await processBankrunTx(ctx, depositTx, [borrowerUser.wallet]);
   }
@@ -436,7 +439,7 @@ export async function runLiquidationScenario(
         tokenAccount: borrowerUser.tokenAAccount,
         amount: regularDepositAmount,
         depositUpToLimit: false,
-      })
+      }),
     );
     await processBankrunTx(ctx, depositTx, [borrowerUser.wallet]);
   }
@@ -477,7 +480,7 @@ export async function runLiquidationScenario(
       tokenAccount: borrowerUser.lstAlphaAccount,
       remaining: remainingForBorrow,
       amount: borrowAmount,
-    })
+    }),
   );
   await processBankrunTx(ctx, borrowTx, [borrowerUser.wallet], false, true);
 
@@ -490,7 +493,7 @@ export async function runLiquidationScenario(
     await configureBank(groupAdmin.mrgnBankrunProgram, {
       bank: liabBank,
       bankConfigOpt: config,
-    })
+    }),
   );
   await processBankrunTx(ctx, configTx, [groupAdmin.wallet]);
 
@@ -500,7 +503,7 @@ export async function runLiquidationScenario(
     await healthPulse(borrowerUser.mrgnBankrunProgram, {
       marginfiAccount: borrowerAccount,
       remaining: remainingForBorrow,
-    })
+    }),
   );
   await processBankrunTx(ctx, healthTx, [borrowerUser.wallet], false, true);
 
@@ -509,7 +512,7 @@ export async function runLiquidationScenario(
     env,
     borrowerAccount,
     driftCount,
-    regularCount
+    regularCount,
   );
 
   // 9. Restore liab bank config
@@ -521,7 +524,7 @@ export async function runLiquidationScenario(
     await configureBank(groupAdmin.mrgnBankrunProgram, {
       bank: liabBank,
       bankConfigOpt: restoreConfig,
-    })
+    }),
   );
   await processBankrunTx(ctx, restoreTx, [groupAdmin.wallet]);
 
@@ -536,7 +539,7 @@ async function attemptLiquidation(
   env: DriftLiqEnv,
   borrowerAccount: PublicKey,
   driftCount: number,
-  regularCount: number
+  regularCount: number,
 ): Promise<Omit<ScenarioResult, "driftCount" | "regularCount">> {
   const {
     ctx,
@@ -590,7 +593,7 @@ async function attemptLiquidation(
     (
       await import("../rootHooks")
     ).driftBankrunProgram,
-    TOKEN_A_MARKET_INDEX
+    TOKEN_A_MARKET_INDEX,
   );
 
   const smallAmount = new BN(0.01 * 10 ** ecosystem.tokenADecimals);
@@ -613,7 +616,7 @@ async function attemptLiquidation(
       amount: liquidateAmount,
       liquidateeAccounts: liquidateeAccountCount,
       liquidatorAccounts: liquidatorAccountCount,
-    }
+    },
   );
 
   const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
@@ -628,7 +631,7 @@ async function attemptLiquidation(
   const tx = new Transaction().add(
     computeBudgetIx,
     accrueIx,
-    liquidateInstruction
+    liquidateInstruction,
   );
 
   // Process with dumpLogOnFail=true - will print logs and throw on failure
@@ -637,7 +640,7 @@ async function attemptLiquidation(
     tx,
     [liquidatorUser.wallet],
     false, // trySend=false so it simulates first for logs
-    true // dumpLogOnFail
+    true, // dumpLogOnFail
   )) as BanksTransactionResultWithMeta;
 
   // Transaction succeeded
@@ -653,7 +656,7 @@ async function addGenericRegularBank(
   seed: BN,
   index: number,
   label?: string,
-  useTokenA: boolean = false
+  useTokenA: boolean = false,
 ) {
   const config = defaultBankConfig();
   config.assetWeightInit = bigNumberToWrappedI80F48(0.5);
@@ -674,7 +677,7 @@ async function addGenericRegularBank(
     bankrunProgram.programId,
     throwawayGroup.publicKey,
     bankMint,
-    seed
+    seed,
   );
 
   const oracleMeta = {
@@ -712,7 +715,7 @@ async function createAndExtendLUT(
   driftBanks: PublicKey[],
   regularBanks: PublicKey[],
   liabBank: PublicKey,
-  driftSpotMarket: PublicKey
+  driftSpotMarket: PublicKey,
 ): Promise<PublicKey> {
   const { TOKEN_PROGRAM_ID } = await import("@solana/spl-token");
 
@@ -729,6 +732,6 @@ async function createAndExtendLUT(
     oracles.pythPullLst.publicKey,
   ];
 
-  const account = await createLut(user, allAddresses);
+  const account = await createLut(user.wallet, allAddresses);
   return account.key;
 }

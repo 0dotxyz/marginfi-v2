@@ -55,6 +55,7 @@ import {
 } from "./utils/genericTests";
 import { editGlobalFeeState } from "./utils/group-instructions";
 import { BankrunProvider } from "anchor-bankrun";
+import { dummyIx } from "./utils/bankrunConnection";
 
 let program: Program<Marginfi>;
 let provider: BankrunProvider;
@@ -503,7 +504,12 @@ describe("orders", () => {
         feeRecipient: keeper.wallet.publicKey,
       });
 
-      await keeperProgram.provider.sendAndConfirm(new Transaction().add(ix));
+      await keeperProgram.provider.sendAndConfirm(
+        new Transaction().add(
+          dummyIx(keeper.wallet.publicKey, user.wallet.publicKey),
+          ix,
+        ),
+      );
 
       const closed = await program.provider.connection.getAccountInfo(orderPk);
       expect(closed).to.be.null;
@@ -703,9 +709,7 @@ describe("orders", () => {
         bankKeys,
         trigger,
       });
-      await userProgram.provider.sendAndConfirm(
-        new Transaction().add(ixPlace),
-      );
+      await userProgram.provider.sendAndConfirm(new Transaction().add(ixPlace));
 
       [orderPk] = deriveOrderPda(
         program.programId,

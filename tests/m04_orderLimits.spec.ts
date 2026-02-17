@@ -60,12 +60,10 @@ import {
 } from "./utils/juplend/shorthand-instructions";
 import { JuplendPoolKeys } from "./utils/juplend/types";
 import { getJuplendPrograms } from "./utils/juplend/programs";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { refreshPullOracles } from "./utils/pyth-pull-mocks";
 import {
-  dumpBankrunLogs,
-  logHealthCache,
   createLookupTableForInstructions,
+  getBankrunBlockhash,
   processBankrunTransaction,
   processBankrunV0Transaction,
 } from "./utils/tools";
@@ -76,7 +74,6 @@ import {
   deriveLiquidityVaultAuthority,
   deriveOrderPda,
 } from "./utils/pdas";
-import { getEpochAndSlot } from "./utils/stake-utils";
 import { assert } from "chai";
 import { TOKEN_A_MARKET_INDEX, refreshDriftOracles } from "./utils/drift-utils";
 import {
@@ -87,6 +84,7 @@ import { assertBankrunTxFailed } from "./utils/genericTests";
 import type { MockUser } from "./utils/mocks";
 import { ensureMultiSuiteIntegrationsSetup } from "./utils/multi-limits-setup";
 import { addJuplendBanksForGroup } from "./utils/multi-limits-juplend-setup";
+import { getEpochAndSlot } from "./utils/bankrunConnection";
 
 const startingSeed: number = 77;
 const U32_MAX = 2 ** 32 - 1;
@@ -737,7 +735,6 @@ SCENARIOS.forEach(
           });
 
           lutAccount = await createLookupTableForInstructions(
-            bankrunContext,
             user.wallet,
             [startIx, repayInstruction, withdrawInstruction, endIx, ...preIxs],
           );

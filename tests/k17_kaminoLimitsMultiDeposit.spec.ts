@@ -22,7 +22,6 @@ import {
   users,
   verbose,
   bankrunProgram,
-  createLut,
 } from "./rootHooks";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import {
@@ -41,6 +40,7 @@ import {
   deriveBaseObligation,
 } from "./utils/pdas";
 import {
+  createLut,
   dumpAccBalances,
   getBankrunBlockhash,
   processBankrunTransaction,
@@ -592,7 +592,7 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
     allAddresses.push(oracles.usdcOracle.publicKey);
 
     const user = users[1];
-    const account = await createLut(user, allAddresses);
+    const account = await createLut(user.wallet, allAddresses);
     lutAddress = account.key;
   });
 

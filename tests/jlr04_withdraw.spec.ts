@@ -47,12 +47,12 @@ import { accountInit } from "./utils/user-instructions";
 import {
   buildHealthRemainingAccounts,
   createLookupTableForInstructions,
+  getBankrunBlockhash,
   mintToTokenAccount,
   processBankrunTransaction,
   processBankrunV0Transaction,
 } from "./utils/tools";
 import { advanceOneHour, dummyIx } from "./utils/bankrunConnection";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 
 const EXCHANGE_PRICES_PRECISION = new BN("1000000000000");
 const USER1_ACCOUNT_SEED = Buffer.from("JLR04_USER1_ACCOUNT_SEED_0000000");
@@ -334,7 +334,6 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
 
     if (useLut) {
       const lutAccount = await createLookupTableForInstructions(
-        bankrunContext,
         user.wallet,
         tx.instructions,
       );

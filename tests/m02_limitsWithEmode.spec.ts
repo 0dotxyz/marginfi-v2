@@ -18,7 +18,6 @@ import {
   users,
   verbose,
   riskAdmin,
-  createLut,
 } from "./rootHooks";
 import {
   configBankEmode,
@@ -55,6 +54,7 @@ import { deriveLiquidationRecord } from "./utils/pdas";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import {
   bytesToF64,
+  createLut,
   dumpAccBalances,
   dumpBankrunLogs,
   getBankrunBlockhash,
@@ -343,7 +343,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       remainingAccounts.push([banks[i], oracles.pythPullLst.publicKey]);
     }
 
-    const account = await createLut(liquidator, remainingAccounts.flat());
+    const account = await createLut(liquidator.wallet, remainingAccounts.flat());
     lookupTable = account.key;
   });
 
