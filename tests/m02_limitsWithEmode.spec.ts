@@ -884,9 +884,9 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
     }).compileToV0Message([lutAccount]);
     const versionedTx = new VersionedTransaction(messageV0);
     versionedTx.sign([liquidator.wallet]);
-    //await banksClient.processTransaction(versionedTx);
-    let result = await banksClient.tryProcessTransaction(versionedTx);
-    dumpBankrunLogs(result);
+    await banksClient.processTransaction(versionedTx);
+    // let result = await banksClient.tryProcessTransaction(versionedTx);
+    // dumpBankrunLogs(result);
 
     const recordAfter = await bankrunProgram.account.liquidationRecord.fetch(
       liqRecordKey,

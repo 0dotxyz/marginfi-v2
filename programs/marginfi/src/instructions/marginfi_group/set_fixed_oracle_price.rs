@@ -4,7 +4,9 @@ use crate::state::bank_config::BankConfigImpl;
 use crate::{check, errors::MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
-use marginfi_type_crate::constants::{ASSET_TAG_DRIFT, ASSET_TAG_KAMINO, ASSET_TAG_STAKED};
+use marginfi_type_crate::constants::{
+    ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_STAKED,
+};
 use marginfi_type_crate::{
     constants::FREEZE_SETTINGS,
     types::{Bank, MarginfiGroup, OracleSetup, WrappedI80F48},
@@ -32,6 +34,8 @@ pub fn lending_pool_set_fixed_oracle_price(
         OracleSetup::FixedKamino
     } else if bank.config.asset_tag == ASSET_TAG_DRIFT {
         OracleSetup::FixedDrift
+    } else if bank.config.asset_tag == ASSET_TAG_JUPLEND {
+        OracleSetup::FixedJuplend
     } else {
         OracleSetup::Fixed
     };

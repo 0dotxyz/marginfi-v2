@@ -142,14 +142,17 @@ pub struct Bank {
     /// - Kamino: reserve
     /// - Drift: spot market
     /// - Solend: reserve
+    /// - JupLend: lending state
     pub integration_acc_1: Pubkey,
     /// Integration account slot 2 (default Pubkey for non-integrations).
     /// - Kamino: obligation
     /// - Drift: user
     /// - Solend: obligation
+    /// - JupLend: fToken vault
     pub integration_acc_2: Pubkey,
     /// Integration account slot 3 (default Pubkey for non-integrations).
     /// - Drift: user stats
+    /// - JupLend: withdraw intermediary ATA (ATA of liquidity_vault_authority for bank mint)
     pub integration_acc_3: Pubkey,
 
     /// Rate limiter for controlling withdraw/borrow outflow.
@@ -217,6 +220,9 @@ pub enum OracleSetup {
     SolendSwitchboardPull = 12,
     FixedKamino = 13,
     FixedDrift = 14,
+    JuplendPythPull = 15,
+    JuplendSwitchboardPull = 16,
+    FixedJuplend = 17,
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
@@ -239,6 +245,9 @@ impl OracleSetup {
             12 => Some(Self::SolendSwitchboardPull),
             13 => Some(Self::FixedKamino),
             14 => Some(Self::FixedDrift),
+            15 => Some(Self::JuplendPythPull),
+            16 => Some(Self::JuplendSwitchboardPull),
+            17 => Some(Self::FixedJuplend),
             _ => None,
         }
     }

@@ -6,16 +6,21 @@ use crate::{check, check_eq, debug, math_error, prelude::*};
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{borsh1::try_from_slice_unchecked, stake::state::StakeStateV2};
 use anchor_spl::token::Mint;
+use drift_mocks::constants::SPOT_CUMULATIVE_INTEREST_PRECISION;
 use drift_mocks::state::MinimalSpotMarket;
 use enum_dispatch::enum_dispatch;
 use fixed::types::I80F48;
+use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION};
 use kamino_mocks::state::MinimalReserve;
 use marginfi_type_crate::{
     constants::{
         CONF_INTERVAL_MULTIPLE, EXP_10_I80F48, MAX_CONF_INTERVAL, STD_DEV_MULTIPLE, U32_MAX,
         U32_MAX_DIV_10,
     },
-    types::{adjust_i128, adjust_i64, adjust_u64, Bank, BankConfig, OracleSetup},
+    types::{
+        mul_div_i128, mul_div_i64, mul_div_u64, mul_i128_by_i80f48, mul_i64_by_i80f48,
+        mul_u64_by_i80f48, Bank, BankConfig, OracleSetup,
+    },
 };
 use pyth_solana_receiver_sdk::price_update::{self, FeedId, PriceUpdateV2};
 use pyth_solana_receiver_sdk::PYTH_PUSH_ORACLE_ID;
@@ -163,6 +168,30 @@ fn ensure_solend_reserve_fresh(reserve: &SolendMinimalReserve) -> MarginfiResult
     Ok(())
 }
 
+fn load_juplend_lending<'info>(
+    bank_config: &BankConfig,
+    lending_info: &'info AccountInfo<'info>,
+) -> MarginfiResult<AccountLoader<'info, JuplendLending>> {
+    require_keys_eq!(
+        *lending_info.key,
+        bank_config.oracle_keys[1],
+        MarginfiError::JuplendLendingValidationFailed
+    );
+
+    // Verifies owner + discriminator automatically
+    let lending_loader: AccountLoader<JuplendLending> = AccountLoader::try_from(lending_info)
+        .map_err(|_| MarginfiError::JuplendLendingValidationFailed)?;
+    Ok(lending_loader)
+}
+
+fn ensure_juplend_lending_fresh(lending: &JuplendLending, clock: &Clock) -> MarginfiResult<()> {
+    require!(
+        !lending.is_stale(clock.unix_timestamp),
+        MarginfiError::JuplendLendingStale
+    );
+    Ok(())
+}
+
 impl OraclePriceFeedAdapter {
     pub fn try_from_bank<'info>(
         bank: &Bank,
@@ -283,18 +312,18 @@ impl OraclePriceFeedAdapter {
 
                 let (total_liq, total_col) = reserve.scaled_supplies()?;
                 if total_col > I80F48::ZERO {
-                    let liq_to_col_ratio = total_liq / total_col;
+                    let multiplier = total_liq / total_col;
 
                     // Adjust prices & confidence in place
-                    price_feed.price.price = adjust_i64(price_feed.price.price, liq_to_col_ratio)
+                    price_feed.price.price = mul_i64_by_i80f48(price_feed.price.price, multiplier)
                         .ok_or_else(math_error!())?;
                     price_feed.ema_price.price =
-                        adjust_i64(price_feed.ema_price.price, liq_to_col_ratio)
+                        mul_i64_by_i80f48(price_feed.ema_price.price, multiplier)
                             .ok_or_else(math_error!())?;
-                    price_feed.price.conf = adjust_u64(price_feed.price.conf, liq_to_col_ratio)
+                    price_feed.price.conf = mul_u64_by_i80f48(price_feed.price.conf, multiplier)
                         .ok_or_else(math_error!())?;
                     price_feed.ema_price.conf =
-                        adjust_u64(price_feed.ema_price.conf, liq_to_col_ratio)
+                        mul_u64_by_i80f48(price_feed.ema_price.conf, multiplier)
                             .ok_or_else(math_error!())?;
                 }
 
@@ -321,14 +350,14 @@ impl OraclePriceFeedAdapter {
 
                 let (total_liq, total_col) = reserve.scaled_supplies()?;
                 if total_col > I80F48::ZERO {
-                    let liq_to_col_ratio = total_liq / total_col;
+                    let multiplier = total_liq / total_col;
 
                     // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
                     price_feed.feed.result.value =
-                        adjust_i128(price_feed.feed.result.value, liq_to_col_ratio)
+                        mul_i128_by_i80f48(price_feed.feed.result.value, multiplier)
                             .ok_or_else(math_error!())?;
                     price_feed.feed.result.std_dev =
-                        adjust_i128(price_feed.feed.result.std_dev, liq_to_col_ratio)
+                        mul_i128_by_i80f48(price_feed.feed.result.std_dev, multiplier)
                             .ok_or_else(math_error!())?;
                 }
 
@@ -357,15 +386,35 @@ impl OraclePriceFeedAdapter {
                 let spot_market_loader = load_drift_spot_market(bank_config, spot_market_info)?;
                 let spot_market = spot_market_loader.load()?;
                 ensure_drift_spot_market_fresh(&spot_market, clock)?;
-
+                let numerator = u128::from_le_bytes(spot_market.cumulative_deposit_interest);
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
 
                 // Adjust Pyth prices & confidence in place
-                price_feed.price.price = spot_market.adjust_i64(price_feed.price.price)?;
-                price_feed.ema_price.price = spot_market.adjust_i64(price_feed.ema_price.price)?;
-                price_feed.price.conf = spot_market.adjust_u64(price_feed.price.conf)?;
-                price_feed.ema_price.conf = spot_market.adjust_u64(price_feed.ema_price.conf)?;
+                price_feed.price.price = mul_div_i64(
+                    price_feed.price.price,
+                    numerator,
+                    SPOT_CUMULATIVE_INTEREST_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
+                price_feed.ema_price.price = mul_div_i64(
+                    price_feed.ema_price.price,
+                    numerator,
+                    SPOT_CUMULATIVE_INTEREST_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
+                price_feed.price.conf = mul_div_u64(
+                    price_feed.price.conf,
+                    numerator,
+                    SPOT_CUMULATIVE_INTEREST_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
+                price_feed.ema_price.conf = mul_div_u64(
+                    price_feed.ema_price.conf,
+                    numerator,
+                    SPOT_CUMULATIVE_INTEREST_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
 
                 Ok(OraclePriceFeedAdapter::PythPushOracle(price_feed))
             }
@@ -381,6 +430,7 @@ impl OraclePriceFeedAdapter {
                 let spot_market_loader = load_drift_spot_market(bank_config, spot_market_info)?;
                 let spot_market = spot_market_loader.load()?;
                 ensure_drift_spot_market_fresh(&spot_market, clock)?;
+                let numerator = u128::from_le_bytes(spot_market.cumulative_deposit_interest);
 
                 let mut price_feed = SwitchboardPullPriceFeed::load_checked(
                     oracle_info,
@@ -389,10 +439,18 @@ impl OraclePriceFeedAdapter {
                 )?;
 
                 // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
-                price_feed.feed.result.value =
-                    spot_market.adjust_i128(price_feed.feed.result.value)?;
-                price_feed.feed.result.std_dev =
-                    spot_market.adjust_i128(price_feed.feed.result.std_dev)?;
+                price_feed.feed.result.value = mul_div_i128(
+                    price_feed.feed.result.value,
+                    numerator,
+                    SPOT_CUMULATIVE_INTEREST_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
+                price_feed.feed.result.std_dev = mul_div_i128(
+                    price_feed.feed.result.std_dev,
+                    numerator,
+                    SPOT_CUMULATIVE_INTEREST_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
 
                 Ok(OraclePriceFeedAdapter::SwitchboardPull(price_feed))
             }
@@ -413,18 +471,18 @@ impl OraclePriceFeedAdapter {
 
                 let (total_liq, total_col) = reserve.scaled_supplies()?;
                 if total_col > I80F48::ZERO {
-                    let liq_to_col_ratio = total_liq / total_col;
+                    let multiplier = total_liq / total_col;
 
                     // Adjust Pyth prices & confidence in place
-                    price_feed.price.price = adjust_i64(price_feed.price.price, liq_to_col_ratio)
+                    price_feed.price.price = mul_i64_by_i80f48(price_feed.price.price, multiplier)
                         .ok_or_else(math_error!())?;
                     price_feed.ema_price.price =
-                        adjust_i64(price_feed.ema_price.price, liq_to_col_ratio)
+                        mul_i64_by_i80f48(price_feed.ema_price.price, multiplier)
                             .ok_or_else(math_error!())?;
-                    price_feed.price.conf = adjust_u64(price_feed.price.conf, liq_to_col_ratio)
+                    price_feed.price.conf = mul_u64_by_i80f48(price_feed.price.conf, multiplier)
                         .ok_or_else(math_error!())?;
                     price_feed.ema_price.conf =
-                        adjust_u64(price_feed.ema_price.conf, liq_to_col_ratio)
+                        mul_u64_by_i80f48(price_feed.ema_price.conf, multiplier)
                             .ok_or_else(math_error!())?;
                 }
                 Ok(OraclePriceFeedAdapter::PythPushOracle(price_feed))
@@ -450,14 +508,14 @@ impl OraclePriceFeedAdapter {
 
                 let (total_liq, total_col) = reserve.scaled_supplies()?;
                 if total_col > I80F48::ZERO {
-                    let liq_to_col_ratio = total_liq / total_col;
+                    let multiplier = total_liq / total_col;
 
                     // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
                     price_feed.feed.result.value =
-                        adjust_i128(price_feed.feed.result.value, liq_to_col_ratio)
+                        mul_i128_by_i80f48(price_feed.feed.result.value, multiplier)
                             .ok_or_else(math_error!())?;
                     price_feed.feed.result.std_dev =
-                        adjust_i128(price_feed.feed.result.std_dev, liq_to_col_ratio)
+                        mul_i128_by_i80f48(price_feed.feed.result.std_dev, multiplier)
                             .ok_or_else(math_error!())?;
                 }
 
@@ -529,6 +587,122 @@ impl OraclePriceFeedAdapter {
                 Ok(OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
                     price: adjusted_price,
                 }))
+            }
+
+            OracleSetup::FixedJuplend => {
+                // Fixed base price + JupLend Lending exchange rate
+                // Requires: JupLend Lending state (no oracle needed)
+                check!(ais.len() == 1, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let lending_info = &ais[0];
+
+                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
+                let lending = lending_loader.load()?;
+                ensure_juplend_lending_fresh(&lending, clock)?;
+
+                let base_price: I80F48 = bank.config.fixed_price.into();
+                check!(
+                    base_price >= I80F48::ZERO,
+                    MarginfiError::FixedOraclePriceNegative
+                );
+
+                // Apply JupLend exchange rate: base_price * token_exchange_price / 1e12
+                let rate = I80F48::from_num(lending.token_exchange_price);
+                let precision = I80F48::from_num(EXCHANGE_PRICES_PRECISION);
+                let adjusted_price = base_price
+                    .checked_mul(rate)
+                    .ok_or_else(math_error!())?
+                    .checked_div(precision)
+                    .ok_or_else(math_error!())?;
+
+                Ok(OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                    price: adjusted_price,
+                }))
+            }
+
+            OracleSetup::JuplendPythPull => {
+                // (1) Pyth oracle (for price) and (2) JupLend Lending state (for exchange rate)
+                require_eq!(ais.len(), 2, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let oracle_info = &ais[0];
+                let lending_info = &ais[1];
+
+                require_keys_eq!(
+                    *oracle_info.key,
+                    bank_config.oracle_keys[0],
+                    MarginfiError::WrongOracleAccountKeys
+                );
+
+                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
+                let lending = lending_loader.load()?;
+                ensure_juplend_lending_fresh(&lending, clock)?;
+                let numerator = lending.token_exchange_price as u128;
+
+                let mut price_feed =
+                    PythPushOraclePriceFeed::load_checked(oracle_info, clock, max_age)?;
+
+                // Adjust Pyth prices & confidence in place
+                price_feed.price.price =
+                    mul_div_i64(price_feed.price.price, numerator, EXCHANGE_PRICES_PRECISION)
+                        .ok_or_else(math_error!())?;
+                price_feed.ema_price.price = mul_div_i64(
+                    price_feed.ema_price.price,
+                    numerator,
+                    EXCHANGE_PRICES_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
+                price_feed.price.conf =
+                    mul_div_u64(price_feed.price.conf, numerator, EXCHANGE_PRICES_PRECISION)
+                        .ok_or_else(math_error!())?;
+                price_feed.ema_price.conf = mul_div_u64(
+                    price_feed.ema_price.conf,
+                    numerator,
+                    EXCHANGE_PRICES_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
+
+                Ok(OraclePriceFeedAdapter::PythPushOracle(price_feed))
+            }
+
+            OracleSetup::JuplendSwitchboardPull => {
+                // (1) Switchboard oracle (for price) and (2) JupLend Lending state (for exchange rate)
+                require_eq!(ais.len(), 2, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let oracle_info = &ais[0];
+                let lending_info = &ais[1];
+
+                require_keys_eq!(
+                    *oracle_info.key,
+                    bank_config.oracle_keys[0],
+                    MarginfiError::WrongOracleAccountKeys
+                );
+
+                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
+                let lending = lending_loader.load()?;
+                ensure_juplend_lending_fresh(&lending, clock)?;
+                let numerator = lending.token_exchange_price as u128;
+
+                let mut price_feed = SwitchboardPullPriceFeed::load_checked(
+                    oracle_info,
+                    clock.unix_timestamp,
+                    max_age,
+                )?;
+
+                // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
+                price_feed.feed.result.value = mul_div_i128(
+                    price_feed.feed.result.value,
+                    numerator,
+                    EXCHANGE_PRICES_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
+                price_feed.feed.result.std_dev = mul_div_i128(
+                    price_feed.feed.result.std_dev,
+                    numerator,
+                    EXCHANGE_PRICES_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
+
+                Ok(OraclePriceFeedAdapter::SwitchboardPull(price_feed))
             }
         }
     }
@@ -775,6 +949,69 @@ impl OraclePriceFeedAdapter {
                     *oracle_ais[0].key,
                     bank_config.oracle_keys[1],
                     MarginfiError::KaminoReserveValidationFailed
+                );
+                Ok(())
+            }
+            OracleSetup::FixedJuplend => {
+                // Fixed base price with JupLend Lending exchange rate
+                require_eq!(
+                    oracle_ais.len(),
+                    1,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                require_keys_eq!(
+                    *oracle_ais[0].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::JuplendLendingValidationFailed
+                );
+                Ok(())
+            }
+
+            OracleSetup::JuplendPythPull => {
+                require_eq!(
+                    oracle_ais.len(),
+                    2,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                // First account is the Pyth Push oracle
+                require_keys_eq!(
+                    oracle_ais[0].key(),
+                    bank_config.oracle_keys[0],
+                    MarginfiError::WrongOracleAccountKeys
+                );
+                load_price_update_v2_checked(&oracle_ais[0])?;
+
+                // Second account is the JupLend Lending state
+                require_keys_eq!(
+                    oracle_ais[1].key(),
+                    bank_config.oracle_keys[1],
+                    MarginfiError::JuplendLendingValidationFailed
+                );
+                Ok(())
+            }
+
+            OracleSetup::JuplendSwitchboardPull => {
+                require_eq!(
+                    oracle_ais.len(),
+                    2,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                // First account is the Switchboard Pull oracle
+                require_keys_eq!(
+                    oracle_ais[0].key(),
+                    bank_config.oracle_keys[0],
+                    MarginfiError::WrongOracleAccountKeys
+                );
+                SwitchboardPullPriceFeed::check_ais(&oracle_ais[0])?;
+
+                // Second account is the JupLend Lending state
+                require_keys_eq!(
+                    oracle_ais[1].key(),
+                    bank_config.oracle_keys[1],
+                    MarginfiError::JuplendLendingValidationFailed
                 );
                 Ok(())
             }

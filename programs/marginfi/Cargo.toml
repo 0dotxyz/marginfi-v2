@@ -52,6 +52,7 @@ solana-security-txt = "1.1.1"
 kamino-mocks = { path = "../kamino-mocks" , features = ["no-entrypoint"]}
 drift-mocks = { path = "../drift-mocks" , features = ["no-entrypoint"]}
 solend-mocks = { path = "../solend-mocks" , features = ["no-entrypoint"]}
+juplend-mocks = { path = "../juplend-mocks" , features = ["no-entrypoint"]}
 
 [dev-dependencies]
 solana-account-decoder = { workspace = true }

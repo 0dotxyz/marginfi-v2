@@ -874,6 +874,46 @@ pub mod marginfi {
     ) -> MarginfiResult {
         solend::solend_withdraw(ctx, amount, withdraw_all)
     }
+
+    // Juplend integration instructions
+
+    /// (admin) Add a JupLend bank to the marginfi group.
+    ///
+    /// Remaining accounts (for oracle validation):
+    /// 0. underlying oracle feed (pyth push or switchboard pull)
+    /// 1. JupLend `Lending` state
+    pub fn lending_pool_add_bank_juplend(
+        ctx: Context<LendingPoolAddBankJuplend>,
+        bank_config: state::juplend::JuplendConfigCompact,
+        bank_seed: u64,
+    ) -> MarginfiResult {
+        juplend::lending_pool_add_bank_juplend(ctx, bank_config, bank_seed)
+    }
+
+    /// (permissionless) Initialize the bank-level JupLend position.
+    ///
+    /// This creates the bank's fToken ATA (owned by the bank liquidity vault authority) and
+    /// performs a nominal seed deposit into JupLend, then flips the bank from `Paused` to
+    /// `Operational`.
+    pub fn juplend_init_position(ctx: Context<JuplendInitPosition>, amount: u64) -> MarginfiResult {
+        juplend::juplend_init_position(ctx, amount)
+    }
+
+    /// (user) Deposit into a JupLend lending pool through a marginfi account.
+    /// * amount - in the underlying token (e.g., USDC), in native decimals
+    pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiResult {
+        juplend::juplend_deposit(ctx, amount)
+    }
+
+    /// (user) Withdraw from a JupLend lending pool through a marginfi account.
+    /// * amount - in the underlying token (e.g., USDC), in native decimals
+    pub fn juplend_withdraw<'info>(
+        ctx: Context<'_, '_, 'info, 'info, JuplendWithdraw<'info>>,
+        amount: u64,
+        withdraw_all: Option<bool>,
+    ) -> MarginfiResult {
+        juplend::juplend_withdraw(ctx, amount, withdraw_all)
+    }
 }
 
 #[cfg(not(feature = "no-entrypoint"))]

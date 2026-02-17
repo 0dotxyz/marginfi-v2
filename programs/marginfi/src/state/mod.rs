@@ -5,6 +5,7 @@ pub mod drift;
 pub mod emode;
 pub mod fee_state;
 pub mod interest_rate;
+pub mod juplend;
 pub mod kamino;
 pub mod liquidation_record;
 pub mod marginfi_account;

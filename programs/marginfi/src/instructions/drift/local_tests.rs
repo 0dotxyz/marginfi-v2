@@ -8,6 +8,7 @@ mod tests {
         state::{MinimalSpotMarket, MinimalUser, SpotBalanceType, SpotPosition},
         DriftMocksError,
     };
+    use marginfi_type_crate::types::price::{mul_div_i128, mul_div_i64, mul_div_u64};
 
     /// Find the largest u64 raw value that won't overflow when adjusted.
     /// Formula: adjusted = raw * interest / precision
@@ -76,6 +77,21 @@ mod tests {
         market.decimals = decimals;
         market.cumulative_deposit_interest = cumulative_deposit_interest.to_le_bytes();
         market
+    }
+
+    fn drift_adjust_i64(market: &MinimalSpotMarket, value: i64) -> Option<i64> {
+        let numerator = u128::from_le_bytes(market.cumulative_deposit_interest);
+        mul_div_i64(value, numerator, SPOT_CUMULATIVE_INTEREST_PRECISION)
+    }
+
+    fn drift_adjust_u64(market: &MinimalSpotMarket, value: u64) -> Option<u64> {
+        let numerator = u128::from_le_bytes(market.cumulative_deposit_interest);
+        mul_div_u64(value, numerator, SPOT_CUMULATIVE_INTEREST_PRECISION)
+    }
+
+    fn drift_adjust_i128(market: &MinimalSpotMarket, value: i128) -> Option<i128> {
+        let numerator = u128::from_le_bytes(market.cumulative_deposit_interest);
+        mul_div_i128(value, numerator, SPOT_CUMULATIVE_INTEREST_PRECISION)
     }
 
     fn user_with_deposit(market_index: u16, scaled_balance: u64) -> MinimalUser {
@@ -357,20 +373,17 @@ mod tests {
 
         // At 1.0x: adjusted = price
         let market_1x = spot_market(6, SPOT_CUMULATIVE_INTEREST_PRECISION);
-        assert_eq!(market_1x.adjust_oracle_price(price).unwrap(), price);
+        assert_eq!(drift_adjust_i64(&market_1x, price).unwrap(), price);
 
         // At 1.2x: adjusted = 1_200_000
         let market_1_2x = spot_market(6, 12_000_000_000u128);
-        assert_eq!(
-            market_1_2x.adjust_oracle_price(price).unwrap(),
-            1_200_000i64
-        );
+        assert_eq!(drift_adjust_i64(&market_1_2x, price).unwrap(), 1_200_000i64);
     }
 
     #[test]
     fn adjust_u64() {
         let market = spot_market(6, 15_000_000_000u128); // 1.5x
-        assert_eq!(market.adjust_u64(10_000).unwrap(), 15_000u64);
+        assert_eq!(drift_adjust_u64(&market, 10_000).unwrap(), 15_000u64);
     }
 
     #[test]
@@ -378,7 +391,7 @@ mod tests {
         let market = spot_market(6, 12_000_000_000u128);
         let price: i128 = 1_000_000_000_000_000_000;
         assert_eq!(
-            market.adjust_i128(price).unwrap(),
+            drift_adjust_i128(&market, price).unwrap(),
             1_200_000_000_000_000_000i128
         );
     }
@@ -386,8 +399,8 @@ mod tests {
     #[test]
     fn adjust_negative_values_fails() {
         let market = spot_market(6, SPOT_CUMULATIVE_INTEREST_PRECISION);
-        assert!(market.adjust_i64(-1).is_err());
-        assert!(market.adjust_i128(-1).is_err());
+        assert!(drift_adjust_i64(&market, -1).is_none());
+        assert!(drift_adjust_i128(&market, -1).is_none());
     }
 
     #[test]
@@ -460,14 +473,14 @@ mod tests {
 
         let safe = largest_safe_raw_for_u64_exact(&market);
         assert!(
-            market.adjust_u64(safe).is_ok(),
+            drift_adjust_u64(&market, safe).is_some(),
             "safe value {} should succeed",
             safe
         );
 
         let ovf = overflow_raw_for_u64_exact(&market);
         assert!(
-            market.adjust_u64(ovf).is_err(),
+            drift_adjust_u64(&market, ovf).is_none(),
             "overflow value {} should fail",
             ovf
         );
@@ -482,14 +495,14 @@ mod tests {
 
         let safe = largest_safe_raw_for_i64_exact(&market);
         assert!(
-            market.adjust_i64(safe).is_ok(),
+            drift_adjust_i64(&market, safe).is_some(),
             "safe value {} should succeed",
             safe
         );
 
         let ovf = overflow_raw_for_i64_exact(&market);
         assert!(
-            market.adjust_i64(ovf).is_err(),
+            drift_adjust_i64(&market, ovf).is_none(),
             "overflow value {} should fail",
             ovf
         );
@@ -523,15 +536,15 @@ mod tests {
     fn adjust_i128_overflow_detection() {
         let market = spot_market(6, SPOT_CUMULATIVE_INTEREST_PRECISION);
 
-        assert!(market.adjust_i128(-1).is_err());
-        assert!(market.adjust_i128(i128::MIN).is_err());
+        assert!(drift_adjust_i128(&market, -1).is_none());
+        assert!(drift_adjust_i128(&market, i128::MIN).is_none());
 
         // Large positive values overflow during multiply
         let market_10x = spot_market(6, 100_000_000_000u128);
-        assert!(market_10x.adjust_i128(i128::MAX / 5).is_err());
+        assert!(drift_adjust_i128(&market_10x, i128::MAX / 5).is_none());
 
         // Normal Switchboard values work
-        assert!(market.adjust_i128(1_000_000_000_000_000_000i128).is_ok());
+        assert!(drift_adjust_i128(&market, 1_000_000_000_000_000_000i128).is_some());
     }
 
     #[test]
@@ -562,9 +575,9 @@ mod tests {
     fn integer_division_floors_correctly() {
         let market = spot_market(6, 12_000_000_000u128); // 1.2x
 
-        assert_eq!(market.adjust_i64(5).unwrap(), 6); // 5 * 1.2 = 6 (exact)
-        assert_eq!(market.adjust_i64(1).unwrap(), 1); // 1 * 1.2 = 1.2, floors to 1
-        assert_eq!(market.adjust_i64(4).unwrap(), 4); // 4 * 1.2 = 4.8, floors to 4
+        assert_eq!(drift_adjust_i64(&market, 5).unwrap(), 6); // 5 * 1.2 = 6 (exact)
+        assert_eq!(drift_adjust_i64(&market, 1).unwrap(), 1); // 1 * 1.2 = 1.2, floors to 1
+        assert_eq!(drift_adjust_i64(&market, 4).unwrap(), 4); // 4 * 1.2 = 4.8, floors to 4
         assert_eq!(market.get_scaled_balance_increment(1).unwrap(), 833); // 833.33... floors
         assert!(market.get_scaled_balance_decrement(1).unwrap() >= 834); //  rounds up
     }

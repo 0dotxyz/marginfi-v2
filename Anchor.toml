@@ -4,7 +4,7 @@ solana_version = "2.1.20"
 # Getting "thread 'main' panicked at cli/src/lib.rs:545:18:"? Check your toolchain matches the above.
 
 [workspace]
-members = ["programs/marginfi", "programs/mocks", "programs/test_transfer_hook"]
+members = ["programs/marginfi", "programs/mocks", "programs/test_transfer_hook", "programs/juplend-mocks"]
 # exclude = [
 #   "programs/test_transfer_hook",
 # ]
@@ -22,6 +22,12 @@ kamino_lending = "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD"
 kamino_farms = "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr"
 drift_v2 = "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH"
 solend = "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
+
+# Jupiter Lend (JupLend / Fluid)
+juplend_lending = "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9"
+juplend_liquidity = "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC"
+juplend_rewards_rate_model = "jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar"
+token_metadata = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
 
 [programs.mainnet]
 # liquidity_incentive_program = "LipsxuAkFkwa4RKNzn51wAsW7Dedzt1RNHMkTkDEZUW"
@@ -62,6 +68,12 @@ drift-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/d
 
 # Solend tests (sl01-sl09)
 solend-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/sl*.spec.ts --exit --require tests/rootHooks.ts"
+
+# JupLend tests (jl01-jl11)
+juplend-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/jl*.spec.ts --exit --require tests/rootHooks.ts"
+
+# JupLend Token-2022 test only (jl11)
+juplend-token2022-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/jl11*.spec.ts --exit --require tests/rootHooks.ts"
 
 # Bankruptcy tests (z*, zb*)
 bankruptcy-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/z*.spec.ts tests/zb*.spec.ts --exit --require tests/rootHooks.ts"
@@ -147,6 +159,23 @@ program = "tests/fixtures/drift_v2.so"
 [[test.genesis]]
 address = "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
 program = "tests/fixtures/solend.so"
+
+
+[[test.genesis]]
+address = "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9"
+program = "tests/fixtures/juplend_lending.so"
+
+[[test.genesis]]
+address = "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC"
+program = "tests/fixtures/juplend_liquidity.so"
+
+[[test.genesis]]
+address = "jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar"
+program = "tests/fixtures/juplend_rewards_rate_model.so"
+
+[[test.genesis]]
+address = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+program = "tests/fixtures/token_metadata.so"
 
 [test.validator]
 bind_address = "0.0.0.0"

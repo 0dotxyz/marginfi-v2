@@ -186,10 +186,10 @@ describe("k09: Withdraw from Kamino reserve with accrued interest", () => {
     const timeTarget = clock.unixTimestamp + BigInt(ONE_WEEK_IN_SECONDS);
     const targetUnix = BigInt(timeTarget);
     const newClock = new Clock(
-      0n, // slot
-      0n, // epochStartTimestamp
-      0n, // epoch
-      0n, // leaderScheduleEpoch
+      clock.slot, // preserve current slot
+      clock.epochStartTimestamp,
+      clock.epoch,
+      clock.leaderScheduleEpoch,
       targetUnix
     );
     bankrunContext.setClock(newClock);

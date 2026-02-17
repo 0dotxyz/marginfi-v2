@@ -12,8 +12,8 @@ use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_KAMINO, ASSET_TAG_SOL, ASSET_TAG_SOLEND,
-        ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, EMISSIONS_FLAG_BORROW_ACTIVE,
+        ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
+        ASSET_TAG_SOLEND, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, EMISSIONS_FLAG_BORROW_ACTIVE,
         EMISSIONS_FLAG_LENDING_ACTIVE, EXP_10_I80F48, MAX_INTEGRATION_POSITIONS,
         MIN_EMISSIONS_START_TIME, ORDER_ACTIVE_TAGS, SECONDS_PER_YEAR, ZERO_AMOUNT_THRESHOLD,
     },
@@ -35,8 +35,9 @@ use std::{
 /// - `Fixed`: 1 (bank only)
 /// - `FixedKamino`: 2 (bank + reserve)
 /// - `FixedDrift`: 2 (bank + spot market)
+/// - `FixedJuplend`: 2 (bank + lending state)
 /// - `ASSET_TAG_STAKED`: 4 (bank + oracle + lst_mint + stake_pool)
-/// - `ASSET_TAG_KAMINO` / `ASSET_TAG_DRIFT` / `ASSET_TAG_SOLEND`: 3 (bank + oracle + reserve)
+/// - `ASSET_TAG_KAMINO` / `ASSET_TAG_DRIFT` / `ASSET_TAG_SOLEND` / `ASSET_TAG_JUPLEND`: 3 (bank + oracle + reserve)
 /// - `ASSET_TAG_DEFAULT` / `ASSET_TAG_SOL`: 2 (bank + oracle)
 pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
     match bank.config.oracle_setup {
@@ -45,6 +46,8 @@ pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
         OracleSetup::FixedKamino => Ok(2),
         // Fixed + Drift: bank + spot market (no oracle)
         OracleSetup::FixedDrift => Ok(2),
+        // Fixed + JupLend: bank + lending state (no oracle)
+        OracleSetup::FixedJuplend => Ok(2),
         _ => get_remaining_accounts_per_asset_tag(bank.config.asset_tag),
     }
 }
@@ -147,7 +150,7 @@ pub fn validate_remaining_accounts_for_balances_unordered<'info>(
 fn get_remaining_accounts_per_asset_tag(asset_tag: u8) -> MarginfiResult<usize> {
     match asset_tag {
         ASSET_TAG_DEFAULT | ASSET_TAG_SOL => Ok(2),
-        ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND => Ok(3),
+        ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND => Ok(3),
         ASSET_TAG_STAKED => Ok(4),
         _ => err!(MarginfiError::AssetTagMismatch),
     }

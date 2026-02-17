@@ -26,8 +26,8 @@ use anchor_spl::{
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_KAMINO, ASSET_TAG_SOL, ASSET_TAG_SOLEND,
-        ASSET_TAG_STAKED,
+        ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
+        ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
     },
     types::{Bank, BankOperationalState, MarginfiAccount, WrappedI80F48},
 };
@@ -221,7 +221,11 @@ pub fn validate_asset_tags(bank: &Bank, marginfi_account: &MarginfiAccount) -> M
     let is_default_like = |asset_tag: u8| {
         matches!(
             asset_tag,
-            ASSET_TAG_DEFAULT | ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND
+            ASSET_TAG_DEFAULT
+                | ASSET_TAG_KAMINO
+                | ASSET_TAG_DRIFT
+                | ASSET_TAG_SOLEND
+                | ASSET_TAG_JUPLEND
         )
     };
 
@@ -231,8 +235,10 @@ pub fn validate_asset_tags(bank: &Bank, marginfi_account: &MarginfiAccount) -> M
                 ASSET_TAG_DEFAULT => has_default_asset = true,
                 ASSET_TAG_SOL => { /* Do nothing, SOL can mix with any asset type */ }
                 ASSET_TAG_STAKED => has_staked_asset = true,
-                // Kamino/Drift/Solend assets behave like default assets
-                ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND => has_default_asset = true,
+                // Kamino/Drift/Solend/JupLend assets behave like default assets
+                ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND => {
+                    has_default_asset = true
+                }
                 _ => panic!("unsupported asset tag"),
             }
         }
@@ -267,7 +273,11 @@ pub fn validate_bank_asset_tags(bank_a: &Bank, bank_b: &Bank) -> MarginfiResult 
     let is_default_like = |asset_tag: u8| {
         matches!(
             asset_tag,
-            ASSET_TAG_DEFAULT | ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND
+            ASSET_TAG_DEFAULT
+                | ASSET_TAG_KAMINO
+                | ASSET_TAG_DRIFT
+                | ASSET_TAG_SOLEND
+                | ASSET_TAG_JUPLEND
         )
     };
 
@@ -471,12 +481,17 @@ pub fn is_solend_asset_tag(asset_tag: u8) -> bool {
     asset_tag == ASSET_TAG_SOLEND
 }
 
-/// Helper function - checks if asset tag is an integration type (Kamino, Drift, or Solend)
+/// Helper function for constraint validation - checks if asset tag is valid for JupLend operations
+pub fn is_juplend_asset_tag(asset_tag: u8) -> bool {
+    asset_tag == ASSET_TAG_JUPLEND
+}
+
+/// Helper function - checks if asset tag is an integration type (Kamino, Drift, Solend, or JupLend)
 /// These integrations share a position limit due to their 3-account-per-position overhead
 pub fn is_integration_asset_tag(asset_tag: u8) -> bool {
     matches!(
         asset_tag,
-        ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND
+        ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND
     )
 }
 

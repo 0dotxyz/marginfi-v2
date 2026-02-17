@@ -186,12 +186,12 @@ describe("Bank bankruptcy tests", () => {
     let now = Number(currentClock.unixTimestamp);
     const targetUnix = BigInt(now + ONE_YEAR_IN_SECONDS + ONE_YEAR_IN_SECONDS);
 
-    // Construct a new Clock; we only care about the unixTimestamp field here.
+    // Construct a new Clock; preserve current slot/epoch to avoid bankrun warp issues
     const newClock = new Clock(
-      0n, // slot
-      0n, // epochStartTimestamp
-      0n, // epoch
-      0n, // leaderScheduleEpoch
+      currentClock.slot, // preserve current slot
+      currentClock.epochStartTimestamp,
+      currentClock.epoch,
+      currentClock.leaderScheduleEpoch,
       targetUnix
     );
 

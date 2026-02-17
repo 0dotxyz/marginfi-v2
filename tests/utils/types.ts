@@ -54,6 +54,7 @@ export const ASSET_TAG_STAKED = 2;
 export const ASSET_TAG_KAMINO = 3;
 export const ASSET_TAG_DRIFT = 4;
 export const ASSET_TAG_SOLEND = 5;
+export const ASSET_TAG_JUPLEND = 6;
 
 export const ORACLE_SETUP_NONE = 0;
 export const ORACLE_SETUP_SWITCHBOARD_v2 = 2;
@@ -64,6 +65,7 @@ export const ORACLE_SETUP_SWITCHBOARD_v2 = 2;
 export const ORACLE_SETUP_PYTH_PUSH = 3;
 export const ORACLE_SETUP_SWITCHBOARD_PULL = 4;
 export const ORACLE_SETUP_STAKED_WITH_PYTH_PUSH = 5;
+export const ORACLE_SETUP_FIXED_JUPLEND = 17;
 
 export const HEALTH_CACHE_NONE = 0;
 export const HEALTH_CACHE_HEALTHY = 1;

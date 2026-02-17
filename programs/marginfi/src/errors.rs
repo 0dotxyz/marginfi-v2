@@ -369,7 +369,36 @@ pub enum MarginfiError {
     InvalidSolendReserve, // 6415
     #[msg("Invalid Solend obligation: account constraint violated")]
     InvalidSolendObligation, // 6416
-                             // **************END SOLEND ERRORS
+    // **************END SOLEND ERRORS
+
+    // ************** BEGIN JUPLEND ERRORS (starting at 6500)
+    #[msg("Invalid oracle setup: only JuplendPythPull and JuplendSwitchboardPull are supported")]
+    JuplendInvalidOracleSetup = 500, // 6500
+    #[msg("Juplend lending state validation failed")]
+    JuplendLendingValidationFailed, // 6501
+    #[msg("Wrong bank asset tag for Juplend operation")]
+    WrongBankAssetTagForJuplendOperation, // 6502
+    #[msg("Cannot use standard operations on Juplend assets")]
+    CantUseStandardOperationsOnJuplendAssets, // 6503
+    #[msg("Juplend lending state is stale")]
+    JuplendLendingStale, // 6504
+    #[msg("Invalid Juplend lending: account constraint violated")]
+    InvalidJuplendLending, // 6505
+    #[msg("Juplend lending mint mismatch")]
+    JuplendLendingMintMismatch, // 6506
+    #[msg("Juplend bank is already activated")]
+    JuplendBankAlreadyActivated, // 6507
+    #[msg("Invalid Juplend fToken vault")]
+    InvalidJuplendFTokenVault, // 6508
+    #[msg("Juplend deposit failed")]
+    JuplendDepositFailed, // 6509
+    #[msg("Juplend withdraw failed")]
+    JuplendWithdrawFailed, // 6510
+    #[msg("Juplend init position deposit insufficient")]
+    JuplendInitPositionDepositInsufficient, // 6511
+    #[msg("Invalid Juplend withdraw intermediary ATA")]
+    InvalidJuplendWithdrawIntermediaryAta, // 6512
+                                           // **************END JUPLEND ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -579,6 +608,21 @@ impl From<u32> for MarginfiError {
             6415 => MarginfiError::InvalidSolendReserve,
             6416 => MarginfiError::InvalidSolendObligation,
 
+            // Juplend-specific errors (starting at 6500)
+            6500 => MarginfiError::JuplendInvalidOracleSetup,
+            6501 => MarginfiError::JuplendLendingValidationFailed,
+            6502 => MarginfiError::WrongBankAssetTagForJuplendOperation,
+            6503 => MarginfiError::CantUseStandardOperationsOnJuplendAssets,
+            6504 => MarginfiError::JuplendLendingStale,
+            6505 => MarginfiError::InvalidJuplendLending,
+            6506 => MarginfiError::JuplendLendingMintMismatch,
+            6507 => MarginfiError::JuplendBankAlreadyActivated,
+            6508 => MarginfiError::InvalidJuplendFTokenVault,
+            6509 => MarginfiError::JuplendDepositFailed,
+            6510 => MarginfiError::JuplendWithdrawFailed,
+            6511 => MarginfiError::JuplendInitPositionDepositInsufficient,
+            6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
+
             _ => MarginfiError::InternalLogicError,
         }
     }
@@ -612,6 +656,11 @@ impl MarginfiError {
                 | MarginfiError::PythPushInvalidWindowSize
                 | MarginfiError::OracleMaxConfidenceExceeded
                 | MarginfiError::ZeroSupplyInStakePool
+                // Lending protocol staleness errors - stale exchange rates mean unreliable prices
+                | MarginfiError::ReserveStale // Kamino
+                | MarginfiError::SolendReserveStale
+                | MarginfiError::DriftSpotMarketStale
+                | MarginfiError::JuplendLendingStale
         )
     }
 

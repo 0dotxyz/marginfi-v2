@@ -1,0 +1,3404 @@
+{
+  "address": "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC",
+  "metadata": {
+    "name": "liquidity",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "change_status",
+      "discriminator": [
+        236,
+        145,
+        131,
+        228,
+        227,
+        17,
+        192,
+        255
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "liquidity",
+          "writable": true
+        },
+        {
+          "name": "auth_list"
+        }
+      ],
+      "args": [
+        {
+          "name": "status",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "claim",
+      "discriminator": [
+        62,
+        198,
+        214,
+        193,
+        213,
+        159,
+        108,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "signer": true,
+          "relations": [
+            "claim_account"
+          ]
+        },
+        {
+          "name": "liquidity"
+        },
+        {
+          "name": "token_reserve",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "token_reserve",
+            "claim_account"
+          ]
+        },
+        {
+          "name": "recipient_token_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "arg",
+                "path": "recipient"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "liquidity"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          },
+          "relations": [
+            "token_reserve"
+          ]
+        },
+        {
+          "name": "claim_account",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        }
+      ],
+      "args": [
+        {
+          "name": "recipient",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "close_claim_account",
+      "discriminator": [
+        241,
+        146,
+        203,
+        216,
+        58,
+        222,
+        91,
+        118
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "claim_account"
+          ]
+        },
+        {
+          "name": "claim_account",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "_mint",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "collect_revenue",
+      "discriminator": [
+        87,
+        96,
+        211,
+        36,
+        240,
+        43,
+        246,
+        87
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "liquidity"
+        },
+        {
+          "name": "auth_list"
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "token_reserve"
+          ]
+        },
+        {
+          "name": "revenue_collector_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "revenue_collector"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "revenue_collector"
+        },
+        {
+          "name": "token_reserve",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "liquidity"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          },
+          "relations": [
+            "token_reserve"
+          ]
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "init_claim_account",
+      "discriminator": [
+        112,
+        141,
+        47,
+        170,
+        42,
+        99,
+        144,
+        145
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "claim_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  95,
+                  99,
+                  108,
+                  97,
+                  105,
+                  109
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "user"
+              },
+              {
+                "kind": "arg",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "user",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "init_liquidity",
+      "discriminator": [
+        95,
+        189,
+        216,
+        183,
+        188,
+        62,
+        244,
+        108
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "liquidity",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  113,
+                  117,
+                  105,
+                  100,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "auth_list",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  95,
+                  108,
+                  105,
+                  115,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "authority",
+          "type": "pubkey"
+        },
+        {
+          "name": "revenue_collector",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "init_new_protocol",
+      "discriminator": [
+        193,
+        147,
+        5,
+        32,
+        138,
+        135,
+        213,
+        158
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "auth_list"
+        },
+        {
+          "name": "user_supply_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  95,
+                  115,
+                  117,
+                  112,
+                  112,
+                  108,
+                  121,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "supply_mint"
+              },
+              {
+                "kind": "arg",
+                "path": "protocol"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_borrow_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  95,
+                  98,
+                  111,
+                  114,
+                  114,
+                  111,
+                  119,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "borrow_mint"
+              },
+              {
+                "kind": "arg",
+                "path": "protocol"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "supply_mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "borrow_mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "protocol",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "init_token_reserve",
+      "discriminator": [
+        228,
+        235,
+        65,
+        129,
+        159,
+        15,
+        6,
+        84
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "liquidity"
+        },
+        {
+          "name": "auth_list"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "liquidity"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "rate_model",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  116,
+                  101,
+                  95,
+                  109,
+                  111,
+                  100,
+                  101,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_reserve",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  115,
+                  101,
+                  114,
+                  118,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "operate",
+      "discriminator": [
+        217,
+        106,
+        208,
+        99,
+        116,
+        151,
+        42,
+        135
+      ],
+      "accounts": [
+        {
+          "name": "protocol",
+          "signer": true,
+          "relations": [
+            "user_supply_position",
+            "user_borrow_position"
+          ]
+        },
+        {
+          "name": "liquidity"
+        },
+        {
+          "name": "token_reserve",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "token_reserve",
+            "rate_model",
+            "borrow_claim_account",
+            "withdraw_claim_account"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "liquidity"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          },
+          "relations": [
+            "token_reserve"
+          ]
+        },
+        {
+          "name": "user_supply_position",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "user_borrow_position",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "rate_model"
+        },
+        {
+          "name": "withdraw_to_account",
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "arg",
+                "path": "withdraw_to"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "borrow_to_account",
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "arg",
+                "path": "borrow_to"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "borrow_claim_account",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "withdraw_claim_account",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        }
+      ],
+      "args": [
+        {
+          "name": "supply_amount",
+          "type": "i128"
+        },
+        {
+          "name": "borrow_amount",
+          "type": "i128"
+        },
+        {
+          "name": "withdraw_to",
+          "type": "pubkey"
+        },
+        {
+          "name": "borrow_to",
+          "type": "pubkey"
+        },
+        {
+          "name": "transfer_type",
+          "type": {
+            "defined": {
+              "name": "TransferType"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "pause_user",
+      "discriminator": [
+        18,
+        63,
+        43,
+        94,
+        239,
+        53,
+        101,
+        14
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "auth_list"
+        },
+        {
+          "name": "user_supply_position",
+          "writable": true
+        },
+        {
+          "name": "user_borrow_position",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol",
+          "type": "pubkey"
+        },
+        {
+          "name": "supply_mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "borrow_mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "supply_status",
+          "type": {
+            "option": "u8"
+          }
+        },
+        {
+          "name": "borrow_status",
+          "type": {
+            "option": "u8"
+          }
+        }
+      ]
+    },
+    {
+      "name": "pre_operate",
+      "discriminator": [
+        129,
+        205,
+        158,
+        155,
+        198,
+        155,
+        72,
+        133
+      ],
+      "accounts": [
+        {
+          "name": "protocol",
+          "signer": true,
+          "relations": [
+            "user_supply_position",
+            "user_borrow_position"
+          ]
+        },
+        {
+          "name": "liquidity"
+        },
+        {
+          "name": "user_supply_position",
+          "optional": true
+        },
+        {
+          "name": "user_borrow_position",
+          "optional": true
+        },
+        {
+          "name": "vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "liquidity"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "arg",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          },
+          "relations": [
+            "token_reserve"
+          ]
+        },
+        {
+          "name": "token_reserve",
+          "writable": true
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "mint",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "unpause_user",
+      "discriminator": [
+        71,
+        115,
+        128,
+        252,
+        182,
+        126,
+        234,
+        62
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "auth_list"
+        },
+        {
+          "name": "user_supply_position",
+          "writable": true
+        },
+        {
+          "name": "user_borrow_position",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "protocol",
+          "type": "pubkey"
+        },
+        {
+          "name": "supply_mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "borrow_mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "supply_status",
+          "type": {
+            "option": "u8"
+          }
+        },
+        {
+          "name": "borrow_status",
+          "type": {
+            "option": "u8"
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_authority",
+      "discriminator": [
+        32,
+        46,
+        64,
+        28,
+        149,
+        75,
+        243,
+        88
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "liquidity",
+          "writable": true
+        },
+        {
+          "name": "auth_list",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_authority",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "update_auths",
+      "discriminator": [
+        93,
+        96,
+        178,
+        156,
+        57,
+        117,
+        253,
+        209
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "liquidity"
+        },
+        {
+          "name": "auth_list",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "auth_status",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "AddressBool"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_exchange_price",
+      "discriminator": [
+        239,
+        244,
+        10,
+        248,
+        116,
+        25,
+        53,
+        150
+      ],
+      "accounts": [
+        {
+          "name": "token_reserve",
+          "writable": true
+        },
+        {
+          "name": "rate_model",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "_mint",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "update_guardians",
+      "discriminator": [
+        43,
+        62,
+        250,
+        138,
+        141,
+        117,
+        132,
+        97
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "liquidity"
+        },
+        {
+          "name": "auth_list",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "guardian_status",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "AddressBool"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_rate_data_v1",
+      "discriminator": [
+        6,
+        20,
+        34,
+        122,
+        22,
+        150,
+        180,
+        22
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "auth_list"
+        },
+        {
+          "name": "rate_model",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "rate_model",
+            "token_reserve"
+          ]
+        },
+        {
+          "name": "token_reserve",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "rate_data",
+          "type": {
+            "defined": {
+              "name": "RateDataV1Params"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_rate_data_v2",
+      "discriminator": [
+        116,
+        73,
+        53,
+        146,
+        216,
+        45,
+        228,
+        124
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "auth_list"
+        },
+        {
+          "name": "rate_model",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "rate_model",
+            "token_reserve"
+          ]
+        },
+        {
+          "name": "token_reserve",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "rate_data",
+          "type": {
+            "defined": {
+              "name": "RateDataV2Params"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_revenue_collector",
+      "discriminator": [
+        167,
+        142,
+        124,
+        240,
+        220,
+        113,
+        141,
+        59
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "liquidity",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "revenue_collector",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "update_token_config",
+      "discriminator": [
+        231,
+        122,
+        181,
+        79,
+        255,
+        79,
+        144,
+        167
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "auth_list"
+        },
+        {
+          "name": "rate_model",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "rate_model",
+            "token_reserve"
+          ]
+        },
+        {
+          "name": "token_reserve",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "token_config",
+          "type": {
+            "defined": {
+              "name": "TokenConfig"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_user_borrow_config",
+      "discriminator": [
+        100,
+        176,
+        201,
+        174,
+        247,
+        2,
+        54,
+        168
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "protocol",
+          "relations": [
+            "user_borrow_position"
+          ]
+        },
+        {
+          "name": "auth_list"
+        },
+        {
+          "name": "rate_model"
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "rate_model",
+            "token_reserve",
+            "user_borrow_position"
+          ]
+        },
+        {
+          "name": "token_reserve",
+          "writable": true
+        },
+        {
+          "name": "user_borrow_position",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "user_borrow_config",
+          "type": {
+            "defined": {
+              "name": "UserBorrowConfig"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_user_class",
+      "discriminator": [
+        12,
+        206,
+        68,
+        135,
+        63,
+        212,
+        48,
+        119
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "auth_list",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "user_class",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "AddressU8"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_user_supply_config",
+      "discriminator": [
+        217,
+        239,
+        225,
+        218,
+        33,
+        49,
+        234,
+        183
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "protocol",
+          "relations": [
+            "user_supply_position"
+          ]
+        },
+        {
+          "name": "auth_list"
+        },
+        {
+          "name": "rate_model"
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "rate_model",
+            "token_reserve",
+            "user_supply_position"
+          ]
+        },
+        {
+          "name": "token_reserve",
+          "writable": true
+        },
+        {
+          "name": "user_supply_position",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "user_supply_config",
+          "type": {
+            "defined": {
+              "name": "UserSupplyConfig"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_user_withdrawal_limit",
+      "discriminator": [
+        162,
+        9,
+        186,
+        9,
+        213,
+        30,
+        173,
+        78
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "auth_list"
+        },
+        {
+          "name": "user_supply_position",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_limit",
+          "type": "u128"
+        },
+        {
+          "name": "protocol",
+          "type": "pubkey"
+        },
+        {
+          "name": "mint",
+          "type": "pubkey"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "AuthorizationList",
+      "discriminator": [
+        19,
+        157,
+        117,
+        43,
+        236,
+        167,
+        251,
+        69
+      ]
+    },
+    {
+      "name": "Liquidity",
+      "discriminator": [
+        54,
+        252,
+        249,
+        226,
+        137,
+        172,
+        121,
+        58
+      ]
+    },
+    {
+      "name": "RateModel",
+      "discriminator": [
+        94,
+        3,
+        203,
+        219,
+        107,
+        137,
+        4,
+        162
+      ]
+    },
+    {
+      "name": "TokenReserve",
+      "discriminator": [
+        21,
+        18,
+        59,
+        135,
+        120,
+        20,
+        31,
+        12
+      ]
+    },
+    {
+      "name": "UserBorrowPosition",
+      "discriminator": [
+        73,
+        126,
+        65,
+        123,
+        220,
+        126,
+        197,
+        24
+      ]
+    },
+    {
+      "name": "UserClaim",
+      "discriminator": [
+        228,
+        142,
+        195,
+        181,
+        228,
+        147,
+        32,
+        209
+      ]
+    },
+    {
+      "name": "UserSupplyPosition",
+      "discriminator": [
+        202,
+        219,
+        136,
+        118,
+        61,
+        177,
+        21,
+        146
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "LogBorrowRateCap",
+      "discriminator": [
+        156,
+        131,
+        232,
+        94,
+        254,
+        156,
+        14,
+        117
+      ]
+    },
+    {
+      "name": "LogChangeStatus",
+      "discriminator": [
+        89,
+        77,
+        37,
+        172,
+        141,
+        31,
+        74,
+        42
+      ]
+    },
+    {
+      "name": "LogClaim",
+      "discriminator": [
+        238,
+        50,
+        157,
+        85,
+        151,
+        58,
+        231,
+        45
+      ]
+    },
+    {
+      "name": "LogCollectRevenue",
+      "discriminator": [
+        64,
+        198,
+        22,
+        194,
+        123,
+        87,
+        166,
+        82
+      ]
+    },
+    {
+      "name": "LogOperate",
+      "discriminator": [
+        180,
+        8,
+        81,
+        71,
+        19,
+        132,
+        173,
+        8
+      ]
+    },
+    {
+      "name": "LogPauseUser",
+      "discriminator": [
+        100,
+        17,
+        114,
+        224,
+        180,
+        30,
+        52,
+        170
+      ]
+    },
+    {
+      "name": "LogUnpauseUser",
+      "discriminator": [
+        170,
+        91,
+        132,
+        96,
+        179,
+        77,
+        168,
+        26
+      ]
+    },
+    {
+      "name": "LogUpdateAuthority",
+      "discriminator": [
+        150,
+        152,
+        157,
+        143,
+        6,
+        135,
+        193,
+        101
+      ]
+    },
+    {
+      "name": "LogUpdateAuths",
+      "discriminator": [
+        88,
+        80,
+        109,
+        48,
+        111,
+        203,
+        76,
+        251
+      ]
+    },
+    {
+      "name": "LogUpdateExchangePrices",
+      "discriminator": [
+        190,
+        194,
+        69,
+        204,
+        30,
+        86,
+        181,
+        163
+      ]
+    },
+    {
+      "name": "LogUpdateGuardians",
+      "discriminator": [
+        231,
+        28,
+        191,
+        51,
+        53,
+        140,
+        79,
+        142
+      ]
+    },
+    {
+      "name": "LogUpdateRateDataV1",
+      "discriminator": [
+        30,
+        102,
+        131,
+        192,
+        0,
+        30,
+        85,
+        223
+      ]
+    },
+    {
+      "name": "LogUpdateRateDataV2",
+      "discriminator": [
+        206,
+        53,
+        195,
+        70,
+        113,
+        211,
+        92,
+        129
+      ]
+    },
+    {
+      "name": "LogUpdateRevenueCollector",
+      "discriminator": [
+        44,
+        143,
+        80,
+        250,
+        211,
+        147,
+        180,
+        159
+      ]
+    },
+    {
+      "name": "LogUpdateTokenConfigs",
+      "discriminator": [
+        24,
+        205,
+        191,
+        130,
+        47,
+        40,
+        233,
+        218
+      ]
+    },
+    {
+      "name": "LogUpdateUserBorrowConfigs",
+      "discriminator": [
+        210,
+        251,
+        242,
+        159,
+        205,
+        33,
+        154,
+        74
+      ]
+    },
+    {
+      "name": "LogUpdateUserClass",
+      "discriminator": [
+        185,
+        193,
+        106,
+        248,
+        11,
+        53,
+        0,
+        136
+      ]
+    },
+    {
+      "name": "LogUpdateUserSupplyConfigs",
+      "discriminator": [
+        142,
+        160,
+        21,
+        90,
+        87,
+        88,
+        18,
+        51
+      ]
+    },
+    {
+      "name": "LogUpdateUserWithdrawalLimit",
+      "discriminator": [
+        114,
+        131,
+        152,
+        189,
+        120,
+        253,
+        88,
+        105
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "UserClassNotPausable",
+      "msg": "ADMIN_MODULE_USER_CLASS_NOT_PAUSABLE"
+    },
+    {
+      "code": 6001,
+      "name": "UserClassNotFound",
+      "msg": "ADMIN_MODULE_USER_CLASS_NOT_FOUND"
+    },
+    {
+      "code": 6002,
+      "name": "UserAlreadyPaused",
+      "msg": "ADMIN_MODULE_USER_ALREADY_PAUSED"
+    },
+    {
+      "code": 6003,
+      "name": "UserAlreadyUnpaused",
+      "msg": "ADMIN_MODULE_USER_ALREADY_UNPAUSED"
+    },
+    {
+      "code": 6004,
+      "name": "OnlyLiquidityAuthority",
+      "msg": "ADMIN_MODULE_ONLY_LIQUIDITY_AUTHORITY"
+    },
+    {
+      "code": 6005,
+      "name": "OnlyAuth",
+      "msg": "ADMIN_MODULE_ONLY_AUTH"
+    },
+    {
+      "code": 6006,
+      "name": "OnlyGuardians",
+      "msg": "ADMIN_MODULE_ONLY_GUARDIANS"
+    },
+    {
+      "code": 6007,
+      "name": "InvalidParams",
+      "msg": "ADMIN_MODULE_INVALID_PARAMS"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidConfigOrder",
+      "msg": "ADMIN_MODULE_INVALID_CONFIG_ORDER"
+    },
+    {
+      "code": 6009,
+      "name": "StatusAlreadySet",
+      "msg": "ADMIN_MODULE_STATUS_ALREADY_SET"
+    },
+    {
+      "code": 6010,
+      "name": "LimitsCannotBeZero",
+      "msg": "ADMIN_MODULE_LIMITS_CAN_NOT_BE_ZERO"
+    },
+    {
+      "code": 6011,
+      "name": "MaxAuthCountReached",
+      "msg": "ADMIN_MODULE_MAX_AUTH_COUNT"
+    },
+    {
+      "code": 6012,
+      "name": "MaxUserClassesReached",
+      "msg": "ADMIN_MODULE_MAX_USER_CLASSES"
+    },
+    {
+      "code": 6013,
+      "name": "InsufficientBalance",
+      "msg": "USER_MODULE_INSUFFICIENT_BALANCE"
+    },
+    {
+      "code": 6014,
+      "name": "UserSupplyPositionRequired",
+      "msg": "USER_MODULE_USER_SUPPLY_POSITION_REQUIRED"
+    },
+    {
+      "code": 6015,
+      "name": "UserBorrowPositionRequired",
+      "msg": "USER_MODULE_USER_BORROW_POSITION_REQUIRED"
+    },
+    {
+      "code": 6016,
+      "name": "ClaimAccountRequired",
+      "msg": "USER_MODULE_CLAIM_ACCOUNT_REQUIRED"
+    },
+    {
+      "code": 6017,
+      "name": "WithdrawToAccountRequired",
+      "msg": "USER_MODULE_WITHDRAW_TO_ACCOUNT_REQUIRED"
+    },
+    {
+      "code": 6018,
+      "name": "BorrowToAccountRequired",
+      "msg": "USER_MODULE_BORROW_TO_ACCOUNT_REQUIRED"
+    },
+    {
+      "code": 6019,
+      "name": "InvalidClaimAmount",
+      "msg": "USER_MODULE_INVALID_CLAIM_AMOUNT"
+    },
+    {
+      "code": 6020,
+      "name": "NoAmountToClaim",
+      "msg": "USER_MODULE_NO_AMOUNT_TO_CLAIM"
+    },
+    {
+      "code": 6021,
+      "name": "AmountNotZero",
+      "msg": "USER_MODULE_AMOUNT_NOT_ZERO"
+    },
+    {
+      "code": 6022,
+      "name": "ValueOverflow",
+      "msg": "USER_MODULE_VALUE_OVERFLOW"
+    },
+    {
+      "code": 6023,
+      "name": "InvalidTransferType",
+      "msg": "USER_MODULE_INVALID_TRANSFER_TYPE"
+    },
+    {
+      "code": 6024,
+      "name": "MintMismatch",
+      "msg": "USER_MODULE_MINT_MISMATCH"
+    },
+    {
+      "code": 6025,
+      "name": "UserNotDefined",
+      "msg": "USER_MODULE_USER_NOT_DEFINED"
+    },
+    {
+      "code": 6026,
+      "name": "InvalidUserClaim",
+      "msg": "USER_MODULE_INVALID_USER_CLAIM"
+    },
+    {
+      "code": 6027,
+      "name": "UserPaused",
+      "msg": "USER_MODULE_USER_PAUSED"
+    },
+    {
+      "code": 6028,
+      "name": "WithdrawalLimitReached",
+      "msg": "USER_MODULE_WITHDRAWAL_LIMIT_REACHED"
+    },
+    {
+      "code": 6029,
+      "name": "BorrowLimitReached",
+      "msg": "USER_MODULE_BORROW_LIMIT_REACHED"
+    },
+    {
+      "code": 6030,
+      "name": "OperateAmountsNearlyZero",
+      "msg": "USER_MODULE_OPERATE_AMOUNTS_ZERO"
+    },
+    {
+      "code": 6031,
+      "name": "OperateAmountTooBig",
+      "msg": "USER_MODULE_OPERATE_AMOUNTS_TOO_BIG"
+    },
+    {
+      "code": 6032,
+      "name": "OperateAmountsInsufficient",
+      "msg": "USER_MODULE_OPERATE_AMOUNTS_INSUFFICIENT"
+    },
+    {
+      "code": 6033,
+      "name": "TransferAmountOutOfBounds",
+      "msg": "USER_MODULE_TRANSFER_AMOUNT_OUT_OF_BOUNDS"
+    },
+    {
+      "code": 6034,
+      "name": "ForbiddenOperateCall",
+      "msg": "FORBIDDEN_OPERATE_CALL"
+    },
+    {
+      "code": 6035,
+      "name": "MaxUtilizationReached",
+      "msg": "USER_MODULE_MAX_UTILIZATION_REACHED"
+    },
+    {
+      "code": 6036,
+      "name": "ValueOverflowTotalSupply",
+      "msg": "USER_MODULE_VALUE_OVERFLOW_TOTAL_SUPPLY"
+    },
+    {
+      "code": 6037,
+      "name": "ValueOverflowTotalBorrow",
+      "msg": "USER_MODULE_VALUE_OVERFLOW_TOTAL_BORROW"
+    },
+    {
+      "code": 6038,
+      "name": "DepositExpected",
+      "msg": "USER_MODULE_DEPOSIT_EXPECTED"
+    },
+    {
+      "code": 6039,
+      "name": "ExchangePriceZero",
+      "msg": "LIQUIDITY_CALCS_EXCHANGE_PRICE_ZERO"
+    },
+    {
+      "code": 6040,
+      "name": "UnsupportedRateVersion",
+      "msg": "LIQUIDITY_CALCS_UNSUPPORTED_RATE_VERSION"
+    },
+    {
+      "code": 6041,
+      "name": "BorrowRateNegative",
+      "msg": "LIQUIDITY_CALCS_BORROW_RATE_NEGATIVE"
+    },
+    {
+      "code": 6042,
+      "name": "ProtocolLockdown",
+      "msg": "PROTOCOL_LOCKDOWN"
+    }
+  ],
+  "types": [
+    {
+      "name": "AddressBool",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "addr",
+            "type": "pubkey"
+          },
+          {
+            "name": "value",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AddressU8",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "addr",
+            "type": "pubkey"
+          },
+          {
+            "name": "value",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AuthorizationList",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "auth_users",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "guardians",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "user_classes",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "UserClass"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Liquidity",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "revenue_collector",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogBorrowRateCap",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "token",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogChangeStatus",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "new_status",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogClaim",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "token",
+            "type": "pubkey"
+          },
+          {
+            "name": "recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogCollectRevenue",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "token",
+            "type": "pubkey"
+          },
+          {
+            "name": "revenue_amount",
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogOperate",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "token",
+            "type": "pubkey"
+          },
+          {
+            "name": "supply_amount",
+            "type": "i128"
+          },
+          {
+            "name": "borrow_amount",
+            "type": "i128"
+          },
+          {
+            "name": "withdraw_to",
+            "type": "pubkey"
+          },
+          {
+            "name": "borrow_to",
+            "type": "pubkey"
+          },
+          {
+            "name": "supply_exchange_price",
+            "type": "u64"
+          },
+          {
+            "name": "borrow_exchange_price",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogPauseUser",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogUnpauseUser",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogUpdateAuthority",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "new_authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogUpdateAuths",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "auth_status",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "AddressBool"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogUpdateExchangePrices",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "token",
+            "type": "pubkey"
+          },
+          {
+            "name": "supply_exchange_price",
+            "type": "u128"
+          },
+          {
+            "name": "borrow_exchange_price",
+            "type": "u128"
+          },
+          {
+            "name": "borrow_rate",
+            "type": "u16"
+          },
+          {
+            "name": "utilization",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogUpdateGuardians",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "guardian_status",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "AddressBool"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogUpdateRateDataV1",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "token",
+            "type": "pubkey"
+          },
+          {
+            "name": "rate_data",
+            "type": {
+              "defined": {
+                "name": "RateDataV1Params"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogUpdateRateDataV2",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "token",
+            "type": "pubkey"
+          },
+          {
+            "name": "rate_data",
+            "type": {
+              "defined": {
+                "name": "RateDataV2Params"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogUpdateRevenueCollector",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "revenue_collector",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogUpdateTokenConfigs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "token_config",
+            "type": {
+              "defined": {
+                "name": "TokenConfig"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogUpdateUserBorrowConfigs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "token",
+            "type": "pubkey"
+          },
+          {
+            "name": "user_borrow_config",
+            "type": {
+              "defined": {
+                "name": "UserBorrowConfig"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogUpdateUserClass",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user_class",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "AddressU8"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogUpdateUserSupplyConfigs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "token",
+            "type": "pubkey"
+          },
+          {
+            "name": "user_supply_config",
+            "type": {
+              "defined": {
+                "name": "UserSupplyConfig"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogUpdateUserWithdrawalLimit",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "token",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_limit",
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RateDataV1Params",
+      "docs": [
+        "@notice struct to set borrow rate data for version 1"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kink",
+            "docs": [
+              "",
+              "@param kink in borrow rate. in 1e2: 100% = 10_000; 1% = 100"
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "rate_at_utilization_zero",
+            "docs": [
+              "",
+              "@param rateAtUtilizationZero desired borrow rate when utilization is zero. in 1e2: 100% = 10_000; 1% = 100",
+              "i.e. constant minimum borrow rate",
+              "e.g. at utilization = 0.01% rate could still be at least 4% (rateAtUtilizationZero would be 400 then)"
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "rate_at_utilization_kink",
+            "docs": [
+              "",
+              "@param rateAtUtilizationKink borrow rate when utilization is at kink. in 1e2: 100% = 10_000; 1% = 100",
+              "e.g. when rate should be 7% at kink then rateAtUtilizationKink would be 700"
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "rate_at_utilization_max",
+            "docs": [
+              "",
+              "@param rateAtUtilizationMax borrow rate when utilization is maximum at 100%. in 1e2: 100% = 10_000; 1% = 100",
+              "e.g. when rate should be 125% at 100% then rateAtUtilizationMax would be 12_500"
+            ],
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RateDataV2Params",
+      "docs": [
+        "@notice struct to set borrow rate data for version 2"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kink1",
+            "docs": [
+              "",
+              "@param kink1 first kink in borrow rate. in 1e2: 100% = 10_000; 1% = 100",
+              "utilization below kink 1 usually means slow increase in rate, once utilization is above kink 1 borrow rate increases faster"
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "kink2",
+            "docs": [
+              "",
+              "@param kink2 second kink in borrow rate. in 1e2: 100% = 10_000; 1% = 100",
+              "utilization below kink 2 usually means slow / medium increase in rate, once utilization is above kink 2 borrow rate increases fast"
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "rate_at_utilization_zero",
+            "docs": [
+              "",
+              "@param rateAtUtilizationZero desired borrow rate when utilization is zero. in 1e2: 100% = 10_000; 1% = 100",
+              "i.e. constant minimum borrow rate",
+              "e.g. at utilization = 0.01% rate could still be at least 4% (rateAtUtilizationZero would be 400 then)"
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "rate_at_utilization_kink1",
+            "docs": [
+              "",
+              "@param rateAtUtilizationKink1 desired borrow rate when utilization is at first kink. in 1e2: 100% = 10_000; 1% = 100",
+              "e.g. when rate should be 7% at first kink then rateAtUtilizationKink would be 700"
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "rate_at_utilization_kink2",
+            "docs": [
+              "",
+              "@param rateAtUtilizationKink2 desired borrow rate when utilization is at second kink. in 1e2: 100% = 10_000; 1% = 100",
+              "e.g. when rate should be 7% at second kink then rateAtUtilizationKink would be 1_200"
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "rate_at_utilization_max",
+            "docs": [
+              "",
+              "@param rateAtUtilizationMax desired borrow rate when utilization is maximum at 100%. in 1e2: 100% = 10_000; 1% = 100",
+              "e.g. when rate should be 125% at 100% then rateAtUtilizationMax would be 12_500"
+            ],
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RateModel",
+      "docs": [
+        "Interest rate model data"
+      ],
+      "serialization": "bytemuck",
+      "repr": {
+        "kind": "c",
+        "packed": true
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "rate_at_zero",
+            "type": "u16"
+          },
+          {
+            "name": "kink1_utilization",
+            "type": "u16"
+          },
+          {
+            "name": "rate_at_kink1",
+            "type": "u16"
+          },
+          {
+            "name": "rate_at_max",
+            "type": "u16"
+          },
+          {
+            "name": "kink2_utilization",
+            "type": "u16"
+          },
+          {
+            "name": "rate_at_kink2",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenConfig",
+      "docs": [
+        "@notice struct to set token config"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "token",
+            "docs": [
+              "",
+              "@param token address"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "fee",
+            "docs": [
+              "",
+              "@param fee charges on borrower's interest. in 1e2: 100% = 10_000; 1% = 100"
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "max_utilization",
+            "docs": [
+              "",
+              "@param maxUtilization maximum allowed utilization. in 1e2: 100% = 10_000; 1% = 100",
+              "set to 100% to disable and have default limit of 100% (avoiding SLOAD)."
+            ],
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenReserve",
+      "docs": [
+        "Token configuration and exchange prices"
+      ],
+      "serialization": "bytemuck",
+      "repr": {
+        "kind": "c",
+        "packed": true
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "borrow_rate",
+            "type": "u16"
+          },
+          {
+            "name": "fee_on_interest",
+            "type": "u16"
+          },
+          {
+            "name": "last_utilization",
+            "type": "u16"
+          },
+          {
+            "name": "last_update_timestamp",
+            "type": "u64"
+          },
+          {
+            "name": "supply_exchange_price",
+            "type": "u64"
+          },
+          {
+            "name": "borrow_exchange_price",
+            "type": "u64"
+          },
+          {
+            "name": "max_utilization",
+            "type": "u16"
+          },
+          {
+            "name": "total_supply_with_interest",
+            "type": "u64"
+          },
+          {
+            "name": "total_supply_interest_free",
+            "type": "u64"
+          },
+          {
+            "name": "total_borrow_with_interest",
+            "type": "u64"
+          },
+          {
+            "name": "total_borrow_interest_free",
+            "type": "u64"
+          },
+          {
+            "name": "total_claim_amount",
+            "type": "u64"
+          },
+          {
+            "name": "interacting_protocol",
+            "type": "pubkey"
+          },
+          {
+            "name": "interacting_timestamp",
+            "type": "u64"
+          },
+          {
+            "name": "interacting_balance",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TransferType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "SKIP"
+          },
+          {
+            "name": "DIRECT"
+          },
+          {
+            "name": "CLAIM"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserBorrowConfig",
+      "docs": [
+        "@notice struct to set user borrow & payback config"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mode",
+            "docs": [
+              "",
+              "@param mode: 0 = without interest. 1 = with interest"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "expand_percent",
+            "docs": [
+              "",
+              "@param expandPercent debt limit expand percent. in 1e2: 100% = 10_000; 1% = 100",
+              "Also used to calculate rate at which debt limit should decrease (instant)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "expand_duration",
+            "docs": [
+              "",
+              "@param expandDuration debt limit expand duration in seconds.",
+              "used to calculate rate together with expandPercent"
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "base_debt_ceiling",
+            "docs": [
+              "",
+              "@param baseDebtCeiling base borrow limit. until here, borrow limit remains as baseDebtCeiling",
+              "(user can borrow until this point at once without stepped expansion). Above this, automated limit comes in place.",
+              "amount in raw (to be multiplied with exchange price) or normal depends on configured mode in user config for the token:",
+              "with interest -> raw, without interest -> normal"
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "max_debt_ceiling",
+            "docs": [
+              "",
+              "@param maxDebtCeiling max borrow ceiling, maximum amount the user can borrow.",
+              "amount in raw (to be multiplied with exchange price) or normal depends on configured mode in user config for the token:",
+              "with interest -> raw, without interest -> normal"
+            ],
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserBorrowPosition",
+      "docs": [
+        "User borrow position"
+      ],
+      "serialization": "bytemuck",
+      "repr": {
+        "kind": "c",
+        "packed": true
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "protocol",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "with_interest",
+            "type": "u8"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "debt_ceiling",
+            "type": "u64"
+          },
+          {
+            "name": "last_update",
+            "type": "u64"
+          },
+          {
+            "name": "expand_pct",
+            "type": "u16"
+          },
+          {
+            "name": "expand_duration",
+            "type": "u32"
+          },
+          {
+            "name": "base_debt_ceiling",
+            "type": "u64"
+          },
+          {
+            "name": "max_debt_ceiling",
+            "type": "u64"
+          },
+          {
+            "name": "status",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserClaim",
+      "serialization": "bytemuck",
+      "repr": {
+        "kind": "c",
+        "packed": true
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserClass",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "addr",
+            "type": "pubkey"
+          },
+          {
+            "name": "class",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserSupplyConfig",
+      "docs": [
+        "@notice struct to set user supply & withdrawal config"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mode",
+            "docs": [
+              "",
+              "@param mode: 0 = without interest. 1 = with interest"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "expand_percent",
+            "docs": [
+              "",
+              "@param expandPercent withdrawal limit expand percent. in 1e2: 100% = 10_000; 1% = 100",
+              "Also used to calculate rate at which withdrawal limit should decrease (instant)."
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "expand_duration",
+            "docs": [
+              "",
+              "@param expandDuration withdrawal limit expand duration in seconds.",
+              "used to calculate rate together with expandPercent"
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "base_withdrawal_limit",
+            "docs": [
+              "",
+              "@param baseWithdrawalLimit base limit, below this, user can withdraw the entire amount.",
+              "amount in raw (to be multiplied with exchange price) or normal depends on configured mode in user config for the token:",
+              "with interest -> raw, without interest -> normal"
+            ],
+            "type": "u128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserSupplyPosition",
+      "docs": [
+        "User supply position"
+      ],
+      "serialization": "bytemuck",
+      "repr": {
+        "kind": "c",
+        "packed": true
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "protocol",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "with_interest",
+            "type": "u8"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "withdrawal_limit",
+            "type": "u128"
+          },
+          {
+            "name": "last_update",
+            "type": "u64"
+          },
+          {
+            "name": "expand_pct",
+            "type": "u16"
+          },
+          {
+            "name": "expand_duration",
+            "type": "u64"
+          },
+          {
+            "name": "base_withdrawal_limit",
+            "type": "u64"
+          },
+          {
+            "name": "status",
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ]
+}

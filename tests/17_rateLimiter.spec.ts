@@ -186,6 +186,7 @@ describe("Rate limiter", () => {
     const prog = userProgram();
     await prog.provider.sendAndConfirm(
       new Transaction().add(
+        dummyIx(prog.provider.publicKey, users[0].wallet.publicKey),
         await borrowIx(prog, {
           marginfiAccount: requireRateLimitAccount(),
           bank: bankKeypairUsdc.publicKey,
@@ -204,6 +205,7 @@ describe("Rate limiter", () => {
     const prog = userProgram();
     await prog.provider.sendAndConfirm(
       new Transaction().add(
+        dummyIx(prog.provider.publicKey, users[0].wallet.publicKey),
         await repayIx(prog, {
           marginfiAccount: requireRateLimitAccount(),
           bank: bankKeypairUsdc.publicKey,

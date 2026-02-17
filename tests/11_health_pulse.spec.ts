@@ -187,40 +187,50 @@ describe("Health pulse", () => {
 
     const assetValue = wrappedI80F48toBigNumber(cacheAfter.assetValue);
     const liabValue = wrappedI80F48toBigNumber(cacheAfter.liabilityValue);
-    let expectedValue: number;
-    let expectedDebt: number;
+    let expectedValue: number = 0;
+    let expectedDebt: number = 0;
+
+    // Calculate expectedValue and expectedDebt from account balances
+    const bals = accAfter.lendingAccount.balances;
+    for (let i = 0; i < bals.length; i++) {
+      const b = bals[i];
+      const bankKey = b.bankPk;
+      const shares = wrappedI80F48toBigNumber(b.assetShares).toNumber();
+      const debt = wrappedI80F48toBigNumber(b.liabilityShares).toNumber();
+      if (shares != 0) {
+        const bankAcc = await program.account.bank.fetch(bankKey);
+        const config = bankAcc.config;
+        expectedValue =
+          shares *
+          wrappedI80F48toBigNumber(bankAcc.assetShareValue).toNumber() *
+          wrappedI80F48toBigNumber(config.assetWeightInit).toNumber();
+      }
+      if (debt != 0) {
+        const bankAcc = await program.account.bank.fetch(bankKey);
+        const config = bankAcc.config;
+        expectedDebt =
+          debt *
+          wrappedI80F48toBigNumber(bankAcc.liabilityShareValue).toNumber() *
+          wrappedI80F48toBigNumber(config.liabilityWeightInit).toNumber();
+      }
+    }
+
     if (verbose) {
       console.log("---user balances state---");
-      const bals = accAfter.lendingAccount.balances;
       for (let i = 0; i < bals.length; i++) {
         const b = bals[i];
-        const bankKey = b.bankPk;
         const shares = wrappedI80F48toBigNumber(b.assetShares).toNumber();
         const debt = wrappedI80F48toBigNumber(b.liabilityShares).toNumber();
         if (shares != 0) {
-          const bankAcc = await program.account.bank.fetch(bankKey);
-          const config = bankAcc.config;
-          expectedValue =
-            shares *
-            wrappedI80F48toBigNumber(bankAcc.assetShareValue).toNumber() *
-            wrappedI80F48toBigNumber(config.assetWeightInit).toNumber();
           console.log(
-            " [" + i + "] (asset): " + shares + " of " + bankKey.toString()
+            " [" + i + "] (asset): " + shares + " of " + b.bankPk.toString()
           );
-          // Note: Multiply this by the asset price, e.g. for Token A this is $10
           console.log("  exp value/price: " + expectedValue);
         }
         if (debt != 0) {
-          const bankAcc = await program.account.bank.fetch(bankKey);
-          const config = bankAcc.config;
-          expectedDebt =
-            debt *
-            wrappedI80F48toBigNumber(bankAcc.liabilityShareValue).toNumber() *
-            wrappedI80F48toBigNumber(config.liabilityWeightInit).toNumber();
           console.log(
-            " [" + i + "] (debt):  " + debt + " in " + bankKey.toString()
+            " [" + i + "] (debt):  " + debt + " in " + b.bankPk.toString()
           );
-          // Note: Multiply this by the asset price, e.g. for Token A this is $1
           console.log("  exp value/price: " + expectedDebt);
         }
       }
@@ -309,40 +319,50 @@ describe("Health pulse", () => {
 
     const assetValue = wrappedI80F48toBigNumber(cacheAfter.assetValue);
     const liabValue = wrappedI80F48toBigNumber(cacheAfter.liabilityValue);
-    let expectedValue: number;
-    let expectedDebt: number;
+    let expectedValue: number = 0;
+    let expectedDebt: number = 0;
+
+    // Calculate expectedValue and expectedDebt from account balances
+    const bals = accAfter.lendingAccount.balances;
+    for (let i = 0; i < bals.length; i++) {
+      const b = bals[i];
+      const bankKey = b.bankPk;
+      const shares = wrappedI80F48toBigNumber(b.assetShares).toNumber();
+      const debt = wrappedI80F48toBigNumber(b.liabilityShares).toNumber();
+      if (shares != 0) {
+        const bankAcc = await program.account.bank.fetch(bankKey);
+        const config = bankAcc.config;
+        expectedValue =
+          shares *
+          wrappedI80F48toBigNumber(bankAcc.assetShareValue).toNumber() *
+          wrappedI80F48toBigNumber(config.assetWeightInit).toNumber();
+      }
+      if (debt != 0) {
+        const bankAcc = await program.account.bank.fetch(bankKey);
+        const config = bankAcc.config;
+        expectedDebt =
+          debt *
+          wrappedI80F48toBigNumber(bankAcc.liabilityShareValue).toNumber() *
+          wrappedI80F48toBigNumber(config.liabilityWeightInit).toNumber();
+      }
+    }
+
     if (verbose) {
       console.log("---user balances state---");
-      const bals = accAfter.lendingAccount.balances;
       for (let i = 0; i < bals.length; i++) {
         const b = bals[i];
-        const bankKey = b.bankPk;
         const shares = wrappedI80F48toBigNumber(b.assetShares).toNumber();
         const debt = wrappedI80F48toBigNumber(b.liabilityShares).toNumber();
         if (shares != 0) {
-          const bankAcc = await program.account.bank.fetch(bankKey);
-          const config = bankAcc.config;
-          expectedValue =
-            shares *
-            wrappedI80F48toBigNumber(bankAcc.assetShareValue).toNumber() *
-            wrappedI80F48toBigNumber(config.assetWeightInit).toNumber();
           console.log(
-            " [" + i + "] (asset): " + shares + " of " + bankKey.toString()
+            " [" + i + "] (asset): " + shares + " of " + b.bankPk.toString()
           );
-          // Note: Multiply this by the asset price, e.g. for Token A this is $10
           console.log("  exp value/price: " + expectedValue);
         }
         if (debt != 0) {
-          const bankAcc = await program.account.bank.fetch(bankKey);
-          const config = bankAcc.config;
-          expectedDebt =
-            debt *
-            wrappedI80F48toBigNumber(bankAcc.liabilityShareValue).toNumber() *
-            wrappedI80F48toBigNumber(config.liabilityWeightInit).toNumber();
           console.log(
-            " [" + i + "] (debt):  " + debt + " in " + bankKey.toString()
+            " [" + i + "] (debt):  " + debt + " in " + b.bankPk.toString()
           );
-          // Note: Multiply this by the asset price, e.g. for Token A this is $1
           console.log("  exp value/price: " + expectedDebt);
         }
       }

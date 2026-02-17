@@ -77,7 +77,7 @@ import {
 export const ecosystem: Ecosystem = getGenericEcosystem();
 export let oracles: Oracles = undefined;
 /** Show various information about accounts and tests */
-export const verbose = true;
+export const verbose = false;
 /** Show the raw buffer printout of various structs */
 export const printBuffers = false;
 /** The program owner is also the provider wallet */
@@ -92,6 +92,7 @@ export let validatorAdmin: MockUser = undefined;
 export let riskAdmin: MockUser = undefined;
 export const users: MockUser[] = [];
 export const numUsers = 4;
+export const juplendAccounts: Map<string, PublicKey> = new Map();
 
 export const validators: Validator[] = [];
 export const numValidators = 2;
@@ -433,6 +434,23 @@ const extraPrograms: AddedProgram[] = [
   {
     name: "solend",
     programId: new PublicKey("So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"),
+  },
+  // JupLend (Fluid) programs
+  {
+    name: "juplend_lending",
+    programId: new PublicKey("jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9"),
+  },
+  {
+    name: "juplend_liquidity",
+    programId: new PublicKey("jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC"),
+  },
+  {
+    name: "juplend_rewards_rate_model",
+    programId: new PublicKey("jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar"),
+  },
+  {
+    name: "token_metadata",
+    programId: new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"),
   },
 ];
 
