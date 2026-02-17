@@ -12,8 +12,8 @@ use marginfi_type_crate::{
 /// Used to configure JupLend banks. A simplified version of `BankConfigCompact` which omits most
 /// values related to interest since JupLend banks cannot earn interest or be borrowed against.
 ///
-/// Note: JupLend banks always start in `Paused` state and can only be set to `Operational`
-/// via `juplend_init_position` (seed deposit + fToken ATA).
+/// Note: JupLend banks do not take an Operational State, they always start in `Paused` state and
+/// are set to `Operational` via `juplend_init_position` (seed deposit + protocol fToken vault).
 #[derive(AnchorDeserialize, AnchorSerialize, Debug, PartialEq, Eq)]
 pub struct JuplendConfigCompact {
     pub oracle: Pubkey,
@@ -22,11 +22,13 @@ pub struct JuplendConfigCompact {
     pub deposit_limit: u64,
     /// Either `JuplendPythPull` or `JuplendSwitchboardPull`
     pub oracle_setup: OracleSetup,
-    /// Risk tier - determines if assets can be borrowed in isolation
+    /// Isolated or Collateral
     pub risk_tier: RiskTier,
-    /// Config flags for future-proofing
+    /// Config flags for future-proofing, currently ignored
     pub config_flags: u8,
+    /// In $
     pub total_asset_value_init_limit: u64,
+    /// In seconds
     pub oracle_max_age: u16,
     /// Oracle confidence threshold (0 = use default 10%)
     pub oracle_max_confidence: u32,

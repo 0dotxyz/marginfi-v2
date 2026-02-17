@@ -11,11 +11,12 @@ use crate::{
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
-use anchor_spl::{associated_token::AssociatedToken, token_interface::*};
+use anchor_spl::associated_token::get_associated_token_address_with_program_id;
+use anchor_spl::token_interface::*;
 use juplend_mocks::state::Lending as JuplendLending;
 use marginfi_type_crate::constants::{
     FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED,
-    LIQUIDITY_VAULT_AUTHORITY_SEED,
+    LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
 };
 use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 
@@ -56,11 +57,7 @@ pub fn lending_pool_add_bank_juplend(
 
     let config = bank_config.to_bank_config(lending_key);
 
-    // liquidity_vault is an ATA (not a PDA of this program), so no bump to store.
-    // The Fluid liquidity program's `Operate` instruction enforces `associated_token::`
-    // constraints on `withdraw_to_account`, requiring it to be the canonical ATA of
-    // liquidity_vault_authority. Using a PDA here would break withdrawals.
-    let liquidity_vault_bump = 0u8;
+    let liquidity_vault_bump = ctx.bumps.liquidity_vault;
     let liquidity_vault_authority_bump = ctx.bumps.liquidity_vault_authority;
     let insurance_vault_bump = ctx.bumps.insurance_vault;
     let insurance_vault_authority_bump = ctx.bumps.insurance_vault_authority;
@@ -85,8 +82,15 @@ pub fn lending_pool_add_bank_juplend(
     );
 
     // Set JupLend-specific fields
+    // - integration_acc_2: protocol fToken vault (PDA token account)
+    // - integration_acc_3: withdraw intermediary ATA expected by JupLend's withdraw constraints
     bank.integration_acc_1 = lending_key;
     bank.integration_acc_2 = f_token_vault_key;
+    bank.integration_acc_3 = get_associated_token_address_with_program_id(
+        &ctx.accounts.liquidity_vault_authority.key(),
+        &bank_mint.key(),
+        &ctx.accounts.token_program.key(),
+    );
 
     log_pool_info(&bank);
 
@@ -156,19 +160,19 @@ pub struct LendingPoolAddBankJuplend<'info> {
     )]
     pub liquidity_vault_authority: SystemAccount<'info>,
 
-    /// For JupLend banks, the `liquidity_vault` is the ATA of `liquidity_vault_authority`.
-    ///
-    /// Unlike Drift/Kamino (which use seed-derived PDA vaults), JupLend requires this to be an
-    /// ATA because the Fluid liquidity program's `Operate` instruction enforces
-    /// `associated_token::authority = withdraw_to` on the withdrawal destination account.
-    /// During withdrawals, `withdraw_to` = `liquidity_vault_authority`, so this account must
-    /// match `ATA(liquidity_vault_authority, bank_mint)`.
+    /// For JupLend banks, the `liquidity_vault` is used as an intermediary when depositing/
+    /// withdrawing, e.g., withdrawn funds move from JupLend -> here -> the user's token account.
     #[account(
         init,
         payer = fee_payer,
-        associated_token::mint = bank_mint,
-        associated_token::authority = liquidity_vault_authority,
-        associated_token::token_program = token_program,
+        seeds = [
+            LIQUIDITY_VAULT_SEED.as_bytes(),
+            bank.key().as_ref(),
+        ],
+        bump,
+        token::mint = bank_mint,
+        token::authority = liquidity_vault_authority,
+        token::token_program = token_program,
     )]
     pub liquidity_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
@@ -222,8 +226,6 @@ pub struct LendingPoolAddBankJuplend<'info> {
 
     /// The bank's fToken vault holds the fTokens received when depositing into JupLend.
     ///
-    /// NOTE: JupLend creates fToken mints using the same token program as the underlying mint,
-    /// so for Token-2022 underlying mints, fToken mints are also Token-2022.
     #[account(
         init,
         payer = fee_payer,
@@ -234,12 +236,12 @@ pub struct LendingPoolAddBankJuplend<'info> {
         bump,
         token::mint = f_token_mint,
         token::authority = liquidity_vault_authority,
+        token::token_program = token_program,
     )]
     pub integration_acc_2: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Token program for both underlying mint and fToken mint (SPL Token or Token-2022).
     /// JupLend creates fToken mints using the same token program as the underlying.
     pub token_program: Interface<'info, TokenInterface>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }

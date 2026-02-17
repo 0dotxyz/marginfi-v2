@@ -39,7 +39,7 @@ import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { assert } from "chai";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { blankBankConfigOptRaw } from "./utils/types";
-
+import { dummyIx } from "./utils/bankrunConnection";
 
 const RATE_LIMIT_ACCOUNT = "rate_limit_account";
 const WITHDRAW_ACCOUNT = "withdraw_account";
@@ -62,7 +62,6 @@ let rateLimitAccount: PublicKey | null = null;
 let withdrawAccount: PublicKey | null = null;
 let rateLimitUser: MockUser;
 
-
 describe("Rate limiter", () => {
   before(async () => {
     program = bankrunProgram;
@@ -83,9 +82,9 @@ describe("Rate limiter", () => {
             marginfiAccount: accountKeypair.publicKey,
             authority: rateLimitUser.wallet.publicKey,
             feePayer: rateLimitUser.wallet.publicKey,
-          })
+          }),
         ),
-        [accountKeypair]
+        [accountKeypair],
       );
     } else {
       const existing = rateLimitUser.accounts.get(RATE_LIMIT_ACCOUNT);
@@ -106,9 +105,9 @@ describe("Rate limiter", () => {
             marginfiAccount: accountKeypair.publicKey,
             authority: rateLimitUser.wallet.publicKey,
             feePayer: rateLimitUser.wallet.publicKey,
-          })
+          }),
         ),
-        [accountKeypair]
+        [accountKeypair],
       );
     } else {
       const existing = rateLimitUser.accounts.get(WITHDRAW_ACCOUNT);
@@ -134,8 +133,8 @@ describe("Rate limiter", () => {
         await configureBank(groupAdmin.mrgnProgram, {
           bank: bankKeypairA.publicKey,
           bankConfigOpt: tokenACapConfig,
-        })
-      )
+        }),
+      ),
     );
 
     // Deposit Token A collateral to rate limit account (for borrow tests)
@@ -147,8 +146,8 @@ describe("Rate limiter", () => {
           tokenAccount: rateLimitUser.tokenAAccount,
           amount: tokenANative(5),
           depositUpToLimit: false,
-        })
-      )
+        }),
+      ),
     );
 
     // Deposit USDC collateral to withdraw account (for withdraw tests)
@@ -160,8 +159,8 @@ describe("Rate limiter", () => {
           tokenAccount: rateLimitUser.usdcAccount,
           amount: usdcNative(20),
           depositUpToLimit: false,
-        })
-      )
+        }),
+      ),
     );
   });
 
@@ -188,14 +187,15 @@ describe("Rate limiter", () => {
     const prog = userProgram();
     await prog.provider.sendAndConfirm(
       new Transaction().add(
+        dummyIx(prog.provider.publicKey, users[0].wallet.publicKey),
         await borrowIx(prog, {
           marginfiAccount: requireRateLimitAccount(),
           bank: bankKeypairUsdc.publicKey,
           tokenAccount: rateLimitUser.usdcAccount,
           remaining: usdcRemainingAccounts(),
           amount,
-        })
-      )
+        }),
+      ),
     );
   };
 
@@ -206,14 +206,15 @@ describe("Rate limiter", () => {
     const prog = userProgram();
     await prog.provider.sendAndConfirm(
       new Transaction().add(
+        dummyIx(prog.provider.publicKey, users[0].wallet.publicKey),
         await repayIx(prog, {
           marginfiAccount: requireRateLimitAccount(),
           bank: bankKeypairUsdc.publicKey,
           tokenAccount: rateLimitUser.usdcAccount,
           remaining: usdcRemainingAccounts(),
           amount,
-        })
-      )
+        }),
+      ),
     );
   };
 
@@ -240,8 +241,8 @@ describe("Rate limiter", () => {
           marginfiGroup: marginfiGroup.publicKey,
           hourlyMaxOutflowUsd: args.groupHourly ?? null,
           dailyMaxOutflowUsd: args.groupDaily ?? null,
-        })
-      )
+        }),
+      ),
     );
   };
 
@@ -250,7 +251,7 @@ describe("Rate limiter", () => {
    */
   const advanceClock = async (
     seconds: number,
-    refreshOracles: boolean
+    refreshOracles: boolean,
   ): Promise<void> => {
     await advanceBankrunClock(bankrunContext, seconds);
 
@@ -258,7 +259,6 @@ describe("Rate limiter", () => {
       await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
     }
   };
-
 
   it("(admin) configures bank + group rate limits and partial updates preserve existing", async () => {
     // Initial configuration
@@ -278,7 +278,10 @@ describe("Rate limiter", () => {
     // Verify bank rate limiter configuration
     assertBNEqual(bank.rateLimiter.hourly.maxOutflow, usdcNative(50));
     assertBNEqual(bank.rateLimiter.daily.maxOutflow, usdcNative(100));
-    assertBNEqual(bank.rateLimiter.hourly.windowDuration, HOURLY_WINDOW_SECONDS);
+    assertBNEqual(
+      bank.rateLimiter.hourly.windowDuration,
+      HOURLY_WINDOW_SECONDS,
+    );
     assertBNEqual(bank.rateLimiter.daily.windowDuration, DAILY_WINDOW_SECONDS);
     assertBNApproximately(bank.rateLimiter.hourly.windowStart, now, 2);
     assertBNApproximately(bank.rateLimiter.daily.windowStart, now, 2);
@@ -288,7 +291,10 @@ describe("Rate limiter", () => {
     // Verify group rate limiter configuration
     assertBNEqual(group.rateLimiter.hourly.maxOutflow, 50);
     assertBNEqual(group.rateLimiter.daily.maxOutflow, 200);
-    assertBNEqual(group.rateLimiter.hourly.windowDuration, HOURLY_WINDOW_SECONDS);
+    assertBNEqual(
+      group.rateLimiter.hourly.windowDuration,
+      HOURLY_WINDOW_SECONDS,
+    );
     assertBNEqual(group.rateLimiter.daily.windowDuration, DAILY_WINDOW_SECONDS);
     assertBNApproximately(group.rateLimiter.hourly.windowStart, now, 2);
     assertBNApproximately(group.rateLimiter.daily.windowStart, now, 2);
@@ -327,11 +333,11 @@ describe("Rate limiter", () => {
     await borrowUsdc(bankHourlyLimit);
 
     const bankAfterBorrow = await program.account.bank.fetch(
-      bankKeypairUsdc.publicKey
+      bankKeypairUsdc.publicKey,
     );
     assertBNEqual(
       bankAfterBorrow.rateLimiter.hourly.curWindowOutflow,
-      bankHourlyLimit
+      bankHourlyLimit,
     );
 
     await expectFailedTxWithMessage(async () => {
@@ -355,8 +361,8 @@ describe("Rate limiter", () => {
           tokenAccount: rateLimitUser.usdcAccount,
           remaining: usdcOnlyRemainingAccounts(),
           amount: usdcNative(1),
-        })
-      )
+        }),
+      ),
     );
 
     await expectFailedTxWithMessage(async () => {
@@ -368,8 +374,8 @@ describe("Rate limiter", () => {
             tokenAccount: rateLimitUser.usdcAccount,
             remaining: usdcOnlyRemainingAccounts(),
             amount: usdcNative(2),
-          })
-        )
+          }),
+        ),
       );
     }, "Bank hourly rate limit exceeded");
   });
@@ -386,7 +392,9 @@ describe("Rate limiter", () => {
     // Borrow 15 USDC at $1 = 15 USD outflow
     await borrowUsdc(usdcNative(15));
 
-    const groupAfterBorrow = await program.account.marginfiGroup.fetch(marginfiGroup.publicKey);
+    const groupAfterBorrow = await program.account.marginfiGroup.fetch(
+      marginfiGroup.publicKey,
+    );
     assertBNEqual(groupAfterBorrow.rateLimiter.hourly.curWindowOutflow, 15);
 
     // Try to borrow 10 more - should fail (15 + 10 = 25 > 20 limit)
@@ -395,19 +403,23 @@ describe("Rate limiter", () => {
         await borrowUsdc(usdcNative(10));
       },
       "GroupHourlyRateLimitExceeded",
-      6117
+      6117,
     );
 
     // Repay 5 USDC at $1 = 5 USD inflow, reducing net outflow to 10
     await repayUsdc(usdcNative(5));
 
-    const groupAfterRepay = await program.account.marginfiGroup.fetch(marginfiGroup.publicKey);
+    const groupAfterRepay = await program.account.marginfiGroup.fetch(
+      marginfiGroup.publicKey,
+    );
     assertBNEqual(groupAfterRepay.rateLimiter.hourly.curWindowOutflow, 10);
 
     // Now borrow 5 more should succeed (10 + 5 = 15 < 20 limit)
     await borrowUsdc(usdcNative(5));
 
-    const groupFinal = await program.account.marginfiGroup.fetch(marginfiGroup.publicKey);
+    const groupFinal = await program.account.marginfiGroup.fetch(
+      marginfiGroup.publicKey,
+    );
     assertBNEqual(groupFinal.rateLimiter.hourly.curWindowOutflow, 15);
   });
 
@@ -424,12 +436,9 @@ describe("Rate limiter", () => {
     await borrowUsdc(bankDailyLimit);
 
     const bankAfter = await program.account.bank.fetch(
-      bankKeypairUsdc.publicKey
+      bankKeypairUsdc.publicKey,
     );
-    assertBNEqual(
-      bankAfter.rateLimiter.daily.curWindowOutflow,
-      bankDailyLimit
-    );
+    assertBNEqual(bankAfter.rateLimiter.daily.curWindowOutflow, bankDailyLimit);
 
     await expectFailedTxWithMessage(async () => {
       await borrowUsdc(usdcNative(1));
@@ -448,7 +457,9 @@ describe("Rate limiter", () => {
     // Borrow 10 USDC at $1 = 10 USD outflow (exactly at limit)
     await borrowUsdc(usdcNative(10));
 
-    const groupAfter = await program.account.marginfiGroup.fetch(marginfiGroup.publicKey);
+    const groupAfter = await program.account.marginfiGroup.fetch(
+      marginfiGroup.publicKey,
+    );
     assertBNEqual(groupAfter.rateLimiter.daily.curWindowOutflow, 10);
 
     // Try to borrow 5 more - should fail (10 + 5 = 15 > 10 limit)
@@ -474,8 +485,8 @@ describe("Rate limiter", () => {
           tokenAccount: rateLimitUser.usdcAccount,
           amount: usdcNative(1),
           depositUpToLimit: false,
-        })
-      )
+        }),
+      ),
     );
 
     // Withdraw 2 USDC (outflow)
@@ -487,8 +498,8 @@ describe("Rate limiter", () => {
           tokenAccount: rateLimitUser.usdcAccount,
           remaining: usdcOnlyRemainingAccounts(),
           amount: usdcNative(2),
-        })
-      )
+        }),
+      ),
     );
 
     const bank = await program.account.bank.fetch(bankKeypairUsdc.publicKey);
@@ -540,28 +551,41 @@ describe("Rate limiter", () => {
           group: marginfiGroup.publicKey,
           bank: bankKeypairUsdc.publicKey,
           remaining: [oracles.usdcOracle.publicKey],
-        })
-      )
+        }),
+      ),
     );
 
     // Verify bank has a valid cached price
-    const bankAfterPulse = await program.account.bank.fetch(bankKeypairUsdc.publicKey);
-    const cachedPrice = wrappedI80F48toBigNumber(bankAfterPulse.cache.lastOraclePrice).toNumber();
-    assert.ok(cachedPrice > 0, "Bank should have a valid cached price after pulse");
+    const bankAfterPulse = await program.account.bank.fetch(
+      bankKeypairUsdc.publicKey,
+    );
+    const cachedPrice = wrappedI80F48toBigNumber(
+      bankAfterPulse.cache.lastOraclePrice,
+    ).toNumber();
+    assert.ok(
+      cachedPrice > 0,
+      "Bank should have a valid cached price after pulse",
+    );
 
     await borrowUsdc(usdcNative(1));
 
-    const groupAfterBorrow = await program.account.marginfiGroup.fetch(marginfiGroup.publicKey);
+    const groupAfterBorrow = await program.account.marginfiGroup.fetch(
+      marginfiGroup.publicKey,
+    );
     assertBNEqual(groupAfterBorrow.rateLimiter.hourly.curWindowOutflow, 1);
 
     await repayUsdc(usdcNative(1));
 
     // Verify: inflow was applied directly (not tracked as untracked)
-    const bankAfterRepay = await program.account.bank.fetch(bankKeypairUsdc.publicKey);
+    const bankAfterRepay = await program.account.bank.fetch(
+      bankKeypairUsdc.publicKey,
+    );
     assertBNEqual(bankAfterRepay.rateLimiter.untrackedInflow, 0);
 
     // Verify: net outflow = 0 (borrow 1, repay 1)
-    const groupAfterRepay = await program.account.marginfiGroup.fetch(marginfiGroup.publicKey);
+    const groupAfterRepay = await program.account.marginfiGroup.fetch(
+      marginfiGroup.publicKey,
+    );
     assertBNEqual(groupAfterRepay.rateLimiter.hourly.curWindowOutflow, 0);
   });
 
@@ -580,24 +604,36 @@ describe("Rate limiter", () => {
           group: marginfiGroup.publicKey,
           bank: bankKeypairUsdc.publicKey,
           remaining: [oracles.usdcOracle.publicKey],
-        })
-      )
+        }),
+      ),
     );
 
-    const groupBefore = await program.account.marginfiGroup.fetch(marginfiGroup.publicKey);
-    const outflowBefore = groupBefore.rateLimiter.hourly.curWindowOutflow.toNumber();
+    const groupBefore = await program.account.marginfiGroup.fetch(
+      marginfiGroup.publicKey,
+    );
+    const outflowBefore =
+      groupBefore.rateLimiter.hourly.curWindowOutflow.toNumber();
 
     // Advance clock past oracle max age (makes cached price stale)
-    const bankBefore = await program.account.bank.fetch(bankKeypairUsdc.publicKey);
+    const bankBefore = await program.account.bank.fetch(
+      bankKeypairUsdc.publicKey,
+    );
     await advanceClock(bankBefore.config.oracleMaxAge + 1, false);
 
     await repayUsdc(usdcNative(1));
 
-    const bankAfterRepay = await program.account.bank.fetch(bankKeypairUsdc.publicKey);
+    const bankAfterRepay = await program.account.bank.fetch(
+      bankKeypairUsdc.publicKey,
+    );
     assertBNEqual(bankAfterRepay.rateLimiter.untrackedInflow, usdcNative(1));
 
-    const groupAfterRepay = await program.account.marginfiGroup.fetch(marginfiGroup.publicKey);
-    assertBNEqual(groupAfterRepay.rateLimiter.hourly.curWindowOutflow, outflowBefore);
+    const groupAfterRepay = await program.account.marginfiGroup.fetch(
+      marginfiGroup.publicKey,
+    );
+    assertBNEqual(
+      groupAfterRepay.rateLimiter.hourly.curWindowOutflow,
+      outflowBefore,
+    );
 
     // Refresh oracles and pulse bank to apply untracked inflows
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
@@ -607,17 +643,24 @@ describe("Rate limiter", () => {
           group: marginfiGroup.publicKey,
           bank: bankKeypairUsdc.publicKey,
           remaining: [oracles.usdcOracle.publicKey],
-        })
-      )
+        }),
+      ),
     );
 
     // Untracked inflow should be applied (reset to 0)
-    const bankAfterPulse = await program.account.bank.fetch(bankKeypairUsdc.publicKey);
+    const bankAfterPulse = await program.account.bank.fetch(
+      bankKeypairUsdc.publicKey,
+    );
     assertBNEqual(bankAfterPulse.rateLimiter.untrackedInflow, 0);
 
     // Group outflow reduced by 1 USD (1 USDC at $1)
-    const groupAfterPulse = await program.account.marginfiGroup.fetch(marginfiGroup.publicKey);
-    assertBNEqual(groupAfterPulse.rateLimiter.hourly.curWindowOutflow, outflowBefore - 1);
+    const groupAfterPulse = await program.account.marginfiGroup.fetch(
+      marginfiGroup.publicKey,
+    );
+    assertBNEqual(
+      groupAfterPulse.rateLimiter.hourly.curWindowOutflow,
+      outflowBefore - 1,
+    );
   });
 
   it("(user 2) hourly window decays and resets", async () => {
@@ -650,11 +693,11 @@ describe("Rate limiter", () => {
     await borrowUsdc(bankHourlyLimit);
 
     const bankAfter = await program.account.bank.fetch(
-      bankKeypairUsdc.publicKey
+      bankKeypairUsdc.publicKey,
     );
     assertBNEqual(
       bankAfter.rateLimiter.hourly.curWindowOutflow,
-      bankHourlyLimit
+      bankHourlyLimit,
     );
     assertBNEqual(bankAfter.rateLimiter.hourly.prevWindowOutflow, 0);
   });
@@ -704,14 +747,14 @@ describe("Rate limiter", () => {
       .instruction();
 
     await prog.provider.sendAndConfirm(
-      new Transaction().add(startIx, borrowIxLocal, endIx)
+      new Transaction().add(startIx, borrowIxLocal, endIx),
     );
 
     const bank = await program.account.bank.fetch(bankKeypairUsdc.publicKey);
     assert.ok(
       bank.rateLimiter.hourly.curWindowOutflow.toNumber() <=
         bankHourlyLimit.toNumber() * 10,
-      "Rate limiter should not have excessive outflow after flashloan"
+      "Rate limiter should not have excessive outflow after flashloan",
     );
   });
 });

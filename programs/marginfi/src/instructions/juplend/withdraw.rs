@@ -26,10 +26,15 @@ use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use juplend_mocks::juplend_earn::cpi::accounts::{UpdateRate, Withdraw as WithdrawCpi};
 use juplend_mocks::juplend_earn::cpi::{update_rate, withdraw as cpi_withdraw};
-use juplend_mocks::state::Lending as JuplendLending;
-use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
+use juplend_mocks::state::{
+    expected_assets_for_redeem_from_rate, expected_shares_for_withdraw_from_rate,
+    Lending as JuplendLending,
+};
 use marginfi_type_crate::types::{
     Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+};
+use marginfi_type_crate::{
+    constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_IN_DELEVERAGE,
 };
 
 /// Withdraw underlying tokens from a JupLend lending pool through a marginfi account.
@@ -38,9 +43,9 @@ use marginfi_type_crate::types::{
 /// 1. CPI `update_rate` to refresh `token_exchange_price`.
 /// 2. Compute expected fTokens burned: `ceil(assets * 1e12 / token_exchange_price)`.
 /// 3. Call `bank_account.withdraw()` for the expected burned shares.
-/// 4. CPI `withdraw` (burn fTokens, receive underlying into liquidity vault).
+/// 4. CPI `withdraw` (burn fTokens, receive underlying into withdraw intermediary ATA).
 /// 5. Verify received underlying == requested and burned fTokens == expected.
-/// 6. Transfer underlying from liquidity vault -> destination token account.
+/// 6. Transfer underlying from withdraw intermediary ATA -> destination token account.
 /// 7. Update health cache (unless receivership).
 pub fn juplend_withdraw<'info>(
     ctx: Context<'_, '_, 'info, 'info, JuplendWithdraw<'info>>,
@@ -71,6 +76,7 @@ pub fn juplend_withdraw<'info>(
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut group = ctx.accounts.group.load_mut()?;
+        let lending = ctx.accounts.integration_acc_1.load()?;
 
         authority_bump = bank.liquidity_vault_authority_bump;
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
@@ -103,32 +109,33 @@ pub fn juplend_withdraw<'info>(
 
         let (token_amount, shares_to_burn) = if withdraw_all {
             // `withdraw_all` returns the user's full fToken share balance (u64).
-            let total_shares = bank_account.withdraw_all()?;
+            let f_tokens_balance = bank_account.withdraw_all()?;
             // Redeemable underlying = floor(shares * price / 1e12)
             // Then recalculate shares_to_burn from token_amount to guarantee we match
             // JupLend's expected burn amount (should be identical, but this is safer).
             let (token_amount, shares_to_burn) = {
-                let lending = ctx.accounts.integration_acc_1.load()?;
-                let token_amount = lending
-                    .expected_assets_for_redeem(total_shares)
-                    .map_err(|_| error!(MarginfiError::MathError))?;
-                let shares_to_burn = lending
-                    .expected_shares_for_withdraw(token_amount)
-                    .map_err(|_| error!(MarginfiError::MathError))?;
+                let token_amount = expected_assets_for_redeem_from_rate(
+                    f_tokens_balance,
+                    lending.token_exchange_price,
+                )
+                .ok_or_else(|| error!(MarginfiError::MathError))?;
+                let shares_to_burn = expected_shares_for_withdraw_from_rate(
+                    token_amount,
+                    lending.token_exchange_price,
+                )
+                .ok_or_else(|| error!(MarginfiError::MathError))?;
                 (token_amount, shares_to_burn)
             };
 
             // Sanity check: recalculated shares should never exceed what we have
-            require!(shares_to_burn <= total_shares, MarginfiError::MathError);
+            require!(shares_to_burn <= f_tokens_balance, MarginfiError::MathError);
 
             (token_amount, shares_to_burn)
         } else {
             // shares = ceil(assets * 1e12 / token_exchange_price)
             let shares_to_burn = {
-                let lending = ctx.accounts.integration_acc_1.load()?;
-                lending
-                    .expected_shares_for_withdraw(amount)
-                    .map_err(|_| error!(MarginfiError::MathError))?
+                expected_shares_for_withdraw_from_rate(amount, lending.token_exchange_price)
+                    .ok_or_else(|| error!(MarginfiError::MathError))?
             };
 
             bank_account.withdraw(I80F48::from_num(shares_to_burn))?;
@@ -137,7 +144,7 @@ pub fn juplend_withdraw<'info>(
         };
 
         // Track withdrawal limit for risk admin during deleverage.
-        if ctx.accounts.authority.key() == group.risk_admin {
+        if marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE) {
             let withdrawn_equity = calc_value(
                 I80F48::from_num(shares_to_burn),
                 price,
@@ -151,8 +158,8 @@ pub fn juplend_withdraw<'info>(
     };
 
     // Record balances to verify exact deltas.
-    let pre_liquidity_vault_balance =
-        accessor::amount(&ctx.accounts.liquidity_vault.to_account_info())?;
+    let pre_withdraw_intermediary_ata_balance =
+        accessor::amount(&ctx.accounts.integration_acc_3.to_account_info())?;
     let pre_f_token_balance = accessor::amount(&ctx.accounts.integration_acc_2.to_account_info())?;
 
     // Handle potential dust case where remaining shares are worth less than 1 underlying unit.
@@ -180,17 +187,17 @@ pub fn juplend_withdraw<'info>(
     let received_underlying = if withdraw_all && token_amount == 0 {
         0
     } else {
-        // CPI withdraw: burns fTokens and credits underlying into liquidity vault.
+        // CPI withdraw: burns fTokens and credits underlying into withdraw intermediary ATA.
         ctx.accounts
             .cpi_juplend_withdraw(token_amount, authority_bump)?;
 
-        let post_liquidity_vault_balance =
-            accessor::amount(&ctx.accounts.liquidity_vault.to_account_info())?;
+        let post_withdraw_intermediary_ata_balance =
+            accessor::amount(&ctx.accounts.integration_acc_3.to_account_info())?;
         let post_f_token_balance =
             accessor::amount(&ctx.accounts.integration_acc_2.to_account_info())?;
 
-        let received_underlying = post_liquidity_vault_balance
-            .checked_sub(pre_liquidity_vault_balance)
+        let received_underlying = post_withdraw_intermediary_ata_balance
+            .checked_sub(pre_withdraw_intermediary_ata_balance)
             .ok_or_else(|| error!(MarginfiError::MathError))?;
         require_eq!(
             received_underlying,
@@ -207,9 +214,12 @@ pub fn juplend_withdraw<'info>(
             MarginfiError::JuplendWithdrawFailed
         );
 
-        // Transfer underlying from liquidity vault -> destination.
+        // Transfer underlying from withdraw intermediary ATA -> destination.
         ctx.accounts
-            .cpi_transfer_liquidity_vault_to_destination(received_underlying, authority_bump)?;
+            .cpi_transfer_withdraw_intermediary_ata_to_destination(
+                received_underlying,
+                authority_bump,
+            )?;
 
         received_underlying
     };
@@ -312,9 +322,9 @@ pub struct JuplendWithdraw<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
         has_one = integration_acc_1 @ MarginfiError::InvalidJuplendLending,
         has_one = integration_acc_2 @ MarginfiError::InvalidJuplendFTokenVault,
+        has_one = integration_acc_3 @ MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
         has_one = mint @ MarginfiError::InvalidMint,
         constraint = is_juplend_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongBankAssetTagForJuplendOperation,
@@ -345,10 +355,6 @@ pub struct JuplendWithdraw<'info> {
     )]
     pub liquidity_vault_authority: SystemAccount<'info>,
 
-    /// Bank liquidity vault (receives underlying from JupLend withdraw).
-    #[account(mut)]
-    pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
-
     /// Underlying mint.
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
@@ -363,6 +369,16 @@ pub struct JuplendWithdraw<'info> {
     /// Bank's fToken vault (validated via has_one on bank).
     #[account(mut)]
     pub integration_acc_2: InterfaceAccount<'info, TokenAccount>,
+
+    /// Withdraw intermediary ATA (authority = liquidity_vault_authority).
+    /// This must be an ATA to satisfy JupLend's withdraw constraints.
+    #[account(
+        mut,
+        token::mint = mint,
+        token::authority = liquidity_vault_authority,
+        token::token_program = token_program,
+    )]
+    pub integration_acc_3: InterfaceAccount<'info, TokenAccount>,
 
     // ---- JupLend CPI accounts ----
     /// CHECK: validated by the JupLend program
@@ -437,7 +453,7 @@ impl<'info> JuplendWithdraw<'info> {
         let accounts = WithdrawCpi {
             signer: self.liquidity_vault_authority.to_account_info(),
             owner_token_account: self.integration_acc_2.to_account_info(),
-            recipient_token_account: self.liquidity_vault.to_account_info(),
+            recipient_token_account: self.integration_acc_3.to_account_info(),
             lending_admin: self.lending_admin.to_account_info(),
             lending: self.integration_acc_1.to_account_info(),
             mint: self.mint.to_account_info(),
@@ -470,14 +486,14 @@ impl<'info> JuplendWithdraw<'info> {
         Ok(())
     }
 
-    pub fn cpi_transfer_liquidity_vault_to_destination(
+    pub fn cpi_transfer_withdraw_intermediary_ata_to_destination(
         &self,
         amount: u64,
         authority_bump: u8,
     ) -> MarginfiResult {
         let program = self.token_program.to_account_info();
         let accounts = TransferChecked {
-            from: self.liquidity_vault.to_account_info(),
+            from: self.integration_acc_3.to_account_info(),
             to: self.destination_token_account.to_account_info(),
             authority: self.liquidity_vault_authority.to_account_info(),
             mint: self.mint.to_account_info(),
@@ -488,5 +504,90 @@ impl<'info> JuplendWithdraw<'info> {
         let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
         transfer_checked(cpi_ctx, amount, self.mint.decimals)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shares_for_withdraw_price_eq_1e12() {
+        let shares = expected_shares_for_withdraw_from_rate(50_000_000, 1_000_000_000_000).unwrap();
+        assert_eq!(shares, 50_000_000);
+    }
+
+    #[test]
+    fn shares_for_withdraw_price_above_1e12_burns_less_shares() {
+        // ceil(100 * 1e12 / 1.1e12) = ceil(90.909...) = 91
+        let shares = expected_shares_for_withdraw_from_rate(100, 1_100_000_000_000).unwrap();
+        assert_eq!(shares, 91);
+        assert!(shares < 100);
+    }
+
+    #[test]
+    fn shares_for_withdraw_price_below_1e12_burns_more_shares() {
+        // ceil(100 * 1e12 / 0.9e12) = ceil(111.111...) = 112
+        let shares = expected_shares_for_withdraw_from_rate(100, 900_000_000_000).unwrap();
+        assert_eq!(shares, 112);
+        assert!(shares > 100);
+    }
+
+    #[test]
+    fn shares_for_withdraw_price_zero_errors() {
+        assert!(expected_shares_for_withdraw_from_rate(1, 0).is_none());
+    }
+
+    #[test]
+    fn shares_for_withdraw_non_divisible_rounds_up() {
+        // ceil(7 * 1e12 / 3e12) = ceil(2.333...) = 3
+        let shares = expected_shares_for_withdraw_from_rate(7, 3_000_000_000_000).unwrap();
+        assert_eq!(shares, 3);
+    }
+
+    #[test]
+    fn shares_for_withdraw_tiny_amount_burns_min_one_share() {
+        // ceil(1 * 1e12 / 4e12) = ceil(0.25) = 1
+        let shares = expected_shares_for_withdraw_from_rate(1, 4_000_000_000_000).unwrap();
+        assert_eq!(shares, 1);
+    }
+
+    #[test]
+    fn assets_for_redeem_price_eq_1e12() {
+        let assets = expected_assets_for_redeem_from_rate(50_000_000, 1_000_000_000_000).unwrap();
+        assert_eq!(assets, 50_000_000);
+    }
+
+    #[test]
+    fn assets_for_redeem_price_above_1e12_returns_more_assets() {
+        // floor(100 * 1.1e12 / 1e12) = floor(110) = 110
+        let assets = expected_assets_for_redeem_from_rate(100, 1_100_000_000_000).unwrap();
+        assert_eq!(assets, 110);
+    }
+
+    #[test]
+    fn assets_for_redeem_price_below_1e12_returns_less_assets() {
+        // floor(100 * 0.9e12 / 1e12) = floor(90) = 90
+        let assets = expected_assets_for_redeem_from_rate(100, 900_000_000_000).unwrap();
+        assert_eq!(assets, 90);
+    }
+
+    #[test]
+    fn assets_for_redeem_price_zero_errors() {
+        assert!(expected_assets_for_redeem_from_rate(1, 0).is_none());
+    }
+
+    #[test]
+    fn assets_for_redeem_non_divisible_rounds_down() {
+        // floor(5 * 1_300_000_000_001 / 1e12) = floor(6.500000000005) = 6
+        let assets = expected_assets_for_redeem_from_rate(5, 1_300_000_000_001).unwrap();
+        assert_eq!(assets, 6);
+    }
+
+    #[test]
+    fn assets_for_redeem_tiny_position_can_floor_to_zero() {
+        // floor(1 * 0.5e12 / 1e12) = floor(0.5) = 0
+        let assets = expected_assets_for_redeem_from_rate(1, 500_000_000_000).unwrap();
+        assert_eq!(assets, 0);
     }
 }

@@ -1,6 +1,7 @@
 mod add_pool;
 mod deposit;
 mod init_position;
+mod local_tests;
 mod withdraw;
 
 pub use add_pool::*;

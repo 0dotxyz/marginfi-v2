@@ -5,7 +5,9 @@ mod tests {
     use bytemuck::Zeroable;
     use fixed::types::I80F48;
     use kamino_mocks::state::{u68f60_to_i80f48, MinimalReserve};
-    use marginfi_type_crate::types::price::{adjust_i128, adjust_i64, adjust_u64};
+    use marginfi_type_crate::types::price::{
+        mul_i128_by_i80f48, mul_i64_by_i80f48, mul_u64_by_i80f48,
+    };
 
     const FRAC_BITS_DIFF: u32 = 60 - 48;
 
@@ -107,7 +109,7 @@ mod tests {
         let (total_liq, total_col) = bank.scaled_supplies().unwrap();
         let liq_to_col_ratio = total_liq.checked_div(total_col).unwrap();
 
-        let got = adjust_u64(42, liq_to_col_ratio).unwrap();
+        let got = mul_u64_by_i80f48(42, liq_to_col_ratio).unwrap();
         assert_eq!(got, 420);
     }
 
@@ -118,7 +120,7 @@ mod tests {
         let (total_liq, total_col) = bank.scaled_supplies().unwrap();
         let liq_to_col_ratio = total_liq.checked_div(total_col).unwrap();
 
-        let got = adjust_i64(42, liq_to_col_ratio).unwrap();
+        let got = mul_i64_by_i80f48(42, liq_to_col_ratio).unwrap();
         assert_eq!(got, 420);
     }
 
@@ -131,7 +133,7 @@ mod tests {
         const ONE_E18: i128 = 1_000_000_000_000_000_000;
         let raw = 42 * ONE_E18;
 
-        let got = adjust_i128(raw, liq_to_col_ratio).unwrap();
+        let got = mul_i128_by_i80f48(raw, liq_to_col_ratio).unwrap();
 
         let eps = i80f48_eps_bits(10_000_000, 1_000_000, 8);
         let k = (10_000_000u64 / 1_000_000u64) as i128; // = 10 for this fixture
@@ -146,13 +148,13 @@ mod tests {
         let (total_liq, total_col) = bank.scaled_supplies().unwrap();
         let liq_to_col_ratio = total_liq.checked_div(total_col).unwrap();
 
-        let res = adjust_u64(42, liq_to_col_ratio);
+        let res = mul_u64_by_i80f48(42, liq_to_col_ratio);
         assert!(res.is_some());
         assert_eq!(res.unwrap(), 42);
 
         // Note: 2^15 is the largest value that wouldn't overflow (2^80 / 2^64), i.e. I80's max
         // whole component when multiplied by u64 max (the max possibly supply in practice)
-        let res = adjust_u64(32768, liq_to_col_ratio);
+        let res = mul_u64_by_i80f48(32768, liq_to_col_ratio);
         assert!(res.is_some());
         assert_eq!(res.unwrap(), 32768);
 
@@ -161,7 +163,7 @@ mod tests {
         let (total_liq, total_col) = bank.scaled_supplies().unwrap();
         let liq_to_col_ratio = total_liq.checked_div(total_col).unwrap();
 
-        let res = adjust_u64(32_76_800_000_000, liq_to_col_ratio);
+        let res = mul_u64_by_i80f48(32_76_800_000_000, liq_to_col_ratio);
         assert!(res.is_some());
         assert_eq!(res.unwrap(), 32_76_800_000_000);
     }
@@ -172,11 +174,11 @@ mod tests {
         let (total_liq, total_col) = bank.scaled_supplies().unwrap();
         let liq_to_col_ratio = total_liq.checked_div(total_col).unwrap();
 
-        let res = adjust_i64(42, liq_to_col_ratio);
+        let res = mul_i64_by_i80f48(42, liq_to_col_ratio);
         assert!(res.is_some());
         assert_eq!(res.unwrap(), 42);
 
-        let res = adjust_i64(32768, liq_to_col_ratio);
+        let res = mul_i64_by_i80f48(32768, liq_to_col_ratio);
         assert!(res.is_some());
         assert_eq!(res.unwrap(), 32768);
 
@@ -184,7 +186,7 @@ mod tests {
         let (total_liq, total_col) = bank.scaled_supplies().unwrap();
         let liq_to_col_ratio = total_liq.checked_div(total_col).unwrap();
 
-        let res = adjust_i64(32_76_800_000_000, liq_to_col_ratio);
+        let res = mul_i64_by_i80f48(32_76_800_000_000, liq_to_col_ratio);
         assert!(res.is_some());
         assert_eq!(res.unwrap(), 32_76_800_000_000);
     }
@@ -195,7 +197,7 @@ mod tests {
         let (total_liq, total_col) = bank.scaled_supplies().unwrap();
         let liq_to_col_ratio = total_liq.checked_div(total_col).unwrap();
 
-        let res = adjust_i128(42_000_000_000_000_000_000i128, liq_to_col_ratio);
+        let res = mul_i128_by_i80f48(42_000_000_000_000_000_000i128, liq_to_col_ratio);
         assert!(res.is_some());
         assert_eq!(res.unwrap(), 42_000_000_000_000_000_000i128);
 
@@ -204,7 +206,7 @@ mod tests {
         let liq_to_col_ratio = total_liq.checked_div(total_col).unwrap();
 
         // Large Switchboard value with 18 decimals
-        let res = adjust_i128(32_768_000_000_000_000_000_000i128, liq_to_col_ratio);
+        let res = mul_i128_by_i80f48(32_768_000_000_000_000_000_000i128, liq_to_col_ratio);
         assert!(res.is_some());
         assert_eq!(res.unwrap(), 32_768_000_000_000_000_000_000i128);
     }
@@ -218,13 +220,13 @@ mod tests {
 
         let safe = largest_safe_raw_for_u64_exact(&bank);
         assert!(
-            adjust_u64(safe, liq_to_col_ratio).is_some(),
+            mul_u64_by_i80f48(safe, liq_to_col_ratio).is_some(),
             "largest safe raw should succeed"
         );
 
         let ovf = overflow_raw_for_u64_exact(&bank);
         assert!(
-            adjust_u64(ovf, liq_to_col_ratio).is_none(),
+            mul_u64_by_i80f48(ovf, liq_to_col_ratio).is_none(),
             "raw above threshold must overflow"
         );
     }
@@ -236,10 +238,10 @@ mod tests {
         let liq_to_col_ratio = total_liq.checked_div(total_col).unwrap();
 
         let safe = largest_safe_raw_for_i64_exact(&bank);
-        assert!(adjust_i64(safe, liq_to_col_ratio).is_some());
+        assert!(mul_i64_by_i80f48(safe, liq_to_col_ratio).is_some());
 
         let ovf = overflow_raw_for_i64_exact(&bank);
-        assert!(adjust_i64(ovf, liq_to_col_ratio).is_none());
+        assert!(mul_i64_by_i80f48(ovf, liq_to_col_ratio).is_none());
     }
 
     #[test]
@@ -247,7 +249,7 @@ mod tests {
         let bank = generic_reserve(200_000_000, 8, 1_000_000);
         let (total_liq, total_col) = bank.scaled_supplies().unwrap();
         let liq_to_col_ratio = total_liq.checked_div(total_col).unwrap();
-        let res = adjust_i128(i128::MAX, liq_to_col_ratio);
+        let res = mul_i128_by_i80f48(i128::MAX, liq_to_col_ratio);
         assert!(res.is_none()); // no panic, clean None
     }
 
@@ -263,7 +265,7 @@ mod tests {
         let raw = safe_raw.saturating_add(1);
         let (total_liq, total_col) = bank.scaled_supplies().unwrap();
         let liq_to_col_ratio = total_liq.checked_div(total_col).unwrap();
-        let res = adjust_i128(raw, liq_to_col_ratio);
+        let res = mul_i128_by_i80f48(raw, liq_to_col_ratio);
         assert!(res.is_none());
     }
 

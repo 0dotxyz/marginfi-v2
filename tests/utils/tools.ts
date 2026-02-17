@@ -4,12 +4,38 @@ import {
   BanksTransactionResultWithMeta,
 } from "solana-bankrun";
 import { ProgramTestContext } from "solana-bankrun";
-import { Transaction, PublicKey, AccountInfo } from "@solana/web3.js";
+import {
+  AddressLookupTableAccount,
+  AddressLookupTableProgram,
+  Transaction,
+  TransactionInstruction,
+  PublicKey,
+  AccountInfo,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import { Keypair } from "@solana/web3.js";
+import { AccountLayout, createMintToInstruction } from "@solana/spl-token";
+import { inspect } from "util";
 import { getBankrunBlockhash } from "./spl-staking-utils";
 import { MarginfiAccountRaw } from "@mrgnlabs/marginfi-client-v2";
-import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
-import { HEALTH_CACHE_HEALTHY } from "./types";
+import {
+  TOKEN_PROGRAM_ID,
+  wrappedI80F48toBigNumber,
+} from "@mrgnlabs/mrgn-common";
+import {
+  ASSET_TAG_DRIFT,
+  ASSET_TAG_JUPLEND,
+  ASSET_TAG_KAMINO,
+  ASSET_TAG_SOLEND,
+  ASSET_TAG_STAKED,
+  HEALTH_CACHE_HEALTHY,
+} from "./types";
+import { composeRemainingAccounts } from "./user-instructions";
+import {
+  globalProgramAdmin,
+  bankrunContext,
+  bankrunProgram,
+} from "../rootHooks";
 
 /**
  * Convert a human-readable amount to native token units based on decimals.
@@ -21,43 +47,175 @@ export const toNative = (amount: number, decimals: number): BN =>
   new BN(amount).mul(new BN(10).pow(new BN(decimals)));
 
 /**
- * Process a transaction in a bankrun context and return the transaction result
+ * Process a signed transaction in a bankrun context and return the transaction result. This
+ * internal helper is shared between legacy and v0 wrappers. In edge cases (particularly with v0)
+ * bankrun can't pick up logs on failure.
+ */
+function processSignedBankrunTransaction(
+  bankrunContext: ProgramTestContext,
+  tx: Transaction | VersionedTransaction,
+  trySend: true,
+  dumpLogOnFail?: boolean
+): Promise<BanksTransactionResultWithMeta>;
+function processSignedBankrunTransaction(
+  bankrunContext: ProgramTestContext,
+  tx: Transaction | VersionedTransaction,
+  trySend?: false,
+  dumpLogOnFail?: boolean
+): Promise<BanksTransactionMeta>;
+function processSignedBankrunTransaction(
+  bankrunContext: ProgramTestContext,
+  tx: Transaction | VersionedTransaction,
+  trySend: boolean,
+  dumpLogOnFail?: boolean
+): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta>;
+async function processSignedBankrunTransaction(
+  bankrunContext: ProgramTestContext,
+  tx: Transaction | VersionedTransaction,
+  trySend: boolean = false,
+  dumpLogOnFail: boolean = false
+): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta> {
+  const bankrunTx = tx;
+
+  if (trySend) {
+    const result = await bankrunContext.banksClient.tryProcessTransaction(
+      bankrunTx
+    );
+    if (dumpLogOnFail && result.result) {
+      const dumped = dumpBankrunLogs(result);
+      if (!dumped) {
+        try {
+          const simResult =
+            await bankrunContext.banksClient.simulateTransaction(bankrunTx);
+          dumpBankrunLogs(simResult);
+        } catch (diagnosticError) {
+          console.log(
+            "[bankrun] trySend fallback simulateTransaction failed:",
+            diagnosticError
+          );
+        }
+      }
+    }
+    return result;
+  }
+
+  try {
+    return await bankrunContext.banksClient.processTransaction(bankrunTx);
+  } catch (error) {
+    // If processing throws, re-simulate for diagnostics without mutating state.
+    if (dumpLogOnFail) {
+      console.log(
+        "[bankrun] processTransaction threw:",
+        error instanceof Error ? error.message : error
+      );
+      let dumped = false;
+      try {
+        const simulatedResult =
+          await bankrunContext.banksClient.simulateTransaction(bankrunTx);
+        dumped = dumpBankrunLogs(simulatedResult);
+      } catch (diagnosticError) {
+        console.log(
+          "[bankrun] simulateTransaction for diagnostics failed:",
+          diagnosticError
+        );
+      }
+      if (!dumped) {
+        try {
+          const tryResult =
+            await bankrunContext.banksClient.tryProcessTransaction(bankrunTx);
+          dumpBankrunLogs(tryResult);
+        } catch (diagnosticError) {
+          console.log(
+            "[bankrun] tryProcessTransaction for diagnostics failed:",
+            diagnosticError
+          );
+        }
+      }
+    }
+    throw error;
+  }
+}
+
+/**
+ * Process a legacy transaction in a bankrun context and return the transaction result.
  * @param bankrunContext - The bankrun context
- * @param tx - The transaction to process
+ * @param tx - The legacy transaction to process
  * @param signers - The signers for the transaction
  * @param trySend - true to use tryProcess instead
  * @param dumpLogOnFail - true to print a tx log on fail
  * @returns The transaction result with metadata
  */
-export const processBankrunTransaction = async (
+export function processBankrunTransaction(
+  bankrunContext: ProgramTestContext,
+  tx: Transaction,
+  signers: Keypair[],
+  trySend: true,
+  dumpLogOnFail?: boolean
+): Promise<BanksTransactionResultWithMeta>;
+export function processBankrunTransaction(
+  bankrunContext: ProgramTestContext,
+  tx: Transaction,
+  signers: Keypair[],
+  trySend?: false,
+  dumpLogOnFail?: boolean
+): Promise<BanksTransactionMeta>;
+export async function processBankrunTransaction(
   bankrunContext: ProgramTestContext,
   tx: Transaction,
   signers: Keypair[],
   trySend: boolean = false,
   dumpLogOnFail: boolean = false
-): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta> => {
+): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta> {
   tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
   tx.sign(...signers);
+  return processSignedBankrunTransaction(
+    bankrunContext,
+    tx,
+    trySend,
+    dumpLogOnFail
+  );
+}
 
-  if (trySend) {
-    let result = await bankrunContext.banksClient.tryProcessTransaction(tx);
-    if (dumpLogOnFail) {
-      dumpBankrunLogs(result);
-    }
-    return result;
-  } else {
-    // TODO throw on error?
-    // If we want to dump logs on fail, simulate first
-    if (dumpLogOnFail) {
-      const simulationResult = await bankrunContext.banksClient.simulateTransaction(tx);
-      if (simulationResult.result) {
-        dumpBankrunLogs(simulationResult);
-      }
-    }
-    return await bankrunContext.banksClient.processTransaction(tx);
+/**
+ * Process a v0 transaction in a bankrun context and return the transaction result.
+ * @param bankrunContext - The bankrun context
+ * @param tx - The v0 transaction to process
+ * @param signers - The signers for the transaction
+ * @param trySend - true to use tryProcess instead
+ * @param dumpLogOnFail - true to print a tx log on fail
+ * @returns The transaction result with metadata
+ */
+export function processBankrunV0Transaction(
+  bankrunContext: ProgramTestContext,
+  tx: VersionedTransaction,
+  signers: Keypair[],
+  trySend: true,
+  dumpLogOnFail?: boolean
+): Promise<BanksTransactionResultWithMeta>;
+export function processBankrunV0Transaction(
+  bankrunContext: ProgramTestContext,
+  tx: VersionedTransaction,
+  signers: Keypair[],
+  trySend?: false,
+  dumpLogOnFail?: boolean
+): Promise<BanksTransactionMeta>;
+export async function processBankrunV0Transaction(
+  bankrunContext: ProgramTestContext,
+  tx: VersionedTransaction,
+  signers: Keypair[],
+  trySend: boolean = false,
+  dumpLogOnFail: boolean = false
+): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta> {
+  if (signers.length > 0) {
+    tx.sign(signers);
   }
-
-};
+  return processSignedBankrunTransaction(
+    bankrunContext,
+    tx,
+    trySend,
+    dumpLogOnFail
+  );
+}
 
 /**
  * Function to print bytes from a Buffer in groups with column labels and color highlighting for non-zero values
@@ -138,10 +296,129 @@ export const printBufferGroups = (
   }
 };
 
-export const dumpBankrunLogs = (result: BanksTransactionResultWithMeta) => {
-  for (let i = 0; i < result.meta.logMessages.length; i++) {
-    console.log(i + " " + result.meta.logMessages[i]);
+const readField = (obj: unknown, field: string): unknown => {
+  if (!obj || typeof obj !== "object") return undefined;
+  try {
+    return (obj as Record<string, unknown>)[field];
+  } catch {
+    return undefined;
   }
+};
+
+const findFieldDeep = (obj: unknown, field: string, maxDepth = 5): unknown => {
+  let current: unknown = obj;
+  for (let depth = 0; depth <= maxDepth; depth += 1) {
+    const value = readField(current, field);
+    if (value !== undefined) return value;
+    current = readField(current, "inner");
+    if (!current) break;
+  }
+  return undefined;
+};
+
+export const dumpBankrunLogs = (result: any): boolean => {
+  const logMessages =
+    findFieldDeep(result?.meta, "logMessages") ??
+    findFieldDeep(result, "logMessages");
+  if (Array.isArray(logMessages) && logMessages.length > 0) {
+    for (let i = 0; i < logMessages.length; i++) {
+      console.log(i + " " + logMessages[i]);
+    }
+    return true;
+  }
+
+  const txResult = findFieldDeep(result, "result");
+  const computeUnitsConsumed =
+    findFieldDeep(result?.meta, "computeUnitsConsumed") ??
+    findFieldDeep(result, "computeUnitsConsumed");
+  const status = txResult === null || txResult === undefined ? "ok" : "failed";
+  console.log(
+    `[bankrun] no logMessages available (status=${status}, meta=${
+      result?.meta === null ? "null" : typeof result?.meta
+    })`
+  );
+  if (txResult !== undefined) {
+    console.log("[bankrun] tx result:", txResult);
+  }
+  if (computeUnitsConsumed !== undefined) {
+    console.log("[bankrun] CU consumed:", computeUnitsConsumed.toString());
+  }
+  console.log(
+    "[bankrun] raw result preview:",
+    inspect(result, { depth: 4, colors: false, maxArrayLength: 50 })
+  );
+  return false;
+};
+
+/**
+ * Create and activate a lookup table for the provided instruction set.
+ *
+ * This is useful for tests that need deterministic v0 execution without relying
+ * on a shared LUT that can drift as test state evolves.
+ */
+export const createLookupTableForInstructions = async (
+  bankrunContext: ProgramTestContext,
+  authority: Keypair,
+  instructions: TransactionInstruction[]
+): Promise<AddressLookupTableAccount> => {
+  const addresses: PublicKey[] = [];
+  const seen = new Set<string>();
+  const push = (pk: PublicKey) => {
+    const key = pk.toBase58();
+    if (seen.has(key)) return;
+    seen.add(key);
+    addresses.push(pk);
+  };
+
+  for (const ix of instructions) {
+    push(ix.programId);
+    for (const meta of ix.keys) {
+      push(meta.pubkey);
+    }
+  }
+
+  const recentSlot = Number(await bankrunContext.banksClient.getSlot());
+  const [createLutIx, lutAddress] = AddressLookupTableProgram.createLookupTable(
+    {
+      authority: authority.publicKey,
+      payer: authority.publicKey,
+      recentSlot: Math.max(0, recentSlot - 1),
+    }
+  );
+  await processBankrunTransaction(
+    bankrunContext,
+    new Transaction().add(createLutIx),
+    [authority]
+  );
+
+  const CHUNK_SIZE = 20;
+  for (let i = 0; i < addresses.length; i += CHUNK_SIZE) {
+    const extendIx = AddressLookupTableProgram.extendLookupTable({
+      authority: authority.publicKey,
+      payer: authority.publicKey,
+      lookupTable: lutAddress,
+      addresses: addresses.slice(i, i + CHUNK_SIZE),
+    });
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(extendIx),
+      [authority]
+    );
+  }
+
+  // LUTs are usable after a short warmup.
+  const currentSlot = Number(await bankrunContext.banksClient.getSlot());
+  bankrunContext.warpToSlot(BigInt(currentSlot + 5));
+
+  const lutRaw = await bankrunContext.banksClient.getAccount(lutAddress);
+  if (!lutRaw) {
+    throw new Error("Failed to fetch newly created lookup table");
+  }
+  const lutState = AddressLookupTableAccount.deserialize(lutRaw.data);
+  return new AddressLookupTableAccount({
+    key: lutAddress,
+    state: lutState,
+  });
 };
 
 /**
@@ -226,7 +503,6 @@ export function dumpAccBalances(
 
   for (let b of balances) {
     if (b.active == 0) {
-
       activeBalances.push({
         "Bank PK": "empty",
         // Tag: "-",
@@ -263,6 +539,8 @@ export const logHealthCache = (header: string, healthCache: any) => {
   const lv = wrappedI80F48toBigNumber(healthCache.liabilityValue);
   const aValMaint = wrappedI80F48toBigNumber(healthCache.assetValueMaint);
   const lValMaint = wrappedI80F48toBigNumber(healthCache.liabilityValueMaint);
+  const aValEqui = wrappedI80F48toBigNumber(healthCache.assetValueEquity);
+  const lValEqui = wrappedI80F48toBigNumber(healthCache.liabilityValueEquity);
   console.log(`---${header}---`);
   if (healthCache.flags & HEALTH_CACHE_HEALTHY) {
     console.log("**HEALTHY**");
@@ -273,6 +551,8 @@ export const logHealthCache = (header: string, healthCache: any) => {
   console.log("liab value: " + lv.toString());
   console.log("asset value (maint): " + aValMaint.toString());
   console.log("liab value (maint): " + lValMaint.toString());
+  console.log("asset value (equity): " + aValEqui.toString());
+  console.log("liab value (equity): " + lValEqui.toString());
   console.log("prices: ");
   healthCache.prices.forEach((priceWrapped: any, i: number) => {
     const price = bytesToF64(priceWrapped);
@@ -318,6 +598,109 @@ export async function getBankrunTime(ctx: ProgramTestContext): Promise<number> {
   const clock = await ctx.banksClient.getClock();
   return Number(clock.unixTimestamp);
 }
+
+/** Shorthand to convert an I80F48 to BN (rounding off decimals) */
+export const toBnFromI80 = (value: any): BN =>
+  new BN(wrappedI80F48toBigNumber(value).toFixed(0));
+
+/** Shorthand to cast BN/number/bigint as BN */
+export const toBn = (value: BN | number | bigint) => {
+  if (typeof value === "bigint") return new BN(value.toString());
+  if (typeof value === "number") return new BN(value);
+  return value;
+};
+
+/** Shorthand to mint some tokens to a destination, globalProgramAdmin always sign/sends */
+export const mintToTokenAccount = async (
+  mint: PublicKey,
+  destination: PublicKey,
+  amount: BN
+) => {
+  const ix = createMintToInstruction(
+    mint,
+    destination,
+    globalProgramAdmin.wallet.publicKey,
+    BigInt(amount.toString()),
+    [],
+    TOKEN_PROGRAM_ID
+  );
+
+  await processBankrunTransaction(
+    bankrunContext,
+    new Transaction().add(ix),
+    [globalProgramAdmin.wallet],
+    false,
+    true
+  );
+};
+
+/**
+ * Useful when building risk accounts in tests where hand-construction is tedious or not neccessary
+ * for the flow being demonstrated.
+ * @param marginfiAccountPk
+ * @param excludedBankPks
+ * @returns
+ */
+export const buildHealthRemainingAccounts = async (
+  marginfiAccountPk: PublicKey,
+  options: {
+    excludedBankPks?: PublicKey[];
+    includedBankPks?: PublicKey[];
+  } = {}
+): Promise<PublicKey[]> => {
+  const excludedBankPks = options.excludedBankPks ?? [];
+  const includedBankPks = options.includedBankPks ?? [];
+
+  const marginfiAccount = await bankrunProgram.account.marginfiAccount.fetch(
+    marginfiAccountPk
+  );
+  const activeBankPks = marginfiAccount.lendingAccount.balances
+    .filter((b: any) => b.active)
+    .filter(
+      (b: any) =>
+        !excludedBankPks.some((excludedPk) => excludedPk.equals(b.bankPk))
+    )
+    .map((b: any) => b.bankPk as PublicKey);
+
+  const bankPks: PublicKey[] = [...activeBankPks];
+  for (const bankPk of includedBankPks) {
+    if (excludedBankPks.some((excludedPk) => excludedPk.equals(bankPk))) {
+      continue;
+    }
+    if (!bankPks.some((existingBankPk) => existingBankPk.equals(bankPk))) {
+      bankPks.push(bankPk);
+    }
+  }
+
+  const banks = await Promise.all(
+    bankPks.map((bankPk) => bankrunProgram.account.bank.fetch(bankPk))
+  );
+
+  const groups: PublicKey[][] = [];
+  for (let i = 0; i < bankPks.length; i++) {
+    const bankPk = bankPks[i];
+    const bank = banks[i];
+    const assetTag = bank.config.assetTag;
+    const group: PublicKey[] = [bankPk, bank.config.oracleKeys[0]];
+
+    if (
+      assetTag === ASSET_TAG_KAMINO ||
+      assetTag === ASSET_TAG_DRIFT ||
+      assetTag === ASSET_TAG_SOLEND ||
+      assetTag === ASSET_TAG_JUPLEND
+    ) {
+      group.push(bank.config.oracleKeys[1]);
+    }
+
+    if (assetTag === ASSET_TAG_STAKED) {
+      group.push(bank.config.oracleKeys[1], bank.config.oracleKeys[2]);
+    }
+
+    groups.push(group);
+  }
+
+  return composeRemainingAccounts(groups);
+};
 
 /**
  * Advance the bankrun clock by a specified number of seconds.

@@ -1,0 +1,26 @@
+[package]
+name = "liquidity"
+version = "0.1.2"
+description = "Created with Anchor"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "liquidity"
+
+[features]
+default = []
+staging = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = { version="=0.32.0", features=["init-if-needed"] }
+anchor-spl = "=0.32.0"
+spl-token = "8.0.0"
+num-traits = "0.2"
+bytemuck = { version = "1.20.0", features = ["min_const_generics"] }
+library = { path="../../crates/library" }

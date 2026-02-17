@@ -396,7 +396,9 @@ pub enum MarginfiError {
     JuplendWithdrawFailed, // 6510
     #[msg("Juplend init position deposit insufficient")]
     JuplendInitPositionDepositInsufficient, // 6511
-                                            // **************END JUPLEND ERRORS
+    #[msg("Invalid Juplend withdraw intermediary ATA")]
+    InvalidJuplendWithdrawIntermediaryAta, // 6512
+                                           // **************END JUPLEND ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -619,6 +621,7 @@ impl From<u32> for MarginfiError {
             6509 => MarginfiError::JuplendDepositFailed,
             6510 => MarginfiError::JuplendWithdrawFailed,
             6511 => MarginfiError::JuplendInitPositionDepositInsufficient,
+            6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
 
             _ => MarginfiError::InternalLogicError,
         }

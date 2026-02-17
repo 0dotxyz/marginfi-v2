@@ -3,8 +3,8 @@ mod tests {
     use bytemuck::Zeroable;
     use fixed::types::I80F48;
     use marginfi_type_crate::types::price::{
-        adjust_i128 as shared_adjust_i128, adjust_i64 as shared_adjust_i64,
-        adjust_u64 as shared_adjust_u64, liq_to_col_ratio as shared_liq_to_col_ratio,
+        liq_to_col_ratio as shared_liq_to_col_ratio, mul_i128_by_i80f48 as shared_adjust_i128,
+        mul_i64_by_i80f48 as shared_adjust_i64, mul_u64_by_i80f48 as shared_adjust_u64,
     };
     use solend_mocks::state::{
         convert_decimals, decimal_to_i80f48, CollateralExchangeRate, SolendMinimalReserve,
