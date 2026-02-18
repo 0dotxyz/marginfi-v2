@@ -8,7 +8,7 @@ export type Farms = {
   "address": "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr",
   "metadata": {
     "name": "farms",
-    "version": "0.1.0",
+    "version": "1.6.5",
     "spec": "0.1.0"
   },
   "instructions": [
@@ -375,20 +375,41 @@ export type Farms = {
       ],
       "accounts": [
         {
-          "name": "owner",
+          "name": "oldOwner",
           "signer": true
         },
         {
-          "name": "userState",
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "newOwner"
+        },
+        {
+          "name": "oldUserState",
           "writable": true
+        },
+        {
+          "name": "newUserState",
+          "writable": true
+        },
+        {
+          "name": "farmState",
+          "writable": true
+        },
+        {
+          "name": "scopePrices",
+          "optional": true
+        },
+        {
+          "name": "systemProgram"
+        },
+        {
+          "name": "rent"
         }
       ],
-      "args": [
-        {
-          "name": "newOwner",
-          "type": "pubkey"
-        }
-      ]
+      "args": []
     },
     {
       "name": "rewardUserOnce",
@@ -404,7 +425,7 @@ export type Farms = {
       ],
       "accounts": [
         {
-          "name": "farmAdmin",
+          "name": "delegateAuthority",
           "writable": true,
           "signer": true
         },
@@ -424,6 +445,10 @@ export type Farms = {
         },
         {
           "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "expectedRewardIssuedUnclaimed",
           "type": "u64"
         }
       ]
@@ -550,7 +575,7 @@ export type Farms = {
       ],
       "accounts": [
         {
-          "name": "owner",
+          "name": "payer",
           "writable": true,
           "signer": true
         },
@@ -569,7 +594,7 @@ export type Farms = {
           "name": "rewardMint"
         },
         {
-          "name": "userRewardAta",
+          "name": "userRewardTokenAccount",
           "writable": true
         },
         {
@@ -1305,7 +1330,7 @@ export type Farms = {
     {
       "code": 6034,
       "name": "farmNotDelegated",
-      "msg": "Farm not delegated, can not set stake"
+      "msg": "Farm not delegated, can not complete operation"
     },
     {
       "code": 6035,
@@ -1406,6 +1431,71 @@ export type Farms = {
       "code": 6054,
       "name": "invalidFarmConfigUpdateAuthority",
       "msg": "Invalid authority for updating farm config"
+    },
+    {
+      "code": 6055,
+      "name": "invalidTransferOwnershipOldOwner",
+      "msg": "Invalid authority for transfer ownersip new user state initialization"
+    },
+    {
+      "code": 6056,
+      "name": "invalidTransferOwnershipFarmState",
+      "msg": "Invalid farm state for transfer ownership new user state initialization"
+    },
+    {
+      "code": 6057,
+      "name": "invalidTransferOwnershipUserStateOwnerDelegatee",
+      "msg": "Invalid user state for transfer ownership, owner must match delegatee"
+    },
+    {
+      "code": 6058,
+      "name": "invalidTransferOwnershipFarmStateLockingMode",
+      "msg": "Invalid farm state locking mode for transfer ownership, must be 0"
+    },
+    {
+      "code": 6059,
+      "name": "invalidTransferOwnershipFarmStateWithdrawCooldownPeriod",
+      "msg": "Invalid farm state withdrawal cooldown period for transfer ownership, must be 0"
+    },
+    {
+      "code": 6060,
+      "name": "invalidTransferOwnershipStakeAmount",
+      "msg": "Invalid transfer ownership stake amount, must be equal to unstaked deposits"
+    },
+    {
+      "code": 6061,
+      "name": "invalidTransferOwnershipNewOwner",
+      "msg": "Invalid authority for transfer ownersip new user state initialization"
+    },
+    {
+      "code": 6062,
+      "name": "invalidTransferOwnershipFarmStateDepositWarmupPeriod",
+      "msg": "Invalid farm state deposit warmup period for transfer ownership, must be 0 if old user has stake"
+    },
+    {
+      "code": 6063,
+      "name": "rewardUserOnceFeatureDisabled",
+      "msg": "Reward User Once feature is disabled"
+    },
+    {
+      "code": 6064,
+      "name": "invalidDelegatedAuthorityUpdate",
+      "msg": "Can not set delegate_authority to default pubkey - farm is delegated"
+    },
+    {
+      "code": 6065,
+      "name": "userTokenAccountOwnerMismatch",
+      "msg": "User token account owner does not match user state owner"
+    },
+    {
+      "code": 6066,
+      "name": "harvestingNotPermissionlessPayerMismatch",
+      "msg": "Harvesting is not permissionless, payer does not match user state owner"
+    },
+    {
+      "code": 6067,
+      "name": "currentRewardIssuedUnclaimedMismatch",
+      "msg": "Current reward issued unclaimed does not match expected value"
     }
   ],
   "types": [
@@ -1479,6 +1569,15 @@ export type Farms = {
           },
           {
             "name": "updateExtraDelegatedAuthority"
+          },
+          {
+            "name": "updateIsRewardUserOnceEnabled"
+          },
+          {
+            "name": "updateDelegatedAuthority"
+          },
+          {
+            "name": "updateIsHarvestingPermissionless"
           }
         ]
       }
@@ -1619,6 +1718,17 @@ export type Farms = {
         "fields": [
           {
             "name": "points",
+            "docs": [
+              "This is a stepwise function, meaning that each point represents",
+              "how many rewards are issued per time unit since the beginning",
+              "of that point until the beginning of the next point.",
+              "This is not a linear curve, there is no interpolation going on.",
+              "A curve can be [[t0, 100], [t1, 50], [t2, 0]]",
+              "meaning that from t0 to t1, 100 rewards are issued per time unit,",
+              "from t1 to t2, 50 rewards are issued per time unit, and after t2 it stops",
+              "Another curve, can be [[t0, 100], [u64::max, 0]]",
+              "meaning that from t0 to u64::max, 100 rewards are issued per time unit"
+            ],
             "type": {
               "array": [
                 {
@@ -1792,10 +1902,17 @@ export type Farms = {
           },
           {
             "name": "numUsers",
+            "docs": [
+              "Data used to calculate the rewards of the user"
+            ],
             "type": "u64"
           },
           {
             "name": "totalStakedAmount",
+            "docs": [
+              "The number of token in the `farm_vault` staked (getting rewards and fees)",
+              "Set such as `farm_vault.amount = total_staked_amount + total_pending_amount`"
+            ],
             "type": "u64"
           },
           {
@@ -1812,18 +1929,45 @@ export type Farms = {
           },
           {
             "name": "delegateAuthority",
+            "docs": [
+              "Only used for delegate farms",
+              "Set to `default()` otherwise"
+            ],
             "type": "pubkey"
           },
           {
             "name": "timeUnit",
+            "docs": [
+              "Raw representation of a `TimeUnit`",
+              "Seconds = 0, Slots = 1"
+            ],
             "type": "u8"
           },
           {
             "name": "isFarmFrozen",
+            "docs": [
+              "Automatically set to true in case of a full authority withdrawal",
+              "If true, the farm is frozen and no more deposits are allowed"
+            ],
             "type": "u8"
           },
           {
             "name": "isFarmDelegated",
+            "docs": [
+              "Indicates if the farm is a delegate farm",
+              "If true, the farm is a delegate farm and the `delegate_authority` is set*"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "isRewardUserOnceEnabled",
+            "docs": [
+              "If set to 1, indicates that the \"reward user once\" feature is enabled"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "isHarvestingPermissionless",
             "type": "u8"
           },
           {
@@ -1831,36 +1975,60 @@ export type Farms = {
             "type": {
               "array": [
                 "u8",
-                5
+                3
               ]
             }
           },
           {
             "name": "withdrawAuthority",
+            "docs": [
+              "Withdraw authority for the farm, allowed to lock deposited funds and withdraw them",
+              "Set to `default()` if unused (only the depositors can withdraw their funds)"
+            ],
             "type": "pubkey"
           },
           {
             "name": "depositWarmupPeriod",
+            "docs": [
+              "Delay between a user deposit and the moment it is considered as staked",
+              "0 if unused"
+            ],
             "type": "u32"
           },
           {
             "name": "withdrawalCooldownPeriod",
+            "docs": [
+              "Delay between a user unstake and the ability to withdraw his deposit."
+            ],
             "type": "u32"
           },
           {
             "name": "totalActiveStakeScaled",
+            "docs": [
+              "Total active stake of tokens in the farm (scaled from `Decimal` representation)."
+            ],
             "type": "u128"
           },
           {
             "name": "totalPendingStakeScaled",
+            "docs": [
+              "Total pending stake of tokens in the farm (scaled from `Decimal` representation).",
+              "(can be used by `withdraw_authority` but don't get rewards or fees)"
+            ],
             "type": "u128"
           },
           {
             "name": "totalPendingAmount",
+            "docs": [
+              "Total pending amount of tokens in the farm"
+            ],
             "type": "u64"
           },
           {
             "name": "slashedAmountCurrent",
+            "docs": [
+              "Slashed amounts from early withdrawal"
+            ],
             "type": "u64"
           },
           {
@@ -1873,6 +2041,9 @@ export type Farms = {
           },
           {
             "name": "lockingMode",
+            "docs": [
+              "Locking stake"
+            ],
             "type": "u64"
           },
           {
@@ -1991,6 +2162,9 @@ export type Farms = {
           },
           {
             "name": "isFarmDelegated",
+            "docs": [
+              "Indicate if this user state is part of a delegated farm"
+            ],
             "type": "u8"
           },
           {
@@ -2004,6 +2178,10 @@ export type Farms = {
           },
           {
             "name": "rewardsTallyScaled",
+            "docs": [
+              "Rewards tally used for computation of gained rewards",
+              "(scaled from `Decimal` representation)."
+            ],
             "type": {
               "array": [
                 "u128",
@@ -2013,6 +2191,9 @@ export type Farms = {
           },
           {
             "name": "rewardsIssuedUnclaimed",
+            "docs": [
+              "Number of reward tokens ready for claim"
+            ],
             "type": {
               "array": [
                 "u64",
@@ -2031,30 +2212,55 @@ export type Farms = {
           },
           {
             "name": "activeStakeScaled",
+            "docs": [
+              "User stake deposited and usable, generating rewards and fees.",
+              "(scaled from `Decimal` representation)."
+            ],
             "type": "u128"
           },
           {
             "name": "pendingDepositStakeScaled",
+            "docs": [
+              "User stake deposited but not usable and not generating rewards yet.",
+              "(scaled from `Decimal` representation)."
+            ],
             "type": "u128"
           },
           {
             "name": "pendingDepositStakeTs",
+            "docs": [
+              "After this timestamp, pending user stake can be moved to user stake",
+              "Initialized to now() + delayed user stake period"
+            ],
             "type": "u64"
           },
           {
             "name": "pendingWithdrawalUnstakeScaled",
+            "docs": [
+              "User deposits unstaked, pending for withdrawal, not usable and not generating rewards.",
+              "(scaled from `Decimal` representation)."
+            ],
             "type": "u128"
           },
           {
             "name": "pendingWithdrawalUnstakeTs",
+            "docs": [
+              "After this timestamp, user can withdraw their deposit."
+            ],
             "type": "u64"
           },
           {
             "name": "bump",
+            "docs": [
+              "User bump used for account address validation"
+            ],
             "type": "u64"
           },
           {
             "name": "delegatee",
+            "docs": [
+              "Delegatee used for initialisation - useful to check against"
+            ],
             "type": "pubkey"
           },
           {
@@ -2062,11 +2268,26 @@ export type Farms = {
             "type": "u64"
           },
           {
+            "name": "rewardsIssuedCumulative",
+            "docs": [
+              "Cumulative rewards issued to the user - ONLY used for stats/analytics",
+              "DO NOT USE IN ANY CALCULATIONS",
+              "Old userStates will have this field populated only from the point of release",
+              "not reflecting any historical data before this was released"
+            ],
+            "type": {
+              "array": [
+                "u64",
+                10
+              ]
+            }
+          },
+          {
             "name": "padding1",
             "type": {
               "array": [
                 "u64",
-                50
+                40
               ]
             }
           }
@@ -2100,3 +2321,4 @@ export type Farms = {
     }
   ]
 };
+
