@@ -44,6 +44,10 @@ export type JuplendPoolKeysArgs = {
   liquidityProgramId?: PublicKey;
   lendingProgramId?: PublicKey;
   rewardsProgramId?: PublicKey;
+  /** Optional marginfi program id to derive the expected withdraw intermediary ATA for a bank. */
+  mrgnProgramId?: PublicKey;
+  /** Optional marginfi bank pk used with `mrgnProgramId` to derive `withdrawIntermediaryAta`. */
+  bank?: PublicKey;
 };
 
 export type JuplendGlobalKeys = {
@@ -281,6 +285,7 @@ export const deriveJuplendPoolKeys = (
   const lendingProgramId = args.lendingProgramId ?? JUPLEND_LENDING_PROGRAM_ID;
   const rewardsProgramId =
     args.rewardsProgramId ?? JUPLEND_EARN_REWARDS_PROGRAM_ID;
+  const tokenProgram = args.tokenProgram ?? TOKEN_PROGRAM_ID;
 
   const [liquidity] = findJuplendLiquidityPda(liquidityProgramId);
   const [authList] = findJuplendLiquidityAuthListPda(liquidityProgramId);
@@ -295,7 +300,7 @@ export const deriveJuplendPoolKeys = (
   const vault = deriveJuplendLiquidityVaultAta(
     args.mint,
     liquidity,
-    args.tokenProgram,
+    tokenProgram,
   );
 
   const { fTokenMint, lending, lendingAdmin } = deriveJuplendLendingPdas(
@@ -322,9 +327,24 @@ export const deriveJuplendPoolKeys = (
     liquidityProgramId,
   );
 
+  let withdrawIntermediaryAta: PublicKey | undefined;
+  if (args.mrgnProgramId && args.bank) {
+    const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
+      args.mrgnProgramId,
+      args.bank,
+    );
+    withdrawIntermediaryAta = getAssociatedTokenAddressSync(
+      args.mint,
+      liquidityVaultAuthority,
+      true,
+      tokenProgram,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    );
+  }
+
   return {
     mint: args.mint,
-    tokenProgram: args.tokenProgram,
+    tokenProgram,
     liquidity,
     authList,
     tokenReserve,
@@ -338,6 +358,7 @@ export const deriveJuplendPoolKeys = (
     fTokenMetadata,
     supplyPositionOnLiquidity,
     borrowPositionOnLiquidity,
+    ...(withdrawIntermediaryAta ? { withdrawIntermediaryAta } : {}),
   };
 };
 

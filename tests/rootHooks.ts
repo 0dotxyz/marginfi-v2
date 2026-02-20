@@ -72,7 +72,7 @@ import {
 export const ecosystem: Ecosystem = getGenericEcosystem();
 export let oracles: Oracles = undefined;
 /** Show various information about accounts and tests */
-export const verbose = false;
+export const verbose = true;
 /** Show the raw buffer printout of various structs */
 export const printBuffers = false;
 /** The program owner is also the provider wallet */
@@ -104,7 +104,6 @@ export const PROGRAM_FEE_RATE = 0.02;
 export const LIQUIDATION_MAX_FEE = 0.5;
 export const ORDER_EXECUTION_MAX_FEE = 0.05; // 5%
 export const ORDER_INIT_FLAT_FEE_DEFAULT = 100_000;
-
 
 // All groups and banks below need to be deterministic to ensure the same ordering of balances in
 // lending accounts
