@@ -257,7 +257,7 @@ pub fn kamino_withdraw<'info>(
     let in_receivership_or_order_execution =
         marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
 
-    // Note: during liquidation/receivership or order execution, we skip health checks until the end
+    // Note: during liquidation/deleverage or order execution, we skip health checks until the end
     // of the transaction, but we still update the price cache.
     if !in_receivership_or_order_execution {
         // Check account health, if below threshold fail transaction

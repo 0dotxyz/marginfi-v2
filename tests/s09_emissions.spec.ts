@@ -40,7 +40,6 @@ import {
   withdrawEmissionsPermissionlessIx,
 } from "./utils/user-instructions";
 import { USER_ACCOUNT } from "./utils/mocks";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import {
   createAssociatedTokenAccountInstruction,
   getAssociatedTokenAddressSync,
@@ -49,12 +48,12 @@ import {
 import {
   EMISSIONS_FLAG_BORROW_ACTIVE,
   EMISSIONS_FLAG_LENDING_ACTIVE,
-  ONE_WEEK_IN_SECONDS,
 } from "./utils/types";
 import { groupConfigure, setupEmissions } from "./utils/group-instructions";
-import { getEpochAndSlot } from "./utils/stake-utils";
 import { createMintToInstruction } from "@solana/spl-token";
 import { Clock } from "solana-bankrun";
+import { getBankrunBlockhash } from "./utils/tools";
+import { getEpochAndSlot } from "./utils/bankrunConnection";
 
 let marginfiGroup: Keypair;
 

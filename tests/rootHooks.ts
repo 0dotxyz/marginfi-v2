@@ -12,6 +12,8 @@ import {
   SetupTestUserBankrunOptions,
 } from "./utils/mocks";
 import {
+  AddressLookupTableAccount,
+  AddressLookupTableProgram,
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
@@ -22,7 +24,10 @@ import {
 } from "@solana/web3.js";
 import fs from "fs";
 import path from "path";
-import { patchBankrunConnection } from "./utils/bankrunConnection";
+import {
+  getEpochAndSlot,
+  patchBankrunConnection,
+} from "./utils/bankrunConnection";
 
 // ---------------------------------------------------------------------------
 // Kamino farms (liquidity-incentive) program
@@ -59,7 +64,7 @@ import { Mocks } from "../target/types/mocks";
 import marginfiIdl from "../target/idl/marginfi.json";
 import mocksIdl from "../target/idl/mocks.json";
 import { setupPythOraclesBankrun } from "./utils/bankrun-oracles";
-import { processBankrunTransaction } from "./utils/tools";
+import { getBankrunBlockhash, processBankrunTransaction } from "./utils/tools";
 
 import {
   findPoolAddress,
@@ -254,7 +259,7 @@ export const SOLEND_TOKEN_A_LIQUIDITY_SUPPLY = "solend_tokena_liquidity_supply";
 /** Token A Reserve collateral mint */
 export const SOLEND_TOKEN_A_COLLATERAL_MINT = "solend_tokena_collateral_mint";
 /** Token A Reserve collateral supply */
-export const SOLEND_TOKENA_COLLATERAL_SUPPLY =
+export const SOLEND_TOKEN_A_COLLATERAL_SUPPLY =
   "solend_tokena_collateral_supply";
 /** Token A Reserve fee receiver */
 export const SOLEND_TOKEN_A_FEE_RECEIVER = "solend_tokena_fee_receiver";

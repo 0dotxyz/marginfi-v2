@@ -41,7 +41,6 @@ import { assert } from "chai";
 import {
   assertBankrunTxFailed,
   assertBNApproximately,
-  assertBNEqual,
   getTokenBalance,
 } from "./utils/genericTests";
 import {
@@ -60,10 +59,8 @@ import {
   defaultDriftBankConfig,
   getDriftUserAccount,
   getSpotMarketAccount,
-  scaledBalanceToTokenAmount,
   tokenAmountToScaledBalance,
   USDC_INIT_DEPOSIT_AMOUNT,
-  USDC_SCALING_FACTOR,
 } from "./utils/drift-utils";
 import {
   makeAddDriftBankIx,
@@ -87,7 +84,7 @@ const BORROW_SEED = new BN(8842);
 const FIXED_PRICE = 2;
 const BORROW_AMOUNT = new BN(10 * 10 ** ecosystem.tokenADecimals);
 
-describe("dx: Fixed Drift price bank", () => {
+describe("d15: Fixed Drift price bank", () => {
   before(async () => {
     ctx = bankrunContext;
     usdcSpotMarket = driftAccounts.get(DRIFT_USDC_SPOT_MARKET);

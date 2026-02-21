@@ -80,7 +80,7 @@ unprotected between the close of the Stop Loss and the open of the Both order.
 (F2) The lending position can be withdrawn down to $0, but must remain open. If the Balance is closed
 by the user (e.g. by withdraw_all), and the same asset is deposited later to re-open it, Orders
 created prior to the Balance being closed **will not work**. This means users are able to modify
-their accounts such that active Orders are orphaned and can longer execute, it's up to users to make
+their accounts such that active Orders are orphaned and can no longer execute, it's up to users to make
 sure they do not close out positions involved with their Orders without updating the Orders too.
 
 
@@ -101,9 +101,8 @@ sure they do not close out positions involved with their Orders without updating
 - `PlaceOrder` (user) - Place a new Stop Loss, Take Profit, or Both type Order on a pair of balances
   the user currently holds.
 - `StartExecuteOrder` (Keeper) - Keepers run this to begin the execution of an Order. Must be at the
-  start of the tx, and `EndExecuteOrder` must appear last in the tx. Withdraw/Repay of the involved
-  balances typically follows this ix. Requires a risk check of just the balances involved in the
-  Order.
+  start of the tx. Withdraw/Repay of the involved balances typically follows this ix.
+  Requires a risk check of just the balances involved in the Order.
 - `EndExecuteOrder` (Keeper) - Must be the last tx in executing an Order. Requires a risk check of
   just the balances involved in the Order.
 - `CloseOrder` (user) - Clear an unwanted Order, user gets their rent back.

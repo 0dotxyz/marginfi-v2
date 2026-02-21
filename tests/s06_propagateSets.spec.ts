@@ -13,7 +13,6 @@ import {
 } from "./rootHooks";
 import { propagateStakedSettings } from "./utils/group-instructions";
 import { deriveBankWithSeed, deriveStakedSettings } from "./utils/pdas";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
 import {
@@ -27,6 +26,7 @@ import {
   PYTH_PULL_MIGRATED,
   StakedSettingsEdit,
 } from "./utils/types";
+import { getBankrunBlockhash } from "./utils/tools";
 
 let program: Program<Marginfi>;
 let marginfiGroup: Keypair;

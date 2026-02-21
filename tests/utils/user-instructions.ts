@@ -981,7 +981,7 @@ export type SetKeeperCloseFlagsArgs = {
   bankKeysOpt?: PublicKey[] | null;
 };
 
-export const setLiquidatorCloseFlagsIx = (
+export const setKeeperCloseFlagsIx = (
   program: Program<Marginfi>,
   args: SetKeeperCloseFlagsArgs
 ) => {

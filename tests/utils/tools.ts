@@ -15,9 +15,6 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import { Keypair } from "@solana/web3.js";
-import { AccountLayout, createMintToInstruction } from "@solana/spl-token";
-import { inspect } from "util";
-import { getBankrunBlockhash } from "./spl-staking-utils";
 import { MarginfiAccountRaw } from "@mrgnlabs/marginfi-client-v2";
 import {
   TOKEN_PROGRAM_ID,
@@ -36,7 +33,10 @@ import {
   globalProgramAdmin,
   bankrunContext,
   bankrunProgram,
+  banksClient,
 } from "../rootHooks";
+import { getEpochAndSlot } from "./bankrunConnection";
+import { createMintToInstruction } from "@solana/spl-token";
 
 /**
  * Convert a human-readable amount to native token units based on decimals.
@@ -392,7 +392,14 @@ export const createLookupTableForInstructions = async (
     }
   }
 
-  const recentSlot = Number(await bankrunContext.banksClient.getSlot());
+  return createLut(signer, addresses);
+};
+
+export const createLut = async (
+  signer: Keypair,
+  addresses: PublicKey[],
+): Promise<AddressLookupTableAccount> => {
+  const recentSlot = Number(await banksClient.getSlot());
   const [createLutIx, lutAddress] = AddressLookupTableProgram.createLookupTable(
     {
       authority: authority.publicKey,
@@ -419,16 +426,16 @@ export const createLookupTableForInstructions = async (
       new Transaction().add(extendIx),
       [authority],
     );
+    extendTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    extendTx.sign(signer);
+    await banksClient.processTransaction(extendTx);
   }
 
-  // LUTs are usable after a short warmup.
-  const currentSlot = Number(await bankrunContext.banksClient.getSlot());
-  bankrunContext.warpToSlot(BigInt(currentSlot + 5));
+  // allow LUT to activate
+  const { slot } = await getEpochAndSlot(banksClient);
+  bankrunContext.warpToSlot(BigInt(slot + 25));
 
-  const lutRaw = await bankrunContext.banksClient.getAccount(lutAddress);
-  if (!lutRaw) {
-    throw new Error("Failed to fetch newly created lookup table");
-  }
+  const lutRaw = await banksClient.getAccount(lutAddress);
   const lutState = AddressLookupTableAccount.deserialize(lutRaw.data);
   return new AddressLookupTableAccount({
     key: lutAddress,
@@ -759,3 +766,15 @@ export async function advanceBankrunClock(
   ctx.setClock(newClock);
   return Number(newClock.unixTimestamp);
 }
+
+/**
+ * Generally, use this instead of `bankrunContext.lastBlockhash` (which does not work if the test
+ * has already run for some time and the blockhash has advanced)
+ * @param bankrunContext
+ * @returns
+ */
+export const getBankrunBlockhash = async (
+  bankrunContext: ProgramTestContext,
+) => {
+  return (await bankrunContext.banksClient.getLatestBlockhash())[0];
+};

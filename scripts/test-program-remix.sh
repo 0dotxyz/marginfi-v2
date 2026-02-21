@@ -90,7 +90,7 @@ ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
 cd "$ROOT"
 
 # Set environment variables for the tests.
-export SBF_OUT_DIR="$ROOT/target/deploy"
+export SBF_OUT_DIR="$ROOT/target/sbf/deploy"
 export CARGO_TARGET_DIR="$ROOT/target/host"
 export RUST_LOG="solana_runtime::message_processor::stable_log=${loglevel}"
 

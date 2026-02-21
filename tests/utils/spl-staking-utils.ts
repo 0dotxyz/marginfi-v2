@@ -137,15 +137,3 @@ export const depositToSinglePoolIxes = async (
 
   return ixes;
 };
-
-/**
- * Generally, use this instead of `bankrunContext.lastBlockhash` (which does not work if the test
- * has already run for some time and the blockhash has advanced)
- * @param bankrunContext
- * @returns
- */
-export const getBankrunBlockhash = async (
-  bankrunContext: ProgramTestContext
-) => {
-  return (await bankrunContext.banksClient.getLatestBlockhash())[0];
-};

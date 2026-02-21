@@ -26,7 +26,6 @@ import {
   configureBank,
   groupConfigure,
 } from "./utils/group-instructions";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { assert } from "chai";
 import { defaultBankConfigOptRaw, newEmodeEntry } from "./utils/types";
 import {
@@ -39,6 +38,7 @@ import {
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import {
   dumpAccBalances,
+  getBankrunBlockhash,
   processBankrunTransaction,
 } from "./utils/tools";
 import { genericMultiBankTestSetup } from "./genericSetups";

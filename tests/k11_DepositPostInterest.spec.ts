@@ -48,10 +48,9 @@ import {
   deriveReserveCollateralSupply,
   deriveReserveLiquiditySupply,
 } from "./utils/pdas";
-import { getEpochAndSlot } from "./utils/stake-utils";
 import { BalanceRaw } from "@mrgnlabs/marginfi-client-v2";
 import { Reserve } from "@kamino-finance/klend-sdk";
-import { dummyIx } from "./utils/bankrunConnection";
+import { dummyIx, getEpochAndSlot } from "./utils/bankrunConnection";
 
 let ctx: ProgramTestContext;
 let bank: PublicKey;

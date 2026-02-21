@@ -24,7 +24,6 @@ import {
 } from "./utils/genericTests";
 import { assert } from "chai";
 import {
-  composeRemainingAccounts,
   composeRemainingAccountsByBalances,
   depositIx,
   withdrawIx,

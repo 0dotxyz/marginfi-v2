@@ -33,8 +33,8 @@ import { assert } from "chai";
 import { processBankrunTransaction } from "./utils/tools";
 import { getTokenBalance } from "./utils/genericTests";
 import { Clock, ProgramTestContext } from "solana-bankrun";
-import { getEpochAndSlot } from "./utils/stake-utils";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
+import { getEpochAndSlot } from "./utils/bankrunConnection";
 
 let ctx: ProgramTestContext;
 let usdcReserve: PublicKey;

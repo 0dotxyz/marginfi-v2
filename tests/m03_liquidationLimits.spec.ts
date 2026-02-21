@@ -1,7 +1,6 @@
 import { BN } from "@coral-xyz/anchor";
 import {
   AddressLookupTableAccount,
-  AddressLookupTableProgram,
   ComputeBudgetProgram,
   PublicKey,
   Transaction,
@@ -45,13 +44,13 @@ import {
 } from "./utils/user-instructions";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import {
+  createLut,
   dumpBankrunLogs,
-  logHealthCache,
+  getBankrunBlockhash,
   processBankrunTransaction,
 } from "./utils/tools";
 import { genericMultiBankTestSetup } from "./genericSetups";
 import { refreshPullOracles } from "./utils/pyth-pull-mocks";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import {
   simpleRefreshObligation,
   simpleRefreshReserve,
@@ -77,10 +76,10 @@ import {
   deriveBaseObligation,
   deriveLiquidityVaultAuthority,
 } from "./utils/pdas";
-import { getEpochAndSlot } from "./utils/stake-utils";
 import { assert } from "chai";
 import { ensureMultiSuiteIntegrationsSetup } from "./utils/multi-limits-setup";
 import { addJuplendBanksForGroup } from "./utils/multi-limits-juplend-setup";
+import { getEpochAndSlot } from "./utils/bankrunConnection";
 
 const startingSeed: number = 42;
 
@@ -809,39 +808,8 @@ SCENARIOS.forEach(
             }
           }
 
-          const recentSlot = Number(await banksClient.getSlot());
-          const [createLutIx, lutAddress] =
-            AddressLookupTableProgram.createLookupTable({
-              authority: liquidator.wallet.publicKey,
-              payer: liquidator.wallet.publicKey,
-              recentSlot: recentSlot - 1,
-            });
-          lookupTable = lutAddress;
-
-          const createLutTx = new Transaction().add(createLutIx);
-          createLutTx.recentBlockhash = await getBankrunBlockhash(
-            bankrunContext,
-          );
-          createLutTx.sign(liquidator.wallet);
-          await banksClient.processTransaction(createLutTx);
-
-          const LUT_CHUNK_SIZE = 20;
-          const LUT_MAX_ADDRESSES = 256;
-          const addressesToLoad = lutAddresses.slice(0, LUT_MAX_ADDRESSES);
-          for (let i = 0; i < addressesToLoad.length; i += LUT_CHUNK_SIZE) {
-            const extendIx = AddressLookupTableProgram.extendLookupTable({
-              authority: liquidator.wallet.publicKey,
-              payer: liquidator.wallet.publicKey,
-              lookupTable,
-              addresses: addressesToLoad.slice(i, i + LUT_CHUNK_SIZE),
-            });
-            const extendTx = new Transaction().add(extendIx);
-            extendTx.recentBlockhash = await getBankrunBlockhash(
-              bankrunContext,
-            );
-            extendTx.sign(liquidator.wallet);
-            await banksClient.processTransaction(extendTx);
-          }
+          const account = await createLut(liquidator.wallet, lutAddresses);
+          lookupTable = account.key;
 
           // We must advance the bankrun slot to allow the lut to activate
           const ONE_MINUTE = 60;

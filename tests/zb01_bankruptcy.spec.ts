@@ -25,7 +25,6 @@ import {
   groupConfigure,
   handleBankruptcy,
 } from "./utils/group-instructions";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { assert } from "chai";
 import {
   blankBankConfigOptRaw,
@@ -55,7 +54,7 @@ import {
   assertI80F48Equal,
 } from "./utils/genericTests";
 import { initOrUpdatePriceUpdateV2 } from "./utils/pyth-pull-mocks";
-import { dumpAccBalances, bytesToF64, dumpBankrunLogs } from "./utils/tools";
+import { dumpAccBalances, bytesToF64, dumpBankrunLogs, getBankrunBlockhash } from "./utils/tools";
 
 const USER_ACCOUNT_THROWAWAY = "throwaway_account_zb01";
 const ONE_YEAR_IN_SECONDS = 2 * 365 * 24 * 60 * 60;

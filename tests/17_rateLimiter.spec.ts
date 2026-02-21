@@ -508,15 +508,15 @@ describe("Rate limiter", () => {
   });
 
   it("(admin) disabling limits removes enforcement", async () => {
-    // Set bank hourly limit to 1 USDC
+    // Set bank hourly limit to 2 USDC
     await setRateLimits({
-      bankHourly: usdcNative(1),
+      bankHourly: usdcNative(2),
       bankDaily: new BN(0),
       groupHourly: new BN(0),
       groupDaily: new BN(0),
     });
 
-    await borrowUsdc(usdcNative(1));
+    await borrowUsdc(usdcNative(2));
 
     await expectFailedTxWithMessage(async () => {
       await borrowUsdc(usdcNative(1));
@@ -533,7 +533,7 @@ describe("Rate limiter", () => {
     assertBNEqual(bank.rateLimiter.hourly.maxOutflow, 0);
 
     // Now borrow succeeds (limit disabled)
-    await borrowUsdc(usdcNative(1));
+    await borrowUsdc(usdcNative(3));
   });
 
   it("(user 2) uses cached price for inflows (repay uses bank cache, not fresh oracle)", async () => {

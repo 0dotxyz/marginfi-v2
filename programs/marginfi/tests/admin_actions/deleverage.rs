@@ -81,7 +81,7 @@ async fn deleverage_happy_path() -> anyhow::Result<()> {
 
     // Repay $10
     let repay_ix = deleveragee
-        .make_bank_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
+        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
         .await;
 
     // Health should improve from $4 (24 - 20) to $6 (16 - 10)
@@ -187,7 +187,7 @@ async fn deleverage_happy_path() -> anyhow::Result<()> {
 
     // Repay $2
     let repay_ix = deleveragee
-        .make_bank_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 2.0, None)
+        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 2.0, None)
         .await;
 
     let end_ix = deleveragee
@@ -319,7 +319,7 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
 
     // Repay $10 (even though tokenless repayments are allowed, if withdraw_all is false, we will repay WITH tokens)
     let repay_ix = deleveragee
-        .make_bank_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
+        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
         .await;
 
     // Health should not change: from $4 (24 - 20) to $4 (14 - 10)
@@ -359,7 +359,7 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
 
     // "Repay" $10 with nothing
     let repay_ix = deleveragee
-        .make_bank_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
+        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
         .await;
 
     // Health should not have changed: from $4 (14 - 10) to $4 (4 - 0)
@@ -445,7 +445,7 @@ async fn deleverage_cannot_worsen_health() -> anyhow::Result<()> {
 
     // Repay $10
     let repay_ix = deleveragee
-        .make_bank_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
+        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
         .await;
 
     // Health decreases: $10 (20 - 10) -> $8 (8 - 0)
@@ -543,7 +543,7 @@ async fn deleverage_not_risk_admin() -> anyhow::Result<()> {
 
     // Repay $10
     let repay_ix = deleveragee
-        .make_bank_repay_ix(payer_usdc_acc.key, usdc_bank, 10.0, None)
+        .make_repay_ix(payer_usdc_acc.key, usdc_bank, 10.0, None)
         .await;
 
     // Health decreases: $10 (20 - 10) -> $12 (12 - 0)
@@ -625,7 +625,7 @@ async fn deleverage_rejects_zero_weight_asset() -> anyhow::Result<()> {
         .await;
 
     let repay_ix = deleveragee
-        .make_bank_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 2.0, None)
+        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 2.0, None)
         .await;
 
     let end_ix = deleveragee
@@ -714,7 +714,7 @@ async fn deleverage_can_close_out_balances() -> anyhow::Result<()> {
 
     // The entire liability
     let repay_ix = deleveragee
-        .make_bank_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 0.0, Some(true))
+        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 0.0, Some(true))
         .await;
 
     // Health should improve from $8 (18 - 10) to $10 (10 - 0)

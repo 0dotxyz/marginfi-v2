@@ -29,11 +29,11 @@ import {
   EMODE_STABLE_TAG,
   newEmodeEntry,
 } from "./utils/types";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { deriveBankWithSeed } from "./utils/pdas";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { createMintToInstruction } from "@solana/spl-token";
 import { assert } from "chai";
+import { getBankrunBlockhash } from "./utils/tools";
 
 const seed = new BN(EMODE_SEED);
 let usdcBank: PublicKey;

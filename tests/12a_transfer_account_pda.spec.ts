@@ -20,7 +20,6 @@ import {
   ACCOUNT_TRANSFER_FEE,
   I80F48_ZERO,
 } from "./utils/types";
-import { dumpAccBalances } from "./utils/tools";
 import { deriveMarginfiAccountPda } from "./utils/pdas";
 
 let program: Program<Marginfi>;

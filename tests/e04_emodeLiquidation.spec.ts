@@ -26,12 +26,10 @@ import {
 } from "@mrgnlabs/mrgn-common";
 import { assertBankrunTxFailed } from "./utils/genericTests";
 import { USER_ACCOUNT_E } from "./utils/mocks";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import {
   EMODE_APPLIES_TO_ISOLATED,
   EMODE_LST_TAG,
   EMODE_SOL_TAG,
-  HEALTH_CACHE_HEALTHY,
   newEmodeEntry,
 } from "./utils/types";
 import {
@@ -44,7 +42,7 @@ import {
   composeRemainingAccountsByBalances,
 } from "./utils/user-instructions";
 import { configBankEmode } from "./utils/group-instructions";
-import { bytesToF64, logHealthCache } from "./utils/tools";
+import { bytesToF64, getBankrunBlockhash, logHealthCache } from "./utils/tools";
 import { assert } from "chai";
 import { dummyIx } from "./utils/bankrunConnection";
 
