@@ -205,11 +205,8 @@ pub fn lending_account_borrow<'info>(
     health_cache.program_version = PROGRAM_VERSION;
 
     let bank_pk = ctx.accounts.bank.key();
-    let bank = ctx.accounts.bank.load()?;
-    let price = fetch_unbiased_price_for_bank(&bank_pk, &bank, &clock, ctx.remaining_accounts).ok();
-    drop(bank);
-
     let mut bank = ctx.accounts.bank.load_mut()?;
+    let price = fetch_unbiased_price_for_bank(&bank_pk, &bank, &clock, ctx.remaining_accounts).ok();
 
     // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
     if !should_skip_rate_limit(marginfi_account.account_flags) {

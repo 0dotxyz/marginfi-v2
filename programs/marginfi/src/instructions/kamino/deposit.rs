@@ -1,6 +1,6 @@
 use crate::state::bank::BankVaultType;
 use crate::{
-    bank_signer, check,
+    bank_signer,
     constants::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
     events::{AccountEventHeader, LendingAccountDepositEvent},
     optional_account,
@@ -40,9 +40,7 @@ use kamino_mocks::{
     state::{MinimalObligation, MinimalReserve},
 };
 use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
-use marginfi_type_crate::types::{
-    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
-};
+use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
 /// Deposit into a Kamino pool through a marginfi account
 ///
@@ -63,12 +61,6 @@ pub fn kamino_deposit<'info>(
 
         validate_asset_tags(&bank, &marginfi_account)?;
         validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
-
-        check!(
-            !marginfi_account.get_flag(ACCOUNT_DISABLED)
-                && !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP),
-            MarginfiError::AccountDisabled
-        );
     }
 
     // Get initial obligation data to verify deposit amount later
@@ -170,6 +162,10 @@ pub struct KaminoDeposit<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
+        constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_DISABLED)
+        } @MarginfiError::AccountDisabled,
         constraint = {
             let a = marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())

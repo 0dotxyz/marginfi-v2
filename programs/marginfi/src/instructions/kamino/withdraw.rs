@@ -109,11 +109,6 @@ pub fn kamino_withdraw<'info>(
         let mut group = ctx.accounts.group.load_mut()?;
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
 
-        check!(
-            !marginfi_account.get_flag(ACCOUNT_DISABLED),
-            MarginfiError::AccountDisabled
-        );
-
         let in_receivership_or_order_execution =
             marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
         // Fetch oracle price for rate limiting and deleverage tracking
@@ -156,6 +151,7 @@ pub fn kamino_withdraw<'info>(
         } else {
             amount
         };
+
         if !should_skip_rate_limit(marginfi_account.account_flags) {
             // Bank-level rate limiting (native tokens)
             if bank.rate_limiter.is_enabled() {
@@ -243,7 +239,7 @@ pub fn kamino_withdraw<'info>(
             marginfi_account_authority: marginfi_account.authority,
             marginfi_group: marginfi_account.group,
         },
-        bank: ctx.accounts.bank.key(),
+        bank: bank_key,
         mint: bank_mint,
         amount: collateral_amount,
         close_balance: withdraw_all,
@@ -270,7 +266,7 @@ pub fn kamino_withdraw<'info>(
         health_cache.program_version = PROGRAM_VERSION;
 
         let bank_loader = &ctx.accounts.bank;
-        let bank = bank_loader.load()?;
+        let mut bank = bank_loader.load_mut()?;
         let price_for_cache = fetch_unbiased_price_for_bank(
             &bank_loader.key(),
             &bank,
@@ -278,10 +274,8 @@ pub fn kamino_withdraw<'info>(
             ctx.remaining_accounts,
         )
         .ok();
-        drop(bank);
-        bank_loader
-            .load_mut()?
-            .update_cache_price(price_for_cache)?;
+
+        bank.update_cache_price(price_for_cache)?;
 
         health_cache.set_engine_ok(true);
         marginfi_account.health_cache = health_cache;
@@ -311,6 +305,10 @@ pub struct KaminoWithdraw<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
+        constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_DISABLED)
+        } @MarginfiError::AccountDisabled,
         constraint = {
             let a = marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())
