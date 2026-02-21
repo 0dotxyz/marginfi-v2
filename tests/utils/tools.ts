@@ -1,4 +1,5 @@
 import { BN } from "@coral-xyz/anchor";
+import { inspect } from "util";
 import {
   BanksTransactionMeta,
   BanksTransactionResultWithMeta,
@@ -372,8 +373,7 @@ export const dumpBankrunLogs = (result: any): boolean => {
  * on a shared LUT that can drift as test state evolves.
  */
 export const createLookupTableForInstructions = async (
-  bankrunContext: ProgramTestContext,
-  authority: Keypair,
+  signer: Keypair,
   instructions: TransactionInstruction[],
 ): Promise<AddressLookupTableAccount> => {
   const addresses: PublicKey[] = [];
@@ -402,29 +402,26 @@ export const createLut = async (
   const recentSlot = Number(await banksClient.getSlot());
   const [createLutIx, lutAddress] = AddressLookupTableProgram.createLookupTable(
     {
-      authority: authority.publicKey,
-      payer: authority.publicKey,
+      authority: signer.publicKey,
+      payer: signer.publicKey,
       recentSlot: Math.max(0, recentSlot - 1),
     },
   );
-  await processBankrunTransaction(
-    bankrunContext,
-    new Transaction().add(createLutIx),
-    [authority],
-  );
+
+  const createLutTx = new Transaction().add(createLutIx);
+  createLutTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+  createLutTx.sign(signer);
+  await banksClient.processTransaction(createLutTx);
 
   const CHUNK_SIZE = 20;
   for (let i = 0; i < addresses.length; i += CHUNK_SIZE) {
-    const extendIx = AddressLookupTableProgram.extendLookupTable({
-      authority: authority.publicKey,
-      payer: authority.publicKey,
-      lookupTable: lutAddress,
-      addresses: addresses.slice(i, i + CHUNK_SIZE),
-    });
-    await processBankrunTransaction(
-      bankrunContext,
-      new Transaction().add(extendIx),
-      [authority],
+    const extendTx = new Transaction().add(
+      AddressLookupTableProgram.extendLookupTable({
+        authority: signer.publicKey,
+        payer: signer.publicKey,
+        lookupTable: lutAddress,
+        addresses: addresses.slice(i, i + CHUNK_SIZE),
+      }),
     );
     extendTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     extendTx.sign(signer);
