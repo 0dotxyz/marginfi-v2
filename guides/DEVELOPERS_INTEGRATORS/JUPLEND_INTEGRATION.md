@@ -14,7 +14,7 @@ integration and want to know more? Read on!
   mint. This is a JupLend pool account, not a marginfi bank.
 - fToken - Interest-bearing share token, like a mrgn bank's "share" in JupLend parlance. Deposits
   mint fTokens and withdrawals burn fTokens. The mrgn bank stores these shares in its `fToken
-  vault`.
+vault`.
 - fToken vault - The bank's `integration_acc_2` account. This vault holds the fTokens representing
   all user deposits in that wrapped bank.
 - cToken - The liquidity-layer supply unit, used extensively by Juplend under the hood, and not to
@@ -83,68 +83,71 @@ Lending state exchange rate. Include the correct remaining risk accounts and ref
 `updateRate` in the same transaction for flows that do not already call it internally. Remember that
 Juplend risk accounts are the `bank, oracle, Lending` accounts, in that order.
 
-
 ## Juplend Rewards
 
 ### Key Behavior
 
-- Rewards are **same-mint rewards**, not a second incentive token. For a USDC lending pool, rewards are
-  USDC-denominated and realized through a higher `token_exchange_price` (fToken -> underlying), not
-  through separate token transfers to marginfi users.
-- In mrgn-wrapped banks, users earn rewards implicitly by holding wrapped Juplend collateral. As
-  `token_exchange_price` rises, their collateral value in mrgn rises.
+- Rewards are **same-mint rewards**, not a second incentive token. For a USDC lending pool, rewards
+  are USDC-denominated and realized through a higher `token_exchange_price` (fToken -> underlying),
+  similar to interest earnings, not through separate token transfers, a claim portal, etc.
+- In mrgn-wrapped banks, users earn rewards implicitly by holding wrapped Juplend collateral. The
+  user doesn't do anything: as `token_exchange_price` rises, their collateral value in mrgn rises.
 
-### One-Time Setup (Admin / Integrator)
+### Starting Rewards (Juplend Admin)
 
 - Initialize rewards admin authority (Jup Rewards program): `initLendingRewardsAdmin`.
 - Initialize per-mint rewards model PDA: `initLendingRewardsRateModel`.
 - Link that rewards model to the lending pool: `setRewardsRateModel` (Jup Lending program).
-- For mrgn Juplend withdraw compatibility, initialize the claim PDA for
-  `liquidity_vault_authority` + mint via `initClaimAccount`. This instruction is permissionless
-  (any signer can pay rent to create it).
+- Call `startRewards(rewardAmount, duration, startTime, startTvl)`.
 
-### Starting Rewards (Admin)
+### One-Time Setup (mrgn-wrapped Bank Admin / Integrator)
 
-- Call `startRewards(rewardAmount, duration, startTime, startTvl)` (wrapped in our tests as
-  `startJuplendRewardsIx`).
-- Important constraints:
-  - `rewardAmount > 0`
-  - `duration > 0`
-  - cannot overlap an existing active period
-  - if prior rewards existed, Jup syncs rates first (`updateRate`) before applying new params
-- `startTvl` is a floor: if TVL is below this threshold, reward rate is effectively 0.
+- For mrgn Juplend withdraw compatibility, initialize the claim PDA for `liquidity_vault_authority`
+  - mint via `initClaimAccount`. This instruction is permissionless: any signer can pay rent to
+    create it.
 
 ### How Rewards Accrue and When They Materialize
 
 - Rewards accrue over time but are **materialized on rate refresh** (`updateRate`).
-- In mrgn integration, `juplend_deposit` and `juplend_withdraw` already call `updateRate`
-  internally, so those user actions crank rewards automatically.
-- For pure valuation/health freshness outside deposit/withdraw flows, include native Jup
-  `updateRate` in the same transaction before risk checks.
+- Rewards refresh whenever funds are updated (e.g. on deposit/withdraw/borrow/repay, etc), thus a
+  pool that hasn't had activity in some time may show stale rewards.
+  - In mrgn, `juplend_deposit` and `juplend_withdraw` already call `updateRate` internally, so those
+    user actions crank rewards automatically.
+  - For pure valuation/health freshness outside deposit/withdraw flows, include native Jup
+    `updateRate` in the same transaction before risk checks.
+- Previewing earned rewards without cranking is somewhat complex, you may prefer to approximate:
+  (user's share of pool deposits) \* (rewards per time unit), where:
+  - users's share of the pool is their ftokens balance divided by the juplend pool's total,
+  - the rewards per time unit is `rewardAmount` divided by `duration`, multiplied by your preferred
+    time unit.
 
 ### How Users “Get” Rewards in mrgn
 
 - Users do **not** call a Juplend claim instruction through mrgn to receive rewards.
 - Rewards appear as higher collateral valuation (e.g. visible after `healthPulse`).
-- To realize rewards into wallet tokens, users withdraw (`juplend_withdraw`), which burns fTokens
-  at the newer exchange rate and returns more underlying.
+- To realize rewards into wallet tokens, users withdraw (`juplend_withdraw`), which burns fTokens at
+  the newer exchange rate and returns more underlying.
 
-### Stopping / Changing Rewards
+### Stopping / Changing Rewards (Juplend Admin)
 
-- `stopRewards` (wrapped as `stopJuplendRewardsIx`) ends the active schedule early:
+- Rewards naturally have a known expiration date (`start_time` + `duration`). The following campaign
+  is visible in e.g. `next_duration`, but this is beyond the scope of this guide.
+- `stopRewards` ends the active schedule early:
   - it first syncs `updateRate`
   - then truncates the current rewards window to elapsed time
-- It fails if:
-  - rewards are already stopped/ended
-  - a next rewards period is queued (must resolve queue first)
-- To change emissions while active, protocol-side queue/cancel/transition flows exist; in our mrgn
-  integration tests we use start/stop.
+- Changing rewards is a similar process, which essentially composes start/stop (or e.g.
+  `cancelQueuedRewards` and `queueNextRewards`), and is beyond the scope of this guide
+- To see if rewards have updated, query the `LendingRewardsRateModel`. If you have the `Lending`
+  account, this is the `rewards_rate_model`. Alternatively, if you know the mint, you can derive the
+  pda using just the mint. Note the `start_time`, `duration`, and `yearly_reward`, in particular.
 
 ### Critical Funding Caveat
 
 - `startRewards` configures emissions/rate math; it does **not** by itself transfer funding into the
   reserve vault.
-- Rewards become withdrawable only if underlying liquidity is actually present (typically via
-  Jup lending-side rebalancer/funding flow).
+- Rewards become withdrawable only if underlying liquidity is actually present (typically via Jup
+  lending-side rebalancer/funding flow).
 - Therefore, it is possible to have value that appears “earned” in exchange-rate/health math, but
   fail on token outflow if reserve liquidity is short.
+- In summary, we trust Juplend administrators to actually supply the liquidity vault with the amount
+  of rewards they indicate are being earned, the program does *not* enforce this.
