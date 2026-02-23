@@ -1,22 +1,22 @@
 use crate::{
     check,
     constants::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
-    utils::integration_common::{finalize_withdrawal, record_withdrawal_outflow},
     ix_utils::{get_discrim_hash, Hashable},
     optional_account,
     state::{
         bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, calc_value,
-            is_signer_authorized, validate_remaining_accounts_for_balances_close_last,
-            BankAccountWrapper, MarginfiAccountImpl,
+            account_not_frozen_for_authority, calc_value, is_signer_authorized,
+            validate_remaining_accounts_for_balances_close_last, BankAccountWrapper,
+            MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         rate_limiter::GroupRateLimiterImpl,
     },
+    utils::integration_common::{finalize_withdrawal, record_withdrawal_outflow},
     utils::{
-        assert_within_one_token, fetch_asset_price_for_bank_low_bias,
-        is_kamino_asset_tag, validate_bank_state, InstructionKind,
+        assert_within_one_token, fetch_asset_price_for_bank_low_bias, is_kamino_asset_tag,
+        validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -37,8 +37,8 @@ use kamino_mocks::{
     state::{MinimalObligation, MinimalReserve},
 };
 use marginfi_type_crate::types::{
-    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-    ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_ORDER_EXECUTION,
+    ACCOUNT_IN_RECEIVERSHIP,
 };
 use marginfi_type_crate::{
     constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED},
@@ -133,11 +133,8 @@ pub fn kamino_withdraw<'info>(
             I80F48::ZERO
         };
 
-        let mut bank_account = BankAccountWrapper::find(
-            &bank_key,
-            &mut bank,
-            &mut marginfi_account.lending_account,
-        )?;
+        let mut bank_account =
+            BankAccountWrapper::find(&bank_key, &mut bank, &mut marginfi_account.lending_account)?;
 
         collateral_amount = if withdraw_all {
             bank_account.withdraw_all()?

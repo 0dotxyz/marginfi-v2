@@ -1,7 +1,6 @@
 use crate::{
     bank_signer, check,
     constants::DRIFT_PROGRAM_ID,
-    utils::integration_common::{finalize_deposit, record_deposit_inflow},
     state::{
         bank::BankVaultType,
         marginfi_account::{
@@ -10,9 +9,8 @@ use crate::{
         },
         marginfi_group::MarginfiGroupImpl,
     },
-    utils::{
-        is_drift_asset_tag, validate_asset_tags, validate_bank_state, InstructionKind,
-    },
+    utils::integration_common::{finalize_deposit, record_deposit_inflow},
+    utils::{is_drift_asset_tag, validate_asset_tags, validate_bank_state, InstructionKind},
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;

@@ -1,17 +1,15 @@
 use crate::{
     bank_signer, check,
-    utils::integration_common::{finalize_withdrawal, record_withdrawal_outflow},
     state::{
         bank::{BankImpl, BankVaultType},
-        marginfi_account::{
-            calc_value, BankAccountWrapper, MarginfiAccountImpl,
-        },
+        marginfi_account::{calc_value, BankAccountWrapper, MarginfiAccountImpl},
         marginfi_group::MarginfiGroupImpl,
         rate_limiter::GroupRateLimiterImpl,
     },
+    utils::integration_common::{finalize_withdrawal, record_withdrawal_outflow},
     utils::{
-        fetch_asset_price_for_bank_low_bias, is_juplend_asset_tag,
-        validate_bank_state, InstructionKind,
+        fetch_asset_price_for_bank_low_bias, is_juplend_asset_tag, validate_bank_state,
+        InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -106,11 +104,8 @@ pub fn juplend_withdraw<'info>(
             I80F48::ZERO
         };
 
-        let mut bank_account = BankAccountWrapper::find(
-            &bank_key,
-            &mut bank,
-            &mut marginfi_account.lending_account,
-        )?;
+        let mut bank_account =
+            BankAccountWrapper::find(&bank_key, &mut bank, &mut marginfi_account.lending_account)?;
 
         let (token_amount, shares_to_burn) = if withdraw_all {
             // `withdraw_all` returns the user's full fToken share balance (u64).

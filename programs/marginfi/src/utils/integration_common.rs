@@ -124,7 +124,9 @@ pub fn finalize_withdrawal<'info>(
         fetch_unbiased_price_for_bank(&bank_key, &bank, clock, remaining_accounts).ok();
     drop(bank);
 
-    bank_loader.load_mut()?.update_cache_price(price_for_cache)?;
+    bank_loader
+        .load_mut()?
+        .update_cache_price(price_for_cache)?;
 
     Ok(())
 }

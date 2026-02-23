@@ -1,11 +1,11 @@
 use crate::{
     bank_signer, check,
-    utils::integration_common::{finalize_deposit, record_deposit_inflow},
     state::{
         bank::BankVaultType,
         marginfi_account::{BankAccountWrapper, MarginfiAccountImpl},
         marginfi_group::MarginfiGroupImpl,
     },
+    utils::integration_common::{finalize_deposit, record_deposit_inflow},
     utils::{is_juplend_asset_tag, validate_asset_tags, validate_bank_state, InstructionKind},
     MarginfiError, MarginfiResult,
 };

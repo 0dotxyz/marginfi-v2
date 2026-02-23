@@ -1,21 +1,21 @@
 use crate::{
     bank_signer, check,
     constants::DRIFT_PROGRAM_ID,
-    utils::integration_common::{finalize_withdrawal, record_withdrawal_outflow},
     ix_utils::{get_discrim_hash, Hashable},
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            account_not_frozen_for_authority, calc_value,
-            is_signer_authorized, validate_remaining_accounts_for_balances_close_last,
-            BankAccountWrapper, MarginfiAccountImpl,
+            account_not_frozen_for_authority, calc_value, is_signer_authorized,
+            validate_remaining_accounts_for_balances_close_last, BankAccountWrapper,
+            MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         rate_limiter::GroupRateLimiterImpl,
     },
+    utils::integration_common::{finalize_withdrawal, record_withdrawal_outflow},
     utils::{
-        fetch_asset_price_for_bank_low_bias, is_drift_asset_tag,
-        validate_bank_state, InstructionKind,
+        fetch_asset_price_for_bank_low_bias, is_drift_asset_tag, validate_bank_state,
+        InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -31,8 +31,8 @@ use drift_mocks::drift::cpi::{update_spot_market_cumulative_interest, withdraw};
 use drift_mocks::state::MinimalUser;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{
-    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-    ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_ORDER_EXECUTION,
+    ACCOUNT_IN_RECEIVERSHIP,
 };
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_IN_DELEVERAGE,
@@ -109,14 +109,15 @@ pub fn drift_withdraw<'info>(
         let integration_acc_1 = ctx.accounts.integration_acc_1.load()?;
         let market_index = integration_acc_1.market_index;
 
-        let mut bank_account = BankAccountWrapper::find(
-            &bank_key,
-            &mut bank,
-            &mut marginfi_account.lending_account,
-        )?;
+        let mut bank_account =
+            BankAccountWrapper::find(&bank_key, &mut bank, &mut marginfi_account.lending_account)?;
 
-        let (token_amount, expected_scaled_balance_change) =
-            resolve_withdrawal_amounts(withdraw_all, amount, &mut bank_account, &integration_acc_1)?;
+        let (token_amount, expected_scaled_balance_change) = resolve_withdrawal_amounts(
+            withdraw_all,
+            amount,
+            &mut bank_account,
+            &integration_acc_1,
+        )?;
 
         record_withdrawal_outflow(
             group_rate_limit_enabled,
@@ -139,7 +140,12 @@ pub fn drift_withdraw<'info>(
             group.update_withdrawn_equity(withdrawn_equity, clock.unix_timestamp)?;
         }
 
-        (token_amount, expected_scaled_balance_change, authority_bump, market_index)
+        (
+            token_amount,
+            expected_scaled_balance_change,
+            authority_bump,
+            market_index,
+        )
     };
 
     // When calling withdraw_all, it's possible that the remaining scaled balance is worth less than
@@ -541,4 +547,3 @@ fn resolve_withdrawal_amounts(
         Ok((token_amount, scaled_decrement))
     }
 }
-
