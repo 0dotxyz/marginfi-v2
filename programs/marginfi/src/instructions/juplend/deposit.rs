@@ -1,9 +1,9 @@
 use crate::{
     bank_signer, check,
-    events::{AccountEventHeader, LendingAccountDepositEvent},
+    utils::integration_common::{finalize_deposit, record_deposit_inflow},
     state::{
-        bank::{BankImpl, BankVaultType},
-        marginfi_account::{BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl},
+        bank::BankVaultType,
+        marginfi_account::{BankAccountWrapper, MarginfiAccountImpl},
         marginfi_group::MarginfiGroupImpl,
     },
     utils::{is_juplend_asset_tag, validate_asset_tags, validate_bank_state, InstructionKind},
@@ -90,7 +90,7 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let group = &ctx.accounts.group.load()?;
+        let mut group = ctx.accounts.group.load_mut()?;
         let clock = Clock::get()?;
 
         let mut bank_account = BankAccountWrapper::find_or_create(
@@ -101,22 +101,24 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
 
         bank_account.deposit_no_repay(I80F48::from_num(minted_shares))?;
 
-        bank.update_bank_cache(group)?;
-
-        marginfi_account.last_update = clock.unix_timestamp as u64;
-        marginfi_account.lending_account.sort_balances();
-
-        emit!(LendingAccountDepositEvent {
-            header: AccountEventHeader {
-                signer: Some(ctx.accounts.authority.key()),
-                marginfi_account: ctx.accounts.marginfi_account.key(),
-                marginfi_account_authority: marginfi_account.authority,
-                marginfi_group: marginfi_account.group,
-            },
-            bank: ctx.accounts.bank.key(),
-            mint: bank.mint,
+        record_deposit_inflow(
+            &mut bank,
+            &mut group,
+            marginfi_account.account_flags,
             amount,
-        });
+            &clock,
+        )?;
+
+        finalize_deposit(
+            &mut bank,
+            &group,
+            &mut marginfi_account,
+            ctx.accounts.authority.key(),
+            ctx.accounts.marginfi_account.key(),
+            ctx.accounts.bank.key(),
+            amount,
+            &clock,
+        )?;
     }
 
     Ok(())
@@ -125,6 +127,7 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
 #[derive(Accounts)]
 pub struct JuplendDeposit<'info> {
     #[account(
+        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused

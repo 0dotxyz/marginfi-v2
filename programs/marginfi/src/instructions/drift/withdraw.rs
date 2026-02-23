@@ -1,23 +1,20 @@
 use crate::{
     bank_signer, check,
-    constants::{DRIFT_PROGRAM_ID, PROGRAM_VERSION},
-    events::{AccountEventHeader, LendingAccountWithdrawEvent},
+    constants::DRIFT_PROGRAM_ID,
+    utils::integration_common::{finalize_withdrawal, record_withdrawal_outflow},
     ix_utils::{get_discrim_hash, Hashable},
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            account_not_frozen_for_authority, calc_value, check_account_init_health,
+            account_not_frozen_for_authority, calc_value,
             is_signer_authorized, validate_remaining_accounts_for_balances_close_last,
-            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            BankAccountWrapper, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        rate_limiter::{
-            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
-            GroupRateLimiterImpl,
-        },
+        rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
-        fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank, is_drift_asset_tag,
+        fetch_asset_price_for_bank_low_bias, is_drift_asset_tag,
         validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
@@ -29,13 +26,12 @@ use anchor_spl::token::accessor;
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
-use bytemuck::Zeroable;
 use drift_mocks::drift::cpi::accounts::{UpdateSpotMarketCumulativeInterest, Withdraw};
 use drift_mocks::drift::cpi::{update_spot_market_cumulative_interest, withdraw};
 use drift_mocks::state::MinimalUser;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{
-    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
     ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
 };
 use marginfi_type_crate::{
@@ -59,8 +55,6 @@ pub fn drift_withdraw<'info>(
     withdraw_all: Option<bool>,
 ) -> MarginfiResult {
     let withdraw_all = withdraw_all.unwrap_or(false);
-    let authority_bump: u8;
-    let market_index: u16;
 
     ctx.accounts.cpi_update_spot_market_cumulative_interest()?;
 
@@ -76,11 +70,11 @@ pub fn drift_withdraw<'info>(
             &bank_key,
         )?;
     }
-    let (token_amount, expected_scaled_balance_change) = {
+    let (token_amount, expected_scaled_balance_change, authority_bump, market_index) = {
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut group = ctx.accounts.group.load_mut()?;
-        authority_bump = bank.liquidity_vault_authority_bump;
+        let authority_bump = bank.liquidity_vault_authority_bump;
 
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
 
@@ -113,105 +107,26 @@ pub fn drift_withdraw<'info>(
         };
 
         let integration_acc_1 = ctx.accounts.integration_acc_1.load()?;
-        market_index = integration_acc_1.market_index;
+        let market_index = integration_acc_1.market_index;
 
         let mut bank_account = BankAccountWrapper::find(
-            &ctx.accounts.bank.key(),
+            &bank_key,
             &mut bank,
             &mut marginfi_account.lending_account,
         )?;
 
-        let (token_amount, expected_scaled_balance_change) = if withdraw_all {
-            let scaled_balance = bank_account.withdraw_all()?;
+        let (token_amount, expected_scaled_balance_change) =
+            resolve_withdrawal_amounts(withdraw_all, amount, &mut bank_account, &integration_acc_1)?;
 
-            let mut token_amount = integration_acc_1.get_withdraw_token_amount(scaled_balance)?;
-            let mut expected_scaled_balance_change =
-                integration_acc_1.get_scaled_balance_decrement(token_amount)?;
-
-            // If rounding would require more scaled balance than we have, reduce the withdraw
-            // amount by 1 base unit to keep the init deposit buffer intact. In practice, this means
-            // if you deposit and immediately withdraw_all, you will lose one lamport, which will be
-            // trapped in the Drift init buffer forever.
-            if expected_scaled_balance_change == scaled_balance + 1 && token_amount > 0 {
-                token_amount = token_amount.saturating_sub(1);
-                expected_scaled_balance_change =
-                    integration_acc_1.get_scaled_balance_decrement(token_amount)?;
-            }
-
-            // Sanity check
-            require_gte!(
-                scaled_balance,
-                expected_scaled_balance_change,
-                MarginfiError::MathError
-            );
-
-            (token_amount, expected_scaled_balance_change)
-        } else {
-            let mut scaled_decrement = integration_acc_1.get_scaled_balance_decrement(amount)?;
-            let mut token_amount = amount;
-
-            let asset_shares_i80f48: I80F48 = bank_account.balance.asset_shares.into();
-            let asset_shares = asset_shares_i80f48.to_num::<u64>();
-
-            // In some edge cases (such as when depositing and immediately withdrawing), the
-            // requested token amount rounds up to a scaled decrement that exceeds the user's actual
-            // scaled balance. In this case, we recompute the actual amounts from shares.
-            //
-            // ## Additional Notes:
-            // * Bear in mind that one scaled-balance-unit is not neccessarily equal to one lamport.
-            // * This is distinct from a true over-withdraw (>1 scaled unit), which still fails.
-            // * A user can request up to ~1 scaled-unit over the true max; we will round down and
-            //   withdraw only what they actually have, so the instruction input amount may not
-            //   match the transfer. This is especially relevant for accounting systems that use the
-            //   `amount` input to track funds: these may be slightly off.
-            // * We cannot just `token_amount = token_amount.saturating_sub(1)` here because unlike
-            //   withdraw_all, the token amount wasn’t derived from `asset_shares`.
-            if scaled_decrement > asset_shares + 1 {
-                return Err(error!(MarginfiError::OperationWithdrawOnly));
-            } else if scaled_decrement == asset_shares + 1 {
-                token_amount = integration_acc_1.get_withdraw_token_amount(asset_shares)?;
-                scaled_decrement = integration_acc_1.get_scaled_balance_decrement(token_amount)?;
-            }
-
-            bank_account.withdraw(I80F48::from_num(scaled_decrement))?;
-
-            (token_amount, scaled_decrement)
-        };
-
-        // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
-        if !should_skip_rate_limit(marginfi_account.account_flags) {
-            // Bank-level rate limiting (native tokens)
-            if bank.rate_limiter.is_enabled() {
-                bank.rate_limiter
-                    .try_record_outflow(token_amount, clock.unix_timestamp)?;
-            }
-
-            // Group-level rate limiting (USD) - use fresh oracle price
-            if group_rate_limit_enabled {
-                check!(price > I80F48::ZERO, MarginfiError::InvalidRateLimitPrice);
-
-                // Apply any pending untracked inflows before recording the outflow
-                if bank.rate_limiter.untracked_inflow != 0 {
-                    let mint_decimals = bank.mint_decimals;
-                    bank.rate_limiter.apply_untracked_inflow(
-                        &mut group.rate_limiter,
-                        price,
-                        mint_decimals,
-                        clock.unix_timestamp,
-                    )?;
-                }
-
-                let usd_value = calc_value(
-                    I80F48::from_num(token_amount),
-                    price,
-                    bank.mint_decimals,
-                    None,
-                )?;
-                group
-                    .rate_limiter
-                    .try_record_outflow(usd_value.to_num::<u64>(), clock.unix_timestamp)?;
-            }
-        }
+        record_withdrawal_outflow(
+            group_rate_limit_enabled,
+            token_amount,
+            price,
+            &mut bank,
+            &mut group,
+            &marginfi_account,
+            &clock,
+        )?;
 
         // Track withdrawal limit for risk admin during deleverage
         if marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE) {
@@ -224,7 +139,7 @@ pub fn drift_withdraw<'info>(
             group.update_withdrawn_equity(withdrawn_equity, clock.unix_timestamp)?;
         }
 
-        (token_amount, expected_scaled_balance_change)
+        (token_amount, expected_scaled_balance_change, authority_bump, market_index)
     };
 
     // When calling withdraw_all, it's possible that the remaining scaled balance is worth less than
@@ -266,7 +181,7 @@ pub fn drift_withdraw<'info>(
         );
 
         ctx.accounts
-            .cpi_transfer_liquidity_vault_to_destination(actual_amount_received)?;
+            .cpi_transfer_liquidity_vault_to_destination(actual_amount_received, authority_bump)?;
         actual_amount_received
     };
 
@@ -278,64 +193,21 @@ pub fn drift_withdraw<'info>(
         // Update bank cache after modifying balances
         bank.update_bank_cache(group)?;
 
-        marginfi_account.last_update = Clock::get()?.unix_timestamp as u64;
-
-        emit!(LendingAccountWithdrawEvent {
-            header: AccountEventHeader {
-                signer: Some(ctx.accounts.authority.key()),
-                marginfi_account: ctx.accounts.marginfi_account.key(),
-                marginfi_account_authority: marginfi_account.authority,
-                marginfi_group: marginfi_account.group,
-            },
-            bank: ctx.accounts.bank.key(),
-            mint: bank.mint,
-            amount: actual_amount_received,
-            close_balance: withdraw_all,
-        });
-
-        let mut health_cache = HealthCache::zeroed();
-        health_cache.timestamp = Clock::get()?.unix_timestamp;
-
-        marginfi_account.lending_account.sort_balances();
-
-        // Drop the bank mutable borrow before health check (bank is in remaining_accounts)
+        let bank_mint = bank.mint;
         drop(bank);
 
-        // Note: during liquidation/deleverage or order execution, we skip all health checks until
-        // the end of the transaction.
-        if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION) {
-            check_account_init_health(
-                &marginfi_account,
-                ctx.remaining_accounts,
-                &mut Some(&mut health_cache),
-            )?;
-
-            health_cache.program_version = PROGRAM_VERSION;
-            let bank_loader = &ctx.accounts.bank;
-
-            let bank = bank_loader.load()?;
-            let price_for_cache = fetch_unbiased_price_for_bank(
-                &bank_loader.key(),
-                &bank,
-                &clock,
-                ctx.remaining_accounts,
-            )
-            .ok();
-            drop(bank);
-            bank_loader
-                .load_mut()?
-                .update_cache_price(price_for_cache)?;
-
-            health_cache.set_engine_ok(true);
-            marginfi_account.health_cache = health_cache;
-        } else {
-            let mut bank = ctx.accounts.bank.load_mut()?;
-            let price_for_cache =
-                fetch_unbiased_price_for_bank(&bank_key, &bank, &clock, ctx.remaining_accounts)
-                    .ok();
-
-            bank.update_cache_price(price_for_cache)?;
-        }
+        finalize_withdrawal(
+            &mut marginfi_account,
+            &ctx.accounts.bank,
+            bank_key,
+            bank_mint,
+            ctx.accounts.authority.key(),
+            ctx.accounts.marginfi_account.key(),
+            actual_amount_received,
+            withdraw_all,
+            &clock,
+            ctx.remaining_accounts,
+        )?;
     }
 
     Ok(())
@@ -531,66 +403,19 @@ impl<'info> DriftWithdraw<'info> {
         let program = self.drift_program.to_account_info();
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
-        let mut cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
-
-        // Construct remaining accounts in the required order for Drift:
-        // 1. Oracle accounts (if provided) - main oracle first, then reward oracle
-        // 2. Spot market accounts - main spot market first, then reward spot market
-        // 3. Token mint (required for Token-2022, harmless to include for regular mints)
-        //
-        // IMPORTANT: If admin deposits exist in other markets (rewards), you MUST:
-        // 1. Include the reward oracle and spot market accounts
-        // 2. Harvest the rewards immediately after withdrawal
-        // Drift typically only has one reward asset at a time
-        let mut remaining_accounts = Vec::new();
-
-        // Add main oracle if provided (not needed if using oracle type QuoteAsset)
-        if let Some(oracle) = &self.drift_oracle {
-            remaining_accounts.push(oracle.to_account_info());
-        }
-
-        // Add first reward oracle if provided (for admin deposits)
-        if let Some(reward_oracle) = &self.drift_reward_oracle {
-            remaining_accounts.push(reward_oracle.to_account_info());
-        }
-
-        // Add second reward oracle if provided (backup for multiple rewards)
-        if let Some(reward_oracle_2) = &self.drift_reward_oracle_2 {
-            remaining_accounts.push(reward_oracle_2.to_account_info());
-        }
-
-        // Always add main spot market account
-        remaining_accounts.push(self.integration_acc_1.to_account_info());
-
-        // Add first reward spot market if provided (for admin deposits)
-        if let Some(reward_spot_market) = &self.drift_reward_spot_market {
-            remaining_accounts.push(reward_spot_market.to_account_info());
-        }
-
-        // Add second reward spot market if provided (backup for multiple rewards)
-        if let Some(reward_spot_market_2) = &self.drift_reward_spot_market_2 {
-            remaining_accounts.push(reward_spot_market_2.to_account_info());
-        }
-
-        // Always add main token mint (needed for Token-2022 support)
-        remaining_accounts.push(self.mint.to_account_info());
-
-        if let Some(reward_mint) = &self.drift_reward_mint {
-            remaining_accounts.push(reward_mint.to_account_info());
-        }
-
-        if let Some(reward_mint_2) = &self.drift_reward_mint_2 {
-            remaining_accounts.push(reward_mint_2.to_account_info());
-        }
-
-        cpi_ctx = cpi_ctx.with_remaining_accounts(remaining_accounts);
+        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds)
+            .with_remaining_accounts(self.build_drift_remaining_accounts());
 
         // Call drift withdraw with reduce_only = true (don't allow borrowing)
         withdraw(cpi_ctx, market_index, amount, true)?;
         Ok(())
     }
 
-    pub fn cpi_transfer_liquidity_vault_to_destination(&self, amount: u64) -> MarginfiResult {
+    pub fn cpi_transfer_liquidity_vault_to_destination(
+        &self,
+        amount: u64,
+        authority_bump: u8,
+    ) -> MarginfiResult {
         let program = self.token_program.to_account_info();
         let accounts = TransferChecked {
             from: self.liquidity_vault.to_account_info(),
@@ -598,18 +423,53 @@ impl<'info> DriftWithdraw<'info> {
             authority: self.liquidity_vault_authority.to_account_info(),
             mint: self.mint.to_account_info(),
         };
-        let bank_key = self.bank.key();
-        let bump = self.bank.load()?.liquidity_vault_authority_bump;
-        let seeds = &[
-            LIQUIDITY_VAULT_AUTHORITY_SEED.as_bytes(),
-            bank_key.as_ref(),
-            &[bump],
-        ];
-        let signer_seeds: &[&[&[u8]]] = &[seeds];
+        let signer_seeds: &[&[&[u8]]] =
+            bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
         let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
-        let decimals = self.mint.decimals;
-        transfer_checked(cpi_ctx, amount, decimals)?;
+        transfer_checked(cpi_ctx, amount, self.mint.decimals)?;
         Ok(())
+    }
+
+    /// Constructs remaining accounts in the order Drift expects:
+    /// 1. Oracles (main, then reward oracles)
+    /// 2. Spot markets (main, then reward spot markets)
+    /// 3. Mints (main, then reward mints — main mint needed for Token-2022)
+    ///
+    /// If admin deposits exist in other markets (rewards), the reward oracle and
+    /// spot market accounts MUST be included and rewards harvested after withdrawal.
+    fn build_drift_remaining_accounts(&self) -> Vec<AccountInfo<'info>> {
+        let mut accounts = Vec::new();
+
+        // Oracles
+        if let Some(ref oracle) = self.drift_oracle {
+            accounts.push(oracle.to_account_info());
+        }
+        if let Some(ref oracle) = self.drift_reward_oracle {
+            accounts.push(oracle.to_account_info());
+        }
+        if let Some(ref oracle) = self.drift_reward_oracle_2 {
+            accounts.push(oracle.to_account_info());
+        }
+
+        // Spot markets
+        accounts.push(self.integration_acc_1.to_account_info());
+        if let Some(ref market) = self.drift_reward_spot_market {
+            accounts.push(market.to_account_info());
+        }
+        if let Some(ref market) = self.drift_reward_spot_market_2 {
+            accounts.push(market.to_account_info());
+        }
+
+        // Mints
+        accounts.push(self.mint.to_account_info());
+        if let Some(ref mint) = self.drift_reward_mint {
+            accounts.push(mint.to_account_info());
+        }
+        if let Some(ref mint) = self.drift_reward_mint_2 {
+            accounts.push(mint.to_account_info());
+        }
+
+        accounts
     }
 }
 
@@ -618,3 +478,67 @@ impl Hashable for DriftWithdraw<'_> {
         get_discrim_hash("global", "drift_withdraw")
     }
 }
+fn resolve_withdrawal_amounts(
+    withdraw_all: bool,
+    amount: u64,
+    bank_account: &mut BankAccountWrapper,
+    integration_acc_1: &drift_mocks::state::MinimalSpotMarket,
+) -> MarginfiResult<(u64, u64)> {
+    if withdraw_all {
+        let scaled_balance = bank_account.withdraw_all()?;
+
+        let mut token_amount = integration_acc_1.get_withdraw_token_amount(scaled_balance)?;
+        let mut expected_scaled_balance_change =
+            integration_acc_1.get_scaled_balance_decrement(token_amount)?;
+
+        // If rounding would require more scaled balance than we have, reduce the withdraw
+        // amount by 1 base unit to keep the init deposit buffer intact. In practice, this means
+        // if you deposit and immediately withdraw_all, you will lose one lamport, which will be
+        // trapped in the Drift init buffer forever.
+        if expected_scaled_balance_change == scaled_balance + 1 && token_amount > 0 {
+            token_amount = token_amount.saturating_sub(1);
+            expected_scaled_balance_change =
+                integration_acc_1.get_scaled_balance_decrement(token_amount)?;
+        }
+
+        // Sanity check
+        require_gte!(
+            scaled_balance,
+            expected_scaled_balance_change,
+            MarginfiError::MathError
+        );
+
+        Ok((token_amount, expected_scaled_balance_change))
+    } else {
+        let mut scaled_decrement = integration_acc_1.get_scaled_balance_decrement(amount)?;
+        let mut token_amount = amount;
+
+        let asset_shares_i80f48: I80F48 = bank_account.balance.asset_shares.into();
+        let asset_shares = asset_shares_i80f48.to_num::<u64>();
+
+        // In some edge cases (such as when depositing and immediately withdrawing), the
+        // requested token amount rounds up to a scaled decrement that exceeds the user’s actual
+        // scaled balance. In this case, we recompute the actual amounts from shares.
+        //
+        // ## Additional Notes:
+        // * Bear in mind that one scaled-balance-unit is not neccessarily equal to one lamport.
+        // * This is distinct from a true over-withdraw (>1 scaled unit), which still fails.
+        // * A user can request up to ~1 scaled-unit over the true max; we will round down and
+        //   withdraw only what they actually have, so the instruction input amount may not
+        //   match the transfer. This is especially relevant for accounting systems that use the
+        //   `amount` input to track funds: these may be slightly off.
+        // * We cannot just `token_amount = token_amount.saturating_sub(1)` here because unlike
+        //   withdraw_all, the token amount wasn’t derived from `asset_shares`.
+        if scaled_decrement > asset_shares + 1 {
+            return Err(error!(MarginfiError::OperationWithdrawOnly));
+        } else if scaled_decrement == asset_shares + 1 {
+            token_amount = integration_acc_1.get_withdraw_token_amount(asset_shares)?;
+            scaled_decrement = integration_acc_1.get_scaled_balance_decrement(token_amount)?;
+        }
+
+        bank_account.withdraw(I80F48::from_num(scaled_decrement))?;
+
+        Ok((token_amount, scaled_decrement))
+    }
+}
+

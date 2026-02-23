@@ -1,22 +1,17 @@
 use crate::{
     bank_signer, check,
     constants::DRIFT_PROGRAM_ID,
-    events::{AccountEventHeader, LendingAccountDepositEvent},
+    utils::integration_common::{finalize_deposit, record_deposit_inflow},
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankVaultType,
         marginfi_account::{
-            account_not_frozen_for_authority, calc_value, is_signer_authorized, BankAccountWrapper,
-            LendingAccountImpl, MarginfiAccountImpl,
+            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
+            MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        rate_limiter::{
-            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
-            GroupRateLimiterImpl,
-        },
     },
     utils::{
-        fetch_rate_limit_price_for_inflow, is_drift_asset_tag, validate_asset_tags,
-        validate_bank_state, InstructionKind,
+        is_drift_asset_tag, validate_asset_tags, validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -108,47 +103,24 @@ pub fn drift_deposit<'info>(
         let scaled_balance_change_i80f48 = I80F48::from_num(scaled_balance_change);
         bank_account.deposit_no_repay(scaled_balance_change_i80f48)?;
 
-        // Record inflow so net-outflow windows release capacity.
-        if !should_skip_rate_limit(marginfi_account.account_flags) {
-            if bank.rate_limiter.is_enabled() {
-                bank.rate_limiter
-                    .record_inflow(amount, clock.unix_timestamp);
-            }
-
-            if group.rate_limiter.is_enabled() {
-                let rate_limit_price = fetch_rate_limit_price_for_inflow(&bank, &clock)?;
-                match rate_limit_price {
-                    Some(price) => {
-                        let usd_value =
-                            calc_value(I80F48::from_num(amount), price, bank.mint_decimals, None)?;
-                        group
-                            .rate_limiter
-                            .record_inflow(usd_value.to_num::<u64>(), clock.unix_timestamp);
-                    }
-                    None => {
-                        bank.rate_limiter.record_untracked_inflow(amount);
-                    }
-                }
-            }
-        }
-
-        // Update bank cache after modifying balances
-        bank.update_bank_cache(&group)?;
-
-        marginfi_account.last_update = clock.unix_timestamp as u64;
-        marginfi_account.lending_account.sort_balances();
-
-        emit!(LendingAccountDepositEvent {
-            header: AccountEventHeader {
-                signer: Some(ctx.accounts.authority.key()),
-                marginfi_account: ctx.accounts.marginfi_account.key(),
-                marginfi_account_authority: marginfi_account.authority,
-                marginfi_group: marginfi_account.group,
-            },
-            bank: ctx.accounts.bank.key(),
-            mint: bank.mint,
+        record_deposit_inflow(
+            &mut bank,
+            &mut group,
+            marginfi_account.account_flags,
             amount,
-        });
+            &clock,
+        )?;
+
+        finalize_deposit(
+            &mut bank,
+            &group,
+            &mut marginfi_account,
+            ctx.accounts.authority.key(),
+            ctx.accounts.marginfi_account.key(),
+            ctx.accounts.bank.key(),
+            amount,
+            &clock,
+        )?;
     }
 
     Ok(())

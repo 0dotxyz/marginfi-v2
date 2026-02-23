@@ -1,17 +1,16 @@
 use crate::{
     bank_signer, check,
-    constants::PROGRAM_VERSION,
-    events::{AccountEventHeader, LendingAccountWithdrawEvent},
+    utils::integration_common::{finalize_withdrawal, record_withdrawal_outflow},
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            calc_value, check_account_init_health, BankAccountWrapper, LendingAccountImpl,
-            MarginfiAccountImpl,
+            calc_value, BankAccountWrapper, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
+        rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
-        fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank, is_juplend_asset_tag,
+        fetch_asset_price_for_bank_low_bias, is_juplend_asset_tag,
         validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
@@ -22,7 +21,6 @@ use anchor_spl::token::accessor;
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
-use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use juplend_mocks::juplend_earn::cpi::accounts::{UpdateRate, Withdraw as WithdrawCpi};
 use juplend_mocks::juplend_earn::cpi::{update_rate, withdraw as cpi_withdraw};
@@ -31,7 +29,7 @@ use juplend_mocks::state::{
     Lending as JuplendLending,
 };
 use marginfi_type_crate::types::{
-    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
 };
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_IN_DELEVERAGE,
@@ -86,23 +84,30 @@ pub fn juplend_withdraw<'info>(
             MarginfiError::AccountDisabled
         );
 
-        // Validate price is non-zero during liquidation/deleverage to prevent exploits with stale oracles.
+        // Fetch oracle price for rate limiting and deleverage tracking.
+        // When group rate limiter is enabled, oracle is required.
         let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
-        let price = if in_receivership {
+        let group_rate_limit_enabled = group.rate_limiter.is_enabled();
+        let price = if in_receivership || group_rate_limit_enabled {
             let price = fetch_asset_price_for_bank_low_bias(
                 &bank_key,
                 &bank,
                 &clock,
                 ctx.remaining_accounts,
             )?;
-            check!(price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
+
+            // Validate price is non-zero during liquidation/deleverage to prevent exploits with stale oracles.
+            if in_receivership {
+                check!(price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
+            }
+
             price
         } else {
             I80F48::ZERO
         };
 
         let mut bank_account = BankAccountWrapper::find(
-            &ctx.accounts.bank.key(),
+            &bank_key,
             &mut bank,
             &mut marginfi_account.lending_account,
         )?;
@@ -142,6 +147,16 @@ pub fn juplend_withdraw<'info>(
 
             (amount, shares_to_burn)
         };
+
+        record_withdrawal_outflow(
+            group_rate_limit_enabled,
+            token_amount,
+            price,
+            &mut bank,
+            &mut group,
+            &marginfi_account,
+            &clock,
+        )?;
 
         // Track withdrawal limit for risk admin during deleverage.
         if marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE) {
@@ -232,66 +247,21 @@ pub fn juplend_withdraw<'info>(
 
         bank.update_bank_cache(group)?;
 
-        marginfi_account.last_update = clock.unix_timestamp as u64;
-
-        emit!(LendingAccountWithdrawEvent {
-            header: AccountEventHeader {
-                signer: Some(ctx.accounts.authority.key()),
-                marginfi_account: ctx.accounts.marginfi_account.key(),
-                marginfi_account_authority: marginfi_account.authority,
-                marginfi_group: marginfi_account.group,
-            },
-            bank: ctx.accounts.bank.key(),
-            mint: bank.mint,
-            amount: received_underlying,
-            close_balance: withdraw_all,
-        });
-
-        let mut health_cache = HealthCache::zeroed();
-        health_cache.timestamp = clock.unix_timestamp;
-
-        marginfi_account.lending_account.sort_balances();
-
-        // Drop bank mutable borrow before health check (bank is in remaining_accounts).
+        let bank_mint = bank.mint;
         drop(bank);
 
-        // Skip health checks during liquidation; checked at end of tx.
-        // During receivership we still update the price cache but skip the risk check.
-        if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
-            check_account_init_health(
-                &marginfi_account,
-                ctx.remaining_accounts,
-                &mut Some(&mut health_cache),
-            )?;
-            health_cache.program_version = PROGRAM_VERSION;
-
-            let bank_loader = &ctx.accounts.bank;
-            let bank = bank_loader.load()?;
-            let clock = Clock::get()?;
-            let price_for_cache = fetch_unbiased_price_for_bank(
-                &bank_loader.key(),
-                &bank,
-                &clock,
-                ctx.remaining_accounts,
-            )
-            .ok();
-            drop(bank);
-            bank_loader
-                .load_mut()?
-                .update_cache_price(price_for_cache)?;
-
-            health_cache.set_engine_ok(true);
-            marginfi_account.health_cache = health_cache;
-        } else {
-            // Note: the caller can simply omit risk accounts since the risk check is ignored here,
-            // in that case the cache doesn't update and this does nothing.
-            let mut bank = ctx.accounts.bank.load_mut()?;
-            let clock = Clock::get()?;
-            let price_for_cache =
-                fetch_unbiased_price_for_bank(&bank_key, &bank, &clock, ctx.remaining_accounts)
-                    .ok();
-            bank.update_cache_price(price_for_cache)?;
-        }
+        finalize_withdrawal(
+            &mut marginfi_account,
+            &ctx.accounts.bank,
+            bank_key,
+            bank_mint,
+            ctx.accounts.authority.key(),
+            ctx.accounts.marginfi_account.key(),
+            received_underlying,
+            withdraw_all,
+            &clock,
+            ctx.remaining_accounts,
+        )?;
     }
 
     Ok(())
