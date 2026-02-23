@@ -318,6 +318,17 @@ pub mod marginfi {
         marginfi_account::lending_account_repay(ctx, amount, repay_all)
     }
 
+    /// (account authority, flashloan-only) Repay borrowed assets while in flashloan mode.
+    /// Equivalent to `lending_account_repay` except `group` is passed readonly and group
+    /// rate-limiter state is not updated.
+    pub fn lending_account_repay_flashloan<'info>(
+        ctx: Context<'_, '_, 'info, 'info, LendingAccountRepayFlashloan<'info>>,
+        amount: u64,
+        repay_all: Option<bool>,
+    ) -> MarginfiResult {
+        marginfi_account::lending_account_repay_flashloan(ctx, amount, repay_all)
+    }
+
     /// (account authority, or any signer during receivership) Withdraw assets from a bank. Accrues
     /// interest, records withdrawal, transfers tokens, and runs a health check (skipped during
     /// receivership).
@@ -336,6 +347,16 @@ pub mod marginfi {
         amount: u64,
     ) -> MarginfiResult {
         marginfi_account::lending_account_borrow(ctx, amount)
+    }
+
+    /// (account authority, flashloan-only) Borrow assets while in flashloan mode. Equivalent to
+    /// `lending_account_borrow` except `group` is passed readonly and group rate-limiter state is
+    /// not updated.
+    pub fn lending_account_borrow_flashloan<'info>(
+        ctx: Context<'_, '_, 'info, 'info, LendingAccountBorrowFlashloan<'info>>,
+        amount: u64,
+    ) -> MarginfiResult {
+        marginfi_account::lending_account_borrow_flashloan(ctx, amount)
     }
 
     /// (account authority) Close a balance position with dust-level amounts. Claims outstanding

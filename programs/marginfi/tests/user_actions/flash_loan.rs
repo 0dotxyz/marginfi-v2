@@ -25,6 +25,8 @@ use solana_sdk::{
 // 8. Flashloan fails because `end_flashloan` ix is for another account
 // 9. Flashloan fails because account is already in a flashloan
 // 10. Flashloan fails because account transfer during flashloan
+// 11. Flashloan fails when using regular borrow instruction
+// 12. Flashloan fails when using regular repay instruction
 
 #[tokio::test]
 async fn flashloan_success_1op() -> anyhow::Result<()> {
@@ -49,11 +51,11 @@ async fn flashloan_success_1op() -> anyhow::Result<()> {
     let borrower_token_account_f_sol = test_f.sol_mint.create_empty_token_account().await;
     // Borrow SOL
     let borrow_ix = borrower_mfi_account_f
-        .make_bank_borrow_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
+        .make_bank_borrow_flashloan_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
         .await;
 
     let repay_ix = borrower_mfi_account_f
-        .make_repay_ix(
+        .make_repay_flashloan_ix(
             borrower_token_account_f_sol.key,
             sol_bank,
             1_000,
@@ -96,12 +98,12 @@ async fn flashloan_success_3op() -> anyhow::Result<()> {
     let mut ixs = Vec::new();
     for _ in 0..3 {
         let borrow_ix = borrower_mfi_account_f
-            .make_bank_borrow_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
+            .make_bank_borrow_flashloan_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
             .await;
         ixs.push(borrow_ix);
 
         let repay_ix = borrower_mfi_account_f
-            .make_repay_ix(
+            .make_repay_flashloan_ix(
                 borrower_token_account_f_sol.key,
                 sol_bank,
                 1_000,
@@ -144,7 +146,7 @@ async fn flashloan_fail_account_health() -> anyhow::Result<()> {
     let borrower_token_account_f_sol = test_f.sol_mint.create_empty_token_account().await;
     // Borrow SOL
     let borrow_ix = borrower_mfi_account_f
-        .make_bank_borrow_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
+        .make_bank_borrow_flashloan_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
         .await;
 
     let flash_loan_result = borrower_mfi_account_f
@@ -154,6 +156,79 @@ async fn flashloan_fail_account_health() -> anyhow::Result<()> {
     assert_custom_error!(
         flash_loan_result.unwrap_err(),
         MarginfiError::RiskEngineInitRejected
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn flashloan_fail_regular_borrow_instruction() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+
+    let lender_mfi_account_f = test_f.create_marginfi_account().await;
+    let lender_token_account_f_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    lender_mfi_account_f
+        .try_bank_deposit(lender_token_account_f_sol.key, sol_bank, 1_000, None)
+        .await?;
+
+    let borrower_mfi_account_f = test_f.create_marginfi_account().await;
+    let borrower_token_account_f_sol = test_f.sol_mint.create_empty_token_account().await;
+
+    // Regular borrow is forbidden during flashloan mode.
+    let regular_borrow_ix = borrower_mfi_account_f
+        .make_bank_borrow_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
+        .await;
+
+    let flash_loan_result = borrower_mfi_account_f
+        .try_flashloan(vec![regular_borrow_ix], vec![], vec![sol_bank.key], None)
+        .await;
+
+    assert_custom_error!(
+        flash_loan_result.unwrap_err(),
+        MarginfiError::IllegalFlashloan
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn flashloan_fail_regular_repay_instruction() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+
+    let lender_mfi_account_f = test_f.create_marginfi_account().await;
+    let lender_token_account_f_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    lender_mfi_account_f
+        .try_bank_deposit(lender_token_account_f_sol.key, sol_bank, 1_000, None)
+        .await?;
+
+    let borrower_mfi_account_f = test_f.create_marginfi_account().await;
+    let borrower_token_account_f_sol = test_f.sol_mint.create_empty_token_account().await;
+
+    // Regular repay is forbidden during flashloan mode.
+    let regular_repay_ix = borrower_mfi_account_f
+        .make_repay_ix(
+            borrower_token_account_f_sol.key,
+            sol_bank,
+            1_000,
+            Some(true),
+        )
+        .await;
+
+    let flash_loan_result = borrower_mfi_account_f
+        .try_flashloan(vec![regular_repay_ix], vec![], vec![sol_bank.key], None)
+        .await;
+
+    assert_custom_error!(
+        flash_loan_result.unwrap_err(),
+        MarginfiError::IllegalFlashloan
     );
 
     Ok(())
@@ -184,11 +259,11 @@ async fn flashloan_ok_missing_flag() -> anyhow::Result<()> {
     // Borrow SOL
 
     let borrow_ix = borrower_mfi_account_f
-        .make_bank_borrow_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
+        .make_bank_borrow_flashloan_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
         .await;
 
     let repay_ix = borrower_mfi_account_f
-        .make_repay_ix(
+        .make_repay_flashloan_ix(
             borrower_token_account_f_sol.key,
             sol_bank,
             1_000,
@@ -229,11 +304,11 @@ async fn flashloan_fail_missing_fe_ix() -> anyhow::Result<()> {
     // Borrow SOL
 
     let borrow_ix = borrower_mfi_account_f
-        .make_bank_borrow_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
+        .make_bank_borrow_flashloan_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
         .await;
 
     let repay_ix = borrower_mfi_account_f
-        .make_repay_ix(
+        .make_repay_flashloan_ix(
             borrower_token_account_f_sol.key,
             sol_bank,
             1_000,
@@ -289,11 +364,11 @@ async fn flashloan_fail_missing_invalid_sysvar_ixs() -> anyhow::Result<()> {
     // Borrow SOL
 
     let borrow_ix = borrower_mfi_account_f
-        .make_bank_borrow_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
+        .make_bank_borrow_flashloan_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
         .await;
 
     let repay_ix = borrower_mfi_account_f
-        .make_repay_ix(
+        .make_repay_flashloan_ix(
             borrower_token_account_f_sol.key,
             sol_bank,
             1_000,
@@ -364,7 +439,7 @@ async fn flashloan_fail_invalid_end_fl_order() -> anyhow::Result<()> {
     // Borrow SOL
 
     let borrow_ix = borrower_mfi_account_f
-        .make_bank_borrow_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
+        .make_bank_borrow_flashloan_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
         .await;
 
     let mut ixs = vec![borrow_ix];
@@ -420,7 +495,7 @@ async fn flashloan_fail_invalid_end_fl_different_m_account() -> anyhow::Result<(
     // Borrow SOL
 
     let borrow_ix = borrower_mfi_account_f
-        .make_bank_borrow_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
+        .make_bank_borrow_flashloan_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
         .await;
 
     let mut ixs = vec![borrow_ix];
@@ -476,7 +551,7 @@ async fn flashloan_fail_already_in_flashloan() -> anyhow::Result<()> {
     // Borrow SOL
 
     let borrow_ix = borrower_mfi_account_f
-        .make_bank_borrow_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
+        .make_bank_borrow_flashloan_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
         .await;
 
     let mut ixs = vec![borrow_ix];
@@ -532,7 +607,7 @@ async fn flashloan_fail_account_transfer_during_flashloan() -> anyhow::Result<()
 
     // Borrow SOL
     let borrow_ix = borrower_mfi_account_f
-        .make_bank_borrow_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
+        .make_bank_borrow_flashloan_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
         .await;
 
     let new_authority = Keypair::new();
@@ -612,7 +687,7 @@ async fn flashloan_fail_bankruptcy_during_flashloan() -> anyhow::Result<()> {
 
     // Borrow SOL
     let borrow_ix = borrower_mfi_account_f
-        .make_bank_borrow_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
+        .make_bank_borrow_flashloan_ix(borrower_token_account_f_sol.key, sol_bank, 1_000)
         .await;
 
     let bank_pk = sol_bank.key;

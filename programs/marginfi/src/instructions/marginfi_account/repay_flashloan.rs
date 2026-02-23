@@ -1,8 +1,7 @@
-use super::borrow_common;
+use super::repay_common;
 use crate::{
     prelude::{MarginfiError, MarginfiResult},
     state::{
-        bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, is_signer_authorized, MarginfiAccountImpl,
         },
@@ -12,41 +11,34 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
-use marginfi_type_crate::{
-    constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, TOKENLESS_REPAYMENTS_ALLOWED},
-    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_IN_FLASHLOAN},
-};
+use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_IN_FLASHLOAN};
 
-/// 1. Accrue interest
-/// 2. Create the user's bank account for the asset borrowed if it does not exist yet
-/// 3. Record liability increase in the bank account
-/// 4. Transfer funds from the bank's liquidity vault to the signer's token account
-/// 5. Verify that the user account is in a healthy state
-///
-/// Will error if there is an existing asset <=> withdrawing is not allowed.
-pub fn lending_account_borrow<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, LendingAccountBorrow<'info>>,
+/// Flashloan-only variant of `lending_account_repay`:
+/// - Requires account to be in flashloan mode.
+/// - Passes `group` as readonly and never mutates group rate-limiter state.
+pub fn lending_account_repay_flashloan<'info>(
+    mut ctx: Context<'_, '_, 'info, 'info, LendingAccountRepayFlashloan<'info>>,
     amount: u64,
+    repay_all: Option<bool>,
 ) -> MarginfiResult {
-    borrow_common::lending_account_borrow_common(
+    repay_common::lending_account_repay_common(
         &ctx.accounts.marginfi_account,
         &ctx.accounts.group,
         &ctx.accounts.bank,
-        &ctx.accounts.destination_token_account,
+        &ctx.accounts.signer_token_account,
         &ctx.accounts.liquidity_vault,
-        &ctx.accounts.bank_liquidity_vault_authority,
         &ctx.accounts.token_program,
         &ctx.accounts.authority,
         &mut ctx.remaining_accounts,
         amount,
-        true,
+        repay_all,
+        false,
     )
 }
 
 #[derive(Accounts)]
-pub struct LendingAccountBorrow<'info> {
+pub struct LendingAccountRepayFlashloan<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused
@@ -63,13 +55,17 @@ pub struct LendingAccountBorrow<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false)
+            is_signer_authorized(&a, g.admin, authority.key(), true, true)
         } @ MarginfiError::Unauthorized,
-        constraint = !marginfi_account.load()?.get_flag(ACCOUNT_IN_FLASHLOAN)
+        constraint = marginfi_account.load()?.get_flag(ACCOUNT_IN_FLASHLOAN)
             @ MarginfiError::IllegalFlashloan
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
+    /// Must be marginfi_account's authority, unless in liquidation/deleverage receivership or order execution
+    ///
+    /// Note: during receivership and order execution, there are no signer checks whatsoever: any key can repay as
+    /// long as the invariants checked at the end of execution are met.
     pub authority: Signer<'info>,
 
     #[account(
@@ -77,25 +73,13 @@ pub struct LendingAccountBorrow<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
         constraint = is_marginfi_asset_tag(bank.load()?.config.asset_tag)
-            @ MarginfiError::WrongAssetTagForStandardInstructions,
-        // Prevents footgun where admin forgot to put a deleveraging bank into reduce-only mode
-        constraint = !bank.load()?.get_flag(TOKENLESS_REPAYMENTS_ALLOWED)
-            @MarginfiError::ForbiddenIx
+            @ MarginfiError::WrongAssetTagForStandardInstructions
     )]
     pub bank: AccountLoader<'info, Bank>,
 
+    /// CHECK: Token mint/authority are checked at transfer
     #[account(mut)]
-    pub destination_token_account: InterfaceAccount<'info, TokenAccount>,
-
-    /// CHECK: Seed constraint check
-    #[account(
-        seeds = [
-            LIQUIDITY_VAULT_AUTHORITY_SEED.as_bytes(),
-            bank.key().as_ref(),
-        ],
-        bump = bank.load() ?.liquidity_vault_authority_bump,
-    )]
-    pub bank_liquidity_vault_authority: AccountInfo<'info>,
+    pub signer_token_account: AccountInfo<'info>,
 
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,

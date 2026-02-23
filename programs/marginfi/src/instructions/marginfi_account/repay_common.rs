@@ -1,0 +1,220 @@
+use crate::{
+    check,
+    events::{AccountEventHeader, LendingAccountRepayEvent},
+    prelude::{MarginfiError, MarginfiResult},
+    state::{
+        bank::BankImpl,
+        marginfi_account::{
+            calc_value, validate_remaining_accounts_for_balances_unordered, BankAccountWrapper,
+            LendingAccountImpl, MarginfiAccountImpl,
+        },
+        rate_limiter::{
+            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
+            GroupRateLimiterImpl,
+        },
+    },
+    utils::{self, fetch_rate_limit_price_for_inflow, validate_bank_state, InstructionKind},
+};
+use anchor_lang::prelude::*;
+use anchor_lang::solana_program::{clock::Clock, sysvar::Sysvar};
+use anchor_spl::token_interface::{TokenAccount, TokenInterface};
+use fixed::types::I80F48;
+use fixed_macro::types::I80F48;
+use marginfi_type_crate::{
+    constants::{
+        TOKENLESS_REPAYMENTS_ALLOWED, TOKENLESS_REPAYMENTS_COMPLETE, ZERO_AMOUNT_THRESHOLD,
+    },
+    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_FLASHLOAN},
+};
+
+/// Shared implementation for repay instructions.
+///
+/// `allow_group_rate_limit_mutation` must be `true` for normal repays and `false` for
+/// flashloan-only variants that pass `group` as readonly.
+#[allow(clippy::too_many_arguments)]
+pub fn lending_account_repay_common<'info>(
+    marginfi_account_loader: &AccountLoader<'info, MarginfiAccount>,
+    marginfi_group_loader: &AccountLoader<'info, MarginfiGroup>,
+    bank_loader: &AccountLoader<'info, Bank>,
+    signer_token_account: &AccountInfo<'info>,
+    bank_liquidity_vault: &InterfaceAccount<'info, TokenAccount>,
+    token_program: &Interface<'info, TokenInterface>,
+    authority: &Signer<'info>,
+    remaining_accounts: &mut &'info [AccountInfo<'info>],
+    amount: u64,
+    repay_all: Option<bool>,
+    allow_group_rate_limit_mutation: bool,
+) -> MarginfiResult {
+    let clock = Clock::get()?;
+    let repay_all = repay_all.unwrap_or(false);
+    let mut marginfi_account = marginfi_account_loader.load_mut()?;
+
+    check!(
+        !marginfi_account.get_flag(ACCOUNT_DISABLED),
+        MarginfiError::AccountDisabled
+    );
+
+    if allow_group_rate_limit_mutation {
+        check!(
+            !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
+            MarginfiError::IllegalFlashloan
+        );
+    } else {
+        check!(
+            marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
+            MarginfiError::IllegalFlashloan
+        );
+    }
+
+    let maybe_bank_mint = {
+        let bank = bank_loader.load()?;
+        utils::maybe_take_bank_mint(remaining_accounts, &bank, token_program.key)?
+    };
+
+    if repay_all {
+        // Require remaining accounts for all active balances, including the one being closed.
+        validate_remaining_accounts_for_balances_unordered(
+            &marginfi_account.lending_account,
+            *remaining_accounts,
+        )?;
+    }
+
+    let mut bank = bank_loader.load_mut()?;
+    validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
+
+    {
+        let group = marginfi_group_loader.load()?;
+        bank.accrue_interest(
+            clock.unix_timestamp,
+            &group,
+            #[cfg(not(feature = "client"))]
+            bank_loader.key(),
+        )?;
+    }
+
+    let group_rate_limit_enabled = marginfi_group_loader.load()?.rate_limiter.is_enabled();
+    let rate_limit_price = if group_rate_limit_enabled {
+        fetch_rate_limit_price_for_inflow(&bank, &clock)?
+    } else {
+        None
+    };
+
+    let lending_account = &mut marginfi_account.lending_account;
+    let mut bank_account =
+        BankAccountWrapper::find(&bank_loader.key(), &mut bank, lending_account)?;
+
+    let repay_amount_post_fee = if repay_all {
+        bank_account.repay_all()?
+    } else {
+        bank_account.repay(I80F48::from_num(amount))?;
+
+        amount
+    };
+    marginfi_account.last_update = clock.unix_timestamp as u64;
+
+    // Record inflow so net-outflow windows release capacity.
+    if !should_skip_rate_limit(marginfi_account.account_flags) {
+        // Bank-level rate limiting (native tokens)
+        if bank.rate_limiter.is_enabled() {
+            bank.rate_limiter
+                .record_inflow(repay_amount_post_fee, clock.unix_timestamp);
+        }
+
+        // Group-level rate limiting (USD) - prefer live price, fall back to cached.
+        if group_rate_limit_enabled {
+            match rate_limit_price {
+                Some(price) => {
+                    check!(
+                        allow_group_rate_limit_mutation,
+                        MarginfiError::IllegalFlashloan
+                    );
+
+                    // Valid price available - record directly to group limiter
+                    let usd_value = calc_value(
+                        I80F48::from_num(repay_amount_post_fee),
+                        price,
+                        bank.mint_decimals,
+                        None,
+                    )?;
+                    let mut group = marginfi_group_loader.load_mut()?;
+                    group
+                        .rate_limiter
+                        .record_inflow(usd_value.to_num::<u64>(), clock.unix_timestamp);
+                }
+                None => {
+                    // No valid price - track at bank level to apply later
+                    bank.rate_limiter
+                        .record_untracked_inflow(repay_amount_post_fee);
+                }
+            }
+        }
+    }
+
+    let group_risk_admin = marginfi_group_loader.load()?.risk_admin;
+    if authority.key() == group_risk_admin
+        && bank.get_flag(TOKENLESS_REPAYMENTS_ALLOWED)
+        && repay_all
+    {
+        // In some rare cases (e.g. super illiquid token sunset) we allow risk admin
+        // to "repay" the debt with nothing. Hence we skip the actual transfer here.
+
+        // repay_all must be enabled: this enables the risk admin to voluntarily pay when it wants,
+        // but in general, once the risk admin is prepared to use this feature, there's no point in
+        // not repaying the entire balance!
+
+        // Note: Doing this means there will not be enough funds left for lenders to withdraw! This
+        // state is irrecoverable. Lenders will be paid out on a first-come-first-served basis as
+        // they withdraw. Remaining lenders will either absorb the loss - or more likely - be repaid
+        // through some OTC claims portal using assets seized from borrowers
+    } else {
+        let repay_amount_pre_fee = maybe_bank_mint
+            .as_ref()
+            .map(|mint| {
+                utils::calculate_pre_fee_spl_deposit_amount(
+                    mint.to_account_info(),
+                    repay_amount_post_fee,
+                    clock.epoch,
+                )
+            })
+            .transpose()?
+            .unwrap_or(repay_amount_post_fee);
+
+        bank.deposit_spl_transfer(
+            repay_amount_pre_fee,
+            signer_token_account.to_account_info(),
+            bank_liquidity_vault.to_account_info(),
+            authority.to_account_info(),
+            maybe_bank_mint.as_ref(),
+            token_program.to_account_info(),
+            *remaining_accounts,
+        )?;
+    }
+
+    // During deleverage, once the last repayment is complete, and the bank's debts have been fully
+    // discharged, the risk admin becomes empowered to purge the balances of lenders
+    let liabs: I80F48 = bank.total_liability_shares.into();
+    if bank.get_flag(TOKENLESS_REPAYMENTS_ALLOWED)
+        && liabs.abs() < ZERO_AMOUNT_THRESHOLD * I80F48!(10)
+    {
+        bank.update_flag(true, TOKENLESS_REPAYMENTS_COMPLETE);
+    }
+
+    let group = marginfi_group_loader.load()?;
+    bank.update_bank_cache(&group)?;
+    emit!(LendingAccountRepayEvent {
+        header: AccountEventHeader {
+            signer: Some(authority.key()),
+            marginfi_account: marginfi_account_loader.key(),
+            marginfi_account_authority: marginfi_account.authority,
+            marginfi_group: marginfi_account.group,
+        },
+        bank: bank_loader.key(),
+        mint: bank.mint,
+        amount: repay_amount_post_fee,
+        close_balance: repay_all,
+    });
+
+    marginfi_account.lending_account.sort_balances();
+
+    Ok(())
+}

@@ -17,15 +17,11 @@ use marginfi_type_crate::{
     types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_IN_FLASHLOAN},
 };
 
-/// 1. Accrue interest
-/// 2. Create the user's bank account for the asset borrowed if it does not exist yet
-/// 3. Record liability increase in the bank account
-/// 4. Transfer funds from the bank's liquidity vault to the signer's token account
-/// 5. Verify that the user account is in a healthy state
-///
-/// Will error if there is an existing asset <=> withdrawing is not allowed.
-pub fn lending_account_borrow<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, LendingAccountBorrow<'info>>,
+/// Flashloan-only variant of `lending_account_borrow`:
+/// - Requires account to be in flashloan mode.
+/// - Passes `group` as readonly and never mutates group rate-limiter state.
+pub fn lending_account_borrow_flashloan<'info>(
+    mut ctx: Context<'_, '_, 'info, 'info, LendingAccountBorrowFlashloan<'info>>,
     amount: u64,
 ) -> MarginfiResult {
     borrow_common::lending_account_borrow_common(
@@ -39,14 +35,13 @@ pub fn lending_account_borrow<'info>(
         &ctx.accounts.authority,
         &mut ctx.remaining_accounts,
         amount,
-        true,
+        false,
     )
 }
 
 #[derive(Accounts)]
-pub struct LendingAccountBorrow<'info> {
+pub struct LendingAccountBorrowFlashloan<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused
@@ -65,7 +60,7 @@ pub struct LendingAccountBorrow<'info> {
             let g = group.load()?;
             is_signer_authorized(&a, g.admin, authority.key(), false, false)
         } @ MarginfiError::Unauthorized,
-        constraint = !marginfi_account.load()?.get_flag(ACCOUNT_IN_FLASHLOAN)
+        constraint = marginfi_account.load()?.get_flag(ACCOUNT_IN_FLASHLOAN)
             @ MarginfiError::IllegalFlashloan
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

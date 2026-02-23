@@ -1,4 +1,6 @@
 mod borrow;
+mod borrow_common;
+mod borrow_flashloan;
 mod close;
 mod close_balance;
 mod deposit;
@@ -14,10 +16,13 @@ mod order;
 mod pulse_health;
 mod purge_delev_balance;
 mod repay;
+mod repay_common;
+mod repay_flashloan;
 mod transfer_account;
 mod withdraw;
 
 pub use borrow::*;
+pub use borrow_flashloan::*;
 pub use close::*;
 pub use close_balance::*;
 pub use deposit::*;
@@ -33,5 +38,6 @@ pub use order::*;
 pub use pulse_health::*;
 pub use purge_delev_balance::*;
 pub use repay::*;
+pub use repay_flashloan::*;
 pub use transfer_account::*;
 pub use withdraw::*;
