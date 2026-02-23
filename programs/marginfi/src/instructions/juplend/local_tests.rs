@@ -258,7 +258,10 @@ mod tests {
         let token_price = 1_000_000_000u64; // 0.001x
         let l = lending_state(1_000_000_000_000, token_price);
         let safe = largest_safe_assets_for_shares(token_price);
-        assert!(safe < u64::MAX / 500, "1000x amplification should have a low boundary");
+        assert!(
+            safe < u64::MAX / 500,
+            "1000x amplification should have a low boundary"
+        );
         assert!(l.expected_shares_for_deposit(safe).is_some());
         assert!(l.expected_shares_for_deposit(safe + 1).is_none());
 
@@ -269,16 +272,21 @@ mod tests {
         assert!(l.expected_shares_for_deposit(safe + 1).is_none());
     }
 
-
     #[test]
     fn expected_shares_to_burn_for_withdrawal_matches_computed_values() {
         // Baseline: price at 1e12 -> shares == assets (no rounding)
         let l = lending_state(0, 1_000_000_000_000);
-        assert_eq!(l.expected_shares_for_withdraw(100_000_000).unwrap(), 100_000_000);
+        assert_eq!(
+            l.expected_shares_for_withdraw(100_000_000).unwrap(),
+            100_000_000
+        );
 
         // 1.5x price: ceil(100_000_000 * 1e12 / 1.5e12) = ceil(66_666_666.66...) = 66_666_667
         let l = lending_state(0, 1_500_000_000_000);
-        assert_eq!(l.expected_shares_for_withdraw(100_000_000).unwrap(), 66_666_667);
+        assert_eq!(
+            l.expected_shares_for_withdraw(100_000_000).unwrap(),
+            66_666_667
+        );
 
         // Exact division: no ceiling bump
         // ceil(150 * 1e12 / 1.5e12) = ceil(100.0) = 100
@@ -289,7 +297,10 @@ mod tests {
         let l = lending_state(0, 900_000_000_000);
         let shares = l.expected_shares_for_withdraw(100).unwrap();
         assert_eq!(shares, 112);
-        assert!(shares > 100, "sub-1e12 price must burn more shares than assets");
+        assert!(
+            shares > 100,
+            "sub-1e12 price must burn more shares than assets"
+        );
 
         // Tiny withdrawal: ceil always produces at least 1 share
         let l = lending_state(0, 1_500_000_000_000);
@@ -413,7 +424,11 @@ mod tests {
                 assert!(
                     burned >= minted,
                     "burned {} < minted {} at amount={}, liq={}, tok={}",
-                    burned, minted, amount, liq_price, tok_price
+                    burned,
+                    minted,
+                    amount,
+                    liq_price,
+                    tok_price
                 );
             }
         }
@@ -426,7 +441,9 @@ mod tests {
         let redeem_l = lending_state(1_000_000_000_000, 1_500_000_000_000); // 1.5x yield
 
         let deposit_amount = 100_000_000u64;
-        let shares = deposit_l.expected_shares_for_deposit(deposit_amount).unwrap();
+        let shares = deposit_l
+            .expected_shares_for_deposit(deposit_amount)
+            .unwrap();
         let redeemed = redeem_l.expected_assets_for_redeem(shares).unwrap();
 
         // 100M shares * 1.5e12 / 1e12 = 150M
@@ -454,18 +471,27 @@ mod tests {
     fn assets_for_redeem_at_baseline_price() {
         // price at 1e12 -> assets == shares (1:1)
         let l = lending_state(0, 1_000_000_000_000);
-        assert_eq!(l.expected_assets_for_redeem(100_000_000).unwrap(), 100_000_000);
+        assert_eq!(
+            l.expected_assets_for_redeem(100_000_000).unwrap(),
+            100_000_000
+        );
     }
 
     #[test]
     fn assets_for_redeem_with_yield() {
         // 1.5x price: floor(100_000_000 * 1.5e12 / 1e12) = 150_000_000
         let l = lending_state(0, 1_500_000_000_000);
-        assert_eq!(l.expected_assets_for_redeem(100_000_000).unwrap(), 150_000_000);
+        assert_eq!(
+            l.expected_assets_for_redeem(100_000_000).unwrap(),
+            150_000_000
+        );
 
         // 2x price: floor(100_000_000 * 2e12 / 1e12) = 200_000_000
         let l = lending_state(0, 2_000_000_000_000);
-        assert_eq!(l.expected_assets_for_redeem(100_000_000).unwrap(), 200_000_000);
+        assert_eq!(
+            l.expected_assets_for_redeem(100_000_000).unwrap(),
+            200_000_000
+        );
     }
 
     #[test]
