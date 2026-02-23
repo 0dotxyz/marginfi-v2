@@ -13,8 +13,12 @@ pub fn lending_pool_configure_bank_interest_only(
     ctx: Context<LendingPoolConfigureBankInterestOnly>,
     interest_rate_config: InterestRateConfigOpt,
 ) -> MarginfiResult {
-    msg!("Configuring bank : {:?}", ctx.accounts.bank.key());
     let mut bank = ctx.accounts.bank.load_mut()?;
+    msg!(
+        "Configuring bank: {:?} mint: {:?}",
+        ctx.accounts.bank.key(),
+        bank.mint
+    );
 
     // If settings are frozen, interest rates can't update.
     if bank.get_flag(FREEZE_SETTINGS) {
@@ -52,8 +56,12 @@ pub fn lending_pool_configure_bank_limits_only(
     borrow_limit: Option<u64>,
     total_asset_value_init_limit: Option<u64>,
 ) -> MarginfiResult {
-    msg!("Configuring bank : {:?}", ctx.accounts.bank.key());
     let mut bank = ctx.accounts.bank.load_mut()?;
+    msg!(
+        "Configuring bank: {:?} mint: {:?}",
+        ctx.accounts.bank.key(),
+        bank.mint
+    );
 
     // If settings are frozen, only deposit and borrow limits can update
     if bank.get_flag(FREEZE_SETTINGS) {
