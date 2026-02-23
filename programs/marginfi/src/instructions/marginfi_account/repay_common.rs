@@ -75,7 +75,7 @@ pub fn lending_account_repay_common<'info>(
         // Require remaining accounts for all active balances, including the one being closed.
         validate_remaining_accounts_for_balances_unordered(
             &marginfi_account.lending_account,
-            *remaining_accounts,
+            remaining_accounts,
         )?;
     }
 
@@ -186,7 +186,7 @@ pub fn lending_account_repay_common<'info>(
             authority.to_account_info(),
             maybe_bank_mint.as_ref(),
             token_program.to_account_info(),
-            *remaining_accounts,
+            remaining_accounts,
         )?;
     }
 

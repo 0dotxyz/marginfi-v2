@@ -272,6 +272,7 @@ export type BorrowIxArgs = {
   tokenAccount: PublicKey;
   remaining: PublicKey[];
   amount: BN;
+  variant?: "regular" | "flashloan";
 };
 
 /**
@@ -291,8 +292,11 @@ export const borrowIx = (program: Program<Marginfi>, args: BorrowIxArgs) => {
     isSigner: false,
     isWritable: false,
   }));
-  const ix = program.methods
-    .lendingAccountBorrow(args.amount)
+  const borrowMethod =
+    args.variant === "flashloan"
+      ? program.methods.lendingAccountBorrowFlashloan(args.amount)
+      : program.methods.lendingAccountBorrow(args.amount);
+  const ix = borrowMethod
     .accounts({
       // marginfiGroup: args.marginfiGroup, // implied from bank
       marginfiAccount: args.marginfiAccount,

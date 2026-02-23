@@ -146,7 +146,7 @@ pub fn lending_account_borrow_common<'info>(
                 bank_loader.key(),
                 liquidity_vault_authority_bump
             ),
-            *remaining_accounts,
+            remaining_accounts,
         )?;
 
         emit!(LendingAccountBorrowEvent {
@@ -201,14 +201,14 @@ pub fn lending_account_borrow_common<'info>(
     // Assuming `remaining_accounts` holds only oracle accounts
     check_account_init_health(
         &marginfi_account,
-        *remaining_accounts,
+        remaining_accounts,
         &mut Some(&mut health_cache),
     )?;
     health_cache.program_version = PROGRAM_VERSION;
 
     let bank_pk = bank_loader.key();
     let bank = bank_loader.load()?;
-    let price = fetch_unbiased_price_for_bank(&bank_pk, &bank, &clock, *remaining_accounts).ok();
+    let price = fetch_unbiased_price_for_bank(&bank_pk, &bank, &clock, remaining_accounts).ok();
     drop(bank);
 
     let mut bank = bank_loader.load_mut()?;

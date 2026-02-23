@@ -729,6 +729,7 @@ describe("Rate limiter", () => {
       tokenAccount: rateLimitUser.usdcAccount,
       remaining: usdcRemainingAccounts(),
       amount: usdcNative(5), // 5x the hourly limit
+      variant: "flashloan",
     });
 
     // Flashloan end instruction
