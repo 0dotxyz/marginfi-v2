@@ -51,6 +51,8 @@ export type JuplendPoolKeys = {
   supplyPositionOnLiquidity: PublicKey;
   /** Liquidity-side user borrow position PDA owned by the lending state. */
   borrowPositionOnLiquidity: PublicKey;
+  /** Expected withdraw intermediary ATA for a marginfi bank when derivation context is provided. */
+  withdrawIntermediaryAta?: PublicKey;
 };
 
 type LiquidityAccounts = IdlAccounts<JuplendLiquidityIdl>;
