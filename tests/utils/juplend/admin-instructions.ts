@@ -1,7 +1,12 @@
+import { BN } from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
 
 import type { JuplendPrograms } from "./types";
-import type { JuplendBorrowConfig, JuplendUserClassEntry } from "./types";
+import type {
+  JuplendBorrowConfig,
+  JuplendPoolKeys,
+  JuplendUserClassEntry,
+} from "./types";
 import {
   JUPLEND_LENDING_PROGRAM_ID,
   JUPLEND_LIQUIDITY_PROGRAM_ID,
@@ -143,6 +148,94 @@ export const updateJuplendUserBorrowConfigIx = (
     })
     .accountsPartial({
       protocol: args.protocol,
+    })
+    .instruction();
+};
+
+export type InitJuplendClaimAccountArgs = {
+  signer: PublicKey;
+  mint: PublicKey;
+  accountFor: PublicKey;
+  claimAccount?: PublicKey;
+};
+
+/**
+ * (Permissionless) Any wallet can create a claim account a jup user. This means that if jup starts
+ * a reward, somebody (anybody) must create one for the liquidity vault authority.
+ * @param programs
+ * @param args
+ * @returns
+ */
+export const initJuplendClaimAccountIx = (
+  programs: JuplendPrograms,
+  args: InitJuplendClaimAccountArgs,
+) => {
+  return programs.liquidity.methods
+    .initClaimAccount(args.mint, args.accountFor)
+    .accounts({
+      signer: args.signer,
+    })
+    .accountsPartial({
+      claimAccount: args.claimAccount,
+    })
+    .instruction();
+};
+
+export type StartJuplendRewardsArgs = {
+  authority: PublicKey;
+  pool: JuplendPoolKeys;
+  rewardAmount: BN;
+  duration: BN;
+  startTime?: BN;
+  startTvl?: BN;
+  lendingProgram?: PublicKey;
+};
+
+export const startJuplendRewardsIx = (
+  programs: JuplendPrograms,
+  args: StartJuplendRewardsArgs,
+) => {
+  return programs.rewards.methods
+    .startRewards(
+      args.rewardAmount,
+      args.duration,
+      args.startTime ?? new BN(0),
+      args.startTvl ?? new BN(0),
+    )
+    .accounts({
+      authority: args.authority,
+      lendingRewardsAdmin: args.pool.lendingRewardsAdmin,
+      lendingAccount: args.pool.lending,
+      mint: args.pool.mint,
+      fTokenMint: args.pool.fTokenMint,
+      supplyTokenReservesLiquidity: args.pool.tokenReserve,
+      lendingRewardsRateModel: args.pool.lendingRewardsRateModel,
+      lendingProgram: args.lendingProgram ?? JUPLEND_LENDING_PROGRAM_ID,
+    })
+    .instruction();
+};
+
+export type StopJuplendRewardsArgs = {
+  authority: PublicKey;
+  pool: JuplendPoolKeys;
+  lendingProgram?: PublicKey;
+};
+
+export const stopJuplendRewardsIx = (
+  programs: JuplendPrograms,
+  args: StopJuplendRewardsArgs,
+) => {
+  return programs.rewards.methods
+    .stopRewards()
+    .accounts({
+      authority: args.authority,
+      lendingRewardsAdmin: args.pool.lendingRewardsAdmin,
+      lendingAccount: args.pool.lending,
+      mint: args.pool.mint,
+      fTokenMint: args.pool.fTokenMint,
+      supplyTokenReservesLiquidity: args.pool.tokenReserve,
+      lendingRewardsRateModel: args.pool.lendingRewardsRateModel,
+      lendingProgram: args.lendingProgram ?? JUPLEND_LENDING_PROGRAM_ID,
     })
     .instruction();
 };

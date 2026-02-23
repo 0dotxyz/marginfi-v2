@@ -1,9 +1,11 @@
 import { BN } from "@coral-xyz/anchor";
+import { inspect } from "util";
 import {
   BanksTransactionMeta,
   BanksTransactionResultWithMeta,
 } from "solana-bankrun";
 import { ProgramTestContext } from "solana-bankrun";
+import BigNumber from "bignumber.js";
 import {
   AddressLookupTableAccount,
   AddressLookupTableProgram,
@@ -159,6 +161,13 @@ export function processBankrunTransaction(
   trySend?: false,
   dumpLogOnFail?: boolean,
 ): Promise<BanksTransactionMeta>;
+export function processBankrunTransaction(
+  bankrunContext: ProgramTestContext,
+  tx: Transaction,
+  signers: Keypair[],
+  trySend?: boolean,
+  dumpLogOnFail?: boolean,
+): Promise<BanksTransactionMeta>;
 export async function processBankrunTransaction(
   bankrunContext: ProgramTestContext,
   tx: Transaction,
@@ -197,6 +206,13 @@ export function processBankrunV0Transaction(
   tx: VersionedTransaction,
   signers: Keypair[],
   trySend?: false,
+  dumpLogOnFail?: boolean,
+): Promise<BanksTransactionMeta>;
+export function processBankrunV0Transaction(
+  bankrunContext: ProgramTestContext,
+  tx: VersionedTransaction,
+  signers: Keypair[],
+  trySend?: boolean,
   dumpLogOnFail?: boolean,
 ): Promise<BanksTransactionMeta>;
 export async function processBankrunV0Transaction(
@@ -388,7 +404,7 @@ export const createLut = async (
     {
       authority: signer.publicKey,
       payer: signer.publicKey,
-      recentSlot: recentSlot - 1,
+      recentSlot: Math.max(0, recentSlot - 1),
     },
   );
 
@@ -397,14 +413,14 @@ export const createLut = async (
   createLutTx.sign(signer);
   await banksClient.processTransaction(createLutTx);
 
-  const CHUNK = 20;
-  for (let i = 0; i < addresses.length; i += CHUNK) {
+  const CHUNK_SIZE = 20;
+  for (let i = 0; i < addresses.length; i += CHUNK_SIZE) {
     const extendTx = new Transaction().add(
       AddressLookupTableProgram.extendLookupTable({
         authority: signer.publicKey,
         payer: signer.publicKey,
         lookupTable: lutAddress,
-        addresses: addresses.slice(i, i + CHUNK),
+        addresses: addresses.slice(i, i + CHUNK_SIZE),
       }),
     );
     extendTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -611,6 +627,25 @@ export const toBn = (value: BN | number | bigint) => {
   if (typeof value === "bigint") return new BN(value.toString());
   if (typeof value === "number") return new BN(value);
   return value;
+};
+
+/**
+ * Returns the user's active asset shares for a given bank as raw BigNumber precision.
+ * Returns zero when no active balance exists for that bank.
+ */
+export const getUserAssetShares = async (
+  marginfiAccountPk: PublicKey,
+  bankPk: PublicKey,
+): Promise<BigNumber> => {
+  const marginfiAccount = await bankrunProgram.account.marginfiAccount.fetch(
+    marginfiAccountPk,
+  );
+  const userBalance = marginfiAccount.lendingAccount.balances.find(
+    (b: any) => b.active && b.bankPk.equals(bankPk),
+  );
+  return userBalance
+    ? wrappedI80F48toBigNumber(userBalance.assetShares)
+    : new BigNumber(0);
 };
 
 /** Shorthand to mint some tokens to a destination, globalProgramAdmin always sign/sends */

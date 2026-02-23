@@ -77,7 +77,7 @@ import {
 export const ecosystem: Ecosystem = getGenericEcosystem();
 export let oracles: Oracles = undefined;
 /** Show various information about accounts and tests */
-export const verbose = false;
+export const verbose = true;
 /** Show the raw buffer printout of various structs */
 export const printBuffers = false;
 /** The program owner is also the provider wallet */
