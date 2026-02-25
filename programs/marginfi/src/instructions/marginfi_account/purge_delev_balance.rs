@@ -37,7 +37,7 @@ pub fn lending_account_purge_delev_balance(
 
     let asset_shares: I80F48 = balance.asset_shares.into();
     msg!("Balance had: {:?}", asset_shares.to_num::<f64>());
-    balance.close(false)?;
+    balance.close()?;
     bank.decrement_lending_position_count();
     bank.change_asset_shares(-asset_shares, false)?;
 
