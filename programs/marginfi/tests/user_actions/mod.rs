@@ -187,18 +187,14 @@ async fn set_emissions_destination_account() -> anyhow::Result<()> {
 
     // Set to the account authority
     let authority = account.authority;
-    account_f
-        .try_set_emissions_destination(authority)
-        .await?;
+    account_f.try_set_emissions_destination(authority).await?;
 
     let account = account_f.load().await;
     assert_eq!(account.emissions_destination_account, authority);
 
     // Update to a different key
     let other = solana_sdk::pubkey::Pubkey::new_unique();
-    account_f
-        .try_set_emissions_destination(other)
-        .await?;
+    account_f.try_set_emissions_destination(other).await?;
 
     let account = account_f.load().await;
     assert_eq!(account.emissions_destination_account, other);

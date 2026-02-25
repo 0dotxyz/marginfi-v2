@@ -223,8 +223,8 @@ mod tests {
     use crate::{
         DriftWithdraw, EndDeleverage, EndExecuteOrder, EndLiquidation, InitLiquidationRecord,
         KaminoWithdraw, LendingAccountEndFlashloan, LendingAccountRepay,
-        LendingAccountStartFlashloan, LendingAccountWithdraw, StartDeleverage,
-        StartExecuteOrder, StartLiquidation,
+        LendingAccountStartFlashloan, LendingAccountWithdraw, StartDeleverage, StartExecuteOrder,
+        StartLiquidation,
     };
 
     use super::*;

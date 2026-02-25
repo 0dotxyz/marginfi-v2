@@ -15,8 +15,7 @@ pub fn marginfi_account_update_emissions_destination_account(
     ctx: Context<MarginfiAccountUpdateEmissionsDestinationAccount>,
 ) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-    marginfi_account.emissions_destination_account =
-        ctx.accounts.destination_account.key();
+    marginfi_account.emissions_destination_account = ctx.accounts.destination_account.key();
     Ok(())
 }
 

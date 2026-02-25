@@ -1,3 +1,4 @@
+use crate::check;
 use crate::events::{
     GroupEventHeader, LendingPoolBankConfigureEvent, LendingPoolBankConfigureFrozenEvent,
 };
@@ -5,7 +6,6 @@ use crate::prelude::MarginfiError;
 use crate::state::bank::BankImpl;
 use crate::state::emode::EmodeSettingsImpl;
 use crate::MarginfiResult;
-use crate::check;
 use anchor_lang::prelude::*;
 use anchor_spl::token_2022::{transfer_checked, TransferChecked};
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};

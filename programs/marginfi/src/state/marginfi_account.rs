@@ -2020,7 +2020,6 @@ impl<'a> BankAccountWrapper<'a> {
 
         Ok(())
     }
-
 }
 
 #[cfg(test)]
