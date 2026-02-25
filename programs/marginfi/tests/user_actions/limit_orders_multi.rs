@@ -115,10 +115,6 @@ async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails() -> anyhow::Result<()
 
     let borrower = create_account_with_positions(&test_f, &assets, &liabilities).await?;
 
-    // set emissions destination to the authority before placing order
-    let authority = borrower.load().await.authority;
-    borrower.try_set_emissions_destination(authority).await?;
-
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
     let pyusd_bank = test_f.get_bank(&BankMint::PyUSD);
@@ -270,10 +266,6 @@ async fn limit_orders_overlap_ab_nearly_closes_a_no_withdraw_all_ok() -> anyhow:
 
     let borrower = create_account_with_positions(&test_f, &assets, &liabilities).await?;
 
-    // set emissions destination to the authority before placing order
-    let authority = borrower.load().await.authority;
-    borrower.try_set_emissions_destination(authority).await?;
-
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
 
@@ -360,10 +352,6 @@ async fn limit_orders_overlap_ab_close_a_reopen_a_ad_fails() -> anyhow::Result<(
     let liabilities = vec![(BankMint::Usdc, 50.0), (BankMint::PyUSD, 50.0)];
 
     let borrower = create_account_with_positions(&test_f, &assets, &liabilities).await?;
-
-    // set emissions destination to the authority before placing order
-    let authority = borrower.load().await.authority;
-    borrower.try_set_emissions_destination(authority).await?;
 
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
@@ -481,10 +469,6 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
     let liabilities = vec![(BankMint::Usdc, 50.0), (BankMint::PyUSD, 50.0)];
 
     let borrower = create_account_with_positions(&test_f, &assets, &liabilities).await?;
-
-    // set emissions destination to the authority before placing order
-    let authority = borrower.load().await.authority;
-    borrower.try_set_emissions_destination(authority).await?;
 
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
@@ -623,10 +607,6 @@ async fn limit_orders_open_max_count() -> anyhow::Result<()> {
     ];
 
     let borrower = create_account_with_positions(&test_f, &assets, &liabilities).await?;
-
-    // set emissions destination to the authority before placing order
-    let authority = borrower.load().await.authority;
-    borrower.try_set_emissions_destination(authority).await?;
 
     // ---------------------------------------------------------------------
     // Test

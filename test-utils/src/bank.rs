@@ -1,10 +1,7 @@
 use super::utils::{latest_blockhash, load_and_deserialize};
 use crate::{
     kamino::KaminoFixture,
-    prelude::{
-        get_emissions_authority_address, get_emissions_token_account_address, MintFixture,
-        TokenAccountFixture,
-    },
+    prelude::{MintFixture, TokenAccountFixture},
 };
 use anchor_lang::{
     prelude::{AccountMeta, Pubkey},
@@ -149,114 +146,6 @@ impl BankFixture {
             &[&self.ctx.borrow().payer],
             latest_blockhash(&self.ctx).await,
         );
-
-        self.ctx
-            .borrow_mut()
-            .banks_client
-            .process_transaction(tx)
-            .await?;
-
-        Ok(())
-    }
-
-    pub async fn try_setup_emissions(
-        &self,
-        flags: u64,
-        rate: u64,
-        total_emissions: u64,
-        emissions_mint: Pubkey,
-        funding_account: Pubkey,
-        token_program: Pubkey,
-    ) -> Result<(), BanksClientError> {
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingPoolSetupEmissions {
-                group: self.load().await.group,
-                delegate_emissions_admin: self.ctx.borrow().payer.pubkey(),
-                bank: self.key,
-                emissions_mint,
-                emissions_funding_account: funding_account,
-                emissions_auth: get_emissions_authority_address(self.key, emissions_mint).0,
-                emissions_token_account: get_emissions_token_account_address(
-                    self.key,
-                    emissions_mint,
-                )
-                .0,
-                token_program,
-                system_program: solana_program::system_program::id(),
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingPoolSetupEmissions {
-                rate,
-                flags,
-                total_emissions,
-            }
-            .data(),
-        };
-
-        let tx = {
-            let ctx = self.ctx.borrow_mut();
-
-            Transaction::new_signed_with_payer(
-                &[ix],
-                Some(&ctx.payer.pubkey()),
-                &[&ctx.payer],
-                ctx.banks_client.get_latest_blockhash().await.unwrap(),
-            )
-        };
-
-        self.ctx
-            .borrow_mut()
-            .banks_client
-            .process_transaction(tx)
-            .await?;
-
-        Ok(())
-    }
-
-    pub async fn try_update_emissions(
-        &self,
-        emissions_flags: Option<u64>,
-        emissions_rate: Option<u64>,
-        additional_emissions: Option<(u64, Pubkey)>,
-        token_program: Pubkey,
-    ) -> Result<(), BanksClientError> {
-        let bank = self.load().await;
-
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingPoolUpdateEmissionsParameters {
-                group: self.load().await.group,
-                delegate_emissions_admin: self.ctx.borrow().payer.pubkey(),
-                bank: self.key,
-                emissions_mint: bank.emissions_mint,
-                emissions_funding_account: additional_emissions.map(|(_, f)| f).unwrap_or_default(),
-                emissions_token_account: get_emissions_token_account_address(
-                    self.key,
-                    bank.emissions_mint,
-                )
-                .0,
-                token_program,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingPoolUpdateEmissionsParameters {
-                emissions_flags,
-                emissions_rate,
-                additional_emissions: additional_emissions.map(|(a, _)| a),
-            }
-            .data(),
-        };
-
-        let tx = {
-            let ctx = self.ctx.borrow_mut();
-
-            Transaction::new_signed_with_payer(
-                &[ix],
-                Some(&ctx.payer.pubkey()),
-                &[&ctx.payer],
-                ctx.banks_client.get_latest_blockhash().await.unwrap(),
-            )
-        };
 
         self.ctx
             .borrow_mut()
