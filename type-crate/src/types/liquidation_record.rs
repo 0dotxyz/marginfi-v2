@@ -41,9 +41,12 @@ pub struct LiquidationRecord {
     pub entries: [LiquidationEntry; 4],
     pub cache: LiquidationCache,
 
+    /// Timestamp for last transition into an idle state.
+    /// * Set on record initialization and when liquidation ends
+    /// * 0 indicates a legacy record with unknown activity timestamp
+    pub last_activity_ts: i64,
     _reserved0: [u8; 64],
     _reserved2: [u8; 16],
-    _reserved3: [u8; 8],
 }
 
 /// Used to record key details of the last few liquidation events on the account
@@ -117,9 +120,9 @@ impl Default for LiquidationRecord {
             liquidation_receiver: Pubkey::default(),
             entries: [LiquidationEntry::default(); 4],
             cache: LiquidationCache::default(),
+            last_activity_ts: 0,
             _reserved0: [0u8; 64],
             _reserved2: [0u8; 16],
-            _reserved3: [0u8; 8],
         }
     }
 }

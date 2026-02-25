@@ -217,6 +217,13 @@ pub mod marginfi {
         marginfi_account::initialize_liquidation_record(ctx)
     }
 
+    /// (record_payer only) Close a LiquidationRecord after 60 days of inactivity.
+    pub fn close_liquidation_record_by_creator(
+        ctx: Context<CreatorCloseLiquidationRecord>,
+    ) -> MarginfiResult {
+        marginfi_account::close_liquidation_record_by_creator(ctx)
+    }
+
     /// (risk_admin only) Close a LiquidationRecord account to reclaim rent. The record must not
     /// be actively in use by an ongoing liquidation.
     pub fn risk_admin_close_liquidation_record(

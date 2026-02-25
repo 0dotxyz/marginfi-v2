@@ -1276,7 +1276,7 @@ impl MarginfiAccountFixture {
         liquidation_record: Pubkey,
         group: Pubkey,
         risk_admin: Pubkey,
-        receiver: Pubkey,
+        record_payer: Pubkey,
     ) -> Instruction {
         Instruction {
             program_id: marginfi::ID,
@@ -1285,10 +1285,29 @@ impl MarginfiAccountFixture {
                 marginfi_account: self.key,
                 liquidation_record,
                 risk_admin,
-                receiver,
+                record_payer,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::RiskAdminCloseLiquidationRecord {}.data(),
+        }
+    }
+
+    pub async fn make_close_liquidation_record_by_creator_ix(
+        &self,
+        liquidation_record: Pubkey,
+        group: Pubkey,
+        creator: Pubkey,
+    ) -> Instruction {
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::CreatorCloseLiquidationRecord {
+                group,
+                marginfi_account: self.key,
+                liquidation_record,
+                creator,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::CloseLiquidationRecordByCreator {}.data(),
         }
     }
 

@@ -243,6 +243,8 @@ pub enum MarginfiError {
     GroupDailyRateLimitExceeded,
     #[msg("Invalid rate limit price: pass oracle or pre-crank cache")] // 6119
     InvalidRateLimitPrice,
+    #[msg("Liquidation record has not met the inactivity threshold for closing")] // 6120
+    LiquidationRecordNotExpired,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -542,6 +544,7 @@ impl From<u32> for MarginfiError {
             6117 => MarginfiError::GroupHourlyRateLimitExceeded,
             6118 => MarginfiError::GroupDailyRateLimitExceeded,
             6119 => MarginfiError::InvalidRateLimitPrice,
+            6120 => MarginfiError::LiquidationRecordNotExpired,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,

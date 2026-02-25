@@ -11,12 +11,14 @@ use marginfi_type_crate::{
 pub fn initialize_liquidation_record(ctx: Context<InitLiquidationRecord>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_init()?;
+    let now_ts = Clock::get()?.unix_timestamp;
 
     liq_record.key = ctx.accounts.liquidation_record.key();
     liq_record.record_payer = ctx.accounts.fee_payer.key();
     liq_record.marginfi_account = ctx.accounts.marginfi_account.key();
     liq_record.entries = [LiquidationEntry::default(); 4];
     liq_record.cache = LiquidationCache::default();
+    liq_record.last_activity_ts = now_ts;
 
     // Link the record back to the MarginfiAccount. This also serves to inform liquidators if the
     // record exists without performing a fetch. If this field is non-default, it exists.

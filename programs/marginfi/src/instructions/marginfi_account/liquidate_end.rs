@@ -160,9 +160,12 @@ pub fn end_receivership<'info>(
     let seized: I80F48 = pre_assets_equity - post_assets_equity;
     let repaid: I80F48 = pre_liabs_equity - post_liabilities_equity;
 
+    let now_ts = Clock::get()?.unix_timestamp;
+
     // clear receivership
     marginfi_account.unset_flag(ACCOUNT_IN_RECEIVERSHIP, false);
     liq_record.liquidation_receiver = Pubkey::default();
+    liq_record.last_activity_ts = now_ts;
 
     let seized_f64 = seized.to_num::<f64>();
     let repaid_f64 = repaid.to_num::<f64>();
@@ -174,7 +177,7 @@ pub fn end_receivership<'info>(
 
         entry.asset_amount_seized = seized_f64.to_le_bytes();
         entry.liab_amount_repaid = repaid_f64.to_le_bytes();
-        entry.timestamp = Clock::get()?.unix_timestamp;
+        entry.timestamp = now_ts;
     }
 
     Ok((
