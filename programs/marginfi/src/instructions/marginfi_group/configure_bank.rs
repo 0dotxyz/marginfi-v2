@@ -1,10 +1,11 @@
-use crate::check;
+use crate::{check, math_error, utils};
 use crate::events::{
     GroupEventHeader, LendingPoolBankConfigureEvent, LendingPoolBankConfigureFrozenEvent,
 };
 use crate::prelude::MarginfiError;
 use crate::state::bank::BankImpl;
 use crate::state::emode::EmodeSettingsImpl;
+use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::MarginfiResult;
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::get_associated_token_address_with_program_id;
@@ -197,6 +198,97 @@ pub struct LendingPoolReclaimEmissionsVault<'info> {
     /// emissions mint (validated in handler).
     #[account(mut)]
     pub destination_account: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+/// Permissionlessly deposit same-mint emissions directly into the bank liquidity vault,
+/// increasing depositor value through `asset_share_value`.
+pub fn lending_pool_emissions_deposit(
+    ctx: Context<LendingPoolEmissionsDeposit>,
+    amount: u64,
+) -> MarginfiResult {
+    if amount == 0 {
+        return Ok(());
+    }
+
+    let mut bank = ctx.accounts.bank.load_mut()?;
+
+    check!(
+        bank.mint.eq(&bank.emissions_mint),
+        MarginfiError::InvalidEmissionsMint
+    );
+
+    let total_asset_shares = I80F48::from(bank.total_asset_shares);
+    check!(
+        total_asset_shares > I80F48::ZERO,
+        MarginfiError::EmissionsUpdateError
+    );
+
+    transfer_checked(
+        CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            TransferChecked {
+                from: ctx.accounts.emissions_funding_account.to_account_info(),
+                to: ctx.accounts.liquidity_vault.to_account_info(),
+                authority: ctx.accounts.depositor.to_account_info(),
+                mint: ctx.accounts.emissions_mint.to_account_info(),
+            },
+        ),
+        amount,
+        ctx.accounts.emissions_mint.decimals,
+    )?;
+
+    ctx.accounts.liquidity_vault.reload()?;
+
+    let total_assets = bank.get_asset_amount(total_asset_shares)?;
+    let updated_total_assets = total_assets
+        .checked_add(I80F48::from_num(amount))
+        .ok_or_else(math_error!())?;
+
+    bank.asset_share_value = updated_total_assets
+        .checked_div(total_asset_shares)
+        .ok_or_else(math_error!())?
+        .into();
+
+    msg!(
+        "Deposited {} same-bank emissions into liquidity vault",
+        amount
+    );
+
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct LendingPoolEmissionsDeposit<'info> {
+    #[account(
+        constraint = (
+            !group.load()?.is_protocol_paused()
+        ) @ MarginfiError::ProtocolPaused
+    )]
+    pub group: AccountLoader<'info, MarginfiGroup>,
+
+    #[account(
+        mut,
+        has_one = group @ MarginfiError::InvalidGroup,
+        has_one = emissions_mint @ MarginfiError::InvalidEmissionsMint,
+        has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
+    )]
+    pub bank: AccountLoader<'info, Bank>,
+
+    pub emissions_mint: InterfaceAccount<'info, Mint>,
+
+    /// NOTE: This is a TokenAccount, spl transfer will validate it.
+    ///
+    /// CHECK: Account provided only for funding rewards
+    #[account(mut)]
+    pub emissions_funding_account: AccountInfo<'info>,
+
+    #[account(mut)]
+    pub depositor: Signer<'info>,
+
+    #[account(mut)]
+    pub liquidity_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     pub token_program: Interface<'info, TokenInterface>,
 }
