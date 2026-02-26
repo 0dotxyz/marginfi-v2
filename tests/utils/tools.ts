@@ -38,6 +38,7 @@ import {
 } from "../rootHooks";
 import { getEpochAndSlot } from "./bankrunConnection";
 import { createMintToInstruction } from "@solana/spl-token";
+import { BankrunProvider } from "anchor-bankrun";
 
 /**
  * Convert a human-readable amount to native token units based on decimals.
@@ -349,8 +350,7 @@ export const dumpBankrunLogs = (result: any): boolean => {
     findFieldDeep(result, "computeUnitsConsumed");
   const status = txResult === null || txResult === undefined ? "ok" : "failed";
   console.log(
-    `[bankrun] no logMessages available (status=${status}, meta=${
-      result?.meta === null ? "null" : typeof result?.meta
+    `[bankrun] no logMessages available (status=${status}, meta=${result?.meta === null ? "null" : typeof result?.meta
     })`,
   );
   if (txResult !== undefined) {
@@ -775,3 +775,59 @@ export const getBankrunBlockhash = async (
 ) => {
   return (await bankrunContext.banksClient.getLatestBlockhash())[0];
 };
+
+const MINT_OFFSET = 0 + 8;
+const EMISSIONS_MINT_OFFSET = 864 + 8;
+
+/**
+ * Mutate the Bank account to set `emissions_mint = bank.mint` and return the previous mint
+ */
+export async function setEmissionsDirect(
+  provider: BankrunProvider,
+  bank: PublicKey,
+): Promise<PublicKey> {
+  const existing = await provider.context.banksClient.getAccount(bank);
+  if (!existing) throw new Error("Bank account not found in bankrun");
+
+  const buf = Buffer.from(existing.data);
+
+  // Capture previous emissions mint
+  const prevMint = new PublicKey(buf.slice(EMISSIONS_MINT_OFFSET, EMISSIONS_MINT_OFFSET + 32));
+
+  // Copy bank.mint into bank.emissions_mint
+  const mintSlice = buf.slice(MINT_OFFSET, MINT_OFFSET + 32);
+  mintSlice.copy(buf, EMISSIONS_MINT_OFFSET);
+
+  provider.context.setAccount(bank, {
+    lamports: existing.lamports,
+    data: buf,
+    owner: existing.owner,
+    executable: existing.executable,
+    rentEpoch: existing.rentEpoch,
+  });
+
+  return prevMint;
+}
+
+/**
+ * Restore a previously-snapshotted emissions mint for `bank`.
+ */
+export async function resetEmissionsDirect(
+  provider: BankrunProvider,
+  bank: PublicKey,
+  prevMint: PublicKey
+) {
+  const existing = await provider.context.banksClient.getAccount(bank);
+  if (!existing) throw new Error("Bank account not found in bankrun");
+  const buf = Buffer.from(existing.data);
+
+  prevMint.toBuffer().copy(buf, EMISSIONS_MINT_OFFSET);
+
+  provider.context.setAccount(bank, {
+    lamports: existing.lamports,
+    data: buf,
+    owner: existing.owner,
+    executable: existing.executable,
+    rentEpoch: existing.rentEpoch,
+  });
+}

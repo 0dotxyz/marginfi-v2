@@ -16,7 +16,7 @@ use marginfi::{
     },
     utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
 };
-use marginfi_type_crate::constants::{EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED};
+use marginfi_type_crate::constants::{EMISSION_FLAGS, EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED};
 use marginfi_type_crate::types::{Bank, BankConfigOpt, OracleSetup};
 use solana_program::{
     account_info::IntoAccountInfo, instruction::Instruction, sysvar::clock::Clock,
@@ -147,6 +147,49 @@ impl BankFixture {
             &[&self.ctx.borrow().payer],
             latest_blockhash(&self.ctx).await,
         );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(())
+    }
+
+
+    pub async fn try_emissions_deposit(
+        &self,
+        amount: u64,
+        funding_account: Pubkey,
+    ) -> Result<(), BanksClientError> {
+        let bank = self.load().await;
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolEmissionsDeposit {
+                group: bank.group,
+                bank: self.key,
+                emissions_mint: bank.emissions_mint,
+                emissions_funding_account: funding_account,
+                depositor: self.ctx.borrow().payer.pubkey(),
+                liquidity_vault: bank.liquidity_vault,
+                token_program: self.get_token_program(),
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::LendingPoolEmissionsDeposit { amount }.data(),
+        };
+
+        let tx = {
+            let ctx = self.ctx.borrow_mut();
+
+            Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&ctx.payer.pubkey()),
+                &[&ctx.payer],
+                ctx.banks_client.get_latest_blockhash().await.unwrap(),
+            )
+        };
 
         self.ctx
             .borrow_mut()
@@ -455,6 +498,32 @@ impl BankFixture {
         self.ctx
             .borrow_mut()
             .set_account(&self.key, &bank_ai.into());
+    }
+
+    /// Directly set emissions configuration on a bank account.
+    pub async fn set_emissions_direct(&self, emissions_flags: u64) -> Result<(), BanksClientError> {
+        let mut bank_ai = self
+            .ctx
+            .borrow_mut()
+            .banks_client
+            .get_account(self.key)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let bank = bytemuck::from_bytes_mut::<Bank>(&mut bank_ai.data.as_mut_slice()[8..]);
+
+        // set emissions mint to be the same as the bank mint
+        bank.emissions_mint = bank.mint;
+
+        // set flags (clear emission bits first)
+        bank.flags = (bank.flags & !EMISSION_FLAGS) | emissions_flags;
+
+        self.ctx
+            .borrow_mut()
+            .set_account(&self.key, &bank_ai.into());
+
+        Ok(())
     }
 }
 
