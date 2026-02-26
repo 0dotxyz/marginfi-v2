@@ -1126,8 +1126,8 @@ async fn liquidate_receiver_allows_negative_profit() -> anyhow::Result<()> {
 // requires the lock to be held for every bank the liquidatee still has positions in.
 
 #[tokio::test]
-async fn liquidate_receiver_other_account_withdraw_all_clears_bank_cache_lock(
-) -> anyhow::Result<()> {
+async fn liquidate_receiver_other_account_withdraw_all_clears_bank_cache_lock() -> anyhow::Result<()>
+{
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let liquidator = test_f.create_marginfi_account().await;
@@ -1245,8 +1245,7 @@ async fn liquidate_receiver_other_account_withdraw_all_clears_bank_cache_lock(
 }
 
 #[tokio::test]
-async fn liquidate_receiver_other_account_repay_all_clears_bank_cache_lock(
-) -> anyhow::Result<()> {
+async fn liquidate_receiver_other_account_repay_all_clears_bank_cache_lock() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let liquidator = test_f.create_marginfi_account().await;
@@ -1367,8 +1366,8 @@ async fn liquidate_receiver_other_account_repay_all_clears_bank_cache_lock(
 }
 
 // close_balance is not in the allowed instruction list for liquidation, so including it
-// in a receivership transaction must be rejected with ForbiddenIx. 
-// otherwise there might be edge case of unlocking bank mid 
+// in a receivership transaction must be rejected with ForbiddenIx.
+// otherwise there might be edge case of unlocking bank mid
 #[tokio::test]
 async fn liquidate_receiver_close_balance_forbidden() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
@@ -1508,8 +1507,16 @@ async fn liquidate_receiver_closed_balances_do_not_leave_stale_cache_lock() -> a
         .await?;
 
     // Confirm banks are unlocked before liquidation
-    assert!(!sol_bank.load().await.cache.is_liquidation_price_cache_locked());
-    assert!(!usdc_bank.load().await.cache.is_liquidation_price_cache_locked());
+    assert!(!sol_bank
+        .load()
+        .await
+        .cache
+        .is_liquidation_price_cache_locked());
+    assert!(!usdc_bank
+        .load()
+        .await
+        .cache
+        .is_liquidation_price_cache_locked());
 
     let (record_pk, _bump) = Pubkey::find_program_address(
         &[LIQUIDATION_RECORD_SEED.as_bytes(), liquidatee.key.as_ref()],
