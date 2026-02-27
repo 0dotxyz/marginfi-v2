@@ -7,14 +7,16 @@ use crate::state::bank::BankImpl;
 use crate::state::emode::EmodeSettingsImpl;
 use crate::MarginfiResult;
 use anchor_lang::prelude::*;
+use anchor_spl::associated_token::get_associated_token_address_with_program_id;
 use anchor_spl::token_2022::{transfer_checked, TransferChecked};
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED, EMISSION_FLAGS, FREEZE_SETTINGS,
+        EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED, EMISSION_FLAGS, FEE_STATE_SEED,
+        FREEZE_SETTINGS,
     },
-    types::{Bank, BankConfigOpt, MarginfiGroup},
+    types::{Bank, BankConfigOpt, FeeState, MarginfiGroup},
 };
 
 pub fn lending_pool_configure_bank(
@@ -81,18 +83,35 @@ pub struct LendingPoolConfigureBank<'info> {
     pub bank: AccountLoader<'info, Bank>,
 }
 
-/// (delegate_emissions_admin only) Reclaim all remaining tokens from the
-/// emissions vault and disable emissions on the bank.
+/// (permissionless) Reclaim all remaining tokens from the emissions vault
+/// to the global fee wallet ATA, and disable emissions on the bank.
 pub fn lending_pool_reclaim_emissions_vault(
     ctx: Context<LendingPoolReclaimEmissionsVault>,
 ) -> MarginfiResult {
     let mut bank = ctx.accounts.bank.load_mut()?;
 
+    if bank.emissions_mint.eq(&Pubkey::default()) {
+        return Ok(());
+    }
+
     check!(
-        bank.emissions_mint.ne(&Pubkey::default()),
-        MarginfiError::EmissionsUpdateError,
-        "Emissions were never set up on this bank"
+        bank.emissions_mint == ctx.accounts.emissions_mint.key(),
+        MarginfiError::InvalidEmissionsMint
     );
+
+    // Validate the destination ATA is correct
+    {
+        let mint = &ctx.accounts.emissions_mint.key();
+        let global_fee_wallet = &ctx.accounts.fee_state.load()?.global_fee_wallet;
+        let token_program_id = &ctx.accounts.token_program.key();
+        let destination_ata = &ctx.accounts.destination_account.key();
+        let ata_expected =
+            get_associated_token_address_with_program_id(global_fee_wallet, mint, token_program_id);
+        check!(
+            destination_ata.eq(&ata_expected),
+            MarginfiError::InvalidFeeAta
+        );
+    }
 
     let vault_balance = ctx.accounts.emissions_vault.amount;
 
@@ -123,6 +142,7 @@ pub fn lending_pool_reclaim_emissions_vault(
     bank.emissions_remaining = I80F48::ZERO.into();
     bank.emissions_rate = 0;
     bank.flags &= !EMISSION_FLAGS;
+    bank.emissions_mint = Pubkey::default();
 
     msg!(
         "Reclaimed {} tokens from emissions vault for bank {}",
@@ -135,17 +155,11 @@ pub fn lending_pool_reclaim_emissions_vault(
 
 #[derive(Accounts)]
 pub struct LendingPoolReclaimEmissionsVault<'info> {
-    #[account(
-        has_one = delegate_emissions_admin @ MarginfiError::Unauthorized,
-    )]
     pub group: AccountLoader<'info, MarginfiGroup>,
-
-    pub delegate_emissions_admin: Signer<'info>,
 
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = emissions_mint @ MarginfiError::InvalidEmissionsMint,
     )]
     pub bank: AccountLoader<'info, Bank>,
 
@@ -174,10 +188,14 @@ pub struct LendingPoolReclaimEmissionsVault<'info> {
     pub emissions_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
-        mut,
-        constraint = destination_account.mint == emissions_mint.key()
-            @ MarginfiError::InvalidEmissionsMint,
+        seeds = [FEE_STATE_SEED.as_bytes()],
+        bump,
     )]
+    pub fee_state: AccountLoader<'info, FeeState>,
+
+    /// CHECK: Canonical ATA of the `FeeState.global_fee_wallet` for the
+    /// emissions mint (validated in handler).
+    #[account(mut)]
     pub destination_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     pub token_program: Interface<'info, TokenInterface>,

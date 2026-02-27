@@ -1,12 +1,13 @@
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
     constants::EMISSION_FLAGS,
-    types::{Bank, MarginfiAccount},
+    types::{Bank, MarginfiAccount, ACCOUNT_FROZEN},
 };
 
 use crate::{
     check,
     prelude::{MarginfiError, MarginfiResult},
+    state::marginfi_account::MarginfiAccountImpl,
 };
 
 /// (account authority) Set the wallet whose canonical ATA will receive
@@ -15,6 +16,12 @@ pub fn marginfi_account_update_emissions_destination_account(
     ctx: Context<MarginfiAccountUpdateEmissionsDestinationAccount>,
 ) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
+
+    check!(
+        !marginfi_account.get_flag(ACCOUNT_FROZEN),
+        MarginfiError::AccountFrozen
+    );
+
     marginfi_account.emissions_destination_account = ctx.accounts.destination_account.key();
     Ok(())
 }

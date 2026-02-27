@@ -167,8 +167,8 @@ pub mod marginfi {
         marginfi_group::lending_pool_clone_emode(ctx)
     }
 
-    /// (delegate_emissions_admin only) Reclaim all remaining tokens from the emissions vault
-    /// and disable emissions on the bank.
+    /// (permissionless) Reclaim all remaining tokens from the emissions vault
+    /// to the global fee wallet ATA, and disable emissions on the bank.
     pub fn lending_pool_reclaim_emissions_vault(
         ctx: Context<LendingPoolReclaimEmissionsVault>,
     ) -> MarginfiResult {
