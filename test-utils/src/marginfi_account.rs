@@ -808,6 +808,61 @@ impl MarginfiAccountFixture {
             .await
     }
 
+    pub async fn try_set_emissions_destination_with_authority(
+        &self,
+        destination_account: Pubkey,
+        authority: &Keypair,
+    ) -> std::result::Result<(), BanksClientError> {
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::MarginfiAccountUpdateEmissionsDestinationAccount {
+                marginfi_account: self.key,
+                authority: authority.pubkey(),
+                destination_account,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountUpdateEmissionsDestinationAccount {}.data(),
+        };
+
+        let mut signers: Vec<&Keypair> = vec![&payer];
+        if authority.pubkey() != payer.pubkey() {
+            signers.push(authority);
+        }
+
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &signers, blockhash);
+
+        banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
+    pub async fn try_clear_emissions(
+        &self,
+        bank: &super::bank::BankFixture,
+    ) -> std::result::Result<(), BanksClientError> {
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingAccountClearEmissions {
+                marginfi_account: self.key,
+                bank: bank.key,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::LendingAccountClearEmissions {}.data(),
+        };
+
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
+
+        banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
     pub async fn make_lending_account_start_flashloan_ix(&self, end_index: u64) -> Instruction {
         Instruction {
             program_id: marginfi::ID,
