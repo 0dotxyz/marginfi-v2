@@ -254,6 +254,18 @@ pub fn solend_withdraw<'info>(
 
         marginfi_account.lending_account.sort_balances();
 
+        // SAFETY: The `bank` AccountLoader shares the same underlying account as one of the
+        // entries in `remaining_accounts` (passed for oracle/health-check lookups). The Solana
+        // runtime enforces single-writer semantics per account per instruction — if we hold a
+        // mutable borrow via `bank.load_mut()` while another code path (e.g. `check_account_init_health`)
+        // attempts to borrow the same account through `remaining_accounts`, the runtime rejects the
+        // transaction with:
+        //   "instruction tries to borrow reference for an account which is already borrowed"
+        //
+        // We must explicitly drop the mutable borrow before any code that may re-access this
+        // account through a different handle.
+        drop(bank);
+
         let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
 
         // Note: during liquidation, we skip all health checks until the end of the transaction,

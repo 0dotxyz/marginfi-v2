@@ -146,6 +146,7 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
 #[derive(Accounts)]
 pub struct JuplendDeposit<'info> {
     #[account(
+        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused
