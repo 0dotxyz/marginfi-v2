@@ -1,8 +1,4 @@
-use crate::{
-    check,
-    state::rate_limiter::GroupRateLimiterImpl,
-    MarginfiError, MarginfiResult,
-};
+use crate::{check, state::rate_limiter::GroupRateLimiterImpl, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::types::MarginfiGroup;
 

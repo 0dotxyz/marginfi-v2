@@ -8,8 +8,7 @@ use crate::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
-            is_signer_authorized, validate_remaining_accounts_for_balances_close_last,
-            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         price::OraclePriceWithConfidence,
@@ -71,15 +70,6 @@ pub fn lending_account_withdraw<'info>(
 
         let in_receivership_or_order_execution =
             marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
-        if withdraw_all {
-            // Require remaining accounts for all active balances, including the one being closed.
-            validate_remaining_accounts_for_balances_close_last(
-                &marginfi_account.lending_account,
-                ctx.remaining_accounts,
-                &bank_loader.key(),
-            )?;
-        }
-
         let mut group = marginfi_group_loader.load_mut()?;
         let mut bank = bank_loader.load_mut()?;
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;

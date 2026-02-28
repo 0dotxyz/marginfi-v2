@@ -39,7 +39,6 @@ import {
   healthPulse,
   repayIx,
   composeRemainingAccounts,
-  composeRemainingAccountsByBalances,
 } from "./utils/user-instructions";
 import { configBankEmode } from "./utils/group-instructions";
 import { bytesToF64, getBankrunBlockhash, logHealthCache } from "./utils/tools";
@@ -465,15 +464,12 @@ describe("Emode liquidation", () => {
 
     const userAccBefore =
       await user.mrgnBankrunProgram.account.marginfiAccount.fetch(userAccount);
-    const remaining = composeRemainingAccountsByBalances(
-      userAccBefore.lendingAccount.balances,
-      [
-        [usdcBank, oracles.usdcOracle.publicKey],
-        [solBank, oracles.wsolOracle.publicKey],
-        [stableBank, oracles.usdcOracle.publicKey],
-        [lstABank, oracles.pythPullLst.publicKey],
-      ]
-    );
+    const remaining = composeRemainingAccounts([
+      [usdcBank, oracles.usdcOracle.publicKey],
+      [solBank, oracles.wsolOracle.publicKey],
+      [stableBank, oracles.usdcOracle.publicKey],
+      [lstABank, oracles.pythPullLst.publicKey],
+    ]);
 
     let tx = new Transaction().add(
       await repayIx(user.mrgnBankrunProgram, {

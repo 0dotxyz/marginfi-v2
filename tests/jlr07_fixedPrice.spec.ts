@@ -30,7 +30,6 @@ import {
   accountInit,
   borrowIx,
   composeRemainingAccounts,
-  composeRemainingAccountsByBalances,
   depositIx,
   healthPulse,
   pulseBankPrice,
@@ -584,13 +583,11 @@ describe("jlrx: Fixed JupLend price bank", () => {
 
     const accountStateAfterRepay =
       await bankrunProgram.account.marginfiAccount.fetch(userAccount);
-    const remaining = composeRemainingAccountsByBalances(
-      accountStateAfterRepay.lendingAccount.balances,
+    const remaining = composeRemainingAccounts(
       [
         [fixedJuplendBank, pool.lending],
         [borrowBank, oracles.tokenAOracle.publicKey],
-      ],
-      fixedJuplendBank,
+      ].filter((group) => !group[0].equals(fixedJuplendBank))
     );
 
     await refreshPullOraclesBankrun(oracles, ctx, banksClient);

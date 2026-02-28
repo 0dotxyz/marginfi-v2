@@ -9,8 +9,7 @@ use crate::{
             PriceBias,
         },
         rate_limiter::{
-            should_skip_rate_limit, BankRateLimiterImpl,
-            GroupRateLimiterImpl, RateLimitWindowImpl,
+            should_skip_rate_limit, BankRateLimiterImpl, GroupRateLimiterImpl, RateLimitWindowImpl,
         },
     },
     MarginfiError, MarginfiResult,

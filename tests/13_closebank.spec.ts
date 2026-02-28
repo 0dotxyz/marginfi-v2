@@ -16,7 +16,7 @@ import {
 import { defaultBankConfig, ORACLE_SETUP_PYTH_PUSH } from "./utils/types";
 import { addBankWithSeed } from "./utils/group-instructions";
 import {
-  composeRemainingAccountsByBalances,
+  composeRemainingAccounts,
   depositIx,
   withdrawIx,
 } from "./utils/user-instructions";
@@ -118,14 +118,12 @@ describe("Close bank", () => {
     // For withdrawAll, include all active balances, including the closing bank.
     const userAccBefore =
       await users[0].mrgnProgram.account.marginfiAccount.fetch(userAcc);
-    const remaining = composeRemainingAccountsByBalances(
-      userAccBefore.lendingAccount.balances,
+    const remaining = composeRemainingAccounts(
       [
         [bankKey, oracles.tokenAOracle.publicKey],
         [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
         [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
-      ],
-      bankKey
+      ].filter((group) => !group[0].equals(bankKey))
     );
     await users[0].mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(

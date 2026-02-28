@@ -24,7 +24,6 @@ import {
   accountInit,
   borrowIx,
   composeRemainingAccounts,
-  composeRemainingAccountsByBalances,
   depositIx,
   healthPulse,
   withdrawIx,
@@ -280,14 +279,12 @@ describe("Reduce-Only Bank Tests", () => {
       try {
         const userAccBefore =
           await user.mrgnProgram.account.marginfiAccount.fetch(userAccount);
-        const remaining = composeRemainingAccountsByBalances(
-          userAccBefore.lendingAccount.balances,
+        const remaining = composeRemainingAccounts(
           [
             [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
             [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
             [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
-          ],
-          bankKeypairA.publicKey
+          ].filter((group) => !group[0].equals(bankKeypairA.publicKey))
         );
         await user.mrgnProgram.provider.sendAndConfirm!(
           new Transaction().add(

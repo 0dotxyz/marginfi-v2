@@ -37,7 +37,6 @@ import {
 import {
   borrowIx,
   composeRemainingAccounts,
-  composeRemainingAccountsByBalances,
   composeRemainingAccountsMetaBanksOnly,
   composeRemainingAccountsWriteableMeta,
   depositIx,
@@ -491,10 +490,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
     const mrgnAccountBefore =
       await bankrunProgram.account.marginfiAccount.fetch(deleverageeAccount);
     dumpAccBalances(mrgnAccountBefore);
-    const repayRemaining = composeRemainingAccountsByBalances(
-      mrgnAccountBefore.lendingAccount.balances,
-      remainingAccounts,
-    );
+    const repayRemaining = composeRemainingAccounts(remainingAccounts);
 
     const recordBefore = await bankrunProgram.account.liquidationRecord.fetch(
       liqRecordKey,
@@ -619,10 +615,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
     const mrgnAccountBefore =
       await bankrunProgram.account.marginfiAccount.fetch(deleverageeAccount);
     dumpAccBalances(mrgnAccountBefore);
-    const repayRemaining = composeRemainingAccountsByBalances(
-      mrgnAccountBefore.lendingAccount.balances,
-      remainingAccounts,
-    );
+    const repayRemaining = composeRemainingAccounts(remainingAccounts);
 
     const recordBefore = await bankrunProgram.account.liquidationRecord.fetch(
       liqRecordKey,
@@ -737,10 +730,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
     const deleverageeAccount = deleveragee.accounts.get(USER_ACCOUNT_THROWAWAY);
     const mrgnAccountBefore =
       await bankrunProgram.account.marginfiAccount.fetch(deleverageeAccount);
-    const repayRemaining = composeRemainingAccountsByBalances(
-      mrgnAccountBefore.lendingAccount.balances,
-      remainingAccounts,
-    );
+    const repayRemaining = composeRemainingAccounts(remainingAccounts);
 
     let tx = new Transaction().add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),
@@ -995,11 +985,9 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
 
     const mrgnAccountBefore =
       await bankrunProgram.account.marginfiAccount.fetch(deleverageeAccount);
-    const withdrawAllRemaining = composeRemainingAccountsByBalances(
-      mrgnAccountBefore.lendingAccount.balances,
-      remainingWithBank2,
-      banks[2],
-    );
+    // During deleverage, the closing bank must remain in remaining accounts
+    // because the withdraw instruction needs the oracle price for equity tracking.
+    const withdrawAllRemaining = composeRemainingAccounts(remainingWithBank2);
 
     const tx = new Transaction().add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),

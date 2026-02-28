@@ -11,8 +11,8 @@ use crate::{
         marginfi_group::MarginfiGroupImpl,
     },
     utils::{
-        self, is_marginfi_asset_tag, record_deposit_inflow,
-        validate_asset_tags, validate_bank_state, InstructionKind,
+        self, is_marginfi_asset_tag, record_deposit_inflow, validate_asset_tags,
+        validate_bank_state, InstructionKind,
     },
 };
 use anchor_lang::prelude::*;

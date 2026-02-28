@@ -709,7 +709,12 @@ async fn deleverage_can_close_out_balances() -> anyhow::Result<()> {
     // NOTE: In deleveraging, you MUST PASS the oracle for the withdrawn asset even for
     // a withdraw-all. The entire balance is still withdrawn!
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 0.0, Some(true))
+        .make_bank_withdraw_ix_include_closing_bank(
+            risk_admin_sol_acc.key,
+            sol_bank,
+            0.0,
+            Some(true),
+        )
         .await;
 
     // The entire liability

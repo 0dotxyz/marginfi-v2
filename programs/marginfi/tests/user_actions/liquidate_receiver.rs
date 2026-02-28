@@ -990,7 +990,12 @@ async fn liquidate_receiver_closes_out_low_value_acc() -> anyhow::Result<()> {
     // NOTE: In receivership liquidation, you MUST PASS the oracle for the withdrawn asset even for
     // a withdraw-all. The entire balance is still withdrawn!
     let withdraw_ix = liquidatee
-        .make_bank_withdraw_ix(liquidator_sol_acc.key, sol_bank, 0.4, Some(true))
+        .make_bank_withdraw_ix_include_closing_bank(
+            liquidator_sol_acc.key,
+            sol_bank,
+            0.4,
+            Some(true),
+        )
         .await;
     // The entire liability
     let repay_ix = liquidatee

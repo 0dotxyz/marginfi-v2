@@ -18,7 +18,6 @@ import { genericMultiBankTestSetup } from "./genericSetups";
 import {
   borrowIx,
   composeRemainingAccounts,
-  composeRemainingAccountsByBalances,
   depositIx,
   repayIx,
   pulseBankPrice,
@@ -231,13 +230,10 @@ describe("Bank cache last oracle price", () => {
     // For repayAll, include all active balances, including the closing bank.
     const userAccBefore =
       await bankrunProgram.account.marginfiAccount.fetch(userAccount);
-    const remaining = composeRemainingAccountsByBalances(
-      userAccBefore.lendingAccount.balances,
-      [
-        [banks[1], oracles.pythPullLst.publicKey],
-        [banks[0], oracles.pythPullLst.publicKey],
-      ]
-    );
+    const remaining = composeRemainingAccounts([
+      [banks[1], oracles.pythPullLst.publicKey],
+      [banks[0], oracles.pythPullLst.publicKey],
+    ]);
     const tx = new Transaction().add(
       await repayIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,

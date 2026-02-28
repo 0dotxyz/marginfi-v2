@@ -25,7 +25,6 @@ import { assert } from "chai";
 import {
   borrowIx,
   composeRemainingAccounts,
-  composeRemainingAccountsByBalances,
   repayIx,
 } from "./utils/user-instructions";
 import { USER_ACCOUNT } from "./utils/mocks";
@@ -118,9 +117,10 @@ describe("Borrow funds", () => {
     // For repayAll, include all active balances, including the closing bank.
     const userAccBefore =
       await program.account.marginfiAccount.fetch(userAccKey);
-    const remaining = composeRemainingAccountsByBalances(
-      userAccBefore.lendingAccount.balances,
-      balanceAccountGroups
+    const remaining = composeRemainingAccounts(
+      balanceAccountGroups.filter(
+        (group) => !group[0].equals(bankKeypairSol.publicKey)
+      )
     );
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(

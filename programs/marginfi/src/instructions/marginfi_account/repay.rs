@@ -6,8 +6,7 @@ use crate::{
     state::{
         bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, is_signer_authorized,
-            validate_remaining_accounts_for_balances_unordered, BankAccountWrapper,
+            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
             LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
@@ -62,13 +61,6 @@ pub fn lending_account_repay<'info>(
         utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?
     };
 
-    if repay_all {
-        // Require remaining accounts for all active balances, including the one being closed.
-        validate_remaining_accounts_for_balances_unordered(
-            &marginfi_account.lending_account,
-            ctx.remaining_accounts,
-        )?;
-    }
     let mut bank = bank_loader.load_mut()?;
     validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
 

@@ -279,8 +279,7 @@ export type BorrowIxArgs = {
  * * `authority` - marginfiAccount's authority must sign, but does not have to own the `tokenAccount`
  * * `remaining` - pass bank/oracles for each bank the user is involved with, in the SAME ORDER they
  *   appear in userAcc.balances (e.g. `[bank0, oracle0, bank1, oracle1]`). For Token22 assets, pass
- *   the mint first, then the oracles/banks as described earlier. Required for withdraw_all: include
- *   the closing balance's risk accounts.
+ *   the mint first, then the oracles/banks as described earlier.
  * @param program
  * @param args
  * @returns
@@ -320,9 +319,8 @@ export type WithdrawIxArgs = {
  * Withdraw from a bank
  * * `authority` - marginfiAccount's authority must sign, but does not have to own the `tokenAccount`
  * * `remaining` - pass bank/oracles for each bank the user is involved with, in the SAME ORDER they
- *   appear in userAcc.balances (e.g. `[bank0, oracle0, bank1, oracle1]`). For `withdrawAll`, include
- *   all active balances, including the bank being closed, and place the closing bank last. For
- *   Token22 assets, pass the mint first, then the oracles/banks as described earlier.
+ *   appear in userAcc.balances (e.g. `[bank0, oracle0, bank1, oracle1]`). For Token22 assets, pass
+ *   the mint first, then the oracles/banks as described earlier.
  * @param program
  * @param args
  * @returns
@@ -368,10 +366,8 @@ export type RepayIxArgs = {
 /**
  * Repay debt to a bank
  * * `authority` - MarginfiAccount's authority must sign and own the `tokenAccount`
- * * `remaining` - Required for repay_all: pass bank/oracles for each bank the user is involved with,
- *   in the SAME ORDER they appear in userAcc.balances (e.g. `[bank0, oracle0, bank1, oracle1]`).
- *   For `repayAll`, include all active balances, including the bank being closed. For Token22
- *   assets, pass the mint first.
+ * * `remaining` - pass bank/oracles for any balances that need risk/oracle context in this
+ *   instruction. For Token22 assets, pass the mint first.
  * @param program
  * @param args
  * @returns
@@ -734,63 +730,6 @@ export const composeRemainingAccountsMetaBanksOnly = (
     isSigner: false,
     isWritable: true,
   }));
-};
-
-/**
- * Flattens bank-oracle groups in the exact order of active balances.
- * If closingBank is provided, its group is placed last.
- * Throws if a balance's bank is missing from banksAndOracles.
- */
-export const composeRemainingAccountsByBalances = (
-  balances: { active: number; bankPk: PublicKey }[],
-  banksAndOracles: PublicKey[][],
-  closingBank?: PublicKey
-): PublicKey[] => {
-  const byBank = new Map<string, PublicKey[]>();
-  for (const group of banksAndOracles) {
-    byBank.set(group[0].toBase58(), group);
-  }
-
-  let activeBalances = balances.filter((balance) => balance.active);
-  if (closingBank) {
-    const closing = activeBalances.filter((b) => b.bankPk.equals(closingBank));
-    const others = activeBalances.filter((b) => !b.bankPk.equals(closingBank));
-    others.sort((a, b) => {
-      const A = a.bankPk.toBytes();
-      const B = b.bankPk.toBytes();
-      for (let i = 0; i < 32; i++) {
-        if (A[i] !== B[i]) {
-          return B[i] - A[i];
-        }
-      }
-      return 0;
-    });
-    activeBalances = [...others, ...closing];
-  } else {
-    activeBalances.sort((a, b) => {
-      const A = a.bankPk.toBytes();
-      const B = b.bankPk.toBytes();
-      for (let i = 0; i < 32; i++) {
-        if (A[i] !== B[i]) {
-          return B[i] - A[i];
-        }
-      }
-      return 0;
-    });
-  }
-
-  const ordered: PublicKey[] = [];
-  for (const balance of activeBalances) {
-    const group = byBank.get(balance.bankPk.toBase58());
-    if (!group) {
-      throw new Error(
-        `Missing remaining accounts for bank ${balance.bankPk.toBase58()}`
-      );
-    }
-    ordered.push(...group);
-  }
-
-  return ordered;
 };
 
 export type AccountInitPdaArgs = {

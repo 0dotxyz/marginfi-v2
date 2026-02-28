@@ -7,8 +7,7 @@ use crate::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
-            is_signer_authorized, validate_remaining_accounts_for_balances_close_last,
-            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         rate_limiter::GroupRateLimiterImpl,
@@ -65,15 +64,6 @@ pub fn drift_withdraw<'info>(
 
     let bank_key = ctx.accounts.bank.key();
     let bank_mint = ctx.accounts.bank.load()?.mint;
-    if withdraw_all {
-        let marginfi_account = ctx.accounts.marginfi_account.load()?;
-        // Require remaining accounts for all active balances, including the one being closed.
-        validate_remaining_accounts_for_balances_close_last(
-            &marginfi_account.lending_account,
-            ctx.remaining_accounts,
-            &bank_key,
-        )?;
-    }
     let (token_amount, expected_scaled_balance_change) = {
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;

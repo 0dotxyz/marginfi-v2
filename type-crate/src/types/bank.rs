@@ -159,7 +159,7 @@ pub struct Bank {
     /// Tracks net outflow (outflows - inflows) in native tokens.
     pub rate_limiter: BankRateLimiter,
 
-    pub _pad_0: [u8; 16],           // 8B
+    pub _pad_0: [u8; 16],          // 8B
     pub _padding_1: [[u64; 2]; 7], // 8 * 2 * 7 = 112B
 }
 

@@ -24,7 +24,7 @@ import {
 } from "./utils/genericTests";
 import { assert } from "chai";
 import {
-  composeRemainingAccountsByBalances,
+  composeRemainingAccounts,
   depositIx,
   withdrawIx,
 } from "./utils/user-instructions";
@@ -328,13 +328,11 @@ describe("Deposit funds", () => {
     // withdraw amounts to restore to previous state...
 
     // For withdrawAll, include all active balances, including the closing bank.
-    const remainingUser1 = composeRemainingAccountsByBalances(
-      userAcc.lendingAccount.balances,
+    const remainingUser1 = composeRemainingAccounts(
       [
         [bankKey, oracles.tokenAOracle.publicKey],
         [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
-      ],
-      bankKey
+      ].filter((group) => !group[0].equals(bankKey))
     );
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
@@ -353,13 +351,11 @@ describe("Deposit funds", () => {
     const user0Acc = await users[0].mrgnProgram.account.marginfiAccount.fetch(
       user0Account
     );
-    const remainingUser0 = composeRemainingAccountsByBalances(
-      user0Acc.lendingAccount.balances,
+    const remainingUser0 = composeRemainingAccounts(
       [
         [bankKey, oracles.tokenAOracle.publicKey],
         [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
-      ],
-      bankKey
+      ].filter((group) => !group[0].equals(bankKey))
     );
     await users[0].mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
