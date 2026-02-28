@@ -6,5 +6,6 @@ mod deleverage;
 mod freeze;
 mod interest_accrual;
 mod panic_mode;
+mod rate_limiter;
 mod setup_bank;
 mod withdraw_fees;

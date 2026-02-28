@@ -173,7 +173,9 @@ pub fn drift_withdraw<'info>(
 
         record_deposit_inflow(
             &mut bank,
-            &mut group,
+            &group,
+            ctx.accounts.group.key(),
+            ctx.accounts.bank.key(),
             marginfi_account.account_flags,
             token_amount,
             &clock,

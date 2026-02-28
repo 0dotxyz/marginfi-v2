@@ -84,7 +84,7 @@ pub fn kamino_deposit<'info>(
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let mut group = ctx.accounts.group.load_mut()?;
+        let group = ctx.accounts.group.load()?;
         let clock = Clock::get()?;
 
         let mut bank_account = BankAccountWrapper::find_or_create(
@@ -99,7 +99,9 @@ pub fn kamino_deposit<'info>(
 
         record_deposit_inflow(
             &mut bank,
-            &mut group,
+            &group,
+            ctx.accounts.group.key(),
+            ctx.accounts.bank.key(),
             marginfi_account.account_flags,
             amount,
             &clock,

@@ -243,6 +243,18 @@ pub enum MarginfiError {
     GroupDailyRateLimitExceeded,
     #[msg("Invalid rate limit price: pass oracle or pre-crank cache")] // 6119
     InvalidRateLimitPrice,
+    #[msg("Group rate limiter admin update must include inflow and/or outflow")] // 6120
+    GroupRateLimiterUpdateEmpty,
+    #[msg("Group rate limiter admin update slot range is invalid")] // 6121
+    GroupRateLimiterUpdateInvalidSlotRange,
+    #[msg("Group rate limiter admin update cannot reference future slots")] // 6122
+    GroupRateLimiterUpdateFutureSlot,
+    #[msg("Group rate limiter admin update is too stale")] // 6123
+    GroupRateLimiterUpdateStale,
+    #[msg("Group rate limiter admin update slot progression is out of order")] // 6124
+    GroupRateLimiterUpdateOutOfOrderSlot,
+    #[msg("Group rate limiter admin update sequence is out of order")] // 6125
+    GroupRateLimiterUpdateOutOfOrderSeq,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -542,6 +554,12 @@ impl From<u32> for MarginfiError {
             6117 => MarginfiError::GroupHourlyRateLimitExceeded,
             6118 => MarginfiError::GroupDailyRateLimitExceeded,
             6119 => MarginfiError::InvalidRateLimitPrice,
+            6120 => MarginfiError::GroupRateLimiterUpdateEmpty,
+            6121 => MarginfiError::GroupRateLimiterUpdateInvalidSlotRange,
+            6122 => MarginfiError::GroupRateLimiterUpdateFutureSlot,
+            6123 => MarginfiError::GroupRateLimiterUpdateStale,
+            6124 => MarginfiError::GroupRateLimiterUpdateOutOfOrderSlot,
+            6125 => MarginfiError::GroupRateLimiterUpdateOutOfOrderSeq,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,

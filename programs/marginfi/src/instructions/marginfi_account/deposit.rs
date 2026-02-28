@@ -56,7 +56,7 @@ pub fn lending_account_deposit<'info>(
 
     let mut bank = bank_loader.load_mut()?;
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
-    let mut group = marginfi_group_loader.load_mut()?;
+    let group = marginfi_group_loader.load()?;
     validate_asset_tags(&bank, &marginfi_account)?;
     validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
 
@@ -94,7 +94,9 @@ pub fn lending_account_deposit<'info>(
 
     record_deposit_inflow(
         &mut bank,
-        &mut group,
+        &group,
+        marginfi_group_loader.key(),
+        bank_loader.key(),
         marginfi_account.account_flags,
         deposit_amount,
         &clock,
@@ -142,7 +144,6 @@ pub fn lending_account_deposit<'info>(
 #[derive(Accounts)]
 pub struct LendingAccountDeposit<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused

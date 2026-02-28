@@ -1004,6 +1004,34 @@ export const writeBankMetadata = (
   return ix;
 };
 
+export type UpdateGroupRateLimiterArgs = {
+  marginfiGroup: PublicKey;
+  outflowUsd?: BN | null;
+  inflowUsd?: BN | null;
+  updateSeq: BN;
+  eventStartSlot: BN;
+  eventEndSlot: BN;
+};
+
+export const updateGroupRateLimiter = (
+  program: Program<Marginfi>,
+  args: UpdateGroupRateLimiterArgs
+) => {
+  const ix = program.methods
+    .updateGroupRateLimiter(
+      args.outflowUsd ?? null,
+      args.inflowUsd ?? null,
+      args.updateSeq,
+      args.eventStartSlot,
+      args.eventEndSlot
+    )
+    .accounts({
+      marginfiGroup: args.marginfiGroup,
+    })
+    .instruction();
+  return ix;
+};
+
 export type ConfigureDeleverageWithdrawalLimitArgs = {
   marginfiGroup: PublicKey;
   limit: number;

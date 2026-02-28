@@ -1,13 +1,19 @@
 use crate::{
-    MarginfiError, MarginfiResult, bank_authority_seed, bank_seed, check, state::{
+    bank_authority_seed, bank_seed, check,
+    events::RateLimitFlowEvent,
+    state::{
         bank::BankVaultType,
-        bank_config::BankConfigImpl,
         marginfi_account::{calc_value, get_remaining_accounts_per_bank},
         price::{
             OraclePriceFeedAdapter, OraclePriceType, OraclePriceWithConfidence, PriceAdapter,
             PriceBias,
-        }, rate_limiter::{BankRateLimiterImpl, BankRateLimiterUntrackedImpl, GroupRateLimiterImpl, should_skip_rate_limit},
-    }
+        },
+        rate_limiter::{
+            should_skip_rate_limit, BankRateLimiterImpl,
+            GroupRateLimiterImpl, RateLimitWindowImpl,
+        },
+    },
+    MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::{
@@ -397,28 +403,6 @@ pub fn fetch_unbiased_price_for_bank<'info>(
     Ok(price)
 }
 
-/// Fetch a rate-limit price for inflow accounting (deposit/repay).
-///
-/// Returns `Some(price)` if a valid price is available (live oracle or fresh cache),
-/// or `None` if no valid price is available.
-pub fn fetch_rate_limit_price_for_inflow(
-    bank: &Bank,
-    clock: &Clock,
-) -> MarginfiResult<Option<I80F48>> {
-    // Fall back to cached price if fresh enough
-    let cached_price: I80F48 = bank.cache.last_oracle_price.into();
-    let cached_ts = bank.cache.last_oracle_price_timestamp;
-    let max_age = bank.config.get_oracle_max_age() as i64;
-    let age = clock.unix_timestamp.saturating_sub(cached_ts);
-
-    if cached_price <= I80F48::ZERO || cached_ts == 0 || age < 0 || age > max_age {
-        // No valid price available - return None instead of erroring
-        return Ok(None);
-    }
-
-    Ok(Some(cached_price))
-}
-
 /// Locate a bank's oracle information from a properly formatted slice of remaining accounts.
 fn oracle_accounts_for_bank<'info>(
     bank_key: &Pubkey,
@@ -492,13 +476,18 @@ pub fn is_integration_asset_tag(asset_tag: u8) -> bool {
         ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND
     )
 }
-/// Records withdrawal outflow on bank-level and group-level rate limiters.
+/// Records withdrawal outflow on bank-level rate limiter and validates against
+/// group-level rate limits (read-only). Emits a `RateLimitFlowEvent` for the admin
+/// to aggregate off-chain and update the group rate limiter via
+/// `update_group_rate_limiter`.
 pub fn record_withdrawal_outflow(
     group_rate_limit_enabled: bool,
     token_amount: u64,
     price: I80F48,
     bank: &mut Bank,
-    group: &mut MarginfiGroup,
+    group: &MarginfiGroup,
+    group_key: Pubkey,
+    bank_key: Pubkey,
     marginfi_account: &MarginfiAccount,
     clock: &Clock,
 ) -> MarginfiResult<()> {
@@ -510,40 +499,58 @@ pub fn record_withdrawal_outflow(
                 .try_record_outflow(token_amount, clock.unix_timestamp)?;
         }
 
-        // Group-level rate limiting (USD) - use fresh oracle price
+        // Group-level rate limiting: read-only validation + event emission.
+        // The admin aggregates events off-chain and calls update_group_rate_limiter.
         if group_rate_limit_enabled {
             check!(price > I80F48::ZERO, MarginfiError::InvalidRateLimitPrice);
 
-            // Apply any pending untracked inflows before recording the outflow
-            if bank.rate_limiter.untracked_inflow != 0 {
-                let mint_decimals = bank.mint_decimals;
-                bank.rate_limiter.apply_untracked_inflow(
-                    &mut group.rate_limiter,
-                    price,
-                    mint_decimals,
-                    clock.unix_timestamp,
-                )?;
-            }
-
-            let usd_value = calc_value(
+            let value = calc_value(
                 I80F48::from_num(token_amount),
                 price,
                 bank.mint_decimals,
                 None,
             )?;
-            group
-                .rate_limiter
-                .try_record_outflow(usd_value.to_num::<u64>(), clock.unix_timestamp)?;
+            if group.rate_limiter.hourly.is_enabled() {
+                let remaining = group
+                    .rate_limiter
+                    .hourly
+                    .effective_remaining_capacity(clock.unix_timestamp);
+                if value.to_num::<i64>() > remaining {
+                    return Err(MarginfiError::GroupHourlyRateLimitExceeded.into());
+                }
+            }
+            if group.rate_limiter.daily.is_enabled() {
+                let remaining = group
+                    .rate_limiter
+                    .daily
+                    .effective_remaining_capacity(clock.unix_timestamp);
+                if value.to_num::<i64>() > remaining {
+                    return Err(MarginfiError::GroupDailyRateLimitExceeded.into());
+                }
+            }
+
+            emit!(RateLimitFlowEvent {
+                group: group_key,
+                bank: bank_key,
+                mint: bank.mint,
+                flow_direction: 0, // outflow
+                native_amount: token_amount,
+                mint_decimals: bank.mint_decimals,
+                current_timestamp: clock.unix_timestamp,
+            });
         }
     }
     Ok(())
 }
 
-
-/// Records deposit inflow on bank-level and group-level rate limiters.
+/// Records deposit inflow on bank-level rate limiter and emits a `RateLimitFlowEvent`
+/// for the admin to aggregate off-chain and update the group rate limiter via
+/// `update_group_rate_limiter`.
 pub fn record_deposit_inflow(
     bank: &mut Bank,
-    group: &mut MarginfiGroup,
+    group: &MarginfiGroup,
+    group_key: Pubkey,
+    bank_key: Pubkey,
     account_flags: u64,
     amount: u64,
     clock: &Clock,
@@ -556,19 +563,15 @@ pub fn record_deposit_inflow(
         }
 
         if group.rate_limiter.is_enabled() {
-            let rate_limit_price = fetch_rate_limit_price_for_inflow(bank, clock)?;
-            match rate_limit_price {
-                Some(price) => {
-                    let usd_value =
-                        calc_value(I80F48::from_num(amount), price, bank.mint_decimals, None)?;
-                    group
-                        .rate_limiter
-                        .record_inflow(usd_value.to_num::<u64>(), clock.unix_timestamp);
-                }
-                None => {
-                    bank.rate_limiter.record_untracked_inflow(amount);
-                }
-            }
+            emit!(RateLimitFlowEvent {
+                group: group_key,
+                bank: bank_key,
+                mint: bank.mint,
+                flow_direction: 1, // inflow
+                native_amount: amount,
+                mint_decimals: bank.mint_decimals,
+                current_timestamp: clock.unix_timestamp,
+            });
         }
     }
     Ok(())

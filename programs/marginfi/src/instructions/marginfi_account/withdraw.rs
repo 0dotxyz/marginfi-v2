@@ -160,7 +160,9 @@ pub fn lending_account_withdraw<'info>(
             rate_limit_amount,
             price,
             &mut bank,
-            &mut group,
+            &group,
+            marginfi_group_loader.key(),
+            bank_loader.key(),
             &marginfi_account,
             &clock,
         )?;

@@ -143,7 +143,9 @@ pub fn solend_withdraw<'info>(
             rate_limit_amount,
             price,
             &mut bank,
-            &mut group,
+            &group,
+            ctx.accounts.group.key(),
+            ctx.accounts.bank.key(),
             &marginfi_account,
             &clock,
         )?;

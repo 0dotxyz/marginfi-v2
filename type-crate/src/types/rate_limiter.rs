@@ -36,7 +36,7 @@ pub struct RateLimitWindow {
     pub cur_window_outflow: i64,
 }
 
-assert_struct_size!(BankRateLimiter, 88);
+assert_struct_size!(BankRateLimiter, 80);
 assert_struct_align!(BankRateLimiter, 8);
 /// Per-bank rate limiting configuration and state.
 /// Tracks net outflow in native tokens.
@@ -49,12 +49,6 @@ pub struct BankRateLimiter {
 
     /// Daily window rate limiter (native tokens).
     pub daily: RateLimitWindow,
-
-    /// Native token inflows pending USD conversion for group rate limiter.
-    /// When deposits/repays occur without a valid oracle price, the amount is
-    /// recorded here and later applied to the group rate limiter when a valid
-    /// price becomes available (e.g., during pulse_bank_price_cache or outflow operations).
-    pub untracked_inflow: i64,
 }
 
 assert_struct_size!(GroupRateLimiter, 80);

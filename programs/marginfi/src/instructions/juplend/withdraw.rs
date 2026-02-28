@@ -157,7 +157,9 @@ pub fn juplend_withdraw<'info>(
             rate_limit_amount,
             price,
             &mut bank,
-            &mut group,
+            &group,
+            ctx.accounts.group.key(),
+            bank_key,
             &marginfi_account,
             &clock,
         )?;

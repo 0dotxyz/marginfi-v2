@@ -69,7 +69,14 @@ pub struct MarginfiGroup {
     /// Tracks net outflow in USD.
     pub rate_limiter: GroupRateLimiter,
 
-    pub _padding_0: [[u64; 2]; 6],
+    /// Last slot covered by an admin group rate limiter aggregation update.
+    pub rate_limiter_last_admin_update_slot: u64,
+    /// Monotonic sequence number for admin group rate limiter updates.
+    /// This is used to enforce strict ordering and prevent duplicate/replayed batches
+    /// when slot ranges overlap or multiple updates happen in the same slot.
+    pub rate_limiter_last_admin_update_seq: u64,
+
+    pub _padding_0: [[u64; 2]; 5],
     pub _padding_1: [[u64; 2]; 32],
 }
 

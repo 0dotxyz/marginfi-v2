@@ -1,0 +1,391 @@
+use anchor_lang::{InstructionData, ToAccountMetas};
+use fixtures::assert_custom_error;
+use fixtures::prelude::*;
+use marginfi::prelude::*;
+use marginfi_type_crate::types::MarginfiGroup;
+use solana_program_test::*;
+use solana_sdk::transaction::Transaction;
+use solana_sdk::{clock::Clock, instruction::Instruction, signature::Keypair, signer::Signer};
+
+async fn configure_group_hourly_limit(
+    test_f: &TestFixture,
+    hourly_limit: u64,
+) -> anyhow::Result<()> {
+    let ix = Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::ConfigureGroupRateLimits {
+            marginfi_group: test_f.marginfi_group.key,
+            admin: test_f.payer(),
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::ConfigureGroupRateLimits {
+            hourly_max_outflow_usd: Some(hourly_limit),
+            daily_max_outflow_usd: None,
+        }
+        .data(),
+    };
+
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&ctx.payer.pubkey()),
+        &[&ctx.payer],
+        ctx.banks_client.get_latest_blockhash().await?,
+    );
+    ctx.banks_client
+        .process_transaction_with_preflight(tx)
+        .await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn update_group_rate_limiter_applies_inflow_before_outflow() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+    configure_group_hourly_limit(&test_f, 100).await?;
+
+    let slot = {
+        let ctx = test_f.context.borrow_mut();
+        let clock: Clock = ctx.banks_client.get_sysvar().await?;
+        clock.slot
+    };
+
+    {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+                marginfi_group: test_f.marginfi_group.key,
+                admin: test_f.payer(),
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::UpdateGroupRateLimiter {
+                outflow_usd: Some(95),
+                inflow_usd: None,
+                update_seq: 1,
+                event_start_slot: 0,
+                event_end_slot: slot,
+            }
+            .data(),
+        };
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    // If outflow were applied first, this would fail against the 100 USD hourly cap.
+    // With inflow-first ordering it succeeds: 95 - 10 + 15 = 100.
+    {
+        let g: MarginfiGroup = test_f
+            .load_and_deserialize(&test_f.marginfi_group.key)
+            .await;
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+                marginfi_group: test_f.marginfi_group.key,
+                admin: test_f.payer(),
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::UpdateGroupRateLimiter {
+                outflow_usd: Some(15),
+                inflow_usd: Some(10),
+                update_seq: g.rate_limiter_last_admin_update_seq.saturating_add(1),
+                event_start_slot: g.rate_limiter_last_admin_update_slot,
+                event_end_slot: slot,
+            }
+            .data(),
+        };
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    let g: MarginfiGroup = test_f
+        .load_and_deserialize(&test_f.marginfi_group.key)
+        .await;
+    assert_eq!(g.rate_limiter.hourly.cur_window_outflow, 100);
+    assert_eq!(g.rate_limiter_last_admin_update_seq, 2);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+
+    let slot = {
+        let ctx = test_f.context.borrow_mut();
+        let clock: Clock = ctx.banks_client.get_sysvar().await?;
+        clock.slot
+    };
+
+    // Empty update payload.
+    {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+                marginfi_group: test_f.marginfi_group.key,
+                admin: test_f.payer(),
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::UpdateGroupRateLimiter {
+                outflow_usd: None,
+                inflow_usd: None,
+                update_seq: 1,
+                event_start_slot: 0,
+                event_end_slot: slot,
+            }
+            .data(),
+        };
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        let res = ctx
+            .banks_client
+            .process_transaction_with_preflight(tx)
+            .await;
+        assert_custom_error!(res.unwrap_err(), MarginfiError::GroupRateLimiterUpdateEmpty);
+    }
+
+    // Invalid slot range.
+    {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+                marginfi_group: test_f.marginfi_group.key,
+                admin: test_f.payer(),
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::UpdateGroupRateLimiter {
+                outflow_usd: Some(1),
+                inflow_usd: None,
+                update_seq: 1,
+                event_start_slot: slot.saturating_add(1),
+                event_end_slot: slot,
+            }
+            .data(),
+        };
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        let res = ctx
+            .banks_client
+            .process_transaction_with_preflight(tx)
+            .await;
+        assert_custom_error!(
+            res.unwrap_err(),
+            MarginfiError::GroupRateLimiterUpdateInvalidSlotRange
+        );
+    }
+
+    // Future slot.
+    {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+                marginfi_group: test_f.marginfi_group.key,
+                admin: test_f.payer(),
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::UpdateGroupRateLimiter {
+                outflow_usd: Some(1),
+                inflow_usd: None,
+                update_seq: 1,
+                event_start_slot: 0,
+                event_end_slot: slot.saturating_add(1),
+            }
+            .data(),
+        };
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        let res = ctx
+            .banks_client
+            .process_transaction_with_preflight(tx)
+            .await;
+        assert_custom_error!(
+            res.unwrap_err(),
+            MarginfiError::GroupRateLimiterUpdateFutureSlot
+        );
+    }
+
+    // Out-of-order sequence (initial seq must be 1).
+    {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+                marginfi_group: test_f.marginfi_group.key,
+                admin: test_f.payer(),
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::UpdateGroupRateLimiter {
+                outflow_usd: Some(1),
+                inflow_usd: None,
+                update_seq: 2,
+                event_start_slot: 0,
+                event_end_slot: slot,
+            }
+            .data(),
+        };
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        let res = ctx
+            .banks_client
+            .process_transaction_with_preflight(tx)
+            .await;
+        assert_custom_error!(
+            res.unwrap_err(),
+            MarginfiError::GroupRateLimiterUpdateOutOfOrderSeq
+        );
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+
+    // Force clock forward so we can deterministically construct a "lower than last slot" update.
+    {
+        let ctx = test_f.context.borrow_mut();
+        let mut clock: Clock = ctx.banks_client.get_sysvar().await?;
+        clock.slot = clock.slot.saturating_add(10);
+        ctx.set_sysvar(&clock);
+    }
+
+    let slot = {
+        let ctx = test_f.context.borrow_mut();
+        let clock: Clock = ctx.banks_client.get_sysvar().await?;
+        clock.slot
+    };
+
+    // First valid update sets last slot + seq.
+    {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+                marginfi_group: test_f.marginfi_group.key,
+                admin: test_f.payer(),
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::UpdateGroupRateLimiter {
+                outflow_usd: Some(1),
+                inflow_usd: None,
+                update_seq: 1,
+                event_start_slot: 0,
+                event_end_slot: slot,
+            }
+            .data(),
+        };
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    // Slot progression must not move backward.
+    {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+                marginfi_group: test_f.marginfi_group.key,
+                admin: test_f.payer(),
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::UpdateGroupRateLimiter {
+                outflow_usd: Some(1),
+                inflow_usd: None,
+                update_seq: 2,
+                event_start_slot: slot.saturating_sub(1),
+                event_end_slot: slot.saturating_sub(1),
+            }
+            .data(),
+        };
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        let res = ctx
+            .banks_client
+            .process_transaction_with_preflight(tx)
+            .await;
+        assert_custom_error!(
+            res.unwrap_err(),
+            MarginfiError::GroupRateLimiterUpdateOutOfOrderSlot
+        );
+    }
+
+    // Only the configured group admin may call this instruction.
+    {
+        let unauthorized = Keypair::new();
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::UpdateGroupRateLimiter {
+                marginfi_group: test_f.marginfi_group.key,
+                admin: unauthorized.pubkey(),
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::UpdateGroupRateLimiter {
+                outflow_usd: Some(1),
+                inflow_usd: None,
+                update_seq: 2,
+                event_start_slot: slot,
+                event_end_slot: slot,
+            }
+            .data(),
+        };
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer, &unauthorized],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        let res = ctx
+            .banks_client
+            .process_transaction_with_preflight(tx)
+            .await;
+        assert_custom_error!(res.unwrap_err(), MarginfiError::Unauthorized);
+    }
+
+    Ok(())
+}

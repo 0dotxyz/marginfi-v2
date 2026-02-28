@@ -23,6 +23,10 @@ pub trait RateLimitWindowImpl {
     /// Returns i64::MAX if rate limiting is disabled.
     fn remaining_capacity(&self, current_timestamp: i64) -> i64;
 
+    /// Calculate remaining outflow capacity at a timestamp without mutating state.
+    /// This simulates window advancement before computing capacity.
+    fn effective_remaining_capacity(&self, current_timestamp: i64) -> i64;
+
     /// Record an outflow (withdraw/borrow). Returns error if limit exceeded.
     fn try_record_outflow(&mut self, amount: u64, current_timestamp: i64) -> MarginfiResult<()>;
 
@@ -77,46 +81,32 @@ impl RateLimitWindowImpl for RateLimitWindow {
         if !self.is_enabled() {
             return i64::MAX;
         }
+        remaining_capacity_from_state(
+            self.max_outflow,
+            self.window_duration,
+            self.window_start,
+            self.prev_window_outflow,
+            self.cur_window_outflow,
+            current_timestamp,
+        )
+    }
 
-        // Calculate elapsed time in current window
-        let elapsed = current_timestamp.saturating_sub(self.window_start);
-        if elapsed < 0 {
-            return 0;
+    fn effective_remaining_capacity(&self, current_timestamp: i64) -> i64 {
+        if !self.is_enabled() {
+            return i64::MAX;
         }
-        let elapsed = elapsed as u64;
 
-        if elapsed >= self.window_duration {
-            // We're past the window, only cur_window matters (it would become prev)
-            // and it would be reset, so full capacity available
-            return self.max_outflow as i64;
-        }
+        let (window_start, prev_window_outflow, cur_window_outflow) =
+            effective_window_state(self, current_timestamp);
 
-        // Weight the previous window by remaining time fraction
-        // remaining_time = window_duration - elapsed
-        // weight = remaining_time / window_duration
-        let remaining_time = self.window_duration.saturating_sub(elapsed);
-
-        // Calculate weighted previous window contribution
-        // Use saturating operations to avoid overflow
-        let prev_abs = self.prev_window_outflow.unsigned_abs();
-        let weighted_prev_abs = prev_abs
-            .saturating_mul(remaining_time)
-            .checked_div(self.window_duration)
-            .unwrap_or(0);
-
-        // Apply the sign back
-        let weighted_prev = if self.prev_window_outflow >= 0 {
-            weighted_prev_abs as i64
-        } else {
-            -(weighted_prev_abs as i64)
-        };
-
-        // Total net outflow = weighted_prev + cur_window_outflow
-        let total_net_outflow = weighted_prev.saturating_add(self.cur_window_outflow);
-
-        // Remaining capacity = max_outflow - total_net_outflow
-        // If total_net_outflow is negative (more inflows), we have extra capacity
-        (self.max_outflow as i64).saturating_sub(total_net_outflow)
+        remaining_capacity_from_state(
+            self.max_outflow,
+            self.window_duration,
+            window_start,
+            prev_window_outflow,
+            cur_window_outflow,
+            current_timestamp,
+        )
     }
 
     fn try_record_outflow(&mut self, amount: u64, current_timestamp: i64) -> MarginfiResult<()> {
@@ -146,6 +136,96 @@ impl RateLimitWindowImpl for RateLimitWindow {
         // Inflow reduces net outflow
         self.cur_window_outflow = self.cur_window_outflow.saturating_sub(amount as i64);
     }
+}
+
+fn effective_window_state(window: &RateLimitWindow, current_timestamp: i64) -> (i64, i64, i64) {
+    if !window.is_enabled() || window.window_duration == 0 {
+        return (
+            window.window_start,
+            window.prev_window_outflow,
+            window.cur_window_outflow,
+        );
+    }
+
+    let elapsed = current_timestamp.saturating_sub(window.window_start);
+    if elapsed < 0 {
+        return (
+            window.window_start,
+            window.prev_window_outflow,
+            window.cur_window_outflow,
+        );
+    }
+    let elapsed = elapsed as u64;
+
+    if elapsed >= window.window_duration.saturating_mul(2) {
+        (current_timestamp, 0, 0)
+    } else if elapsed >= window.window_duration {
+        (
+            window
+                .window_start
+                .saturating_add(window.window_duration as i64),
+            window.cur_window_outflow,
+            0,
+        )
+    } else {
+        (
+            window.window_start,
+            window.prev_window_outflow,
+            window.cur_window_outflow,
+        )
+    }
+}
+
+fn remaining_capacity_from_state(
+    max_outflow: u64,
+    window_duration: u64,
+    window_start: i64,
+    prev_window_outflow: i64,
+    cur_window_outflow: i64,
+    current_timestamp: i64,
+) -> i64 {
+    if window_duration == 0 {
+        return max_outflow as i64;
+    }
+
+    // Calculate elapsed time in current window
+    let elapsed = current_timestamp.saturating_sub(window_start);
+    if elapsed < 0 {
+        return 0;
+    }
+    let elapsed = elapsed as u64;
+
+    if elapsed >= window_duration {
+        // We're past the window, only cur_window matters (it would become prev)
+        // and it would be reset, so full capacity available
+        return max_outflow as i64;
+    }
+
+    // Weight the previous window by remaining time fraction
+    // remaining_time = window_duration - elapsed
+    // weight = remaining_time / window_duration
+    let remaining_time = window_duration.saturating_sub(elapsed);
+
+    // Calculate weighted previous window contribution
+    let prev_abs = prev_window_outflow.unsigned_abs();
+    let weighted_prev_abs = prev_abs
+        .saturating_mul(remaining_time)
+        .checked_div(window_duration)
+        .unwrap_or(0);
+
+    // Apply the sign back
+    let weighted_prev = if prev_window_outflow >= 0 {
+        weighted_prev_abs as i64
+    } else {
+        -(weighted_prev_abs as i64)
+    };
+
+    // Total net outflow = weighted_prev + cur_window_outflow
+    let total_net_outflow = weighted_prev.saturating_add(cur_window_outflow);
+
+    // Remaining capacity = max_outflow - total_net_outflow
+    // If total_net_outflow is negative (more inflows), we have extra capacity
+    (max_outflow as i64).saturating_sub(total_net_outflow)
 }
 
 macro_rules! impl_dual_window_rate_limiter {
@@ -258,63 +338,6 @@ impl_dual_window_rate_limiter!(
     daily_error: BankDailyRateLimitExceeded,
     log_prefix: "Bank"
 );
-
-/// Extension trait for BankRateLimiter to handle untracked inflows.
-/// This is implemented as a separate trait since BankRateLimiter is defined in the type crate.
-pub trait BankRateLimiterUntrackedImpl {
-    /// Record an inflow that cannot be converted to USD yet due to missing/stale price.
-    /// The amount will be applied to the group rate limiter when a valid price is available.
-    fn record_untracked_inflow(&mut self, amount: u64);
-
-    /// Apply untracked inflows to a group rate limiter using the given price.
-    /// Returns the USD value that was applied.
-    fn apply_untracked_inflow(
-        &mut self,
-        group_limiter: &mut GroupRateLimiter,
-        price: fixed::types::I80F48,
-        mint_decimals: u8,
-        current_timestamp: i64,
-    ) -> MarginfiResult<u64>;
-}
-
-impl BankRateLimiterUntrackedImpl for BankRateLimiter {
-    fn record_untracked_inflow(&mut self, amount: u64) {
-        self.untracked_inflow = self.untracked_inflow.saturating_add(amount as i64);
-    }
-
-    fn apply_untracked_inflow(
-        &mut self,
-        group_limiter: &mut GroupRateLimiter,
-        price: fixed::types::I80F48,
-        mint_decimals: u8,
-        current_timestamp: i64,
-    ) -> MarginfiResult<u64> {
-        use crate::state::marginfi_account::calc_value;
-
-        if self.untracked_inflow == 0 {
-            return Ok(0);
-        }
-
-        // Convert native tokens to USD using the provided price
-        let native_amount = fixed::types::I80F48::from_num(self.untracked_inflow);
-        let usd_value = calc_value(native_amount, price, mint_decimals, None)?;
-        let usd_value_u64 = usd_value.to_num::<u64>();
-
-        // Record the inflow in the group rate limiter
-        group_limiter.record_inflow(usd_value_u64, current_timestamp);
-
-        // Clear the untracked inflow
-        self.untracked_inflow = 0;
-
-        msg!(
-            "Applied untracked inflow: native={}, usd={}",
-            native_amount,
-            usd_value_u64
-        );
-
-        Ok(usd_value_u64)
-    }
-}
 
 /// Implementation trait for group-level rate limiting (USD).
 pub trait GroupRateLimiterImpl {

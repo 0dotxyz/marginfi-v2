@@ -718,6 +718,27 @@ pub mod marginfi {
         )
     }
 
+    /// (admin only) Update the group rate limiter with aggregated inflow/outflow.
+    /// The admin aggregates RateLimitFlowEvent events off-chain, converts to USD,
+    /// and calls this instruction at intervals to update group rate limiter state.
+    pub fn update_group_rate_limiter(
+        ctx: Context<UpdateGroupRateLimiter>,
+        outflow_usd: Option<u64>,
+        inflow_usd: Option<u64>,
+        update_seq: u64,
+        event_start_slot: u64,
+        event_end_slot: u64,
+    ) -> MarginfiResult {
+        marginfi_group::update_group_rate_limiter(
+            ctx,
+            outflow_usd,
+            inflow_usd,
+            update_seq,
+            event_start_slot,
+            event_end_slot,
+        )
+    }
+
     // TODO deprecate and incorporate this functionality into forced-withdraw in 1.7+
     /// (risk admin only) Purge a user's lending balance without withdrawing anything. Only usable
     /// after all the debt has been settled on a bank in deleveraging mode, e.g. when
