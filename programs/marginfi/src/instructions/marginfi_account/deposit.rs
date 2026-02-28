@@ -5,18 +5,14 @@ use crate::{
     state::{
         bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, calc_value, is_signer_authorized, BankAccountWrapper,
+            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
             LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        rate_limiter::{
-            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
-            GroupRateLimiterImpl,
-        },
     },
     utils::{
-        self, fetch_rate_limit_price_for_inflow, is_marginfi_asset_tag, validate_asset_tags,
-        validate_bank_state, InstructionKind,
+        self, is_marginfi_asset_tag, record_deposit_inflow,
+        validate_asset_tags, validate_bank_state, InstructionKind,
     },
 };
 use anchor_lang::prelude::*;
@@ -87,14 +83,6 @@ pub fn lending_account_deposit<'info>(
         bank_loader.key(),
     )?;
 
-    // Fetch oracle price for group rate limiting (fall back to cache when oracles are omitted).
-    let group_rate_limit_enabled = group.rate_limiter.is_enabled();
-    let rate_limit_price = if group_rate_limit_enabled {
-        fetch_rate_limit_price_for_inflow(&bank, &clock)?
-    } else {
-        None
-    };
-
     let mut bank_account = BankAccountWrapper::find_or_create(
         &bank_loader.key(),
         &mut bank,
@@ -104,37 +92,13 @@ pub fn lending_account_deposit<'info>(
     bank_account.deposit(I80F48::from_num(deposit_amount))?;
     marginfi_account.last_update = clock.unix_timestamp as u64;
 
-    // Record inflow so net-outflow windows release capacity.
-    if !should_skip_rate_limit(marginfi_account.account_flags) {
-        // Bank-level rate limiting (native tokens)
-        if bank.rate_limiter.is_enabled() {
-            bank.rate_limiter
-                .record_inflow(deposit_amount, clock.unix_timestamp);
-        }
-
-        // Group-level rate limiting (USD) - prefer live price, fall back to cached.
-        if group_rate_limit_enabled {
-            match rate_limit_price {
-                Some(price) => {
-                    // Valid price available - record directly to group limiter
-                    let usd_value = calc_value(
-                        I80F48::from_num(deposit_amount),
-                        price,
-                        bank.mint_decimals,
-                        None,
-                    )?;
-                    group
-                        .rate_limiter
-                        .record_inflow(usd_value.to_num::<u64>(), clock.unix_timestamp);
-                }
-                None => {
-                    // No valid price - track at bank level to apply later
-                    bank.rate_limiter.record_untracked_inflow(deposit_amount);
-                }
-            }
-        }
-    }
-
+    record_deposit_inflow(
+        &mut bank,
+        &mut group,
+        marginfi_account.account_flags,
+        deposit_amount,
+        &clock,
+    )?;
     let amount_pre_fee = maybe_bank_mint
         .as_ref()
         .map(|mint| {

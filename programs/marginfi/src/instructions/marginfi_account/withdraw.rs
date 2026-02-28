@@ -13,14 +13,11 @@ use crate::{
         },
         marginfi_group::MarginfiGroupImpl,
         price::OraclePriceWithConfidence,
-        rate_limiter::{
-            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
-            GroupRateLimiterImpl,
-        },
+        rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
         self, fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank,
-        is_marginfi_asset_tag, validate_bank_state, InstructionKind,
+        is_marginfi_asset_tag, record_withdrawal_outflow, validate_bank_state, InstructionKind,
     },
 };
 use anchor_lang::prelude::*;
@@ -157,40 +154,16 @@ pub fn lending_account_withdraw<'info>(
 
         // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
         let rate_limit_amount = if withdraw_all { amount_pre_fee } else { amount };
-        if !should_skip_rate_limit(marginfi_account.account_flags) {
-            // Bank-level rate limiting (native tokens)
-            if bank.rate_limiter.is_enabled() {
-                bank.rate_limiter
-                    .try_record_outflow(rate_limit_amount, clock.unix_timestamp)?;
-            }
 
-            // Group-level rate limiting (USD) - use fresh oracle price (fetched above)
-            if group_rate_limit_enabled {
-                check!(price > I80F48::ZERO, MarginfiError::InvalidRateLimitPrice);
-
-                // Apply any pending untracked inflows before recording the outflow
-                if bank.rate_limiter.untracked_inflow != 0 {
-                    let mint_decimals = bank.mint_decimals;
-                    bank.rate_limiter.apply_untracked_inflow(
-                        &mut group.rate_limiter,
-                        price,
-                        mint_decimals,
-                        clock.unix_timestamp,
-                    )?;
-                }
-
-                let usd_value = calc_value(
-                    I80F48::from_num(rate_limit_amount),
-                    price,
-                    bank.mint_decimals,
-                    None,
-                )?;
-                group
-                    .rate_limiter
-                    .try_record_outflow(usd_value.to_num::<u64>(), clock.unix_timestamp)?;
-            }
-        }
-
+        record_withdrawal_outflow(
+            group_rate_limit_enabled,
+            rate_limit_amount,
+            price,
+            &mut bank,
+            &mut group,
+            &marginfi_account,
+            &clock,
+        )?;
         // Note: we only care about the withdraw limit in case of deleverage
         if marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE) {
             let withdrawn_equity = calc_value(

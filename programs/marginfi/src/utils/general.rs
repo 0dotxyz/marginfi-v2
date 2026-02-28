@@ -1,15 +1,13 @@
 use crate::{
-    bank_authority_seed, bank_seed,
-    state::{
+    MarginfiError, MarginfiResult, bank_authority_seed, bank_seed, check, state::{
         bank::BankVaultType,
         bank_config::BankConfigImpl,
-        marginfi_account::get_remaining_accounts_per_bank,
+        marginfi_account::{calc_value, get_remaining_accounts_per_bank},
         price::{
             OraclePriceFeedAdapter, OraclePriceType, OraclePriceWithConfidence, PriceAdapter,
             PriceBias,
-        },
-    },
-    MarginfiError, MarginfiResult,
+        }, rate_limiter::{BankRateLimiterImpl, BankRateLimiterUntrackedImpl, GroupRateLimiterImpl, should_skip_rate_limit},
+    }
 };
 use anchor_lang::prelude::*;
 use anchor_spl::{
@@ -29,7 +27,7 @@ use marginfi_type_crate::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
         ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
     },
-    types::{Bank, BankOperationalState, MarginfiAccount, WrappedI80F48},
+    types::{Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, WrappedI80F48},
 };
 
 pub fn find_bank_vault_pda(bank_pk: &Pubkey, vault_type: BankVaultType) -> (Pubkey, u8) {
@@ -493,6 +491,87 @@ pub fn is_integration_asset_tag(asset_tag: u8) -> bool {
         asset_tag,
         ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND
     )
+}
+/// Records withdrawal outflow on bank-level and group-level rate limiters.
+pub fn record_withdrawal_outflow(
+    group_rate_limit_enabled: bool,
+    token_amount: u64,
+    price: I80F48,
+    bank: &mut Bank,
+    group: &mut MarginfiGroup,
+    marginfi_account: &MarginfiAccount,
+    clock: &Clock,
+) -> MarginfiResult<()> {
+    // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
+    if !should_skip_rate_limit(marginfi_account.account_flags) {
+        // Bank-level rate limiting (native tokens)
+        if bank.rate_limiter.is_enabled() {
+            bank.rate_limiter
+                .try_record_outflow(token_amount, clock.unix_timestamp)?;
+        }
+
+        // Group-level rate limiting (USD) - use fresh oracle price
+        if group_rate_limit_enabled {
+            check!(price > I80F48::ZERO, MarginfiError::InvalidRateLimitPrice);
+
+            // Apply any pending untracked inflows before recording the outflow
+            if bank.rate_limiter.untracked_inflow != 0 {
+                let mint_decimals = bank.mint_decimals;
+                bank.rate_limiter.apply_untracked_inflow(
+                    &mut group.rate_limiter,
+                    price,
+                    mint_decimals,
+                    clock.unix_timestamp,
+                )?;
+            }
+
+            let usd_value = calc_value(
+                I80F48::from_num(token_amount),
+                price,
+                bank.mint_decimals,
+                None,
+            )?;
+            group
+                .rate_limiter
+                .try_record_outflow(usd_value.to_num::<u64>(), clock.unix_timestamp)?;
+        }
+    }
+    Ok(())
+}
+
+
+/// Records deposit inflow on bank-level and group-level rate limiters.
+pub fn record_deposit_inflow(
+    bank: &mut Bank,
+    group: &mut MarginfiGroup,
+    account_flags: u64,
+    amount: u64,
+    clock: &Clock,
+) -> MarginfiResult<()> {
+    // Rate limiting tracks net outflow; inflows release capacity.
+    if !should_skip_rate_limit(account_flags) {
+        if bank.rate_limiter.is_enabled() {
+            bank.rate_limiter
+                .record_inflow(amount, clock.unix_timestamp);
+        }
+
+        if group.rate_limiter.is_enabled() {
+            let rate_limit_price = fetch_rate_limit_price_for_inflow(bank, clock)?;
+            match rate_limit_price {
+                Some(price) => {
+                    let usd_value =
+                        calc_value(I80F48::from_num(amount), price, bank.mint_decimals, None)?;
+                    group
+                        .rate_limiter
+                        .record_inflow(usd_value.to_num::<u64>(), clock.unix_timestamp);
+                }
+                None => {
+                    bank.rate_limiter.record_untracked_inflow(amount);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
