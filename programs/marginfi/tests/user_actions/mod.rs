@@ -209,9 +209,7 @@ async fn emissions_same_bank_deposit_updates_asset_share_value() -> anyhow::Resu
 
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
 
-    usdc_bank
-        .set_emissions_direct(EMISSIONS_FLAG_LENDING_ACTIVE)
-        .await?;
+    usdc_bank.set_emissions_direct(usdc_bank.mint.key).await?;
 
     let emissions_funding = test_f.usdc_mint.create_token_account_and_mint_to(50).await;
 
@@ -317,6 +315,56 @@ async fn emissions_same_bank_deposit_updates_asset_share_value() -> anyhow::Resu
         native!(90, "USDC") as i64,
         native!(1, "USDC") as i64
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn emissions_not_same_bank_deposit_updates_asset_share_value() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    let emissions_mint_fixture = MintFixture::new(test_f.context.clone(), None, None).await;
+
+    usdc_bank
+        .set_emissions_direct(emissions_mint_fixture.key)
+        .await?;
+
+    let emissions_funding = test_f.usdc_mint.create_token_account_and_mint_to(50).await;
+
+    let depositor_a = test_f.create_marginfi_account().await;
+    let depositor_b = test_f.create_marginfi_account().await;
+
+    let depositor_a_usdc = test_f.usdc_mint.create_token_account_and_mint_to(40).await;
+    let depositor_b_usdc = test_f.usdc_mint.create_token_account_and_mint_to(60).await;
+
+    let depositor_a_amount = 40;
+    depositor_a
+        .try_bank_deposit(
+            depositor_a_usdc.key,
+            usdc_bank,
+            depositor_a_amount as f64,
+            None,
+        )
+        .await?;
+
+    let depositor_b_amount = 60;
+    depositor_b
+        .try_bank_deposit(
+            depositor_b_usdc.key,
+            usdc_bank,
+            depositor_b_amount as f64,
+            None,
+        )
+        .await?;
+
+    let emissions_deposit = 50;
+    let res = usdc_bank
+        .try_emissions_deposit(native!(emissions_deposit, "USDC"), emissions_funding.key)
+        .await;
+
+    assert_custom_error!(res.unwrap_err(), MarginfiError::InvalidEmissionsMint);
 
     Ok(())
 }

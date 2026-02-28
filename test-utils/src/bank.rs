@@ -16,7 +16,7 @@ use marginfi::{
     },
     utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
 };
-use marginfi_type_crate::constants::{EMISSION_FLAGS, EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED};
+use marginfi_type_crate::constants::{EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED};
 use marginfi_type_crate::types::{Bank, BankConfigOpt, OracleSetup};
 use solana_program::{
     account_info::IntoAccountInfo, instruction::Instruction, sysvar::clock::Clock,
@@ -500,8 +500,11 @@ impl BankFixture {
             .set_account(&self.key, &bank_ai.into());
     }
 
-    /// Directly set emissions configuration on a bank account.
-    pub async fn set_emissions_direct(&self, emissions_flags: u64) -> Result<(), BanksClientError> {
+    /// Directly set an emissions mint on a bank account.
+    pub async fn set_emissions_direct(
+        &self,
+        emissions_mint: Pubkey,
+    ) -> Result<(), BanksClientError> {
         let mut bank_ai = self
             .ctx
             .borrow_mut()
@@ -513,11 +516,7 @@ impl BankFixture {
 
         let bank = bytemuck::from_bytes_mut::<Bank>(&mut bank_ai.data.as_mut_slice()[8..]);
 
-        // set emissions mint to be the same as the bank mint
-        bank.emissions_mint = bank.mint;
-
-        // set flags (clear emission bits first)
-        bank.flags = (bank.flags & !EMISSION_FLAGS) | emissions_flags;
+        bank.emissions_mint = emissions_mint;
 
         self.ctx
             .borrow_mut()
