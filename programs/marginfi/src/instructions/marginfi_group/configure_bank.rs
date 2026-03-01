@@ -203,7 +203,7 @@ pub struct LendingPoolReclaimEmissionsVault<'info> {
 }
 
 /// Permissionlessly deposit same-mint emissions directly into the bank liquidity vault,
-/// increasing depositor value through `asset_share_value`.
+/// increasing depositor value through asset share value.
 pub fn lending_pool_emissions_deposit(
     ctx: Context<LendingPoolEmissionsDeposit>,
     amount: u64,
@@ -212,11 +212,26 @@ pub fn lending_pool_emissions_deposit(
         return Ok(());
     }
 
+    let clock = Clock::get()?;
     let mut bank = ctx.accounts.bank.load_mut()?;
+    let group = ctx.accounts.group.load()?;
+
+    utils::validate_bank_state(&bank, utils::InstructionKind::FailsIfPausedOrReduceState)?;
 
     check!(
         bank.mint.eq(&bank.emissions_mint),
         MarginfiError::InvalidEmissionsMint
+    );
+
+    // Reject mints with non-zero transfer fees or active transfer hooks.
+    let mint_ai = ctx.accounts.emissions_mint.to_account_info();
+    check!(
+        !utils::nonzero_fee(mint_ai.clone(), clock.epoch)?,
+        MarginfiError::InvalidTransfer
+    );
+    check!(
+        !utils::has_transfer_hook(mint_ai)?,
+        MarginfiError::InvalidTransfer
     );
 
     let total_asset_shares = I80F48::from(bank.total_asset_shares);
@@ -224,6 +239,13 @@ pub fn lending_pool_emissions_deposit(
         total_asset_shares > I80F48::ZERO,
         MarginfiError::EmissionsUpdateError
     );
+
+    bank.accrue_interest(
+        clock.unix_timestamp,
+        &group,
+        #[cfg(not(feature = "client"))]
+        ctx.accounts.bank.key(),
+    )?;
 
     transfer_checked(
         CpiContext::new(
@@ -239,8 +261,6 @@ pub fn lending_pool_emissions_deposit(
         ctx.accounts.emissions_mint.decimals,
     )?;
 
-    ctx.accounts.liquidity_vault.reload()?;
-
     let total_assets = bank.get_asset_amount(total_asset_shares)?;
     let updated_total_assets = total_assets
         .checked_add(I80F48::from_num(amount))
@@ -250,6 +270,8 @@ pub fn lending_pool_emissions_deposit(
         .checked_div(total_asset_shares)
         .ok_or_else(math_error!())?
         .into();
+
+    bank.update_bank_cache(&group)?;
 
     msg!(
         "Deposited {} same-bank emissions into liquidity vault",
