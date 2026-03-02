@@ -461,7 +461,7 @@
       ],
       "accounts": [
         {
-          "name": "socialize_loss_accounts",
+          "name": "socialize_loss_v2_socialize_loss_accounts",
           "accounts": [
             {
               "name": "lending_market_owner",
@@ -484,7 +484,7 @@
           ]
         },
         {
-          "name": "farms_accounts",
+          "name": "socialize_loss_v2_farms_accounts",
           "accounts": [
             {
               "name": "obligation_farm_user_state",
@@ -863,7 +863,7 @@
           "signer": true
         },
         {
-          "name": "base_accounts",
+          "name": "refresh_obligation_farms_for_reserve_base_accounts",
           "accounts": [
             {
               "name": "obligation"
@@ -991,7 +991,7 @@
       ],
       "accounts": [
         {
-          "name": "deposit_accounts",
+          "name": "deposit_obligation_collateral_v2_deposit_accounts",
           "accounts": [
             {
               "name": "owner",
@@ -1028,7 +1028,7 @@
           "name": "lending_market_authority"
         },
         {
-          "name": "farms_accounts",
+          "name": "deposit_obligation_collateral_v2_farms_accounts",
           "accounts": [
             {
               "name": "obligation_farm_user_state",
@@ -1121,7 +1121,7 @@
       ],
       "accounts": [
         {
-          "name": "withdraw_accounts",
+          "name": "withdraw_obligation_collateral_v2_withdraw_accounts",
           "accounts": [
             {
               "name": "owner",
@@ -1159,7 +1159,7 @@
           ]
         },
         {
-          "name": "farms_accounts",
+          "name": "withdraw_obligation_collateral_v2_farms_accounts",
           "accounts": [
             {
               "name": "obligation_farm_user_state",
@@ -1263,7 +1263,7 @@
       ],
       "accounts": [
         {
-          "name": "borrow_accounts",
+          "name": "borrow_obligation_liquidity_v2_borrow_accounts",
           "accounts": [
             {
               "name": "owner",
@@ -1312,7 +1312,7 @@
           ]
         },
         {
-          "name": "farms_accounts",
+          "name": "borrow_obligation_liquidity_v2_farms_accounts",
           "accounts": [
             {
               "name": "obligation_farm_user_state",
@@ -1404,7 +1404,7 @@
       ],
       "accounts": [
         {
-          "name": "repay_accounts",
+          "name": "repay_obligation_liquidity_v2_repay_accounts",
           "accounts": [
             {
               "name": "owner",
@@ -1441,7 +1441,7 @@
           ]
         },
         {
-          "name": "farms_accounts",
+          "name": "repay_obligation_liquidity_v2_farms_accounts",
           "accounts": [
             {
               "name": "obligation_farm_user_state",
@@ -1483,7 +1483,7 @@
       ],
       "accounts": [
         {
-          "name": "repay_accounts",
+          "name": "repay_and_withdraw_and_redeem_repay_accounts",
           "accounts": [
             {
               "name": "owner",
@@ -1520,7 +1520,7 @@
           ]
         },
         {
-          "name": "withdraw_accounts",
+          "name": "repay_and_withdraw_and_redeem_withdraw_accounts",
           "accounts": [
             {
               "name": "owner",
@@ -1576,7 +1576,7 @@
           ]
         },
         {
-          "name": "collateral_farms_accounts",
+          "name": "repay_and_withdraw_and_redeem_collateral_farms_accounts",
           "accounts": [
             {
               "name": "obligation_farm_user_state",
@@ -1591,7 +1591,7 @@
           ]
         },
         {
-          "name": "debt_farms_accounts",
+          "name": "repay_and_withdraw_and_redeem_debt_farms_accounts",
           "accounts": [
             {
               "name": "obligation_farm_user_state",
@@ -1634,7 +1634,7 @@
       ],
       "accounts": [
         {
-          "name": "deposit_accounts",
+          "name": "deposit_and_withdraw_deposit_accounts",
           "accounts": [
             {
               "name": "owner",
@@ -1690,7 +1690,7 @@
           ]
         },
         {
-          "name": "withdraw_accounts",
+          "name": "deposit_and_withdraw_withdraw_accounts",
           "accounts": [
             {
               "name": "owner",
@@ -1746,7 +1746,7 @@
           ]
         },
         {
-          "name": "deposit_farms_accounts",
+          "name": "deposit_and_withdraw_deposit_farms_accounts",
           "accounts": [
             {
               "name": "obligation_farm_user_state",
@@ -1761,7 +1761,7 @@
           ]
         },
         {
-          "name": "withdraw_farms_accounts",
+          "name": "deposit_and_withdraw_withdraw_farms_accounts",
           "accounts": [
             {
               "name": "obligation_farm_user_state",
@@ -1876,7 +1876,7 @@
       ],
       "accounts": [
         {
-          "name": "deposit_accounts",
+          "name": "deposit_reserve_liquidity_and_obligation_collateral_v2_deposit_accounts",
           "accounts": [
             {
               "name": "owner",
@@ -1932,7 +1932,7 @@
           ]
         },
         {
-          "name": "farms_accounts",
+          "name": "deposit_reserve_liquidity_and_obligation_collateral_v2_farms_accounts",
           "accounts": [
             {
               "name": "obligation_farm_user_state",
@@ -2043,7 +2043,7 @@
       ],
       "accounts": [
         {
-          "name": "withdraw_accounts",
+          "name": "withdraw_obligation_collateral_and_redeem_reserve_collateral_v2_withdraw_accounts",
           "accounts": [
             {
               "name": "owner",
@@ -2099,7 +2099,7 @@
           ]
         },
         {
-          "name": "farms_accounts",
+          "name": "withdraw_obligation_collateral_and_redeem_reserve_collateral_v2_farms_accounts",
           "accounts": [
             {
               "name": "obligation_farm_user_state",
@@ -2239,7 +2239,7 @@
       ],
       "accounts": [
         {
-          "name": "liquidation_accounts",
+          "name": "liquidate_obligation_and_redeem_reserve_collateral_v2_liquidation_accounts",
           "accounts": [
             {
               "name": "liquidator",
@@ -2316,7 +2316,7 @@
           ]
         },
         {
-          "name": "collateral_farms_accounts",
+          "name": "liquidate_obligation_and_redeem_reserve_collateral_v2_collateral_farms_accounts",
           "accounts": [
             {
               "name": "obligation_farm_user_state",
@@ -2331,7 +2331,7 @@
           ]
         },
         {
-          "name": "debt_farms_accounts",
+          "name": "liquidate_obligation_and_redeem_reserve_collateral_v2_debt_farms_accounts",
           "accounts": [
             {
               "name": "obligation_farm_user_state",
@@ -2871,7 +2871,7 @@
       ],
       "accounts": [
         {
-          "name": "borrow_accounts",
+          "name": "fill_borrow_order_borrow_accounts",
           "accounts": [
             {
               "name": "payer",
@@ -2957,7 +2957,7 @@
           ]
         },
         {
-          "name": "farms_accounts",
+          "name": "fill_borrow_order_farms_accounts",
           "accounts": [
             {
               "name": "obligation_farm_user_state",

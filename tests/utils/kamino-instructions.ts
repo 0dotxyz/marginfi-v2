@@ -16,7 +16,7 @@ import {
   deriveLiquidityVaultAuthority,
   deriveUserMetadata,
 } from "./pdas";
-import { klendBankrunProgram } from "tests/rootHooks";
+import { klendBankrunProgram } from "../rootHooks";
 
 const DEFAULT_KAMINO_DEPOSIT_OPTIONAL_ACCOUNTS = {
   obligationFarmUserState: null,
