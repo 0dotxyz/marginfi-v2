@@ -157,7 +157,6 @@ impl BankFixture {
         Ok(())
     }
 
-
     pub async fn try_emissions_deposit(
         &self,
         amount: u64,
@@ -498,31 +497,6 @@ impl BankFixture {
         self.ctx
             .borrow_mut()
             .set_account(&self.key, &bank_ai.into());
-    }
-
-    /// Directly set an emissions mint on a bank account.
-    pub async fn set_emissions_direct(
-        &self,
-        emissions_mint: Pubkey,
-    ) -> Result<(), BanksClientError> {
-        let mut bank_ai = self
-            .ctx
-            .borrow_mut()
-            .banks_client
-            .get_account(self.key)
-            .await
-            .unwrap()
-            .unwrap();
-
-        let bank = bytemuck::from_bytes_mut::<Bank>(&mut bank_ai.data.as_mut_slice()[8..]);
-
-        bank.emissions_mint = emissions_mint;
-
-        self.ctx
-            .borrow_mut()
-            .set_account(&self.key, &bank_ai.into());
-
-        Ok(())
     }
 }
 

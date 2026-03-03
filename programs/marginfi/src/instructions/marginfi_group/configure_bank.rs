@@ -1,4 +1,3 @@
-use crate::{check, math_error, utils};
 use crate::events::{
     GroupEventHeader, LendingPoolBankConfigureEvent, LendingPoolBankConfigureFrozenEvent,
 };
@@ -6,7 +5,9 @@ use crate::prelude::MarginfiError;
 use crate::state::bank::BankImpl;
 use crate::state::emode::EmodeSettingsImpl;
 use crate::state::marginfi_group::MarginfiGroupImpl;
+use crate::utils::is_marginfi_asset_tag;
 use crate::MarginfiResult;
+use crate::{check, math_error, utils};
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::get_associated_token_address_with_program_id;
 use anchor_spl::token_2022::{transfer_checked, TransferChecked};
@@ -295,6 +296,8 @@ pub struct LendingPoolEmissionsDeposit<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
         has_one = emissions_mint @ MarginfiError::InvalidEmissionsMint,
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
+        constraint = is_marginfi_asset_tag(bank.load()?.config.asset_tag)
+            @ MarginfiError::WrongAssetTagForStandardInstructions,
     )]
     pub bank: AccountLoader<'info, Bank>,
 

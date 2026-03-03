@@ -10,7 +10,9 @@ async fn emissions_deposit_fails_when_bank_paused() -> anyhow::Result<()> {
 
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
 
-    usdc_bank.set_emissions_direct(usdc_bank.mint.key).await?;
+    usdc_bank
+        .set_emissions(usdc_bank.mint.key, 0, I80F48::ZERO, 0)
+        .await;
 
     let depositor = test_f.create_marginfi_account().await;
     let depositor_usdc = test_f.usdc_mint.create_token_account_and_mint_to(100).await;
@@ -45,7 +47,9 @@ async fn emissions_deposit_fails_when_bank_reduce_only() -> anyhow::Result<()> {
 
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
 
-    usdc_bank.set_emissions_direct(usdc_bank.mint.key).await?;
+    usdc_bank
+        .set_emissions(usdc_bank.mint.key, 0, I80F48::ZERO, 0)
+        .await;
 
     let depositor = test_f.create_marginfi_account().await;
     let depositor_usdc = test_f.usdc_mint.create_token_account_and_mint_to(100).await;
@@ -87,7 +91,9 @@ async fn emissions_deposit_fails_with_nonzero_transfer_fee() -> anyhow::Result<(
 
     let t22_bank = test_f.get_bank(&BankMint::T22WithFee);
 
-    t22_bank.set_emissions_direct(t22_bank.mint.key).await?;
+    t22_bank
+        .set_emissions(t22_bank.mint.key, 0, I80F48::ZERO, 0)
+        .await;
 
     let depositor = test_f.create_marginfi_account().await;
     let depositor_t22 = t22_bank.mint.create_token_account_and_mint_to(100).await;
@@ -125,7 +131,9 @@ async fn emissions_deposit_fails_with_transfer_hook() -> anyhow::Result<()> {
 
     let t22_bank = test_f.get_bank(&BankMint::UsdcT22);
 
-    t22_bank.set_emissions_direct(t22_bank.mint.key).await?;
+    t22_bank
+        .set_emissions(t22_bank.mint.key, 0, I80F48::ZERO, 0)
+        .await;
 
     let depositor = test_f.create_marginfi_account().await;
     let depositor_t22 = t22_bank.mint.create_token_account_and_mint_to(100).await;
@@ -165,7 +173,9 @@ async fn emissions_deposit_succeeds_with_inactive_t22_extensions() -> anyhow::Re
 
     let t22_bank = test_f.get_bank(&BankMint::UsdcT22);
 
-    t22_bank.set_emissions_direct(t22_bank.mint.key).await?;
+    t22_bank
+        .set_emissions(t22_bank.mint.key, 0, I80F48::ZERO, 0)
+        .await;
 
     let depositor = test_f.create_marginfi_account().await;
     let depositor_t22 = t22_bank.mint.create_token_account_and_mint_to(100).await;
@@ -224,7 +234,9 @@ async fn emissions_same_bank_deposit_updates_asset_share_value() -> anyhow::Resu
 
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
 
-    usdc_bank.set_emissions_direct(usdc_bank.mint.key).await?;
+    usdc_bank
+        .set_emissions(usdc_bank.mint.key, 0, I80F48::ZERO, 0)
+        .await;
 
     let emissions_funding = test_f.usdc_mint.create_token_account_and_mint_to(50).await;
 
@@ -345,8 +357,8 @@ async fn emissions_not_same_bank_deposit_updates_asset_share_value() -> anyhow::
     let emissions_mint_fixture = MintFixture::new(test_f.context.clone(), None, None).await;
 
     usdc_bank
-        .set_emissions_direct(emissions_mint_fixture.key)
-        .await?;
+        .set_emissions(emissions_mint_fixture.key, 0, I80F48::ZERO, 0)
+        .await;
 
     let emissions_funding = test_f.usdc_mint.create_token_account_and_mint_to(50).await;
 

@@ -302,7 +302,6 @@ export const configureBankOracle = (
   return ix;
 };
 
-
 export type EmissionsDepositArgs = {
   bank: PublicKey;
   emissionsMint: PublicKey;
