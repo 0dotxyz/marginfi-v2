@@ -121,11 +121,8 @@ pub fn solend_withdraw<'info>(
             I80F48::ZERO
         };
 
-        let mut bank_account = BankAccountWrapper::find(
-            &ctx.accounts.bank.key(),
-            &mut bank,
-            &mut marginfi_account.lending_account,
-        )?;
+        let mut bank_account =
+            BankAccountWrapper::find(&bank_key, &mut bank, &mut marginfi_account.lending_account)?;
 
         let collateral_amount = if withdraw_all {
             bank_account.withdraw_all()?

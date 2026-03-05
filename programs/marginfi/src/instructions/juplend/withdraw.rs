@@ -572,7 +572,6 @@ mod tests {
         // ceil(100 * 1e12 / 1.1e12) = ceil(90.909...) = 91
         let shares = expected_shares_for_withdraw_from_rate(100, 1_100_000_000_000).unwrap();
         assert_eq!(shares, 91);
-        assert!(shares < 100);
     }
 
     #[test]
@@ -580,7 +579,6 @@ mod tests {
         // ceil(100 * 1e12 / 0.9e12) = ceil(111.111...) = 112
         let shares = expected_shares_for_withdraw_from_rate(100, 900_000_000_000).unwrap();
         assert_eq!(shares, 112);
-        assert!(shares > 100);
     }
 
     #[test]

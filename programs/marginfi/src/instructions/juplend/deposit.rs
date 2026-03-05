@@ -345,7 +345,6 @@ mod tests {
             expected_shares_for_deposit_from_rates(100, 1_000_000_000_000, 1_100_000_000_000)
                 .unwrap();
         assert_eq!(shares, 90);
-        assert!(shares < 100);
     }
 
     #[test]
@@ -355,7 +354,6 @@ mod tests {
             expected_shares_for_deposit_from_rates(100, 1_000_000_000_000, 900_000_000_000)
                 .unwrap();
         assert_eq!(shares, 111);
-        assert!(shares > 100);
     }
 
     #[test]
