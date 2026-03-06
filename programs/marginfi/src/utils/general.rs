@@ -18,6 +18,7 @@ use anchor_spl::{
         self,
         extension::{
             transfer_fee::{TransferFee, TransferFeeConfig},
+            transfer_hook::TransferHook,
             BaseStateWithExtensions, StateWithExtensions,
         },
     },
@@ -121,6 +122,24 @@ pub fn nonzero_fee(mint_ai: AccountInfo, epoch: u64) -> MarginfiResult<bool> {
                 .get_epoch_fee(epoch)
                 .transfer_fee_basis_points,
         ) != 0);
+    }
+
+    Ok(false)
+}
+
+/// Returns `true` if the given mint has an active transfer hook program.
+/// If the hook is present but no program is active it would return false.
+pub fn has_transfer_hook(mint_ai: AccountInfo) -> MarginfiResult<bool> {
+    if mint_ai.owner.eq(&Token::id()) {
+        return Ok(false);
+    }
+
+    let mint_data = mint_ai.try_borrow_data()?;
+    let mint = StateWithExtensions::<spl_token_2022::state::Mint>::unpack(&mint_data)?;
+
+    if let Ok(hook) = mint.get_extension::<TransferHook>() {
+        let program_id: Option<Pubkey> = Option::from(hook.program_id);
+        return Ok(program_id.is_some());
     }
 
     Ok(false)

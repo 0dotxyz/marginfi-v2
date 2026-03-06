@@ -38,6 +38,7 @@ import {
 } from "../rootHooks";
 import { getEpochAndSlot } from "./bankrunConnection";
 import { createMintToInstruction } from "@solana/spl-token";
+import { BankrunProvider } from "anchor-bankrun";
 
 /**
  * Convert a human-readable amount to native token units based on decimals.
@@ -349,8 +350,7 @@ export const dumpBankrunLogs = (result: any): boolean => {
     findFieldDeep(result, "computeUnitsConsumed");
   const status = txResult === null || txResult === undefined ? "ok" : "failed";
   console.log(
-    `[bankrun] no logMessages available (status=${status}, meta=${
-      result?.meta === null ? "null" : typeof result?.meta
+    `[bankrun] no logMessages available (status=${status}, meta=${result?.meta === null ? "null" : typeof result?.meta
     })`,
   );
   if (txResult !== undefined) {
@@ -775,3 +775,30 @@ export const getBankrunBlockhash = async (
 ) => {
   return (await bankrunContext.banksClient.getLatestBlockhash())[0];
 };
+
+const EMISSIONS_MINT_OFFSET = 864 + 8;
+
+/**
+ * Directly set an emissions mint on a bank account and return the previous mint
+ */
+export async function setEmissionsDirect(
+  provider: BankrunProvider,
+  bank: PublicKey,
+  emissionsMint: PublicKey,
+): Promise<PublicKey> {
+  const existing = await provider.context.banksClient.getAccount(bank);
+  if (!existing) throw new Error("Bank account not found in bankrun");
+
+  const buf = Buffer.from(existing.data);
+  const prevMint = new PublicKey(buf.subarray(EMISSIONS_MINT_OFFSET, EMISSIONS_MINT_OFFSET + 32));
+
+  const emissionsSlice = emissionsMint.toBuffer();
+  emissionsSlice.copy(buf, EMISSIONS_MINT_OFFSET);
+
+  provider.context.setAccount(bank, {
+    ...existing,
+    data: buf
+  });
+
+  return prevMint;
+}
