@@ -169,7 +169,7 @@ impl BankFixture {
             accounts: marginfi::accounts::LendingPoolEmissionsDeposit {
                 group: bank.group,
                 bank: self.key,
-                emissions_mint: bank.emissions_mint,
+                mint: bank.mint,
                 emissions_funding_account: funding_account,
                 depositor: self.ctx.borrow().payer.pubkey(),
                 liquidity_vault: bank.liquidity_vault,

@@ -219,13 +219,8 @@ pub fn lending_pool_emissions_deposit(
 
     utils::validate_bank_state(&bank, utils::InstructionKind::FailsIfPausedOrReduceState)?;
 
-    check!(
-        bank.mint.eq(&bank.emissions_mint),
-        MarginfiError::InvalidEmissionsMint
-    );
-
     // Reject mints with non-zero transfer fees or active transfer hooks.
-    let mint_ai = ctx.accounts.emissions_mint.to_account_info();
+    let mint_ai = ctx.accounts.mint.to_account_info();
     check!(
         !utils::nonzero_fee(mint_ai.clone(), clock.epoch)?,
         MarginfiError::InvalidTransfer
@@ -255,11 +250,11 @@ pub fn lending_pool_emissions_deposit(
                 from: ctx.accounts.emissions_funding_account.to_account_info(),
                 to: ctx.accounts.liquidity_vault.to_account_info(),
                 authority: ctx.accounts.depositor.to_account_info(),
-                mint: ctx.accounts.emissions_mint.to_account_info(),
+                mint: ctx.accounts.mint.to_account_info(),
             },
         ),
         amount,
-        ctx.accounts.emissions_mint.decimals,
+        ctx.accounts.mint.decimals,
     )?;
 
     let total_assets = bank.get_asset_amount(total_asset_shares)?;
@@ -294,14 +289,14 @@ pub struct LendingPoolEmissionsDeposit<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = emissions_mint @ MarginfiError::InvalidEmissionsMint,
+        has_one = mint @ MarginfiError::InvalidEmissionsMint,
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
         constraint = is_marginfi_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongAssetTagForStandardInstructions,
     )]
     pub bank: AccountLoader<'info, Bank>,
 
-    pub emissions_mint: InterfaceAccount<'info, Mint>,
+    pub mint: InterfaceAccount<'info, Mint>,
 
     /// NOTE: This is a TokenAccount, spl transfer will validate it.
     ///

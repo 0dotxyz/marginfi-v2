@@ -304,7 +304,7 @@ export const configureBankOracle = (
 
 export type EmissionsDepositArgs = {
   bank: PublicKey;
-  emissionsMint: PublicKey;
+  mint: PublicKey;
   fundingAccount: PublicKey;
   depositor: PublicKey;
   liquidityVault: PublicKey;
@@ -320,7 +320,7 @@ export const lendingPoolEmissionsDeposit = (
     .accounts({
       bank: args.bank,
       depositor: args.depositor,
-      // emissionsMint: args.emissionsMint,
+      // mint: args.mint,
       emissionsFundingAccount: args.fundingAccount,
       // liquidityVault: args.liquidityVault,
       tokenProgram: TOKEN_PROGRAM_ID,
