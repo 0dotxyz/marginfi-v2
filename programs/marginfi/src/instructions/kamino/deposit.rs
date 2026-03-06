@@ -131,7 +131,6 @@ pub fn kamino_deposit<'info>(
 #[derive(Accounts)]
 pub struct KaminoDeposit<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused

@@ -27,10 +27,11 @@ pub fn update_group_rate_limiter(
         outflow_usd.is_some() || inflow_usd.is_some(),
         MarginfiError::GroupRateLimiterUpdateEmpty
     );
-    check!(
-        event_start_slot <= event_end_slot,
-        MarginfiError::GroupRateLimiterUpdateInvalidSlotRange
-    );
+    validate_event_slots(
+        event_start_slot,
+        event_end_slot,
+        group.rate_limiter_last_admin_update_slot,
+    )?;
     check!(
         event_end_slot <= clock.slot,
         MarginfiError::GroupRateLimiterUpdateFutureSlot
@@ -38,14 +39,6 @@ pub fn update_group_rate_limiter(
     check!(
         clock.slot.saturating_sub(event_end_slot) <= MAX_RATE_LIMIT_UPDATE_LAG_SLOTS,
         MarginfiError::GroupRateLimiterUpdateStale
-    );
-    check!(
-        event_start_slot >= group.rate_limiter_last_admin_update_slot,
-        MarginfiError::GroupRateLimiterUpdateOutOfOrderSlot
-    );
-    check!(
-        event_end_slot >= group.rate_limiter_last_admin_update_slot,
-        MarginfiError::GroupRateLimiterUpdateOutOfOrderSlot
     );
     check!(
         update_seq == group.rate_limiter_last_admin_update_seq.saturating_add(1),
@@ -72,6 +65,24 @@ pub fn update_group_rate_limiter(
     Ok(())
 }
 
+fn validate_event_slots(
+    event_start_slot: u64,
+    event_end_slot: u64,
+    last_admin_update_slot: u64,
+) -> MarginfiResult {
+    check!(
+        event_start_slot <= event_end_slot,
+        MarginfiError::GroupRateLimiterUpdateInvalidSlotRange
+    );
+
+    // Strictly-greater enforces non-overlapping slot ranges across admin batches.
+    check!(
+        event_start_slot > last_admin_update_slot,
+        MarginfiError::GroupRateLimiterUpdateOutOfOrderSlot
+    );
+    Ok(())
+}
+
 #[derive(Accounts)]
 pub struct UpdateGroupRateLimiter<'info> {
     #[account(
@@ -81,4 +92,49 @@ pub struct UpdateGroupRateLimiter<'info> {
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
     pub admin: Signer<'info>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_event_slots;
+    use crate::MarginfiError;
+
+    #[test]
+    fn validate_event_slots_checks_range_and_non_overlapping_start() {
+        let cases = [
+            (111_u64, 120_u64, 110_u64, None),
+            (111_u64, 111_u64, 110_u64, None),
+            (500_u64, 600_u64, 0_u64, None),
+            (u64::MAX, u64::MAX, u64::MAX.saturating_sub(1), None),
+            (
+                121_u64,
+                120_u64,
+                110_u64,
+                Some(MarginfiError::GroupRateLimiterUpdateInvalidSlotRange),
+            ),
+            (
+                110_u64,
+                120_u64,
+                110_u64,
+                Some(MarginfiError::GroupRateLimiterUpdateOutOfOrderSlot),
+            ),
+            (
+                109_u64,
+                120_u64,
+                110_u64,
+                Some(MarginfiError::GroupRateLimiterUpdateOutOfOrderSlot),
+            ),
+        ];
+
+        for (start, end, last, expected_err) in cases {
+            let result = validate_event_slots(start, end, last);
+            match expected_err {
+                None => assert!(result.is_ok()),
+                Some(err) => {
+                    assert!(result.is_err());
+                    assert_eq!(result.err().unwrap(), err.into());
+                }
+            }
+        }
+    }
 }

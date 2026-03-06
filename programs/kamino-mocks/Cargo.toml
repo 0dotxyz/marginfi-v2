@@ -19,7 +19,7 @@ idl-build = ["anchor-lang/idl-build"]
 
 [dependencies]
 anchor-lang = { workspace = true }
-bytemuck = { workspace = true }
+bytemuck = { workspace = true, features = ["derive"] }
 fixed = { workspace = true }
 fixed-macro = { workspace = true }
 static_assertions = { workspace = true }

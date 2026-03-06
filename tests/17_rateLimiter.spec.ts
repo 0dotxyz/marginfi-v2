@@ -339,8 +339,15 @@ describe("Rate limiter", () => {
       marginfiGroup.publicKey,
     );
     const updateSeq = groupState.rateLimiterLastAdminUpdateSeq.add(new BN(1));
-    const eventStartSlot = groupState.rateLimiterLastAdminUpdateSlot;
-    const eventEndSlot = await getCurrentBankrunSlot();
+    const eventStartSlot = groupState.rateLimiterLastAdminUpdateSlot.add(new BN(1));
+    let eventEndSlot = await getCurrentBankrunSlot();
+
+    // Strict slot progression requires start > last_slot and start <= end.
+    // Back-to-back admin updates can happen in the same slot, so advance one slot if needed.
+    while (eventEndSlot.lt(eventStartSlot)) {
+      await advanceBankrunClock(bankrunContext, 1);
+      eventEndSlot = await getCurrentBankrunSlot();
+    }
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
@@ -456,6 +463,35 @@ describe("Rate limiter", () => {
     assertBNEqual(bankAfter.rateLimiter.daily.maxOutflow, usdcNative(100)); // preserved
     assertBNEqual(groupAfter.rateLimiter.hourly.maxOutflow, 50); // preserved
     assertBNEqual(groupAfter.rateLimiter.daily.maxOutflow, 300); // updated
+  });
+
+  it("(admin) rejects overlapping admin update slot ranges", async () => {
+    const groupState = await program.account.marginfiGroup.fetch(
+      marginfiGroup.publicKey,
+    );
+
+    const updateSeq = groupState.rateLimiterLastAdminUpdateSeq.add(new BN(1));
+    const eventStartSlot = groupState.rateLimiterLastAdminUpdateSlot; // intentionally overlapping
+    const eventEndSlot = await getCurrentBankrunSlot();
+
+    await expectFailedTxWithError(
+      async () => {
+        await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+          new Transaction().add(
+            await updateGroupRateLimiter(groupAdmin.mrgnProgram, {
+              marginfiGroup: marginfiGroup.publicKey,
+              outflowUsd: new BN(1),
+              inflowUsd: null,
+              updateSeq,
+              eventStartSlot,
+              eventEndSlot,
+            }),
+          ),
+        );
+      },
+      "GroupRateLimiterUpdateOutOfOrderSlot",
+      6124,
+    );
   });
 
   it("(user 2) bank hourly limit blocks excess outflow", async () => {

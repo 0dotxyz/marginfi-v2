@@ -14,7 +14,7 @@ use crate::{
     },
     utils::{
         fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank, is_drift_asset_tag,
-        record_deposit_inflow, validate_bank_state, InstructionKind,
+        record_withdrawal_outflow, validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -161,13 +161,15 @@ pub fn drift_withdraw<'info>(
             (token_amount, scaled_decrement)
         };
 
-        record_deposit_inflow(
+        record_withdrawal_outflow(
+            group_rate_limit_enabled,
+            token_amount,
+            price,
             &mut bank,
             &group,
             ctx.accounts.group.key(),
             ctx.accounts.bank.key(),
-            marginfi_account.account_flags,
-            token_amount,
+            &marginfi_account,
             &clock,
         )?;
 
@@ -259,7 +261,7 @@ pub fn drift_withdraw<'info>(
         if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION) {
             check_account_init_health(
                 &marginfi_account,
-                ctx.remaining_accounts,
+                ctx.remaining_accounts, 
                 &mut Some(&mut health_cache),
             )?;
 

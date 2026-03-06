@@ -38,6 +38,14 @@ async fn configure_group_hourly_limit(
     Ok(())
 }
 
+async fn next_group_rate_limiter_update_params(test_f: &TestFixture) -> (u64, u64) {
+    let g: MarginfiGroup = test_f.load_and_deserialize(&test_f.marginfi_group.key).await;
+    (
+        g.rate_limiter_last_admin_update_slot.saturating_add(1),
+        g.rate_limiter_last_admin_update_seq.saturating_add(1),
+    )
+}
+
 #[tokio::test]
 async fn update_group_rate_limiter_applies_inflow_before_outflow() -> anyhow::Result<()> {
     let test_f = TestFixture::new(None).await;
@@ -50,6 +58,7 @@ async fn update_group_rate_limiter_applies_inflow_before_outflow() -> anyhow::Re
     };
 
     {
+        let (event_start_slot, update_seq) = next_group_rate_limiter_update_params(&test_f).await;
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
@@ -60,8 +69,8 @@ async fn update_group_rate_limiter_applies_inflow_before_outflow() -> anyhow::Re
             data: marginfi::instruction::UpdateGroupRateLimiter {
                 outflow_usd: Some(95),
                 inflow_usd: None,
-                update_seq: 1,
-                event_start_slot: 0,
+                update_seq,
+                event_start_slot,
                 event_end_slot: slot,
             }
             .data(),
@@ -77,6 +86,14 @@ async fn update_group_rate_limiter_applies_inflow_before_outflow() -> anyhow::Re
             .process_transaction_with_preflight(tx)
             .await?;
     }
+
+    let slot2 = {
+        let ctx = test_f.context.borrow_mut();
+        let mut clock: Clock = ctx.banks_client.get_sysvar().await?;
+        clock.slot = clock.slot.saturating_add(1);
+        ctx.set_sysvar(&clock);
+        clock.slot
+    };
 
     // If outflow were applied first, this would fail against the 100 USD hourly cap.
     // With inflow-first ordering it succeeds: 95 - 10 + 15 = 100.
@@ -95,8 +112,8 @@ async fn update_group_rate_limiter_applies_inflow_before_outflow() -> anyhow::Re
                 outflow_usd: Some(15),
                 inflow_usd: Some(10),
                 update_seq: g.rate_limiter_last_admin_update_seq.saturating_add(1),
-                event_start_slot: g.rate_limiter_last_admin_update_slot,
-                event_end_slot: slot,
+                event_start_slot: g.rate_limiter_last_admin_update_slot.saturating_add(1),
+                event_end_slot: slot2,
             }
             .data(),
         };
@@ -125,14 +142,14 @@ async fn update_group_rate_limiter_applies_inflow_before_outflow() -> anyhow::Re
 async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
     let test_f = TestFixture::new(None).await;
 
-    let slot = {
-        let ctx = test_f.context.borrow_mut();
-        let clock: Clock = ctx.banks_client.get_sysvar().await?;
-        clock.slot
-    };
-
     // Empty update payload.
     {
+        let (event_start_slot, update_seq) = next_group_rate_limiter_update_params(&test_f).await;
+        let slot = {
+            let ctx = test_f.context.borrow_mut();
+            let clock: Clock = ctx.banks_client.get_sysvar().await?;
+            clock.slot
+        };
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
@@ -143,8 +160,8 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
             data: marginfi::instruction::UpdateGroupRateLimiter {
                 outflow_usd: None,
                 inflow_usd: None,
-                update_seq: 1,
-                event_start_slot: 0,
+                update_seq,
+                event_start_slot,
                 event_end_slot: slot,
             }
             .data(),
@@ -165,6 +182,7 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
 
     // Invalid slot range.
     {
+        let (next_start_slot, update_seq) = next_group_rate_limiter_update_params(&test_f).await;
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
@@ -175,9 +193,9 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
             data: marginfi::instruction::UpdateGroupRateLimiter {
                 outflow_usd: Some(1),
                 inflow_usd: None,
-                update_seq: 1,
-                event_start_slot: slot.saturating_add(1),
-                event_end_slot: slot,
+                update_seq,
+                event_start_slot: next_start_slot.saturating_add(1),
+                event_end_slot: next_start_slot,
             }
             .data(),
         };
@@ -200,6 +218,12 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
 
     // Future slot.
     {
+        let (event_start_slot, update_seq) = next_group_rate_limiter_update_params(&test_f).await;
+        let slot = {
+            let ctx = test_f.context.borrow_mut();
+            let clock: Clock = ctx.banks_client.get_sysvar().await?;
+            clock.slot
+        };
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
@@ -210,8 +234,8 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
             data: marginfi::instruction::UpdateGroupRateLimiter {
                 outflow_usd: Some(1),
                 inflow_usd: None,
-                update_seq: 1,
-                event_start_slot: 0,
+                update_seq,
+                event_start_slot,
                 event_end_slot: slot.saturating_add(1),
             }
             .data(),
@@ -235,6 +259,12 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
 
     // Out-of-order sequence (initial seq must be 1).
     {
+        let (event_start_slot, next_seq) = next_group_rate_limiter_update_params(&test_f).await;
+        let slot = {
+            let ctx = test_f.context.borrow_mut();
+            let clock: Clock = ctx.banks_client.get_sysvar().await?;
+            clock.slot
+        };
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
@@ -245,8 +275,8 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
             data: marginfi::instruction::UpdateGroupRateLimiter {
                 outflow_usd: Some(1),
                 inflow_usd: None,
-                update_seq: 2,
-                event_start_slot: 0,
+                update_seq: next_seq.saturating_add(1),
+                event_start_slot,
                 event_end_slot: slot,
             }
             .data(),
@@ -291,6 +321,7 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
 
     // First valid update sets last slot + seq.
     {
+        let (event_start_slot, update_seq) = next_group_rate_limiter_update_params(&test_f).await;
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
@@ -301,8 +332,8 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
             data: marginfi::instruction::UpdateGroupRateLimiter {
                 outflow_usd: Some(1),
                 inflow_usd: None,
-                update_seq: 1,
-                event_start_slot: 0,
+                update_seq,
+                event_start_slot,
                 event_end_slot: slot,
             }
             .data(),
@@ -321,6 +352,9 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
 
     // Slot progression must not move backward.
     {
+        let g: MarginfiGroup = test_f
+            .load_and_deserialize(&test_f.marginfi_group.key)
+            .await;
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
@@ -331,9 +365,9 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
             data: marginfi::instruction::UpdateGroupRateLimiter {
                 outflow_usd: Some(1),
                 inflow_usd: None,
-                update_seq: 2,
-                event_start_slot: slot.saturating_sub(1),
-                event_end_slot: slot.saturating_sub(1),
+                update_seq: g.rate_limiter_last_admin_update_seq.saturating_add(1),
+                event_start_slot: g.rate_limiter_last_admin_update_slot,
+                event_end_slot: g.rate_limiter_last_admin_update_slot,
             }
             .data(),
         };
@@ -356,6 +390,16 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
 
     // Only the configured group admin may call this instruction.
     {
+        let next_slot = {
+            let ctx = test_f.context.borrow_mut();
+            let mut clock: Clock = ctx.banks_client.get_sysvar().await?;
+            clock.slot = clock.slot.saturating_add(1);
+            ctx.set_sysvar(&clock);
+            clock.slot
+        };
+        let g: MarginfiGroup = test_f
+            .load_and_deserialize(&test_f.marginfi_group.key)
+            .await;
         let unauthorized = Keypair::new();
         let ix = Instruction {
             program_id: marginfi::ID,
@@ -367,9 +411,9 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
             data: marginfi::instruction::UpdateGroupRateLimiter {
                 outflow_usd: Some(1),
                 inflow_usd: None,
-                update_seq: 2,
-                event_start_slot: slot,
-                event_end_slot: slot,
+                update_seq: g.rate_limiter_last_admin_update_seq.saturating_add(1),
+                event_start_slot: g.rate_limiter_last_admin_update_slot.saturating_add(1),
+                event_end_slot: next_slot,
             }
             .data(),
         };

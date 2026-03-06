@@ -138,7 +138,6 @@ pub fn drift_deposit<'info>(
 #[derive(Accounts)]
 pub struct DriftDeposit<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused
