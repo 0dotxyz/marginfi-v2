@@ -1,14 +1,22 @@
 import {
+  AccountMeta,
+  AddressLookupTableProgram,
+  BPF_LOADER_DEPRECATED_PROGRAM_ID,
+  BPF_LOADER_PROGRAM_ID,
   ComputeBudgetProgram,
   Keypair,
   PublicKey,
   SystemProgram,
   SYSVAR_RENT_PUBKEY,
   Transaction,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
 } from "@solana/web3.js";
 import {
   bankrunContext,
   bankRunProvider,
+  banksClient,
   ecosystem,
   globalProgramAdmin,
   groupAdmin,
@@ -21,13 +29,18 @@ import {
   users,
   verbose,
 } from "./rootHooks";
-import { processBankrunTransaction } from "./utils/tools";
+import {
+  createLookupTableForInstructions,
+  getBankrunBlockhash,
+  processBankrunTransaction,
+} from "./utils/tools";
 import { assert } from "chai";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { assertBNApproximately, assertKeysEqual } from "./utils/genericTests";
 import Decimal from "decimal.js";
 import { Fraction } from "@kamino-finance/klend-sdk/dist/classes/fraction";
 import {
+  GLOBAL_CONFIG_SIZE,
   LENDING_MARKET_SIZE,
   RESERVE_SIZE,
   simpleRefreshReserve,
@@ -35,8 +48,6 @@ import {
 // Note: there's some glitch in Kamino's lib based on a Raydium static init, it's currently patch-package hacked...
 import {
   LendingMarket,
-  reserveCollateralMintPda,
-  reserveCollateralSupplyPda,
   Reserve,
   MarketWithAddress,
   BorrowRateCurve,
@@ -45,8 +56,7 @@ import {
   PriceFeed,
   AssetReserveConfig,
   updateEntireReserveConfigIx,
-  reserveLiqSupplyPda,
-  reserveFeeVaultPda,
+  globalConfigPda,
 } from "@kamino-finance/klend-sdk";
 import { createMintToInstruction } from "@solana/spl-token";
 import { ProgramTestContext } from "solana-bankrun";
@@ -54,12 +64,15 @@ import { ProgramTestContext } from "solana-bankrun";
 let ctx: ProgramTestContext;
 import { KLEND_PROGRAM_ID } from "./utils/types";
 import {
+  deriveFeeReceiver,
   deriveLendingMarketAuthority,
   deriveReserveCollateralMint,
   deriveReserveCollateralSupply,
   deriveReserveLiquiditySupply,
 } from "./utils/pdas";
-import { address } from "@solana/addresses";
+import { Address, address } from "@solana/addresses";
+import { createNoopSigner } from "@solana/kit";
+import { dummyIx } from "./utils/bankrunConnection";
 
 describe("k01: Init Kamino instance", () => {
   before(async () => {
@@ -80,8 +93,31 @@ describe("k01: Init Kamino instance", () => {
       lendingMarket.publicKey,
     );
 
+    await ensureGlobalConfigExists();
+
+    // const globalConfig = await globalConfigPda(
+    //   address(klendBankrunProgram.programId.toString()),
+    // );
+
+    // const [programData] = PublicKey.findProgramAddressSync(
+    //   [klendBankrunProgram.programId.toBuffer()],
+    //   BPF_LOADER_PROGRAM_ID,
+    // );
+
     let tx = new Transaction();
     tx.add(
+      // // Init global config (FAILS due to BPF_LOADER_PROGRAM_ID, probably because it's deprecated)
+      // await klendBankrunProgram.methods
+      //   .initGlobalConfig()
+      //   .accounts({
+      //     payer: groupAdmin.wallet.publicKey,
+      //     globalConfig,
+      //     programData,
+      //     systemProgram: SystemProgram.programId,
+      //     rent: SYSVAR_RENT_PUBKEY,
+      //   })
+      //   .instruction()
+
       // Create a zeroed account that's large enough to hold the lending market
       SystemProgram.createAccount({
         fromPubkey: groupAdmin.wallet.publicKey,
@@ -106,10 +142,13 @@ describe("k01: Init Kamino instance", () => {
         .instruction(),
     );
 
-    await processBankrunTransaction(ctx, tx, [
-      groupAdmin.wallet,
-      lendingMarket,
-    ]);
+    await processBankrunTransaction(
+      ctx,
+      tx,
+      [groupAdmin.wallet, lendingMarket],
+      false,
+      true,
+    );
     kaminoAccounts.set(MARKET, lendingMarket.publicKey);
     if (verbose) {
       console.log("Kamino market: " + lendingMarket.publicKey);
@@ -243,7 +282,7 @@ describe("k01: Init Kamino instance", () => {
       market,
     );
 
-    const [feeReceiver] = deriveLendingMarketAuthority(
+    const [feeReceiver] = deriveFeeReceiver(
       KLEND_PROGRAM_ID,
       reserve.publicKey,
     );
@@ -263,6 +302,8 @@ describe("k01: Init Kamino instance", () => {
       reserve.publicKey,
     );
 
+    assertKeysEqual(klendBankrunProgram.programId, KLEND_PROGRAM_ID);
+
     const tx = new Transaction().add(
       SystemProgram.createAccount({
         fromPubkey: groupAdmin.wallet.publicKey,
@@ -276,8 +317,8 @@ describe("k01: Init Kamino instance", () => {
       }),
       await klendBankrunProgram.methods
         .initReserve()
-        .accounts({
-          lendingMarketOwner: groupAdmin.wallet.publicKey,
+        .accountsStrict({
+          signer: groupAdmin.wallet.publicKey,
           lendingMarket: market,
           lendingMarketAuthority,
           reserve: reserve.publicKey,
@@ -360,21 +401,110 @@ describe("k01: Init Kamino instance", () => {
       ...assetReserveConfigParams,
     }).getReserveConfig();
 
-    const updateReserveIx = updateEntireReserveConfigIx(
-      noopSigner(groupAdmin.wallet.publicKey.toString()),
+    const addr = address(groupAdmin.wallet.publicKey.toString());
+    const signer = createNoopSigner(addr);
+    const updateReserveIx = await updateEntireReserveConfigIx(
+      signer,
       marketWithAddress.address,
       address(reserve.publicKey.toString()),
       assetReserveConfig,
       address(klendBankrunProgram.programId.toString()),
     );
 
-    const updateTx = new Transaction().add(
-      ComputeBudgetProgram.setComputeUnitLimit({
-        units: 1_000_000,
-      }),
-      updateReserveIx,
+    const ix = toWeb3Ix(updateReserveIx as any);
+    const lutAccount = await createLookupTableForInstructions(
+      groupAdmin.wallet,
+      [ix],
     );
 
-    await processBankrunTransaction(ctx, updateTx, [groupAdmin.wallet]);
+    const instructions = [
+      ComputeBudgetProgram.setComputeUnitLimit({
+        units: 1_400_000,
+      }),
+      ix,
+    ];
+
+    const messageV0 = new TransactionMessage({
+      payerKey: groupAdmin.wallet.publicKey,
+      recentBlockhash: await getBankrunBlockhash(bankrunContext),
+      instructions,
+    }).compileToV0Message([lutAccount]);
+
+    const versionedTx = new VersionedTransaction(messageV0);
+    versionedTx.sign([groupAdmin.wallet]);
+    await banksClient.processTransaction(versionedTx);
   }
 });
+
+type KitAccountMeta = {
+  address: string;
+  role?: number;
+  isSigner?: boolean;
+  isWritable?: boolean;
+};
+
+type KitInstruction = {
+  programAddress: string;
+  accounts: readonly KitAccountMeta[];
+  data: Uint8Array;
+};
+
+function toWeb3Ix(ix: KitInstruction): TransactionInstruction {
+  const keys: AccountMeta[] = ix.accounts.map((account) => {
+    // Depending on the exact Kit shape, role may encode signer/writable.
+    // If your generated client already exposes isSigner/isWritable, use those directly.
+    return {
+      pubkey: new PublicKey(account.address),
+      isSigner: Boolean(account.isSigner),
+      isWritable: Boolean(account.isWritable),
+    };
+  });
+
+  return new TransactionInstruction({
+    programId: new PublicKey(ix.programAddress),
+    keys,
+    data: Buffer.from(ix.data),
+  });
+}
+
+import crypto from "crypto";
+
+function anchorDiscriminator(name: string): Buffer {
+  return crypto
+    .createHash("sha256")
+    .update(`account:${name}`)
+    .digest()
+    .subarray(0, 8);
+}
+
+async function ensureGlobalConfigExists() {
+  const globalConfigAddr = await globalConfigPda(
+    address(klendBankrunProgram.programId.toString()),
+  );
+  const globalConfigPk = new PublicKey(globalConfigAddr.toString());
+
+  const existing = await bankRunProvider.connection.getAccountInfo(
+    globalConfigPk,
+  );
+  if (existing) {
+    return globalConfigPk;
+  }
+
+  const lamports =
+    await bankRunProvider.connection.getMinimumBalanceForRentExemption(
+      GLOBAL_CONFIG_SIZE,
+    );
+
+  const data = Buffer.alloc(GLOBAL_CONFIG_SIZE);
+  anchorDiscriminator("GlobalConfig").copy(data, 0);
+
+  bankrunContext.setAccount(globalConfigPk, {
+    lamports,
+    data,
+    owner: klendBankrunProgram.programId,
+    executable: false,
+    rentEpoch: 0,
+  });
+
+  return globalConfigPk;
+}
