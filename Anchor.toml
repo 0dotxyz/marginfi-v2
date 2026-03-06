@@ -20,7 +20,7 @@ spl_single_pool = "SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE" # cloned from so
 # liquidity_incentive_program = "Lip1111111111111111111111111111111111111111"
 kamino_lending = "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD"
 kamino_farms = "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr"
-drift_v2 = "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH"
+drift = "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH"
 solend = "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
 
 # Jupiter Lend (JupLend / Fluid)
@@ -154,7 +154,7 @@ program = "tests/fixtures/spl_single_pool.so"
 
 [[test.genesis]]
 address = "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH"
-program = "tests/fixtures/drift_v2.so"
+program = "tests/fixtures/drift.so"
 
 [[test.genesis]]
 address = "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
