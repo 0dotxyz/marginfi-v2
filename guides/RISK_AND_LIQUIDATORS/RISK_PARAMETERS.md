@@ -127,6 +127,7 @@ collateral system and integration modules:
 | `ASSET_TAG_KAMINO` | 3 | Kamino vault position |
 | `ASSET_TAG_DRIFT` | 4 | Drift protocol position |
 | `ASSET_TAG_SOLEND` | 5 | Solend protocol position |
+| `ASSET_TAG_JUPLEND` | 6 | JupLend protocol position |
 
 ## Liquidation Parameters
 

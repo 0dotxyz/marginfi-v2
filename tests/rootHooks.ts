@@ -12,8 +12,6 @@ import {
   SetupTestUserBankrunOptions,
 } from "./utils/mocks";
 import {
-  AddressLookupTableAccount,
-  AddressLookupTableProgram,
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
@@ -25,7 +23,6 @@ import {
 import fs from "fs";
 import path from "path";
 import {
-  getEpochAndSlot,
   patchBankrunConnection,
 } from "./utils/bankrunConnection";
 
@@ -56,15 +53,15 @@ const MOCKS_PROGRAM_ID = new PublicKey(
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { initGlobalFeeState } from "./utils/group-instructions";
 import { KaminoLending } from "./fixtures/kamino_lending";
-import klendIdl from "./fixtures/kamino_lending.json";
-import { Drift } from "./fixtures/drift_v2";
-import driftIdl from "./fixtures/drift_v2.json";
+import klendIdl from "../idls/kamino_lending.json";
+import { Drift } from "./fixtures/drift";
+import driftIdl from "../idls/drift.json";
 import { Marginfi } from "../target/types/marginfi";
 import { Mocks } from "../target/types/mocks";
 import marginfiIdl from "../target/idl/marginfi.json";
 import mocksIdl from "../target/idl/mocks.json";
 import { setupPythOraclesBankrun } from "./utils/bankrun-oracles";
-import { getBankrunBlockhash, processBankrunTransaction } from "./utils/tools";
+import { processBankrunTransaction } from "./utils/tools";
 
 import {
   findPoolAddress,
@@ -428,7 +425,7 @@ const extraPrograms: AddedProgram[] = [
     programId: new PublicKey("SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE"),
   },
   {
-    name: "drift_v2",
+    name: "drift",
     programId: new PublicKey("dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH"),
   },
   {

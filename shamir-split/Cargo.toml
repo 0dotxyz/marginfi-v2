@@ -1,0 +1,10 @@
+[package]
+name = "shamir-split"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gf256 = { version = "0.3", features = ["shamir", "thread-rng"] } 
+serde_json = "1"
+bs58 = "0.5"
+anyhow = "1"

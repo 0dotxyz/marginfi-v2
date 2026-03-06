@@ -175,7 +175,7 @@ describe("k05: Init Kamino banks", () => {
           bank: bank,
           signerTokenAccount: usr.tokenAAccount, // wrong
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.tokenAMint.publicKey, // wrong
+          reserve: ecosystem.tokenAMint.publicKey, // wrong
           pythOracle: oracles.tokenAOracle.publicKey, // wrong
         },
         new BN(999)
@@ -194,7 +194,7 @@ describe("k05: Init Kamino banks", () => {
           bank: bank,
           signerTokenAccount: usr.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
           pythOracle: oracles.tokenAOracle.publicKey, // wrong
         },
         new BN(999)
@@ -244,7 +244,7 @@ describe("k05: Init Kamino banks", () => {
           bank: bank,
           signerTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
           pythOracle: oracles.usdcOracle.publicKey,
         },
         new BN(nominalAmount)
@@ -337,7 +337,7 @@ describe("k05: Init Kamino banks", () => {
           bank: tokenABankKey,
           signerTokenAccount: user.tokenAAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+          reserve: tokenAReserve,
           pythOracle: oracles.tokenAOracle.publicKey,
         },
         new BN(nominalAmount)

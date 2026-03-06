@@ -45,8 +45,6 @@ import { KLEND_PROGRAM_ID } from "./utils/types";
 import {
   deriveBaseObligation,
   deriveLiquidityVaultAuthority,
-  deriveReserveCollateralSupply,
-  deriveReserveLiquiditySupply,
 } from "./utils/pdas";
 import { BalanceRaw } from "@mrgnlabs/marginfi-client-v2";
 import { Reserve } from "@kamino-finance/klend-sdk";
@@ -68,17 +66,6 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
     usdcReserve = kaminoAccounts.get(USDC_RESERVE);
     const bankKey = bank.toString();
     usdcBankObligation = kaminoAccounts.get(`${bankKey}_OBLIGATION`);
-
-    [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
-      KLEND_PROGRAM_ID,
-      market,
-      ecosystem.usdcMint.publicKey,
-    );
-    [reserveCollateralSupply] = deriveReserveCollateralSupply(
-      KLEND_PROGRAM_ID,
-      market,
-      ecosystem.usdcMint.publicKey,
-    );
 
     // Refresh to pick up any interest changes since the last test ended.
     let tx = new Transaction().add(
@@ -169,7 +156,7 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
           bank,
           signerTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
         amount,
       ),
@@ -380,16 +367,6 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
       bank,
     );
     [tokenABankObligation] = deriveBaseObligation(authority, market);
-    [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
-      KLEND_PROGRAM_ID,
-      market,
-      ecosystem.tokenAMint.publicKey,
-    );
-    [reserveCollateralSupply] = deriveReserveCollateralSupply(
-      KLEND_PROGRAM_ID,
-      market,
-      ecosystem.tokenAMint.publicKey,
-    );
 
     let tx = new Transaction().add(
       dummyIx(users[0].wallet.publicKey, groupAdmin.wallet.publicKey),
@@ -477,7 +454,7 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
           bank,
           signerTokenAccount: user.tokenAAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+          reserve: tokenAReserve,
         },
         amount,
       ),

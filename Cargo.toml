@@ -7,6 +7,9 @@ members = [
     "type-crate",
     "id-crate"
 ]
+exclude = [
+  "shamir-split",
+]
 
 [workspace.dependencies]
 solana-cli-output = "=2.1.20"

@@ -98,11 +98,8 @@ pub fn drift_withdraw<'info>(
         let integration_acc_1 = ctx.accounts.integration_acc_1.load()?;
         market_index = integration_acc_1.market_index;
 
-        let mut bank_account = BankAccountWrapper::find(
-            &ctx.accounts.bank.key(),
-            &mut bank,
-            &mut marginfi_account.lending_account,
-        )?;
+        let mut bank_account =
+            BankAccountWrapper::find(&bank_key, &mut bank, &mut marginfi_account.lending_account)?;
 
         let (token_amount, expected_scaled_balance_change) = if withdraw_all {
             let scaled_balance = bank_account.withdraw_all()?;

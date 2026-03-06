@@ -151,7 +151,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
         bank: kaminoTokenABank,
         signerTokenAccount: groupAdmin.tokenAAccount,
         lendingMarket: market,
-        reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+        reserve: tokenAReserve,
         pythOracle: oracles.tokenAOracle.publicKey,
       })
     );
@@ -199,7 +199,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
             bank: kaminoUsdcBank,
             signerTokenAccount: user.usdcAccount,
             lendingMarket: market,
-            reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+            reserve: usdcReserve,
           },
           depositAmountUsdc
         ),
@@ -210,7 +210,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
             bank: kaminoUsdcBank,
             signerTokenAccount: user.usdcAccount,
             lendingMarket: market,
-            reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+            reserve: usdcReserve,
           },
           depositAmountUsdc
         )
@@ -250,7 +250,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
             bank: kaminoUsdcBank,
             signerTokenAccount: user.usdcAccount,
             lendingMarket: market,
-            reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+            reserve: usdcReserve,
           },
           depositAmountUsdc
         ),
@@ -304,7 +304,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
             bank: kaminoTokenABank,
             signerTokenAccount: user.tokenAAccount,
             lendingMarket: market,
-            reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+            reserve: tokenAReserve,
           },
           depositAmountTokenA
         )
@@ -331,7 +331,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
             bank: kaminoTokenABank,
             signerTokenAccount: user.tokenAAccount,
             lendingMarket: market,
-            reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+            reserve: tokenAReserve,
           },
           depositAmountTokenA
         )
@@ -391,7 +391,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
             bank: kaminoTokenABank,
             signerTokenAccount: user.tokenAAccount,
             lendingMarket: market,
-            reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+            reserve: tokenAReserve,
           },
           depositAmountTokenA
         ),
@@ -513,7 +513,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
           bank: kaminoTokenABank,
           signerTokenAccount: user.tokenAAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+          reserve: tokenAReserve,
         },
         new BN(0.0001 * 10 ** ecosystem.tokenADecimals)
       ),

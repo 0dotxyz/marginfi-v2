@@ -40,7 +40,7 @@ mkdir -p "${OUT_DIR}"
 # Existing integration fixtures
 KAMINO_LENDING_PROGRAM_ID="KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD"
 KAMINO_FARMS_PROGRAM_ID="FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr"
-DRIFT_V2_PROGRAM_ID="dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH"
+DRIFT_PROGRAM_ID="dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH"
 SOLEND_PROGRAM_ID="So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
 SPL_SINGLE_POOL_PROGRAM_ID="SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE"
 
@@ -76,7 +76,7 @@ dump_program() {
 
 dump_program "${KAMINO_LENDING_PROGRAM_ID}" "${OUT_DIR}/kamino_lending.so"
 dump_program "${KAMINO_FARMS_PROGRAM_ID}" "${OUT_DIR}/kamino_farms.so"
-dump_program "${DRIFT_V2_PROGRAM_ID}" "${OUT_DIR}/drift_v2.so"
+dump_program "${DRIFT_PROGRAM_ID}" "${OUT_DIR}/drift.so"
 dump_program "${SOLEND_PROGRAM_ID}" "${OUT_DIR}/solend.so"
 dump_program "${SPL_SINGLE_POOL_PROGRAM_ID}" "${OUT_DIR}/spl_single_pool.so"
 

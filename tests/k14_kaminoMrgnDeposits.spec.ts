@@ -147,7 +147,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
               bank: usdcBank,
               signerTokenAccount: userA.usdcAccount,
               lendingMarket: kaminoAccounts.get(MARKET)!,
-              reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+              reserve: usdcReserve,
             },
             DEPOSIT_AMOUNT, // Separate amount parameter
           ),
@@ -314,7 +314,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
               bank: tokenABank,
               signerTokenAccount: userB.tokenAAccount,
               lendingMarket: kaminoAccounts.get(MARKET)!,
-              reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+              reserve: tokenAReserve,
               obligationFarmUserState: farmAccounts.get(
                 A_OBLIGATION_USER_STATE,
               ),
@@ -435,7 +435,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
               bank: usdcBank,
               signerTokenAccount: userA.usdcAccount,
               lendingMarket: kaminoAccounts.get(MARKET)!,
-              reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+              reserve: usdcReserve,
             },
             DEPOSIT_AMOUNT,
           ),
@@ -547,7 +547,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
               bank: tokenABank,
               signerTokenAccount: userB.tokenAAccount,
               lendingMarket: kaminoAccounts.get(MARKET)!,
-              reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+              reserve: tokenAReserve,
               obligationFarmUserState: farmAccounts.get(
                 A_OBLIGATION_USER_STATE,
               ),
@@ -661,7 +661,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
             bank: usdcBank,
             signerTokenAccount: userA.usdcAccount,
             lendingMarket: kaminoAccounts.get(MARKET)!,
-            reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+            reserve: usdcReserve,
           },
           DEPOSIT_AMOUNT,
         ),
@@ -695,7 +695,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
             bank: usdcBank,
             signerTokenAccount: userA.usdcAccount,
             lendingMarket: kaminoAccounts.get(MARKET)!,
-            reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+            reserve: usdcReserve,
           },
           DEPOSIT_AMOUNT,
         ),
@@ -758,7 +758,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
             bank: usdcBank,
             destinationTokenAccount: userA.usdcAccount,
             lendingMarket: kaminoAccounts.get(MARKET)!,
-            reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+            reserve: usdcReserve,
           },
           {
             amount: halfAmount,
@@ -835,7 +835,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
             bank: usdcBank,
             signerTokenAccount: userA.usdcAccount,
             lendingMarket: kaminoAccounts.get(MARKET)!,
-            reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+            reserve: usdcReserve,
           },
           DEPOSIT_AMOUNT,
         ),
@@ -1042,7 +1042,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
                 bank: bank,
                 signerTokenAccount: tokenAccount,
                 lendingMarket: kaminoAccounts.get(MARKET)!,
-                reserveLiquidityMint: mint,
+                reserve: isUsdc ? usdcReserve : tokenAReserve,
                 // Add farm accounts for Token A (has farms enabled from k13)
                 obligationFarmUserState: !isUsdc
                   ? farmAccounts.get(A_OBLIGATION_USER_STATE)
@@ -1122,7 +1122,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
                 bank: usdcBank,
                 signerTokenAccount: userA.usdcAccount,
                 lendingMarket: kaminoAccounts.get(MARKET)!,
-                reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+                reserve: usdcReserve,
               },
               DEPOSIT1,
             ),
@@ -1171,7 +1171,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
                 bank: usdcBank,
                 signerTokenAccount: userA.usdcAccount,
                 lendingMarket: kaminoAccounts.get(MARKET)!,
-                reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+                reserve: usdcReserve,
               },
               DEPOSIT2,
             ),
@@ -1383,7 +1383,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
           bank,
           destinationTokenAccount: tokenAccount,
           lendingMarket: kaminoAccounts.get(MARKET)!,
-          reserveLiquidityMint: mint,
+          reserve: isUsdc ? usdcReserve : tokenAReserve,
           // Add farm accounts for Token A (has farms enabled from k13)
           obligationFarmUserState: isUsdc
             ? null

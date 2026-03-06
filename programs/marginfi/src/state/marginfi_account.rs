@@ -76,7 +76,7 @@ pub trait MarginfiAccountImpl {
 /// Returns `true` if the signer is authorized, `false` otherwise.
 ///
 /// Authorization rules (checked in order):
-/// 1. If `allow_receivership` is true and the account is in receivership → `true`
+/// 1. If `allow_receivership` is true and the (NOT signer's) account is in receivership → `true`
 /// 2. If `allow_order_execution` is true and the account is in order execution → `true`
 /// 3. If the account is frozen → `true` only if signer is the group admin
 /// 4. Otherwise → `true` only if signer is the account authority
@@ -88,7 +88,7 @@ pub fn is_signer_authorized(
     allow_order_execution: bool,
 ) -> bool {
     if allow_receivership && marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
-        return true;
+        return marginfi_account.authority != signer; // it is forbidden to take receivership of your own account
     }
 
     if allow_order_execution && marginfi_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION) {

@@ -9,6 +9,7 @@ import Decimal from "decimal.js";
 import { Fraction } from "@kamino-finance/klend-sdk";
 import BigNumber from "bignumber.js";
 
+export const GLOBAL_CONFIG_SIZE = 1032;
 export const LENDING_MARKET_SIZE = 4656;
 export const RESERVE_SIZE = 8616;
 export const OBLIGATION_SIZE = 3336;

@@ -78,7 +78,7 @@ describe("k07: Kamino Withdraw Tests", () => {
           bank,
           destinationTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
         {
           amount: withdrawAmt,
@@ -160,7 +160,7 @@ describe("k07: Kamino Withdraw Tests", () => {
           bank,
           destinationTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
         {
           amount: excessiveWithdrawAmount,
