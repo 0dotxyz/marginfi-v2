@@ -850,6 +850,45 @@ impl MarginfiGroupFixture {
         Ok(())
     }
 
+    pub async fn try_admin_update_deleverage_withdraw_limit(
+        &self,
+        outflow_usd: u32,
+        update_seq: u64,
+        event_start_slot: u64,
+        event_end_slot: u64,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::UpdateDeleverageWithdrawLimit {
+                marginfi_group: self.key,
+                admin: self.ctx.borrow().payer.pubkey(),
+            }
+            .to_account_metas(Some(true)),
+            data: UpdateDeleverageWithdrawLimit {
+                outflow_usd,
+                update_seq,
+                event_start_slot,
+                event_end_slot,
+            }
+            .data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn try_collect_fees(&self, bank: &BankFixture) -> Result<()> {
         let ctx = self.ctx.borrow_mut();
 

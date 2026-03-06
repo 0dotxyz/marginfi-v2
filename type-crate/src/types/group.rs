@@ -76,7 +76,12 @@ pub struct MarginfiGroup {
     /// when slot ranges overlap or multiple updates happen in the same slot.
     pub rate_limiter_last_admin_update_seq: u64,
 
-    pub _padding_0: [[u64; 2]; 5],
+    /// Last slot covered by an admin deleverage withdraw-limit aggregation update.
+    pub deleverage_withdraw_last_admin_update_slot: u64,
+    /// Monotonic sequence number for admin deleverage withdraw-limit updates.
+    pub deleverage_withdraw_last_admin_update_seq: u64,
+
+    pub _padding_0: [[u64; 2]; 4],
     pub _padding_1: [[u64; 2]; 32],
 }
 

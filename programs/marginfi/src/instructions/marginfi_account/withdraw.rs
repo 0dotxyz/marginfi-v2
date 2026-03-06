@@ -1,7 +1,7 @@
 use crate::{
     bank_signer, check,
     constants::PROGRAM_VERSION,
-    events::{AccountEventHeader, LendingAccountWithdrawEvent},
+    events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     ix_utils::{get_discrim_hash, Hashable},
     prelude::*,
     state::{
@@ -70,7 +70,7 @@ pub fn lending_account_withdraw<'info>(
 
         let in_receivership_or_order_execution =
             marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
-        let mut group = marginfi_group_loader.load_mut()?;
+        let group = marginfi_group_loader.load()?;
         let mut bank = bank_loader.load_mut()?;
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
 
@@ -164,7 +164,14 @@ pub fn lending_account_withdraw<'info>(
                 bank.get_balance_decimals(),
                 None,
             )?;
-            group.update_withdrawn_equity(withdrawn_equity, clock.unix_timestamp)?;
+            group.check_deleverage_withdraw_limit(withdrawn_equity, clock.unix_timestamp)?;
+            emit!(DeleverageWithdrawFlowEvent {
+                group: marginfi_group_loader.key(),
+                bank: bank_loader.key(),
+                mint: bank.mint,
+                outflow_usd: withdrawn_equity.to_num(),
+                current_timestamp: clock.unix_timestamp,
+            });
         }
 
         marginfi_account.last_update = clock.unix_timestamp as u64;
@@ -240,7 +247,6 @@ pub fn lending_account_withdraw<'info>(
 #[derive(Accounts)]
 pub struct LendingAccountWithdraw<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused

@@ -1032,6 +1032,32 @@ export const updateGroupRateLimiter = (
   return ix;
 };
 
+export type UpdateDeleverageWithdrawLimitArgs = {
+  marginfiGroup: PublicKey;
+  outflowUsd: number;
+  updateSeq: BN;
+  eventStartSlot: BN;
+  eventEndSlot: BN;
+};
+
+export const updateDeleverageWithdrawLimit = (
+  program: Program<Marginfi>,
+  args: UpdateDeleverageWithdrawLimitArgs
+) => {
+  const ix = program.methods
+    .updateDeleverageWithdrawLimit(
+      args.outflowUsd,
+      args.updateSeq,
+      args.eventStartSlot,
+      args.eventEndSlot
+    )
+    .accounts({
+      marginfiGroup: args.marginfiGroup,
+    })
+    .instruction();
+  return ix;
+};
+
 export type ConfigureDeleverageWithdrawalLimitArgs = {
   marginfiGroup: PublicKey;
   limit: number;

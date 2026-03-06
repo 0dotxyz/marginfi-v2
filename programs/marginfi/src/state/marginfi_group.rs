@@ -27,6 +27,11 @@ pub trait MarginfiGroupImpl {
         withdrawn_equity: I80F48,
         current_timestamp: i64,
     ) -> MarginfiResult;
+    fn check_deleverage_withdraw_limit(
+        &self,
+        withdrawn_equity: I80F48,
+        current_timestamp: i64,
+    ) -> MarginfiResult;
 }
 
 impl MarginfiGroupImpl for MarginfiGroup {
@@ -178,6 +183,8 @@ impl MarginfiGroupImpl for MarginfiGroup {
         withdrawn_equity: I80F48,
         current_timestamp: i64,
     ) -> MarginfiResult {
+        let projected =
+            self.projected_deleverage_withdrawn_today(withdrawn_equity, current_timestamp);
         if current_timestamp.saturating_sub(
             self.deleverage_withdraw_window_cache
                 .last_daily_reset_timestamp,
@@ -187,10 +194,7 @@ impl MarginfiGroupImpl for MarginfiGroup {
             self.deleverage_withdraw_window_cache
                 .last_daily_reset_timestamp = current_timestamp;
         }
-        self.deleverage_withdraw_window_cache.withdrawn_today = self
-            .deleverage_withdraw_window_cache
-            .withdrawn_today
-            .saturating_add(withdrawn_equity.to_num());
+        self.deleverage_withdraw_window_cache.withdrawn_today = projected;
 
         // Note: treat zero limit as "no limit" here for backwards compatibility.
         if self.deleverage_withdraw_window_cache.daily_limit != 0
@@ -205,6 +209,56 @@ impl MarginfiGroupImpl for MarginfiGroup {
             return err!(MarginfiError::DailyWithdrawalLimitExceeded);
         }
         Ok(())
+    }
+
+    fn check_deleverage_withdraw_limit(
+        &self,
+        withdrawn_equity: I80F48,
+        current_timestamp: i64,
+    ) -> MarginfiResult {
+        let projected =
+            self.projected_deleverage_withdrawn_today(withdrawn_equity, current_timestamp);
+
+        if self.deleverage_withdraw_window_cache.daily_limit != 0
+            && projected > self.deleverage_withdraw_window_cache.daily_limit
+        {
+            msg!(
+                "trying to withdraw more than daily limit: {} > {}",
+                projected,
+                self.deleverage_withdraw_window_cache.daily_limit
+            );
+            return err!(MarginfiError::DailyWithdrawalLimitExceeded);
+        }
+
+        Ok(())
+    }
+}
+
+trait MarginfiGroupDeleverageLimitExt {
+    fn projected_deleverage_withdrawn_today(
+        &self,
+        withdrawn_equity: I80F48,
+        current_timestamp: i64,
+    ) -> u32;
+}
+
+impl MarginfiGroupDeleverageLimitExt for MarginfiGroup {
+    fn projected_deleverage_withdrawn_today(
+        &self,
+        withdrawn_equity: I80F48,
+        current_timestamp: i64,
+    ) -> u32 {
+        let withdrawn_today = if current_timestamp.saturating_sub(
+            self.deleverage_withdraw_window_cache
+                .last_daily_reset_timestamp,
+        ) >= DAILY_RESET_INTERVAL
+        {
+            0
+        } else {
+            self.deleverage_withdraw_window_cache.withdrawn_today
+        };
+
+        withdrawn_today.saturating_add(withdrawn_equity.to_num())
     }
 }
 

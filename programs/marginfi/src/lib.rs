@@ -692,6 +692,25 @@ pub mod marginfi {
         marginfi_group::configure_deleverage_withdrawal_limit(ctx, limit)
     }
 
+    /// (admin only) Update the deleverage daily withdraw counter with aggregated outflow.
+    /// The admin aggregates DeleverageWithdrawFlowEvent events off-chain
+    /// and calls this instruction at intervals.
+    pub fn update_deleverage_withdraw_limit(
+        ctx: Context<UpdateDeleverageWithdrawLimit>,
+        outflow_usd: u32,
+        update_seq: u64,
+        event_start_slot: u64,
+        event_end_slot: u64,
+    ) -> MarginfiResult {
+        marginfi_group::update_deleverage_withdraw_limit(
+            ctx,
+            outflow_usd,
+            update_seq,
+            event_start_slot,
+            event_end_slot,
+        )
+    }
+
     /// (admin only) Configure bank-level rate limits for withdraw/borrow.
     /// Rate limits track net outflow in native tokens. Deposits offset withdraws.
     /// Set to 0 to disable. Hourly and daily windows are independent.

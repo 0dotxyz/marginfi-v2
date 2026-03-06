@@ -25,6 +25,7 @@ import {
   configureDeleverageWithdrawalLimit,
   groupConfigure,
   setFixedPrice,
+  updateDeleverageWithdrawLimit,
 } from "./utils/group-instructions";
 import { assert } from "chai";
 import {
@@ -77,6 +78,11 @@ let banks: PublicKey[] = [];
 let throwawayGroup: Keypair;
 let remainingAccounts: PublicKey[][] = [];
 let lookupTable: PublicKey;
+
+async function getCurrentBankrunSlot(): Promise<BN> {
+  const clock = await bankrunContext.banksClient.getClock();
+  return new BN(clock.slot.toString());
+}
 
 describe("m02: Limits on number of accounts, with emode in effect", () => {
   it("init group, init banks, and fund banks", async () => {
@@ -715,8 +721,31 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
   });
 
   it("(admin) Sets the group withdrawal limit to $1 less than bank 4's liability", async () => {
+    const groupState = await bankrunProgram.account.marginfiGroup.fetch(
+      throwawayGroup.publicKey,
+    );
+    const updateSeq = groupState.deleverageWithdrawLastAdminUpdateSeq.add(
+      new BN(1),
+    );
+    const eventStartSlot = groupState.deleverageWithdrawLastAdminUpdateSlot.add(
+      new BN(1),
+    );
+    const eventEndSlot = await getCurrentBankrunSlot();
+
+    assert(
+      eventEndSlot.gte(eventStartSlot),
+      "slot progression invalid for deleverage withdraw-limit update",
+    );
+
     const tx = new Transaction();
     tx.add(
+      await updateDeleverageWithdrawLimit(groupAdmin.mrgnBankrunProgram, {
+        marginfiGroup: throwawayGroup.publicKey,
+        outflowUsd: Math.floor(ecosystem.lstAlphaPrice),
+        updateSeq,
+        eventStartSlot,
+        eventEndSlot,
+      }),
       await configureDeleverageWithdrawalLimit(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
         limit: 1 * ecosystem.lstAlphaPrice - 1, // borrowAmount is 1 LST Alpha

@@ -1,7 +1,7 @@
 use crate::{
     check,
     constants::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID, PROGRAM_VERSION},
-    events::{AccountEventHeader, LendingAccountWithdrawEvent},
+    events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     ix_utils::{get_discrim_hash, Hashable},
     optional_account,
     state::{
@@ -94,7 +94,7 @@ pub fn kamino_withdraw<'info>(
 
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
-        let mut group = ctx.accounts.group.load_mut()?;
+        let group = ctx.accounts.group.load()?;
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
 
         let in_receivership_or_order_execution =
@@ -159,7 +159,14 @@ pub fn kamino_withdraw<'info>(
                 bank.get_balance_decimals(),
                 None,
             )?;
-            group.update_withdrawn_equity(withdrawn_equity, clock.unix_timestamp)?;
+            group.check_deleverage_withdraw_limit(withdrawn_equity, clock.unix_timestamp)?;
+            emit!(DeleverageWithdrawFlowEvent {
+                group: ctx.accounts.group.key(),
+                bank: ctx.accounts.bank.key(),
+                mint: bank.mint,
+                outflow_usd: withdrawn_equity.to_num(),
+                current_timestamp: clock.unix_timestamp,
+            });
         }
 
         // Update bank cache after modifying balances (following pattern from regular withdraw)
@@ -260,7 +267,6 @@ pub fn kamino_withdraw<'info>(
 #[derive(Accounts)]
 pub struct KaminoWithdraw<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused

@@ -39,7 +39,9 @@ async fn configure_group_hourly_limit(
 }
 
 async fn next_group_rate_limiter_update_params(test_f: &TestFixture) -> (u64, u64) {
-    let g: MarginfiGroup = test_f.load_and_deserialize(&test_f.marginfi_group.key).await;
+    let g: MarginfiGroup = test_f
+        .load_and_deserialize(&test_f.marginfi_group.key)
+        .await;
     (
         g.rate_limiter_last_admin_update_slot.saturating_add(1),
         g.rate_limiter_last_admin_update_seq.saturating_add(1),

@@ -258,3 +258,17 @@ pub struct RateLimitFlowEvent {
     /// Unix timestamp when the flow was recorded
     pub current_timestamp: i64,
 }
+
+/// Emitted for deleverage-only withdraw outflows.
+/// The group admin aggregates these off-chain and updates
+/// the deleverage daily withdraw counter via `update_deleverage_withdraw_limit`.
+#[event]
+pub struct DeleverageWithdrawFlowEvent {
+    pub group: Pubkey,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    /// Equity-denominated outflow value in USD, rounded to integer.
+    pub outflow_usd: u32,
+    /// Unix timestamp when the flow was recorded
+    pub current_timestamp: i64,
+}

@@ -1,7 +1,7 @@
 use crate::{
     bank_signer, check,
     constants::{PROGRAM_VERSION, SOLEND_PROGRAM_ID},
-    events::{AccountEventHeader, LendingAccountWithdrawEvent},
+    events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
@@ -82,7 +82,7 @@ pub fn solend_withdraw<'info>(
     let collateral_amount = {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let mut group = ctx.accounts.group.load_mut()?;
+        let group = ctx.accounts.group.load()?;
         let clock = Clock::get()?;
         authority_bump = bank.liquidity_vault_authority_bump;
 
@@ -148,7 +148,14 @@ pub fn solend_withdraw<'info>(
                 bank.get_balance_decimals(),
                 None,
             )?;
-            group.update_withdrawn_equity(withdrawn_equity, clock.unix_timestamp)?;
+            group.check_deleverage_withdraw_limit(withdrawn_equity, clock.unix_timestamp)?;
+            emit!(DeleverageWithdrawFlowEvent {
+                group: ctx.accounts.group.key(),
+                bank: ctx.accounts.bank.key(),
+                mint: bank.mint,
+                outflow_usd: withdrawn_equity.to_num(),
+                current_timestamp: clock.unix_timestamp,
+            });
         }
 
         collateral_amount
@@ -280,7 +287,6 @@ pub fn solend_withdraw<'info>(
 #[derive(Accounts)]
 pub struct SolendWithdraw<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused

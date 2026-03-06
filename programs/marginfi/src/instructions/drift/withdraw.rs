@@ -1,7 +1,7 @@
 use crate::{
     bank_signer, check,
     constants::{DRIFT_PROGRAM_ID, PROGRAM_VERSION},
-    events::{AccountEventHeader, LendingAccountWithdrawEvent},
+    events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     ix_utils::{get_discrim_hash, Hashable},
     state::{
         bank::{BankImpl, BankVaultType},
@@ -67,7 +67,7 @@ pub fn drift_withdraw<'info>(
     let (token_amount, expected_scaled_balance_change) = {
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;
-        let mut group = ctx.accounts.group.load_mut()?;
+        let group = ctx.accounts.group.load()?;
         authority_bump = bank.liquidity_vault_authority_bump;
 
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
@@ -181,7 +181,14 @@ pub fn drift_withdraw<'info>(
                 bank.get_balance_decimals(),
                 None,
             )?;
-            group.update_withdrawn_equity(withdrawn_equity, clock.unix_timestamp)?;
+            group.check_deleverage_withdraw_limit(withdrawn_equity, clock.unix_timestamp)?;
+            emit!(DeleverageWithdrawFlowEvent {
+                group: ctx.accounts.group.key(),
+                bank: ctx.accounts.bank.key(),
+                mint: bank.mint,
+                outflow_usd: withdrawn_equity.to_num(),
+                current_timestamp: clock.unix_timestamp,
+            });
         }
 
         // Update bank cache after modifying balances (following pattern from regular withdraw)
@@ -261,7 +268,7 @@ pub fn drift_withdraw<'info>(
         if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION) {
             check_account_init_health(
                 &marginfi_account,
-                ctx.remaining_accounts, 
+                ctx.remaining_accounts,
                 &mut Some(&mut health_cache),
             )?;
 
@@ -297,7 +304,6 @@ pub fn drift_withdraw<'info>(
 #[derive(Accounts)]
 pub struct DriftWithdraw<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused

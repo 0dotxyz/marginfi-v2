@@ -1,7 +1,7 @@
 use crate::{
     bank_signer, check,
     constants::PROGRAM_VERSION,
-    events::{AccountEventHeader, LendingAccountWithdrawEvent},
+    events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
@@ -78,7 +78,7 @@ pub fn juplend_withdraw<'info>(
     let (token_amount, shares_to_burn) = {
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;
-        let mut group = ctx.accounts.group.load_mut()?;
+        let group = ctx.accounts.group.load()?;
         let lending = ctx.accounts.integration_acc_1.load()?;
 
         authority_bump = bank.liquidity_vault_authority_bump;
@@ -171,7 +171,14 @@ pub fn juplend_withdraw<'info>(
                 bank.mint_decimals,
                 None,
             )?;
-            group.update_withdrawn_equity(withdrawn_equity, clock.unix_timestamp)?;
+            group.check_deleverage_withdraw_limit(withdrawn_equity, clock.unix_timestamp)?;
+            emit!(DeleverageWithdrawFlowEvent {
+                group: ctx.accounts.group.key(),
+                bank: bank_key,
+                mint: bank.mint,
+                outflow_usd: withdrawn_equity.to_num(),
+                current_timestamp: clock.unix_timestamp,
+            });
         }
 
         bank.update_bank_cache(&group)?;
@@ -315,7 +322,6 @@ pub fn juplend_withdraw<'info>(
 #[derive(Accounts)]
 pub struct JuplendWithdraw<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused
