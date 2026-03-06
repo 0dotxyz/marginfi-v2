@@ -202,7 +202,7 @@ export let kaminoAccounts: Map<string, PublicKey>;
 /** Kamino Market */
 export const MARKET = "market";
 /** Kamino USDC Reserve */
-export const USDC_RESERVE = "usdc_reserve";
+export const USDC_RESERVE = "usdc_reserve\0";
 /** Kamino Token A Reserve */
 export const TOKEN_A_RESERVE = "token_a_reserve";
 /** mrgn USDC bank trading on `USDC_RESERVE` (the reserve for ecosystem.usdcMint) */
@@ -465,6 +465,7 @@ function getGenesisAccounts(): AddedAccount[] {
     loadJsonFixture("tests/fixtures/mainnet_group.json"),
     loadJsonFixture("tests/fixtures/sol_pyth_oracle.json"),
     loadJsonFixture("tests/fixtures/sol_pyth_price_feed.json"),
+    loadJsonFixture("tests/fixtures/kamino_global_config.json"),
   ];
 }
 

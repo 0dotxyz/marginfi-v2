@@ -14,6 +14,9 @@ import {
   deriveBaseObligation,
   deriveLendingMarketAuthority,
   deriveLiquidityVaultAuthority,
+  deriveReserveCollateralMint,
+  deriveReserveCollateralSupply,
+  deriveReserveLiquiditySupply,
   deriveUserMetadata,
 } from "./pdas";
 import { klendBankrunProgram } from "../rootHooks";
@@ -249,12 +252,20 @@ export const makeInitObligationIx = async (
     accounts.lendingMarket,
   );
 
-  const reserve = await klendBankrunProgram.account.reserve.fetch(
+  const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
+    KLEND_PROGRAM_ID,
     accounts.reserve,
   );
-  const reserveLiquiditySupply = reserve.liquidity.supplyVault;
-  const reserveCollateralMint = reserve.collateral.mintPubkey;
-  const reserveCollateralSupply = reserve.collateral.supplyVault;
+
+  const [reserveCollateralMint] = deriveReserveCollateralMint(
+    KLEND_PROGRAM_ID,
+    accounts.reserve,
+  );
+
+  const [reserveCollateralSupply] = deriveReserveCollateralSupply(
+    KLEND_PROGRAM_ID,
+    accounts.reserve,
+  );
 
   const ix = await program.methods
     .kaminoInitObligation(amount ?? new BN(100))
@@ -322,6 +333,7 @@ export const makeKaminoWithdrawIx = async (
   const reserve = await klendBankrunProgram.account.reserve.fetch(
     accounts.reserve,
   );
+  const reserveLiquidityMint = reserve.liquidity.mintPubkey;
   const reserveLiquiditySupply = reserve.liquidity.supplyVault;
   const reserveCollateralMint = reserve.collateral.mintPubkey;
   const reserveCollateralSupply = reserve.collateral.supplyVault;
@@ -330,6 +342,7 @@ export const makeKaminoWithdrawIx = async (
     .kaminoWithdraw(args.amount, args.isWithdrawAll)
     .accounts({
       lendingMarketAuthority, // derived
+      reserveLiquidityMint,
       reserveLiquiditySupply,
       reserveCollateralMint,
       reserveSourceCollateral: reserveCollateralSupply,

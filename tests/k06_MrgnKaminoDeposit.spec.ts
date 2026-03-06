@@ -185,8 +185,8 @@ describe("k06: Kamino Deposit Tests", () => {
       balanceAmtBefore + amount.toNumber()
     );
     assertBNEqual(
-      resAfter.liquidity.availableAmount,
-      resBefore.liquidity.availableAmount.add(amount)
+      resAfter.liquidity.totalAvailableAmount,
+      resBefore.liquidity.totalAvailableAmount.add(amount)
     );
     assertI68F60Equal(resAfter.liquidity.borrowedAmountSf, 0);
 

@@ -254,7 +254,12 @@ describe("kx: Fixed Kamino price bank", () => {
         remaining: [tokenAReserve],
       }),
     );
-    const result = await processBankrunTransaction(ctx, tx, [user.wallet], true);
+    const result = await processBankrunTransaction(
+      ctx,
+      tx,
+      [user.wallet],
+      true,
+    );
     // KaminoReserveValidationFailed
     assertBankrunTxFailed(result, 6210);
   });

@@ -8,7 +8,7 @@ export type KaminoLending = {
   "address": "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD",
   "metadata": {
     "name": "kaminoLending",
-    "version": "1.13.0",
+    "version": "1.14.0",
     "spec": "0.1.0"
   },
   "instructions": [
@@ -2819,7 +2819,15 @@ export type KaminoLending = {
         {
           "name": "lendingMarket",
           "docs": [
-            "The [Self::obligation]'s market - needed only to validate the borrow orders' feature flag."
+            "The [Self::obligation]'s market - needed to validate feature flags and minimum order value."
+          ]
+        },
+        {
+          "name": "reserve",
+          "docs": [
+            "The reserve matching the [Self::debt_liquidity_mint] - needed for the minimum order value",
+            "check (and refreshed internally). On cancellation, this account is ignored (but still must",
+            "belong to the same market)."
           ]
         },
         {
@@ -2988,6 +2996,327 @@ export type KaminoLending = {
         }
       ],
       "args": []
+    },
+    {
+      "name": "enqueueToWithdraw",
+      "discriminator": [
+        134,
+        113,
+        160,
+        207,
+        90,
+        75,
+        213,
+        219
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "docs": [
+            "The depositor holding ctokens."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lendingMarket"
+        },
+        {
+          "name": "lendingMarketAuthority",
+          "docs": [
+            "The market's authority, needed to initialize the [Self::owner_queued_collateral_vault]."
+          ]
+        },
+        {
+          "name": "reserve",
+          "writable": true
+        },
+        {
+          "name": "userSourceCollateralTa",
+          "docs": [
+            "The source of collateral to be enqueued."
+          ],
+          "writable": true
+        },
+        {
+          "name": "userDestinationLiquidityTa",
+          "docs": [
+            "The account to which the liquidity should be finally transferred later (to be recorded in",
+            "the ticket)."
+          ]
+        },
+        {
+          "name": "reserveLiquidityMint"
+        },
+        {
+          "name": "reserveCollateralMint"
+        },
+        {
+          "name": "collateralTokenProgram",
+          "docs": [
+            "The collateral's program - needed for invoking the transfer to the vault *and* (implicitly)",
+            "for handling the `init_if_needed`."
+          ]
+        },
+        {
+          "name": "withdrawTicket",
+          "docs": [
+            "The new account to be initialized with the issued ticket's data."
+          ],
+          "writable": true
+        },
+        {
+          "name": "ownerQueuedCollateralVault",
+          "docs": [
+            "The per-owner \"this reserve's queued collateral\" vault (in which the collateral will be",
+            "locked)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "systemProgram",
+          "docs": [
+            "The System program - needed only for `init` / `init_if_needed` of the accounts above."
+          ]
+        },
+        {
+          "name": "instructionSysvarAccount"
+        }
+      ],
+      "args": [
+        {
+          "name": "collateralAmount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdrawQueuedLiquidity",
+      "discriminator": [
+        66,
+        149,
+        187,
+        201,
+        74,
+        191,
+        174,
+        120
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "The executor of the permissionless tx (not necessarily the ticket owner)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lendingMarket",
+          "docs": [
+            "The lending market."
+          ]
+        },
+        {
+          "name": "lendingMarketAuthority",
+          "docs": [
+            "The market's authority, needed for burning the collateral (from",
+            "[Self::owner_queued_collateral_vault]) and transferring the liquidity (from",
+            "[Self::reserve_liquidity_supply])."
+          ]
+        },
+        {
+          "name": "reserve",
+          "docs": [
+            "The reserve."
+          ],
+          "writable": true
+        },
+        {
+          "name": "reserveLiquidityMint",
+          "docs": [
+            "The liquidity mint, needed to invoke the transfer."
+          ]
+        },
+        {
+          "name": "reserveCollateralMint",
+          "docs": [
+            "The collateral mint, needed to burn (`mut`!) the queued collateral."
+          ],
+          "writable": true
+        },
+        {
+          "name": "reserveLiquiditySupply",
+          "docs": [
+            "The liquidity supply vault (to withdraw the liquidity from)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "ownerQueuedCollateralVault",
+          "docs": [
+            "The per-owner \"this reserve's queued collateral\" vault (from which the collateral will be",
+            "burnt)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "userDestinationLiquidity",
+          "docs": [
+            "The token account to which the liquidity should be transferred (the one recorded in the",
+            "ticket)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "collateralTokenProgram",
+          "docs": [
+            "The program of [Self::reserve_collateral_mint], needed for transfer."
+          ]
+        },
+        {
+          "name": "liquidityTokenProgram",
+          "docs": [
+            "The program of [Self::reserve_liquidity_mint], needed for transfer."
+          ]
+        },
+        {
+          "name": "withdrawTicket",
+          "docs": [
+            "The ticket's data itself.",
+            "",
+            "Note: in case of complete withdrawal, this account will be closed. In case of partial",
+            "withdrawal, its [WithdrawTicket::queued_collateral_amount] will simply be reduced, and the",
+            "ticket will maintain its position in the queue."
+          ],
+          "writable": true
+        },
+        {
+          "name": "withdrawTicketOwner",
+          "docs": [
+            "The owner of the [Self::withdraw_ticket]; needed only to return the rent of the",
+            "[WithdrawTicket] account (if it is getting fully-consumed and closed here)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "associatedTokenProgram",
+          "docs": [
+            "The ATA program - needed for potential destination ATA creation."
+          ]
+        },
+        {
+          "name": "systemProgram",
+          "docs": [
+            "The System program - needed for potential destination ATA creation."
+          ]
+        },
+        {
+          "name": "instructionSysvarAccount"
+        }
+      ],
+      "args": [],
+      "returns": "bool"
+    },
+    {
+      "name": "recoverInvalidTicketCollateral",
+      "discriminator": [
+        28,
+        48,
+        176,
+        102,
+        159,
+        206,
+        210,
+        246
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "The transaction executor.",
+            "",
+            "This instruction is, in principle, permissionless. However, only the ticket owner can use",
+            "arbitrary token account as destination for recovered collateral. Other signers can only",
+            "transfer the collateral to the ticket owner's ATA (see [Self::user_source_collateral])."
+          ],
+          "signer": true
+        },
+        {
+          "name": "lendingMarket",
+          "docs": [
+            "The lending market."
+          ]
+        },
+        {
+          "name": "lendingMarketAuthority",
+          "docs": [
+            "The market's authority, needed for transferring the collateral (from",
+            "[Self::owner_queued_collateral_vault])."
+          ]
+        },
+        {
+          "name": "reserve",
+          "docs": [
+            "The reserve, needed only to validate the other accounts."
+          ]
+        },
+        {
+          "name": "reserveCollateralMint",
+          "docs": [
+            "The collateral mint, needed to invoke the transfer."
+          ]
+        },
+        {
+          "name": "ownerQueuedCollateralVault",
+          "docs": [
+            "The per-owner \"this reserve's queued collateral\" vault (from which the collateral will be",
+            "recovered)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "userSourceCollateral",
+          "docs": [
+            "The ticket's owner token account to which the ticket-locked collateral should be returned.",
+            "",
+            "Only the ticket's owner can indicate an arbitrary token account here. Permissionless",
+            "executors must indicate the ticket's owner ATA."
+          ],
+          "writable": true
+        },
+        {
+          "name": "collateralTokenProgram",
+          "docs": [
+            "The program of [Self::reserve_collateral_mint], needed for transfer."
+          ]
+        },
+        {
+          "name": "withdrawTicket",
+          "docs": [
+            "The ticket's account, necessarily marked as [WithdrawTicket::invalid] first (by the",
+            "`handler_withdraw_queued_liquidity`)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "withdrawTicketOwner",
+          "docs": [
+            "The owner of the [Self::withdraw_ticket]; needed only to return the rent of the",
+            "[WithdrawTicket] account."
+          ],
+          "writable": true
+        },
+        {
+          "name": "instructionSysvarAccount"
+        }
+      ],
+      "args": [
+        {
+          "name": "ticketSequenceNumber",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "initGlobalConfig",
@@ -3280,6 +3609,19 @@ export type KaminoLending = {
         247,
         59,
         127
+      ]
+    },
+    {
+      "name": "withdrawTicket",
+      "discriminator": [
+        237,
+        23,
+        164,
+        58,
+        53,
+        248,
+        240,
+        94
       ]
     }
   ],
@@ -4075,6 +4417,56 @@ export type KaminoLending = {
       "code": 6144,
       "name": "borrowOrderFillValueTooSmall",
       "msg": "Available liquidity could not satisfy the minimum required borrow order fill value"
+    },
+    {
+      "code": 6145,
+      "name": "withdrawTicketIssuanceDisabled",
+      "msg": "Issuing new withdraw tickets is disabled by the market"
+    },
+    {
+      "code": 6146,
+      "name": "withdrawTicketRedemptionDisabled",
+      "msg": "Redeeming withdraw tickets is disabled by the market"
+    },
+    {
+      "code": 6147,
+      "name": "withdrawTicketStillValid",
+      "msg": "Recovering collateral is only available after the withdraw ticket has been marked invalid"
+    },
+    {
+      "code": 6148,
+      "name": "withdrawTicketRequiresFullRedemption",
+      "msg": "The withdraw ticket's current state requires that it is fully redeemed (e.g. due to owner ATA creation), but there is not enough liquidity"
+    },
+    {
+      "code": 6149,
+      "name": "userTokenBalanceMismatch",
+      "msg": "The user's token account has changed its balance in an unexpected way"
+    },
+    {
+      "code": 6150,
+      "name": "withdrawQueuedLiquidityValueTooSmall",
+      "msg": "Available liquidity could not satisfy the minimum required ticketed withdrawal value"
+    },
+    {
+      "code": 6151,
+      "name": "invalidTokenAccountState",
+      "msg": "Token account is in a state preventing the handler's operation (e.g. frozen or delegate)"
+    },
+    {
+      "code": 6152,
+      "name": "withdrawTicketInvalid",
+      "msg": "Cannot use ticket that was already marked invalid"
+    },
+    {
+      "code": 6153,
+      "name": "borrowOrderValueTooSmall",
+      "msg": "Borrow order's value would be below the market-configured minimum"
+    },
+    {
+      "code": 6154,
+      "name": "withdrawTicketValueTooSmall",
+      "msg": "Withdraw ticket's value would be below the market-configured minimum"
     }
   ],
   "types": [
@@ -4454,6 +4846,15 @@ export type KaminoLending = {
           },
           {
             "name": "updateMinBorrowOrderFillValue"
+          },
+          {
+            "name": "updateWithdrawTicketIssuanceEnabled"
+          },
+          {
+            "name": "updateWithdrawTicketRedemptionEnabled"
+          },
+          {
+            "name": "updateMinWithdrawQueuedLiquidityValue"
           }
         ]
       }
@@ -5456,9 +5857,13 @@ export type KaminoLending = {
             "type": "pubkey"
           },
           {
-            "name": "availableAmount",
+            "name": "totalAvailableAmount",
             "docs": [
-              "Reserve liquidity available"
+              "Total reserve liquidity available.",
+              "",
+              "Note: not all of this liquidity can be freely used for any purpose. Production code should",
+              "use the specialized getters - see e.g. [Reserve::total_available_liquidity_amount()],",
+              "[Reserve::freely_available_liquidity_amount()]."
             ],
             "type": "u64"
           },
@@ -5586,6 +5991,41 @@ export type KaminoLending = {
           },
           {
             "name": "hidden"
+          }
+        ]
+      }
+    },
+    {
+      "name": "withdrawQueue",
+      "docs": [
+        "A tracker of ticket-based withdrawals."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "queuedCollateralAmount",
+            "docs": [
+              "The part of [ReserveLiquidity::total_available_amount] locked for ticketed withdrawals."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "nextIssuedTicketSequenceNumber",
+            "docs": [
+              "The sequence number of the next ticket to be issued when enqueueing to withdraw.",
+              "Note: it is also a number of tickets issued so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "nextWithdrawableTicketSequenceNumber",
+            "docs": [
+              "The sequence number of the next ticket to be used for actually transferring the withdrawn",
+              "liquidity (assuming it is available in the reserve).",
+              "Note: it is also a number of fully-consumed tickets so far."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -6096,7 +6536,8 @@ export type KaminoLending = {
           {
             "name": "minFullLiquidationValueThreshold",
             "docs": [
-              "Minimum liquidation value threshold triggering full liquidation for an obligation"
+              "Minimum liquidation value threshold triggering full liquidation for an obligation, in full",
+              "units of the quote currency (e.g. `2` means \"$2\", not \"2 lamports of USDC\")."
             ],
             "type": "u64"
           },
@@ -6300,11 +6741,44 @@ export type KaminoLending = {
             "type": "u64"
           },
           {
+            "name": "withdrawTicketIssuanceEnabled",
+            "docs": [
+              "Whether any new withdraw tickets can be issued (i.e. whether new requests can enter the",
+              "withdraw queue)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "withdrawTicketRedemptionEnabled",
+            "docs": [
+              "Whether the existing withdraw tickets can be redeemed (i.e. whether the tickets can be used",
+              "to transfer accumulated pending liquidity to destination accounts)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "padding2",
+            "type": {
+              "array": [
+                "u8",
+                6
+              ]
+            }
+          },
+          {
+            "name": "minWithdrawQueuedLiquidityValue",
+            "docs": [
+              "Minimum value that can be withdrawn in a single `withdraw_queued_liquidity()` call, in full",
+              "units of the quote currency (e.g. `2` means \"$2\", not \"2 lamports of USDC\")."
+            ],
+            "type": "u64"
+          },
+          {
             "name": "padding1",
             "type": {
               "array": [
                 "u64",
-                164
+                162
               ]
             }
           }
@@ -6816,11 +7290,130 @@ export type KaminoLending = {
             }
           },
           {
+            "name": "withdrawQueue",
+            "docs": [
+              "The tracker of ticket-based withdrawals."
+            ],
+            "type": {
+              "defined": {
+                "name": "withdrawQueue"
+              }
+            }
+          },
+          {
             "name": "padding",
             "type": {
               "array": [
                 "u64",
-                207
+                204
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "withdrawTicket",
+      "docs": [
+        "A finite-lifecycle account representing a specific depositor's place in the withdraw queue of",
+        "a specific reserve.",
+        "",
+        "The lifecycle:",
+        "1. The depositor holding ctokens wants to withdraw funds from the reserve, and finds out that",
+        "the required amount is not available (due to high utilization).",
+        "2. The depositor calls the `enqueue_to_withdraw` handler.",
+        "3. The handler transfers the depositor's ctokens to the reserve's internal \"pending\" vault.",
+        "4. The handler initializes a new [WithdrawTicket] account, with the next available sequence",
+        "number.",
+        "5. The depositor waits until his ticket is the next expected one for actual withdraw, and until",
+        "the reserve has enough liquidity.",
+        "6. Anyone (the depositor or a bot) calls the permissionless `withdraw_queued_liquidity`",
+        "handler. If the ticket became invalid (e.g. destination account no longer exists), then the",
+        "depositor can call the `recover_invalid_ticket_collateral` handler instead.",
+        "7. The handler transfers the liquidity amount according to the current exchange rate.",
+        "8. The handler closes the ticket account."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "sequenceNumber",
+            "docs": [
+              "This ticket's place in the queue; the same as used for PDA derivation."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "owner",
+            "docs": [
+              "The funds' owner (the user who called the `enqueue_to_withdraw` handler)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "reserve",
+            "docs": [
+              "The reserve to withdraw from."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "userDestinationLiquidityTa",
+            "docs": [
+              "The token account to which the finally-available liquidity should be transferred (by the",
+              "`withdraw_queued_liquidity` handler)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "queuedCollateralAmount",
+            "docs": [
+              "The amount of collateral still waiting to be withdrawn using this ticket."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "createdAtTimestamp",
+            "docs": [
+              "The timestamp at which the queue was entered.",
+              "",
+              "This is currently only a piece of metadata, not used by the logic."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "invalid",
+            "docs": [
+              "Whether the ticket has been found to be invalid (e.g. the [Self::user_destination_liquidity]",
+              "has been repurposed) by the `withdraw_queued_liquidity` handler.",
+              "To be specific: valid = `0`, invalid = `1`.",
+              "",
+              "An invalid ticket cannot be made valid again, and can only be passed to the",
+              "`recover_invalid_ticket_collateral` handler."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "alignmentPadding",
+            "docs": [
+              "Inner padding, for alignment."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                7
+              ]
+            }
+          },
+          {
+            "name": "endPadding",
+            "docs": [
+              "Trailing padding, for future developments."
+            ],
+            "type": {
+              "array": [
+                "u64",
+                48
               ]
             }
           }
