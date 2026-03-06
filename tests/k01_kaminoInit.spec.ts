@@ -146,6 +146,7 @@ describe("k01: Init Kamino instance", () => {
     await processBankrunTransaction(ctx, tx, [globalProgramAdmin.wallet]);
 
     await createReserve(
+      Keypair.generate(),
       ecosystem.usdcMint.publicKey,
       USDC_RESERVE,
       ecosystem.usdcDecimals,
@@ -170,6 +171,7 @@ describe("k01: Init Kamino instance", () => {
     await processBankrunTransaction(ctx, tx, [globalProgramAdmin.wallet]);
 
     await createReserve(
+      Keypair.generate(),
       ecosystem.tokenAMint.publicKey,
       TOKEN_A_RESERVE,
       ecosystem.tokenADecimals,
@@ -238,13 +240,13 @@ describe("k01: Init Kamino instance", () => {
 });
 
 export async function createReserve(
+  reserve: Keypair,
   mint: PublicKey,
   reserveLabel: string,
   decimals: number,
   oracle: PublicKey,
   liquiditySource: PublicKey,
 ) {
-  const reserve = Keypair.generate();
   const market = kaminoAccounts.get(MARKET);
 
   const [lendingMarketAuthority] = deriveLendingMarketAuthority(

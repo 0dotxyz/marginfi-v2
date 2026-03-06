@@ -41,10 +41,6 @@ import {
   deriveLiquidityVaultAuthority,
   deriveBaseObligation,
   deriveLendingMarketAuthority,
-  deriveFeeReceiver,
-  deriveReserveLiquiditySupply,
-  deriveReserveCollateralMint,
-  deriveReserveCollateralSupply,
 } from "./utils/pdas";
 import {
   createLut,
@@ -52,27 +48,9 @@ import {
   getBankrunBlockhash,
   processBankrunTransaction,
 } from "./utils/tools";
-import {
-  lendingMarketAuthPda,
-  reserveLiqSupplyPda,
-  reserveFeeVaultPda,
-  reserveCollateralMintPda,
-  reserveCollateralSupplyPda,
-  LendingMarket,
-  MarketWithAddress,
-  BorrowRateCurve,
-  CurvePoint,
-  BorrowRateCurveFields,
-  PriceFeed,
-  AssetReserveConfig,
-} from "@kamino-finance/klend-sdk";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { ComputeBudgetProgram } from "@solana/web3.js";
-import Decimal from "decimal.js";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
-import { address } from "@solana/kit";
-import { KLEND_PROGRAM_ID } from "./utils/types";
 import { createReserve } from "./k01_kaminoInit.spec";
 
 const NUM_KAMINO_BANKS_FOR_TESTING = 15;
@@ -80,7 +58,6 @@ const NUM_REGULAR_TOKEN_A_BANKS = 7;
 const USER_ACCOUNT = "user_account_k17";
 const STARTING_SEED = 17000;
 const LENDING_MARKET_SIZE = 4656;
-const RESERVE_SIZE = 8616;
 
 describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation with LUT", () => {
   let kaminoMarkets: PublicKey[] = [];
@@ -144,6 +121,7 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
       const mint = ecosystem.tokenAMint.publicKey;
 
       await createReserve(
+        reserveKeypair,
         mint,
         "TOKEN_A",
         ecosystem.tokenADecimals,
