@@ -45,6 +45,8 @@ import { KLEND_PROGRAM_ID } from "./utils/types";
 import {
   deriveBaseObligation,
   deriveLiquidityVaultAuthority,
+  deriveReserveCollateralSupply,
+  deriveReserveLiquiditySupply,
 } from "./utils/pdas";
 import { BalanceRaw } from "@mrgnlabs/marginfi-client-v2";
 import { Reserve } from "@kamino-finance/klend-sdk";
@@ -66,6 +68,16 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
     usdcReserve = kaminoAccounts.get(USDC_RESERVE);
     const bankKey = bank.toString();
     usdcBankObligation = kaminoAccounts.get(`${bankKey}_OBLIGATION`);
+
+    [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
+      KLEND_PROGRAM_ID,
+      usdcReserve,
+    );
+
+    [reserveCollateralSupply] = deriveReserveCollateralSupply(
+      KLEND_PROGRAM_ID,
+      usdcReserve,
+    );
 
     // Refresh to pick up any interest changes since the last test ended.
     let tx = new Transaction().add(
@@ -211,8 +223,8 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
       balanceAmtBefore + expectedCollateral.toNumber(),
     );
     assertBNEqual(
-      resAfter.liquidity.availableAmount,
-      resBefore.liquidity.availableAmount.add(amount),
+      resAfter.liquidity.totalAvailableAmount,
+      resBefore.liquidity.totalAvailableAmount.add(amount),
     );
     // * Note: the collateral mint will have the same raw value, even though it may use different
     // decimals (fixed to 6) in the token program, it actually always uses mint_decimals.
@@ -368,6 +380,16 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
     );
     [tokenABankObligation] = deriveBaseObligation(authority, market);
 
+    [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
+      KLEND_PROGRAM_ID,
+      tokenAReserve,
+    );
+
+    [reserveCollateralSupply] = deriveReserveCollateralSupply(
+      KLEND_PROGRAM_ID,
+      tokenAReserve,
+    );
+
     let tx = new Transaction().add(
       dummyIx(users[0].wallet.publicKey, groupAdmin.wallet.publicKey),
       await simpleRefreshReserve(
@@ -508,8 +530,8 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
       balanceAmtBefore + expectedCollateral.toNumber(),
     );
     assertBNEqual(
-      resAfter.liquidity.availableAmount,
-      resBefore.liquidity.availableAmount.add(amount),
+      resAfter.liquidity.totalAvailableAmount,
+      resBefore.liquidity.totalAvailableAmount.add(amount),
     );
     // Note: Here with an 8 decimal mint, the mintTotalSupply still uses mint_decimals.
     const interestTolerance =

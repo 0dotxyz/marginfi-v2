@@ -37,6 +37,11 @@ import {
 } from "./utils/genericTests";
 import { BalanceRaw } from "@mrgnlabs/marginfi-client-v2";
 import { getEpochAndSlot } from "./utils/bankrunConnection";
+import {
+  deriveReserveCollateralSupply,
+  deriveReserveLiquiditySupply,
+} from "./utils/pdas";
+import { KLEND_PROGRAM_ID } from "./utils/types";
 
 let ctx: ProgramTestContext;
 let bank: PublicKey;
@@ -55,6 +60,16 @@ describe("k06: Kamino Deposit Tests", () => {
     const bankKey = bank.toString();
     usdcBankObligation = kaminoAccounts.get(`${bankKey}_OBLIGATION`);
 
+    [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
+      KLEND_PROGRAM_ID,
+      usdcReserve,
+    );
+
+    [reserveCollateralSupply] = deriveReserveCollateralSupply(
+      KLEND_PROGRAM_ID,
+      usdcReserve,
+    );
+
     // Refresh oracles to ensure they have current timestamps
     // This prevents stale oracle issues when other test suites run first
     await refreshPullOraclesBankrun(oracles, ctx, banksClient);
@@ -63,7 +78,7 @@ describe("k06: Kamino Deposit Tests", () => {
   async function executeDeposit(
     user: MockUser,
     amount: BN,
-    userLabel: string
+    userLabel: string,
   ): Promise<void> {
     const marginfiAccount = user.accounts.get(USER_ACCOUNT_K);
     /** Without decimals, e.g. 1.1 USDC = 1.1 */
@@ -71,7 +86,7 @@ describe("k06: Kamino Deposit Tests", () => {
 
     if (verbose) {
       console.log(
-        `Deposit for user ${userLabel} Account: ${marginfiAccount.toString()}`
+        `Deposit for user ${userLabel} Account: ${marginfiAccount.toString()}`,
       );
     }
 
@@ -94,7 +109,7 @@ describe("k06: Kamino Deposit Tests", () => {
     ]);
 
     const balanceMaybe = userAccBefore.lendingAccount.balances.find(
-      (b) => b.bankPk.equals(bank) && b.active === 1
+      (b) => b.bankPk.equals(bank) && b.active === 1,
     );
     const balanceAmtBefore = balanceMaybe
       ? wrappedI80F48toBigNumber(balanceMaybe.assetShares).toNumber()
@@ -123,14 +138,14 @@ describe("k06: Kamino Deposit Tests", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       ),
       // pass the USDC reserve since it's now part of the obligation
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         usdcBankObligation,
-        [usdcReserve]
+        [usdcReserve],
       ),
       await makeKaminoDepositIx(
         user.mrgnBankrunProgram,
@@ -141,8 +156,8 @@ describe("k06: Kamino Deposit Tests", () => {
           lendingMarket: market,
           reserve: usdcReserve,
         },
-        amount
-      )
+        amount,
+      ),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
@@ -175,30 +190,30 @@ describe("k06: Kamino Deposit Tests", () => {
 
     const balancesAfter = userAccAfter.lendingAccount.balances;
     const balanceAfter: BalanceRaw = balancesAfter.find(
-      (b: BalanceRaw) => b.bankPk.equals(bank) && b.active === 1
+      (b: BalanceRaw) => b.bankPk.equals(bank) && b.active === 1,
     );
     assert.equal(balanceAfter.active, 1);
     assertI80F48Approx(
       balanceAfter.assetShares,
       // Note: Here collateral and liquidity are 1:1, so we can use amount, but this is actually
       // tracking collateral token!
-      balanceAmtBefore + amount.toNumber()
+      balanceAmtBefore + amount.toNumber(),
     );
     assertBNEqual(
       resAfter.liquidity.totalAvailableAmount,
-      resBefore.liquidity.totalAvailableAmount.add(amount)
+      resBefore.liquidity.totalAvailableAmount.add(amount),
     );
     assertI68F60Equal(resAfter.liquidity.borrowedAmountSf, 0);
 
     // Assert bank updated as expected
     const sharesBefore = wrappedI80F48toBigNumber(
-      bankBefore.totalAssetShares
+      bankBefore.totalAssetShares,
     ).toNumber();
     // No interest accumulates on Kamino banks, so the asset share value is always 1, and the
     // relationship between collateral tokens and shares is always 1:1
     assertI80F48Approx(
       bankAfter.totalAssetShares,
-      sharesBefore + amount.toNumber()
+      sharesBefore + amount.toNumber(),
     );
     assertI80F48Equal(bankAfter.assetShareValue, 1);
     assertI80F48Equal(bankAfter.collectedInsuranceFeesOutstanding, 0);
@@ -213,7 +228,7 @@ describe("k06: Kamino Deposit Tests", () => {
       depositAfter.depositedAmount,
       // Note: Here collateral and liquidity are 1:1, so we can use amount, but this is actually
       // tracking collateral token!
-      depositBefore.depositedAmount.add(amount)
+      depositBefore.depositedAmount.add(amount),
     );
 
     // Oracle update assertions
@@ -241,14 +256,14 @@ describe("k06: Kamino Deposit Tests", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         usdcBankObligation,
-        [usdcReserve]
-      )
+        [usdcReserve],
+      ),
     );
     await processBankrunTransaction(ctx, refreshTx, [user.wallet]);
 
@@ -259,25 +274,25 @@ describe("k06: Kamino Deposit Tests", () => {
     ]);
     const depositAfterRefresh = obAfterRefresh.deposits[0];
     const marketValueBefore = wrappedU68F60toBigNumber(
-      depositBefore.marketValueSf
+      depositBefore.marketValueSf,
     ).toNumber();
     const marketValueAfter = wrappedU68F60toBigNumber(
-      depositAfterRefresh.marketValueSf
+      depositAfterRefresh.marketValueSf,
     ).toNumber();
     const expectedDiff = amtFloat * oracles.usdcPrice;
     const expectedValue = marketValueBefore + expectedDiff;
     assert.approximately(
       marketValueAfter,
       expectedValue,
-      marketValueAfter * 0.00001
+      marketValueAfter * 0.00001,
     );
     // Note: the reserve, in a variable with the same name, records the token PRICE...
     assert.approximately(
       wrappedU68F60toBigNumber(
-        resAfterRefresh.liquidity.marketPriceSf
+        resAfterRefresh.liquidity.marketPriceSf,
       ).toNumber(),
       oracles.usdcPrice,
-      oracles.usdcPrice * 0.00001
+      oracles.usdcPrice * 0.00001,
     );
 
     // After another refresh, the stale flag is removed and the oracle data can be used again. Note:

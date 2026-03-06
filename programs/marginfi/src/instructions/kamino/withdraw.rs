@@ -391,6 +391,7 @@ pub struct KaminoWithdraw<'info> {
 
     /// The liquidity token mint (e.g., USDC)
     /// Needs serde to get the mint decimals for transfer checked
+    /// TODO: rename to just 'mint' to make use of has_one and to be consistent with deposit
     #[account(mut)]
     pub reserve_liquidity_mint: Box<InterfaceAccount<'info, Mint>>,
 

@@ -222,6 +222,7 @@ export const SEED_BASE_REFERRER_STATE = "ref_state";
 export const SEED_BASE_SHORT_URL = "short_url";
 export const SEED_USER_STATE = "user";
 export const SEED_AUTHORITY = "authority";
+export const SEED_GLOBAL_CONFIG_STATE = "global_config";
 
 export function deriveLendingMarketAuthority(
   programId: PublicKey,
@@ -321,6 +322,15 @@ export function deriveShortUrl(
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from(SEED_BASE_SHORT_URL), identifier],
+    programId,
+  );
+}
+
+export function deriveGlobalConfig(
+  programId: PublicKey,
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from(SEED_GLOBAL_CONFIG_STATE)],
     programId,
   );
 }

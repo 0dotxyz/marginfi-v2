@@ -114,13 +114,10 @@ describe("k01: Init Kamino instance", () => {
         .instruction(),
     );
 
-    await processBankrunTransaction(
-      ctx,
-      tx,
-      [groupAdmin.wallet, lendingMarket],
-      false,
-      true,
-    );
+    await processBankrunTransaction(ctx, tx, [
+      groupAdmin.wallet,
+      lendingMarket,
+    ]);
     kaminoAccounts.set(MARKET, lendingMarket.publicKey);
     if (verbose) {
       console.log("Kamino market: " + lendingMarket.publicKey);

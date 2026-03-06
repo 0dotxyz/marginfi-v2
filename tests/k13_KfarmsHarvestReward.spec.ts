@@ -557,6 +557,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
           marginfiAccount,
           authority: user.wallet.publicKey,
           bank: tokenABank,
+          mint: ecosystem.tokenAMint.publicKey,
           destinationTokenAccount: user.tokenAAccount,
           lendingMarket: market,
           reserve: tokenAReserve,
