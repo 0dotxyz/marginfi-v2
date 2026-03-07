@@ -176,7 +176,6 @@ describe("k05: Init Kamino banks", () => {
           signerTokenAccount: usr.tokenAAccount, // wrong
           lendingMarket: market,
           reserveLiquidityMint: ecosystem.tokenAMint.publicKey, // wrong
-          pythOracle: oracles.tokenAOracle.publicKey, // wrong
         },
         new BN(999)
       )
@@ -184,25 +183,6 @@ describe("k05: Init Kamino banks", () => {
     let result1 = await processBankrunTransaction(ctx, tx1, [usr.wallet], true);
     // Generic ConstraintTokenMint
     assertBankrunTxFailed(result1, 2014);
-
-    let tx2 = new Transaction().add(
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),
-      await makeInitObligationIx(
-        groupAdmin.mrgnBankrunProgram,
-        {
-          feePayer: usr.wallet.publicKey,
-          bank: bank,
-          signerTokenAccount: usr.usdcAccount,
-          lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
-          pythOracle: oracles.tokenAOracle.publicKey, // wrong
-        },
-        new BN(999)
-      )
-    );
-    let result2 = await processBankrunTransaction(ctx, tx2, [usr.wallet], true);
-    // WrongOracleAccountKeys
-    assertBankrunTxFailed(result2, 6054);
   });
 
   /*
@@ -245,7 +225,6 @@ describe("k05: Init Kamino banks", () => {
           signerTokenAccount: user.usdcAccount,
           lendingMarket: market,
           reserveLiquidityMint: ecosystem.usdcMint.publicKey,
-          pythOracle: oracles.usdcOracle.publicKey,
         },
         new BN(nominalAmount)
       )
@@ -338,7 +317,6 @@ describe("k05: Init Kamino banks", () => {
           signerTokenAccount: user.tokenAAccount,
           lendingMarket: market,
           reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
-          pythOracle: oracles.tokenAOracle.publicKey,
         },
         new BN(nominalAmount)
       )

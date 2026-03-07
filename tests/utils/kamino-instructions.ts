@@ -197,10 +197,6 @@ const DEFAULT_INIT_OBLIGATION_OPTIONAL_ACCOUNTS = {
   obligationFarmUserState: null,
   reserveFarmState: null,
   referrerUserMetadata: null,
-  pythOracle: null,
-  switchboardPriceOracle: null,
-  switchboardTwapOracle: null,
-  scopePrices: null,
 } as const;
 
 export interface InitObligationAccounts {
@@ -213,11 +209,6 @@ export interface InitObligationAccounts {
   obligationFarmUserState?: PublicKey | null;
   reserveFarmState?: PublicKey | null;
   referrerUserMetadata?: PublicKey | null;
-  // Oracle accounts for refreshing the reserve, pick just one.
-  pythOracle?: PublicKey | null;
-  switchboardPriceOracle?: PublicKey | null;
-  switchboardTwapOracle?: PublicKey | null;
-  scopePrices?: PublicKey | null;
 }
 
 /**

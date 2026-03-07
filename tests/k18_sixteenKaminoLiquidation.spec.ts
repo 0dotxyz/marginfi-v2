@@ -267,6 +267,22 @@ describe("k18: 16 Kamino position liquidation test", () => {
         groupAdmin.wallet,
       ]);
 
+      // Prime the reserve price: refresh reserves batch with skip_price_updates=true
+      // requires the reserve to already have valid price data from a prior refresh.
+      // This is only required because the reserves are newly created for this test, 
+      // otherwise it would not have been necessary.
+      const primeReserveTx = new Transaction().add(
+        await simpleRefreshReserve(
+          klendBankrunProgram,
+          reserveKeypair.publicKey,
+          marketKeypair.publicKey,
+          oracles.tokenAOracle.publicKey,
+        ),
+      );
+      await processBankrunTransaction(bankrunContext, primeReserveTx, [
+        groupAdmin.wallet,
+      ]);
+
       // Create marginfi Kamino bank
       const seed = new BN(STARTING_SEED + i);
       const config = defaultKaminoBankConfig(oracles.tokenAOracle.publicKey);
@@ -311,7 +327,6 @@ describe("k18: 16 Kamino position liquidation test", () => {
             signerTokenAccount: groupAdmin.tokenAAccount,
             lendingMarket: marketKeypair.publicKey,
             reserveLiquidityMint: mint,
-            pythOracle: oracles.tokenAOracle.publicKey,
           },
           new BN(100),
         ),
