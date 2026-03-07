@@ -163,13 +163,24 @@ impl BankFixture {
         funding_account: Pubkey,
     ) -> Result<(), BanksClientError> {
         let bank = self.load().await;
+        self.try_emissions_deposit_with_mint(amount, funding_account, bank.mint)
+            .await
+    }
+
+    pub async fn try_emissions_deposit_with_mint(
+        &self,
+        amount: u64,
+        funding_account: Pubkey,
+        mint: Pubkey,
+    ) -> Result<(), BanksClientError> {
+        let bank = self.load().await;
 
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::LendingPoolEmissionsDeposit {
                 group: bank.group,
                 bank: self.key,
-                mint: bank.mint,
+                mint,
                 emissions_funding_account: funding_account,
                 depositor: self.ctx.borrow().payer.pubkey(),
                 liquidity_vault: bank.liquidity_vault,
