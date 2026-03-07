@@ -8,6 +8,7 @@ mod create_account_pda_cpi;
 mod deposit;
 mod emissions;
 mod flash_loan;
+mod kamino;
 mod limit_orders;
 mod limit_orders_common;
 mod limit_orders_multi;
@@ -23,10 +24,7 @@ mod withdraw;
 use anchor_lang::prelude::Clock;
 use fixed::types::I80F48;
 use fixtures::{assert_eq_noise, native, prelude::*};
-use marginfi::{
-    prelude::*,
-    state::{bank::BankImpl, marginfi_account::BankAccountWrapper},
-};
+use marginfi::state::{bank::BankImpl, marginfi_account::BankAccountWrapper};
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
 

@@ -4,6 +4,7 @@ use crate::utils::find_order_pda;
 use anchor_lang::{prelude::*, system_program, InstructionData, ToAccountMetas};
 use fixed::types::I80F48;
 use kamino_mocks::kamino_lending::client as kamino;
+use kamino_mocks::state::{MinimalObligation, MinimalReserve};
 use marginfi::state::bank::BankVaultType;
 use marginfi_type_crate::types::OracleSetup;
 use marginfi_type_crate::types::{Bank, FeeState, MarginfiAccount, Order, OrderTrigger};
@@ -28,6 +29,14 @@ async fn ctx_parts(ctx: &Rc<RefCell<ProgramTestContext>>) -> (BanksClient, Keypa
     };
     let blockhash = banks_client.get_latest_blockhash().await.unwrap();
     (banks_client, payer, blockhash)
+}
+
+fn derive_kamino_lending_market_authority(lending_market: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"lma", lending_market.as_ref()],
+        &kamino_mocks::kamino_lending::ID,
+    )
+    .0
 }
 
 pub struct MarginfiAccountFixture {
@@ -1327,16 +1336,29 @@ impl MarginfiAccountFixture {
     }
 
     pub async fn make_kamino_refresh_reserve_ix(&self, bank: &BankFixture) -> Instruction {
-        let reserve = &bank.kamino.as_ref().unwrap().reserve;
-        let bank = bank.load().await;
+        let bank_state = bank.load().await;
+        let (lending_market, pyth_oracle, scope_prices) = if let Some(kamino) = &bank.kamino {
+            let pyth = kamino.reserve.config.token_info.pyth_configuration.price;
+            (
+                kamino.reserve.lending_market,
+                (pyth != Pubkey::default()).then_some(pyth),
+                None,
+            )
+        } else {
+            let reserve: MinimalReserve =
+                load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+            let oracle_key = get_oracle_id_from_feed_id(bank_state.config.oracle_keys[0])
+                .unwrap_or(bank_state.config.oracle_keys[0]);
+            (reserve.lending_market, Some(oracle_key), None)
+        };
 
         let accounts = kamino::accounts::RefreshReserve {
-            reserve: bank.integration_acc_1,
-            lending_market: reserve.lending_market,
-            pyth_oracle: None,
+            reserve: bank_state.integration_acc_1,
+            lending_market,
+            pyth_oracle,
             switchboard_price_oracle: None,
             switchboard_twap_oracle: None,
-            scope_prices: Some(reserve.config.token_info.scope_configuration.price_feed),
+            scope_prices,
         }
         .to_account_metas(Some(true));
 
@@ -1348,20 +1370,174 @@ impl MarginfiAccountFixture {
     }
 
     pub async fn make_kamino_refresh_obligation_ix(&self, bank: &BankFixture) -> Instruction {
-        let obligation = &bank.kamino.as_ref().unwrap().obligation;
-        let bank = bank.load().await;
+        let bank_state = bank.load().await;
+        let lending_market = if let Some(kamino) = &bank.kamino {
+            kamino.obligation.lending_market
+        } else {
+            let obligation: MinimalObligation =
+                load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_2).await;
+            obligation.lending_market
+        };
 
-        let accounts = kamino::accounts::RefreshObligation {
-            obligation: bank.integration_acc_2,
-            lending_market: obligation.lending_market,
+        let mut accounts = kamino::accounts::RefreshObligation {
+            obligation: bank_state.integration_acc_2,
+            lending_market,
         }
         .to_account_metas(Some(true));
+        accounts.push(AccountMeta::new_readonly(
+            bank_state.integration_acc_1,
+            false,
+        ));
 
         Instruction {
             program_id: kamino_mocks::kamino_lending::ID,
             accounts,
             data: kamino::args::RefreshObligation {}.data(),
         }
+    }
+
+    pub async fn make_kamino_deposit_ix(
+        &self,
+        funding_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+    ) -> Instruction {
+        self.make_kamino_deposit_ix_with_authority(
+            funding_account,
+            bank,
+            amount,
+            self.ctx.borrow().payer.pubkey(),
+        )
+        .await
+    }
+
+    pub async fn make_kamino_deposit_ix_with_authority(
+        &self,
+        funding_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        authority: Pubkey,
+    ) -> Instruction {
+        let marginfi_account = self.load().await;
+        let bank_state = bank.load().await;
+        let reserve: MinimalReserve =
+            load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+        let lending_market_authority =
+            derive_kamino_lending_market_authority(reserve.lending_market);
+
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::KaminoDeposit {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                authority,
+                bank: bank.key,
+                signer_token_account: funding_account,
+                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+                integration_acc_2: bank_state.integration_acc_2,
+                lending_market: reserve.lending_market,
+                lending_market_authority,
+                integration_acc_1: bank_state.integration_acc_1,
+                mint: reserve.mint_pubkey,
+                reserve_liquidity_supply: reserve.supply_vault,
+                reserve_collateral_mint: reserve.collateral_mint_pubkey,
+                reserve_destination_deposit_collateral: reserve.collateral_supply_vault,
+                obligation_farm_user_state: None,
+                reserve_farm_state: None,
+                kamino_program: kamino_mocks::kamino_lending::ID,
+                farms_program: kamino_mocks::kamino_farms::ID,
+                collateral_token_program: anchor_spl::token::spl_token::ID,
+                liquidity_token_program: bank.get_token_program(),
+                instruction_sysvar_account: sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::KaminoDeposit { amount }.data(),
+        }
+    }
+
+    pub async fn make_kamino_withdraw_ix(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        withdraw_all: Option<bool>,
+        include_health_accounts: bool,
+    ) -> Instruction {
+        self.make_kamino_withdraw_ix_with_authority(
+            destination_account,
+            bank,
+            amount,
+            withdraw_all,
+            include_health_accounts,
+            self.ctx.borrow().payer.pubkey(),
+        )
+        .await
+    }
+
+    pub async fn make_kamino_withdraw_ix_with_authority(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        withdraw_all: Option<bool>,
+        include_health_accounts: bool,
+        authority: Pubkey,
+    ) -> Instruction {
+        let marginfi_account = self.load().await;
+        let bank_state = bank.load().await;
+        let reserve: MinimalReserve =
+            load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+        let lending_market_authority =
+            derive_kamino_lending_market_authority(reserve.lending_market);
+
+        let mut ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::KaminoWithdraw {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                authority,
+                bank: bank.key,
+                destination_token_account: destination_account,
+                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+                integration_acc_2: bank_state.integration_acc_2,
+                lending_market: reserve.lending_market,
+                lending_market_authority,
+                integration_acc_1: bank_state.integration_acc_1,
+                reserve_liquidity_mint: reserve.mint_pubkey,
+                reserve_liquidity_supply: reserve.supply_vault,
+                reserve_collateral_mint: reserve.collateral_mint_pubkey,
+                reserve_source_collateral: reserve.collateral_supply_vault,
+                obligation_farm_user_state: None,
+                reserve_farm_state: None,
+                kamino_program: kamino_mocks::kamino_lending::ID,
+                farms_program: kamino_mocks::kamino_farms::ID,
+                collateral_token_program: anchor_spl::token::spl_token::ID,
+                liquidity_token_program: bank.get_token_program(),
+                instruction_sysvar_account: sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::KaminoWithdraw {
+                amount,
+                withdraw_all,
+            }
+            .data(),
+        };
+
+        if include_health_accounts {
+            let oracle_key = get_oracle_id_from_feed_id(bank_state.config.oracle_keys[0])
+                .unwrap_or(bank_state.config.oracle_keys[0]);
+            ix.accounts.push(AccountMeta::new_readonly(bank.key, false));
+            ix.accounts
+                .push(AccountMeta::new_readonly(oracle_key, false));
+            ix.accounts.push(AccountMeta::new_readonly(
+                bank_state.integration_acc_1,
+                false,
+            ));
+        }
+
+        ix
     }
 
     pub async fn try_lending_account_pulse_health(
