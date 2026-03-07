@@ -8,6 +8,8 @@ use crate::{
 use anchor_lang::{prelude::*, InstructionData, ToAccountMetas};
 use anchor_spl::token::spl_token;
 use bincode::deserialize;
+use drift_mocks::drift::client as drift;
+use drift_mocks::state::{MinimalSpotMarket, MinimalUser};
 use fixed::types::I80F48;
 use kamino_mocks::kamino_lending::accounts::LendingMarket;
 use kamino_mocks::mock_kamino_lending_processor;
@@ -15,6 +17,7 @@ use kamino_mocks::state::{MinimalObligation, MinimalReserve};
 use marginfi::{
     state::{
         bank::{BankImpl, BankVaultType},
+        drift::DriftConfigCompact,
         kamino::KaminoConfigCompact,
     },
     utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
@@ -316,6 +319,68 @@ pub struct KaminoStateSnapshot {
     pub obligation_collateral: u64,
 }
 
+pub struct DriftBankSetup {
+    pub test_f: TestFixture,
+    pub bank_f: BankFixture,
+    pub spot_market_vault: Pubkey,
+    pub market_index: u16,
+}
+
+impl DriftBankSetup {
+    pub async fn create_user_with_liquidity(
+        &self,
+        ui_amount: f64,
+    ) -> (MarginfiAccountFixture, TokenAccountFixture) {
+        let user = self.test_f.create_marginfi_account().await;
+        let user_token = self
+            .bank_f
+            .mint
+            .create_token_account_and_mint_to(ui_amount)
+            .await;
+        (user, user_token)
+    }
+
+    pub async fn load_state(&self, user_token: &TokenAccountFixture) -> DriftStateSnapshot {
+        self.test_f
+            .load_drift_state(
+                &self.bank_f,
+                self.spot_market_vault,
+                self.market_index,
+                user_token,
+            )
+            .await
+    }
+
+    pub async fn load_spot_market(&self) -> MinimalSpotMarket {
+        let bank = self.bank_f.load().await;
+        self.test_f
+            .load_and_deserialize(&bank.integration_acc_1)
+            .await
+    }
+
+    pub async fn load_user_accounted_scaled_balance(
+        &self,
+        user: &MarginfiAccountFixture,
+    ) -> Option<u64> {
+        let user_state = user.load().await;
+        let user_balance = user_state.lending_account.get_balance(&self.bank_f.key)?;
+        let bank_state = self.bank_f.load().await;
+        Some(
+            bank_state
+                .get_asset_amount(user_balance.asset_shares.into())
+                .unwrap()
+                .to_num::<u64>(),
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DriftStateSnapshot {
+    pub user_balance: u64,
+    pub spot_market_vault_balance: u64,
+    pub user_scaled_balance: u64,
+}
+
 pub const PYTH_USDC_FEED: Pubkey = pubkey!("PythUsdcPrice111111111111111111111111111111");
 pub const SWITCHBOARD_USDC_FEED: Pubkey = pubkey!("SwchUsdcPrice111111111111111111111111111111");
 pub const PYTH_SOL_FEED: Pubkey = pubkey!("PythSo1Price1111111111111111111111111111111");
@@ -541,6 +606,9 @@ pub fn marginfi_entry<'info>(
 pub const FAKE_KAMINO_PROGRAM_ID: Pubkey = pubkey!("KFake2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
 const KAMINO_TEST_BANK_SEED: u64 = 555;
 const KAMINO_INIT_OBLIGATION_NOMINAL_AMOUNT: u64 = 500;
+const DRIFT_TEST_BANK_SEED: u64 = 777;
+const DRIFT_USDC_MARKET_INDEX: u16 = 0;
+const DRIFT_INIT_USER_NOMINAL_AMOUNT: u64 = 100;
 
 impl TestFixture {
     pub async fn new(test_settings: Option<TestSettings>) -> TestFixture {
@@ -586,6 +654,7 @@ impl TestFixture {
             program.prefer_bpf(true);
             program.add_program("kamino_lending", kamino_mocks::kamino_lending::ID, None);
             program.add_program("kamino_farms", kamino_mocks::kamino_farms::ID, None);
+            program.add_program("drift_v2", drift_mocks::drift::ID, None);
             program.prefer_bpf(false);
         } else {
             program.add_program(
@@ -1066,6 +1135,54 @@ impl TestFixture {
         .0
     }
 
+    fn derive_drift_state() -> Pubkey {
+        Pubkey::find_program_address(&[b"drift_state"], &drift_mocks::drift::ID).0
+    }
+
+    fn derive_drift_signer() -> Pubkey {
+        Pubkey::find_program_address(&[b"drift_signer"], &drift_mocks::drift::ID).0
+    }
+
+    fn derive_drift_spot_market(market_index: u16) -> Pubkey {
+        Pubkey::find_program_address(
+            &[b"spot_market", &market_index.to_le_bytes()],
+            &drift_mocks::drift::ID,
+        )
+        .0
+    }
+
+    fn derive_drift_spot_market_vault(market_index: u16) -> Pubkey {
+        Pubkey::find_program_address(
+            &[b"spot_market_vault", &market_index.to_le_bytes()],
+            &drift_mocks::drift::ID,
+        )
+        .0
+    }
+
+    fn derive_drift_insurance_fund_vault(market_index: u16) -> Pubkey {
+        Pubkey::find_program_address(
+            &[b"insurance_fund_vault", &market_index.to_le_bytes()],
+            &drift_mocks::drift::ID,
+        )
+        .0
+    }
+
+    fn derive_drift_user(authority: Pubkey, user_index: u16) -> Pubkey {
+        Pubkey::find_program_address(
+            &[b"user", authority.as_ref(), &user_index.to_le_bytes()],
+            &drift_mocks::drift::ID,
+        )
+        .0
+    }
+
+    fn derive_drift_user_stats(authority: Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[b"user_stats", authority.as_ref()],
+            &drift_mocks::drift::ID,
+        )
+        .0
+    }
+
     async fn process_ixs(
         ctx: Rc<RefCell<ProgramTestContext>>,
         ixs: &[Instruction],
@@ -1320,6 +1437,194 @@ impl TestFixture {
         }
     }
 
+    pub async fn setup_drift_bank(test_settings: Option<TestSettings>) -> DriftBankSetup {
+        let settings = test_settings.unwrap_or(TestSettings {
+            banks: vec![],
+            protocol_fees: false,
+        });
+        let test_f = TestFixture::new_with_t22_extension_inner(Some(settings), &[], true).await;
+
+        let drift_state = Self::derive_drift_state();
+        let drift_signer = Self::derive_drift_signer();
+        let spot_market = Self::derive_drift_spot_market(DRIFT_USDC_MARKET_INDEX);
+        let spot_market_vault = Self::derive_drift_spot_market_vault(DRIFT_USDC_MARKET_INDEX);
+        let insurance_fund_vault = Self::derive_drift_insurance_fund_vault(DRIFT_USDC_MARKET_INDEX);
+
+        let init_drift_state_ix = Instruction {
+            program_id: drift_mocks::drift::ID,
+            accounts: drift::accounts::Initialize {
+                admin: test_f.payer(),
+                state: drift_state,
+                quote_asset_mint: test_f.usdc_mint.key,
+                drift_signer,
+                rent: sysvar::rent::ID,
+                system_program: system_program::ID,
+                token_program: spl_token::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: drift::args::Initialize {}.data(),
+        };
+
+        let init_spot_market_ix = Instruction {
+            program_id: drift_mocks::drift::ID,
+            accounts: drift::accounts::InitializeSpotMarket {
+                spot_market,
+                spot_market_mint: test_f.usdc_mint.key,
+                spot_market_vault,
+                insurance_fund_vault,
+                drift_signer,
+                state: drift_state,
+                oracle: system_program::ID, 
+                admin: test_f.payer(),
+                rent: sysvar::rent::ID,
+                system_program: system_program::ID,
+                token_program: spl_token::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: drift::args::InitializeSpotMarket {
+                optimal_utilization: 500_000,
+                optimal_borrow_rate: 50_000,
+                max_borrow_rate: 1_000_000,
+                oracle_source: drift_mocks::drift::types::OracleSource::QuoteAsset,
+                initial_asset_weight: 10_000,
+                maintenance_asset_weight: 10_000,
+                initial_liability_weight: 10_000,
+                maintenance_liability_weight: 10_000,
+                imf_factor: 0,
+                liquidator_fee: 0,
+                if_liquidation_fee: 0,
+                active_status: true,
+                asset_tier: drift_mocks::drift::types::AssetTier::Collateral,
+                scale_initial_asset_weight_start: 0,
+                withdraw_guard_threshold: 10_000_000_000_000,
+                order_tick_size: 1,
+                order_step_size: 1,
+                if_total_factor: 0,
+                name: [0; 32],
+            }
+            .data(),
+        };
+
+        let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
+        Self::process_ixs(
+            test_f.context.clone(),
+            &[cu_ix, init_drift_state_ix, init_spot_market_ix],
+        )
+        .await
+        .unwrap();
+
+        let (bank_key, _) = Pubkey::find_program_address(
+            &[
+                test_f.marginfi_group.key.as_ref(),
+                test_f.usdc_mint.key.as_ref(),
+                &DRIFT_TEST_BANK_SEED.to_le_bytes(),
+            ],
+            &marginfi::ID,
+        );
+        let bank_f = BankFixture::new(test_f.context.clone(), bank_key, &test_f.usdc_mint, None);
+
+        let liquidity_vault_authority =
+            find_bank_vault_authority_pda(&bank_key, BankVaultType::Liquidity).0;
+        let drift_user = Self::derive_drift_user(liquidity_vault_authority, 0);
+        let drift_user_stats = Self::derive_drift_user_stats(liquidity_vault_authority);
+        create_system_account_if_missing(test_f.context.clone(), drift_user).await;
+        create_system_account_if_missing(test_f.context.clone(), drift_user_stats).await;
+
+        let bank_config = DriftConfigCompact::new(
+            PYTH_USDC_FEED,
+            I80F48!(1).into(),
+            I80F48!(1).into(),
+            native!(1_000_000, "USDC"),
+            OracleSetup::DriftPythPull,
+            BankOperationalState::Operational,
+            RiskTier::Collateral,
+            PYTH_PUSH_MIGRATED_DEPRECATED,
+            1_000_000_000_000,
+            100,
+            0,
+        );
+
+        let add_bank_accounts = marginfi::accounts::LendingPoolAddBankDrift {
+            group: test_f.marginfi_group.key,
+            admin: test_f.payer(),
+            fee_payer: test_f.payer(),
+            bank_mint: test_f.usdc_mint.key,
+            bank: bank_key,
+            integration_acc_1: spot_market,
+            integration_acc_2: drift_user,
+            integration_acc_3: drift_user_stats,
+            liquidity_vault_authority,
+            liquidity_vault: find_bank_vault_pda(&bank_key, BankVaultType::Liquidity).0,
+            insurance_vault_authority: find_bank_vault_authority_pda(
+                &bank_key,
+                BankVaultType::Insurance,
+            )
+            .0,
+            insurance_vault: find_bank_vault_pda(&bank_key, BankVaultType::Insurance).0,
+            fee_vault_authority: find_bank_vault_authority_pda(&bank_key, BankVaultType::Fee).0,
+            fee_vault: find_bank_vault_pda(&bank_key, BankVaultType::Fee).0,
+            token_program: spl_token::ID,
+            system_program: system_program::ID,
+        };
+        let mut add_bank_ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: add_bank_accounts.to_account_metas(Some(true)),
+            data: marginfi::instruction::LendingPoolAddBankDrift {
+                bank_config,
+                bank_seed: DRIFT_TEST_BANK_SEED,
+            }
+            .data(),
+        };
+        add_bank_ix
+            .accounts
+            .push(AccountMeta::new_readonly(PYTH_USDC_FEED, false));
+        add_bank_ix
+            .accounts
+            .push(AccountMeta::new_readonly(spot_market, false));
+        Self::process_ixs(test_f.context.clone(), &[add_bank_ix])
+            .await
+            .unwrap();
+
+        let init_source = test_f.usdc_mint.create_token_account_and_mint_to(1.0).await;
+        let init_user_ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::DriftInitUser {
+                fee_payer: test_f.payer(),
+                signer_token_account: init_source.key,
+                bank: bank_key,
+                liquidity_vault_authority,
+                liquidity_vault: find_bank_vault_pda(&bank_key, BankVaultType::Liquidity).0,
+                mint: test_f.usdc_mint.key,
+                integration_acc_3: drift_user_stats,
+                integration_acc_2: drift_user,
+                drift_state,
+                integration_acc_1: spot_market,
+                drift_spot_market_vault: spot_market_vault,
+                drift_oracle: None,
+                drift_program: drift_mocks::drift::ID,
+                token_program: spl_token::ID,
+                rent: sysvar::rent::ID,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::DriftInitUser {
+                amount: DRIFT_INIT_USER_NOMINAL_AMOUNT,
+            }
+            .data(),
+        };
+        let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
+        Self::process_ixs(test_f.context.clone(), &[cu_ix, init_user_ix])
+            .await
+            .unwrap();
+
+        DriftBankSetup {
+            test_f,
+            bank_f,
+            spot_market_vault,
+            market_index: DRIFT_USDC_MARKET_INDEX,
+        }
+    }
+
     pub async fn run_kamino_deposit(
         &self,
         bank_f: &BankFixture,
@@ -1361,6 +1666,43 @@ impl TestFixture {
         Self::process_ixs(self.context.clone(), &ixs).await
     }
 
+    pub async fn run_drift_deposit(
+        &self,
+        bank_f: &BankFixture,
+        user: &MarginfiAccountFixture,
+        signer_token_account: Pubkey,
+        amount: u64,
+    ) -> std::result::Result<(), BanksClientError> {
+        let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
+        let deposit_ix = user
+            .make_drift_deposit_ix(signer_token_account, bank_f, amount)
+            .await;
+        let ixs = vec![cu_ix, deposit_ix];
+        Self::process_ixs(self.context.clone(), &ixs).await
+    }
+
+    pub async fn run_drift_withdraw(
+        &self,
+        bank_f: &BankFixture,
+        user: &MarginfiAccountFixture,
+        destination_token_account: Pubkey,
+        amount: u64,
+        withdraw_all: Option<bool>,
+    ) -> std::result::Result<(), BanksClientError> {
+        let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
+        let withdraw_ix = user
+            .make_drift_withdraw_ix(
+                destination_token_account,
+                bank_f,
+                amount,
+                withdraw_all,
+                true,
+            )
+            .await;
+        let ixs = vec![cu_ix, withdraw_ix];
+        Self::process_ixs(self.context.clone(), &ixs).await
+    }
+
     pub async fn load_kamino_state(
         &self,
         obligation: Pubkey,
@@ -1379,6 +1721,29 @@ impl TestFixture {
             .balance()
             .await,
             obligation_collateral: obligation.deposits[0].deposited_amount,
+        }
+    }
+
+    pub async fn load_drift_state(
+        &self,
+        bank_f: &BankFixture,
+        spot_market_vault: Pubkey,
+        market_index: u16,
+        user_token: &TokenAccountFixture,
+    ) -> DriftStateSnapshot {
+        let bank = bank_f.load().await;
+        let drift_user: MinimalUser = self.load_and_deserialize(&bank.integration_acc_2).await;
+
+        DriftStateSnapshot {
+            user_balance: user_token.balance().await,
+            spot_market_vault_balance: TokenAccountFixture::fetch(
+                self.context.clone(),
+                spot_market_vault,
+            )
+            .await
+            .balance()
+            .await,
+            user_scaled_balance: drift_user.get_scaled_balance(market_index),
         }
     }
 

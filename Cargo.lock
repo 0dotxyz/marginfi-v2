@@ -7412,6 +7412,7 @@ dependencies = [
  "assert_matches",
  "bincode",
  "bytemuck",
+ "drift-mocks",
  "fixed",
  "fixed-macro",
  "futures",

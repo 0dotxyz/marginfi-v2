@@ -2,9 +2,11 @@ use super::{bank::BankFixture, prelude::*};
 use crate::ui_to_native;
 use crate::utils::find_order_pda;
 use anchor_lang::{prelude::*, system_program, InstructionData, ToAccountMetas};
+use drift_mocks::state::MinimalSpotMarket;
 use fixed::types::I80F48;
 use kamino_mocks::kamino_lending::client as kamino;
 use kamino_mocks::state::{MinimalObligation, MinimalReserve};
+use marginfi::constants::DRIFT_PROGRAM_ID;
 use marginfi::state::bank::BankVaultType;
 use marginfi_type_crate::types::OracleSetup;
 use marginfi_type_crate::types::{Bank, FeeState, MarginfiAccount, Order, OrderTrigger};
@@ -37,6 +39,49 @@ fn derive_kamino_lending_market_authority(lending_market: Pubkey) -> Pubkey {
         &kamino_mocks::kamino_lending::ID,
     )
     .0
+}
+
+fn derive_drift_state() -> Pubkey {
+    Pubkey::find_program_address(&[b"drift_state"], &DRIFT_PROGRAM_ID).0
+}
+
+fn derive_drift_signer() -> Pubkey {
+    Pubkey::find_program_address(&[b"drift_signer"], &DRIFT_PROGRAM_ID).0
+}
+
+fn derive_drift_spot_market_vault(market_index: u16) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"spot_market_vault", &market_index.to_le_bytes()],
+        &DRIFT_PROGRAM_ID,
+    )
+    .0
+}
+
+fn should_include_oracle_observation_meta(bank: &Bank) -> bool {
+    !matches!(
+        bank.config.oracle_setup,
+        OracleSetup::Fixed
+            | OracleSetup::FixedKamino
+            | OracleSetup::FixedDrift
+            | OracleSetup::FixedJuplend
+    )
+}
+
+fn should_include_integration_observation_meta(bank: &Bank) -> bool {
+    matches!(
+        bank.config.oracle_setup,
+        OracleSetup::KaminoPythPush
+            | OracleSetup::KaminoSwitchboardPull
+            | OracleSetup::FixedKamino
+            | OracleSetup::DriftPythPull
+            | OracleSetup::DriftSwitchboardPull
+            | OracleSetup::FixedDrift
+            | OracleSetup::SolendPythPull
+            | OracleSetup::SolendSwitchboardPull
+            | OracleSetup::JuplendPythPull
+            | OracleSetup::JuplendSwitchboardPull
+            | OracleSetup::FixedJuplend
+    )
 }
 
 pub struct MarginfiAccountFixture {
@@ -1010,8 +1055,7 @@ impl MarginfiAccountFixture {
                     return metas;
                 }
 
-                // Oracle meta is included for all but fixed-price banks
-                if bank.config.oracle_setup != OracleSetup::Fixed {
+                if should_include_oracle_observation_meta(bank) {
                     let oracle_key = {
                         let oracle_key = bank.config.oracle_keys[0];
                         get_oracle_id_from_feed_id(oracle_key).unwrap_or(oracle_key)
@@ -1019,6 +1063,14 @@ impl MarginfiAccountFixture {
 
                     metas.push(AccountMeta {
                         pubkey: oracle_key,
+                        is_signer: false,
+                        is_writable: false,
+                    });
+                }
+
+                if should_include_integration_observation_meta(bank) {
+                    metas.push(AccountMeta {
+                        pubkey: bank.integration_acc_1,
                         is_signer: false,
                         is_writable: false,
                     });
@@ -1083,7 +1135,7 @@ impl MarginfiAccountFixture {
                     is_writable: false,
                 }];
 
-                if bank.config.oracle_setup != OracleSetup::Fixed {
+                if should_include_oracle_observation_meta(bank) {
                     let oracle_key = {
                         let oracle_key = bank.config.oracle_keys[0];
                         get_oracle_id_from_feed_id(oracle_key).unwrap_or(oracle_key)
@@ -1091,6 +1143,14 @@ impl MarginfiAccountFixture {
 
                     metas.push(AccountMeta {
                         pubkey: oracle_key,
+                        is_signer: false,
+                        is_writable: false,
+                    });
+                }
+
+                if should_include_integration_observation_meta(bank) {
+                    metas.push(AccountMeta {
+                        pubkey: bank.integration_acc_1,
                         is_signer: false,
                         is_writable: false,
                     });
@@ -1535,6 +1595,153 @@ impl MarginfiAccountFixture {
                 bank_state.integration_acc_1,
                 false,
             ));
+        }
+
+        ix
+    }
+
+    pub async fn make_drift_deposit_ix(
+        &self,
+        funding_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+    ) -> Instruction {
+        self.make_drift_deposit_ix_with_authority(
+            funding_account,
+            bank,
+            amount,
+            self.ctx.borrow().payer.pubkey(),
+            None,
+        )
+        .await
+    }
+
+    pub async fn make_drift_deposit_ix_with_authority(
+        &self,
+        funding_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        authority: Pubkey,
+        drift_oracle: Option<Pubkey>,
+    ) -> Instruction {
+        let marginfi_account = self.load().await;
+        let bank_state = bank.load().await;
+        let spot_market: MinimalSpotMarket =
+            load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+        let drift_state = derive_drift_state();
+        let drift_spot_market_vault = derive_drift_spot_market_vault(spot_market.market_index);
+
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::DriftDeposit {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                authority,
+                bank: bank.key,
+                drift_oracle,
+                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+                signer_token_account: funding_account,
+                drift_state,
+                integration_acc_2: bank_state.integration_acc_2,
+                integration_acc_3: bank_state.integration_acc_3,
+                integration_acc_1: bank_state.integration_acc_1,
+                drift_spot_market_vault,
+                mint: bank.mint.key,
+                drift_program: DRIFT_PROGRAM_ID,
+                token_program: bank.get_token_program(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::DriftDeposit { amount }.data(),
+        }
+    }
+
+    pub async fn make_drift_withdraw_ix(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        withdraw_all: Option<bool>,
+        include_health_accounts: bool,
+    ) -> Instruction {
+        self.make_drift_withdraw_ix_with_authority(
+            destination_account,
+            bank,
+            amount,
+            withdraw_all,
+            include_health_accounts,
+            self.ctx.borrow().payer.pubkey(),
+            None,
+        )
+        .await
+    }
+
+    pub async fn make_drift_withdraw_ix_with_authority(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        withdraw_all: Option<bool>,
+        include_health_accounts: bool,
+        authority: Pubkey,
+        drift_oracle: Option<Pubkey>,
+    ) -> Instruction {
+        let marginfi_account = self.load().await;
+        let bank_state = bank.load().await;
+        let spot_market: MinimalSpotMarket =
+            load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+        let drift_state = derive_drift_state();
+        let drift_spot_market_vault = derive_drift_spot_market_vault(spot_market.market_index);
+        let drift_signer = derive_drift_signer();
+
+        let mut ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::DriftWithdraw {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                authority,
+                bank: bank.key,
+                drift_oracle,
+                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+                destination_token_account: destination_account,
+                drift_state,
+                integration_acc_2: bank_state.integration_acc_2,
+                integration_acc_3: bank_state.integration_acc_3,
+                integration_acc_1: bank_state.integration_acc_1,
+                drift_spot_market_vault,
+                drift_reward_oracle: None,
+                drift_reward_spot_market: None,
+                drift_reward_mint: None,
+                drift_reward_oracle_2: None,
+                drift_reward_spot_market_2: None,
+                drift_reward_mint_2: None,
+                drift_signer,
+                mint: bank.mint.key,
+                drift_program: DRIFT_PROGRAM_ID,
+                token_program: bank.get_token_program(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::DriftWithdraw {
+                amount,
+                withdraw_all,
+            }
+            .data(),
+        };
+
+        if include_health_accounts {
+            if withdraw_all.unwrap_or(false) {
+                ix.accounts.extend_from_slice(
+                    &self
+                        .load_observation_account_metas_close_last(bank.key, vec![], vec![])
+                        .await,
+                );
+            } else {
+                ix.accounts
+                    .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
+            }
         }
 
         ix

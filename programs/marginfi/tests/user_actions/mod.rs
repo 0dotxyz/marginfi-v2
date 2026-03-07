@@ -6,6 +6,7 @@ mod create_account;
 mod create_account_pda;
 mod create_account_pda_cpi;
 mod deposit;
+mod drift;
 mod emissions;
 mod flash_loan;
 mod kamino;
