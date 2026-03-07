@@ -720,6 +720,16 @@ pub mod marginfi {
         kamino::kamino_deposit(ctx, amount)
     }
 
+    /// (user) Deposit into a Kamino pool through a marginfi account
+    /// * amount - in the liquidity token (e.g. if there is a Kamino USDC bank, pass the amount of
+    ///   USDC desired), in native decimals.
+    pub fn kamino_deposit_with_refresh<'info>(
+        ctx: Context<'_, '_, 'info, 'info, KaminoDepositWithRefresh<'info>>,
+        amount: u64,
+    ) -> MarginfiResult {
+        kamino::kamino_deposit_with_refresh(ctx, amount)
+    }
+
     /// (user) Withdraw from a Kamino pool through a marginfi account
     /// * amount - in the collateral token (NOT liquidity token), in native decimals. Must convert
     ///     from collateral to liquidity token amounts using the current exchange rate.
@@ -731,6 +741,19 @@ pub mod marginfi {
         withdraw_all: Option<bool>,
     ) -> MarginfiResult {
         kamino::kamino_withdraw(ctx, amount, withdraw_all)
+    }
+
+    /// (user) Withdraw from a Kamino pool through a marginfi account
+    /// * amount - in the collateral token (NOT liquidity token), in native decimals. Must convert
+    ///     from collateral to liquidity token amounts using the current exchange rate.
+    /// * withdraw_all - if true, withdraw the entire mrgn balance (Note: due to rounding down, a
+    ///   deposit and withdraw back to back may result in several lamports less)
+    pub fn kamino_withdraw_with_refresh<'info>(
+        ctx: Context<'_, '_, 'info, 'info, KaminoWithdrawWithRefresh<'info>>,
+        amount: u64,
+        withdraw_all: Option<bool>,
+    ) -> MarginfiResult {
+        kamino::kamino_withdraw_with_refresh(ctx, amount, withdraw_all)
     }
 
     /// (group admin only) Add a Kamino bank to the group. Pass the oracle and reserve in remaining

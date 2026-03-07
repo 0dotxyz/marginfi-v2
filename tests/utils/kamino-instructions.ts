@@ -80,6 +80,140 @@ export const makeKaminoDepositIx = async (
     .instruction();
 };
 
+const DEFAULT_KAMINO_DEPOSIT_WITH_REFRESH_OPTIONAL_ACCOUNTS = {
+  obligationFarmUserState: null,
+  reserveFarmState: null,
+} as const;
+
+export interface KaminoDepositWithRefreshAccounts {
+  marginfiAccount: PublicKey;
+  bank: PublicKey;
+  signerTokenAccount: PublicKey;
+  lendingMarket: PublicKey;
+  reserveLiquidityMint: PublicKey;
+
+  obligationFarmUserState?: PublicKey | null;
+  reserveFarmState?: PublicKey | null;
+}
+
+export const makeKaminoDepositWithRefreshIx = async (
+  program: Program<Marginfi>,
+  accounts: KaminoDepositWithRefreshAccounts,
+  amount: BN,
+): Promise<TransactionInstruction> => {
+  const accs = {
+    ...DEFAULT_KAMINO_DEPOSIT_WITH_REFRESH_OPTIONAL_ACCOUNTS,
+    ...accounts,
+  };
+
+  const [lendingMarketAuthority] = deriveLendingMarketAuthority(
+    KLEND_PROGRAM_ID,
+    accounts.lendingMarket,
+  );
+  const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
+    KLEND_PROGRAM_ID,
+    accounts.lendingMarket,
+    accounts.reserveLiquidityMint,
+  );
+  const [reserveCollateralMint] = deriveReserveCollateralMint(
+    KLEND_PROGRAM_ID,
+    accounts.lendingMarket,
+    accounts.reserveLiquidityMint,
+  );
+  const [reserveCollateralSupply] = deriveReserveCollateralSupply(
+    KLEND_PROGRAM_ID,
+    accounts.lendingMarket,
+    accounts.reserveLiquidityMint,
+  );
+
+  return program.methods
+    .kaminoDepositWithRefresh(amount)
+    .accounts({
+      lendingMarketAuthority,
+      reserveLiquiditySupply,
+      reserveCollateralMint,
+      reserveDestinationDepositCollateral: reserveCollateralSupply,
+      liquidityTokenProgram: TOKEN_PROGRAM_ID,
+      ...accs,
+    })
+    .instruction();
+};
+
+const DEFAULT_KAMINO_WITHDRAW_WITH_REFRESH_OPTIONAL_ACCOUNTS = {
+  obligationFarmUserState: null,
+  reserveFarmState: null,
+} as const;
+
+export interface KaminoWithdrawWithRefreshAccounts {
+  marginfiAccount: PublicKey;
+  authority: PublicKey;
+  bank: PublicKey;
+  destinationTokenAccount: PublicKey;
+  lendingMarket: PublicKey;
+  reserveLiquidityMint: PublicKey;
+
+  obligationFarmUserState?: PublicKey | null;
+  reserveFarmState?: PublicKey | null;
+}
+
+export interface KaminoWithdrawWithRefreshArgs {
+  amount: BN;
+  isWithdrawAll: boolean;
+  remaining: PublicKey[];
+}
+
+export const makeKaminoWithdrawWithRefreshIx = async (
+  program: Program<Marginfi>,
+  accounts: KaminoWithdrawWithRefreshAccounts,
+  args: KaminoWithdrawWithRefreshArgs,
+): Promise<TransactionInstruction> => {
+  const accs = {
+    ...DEFAULT_KAMINO_WITHDRAW_WITH_REFRESH_OPTIONAL_ACCOUNTS,
+    ...accounts,
+  };
+
+  const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => ({
+    pubkey,
+    isSigner: false,
+    isWritable: false,
+  }));
+
+  const [lendingMarketAuthority] = deriveLendingMarketAuthority(
+    KLEND_PROGRAM_ID,
+    accounts.lendingMarket,
+  );
+  const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
+    KLEND_PROGRAM_ID,
+    accounts.lendingMarket,
+    accounts.reserveLiquidityMint,
+  );
+  const [reserveCollateralMint] = deriveReserveCollateralMint(
+    KLEND_PROGRAM_ID,
+    accounts.lendingMarket,
+    accounts.reserveLiquidityMint,
+  );
+  const [reserveCollateralSupply] = deriveReserveCollateralSupply(
+    KLEND_PROGRAM_ID,
+    accounts.lendingMarket,
+    accounts.reserveLiquidityMint,
+  );
+
+  const ix = await program.methods
+    .kaminoWithdrawWithRefresh(args.amount, args.isWithdrawAll)
+    .accounts({
+      lendingMarketAuthority,
+      reserveLiquiditySupply,
+      reserveCollateralMint,
+      reserveSourceCollateral: reserveCollateralSupply,
+      liquidityTokenProgram: TOKEN_PROGRAM_ID,
+      ...accs,
+    })
+    .remainingAccounts(oracleMeta)
+    .instruction();
+
+  return ix;
+};
+
 export interface KaminoHarvestRewardAccounts {
   bank: PublicKey;
   feeState: PublicKey;
