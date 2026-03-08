@@ -20,6 +20,10 @@ import {
   bankrunProgram,
   klendBankrunProgram,
   banksClient,
+  farmAccounts,
+  A_FARM_STATE,
+  A_OBLIGATION_USER_STATE,
+  FARMS_PROGRAM_ID,
 } from "./rootHooks";
 import {
   simpleRefreshObligation,
@@ -39,6 +43,7 @@ import {
   makeKaminoWithdrawWithRefreshIx,
   makeAddKaminoBankIx,
   makeInitObligationIx,
+  makeInitObligationBatchRefreshIx,
 } from "./utils/kamino-instructions";
 import {
   depositIx,
@@ -89,6 +94,21 @@ let liqKaminoObligation: PublicKey;
 let liqMarket: PublicKey;
 let liqUsdcReserve: PublicKey;
 
+// Group F
+const THROWAWAY_GROUP_SEED_F = Buffer.from("MARGINFI_GROUP_SEED_12340ks00002");
+const USER_ACCOUNT_F = "throwaway_account_k_f";
+const F_STARTING_SEED = 30;
+let fThrowawayGroup: Keypair;
+let fBankA: PublicKey;
+let fBankB: PublicKey;
+let fBankC: PublicKey;
+let fBankD: PublicKey;
+let fMarket: PublicKey;
+let fUsdcReserve: PublicKey;
+let fTokenAReserve: PublicKey;
+let fUserStateC: PublicKey;
+let fUserStateD: PublicKey;
+
 
 interface Measurement {
   label: string;
@@ -131,23 +151,34 @@ function bothBanksRemaining(): PublicKey[] {
   ]);
 }
 
+function tokenAFarms() {
+  return {
+    obligationFarmUserState: farmAccounts.get(A_OBLIGATION_USER_STATE) ?? null,
+    reserveFarmState: farmAccounts.get(A_FARM_STATE) ?? null,
+  };
+}
+
 async function rawDeposit(
   user: any, bank: PublicKey, signerAcc: any, mint: any, amount: BN
 ) {
+  const isTokenA = tokenABank && bank.equals(tokenABank);
   return makeKaminoDepositIx(user.mrgnBankrunProgram, {
     marginfiAccount: user.accounts.get(USER_ACCOUNT_K),
     bank, signerTokenAccount: signerAcc, lendingMarket: market,
     reserveLiquidityMint: mint,
+    ...(isTokenA ? tokenAFarms() : {}),
   }, amount);
 }
 
 async function rawWithdraw(
   user: any, bank: PublicKey, destAcc: any, mint: any, amount: BN
 ) {
+  const isTokenA = tokenABank && bank.equals(tokenABank);
   return makeKaminoWithdrawIx(user.mrgnBankrunProgram, {
     marginfiAccount: user.accounts.get(USER_ACCOUNT_K),
     authority: user.wallet.publicKey, bank, destinationTokenAccount: destAcc,
     lendingMarket: market, reserveLiquidityMint: mint,
+    ...(isTokenA ? tokenAFarms() : {}),
   }, { amount, isWithdrawAll: false, remaining: bothBanksRemaining() });
 }
 
@@ -155,10 +186,12 @@ async function cpiDeposit(
   user: any, bank: PublicKey, mint: any,
   signerAcc: any, amount: BN
 ) {
+  const isTokenA = tokenABank && bank.equals(tokenABank);
   return makeKaminoDepositWithRefreshIx(user.mrgnBankrunProgram, {
     marginfiAccount: user.accounts.get(USER_ACCOUNT_K),
     bank, signerTokenAccount: signerAcc, lendingMarket: market,
     reserveLiquidityMint: mint,
+    ...(isTokenA ? tokenAFarms() : {}),
   }, amount);
 }
 
@@ -166,10 +199,12 @@ async function cpiWithdraw(
   user: any, bank: PublicKey,
   destAcc: any, mint: any, amount: BN
 ) {
+  const isTokenA = tokenABank && bank.equals(tokenABank);
   return makeKaminoWithdrawWithRefreshIx(user.mrgnBankrunProgram, {
     marginfiAccount: user.accounts.get(USER_ACCOUNT_K),
     authority: user.wallet.publicKey, bank, destinationTokenAccount: destAcc,
     lendingMarket: market, reserveLiquidityMint: mint,
+    ...(isTokenA ? tokenAFarms() : {}),
   }, { amount, isWithdrawAll: false, remaining: bothBanksRemaining() });
 }
 
@@ -656,6 +691,187 @@ describe("k_scenarios: CPI vs External", () => {
     });
   });
 
+  describe("Group F: Init Obligation refresh comparison", () => {
+    const mrgnID = () => bankrunProgram.programId;
+
+    before(async () => {
+      fMarket = kaminoAccounts.get(MARKET);
+      fUsdcReserve = kaminoAccounts.get(USDC_RESERVE);
+
+      const result = await genericMultiBankTestSetup(
+        0, USER_ACCOUNT_F, THROWAWAY_GROUP_SEED_F, F_STARTING_SEED
+      );
+      fThrowawayGroup = result.throwawayGroup;
+
+      const seedA = new BN(F_STARTING_SEED);
+      const seedB = new BN(F_STARTING_SEED + 1);
+
+      [fBankA] = deriveBankWithSeed(
+        mrgnID(), fThrowawayGroup.publicKey, ecosystem.usdcMint.publicKey, seedA
+      );
+      [fBankB] = deriveBankWithSeed(
+        mrgnID(), fThrowawayGroup.publicKey, ecosystem.usdcMint.publicKey, seedB
+      );
+
+      let tx = new Transaction().add(
+        await makeAddKaminoBankIx(groupAdmin.mrgnBankrunProgram, {
+          group: fThrowawayGroup.publicKey,
+          feePayer: groupAdmin.wallet.publicKey,
+          bankMint: ecosystem.usdcMint.publicKey,
+          kaminoReserve: fUsdcReserve,
+          kaminoMarket: fMarket,
+          oracle: oracles.usdcOracle.publicKey,
+        }, {
+          config: defaultKaminoBankConfig(oracles.usdcOracle.publicKey),
+          seed: seedA,
+        })
+      );
+      await processBankrunTransaction(ctx, tx, [groupAdmin.wallet]);
+
+      tx = new Transaction().add(
+        await makeAddKaminoBankIx(groupAdmin.mrgnBankrunProgram, {
+          group: fThrowawayGroup.publicKey,
+          feePayer: groupAdmin.wallet.publicKey,
+          bankMint: ecosystem.usdcMint.publicKey,
+          kaminoReserve: fUsdcReserve,
+          kaminoMarket: fMarket,
+          oracle: oracles.usdcOracle.publicKey,
+        }, {
+          config: defaultKaminoBankConfig(oracles.usdcOracle.publicKey),
+          seed: seedB,
+        })
+      );
+      await processBankrunTransaction(ctx, tx, [groupAdmin.wallet]);
+
+      // Banks C and D: Token A with farms
+      fTokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE);
+      const farmState = farmAccounts.get(A_FARM_STATE);
+      const seedC = new BN(F_STARTING_SEED + 2);
+      const seedD = new BN(F_STARTING_SEED + 3);
+
+      [fBankC] = deriveBankWithSeed(
+        mrgnID(), fThrowawayGroup.publicKey, ecosystem.tokenAMint.publicKey, seedC
+      );
+      [fBankD] = deriveBankWithSeed(
+        mrgnID(), fThrowawayGroup.publicKey, ecosystem.tokenAMint.publicKey, seedD
+      );
+
+      const [vaultAuthC] = deriveLiquidityVaultAuthority(mrgnID(), fBankC);
+      const [obligationC] = deriveBaseObligation(vaultAuthC, fMarket);
+      [fUserStateC] = PublicKey.findProgramAddressSync(
+        [Buffer.from("user"), farmState.toBuffer(), obligationC.toBuffer()],
+        FARMS_PROGRAM_ID,
+      );
+
+      const [vaultAuthD] = deriveLiquidityVaultAuthority(mrgnID(), fBankD);
+      const [obligationD] = deriveBaseObligation(vaultAuthD, fMarket);
+      [fUserStateD] = PublicKey.findProgramAddressSync(
+        [Buffer.from("user"), farmState.toBuffer(), obligationD.toBuffer()],
+        FARMS_PROGRAM_ID,
+      );
+
+      tx = new Transaction().add(
+        await makeAddKaminoBankIx(groupAdmin.mrgnBankrunProgram, {
+          group: fThrowawayGroup.publicKey,
+          feePayer: groupAdmin.wallet.publicKey,
+          bankMint: ecosystem.tokenAMint.publicKey,
+          kaminoReserve: fTokenAReserve,
+          kaminoMarket: fMarket,
+          oracle: oracles.tokenAOracle.publicKey,
+        }, {
+          config: defaultKaminoBankConfig(oracles.tokenAOracle.publicKey),
+          seed: seedC,
+        })
+      );
+      await processBankrunTransaction(ctx, tx, [groupAdmin.wallet]);
+
+      tx = new Transaction().add(
+        await makeAddKaminoBankIx(groupAdmin.mrgnBankrunProgram, {
+          group: fThrowawayGroup.publicKey,
+          feePayer: groupAdmin.wallet.publicKey,
+          bankMint: ecosystem.tokenAMint.publicKey,
+          kaminoReserve: fTokenAReserve,
+          kaminoMarket: fMarket,
+          oracle: oracles.tokenAOracle.publicKey,
+        }, {
+          config: defaultKaminoBankConfig(oracles.tokenAOracle.publicKey),
+          seed: seedD,
+        })
+      );
+      await processBankrunTransaction(ctx, tx, [groupAdmin.wallet]);
+    });
+
+    it("S08: Init obligation: Simple refresh_reserve vs Batch refresh_reserves_batch", async () => {
+      await warpClock();
+      await refreshPullOraclesBankrun(oracles, ctx, banksClient);
+
+      const standard = await measure([
+        await makeInitObligationIx(groupAdmin.mrgnBankrunProgram, {
+          feePayer: groupAdmin.wallet.publicKey,
+          bank: fBankA,
+          signerTokenAccount: groupAdmin.usdcAccount,
+          lendingMarket: fMarket,
+          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          pythOracle: oracles.usdcOracle.publicKey,
+        }),
+      ], groupAdmin.wallet, "Simple");
+
+      await warpClock();
+      await refreshPullOraclesBankrun(oracles, ctx, banksClient);
+
+      const batch = await measure([
+        await makeInitObligationBatchRefreshIx(groupAdmin.mrgnBankrunProgram, {
+          feePayer: groupAdmin.wallet.publicKey,
+          bank: fBankB,
+          signerTokenAccount: groupAdmin.usdcAccount,
+          lendingMarket: fMarket,
+          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+        }),
+      ], groupAdmin.wallet, "Batch");
+
+      printComparison("S08", "Init obligation: Simple vs Batch Refresh", standard, batch);
+      results.push({ id: "S08", name: "Init obligation: Simple vs Batch Refresh", group: "F", a: standard, b: batch });
+    });
+
+    it("S09: Init obligation with farms: Simple refresh_reserve vs Batch refresh_reserves_batch", async () => {
+      const farmState = farmAccounts.get(A_FARM_STATE);
+
+      await warpClock();
+      await refreshPullOraclesBankrun(oracles, ctx, banksClient);
+
+      const standard = await measure([
+        await makeInitObligationIx(groupAdmin.mrgnBankrunProgram, {
+          feePayer: groupAdmin.wallet.publicKey,
+          bank: fBankC,
+          signerTokenAccount: groupAdmin.tokenAAccount,
+          lendingMarket: fMarket,
+          reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+          pythOracle: oracles.tokenAOracle.publicKey,
+          reserveFarmState: farmState,
+          obligationFarmUserState: fUserStateC,
+        }),
+      ], groupAdmin.wallet, "Simple", 2_000_000);
+
+      await warpClock();
+      await refreshPullOraclesBankrun(oracles, ctx, banksClient);
+
+      const batch = await measure([
+        await makeInitObligationBatchRefreshIx(groupAdmin.mrgnBankrunProgram, {
+          feePayer: groupAdmin.wallet.publicKey,
+          bank: fBankD,
+          signerTokenAccount: groupAdmin.tokenAAccount,
+          lendingMarket: fMarket,
+          reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+          reserveFarmState: farmState,
+          obligationFarmUserState: fUserStateD,
+        }),
+      ], groupAdmin.wallet, "Batch", 2_000_000);
+
+      printComparison("S09", "Init obligation (farms): Simple vs Batch Refresh", standard, batch);
+      results.push({ id: "S09", name: "Init obligation (farms): Simple vs Batch Refresh", group: "F", a: standard, b: batch });
+    });
+  });
+
   after(() => {
     if (results.length === 0) return;
 
@@ -669,7 +885,8 @@ describe("k_scenarios: CPI vs External", () => {
     console.log("✓ = TX succeeded   ✗ = failed / too large to serialize");
     console.log("Groups A-C use the shared rootHooks Kamino group (deposit/withdraw).");
     console.log("Group D: Liquidation scenarios (throwaway group, Kamino USDC + regular LST).");
-    console.log("Group E: Refresh methods comparison.");    
+    console.log("Group E: Refresh methods comparison.");
+    console.log("Group F: Init obligation refresh comparison (Simple refresh_reserve vs Batch refresh_reserves_batch).");
     console.log("");
 
     const headerRow = `  ${"ID".padEnd(4)} ${"Grp"} ${"A CU".padStart(10)} ${"B CU".padStart(10)} ${"Δ-CU".padStart(10)} ${"Δ-CU%".padStart(7)} ${"A size".padStart(7)} ${"B size".padStart(7)} ${"Δ-size".padStart(5)} ${"A ix count".padStart(6)} ${"B ix count".padStart(6)} ${"Δix count".padStart(4)}  A / B`;

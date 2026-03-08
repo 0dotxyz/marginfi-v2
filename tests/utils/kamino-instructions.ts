@@ -425,6 +425,78 @@ export const makeInitObligationIx = async (
   return ix;
 };
 
+const DEFAULT_INIT_OBLIGATION_BATCH_REFRESH_OPTIONAL_ACCOUNTS = {
+  obligationFarmUserState: null,
+  reserveFarmState: null,
+  referrerUserMetadata: null,
+} as const;
+
+export interface InitObligationBatchRefreshAccounts {
+  feePayer: PublicKey;
+  bank: PublicKey;
+  signerTokenAccount: PublicKey;
+  lendingMarket: PublicKey;
+  reserveLiquidityMint: PublicKey;
+
+  obligationFarmUserState?: PublicKey | null;
+  reserveFarmState?: PublicKey | null;
+  referrerUserMetadata?: PublicKey | null;
+}
+
+export const makeInitObligationBatchRefreshIx = async (
+  program: Program<Marginfi>,
+  accounts: InitObligationBatchRefreshAccounts,
+  amount?: BN,
+): Promise<TransactionInstruction> => {
+  const accs = {
+    ...DEFAULT_INIT_OBLIGATION_BATCH_REFRESH_OPTIONAL_ACCOUNTS,
+    ...accounts,
+  };
+
+  const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
+    program.programId,
+    accounts.bank,
+  );
+  const [userMetadata] = deriveUserMetadata(
+    KLEND_PROGRAM_ID,
+    liquidityVaultAuthority,
+  );
+  const [lendingMarketAuthority] = deriveLendingMarketAuthority(
+    KLEND_PROGRAM_ID,
+    accounts.lendingMarket,
+  );
+  const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
+    KLEND_PROGRAM_ID,
+    accounts.lendingMarket,
+    accounts.reserveLiquidityMint,
+  );
+  const [reserveCollateralMint] = deriveReserveCollateralMint(
+    KLEND_PROGRAM_ID,
+    accounts.lendingMarket,
+    accounts.reserveLiquidityMint,
+  );
+  const [reserveCollateralSupply] = deriveReserveCollateralSupply(
+    KLEND_PROGRAM_ID,
+    accounts.lendingMarket,
+    accounts.reserveLiquidityMint,
+  );
+
+  const ix = await program.methods
+    .kaminoInitObligationBatchRefresh(amount ?? new BN(100))
+    .accounts({
+      userMetadata,
+      lendingMarketAuthority,
+      reserveLiquiditySupply,
+      reserveCollateralMint,
+      reserveDestinationDepositCollateral: reserveCollateralSupply,
+      liquidityTokenProgram: TOKEN_PROGRAM_ID,
+      ...accs,
+    })
+    .instruction();
+
+  return ix;
+};
+
 const DEFAULT_KAMINO_WITHDRAW_OPTIONAL_ACCOUNTS = {
   obligationFarmUserState: null,
   reserveFarmState: null,

@@ -710,6 +710,13 @@ pub mod marginfi {
         kamino::kamino_init_obligation(ctx, amount)
     }
 
+    pub fn kamino_init_obligation_batch_refresh(
+        ctx: Context<KaminoInitObligationBatchRefresh>,
+        amount: u64,
+    ) -> MarginfiResult {
+        kamino::kamino_init_obligation_batch_refresh(ctx, amount)
+    }
+
     /// (user) Deposit into a Kamino pool through a marginfi account
     /// * amount - in the liquidity token (e.g. if there is a Kamino USDC bank, pass the amount of
     ///   USDC desired), in native decimals.

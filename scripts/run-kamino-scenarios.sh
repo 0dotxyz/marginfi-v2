@@ -19,6 +19,7 @@ RUST_LOG= yarn run ts-mocha \
   tests/k04_kaminoMrgnUser.spec.ts \
   tests/k05_kaminoBankInit.spec.ts \
   tests/k06_MrgnKaminoDeposit.spec.ts \
+  tests/k13_KfarmsHarvestReward.spec.ts \
   tests/k_scenarios.spec.ts \
   --exit \
   --require tests/rootHooks.ts
