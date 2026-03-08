@@ -9,6 +9,7 @@ mod deposit;
 mod drift;
 mod emissions;
 mod flash_loan;
+mod juplend;
 mod kamino;
 mod limit_orders;
 mod limit_orders_common;

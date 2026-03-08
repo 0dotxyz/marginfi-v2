@@ -7416,6 +7416,7 @@ dependencies = [
  "fixed",
  "fixed-macro",
  "futures",
+ "juplend-mocks",
  "kamino-mocks",
  "lazy_static",
  "marginfi",

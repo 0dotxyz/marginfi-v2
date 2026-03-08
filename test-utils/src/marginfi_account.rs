@@ -2,8 +2,10 @@ use super::{bank::BankFixture, prelude::*};
 use crate::ui_to_native;
 use crate::utils::find_order_pda;
 use anchor_lang::{prelude::*, system_program, InstructionData, ToAccountMetas};
+use anchor_spl::associated_token::get_associated_token_address_with_program_id;
 use drift_mocks::state::MinimalSpotMarket;
 use fixed::types::I80F48;
+use juplend_mocks::state::Lending as JuplendLending;
 use kamino_mocks::kamino_lending::client as kamino;
 use kamino_mocks::state::{MinimalObligation, MinimalReserve};
 use marginfi::constants::DRIFT_PROGRAM_ID;
@@ -53,6 +55,30 @@ fn derive_drift_spot_market_vault(market_index: u16) -> Pubkey {
     Pubkey::find_program_address(
         &[b"spot_market_vault", &market_index.to_le_bytes()],
         &DRIFT_PROGRAM_ID,
+    )
+    .0
+}
+
+fn derive_juplend_liquidity() -> Pubkey {
+    Pubkey::find_program_address(&[b"liquidity"], &juplend_mocks::liquidity::ID).0
+}
+
+fn derive_juplend_rate_model(mint: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"rate_model", mint.as_ref()],
+        &juplend_mocks::liquidity::ID,
+    )
+    .0
+}
+
+fn derive_juplend_lending_admin() -> Pubkey {
+    Pubkey::find_program_address(&[b"lending_admin"], &juplend_mocks::ID).0
+}
+
+fn derive_juplend_claim_account(user: Pubkey, mint: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"user_claim", user.as_ref(), mint.as_ref()],
+        &juplend_mocks::liquidity::ID,
     )
     .0
 }
@@ -1725,6 +1751,172 @@ impl MarginfiAccountFixture {
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::DriftWithdraw {
+                amount,
+                withdraw_all,
+            }
+            .data(),
+        };
+
+        if include_health_accounts {
+            if withdraw_all.unwrap_or(false) {
+                ix.accounts.extend_from_slice(
+                    &self
+                        .load_observation_account_metas_close_last(bank.key, vec![], vec![])
+                        .await,
+                );
+            } else {
+                ix.accounts
+                    .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
+            }
+        }
+
+        ix
+    }
+
+    pub async fn make_juplend_deposit_ix(
+        &self,
+        funding_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+    ) -> Instruction {
+        self.make_juplend_deposit_ix_with_authority(
+            funding_account,
+            bank,
+            amount,
+            self.ctx.borrow().payer.pubkey(),
+        )
+        .await
+    }
+
+    pub async fn make_juplend_deposit_ix_with_authority(
+        &self,
+        funding_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        authority: Pubkey,
+    ) -> Instruction {
+        let marginfi_account = self.load().await;
+        let bank_state = bank.load().await;
+        let lending: JuplendLending =
+            load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+
+        let liquidity = derive_juplend_liquidity();
+        let rate_model = derive_juplend_rate_model(lending.mint);
+        let vault = get_associated_token_address_with_program_id(
+            &liquidity,
+            &lending.mint,
+            &bank.get_token_program(),
+        );
+        let lending_admin = derive_juplend_lending_admin();
+
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::JuplendDeposit {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                authority,
+                bank: bank.key,
+                signer_token_account: funding_account,
+                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+                mint: lending.mint,
+                integration_acc_1: bank_state.integration_acc_1,
+                f_token_mint: lending.f_token_mint,
+                integration_acc_2: bank_state.integration_acc_2,
+                lending_admin,
+                supply_token_reserves_liquidity: lending.token_reserves_liquidity,
+                lending_supply_position_on_liquidity: lending.supply_position_on_liquidity,
+                rate_model,
+                vault,
+                liquidity,
+                liquidity_program: juplend_mocks::liquidity::ID,
+                rewards_rate_model: lending.rewards_rate_model,
+                juplend_program: juplend_mocks::ID,
+                token_program: bank.get_token_program(),
+                associated_token_program: anchor_spl::associated_token::ID,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::JuplendDeposit { amount }.data(),
+        }
+    }
+
+    pub async fn make_juplend_withdraw_ix(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        withdraw_all: Option<bool>,
+        include_health_accounts: bool,
+    ) -> Instruction {
+        self.make_juplend_withdraw_ix_with_authority(
+            destination_account,
+            bank,
+            amount,
+            withdraw_all,
+            include_health_accounts,
+            self.ctx.borrow().payer.pubkey(),
+        )
+        .await
+    }
+
+    pub async fn make_juplend_withdraw_ix_with_authority(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        withdraw_all: Option<bool>,
+        include_health_accounts: bool,
+        authority: Pubkey,
+    ) -> Instruction {
+        let marginfi_account = self.load().await;
+        let bank_state = bank.load().await;
+        let lending: JuplendLending =
+            load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+
+        let liquidity = derive_juplend_liquidity();
+        let rate_model = derive_juplend_rate_model(lending.mint);
+        let vault = get_associated_token_address_with_program_id(
+            &liquidity,
+            &lending.mint,
+            &bank.get_token_program(),
+        );
+        let lending_admin = derive_juplend_lending_admin();
+        let claim_account = derive_juplend_claim_account(
+            bank.get_vault_authority(BankVaultType::Liquidity).0,
+            lending.mint,
+        );
+
+        let mut ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::JuplendWithdraw {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                authority,
+                bank: bank.key,
+                destination_token_account: destination_account,
+                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+                mint: lending.mint,
+                integration_acc_1: bank_state.integration_acc_1,
+                f_token_mint: lending.f_token_mint,
+                integration_acc_2: bank_state.integration_acc_2,
+                integration_acc_3: bank_state.integration_acc_3,
+                lending_admin,
+                supply_token_reserves_liquidity: lending.token_reserves_liquidity,
+                lending_supply_position_on_liquidity: lending.supply_position_on_liquidity,
+                rate_model,
+                vault,
+                claim_account,
+                liquidity,
+                liquidity_program: juplend_mocks::liquidity::ID,
+                rewards_rate_model: lending.rewards_rate_model,
+                juplend_program: juplend_mocks::ID,
+                token_program: bank.get_token_program(),
+                associated_token_program: anchor_spl::associated_token::ID,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::JuplendWithdraw {
                 amount,
                 withdraw_all,
             }

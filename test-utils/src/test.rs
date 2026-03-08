@@ -6,18 +6,25 @@ use crate::{
 };
 
 use anchor_lang::{prelude::*, InstructionData, ToAccountMetas};
+use anchor_spl::associated_token::get_associated_token_address_with_program_id;
 use anchor_spl::token::spl_token;
 use bincode::deserialize;
 use drift_mocks::drift::client as drift;
 use drift_mocks::state::{MinimalSpotMarket, MinimalUser};
 use fixed::types::I80F48;
+use juplend_mocks::juplend_earn::client as juplend_lending;
+use juplend_mocks::lending_reward_rate_model::client as juplend_rewards;
+use juplend_mocks::liquidity::client as juplend_liquidity;
+use juplend_mocks::state::Lending as JuplendLending;
 use kamino_mocks::kamino_lending::accounts::LendingMarket;
 use kamino_mocks::mock_kamino_lending_processor;
 use kamino_mocks::state::{MinimalObligation, MinimalReserve};
 use marginfi::{
+    constants::JUPLEND_F_TOKEN_VAULT_SEED,
     state::{
         bank::{BankImpl, BankVaultType},
         drift::DriftConfigCompact,
+        juplend::JuplendConfigCompact,
         kamino::KaminoConfigCompact,
     },
     utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
@@ -381,6 +388,57 @@ pub struct DriftStateSnapshot {
     pub user_scaled_balance: u64,
 }
 
+pub struct JuplendBankSetup {
+    pub test_f: TestFixture,
+    pub bank_f: BankFixture,
+    pub lending: Pubkey,
+    pub reserve_vault: Pubkey,
+}
+
+impl JuplendBankSetup {
+    pub async fn create_user_with_liquidity(
+        &self,
+        ui_amount: f64,
+    ) -> (MarginfiAccountFixture, TokenAccountFixture) {
+        let user = self.test_f.create_marginfi_account().await;
+        let user_token = self
+            .bank_f
+            .mint
+            .create_token_account_and_mint_to(ui_amount)
+            .await;
+        (user, user_token)
+    }
+
+    pub async fn load_state(&self, user_token: &TokenAccountFixture) -> JuplendStateSnapshot {
+        self.test_f
+            .load_juplend_state(&self.bank_f, self.reserve_vault, user_token)
+            .await
+    }
+
+    pub async fn load_lending(&self) -> JuplendLending {
+        self.test_f.load_and_deserialize(&self.lending).await
+    }
+
+    pub async fn load_user_accounted_shares(&self, user: &MarginfiAccountFixture) -> Option<u64> {
+        let user_state = user.load().await;
+        let user_balance = user_state.lending_account.get_balance(&self.bank_f.key)?;
+        let bank_state = self.bank_f.load().await;
+        Some(
+            bank_state
+                .get_asset_amount(user_balance.asset_shares.into())
+                .unwrap()
+                .to_num::<u64>(),
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct JuplendStateSnapshot {
+    pub user_balance: u64,
+    pub reserve_vault_balance: u64,
+    pub f_token_vault_balance: u64,
+}
+
 pub const PYTH_USDC_FEED: Pubkey = pubkey!("PythUsdcPrice111111111111111111111111111111");
 pub const SWITCHBOARD_USDC_FEED: Pubkey = pubkey!("SwchUsdcPrice111111111111111111111111111111");
 pub const PYTH_SOL_FEED: Pubkey = pubkey!("PythSo1Price1111111111111111111111111111111");
@@ -604,11 +662,15 @@ pub fn marginfi_entry<'info>(
 }
 
 pub const FAKE_KAMINO_PROGRAM_ID: Pubkey = pubkey!("KFake2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
+pub const TOKEN_METADATA_PROGRAM_ID: Pubkey =
+    pubkey!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 const KAMINO_TEST_BANK_SEED: u64 = 555;
 const KAMINO_INIT_OBLIGATION_NOMINAL_AMOUNT: u64 = 500;
 const DRIFT_TEST_BANK_SEED: u64 = 777;
 const DRIFT_USDC_MARKET_INDEX: u16 = 0;
 const DRIFT_INIT_USER_NOMINAL_AMOUNT: u64 = 100;
+const JUPLEND_TEST_BANK_SEED: u64 = 888;
+const JUPLEND_INIT_POSITION_NOMINAL_AMOUNT: u64 = 1_000_000;
 
 impl TestFixture {
     pub async fn new(test_settings: Option<TestSettings>) -> TestFixture {
@@ -655,6 +717,14 @@ impl TestFixture {
             program.add_program("kamino_lending", kamino_mocks::kamino_lending::ID, None);
             program.add_program("kamino_farms", kamino_mocks::kamino_farms::ID, None);
             program.add_program("drift_v2", drift_mocks::drift::ID, None);
+            program.add_program("juplend_lending", juplend_mocks::ID, None);
+            program.add_program("juplend_liquidity", juplend_mocks::liquidity::ID, None);
+            program.add_program(
+                "juplend_rewards_rate_model",
+                juplend_mocks::lending_reward_rate_model::ID,
+                None,
+            );
+            program.add_program("token_metadata", TOKEN_METADATA_PROGRAM_ID, None);
             program.prefer_bpf(false);
         } else {
             program.add_program(
@@ -1183,6 +1253,94 @@ impl TestFixture {
         .0
     }
 
+    fn derive_juplend_liquidity() -> Pubkey {
+        Pubkey::find_program_address(&[b"liquidity"], &juplend_mocks::liquidity::ID).0
+    }
+
+    fn derive_juplend_auth_list() -> Pubkey {
+        Pubkey::find_program_address(&[b"auth_list"], &juplend_mocks::liquidity::ID).0
+    }
+
+    fn derive_juplend_token_reserve(mint: Pubkey) -> Pubkey {
+        Pubkey::find_program_address(&[b"reserve", mint.as_ref()], &juplend_mocks::liquidity::ID).0
+    }
+
+    fn derive_juplend_rate_model(mint: Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[b"rate_model", mint.as_ref()],
+            &juplend_mocks::liquidity::ID,
+        )
+        .0
+    }
+
+    fn derive_juplend_lending_admin() -> Pubkey {
+        Pubkey::find_program_address(&[b"lending_admin"], &juplend_mocks::ID).0
+    }
+
+    fn derive_juplend_f_token_mint(mint: Pubkey) -> Pubkey {
+        Pubkey::find_program_address(&[b"f_token_mint", mint.as_ref()], &juplend_mocks::ID).0
+    }
+
+    fn derive_juplend_lending(mint: Pubkey, f_token_mint: Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[b"lending", mint.as_ref(), f_token_mint.as_ref()],
+            &juplend_mocks::ID,
+        )
+        .0
+    }
+
+    fn derive_juplend_supply_position(mint: Pubkey, protocol: Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[b"user_supply_position", mint.as_ref(), protocol.as_ref()],
+            &juplend_mocks::liquidity::ID,
+        )
+        .0
+    }
+
+    fn derive_juplend_borrow_position(mint: Pubkey, protocol: Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[b"user_borrow_position", mint.as_ref(), protocol.as_ref()],
+            &juplend_mocks::liquidity::ID,
+        )
+        .0
+    }
+
+    fn derive_juplend_rewards_admin() -> Pubkey {
+        Pubkey::find_program_address(
+            &[b"lending_rewards_admin"],
+            &juplend_mocks::lending_reward_rate_model::ID,
+        )
+        .0
+    }
+
+    fn derive_juplend_rewards_rate_model(mint: Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[b"lending_rewards_rate_model", mint.as_ref()],
+            &juplend_mocks::lending_reward_rate_model::ID,
+        )
+        .0
+    }
+
+    fn derive_juplend_claim_account(user: Pubkey, mint: Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[b"user_claim", user.as_ref(), mint.as_ref()],
+            &juplend_mocks::liquidity::ID,
+        )
+        .0
+    }
+
+    fn derive_token_metadata(mint: Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[
+                b"metadata",
+                TOKEN_METADATA_PROGRAM_ID.as_ref(),
+                mint.as_ref(),
+            ],
+            &TOKEN_METADATA_PROGRAM_ID,
+        )
+        .0
+    }
+
     async fn process_ixs(
         ctx: Rc<RefCell<ProgramTestContext>>,
         ixs: &[Instruction],
@@ -1474,7 +1632,7 @@ impl TestFixture {
                 insurance_fund_vault,
                 drift_signer,
                 state: drift_state,
-                oracle: system_program::ID, 
+                oracle: system_program::ID,
                 admin: test_f.payer(),
                 rent: sysvar::rent::ID,
                 system_program: system_program::ID,
@@ -1625,6 +1783,476 @@ impl TestFixture {
         }
     }
 
+    pub async fn setup_juplend_bank(test_settings: Option<TestSettings>) -> JuplendBankSetup {
+        let settings = test_settings.unwrap_or(TestSettings {
+            banks: vec![],
+            protocol_fees: false,
+        });
+        let test_f = TestFixture::new_with_t22_extension_inner(Some(settings), &[], true).await;
+
+        let mint = test_f.usdc_mint.key;
+        let token_program = spl_token::ID;
+
+        let liquidity = Self::derive_juplend_liquidity();
+        let auth_list = Self::derive_juplend_auth_list();
+        let token_reserve = Self::derive_juplend_token_reserve(mint);
+        let rate_model = Self::derive_juplend_rate_model(mint);
+        let reserve_vault =
+            get_associated_token_address_with_program_id(&liquidity, &mint, &token_program);
+
+        let lending_admin = Self::derive_juplend_lending_admin();
+        let f_token_mint = Self::derive_juplend_f_token_mint(mint);
+        let lending = Self::derive_juplend_lending(mint, f_token_mint);
+        let metadata_account = Self::derive_token_metadata(f_token_mint);
+
+        let rewards_admin = Self::derive_juplend_rewards_admin();
+        let rewards_rate_model = Self::derive_juplend_rewards_rate_model(mint);
+
+        let user_supply_position = Self::derive_juplend_supply_position(mint, lending);
+        let user_borrow_position = Self::derive_juplend_borrow_position(mint, lending);
+
+        // Seed a small mint supply so Juplend borrow-config admin checks accept
+        // non-zero debt ceiling values.
+        let _borrow_limit_warmup_source =
+            test_f.usdc_mint.create_token_account_and_mint_to(1.0).await;
+
+        let init_liquidity_ix = Instruction {
+            program_id: juplend_mocks::liquidity::ID,
+            accounts: juplend_liquidity::accounts::InitLiquidity {
+                signer: test_f.payer(),
+                liquidity,
+                auth_list,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: juplend_liquidity::args::InitLiquidity {
+                authority: test_f.payer(),
+                revenue_collector: test_f.payer(),
+            }
+            .data(),
+        };
+
+        let init_rewards_admin_ix = Instruction {
+            program_id: juplend_mocks::lending_reward_rate_model::ID,
+            accounts: juplend_rewards::accounts::InitLendingRewardsAdmin {
+                signer: test_f.payer(),
+                lending_rewards_admin: rewards_admin,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: juplend_rewards::args::InitLendingRewardsAdmin {
+                authority: test_f.payer(),
+                lending_program: juplend_mocks::ID,
+            }
+            .data(),
+        };
+
+        let init_lending_admin_ix = Instruction {
+            program_id: juplend_mocks::ID,
+            accounts: juplend_lending::accounts::InitLendingAdmin {
+                authority: test_f.payer(),
+                lending_admin,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: juplend_lending::args::InitLendingAdmin {
+                liquidity_program: juplend_mocks::liquidity::ID,
+                rebalancer: test_f.payer(),
+                authority: test_f.payer(),
+            }
+            .data(),
+        };
+
+        let init_token_reserve_ix = Instruction {
+            program_id: juplend_mocks::liquidity::ID,
+            accounts: juplend_liquidity::accounts::InitTokenReserve {
+                authority: test_f.payer(),
+                liquidity,
+                auth_list,
+                mint,
+                vault: reserve_vault,
+                rate_model,
+                token_reserve,
+                token_program,
+                associated_token_program: anchor_spl::associated_token::ID,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: juplend_liquidity::args::InitTokenReserve {}.data(),
+        };
+
+        let update_rate_data_ix = Instruction {
+            program_id: juplend_mocks::liquidity::ID,
+            accounts: juplend_liquidity::accounts::UpdateRateDataV1 {
+                authority: test_f.payer(),
+                auth_list,
+                rate_model,
+                mint,
+                token_reserve,
+            }
+            .to_account_metas(Some(true)),
+            data: juplend_liquidity::args::UpdateRateDataV1 {
+                rate_data: juplend_mocks::liquidity::types::RateDataV1Params {
+                    kink: 8_000,
+                    rate_at_utilization_zero: 400,
+                    rate_at_utilization_kink: 1_000,
+                    rate_at_utilization_max: 15_000,
+                },
+            }
+            .data(),
+        };
+
+        let update_token_config_ix = Instruction {
+            program_id: juplend_mocks::liquidity::ID,
+            accounts: juplend_liquidity::accounts::UpdateTokenConfig {
+                authority: test_f.payer(),
+                auth_list,
+                rate_model,
+                mint,
+                token_reserve,
+            }
+            .to_account_metas(Some(true)),
+            data: juplend_liquidity::args::UpdateTokenConfig {
+                token_config: juplend_mocks::liquidity::types::TokenConfig {
+                    token: mint,
+                    fee: 0,
+                    max_utilization: 10_000,
+                },
+            }
+            .data(),
+        };
+
+        let init_rewards_rate_model_ix = Instruction {
+            program_id: juplend_mocks::lending_reward_rate_model::ID,
+            accounts: juplend_rewards::accounts::InitLendingRewardsRateModel {
+                authority: test_f.payer(),
+                lending_rewards_admin: rewards_admin,
+                mint,
+                lending_rewards_rate_model: rewards_rate_model,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: juplend_rewards::args::InitLendingRewardsRateModel {}.data(),
+        };
+
+        let init_lending_ix = Instruction {
+            program_id: juplend_mocks::ID,
+            accounts: juplend_lending::accounts::InitLending {
+                signer: test_f.payer(),
+                lending_admin,
+                mint,
+                f_token_mint,
+                metadata_account,
+                lending,
+                token_reserves_liquidity: token_reserve,
+                token_program,
+                system_program: system_program::ID,
+                sysvar_instruction: sysvar::instructions::ID,
+                metadata_program: TOKEN_METADATA_PROGRAM_ID,
+                rent: sysvar::rent::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: juplend_lending::args::InitLending {
+                symbol: "jlUSDC".to_string(),
+                liquidity_program: juplend_mocks::liquidity::ID,
+            }
+            .data(),
+        };
+
+        let set_rewards_rate_model_ix = Instruction {
+            program_id: juplend_mocks::ID,
+            accounts: juplend_lending::accounts::SetRewardsRateModel {
+                signer: test_f.payer(),
+                lending_admin,
+                lending,
+                f_token_mint,
+                new_rewards_rate_model: rewards_rate_model,
+                supply_token_reserves_liquidity: token_reserve,
+            }
+            .to_account_metas(Some(true)),
+            data: juplend_lending::args::SetRewardsRateModel { mint }.data(),
+        };
+
+        let init_protocol_positions_ix = Instruction {
+            program_id: juplend_mocks::liquidity::ID,
+            accounts: juplend_liquidity::accounts::InitNewProtocol {
+                authority: test_f.payer(),
+                auth_list,
+                user_supply_position,
+                user_borrow_position,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: juplend_liquidity::args::InitNewProtocol {
+                supply_mint: mint,
+                borrow_mint: mint,
+                protocol: lending,
+            }
+            .data(),
+        };
+
+        let update_user_supply_config_ix = Instruction {
+            program_id: juplend_mocks::liquidity::ID,
+            accounts: juplend_liquidity::accounts::UpdateUserSupplyConfig {
+                authority: test_f.payer(),
+                protocol: lending,
+                auth_list,
+                rate_model,
+                mint,
+                token_reserve,
+                user_supply_position,
+            }
+            .to_account_metas(Some(true)),
+            data: juplend_liquidity::args::UpdateUserSupplyConfig {
+                user_supply_config: juplend_mocks::liquidity::types::UserSupplyConfig {
+                    mode: 1,
+                    expand_percent: 2_000,
+                    expand_duration: 172_800,
+                    base_withdrawal_limit: u64::MAX as u128,
+                },
+            }
+            .data(),
+        };
+
+        let update_user_borrow_config_ix = Instruction {
+            program_id: juplend_mocks::liquidity::ID,
+            accounts: juplend_liquidity::accounts::UpdateUserBorrowConfig {
+                authority: test_f.payer(),
+                protocol: lending,
+                auth_list,
+                rate_model,
+                mint,
+                token_reserve,
+                user_borrow_position,
+            }
+            .to_account_metas(Some(true)),
+            data: juplend_liquidity::args::UpdateUserBorrowConfig {
+                user_borrow_config: juplend_mocks::liquidity::types::UserBorrowConfig {
+                    mode: 1,
+                    expand_percent: 2_000,
+                    expand_duration: 172_800,
+                    // Minimal non-zero limits are enough for tests that only cover
+                    // deposit/withdraw; we don't exercise native borrow flows here.
+                    base_debt_ceiling: 1,
+                    max_debt_ceiling: 1,
+                },
+            }
+            .data(),
+        };
+
+        let update_user_class_ix = Instruction {
+            program_id: juplend_mocks::liquidity::ID,
+            accounts: juplend_liquidity::accounts::UpdateUserClass {
+                authority: test_f.payer(),
+                auth_list,
+            }
+            .to_account_metas(Some(true)),
+            data: juplend_liquidity::args::UpdateUserClass {
+                user_class: vec![juplend_mocks::liquidity::types::AddressU8 {
+                    addr: lending,
+                    value: 1,
+                }],
+            }
+            .data(),
+        };
+
+        let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
+        Self::process_ixs(
+            test_f.context.clone(),
+            &[
+                cu_ix.clone(),
+                init_liquidity_ix,
+                init_rewards_admin_ix,
+                init_lending_admin_ix,
+            ],
+        )
+        .await
+        .unwrap();
+        Self::process_ixs(
+            test_f.context.clone(),
+            &[
+                cu_ix.clone(),
+                init_token_reserve_ix,
+                update_rate_data_ix,
+                update_token_config_ix,
+            ],
+        )
+        .await
+        .unwrap();
+        Self::process_ixs(
+            test_f.context.clone(),
+            &[
+                cu_ix.clone(),
+                init_rewards_rate_model_ix,
+                init_lending_ix,
+                set_rewards_rate_model_ix,
+            ],
+        )
+        .await
+        .unwrap();
+        Self::process_ixs(
+            test_f.context.clone(),
+            &[
+                cu_ix.clone(),
+                init_protocol_positions_ix,
+                update_user_supply_config_ix,
+                update_user_borrow_config_ix,
+                update_user_class_ix,
+            ],
+        )
+        .await
+        .unwrap();
+
+        let (bank_key, _) = Pubkey::find_program_address(
+            &[
+                test_f.marginfi_group.key.as_ref(),
+                test_f.usdc_mint.key.as_ref(),
+                &JUPLEND_TEST_BANK_SEED.to_le_bytes(),
+            ],
+            &marginfi::ID,
+        );
+        let bank_f = BankFixture::new(test_f.context.clone(), bank_key, &test_f.usdc_mint, None);
+
+        let liquidity_vault_authority =
+            find_bank_vault_authority_pda(&bank_key, BankVaultType::Liquidity).0;
+
+        let bank_config = JuplendConfigCompact::new(
+            PYTH_USDC_FEED,
+            I80F48!(1).into(),
+            I80F48!(1).into(),
+            native!(1_000_000, "USDC"),
+            OracleSetup::JuplendPythPull,
+            RiskTier::Collateral,
+            PYTH_PUSH_MIGRATED_DEPRECATED,
+            1_000_000_000_000,
+            100,
+            0,
+        );
+
+        let mut add_bank_ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolAddBankJuplend {
+                group: test_f.marginfi_group.key,
+                admin: test_f.payer(),
+                fee_payer: test_f.payer(),
+                bank_mint: mint,
+                bank: bank_key,
+                integration_acc_1: lending,
+                liquidity_vault_authority,
+                liquidity_vault: find_bank_vault_pda(&bank_key, BankVaultType::Liquidity).0,
+                insurance_vault_authority: find_bank_vault_authority_pda(
+                    &bank_key,
+                    BankVaultType::Insurance,
+                )
+                .0,
+                insurance_vault: find_bank_vault_pda(&bank_key, BankVaultType::Insurance).0,
+                fee_vault_authority: find_bank_vault_authority_pda(&bank_key, BankVaultType::Fee).0,
+                fee_vault: find_bank_vault_pda(&bank_key, BankVaultType::Fee).0,
+                f_token_mint,
+                integration_acc_2: Pubkey::find_program_address(
+                    &[JUPLEND_F_TOKEN_VAULT_SEED.as_bytes(), bank_key.as_ref()],
+                    &marginfi::ID,
+                )
+                .0,
+                token_program,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::LendingPoolAddBankJuplend {
+                bank_config,
+                bank_seed: JUPLEND_TEST_BANK_SEED,
+            }
+            .data(),
+        };
+        add_bank_ix
+            .accounts
+            .push(AccountMeta::new_readonly(PYTH_USDC_FEED, false));
+        add_bank_ix
+            .accounts
+            .push(AccountMeta::new_readonly(lending, false));
+        Self::process_ixs(test_f.context.clone(), &[add_bank_ix])
+            .await
+            .unwrap();
+
+        let bank_state = bank_f.load().await;
+        create_spl_token_account_if_missing(
+            test_f.context.clone(),
+            bank_state.integration_acc_3,
+            mint,
+            liquidity_vault_authority,
+            0,
+        )
+        .await;
+
+        let claim_account = Self::derive_juplend_claim_account(liquidity_vault_authority, mint);
+        let init_claim_account_ix = Instruction {
+            program_id: juplend_mocks::liquidity::ID,
+            accounts: juplend_liquidity::accounts::InitClaimAccount {
+                signer: test_f.payer(),
+                claim_account,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: juplend_liquidity::args::InitClaimAccount {
+                mint,
+                user: liquidity_vault_authority,
+            }
+            .data(),
+        };
+        Self::process_ixs(
+            test_f.context.clone(),
+            &[cu_ix.clone(), init_claim_account_ix],
+        )
+        .await
+        .unwrap();
+
+        let init_source = test_f
+            .usdc_mint
+            .create_token_account_and_mint_to(10.0)
+            .await;
+        let init_position_ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::JuplendInitPosition {
+                fee_payer: test_f.payer(),
+                signer_token_account: init_source.key,
+                bank: bank_key,
+                liquidity_vault_authority,
+                liquidity_vault: find_bank_vault_pda(&bank_key, BankVaultType::Liquidity).0,
+                mint,
+                integration_acc_1: lending,
+                f_token_mint,
+                integration_acc_2: bank_state.integration_acc_2,
+                lending_admin,
+                supply_token_reserves_liquidity: token_reserve,
+                lending_supply_position_on_liquidity: user_supply_position,
+                rate_model,
+                vault: reserve_vault,
+                liquidity,
+                liquidity_program: juplend_mocks::liquidity::ID,
+                rewards_rate_model,
+                juplend_program: juplend_mocks::ID,
+                token_program,
+                associated_token_program: anchor_spl::associated_token::ID,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::JuplendInitPosition {
+                amount: JUPLEND_INIT_POSITION_NOMINAL_AMOUNT,
+            }
+            .data(),
+        };
+        Self::process_ixs(test_f.context.clone(), &[cu_ix, init_position_ix])
+            .await
+            .unwrap();
+
+        JuplendBankSetup {
+            test_f,
+            bank_f,
+            lending,
+            reserve_vault,
+        }
+    }
+
     pub async fn run_kamino_deposit(
         &self,
         bank_f: &BankFixture,
@@ -1703,6 +2331,43 @@ impl TestFixture {
         Self::process_ixs(self.context.clone(), &ixs).await
     }
 
+    pub async fn run_juplend_deposit(
+        &self,
+        bank_f: &BankFixture,
+        user: &MarginfiAccountFixture,
+        signer_token_account: Pubkey,
+        amount: u64,
+    ) -> std::result::Result<(), BanksClientError> {
+        let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
+        let deposit_ix = user
+            .make_juplend_deposit_ix(signer_token_account, bank_f, amount)
+            .await;
+        let ixs = vec![cu_ix, deposit_ix];
+        Self::process_ixs(self.context.clone(), &ixs).await
+    }
+
+    pub async fn run_juplend_withdraw(
+        &self,
+        bank_f: &BankFixture,
+        user: &MarginfiAccountFixture,
+        destination_token_account: Pubkey,
+        amount: u64,
+        withdraw_all: Option<bool>,
+    ) -> std::result::Result<(), BanksClientError> {
+        let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
+        let withdraw_ix = user
+            .make_juplend_withdraw_ix(
+                destination_token_account,
+                bank_f,
+                amount,
+                withdraw_all,
+                true,
+            )
+            .await;
+        let ixs = vec![cu_ix, withdraw_ix];
+        Self::process_ixs(self.context.clone(), &ixs).await
+    }
+
     pub async fn load_kamino_state(
         &self,
         obligation: Pubkey,
@@ -1744,6 +2409,30 @@ impl TestFixture {
             .balance()
             .await,
             user_scaled_balance: drift_user.get_scaled_balance(market_index),
+        }
+    }
+
+    pub async fn load_juplend_state(
+        &self,
+        bank_f: &BankFixture,
+        reserve_vault: Pubkey,
+        user_token: &TokenAccountFixture,
+    ) -> JuplendStateSnapshot {
+        let bank = bank_f.load().await;
+
+        JuplendStateSnapshot {
+            user_balance: user_token.balance().await,
+            reserve_vault_balance: TokenAccountFixture::fetch(self.context.clone(), reserve_vault)
+                .await
+                .balance()
+                .await,
+            f_token_vault_balance: TokenAccountFixture::fetch(
+                self.context.clone(),
+                bank.integration_acc_2,
+            )
+            .await
+            .balance()
+            .await,
         }
     }
 
