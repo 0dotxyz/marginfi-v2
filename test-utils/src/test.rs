@@ -1253,94 +1253,6 @@ impl TestFixture {
         .0
     }
 
-    fn derive_juplend_liquidity() -> Pubkey {
-        Pubkey::find_program_address(&[b"liquidity"], &juplend_mocks::liquidity::ID).0
-    }
-
-    fn derive_juplend_auth_list() -> Pubkey {
-        Pubkey::find_program_address(&[b"auth_list"], &juplend_mocks::liquidity::ID).0
-    }
-
-    fn derive_juplend_token_reserve(mint: Pubkey) -> Pubkey {
-        Pubkey::find_program_address(&[b"reserve", mint.as_ref()], &juplend_mocks::liquidity::ID).0
-    }
-
-    fn derive_juplend_rate_model(mint: Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"rate_model", mint.as_ref()],
-            &juplend_mocks::liquidity::ID,
-        )
-        .0
-    }
-
-    fn derive_juplend_lending_admin() -> Pubkey {
-        Pubkey::find_program_address(&[b"lending_admin"], &juplend_mocks::ID).0
-    }
-
-    fn derive_juplend_f_token_mint(mint: Pubkey) -> Pubkey {
-        Pubkey::find_program_address(&[b"f_token_mint", mint.as_ref()], &juplend_mocks::ID).0
-    }
-
-    fn derive_juplend_lending(mint: Pubkey, f_token_mint: Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"lending", mint.as_ref(), f_token_mint.as_ref()],
-            &juplend_mocks::ID,
-        )
-        .0
-    }
-
-    fn derive_juplend_supply_position(mint: Pubkey, protocol: Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"user_supply_position", mint.as_ref(), protocol.as_ref()],
-            &juplend_mocks::liquidity::ID,
-        )
-        .0
-    }
-
-    fn derive_juplend_borrow_position(mint: Pubkey, protocol: Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"user_borrow_position", mint.as_ref(), protocol.as_ref()],
-            &juplend_mocks::liquidity::ID,
-        )
-        .0
-    }
-
-    fn derive_juplend_rewards_admin() -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"lending_rewards_admin"],
-            &juplend_mocks::lending_reward_rate_model::ID,
-        )
-        .0
-    }
-
-    fn derive_juplend_rewards_rate_model(mint: Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"lending_rewards_rate_model", mint.as_ref()],
-            &juplend_mocks::lending_reward_rate_model::ID,
-        )
-        .0
-    }
-
-    fn derive_juplend_claim_account(user: Pubkey, mint: Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"user_claim", user.as_ref(), mint.as_ref()],
-            &juplend_mocks::liquidity::ID,
-        )
-        .0
-    }
-
-    fn derive_token_metadata(mint: Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[
-                b"metadata",
-                TOKEN_METADATA_PROGRAM_ID.as_ref(),
-                mint.as_ref(),
-            ],
-            &TOKEN_METADATA_PROGRAM_ID,
-        )
-        .0
-    }
-
     async fn process_ixs(
         ctx: Rc<RefCell<ProgramTestContext>>,
         ixs: &[Instruction],
@@ -1793,23 +1705,23 @@ impl TestFixture {
         let mint = test_f.usdc_mint.key;
         let token_program = spl_token::ID;
 
-        let liquidity = Self::derive_juplend_liquidity();
-        let auth_list = Self::derive_juplend_auth_list();
-        let token_reserve = Self::derive_juplend_token_reserve(mint);
-        let rate_model = Self::derive_juplend_rate_model(mint);
+        let liquidity = derive_juplend_liquidity();
+        let auth_list = derive_juplend_auth_list();
+        let token_reserve = derive_juplend_token_reserve(mint);
+        let rate_model = derive_juplend_rate_model(mint);
         let reserve_vault =
             get_associated_token_address_with_program_id(&liquidity, &mint, &token_program);
 
-        let lending_admin = Self::derive_juplend_lending_admin();
-        let f_token_mint = Self::derive_juplend_f_token_mint(mint);
-        let lending = Self::derive_juplend_lending(mint, f_token_mint);
-        let metadata_account = Self::derive_token_metadata(f_token_mint);
+        let lending_admin = derive_juplend_lending_admin();
+        let f_token_mint = derive_juplend_f_token_mint(mint);
+        let lending = derive_juplend_lending(mint, f_token_mint);
+        let metadata_account = derive_token_metadata(f_token_mint);
 
-        let rewards_admin = Self::derive_juplend_rewards_admin();
-        let rewards_rate_model = Self::derive_juplend_rewards_rate_model(mint);
+        let rewards_admin = derive_juplend_rewards_admin();
+        let rewards_rate_model = derive_juplend_rewards_rate_model(mint);
 
-        let user_supply_position = Self::derive_juplend_supply_position(mint, lending);
-        let user_borrow_position = Self::derive_juplend_borrow_position(mint, lending);
+        let user_supply_position = derive_juplend_supply_position(mint, lending);
+        let user_borrow_position = derive_juplend_borrow_position(mint, lending);
 
         // Seed a small mint supply so Juplend borrow-config admin checks accept
         // non-zero debt ceiling values.
@@ -2184,7 +2096,7 @@ impl TestFixture {
         )
         .await;
 
-        let claim_account = Self::derive_juplend_claim_account(liquidity_vault_authority, mint);
+        let claim_account = derive_juplend_claim_account(liquidity_vault_authority, mint);
         let init_claim_account_ix = Instruction {
             program_id: juplend_mocks::liquidity::ID,
             accounts: juplend_liquidity::accounts::InitClaimAccount {
@@ -2510,4 +2422,92 @@ pub fn get_mint_price(mint: BankMint) -> f64 {
         | BankMint::SolEquivalent9
         | BankMint::SolEqIsolated => 10.0,
     }
+}
+
+fn derive_juplend_liquidity() -> Pubkey {
+    Pubkey::find_program_address(&[b"liquidity"], &juplend_mocks::liquidity::ID).0
+}
+
+fn derive_juplend_auth_list() -> Pubkey {
+    Pubkey::find_program_address(&[b"auth_list"], &juplend_mocks::liquidity::ID).0
+}
+
+fn derive_juplend_token_reserve(mint: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[b"reserve", mint.as_ref()], &juplend_mocks::liquidity::ID).0
+}
+
+fn derive_juplend_rate_model(mint: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"rate_model", mint.as_ref()],
+        &juplend_mocks::liquidity::ID,
+    )
+    .0
+}
+
+fn derive_juplend_lending_admin() -> Pubkey {
+    Pubkey::find_program_address(&[b"lending_admin"], &juplend_mocks::ID).0
+}
+
+fn derive_juplend_f_token_mint(mint: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[b"f_token_mint", mint.as_ref()], &juplend_mocks::ID).0
+}
+
+fn derive_juplend_lending(mint: Pubkey, f_token_mint: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"lending", mint.as_ref(), f_token_mint.as_ref()],
+        &juplend_mocks::ID,
+    )
+    .0
+}
+
+fn derive_juplend_supply_position(mint: Pubkey, protocol: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"user_supply_position", mint.as_ref(), protocol.as_ref()],
+        &juplend_mocks::liquidity::ID,
+    )
+    .0
+}
+
+fn derive_juplend_borrow_position(mint: Pubkey, protocol: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"user_borrow_position", mint.as_ref(), protocol.as_ref()],
+        &juplend_mocks::liquidity::ID,
+    )
+    .0
+}
+
+fn derive_juplend_rewards_admin() -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"lending_rewards_admin"],
+        &juplend_mocks::lending_reward_rate_model::ID,
+    )
+    .0
+}
+
+fn derive_juplend_rewards_rate_model(mint: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"lending_rewards_rate_model", mint.as_ref()],
+        &juplend_mocks::lending_reward_rate_model::ID,
+    )
+    .0
+}
+
+fn derive_juplend_claim_account(user: Pubkey, mint: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"user_claim", user.as_ref(), mint.as_ref()],
+        &juplend_mocks::liquidity::ID,
+    )
+    .0
+}
+
+fn derive_token_metadata(mint: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[
+            b"metadata",
+            TOKEN_METADATA_PROGRAM_ID.as_ref(),
+            mint.as_ref(),
+        ],
+        &TOKEN_METADATA_PROGRAM_ID,
+    )
+    .0
 }
