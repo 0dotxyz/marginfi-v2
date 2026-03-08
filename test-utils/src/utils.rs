@@ -159,11 +159,13 @@ pub async fn create_spl_mint_account_if_missing(
         return;
     }
 
-    let mut mint = SplMint::default();
-    mint.mint_authority = spl_token::solana_program::program_option::COption::Some(authority);
-    mint.supply = supply;
-    mint.decimals = decimals;
-    mint.is_initialized = true;
+    let mint = SplMint {
+        mint_authority: spl_token::solana_program::program_option::COption::Some(authority),
+        supply,
+        decimals,
+        is_initialized: true,
+        ..Default::default()
+    };
 
     let mut data = vec![0u8; SplMint::LEN];
     SplMint::pack(mint, &mut data).unwrap();
@@ -199,11 +201,13 @@ pub async fn create_spl_token_account_if_missing(
         return;
     }
 
-    let mut token = SplAccount::default();
-    token.mint = mint;
-    token.owner = owner;
-    token.amount = amount;
-    token.state = AccountState::Initialized;
+    let token = SplAccount {
+        mint,
+        owner,
+        amount,
+        state: AccountState::Initialized,
+        ..Default::default()
+    };
 
     let mut data = vec![0u8; SplAccount::LEN];
     SplAccount::pack(token, &mut data).unwrap();

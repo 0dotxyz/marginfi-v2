@@ -711,7 +711,7 @@ impl TestFixture {
                 .join("../tests/fixtures")
                 .to_string_lossy()
                 .to_string();
-            std::env::set_var("SBF_OUT_DIR", &fixtures_dir);
+            std::env::set_var("SBF_OUT_DIR", fixtures_dir);
 
             program.prefer_bpf(true);
             program.add_program("kamino_lending", kamino_mocks::kamino_lending::ID, None);
@@ -1334,7 +1334,7 @@ impl TestFixture {
         let lending_market_account = test_f.try_load(&lending_market).await.unwrap();
         if lending_market_account.is_none() {
             let mut data = vec![0u8; 8 + std::mem::size_of::<LendingMarket>()];
-            data[..8].copy_from_slice(&LendingMarket::DISCRIMINATOR);
+            data[..8].copy_from_slice(LendingMarket::DISCRIMINATOR);
             // `lending_market.bump_seed` is used in PDA seed constraints for `lending_market_authority`.
             data[16..24].copy_from_slice(&(u64::from(lending_market_authority_bump)).to_le_bytes());
             // Keep refresh behavior aligned with TS tests where `scopePrices` is null.
