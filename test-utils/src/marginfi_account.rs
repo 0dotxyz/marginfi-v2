@@ -118,7 +118,7 @@ impl MarginfiAccountFixture {
         }
     }
 
-    pub async fn make_bank_deposit_ix<T: Into<f64>>(
+    pub async fn make_deposit_ix<T: Into<f64>>(
         &self,
         funding_account: Pubkey,
         bank: &BankFixture,
@@ -135,7 +135,7 @@ impl MarginfiAccountFixture {
         .await
     }
 
-    pub async fn make_bank_deposit_ix_with_authority<T: Into<f64>>(
+    pub async fn make_deposit_ix_with_authority<T: Into<f64>>(
         &self,
         funding_account: Pubkey,
         bank: &BankFixture,
@@ -180,7 +180,7 @@ impl MarginfiAccountFixture {
     ) -> anyhow::Result<(), BanksClientError> {
         #[cfg_attr(not(feature = "transfer-hook"), allow(unused_mut))]
         let mut ix = self
-            .make_bank_deposit_ix_with_authority(
+            .make_deposit_ix_with_authority(
                 funding_account,
                 bank,
                 ui_amount,

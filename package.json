@@ -4,7 +4,7 @@
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check"
   },
   "dependencies": {
-    "@coral-xyz/anchor": "^0.30.1",
+    "@coral-xyz/anchor": "0.31.1",
     "@coral-xyz/spl-token": "^0.31.1",
     "@kamino-finance/klend-sdk": "^7.4.0-beta.20",
     "@mrgnlabs/marginfi-client-v2": "^6.0.1",
