@@ -320,9 +320,8 @@ impl<'info> KaminoInitObligation<'info> {
 
         // --- wrap both groups in the outer struct ---
         let accounts = DepositReserveLiquidityAndObligationCollateralV2 {
-            deposit_reserve_liquidity_and_obligation_collateral_v2_deposit_accounts:
-                deposit_accounts,
-            deposit_reserve_liquidity_and_obligation_collateral_v2_farms_accounts: farms_accounts,
+            deposit_accounts,
+            farms_accounts,
             farms_program: self.farms_program.to_account_info(),
         };
         let program = self.kamino_program.to_account_info();

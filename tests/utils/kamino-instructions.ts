@@ -178,8 +178,6 @@ export const makeAddKaminoBankIx = (
     liquidityVaultAuthority,
     accounts.kaminoMarket,
   );
-  console.log("args.seed", args.seed.toString());
-  console.log("kaminoObligation", kaminoObligation.toString());
 
   const ix = program.methods
     .lendingPoolAddBankKamino(args.config, args.seed)

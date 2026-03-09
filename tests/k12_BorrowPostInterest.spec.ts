@@ -127,8 +127,8 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
           oracle: oracles.tokenAOracle.publicKey,
         },
         {
-          config: config,
-          seed: seed,
+          config,
+          seed,
         },
       ),
     );

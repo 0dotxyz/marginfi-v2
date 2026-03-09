@@ -122,6 +122,7 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
 
       await createReserve(
         reserveKeypair,
+        marketKeypair.publicKey,
         mint,
         "TOKEN_A",
         ecosystem.tokenADecimals,
