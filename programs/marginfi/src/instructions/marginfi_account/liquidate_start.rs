@@ -191,14 +191,6 @@ pub fn validate_instructions(
             &ix_discriminators::JUPLEND_WITHDRAW,
             // TODO add withdraw/repay from integrator as they are added to the program. Also
             // remember to add a test to ix_utils to validate you added the correct hash.
-
-            // Note: At some point we may allow the liquidator to claim emissions too. Since we
-            // currently don't allow this, liquidators can never fully close out an account that
-            // has emissions active. This is not a priority since we are considering deprecating
-            // the emissions feature in late 2025 and moving to a fully off-chain emissions
-            // system anyways.
-            // * &ix_discriminators::LENDING_SETTLE_EMISSIONS,
-            &ix_discriminators::LENDING_WITHDRAW_EMISSIONS_PERMISSIONLESS,
         ],
     )?;
     validate_not_cpi_by_stack_height()?;

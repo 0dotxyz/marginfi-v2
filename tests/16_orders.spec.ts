@@ -25,7 +25,6 @@ import {
   setKeeperCloseFlagsIx,
   depositIx,
   borrowIx,
-  updateEmissionsDestination,
 } from "./utils/user-instructions";
 import { deriveOrderPda, deriveExecuteOrderPda } from "./utils/pdas";
 import { refreshOracles as refreshPullOracles } from "./utils/pyth-pull-mocks";
@@ -186,17 +185,6 @@ describe("orders", () => {
       new Transaction().add(borrowUsdcIx),
     );
 
-    // Set emissions destination to the authority before placing any orders
-    const setEmissionsDestIx = await updateEmissionsDestination(
-      user.mrgnProgram,
-      {
-        marginfiAccount: userMarginfiAccount,
-        destinationAccount: user.wallet.publicKey,
-      },
-    );
-    await userProgram.provider.sendAndConfirm(
-      new Transaction().add(setEmissionsDestIx),
-    );
   });
 
   after(async () => {
@@ -381,39 +369,8 @@ describe("orders", () => {
         .remainingAccounts(repayRemaining)
         .instruction();
 
-      // Ensure the user's ATA exists
-      const bankAccount = await program.account.bank.fetch(bankUsdc);
-      const emissionsMint = bankAccount.emissionsMint;
-      const emissionsAta = getAssociatedTokenAddressSync(
-        emissionsMint,
-        user.wallet.publicKey,
-      );
-
-      const createEmissionsAtaIx =
-        createAssociatedTokenAccountIdempotentInstruction(
-          user.wallet.publicKey,
-          emissionsAta,
-          user.wallet.publicKey,
-          emissionsMint,
-        );
-
-      // Claim emissions on the liability balance before closing it
-      const withdrawEmissionsInstruction = await program.methods
-        .lendingAccountWithdrawEmissions()
-        .accountsPartial({
-          marginfiAccount: userMarginfiAccount,
-          authority: user.wallet.publicKey,
-          bank: bankUsdc,
-          destinationAccount: emissionsAta,
-          tokenProgram: TOKEN_PROGRAM_ID,
-        })
-        .instruction();
-
       await userProgram.provider.sendAndConfirm(
-        new Transaction()
-          .add(createEmissionsAtaIx)
-          .add(withdrawEmissionsInstruction)
-          .add(repayInstruction),
+        new Transaction().add(repayInstruction),
       );
 
       const ix = await keeperCloseOrderIx(program, {
@@ -519,7 +476,6 @@ describe("orders", () => {
   describe("order execution", () => {
     const bankKeys = [bankA, bankUsdc];
     let orderPk: PublicKey;
-    let userEmissionsAta: PublicKey;
     let keeper: MockUser;
     let keeperProgram: Program<Marginfi>;
     let keeperTokenAata: PublicKey;
@@ -624,16 +580,6 @@ describe("orders", () => {
         remaining: startRemaining,
       });
 
-      const withdrawEmissionsPermIx = await program.methods
-        .lendingAccountWithdrawEmissionsPermissionless()
-        .accountsPartial({
-          marginfiAccount: userMarginfiAccount,
-          bank: bankUsdc,
-          destinationAccount: userEmissionsAta,
-          tokenProgram: TOKEN_PROGRAM_ID,
-        })
-        .instruction();
-
       const repayInstruction = await program.methods
         .lendingAccountRepay(borrowUsdc, true)
         .accountsPartial({
@@ -680,7 +626,6 @@ describe("orders", () => {
 
       return {
         startIx,
-        withdrawEmissionsPermIx,
         repayInstruction,
         withdrawInstruction,
         endIx,
@@ -733,34 +678,6 @@ describe("orders", () => {
         program.programId,
         userMarginfiAccount,
         bankKeys,
-      );
-
-      // Ensure emissions destination is registered for the user
-      const bankAccount = await program.account.bank.fetch(bankUsdc);
-      const emissionsMint = bankAccount.emissionsMint;
-      userEmissionsAta = getAssociatedTokenAddressSync(
-        emissionsMint,
-        user.wallet.publicKey,
-      );
-
-      const ensureUserEmissionsAtaIx =
-        createAssociatedTokenAccountIdempotentInstruction(
-          user.wallet.publicKey,
-          userEmissionsAta,
-          user.wallet.publicKey,
-          emissionsMint,
-        );
-
-      const updateEmissionsIx = await program.methods
-        .marginfiAccountUpdateEmissionsDestinationAccount()
-        .accountsPartial({
-          marginfiAccount: userMarginfiAccount,
-          authority: user.wallet.publicKey,
-          destinationAccount: user.wallet.publicKey,
-        })
-        .instruction();
-      await userProgram.provider.sendAndConfirm(
-        new Transaction().add(ensureUserEmissionsAtaIx).add(updateEmissionsIx),
       );
 
       // Fund keeper with USDC so they can repay during execution
@@ -818,7 +735,6 @@ describe("orders", () => {
       const withdrawAmount = calcWithdrawAmount(oracles.tokenAPrice);
       const {
         startIx,
-        withdrawEmissionsPermIx,
         repayInstruction,
         withdrawInstruction,
         endIx,
@@ -829,7 +745,7 @@ describe("orders", () => {
           await keeperProgram.provider.sendAndConfirm(
             new Transaction()
               .add(startIx)
-              .add(withdrawEmissionsPermIx)
+
               .add(repayInstruction)
               .add(withdrawInstruction)
               .add(endIx),
@@ -874,7 +790,6 @@ describe("orders", () => {
       const withdrawAmount = calcWithdrawAmount(oracles.tokenAPrice);
       const {
         startIx,
-        withdrawEmissionsPermIx,
         repayInstruction,
         withdrawInstruction,
         endIx,
@@ -919,7 +834,7 @@ describe("orders", () => {
           await keeperProgram.provider.sendAndConfirm(
             new Transaction()
               .add(startIx)
-              .add(withdrawEmissionsPermIx)
+
               .add(repayInstruction)
               .add(withdrawInstruction)
               .add(withdrawSol) // This touches an uninvolved balance
@@ -963,7 +878,6 @@ describe("orders", () => {
       const excessiveWithdraw = calcWithdrawAmount(oracles.tokenAPrice).muln(3);
       const {
         startIx,
-        withdrawEmissionsPermIx,
         repayInstruction,
         withdrawInstruction,
         endIx,
@@ -974,7 +888,7 @@ describe("orders", () => {
           await keeperProgram.provider.sendAndConfirm(
             new Transaction()
               .add(startIx)
-              .add(withdrawEmissionsPermIx)
+
               .add(repayInstruction)
               .add(withdrawInstruction)
               .add(endIx),
@@ -1033,7 +947,6 @@ describe("orders", () => {
         const excessiveWithdraw = baseWithdraw.muln(2); // +100%
         const {
           startIx,
-          withdrawEmissionsPermIx,
           repayInstruction,
           withdrawInstruction,
           endIx,
@@ -1044,7 +957,7 @@ describe("orders", () => {
             await keeperProgram.provider.sendAndConfirm(
               new Transaction()
                 .add(startIx)
-                .add(withdrawEmissionsPermIx)
+  
                 .add(repayInstruction)
                 .add(withdrawInstruction)
                 .add(endIx),
@@ -1102,7 +1015,6 @@ describe("orders", () => {
       const withdrawAmount = calcWithdrawAmount(oracles.tokenAPrice);
       const {
         startIx,
-        withdrawEmissionsPermIx,
         repayInstruction,
         withdrawInstruction,
         endIx,
@@ -1111,7 +1023,7 @@ describe("orders", () => {
       await keeperProgram.provider.sendAndConfirm(
         new Transaction()
           .add(startIx)
-          .add(withdrawEmissionsPermIx)
+
           .add(repayInstruction)
           .add(withdrawInstruction)
           .add(endIx),
@@ -1236,7 +1148,6 @@ describe("orders", () => {
       const withdrawAmount = calcWithdrawAmount(oracles.tokenAPrice);
       const {
         startIx,
-        withdrawEmissionsPermIx,
         repayInstruction,
         withdrawInstruction,
         endIx,
@@ -1245,7 +1156,7 @@ describe("orders", () => {
       await keeperProgram.provider.sendAndConfirm(
         new Transaction()
           .add(startIx)
-          .add(withdrawEmissionsPermIx)
+
           .add(repayInstruction)
           .add(withdrawInstruction)
           .add(endIx),
@@ -1336,7 +1247,6 @@ describe("orders", () => {
       const withdrawAmount = calcWithdrawAmount(oracles.tokenAPrice);
       const {
         startIx,
-        withdrawEmissionsPermIx,
         repayInstruction,
         withdrawInstruction,
         endIx,
@@ -1345,7 +1255,7 @@ describe("orders", () => {
       await keeperProgram.provider.sendAndConfirm(
         new Transaction()
           .add(startIx)
-          .add(withdrawEmissionsPermIx)
+
           .add(repayInstruction)
           .add(withdrawInstruction)
           .add(endIx),

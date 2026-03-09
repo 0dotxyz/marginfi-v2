@@ -776,30 +776,85 @@ impl MarginfiAccountFixture {
             .await
     }
 
-    pub async fn try_withdraw_emissions(
+    pub async fn try_set_emissions_destination(
         &self,
-        bank: &BankFixture,
-        recv_account: &TokenAccountFixture,
+        destination_account: Pubkey,
     ) -> std::result::Result<(), BanksClientError> {
-        let emissions_mint = bank.load().await.emissions_mint;
+        let ctx = self.ctx.borrow();
+
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingAccountWithdrawEmissions {
-                group: self.load().await.group,
+            accounts: marginfi::accounts::MarginfiAccountUpdateEmissionsDestinationAccount {
                 marginfi_account: self.key,
-                authority: self.ctx.borrow().payer.pubkey(),
-                emissions_mint,
-                emissions_auth: get_emissions_authority_address(bank.key, emissions_mint).0,
-                emissions_vault: get_emissions_token_account_address(bank.key, emissions_mint).0,
-                destination_account: recv_account.key,
-                bank: bank.key,
-                token_program: recv_account.token_program,
+                authority: ctx.payer.pubkey(),
+                destination_account,
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingAccountWithdrawEmissions {}.data(),
+            data: marginfi::instruction::MarginfiAccountUpdateEmissionsDestinationAccount {}.data(),
         };
 
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
+    pub async fn try_set_emissions_destination_with_authority(
+        &self,
+        destination_account: Pubkey,
+        authority: &Keypair,
+    ) -> std::result::Result<(), BanksClientError> {
         let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::MarginfiAccountUpdateEmissionsDestinationAccount {
+                marginfi_account: self.key,
+                authority: authority.pubkey(),
+                destination_account,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountUpdateEmissionsDestinationAccount {}.data(),
+        };
+
+        let mut signers: Vec<&Keypair> = vec![&payer];
+        if authority.pubkey() != payer.pubkey() {
+            signers.push(authority);
+        }
+
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &signers, blockhash);
+
+        banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
+    pub async fn try_clear_emissions(
+        &self,
+        bank: &super::bank::BankFixture,
+    ) -> std::result::Result<(), BanksClientError> {
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingAccountClearEmissions {
+                marginfi_account: self.key,
+                bank: bank.key,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::LendingAccountClearEmissions {}.data(),
+        };
+
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
 
@@ -1554,38 +1609,6 @@ impl MarginfiAccountFixture {
 
     pub async fn load_order(&self, order: Pubkey) -> Order {
         load_and_deserialize::<Order>(self.ctx.clone(), &order).await
-    }
-
-    pub async fn try_set_emissions_destination(
-        &self,
-        destination_account: Pubkey,
-    ) -> std::result::Result<(), BanksClientError> {
-        let ctx = self.ctx.borrow();
-
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::MarginfiAccountUpdateEmissionsDestinationAccount {
-                marginfi_account: self.key,
-                authority: ctx.payer.pubkey(),
-                destination_account,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountUpdateEmissionsDestinationAccount {}.data(),
-        };
-
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&ctx.payer.pubkey()),
-            &[&ctx.payer],
-            ctx.banks_client.get_latest_blockhash().await.unwrap(),
-        );
-
-        drop(ctx);
-        self.ctx
-            .borrow_mut()
-            .banks_client
-            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
-            .await
     }
 
     pub async fn make_start_execute_ix(

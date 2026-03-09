@@ -43,10 +43,7 @@ pub struct MarginfiAccount {
     /// - 64: `ACCOUNT_FROZEN` - the admin has frozen the account; only the group admin may perform
     ///   actions until unfrozen.
     pub account_flags: u64, // 8
-    /// Set with `update_emissions_destination_account`. Emissions rewards can be withdrawn to the
-    /// canonical ATA of this wallet without the user's input (withdraw_emissions_permissionless).
-    /// If pubkey default, the user has not opted into this feature, and must claim emissions
-    /// manually (withdraw_emissions).
+    /// Wallet whose canonical ATA receives off-chain emissions distributions.
     pub emissions_destination_account: Pubkey, // 32
     pub health_cache: HealthCache,
     /// If this account was migrated from another one, store the original account key

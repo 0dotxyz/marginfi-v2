@@ -39,7 +39,6 @@ import {
   placeOrderIx,
   repayIx,
   startExecuteOrderIx,
-  updateEmissionsDestination,
 } from "./utils/user-instructions";
 import {
   simpleRefreshObligation,
@@ -575,15 +574,7 @@ SCENARIOS.forEach(
             },
           });
 
-          const updateEmissionsIx = await updateEmissionsDestination(
-            user.mrgnBankrunProgram,
-            {
-              marginfiAccount: userAccount,
-              destinationAccount: user.wallet.publicKey,
-            },
-          );
-
-          const tx = new Transaction().add(updateEmissionsIx).add(ix);
+          const tx = new Transaction().add(ix);
           await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
 
           [orderPk] = deriveOrderPda(

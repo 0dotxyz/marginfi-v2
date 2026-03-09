@@ -1337,3 +1337,472 @@ async fn liquidate_receiver_allows_negative_profit() -> anyhow::Result<()> {
         .await?;
     Ok(())
 }
+
+// Unlocking a bank's liq_cache_locked flag mid-liquidation (via withdraw_all or repay_all on
+// a different MarginfiAccount sharing the same bank) should fail, because end_liquidation
+// requires the lock to be held for every bank the liquidatee still has positions in.
+
+#[tokio::test]
+async fn liquidate_receiver_other_account_withdraw_all_clears_bank_cache_lock() -> anyhow::Result<()>
+{
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidatee = test_f.create_marginfi_account().await;
+
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    // Liquidator deposits USDC (provides liquidity) and a small SOL deposit
+    let liquidator_usdc_acc = test_f.usdc_mint.create_token_account_and_mint_to(200).await;
+    liquidator
+        .try_bank_deposit(liquidator_usdc_acc.key, usdc_bank, 100, None)
+        .await?;
+    let liquidator_sol_acc = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    liquidator
+        .try_bank_deposit(liquidator_sol_acc.key, sol_bank, 0.5, None)
+        .await?;
+
+    // Liquidatee: deposit SOL, borrow USDC
+    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    liquidatee
+        .try_bank_deposit(user_token_sol.key, sol_bank, 2.0, None)
+        .await?;
+    liquidatee
+        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .await?;
+
+    // Make liquidatee unhealthy
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.25).into()),
+                asset_weight_maint: Some(I80F48!(0.4).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let (record_pk, _bump) = Pubkey::find_program_address(
+        &[LIQUIDATION_RECORD_SEED.as_bytes(), liquidatee.key.as_ref()],
+        &marginfi::ID,
+    );
+    {
+        let ctx = test_f.context.borrow_mut();
+        let init_ix = liquidatee
+            .make_init_liquidation_record_ix(record_pk, ctx.payer.pubkey())
+            .await;
+        let init_tx = Transaction::new_signed_with_payer(
+            &[init_ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(init_tx)
+            .await?;
+    }
+
+    let payer = test_f.payer().clone();
+    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+
+    // Partial withdraw from liquidatee (does NOT clear liq_cache_locked)
+    let liquidator_sol_dest = test_f.sol_mint.create_empty_token_account().await;
+    let withdraw_ix = liquidatee
+        .make_bank_withdraw_ix(liquidator_sol_dest.key, sol_bank, 0.210, None)
+        .await;
+
+    // Partial repay on behalf of liquidatee (does NOT clear liq_cache_locked)
+    let repay_ix = liquidatee
+        .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 2.0, None)
+        .await;
+
+    // Liquidator's withdraw_all on sol_bank unlocks the bank mid-liquidation
+    let liquidator_sol_dest2 = test_f.sol_mint.create_empty_token_account().await;
+    let liquidator_withdraw_all_ix = liquidator
+        .make_bank_withdraw_ix(liquidator_sol_dest2.key, sol_bank, 0.5, Some(true))
+        .await;
+
+    let end_ix = liquidatee
+        .make_end_liquidation_ix(
+            record_pk,
+            payer,
+            test_f.marginfi_group.fee_state,
+            test_f.marginfi_group.fee_wallet,
+            vec![],
+        )
+        .await;
+
+    let compute_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_000_000);
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(
+        &[
+            compute_ix,
+            start_ix,
+            withdraw_ix,
+            repay_ix,
+            liquidator_withdraw_all_ix,
+            end_ix,
+        ],
+        Some(&ctx.payer.pubkey()),
+        &[&ctx.payer],
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
+    );
+    let res = ctx
+        .banks_client
+        .process_transaction_with_preflight(tx)
+        .await;
+
+    // Fails: unlocking bank mid-liquidation should fail
+    assert!(res.is_err());
+    assert_custom_error!(res.unwrap_err(), MarginfiError::InternalLogicError);
+    Ok(())
+}
+
+#[tokio::test]
+async fn liquidate_receiver_other_account_repay_all_clears_bank_cache_lock() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidatee = test_f.create_marginfi_account().await;
+
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    // Liquidator deposits USDC (collateral + liquidity)
+    let liquidator_usdc_acc = test_f.usdc_mint.create_token_account_and_mint_to(200).await;
+    liquidator
+        .try_bank_deposit(liquidator_usdc_acc.key, usdc_bank, 100, None)
+        .await?;
+
+    // Liquidatee deposits SOL (provides sol_bank liquidity for liquidator to borrow)
+    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    liquidatee
+        .try_bank_deposit(user_token_sol.key, sol_bank, 2.0, None)
+        .await?;
+
+    // Liquidator borrows a small amount of SOL (using USDC as collateral)
+    let liquidator_sol_acc = test_f.sol_mint.create_token_account_and_mint_to(1).await;
+    liquidator
+        .try_bank_borrow(liquidator_sol_acc.key, sol_bank, 0.01)
+        .await?;
+
+    // Liquidatee borrows USDC
+    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    liquidatee
+        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .await?;
+
+    // Make liquidatee unhealthy
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.25).into()),
+                asset_weight_maint: Some(I80F48!(0.4).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let (record_pk, _bump) = Pubkey::find_program_address(
+        &[LIQUIDATION_RECORD_SEED.as_bytes(), liquidatee.key.as_ref()],
+        &marginfi::ID,
+    );
+    {
+        let ctx = test_f.context.borrow_mut();
+        let init_ix = liquidatee
+            .make_init_liquidation_record_ix(record_pk, ctx.payer.pubkey())
+            .await;
+        let init_tx = Transaction::new_signed_with_payer(
+            &[init_ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(init_tx)
+            .await?;
+    }
+
+    let payer = test_f.payer().clone();
+    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+
+    // Partial withdraw from liquidatee
+    let liquidator_sol_dest = test_f.sol_mint.create_empty_token_account().await;
+    let withdraw_ix = liquidatee
+        .make_bank_withdraw_ix(liquidator_sol_dest.key, sol_bank, 0.210, None)
+        .await;
+
+    // Partial repay on behalf of liquidatee
+    let repay_ix = liquidatee
+        .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 2.0, None)
+        .await;
+
+    // Liquidator's repay_all on sol_bank unlocks the bank mid-liquidation
+    let liquidator_repay_all_ix = liquidator
+        .make_repay_ix(liquidator_sol_acc.key, sol_bank, 0.01, Some(true))
+        .await;
+
+    let end_ix = liquidatee
+        .make_end_liquidation_ix(
+            record_pk,
+            payer,
+            test_f.marginfi_group.fee_state,
+            test_f.marginfi_group.fee_wallet,
+            vec![],
+        )
+        .await;
+
+    let compute_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_000_000);
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(
+        &[
+            compute_ix,
+            start_ix,
+            withdraw_ix,
+            repay_ix,
+            liquidator_repay_all_ix,
+            end_ix,
+        ],
+        Some(&ctx.payer.pubkey()),
+        &[&ctx.payer],
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
+    );
+    let res = ctx
+        .banks_client
+        .process_transaction_with_preflight(tx)
+        .await;
+
+    // Fails: unlocking bank mid-liquidation should fail
+    assert!(res.is_err());
+    assert_custom_error!(res.unwrap_err(), MarginfiError::InternalLogicError);
+    Ok(())
+}
+
+// close_balance is not in the allowed instruction list for liquidation, so including it
+// in a receivership transaction must be rejected with ForbiddenIx.
+// otherwise there might be edge case of unlocking bank mid
+#[tokio::test]
+async fn liquidate_receiver_close_balance_forbidden() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidatee = test_f.create_marginfi_account().await;
+
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    let liquidator_usdc_acc = test_f.usdc_mint.create_token_account_and_mint_to(200).await;
+    liquidator
+        .try_bank_deposit(liquidator_usdc_acc.key, usdc_bank, 100, None)
+        .await?;
+
+    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    liquidatee
+        .try_bank_deposit(user_token_sol.key, sol_bank, 2.0, None)
+        .await?;
+    liquidatee
+        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .await?;
+
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.25).into()),
+                asset_weight_maint: Some(I80F48!(0.4).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let (record_pk, _bump) = Pubkey::find_program_address(
+        &[LIQUIDATION_RECORD_SEED.as_bytes(), liquidatee.key.as_ref()],
+        &marginfi::ID,
+    );
+    {
+        let ctx = test_f.context.borrow_mut();
+        let init_ix = liquidatee
+            .make_init_liquidation_record_ix(record_pk, ctx.payer.pubkey())
+            .await;
+        let init_tx = Transaction::new_signed_with_payer(
+            &[init_ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(init_tx)
+            .await?;
+    }
+
+    let payer = test_f.payer().clone();
+    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+
+    // Build a close_balance ix targeting the liquidator's own account on usdc_bank
+    let liquidator_account = liquidator.load().await;
+    let close_balance_ix = Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::LendingAccountCloseBalance {
+            group: liquidator_account.group,
+            marginfi_account: liquidator.key,
+            authority: payer,
+            bank: usdc_bank.key,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::LendingAccountCloseBalance.data(),
+    };
+
+    let end_ix = liquidatee
+        .make_end_liquidation_ix(
+            record_pk,
+            payer,
+            test_f.marginfi_group.fee_state,
+            test_f.marginfi_group.fee_wallet,
+            vec![],
+        )
+        .await;
+
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(
+        &[start_ix, close_balance_ix, end_ix],
+        Some(&ctx.payer.pubkey()),
+        &[&ctx.payer],
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
+    );
+    let res = ctx
+        .banks_client
+        .process_transaction_with_preflight(tx)
+        .await;
+
+    assert!(res.is_err());
+    assert_custom_error!(res.unwrap_err(), MarginfiError::ForbiddenIx);
+    Ok(())
+}
+
+// Verify that withdraw_all/repay_all during liquidation properly clear the bank's
+// liq_cache_locked flag so it does not remain permanently stale after the liquidation ends.
+// Previously, closed balances were skipped by clear_liquidation_price_cache_locks in
+// end_receivership, leaving liq_cache_locked set forever and freezing the bank's cache.
+#[tokio::test]
+async fn liquidate_receiver_closed_balances_do_not_leave_stale_cache_lock() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidatee = test_f.create_marginfi_account().await;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    let liquidator_usdc_acc = test_f.usdc_mint.create_token_account_and_mint_to(200).await;
+    liquidator
+        .try_bank_deposit(liquidator_usdc_acc.key, usdc_bank, 100, None)
+        .await?;
+
+    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    // Low value account so full close-out is allowed
+    liquidatee
+        .try_bank_deposit(user_token_sol.key, sol_bank, 0.4, None)
+        .await?;
+    liquidatee
+        .try_bank_borrow(user_token_usdc.key, usdc_bank, 2.0)
+        .await?;
+
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.25).into()),
+                asset_weight_maint: Some(I80F48!(0.4).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    // Confirm banks are unlocked before liquidation
+    assert!(!sol_bank
+        .load()
+        .await
+        .cache
+        .is_liquidation_price_cache_locked());
+    assert!(!usdc_bank
+        .load()
+        .await
+        .cache
+        .is_liquidation_price_cache_locked());
+
+    let (record_pk, _bump) = Pubkey::find_program_address(
+        &[LIQUIDATION_RECORD_SEED.as_bytes(), liquidatee.key.as_ref()],
+        &marginfi::ID,
+    );
+    {
+        let ctx = test_f.context.borrow_mut();
+        let init_ix = liquidatee
+            .make_init_liquidation_record_ix(record_pk, ctx.payer.pubkey())
+            .await;
+        let init_tx = Transaction::new_signed_with_payer(
+            &[init_ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(init_tx)
+            .await?;
+    }
+
+    let payer = test_f.payer().clone();
+    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
+    // withdraw_all closes the sol balance entirely
+    let withdraw_ix = liquidatee
+        .make_bank_withdraw_ix(liquidator_sol_acc.key, sol_bank, 0.4, Some(true))
+        .await;
+    // repay_all closes the usdc liability entirely
+    let repay_ix = liquidatee
+        .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 2.0, Some(true))
+        .await;
+    // Exclude usdc_bank from end_ix remaining accounts since its balance is closed
+    let end_ix = liquidatee
+        .make_end_liquidation_ix(
+            record_pk,
+            payer,
+            test_f.marginfi_group.fee_state,
+            test_f.marginfi_group.fee_wallet,
+            vec![usdc_bank.key],
+        )
+        .await;
+
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[start_ix, withdraw_ix, repay_ix, end_ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    // Both banks must have their liq_cache_locked flag cleared after liquidation.
+    // Before the fix, banks whose balances were closed by withdraw_all/repay_all would
+    // remain locked (stale), because end_receivership only iterated active balances.
+    let sol_bank_state = sol_bank.load().await;
+    let usdc_bank_state = usdc_bank.load().await;
+    assert!(
+        !sol_bank_state.cache.is_liquidation_price_cache_locked(),
+        "sol_bank liq_cache_locked must be cleared after liquidation"
+    );
+    assert!(
+        !usdc_bank_state.cache.is_liquidation_price_cache_locked(),
+        "usdc_bank liq_cache_locked must be cleared after liquidation"
+    );
+
+    Ok(())
+}

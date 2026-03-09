@@ -167,29 +167,12 @@ pub mod marginfi {
         marginfi_group::lending_pool_clone_emode(ctx)
     }
 
-    /// (delegate_emissions_admin only)
-    pub fn lending_pool_setup_emissions(
-        ctx: Context<LendingPoolSetupEmissions>,
-        flags: u64,
-        rate: u64,
-        total_emissions: u64,
+    /// (permissionless) Reclaim all remaining tokens from the emissions vault
+    /// to the global fee wallet ATA, and disable emissions on the bank.
+    pub fn lending_pool_reclaim_emissions_vault(
+        ctx: Context<LendingPoolReclaimEmissionsVault>,
     ) -> MarginfiResult {
-        marginfi_group::lending_pool_setup_emissions(ctx, flags, rate, total_emissions)
-    }
-
-    /// (delegate_emissions_admin only)
-    pub fn lending_pool_update_emissions_parameters(
-        ctx: Context<LendingPoolUpdateEmissionsParameters>,
-        emissions_flags: Option<u64>,
-        emissions_rate: Option<u64>,
-        additional_emissions: Option<u64>,
-    ) -> MarginfiResult {
-        marginfi_group::lending_pool_update_emissions_parameters(
-            ctx,
-            emissions_flags,
-            emissions_rate,
-            additional_emissions,
-        )
+        marginfi_group::lending_pool_reclaim_emissions_vault(ctx)
     }
 
     /// (risk_admin or admin, unless `PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG` is set on the bank)
@@ -338,26 +321,11 @@ pub mod marginfi {
         marginfi_account::lending_account_borrow(ctx, amount)
     }
 
-    /// (account authority) Close a balance position with dust-level amounts. Claims outstanding
-    /// emissions before closing.
+    /// (account authority) Close a balance position with dust-level amounts.
     pub fn lending_account_close_balance(
         ctx: Context<LendingAccountCloseBalance>,
     ) -> MarginfiResult {
         marginfi_account::lending_account_close_balance(ctx)
-    }
-
-    /// (account authority) Settle and withdraw emissions rewards to a destination token account.
-    pub fn lending_account_withdraw_emissions<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingAccountWithdrawEmissions<'info>>,
-    ) -> MarginfiResult {
-        marginfi_account::lending_account_withdraw_emissions(ctx)
-    }
-
-    /// (permissionless) Settle unclaimed emissions into a user's balance without withdrawing.
-    pub fn lending_account_settle_emissions(
-        ctx: Context<LendingAccountSettleEmissions>,
-    ) -> MarginfiResult {
-        marginfi_account::lending_account_settle_emissions(ctx)
     }
 
     /// (permissionless) Liquidate a lending account balance of an unhealthy marginfi account.
@@ -396,10 +364,9 @@ pub mod marginfi {
         marginfi_account::lending_account_end_flashloan(ctx)
     }
 
-    /// (account authority) Set the wallet whose canonical ATA will receive permissionless emissions
-    /// withdrawals.
-    pub fn marginfi_account_update_emissions_destination_account<'info>(
-        ctx: Context<'_, '_, 'info, 'info, MarginfiAccountUpdateEmissionsDestinationAccount<'info>>,
+    /// (account authority) Set the wallet whose canonical ATA will receive off-chain emissions.
+    pub fn marginfi_account_update_emissions_destination_account(
+        ctx: Context<MarginfiAccountUpdateEmissionsDestinationAccount>,
     ) -> MarginfiResult {
         marginfi_account::marginfi_account_update_emissions_destination_account(ctx)
     }
@@ -494,11 +461,12 @@ pub mod marginfi {
         marginfi_account::close_account(ctx)
     }
 
-    /// (permissionless) Withdraw emissions to the user's pre-configured emissions destination ATA.
-    pub fn lending_account_withdraw_emissions_permissionless<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingAccountWithdrawEmissionsPermissionless<'info>>,
+    /// (permissionless) Zero out `emissions_outstanding` on a balance after emissions are disabled
+    /// on the bank.
+    pub fn lending_account_clear_emissions(
+        ctx: Context<LendingAccountClearEmissions>,
     ) -> MarginfiResult {
-        marginfi_account::lending_account_withdraw_emissions_permissionless(ctx)
+        marginfi_account::lending_account_clear_emissions(ctx)
     }
 
     /// (Permissionless) Refresh the internal risk engine health cache. Useful for liquidators and

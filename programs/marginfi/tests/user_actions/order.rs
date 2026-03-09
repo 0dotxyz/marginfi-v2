@@ -88,12 +88,6 @@ async fn setup_execution_fixture_with_params(
         .try_bank_deposit(uninvolved_account.key, uninvolved_bank_f, 0.5, None)
         .await?;
 
-    // set emissions destination to the authority before placing order
-    let authority = borrower_mfi_account_f.load().await.authority;
-    borrower_mfi_account_f
-        .try_set_emissions_destination(authority)
-        .await?;
-
     // place the order with the provided trigger
     let bank_keys = vec![asset_bank_f.key, liability_bank_f.key];
     let order_pda = borrower_mfi_account_f
@@ -1007,12 +1001,6 @@ async fn place_order_success_one_asset_one_liability(
     // Test
     // ---------------------------------------------------------------------
 
-    // set emissions destination to the authority before placing order
-    let authority = borrower_mfi_account_f.load().await.authority;
-    borrower_mfi_account_f
-        .try_set_emissions_destination(authority)
-        .await?;
-
     let bank_keys = vec![asset_bank_f.key, liability_bank_f.key];
 
     let order_pda = borrower_mfi_account_f
@@ -1077,12 +1065,6 @@ async fn place_order_fail_invalid_sl_or_tp(
     // Test
     // ---------------------------------------------------------------------
 
-    // set emissions destination to the authority before placing order
-    let authority = borrower_mfi_account_f.load().await.authority;
-    borrower_mfi_account_f
-        .try_set_emissions_destination(authority)
-        .await?;
-
     let bank_keys = vec![asset_bank_f.key, liability_bank_f.key];
 
     let result = borrower_mfi_account_f
@@ -1129,12 +1111,6 @@ async fn place_order_fail_invalid_slippage(
     // Test
     // ---------------------------------------------------------------------
 
-    // set emissions destination to the authority before placing order
-    let authority = borrower_mfi_account_f.load().await.authority;
-    borrower_mfi_account_f
-        .try_set_emissions_destination(authority)
-        .await?;
-
     let bank_keys = vec![asset_bank_f.key, liability_bank_f.key];
 
     let result = borrower_mfi_account_f
@@ -1177,12 +1153,6 @@ async fn place_order_fails_both_assets(
     // ---------------------------------------------------------------------
     // Test
     // ---------------------------------------------------------------------
-
-    // set emissions destination to the authority before placing order
-    let authority = mfi_account_f.load().await.authority;
-    mfi_account_f
-        .try_set_emissions_destination(authority)
-        .await?;
 
     let bank_keys = vec![first_bank_f.key, second_bank_f.key];
 
@@ -1228,12 +1198,6 @@ async fn place_order_fails_same_order_twice(
     // Test
     // ---------------------------------------------------------------------
 
-    // set emissions destination to the authority before placing order
-    let authority = borrower_mfi_account_f.load().await.authority;
-    borrower_mfi_account_f
-        .try_set_emissions_destination(authority)
-        .await?;
-
     let bank_keys = vec![asset_bank_f.key, liability_bank_f.key];
     borrower_mfi_account_f
         .try_place_order(bank_keys.clone(), trigger)
@@ -1276,12 +1240,6 @@ async fn close_order_success_authority(
         liability_borrow,
     )
     .await?;
-
-    // set emissions destination to the authority before placing order
-    let authority = borrower_mfi_account_f.load().await.authority;
-    borrower_mfi_account_f
-        .try_set_emissions_destination(authority)
-        .await?;
 
     let bank_keys = vec![asset_bank_f.key, liability_bank_f.key];
     let order_pda = borrower_mfi_account_f
@@ -1338,12 +1296,6 @@ async fn keeper_close_order_success_after_clearing_side(
         liability_borrow,
     )
     .await?;
-
-    // set emissions destination to the authority before placing order
-    let authority = borrower_mfi_account_f.load().await.authority;
-    borrower_mfi_account_f
-        .try_set_emissions_destination(authority)
-        .await?;
 
     let bank_keys = vec![asset_bank_f.key, liability_bank_f.key];
     let order_pda = borrower_mfi_account_f
@@ -1408,12 +1360,6 @@ async fn keeper_can_close_order_after_marginfi_account_closed(
         liability_borrow,
     )
     .await?;
-
-    // set emissions destination to the authority before placing order
-    let authority = borrower_mfi_account_f.load().await.authority;
-    borrower_mfi_account_f
-        .try_set_emissions_destination(authority)
-        .await?;
 
     let bank_keys = vec![asset_bank_f.key, liability_bank_f.key];
     let order_pda = borrower_mfi_account_f
@@ -1496,12 +1442,6 @@ async fn keeper_close_order_fails_active_tags(
     )
     .await?;
 
-    // set emissions destination to the authority before placing order
-    let authority = borrower_mfi_account_f.load().await.authority;
-    borrower_mfi_account_f
-        .try_set_emissions_destination(authority)
-        .await?;
-
     let bank_keys = vec![asset_bank_f.key, liability_bank_f.key];
     let order_pda = borrower_mfi_account_f
         .try_place_order(bank_keys.clone(), trigger)
@@ -1556,12 +1496,6 @@ async fn set_liquidator_close_order_flags_success(
         liability_borrow,
     )
     .await?;
-
-    // set emissions destination to the authority before placing order
-    let authority = borrower_mfi_account_f.load().await.authority;
-    borrower_mfi_account_f
-        .try_set_emissions_destination(authority)
-        .await?;
 
     let bank_keys = vec![asset_bank_f.key, liability_bank_f.key];
     let order_pda = borrower_mfi_account_f
@@ -1629,12 +1563,6 @@ async fn keeper_close_order_success_after_set_flags(
         liability_borrow,
     )
     .await?;
-
-    // set emissions destination to the authority before placing order
-    let authority = borrower_mfi_account_f.load().await.authority;
-    borrower_mfi_account_f
-        .try_set_emissions_destination(authority)
-        .await?;
 
     let bank_keys = vec![asset_bank_f.key, liability_bank_f.key];
     let order_pda = borrower_mfi_account_f
