@@ -856,6 +856,7 @@ describe("d12: Drift Harvest Reward", () => {
       [driftTokenBBank, oracles.tokenBOracle.publicKey, driftTokenBSpotMarket],
     ]);
     const healthBeforeTx = new Transaction().add(
+      dummyIx(user.wallet.publicKey, ecosystem.tokenBMint.publicKey),
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount,
         remaining: healthRemaining,
@@ -944,6 +945,7 @@ describe("d12: Drift Harvest Reward", () => {
     );
 
     const healthAfterTx = new Transaction().add(
+      dummyIx(user.wallet.publicKey, ecosystem.tokenBMint.publicKey),
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount,
         remaining: healthRemaining,
