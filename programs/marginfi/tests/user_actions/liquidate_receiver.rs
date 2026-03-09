@@ -1348,7 +1348,13 @@ async fn liquidate_receiver_other_account_withdraw_all_clears_bank_cache_lock() 
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let liquidator = test_f.create_marginfi_account().await;
-    let liquidatee = test_f.create_marginfi_account().await;
+    let liquidatee_authority = Keypair::new();
+    let liquidatee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &liquidatee_authority,
+    )
+    .await;
 
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
@@ -1364,13 +1370,31 @@ async fn liquidate_receiver_other_account_withdraw_all_clears_bank_cache_lock() 
         .await?;
 
     // Liquidatee: deposit SOL, borrow USDC
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&liquidatee_authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&liquidatee_authority.pubkey())
+        .await;
     liquidatee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 2.0, None)
+        .try_bank_deposit_with_authority(
+            user_token_sol.key,
+            sol_bank,
+            2.0,
+            None,
+            &liquidatee_authority,
+        )
         .await?;
     liquidatee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .try_bank_borrow_with_authority(
+            user_token_usdc.key,
+            usdc_bank,
+            10.0,
+            0,
+            &liquidatee_authority,
+        )
         .await?;
 
     // Make liquidatee unhealthy
@@ -1466,7 +1490,13 @@ async fn liquidate_receiver_other_account_repay_all_clears_bank_cache_lock() -> 
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let liquidator = test_f.create_marginfi_account().await;
-    let liquidatee = test_f.create_marginfi_account().await;
+    let liquidatee_authority = Keypair::new();
+    let liquidatee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &liquidatee_authority,
+    )
+    .await;
 
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
@@ -1478,9 +1508,18 @@ async fn liquidate_receiver_other_account_repay_all_clears_bank_cache_lock() -> 
         .await?;
 
     // Liquidatee deposits SOL (provides sol_bank liquidity for liquidator to borrow)
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&liquidatee_authority.pubkey(), 10)
+        .await;
     liquidatee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 2.0, None)
+        .try_bank_deposit_with_authority(
+            user_token_sol.key,
+            sol_bank,
+            2.0,
+            None,
+            &liquidatee_authority,
+        )
         .await?;
 
     // Liquidator borrows a small amount of SOL (using USDC as collateral)
@@ -1490,9 +1529,18 @@ async fn liquidate_receiver_other_account_repay_all_clears_bank_cache_lock() -> 
         .await?;
 
     // Liquidatee borrows USDC
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&liquidatee_authority.pubkey())
+        .await;
     liquidatee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .try_bank_borrow_with_authority(
+            user_token_usdc.key,
+            usdc_bank,
+            10.0,
+            0,
+            &liquidatee_authority,
+        )
         .await?;
 
     // Make liquidatee unhealthy
@@ -1693,7 +1741,13 @@ async fn liquidate_receiver_closed_balances_do_not_leave_stale_cache_lock() -> a
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let liquidator = test_f.create_marginfi_account().await;
-    let liquidatee = test_f.create_marginfi_account().await;
+    let liquidatee_authority = Keypair::new();
+    let liquidatee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &liquidatee_authority,
+    )
+    .await;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
 
@@ -1702,14 +1756,32 @@ async fn liquidate_receiver_closed_balances_do_not_leave_stale_cache_lock() -> a
         .try_bank_deposit(liquidator_usdc_acc.key, usdc_bank, 100, None)
         .await?;
 
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&liquidatee_authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&liquidatee_authority.pubkey())
+        .await;
     // Low value account so full close-out is allowed
     liquidatee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 0.4, None)
+        .try_bank_deposit_with_authority(
+            user_token_sol.key,
+            sol_bank,
+            0.4,
+            None,
+            &liquidatee_authority,
+        )
         .await?;
     liquidatee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 2.0)
+        .try_bank_borrow_with_authority(
+            user_token_usdc.key,
+            usdc_bank,
+            2.0,
+            0,
+            &liquidatee_authority,
+        )
         .await?;
 
     sol_bank
@@ -1766,14 +1838,14 @@ async fn liquidate_receiver_closed_balances_do_not_leave_stale_cache_lock() -> a
     let repay_ix = liquidatee
         .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 2.0, Some(true))
         .await;
-    // Exclude usdc_bank from end_ix remaining accounts since its balance is closed
+    // Exclude both banks from end_ix remaining accounts since both balances are closed.
     let end_ix = liquidatee
         .make_end_liquidation_ix(
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,
             test_f.marginfi_group.fee_wallet,
-            vec![usdc_bank.key],
+            vec![usdc_bank.key, sol_bank.key],
         )
         .await;
 
