@@ -135,6 +135,7 @@ process_program() {
   echo "Generating TS..."
   generate_ts_from_idl "${final_idl}" "${ts_file}"
 
+# TODO: test and enable
 #   echo "Downloading program .so..."
 #   download_program_so "${program_id}" "${so_file}"
 
