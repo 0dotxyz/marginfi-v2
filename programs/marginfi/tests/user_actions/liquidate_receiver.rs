@@ -1121,13 +1121,12 @@ async fn liquidate_receiver_allows_negative_profit() -> anyhow::Result<()> {
     Ok(())
 }
 
-// Unlocking a bank's liq_cache_locked flag mid-liquidation (via withdraw_all or repay_all on
-// a different MarginfiAccount sharing the same bank) should fail, because end_liquidation
-// requires the lock to be held for every bank the liquidatee still has positions in.
-
+// Calling withdraw_all on a non-receivership account that shares a bank with the liquidatee
+// must NOT clear the bank's liq_cache_locked flag. The lock is only cleared when the account
+// being operated on has ACCOUNT_IN_RECEIVERSHIP set, preventing cross-account interference.
 #[tokio::test]
-async fn liquidate_receiver_other_account_withdraw_all_clears_bank_cache_lock() -> anyhow::Result<()>
-{
+async fn liquidate_receiver_other_account_withdraw_all_does_not_clear_bank_cache_lock(
+) -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let liquidator = test_f.create_marginfi_account().await;
@@ -1202,7 +1201,7 @@ async fn liquidate_receiver_other_account_withdraw_all_clears_bank_cache_lock() 
         .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 2.0, None)
         .await;
 
-    // Liquidator's withdraw_all on sol_bank unlocks the bank mid-liquidation
+    // Liquidator's withdraw_all on sol_bank — should NOT affect the bank's liq_cache lock
     let liquidator_sol_dest2 = test_f.sol_mint.create_empty_token_account().await;
     let liquidator_withdraw_all_ix = liquidator
         .make_bank_withdraw_ix(liquidator_sol_dest2.key, sol_bank, 0.5, Some(true))
@@ -1238,14 +1237,17 @@ async fn liquidate_receiver_other_account_withdraw_all_clears_bank_cache_lock() 
         .process_transaction_with_preflight(tx)
         .await;
 
-    // Fails: unlocking bank mid-liquidation should fail
-    assert!(res.is_err());
-    assert_custom_error!(res.unwrap_err(), MarginfiError::InternalLogicError);
+    // Succeeds: withdraw_all on a non-receivership account should NOT clear the
+    // bank's liq_cache_locked flag, so the liquidation completes normally.
+    assert!(res.is_ok());
     Ok(())
 }
 
+// Same as above but for repay_all: repaying on a non-receivership account that shares a bank
+// with the liquidatee must NOT clear the bank's liq_cache_locked flag.
 #[tokio::test]
-async fn liquidate_receiver_other_account_repay_all_clears_bank_cache_lock() -> anyhow::Result<()> {
+async fn liquidate_receiver_other_account_repay_all_does_not_clear_bank_cache_lock(
+) -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let liquidator = test_f.create_marginfi_account().await;
@@ -1324,7 +1326,7 @@ async fn liquidate_receiver_other_account_repay_all_clears_bank_cache_lock() -> 
         .make_repay_ix(liquidator_usdc_acc.key, usdc_bank, 2.0, None)
         .await;
 
-    // Liquidator's repay_all on sol_bank unlocks the bank mid-liquidation
+    // Liquidator's repay_all on sol_bank — should NOT affect the bank's liq_cache lock
     let liquidator_repay_all_ix = liquidator
         .make_repay_ix(liquidator_sol_acc.key, sol_bank, 0.01, Some(true))
         .await;
@@ -1359,15 +1361,14 @@ async fn liquidate_receiver_other_account_repay_all_clears_bank_cache_lock() -> 
         .process_transaction_with_preflight(tx)
         .await;
 
-    // Fails: unlocking bank mid-liquidation should fail
-    assert!(res.is_err());
-    assert_custom_error!(res.unwrap_err(), MarginfiError::InternalLogicError);
+    // Succeeds: repay_all on a non-receivership account should NOT clear the
+    // bank's liq_cache_locked flag, so the liquidation completes normally.
+    assert!(res.is_ok());
     Ok(())
 }
 
 // close_balance is not in the allowed instruction list for liquidation, so including it
-// in a receivership transaction must be rejected with ForbiddenIx.
-// otherwise there might be edge case of unlocking bank mid
+// as a top-level instruction in a receivership transaction must be rejected with ForbiddenIx.
 #[tokio::test]
 async fn liquidate_receiver_close_balance_forbidden() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
