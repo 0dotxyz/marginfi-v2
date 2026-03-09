@@ -10,9 +10,8 @@ use anchor_spl::token_interface::{
 };
 use kamino_mocks::kamino_lending::cpi::accounts::{
     DepositReserveLiquidityAndObligationCollateral,
-    DepositReserveLiquidityAndObligationCollateralV2, InitObligation,
+    DepositReserveLiquidityAndObligationCollateralV2, FarmsAccounts, InitObligation,
     InitObligationFarmsForReserve, InitUserMetadata, RefreshObligation, RefreshReserve,
-    SocializeLossV2FarmsAccounts,
 };
 use kamino_mocks::kamino_lending::cpi::{
     deposit_reserve_liquidity_and_obligation_collateral_v2, init_obligation,
@@ -313,7 +312,7 @@ impl<'info> KaminoInitObligation<'info> {
         };
 
         // --- optional “farms_accounts” group ---
-        let farms_accounts = SocializeLossV2FarmsAccounts {
+        let farms_accounts = FarmsAccounts {
             obligation_farm_user_state: optional_account!(self.obligation_farm_user_state),
             reserve_farm_state: optional_account!(self.reserve_farm_state),
         };
@@ -321,7 +320,7 @@ impl<'info> KaminoInitObligation<'info> {
         // --- wrap both groups in the outer struct ---
         let accounts = DepositReserveLiquidityAndObligationCollateralV2 {
             deposit_accounts,
-            farms_accounts,
+            deposit_farms_accounts: farms_accounts,
             farms_program: self.farms_program.to_account_info(),
         };
         let program = self.kamino_program.to_account_info();

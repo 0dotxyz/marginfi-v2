@@ -152,6 +152,8 @@ describe("k18: 16 Kamino position liquidation test", () => {
       const mint = ecosystem.tokenAMint.publicKey;
 
       await createReserve(
+        reserveKeypair,
+        marketKeypair.publicKey,
         mint,
         "TOKEN_A",
         ecosystem.tokenADecimals,
@@ -202,7 +204,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
             bank: bankKey,
             signerTokenAccount: groupAdmin.tokenAAccount,
             lendingMarket: marketKeypair.publicKey,
-            reserve: tokenAReserve,
+            reserve: reserveKeypair.publicKey,
             pythOracle: oracles.tokenAOracle.publicKey,
           },
           new BN(100),
@@ -380,10 +382,10 @@ describe("k18: 16 Kamino position liquidation test", () => {
           user.mrgnBankrunProgram,
           {
             marginfiAccount: userAccount,
-            bank: bank,
+            bank,
             signerTokenAccount: user.tokenAAccount,
             lendingMarket: market,
-            reserve: tokenAReserve,
+            reserve,
           },
           depositAmount,
         ),
@@ -647,7 +649,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
           bank: kaminoBanks[0],
           signerTokenAccount: user.tokenAAccount,
           lendingMarket: kaminoMarkets[0],
-          reserve: tokenAReserve,
+          reserve: kaminoReserves[0],
         },
         depositAmountTokenA,
       ),

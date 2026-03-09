@@ -35,7 +35,7 @@ use fixed::types::I80F48;
 use kamino_mocks::kamino_lending::cpi::withdraw_obligation_collateral_and_redeem_reserve_collateral_v2;
 use kamino_mocks::{
     kamino_lending::cpi::accounts::{
-        SocializeLossV2FarmsAccounts, WithdrawObligationCollateralAndRedeemReserveCollateral,
+        FarmsAccounts, WithdrawObligationCollateralAndRedeemReserveCollateral,
         WithdrawObligationCollateralAndRedeemReserveCollateralV2,
     },
     state::{MinimalObligation, MinimalReserve},
@@ -458,15 +458,13 @@ impl<'info> KaminoWithdraw<'info> {
             user_destination_liquidity: self.liquidity_vault.to_account_info(),
             withdraw_reserve: self.integration_acc_1.to_account_info(),
         };
-        let farms_accounts = SocializeLossV2FarmsAccounts {
+        let farms_accounts = FarmsAccounts {
             obligation_farm_user_state: optional_account!(self.obligation_farm_user_state),
             reserve_farm_state: optional_account!(self.reserve_farm_state),
         };
         let accounts = WithdrawObligationCollateralAndRedeemReserveCollateralV2 {
-            withdraw_obligation_collateral_and_redeem_reserve_collateral_v2_withdraw_accounts:
-                withdraw_accounts,
-            withdraw_obligation_collateral_and_redeem_reserve_collateral_v2_farms_accounts:
-                farms_accounts,
+            withdraw_accounts,
+            withdraw_farms_accounts: farms_accounts,
             farms_program: self.farms_program.to_account_info(),
         };
         let program = self.kamino_program.to_account_info();
