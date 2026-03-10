@@ -19,13 +19,14 @@ import {
   users,
 } from "./rootHooks";
 import {
+  assertBankrunTxFailed,
   assertBNEqual,
   assertBNGreaterThan,
   assertI80F48Equal,
   getTokenBalance,
 } from "./utils/genericTests";
 import { accountInit } from "./utils/user-instructions";
-import { mintToTokenAccount, processBankrunTransaction } from "./utils/tools";
+import { dumpBankrunLogs, mintToTokenAccount, processBankrunTransaction } from "./utils/tools";
 import {
   makeJuplendDepositIx,
   makeJuplendNativeBorrowIx,
@@ -303,7 +304,8 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       true,
     );
 
-    assert("result" in result, "expected zero-amount JupLend deposit to fail");
+    // Juplend's OperateAmountsNearlyZero.
+    assertBankrunTxFailed(result, 6030);
   });
 
   it("(admin) deposits tokenA and borrows USDC from native jup to generate interest", async () => {
