@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
-use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
+use marginfi_type_crate::types::{
+    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+};
 
 use crate::{
     check,
@@ -40,12 +42,13 @@ pub fn lending_account_close_balance(ctx: Context<LendingAccountCloseBalance>) -
 
     bank.update_bank_cache(group)?;
 
+    let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
     let lending_account: &mut marginfi_type_crate::types::LendingAccount =
         &mut marginfi_account.lending_account;
     let mut bank_account =
         BankAccountWrapper::find(&bank_loader.key(), &mut bank, lending_account)?;
 
-    bank_account.close_balance()?;
+    bank_account.close_balance(in_receivership)?;
     lending_account.sort_balances();
     marginfi_account.last_update = Clock::get()?.unix_timestamp as u64;
 
