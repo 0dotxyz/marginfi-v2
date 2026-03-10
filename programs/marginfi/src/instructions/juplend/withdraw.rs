@@ -110,6 +110,7 @@ pub fn juplend_withdraw<'info>(
             I80F48::ZERO
         };
 
+        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
         let mut bank_account = BankAccountWrapper::find(
             &ctx.accounts.bank.key(),
             &mut bank,
