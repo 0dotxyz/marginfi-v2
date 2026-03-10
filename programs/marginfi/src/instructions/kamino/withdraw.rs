@@ -132,11 +132,15 @@ pub fn kamino_withdraw<'info>(
             I80F48::ZERO
         };
 
-        let mut bank_account =
-            BankAccountWrapper::find(&bank_key, &mut bank, &mut marginfi_account.lending_account)?;
+        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
+        let mut bank_account = BankAccountWrapper::find(
+            &ctx.accounts.bank.key(),
+            &mut bank,
+            &mut marginfi_account.lending_account,
+        )?;
 
         collateral_amount = if withdraw_all {
-            bank_account.withdraw_all()?
+            bank_account.withdraw_all(in_receivership)?
         } else {
             bank_account.withdraw(I80F48::from_num(amount))?;
             amount

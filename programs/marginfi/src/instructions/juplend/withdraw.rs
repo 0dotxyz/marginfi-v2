@@ -118,7 +118,7 @@ pub fn juplend_withdraw<'info>(
 
         let (token_amount, shares_to_burn) = if withdraw_all {
             // `withdraw_all` returns the user's full fToken share balance (u64).
-            let f_tokens_balance = bank_account.withdraw_all()?;
+            let f_tokens_balance = bank_account.withdraw_all(in_receivership)?;
             // Redeemable underlying = floor(shares * price / 1e12)
             // Then recalculate shares_to_burn from token_amount to guarantee we match
             // JupLend's expected burn amount (should be identical, but this is safer).

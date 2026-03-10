@@ -1729,7 +1729,9 @@ impl<'a> BankAccountWrapper<'a> {
     }
 
     /// Withdraw existing asset in full - will error if there is no asset.
-    pub fn withdraw_all(&mut self) -> MarginfiResult<u64> {
+    /// When `in_receivership` is true, clears the bank's liquidation price cache lock
+    /// so that banks whose balances are closed mid-liquidation don't stay permanently locked.
+    pub fn withdraw_all(&mut self, in_receivership: bool) -> MarginfiResult<u64> {
         let balance = &mut self.balance;
         let bank = &mut self.bank;
 
@@ -1752,9 +1754,12 @@ impl<'a> BankAccountWrapper<'a> {
 
         balance.close()?;
 
-        // Note: We do this so that banks in the receivership/deleverage flow are unlocked, as
-        // closed-position banks will not make it to the "end" instruction to be unlocked there
-        bank.cache.clear_liquidation_price_cache_locked();
+        // Only clear the lock when this account is actually in receivership.
+        // The lock is bank-level global state, so clearing it unconditionally
+        // would affect unrelated accounts sharing the same bank.
+        if in_receivership {
+            bank.cache.clear_liquidation_price_cache_locked();
+        }
 
         bank.decrement_lending_position_count();
         bank.change_asset_shares(-total_asset_shares, false)?;
@@ -1779,7 +1784,9 @@ impl<'a> BankAccountWrapper<'a> {
     }
 
     /// Repay existing liability in full - will error if there is no liability.
-    pub fn repay_all(&mut self) -> MarginfiResult<u64> {
+    /// When `in_receivership` is true, clears the bank's liquidation price cache lock
+    /// so that banks whose balances are closed mid-liquidation don't stay permanently locked.
+    pub fn repay_all(&mut self, in_receivership: bool) -> MarginfiResult<u64> {
         let balance = &mut self.balance;
         let bank = &mut self.bank;
 
@@ -1801,9 +1808,12 @@ impl<'a> BankAccountWrapper<'a> {
 
         balance.close()?;
 
-        // Note: We do this so that banks in the receivership/deleverage flow are unlocked, as
-        // closed-position banks will not make it to the "end" instruction to be unlocked there
-        bank.cache.clear_liquidation_price_cache_locked();
+        // Only clear the lock when this account is actually in receivership.
+        // The lock is bank-level global state, so clearing it unconditionally
+        // would affect unrelated accounts sharing the same bank.
+        if in_receivership {
+            bank.cache.clear_liquidation_price_cache_locked();
+        }
 
         bank.decrement_borrowing_position_count();
         bank.change_liability_shares(-total_liability_shares, false)?;
@@ -1826,7 +1836,9 @@ impl<'a> BankAccountWrapper<'a> {
             .ok_or_else(math_error!())?)
     }
 
-    pub fn close_balance(&mut self) -> MarginfiResult<()> {
+    /// When `in_receivership` is true, clears the bank's liquidation price cache lock
+    /// so that banks whose balances are closed mid-liquidation don't stay permanently locked.
+    pub fn close_balance(&mut self, in_receivership: bool) -> MarginfiResult<()> {
         let balance = &mut self.balance;
         let bank = &mut self.bank;
 
@@ -1847,6 +1859,10 @@ impl<'a> BankAccountWrapper<'a> {
         );
 
         balance.close()?;
+
+        if in_receivership {
+            bank.cache.clear_liquidation_price_cache_locked();
+        }
 
         Ok(())
     }
