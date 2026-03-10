@@ -286,6 +286,26 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     );
   });
 
+  it("(user 0) deposit 0 into JupLend USDC bank - should fail", async () => {
+    const depositIx = await makeJuplendDepositIx(user.mrgnBankrunProgram!, {
+      marginfiAccount: user0MarginfiAccount.publicKey,
+      signerTokenAccount: user.usdcAccount,
+      bank: usdcJupBankPk,
+      pool: usdcJupPool,
+      amount: new BN(0),
+    });
+
+    const result = await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(depositIx),
+      [user.wallet],
+      true,
+      true,
+    );
+
+    assert("result" in result, "expected zero-amount JupLend deposit to fail");
+  });
+
   it("(admin) deposits tokenA and borrows USDC from native jup to generate interest", async () => {
     const [adminUsdcSupplyPosition] = findJuplendLiquiditySupplyPositionPda(
       usdcJupPool.mint,

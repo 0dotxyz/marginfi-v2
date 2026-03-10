@@ -180,7 +180,7 @@ pub fn is_signer_authorized(
     allow_order_execution: bool,
 ) -> bool {
     if allow_receivership && marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
-        return marginfi_account.authority != signer; // it is forbidden to take receivership of your own account
+        return marginfi_account.authority != signer; // forbidden to take receivership of your own account
     }
 
     if allow_order_execution && marginfi_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION) {

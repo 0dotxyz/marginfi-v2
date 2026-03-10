@@ -20,7 +20,7 @@ import {
 import { processBankrunTransaction } from "./utils/tools";
 import { ProgramTestContext } from "solana-bankrun";
 import { assert } from "chai";
-import { getTokenBalance } from "./utils/genericTests";
+import { assertBankrunTxFailed, getTokenBalance } from "./utils/genericTests";
 import {
   deriveLendingMarketAuthority,
   deriveReserveCollateralMint,
@@ -103,6 +103,66 @@ describe("k03: Deposit to Kamino reserve", () => {
     ]);
     assert.equal(userBefore - userAfter, depositAmt);
     assert.equal(vaultAfter - vaultBefore, depositAmt);
+  });
+
+  it("(user 0) Deposit 0 USDC to Kamino reserve - should fail", async () => {
+    const user = users[0];
+    const market = kaminoAccounts.get(MARKET);
+    const usdcReserve = kaminoAccounts.get(USDC_RESERVE);
+
+    const [lendingMarketAuthority] = deriveLendingMarketAuthority(
+      KLEND_PROGRAM_ID,
+      market,
+    );
+    const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
+      KLEND_PROGRAM_ID,
+      usdcReserve,
+    );
+    const [reserveCollateralMint] = deriveReserveCollateralMint(
+      KLEND_PROGRAM_ID,
+      usdcReserve,
+    );
+    const [reserveDestinationDepositCollateral] = deriveReserveCollateralSupply(
+      KLEND_PROGRAM_ID,
+      usdcReserve,
+    );
+
+    const obligation = user.accounts.get(KAMINO_OBLIGATION);
+
+    const tx = new Transaction().add(
+      await simpleRefreshReserve(
+        klendBankrunProgram,
+        usdcReserve,
+        market,
+        oracles.usdcOracle.publicKey,
+      ),
+      await simpleRefreshObligation(klendBankrunProgram, market, obligation, [
+        usdcReserve,
+      ]),
+      await klendBankrunProgram.methods
+        .depositReserveLiquidityAndObligationCollateral(new BN(0))
+        .accounts({
+          owner: user.wallet.publicKey,
+          obligation: obligation,
+          lendingMarket: market,
+          lendingMarketAuthority: lendingMarketAuthority,
+          reserve: usdcReserve,
+          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserveLiquiditySupply,
+          reserveCollateralMint,
+          reserveDestinationDepositCollateral,
+          userSourceLiquidity: user.usdcAccount,
+          placeholderUserDestinationCollateral: null,
+          collateralTokenProgram: TOKEN_PROGRAM_ID,
+          liquidityTokenProgram: TOKEN_PROGRAM_ID,
+          instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
+        })
+        .instruction(),
+    );
+
+    const result = await processBankrunTransaction(ctx, tx, [user.wallet], true);
+    // Kamino Error Code: InvalidAmount. Error Number: 6003.
+    assertBankrunTxFailed(result, 6003);
   });
 
   const withdrawAmt: number = 10_000;

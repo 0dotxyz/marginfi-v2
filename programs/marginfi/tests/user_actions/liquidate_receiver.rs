@@ -1644,7 +1644,13 @@ async fn liquidate_receiver_other_account_close_balance_via_cpi_does_not_clear_b
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let liquidator = test_f.create_marginfi_account().await;
-    let liquidatee = test_f.create_marginfi_account().await;
+    let liquidatee_authority = Keypair::new();
+    let liquidatee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &liquidatee_authority,
+    )
+    .await;
 
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
@@ -1656,13 +1662,31 @@ async fn liquidate_receiver_other_account_close_balance_via_cpi_does_not_clear_b
         .await?;
 
     // Liquidatee setup.
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&liquidatee_authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&liquidatee_authority.pubkey())
+        .await;
     liquidatee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 2.0, None)
+        .try_bank_deposit_with_authority(
+            user_token_sol.key,
+            sol_bank,
+            2.0,
+            None,
+            &liquidatee_authority,
+        )
         .await?;
     liquidatee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .try_bank_borrow_with_authority(
+            user_token_usdc.key,
+            usdc_bank,
+            10.0,
+            0,
+            &liquidatee_authority,
+        )
         .await?;
 
     // Create an empty-but-active SOL balance on liquidator so close_balance is valid.
@@ -1786,15 +1810,21 @@ async fn liquidate_receiver_other_account_close_balance_via_cpi_does_not_clear_b
     Ok(())
 }
 
-// Same lock-preservation invariant as above, but with a true second user (distinct authority signer).
-// The second user performs withdraw_all on a shared bank during A's receivership liquidation.
+// Same lock-preservation invariant as above, with another distinct-authority external signer.
+// That external user performs withdraw_all on a shared bank during A's receivership liquidation.
 #[tokio::test]
-async fn liquidate_receiver_second_user_signed_withdraw_all_does_not_clear_bank_cache_lock(
+async fn liquidate_receiver_external_user_signed_withdraw_all_does_not_clear_bank_cache_lock(
 ) -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let liquidator = test_f.create_marginfi_account().await;
-    let liquidatee = test_f.create_marginfi_account().await;
+    let liquidatee_authority = Keypair::new();
+    let liquidatee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &liquidatee_authority,
+    )
+    .await;
 
     // Independent user B with a different authority than payer.
     let user_b_authority = Keypair::new();
@@ -1815,13 +1845,31 @@ async fn liquidate_receiver_second_user_signed_withdraw_all_does_not_clear_bank_
         .await?;
 
     // Liquidatee setup.
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&liquidatee_authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&liquidatee_authority.pubkey())
+        .await;
     liquidatee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 2.0, None)
+        .try_bank_deposit_with_authority(
+            user_token_sol.key,
+            sol_bank,
+            2.0,
+            None,
+            &liquidatee_authority,
+        )
         .await?;
     liquidatee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .try_bank_borrow_with_authority(
+            user_token_usdc.key,
+            usdc_bank,
+            10.0,
+            0,
+            &liquidatee_authority,
+        )
         .await?;
 
     // User B creates a closeable SOL position on the same bank and will withdraw_all later.
@@ -1933,7 +1981,7 @@ async fn liquidate_receiver_second_user_signed_withdraw_all_does_not_clear_bank_
     assert!(!liquidator_ma.get_flag(ACCOUNT_IN_RECEIVERSHIP));
     assert!(!user_b_ma.get_flag(ACCOUNT_IN_RECEIVERSHIP));
 
-    // External second user's shared-bank balance should have been closed by withdraw_all.
+    // External user's shared-bank balance should have been closed by withdraw_all.
     assert!(user_b_ma
         .lending_account
         .balances
@@ -1945,6 +1993,99 @@ async fn liquidate_receiver_second_user_signed_withdraw_all_does_not_clear_bank_
     let usdc_bank_state = usdc_bank.load().await;
     assert!(!sol_bank_state.cache.is_liquidation_price_cache_locked());
     assert!(!usdc_bank_state.cache.is_liquidation_price_cache_locked());
+    Ok(())
+}
+
+// During receivership, the liquidatee authority itself cannot act as liquidation receiver.
+// A same-authority withdraw should fail with Unauthorized.
+#[tokio::test]
+async fn liquidate_receiver_same_authority_withdraw_fails_unauthorized() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidatee = test_f.create_marginfi_account().await;
+
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    // Provide USDC liquidity for the liquidatee borrow.
+    let liquidator_usdc_acc = test_f.usdc_mint.create_token_account_and_mint_to(200).await;
+    liquidator
+        .try_bank_deposit(liquidator_usdc_acc.key, usdc_bank, 100, None)
+        .await?;
+
+    // Liquidatee setup (authority == payer in this fixture).
+    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    liquidatee
+        .try_bank_deposit(user_token_sol.key, sol_bank, 2.0, None)
+        .await?;
+    liquidatee
+        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .await?;
+
+    // Make liquidatee unhealthy so liquidation can start.
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.25).into()),
+                asset_weight_maint: Some(I80F48!(0.4).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let (record_pk, _bump) = Pubkey::find_program_address(
+        &[LIQUIDATION_RECORD_SEED.as_bytes(), liquidatee.key.as_ref()],
+        &marginfi::ID,
+    );
+    {
+        let ctx = test_f.context.borrow_mut();
+        let init_ix = liquidatee
+            .make_init_liquidation_record_ix(record_pk, ctx.payer.pubkey())
+            .await;
+        let init_tx = Transaction::new_signed_with_payer(
+            &[init_ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(init_tx)
+            .await?;
+    }
+
+    let payer = test_f.payer();
+    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let withdraw_ix = liquidatee
+        .make_bank_withdraw_ix(user_token_sol.key, sol_bank, 0.1, None)
+        .await;
+    let end_ix = liquidatee
+        .make_end_liquidation_ix(
+            record_pk,
+            payer,
+            test_f.marginfi_group.fee_state,
+            test_f.marginfi_group.fee_wallet,
+            vec![],
+        )
+        .await;
+
+    let compute_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_000_000);
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(
+        &[compute_ix, start_ix, withdraw_ix, end_ix],
+        Some(&ctx.payer.pubkey()),
+        &[&ctx.payer],
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
+    );
+    let res = ctx
+        .banks_client
+        .process_transaction_with_preflight(tx)
+        .await;
+
+    assert!(res.is_err());
+    assert_custom_error!(res.unwrap_err(), MarginfiError::Unauthorized);
     Ok(())
 }
 
