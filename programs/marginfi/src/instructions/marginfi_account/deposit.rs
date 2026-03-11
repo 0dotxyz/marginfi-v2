@@ -71,6 +71,13 @@ pub fn lending_account_deposit<'info>(
         MarginfiError::AccountDisabled
     );
 
+    bank.accrue_interest(
+        clock.unix_timestamp,
+        &group,
+        #[cfg(not(feature = "client"))]
+        bank_loader.key(),
+    )?;
+
     let deposit_amount = if deposit_up_to_limit {
         amount.min(bank.get_remaining_deposit_capacity()?)
     } else {
@@ -80,12 +87,6 @@ pub fn lending_account_deposit<'info>(
     if deposit_amount == 0 {
         return Ok(());
     }
-    bank.accrue_interest(
-        clock.unix_timestamp,
-        &group,
-        #[cfg(not(feature = "client"))]
-        bank_loader.key(),
-    )?;
 
     // Fetch oracle price for group rate limiting (fall back to cache when oracles are omitted).
     let group_rate_limit_enabled = group.rate_limiter.is_enabled();

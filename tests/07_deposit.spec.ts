@@ -1,6 +1,9 @@
 import { BN, Program } from "@coral-xyz/anchor";
 import { BankrunProvider } from "anchor-bankrun";
-import { AccountMeta, PublicKey, Transaction } from "@solana/web3.js";
+import { AccountMeta, Keypair, PublicKey, Transaction } from "@solana/web3.js";
+import { Clock } from "solana-bankrun";
+import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
+import BigNumber from "bignumber.js";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairA,
@@ -9,6 +12,7 @@ import {
   bankrunContext,
   bankrunProgram,
   bankRunProvider,
+  banksClient,
   ecosystem,
   groupAdmin,
   marginfiGroup,
@@ -20,24 +24,29 @@ import {
   assertBNApproximately,
   assertI80F48Approx,
   assertI80F48Equal,
+  expectFailedTxWithError,
   getTokenBalance,
 } from "./utils/genericTests";
 import { assert } from "chai";
 import {
   composeRemainingAccountsByBalances,
+  accountInit,
+  borrowIx,
+  composeRemainingAccounts,
   depositIx,
   withdrawIx,
 } from "./utils/user-instructions";
 import { USER_ACCOUNT } from "./utils/mocks";
 import { createMintToInstruction } from "@solana/spl-token";
 import { deriveBankWithSeed, deriveLiquidityVault } from "./utils/pdas";
-import { addBankWithSeed } from "./utils/group-instructions";
+import { addBankWithSeed, groupInitialize } from "./utils/group-instructions";
 import {
   defaultBankConfig,
   ORACLE_SETUP_PYTH_PUSH,
   u64MAX_BN,
 } from "./utils/types";
-import { getBankrunTime } from "./utils/tools";
+import { getBankrunBlockhash, getBankrunTime } from "./utils/tools";
+import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 
 let program: Program<Marginfi>;
 let mintAuthority: PublicKey;
@@ -428,5 +437,300 @@ describe("Deposit funds", () => {
       userSolBefore - depositAmountSol_native.toNumber(),
       userSolAfter
     );
+  });
+});
+
+describe("Deposit up to limit with accrued interest", () => {
+  const GROUP_SEED = Buffer.from("MRGN_DEPOSIT_LIMIT_CLK_TEST_0000");
+  const USDC_BANK_SEED = new BN(29_000);
+  const TOKEN_A_BANK_SEED = new BN(29_001);
+  const UA = "z00_acc";
+
+  const DEPOSIT_LIMIT_NATIVE = new BN(2_000 * 10 ** 6);
+  const LENDER_DEPOSIT_NATIVE = new BN(600 * 10 ** 6);
+  const BORROW_AMOUNT_NATIVE = new BN(400 * 10 ** 6);
+  const THIRTY_DAYS_SECS = 30 * 24 * 60 * 60;
+
+  let throwawayGroup: Keypair;
+  let usdcBankKey: PublicKey;
+  let clockBeforeTest: Clock;
+  let tokenABankKey: PublicKey;
+  // Pre-accrual remaining capacity captured before the clock is advanced
+  let staleCapacityNative: BigNumber;
+
+  before(async () => {
+    throwawayGroup = Keypair.fromSeed(GROUP_SEED);
+
+    // Init throwaway group
+    {
+      const tx = new Transaction().add(
+        await groupInitialize(groupAdmin.mrgnBankrunProgram, {
+          marginfiGroup: throwawayGroup.publicKey,
+          admin: groupAdmin.wallet.publicKey,
+        })
+      );
+      tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+      tx.sign(groupAdmin.wallet, throwawayGroup);
+      await banksClient.processTransaction(tx);
+    }
+
+    // USDC bank with deposit limit and borrow enabled to drive interest accrual
+    [usdcBankKey] = deriveBankWithSeed(
+      bankrunProgram.programId,
+      throwawayGroup.publicKey,
+      ecosystem.usdcMint.publicKey,
+      USDC_BANK_SEED
+    );
+    {
+      const config = defaultBankConfig();
+      config.depositLimit = DEPOSIT_LIMIT_NATIVE;
+      config.borrowLimit = new BN(2_000 * 10 ** 6);
+      const oracleIx = await groupAdmin.mrgnBankrunProgram.methods
+        .lendingPoolConfigureBankOracle(
+          ORACLE_SETUP_PYTH_PUSH,
+          oracles.usdcOracle.publicKey
+        )
+        .accountsPartial({
+          group: throwawayGroup.publicKey,
+          bank: usdcBankKey,
+          admin: groupAdmin.wallet.publicKey,
+        })
+        .remainingAccounts([
+          {
+            pubkey: oracles.usdcOracle.publicKey,
+            isSigner: false,
+            isWritable: false,
+          } as AccountMeta,
+        ])
+        .instruction();
+      const tx = new Transaction().add(
+        await addBankWithSeed(groupAdmin.mrgnBankrunProgram, {
+          marginfiGroup: throwawayGroup.publicKey,
+          feePayer: groupAdmin.wallet.publicKey,
+          bankMint: ecosystem.usdcMint.publicKey,
+          config,
+          seed: USDC_BANK_SEED,
+        }),
+        oracleIx
+      );
+      tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+      tx.sign(groupAdmin.wallet);
+      await banksClient.processTransaction(tx);
+    }
+
+    // Token-A bank used as collateral only
+    [tokenABankKey] = deriveBankWithSeed(
+      bankrunProgram.programId,
+      throwawayGroup.publicKey,
+      ecosystem.tokenAMint.publicKey,
+      TOKEN_A_BANK_SEED
+    );
+    {
+      const config = defaultBankConfig();
+      config.depositLimit = new BN(100_000 * 10 ** ecosystem.tokenADecimals);
+      const oracleIx = await groupAdmin.mrgnBankrunProgram.methods
+        .lendingPoolConfigureBankOracle(
+          ORACLE_SETUP_PYTH_PUSH,
+          oracles.tokenAOracle.publicKey
+        )
+        .accountsPartial({
+          group: throwawayGroup.publicKey,
+          bank: tokenABankKey,
+          admin: groupAdmin.wallet.publicKey,
+        })
+        .remainingAccounts([
+          {
+            pubkey: oracles.tokenAOracle.publicKey,
+            isSigner: false,
+            isWritable: false,
+          } as AccountMeta,
+        ])
+        .instruction();
+      const tx = new Transaction().add(
+        await addBankWithSeed(groupAdmin.mrgnBankrunProgram, {
+          marginfiGroup: throwawayGroup.publicKey,
+          feePayer: groupAdmin.wallet.publicKey,
+          bankMint: ecosystem.tokenAMint.publicKey,
+          config,
+          seed: TOKEN_A_BANK_SEED,
+        }),
+        oracleIx
+      );
+      tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+      tx.sign(groupAdmin.wallet);
+      await banksClient.processTransaction(tx);
+    }
+
+    // Init user accounts and mint tokens (users 0, 1, 2)
+    const payer = bankrunContext.payer;
+    for (let i = 0; i <= 2; i++) {
+      const user = users[i];
+      const kp = Keypair.generate();
+      user.accounts.set(UA, kp.publicKey);
+      const accountTx = new Transaction().add(
+        await accountInit(user.mrgnBankrunProgram, {
+          marginfiGroup: throwawayGroup.publicKey,
+          marginfiAccount: kp.publicKey,
+          authority: user.wallet.publicKey,
+          feePayer: user.wallet.publicKey,
+        })
+      );
+      accountTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+      accountTx.sign(user.wallet, kp);
+      await banksClient.processTransaction(accountTx);
+
+      const mintTx = new Transaction().add(
+        createMintToInstruction(
+          ecosystem.usdcMint.publicKey,
+          user.usdcAccount,
+          payer.publicKey,
+          5_000 * 10 ** ecosystem.usdcDecimals
+        ),
+        createMintToInstruction(
+          ecosystem.tokenAMint.publicKey,
+          user.tokenAAccount,
+          payer.publicKey,
+          5_000 * 10 ** ecosystem.tokenADecimals
+        )
+      );
+      mintTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+      mintTx.sign(payer);
+      await banksClient.processTransaction(mintTx);
+    }
+
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+
+    // User 0 deposits USDC (lender)
+    await users[0].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await depositIx(users[0].mrgnProgram, {
+          marginfiAccount: users[0].accounts.get(UA),
+          bank: usdcBankKey,
+          tokenAccount: users[0].usdcAccount,
+          amount: LENDER_DEPOSIT_NATIVE,
+          depositUpToLimit: false,
+        })
+      )
+    );
+
+    // User 1 deposits token-A collateral then borrows USDC
+    await users[1].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await depositIx(users[1].mrgnProgram, {
+          marginfiAccount: users[1].accounts.get(UA),
+          bank: tokenABankKey,
+          tokenAccount: users[1].tokenAAccount,
+          amount: new BN(2_000 * 10 ** ecosystem.tokenADecimals),
+          depositUpToLimit: false,
+        })
+      )
+    );
+    await users[1].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await borrowIx(users[1].mrgnProgram, {
+          marginfiAccount: users[1].accounts.get(UA),
+          bank: usdcBankKey,
+          tokenAccount: users[1].usdcAccount,
+          remaining: composeRemainingAccounts([
+            [tokenABankKey, oracles.tokenAOracle.publicKey],
+            [usdcBankKey, oracles.usdcOracle.publicKey],
+          ]),
+          amount: BORROW_AMOUNT_NATIVE,
+        })
+      )
+    );
+
+    // Capture the remaining deposit capacity before advancing the clock.
+    const bankBefore = await bankrunProgram.account.bank.fetch(usdcBankKey);
+    const currentAssets = wrappedI80F48toBigNumber(bankBefore.totalAssetShares).multipliedBy(
+      wrappedI80F48toBigNumber(bankBefore.assetShareValue)
+    );
+    staleCapacityNative = new BigNumber(bankBefore.config.depositLimit.toString())
+      .minus(currentAssets)
+      .minus(1)
+      .integerValue(BigNumber.ROUND_FLOOR);
+    assert.ok(staleCapacityNative.isGreaterThan(0));
+
+    // Advance the bankrun clock by ~30 days so interest accrues
+    const currentClock = await banksClient.getClock();
+    clockBeforeTest = currentClock;
+    bankrunContext.setClock(
+      new Clock(
+        currentClock.slot,
+        currentClock.epochStartTimestamp,
+        currentClock.epoch,
+        currentClock.leaderScheduleEpoch,
+        currentClock.unixTimestamp + BigInt(THIRTY_DAYS_SECS)
+      )
+    );
+
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+  });
+
+  it("depositing the pre-accrual remaining capacity without deposit_up_to_limit fails", async () => {
+    const user = users[2];
+    await expectFailedTxWithError(
+      async () => {
+        await user.mrgnProgram.provider.sendAndConfirm(
+          new Transaction().add(
+            await depositIx(user.mrgnProgram, {
+              marginfiAccount: user.accounts.get(UA),
+              bank: usdcBankKey,
+              tokenAccount: user.usdcAccount,
+              amount: new BN(staleCapacityNative.toFixed(0)),
+              depositUpToLimit: false,
+            })
+          )
+        );
+      },
+      "BankAssetCapacityExceeded",
+      6003
+    );
+  });
+
+  it("deposit_up_to_limit=true succeeds and deposits less than the pre-accrual capacity", async () => {
+    const user = users[2];
+    const usdcBefore = await getTokenBalance(bankRunProvider, user.usdcAccount);
+
+    await user.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await depositIx(user.mrgnProgram, {
+          marginfiAccount: user.accounts.get(UA),
+          bank: usdcBankKey,
+          tokenAccount: user.usdcAccount,
+          amount: u64MAX_BN,
+          depositUpToLimit: true,
+        })
+      )
+    );
+    const usdcAfter = await getTokenBalance(bankRunProvider, user.usdcAccount);
+    const actualDeposited = usdcBefore - usdcAfter;
+
+    assert.ok(actualDeposited > 0, "expected a non-zero deposit");
+    assert.ok(
+      new BigNumber(actualDeposited).isLessThan(staleCapacityNative),
+      `actual deposit ${actualDeposited} must be < pre-accrual capacity ${staleCapacityNative}`
+    );
+
+    // Total assets must remain strictly below the deposit limit
+    const bankFinal = await bankrunProgram.account.bank.fetch(usdcBankKey);
+    const totalAssets = wrappedI80F48toBigNumber(bankFinal.totalAssetShares).multipliedBy(
+      wrappedI80F48toBigNumber(bankFinal.assetShareValue)
+    );
+    assert.ok(
+      totalAssets.isLessThan(new BigNumber(bankFinal.config.depositLimit.toString())),
+      "total assets must remain below deposit limit"
+    );
+
+    if (verbose) {
+      console.log(
+        `deposited: ${actualDeposited}, pre-accrual capacity was: ${staleCapacityNative.toFixed(0)}`
+      );
+    }
+  });
+
+  after(async () => {
+    // Restore the clock so tests that run after this suite are unaffected.
+    bankrunContext.setClock(clockBeforeTest);
   });
 });
