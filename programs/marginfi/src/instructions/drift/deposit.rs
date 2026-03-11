@@ -1,5 +1,5 @@
 use crate::{
-    bank_signer, check,
+    bank_signer,
     constants::DRIFT_PROGRAM_ID,
     events::{AccountEventHeader, LendingAccountDepositEvent},
     state::{

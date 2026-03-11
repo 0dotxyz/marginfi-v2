@@ -7,7 +7,7 @@ set -euo pipefail
 
 ANCHOR_PROVIDER_URL="${ANCHOR_PROVIDER_URL:-https://api.mainnet-beta.solana.com}"
 
-IDL_DIR="idls"
+IDL_DIR="idls-complete"
 FIXTURES_DIR="tests/fixtures"
 
 # Map: output file prefix -> Solana program id

@@ -1336,7 +1336,9 @@ impl MarginfiAccountFixture {
             pyth_oracle: None,
             switchboard_price_oracle: None,
             switchboard_twap_oracle: None,
-            scope_prices: Some(reserve.config.token_info.scope_configuration.price_feed),
+            // Test fixture uses a lightweight Kamino reserve representation without config/oracle fields.
+            // The local Kamino mock processor accepts this instruction shape without requiring scope prices.
+            scope_prices: None,
         }
         .to_account_metas(Some(true));
 
