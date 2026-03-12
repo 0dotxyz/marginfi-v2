@@ -91,7 +91,7 @@ pub fn expected_shares_for_deposit_from_rates(
 /// - `repr(C, packed)` keeps the byte layout identical to a field-by-field serialization
 ///   (i.e. no implicit padding). This is important because `Pubkey` has alignment=1 while `u64`
 ///   has alignment=8; using plain `repr(C)` would insert padding before the first `u64`.
-#[account(zero_copy(unsafe), discriminator = &LENDING_DISCRIMINATOR)]
+#[account(zero_copy, discriminator = &LENDING_DISCRIMINATOR)]
 #[repr(C, packed)]
 pub struct Lending {
     pub mint: Pubkey,

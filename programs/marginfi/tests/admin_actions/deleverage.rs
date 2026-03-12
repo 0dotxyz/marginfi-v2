@@ -1,6 +1,7 @@
 use anchor_lang::error::ErrorCode;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
+use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{assert_anchor_error, assert_custom_error, assert_eq_noise, native, prelude::*};
 use marginfi::state::bank::BankImpl;
 use marginfi::{prelude::*, state::marginfi_account::MarginfiAccountImpl};
@@ -9,17 +10,25 @@ use marginfi_type_crate::{
     types::{BankConfigOpt, ACCOUNT_IN_RECEIVERSHIP},
 };
 use solana_program_test::*;
+use solana_sdk::signature::Keypair;
+use solana_sdk::signer::Signer;
 use solana_sdk::{pubkey::Pubkey, transaction::Transaction};
 
 #[tokio::test]
 async fn deleverage_happy_path() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let authority = Keypair::new();
 
     let risk_admin = test_f.payer().clone();
     assert_eq!(risk_admin, test_f.marginfi_group.load().await.admin);
 
     let lp = test_f.create_marginfi_account().await;
-    let deleveragee = test_f.create_marginfi_account().await;
+    let deleveragee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &authority,
+    )
+    .await;
 
     // Note: Sol is $10, USDC is $1
     let sol_bank = test_f.get_bank(&BankMint::Sol);
@@ -31,16 +40,22 @@ async fn deleverage_happy_path() -> anyhow::Result<()> {
         .await?;
 
     // Setup deleveragee (after bank has liquidity for them to borrow)
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&authority.pubkey())
+        .await;
 
     // * Note: Deposited $30 in SOL, borrowed $20 in USDC
     // * Note: all asset/liab weights in testing are 1, e.g. $30 in SOL = $30 exactly in value
     deleveragee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 3.0, None)
+        .try_bank_deposit_with_authority(user_token_sol.key, sol_bank, 3.0, None, &authority)
         .await?;
     deleveragee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 20.0)
+        .try_bank_borrow_with_authority(user_token_usdc.key, usdc_bank, 20.0, 0, &authority)
         .await?;
 
     let (record_pk, _bump) = Pubkey::find_program_address(
@@ -243,12 +258,18 @@ async fn deleverage_happy_path() -> anyhow::Result<()> {
 #[tokio::test]
 async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let authority = Keypair::new();
 
     let risk_admin = test_f.payer().clone();
     assert_eq!(risk_admin, test_f.marginfi_group.load().await.risk_admin);
 
     let lp = test_f.create_marginfi_account().await;
-    let deleveragee = test_f.create_marginfi_account().await;
+    let deleveragee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &authority,
+    )
+    .await;
 
     // Note: Sol is $10, USDC is $1
     let sol_bank = test_f.get_bank(&BankMint::Sol);
@@ -267,16 +288,22 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
         .await?;
 
     // Setup deleveragee (after bank has liquidity for them to borrow)
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&authority.pubkey())
+        .await;
 
     // * Note: Deposited $30 in SOL, borrowed $20 in USDC
     // * Note: all asset/liab weights in testing are 1, e.g. $30 in SOL = $30 exactly in value
     deleveragee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 3.0, None)
+        .try_bank_deposit_with_authority(user_token_sol.key, sol_bank, 3.0, None, &authority)
         .await?;
     deleveragee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 20.0)
+        .try_bank_borrow_with_authority(user_token_usdc.key, usdc_bank, 20.0, 0, &authority)
         .await?;
 
     test_f
@@ -392,12 +419,18 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
 #[tokio::test]
 async fn deleverage_cannot_worsen_health() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let authority = Keypair::new();
 
     let risk_admin = test_f.payer().clone();
     assert_eq!(risk_admin, test_f.marginfi_group.load().await.risk_admin);
 
     let lp = test_f.create_marginfi_account().await;
-    let deleveragee = test_f.create_marginfi_account().await;
+    let deleveragee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &authority,
+    )
+    .await;
 
     // Note: Sol is $10, USDC is $1
     let sol_bank = test_f.get_bank(&BankMint::Sol);
@@ -409,16 +442,22 @@ async fn deleverage_cannot_worsen_health() -> anyhow::Result<()> {
         .await?;
 
     // Setup deleveragee (after bank has liquidity for them to borrow)
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&authority.pubkey())
+        .await;
 
     // * Note: Deposited $20 in SOL, borrowed $10 in USDC
     // * Note: all asset/liab weights in testing are 1, e.g. $20 in SOL = $20 exactly in value
     deleveragee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 2.0, None)
+        .try_bank_deposit_with_authority(user_token_sol.key, sol_bank, 2.0, None, &authority)
         .await?;
     deleveragee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .try_bank_borrow_with_authority(user_token_usdc.key, usdc_bank, 10.0, 0, &authority)
         .await?;
 
     // Risk admin will (try to) withdraw some sol and will (try to) repay some usdc
@@ -475,6 +514,7 @@ async fn deleverage_cannot_worsen_health() -> anyhow::Result<()> {
 #[tokio::test]
 async fn deleverage_not_risk_admin() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let authority = Keypair::new();
 
     let risk_admin = test_f.payer().clone();
     assert_eq!(risk_admin, test_f.marginfi_group.load().await.admin);
@@ -496,7 +536,12 @@ async fn deleverage_not_risk_admin() -> anyhow::Result<()> {
     assert!(res.is_ok());
 
     let lp = test_f.create_marginfi_account().await;
-    let deleveragee = test_f.create_marginfi_account().await;
+    let deleveragee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &authority,
+    )
+    .await;
 
     // Note: Sol is $10, USDC is $1
     let sol_bank = test_f.get_bank(&BankMint::Sol);
@@ -508,16 +553,22 @@ async fn deleverage_not_risk_admin() -> anyhow::Result<()> {
         .await?;
 
     // Setup deleveragee (after bank has liquidity for them to borrow)
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&authority.pubkey())
+        .await;
 
     // * Note: Deposited $20 in SOL, borrowed $10 in USDC
     // * Note: all asset/liab weights in testing are 1, e.g. $20 in SOL = $20 exactly in value
     deleveragee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 2.0, None)
+        .try_bank_deposit_with_authority(user_token_sol.key, sol_bank, 2.0, None, &authority)
         .await?;
     deleveragee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .try_bank_borrow_with_authority(user_token_usdc.key, usdc_bank, 10.0, 0, &authority)
         .await?;
 
     // Payer will (try to) withdraw some sol and will (try to) repay some usdc
@@ -573,9 +624,15 @@ async fn deleverage_not_risk_admin() -> anyhow::Result<()> {
 #[tokio::test]
 async fn deleverage_rejects_zero_weight_asset() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let authority = Keypair::new();
 
     let lp = test_f.create_marginfi_account().await;
-    let deleveragee = test_f.create_marginfi_account().await;
+    let deleveragee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &authority,
+    )
+    .await;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
 
@@ -583,13 +640,19 @@ async fn deleverage_rejects_zero_weight_asset() -> anyhow::Result<()> {
     lp.try_bank_deposit(lp_usdc_acc.key, usdc_bank, 100, None)
         .await?;
 
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&authority.pubkey())
+        .await;
     deleveragee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 1.0, None)
+        .try_bank_deposit_with_authority(user_token_sol.key, sol_bank, 1.0, None, &authority)
         .await?;
     deleveragee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .try_bank_borrow_with_authority(user_token_usdc.key, usdc_bank, 10.0, 0, &authority)
         .await?;
 
     sol_bank
@@ -652,9 +715,16 @@ async fn deleverage_rejects_zero_weight_asset() -> anyhow::Result<()> {
 #[tokio::test]
 async fn deleverage_can_close_out_balances() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let authority = Keypair::new();
+
+    let deleveragee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &authority,
+    )
+    .await;
 
     let lp = test_f.create_marginfi_account().await;
-    let deleveragee = test_f.create_marginfi_account().await;
     let pyusd_bank = test_f.get_bank(&BankMint::PyUSD);
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
@@ -663,18 +733,27 @@ async fn deleverage_can_close_out_balances() -> anyhow::Result<()> {
     lp.try_bank_deposit(lp_usdc_acc.key, usdc_bank, 100, None)
         .await?;
 
-    let user_token_pyusd = test_f.pyusd_mint.create_token_account_and_mint_to(10).await;
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_pyusd = test_f
+        .pyusd_mint
+        .create_token_account_and_mint_to_with_owner(&authority.pubkey(), 10)
+        .await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&authority.pubkey())
+        .await;
 
     deleveragee
-        .try_bank_deposit(user_token_pyusd.key, pyusd_bank, 10.0, None)
+        .try_bank_deposit_with_authority(user_token_pyusd.key, pyusd_bank, 10.0, None, &authority)
         .await?;
     deleveragee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 1.0, None)
+        .try_bank_deposit_with_authority(user_token_sol.key, sol_bank, 1.0, None, &authority)
         .await?;
     deleveragee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .try_bank_borrow_with_authority(user_token_usdc.key, usdc_bank, 10.0, 0, &authority)
         .await?;
 
     // Tweak weights so that deleveraging can improve health
@@ -734,6 +813,7 @@ async fn deleverage_can_close_out_balances() -> anyhow::Result<()> {
             .banks_client
             .process_transaction_with_preflight(tx)
             .await;
+
         assert!(res.is_ok());
     }
 

@@ -81,6 +81,7 @@ pub fn solend_withdraw<'info>(
     let withdraw_all = withdraw_all.unwrap_or(false);
     let authority_bump: u8;
     let bank_key = ctx.accounts.bank.key();
+    let bank_mint = ctx.accounts.bank.load()?.mint;
     if withdraw_all {
         let marginfi_account = ctx.accounts.marginfi_account.load()?;
         // Require remaining accounts for all active balances, including the one being closed.
@@ -98,11 +99,6 @@ pub fn solend_withdraw<'info>(
         authority_bump = bank.liquidity_vault_authority_bump;
 
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
-
-        check!(
-            !marginfi_account.get_flag(ACCOUNT_DISABLED),
-            MarginfiError::AccountDisabled
-        );
 
         // Fetch oracle price for rate limiting and deleverage tracking
         let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
@@ -125,11 +121,8 @@ pub fn solend_withdraw<'info>(
             I80F48::ZERO
         };
 
-        let mut bank_account = BankAccountWrapper::find(
-            &ctx.accounts.bank.key(),
-            &mut bank,
-            &mut marginfi_account.lending_account,
-        )?;
+        let mut bank_account =
+            BankAccountWrapper::find(&bank_key, &mut bank, &mut marginfi_account.lending_account)?;
 
         let collateral_amount = if withdraw_all {
             bank_account.withdraw_all(in_receivership)?
@@ -247,8 +240,8 @@ pub fn solend_withdraw<'info>(
                 marginfi_account_authority: marginfi_account.authority,
                 marginfi_group: marginfi_account.group,
             },
-            bank: ctx.accounts.bank.key(),
-            mint: bank.mint,
+            bank: bank_key,
+            mint: bank_mint,
             amount: collateral_amount,
             close_balance: withdraw_all,
         });
@@ -258,7 +251,16 @@ pub fn solend_withdraw<'info>(
 
         marginfi_account.lending_account.sort_balances();
 
-        // Drop the bank mutable borrow before health check (bank is in remaining_accounts)
+        // SAFETY: The `bank` AccountLoader shares the same underlying account as one of the
+        // entries in `remaining_accounts` (passed for oracle/health-check lookups). The Solana
+        // runtime enforces single-writer semantics per account per instruction — if we hold a
+        // mutable borrow via `bank.load_mut()` while another code path (e.g. `check_account_init_health`)
+        // attempts to borrow the same account through `remaining_accounts`, the runtime rejects the
+        // transaction with:
+        //   "instruction tries to borrow reference for an account which is already borrowed"
+        //
+        // We must explicitly drop the mutable borrow before any code that may re-access this
+        // account through a different handle.
         drop(bank);
 
         let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
@@ -276,7 +278,7 @@ pub fn solend_withdraw<'info>(
             health_cache.program_version = PROGRAM_VERSION;
 
             let bank_loader = &ctx.accounts.bank;
-            let bank = bank_loader.load()?;
+            let mut bank = bank_loader.load_mut()?;
             let clock = Clock::get()?;
             let price_for_cache = fetch_unbiased_price_for_bank(
                 &bank_loader.key(),
@@ -285,10 +287,8 @@ pub fn solend_withdraw<'info>(
                 ctx.remaining_accounts,
             )
             .ok();
-            drop(bank);
-            bank_loader
-                .load_mut()?
-                .update_cache_price(price_for_cache)?;
+
+            bank.update_cache_price(price_for_cache)?;
 
             health_cache.set_engine_ok(true);
             marginfi_account.health_cache = health_cache;
@@ -321,6 +321,10 @@ pub struct SolendWithdraw<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
+        constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_DISABLED)
+        } @MarginfiError::AccountDisabled,
         constraint = {
             let a = marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())

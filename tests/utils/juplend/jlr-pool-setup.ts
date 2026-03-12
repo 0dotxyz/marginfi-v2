@@ -55,12 +55,6 @@ async function getTokenProgramForMint(mint: PublicKey): Promise<PublicKey> {
   );
 }
 
-function toBn(value: BN | number | bigint): BN {
-  if (typeof value === "bigint") return new BN(value.toString());
-  if (typeof value === "number") return new BN(value);
-  return value;
-}
-
 export async function fetchJuplendPool(args: {
   mint: PublicKey;
   tokenProgram?: PublicKey;
@@ -529,9 +523,9 @@ export async function configureJuplendProtocolPermissions(args: {
   );
   assert.equal(supplyPos.withInterest, supplyConfig.mode);
   assert.equal(supplyPos.expandPct, supplyConfig.expandPercent.toNumber());
-  assertBNEqual(toBn(supplyPos.expandDuration), supplyConfig.expandDuration);
+  assertBNEqual(supplyPos.expandDuration, supplyConfig.expandDuration);
   assertBNEqual(
-    toBn(supplyPos.baseWithdrawalLimit),
+    supplyPos.baseWithdrawalLimit,
     supplyConfig.baseWithdrawalLimit,
   );
 
@@ -545,7 +539,7 @@ export async function configureJuplendProtocolPermissions(args: {
     borrowConfig.expandDuration.toNumber(),
   );
   assertBNEqual(borrowPos.baseDebtCeiling, borrowConfig.baseDebtCeiling);
-  assertBNEqual(toBn(borrowPos.maxDebtCeiling), borrowConfig.maxDebtCeiling);
+  assertBNEqual(borrowPos.maxDebtCeiling, borrowConfig.maxDebtCeiling);
 
   const authListAcc = await programs.liquidity.account.authorizationList.fetch(
     authList,

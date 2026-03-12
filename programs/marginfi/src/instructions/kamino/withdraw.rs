@@ -35,7 +35,7 @@ use fixed::types::I80F48;
 use kamino_mocks::kamino_lending::cpi::withdraw_obligation_collateral_and_redeem_reserve_collateral_v2;
 use kamino_mocks::{
     kamino_lending::cpi::accounts::{
-        SocializeLossV2FarmsAccounts, WithdrawObligationCollateralAndRedeemReserveCollateral,
+        FarmsAccounts, WithdrawObligationCollateralAndRedeemReserveCollateral,
         WithdrawObligationCollateralAndRedeemReserveCollateralV2,
     },
     state::{MinimalObligation, MinimalReserve},
@@ -109,11 +109,6 @@ pub fn kamino_withdraw<'info>(
         let mut group = ctx.accounts.group.load_mut()?;
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
 
-        check!(
-            !marginfi_account.get_flag(ACCOUNT_DISABLED),
-            MarginfiError::AccountDisabled
-        );
-
         let in_receivership_or_order_execution =
             marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
         // Fetch oracle price for rate limiting and deleverage tracking
@@ -157,6 +152,7 @@ pub fn kamino_withdraw<'info>(
         } else {
             amount
         };
+
         if !should_skip_rate_limit(marginfi_account.account_flags) {
             // Bank-level rate limiting (native tokens)
             if bank.rate_limiter.is_enabled() {
@@ -244,7 +240,7 @@ pub fn kamino_withdraw<'info>(
             marginfi_account_authority: marginfi_account.authority,
             marginfi_group: marginfi_account.group,
         },
-        bank: ctx.accounts.bank.key(),
+        bank: bank_key,
         mint: bank_mint,
         amount: collateral_amount,
         close_balance: withdraw_all,
@@ -271,7 +267,7 @@ pub fn kamino_withdraw<'info>(
         health_cache.program_version = PROGRAM_VERSION;
 
         let bank_loader = &ctx.accounts.bank;
-        let bank = bank_loader.load()?;
+        let mut bank = bank_loader.load_mut()?;
         let price_for_cache = fetch_unbiased_price_for_bank(
             &bank_loader.key(),
             &bank,
@@ -279,10 +275,8 @@ pub fn kamino_withdraw<'info>(
             ctx.remaining_accounts,
         )
         .ok();
-        drop(bank);
-        bank_loader
-            .load_mut()?
-            .update_cache_price(price_for_cache)?;
+
+        bank.update_cache_price(price_for_cache)?;
 
         health_cache.set_engine_ok(true);
         marginfi_account.health_cache = health_cache;
@@ -312,6 +306,10 @@ pub struct KaminoWithdraw<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
+        constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_DISABLED)
+        } @MarginfiError::AccountDisabled,
         constraint = {
             let a = marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())
@@ -397,6 +395,7 @@ pub struct KaminoWithdraw<'info> {
 
     /// The liquidity token mint (e.g., USDC)
     /// Needs serde to get the mint decimals for transfer checked
+    /// TODO: rename to just 'mint' to make use of has_one and to be consistent with deposit
     #[account(mut)]
     pub reserve_liquidity_mint: Box<InterfaceAccount<'info, Mint>>,
 
@@ -463,15 +462,13 @@ impl<'info> KaminoWithdraw<'info> {
             user_destination_liquidity: self.liquidity_vault.to_account_info(),
             withdraw_reserve: self.integration_acc_1.to_account_info(),
         };
-        let farms_accounts = SocializeLossV2FarmsAccounts {
+        let farms_accounts = FarmsAccounts {
             obligation_farm_user_state: optional_account!(self.obligation_farm_user_state),
             reserve_farm_state: optional_account!(self.reserve_farm_state),
         };
         let accounts = WithdrawObligationCollateralAndRedeemReserveCollateralV2 {
-            withdraw_obligation_collateral_and_redeem_reserve_collateral_v2_withdraw_accounts:
-                withdraw_accounts,
-            withdraw_obligation_collateral_and_redeem_reserve_collateral_v2_farms_accounts:
-                farms_accounts,
+            withdraw_accounts,
+            withdraw_farms_accounts: farms_accounts,
             farms_program: self.farms_program.to_account_info(),
         };
         let program = self.kamino_program.to_account_info();

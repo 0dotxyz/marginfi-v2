@@ -1,6 +1,6 @@
 use crate::state::bank::BankVaultType;
 use crate::{
-    bank_signer, check,
+    bank_signer,
     constants::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
     events::{AccountEventHeader, LendingAccountDepositEvent},
     optional_account,
@@ -35,14 +35,12 @@ use kamino_mocks::kamino_lending::cpi::deposit_reserve_liquidity_and_obligation_
 use kamino_mocks::{
     kamino_lending::cpi::accounts::{
         DepositReserveLiquidityAndObligationCollateral,
-        DepositReserveLiquidityAndObligationCollateralV2, SocializeLossV2FarmsAccounts,
+        DepositReserveLiquidityAndObligationCollateralV2, FarmsAccounts,
     },
     state::{MinimalObligation, MinimalReserve},
 };
 use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
-use marginfi_type_crate::types::{
-    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
-};
+use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
 /// Deposit into a Kamino pool through a marginfi account
 ///
@@ -63,12 +61,6 @@ pub fn kamino_deposit<'info>(
 
         validate_asset_tags(&bank, &marginfi_account)?;
         validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
-
-        check!(
-            !marginfi_account.get_flag(ACCOUNT_DISABLED)
-                && !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP),
-            MarginfiError::AccountDisabled
-        );
     }
 
     // Get initial obligation data to verify deposit amount later
@@ -170,6 +162,10 @@ pub struct KaminoDeposit<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
+        constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_DISABLED)
+        } @MarginfiError::AccountDisabled,
         constraint = {
             let a = marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())
@@ -323,16 +319,15 @@ impl<'info> KaminoDeposit<'info> {
         };
 
         // --- optional “farms_accounts” group ---
-        let farms_accounts = SocializeLossV2FarmsAccounts {
+        let farms_accounts = FarmsAccounts {
             obligation_farm_user_state: optional_account!(self.obligation_farm_user_state),
             reserve_farm_state: optional_account!(self.reserve_farm_state),
         };
 
         // --- wrap both groups in the outer struct ---
         let accounts = DepositReserveLiquidityAndObligationCollateralV2 {
-            deposit_reserve_liquidity_and_obligation_collateral_v2_deposit_accounts:
-                deposit_accounts,
-            deposit_reserve_liquidity_and_obligation_collateral_v2_farms_accounts: farms_accounts,
+            deposit_accounts,
+            deposit_farms_accounts: farms_accounts,
             farms_program: self.farms_program.to_account_info(),
         };
         let program = self.kamino_program.to_account_info();

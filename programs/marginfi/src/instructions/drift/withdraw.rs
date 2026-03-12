@@ -67,6 +67,7 @@ pub fn drift_withdraw<'info>(
     let clock = Clock::get()?;
 
     let bank_key = ctx.accounts.bank.key();
+    let bank_mint = ctx.accounts.bank.load()?.mint;
     if withdraw_all {
         let marginfi_account = ctx.accounts.marginfi_account.load()?;
         // Require remaining accounts for all active balances, including the one being closed.
@@ -83,11 +84,6 @@ pub fn drift_withdraw<'info>(
         authority_bump = bank.liquidity_vault_authority_bump;
 
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
-
-        check!(
-            !marginfi_account.get_flag(ACCOUNT_DISABLED),
-            MarginfiError::AccountDisabled
-        );
 
         // Fetch oracle price for rate limiting and deleverage tracking
         let in_receivership_or_order_execution =
@@ -225,6 +221,11 @@ pub fn drift_withdraw<'info>(
             group.update_withdrawn_equity(withdrawn_equity, clock.unix_timestamp)?;
         }
 
+        // Update bank cache after modifying balances (following pattern from regular withdraw)
+        bank.update_bank_cache(&group)?;
+
+        marginfi_account.last_update = clock.unix_timestamp as u64;
+
         (token_amount, expected_scaled_balance_change)
     };
 
@@ -272,14 +273,7 @@ pub fn drift_withdraw<'info>(
     };
 
     {
-        let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let group = &ctx.accounts.group.load()?;
-
-        // Update bank cache after modifying balances
-        bank.update_bank_cache(group)?;
-
-        marginfi_account.last_update = Clock::get()?.unix_timestamp as u64;
 
         emit!(LendingAccountWithdrawEvent {
             header: AccountEventHeader {
@@ -288,8 +282,8 @@ pub fn drift_withdraw<'info>(
                 marginfi_account_authority: marginfi_account.authority,
                 marginfi_group: marginfi_account.group,
             },
-            bank: ctx.accounts.bank.key(),
-            mint: bank.mint,
+            bank: bank_key,
+            mint: bank_mint,
             amount: actual_amount_received,
             close_balance: withdraw_all,
         });
@@ -298,9 +292,6 @@ pub fn drift_withdraw<'info>(
         health_cache.timestamp = Clock::get()?.unix_timestamp;
 
         marginfi_account.lending_account.sort_balances();
-
-        // Drop the bank mutable borrow before health check (bank is in remaining_accounts)
-        drop(bank);
 
         // Note: during liquidation/deleverage or order execution, we skip all health checks until
         // the end of the transaction.
@@ -314,7 +305,7 @@ pub fn drift_withdraw<'info>(
             health_cache.program_version = PROGRAM_VERSION;
             let bank_loader = &ctx.accounts.bank;
 
-            let bank = bank_loader.load()?;
+            let mut bank = bank_loader.load_mut()?;
             let price_for_cache = fetch_unbiased_price_for_bank(
                 &bank_loader.key(),
                 &bank,
@@ -322,10 +313,8 @@ pub fn drift_withdraw<'info>(
                 ctx.remaining_accounts,
             )
             .ok();
-            drop(bank);
-            bank_loader
-                .load_mut()?
-                .update_cache_price(price_for_cache)?;
+
+            bank.update_cache_price(price_for_cache)?;
 
             health_cache.set_engine_ok(true);
             marginfi_account.health_cache = health_cache;
@@ -355,6 +344,10 @@ pub struct DriftWithdraw<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
+        constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_DISABLED)
+        } @MarginfiError::AccountDisabled,
         constraint = {
             let a = marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())

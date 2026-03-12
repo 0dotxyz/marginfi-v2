@@ -159,7 +159,7 @@ describe("kx: Fixed Kamino price bank", () => {
           bank: fixedKaminoBank,
           signerTokenAccount: users[3].usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
           pythOracle: oracles.usdcOracle.publicKey,
         },
         new BN(100),
@@ -254,7 +254,12 @@ describe("kx: Fixed Kamino price bank", () => {
         remaining: [tokenAReserve],
       }),
     );
-    const result = await processBankrunTransaction(ctx, tx, [user.wallet], true);
+    const result = await processBankrunTransaction(
+      ctx,
+      tx,
+      [user.wallet],
+      true,
+    );
     // KaminoReserveValidationFailed
     assertBankrunTxFailed(result, 6210);
   });
@@ -291,7 +296,7 @@ describe("kx: Fixed Kamino price bank", () => {
           bank: fixedKaminoBank,
           signerTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
         depositAmount,
       ),
@@ -458,9 +463,10 @@ describe("kx: Fixed Kamino price bank", () => {
           marginfiAccount: userAccount,
           authority: user.wallet.publicKey,
           bank: fixedKaminoBank,
+          mint: ecosystem.usdcMint.publicKey,
           destinationTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
         {
           amount: withdrawAmount,
@@ -556,9 +562,10 @@ describe("kx: Fixed Kamino price bank", () => {
           marginfiAccount: userAccount,
           authority: user.wallet.publicKey,
           bank: fixedKaminoBank,
+          mint: ecosystem.usdcMint.publicKey,
           destinationTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
         {
           amount: new BN(0),

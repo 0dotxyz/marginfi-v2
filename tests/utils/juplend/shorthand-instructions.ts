@@ -15,7 +15,7 @@ export type RefreshJupSimpleArgs = {
 };
 
 /**
- * Useful when one already has a `JuplendPoolKeys` and is too lazy too call
+ * Useful when one already has a `JuplendPoolKeys` and is too lazy to call
  * `makeJuplendNativeUpdateRateIx`
  * @param program
  * @param args

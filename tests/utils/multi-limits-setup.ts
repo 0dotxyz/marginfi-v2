@@ -161,7 +161,7 @@ const createTokenAReserve = async (market: PublicKey): Promise<PublicKey> => {
     await klendBankrunProgram.methods
       .initReserve()
       .accounts({
-        lendingMarketOwner: groupAdmin.wallet.publicKey,
+        signer: groupAdmin.wallet.publicKey,
         lendingMarket: market,
         lendingMarketAuthority,
         reserve: reserve.publicKey,

@@ -82,7 +82,7 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
       USER_ACCOUNT_THROWAWAY,
       groupBuff,
       startingSeed,
-      KAMINO_POSITIONS + 1
+      KAMINO_POSITIONS + 1,
     );
     kaminoBanks = result.kaminoBanks;
     regularBanks = result.banks;
@@ -95,7 +95,7 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
         marginfiGroup: throwawayGroup.publicKey,
         newAdmin: groupAdmin.wallet.publicKey,
         newEmodeAdmin: groupAdmin.wallet.publicKey,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
   });
@@ -118,8 +118,8 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
           entryTag,
           1, // applies to isolated doesn't matter here
           bigNumberToWrappedI80F48(Math.random() * 0.2 + 0.6), // random 0.6–0.8 (~3.3x-5x leverage)
-          bigNumberToWrappedI80F48(Math.random() * 0.1 + 0.8) // random 0.8–0.9 (~5x-10x leverage)
-        )
+          bigNumberToWrappedI80F48(Math.random() * 0.1 + 0.8), // random 0.8–0.9 (~5x-10x leverage)
+        ),
       );
 
       // construct & send the tx for this bank
@@ -135,7 +135,7 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
           bank: regularBank,
           tag: bankIndex, // bank’s own tag = its index
           entries,
-        })
+        }),
       );
       await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
     }
@@ -159,7 +159,7 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
             tokenAccount: user.lstAlphaAccount,
             amount,
             depositUpToLimit: false,
-          })
+          }),
         );
       }
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -185,16 +185,16 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
       for (const bank of chunk) {
         const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
           bankrunProgram.programId,
-          bank
+          bank,
         );
         const [kaminoObligation] = deriveBaseObligation(
           liquidityVaultAuthority,
-          market
+          market,
         );
         const [userState] = deriveUserState(
           FARMS_PROGRAM_ID,
           farmState,
-          kaminoObligation
+          kaminoObligation,
         );
 
         depositTx.add(
@@ -202,13 +202,13 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
             klendBankrunProgram,
             tokenAReserve,
             market,
-            oracles.tokenAOracle.publicKey
+            oracles.tokenAOracle.publicKey,
           ),
           await simpleRefreshObligation(
             klendBankrunProgram,
             market,
             kaminoObligation,
-            [tokenAReserve]
+            [tokenAReserve],
           ),
           await makeKaminoDepositIx(
             user.mrgnBankrunProgram,
@@ -217,18 +217,17 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
               bank,
               signerTokenAccount: user.tokenAAccount,
               lendingMarket: market,
-              reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+              reserve: tokenAReserve,
               obligationFarmUserState: userState,
               reserveFarmState: farmState,
             },
-            amount
-          )
+            amount,
+          ),
         );
       }
       await processBankrunTransaction(bankrunContext, depositTx, [user.wallet]);
     }
   });
-
 
   it("(admin) Withdraws from one Kamino bank and reopens a new position", async () => {
     const user = groupAdmin;
@@ -254,21 +253,22 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
 
     const [withdrawLiqAuth] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      withdrawBank
+      withdrawBank,
     );
     const [withdrawObligation] = deriveBaseObligation(withdrawLiqAuth, market);
     const [withdrawUserState] = deriveUserState(
       FARMS_PROGRAM_ID,
       farmState,
-      withdrawObligation
+      withdrawObligation,
     );
 
-    const userAccBefore =
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
+    const userAccBefore = await bankrunProgram.account.marginfiAccount.fetch(
+      userAccount,
+    );
     const withdrawRemaining = composeRemainingAccountsByBalances(
       userAccBefore.lendingAccount.balances,
       remainingPositions,
-      withdrawBank
+      withdrawBank,
     );
     const withdrawIx = await makeKaminoWithdrawIx(
       user.mrgnBankrunProgram,
@@ -276,9 +276,10 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
         marginfiAccount: userAccount,
         authority: user.wallet.publicKey,
         bank: withdrawBank,
+        mint: ecosystem.tokenAMint.publicKey,
         destinationTokenAccount: user.tokenAAccount,
         lendingMarket: market,
-        reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+        reserve: tokenAReserve,
         obligationFarmUserState: withdrawUserState,
         reserveFarmState: farmState,
       },
@@ -286,7 +287,7 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
         amount: new BN(0),
         isWithdrawAll: true,
         remaining: withdrawRemaining,
-      }
+      },
     );
 
     const withdrawTx = new Transaction().add(
@@ -294,31 +295,31 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
         klendBankrunProgram,
         tokenAReserve,
         market,
-        oracles.tokenAOracle.publicKey
+        oracles.tokenAOracle.publicKey,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         withdrawObligation,
-        [tokenAReserve]
+        [tokenAReserve],
       ),
       // For withdrawAll, include all active balances, with the closing bank last.
-      withdrawIx
+      withdrawIx,
     );
     await processBankrunTransaction(bankrunContext, withdrawTx, [user.wallet]);
 
     const [replacementLiqAuth] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      replacementBank
+      replacementBank,
     );
     const [replacementObligation] = deriveBaseObligation(
       replacementLiqAuth,
-      market
+      market,
     );
     const [replacementUserState] = deriveUserState(
       FARMS_PROGRAM_ID,
       farmState,
-      replacementObligation
+      replacementObligation,
     );
 
     const reopenAmount = new BN(10 * 10 ** ecosystem.tokenADecimals);
@@ -327,13 +328,13 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
         klendBankrunProgram,
         tokenAReserve,
         market,
-        oracles.tokenAOracle.publicKey
+        oracles.tokenAOracle.publicKey,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         replacementObligation,
-        [tokenAReserve]
+        [tokenAReserve],
       ),
       await makeKaminoDepositIx(
         user.mrgnBankrunProgram,
@@ -342,28 +343,28 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
           bank: replacementBank,
           signerTokenAccount: user.tokenAAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+          reserve: tokenAReserve,
           obligationFarmUserState: replacementUserState,
           reserveFarmState: farmState,
         },
-        reopenAmount
-      )
+        reopenAmount,
+      ),
     );
     await processBankrunTransaction(bankrunContext, reopenTx, [user.wallet]);
 
     const accountAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount
+      userAccount,
     );
     const hasReplacement = accountAfter.lendingAccount.balances.some(
       (balance) =>
-        balance.active === 1 && balance.bankPk.equals(replacementBank)
+        balance.active === 1 && balance.bankPk.equals(replacementBank),
     );
     if (!hasReplacement) {
       throw new Error("Expected reopened Kamino position to be active");
     }
 
     const stillHasWithdrawBank = accountAfter.lendingAccount.balances.some(
-      (balance) => balance.active === 1 && balance.bankPk.equals(withdrawBank)
+      (balance) => balance.active === 1 && balance.bankPk.equals(withdrawBank),
     );
     if (stillHasWithdrawBank) {
       throw new Error("Expected original Kamino position to be closed");
@@ -381,16 +382,16 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
     const farmState = farmAccounts.get(A_FARM_STATE);
     const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      depositBank
+      depositBank,
     );
     const [kaminoObligation] = deriveBaseObligation(
       liquidityVaultAuthority,
-      market
+      market,
     );
     const [userState] = deriveUserState(
       FARMS_PROGRAM_ID,
       farmState,
-      kaminoObligation
+      kaminoObligation,
     );
 
     const depositAmount = new BN(100 * 10 ** ecosystem.tokenADecimals);
@@ -402,13 +403,13 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
         klendBankrunProgram,
         tokenAReserve,
         market,
-        oracles.tokenAOracle.publicKey
+        oracles.tokenAOracle.publicKey,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         kaminoObligation,
-        [tokenAReserve]
+        [tokenAReserve],
       ),
       await makeKaminoDepositIx(
         user.mrgnBankrunProgram,
@@ -417,12 +418,12 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
           bank: depositBank,
           signerTokenAccount: user.tokenAAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+          reserve: tokenAReserve,
           obligationFarmUserState: userState,
           reserveFarmState: farmState,
         },
-        depositAmount
-      )
+        depositAmount,
+      ),
     );
     await processBankrunTransaction(bankrunContext, depositTx, [user.wallet]);
 
@@ -450,13 +451,13 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
           klendBankrunProgram,
           tokenAReserve,
           market,
-          oracles.tokenAOracle.publicKey
+          oracles.tokenAOracle.publicKey,
         ),
         await simpleRefreshObligation(
           klendBankrunProgram,
           market,
           kaminoObligation,
-          [tokenAReserve]
+          [tokenAReserve],
         ),
         await borrowIx(user.mrgnBankrunProgram, {
           marginfiAccount: userAccount,
@@ -464,7 +465,7 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
           tokenAccount: user.lstAlphaAccount,
           remaining: composeRemainingAccounts(remainingAccounts),
           amount: borrowAmount,
-        })
+        }),
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(user.wallet);
@@ -476,7 +477,7 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
       if (result.result) {
         const logs = result.meta.logMessages;
         const isOOM = logs.some((msg) =>
-          msg.toLowerCase().includes("memory allocation failed, out of memory")
+          msg.toLowerCase().includes("memory allocation failed, out of memory"),
         );
 
         if (isOOM) {
@@ -489,7 +490,7 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
           throw new Error(
             `Unexpected borrowIx failure on bank ${kaminoBanks[
               i
-            ].toBase58()}: ` + logs.join("\n")
+            ].toBase58()}: ` + logs.join("\n"),
           );
         }
       }
@@ -506,7 +507,7 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
       await configureBank(groupAdmin.mrgnBankrunProgram, {
         bank: regularBanks[MAX_BALANCES - 1],
         bankConfigOpt: config,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
   });
@@ -541,16 +542,16 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
         tokenAccount: liquidator.lstAlphaAccount,
         amount: depositAmount,
         depositUpToLimit: false,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [liquidator.wallet]);
 
     const liquidateeAcc = await bankrunProgram.account.marginfiAccount.fetch(
-      liquidateeAccount
+      liquidateeAccount,
     );
     dumpAccBalances(liquidateeAcc);
     const liquidatorAcc = await bankrunProgram.account.marginfiAccount.fetch(
-      liquidatorAccount
+      liquidatorAccount,
     );
     dumpAccBalances(liquidatorAcc);
 
@@ -580,7 +581,7 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
         amount: liquidateAmount,
         liquidateeAccounts: liquidateeAccounts.length,
         liquidatorAccounts: 7,
-      })
+      }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(liquidator.wallet);
@@ -598,7 +599,7 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
     if (result.result) {
       const logs = result.meta.logMessages;
       const isOOM = logs.some((msg) =>
-        msg.toLowerCase().includes("memory allocation failed, out of memory")
+        msg.toLowerCase().includes("memory allocation failed, out of memory"),
       );
 
       if (isOOM) {
