@@ -121,6 +121,7 @@ describe("k09: Withdraw from Kamino reserve with accrued interest", () => {
           marginfiAccount,
           authority: user.wallet.publicKey,
           bank: bankUsdc,
+          mint: ecosystem.usdcMint.publicKey,
           destinationTokenAccount: user.usdcAccount,
           lendingMarket: market,
           reserve: usdcReserve,

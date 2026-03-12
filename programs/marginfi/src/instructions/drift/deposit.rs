@@ -1,5 +1,5 @@
 use crate::{
-    bank_signer, check,
+    bank_signer,
     constants::DRIFT_PROGRAM_ID,
     events::{AccountEventHeader, LendingAccountDepositEvent},
     state::{
@@ -26,9 +26,7 @@ use drift_mocks::drift::cpi::{deposit, update_spot_market_cumulative_interest};
 use drift_mocks::state::MinimalUser;
 use fixed::types::I80F48;
 use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
-use marginfi_type_crate::types::{
-    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
-};
+use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
 /// Deposit into a Drift spot market through a marginfi account
 ///
@@ -51,12 +49,6 @@ pub fn drift_deposit<'info>(
 
         validate_asset_tags(&bank, &marginfi_account)?;
         validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
-
-        check!(
-            !marginfi_account.get_flag(ACCOUNT_DISABLED)
-                && !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP),
-            MarginfiError::AccountDisabled
-        );
 
         let integration_acc_1 = ctx.accounts.integration_acc_1.load()?;
         market_index = integration_acc_1.market_index;
@@ -147,6 +139,10 @@ pub struct DriftDeposit<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
+        constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_DISABLED)
+        } @MarginfiError::AccountDisabled,
         constraint = {
             let a = marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())

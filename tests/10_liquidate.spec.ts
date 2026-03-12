@@ -433,11 +433,7 @@ describe("Liquidate user", () => {
     }
 
     let now = await getBankrunTime(bankrunContext);
-    assertBNApproximately(liquidatorBalancesAfter[0].lastUpdate, now, 2);
-    assertBNApproximately(liquidatorBalancesAfter[1].lastUpdate, now, 2);
     assertBNApproximately(liquidatorMarginfiAccountAfter.lastUpdate, now, 2);
-    assertBNApproximately(liquidateeBalancesAfter[0].lastUpdate, now, 2);
-    assertBNApproximately(liquidateeBalancesAfter[1].lastUpdate, now, 2);
     assertBNApproximately(liquidateeMarginfiAccountAfter.lastUpdate, now, 2);
   });
 });

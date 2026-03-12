@@ -253,7 +253,12 @@ describe("kx: Fixed Kamino price bank", () => {
         remaining: [tokenAReserve],
       }),
     );
-    const result = await processBankrunTransaction(ctx, tx, [user.wallet], true);
+    const result = await processBankrunTransaction(
+      ctx,
+      tx,
+      [user.wallet],
+      true,
+    );
     // KaminoReserveValidationFailed
     assertBankrunTxFailed(result, 6210);
   });
@@ -457,6 +462,7 @@ describe("kx: Fixed Kamino price bank", () => {
           marginfiAccount: userAccount,
           authority: user.wallet.publicKey,
           bank: fixedKaminoBank,
+          mint: ecosystem.usdcMint.publicKey,
           destinationTokenAccount: user.usdcAccount,
           lendingMarket: market,
           reserve: usdcReserve,
@@ -553,6 +559,7 @@ describe("kx: Fixed Kamino price bank", () => {
           marginfiAccount: userAccount,
           authority: user.wallet.publicKey,
           bank: fixedKaminoBank,
+          mint: ecosystem.usdcMint.publicKey,
           destinationTokenAccount: user.usdcAccount,
           lendingMarket: market,
           reserve: usdcReserve,

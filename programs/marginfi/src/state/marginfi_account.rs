@@ -13,9 +13,8 @@ use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
-        ASSET_TAG_SOLEND, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, EMISSIONS_FLAG_BORROW_ACTIVE,
-        EMISSIONS_FLAG_LENDING_ACTIVE, EXP_10_I80F48, MAX_INTEGRATION_POSITIONS,
-        MIN_EMISSIONS_START_TIME, ORDER_ACTIVE_TAGS, SECONDS_PER_YEAR, ZERO_AMOUNT_THRESHOLD,
+        ASSET_TAG_SOLEND, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, EXP_10_I80F48,
+        MAX_INTEGRATION_POSITIONS, ORDER_ACTIVE_TAGS, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
         reconcile_emode_configs, Balance, BalanceSide, Bank, BankOperationalState, EmodeConfig,
@@ -88,7 +87,7 @@ pub fn is_signer_authorized(
     allow_order_execution: bool,
 ) -> bool {
     if allow_receivership && marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
-        return marginfi_account.authority != signer; // it is forbidden to take receivership of your own account
+        return marginfi_account.authority != signer; // forbidden to take receivership of your own account
     }
 
     if allow_order_execution && marginfi_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION) {
@@ -1485,7 +1484,7 @@ impl LendingAccountImpl for LendingAccount {
 pub trait BalanceImpl {
     fn change_asset_shares(&mut self, delta: I80F48) -> MarginfiResult;
     fn change_liability_shares(&mut self, delta: I80F48) -> MarginfiResult;
-    fn close(&mut self, check_emissions: bool) -> MarginfiResult;
+    fn close(&mut self) -> MarginfiResult;
 }
 
 impl BalanceImpl for Balance {
@@ -1507,14 +1506,7 @@ impl BalanceImpl for Balance {
         Ok(())
     }
 
-    fn close(&mut self, check_emissions: bool) -> MarginfiResult {
-        if check_emissions {
-            check!(
-                I80F48::from(self.emissions_outstanding) < I80F48::ONE,
-                MarginfiError::CannotCloseOutstandingEmissions
-            );
-        }
-
+    fn close(&mut self) -> MarginfiResult {
         *self = Self::empty_deactivated();
 
         Ok(())
@@ -1644,9 +1636,9 @@ impl<'a> BankAccountWrapper<'a> {
     }
 
     /// Withdraw existing asset in full - will error if there is no asset.
-    pub fn withdraw_all(&mut self) -> MarginfiResult<u64> {
-        self.claim_emissions(Clock::get()?.unix_timestamp as u64)?;
-
+    /// When `in_receivership` is true, clears the bank's liquidation price cache lock
+    /// so that banks whose balances are closed mid-liquidation don't stay permanently locked.
+    pub fn withdraw_all(&mut self, in_receivership: bool) -> MarginfiResult<u64> {
         let balance = &mut self.balance;
         let bank = &mut self.bank;
 
@@ -1667,11 +1659,14 @@ impl<'a> BankAccountWrapper<'a> {
             MarginfiError::NoAssetFound
         );
 
-        balance.close(true)?;
+        balance.close()?;
 
-        // Note: We do this so that banks in the receivership/deleverage flow are unlocked, as
-        // closed-position banks will not make it to the "end" instruction to be unlocked there
-        bank.cache.clear_liquidation_price_cache_locked();
+        // Only clear the lock when this account is actually in receivership.
+        // The lock is bank-level global state, so clearing it unconditionally
+        // would affect unrelated accounts sharing the same bank.
+        if in_receivership {
+            bank.cache.clear_liquidation_price_cache_locked();
+        }
 
         bank.decrement_lending_position_count();
         bank.change_asset_shares(-total_asset_shares, false)?;
@@ -1696,9 +1691,9 @@ impl<'a> BankAccountWrapper<'a> {
     }
 
     /// Repay existing liability in full - will error if there is no liability.
-    pub fn repay_all(&mut self) -> MarginfiResult<u64> {
-        self.claim_emissions(Clock::get()?.unix_timestamp as u64)?;
-
+    /// When `in_receivership` is true, clears the bank's liquidation price cache lock
+    /// so that banks whose balances are closed mid-liquidation don't stay permanently locked.
+    pub fn repay_all(&mut self, in_receivership: bool) -> MarginfiResult<u64> {
         let balance = &mut self.balance;
         let bank = &mut self.bank;
 
@@ -1718,11 +1713,14 @@ impl<'a> BankAccountWrapper<'a> {
             MarginfiError::NoLiabilityFound
         );
 
-        balance.close(true)?;
+        balance.close()?;
 
-        // Note: We do this so that banks in the receivership/deleverage flow are unlocked, as
-        // closed-position banks will not make it to the "end" instruction to be unlocked there
-        bank.cache.clear_liquidation_price_cache_locked();
+        // Only clear the lock when this account is actually in receivership.
+        // The lock is bank-level global state, so clearing it unconditionally
+        // would affect unrelated accounts sharing the same bank.
+        if in_receivership {
+            bank.cache.clear_liquidation_price_cache_locked();
+        }
 
         bank.decrement_borrowing_position_count();
         bank.change_liability_shares(-total_liability_shares, false)?;
@@ -1745,9 +1743,9 @@ impl<'a> BankAccountWrapper<'a> {
             .ok_or_else(math_error!())?)
     }
 
-    pub fn close_balance(&mut self) -> MarginfiResult<()> {
-        self.claim_emissions(Clock::get()?.unix_timestamp as u64)?;
-
+    /// When `in_receivership` is true, clears the bank's liquidation price cache lock
+    /// so that banks whose balances are closed mid-liquidation don't stay permanently locked.
+    pub fn close_balance(&mut self, in_receivership: bool) -> MarginfiResult<()> {
         let balance = &mut self.balance;
         let bank = &mut self.bank;
 
@@ -1767,7 +1765,11 @@ impl<'a> BankAccountWrapper<'a> {
             "Balance has existing assets"
         );
 
-        balance.close(true)?;
+        balance.close()?;
+
+        if in_receivership {
+            bank.cache.clear_liquidation_price_cache_locked();
+        }
 
         Ok(())
     }
@@ -1784,8 +1786,6 @@ impl<'a> BankAccountWrapper<'a> {
             "Balance increase: {} (type: {:?})",
             balance_delta, operation_type
         );
-
-        self.claim_emissions(Clock::get()?.unix_timestamp as u64)?;
 
         let balance = &mut self.balance;
         let bank = &mut self.bank;
@@ -1871,8 +1871,6 @@ impl<'a> BankAccountWrapper<'a> {
             balance_delta, operation_type
         );
 
-        self.claim_emissions(Clock::get()?.unix_timestamp as u64)?;
-
         let balance = &mut self.balance;
         let bank = &mut self.bank;
         let had_assets =
@@ -1945,132 +1943,6 @@ impl<'a> BankAccountWrapper<'a> {
 
         Ok(())
     }
-
-    /// Claim any unclaimed emissions and add them to the outstanding emissions amount.
-    pub fn claim_emissions(&mut self, current_timestamp: u64) -> MarginfiResult {
-        if let Some(balance_amount) = match (
-            self.balance.get_side(),
-            self.bank.get_flag(EMISSIONS_FLAG_LENDING_ACTIVE),
-            self.bank.get_flag(EMISSIONS_FLAG_BORROW_ACTIVE),
-        ) {
-            (Some(BalanceSide::Assets), true, _) => Some(
-                self.bank
-                    .get_asset_amount(self.balance.asset_shares.into())?,
-            ),
-            (Some(BalanceSide::Liabilities), _, true) => Some(
-                self.bank
-                    .get_liability_amount(self.balance.liability_shares.into())?,
-            ),
-            _ => None,
-        } {
-            let last_update = if self.balance.last_update < MIN_EMISSIONS_START_TIME {
-                current_timestamp
-            } else {
-                self.balance.last_update
-            };
-            let period = I80F48::from_num(
-                current_timestamp
-                    .checked_sub(last_update)
-                    .ok_or_else(math_error!())?,
-            );
-            let emissions_rate = I80F48::from_num(self.bank.emissions_rate);
-            let emissions = calc_emissions(
-                period,
-                balance_amount,
-                self.bank.get_balance_decimals() as usize,
-                emissions_rate,
-            )?;
-
-            let emissions_real = min(emissions, I80F48::from(self.bank.emissions_remaining));
-
-            if emissions != emissions_real {
-                msg!(
-                    "Emissions capped: {} ({} calculated) for period {}s",
-                    emissions_real,
-                    emissions,
-                    period
-                );
-            }
-
-            debug!(
-                "Outstanding emissions: {}",
-                I80F48::from(self.balance.emissions_outstanding)
-            );
-
-            self.balance.emissions_outstanding = {
-                I80F48::from(self.balance.emissions_outstanding)
-                    .checked_add(emissions_real)
-                    .ok_or_else(math_error!())?
-            }
-            .into();
-            self.bank.emissions_remaining = {
-                I80F48::from(self.bank.emissions_remaining)
-                    .checked_sub(emissions_real)
-                    .ok_or_else(math_error!())?
-            }
-            .into();
-        }
-
-        self.balance.last_update = current_timestamp;
-
-        Ok(())
-    }
-
-    /// Claim any outstanding emissions, and return the max amount that can be withdrawn.
-    pub fn settle_emissions_and_get_transfer_amount(&mut self) -> MarginfiResult<u64> {
-        self.claim_emissions(Clock::get()?.unix_timestamp as u64)?;
-
-        let outstanding_emissions_floored = I80F48::from(self.balance.emissions_outstanding)
-            .checked_floor()
-            .ok_or_else(math_error!())?;
-        let new_outstanding_amount = I80F48::from(self.balance.emissions_outstanding)
-            .checked_sub(outstanding_emissions_floored)
-            .ok_or_else(math_error!())?;
-
-        self.balance.emissions_outstanding = new_outstanding_amount.into();
-
-        Ok(outstanding_emissions_floored
-            .checked_to_num::<u64>()
-            .ok_or_else(math_error!())?)
-    }
-}
-
-/// Calculates the emissions based on the given period, balance amount, mint decimals,
-/// emissions rate, and seconds per year.
-///
-/// Formula:
-/// emissions = period * balance_amount / (10 ^ mint_decimals) * emissions_rate
-///
-/// # Arguments
-///
-/// * `period` - The period for which emissions are calculated.
-/// * `balance_amount` - The balance amount used in the calculation.
-/// * `mint_decimals` - The number of decimal places for the mint.
-/// * `emissions_rate` - The emissions rate used in the calculation.
-///
-/// # Returns
-///
-/// The calculated emissions value.
-fn calc_emissions(
-    period: I80F48,
-    balance_amount: I80F48,
-    mint_decimals: usize,
-    emissions_rate: I80F48,
-) -> MarginfiResult<I80F48> {
-    let exponent = EXP_10_I80F48[mint_decimals];
-    let balance_amount_ui = balance_amount
-        .checked_div(exponent)
-        .ok_or_else(math_error!())?;
-
-    let emissions = period
-        .checked_mul(balance_amount_ui)
-        .ok_or_else(math_error!())?
-        .checked_div(SECONDS_PER_YEAR)
-        .ok_or_else(math_error!())?
-        .checked_mul(emissions_rate)
-        .ok_or_else(math_error!())?;
-
-    Ok(emissions)
 }
 
 #[cfg(test)]
@@ -2094,111 +1966,5 @@ mod test {
             calc_value(I80F48!(1_000_000_000), I80F48!(10_000_000), 9, None).unwrap(),
             I80F48!(10_000_000)
         );
-    }
-
-    #[test]
-    fn test_calc_emissions() {
-        let balance_amount: u64 = 106153222432271169;
-        let emissions_rate = 1.5;
-
-        // 1 second
-        let period = 1;
-        let emissions = calc_emissions(
-            I80F48::from_num(period),
-            I80F48::from_num(balance_amount),
-            9,
-            I80F48::from_num(emissions_rate),
-        );
-        assert!(emissions.is_ok());
-        assert_eq!(emissions.unwrap(), I80F48::from_num(5.049144902600414));
-
-        // 126 days
-        let period = 126 * 24 * 60 * 60;
-        let emissions = calc_emissions(
-            I80F48::from_num(period),
-            I80F48::from_num(balance_amount),
-            9,
-            I80F48::from_num(emissions_rate),
-        );
-        assert!(emissions.is_ok());
-
-        // 2 years
-        let period = 2 * 365 * 24 * 60 * 60;
-        let emissions = calc_emissions(
-            I80F48::from_num(period),
-            I80F48::from_num(balance_amount),
-            9,
-            I80F48::from_num(emissions_rate),
-        );
-        assert!(emissions.is_ok());
-
-        {
-            // 10x balance amount
-            let balance_amount = balance_amount * 10;
-            let emissions = calc_emissions(
-                I80F48::from_num(period),
-                I80F48::from_num(balance_amount),
-                9,
-                I80F48::from_num(emissions_rate),
-            );
-            assert!(emissions.is_ok());
-        }
-
-        // 20 years + 100x emissions rate
-        let period = 20 * 365 * 24 * 60 * 60;
-        let emissions_rate = emissions_rate * 100.0;
-        let emissions = calc_emissions(
-            I80F48::from_num(period),
-            I80F48::from_num(balance_amount),
-            9,
-            I80F48::from_num(emissions_rate),
-        );
-        assert!(emissions.is_ok());
-
-        {
-            // u64::MAX deposit amount
-            let balance_amount = u64::MAX;
-            let emissions_rate = emissions_rate;
-            let emissions = calc_emissions(
-                I80F48::from_num(period),
-                I80F48::from_num(balance_amount),
-                9,
-                I80F48::from_num(emissions_rate),
-            );
-            assert!(emissions.is_ok());
-        }
-
-        {
-            // 10000x emissions rate
-            let balance_amount = u64::MAX;
-            let emissions_rate = emissions_rate * 10000.;
-            let emissions = calc_emissions(
-                I80F48::from_num(period),
-                I80F48::from_num(balance_amount),
-                9,
-                I80F48::from_num(emissions_rate),
-            );
-            assert!(emissions.is_ok());
-        }
-
-        {
-            let balance_amount = I80F48::from_num(10000000);
-            let emissions_rate = I80F48::from_num(1.5);
-            let period = I80F48::from_num(10 * 24 * 60 * 60);
-
-            let emissions = period
-                .checked_mul(balance_amount)
-                .unwrap()
-                .checked_div(EXP_10_I80F48[9])
-                .unwrap()
-                .checked_mul(emissions_rate)
-                .unwrap()
-                .checked_div(SECONDS_PER_YEAR)
-                .unwrap();
-
-            let emissions_new = calc_emissions(period, balance_amount, 9, emissions_rate).unwrap();
-
-            assert!(emissions_new - emissions < I80F48::from_num(0.00000001));
-        }
     }
 }

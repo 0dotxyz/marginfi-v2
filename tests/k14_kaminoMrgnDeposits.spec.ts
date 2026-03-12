@@ -44,6 +44,7 @@ import {
 } from "./utils/kamino-utils";
 import { createMintToInstruction } from "@solana/spl-token";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
+import { dummyIx } from "./utils/bankrunConnection";
 
 describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
   let userA: MockUser;
@@ -131,6 +132,10 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
             kaminoAccounts.get(MARKET)!,
             usdcBankObligation,
             [usdcReserve],
+          ),
+          dummyIx(
+            globalProgramAdmin.wallet.publicKey,
+            groupAdmin.wallet.publicKey,
           ),
         );
         await processBankrunTransaction(bankrunContext, refreshTx, [
@@ -299,6 +304,10 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
             tokenABankObligation,
             [tokenAReserve],
           ),
+          dummyIx(
+            globalProgramAdmin.wallet.publicKey,
+            groupAdmin.wallet.publicKey,
+          ),
         );
         await processBankrunTransaction(bankrunContext, refreshTx, [
           globalProgramAdmin.wallet,
@@ -420,6 +429,10 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
             usdcBankObligation,
             [usdcReserve],
           ),
+          dummyIx(
+            globalProgramAdmin.wallet.publicKey,
+            groupAdmin.wallet.publicKey,
+          ),
         );
         await processBankrunTransaction(bankrunContext, refreshTx, [
           globalProgramAdmin.wallet,
@@ -531,6 +544,10 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
             kaminoAccounts.get(MARKET)!,
             tokenABankObligation,
             [tokenAReserve],
+          ),
+          dummyIx(
+            globalProgramAdmin.wallet.publicKey,
+            groupAdmin.wallet.publicKey,
           ),
         );
         await processBankrunTransaction(bankrunContext, refreshTx, [
@@ -647,6 +664,10 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
           usdcBankObligation,
           [usdcReserve],
         ),
+        dummyIx(
+          globalProgramAdmin.wallet.publicKey,
+          groupAdmin.wallet.publicKey,
+        ),
       );
       await processBankrunTransaction(bankrunContext, refreshTx, [
         globalProgramAdmin.wallet,
@@ -756,6 +777,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
             marginfiAccount: userA.accounts.get(USER_ACCOUNT_K)!,
             authority: userA.wallet.publicKey,
             bank: usdcBank,
+            mint: ecosystem.usdcMint.publicKey,
             destinationTokenAccount: userA.usdcAccount,
             lendingMarket: kaminoAccounts.get(MARKET)!,
             reserve: usdcReserve,
@@ -820,6 +842,10 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
           kaminoAccounts.get(MARKET)!,
           usdcBankObligation,
           [usdcReserve],
+        ),
+        dummyIx(
+          globalProgramAdmin.wallet.publicKey,
+          groupAdmin.wallet.publicKey,
         ),
       );
       await processBankrunTransaction(bankrunContext, refreshTx, [
@@ -1014,12 +1040,10 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
               obligation,
               [reserve],
             ),
-            // dummy tx to trick bankrun
-            SystemProgram.transfer({
-              fromPubkey: globalProgramAdmin.wallet.publicKey,
-              toPubkey: groupAdmin.wallet.publicKey,
-              lamports: Math.round(Math.random() * 10000),
-            }),
+            dummyIx(
+              globalProgramAdmin.wallet.publicKey,
+              groupAdmin.wallet.publicKey,
+            ),
           );
           await processBankrunTransaction(bankrunContext, refreshTx, [
             globalProgramAdmin.wallet,
@@ -1053,12 +1077,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
               },
               depositAmount,
             ),
-            // dummy tx to trick bankrun
-            SystemProgram.transfer({
-              fromPubkey: user.wallet.publicKey,
-              toPubkey: groupAdmin.wallet.publicKey,
-              lamports: Math.round(Math.random() * 10000),
-            }),
+            dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
           );
           await processBankrunTransaction(
             bankrunContext,
@@ -1361,12 +1380,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
         obligation,
         [reserve],
       ),
-      // dummy tx to trick bankrun
-      SystemProgram.transfer({
-        fromPubkey: globalProgramAdmin.wallet.publicKey,
-        toPubkey: groupAdmin.wallet.publicKey,
-        lamports: Math.round(Math.random() * 10000),
-      }),
+      dummyIx(globalProgramAdmin.wallet.publicKey, groupAdmin.wallet.publicKey),
     );
     await processBankrunTransaction(bankrunContext, refreshTx, [
       globalProgramAdmin.wallet,
@@ -1381,6 +1395,9 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
           marginfiAccount: userAccount,
           authority: user.wallet.publicKey,
           bank,
+          mint: isUsdc
+            ? ecosystem.usdcMint.publicKey
+            : ecosystem.tokenAMint.publicKey,
           destinationTokenAccount: tokenAccount,
           lendingMarket: kaminoAccounts.get(MARKET)!,
           reserve: isUsdc ? usdcReserve : tokenAReserve,
@@ -1392,20 +1409,15 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
         },
         {
           amount: isFinalWithdrawal ? new BN(0) : amount,
-          isWithdrawAll:isFinalWithdrawal,
+          isWithdrawAll: isFinalWithdrawal,
           remaining: isFinalWithdrawal
             ? composeRemainingAccounts(
                 activePositions.filter((group) => !group[0].equals(bank))
               )
             : composeRemainingAccounts(activePositions),
-        }
+        },
       ),
-      // dummy tx to trick bankrun
-      SystemProgram.transfer({
-        fromPubkey: user.wallet.publicKey,
-        toPubkey: groupAdmin.wallet.publicKey,
-        lamports: Math.round(Math.random() * 10000),
-      }),
+      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
     );
 
     await processBankrunTransaction(bankrunContext, withdrawTx, [user.wallet]);

@@ -9,18 +9,14 @@ import {
   bankrunContext,
   bankrunProgram,
   bankRunProvider,
-  banksClient,
   ecosystem,
   oracles,
   users,
   verbose,
 } from "./rootHooks";
-import { Clock } from "solana-bankrun";
-import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import {
   assertBNApproximately,
   assertKeysEqual,
-  expectFailedTxWithError,
   getTokenBalance,
 } from "./utils/genericTests";
 import { assert } from "chai";
@@ -29,7 +25,6 @@ import {
   composeRemainingAccounts,
   depositIx,
   repayIx,
-  withdrawEmissionsIx,
   withdrawIx,
 } from "./utils/user-instructions";
 import { USER_ACCOUNT } from "./utils/mocks";
@@ -62,28 +57,6 @@ describe("Withdraw funds", () => {
   const repayAmountUsdc_native = new BN(
     repayAmountUsdc * 10 ** ecosystem.usdcDecimals
   );
-
-  /**
-   * Advance bankrun clock by specified seconds and refresh oracles.
-   * Required for emissions to accrue since bankrun clock is frozen.
-   *
-   * Note: setTimeout does NOT advance bankrun's Clock sysvar - it's frozen.
-   * We must use setClock() to advance blockchain time explicitly.
-   */
-  const advanceClockAndRefreshOracles = async (seconds: number = 2) => {
-    const clock = await banksClient.getClock();
-    const newClock = new Clock(
-      clock.slot + BigInt(1),
-      clock.epochStartTimestamp,
-      clock.epoch,
-      clock.leaderScheduleEpoch,
-      clock.unixTimestamp + BigInt(seconds)
-    );
-    bankrunContext.setClock(newClock);
-
-    // Refresh oracles so publish times match new clock
-    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
-  };
 
   it("(user 0) withdraws some token A - happy path", async () => {
     const user = users[0];
@@ -242,87 +215,9 @@ describe("Withdraw funds", () => {
     assert.approximately(bankSharesAfter, bankSharesBefore - repayExpected, 1);
   });
 
-  it("(user 0) tries to repay all without claiming emissions - should fail", async () => {
-    const user = users[0];
-    const userAccKey = user.accounts.get(USER_ACCOUNT);
-    const bank = bankKeypairUsdc.publicKey;
-
-    // Ensure emissions accrue by advancing bankrun clock
-    await advanceClockAndRefreshOracles(2);
-
-    // For repayAll, pass remaining accounts excluding the closing bank.
-    const userAccBefore =
-      await program.account.marginfiAccount.fetch(userAccKey);
-    const remaining = composeRemainingAccounts(
-      balanceAccountGroups.filter((group) => !group[0].equals(bank))
-    );
-    await expectFailedTxWithError(
-      async () => {
-        await user.mrgnProgram.provider.sendAndConfirm(
-          new Transaction().add(
-            await repayIx(user.mrgnProgram, {
-              marginfiAccount: userAccKey,
-              bank: bank,
-              tokenAccount: user.usdcAccount,
-              remaining,
-              amount: u64MAX_BN,
-              repayAll: true,
-            })
-          )
-        );
-      },
-      "CannotCloseOutstandingEmissions",
-      6033
-    );
-  });
-
-  it("(user 0) claims emissions (in token B) before repaying their balance - happy path", async () => {
-    const user = users[0];
-    const userAccKey = user.accounts.get(USER_ACCOUNT);
-    const bank = bankKeypairUsdc.publicKey;
-
-    // Make this test independent: ensure emissions accrue even when run standalone.
-    await advanceClockAndRefreshOracles(2);
-
-    const userBBefore = await getTokenBalance(provider, user.tokenBAccount);
-    const userAccBefore = await program.account.marginfiAccount.fetch(userAccKey);
-
-    // Only claim emissions here - the actual repayAll happens in the next test
-    await user.mrgnProgram.provider.sendAndConfirm(
-      new Transaction().add(
-        await withdrawEmissionsIx(user.mrgnProgram, {
-          marginfiAccount: userAccKey,
-          bank: bank,
-          tokenAccount: user.tokenBAccount,
-        })
-      )
-    );
-
-    const userBAfter = await getTokenBalance(provider, user.tokenBAccount);
-    const userAccAfter = await program.account.marginfiAccount.fetch(userAccKey);
-
-    let now = await getBankrunTime(bankrunContext);
-    assert(userAccBefore.lastUpdate != userAccAfter.lastUpdate);
-    assertBNApproximately(userAccAfter.lastUpdate, now, 2);
-
-    const diff = userBAfter - userBBefore;
-    if (verbose) {
-      console.log("Claimed Token B emissions: " + diff);
-    }
-
-    // TODO we can probably assert a more specific balance here with some maths...
-    assert.ok(diff > 0);
-
-    // TODO assert changes to the emissions accounts...
-  });
-
   it("(user 0) repays all of their USDC debt - happy path", async () => {
     const user = users[0];
     const userAccKey = user.accounts.get(USER_ACCOUNT);
-
-    // Note: In bankrun we don't advance the clock here since the previous test already
-    // advanced it and claimed emissions. The withdrawEmissionsIx in this transaction
-    // will claim any remaining emissions before repaying.
 
     const bank = bankKeypairUsdc.publicKey;
     const bankBefore = await program.account.bank.fetch(bank);

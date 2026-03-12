@@ -68,10 +68,10 @@ const PRECISION_DECIMALS = 9; // Use 9 decimals as baseline for precision
  */
 function lowerBiasedAdjustedPrice(
   rawOraclePrice: BN,
-  exchangeRateDecimal: Decimal
+  exchangeRateDecimal: Decimal,
 ): BN {
   const exchangeRateScaled = new BN(
-    exchangeRateDecimal.mul(SCALE_1E9.toString()).floor().toString()
+    exchangeRateDecimal.mul(SCALE_1E9.toString()).floor().toString(),
   );
 
   const adjustedScaled = rawOraclePrice.mul(exchangeRateScaled);
@@ -89,7 +89,7 @@ function lowerBiasedAdjustedPrice(
 function expectedUsdValue(
   assetShares: BN,
   lowerPrice: BN,
-  tokenDecimals: number
+  tokenDecimals: number,
 ): BN {
   return assetShares.mul(lowerPrice).div(new BN(10).pow(new BN(tokenDecimals)));
 }
@@ -104,7 +104,7 @@ async function fetchReserve(reserve: PublicKey): Promise<Reserve> {
 export const makePulseHealthIx = async (
   program: Program<Marginfi>,
   marginfiAccount: PublicKey,
-  remainingAccounts: AccountMeta[] = []
+  remainingAccounts: AccountMeta[] = [],
 ): Promise<TransactionInstruction> => {
   return program.methods
     .lendingAccountPulseHealth()
@@ -137,7 +137,7 @@ describe("k15: Kamino Conversion Validation", () => {
     tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE)!;
     usdcObligation = kaminoAccounts.get(`${usdcBank.toString()}_OBLIGATION`)!;
     tokenAObligation = kaminoAccounts.get(
-      `${tokenABank.toString()}_OBLIGATION`
+      `${tokenABank.toString()}_OBLIGATION`,
     )!;
   });
 
@@ -157,7 +157,7 @@ describe("k15: Kamino Conversion Validation", () => {
         tx,
         [users[i].wallet, accountKeypair],
         false,
-        true
+        true,
       );
 
       users[i].accounts.set("k16_account", accountKeypair.publicKey);
@@ -173,23 +173,23 @@ describe("k15: Kamino Conversion Validation", () => {
           ecosystem.usdcMint.publicKey,
           users[0].usdcAccount,
           globalProgramAdmin.wallet.publicKey,
-          1000 * 10 ** ecosystem.usdcDecimals
-        )
+          1000 * 10 ** ecosystem.usdcDecimals,
+        ),
       )
       .add(
         createMintToInstruction(
           ecosystem.tokenAMint.publicKey,
           users[1].tokenAAccount,
           globalProgramAdmin.wallet.publicKey,
-          100 * 10 ** ecosystem.tokenADecimals
-        )
+          100 * 10 ** ecosystem.tokenADecimals,
+        ),
       );
     await processBankrunTransaction(
       bankrunContext,
       fundTx,
       [globalProgramAdmin.wallet],
       false,
-      true
+      true,
     );
 
     user0DepositAmount = new BN(100 * 10 ** ecosystem.usdcDecimals);
@@ -197,21 +197,21 @@ describe("k15: Kamino Conversion Validation", () => {
     const usdcReserveBefore = await fetchReserve(usdcReserve);
     const expectedUsdcCTokens = estimateCollateralFromDeposit(
       usdcReserveBefore,
-      user0DepositAmount
+      user0DepositAmount,
     );
 
     const refreshUsdcIx = await simpleRefreshReserve(
       klendBankrunProgram,
       usdcReserve,
       kaminoAccounts.get(MARKET)!,
-      oracles.usdcOracle.publicKey
+      oracles.usdcOracle.publicKey,
     );
 
     const refreshUsdcObligationIx = await simpleRefreshObligation(
       klendBankrunProgram,
       kaminoAccounts.get(MARKET)!,
       usdcObligation,
-      [usdcReserve]
+      [usdcReserve],
     );
 
     const depositIx0 = await makeKaminoDepositIx(
@@ -225,7 +225,7 @@ describe("k15: Kamino Conversion Validation", () => {
         obligationFarmUserState: null,
         reserveFarmState: null,
       },
-      user0DepositAmount
+      user0DepositAmount,
     );
 
     await processBankrunTransaction(
@@ -233,17 +233,17 @@ describe("k15: Kamino Conversion Validation", () => {
       new Transaction().add(refreshUsdcIx, refreshUsdcObligationIx, depositIx0),
       [users[0].wallet],
       false,
-      true
+      true,
     );
 
     const marginfiAccount0 = await bankrunProgram.account.marginfiAccount.fetch(
-      user0Account
+      user0Account,
     );
     const balance0 = marginfiAccount0.lendingAccount.balances.find(
-      (b) => b.active == 1 && b.bankPk.equals(usdcBank)
+      (b) => b.active == 1 && b.bankPk.equals(usdcBank),
     );
     user0InitialCTokens = new BN(
-      wrappedI80F48toBigNumber(balance0.assetShares).toString()
+      wrappedI80F48toBigNumber(balance0.assetShares).toString(),
     );
 
     assertBNApproximately(user0InitialCTokens, expectedUsdcCTokens, new BN(1));
@@ -255,27 +255,27 @@ describe("k15: Kamino Conversion Validation", () => {
       klendBankrunProgram,
       tokenAReserve,
       kaminoAccounts.get(MARKET)!,
-      oracles.tokenAOracle.publicKey
+      oracles.tokenAOracle.publicKey,
     );
 
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(refreshTokenAIx),
-      [users[1].wallet]
+      [users[1].wallet],
     );
 
     // Now fetch the fresh (post-refresh) state to calculate expected cTokens
     const tokenAReserveBefore = await fetchReserve(tokenAReserve);
     const expectedTokenACTokens = estimateCollateralFromDeposit(
       tokenAReserveBefore,
-      user1DepositAmount
+      user1DepositAmount,
     );
 
     const refreshTokenAObligationIx = await simpleRefreshObligation(
       klendBankrunProgram,
       kaminoAccounts.get(MARKET)!,
       tokenAObligation,
-      [tokenAReserve]
+      [tokenAReserve],
     );
 
     const depositIx1 = await makeKaminoDepositIx(
@@ -289,34 +289,31 @@ describe("k15: Kamino Conversion Validation", () => {
         obligationFarmUserState: farmAccounts.get(A_OBLIGATION_USER_STATE),
         reserveFarmState: farmAccounts.get(A_FARM_STATE),
       },
-      user1DepositAmount
+      user1DepositAmount,
     );
 
     await processBankrunTransaction(
       bankrunContext,
-      new Transaction().add(
-        refreshTokenAObligationIx,
-        depositIx1
-      ),
+      new Transaction().add(refreshTokenAObligationIx, depositIx1),
       [users[1].wallet],
       false,
-      true
+      true,
     );
 
     const marginfiAccount1 = await bankrunProgram.account.marginfiAccount.fetch(
-      user1Account
+      user1Account,
     );
     const balance1 = marginfiAccount1.lendingAccount.balances.find(
-      (b) => b.active == 1 && b.bankPk.equals(tokenABank)
+      (b) => b.active == 1 && b.bankPk.equals(tokenABank),
     );
     user1InitialCTokens = new BN(
-      wrappedI80F48toBigNumber(balance1.assetShares).toString()
+      wrappedI80F48toBigNumber(balance1.assetShares).toString(),
     );
     // ??? This sometimes fails due to clock issues
     assertBNApproximately(
       user1InitialCTokens,
       expectedTokenACTokens,
-      new BN(1)
+      new BN(1),
     );
   });
 
@@ -340,7 +337,7 @@ describe("k15: Kamino Conversion Validation", () => {
       0n,
       currentClock.epoch,
       0n,
-      BigInt(newTimestamp)
+      BigInt(newTimestamp),
     );
 
     bankrunContext.setClock(newClock);
@@ -351,13 +348,13 @@ describe("k15: Kamino Conversion Validation", () => {
       klendBankrunProgram,
       usdcReserve,
       kaminoAccounts.get(MARKET),
-      oracles.usdcOracle.publicKey
+      oracles.usdcOracle.publicKey,
     );
     const refreshIx1 = await simpleRefreshReserve(
       klendBankrunProgram,
       tokenAReserve,
       kaminoAccounts.get(MARKET),
-      oracles.tokenAOracle.publicKey
+      oracles.tokenAOracle.publicKey,
     );
     const refreshTx = new Transaction().add(refreshIx0, refreshIx1);
     await processBankrunTransaction(
@@ -365,7 +362,7 @@ describe("k15: Kamino Conversion Validation", () => {
       refreshTx,
       [globalProgramAdmin.wallet],
       false,
-      true
+      true,
     );
 
     const usdcReserveAfter = await fetchReserve(usdcReserve);
@@ -377,11 +374,11 @@ describe("k15: Kamino Conversion Validation", () => {
 
     assert.ok(
       usdcExchangeRateAfter.gt(usdcExchangeRateBefore),
-      `USDC exchange rate should increase with interest. Before: ${usdcExchangeRateBefore.toString()}, After: ${usdcExchangeRateAfter.toString()}`
+      `USDC exchange rate should increase with interest. Before: ${usdcExchangeRateBefore.toString()}, After: ${usdcExchangeRateAfter.toString()}`,
     );
     assert.ok(
       tokenAExchangeRateAfter.gt(tokenAExchangeRateBefore),
-      `Token A exchange rate should increase with interest. Before: ${tokenAExchangeRateBefore.toString()}, After: ${tokenAExchangeRateAfter.toString()}`
+      `Token A exchange rate should increase with interest. Before: ${tokenAExchangeRateBefore.toString()}, After: ${tokenAExchangeRateAfter.toString()}`,
     );
   });
 
@@ -391,14 +388,14 @@ describe("k15: Kamino Conversion Validation", () => {
       klendBankrunProgram,
       usdcReserve,
       kaminoAccounts.get(MARKET)!,
-      oracles.usdcOracle.publicKey
+      oracles.usdcOracle.publicKey,
     );
 
     const refreshUsdcObligationBeforeHealthIx = await simpleRefreshObligation(
       klendBankrunProgram,
       kaminoAccounts.get(MARKET)!,
       usdcObligation,
-      [usdcReserve]
+      [usdcReserve],
     );
 
     const pulseHealthIx0 = await makePulseHealthIx(
@@ -416,27 +413,27 @@ describe("k15: Kamino Conversion Validation", () => {
           isSigner: false,
           isWritable: false,
         },
-      ]
+      ],
     );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(
         refreshUsdcBeforeHealthIx,
         refreshUsdcObligationBeforeHealthIx,
-        pulseHealthIx0
+        pulseHealthIx0,
       ),
       [users[0].wallet],
       false,
-      true
+      true,
     );
 
     const accAfter0 = await bankrunProgram.account.marginfiAccount.fetch(
-      user0Account
+      user0Account,
     );
     const healthCahce0 = accAfter0.healthCache;
     const assetValue0 = wrappedI80F48toBigNumber(healthCahce0.assetValue);
     const actualUser0UsdValue = new BN(
-      Math.floor(assetValue0.toNumber() * 10 ** ecosystem.usdcDecimals)
+      Math.floor(assetValue0.toNumber() * 10 ** ecosystem.usdcDecimals),
     );
 
     // Refresh TokenA reserves before health pulse
@@ -444,14 +441,14 @@ describe("k15: Kamino Conversion Validation", () => {
       klendBankrunProgram,
       tokenAReserve,
       kaminoAccounts.get(MARKET)!,
-      oracles.tokenAOracle.publicKey
+      oracles.tokenAOracle.publicKey,
     );
 
     const refreshTokenAObligationBeforeHealthIx = await simpleRefreshObligation(
       klendBankrunProgram,
       kaminoAccounts.get(MARKET)!,
       tokenAObligation,
-      [tokenAReserve]
+      [tokenAReserve],
     );
 
     const pulseHealthIx1 = await makePulseHealthIx(
@@ -469,7 +466,7 @@ describe("k15: Kamino Conversion Validation", () => {
           isSigner: false,
           isWritable: false,
         },
-      ]
+      ],
     );
 
     await processBankrunTransaction(
@@ -477,29 +474,29 @@ describe("k15: Kamino Conversion Validation", () => {
       new Transaction().add(
         refreshTokenABeforeHealthIx,
         refreshTokenAObligationBeforeHealthIx,
-        pulseHealthIx1
+        pulseHealthIx1,
       ),
       [users[1].wallet],
       false,
-      true
+      true,
     );
     const accAfter1 = await bankrunProgram.account.marginfiAccount.fetch(
-      user1Account
+      user1Account,
     );
     const healthCache1 = accAfter1.healthCache;
     const assetValue1 = wrappedI80F48toBigNumber(healthCache1.assetValue);
     const actualUser1UsdValue = new BN(
-      Math.floor(assetValue1.toNumber() * 10 ** ecosystem.usdcDecimals)
+      Math.floor(assetValue1.toNumber() * 10 ** ecosystem.usdcDecimals),
     );
 
     const usdcBankData = await bankrunProgram.account.bank.fetch(usdcBank);
     const tokenABankData = await bankrunProgram.account.bank.fetch(tokenABank);
 
     const usdcAssetWeight = wrappedI80F48toBigNumber(
-      usdcBankData.config.assetWeightInit
+      usdcBankData.config.assetWeightInit,
     );
     const tokenAAssetWeight = wrappedI80F48toBigNumber(
-      tokenABankData.config.assetWeightInit
+      tokenABankData.config.assetWeightInit,
     );
 
     const usdcReserveAfter = await fetchReserve(usdcReserve);
@@ -518,13 +515,13 @@ describe("k15: Kamino Conversion Validation", () => {
     const expectedUser0UsdValue = expectedUsdValue(
       user0InitialCTokens,
       lowUSDC,
-      ecosystem.usdcDecimals
+      ecosystem.usdcDecimals,
     );
 
     const expectedUser1UsdValue = expectedUsdValue(
       user1InitialCTokens,
       lowA,
-      ecosystem.tokenADecimals
+      ecosystem.tokenADecimals,
     );
 
     // === SIMPLIFIED DEBUG - FOCUS ON THE THREE KEY VALUES ===
@@ -533,21 +530,21 @@ describe("k15: Kamino Conversion Validation", () => {
     console.log("1. ASSET VALUES FROM HEALTH PULSE:");
     console.log(
       "   User0 (USDC) asset value from health pulse:",
-      actualUser0UsdValue.toString()
+      actualUser0UsdValue.toString(),
     );
     console.log(
       "   User1 (TokenA) asset value from health pulse:",
-      actualUser1UsdValue.toString()
+      actualUser1UsdValue.toString(),
     );
 
     console.log("2. ASSET VALUES FROM OUR CALCULATIONS:");
     console.log(
       "   User0 (USDC) calculated value:",
-      expectedUser0UsdValue.toString()
+      expectedUser0UsdValue.toString(),
     );
     console.log(
       "   User1 (TokenA) calculated value:",
-      expectedUser1UsdValue.toString()
+      expectedUser1UsdValue.toString(),
     );
 
     console.log("3. ASSET WEIGHT VALUES:");
@@ -559,15 +556,15 @@ describe("k15: Kamino Conversion Validation", () => {
     const expectedUser0WeightedValue = expectedUser0UsdValue
       .mul(
         new BN(
-          Math.floor(usdcAssetWeight.toNumber() * 10 ** PRECISION_DECIMALS)
-        )
+          Math.floor(usdcAssetWeight.toNumber() * 10 ** PRECISION_DECIMALS),
+        ),
       )
       .div(SCALE_1E9);
     const expectedUser1WeightedValue = expectedUser1UsdValue
       .mul(
         new BN(
-          Math.floor(tokenAAssetWeight.toNumber() * 10 ** PRECISION_DECIMALS)
-        )
+          Math.floor(tokenAAssetWeight.toNumber() * 10 ** PRECISION_DECIMALS),
+        ),
       )
       .div(SCALE_1E9);
 
@@ -577,12 +574,12 @@ describe("k15: Kamino Conversion Validation", () => {
     assertBNApproximately(
       actualUser0UsdValue,
       expectedUser0WeightedValue,
-      usdcTolerance
+      usdcTolerance,
     );
     assertBNApproximately(
       actualUser1UsdValue,
       expectedUser1WeightedValue,
-      tokenATolerance
+      tokenATolerance,
     );
   });
 
@@ -593,26 +590,26 @@ describe("k15: Kamino Conversion Validation", () => {
 
     const exchangeRate = getLiquidityExchangeRate(usdcReserveBeforeWithdraw);
     const expectedTokens = new BN(
-      Math.floor(withdrawAmount.toNumber() * exchangeRate.toNumber())
+      Math.floor(withdrawAmount.toNumber() * exchangeRate.toNumber()),
     );
 
     const balanceBefore = await getTokenBalance(
       bankRunProvider,
-      users[0].usdcAccount
+      users[0].usdcAccount,
     );
 
     const refreshUsdcIx = await simpleRefreshReserve(
       klendBankrunProgram,
       usdcReserve,
       kaminoAccounts.get(MARKET)!,
-      oracles.usdcOracle.publicKey
+      oracles.usdcOracle.publicKey,
     );
 
     const refreshUsdcObligationIx = await simpleRefreshObligation(
       klendBankrunProgram,
       kaminoAccounts.get(MARKET)!,
       usdcObligation,
-      [usdcReserve]
+      [usdcReserve],
     );
 
     const withdrawIx = await makeKaminoWithdrawIx(
@@ -621,6 +618,7 @@ describe("k15: Kamino Conversion Validation", () => {
         marginfiAccount: user0Account,
         authority: users[0].wallet.publicKey,
         bank: usdcBank,
+        mint: ecosystem.usdcMint.publicKey,
         destinationTokenAccount: users[0].usdcAccount,
         lendingMarket: kaminoAccounts.get(MARKET)!,
         reserve: usdcReserve,
@@ -633,7 +631,7 @@ describe("k15: Kamino Conversion Validation", () => {
         remaining: composeRemainingAccounts([
           [usdcBank, oracles.usdcOracle.publicKey, usdcReserve],
         ]),
-      }
+      },
     );
 
     await processBankrunTransaction(
@@ -641,12 +639,12 @@ describe("k15: Kamino Conversion Validation", () => {
       new Transaction().add(refreshUsdcIx, refreshUsdcObligationIx, withdrawIx),
       [users[0].wallet],
       false,
-      true
+      true,
     );
 
     const balanceAfter = await getTokenBalance(
       bankRunProvider,
-      users[0].usdcAccount
+      users[0].usdcAccount,
     );
     const actualTokensReceived = new BN(balanceAfter - balanceBefore);
 
@@ -660,26 +658,26 @@ describe("k15: Kamino Conversion Validation", () => {
 
     const exchangeRate = getLiquidityExchangeRate(tokenAReserveBeforeWithdraw);
     const expectedTokens = new BN(
-      Math.floor(withdrawAmount.toNumber() * exchangeRate.toNumber())
+      Math.floor(withdrawAmount.toNumber() * exchangeRate.toNumber()),
     );
 
     const balanceBefore = await getTokenBalance(
       bankRunProvider,
-      users[1].tokenAAccount
+      users[1].tokenAAccount,
     );
 
     const refreshTokenAIx = await simpleRefreshReserve(
       klendBankrunProgram,
       tokenAReserve,
       kaminoAccounts.get(MARKET)!,
-      oracles.tokenAOracle.publicKey
+      oracles.tokenAOracle.publicKey,
     );
 
     const refreshTokenAObligationIx = await simpleRefreshObligation(
       klendBankrunProgram,
       kaminoAccounts.get(MARKET)!,
       tokenAObligation,
-      [tokenAReserve]
+      [tokenAReserve],
     );
 
     const withdrawIx = await makeKaminoWithdrawIx(
@@ -688,9 +686,10 @@ describe("k15: Kamino Conversion Validation", () => {
         marginfiAccount: user1Account,
         authority: users[1].wallet.publicKey,
         bank: tokenABank,
+        mint: ecosystem.tokenAMint.publicKey,
         destinationTokenAccount: users[1].tokenAAccount,
         lendingMarket: kaminoAccounts.get(MARKET)!,
-        reserve: tokenABank,
+        reserve: tokenAReserve,
         obligationFarmUserState: farmAccounts.get(A_OBLIGATION_USER_STATE),
         reserveFarmState: farmAccounts.get(A_FARM_STATE),
       },
@@ -700,7 +699,7 @@ describe("k15: Kamino Conversion Validation", () => {
         remaining: composeRemainingAccounts([
           [tokenABank, oracles.tokenAOracle.publicKey, tokenAReserve],
         ]),
-      }
+      },
     );
 
     await processBankrunTransaction(
@@ -708,23 +707,23 @@ describe("k15: Kamino Conversion Validation", () => {
       new Transaction().add(
         refreshTokenAIx,
         refreshTokenAObligationIx,
-        withdrawIx
+        withdrawIx,
       ),
       [users[1].wallet],
       false,
-      true
+      true,
     );
 
     const balanceAfter = await getTokenBalance(
       bankRunProvider,
-      users[1].tokenAAccount
+      users[1].tokenAAccount,
     );
     const actualTokensReceived = new BN(balanceAfter - balanceBefore);
 
     // Sanity check: tokens received should be greater than deposit amount due to interest
     assert.ok(
       actualTokensReceived.gt(user1DepositAmount),
-      `Tokens received (${actualTokensReceived.toString()}) should be greater than original deposit (${user1DepositAmount.toString()}) due to interest accrual`
+      `Tokens received (${actualTokensReceived.toString()}) should be greater than original deposit (${user1DepositAmount.toString()}) due to interest accrual`,
     );
 
     assertBNApproximately(actualTokensReceived, expectedTokens, new BN(1));

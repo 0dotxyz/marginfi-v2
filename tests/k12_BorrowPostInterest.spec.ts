@@ -77,7 +77,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
         bankrunProgram.programId,
         throwawayGroup.publicKey,
         ecosystem.lstAlphaMint.publicKey,
-        new BN(startingSeed).addn(i)
+        new BN(startingSeed).addn(i),
       );
       banks.push(bankPk);
     }
@@ -86,7 +86,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
       mrgnID,
       throwawayGroup.publicKey,
       ecosystem.usdcMint.publicKey,
-      new BN(startingSeed).addn(1)
+      new BN(startingSeed).addn(1),
     );
     usdcReserve = kaminoAccounts.get(USDC_RESERVE);
     tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE);
@@ -94,9 +94,9 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
     [kaminoUsdcObligation] = deriveBaseObligation(
       deriveLiquidityVaultAuthority(
         bankrunProgram.programId,
-        kaminoUsdcBank
+        kaminoUsdcBank,
       )[0],
-      market
+      market,
     );
   });
 
@@ -104,9 +104,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
     const market = kaminoAccounts.get(MARKET);
     const seed = new BN(startingSeed).addn(1);
 
-    let config = defaultKaminoBankConfig(
-      oracles.tokenAOracle.publicKey
-    );
+    let config = defaultKaminoBankConfig(oracles.tokenAOracle.publicKey);
     config.assetWeightInit = bigNumberToWrappedI80F48(0.8);
     config.assetWeightMaint = bigNumberToWrappedI80F48(0.9);
 
@@ -114,7 +112,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
       mrgnID,
       throwawayGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
-      seed
+      seed,
     );
 
     let tx = new Transaction().add(
@@ -129,19 +127,19 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
           oracle: oracles.tokenAOracle.publicKey,
         },
         {
-          config: config,
-          seed: seed,
-        }
-      )
+          config,
+          seed,
+        },
+      ),
     );
     await processBankrunTx(bankrunContext, tx, [groupAdmin.wallet]);
 
     [kaminoTokenAObligation] = deriveBaseObligation(
       deriveLiquidityVaultAuthority(
         bankrunProgram.programId,
-        kaminoTokenABank
+        kaminoTokenABank,
       )[0],
-      market
+      market,
     );
 
     tx = new Transaction().add(
@@ -153,7 +151,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
         lendingMarket: market,
         reserve: tokenAReserve,
         pythOracle: oracles.tokenAOracle.publicKey,
-      })
+      }),
     );
     await processBankrunTx(bankrunContext, tx, [groupAdmin.wallet]);
   });
@@ -184,13 +182,13 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
           klendBankrunProgram,
           usdcReserve,
           market,
-          oracles.usdcOracle.publicKey
+          oracles.usdcOracle.publicKey,
         ),
         await simpleRefreshObligation(
           klendBankrunProgram,
           market,
           kaminoUsdcObligation,
-          [usdcReserve]
+          [usdcReserve],
         ),
         await makeKaminoDepositIx(
           user.mrgnBankrunProgram,
@@ -201,7 +199,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
             lendingMarket: market,
             reserve: usdcReserve,
           },
-          depositAmountUsdc
+          depositAmountUsdc,
         ),
         await makeKaminoDepositIx(
           user.mrgnBankrunProgram,
@@ -212,11 +210,11 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
             lendingMarket: market,
             reserve: usdcReserve,
           },
-          depositAmountUsdc
-        )
+          depositAmountUsdc,
+        ),
       ),
       [user.wallet],
-      true
+      true,
     );
     // ReserveStale
     assertBankrunTxFailed(result, 6009);
@@ -235,13 +233,13 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
           klendBankrunProgram,
           usdcReserve,
           market,
-          oracles.usdcOracle.publicKey
+          oracles.usdcOracle.publicKey,
         ),
         await simpleRefreshObligation(
           klendBankrunProgram,
           market,
           kaminoUsdcObligation,
-          [usdcReserve]
+          [usdcReserve],
         ),
         await makeKaminoDepositIx(
           user.mrgnBankrunProgram,
@@ -252,16 +250,16 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
             lendingMarket: market,
             reserve: usdcReserve,
           },
-          depositAmountUsdc
+          depositAmountUsdc,
         ),
         await healthPulse(user.mrgnBankrunProgram, {
           marginfiAccount: userAccount,
           remaining: composeRemainingAccounts([
             [kaminoUsdcBank, oracles.usdcOracle.publicKey, usdcReserve],
           ]),
-        })
+        }),
       ),
-      [user.wallet]
+      [user.wallet],
     );
 
     const acc = await bankrunProgram.account.marginfiAccount.fetch(userAccount);
@@ -275,7 +273,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
       console.log("expected value (w/ confidence): " + depValWithConf);
       console.log(
         "actual value:               " +
-          wrappedI80F48toBigNumber(cache.assetValueEquity).toString()
+          wrappedI80F48toBigNumber(cache.assetValueEquity).toString(),
       );
     }
     // Note: interest has accumulated, so we expect this position should be worth a few % more.
@@ -306,11 +304,11 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
             lendingMarket: market,
             reserve: tokenAReserve,
           },
-          depositAmountTokenA
-        )
+          depositAmountTokenA,
+        ),
       ),
       [user.wallet],
-      true
+      true,
     );
     // ReserveStale
     assertBankrunTxFailed(result, 6009);
@@ -322,7 +320,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
           klendBankrunProgram,
           tokenAReserve,
           market,
-          oracles.tokenAOracle.publicKey
+          oracles.tokenAOracle.publicKey,
         ),
         await makeKaminoDepositIx(
           user.mrgnBankrunProgram,
@@ -333,11 +331,11 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
             lendingMarket: market,
             reserve: tokenAReserve,
           },
-          depositAmountTokenA
-        )
+          depositAmountTokenA,
+        ),
       ),
       [user.wallet],
-      true
+      true,
     );
     // ObligationStale.
     assertBankrunTxFailed(result, 6017);
@@ -360,13 +358,13 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
           klendBankrunProgram,
           tokenAReserve,
           market,
-          oracles.tokenAOracle.publicKey
+          oracles.tokenAOracle.publicKey,
         ),
         await simpleRefreshObligation(
           klendBankrunProgram,
           market,
           kaminoTokenAObligation,
-          [tokenAReserve]
+          [tokenAReserve],
         ),
         // Note: it doesn't matter for deposit that the USDC obligation is stale here, only the
         // deposit bank's obligation matters. It also doesn't matter that the USDC reserve is stale:
@@ -376,13 +374,13 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
           klendBankrunProgram,
           usdcReserve,
           market,
-          oracles.usdcOracle.publicKey
+          oracles.usdcOracle.publicKey,
         ),
         await simpleRefreshObligation(
           klendBankrunProgram,
           market,
           kaminoUsdcObligation,
-          [usdcReserve]
+          [usdcReserve],
         ),
         await makeKaminoDepositIx(
           user.mrgnBankrunProgram,
@@ -393,7 +391,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
             lendingMarket: market,
             reserve: tokenAReserve,
           },
-          depositAmountTokenA
+          depositAmountTokenA,
         ),
         // Pulse so the next test has an up-to-date cache for the "before" state.
         await healthPulse(user.mrgnBankrunProgram, {
@@ -402,9 +400,9 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
             [kaminoUsdcBank, oracles.usdcOracle.publicKey, usdcReserve],
             [kaminoTokenABank, oracles.tokenAOracle.publicKey, tokenAReserve],
           ]),
-        })
+        }),
       ),
-      [user.wallet]
+      [user.wallet],
     );
   });
 
@@ -419,7 +417,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
       bankrunProgram.account.bank.fetch(bank),
     ]);
     const balBefore = accBefore.lendingAccount.balances.find(
-      (b: BalanceRaw) => b.bankPk.equals(bank) && b.active === 1
+      (b: BalanceRaw) => b.bankPk.equals(bank) && b.active === 1,
     );
     const owedBefore = balBefore
       ? wrappedI80F48toBigNumber(balBefore.liabilityShares).toNumber()
@@ -446,7 +444,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
           [kaminoTokenABank, oracles.tokenAOracle.publicKey, tokenAReserve],
           [bank, oracles.pythPullLst.publicKey],
         ]),
-      })
+      }),
     );
     await processBankrunTx(bankrunContext, tx, [user.wallet]);
 
@@ -456,13 +454,13 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
     ]);
     logHealthCache("user cache after: ", accAfter.healthCache);
     const balAfter = accAfter.lendingAccount.balances.find(
-      (b: BalanceRaw) => b.bankPk.equals(bank) && b.active === 1
+      (b: BalanceRaw) => b.bankPk.equals(bank) && b.active === 1,
     );
     const owedAfter = wrappedI80F48toBigNumber(
-      balAfter.liabilityShares
+      balAfter.liabilityShares,
     ).toNumber();
     const originationFee = wrappedI80F48toBigNumber(
-      bankAfter.config.interestRateConfig.protocolOriginationFee
+      bankAfter.config.interestRateConfig.protocolOriginationFee,
     ).toNumber();
     const actual = owedAfter - owedBefore;
     const expected =
@@ -486,25 +484,25 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
         klendBankrunProgram,
         tokenAReserve,
         market,
-        oracles.tokenAOracle.publicKey
+        oracles.tokenAOracle.publicKey,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         kaminoTokenAObligation,
-        [tokenAReserve]
+        [tokenAReserve],
       ),
       await simpleRefreshReserve(
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         kaminoUsdcObligation,
-        [usdcReserve]
+        [usdcReserve],
       ),
       await makeKaminoDepositIx(
         user.mrgnBankrunProgram,
@@ -515,7 +513,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
           lendingMarket: market,
           reserve: tokenAReserve,
         },
-        new BN(0.0001 * 10 ** ecosystem.tokenADecimals)
+        new BN(0.0001 * 10 ** ecosystem.tokenADecimals),
       ),
       await borrowIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
@@ -528,7 +526,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
         ]),
         // some nominal amount
         amount: new BN(0.00001 * 10 ** ecosystem.lstAlphaDecimals),
-      })
+      }),
     );
     await processBankrunTx(bankrunContext, tx, [user.wallet]);
   });

@@ -55,13 +55,6 @@ pub fn place_order(
         MarginfiError::InvalidBalanceCount
     );
 
-    check!(
-        marginfi_account
-            .emissions_destination_account
-            .ne(&Pubkey::default()),
-        MarginfiError::InvalidEmissionsDestinationAccount
-    );
-
     // ORDER_ACTIVE_TAGS == 2
     let bank_key_1 = &bank_keys[0];
     let bank_key_2 = &bank_keys[1];

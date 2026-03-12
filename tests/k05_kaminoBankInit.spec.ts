@@ -182,8 +182,8 @@ describe("k05: Init Kamino banks", () => {
       )
     );
     let result1 = await processBankrunTransaction(ctx, tx1, [usr.wallet], true);
-    // Generic ConstraintTokenMint
-    assertBankrunTxFailed(result1, 2014);
+    // Generic AccountNotInitialized (reserve_liquidity_supply is uninitialized)
+    assertBankrunTxFailed(result1, 3012);
 
     let tx2 = new Transaction().add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),

@@ -24,7 +24,7 @@ use marginfi_type_crate::{
     constants::{
         TOKENLESS_REPAYMENTS_ALLOWED, TOKENLESS_REPAYMENTS_COMPLETE, ZERO_AMOUNT_THRESHOLD,
     },
-    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED},
+    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP},
 };
 
 /// 1. Accrue interest
@@ -72,12 +72,13 @@ pub fn lending_account_repay<'info>(
         bank_loader.key(),
     )?;
 
+    let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
     let lending_account = &mut marginfi_account.lending_account;
     let mut bank_account =
         BankAccountWrapper::find(&bank_loader.key(), &mut bank, lending_account)?;
 
     let repay_amount_post_fee = if repay_all {
-        bank_account.repay_all()?
+        bank_account.repay_all(in_receivership)?
     } else {
         bank_account.repay(I80F48::from_num(amount))?;
 

@@ -39,7 +39,6 @@ import {
   placeOrderIx,
   repayIx,
   startExecuteOrderIx,
-  updateEmissionsDestination,
 } from "./utils/user-instructions";
 import {
   simpleRefreshObligation,
@@ -372,7 +371,7 @@ SCENARIOS.forEach(
                   bank,
                   signerTokenAccount: groupAdmin.tokenAAccount,
                   lendingMarket,
-                  reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+                  reserve: tokenAReserve,
                   obligationFarmUserState,
                   reserveFarmState: reserveFarmState ?? null,
                 },
@@ -472,7 +471,7 @@ SCENARIOS.forEach(
                   bank,
                   signerTokenAccount: user.tokenAAccount,
                   lendingMarket,
-                  reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+                  reserve: tokenAReserve,
                   obligationFarmUserState,
                   reserveFarmState: reserveFarmState ?? null,
                 },
@@ -575,15 +574,7 @@ SCENARIOS.forEach(
             },
           });
 
-          const updateEmissionsIx = await updateEmissionsDestination(
-            user.mrgnBankrunProgram,
-            {
-              marginfiAccount: userAccount,
-              destinationAccount: user.wallet.publicKey,
-            },
-          );
-
-          const tx = new Transaction().add(updateEmissionsIx).add(ix);
+          const tx = new Transaction().add(ix);
           await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
 
           [orderPk] = deriveOrderPda(
@@ -671,9 +662,10 @@ SCENARIOS.forEach(
                 marginfiAccount: userAccount,
                 authority: user.wallet.publicKey,
                 bank: assetBank,
+                mint: ecosystem.tokenAMint.publicKey,
                 destinationTokenAccount: user.tokenAAccount,
                 lendingMarket,
-                reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+                reserve: tokenAReserve,
                 obligationFarmUserState,
                 reserveFarmState: reserveFarmState ?? null,
               },

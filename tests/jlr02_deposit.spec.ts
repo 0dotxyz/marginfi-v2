@@ -19,13 +19,14 @@ import {
   users,
 } from "./rootHooks";
 import {
+  assertBankrunTxFailed,
   assertBNEqual,
   assertBNGreaterThan,
   assertI80F48Equal,
   getTokenBalance,
 } from "./utils/genericTests";
 import { accountInit } from "./utils/user-instructions";
-import { mintToTokenAccount, processBankrunTransaction } from "./utils/tools";
+import { dumpBankrunLogs, mintToTokenAccount, processBankrunTransaction } from "./utils/tools";
 import {
   makeJuplendDepositIx,
   makeJuplendNativeBorrowIx,
@@ -284,6 +285,27 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       lendingAfter.liquidityExchangePrice,
       lendingBefore.liquidityExchangePrice,
     );
+  });
+
+  it("(user 0) deposit 0 into JupLend USDC bank - should fail", async () => {
+    const depositIx = await makeJuplendDepositIx(user.mrgnBankrunProgram!, {
+      marginfiAccount: user0MarginfiAccount.publicKey,
+      signerTokenAccount: user.usdcAccount,
+      bank: usdcJupBankPk,
+      pool: usdcJupPool,
+      amount: new BN(0),
+    });
+
+    const result = await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(depositIx),
+      [user.wallet],
+      true,
+      true,
+    );
+
+    // Juplend's OperateAmountsNearlyZero.
+    assertBankrunTxFailed(result, 6030);
   });
 
   it("(admin) deposits tokenA and borrows USDC from native jup to generate interest", async () => {

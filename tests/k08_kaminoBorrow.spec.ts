@@ -34,8 +34,11 @@ import { getTokenBalance } from "./utils/genericTests";
 import { Clock, ProgramTestContext } from "solana-bankrun";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { getEpochAndSlot } from "./utils/bankrunConnection";
-import { deriveLendingMarketAuthority } from "./utils/pdas";
+import { deriveGlobalConfig, deriveLendingMarketAuthority } from "./utils/pdas";
 import { KLEND_PROGRAM_ID } from "./utils/types";
+import { UpdateBorrowLimitOutsideElevationGroup } from "@kamino-finance/klend-sdk/dist/@codegen/klend/types/UpdateConfigMode";
+import { globalConfigPda } from "@kamino-finance/klend-sdk";
+import { address } from "@solana/kit";
 
 let ctx: ProgramTestContext;
 let usdcReserve: PublicKey;
@@ -174,14 +177,20 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
     const valueBuffer = Buffer.alloc(8);
     borrowLimit.toArrayLike(Buffer, "le", 8).copy(valueBuffer);
 
+    // See different modes here: https://github.com/Kamino-Finance/klend/blob/ea845c39e9e3aee2d0c0a49caaba969d2ee2c772/programs/klend/src/state/mod.rs#L142
+    const mode = {
+      updateBorrowLimitOutsideElevationGroup: {},
+    };
+    const [globalConfig] = deriveGlobalConfig(KLEND_PROGRAM_ID);
+
     let elevationTx = new Transaction().add(
       await klendBankrunProgram.methods
-        // TODO what is code 45?
-        .updateReserveConfig(new BN(45), valueBuffer, false)
+        .updateReserveConfig(mode, valueBuffer, false)
         .accounts({
-          lendingMarketOwner: groupAdmin.wallet.publicKey,
+          signer: groupAdmin.wallet.publicKey,
           reserve: usdcReserve,
           lendingMarket: market,
+          globalConfig
         })
         .instruction(),
     );
@@ -257,14 +266,21 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
     const borrowLimit = new BN(1_000_000 * 10 ** ecosystem.usdcDecimals);
     const valueBuffer = Buffer.alloc(8);
     borrowLimit.toArrayLike(Buffer, "le", 8).copy(valueBuffer);
+
+    // See different modes here: https://github.com/Kamino-Finance/klend/blob/ea845c39e9e3aee2d0c0a49caaba969d2ee2c772/programs/klend/src/state/mod.rs#L142
+    const mode = {
+      updateBorrowLimitOutsideElevationGroup: {},
+    };
+    const [globalConfig] = deriveGlobalConfig(KLEND_PROGRAM_ID);
+
     let elevationTx = new Transaction().add(
       await klendBankrunProgram.methods
-        // TODO what is code 45?
-        .updateReserveConfig(new BN(45), valueBuffer, false)
+        .updateReserveConfig(mode, valueBuffer, false)
         .accounts({
-          lendingMarketOwner: groupAdmin.wallet.publicKey,
+          signer: groupAdmin.wallet.publicKey,
           reserve: tokenAReserve,
           lendingMarket: market,
+          globalConfig
         })
         .instruction(),
     );
@@ -360,7 +376,7 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
     const resBefore = await klendBankrunProgram.account.reserve.fetch(
       usdcReserve,
     );
-    const availableBefore = resBefore.liquidity.availableAmount.toNumber();
+    const availableBefore = resBefore.liquidity.totalAvailableAmount.toNumber();
     const borrowedBefore = wrappedU68F60toBigNumber(
       resBefore.liquidity.borrowedAmountSf,
     );
@@ -374,7 +390,7 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
       clock.epochStartTimestamp,
       clock.epoch,
       clock.leaderScheduleEpoch,
-      targetUnix
+      targetUnix,
     );
     bankrunContext.setClock(newClock);
     let { epoch: _epoch, slot } = await getEpochAndSlot(banksClient);
@@ -407,7 +423,7 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
     const resAfter = await klendBankrunProgram.account.reserve.fetch(
       usdcReserve,
     );
-    const availableAfter = resAfter.liquidity.availableAmount.toNumber();
+    const availableAfter = resAfter.liquidity.totalAvailableAmount.toNumber();
     const borrowedAfter = wrappedU68F60toBigNumber(
       resAfter.liquidity.borrowedAmountSf,
     );

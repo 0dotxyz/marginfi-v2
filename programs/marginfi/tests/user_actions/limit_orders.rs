@@ -64,12 +64,6 @@ async fn setup_limit_order_fixture(
     )
     .await?;
 
-    // set emissions destination to the authority before placing order
-    let authority = borrower_mfi_account_f.load().await.authority;
-    borrower_mfi_account_f
-        .try_set_emissions_destination(authority)
-        .await?;
-
     let bank_keys = vec![asset_bank_f.key, liability_bank_f.key];
     let order_pda = borrower_mfi_account_f
         .try_place_order(bank_keys, trigger)

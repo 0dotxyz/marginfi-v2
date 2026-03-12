@@ -1,5 +1,5 @@
 import { BN, Program } from "@coral-xyz/anchor";
-import { AccountMeta, PublicKey } from "@solana/web3.js";
+import { AccountMeta, PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { KaminoLending } from "../fixtures/kamino_lending";
 import { I80F48_ONE, PYTH_PULL_MIGRATED, OperationalStateRaw } from "./types";
 import { WrappedI80F48 } from "@mrgnlabs/mrgn-common";
@@ -9,7 +9,6 @@ import Decimal from "decimal.js";
 import { Fraction } from "@kamino-finance/klend-sdk";
 import BigNumber from "bignumber.js";
 
-export const GLOBAL_CONFIG_SIZE = 1032;
 export const LENDING_MARKET_SIZE = 4656;
 export const RESERVE_SIZE = 8616;
 export const OBLIGATION_SIZE = 3336;
@@ -171,7 +170,7 @@ export function getBorrowedAmount(state: Reserve): Decimal {
  * @returns the available liquidity amount of the reserve in lamports
  */
 export function getLiquidityAvailableAmount(state: Reserve): Decimal {
-  return new Decimal(state.liquidity.availableAmount.toString());
+  return new Decimal(state.liquidity.totalAvailableAmount.toString());
 }
 
 /**
@@ -348,4 +347,46 @@ export function wrappedU68F60toBigNumber(
     sign + "0x" + bytesBE.map((b) => b.toString(16).padStart(2, "0")).join("");
   const dec = new Decimal(hex).dividedBy(I68F60_DIVISOR);
   return new BigNumber(dec.toString());
+}
+
+type KitAccountMeta = {
+  address: string;
+  role?: number;
+  isSigner?: boolean;
+  isWritable?: boolean;
+};
+
+type KitInstruction = {
+  programAddress: string;
+  accounts: readonly KitAccountMeta[];
+  data: Uint8Array;
+};
+
+const AccountRole = {
+  READONLY: 0,
+  WRITABLE: 1,
+  READONLY_SIGNER: 2,
+  WRITABLE_SIGNER: 3,
+} as const;
+
+export function toWeb3Ix(ix: KitInstruction): TransactionInstruction {
+  const keys: AccountMeta[] = ix.accounts.map((account) => {
+    const role = account.role ?? 0;
+
+    return {
+      pubkey: new PublicKey(account.address),
+      isSigner:
+        role === AccountRole.READONLY_SIGNER ||
+        role === AccountRole.WRITABLE_SIGNER,
+      isWritable:
+        role === AccountRole.WRITABLE ||
+        role === AccountRole.WRITABLE_SIGNER,
+    };
+  });
+
+  return new TransactionInstruction({
+    programId: new PublicKey(ix.programAddress),
+    keys,
+    data: Buffer.from(ix.data),
+  });
 }

@@ -104,13 +104,14 @@ pub fn lending_account_withdraw<'info>(
 
         let liquidity_vault_authority_bump = bank.liquidity_vault_authority_bump;
 
+        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
         let lending_account = &mut marginfi_account.lending_account;
         let mut bank_account =
             BankAccountWrapper::find(&bank_loader.key(), &mut bank, lending_account)?;
 
         let amount_pre_fee = if withdraw_all {
             // Note: In liquidation, we still want this passed on the books
-            bank_account.withdraw_all()?
+            bank_account.withdraw_all(in_receivership)?
         } else {
             let amount_pre_fee = maybe_bank_mint
                 .as_ref()

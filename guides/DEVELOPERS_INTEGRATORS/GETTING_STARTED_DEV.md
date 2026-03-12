@@ -90,9 +90,13 @@ Benchmarks:
 
 0.1.6
 
-| 9700X (8 threads)  | `[  27.718s] 373 tests run: 373 passed, 0 skipped`
+| 9700X (8 threads) | `[  27.718s] 373 tests run: 373 passed, 0 skipped`
 
 | 9700X (16 threads) | `[  19.343s] 373 tests run: 373 passed (3 flaky), 0 skipped`
+
+0.1.8
+
+| 9700X (8 threads) | `[  53.024s] 622 tests run: 622 passed, 0 skipped`
 
 ## To run just one Rust test:
 
@@ -129,7 +133,10 @@ Update Node
 
 ## All the tests are failing in Rust and/or TS
 
-Make sure you build the correct version, Rust requires the mainnet version (default features), TS wants localnet (no features)
+Make sure you build the correct version, Rust requires the mainnet version (default features), TS
+wants localnet (no features). Also note that Rust localnet builds to a different target folder (e.g.
+`./scripts/build-workspace.sh` builds to target/sbf, `anchor build` goes to target/), see `Rust
+tests panic with` for more details.
 
 ## Program not deployed errors, when build seemingly worked otherwise
 
@@ -165,7 +172,8 @@ Ensure your machine is not in Low Power battery mode (or in any other mode decre
 
 On slower machines, or in tests with many txes, this error can be consistent or sometimes intermittent. Try
 refreshing the blockhash in longer tests: `test_f.refresh_blockhash().await;` and switching usage of
-`ctx.last_blockhash` to 
+`ctx.last_blockhash` to
+
 ```
 let blockhash = {
     let banks_client = self.ctx.borrow().banks_client.clone();
@@ -176,6 +184,7 @@ let blockhash = {
 ## Validator Crashes at Startup
 
 Usually manifests as something like:
+
 ```
 Starting bankrun with pure bankrun setup...
 thread 'tokio-runtime-worker' panicked at /usr/local/cargo/registry/src/index.crates.io-6f17d22bba15001f/solana-program-test-1.18.0/src/lib.rs:716:17:
@@ -183,6 +192,56 @@ Program file data not available <SOME GARBAGE>
 ```
 
 Run `lsof -i :8899` to find the validator and then `kill -9 VALIDATOR_PID
+
+## Rust tests panic with `Program file data not available for marginfi (...)`
+
+Usually manifests as:
+
+```
+thread '...' panicked at .../solana-program-test-2.1.20/src/lib.rs:745:17:
+Program file data not available for marginfi (MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA)
+```
+
+Root cause: `solana-program-test` cannot find `marginfi.so` in `SBF_OUT_DIR`.
+This often happens when artifacts exist at `target/deploy` but `SBF_OUT_DIR` points at `target/sbf/deploy`.
+
+Quick checks:
+
+```
+ls -la target/deploy/marginfi.so
+ls -la target/sbf/deploy/marginfi.so
+```
+
+Fix options:
+
+Actual fix:
+
+```
+./scripts/build-workspace.sh
+```
+
+Quick fix to just run tests:
+
+```
+export SBF_OUT_DIR="$PWD/target/deploy"
+cargo nextest run --package marginfi --features mainnet-beta
+```
+
+This will run tests without building the full workspace.
+
+Or edit `scripts/test-program-remix.sh` line 93 so `SBF_OUT_DIR` uses
+`target/deploy` (not `target/sbf/deploy`), then rerun the remix command:
+
+```
+./scripts/test-program-remix.sh -p marginfi -l warn -c mainnet-beta -f mainnet-beta -j 8
+```
+
+If artifacts are stale/corrupt:
+
+```
+anchor clean
+anchor build -p marginfi -- --no-default-features --features mainnet-beta,custom-heap
+```
 
 # Common Footguns
 
