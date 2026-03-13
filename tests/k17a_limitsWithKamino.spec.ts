@@ -276,7 +276,6 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
         marginfiAccount: userAccount,
         authority: user.wallet.publicKey,
         bank: withdrawBank,
-        mint: ecosystem.tokenAMint.publicKey,
         destinationTokenAccount: user.tokenAAccount,
         lendingMarket: market,
         reserve: tokenAReserve,

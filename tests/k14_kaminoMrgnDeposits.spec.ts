@@ -778,7 +778,6 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
             marginfiAccount: userA.accounts.get(USER_ACCOUNT_K)!,
             authority: userA.wallet.publicKey,
             bank: usdcBank,
-            mint: ecosystem.usdcMint.publicKey,
             destinationTokenAccount: userA.usdcAccount,
             lendingMarket: kaminoAccounts.get(MARKET)!,
             reserve: usdcReserve,
@@ -1339,9 +1338,6 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
       ? oracles.usdcOracle.publicKey
       : oracles.tokenAOracle.publicKey;
     const tokenAccount = isUsdc ? user.usdcAccount : user.tokenAAccount;
-    const mint = isUsdc
-      ? ecosystem.usdcMint.publicKey
-      : ecosystem.tokenAMint.publicKey;
 
     // Build remaining accounts from currently active positions (Kamino pattern: [bank, oracle, reserve])
     const activePositions: PublicKey[][] = [];
@@ -1396,9 +1392,6 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
           marginfiAccount: userAccount,
           authority: user.wallet.publicKey,
           bank,
-          mint: isUsdc
-            ? ecosystem.usdcMint.publicKey
-            : ecosystem.tokenAMint.publicKey,
           destinationTokenAccount: tokenAccount,
           lendingMarket: kaminoAccounts.get(MARKET)!,
           reserve: isUsdc ? usdcReserve : tokenAReserve,

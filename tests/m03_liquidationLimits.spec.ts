@@ -221,7 +221,6 @@ SCENARIOS.forEach(
                   marginfiAccount: liquidateeAccount,
                   authority: liquidator.wallet.publicKey,
                   bank,
-                  mint: ecosystem.tokenAMint.publicKey,
                   destinationTokenAccount: liquidator.tokenAAccount,
                   lendingMarket,
                   reserve: tokenAReserve,

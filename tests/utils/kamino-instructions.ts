@@ -300,7 +300,6 @@ export interface KaminoWithdrawAccounts {
   marginfiAccount: PublicKey;
   authority: PublicKey;
   bank: PublicKey;
-  mint: PublicKey;
   destinationTokenAccount: PublicKey;
   lendingMarket: PublicKey;
   reserve: PublicKey;
@@ -357,7 +356,6 @@ export const makeKaminoWithdrawIx = async (
     .kaminoWithdraw(args.amount, args.isWithdrawAll)
     .accounts({
       lendingMarketAuthority, // derived
-      reserveLiquidityMint: accounts.mint,
       reserveLiquiditySupply,
       reserveCollateralMint,
       reserveSourceCollateral,
