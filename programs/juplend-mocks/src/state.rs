@@ -123,10 +123,12 @@ pub struct Lending {
 impl Lending {
     /// Returns true if the lending exchange rate is not updated for the current timestamp.
     ///
-    /// Marginfi uses a strict equality check (same-slot/same-time) to ensure exact math.
+    /// Note that we allow last_update_timestamp to be in the *future* compared to the current timestamp.
+    /// This is useful for the external callers of the functions we expose, such as try_from_bank(),
+    /// because they do not have to synchronize their clock before every call.
     #[inline]
     pub fn is_stale(&self, current_timestamp: i64) -> bool {
-        self.last_update_timestamp as i64 != current_timestamp
+        (self.last_update_timestamp as i64) < current_timestamp
     }
 
     /// Expected fToken shares minted when depositing `assets` underlying.

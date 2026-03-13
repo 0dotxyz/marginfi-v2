@@ -1591,7 +1591,7 @@ impl MarginfiAccountFixture {
                 lending_market: reserve.lending_market,
                 lending_market_authority,
                 integration_acc_1: bank_state.integration_acc_1,
-                reserve_liquidity_mint: reserve.mint_pubkey,
+                mint: reserve.mint_pubkey,
                 reserve_liquidity_supply: reserve.supply_vault,
                 reserve_collateral_mint: reserve.collateral_mint_pubkey,
                 reserve_source_collateral: reserve.collateral_supply_vault,

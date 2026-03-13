@@ -330,6 +330,7 @@ pub struct KaminoWithdraw<'info> {
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
         has_one = integration_acc_1 @ MarginfiError::InvalidKaminoReserve,
         has_one = integration_acc_2 @ MarginfiError::InvalidKaminoObligation,
+        has_one = mint @ MarginfiError::InvalidMint,
         constraint = is_kamino_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongAssetTagForKaminoInstructions,
         // Block withdraw of zero-weight assets during receivership - prevents unfair liquidation
@@ -395,9 +396,8 @@ pub struct KaminoWithdraw<'info> {
 
     /// The liquidity token mint (e.g., USDC)
     /// Needs serde to get the mint decimals for transfer checked
-    /// TODO: rename to just 'mint' to make use of has_one and to be consistent with deposit
     #[account(mut)]
-    pub reserve_liquidity_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// The reserve's liquidity supply account
     /// CHECK: This is validated by the Kamino program
@@ -456,7 +456,7 @@ impl<'info> KaminoWithdraw<'info> {
             owner: self.liquidity_vault_authority.to_account_info(),
             placeholder_user_destination_collateral: None,
             reserve_collateral_mint: self.reserve_collateral_mint.to_account_info(),
-            reserve_liquidity_mint: self.reserve_liquidity_mint.to_account_info(),
+            reserve_liquidity_mint: self.mint.to_account_info(),
             reserve_liquidity_supply: self.reserve_liquidity_supply.to_account_info(),
             reserve_source_collateral: self.reserve_source_collateral.to_account_info(),
             user_destination_liquidity: self.liquidity_vault.to_account_info(),
@@ -494,7 +494,7 @@ impl<'info> KaminoWithdraw<'info> {
             from: self.liquidity_vault.to_account_info(),
             to: self.destination_token_account.to_account_info(),
             authority: self.liquidity_vault_authority.to_account_info(),
-            mint: self.reserve_liquidity_mint.to_account_info(),
+            mint: self.mint.to_account_info(),
         };
         let bank_key = self.bank.key();
         let bump = self.bank.load()?.liquidity_vault_authority_bump;
@@ -505,7 +505,7 @@ impl<'info> KaminoWithdraw<'info> {
         ];
         let signer_seeds: &[&[&[u8]]] = &[seeds];
         let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
-        let decimals = self.reserve_liquidity_mint.decimals;
+        let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())
     }
