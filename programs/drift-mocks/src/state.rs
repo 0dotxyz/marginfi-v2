@@ -240,7 +240,7 @@ impl MinimalSpotMarket {
     /// Based on Drift documentation, interest should be updated before any operation
     /// that uses the oracle price for valuation (deposits, withdrawals, liquidations).
 
-    /// Note that we allow last_update_timestamp to be in the *future* compared to the current timestamp.
+    /// Note that we allow last_interest_ts to be in the *future* compared to the current timestamp.
     /// This is useful for the external callers of the functions we expose, such as try_from_bank(),
     /// because they do not have to synchronize their clock before every call.
     pub fn is_stale(&self, current_timestamp: i64) -> bool {
