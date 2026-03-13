@@ -25,9 +25,10 @@ pub struct GlobalOptions {
     // /// Commitment.
     // #[clap(global = true, long = "commitment")]
     // pub commitment: Option<CommitmentLevel>,
-    /// Dry run for any transactions involved.
-    #[clap(global = true, long = "dry-run", action, default_value_t = false)]
-    pub dry_run: bool,
+    /// Actually sign and broadcast the transaction.
+    /// By default, the CLI simulates and outputs unsigned base58 for Squads multisig.
+    #[clap(global = true, long = "send-tx", action, default_value_t = false)]
+    pub send_tx: bool,
 
     #[clap(
         global = true,
@@ -40,13 +41,43 @@ pub struct GlobalOptions {
 
     #[clap(global = true, long)]
     pub compute_unit_price: Option<u64>,
+
+    #[clap(global = true, long, help = "Compute unit limit for transactions")]
+    pub compute_unit_limit: Option<u32>,
+
+    #[clap(
+        global = true,
+        long = "lookup-table",
+        short = 'l',
+        help = "Address lookup table(s) for versioned transactions"
+    )]
+    pub lookup_tables: Vec<Pubkey>,
+
+    #[clap(
+        global = true,
+        long = "legacy-tx",
+        action,
+        default_value_t = false,
+        help = "Force legacy transaction mode instead of versioned"
+    )]
+    pub legacy_tx: bool,
+
+    #[clap(
+        global = true,
+        long = "json",
+        action,
+        default_value_t = false,
+        help = "Output in JSON format"
+    )]
+    pub json_output: bool,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub enum TxMode {
-    DryRun,
-    Multisig,
-    Normal,
+    /// Default: simulate, output unsigned base58 for Squads multisig
+    MultisigOutput,
+    /// --send-tx: sign and broadcast
+    SendTx,
 }
 
 pub enum CliSigner {
@@ -84,12 +115,15 @@ pub struct Config {
     pub program_id: Pubkey,
     #[allow(dead_code)]
     pub commitment: CommitmentConfig,
-    pub dry_run: bool,
+    pub send_tx: bool,
+    pub legacy_tx: bool,
+    pub json_output: bool,
+    pub compute_unit_price: Option<u64>,
+    pub compute_unit_limit: Option<u32>,
+    pub lookup_tables: Vec<Pubkey>,
     #[allow(dead_code)]
     pub client: Client<CliSigner>,
     pub mfi_program: Program<CliSigner>,
-    #[allow(dead_code)]
-    pub lip_program: Program<CliSigner>,
 }
 
 impl Config {
@@ -108,12 +142,10 @@ impl Config {
     }
 
     pub fn get_tx_mode(&self) -> TxMode {
-        if self.dry_run {
-            TxMode::DryRun
-        } else if self.multisig.is_some() {
-            TxMode::Multisig
+        if self.send_tx {
+            TxMode::SendTx
         } else {
-            TxMode::Normal
+            TxMode::MultisigOutput
         }
     }
 

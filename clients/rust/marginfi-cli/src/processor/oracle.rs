@@ -88,12 +88,15 @@ pub fn inspect_swb_pull_feed(config: &Config, address: Pubkey) -> anyhow::Result
 
     let price: I80F48 = I80F48::from_num(feed.result.value)
         .checked_div(EXP_10_I80F48[switchboard_on_demand::PRECISION as usize])
-        .unwrap();
+        .ok_or_else(|| anyhow::anyhow!("failed to compute SWB price: division overflow"))?;
 
     let last_updated = feed.last_update_timestamp;
     let current_timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
     let age = current_timestamp.saturating_sub(last_updated);
-    let datetime: DateTime<Local> = Local.timestamp_opt(last_updated, 0).unwrap();
+    let datetime: DateTime<Local> = Local
+        .timestamp_opt(last_updated, 0)
+        .single()
+        .ok_or_else(|| anyhow::anyhow!("invalid timestamp: {}", last_updated))?;
 
     println!("price: {}", price);
     println!(
