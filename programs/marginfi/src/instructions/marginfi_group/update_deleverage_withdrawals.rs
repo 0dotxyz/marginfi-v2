@@ -131,4 +131,23 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn validate_event_slots_allows_gap_skipping_unprocessed_slots() {
+        // Last settled slot is 100. A buggy updater skips events from slots 101..=103
+        // and submits a batch starting at 104. This currently passes validation.
+        let mut last_admin_update_slot = 100_u64;
+
+        let first_buggy_batch = (104_u64, 104_u64);
+        assert!(validate_event_slots(
+            first_buggy_batch.0,
+            first_buggy_batch.1,
+            last_admin_update_slot
+        )
+        .is_ok());
+
+        // Cursor would advance to 104, making slots 101..=103 permanently unaddressable.
+        last_admin_update_slot = first_buggy_batch.1;
+        assert!(validate_event_slots(105_u64, 105_u64, last_admin_update_slot).is_ok());
+    }
 }
