@@ -255,18 +255,18 @@ pub enum MarginfiError {
     GroupRateLimiterUpdateOutOfOrderSlot,
     #[msg("Group rate limiter admin update sequence is out of order")] // 6125
     GroupRateLimiterUpdateOutOfOrderSeq,
-    #[msg("Deleverage withdraw-limit admin update must include outflow")] // 6126
-    DeleverageWithdrawLimitUpdateEmpty,
-    #[msg("Deleverage withdraw-limit admin update slot range is invalid")] // 6127
-    DeleverageWithdrawLimitUpdateInvalidSlotRange,
-    #[msg("Deleverage withdraw-limit admin update cannot reference future slots")] // 6128
-    DeleverageWithdrawLimitUpdateFutureSlot,
-    #[msg("Deleverage withdraw-limit admin update is too stale")] // 6129
-    DeleverageWithdrawLimitUpdateStale,
-    #[msg("Deleverage withdraw-limit admin update slot progression is out of order")] // 6130
-    DeleverageWithdrawLimitUpdateOutOfOrderSlot,
-    #[msg("Deleverage withdraw-limit admin update sequence is out of order")] // 6131
-    DeleverageWithdrawLimitUpdateOutOfOrderSeq,
+    #[msg("Deleverage withdrawal admin update must include outflow")] // 6126
+    DeleverageWithdrawalUpdateEmpty,
+    #[msg("Deleverage withdrawal admin update slot range is invalid")] // 6127
+    DeleverageWithdrawalUpdateInvalidSlotRange,
+    #[msg("Deleverage withdrawal admin update cannot reference future slots")] // 6128
+    DeleverageWithdrawalUpdateFutureSlot,
+    #[msg("Deleverage withdrawal admin update is too stale")] // 6129
+    DeleverageWithdrawalUpdateStale,
+    #[msg("Deleverage withdrawal admin update slot progression is out of order")] // 6130
+    DeleverageWithdrawalUpdateOutOfOrderSlot,
+    #[msg("Deleverage withdrawal admin update sequence is out of order")] // 6131
+    DeleverageWithdrawalUpdateOutOfOrderSeq,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -572,12 +572,12 @@ impl From<u32> for MarginfiError {
             6123 => MarginfiError::GroupRateLimiterUpdateStale,
             6124 => MarginfiError::GroupRateLimiterUpdateOutOfOrderSlot,
             6125 => MarginfiError::GroupRateLimiterUpdateOutOfOrderSeq,
-            6126 => MarginfiError::DeleverageWithdrawLimitUpdateEmpty,
-            6127 => MarginfiError::DeleverageWithdrawLimitUpdateInvalidSlotRange,
-            6128 => MarginfiError::DeleverageWithdrawLimitUpdateFutureSlot,
-            6129 => MarginfiError::DeleverageWithdrawLimitUpdateStale,
-            6130 => MarginfiError::DeleverageWithdrawLimitUpdateOutOfOrderSlot,
-            6131 => MarginfiError::DeleverageWithdrawLimitUpdateOutOfOrderSeq,
+            6126 => MarginfiError::DeleverageWithdrawalUpdateEmpty,
+            6127 => MarginfiError::DeleverageWithdrawalUpdateInvalidSlotRange,
+            6128 => MarginfiError::DeleverageWithdrawalUpdateFutureSlot,
+            6129 => MarginfiError::DeleverageWithdrawalUpdateStale,
+            6130 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSlot,
+            6131 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSeq,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,

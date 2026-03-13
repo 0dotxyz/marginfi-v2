@@ -392,7 +392,7 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
 
         test_f
             .marginfi_group
-            .try_admin_update_deleverage_withdraw_limit(
+            .try_admin_update_deleverage_withdrawals(
                 10, // from the 1.0 SOL seize at $10
                 update_seq,
                 event_start_slot,

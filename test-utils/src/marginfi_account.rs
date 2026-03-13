@@ -1516,14 +1516,12 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
         amount: u64,
         withdraw_all: Option<bool>,
-        include_health_accounts: bool,
     ) -> Instruction {
         self.make_kamino_withdraw_ix_with_authority(
             destination_account,
             bank,
             amount,
             withdraw_all,
-            include_health_accounts,
             self.ctx.borrow().payer.pubkey(),
         )
         .await
@@ -1535,7 +1533,6 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
         amount: u64,
         withdraw_all: Option<bool>,
-        include_health_accounts: bool,
         authority: Pubkey,
     ) -> Instruction {
         let marginfi_account = self.load().await;
@@ -1579,17 +1576,8 @@ impl MarginfiAccountFixture {
             .data(),
         };
 
-        if include_health_accounts {
-            let oracle_key = get_oracle_id_from_feed_id(bank_state.config.oracle_keys[0])
-                .unwrap_or(bank_state.config.oracle_keys[0]);
-            ix.accounts.push(AccountMeta::new_readonly(bank.key, false));
-            ix.accounts
-                .push(AccountMeta::new_readonly(oracle_key, false));
-            ix.accounts.push(AccountMeta::new_readonly(
-                bank_state.integration_acc_1,
-                false,
-            ));
-        }
+        self.append_integration_withdraw_health_accounts(&mut ix)
+            .await;
 
         ix
     }
@@ -1657,14 +1645,12 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
         amount: u64,
         withdraw_all: Option<bool>,
-        include_health_accounts: bool,
     ) -> Instruction {
         self.make_drift_withdraw_ix_with_authority(
             destination_account,
             bank,
             amount,
             withdraw_all,
-            include_health_accounts,
             self.ctx.borrow().payer.pubkey(),
             None,
         )
@@ -1677,7 +1663,6 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
         amount: u64,
         withdraw_all: Option<bool>,
-        include_health_accounts: bool,
         authority: Pubkey,
         drift_oracle: Option<Pubkey>,
     ) -> Instruction {
@@ -1725,18 +1710,8 @@ impl MarginfiAccountFixture {
             .data(),
         };
 
-        if include_health_accounts {
-            if withdraw_all.unwrap_or(false) {
-                ix.accounts.extend_from_slice(
-                    &self
-                        .load_observation_account_metas_close_last(bank.key, vec![], vec![])
-                        .await,
-                );
-            } else {
-                ix.accounts
-                    .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
-            }
-        }
+        self.append_integration_withdraw_health_accounts(&mut ix)
+            .await;
 
         ix
     }
@@ -1815,14 +1790,12 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
         amount: u64,
         withdraw_all: Option<bool>,
-        include_health_accounts: bool,
     ) -> Instruction {
         self.make_juplend_withdraw_ix_with_authority(
             destination_account,
             bank,
             amount,
             withdraw_all,
-            include_health_accounts,
             self.ctx.borrow().payer.pubkey(),
         )
         .await
@@ -1834,7 +1807,6 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
         amount: u64,
         withdraw_all: Option<bool>,
-        include_health_accounts: bool,
         authority: Pubkey,
     ) -> Instruction {
         let marginfi_account = self.load().await;
@@ -1891,20 +1863,15 @@ impl MarginfiAccountFixture {
             .data(),
         };
 
-        if include_health_accounts {
-            if withdraw_all.unwrap_or(false) {
-                ix.accounts.extend_from_slice(
-                    &self
-                        .load_observation_account_metas_close_last(bank.key, vec![], vec![])
-                        .await,
-                );
-            } else {
-                ix.accounts
-                    .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
-            }
-        }
+        self.append_integration_withdraw_health_accounts(&mut ix)
+            .await;
 
         ix
+    }
+
+    async fn append_integration_withdraw_health_accounts(&self, ix: &mut Instruction) {
+        ix.accounts
+            .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
     }
 
     pub async fn try_lending_account_pulse_health(

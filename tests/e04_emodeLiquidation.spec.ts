@@ -462,8 +462,6 @@ describe("Emode liquidation", () => {
     const user = users[2];
     const userAccount = user.accounts.get(USER_ACCOUNT_E);
 
-    const userAccBefore =
-      await user.mrgnBankrunProgram.account.marginfiAccount.fetch(userAccount);
     const remaining = composeRemainingAccounts([
       [usdcBank, oracles.usdcOracle.publicKey],
       [solBank, oracles.wsolOracle.publicKey],

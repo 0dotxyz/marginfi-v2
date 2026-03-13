@@ -25,7 +25,7 @@ import {
   configureDeleverageWithdrawalLimit,
   groupConfigure,
   setFixedPrice,
-  updateDeleverageWithdrawLimit,
+  updateDeleverageWithdrawals,
 } from "./utils/group-instructions";
 import { assert } from "chai";
 import {
@@ -739,7 +739,7 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
 
     const tx = new Transaction();
     tx.add(
-      await updateDeleverageWithdrawLimit(groupAdmin.mrgnBankrunProgram, {
+      await updateDeleverageWithdrawals(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
         outflowUsd: Math.floor(ecosystem.lstAlphaPrice),
         updateSeq,
@@ -757,8 +757,6 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
   it("(admin) Tries to deleverage user 0 by fully (tokenlessly) repaying bank 4's liabs - limit exceeded", async () => {
     const deleveragee = users[0];
     const deleverageeAccount = deleveragee.accounts.get(USER_ACCOUNT_THROWAWAY);
-    const mrgnAccountBefore =
-      await bankrunProgram.account.marginfiAccount.fetch(deleverageeAccount);
     const repayRemaining = composeRemainingAccounts(remainingAccounts);
 
     let tx = new Transaction().add(
@@ -1012,8 +1010,6 @@ describe("m02: Limits on number of accounts, with emode in effect", () => {
       deleveragee.wallet,
     ]);
 
-    const mrgnAccountBefore =
-      await bankrunProgram.account.marginfiAccount.fetch(deleverageeAccount);
     // During deleverage, the closing bank must remain in remaining accounts
     // because the withdraw instruction needs the oracle price for equity tracking.
     const withdrawAllRemaining = composeRemainingAccounts(remainingWithBank2);

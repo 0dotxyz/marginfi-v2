@@ -716,7 +716,7 @@ impl TestFixture {
             program.prefer_bpf(true);
             program.add_program("kamino_lending", kamino_mocks::kamino_lending::ID, None);
             program.add_program("kamino_farms", kamino_mocks::kamino_farms::ID, None);
-            program.add_program("drift_v2", drift_mocks::drift::ID, None);
+            program.add_program("drift", drift_mocks::drift::ID, None);
             program.add_program("juplend_lending", juplend_mocks::ID, None);
             program.add_program("juplend_liquidity", juplend_mocks::liquidity::ID, None);
             program.add_program(
@@ -2193,13 +2193,7 @@ impl TestFixture {
         let refresh_reserve_ix = user.make_kamino_refresh_reserve_ix(bank_f).await;
         let refresh_obligation_ix = user.make_kamino_refresh_obligation_ix(bank_f).await;
         let withdraw_ix = user
-            .make_kamino_withdraw_ix(
-                destination_token_account,
-                bank_f,
-                amount,
-                withdraw_all,
-                true,
-            )
+            .make_kamino_withdraw_ix(destination_token_account, bank_f, amount, withdraw_all)
             .await;
 
         let ixs = vec![refresh_reserve_ix, refresh_obligation_ix, withdraw_ix];
@@ -2231,13 +2225,7 @@ impl TestFixture {
     ) -> std::result::Result<(), BanksClientError> {
         let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
         let withdraw_ix = user
-            .make_drift_withdraw_ix(
-                destination_token_account,
-                bank_f,
-                amount,
-                withdraw_all,
-                true,
-            )
+            .make_drift_withdraw_ix(destination_token_account, bank_f, amount, withdraw_all)
             .await;
         let ixs = vec![cu_ix, withdraw_ix];
         Self::process_ixs(self.context.clone(), &ixs).await
@@ -2268,13 +2256,7 @@ impl TestFixture {
     ) -> std::result::Result<(), BanksClientError> {
         let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
         let withdraw_ix = user
-            .make_juplend_withdraw_ix(
-                destination_token_account,
-                bank_f,
-                amount,
-                withdraw_all,
-                true,
-            )
+            .make_juplend_withdraw_ix(destination_token_account, bank_f, amount, withdraw_all)
             .await;
         let ixs = vec![cu_ix, withdraw_ix];
         Self::process_ixs(self.context.clone(), &ixs).await

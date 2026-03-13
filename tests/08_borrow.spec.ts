@@ -115,8 +115,6 @@ describe("Borrow funds", () => {
     const userAccKey = user.accounts.get(USER_ACCOUNT);
 
     // For repayAll, include all active balances, including the closing bank.
-    const userAccBefore =
-      await program.account.marginfiAccount.fetch(userAccKey);
     const remaining = composeRemainingAccounts(
       balanceAccountGroups.filter(
         (group) => !group[0].equals(bankKeypairSol.publicKey)

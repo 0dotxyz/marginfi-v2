@@ -533,8 +533,6 @@ describe("Bank e2e sunset due to illiquid asset", () => {
 
     // first repay our debt so we can withdraw without interference.
     // For repayAll, include all active balances, including the closing bank.
-    const userAccBefore =
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
     const remaining = composeRemainingAccounts([
       [banks[0], oracles.pythPullLst.publicKey],
       [banks[1], oracles.pythPullLst.publicKey],
@@ -563,8 +561,6 @@ describe("Bank e2e sunset due to illiquid asset", () => {
       ]);
 
     // For withdrawAll, include all active balances, including the closing bank.
-    const userAccBeforeWithdraw =
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
     const remainingWithdraw = composeRemainingAccounts(
       [
         [banks[1], oracles.pythPullLst.publicKey],
@@ -678,8 +674,6 @@ describe("Bank e2e sunset due to illiquid asset", () => {
     // If repaying all, remove the account being repaid.
     endAccounts?: PublicKey[][]
   ) => {
-    const accountBefore =
-      await bankrunProgram.account.marginfiAccount.fetch(deleverageeAccount);
     const repayRemaining = composeRemainingAccounts(remainingAccounts);
 
     let tx = new Transaction().add(

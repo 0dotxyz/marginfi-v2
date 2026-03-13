@@ -21,6 +21,37 @@ async fn next_deleverage_withdraw_limit_update_params(test_f: &TestFixture) -> (
 }
 
 #[tokio::test]
+async fn limit_admin_can_configure_and_update_deleverage_withdraw_limit() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    test_f
+        .marginfi_group
+        .try_update_deleverage_withdrawal_limit(100)
+        .await?;
+
+    let slot = {
+        let ctx = test_f.context.borrow_mut();
+        let clock: Clock = ctx.banks_client.get_sysvar().await?;
+        clock.slot
+    };
+
+    let (event_start_slot, update_seq) =
+        next_deleverage_withdraw_limit_update_params(&test_f).await;
+    test_f
+        .marginfi_group
+        .try_admin_update_deleverage_withdrawals(40, update_seq, event_start_slot, slot)
+        .await?;
+
+    let g: MarginfiGroup = test_f
+        .load_and_deserialize(&test_f.marginfi_group.key)
+        .await;
+    assert_eq!(g.deleverage_withdraw_window_cache.daily_limit, 100);
+    assert_eq!(g.deleverage_withdraw_window_cache.withdrawn_today, 40);
+    assert_eq!(g.deleverage_withdraw_last_admin_update_seq, 1);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn update_deleverage_withdraw_limit_applies_and_enforces_daily_limit() -> anyhow::Result<()> {
     let test_f = TestFixture::new(None).await;
     test_f
@@ -39,7 +70,7 @@ async fn update_deleverage_withdraw_limit_applies_and_enforces_daily_limit() -> 
             next_deleverage_withdraw_limit_update_params(&test_f).await;
         test_f
             .marginfi_group
-            .try_admin_update_deleverage_withdraw_limit(95, update_seq, event_start_slot, slot)
+            .try_admin_update_deleverage_withdrawals(95, update_seq, event_start_slot, slot)
             .await?;
     }
 
@@ -63,7 +94,7 @@ async fn update_deleverage_withdraw_limit_applies_and_enforces_daily_limit() -> 
             next_deleverage_withdraw_limit_update_params(&test_f).await;
         let res = test_f
             .marginfi_group
-            .try_admin_update_deleverage_withdraw_limit(10, update_seq, event_start_slot, slot2)
+            .try_admin_update_deleverage_withdrawals(10, update_seq, event_start_slot, slot2)
             .await;
 
         assert!(res.is_err());
@@ -92,12 +123,12 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
             next_deleverage_withdraw_limit_update_params(&test_f).await;
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateDeleverageWithdrawLimit {
+            accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 admin: test_f.payer(),
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateDeleverageWithdrawLimit {
+            data: marginfi::instruction::UpdateDeleverageWithdrawals {
                 outflow_usd: 0,
                 update_seq,
                 event_start_slot,
@@ -118,7 +149,7 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
             .await;
         assert_custom_error!(
             res.unwrap_err(),
-            MarginfiError::DeleverageWithdrawLimitUpdateEmpty
+            MarginfiError::DeleverageWithdrawalUpdateEmpty
         );
     }
 
@@ -128,12 +159,12 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
             next_deleverage_withdraw_limit_update_params(&test_f).await;
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateDeleverageWithdrawLimit {
+            accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 admin: test_f.payer(),
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateDeleverageWithdrawLimit {
+            data: marginfi::instruction::UpdateDeleverageWithdrawals {
                 outflow_usd: 1,
                 update_seq,
                 event_start_slot: event_start_slot.saturating_add(1),
@@ -154,7 +185,7 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
             .await;
         assert_custom_error!(
             res.unwrap_err(),
-            MarginfiError::DeleverageWithdrawLimitUpdateInvalidSlotRange
+            MarginfiError::DeleverageWithdrawalUpdateInvalidSlotRange
         );
     }
 
@@ -164,12 +195,12 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
             next_deleverage_withdraw_limit_update_params(&test_f).await;
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateDeleverageWithdrawLimit {
+            accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 admin: test_f.payer(),
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateDeleverageWithdrawLimit {
+            data: marginfi::instruction::UpdateDeleverageWithdrawals {
                 outflow_usd: 1,
                 update_seq,
                 event_start_slot,
@@ -190,7 +221,7 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
             .await;
         assert_custom_error!(
             res.unwrap_err(),
-            MarginfiError::DeleverageWithdrawLimitUpdateFutureSlot
+            MarginfiError::DeleverageWithdrawalUpdateFutureSlot
         );
     }
 
@@ -200,12 +231,12 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
             next_deleverage_withdraw_limit_update_params(&test_f).await;
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateDeleverageWithdrawLimit {
+            accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 admin: test_f.payer(),
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateDeleverageWithdrawLimit {
+            data: marginfi::instruction::UpdateDeleverageWithdrawals {
                 outflow_usd: 1,
                 update_seq: update_seq.saturating_add(1),
                 event_start_slot,
@@ -226,7 +257,7 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
             .await;
         assert_custom_error!(
             res.unwrap_err(),
-            MarginfiError::DeleverageWithdrawLimitUpdateOutOfOrderSeq
+            MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSeq
         );
     }
 
@@ -249,12 +280,12 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
 
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateDeleverageWithdrawLimit {
+            accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
                 marginfi_group: test_f.marginfi_group.key,
                 admin: attacker.pubkey(),
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::UpdateDeleverageWithdrawLimit {
+            data: marginfi::instruction::UpdateDeleverageWithdrawals {
                 outflow_usd: 1,
                 update_seq,
                 event_start_slot,

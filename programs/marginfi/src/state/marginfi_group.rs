@@ -20,6 +20,7 @@ pub trait MarginfiGroupImpl {
     fn get_group_bank_config(&self) -> GroupBankConfig;
     fn set_program_fee_enabled(&mut self, fee_enabled: bool);
     fn program_fees_enabled(&self) -> bool;
+    fn is_admin_or_limit_admin(&self, signer: Pubkey) -> bool;
     fn add_bank(&mut self) -> MarginfiResult;
     fn is_protocol_paused(&self) -> bool;
     fn update_withdrawn_equity(
@@ -155,6 +156,10 @@ impl MarginfiGroupImpl for MarginfiGroup {
     /// True if program fees are enabled
     fn program_fees_enabled(&self) -> bool {
         (self.group_flags & PROGRAM_FEES_ENABLED) != 0
+    }
+
+    fn is_admin_or_limit_admin(&self, signer: Pubkey) -> bool {
+        signer == self.admin || signer == self.delegate_limit_admin
     }
 
     // Increment the bank count by 1. If you managed to create 16,000 banks, congrats, does

@@ -531,8 +531,6 @@ describe("kx: Fixed Kamino price bank", () => {
     );
     await processBankrunTransaction(ctx, repayTx, [user.wallet]);
 
-    const accountStateAfterRepay =
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
     const remaining = composeRemainingAccounts(
       [
         [fixedKaminoBank, usdcReserve],

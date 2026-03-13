@@ -968,7 +968,7 @@ export const updateGroupRateLimiter = (
   return ix;
 };
 
-export type UpdateDeleverageWithdrawLimitArgs = {
+export type UpdateDeleverageWithdrawalsArgs = {
   marginfiGroup: PublicKey;
   outflowUsd: number;
   updateSeq: BN;
@@ -976,12 +976,12 @@ export type UpdateDeleverageWithdrawLimitArgs = {
   eventEndSlot: BN;
 };
 
-export const updateDeleverageWithdrawLimit = (
+export const updateDeleverageWithdrawals = (
   program: Program<Marginfi>,
-  args: UpdateDeleverageWithdrawLimitArgs
+  args: UpdateDeleverageWithdrawalsArgs
 ) => {
   const ix = program.methods
-    .updateDeleverageWithdrawLimit(
+    .updateDeleverageWithdrawals(
       args.outflowUsd,
       args.updateSeq,
       args.eventStartSlot,

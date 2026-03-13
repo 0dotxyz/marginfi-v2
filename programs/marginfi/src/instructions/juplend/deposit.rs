@@ -8,10 +8,6 @@ use crate::{
             LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        rate_limiter::{
-            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
-            GroupRateLimiterImpl,
-        },
     },
     utils::{
         is_juplend_asset_tag, record_deposit_inflow, validate_asset_tags, validate_bank_state,

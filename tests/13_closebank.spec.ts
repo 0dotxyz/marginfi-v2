@@ -116,8 +116,6 @@ describe("Close bank", () => {
     dumpAccBalances(acc);
 
     // For withdrawAll, include all active balances, including the closing bank.
-    const userAccBefore =
-      await users[0].mrgnProgram.account.marginfiAccount.fetch(userAcc);
     const remaining = composeRemainingAccounts(
       [
         [bankKey, oracles.tokenAOracle.publicKey],

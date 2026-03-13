@@ -30,7 +30,7 @@ mod propagate_fee_state;
 mod propagate_staked_settings;
 mod pulse_bank_price_cache;
 mod set_fixed_oracle_price;
-mod update_deleverage_withdraw_limit;
+mod update_deleverage_withdrawals;
 mod update_group_rate_limiter;
 mod write_bank_metadata;
 
@@ -66,6 +66,6 @@ pub use propagate_fee_state::*;
 pub use propagate_staked_settings::*;
 pub use pulse_bank_price_cache::*;
 pub use set_fixed_oracle_price::*;
-pub use update_deleverage_withdraw_limit::*;
+pub use update_deleverage_withdrawals::*;
 pub use update_group_rate_limiter::*;
 pub use write_bank_metadata::*;

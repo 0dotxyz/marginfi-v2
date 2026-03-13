@@ -5,14 +5,15 @@ use marginfi_type_crate::types::MarginfiGroup;
 
 const MAX_DELEVERAGE_WITHDRAW_LIMIT_UPDATE_LAG_SLOTS: u64 = 1_500; // ~10 minutes at ~400ms/slot
 
-/// (admin only) Update the deleverage daily withdraw counter with aggregated outflow.
+/// (admin or delegate_limit_admin) Update the deleverage daily withdraw outflow.
 ///
-/// The group admin aggregates `DeleverageWithdrawFlowEvent` events off-chain and calls this
-/// instruction at intervals to update the on-chain deleverage daily withdraw counter.
+/// The group admin or delegate limit admin aggregates
+/// `DeleverageWithdrawFlowEvent` events off-chain and calls this instruction at
+/// intervals to update the on-chain deleverage daily withdraw outflow.
 ///
 /// This avoids requiring the group account to be writable (mut) in every withdraw instruction.
-pub fn update_deleverage_withdraw_limit(
-    ctx: Context<UpdateDeleverageWithdrawLimit>,
+pub fn update_deleverage_withdrawals(
+    ctx: Context<UpdateDeleverageWithdrawals>,
     outflow_usd: u32,
     update_seq: u64,
     event_start_slot: u64,
@@ -23,7 +24,7 @@ pub fn update_deleverage_withdraw_limit(
 
     check!(
         outflow_usd > 0,
-        MarginfiError::DeleverageWithdrawLimitUpdateEmpty
+        MarginfiError::DeleverageWithdrawalUpdateEmpty
     );
     validate_event_slots(
         event_start_slot,
@@ -32,23 +33,23 @@ pub fn update_deleverage_withdraw_limit(
     )?;
     check!(
         event_end_slot <= clock.slot,
-        MarginfiError::DeleverageWithdrawLimitUpdateFutureSlot
+        MarginfiError::DeleverageWithdrawalUpdateFutureSlot
     );
     check!(
         clock.slot.saturating_sub(event_end_slot) <= MAX_DELEVERAGE_WITHDRAW_LIMIT_UPDATE_LAG_SLOTS,
-        MarginfiError::DeleverageWithdrawLimitUpdateStale
+        MarginfiError::DeleverageWithdrawalUpdateStale
     );
     check!(
         update_seq
             == group
                 .deleverage_withdraw_last_admin_update_seq
                 .saturating_add(1),
-        MarginfiError::DeleverageWithdrawLimitUpdateOutOfOrderSeq
+        MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSeq
     );
 
     group.update_withdrawn_equity(I80F48::from_num(outflow_usd), clock.unix_timestamp)?;
     msg!(
-        "Deleverage withdraw limit outflow recorded: {} USD",
+        "Deleverage withdrawal outflow recorded: {} USD",
         outflow_usd
     );
 
@@ -65,22 +66,22 @@ fn validate_event_slots(
 ) -> MarginfiResult {
     check!(
         event_start_slot <= event_end_slot,
-        MarginfiError::DeleverageWithdrawLimitUpdateInvalidSlotRange
+        MarginfiError::DeleverageWithdrawalUpdateInvalidSlotRange
     );
 
     // Strictly-greater enforces non-overlapping slot ranges across admin batches.
     check!(
         event_start_slot > last_admin_update_slot,
-        MarginfiError::DeleverageWithdrawLimitUpdateOutOfOrderSlot
+        MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSlot
     );
     Ok(())
 }
 
 #[derive(Accounts)]
-pub struct UpdateDeleverageWithdrawLimit<'info> {
+pub struct UpdateDeleverageWithdrawals<'info> {
     #[account(
         mut,
-        has_one = admin @ MarginfiError::Unauthorized,
+        constraint = marginfi_group.load()?.is_admin_or_limit_admin(admin.key()) @ MarginfiError::Unauthorized,
     )]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
@@ -103,19 +104,19 @@ mod tests {
                 121_u64,
                 120_u64,
                 110_u64,
-                Some(MarginfiError::DeleverageWithdrawLimitUpdateInvalidSlotRange),
+                Some(MarginfiError::DeleverageWithdrawalUpdateInvalidSlotRange),
             ),
             (
                 110_u64,
                 120_u64,
                 110_u64,
-                Some(MarginfiError::DeleverageWithdrawLimitUpdateOutOfOrderSlot),
+                Some(MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSlot),
             ),
             (
                 109_u64,
                 120_u64,
                 110_u64,
-                Some(MarginfiError::DeleverageWithdrawLimitUpdateOutOfOrderSlot),
+                Some(MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSlot),
             ),
         ];
 

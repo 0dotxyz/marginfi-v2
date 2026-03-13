@@ -850,7 +850,7 @@ impl MarginfiGroupFixture {
         Ok(())
     }
 
-    pub async fn try_admin_update_deleverage_withdraw_limit(
+    pub async fn try_admin_update_deleverage_withdrawals(
         &self,
         outflow_usd: u32,
         update_seq: u64,
@@ -859,12 +859,12 @@ impl MarginfiGroupFixture {
     ) -> Result<(), BanksClientError> {
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::UpdateDeleverageWithdrawLimit {
+            accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
                 marginfi_group: self.key,
                 admin: self.ctx.borrow().payer.pubkey(),
             }
             .to_account_metas(Some(true)),
-            data: UpdateDeleverageWithdrawLimit {
+            data: UpdateDeleverageWithdrawals {
                 outflow_usd,
                 update_seq,
                 event_start_slot,

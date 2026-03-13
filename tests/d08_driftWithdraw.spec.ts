@@ -79,8 +79,6 @@ describe("d08: Drift Withdraw Tests", () => {
     const scaledBalanceBefore = spotPositionBefore.scaledBalance;
 
     const marginfiAccount = user.accounts.get(USER_ACCOUNT_D);
-    const marginfiAccountState =
-      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
     const remaining = composeRemainingAccounts(
       driftBalanceAccountGroups.filter((group) => !group[0].equals(driftUsdcBank))
     );
@@ -141,8 +139,6 @@ describe("d08: Drift Withdraw Tests", () => {
     const scaledBalanceBefore = spotPositionBefore.scaledBalance;
 
     const marginfiAccount = user.accounts.get(USER_ACCOUNT_D);
-    const marginfiAccountState =
-      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
     const remaining = composeRemainingAccounts(
       driftBalanceAccountGroups.filter((group) => !group[0].equals(driftUsdcBank))
     );
@@ -492,8 +488,6 @@ describe("d08: Drift Withdraw Tests", () => {
     const spotPositionBefore = driftUserBefore.spotPositions[1];
     const scaledBalanceBefore = spotPositionBefore.scaledBalance;
     const marginfiAccount = user.accounts.get(USER_ACCOUNT_D);
-    const marginfiAccountState =
-      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
     const remaining = composeRemainingAccounts(
       driftBalanceAccountGroups.filter((group) => !group[0].equals(driftTokenABank))
     );

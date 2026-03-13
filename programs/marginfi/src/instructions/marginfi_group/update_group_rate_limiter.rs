@@ -1,14 +1,18 @@
-use crate::{check, state::rate_limiter::GroupRateLimiterImpl, MarginfiError, MarginfiResult};
+use crate::{
+    check,
+    state::{marginfi_group::MarginfiGroupImpl, rate_limiter::GroupRateLimiterImpl},
+    MarginfiError, MarginfiResult,
+};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::types::MarginfiGroup;
 
 const MAX_RATE_LIMIT_UPDATE_LAG_SLOTS: u64 = 1_500; // ~10 minutes at ~400ms/slot
 
-/// (admin only) Update the group rate limiter inflow/outflow state.
+/// (admin or delegate_limit_admin) Update the group rate limiter inflow/outflow state.
 ///
-/// The group admin aggregates `RateLimitFlowEvent` events off-chain, computes the
-/// USD-denominated inflows and outflows, and calls this instruction at intervals to
-/// update the group rate limiter state.
+/// The group admin or delegate limit admin aggregates `RateLimitFlowEvent` events
+/// off-chain, computes the USD-denominated inflows and outflows, and calls this
+/// instruction at intervals to update the group rate limiter state.
 ///
 /// This avoids requiring the group account to be writable (mut) in every user-facing
 /// instruction, which would serialize all transactions for a group into a single slot.
@@ -87,7 +91,7 @@ fn validate_event_slots(
 pub struct UpdateGroupRateLimiter<'info> {
     #[account(
         mut,
-        has_one = admin @ MarginfiError::Unauthorized,
+        constraint = marginfi_group.load()?.is_admin_or_limit_admin(admin.key()) @ MarginfiError::Unauthorized,
     )]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 

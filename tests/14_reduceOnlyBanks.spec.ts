@@ -277,8 +277,6 @@ describe("Reduce-Only Bank Tests", () => {
       // Withdraw all Token A.
       // For withdrawAll, include all active balances, including the closing bank.
       try {
-        const userAccBefore =
-          await user.mrgnProgram.account.marginfiAccount.fetch(userAccount);
         const remaining = composeRemainingAccounts(
           [
             [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],

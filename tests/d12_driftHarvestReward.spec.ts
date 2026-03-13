@@ -337,8 +337,6 @@ describe("d12: Drift Harvest Reward", () => {
     assertBankrunTxFailed(withdrawWithoutRewardsResult, 0x18b1); // DriftMissingRewardAccounts
 
     // STEP 3: Withdraw all with reward accounts - should succeed
-    const marginfiAccountState =
-      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
     const remaining = composeRemainingAccounts(
       getDriftBalanceAccountGroups().filter(
         (group) => !group[0].equals(driftTokenABank)
@@ -1087,8 +1085,6 @@ describe("d12: Drift Harvest Reward", () => {
       true,
     );
 
-    const marginfiAccountState =
-      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
     const remaining = composeRemainingAccounts(
       getDriftBalanceAccountGroups().filter(
         (group) => !group[0].equals(driftTokenABank)
@@ -1187,8 +1183,6 @@ describe("d12: Drift Harvest Reward", () => {
       user.tokenAAccount,
     );
 
-    const marginfiAccountState =
-      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
     const remaining = composeRemainingAccounts(
       getDriftBalanceAccountGroups().filter(
         (group) => !group[0].equals(driftTokenABank)
@@ -1301,8 +1295,6 @@ describe("d12: Drift Harvest Reward", () => {
       true,
     );
 
-    const marginfiAccountState =
-      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
     const remaining = composeRemainingAccounts(
       getDriftBalanceAccountGroups().filter(
         (group) => !group[0].equals(driftTokenABank)

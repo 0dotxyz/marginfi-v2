@@ -228,8 +228,6 @@ describe("Bank cache last oracle price", () => {
     ); // ensure cache is populated before repay
 
     // For repayAll, include all active balances, including the closing bank.
-    const userAccBefore =
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
     const remaining = composeRemainingAccounts([
       [banks[1], oracles.pythPullLst.publicKey],
       [banks[0], oracles.pythPullLst.publicKey],

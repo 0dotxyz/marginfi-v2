@@ -243,8 +243,8 @@ pub struct DeleverageEvent {
 // Rate limit events
 
 /// Emitted when a bank-level inflow or outflow is recorded.
-/// The group admin aggregates these off-chain and updates the group rate limiter via
-/// `update_group_rate_limiter`.
+/// The group admin or delegate limit admin aggregates these off-chain and
+/// updates the group rate limiter via `update_group_rate_limiter`.
 #[event]
 pub struct RateLimitFlowEvent {
     pub group: Pubkey,
@@ -260,8 +260,8 @@ pub struct RateLimitFlowEvent {
 }
 
 /// Emitted for deleverage-only withdraw outflows.
-/// The group admin aggregates these off-chain and updates
-/// the deleverage daily withdraw counter via `update_deleverage_withdraw_limit`.
+/// The group admin or delegate limit admin aggregates these off-chain and
+/// updates the deleverage daily withdraws via `update_deleverage_withdrawals`.
 #[event]
 pub struct DeleverageWithdrawFlowEvent {
     pub group: Pubkey,

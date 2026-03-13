@@ -261,8 +261,6 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
       withdrawObligation,
     );
 
-    const userAccBefore =
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
     const withdrawRemaining = composeRemainingAccounts(
       remainingPositions.filter((group) => !group[0].equals(withdrawBank))
     );

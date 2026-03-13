@@ -2,10 +2,12 @@ use anchor_lang::{InstructionData, ToAccountMetas};
 use fixtures::assert_custom_error;
 use fixtures::prelude::*;
 use marginfi::prelude::*;
-use marginfi_type_crate::types::MarginfiGroup;
+use marginfi_type_crate::types::{Bank, MarginfiGroup};
 use solana_program_test::*;
 use solana_sdk::transaction::Transaction;
-use solana_sdk::{clock::Clock, instruction::Instruction, signature::Keypair, signer::Signer};
+use solana_sdk::{
+    clock::Clock, instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer,
+};
 
 async fn configure_group_hourly_limit(
     test_f: &TestFixture,
@@ -25,16 +27,53 @@ async fn configure_group_hourly_limit(
         .data(),
     };
 
-    let ctx = test_f.context.borrow_mut();
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&ctx.payer.pubkey()),
-        &[&ctx.payer],
-        ctx.banks_client.get_latest_blockhash().await?,
-    );
-    ctx.banks_client
-        .process_transaction_with_preflight(tx)
-        .await?;
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+    Ok(())
+}
+
+async fn configure_bank_hourly_limit(
+    test_f: &TestFixture,
+    bank: Pubkey,
+    hourly_limit: u64,
+) -> anyhow::Result<()> {
+    let ix = Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::ConfigureBankRateLimits {
+            group: test_f.marginfi_group.key,
+            admin: test_f.payer(),
+            bank,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::ConfigureBankRateLimits {
+            hourly_max_outflow: Some(hourly_limit),
+            daily_max_outflow: None,
+        }
+        .data(),
+    };
+
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
     Ok(())
 }
 
@@ -46,6 +85,63 @@ async fn next_group_rate_limiter_update_params(test_f: &TestFixture) -> (u64, u6
         g.rate_limiter_last_admin_update_slot.saturating_add(1),
         g.rate_limiter_last_admin_update_seq.saturating_add(1),
     )
+}
+
+#[tokio::test]
+async fn limit_admin_can_configure_and_update_rate_limits() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let bank = test_f.get_bank(&BankMint::Usdc);
+
+    configure_bank_hourly_limit(&test_f, bank.key, 55).await?;
+    configure_group_hourly_limit(&test_f, 100).await?;
+
+    let bank_after: Bank = test_f.load_and_deserialize(&bank.key).await;
+    assert_eq!(bank_after.rate_limiter.hourly.max_outflow, 55);
+
+    let slot = {
+        let ctx = test_f.context.borrow_mut();
+        let clock: Clock = ctx.banks_client.get_sysvar().await?;
+        clock.slot
+    };
+
+    let (event_start_slot, update_seq) = next_group_rate_limiter_update_params(&test_f).await;
+    let ix = Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::UpdateGroupRateLimiter {
+            marginfi_group: test_f.marginfi_group.key,
+            admin: test_f.payer(),
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::UpdateGroupRateLimiter {
+            outflow_usd: Some(42),
+            inflow_usd: None,
+            update_seq,
+            event_start_slot,
+            event_end_slot: slot,
+        }
+        .data(),
+    };
+
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    let group_after: MarginfiGroup = test_f
+        .load_and_deserialize(&test_f.marginfi_group.key)
+        .await;
+    assert_eq!(group_after.rate_limiter.hourly.cur_window_outflow, 42);
+    assert_eq!(group_after.rate_limiter_last_admin_update_seq, 1);
+
+    Ok(())
 }
 
 #[tokio::test]
@@ -390,7 +486,7 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
         );
     }
 
-    // Only the configured group admin may call this instruction.
+    // Only the configured group admin or delegate limit admin may call this instruction.
     {
         let next_slot = {
             let ctx = test_f.context.borrow_mut();

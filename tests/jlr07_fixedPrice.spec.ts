@@ -581,8 +581,6 @@ describe("jlrx: Fixed JupLend price bank", () => {
     );
     await processBankrunTransaction(ctx, repayTx, [user.wallet]);
 
-    const accountStateAfterRepay =
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
     const remaining = composeRemainingAccounts(
       [
         [fixedJuplendBank, pool.lending],
