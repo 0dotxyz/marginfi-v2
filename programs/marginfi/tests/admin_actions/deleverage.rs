@@ -10,6 +10,7 @@ use marginfi_type_crate::{
     types::{BankConfigOpt, ACCOUNT_IN_RECEIVERSHIP},
 };
 use solana_program_test::*;
+use solana_sdk::clock::Clock;
 use solana_sdk::signature::Keypair;
 use solana_sdk::signer::Signer;
 use solana_sdk::{pubkey::Pubkey, transaction::Transaction};
@@ -373,6 +374,32 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
     assert_eq!(risk_admin_sol_tokens, native!(1.0, "SOL", f64));
     let risk_admin_usdc_tokens = risk_admin_usdc_acc.balance().await;
     assert_eq!(risk_admin_usdc_tokens, native!(0, "USDC"));
+
+    // Settle the aggregated deleverage withdraw flow into the on-chain daily counter.
+    {
+        let group = test_f.marginfi_group.load().await;
+        let event_start_slot = group
+            .deleverage_withdraw_last_admin_update_slot
+            .saturating_add(1);
+        let update_seq = group
+            .deleverage_withdraw_last_admin_update_seq
+            .saturating_add(1);
+        let event_end_slot = {
+            let ctx = test_f.context.borrow_mut();
+            let clock: Clock = ctx.banks_client.get_sysvar().await?;
+            clock.slot
+        };
+
+        test_f
+            .marginfi_group
+            .try_admin_update_deleverage_withdrawals(
+                10, // from the 1.0 SOL seize at $10
+                update_seq,
+                event_start_slot,
+                event_end_slot,
+            )
+            .await?;
+    }
 
     // Now let's try to seize more (and thus "repay" more) and see it failing due to daily withdrawal limit reach
     let start_ix = deleveragee
@@ -788,7 +815,12 @@ async fn deleverage_can_close_out_balances() -> anyhow::Result<()> {
     // NOTE: In deleveraging, you MUST PASS the oracle for the withdrawn asset even for
     // a withdraw-all. The entire balance is still withdrawn!
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 0.0, Some(true))
+        .make_bank_withdraw_ix_include_closing_bank(
+            risk_admin_sol_acc.key,
+            sol_bank,
+            0.0,
+            Some(true),
+        )
         .await;
 
     // The entire liability

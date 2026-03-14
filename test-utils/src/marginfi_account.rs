@@ -347,6 +347,26 @@ impl MarginfiAccountFixture {
         withdraw_all: Option<bool>,
         authority: Pubkey,
     ) -> Instruction {
+        self.make_withdraw_ix_with_authority_and_options(
+            destination_account,
+            bank,
+            ui_amount,
+            withdraw_all,
+            authority,
+            false,
+        )
+        .await
+    }
+
+    async fn make_withdraw_ix_with_authority_and_options<T: Into<f64>>(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        ui_amount: T,
+        withdraw_all: Option<bool>,
+        authority: Pubkey,
+        include_closing_bank_on_withdraw_all: bool,
+    ) -> Instruction {
         let marginfi_account = self.load().await;
 
         let mut accounts = marginfi::accounts::LendingAccountWithdraw {
@@ -375,9 +395,20 @@ impl MarginfiAccountFixture {
         };
 
         if withdraw_all.unwrap_or(false) {
+            // For user-driven withdraw_all flows, omit the closing bank's risk accounts unless a
+            // caller explicitly asks to include them.
+            let exclude_banks = if include_closing_bank_on_withdraw_all {
+                vec![]
+            } else if authority == marginfi_account.authority {
+                vec![bank.key]
+            } else {
+                // Delegated/admin flows (e.g. order execution) may still require withdrawn-bank
+                // oracle data during execution.
+                vec![]
+            };
             ix.accounts.extend_from_slice(
                 &self
-                    .load_observation_account_metas_close_last(bank.key, vec![], vec![])
+                    .load_observation_account_metas(vec![], exclude_banks)
                     .await,
             );
         } else {
@@ -401,6 +432,24 @@ impl MarginfiAccountFixture {
             ui_amount,
             withdraw_all,
             self.ctx.borrow().payer.pubkey(),
+        )
+        .await
+    }
+
+    pub async fn make_bank_withdraw_ix_include_closing_bank<T: Into<f64>>(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        ui_amount: T,
+        withdraw_all: Option<bool>,
+    ) -> Instruction {
+        self.make_withdraw_ix_with_authority_and_options(
+            destination_account,
+            bank,
+            ui_amount,
+            withdraw_all,
+            self.ctx.borrow().payer.pubkey(),
+            true,
         )
         .await
     }
@@ -657,7 +706,7 @@ impl MarginfiAccountFixture {
         if repay_all.unwrap_or(false) {
             ix.accounts.extend_from_slice(
                 &self
-                    .load_observation_account_metas(vec![bank.key], vec![])
+                    .load_observation_account_metas(vec![], vec![bank.key])
                     .await,
             );
         }
@@ -1107,87 +1156,6 @@ impl MarginfiAccountFixture {
         account_metas
     }
 
-    pub async fn load_observation_account_metas_close_last(
-        &self,
-        close_bank: Pubkey,
-        include_banks: Vec<Pubkey>,
-        exclude_banks: Vec<Pubkey>,
-    ) -> Vec<AccountMeta> {
-        let marginfi_account = self.load().await;
-        let mut bank_pks = marginfi_account
-            .lending_account
-            .balances
-            .iter()
-            .filter_map(|balance| {
-                if balance.is_active() {
-                    Some(balance.bank_pk)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-
-        for bank_pk in include_banks {
-            if !bank_pks.contains(&bank_pk) {
-                bank_pks.push(bank_pk);
-            }
-        }
-        bank_pks.retain(|bank_pk| !exclude_banks.contains(bank_pk));
-
-        let mut other_banks: Vec<Pubkey> = bank_pks
-            .into_iter()
-            .filter(|pk| *pk != close_bank)
-            .collect();
-        other_banks.sort_by(|a, b| b.cmp(a));
-
-        let mut ordered = other_banks;
-        if !exclude_banks.contains(&close_bank) {
-            ordered.push(close_bank);
-        }
-
-        let mut banks = vec![];
-        for bank_pk in ordered.clone() {
-            let bank = load_and_deserialize::<Bank>(self.ctx.clone(), &bank_pk).await;
-            banks.push(bank);
-        }
-
-        let account_metas = banks
-            .iter()
-            .zip(ordered.iter())
-            .flat_map(|(bank, bank_pk)| {
-                let mut metas = vec![AccountMeta {
-                    pubkey: *bank_pk,
-                    is_signer: false,
-                    is_writable: false,
-                }];
-
-                if should_include_oracle_observation_meta(bank) {
-                    let oracle_key = {
-                        let oracle_key = bank.config.oracle_keys[0];
-                        get_oracle_id_from_feed_id(oracle_key).unwrap_or(oracle_key)
-                    };
-
-                    metas.push(AccountMeta {
-                        pubkey: oracle_key,
-                        is_signer: false,
-                        is_writable: false,
-                    });
-                }
-
-                if should_include_integration_observation_meta(bank) {
-                    metas.push(AccountMeta {
-                        pubkey: bank.integration_acc_1,
-                        is_signer: false,
-                        is_writable: false,
-                    });
-                }
-                metas
-            })
-            .collect::<Vec<_>>();
-
-        account_metas
-    }
-
     pub async fn set_account(&self, mfi_account: &MarginfiAccount) -> anyhow::Result<()> {
         let mut ctx = self.ctx.borrow_mut();
         let mut account = ctx.banks_client.get_account(self.key).await?.unwrap();
@@ -1548,14 +1516,12 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
         amount: u64,
         withdraw_all: Option<bool>,
-        include_health_accounts: bool,
     ) -> Instruction {
         self.make_kamino_withdraw_ix_with_authority(
             destination_account,
             bank,
             amount,
             withdraw_all,
-            include_health_accounts,
             self.ctx.borrow().payer.pubkey(),
         )
         .await
@@ -1567,7 +1533,6 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
         amount: u64,
         withdraw_all: Option<bool>,
-        include_health_accounts: bool,
         authority: Pubkey,
     ) -> Instruction {
         let marginfi_account = self.load().await;
@@ -1611,17 +1576,8 @@ impl MarginfiAccountFixture {
             .data(),
         };
 
-        if include_health_accounts {
-            let oracle_key = get_oracle_id_from_feed_id(bank_state.config.oracle_keys[0])
-                .unwrap_or(bank_state.config.oracle_keys[0]);
-            ix.accounts.push(AccountMeta::new_readonly(bank.key, false));
-            ix.accounts
-                .push(AccountMeta::new_readonly(oracle_key, false));
-            ix.accounts.push(AccountMeta::new_readonly(
-                bank_state.integration_acc_1,
-                false,
-            ));
-        }
+        self.append_integration_withdraw_health_accounts(&mut ix)
+            .await;
 
         ix
     }
@@ -1689,14 +1645,12 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
         amount: u64,
         withdraw_all: Option<bool>,
-        include_health_accounts: bool,
     ) -> Instruction {
         self.make_drift_withdraw_ix_with_authority(
             destination_account,
             bank,
             amount,
             withdraw_all,
-            include_health_accounts,
             self.ctx.borrow().payer.pubkey(),
             None,
         )
@@ -1709,7 +1663,6 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
         amount: u64,
         withdraw_all: Option<bool>,
-        include_health_accounts: bool,
         authority: Pubkey,
         drift_oracle: Option<Pubkey>,
     ) -> Instruction {
@@ -1757,18 +1710,8 @@ impl MarginfiAccountFixture {
             .data(),
         };
 
-        if include_health_accounts {
-            if withdraw_all.unwrap_or(false) {
-                ix.accounts.extend_from_slice(
-                    &self
-                        .load_observation_account_metas_close_last(bank.key, vec![], vec![])
-                        .await,
-                );
-            } else {
-                ix.accounts
-                    .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
-            }
-        }
+        self.append_integration_withdraw_health_accounts(&mut ix)
+            .await;
 
         ix
     }
@@ -1847,14 +1790,12 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
         amount: u64,
         withdraw_all: Option<bool>,
-        include_health_accounts: bool,
     ) -> Instruction {
         self.make_juplend_withdraw_ix_with_authority(
             destination_account,
             bank,
             amount,
             withdraw_all,
-            include_health_accounts,
             self.ctx.borrow().payer.pubkey(),
         )
         .await
@@ -1866,7 +1807,6 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
         amount: u64,
         withdraw_all: Option<bool>,
-        include_health_accounts: bool,
         authority: Pubkey,
     ) -> Instruction {
         let marginfi_account = self.load().await;
@@ -1923,20 +1863,15 @@ impl MarginfiAccountFixture {
             .data(),
         };
 
-        if include_health_accounts {
-            if withdraw_all.unwrap_or(false) {
-                ix.accounts.extend_from_slice(
-                    &self
-                        .load_observation_account_metas_close_last(bank.key, vec![], vec![])
-                        .await,
-                );
-            } else {
-                ix.accounts
-                    .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
-            }
-        }
+        self.append_integration_withdraw_health_accounts(&mut ix)
+            .await;
 
         ix
+    }
+
+    async fn append_integration_withdraw_health_accounts(&self, ix: &mut Instruction) {
+        ix.accounts
+            .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
     }
 
     pub async fn try_lending_account_pulse_health(

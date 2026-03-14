@@ -602,17 +602,19 @@ async fn config_group_admins() -> anyhow::Result<()> {
     let new_emode_admin = Pubkey::new_unique();
     let new_curve_admin = Pubkey::new_unique();
     let new_limit_admin = Pubkey::new_unique();
+    let new_flow_admin = Pubkey::new_unique();
     let new_emissions_admin = Pubkey::new_unique();
     let new_metadata_admin = Pubkey::new_unique();
     let new_risk_admin = Pubkey::new_unique();
 
     let res = test_f
         .marginfi_group
-        .try_update(
+        .try_update_with_flow_admin(
             new_admin,
             new_emode_admin,
             new_curve_admin,
             new_limit_admin,
+            new_flow_admin,
             new_emissions_admin,
             new_metadata_admin,
             new_risk_admin,
@@ -625,6 +627,7 @@ async fn config_group_admins() -> anyhow::Result<()> {
     assert_eq!(group_after.emode_admin, new_emode_admin);
     assert_eq!(group_after.delegate_curve_admin, new_curve_admin);
     assert_eq!(group_after.delegate_limit_admin, new_limit_admin);
+    assert_eq!(group_after.delegate_flow_admin, new_flow_admin);
     assert_eq!(group_after.delegate_emissions_admin, new_emissions_admin);
     assert_eq!(group_after.metadata_admin, new_metadata_admin);
     assert_eq!(group_after.risk_admin, new_risk_admin);

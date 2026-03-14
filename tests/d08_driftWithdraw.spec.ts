@@ -41,7 +41,6 @@ import {
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import {
   composeRemainingAccounts,
-  composeRemainingAccountsByBalances,
 } from "./utils/user-instructions";
 import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "./utils/types";
 
@@ -80,12 +79,8 @@ describe("d08: Drift Withdraw Tests", () => {
     const scaledBalanceBefore = spotPositionBefore.scaledBalance;
 
     const marginfiAccount = user.accounts.get(USER_ACCOUNT_D);
-    const marginfiAccountState =
-      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
-    const remaining = composeRemainingAccountsByBalances(
-      marginfiAccountState.lendingAccount.balances,
-      driftBalanceAccountGroups,
-      driftUsdcBank
+    const remaining = composeRemainingAccounts(
+      driftBalanceAccountGroups.filter((group) => !group[0].equals(driftUsdcBank))
     );
     const withdrawIx = await makeDriftWithdrawIx(
       user.mrgnBankrunProgram,
@@ -144,12 +139,8 @@ describe("d08: Drift Withdraw Tests", () => {
     const scaledBalanceBefore = spotPositionBefore.scaledBalance;
 
     const marginfiAccount = user.accounts.get(USER_ACCOUNT_D);
-    const marginfiAccountState =
-      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
-    const remaining = composeRemainingAccountsByBalances(
-      marginfiAccountState.lendingAccount.balances,
-      driftBalanceAccountGroups,
-      driftUsdcBank
+    const remaining = composeRemainingAccounts(
+      driftBalanceAccountGroups.filter((group) => !group[0].equals(driftUsdcBank))
     );
     const withdrawIx = await makeDriftWithdrawIx(
       user.mrgnBankrunProgram,
@@ -497,12 +488,8 @@ describe("d08: Drift Withdraw Tests", () => {
     const spotPositionBefore = driftUserBefore.spotPositions[1];
     const scaledBalanceBefore = spotPositionBefore.scaledBalance;
     const marginfiAccount = user.accounts.get(USER_ACCOUNT_D);
-    const marginfiAccountState =
-      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
-    const remaining = composeRemainingAccountsByBalances(
-      marginfiAccountState.lendingAccount.balances,
-      driftBalanceAccountGroups,
-      driftTokenABank
+    const remaining = composeRemainingAccounts(
+      driftBalanceAccountGroups.filter((group) => !group[0].equals(driftTokenABank))
     );
     const withdrawIx = await makeDriftWithdrawIx(
       user.mrgnBankrunProgram,
