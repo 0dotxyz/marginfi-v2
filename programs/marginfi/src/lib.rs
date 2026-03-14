@@ -37,6 +37,7 @@ pub mod marginfi {
         new_emode_admin: Option<Pubkey>,
         new_curve_admin: Option<Pubkey>,
         new_limit_admin: Option<Pubkey>,
+        new_flow_admin: Option<Pubkey>,
         new_emissions_admin: Option<Pubkey>,
         new_metadata_admin: Option<Pubkey>,
         new_risk_admin: Option<Pubkey>,
@@ -49,6 +50,7 @@ pub mod marginfi {
             new_emode_admin,
             new_curve_admin,
             new_limit_admin,
+            new_flow_admin,
             new_emissions_admin,
             new_metadata_admin,
             new_risk_admin,
@@ -660,8 +662,8 @@ pub mod marginfi {
         marginfi_group::configure_deleverage_withdrawal_limit(ctx, limit)
     }
 
-    /// (admin or delegate_limit_admin) Update the deleverage daily withdraw outflow with
-    /// aggregated data. The admin or delegate limit admin aggregates
+    /// (delegate_flow_admin only) Update the deleverage daily withdraw outflow with
+    /// aggregated data. The delegate flow admin aggregates
     /// `DeleverageWithdrawFlowEvent` events off-chain and calls this instruction at intervals.
     pub fn update_deleverage_withdrawals(
         ctx: Context<UpdateDeleverageWithdrawals>,
@@ -705,8 +707,8 @@ pub mod marginfi {
         )
     }
 
-    /// (admin or delegate_limit_admin) Update the group rate limiter with aggregated
-    /// inflow/outflow. The admin or delegate limit admin aggregates
+    /// (delegate_flow_admin only) Update the group rate limiter with aggregated
+    /// inflow/outflow. The delegate flow admin aggregates
     /// `RateLimitFlowEvent` events off-chain, converts to USD, and calls this instruction at
     /// intervals to update group rate limiter state.
     pub fn update_group_rate_limiter(

@@ -5,11 +5,11 @@ use marginfi_type_crate::types::MarginfiGroup;
 
 const MAX_DELEVERAGE_WITHDRAW_LIMIT_UPDATE_LAG_SLOTS: u64 = 1_500; // ~10 minutes at ~400ms/slot
 
-/// (admin or delegate_limit_admin) Update the deleverage daily withdraw outflow.
+/// (delegate_flow_admin only) Update the deleverage daily withdraw outflow.
 ///
-/// The group admin or delegate limit admin aggregates
-/// `DeleverageWithdrawFlowEvent` events off-chain and calls this instruction at
-/// intervals to update the on-chain deleverage daily withdraw outflow.
+/// The delegate flow admin aggregates `DeleverageWithdrawFlowEvent` events
+/// off-chain and calls this instruction at intervals to update the on-chain
+/// deleverage daily withdraw outflow.
 ///
 /// This avoids requiring the group account to be writable (mut) in every withdraw instruction.
 pub fn update_deleverage_withdrawals(
@@ -81,11 +81,11 @@ fn validate_event_slots(
 pub struct UpdateDeleverageWithdrawals<'info> {
     #[account(
         mut,
-        constraint = marginfi_group.load()?.is_admin_or_limit_admin(admin.key()) @ MarginfiError::Unauthorized,
+        has_one = delegate_flow_admin @ MarginfiError::Unauthorized,
     )]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub delegate_flow_admin: Signer<'info>,
 }
 
 #[cfg(test)]

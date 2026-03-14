@@ -477,7 +477,7 @@ pub fn is_integration_asset_tag(asset_tag: u8) -> bool {
 }
 /// Records withdrawal outflow on bank-level rate limiter and validates against
 /// group-level rate limits (read-only). Emits a `RateLimitFlowEvent` for the
-/// admin or delegate limit admin to aggregate off-chain and update the group
+/// delegate flow admin to aggregate off-chain and update the group
 /// rate limiter via
 /// `update_group_rate_limiter`.
 pub fn record_withdrawal_outflow(
@@ -544,7 +544,7 @@ pub fn record_withdrawal_outflow(
 }
 
 /// Records deposit inflow on bank-level rate limiter and emits a `RateLimitFlowEvent`
-/// for the admin or delegate limit admin to aggregate off-chain and update the
+/// for the delegate flow admin to aggregate off-chain and update the
 /// group rate limiter via
 /// `update_group_rate_limiter`.
 pub fn record_deposit_inflow(

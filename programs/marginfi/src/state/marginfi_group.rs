@@ -13,6 +13,7 @@ pub trait MarginfiGroupImpl {
     fn update_emode_admin(&mut self, new_emode_admin: Pubkey);
     fn update_curve_admin(&mut self, new_curve_admin: Pubkey);
     fn update_limit_admin(&mut self, new_limit_admin: Pubkey);
+    fn update_flow_admin(&mut self, new_flow_admin: Pubkey);
     fn update_emissions_admin(&mut self, new_emissions_admin: Pubkey);
     fn update_metadata_admin(&mut self, new_metadata_admin: Pubkey);
     fn update_risk_admin(&mut self, new_risk_admin: Pubkey);
@@ -88,6 +89,20 @@ impl MarginfiGroupImpl for MarginfiGroup {
         }
     }
 
+    fn update_flow_admin(&mut self, new_flow_admin: Pubkey) {
+        if self.delegate_flow_admin == new_flow_admin {
+            msg!("No change to flow admin: {:?}", new_flow_admin);
+            // do nothing
+        } else {
+            msg!(
+                "Set flow admin from {:?} to {:?}",
+                self.delegate_flow_admin,
+                new_flow_admin
+            );
+            self.delegate_flow_admin = new_flow_admin;
+        }
+    }
+
     fn update_emissions_admin(&mut self, new_emissions_admin: Pubkey) {
         if self.delegate_emissions_admin == new_emissions_admin {
             msg!("No change to emissions admin: {:?}", new_emissions_admin);
@@ -134,6 +149,7 @@ impl MarginfiGroupImpl for MarginfiGroup {
     #[allow(clippy::too_many_arguments)]
     fn set_initial_configuration(&mut self, admin_pk: Pubkey) {
         self.admin = admin_pk;
+        self.delegate_flow_admin = admin_pk;
         self.set_program_fee_enabled(true);
         self.emode_max_init_leverage = basis_to_u32(DEFAULT_INIT_MAX_EMODE_LEVERAGE);
         self.emode_max_maint_leverage = basis_to_u32(DEFAULT_MAINT_MAX_EMODE_LEVERAGE);

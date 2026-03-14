@@ -136,6 +136,7 @@ export const addBankWithSeed = (
  * newEModeAdmin - (Optional) pass null to keep current emode admin
  * newCurveAdmin - (Optional) pass null to keep current curve admin
  * newLimitAdmin - (Optional) pass null to keep current limit admin
+ * newFlowAdmin - (Optional) pass null to keep current flow admin
  * newEmissionsAdmin - (Optional) pass null to keep current emissions admin
  * newMetadataAdmin - (Optional) pass null to keep current meta admin
  * newRiskAdmin - (Optional) pass null to keep current risk admin
@@ -146,6 +147,7 @@ export type GroupConfigureArgs = {
   newEmodeAdmin?: PublicKey | null;
   newCurveAdmin?: PublicKey | null;
   newLimitAdmin?: PublicKey | null;
+  newFlowAdmin?: PublicKey | null;
   newEmissionsAdmin?: PublicKey | null;
   newMetadataAdmin?: PublicKey | null;
   newRiskAdmin?: PublicKey | null;
@@ -163,6 +165,7 @@ export const groupConfigure = async (
   const newEmodeAdmin = args.newEmodeAdmin ?? group.emodeAdmin;
   const newCurveAdmin = args.newCurveAdmin ?? group.delegateCurveAdmin;
   const newLimitAdmin = args.newLimitAdmin ?? group.delegateLimitAdmin;
+  const newFlowAdmin = args.newFlowAdmin ?? group.delegateFlowAdmin;
   const newEmissionsAdmin =
     args.newEmissionsAdmin ?? group.delegateEmissionsAdmin;
   const newMetadataAdmin = args.newMetadataAdmin ?? group.metadataAdmin;
@@ -176,6 +179,7 @@ export const groupConfigure = async (
       newEmodeAdmin,
       newCurveAdmin,
       newLimitAdmin,
+      newFlowAdmin,
       newEmissionsAdmin,
       newMetadataAdmin,
       newRiskAdmin,
@@ -942,6 +946,7 @@ export const writeBankMetadata = (
 
 export type UpdateGroupRateLimiterArgs = {
   marginfiGroup: PublicKey;
+  delegateFlowAdmin?: PublicKey;
   outflowUsd?: BN | null;
   inflowUsd?: BN | null;
   updateSeq: BN;
@@ -963,6 +968,8 @@ export const updateGroupRateLimiter = (
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
+      delegateFlowAdmin:
+        args.delegateFlowAdmin ?? (program.provider.publicKey as PublicKey),
     })
     .instruction();
   return ix;
@@ -970,6 +977,7 @@ export const updateGroupRateLimiter = (
 
 export type UpdateDeleverageWithdrawalsArgs = {
   marginfiGroup: PublicKey;
+  delegateFlowAdmin?: PublicKey;
   outflowUsd: number;
   updateSeq: BN;
   eventStartSlot: BN;
@@ -989,6 +997,8 @@ export const updateDeleverageWithdrawals = (
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
+      delegateFlowAdmin:
+        args.delegateFlowAdmin ?? (program.provider.publicKey as PublicKey),
     })
     .instruction();
   return ix;

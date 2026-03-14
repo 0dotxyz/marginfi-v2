@@ -9,6 +9,85 @@ use solana_sdk::{
     clock::Clock, instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer,
 };
 
+async fn fund_signer(test_f: &TestFixture, signer: &Keypair) -> anyhow::Result<()> {
+    let ctx = test_f.context.borrow_mut();
+    let recent_blockhash = ctx.banks_client.get_latest_blockhash().await?;
+    let tx = solana_sdk::system_transaction::transfer(
+        &ctx.payer,
+        &signer.pubkey(),
+        10_000_000,
+        recent_blockhash,
+    );
+    ctx.banks_client.process_transaction(tx).await?;
+    Ok(())
+}
+
+async fn configure_group_hourly_limit_as(
+    test_f: &TestFixture,
+    admin: &Keypair,
+    hourly_limit: u64,
+) -> anyhow::Result<()> {
+    let ix = Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::ConfigureGroupRateLimits {
+            marginfi_group: test_f.marginfi_group.key,
+            admin: admin.pubkey(),
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::ConfigureGroupRateLimits {
+            hourly_max_outflow_usd: Some(hourly_limit),
+            daily_max_outflow_usd: None,
+        }
+        .data(),
+    };
+
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&admin.pubkey()),
+        &[admin],
+        ctx.banks_client.get_latest_blockhash().await?,
+    );
+    ctx.banks_client
+        .process_transaction_with_preflight(tx)
+        .await?;
+    Ok(())
+}
+
+async fn configure_bank_hourly_limit_as(
+    test_f: &TestFixture,
+    admin: &Keypair,
+    bank: Pubkey,
+    hourly_limit: u64,
+) -> anyhow::Result<()> {
+    let ix = Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::ConfigureBankRateLimits {
+            group: test_f.marginfi_group.key,
+            admin: admin.pubkey(),
+            bank,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::ConfigureBankRateLimits {
+            hourly_max_outflow: Some(hourly_limit),
+            daily_max_outflow: None,
+        }
+        .data(),
+    };
+
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&admin.pubkey()),
+        &[admin],
+        ctx.banks_client.get_latest_blockhash().await?,
+    );
+    ctx.banks_client
+        .process_transaction_with_preflight(tx)
+        .await?;
+    Ok(())
+}
+
 async fn configure_group_hourly_limit(
     test_f: &TestFixture,
     hourly_limit: u64,
@@ -42,41 +121,6 @@ async fn configure_group_hourly_limit(
     Ok(())
 }
 
-async fn configure_bank_hourly_limit(
-    test_f: &TestFixture,
-    bank: Pubkey,
-    hourly_limit: u64,
-) -> anyhow::Result<()> {
-    let ix = Instruction {
-        program_id: marginfi::ID,
-        accounts: marginfi::accounts::ConfigureBankRateLimits {
-            group: test_f.marginfi_group.key,
-            admin: test_f.payer(),
-            bank,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::ConfigureBankRateLimits {
-            hourly_max_outflow: Some(hourly_limit),
-            daily_max_outflow: None,
-        }
-        .data(),
-    };
-
-    {
-        let ctx = test_f.context.borrow_mut();
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&ctx.payer.pubkey()),
-            &[&ctx.payer],
-            ctx.banks_client.get_latest_blockhash().await?,
-        );
-        ctx.banks_client
-            .process_transaction_with_preflight(tx)
-            .await?;
-    }
-    Ok(())
-}
-
 async fn next_group_rate_limiter_update_params(test_f: &TestFixture) -> (u64, u64) {
     let g: MarginfiGroup = test_f
         .load_and_deserialize(&test_f.marginfi_group.key)
@@ -88,12 +132,30 @@ async fn next_group_rate_limiter_update_params(test_f: &TestFixture) -> (u64, u6
 }
 
 #[tokio::test]
-async fn limit_admin_can_configure_and_update_rate_limits() -> anyhow::Result<()> {
+async fn limit_admin_can_configure_and_flow_admin_can_update_rate_limits() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let bank = test_f.get_bank(&BankMint::Usdc);
+    let limit_admin = Keypair::new();
+    let flow_admin = Keypair::new();
 
-    configure_bank_hourly_limit(&test_f, bank.key, 55).await?;
-    configure_group_hourly_limit(&test_f, 100).await?;
+    fund_signer(&test_f, &limit_admin).await?;
+    fund_signer(&test_f, &flow_admin).await?;
+    test_f
+        .marginfi_group
+        .try_update_with_flow_admin(
+            test_f.payer(),
+            test_f.payer(),
+            test_f.payer(),
+            limit_admin.pubkey(),
+            flow_admin.pubkey(),
+            test_f.payer(),
+            test_f.payer(),
+            test_f.payer(),
+        )
+        .await?;
+
+    configure_bank_hourly_limit_as(&test_f, &limit_admin, bank.key, 55).await?;
+    configure_group_hourly_limit_as(&test_f, &limit_admin, 100).await?;
 
     let bank_after: Bank = test_f.load_and_deserialize(&bank.key).await;
     assert_eq!(bank_after.rate_limiter.hourly.max_outflow, 55);
@@ -109,7 +171,7 @@ async fn limit_admin_can_configure_and_update_rate_limits() -> anyhow::Result<()
         program_id: marginfi::ID,
         accounts: marginfi::accounts::UpdateGroupRateLimiter {
             marginfi_group: test_f.marginfi_group.key,
-            admin: test_f.payer(),
+            delegate_flow_admin: flow_admin.pubkey(),
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -126,8 +188,8 @@ async fn limit_admin_can_configure_and_update_rate_limits() -> anyhow::Result<()
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
-            Some(&ctx.payer.pubkey()),
-            &[&ctx.payer],
+            Some(&flow_admin.pubkey()),
+            &[&flow_admin],
             ctx.banks_client.get_latest_blockhash().await?,
         );
         ctx.banks_client
@@ -161,7 +223,7 @@ async fn update_group_rate_limiter_applies_inflow_before_outflow() -> anyhow::Re
             program_id: marginfi::ID,
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
-                admin: test_f.payer(),
+                delegate_flow_admin: test_f.payer(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -203,7 +265,7 @@ async fn update_group_rate_limiter_applies_inflow_before_outflow() -> anyhow::Re
             program_id: marginfi::ID,
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
-                admin: test_f.payer(),
+                delegate_flow_admin: test_f.payer(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -252,7 +314,7 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
-                admin: test_f.payer(),
+                delegate_flow_admin: test_f.payer(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -285,7 +347,7 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
-                admin: test_f.payer(),
+                delegate_flow_admin: test_f.payer(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -326,7 +388,7 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
-                admin: test_f.payer(),
+                delegate_flow_admin: test_f.payer(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -367,7 +429,7 @@ async fn update_group_rate_limiter_guard_errors() -> anyhow::Result<()> {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
-                admin: test_f.payer(),
+                delegate_flow_admin: test_f.payer(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -424,7 +486,7 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
             program_id: marginfi::ID,
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
-                admin: test_f.payer(),
+                delegate_flow_admin: test_f.payer(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -457,7 +519,7 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
             program_id: marginfi::ID,
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
-                admin: test_f.payer(),
+                delegate_flow_admin: test_f.payer(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {
@@ -486,7 +548,7 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
         );
     }
 
-    // Only the configured group admin or delegate limit admin may call this instruction.
+    // Only the configured delegate flow admin may call this instruction.
     {
         let next_slot = {
             let ctx = test_f.context.borrow_mut();
@@ -503,7 +565,7 @@ async fn update_group_rate_limiter_out_of_order_slot_and_unauthorized() -> anyho
             program_id: marginfi::ID,
             accounts: marginfi::accounts::UpdateGroupRateLimiter {
                 marginfi_group: test_f.marginfi_group.key,
-                admin: unauthorized.pubkey(),
+                delegate_flow_admin: unauthorized.pubkey(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::UpdateGroupRateLimiter {

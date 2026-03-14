@@ -56,6 +56,7 @@ describe("Config group", () => {
             PublicKey.default,
             PublicKey.default,
             PublicKey.default,
+            PublicKey.default,
             null,
             null
           )

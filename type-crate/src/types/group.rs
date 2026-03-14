@@ -30,7 +30,7 @@ pub struct MarginfiGroup {
     pub banks: u16,
     pub pad0: [u8; 6],
     /// This admin can configure collateral ratios above (but not below) the collateral ratio of
-    /// certain banks , e.g. allow SOL to count as 90% collateral when borrowing an LST instead of
+    /// certain banks, e.g. allow SOL to count as 90% collateral when borrowing an LST instead of
     /// the default rate.
     pub emode_admin: Pubkey,
     /// Can modify the fields in `config.interest_rate_config` but nothing else, for every bank
@@ -81,7 +81,13 @@ pub struct MarginfiGroup {
     /// Monotonic sequence number for admin deleverage withdraw-limit updates.
     pub deleverage_withdraw_last_admin_update_seq: u64,
 
-    pub _padding_0: [[u64; 2]; 4],
+    /// Can modify flow-control status for the group, i.e. update the withdraw caches with flow
+    /// information from banks. Typically this is a hot wallet that lives in e.g. some cron job. If
+    /// compromised, flow control can be effectively disabled until the admin is restored, which
+    /// does not itself compromise any funds, and is merely annoying.
+    pub delegate_flow_admin: Pubkey,
+
+    pub _padding_0: [[u64; 2]; 2],
     pub _padding_1: [[u64; 2]; 32],
 }
 
