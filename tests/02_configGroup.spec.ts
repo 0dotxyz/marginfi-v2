@@ -50,13 +50,13 @@ describe("Config group", () => {
         await groupAdmin.mrgnProgram.methods
           .marginfiGroupConfigure(
             groupAdmin.wallet.publicKey,
-            PublicKey.default,
-            PublicKey.default,
-            PublicKey.default,
-            PublicKey.default,
-            PublicKey.default,
-            PublicKey.default,
-            PublicKey.default,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
             null,
             null
           )
