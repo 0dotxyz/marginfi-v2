@@ -14,21 +14,66 @@ use crate::processor;
 /// Marginfi group management commands.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Parser)]
+#[clap(
+    after_help = "Common subcommands:\n  mfi group get <GROUP_PUBKEY>\n  mfi group get-all\n  mfi group create --config ./configs/group/create/config.json.example\n  mfi group update --config ./configs/group/update/config.json.example\n  mfi group init-fee-state --config ./configs/group/fee-state/config.json.example\n  mfi group init-staked-settings --config ./configs/group/staked-settings/config.json.example",
+    after_long_help = "Common subcommands:\n  mfi group get <GROUP_PUBKEY>\n  mfi group get-all\n  mfi group create --config ./configs/group/create/config.json.example\n  mfi group update --config ./configs/group/update/config.json.example\n  mfi group init-fee-state --config ./configs/group/fee-state/config.json.example\n  mfi group init-staked-settings --config ./configs/group/staked-settings/config.json.example"
+)]
 pub enum GroupCommand {
     /// Display group details and its banks
+    ///
+    /// Example: `mfi group get <GROUP_PUBKEY>`
+    #[clap(
+        after_help = "Example:\n  mfi group get <GROUP_PUBKEY>",
+        after_long_help = "Example:\n  mfi group get <GROUP_PUBKEY>"
+    )]
     Get { marginfi_group: Option<Pubkey> },
     /// List all marginfi groups
+    ///
+    /// Example: `mfi group get-all`
+    #[clap(
+        after_help = "Example:\n  mfi group get-all",
+        after_long_help = "Example:\n  mfi group get-all"
+    )]
     GetAll {},
     /// Create a new marginfi group
+    ///
+    /// Example: `mfi group create --config ./configs/group/create/config.json.example`
+    #[clap(
+        after_help = "Example:\n  mfi group create --config ./configs/group/create/config.json.example",
+        after_long_help = "Example:\n  mfi group create --config ./configs/group/create/config.json.example"
+    )]
     Create {
+        #[clap(long, help = "Path to JSON config file")]
+        config: Option<PathBuf>,
+        #[clap(long, help = "Print an example JSON config and exit", action)]
+        config_example: bool,
         admin: Option<Pubkey>,
+        #[clap(long)]
+        emode_admin: Option<Pubkey>,
+        #[clap(long)]
+        curve_admin: Option<Pubkey>,
+        #[clap(long)]
+        limit_admin: Option<Pubkey>,
+        #[clap(long)]
+        emissions_admin: Option<Pubkey>,
+        #[clap(long)]
+        metadata_admin: Option<Pubkey>,
+        #[clap(long)]
+        risk_admin: Option<Pubkey>,
+        #[clap(long)]
+        emode_max_init_leverage: Option<f64>,
+        #[clap(long)]
+        emode_max_maint_leverage: Option<f64>,
         #[clap(short = 'f', long = "override")]
         override_existing_profile_group: bool,
     },
-    /// Update group admin roles.
+    /// Update group admin roles
     ///
-    /// Accepts either CLI flags or --config <path> with a JSON file.
-    /// Example JSON: `mfi group update --config-example`
+    /// Example: `mfi group update --config ./configs/group/update/config.json.example`
+    #[clap(
+        after_help = "Example:\n  mfi group update --config ./configs/group/update/config.json.example",
+        after_long_help = "Example:\n  mfi group update --config ./configs/group/update/config.json.example"
+    )]
     Update {
         #[clap(long, help = "Path to JSON config file")]
         config: Option<PathBuf>,
@@ -53,82 +98,43 @@ pub enum GroupCommand {
         #[clap(long)]
         emode_max_maint_leverage: Option<f64>,
     },
-    /// Add a new lending bank to the group.
-    ///
-    /// Accepts either CLI flags or --config <path> with a JSON file.
-    /// Example JSON: `mfi group add-bank --config-example`
-    AddBank {
-        #[clap(long, help = "Path to JSON config file (see --config-example)")]
-        config: Option<PathBuf>,
-        #[clap(long, help = "Print an example JSON config and exit", action)]
-        config_example: bool,
-        #[clap(long)]
-        mint: Option<Pubkey>,
-        /// Generates a PDA for the bank key
-        #[clap(long, action)]
-        seed: bool,
-        #[clap(long)]
-        asset_weight_init: Option<f64>,
-        #[clap(long)]
-        asset_weight_maint: Option<f64>,
-        #[clap(long)]
-        liability_weight_init: Option<f64>,
-        #[clap(long)]
-        liability_weight_maint: Option<f64>,
-        #[clap(long)]
-        deposit_limit_ui: Option<u64>,
-        #[clap(long)]
-        borrow_limit_ui: Option<u64>,
-        #[clap(long)]
-        zero_util_rate: Option<u32>,
-        #[clap(long)]
-        hundred_util_rate: Option<u32>,
-        #[clap(long)]
-        points: Vec<RatePointArg>,
-        #[clap(long)]
-        insurance_fee_fixed_apr: Option<f64>,
-        #[clap(long)]
-        insurance_ir_fee: Option<f64>,
-        #[clap(long)]
-        group_fixed_fee_apr: Option<f64>,
-        #[clap(long)]
-        group_ir_fee: Option<f64>,
-        #[clap(long, value_enum)]
-        risk_tier: Option<RiskTierArg>,
-        #[clap(
-            long,
-            help = "Max oracle age in seconds, 0 for default (60s)",
-            default_value = "60"
-        )]
-        oracle_max_age: u16,
-        #[clap(long)]
-        global_fee_wallet: Option<Pubkey>,
-    },
-    /// Clone a mainnet bank into staging/localnet using a deterministic seed
-    CloneBank {
-        #[clap(long)]
-        source_bank: Pubkey,
-        #[clap(long)]
-        mint: Pubkey,
-        #[clap(long)]
-        bank_seed: u64,
-    },
     /// Handle bankruptcy for specified accounts
+    ///
+    /// Example: `mfi group handle-bankruptcy <ACCOUNT_PUBKEY_1> <ACCOUNT_PUBKEY_2>`
+    #[clap(
+        after_help = "Example:\n  mfi group handle-bankruptcy <ACCOUNT_PUBKEY_1> <ACCOUNT_PUBKEY_2>",
+        after_long_help = "Example:\n  mfi group handle-bankruptcy <ACCOUNT_PUBKEY_1> <ACCOUNT_PUBKEY_2>"
+    )]
     HandleBankruptcy { accounts: Vec<Pubkey> },
     /// Update address lookup table for the group
+    ///
+    /// Example: `mfi group update-lookup-table -t <TOKEN_ALT_PUBKEY>`
+    #[clap(
+        after_help = "Example:\n  mfi group update-lookup-table -t <TOKEN_ALT_PUBKEY>",
+        after_long_help = "Example:\n  mfi group update-lookup-table -t <TOKEN_ALT_PUBKEY>"
+    )]
     UpdateLookupTable {
         #[clap(short = 't', long)]
         existing_token_lookup_tables: Vec<Pubkey>,
     },
     /// Check address lookup table status
+    ///
+    /// Example: `mfi group check-lookup-table -t <TOKEN_ALT_PUBKEY>`
+    #[clap(
+        after_help = "Example:\n  mfi group check-lookup-table -t <TOKEN_ALT_PUBKEY>",
+        after_long_help = "Example:\n  mfi group check-lookup-table -t <TOKEN_ALT_PUBKEY>"
+    )]
     CheckLookupTable {
         #[clap(short = 't', long)]
         existing_token_lookup_tables: Vec<Pubkey>,
     },
-    /// Initialize global fee state.
+    /// Initialize global fee state
     ///
-    /// Accepts either CLI flags or --config <path> with a JSON file.
-    /// Example JSON: `mfi group init-fee-state --config-example`
+    /// Example: `mfi group init-fee-state --config ./configs/group/fee-state/config.json.example`
+    #[clap(
+        after_help = "Example:\n  mfi group init-fee-state --config ./configs/group/fee-state/config.json.example",
+        after_long_help = "Example:\n  mfi group init-fee-state --config ./configs/group/fee-state/config.json.example"
+    )]
     InitFeeState {
         #[clap(long, help = "Path to JSON config file")]
         config: Option<PathBuf>,
@@ -153,10 +159,13 @@ pub enum GroupCommand {
         #[clap(long)]
         order_execution_max_fee: Option<f64>,
     },
-    /// Edit global fee state parameters.
+    /// Edit global fee state parameters
     ///
-    /// Accepts either CLI flags or --config <path> with a JSON file.
-    /// Example JSON: `mfi group edit-fee-state --config-example`
+    /// Example: `mfi group edit-fee-state --config ./configs/group/fee-state/config.json.example`
+    #[clap(
+        after_help = "Example:\n  mfi group edit-fee-state --config ./configs/group/fee-state/config.json.example",
+        after_long_help = "Example:\n  mfi group edit-fee-state --config ./configs/group/fee-state/config.json.example"
+    )]
     EditFeeState {
         #[clap(long, help = "Path to JSON config file")]
         config: Option<PathBuf>,
@@ -185,6 +194,12 @@ pub enum GroupCommand {
         order_execution_max_fee: Option<f64>,
     },
     /// Configure group-level fee collection
+    ///
+    /// Example: `mfi group config-group-fee --enable-program-fee true`
+    #[clap(
+        after_help = "Example:\n  mfi group config-group-fee --enable-program-fee true",
+        after_long_help = "Example:\n  mfi group config-group-fee --enable-program-fee true"
+    )]
     ConfigGroupFee {
         #[clap(
             long,
@@ -193,35 +208,79 @@ pub enum GroupCommand {
         enable_program_fee: bool,
     },
     /// Propagate fee state to a group
+    ///
+    /// Example: `mfi group propagate-fee`
+    #[clap(
+        after_help = "Examples:\n  mfi group propagate-fee\n  mfi group propagate-fee --marginfi-group <GROUP_PUBKEY>",
+        after_long_help = "Examples:\n  mfi group propagate-fee\n  mfi group propagate-fee --marginfi-group <GROUP_PUBKEY>"
+    )]
     PropagateFee {
         #[clap(long)]
-        marginfi_group: Pubkey,
+        marginfi_group: Option<Pubkey>,
     },
     /// Emergency pause all group operations
+    ///
+    /// Example: `mfi group panic-pause`
+    #[clap(
+        after_help = "Example:\n  mfi group panic-pause",
+        after_long_help = "Example:\n  mfi group panic-pause"
+    )]
     PanicPause {},
     /// Unpause group operations (admin only)
+    ///
+    /// Example: `mfi group panic-unpause`
+    #[clap(
+        after_help = "Example:\n  mfi group panic-unpause",
+        after_long_help = "Example:\n  mfi group panic-unpause"
+    )]
     PanicUnpause {},
     /// Permissionless unpause after timeout
+    ///
+    /// Example: `mfi group panic-unpause-permissionless`
+    #[clap(
+        after_help = "Example:\n  mfi group panic-unpause-permissionless",
+        after_long_help = "Example:\n  mfi group panic-unpause-permissionless"
+    )]
     PanicUnpausePermissionless {},
     /// Initialize staked collateral settings
+    ///
+    /// Example: `mfi group init-staked-settings --config ./configs/group/staked-settings/config.json.example`
+    #[clap(
+        after_help = "Example:\n  mfi group init-staked-settings --config ./configs/group/staked-settings/config.json.example",
+        after_long_help = "Example:\n  mfi group init-staked-settings --config ./configs/group/staked-settings/config.json.example"
+    )]
     InitStakedSettings {
+        #[clap(long, help = "Path to JSON config file")]
+        config: Option<PathBuf>,
+        #[clap(long, help = "Print an example JSON config and exit", action)]
+        config_example: bool,
         #[clap(long)]
-        oracle: Pubkey,
+        oracle: Option<Pubkey>,
         #[clap(long)]
-        asset_weight_init: f64,
+        asset_weight_init: Option<f64>,
         #[clap(long)]
-        asset_weight_maint: f64,
+        asset_weight_maint: Option<f64>,
         #[clap(long)]
-        deposit_limit: u64,
+        deposit_limit: Option<u64>,
         #[clap(long)]
-        total_asset_value_init_limit: u64,
+        total_asset_value_init_limit: Option<u64>,
         #[clap(long)]
-        oracle_max_age: u16,
+        oracle_max_age: Option<u16>,
         #[clap(long, value_enum)]
-        risk_tier: RiskTierArg,
+        risk_tier: Option<RiskTierArg>,
     },
     /// Edit staked collateral settings
+    ///
+    /// Example: `mfi group edit-staked-settings --config ./configs/group/edit-staked-settings/config.json.example`
+    #[clap(
+        after_help = "Example:\n  mfi group edit-staked-settings --config ./configs/group/edit-staked-settings/config.json.example",
+        after_long_help = "Example:\n  mfi group edit-staked-settings --config ./configs/group/edit-staked-settings/config.json.example"
+    )]
     EditStakedSettings {
+        #[clap(long, help = "Path to JSON config file")]
+        config: Option<PathBuf>,
+        #[clap(long, help = "Print an example JSON config and exit", action)]
+        config_example: bool,
         #[clap(long)]
         oracle: Option<Pubkey>,
         #[clap(long)]
@@ -238,8 +297,20 @@ pub enum GroupCommand {
         risk_tier: Option<RiskTierArg>,
     },
     /// Propagate staked settings to a specific bank
+    ///
+    /// Example: `mfi group propagate-staked-settings <BANK_PUBKEY>`
+    #[clap(
+        after_help = "Example:\n  mfi group propagate-staked-settings <BANK_PUBKEY>",
+        after_long_help = "Example:\n  mfi group propagate-staked-settings <BANK_PUBKEY>"
+    )]
     PropagateStakedSettings { bank_pk: Pubkey },
     /// Configure group-level outflow rate limits
+    ///
+    /// Example: `mfi group configure-rate-limits --hourly-max-outflow-usd 1000000 --daily-max-outflow-usd 5000000`
+    #[clap(
+        after_help = "Example:\n  mfi group configure-rate-limits --hourly-max-outflow-usd 1000000 --daily-max-outflow-usd 5000000",
+        after_long_help = "Example:\n  mfi group configure-rate-limits --hourly-max-outflow-usd 1000000 --daily-max-outflow-usd 5000000"
+    )]
     ConfigureRateLimits {
         #[clap(long)]
         hourly_max_outflow_usd: Option<u64>,
@@ -247,6 +318,12 @@ pub enum GroupCommand {
         daily_max_outflow_usd: Option<u64>,
     },
     /// Configure daily deleverage withdrawal limit
+    ///
+    /// Example: `mfi group configure-deleverage-limit --daily-limit 250000`
+    #[clap(
+        after_help = "Example:\n  mfi group configure-deleverage-limit --daily-limit 250000",
+        after_long_help = "Example:\n  mfi group configure-deleverage-limit --daily-limit 250000"
+    )]
     ConfigureDeleverageLimit {
         #[clap(long)]
         daily_limit: u32,
@@ -308,6 +385,49 @@ impl From<RiskTierArg> for RiskTier {
 }
 
 pub fn dispatch(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<()> {
+    match &subcmd {
+        GroupCommand::Create {
+            config_example: true,
+            ..
+        } => {
+            println!("{}", configs::GroupCreateConfig::example_json());
+            return Ok(());
+        }
+        GroupCommand::Update {
+            config_example: true,
+            ..
+        } => {
+            println!("{}", configs::GroupUpdateConfig::example_json());
+            return Ok(());
+        }
+        GroupCommand::InitFeeState {
+            config_example: true,
+            ..
+        }
+        | GroupCommand::EditFeeState {
+            config_example: true,
+            ..
+        } => {
+            println!("{}", configs::FeeStateConfig::example_json());
+            return Ok(());
+        }
+        GroupCommand::InitStakedSettings {
+            config_example: true,
+            ..
+        } => {
+            println!("{}", configs::StakedSettingsConfig::example_json());
+            return Ok(());
+        }
+        GroupCommand::EditStakedSettings {
+            config_example: true,
+            ..
+        } => {
+            println!("{}", configs::EditStakedSettingsConfig::example_json());
+            return Ok(());
+        }
+        _ => {}
+    }
+
     let (profile, config) = super::load_profile_and_config(global_options)?;
 
     if !global_options.skip_confirmation {
@@ -326,9 +446,68 @@ pub fn dispatch(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<
         GroupCommand::GetAll {} => processor::group_get_all(config),
 
         GroupCommand::Create {
+            config: config_path,
+            config_example,
             admin,
+            emode_admin,
+            curve_admin,
+            limit_admin,
+            emissions_admin,
+            metadata_admin,
+            risk_admin,
+            emode_max_init_leverage,
+            emode_max_maint_leverage,
             override_existing_profile_group,
-        } => processor::group_create(config, profile, admin, override_existing_profile_group),
+        } => {
+            if config_example {
+                println!("{}", configs::GroupCreateConfig::example_json());
+                return Ok(());
+            }
+
+            let cfg = if let Some(path) = config_path {
+                Some(configs::load_config::<configs::GroupCreateConfig>(&path)?)
+            } else {
+                None
+            };
+
+            let create_config = if let Some(cfg) = cfg.as_ref() {
+                processor::GroupCreateConfigRequest {
+                    emode_admin: configs::parse_optional_pubkey(&cfg.emode_admin)?,
+                    curve_admin: configs::parse_optional_pubkey(&cfg.curve_admin)?,
+                    limit_admin: configs::parse_optional_pubkey(&cfg.limit_admin)?,
+                    emissions_admin: configs::parse_optional_pubkey(&cfg.emissions_admin)?,
+                    metadata_admin: configs::parse_optional_pubkey(&cfg.metadata_admin)?,
+                    risk_admin: configs::parse_optional_pubkey(&cfg.risk_admin)?,
+                    emode_max_init_leverage: cfg.emode_max_init_leverage,
+                    emode_max_maint_leverage: cfg.emode_max_maint_leverage,
+                }
+            } else {
+                processor::GroupCreateConfigRequest {
+                    emode_admin,
+                    curve_admin,
+                    limit_admin,
+                    emissions_admin,
+                    metadata_admin,
+                    risk_admin,
+                    emode_max_init_leverage,
+                    emode_max_maint_leverage,
+                }
+            };
+
+            let create_admin = if let Some(cfg) = cfg.as_ref() {
+                configs::parse_optional_pubkey(&cfg.admin)?
+            } else {
+                admin
+            };
+
+            processor::group_create(
+                config,
+                profile,
+                create_admin,
+                override_existing_profile_group,
+                create_config,
+            )
+        }
 
         GroupCommand::Update {
             config: config_path,
@@ -352,13 +531,13 @@ pub fn dispatch(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<
                 processor::group_configure(
                     config,
                     profile,
-                    configs::parse_pubkey(&cfg.new_admin)?,
-                    configs::parse_pubkey(&cfg.new_emode_admin)?,
-                    configs::parse_pubkey(&cfg.new_curve_admin)?,
-                    configs::parse_pubkey(&cfg.new_limit_admin)?,
-                    configs::parse_pubkey(&cfg.new_emissions_admin)?,
-                    configs::parse_pubkey(&cfg.new_metadata_admin)?,
-                    configs::parse_pubkey(&cfg.new_risk_admin)?,
+                    configs::parse_optional_pubkey(&cfg.new_admin)?,
+                    configs::parse_optional_pubkey(&cfg.new_emode_admin)?,
+                    configs::parse_optional_pubkey(&cfg.new_curve_admin)?,
+                    configs::parse_optional_pubkey(&cfg.new_limit_admin)?,
+                    configs::parse_optional_pubkey(&cfg.new_emissions_admin)?,
+                    configs::parse_optional_pubkey(&cfg.new_metadata_admin)?,
+                    configs::parse_optional_pubkey(&cfg.new_risk_admin)?,
                     cfg.emode_max_init_leverage,
                     cfg.emode_max_maint_leverage,
                 )
@@ -366,114 +545,18 @@ pub fn dispatch(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<
                 processor::group_configure(
                     config,
                     profile,
-                    new_admin.context("--new-admin required")?,
-                    new_emode_admin.context("--new-emode-admin required")?,
-                    new_curve_admin.context("--new-curve-admin required")?,
-                    new_limit_admin.context("--new-limit-admin required")?,
-                    new_emissions_admin.context("--new-emissions-admin required")?,
-                    new_metadata_admin.context("--new-metadata-admin required")?,
-                    new_risk_admin.context("--new-risk-admin required")?,
+                    new_admin,
+                    new_emode_admin,
+                    new_curve_admin,
+                    new_limit_admin,
+                    new_emissions_admin,
+                    new_metadata_admin,
+                    new_risk_admin,
                     emode_max_init_leverage,
                     emode_max_maint_leverage,
                 )
             }
         }
-
-        GroupCommand::AddBank {
-            config: config_path,
-            config_example,
-            mint: bank_mint,
-            seed,
-            asset_weight_init,
-            asset_weight_maint,
-            liability_weight_init,
-            liability_weight_maint,
-            zero_util_rate,
-            hundred_util_rate,
-            points,
-            insurance_fee_fixed_apr,
-            insurance_ir_fee,
-            group_fixed_fee_apr,
-            group_ir_fee,
-            deposit_limit_ui,
-            borrow_limit_ui,
-            risk_tier,
-            oracle_max_age,
-            global_fee_wallet,
-        } => {
-            if config_example {
-                println!("{}", configs::AddBankConfig::example_json());
-                return Ok(());
-            }
-            if let Some(path) = config_path {
-                let cfg: configs::AddBankConfig = configs::load_config(&path)?;
-                let risk_tier_arg = match cfg.risk_tier.to_lowercase().as_str() {
-                    "collateral" => RiskTierArg::Collateral,
-                    "isolated" => RiskTierArg::Isolated,
-                    other => anyhow::bail!("Unknown risk_tier in config: {other}"),
-                };
-                let pts: Vec<RatePointArg> = cfg
-                    .points
-                    .iter()
-                    .map(|p| RatePointArg {
-                        util: p.util,
-                        rate: p.rate,
-                    })
-                    .collect();
-                processor::group_add_bank(
-                    config,
-                    profile,
-                    configs::parse_pubkey(&cfg.mint)?,
-                    cfg.seed,
-                    cfg.asset_weight_init,
-                    cfg.asset_weight_maint,
-                    cfg.liability_weight_init,
-                    cfg.liability_weight_maint,
-                    cfg.deposit_limit_ui,
-                    cfg.borrow_limit_ui,
-                    cfg.zero_util_rate,
-                    cfg.hundred_util_rate,
-                    pts,
-                    cfg.insurance_fee_fixed_apr,
-                    cfg.insurance_ir_fee,
-                    cfg.group_fixed_fee_apr,
-                    cfg.group_ir_fee,
-                    risk_tier_arg,
-                    cfg.oracle_max_age,
-                    global_options.compute_unit_price,
-                    configs::parse_pubkey(&cfg.global_fee_wallet)?,
-                )
-            } else {
-                processor::group_add_bank(
-                    config,
-                    profile,
-                    bank_mint.context("--mint required (or use --config)")?,
-                    seed,
-                    asset_weight_init.context("--asset-weight-init required")?,
-                    asset_weight_maint.context("--asset-weight-maint required")?,
-                    liability_weight_init.context("--liability-weight-init required")?,
-                    liability_weight_maint.context("--liability-weight-maint required")?,
-                    deposit_limit_ui.context("--deposit-limit-ui required")?,
-                    borrow_limit_ui.context("--borrow-limit-ui required")?,
-                    zero_util_rate.context("--zero-util-rate required")?,
-                    hundred_util_rate.context("--hundred-util-rate required")?,
-                    points,
-                    insurance_fee_fixed_apr.context("--insurance-fee-fixed-apr required")?,
-                    insurance_ir_fee.context("--insurance-ir-fee required")?,
-                    group_fixed_fee_apr.context("--group-fixed-fee-apr required")?,
-                    group_ir_fee.context("--group-ir-fee required")?,
-                    risk_tier.context("--risk-tier required")?,
-                    oracle_max_age,
-                    global_options.compute_unit_price,
-                    global_fee_wallet.context("--global-fee-wallet required")?,
-                )
-            }
-        }
-        GroupCommand::CloneBank {
-            source_bank,
-            mint,
-            bank_seed,
-        } => processor::group_clone_bank(config, profile, source_bank, mint, bank_seed),
 
         GroupCommand::HandleBankruptcy { accounts } => {
             processor::handle_bankruptcy_for_accounts(&config, &profile, accounts)
@@ -589,15 +672,20 @@ pub fn dispatch(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<
         GroupCommand::ConfigGroupFee { enable_program_fee } => {
             processor::config_group_fee(config, profile, enable_program_fee)
         }
-        GroupCommand::PropagateFee { marginfi_group } => {
-            processor::propagate_fee(config, marginfi_group)
-        }
+        GroupCommand::PropagateFee { marginfi_group } => processor::propagate_fee(
+            config,
+            marginfi_group
+                .or(profile.marginfi_group)
+                .context("--marginfi-group required or set in profile")?,
+        ),
         GroupCommand::PanicPause {} => processor::panic_pause(config),
         GroupCommand::PanicUnpause {} => processor::panic_unpause(config),
         GroupCommand::PanicUnpausePermissionless {} => {
             processor::panic_unpause_permissionless(config)
         }
         GroupCommand::InitStakedSettings {
+            config: config_path,
+            config_example,
             oracle,
             asset_weight_init,
             asset_weight_maint,
@@ -605,18 +693,43 @@ pub fn dispatch(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<
             total_asset_value_init_limit,
             oracle_max_age,
             risk_tier,
-        } => processor::init_staked_settings(
-            config,
-            profile,
-            oracle,
-            asset_weight_init,
-            asset_weight_maint,
-            deposit_limit,
-            total_asset_value_init_limit,
-            oracle_max_age,
-            risk_tier.into(),
-        ),
+        } => {
+            if config_example {
+                println!("{}", configs::StakedSettingsConfig::example_json());
+                return Ok(());
+            }
+            if let Some(path) = config_path {
+                let cfg: configs::StakedSettingsConfig = configs::load_config(&path)?;
+                let rt = super::bank::parse_risk_tier_config(&cfg.risk_tier)?;
+                processor::init_staked_settings(
+                    config,
+                    profile,
+                    configs::parse_pubkey(&cfg.oracle)?,
+                    cfg.asset_weight_init,
+                    cfg.asset_weight_maint,
+                    cfg.deposit_limit,
+                    cfg.total_asset_value_init_limit,
+                    cfg.oracle_max_age,
+                    rt.into(),
+                )
+            } else {
+                processor::init_staked_settings(
+                    config,
+                    profile,
+                    oracle.context("--oracle required (or use --config)")?,
+                    asset_weight_init.context("--asset-weight-init required")?,
+                    asset_weight_maint.context("--asset-weight-maint required")?,
+                    deposit_limit.context("--deposit-limit required")?,
+                    total_asset_value_init_limit
+                        .context("--total-asset-value-init-limit required")?,
+                    oracle_max_age.context("--oracle-max-age required")?,
+                    risk_tier.context("--risk-tier required")?.into(),
+                )
+            }
+        }
         GroupCommand::EditStakedSettings {
+            config: config_path,
+            config_example,
             oracle,
             asset_weight_init,
             asset_weight_maint,
@@ -624,17 +737,43 @@ pub fn dispatch(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<
             total_asset_value_init_limit,
             oracle_max_age,
             risk_tier,
-        } => processor::edit_staked_settings(
-            config,
-            profile,
-            oracle,
-            asset_weight_init,
-            asset_weight_maint,
-            deposit_limit,
-            total_asset_value_init_limit,
-            oracle_max_age,
-            risk_tier.map(Into::into),
-        ),
+        } => {
+            if config_example {
+                println!("{}", configs::EditStakedSettingsConfig::example_json());
+                return Ok(());
+            }
+            if let Some(path) = config_path {
+                let cfg: configs::EditStakedSettingsConfig = configs::load_config(&path)?;
+                let rt = cfg
+                    .risk_tier
+                    .as_deref()
+                    .map(super::bank::parse_risk_tier_config)
+                    .transpose()?;
+                processor::edit_staked_settings(
+                    config,
+                    profile,
+                    configs::parse_optional_pubkey(&cfg.oracle)?,
+                    cfg.asset_weight_init,
+                    cfg.asset_weight_maint,
+                    cfg.deposit_limit,
+                    cfg.total_asset_value_init_limit,
+                    cfg.oracle_max_age,
+                    rt.map(Into::into),
+                )
+            } else {
+                processor::edit_staked_settings(
+                    config,
+                    profile,
+                    oracle,
+                    asset_weight_init,
+                    asset_weight_maint,
+                    deposit_limit,
+                    total_asset_value_init_limit,
+                    oracle_max_age,
+                    risk_tier.map(Into::into),
+                )
+            }
+        }
         GroupCommand::PropagateStakedSettings { bank_pk } => {
             processor::propagate_staked_settings(config, profile, bank_pk)
         }

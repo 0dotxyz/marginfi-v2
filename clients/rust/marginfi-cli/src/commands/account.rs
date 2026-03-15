@@ -62,20 +62,59 @@ impl OrderTriggerTypeArg {
 
 /// Marginfi account operations.
 #[derive(Debug, Parser)]
+#[clap(
+    after_help = "Common subcommands:\n  mfi account list\n  mfi account get <ACCOUNT_PUBKEY>\n  mfi account deposit <BANK_PUBKEY> 10\n  mfi account withdraw <BANK_PUBKEY> 5\n  mfi account borrow <BANK_PUBKEY> 3\n  mfi account repay <BANK_PUBKEY> 3\n  mfi account place-order --bank-1 <BANK_PUBKEY> --bank-2 <BANK_PUBKEY> --trigger-type stop-loss --stop-loss 0.9 --max-slippage-bps 50",
+    after_long_help = "Common subcommands:\n  mfi account list\n  mfi account get <ACCOUNT_PUBKEY>\n  mfi account deposit <BANK_PUBKEY> 10\n  mfi account withdraw <BANK_PUBKEY> 5\n  mfi account borrow <BANK_PUBKEY> 3\n  mfi account repay <BANK_PUBKEY> 3\n  mfi account place-order --bank-1 <BANK_PUBKEY> --bank-2 <BANK_PUBKEY> --trigger-type stop-loss --stop-loss 0.9 --max-slippage-bps 50"
+)]
 pub enum AccountCommand {
     /// List all marginfi accounts for the current authority
+    ///
+    /// Example: `mfi account list`
+    #[clap(
+        after_help = "Example:\n  mfi account list",
+        after_long_help = "Example:\n  mfi account list"
+    )]
     List,
     /// Set the default marginfi account for this profile
+    ///
+    /// Example: `mfi account use <ACCOUNT_PUBKEY>`
+    #[clap(
+        after_help = "Example:\n  mfi account use <ACCOUNT_PUBKEY>",
+        after_long_help = "Example:\n  mfi account use <ACCOUNT_PUBKEY>"
+    )]
     Use { account: Pubkey },
     /// Display account details and balances
+    ///
+    /// Example: `mfi account get <ACCOUNT_PUBKEY>`
+    #[clap(
+        after_help = "Example:\n  mfi account get <ACCOUNT_PUBKEY>",
+        after_long_help = "Example:\n  mfi account get <ACCOUNT_PUBKEY>"
+    )]
     Get { account: Option<Pubkey> },
-    /// Deposit tokens into a bank (accepts address or symbol like SOL, USDC)
+    /// Deposit tokens into a bank
+    ///
+    /// Example: `mfi account deposit <BANK_PUBKEY> 10`
+    #[clap(
+        after_help = "Example:\n  mfi account deposit <BANK_PUBKEY> 10",
+        after_long_help = "Example:\n  mfi account deposit <BANK_PUBKEY> 10"
+    )]
     Deposit {
         bank: String,
         ui_amount: f64,
-        deposit_up_to_limit: Option<bool>,
+        #[clap(
+            long = "up-to-limit",
+            action,
+            help = "If the requested deposit exceeds the bank's deposit limit, deposit only the remaining allowed amount instead of failing"
+        )]
+        deposit_up_to_limit: bool,
     },
     /// Withdraw tokens from a bank
+    ///
+    /// Example: `mfi account withdraw <BANK_PUBKEY> 5`
+    #[clap(
+        after_help = "Example:\n  mfi account withdraw <BANK_PUBKEY> 5",
+        after_long_help = "Example:\n  mfi account withdraw <BANK_PUBKEY> 5"
+    )]
     Withdraw {
         bank: String,
         ui_amount: f64,
@@ -83,8 +122,20 @@ pub enum AccountCommand {
         withdraw_all: bool,
     },
     /// Borrow tokens from a bank
+    ///
+    /// Example: `mfi account borrow <BANK_PUBKEY> 3`
+    #[clap(
+        after_help = "Example:\n  mfi account borrow <BANK_PUBKEY> 3",
+        after_long_help = "Example:\n  mfi account borrow <BANK_PUBKEY> 3"
+    )]
     Borrow { bank: String, ui_amount: f64 },
     /// Liquidate an undercollateralized account
+    ///
+    /// Example: `mfi account liquidate --liquidatee-marginfi-account <ACCOUNT_PUBKEY> --asset-bank <ASSET_BANK_PUBKEY> --liability-bank <LIABILITY_BANK_PUBKEY> --ui-asset-amount 1`
+    #[clap(
+        after_help = "Example:\n  mfi account liquidate --liquidatee-marginfi-account <ACCOUNT_PUBKEY> --asset-bank <ASSET_BANK_PUBKEY> --liability-bank <LIABILITY_BANK_PUBKEY> --ui-asset-amount 1",
+        after_long_help = "Example:\n  mfi account liquidate --liquidatee-marginfi-account <ACCOUNT_PUBKEY> --asset-bank <ASSET_BANK_PUBKEY> --liability-bank <LIABILITY_BANK_PUBKEY> --ui-asset-amount 1"
+    )]
     Liquidate {
         #[clap(long)]
         liquidatee_marginfi_account: Pubkey,
@@ -96,10 +147,28 @@ pub enum AccountCommand {
         ui_asset_amount: f64,
     },
     /// Create a new marginfi account
+    ///
+    /// Example: `mfi account create`
+    #[clap(
+        after_help = "Example:\n  mfi account create",
+        after_long_help = "Example:\n  mfi account create"
+    )]
     Create,
     /// Close the default marginfi account
+    ///
+    /// Example: `mfi account close`
+    #[clap(
+        after_help = "Example:\n  mfi account close",
+        after_long_help = "Example:\n  mfi account close"
+    )]
     Close,
     /// Place a stop-loss or take-profit order
+    ///
+    /// Example: `mfi account place-order --bank-1 <BANK_PUBKEY> --bank-2 <BANK_PUBKEY> --trigger-type stop-loss --stop-loss 0.9 --max-slippage-bps 50`
+    #[clap(
+        after_help = "Example:\n  mfi account place-order --bank-1 <BANK_PUBKEY> --bank-2 <BANK_PUBKEY> --trigger-type stop-loss --stop-loss 0.9 --max-slippage-bps 50",
+        after_long_help = "Example:\n  mfi account place-order --bank-1 <BANK_PUBKEY> --bank-2 <BANK_PUBKEY> --trigger-type stop-loss --stop-loss 0.9 --max-slippage-bps 50"
+    )]
     PlaceOrder {
         /// First bank public key (one must be an asset balance)
         #[clap(long)]
@@ -121,13 +190,25 @@ pub enum AccountCommand {
         max_slippage_bps: u32,
     },
     /// Close an existing order and reclaim lamports
+    ///
+    /// Example: `mfi account close-order <ORDER_PUBKEY>`
+    #[clap(
+        after_help = "Example:\n  mfi account close-order <ORDER_PUBKEY>",
+        after_long_help = "Example:\n  mfi account close-order <ORDER_PUBKEY>"
+    )]
     CloseOrder {
         order: Pubkey,
         /// Recipient of lamports from closed order account (defaults to signer)
         #[clap(long)]
         fee_recipient: Option<Pubkey>,
     },
-    /// Keeper closes an order (permissionless)
+    /// Keeper closes an order
+    ///
+    /// Example: `mfi account keeper-close-order --marginfi-account <ACCOUNT_PUBKEY> --order <ORDER_PUBKEY>`
+    #[clap(
+        after_help = "Example:\n  mfi account keeper-close-order --marginfi-account <ACCOUNT_PUBKEY> --order <ORDER_PUBKEY>",
+        after_long_help = "Example:\n  mfi account keeper-close-order --marginfi-account <ACCOUNT_PUBKEY> --order <ORDER_PUBKEY>"
+    )]
     KeeperCloseOrder {
         /// Marginfi account that owns (or previously owned) the order
         #[clap(long)]
@@ -139,7 +220,13 @@ pub enum AccountCommand {
         #[clap(long)]
         fee_recipient: Option<Pubkey>,
     },
-    /// Keeper executes an order in one tx: start_execute_order + extra ixs + end_execute_order
+    /// Keeper executes an order in one transaction
+    ///
+    /// Example: `mfi account execute-order-keeper --order <ORDER_PUBKEY> --extra-ixs-file ./extra-ixs.json`
+    #[clap(
+        after_help = "Example:\n  mfi account execute-order-keeper --order <ORDER_PUBKEY> --extra-ixs-file ./extra-ixs.json",
+        after_long_help = "Example:\n  mfi account execute-order-keeper --order <ORDER_PUBKEY> --extra-ixs-file ./extra-ixs.json"
+    )]
     ExecuteOrderKeeper {
         /// Order PDA to execute
         #[clap(long)]
@@ -152,12 +239,24 @@ pub enum AccountCommand {
         extra_ixs_file: Option<PathBuf>,
     },
     /// Initialize liquidation record PDA for an account
+    ///
+    /// Example: `mfi account init-liq-record --account <ACCOUNT_PUBKEY>`
+    #[clap(
+        after_help = "Example:\n  mfi account init-liq-record --account <ACCOUNT_PUBKEY>",
+        after_long_help = "Example:\n  mfi account init-liq-record --account <ACCOUNT_PUBKEY>"
+    )]
     InitLiqRecord {
         /// Account to initialize the record for (defaults to profile default account)
         #[clap(long)]
         account: Option<Pubkey>,
     },
-    /// Receivership liquidation bundle: (optional init) + start_liquidation + extra ixs + end_liquidation
+    /// Run the receivership liquidation flow
+    ///
+    /// Example: `mfi account liquidate-receivership --liquidatee-marginfi-account <ACCOUNT_PUBKEY> --init-liq-record-if-missing`
+    #[clap(
+        after_help = "Example:\n  mfi account liquidate-receivership --liquidatee-marginfi-account <ACCOUNT_PUBKEY> --init-liq-record-if-missing",
+        after_long_help = "Example:\n  mfi account liquidate-receivership --liquidatee-marginfi-account <ACCOUNT_PUBKEY> --init-liq-record-if-missing"
+    )]
     LiquidateReceivership {
         #[clap(long)]
         liquidatee_marginfi_account: Pubkey,
@@ -169,12 +268,24 @@ pub enum AccountCommand {
         extra_ixs_file: Option<PathBuf>,
     },
     /// Set keeper close flags on balance tags
+    ///
+    /// Example: `mfi account set-keeper-close-flags --banks <BANK_PUBKEY>`
+    #[clap(
+        after_help = "Example:\n  mfi account set-keeper-close-flags --banks <BANK_PUBKEY>",
+        after_long_help = "Example:\n  mfi account set-keeper-close-flags --banks <BANK_PUBKEY>"
+    )]
     SetKeeperCloseFlags {
         /// Optional list of bank keys to clear tags for. If not provided, clears all tags.
         #[clap(long)]
         banks: Vec<Pubkey>,
     },
     /// Repay borrowed tokens
+    ///
+    /// Example: `mfi account repay <BANK_PUBKEY> 3`
+    #[clap(
+        after_help = "Example:\n  mfi account repay <BANK_PUBKEY> 3",
+        after_long_help = "Example:\n  mfi account repay <BANK_PUBKEY> 3"
+    )]
     Repay {
         bank: String,
         ui_amount: f64,
@@ -182,22 +293,52 @@ pub enum AccountCommand {
         repay_all: bool,
     },
     /// Close a zero balance position in a bank
+    ///
+    /// Example: `mfi account close-balance <BANK_PUBKEY>`
+    #[clap(
+        after_help = "Example:\n  mfi account close-balance <BANK_PUBKEY>",
+        after_long_help = "Example:\n  mfi account close-balance <BANK_PUBKEY>"
+    )]
     CloseBalance { bank: String },
     /// Transfer account authority to a new owner
+    ///
+    /// Example: `mfi account transfer <NEW_AUTHORITY_PUBKEY>`
+    #[clap(
+        after_help = "Example:\n  mfi account transfer <NEW_AUTHORITY_PUBKEY>",
+        after_long_help = "Example:\n  mfi account transfer <NEW_AUTHORITY_PUBKEY>"
+    )]
     Transfer { new_authority: Pubkey },
     /// Create a PDA-based marginfi account
+    ///
+    /// Example: `mfi account create-pda 7 --third-party-id 1`
+    #[clap(
+        after_help = "Example:\n  mfi account create-pda 7 --third-party-id 1",
+        after_long_help = "Example:\n  mfi account create-pda 7 --third-party-id 1"
+    )]
     CreatePda {
         account_index: u16,
         #[clap(long)]
         third_party_id: Option<u16>,
     },
-    /// Freeze or unfreeze a marginfi account (admin only)
+    /// Freeze or unfreeze a marginfi account
+    ///
+    /// Example: `mfi account set-freeze <ACCOUNT_PUBKEY> --frozen true`
+    #[clap(
+        after_help = "Example:\n  mfi account set-freeze <ACCOUNT_PUBKEY> --frozen true",
+        after_long_help = "Example:\n  mfi account set-freeze <ACCOUNT_PUBKEY> --frozen true"
+    )]
     SetFreeze {
         account: Pubkey,
         #[clap(long)]
         frozen: bool,
     },
     /// Pulse health check for an account
+    ///
+    /// Example: `mfi account pulse-health`
+    #[clap(
+        after_help = "Example:\n  mfi account pulse-health",
+        after_long_help = "Example:\n  mfi account pulse-health"
+    )]
     PulseHealth { account: Option<Pubkey> },
 }
 
@@ -230,7 +371,7 @@ pub fn dispatch(subcmd: AccountCommand, global_options: &GlobalOptions) -> Resul
                 &config,
                 bank_pk,
                 ui_amount,
-                deposit_up_to_limit,
+                deposit_up_to_limit.then_some(true),
             )
         }
         AccountCommand::Withdraw {

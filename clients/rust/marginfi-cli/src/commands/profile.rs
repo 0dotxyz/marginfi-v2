@@ -5,10 +5,20 @@ use solana_sdk::{commitment_config::CommitmentLevel, pubkey::Pubkey};
 
 use crate::processor;
 
-/// CLI profile management (RPC endpoints, keypairs, default accounts).
+/// CLI profile management.
 #[derive(Debug, Parser)]
+#[clap(
+    after_help = "Common subcommands:\n  mfi profile create --name mainnet --cluster mainnet --keypair-path ~/.config/solana/id.json --rpc-url https://api.mainnet-beta.solana.com\n  mfi profile show\n  mfi profile list\n  mfi profile set mainnet\n  mfi profile update mainnet --group <GROUP_PUBKEY> --account <ACCOUNT_PUBKEY>",
+    after_long_help = "Common subcommands:\n  mfi profile create --name mainnet --cluster mainnet --keypair-path ~/.config/solana/id.json --rpc-url https://api.mainnet-beta.solana.com\n  mfi profile show\n  mfi profile list\n  mfi profile set mainnet\n  mfi profile update mainnet --group <GROUP_PUBKEY> --account <ACCOUNT_PUBKEY>"
+)]
 pub enum ProfileCommand {
     /// Create a new CLI profile
+    ///
+    /// Example: `mfi profile create --name mainnet --cluster mainnet --keypair-path ~/.config/solana/id.json --rpc-url https://api.mainnet-beta.solana.com`
+    #[clap(
+        after_help = "Example:\n  mfi profile create --name mainnet --cluster mainnet --keypair-path ~/.config/solana/id.json --rpc-url https://api.mainnet-beta.solana.com",
+        after_long_help = "Example:\n  mfi profile create --name mainnet --cluster mainnet --keypair-path ~/.config/solana/id.json --rpc-url https://api.mainnet-beta.solana.com"
+    )]
     Create {
         #[clap(long)]
         name: String,
@@ -29,13 +39,37 @@ pub enum ProfileCommand {
         #[clap(long)]
         account: Option<Pubkey>,
     },
-    /// Show the active profile
-    Show,
+    /// Show the active profile, or a named profile if provided
+    ///
+    /// Example: `mfi profile show`
+    #[clap(
+        after_help = "Example:\n  mfi profile show",
+        after_long_help = "Example:\n  mfi profile show"
+    )]
+    Show { name: Option<String> },
     /// List all profiles
+    ///
+    /// Example: `mfi profile list`
+    #[clap(
+        after_help = "Example:\n  mfi profile list",
+        after_long_help = "Example:\n  mfi profile list"
+    )]
     List,
     /// Switch to a different profile
+    ///
+    /// Example: `mfi profile set mainnet`
+    #[clap(
+        after_help = "Example:\n  mfi profile set mainnet",
+        after_long_help = "Example:\n  mfi profile set mainnet"
+    )]
     Set { name: String },
     /// Update an existing profile's settings
+    ///
+    /// Example: `mfi profile update mainnet --group <GROUP_PUBKEY> --account <ACCOUNT_PUBKEY>`
+    #[clap(
+        after_help = "Example:\n  mfi profile update mainnet --group <GROUP_PUBKEY> --account <ACCOUNT_PUBKEY>",
+        after_long_help = "Example:\n  mfi profile update mainnet --group <GROUP_PUBKEY> --account <ACCOUNT_PUBKEY>"
+    )]
     Update {
         name: String,
         #[clap(long)]
@@ -58,6 +92,12 @@ pub enum ProfileCommand {
         account: Option<Pubkey>,
     },
     /// Delete a profile
+    ///
+    /// Example: `mfi profile delete old-profile`
+    #[clap(
+        after_help = "Example:\n  mfi profile delete old-profile",
+        after_long_help = "Example:\n  mfi profile delete old-profile"
+    )]
     Delete { name: String },
 }
 
@@ -84,7 +124,7 @@ pub fn dispatch(subcmd: ProfileCommand) -> Result<()> {
             group,
             account,
         ),
-        ProfileCommand::Show => processor::show_profile(),
+        ProfileCommand::Show { name } => processor::show_profile(name),
         ProfileCommand::List => processor::list_profiles(),
         ProfileCommand::Set { name } => processor::set_profile(name),
         ProfileCommand::Update {

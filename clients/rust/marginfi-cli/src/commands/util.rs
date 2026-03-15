@@ -13,30 +13,71 @@ use pyth_solana_receiver_sdk::price_update::get_feed_id_from_hex;
 use crate::config::GlobalOptions;
 use crate::processor;
 use crate::processor::oracle::find_pyth_push_oracles_for_feed_id;
-use crate::profile::load_profile;
 
 /// Debug and utility commands.
 #[derive(Debug, Parser)]
+#[clap(
+    after_help = "Common subcommands:\n  mfi util inspect-size\n  mfi util make-test-i80f48\n  mfi util show-oracle-ages --group <GROUP_PUBKEY> --only-stale\n  mfi util inspect-pyth-push-oracle-feed <PYTH_FEED_PUBKEY>\n  mfi util find-pyth-push <PYTH_FEED_ID_HEX>\n  mfi util inspect-swb-pull-feed <SWITCHBOARD_FEED_PUBKEY>",
+    after_long_help = "Common subcommands:\n  mfi util inspect-size\n  mfi util make-test-i80f48\n  mfi util show-oracle-ages --group <GROUP_PUBKEY> --only-stale\n  mfi util inspect-pyth-push-oracle-feed <PYTH_FEED_PUBKEY>\n  mfi util find-pyth-push <PYTH_FEED_ID_HEX>\n  mfi util inspect-swb-pull-feed <SWITCHBOARD_FEED_PUBKEY>"
+)]
 pub enum UtilCommand {
     /// Print the byte size of core on-chain types
+    ///
+    /// Example: `mfi util inspect-size`
+    #[clap(
+        after_help = "Example:\n  mfi util inspect-size",
+        after_long_help = "Example:\n  mfi util inspect-size"
+    )]
     InspectSize {},
     /// Generate random I80F48 test vectors
+    ///
+    /// Example: `mfi util make-test-i80f48`
+    #[clap(
+        after_help = "Example:\n  mfi util make-test-i80f48",
+        after_long_help = "Example:\n  mfi util make-test-i80f48"
+    )]
     MakeTestI80F48,
-    /// Show oracle ages for all banks (optionally only stale ones)
+    /// Show oracle ages for all banks
+    ///
+    /// Example: `mfi util show-oracle-ages --group <GROUP_PUBKEY> --only-stale`
+    #[clap(
+        after_help = "Example:\n  mfi util show-oracle-ages --group <GROUP_PUBKEY> --only-stale",
+        after_long_help = "Example:\n  mfi util show-oracle-ages --group <GROUP_PUBKEY> --only-stale"
+    )]
     ShowOracleAges {
         #[clap(
             long = "group",
-            help = "Group address to inspect. Defaults to mainnet group 4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8"
+            help = "Group address to inspect. Defaults to the active profile group, then falls back to mainnet group 4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8"
         )]
         marginfi_group: Option<Pubkey>,
         #[clap(long, action)]
         only_stale: bool,
     },
     /// Inspect a Pyth push oracle feed account
+    ///
+    /// Example: `mfi util inspect-pyth-push-oracle-feed <PYTH_FEED_PUBKEY>`
+    #[clap(
+        after_help = "Example:\n  mfi util inspect-pyth-push-oracle-feed <PYTH_FEED_PUBKEY>",
+        after_long_help = "Example:\n  mfi util inspect-pyth-push-oracle-feed <PYTH_FEED_PUBKEY>"
+    )]
     InspectPythPushOracleFeed { pyth_feed: Pubkey },
-    /// Find Pyth pull oracle accounts by feed ID hex
-    FindPythPull { feed_id: String },
+    /// Find Pyth push oracle accounts by feed ID hex
+    ///
+    /// Example: `mfi util find-pyth-push <PYTH_FEED_ID_HEX>`
+    #[clap(
+        name = "find-pyth-push",
+        visible_alias = "find-pyth-pull",
+        after_help = "Example:\n  mfi util find-pyth-push <PYTH_FEED_ID_HEX>",
+        after_long_help = "Example:\n  mfi util find-pyth-push <PYTH_FEED_ID_HEX>"
+    )]
+    FindPythPush { feed_id: String },
     /// Inspect a Switchboard pull feed account
+    ///
+    /// Example: `mfi util inspect-swb-pull-feed <SWITCHBOARD_FEED_PUBKEY>`
+    #[clap(
+        after_help = "Example:\n  mfi util inspect-swb-pull-feed <SWITCHBOARD_FEED_PUBKEY>",
+        after_long_help = "Example:\n  mfi util inspect-swb-pull-feed <SWITCHBOARD_FEED_PUBKEY>"
+    )]
     InspectSwbPullFeed { address: Pubkey },
 }
 
@@ -53,25 +94,26 @@ pub fn dispatch(subcmd: UtilCommand, global_options: &GlobalOptions) -> Result<(
             marginfi_group,
             only_stale,
         } => {
-            let profile = load_profile()?;
-            let config = profile.get_config(Some(global_options))?;
+            let (profile, config) = super::load_profile_and_config(global_options)?;
 
-            processor::show_oracle_ages(config, marginfi_group, only_stale)?;
+            processor::show_oracle_ages(
+                config,
+                marginfi_group.or(profile.marginfi_group),
+                only_stale,
+            )?;
 
             Ok(())
         }
 
         UtilCommand::InspectPythPushOracleFeed { pyth_feed } => {
-            let profile = load_profile()?;
-            let config = profile.get_config(Some(global_options))?;
+            let (_, config) = super::load_profile_and_config(global_options)?;
 
             processor::oracle::inspect_pyth_push_feed(&config, pyth_feed)?;
 
             Ok(())
         }
-        UtilCommand::FindPythPull { feed_id } => {
-            let profile = load_profile()?;
-            let config = profile.get_config(Some(global_options))?;
+        UtilCommand::FindPythPush { feed_id } => {
+            let (_, config) = super::load_profile_and_config(global_options)?;
             let feed_id = get_feed_id_from_hex(&feed_id)
                 .map_err(|err| anyhow!("invalid feed id '{}': {}", feed_id, err))?;
 
@@ -82,8 +124,7 @@ pub fn dispatch(subcmd: UtilCommand, global_options: &GlobalOptions) -> Result<(
             Ok(())
         }
         UtilCommand::InspectSwbPullFeed { address } => {
-            let profile = load_profile()?;
-            let config = profile.get_config(Some(global_options))?;
+            let (_, config) = super::load_profile_and_config(global_options)?;
 
             processor::oracle::inspect_swb_pull_feed(&config, address)?;
 

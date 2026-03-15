@@ -5,9 +5,10 @@ use {
         output,
         profile::Profile,
         utils::{
-            find_bank_vault_authority_pda, find_execute_order_pda, find_fee_state_pda,
-            find_liquidation_record_pda, find_order_pda, load_bank_oracle_account_metas,
-            load_observation_account_metas, load_observation_account_metas_close_last,
+            build_wsol_wrap_ixs, find_bank_vault_authority_pda, find_execute_order_pda,
+            find_fee_state_pda, find_liquidation_record_pda, find_order_pda,
+            load_bank_oracle_account_metas, load_observation_account_metas,
+            load_observation_account_metas_close_last,
             load_observation_account_metas_with_bank_writable, load_observation_bank_only_metas,
             send_tx, EXP_10_I80F48,
         },
@@ -51,6 +52,20 @@ struct JsonInstruction {
     pub data_base64: Option<String>,
     #[serde(default)]
     pub data_base58: Option<String>,
+}
+
+fn build_authority_ata_ix(
+    config: &Config,
+    owner: &Pubkey,
+    mint: &Pubkey,
+    token_program: &Pubkey,
+) -> Instruction {
+    create_associated_token_account_idempotent(
+        &config.explicit_fee_payer(),
+        owner,
+        mint,
+        token_program,
+    )
 }
 
 fn load_extra_instructions(extra_ixs_file: Option<PathBuf>) -> Result<Vec<Instruction>> {
@@ -114,7 +129,21 @@ pub fn marginfi_account_list(profile: Profile, config: &Config) -> Result<()> {
         RpcFilterType::Memcmp(Memcmp::new_raw_bytes(8 + 32, authority.to_bytes().to_vec())),
     ])?;
 
-    if accounts.is_empty() && !json {
+    if json {
+        let vals = accounts
+            .iter()
+            .map(|(address, marginfi_account)| {
+                let is_default = profile
+                    .marginfi_account
+                    .is_some_and(|default_account| default_account == *address);
+                output::account_detail_json(*address, marginfi_account, &banks, is_default)
+            })
+            .collect::<Vec<_>>();
+        println!("{}", serde_json::to_string_pretty(&vals)?);
+        return Ok(());
+    }
+
+    if accounts.is_empty() {
         println!("No marginfi accounts found");
     }
 
@@ -122,13 +151,7 @@ pub fn marginfi_account_list(profile: Profile, config: &Config) -> Result<()> {
         let is_default = profile
             .marginfi_account
             .map_or(false, |default_account| default_account == *address);
-        output::print_account_detail(
-            *address,
-            marginfi_account,
-            &banks,
-            is_default,
-            json,
-        );
+        output::print_account_detail(*address, marginfi_account, &banks, is_default, json);
     }
 
     Ok(())
@@ -139,18 +162,11 @@ pub fn marginfi_account_use(
     config: &Config,
     marginfi_account_pk: Pubkey,
 ) -> Result<()> {
-    let group = profile
-        .marginfi_group
-        .context("marginfi group not set in profile")?;
     let authority = config.authority();
 
     let marginfi_account = config
         .mfi_program
         .account::<MarginfiAccount>(marginfi_account_pk)?;
-
-    if marginfi_account.group != group {
-        return Err(anyhow!("Marginfi account does not belong to group"));
-    }
 
     if marginfi_account.authority != authority {
         return Err(anyhow!("Marginfi account does not belong to authority"));
@@ -164,7 +180,7 @@ pub fn marginfi_account_use(
         None,
         None,
         None,
-        None,
+        Some(marginfi_account.group),
         Some(marginfi_account_pk),
     )?;
 
@@ -197,13 +213,7 @@ pub fn marginfi_account_get(
 
     let banks = HashMap::from_iter(load_all_banks(config, Some(group))?);
 
-    output::print_account_detail(
-        marginfi_account_pk,
-        &marginfi_account,
-        &banks,
-        false,
-        json,
-    );
+    output::print_account_detail(marginfi_account_pk, &marginfi_account, &banks, false, json);
 
     Ok(())
 }
@@ -216,18 +226,18 @@ pub fn marginfi_account_deposit(
     deposit_up_to_limit: Option<bool>,
 ) -> Result<()> {
     let rpc_client = config.mfi_program.rpc();
-    let signer = config.get_non_ms_authority_keypair()?;
-    let marginfi_account_pk = profile.get_marginfi_account();
+    let authority = config.authority();
+    let marginfi_account_pk = profile.get_marginfi_account()?;
+    let marginfi_account = config
+        .mfi_program
+        .account::<MarginfiAccount>(marginfi_account_pk)?;
+    let group = marginfi_account.group;
 
     let bank = config.mfi_program.account::<Bank>(bank_pk)?;
 
     let amount = (I80F48::from_num(ui_amount) * EXP_10_I80F48[bank.mint_decimals as usize])
         .floor()
         .to_num::<u64>();
-
-    let group = profile
-        .marginfi_group
-        .context("marginfi group not set in profile")?;
 
     // Check that bank belongs to the correct group
     if bank.group != group {
@@ -238,7 +248,7 @@ pub fn marginfi_account_deposit(
     let token_program = bank_mint_account.owner;
 
     let deposit_ata = anchor_spl::associated_token::get_associated_token_address_with_program_id(
-        &signer.pubkey(),
+        &authority,
         &bank.mint,
         &token_program,
     );
@@ -248,7 +258,7 @@ pub fn marginfi_account_deposit(
         accounts: marginfi::accounts::LendingAccountDeposit {
             group,
             marginfi_account: marginfi_account_pk,
-            authority: signer.pubkey(),
+            authority,
             bank: bank_pk,
             signer_token_account: deposit_ata,
             liquidity_vault: bank.liquidity_vault,
@@ -266,7 +276,22 @@ pub fn marginfi_account_deposit(
             .push(AccountMeta::new_readonly(bank.mint, false));
     }
 
-    let sig = send_tx(config, vec![ix], &[signer])?;
+    // If depositing native SOL, wrap it into WSOL first
+    let mut ixs = Vec::new();
+    if bank.mint == spl_token::native_mint::id() {
+        ixs.extend(build_wsol_wrap_ixs(&authority, amount));
+    } else {
+        ixs.push(build_authority_ata_ix(
+            config,
+            &authority,
+            &bank.mint,
+            &token_program,
+        ));
+    }
+    ixs.push(ix);
+
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, ixs, &signing_keypairs)?;
     println!("Deposit successful: {sig}");
 
     Ok(())
@@ -279,22 +304,18 @@ pub fn marginfi_account_withdraw(
     ui_amount: f64,
     withdraw_all: bool,
 ) -> Result<()> {
-    let signer = config.get_non_ms_authority_keypair()?;
-
+    let authority = config.authority();
     let rpc_client = config.mfi_program.rpc();
 
-    let marginfi_account_pk = profile.get_marginfi_account();
-
-    let group = profile
-        .marginfi_group
-        .context("marginfi group not set in profile")?;
-
-    let banks = HashMap::from_iter(load_all_banks(config, Some(group))?);
-    let bank = banks.get(&bank_pk).context("Bank not found")?;
+    let marginfi_account_pk = profile.get_marginfi_account()?;
 
     let marginfi_account = config
         .mfi_program
         .account::<MarginfiAccount>(marginfi_account_pk)?;
+    let group = marginfi_account.group;
+
+    let banks = HashMap::from_iter(load_all_banks(config, Some(group))?);
+    let bank = banks.get(&bank_pk).context("Bank not found")?;
 
     let amount = (I80F48::from_num(ui_amount) * EXP_10_I80F48[bank.mint_decimals as usize])
         .floor()
@@ -309,7 +330,7 @@ pub fn marginfi_account_withdraw(
     let token_program = bank_mint_account.owner;
 
     let withdraw_ata = anchor_spl::associated_token::get_associated_token_address_with_program_id(
-        &signer.pubkey(),
+        &authority,
         &bank.mint,
         &token_program,
     );
@@ -319,7 +340,7 @@ pub fn marginfi_account_withdraw(
         accounts: marginfi::accounts::LendingAccountWithdraw {
             group,
             marginfi_account: marginfi_account_pk,
-            authority: signer.pubkey(),
+            authority,
             bank: bank_pk,
             liquidity_vault: bank.liquidity_vault,
             token_program,
@@ -356,14 +377,9 @@ pub fn marginfi_account_withdraw(
     };
     ix.accounts.extend(observation_metas);
 
-    let create_ide_ata_ix = create_associated_token_account_idempotent(
-        &signer.pubkey(),
-        &signer.pubkey(),
-        &bank.mint,
-        &token_program,
-    );
-
-    let sig = send_tx(config, vec![create_ide_ata_ix, ix], &[signer])?;
+    let create_ide_ata_ix = build_authority_ata_ix(config, &authority, &bank.mint, &token_program);
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![create_ide_ata_ix, ix], &signing_keypairs)?;
     println!("Withdraw successful: {sig}");
 
     Ok(())
@@ -375,22 +391,18 @@ pub fn marginfi_account_borrow(
     bank_pk: Pubkey,
     ui_amount: f64,
 ) -> Result<()> {
-    let signer = config.get_non_ms_authority_keypair()?;
-
+    let authority = config.authority();
     let rpc_client = config.mfi_program.rpc();
 
-    let marginfi_account_pk = profile.get_marginfi_account();
-
-    let group = profile
-        .marginfi_group
-        .context("marginfi group not set in profile")?;
-
-    let banks = HashMap::from_iter(load_all_banks(config, Some(group))?);
-    let bank = banks.get(&bank_pk).context("Bank not found")?;
+    let marginfi_account_pk = profile.get_marginfi_account()?;
 
     let marginfi_account = config
         .mfi_program
         .account::<MarginfiAccount>(marginfi_account_pk)?;
+    let group = marginfi_account.group;
+
+    let banks = HashMap::from_iter(load_all_banks(config, Some(group))?);
+    let bank = banks.get(&bank_pk).context("Bank not found")?;
 
     let amount = (I80F48::from_num(ui_amount) * EXP_10_I80F48[bank.mint_decimals as usize])
         .floor()
@@ -405,7 +417,7 @@ pub fn marginfi_account_borrow(
     let token_program = bank_mint_account.owner;
 
     let borrow_ata = anchor_spl::associated_token::get_associated_token_address_with_program_id(
-        &signer.pubkey(),
+        &authority,
         &bank.mint,
         &token_program,
     );
@@ -415,7 +427,7 @@ pub fn marginfi_account_borrow(
         accounts: marginfi::accounts::LendingAccountBorrow {
             group,
             marginfi_account: marginfi_account_pk,
-            authority: signer.pubkey(),
+            authority,
             bank: bank_pk,
             liquidity_vault: bank.liquidity_vault,
             token_program,
@@ -442,14 +454,9 @@ pub fn marginfi_account_borrow(
         vec![],
     ));
 
-    let create_ide_ata_ix = create_associated_token_account_idempotent(
-        &signer.pubkey(),
-        &signer.pubkey(),
-        &bank.mint,
-        &token_program,
-    );
-
-    let sig = send_tx(config, vec![create_ide_ata_ix, ix], &[signer])?;
+    let create_ide_ata_ix = build_authority_ata_ix(config, &authority, &bank.mint, &token_program);
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![create_ide_ata_ix, ix], &signing_keypairs)?;
     println!("Borrow successful: {sig}");
 
     Ok(())
@@ -463,15 +470,15 @@ pub fn marginfi_account_liquidate(
     liability_bank_pk: Pubkey,
     ui_asset_amount: f64,
 ) -> Result<()> {
-    let signer = config.get_non_ms_authority_keypair()?;
-
+    let authority = config.authority();
     let rpc_client = config.mfi_program.rpc();
 
-    let marginfi_account_pk = profile.get_marginfi_account();
+    let marginfi_account_pk = profile.get_marginfi_account()?;
 
-    let group = profile
-        .marginfi_group
-        .context("marginfi group not set in profile")?;
+    let marginfi_account = config
+        .mfi_program
+        .account::<MarginfiAccount>(marginfi_account_pk)?;
+    let group = marginfi_account.group;
 
     let banks = HashMap::from_iter(load_all_banks(config, Some(group))?);
     let asset_bank = banks.get(&asset_bank_pk).context("Asset bank not found")?;
@@ -479,13 +486,13 @@ pub fn marginfi_account_liquidate(
         .get(&liability_bank_pk)
         .context("Liability bank not found")?;
 
-    let marginfi_account = config
-        .mfi_program
-        .account::<MarginfiAccount>(marginfi_account_pk)?;
-
     let liquidatee_marginfi_account = config
         .mfi_program
         .account::<MarginfiAccount>(liquidatee_marginfi_account_pk)?;
+
+    if liquidatee_marginfi_account.group != group {
+        bail!("Liquidatee marginfi account does not belong to group")
+    }
 
     let asset_amount = (I80F48::from_num(ui_asset_amount)
         * EXP_10_I80F48[asset_bank.mint_decimals as usize])
@@ -519,7 +526,7 @@ pub fn marginfi_account_liquidate(
             asset_bank: asset_bank_pk,
             liab_bank: liability_bank_pk,
             liquidator_marginfi_account: marginfi_account_pk,
-            authority: signer.pubkey(),
+            authority,
             liquidatee_marginfi_account: liquidatee_marginfi_account_pk,
             bank_liquidity_vault_authority: find_bank_vault_authority_pda(
                 &liability_bank_pk,
@@ -551,14 +558,15 @@ pub fn marginfi_account_liquidate(
     ix.accounts.extend(liquidator_accounts);
     ix.accounts.extend(liquidatee_accounts);
 
-    let sig = send_tx(config, vec![ix], &[signer])?;
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![ix], &signing_keypairs)?;
     println!("Liquidation successful: {sig}");
 
     Ok(())
 }
 
 pub fn marginfi_account_create(profile: &Profile, config: &Config) -> Result<()> {
-    let signer = config.get_non_ms_authority_keypair()?;
+    let authority = config.authority();
 
     let marginfi_account_key = Keypair::new();
 
@@ -570,8 +578,8 @@ pub fn marginfi_account_create(profile: &Profile, config: &Config) -> Result<()>
                 .context("marginfi group not set in profile")?,
             marginfi_account: marginfi_account_key.pubkey(),
             system_program: system_program::ID,
-            authority: signer.pubkey(),
-            fee_payer: signer.pubkey(),
+            authority,
+            fee_payer: config.explicit_fee_payer(),
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::MarginfiAccountInitialize.data(),
@@ -579,45 +587,45 @@ pub fn marginfi_account_create(profile: &Profile, config: &Config) -> Result<()>
 
     let marginfi_account_pk = marginfi_account_key.pubkey();
 
-    let _sig = send_tx(config, vec![ix], &[signer, &marginfi_account_key])?;
-    print!("{marginfi_account_pk}");
+    let mut signing_keypairs = config.get_signers(false);
+    signing_keypairs.push(&marginfi_account_key);
+    let _sig = send_tx(config, vec![ix], &signing_keypairs)?;
+    println!("{marginfi_account_pk}");
 
-    let mut profile = profile.clone();
+    if config.send_tx {
+        let mut profile = profile.clone();
 
-    profile.config(
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some(marginfi_account_key.pubkey()),
-    )?;
+        profile.set_marginfi_account(Some(marginfi_account_key.pubkey()))?;
+    }
 
     Ok(())
 }
 
 pub fn marginfi_account_close(profile: &Profile, config: &Config) -> Result<()> {
-    let signer = config.get_non_ms_authority_keypair()?;
+    let authority = config.authority();
 
-    let marginfi_account_pk = profile.get_marginfi_account();
+    let marginfi_account_pk = profile.get_marginfi_account()?;
     println!("Closing marginfi account {}", marginfi_account_pk);
 
     let ix = Instruction {
         program_id: config.program_id,
         accounts: marginfi::accounts::MarginfiAccountClose {
             marginfi_account: marginfi_account_pk,
-            authority: signer.pubkey(),
-            fee_payer: signer.pubkey(),
+            authority,
+            fee_payer: config.explicit_fee_payer(),
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::MarginfiAccountClose.data(),
     };
 
-    let sig = send_tx(config, vec![ix], &[signer])?;
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![ix], &signing_keypairs)?;
     println!("Marginfi account closed successfully (sig: {})", sig);
+
+    if config.send_tx {
+        let mut profile = profile.clone();
+        profile.set_marginfi_account(None)?;
+    }
 
     Ok(())
 }
@@ -629,15 +637,12 @@ pub fn marginfi_account_place_order(
     bank_2: Pubkey,
     trigger: OrderTrigger,
 ) -> Result<()> {
-    let signer = config.get_non_ms_authority_keypair()?;
-
-    let marginfi_account_pk = profile.get_marginfi_account();
-    let group_pk = profile.marginfi_group.ok_or_else(|| {
-        anyhow!(
-            "Marginfi group does not exist for profile [{}]",
-            profile.name
-        )
-    })?;
+    let authority = config.authority();
+    let marginfi_account_pk = profile.get_marginfi_account()?;
+    let marginfi_account = config
+        .mfi_program
+        .account::<MarginfiAccount>(marginfi_account_pk)?;
+    let group_pk = marginfi_account.group;
 
     let bank_keys = vec![bank_1, bank_2];
 
@@ -660,8 +665,8 @@ pub fn marginfi_account_place_order(
         accounts: marginfi::accounts::PlaceOrder {
             group: group_pk,
             marginfi_account: marginfi_account_pk,
-            fee_payer: signer.pubkey(),
-            authority: signer.pubkey(),
+            fee_payer: config.explicit_fee_payer(),
+            authority,
             order: order_pda,
             fee_state: fee_state_pk,
             global_fee_wallet: fee_state.global_fee_wallet,
@@ -675,7 +680,8 @@ pub fn marginfi_account_place_order(
         .data(),
     };
 
-    let sig = send_tx(config, vec![ix], &[signer])?;
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![ix], &signing_keypairs)?;
     println!("Order placed successfully (sig: {})", sig);
 
     Ok(())
@@ -687,12 +693,10 @@ pub fn marginfi_account_close_order(
     order_pk: Pubkey,
     fee_recipient: Option<Pubkey>,
 ) -> Result<()> {
-    let signer = config.get_non_ms_authority_keypair()?;
+    let authority = config.authority();
+    let marginfi_account_pk = profile.get_marginfi_account()?;
 
-    let marginfi_account_pk = profile.get_marginfi_account();
-
-    // Default fee_recipient to signer if not provided
-    let fee_recipient = fee_recipient.unwrap_or(signer.pubkey());
+    let fee_recipient = fee_recipient.unwrap_or(authority);
 
     println!("Closing order: {}", order_pk);
     println!("Fee recipient: {}", fee_recipient);
@@ -701,7 +705,7 @@ pub fn marginfi_account_close_order(
         program_id: config.program_id,
         accounts: marginfi::accounts::CloseOrder {
             marginfi_account: marginfi_account_pk,
-            authority: signer.pubkey(),
+            authority,
             order: order_pk,
             fee_recipient,
             system_program: system_program::id(),
@@ -710,7 +714,8 @@ pub fn marginfi_account_close_order(
         data: marginfi::instruction::MarginfiAccountCloseOrder.data(),
     };
 
-    let sig = send_tx(config, vec![ix], &[signer])?;
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![ix], &signing_keypairs)?;
     println!("Order closed successfully (sig: {})", sig);
 
     Ok(())
@@ -722,8 +727,7 @@ pub fn marginfi_account_keeper_close_order(
     order_pk: Pubkey,
     fee_recipient: Option<Pubkey>,
 ) -> Result<()> {
-    let signer = config.get_non_ms_authority_keypair()?;
-    let fee_recipient = fee_recipient.unwrap_or(signer.pubkey());
+    let fee_recipient = fee_recipient.unwrap_or(config.authority());
 
     let ix = Instruction {
         program_id: config.program_id,
@@ -736,7 +740,8 @@ pub fn marginfi_account_keeper_close_order(
         data: marginfi::instruction::MarginfiAccountKeeperCloseOrder.data(),
     };
 
-    let sig = send_tx(config, vec![ix], &[signer])?;
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![ix], &signing_keypairs)?;
     println!("Keeper close order successful (sig: {})", sig);
 
     Ok(())
@@ -747,8 +752,10 @@ pub fn marginfi_account_init_liquidation_record(
     config: &Config,
     marginfi_account_pk: Option<Pubkey>,
 ) -> Result<()> {
-    let signer = config.get_non_ms_authority_keypair()?;
-    let marginfi_account_pk = marginfi_account_pk.unwrap_or_else(|| profile.get_marginfi_account());
+    let marginfi_account_pk = match marginfi_account_pk {
+        Some(pubkey) => pubkey,
+        None => profile.get_marginfi_account()?,
+    };
     let liq_record_pk = find_liquidation_record_pda(&marginfi_account_pk, &config.program_id).0;
 
     // Avoid throwing if the record already exists.
@@ -761,7 +768,7 @@ pub fn marginfi_account_init_liquidation_record(
         program_id: config.program_id,
         accounts: marginfi::accounts::InitLiquidationRecord {
             marginfi_account: marginfi_account_pk,
-            fee_payer: signer.pubkey(),
+            fee_payer: config.explicit_fee_payer(),
             liquidation_record: liq_record_pk,
             system_program: system_program::id(),
         }
@@ -769,7 +776,8 @@ pub fn marginfi_account_init_liquidation_record(
         data: marginfi::instruction::MarginfiAccountInitLiqRecord.data(),
     };
 
-    let sig = send_tx(config, vec![ix], &[signer])?;
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![ix], &signing_keypairs)?;
     println!(
         "Liquidation record initialized (sig: {})\nRecord: {}",
         sig, liq_record_pk
@@ -784,8 +792,8 @@ pub fn marginfi_account_keeper_execute_order(
     fee_recipient: Option<Pubkey>,
     extra_ixs_file: Option<PathBuf>,
 ) -> Result<()> {
-    let signer = config.get_non_ms_authority_keypair()?;
-    let fee_recipient = fee_recipient.unwrap_or(signer.pubkey());
+    let authority = config.authority();
+    let fee_recipient = fee_recipient.unwrap_or(authority);
 
     let order: Order = config.mfi_program.account(order_pk)?;
     let marginfi_account_pk = order.marginfi_account;
@@ -803,8 +811,8 @@ pub fn marginfi_account_keeper_execute_order(
         accounts: marginfi::accounts::StartExecuteOrder {
             group: group_pk,
             marginfi_account: marginfi_account_pk,
-            fee_payer: signer.pubkey(),
-            executor: signer.pubkey(),
+            fee_payer: config.explicit_fee_payer(),
+            executor: authority,
             order: order_pk,
             execute_record: execute_record_pk,
             instruction_sysvar: sysvar::instructions::id(),
@@ -820,7 +828,7 @@ pub fn marginfi_account_keeper_execute_order(
         accounts: marginfi::accounts::EndExecuteOrder {
             group: group_pk,
             marginfi_account: marginfi_account_pk,
-            executor: signer.pubkey(),
+            executor: authority,
             fee_recipient,
             order: order_pk,
             execute_record: execute_record_pk,
@@ -835,7 +843,8 @@ pub fn marginfi_account_keeper_execute_order(
     ixs.extend(load_extra_instructions(extra_ixs_file)?);
     ixs.push(end_ix);
 
-    let sig = send_tx(config, ixs, &[signer])?;
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, ixs, &signing_keypairs)?;
     println!("Keeper execute order successful (sig: {})", sig);
 
     Ok(())
@@ -847,7 +856,7 @@ pub fn marginfi_account_liquidate_receivership(
     init_liq_record_if_missing: bool,
     extra_ixs_file: Option<PathBuf>,
 ) -> Result<()> {
-    let signer = config.get_non_ms_authority_keypair()?;
+    let authority = config.authority();
     let liquidatee_marginfi_account: MarginfiAccount =
         config.mfi_program.account(liquidatee_marginfi_account_pk)?;
 
@@ -881,7 +890,7 @@ pub fn marginfi_account_liquidate_receivership(
             program_id: config.program_id,
             accounts: marginfi::accounts::InitLiquidationRecord {
                 marginfi_account: liquidatee_marginfi_account_pk,
-                fee_payer: signer.pubkey(),
+                fee_payer: config.explicit_fee_payer(),
                 liquidation_record: liq_record_pk,
                 system_program: system_program::id(),
             }
@@ -900,7 +909,7 @@ pub fn marginfi_account_liquidate_receivership(
         accounts: marginfi::accounts::StartLiquidation {
             marginfi_account: liquidatee_marginfi_account_pk,
             liquidation_record: liq_record_pk,
-            liquidation_receiver: signer.pubkey(),
+            liquidation_receiver: authority,
             instruction_sysvar: sysvar::instructions::id(),
         }
         .to_account_metas(Some(true)),
@@ -916,7 +925,7 @@ pub fn marginfi_account_liquidate_receivership(
         accounts: marginfi::accounts::EndLiquidation {
             marginfi_account: liquidatee_marginfi_account_pk,
             liquidation_record: liq_record_pk,
-            liquidation_receiver: signer.pubkey(),
+            liquidation_receiver: authority,
             fee_state: fee_state_pk,
             global_fee_wallet: fee_state.global_fee_wallet,
             system_program: system_program::id(),
@@ -927,7 +936,8 @@ pub fn marginfi_account_liquidate_receivership(
     end_ix.accounts.extend(end_metas);
     ixs.push(end_ix);
 
-    let sig = send_tx(config, ixs, &[signer])?;
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, ixs, &signing_keypairs)?;
     println!("Receivership liquidation bundle sent (sig: {})", sig);
 
     Ok(())
@@ -938,9 +948,7 @@ pub fn marginfi_account_set_keeper_close_flags(
     config: &Config,
     bank_keys_opt: Option<Vec<Pubkey>>,
 ) -> Result<()> {
-    let signer = config.get_non_ms_authority_keypair()?;
-
-    let marginfi_account_pk = profile.get_marginfi_account();
+    let marginfi_account_pk = profile.get_marginfi_account()?;
 
     match &bank_keys_opt {
         Some(keys) => {
@@ -958,13 +966,14 @@ pub fn marginfi_account_set_keeper_close_flags(
         program_id: config.program_id,
         accounts: marginfi::accounts::SetKeeperCloseFlags {
             marginfi_account: marginfi_account_pk,
-            authority: signer.pubkey(),
+            authority: config.authority(),
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::MarginfiAccountSetKeeperCloseFlags { bank_keys_opt }.data(),
     };
 
-    let sig = send_tx(config, vec![ix], &[signer])?;
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![ix], &signing_keypairs)?;
     println!("Liquidator close flags set successfully (sig: {})", sig);
 
     Ok(())
@@ -978,21 +987,18 @@ pub fn marginfi_account_repay(
     repay_all: bool,
 ) -> Result<()> {
     let rpc_client = config.mfi_program.rpc();
-    let signer = config.get_non_ms_authority_keypair()?;
-    let marginfi_account_pk = profile.get_marginfi_account();
+    let authority = config.authority();
+    let marginfi_account_pk = profile.get_marginfi_account()?;
     let marginfi_account = config
         .mfi_program
         .account::<MarginfiAccount>(marginfi_account_pk)?;
+    let group = marginfi_account.group;
 
     let bank = config.mfi_program.account::<Bank>(bank_pk)?;
 
     let amount = (I80F48::from_num(ui_amount) * EXP_10_I80F48[bank.mint_decimals as usize])
         .floor()
         .to_num::<u64>();
-
-    let group = profile
-        .marginfi_group
-        .context("marginfi group not set in profile")?;
 
     if bank.group != group {
         bail!("Bank does not belong to group")
@@ -1003,7 +1009,7 @@ pub fn marginfi_account_repay(
 
     let signer_token_account =
         anchor_spl::associated_token::get_associated_token_address_with_program_id(
-            &signer.pubkey(),
+            &authority,
             &bank.mint,
             &token_program,
         );
@@ -1013,7 +1019,7 @@ pub fn marginfi_account_repay(
         accounts: marginfi::accounts::LendingAccountRepay {
             group,
             marginfi_account: marginfi_account_pk,
-            authority: signer.pubkey(),
+            authority,
             bank: bank_pk,
             signer_token_account,
             liquidity_vault: bank.liquidity_vault,
@@ -1041,7 +1047,8 @@ pub fn marginfi_account_repay(
         ));
     }
 
-    let sig = send_tx(config, vec![ix], &[signer])?;
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![ix], &signing_keypairs)?;
     println!("Repay successful: {sig}");
 
     Ok(())
@@ -1052,24 +1059,25 @@ pub fn marginfi_account_close_balance(
     config: &Config,
     bank_pk: Pubkey,
 ) -> Result<()> {
-    let signer = config.get_non_ms_authority_keypair()?;
-    let marginfi_account_pk = profile.get_marginfi_account();
+    let marginfi_account_pk = profile.get_marginfi_account()?;
+    let marginfi_account = config
+        .mfi_program
+        .account::<MarginfiAccount>(marginfi_account_pk)?;
 
     let ix = Instruction {
         program_id: config.program_id,
         accounts: marginfi::accounts::LendingAccountCloseBalance {
-            group: profile
-                .marginfi_group
-                .context("marginfi group not set in profile")?,
+            group: marginfi_account.group,
             marginfi_account: marginfi_account_pk,
-            authority: signer.pubkey(),
+            authority: config.authority(),
             bank: bank_pk,
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::LendingAccountCloseBalance.data(),
     };
 
-    let sig = send_tx(config, vec![ix], &[signer])?;
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![ix], &signing_keypairs)?;
     println!("Close balance successful: {sig}");
 
     Ok(())
@@ -1080,8 +1088,11 @@ pub fn marginfi_account_transfer(
     config: &Config,
     new_authority: Pubkey,
 ) -> Result<()> {
-    let signer = config.get_non_ms_authority_keypair()?;
-    let marginfi_account_pk = profile.get_marginfi_account();
+    let authority = config.authority();
+    let marginfi_account_pk = profile.get_marginfi_account()?;
+    let marginfi_account = config
+        .mfi_program
+        .account::<MarginfiAccount>(marginfi_account_pk)?;
 
     let new_marginfi_account_key = Keypair::new();
 
@@ -1091,13 +1102,11 @@ pub fn marginfi_account_transfer(
     let ix = Instruction {
         program_id: config.program_id,
         accounts: marginfi::accounts::TransferToNewAccount {
-            group: profile
-                .marginfi_group
-                .context("marginfi group not set in profile")?,
+            group: marginfi_account.group,
             old_marginfi_account: marginfi_account_pk,
             new_marginfi_account: new_marginfi_account_key.pubkey(),
-            authority: signer.pubkey(),
-            fee_payer: signer.pubkey(),
+            authority,
+            fee_payer: config.explicit_fee_payer(),
             new_authority,
             global_fee_wallet: fee_state.global_fee_wallet,
             system_program: system_program::ID,
@@ -1108,11 +1117,18 @@ pub fn marginfi_account_transfer(
 
     let new_account_pk = new_marginfi_account_key.pubkey();
 
-    let sig = send_tx(config, vec![ix], &[signer, &new_marginfi_account_key])?;
+    let mut signing_keypairs = config.get_signers(false);
+    signing_keypairs.push(&new_marginfi_account_key);
+    let sig = send_tx(config, vec![ix], &signing_keypairs)?;
     println!(
         "Transfer successful (sig: {})\nNew account: {}",
         sig, new_account_pk
     );
+
+    if config.send_tx {
+        let mut profile = profile.clone();
+        profile.set_marginfi_account(Some(new_account_pk))?;
+    }
 
     Ok(())
 }
@@ -1123,10 +1139,10 @@ pub fn marginfi_account_create_pda(
     account_index: u16,
     third_party_id: Option<u16>,
 ) -> Result<()> {
-    let signer = config.get_non_ms_authority_keypair()?;
     let group_pk = profile
         .marginfi_group
         .context("marginfi group not set in profile")?;
+    let authority = config.authority();
 
     let third_party_id_val = third_party_id.unwrap_or(0);
 
@@ -1134,7 +1150,7 @@ pub fn marginfi_account_create_pda(
         &[
             MARGINFI_ACCOUNT_SEED.as_bytes(),
             group_pk.as_ref(),
-            signer.pubkey().as_ref(),
+            authority.as_ref(),
             &account_index.to_le_bytes(),
             &third_party_id_val.to_le_bytes(),
         ],
@@ -1146,8 +1162,8 @@ pub fn marginfi_account_create_pda(
         accounts: marginfi::accounts::MarginfiAccountInitializePda {
             marginfi_group: group_pk,
             marginfi_account: marginfi_account_pda,
-            authority: signer.pubkey(),
-            fee_payer: signer.pubkey(),
+            authority,
+            fee_payer: config.explicit_fee_payer(),
             instructions_sysvar: sysvar::instructions::ID,
             system_program: system_program::ID,
         }
@@ -1159,7 +1175,8 @@ pub fn marginfi_account_create_pda(
         .data(),
     };
 
-    let sig = send_tx(config, vec![ix], &[signer])?;
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![ix], &signing_keypairs)?;
     println!(
         "PDA account created successfully (sig: {})\nAccount: {}",
         sig, marginfi_account_pda
@@ -1169,17 +1186,18 @@ pub fn marginfi_account_create_pda(
 }
 
 pub fn marginfi_account_set_freeze(
-    profile: &Profile,
+    _profile: &Profile,
     config: &Config,
     marginfi_account_pk: Pubkey,
     frozen: bool,
 ) -> Result<()> {
+    let marginfi_account = config
+        .mfi_program
+        .account::<MarginfiAccount>(marginfi_account_pk)?;
     let ix = Instruction {
         program_id: config.program_id,
         accounts: marginfi::accounts::SetAccountFreeze {
-            group: profile
-                .marginfi_group
-                .context("marginfi group not set in profile")?,
+            group: marginfi_account.group,
             marginfi_account: marginfi_account_pk,
             admin: config.authority(),
         }
@@ -1202,9 +1220,10 @@ pub fn marginfi_account_pulse_health(
     config: &Config,
     account: Option<Pubkey>,
 ) -> Result<()> {
-    let signer = config.get_non_ms_authority_keypair()?;
-
-    let marginfi_account_pk = account.unwrap_or_else(|| profile.get_marginfi_account());
+    let marginfi_account_pk = match account {
+        Some(pubkey) => pubkey,
+        None => profile.get_marginfi_account()?,
+    };
 
     let marginfi_account = config
         .mfi_program
@@ -1226,7 +1245,8 @@ pub fn marginfi_account_pulse_health(
 
     ix.accounts.extend(observation_metas);
 
-    let sig = send_tx(config, vec![ix], &[signer])?;
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![ix], &signing_keypairs)?;
     println!("Pulse health successful: {sig}");
 
     Ok(())

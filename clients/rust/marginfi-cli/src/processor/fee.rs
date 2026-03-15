@@ -5,7 +5,7 @@ use {
         utils::{find_fee_state_pda, send_tx},
     },
     anchor_client::anchor_lang::{InstructionData, ToAccountMetas},
-    anyhow::{anyhow, Context, Result},
+    anyhow::{anyhow, Result},
     fixed::types::I80F48,
     marginfi_type_crate::{
         constants::STAKED_SETTINGS_SEED,
@@ -115,12 +115,7 @@ pub fn config_group_fee(config: Config, profile: Profile, enable_program_fee: bo
         )
     })?;
 
-    let fee_state_pubkey = find_fee_state_pda(
-        &profile
-            .program_id
-            .context("program ID not set in profile")?,
-    )
-    .0;
+    let fee_state_pubkey = find_fee_state_pda(&config.program_id).0;
 
     let config_group_fee_ixs_builder = config.mfi_program.request();
 

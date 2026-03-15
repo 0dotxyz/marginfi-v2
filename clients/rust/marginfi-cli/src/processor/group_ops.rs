@@ -15,11 +15,15 @@ use {
     fixed::types::I80F48,
     log::info,
     marginfi::{
-        state::bank::{BankImpl, BankVaultType},
+        constants::SPL_SINGLE_POOL_ID,
+        state::{
+            bank::{BankImpl, BankVaultType},
+            bank_config::BankConfigImpl,
+        },
         utils::NumTraitsWithTolerance,
     },
     marginfi_type_crate::{
-        constants::ZERO_AMOUNT_THRESHOLD,
+        constants::{STAKED_SETTINGS_SEED, ZERO_AMOUNT_THRESHOLD},
         types::{
             make_points, Bank, BankConfigCompact, BankOperationalState, InterestRateConfig,
             MarginfiAccount, MarginfiGroup, RatePoint, WrappedI80F48, CURVE_POINTS,
@@ -41,6 +45,63 @@ use {
     std::{collections::HashMap, mem::size_of},
 };
 
+pub struct StandardBankCreateRequest {
+    pub group: Pubkey,
+    pub bank_mint: Pubkey,
+    pub seed: Option<u64>,
+    pub asset_weight_init: f64,
+    pub asset_weight_maint: f64,
+    pub liability_weight_init: f64,
+    pub liability_weight_maint: f64,
+    pub deposit_limit_ui: u64,
+    pub borrow_limit_ui: u64,
+    pub zero_util_rate: u32,
+    pub hundred_util_rate: u32,
+    pub points: Vec<RatePointArg>,
+    pub insurance_fee_fixed_apr: f64,
+    pub insurance_ir_fee: f64,
+    pub protocol_fixed_fee_apr: f64,
+    pub protocol_ir_fee: f64,
+    pub protocol_origination_fee: f64,
+    pub risk_tier: crate::RiskTierArg,
+    pub oracle_max_age: u16,
+    pub oracle_max_confidence: u32,
+    pub asset_tag: u8,
+    pub global_fee_wallet: Option<Pubkey>,
+    pub oracle: Pubkey,
+    pub oracle_type: u8,
+}
+
+pub struct StakedBankCreateRequest {
+    pub group: Pubkey,
+    pub stake_pool: Pubkey,
+    pub seed: Option<u64>,
+}
+
+pub struct GroupCreateConfigRequest {
+    pub emode_admin: Option<Pubkey>,
+    pub curve_admin: Option<Pubkey>,
+    pub limit_admin: Option<Pubkey>,
+    pub emissions_admin: Option<Pubkey>,
+    pub metadata_admin: Option<Pubkey>,
+    pub risk_admin: Option<Pubkey>,
+    pub emode_max_init_leverage: Option<f64>,
+    pub emode_max_maint_leverage: Option<f64>,
+}
+
+impl GroupCreateConfigRequest {
+    fn is_empty(&self) -> bool {
+        self.emode_admin.is_none()
+            && self.curve_admin.is_none()
+            && self.limit_admin.is_none()
+            && self.emissions_admin.is_none()
+            && self.metadata_admin.is_none()
+            && self.risk_admin.is_none()
+            && self.emode_max_init_leverage.is_none()
+            && self.emode_max_maint_leverage.is_none()
+    }
+}
+
 // --------------------------------------------------------------------------------------------------------------------
 // marginfi group
 // --------------------------------------------------------------------------------------------------------------------
@@ -49,11 +110,18 @@ pub fn group_get(config: Config, marginfi_group: Option<Pubkey>) -> Result<()> {
     let json = config.json_output;
     if let Some(marginfi_group) = marginfi_group {
         let group: MarginfiGroup = config.mfi_program.account(marginfi_group)?;
-        output::print_group_detail(&marginfi_group, &group, json);
-        if !json {
+        if json {
+            let banks = load_all_banks(&config, Some(marginfi_group))?;
+            let val = serde_json::json!({
+                "group": output::group_detail_json(&marginfi_group, &group),
+                "banks": output::banks_table_json(&banks),
+            });
+            println!("{}", serde_json::to_string_pretty(&val)?);
+        } else {
+            output::print_group_detail(&marginfi_group, &group, false);
             println!("--------\nBanks:");
+            print_group_banks(config, marginfi_group)?;
         }
-        print_group_banks(config, marginfi_group)?;
     } else {
         group_get_all(config)?;
     }
@@ -64,8 +132,16 @@ pub fn group_get_all(config: Config) -> Result<()> {
     let json = config.json_output;
     let accounts: Vec<(Pubkey, MarginfiGroup)> = config.mfi_program.accounts(vec![])?;
 
-    for (address, group) in &accounts {
-        output::print_group_detail(address, group, json);
+    if json {
+        let vals = accounts
+            .iter()
+            .map(|(address, group)| output::group_detail_json(address, group))
+            .collect::<Vec<_>>();
+        println!("{}", serde_json::to_string_pretty(&vals)?);
+    } else {
+        for (address, group) in &accounts {
+            output::print_group_detail(address, group, false);
+        }
     }
 
     Ok(())
@@ -108,8 +184,10 @@ pub fn group_create(
     profile: Profile,
     admin: Option<Pubkey>,
     override_existing_profile_group: bool,
+    create_config: GroupCreateConfigRequest,
 ) -> Result<()> {
-    let admin = admin.unwrap_or_else(|| config.authority());
+    let authority = config.authority();
+    let final_admin = admin.unwrap_or(authority);
 
     if profile.marginfi_group.is_some() && !override_existing_profile_group {
         bail!(
@@ -119,6 +197,12 @@ pub fn group_create(
     }
 
     let marginfi_group_keypair = Keypair::new();
+    let needs_post_create_config = !create_config.is_empty();
+    let init_admin = if needs_post_create_config {
+        authority
+    } else {
+        final_admin
+    };
 
     let init_marginfi_group_ixs_builder = config.mfi_program.request();
 
@@ -128,18 +212,49 @@ pub fn group_create(
     let init_marginfi_group_ixs = init_marginfi_group_ixs_builder
         .accounts(marginfi::accounts::MarginfiGroupInitialize {
             marginfi_group: marginfi_group_keypair.pubkey(),
-            admin,
+            admin: init_admin,
             fee_state: find_fee_state_pda(&config.program_id).0,
             system_program: system_program::id(),
         })
         .args(marginfi::instruction::MarginfiGroupInitialize {})
         .instructions()?;
 
-    let sig = send_tx(&config, init_marginfi_group_ixs, &signing_keypairs)?;
+    let mut group_ixs = init_marginfi_group_ixs;
+
+    if needs_post_create_config {
+        let configure_ixs = config
+            .mfi_program
+            .request()
+            .accounts(marginfi::accounts::MarginfiGroupConfigure {
+                marginfi_group: marginfi_group_keypair.pubkey(),
+                admin: authority,
+            })
+            .args(marginfi::instruction::MarginfiGroupConfigure {
+                new_admin: (final_admin != authority).then_some(final_admin),
+                new_emode_admin: create_config.emode_admin,
+                new_curve_admin: create_config.curve_admin,
+                new_limit_admin: create_config.limit_admin,
+                new_emissions_admin: create_config.emissions_admin,
+                new_metadata_admin: create_config.metadata_admin,
+                new_risk_admin: create_config.risk_admin,
+                emode_max_init_leverage: create_config
+                    .emode_max_init_leverage
+                    .map(|value| I80F48::from_num(value).into()),
+                emode_max_maint_leverage: create_config
+                    .emode_max_maint_leverage
+                    .map(|value| I80F48::from_num(value).into()),
+            })
+            .instructions()?;
+        group_ixs.extend(configure_ixs);
+    }
+
+    let sig = send_tx(&config, group_ixs, &signing_keypairs)?;
     println!("marginfi group created (sig: {})", sig);
 
-    let mut profile = profile;
-    profile.set_marginfi_group(marginfi_group_keypair.pubkey())?;
+    if config.send_tx {
+        let mut profile = profile;
+        profile.set_marginfi_group(marginfi_group_keypair.pubkey())?;
+    }
 
     Ok(())
 }
@@ -147,13 +262,13 @@ pub fn group_create(
 pub fn group_configure(
     config: Config,
     profile: Profile,
-    new_admin: Pubkey,
-    new_emode_admin: Pubkey,
-    new_curve_admin: Pubkey,
-    new_limit_admin: Pubkey,
-    new_emissions_admin: Pubkey,
-    new_metadata_admin: Pubkey,
-    new_risk_admin: Pubkey,
+    new_admin: Option<Pubkey>,
+    new_emode_admin: Option<Pubkey>,
+    new_curve_admin: Option<Pubkey>,
+    new_limit_admin: Option<Pubkey>,
+    new_emissions_admin: Option<Pubkey>,
+    new_metadata_admin: Option<Pubkey>,
+    new_risk_admin: Option<Pubkey>,
     emode_max_init_leverage: Option<f64>,
     emode_max_maint_leverage: Option<f64>,
 ) -> Result<()> {
@@ -172,13 +287,13 @@ pub fn group_configure(
             admin: config.authority(),
         })
         .args(marginfi::instruction::MarginfiGroupConfigure {
-            new_admin: Some(new_admin),
-            new_emode_admin: Some(new_emode_admin),
-            new_curve_admin: Some(new_curve_admin),
-            new_limit_admin: Some(new_limit_admin),
-            new_emissions_admin: Some(new_emissions_admin),
-            new_metadata_admin: Some(new_metadata_admin),
-            new_risk_admin: Some(new_risk_admin),
+            new_admin,
+            new_emode_admin,
+            new_curve_admin,
+            new_limit_admin,
+            new_emissions_admin,
+            new_metadata_admin,
+            new_risk_admin,
             emode_max_init_leverage: emode_max_init_leverage
                 .map(|value| I80F48::from_num(value).into()),
             emode_max_maint_leverage: emode_max_maint_leverage
@@ -192,59 +307,47 @@ pub fn group_configure(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-
-pub fn group_add_bank(
-    config: Config,
-    profile: Profile,
-    bank_mint: Pubkey,
-    seed: bool,
-    asset_weight_init: f64,
-    asset_weight_maint: f64,
-    liability_weight_init: f64,
-    liability_weight_maint: f64,
-    deposit_limit_ui: u64,
-    borrow_limit_ui: u64,
-    zero_util_rate: u32,
-    hundred_util_rate: u32,
-    points: Vec<RatePointArg>,
-    insurance_fee_fixed_apr: f64,
-    insurance_ir_fee: f64,
-    group_fixed_fee_apr: f64,
-    group_ir_fee: f64,
-    risk_tier: crate::RiskTierArg,
-    oracle_max_age: u16,
-    _compute_unit_price: Option<u64>,
-    global_fee_wallet: Pubkey,
-) -> Result<()> {
+pub fn create_standard_bank(config: Config, request: StandardBankCreateRequest) -> Result<()> {
     let rpc_client = config.mfi_program.rpc();
+    let global_fee_wallet = match request.global_fee_wallet {
+        Some(pubkey) => pubkey,
+        None => {
+            let fee_state_pk = find_fee_state_pda(&config.program_id).0;
+            let fee_state: marginfi_type_crate::types::FeeState =
+                config.mfi_program.account(fee_state_pk)?;
+            fee_state.global_fee_wallet
+        }
+    };
 
-    if profile.marginfi_group.is_none() {
-        bail!("Marginfi group not specified in profile [{}]", profile.name);
-    }
-
-    let asset_weight_init: WrappedI80F48 = I80F48::from_num(asset_weight_init).into();
-    let asset_weight_maint: WrappedI80F48 = I80F48::from_num(asset_weight_maint).into();
-    let liability_weight_init: WrappedI80F48 = I80F48::from_num(liability_weight_init).into();
-    let liability_weight_maint: WrappedI80F48 = I80F48::from_num(liability_weight_maint).into();
+    let asset_weight_init: WrappedI80F48 = I80F48::from_num(request.asset_weight_init).into();
+    let asset_weight_maint: WrappedI80F48 = I80F48::from_num(request.asset_weight_maint).into();
+    let liability_weight_init: WrappedI80F48 =
+        I80F48::from_num(request.liability_weight_init).into();
+    let liability_weight_maint: WrappedI80F48 =
+        I80F48::from_num(request.liability_weight_maint).into();
 
     let optimal_utilization_rate: WrappedI80F48 = I80F48::ZERO.into();
     let plateau_interest_rate: WrappedI80F48 = I80F48::ZERO.into();
     let max_interest_rate: WrappedI80F48 = I80F48::ZERO.into();
-    let insurance_fee_fixed_apr: WrappedI80F48 = I80F48::from_num(insurance_fee_fixed_apr).into();
-    let insurance_ir_fee: WrappedI80F48 = I80F48::from_num(insurance_ir_fee).into();
-    let group_fixed_fee_apr: WrappedI80F48 = I80F48::from_num(group_fixed_fee_apr).into();
-    let group_ir_fee: WrappedI80F48 = I80F48::from_num(group_ir_fee).into();
+    let insurance_fee_fixed_apr: WrappedI80F48 =
+        I80F48::from_num(request.insurance_fee_fixed_apr).into();
+    let insurance_ir_fee: WrappedI80F48 = I80F48::from_num(request.insurance_ir_fee).into();
+    let protocol_fixed_fee_apr: WrappedI80F48 =
+        I80F48::from_num(request.protocol_fixed_fee_apr).into();
+    let protocol_ir_fee: WrappedI80F48 = I80F48::from_num(request.protocol_ir_fee).into();
+    let protocol_origination_fee: WrappedI80F48 =
+        I80F48::from_num(request.protocol_origination_fee).into();
 
-    let mint_account = rpc_client.get_account(&bank_mint)?;
+    let mint_account = rpc_client.get_account(&request.bank_mint)?;
     let token_program = mint_account.owner;
     let mint = spl_token_2022::state::Mint::unpack(
         &mint_account.data[..spl_token_2022::state::Mint::LEN],
     )?;
-    let deposit_limit = deposit_limit_ui * 10_u64.pow(mint.decimals as u32);
-    let borrow_limit = borrow_limit_ui * 10_u64.pow(mint.decimals as u32);
+    let deposit_limit = request.deposit_limit_ui * 10_u64.pow(mint.decimals as u32);
+    let borrow_limit = request.borrow_limit_ui * 10_u64.pow(mint.decimals as u32);
 
-    let pts_raw: Vec<RatePoint> = points
+    let pts_raw: Vec<RatePoint> = request
+        .points
         .iter()
         .map(|p| RatePoint {
             util: p.util,
@@ -259,62 +362,64 @@ pub fn group_add_bank(
         max_interest_rate,
         insurance_fee_fixed_apr,
         insurance_ir_fee,
-        protocol_fixed_fee_apr: group_fixed_fee_apr,
-        protocol_ir_fee: group_ir_fee,
-        zero_util_rate,
-        hundred_util_rate,
+        protocol_fixed_fee_apr,
+        protocol_ir_fee,
+        protocol_origination_fee,
+        zero_util_rate: request.zero_util_rate,
+        hundred_util_rate: request.hundred_util_rate,
         points,
         curve_type: INTEREST_CURVE_SEVEN_POINT,
         ..InterestRateConfig::default()
     };
-
-    // Create signing keypairs -- if the PDA is used, no explicit fee payer.
-    let mut signing_keypairs = config.get_signers(false);
-
-    let bank_keypair = Keypair::new();
-    if !seed {
-        signing_keypairs.push(&bank_keypair);
-    }
-
-    // Generate the PDA for the bank keypair if the seed bool is set
-    // Issue tx with the seed
-    let add_bank_ixs: Vec<Instruction> = if seed {
-        create_bank_ix_with_seed(
-            &config,
-            profile,
-            &rpc_client,
-            bank_mint,
-            token_program,
-            asset_weight_init,
-            asset_weight_maint,
-            liability_weight_init,
-            liability_weight_maint,
-            deposit_limit,
-            borrow_limit,
-            interest_rate_config,
-            risk_tier,
-            oracle_max_age,
-            global_fee_wallet,
-        )?
-    } else {
-        create_bank_ix(
-            &config,
-            profile,
-            bank_mint,
-            token_program,
-            &bank_keypair,
-            asset_weight_init,
-            asset_weight_maint,
-            liability_weight_init,
-            liability_weight_maint,
-            deposit_limit,
-            borrow_limit,
-            interest_rate_config,
-            risk_tier,
-            oracle_max_age,
-            global_fee_wallet,
-        )?
+    let compact_config = BankConfigCompact {
+        asset_weight_init,
+        asset_weight_maint,
+        liability_weight_init,
+        liability_weight_maint,
+        deposit_limit,
+        borrow_limit,
+        interest_rate_config: interest_rate_config.into(),
+        operational_state: BankOperationalState::Operational,
+        risk_tier: request.risk_tier.into(),
+        oracle_max_age: request.oracle_max_age,
+        oracle_max_confidence: request.oracle_max_confidence,
+        asset_tag: request.asset_tag,
+        ..BankConfigCompact::default()
     };
+    let bank_config = marginfi_type_crate::types::BankConfig::from(compact_config);
+    bank_config
+        .validate()
+        .context("invalid standard bank config")?;
+
+    let bank_seed = resolve_bank_seed(
+        &rpc_client,
+        &config.program_id,
+        request.group,
+        request.bank_mint,
+        request.seed,
+    )?;
+    let signing_keypairs = config.get_signers(true);
+    let add_bank_ixs: Vec<Instruction> = create_bank_ix_with_seed(
+        &config,
+        request.group,
+        request.bank_mint,
+        token_program,
+        asset_weight_init,
+        asset_weight_maint,
+        liability_weight_init,
+        liability_weight_maint,
+        deposit_limit,
+        borrow_limit,
+        interest_rate_config,
+        request.risk_tier,
+        request.oracle_max_age,
+        request.oracle_max_confidence,
+        request.asset_tag,
+        global_fee_wallet,
+        request.oracle,
+        request.oracle_type,
+        bank_seed,
+    )?;
 
     let sig = send_tx(&config, add_bank_ixs, &signing_keypairs)?;
     println!("bank created (sig: {})", sig);
@@ -322,26 +427,235 @@ pub fn group_add_bank(
     Ok(())
 }
 
+fn resolve_bank_seed(
+    rpc_client: &RpcClient,
+    program_id: &Pubkey,
+    group: Pubkey,
+    bank_mint: Pubkey,
+    requested_seed: Option<u64>,
+) -> Result<u64> {
+    use solana_sdk::commitment_config::CommitmentConfig;
+
+    if let Some(seed) = requested_seed {
+        let (bank_pda, _) = Pubkey::find_program_address(
+            &[group.as_ref(), bank_mint.as_ref(), &seed.to_le_bytes()],
+            program_id,
+        );
+        if rpc_client
+            .get_account_with_commitment(&bank_pda, CommitmentConfig::default())?
+            .value
+            .is_some()
+        {
+            bail!(
+                "seed {} already in use for mint {} in group {} (bank {})",
+                seed,
+                bank_mint,
+                group,
+                bank_pda
+            );
+        }
+        return Ok(seed);
+    }
+
+    for seed in 0..u64::MAX {
+        let (bank_pda, _) = Pubkey::find_program_address(
+            &[group.as_ref(), bank_mint.as_ref(), &seed.to_le_bytes()],
+            program_id,
+        );
+        if rpc_client
+            .get_account_with_commitment(&bank_pda, CommitmentConfig::default())?
+            .value
+            .is_none()
+        {
+            return Ok(seed);
+        }
+    }
+
+    bail!(
+        "unable to find a free seed for mint {} in group {}",
+        bank_mint,
+        group
+    )
+}
+
+fn derive_staked_bank_dependencies(stake_pool: &Pubkey) -> (Pubkey, Pubkey) {
+    let (bank_mint, _) =
+        Pubkey::find_program_address(&[b"mint", stake_pool.as_ref()], &SPL_SINGLE_POOL_ID);
+    let (sol_pool, _) =
+        Pubkey::find_program_address(&[b"stake", stake_pool.as_ref()], &SPL_SINGLE_POOL_ID);
+    (bank_mint, sol_pool)
+}
+
+fn find_next_staked_bank_seed(
+    rpc_client: &RpcClient,
+    program_id: &Pubkey,
+    group: Pubkey,
+    bank_mint: Pubkey,
+    requested_seed: Option<u64>,
+) -> Result<(Pubkey, u64)> {
+    use solana_sdk::commitment_config::CommitmentConfig;
+
+    if let Some(seed) = requested_seed {
+        let (bank_pda, _) = Pubkey::find_program_address(
+            &[group.as_ref(), bank_mint.as_ref(), &seed.to_le_bytes()],
+            program_id,
+        );
+        if rpc_client
+            .get_account_with_commitment(&bank_pda, CommitmentConfig::default())?
+            .value
+            .is_some()
+        {
+            bail!(
+                "seed {} already in use for mint {} in group {} (bank {})",
+                seed,
+                bank_mint,
+                group,
+                bank_pda
+            );
+        }
+        return Ok((bank_pda, seed));
+    }
+
+    for seed in 0..u64::MAX {
+        let (bank_pda, _) = Pubkey::find_program_address(
+            &[group.as_ref(), bank_mint.as_ref(), &seed.to_le_bytes()],
+            program_id,
+        );
+        if rpc_client
+            .get_account_with_commitment(&bank_pda, CommitmentConfig::default())?
+            .value
+            .is_none()
+        {
+            return Ok((bank_pda, seed));
+        }
+    }
+
+    bail!("unable to find a free seed for staked bank")
+}
+
+fn load_staked_settings_oracle(config: &Config, group: Pubkey) -> Result<(Pubkey, Pubkey)> {
+    let staked_settings = Pubkey::find_program_address(
+        &[STAKED_SETTINGS_SEED.as_bytes(), group.as_ref()],
+        &config.program_id,
+    )
+    .0;
+    let account = config
+        .mfi_program
+        .rpc()
+        .get_account(&staked_settings)
+        .with_context(|| format!("failed to load staked settings for group {}", group))?;
+
+    let expected_len = 8 + 256;
+    if account.data.len() < expected_len {
+        bail!(
+            "staked settings account {} too short: got {} bytes, expected at least {}",
+            staked_settings,
+            account.data.len(),
+            expected_len
+        );
+    }
+
+    let oracle = Pubkey::try_from(&account.data[72..104])
+        .map_err(|_| anyhow::anyhow!("failed to decode staked settings oracle"))?;
+
+    Ok((staked_settings, oracle))
+}
+
+pub fn create_staked_bank(config: Config, request: StakedBankCreateRequest) -> Result<()> {
+    let rpc_client = config.mfi_program.rpc();
+    let (bank_mint, sol_pool) = derive_staked_bank_dependencies(&request.stake_pool);
+    let token_program = rpc_client
+        .get_account(&bank_mint)
+        .with_context(|| format!("failed to load derived LST mint {}", bank_mint))?
+        .owner;
+    let (staked_settings, oracle) = load_staked_settings_oracle(&config, request.group)?;
+    let (bank_pda, bank_seed) = find_next_staked_bank_seed(
+        &rpc_client,
+        &config.program_id,
+        request.group,
+        bank_mint,
+        request.seed,
+    )?;
+
+    let mut add_bank_ixs = config
+        .mfi_program
+        .request()
+        .accounts(marginfi::accounts::LendingPoolAddBankPermissionless {
+            marginfi_group: request.group,
+            staked_settings,
+            fee_payer: config.explicit_fee_payer(),
+            bank_mint,
+            sol_pool,
+            stake_pool: request.stake_pool,
+            bank: bank_pda,
+            liquidity_vault_authority: find_bank_vault_authority_pda(
+                &bank_pda,
+                BankVaultType::Liquidity,
+                &config.program_id,
+            )
+            .0,
+            liquidity_vault: find_bank_vault_pda(
+                &bank_pda,
+                BankVaultType::Liquidity,
+                &config.program_id,
+            )
+            .0,
+            insurance_vault_authority: find_bank_vault_authority_pda(
+                &bank_pda,
+                BankVaultType::Insurance,
+                &config.program_id,
+            )
+            .0,
+            insurance_vault: find_bank_vault_pda(
+                &bank_pda,
+                BankVaultType::Insurance,
+                &config.program_id,
+            )
+            .0,
+            fee_vault_authority: find_bank_vault_authority_pda(
+                &bank_pda,
+                BankVaultType::Fee,
+                &config.program_id,
+            )
+            .0,
+            fee_vault: find_bank_vault_pda(&bank_pda, BankVaultType::Fee, &config.program_id).0,
+            token_program,
+            system_program: system_program::id(),
+        })
+        .args(marginfi::instruction::LendingPoolAddBankPermissionless { bank_seed })
+        .instructions()?;
+
+    let ix = add_bank_ixs
+        .first_mut()
+        .context("failed to build staked bank instruction")?;
+    ix.accounts.extend([
+        AccountMeta::new_readonly(oracle, false),
+        AccountMeta::new_readonly(bank_mint, false),
+        AccountMeta::new_readonly(sol_pool, false),
+    ]);
+
+    let signing_keypairs = config.get_signers(true);
+    let sig = send_tx(&config, add_bank_ixs, &signing_keypairs)?;
+    println!("staked bank created (sig: {})", sig);
+    println!("Bank address (PDA): {}", bank_pda);
+    println!("Derived LST mint: {}", bank_mint);
+    println!("Derived SOL pool: {}", sol_pool);
+
+    Ok(())
+}
+
 pub fn group_clone_bank(
     config: Config,
-    profile: Profile,
+    group: Pubkey,
     source_bank: Pubkey,
     bank_mint: Pubkey,
     bank_seed: u64,
 ) -> Result<()> {
-    let marginfi_group = profile
-        .marginfi_group
-        .context("marginfi group not set in profile")?;
-
     let mint_account = config.mfi_program.rpc().get_account(&bank_mint)?;
     let token_program = mint_account.owner;
 
     let (bank_pda, _) = Pubkey::find_program_address(
-        &[
-            marginfi_group.as_ref(),
-            bank_mint.as_ref(),
-            &bank_seed.to_le_bytes(),
-        ],
+        &[group.as_ref(), bank_mint.as_ref(), &bank_seed.to_le_bytes()],
         &config.program_id,
     );
 
@@ -349,7 +663,7 @@ pub fn group_clone_bank(
         .mfi_program
         .request()
         .accounts(marginfi::accounts::LendingPoolCloneBank {
-            marginfi_group,
+            marginfi_group: group,
             admin: config.authority(),
             fee_payer: config.explicit_fee_payer(),
             bank_mint,
@@ -403,8 +717,7 @@ pub fn group_clone_bank(
 
 fn create_bank_ix_with_seed(
     config: &Config,
-    profile: Profile,
-    rpc_client: &RpcClient,
+    group: Pubkey,
     bank_mint: Pubkey,
     token_program: Pubkey,
     asset_weight_init: WrappedI80F48,
@@ -416,42 +729,22 @@ fn create_bank_ix_with_seed(
     interest_rate_config: InterestRateConfig,
     risk_tier: crate::RiskTierArg,
     oracle_max_age: u16,
+    oracle_max_confidence: u32,
+    asset_tag: u8,
     global_fee_wallet: Pubkey,
+    oracle: Pubkey,
+    oracle_type: u8,
+    bank_seed: u64,
 ) -> Result<Vec<Instruction>> {
-    use solana_sdk::commitment_config::CommitmentConfig;
-
-    let mut bank_pda = Pubkey::default();
-    let mut bank_seed: u64 = u64::default();
-    let group_key = profile
-        .marginfi_group
-        .context("marginfi group not set in profile")?;
-
-    // Iterate through to find the next canonical seed
-    for i in 0..u64::MAX {
-        println!("Seed option enabled -- generating a PDA account");
-        let (pda, _) = Pubkey::find_program_address(
-            [group_key.as_ref(), bank_mint.as_ref(), &i.to_le_bytes()].as_slice(),
-            &config.program_id,
-        );
-        if rpc_client
-            .get_account_with_commitment(&pda, CommitmentConfig::default())?
-            .value
-            .is_none()
-        {
-            // Bank address is free
-            println!("Succesffuly generated a PDA account");
-            bank_pda = pda;
-            bank_seed = i;
-            break;
-        }
-    }
+    let (bank_pda, _) = Pubkey::find_program_address(
+        [group.as_ref(), bank_mint.as_ref(), &bank_seed.to_le_bytes()].as_slice(),
+        &config.program_id,
+    );
 
     let add_bank_ixs_builder = config.mfi_program.request();
-    let add_bank_ixs = add_bank_ixs_builder
+    let mut add_bank_ixs = add_bank_ixs_builder
         .accounts(marginfi::accounts::LendingPoolAddBankWithSeed {
-            marginfi_group: profile
-                .marginfi_group
-                .context("marginfi group not set in profile")?,
+            marginfi_group: group,
             admin: config.authority(),
             bank_mint,
             bank: bank_pda,
@@ -488,7 +781,7 @@ fn create_bank_ix_with_seed(
             .0,
             token_program,
             system_program: system_program::id(),
-            fee_payer: config.authority(),
+            fee_payer: config.explicit_fee_payer(),
             fee_state: find_fee_state_pda(&config.program_id).0,
             global_fee_wallet,
         })
@@ -504,275 +797,36 @@ fn create_bank_ix_with_seed(
                 operational_state: BankOperationalState::Operational,
                 risk_tier: risk_tier.into(),
                 oracle_max_age,
+                oracle_max_confidence,
+                asset_tag,
                 ..BankConfigCompact::default()
             },
             bank_seed,
         })
         .instructions()?;
 
+    // Chain oracle configuration in the same transaction
+    let oracle_meta = AccountMeta::new_readonly(oracle, false);
+    let configure_oracle_ixs = config
+        .mfi_program
+        .request()
+        .accounts(marginfi::accounts::LendingPoolConfigureBankOracle {
+            group,
+            admin: config.authority(),
+            bank: bank_pda,
+        })
+        .args(marginfi::instruction::LendingPoolConfigureBankOracle {
+            setup: oracle_type,
+            oracle,
+        })
+        .instructions()?;
+    let mut oracle_ix = configure_oracle_ixs.into_iter().next().unwrap();
+    oracle_ix.accounts.push(oracle_meta);
+    add_bank_ixs.push(oracle_ix);
+
     println!("Bank address (PDA): {}", bank_pda);
 
     Ok(add_bank_ixs)
-}
-
-#[allow(clippy::too_many_arguments)]
-
-fn create_bank_ix(
-    config: &Config,
-    profile: Profile,
-    bank_mint: Pubkey,
-    token_program: Pubkey,
-    bank_keypair: &Keypair,
-    asset_weight_init: WrappedI80F48,
-    asset_weight_maint: WrappedI80F48,
-    liability_weight_init: WrappedI80F48,
-    liability_weight_maint: WrappedI80F48,
-    deposit_limit: u64,
-    borrow_limit: u64,
-    interest_rate_config: InterestRateConfig,
-    risk_tier: crate::RiskTierArg,
-    oracle_max_age: u16,
-    global_fee_wallet: Pubkey,
-) -> Result<Vec<Instruction>> {
-    let add_bank_ixs_builder = config.mfi_program.request();
-    let add_bank_ixs = add_bank_ixs_builder
-        .accounts(marginfi::accounts::LendingPoolAddBank {
-            marginfi_group: profile
-                .marginfi_group
-                .context("marginfi group not set in profile")?,
-            admin: config.authority(),
-            bank: bank_keypair.pubkey(),
-            bank_mint,
-            fee_vault: find_bank_vault_pda(
-                &bank_keypair.pubkey(),
-                BankVaultType::Fee,
-                &config.program_id,
-            )
-            .0,
-            fee_vault_authority: find_bank_vault_authority_pda(
-                &bank_keypair.pubkey(),
-                BankVaultType::Fee,
-                &config.program_id,
-            )
-            .0,
-            insurance_vault: find_bank_vault_pda(
-                &bank_keypair.pubkey(),
-                BankVaultType::Insurance,
-                &config.program_id,
-            )
-            .0,
-            insurance_vault_authority: find_bank_vault_authority_pda(
-                &bank_keypair.pubkey(),
-                BankVaultType::Insurance,
-                &config.program_id,
-            )
-            .0,
-            liquidity_vault: find_bank_vault_pda(
-                &bank_keypair.pubkey(),
-                BankVaultType::Liquidity,
-                &config.program_id,
-            )
-            .0,
-            liquidity_vault_authority: find_bank_vault_authority_pda(
-                &bank_keypair.pubkey(),
-                BankVaultType::Liquidity,
-                &config.program_id,
-            )
-            .0,
-            token_program,
-            system_program: system_program::id(),
-            fee_payer: config.explicit_fee_payer(),
-            fee_state: find_fee_state_pda(&config.program_id).0,
-            global_fee_wallet,
-        })
-        .args(marginfi::instruction::LendingPoolAddBank {
-            bank_config: BankConfigCompact {
-                asset_weight_init,
-                asset_weight_maint,
-                liability_weight_init,
-                liability_weight_maint,
-                deposit_limit,
-                borrow_limit,
-                interest_rate_config: interest_rate_config.into(),
-                operational_state: BankOperationalState::Operational,
-                risk_tier: risk_tier.into(),
-                oracle_max_age,
-                ..BankConfigCompact::default()
-            },
-        })
-        .instructions()?;
-
-    println!("Bank address: {}", bank_keypair.pubkey());
-
-    Ok(add_bank_ixs)
-}
-
-#[allow(clippy::too_many_arguments, dead_code)]
-
-pub fn group_handle_bankruptcy(
-    config: &Config,
-    profile: Profile,
-    bank_pk: Pubkey,
-    marginfi_account_pk: Pubkey,
-) -> Result<()> {
-    let rpc_client = config.mfi_program.rpc();
-
-    if profile.marginfi_group.is_none() {
-        bail!("Marginfi group not specified in profile [{}]", profile.name);
-    }
-
-    let banks = HashMap::from_iter(load_all_banks(
-        config,
-        Some(
-            profile
-                .marginfi_group
-                .context("marginfi group not set in profile")?,
-        ),
-    )?);
-
-    let marginfi_account = config
-        .mfi_program
-        .account::<MarginfiAccount>(marginfi_account_pk)?;
-
-    handle_bankruptcy_for_an_account(
-        config,
-        &profile,
-        &rpc_client,
-        &banks,
-        marginfi_account_pk,
-        &marginfi_account,
-        bank_pk,
-    )?;
-
-    Ok(())
-}
-
-#[allow(dead_code)]
-pub fn group_auto_handle_bankruptcy_for_an_account(
-    config: &Config,
-    profile: Profile,
-    marginfi_account_pk: Pubkey,
-) -> Result<()> {
-    let rpc_client = config.mfi_program.rpc();
-
-    if profile.marginfi_group.is_none() {
-        bail!("Marginfi group not specified in profile [{}]", profile.name);
-    }
-
-    let banks = HashMap::from_iter(load_all_banks(
-        config,
-        Some(
-            profile
-                .marginfi_group
-                .context("marginfi group not set in profile")?,
-        ),
-    )?);
-    let marginfi_account = config
-        .mfi_program
-        .account::<MarginfiAccount>(marginfi_account_pk)?;
-
-    let target_banks = marginfi_account
-        .lending_account
-        .balances
-        .iter()
-        .filter_map(|balance| {
-            if !balance.is_active() {
-                return None;
-            }
-            let bank = banks.get(&balance.bank_pk)?;
-            let liability_amount = bank
-                .get_liability_amount(balance.liability_shares.into())
-                .ok()?;
-            liability_amount
-                .is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD)
-                .then_some(balance.bank_pk)
-        })
-        .collect::<Vec<Pubkey>>();
-
-    for bank_pk in target_banks {
-        handle_bankruptcy_for_an_account(
-            config,
-            &profile,
-            &rpc_client,
-            &banks,
-            marginfi_account_pk,
-            &marginfi_account,
-            bank_pk,
-        )?;
-    }
-
-    Ok(())
-}
-
-#[allow(dead_code)]
-fn handle_bankruptcy_for_an_account(
-    config: &Config,
-    profile: &Profile,
-    rpc_client: &RpcClient,
-    banks: &HashMap<Pubkey, Bank>,
-    marginfi_account_pk: Pubkey,
-    marginfi_account: &MarginfiAccount,
-    bank_pk: Pubkey,
-) -> Result<()> {
-    println!("Handling bankruptcy for bank {}", bank_pk);
-
-    let bank = banks.get(&bank_pk).context("bank not found")?;
-
-    let bank_mint_account = rpc_client.get_account(&bank.mint)?;
-    let token_program = bank_mint_account.owner;
-    let mut handle_bankruptcy_ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::LendingPoolHandleBankruptcy {
-            group: profile
-                .marginfi_group
-                .context("marginfi group not set in profile")?,
-            signer: config.authority(),
-            bank: bank_pk,
-            marginfi_account: marginfi_account_pk,
-            liquidity_vault: find_bank_vault_pda(
-                &bank_pk,
-                BankVaultType::Liquidity,
-                &config.program_id,
-            )
-            .0,
-            insurance_vault: find_bank_vault_pda(
-                &bank_pk,
-                BankVaultType::Insurance,
-                &config.program_id,
-            )
-            .0,
-            insurance_vault_authority: find_bank_vault_authority_pda(
-                &bank_pk,
-                BankVaultType::Insurance,
-                &config.program_id,
-            )
-            .0,
-            token_program,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingPoolHandleBankruptcy {}.data(),
-    };
-
-    if token_program == anchor_spl::token_2022::ID {
-        handle_bankruptcy_ix
-            .accounts
-            .push(AccountMeta::new_readonly(bank.mint, false));
-    }
-    handle_bankruptcy_ix
-        .accounts
-        .extend(load_observation_account_metas(
-            marginfi_account,
-            banks,
-            vec![bank_pk],
-            vec![],
-        ));
-
-    let signing_keypairs = config.get_signers(false);
-
-    let sig = send_tx(config, vec![handle_bankruptcy_ix], &signing_keypairs)?;
-    println!("Bankruptcy handled (sig: {})", sig);
-
-    Ok(())
 }
 
 const BANKRUPTCY_CHUNKS: usize = 4;

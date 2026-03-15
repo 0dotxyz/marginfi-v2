@@ -15,50 +15,29 @@ use {
     solana_sdk::{
         address_lookup_table::{state::AddressLookupTable, AddressLookupTableAccount},
         compute_budget::ComputeBudgetInstruction,
-        hash::hashv,
+        hash::{hash, hashv},
         instruction::{AccountMeta, Instruction},
         message::{v0, VersionedMessage},
         pubkey::Pubkey,
         signature::{Keypair, Signature},
-        transaction::{Transaction, VersionedTransaction},
+        system_instruction,
+        transaction::VersionedTransaction,
     },
     std::collections::HashMap,
 };
 
-/// Simulate a transaction before sending. Logs program output.
-/// Returns the estimated compute units consumed on success.
-fn simulate_and_log(rpc_client: &RpcClient, tx: &Transaction) -> Result<u64> {
-    let sim_result = rpc_client.simulate_transaction(tx)?;
-
-    if let Some(logs) = &sim_result.value.logs {
-        println!("------- program logs -------");
-        for line in logs {
-            println!("{line}");
-        }
-        println!("----------------------------");
-    }
-
-    if let Some(err) = sim_result.value.err {
-        bail!("Simulation failed: {err}");
-    }
-
-    Ok(sim_result.value.units_consumed.unwrap_or(200_000))
-}
-
 /// Simulate a versioned transaction before sending. Logs program output.
-#[allow(dead_code)]
 fn simulate_versioned_and_log(rpc_client: &RpcClient, tx: &VersionedTransaction) -> Result<u64> {
     let sim_result = rpc_client.simulate_transaction(tx)?;
 
-    if let Some(logs) = &sim_result.value.logs {
-        println!("------- program logs -------");
-        for line in logs {
-            println!("{line}");
-        }
-        println!("----------------------------");
-    }
-
     if let Some(err) = sim_result.value.err {
+        if let Some(logs) = &sim_result.value.logs {
+            println!("------- program logs -------");
+            for line in logs {
+                println!("{line}");
+            }
+            println!("----------------------------");
+        }
         bail!("Simulation failed: {err}");
     }
 
@@ -67,20 +46,6 @@ fn simulate_versioned_and_log(rpc_client: &RpcClient, tx: &VersionedTransaction)
 
 /// Output an unsigned transaction as base58 for Squads multisig.
 fn output_multisig_tx(tx: &VersionedTransaction) -> Result<Signature> {
-    let bytes = bincode::serialize(tx)?;
-    let tx_size = bytes.len();
-    let tx_serialized = bs58::encode(&bytes).into_string();
-
-    println!("tx size: {} bytes", tx_size);
-    println!("------- transaction (base58) -------");
-    println!("{}", tx_serialized);
-    println!("------------------------------------");
-
-    Ok(Signature::default())
-}
-
-/// Output an unsigned legacy transaction as base58 for Squads multisig.
-fn output_multisig_legacy_tx(tx: &Transaction) -> Result<Signature> {
     let bytes = bincode::serialize(tx)?;
     let tx_size = bytes.len();
     let tx_serialized = bs58::encode(&bytes).into_string();
@@ -116,73 +81,68 @@ fn load_lookup_tables(
     Ok(out)
 }
 
-/// Build, simulate, and either output unsigned base58 (default) or sign and send (--send-tx).
+/// Build, simulate, and either sign/send (default) or output unsigned base58 (--no-send-tx).
 ///
 /// Flow:
 /// 1. Always simulate first — on failure, log program output and abort
-/// 2. If `--send-tx`: sign and broadcast
-/// 3. Otherwise (default): serialize unsigned tx as base58 for Squads multisig
-///
-/// Compute budget: if `config.compute_unit_limit` is set, uses that. Otherwise,
-/// uses the simulation result (1.4x consumed, minimum 50_000).
+/// 2. By default: sign and broadcast
+/// 3. If `--no-send-tx`: serialize unsigned tx as base58 for external signing
 pub fn send_tx(config: &Config, ixs: Vec<Instruction>, signers: &[&Keypair]) -> Result<Signature> {
     let rpc_client = config.mfi_program.rpc();
     let payer = config.explicit_fee_payer();
-    let blockhash = rpc_client.get_latest_blockhash()?;
 
-    // Step 1: Simulate to estimate CU and validate the transaction
-    let sim_tx = Transaction::new_signed_with_payer(&ixs, Some(&payer), signers, blockhash);
-    let consumed_cu = simulate_and_log(&rpc_client, &sim_tx)?;
-
-    let cu_limit = config
-        .compute_unit_limit
-        .unwrap_or_else(|| ((consumed_cu as f64 * 1.4) as u32).max(50_000));
-    let cu_price = config.compute_unit_price.unwrap_or(1);
-
-    let mut final_ixs = vec![
-        ComputeBudgetInstruction::set_compute_unit_price(cu_price),
-        ComputeBudgetInstruction::set_compute_unit_limit(cu_limit),
-    ];
+    let mut final_ixs = Vec::new();
+    if let Some(cu_price) = config.compute_unit_price {
+        final_ixs.push(ComputeBudgetInstruction::set_compute_unit_price(cu_price));
+    }
+    if let Some(cu_limit) = config.compute_unit_limit {
+        final_ixs.push(ComputeBudgetInstruction::set_compute_unit_limit(cu_limit));
+    }
     final_ixs.extend(ixs);
 
     // Re-fetch blockhash for the actual transaction
     let blockhash = rpc_client.get_latest_blockhash()?;
     let tx_mode = config.get_tx_mode();
 
-    if config.legacy_tx {
-        match tx_mode {
-            TxMode::SendTx => {
-                let tx =
-                    Transaction::new_signed_with_payer(&final_ixs, Some(&payer), signers, blockhash);
-                let sig = rpc_client.send_and_confirm_transaction_with_spinner(&tx)?;
-                println!("Transaction confirmed: {sig}");
-                return Ok(sig);
-            }
-            TxMode::MultisigOutput => {
-                let tx =
-                    Transaction::new_signed_with_payer(&final_ixs, Some(&payer), signers, blockhash);
-                return output_multisig_legacy_tx(&tx);
-            }
-        }
-    }
-
     let lookup_tables = load_lookup_tables(&rpc_client, &config.lookup_tables)?;
-    let v0_message = v0::Message::try_compile(&payer, &final_ixs, &lookup_tables, blockhash)?;
+    let versioned_message = VersionedMessage::V0(v0::Message::try_compile(
+        &payer,
+        &final_ixs,
+        &lookup_tables,
+        blockhash,
+    )?);
+    let required_signers = usize::from(versioned_message.header().num_required_signatures);
+    let required_signer_keys = versioned_message.static_account_keys()[..required_signers].to_vec();
+    let unsigned_vtx = VersionedTransaction {
+        signatures: vec![Signature::default(); required_signers],
+        message: versioned_message.clone(),
+    };
 
     match tx_mode {
         TxMode::MultisigOutput => {
-            let num_required_signatures = v0_message.header.num_required_signatures as usize;
-            let vtx = VersionedTransaction {
-                signatures: vec![Signature::default(); num_required_signatures],
-                message: VersionedMessage::V0(v0_message),
-            };
-            output_multisig_tx(&vtx)
+            let unsupported_signers = required_signer_keys
+                .iter()
+                .copied()
+                .filter(|pk| *pk != payer)
+                .collect::<Vec<_>>();
+            if !unsupported_signers.is_empty() {
+                bail!(
+                    "--no-send-tx cannot emit an externally signable payload for this command; additional required signer(s): {}",
+                    unsupported_signers
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            simulate_versioned_and_log(&rpc_client, &unsigned_vtx)?;
+            output_multisig_tx(&unsigned_vtx)
         }
         TxMode::SendTx => {
-            let vtx =
-                VersionedTransaction::try_new(VersionedMessage::V0(v0_message), signers)?;
+            let vtx = VersionedTransaction::try_new(versioned_message, signers)?;
+            simulate_versioned_and_log(&rpc_client, &vtx)?;
             let sig = rpc_client.send_and_confirm_transaction_with_spinner(&vtx)?;
-            println!("Transaction confirmed: {sig}");
+            println!("Transaction confirmed: https://solscan.io/tx/{}", sig);
             Ok(sig)
         }
     }
@@ -272,9 +232,34 @@ pub fn find_juplend_lending_admin() -> (Pubkey, u8) {
     Pubkey::find_program_address(&[b"lending_admin"], &JUPLEND_LENDING_PROGRAM_ID)
 }
 
+/// `["f_token_mint", mint]` on JupLend Lending program
+pub fn find_juplend_f_token_mint(mint: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[b"f_token_mint", mint.as_ref()],
+        &JUPLEND_LENDING_PROGRAM_ID,
+    )
+}
+
+/// `["lending", mint, f_token_mint]` on JupLend Lending program
+pub fn find_juplend_lending(mint: &Pubkey, f_token_mint: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[b"lending", mint.as_ref(), f_token_mint.as_ref()],
+        &JUPLEND_LENDING_PROGRAM_ID,
+    )
+}
+
+pub fn derive_juplend_lending_from_mint(mint: &Pubkey) -> (Pubkey, Pubkey) {
+    let (f_token_mint, _) = find_juplend_f_token_mint(mint);
+    let (lending, _) = find_juplend_lending(mint, &f_token_mint);
+    (lending, f_token_mint)
+}
+
 /// `["rate_model", mint]` on JupLend Liquidity program
 pub fn find_juplend_rate_model(mint: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(&[b"rate_model", mint.as_ref()], &JUPLEND_LIQUIDITY_PROGRAM_ID)
+    Pubkey::find_program_address(
+        &[b"rate_model", mint.as_ref()],
+        &JUPLEND_LIQUIDITY_PROGRAM_ID,
+    )
 }
 
 /// `["liquidity"]` on JupLend Liquidity program
@@ -324,6 +309,33 @@ pub struct JuplendCpiAccounts {
     pub claim_account: Pubkey,
 }
 
+pub fn derive_juplend_cpi_accounts_for_lending(
+    lending: &juplend_mocks::state::Lending,
+    mint: &Pubkey,
+    token_program: &Pubkey,
+    liquidity_vault_authority: &Pubkey,
+) -> JuplendCpiAccounts {
+    let (lending_admin, _) = find_juplend_lending_admin();
+    let (rate_model, _) = find_juplend_rate_model(mint);
+    let (liquidity, _) = find_juplend_liquidity();
+    let vault = find_juplend_vault(mint, token_program);
+    let (claim_account, _) = find_juplend_claim_account(liquidity_vault_authority, mint);
+    let (rewards_rate_model, _) = find_juplend_rewards_rate_model(mint);
+
+    JuplendCpiAccounts {
+        f_token_mint: lending.f_token_mint,
+        lending_admin,
+        supply_token_reserves_liquidity: lending.token_reserves_liquidity,
+        lending_supply_position_on_liquidity: lending.supply_position_on_liquidity,
+        rate_model,
+        vault,
+        liquidity,
+        liquidity_program: JUPLEND_LIQUIDITY_PROGRAM_ID,
+        rewards_rate_model,
+        claim_account,
+    }
+}
+
 /// Derive all JupLend CPI accounts from a bank's integration_acc_1.
 /// Fetches the Lending account from RPC and derives all PDAs.
 pub fn derive_juplend_cpi_accounts(
@@ -350,25 +362,12 @@ pub fn derive_juplend_cpi_accounts(
     let bank_mint_account = rpc_client.get_account(&bank.mint)?;
     let token_program = bank_mint_account.owner;
 
-    let (lending_admin, _) = find_juplend_lending_admin();
-    let (rate_model, _) = find_juplend_rate_model(&bank.mint);
-    let (liquidity, _) = find_juplend_liquidity();
-    let vault = find_juplend_vault(&bank.mint, &token_program);
-    let (claim_account, _) = find_juplend_claim_account(liquidity_vault_authority, &bank.mint);
-    let (rewards_rate_model, _) = find_juplend_rewards_rate_model(&bank.mint);
-
-    Ok(JuplendCpiAccounts {
-        f_token_mint: lending.f_token_mint,
-        lending_admin,
-        supply_token_reserves_liquidity: lending.token_reserves_liquidity,
-        lending_supply_position_on_liquidity: lending.supply_position_on_liquidity,
-        rate_model,
-        vault,
-        liquidity,
-        liquidity_program: JUPLEND_LIQUIDITY_PROGRAM_ID,
-        rewards_rate_model,
-        claim_account,
-    })
+    Ok(derive_juplend_cpi_accounts_for_lending(
+        lending,
+        &bank.mint,
+        &token_program,
+        liquidity_vault_authority,
+    ))
 }
 
 pub const EXP_10_I80F48: [I80F48; 15] = [
@@ -577,7 +576,115 @@ pub fn load_bank_oracle_account_metas(bank: &Bank) -> Vec<AccountMeta> {
         .collect()
 }
 
-
+/// Convert a UI amount to native token units using I80F48 precision.
 pub fn ui_to_native(ui_amount: f64, decimals: u8) -> u64 {
-    (ui_amount * (10u64.pow(decimals as u32) as f64)) as u64
+    (I80F48::from_num(ui_amount) * EXP_10_I80F48[decimals as usize])
+        .floor()
+        .to_num::<u64>()
+}
+
+// ---------------------------------------------------------------------------
+// Kamino refresh instruction builders
+// ---------------------------------------------------------------------------
+
+const KAMINO_PROGRAM_ID: Pubkey =
+    solana_sdk::pubkey!("KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
+
+/// Build a standalone `refreshReserve` instruction for the Kamino program.
+///
+/// Must be prepended before any Kamino deposit or withdraw to ensure the
+/// reserve is non-stale in the same slot.
+pub fn build_kamino_refresh_reserve_ix(
+    reserve: Pubkey,
+    lending_market: Pubkey,
+    pyth_oracle: Option<Pubkey>,
+    switchboard_price_oracle: Option<Pubkey>,
+    switchboard_twap_oracle: Option<Pubkey>,
+    scope_prices: Option<Pubkey>,
+) -> Instruction {
+    let discriminator = hash(b"global:refresh_reserve").to_bytes();
+
+    let program_id_key = KAMINO_PROGRAM_ID;
+
+    let mut accounts = vec![
+        AccountMeta::new(reserve, false),
+        AccountMeta::new_readonly(lending_market, false),
+    ];
+
+    // Optional oracle accounts — pass program_id as placeholder for None (Kamino convention)
+    accounts.push(AccountMeta::new_readonly(
+        pyth_oracle.unwrap_or(program_id_key),
+        false,
+    ));
+    accounts.push(AccountMeta::new_readonly(
+        switchboard_price_oracle.unwrap_or(program_id_key),
+        false,
+    ));
+    accounts.push(AccountMeta::new_readonly(
+        switchboard_twap_oracle.unwrap_or(program_id_key),
+        false,
+    ));
+    accounts.push(AccountMeta::new_readonly(
+        scope_prices.unwrap_or(program_id_key),
+        false,
+    ));
+
+    Instruction {
+        program_id: program_id_key,
+        accounts,
+        data: discriminator[..8].to_vec(),
+    }
+}
+
+/// Build a standalone `refreshObligation` instruction for the Kamino program.
+///
+/// Must be prepended before any Kamino deposit or withdraw to ensure the
+/// obligation is non-stale in the same slot.
+pub fn build_kamino_refresh_obligation_ix(
+    obligation: Pubkey,
+    lending_market: Pubkey,
+    reserve: Pubkey,
+) -> Instruction {
+    let discriminator = hash(b"global:refresh_obligation").to_bytes();
+
+    Instruction {
+        program_id: KAMINO_PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new_readonly(lending_market, false),
+            AccountMeta::new(obligation, false),
+            // Remaining accounts: one writable entry per obligation deposit position
+            AccountMeta::new(reserve, false),
+        ],
+        data: discriminator[..8].to_vec(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WSOL wrapping helpers
+// ---------------------------------------------------------------------------
+
+/// Build instructions to wrap SOL into a WSOL ATA.
+///
+/// Returns instructions to: create ATA (idempotent), transfer SOL, sync native balance.
+pub fn build_wsol_wrap_ixs(payer: &Pubkey, native_amount: u64) -> Vec<Instruction> {
+    let wsol_mint = spl_token::native_mint::id();
+    let wsol_ata = anchor_spl::associated_token::get_associated_token_address_with_program_id(
+        payer,
+        &wsol_mint,
+        &spl_token::id(),
+    );
+
+    vec![
+        // Create ATA idempotently
+        spl_associated_token_account::instruction::create_associated_token_account_idempotent(
+            payer,
+            payer,
+            &wsol_mint,
+            &spl_token::id(),
+        ),
+        // Transfer SOL to the WSOL ATA
+        system_instruction::transfer(payer, &wsol_ata, native_amount),
+        // Sync the native balance so the ATA reflects the deposit
+        spl_token::instruction::sync_native(&spl_token::id(), &wsol_ata).unwrap(),
+    ]
 }

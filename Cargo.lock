@@ -3130,7 +3130,7 @@ dependencies = [
 
 [[package]]
 name = "marginfi-v2-cli"
-version = "0.1.6"
+version = "0.1.8"
 dependencies = [
  "anchor-client",
  "anchor-spl",
@@ -3144,11 +3144,13 @@ dependencies = [
  "clap 4.5.60",
  "comfy-table",
  "dirs",
+ "drift-mocks",
  "env_logger",
  "fixed",
  "fixed-macro",
  "hex",
  "juplend-mocks",
+ "kamino-mocks",
  "log",
  "marginfi",
  "marginfi-type-crate",

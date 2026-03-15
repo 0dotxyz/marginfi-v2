@@ -1,6 +1,6 @@
 # marginfi v2 CLI (`mfi`)
 
-Production-oriented Rust CLI for interacting with the `marginfi` on-chain program. Replaces the legacy TypeScript scripts with a scalable, multisig-first workflow.
+Production-oriented Rust CLI for interacting with the `marginfi` on-chain program.
 
 ## Build
 
@@ -14,210 +14,278 @@ Install locally:
 cargo install --path clients/rust/marginfi-cli --locked --force
 ```
 
-## Architecture
+GitHub release builds are published for tagged versions as archives containing the `mfi` binary:
 
-The CLI is split into clear layers:
+```bash
+gh release download mfi-v0.1.8 --pattern 'mfi-*'
+```
 
-- `src/commands/*` — clap command definitions + argument parsing
-- `src/processor/*` — instruction builders/executors grouped by domain
-- `src/config.rs` / `src/profile.rs` — runtime/profile loading and tx mode resolution
-- `src/configs.rs` — JSON config file structs for complex instructions
-- `src/utils.rs` — shared PDA/account-meta/tx helpers
-- `src/output.rs` — human/JSON output formatters
+## Help And Discovery
 
-Processor domains:
+Use the built-in help as the live source of truth for flags and examples:
 
-| Module | Scope |
-|--------|-------|
-| `account` | User actions (deposit/withdraw/borrow/repay/orders/liquidation) |
-| `bank_ops` | Bank admin, oracle, rate-limit, curve, e-mode, metadata |
-| `group_ops` | Group lifecycle, bank creation/clone, bankruptcy |
-| `group` | Lookup table maintenance |
-| `integrations` | Kamino, Drift, JupLend CPI integrations |
-| `fee` | Fee-state, panic pause/unpause, staked settings |
-| `oracle` | Oracle feed inspection utilities |
-| `profile_ops` | Profile CRUD |
+```bash
+mfi -h
+mfi <command> -h
+mfi <command> <subcommand> -h
+```
+
+Main command groups:
+
+```text
+mfi group
+mfi bank
+mfi profile
+mfi account
+mfi kamino
+mfi drift
+mfi juplend
+mfi util
+```
 
 ## Transaction Behavior
 
-**Default (multisig mode):** Every transaction is simulated first. On success, the unsigned transaction is serialized as base58 and printed to stdout — ready for Squads or other multisig workflows.
-
-**`--send-tx` flag:** After successful simulation, the transaction is signed and broadcast on-chain. Use this for staging/localnet or when operating without a multisig.
-
-If simulation fails, the CLI aborts with program logs — it never silently swallows errors.
+- Default behavior is send mode: simulate first, then sign and broadcast on success.
+- `--no-send-tx` simulates and prints an unsigned base58 transaction for external signing or multisig workflows.
+- `-y` or `--skip-confirmation` skips the interactive confirmation prompt for state-changing commands.
+- Compute budget instructions are only added when `--compute-unit-price` and/or `--compute-unit-limit` are passed.
+- `--json` is useful for machine-oriented output where supported.
 
 ## Profiles
 
+Typical setup:
+
 ```bash
-# Create a profile
 mfi profile create \
   --name mainnet \
   --cluster mainnet \
   --keypair-path ~/.config/solana/id.json \
   --rpc-url https://api.mainnet-beta.solana.com
 
-# Set active profile
 mfi profile set mainnet
 ```
+
+Use a different saved profile for one command only:
+
+```bash
+mfi --profile staging bank get <BANK_PUBKEY>
+```
+
+Profile defaults matter for many commands:
+
+- `mfi group get` uses the active profile group when omitted.
+- `mfi group propagate-fee` can use the active profile group when omitted.
+- `mfi account get` and some account-management flows can use the active profile account.
+- `mfi util show-oracle-ages` defaults to the active profile group before falling back to the hardcoded mainnet group.
 
 ## Global Flags
 
 | Flag | Description |
 |------|-------------|
-| `--send-tx` | Sign and broadcast (default: output unsigned base58) |
-| `--skip-confirmation` / `-y` | Skip interactive confirmation prompts |
+| `--profile <NAME>` | Use a saved profile for this command only |
+| `--no-send-tx` | Output unsigned base58 instead of signing and broadcasting |
+| `-y`, `--skip-confirmation` | Skip interactive confirmation prompts |
 | `--compute-unit-price <u64>` | Priority fee in micro-lamports |
 | `--compute-unit-limit <u32>` | Compute unit limit override |
-| `--lookup-table <PUBKEY>` | Address lookup table (repeatable) |
-| `--legacy-tx` | Force legacy transaction format |
+| `-l`, `--lookup-table <PUBKEY>` | Address lookup table (repeatable) |
 | `--json` | JSON output mode |
 
-## Command Groups
+## Config Files
 
-```
-mfi group ...         # Group management
-mfi bank ...          # Bank configuration
-mfi account ...       # Account operations
-mfi integration ...   # DeFi integrations (Kamino, Drift, JupLend)
-mfi util ...          # Debug/utility commands
-mfi profile ...       # Profile management
-```
+Complex workflows accept `--config <path>`. Use `--config-example` to print a template.
 
-## JSON Config Files
-
-Complex instructions accept `--config <path>` with a JSON file instead of many CLI flags. Use `--config-example` to print an example JSON template.
+Examples:
 
 ```bash
-# Print example config
-mfi group add-bank --config-example
-
-# Use a config file
-mfi group add-bank --config ./add-bank.json
-
-# Also supported:
-mfi group update --config ./group-update.json
-mfi group init-fee-state --config ./fee-state.json
-mfi group edit-fee-state --config ./fee-state.json
-mfi bank update --config ./bank-config.json
+mfi bank add --config-example
+mfi bank add --config ./configs/bank/add/config.json.example
+mfi bank update <BANK_PUBKEY> --config ./configs/bank/update/config.json.example
+mfi group create --config ./configs/group/create/config.json.example
+mfi kamino add-bank --config ./configs/kamino/add-bank/config.json.example
+mfi drift withdraw --config ./configs/drift/withdraw/config.json.example
+mfi juplend add-bank --config ./configs/juplend/add-bank/config.json.example
 ```
 
-## Group Commands
+Config templates live under `clients/rust/marginfi-cli/configs/`.
+See [configs/README.md](/Users/femi0x/Projects/marginfi-v2/clients/rust/marginfi-cli/configs/README.md) for the layout.
 
-| Command | Description |
-|---------|-------------|
-| `get [group]` | Display group details |
-| `get-all` | List all groups |
-| `create` | Create a new group |
-| `update` | Update admin roles (`--config` supported) |
-| `add-bank` | Add a lending bank (`--config` supported) |
-| `clone-bank` | Clone a mainnet bank for staging |
-| `handle-bankruptcy` | Handle bankruptcy for accounts |
-| `update-lookup-table` | Update address lookup table |
-| `check-lookup-table` | Check ALT status |
-| `init-fee-state` | Initialize global fee state (`--config` supported) |
-| `edit-fee-state` | Edit global fee state (`--config` supported) |
-| `config-group-fee` | Enable/disable program fee collection |
-| `propagate-fee` | Propagate fee state to a group |
-| `panic-pause` | Emergency pause all operations |
-| `panic-unpause` | Admin unpause |
-| `panic-unpause-permissionless` | Permissionless unpause after timeout |
-| `init-staked-settings` | Initialize staked collateral settings |
-| `edit-staked-settings` | Edit staked collateral settings |
-| `propagate-staked-settings` | Propagate staked settings to a bank |
-| `configure-rate-limits` | Group-level outflow rate limits |
-| `configure-deleverage-limit` | Daily deleverage withdrawal limit |
+## Input Minimization Rules
 
-## Bank Commands
+The CLI now derives several deterministic accounts so JSON configs and direct inputs can stay minimal:
 
-| Command | Description |
-|---------|-------------|
-| `get <pubkey>` | Display bank details |
-| `get-all [group]` | List all banks in a group |
-| `update` | Full bank config update (`--config` supported) |
-| `configure-interest-only` | Curve-admin interest rate update |
-| `configure-limits-only` | Limit-admin deposit/borrow limits |
-| `update-oracle` | Change oracle type and key |
-| `force-tokenless-repay-complete` | Mark tokenless repay workflow complete |
-| `inspect-price-oracle` | Show oracle price and metadata |
-| `collect-fees` | Collect accrued protocol fees |
-| `withdraw-fees` | Withdraw from fee vault |
-| `withdraw-insurance` | Withdraw from insurance vault |
-| `withdraw-fees-permissionless` | Permissionless fee withdrawal |
-| `update-fees-destination` | Change fee destination address |
-| `close` | Close a bank (must be empty) |
-| `accrue-interest` | Trigger interest accrual |
-| `set-fixed-price` | Override oracle with a fixed price |
-| `configure-emode` | Set e-mode tag |
-| `clone-emode` | Copy e-mode settings between banks |
-| `migrate-curve` | Migrate legacy curve to 7-point format |
-| `pulse-price-cache` | Refresh cached oracle price |
-| `configure-rate-limits` | Bank-level outflow limits |
-| `init-metadata` | Initialize on-chain metadata |
-| `write-metadata` | Write ticker/description to metadata |
+- Standard bank creation: `group` defaults to the active profile group, and `seed` can be omitted to auto-select the next free bank seed.
+- Staked bank creation: `group` defaults to the active profile group, and `seed` can be omitted.
+- `mfi juplend add-bank`: provide `mint` or `juplend_lending`; the CLI derives the other plus `f_token_mint`.
+- `mfi kamino harvest-reward`: provide only the roots `bank_pk`, `reward_index`, `global_config`, `reward_mint`, and optional `scope_prices`; the CLI derives user and farm reward accounts.
+- `mfi drift withdraw`: reward oracle and reward mint are derived from each reward spot market, so configs only need the reward spot market pubkeys.
+- `mfi group propagate-fee` and `mfi util show-oracle-ages` can derive the target group from the active profile.
 
-## Account Commands
+## Command Reference
 
-| Command | Description |
-|---------|-------------|
-| `list` | List all accounts for the authority |
-| `use <pubkey>` | Set default account |
-| `get [pubkey]` | Display account with balances |
-| `create` | Create new account |
-| `create-pda` | Create PDA-based account |
-| `close` | Close default account |
-| `deposit` | Deposit tokens |
-| `withdraw` | Withdraw tokens |
-| `borrow` | Borrow tokens |
-| `repay` | Repay borrowed tokens |
-| `close-balance` | Close zero-balance position |
-| `transfer` | Transfer account authority |
-| `liquidate` | Liquidate an account |
-| `liquidate-receivership` | Receivership liquidation bundle |
-| `init-liq-record` | Initialize liquidation record PDA |
-| `set-freeze` | Freeze/unfreeze account (admin) |
-| `pulse-health` | Pulse health check |
-| `place-order` | Place stop-loss/take-profit order |
-| `close-order` | Close an existing order |
-| `keeper-close-order` | Keeper permissionless close |
-| `execute-order-keeper` | Keeper execute order in one tx |
-| `set-keeper-close-flags` | Set keeper close flags |
+### `profile`
 
-## Integration Commands
+| Command | Purpose |
+|--------|---------|
+| `mfi profile create` | Create a new CLI profile with cluster, keypair, RPC URL, and optional defaults |
+| `mfi profile show [NAME]` | Show the active profile or a named profile |
+| `mfi profile list` | List saved profiles |
+| `mfi profile set <NAME>` | Switch the active profile |
+| `mfi profile update <NAME>` | Update profile settings such as RPC URL, keypair, group, or account |
+| `mfi profile delete <NAME>` | Delete a saved profile |
 
-All JupLend commands auto-derive CPI accounts from the bank — only the bank pubkey is required.
+### `group`
 
-| Command | Description |
-|---------|-------------|
-| **Kamino** | |
-| `kamino-init-obligation` | Initialize Kamino obligation |
-| `kamino-deposit` | Deposit into Kamino reserve |
-| `kamino-withdraw` | Withdraw from Kamino reserve |
-| `kamino-harvest-reward` | Harvest Kamino farm rewards |
-| **Drift** | |
-| `drift-init-user` | Initialize Drift user account |
-| `drift-deposit` | Deposit into Drift |
-| `drift-withdraw` | Withdraw from Drift |
-| `drift-harvest-reward` | Harvest Drift rewards |
-| **JupLend** | |
-| `juplend-init-position` | Initialize JupLend position |
-| `juplend-deposit` | Deposit into JupLend |
-| `juplend-withdraw` | Withdraw from JupLend |
+| Command | Purpose |
+|--------|---------|
+| `mfi group get [GROUP_PUBKEY]` | Show one group and its banks |
+| `mfi group get-all` | List all groups |
+| `mfi group create` | Create a group, optionally updating the profile group with `--override` |
+| `mfi group update` | Update group admins and e-mode caps |
+| `mfi group handle-bankruptcy <ACCOUNT...>` | Settle bad debt for one or more accounts |
+| `mfi group update-lookup-table` | Extend the group address lookup table |
+| `mfi group check-lookup-table` | Inspect lookup table status |
+| `mfi group init-fee-state` | Create the shared fee-state account |
+| `mfi group edit-fee-state` | Edit fee-state parameters |
+| `mfi group config-group-fee` | Enable or disable program fee collection |
+| `mfi group propagate-fee` | Push the shared fee-state to a group |
+| `mfi group panic-pause` | Emergency pause all group activity |
+| `mfi group panic-unpause` | Admin unpause |
+| `mfi group panic-unpause-permissionless` | Permissionless unpause after timeout |
+| `mfi group init-staked-settings` | Create shared settings for staked collateral banks |
+| `mfi group edit-staked-settings` | Update shared staked collateral settings |
+| `mfi group propagate-staked-settings <BANK_PUBKEY>` | Push shared staked settings to one bank |
+| `mfi group configure-rate-limits` | Set hourly and daily group outflow caps |
+| `mfi group configure-deleverage-limit` | Set the daily deleverage withdrawal cap |
 
-## Unimplemented Program Instructions
+### `bank`
 
-The following marginfi program instructions are not yet exposed in the CLI:
+| Command | Purpose |
+|--------|---------|
+| `mfi bank add` | Create a standard bank |
+| `mfi bank add-staked` | Create a staked collateral bank |
+| `mfi bank clone` | Clone a source bank into a target group with a chosen seed |
+| `mfi bank get <BANK_PUBKEY>` | Show one bank |
+| `mfi bank get-all [GROUP_PUBKEY]` | List banks in a group |
+| `mfi bank update <BANK_PUBKEY>` | Full config update for an existing bank |
+| `mfi bank configure-interest-only <BANK_PUBKEY>` | Update only the interest-rate curve and fee APRs |
+| `mfi bank configure-limits-only <BANK_PUBKEY>` | Update only deposit, borrow, and init limits |
+| `mfi bank update-oracle <BANK_PUBKEY>` | Change oracle type and oracle account |
+| `mfi bank force-tokenless-repay-complete <BANK_PUBKEY>` | Complete the tokenless repay workflow |
+| `mfi bank inspect-price-oracle <BANK_PUBKEY>` | Show current oracle state for a bank |
+| `mfi bank collect-fees <BANK_PUBKEY>` | Collect accrued fees into the fee vault |
+| `mfi bank withdraw-fees <BANK_PUBKEY> <AMOUNT>` | Withdraw collected fees |
+| `mfi bank withdraw-insurance <BANK_PUBKEY> <AMOUNT>` | Withdraw insurance funds |
+| `mfi bank close <BANK_PUBKEY>` | Close an empty bank |
+| `mfi bank accrue-interest <BANK_PUBKEY>` | Trigger interest accrual |
+| `mfi bank set-fixed-price <BANK_PUBKEY>` | Override a bank with a fixed price |
+| `mfi bank configure-emode <BANK_PUBKEY>` | Set the bank e-mode tag |
+| `mfi bank clone-emode` | Copy e-mode settings between banks |
+| `mfi bank migrate-curve <BANK_PUBKEY>` | Convert a legacy curve to the 7-point format |
+| `mfi bank pulse-price-cache <BANK_PUBKEY>` | Refresh cached price data |
+| `mfi bank configure-rate-limits <BANK_PUBKEY>` | Set hourly and daily bank outflow caps |
+| `mfi bank withdraw-fees-permissionless <BANK_PUBKEY>` | Permissionless fee withdrawal |
+| `mfi bank update-fees-destination <BANK_PUBKEY>` | Change the fee destination |
+| `mfi bank init-metadata <BANK_PUBKEY>` | Create the on-chain metadata account |
+| `mfi bank write-metadata <BANK_PUBKEY>` | Write ticker and description metadata |
+| `mfi bank sync-metadata` | Pull metadata from a source URL and write it on-chain |
 
-- `lending_account_start_flashloan` / `lending_account_end_flashloan` — flash loan operations
-- `lending_pool_add_bank_permissionless` — permissionless bank creation
-- `lending_pool_configure_bank_oracle` (7-point curve variant)
-- `set_account_flag` — account flag management
-- `lending_account_authorize_address` / `lending_account_deauthorize_address` — delegated authority
-- Emissions instructions (`setup_emissions`, `update_emissions`, `claim_emissions`) — intentionally removed
-- Solend integration instructions — intentionally excluded
+### `account`
 
-## Notes
+| Command | Purpose |
+|--------|---------|
+| `mfi account list` | List marginfi accounts for the active authority |
+| `mfi account use <ACCOUNT_PUBKEY>` | Set the default account on the current profile |
+| `mfi account get [ACCOUNT_PUBKEY]` | Show one account and its balances |
+| `mfi account create` | Create a new account |
+| `mfi account close` | Close the default account |
+| `mfi account create-pda <INDEX>` | Create a PDA-based account |
+| `mfi account deposit <BANK_PUBKEY> <UI_AMOUNT>` | Deposit tokens into a bank |
+| `mfi account withdraw <BANK_PUBKEY> <UI_AMOUNT>` | Withdraw tokens from a bank |
+| `mfi account borrow <BANK_PUBKEY> <UI_AMOUNT>` | Borrow from a bank |
+| `mfi account repay <BANK_PUBKEY> <UI_AMOUNT>` | Repay borrowed tokens |
+| `mfi account close-balance <BANK_PUBKEY>` | Close a zero-balance position |
+| `mfi account transfer <NEW_AUTHORITY_PUBKEY>` | Transfer account authority |
+| `mfi account liquidate` | Liquidate an undercollateralized account |
+| `mfi account init-liq-record` | Initialize the liquidation record PDA |
+| `mfi account liquidate-receivership` | Run the receivership liquidation flow |
+| `mfi account place-order` | Place a stop-loss or take-profit order |
+| `mfi account close-order <ORDER_PUBKEY>` | Close an order account |
+| `mfi account keeper-close-order` | Keeper close an order |
+| `mfi account execute-order-keeper` | Execute a keeper order with optional extra instructions |
+| `mfi account set-keeper-close-flags` | Set or clear keeper close flags |
+| `mfi account set-freeze <ACCOUNT_PUBKEY>` | Freeze or unfreeze an account |
+| `mfi account pulse-health [ACCOUNT_PUBKEY]` | Refresh and print account health |
 
-- Banks are specified by pubkey only (no symbol shortcuts).
-- Emissions mutation instructions were intentionally removed from the command surface.
-- Token-2022 mints are auto-detected — the CLI uses the correct token program for fee/insurance vault operations.
-- Multi-oracle setups (e.g., StakedWithPythPush) are handled correctly for bank observation keys.
+### `kamino`
+
+Use the `kamino` command group for Kamino integration banks and reserve interactions:
+
+| Command | Purpose |
+|--------|---------|
+| `mfi kamino add-bank` | Create a Kamino integration bank |
+| `mfi kamino init-obligation` | Initialize the Kamino obligation used by the bank |
+| `mfi kamino deposit` | Deposit through marginfi into Kamino |
+| `mfi kamino withdraw` | Withdraw through marginfi from Kamino |
+| `mfi kamino harvest-reward` | Harvest Kamino farm rewards |
+
+Important note:
+
+- `kamino harvest-reward` now expects only the root fields. Do not manually provide derived user-state, farm-state, or reward-vault accounts in config.
+
+### `drift`
+
+Use the `drift` command group for Drift integration banks and spot market interactions:
+
+| Command | Purpose |
+|--------|---------|
+| `mfi drift add-bank` | Create a Drift integration bank |
+| `mfi drift init-user` | Initialize the Drift user used by the bank |
+| `mfi drift deposit` | Deposit through marginfi into Drift |
+| `mfi drift withdraw` | Withdraw through marginfi from Drift |
+| `mfi drift harvest-reward` | Harvest Drift rewards |
+
+Important note:
+
+- `drift withdraw` only needs reward spot market pubkeys for extra reward handling. Reward mint and oracle are derived from the spot market state.
+
+### `juplend`
+
+Use the `juplend` command group for JupLend integration banks and positions:
+
+| Command | Purpose |
+|--------|---------|
+| `mfi juplend add-bank` | Create a JupLend integration bank |
+| `mfi juplend init-position <BANK_PUBKEY> --amount <NATIVE_AMOUNT>` | Initialize the JupLend position PDA |
+| `mfi juplend deposit <BANK_PUBKEY> <UI_AMOUNT>` | Deposit through marginfi into JupLend |
+| `mfi juplend withdraw <BANK_PUBKEY> <UI_AMOUNT>` | Withdraw through marginfi from JupLend |
+
+Important notes:
+
+- For JupLend bank creation, the CLI accepts `mint` or `juplend_lending` and derives the other.
+- `f_token_mint` is derived and should not be provided manually.
+- Supported oracle setups are `juplendPythPull` and `juplendSwitchboardPull`.
+
+### `util`
+
+| Command | Purpose |
+|--------|---------|
+| `mfi util inspect-size` | Print sizes of key on-chain account types |
+| `mfi util make-test-i80f48` | Generate test vectors for fixed-point numbers |
+| `mfi util show-oracle-ages` | Inspect oracle ages for every bank in a group |
+| `mfi util inspect-pyth-push-oracle-feed <PUBKEY>` | Inspect a Pyth push feed account |
+| `mfi util find-pyth-push <FEED_ID_HEX>` | Search for Pyth push oracle accounts by feed ID |
+| `mfi util inspect-swb-pull-feed <PUBKEY>` | Inspect a Switchboard pull feed account |
+
+`find-pyth-push` keeps `find-pyth-pull` as an alias.
+
+## Common Examples
+
+```bash
+mfi group get
+mfi group create --config ./clients/rust/marginfi-cli/configs/group/create/config.json.example
+mfi bank add --config ./clients/rust/marginfi-cli/configs/bank/add/config.json.example
+mfi account deposit <BANK_PUBKEY> 10
+mfi kamino harvest-reward --config ./clients/rust/marginfi-cli/configs/kamino/harvest-reward/config.json.example
+mfi drift withdraw --config ./clients/rust/marginfi-cli/configs/drift/withdraw/config.json.example
+mfi juplend add-bank --config ./clients/rust/marginfi-cli/configs/juplend/add-bank/config.json.example
+```

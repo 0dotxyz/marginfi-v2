@@ -1,0 +1,9 @@
+{
+  "oracle": "<ORACLE_PUBKEY>",
+  "asset_weight_init": 0.75,
+  "asset_weight_maint": 0.85,
+  "deposit_limit": 2000000,
+  "total_asset_value_init_limit": 50000000,
+  "oracle_max_age": 70,
+  "risk_tier": "collateral"
+}

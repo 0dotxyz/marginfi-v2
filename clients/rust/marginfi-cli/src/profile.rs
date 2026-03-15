@@ -74,16 +74,16 @@ impl Profile {
         let multisig = self.multisig;
 
         let send_tx = match global_options {
-            Some(options) => options.send_tx,
-            None => false,
+            Some(options) => !options.no_send_tx,
+            None => true,
         };
         let cluster = self.cluster.clone();
         let program_id = match self.program_id {
         Some(pid) => pid,
         None => {
             match cluster {
-                Cluster::Localnet => pubkey!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"),
-                Cluster::Devnet => pubkey!("mf2iDQbVTAE3tT4tgAZBhBAmKUW56GsXX7H3oeH4atr"),
+                Cluster::Localnet => pubkey!("2jGhuVUuy3umdzByFx8sNWUAaf5vaeuDm78RDPEnhrMr"),
+                Cluster::Devnet => pubkey!("neetcne3Ctrrud7vLdt2ypMm21gZHGN2mCmqWaMVcBQ"),
                 Cluster::Mainnet => pubkey!("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA"),
                 _ => bail!("cluster {:?} does not have a default target program ID, please provide it through the --pid option", cluster)
             }
@@ -111,16 +111,15 @@ impl Profile {
                 format!("unable to build marginfi program client for {}", program_id)
             })?;
 
-        let (legacy_tx, json_output, compute_unit_price, compute_unit_limit, lookup_tables) =
+        let (json_output, compute_unit_price, compute_unit_limit, lookup_tables) =
             match global_options {
                 Some(opts) => (
-                    opts.legacy_tx,
                     opts.json_output,
                     opts.compute_unit_price,
                     opts.compute_unit_limit,
                     opts.lookup_tables.clone(),
                 ),
-                None => (false, false, None, None, vec![]),
+                None => (false, None, None, vec![]),
             };
 
         Ok(Config {
@@ -130,7 +129,6 @@ impl Profile {
             program_id,
             commitment,
             send_tx,
-            legacy_tx,
             json_output,
             compute_unit_price,
             compute_unit_limit,
@@ -194,9 +192,13 @@ impl Profile {
         Ok(())
     }
 
-    pub fn get_marginfi_account(&self) -> Pubkey {
-        self.marginfi_account
-            .unwrap_or_else(|| panic!("No marginfi account set for profile \"{}\"", self.name))
+    pub fn get_marginfi_account(&self) -> Result<Pubkey> {
+        self.marginfi_account.ok_or_else(|| {
+            anyhow!(
+                "No default marginfi account set for profile \"{}\". Use `mfi account list`, `mfi account use <ACCOUNT>`, or `mfi account create`.",
+                self.name
+            )
+        })
     }
 
     pub fn set_marginfi_group(&mut self, address: Pubkey) -> Result<()> {
@@ -206,9 +208,17 @@ impl Profile {
         Ok(())
     }
 
+    pub fn set_marginfi_account(&mut self, address: Option<Pubkey>) -> Result<()> {
+        self.marginfi_account = address;
+        self.write_to_file()?;
+
+        Ok(())
+    }
+
     fn write_to_file(&self) -> Result<()> {
         let cli_config_dir = get_cli_config_dir();
         let cli_profiles_dir = cli_config_dir.join("profiles");
+        fs::create_dir_all(&cli_profiles_dir)?;
         let profile_file = cli_profiles_dir.join(self.name.clone() + ".json");
 
         fs::write(profile_file, serde_json::to_string(&self)?)?;

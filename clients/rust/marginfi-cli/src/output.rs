@@ -13,13 +13,103 @@ use {
     },
 };
 
+/// Clamp mint_decimals to the supported range to prevent panics.
+fn safe_decimals(bank: &Bank) -> usize {
+    (bank.mint_decimals as usize).min(EXP_10_I80F48.len() - 1)
+}
+
+fn bank_summary_json(address: &Pubkey, bank: &Bank) -> Value {
+    let decimals = safe_decimals(bank);
+    let total_deposits = bank
+        .get_asset_amount(bank.total_asset_shares.into())
+        .unwrap_or(I80F48::ZERO)
+        / EXP_10_I80F48[decimals];
+    let total_liabilities = bank
+        .get_liability_amount(bank.total_liability_shares.into())
+        .unwrap_or(I80F48::ZERO)
+        / EXP_10_I80F48[decimals];
+
+    json!({
+        "address": address.to_string(),
+        "mint": bank.mint.to_string(),
+        "deposits": total_deposits.to_string(),
+        "borrows": total_liabilities.to_string(),
+        "state": format!("{:?}", bank.config.operational_state),
+        "risk_tier": format!("{:?}", bank.config.risk_tier),
+    })
+}
+
+fn account_balances_json(
+    marginfi_account: &MarginfiAccount,
+    banks: &HashMap<Pubkey, Bank>,
+) -> Vec<Value> {
+    marginfi_account
+        .lending_account
+        .get_active_balances_iter()
+        .filter_map(|balance| {
+            let bank = banks.get(&balance.bank_pk)?;
+            let decimals = safe_decimals(bank);
+
+            let (side, amount) = if balance.is_empty(BalanceSide::Assets).not() {
+                let v = bank
+                    .get_asset_amount(balance.asset_shares.into())
+                    .unwrap_or(I80F48::ZERO)
+                    / EXP_10_I80F48[decimals];
+                ("deposit", v)
+            } else if balance.is_empty(BalanceSide::Liabilities).not() {
+                let v = bank
+                    .get_liability_amount(balance.liability_shares.into())
+                    .unwrap_or(I80F48::ZERO)
+                    / EXP_10_I80F48[decimals];
+                ("borrow", v)
+            } else {
+                return None;
+            };
+
+            Some(json!({
+                "bank": balance.bank_pk.to_string(),
+                "mint": bank.mint.to_string(),
+                "side": side,
+                "amount": format!("{:.6}", amount),
+            }))
+        })
+        .collect()
+}
+
+pub fn account_detail_json(
+    address: Pubkey,
+    marginfi_account: &MarginfiAccount,
+    banks: &HashMap<Pubkey, Bank>,
+    default: bool,
+) -> Value {
+    json!({
+        "address": address.to_string(),
+        "group": marginfi_account.group.to_string(),
+        "authority": marginfi_account.authority.to_string(),
+        "default": default,
+        "balances": account_balances_json(marginfi_account, banks),
+    })
+}
+
+pub fn banks_table_json(banks: &[(Pubkey, Bank)]) -> Value {
+    Value::Array(
+        banks
+            .iter()
+            .map(|(address, bank)| bank_summary_json(address, bank))
+            .collect(),
+    )
+}
+
+pub fn group_detail_json(address: &Pubkey, group: &MarginfiGroup) -> Value {
+    json!({
+        "address": address.to_string(),
+        "admin": group.admin.to_string(),
+    })
+}
+
 /// Print a single bank in detail (verbose view).
-pub fn print_bank_detail(
-    address: &Pubkey,
-    bank: &Bank,
-    json: bool,
-) {
-    let decimals = bank.mint_decimals as usize;
+pub fn print_bank_detail(address: &Pubkey, bank: &Bank, json: bool) {
+    let decimals = safe_decimals(bank);
     let total_deposits = bank
         .get_asset_amount(bank.total_asset_shares.into())
         .unwrap_or(I80F48::ZERO)
@@ -150,29 +240,10 @@ pub fn print_bank_detail(
 /// Print banks in a summary table (for bank get-all / list).
 pub fn print_banks_table(banks: &[(Pubkey, Bank)], json: bool) {
     if json {
-        let arr: Vec<Value> = banks
-            .iter()
-            .map(|(address, bank)| {
-                let decimals = bank.mint_decimals as usize;
-                let total_deposits = bank
-                    .get_asset_amount(bank.total_asset_shares.into())
-                    .unwrap_or(I80F48::ZERO)
-                    / EXP_10_I80F48[decimals];
-                let total_liabilities = bank
-                    .get_liability_amount(bank.total_liability_shares.into())
-                    .unwrap_or(I80F48::ZERO)
-                    / EXP_10_I80F48[decimals];
-                json!({
-                    "address": address.to_string(),
-                    "mint": bank.mint.to_string(),
-                    "deposits": total_deposits.to_string(),
-                    "borrows": total_liabilities.to_string(),
-                    "state": format!("{:?}", bank.config.operational_state),
-                    "risk_tier": format!("{:?}", bank.config.risk_tier),
-                })
-            })
-            .collect();
-        println!("{}", serde_json::to_string_pretty(&arr).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&banks_table_json(banks)).unwrap()
+        );
         return;
     }
 
@@ -191,7 +262,7 @@ pub fn print_banks_table(banks: &[(Pubkey, Bank)], json: bool) {
     ]);
 
     for (address, bank) in banks {
-        let decimals = bank.mint_decimals as usize;
+        let decimals = safe_decimals(bank);
         let total_deposits = bank
             .get_asset_amount(bank.total_asset_shares.into())
             .unwrap_or(I80F48::ZERO)
@@ -228,45 +299,19 @@ pub fn print_account_detail(
     default: bool,
     json: bool,
 ) {
-    let balances: Vec<Value> = marginfi_account
-        .lending_account
-        .get_active_balances_iter()
-        .filter_map(|balance| {
-            let bank = banks.get(&balance.bank_pk)?;
-            let decimals = bank.mint_decimals as usize;
-
-            let (side, amount) = if balance.is_empty(BalanceSide::Assets).not() {
-                let v = bank.get_asset_amount(balance.asset_shares.into()).unwrap_or(I80F48::ZERO)
-                    / EXP_10_I80F48[decimals];
-                ("deposit", v)
-            } else if balance.is_empty(BalanceSide::Liabilities).not() {
-                let v = bank
-                    .get_liability_amount(balance.liability_shares.into())
-                    .unwrap_or(I80F48::ZERO)
-                    / EXP_10_I80F48[decimals];
-                ("borrow", v)
-            } else {
-                return None;
-            };
-
-            Some(json!({
-                "bank": balance.bank_pk.to_string(),
-                "mint": bank.mint.to_string(),
-                "side": side,
-                "amount": format!("{:.6}", amount),
-            }))
-        })
-        .collect();
+    let balances = account_balances_json(marginfi_account, banks);
 
     if json {
-        let val = json!({
-            "address": address.to_string(),
-            "group": marginfi_account.group.to_string(),
-            "authority": marginfi_account.authority.to_string(),
-            "default": default,
-            "balances": balances,
-        });
-        println!("{}", serde_json::to_string_pretty(&val).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&account_detail_json(
+                address,
+                marginfi_account,
+                banks,
+                default,
+            ))
+            .unwrap()
+        );
     } else {
         let label = if default { " (default)" } else { "" };
         println!("Account: {}{}", address, label);
@@ -285,12 +330,7 @@ pub fn print_account_detail(
             .load_preset(UTF8_FULL)
             .set_content_arrangement(ContentArrangement::Dynamic);
 
-        table.set_header(vec![
-            "Side",
-            "Amount",
-            "Bank",
-            "Mint",
-        ]);
+        table.set_header(vec!["Side", "Amount", "Bank", "Mint"]);
 
         for b in &balances {
             let side = b["side"].as_str().unwrap_or("");
@@ -329,11 +369,10 @@ pub fn print_account_detail(
 /// Print group info.
 pub fn print_group_detail(address: &Pubkey, group: &MarginfiGroup, json: bool) {
     if json {
-        let val = json!({
-            "address": address.to_string(),
-            "admin": group.admin.to_string(),
-        });
-        println!("{}", serde_json::to_string_pretty(&val).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&group_detail_json(address, group)).unwrap()
+        );
     } else {
         println!("Group: {}", address);
         println!("  Admin: {}", group.admin);

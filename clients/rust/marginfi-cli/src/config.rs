@@ -13,22 +13,17 @@ use {
 
 #[derive(Default, Debug, Parser)]
 pub struct GlobalOptions {
-    // /// Cluster override.
-    // #[clap(global = true, long = "cluster")]
-    // pub cluster: Option<Cluster>,
-    // /// Wallet override.
-    // #[clap(global = true, long = "wallet")]
-    // pub wallet: Option<WalletPath>,
-    // /// Program ID override.
-    // #[clap(global = true, long = "pid")]
-    // pub pid: Option<Pubkey>,
-    // /// Commitment.
-    // #[clap(global = true, long = "commitment")]
-    // pub commitment: Option<CommitmentLevel>,
-    /// Actually sign and broadcast the transaction.
-    /// By default, the CLI simulates and outputs unsigned base58 for Squads multisig.
-    #[clap(global = true, long = "send-tx", action, default_value_t = false)]
-    pub send_tx: bool,
+    #[clap(
+        global = true,
+        long = "profile",
+        help = "Use a saved profile for this command only"
+    )]
+    pub profile_name: Option<String>,
+
+    /// Do not sign and broadcast the transaction.
+    /// By default, the CLI simulates, signs, and sends the transaction.
+    #[clap(global = true, long = "no-send-tx", action, default_value_t = false)]
+    pub no_send_tx: bool,
 
     #[clap(
         global = true,
@@ -55,15 +50,6 @@ pub struct GlobalOptions {
 
     #[clap(
         global = true,
-        long = "legacy-tx",
-        action,
-        default_value_t = false,
-        help = "Force legacy transaction mode instead of versioned"
-    )]
-    pub legacy_tx: bool,
-
-    #[clap(
-        global = true,
         long = "json",
         action,
         default_value_t = false,
@@ -74,10 +60,10 @@ pub struct GlobalOptions {
 
 #[derive(Copy, Clone, Debug)]
 pub enum TxMode {
-    /// Default: simulate, output unsigned base58 for Squads multisig
-    MultisigOutput,
-    /// --send-tx: sign and broadcast
+    /// Default: simulate, sign, and broadcast
     SendTx,
+    /// --no-send-tx: simulate and output unsigned base58 for external signing
+    MultisigOutput,
 }
 
 pub enum CliSigner {
@@ -116,7 +102,6 @@ pub struct Config {
     #[allow(dead_code)]
     pub commitment: CommitmentConfig,
     pub send_tx: bool,
-    pub legacy_tx: bool,
     pub json_output: bool,
     pub compute_unit_price: Option<u64>,
     pub compute_unit_limit: Option<u32>,
@@ -127,9 +112,16 @@ pub struct Config {
 }
 
 impl Config {
-    /// Use this only for transations that have a separate fee payer and authority.
+    /// Payer encoded into instructions and output transactions.
+    ///
+    /// In `--no-send-tx` multisig mode this switches to the multisig so the emitted
+    /// payload can actually be signed and executed externally.
     pub fn explicit_fee_payer(&self) -> Pubkey {
-        self.fee_payer.pubkey()
+        if !self.send_tx {
+            self.multisig.unwrap_or(self.fee_payer.pubkey())
+        } else {
+            self.fee_payer.pubkey()
+        }
     }
 
     /// Either the fee payer or the multisig authority.
