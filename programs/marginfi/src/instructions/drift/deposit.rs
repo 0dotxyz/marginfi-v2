@@ -5,18 +5,14 @@ use crate::{
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            account_not_frozen_for_authority, calc_value, is_signer_authorized, BankAccountWrapper,
+            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
             LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        rate_limiter::{
-            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
-            GroupRateLimiterImpl,
-        },
     },
     utils::{
-        fetch_rate_limit_price_for_inflow, is_drift_asset_tag, validate_asset_tags,
-        validate_bank_state, InstructionKind,
+        is_drift_asset_tag, record_deposit_inflow, validate_asset_tags, validate_bank_state,
+        InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -88,7 +84,7 @@ pub fn drift_deposit<'info>(
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let mut group = ctx.accounts.group.load_mut()?;
+        let group = ctx.accounts.group.load()?;
         let clock = Clock::get()?;
 
         let mut bank_account = BankAccountWrapper::find_or_create(
@@ -100,30 +96,15 @@ pub fn drift_deposit<'info>(
         let scaled_balance_change_i80f48 = I80F48::from_num(scaled_balance_change);
         bank_account.deposit_no_repay(scaled_balance_change_i80f48)?;
 
-        // Record inflow so net-outflow windows release capacity.
-        if !should_skip_rate_limit(marginfi_account.account_flags) {
-            if bank.rate_limiter.is_enabled() {
-                bank.rate_limiter
-                    .record_inflow(amount, clock.unix_timestamp);
-            }
-
-            if group.rate_limiter.is_enabled() {
-                let rate_limit_price = fetch_rate_limit_price_for_inflow(&bank, &clock)?;
-                match rate_limit_price {
-                    Some(price) => {
-                        let usd_value =
-                            calc_value(I80F48::from_num(amount), price, bank.mint_decimals, None)?;
-                        group
-                            .rate_limiter
-                            .record_inflow(usd_value.to_num::<u64>(), clock.unix_timestamp);
-                    }
-                    None => {
-                        bank.rate_limiter.record_untracked_inflow(amount);
-                    }
-                }
-            }
-        }
-
+        record_deposit_inflow(
+            &mut bank,
+            &group,
+            ctx.accounts.group.key(),
+            ctx.accounts.bank.key(),
+            marginfi_account.account_flags,
+            amount,
+            &clock,
+        )?;
         // Update bank cache after modifying balances
         bank.update_bank_cache(&group)?;
 
@@ -149,7 +130,6 @@ pub fn drift_deposit<'info>(
 #[derive(Accounts)]
 pub struct DriftDeposit<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused

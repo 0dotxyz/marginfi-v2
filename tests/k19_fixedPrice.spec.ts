@@ -42,7 +42,6 @@ import {
   depositIx,
   borrowIx,
   composeRemainingAccounts,
-  composeRemainingAccountsByBalances,
   healthPulse,
   pulseBankPrice,
   repayIx,
@@ -531,15 +530,11 @@ describe("kx: Fixed Kamino price bank", () => {
     );
     await processBankrunTransaction(ctx, repayTx, [user.wallet]);
 
-    const accountStateAfterRepay =
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
-    const remaining = composeRemainingAccountsByBalances(
-      accountStateAfterRepay.lendingAccount.balances,
+    const remaining = composeRemainingAccounts(
       [
         [fixedKaminoBank, usdcReserve],
         [borrowBank, oracles.tokenAOracle.publicKey],
-      ],
-      fixedKaminoBank,
+      ].filter((group) => !group[0].equals(fixedKaminoBank))
     );
 
     const withdrawAllTx = new Transaction().add(
