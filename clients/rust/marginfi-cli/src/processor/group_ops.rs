@@ -82,6 +82,7 @@ pub struct GroupCreateConfigRequest {
     pub emode_admin: Option<Pubkey>,
     pub curve_admin: Option<Pubkey>,
     pub limit_admin: Option<Pubkey>,
+    pub flow_admin: Option<Pubkey>,
     pub emissions_admin: Option<Pubkey>,
     pub metadata_admin: Option<Pubkey>,
     pub risk_admin: Option<Pubkey>,
@@ -94,6 +95,7 @@ impl GroupCreateConfigRequest {
         self.emode_admin.is_none()
             && self.curve_admin.is_none()
             && self.limit_admin.is_none()
+            && self.flow_admin.is_none()
             && self.emissions_admin.is_none()
             && self.metadata_admin.is_none()
             && self.risk_admin.is_none()
@@ -234,6 +236,7 @@ pub fn group_create(
                 new_emode_admin: create_config.emode_admin,
                 new_curve_admin: create_config.curve_admin,
                 new_limit_admin: create_config.limit_admin,
+                new_flow_admin: create_config.flow_admin,
                 new_emissions_admin: create_config.emissions_admin,
                 new_metadata_admin: create_config.metadata_admin,
                 new_risk_admin: create_config.risk_admin,
@@ -266,6 +269,7 @@ pub fn group_configure(
     new_emode_admin: Option<Pubkey>,
     new_curve_admin: Option<Pubkey>,
     new_limit_admin: Option<Pubkey>,
+    new_flow_admin: Option<Pubkey>,
     new_emissions_admin: Option<Pubkey>,
     new_metadata_admin: Option<Pubkey>,
     new_risk_admin: Option<Pubkey>,
@@ -291,6 +295,7 @@ pub fn group_configure(
             new_emode_admin,
             new_curve_admin,
             new_limit_admin,
+            new_flow_admin,
             new_emissions_admin,
             new_metadata_admin,
             new_risk_admin,

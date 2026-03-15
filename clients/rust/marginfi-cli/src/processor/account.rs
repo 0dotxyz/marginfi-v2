@@ -674,7 +674,7 @@ pub fn marginfi_account_place_order(
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::MarginfiAccountPlaceOrder {
-            bank_keys: bank_keys,
+            bank_keys,
             trigger,
         }
         .data(),

@@ -300,7 +300,7 @@ pub fn dispatch(subcmd: DriftCommand, global_options: &GlobalOptions) -> Result<
             let group = c
                 .group
                 .as_deref()
-                .map(|s| configs::parse_pubkey(s))
+                .map(configs::parse_pubkey)
                 .transpose()?
                 .or(profile.marginfi_group)
                 .context("group required: set in config or profile")?;

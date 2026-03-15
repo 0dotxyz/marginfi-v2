@@ -55,6 +55,8 @@ pub enum GroupCommand {
         #[clap(long)]
         limit_admin: Option<Pubkey>,
         #[clap(long)]
+        flow_admin: Option<Pubkey>,
+        #[clap(long)]
         emissions_admin: Option<Pubkey>,
         #[clap(long)]
         metadata_admin: Option<Pubkey>,
@@ -87,6 +89,8 @@ pub enum GroupCommand {
         new_curve_admin: Option<Pubkey>,
         #[clap(long)]
         new_limit_admin: Option<Pubkey>,
+        #[clap(long)]
+        new_flow_admin: Option<Pubkey>,
         #[clap(long)]
         new_emissions_admin: Option<Pubkey>,
         #[clap(long)]
@@ -452,6 +456,7 @@ pub fn dispatch(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<
             emode_admin,
             curve_admin,
             limit_admin,
+            flow_admin,
             emissions_admin,
             metadata_admin,
             risk_admin,
@@ -475,6 +480,7 @@ pub fn dispatch(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<
                     emode_admin: configs::parse_optional_pubkey(&cfg.emode_admin)?,
                     curve_admin: configs::parse_optional_pubkey(&cfg.curve_admin)?,
                     limit_admin: configs::parse_optional_pubkey(&cfg.limit_admin)?,
+                    flow_admin: configs::parse_optional_pubkey(&cfg.flow_admin)?,
                     emissions_admin: configs::parse_optional_pubkey(&cfg.emissions_admin)?,
                     metadata_admin: configs::parse_optional_pubkey(&cfg.metadata_admin)?,
                     risk_admin: configs::parse_optional_pubkey(&cfg.risk_admin)?,
@@ -486,6 +492,7 @@ pub fn dispatch(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<
                     emode_admin,
                     curve_admin,
                     limit_admin,
+                    flow_admin,
                     emissions_admin,
                     metadata_admin,
                     risk_admin,
@@ -516,6 +523,7 @@ pub fn dispatch(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<
             new_emode_admin,
             new_curve_admin,
             new_limit_admin,
+            new_flow_admin,
             new_emissions_admin,
             new_metadata_admin,
             new_risk_admin,
@@ -535,6 +543,7 @@ pub fn dispatch(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<
                     configs::parse_optional_pubkey(&cfg.new_emode_admin)?,
                     configs::parse_optional_pubkey(&cfg.new_curve_admin)?,
                     configs::parse_optional_pubkey(&cfg.new_limit_admin)?,
+                    configs::parse_optional_pubkey(&cfg.new_flow_admin)?,
                     configs::parse_optional_pubkey(&cfg.new_emissions_admin)?,
                     configs::parse_optional_pubkey(&cfg.new_metadata_admin)?,
                     configs::parse_optional_pubkey(&cfg.new_risk_admin)?,
@@ -549,6 +558,7 @@ pub fn dispatch(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<
                     new_emode_admin,
                     new_curve_admin,
                     new_limit_admin,
+                    new_flow_admin,
                     new_emissions_admin,
                     new_metadata_admin,
                     new_risk_admin,

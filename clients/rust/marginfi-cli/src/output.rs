@@ -175,7 +175,7 @@ pub fn print_bank_detail(address: &Pubkey, bank: &Bank, json: bool) {
             .set_width(100);
 
         table.set_header(vec![
-            Cell::new(&format!("Bank: {}", address)),
+            Cell::new(format!("Bank: {}", address)),
             Cell::new("Value"),
         ]);
 
