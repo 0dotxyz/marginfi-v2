@@ -673,11 +673,7 @@ pub fn marginfi_account_place_order(
             system_program: system_program::id(),
         }
         .to_account_metas(Some(true)),
-        data: marginfi::instruction::MarginfiAccountPlaceOrder {
-            bank_keys,
-            trigger,
-        }
-        .data(),
+        data: marginfi::instruction::MarginfiAccountPlaceOrder { bank_keys, trigger }.data(),
     };
 
     let signing_keypairs = config.get_signers(false);
