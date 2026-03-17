@@ -17,6 +17,8 @@ from typing import Any
 
 
 DRIFT_KEEP_CANONICAL = {
+    "initialize",
+    "initialize_spot_market",
     "initialize_user",
     "initialize_user_stats",
     "update_user_pool_id",
@@ -26,6 +28,9 @@ DRIFT_KEEP_CANONICAL = {
 }
 
 JUPLEND_KEEP_CANONICAL = {
+    "init_lending_admin",
+    "init_lending",
+    "set_rewards_rate_model",
     "update_rate",
     "deposit",
     "withdraw",

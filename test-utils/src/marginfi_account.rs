@@ -1392,10 +1392,11 @@ impl MarginfiAccountFixture {
     pub async fn make_kamino_refresh_reserve_ix(&self, bank: &BankFixture) -> Instruction {
         let bank_state = bank.load().await;
         let (lending_market, pyth_oracle, scope_prices) = if let Some(kamino) = &bank.kamino {
-            let pyth = kamino.reserve.config.token_info.pyth_configuration.price;
+            let oracle_key = get_oracle_id_from_feed_id(bank_state.config.oracle_keys[0])
+                .unwrap_or(bank_state.config.oracle_keys[0]);
             (
                 kamino.reserve.lending_market,
-                (pyth != Pubkey::default()).then_some(pyth),
+                (oracle_key != Pubkey::default()).then_some(oracle_key),
                 None,
             )
         } else {
