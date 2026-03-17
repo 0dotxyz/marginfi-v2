@@ -437,35 +437,6 @@ pub enum BankCommand {
     InspectPriceOracle {
         bank_pk: Pubkey,
     },
-    SetupEmissions {
-        bank: Pubkey,
-        #[clap(long)]
-        deposits: bool,
-        #[clap(long)]
-        borrows: bool,
-        #[clap(long)]
-        mint: Pubkey,
-        #[clap(long)]
-        rate_apr: f64,
-        #[clap(long)]
-        total_amount_ui: f64,
-    },
-    UpdateEmissions {
-        bank: Pubkey,
-        #[clap(long)]
-        deposits: bool,
-        #[clap(long)]
-        borrows: bool,
-        #[clap(long)]
-        disable: bool,
-        #[clap(long)]
-        rate: Option<f64>,
-        #[clap(long)]
-        additional_amount_ui: Option<f64>,
-    },
-    SettleAllEmissions {
-        bank: Pubkey,
-    },
     CollectFees {
         bank: Pubkey,
         #[clap(help = "The ATA for fee_state.global_fee_wallet and the bank's mint")]
@@ -973,36 +944,6 @@ fn bank(subcmd: BankCommand, global_options: &GlobalOptions) -> Result<()> {
         } => processor::bank_configure_oracle(config, profile, bank_pk, oracle_type, oracle_key),
         BankCommand::InspectPriceOracle { bank_pk } => {
             processor::bank_inspect_price_oracle(config, bank_pk)
-        }
-        BankCommand::SetupEmissions {
-            bank,
-            deposits,
-            borrows,
-            mint,
-            rate_apr: rate,
-            total_amount_ui: total_ui,
-        } => processor::bank_setup_emissions(
-            &config, &profile, bank, deposits, borrows, mint, rate, total_ui,
-        ),
-        BankCommand::UpdateEmissions {
-            bank,
-            deposits,
-            borrows,
-            disable,
-            rate,
-            additional_amount_ui,
-        } => processor::bank_update_emissions(
-            &config,
-            &profile,
-            bank,
-            deposits,
-            borrows,
-            disable,
-            rate,
-            additional_amount_ui,
-        ),
-        BankCommand::SettleAllEmissions { bank } => {
-            processor::emissions::claim_all_emissions_for_bank(&config, &profile, bank)
         }
         BankCommand::CollectFees { bank, fee_ata } => {
             processor::admin::process_collect_fees(config, bank, fee_ata)

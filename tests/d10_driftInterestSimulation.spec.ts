@@ -45,7 +45,6 @@ import {
 import { getTokenBalance } from "./utils/genericTests";
 import {
   composeRemainingAccounts,
-  composeRemainingAccountsByBalances,
 } from "./utils/user-instructions";
 import { createMintToInstruction } from "@solana/spl-token";
 import { Clock } from "solana-bankrun";
@@ -444,10 +443,8 @@ describe("d10: Drift Interest Simulation", () => {
         amount: withdrawAll ? new BN(0) : amount,
         withdrawAll: withdrawAll,
         remaining: withdrawAll
-          ? composeRemainingAccountsByBalances(
-              marginfiAccount.lendingAccount.balances,
-              activePositions,
-              bank
+          ? composeRemainingAccounts(
+              activePositions.filter((group) => !group[0].equals(bank))
             )
           : composeRemainingAccounts(activePositions),
       },

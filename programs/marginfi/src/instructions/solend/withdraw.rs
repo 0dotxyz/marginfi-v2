@@ -1,23 +1,20 @@
 use crate::{
     bank_signer, check,
     constants::{PROGRAM_VERSION, SOLEND_PROGRAM_ID},
-    events::{AccountEventHeader, LendingAccountWithdrawEvent},
+    events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
-            is_signer_authorized, validate_remaining_accounts_for_balances_close_last,
-            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        rate_limiter::{
-            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
-            GroupRateLimiterImpl,
-        },
+        rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
         assert_within_one_token, fetch_asset_price_for_bank_low_bias,
-        fetch_unbiased_price_for_bank, is_solend_asset_tag, validate_bank_state, InstructionKind,
+        fetch_unbiased_price_for_bank, is_solend_asset_tag, record_withdrawal_outflow,
+        validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -81,28 +78,15 @@ pub fn solend_withdraw<'info>(
     let withdraw_all = withdraw_all.unwrap_or(false);
     let authority_bump: u8;
     let bank_key = ctx.accounts.bank.key();
-    if withdraw_all {
-        let marginfi_account = ctx.accounts.marginfi_account.load()?;
-        // Require remaining accounts for all active balances, including the one being closed.
-        validate_remaining_accounts_for_balances_close_last(
-            &marginfi_account.lending_account,
-            ctx.remaining_accounts,
-            &bank_key,
-        )?;
-    }
+    let bank_mint = ctx.accounts.bank.load()?.mint;
     let collateral_amount = {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let mut group = ctx.accounts.group.load_mut()?;
+        let group = ctx.accounts.group.load()?;
         let clock = Clock::get()?;
         authority_bump = bank.liquidity_vault_authority_bump;
 
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
-
-        check!(
-            !marginfi_account.get_flag(ACCOUNT_DISABLED),
-            MarginfiError::AccountDisabled
-        );
 
         // Fetch oracle price for rate limiting and deleverage tracking
         let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
@@ -125,14 +109,11 @@ pub fn solend_withdraw<'info>(
             I80F48::ZERO
         };
 
-        let mut bank_account = BankAccountWrapper::find(
-            &ctx.accounts.bank.key(),
-            &mut bank,
-            &mut marginfi_account.lending_account,
-        )?;
+        let mut bank_account =
+            BankAccountWrapper::find(&bank_key, &mut bank, &mut marginfi_account.lending_account)?;
 
         let collateral_amount = if withdraw_all {
-            bank_account.withdraw_all()?
+            bank_account.withdraw_all(in_receivership)?
         } else {
             bank_account.withdraw(I80F48::from_num(amount))?;
             amount
@@ -144,39 +125,17 @@ pub fn solend_withdraw<'info>(
         } else {
             amount
         };
-        if !should_skip_rate_limit(marginfi_account.account_flags) {
-            // Bank-level rate limiting (native tokens)
-            if bank.rate_limiter.is_enabled() {
-                bank.rate_limiter
-                    .try_record_outflow(rate_limit_amount, clock.unix_timestamp)?;
-            }
-
-            // Group-level rate limiting (USD) - use fresh oracle price
-            if group_rate_limit_enabled {
-                check!(price > I80F48::ZERO, MarginfiError::InvalidRateLimitPrice);
-
-                // Apply any pending untracked inflows before recording the outflow
-                if bank.rate_limiter.untracked_inflow != 0 {
-                    let mint_decimals = bank.mint_decimals;
-                    bank.rate_limiter.apply_untracked_inflow(
-                        &mut group.rate_limiter,
-                        price,
-                        mint_decimals,
-                        clock.unix_timestamp,
-                    )?;
-                }
-
-                let usd_value = calc_value(
-                    I80F48::from_num(rate_limit_amount),
-                    price,
-                    bank.mint_decimals,
-                    None,
-                )?;
-                group
-                    .rate_limiter
-                    .try_record_outflow(usd_value.to_num::<u64>(), clock.unix_timestamp)?;
-            }
-        }
+        record_withdrawal_outflow(
+            group_rate_limit_enabled,
+            rate_limit_amount,
+            price,
+            &mut bank,
+            &group,
+            ctx.accounts.group.key(),
+            ctx.accounts.bank.key(),
+            &marginfi_account,
+            &clock,
+        )?;
 
         // Track withdrawal limit for risk admin during deleverage
         if marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE) {
@@ -186,7 +145,14 @@ pub fn solend_withdraw<'info>(
                 bank.get_balance_decimals(),
                 None,
             )?;
-            group.update_withdrawn_equity(withdrawn_equity, clock.unix_timestamp)?;
+            group.check_deleverage_withdraw_limit(withdrawn_equity, clock.unix_timestamp)?;
+            emit!(DeleverageWithdrawFlowEvent {
+                group: ctx.accounts.group.key(),
+                bank: ctx.accounts.bank.key(),
+                mint: bank.mint,
+                outflow_usd: withdrawn_equity.to_num(),
+                current_timestamp: clock.unix_timestamp,
+            });
         }
 
         collateral_amount
@@ -247,8 +213,8 @@ pub fn solend_withdraw<'info>(
                 marginfi_account_authority: marginfi_account.authority,
                 marginfi_group: marginfi_account.group,
             },
-            bank: ctx.accounts.bank.key(),
-            mint: bank.mint,
+            bank: bank_key,
+            mint: bank_mint,
             amount: collateral_amount,
             close_balance: withdraw_all,
         });
@@ -258,7 +224,16 @@ pub fn solend_withdraw<'info>(
 
         marginfi_account.lending_account.sort_balances();
 
-        // Drop the bank mutable borrow before health check (bank is in remaining_accounts)
+        // SAFETY: The `bank` AccountLoader shares the same underlying account as one of the
+        // entries in `remaining_accounts` (passed for oracle/health-check lookups). The Solana
+        // runtime enforces single-writer semantics per account per instruction — if we hold a
+        // mutable borrow via `bank.load_mut()` while another code path (e.g. `check_account_init_health`)
+        // attempts to borrow the same account through `remaining_accounts`, the runtime rejects the
+        // transaction with:
+        //   "instruction tries to borrow reference for an account which is already borrowed"
+        //
+        // We must explicitly drop the mutable borrow before any code that may re-access this
+        // account through a different handle.
         drop(bank);
 
         let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
@@ -276,7 +251,7 @@ pub fn solend_withdraw<'info>(
             health_cache.program_version = PROGRAM_VERSION;
 
             let bank_loader = &ctx.accounts.bank;
-            let bank = bank_loader.load()?;
+            let mut bank = bank_loader.load_mut()?;
             let clock = Clock::get()?;
             let price_for_cache = fetch_unbiased_price_for_bank(
                 &bank_loader.key(),
@@ -285,10 +260,8 @@ pub fn solend_withdraw<'info>(
                 ctx.remaining_accounts,
             )
             .ok();
-            drop(bank);
-            bank_loader
-                .load_mut()?
-                .update_cache_price(price_for_cache)?;
+
+            bank.update_cache_price(price_for_cache)?;
 
             health_cache.set_engine_ok(true);
             marginfi_account.health_cache = health_cache;
@@ -311,7 +284,6 @@ pub fn solend_withdraw<'info>(
 #[derive(Accounts)]
 pub struct SolendWithdraw<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused
@@ -321,6 +293,10 @@ pub struct SolendWithdraw<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
+        constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_DISABLED)
+        } @MarginfiError::AccountDisabled,
         constraint = {
             let a = marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())

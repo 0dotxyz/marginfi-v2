@@ -6,19 +6,13 @@ use crate::{
     state::{
         bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, calc_value, is_signer_authorized,
-            validate_remaining_accounts_for_balances_unordered, BankAccountWrapper,
+            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
             LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        rate_limiter::{
-            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
-            GroupRateLimiterImpl,
-        },
     },
     utils::{
-        self, fetch_rate_limit_price_for_inflow, is_marginfi_asset_tag, validate_bank_state,
-        InstructionKind,
+        self, is_marginfi_asset_tag, record_deposit_inflow, validate_bank_state, InstructionKind,
     },
 };
 use anchor_lang::prelude::*;
@@ -30,7 +24,7 @@ use marginfi_type_crate::{
     constants::{
         TOKENLESS_REPAYMENTS_ALLOWED, TOKENLESS_REPAYMENTS_COMPLETE, ZERO_AMOUNT_THRESHOLD,
     },
-    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED},
+    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP},
 };
 
 /// 1. Accrue interest
@@ -67,17 +61,10 @@ pub fn lending_account_repay<'info>(
         utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?
     };
 
-    if repay_all {
-        // Require remaining accounts for all active balances, including the one being closed.
-        validate_remaining_accounts_for_balances_unordered(
-            &marginfi_account.lending_account,
-            ctx.remaining_accounts,
-        )?;
-    }
     let mut bank = bank_loader.load_mut()?;
     validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
 
-    let mut group = marginfi_group_loader.load_mut()?;
+    let group = marginfi_group_loader.load()?;
     bank.accrue_interest(
         clock.unix_timestamp,
         &group,
@@ -85,19 +72,13 @@ pub fn lending_account_repay<'info>(
         bank_loader.key(),
     )?;
 
-    let group_rate_limit_enabled = group.rate_limiter.is_enabled();
-    let rate_limit_price = if group_rate_limit_enabled {
-        fetch_rate_limit_price_for_inflow(&bank, &clock)?
-    } else {
-        None
-    };
-
+    let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
     let lending_account = &mut marginfi_account.lending_account;
     let mut bank_account =
         BankAccountWrapper::find(&bank_loader.key(), &mut bank, lending_account)?;
 
     let repay_amount_post_fee = if repay_all {
-        bank_account.repay_all()?
+        bank_account.repay_all(in_receivership)?
     } else {
         bank_account.repay(I80F48::from_num(amount))?;
 
@@ -106,36 +87,15 @@ pub fn lending_account_repay<'info>(
     marginfi_account.last_update = clock.unix_timestamp as u64;
 
     // Record inflow so net-outflow windows release capacity.
-    if !should_skip_rate_limit(marginfi_account.account_flags) {
-        // Bank-level rate limiting (native tokens)
-        if bank.rate_limiter.is_enabled() {
-            bank.rate_limiter
-                .record_inflow(repay_amount_post_fee, clock.unix_timestamp);
-        }
-
-        // Group-level rate limiting (USD) - prefer live price, fall back to cached.
-        if group_rate_limit_enabled {
-            match rate_limit_price {
-                Some(price) => {
-                    // Valid price available - record directly to group limiter
-                    let usd_value = calc_value(
-                        I80F48::from_num(repay_amount_post_fee),
-                        price,
-                        bank.mint_decimals,
-                        None,
-                    )?;
-                    group
-                        .rate_limiter
-                        .record_inflow(usd_value.to_num::<u64>(), clock.unix_timestamp);
-                }
-                None => {
-                    // No valid price - track at bank level to apply later
-                    bank.rate_limiter
-                        .record_untracked_inflow(repay_amount_post_fee);
-                }
-            }
-        }
-    }
+    record_deposit_inflow(
+        &mut bank,
+        &group,
+        marginfi_group_loader.key(),
+        bank_loader.key(),
+        marginfi_account.account_flags,
+        repay_amount_post_fee,
+        &clock,
+    )?;
 
     if authority.key() == group.risk_admin
         && bank.get_flag(TOKENLESS_REPAYMENTS_ALLOWED)
@@ -207,7 +167,6 @@ pub fn lending_account_repay<'info>(
 #[derive(Accounts)]
 pub struct LendingAccountRepay<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused

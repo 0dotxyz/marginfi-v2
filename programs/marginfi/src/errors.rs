@@ -243,7 +243,31 @@ pub enum MarginfiError {
     GroupDailyRateLimitExceeded,
     #[msg("Invalid rate limit price: pass oracle or pre-crank cache")] // 6119
     InvalidRateLimitPrice,
-    #[msg("Liquidation record has not met the inactivity threshold for closing")] // 6120
+    #[msg("Group rate limiter admin update must include inflow and/or outflow")] // 6120
+    GroupRateLimiterUpdateEmpty,
+    #[msg("Group rate limiter admin update slot range is invalid")] // 6121
+    GroupRateLimiterUpdateInvalidSlotRange,
+    #[msg("Group rate limiter admin update cannot reference future slots")] // 6122
+    GroupRateLimiterUpdateFutureSlot,
+    #[msg("Group rate limiter admin update is too stale")] // 6123
+    GroupRateLimiterUpdateStale,
+    #[msg("Group rate limiter admin update slot progression is out of order")] // 6124
+    GroupRateLimiterUpdateOutOfOrderSlot,
+    #[msg("Group rate limiter admin update sequence is out of order")] // 6125
+    GroupRateLimiterUpdateOutOfOrderSeq,
+    #[msg("Deleverage withdrawal admin update must include outflow")] // 6126
+    DeleverageWithdrawalUpdateEmpty,
+    #[msg("Deleverage withdrawal admin update slot range is invalid")] // 6127
+    DeleverageWithdrawalUpdateInvalidSlotRange,
+    #[msg("Deleverage withdrawal admin update cannot reference future slots")] // 6128
+    DeleverageWithdrawalUpdateFutureSlot,
+    #[msg("Deleverage withdrawal admin update is too stale")] // 6129
+    DeleverageWithdrawalUpdateStale,
+    #[msg("Deleverage withdrawal admin update slot progression is out of order")] // 6130
+    DeleverageWithdrawalUpdateOutOfOrderSlot,
+    #[msg("Deleverage withdrawal admin update sequence is out of order")] // 6131
+    DeleverageWithdrawalUpdateOutOfOrderSeq,
+    #[msg("Liquidation record has not met the inactivity threshold for closing")] // 6132
     LiquidationRecordNotExpired,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
@@ -544,7 +568,19 @@ impl From<u32> for MarginfiError {
             6117 => MarginfiError::GroupHourlyRateLimitExceeded,
             6118 => MarginfiError::GroupDailyRateLimitExceeded,
             6119 => MarginfiError::InvalidRateLimitPrice,
-            6120 => MarginfiError::LiquidationRecordNotExpired,
+            6120 => MarginfiError::GroupRateLimiterUpdateEmpty,
+            6121 => MarginfiError::GroupRateLimiterUpdateInvalidSlotRange,
+            6122 => MarginfiError::GroupRateLimiterUpdateFutureSlot,
+            6123 => MarginfiError::GroupRateLimiterUpdateStale,
+            6124 => MarginfiError::GroupRateLimiterUpdateOutOfOrderSlot,
+            6125 => MarginfiError::GroupRateLimiterUpdateOutOfOrderSeq,
+            6126 => MarginfiError::DeleverageWithdrawalUpdateEmpty,
+            6127 => MarginfiError::DeleverageWithdrawalUpdateInvalidSlotRange,
+            6128 => MarginfiError::DeleverageWithdrawalUpdateFutureSlot,
+            6129 => MarginfiError::DeleverageWithdrawalUpdateStale,
+            6130 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSlot,
+            6131 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSeq,
+            6132 => MarginfiError::LiquidationRecordNotExpired,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,

@@ -1,12 +1,18 @@
 use crate::{
-    bank_signer, check,
+    bank_signer,
     events::{AccountEventHeader, LendingAccountDepositEvent},
     state::{
         bank::{BankImpl, BankVaultType},
-        marginfi_account::{BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl},
+        marginfi_account::{
+            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
+            LendingAccountImpl, MarginfiAccountImpl,
+        },
         marginfi_group::MarginfiGroupImpl,
     },
-    utils::{is_juplend_asset_tag, validate_asset_tags, validate_bank_state, InstructionKind},
+    utils::{
+        is_juplend_asset_tag, record_deposit_inflow, validate_asset_tags, validate_bank_state,
+        InstructionKind,
+    },
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -19,10 +25,8 @@ use fixed::types::I80F48;
 use juplend_mocks::juplend_earn::cpi::accounts::{Deposit, UpdateRate};
 use juplend_mocks::juplend_earn::cpi::{deposit, update_rate};
 use juplend_mocks::state::{expected_shares_for_deposit_from_rates, Lending as JuplendLending};
-use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
-use marginfi_type_crate::types::{
-    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
-};
+use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup};
+use marginfi_type_crate::{constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_DISABLED};
 
 /// Deposit into a JupLend lending pool through a marginfi account.
 ///
@@ -34,11 +38,6 @@ use marginfi_type_crate::types::{
 /// 5. Verify minted fTokens == expected.
 /// 6. Credit marginfi asset_shares by minted fTokens.
 pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiResult {
-    // Match marginfi deposit semantics: depositing 0 is a no-op.
-    if amount == 0 {
-        return Ok(());
-    }
-
     let authority_bump: u8;
     {
         let marginfi_account = ctx.accounts.marginfi_account.load()?;
@@ -47,12 +46,6 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
 
         validate_asset_tags(&bank, &marginfi_account)?;
         validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
-
-        check!(
-            !marginfi_account.get_flag(ACCOUNT_DISABLED)
-                && !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP),
-            MarginfiError::AccountDisabled
-        );
     }
 
     // Refresh the exchange price (interest/rewards) for this slot.
@@ -90,7 +83,7 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let group = &ctx.accounts.group.load()?;
+        let group = ctx.accounts.group.load()?;
         let clock = Clock::get()?;
 
         let mut bank_account = BankAccountWrapper::find_or_create(
@@ -101,7 +94,17 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
 
         bank_account.deposit_no_repay(I80F48::from_num(minted_shares))?;
 
-        bank.update_bank_cache(group)?;
+        record_deposit_inflow(
+            &mut bank,
+            &group,
+            ctx.accounts.group.key(),
+            ctx.accounts.bank.key(),
+            marginfi_account.account_flags,
+            amount,
+            &clock,
+        )?;
+
+        bank.update_bank_cache(&group)?;
 
         marginfi_account.last_update = clock.unix_timestamp as u64;
         marginfi_account.lending_account.sort_balances();
@@ -125,6 +128,7 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
 #[derive(Accounts)]
 pub struct JuplendDeposit<'info> {
     #[account(
+        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused
@@ -134,7 +138,19 @@ pub struct JuplendDeposit<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        has_one = authority @ MarginfiError::Unauthorized
+        constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_DISABLED)
+        } @MarginfiError::AccountDisabled,
+        constraint = {
+            let a = marginfi_account.load()?;
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), false, false)
+        } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
@@ -311,7 +327,6 @@ mod tests {
             expected_shares_for_deposit_from_rates(100, 1_000_000_000_000, 1_100_000_000_000)
                 .unwrap();
         assert_eq!(shares, 90);
-        assert!(shares < 100);
     }
 
     #[test]
@@ -321,7 +336,6 @@ mod tests {
             expected_shares_for_deposit_from_rates(100, 1_000_000_000_000, 900_000_000_000)
                 .unwrap();
         assert_eq!(shares, 111);
-        assert!(shares > 100);
     }
 
     #[test]

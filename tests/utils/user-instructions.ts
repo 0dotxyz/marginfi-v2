@@ -133,139 +133,6 @@ export const depositIx = (program: Program<Marginfi>, args: DepositArgs) => {
   return ix;
 };
 
-export type SettleEmissionsArgs = {
-  marginfiAccount: PublicKey;
-  bank: PublicKey;
-};
-
-/**
- * (Permissionless) Settle emissions for a mrgnfi bank that is emitting some rewards. Generally runs
- * for all users before rates are updated, otherwise past emissions are retroactively credited at
- * the new rate as well. See `withdrawEmissionsIx` to actually claim the emissions to a wallet.
- * * `authority`- MarginfiAccount's authority must sign and own the `tokenAccount`
- * @param program
- * @param args
- * @returns
- */
-export const settleEmissionsIx = (
-  program: Program<Marginfi>,
-  args: SettleEmissionsArgs
-) => {
-  const ix = program.methods
-    .lendingAccountSettleEmissions()
-    .accounts({
-      marginfiAccount: args.marginfiAccount,
-      bank: args.bank,
-    })
-    .instruction();
-
-  return ix;
-};
-
-export type WithdrawEmissionsArgs = {
-  marginfiAccount: PublicKey;
-  bank: PublicKey;
-  tokenAccount: PublicKey;
-};
-
-/**
- * Settles AND withdraws emissions to the user's given token account. Also see `settleEmissionsIx`, which settles but does not withdraw.
- * * `authority`- MarginfiAccount's authority must sign but does not have to own the `tokenAccount`
- * @param program
- * @param args
- * @returns
- */
-export const withdrawEmissionsIx = (
-  program: Program<Marginfi>,
-  args: WithdrawEmissionsArgs
-) => {
-  const ix = program.methods
-    .lendingAccountWithdrawEmissions()
-    .accounts({
-      // group: args.marginfiGroup, // implied from bank
-      marginfiAccount: args.marginfiAccount,
-      // authority: args.authority, // implied from marginfiAccount
-      bank: args.bank,
-      // emissions_mint // implied from bank
-      // emissions_auth // pda derived from bank
-      // emissions_vault // pda derived from bank
-      destinationAccount: args.tokenAccount,
-      tokenProgram: TOKEN_PROGRAM_ID,
-    })
-    .instruction();
-
-  return ix;
-};
-
-export type WithdrawEmissionsPermissionlessArgs = {
-  marginfiAccount: PublicKey;
-  bank: PublicKey;
-  /** Canonical ATA of `emissions_destination_account` registered on `marginfiAccount` */
-  tokenAccount: PublicKey;
-};
-
-/**
- * (Permissionless) Settles AND withdraws emissions to the user's given token account. The user must
- * have opted in to this feature by designating a wallet to receive claims with
- * `marginfi_account_update_emissions_destination_account`
- * * `tokenAccount`- must be canonical ATA of `emissions_destination_account`
- * @param program
- * @param args
- * @returns
- */
-export const withdrawEmissionsPermissionlessIx = (
-  program: Program<Marginfi>,
-  args: WithdrawEmissionsPermissionlessArgs
-) => {
-  const ix = program.methods
-    .lendingAccountWithdrawEmissionsPermissionless()
-    .accounts({
-      // group: args.marginfiGroup, // implied from bank
-      marginfiAccount: args.marginfiAccount,
-      // authority: args.authority, // implied from marginfiAccount
-      bank: args.bank,
-      // emissions_mint // implied from bank
-      // emissions_auth // pda derived from bank
-      // emissions_vault // pda derived from bank
-      destinationAccount: args.tokenAccount,
-      tokenProgram: TOKEN_PROGRAM_ID,
-    })
-    .instruction();
-
-  return ix;
-};
-
-export type UpdateEmissionsDestinationArgs = {
-  marginfiAccount: PublicKey;
-  destinationAccount: PublicKey;
-};
-
-/**
- * (Permissionless) Opt in to claim permissionless emissions. The designated account/wallet will
- * receive all the funds. Emissions go to the canonical ATA of that account, and if the ATA doesn't
- * exist, they may still not get distributed. We (mrgn) might pay to open SOME atas, or we might
- * open some common ones when you opt in, or we might let the user pay and just let the tx fail it
- * it doesn't exist.
- * @param program
- * @param args
- * @returns
- */
-export const updateEmissionsDestination = (
-  program: Program<Marginfi>,
-  args: UpdateEmissionsDestinationArgs
-) => {
-  const ix = program.methods
-    .marginfiAccountUpdateEmissionsDestinationAccount()
-    .accounts({
-      marginfiAccount: args.marginfiAccount,
-      // authority: //implied from marginfiAccount
-      destinationAccount: args.destinationAccount,
-    })
-    .instruction();
-
-  return ix;
-};
-
 export type BorrowIxArgs = {
   marginfiAccount: PublicKey;
   bank: PublicKey;
@@ -279,8 +146,7 @@ export type BorrowIxArgs = {
  * * `authority` - marginfiAccount's authority must sign, but does not have to own the `tokenAccount`
  * * `remaining` - pass bank/oracles for each bank the user is involved with, in the SAME ORDER they
  *   appear in userAcc.balances (e.g. `[bank0, oracle0, bank1, oracle1]`). For Token22 assets, pass
- *   the mint first, then the oracles/banks as described earlier. Required for withdraw_all: include
- *   the closing balance's risk accounts.
+ *   the mint first, then the oracles/banks as described earlier.
  * @param program
  * @param args
  * @returns
@@ -320,9 +186,8 @@ export type WithdrawIxArgs = {
  * Withdraw from a bank
  * * `authority` - marginfiAccount's authority must sign, but does not have to own the `tokenAccount`
  * * `remaining` - pass bank/oracles for each bank the user is involved with, in the SAME ORDER they
- *   appear in userAcc.balances (e.g. `[bank0, oracle0, bank1, oracle1]`). For `withdrawAll`, include
- *   all active balances, including the bank being closed, and place the closing bank last. For
- *   Token22 assets, pass the mint first, then the oracles/banks as described earlier.
+ *   appear in userAcc.balances (e.g. `[bank0, oracle0, bank1, oracle1]`). For Token22 assets, pass
+ *   the mint first, then the oracles/banks as described earlier.
  * @param program
  * @param args
  * @returns
@@ -368,10 +233,8 @@ export type RepayIxArgs = {
 /**
  * Repay debt to a bank
  * * `authority` - MarginfiAccount's authority must sign and own the `tokenAccount`
- * * `remaining` - Required for repay_all: pass bank/oracles for each bank the user is involved with,
- *   in the SAME ORDER they appear in userAcc.balances (e.g. `[bank0, oracle0, bank1, oracle1]`).
- *   For `repayAll`, include all active balances, including the bank being closed. For Token22
- *   assets, pass the mint first.
+ * * `remaining` - pass bank/oracles for any balances that need risk/oracle context in this
+ *   instruction. For Token22 assets, pass the mint first.
  * @param program
  * @param args
  * @returns
@@ -734,63 +597,6 @@ export const composeRemainingAccountsMetaBanksOnly = (
     isSigner: false,
     isWritable: true,
   }));
-};
-
-/**
- * Flattens bank-oracle groups in the exact order of active balances.
- * If closingBank is provided, its group is placed last.
- * Throws if a balance's bank is missing from banksAndOracles.
- */
-export const composeRemainingAccountsByBalances = (
-  balances: { active: number; bankPk: PublicKey }[],
-  banksAndOracles: PublicKey[][],
-  closingBank?: PublicKey
-): PublicKey[] => {
-  const byBank = new Map<string, PublicKey[]>();
-  for (const group of banksAndOracles) {
-    byBank.set(group[0].toBase58(), group);
-  }
-
-  let activeBalances = balances.filter((balance) => balance.active);
-  if (closingBank) {
-    const closing = activeBalances.filter((b) => b.bankPk.equals(closingBank));
-    const others = activeBalances.filter((b) => !b.bankPk.equals(closingBank));
-    others.sort((a, b) => {
-      const A = a.bankPk.toBytes();
-      const B = b.bankPk.toBytes();
-      for (let i = 0; i < 32; i++) {
-        if (A[i] !== B[i]) {
-          return B[i] - A[i];
-        }
-      }
-      return 0;
-    });
-    activeBalances = [...others, ...closing];
-  } else {
-    activeBalances.sort((a, b) => {
-      const A = a.bankPk.toBytes();
-      const B = b.bankPk.toBytes();
-      for (let i = 0; i < 32; i++) {
-        if (A[i] !== B[i]) {
-          return B[i] - A[i];
-        }
-      }
-      return 0;
-    });
-  }
-
-  const ordered: PublicKey[] = [];
-  for (const balance of activeBalances) {
-    const group = byBank.get(balance.bankPk.toBase58());
-    if (!group) {
-      throw new Error(
-        `Missing remaining accounts for bank ${balance.bankPk.toBase58()}`
-      );
-    }
-    ordered.push(...group);
-  }
-
-  return ordered;
 };
 
 export type AccountInitPdaArgs = {

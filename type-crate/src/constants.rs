@@ -92,10 +92,6 @@ pub const GROUP_FLAGS: u64 = PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
     | TOKENLESS_REPAYMENTS_ALLOWED
     | TOKENLESS_REPAYMENTS_COMPLETE;
 
-/// Cutoff timestamp for balance last_update used in accounting collected emissions.
-/// Any balance updates before this timestamp are ignored, and current_timestamp is used instead.
-pub const MIN_EMISSIONS_START_TIME: u64 = 1681989983;
-
 pub const MAX_EXP_10_I80F48: usize = 24;
 pub const EXP_10_I80F48: [I80F48; MAX_EXP_10_I80F48] = [
     I80F48!(1),                        // 10^0
@@ -212,10 +208,6 @@ pub mod ix_discriminators {
     pub const END_EXECUTE_ORDER: [u8; 8] = [115, 42, 20, 93, 121, 84, 178, 83];
     pub const LENDING_ACCOUNT_WITHDRAW: [u8; 8] = [36, 72, 74, 19, 210, 210, 192, 192];
     pub const LENDING_ACCOUNT_REPAY: [u8; 8] = [79, 209, 172, 177, 222, 51, 173, 151];
-    pub const LENDING_SETTLE_EMISSIONS: [u8; 8] = [161, 58, 136, 174, 242, 223, 156, 176];
-    pub const LENDING_WITHDRAW_EMISSIONS: [u8; 8] = [234, 22, 84, 214, 118, 176, 140, 170];
-    pub const LENDING_WITHDRAW_EMISSIONS_PERMISSIONLESS: [u8; 8] =
-        [4, 174, 124, 203, 44, 49, 145, 150];
     pub const KAMINO_WITHDRAW: [u8; 8] = [199, 101, 41, 45, 213, 98, 224, 200];
     pub const DRIFT_WITHDRAW: [u8; 8] = [86, 59, 186, 123, 183, 181, 234, 137];
     pub const JUPLEND_WITHDRAW: [u8; 8] = [245, 164, 253, 202, 53, 77, 251, 221];

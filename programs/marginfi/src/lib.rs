@@ -37,6 +37,7 @@ pub mod marginfi {
         new_emode_admin: Option<Pubkey>,
         new_curve_admin: Option<Pubkey>,
         new_limit_admin: Option<Pubkey>,
+        new_flow_admin: Option<Pubkey>,
         new_emissions_admin: Option<Pubkey>,
         new_metadata_admin: Option<Pubkey>,
         new_risk_admin: Option<Pubkey>,
@@ -49,6 +50,7 @@ pub mod marginfi {
             new_emode_admin,
             new_curve_admin,
             new_limit_admin,
+            new_flow_admin,
             new_emissions_admin,
             new_metadata_admin,
             new_risk_admin,
@@ -167,29 +169,12 @@ pub mod marginfi {
         marginfi_group::lending_pool_clone_emode(ctx)
     }
 
-    /// (delegate_emissions_admin only)
-    pub fn lending_pool_setup_emissions(
-        ctx: Context<LendingPoolSetupEmissions>,
-        flags: u64,
-        rate: u64,
-        total_emissions: u64,
+    /// (permissionless) Reclaim all remaining tokens from the emissions vault
+    /// to the global fee wallet ATA, and disable emissions on the bank.
+    pub fn lending_pool_reclaim_emissions_vault(
+        ctx: Context<LendingPoolReclaimEmissionsVault>,
     ) -> MarginfiResult {
-        marginfi_group::lending_pool_setup_emissions(ctx, flags, rate, total_emissions)
-    }
-
-    /// (delegate_emissions_admin only)
-    pub fn lending_pool_update_emissions_parameters(
-        ctx: Context<LendingPoolUpdateEmissionsParameters>,
-        emissions_flags: Option<u64>,
-        emissions_rate: Option<u64>,
-        additional_emissions: Option<u64>,
-    ) -> MarginfiResult {
-        marginfi_group::lending_pool_update_emissions_parameters(
-            ctx,
-            emissions_flags,
-            emissions_rate,
-            additional_emissions,
-        )
+        marginfi_group::lending_pool_reclaim_emissions_vault(ctx)
     }
 
     /// (risk_admin or admin, unless `PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG` is set on the bank)
@@ -353,26 +338,11 @@ pub mod marginfi {
         marginfi_account::lending_account_borrow(ctx, amount)
     }
 
-    /// (account authority) Close a balance position with dust-level amounts. Claims outstanding
-    /// emissions before closing.
+    /// (account authority) Close a balance position with dust-level amounts.
     pub fn lending_account_close_balance(
         ctx: Context<LendingAccountCloseBalance>,
     ) -> MarginfiResult {
         marginfi_account::lending_account_close_balance(ctx)
-    }
-
-    /// (account authority) Settle and withdraw emissions rewards to a destination token account.
-    pub fn lending_account_withdraw_emissions<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingAccountWithdrawEmissions<'info>>,
-    ) -> MarginfiResult {
-        marginfi_account::lending_account_withdraw_emissions(ctx)
-    }
-
-    /// (permissionless) Settle unclaimed emissions into a user's balance without withdrawing.
-    pub fn lending_account_settle_emissions(
-        ctx: Context<LendingAccountSettleEmissions>,
-    ) -> MarginfiResult {
-        marginfi_account::lending_account_settle_emissions(ctx)
     }
 
     /// (permissionless) Liquidate a lending account balance of an unhealthy marginfi account.
@@ -411,10 +381,9 @@ pub mod marginfi {
         marginfi_account::lending_account_end_flashloan(ctx)
     }
 
-    /// (account authority) Set the wallet whose canonical ATA will receive permissionless emissions
-    /// withdrawals.
-    pub fn marginfi_account_update_emissions_destination_account<'info>(
-        ctx: Context<'_, '_, 'info, 'info, MarginfiAccountUpdateEmissionsDestinationAccount<'info>>,
+    /// (account authority) Set the wallet whose canonical ATA will receive off-chain emissions.
+    pub fn marginfi_account_update_emissions_destination_account(
+        ctx: Context<MarginfiAccountUpdateEmissionsDestinationAccount>,
     ) -> MarginfiResult {
         marginfi_account::marginfi_account_update_emissions_destination_account(ctx)
     }
@@ -509,11 +478,12 @@ pub mod marginfi {
         marginfi_account::close_account(ctx)
     }
 
-    /// (permissionless) Withdraw emissions to the user's pre-configured emissions destination ATA.
-    pub fn lending_account_withdraw_emissions_permissionless<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingAccountWithdrawEmissionsPermissionless<'info>>,
+    /// (permissionless) Zero out `emissions_outstanding` on a balance after emissions are disabled
+    /// on the bank.
+    pub fn lending_account_clear_emissions(
+        ctx: Context<LendingAccountClearEmissions>,
     ) -> MarginfiResult {
-        marginfi_account::lending_account_withdraw_emissions_permissionless(ctx)
+        marginfi_account::lending_account_clear_emissions(ctx)
     }
 
     /// (Permissionless) Refresh the internal risk engine health cache. Useful for liquidators and
@@ -699,7 +669,7 @@ pub mod marginfi {
         marginfi_group::write_bank_metadata(ctx, ticker, description)
     }
 
-    /// (group admin only) Set the daily withdrawal limit for deleverages per group.
+    /// (admin or delegate_limit_admin) Set the daily withdrawal limit for deleverages per group.
     pub fn configure_deleverage_withdrawal_limit(
         ctx: Context<ConfigureDeleverageWithdrawalLimit>,
         limit: u32,
@@ -707,7 +677,26 @@ pub mod marginfi {
         marginfi_group::configure_deleverage_withdrawal_limit(ctx, limit)
     }
 
-    /// (admin only) Configure bank-level rate limits for withdraw/borrow.
+    /// (delegate_flow_admin only) Update the deleverage daily withdraw outflow with
+    /// aggregated data. The delegate flow admin aggregates
+    /// `DeleverageWithdrawFlowEvent` events off-chain and calls this instruction at intervals.
+    pub fn update_deleverage_withdrawals(
+        ctx: Context<UpdateDeleverageWithdrawals>,
+        outflow_usd: u32,
+        update_seq: u64,
+        event_start_slot: u64,
+        event_end_slot: u64,
+    ) -> MarginfiResult {
+        marginfi_group::update_deleverage_withdrawals(
+            ctx,
+            outflow_usd,
+            update_seq,
+            event_start_slot,
+            event_end_slot,
+        )
+    }
+
+    /// (admin or delegate_limit_admin) Configure bank-level rate limits for withdraw/borrow.
     /// Rate limits track net outflow in native tokens. Deposits offset withdraws.
     /// Set to 0 to disable. Hourly and daily windows are independent.
     pub fn configure_bank_rate_limits(
@@ -718,7 +707,7 @@ pub mod marginfi {
         marginfi_group::configure_bank_rate_limits(ctx, hourly_max_outflow, daily_max_outflow)
     }
 
-    /// (admin only) Configure group-level rate limits for withdraw/borrow.
+    /// (admin or delegate_limit_admin) Configure group-level rate limits for withdraw/borrow.
     /// Rate limits track aggregate net outflow in USD.
     /// Example: $10M = 10_000_000. Set to 0 to disable.
     pub fn configure_group_rate_limits(
@@ -730,6 +719,28 @@ pub mod marginfi {
             ctx,
             hourly_max_outflow_usd,
             daily_max_outflow_usd,
+        )
+    }
+
+    /// (delegate_flow_admin only) Update the group rate limiter with aggregated
+    /// inflow/outflow. The delegate flow admin aggregates
+    /// `RateLimitFlowEvent` events off-chain, converts to USD, and calls this instruction at
+    /// intervals to update group rate limiter state.
+    pub fn update_group_rate_limiter(
+        ctx: Context<UpdateGroupRateLimiter>,
+        outflow_usd: Option<u64>,
+        inflow_usd: Option<u64>,
+        update_seq: u64,
+        event_start_slot: u64,
+        event_end_slot: u64,
+    ) -> MarginfiResult {
+        marginfi_group::update_group_rate_limiter(
+            ctx,
+            outflow_usd,
+            inflow_usd,
+            update_seq,
+            event_start_slot,
+            event_end_slot,
         )
     }
 

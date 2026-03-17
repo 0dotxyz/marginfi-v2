@@ -1,10 +1,7 @@
 use super::utils::{latest_blockhash, load_and_deserialize};
 use crate::{
     kamino::KaminoFixture,
-    prelude::{
-        get_emissions_authority_address, get_emissions_token_account_address, MintFixture,
-        TokenAccountFixture,
-    },
+    prelude::{MintFixture, TokenAccountFixture},
 };
 use anchor_lang::{
     prelude::{AccountMeta, Pubkey},
@@ -19,6 +16,7 @@ use marginfi::{
     },
     utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
 };
+use marginfi_type_crate::constants::{EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED};
 use marginfi_type_crate::types::{Bank, BankConfigOpt, OracleSetup};
 use solana_program::{
     account_info::IntoAccountInfo, instruction::Instruction, sysvar::clock::Clock,
@@ -149,114 +147,6 @@ impl BankFixture {
             &[&self.ctx.borrow().payer],
             latest_blockhash(&self.ctx).await,
         );
-
-        self.ctx
-            .borrow_mut()
-            .banks_client
-            .process_transaction(tx)
-            .await?;
-
-        Ok(())
-    }
-
-    pub async fn try_setup_emissions(
-        &self,
-        flags: u64,
-        rate: u64,
-        total_emissions: u64,
-        emissions_mint: Pubkey,
-        funding_account: Pubkey,
-        token_program: Pubkey,
-    ) -> Result<(), BanksClientError> {
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingPoolSetupEmissions {
-                group: self.load().await.group,
-                delegate_emissions_admin: self.ctx.borrow().payer.pubkey(),
-                bank: self.key,
-                emissions_mint,
-                emissions_funding_account: funding_account,
-                emissions_auth: get_emissions_authority_address(self.key, emissions_mint).0,
-                emissions_token_account: get_emissions_token_account_address(
-                    self.key,
-                    emissions_mint,
-                )
-                .0,
-                token_program,
-                system_program: solana_program::system_program::id(),
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingPoolSetupEmissions {
-                rate,
-                flags,
-                total_emissions,
-            }
-            .data(),
-        };
-
-        let tx = {
-            let ctx = self.ctx.borrow_mut();
-
-            Transaction::new_signed_with_payer(
-                &[ix],
-                Some(&ctx.payer.pubkey()),
-                &[&ctx.payer],
-                ctx.banks_client.get_latest_blockhash().await.unwrap(),
-            )
-        };
-
-        self.ctx
-            .borrow_mut()
-            .banks_client
-            .process_transaction(tx)
-            .await?;
-
-        Ok(())
-    }
-
-    pub async fn try_update_emissions(
-        &self,
-        emissions_flags: Option<u64>,
-        emissions_rate: Option<u64>,
-        additional_emissions: Option<(u64, Pubkey)>,
-        token_program: Pubkey,
-    ) -> Result<(), BanksClientError> {
-        let bank = self.load().await;
-
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingPoolUpdateEmissionsParameters {
-                group: self.load().await.group,
-                delegate_emissions_admin: self.ctx.borrow().payer.pubkey(),
-                bank: self.key,
-                emissions_mint: bank.emissions_mint,
-                emissions_funding_account: additional_emissions.map(|(_, f)| f).unwrap_or_default(),
-                emissions_token_account: get_emissions_token_account_address(
-                    self.key,
-                    bank.emissions_mint,
-                )
-                .0,
-                token_program,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingPoolUpdateEmissionsParameters {
-                emissions_flags,
-                emissions_rate,
-                additional_emissions: additional_emissions.map(|(a, _)| a),
-            }
-            .data(),
-        };
-
-        let tx = {
-            let ctx = self.ctx.borrow_mut();
-
-            Transaction::new_signed_with_payer(
-                &[ix],
-                Some(&ctx.payer.pubkey()),
-                &[&ctx.payer],
-                ctx.banks_client.get_latest_blockhash().await.unwrap(),
-            )
-        };
 
         self.ctx
             .borrow_mut()
@@ -458,6 +348,91 @@ impl BankFixture {
 
         bank.cache.last_oracle_price = price.into();
         bank.cache.last_oracle_price_confidence = confidence.into();
+
+        self.ctx
+            .borrow_mut()
+            .set_account(&self.key, &bank_ai.into());
+    }
+
+    pub async fn try_reclaim_emissions_vault(
+        &self,
+        emissions_mint: &MintFixture,
+        fee_state: Pubkey,
+        destination_account: Pubkey,
+    ) -> Result<(), BanksClientError> {
+        let bank = self.load().await;
+        let ctx = self.ctx.borrow_mut();
+
+        let (emissions_auth, _) = Pubkey::find_program_address(
+            &[
+                EMISSIONS_AUTH_SEED.as_bytes(),
+                self.key.as_ref(),
+                emissions_mint.key.as_ref(),
+            ],
+            &marginfi::ID,
+        );
+
+        let (emissions_vault, _) = Pubkey::find_program_address(
+            &[
+                EMISSIONS_TOKEN_ACCOUNT_SEED.as_bytes(),
+                self.key.as_ref(),
+                emissions_mint.key.as_ref(),
+            ],
+            &marginfi::ID,
+        );
+
+        let accounts = marginfi::accounts::LendingPoolReclaimEmissionsVault {
+            group: bank.group,
+            bank: self.key,
+            emissions_mint: emissions_mint.key,
+            emissions_auth,
+            emissions_vault,
+            fee_state,
+            destination_account,
+            token_program: emissions_mint.token_program,
+        }
+        .to_account_metas(Some(true));
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: marginfi::instruction::LendingPoolReclaimEmissionsVault {}.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+
+        ctx.banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
+    /// Directly mutate the bank's emissions fields in test state.
+    pub async fn set_emissions(
+        &self,
+        emissions_mint: Pubkey,
+        emissions_rate: u64,
+        emissions_remaining: I80F48,
+        flags: u64,
+    ) {
+        let mut bank_ai = self
+            .ctx
+            .borrow_mut()
+            .banks_client
+            .get_account(self.key)
+            .await
+            .unwrap()
+            .unwrap();
+        let bank = bytemuck::from_bytes_mut::<Bank>(&mut bank_ai.data.as_mut_slice()[8..]);
+
+        bank.emissions_mint = emissions_mint;
+        bank.emissions_rate = emissions_rate;
+        bank.emissions_remaining = emissions_remaining.into();
+        bank.flags |= flags;
 
         self.ctx
             .borrow_mut()

@@ -8,9 +8,8 @@ use {
         config::Config,
         profile::{self, get_cli_config_dir, load_profile, CliConfig, Profile},
         utils::{
-            bank_to_oracle_key, calc_emissions_rate, find_bank_emssions_auth_pda,
-            find_bank_emssions_token_account_pda, find_bank_vault_authority_pda,
-            find_bank_vault_pda, find_fee_state_pda, find_order_pda,
+            bank_to_oracle_key, find_bank_emssions_token_account_pda,
+            find_bank_vault_authority_pda, find_bank_vault_pda, find_fee_state_pda, find_order_pda,
             load_observation_account_metas, process_transaction, EXP_10_I80F48,
         },
         RatePointArg,
@@ -27,7 +26,6 @@ use {
         state::{
             bank::{BankImpl, BankVaultType},
             bank_config::BankConfigImpl,
-            marginfi_account::BankAccountWrapper,
             price::{
                 parse_swb_ignore_alignment, LitePullFeedAccountData, OraclePriceFeedAdapter,
                 PriceAdapter,
@@ -36,9 +34,7 @@ use {
         utils::NumTraitsWithTolerance,
     },
     marginfi_type_crate::{
-        constants::{
-            EMISSIONS_FLAG_BORROW_ACTIVE, EMISSIONS_FLAG_LENDING_ACTIVE, ZERO_AMOUNT_THRESHOLD,
-        },
+        constants::ZERO_AMOUNT_THRESHOLD,
         types::{
             make_points, BalanceSide, Bank, BankConfigCompact, BankConfigOpt, BankOperationalState,
             FeeState, InterestRateConfig, MarginfiAccount, MarginfiGroup, OracleSetup,
@@ -65,13 +61,11 @@ use {
         system_program,
         transaction::Transaction,
     },
-    spl_associated_token_account::{
-        get_associated_token_address, instruction::create_associated_token_account_idempotent,
-    },
+    spl_associated_token_account::instruction::create_associated_token_account_idempotent,
     std::{
         cell::RefCell,
         collections::HashMap,
-        fs, io,
+        fs,
         mem::size_of,
         ops::{Neg, Not},
         time::{Duration, SystemTime, UNIX_EPOCH},
@@ -292,13 +286,14 @@ pub fn group_configure(
             admin: config.authority(),
         })
         .args(marginfi::instruction::MarginfiGroupConfigure {
-            new_admin,
-            new_emode_admin,
-            new_curve_admin,
-            new_limit_admin,
-            new_emissions_admin,
-            new_metadata_admin,
-            new_risk_admin,
+            new_admin: Some(new_admin),
+            new_emode_admin: Some(new_emode_admin),
+            new_curve_admin: Some(new_curve_admin),
+            new_limit_admin: Some(new_limit_admin),
+            new_flow_admin: None,
+            new_emissions_admin: Some(new_emissions_admin),
+            new_metadata_admin: Some(new_metadata_admin),
+            new_risk_admin: Some(new_risk_admin),
             emode_max_init_leverage: None,
             emode_max_maint_leverage: None,
         })
@@ -1471,225 +1466,6 @@ pub fn show_oracle_ages(config: Config, only_stale: bool) -> Result<()> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-
-pub fn bank_setup_emissions(
-    config: &Config,
-    profile: &Profile,
-    bank: Pubkey,
-    deposits: bool,
-    borrows: bool,
-    mint: Pubkey,
-    rate: f64,
-    total: f64,
-) -> Result<()> {
-    let rpc_client = config.mfi_program.rpc();
-
-    let mut flags = 0;
-
-    if deposits {
-        flags |= EMISSIONS_FLAG_LENDING_ACTIVE;
-    }
-
-    if borrows {
-        flags |= EMISSIONS_FLAG_BORROW_ACTIVE;
-    }
-
-    let emissions_mint_account = config.mfi_program.rpc().get_account(&mint).unwrap();
-    let token_program = emissions_mint_account.owner;
-
-    let funding_account_ata =
-        anchor_spl::associated_token::get_associated_token_address_with_program_id(
-            &config.authority(),
-            &mint,
-            &token_program,
-        );
-
-    let emissions_mint = spl_token_2022::state::Mint::unpack(
-        &emissions_mint_account.data[..spl_token_2022::state::Mint::LEN],
-    )
-    .unwrap();
-    let emissions_mint_decimals = emissions_mint.decimals;
-
-    let total_emissions = (total * 10u64.pow(emissions_mint_decimals as u32) as f64) as u64;
-    let rate = crate::utils::calc_emissions_rate(rate, emissions_mint_decimals);
-
-    println!(
-        "Native rate: {} tokens per 1 bank token (UI) per YEAR",
-        rate
-    );
-    println!("Emissions flag: {:b}", flags);
-    println!("Total native emissions: {}", total_emissions);
-
-    // Get (y or n) input from user
-    println!("Is this correct? (y/n)");
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
-    let input = input.trim();
-
-    if input != "y" {
-        println!("Aborting");
-        return Ok(());
-    }
-
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::LendingPoolSetupEmissions {
-            group: profile.marginfi_group.expect("marginfi group not set"),
-            delegate_emissions_admin: config.authority(),
-            bank,
-            emissions_mint: mint,
-            emissions_auth: find_bank_emssions_auth_pda(bank, mint, config.program_id).0,
-            emissions_token_account: find_bank_emssions_token_account_pda(
-                bank,
-                mint,
-                config.program_id,
-            )
-            .0,
-            emissions_funding_account: funding_account_ata,
-            token_program,
-            system_program: system_program::id(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingPoolSetupEmissions {
-            flags,
-            rate,
-            total_emissions,
-        }
-        .data(),
-    };
-
-    let recent_blockhash = rpc_client.get_latest_blockhash().unwrap();
-    let signing_keypairs = config.get_signers(false);
-
-    let message = Message::new(&[ix], Some(&config.authority()));
-    let mut transaction = Transaction::new_unsigned(message);
-    transaction.partial_sign(&signing_keypairs, recent_blockhash);
-
-    match process_transaction(&transaction, &rpc_client, config.get_tx_mode()) {
-        Ok(sig) => println!("Tx succeded (sig: {})", sig),
-        Err(err) => println!("Error :\n{:#?}", err),
-    };
-
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-
-pub fn bank_update_emissions(
-    config: &Config,
-    profile: &Profile,
-    bank_pk: Pubkey,
-    deposits: bool,
-    borrows: bool,
-    disable: bool,
-    rate: Option<f64>,
-    additional_emissions: Option<f64>,
-) -> Result<()> {
-    assert!(!(disable && (deposits || borrows)));
-
-    let rpc_client = config.mfi_program.rpc();
-
-    let bank = config
-        .mfi_program
-        .account::<Bank>(bank_pk)
-        .unwrap_or_else(|_| panic!("Bank {} not found", bank_pk));
-
-    let emission_mint = bank.emissions_mint;
-    let funding_account_ata = get_associated_token_address(&config.authority(), &emission_mint);
-
-    let emissions_mint_decimals = config
-        .mfi_program
-        .rpc()
-        .get_account(&emission_mint)
-        .unwrap();
-
-    let emissions_mint_decimals = spl_token_2022::state::Mint::unpack(
-        &emissions_mint_decimals.data[..spl_token_2022::state::Mint::LEN],
-    )
-    .unwrap()
-    .decimals;
-
-    let emissions_rate = rate.map(|rate| calc_emissions_rate(rate, emissions_mint_decimals));
-    let additional_emissions = additional_emissions
-        .map(|emissions| (emissions * 10u64.pow(emissions_mint_decimals as u32) as f64) as u64);
-    let emissions_flags = if disable {
-        Some(0)
-    } else if deposits || borrows {
-        let mut flags = 0;
-
-        if deposits {
-            flags |= EMISSIONS_FLAG_LENDING_ACTIVE;
-        }
-
-        if borrows {
-            flags |= EMISSIONS_FLAG_BORROW_ACTIVE;
-        }
-
-        Some(flags)
-    } else {
-        None
-    };
-
-    println!(
-        "Changes:\n\tRate: {:?}\n\tAdditional emissions: {:?}\n\tFlags: {:?}",
-        emissions_rate.map(|rate| format!("{} tokens per 1M bank tokens per YEAR", rate)),
-        additional_emissions,
-        emissions_flags.map(|flags| format!("{:b}", flags)),
-    );
-
-    // Get (y or n) input from user
-    println!("Is this correct? (y/n)");
-
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
-    let input = input.trim();
-
-    if input != "y" {
-        println!("Aborting");
-        return Ok(());
-    }
-
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::LendingPoolUpdateEmissionsParameters {
-            group: profile.marginfi_group.expect("marginfi group not set"),
-            delegate_emissions_admin: config.authority(),
-            bank: bank_pk,
-            emissions_mint: emission_mint,
-            emissions_token_account: find_bank_emssions_token_account_pda(
-                bank_pk,
-                emission_mint,
-                config.program_id,
-            )
-            .0,
-            emissions_funding_account: funding_account_ata,
-            token_program: spl_token::id(),
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::LendingPoolUpdateEmissionsParameters {
-            emissions_flags,
-            emissions_rate,
-            additional_emissions,
-        }
-        .data(),
-    };
-
-    let recent_blockhash = rpc_client.get_latest_blockhash().unwrap();
-    let signing_keypairs = config.get_signers(false);
-
-    let message = Message::new(&[ix], Some(&config.authority()));
-    let mut transaction = Transaction::new_unsigned(message);
-    transaction.partial_sign(&signing_keypairs, recent_blockhash);
-
-    match process_transaction(&transaction, &rpc_client, config.get_tx_mode()) {
-        Ok(sig) => println!("Tx succeded (sig: {})", sig),
-        Err(err) => println!("Error:\n{:#?}", err),
-    };
-
-    Ok(())
-}
-
 pub fn bank_configure(
     config: Config,
     profile: Profile,
@@ -1987,28 +1763,9 @@ pub fn print_account(
                 I80F48::ZERO
             };
 
-            let mut bank = *bank;
-            let mut balance = *balance;
-
-            let mut baw = BankAccountWrapper {
-                bank: &mut bank,
-                balance: &mut balance,
-            };
-
-            // Current timestamp
-            let current_timestamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-
-            baw.claim_emissions(current_timestamp).unwrap();
-
             println!(
-                "\tBalance: {:.3}, Bank: {} (mint: {}), Emissions: {}",
-                balance_amount,
-                balance.bank_pk,
-                bank.mint,
-                I80F48::from(balance.emissions_outstanding)
+                "\tBalance: {:.3}, Bank: {} (mint: {})",
+                balance_amount, balance.bank_pk, bank.mint,
             )
         });
     Ok(())

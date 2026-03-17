@@ -12,7 +12,7 @@ import {
 } from "@solana/spl-token";
 import BN from "bn.js";
 import { Program, IdlAccounts, IdlTypes } from "@coral-xyz/anchor";
-import { Drift } from "tests/fixtures/drift_v2";
+import { Drift } from "tests/fixtures/drift";
 import { WrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import {
   DRIFT_ORACLE_RECEIVER_PROGRAM_ID,

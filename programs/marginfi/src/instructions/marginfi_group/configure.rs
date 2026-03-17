@@ -38,6 +38,7 @@ pub fn configure(
     new_emode_admin: Option<Pubkey>,
     new_curve_admin: Option<Pubkey>,
     new_limit_admin: Option<Pubkey>,
+    new_flow_admin: Option<Pubkey>,
     new_emissions_admin: Option<Pubkey>,
     new_metadata_admin: Option<Pubkey>,
     new_risk_admin: Option<Pubkey>,
@@ -56,6 +57,9 @@ pub fn configure(
     }
     if let Some(new_limit_admin) = new_limit_admin {
         marginfi_group.update_limit_admin(new_limit_admin);
+    }
+    if let Some(new_flow_admin) = new_flow_admin {
+        marginfi_group.update_flow_admin(new_flow_admin);
     }
     if let Some(new_emissions_admin) = new_emissions_admin {
         marginfi_group.update_emissions_admin(new_emissions_admin);

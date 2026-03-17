@@ -7,18 +7,15 @@ use crate::{
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            account_not_frozen_for_authority, calc_value, check_account_init_health,
-            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            account_not_frozen_for_authority, check_account_init_health, is_signer_authorized,
+            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        rate_limiter::{
-            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
-            GroupRateLimiterImpl,
-        },
+        rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
-        self, fetch_unbiased_price_for_bank, is_marginfi_asset_tag, validate_asset_tags,
-        validate_bank_state, InstructionKind,
+        self, fetch_unbiased_price_for_bank, is_marginfi_asset_tag, record_withdrawal_outflow,
+        validate_asset_tags, validate_bank_state, InstructionKind,
     },
 };
 use anchor_lang::prelude::*;
@@ -63,7 +60,7 @@ pub fn lending_account_borrow<'info>(
     )?;
 
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
-    let mut group = marginfi_group_loader.load_mut()?;
+    let group = marginfi_group_loader.load()?;
 
     let program_fee_rate: I80F48 = group.fee_state_cache.program_fee_rate.into();
 
@@ -205,50 +202,21 @@ pub fn lending_account_borrow<'info>(
     health_cache.program_version = PROGRAM_VERSION;
 
     let bank_pk = ctx.accounts.bank.key();
-    let bank = ctx.accounts.bank.load()?;
-    let price = fetch_unbiased_price_for_bank(&bank_pk, &bank, &clock, ctx.remaining_accounts).ok();
-    drop(bank);
-
     let mut bank = ctx.accounts.bank.load_mut()?;
+    let price = fetch_unbiased_price_for_bank(&bank_pk, &bank, &clock, ctx.remaining_accounts).ok();
 
-    // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
-    if !should_skip_rate_limit(marginfi_account.account_flags) {
-        // Bank-level rate limiting (native tokens)
-        if bank.rate_limiter.is_enabled() {
-            bank.rate_limiter
-                .try_record_outflow(amount, clock.unix_timestamp)?;
-        }
-
-        // Group-level rate limiting (USD) - reuse risk-engine price used for cache.
-        if group_rate_limit_enabled {
-            let rate_limit_price = price.as_ref().map(|p| p.price).unwrap_or(I80F48::ZERO);
-            check!(
-                rate_limit_price > I80F48::ZERO,
-                MarginfiError::InvalidRateLimitPrice
-            );
-
-            // Apply any pending untracked inflows before recording the outflow
-            if bank.rate_limiter.untracked_inflow != 0 {
-                let mint_decimals = bank.mint_decimals;
-                bank.rate_limiter.apply_untracked_inflow(
-                    &mut group.rate_limiter,
-                    rate_limit_price,
-                    mint_decimals,
-                    clock.unix_timestamp,
-                )?;
-            }
-
-            let usd_value = calc_value(
-                I80F48::from_num(amount),
-                rate_limit_price,
-                bank.mint_decimals,
-                None,
-            )?;
-            group
-                .rate_limiter
-                .try_record_outflow(usd_value.to_num::<u64>(), clock.unix_timestamp)?;
-        }
-    }
+    let rate_limit_price = price.as_ref().map(|p| p.price).unwrap_or(I80F48::ZERO);
+    record_withdrawal_outflow(
+        group_rate_limit_enabled,
+        amount,
+        rate_limit_price,
+        &mut bank,
+        &group,
+        marginfi_group_loader.key(),
+        bank_pk,
+        &marginfi_account,
+        &clock,
+    )?;
 
     bank.update_bank_cache(&group)?;
     bank.update_cache_price(price)?;
@@ -262,7 +230,6 @@ pub fn lending_account_borrow<'info>(
 #[derive(Accounts)]
 pub struct LendingAccountBorrow<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused

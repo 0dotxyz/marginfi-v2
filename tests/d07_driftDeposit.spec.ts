@@ -208,8 +208,8 @@ describe("d07: Drift Deposit Tests", () => {
       true
     );
 
-    // Drift Error Code: InsufficientDeposit. Error Number: 6002. custom program error: 0x1772
-    assertBankrunTxFailed(result, "0x1772");
+    // Drift Error Code: InsufficientDeposit. Error Number: 6002.
+    assertBankrunTxFailed(result, 6002);
   });
 
   it("(user 0) Deposits 5 Token A to Drift - happy path", async () => {
