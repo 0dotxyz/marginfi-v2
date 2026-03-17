@@ -186,7 +186,11 @@ For more details see the [Receivership Liquidation Guide](../RISK_AND_LIQUIDATOR
 | Configure bank oracle | `admin` |
 | Set fixed oracle price | `admin` |
 | Configure interest rate config | `admin` or `delegate_curve_admin` |
-| Configure limits | `admin` or `delegate_limit_admin` |
+| Configure bank deposit/borrow/init limits | `admin` or `delegate_limit_admin` |
+| Configure bank/group rate limits | `admin` or `delegate_limit_admin` |
+| Configure deleverage withdraw daily limit | `admin` or `delegate_limit_admin` |
+| Settle group rate limiter batches | `admin` or `delegate_limit_admin` |
+| Settle deleverage withdraw batches | `admin` or `delegate_limit_admin` |
 | Configure emissions | `admin` or `delegate_emissions_admin` |
 | Configure emode | `emode_admin` |
 | Write bank metadata | `metadata_admin` |
@@ -200,3 +204,5 @@ For more details see the [Receivership Liquidation Guide](../RISK_AND_LIQUIDATOR
 | Classic liquidation | Anyone (if account unhealthy) |
 | Receivership liquidation | Anyone (if account unhealthy) |
 | Deposit/Withdraw/Borrow/Repay | Account `authority` |
+
+For the off-chain aggregation flow behind group rate limits and deleverage withdraw limits, see [RATE_LIMITS_AND_DELEVERAGE_WITHDRAW_LIMITS.md](./RATE_LIMITS_AND_DELEVERAGE_WITHDRAW_LIMITS.md).

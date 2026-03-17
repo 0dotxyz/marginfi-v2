@@ -50,6 +50,28 @@ pub struct MintFixture {
 }
 
 impl MintFixture {
+    pub async fn from_existing(
+        ctx: Rc<RefCell<ProgramTestContext>>,
+        mint_key: Pubkey,
+    ) -> MintFixture {
+        let mint_account = ctx
+            .borrow_mut()
+            .banks_client
+            .get_account(mint_key)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let mint = spl_token_2022::state::Mint::unpack(&mint_account.data()[..Mint::LEN]).unwrap();
+
+        MintFixture {
+            ctx,
+            key: mint_key,
+            mint,
+            token_program: mint_account.owner().to_owned(),
+        }
+    }
+
     pub async fn new(
         ctx: Rc<RefCell<ProgramTestContext>>,
         mint_keypair: Option<Keypair>,

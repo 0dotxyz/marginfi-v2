@@ -123,7 +123,7 @@ describe("k09: Withdraw from Kamino reserve with accrued interest", () => {
           bank: bankUsdc,
           destinationTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
         {
           amount: withdrawAmt,
@@ -161,7 +161,7 @@ describe("k09: Withdraw from Kamino reserve with accrued interest", () => {
           bank,
           signerTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
         amount
       )

@@ -20,7 +20,6 @@ import { LST_ATA, USER_ACCOUNT } from "./utils/mocks";
 import {
   borrowIx,
   composeRemainingAccounts,
-  composeRemainingAccountsByBalances,
   depositIx,
   repayIx,
   withdrawIx,
@@ -199,18 +198,15 @@ describe("Withdraw staked asset", () => {
       ).toNumber() *
       wrappedI80F48toBigNumber(bankBefore.liabilityShareValue).toNumber();
 
-    const remaining = composeRemainingAccountsByBalances(
-      userAccBefore.lendingAccount.balances,
+    const remaining = composeRemainingAccounts([
       [
-        [
-          validators[0].bank,
-          oracles.wsolOracle.publicKey,
-          validators[0].splMint,
-          validators[0].splSolPool,
-        ],
-        [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
-      ]
-    );
+        validators[0].bank,
+        oracles.wsolOracle.publicKey,
+        validators[0].splMint,
+        validators[0].splSolPool,
+      ],
+      [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
+    ]);
 
     let tx = new Transaction().add(
       await repayIx(user.mrgnBankrunProgram, {
@@ -259,8 +255,7 @@ describe("Withdraw staked asset", () => {
       ).toNumber() *
       wrappedI80F48toBigNumber(bankBefore.assetShareValue).toNumber();
 
-    const remaining = composeRemainingAccountsByBalances(
-      userAccBefore.lendingAccount.balances,
+    const remaining = composeRemainingAccounts(
       [
         [
           validators[0].bank,
@@ -268,8 +263,7 @@ describe("Withdraw staked asset", () => {
           validators[0].splMint,
           validators[0].splSolPool,
         ],
-      ],
-      validators[0].bank
+      ].filter((group) => !group[0].equals(validators[0].bank))
     );
 
     let tx = new Transaction().add(

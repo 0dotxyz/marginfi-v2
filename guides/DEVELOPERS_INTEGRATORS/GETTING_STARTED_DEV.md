@@ -94,6 +94,10 @@ Benchmarks:
 
 | 9700X (16 threads) | `[  19.343s] 373 tests run: 373 passed (3 flaky), 0 skipped`
 
+0.1.8
+
+| 9700X (8 threads) | `[  53.024s] 622 tests run: 622 passed, 0 skipped`
+
 ## To run just one Rust test:
 
 ```
@@ -129,7 +133,10 @@ Update Node
 
 ## All the tests are failing in Rust and/or TS
 
-Make sure you build the correct version, Rust requires the mainnet version (default features), TS wants localnet (no features)
+Make sure you build the correct version, Rust requires the mainnet version (default features), TS
+wants localnet (no features). Also note that Rust localnet builds to a different target folder (e.g.
+`./scripts/build-workspace.sh` builds to target/sbf, `anchor build` goes to target/), see `Rust
+tests panic with` for more details.
 
 ## Program not deployed errors, when build seemingly worked otherwise
 

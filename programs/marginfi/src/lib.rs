@@ -37,6 +37,7 @@ pub mod marginfi {
         new_emode_admin: Option<Pubkey>,
         new_curve_admin: Option<Pubkey>,
         new_limit_admin: Option<Pubkey>,
+        new_flow_admin: Option<Pubkey>,
         new_emissions_admin: Option<Pubkey>,
         new_metadata_admin: Option<Pubkey>,
         new_risk_admin: Option<Pubkey>,
@@ -49,6 +50,7 @@ pub mod marginfi {
             new_emode_admin,
             new_curve_admin,
             new_limit_admin,
+            new_flow_admin,
             new_emissions_admin,
             new_metadata_admin,
             new_risk_admin,
@@ -661,7 +663,7 @@ pub mod marginfi {
         marginfi_group::write_bank_metadata(ctx, ticker, description)
     }
 
-    /// (group admin only) Set the daily withdrawal limit for deleverages per group.
+    /// (admin or delegate_limit_admin) Set the daily withdrawal limit for deleverages per group.
     pub fn configure_deleverage_withdrawal_limit(
         ctx: Context<ConfigureDeleverageWithdrawalLimit>,
         limit: u32,
@@ -669,7 +671,26 @@ pub mod marginfi {
         marginfi_group::configure_deleverage_withdrawal_limit(ctx, limit)
     }
 
-    /// (admin only) Configure bank-level rate limits for withdraw/borrow.
+    /// (delegate_flow_admin only) Update the deleverage daily withdraw outflow with
+    /// aggregated data. The delegate flow admin aggregates
+    /// `DeleverageWithdrawFlowEvent` events off-chain and calls this instruction at intervals.
+    pub fn update_deleverage_withdrawals(
+        ctx: Context<UpdateDeleverageWithdrawals>,
+        outflow_usd: u32,
+        update_seq: u64,
+        event_start_slot: u64,
+        event_end_slot: u64,
+    ) -> MarginfiResult {
+        marginfi_group::update_deleverage_withdrawals(
+            ctx,
+            outflow_usd,
+            update_seq,
+            event_start_slot,
+            event_end_slot,
+        )
+    }
+
+    /// (admin or delegate_limit_admin) Configure bank-level rate limits for withdraw/borrow.
     /// Rate limits track net outflow in native tokens. Deposits offset withdraws.
     /// Set to 0 to disable. Hourly and daily windows are independent.
     pub fn configure_bank_rate_limits(
@@ -680,7 +701,7 @@ pub mod marginfi {
         marginfi_group::configure_bank_rate_limits(ctx, hourly_max_outflow, daily_max_outflow)
     }
 
-    /// (admin only) Configure group-level rate limits for withdraw/borrow.
+    /// (admin or delegate_limit_admin) Configure group-level rate limits for withdraw/borrow.
     /// Rate limits track aggregate net outflow in USD.
     /// Example: $10M = 10_000_000. Set to 0 to disable.
     pub fn configure_group_rate_limits(
@@ -692,6 +713,28 @@ pub mod marginfi {
             ctx,
             hourly_max_outflow_usd,
             daily_max_outflow_usd,
+        )
+    }
+
+    /// (delegate_flow_admin only) Update the group rate limiter with aggregated
+    /// inflow/outflow. The delegate flow admin aggregates
+    /// `RateLimitFlowEvent` events off-chain, converts to USD, and calls this instruction at
+    /// intervals to update group rate limiter state.
+    pub fn update_group_rate_limiter(
+        ctx: Context<UpdateGroupRateLimiter>,
+        outflow_usd: Option<u64>,
+        inflow_usd: Option<u64>,
+        update_seq: u64,
+        event_start_slot: u64,
+        event_end_slot: u64,
+    ) -> MarginfiResult {
+        marginfi_group::update_group_rate_limiter(
+            ctx,
+            outflow_usd,
+            inflow_usd,
+            update_seq,
+            event_start_slot,
+            event_end_slot,
         )
     }
 

@@ -57,8 +57,10 @@ pub struct BankCache {
     /// Liquidate as an additional safeguard, if the liquidation prices stored here were to be
     /// edited between start and end, it would completely break the risk engine. End validates that
     /// the lock is set, panics if not, and removes it - which prevents footguns if the cache was
-    /// e.g. accidently set to default. The lock is also removed when a Balance is closed with
-    /// repay_all or withdraw_all, since those Balances can be omitted from the risk check at End.
+    /// e.g. accidently set to default. The lock is also removed when a Balance is closed via
+    /// withdraw_all, repay_all, or close_balance, but only when the account has
+    /// ACCOUNT_IN_RECEIVERSHIP set, so that operations on unrelated accounts sharing the same
+    /// bank do not interfere with an in-progress liquidation.
     pub liq_cache_flags: u8,
     _padding: [u8; 23],
     // INFO: these are duplicative of `last_oracle_price` and `last_oracle_price_timestamp` so if
