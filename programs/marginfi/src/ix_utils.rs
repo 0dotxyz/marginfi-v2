@@ -221,10 +221,9 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use crate::{
-        DriftWithdraw, EndDeleverage, EndExecuteOrder, EndLiquidation, InitLiquidationRecord,
-        KaminoWithdraw, LendingAccountEndFlashloan, LendingAccountRepay,
-        LendingAccountStartFlashloan, LendingAccountWithdraw, StartDeleverage, StartExecuteOrder,
-        StartLiquidation,
+        EndDeleverage, EndExecuteOrder, EndLiquidation, InitLiquidationRecord, IntegrationWithdraw,
+        LendingAccountEndFlashloan, LendingAccountRepay, LendingAccountStartFlashloan,
+        LendingAccountWithdraw, StartDeleverage, StartExecuteOrder, StartLiquidation,
     };
 
     use super::*;
@@ -319,15 +318,10 @@ mod tests {
         let want_end = ix_discriminators::END_DELEVERAGE;
         assert_eq!(got_end, want_end);
 
-        // ─── DriftWithdraw ─────────────────────────────────────────────────────
-        let got_drift = DriftWithdraw::get_hash();
-        let want_drift = ix_discriminators::DRIFT_WITHDRAW;
-        assert_eq!(got_drift, want_drift);
-
-        // ─── KaminoWithdraw ────────────────────────────────────────────────────
-        let got_kamino = KaminoWithdraw::get_hash();
-        let want_kamino = ix_discriminators::KAMINO_WITHDRAW;
-        assert_eq!(got_kamino, want_kamino);
+        // ─── IntegrationWithdraw ─────────────────────────────────────────────────
+        let got_integration = IntegrationWithdraw::get_hash();
+        let want_integration = ix_discriminators::INTEGRATION_WITHDRAW;
+        assert_eq!(got_integration, want_integration);
 
         // ─── StartExecuteOrder ───────────────────────────────────────────────────
         let got_start_exec = StartExecuteOrder::get_hash();

@@ -1,6 +1,8 @@
 import {
   AccountMeta,
   PublicKey,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
+  SystemProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
 import BN from "bn.js";
@@ -8,7 +10,11 @@ import { Marginfi } from "../../target/types/marginfi";
 import { Program } from "@coral-xyz/anchor";
 import { KaminoConfigCompact } from "./kamino-utils";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { KLEND_PROGRAM_ID } from "./types";
+import { KLEND_PROGRAM_ID, FARMS_PROGRAM_ID } from "./types";
+import {
+  assertProtocolAccountCount,
+  INTEGRATION_PROTOCOL_ACCOUNT_COUNTS,
+} from "./integration-account-layouts";
 import {
   deriveBankWithSeed,
   deriveBaseObligation,
@@ -67,16 +73,52 @@ export const makeKaminoDepositIx = async (
     accounts.reserve,
   );
 
+  // Fetch bank to get obligation (integration_acc_2) and mint
+  const bank = await program.account.bank.fetch(accounts.bank);
+
+  // Build protocol-specific remaining accounts (Kamino deposit layout)
+  const protocolAccounts: AccountMeta[] = [
+    { pubkey: bank.integrationAcc2, isSigner: false, isWritable: true },          // [0] obligation
+    { pubkey: accounts.lendingMarket, isSigner: false, isWritable: false },       // [1] lending_market
+    { pubkey: lendingMarketAuthority, isSigner: false, isWritable: false },       // [2] lending_market_authority
+    { pubkey: accounts.reserve, isSigner: false, isWritable: true },              // [3] reserve
+    { pubkey: reserveLiquiditySupply, isSigner: false, isWritable: true },        // [4] reserve_liquidity_supply
+    { pubkey: reserveCollateralMint, isSigner: false, isWritable: true },         // [5] reserve_collateral_mint
+    { pubkey: reserveCollateralSupply, isSigner: false, isWritable: true },       // [6] reserve_destination_deposit_collateral
+    { pubkey: KLEND_PROGRAM_ID, isSigner: false, isWritable: false },             // [7] kamino_program
+    { pubkey: FARMS_PROGRAM_ID, isSigner: false, isWritable: false },      // [8] farms_program
+    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },             // [9] collateral_token_program
+    { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },   // [10] instruction_sysvar_account
+  ];
+
+  // Optional farm accounts (use system_program as sentinel for absent)
+  protocolAccounts.push({
+    pubkey: accs.obligationFarmUserState ?? SystemProgram.programId,
+    isSigner: false,
+    isWritable: !!accs.obligationFarmUserState,
+  });
+  protocolAccounts.push({
+    pubkey: accs.reserveFarmState ?? SystemProgram.programId,
+    isSigner: false,
+    isWritable: !!accs.reserveFarmState,
+  });
+  assertProtocolAccountCount(
+    "kamino",
+    "deposit",
+    protocolAccounts.length,
+    INTEGRATION_PROTOCOL_ACCOUNT_COUNTS.kamino.deposit,
+  );
+
   return program.methods
-    .kaminoDeposit(amount)
+    .integrationDeposit(amount)
     .accounts({
-      lendingMarketAuthority,
-      reserveLiquiditySupply,
-      reserveCollateralMint,
-      reserveDestinationDepositCollateral: reserveCollateralSupply,
-      liquidityTokenProgram: TOKEN_PROGRAM_ID,
-      ...accs,
+      marginfiAccount: accounts.marginfiAccount,
+      bank: accounts.bank,
+      signerTokenAccount: accounts.signerTokenAccount,
+      mint: bank.mint,
+      tokenProgram: TOKEN_PROGRAM_ID,
     })
+    .remainingAccounts(protocolAccounts)
     .instruction();
 };
 
@@ -326,12 +368,6 @@ export const makeKaminoWithdrawIx = async (
     ...accounts,
   };
 
-  const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => ({
-    pubkey,
-    isSigner: false,
-    isWritable: false,
-  }));
-
   const [lendingMarketAuthority] = deriveLendingMarketAuthority(
     KLEND_PROGRAM_ID,
     accounts.lendingMarket,
@@ -352,17 +388,60 @@ export const makeKaminoWithdrawIx = async (
     accounts.reserve,
   );
 
+  // Fetch bank to get obligation (integration_acc_2) and mint
+  const bank = await program.account.bank.fetch(accounts.bank);
+
+  // Build protocol-specific remaining accounts (Kamino withdraw layout)
+  const protocolAccounts: AccountMeta[] = [
+    { pubkey: bank.integrationAcc2, isSigner: false, isWritable: true },          // [0] obligation
+    { pubkey: accounts.lendingMarket, isSigner: false, isWritable: false },       // [1] lending_market
+    { pubkey: lendingMarketAuthority, isSigner: false, isWritable: false },       // [2] lending_market_authority
+    { pubkey: accounts.reserve, isSigner: false, isWritable: true },              // [3] reserve
+    { pubkey: reserveLiquiditySupply, isSigner: false, isWritable: true },        // [4] reserve_liquidity_supply
+    { pubkey: reserveCollateralMint, isSigner: false, isWritable: true },         // [5] reserve_collateral_mint
+    { pubkey: reserveSourceCollateral, isSigner: false, isWritable: true },       // [6] reserve_source_collateral
+    { pubkey: KLEND_PROGRAM_ID, isSigner: false, isWritable: false },             // [7] kamino_program
+    { pubkey: FARMS_PROGRAM_ID, isSigner: false, isWritable: false },      // [8] farms_program
+    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },             // [9] collateral_token_program
+    { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },   // [10] instruction_sysvar_account
+  ];
+
+  // Optional farm accounts (use system_program as sentinel for absent)
+  protocolAccounts.push({
+    pubkey: accs.obligationFarmUserState ?? SystemProgram.programId,
+    isSigner: false,
+    isWritable: !!accs.obligationFarmUserState,
+  });
+  protocolAccounts.push({
+    pubkey: accs.reserveFarmState ?? SystemProgram.programId,
+    isSigner: false,
+    isWritable: !!accs.reserveFarmState,
+  });
+  assertProtocolAccountCount(
+    "kamino",
+    "withdraw",
+    protocolAccounts.length,
+    INTEGRATION_PROTOCOL_ACCOUNT_COUNTS.kamino.withdraw,
+  );
+
+  // Oracle/health remaining accounts come after protocol accounts
+  const oracleAccounts: AccountMeta[] = args.remaining.map((pubkey) => ({
+    pubkey,
+    isSigner: false,
+    isWritable: false,
+  }));
+
   const ix = await program.methods
-    .kaminoWithdraw(args.amount, args.isWithdrawAll)
+    .integrationWithdraw(args.amount, args.isWithdrawAll)
     .accounts({
-      lendingMarketAuthority, // derived
-      reserveLiquiditySupply,
-      reserveCollateralMint,
-      reserveSourceCollateral,
-      liquidityTokenProgram: TOKEN_PROGRAM_ID,
-      ...accs,
+      marginfiAccount: accounts.marginfiAccount,
+      authority: accounts.authority,
+      bank: accounts.bank,
+      destinationTokenAccount: accounts.destinationTokenAccount,
+      mint: bank.mint,
+      tokenProgram: TOKEN_PROGRAM_ID,
     })
-    .remainingAccounts(oracleMeta)
+    .remainingAccounts([...protocolAccounts, ...oracleAccounts])
     .instruction();
 
   return ix;

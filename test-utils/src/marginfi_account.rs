@@ -1479,34 +1479,39 @@ impl MarginfiAccountFixture {
         let lending_market_authority =
             derive_kamino_lending_market_authority(reserve.lending_market);
 
+        let mut accounts = marginfi::accounts::IntegrationDeposit {
+            group: marginfi_account.group,
+            marginfi_account: self.key,
+            authority,
+            bank: bank.key,
+            signer_token_account: funding_account,
+            liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+            mint: reserve.mint_pubkey,
+            token_program: bank.get_token_program(),
+        }
+        .to_account_metas(Some(true));
+
+        // Kamino deposit protocol accounts (indices 0..11)
+        let protocol_accounts = vec![
+            AccountMeta::new(bank_state.integration_acc_2, false), // [0] obligation
+            AccountMeta::new_readonly(reserve.lending_market, false), // [1] lending_market
+            AccountMeta::new_readonly(lending_market_authority, false), // [2] lending_market_authority
+            AccountMeta::new(bank_state.integration_acc_1, false),      // [3] reserve
+            AccountMeta::new(reserve.supply_vault, false), // [4] reserve_liquidity_supply
+            AccountMeta::new(reserve.collateral_mint_pubkey, false), // [5] reserve_collateral_mint
+            AccountMeta::new(reserve.collateral_supply_vault, false), // [6] reserve_destination_deposit_collateral
+            AccountMeta::new_readonly(kamino_mocks::kamino_lending::ID, false), // [7] kamino_program
+            AccountMeta::new_readonly(kamino_mocks::kamino_farms::ID, false),   // [8] farms_program
+            AccountMeta::new_readonly(anchor_spl::token::spl_token::ID, false), // [9] collateral_token_program
+            AccountMeta::new_readonly(sysvar::instructions::ID, false), // [10] instruction_sysvar_account
+        ];
+        accounts.extend(protocol_accounts);
+
         Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::KaminoDeposit {
-                group: marginfi_account.group,
-                marginfi_account: self.key,
-                authority,
-                bank: bank.key,
-                signer_token_account: funding_account,
-                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
-                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
-                integration_acc_2: bank_state.integration_acc_2,
-                lending_market: reserve.lending_market,
-                lending_market_authority,
-                integration_acc_1: bank_state.integration_acc_1,
-                mint: reserve.mint_pubkey,
-                reserve_liquidity_supply: reserve.supply_vault,
-                reserve_collateral_mint: reserve.collateral_mint_pubkey,
-                reserve_destination_deposit_collateral: reserve.collateral_supply_vault,
-                obligation_farm_user_state: None,
-                reserve_farm_state: None,
-                kamino_program: kamino_mocks::kamino_lending::ID,
-                farms_program: kamino_mocks::kamino_farms::ID,
-                collateral_token_program: anchor_spl::token::spl_token::ID,
-                liquidity_token_program: bank.get_token_program(),
-                instruction_sysvar_account: sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::KaminoDeposit { amount }.data(),
+            accounts,
+            data: marginfi::instruction::IntegrationDeposit { amount }.data(),
         }
     }
 
@@ -1542,34 +1547,41 @@ impl MarginfiAccountFixture {
         let lending_market_authority =
             derive_kamino_lending_market_authority(reserve.lending_market);
 
+        let mut accounts = marginfi::accounts::IntegrationWithdraw {
+            group: marginfi_account.group,
+            marginfi_account: self.key,
+            authority,
+            bank: bank.key,
+            destination_token_account: destination_account,
+            liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+            mint: reserve.mint_pubkey,
+            token_program: bank.get_token_program(),
+        }
+        .to_account_metas(Some(true));
+
+        // Kamino withdraw protocol accounts (indices 0..13, padded to MAX)
+        let protocol_accounts = vec![
+            AccountMeta::new(bank_state.integration_acc_2, false), // [0] obligation
+            AccountMeta::new_readonly(reserve.lending_market, false), // [1] lending_market
+            AccountMeta::new_readonly(lending_market_authority, false), // [2] lending_market_authority
+            AccountMeta::new(bank_state.integration_acc_1, false),      // [3] reserve
+            AccountMeta::new(reserve.supply_vault, false), // [4] reserve_liquidity_supply
+            AccountMeta::new(reserve.collateral_mint_pubkey, false), // [5] reserve_collateral_mint
+            AccountMeta::new(reserve.collateral_supply_vault, false), // [6] reserve_source_collateral
+            AccountMeta::new_readonly(kamino_mocks::kamino_lending::ID, false), // [7] kamino_program
+            AccountMeta::new_readonly(kamino_mocks::kamino_farms::ID, false),   // [8] farms_program
+            AccountMeta::new_readonly(anchor_spl::token::spl_token::ID, false), // [9] collateral_token_program
+            AccountMeta::new_readonly(sysvar::instructions::ID, false), // [10] instruction_sysvar_account
+            AccountMeta::new_readonly(system_program::ID, false), // [11] farm user state (absent)
+            AccountMeta::new_readonly(system_program::ID, false), // [12] farm state (absent)
+        ];
+        accounts.extend(protocol_accounts);
+
         let mut ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::KaminoWithdraw {
-                group: marginfi_account.group,
-                marginfi_account: self.key,
-                authority,
-                bank: bank.key,
-                destination_token_account: destination_account,
-                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
-                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
-                integration_acc_2: bank_state.integration_acc_2,
-                lending_market: reserve.lending_market,
-                lending_market_authority,
-                integration_acc_1: bank_state.integration_acc_1,
-                mint: reserve.mint_pubkey,
-                reserve_liquidity_supply: reserve.supply_vault,
-                reserve_collateral_mint: reserve.collateral_mint_pubkey,
-                reserve_source_collateral: reserve.collateral_supply_vault,
-                obligation_farm_user_state: None,
-                reserve_farm_state: None,
-                kamino_program: kamino_mocks::kamino_lending::ID,
-                farms_program: kamino_mocks::kamino_farms::ID,
-                collateral_token_program: anchor_spl::token::spl_token::ID,
-                liquidity_token_program: bank.get_token_program(),
-                instruction_sysvar_account: sysvar::instructions::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::KaminoWithdraw {
+            accounts,
+            data: marginfi::instruction::IntegrationWithdraw {
                 amount,
                 withdraw_all,
             }
@@ -1613,29 +1625,38 @@ impl MarginfiAccountFixture {
         let drift_state = derive_drift_state();
         let drift_spot_market_vault = derive_drift_spot_market_vault(spot_market.market_index);
 
+        let mut accounts = marginfi::accounts::IntegrationDeposit {
+            group: marginfi_account.group,
+            marginfi_account: self.key,
+            authority,
+            bank: bank.key,
+            signer_token_account: funding_account,
+            liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+            mint: bank.mint.key,
+            token_program: bank.get_token_program(),
+        }
+        .to_account_metas(Some(true));
+
+        // Drift deposit protocol accounts (indices 0..7+)
+        let mut protocol_accounts = vec![
+            AccountMeta::new_readonly(drift_state, false), // [0] drift_state
+            AccountMeta::new(bank_state.integration_acc_2, false), // [1] user
+            AccountMeta::new(bank_state.integration_acc_3, false), // [2] user_stats
+            AccountMeta::new(bank_state.integration_acc_1, false), // [3] spot_market
+            AccountMeta::new(drift_spot_market_vault, false), // [4] drift_spot_market_vault
+            AccountMeta::new_readonly(DRIFT_PROGRAM_ID, false), // [5] drift_program
+            AccountMeta::new_readonly(system_program::ID, false), // [6] system_program
+        ];
+        if let Some(oracle) = drift_oracle {
+            protocol_accounts.push(AccountMeta::new_readonly(oracle, false)); // [7] drift_oracle
+        }
+        accounts.extend(protocol_accounts);
+
         Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::DriftDeposit {
-                group: marginfi_account.group,
-                marginfi_account: self.key,
-                authority,
-                bank: bank.key,
-                drift_oracle,
-                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
-                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
-                signer_token_account: funding_account,
-                drift_state,
-                integration_acc_2: bank_state.integration_acc_2,
-                integration_acc_3: bank_state.integration_acc_3,
-                integration_acc_1: bank_state.integration_acc_1,
-                drift_spot_market_vault,
-                mint: bank.mint.key,
-                drift_program: DRIFT_PROGRAM_ID,
-                token_program: bank.get_token_program(),
-                system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::DriftDeposit { amount }.data(),
+            accounts,
+            data: marginfi::instruction::IntegrationDeposit { amount }.data(),
         }
     }
 
@@ -1674,36 +1695,42 @@ impl MarginfiAccountFixture {
         let drift_spot_market_vault = derive_drift_spot_market_vault(spot_market.market_index);
         let drift_signer = derive_drift_signer();
 
+        let mut accounts = marginfi::accounts::IntegrationWithdraw {
+            group: marginfi_account.group,
+            marginfi_account: self.key,
+            authority,
+            bank: bank.key,
+            destination_token_account: destination_account,
+            liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+            mint: bank.mint.key,
+            token_program: bank.get_token_program(),
+        }
+        .to_account_metas(Some(true));
+
+        // Drift withdraw protocol accounts (indices 0..15, padded to MAX)
+        let mut protocol_accounts = vec![
+            AccountMeta::new_readonly(drift_state, false), // [0] drift_state
+            AccountMeta::new(bank_state.integration_acc_2, false), // [1] user
+            AccountMeta::new(bank_state.integration_acc_3, false), // [2] user_stats
+            AccountMeta::new(bank_state.integration_acc_1, false), // [3] spot_market
+            AccountMeta::new(drift_spot_market_vault, false), // [4] drift_spot_market_vault
+            AccountMeta::new_readonly(drift_signer, false), // [5] drift_signer
+            AccountMeta::new_readonly(DRIFT_PROGRAM_ID, false), // [6] drift_program
+            AccountMeta::new_readonly(system_program::ID, false), // [7] system_program
+        ];
+        // Pad optional slots [8..14] with system_program sentinel
+        let oracle_key = drift_oracle.unwrap_or(system_program::ID);
+        protocol_accounts.push(AccountMeta::new_readonly(oracle_key, false)); // [8] drift_oracle
+        for _ in 9..15 {
+            protocol_accounts.push(AccountMeta::new_readonly(system_program::ID, false));
+        }
+        accounts.extend(protocol_accounts);
+
         let mut ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::DriftWithdraw {
-                group: marginfi_account.group,
-                marginfi_account: self.key,
-                authority,
-                bank: bank.key,
-                drift_oracle,
-                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
-                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
-                destination_token_account: destination_account,
-                drift_state,
-                integration_acc_2: bank_state.integration_acc_2,
-                integration_acc_3: bank_state.integration_acc_3,
-                integration_acc_1: bank_state.integration_acc_1,
-                drift_spot_market_vault,
-                drift_reward_oracle: None,
-                drift_reward_spot_market: None,
-                drift_reward_mint: None,
-                drift_reward_oracle_2: None,
-                drift_reward_spot_market_2: None,
-                drift_reward_mint_2: None,
-                drift_signer,
-                mint: bank.mint.key,
-                drift_program: DRIFT_PROGRAM_ID,
-                token_program: bank.get_token_program(),
-                system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::DriftWithdraw {
+            accounts,
+            data: marginfi::instruction::IntegrationWithdraw {
                 amount,
                 withdraw_all,
             }
@@ -1752,35 +1779,42 @@ impl MarginfiAccountFixture {
         );
         let lending_admin = derive_juplend_lending_admin();
 
+        let mut accounts = marginfi::accounts::IntegrationDeposit {
+            group: marginfi_account.group,
+            marginfi_account: self.key,
+            authority,
+            bank: bank.key,
+            signer_token_account: funding_account,
+            liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+            mint: lending.mint,
+            token_program: bank.get_token_program(),
+        }
+        .to_account_metas(Some(true));
+
+        // JupLend deposit protocol accounts (indices 0..14)
+        let protocol_accounts = vec![
+            AccountMeta::new(bank_state.integration_acc_1, false), // [0] lending
+            AccountMeta::new(lending.f_token_mint, false),         // [1] f_token_mint
+            AccountMeta::new(bank_state.integration_acc_2, false), // [2] fToken vault
+            AccountMeta::new_readonly(lending_admin, false),       // [3] lending_admin
+            AccountMeta::new(lending.token_reserves_liquidity, false), // [4] supply_token_reserves_liquidity
+            AccountMeta::new(lending.supply_position_on_liquidity, false), // [5] lending_supply_position_on_liquidity
+            AccountMeta::new_readonly(rate_model, false),                  // [6] rate_model
+            AccountMeta::new(vault, false),                                // [7] vault
+            AccountMeta::new(liquidity, false),                            // [8] liquidity
+            AccountMeta::new_readonly(juplend_mocks::liquidity::ID, false), // [9] liquidity_program
+            AccountMeta::new_readonly(lending.rewards_rate_model, false), // [10] rewards_rate_model
+            AccountMeta::new_readonly(juplend_mocks::ID, false),          // [11] juplend_program
+            AccountMeta::new_readonly(anchor_spl::associated_token::ID, false), // [12] associated_token_program
+            AccountMeta::new_readonly(system_program::ID, false), // [13] system_program
+        ];
+        accounts.extend(protocol_accounts);
+
         Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::JuplendDeposit {
-                group: marginfi_account.group,
-                marginfi_account: self.key,
-                authority,
-                bank: bank.key,
-                signer_token_account: funding_account,
-                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
-                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
-                mint: lending.mint,
-                integration_acc_1: bank_state.integration_acc_1,
-                f_token_mint: lending.f_token_mint,
-                integration_acc_2: bank_state.integration_acc_2,
-                lending_admin,
-                supply_token_reserves_liquidity: lending.token_reserves_liquidity,
-                lending_supply_position_on_liquidity: lending.supply_position_on_liquidity,
-                rate_model,
-                vault,
-                liquidity,
-                liquidity_program: juplend_mocks::liquidity::ID,
-                rewards_rate_model: lending.rewards_rate_model,
-                juplend_program: juplend_mocks::ID,
-                token_program: bank.get_token_program(),
-                associated_token_program: anchor_spl::associated_token::ID,
-                system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::JuplendDeposit { amount }.data(),
+            accounts,
+            data: marginfi::instruction::IntegrationDeposit { amount }.data(),
         }
     }
 
@@ -1827,36 +1861,44 @@ impl MarginfiAccountFixture {
             lending.mint,
         );
 
+        let mut accounts = marginfi::accounts::IntegrationWithdraw {
+            group: marginfi_account.group,
+            marginfi_account: self.key,
+            authority,
+            bank: bank.key,
+            destination_token_account: destination_account,
+            liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+            mint: lending.mint,
+            token_program: bank.get_token_program(),
+        }
+        .to_account_metas(Some(true));
+
+        // JupLend withdraw protocol accounts (indices 0..16)
+        let protocol_accounts = vec![
+            AccountMeta::new(bank_state.integration_acc_1, false), // [0] lending
+            AccountMeta::new(lending.f_token_mint, false),         // [1] f_token_mint
+            AccountMeta::new(bank_state.integration_acc_2, false), // [2] fToken vault
+            AccountMeta::new(bank_state.integration_acc_3, false), // [3] withdraw intermediary ATA
+            AccountMeta::new_readonly(lending_admin, false),       // [4] lending_admin
+            AccountMeta::new(lending.token_reserves_liquidity, false), // [5] supply_token_reserves_liquidity
+            AccountMeta::new(lending.supply_position_on_liquidity, false), // [6] lending_supply_position_on_liquidity
+            AccountMeta::new_readonly(rate_model, false),                  // [7] rate_model
+            AccountMeta::new(vault, false),                                // [8] vault
+            AccountMeta::new(claim_account, false),                        // [9] claim_account
+            AccountMeta::new(liquidity, false),                            // [10] liquidity
+            AccountMeta::new_readonly(juplend_mocks::liquidity::ID, false), // [11] liquidity_program
+            AccountMeta::new_readonly(lending.rewards_rate_model, false), // [12] rewards_rate_model
+            AccountMeta::new_readonly(juplend_mocks::ID, false),          // [13] juplend_program
+            AccountMeta::new_readonly(anchor_spl::associated_token::ID, false), // [14] associated_token_program
+            AccountMeta::new_readonly(system_program::ID, false), // [15] system_program
+        ];
+        accounts.extend(protocol_accounts);
+
         let mut ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::JuplendWithdraw {
-                group: marginfi_account.group,
-                marginfi_account: self.key,
-                authority,
-                bank: bank.key,
-                destination_token_account: destination_account,
-                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
-                mint: lending.mint,
-                integration_acc_1: bank_state.integration_acc_1,
-                f_token_mint: lending.f_token_mint,
-                integration_acc_2: bank_state.integration_acc_2,
-                integration_acc_3: bank_state.integration_acc_3,
-                lending_admin,
-                supply_token_reserves_liquidity: lending.token_reserves_liquidity,
-                lending_supply_position_on_liquidity: lending.supply_position_on_liquidity,
-                rate_model,
-                vault,
-                claim_account,
-                liquidity,
-                liquidity_program: juplend_mocks::liquidity::ID,
-                rewards_rate_model: lending.rewards_rate_model,
-                juplend_program: juplend_mocks::ID,
-                token_program: bank.get_token_program(),
-                associated_token_program: anchor_spl::associated_token::ID,
-                system_program: system_program::ID,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::JuplendWithdraw {
+            accounts,
+            data: marginfi::instruction::IntegrationWithdraw {
                 amount,
                 withdraw_all,
             }

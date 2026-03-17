@@ -2,9 +2,10 @@ import { BN, Program } from "@coral-xyz/anchor";
 import {
   AccountMeta,
   PublicKey,
+  SystemProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 
 import { Marginfi } from "../../../target/types/marginfi";
 import type {
@@ -12,11 +13,14 @@ import type {
   JuplendLiquidityIdl,
   JuplendPoolKeys,
 } from "./types";
-import { JUPLEND_LIQUIDITY_PROGRAM_ID } from "./juplend-pdas";
+import { JUPLEND_LENDING_PROGRAM_ID, JUPLEND_LIQUIDITY_PROGRAM_ID } from "./juplend-pdas";
+import {
+  assertProtocolAccountCount,
+  INTEGRATION_PROTOCOL_ACCOUNT_COUNTS,
+} from "../integration-account-layouts";
 
 export type JuplendDepositAccounts = {
   marginfiAccount: PublicKey;
-  // authority: PublicKey;
   signerTokenAccount: PublicKey;
   bank: PublicKey;
   pool: JuplendPoolKeys;
@@ -25,37 +29,49 @@ export type JuplendDepositAccounts = {
 };
 
 /**
- * Build `juplend_deposit(amount)`.
- *
- * Note: `fTokenMint` still needs to be passed via `accountsPartial` because
- * Anchor cannot infer it through external JupLend account relations.
+ * Build `integration_deposit(amount)` for JupLend.
  */
 export const makeJuplendDepositIx = async (
   program: Program<Marginfi>,
   accounts: JuplendDepositAccounts,
 ): Promise<TransactionInstruction> => {
+  // Fetch bank to get integration accounts and mint
+  const bank = await program.account.bank.fetch(accounts.bank);
+
+  // Build protocol-specific remaining accounts (JupLend deposit layout)
+  const protocolAccounts: AccountMeta[] = [
+    { pubkey: bank.integrationAcc1, isSigner: false, isWritable: true },          // [0] lending
+    { pubkey: accounts.pool.fTokenMint, isSigner: false, isWritable: true },      // [1] f_token_mint
+    { pubkey: bank.integrationAcc2, isSigner: false, isWritable: true },          // [2] fToken vault
+    { pubkey: accounts.pool.lendingAdmin, isSigner: false, isWritable: false },   // [3] lending_admin
+    { pubkey: accounts.pool.tokenReserve, isSigner: false, isWritable: true },    // [4] supply_token_reserves_liquidity
+    { pubkey: accounts.pool.supplyPositionOnLiquidity, isSigner: false, isWritable: true }, // [5] lending_supply_position_on_liquidity
+    { pubkey: accounts.pool.rateModel, isSigner: false, isWritable: false },      // [6] rate_model
+    { pubkey: accounts.pool.vault, isSigner: false, isWritable: true },           // [7] vault
+    { pubkey: accounts.pool.liquidity, isSigner: false, isWritable: true },       // [8] liquidity
+    { pubkey: JUPLEND_LIQUIDITY_PROGRAM_ID, isSigner: false, isWritable: false }, // [9] liquidity_program
+    { pubkey: accounts.pool.lendingRewardsRateModel, isSigner: false, isWritable: false }, // [10] rewards_rate_model
+    { pubkey: JUPLEND_LENDING_PROGRAM_ID, isSigner: false, isWritable: false },   // [11] juplend_program
+    { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }, // [12] associated_token_program
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },      // [13] system_program
+  ];
+  assertProtocolAccountCount(
+    "juplend",
+    "deposit",
+    protocolAccounts.length,
+    INTEGRATION_PROTOCOL_ACCOUNT_COUNTS.juplend.deposit,
+  );
+
   return program.methods
-    .juplendDeposit(accounts.amount)
+    .integrationDeposit(accounts.amount)
     .accounts({
       marginfiAccount: accounts.marginfiAccount,
-      // authority: accounts.authority,
-      signerTokenAccount: accounts.signerTokenAccount,
       bank: accounts.bank,
-      lendingAdmin: accounts.pool.lendingAdmin,
-      supplyTokenReservesLiquidity: accounts.pool.tokenReserve,
-      lendingSupplyPositionOnLiquidity: accounts.pool.supplyPositionOnLiquidity,
-      rateModel: accounts.pool.rateModel,
-      vault: accounts.pool.vault,
-      liquidity: accounts.pool.liquidity,
-      liquidityProgram: JUPLEND_LIQUIDITY_PROGRAM_ID,
-      rewardsRateModel: accounts.pool.lendingRewardsRateModel,
-      // integrationAcc2: accounts.fTokenVault,
-      tokenProgram:
-        accounts.tokenProgram ?? accounts.pool.tokenProgram ?? TOKEN_PROGRAM_ID,
+      signerTokenAccount: accounts.signerTokenAccount,
+      mint: accounts.pool.mint,
+      tokenProgram: accounts.tokenProgram ?? accounts.pool.tokenProgram ?? TOKEN_PROGRAM_ID,
     })
-    .accountsPartial({
-      fTokenMint: accounts.pool.fTokenMint,
-    })
+    .remainingAccounts(protocolAccounts)
     .instruction();
 };
 
@@ -72,16 +88,43 @@ export type JuplendWithdrawAccounts = {
 };
 
 /**
- * Build `juplend_withdraw(amount, withdraw_all)`.
- *
- * Note: `fTokenMint` still needs to be passed via `accountsPartial` because
- * Anchor cannot infer it through external JupLend account relations.
+ * Build `integration_withdraw(amount, withdraw_all)` for JupLend.
  */
 export const makeJuplendWithdrawIx = async (
   program: Program<Marginfi>,
   accounts: JuplendWithdrawAccounts,
 ): Promise<TransactionInstruction> => {
-  const remaining: AccountMeta[] = (accounts.remainingAccounts ?? []).map(
+  // Fetch bank to get integration accounts and mint
+  const bank = await program.account.bank.fetch(accounts.bank);
+
+  // Build protocol-specific remaining accounts (JupLend withdraw layout)
+  const protocolAccounts: AccountMeta[] = [
+    { pubkey: bank.integrationAcc1, isSigner: false, isWritable: true },          // [0] lending
+    { pubkey: accounts.pool.fTokenMint, isSigner: false, isWritable: true },      // [1] f_token_mint
+    { pubkey: bank.integrationAcc2, isSigner: false, isWritable: true },          // [2] fToken vault
+    { pubkey: bank.integrationAcc3, isSigner: false, isWritable: true },          // [3] withdraw intermediary ATA
+    { pubkey: accounts.pool.lendingAdmin, isSigner: false, isWritable: false },   // [4] lending_admin
+    { pubkey: accounts.pool.tokenReserve, isSigner: false, isWritable: true },    // [5] supply_token_reserves_liquidity
+    { pubkey: accounts.pool.supplyPositionOnLiquidity, isSigner: false, isWritable: true }, // [6] lending_supply_position_on_liquidity
+    { pubkey: accounts.pool.rateModel, isSigner: false, isWritable: false },      // [7] rate_model
+    { pubkey: accounts.pool.vault, isSigner: false, isWritable: true },           // [8] vault
+    { pubkey: accounts.claimAccount, isSigner: false, isWritable: true },         // [9] claim_account
+    { pubkey: accounts.pool.liquidity, isSigner: false, isWritable: true },       // [10] liquidity
+    { pubkey: JUPLEND_LIQUIDITY_PROGRAM_ID, isSigner: false, isWritable: false }, // [11] liquidity_program
+    { pubkey: accounts.pool.lendingRewardsRateModel, isSigner: false, isWritable: false }, // [12] rewards_rate_model
+    { pubkey: JUPLEND_LENDING_PROGRAM_ID, isSigner: false, isWritable: false },   // [13] juplend_program
+    { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }, // [14] associated_token_program
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },      // [15] system_program
+  ];
+  assertProtocolAccountCount(
+    "juplend",
+    "withdraw",
+    protocolAccounts.length,
+    INTEGRATION_PROTOCOL_ACCOUNT_COUNTS.juplend.withdraw,
+  );
+
+  // Oracle/health remaining accounts come after protocol accounts
+  const oracleAccounts: AccountMeta[] = (accounts.remainingAccounts ?? []).map(
     (pubkey) => ({
       pubkey,
       isSigner: false,
@@ -90,28 +133,15 @@ export const makeJuplendWithdrawIx = async (
   );
 
   return program.methods
-    .juplendWithdraw(accounts.amount, accounts.withdrawAll ? true : null)
+    .integrationWithdraw(accounts.amount, accounts.withdrawAll ? true : null)
     .accounts({
       marginfiAccount: accounts.marginfiAccount,
-      destinationTokenAccount: accounts.destinationTokenAccount,
       bank: accounts.bank,
-      // integrationAcc3: accounts.withdrawIntermediaryAta,
-      lendingAdmin: accounts.pool.lendingAdmin,
-      supplyTokenReservesLiquidity: accounts.pool.tokenReserve,
-      lendingSupplyPositionOnLiquidity: accounts.pool.supplyPositionOnLiquidity,
-      rateModel: accounts.pool.rateModel,
-      vault: accounts.pool.vault,
-      claimAccount: accounts.claimAccount,
-      liquidity: accounts.pool.liquidity,
-      liquidityProgram: JUPLEND_LIQUIDITY_PROGRAM_ID,
-      rewardsRateModel: accounts.pool.lendingRewardsRateModel,
+      destinationTokenAccount: accounts.destinationTokenAccount,
+      mint: accounts.pool.mint,
       tokenProgram: accounts.tokenProgram ?? TOKEN_PROGRAM_ID,
-      // systemProgram: accounts.systemProgram ?? SystemProgram.programId,
     })
-    .accountsPartial({
-      fTokenMint: accounts.pool.fTokenMint,
-    })
-    .remainingAccounts(remaining)
+    .remainingAccounts([...protocolAccounts, ...oracleAccounts])
     .instruction();
 };
 
