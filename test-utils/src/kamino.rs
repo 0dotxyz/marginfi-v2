@@ -47,7 +47,7 @@ where
     );
     assert_eq!(
         &data[..disc.len()],
-        disc.as_ref(),
+        disc,
         "unexpected account discriminator"
     );
     assert!(
