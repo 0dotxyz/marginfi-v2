@@ -672,17 +672,13 @@ const JUPLEND_TEST_BANK_SEED: u64 = 888;
 const JUPLEND_INIT_POSITION_NOMINAL_AMOUNT: u64 = 1_000_000;
 
 impl TestFixture {
-    const KAMINO_LENDING_MARKET_ACCOUNT_LEN: usize = 256;
+    // Full serialized LendingMarket account payload size (without 8-byte discriminator).
+    // Keep this aligned with Kamino's on-chain account layout used by integration tests.
+    const KAMINO_LENDING_MARKET_ACCOUNT_LEN: usize = 4656;
     const KAMINO_LENDING_MARKET_BUMP_OFFSET: usize = 16;
     const KAMINO_LENDING_MARKET_SCOPE_CHAIN_OFFSET: usize = 125;
-
-    fn kamino_lending_market_discriminator() -> [u8; 8] {
-        let mut discriminator = [0u8; 8];
-        discriminator.copy_from_slice(
-            &anchor_lang::solana_program::hash::hash(b"account:LendingMarket").to_bytes()[..8],
-        );
-        discriminator
-    }
+    // `LendingMarket` discriminator from complete Kamino IDL.
+    const KAMINO_LENDING_MARKET_DISCRIMINATOR: [u8; 8] = [246, 114, 50, 98, 72, 157, 28, 120];
 
     pub async fn new(test_settings: Option<TestSettings>) -> TestFixture {
         TestFixture::new_with_t22_extension(test_settings, &[]).await
@@ -1341,7 +1337,7 @@ impl TestFixture {
         let lending_market_account = test_f.try_load(&lending_market).await.unwrap();
         if lending_market_account.is_none() {
             let mut data = vec![0u8; 8 + Self::KAMINO_LENDING_MARKET_ACCOUNT_LEN];
-            data[..8].copy_from_slice(&Self::kamino_lending_market_discriminator());
+            data[..8].copy_from_slice(&Self::KAMINO_LENDING_MARKET_DISCRIMINATOR);
             // `lending_market.bump_seed` is used in PDA seed constraints for `lending_market_authority`.
             data[Self::KAMINO_LENDING_MARKET_BUMP_OFFSET
                 ..Self::KAMINO_LENDING_MARKET_BUMP_OFFSET + 8]
