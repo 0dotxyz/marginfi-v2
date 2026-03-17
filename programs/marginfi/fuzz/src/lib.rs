@@ -1086,6 +1086,7 @@ fn initialize_marginfi_group<'a>(
         Some(admin.key()), // emode_admin
         Some(admin.key()), // curve_admin
         Some(admin.key()), // limit_admin
+        Some(admin.key()), // flow_admin
         Some(admin.key()), // emissions_admin
         Some(admin.key()), // metadata_admin
         Some(admin.key()), // risk_admin

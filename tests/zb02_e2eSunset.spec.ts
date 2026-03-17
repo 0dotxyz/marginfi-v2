@@ -35,7 +35,6 @@ import {
   composeRemainingAccounts,
   composeRemainingAccountsMetaBanksOnly,
   composeRemainingAccountsWriteableMeta,
-  composeRemainingAccountsByBalances,
   depositIx,
   endDeleverageIx,
   initLiquidationRecordIx,
@@ -534,15 +533,10 @@ describe("Bank e2e sunset due to illiquid asset", () => {
 
     // first repay our debt so we can withdraw without interference.
     // For repayAll, include all active balances, including the closing bank.
-    const userAccBefore =
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
-    const remaining = composeRemainingAccountsByBalances(
-      userAccBefore.lendingAccount.balances,
-      [
-        [banks[0], oracles.pythPullLst.publicKey],
-        [banks[1], oracles.pythPullLst.publicKey],
-      ]
-    );
+    const remaining = composeRemainingAccounts([
+      [banks[0], oracles.pythPullLst.publicKey],
+      [banks[1], oracles.pythPullLst.publicKey],
+    ]);
     const repayTx = new Transaction();
     repayTx.add(
       await repayIx(user.mrgnBankrunProgram, {
@@ -567,15 +561,11 @@ describe("Bank e2e sunset due to illiquid asset", () => {
       ]);
 
     // For withdrawAll, include all active balances, including the closing bank.
-    const userAccBeforeWithdraw =
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
-    const remainingWithdraw = composeRemainingAccountsByBalances(
-      userAccBeforeWithdraw.lendingAccount.balances,
+    const remainingWithdraw = composeRemainingAccounts(
       [
         [banks[1], oracles.pythPullLst.publicKey],
         [banks[0], oracles.pythPullLst.publicKey],
-      ],
-      banks[1]
+      ].filter((group) => !group[0].equals(banks[1]))
     );
     const tx = new Transaction();
     tx.add(
@@ -684,12 +674,7 @@ describe("Bank e2e sunset due to illiquid asset", () => {
     // If repaying all, remove the account being repaid.
     endAccounts?: PublicKey[][]
   ) => {
-    const accountBefore =
-      await bankrunProgram.account.marginfiAccount.fetch(deleverageeAccount);
-    const repayRemaining = composeRemainingAccountsByBalances(
-      accountBefore.lendingAccount.balances,
-      remainingAccounts
-    );
+    const repayRemaining = composeRemainingAccounts(remainingAccounts);
 
     let tx = new Transaction().add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),

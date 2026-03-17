@@ -33,7 +33,6 @@ import { getTokenBalance, assertBankrunTxFailed } from "./utils/genericTests";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import {
   composeRemainingAccounts,
-  composeRemainingAccountsByBalances,
 } from "./utils/user-instructions";
 import {
   makeKaminoDepositIx,
@@ -1339,9 +1338,6 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
       ? oracles.usdcOracle.publicKey
       : oracles.tokenAOracle.publicKey;
     const tokenAccount = isUsdc ? user.usdcAccount : user.tokenAAccount;
-    const mint = isUsdc
-      ? ecosystem.usdcMint.publicKey
-      : ecosystem.tokenAMint.publicKey;
 
     // Build remaining accounts from currently active positions (Kamino pattern: [bank, oracle, reserve])
     const activePositions: PublicKey[][] = [];
@@ -1412,10 +1408,8 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
           amount: isFinalWithdrawal ? new BN(0) : amount,
           isWithdrawAll: isFinalWithdrawal,
           remaining: isFinalWithdrawal
-            ? composeRemainingAccountsByBalances(
-                marginfiAccount.lendingAccount.balances,
-                activePositions,
-                bank,
+            ? composeRemainingAccounts(
+                activePositions.filter((group) => !group[0].equals(bank))
               )
             : composeRemainingAccounts(activePositions),
         },

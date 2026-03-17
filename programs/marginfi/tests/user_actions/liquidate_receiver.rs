@@ -710,12 +710,13 @@ async fn liquidate_receiver_happy_path() -> anyhow::Result<()> {
 }
 
 // Repay during receivership should not require remaining accounts even when rate limits are enabled.
-// This currently fails because repay fetches a rate-limit price before checking the receivership flag.
+// Group rate limiting is now event-driven and read-only during user instructions.
 #[tokio::test]
 async fn liquidate_receiver_repay_without_oracles_should_succeed() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
-    // Enable group rate limiting so repay attempts to fetch a rate-limit price.
+    // Enable group rate limiting to ensure receivership repay still skips any oracle-dependent
+    // flow accounting path.
     {
         let ctx = test_f.context.borrow_mut();
         let ix = Instruction {
@@ -1186,7 +1187,12 @@ async fn liquidate_receiver_closes_out_low_value_acc() -> anyhow::Result<()> {
     // NOTE: In receivership liquidation, you MUST PASS the oracle for the withdrawn asset even for
     // a withdraw-all. The entire balance is still withdrawn!
     let withdraw_ix = liquidatee
-        .make_bank_withdraw_ix(liquidator_sol_acc.key, sol_bank, 0.4, Some(true))
+        .make_bank_withdraw_ix_include_closing_bank(
+            liquidator_sol_acc.key,
+            sol_bank,
+            0.4,
+            Some(true),
+        )
         .await;
     // The entire liability
     let repay_ix = liquidatee

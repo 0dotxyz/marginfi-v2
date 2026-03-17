@@ -357,7 +357,6 @@ export const makeKaminoWithdrawIx = async (
     .kaminoWithdraw(args.amount, args.isWithdrawAll)
     .accounts({
       lendingMarketAuthority, // derived
-      reserveLiquidityMint: accounts.mint,
       reserveLiquiditySupply,
       reserveCollateralMint,
       reserveSourceCollateral,

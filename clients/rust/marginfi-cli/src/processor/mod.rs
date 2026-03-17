@@ -9,8 +9,8 @@ use {
         profile::{self, get_cli_config_dir, load_profile, CliConfig, Profile},
         utils::{
             bank_to_oracle_key, find_bank_emssions_token_account_pda,
-            find_bank_vault_authority_pda, find_bank_vault_pda, find_fee_state_pda,
-            find_order_pda, load_observation_account_metas, process_transaction, EXP_10_I80F48,
+            find_bank_vault_authority_pda, find_bank_vault_pda, find_fee_state_pda, find_order_pda,
+            load_observation_account_metas, process_transaction, EXP_10_I80F48,
         },
         RatePointArg,
     },
@@ -61,9 +61,7 @@ use {
         system_program,
         transaction::Transaction,
     },
-    spl_associated_token_account::{
-        instruction::create_associated_token_account_idempotent,
-    },
+    spl_associated_token_account::instruction::create_associated_token_account_idempotent,
     std::{
         cell::RefCell,
         collections::HashMap,
@@ -288,13 +286,14 @@ pub fn group_configure(
             admin: config.authority(),
         })
         .args(marginfi::instruction::MarginfiGroupConfigure {
-            new_admin,
-            new_emode_admin,
-            new_curve_admin,
-            new_limit_admin,
-            new_emissions_admin,
-            new_metadata_admin,
-            new_risk_admin,
+            new_admin: Some(new_admin),
+            new_emode_admin: Some(new_emode_admin),
+            new_curve_admin: Some(new_curve_admin),
+            new_limit_admin: Some(new_limit_admin),
+            new_flow_admin: None,
+            new_emissions_admin: Some(new_emissions_admin),
+            new_metadata_admin: Some(new_metadata_admin),
+            new_risk_admin: Some(new_risk_admin),
             emode_max_init_leverage: None,
             emode_max_maint_leverage: None,
         })
@@ -1766,9 +1765,7 @@ pub fn print_account(
 
             println!(
                 "\tBalance: {:.3}, Bank: {} (mint: {})",
-                balance_amount,
-                balance.bank_pk,
-                bank.mint,
+                balance_amount, balance.bank_pk, bank.mint,
             )
         });
     Ok(())

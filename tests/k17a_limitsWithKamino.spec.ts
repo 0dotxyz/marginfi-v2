@@ -31,7 +31,6 @@ import { defaultBankConfigOptRaw, newEmodeEntry } from "./utils/types";
 import {
   borrowIx,
   composeRemainingAccounts,
-  composeRemainingAccountsByBalances,
   depositIx,
   liquidateIx,
 } from "./utils/user-instructions";
@@ -262,13 +261,8 @@ describe("k14: Limits on number of accounts, with Kamino and emode", () => {
       withdrawObligation,
     );
 
-    const userAccBefore = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount,
-    );
-    const withdrawRemaining = composeRemainingAccountsByBalances(
-      userAccBefore.lendingAccount.balances,
-      remainingPositions,
-      withdrawBank,
+    const withdrawRemaining = composeRemainingAccounts(
+      remainingPositions.filter((group) => !group[0].equals(withdrawBank))
     );
     const withdrawIx = await makeKaminoWithdrawIx(
       user.mrgnBankrunProgram,
