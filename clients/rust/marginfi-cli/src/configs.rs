@@ -97,6 +97,34 @@ pub struct FeeStateConfig {
     pub order_execution_max_fee: f64,
 }
 
+/// JSON config entry for `bank write-metadata --config <path>`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WriteBankMetadataConfigEntry {
+    #[serde(alias = "bank")]
+    pub bank_address: String,
+    #[serde(alias = "mint", alias = "tokenAddress")]
+    pub token_address: Option<String>,
+    #[serde(alias = "symbol", alias = "tokenSymbol")]
+    pub token_symbol: Option<String>,
+    #[serde(alias = "name", alias = "tokenName")]
+    pub token_name: Option<String>,
+    #[serde(alias = "assetGroup")]
+    pub asset_group: Option<String>,
+    pub venue: Option<String>,
+    #[serde(alias = "venueIdentifier")]
+    pub venue_identifier: Option<String>,
+    #[serde(alias = "riskTierName")]
+    pub risk_tier_name: Option<String>,
+}
+
+/// JSON config for `bank write-metadata --config <path>`.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum WriteBankMetadataConfig {
+    Single(WriteBankMetadataConfigEntry),
+    Multiple(Vec<WriteBankMetadataConfigEntry>),
+}
+
 /// JSON config for `group update --config <path>`.
 #[derive(Debug, Deserialize)]
 pub struct GroupUpdateConfig {
@@ -409,6 +437,40 @@ impl FeeStateConfig {
   "order_init_flat_sol_fee": 50000,
   "order_execution_max_fee": 0.05
 }"#
+    }
+}
+
+impl WriteBankMetadataConfig {
+    pub fn into_entries(self) -> Vec<WriteBankMetadataConfigEntry> {
+        match self {
+            Self::Single(entry) => vec![entry],
+            Self::Multiple(entries) => entries,
+        }
+    }
+
+    pub fn example_json() -> &'static str {
+        r#"[
+  {
+    "bankAddress": "<BANK_PUBKEY>",
+    "tokenAddress": null,
+    "tokenSymbol": "USDC",
+    "tokenName": "USD Coin",
+    "assetGroup": null,
+    "venue": null,
+    "venueIdentifier": null,
+    "riskTierName": null
+  },
+  {
+    "bankAddress": "<BANK_PUBKEY>",
+    "tokenAddress": null,
+    "tokenSymbol": "SOL",
+    "tokenName": "Wrapped SOL",
+    "assetGroup": "blue-chip",
+    "venue": null,
+    "venueIdentifier": null,
+    "riskTierName": null
+  }
+]"#
     }
 }
 

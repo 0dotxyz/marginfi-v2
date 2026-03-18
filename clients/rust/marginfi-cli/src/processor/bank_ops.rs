@@ -26,7 +26,7 @@ use {
         },
     },
     pyth_solana_receiver_sdk::price_update::PriceUpdateV2,
-    serde::Deserialize,
+    serde::{Deserialize, Serialize},
     solana_client::rpc_filter::{Memcmp, RpcFilterType},
     solana_sdk::{
         account::{ReadableAccount, WritableAccount},
@@ -39,7 +39,9 @@ use {
     std::{
         cell::RefCell,
         collections::{HashMap, HashSet},
+        fs,
         mem::size_of,
+        path::PathBuf,
         sync::OnceLock,
         thread::sleep,
         time::{Duration, SystemTime, UNIX_EPOCH},
@@ -153,13 +155,50 @@ pub struct BankMetadataEntry {
     pub description: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct BankMetadataInput {
+    pub bank: Pubkey,
+    pub ticker: Option<String>,
+    pub description: Option<String>,
+    pub mint: Option<Pubkey>,
+    pub symbol: Option<String>,
+    pub name: Option<String>,
+    pub asset_group: Option<String>,
+    pub venue: Option<String>,
+    pub venue_identifier: Option<String>,
+    pub risk_tier_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BankMetadataWriteOptions {
+    pub wait_for_bank: bool,
+    pub wait_for_bank_timeout: Duration,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct BankMetadataSnapshot {
     ticker: String,
     description: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MetadataWriteStatus {
+    UpToDate,
+    Updated,
+    CreatedAndUpdated,
+    UpdatePrepared,
+    CreateAndUpdatePrepared,
+}
+
+#[derive(Debug, Clone)]
+struct BankMetadataWriteResult {
+    bank: Pubkey,
+    metadata: Pubkey,
+    status: MetadataWriteStatus,
+    resulting_metadata: BankMetadataSnapshot,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct MetadataRow {
     #[serde(alias = "bankAddress")]
     bank_address: String,
@@ -169,6 +208,8 @@ struct MetadataRow {
     symbol: String,
     #[serde(alias = "tokenName")]
     name: String,
+    #[serde(default, alias = "assetGroup")]
+    asset_group: Option<String>,
     #[serde(default)]
     venue: Option<String>,
     #[serde(default, alias = "venueIdentifier")]
@@ -183,6 +224,16 @@ const ADDITIONAL_STAGING_BANKS: &[(&str, &str, &str)] = &[(
     "ptBulkSOL | PT-bulkSOL-26FEB26",
     "PT-bulkSOL-26FEB26 | rate-products | ptBulkSOL | P0 | -",
 )];
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BankMetadataDumpRow {
+    bank_name: String,
+    bank_address: String,
+    bank_metadata_address: String,
+    ticker: Option<String>,
+    description: Option<String>,
+}
 
 pub fn bank_get(config: Config, bank_pk: Option<Pubkey>) -> Result<()> {
     let rpc_client = config.mfi_program.rpc();
@@ -520,11 +571,62 @@ const ASSET_GROUP_PRIORITY: &[&str] = &[
     "memes",
 ];
 
+fn asset_groups_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("assets")
+        .join("assetGroups.json")
+}
+
 fn asset_groups() -> &'static AssetGroups {
     ASSET_GROUPS.get_or_init(|| {
-        serde_json::from_str(include_str!("../../assets/assetGroups.json"))
-            .expect("asset group json must be valid")
+        let content = fs::read_to_string(asset_groups_path())
+            .unwrap_or_else(|_| include_str!("../../assets/assetGroups.json").to_string());
+        serde_json::from_str(&content).expect("asset group json must be valid")
     })
+}
+
+fn update_asset_groups_file(asset_group: &str, symbol: &str, mint: &Pubkey) -> Result<()> {
+    let path = asset_groups_path();
+    let content = fs::read_to_string(&path)
+        .unwrap_or_else(|_| include_str!("../../assets/assetGroups.json").to_string());
+    let mut value: serde_json::Value =
+        serde_json::from_str(&content).context("asset group json must be valid")?;
+    let root = value
+        .as_object_mut()
+        .context("asset group json root must be an object")?;
+
+    if !root.contains_key(asset_group) {
+        root.insert(asset_group.to_string(), serde_json::json!({}));
+    }
+
+    let group = root
+        .get_mut(asset_group)
+        .and_then(serde_json::Value::as_object_mut)
+        .context("asset group entry must be an object")?;
+
+    match group.get(symbol).and_then(serde_json::Value::as_str) {
+        Some(existing_mint) if existing_mint == mint.to_string() => return Ok(()),
+        Some(existing_mint) => {
+            println!(
+                "assetGroups.json not updated for {} in {}: existing mint {} differs from {}",
+                symbol, asset_group, existing_mint, mint
+            );
+            return Ok(());
+        }
+        None => {}
+    }
+
+    group.insert(
+        symbol.to_string(),
+        serde_json::Value::String(mint.to_string()),
+    );
+    fs::write(&path, serde_json::to_vec_pretty(&value)?)?;
+    println!(
+        "Updated assetGroups.json: added {} -> {} to {}",
+        symbol, mint, asset_group
+    );
+
+    Ok(())
 }
 
 fn mint_to_group() -> &'static HashMap<String, String> {
@@ -576,6 +678,10 @@ fn asset_group_for_mint(mint: &str, risk_tier_name: Option<&str>) -> &'static st
         .unwrap_or("W/E")
 }
 
+fn derive_bank_metadata_address(program_id: &Pubkey, bank_pk: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[METADATA_SEED.as_bytes(), bank_pk.as_ref()], program_id).0
+}
+
 fn decode_metadata_field(bytes: &[u8], end_index: usize) -> String {
     if bytes.is_empty() || bytes[0] == 0 {
         return String::new();
@@ -590,11 +696,7 @@ fn read_current_bank_metadata(
     bank_pk: Pubkey,
 ) -> Result<Option<BankMetadataSnapshot>> {
     let rpc_client = config.mfi_program.rpc();
-    let metadata = Pubkey::find_program_address(
-        &[METADATA_SEED.as_bytes(), bank_pk.as_ref()],
-        &config.program_id,
-    )
-    .0;
+    let metadata = derive_bank_metadata_address(&config.program_id, &bank_pk);
 
     let account = rpc_client
         .get_account_with_commitment(&metadata, config.commitment)?
@@ -627,13 +729,174 @@ fn read_current_bank_metadata(
     }))
 }
 
+fn parse_metadata_source_db(body: &str) -> Result<Vec<MetadataRow>> {
+    serde_json::from_str::<Vec<MetadataRow>>(body).context("unsupported metadata source format")
+}
+
 fn print_bank_metadata_snapshot(metadata: &BankMetadataSnapshot) {
     println!("  ticker: {}", metadata.ticker);
     println!("  description: {}", metadata.description);
 }
 
+fn target_bank_metadata_snapshot(entry: &BankMetadataEntry) -> BankMetadataSnapshot {
+    BankMetadataSnapshot {
+        ticker: entry.ticker.clone(),
+        description: entry.description.clone(),
+    }
+}
+
+fn metadata_write_status_label(status: MetadataWriteStatus) -> &'static str {
+    match status {
+        MetadataWriteStatus::UpToDate => "up to date",
+        MetadataWriteStatus::Updated => "updated",
+        MetadataWriteStatus::CreatedAndUpdated => "initialized + updated",
+        MetadataWriteStatus::UpdatePrepared => "update prepared",
+        MetadataWriteStatus::CreateAndUpdatePrepared => "init + update prepared",
+    }
+}
+
+fn apply_bank_metadata_entry(
+    config: &Config,
+    entry: &BankMetadataEntry,
+    options: &BankMetadataWriteOptions,
+) -> Result<BankMetadataWriteResult> {
+    let rpc_client = config.mfi_program.rpc();
+    let metadata = derive_bank_metadata_address(&config.program_id, &entry.bank);
+    println!("  ensuring bank account {} exists", entry.bank);
+    let bank = wait_for_bank_account(config, entry.bank, options)?;
+    println!("  bank account found");
+    println!("  metadata PDA: {}", metadata);
+    let target_metadata = target_bank_metadata_snapshot(entry);
+    let current_metadata = read_current_bank_metadata(config, entry.bank)?;
+
+    if current_metadata.as_ref() == Some(&target_metadata) {
+        println!("  on-chain metadata already matches target values");
+        return Ok(BankMetadataWriteResult {
+            bank: entry.bank,
+            metadata,
+            status: MetadataWriteStatus::UpToDate,
+            resulting_metadata: target_metadata,
+        });
+    }
+
+    let mut ixs = Vec::new();
+    let needs_init = rpc_client.get_account(&metadata).is_err();
+
+    if needs_init {
+        println!("  metadata account not found; init will be included");
+        ixs.push(Instruction {
+            program_id: config.program_id,
+            accounts: marginfi::accounts::InitBankMetadata {
+                bank: entry.bank,
+                fee_payer: config.authority(),
+                metadata,
+                system_program: system_program::id(),
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::InitBankMetadata {}.data(),
+        });
+    } else {
+        println!("  metadata account already exists");
+    }
+
+    println!("  scheduling metadata write");
+    ixs.push(Instruction {
+        program_id: config.program_id,
+        accounts: marginfi::accounts::WriteBankMetadata {
+            group: bank.group,
+            bank: entry.bank,
+            metadata_admin: config.authority(),
+            metadata,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::WriteBankMetadata {
+            ticker: Some(entry.ticker.clone().into_bytes()),
+            description: Some(entry.description.clone().into_bytes()),
+        }
+        .data(),
+    });
+
+    let signing_keypairs = config.get_signers(false);
+    println!(
+        "  {} {} instruction{}",
+        if config.send_tx {
+            "sending"
+        } else {
+            "preparing"
+        },
+        ixs.len(),
+        if ixs.len() == 1 { "" } else { "s" }
+    );
+    send_tx(config, ixs, &signing_keypairs)?;
+
+    let status = match (config.send_tx, needs_init) {
+        (true, true) => MetadataWriteStatus::CreatedAndUpdated,
+        (true, false) => MetadataWriteStatus::Updated,
+        (false, true) => MetadataWriteStatus::CreateAndUpdatePrepared,
+        (false, false) => MetadataWriteStatus::UpdatePrepared,
+    };
+
+    let resulting_metadata = if config.send_tx {
+        read_current_bank_metadata(config, entry.bank)?.unwrap_or_else(|| target_metadata.clone())
+    } else {
+        target_metadata
+    };
+
+    Ok(BankMetadataWriteResult {
+        bank: entry.bank,
+        metadata,
+        status,
+        resulting_metadata,
+    })
+}
+
+fn wait_for_bank_account(
+    config: &Config,
+    bank: Pubkey,
+    options: &BankMetadataWriteOptions,
+) -> Result<Bank> {
+    let rpc_client = config.mfi_program.rpc();
+    let started = std::time::Instant::now();
+    let poll_interval = Duration::from_secs(1);
+    let mut wait_notice_printed = false;
+
+    loop {
+        match rpc_client.get_account(&bank) {
+            Ok(_) => return Ok(config.mfi_program.account(bank)?),
+            Err(err) if options.wait_for_bank => {
+                if started.elapsed() >= options.wait_for_bank_timeout {
+                    return Err(err).with_context(|| {
+                        format!(
+                            "bank {bank} did not appear on-chain within {}s",
+                            options.wait_for_bank_timeout.as_secs()
+                        )
+                    });
+                }
+
+                if !wait_notice_printed {
+                    println!(
+                        "  bank account not found yet; waiting up to {}s for it to appear on-chain",
+                        options.wait_for_bank_timeout.as_secs()
+                    );
+                    wait_notice_printed = true;
+                }
+
+                println!(
+                    "  still waiting for bank account {} (elapsed: {}s)",
+                    bank,
+                    started.elapsed().as_secs()
+                );
+                sleep(poll_interval);
+            }
+            Err(err) => return Err(err.into()),
+        }
+    }
+}
+
 fn build_metadata_entry(row: MetadataRow) -> Result<BankMetadataEntry> {
-    let asset_group = asset_group_for_mint(&row.mint, row.risk_tier_name.as_deref());
+    let asset_group = row.asset_group.unwrap_or_else(|| {
+        asset_group_for_mint(&row.mint, row.risk_tier_name.as_deref()).to_string()
+    });
     let venue = row.venue.unwrap_or_else(|| "P0".to_string());
     let market_type = row
         .venue_identifier
@@ -663,9 +926,72 @@ fn build_metadata_entry(row: MetadataRow) -> Result<BankMetadataEntry> {
     })
 }
 
+fn resolve_bank_metadata_input(
+    config: &Config,
+    input: BankMetadataInput,
+    options: &BankMetadataWriteOptions,
+) -> Result<BankMetadataEntry> {
+    let BankMetadataInput {
+        bank,
+        ticker,
+        description,
+        mint,
+        symbol,
+        name,
+        asset_group,
+        venue,
+        venue_identifier,
+        risk_tier_name,
+    } = input;
+
+    if let (Some(ticker), Some(description)) = (&ticker, &description) {
+        return Ok(BankMetadataEntry {
+            bank,
+            ticker: ticker.clone(),
+            description: description.clone(),
+        });
+    }
+
+    let effective_mint = if let Some(mint) = mint {
+        mint
+    } else {
+        wait_for_bank_account(config, bank, options)?.mint
+    };
+    if let (Some(asset_group), Some(symbol)) = (asset_group.as_deref(), symbol.as_deref()) {
+        update_asset_groups_file(asset_group, symbol, &effective_mint)?;
+    }
+    let row = MetadataRow {
+        bank_address: bank.to_string(),
+        mint: effective_mint.to_string(),
+        symbol: symbol.context("symbol required when --ticker or --description is omitted")?,
+        name: name.context("name required when --ticker or --description is omitted")?,
+        asset_group,
+        venue,
+        venue_identifier,
+        risk_tier_name,
+    };
+    let derived = build_metadata_entry(row)?;
+
+    Ok(BankMetadataEntry {
+        bank,
+        ticker: ticker.unwrap_or(derived.ticker),
+        description: description.unwrap_or(derived.description),
+    })
+}
+
+pub fn resolve_bank_metadata_inputs(
+    config: &Config,
+    inputs: Vec<BankMetadataInput>,
+    options: &BankMetadataWriteOptions,
+) -> Result<Vec<BankMetadataEntry>> {
+    inputs
+        .into_iter()
+        .map(|input| resolve_bank_metadata_input(config, input, options))
+        .collect()
+}
+
 fn parse_metadata_source_rows(body: &str, url: &str) -> Result<Vec<BankMetadataEntry>> {
-    let rows = serde_json::from_str::<Vec<MetadataRow>>(body)
-        .context("unsupported metadata source format")?;
+    let rows = parse_metadata_source_db(body)?;
     let mut entries: Vec<BankMetadataEntry> = rows
         .into_iter()
         .map(build_metadata_entry)
@@ -682,6 +1008,93 @@ fn parse_metadata_source_rows(body: &str, url: &str) -> Result<Vec<BankMetadataE
     }
 
     Ok(entries)
+}
+
+pub fn dump_bank_metadata(
+    config: Config,
+    group: Option<Pubkey>,
+    url: Option<String>,
+    out: PathBuf,
+    limit: Option<usize>,
+) -> Result<()> {
+    let url = url.unwrap_or_else(|| DEFAULT_METADATA_DB_URL.to_string());
+    let response = reqwest::blocking::get(&url)
+        .with_context(|| format!("failed to fetch metadata source {}", url))?;
+    let response = response
+        .error_for_status()
+        .with_context(|| format!("metadata source {} returned an error", url))?;
+    let body = response.text()?;
+    let source_rows = parse_metadata_source_db(&body)?;
+
+    let group_bank_set = if let Some(group) = group {
+        Some(
+            load_all_banks(&config, Some(group))?
+                .into_iter()
+                .map(|(pk, _)| pk)
+                .collect::<HashSet<_>>(),
+        )
+    } else {
+        None
+    };
+
+    let mut rows: Vec<MetadataRow> = source_rows
+        .into_iter()
+        .filter(|row| match group_bank_set.as_ref() {
+            Some(group_bank_set) => row
+                .bank_address
+                .parse::<Pubkey>()
+                .map(|bank_pk| group_bank_set.contains(&bank_pk))
+                .unwrap_or(false),
+            None => true,
+        })
+        .collect();
+
+    if let Some(limit) = limit {
+        rows.truncate(limit);
+    }
+
+    let dump_rows = rows
+        .into_iter()
+        .map(|row| {
+            let bank_pk: Pubkey = row.bank_address.parse()?;
+            let bank_metadata_address = derive_bank_metadata_address(&config.program_id, &bank_pk);
+            let metadata = read_current_bank_metadata(&config, bank_pk)?;
+
+            Ok(BankMetadataDumpRow {
+                bank_name: row.name,
+                bank_address: row.bank_address,
+                bank_metadata_address: bank_metadata_address.to_string(),
+                ticker: metadata.as_ref().map(|value| value.ticker.clone()),
+                description: metadata.as_ref().map(|value| value.description.clone()),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    fs::write(&out, serde_json::to_vec_pretty(&dump_rows)?)?;
+
+    if config.json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "outPath": out.display().to_string(),
+                "count": dump_rows.len(),
+                "group": group.map(|value| value.to_string()),
+                "url": url,
+            }))?
+        );
+    } else {
+        println!("Metadata source: {}", url);
+        if let Some(group) = group {
+            println!("Filtered group: {}", group);
+        }
+        println!(
+            "Wrote {} bank metadata rows to {}",
+            dump_rows.len(),
+            out.display()
+        );
+    }
+
+    Ok(())
 }
 
 pub fn sync_bank_metadata_from_url(
@@ -715,52 +1128,37 @@ pub fn sync_bank_metadata_from_url(
     println!("Metadata source: {}", url);
     println!("Target group: {}", group);
     println!("Banks selected: {}", entries.len());
+    let mut synced_results = Vec::new();
 
     for (index, entry) in entries.iter().enumerate() {
-        let target_metadata = BankMetadataSnapshot {
-            ticker: entry.ticker.clone(),
-            description: entry.description.clone(),
-        };
-        let current_metadata = read_current_bank_metadata(&config, entry.bank)?;
-
-        if current_metadata.as_ref() == Some(&target_metadata) {
-            println!(
-                "[{}/{}] {} - up to date",
-                index + 1,
-                entries.len(),
-                entry.bank
-            );
-            print_bank_metadata_snapshot(&target_metadata);
-        } else {
-            let status = if config.send_tx {
-                "updated"
-            } else {
-                "update prepared"
-            };
-            bank_write_metadata(
-                &config,
-                entry.bank,
-                entry.ticker.clone(),
-                entry.description.clone(),
-            )?;
-            println!(
-                "[{}/{}] {} - {}",
-                index + 1,
-                entries.len(),
-                entry.bank,
-                status
-            );
-            let resulting_metadata = if config.send_tx {
-                read_current_bank_metadata(&config, entry.bank)?
-                    .unwrap_or_else(|| target_metadata.clone())
-            } else {
-                target_metadata.clone()
-            };
-            print_bank_metadata_snapshot(&resulting_metadata);
+        let result = apply_bank_metadata_entry(&config, entry)?;
+        println!(
+            "[{}/{}] {} - {}",
+            index + 1,
+            entries.len(),
+            result.bank,
+            metadata_write_status_label(result.status)
+        );
+        print_bank_metadata_snapshot(&result.resulting_metadata);
+        if result.status != MetadataWriteStatus::UpToDate {
+            synced_results.push(result);
         }
 
         if index + 1 < entries.len() && delay_ms > 0 {
             sleep(Duration::from_millis(delay_ms));
+        }
+    }
+
+    println!("Banks synced this iteration: {}", synced_results.len());
+    if !synced_results.is_empty() {
+        println!("Updated accounts:");
+        for result in synced_results {
+            println!(
+                "- bank: {} | metadata: {} | status: {}",
+                result.bank,
+                result.metadata,
+                metadata_write_status_label(result.status)
+            );
         }
     }
 
@@ -1184,10 +1582,7 @@ pub fn bank_update_fees_destination(
 }
 
 pub fn bank_init_metadata(config: Config, bank_pk: Pubkey) -> Result<()> {
-    let (metadata, _) = Pubkey::find_program_address(
-        &[METADATA_SEED.as_bytes(), bank_pk.as_ref()],
-        &config.program_id,
-    );
+    let metadata = derive_bank_metadata_address(&config.program_id, &bank_pk);
 
     let ix = Instruction {
         program_id: config.program_id,
@@ -1208,53 +1603,29 @@ pub fn bank_init_metadata(config: Config, bank_pk: Pubkey) -> Result<()> {
     Ok(())
 }
 
-pub fn bank_write_metadata(
+pub fn bank_write_metadata_entries(
     config: &Config,
-    bank_pk: Pubkey,
-    ticker: String,
-    description: String,
+    entries: Vec<BankMetadataEntry>,
+    options: &BankMetadataWriteOptions,
 ) -> Result<()> {
-    let rpc_client = config.mfi_program.rpc();
-    let bank: Bank = config.mfi_program.account(bank_pk)?;
-
-    let (metadata, _) = Pubkey::find_program_address(
-        &[METADATA_SEED.as_bytes(), bank_pk.as_ref()],
-        &config.program_id,
-    );
-
-    let mut ixs = Vec::new();
-    if rpc_client.get_account(&metadata).is_err() {
-        ixs.push(Instruction {
-            program_id: config.program_id,
-            accounts: marginfi::accounts::InitBankMetadata {
-                bank: bank_pk,
-                fee_payer: config.authority(),
-                metadata,
-                system_program: system_program::id(),
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::InitBankMetadata {}.data(),
-        });
+    for (index, entry) in entries.iter().enumerate() {
+        println!(
+            "[{}/{}] processing bank {}",
+            index + 1,
+            entries.len(),
+            entry.bank
+        );
+        let result = apply_bank_metadata_entry(config, entry, options)?;
+        println!(
+            "[{}/{}] {} - {} (metadata: {})",
+            index + 1,
+            entries.len(),
+            result.bank,
+            metadata_write_status_label(result.status),
+            result.metadata
+        );
+        print_bank_metadata_snapshot(&result.resulting_metadata);
     }
-
-    ixs.push(Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::WriteBankMetadata {
-            group: bank.group,
-            bank: bank_pk,
-            metadata_admin: config.authority(),
-            metadata,
-        }
-        .to_account_metas(Some(true)),
-        data: marginfi::instruction::WriteBankMetadata {
-            ticker: Some(ticker.into_bytes()),
-            description: Some(description.into_bytes()),
-        }
-        .data(),
-    });
-
-    let signing_keypairs = config.get_signers(false);
-    send_tx(config, ixs, &signing_keypairs)?;
 
     Ok(())
 }

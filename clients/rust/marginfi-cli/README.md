@@ -186,7 +186,7 @@ The CLI now derives several deterministic accounts so JSON configs and direct in
 | `mfi bank withdraw-fees-permissionless <BANK_PUBKEY>` | Permissionless fee withdrawal |
 | `mfi bank update-fees-destination <BANK_PUBKEY>` | Change the fee destination |
 | `mfi bank init-metadata <BANK_PUBKEY>` | Create the on-chain metadata account |
-| `mfi bank write-metadata <BANK_PUBKEY>` | Write ticker and description metadata |
+| `mfi bank write-metadata <BANK_PUBKEY>` | Initialize if needed, then write ticker and description metadata |
 | `mfi bank sync-metadata` | Pull metadata from a source URL and write it on-chain |
 
 ### `account`

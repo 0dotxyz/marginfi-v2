@@ -36,6 +36,21 @@ pub struct CliConfig {
 }
 
 impl Profile {
+    pub fn resolved_program_id(&self) -> Result<Pubkey> {
+        match self.program_id {
+            Some(pid) => Ok(pid),
+            None => match self.cluster {
+                Cluster::Localnet => Ok(pubkey!("2jGhuVUuy3umdzByFx8sNWUAaf5vaeuDm78RDPEnhrMr")),
+                Cluster::Devnet => Ok(pubkey!("neetcne3Ctrrud7vLdt2ypMm21gZHGN2mCmqWaMVcBQ")),
+                Cluster::Mainnet => Ok(pubkey!("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA")),
+                _ => bail!(
+                    "cluster {:?} does not have a default target program ID, please provide it through the --pid option",
+                    self.cluster
+                ),
+            },
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
@@ -78,17 +93,7 @@ impl Profile {
             None => true,
         };
         let cluster = self.cluster.clone();
-        let program_id = match self.program_id {
-        Some(pid) => pid,
-        None => {
-            match cluster {
-                Cluster::Localnet => pubkey!("2jGhuVUuy3umdzByFx8sNWUAaf5vaeuDm78RDPEnhrMr"),
-                Cluster::Devnet => pubkey!("neetcne3Ctrrud7vLdt2ypMm21gZHGN2mCmqWaMVcBQ"),
-                Cluster::Mainnet => pubkey!("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA"),
-                _ => bail!("cluster {:?} does not have a default target program ID, please provide it through the --pid option", cluster)
-            }
-        }
-    };
+        let program_id = self.resolved_program_id()?;
         let commitment = CommitmentConfig {
             commitment: self.commitment.unwrap_or(CommitmentLevel::Processed),
         };
