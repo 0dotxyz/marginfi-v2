@@ -1128,10 +1128,14 @@ pub fn sync_bank_metadata_from_url(
     println!("Metadata source: {}", url);
     println!("Target group: {}", group);
     println!("Banks selected: {}", entries.len());
+    let options = BankMetadataWriteOptions {
+        wait_for_bank: false,
+        wait_for_bank_timeout: Duration::from_secs(0),
+    };
     let mut synced_results = Vec::new();
 
     for (index, entry) in entries.iter().enumerate() {
-        let result = apply_bank_metadata_entry(&config, entry)?;
+        let result = apply_bank_metadata_entry(&config, entry, &options)?;
         println!(
             "[{}/{}] {} - {}",
             index + 1,
