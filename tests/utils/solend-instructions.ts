@@ -1,8 +1,4 @@
-import {
-  AccountMeta,
-  PublicKey,
-  TransactionInstruction,
-} from "@solana/web3.js";
+import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { BN, Program } from "@coral-xyz/anchor";
 import {
   TOKEN_PROGRAM_ID,
@@ -17,10 +13,6 @@ import {
 } from "./solend-utils";
 import { deriveBankWithSeed, deriveLiquidityVaultAuthority } from "./pdas";
 import { SOLEND_PROGRAM_ID } from "./types";
-import {
-  assertProtocolAccountCount,
-  INTEGRATION_PROTOCOL_ACCOUNT_COUNTS,
-} from "./integration-account-layouts";
 
 export interface AddSolendBankAccounts {
   group: PublicKey;
@@ -65,12 +57,6 @@ export const makeAddSolendBankIx = async (
     accounts.group,
     accounts.bankMint,
     args.seed
-  );
-
-  // Derive the liquidity vault authority for the bank
-  const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
-    program.programId,
-    bank
   );
 
   const ix = await program.methods
@@ -195,6 +181,30 @@ export interface SolendDepositAccounts {
   tokenProgram?: PublicKey;
 }
 
+const resolveSolendWrapperAccounts = async (
+  program: Program<Marginfi>,
+  marginfiAccountPk: PublicKey,
+  bankPk: PublicKey,
+) => {
+  const [marginfiAccount, bank] = await Promise.all([
+    program.account.marginfiAccount.fetch(marginfiAccountPk),
+    program.account.bank.fetch(bankPk),
+  ]);
+  const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
+    program.programId,
+    bankPk,
+  );
+
+  return {
+    group: marginfiAccount.group,
+    liquidityVaultAuthority,
+    liquidityVault: bank.liquidityVault,
+    integrationAcc1: bank.integrationAcc1,
+    integrationAcc2: bank.integrationAcc2,
+    mint: bank.mint,
+  };
+};
+
 export interface SolendDepositArgs {
   amount: BN;
 }
@@ -215,19 +225,22 @@ export const makeSolendDepositIx = async (
   accounts: SolendDepositAccounts,
   args: SolendDepositArgs
 ): Promise<TransactionInstruction> => {
-  // Load the bank to get the solend reserve
-  const bank = await program.account.bank.fetch(accounts.bank);
-
+  const common = await resolveSolendWrapperAccounts(
+    program,
+    accounts.marginfiAccount,
+    accounts.bank,
+  );
+  const authority = program.provider.publicKey as PublicKey;
   // Load the Solend reserve to get liquidity supply and collateral mint
   const reserveData = await program.provider.connection.getAccountInfo(
-    bank.integrationAcc1
+    common.integrationAcc1
   );
   if (!reserveData) {
     throw new Error("Solend reserve not found");
   }
 
   // Parse the reserve using the SDK
-  const reserve = parseSolendReserve(bank.integrationAcc1, reserveData);
+  const reserve = parseSolendReserve(common.integrationAcc1, reserveData);
   const liquiditySupplyPubkey = reserve.info.liquidity.supplyPubkey;
   const collateralMintPubkey = reserve.info.collateral.mintPubkey;
   const collateralSupplyPubkey = reserve.info.collateral.supplyPubkey;
@@ -238,50 +251,37 @@ export const makeSolendDepositIx = async (
     SOLEND_PROGRAM_ID
   );
 
-  // Derive liquidity vault authority
-  const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
-    program.programId,
-    accounts.bank
-  );
-
   // Derive user collateral ATA for the cTokens
   const userCollateral = getAssociatedTokenAddressSync(
     collateralMintPubkey,
-    liquidityVaultAuthority,
+    common.liquidityVaultAuthority,
     true
   );
 
-  // Build protocol-specific remaining accounts (Solend deposit layout)
-  const protocolAccounts: AccountMeta[] = [
-    { pubkey: bank.integrationAcc2, isSigner: false, isWritable: true },          // [0] obligation
-    { pubkey: accounts.lendingMarket, isSigner: false, isWritable: false },       // [1] lending_market
-    { pubkey: lendingMarketAuthority, isSigner: false, isWritable: false },       // [2] lending_market_authority
-    { pubkey: bank.integrationAcc1, isSigner: false, isWritable: true },          // [3] reserve
-    { pubkey: liquiditySupplyPubkey, isSigner: false, isWritable: true },         // [4] reserve_liquidity_supply
-    { pubkey: collateralMintPubkey, isSigner: false, isWritable: true },          // [5] reserve_collateral_mint
-    { pubkey: collateralSupplyPubkey, isSigner: false, isWritable: true },        // [6] reserve_collateral_supply
-    { pubkey: userCollateral, isSigner: false, isWritable: true },                // [7] user_collateral
-    { pubkey: accounts.pythPrice, isSigner: false, isWritable: false },           // [8] pyth_price
-    { pubkey: SOLEND_NULL_PUBKEY, isSigner: false, isWritable: false },           // [9] switchboard_feed
-    { pubkey: SOLEND_PROGRAM_ID, isSigner: false, isWritable: false },            // [10] solend_program
-  ];
-  assertProtocolAccountCount(
-    "solend",
-    "deposit",
-    protocolAccounts.length,
-    INTEGRATION_PROTOCOL_ACCOUNT_COUNTS.solend.deposit,
-  );
-
   const ix = await program.methods
-    .integrationDeposit(args.amount)
-    .accounts({
+    .solendDeposit(args.amount)
+    .accountsStrict({
+      group: common.group,
       marginfiAccount: accounts.marginfiAccount,
+      authority,
       bank: accounts.bank,
       signerTokenAccount: accounts.signerTokenAccount,
-      mint: bank.mint,
+      liquidityVaultAuthority: common.liquidityVaultAuthority,
+      liquidityVault: common.liquidityVault,
+      integrationAcc2: common.integrationAcc2,
+      lendingMarket: accounts.lendingMarket,
+      lendingMarketAuthority,
+      integrationAcc1: common.integrationAcc1,
+      mint: common.mint,
+      reserveLiquiditySupply: liquiditySupplyPubkey,
+      reserveCollateralMint: collateralMintPubkey,
+      reserveCollateralSupply: collateralSupplyPubkey,
+      userCollateral,
+      pythPrice: accounts.pythPrice,
+      switchboardFeed: SOLEND_NULL_PUBKEY,
+      solendProgram: SOLEND_PROGRAM_ID,
       tokenProgram: accounts.tokenProgram || TOKEN_PROGRAM_ID,
     })
-    .remainingAccounts(protocolAccounts)
     .instruction();
 
   return ix;
@@ -320,19 +320,22 @@ export const makeSolendWithdrawIx = async (
   accounts: SolendWithdrawAccounts,
   args: SolendWithdrawArgs
 ): Promise<TransactionInstruction> => {
-  // Load the bank to get the solend reserve
-  const bank = await program.account.bank.fetch(accounts.bank);
-
+  const common = await resolveSolendWrapperAccounts(
+    program,
+    accounts.marginfiAccount,
+    accounts.bank,
+  );
+  const authority = program.provider.publicKey as PublicKey;
   // Load the Solend reserve to get liquidity supply and collateral mint
   const reserveData = await program.provider.connection.getAccountInfo(
-    bank.integrationAcc1
+    common.integrationAcc1
   );
   if (!reserveData) {
     throw new Error("Solend reserve not found");
   }
 
   // Parse the reserve using the SDK
-  const reserve = parseSolendReserve(bank.integrationAcc1, reserveData);
+  const reserve = parseSolendReserve(common.integrationAcc1, reserveData);
   const liquiditySupplyPubkey = reserve.info.liquidity.supplyPubkey;
   const collateralMintPubkey = reserve.info.collateral.mintPubkey;
   const collateralSupplyPubkey = reserve.info.collateral.supplyPubkey;
@@ -343,55 +346,42 @@ export const makeSolendWithdrawIx = async (
     SOLEND_PROGRAM_ID
   );
 
-  // Derive liquidity vault authority
-  const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
-    program.programId,
-    accounts.bank
-  );
-
   // Derive user collateral ATA for the cTokens
   const userCollateral = getAssociatedTokenAddressSync(
     collateralMintPubkey,
-    liquidityVaultAuthority,
+    common.liquidityVaultAuthority,
     true
   );
 
-  // Build protocol-specific remaining accounts (Solend withdraw layout)
-  const protocolAccounts: AccountMeta[] = [
-    { pubkey: bank.integrationAcc2, isSigner: false, isWritable: true },          // [0] obligation
-    { pubkey: accounts.lendingMarket, isSigner: false, isWritable: true },        // [1] lending_market (mut for withdraw)
-    { pubkey: lendingMarketAuthority, isSigner: false, isWritable: false },       // [2] lending_market_authority
-    { pubkey: bank.integrationAcc1, isSigner: false, isWritable: true },          // [3] reserve
-    { pubkey: liquiditySupplyPubkey, isSigner: false, isWritable: true },         // [4] reserve_liquidity_supply
-    { pubkey: collateralMintPubkey, isSigner: false, isWritable: true },          // [5] reserve_collateral_mint
-    { pubkey: collateralSupplyPubkey, isSigner: false, isWritable: true },        // [6] reserve_collateral_supply
-    { pubkey: userCollateral, isSigner: false, isWritable: true },                // [7] user_collateral
-    { pubkey: SOLEND_PROGRAM_ID, isSigner: false, isWritable: false },            // [8] solend_program
-  ];
-  assertProtocolAccountCount(
-    "solend",
-    "withdraw",
-    protocolAccounts.length,
-    INTEGRATION_PROTOCOL_ACCOUNT_COUNTS.solend.withdraw,
-  );
-
-  // Oracle/health remaining accounts come after protocol accounts
-  const oracleAccounts: AccountMeta[] = args.remaining.map((pubkey) => ({
-    pubkey,
-    isSigner: false,
-    isWritable: false,
-  }));
-
   const ix = await program.methods
-    .integrationWithdraw(args.amount, args.withdrawAll ? true : null)
-    .accounts({
+    .solendWithdraw(args.amount, args.withdrawAll ? true : null)
+    .accountsStrict({
+      group: common.group,
       marginfiAccount: accounts.marginfiAccount,
+      authority,
       bank: accounts.bank,
       destinationTokenAccount: accounts.destinationTokenAccount,
-      mint: bank.mint,
+      liquidityVaultAuthority: common.liquidityVaultAuthority,
+      liquidityVault: common.liquidityVault,
+      integrationAcc2: common.integrationAcc2,
+      lendingMarket: accounts.lendingMarket,
+      lendingMarketAuthority,
+      integrationAcc1: common.integrationAcc1,
+      mint: common.mint,
+      reserveLiquiditySupply: liquiditySupplyPubkey,
+      reserveCollateralMint: collateralMintPubkey,
+      reserveCollateralSupply: collateralSupplyPubkey,
+      userCollateral,
+      solendProgram: SOLEND_PROGRAM_ID,
       tokenProgram: accounts.tokenProgram || TOKEN_PROGRAM_ID,
     })
-    .remainingAccounts([...protocolAccounts, ...oracleAccounts])
+    .remainingAccounts(
+      args.remaining.map((pubkey) => ({
+        pubkey,
+        isSigner: false,
+        isWritable: false,
+      }))
+    )
     .instruction();
 
   return ix;

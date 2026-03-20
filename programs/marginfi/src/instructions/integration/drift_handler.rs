@@ -20,7 +20,7 @@ use drift_mocks::state::MinimalUser;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{Bank, MarginfiAccount, ACCOUNT_IN_RECEIVERSHIP};
 
-use super::{cpi_transfer_vault_to_destination, IntegrationDeposit, IntegrationWithdraw};
+use super::{cpi_transfer_vault_to_destination, CommonDeposit, CommonWithdraw};
 
 /// Expected protocol_accounts layout for Drift deposit:
 /// 0: drift_state
@@ -93,7 +93,7 @@ fn validate_bank_keys<'info>(
 
 fn validate_withdraw_setup<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
-    common: &IntegrationWithdraw<'info>,
+    common: &CommonWithdraw<'_, 'info>,
 ) -> MarginfiResult {
     let bank = common.bank.load()?;
     validate_bank_keys(
@@ -124,9 +124,9 @@ fn validate_withdraw_setup<'info>(
     Ok(())
 }
 
-pub fn deposit<'info>(
+pub(crate) fn deposit<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
-    common: &IntegrationDeposit<'info>,
+    common: &CommonDeposit<'_, 'info>,
     amount: u64,
     authority_bump: u8,
 ) -> MarginfiResult<(u64, u64)> {
@@ -206,9 +206,9 @@ pub fn deposit<'info>(
 }
 
 /// Called before the common pre-withdraw block to refresh spot market interest.
-pub fn pre_refresh<'info>(
+pub(crate) fn pre_refresh<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
-    common: &IntegrationWithdraw<'info>,
+    common: &CommonWithdraw<'_, 'info>,
 ) -> MarginfiResult {
     validate_withdraw_setup(protocol_accounts, common)?;
 
@@ -228,7 +228,7 @@ pub fn pre_refresh<'info>(
 
 /// Protocol-specific pre-withdraw balance computation for Drift.
 /// Returns (token_amount, expected_scaled_balance_change).
-pub fn pre_withdraw<'info>(
+pub(crate) fn pre_withdraw<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
     bank: &mut Bank,
     marginfi_account: &mut MarginfiAccount,
@@ -303,9 +303,9 @@ pub fn pre_withdraw<'info>(
 }
 
 /// Protocol-specific CPI for Drift withdraw.
-pub fn withdraw_cpi<'info>(
+pub(crate) fn withdraw_cpi<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
-    common: &IntegrationWithdraw<'info>,
+    common: &CommonWithdraw<'_, 'info>,
     token_amount: u64,
     expected_scaled_balance_change: u64,
     authority_bump: u8,

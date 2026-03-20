@@ -15,14 +15,11 @@ import { DRIFT_PROGRAM_ID } from "./types";
 import { DriftConfigCompact } from "./drift-utils";
 import { Drift } from "../fixtures/drift";
 import {
+  deriveLiquidityVaultAuthority,
   deriveDriftStatePDA,
   deriveSpotMarketVaultPDA,
 } from "./pdas";
 import { globalFeeWallet } from "../rootHooks";
-import {
-  assertProtocolAccountCount,
-  INTEGRATION_PROTOCOL_ACCOUNT_COUNTS,
-} from "./integration-account-layouts";
 
 export interface AddDriftBankAccounts {
   group: PublicKey;
@@ -146,6 +143,31 @@ export interface DriftDepositAccounts {
   tokenProgram?: PublicKey;
 }
 
+const resolveDriftWrapperAccounts = async (
+  program: Program<Marginfi>,
+  marginfiAccountPk: PublicKey,
+  bankPk: PublicKey,
+) => {
+  const [marginfiAccount, bank] = await Promise.all([
+    program.account.marginfiAccount.fetch(marginfiAccountPk),
+    program.account.bank.fetch(bankPk),
+  ]);
+  const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
+    program.programId,
+    bankPk,
+  );
+
+  return {
+    group: marginfiAccount.group,
+    liquidityVaultAuthority,
+    liquidityVault: bank.liquidityVault,
+    integrationAcc1: bank.integrationAcc1,
+    integrationAcc2: bank.integrationAcc2,
+    integrationAcc3: bank.integrationAcc3,
+    mint: bank.mint,
+  };
+};
+
 /**
  * Deposit tokens into a Drift spot market through marginfi
  *
@@ -164,49 +186,39 @@ export const makeDriftDepositIx = async (
   amount: BN,
   marketIndex: number
 ): Promise<TransactionInstruction> => {
+  const common = await resolveDriftWrapperAccounts(
+    program,
+    accounts.marginfiAccount,
+    accounts.bank,
+  );
+  const authority = program.provider.publicKey as PublicKey;
   const [driftState] = deriveDriftStatePDA(DRIFT_PROGRAM_ID);
   const [driftSpotMarketVault] = deriveSpotMarketVaultPDA(
     DRIFT_PROGRAM_ID,
     marketIndex
   );
 
-  // Fetch bank to get integration accounts and mint
-  const bank = await program.account.bank.fetch(accounts.bank);
-
-  // Build protocol-specific remaining accounts (Drift deposit layout)
-  const protocolAccounts: AccountMeta[] = [
-    { pubkey: driftState, isSigner: false, isWritable: false },                   // [0] drift_state
-    { pubkey: bank.integrationAcc2, isSigner: false, isWritable: true },          // [1] user
-    { pubkey: bank.integrationAcc3, isSigner: false, isWritable: true },          // [2] user_stats
-    { pubkey: bank.integrationAcc1, isSigner: false, isWritable: true },          // [3] spot_market
-    { pubkey: driftSpotMarketVault, isSigner: false, isWritable: true },          // [4] drift_spot_market_vault
-    { pubkey: DRIFT_PROGRAM_ID, isSigner: false, isWritable: false },             // [5] drift_program
-    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },      // [6] system_program
-  ];
-
-  // Optional oracle (use system_program as sentinel for absent)
-  protocolAccounts.push({
-    pubkey: accounts.driftOracle ?? SystemProgram.programId,
-    isSigner: false,
-    isWritable: false,
-  }); // [7] drift_oracle
-  assertProtocolAccountCount(
-    "drift",
-    "deposit",
-    protocolAccounts.length,
-    INTEGRATION_PROTOCOL_ACCOUNT_COUNTS.drift.deposit,
-  );
-
   const ix = await program.methods
-    .integrationDeposit(amount)
-    .accounts({
+    .driftDeposit(amount)
+    .accountsStrict({
+      group: common.group,
       marginfiAccount: accounts.marginfiAccount,
+      authority,
       bank: accounts.bank,
+      liquidityVaultAuthority: common.liquidityVaultAuthority,
+      liquidityVault: common.liquidityVault,
       signerTokenAccount: accounts.signerTokenAccount,
-      mint: bank.mint,
+      driftState,
+      integrationAcc2: common.integrationAcc2,
+      integrationAcc3: common.integrationAcc3,
+      integrationAcc1: common.integrationAcc1,
+      driftSpotMarketVault,
+      mint: common.mint,
+      driftProgram: DRIFT_PROGRAM_ID,
+      driftOracle: accounts.driftOracle || null,
       tokenProgram: accounts.tokenProgram || TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
     })
-    .remainingAccounts(protocolAccounts)
     .instruction();
 
   return ix;
@@ -251,12 +263,15 @@ export const makeDriftWithdrawIx = async (
   args: DriftWithdrawArgs,
   driftProgram: Program<Drift>
 ): Promise<TransactionInstruction> => {
-  // Get the bank to find the drift spot market
-  const bank = await program.account.bank.fetch(accounts.bank);
-
+  const common = await resolveDriftWrapperAccounts(
+    program,
+    accounts.marginfiAccount,
+    accounts.bank,
+  );
+  const authority = program.provider.publicKey as PublicKey;
   // Load the drift spot market to get the market index
   const driftSpotMarket = await driftProgram.account.spotMarket.fetch(
-    bank.integrationAcc1
+    common.integrationAcc1
   );
   const marketIndex = driftSpotMarket.marketIndex;
 
@@ -270,55 +285,41 @@ export const makeDriftWithdrawIx = async (
     DRIFT_PROGRAM_ID
   );
 
-  // Build protocol-specific remaining accounts (Drift withdraw layout)
-  const protocolAccounts: AccountMeta[] = [
-    { pubkey: driftState, isSigner: false, isWritable: false },                   // [0] drift_state
-    { pubkey: bank.integrationAcc2, isSigner: false, isWritable: true },          // [1] user
-    { pubkey: bank.integrationAcc3, isSigner: false, isWritable: true },          // [2] user_stats
-    { pubkey: bank.integrationAcc1, isSigner: false, isWritable: true },          // [3] spot_market
-    { pubkey: driftSpotMarketVault, isSigner: false, isWritable: true },          // [4] drift_spot_market_vault
-    { pubkey: driftSigner, isSigner: false, isWritable: false },                  // [5] drift_signer
-    { pubkey: DRIFT_PROGRAM_ID, isSigner: false, isWritable: false },             // [6] drift_program
-    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },      // [7] system_program
-  ];
-
-  // Optional accounts [8..14] padded with system_program sentinel
-  const driftOptionalAccounts = [
-    accounts.driftOracle ?? SystemProgram.programId,
-    accounts.driftRewardOracle ?? SystemProgram.programId,
-    accounts.driftRewardOracle2 ?? SystemProgram.programId,
-    accounts.driftRewardSpotMarket ?? SystemProgram.programId,
-    accounts.driftRewardSpotMarket2 ?? SystemProgram.programId,
-    accounts.driftRewardMint ?? SystemProgram.programId,
-    accounts.driftRewardMint2 ?? SystemProgram.programId,
-  ];
-  for (const pubkey of driftOptionalAccounts) {
-    protocolAccounts.push({ pubkey, isSigner: false, isWritable: false });
-  }
-  assertProtocolAccountCount(
-    "drift",
-    "withdraw",
-    protocolAccounts.length,
-    INTEGRATION_PROTOCOL_ACCOUNT_COUNTS.drift.withdraw,
-  );
-
-  // Oracle/health remaining accounts come after protocol accounts
-  const oracleAccounts: AccountMeta[] = args.remaining.map((pubkey) => ({
-    pubkey,
-    isSigner: false,
-    isWritable: false,
-  }));
-
   const ix = await program.methods
-    .integrationWithdraw(args.amount, args.withdrawAll)
-    .accounts({
+    .driftWithdraw(args.amount, args.withdrawAll)
+    .accountsStrict({
+      group: common.group,
       marginfiAccount: accounts.marginfiAccount,
+      authority,
       bank: accounts.bank,
       destinationTokenAccount: accounts.destinationTokenAccount,
-      mint: bank.mint,
+      liquidityVaultAuthority: common.liquidityVaultAuthority,
+      liquidityVault: common.liquidityVault,
+      driftState,
+      integrationAcc2: common.integrationAcc2,
+      integrationAcc3: common.integrationAcc3,
+      integrationAcc1: common.integrationAcc1,
+      driftSpotMarketVault,
+      driftRewardOracle: accounts.driftRewardOracle || null,
+      driftRewardSpotMarket: accounts.driftRewardSpotMarket || null,
+      driftRewardMint: accounts.driftRewardMint || null,
+      driftRewardOracle2: accounts.driftRewardOracle2 || null,
+      driftRewardSpotMarket2: accounts.driftRewardSpotMarket2 || null,
+      driftRewardMint2: accounts.driftRewardMint2 || null,
+      driftSigner,
+      mint: common.mint,
+      driftProgram: DRIFT_PROGRAM_ID,
+      driftOracle: accounts.driftOracle || null,
       tokenProgram: accounts.tokenProgram || TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
     })
-    .remainingAccounts([...protocolAccounts, ...oracleAccounts])
+    .remainingAccounts(
+      args.remaining.map((pubkey) => ({
+        pubkey,
+        isSigner: false,
+        isWritable: false,
+      }))
+    )
     .instruction();
 
   return ix;

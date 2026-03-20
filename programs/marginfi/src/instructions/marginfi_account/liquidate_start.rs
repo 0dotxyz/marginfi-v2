@@ -187,6 +187,10 @@ pub fn validate_instructions(
             &ix_discriminators::LENDING_ACCOUNT_WITHDRAW,
             &ix_discriminators::LENDING_ACCOUNT_REPAY,
             &ix_discriminators::INTEGRATION_WITHDRAW,
+            &ix_discriminators::KAMINO_WITHDRAW,
+            &ix_discriminators::DRIFT_WITHDRAW,
+            &ix_discriminators::SOLEND_WITHDRAW,
+            &ix_discriminators::JUPLEND_WITHDRAW,
         ],
     )?;
     validate_not_cpi_by_stack_height()?;

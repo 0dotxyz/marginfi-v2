@@ -323,6 +323,24 @@ mod tests {
         let want_integration = ix_discriminators::INTEGRATION_WITHDRAW;
         assert_eq!(got_integration, want_integration);
 
+        // ─── Per-venue withdraw discriminators ────────────────────────────────────
+        assert_eq!(
+            get_discrim_hash("global", "kamino_withdraw"),
+            ix_discriminators::KAMINO_WITHDRAW
+        );
+        assert_eq!(
+            get_discrim_hash("global", "drift_withdraw"),
+            ix_discriminators::DRIFT_WITHDRAW
+        );
+        assert_eq!(
+            get_discrim_hash("global", "solend_withdraw"),
+            ix_discriminators::SOLEND_WITHDRAW
+        );
+        assert_eq!(
+            get_discrim_hash("global", "juplend_withdraw"),
+            ix_discriminators::JUPLEND_WITHDRAW
+        );
+
         // ─── StartExecuteOrder ───────────────────────────────────────────────────
         let got_start_exec = StartExecuteOrder::get_hash();
         let want_start_exec = ix_discriminators::START_EXECUTE_ORDER;

@@ -20,7 +20,7 @@ use kamino_mocks::{
     state::{MinimalObligation, MinimalReserve},
 };
 
-use super::{cpi_transfer_vault_to_destination, IntegrationDeposit, IntegrationWithdraw};
+use super::{cpi_transfer_vault_to_destination, CommonDeposit, CommonWithdraw};
 
 /// Expected protocol_accounts layout for Kamino deposit/withdraw:
 /// 0: integration_acc_2 (obligation) - mut
@@ -107,9 +107,9 @@ fn farms_accounts<'a>(protocol_accounts: &'a [AccountInfo<'a>]) -> FarmsAccounts
     }
 }
 
-pub fn deposit<'info>(
+pub(crate) fn deposit<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
-    common: &IntegrationDeposit<'info>,
+    common: &CommonDeposit<'_, 'info>,
     amount: u64,
     authority_bump: u8,
 ) -> MarginfiResult<(u64, u64)> {
@@ -172,9 +172,9 @@ pub fn deposit<'info>(
     Ok((balance_change, amount))
 }
 
-pub fn withdraw_cpi<'info>(
+pub(crate) fn withdraw_cpi<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
-    common: &IntegrationWithdraw<'info>,
+    common: &CommonWithdraw<'_, 'info>,
     collateral_amount: u64,
     authority_bump: u8,
 ) -> MarginfiResult<u64> {

@@ -21,7 +21,7 @@ use juplend_mocks::state::{
 };
 use marginfi_type_crate::types::{Bank, MarginfiAccount, ACCOUNT_IN_RECEIVERSHIP};
 
-use super::{IntegrationDeposit, IntegrationWithdraw};
+use super::{CommonDeposit, CommonWithdraw};
 
 /// Expected protocol_accounts layout for JupLend deposit:
 /// 0: lending, 1: f_token_mint, 2: fToken vault, 3: lending_admin,
@@ -62,9 +62,9 @@ fn validate_lending_accounts(
     Ok(())
 }
 
-pub fn deposit<'info>(
+pub(crate) fn deposit<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
-    common: &IntegrationDeposit<'info>,
+    common: &CommonDeposit<'_, 'info>,
     amount: u64,
     authority_bump: u8,
 ) -> MarginfiResult<(u64, u64)> {
@@ -179,9 +179,9 @@ pub fn deposit<'info>(
 }
 
 /// Called before the common pre-withdraw block to refresh exchange rate.
-pub fn pre_refresh<'info>(
+pub(crate) fn pre_refresh<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
-    common: &IntegrationWithdraw<'info>,
+    common: &CommonWithdraw<'_, 'info>,
 ) -> MarginfiResult {
     check!(
         protocol_accounts.len() >= WITHDRAW_ACCOUNTS,
@@ -255,7 +255,7 @@ pub fn pre_refresh<'info>(
 
 /// Protocol-specific pre-withdraw balance computation for JupLend.
 /// Returns (token_amount, shares_to_burn).
-pub fn pre_withdraw<'info>(
+pub(crate) fn pre_withdraw<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
     bank: &mut Bank,
     marginfi_account: &mut MarginfiAccount,
@@ -303,9 +303,9 @@ pub fn pre_withdraw<'info>(
 }
 
 /// Protocol-specific CPI for JupLend withdraw.
-pub fn withdraw_cpi<'info>(
+pub(crate) fn withdraw_cpi<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
-    common: &IntegrationWithdraw<'info>,
+    common: &CommonWithdraw<'_, 'info>,
     token_amount: u64,
     shares_to_burn: u64,
     authority_bump: u8,
@@ -380,7 +380,7 @@ pub fn withdraw_cpi<'info>(
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, common.bank.key(), authority_bump);
         let cpi_ctx = CpiContext::new_with_signer(program, cpi_accounts, signer_seeds);
-        transfer_checked(cpi_ctx, received_underlying, common.mint.decimals)?;
+        transfer_checked(cpi_ctx, received_underlying, common.mint_decimals)?;
     }
 
     Ok(received_underlying)
