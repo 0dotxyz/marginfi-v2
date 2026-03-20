@@ -203,11 +203,12 @@ SCENARIOS.forEach(
           preIxs: TransactionInstruction[] = [],
         ): Promise<VersionedTransaction> => {
           const blockhash = await getBankrunBlockhash(bankrunContext);
+          const units = 1_399_000 + Math.round(Math.random() * 1000); // used instead of dummyIx here
           const messageV0 = new TransactionMessage({
             payerKey: signer.wallet.publicKey,
             recentBlockhash: blockhash,
             instructions: [
-              ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),
+              ComputeBudgetProgram.setComputeUnitLimit({ units }),
               ...preIxs,
               startIx,
               repayInstruction,

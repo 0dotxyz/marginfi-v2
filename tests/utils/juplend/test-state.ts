@@ -7,7 +7,6 @@ export const JUPLEND_STATE_KEYS = {
   jlr01RegularBankUsdc: "jlr01_regular_bank_usdc",
   jlr01RegularBankTokenB: "jlr01_regular_bank_token_b",
   jlr01RegularBankLst: "jlr01_regular_bank_lst",
-  jlr01LookupTable: "jlr01_lookup_table",
   jlr02User0MarginfiAccount: "jlr02_user0_marginfi_account",
   jlr05User1MarginfiAccount: "jlr05_user1_marginfi_account",
 } as const;

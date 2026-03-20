@@ -54,7 +54,7 @@ export const assertBNEqual = (a: BN, b: BN | number) => {
 export const assertBNGreaterThan = (
   a: BN,
   b: BN | number,
-  message?: string
+  message?: string,
 ) => {
   if (typeof b === "number") {
     b = new BN(b);
@@ -64,7 +64,8 @@ export const assertBNGreaterThan = (
 
   if (!(aB > bB)) {
     throw new Error(
-      message || `Expected ${aB.toString()} to be greater than ${bB.toString()}`
+      message ||
+        `Expected ${aB.toString()} to be greater than ${bB.toString()}`,
     );
   }
 };
@@ -78,7 +79,7 @@ export const assertBNGreaterThan = (
  */
 export const assertI80F48Equal = (
   a: WrappedI80F48,
-  b: WrappedI80F48 | BN | number
+  b: WrappedI80F48 | BN | number,
 ) => {
   const bigA = wrappedI80F48toBigNumber(a);
   let bigB: BigNumber;
@@ -109,7 +110,7 @@ export const assertI80F48Equal = (
  */
 export const assertI68F60Equal = (
   a: WrappedU68F60 | BN,
-  b: WrappedU68F60 | BN | number
+  b: WrappedU68F60 | BN | number,
 ) => {
   const bigA = wrappedU68F60toBigNumber(a);
   let bigB: BigNumber;
@@ -140,7 +141,7 @@ export const assertI68F60Equal = (
 export const assertI80F48Approx = (
   a: WrappedI80F48,
   b: WrappedI80F48 | BN | number,
-  tolerance: number = 0.000001
+  tolerance: number = 0.000001,
 ) => {
   const bigA = wrappedI80F48toBigNumber(a);
   let bigB: BigNumber;
@@ -165,7 +166,7 @@ export const assertI80F48Approx = (
   if (diff.isGreaterThan(allowedDifference)) {
     throw new Error(
       `Values are not approximately equal. A: ${bigA.toString()} B: ${bigB.toString()} 
-      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`
+      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`,
     );
   }
 };
@@ -179,7 +180,7 @@ export const assertI80F48Approx = (
 export const assertU68F60Approx = (
   a: WrappedU68F60 | BN,
   b: WrappedU68F60 | BN | number,
-  tolerance: number = 0.000001
+  tolerance: number = 0.000001,
 ) => {
   const bigA = wrappedU68F60toBigNumber(a);
   let bigB: BigNumber;
@@ -204,7 +205,7 @@ export const assertU68F60Approx = (
   if (diff.isGreaterThan(allowedDifference)) {
     throw new Error(
       `Values are not approximately equal. A: ${bigA.toString()} B: ${bigB.toString()} 
-      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`
+      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`,
     );
   }
 };
@@ -236,7 +237,7 @@ function isWrappedU68F60(value: any): value is WrappedU68F60 {
 export const assertBNApproximately = (
   a: BN,
   b: BN | number,
-  tolerance: BN | number
+  tolerance: BN | number,
 ) => {
   const aB = BigNumber(a.toString());
   const bB = BigNumber(b.toString());
@@ -246,7 +247,7 @@ export const assertBNApproximately = (
   if (diff.isGreaterThan(toleranceB)) {
     throw new Error(
       `Values are not approximately equal. A: ${aB.toString()} B: ${bB.toString()} 
-      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`
+      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`,
     );
   }
 };
@@ -259,7 +260,7 @@ export const assertBNApproximately = (
  */
 export const getTokenBalance = async (
   provider: AnchorProvider | BankrunProvider,
-  account: PublicKey
+  account: PublicKey,
 ) => {
   const accountInfo = await provider.connection.getAccountInfo(account);
   if (!accountInfo) {
@@ -283,7 +284,7 @@ export const getTokenBalance = async (
  */
 export const waitUntil = async (
   time: number,
-  silenceWarning: boolean = false
+  silenceWarning: boolean = false,
 ) => {
   const now = Date.now() / 1000;
   if (time > now + 500) {
@@ -293,7 +294,7 @@ export const waitUntil = async (
   if (now > time) {
     if (!silenceWarning) {
       console.error(
-        "Tried to wait for a time that's in the past. You probably need to adjust test timings."
+        "Tried to wait for a time that's in the past. You probably need to adjust test timings.",
       );
       console.error("now: " + now + " and tried waiting until: " + time);
     }
@@ -312,7 +313,7 @@ export const waitUntil = async (
  */
 export const assertBankrunTxFailed = (
   result: BanksTransactionResultWithMeta | BanksTransactionMeta,
-  expectedErrorCode: string | number
+  expectedErrorCode: string | number,
 ) => {
   if (!("result" in result)) {
     throw new Error("TX succeeded when it should have failed");
@@ -330,7 +331,7 @@ export const assertBankrunTxFailed = (
   const lastLog = result.meta.logMessages.pop();
   assert(
     lastLog.includes(codeHex),
-    "\nExpected code " + codeHex + " but got: " + lastLog
+    "\nExpected code " + codeHex + " but got: " + lastLog,
   );
 };
 
@@ -361,7 +362,7 @@ export function logContainsError(logs: string[], errorCode: string): boolean {
 export async function expectFailedTxWithError(
   transactionFn: () => Promise<void>,
   errorCode: string,
-  errorNumber: number
+  errorNumber: number,
 ): Promise<void> {
   let failed = false;
   try {
@@ -373,13 +374,13 @@ export async function expectFailedTxWithError(
       assert.equal(
         parsedNumber,
         errorNumber,
-        `Expected error code ${errorNumber} but got ${parsedNumber}`
+        `Expected error code ${errorNumber} but got ${parsedNumber}`,
       );
       return;
     }
     assert.ok(
       logContainsError(err.logs, errorCode),
-      `Expected error code '${errorCode}' was not found in logs. Log dump: ${err.logs}`
+      `Expected error code '${errorCode}' was not found in logs. Log dump: ${err.logs}`,
     );
     failed = true;
   }
@@ -404,7 +405,7 @@ function extractCustomErrorCode(errorMessage) {
  */
 export async function expectFailedTxWithMessage(
   transactionFn: () => Promise<void>,
-  expectedString: string
+  expectedString: string,
 ): Promise<void> {
   let failed = false;
   try {
@@ -417,7 +418,7 @@ export async function expectFailedTxWithMessage(
     const fullString = errString + " " + logsString;
     assert.ok(
       fullString.includes(expectedString),
-      `Expected error code '${expectedString}' was not found in logs. Log dump: ${err} or ${err.logs}`
+      `Expected error code '${expectedString}' was not found in logs. Log dump: ${err} or ${err.logs}`,
     );
 
     failed = true;
@@ -441,4 +442,12 @@ export function aprToU32(value: number): number {
   const clamped = Math.min(value, MAX_PERCENT);
   const ratio = clamped / MAX_PERCENT;
   return Math.floor(ratio * MAX_U32);
+}
+
+export function i80ToBn(value: any): BN {
+  return new BN(
+    wrappedI80F48toBigNumber(value)
+      .integerValue(BigNumber.ROUND_FLOOR)
+      .toFixed(0),
+  );
 }

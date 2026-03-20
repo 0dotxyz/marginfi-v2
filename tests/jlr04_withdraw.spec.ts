@@ -1,5 +1,4 @@
 import { BN } from "@coral-xyz/anchor";
-import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import {
   createAssociatedTokenAccountIdempotentInstruction,
   getAssociatedTokenAddressSync,
@@ -13,7 +12,6 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import { assert } from "chai";
-import BigNumber from "bignumber.js";
 import {
   BanksTransactionMeta,
   BanksTransactionResultWithMeta,
@@ -35,6 +33,7 @@ import {
   assertBankrunTxFailed,
   assertI80F48Equal,
   getTokenBalance,
+  i80ToBn,
 } from "./utils/genericTests";
 import { deriveLiquidityVaultAuthority } from "./utils/pdas";
 import { deriveJuplendPoolKeys } from "./utils/juplend/juplend-pdas";
@@ -53,6 +52,7 @@ import {
   processBankrunV0Transaction,
 } from "./utils/tools";
 import { advanceOneHour, dummyIx } from "./utils/bankrunConnection";
+import { setFixedPrice } from "./utils/group-instructions";
 
 const EXCHANGE_PRICES_PRECISION = new BN("1000000000000");
 const USER1_ACCOUNT_SEED = Buffer.from("JLR04_USER1_ACCOUNT_SEED_0000000");
@@ -174,13 +174,6 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     user = nextUser;
     activeMarginfiAccountPk = marginfiAccount;
   };
-
-  const i80ToBn = (value: any): BN =>
-    new BN(
-      wrappedI80F48toBigNumber(value)
-        .integerValue(BigNumber.ROUND_FLOOR)
-        .toFixed(0),
-    );
 
   const previewSharesForDeposit = (
     assets: BN,

@@ -12,7 +12,7 @@ import {
 } from "@solana/spl-token";
 import BN from "bn.js";
 import { Program, IdlAccounts, IdlTypes } from "@coral-xyz/anchor";
-import { Drift } from "tests/fixtures/drift";
+import { Drift } from "../fixtures/drift";
 import { WrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import {
   DRIFT_ORACLE_RECEIVER_PROGRAM_ID,
@@ -1087,7 +1087,7 @@ export const compareDriftValuations = async (
   banksClient: BanksClient,
   marginfiAccount: PublicKey,
   driftBank: PublicKey,
-  integrationAcc2: PublicKey,
+  driftUser: PublicKey,
   oracleInfo: { oracle: PublicKey; symbol: string; decimals: number },
 ): Promise<{
   marginfiAssetShares: BN;

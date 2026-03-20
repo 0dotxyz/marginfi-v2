@@ -2,7 +2,7 @@
   "address": "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD",
   "metadata": {
     "name": "kamino_lending",
-    "version": "1.14.0",
+    "version": "1.15.0",
     "spec": "0.1.0"
   },
   "instructions": [
@@ -1821,6 +1821,16 @@
       "code": 6154,
       "name": "WithdrawTicketValueTooSmall",
       "msg": "Withdraw ticket's value would be below the market-configured minimum"
+    },
+    {
+      "code": 6155,
+      "name": "InvalidWithdrawTicketProgressCallbackConfig",
+      "msg": "Invalid configuration or required custom accounts for the requested withdraw ticket callback type"
+    },
+    {
+      "code": 6156,
+      "name": "WithdrawTicketProgressCallbackAccountsMissing",
+      "msg": "One or more accounts required by the ticket's configured progress callback are missing"
     }
   ],
   "types": [
@@ -2209,6 +2219,15 @@
           },
           {
             "name": "UpdateMinWithdrawQueuedLiquidityValue"
+          },
+          {
+            "name": "UpdateFixedRolloverWindowDurationSeconds"
+          },
+          {
+            "name": "UpdateVariableRolloverWindowDurationSeconds"
+          },
+          {
+            "name": "UpdateObligationBorrowRolloverConfigurationEnabled"
           }
         ]
       }
@@ -2361,7 +2380,7 @@
               "The minimum allowed debt term that the obligation owner agrees to.",
               "The reserves used to fill this order *cannot* define their debt term *lower* than this.",
               "",
-              "If zeroed, then only indefinite-term reserves may be used."
+              "If zeroed, then only open-term reserves may be used."
             ],
             "type": "u64"
           },
@@ -2442,6 +2461,79 @@
                 5
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "FixedTermBorrowRolloverConfig",
+      "docs": [
+        "Settings driving the auto-rollover of an [ObligationLiquidity] that uses a fixed-term [Reserve]",
+        "and approaches the end of its [ReserveConfig::debt_term_seconds].",
+        "",
+        "By its nature (not a special case), the zeroed struct mean \"no auto-rollover\"."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "auto_rollover_enabled",
+            "docs": [
+              "Whether the borrow can be permissionlessly prolonged under the following *joint* conditions:",
+              "",
+              "The reserve used to re-borrow the liquidity must have:",
+              "A) the exact same maximum borrow rate as the current one,",
+              "B) the exact same debt term as the current one,",
+              "C) sufficient available liquidity (including no withdraw tickets waiting in its queue).",
+              "",
+              "The time left until the current debt term expires must be:",
+              "D) less than [LendingMarket::fixed_rollover_window_duration_seconds].",
+              "",
+              "Note: the other settings are only effective when this one is `1`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "open_term_allowed",
+            "docs": [
+              "When `1`, partially lifts the condition *B* from [Self::auto_rollover_enabled]: additionally",
+              "allows to use a variable (indefinite) debt term if less than",
+              "[LendingMarket::variable_rollover_window_duration_seconds] is left until expiration.",
+              "",
+              "Note: typically this flag should be used together with [Self::max_borrow_rate_bps] set to",
+              "`u32::MAX` (to denote a variable-rate reserve)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "alignment_padding",
+            "docs": [
+              "Internal alignment padding (free to reuse)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                2
+              ]
+            }
+          },
+          {
+            "name": "max_borrow_rate_bps",
+            "docs": [
+              "A customization setting that can lift the condition *A* from [Self::auto_rollover_enabled]:",
+              "when not zeroed, the rollover may use a reserve with a maximum borrow rate equal or lower",
+              "than the given one."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "min_debt_term_seconds",
+            "docs": [
+              "A customization setting that can lift the condition *B* from [Self::auto_rollover_enabled]:",
+              "when not zeroed, the rollover may use a reserve with a *fixed* debt term equal or longer",
+              "than the given one."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -2582,11 +2674,23 @@
             "type": "u64"
           },
           {
+            "name": "fixed_term_borrow_rollover_config",
+            "docs": [
+              "The user's auto-rollover opt-ins - only effective when this borrow is fixed-term (i.e. its",
+              "reserve has a non-zero [ReserveConfig::debt_term_seconds])."
+            ],
+            "type": {
+              "defined": {
+                "name": "FixedTermBorrowRolloverConfig"
+              }
+            }
+          },
+          {
             "name": "padding2",
             "type": {
               "array": [
                 "u64",
-                7
+                5
               ]
             }
           }
@@ -3615,6 +3719,31 @@
       }
     },
     {
+      "name": "ProgressCallbackType",
+      "docs": [
+        "A callback to be notified when the ticket is being processed.",
+        "",
+        "## Why an enum?",
+        "",
+        "Only reliable programs may be used for callbacks (since any error or panic returned from a CPI",
+        "aborts an entire transaction, which would stall the queue progress). Hence, we need a whitelist,",
+        "and the simplest initial implementation is a hardcoded enum. If we want to be able to add new",
+        "whitelist items without SC updates, we can implement such support using a special enum value",
+        "(e.g. `SPECIFIED_BY_PDA = 255`)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "None"
+          },
+          {
+            "name": "KlendQueueAccountingHandlerOnKvault"
+          }
+        ]
+      }
+    },
+    {
       "name": "BorrowRateCurve",
       "type": {
         "kind": "struct",
@@ -4111,11 +4240,25 @@
             "type": "u8"
           },
           {
+            "name": "obligation_borrow_rollover_configuration_enabled",
+            "docs": [
+              "Whether the owners can enable the \"fixed term borrow rollover\" on their obligations.",
+              "",
+              "*Note 1:* the actual execution of (different kinds of) rollovers can be disabled by zeroing",
+              "[Self::fixed_rollover_window_duration_seconds] and",
+              "[Self::variable_rollover_window_duration_seconds].",
+              "",
+              "*Note 2:* when this configuration is disabled, the obligation owners can still disable their",
+              "rollover (i.e. set the obligation's flags to zeroes)."
+            ],
+            "type": "u8"
+          },
+          {
             "name": "padding2",
             "type": {
               "array": [
                 "u8",
-                6
+                5
               ]
             }
           },
@@ -4128,11 +4271,36 @@
             "type": "u64"
           },
           {
+            "name": "fixed_rollover_window_duration_seconds",
+            "docs": [
+              "A configurable time window (right before the end of a fixed debt term) during which an",
+              "auto-rollover into another *fixed* rate/term can happen.",
+              "",
+              "When zeroed, this rollover mode is effectively disabled.",
+              "",
+              "See [FixedTermBorrowRolloverConfig]."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "variable_rollover_window_duration_seconds",
+            "docs": [
+              "A configurable time window (right before the end of a fixed debt term) during which an",
+              "auto-rollover into a *variable* (indefinite) rate/term can happen.",
+              "",
+              "When zeroed, this rollover mode is effectively disabled.",
+              "",
+              "This will typically be shorter than [Self::fixed_rollover_window_duration_seconds], acting",
+              "as a fallback if a fixed reserve liquidity remains unavailable for considerable time."
+            ],
+            "type": "u64"
+          },
+          {
             "name": "padding1",
             "type": {
               "array": [
                 "u64",
-                162
+                160
               ]
             }
           }
@@ -4748,6 +4916,13 @@
             "type": "u8"
           },
           {
+            "name": "progress_callback_type",
+            "docs": [
+              "One of the valid [ProgressCallbackType] representations."
+            ],
+            "type": "u8"
+          },
+          {
             "name": "alignment_padding",
             "docs": [
               "Inner padding, for alignment."
@@ -4755,7 +4930,19 @@
             "type": {
               "array": [
                 "u8",
-                7
+                6
+              ]
+            }
+          },
+          {
+            "name": "progress_callback_custom_accounts",
+            "docs": [
+              "The (optional) accounts to be used by [Self::progress_callback_type]s."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                2
               ]
             }
           },
@@ -4767,7 +4954,7 @@
             "type": {
               "array": [
                 "u64",
-                48
+                40
               ]
             }
           }

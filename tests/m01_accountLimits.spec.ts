@@ -24,11 +24,22 @@ import {
   liquidateIx,
   withdrawIx,
 } from "./utils/user-instructions";
-import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
-import { dumpAccBalances, getBankrunBlockhash, processBankrunTransaction } from "./utils/tools";
+import {
+  bigNumberToWrappedI80F48,
+  wrappedI80F48toBigNumber,
+} from "@mrgnlabs/mrgn-common";
+import {
+  dumpAccBalances,
+  getBankrunBlockhash,
+  processBankrunTransaction,
+} from "./utils/tools";
 import { genericMultiBankTestSetup } from "./genericSetups";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
-import { assertI80F48Approx, assertKeyDefault } from "./utils/genericTests";
+import {
+  assertI80F48Approx,
+  assertKeyDefault,
+  i80ToBn,
+} from "./utils/genericTests";
 
 const startingSeed: number = 199;
 const groupBuff = Buffer.from("MARGINFI_GROUP_SEED_1234000000M1");
@@ -44,7 +55,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
       MAX_BALANCES,
       USER_ACCOUNT_THROWAWAY,
       groupBuff,
-      startingSeed
+      startingSeed,
     );
     banks = result.banks;
     throwawayGroup = result.throwawayGroup;
@@ -72,7 +83,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
             tokenAccount: user.lstAlphaAccount,
             amount,
             depositUpToLimit: false,
-          })
+          }),
         );
       }
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -96,7 +107,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
         tokenAccount: user.lstAlphaAccount,
         amount: depositAmount,
         depositUpToLimit: false,
-      })
+      }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(user.wallet);
@@ -119,7 +130,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
           tokenAccount: user.lstAlphaAccount,
           remaining: composeRemainingAccounts(remainingAccounts),
           amount: borrowAmount,
-        })
+        }),
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(user.wallet);
@@ -131,7 +142,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
       if (result.result) {
         const logs = result.meta.logMessages;
         const isOOM = logs.some((msg) =>
-          msg.toLowerCase().includes("memory allocation failed, out of memory")
+          msg.toLowerCase().includes("memory allocation failed, out of memory"),
         );
 
         if (isOOM) {
@@ -143,7 +154,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
           // anything other than OOM should blow up the test
           throw new Error(
             `Unexpected borrowIx failure on bank ${banks[i].toBase58()}: ` +
-              logs.join("\n")
+              logs.join("\n"),
           );
         }
       }
@@ -160,7 +171,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
       await configureBank(groupAdmin.mrgnBankrunProgram, {
         bank: banks[MAX_BALANCES - 1],
         bankConfigOpt: config,
-      })
+      }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
@@ -190,18 +201,18 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
         tokenAccount: liquidator.lstAlphaAccount,
         amount: depositAmount,
         depositUpToLimit: false,
-      })
+      }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(liquidator.wallet);
     await banksClient.tryProcessTransaction(tx);
 
     const liquidateeAcc = await bankrunProgram.account.marginfiAccount.fetch(
-      liquidateeAccount
+      liquidateeAccount,
     );
     dumpAccBalances(liquidateeAcc);
     const liquidatorAcc = await bankrunProgram.account.marginfiAccount.fetch(
-      liquidatorAccount
+      liquidatorAccount,
     );
     dumpAccBalances(liquidatorAcc);
 
@@ -227,7 +238,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
         amount: liquidateAmount,
         liquidateeAccounts: liquidateeAccounts.length,
         liquidatorAccounts: 4,
-      })
+      }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(liquidator.wallet);
@@ -238,7 +249,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
     if (result.result) {
       const logs = result.meta.logMessages;
       const isOOM = logs.some((msg) =>
-        msg.toLowerCase().includes("memory allocation failed, out of memory")
+        msg.toLowerCase().includes("memory allocation failed, out of memory"),
       );
 
       if (isOOM) {
@@ -260,7 +271,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
       await setFixedPrice(groupAdmin.mrgnBankrunProgram, {
         bank: banks[4],
         price: oracles.lstAlphaPrice,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
@@ -268,7 +279,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
     assert.deepEqual(bankAfter.config.oracleSetup, { fixed: {} });
     assertI80F48Approx(
       bankAfter.config.fixedPrice,
-      bigNumberToWrappedI80F48(oracles.lstAlphaPrice)
+      bigNumberToWrappedI80F48(oracles.lstAlphaPrice),
     );
     assertKeyDefault(bankAfter.config.oracleKeys[0]);
   });
@@ -286,7 +297,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
       banks.map(async (pubkey) => {
         const account = await bankrunProgram.account.bank.fetch(pubkey);
         return { pubkey, account };
-      })
+      }),
     );
     for (let i = 0; i < MAX_BALANCES; i++) {
       const setup = bankAccs[i].account.config.oracleSetup;
@@ -328,7 +339,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
         amount: liquidateAmount,
         liquidateeAccounts: liquidateeAccounts.length,
         liquidatorAccounts: 4,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [liquidator.wallet]);
   });
@@ -342,7 +353,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
       await setFixedPrice(groupAdmin.mrgnBankrunProgram, {
         bank: banks[MAX_BALANCES - 1],
         price: oracles.lstAlphaPrice,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
   });
@@ -360,7 +371,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
       banks.map(async (pubkey) => {
         const account = await bankrunProgram.account.bank.fetch(pubkey);
         return { pubkey, account };
-      })
+      }),
     );
 
     for (let i = 0; i < MAX_BALANCES; i++) {
@@ -395,7 +406,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
         amount: liquidateAmount,
         liquidateeAccounts: liquidateeAccounts.length,
         liquidatorAccounts: 2,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [liquidator.wallet]);
   });
@@ -413,16 +424,16 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
       await configureBank(groupAdmin.mrgnBankrunProgram, {
         bank: banks[MAX_BALANCES - 1],
         bankConfigOpt: config,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
     const bankAfter = await bankrunProgram.account.bank.fetch(
-      banks[MAX_BALANCES - 1]
+      banks[MAX_BALANCES - 1],
     );
     assertI80F48Approx(
       bankAfter.config.fixedPrice,
-      bigNumberToWrappedI80F48(0.00001)
+      bigNumberToWrappedI80F48(0.00001),
     );
   });
 
@@ -435,7 +446,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
       banks.map(async (pubkey) => {
         const account = await bankrunProgram.account.bank.fetch(pubkey);
         return { pubkey, account };
-      })
+      }),
     );
 
     for (let i = 0; i < MAX_BALANCES; i++) {
@@ -455,7 +466,7 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
         tokenAccount: user.lstAlphaAccount,
         remaining: composeRemainingAccounts(remainingAccounts),
         amount: new BN(42),
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
 
@@ -468,9 +479,57 @@ describe("m01: Limits on number of accounts when using Kamino", () => {
         tokenAccount: user.lstAlphaAccount,
         remaining: composeRemainingAccounts(remainingAccounts),
         amount: new BN(42),
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
+  });
+
+  it("(admin) Withdraws all from all banks WITHOUT withdraw_all true - effectively blocks the account: cannot withdraw_all after this, cannot deposit/borrow anything else", async () => {
+    const user = groupAdmin;
+    const userAccount = user.accounts.get(USER_ACCOUNT_THROWAWAY);
+    const userAcc = await bankrunProgram.account.marginfiAccount.fetch(
+      userAccount,
+    );
+
+    const remainingAccounts: PublicKey[][] = [];
+    const bankAccs = await Promise.all(
+      banks.map(async (pubkey) => {
+        const account = await bankrunProgram.account.bank.fetch(pubkey);
+        return { pubkey, account };
+      }),
+    );
+
+    for (let i = 0; i < MAX_BALANCES; i++) {
+      if ("fixed" in bankAccs[i].account.config.oracleSetup) {
+        remainingAccounts.push([banks[i]]);
+      } else {
+        remainingAccounts.push([banks[i], oracles.pythPullLst.publicKey]);
+      }
+    }
+
+    for (const balance of userAcc.lendingAccount.balances) {
+      const bank = await bankrunProgram.account.bank.fetch(balance.bankPk);
+      const assetShares = i80ToBn(balance.assetShares);
+      const assetShareValue = i80ToBn(bank.assetShareValue);
+      const tx = new Transaction();
+      tx.add(
+        await withdrawIx(user.mrgnBankrunProgram, {
+          marginfiAccount: userAccount,
+          bank: balance.bankPk,
+          tokenAccount: user.lstAlphaAccount,
+          remaining: composeRemainingAccounts(remainingAccounts),
+          amount: assetShares.mul(assetShareValue),
+          withdrawAll: false,
+        }),
+      );
+      await processBankrunTransaction(
+        bankrunContext,
+        tx,
+        [user.wallet],
+        true,
+        true,
+      );
+    }
   });
 
   // TODO try these with switchboard oracles.

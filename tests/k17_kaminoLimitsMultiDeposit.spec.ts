@@ -27,6 +27,7 @@ import {
 } from "./rootHooks";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import {
+  createReserve,
   makeAddKaminoBankIx,
   makeInitObligationIx,
   makeKaminoDepositIx,
@@ -51,7 +52,6 @@ import {
 import { ComputeBudgetProgram } from "@solana/web3.js";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
-import { createReserve } from "./k01_kaminoInit.spec";
 
 const NUM_KAMINO_BANKS_FOR_TESTING = 15;
 const NUM_REGULAR_TOKEN_A_BANKS = 7;

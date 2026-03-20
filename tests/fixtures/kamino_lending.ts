@@ -8,7 +8,7 @@ export type KaminoLending = {
   "address": "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD",
   "metadata": {
     "name": "kaminoLending",
-    "version": "1.14.0",
+    "version": "1.15.0",
     "spec": "0.1.0"
   },
   "instructions": [
@@ -3080,6 +3080,34 @@ export type KaminoLending = {
           ]
         },
         {
+          "name": "progressCallbackCustomAccount0",
+          "docs": [
+            "The first one out of maximum 2 custom accounts that may be required if the optional \"ticket",
+            "progress callback\" is configured for this ticket.",
+            "",
+            "The expected custom accounts are validated based on the `progress_callback_type` instruction",
+            "argument. The currently supported ones are:",
+            "- for [ProgressCallbackType::None] no custom accounts are expected (this is the default",
+            "behavior, when the instruction data is zeroed or absent).",
+            "- for [ProgressCallbackType::KlendQueueAccountingHandlerOnKvault], only the `_0` custom",
+            "account is required:",
+            "- the `_0` custom account must represent the `VaultState` which disinvests from the",
+            "reserve (readonly; needed to be later passed as an input to the Kvault's handler);",
+            "- the `_1` custom account is ignored;",
+            "- the `owner` account (i.e. the signer) must be a Kvault-owned PDA base authority",
+            "associated with the vault indicated by `_0` (needed to prove that Kvault is CPI'ing this",
+            "handler)."
+          ],
+          "optional": true
+        },
+        {
+          "name": "progressCallbackCustomAccount1",
+          "docs": [
+            "The second possible account (see the `progress_callback_custom_account_0` above)."
+          ],
+          "optional": true
+        },
+        {
           "name": "instructionSysvarAccount"
         }
       ],
@@ -3087,6 +3115,14 @@ export type KaminoLending = {
         {
           "name": "collateralAmount",
           "type": "u64"
+        },
+        {
+          "name": "progressCallbackType",
+          "type": {
+            "defined": {
+              "name": "progressCallbackType"
+            }
+          }
         }
       ]
     },
@@ -3210,6 +3246,30 @@ export type KaminoLending = {
           "docs": [
             "The System program - needed for potential destination ATA creation."
           ]
+        },
+        {
+          "name": "progressCallbackProgram",
+          "docs": [
+            "The progress callback program (if configured by the withdraw ticket)."
+          ],
+          "optional": true
+        },
+        {
+          "name": "progressCallbackCustomAccount0",
+          "docs": [
+            "The first one out of maximum 2 custom accounts that may be required if the withdraw ticket",
+            "defines a callback.",
+            "Please note that the constraints defined here do not mention `mut`, but a specific",
+            "[WithdrawTicket::progress_callback_type] may require it."
+          ],
+          "optional": true
+        },
+        {
+          "name": "progressCallbackCustomAccount1",
+          "docs": [
+            "The second possibly-required account (see the `progress_callback_custom_account_0` above)."
+          ],
+          "optional": true
         },
         {
           "name": "instructionSysvarAccount"
@@ -4467,6 +4527,16 @@ export type KaminoLending = {
       "code": 6154,
       "name": "withdrawTicketValueTooSmall",
       "msg": "Withdraw ticket's value would be below the market-configured minimum"
+    },
+    {
+      "code": 6155,
+      "name": "invalidWithdrawTicketProgressCallbackConfig",
+      "msg": "Invalid configuration or required custom accounts for the requested withdraw ticket callback type"
+    },
+    {
+      "code": 6156,
+      "name": "withdrawTicketProgressCallbackAccountsMissing",
+      "msg": "One or more accounts required by the ticket's configured progress callback are missing"
     }
   ],
   "types": [
@@ -4855,6 +4925,15 @@ export type KaminoLending = {
           },
           {
             "name": "updateMinWithdrawQueuedLiquidityValue"
+          },
+          {
+            "name": "updateFixedRolloverWindowDurationSeconds"
+          },
+          {
+            "name": "updateVariableRolloverWindowDurationSeconds"
+          },
+          {
+            "name": "updateObligationBorrowRolloverConfigurationEnabled"
           }
         ]
       }
@@ -5007,7 +5086,7 @@ export type KaminoLending = {
               "The minimum allowed debt term that the obligation owner agrees to.",
               "The reserves used to fill this order *cannot* define their debt term *lower* than this.",
               "",
-              "If zeroed, then only indefinite-term reserves may be used."
+              "If zeroed, then only open-term reserves may be used."
             ],
             "type": "u64"
           },
@@ -5088,6 +5167,79 @@ export type KaminoLending = {
                 5
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "fixedTermBorrowRolloverConfig",
+      "docs": [
+        "Settings driving the auto-rollover of an [ObligationLiquidity] that uses a fixed-term [Reserve]",
+        "and approaches the end of its [ReserveConfig::debt_term_seconds].",
+        "",
+        "By its nature (not a special case), the zeroed struct mean \"no auto-rollover\"."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "autoRolloverEnabled",
+            "docs": [
+              "Whether the borrow can be permissionlessly prolonged under the following *joint* conditions:",
+              "",
+              "The reserve used to re-borrow the liquidity must have:",
+              "A) the exact same maximum borrow rate as the current one,",
+              "B) the exact same debt term as the current one,",
+              "C) sufficient available liquidity (including no withdraw tickets waiting in its queue).",
+              "",
+              "The time left until the current debt term expires must be:",
+              "D) less than [LendingMarket::fixed_rollover_window_duration_seconds].",
+              "",
+              "Note: the other settings are only effective when this one is `1`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "openTermAllowed",
+            "docs": [
+              "When `1`, partially lifts the condition *B* from [Self::auto_rollover_enabled]: additionally",
+              "allows to use a variable (indefinite) debt term if less than",
+              "[LendingMarket::variable_rollover_window_duration_seconds] is left until expiration.",
+              "",
+              "Note: typically this flag should be used together with [Self::max_borrow_rate_bps] set to",
+              "`u32::MAX` (to denote a variable-rate reserve)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "alignmentPadding",
+            "docs": [
+              "Internal alignment padding (free to reuse)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                2
+              ]
+            }
+          },
+          {
+            "name": "maxBorrowRateBps",
+            "docs": [
+              "A customization setting that can lift the condition *A* from [Self::auto_rollover_enabled]:",
+              "when not zeroed, the rollover may use a reserve with a maximum borrow rate equal or lower",
+              "than the given one."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "minDebtTermSeconds",
+            "docs": [
+              "A customization setting that can lift the condition *B* from [Self::auto_rollover_enabled]:",
+              "when not zeroed, the rollover may use a reserve with a *fixed* debt term equal or longer",
+              "than the given one."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -5228,11 +5380,23 @@ export type KaminoLending = {
             "type": "u64"
           },
           {
+            "name": "fixedTermBorrowRolloverConfig",
+            "docs": [
+              "The user's auto-rollover opt-ins - only effective when this borrow is fixed-term (i.e. its",
+              "reserve has a non-zero [ReserveConfig::debt_term_seconds])."
+            ],
+            "type": {
+              "defined": {
+                "name": "fixedTermBorrowRolloverConfig"
+              }
+            }
+          },
+          {
             "name": "padding2",
             "type": {
               "array": [
                 "u64",
-                7
+                5
               ]
             }
           }
@@ -6261,6 +6425,31 @@ export type KaminoLending = {
       }
     },
     {
+      "name": "progressCallbackType",
+      "docs": [
+        "A callback to be notified when the ticket is being processed.",
+        "",
+        "## Why an enum?",
+        "",
+        "Only reliable programs may be used for callbacks (since any error or panic returned from a CPI",
+        "aborts an entire transaction, which would stall the queue progress). Hence, we need a whitelist,",
+        "and the simplest initial implementation is a hardcoded enum. If we want to be able to add new",
+        "whitelist items without SC updates, we can implement such support using a special enum value",
+        "(e.g. `SPECIFIED_BY_PDA = 255`)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "none"
+          },
+          {
+            "name": "klendQueueAccountingHandlerOnKvault"
+          }
+        ]
+      }
+    },
+    {
       "name": "borrowRateCurve",
       "type": {
         "kind": "struct",
@@ -6757,11 +6946,25 @@ export type KaminoLending = {
             "type": "u8"
           },
           {
+            "name": "obligationBorrowRolloverConfigurationEnabled",
+            "docs": [
+              "Whether the owners can enable the \"fixed term borrow rollover\" on their obligations.",
+              "",
+              "*Note 1:* the actual execution of (different kinds of) rollovers can be disabled by zeroing",
+              "[Self::fixed_rollover_window_duration_seconds] and",
+              "[Self::variable_rollover_window_duration_seconds].",
+              "",
+              "*Note 2:* when this configuration is disabled, the obligation owners can still disable their",
+              "rollover (i.e. set the obligation's flags to zeroes)."
+            ],
+            "type": "u8"
+          },
+          {
             "name": "padding2",
             "type": {
               "array": [
                 "u8",
-                6
+                5
               ]
             }
           },
@@ -6774,11 +6977,36 @@ export type KaminoLending = {
             "type": "u64"
           },
           {
+            "name": "fixedRolloverWindowDurationSeconds",
+            "docs": [
+              "A configurable time window (right before the end of a fixed debt term) during which an",
+              "auto-rollover into another *fixed* rate/term can happen.",
+              "",
+              "When zeroed, this rollover mode is effectively disabled.",
+              "",
+              "See [FixedTermBorrowRolloverConfig]."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "variableRolloverWindowDurationSeconds",
+            "docs": [
+              "A configurable time window (right before the end of a fixed debt term) during which an",
+              "auto-rollover into a *variable* (indefinite) rate/term can happen.",
+              "",
+              "When zeroed, this rollover mode is effectively disabled.",
+              "",
+              "This will typically be shorter than [Self::fixed_rollover_window_duration_seconds], acting",
+              "as a fallback if a fixed reserve liquidity remains unavailable for considerable time."
+            ],
+            "type": "u64"
+          },
+          {
             "name": "padding1",
             "type": {
               "array": [
                 "u64",
-                162
+                160
               ]
             }
           }
@@ -7394,6 +7622,13 @@ export type KaminoLending = {
             "type": "u8"
           },
           {
+            "name": "progressCallbackType",
+            "docs": [
+              "One of the valid [ProgressCallbackType] representations."
+            ],
+            "type": "u8"
+          },
+          {
             "name": "alignmentPadding",
             "docs": [
               "Inner padding, for alignment."
@@ -7401,7 +7636,19 @@ export type KaminoLending = {
             "type": {
               "array": [
                 "u8",
-                7
+                6
+              ]
+            }
+          },
+          {
+            "name": "progressCallbackCustomAccounts",
+            "docs": [
+              "The (optional) accounts to be used by [Self::progress_callback_type]s."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                2
               ]
             }
           },
@@ -7413,7 +7660,7 @@ export type KaminoLending = {
             "type": {
               "array": [
                 "u64",
-                48
+                40
               ]
             }
           }

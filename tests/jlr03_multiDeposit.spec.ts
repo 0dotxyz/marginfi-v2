@@ -77,7 +77,7 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
     return value;
   };
 
-  // Note: All prices in this test are for assets, so the get a confidence discount
+  // Note: All prices in this test are for assets, so they get a confidence discount
   const adjustedOraclePriceForMint = (mint: PublicKey): number => {
     const confAdj = 1 - ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
     if (mint.equals(ecosystem.usdcMint.publicKey))

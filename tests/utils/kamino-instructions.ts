@@ -1,17 +1,25 @@
 import {
   AccountMeta,
+  ComputeBudgetProgram,
+  Keypair,
   PublicKey,
+  SystemProgram,
+  SYSVAR_RENT_PUBKEY,
+  Transaction,
   TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
 } from "@solana/web3.js";
 import BN from "bn.js";
 import { Marginfi } from "../../target/types/marginfi";
 import { Program } from "@coral-xyz/anchor";
-import { KaminoConfigCompact } from "./kamino-utils";
+import { KaminoConfigCompact, RESERVE_SIZE, toWeb3Ix } from "./kamino-utils";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { KLEND_PROGRAM_ID } from "./types";
 import {
   deriveBankWithSeed,
   deriveBaseObligation,
+  deriveFeeReceiver,
   deriveLendingMarketAuthority,
   deriveLiquidityVaultAuthority,
   deriveReserveCollateralMint,
@@ -19,6 +27,18 @@ import {
   deriveReserveLiquiditySupply,
   deriveUserMetadata,
 } from "./pdas";
+import {
+  bankrunContext,
+  bankRunProvider,
+  groupAdmin,
+  kaminoAccounts,
+  klendBankrunProgram,
+} from "../rootHooks";
+import { createLookupTableForInstructions, getBankrunBlockhash, processBankrunTransaction, processBankrunV0Transaction } from "./tools";
+import { AssetReserveConfig, BorrowRateCurve, BorrowRateCurveFields, CurvePoint, LendingMarket, MarketWithAddress, parseForChangesReserveConfigAndGetIxs, PriceFeed, Reserve } from "@kamino-finance/klend-sdk";
+import { assert } from "chai";
+import { address, createNoopSigner } from "@solana/kit";
+import Decimal from "decimal.js";
 
 const DEFAULT_KAMINO_DEPOSIT_OPTIONAL_ACCOUNTS = {
   obligationFarmUserState: null,
@@ -367,3 +387,167 @@ export const makeKaminoWithdrawIx = async (
 
   return ix;
 };
+
+export async function createReserve(
+  reserve: Keypair,
+  market: PublicKey,
+  mint: PublicKey,
+  reserveLabel: string,
+  decimals: number,
+  oracle: PublicKey,
+  liquiditySource: PublicKey,
+) {
+  const [lendingMarketAuthority] = deriveLendingMarketAuthority(
+    KLEND_PROGRAM_ID,
+    market,
+  );
+
+  const [feeReceiver] = deriveFeeReceiver(KLEND_PROGRAM_ID, reserve.publicKey);
+
+  const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
+    KLEND_PROGRAM_ID,
+    reserve.publicKey,
+  );
+
+  const [reserveCollateralMint] = deriveReserveCollateralMint(
+    KLEND_PROGRAM_ID,
+    reserve.publicKey,
+  );
+
+  const [reserveCollateralSupply] = deriveReserveCollateralSupply(
+    KLEND_PROGRAM_ID,
+    reserve.publicKey,
+  );
+
+  const tx = new Transaction().add(
+    SystemProgram.createAccount({
+      fromPubkey: groupAdmin.wallet.publicKey,
+      newAccountPubkey: reserve.publicKey,
+      space: RESERVE_SIZE + 8,
+      lamports:
+        await bankRunProvider.connection.getMinimumBalanceForRentExemption(
+          RESERVE_SIZE + 8,
+        ),
+      programId: KLEND_PROGRAM_ID,
+    }),
+    await klendBankrunProgram.methods
+      .initReserve()
+      .accountsStrict({
+        signer: groupAdmin.wallet.publicKey,
+        lendingMarket: market,
+        lendingMarketAuthority,
+        reserve: reserve.publicKey,
+        reserveLiquidityMint: mint,
+        reserveLiquiditySupply,
+        feeReceiver,
+        reserveCollateralMint,
+        reserveCollateralSupply,
+        initialLiquiditySource: liquiditySource,
+        rent: SYSVAR_RENT_PUBKEY,
+        liquidityTokenProgram: TOKEN_PROGRAM_ID,
+        collateralTokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .instruction(),
+  );
+
+  await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet, reserve]);
+  kaminoAccounts.set(reserveLabel, reserve.publicKey);
+
+  console.log("Kamino reserve " + reserveLabel + " " + reserve.publicKey);
+
+  const marketAcc: LendingMarket = LendingMarket.decode(
+    (await bankRunProvider.connection.getAccountInfo(market)).data,
+  );
+  const reserveAcc: Reserve = Reserve.decode(
+    (await bankRunProvider.connection.getAccountInfo(reserve.publicKey)).data,
+  );
+
+  assert.equal(reserveAcc.lendingMarket.toString(), market.toString());
+  // Reserves start in an unconfigured "Hidden" state
+  assert.equal(reserveAcc.config.status, 2);
+
+  // Update the reserve to a sane operational state
+  const marketWithAddress: MarketWithAddress = {
+    address: address(market.toString()),
+    state: marketAcc,
+  };
+
+  const borrowRateCurve = new BorrowRateCurve({
+    points: [
+      // At 0% utilization: 50% interest rate
+      new CurvePoint({ utilizationRateBps: 0, borrowRateBps: 50000 }),
+      // At 50% utilization: 100% interest rate
+      new CurvePoint({ utilizationRateBps: 5000, borrowRateBps: 100000 }),
+      // At 80% utilization: 500% interest rate
+      new CurvePoint({ utilizationRateBps: 8000, borrowRateBps: 500000 }),
+      // At 100% utilization: 1000% interest rate
+      new CurvePoint({ utilizationRateBps: 10000, borrowRateBps: 1000000 }),
+      // Fill remaining points to complete the curve
+      ...Array(7).fill(
+        new CurvePoint({ utilizationRateBps: 10000, borrowRateBps: 1000000 }),
+      ),
+    ],
+  } as BorrowRateCurveFields);
+  const assetReserveConfigParams = {
+    loanToValuePct: 75, // 75%
+    liquidationThresholdPct: 85, // 85%
+    borrowRateCurve,
+    depositLimit: new Decimal(1_000_000_000),
+    borrowLimit: new Decimal(1_000_000_000),
+  };
+
+  const priceFeed: PriceFeed = {
+    pythPrice: address(oracle.toString()),
+    // switchboardPrice: NULL_PUBKEY,
+    // switchboardTwapPrice: NULL_PUBKEY,
+    // scopePriceConfigAddress: NULL_PUBKEY,
+    // scopeChain: [0, 65535, 65535, 65535],
+    // scopeTwapChain: [52, 65535, 65535, 65535],
+  };
+
+  const assetReserveConfig = new AssetReserveConfig({
+    mint: address(mint.toString()),
+    mintTokenProgram: address(TOKEN_PROGRAM_ID.toString()),
+    tokenName: reserveLabel,
+    mintDecimals: decimals,
+    priceFeed,
+    ...assetReserveConfigParams,
+  }).getReserveConfig();
+
+  const addr = address(groupAdmin.wallet.publicKey.toString());
+  const signer = createNoopSigner(addr);
+
+  const instructions: TransactionInstruction[] = [
+    ComputeBudgetProgram.setComputeUnitLimit({
+      units: 1_400_000,
+    }),
+  ];
+
+  const ixes = await parseForChangesReserveConfigAndGetIxs(
+    marketWithAddress,
+    reserveAcc,
+    address(reserve.publicKey.toString()),
+    assetReserveConfig,
+    address(klendBankrunProgram.programId.toString()),
+    signer,
+  );
+
+  for (const ix of ixes) {
+    instructions.push(toWeb3Ix(ix.ix as any));
+  }
+
+  const lutAccount = await createLookupTableForInstructions(
+    groupAdmin.wallet,
+    instructions,
+  );
+
+  const messageV0 = new TransactionMessage({
+    payerKey: groupAdmin.wallet.publicKey,
+    recentBlockhash: await getBankrunBlockhash(bankrunContext),
+    instructions,
+  }).compileToV0Message([lutAccount]);
+
+  const versionedTx = new VersionedTransaction(messageV0);
+  await processBankrunV0Transaction(bankrunContext, versionedTx, [groupAdmin.wallet]);
+}
