@@ -429,6 +429,13 @@ pub mod marginfi {
         marginfi_account::close_account(ctx)
     }
 
+    /// close a liquidationRecord and recover its rent (risk admin only).
+    pub fn marginfi_account_close_liquidation_record(
+        ctx: Context<MarginfiAccountCloseLiquidationRecord>,
+    ) -> MarginfiResult {
+        marginfi_account::marginfi_account_close_liquidation_record(ctx)
+    }
+
     /// (permissionless) Withdraw emissions to the user's pre-configured emissions destination ATA.
     pub fn lending_account_withdraw_emissions_permissionless<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingAccountWithdrawEmissionsPermissionless<'info>>,

@@ -1214,6 +1214,26 @@ impl MarginfiAccountFixture {
         }
     }
 
+    pub async fn make_close_liquidation_record_ix(
+        &self,
+        liquidation_record: Pubkey,
+        risk_admin: Pubkey,
+        fee_payer: Pubkey,
+    ) -> Instruction {
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::MarginfiAccountCloseLiquidationRecord {
+                group: self.load().await.group,
+                marginfi_account: self.key,
+                risk_admin,
+                fee_payer,
+                liquidation_record,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountCloseLiquidationRecord {}.data(),
+        }
+    }
+
     pub async fn make_kamino_refresh_reserve_ix(&self, bank: &BankFixture) -> Instruction {
         let reserve = &bank.kamino.as_ref().unwrap().reserve;
         let bank = bank.load().await;

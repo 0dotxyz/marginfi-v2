@@ -752,3 +752,59 @@ async fn deleverage_can_close_out_balances() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn deleverage_close_liquidation_record() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let risk_admin = test_f.payer().clone();
+    assert_eq!(risk_admin, test_f.marginfi_group.load().await.risk_admin);
+
+    let deleveragee = test_f.create_marginfi_account().await;
+
+    let (record_pk, _bump) = Pubkey::find_program_address(
+        &[LIQUIDATION_RECORD_SEED.as_bytes(), deleveragee.key.as_ref()],
+        &marginfi::ID,
+    );
+
+    let init_ix = deleveragee
+        .make_init_liquidation_record_ix(record_pk, risk_admin)
+        .await;
+
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[init_ix],
+            Some(&risk_admin),
+            &[&ctx.payer],
+            ctx.last_blockhash,
+        );
+
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    let close_ix = deleveragee
+        .make_close_liquidation_record_ix(record_pk, risk_admin, risk_admin)
+        .await;
+
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[close_ix],
+            Some(&risk_admin),
+            &[&ctx.payer],
+            ctx.last_blockhash,
+        );
+
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    let marginfi_account = deleveragee.load().await;
+    assert_eq!(marginfi_account.liquidation_record, Pubkey::default());
+
+    Ok(())
+}
