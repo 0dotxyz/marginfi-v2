@@ -570,6 +570,11 @@ export type Oracles = {
   pythPullLst: Keypair;
   /** the feed ID that pythPullLst oracle uses. */
   pythPullLstOracleFeed: Keypair;
+  /** Switchboard pull oracle account (SOL/USD fixture style). */
+  wsolOracleSwb: Keypair;
+  /** Default 155.59404527 */
+  wsolPriceSwb: number;
+  wsolDecimalsSwb: number;
 };
 
 /**

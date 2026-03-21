@@ -90,6 +90,8 @@ export const addJuplendBanksForGroup = async (args: {
   group: PublicKey;
   numberOfBanks: number;
   startingSeed: number;
+  oracle?: PublicKey;
+  useSwitchboardOracle?: boolean;
 }): Promise<{ juplendBanks: PublicKey[]; pool: JuplendPoolKeys }> => {
   const pool = await ensureJuplendTokenAPoolSetup();
   if (args.numberOfBanks <= 0) {
@@ -104,20 +106,26 @@ export const addJuplendBanksForGroup = async (args: {
   );
 
   const juplendBanks: PublicKey[] = [];
+  const bankOracle = args.oracle ?? oracles.tokenAOracle.publicKey;
+  const useSwitchboardOracle = args.useSwitchboardOracle ?? false;
   for (let i = 0; i < args.numberOfBanks; i += 1) {
     const bankSeed = new BN(args.startingSeed + i);
+    const config = defaultJuplendBankConfig(
+      bankOracle,
+      ecosystem.tokenADecimals
+    );
+    if (useSwitchboardOracle) {
+      config.oracleSetup = { juplendSwitchboardPull: {} };
+    }
     const addIx = await addJuplendBankIx(groupAdmin.mrgnBankrunProgram, {
       group: args.group,
       feePayer: groupAdmin.wallet.publicKey,
       bankMint: ecosystem.tokenAMint.publicKey,
       bankSeed,
-      oracle: oracles.tokenAOracle.publicKey,
+      oracle: bankOracle,
       jupLendingState: pool.lending,
       fTokenMint: pool.fTokenMint,
-      config: defaultJuplendBankConfig(
-        oracles.tokenAOracle.publicKey,
-        ecosystem.tokenADecimals
-      ),
+      config,
       tokenProgram: pool.tokenProgram,
     });
     await processBankrunTransaction(

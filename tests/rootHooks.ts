@@ -60,7 +60,10 @@ import { Marginfi } from "../target/types/marginfi";
 import { Mocks } from "../target/types/mocks";
 import marginfiIdl from "../target/idl/marginfi.json";
 import mocksIdl from "../target/idl/mocks.json";
-import { setupPythOraclesBankrun } from "./utils/bankrun-oracles";
+import {
+  setupPythOraclesBankrun,
+  setupSwbOraclesBankrun,
+} from "./utils/bankrun-oracles";
 import { processBankrunTransaction } from "./utils/tools";
 
 import {
@@ -693,7 +696,7 @@ export const mochaHooks = {
     // -------------------------------------------------------------------------
     console.log("Creating oracles in bankrun...");
 
-    oracles = await setupPythOraclesBankrun(
+    const pythOracles = await setupPythOraclesBankrun(
       bankrunContext,
       banksClient,
       ecosystem.wsolPrice,
@@ -708,6 +711,15 @@ export const mochaHooks = {
       ecosystem.lstAlphaDecimals,
       verbose,
     );
+    const swbOracles = await setupSwbOraclesBankrun(
+      bankrunContext,
+      banksClient,
+      verbose,
+    );
+    oracles = {
+      ...pythOracles,
+      ...swbOracles,
+    };
 
     // ---------------------------------------------------------------------
     // Step 5b: Create validators + SPL single pools (staked collateral tests)

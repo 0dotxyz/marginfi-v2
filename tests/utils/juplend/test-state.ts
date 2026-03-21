@@ -4,6 +4,8 @@ export const JUPLEND_STATE_KEYS = {
   jlr01BankUsdc: "jlr01_bank_usdc",
   jlr01BankTokenA: "jlr01_bank_token_a",
   jlr01BankWsol: "jlr01_bank_wsol",
+  jlr08BankUsdcSwitchboard: "jlr08_bank_usdc_switchboard",
+  jlr09BankToken2022: "jlr09_bank_token_2022",
   jlr01RegularBankUsdc: "jlr01_regular_bank_usdc",
   jlr01RegularBankTokenB: "jlr01_regular_bank_token_b",
   jlr01RegularBankLst: "jlr01_regular_bank_lst",

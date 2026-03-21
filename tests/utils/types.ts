@@ -1,6 +1,8 @@
+import type { IdlAccounts } from "@coral-xyz/anchor";
 import { RiskTierRaw } from "@mrgnlabs/marginfi-client-v2";
 import { bigNumberToWrappedI80F48, WrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { PublicKey } from "@solana/web3.js";
+import type { Marginfi } from "../../target/types/marginfi";
 
 import BN from "bn.js";
 
@@ -85,6 +87,14 @@ export const CONF_INTERVAL_MULTIPLE_FLOAT = 0.0212;
 /** Oracles return values with this confidence for testing purposes */
 export const ORACLE_CONF_INTERVAL = 0.01;
 export const ONE_WEEK_IN_SECONDS = 7 * 24 * 60 * 60;
+
+/**
+ * Shared IDL-derived account helpers used in tests.
+ */
+export type MarginfiAccountRaw = IdlAccounts<Marginfi>["marginfiAccount"];
+export type MarginfiHealthCacheRaw = MarginfiAccountRaw["healthCache"];
+export type MarginfiBalanceRaw =
+  MarginfiAccountRaw["lendingAccount"]["balances"][number];
 
 // By convention, all tags must be in 13375p34k (kidding, but only sorta)
 export const EMODE_STABLE_TAG = 5748; // STAB because 574813 is out of range
