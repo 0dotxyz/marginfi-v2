@@ -65,6 +65,8 @@ number after the prefix determines their run order through the magic of filename
 anchor build --no-idl
 ./scripts/test-program.sh all
 ```
+Note: we recommend running `anchor clean` before using `anchor build --no-idl` if you ran
+`anchor build` before for the TS test suite.
 
 This is much slower than the remix test command, but stable on any system.
 
@@ -160,6 +162,10 @@ Just `anchor clean` and rebuild. This is particularly likely to occur when switc
 ### Rust tests fail with `Error: simulation error: BlockhashNotFound, logs: [], units_consumed: 0`
 
 Ensure your machine is not in Low Power battery mode (or in any other mode decreasing performance).
+
+### Anchor tests fail with `./scripts/test-program.sh: line 40: package_filter[@]: unbound variable`
+
+Just `anchor clean` and `cargo clean` and rebuild. If the error persists it's probably due to macOS default Bash `3.2` + `set -u` that ends up triggering `package_filter[@]: unbound variable` when all uses an empty array. Fix is basically upgrade your Bash to version `5` or higher via Homebrew or similar.
 
 ## Common Footguns
 
