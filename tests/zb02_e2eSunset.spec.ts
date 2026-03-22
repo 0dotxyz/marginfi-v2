@@ -33,6 +33,8 @@ import {
 import {
   borrowIx,
   composeRemainingAccounts,
+  composeRemainingAccountsMetaBanksOnly,
+  composeRemainingAccountsWriteableMeta,
   depositIx,
   endDeleverageIx,
   initLiquidationRecordIx,
@@ -530,12 +532,18 @@ describe("Bank e2e sunset due to illiquid asset", () => {
     const userAccount = user.accounts.get(USER_ACCOUNT_THROWAWAY);
 
     // first repay our debt so we can withdraw without interference.
+    // For repayAll, include all active balances, including the closing bank.
+    const remaining = composeRemainingAccounts([
+      [banks[0], oracles.pythPullLst.publicKey],
+      [banks[1], oracles.pythPullLst.publicKey],
+    ]);
     const repayTx = new Transaction();
     repayTx.add(
       await repayIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         bank: banks[0],
         tokenAccount: user.lstAlphaAccount,
+        remaining,
         amount: new BN(1234),
         repayAll: true,
       })
@@ -552,15 +560,20 @@ describe("Bank e2e sunset due to illiquid asset", () => {
         getTokenBalance(bankRunProvider, liqVault),
       ]);
 
+    // For withdrawAll, include all active balances, including the closing bank.
+    const remainingWithdraw = composeRemainingAccounts(
+      [
+        [banks[1], oracles.pythPullLst.publicKey],
+        [banks[0], oracles.pythPullLst.publicKey],
+      ].filter((group) => !group[0].equals(banks[1]))
+    );
     const tx = new Transaction();
     tx.add(
       await withdrawIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         bank: banks[1],
         tokenAccount: user.lstAlphaAccount,
-        remaining: composeRemainingAccounts([
-          [banks[1], oracles.pythPullLst.publicKey],
-        ]),
+        remaining: remainingWithdraw,
         amount: new BN(12345),
         withdrawAll: true,
       })
@@ -661,12 +674,14 @@ describe("Bank e2e sunset due to illiquid asset", () => {
     // If repaying all, remove the account being repaid.
     endAccounts?: PublicKey[][]
   ) => {
+    const repayRemaining = composeRemainingAccounts(remainingAccounts);
+
     let tx = new Transaction().add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),
       await startDeleverageIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
         riskAdmin: riskAdmin.wallet.publicKey,
-        remaining: composeRemainingAccounts(remainingAccounts),
+        remaining: composeRemainingAccountsWriteableMeta(remainingAccounts),
       }),
       await withdrawIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
@@ -682,12 +697,14 @@ describe("Bank e2e sunset due to illiquid asset", () => {
         marginfiAccount: deleverageeAccount,
         bank: repayBank,
         tokenAccount: riskAdmin.lstAlphaAccount,
+        // For repay_all, include all active balances, including the closing bank.
+        remaining: repayRemaining,
         amount: new BN(repaid),
         repayAll: repayAll,
       }),
       await endDeleverageIx(riskAdmin.mrgnBankrunProgram, {
         marginfiAccount: deleverageeAccount,
-        remaining: composeRemainingAccounts(
+        remaining: composeRemainingAccountsMetaBanksOnly(
           endAccounts ? endAccounts : remainingAccounts
         ),
       })

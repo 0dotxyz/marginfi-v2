@@ -90,8 +90,21 @@ ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
 cd "$ROOT"
 
 # Set environment variables for the tests.
-export SBF_OUT_DIR="$ROOT/target/deploy"
+export SBF_OUT_DIR="$ROOT/target/sbf/deploy"
+export CARGO_TARGET_DIR="$ROOT/target/host"
 export RUST_LOG="solana_runtime::message_processor::stable_log=${loglevel}"
+
+if [[ ! -d "$SBF_OUT_DIR" ]]; then
+  echo "Error: missing SBF output dir: $SBF_OUT_DIR"
+  echo "Run ./scripts/build-workspace.sh first."
+  exit 1
+fi
+
+if [[ ! -f "$SBF_OUT_DIR/${program}.so" ]]; then
+  echo "Error: missing program artifact: $SBF_OUT_DIR/${program}.so"
+  echo "Run ./scripts/build-workspace.sh first."
+  exit 1
+fi
 
 # Set the chain environment variable if provided.
 if [[ -n "$chain" ]]; then

@@ -11,7 +11,9 @@ use crate::{
         },
         marginfi_group::MarginfiGroupImpl,
     },
-    utils::{self, is_marginfi_asset_tag, validate_bank_state, InstructionKind},
+    utils::{
+        self, is_marginfi_asset_tag, record_deposit_inflow, validate_bank_state, InstructionKind,
+    },
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{clock::Clock, sysvar::Sysvar};
@@ -22,7 +24,7 @@ use marginfi_type_crate::{
     constants::{
         TOKENLESS_REPAYMENTS_ALLOWED, TOKENLESS_REPAYMENTS_COMPLETE, ZERO_AMOUNT_THRESHOLD,
     },
-    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED},
+    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP},
 };
 
 /// 1. Accrue interest
@@ -47,42 +49,53 @@ pub fn lending_account_repay<'info>(
         ..
     } = ctx.accounts;
     let clock = Clock::get()?;
-    let maybe_bank_mint = utils::maybe_take_bank_mint(
-        &mut ctx.remaining_accounts,
-        &*bank_loader.load()?,
-        token_program.key,
-    )?;
-
     let repay_all = repay_all.unwrap_or(false);
-    let mut bank = bank_loader.load_mut()?;
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
 
     check!(
         !marginfi_account.get_flag(ACCOUNT_DISABLED),
         MarginfiError::AccountDisabled
     );
+    let maybe_bank_mint = {
+        let bank = bank_loader.load()?;
+        utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?
+    };
+
+    let mut bank = bank_loader.load_mut()?;
     validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
 
-    let group = &marginfi_group_loader.load()?;
+    let group = marginfi_group_loader.load()?;
     bank.accrue_interest(
         clock.unix_timestamp,
-        group,
+        &group,
         #[cfg(not(feature = "client"))]
         bank_loader.key(),
     )?;
 
+    let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
     let lending_account = &mut marginfi_account.lending_account;
     let mut bank_account =
         BankAccountWrapper::find(&bank_loader.key(), &mut bank, lending_account)?;
 
     let repay_amount_post_fee = if repay_all {
-        bank_account.repay_all()?
+        bank_account.repay_all(in_receivership)?
     } else {
         bank_account.repay(I80F48::from_num(amount))?;
 
         amount
     };
     marginfi_account.last_update = clock.unix_timestamp as u64;
+
+    // Record inflow so net-outflow windows release capacity.
+    record_deposit_inflow(
+        &mut bank,
+        &group,
+        marginfi_group_loader.key(),
+        bank_loader.key(),
+        marginfi_account.account_flags,
+        repay_amount_post_fee,
+        &clock,
+    )?;
 
     if authority.key() == group.risk_admin
         && bank.get_flag(TOKENLESS_REPAYMENTS_ALLOWED)
@@ -132,7 +145,7 @@ pub fn lending_account_repay<'info>(
         bank.update_flag(true, TOKENLESS_REPAYMENTS_COMPLETE);
     }
 
-    bank.update_bank_cache(group)?;
+    bank.update_bank_cache(&group)?;
     emit!(LendingAccountRepayEvent {
         header: AccountEventHeader {
             signer: Some(ctx.accounts.authority.key()),
@@ -170,15 +183,15 @@ pub struct LendingAccountRepay<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), true)
+            is_signer_authorized(&a, g.admin, authority.key(), true, true)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
-    /// Must be marginfi_account's authority, unless in liquidation/deleverage receivership
+    /// Must be marginfi_account's authority, unless in liquidation/deleverage receivership or order execution
     ///
-    /// Note: during receivership, there are no signer checks whatsoever: any key can repay as
-    /// long as the invariants checked at the end of receivership are met.
+    /// Note: during receivership and order execution, there are no signer checks whatsoever: any key can repay as
+    /// long as the invariants checked at the end of execution are met.
     pub authority: Signer<'info>,
 
     #[account(

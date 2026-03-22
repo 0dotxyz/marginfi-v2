@@ -1,6 +1,6 @@
 import { BN, Program } from "@coral-xyz/anchor";
 import { configureBank } from "./utils/group-instructions";
-import { Keypair, SystemProgram, Transaction } from "@solana/web3.js";
+import { Keypair, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairA,
@@ -30,7 +30,7 @@ import {
 } from "./utils/user-instructions";
 import { USER_ACCOUNT } from "./utils/mocks";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
-import { dummyTx } from "./utils/bankrunConnection";
+import { dummyIx } from "./utils/bankrunConnection";
 
 describe("Reduce-Only Bank Tests", () => {
   let program: Program<Marginfi>;
@@ -109,7 +109,7 @@ describe("Reduce-Only Bank Tests", () => {
       // Ensure cleanup even if test fails
       await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
         new Transaction().add(
-          dummyTx(groupAdmin.wallet.publicKey, users[1].wallet.publicKey),
+          dummyIx(groupAdmin.wallet.publicKey, users[1].wallet.publicKey),
           await configureBank(groupAdmin.mrgnProgram, {
             bank: bankKey,
             bankConfigOpt: {
@@ -201,7 +201,7 @@ describe("Reduce-Only Bank Tests", () => {
       // Health pulse AFTER configuring bank to ReduceOnly
       await user.mrgnProgram.provider.sendAndConfirm!(
         new Transaction().add(
-          dummyTx(user.wallet.publicKey, users[1].wallet.publicKey),
+          dummyIx(user.wallet.publicKey, users[1].wallet.publicKey),
           await healthPulse(user.mrgnProgram, {
             marginfiAccount: userAccount,
             remaining: composeRemainingAccounts([
@@ -274,15 +274,23 @@ describe("Reduce-Only Bank Tests", () => {
         )
       );
 
-      // Withdraw all Token A
+      // Withdraw all Token A.
+      // For withdrawAll, include all active balances, including the closing bank.
       try {
+        const remaining = composeRemainingAccounts(
+          [
+            [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
+            [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+            [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
+          ].filter((group) => !group[0].equals(bankKeypairA.publicKey))
+        );
         await user.mrgnProgram.provider.sendAndConfirm!(
           new Transaction().add(
             await withdrawIx(user.mrgnProgram, {
               marginfiAccount: userAccount,
               bank: bankKeypairA.publicKey,
               tokenAccount: user.tokenAAccount,
-              remaining: [oracles.tokenAOracle.publicKey],
+              remaining,
               amount: depositAmountTokenA_native,
               withdrawAll: true,
             })

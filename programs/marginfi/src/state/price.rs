@@ -1,24 +1,30 @@
 use crate::constants::{
-    MIN_PYTH_PUSH_VERIFICATION_LEVEL, NATIVE_STAKE_ID, PYTH_ID, SPL_SINGLE_POOL_ID,
-    SWITCHBOARD_PULL_ID,
+    MIN_PYTH_PUSH_VERIFICATION_LEVEL, NATIVE_STAKE_ID, SPL_SINGLE_POOL_ID, SWITCHBOARD_PULL_ID,
 };
 use crate::state::bank_config::BankConfigImpl;
-use crate::{check, check_eq, debug, live, math_error, prelude::*};
+use crate::{check, check_eq, debug, math_error, prelude::*};
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{borsh1::try_from_slice_unchecked, stake::state::StakeStateV2};
 use anchor_spl::token::Mint;
+use drift_mocks::constants::SPOT_CUMULATIVE_INTEREST_PRECISION;
+use drift_mocks::state::MinimalSpotMarket;
 use enum_dispatch::enum_dispatch;
 use fixed::types::I80F48;
+use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION};
 use kamino_mocks::state::MinimalReserve;
 use marginfi_type_crate::{
     constants::{
         CONF_INTERVAL_MULTIPLE, EXP_10_I80F48, MAX_CONF_INTERVAL, STD_DEV_MULTIPLE, U32_MAX,
         U32_MAX_DIV_10,
     },
-    types::{adjust_i128, adjust_i64, adjust_u64, Bank, BankConfig, OracleSetup},
+    types::{
+        mul_div_i128, mul_div_i64, mul_div_u64, mul_i128_by_i80f48, mul_i64_by_i80f48,
+        mul_u64_by_i80f48, Bank, BankConfig, OracleSetup,
+    },
 };
 use pyth_solana_receiver_sdk::price_update::{self, FeedId, PriceUpdateV2};
 use pyth_solana_receiver_sdk::PYTH_PUSH_ORACLE_ID;
+use solend_mocks::state::SolendMinimalReserve;
 use std::{cell::Ref, cmp::min};
 use switchboard_on_demand::{
     CurrentResult, Discriminator, PullFeedAccountData, SPL_TOKEN_PROGRAM_ID,
@@ -77,6 +83,115 @@ pub enum OraclePriceFeedAdapter {
     Fixed(FixedPriceFeed),
 }
 
+/// Checks oracles[0], which is typically the Pyth or Switchboard key.
+fn check_primary_oracle_key(
+    bank_config: &BankConfig,
+    account_info: &AccountInfo,
+) -> MarginfiResult<()> {
+    require_keys_eq!(
+        *account_info.key,
+        bank_config.oracle_keys[0],
+        MarginfiError::WrongOracleAccountKeys
+    );
+    Ok(())
+}
+
+fn load_kamino_reserve<'info>(
+    bank_config: &BankConfig,
+    reserve_info: &'info AccountInfo<'info>,
+) -> MarginfiResult<AccountLoader<'info, MinimalReserve>> {
+    require_keys_eq!(
+        *reserve_info.key,
+        bank_config.oracle_keys[1],
+        MarginfiError::KaminoReserveValidationFailed
+    );
+
+    // Verifies owner + discriminator automatically
+    let reserve_loader: AccountLoader<MinimalReserve> = AccountLoader::try_from(reserve_info)
+        .map_err(|_| MarginfiError::KaminoReserveValidationFailed)?;
+    Ok(reserve_loader)
+}
+
+fn ensure_kamino_reserve_fresh(reserve: &MinimalReserve, clock: &Clock) -> MarginfiResult<()> {
+    if reserve.is_stale(clock.slot) {
+        return err!(MarginfiError::ReserveStale);
+    }
+    Ok(())
+}
+
+fn load_drift_spot_market<'info>(
+    bank_config: &BankConfig,
+    spot_market_info: &'info AccountInfo<'info>,
+) -> MarginfiResult<AccountLoader<'info, MinimalSpotMarket>> {
+    require_keys_eq!(
+        *spot_market_info.key,
+        bank_config.oracle_keys[1],
+        MarginfiError::DriftSpotMarketValidationFailed
+    );
+
+    // Verifies owner + discriminator automatically
+    let spot_market_loader: AccountLoader<MinimalSpotMarket> =
+        AccountLoader::try_from(spot_market_info)
+            .map_err(|_| MarginfiError::DriftSpotMarketValidationFailed)?;
+    Ok(spot_market_loader)
+}
+
+fn ensure_drift_spot_market_fresh(
+    spot_market: &MinimalSpotMarket,
+    clock: &Clock,
+) -> MarginfiResult<()> {
+    require!(
+        !spot_market.is_stale(clock.unix_timestamp),
+        MarginfiError::DriftSpotMarketStale
+    );
+    Ok(())
+}
+
+fn load_solend_reserve<'info>(
+    bank_config: &BankConfig,
+    reserve_info: &'info AccountInfo<'info>,
+) -> MarginfiResult<AccountLoader<'info, SolendMinimalReserve>> {
+    require_keys_eq!(
+        *reserve_info.key,
+        bank_config.oracle_keys[1],
+        MarginfiError::SolendReserveValidationFailed
+    );
+
+    // Verifies owner + discriminator automatically
+    let reserve_loader: AccountLoader<SolendMinimalReserve> = AccountLoader::try_from(reserve_info)
+        .map_err(|_| MarginfiError::SolendReserveValidationFailed)?;
+    Ok(reserve_loader)
+}
+
+fn ensure_solend_reserve_fresh(reserve: &SolendMinimalReserve) -> MarginfiResult<()> {
+    require!(!reserve.is_stale()?, MarginfiError::SolendReserveStale);
+    Ok(())
+}
+
+fn load_juplend_lending<'info>(
+    bank_config: &BankConfig,
+    lending_info: &'info AccountInfo<'info>,
+) -> MarginfiResult<AccountLoader<'info, JuplendLending>> {
+    require_keys_eq!(
+        *lending_info.key,
+        bank_config.oracle_keys[1],
+        MarginfiError::JuplendLendingValidationFailed
+    );
+
+    // Verifies owner + discriminator automatically
+    let lending_loader: AccountLoader<JuplendLending> = AccountLoader::try_from(lending_info)
+        .map_err(|_| MarginfiError::JuplendLendingValidationFailed)?;
+    Ok(lending_loader)
+}
+
+fn ensure_juplend_lending_fresh(lending: &JuplendLending, clock: &Clock) -> MarginfiResult<()> {
+    require!(
+        !lending.is_stale(clock.unix_timestamp),
+        MarginfiError::JuplendLendingStale
+    );
+    Ok(())
+}
+
 impl OraclePriceFeedAdapter {
     pub fn try_from_bank<'info>(
         bank: &Bank,
@@ -106,24 +221,7 @@ impl OraclePriceFeedAdapter {
 
                 let account_info = &ais[0];
 
-                if live!() {
-                    check_eq!(
-                        *account_info.owner,
-                        pyth_solana_receiver_sdk::id(),
-                        MarginfiError::PythPushWrongAccountOwner
-                    );
-                } else {
-                    // On localnet, allow the mock program ID -OR- the real one
-                    let owner_ok = account_info.owner.eq(&PYTH_ID)
-                        || account_info.owner.eq(&pyth_solana_receiver_sdk::id());
-                    check!(owner_ok, MarginfiError::PythPushWrongAccountOwner);
-                }
-
-                require_keys_eq!(
-                    *account_info.key,
-                    bank_config.oracle_keys[0],
-                    MarginfiError::WrongOracleAccountKeys
-                );
+                check_primary_oracle_key(bank_config, account_info)?;
 
                 Ok(OraclePriceFeedAdapter::PythPushOracle(
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?,
@@ -131,14 +229,7 @@ impl OraclePriceFeedAdapter {
             }
             OracleSetup::SwitchboardPull => {
                 check!(ais.len() == 1, MarginfiError::WrongNumberOfOracleAccounts);
-                if ais[0].key != &bank_config.oracle_keys[0] {
-                    msg!(
-                        "Expected oracle key: {:?}, got: {:?}",
-                        bank_config.oracle_keys[0],
-                        ais[0].key
-                    );
-                    return Err(error!(MarginfiError::WrongOracleAccountKeys));
-                }
+                check_primary_oracle_key(bank_config, &ais[0])?;
 
                 Ok(OraclePriceFeedAdapter::SwitchboardPull(
                     SwitchboardPullPriceFeed::load_checked(&ais[0], clock.unix_timestamp, max_age)?,
@@ -182,28 +273,7 @@ impl OraclePriceFeedAdapter {
                 // decimal-adjusted because both SOL and stake positions use 9 decimals
 
                 let account_info = &ais[0];
-                require_keys_eq!(
-                    *account_info.key,
-                    bank_config.oracle_keys[0],
-                    MarginfiError::WrongOracleAccountKeys
-                );
-
-                if live!() {
-                    check_eq!(
-                        account_info.owner,
-                        &pyth_solana_receiver_sdk::id(),
-                        MarginfiError::StakedPythPushWrongAccountOwner
-                    );
-                } else {
-                    // On localnet, allow the mock program ID OR the real one (for regression tests against
-                    // actual mainnet accounts).
-                    // * Note: Typically price updates are owned by `pyth_solana_receiver_sdk` and the oracle
-                    // feed account itself is owned by PYTH ID. On localnet, the mock program may own both for
-                    // simplicity.
-                    let owner_ok = account_info.owner.eq(&PYTH_ID)
-                        || account_info.owner.eq(&pyth_solana_receiver_sdk::id());
-                    check!(owner_ok, MarginfiError::StakedPythPushWrongAccountOwner);
-                }
+                check_primary_oracle_key(bank_config, account_info)?;
 
                 let mut feed = PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
 
@@ -231,67 +301,29 @@ impl OraclePriceFeedAdapter {
                 let account_info = &ais[0];
                 let reserve_info = &ais[1];
 
-                // Validate oracle account matches expected key (new pattern)
-                require_keys_eq!(
-                    *account_info.key,
-                    bank_config.oracle_keys[0],
-                    MarginfiError::WrongOracleAccountKeys
-                );
+                check_primary_oracle_key(bank_config, account_info)?;
 
-                check_eq!(
-                    *reserve_info.key,
-                    bank_config.oracle_keys[1],
-                    MarginfiError::KaminoReserveValidationFailed
-                );
-
-                // Verifies owner + discriminator automatically
-                let reserve_loader: AccountLoader<MinimalReserve> =
-                    AccountLoader::try_from(reserve_info)
-                        .map_err(|_| MarginfiError::KaminoReserveValidationFailed)?;
+                let reserve_loader = load_kamino_reserve(bank_config, reserve_info)?;
                 let reserve = reserve_loader.load()?;
-                let is_stale = reserve.is_stale(clock.slot);
-                if is_stale {
-                    // msg!(
-                    //     "stale. slot now: {:?} but has: {:?}, stale flag: {:?}",
-                    //     clock.slot,
-                    //     reserve.slot,
-                    //     reserve.stale
-                    // );
-                    return err!(MarginfiError::ReserveStale);
-                }
+                ensure_kamino_reserve_fresh(&reserve, clock)?;
 
-                if live!() {
-                    require_keys_eq!(
-                        *account_info.owner,
-                        pyth_solana_receiver_sdk::id(),
-                        MarginfiError::PythPushWrongAccountOwner
-                    );
-                } else {
-                    // Localnet only
-                    // On localnet, allow the mock program ID -OR- the real one
-                    let owner_ok = account_info.owner.eq(&PYTH_ID)
-                        || account_info.owner.eq(&pyth_solana_receiver_sdk::id());
-                    check!(owner_ok, MarginfiError::PythPushWrongAccountOwner);
-                };
-
-                // Use new pattern: no feed_id parameter needed
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
 
                 let (total_liq, total_col) = reserve.scaled_supplies()?;
                 if total_col > I80F48::ZERO {
-                    let liq_to_col_ratio = total_liq / total_col;
+                    let multiplier = total_liq / total_col;
 
                     // Adjust prices & confidence in place
-                    price_feed.price.price = adjust_i64(price_feed.price.price, liq_to_col_ratio)
+                    price_feed.price.price = mul_i64_by_i80f48(price_feed.price.price, multiplier)
                         .ok_or_else(math_error!())?;
                     price_feed.ema_price.price =
-                        adjust_i64(price_feed.ema_price.price, liq_to_col_ratio)
+                        mul_i64_by_i80f48(price_feed.ema_price.price, multiplier)
                             .ok_or_else(math_error!())?;
-                    price_feed.price.conf = adjust_u64(price_feed.price.conf, liq_to_col_ratio)
+                    price_feed.price.conf = mul_u64_by_i80f48(price_feed.price.conf, multiplier)
                         .ok_or_else(math_error!())?;
                     price_feed.ema_price.conf =
-                        adjust_u64(price_feed.ema_price.conf, liq_to_col_ratio)
+                        mul_u64_by_i80f48(price_feed.ema_price.conf, multiplier)
                             .ok_or_else(math_error!())?;
                 }
 
@@ -304,27 +336,11 @@ impl OraclePriceFeedAdapter {
                 let oracle_info = &ais[0];
                 let reserve_info = &ais[1];
 
-                require_keys_eq!(
-                    *oracle_info.key,
-                    bank_config.oracle_keys[0],
-                    MarginfiError::WrongOracleAccountKeys
-                );
+                check_primary_oracle_key(bank_config, oracle_info)?;
 
-                require_keys_eq!(
-                    *reserve_info.key,
-                    bank_config.oracle_keys[1],
-                    MarginfiError::KaminoReserveValidationFailed
-                );
-
-                // Verifies owner + discriminator automatically
-                let reserve_loader: AccountLoader<MinimalReserve> =
-                    AccountLoader::try_from(reserve_info)
-                        .map_err(|_| MarginfiError::KaminoReserveValidationFailed)?;
+                let reserve_loader = load_kamino_reserve(bank_config, reserve_info)?;
                 let reserve = reserve_loader.load()?;
-                let is_stale = reserve.is_stale(clock.slot);
-                if is_stale {
-                    return err!(MarginfiError::ReserveStale);
-                }
+                ensure_kamino_reserve_fresh(&reserve, clock)?;
 
                 let mut price_feed = SwitchboardPullPriceFeed::load_checked(
                     oracle_info,
@@ -334,14 +350,14 @@ impl OraclePriceFeedAdapter {
 
                 let (total_liq, total_col) = reserve.scaled_supplies()?;
                 if total_col > I80F48::ZERO {
-                    let liq_to_col_ratio = total_liq / total_col;
+                    let multiplier = total_liq / total_col;
 
                     // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
                     price_feed.feed.result.value =
-                        adjust_i128(price_feed.feed.result.value, liq_to_col_ratio)
+                        mul_i128_by_i80f48(price_feed.feed.result.value, multiplier)
                             .ok_or_else(math_error!())?;
                     price_feed.feed.result.std_dev =
-                        adjust_i128(price_feed.feed.result.std_dev, liq_to_col_ratio)
+                        mul_i128_by_i80f48(price_feed.feed.result.std_dev, multiplier)
                             .ok_or_else(math_error!())?;
                 }
 
@@ -365,54 +381,40 @@ impl OraclePriceFeedAdapter {
                 let account_info = &ais[0];
                 let spot_market_info = &ais[1];
 
-                // Validate oracle account matches expected key (Kamino pattern)
-                require_keys_eq!(
-                    *account_info.key,
-                    bank_config.oracle_keys[0],
-                    MarginfiError::WrongOracleAccountKeys
-                );
+                check_primary_oracle_key(bank_config, account_info)?;
 
-                require_keys_eq!(
-                    *spot_market_info.key,
-                    bank_config.oracle_keys[1],
-                    MarginfiError::DriftSpotMarketValidationFailed
-                );
-
-                // Verifies owner + discriminator automatically
-                let spot_market_loader: AccountLoader<drift_mocks::state::MinimalSpotMarket> =
-                    AccountLoader::try_from(spot_market_info)
-                        .map_err(|_| MarginfiError::DriftSpotMarketValidationFailed)?;
+                let spot_market_loader = load_drift_spot_market(bank_config, spot_market_info)?;
                 let spot_market = spot_market_loader.load()?;
-
-                // Check if spot market interest is stale
-                require!(
-                    !spot_market.is_stale(clock.unix_timestamp),
-                    MarginfiError::DriftSpotMarketStale
-                );
-
-                if live!() {
-                    require_keys_eq!(
-                        *account_info.owner,
-                        pyth_solana_receiver_sdk::id(),
-                        MarginfiError::PythPushWrongAccountOwner
-                    );
-                } else {
-                    // Localnet only
-                    // On localnet, allow the mock program ID -OR- the real one
-                    let owner_ok = account_info.owner.eq(&PYTH_ID)
-                        || account_info.owner.eq(&pyth_solana_receiver_sdk::id());
-                    check!(owner_ok, MarginfiError::PythPushWrongAccountOwner);
-                };
-
-                // Use Kamino pattern: no feed_id parameter needed
+                ensure_drift_spot_market_fresh(&spot_market, clock)?;
+                let numerator = u128::from_le_bytes(spot_market.cumulative_deposit_interest);
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
 
                 // Adjust Pyth prices & confidence in place
-                price_feed.price.price = spot_market.adjust_i64(price_feed.price.price)?;
-                price_feed.ema_price.price = spot_market.adjust_i64(price_feed.ema_price.price)?;
-                price_feed.price.conf = spot_market.adjust_u64(price_feed.price.conf)?;
-                price_feed.ema_price.conf = spot_market.adjust_u64(price_feed.ema_price.conf)?;
+                price_feed.price.price = mul_div_i64(
+                    price_feed.price.price,
+                    numerator,
+                    SPOT_CUMULATIVE_INTEREST_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
+                price_feed.ema_price.price = mul_div_i64(
+                    price_feed.ema_price.price,
+                    numerator,
+                    SPOT_CUMULATIVE_INTEREST_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
+                price_feed.price.conf = mul_div_u64(
+                    price_feed.price.conf,
+                    numerator,
+                    SPOT_CUMULATIVE_INTEREST_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
+                price_feed.ema_price.conf = mul_div_u64(
+                    price_feed.ema_price.conf,
+                    numerator,
+                    SPOT_CUMULATIVE_INTEREST_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
 
                 Ok(OraclePriceFeedAdapter::PythPushOracle(price_feed))
             }
@@ -423,29 +425,12 @@ impl OraclePriceFeedAdapter {
                 let oracle_info = &ais[0];
                 let spot_market_info = &ais[1];
 
-                require_keys_eq!(
-                    *oracle_info.key,
-                    bank_config.oracle_keys[0],
-                    MarginfiError::WrongOracleAccountKeys
-                );
+                check_primary_oracle_key(bank_config, oracle_info)?;
 
-                require_keys_eq!(
-                    *spot_market_info.key,
-                    bank_config.oracle_keys[1],
-                    MarginfiError::DriftSpotMarketValidationFailed
-                );
-
-                // Verifies owner + discriminator automatically
-                let spot_market_loader: AccountLoader<drift_mocks::state::MinimalSpotMarket> =
-                    AccountLoader::try_from(spot_market_info)
-                        .map_err(|_| MarginfiError::DriftSpotMarketValidationFailed)?;
+                let spot_market_loader = load_drift_spot_market(bank_config, spot_market_info)?;
                 let spot_market = spot_market_loader.load()?;
-
-                // Check if spot market interest is stale
-                require!(
-                    !spot_market.is_stale(clock.unix_timestamp),
-                    MarginfiError::DriftSpotMarketStale
-                );
+                ensure_drift_spot_market_fresh(&spot_market, clock)?;
+                let numerator = u128::from_le_bytes(spot_market.cumulative_deposit_interest);
 
                 let mut price_feed = SwitchboardPullPriceFeed::load_checked(
                     oracle_info,
@@ -454,10 +439,18 @@ impl OraclePriceFeedAdapter {
                 )?;
 
                 // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
-                price_feed.feed.result.value =
-                    spot_market.adjust_i128(price_feed.feed.result.value)?;
-                price_feed.feed.result.std_dev =
-                    spot_market.adjust_i128(price_feed.feed.result.std_dev)?;
+                price_feed.feed.result.value = mul_div_i128(
+                    price_feed.feed.result.value,
+                    numerator,
+                    SPOT_CUMULATIVE_INTEREST_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
+                price_feed.feed.result.std_dev = mul_div_i128(
+                    price_feed.feed.result.std_dev,
+                    numerator,
+                    SPOT_CUMULATIVE_INTEREST_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
 
                 Ok(OraclePriceFeedAdapter::SwitchboardPull(price_feed))
             }
@@ -465,62 +458,31 @@ impl OraclePriceFeedAdapter {
                 // (1) Pyth oracle (for price) and (2) Solend reserve (for exchange rate)
                 require_eq!(ais.len(), 2, MarginfiError::WrongNumberOfOracleAccounts);
                 let reserve_info = &ais[1];
-                require_keys_eq!(
-                    *reserve_info.key,
-                    bank_config.oracle_keys[1],
-                    MarginfiError::SolendReserveValidationFailed
-                );
-
-                // Verifies owner + discriminator automatically
-                let reserve_loader: AccountLoader<solend_mocks::state::SolendMinimalReserve> =
-                    AccountLoader::try_from(reserve_info)
-                        .map_err(|_| MarginfiError::SolendReserveValidationFailed)?;
+                let reserve_loader = load_solend_reserve(bank_config, reserve_info)?;
                 let reserve = reserve_loader.load()?;
-
-                // Check reserve has been refreshed this slot
-                require!(!reserve.is_stale()?, MarginfiError::SolendReserveStale);
+                ensure_solend_reserve_fresh(&reserve)?;
 
                 let account_info = &ais[0];
 
-                // Validate oracle account matches expected key (Kamino pattern)
-                require_keys_eq!(
-                    *account_info.key,
-                    bank_config.oracle_keys[0],
-                    MarginfiError::WrongOracleAccountKeys
-                );
+                check_primary_oracle_key(bank_config, account_info)?;
 
-                if live!() {
-                    require_keys_eq!(
-                        *account_info.owner,
-                        pyth_solana_receiver_sdk::id(),
-                        MarginfiError::PythPushWrongAccountOwner
-                    );
-                } else {
-                    // Localnet only
-                    // On localnet, allow the mock program ID -OR- the real one
-                    let owner_ok = account_info.owner.eq(&PYTH_ID)
-                        || account_info.owner.eq(&pyth_solana_receiver_sdk::id());
-                    check!(owner_ok, MarginfiError::PythPushWrongAccountOwner);
-                };
-
-                // Use Kamino pattern: no feed_id parameter needed
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
 
                 let (total_liq, total_col) = reserve.scaled_supplies()?;
                 if total_col > I80F48::ZERO {
-                    let liq_to_col_ratio = total_liq / total_col;
+                    let multiplier = total_liq / total_col;
 
                     // Adjust Pyth prices & confidence in place
-                    price_feed.price.price = adjust_i64(price_feed.price.price, liq_to_col_ratio)
+                    price_feed.price.price = mul_i64_by_i80f48(price_feed.price.price, multiplier)
                         .ok_or_else(math_error!())?;
                     price_feed.ema_price.price =
-                        adjust_i64(price_feed.ema_price.price, liq_to_col_ratio)
+                        mul_i64_by_i80f48(price_feed.ema_price.price, multiplier)
                             .ok_or_else(math_error!())?;
-                    price_feed.price.conf = adjust_u64(price_feed.price.conf, liq_to_col_ratio)
+                    price_feed.price.conf = mul_u64_by_i80f48(price_feed.price.conf, multiplier)
                         .ok_or_else(math_error!())?;
                     price_feed.ema_price.conf =
-                        adjust_u64(price_feed.ema_price.conf, liq_to_col_ratio)
+                        mul_u64_by_i80f48(price_feed.ema_price.conf, multiplier)
                             .ok_or_else(math_error!())?;
                 }
                 Ok(OraclePriceFeedAdapter::PythPushOracle(price_feed))
@@ -532,26 +494,11 @@ impl OraclePriceFeedAdapter {
                 let oracle_info = &ais[0];
                 let reserve_info = &ais[1];
 
-                require_keys_eq!(
-                    *oracle_info.key,
-                    bank_config.oracle_keys[0],
-                    MarginfiError::WrongOracleAccountKeys
-                );
+                check_primary_oracle_key(bank_config, oracle_info)?;
 
-                require_keys_eq!(
-                    *reserve_info.key,
-                    bank_config.oracle_keys[1],
-                    MarginfiError::SolendReserveValidationFailed
-                );
-
-                // Verifies owner + discriminator automatically
-                let reserve_loader: AccountLoader<solend_mocks::state::SolendMinimalReserve> =
-                    AccountLoader::try_from(reserve_info)
-                        .map_err(|_| MarginfiError::SolendReserveValidationFailed)?;
+                let reserve_loader = load_solend_reserve(bank_config, reserve_info)?;
                 let reserve = reserve_loader.load()?;
-
-                // Check reserve has been refreshed this slot
-                require!(!reserve.is_stale()?, MarginfiError::SolendReserveStale);
+                ensure_solend_reserve_fresh(&reserve)?;
 
                 let mut price_feed = SwitchboardPullPriceFeed::load_checked(
                     oracle_info,
@@ -561,16 +508,199 @@ impl OraclePriceFeedAdapter {
 
                 let (total_liq, total_col) = reserve.scaled_supplies()?;
                 if total_col > I80F48::ZERO {
-                    let liq_to_col_ratio = total_liq / total_col;
+                    let multiplier = total_liq / total_col;
 
                     // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
                     price_feed.feed.result.value =
-                        adjust_i128(price_feed.feed.result.value, liq_to_col_ratio)
+                        mul_i128_by_i80f48(price_feed.feed.result.value, multiplier)
                             .ok_or_else(math_error!())?;
                     price_feed.feed.result.std_dev =
-                        adjust_i128(price_feed.feed.result.std_dev, liq_to_col_ratio)
+                        mul_i128_by_i80f48(price_feed.feed.result.std_dev, multiplier)
                             .ok_or_else(math_error!())?;
                 }
+
+                Ok(OraclePriceFeedAdapter::SwitchboardPull(price_feed))
+            }
+            OracleSetup::FixedDrift => {
+                // Fixed base price + Drift spot market exchange rate
+                // Requires: Drift spot market (no oracle needed)
+                check!(ais.len() == 1, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let spot_market_info = &ais[0];
+
+                let spot_market_loader = load_drift_spot_market(bank_config, spot_market_info)?;
+                let spot_market = spot_market_loader.load()?;
+                ensure_drift_spot_market_fresh(&spot_market, clock)?;
+
+                // Get fixed base price
+                let base_price: I80F48 = bank.config.fixed_price.into();
+                check!(
+                    base_price >= I80F48::ZERO,
+                    MarginfiError::FixedOraclePriceNegative
+                );
+
+                // Apply Drift exchange rate
+                let cumulative_interest =
+                    u128::from_le_bytes(spot_market.cumulative_deposit_interest);
+                let interest_ratio = I80F48::from_num(cumulative_interest)
+                    .checked_div(I80F48::from_num(
+                        drift_mocks::constants::SPOT_CUMULATIVE_INTEREST_PRECISION,
+                    ))
+                    .ok_or_else(math_error!())?;
+                let adjusted_price = base_price
+                    .checked_mul(interest_ratio)
+                    .ok_or_else(math_error!())?;
+
+                Ok(OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                    price: adjusted_price,
+                }))
+            }
+            OracleSetup::FixedKamino => {
+                // Fixed base price + Kamino reserve exchange rate
+                // Requires: Kamino reserve (no Pyth oracle needed)
+                check!(ais.len() == 1, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let reserve_info = &ais[0];
+
+                let reserve_loader = load_kamino_reserve(bank_config, reserve_info)?;
+                let reserve = reserve_loader.load()?;
+                ensure_kamino_reserve_fresh(&reserve, clock)?;
+
+                // Get fixed base price
+                let base_price: I80F48 = bank.config.fixed_price.into();
+                check!(
+                    base_price >= I80F48::ZERO,
+                    MarginfiError::FixedOraclePriceNegative
+                );
+
+                // Apply Kamino exchange rate
+                let (total_liq, total_col) = reserve.scaled_supplies()?;
+                let adjusted_price = if total_col > I80F48::ZERO {
+                    let liq_to_col_ratio = total_liq / total_col;
+                    base_price
+                        .checked_mul(liq_to_col_ratio)
+                        .ok_or_else(math_error!())?
+                } else {
+                    base_price
+                };
+
+                Ok(OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                    price: adjusted_price,
+                }))
+            }
+
+            OracleSetup::FixedJuplend => {
+                // Fixed base price + JupLend Lending exchange rate
+                // Requires: JupLend Lending state (no oracle needed)
+                check!(ais.len() == 1, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let lending_info = &ais[0];
+
+                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
+                let lending = lending_loader.load()?;
+                ensure_juplend_lending_fresh(&lending, clock)?;
+
+                let base_price: I80F48 = bank.config.fixed_price.into();
+                check!(
+                    base_price >= I80F48::ZERO,
+                    MarginfiError::FixedOraclePriceNegative
+                );
+
+                // Apply JupLend exchange rate: base_price * token_exchange_price / 1e12
+                let rate = I80F48::from_num(lending.token_exchange_price);
+                let precision = I80F48::from_num(EXCHANGE_PRICES_PRECISION);
+                let adjusted_price = base_price
+                    .checked_mul(rate)
+                    .ok_or_else(math_error!())?
+                    .checked_div(precision)
+                    .ok_or_else(math_error!())?;
+
+                Ok(OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                    price: adjusted_price,
+                }))
+            }
+
+            OracleSetup::JuplendPythPull => {
+                // (1) Pyth oracle (for price) and (2) JupLend Lending state (for exchange rate)
+                require_eq!(ais.len(), 2, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let oracle_info = &ais[0];
+                let lending_info = &ais[1];
+
+                require_keys_eq!(
+                    *oracle_info.key,
+                    bank_config.oracle_keys[0],
+                    MarginfiError::WrongOracleAccountKeys
+                );
+
+                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
+                let lending = lending_loader.load()?;
+                ensure_juplend_lending_fresh(&lending, clock)?;
+                let numerator = lending.token_exchange_price as u128;
+
+                let mut price_feed =
+                    PythPushOraclePriceFeed::load_checked(oracle_info, clock, max_age)?;
+
+                // Adjust Pyth prices & confidence in place
+                price_feed.price.price =
+                    mul_div_i64(price_feed.price.price, numerator, EXCHANGE_PRICES_PRECISION)
+                        .ok_or_else(math_error!())?;
+                price_feed.ema_price.price = mul_div_i64(
+                    price_feed.ema_price.price,
+                    numerator,
+                    EXCHANGE_PRICES_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
+                price_feed.price.conf =
+                    mul_div_u64(price_feed.price.conf, numerator, EXCHANGE_PRICES_PRECISION)
+                        .ok_or_else(math_error!())?;
+                price_feed.ema_price.conf = mul_div_u64(
+                    price_feed.ema_price.conf,
+                    numerator,
+                    EXCHANGE_PRICES_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
+
+                Ok(OraclePriceFeedAdapter::PythPushOracle(price_feed))
+            }
+
+            OracleSetup::JuplendSwitchboardPull => {
+                // (1) Switchboard oracle (for price) and (2) JupLend Lending state (for exchange rate)
+                require_eq!(ais.len(), 2, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let oracle_info = &ais[0];
+                let lending_info = &ais[1];
+
+                require_keys_eq!(
+                    *oracle_info.key,
+                    bank_config.oracle_keys[0],
+                    MarginfiError::WrongOracleAccountKeys
+                );
+
+                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
+                let lending = lending_loader.load()?;
+                ensure_juplend_lending_fresh(&lending, clock)?;
+                let numerator = lending.token_exchange_price as u128;
+
+                let mut price_feed = SwitchboardPullPriceFeed::load_checked(
+                    oracle_info,
+                    clock.unix_timestamp,
+                    max_age,
+                )?;
+
+                // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
+                price_feed.feed.result.value = mul_div_i128(
+                    price_feed.feed.result.value,
+                    numerator,
+                    EXCHANGE_PRICES_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
+                price_feed.feed.result.std_dev = mul_div_i128(
+                    price_feed.feed.result.std_dev,
+                    numerator,
+                    EXCHANGE_PRICES_PRECISION,
+                )
+                .ok_or_else(math_error!())?;
 
                 Ok(OraclePriceFeedAdapter::SwitchboardPull(price_feed))
             }
@@ -582,7 +712,7 @@ impl OraclePriceFeedAdapter {
     ///   omit these)
     pub fn validate_bank_config(
         bank_config: &BankConfig,
-        oracle_ais: &[AccountInfo],
+        oracle_ais: &[AccountInfo<'_>],
         lst_mint: Option<Pubkey>,
         stake_pool: Option<Pubkey>,
         sol_pool: Option<Pubkey>,
@@ -596,14 +726,8 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::WrongNumberOfOracleAccounts
                 );
 
-                // Validate oracle account matches expected key (new pattern)
-                require_keys_eq!(
-                    oracle_ais[0].key(),
-                    bank_config.oracle_keys[0],
-                    MarginfiError::WrongOracleAccountKeys
-                );
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
 
-                // Validate it's a valid Pyth Push oracle account
                 load_price_update_v2_checked(&oracle_ais[0])?;
 
                 require_keys_eq!(
@@ -620,11 +744,7 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::WrongNumberOfOracleAccounts
                 );
 
-                require_keys_eq!(
-                    oracle_ais[0].key(),
-                    bank_config.oracle_keys[0],
-                    MarginfiError::WrongOracleAccountKeys
-                );
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
 
                 SwitchboardPullPriceFeed::check_ais(&oracle_ais[0])?;
 
@@ -647,11 +767,7 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::WrongNumberOfOracleAccounts
                 );
 
-                require_keys_eq!(
-                    oracle_ais[0].key(),
-                    bank_config.oracle_keys[0],
-                    MarginfiError::WrongOracleAccountKeys
-                );
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 load_price_update_v2_checked(&oracle_ais[0])?;
                 Ok(())
             }
@@ -660,14 +776,7 @@ impl OraclePriceFeedAdapter {
                     oracle_ais.len() == 1,
                     MarginfiError::WrongNumberOfOracleAccounts
                 );
-                if oracle_ais[0].key != &bank_config.oracle_keys[0] {
-                    msg!(
-                        "Expected oracle key: {:?}, got: {:?}",
-                        bank_config.oracle_keys[0],
-                        oracle_ais[0].key
-                    );
-                    return Err(error!(MarginfiError::WrongOracleAccountKeys));
-                }
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
 
                 SwitchboardPullPriceFeed::check_ais(&oracle_ais[0])?;
 
@@ -680,11 +789,7 @@ impl OraclePriceFeedAdapter {
                         MarginfiError::WrongNumberOfOracleAccounts
                     );
 
-                    require_keys_eq!(
-                        oracle_ais[0].key(),
-                        bank_config.oracle_keys[0],
-                        MarginfiError::WrongOracleAccountKeys
-                    );
+                    check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                     load_price_update_v2_checked(&oracle_ais[0])?;
 
                     let lst_mint = lst_mint.unwrap();
@@ -732,11 +837,7 @@ impl OraclePriceFeedAdapter {
                         MarginfiError::WrongNumberOfOracleAccounts
                     );
 
-                    require_keys_eq!(
-                        oracle_ais[0].key(),
-                        bank_config.oracle_keys[0],
-                        MarginfiError::WrongOracleAccountKeys
-                    );
+                    check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                     load_price_update_v2_checked(&oracle_ais[0])?;
 
                     Ok(())
@@ -756,11 +857,7 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::WrongNumberOfOracleAccounts
                 );
 
-                require_keys_eq!(
-                    oracle_ais[0].key(),
-                    bank_config.oracle_keys[0],
-                    MarginfiError::WrongOracleAccountKeys
-                );
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
 
                 load_price_update_v2_checked(&oracle_ais[0])?;
 
@@ -778,11 +875,7 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::WrongNumberOfOracleAccounts
                 );
 
-                require_keys_eq!(
-                    oracle_ais[0].key(),
-                    bank_config.oracle_keys[0],
-                    MarginfiError::WrongOracleAccountKeys
-                );
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
 
                 SwitchboardPullPriceFeed::check_ais(&oracle_ais[0])?;
 
@@ -800,18 +893,10 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::WrongNumberOfOracleAccounts
                 );
 
-                // First account is the pyth push oracle
-                // Validate oracle account matches expected key (Kamino pattern)
-                require_keys_eq!(
-                    oracle_ais[0].key(),
-                    bank_config.oracle_keys[0],
-                    MarginfiError::WrongOracleAccountKeys
-                );
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
 
-                // Validate it's a valid Pyth Push oracle account
                 load_price_update_v2_checked(&oracle_ais[0])?;
 
-                // Second account is the solend reserve
                 require_keys_eq!(
                     *oracle_ais[1].key,
                     bank_config.oracle_keys[1],
@@ -826,18 +911,107 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::WrongNumberOfOracleAccounts
                 );
 
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
+
+                SwitchboardPullPriceFeed::check_ais(&oracle_ais[0])?;
+
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::SolendReserveValidationFailed
+                );
+                Ok(())
+            }
+            OracleSetup::FixedDrift => {
+                // Fixed base price with Drift spot market exchange rate
+                require_eq!(
+                    oracle_ais.len(),
+                    1,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                require_keys_eq!(
+                    *oracle_ais[0].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::DriftSpotMarketValidationFailed
+                );
+                Ok(())
+            }
+            OracleSetup::FixedKamino => {
+                // Fixed base price with Kamino reserve exchange rate
+                require_eq!(
+                    oracle_ais.len(),
+                    1,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                require_keys_eq!(
+                    *oracle_ais[0].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::KaminoReserveValidationFailed
+                );
+                Ok(())
+            }
+            OracleSetup::FixedJuplend => {
+                // Fixed base price with JupLend Lending exchange rate
+                require_eq!(
+                    oracle_ais.len(),
+                    1,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                require_keys_eq!(
+                    *oracle_ais[0].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::JuplendLendingValidationFailed
+                );
+                Ok(())
+            }
+
+            OracleSetup::JuplendPythPull => {
+                require_eq!(
+                    oracle_ais.len(),
+                    2,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                // First account is the Pyth Push oracle
                 require_keys_eq!(
                     oracle_ais[0].key(),
                     bank_config.oracle_keys[0],
                     MarginfiError::WrongOracleAccountKeys
                 );
+                load_price_update_v2_checked(&oracle_ais[0])?;
 
-                SwitchboardPullPriceFeed::check_ais(&oracle_ais[0])?;
-
+                // Second account is the JupLend Lending state
                 require_keys_eq!(
                     oracle_ais[1].key(),
                     bank_config.oracle_keys[1],
-                    MarginfiError::SolendReserveValidationFailed
+                    MarginfiError::JuplendLendingValidationFailed
+                );
+                Ok(())
+            }
+
+            OracleSetup::JuplendSwitchboardPull => {
+                require_eq!(
+                    oracle_ais.len(),
+                    2,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                // First account is the Switchboard Pull oracle
+                require_keys_eq!(
+                    oracle_ais[0].key(),
+                    bank_config.oracle_keys[0],
+                    MarginfiError::WrongOracleAccountKeys
+                );
+                SwitchboardPullPriceFeed::check_ais(&oracle_ais[0])?;
+
+                // Second account is the JupLend Lending state
+                require_keys_eq!(
+                    oracle_ais[1].key(),
+                    bank_config.oracle_keys[1],
+                    MarginfiError::JuplendLendingValidationFailed
                 );
                 Ok(())
             }
@@ -1041,23 +1215,10 @@ pub fn parse_swb_ignore_alignment(data: Ref<&mut [u8]>) -> MarginfiResult<PullFe
 }
 
 pub fn load_price_update_v2_checked(ai: &AccountInfo) -> MarginfiResult<PriceUpdateV2> {
-    if live!() {
-        check_eq!(
-            *ai.owner,
-            pyth_solana_receiver_sdk::id(),
-            MarginfiError::PythPushWrongAccountOwner
-        );
-    } else {
-        // On localnet, allow the mock program ID OR the real one (for regression tests against
-        // actual mainnet accounts).
-        // * Note: Typically price updates are owned by `pyth_solana_receiver_sdk` and the oracle
-        // feed account itself is owned by PYTH ID. On localnet, the mock program may own both for
-        // simplicity.
-        let owner_ok = ai.owner.eq(&PYTH_ID) || ai.owner.eq(&pyth_solana_receiver_sdk::id());
-        check!(owner_ok, MarginfiError::PythPushWrongAccountOwner);
-    }
-
     let price_feed_data = ai.try_borrow_data()?;
+    if price_feed_data.len() < 8 {
+        return err!(MarginfiError::PythPushInvalidAccount);
+    }
     let discriminator = &price_feed_data[0..8];
     let expected_discrim = <PriceUpdateV2 as anchor_lang::Discriminator>::DISCRIMINATOR;
 
@@ -1079,25 +1240,14 @@ pub struct PythPushOraclePriceFeed {
 }
 
 impl PythPushOraclePriceFeed {
-    /// Pyth push oracles are update using crosschain messages from pythnet There can be multiple
-    /// pyth push oracles for a given feed_id. Marginfi allows using any pyth push oracle with a
-    /// sufficient verification level and price age.
+    /// Load a Pyth Price feed.
     ///
     /// Security assumptions:
-    /// - The pyth-push-oracle account is owned by the pyth-solana-receiver program, checked in
-    ///   `load_price_update_v2_checked`
+    /// - The pyth-push-oracle account matches the configured oracle key, checked by the caller.
     /// - The pyth-push-oracle account is a PriceUpdateV2 account, checked in
     ///   `load_price_update_v2_checked`
     /// - The pyth-push-oracle account has a minimum verification level, checked in
     ///   `get_price_no_older_than_with_custom_verification_level`
-    /// - The pyth-push-oracle account has a valid feed_id, the pyth-solana-receiver program
-    ///   enforces that the feed_id matches the pythnet feed_id, checked in
-    ///     - pyth-push-oracle asserts that a valid price update has a matching feed_id with the
-    ///       existing pyth-push-oracle update
-    ///       https://github.com/pyth-network/pyth-crosschain/blob/94f1bd54612adc3e186eaf0bb0f1f705880f20a6/target_chains/solana/programs/pyth-push-oracle/src/lib.rs#L101
-    ///     - pyth-solana-receiver set the feed_id directly from a pythnet verified price_update
-    ///       message
-    ///       https://github.com/pyth-network/pyth-crosschain/blob/94f1bd54612adc3e186eaf0bb0f1f705880f20a6/target_chains/solana/programs/pyth-solana-receiver/src/lib.rs#L437
     /// - The pyth-push-oracle account is not older than the max_age, checked in
     ///   `get_price_no_older_than_with_custom_verification_level`
     pub fn load_checked(ai: &AccountInfo, clock: &Clock, max_age: u64) -> MarginfiResult<Self> {

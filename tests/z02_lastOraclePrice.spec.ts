@@ -23,8 +23,6 @@ import {
   pulseBankPrice,
 } from "./utils/user-instructions";
 import { accrueInterest } from "./utils/group-instructions";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
-import { assert } from "chai";
 import {
   CONF_INTERVAL_MULTIPLE,
   ORACLE_CONF_INTERVAL,
@@ -32,6 +30,7 @@ import {
 } from "./utils/types";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { assertI80F48Approx, assertI80F48Equal } from "./utils/genericTests";
+import { getBankrunBlockhash } from "./utils/tools";
 
 const readCacheFields = (cache: any) => {
   const price = cache?.lastOraclePrice ?? 0;
@@ -228,11 +227,17 @@ describe("Bank cache last oracle price", () => {
       bankBefore.cache
     ); // ensure cache is populated before repay
 
+    // For repayAll, include all active balances, including the closing bank.
+    const remaining = composeRemainingAccounts([
+      [banks[1], oracles.pythPullLst.publicKey],
+      [banks[0], oracles.pythPullLst.publicKey],
+    ]);
     const tx = new Transaction().add(
       await repayIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         bank: banks[1],
         tokenAccount: user.lstAlphaAccount,
+        remaining,
         amount: u64MAX_BN,
         repayAll: true,
       })

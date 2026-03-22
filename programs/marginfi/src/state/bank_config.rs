@@ -24,7 +24,7 @@ pub trait BankConfigImpl {
     fn update_config_flag(&mut self, value: bool, flag: u8);
     fn validate_oracle_setup(
         &self,
-        ais: &[AccountInfo],
+        ais: &[AccountInfo<'_>],
         lst_mint: Option<Pubkey>,
         stake_pool: Option<Pubkey>,
         sol_pool: Option<Pubkey>,
@@ -125,7 +125,7 @@ impl BankConfigImpl for BankConfig {
     ///   initial setup, can be omitted
     fn validate_oracle_setup(
         &self,
-        ais: &[AccountInfo],
+        ais: &[AccountInfo<'_>],
         lst_mint: Option<Pubkey>,
         stake_pool: Option<Pubkey>,
         sol_pool: Option<Pubkey>,

@@ -34,7 +34,7 @@ import {
   SetupTestUserBankrunOptions,
   setupTestUserBankrun,
 } from "./utils/mocks";
-import { dummyTx } from "./utils/bankrunConnection";
+import { dummyIx } from "./utils/bankrunConnection";
 
 describe("Account freeze", () => {
   let program: Program<Marginfi>;
@@ -157,7 +157,7 @@ describe("Account freeze", () => {
   it("(authority) cannot deposit when frozen but admin can", async () => {
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
-        dummyTx(groupAdmin.wallet.publicKey, users[1].wallet.publicKey),
+        dummyIx(groupAdmin.wallet.publicKey, freezeUser.wallet.publicKey),
         await setAccountFreezeIx(groupAdmin.mrgnProgram, {
           group: marginfiGroup.publicKey,
           marginfiAccount: frozenAccount.publicKey,
@@ -220,7 +220,7 @@ describe("Account freeze", () => {
       async () => {
         await freezeUser.mrgnProgram.provider.sendAndConfirm(
           new Transaction().add(
-            dummyTx(freezeUser.wallet.publicKey, users[1].wallet.publicKey),
+            dummyIx(freezeUser.wallet.publicKey, users[1].wallet.publicKey),
             await withdrawIx(freezeUser.mrgnProgram, {
               marginfiAccount: frozenAccount.publicKey,
               bank: bankKeypairUsdc.publicKey,

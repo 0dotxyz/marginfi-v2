@@ -72,6 +72,7 @@ impl<'info> UserAccount<'info> {
         bank_map: &HashMap<Pubkey, &'info BankAccounts<'info>>,
         include_banks: Vec<Pubkey>,
         exclude_banks: Vec<Pubkey>,
+        close_bank_last: Option<Pubkey>,
     ) -> Vec<AccountInfo<'info>> {
         let marginfi_account_al =
             AccountLoader::<MarginfiAccount>::try_from(&self.margin_account).unwrap();
@@ -92,8 +93,17 @@ impl<'info> UserAccount<'info> {
 
         bank_pks.retain(|bank_pk| !exclude_banks.contains(bank_pk));
 
-        // Sort all bank_pks in descending order
+        // Sort all bank_pks in descending order to mirror client-side account composition.
         bank_pks.sort_by(|a, b| b.cmp(a));
+
+        // For close-balance flows, force the closing bank's group to be last.
+        if let Some(close_bank) = close_bank_last {
+            if let Some(close_bank_idx) = bank_pks.iter().position(|bank_pk| *bank_pk == close_bank)
+            {
+                let close_bank = bank_pks.remove(close_bank_idx);
+                bank_pks.push(close_bank);
+            }
+        }
 
         let ais = bank_pks
             .into_iter()

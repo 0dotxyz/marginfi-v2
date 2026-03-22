@@ -105,7 +105,7 @@ async fn liquidate_start_then_cpi_start_on_different_accounts_exploit() -> anyho
                 &[init_ix],
                 Some(&ctx.payer.pubkey()),
                 &[&ctx.payer],
-                ctx.last_blockhash,
+                ctx.banks_client.get_latest_blockhash().await.unwrap(),
             );
             ctx.banks_client
                 .process_transaction_with_preflight(tx)
@@ -139,10 +139,10 @@ async fn liquidate_start_then_cpi_start_on_different_accounts_exploit() -> anyho
 
     // withdraw/repay genuine for A
     let withdraw_ix = liquidatee_a
-        .make_bank_withdraw_ix(liq_sol_acc.key, sol_bank, 0.09, None, true)
+        .make_bank_withdraw_ix(liq_sol_acc.key, sol_bank, 0.09, None)
         .await;
     let repay_ix = liquidatee_a
-        .make_bank_repay_ix(liq_usdc_acc.key, usdc_bank, 2.0, None)
+        .make_repay_ix(liq_usdc_acc.key, usdc_bank, 2.0, None)
         .await;
 
     // End for A
@@ -170,7 +170,7 @@ async fn liquidate_start_then_cpi_start_on_different_accounts_exploit() -> anyho
             ],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         // Should fail: CPI call doesn't appear as a top-level mrgn ix, so introspection of the
@@ -264,7 +264,7 @@ async fn handle_bankruptcy_via_cpi_fails() -> anyhow::Result<()> {
             &[init_ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         ctx.banks_client
             .process_transaction_with_preflight(tx)
@@ -280,7 +280,7 @@ async fn handle_bankruptcy_via_cpi_fails() -> anyhow::Result<()> {
     // keep the entire borrow, the user does), of course the damage to the protocol is equal in both
     // events.
     let withdraw_ix = attacker_acc
-        .make_bank_withdraw_ix(attacker_sol.key, sol_bank, deposit_amt, Some(true), true)
+        .make_bank_withdraw_ix(attacker_sol.key, sol_bank, deposit_amt, Some(true))
         .await;
     // Note: no repay required! We're going to clear that debt throught bankruptcy instead!
     let end_ix = attacker_acc
@@ -343,7 +343,7 @@ async fn handle_bankruptcy_via_cpi_fails() -> anyhow::Result<()> {
             &[start_ix, withdraw_ix, bankrupt_via_cpi_ix, end_ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         let result = ctx
             .banks_client

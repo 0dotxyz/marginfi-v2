@@ -2,14 +2,14 @@ use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{TOKENLESS_REPAYMENTS_COMPLETE, ZERO_AMOUNT_THRESHOLD},
-    types::{Bank, MarginfiAccount, MarginfiGroup},
+    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_IN_RECEIVERSHIP},
 };
 
 use crate::{
     prelude::*,
     state::{
         bank::BankImpl,
-        marginfi_account::{BalanceImpl, LendingAccountImpl},
+        marginfi_account::{BalanceImpl, LendingAccountImpl, MarginfiAccountImpl},
     },
     utils::is_marginfi_asset_tag,
 };
@@ -20,6 +20,7 @@ pub fn lending_account_purge_delev_balance(
     let bank_pk = &ctx.accounts.bank.key();
     let mut bank = ctx.accounts.bank.load_mut()?;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
+    let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
     let lending_account = &mut marginfi_account.lending_account;
 
     let balance = lending_account
@@ -37,7 +38,10 @@ pub fn lending_account_purge_delev_balance(
 
     let asset_shares: I80F48 = balance.asset_shares.into();
     msg!("Balance had: {:?}", asset_shares.to_num::<f64>());
-    balance.close(false)?;
+    balance.close()?;
+    if in_receivership {
+        bank.cache.clear_liquidation_price_cache_locked();
+    }
     bank.decrement_lending_position_count();
     bank.change_asset_shares(-asset_shares, false)?;
 

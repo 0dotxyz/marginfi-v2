@@ -1,6 +1,7 @@
 use crate::state::bank::BankVaultType;
+use crate::utils::record_deposit_inflow;
 use crate::{
-    bank_signer, check,
+    bank_signer,
     constants::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
     events::{AccountEventHeader, LendingAccountDepositEvent},
     optional_account,
@@ -28,14 +29,12 @@ use kamino_mocks::kamino_lending::cpi::deposit_reserve_liquidity_and_obligation_
 use kamino_mocks::{
     kamino_lending::cpi::accounts::{
         DepositReserveLiquidityAndObligationCollateral,
-        DepositReserveLiquidityAndObligationCollateralV2, SocializeLossV2FarmsAccounts,
+        DepositReserveLiquidityAndObligationCollateralV2, FarmsAccounts,
     },
     state::{MinimalObligation, MinimalReserve},
 };
 use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
-use marginfi_type_crate::types::{
-    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
-};
+use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
 /// Deposit into a Kamino pool through a marginfi account
 ///
@@ -44,7 +43,10 @@ use marginfi_type_crate::types::{
 /// 2. Deposits the tokens into Kamino through a CPI call
 /// 3. Verifies the obligation deposit amount was increased correctly
 /// 4. Updates the marginfi account's balance to reflect the deposit
-pub fn kamino_deposit(ctx: Context<KaminoDeposit>, amount: u64) -> MarginfiResult {
+pub fn kamino_deposit<'info>(
+    ctx: Context<'_, '_, 'info, 'info, KaminoDeposit<'info>>,
+    amount: u64,
+) -> MarginfiResult {
     let authority_bump: u8;
     {
         let marginfi_account = ctx.accounts.marginfi_account.load()?;
@@ -53,12 +55,6 @@ pub fn kamino_deposit(ctx: Context<KaminoDeposit>, amount: u64) -> MarginfiResul
 
         validate_asset_tags(&bank, &marginfi_account)?;
         validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
-
-        check!(
-            !marginfi_account.get_flag(ACCOUNT_DISABLED)
-                && !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP),
-            MarginfiError::AccountDisabled
-        );
     }
 
     // Get initial obligation data to verify deposit amount later
@@ -88,7 +84,8 @@ pub fn kamino_deposit(ctx: Context<KaminoDeposit>, amount: u64) -> MarginfiResul
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let group = &ctx.accounts.group.load()?;
+        let group = ctx.accounts.group.load()?;
+        let clock = Clock::get()?;
 
         let mut bank_account = BankAccountWrapper::find_or_create(
             &ctx.accounts.bank.key(),
@@ -100,10 +97,19 @@ pub fn kamino_deposit(ctx: Context<KaminoDeposit>, amount: u64) -> MarginfiResul
         let obligation_collateral_change_i80f48 = I80F48::from_num(obligation_collateral_change);
         bank_account.deposit_no_repay(obligation_collateral_change_i80f48)?;
 
+        record_deposit_inflow(
+            &mut bank,
+            &group,
+            ctx.accounts.group.key(),
+            ctx.accounts.bank.key(),
+            marginfi_account.account_flags,
+            amount,
+            &clock,
+        )?;
         // Update bank cache after modifying balances
-        bank.update_bank_cache(group)?;
+        bank.update_bank_cache(&group)?;
 
-        marginfi_account.last_update = Clock::get()?.unix_timestamp as u64;
+        marginfi_account.last_update = clock.unix_timestamp as u64;
         marginfi_account.lending_account.sort_balances();
 
         emit!(LendingAccountDepositEvent {
@@ -135,13 +141,17 @@ pub struct KaminoDeposit<'info> {
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_DISABLED)
+        } @MarginfiError::AccountDisabled,
+        constraint = {
             let a = marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())
         } @ MarginfiError::AccountFrozen,
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false)
+            is_signer_authorized(&a, g.admin, authority.key(), false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
@@ -287,16 +297,15 @@ impl<'info> KaminoDeposit<'info> {
         };
 
         // --- optional “farms_accounts” group ---
-        let farms_accounts = SocializeLossV2FarmsAccounts {
+        let farms_accounts = FarmsAccounts {
             obligation_farm_user_state: optional_account!(self.obligation_farm_user_state),
             reserve_farm_state: optional_account!(self.reserve_farm_state),
         };
 
         // --- wrap both groups in the outer struct ---
         let accounts = DepositReserveLiquidityAndObligationCollateralV2 {
-            deposit_reserve_liquidity_and_obligation_collateral_v2_deposit_accounts:
-                deposit_accounts,
-            deposit_reserve_liquidity_and_obligation_collateral_v2_farms_accounts: farms_accounts,
+            deposit_accounts,
+            deposit_farms_accounts: farms_accounts,
             farms_program: self.farms_program.to_account_info(),
         };
         let program = self.kamino_program.to_account_info();

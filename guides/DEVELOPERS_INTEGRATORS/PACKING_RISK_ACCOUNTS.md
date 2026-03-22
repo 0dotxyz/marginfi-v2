@@ -163,18 +163,19 @@ const ix = program.methods
 
 ## Removing Balances
 
-Sometimes, an instruction will remove a Balance. For example withdrawing an entire Balance removes
-it.
+Sometimes, an instruction will remove a Balance. For example, `withdraw_all` or `repay_all` closes
+the balance in that bank.
 
-Let's say we have a user with three balances: a deposit in a SOL Bank, a deposit in a USDC bank, and
-a borrow from a Token A Bank. They want to withdraw all of their USDC.
+When closing a balance, pass the accounts needed for the instruction's risk/oracle reads. The
+closing bank does not need to remain in the health-account list just because the balance is being
+closed.
+
+Example (withdraw all USDC when the user also has SOL + Token A balances):
 
 ```
-let remaining = composeRemainingAccounts([
+const remaining = composeRemainingAccounts([
     [solBank, solOracle],
     [tokenABank, tokenAOracle],
-    // We manually filter the bank to be withdrawn out!
-    // [usdcBank, usdcOracle],
 ]);
 ```
 

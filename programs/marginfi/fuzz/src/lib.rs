@@ -430,7 +430,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                     ))?,
                     token_program: Interface::try_from(airls(&bank.token_program))?,
                 },
-                &remaining_accounts,
+                aisls(&remaining_accounts),
                 Default::default(),
             ),
             asset_amount.0,
@@ -468,7 +468,7 @@ impl<'state> MarginfiFuzzContext<'state> {
     }
 
     pub fn process_action_repay(
-        &self,
+        &'state self,
         account_idx: &AccountIdx,
         bank_idx: &BankIdx,
         asset_amount: &AssetAmount,
@@ -489,6 +489,14 @@ impl<'state> MarginfiFuzzContext<'state> {
         if bank.token_program.key() == anchor_spl::token_2022::ID {
             remaining_accounts.push(ails(bank.mint.clone()));
         }
+        if repay_all {
+            remaining_accounts.extend(marginfi_account.get_remaining_accounts(
+                &self.get_bank_map(),
+                vec![],
+                vec![],
+                None,
+            ));
+        }
 
         let res = marginfi::instructions::marginfi_account::lending_account_repay(
             Context::new(
@@ -508,7 +516,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                     ))?,
                     token_program: Interface::try_from(airls(&bank.token_program))?,
                 },
-                &remaining_accounts,
+                aisls(&remaining_accounts),
                 Default::default(),
             ),
             asset_amount.0,
@@ -568,24 +576,22 @@ impl<'state> MarginfiFuzzContext<'state> {
             bank.liquidity_vault.clone(),
         ]);
 
-        let remove_all_bank = if let Some(withdraw_all) = withdraw_all {
-            if withdraw_all {
-                vec![bank.bank.key()]
-            } else {
-                vec![]
-            }
-        } else {
-            vec![]
-        };
-
         let mut remaining_accounts = vec![];
         if bank.token_program.key() == anchor_spl::token_2022::ID {
             remaining_accounts.push(ails(bank.mint.clone()));
         }
+        let close_bank_last = withdraw_all.and_then(|withdraw_all| {
+            if withdraw_all {
+                Some(bank.bank.key())
+            } else {
+                None
+            }
+        });
         remaining_accounts.extend(marginfi_account.get_remaining_accounts(
             &self.get_bank_map(),
             vec![],
-            remove_all_bank,
+            vec![],
+            close_bank_last,
         ));
         let res = marginfi::instructions::marginfi_account::lending_account_withdraw(
             Context::new(
@@ -623,6 +629,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                     MarginfiError::RiskEngineInitRejected.into(),
                     MarginfiError::NoAssetFound.into(),
                     MarginfiError::BankAccountNotFound.into(),
+                    MarginfiError::InvalidBankAccount.into(),
                     MarginfiError::AccountDisabled.into(),
                 ]
                 .contains(&error),
@@ -671,6 +678,7 @@ impl<'state> MarginfiFuzzContext<'state> {
             &self.get_bank_map(),
             vec![bank.bank.key()],
             vec![],
+            None,
         ));
         let res = marginfi::instructions::marginfi_account::lending_account_borrow(
             Context::new(
@@ -793,9 +801,10 @@ impl<'state> MarginfiFuzzContext<'state> {
             &self.get_bank_map(),
             vec![liab_bank.bank.key(), asset_bank.bank.key()],
             vec![],
+            None,
         );
         let mut liquidatee_remaining_accounts =
-            liquidatee_account.get_remaining_accounts(&self.get_bank_map(), vec![], vec![]);
+            liquidatee_account.get_remaining_accounts(&self.get_bank_map(), vec![], vec![], None);
 
         // Note: this must happen before append because it mutably drains the source vec
         let liquidator_accounts_num = liquidator_remaining_accounts.len() as u8;
@@ -939,6 +948,7 @@ impl<'state> MarginfiFuzzContext<'state> {
             &self.get_bank_map(),
             vec![],
             vec![],
+            None,
         ));
         let res = marginfi::instructions::lending_pool_handle_bankruptcy(Context::new(
             &marginfi::ID,
@@ -1072,13 +1082,14 @@ fn initialize_marginfi_group<'a>(
             &[],
             Default::default(),
         ),
-        admin.key(), // admin
-        admin.key(), // emode_admin
-        admin.key(), // curve_admin
-        admin.key(), // limit_admin
-        admin.key(), // emissions_admin
-        admin.key(), // metadata_admin
-        admin.key(), // risk_admin
+        Some(admin.key()), // admin
+        Some(admin.key()), // emode_admin
+        Some(admin.key()), // curve_admin
+        Some(admin.key()), // limit_admin
+        Some(admin.key()), // flow_admin
+        Some(admin.key()), // emissions_admin
+        Some(admin.key()), // metadata_admin
+        Some(admin.key()), // risk_admin
         None,        // emode_max_init_leverage
         None,        // emode_max_maint_leverage
     )
@@ -1114,8 +1125,10 @@ fn initialize_fee_state<'a>(
         // because the fuzz suite does not yet support the system program.
         0,
         0,
+        0,
         I80F48!(0).into(),
         I80F48!(0).into(),
+        I80F48!(0.05).into(),
         I80F48!(0.05).into(),
     )
     .unwrap();
@@ -1129,7 +1142,9 @@ fn initialize_fee_state<'a>(
 mod tests {
     use anchor_lang::AnchorDeserialize;
     use fixed::types::I80F48;
-    use marginfi::state::marginfi_account::RiskEngine;
+    use marginfi::state::marginfi_account::{
+        get_health_components, HealthPriceMode, RiskRequirementType,
+    };
     use marginfi_type_crate::types::MarginfiGroup;
     use pyth_solana_receiver_sdk::price_update::PriceUpdateV2;
 
@@ -1234,16 +1249,16 @@ mod tests {
             let margin_account = &a.marginfi_accounts[0];
             let bank_map = a.get_bank_map();
             let remaining_accounts =
-                margin_account.get_remaining_accounts(&bank_map, vec![], vec![]);
+                margin_account.get_remaining_accounts(&bank_map, vec![], vec![], None);
 
-            let re = RiskEngine::new(&marginfi_account, aisls(&remaining_accounts)).unwrap();
-
-            let (_assets, _liabs) = re
-                .get_account_health_components(
-                    marginfi::state::marginfi_account::RiskRequirementType::Maintenance,
-                    &mut None,
-                )
-                .unwrap();
+            let (_assets, _liabs) = get_health_components(
+                &marginfi_account,
+                aisls(&remaining_accounts),
+                RiskRequirementType::Maintenance,
+                &mut None,
+                HealthPriceMode::Live { liq_cache: None },
+            )
+            .unwrap();
         }
 
         a.process_action_deposit(&AccountIdx(2), &BankIdx(1), &AssetAmount(1000), None)
@@ -1293,16 +1308,16 @@ mod tests {
             let margin_account = &a.marginfi_accounts[0];
             let bank_map = a.get_bank_map();
             let remaining_accounts =
-                margin_account.get_remaining_accounts(&bank_map, vec![], vec![]);
+                margin_account.get_remaining_accounts(&bank_map, vec![], vec![], None);
 
-            let re = RiskEngine::new(&marginfi_account, aisls(&remaining_accounts)).unwrap();
-
-            let (_assets, _liabs) = re
-                .get_account_health_components(
-                    marginfi::state::marginfi_account::RiskRequirementType::Maintenance,
-                    &mut None,
-                )
-                .unwrap();
+            let (_assets, _liabs) = get_health_components(
+                &marginfi_account,
+                aisls(&remaining_accounts),
+                RiskRequirementType::Maintenance,
+                &mut None,
+                HealthPriceMode::Live { liq_cache: None },
+            )
+            .unwrap();
         }
 
         a.process_action_deposit(&AccountIdx(2), &BankIdx(1), &AssetAmount(1000), None)

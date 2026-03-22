@@ -1,6 +1,7 @@
 use anchor_lang::error::ErrorCode;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
+use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{assert_anchor_error, assert_custom_error, assert_eq_noise, native, prelude::*};
 use marginfi::state::bank::BankImpl;
 use marginfi::{prelude::*, state::marginfi_account::MarginfiAccountImpl};
@@ -9,17 +10,26 @@ use marginfi_type_crate::{
     types::{BankConfigOpt, ACCOUNT_IN_RECEIVERSHIP},
 };
 use solana_program_test::*;
+use solana_sdk::clock::Clock;
+use solana_sdk::signature::Keypair;
+use solana_sdk::signer::Signer;
 use solana_sdk::{pubkey::Pubkey, transaction::Transaction};
 
 #[tokio::test]
 async fn deleverage_happy_path() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let authority = Keypair::new();
 
     let risk_admin = test_f.payer().clone();
     assert_eq!(risk_admin, test_f.marginfi_group.load().await.admin);
 
     let lp = test_f.create_marginfi_account().await;
-    let deleveragee = test_f.create_marginfi_account().await;
+    let deleveragee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &authority,
+    )
+    .await;
 
     // Note: Sol is $10, USDC is $1
     let sol_bank = test_f.get_bank(&BankMint::Sol);
@@ -31,16 +41,22 @@ async fn deleverage_happy_path() -> anyhow::Result<()> {
         .await?;
 
     // Setup deleveragee (after bank has liquidity for them to borrow)
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&authority.pubkey())
+        .await;
 
     // * Note: Deposited $30 in SOL, borrowed $20 in USDC
     // * Note: all asset/liab weights in testing are 1, e.g. $30 in SOL = $30 exactly in value
     deleveragee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 3.0, None)
+        .try_bank_deposit_with_authority(user_token_sol.key, sol_bank, 3.0, None, &authority)
         .await?;
     deleveragee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 20.0)
+        .try_bank_borrow_with_authority(user_token_usdc.key, usdc_bank, 20.0, 0, &authority)
         .await?;
 
     let (record_pk, _bump) = Pubkey::find_program_address(
@@ -76,12 +92,12 @@ async fn deleverage_happy_path() -> anyhow::Result<()> {
 
     // Seize 1.0 * 10 = $10.0 ($8 weighted)
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 1.0, None, true)
+        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 1.0, None)
         .await;
 
     // Repay $10
     let repay_ix = deleveragee
-        .make_bank_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
+        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
         .await;
 
     // Health should improve from $4 (24 - 20) to $6 (16 - 10)
@@ -106,7 +122,7 @@ async fn deleverage_happy_path() -> anyhow::Result<()> {
             &[init_ix, start_ix, withdraw_ix, repay_ix, end_ix],
             Some(&risk_admin),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client
@@ -182,12 +198,12 @@ async fn deleverage_happy_path() -> anyhow::Result<()> {
 
     // Seize .210 * 10 = $2.10
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 0.210, None, true)
+        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 0.210, None)
         .await;
 
     // Repay $2
     let repay_ix = deleveragee
-        .make_bank_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 2.0, None)
+        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 2.0, None)
         .await;
 
     let end_ix = deleveragee
@@ -206,7 +222,7 @@ async fn deleverage_happy_path() -> anyhow::Result<()> {
             ],
             Some(&risk_admin),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client
@@ -243,12 +259,18 @@ async fn deleverage_happy_path() -> anyhow::Result<()> {
 #[tokio::test]
 async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let authority = Keypair::new();
 
     let risk_admin = test_f.payer().clone();
     assert_eq!(risk_admin, test_f.marginfi_group.load().await.risk_admin);
 
     let lp = test_f.create_marginfi_account().await;
-    let deleveragee = test_f.create_marginfi_account().await;
+    let deleveragee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &authority,
+    )
+    .await;
 
     // Note: Sol is $10, USDC is $1
     let sol_bank = test_f.get_bank(&BankMint::Sol);
@@ -267,16 +289,22 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
         .await?;
 
     // Setup deleveragee (after bank has liquidity for them to borrow)
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&authority.pubkey())
+        .await;
 
     // * Note: Deposited $30 in SOL, borrowed $20 in USDC
     // * Note: all asset/liab weights in testing are 1, e.g. $30 in SOL = $30 exactly in value
     deleveragee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 3.0, None)
+        .try_bank_deposit_with_authority(user_token_sol.key, sol_bank, 3.0, None, &authority)
         .await?;
     deleveragee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 20.0)
+        .try_bank_borrow_with_authority(user_token_usdc.key, usdc_bank, 20.0, 0, &authority)
         .await?;
 
     test_f
@@ -314,12 +342,12 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
 
     // Seize 1.0 * 10 = $10.0
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 1.0, None, true)
+        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 1.0, None)
         .await;
 
     // Repay $10 (even though tokenless repayments are allowed, if withdraw_all is false, we will repay WITH tokens)
     let repay_ix = deleveragee
-        .make_bank_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
+        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
         .await;
 
     // Health should not change: from $4 (24 - 20) to $4 (14 - 10)
@@ -334,7 +362,7 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
             &[init_ix, start_ix, withdraw_ix, repay_ix, end_ix],
             Some(&risk_admin),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
         ctx.banks_client
@@ -347,6 +375,32 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
     let risk_admin_usdc_tokens = risk_admin_usdc_acc.balance().await;
     assert_eq!(risk_admin_usdc_tokens, native!(0, "USDC"));
 
+    // Settle the aggregated deleverage withdraw flow into the on-chain daily counter.
+    {
+        let group = test_f.marginfi_group.load().await;
+        let event_start_slot = group
+            .deleverage_withdraw_last_admin_update_slot
+            .saturating_add(1);
+        let update_seq = group
+            .deleverage_withdraw_last_admin_update_seq
+            .saturating_add(1);
+        let event_end_slot = {
+            let ctx = test_f.context.borrow_mut();
+            let clock: Clock = ctx.banks_client.get_sysvar().await?;
+            clock.slot
+        };
+
+        test_f
+            .marginfi_group
+            .try_admin_update_deleverage_withdrawals(
+                10, // from the 1.0 SOL seize at $10
+                update_seq,
+                event_start_slot,
+                event_end_slot,
+            )
+            .await?;
+    }
+
     // Now let's try to seize more (and thus "repay" more) and see it failing due to daily withdrawal limit reach
     let start_ix = deleveragee
         .make_start_deleverage_ix(record_pk, risk_admin)
@@ -354,12 +408,12 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
 
     // Seize 1.0 * 10 = $10.0
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 1.0, None, true)
+        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 1.0, None)
         .await;
 
     // "Repay" $10 with nothing
     let repay_ix = deleveragee
-        .make_bank_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
+        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
         .await;
 
     // Health should not have changed: from $4 (14 - 10) to $4 (4 - 0)
@@ -372,7 +426,7 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
         &[start_ix, withdraw_ix, repay_ix, end_ix],
         Some(&risk_admin),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     let res = ctx
@@ -392,12 +446,18 @@ async fn deleverage_tokenless_up_to_limit() -> anyhow::Result<()> {
 #[tokio::test]
 async fn deleverage_cannot_worsen_health() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let authority = Keypair::new();
 
     let risk_admin = test_f.payer().clone();
     assert_eq!(risk_admin, test_f.marginfi_group.load().await.risk_admin);
 
     let lp = test_f.create_marginfi_account().await;
-    let deleveragee = test_f.create_marginfi_account().await;
+    let deleveragee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &authority,
+    )
+    .await;
 
     // Note: Sol is $10, USDC is $1
     let sol_bank = test_f.get_bank(&BankMint::Sol);
@@ -409,16 +469,22 @@ async fn deleverage_cannot_worsen_health() -> anyhow::Result<()> {
         .await?;
 
     // Setup deleveragee (after bank has liquidity for them to borrow)
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&authority.pubkey())
+        .await;
 
     // * Note: Deposited $20 in SOL, borrowed $10 in USDC
     // * Note: all asset/liab weights in testing are 1, e.g. $20 in SOL = $20 exactly in value
     deleveragee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 2.0, None)
+        .try_bank_deposit_with_authority(user_token_sol.key, sol_bank, 2.0, None, &authority)
         .await?;
     deleveragee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .try_bank_borrow_with_authority(user_token_usdc.key, usdc_bank, 10.0, 0, &authority)
         .await?;
 
     // Risk admin will (try to) withdraw some sol and will (try to) repay some usdc
@@ -440,12 +506,12 @@ async fn deleverage_cannot_worsen_health() -> anyhow::Result<()> {
 
     // Seize 1.2 * 10 = $12
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 1.2, None, true)
+        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 1.2, None)
         .await;
 
     // Repay $10
     let repay_ix = deleveragee
-        .make_bank_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
+        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 10.0, None)
         .await;
 
     // Health decreases: $10 (20 - 10) -> $8 (8 - 0)
@@ -458,7 +524,7 @@ async fn deleverage_cannot_worsen_health() -> anyhow::Result<()> {
         &[init_ix, start_ix, withdraw_ix, repay_ix, end_ix],
         Some(&risk_admin),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     let res = ctx
@@ -475,6 +541,7 @@ async fn deleverage_cannot_worsen_health() -> anyhow::Result<()> {
 #[tokio::test]
 async fn deleverage_not_risk_admin() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let authority = Keypair::new();
 
     let risk_admin = test_f.payer().clone();
     assert_eq!(risk_admin, test_f.marginfi_group.load().await.admin);
@@ -496,7 +563,12 @@ async fn deleverage_not_risk_admin() -> anyhow::Result<()> {
     assert!(res.is_ok());
 
     let lp = test_f.create_marginfi_account().await;
-    let deleveragee = test_f.create_marginfi_account().await;
+    let deleveragee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &authority,
+    )
+    .await;
 
     // Note: Sol is $10, USDC is $1
     let sol_bank = test_f.get_bank(&BankMint::Sol);
@@ -508,16 +580,22 @@ async fn deleverage_not_risk_admin() -> anyhow::Result<()> {
         .await?;
 
     // Setup deleveragee (after bank has liquidity for them to borrow)
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&authority.pubkey())
+        .await;
 
     // * Note: Deposited $20 in SOL, borrowed $10 in USDC
     // * Note: all asset/liab weights in testing are 1, e.g. $20 in SOL = $20 exactly in value
     deleveragee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 2.0, None)
+        .try_bank_deposit_with_authority(user_token_sol.key, sol_bank, 2.0, None, &authority)
         .await?;
     deleveragee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .try_bank_borrow_with_authority(user_token_usdc.key, usdc_bank, 10.0, 0, &authority)
         .await?;
 
     // Payer will (try to) withdraw some sol and will (try to) repay some usdc
@@ -538,12 +616,12 @@ async fn deleverage_not_risk_admin() -> anyhow::Result<()> {
 
     // Seize 0.8 * 10 = $8
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(payer_sol_acc.key, sol_bank, 0.8, None, true)
+        .make_bank_withdraw_ix(payer_sol_acc.key, sol_bank, 0.8, None)
         .await;
 
     // Repay $10
     let repay_ix = deleveragee
-        .make_bank_repay_ix(payer_usdc_acc.key, usdc_bank, 10.0, None)
+        .make_repay_ix(payer_usdc_acc.key, usdc_bank, 10.0, None)
         .await;
 
     // Health decreases: $10 (20 - 10) -> $12 (12 - 0)
@@ -556,7 +634,7 @@ async fn deleverage_not_risk_admin() -> anyhow::Result<()> {
         &[init_ix, start_ix, withdraw_ix, repay_ix, end_ix],
         Some(&payer),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
 
     let res = ctx
@@ -573,9 +651,15 @@ async fn deleverage_not_risk_admin() -> anyhow::Result<()> {
 #[tokio::test]
 async fn deleverage_rejects_zero_weight_asset() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let authority = Keypair::new();
 
     let lp = test_f.create_marginfi_account().await;
-    let deleveragee = test_f.create_marginfi_account().await;
+    let deleveragee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &authority,
+    )
+    .await;
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
 
@@ -583,13 +667,19 @@ async fn deleverage_rejects_zero_weight_asset() -> anyhow::Result<()> {
     lp.try_bank_deposit(lp_usdc_acc.key, usdc_bank, 100, None)
         .await?;
 
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&authority.pubkey())
+        .await;
     deleveragee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 1.0, None)
+        .try_bank_deposit_with_authority(user_token_sol.key, sol_bank, 1.0, None, &authority)
         .await?;
     deleveragee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .try_bank_borrow_with_authority(user_token_usdc.key, usdc_bank, 10.0, 0, &authority)
         .await?;
 
     sol_bank
@@ -621,11 +711,11 @@ async fn deleverage_rejects_zero_weight_asset() -> anyhow::Result<()> {
         .await;
 
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 0.1, None, true)
+        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 0.1, None)
         .await;
 
     let repay_ix = deleveragee
-        .make_bank_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 2.0, None)
+        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 2.0, None)
         .await;
 
     let end_ix = deleveragee
@@ -637,7 +727,7 @@ async fn deleverage_rejects_zero_weight_asset() -> anyhow::Result<()> {
         &[init_ix, start_ix, withdraw_ix, repay_ix, end_ix],
         Some(&risk_admin),
         &[&ctx.payer],
-        ctx.last_blockhash,
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
     );
     let res = ctx
         .banks_client
@@ -652,9 +742,16 @@ async fn deleverage_rejects_zero_weight_asset() -> anyhow::Result<()> {
 #[tokio::test]
 async fn deleverage_can_close_out_balances() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let authority = Keypair::new();
+
+    let deleveragee = MarginfiAccountFixture::new_with_authority(
+        test_f.context.clone(),
+        &test_f.marginfi_group.key,
+        &authority,
+    )
+    .await;
 
     let lp = test_f.create_marginfi_account().await;
-    let deleveragee = test_f.create_marginfi_account().await;
     let pyusd_bank = test_f.get_bank(&BankMint::PyUSD);
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
@@ -663,18 +760,27 @@ async fn deleverage_can_close_out_balances() -> anyhow::Result<()> {
     lp.try_bank_deposit(lp_usdc_acc.key, usdc_bank, 100, None)
         .await?;
 
-    let user_token_pyusd = test_f.pyusd_mint.create_token_account_and_mint_to(10).await;
-    let user_token_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
-    let user_token_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let user_token_pyusd = test_f
+        .pyusd_mint
+        .create_token_account_and_mint_to_with_owner(&authority.pubkey(), 10)
+        .await;
+    let user_token_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&authority.pubkey(), 10)
+        .await;
+    let user_token_usdc = test_f
+        .usdc_mint
+        .create_empty_token_account_with_owner(&authority.pubkey())
+        .await;
 
     deleveragee
-        .try_bank_deposit(user_token_pyusd.key, pyusd_bank, 10.0, None)
+        .try_bank_deposit_with_authority(user_token_pyusd.key, pyusd_bank, 10.0, None, &authority)
         .await?;
     deleveragee
-        .try_bank_deposit(user_token_sol.key, sol_bank, 1.0, None)
+        .try_bank_deposit_with_authority(user_token_sol.key, sol_bank, 1.0, None, &authority)
         .await?;
     deleveragee
-        .try_bank_borrow(user_token_usdc.key, usdc_bank, 10.0)
+        .try_bank_borrow_with_authority(user_token_usdc.key, usdc_bank, 10.0, 0, &authority)
         .await?;
 
     // Tweak weights so that deleveraging can improve health
@@ -709,12 +815,17 @@ async fn deleverage_can_close_out_balances() -> anyhow::Result<()> {
     // NOTE: In deleveraging, you MUST PASS the oracle for the withdrawn asset even for
     // a withdraw-all. The entire balance is still withdrawn!
     let withdraw_ix = deleveragee
-        .make_bank_withdraw_ix(risk_admin_sol_acc.key, sol_bank, 0.0, Some(true), true)
+        .make_bank_withdraw_ix_include_closing_bank(
+            risk_admin_sol_acc.key,
+            sol_bank,
+            0.0,
+            Some(true),
+        )
         .await;
 
     // The entire liability
     let repay_ix = deleveragee
-        .make_bank_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 0.0, Some(true))
+        .make_repay_ix(risk_admin_usdc_acc.key, usdc_bank, 0.0, Some(true))
         .await;
 
     // Health should improve from $8 (18 - 10) to $10 (10 - 0)
@@ -728,12 +839,13 @@ async fn deleverage_can_close_out_balances() -> anyhow::Result<()> {
             &[init_ix, start_ix, withdraw_ix, repay_ix, end_ix],
             Some(&risk_admin),
             &[&ctx.payer],
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
         let res = ctx
             .banks_client
             .process_transaction_with_preflight(tx)
             .await;
+
         assert!(res.is_ok());
     }
 

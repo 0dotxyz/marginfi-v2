@@ -43,16 +43,14 @@ pub struct MarginfiAccount {
     /// - 64: `ACCOUNT_FROZEN` - the admin has frozen the account; only the group admin may perform
     ///   actions until unfrozen.
     pub account_flags: u64, // 8
-    /// Set with `update_emissions_destination_account`. Emissions rewards can be withdrawn to the
-    /// cannonical ATA of this wallet without the user's input (withdraw_emissions_permissionless).
-    /// If pubkey default, the user has not opted into this feature, and must claim emissions
-    /// manually (withdraw_emissions).
+    /// Wallet whose canonical ATA receives off-chain emissions distributions.
     pub emissions_destination_account: Pubkey, // 32
     pub health_cache: HealthCache,
     /// If this account was migrated from another one, store the original account key
     pub migrated_from: Pubkey, // 32
     /// If this account has been migrated to another one, store the destination account key
     pub migrated_to: Pubkey, // 32
+    /// Unix timestamp (u64) of the last account interaction. Note: Bank.last_update uses i64.
     pub last_update: u64,
     /// If a PDA-based account, the account index, a seed used to derive the PDA that can be chosen
     /// arbitrarily (0.1.5 or later). Otherwise, does nothing.
@@ -112,6 +110,7 @@ pub const ACCOUNT_TRANSFER_AUTHORITY_DEPRECATED: u64 = 1 << 3;
 pub const ACCOUNT_IN_RECEIVERSHIP: u64 = 1 << 4;
 pub const ACCOUNT_IN_DELEVERAGE: u64 = 1 << 5;
 pub const ACCOUNT_FROZEN: u64 = 1 << 6;
+pub const ACCOUNT_IN_ORDER_EXECUTION: u64 = 1 << 7;
 pub const MAX_LENDING_ACCOUNT_BALANCES: usize = 16;
 
 assert_struct_size!(LendingAccount, 1728);
@@ -119,9 +118,16 @@ assert_struct_align!(LendingAccount, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)]
+/// The lending account holds up to 16 balance positions for a user.
 pub struct LendingAccount {
+    /// Array of balance positions (max 16). Sorted in descending order by bank_pk.
     pub balances: [Balance; MAX_LENDING_ACCOUNT_BALANCES], // 104 * 16 = 1664
-    pub _padding: [u64; 8],                                // 8 * 8 = 64
+    /// Last allocated balance tag (u16), used to find the next unused tag.
+    pub last_tag_used: u16,
+    /// Reserved for future use
+    pub _pad1: [u8; 6],
+    /// Reserved for future use
+    pub _padding: [u64; 7], // 7 * 8 = 56;
 }
 
 impl LendingAccount {
@@ -147,16 +153,28 @@ assert_struct_align!(Balance, 8);
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)]
 pub struct Balance {
+    /// Whether this balance slot is in use (nonzero = active)
     pub active: u8,
+    /// The bank this balance corresponds to
     pub bank_pk: Pubkey,
     /// Inherited from the bank when the position is first created and CANNOT BE CHANGED after that.
     /// Note that all balances created before the addition of this feature use `ASSET_TAG_DEFAULT`
     pub bank_asset_tag: u8,
-    pub _pad0: [u8; 6],
+    /// Tag used by orders to reference this balance (0 means unused/unassigned).
+    /// A tag may also have a non-zero value while having no orders.
+    pub tag: u16,
+    pub _pad0: [u8; 4],
+    /// The user's asset (deposit) shares in the bank. Multiply by `bank.asset_share_value` for
+    /// the token amount.
     pub asset_shares: WrappedI80F48,
+    /// The user's liability (borrow) shares in the bank. Multiply by `bank.liability_share_value`
+    /// for the token amount.
     pub liability_shares: WrappedI80F48,
+    /// Unclaimed emissions rewards for this position
     pub emissions_outstanding: WrappedI80F48,
+    /// Unix timestamp (u64) of the last emissions calculation for this position
     pub last_update: u64,
+    /// Reserved for future use
     pub _padding: [u64; 1],
 }
 
@@ -204,7 +222,8 @@ impl Balance {
             active: 0,
             bank_pk: Pubkey::default(),
             bank_asset_tag: ASSET_TAG_DEFAULT,
-            _pad0: [0; 6],
+            tag: 0,
+            _pad0: [0; 4],
             asset_shares: WrappedI80F48::from(I80F48::ZERO),
             liability_shares: WrappedI80F48::from(I80F48::ZERO),
             emissions_outstanding: WrappedI80F48::from(I80F48::ZERO),

@@ -54,6 +54,7 @@ export const ASSET_TAG_STAKED = 2;
 export const ASSET_TAG_KAMINO = 3;
 export const ASSET_TAG_DRIFT = 4;
 export const ASSET_TAG_SOLEND = 5;
+export const ASSET_TAG_JUPLEND = 6;
 
 export const ORACLE_SETUP_NONE = 0;
 export const ORACLE_SETUP_SWITCHBOARD_v2 = 2;
@@ -64,6 +65,7 @@ export const ORACLE_SETUP_SWITCHBOARD_v2 = 2;
 export const ORACLE_SETUP_PYTH_PUSH = 3;
 export const ORACLE_SETUP_SWITCHBOARD_PULL = 4;
 export const ORACLE_SETUP_STAKED_WITH_PYTH_PUSH = 5;
+export const ORACLE_SETUP_FIXED_JUPLEND = 17;
 
 export const HEALTH_CACHE_NONE = 0;
 export const HEALTH_CACHE_HEALTHY = 1;
@@ -78,6 +80,8 @@ export const HEALTH_CACHE_PROGRAM_VERSION_0_1_4 = 2;
 export const HEALTH_CACHE_PROGRAM_VERSION_0_1_5 = 3;
 /** Confidence intervals are multiplied by this constant internally */
 export const CONF_INTERVAL_MULTIPLE = 2.12;
+/** Price = oracle Price * (1 +/- this value) */
+export const CONF_INTERVAL_MULTIPLE_FLOAT = 0.0212;
 /** Oracles return values with this confidence for testing purposes */
 export const ORACLE_CONF_INTERVAL = 0.01;
 export const ONE_WEEK_IN_SECONDS = 7 * 24 * 60 * 60;
@@ -104,6 +108,9 @@ export const DAILY_RESET_INTERVAL = 24 * 60 * 60; // 24 hours
 
 export const INTEREST_CURVE_LEGACY = 0;
 export const INTEREST_CURVE_SEVEN_POINT = 1;
+
+/** Program-enforced max enforced number of balances per account. */
+export const MAX_BALANCES = 16;
 
 /**
  * The default bank config has

@@ -1,11 +1,17 @@
 use super::{bank::BankFixture, prelude::*};
 use crate::ui_to_native;
+use crate::utils::find_order_pda;
 use anchor_lang::{prelude::*, system_program, InstructionData, ToAccountMetas};
+use anchor_spl::associated_token::get_associated_token_address_with_program_id;
+use drift_mocks::state::MinimalSpotMarket;
 use fixed::types::I80F48;
+use juplend_mocks::state::Lending as JuplendLending;
 use kamino_mocks::kamino_lending::client as kamino;
+use kamino_mocks::state::{MinimalObligation, MinimalReserve};
+use marginfi::constants::DRIFT_PROGRAM_ID;
 use marginfi::state::bank::BankVaultType;
 use marginfi_type_crate::types::OracleSetup;
-use marginfi_type_crate::types::{Bank, MarginfiAccount};
+use marginfi_type_crate::types::{Bank, FeeState, MarginfiAccount, Order, OrderTrigger};
 use solana_program::{instruction::Instruction, sysvar};
 use solana_program_test::{BanksClient, BanksClientError, ProgramTestContext};
 use solana_sdk::{
@@ -20,12 +26,87 @@ use transfer_hook::TEST_HOOK_ID;
 #[derive(Default, Clone)]
 pub struct MarginfiAccountConfig {}
 
-fn ctx_parts(ctx: &Rc<RefCell<ProgramTestContext>>) -> (BanksClient, Keypair, Hash) {
-    let ctx_ref = ctx.borrow();
-    (
-        ctx_ref.banks_client.clone(),
-        ctx_ref.payer.insecure_clone(),
-        ctx_ref.last_blockhash,
+async fn ctx_parts(ctx: &Rc<RefCell<ProgramTestContext>>) -> (BanksClient, Keypair, Hash) {
+    let (banks_client, payer) = {
+        let ctx_ref = ctx.borrow();
+        (ctx_ref.banks_client.clone(), ctx_ref.payer.insecure_clone())
+    };
+    let blockhash = banks_client.get_latest_blockhash().await.unwrap();
+    (banks_client, payer, blockhash)
+}
+
+fn derive_kamino_lending_market_authority(lending_market: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"lma", lending_market.as_ref()],
+        &kamino_mocks::kamino_lending::ID,
+    )
+    .0
+}
+
+fn derive_drift_state() -> Pubkey {
+    Pubkey::find_program_address(&[b"drift_state"], &DRIFT_PROGRAM_ID).0
+}
+
+fn derive_drift_signer() -> Pubkey {
+    Pubkey::find_program_address(&[b"drift_signer"], &DRIFT_PROGRAM_ID).0
+}
+
+fn derive_drift_spot_market_vault(market_index: u16) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"spot_market_vault", &market_index.to_le_bytes()],
+        &DRIFT_PROGRAM_ID,
+    )
+    .0
+}
+
+fn derive_juplend_liquidity() -> Pubkey {
+    Pubkey::find_program_address(&[b"liquidity"], &juplend_mocks::liquidity::ID).0
+}
+
+fn derive_juplend_rate_model(mint: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"rate_model", mint.as_ref()],
+        &juplend_mocks::liquidity::ID,
+    )
+    .0
+}
+
+fn derive_juplend_lending_admin() -> Pubkey {
+    Pubkey::find_program_address(&[b"lending_admin"], &juplend_mocks::ID).0
+}
+
+fn derive_juplend_claim_account(user: Pubkey, mint: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"user_claim", user.as_ref(), mint.as_ref()],
+        &juplend_mocks::liquidity::ID,
+    )
+    .0
+}
+
+fn should_include_oracle_observation_meta(bank: &Bank) -> bool {
+    !matches!(
+        bank.config.oracle_setup,
+        OracleSetup::Fixed
+            | OracleSetup::FixedKamino
+            | OracleSetup::FixedDrift
+            | OracleSetup::FixedJuplend
+    )
+}
+
+fn should_include_integration_observation_meta(bank: &Bank) -> bool {
+    matches!(
+        bank.config.oracle_setup,
+        OracleSetup::KaminoPythPush
+            | OracleSetup::KaminoSwitchboardPull
+            | OracleSetup::FixedKamino
+            | OracleSetup::DriftPythPull
+            | OracleSetup::DriftSwitchboardPull
+            | OracleSetup::FixedDrift
+            | OracleSetup::SolendPythPull
+            | OracleSetup::SolendSwitchboardPull
+            | OracleSetup::JuplendPythPull
+            | OracleSetup::JuplendSwitchboardPull
+            | OracleSetup::FixedJuplend
     )
 }
 
@@ -51,7 +132,7 @@ impl MarginfiAccountFixture {
         let ctx_ref = ctx.clone();
         let account_key = Keypair::new();
 
-        let (banks_client, payer, blockhash) = ctx_parts(&ctx_ref);
+        let (banks_client, payer, blockhash) = ctx_parts(&ctx_ref).await;
         let accounts = marginfi::accounts::MarginfiAccountInitialize {
             marginfi_account: account_key.pubkey(),
             marginfi_group: *marginfi_group,
@@ -117,7 +198,7 @@ impl MarginfiAccountFixture {
         }
     }
 
-    pub async fn make_bank_deposit_ix<T: Into<f64>>(
+    pub async fn make_deposit_ix<T: Into<f64>>(
         &self,
         funding_account: Pubkey,
         bank: &BankFixture,
@@ -134,7 +215,7 @@ impl MarginfiAccountFixture {
         .await
     }
 
-    pub async fn make_bank_deposit_ix_with_authority<T: Into<f64>>(
+    pub async fn make_deposit_ix_with_authority<T: Into<f64>>(
         &self,
         funding_account: Pubkey,
         bank: &BankFixture,
@@ -179,7 +260,7 @@ impl MarginfiAccountFixture {
     ) -> anyhow::Result<(), BanksClientError> {
         #[cfg_attr(not(feature = "transfer-hook"), allow(unused_mut))]
         let mut ix = self
-            .make_bank_deposit_ix_with_authority(
+            .make_deposit_ix_with_authority(
                 funding_account,
                 bank,
                 ui_amount,
@@ -222,7 +303,7 @@ impl MarginfiAccountFixture {
             }
         }
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let mut signers: Vec<&Keypair> = vec![&payer];
         if authority.pubkey() != payer.pubkey() {
             signers.push(authority);
@@ -249,7 +330,7 @@ impl MarginfiAccountFixture {
             data: marginfi::instruction::MarginfiAccountSetFreeze { frozen }.data(),
         };
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
 
@@ -258,14 +339,33 @@ impl MarginfiAccountFixture {
             .await
     }
 
-    async fn make_bank_withdraw_ix_internal<T: Into<f64>>(
+    pub async fn make_withdraw_ix_with_authority<T: Into<f64>>(
         &self,
         destination_account: Pubkey,
         bank: &BankFixture,
         ui_amount: T,
         withdraw_all: Option<bool>,
-        is_liquidate: bool,
         authority: Pubkey,
+    ) -> Instruction {
+        self.make_withdraw_ix_with_authority_and_options(
+            destination_account,
+            bank,
+            ui_amount,
+            withdraw_all,
+            authority,
+            false,
+        )
+        .await
+    }
+
+    async fn make_withdraw_ix_with_authority_and_options<T: Into<f64>>(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        ui_amount: T,
+        withdraw_all: Option<bool>,
+        authority: Pubkey,
+        include_closing_bank_on_withdraw_all: bool,
     ) -> Instruction {
         let marginfi_account = self.load().await;
 
@@ -294,21 +394,27 @@ impl MarginfiAccountFixture {
             .data(),
         };
 
-        let exclude_vec = match withdraw_all.unwrap_or(false) {
-            true => {
-                if is_liquidate {
-                    vec![]
-                } else {
-                    vec![bank.key]
-                }
-            }
-            false => vec![],
-        };
-        ix.accounts.extend_from_slice(
-            &self
-                .load_observation_account_metas(vec![], exclude_vec)
-                .await,
-        );
+        if withdraw_all.unwrap_or(false) {
+            // For user-driven withdraw_all flows, omit the closing bank's risk accounts unless a
+            // caller explicitly asks to include them.
+            let exclude_banks = if include_closing_bank_on_withdraw_all {
+                vec![]
+            } else if authority == marginfi_account.authority {
+                vec![bank.key]
+            } else {
+                // Delegated/admin flows (e.g. order execution) may still require withdrawn-bank
+                // oracle data during execution.
+                vec![]
+            };
+            ix.accounts.extend_from_slice(
+                &self
+                    .load_observation_account_metas(vec![], exclude_banks)
+                    .await,
+            );
+        } else {
+            ix.accounts
+                .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
+        }
 
         ix
     }
@@ -319,15 +425,31 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
         ui_amount: T,
         withdraw_all: Option<bool>,
-        is_liquidate: bool,
     ) -> Instruction {
-        self.make_bank_withdraw_ix_internal(
+        self.make_withdraw_ix_with_authority(
             destination_account,
             bank,
             ui_amount,
             withdraw_all,
-            is_liquidate,
             self.ctx.borrow().payer.pubkey(),
+        )
+        .await
+    }
+
+    pub async fn make_bank_withdraw_ix_include_closing_bank<T: Into<f64>>(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        ui_amount: T,
+        withdraw_all: Option<bool>,
+    ) -> Instruction {
+        self.make_withdraw_ix_with_authority_and_options(
+            destination_account,
+            bank,
+            ui_amount,
+            withdraw_all,
+            self.ctx.borrow().payer.pubkey(),
+            true,
         )
         .await
     }
@@ -358,17 +480,16 @@ impl MarginfiAccountFixture {
         authority: &Keypair,
     ) -> anyhow::Result<(), BanksClientError> {
         let ix = self
-            .make_bank_withdraw_ix_internal(
+            .make_withdraw_ix_with_authority(
                 destination_account,
                 bank,
                 ui_amount,
                 withdraw_all,
-                false,
                 authority.pubkey(),
             )
             .await;
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let mut signers: Vec<&Keypair> = vec![&payer];
         if authority.pubkey() != payer.pubkey() {
             signers.push(authority);
@@ -514,7 +635,7 @@ impl MarginfiAccountFixture {
         let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_400_000);
         let nonce_ix = ComputeBudgetInstruction::set_compute_unit_price(nonce);
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let mut signers: Vec<&Keypair> = vec![&payer];
         if authority.pubkey() != payer.pubkey() {
             signers.push(authority);
@@ -531,42 +652,24 @@ impl MarginfiAccountFixture {
             .await
     }
 
-    pub async fn make_bank_repay_ix<T: Into<f64>>(
+    pub async fn make_repay_ix<T: Into<f64>>(
         &self,
         funding_account: Pubkey,
         bank: &BankFixture,
         ui_amount: T,
         repay_all: Option<bool>,
     ) -> Instruction {
-        let marginfi_account = self.load().await;
-        let ctx = self.ctx.borrow();
-
-        let mut accounts = marginfi::accounts::LendingAccountRepay {
-            group: marginfi_account.group,
-            marginfi_account: self.key,
-            authority: ctx.payer.pubkey(),
-            bank: bank.key,
-            signer_token_account: funding_account,
-            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
-            token_program: bank.get_token_program(),
-        }
-        .to_account_metas(Some(true));
-        if bank.mint.token_program == anchor_spl::token_2022::ID {
-            accounts.push(AccountMeta::new_readonly(bank.mint.key, false));
-        }
-
-        Instruction {
-            program_id: marginfi::ID,
-            accounts,
-            data: marginfi::instruction::LendingAccountRepay {
-                amount: ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
-                repay_all,
-            }
-            .data(),
-        }
+        self.make_repay_ix_with_authority(
+            funding_account,
+            bank,
+            ui_amount,
+            repay_all,
+            self.ctx.borrow().payer.pubkey(),
+        )
+        .await
     }
 
-    async fn make_bank_repay_ix_internal<T: Into<f64>>(
+    pub async fn make_repay_ix_with_authority<T: Into<f64>>(
         &self,
         funding_account: Pubkey,
         bank: &BankFixture,
@@ -590,7 +693,7 @@ impl MarginfiAccountFixture {
             accounts.push(AccountMeta::new_readonly(bank.mint.key, false));
         }
 
-        Instruction {
+        let mut ix = Instruction {
             program_id: marginfi::ID,
             accounts,
             data: marginfi::instruction::LendingAccountRepay {
@@ -598,7 +701,17 @@ impl MarginfiAccountFixture {
                 repay_all,
             }
             .data(),
+        };
+
+        if repay_all.unwrap_or(false) {
+            ix.accounts.extend_from_slice(
+                &self
+                    .load_observation_account_metas(vec![], vec![bank.key])
+                    .await,
+            );
         }
+
+        ix
     }
 
     pub async fn try_bank_repay<T: Into<f64>>(
@@ -627,7 +740,7 @@ impl MarginfiAccountFixture {
         authority: &Keypair,
     ) -> anyhow::Result<(), BanksClientError> {
         let ix = self
-            .make_bank_repay_ix_internal(
+            .make_repay_ix_with_authority(
                 funding_account,
                 bank,
                 ui_amount,
@@ -635,7 +748,7 @@ impl MarginfiAccountFixture {
                 authority.pubkey(),
             )
             .await;
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let mut signers: Vec<&Keypair> = vec![&payer];
         if authority.pubkey() != payer.pubkey() {
             signers.push(authority);
@@ -653,7 +766,7 @@ impl MarginfiAccountFixture {
         bank: &BankFixture,
     ) -> anyhow::Result<(), BanksClientError> {
         let marginfi_account = self.load().await;
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
 
         let ix = Instruction {
             program_id: marginfi::ID,
@@ -779,7 +892,7 @@ impl MarginfiAccountFixture {
 
         let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_400_000);
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let tx = Transaction::new_signed_with_payer(
             &[compute_budget_ix, ix],
             Some(&payer.pubkey()),
@@ -792,30 +905,85 @@ impl MarginfiAccountFixture {
             .await
     }
 
-    pub async fn try_withdraw_emissions(
+    pub async fn try_set_emissions_destination(
         &self,
-        bank: &BankFixture,
-        recv_account: &TokenAccountFixture,
+        destination_account: Pubkey,
     ) -> std::result::Result<(), BanksClientError> {
-        let emissions_mint = bank.load().await.emissions_mint;
+        let ctx = self.ctx.borrow();
+
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingAccountWithdrawEmissions {
-                group: self.load().await.group,
+            accounts: marginfi::accounts::MarginfiAccountUpdateEmissionsDestinationAccount {
                 marginfi_account: self.key,
-                authority: self.ctx.borrow().payer.pubkey(),
-                emissions_mint,
-                emissions_auth: get_emissions_authority_address(bank.key, emissions_mint).0,
-                emissions_vault: get_emissions_token_account_address(bank.key, emissions_mint).0,
-                destination_account: recv_account.key,
-                bank: bank.key,
-                token_program: recv_account.token_program,
+                authority: ctx.payer.pubkey(),
+                destination_account,
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingAccountWithdrawEmissions {}.data(),
+            data: marginfi::instruction::MarginfiAccountUpdateEmissionsDestinationAccount {}.data(),
         };
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
+    pub async fn try_set_emissions_destination_with_authority(
+        &self,
+        destination_account: Pubkey,
+        authority: &Keypair,
+    ) -> std::result::Result<(), BanksClientError> {
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::MarginfiAccountUpdateEmissionsDestinationAccount {
+                marginfi_account: self.key,
+                authority: authority.pubkey(),
+                destination_account,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountUpdateEmissionsDestinationAccount {}.data(),
+        };
+
+        let mut signers: Vec<&Keypair> = vec![&payer];
+        if authority.pubkey() != payer.pubkey() {
+            signers.push(authority);
+        }
+
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &signers, blockhash);
+
+        banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
+    pub async fn try_clear_emissions(
+        &self,
+        bank: &super::bank::BankFixture,
+    ) -> std::result::Result<(), BanksClientError> {
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingAccountClearEmissions {
+                marginfi_account: self.key,
+                bank: bank.key,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::LendingAccountClearEmissions {}.data(),
+        };
+
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
 
@@ -880,7 +1048,7 @@ impl MarginfiAccountFixture {
         ixs.insert(0, start_ix);
         ixs.push(end_ix);
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
 
         let signers = if let Some(signer) = signer {
             vec![&payer, signer]
@@ -900,6 +1068,17 @@ impl MarginfiAccountFixture {
         &self,
         include_banks: Vec<Pubkey>,
         exclude_banks: Vec<Pubkey>,
+    ) -> Vec<AccountMeta> {
+        self.load_observation_account_metas_with_flags(include_banks, exclude_banks, false, false)
+            .await
+    }
+
+    pub async fn load_observation_account_metas_with_flags(
+        &self,
+        include_banks: Vec<Pubkey>,
+        exclude_banks: Vec<Pubkey>,
+        bank_writable: bool,
+        banks_only: bool,
     ) -> Vec<AccountMeta> {
         let marginfi_account = self.load().await;
         // Check all active banks in marginfi account balances
@@ -944,11 +1123,14 @@ impl MarginfiAccountFixture {
                 let mut metas = vec![AccountMeta {
                     pubkey: *bank_pk,
                     is_signer: false,
-                    is_writable: false,
+                    is_writable: bank_writable,
                 }];
 
-                // Oracle meta is included for all but fixed-price banks
-                if bank.config.oracle_setup != OracleSetup::Fixed {
+                if banks_only {
+                    return metas;
+                }
+
+                if should_include_oracle_observation_meta(bank) {
                     let oracle_key = {
                         let oracle_key = bank.config.oracle_keys[0];
                         get_oracle_id_from_feed_id(oracle_key).unwrap_or(oracle_key)
@@ -956,6 +1138,14 @@ impl MarginfiAccountFixture {
 
                     metas.push(AccountMeta {
                         pubkey: oracle_key,
+                        is_signer: false,
+                        is_writable: false,
+                    });
+                }
+
+                if should_include_integration_observation_meta(bank) {
+                    metas.push(AccountMeta {
+                        pubkey: bank.integration_acc_1,
                         is_signer: false,
                         is_writable: false,
                     });
@@ -1031,7 +1221,7 @@ impl MarginfiAccountFixture {
             &[transfer_account_ix],
             Some(&fee_payer.pubkey()),
             &signers,
-            ctx.last_blockhash,
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
         )
     }
 
@@ -1058,7 +1248,7 @@ impl MarginfiAccountFixture {
                 global_fee_wallet,
             )
             .await;
-        let (banks_client, _, _) = ctx_parts(&self.ctx);
+        let (banks_client, _, _) = ctx_parts(&self.ctx).await;
         banks_client
             .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
             .await
@@ -1089,7 +1279,7 @@ impl MarginfiAccountFixture {
     }
 
     pub async fn try_close_account(&self, nonce: u64) -> std::result::Result<(), BanksClientError> {
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
 
         let ix = Instruction {
             program_id: marginfi::ID,
@@ -1144,8 +1334,11 @@ impl MarginfiAccountFixture {
             .to_account_metas(Some(true)),
             data: marginfi::instruction::StartLiquidation {}.data(),
         };
-        ix.accounts
-            .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
+        ix.accounts.extend_from_slice(
+            &self
+                .load_observation_account_metas_with_flags(vec![], vec![], true, false)
+                .await,
+        );
         ix
     }
 
@@ -1172,7 +1365,7 @@ impl MarginfiAccountFixture {
         };
         ix.accounts.extend_from_slice(
             &self
-                .load_observation_account_metas(vec![], exclude_banks)
+                .load_observation_account_metas_with_flags(vec![], exclude_banks, true, true)
                 .await,
         );
         ix
@@ -1197,16 +1390,29 @@ impl MarginfiAccountFixture {
     }
 
     pub async fn make_kamino_refresh_reserve_ix(&self, bank: &BankFixture) -> Instruction {
-        let reserve = &bank.kamino.as_ref().unwrap().reserve;
-        let bank = bank.load().await;
+        let bank_state = bank.load().await;
+        let (lending_market, pyth_oracle, scope_prices) = if let Some(kamino) = &bank.kamino {
+            let pyth = kamino.reserve.config.token_info.pyth_configuration.price;
+            (
+                kamino.reserve.lending_market,
+                (pyth != Pubkey::default()).then_some(pyth),
+                None,
+            )
+        } else {
+            let reserve: MinimalReserve =
+                load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+            let oracle_key = get_oracle_id_from_feed_id(bank_state.config.oracle_keys[0])
+                .unwrap_or(bank_state.config.oracle_keys[0]);
+            (reserve.lending_market, Some(oracle_key), None)
+        };
 
         let accounts = kamino::accounts::RefreshReserve {
-            reserve: bank.integration_acc_1,
-            lending_market: reserve.lending_market,
-            pyth_oracle: None,
+            reserve: bank_state.integration_acc_1,
+            lending_market,
+            pyth_oracle,
             switchboard_price_oracle: None,
             switchboard_twap_oracle: None,
-            scope_prices: Some(reserve.config.token_info.scope_configuration.price_feed),
+            scope_prices,
         }
         .to_account_metas(Some(true));
 
@@ -1218,20 +1424,454 @@ impl MarginfiAccountFixture {
     }
 
     pub async fn make_kamino_refresh_obligation_ix(&self, bank: &BankFixture) -> Instruction {
-        let obligation = &bank.kamino.as_ref().unwrap().obligation;
-        let bank = bank.load().await;
+        let bank_state = bank.load().await;
+        let lending_market = if let Some(kamino) = &bank.kamino {
+            kamino.obligation.lending_market
+        } else {
+            let obligation: MinimalObligation =
+                load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_2).await;
+            obligation.lending_market
+        };
 
-        let accounts = kamino::accounts::RefreshObligation {
-            obligation: bank.integration_acc_2,
-            lending_market: obligation.lending_market,
+        let mut accounts = kamino::accounts::RefreshObligation {
+            obligation: bank_state.integration_acc_2,
+            lending_market,
         }
         .to_account_metas(Some(true));
+        accounts.push(AccountMeta::new_readonly(
+            bank_state.integration_acc_1,
+            false,
+        ));
 
         Instruction {
             program_id: kamino_mocks::kamino_lending::ID,
             accounts,
             data: kamino::args::RefreshObligation {}.data(),
         }
+    }
+
+    pub async fn make_kamino_deposit_ix(
+        &self,
+        funding_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+    ) -> Instruction {
+        self.make_kamino_deposit_ix_with_authority(
+            funding_account,
+            bank,
+            amount,
+            self.ctx.borrow().payer.pubkey(),
+        )
+        .await
+    }
+
+    pub async fn make_kamino_deposit_ix_with_authority(
+        &self,
+        funding_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        authority: Pubkey,
+    ) -> Instruction {
+        let marginfi_account = self.load().await;
+        let bank_state = bank.load().await;
+        let reserve: MinimalReserve =
+            load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+        let lending_market_authority =
+            derive_kamino_lending_market_authority(reserve.lending_market);
+
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::KaminoDeposit {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                authority,
+                bank: bank.key,
+                signer_token_account: funding_account,
+                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+                integration_acc_2: bank_state.integration_acc_2,
+                lending_market: reserve.lending_market,
+                lending_market_authority,
+                integration_acc_1: bank_state.integration_acc_1,
+                mint: reserve.mint_pubkey,
+                reserve_liquidity_supply: reserve.supply_vault,
+                reserve_collateral_mint: reserve.collateral_mint_pubkey,
+                reserve_destination_deposit_collateral: reserve.collateral_supply_vault,
+                obligation_farm_user_state: None,
+                reserve_farm_state: None,
+                kamino_program: kamino_mocks::kamino_lending::ID,
+                farms_program: kamino_mocks::kamino_farms::ID,
+                collateral_token_program: anchor_spl::token::spl_token::ID,
+                liquidity_token_program: bank.get_token_program(),
+                instruction_sysvar_account: sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::KaminoDeposit { amount }.data(),
+        }
+    }
+
+    pub async fn make_kamino_withdraw_ix(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        withdraw_all: Option<bool>,
+    ) -> Instruction {
+        self.make_kamino_withdraw_ix_with_authority(
+            destination_account,
+            bank,
+            amount,
+            withdraw_all,
+            self.ctx.borrow().payer.pubkey(),
+        )
+        .await
+    }
+
+    pub async fn make_kamino_withdraw_ix_with_authority(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        withdraw_all: Option<bool>,
+        authority: Pubkey,
+    ) -> Instruction {
+        let marginfi_account = self.load().await;
+        let bank_state = bank.load().await;
+        let reserve: MinimalReserve =
+            load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+        let lending_market_authority =
+            derive_kamino_lending_market_authority(reserve.lending_market);
+
+        let mut ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::KaminoWithdraw {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                authority,
+                bank: bank.key,
+                destination_token_account: destination_account,
+                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+                integration_acc_2: bank_state.integration_acc_2,
+                lending_market: reserve.lending_market,
+                lending_market_authority,
+                integration_acc_1: bank_state.integration_acc_1,
+                mint: reserve.mint_pubkey,
+                reserve_liquidity_supply: reserve.supply_vault,
+                reserve_collateral_mint: reserve.collateral_mint_pubkey,
+                reserve_source_collateral: reserve.collateral_supply_vault,
+                obligation_farm_user_state: None,
+                reserve_farm_state: None,
+                kamino_program: kamino_mocks::kamino_lending::ID,
+                farms_program: kamino_mocks::kamino_farms::ID,
+                collateral_token_program: anchor_spl::token::spl_token::ID,
+                liquidity_token_program: bank.get_token_program(),
+                instruction_sysvar_account: sysvar::instructions::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::KaminoWithdraw {
+                amount,
+                withdraw_all,
+            }
+            .data(),
+        };
+
+        self.append_integration_withdraw_health_accounts(&mut ix)
+            .await;
+
+        ix
+    }
+
+    pub async fn make_drift_deposit_ix(
+        &self,
+        funding_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+    ) -> Instruction {
+        self.make_drift_deposit_ix_with_authority(
+            funding_account,
+            bank,
+            amount,
+            self.ctx.borrow().payer.pubkey(),
+            None,
+        )
+        .await
+    }
+
+    pub async fn make_drift_deposit_ix_with_authority(
+        &self,
+        funding_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        authority: Pubkey,
+        drift_oracle: Option<Pubkey>,
+    ) -> Instruction {
+        let marginfi_account = self.load().await;
+        let bank_state = bank.load().await;
+        let spot_market: MinimalSpotMarket =
+            load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+        let drift_state = derive_drift_state();
+        let drift_spot_market_vault = derive_drift_spot_market_vault(spot_market.market_index);
+
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::DriftDeposit {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                authority,
+                bank: bank.key,
+                drift_oracle,
+                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+                signer_token_account: funding_account,
+                drift_state,
+                integration_acc_2: bank_state.integration_acc_2,
+                integration_acc_3: bank_state.integration_acc_3,
+                integration_acc_1: bank_state.integration_acc_1,
+                drift_spot_market_vault,
+                mint: bank.mint.key,
+                drift_program: DRIFT_PROGRAM_ID,
+                token_program: bank.get_token_program(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::DriftDeposit { amount }.data(),
+        }
+    }
+
+    pub async fn make_drift_withdraw_ix(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        withdraw_all: Option<bool>,
+    ) -> Instruction {
+        self.make_drift_withdraw_ix_with_authority(
+            destination_account,
+            bank,
+            amount,
+            withdraw_all,
+            self.ctx.borrow().payer.pubkey(),
+            None,
+        )
+        .await
+    }
+
+    pub async fn make_drift_withdraw_ix_with_authority(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        withdraw_all: Option<bool>,
+        authority: Pubkey,
+        drift_oracle: Option<Pubkey>,
+    ) -> Instruction {
+        let marginfi_account = self.load().await;
+        let bank_state = bank.load().await;
+        let spot_market: MinimalSpotMarket =
+            load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+        let drift_state = derive_drift_state();
+        let drift_spot_market_vault = derive_drift_spot_market_vault(spot_market.market_index);
+        let drift_signer = derive_drift_signer();
+
+        let mut ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::DriftWithdraw {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                authority,
+                bank: bank.key,
+                drift_oracle,
+                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+                destination_token_account: destination_account,
+                drift_state,
+                integration_acc_2: bank_state.integration_acc_2,
+                integration_acc_3: bank_state.integration_acc_3,
+                integration_acc_1: bank_state.integration_acc_1,
+                drift_spot_market_vault,
+                drift_reward_oracle: None,
+                drift_reward_spot_market: None,
+                drift_reward_mint: None,
+                drift_reward_oracle_2: None,
+                drift_reward_spot_market_2: None,
+                drift_reward_mint_2: None,
+                drift_signer,
+                mint: bank.mint.key,
+                drift_program: DRIFT_PROGRAM_ID,
+                token_program: bank.get_token_program(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::DriftWithdraw {
+                amount,
+                withdraw_all,
+            }
+            .data(),
+        };
+
+        self.append_integration_withdraw_health_accounts(&mut ix)
+            .await;
+
+        ix
+    }
+
+    pub async fn make_juplend_deposit_ix(
+        &self,
+        funding_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+    ) -> Instruction {
+        self.make_juplend_deposit_ix_with_authority(
+            funding_account,
+            bank,
+            amount,
+            self.ctx.borrow().payer.pubkey(),
+        )
+        .await
+    }
+
+    pub async fn make_juplend_deposit_ix_with_authority(
+        &self,
+        funding_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        authority: Pubkey,
+    ) -> Instruction {
+        let marginfi_account = self.load().await;
+        let bank_state = bank.load().await;
+        let lending: JuplendLending =
+            load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+
+        let liquidity = derive_juplend_liquidity();
+        let rate_model = derive_juplend_rate_model(lending.mint);
+        let vault = get_associated_token_address_with_program_id(
+            &liquidity,
+            &lending.mint,
+            &bank.get_token_program(),
+        );
+        let lending_admin = derive_juplend_lending_admin();
+
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::JuplendDeposit {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                authority,
+                bank: bank.key,
+                signer_token_account: funding_account,
+                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+                liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+                mint: lending.mint,
+                integration_acc_1: bank_state.integration_acc_1,
+                f_token_mint: lending.f_token_mint,
+                integration_acc_2: bank_state.integration_acc_2,
+                lending_admin,
+                supply_token_reserves_liquidity: lending.token_reserves_liquidity,
+                lending_supply_position_on_liquidity: lending.supply_position_on_liquidity,
+                rate_model,
+                vault,
+                liquidity,
+                liquidity_program: juplend_mocks::liquidity::ID,
+                rewards_rate_model: lending.rewards_rate_model,
+                juplend_program: juplend_mocks::ID,
+                token_program: bank.get_token_program(),
+                associated_token_program: anchor_spl::associated_token::ID,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::JuplendDeposit { amount }.data(),
+        }
+    }
+
+    pub async fn make_juplend_withdraw_ix(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        withdraw_all: Option<bool>,
+    ) -> Instruction {
+        self.make_juplend_withdraw_ix_with_authority(
+            destination_account,
+            bank,
+            amount,
+            withdraw_all,
+            self.ctx.borrow().payer.pubkey(),
+        )
+        .await
+    }
+
+    pub async fn make_juplend_withdraw_ix_with_authority(
+        &self,
+        destination_account: Pubkey,
+        bank: &BankFixture,
+        amount: u64,
+        withdraw_all: Option<bool>,
+        authority: Pubkey,
+    ) -> Instruction {
+        let marginfi_account = self.load().await;
+        let bank_state = bank.load().await;
+        let lending: JuplendLending =
+            load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+
+        let liquidity = derive_juplend_liquidity();
+        let rate_model = derive_juplend_rate_model(lending.mint);
+        let vault = get_associated_token_address_with_program_id(
+            &liquidity,
+            &lending.mint,
+            &bank.get_token_program(),
+        );
+        let lending_admin = derive_juplend_lending_admin();
+        let claim_account = derive_juplend_claim_account(
+            bank.get_vault_authority(BankVaultType::Liquidity).0,
+            lending.mint,
+        );
+
+        let mut ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::JuplendWithdraw {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                authority,
+                bank: bank.key,
+                destination_token_account: destination_account,
+                liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+                mint: lending.mint,
+                integration_acc_1: bank_state.integration_acc_1,
+                f_token_mint: lending.f_token_mint,
+                integration_acc_2: bank_state.integration_acc_2,
+                integration_acc_3: bank_state.integration_acc_3,
+                lending_admin,
+                supply_token_reserves_liquidity: lending.token_reserves_liquidity,
+                lending_supply_position_on_liquidity: lending.supply_position_on_liquidity,
+                rate_model,
+                vault,
+                claim_account,
+                liquidity,
+                liquidity_program: juplend_mocks::liquidity::ID,
+                rewards_rate_model: lending.rewards_rate_model,
+                juplend_program: juplend_mocks::ID,
+                token_program: bank.get_token_program(),
+                associated_token_program: anchor_spl::associated_token::ID,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::JuplendWithdraw {
+                amount,
+                withdraw_all,
+            }
+            .data(),
+        };
+
+        self.append_integration_withdraw_health_accounts(&mut ix)
+            .await;
+
+        ix
+    }
+
+    async fn append_integration_withdraw_health_accounts(&self, ix: &mut Instruction) {
+        ix.accounts
+            .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
     }
 
     pub async fn try_lending_account_pulse_health(
@@ -1250,7 +1890,7 @@ impl MarginfiAccountFixture {
         ix.accounts
             .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
 
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx);
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
 
@@ -1278,8 +1918,11 @@ impl MarginfiAccountFixture {
             .to_account_metas(Some(true)),
             data: marginfi::instruction::StartDeleverage {}.data(),
         };
-        ix.accounts
-            .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
+        ix.accounts.extend_from_slice(
+            &self
+                .load_observation_account_metas_with_flags(vec![], vec![], true, false)
+                .await,
+        );
         ix
     }
 
@@ -1304,9 +1947,259 @@ impl MarginfiAccountFixture {
         };
         ix.accounts.extend_from_slice(
             &self
+                .load_observation_account_metas_with_flags(vec![], exclude_banks, true, true)
+                .await,
+        );
+        ix
+    }
+
+    pub async fn try_place_order(
+        &self,
+        bank_keys: Vec<Pubkey>,
+        trigger: OrderTrigger,
+    ) -> std::result::Result<Pubkey, BanksClientError> {
+        let marginfi_account = self.load().await;
+        // Compute fee_state PDA and fetch the global_fee_wallet from it so we can pass both
+        // accounts to the PlaceOrder instruction.
+        let (fee_state_key, _bump) = Pubkey::find_program_address(
+            &[marginfi_type_crate::constants::FEE_STATE_SEED.as_bytes()],
+            &marginfi::ID,
+        );
+
+        // Clone banks_client so we don't hold the RefCell borrow across await points.
+        let banks_client = {
+            let ctx = self.ctx.borrow();
+            ctx.banks_client.clone()
+        };
+        let fee_state_account = banks_client
+            .get_account(fee_state_key)
+            .await?
+            .expect("fee_state account must exist for tests");
+        let fee_state_data: FeeState =
+            FeeState::try_deserialize(&mut &fee_state_account.data[..]).expect("invalid fee_state");
+        let global_fee_wallet = fee_state_data.global_fee_wallet;
+
+        let ctx = self.ctx.borrow();
+
+        let (order_pda, _) = find_order_pda(&self.key, &bank_keys);
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::PlaceOrder {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                fee_payer: ctx.payer.pubkey(),
+                authority: ctx.payer.pubkey(),
+                order: order_pda,
+                fee_state: fee_state_key,
+                global_fee_wallet,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountPlaceOrder { bank_keys, trigger }.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await?;
+
+        Ok(order_pda)
+    }
+
+    pub async fn try_close_order(
+        &self,
+        order: Pubkey,
+        fee_recipient: Pubkey,
+    ) -> std::result::Result<(), BanksClientError> {
+        let ctx = self.ctx.borrow();
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::CloseOrder {
+                marginfi_account: self.key,
+                authority: ctx.payer.pubkey(),
+                order,
+                fee_recipient,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountCloseOrder {}.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
+    pub async fn try_keeper_close_order(
+        &self,
+        order: Pubkey,
+        keeper: &Keypair,
+        fee_recipient: Pubkey,
+    ) -> std::result::Result<(), BanksClientError> {
+        let ctx = self.ctx.borrow();
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::KeeperCloseOrder {
+                marginfi_account: self.key,
+                order,
+                fee_recipient,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountKeeperCloseOrder {}.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&keeper.pubkey()),
+            &[keeper],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
+    pub async fn try_set_keeper_close_flags(
+        &self,
+        bank_keys_opt: Option<Vec<Pubkey>>,
+    ) -> std::result::Result<(), BanksClientError> {
+        let ctx = self.ctx.borrow();
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::SetKeeperCloseFlags {
+                marginfi_account: self.key,
+                authority: ctx.payer.pubkey(),
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountSetKeeperCloseFlags { bank_keys_opt }
+                .data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
+    pub async fn load_order(&self, order: Pubkey) -> Order {
+        load_and_deserialize::<Order>(self.ctx.clone(), &order).await
+    }
+
+    pub async fn make_start_execute_ix(
+        &self,
+        order: Pubkey,
+        executor: Pubkey,
+    ) -> (Instruction, Pubkey) {
+        self.make_start_execute_ix_with_metas(order, executor, None)
+            .await
+    }
+
+    pub async fn make_start_execute_ix_with_metas(
+        &self,
+        order: Pubkey,
+        executor: Pubkey,
+        observation_metas: Option<Vec<AccountMeta>>,
+    ) -> (Instruction, Pubkey) {
+        let marginfi_account = self.load().await;
+        let (execute_record, _) = find_execute_order_pda(&order);
+
+        let mut ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::StartExecuteOrder {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                fee_payer: executor,
+                executor,
+                order,
+                execute_record,
+                instruction_sysvar: sysvar::instructions::id(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountStartExecuteOrder {}.data(),
+        };
+
+        let observation_metas = match observation_metas {
+            Some(metas) => metas,
+            None => self.load_observation_account_metas(vec![], vec![]).await,
+        };
+
+        ix.accounts.extend_from_slice(&observation_metas);
+
+        (ix, execute_record)
+    }
+
+    pub async fn make_end_execute_ix(
+        &self,
+        order: Pubkey,
+        execute_record: Pubkey,
+        executor: Pubkey,
+        fee_recipient: Pubkey,
+        exclude_banks: Vec<Pubkey>,
+    ) -> Instruction {
+        let marginfi_account = self.load().await;
+
+        let mut ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::EndExecuteOrder {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                executor,
+                fee_recipient,
+                order,
+                execute_record,
+                fee_state: Pubkey::find_program_address(
+                    &[marginfi_type_crate::constants::FEE_STATE_SEED.as_bytes()],
+                    &marginfi::ID,
+                )
+                .0,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountEndExecuteOrder {}.data(),
+        };
+
+        ix.accounts.extend_from_slice(
+            &self
                 .load_observation_account_metas(vec![], exclude_banks)
                 .await,
         );
+
         ix
     }
 }

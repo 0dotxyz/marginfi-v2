@@ -11,11 +11,11 @@ if [ -z "$program_lib_name" ] || [ -z "$cluster" ]; then
 fi
 
 if [ "$cluster" = "mainnet" ]; then
-    features="--features mainnet-beta"
+    features="--features mainnet-beta,custom-heap"
 elif [ "$cluster" = "devnet" ]; then
-    features="--features devnet --no-default-features"
+    features="--features devnet,custom-heap --no-default-features"
 elif [ "$cluster" = "staging" ]; then
-    features="--features staging --no-default-features"
+    features="--features staging,custom-heap --no-default-features"
 else
     echo "Error: Unknown cluster: $cluster"
     exit 1

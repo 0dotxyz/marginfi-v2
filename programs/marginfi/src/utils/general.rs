@@ -1,11 +1,15 @@
 use crate::{
-    bank_authority_seed, bank_seed,
+    bank_authority_seed, bank_seed, check,
+    events::RateLimitFlowEvent,
     state::{
         bank::BankVaultType,
-        marginfi_account::get_remaining_accounts_per_bank,
+        marginfi_account::{calc_value, get_remaining_accounts_per_bank},
         price::{
             OraclePriceFeedAdapter, OraclePriceType, OraclePriceWithConfidence, PriceAdapter,
             PriceBias,
+        },
+        rate_limiter::{
+            should_skip_rate_limit, BankRateLimiterImpl, GroupRateLimiterImpl, RateLimitWindowImpl,
         },
     },
     MarginfiError, MarginfiResult,
@@ -25,10 +29,10 @@ use anchor_spl::{
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_KAMINO, ASSET_TAG_SOL, ASSET_TAG_SOLEND,
-        ASSET_TAG_STAKED,
+        ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
+        ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
     },
-    types::{Bank, BankOperationalState, MarginfiAccount, WrappedI80F48},
+    types::{Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, WrappedI80F48},
 };
 
 pub fn find_bank_vault_pda(bank_pk: &Pubkey, vault_type: BankVaultType) -> (Pubkey, u8) {
@@ -220,7 +224,11 @@ pub fn validate_asset_tags(bank: &Bank, marginfi_account: &MarginfiAccount) -> M
     let is_default_like = |asset_tag: u8| {
         matches!(
             asset_tag,
-            ASSET_TAG_DEFAULT | ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND
+            ASSET_TAG_DEFAULT
+                | ASSET_TAG_KAMINO
+                | ASSET_TAG_DRIFT
+                | ASSET_TAG_SOLEND
+                | ASSET_TAG_JUPLEND
         )
     };
 
@@ -230,8 +238,10 @@ pub fn validate_asset_tags(bank: &Bank, marginfi_account: &MarginfiAccount) -> M
                 ASSET_TAG_DEFAULT => has_default_asset = true,
                 ASSET_TAG_SOL => { /* Do nothing, SOL can mix with any asset type */ }
                 ASSET_TAG_STAKED => has_staked_asset = true,
-                // Kamino/Drift/Solend assets behave like default assets
-                ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND => has_default_asset = true,
+                // Kamino/Drift/Solend/JupLend assets behave like default assets
+                ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND => {
+                    has_default_asset = true
+                }
                 _ => panic!("unsupported asset tag"),
             }
         }
@@ -266,7 +276,11 @@ pub fn validate_bank_asset_tags(bank_a: &Bank, bank_b: &Bank) -> MarginfiResult 
     let is_default_like = |asset_tag: u8| {
         matches!(
             asset_tag,
-            ASSET_TAG_DEFAULT | ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND
+            ASSET_TAG_DEFAULT
+                | ASSET_TAG_KAMINO
+                | ASSET_TAG_DRIFT
+                | ASSET_TAG_SOLEND
+                | ASSET_TAG_JUPLEND
         )
     };
 
@@ -352,7 +366,6 @@ pub fn wrapped_i80f48_to_f64(n: WrappedI80F48) -> f64 {
 /// passed to any risk check.
 ///
 /// * Errors if bank not found or bank/oracles don't appear in the slice in the correct order
-/// * If a RiskEngine available, consider `get_unbiased_price_for_bank` instead
 pub fn fetch_asset_price_for_bank_low_bias<'info>(
     bank_key: &Pubkey,
     bank: &Bank,
@@ -373,7 +386,6 @@ pub fn fetch_asset_price_for_bank_low_bias<'info>(
 /// Fetch an unbiased oracle price (no safety bias) for a given bank.
 ///
 /// * Errors if bank not found or bank/oracles don't appear in the slice in the correct order
-/// * If a RiskEngine available, consider `get_unbiased_price_for_bank` instead
 pub fn fetch_unbiased_price_for_bank<'info>(
     bank_key: &Pubkey,
     bank: &Bank,
@@ -450,13 +462,120 @@ pub fn is_solend_asset_tag(asset_tag: u8) -> bool {
     asset_tag == ASSET_TAG_SOLEND
 }
 
-/// Helper function - checks if asset tag is an integration type (Kamino, Drift, or Solend)
+/// Helper function for constraint validation - checks if asset tag is valid for JupLend operations
+pub fn is_juplend_asset_tag(asset_tag: u8) -> bool {
+    asset_tag == ASSET_TAG_JUPLEND
+}
+
+/// Helper function - checks if asset tag is an integration type (Kamino, Drift, Solend, or JupLend)
 /// These integrations share a position limit due to their 3-account-per-position overhead
 pub fn is_integration_asset_tag(asset_tag: u8) -> bool {
     matches!(
         asset_tag,
-        ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND
+        ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND
     )
+}
+/// Records withdrawal outflow on bank-level rate limiter and validates against
+/// group-level rate limits (read-only). Emits a `RateLimitFlowEvent` for the
+/// delegate flow admin to aggregate off-chain and update the group
+/// rate limiter via
+/// `update_group_rate_limiter`.
+pub fn record_withdrawal_outflow(
+    group_rate_limit_enabled: bool,
+    token_amount: u64,
+    price: I80F48,
+    bank: &mut Bank,
+    group: &MarginfiGroup,
+    group_key: Pubkey,
+    bank_key: Pubkey,
+    marginfi_account: &MarginfiAccount,
+    clock: &Clock,
+) -> MarginfiResult<()> {
+    // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
+    if !should_skip_rate_limit(marginfi_account.account_flags) {
+        // Bank-level rate limiting (native tokens)
+        if bank.rate_limiter.is_enabled() {
+            bank.rate_limiter
+                .try_record_outflow(token_amount, clock.unix_timestamp)?;
+        }
+
+        // Group-level rate limiting: read-only validation + event emission.
+        // The admin aggregates events off-chain and calls update_group_rate_limiter.
+        if group_rate_limit_enabled {
+            check!(price > I80F48::ZERO, MarginfiError::InvalidRateLimitPrice);
+
+            let value = calc_value(
+                I80F48::from_num(token_amount),
+                price,
+                bank.mint_decimals,
+                None,
+            )?;
+            if group.rate_limiter.hourly.is_enabled() {
+                let remaining = group
+                    .rate_limiter
+                    .hourly
+                    .effective_remaining_capacity(clock.unix_timestamp);
+                if value.to_num::<i64>() > remaining {
+                    return Err(MarginfiError::GroupHourlyRateLimitExceeded.into());
+                }
+            }
+            if group.rate_limiter.daily.is_enabled() {
+                let remaining = group
+                    .rate_limiter
+                    .daily
+                    .effective_remaining_capacity(clock.unix_timestamp);
+                if value.to_num::<i64>() > remaining {
+                    return Err(MarginfiError::GroupDailyRateLimitExceeded.into());
+                }
+            }
+
+            emit!(RateLimitFlowEvent {
+                group: group_key,
+                bank: bank_key,
+                mint: bank.mint,
+                flow_direction: 0, // outflow
+                native_amount: token_amount,
+                mint_decimals: bank.mint_decimals,
+                current_timestamp: clock.unix_timestamp,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Records deposit inflow on bank-level rate limiter and emits a `RateLimitFlowEvent`
+/// for the delegate flow admin to aggregate off-chain and update the
+/// group rate limiter via
+/// `update_group_rate_limiter`.
+pub fn record_deposit_inflow(
+    bank: &mut Bank,
+    group: &MarginfiGroup,
+    group_key: Pubkey,
+    bank_key: Pubkey,
+    account_flags: u64,
+    amount: u64,
+    clock: &Clock,
+) -> MarginfiResult<()> {
+    // Rate limiting tracks net outflow; inflows release capacity.
+    if !should_skip_rate_limit(account_flags) {
+        if bank.rate_limiter.is_enabled() {
+            bank.rate_limiter
+                .record_inflow(amount, clock.unix_timestamp);
+        }
+
+        if group.rate_limiter.is_enabled() {
+            emit!(RateLimitFlowEvent {
+                group: group_key,
+                bank: bank_key,
+                mint: bank.mint,
+                flow_direction: 1, // inflow
+                native_amount: amount,
+                mint_decimals: bank.mint_decimals,
+                current_timestamp: clock.unix_timestamp,
+            });
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

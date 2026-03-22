@@ -11,8 +11,8 @@ use crate::{
         marginfi_group::MarginfiGroupImpl,
     },
     utils::{
-        assert_within_one_token, is_solend_asset_tag, validate_asset_tags, validate_bank_state,
-        InstructionKind,
+        assert_within_one_token, is_solend_asset_tag, record_deposit_inflow, validate_asset_tags,
+        validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -39,7 +39,10 @@ use solend_mocks::state::{
 /// 2. Deposits the tokens into Solend through a CPI call
 /// 3. Verifies the obligation collateral was increased correctly
 /// 4. Updates the marginfi account's balance to reflect the deposit
-pub fn solend_deposit(ctx: Context<SolendDeposit>, amount: u64) -> MarginfiResult {
+pub fn solend_deposit<'info>(
+    ctx: Context<'_, '_, 'info, 'info, SolendDeposit<'info>>,
+    amount: u64,
+) -> MarginfiResult {
     // Forced to validate here as unable to load obligation as ref in constraints
     validate_solend_obligation(
         ctx.accounts.integration_acc_2.as_ref(),
@@ -91,7 +94,8 @@ pub fn solend_deposit(ctx: Context<SolendDeposit>, amount: u64) -> MarginfiResul
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let group = &ctx.accounts.group.load()?;
+        let group = ctx.accounts.group.load()?;
+        let clock = Clock::get()?;
 
         let mut bank_account = BankAccountWrapper::find_or_create(
             &ctx.accounts.bank.key(),
@@ -103,10 +107,21 @@ pub fn solend_deposit(ctx: Context<SolendDeposit>, amount: u64) -> MarginfiResul
         let obligation_collateral_change_i80f48 = I80F48::from_num(obligation_collateral_change);
         bank_account.deposit_no_repay(obligation_collateral_change_i80f48)?;
 
-        // Update bank cache after modifying balances
-        bank.update_bank_cache(group)?;
+        // Record inflow so net-outflow windows release capacity.
+        record_deposit_inflow(
+            &mut bank,
+            &group,
+            ctx.accounts.group.key(),
+            ctx.accounts.bank.key(),
+            marginfi_account.account_flags,
+            amount,
+            &clock,
+        )?;
 
-        marginfi_account.last_update = Clock::get()?.unix_timestamp as u64;
+        // Update bank cache after modifying balances
+        bank.update_bank_cache(&group)?;
+
+        marginfi_account.last_update = clock.unix_timestamp as u64;
         marginfi_account.lending_account.sort_balances();
 
         emit!(LendingAccountDepositEvent {
@@ -144,7 +159,7 @@ pub struct SolendDeposit<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false)
+            is_signer_authorized(&a, g.admin, authority.key(), false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

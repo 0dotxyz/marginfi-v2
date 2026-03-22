@@ -136,6 +136,7 @@ export const addBankWithSeed = (
  * newEModeAdmin - (Optional) pass null to keep current emode admin
  * newCurveAdmin - (Optional) pass null to keep current curve admin
  * newLimitAdmin - (Optional) pass null to keep current limit admin
+ * newFlowAdmin - (Optional) pass null to keep current flow admin
  * newEmissionsAdmin - (Optional) pass null to keep current emissions admin
  * newMetadataAdmin - (Optional) pass null to keep current meta admin
  * newRiskAdmin - (Optional) pass null to keep current risk admin
@@ -146,12 +147,13 @@ export type GroupConfigureArgs = {
   newEmodeAdmin?: PublicKey | null;
   newCurveAdmin?: PublicKey | null;
   newLimitAdmin?: PublicKey | null;
+  newFlowAdmin?: PublicKey | null;
   newEmissionsAdmin?: PublicKey | null;
   newMetadataAdmin?: PublicKey | null;
   newRiskAdmin?: PublicKey | null;
   marginfiGroup: PublicKey;
-  emodeMaxInitLeverage?: WrappedI80F48 | null; 
-  emodeMaxMaintLeverage?: WrappedI80F48 | null; 
+  emodeMaxInitLeverage?: WrappedI80F48 | null;
+  emodeMaxMaintLeverage?: WrappedI80F48 | null;
 };
 
 export const groupConfigure = async (
@@ -163,6 +165,7 @@ export const groupConfigure = async (
   const newEmodeAdmin = args.newEmodeAdmin ?? group.emodeAdmin;
   const newCurveAdmin = args.newCurveAdmin ?? group.delegateCurveAdmin;
   const newLimitAdmin = args.newLimitAdmin ?? group.delegateLimitAdmin;
+  const newFlowAdmin = args.newFlowAdmin ?? group.delegateFlowAdmin;
   const newEmissionsAdmin =
     args.newEmissionsAdmin ?? group.delegateEmissionsAdmin;
   const newMetadataAdmin = args.newMetadataAdmin ?? group.metadataAdmin;
@@ -176,6 +179,7 @@ export const groupConfigure = async (
       newEmodeAdmin,
       newCurveAdmin,
       newLimitAdmin,
+      newFlowAdmin,
       newEmissionsAdmin,
       newMetadataAdmin,
       newRiskAdmin,
@@ -231,6 +235,51 @@ export const configureBank = (
   return ix;
 };
 
+export type ConfigureBankRateLimitsArgs = {
+  group: PublicKey;
+  bank: PublicKey;
+  hourlyMaxOutflow?: BN | null;
+  dailyMaxOutflow?: BN | null;
+};
+
+export const configureBankRateLimits = (
+  program: Program<Marginfi>,
+  args: ConfigureBankRateLimitsArgs
+) => {
+  const ix = program.methods
+    .configureBankRateLimits(
+      args.hourlyMaxOutflow ?? null,
+      args.dailyMaxOutflow ?? null
+    )
+    .accounts({
+      bank: args.bank,
+    })
+    .instruction();
+  return ix;
+};
+
+export type ConfigureGroupRateLimitsArgs = {
+  marginfiGroup: PublicKey;
+  hourlyMaxOutflowUsd?: BN | null;
+  dailyMaxOutflowUsd?: BN | null;
+};
+
+export const configureGroupRateLimits = (
+  program: Program<Marginfi>,
+  args: ConfigureGroupRateLimitsArgs
+) => {
+  const ix = program.methods
+    .configureGroupRateLimits(
+      args.hourlyMaxOutflowUsd ?? null,
+      args.dailyMaxOutflowUsd ?? null
+    )
+    .accounts({
+      marginfiGroup: args.marginfiGroup,
+    })
+    .instruction();
+  return ix;
+};
+
 export type ConfigureBankOracleArgs = {
   bank: PublicKey;
   type: number;
@@ -257,70 +306,6 @@ export const configureBankOracle = (
   return ix;
 };
 
-export type SetupEmissionsArgs = {
-  bank: PublicKey;
-  emissionsMint: PublicKey;
-  fundingAccount: PublicKey;
-  emissionsFlags: BN;
-  emissionsRate: BN;
-  totalEmissions: BN;
-};
-
-export const setupEmissions = (
-  program: Program<Marginfi>,
-  args: SetupEmissionsArgs
-) => {
-  const ix = program.methods
-    .lendingPoolSetupEmissions(
-      args.emissionsFlags,
-      args.emissionsRate,
-      args.totalEmissions
-    )
-    .accounts({
-      bank: args.bank,
-      emissionsMint: args.emissionsMint,
-      // emissionsAuth: deriveEmissionsAuth()
-      // emissionsTokenAccount: deriveEmissionsTokenAccount()
-      emissionsFundingAccount: args.fundingAccount,
-      tokenProgram: TOKEN_PROGRAM_ID,
-      // systemProgram: SystemProgram.programId,
-    })
-    .instruction();
-  return ix;
-};
-
-export type UpdateEmissionsArgs = {
-  bank: PublicKey;
-  emissionsMint: PublicKey;
-  fundingAccount: PublicKey;
-  emissionsFlags: BN | null;
-  emissionsRate: BN | null;
-  additionalEmissions: BN | null;
-};
-
-export const updateEmissions = (
-  program: Program<Marginfi>,
-  args: UpdateEmissionsArgs
-) => {
-  const ix = program.methods
-    .lendingPoolUpdateEmissionsParameters(
-      args.emissionsFlags,
-      args.emissionsRate,
-      args.additionalEmissions
-    )
-    .accounts({
-      bank: args.bank,
-      emissionsMint: args.emissionsMint,
-      // emissionsAuth: deriveEmissionsAuth()
-      // emissionsTokenAccount: deriveEmissionsTokenAccount()
-      emissionsFundingAccount: args.fundingAccount,
-      tokenProgram: TOKEN_PROGRAM_ID,
-      // systemProgram: SystemProgram.programId,
-    })
-    .instruction();
-  return ix;
-};
-
 // ************* Below this line, not yet included in package ****************
 
 export type InitGlobalFeeStateArgs = {
@@ -329,9 +314,11 @@ export type InitGlobalFeeStateArgs = {
   wallet: PublicKey;
   bankInitFlatSolFee: number;
   liquidationFlatSolFee: number;
+  orderInitFlatFeeDefault: number;
   programFeeFixed: WrappedI80F48;
   programFeeRate: WrappedI80F48;
   liquidationMaxFee: WrappedI80F48;
+  orderExecutionMaxFee: WrappedI80F48;
 };
 
 export const initGlobalFeeState = (
@@ -344,9 +331,11 @@ export const initGlobalFeeState = (
       args.wallet,
       args.bankInitFlatSolFee,
       args.liquidationFlatSolFee,
+      args.orderInitFlatFeeDefault,
       args.programFeeFixed,
       args.programFeeRate,
-      args.liquidationMaxFee
+      args.liquidationMaxFee,
+      args.orderExecutionMaxFee
     )
     .accounts({
       payer: args.payer,
@@ -364,9 +353,11 @@ export type EditGlobalFeeStateArgs = {
   wallet: PublicKey;
   bankInitFlatSolFee: number;
   liquidationFlatSolFee: number;
+  orderInitFlatFeeDefault: number;
   programFeeFixed: WrappedI80F48;
   programFeeRate: WrappedI80F48;
   liquidationMaxFee: WrappedI80F48;
+  orderExecutionMaxFee: WrappedI80F48;
   newAdmin?: PublicKey;
 };
 
@@ -381,9 +372,11 @@ export const editGlobalFeeState = (
       args.wallet,
       args.bankInitFlatSolFee,
       args.liquidationFlatSolFee,
+      args.orderInitFlatFeeDefault,
       args.programFeeFixed,
       args.programFeeRate,
-      args.liquidationMaxFee
+      args.liquidationMaxFee,
+      args.orderExecutionMaxFee
     )
     .accounts({
       globalFeeAdmin: args.admin,
@@ -476,12 +469,12 @@ export const propagateStakedSettings = (
 ) => {
   const remainingAccounts = args.oracle
     ? [
-        {
-          pubkey: args.oracle,
-          isSigner: false,
-          isWritable: false,
-        } as AccountMeta,
-      ]
+      {
+        pubkey: args.oracle,
+        isSigner: false,
+        isWritable: false,
+      } as AccountMeta,
+    ]
     : [];
 
   const ix = program.methods
@@ -873,12 +866,17 @@ export const initBankMetadata = (
 export type SetFixedPriceArgs = {
   bank: PublicKey;
   price: number;
+  remaining?: PublicKey[];
 };
 
 export const setFixedPrice = (
   program: Program<Marginfi>,
   args: SetFixedPriceArgs
 ) => {
+  const oracleMeta: AccountMeta[] = (args.remaining ?? []).map((pubkey) => {
+    return { pubkey, isSigner: false, isWritable: false };
+  });
+
   const ix = program.methods
     .lendingPoolSetFixedOraclePrice(bigNumberToWrappedI80F48(args.price))
     .accounts({
@@ -886,6 +884,7 @@ export const setFixedPrice = (
       // admin: // implied from group
       bank: args.bank,
     })
+    .remainingAccounts(oracleMeta)
     .instruction();
 
   return ix;
@@ -942,6 +941,66 @@ export const writeBankMetadata = (
     })
     .instruction();
 
+  return ix;
+};
+
+export type UpdateGroupRateLimiterArgs = {
+  marginfiGroup: PublicKey;
+  delegateFlowAdmin?: PublicKey;
+  outflowUsd?: BN | null;
+  inflowUsd?: BN | null;
+  updateSeq: BN;
+  eventStartSlot: BN;
+  eventEndSlot: BN;
+};
+
+export const updateGroupRateLimiter = (
+  program: Program<Marginfi>,
+  args: UpdateGroupRateLimiterArgs
+) => {
+  const ix = program.methods
+    .updateGroupRateLimiter(
+      args.outflowUsd ?? null,
+      args.inflowUsd ?? null,
+      args.updateSeq,
+      args.eventStartSlot,
+      args.eventEndSlot
+    )
+    .accounts({
+      marginfiGroup: args.marginfiGroup,
+      delegateFlowAdmin:
+        args.delegateFlowAdmin ?? (program.provider.publicKey as PublicKey),
+    })
+    .instruction();
+  return ix;
+};
+
+export type UpdateDeleverageWithdrawalsArgs = {
+  marginfiGroup: PublicKey;
+  delegateFlowAdmin?: PublicKey;
+  outflowUsd: number;
+  updateSeq: BN;
+  eventStartSlot: BN;
+  eventEndSlot: BN;
+};
+
+export const updateDeleverageWithdrawals = (
+  program: Program<Marginfi>,
+  args: UpdateDeleverageWithdrawalsArgs
+) => {
+  const ix = program.methods
+    .updateDeleverageWithdrawals(
+      args.outflowUsd,
+      args.updateSeq,
+      args.eventStartSlot,
+      args.eventEndSlot
+    )
+    .accounts({
+      marginfiGroup: args.marginfiGroup,
+      delegateFlowAdmin:
+        args.delegateFlowAdmin ?? (program.provider.publicKey as PublicKey),
+    })
+    .instruction();
   return ix;
 };
 

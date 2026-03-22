@@ -16,14 +16,15 @@ import {
   LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
-  SYSVAR_STAKE_HISTORY_PUBKEY,
   Transaction,
   VoteInit,
   VoteProgram,
 } from "@solana/web3.js";
 import fs from "fs";
 import path from "path";
-import { patchBankrunConnection } from "./utils/bankrunConnection";
+import {
+  patchBankrunConnection,
+} from "./utils/bankrunConnection";
 
 // ---------------------------------------------------------------------------
 // Kamino farms (liquidity-incentive) program
@@ -51,11 +52,10 @@ const MOCKS_PROGRAM_ID = new PublicKey(
 );
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { initGlobalFeeState } from "./utils/group-instructions";
-import { deriveGlobalFeeState } from "./utils/pdas";
 import { KaminoLending } from "./fixtures/kamino_lending";
-import klendIdl from "./fixtures/kamino_lending.json";
-import { Drift } from "./fixtures/drift_v2";
-import driftIdl from "./fixtures/drift_v2.json";
+import klendIdl from "../idls/kamino_lending.json";
+import { Drift } from "./fixtures/drift";
+import driftIdl from "../idls/drift.json";
 import { Marginfi } from "../target/types/marginfi";
 import { Mocks } from "../target/types/mocks";
 import marginfiIdl from "../target/idl/marginfi.json";
@@ -89,6 +89,7 @@ export let validatorAdmin: MockUser = undefined;
 export let riskAdmin: MockUser = undefined;
 export const users: MockUser[] = [];
 export const numUsers = 4;
+export const juplendAccounts: Map<string, PublicKey> = new Map();
 
 export const validators: Validator[] = [];
 export const numValidators = 2;
@@ -103,6 +104,8 @@ export const PROGRAM_FEE_FIXED = 0.01;
 export const PROGRAM_FEE_RATE = 0.02;
 /** The most a liquidator can earn in profit from receivership liquidation events */
 export const LIQUIDATION_MAX_FEE = 0.5;
+export const ORDER_EXECUTION_MAX_FEE = 0.05; // 5%
+export const ORDER_INIT_FLAT_FEE_DEFAULT = 100_000;
 
 // All groups and banks below need to be deterministic to ensure the same ordering of balances in
 // lending accounts
@@ -199,7 +202,7 @@ export let kaminoAccounts: Map<string, PublicKey>;
 /** Kamino Market */
 export const MARKET = "market";
 /** Kamino USDC Reserve */
-export const USDC_RESERVE = "usdc_reserve";
+export const USDC_RESERVE = "usdc_reserve\0";
 /** Kamino Token A Reserve */
 export const TOKEN_A_RESERVE = "token_a_reserve";
 /** mrgn USDC bank trading on `USDC_RESERVE` (the reserve for ecosystem.usdcMint) */
@@ -253,7 +256,7 @@ export const SOLEND_TOKEN_A_LIQUIDITY_SUPPLY = "solend_tokena_liquidity_supply";
 /** Token A Reserve collateral mint */
 export const SOLEND_TOKEN_A_COLLATERAL_MINT = "solend_tokena_collateral_mint";
 /** Token A Reserve collateral supply */
-export const SOLEND_TOKENA_COLLATERAL_SUPPLY =
+export const SOLEND_TOKEN_A_COLLATERAL_SUPPLY =
   "solend_tokena_collateral_supply";
 /** Token A Reserve fee receiver */
 export const SOLEND_TOKEN_A_FEE_RECEIVER = "solend_tokena_fee_receiver";
@@ -422,12 +425,29 @@ const extraPrograms: AddedProgram[] = [
     programId: new PublicKey("SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE"),
   },
   {
-    name: "drift_v2",
+    name: "drift",
     programId: new PublicKey("dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH"),
   },
   {
     name: "solend",
     programId: new PublicKey("So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"),
+  },
+  // JupLend (Fluid) programs
+  {
+    name: "juplend_lending",
+    programId: new PublicKey("jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9"),
+  },
+  {
+    name: "juplend_liquidity",
+    programId: new PublicKey("jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC"),
+  },
+  {
+    name: "juplend_rewards_rate_model",
+    programId: new PublicKey("jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar"),
+  },
+  {
+    name: "token_metadata",
+    programId: new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"),
   },
 ];
 
@@ -445,6 +465,7 @@ function getGenesisAccounts(): AddedAccount[] {
     loadJsonFixture("tests/fixtures/mainnet_group.json"),
     loadJsonFixture("tests/fixtures/sol_pyth_oracle.json"),
     loadJsonFixture("tests/fixtures/sol_pyth_price_feed.json"),
+    loadJsonFixture("tests/fixtures/kamino_global_config.json"),
   ];
 }
 
@@ -603,9 +624,11 @@ export const mochaHooks = {
         wallet: globalFeeWallet,
         bankInitFlatSolFee: INIT_POOL_ORIGINATION_FEE,
         liquidationFlatSolFee: LIQUIDATION_FLAT_FEE,
+        orderInitFlatFeeDefault: ORDER_INIT_FLAT_FEE_DEFAULT,
         programFeeFixed: bigNumberToWrappedI80F48(PROGRAM_FEE_FIXED),
         programFeeRate: bigNumberToWrappedI80F48(PROGRAM_FEE_RATE),
         liquidationMaxFee: bigNumberToWrappedI80F48(LIQUIDATION_MAX_FEE),
+        orderExecutionMaxFee: bigNumberToWrappedI80F48(ORDER_EXECUTION_MAX_FEE),
       }),
     );
     await processBankrunTransaction(

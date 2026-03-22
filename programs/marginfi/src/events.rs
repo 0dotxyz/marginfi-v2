@@ -1,6 +1,9 @@
 use crate::StakedSettingsEditConfig;
 use anchor_lang::prelude::*;
-use marginfi_type_crate::types::{BankConfigOpt, HealthCache, WrappedI80F48};
+use marginfi_type_crate::{
+    constants::ORDER_ACTIVE_TAGS,
+    types::{BankConfigOpt, HealthCache, OrderTriggerType, WrappedI80F48},
+};
 
 // Event headers
 
@@ -28,7 +31,7 @@ pub struct MarginfiGroupCreateEvent {
 #[event]
 pub struct MarginfiGroupConfigureEvent {
     pub header: GroupEventHeader,
-    pub admin: Pubkey,
+    pub admin: Option<Pubkey>,
     pub flags: u64,
 }
 
@@ -187,6 +190,34 @@ pub struct MarginfiAccountFreezeEvent {
 }
 
 #[event]
+pub struct MarginfiAccountPlaceOrderEvent {
+    pub header: AccountEventHeader,
+    pub order: Pubkey,
+    pub trigger: OrderTriggerType,
+    pub stop_loss: WrappedI80F48,
+    pub take_profit: WrappedI80F48,
+    pub tags: [u16; ORDER_ACTIVE_TAGS],
+}
+
+#[event]
+pub struct MarginfiAccountCloseOrderEvent {
+    pub header: AccountEventHeader,
+    pub order: Pubkey,
+}
+
+#[event]
+pub struct KeeperCloseOrderEvent {
+    pub header: AccountEventHeader,
+    pub order: Pubkey,
+}
+
+#[event]
+pub struct SetKeeperCloseFlagsEvent {
+    pub header: AccountEventHeader,
+    pub bank_keys: Option<Vec<Pubkey>>,
+}
+
+#[event]
 pub struct HealthPulseEvent {
     pub account: Pubkey,
     pub health_cache: HealthCache,
@@ -207,4 +238,37 @@ pub struct DeleverageEvent {
     pub risk_admin: Pubkey,
     pub deleveragee_assets_seized: f64,
     pub deleveragee_liability_repaid: f64,
+}
+
+// Rate limit events
+
+/// Emitted when a bank-level inflow or outflow is recorded.
+/// The delegate flow admin aggregates these off-chain and
+/// updates the group rate limiter via `update_group_rate_limiter`.
+#[event]
+pub struct RateLimitFlowEvent {
+    pub group: Pubkey,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    /// 0 = outflow (withdraw/borrow), 1 = inflow (deposit/repay)
+    pub flow_direction: u8,
+    /// Amount in native tokens
+    pub native_amount: u64,
+    pub mint_decimals: u8,
+    /// Unix timestamp when the flow was recorded
+    pub current_timestamp: i64,
+}
+
+/// Emitted for deleverage-only withdraw outflows.
+/// The delegate flow admin aggregates these off-chain and
+/// updates the deleverage daily withdraws via `update_deleverage_withdrawals`.
+#[event]
+pub struct DeleverageWithdrawFlowEvent {
+    pub group: Pubkey,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    /// Equity-denominated outflow value in USD, rounded to integer.
+    pub outflow_usd: u32,
+    /// Unix timestamp when the flow was recorded
+    pub current_timestamp: i64,
 }

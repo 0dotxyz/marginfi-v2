@@ -26,12 +26,10 @@ import {
 } from "@mrgnlabs/mrgn-common";
 import { assertBankrunTxFailed } from "./utils/genericTests";
 import { USER_ACCOUNT_E } from "./utils/mocks";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import {
   EMODE_APPLIES_TO_ISOLATED,
   EMODE_LST_TAG,
   EMODE_SOL_TAG,
-  HEALTH_CACHE_HEALTHY,
   newEmodeEntry,
 } from "./utils/types";
 import {
@@ -43,10 +41,9 @@ import {
   composeRemainingAccounts,
 } from "./utils/user-instructions";
 import { configBankEmode } from "./utils/group-instructions";
-import { logHealthCache } from "./utils/tools";
+import { bytesToF64, getBankrunBlockhash, logHealthCache } from "./utils/tools";
 import { assert } from "chai";
-import { bytesToF64 } from "./utils/tools";
-import { dummyTx } from "./utils/bankrunConnection";
+import { dummyIx } from "./utils/bankrunConnection";
 
 // Banks are listed here in the sorted-by-public-keys order - the same used in the lending account balances
 const seed = new BN(EMODE_SEED);
@@ -465,18 +462,20 @@ describe("Emode liquidation", () => {
     const user = users[2];
     const userAccount = user.accounts.get(USER_ACCOUNT_E);
 
+    const remaining = composeRemainingAccounts([
+      [usdcBank, oracles.usdcOracle.publicKey],
+      [solBank, oracles.wsolOracle.publicKey],
+      [stableBank, oracles.usdcOracle.publicKey],
+      [lstABank, oracles.pythPullLst.publicKey],
+    ]);
+
     let tx = new Transaction().add(
       await repayIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         bank: stableBank,
         tokenAccount: user.usdcAccount,
         repayAll: true,
-        remaining: composeRemainingAccounts([
-          [usdcBank, oracles.usdcOracle.publicKey],
-          [solBank, oracles.wsolOracle.publicKey],
-          [stableBank, oracles.usdcOracle.publicKey],
-          [lstABank, oracles.pythPullLst.publicKey],
-        ]),
+        remaining,
         amount: new BN(0.0001 * 10 ** ecosystem.usdcDecimals),
       })
     );
@@ -604,7 +603,7 @@ describe("Emode liquidation", () => {
     remaining: Array<PublicKey>
   ) => {
     const tx = new Transaction().add(
-      dummyTx(user.wallet.publicKey, users[1].wallet.publicKey),
+      dummyIx(user.wallet.publicKey, users[1].wallet.publicKey),
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         remaining,

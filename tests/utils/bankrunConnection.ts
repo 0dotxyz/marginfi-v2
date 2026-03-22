@@ -6,9 +6,10 @@ import {
   Commitment,
   SystemProgram,
   TransactionInstruction,
+  SYSVAR_CLOCK_PUBKEY,
 } from "@solana/web3.js";
-import { BanksClient } from "solana-bankrun";
-import { Instruction, utils } from "@coral-xyz/anchor";
+import { BanksClient, Clock, ProgramTestContext } from "solana-bankrun";
+import { BN, utils } from "@coral-xyz/anchor";
 
 /**
  * Patches a bankrun connection to add missing methods that tests need.
@@ -17,7 +18,7 @@ import { Instruction, utils } from "@coral-xyz/anchor";
  */
 export function patchBankrunConnection(
   connection: Connection,
-  banksClient: BanksClient
+  banksClient: BanksClient,
 ): void {
   type PatchedConnection = Connection & {
     getBalance: (publicKey: PublicKey) => Promise<number>;
@@ -26,7 +27,7 @@ export function patchBankrunConnection(
       lastValidBlockHeight: number;
     }>;
     sendRawTransaction: (
-      rawTransaction: Buffer | Uint8Array
+      rawTransaction: Buffer | Uint8Array,
     ) => Promise<string>;
   };
 
@@ -38,7 +39,7 @@ export function patchBankrunConnection(
   const originalGetAccountInfo = connection.getAccountInfo.bind(connection);
   conn.getAccountInfo = async (
     publicKey: PublicKey,
-    commitment?: Commitment
+    commitment?: Commitment,
   ) => {
     try {
       return await originalGetAccountInfo(publicKey, commitment);
@@ -54,7 +55,7 @@ export function patchBankrunConnection(
     connection.getAccountInfoAndContext.bind(connection);
   conn.getAccountInfoAndContext = async (
     publicKey: PublicKey,
-    commitment?: Commitment
+    commitment?: Commitment,
   ) => {
     try {
       return await originalGetAccountInfoAndContext(publicKey, commitment);
@@ -122,9 +123,9 @@ export function patchBankrunConnection(
  * @param to
  * @returns
  */
-export function dummyTx(
+export function dummyIx(
   from: PublicKey,
-  to: PublicKey
+  to: PublicKey,
 ): TransactionInstruction {
   let ix = SystemProgram.transfer({
     fromPubkey: from,
@@ -133,3 +134,59 @@ export function dummyTx(
   });
   return ix;
 }
+
+const ONE_HOUR_IN_SECONDS = 60 * 60;
+/**
+ * Great for generating nominal interest
+ * @param banksClient
+ * @param bankrunContext
+ */
+export const advanceOneHour = async (
+  banksClient: BanksClient,
+  bankrunContext: ProgramTestContext,
+) => {
+  const before = await banksClient.getClock();
+  bankrunContext.setClock(
+    new Clock(
+      before.slot,
+      before.epochStartTimestamp,
+      before.epoch,
+      before.leaderScheduleEpoch,
+      before.unixTimestamp + BigInt(ONE_HOUR_IN_SECONDS),
+    ),
+  );
+};
+
+const FIVE_MINUTES_IN_SECONDS = 5 * 60;
+/**
+ * Great for forcing oracles to be stale
+ * @param banksClient
+ * @param bankrunContext
+ */
+export const advanceFiveMinutes = async (
+  banksClient: BanksClient,
+  bankrunContext: ProgramTestContext,
+) => {
+  const before = await banksClient.getClock();
+  bankrunContext.setClock(
+    new Clock(
+      before.slot,
+      before.epochStartTimestamp,
+      before.epoch,
+      before.leaderScheduleEpoch,
+      before.unixTimestamp + BigInt(FIVE_MINUTES_IN_SECONDS),
+    ),
+  );
+};
+
+export const getEpochAndSlot = async (banksClient: BanksClient) => {
+  let clock = await banksClient.getAccount(SYSVAR_CLOCK_PUBKEY);
+
+  // Slot is bytes 0-8
+  let slot = new BN(clock.data.slice(0, 8), 10, "le").toNumber();
+
+  // Epoch is bytes 16-24
+  let epoch = new BN(clock.data.slice(16, 24), 10, "le").toNumber();
+
+  return { epoch, slot };
+};

@@ -1,3 +1,4 @@
+use crate::check;
 use crate::events::{
     GroupEventHeader, LendingPoolBankConfigureEvent, LendingPoolBankConfigureFrozenEvent,
 };
@@ -5,14 +6,17 @@ use crate::prelude::MarginfiError;
 use crate::state::bank::BankImpl;
 use crate::state::emode::EmodeSettingsImpl;
 use crate::MarginfiResult;
-use crate::{check, math_error, utils};
 use anchor_lang::prelude::*;
+use anchor_spl::associated_token::get_associated_token_address_with_program_id;
 use anchor_spl::token_2022::{transfer_checked, TransferChecked};
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::{EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED, FREEZE_SETTINGS},
-    types::{Bank, BankConfigOpt, MarginfiGroup},
+    constants::{
+        EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED, EMISSION_FLAGS, FEE_STATE_SEED,
+        FREEZE_SETTINGS,
+    },
+    types::{Bank, BankConfigOpt, FeeState, MarginfiGroup},
 };
 
 pub fn lending_pool_configure_bank(
@@ -79,66 +83,79 @@ pub struct LendingPoolConfigureBank<'info> {
     pub bank: AccountLoader<'info, Bank>,
 }
 
-pub fn lending_pool_setup_emissions(
-    ctx: Context<LendingPoolSetupEmissions>,
-    emissions_flags: u64,
-    emissions_rate: u64,
-    total_emissions: u64,
+/// (permissionless) Reclaim all remaining tokens from the emissions vault
+/// to the global fee wallet ATA, and disable emissions on the bank.
+pub fn lending_pool_reclaim_emissions_vault(
+    ctx: Context<LendingPoolReclaimEmissionsVault>,
 ) -> MarginfiResult {
     let mut bank = ctx.accounts.bank.load_mut()?;
 
+    if bank.emissions_mint.eq(&Pubkey::default()) {
+        return Ok(());
+    }
+
     check!(
-        bank.emissions_mint.eq(&Pubkey::default()),
-        MarginfiError::EmissionsAlreadySetup
+        bank.emissions_mint == ctx.accounts.emissions_mint.key(),
+        MarginfiError::InvalidEmissionsMint
     );
 
-    bank.emissions_mint = ctx.accounts.emissions_mint.key();
+    // Validate the destination ATA is correct
+    {
+        let mint = &ctx.accounts.emissions_mint.key();
+        let global_fee_wallet = &ctx.accounts.fee_state.load()?.global_fee_wallet;
+        let token_program_id = &ctx.accounts.token_program.key();
+        let destination_ata = &ctx.accounts.destination_account.key();
+        let ata_expected =
+            get_associated_token_address_with_program_id(global_fee_wallet, mint, token_program_id);
+        check!(
+            destination_ata.eq(&ata_expected),
+            MarginfiError::InvalidFeeAta
+        );
+    }
 
-    bank.override_emissions_flag(emissions_flags);
+    let vault_balance = ctx.accounts.emissions_vault.amount;
 
-    bank.emissions_rate = emissions_rate;
-    bank.emissions_remaining = I80F48::from_num(total_emissions).into();
+    if vault_balance > 0 {
+        let signer_seeds: &[&[&[u8]]] = &[&[
+            EMISSIONS_AUTH_SEED.as_bytes(),
+            &ctx.accounts.bank.key().to_bytes(),
+            &ctx.accounts.emissions_mint.key().to_bytes(),
+            &[ctx.bumps.emissions_auth],
+        ]];
 
-    msg!("init emissions with mint: {:?}", bank.emissions_mint,);
+        transfer_checked(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                TransferChecked {
+                    from: ctx.accounts.emissions_vault.to_account_info(),
+                    to: ctx.accounts.destination_account.to_account_info(),
+                    authority: ctx.accounts.emissions_auth.to_account_info(),
+                    mint: ctx.accounts.emissions_mint.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            vault_balance,
+            ctx.accounts.emissions_mint.decimals,
+        )?;
+    }
+
+    bank.emissions_remaining = I80F48::ZERO.into();
+    bank.emissions_rate = 0;
+    bank.flags &= !EMISSION_FLAGS;
+    bank.emissions_mint = Pubkey::default();
+
     msg!(
-        "flags: {:?} rate: {:?} total: {:?}",
-        emissions_flags,
-        emissions_rate,
-        total_emissions
+        "Reclaimed {} tokens from emissions vault for bank {}",
+        vault_balance,
+        ctx.accounts.bank.key()
     );
-
-    let initial_emissions_amount_pre_fee = utils::calculate_pre_fee_spl_deposit_amount(
-        ctx.accounts.emissions_mint.to_account_info(),
-        total_emissions,
-        Clock::get()?.epoch,
-    )?;
-
-    transfer_checked(
-        CpiContext::new(
-            ctx.accounts.token_program.to_account_info(),
-            TransferChecked {
-                from: ctx.accounts.emissions_funding_account.to_account_info(),
-                to: ctx.accounts.emissions_token_account.to_account_info(),
-                authority: ctx.accounts.delegate_emissions_admin.to_account_info(),
-                mint: ctx.accounts.emissions_mint.to_account_info(),
-            },
-        ),
-        initial_emissions_amount_pre_fee,
-        ctx.accounts.emissions_mint.decimals,
-    )?;
 
     Ok(())
 }
 
 #[derive(Accounts)]
-pub struct LendingPoolSetupEmissions<'info> {
-    #[account(
-        has_one = delegate_emissions_admin @ MarginfiError::Unauthorized,
-    )]
+pub struct LendingPoolReclaimEmissionsVault<'info> {
     pub group: AccountLoader<'info, MarginfiGroup>,
-
-    #[account(mut)]
-    pub delegate_emissions_admin: Signer<'info>,
 
     #[account(
         mut,
@@ -160,112 +177,6 @@ pub struct LendingPoolSetupEmissions<'info> {
     pub emissions_auth: AccountInfo<'info>,
 
     #[account(
-        init,
-        payer = delegate_emissions_admin,
-        token::mint = emissions_mint,
-        token::authority = emissions_auth,
-        seeds = [
-            EMISSIONS_TOKEN_ACCOUNT_SEED.as_bytes(),
-            bank.key().as_ref(),
-            emissions_mint.key().as_ref(),
-        ],
-        bump,
-    )]
-    pub emissions_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
-
-    /// NOTE: This is a TokenAccount, spl transfer will validate it.
-    ///
-    /// CHECK: Account provided only for funding rewards
-    #[account(mut)]
-    pub emissions_funding_account: AccountInfo<'info>,
-
-    pub token_program: Interface<'info, TokenInterface>,
-    pub system_program: Program<'info, System>,
-}
-
-pub fn lending_pool_update_emissions_parameters(
-    ctx: Context<LendingPoolUpdateEmissionsParameters>,
-    emissions_flags: Option<u64>,
-    emissions_rate: Option<u64>,
-    additional_emissions: Option<u64>,
-) -> MarginfiResult {
-    let mut bank = ctx.accounts.bank.load_mut()?;
-
-    check!(
-        bank.emissions_mint.ne(&Pubkey::default()),
-        MarginfiError::EmissionsUpdateError
-    );
-
-    check!(
-        bank.emissions_mint.eq(&ctx.accounts.emissions_mint.key()),
-        MarginfiError::EmissionsUpdateError
-    );
-
-    if let Some(flags) = emissions_flags {
-        msg!("Updating emissions flags to {:#010b}", flags);
-        bank.flags = flags;
-    }
-
-    if let Some(rate) = emissions_rate {
-        msg!("Updating emissions rate to {}", rate);
-        bank.emissions_rate = rate;
-    }
-
-    if let Some(additional_emissions) = additional_emissions {
-        bank.emissions_remaining = I80F48::from(bank.emissions_remaining)
-            .checked_add(I80F48::from_num(additional_emissions))
-            .ok_or_else(math_error!())?
-            .into();
-
-        msg!(
-            "Adding {} emissions, total {}",
-            additional_emissions,
-            I80F48::from(bank.emissions_remaining)
-        );
-
-        let additional_emissions_amount_pre_fee = utils::calculate_pre_fee_spl_deposit_amount(
-            ctx.accounts.emissions_mint.to_account_info(),
-            additional_emissions,
-            Clock::get()?.epoch,
-        )?;
-
-        transfer_checked(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                TransferChecked {
-                    from: ctx.accounts.emissions_funding_account.to_account_info(),
-                    to: ctx.accounts.emissions_token_account.to_account_info(),
-                    authority: ctx.accounts.delegate_emissions_admin.to_account_info(),
-                    mint: ctx.accounts.emissions_mint.to_account_info(),
-                },
-            ),
-            additional_emissions_amount_pre_fee,
-            ctx.accounts.emissions_mint.decimals,
-        )?;
-    }
-
-    Ok(())
-}
-
-#[derive(Accounts)]
-pub struct LendingPoolUpdateEmissionsParameters<'info> {
-    #[account(
-        has_one = delegate_emissions_admin @ MarginfiError::Unauthorized
-    )]
-    pub group: AccountLoader<'info, MarginfiGroup>,
-
-    #[account(mut)]
-    pub delegate_emissions_admin: Signer<'info>,
-
-    #[account(
-        mut,
-        has_one = group @ MarginfiError::InvalidGroup
-    )]
-    pub bank: AccountLoader<'info, Bank>,
-
-    pub emissions_mint: InterfaceAccount<'info, Mint>,
-
-    #[account(
         mut,
         seeds = [
             EMISSIONS_TOKEN_ACCOUNT_SEED.as_bytes(),
@@ -274,11 +185,18 @@ pub struct LendingPoolUpdateEmissionsParameters<'info> {
         ],
         bump,
     )]
-    pub emissions_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub emissions_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// CHECK: Account provided only for funding rewards
+    #[account(
+        seeds = [FEE_STATE_SEED.as_bytes()],
+        bump,
+    )]
+    pub fee_state: AccountLoader<'info, FeeState>,
+
+    /// CHECK: Canonical ATA of the `FeeState.global_fee_wallet` for the
+    /// emissions mint (validated in handler).
     #[account(mut)]
-    pub emissions_funding_account: AccountInfo<'info>,
+    pub destination_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     pub token_program: Interface<'info, TokenInterface>,
 }

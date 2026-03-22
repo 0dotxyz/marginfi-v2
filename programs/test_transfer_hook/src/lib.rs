@@ -249,7 +249,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], input: &[u8]) -> P
 //             &[ix],
 //             Some(&ctx.payer.pubkey()),
 //             &[&ctx.payer],
-//             ctx.last_blockhash,
+//             ctx.banks_client.get_latest_blockhash().await.unwrap(),
 //         );
 
 //         ctx.banks_client

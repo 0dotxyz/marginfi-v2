@@ -1,21 +1,22 @@
 use crate::{
     bank_signer, check,
     constants::PROGRAM_VERSION,
-    events::{AccountEventHeader, LendingAccountWithdrawEvent},
+    events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     ix_utils::{get_discrim_hash, Hashable},
     prelude::*,
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            account_not_frozen_for_authority, calc_value, is_signer_authorized, BankAccountWrapper,
-            LendingAccountImpl, MarginfiAccountImpl, RiskEngine,
+            account_not_frozen_for_authority, calc_value, check_account_init_health,
+            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         price::OraclePriceWithConfidence,
+        rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
         self, fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank,
-        is_marginfi_asset_tag, validate_bank_state, InstructionKind,
+        is_marginfi_asset_tag, record_withdrawal_outflow, validate_bank_state, InstructionKind,
     },
 };
 use anchor_lang::prelude::*;
@@ -30,7 +31,7 @@ use marginfi_type_crate::{
     constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, TOKENLESS_REPAYMENTS_COMPLETE},
     types::{
         Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -61,21 +62,22 @@ pub fn lending_account_withdraw<'info>(
     let withdraw_all = withdraw_all.unwrap_or(false);
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
 
-    check!(
-        !marginfi_account.get_flag(ACCOUNT_DISABLED),
-        MarginfiError::AccountDisabled
-    );
-
     {
-        let mut group = marginfi_group_loader.load_mut()?;
+        let maybe_bank_mint = {
+            let bank = bank_loader.load()?;
+            utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?
+        };
+
+        let in_receivership_or_order_execution =
+            marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
+        let group = marginfi_group_loader.load()?;
         let mut bank = bank_loader.load_mut()?;
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
 
-        let maybe_bank_mint =
-            utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?;
-
-        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
-        let price = if in_receivership {
+        // Fetch oracle price for rate limiting and deleverage tracking
+        // When group rate limiter is enabled, oracle is required
+        let group_rate_limit_enabled = group.rate_limiter.is_enabled();
+        let price = if in_receivership_or_order_execution || group_rate_limit_enabled {
             let price = fetch_asset_price_for_bank_low_bias(
                 &bank_loader.key(),
                 &bank,
@@ -84,11 +86,12 @@ pub fn lending_account_withdraw<'info>(
             )?;
 
             // Validate price is non-zero during liquidation/deleverage to prevent exploits
-            check!(price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
+            if in_receivership_or_order_execution {
+                check!(price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
+            }
 
             price
         } else {
-            // TODO: force callers to pass oracle, to support tracking withdraws outside delev
             I80F48::ZERO
         };
 
@@ -101,13 +104,14 @@ pub fn lending_account_withdraw<'info>(
 
         let liquidity_vault_authority_bump = bank.liquidity_vault_authority_bump;
 
+        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
         let lending_account = &mut marginfi_account.lending_account;
         let mut bank_account =
             BankAccountWrapper::find(&bank_loader.key(), &mut bank, lending_account)?;
 
         let amount_pre_fee = if withdraw_all {
             // Note: In liquidation, we still want this passed on the books
-            bank_account.withdraw_all()?
+            bank_account.withdraw_all(in_receivership)?
         } else {
             let amount_pre_fee = maybe_bank_mint
                 .as_ref()
@@ -139,6 +143,20 @@ pub fn lending_account_withdraw<'info>(
             amount_pre_fee
         };
 
+        // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
+        let rate_limit_amount = if withdraw_all { amount_pre_fee } else { amount };
+
+        record_withdrawal_outflow(
+            group_rate_limit_enabled,
+            rate_limit_amount,
+            price,
+            &mut bank,
+            &group,
+            marginfi_group_loader.key(),
+            bank_loader.key(),
+            &marginfi_account,
+            &clock,
+        )?;
         // Note: we only care about the withdraw limit in case of deleverage
         if marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE) {
             let withdrawn_equity = calc_value(
@@ -147,7 +165,14 @@ pub fn lending_account_withdraw<'info>(
                 bank.get_balance_decimals(),
                 None,
             )?;
-            group.update_withdrawn_equity(withdrawn_equity, clock.unix_timestamp)?;
+            group.check_deleverage_withdraw_limit(withdrawn_equity, clock.unix_timestamp)?;
+            emit!(DeleverageWithdrawFlowEvent {
+                group: marginfi_group_loader.key(),
+                bank: bank_loader.key(),
+                mint: bank.mint,
+                outflow_usd: withdrawn_equity.to_num(),
+                current_timestamp: clock.unix_timestamp,
+            });
         }
 
         marginfi_account.last_update = clock.unix_timestamp as u64;
@@ -191,26 +216,25 @@ pub fn lending_account_withdraw<'info>(
     let maybe_price: Option<OraclePriceWithConfidence>;
     let bank_pk = bank_loader.key();
 
-    // Note: during receivership, we skip all health checks until the end of the transaction.
-    if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
+    // Note: during receivership and order execution, we skip all health checks until the end of the transaction.
+    if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION) {
         // Check account health, if below threshold fail transaction
         // Assuming `ctx.remaining_accounts` holds only oracle accounts
-        let (risk_result, risk_engine) = RiskEngine::check_account_init_health(
+        // Uses heap-efficient health check to support accounts with up to 16 positions
+        check_account_init_health(
             &marginfi_account,
             ctx.remaining_accounts,
             &mut Some(&mut health_cache),
-        );
-        risk_result?;
+        )?;
         health_cache.program_version = PROGRAM_VERSION;
-
-        // Note: in flashloans, risk_engine is None, and we skip the cache price update.
-        maybe_price = risk_engine.and_then(|e| e.get_unbiased_price_for_bank(&bank_pk).ok());
 
         health_cache.set_engine_ok(true);
         marginfi_account.health_cache = health_cache;
-    } else {
-        // Note: the caller can simply omit risk accounts since the risk check is ignored here, in
-        // that case the cache doesn't update and this does nothing.
+    }
+
+    // Fetch unbiased price for cache update
+    // Note: during receivership, callers may omit oracle accounts; the cache simply won't update.
+    {
         let bank = bank_loader.load()?;
         maybe_price =
             fetch_unbiased_price_for_bank(&bank_pk, &bank, &clock, ctx.remaining_accounts).ok();
@@ -224,7 +248,6 @@ pub fn lending_account_withdraw<'info>(
 #[derive(Accounts)]
 pub struct LendingAccountWithdraw<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused
@@ -235,21 +258,25 @@ pub struct LendingAccountWithdraw<'info> {
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_DISABLED)
+        } @MarginfiError::AccountDisabled,
+        constraint = {
             let a = marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())
         } @ MarginfiError::AccountFrozen,
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), true)
+            is_signer_authorized(&a, g.admin, authority.key(), true, true)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
-    /// Must be marginfi_account's authority, unless in liquidation/deleverage receivership
+    /// Must be marginfi_account's authority, unless in liquidation/deleverage receivership or order execution
     ///
-    /// Note: during receivership, there are no signer checks whatsoever: any key can repay as
-    /// long as the invariants checked at the end of receivership are met.
+    /// Note: during receivership and order execution, there are no signer checks whatsoever: any key can repay as
+    /// long as the invariants checked at the end of execution are met.
     pub authority: Signer<'info>,
 
     #[account(

@@ -13,7 +13,6 @@ import {
   bankRunProvider,
 } from "./rootHooks";
 import { deriveBankWithSeed, deriveStakedSettings } from "./utils/pdas";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
 import { getTokenBalance, assertI80F48Equal } from "./utils/genericTests";
@@ -26,6 +25,7 @@ import {
   withdrawIx,
 } from "./utils/user-instructions";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
+import { getBankrunBlockhash } from "./utils/tools";
 
 let marginfiGroup: Keypair;
 let bankKeypairSol: Keypair;
@@ -198,21 +198,24 @@ describe("Withdraw staked asset", () => {
       ).toNumber() *
       wrappedI80F48toBigNumber(bankBefore.liabilityShareValue).toNumber();
 
+    const remaining = composeRemainingAccounts([
+      [
+        validators[0].bank,
+        oracles.wsolOracle.publicKey,
+        validators[0].splMint,
+        validators[0].splSolPool,
+      ],
+      [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
+    ]);
+
     let tx = new Transaction().add(
       await repayIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         bank: bankKeypairSol.publicKey,
         tokenAccount: user.wsolAccount,
         amount: new BN(amtNative),
-        remaining: composeRemainingAccounts([
-          [
-            validators[0].bank,
-            oracles.wsolOracle.publicKey,
-            validators[0].splMint,
-            validators[0].splSolPool,
-          ],
-          [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
-        ]),
+        // For repayAll, include all active balances, including the closing bank.
+        remaining,
         repayAll: true,
       })
     );
@@ -252,21 +255,25 @@ describe("Withdraw staked asset", () => {
       ).toNumber() *
       wrappedI80F48toBigNumber(bankBefore.assetShareValue).toNumber();
 
+    const remaining = composeRemainingAccounts(
+      [
+        [
+          validators[0].bank,
+          oracles.wsolOracle.publicKey,
+          validators[0].splMint,
+          validators[0].splSolPool,
+        ],
+      ].filter((group) => !group[0].equals(validators[0].bank))
+    );
+
     let tx = new Transaction().add(
       await withdrawIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         bank: validators[0].bank,
         tokenAccount: userLstAta,
         amount: new BN(amtNative),
-        remaining: composeRemainingAccounts([
-          [
-            validators[0].bank,
-            oracles.wsolOracle.publicKey,
-            validators[0].splMint,
-            validators[0].splSolPool,
-          ],
-          [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
-        ]),
+        // For withdrawAll, include all active balances, including the closing bank.
+        remaining,
         withdrawAll: true,
       })
     );

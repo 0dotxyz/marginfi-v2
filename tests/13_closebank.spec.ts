@@ -115,17 +115,21 @@ describe("Close bank", () => {
     );
     dumpAccBalances(acc);
 
+    // For withdrawAll, include all active balances, including the closing bank.
+    const remaining = composeRemainingAccounts(
+      [
+        [bankKey, oracles.tokenAOracle.publicKey],
+        [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
+        [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+      ].filter((group) => !group[0].equals(bankKey))
+    );
     await users[0].mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await withdrawIx(users[0].mrgnProgram, {
           marginfiAccount: userAcc,
           bank: bankKey,
           tokenAccount: users[0].tokenAAccount,
-          remaining: composeRemainingAccounts([
-            [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
-            [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
-            [bankKey, oracles.tokenAOracle.publicKey],
-          ]),
+          remaining,
           amount: new BN(0),
           withdrawAll: true,
         })

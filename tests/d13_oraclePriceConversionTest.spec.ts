@@ -3,7 +3,6 @@ import {
   PublicKey,
   Transaction,
   Keypair,
-  SystemProgram,
 } from "@solana/web3.js";
 import {
   ecosystem,
@@ -34,8 +33,6 @@ import {
   TOKEN_A_MARKET_INDEX,
   calculateInterestRate,
   DRIFT_UTILIZATION_PRECISION,
-  USDC_SCALING_FACTOR,
-  TOKEN_A_SCALING_FACTOR,
   ONE_YEAR,
   ONE,
 } from "./utils/drift-utils";
@@ -216,17 +213,6 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
     );
 
     bankrunContext.setClock(newClock);
-
-    const dummyTx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: globalProgramAdmin.wallet.publicKey,
-        toPubkey: globalProgramAdmin.wallet.publicKey,
-        lamports: 1,
-      })
-    );
-    await processBankrunTransaction(bankrunContext, dummyTx, [
-      globalProgramAdmin.wallet,
-    ]);
 
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 

@@ -35,9 +35,9 @@ use drift_mocks::constants::scale_drift_deposit_limit;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        ASSET_TAG_DRIFT, CLOSE_ENABLED_FLAG, EMISSION_FLAGS, FEE_VAULT_AUTHORITY_SEED,
-        FEE_VAULT_SEED, FREEZE_SETTINGS, GROUP_FLAGS, INSURANCE_VAULT_AUTHORITY_SEED,
-        INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+        ASSET_TAG_DRIFT, CLOSE_ENABLED_FLAG, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED,
+        FREEZE_SETTINGS, GROUP_FLAGS, INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED,
+        LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup},
@@ -115,9 +115,7 @@ pub trait BankImpl {
     ) -> MarginfiResult;
     fn socialize_loss(&mut self, loss_amount: I80F48) -> MarginfiResult<bool>;
     fn get_flag(&self, flag: u64) -> bool;
-    fn override_emissions_flag(&mut self, flag: u64);
     fn update_flag(&mut self, value: bool, flag: u64);
-    fn verify_emissions_flags(flags: u64) -> bool;
     fn verify_group_flags(flags: u64) -> bool;
     fn increment_lending_position_count(&mut self);
     fn decrement_lending_position_count(&mut self);
@@ -380,14 +378,30 @@ impl BankImpl for Bank {
                 new_state != BankOperationalState::KilledByBankruptcy,
                 MarginfiError::Unauthorized
             );
+            // Log operational state change
+            let old_state = self.config.operational_state;
             self.config.operational_state = new_state;
+            msg!(
+                "Operational state changed from {:?} to {:?}",
+                old_state,
+                new_state
+            );
         }
 
         if let Some(ir_config) = &config.interest_rate_config {
             self.config.interest_rate_config.update(ir_config);
         }
 
-        set_if_some!(self.config.risk_tier, config.risk_tier);
+        // Log risk tier change
+        if let Some(new_risk_tier) = config.risk_tier {
+            let old_risk_tier = self.config.risk_tier;
+            self.config.risk_tier = new_risk_tier;
+            msg!(
+                "Risk tier changed from {:?} to {:?}",
+                old_risk_tier,
+                new_risk_tier
+            );
+        }
 
         set_if_some!(self.config.asset_tag, config.asset_tag);
 
@@ -566,6 +580,9 @@ impl BankImpl for Bank {
     /// # Arguments
     /// * `group` - The marginfi group
     fn update_bank_cache(&mut self, group: &MarginfiGroup) -> MarginfiResult<()> {
+        if self.cache.is_liquidation_price_cache_locked() {
+            return Ok(());
+        }
         let total_assets_amount: I80F48 = self.get_asset_amount(self.total_asset_shares.into())?;
         let total_liabilities_amount: I80F48 =
             self.get_liability_amount(self.total_liability_shares.into())?;
@@ -605,6 +622,9 @@ impl BankImpl for Bank {
         &mut self,
         oracle_price: Option<OraclePriceWithConfidence>,
     ) -> MarginfiResult<()> {
+        if self.cache.is_liquidation_price_cache_locked() {
+            return Ok(());
+        }
         if let Some(price_with_confidence) = oracle_price {
             self.cache.last_oracle_price = price_with_confidence.price.into();
             self.cache.last_oracle_price_confidence = price_with_confidence.confidence.into();
@@ -758,11 +778,6 @@ impl BankImpl for Bank {
         (self.flags & flag) == flag
     }
 
-    fn override_emissions_flag(&mut self, flag: u64) {
-        assert!(Self::verify_emissions_flags(flag));
-        self.flags = flag;
-    }
-
     fn update_flag(&mut self, value: bool, flag: u64) {
         assert!(Self::verify_group_flags(flag));
 
@@ -771,10 +786,6 @@ impl BankImpl for Bank {
         } else {
             self.flags &= !flag;
         }
-    }
-
-    fn verify_emissions_flags(flags: u64) -> bool {
-        flags & EMISSION_FLAGS == flags
     }
 
     fn verify_group_flags(flags: u64) -> bool {

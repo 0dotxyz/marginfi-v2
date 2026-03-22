@@ -1,17 +1,14 @@
 import { Program } from "@coral-xyz/anchor";
-import { Keypair, Transaction, PublicKey } from "@solana/web3.js";
+import { Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import { bankrunProgram, marginfiGroup, users } from "./rootHooks";
 import {
-  assertBNEqual,
-  assertI80F48Equal,
   assertKeyDefault,
   assertKeysEqual,
   expectFailedTxWithMessage,
 } from "./utils/genericTests";
 import { assert } from "chai";
 import { accountInitPda } from "./utils/user-instructions";
-import { USER_ACCOUNT } from "./utils/mocks";
 import { deriveMarginfiAccountPda } from "./utils/pdas";
 
 let program: Program<Marginfi>;

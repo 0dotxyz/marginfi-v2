@@ -1,6 +1,6 @@
 import { BN, Program } from "@coral-xyz/anchor";
 import { BankrunProvider } from "anchor-bankrun";
-import { Transaction } from "@solana/web3.js";
+import { PublicKey, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairA,
@@ -9,18 +9,14 @@ import {
   bankrunContext,
   bankrunProgram,
   bankRunProvider,
-  banksClient,
   ecosystem,
   oracles,
   users,
   verbose,
 } from "./rootHooks";
-import { Clock } from "solana-bankrun";
-import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import {
   assertBNApproximately,
   assertKeysEqual,
-  expectFailedTxWithError,
   getTokenBalance,
 } from "./utils/genericTests";
 import { assert } from "chai";
@@ -29,7 +25,6 @@ import {
   composeRemainingAccounts,
   depositIx,
   repayIx,
-  withdrawEmissionsIx,
   withdrawIx,
 } from "./utils/user-instructions";
 import { USER_ACCOUNT } from "./utils/mocks";
@@ -41,9 +36,16 @@ let program: Program<Marginfi>;
 let provider: BankrunProvider;
 
 describe("Withdraw funds", () => {
+  let balanceAccountGroups: PublicKey[][] = [];
+
   before(() => {
     provider = bankRunProvider;
     program = bankrunProgram;
+    balanceAccountGroups = [
+      [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
+      [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+      [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
+    ];
   });
 
   const withdrawAmountTokenA = 0.1;
@@ -55,28 +57,6 @@ describe("Withdraw funds", () => {
   const repayAmountUsdc_native = new BN(
     repayAmountUsdc * 10 ** ecosystem.usdcDecimals
   );
-
-  /**
-   * Advance bankrun clock by specified seconds and refresh oracles.
-   * Required for emissions to accrue since bankrun clock is frozen.
-   *
-   * Note: setTimeout does NOT advance bankrun's Clock sysvar - it's frozen.
-   * We must use setClock() to advance blockchain time explicitly.
-   */
-  const advanceClockAndRefreshOracles = async (seconds: number = 2) => {
-    const clock = await banksClient.getClock();
-    const newClock = new Clock(
-      clock.slot + BigInt(1),
-      clock.epochStartTimestamp,
-      clock.epoch,
-      clock.leaderScheduleEpoch,
-      clock.unixTimestamp + BigInt(seconds)
-    );
-    bankrunContext.setClock(newClock);
-
-    // Refresh oracles so publish times match new clock
-    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
-  };
 
   it("(user 0) withdraws some token A - happy path", async () => {
     const user = users[0];
@@ -235,84 +215,9 @@ describe("Withdraw funds", () => {
     assert.approximately(bankSharesAfter, bankSharesBefore - repayExpected, 1);
   });
 
-  it("(user 0) tries to repay all without claiming emissions - should fail", async () => {
-    const user = users[0];
-    const userAccKey = user.accounts.get(USER_ACCOUNT);
-    const bank = bankKeypairUsdc.publicKey;
-
-    // Ensure emissions accrue by advancing bankrun clock
-    await advanceClockAndRefreshOracles(2);
-
-    await expectFailedTxWithError(
-      async () => {
-        await user.mrgnProgram.provider.sendAndConfirm(
-          new Transaction().add(
-            await repayIx(user.mrgnProgram, {
-              marginfiAccount: userAccKey,
-              bank: bank,
-              tokenAccount: user.usdcAccount,
-              remaining: composeRemainingAccounts([
-                [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
-                [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
-              ]),
-              amount: u64MAX_BN,
-              repayAll: true,
-            })
-          )
-        );
-      },
-      "CannotCloseOutstandingEmissions",
-      6033
-    );
-  });
-
-  it("(user 0) claims emissions (in token B) before repaying their balance - happy path", async () => {
-    const user = users[0];
-    const userAccKey = user.accounts.get(USER_ACCOUNT);
-    const bank = bankKeypairUsdc.publicKey;
-
-    // Make this test independent: ensure emissions accrue even when run standalone.
-    await advanceClockAndRefreshOracles(2);
-
-    const userBBefore = await getTokenBalance(provider, user.tokenBAccount);
-    const userAccBefore = await program.account.marginfiAccount.fetch(userAccKey);
-
-    // Only claim emissions here - the actual repayAll happens in the next test
-    await user.mrgnProgram.provider.sendAndConfirm(
-      new Transaction().add(
-        await withdrawEmissionsIx(user.mrgnProgram, {
-          marginfiAccount: userAccKey,
-          bank: bank,
-          tokenAccount: user.tokenBAccount,
-        })
-      )
-    );
-
-    const userBAfter = await getTokenBalance(provider, user.tokenBAccount);
-    const userAccAfter = await program.account.marginfiAccount.fetch(userAccKey);
-
-    let now = await getBankrunTime(bankrunContext);
-    assert(userAccBefore.lastUpdate != userAccAfter.lastUpdate);
-    assertBNApproximately(userAccAfter.lastUpdate, now, 2);
-
-    const diff = userBAfter - userBBefore;
-    if (verbose) {
-      console.log("Claimed Token B emissions: " + diff);
-    }
-
-    // TODO we can probably assert a more specific balance here with some maths...
-    assert.ok(diff > 0);
-
-    // TODO assert changes to the emissions accounts...
-  });
-
   it("(user 0) repays all of their USDC debt - happy path", async () => {
     const user = users[0];
     const userAccKey = user.accounts.get(USER_ACCOUNT);
-
-    // Note: In bankrun we don't advance the clock here since the previous test already
-    // advanced it and claimed emissions. The withdrawEmissionsIx in this transaction
-    // will claim any remaining emissions before repaying.
 
     const bank = bankKeypairUsdc.publicKey;
     const bankBefore = await program.account.bank.fetch(bank);
@@ -327,16 +232,17 @@ describe("Withdraw funds", () => {
       wrappedI80F48toBigNumber(balancesBefore[1].liabilityShares).toNumber() *
       wrappedI80F48toBigNumber(bankBefore.liabilityShareValue).toNumber();
 
+    // For repayAll, pass remaining accounts excluding the closing bank.
+    const remaining = composeRemainingAccounts(
+      balanceAccountGroups.filter((group) => !group[0].equals(bank))
+    );
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await repayIx(user.mrgnProgram, {
           marginfiAccount: userAccKey,
           bank: bank,
           tokenAccount: user.usdcAccount,
-          remaining: composeRemainingAccounts([
-            [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
-            [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
-          ]),
+          remaining,
           amount: u64MAX_BN,
           repayAll: true,
         })
@@ -409,18 +315,20 @@ describe("Withdraw funds", () => {
       wrappedI80F48toBigNumber(balancesBefore[0].assetShares).toNumber() *
       wrappedI80F48toBigNumber(bankBefore.liabilityShareValue).toNumber();
 
+    // After repaying USDC, user 0 has Token A and SOL. Exclude the closing
+    // bank (Token A) so the health check alignment is correct.
+    const remaining = composeRemainingAccounts(
+      [
+        [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
+      ]
+    );
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await withdrawIx(user.mrgnProgram, {
           marginfiAccount: userAccKey,
           bank: bank,
           tokenAccount: user.tokenAAccount,
-          remaining: [
-            bankKeypairA.publicKey,
-            oracles.tokenAOracle.publicKey,
-            bankKeypairUsdc.publicKey,
-            oracles.usdcOracle.publicKey,
-          ],
+          remaining,
           amount: withdrawAmountTokenA_native,
           withdrawAll: true,
         })
@@ -474,25 +382,30 @@ describe("Withdraw funds", () => {
   });
 
   it("(user 1) withdraws all SOL balance - happy path", async () => {
-    // This is essentially the same test as the previous one but it's necessary to restore the state of the user 1
-    // account to only have a single USDC deposit. We don't repeat the checks for exact numbers here though.
+    // Restore user 1 to only have USDC deposit by withdrawing all SOL.
     const user = users[1];
     const userAccKey = user.accounts.get(USER_ACCOUNT);
     const bank = bankKeypairSol.publicKey;
 
+    // User 1 only has USDC and SOL. Exclude the closing bank (SOL) from
+    // remaining accounts so the health check alignment is correct.
+    const remaining = composeRemainingAccounts(
+      [
+        [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
+      ]
+    );
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await withdrawIx(user.mrgnProgram, {
           marginfiAccount: userAccKey,
           bank: bank,
           tokenAccount: user.wsolAccount,
-          remaining: [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
+          remaining,
           amount: new BN(0),
           withdrawAll: true,
         })
       )
     );
-
     const bankAfter = await program.account.bank.fetch(bank);
     const userAccAfter = await program.account.marginfiAccount.fetch(
       userAccKey
@@ -502,7 +415,10 @@ describe("Withdraw funds", () => {
 
     // This balance is now inactive
     assert.equal(balancesAfter[1].active, 0);
+
   });
+
+
 
   it("(user 0) restores previous Token A deposits and USDC borrows", async () => {
     const user = users[0];

@@ -16,28 +16,77 @@ pub fn i80_from_i128_checked(x: i128) -> Option<I80F48> {
     Some(I80F48::from_bits(x << FRAC_BITS))
 }
 
-/// Multiply an `i128` by `liq_to_col_ratio`, returning `None` on overflow.
+/// Multiply two `I80F48` values, returning `None` on overflow.
 #[inline]
-pub fn adjust_i128(raw: i128, liq_to_col_ratio: I80F48) -> Option<i128> {
-    let raw_fx: I80F48 = i80_from_i128_checked(raw)?;
-    let adj_fx: I80F48 = raw_fx.checked_mul(liq_to_col_ratio)?;
-    adj_fx.checked_to_num::<i128>()
+pub fn mul_i80f48(value: I80F48, multiplier: I80F48) -> Option<I80F48> {
+    value.checked_mul(multiplier)
 }
 
-/// Multiply an `i64` by `liq_to_col_ratio`, returning `None` on overflow.
+/// Multiply and divide `I80F48` values, returning `None` on overflow or divide-by-zero.
 #[inline]
-pub fn adjust_i64(raw: i64, liq_to_col_ratio: I80F48) -> Option<i64> {
-    I80F48::from_num(raw)
-        .checked_mul(liq_to_col_ratio)?
-        .checked_to_num::<i64>()
+pub fn mul_div_i80f48(value: I80F48, numerator: I80F48, denominator: I80F48) -> Option<I80F48> {
+    if denominator == I80F48::ZERO {
+        return None;
+    }
+
+    value.checked_mul(numerator)?.checked_div(denominator)
 }
 
-/// Multiply a `u64` by `liq_to_col_ratio`, returning `None` on overflow.
+/// Multiply an `i128` by an `I80F48` multiplier, returning `None` on overflow.
 #[inline]
-pub fn adjust_u64(raw: u64, liq_to_col_ratio: I80F48) -> Option<u64> {
-    I80F48::from_num(raw)
-        .checked_mul(liq_to_col_ratio)?
-        .checked_to_num::<u64>()
+pub fn mul_i128_by_i80f48(value: i128, multiplier: I80F48) -> Option<i128> {
+    let value_i80f48: I80F48 = i80_from_i128_checked(value)?;
+    let product_i80f48 = mul_i80f48(value_i80f48, multiplier)?;
+    product_i80f48.checked_to_num::<i128>()
+}
+
+/// Multiply an `i64` by an `I80F48` multiplier, returning `None` on overflow.
+#[inline]
+pub fn mul_i64_by_i80f48(value: i64, multiplier: I80F48) -> Option<i64> {
+    let value_i80f48 = I80F48::from_num(value);
+    let product_i80f48 = mul_i80f48(value_i80f48, multiplier)?;
+    product_i80f48.checked_to_num::<i64>()
+}
+
+/// Multiply a `u64` by an `I80F48` multiplier, returning `None` on overflow.
+#[inline]
+pub fn mul_u64_by_i80f48(value: u64, multiplier: I80F48) -> Option<u64> {
+    let value_i80f48 = I80F48::from_num(value);
+    let product_i80f48 = mul_i80f48(value_i80f48, multiplier)?;
+    product_i80f48.checked_to_num::<u64>()
+}
+
+/// Multiply a `u128` by a `u128` ratio (`numerator/denominator`) with floor rounding.
+#[inline]
+pub fn mul_div_u128(value: u128, numerator: u128, denominator: u128) -> Option<u128> {
+    if denominator == 0 {
+        return None;
+    }
+
+    value.checked_mul(numerator)?.checked_div(denominator)
+}
+
+/// Multiply an `i64` by a `u128` ratio (`numerator/denominator`) with floor rounding.
+#[inline]
+pub fn mul_div_i64(value: i64, numerator: u128, denominator: u128) -> Option<i64> {
+    let value_u128 = u128::try_from(value).ok()?;
+    let adjusted_value = mul_div_u128(value_u128, numerator, denominator)?;
+    adjusted_value.try_into().ok()
+}
+
+/// Multiply a `u64` by a `u128` ratio (`numerator/denominator`) with floor rounding.
+#[inline]
+pub fn mul_div_u64(value: u64, numerator: u128, denominator: u128) -> Option<u64> {
+    let adjusted_value = mul_div_u128(value as u128, numerator, denominator)?;
+    adjusted_value.try_into().ok()
+}
+
+/// Multiply an `i128` by a `u128` ratio (`numerator/denominator`) with floor rounding.
+#[inline]
+pub fn mul_div_i128(value: i128, numerator: u128, denominator: u128) -> Option<i128> {
+    let value_u128 = u128::try_from(value).ok()?;
+    let adjusted_value = mul_div_u128(value_u128, numerator, denominator)?;
+    adjusted_value.try_into().ok()
 }
 
 /// Convert collateral tokens to liquidity tokens given scaled supplies.

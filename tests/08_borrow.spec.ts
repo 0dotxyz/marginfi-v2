@@ -1,6 +1,6 @@
 import { BN, Program } from "@coral-xyz/anchor";
 import { BankrunProvider } from "anchor-bankrun";
-import { Transaction } from "@solana/web3.js";
+import { PublicKey, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairA,
@@ -35,9 +35,16 @@ let program: Program<Marginfi>;
 let provider: BankrunProvider;
 
 describe("Borrow funds", () => {
+  let balanceAccountGroups: PublicKey[][] = [];
+
   before(() => {
     provider = bankRunProvider;
     program = bankrunProgram;
+    balanceAccountGroups = [
+      [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
+      [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+      [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
+    ];
   });
 
   // Bank has 100 USDC available to borrow
@@ -65,12 +72,10 @@ describe("Borrow funds", () => {
               marginfiAccount: user0Account,
               bank: bank,
               tokenAccount: user.usdcAccount,
-              remaining: [
-                bankKeypairA.publicKey,
-                oracles.tokenAOracle.publicKey,
-                bank,
-                oracles.fakeUsdc, // sneaky sneaky...
-              ],
+              remaining: composeRemainingAccounts([
+                [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+                [bank, oracles.fakeUsdc], // sneaky sneaky...
+              ]),
               amount: borrowAmountUsdc_native,
             })
           )
@@ -109,16 +114,19 @@ describe("Borrow funds", () => {
     const user = users[0];
     const userAccKey = user.accounts.get(USER_ACCOUNT);
 
+    // For repayAll, include all active balances, including the closing bank.
+    const remaining = composeRemainingAccounts(
+      balanceAccountGroups.filter(
+        (group) => !group[0].equals(bankKeypairSol.publicKey)
+      )
+    );
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await repayIx(user.mrgnProgram, {
           marginfiAccount: userAccKey,
           bank: bankKeypairSol.publicKey,
           tokenAccount: user.wsolAccount,
-          remaining: composeRemainingAccounts([
-            [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
-            [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
-          ]),
+          remaining,
           amount: new BN(0),
           repayAll: true,
         })
@@ -152,12 +160,10 @@ describe("Borrow funds", () => {
           marginfiAccount: user0Account,
           bank: bank,
           tokenAccount: user.usdcAccount,
-          remaining: [
-            bankKeypairA.publicKey,
-            oracles.tokenAOracle.publicKey,
-            bank,
-            oracles.usdcOracle.publicKey,
-          ],
+          remaining: composeRemainingAccounts([
+            [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+            [bank, oracles.usdcOracle.publicKey],
+          ]),
           amount: borrowAmountUsdc_native,
         })
       )

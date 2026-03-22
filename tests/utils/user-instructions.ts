@@ -6,6 +6,8 @@ import {
 } from "@solana/web3.js";
 import { Marginfi } from "../../target/types/marginfi";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { deriveExecuteOrderPda, deriveGlobalFeeState, deriveOrderPda } from "./pdas";
+import { WrappedI80F48 } from "@mrgnlabs/mrgn-common";
 
 export type AccountInitArgs = {
   marginfiGroup: PublicKey;
@@ -92,7 +94,7 @@ export const setAccountFreezeIx = (
   return program.methods
     .marginfiAccountSetFreeze(args.frozen)
     .accounts({
-      group: args.group,
+      // group: args.group,
       marginfiAccount: args.marginfiAccount,
       admin: args.admin,
     })
@@ -125,139 +127,6 @@ export const depositIx = (program: Program<Marginfi>, args: DepositArgs) => {
       signerTokenAccount: args.tokenAccount,
       // bankLiquidityVault:  deriveLiquidityVault(id, bank)
       tokenProgram: TOKEN_PROGRAM_ID,
-    })
-    .instruction();
-
-  return ix;
-};
-
-export type SettleEmissionsArgs = {
-  marginfiAccount: PublicKey;
-  bank: PublicKey;
-};
-
-/**
- * (Permissionless) Settle emissions for a mrgnfi bank that is emitting some rewards. Generally runs
- * for all users before rates are updated, otherwise past emissions are retroactively credited at
- * the new rate as well. See `withdrawEmissionsIx` to actually claim the emissions to a wallet.
- * * `authority`- MarginfiAccount's authority must sign and own the `tokenAccount`
- * @param program
- * @param args
- * @returns
- */
-export const settleEmissionsIx = (
-  program: Program<Marginfi>,
-  args: SettleEmissionsArgs
-) => {
-  const ix = program.methods
-    .lendingAccountSettleEmissions()
-    .accounts({
-      marginfiAccount: args.marginfiAccount,
-      bank: args.bank,
-    })
-    .instruction();
-
-  return ix;
-};
-
-export type WithdrawEmissionsArgs = {
-  marginfiAccount: PublicKey;
-  bank: PublicKey;
-  tokenAccount: PublicKey;
-};
-
-/**
- * Settles AND withdraws emissions to the user's given token account. Also see `settleEmissionsIx`, which settles but does not withdraw.
- * * `authority`- MarginfiAccount's authority must sign but does not have to own the `tokenAccount`
- * @param program
- * @param args
- * @returns
- */
-export const withdrawEmissionsIx = (
-  program: Program<Marginfi>,
-  args: WithdrawEmissionsArgs
-) => {
-  const ix = program.methods
-    .lendingAccountWithdrawEmissions()
-    .accounts({
-      // group: args.marginfiGroup, // implied from bank
-      marginfiAccount: args.marginfiAccount,
-      // authority: args.authority, // implied from marginfiAccount
-      bank: args.bank,
-      // emissions_mint // implied from bank
-      // emissions_auth // pda derived from bank
-      // emissions_vault // pda derived from bank
-      destinationAccount: args.tokenAccount,
-      tokenProgram: TOKEN_PROGRAM_ID,
-    })
-    .instruction();
-
-  return ix;
-};
-
-export type WithdrawEmissionsPermissionlessArgs = {
-  marginfiAccount: PublicKey;
-  bank: PublicKey;
-  /** Canonical ATA of `emissions_destination_account` registered on `marginfiAccount` */
-  tokenAccount: PublicKey;
-};
-
-/**
- * (Permissionless) Settles AND withdraws emissions to the user's given token account. The user must
- * have opted in to this feature by designating a wallet to receive claims with
- * `marginfi_account_update_emissions_destination_account`
- * * `tokenAccount`- must be canonical ATA of `emissions_destination_account`
- * @param program
- * @param args
- * @returns
- */
-export const withdrawEmissionsPermissionlessIx = (
-  program: Program<Marginfi>,
-  args: WithdrawEmissionsPermissionlessArgs
-) => {
-  const ix = program.methods
-    .lendingAccountWithdrawEmissionsPermissionless()
-    .accounts({
-      // group: args.marginfiGroup, // implied from bank
-      marginfiAccount: args.marginfiAccount,
-      // authority: args.authority, // implied from marginfiAccount
-      bank: args.bank,
-      // emissions_mint // implied from bank
-      // emissions_auth // pda derived from bank
-      // emissions_vault // pda derived from bank
-      destinationAccount: args.tokenAccount,
-      tokenProgram: TOKEN_PROGRAM_ID,
-    })
-    .instruction();
-
-  return ix;
-};
-
-export type UpdateEmissionsDestinationArgs = {
-  marginfiAccount: PublicKey;
-  destinationAccount: PublicKey;
-};
-
-/**
- * (Permissionless) Opt in to claim permissionless emissions. The designated account/wallet will
- * receive all the funds. Emissions go to the canonical ATA of that account, and if the ATA doesn't
- * exist, they may still not get distributed. We (mrgn) might pay to open SOME atas, or we might
- * open some common ones when you opt in, or we might let the user pay and just let the tx fail it
- * it doesn't exist.
- * @param program
- * @param args
- * @returns
- */
-export const updateEmissionsDestination = (
-  program: Program<Marginfi>,
-  args: UpdateEmissionsDestinationArgs
-) => {
-  const ix = program.methods
-    .marginfiAccountUpdateEmissionsDestinationAccount()
-    .accounts({
-      marginfiAccount: args.marginfiAccount,
-      // authority: //implied from marginfiAccount
-      destinationAccount: args.destinationAccount,
     })
     .instruction();
 
@@ -357,7 +226,6 @@ export type RepayIxArgs = {
   bank: PublicKey;
   tokenAccount: PublicKey;
   amount: BN;
-  // TODO repay doesn't actually need these it doesn't check risk
   remaining?: PublicKey[];
   repayAll?: boolean;
 };
@@ -365,11 +233,18 @@ export type RepayIxArgs = {
 /**
  * Repay debt to a bank
  * * `authority` - MarginfiAccount's authority must sign and own the `tokenAccount`
+ * * `remaining` - pass bank/oracles for any balances that need risk/oracle context in this
+ *   instruction. For Token22 assets, pass the mint first.
  * @param program
  * @param args
  * @returns
  */
 export const repayIx = (program: Program<Marginfi>, args: RepayIxArgs) => {
+  const oracleMeta: AccountMeta[] = (args.remaining || []).map((pubkey) => ({
+    pubkey,
+    isSigner: false,
+    isWritable: false,
+  }));
   // False is the same as null, so if false we'll just pass null
   const all = args.repayAll === true ? true : null;
   const ix = program.methods
@@ -384,6 +259,7 @@ export const repayIx = (program: Program<Marginfi>, args: RepayIxArgs) => {
       // bankLiquidityVault = deriveLiquidityVault(id, bank)
       tokenProgram: TOKEN_PROGRAM_ID,
     })
+    .remainingAccounts(oracleMeta)
     .instruction();
   return ix;
 };
@@ -408,21 +284,41 @@ export const initLiquidationRecordIx = (
     .instruction();
 };
 
+/**
+ * Converts an array that can be either PublicKey[] or AccountMeta[] into AccountMeta[].
+ * If the input is already AccountMeta[], it preserves the existing isWritable flags.
+ * If the input is PublicKey[], it converts using the provided default isWritable flag.
+ */
+const toAccountMetas = (
+  remaining: Array<PublicKey | AccountMeta>,
+  defaultWritable: boolean = false
+): AccountMeta[] => {
+  if (remaining.length === 0) {
+    return [];
+  }
+  const first = remaining[0] as AccountMeta;
+  if (first.pubkey !== undefined) {
+    return remaining as AccountMeta[];
+  }
+  // Convert PublicKey[] to AccountMeta[]
+  return (remaining as PublicKey[]).map((pubkey) => ({
+    pubkey,
+    isSigner: false,
+    isWritable: defaultWritable,
+  }));
+};
+
 export type StartLiquidationArgs = {
   marginfiAccount: PublicKey;
   liquidationReceiver: PublicKey;
-  remaining: PublicKey[];
+  remaining: PublicKey[] | AccountMeta[];
 };
 
 export const startLiquidationIx = (
   program: Program<Marginfi>,
   args: StartLiquidationArgs
 ) => {
-  const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => ({
-    pubkey,
-    isSigner: false,
-    isWritable: false,
-  }));
+  const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
   return program.methods
     .startLiquidation()
     .accounts({
@@ -438,18 +334,14 @@ export const startLiquidationIx = (
 
 export type EndLiquidationArgs = {
   marginfiAccount: PublicKey;
-  remaining: PublicKey[];
+  remaining: PublicKey[] | AccountMeta[];
 };
 
 export const endLiquidationIx = (
   program: Program<Marginfi>,
   args: EndLiquidationArgs
 ) => {
-  const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => ({
-    pubkey,
-    isSigner: false,
-    isWritable: false,
-  }));
+  const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
   return program.methods
     .endLiquidation()
     .accounts({
@@ -467,18 +359,14 @@ export const endLiquidationIx = (
 export type StartDeleverageArgs = {
   marginfiAccount: PublicKey;
   riskAdmin: PublicKey;
-  remaining: PublicKey[];
+  remaining: PublicKey[] | AccountMeta[];
 };
 
 export const startDeleverageIx = (
   program: Program<Marginfi>,
   args: StartDeleverageArgs
 ) => {
-  const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => ({
-    pubkey,
-    isSigner: false,
-    isWritable: false,
-  }));
+  const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
   return program.methods
     .startDeleverage()
     .accounts({
@@ -490,18 +378,14 @@ export const startDeleverageIx = (
 
 export type EndDeleverageArgs = {
   marginfiAccount: PublicKey;
-  remaining: PublicKey[];
+  remaining: PublicKey[] | AccountMeta[];
 };
 
 export const endDeleverageIx = (
   program: Program<Marginfi>,
   args: EndDeleverageArgs
 ) => {
-  const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => ({
-    pubkey,
-    isSigner: false,
-    isWritable: false,
-  }));
+  const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
   return program.methods
     .endDeleverage()
     .accounts({
@@ -659,6 +543,62 @@ export const composeRemainingAccounts = (
   return banksAndOracles.flat();
 };
 
+/**
+ * Use in place of `composeRemainingAccounts` when building Meta for Start Liquidate (marks banks as
+ * mutable, which is required)
+ * @param banksAndOracles 
+ * @returns 
+ */
+export const composeRemainingAccountsWriteableMeta = (
+  banksAndOracles: PublicKey[][]
+): AccountMeta[] => {
+  banksAndOracles.sort((a, b) => {
+    const A = a[0].toBytes();
+    const B = b[0].toBytes();
+    for (let i = 0; i < 32; i++) {
+      if (A[i] !== B[i]) {
+        return B[i] - A[i];
+      }
+    }
+    return 0;
+  });
+
+  return banksAndOracles.flatMap((accs) =>
+    accs.map((pubkey, idx) => ({
+      pubkey,
+      isSigner: false,
+      isWritable: idx === 0,
+    }))
+  );
+};
+
+/**
+ * Use in place of `composeRemainingAccounts` when building Meta for End Liquidate (marks banks as
+ * mutable and ignores/excludes all other accounts)
+ * @param banksAndOracles 
+ * @returns 
+ */
+export const composeRemainingAccountsMetaBanksOnly = (
+  banksAndOracles: PublicKey[][]
+): AccountMeta[] => {
+  banksAndOracles.sort((a, b) => {
+    const A = a[0].toBytes();
+    const B = b[0].toBytes();
+    for (let i = 0; i < 32; i++) {
+      if (A[i] !== B[i]) {
+        return B[i] - A[i];
+      }
+    }
+    return 0;
+  });
+
+  return banksAndOracles.map((accs) => ({
+    pubkey: accs[0],
+    isSigner: false,
+    isWritable: true,
+  }));
+};
+
 export type AccountInitPdaArgs = {
   marginfiGroup: PublicKey;
   marginfiAccount: PublicKey;
@@ -745,4 +685,196 @@ export const purgeDeveleragedBalance = (
     .instruction();
 
   return ix;
+};
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+export type OrderTriggerArgs =
+  | { stopLoss: { threshold: WrappedI80F48; maxSlippage: number } }
+  | { takeProfit: { threshold: WrappedI80F48; maxSlippage: number } }
+  | { both: { stopLoss: WrappedI80F48; takeProfit: WrappedI80F48; maxSlippage: number } };
+
+export type PlaceOrderArgs = {
+  marginfiAccount: PublicKey;
+  authority: PublicKey;
+  feePayer: PublicKey;
+  bankKeys: PublicKey[];
+  trigger: OrderTriggerArgs;
+  feeState?: PublicKey;
+  globalFeeWallet?: PublicKey;
+};
+
+export const placeOrderIx = async (
+  program: Program<Marginfi>,
+  args: PlaceOrderArgs
+) => {
+  const [orderPda] = deriveOrderPda(
+    program.programId,
+    args.marginfiAccount,
+    args.bankKeys
+  );
+
+  const feeState = args.feeState ?? deriveGlobalFeeState(program.programId)[0];
+  const globalFeeWallet = args.globalFeeWallet
+    ?? (await program.account.feeState.fetch(feeState)).globalFeeWallet;
+
+  const accounts = {
+    authority: args.authority,
+    marginfiAccount: args.marginfiAccount,
+    feePayer: args.feePayer,
+    order: orderPda,
+    feeState,
+    globalFeeWallet,
+  };
+
+  return program.methods
+    .marginfiAccountPlaceOrder(args.bankKeys, args.trigger)
+    .accounts(accounts)
+    .instruction();
+};
+
+export type CloseOrderArgs = {
+  marginfiAccount: PublicKey;
+  authority: PublicKey;
+  order: PublicKey;
+  feeRecipient: PublicKey;
+};
+
+export const closeOrderIx = (
+  program: Program<Marginfi>,
+  args: CloseOrderArgs
+) => {
+  const accounts = {
+    marginfiAccount: args.marginfiAccount,
+    authority: args.authority,
+    order: args.order,
+    feeRecipient: args.feeRecipient,
+  };
+
+  return program.methods
+    .marginfiAccountCloseOrder()
+    .accounts(accounts)
+    .instruction();
+};
+
+export type KeeperCloseOrderArgs = {
+  marginfiAccount: PublicKey;
+  order: PublicKey;
+  feeRecipient: PublicKey;
+};
+
+export const keeperCloseOrderIx = (
+  program: Program<Marginfi>,
+  args: KeeperCloseOrderArgs
+) => {
+  const accounts = {
+    marginfiAccount: args.marginfiAccount,
+    order: args.order,
+    feeRecipient: args.feeRecipient,
+  };
+
+  return program.methods
+    .marginfiAccountKeeperCloseOrder()
+    .accounts(accounts)
+    .instruction();
+};
+
+export type SetKeeperCloseFlagsArgs = {
+  marginfiAccount: PublicKey;
+  authority: PublicKey;
+  bankKeysOpt?: PublicKey[] | null;
+};
+
+export const setKeeperCloseFlagsIx = (
+  program: Program<Marginfi>,
+  args: SetKeeperCloseFlagsArgs
+) => {
+  const accounts: any = {
+    marginfiAccount: args.marginfiAccount,
+    authority: args.authority,
+  };
+
+  return program.methods
+    .marginfiAccountSetKeeperCloseFlags(args.bankKeysOpt ?? null)
+    .accounts(accounts)
+    .instruction();
+};
+
+export type StartExecuteOrderArgs = {
+  group: PublicKey;
+  marginfiAccount: PublicKey;
+  feePayer: PublicKey;
+  executor: PublicKey;
+  order: PublicKey;
+  remaining: PublicKey[];
+};
+
+export const startExecuteOrderIx = (
+  program: Program<Marginfi>,
+  args: StartExecuteOrderArgs
+) => {
+  const [executeRecord] = deriveExecuteOrderPda(program.programId, args.order);
+
+  const rem: AccountMeta[] = args.remaining.map((pubkey) => ({
+    pubkey,
+    isSigner: false,
+    isWritable: false,
+  }));
+
+  const accounts: any = {
+    group: args.group,
+    marginfiAccount: args.marginfiAccount,
+    feePayer: args.feePayer,
+    executor: args.executor,
+    order: args.order,
+    executeRecord,
+    instructionSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+  };
+
+  return program.methods
+    .marginfiAccountStartExecuteOrder()
+    .accounts(accounts)
+    .remainingAccounts(rem)
+    .instruction();
+};
+
+export type EndExecuteOrderArgs = {
+  group: PublicKey;
+  marginfiAccount: PublicKey;
+  executor: PublicKey;
+  order: PublicKey;
+  executeRecord: PublicKey;
+  feeRecipient: PublicKey;
+  remaining: PublicKey[];
+  feeState?: PublicKey;
+};
+
+export const endExecuteOrderIx = (
+  program: Program<Marginfi>,
+  args: EndExecuteOrderArgs
+) => {
+  const feeState = args.feeState ?? deriveGlobalFeeState(program.programId)[0];
+  const rem: AccountMeta[] = args.remaining.map((pubkey) => ({
+    pubkey,
+    isSigner: false,
+    isWritable: false,
+  }));
+
+  const accounts: any = {
+    group: args.group,
+    marginfiAccount: args.marginfiAccount,
+    executor: args.executor,
+    feeRecipient: args.feeRecipient,
+    order: args.order,
+    executeRecord: args.executeRecord,
+    feeState,
+  };
+
+  return program.methods
+    .marginfiAccountEndExecuteOrder()
+    .accountsStrict(accounts)
+    .remainingAccounts(rem)
+    .instruction();
 };

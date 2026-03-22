@@ -53,6 +53,22 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - uses: ./.github/actions/base-setup/
+    - name: Cache Anchor SBF build
+      uses: actions/cache@v3
+      with:
+        path: |
+          target/sbf
+        key: anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}
+        restore-keys: |
+          anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-
+    - name: Cache nextest host build
+      uses: actions/cache@v3
+      with:
+        path: |
+          target/host
+        key: nextest-host-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml', 'programs/**/src/**', 'programs/**/tests/**', 'test-utils/**') }}
+        restore-keys: |
+          nextest-host-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-
     # TODO cache transfer hook and mocks here instead of rebuilding them each time...
     - uses: ./.github/actions/build-workspace/
     # ─── Cache cargo-nextest ─────────────────────────────────────────────
@@ -195,7 +211,7 @@ jobs:
 
     # ─── Marginfi always builds from scratch ─────────────────────────
     - name: Build marginfi
-      run: anchor build -p marginfi -- --no-default-features
+      run: anchor build -p marginfi -- --no-default-features --features custom-heap
 
     - name: Run Anchor tests (retry on segfault)
       run: |

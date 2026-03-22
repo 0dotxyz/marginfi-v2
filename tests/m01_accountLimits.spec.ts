@@ -13,12 +13,10 @@ import {
   ecosystem,
   oracles,
   users,
-  globalProgramAdmin,
 } from "./rootHooks";
 import { configureBank, setFixedPrice } from "./utils/group-instructions";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { assert } from "chai";
-import { defaultBankConfigOptRaw } from "./utils/types";
+import { defaultBankConfigOptRaw, MAX_BALANCES } from "./utils/types";
 import {
   borrowIx,
   composeRemainingAccounts,
@@ -27,7 +25,7 @@ import {
   withdrawIx,
 } from "./utils/user-instructions";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
-import { dumpAccBalances, processBankrunTransaction } from "./utils/tools";
+import { dumpAccBalances, getBankrunBlockhash, processBankrunTransaction } from "./utils/tools";
 import { genericMultiBankTestSetup } from "./genericSetups";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { assertI80F48Approx, assertKeyDefault } from "./utils/genericTests";
@@ -35,14 +33,12 @@ import { assertI80F48Approx, assertKeyDefault } from "./utils/genericTests";
 const startingSeed: number = 199;
 const groupBuff = Buffer.from("MARGINFI_GROUP_SEED_1234000000M1");
 
-/** This is the program-enforced maximum enforced number of balances per account. */
-const MAX_BALANCES = 16;
 const USER_ACCOUNT_THROWAWAY = "throwaway_account1";
 
 let banks: PublicKey[] = [];
 let throwawayGroup: Keypair;
 
-describe("Limits on number of accounts when using Kamino", () => {
+describe("m01: Limits on number of accounts when using Kamino", () => {
   it("init group, init banks, and fund banks", async () => {
     const result = await genericMultiBankTestSetup(
       MAX_BALANCES,

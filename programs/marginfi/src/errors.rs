@@ -108,10 +108,10 @@ pub enum MarginfiError {
     WrongNumberOfOracleAccounts,
     #[msg("Oracle error: wrong account keys")] // 6052
     WrongOracleAccountKeys,
-    #[msg("Pyth Push oracle: wrong account owner")] // 6053
-    PythPushWrongAccountOwner,
-    #[msg("Staked Pyth Push oracle: wrong account owner")] // 6054
-    StakedPythPushWrongAccountOwner,
+    #[msg("Vacated2")] // 6053
+    Vacated2,
+    #[msg("Vacated3")] // 6054
+    Vacated3,
     #[msg("Oracle max confidence exceeded: try again later")] // 6055
     OracleMaxConfidenceExceeded,
     #[msg("Pyth Push oracle: insufficient verification level")] // 6056
@@ -148,10 +148,10 @@ pub enum MarginfiError {
     TooSevereLiquidation,
     #[msg("Liquidation would worsen account health")] // 6072
     WorseHealthPostLiquidation,
-    #[msg("Vacated0")] // 6073
-    Vacated0,
-    #[msg("Vacated1")] // 6074
-    Vacated1,
+    #[msg("Exceeded the maximum allowed integration positions")] // 6073
+    IntegrationPositionLimitExceeded,
+    #[msg("Maximum initial leverage exceeded")] // 6074
+    MaxInitLeverageExceeded,
     #[msg("The Emode config was invalid")] // 6075
     BadEmodeConfig,
     #[msg("TWAP window size does not match expected duration")] // 6076
@@ -210,6 +210,63 @@ pub enum MarginfiError {
     ZeroWithdrawalLimit,
     #[msg("Account is frozen by the group admin")] // 6103
     AccountFrozen,
+    #[msg("Cannot reference duplicate balances")] // 6104
+    DuplicateBalance,
+    #[msg("Invalid amount of balances referenced")] // 6105
+    InvalidBalanceCount,
+    #[msg("Liquidator not allowed to close order")] // 6106
+    LiquidatorOrderCloseNotAllowed,
+    #[msg("Order trigger is yet to be met")] // 6107
+    OrderTriggerNotMet,
+    #[msg("Order execution state issue. Check the necessary invariants i.e not in flashloan or disabled e.t.c")]
+    // 6108
+    UnexpectedOrderExecutionState,
+    #[msg("Order liability not closed")] // 6109
+    OrderLiabilityNotClosed,
+    #[msg("Invalid asset or liabilities count")] // 6110
+    InvalidAssetOrLiabilitiesCount,
+    #[msg("Account health can only worsen if account is healthy")] // 6111
+    WorseHealthPostExecution,
+    #[msg("TP must be > 0, SL must be > 0 and TP > SL if both are set")] // 6112
+    InvalidOrderTakeProfitOrStopLoss,
+    #[msg("Max slippage must be less than 100%")] // 6113
+    InvalidSlippage,
+    #[msg("Executor withdrew too much: slippage or max fee constraint violated")] // 6114
+    OrderExecutionOverWithdrawal,
+    #[msg("Bank hourly rate limit exceeded: try again later")] // 6115
+    BankHourlyRateLimitExceeded,
+    #[msg("Bank daily rate limit exceeded: try again later")] // 6116
+    BankDailyRateLimitExceeded,
+    #[msg("Group hourly rate limit exceeded: try again later")] // 6117
+    GroupHourlyRateLimitExceeded,
+    #[msg("Group daily rate limit exceeded: try again later")] // 6118
+    GroupDailyRateLimitExceeded,
+    #[msg("Invalid rate limit price: pass oracle or pre-crank cache")] // 6119
+    InvalidRateLimitPrice,
+    #[msg("Group rate limiter admin update must include inflow and/or outflow")] // 6120
+    GroupRateLimiterUpdateEmpty,
+    #[msg("Group rate limiter admin update slot range is invalid")] // 6121
+    GroupRateLimiterUpdateInvalidSlotRange,
+    #[msg("Group rate limiter admin update cannot reference future slots")] // 6122
+    GroupRateLimiterUpdateFutureSlot,
+    #[msg("Group rate limiter admin update is too stale")] // 6123
+    GroupRateLimiterUpdateStale,
+    #[msg("Group rate limiter admin update slot progression is out of order")] // 6124
+    GroupRateLimiterUpdateOutOfOrderSlot,
+    #[msg("Group rate limiter admin update sequence is out of order")] // 6125
+    GroupRateLimiterUpdateOutOfOrderSeq,
+    #[msg("Deleverage withdrawal admin update must include outflow")] // 6126
+    DeleverageWithdrawalUpdateEmpty,
+    #[msg("Deleverage withdrawal admin update slot range is invalid")] // 6127
+    DeleverageWithdrawalUpdateInvalidSlotRange,
+    #[msg("Deleverage withdrawal admin update cannot reference future slots")] // 6128
+    DeleverageWithdrawalUpdateFutureSlot,
+    #[msg("Deleverage withdrawal admin update is too stale")] // 6129
+    DeleverageWithdrawalUpdateStale,
+    #[msg("Deleverage withdrawal admin update slot progression is out of order")] // 6130
+    DeleverageWithdrawalUpdateOutOfOrderSlot,
+    #[msg("Deleverage withdrawal admin update sequence is out of order")] // 6131
+    DeleverageWithdrawalUpdateOutOfOrderSeq,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -236,8 +293,8 @@ pub enum MarginfiError {
     KaminoReserveValidationFailed, // 6210
     #[msg("Invalid oracle setup: only KaminoPythPush and KaminoSwitchboardPull are supported")]
     KaminoInvalidOracleSetup, // 6211
-    #[msg("Maximum integration positions limit exceeded (max 8 Kamino/Drift/Solend positions per account)")]
-    IntegrationPositionLimitExceeded, // 6212
+    #[msg("Maximum Maintenance leverage exceeded")]
+    MaxMaintLeverageExceeded, // 6212
     #[msg("Invalid Kamino reserve: account constraint violated")]
     InvalidKaminoReserve, // 6213
     #[msg("Invalid Kamino obligation: account constraint violated")]
@@ -336,7 +393,36 @@ pub enum MarginfiError {
     InvalidSolendReserve, // 6415
     #[msg("Invalid Solend obligation: account constraint violated")]
     InvalidSolendObligation, // 6416
-                             // **************END SOLEND ERRORS
+    // **************END SOLEND ERRORS
+
+    // ************** BEGIN JUPLEND ERRORS (starting at 6500)
+    #[msg("Invalid oracle setup: only JuplendPythPull and JuplendSwitchboardPull are supported")]
+    JuplendInvalidOracleSetup = 500, // 6500
+    #[msg("Juplend lending state validation failed")]
+    JuplendLendingValidationFailed, // 6501
+    #[msg("Wrong bank asset tag for Juplend operation")]
+    WrongBankAssetTagForJuplendOperation, // 6502
+    #[msg("Cannot use standard operations on Juplend assets")]
+    CantUseStandardOperationsOnJuplendAssets, // 6503
+    #[msg("Juplend lending state is stale")]
+    JuplendLendingStale, // 6504
+    #[msg("Invalid Juplend lending: account constraint violated")]
+    InvalidJuplendLending, // 6505
+    #[msg("Juplend lending mint mismatch")]
+    JuplendLendingMintMismatch, // 6506
+    #[msg("Juplend bank is already activated")]
+    JuplendBankAlreadyActivated, // 6507
+    #[msg("Invalid Juplend fToken vault")]
+    InvalidJuplendFTokenVault, // 6508
+    #[msg("Juplend deposit failed")]
+    JuplendDepositFailed, // 6509
+    #[msg("Juplend withdraw failed")]
+    JuplendWithdrawFailed, // 6510
+    #[msg("Juplend init position deposit insufficient")]
+    JuplendInitPositionDepositInsufficient, // 6511
+    #[msg("Invalid Juplend withdraw intermediary ATA")]
+    InvalidJuplendWithdrawIntermediaryAta, // 6512
+                                           // **************END JUPLEND ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -413,8 +499,8 @@ impl From<u32> for MarginfiError {
             6050 => MarginfiError::PythPushStalePrice,
             6051 => MarginfiError::WrongNumberOfOracleAccounts,
             6052 => MarginfiError::WrongOracleAccountKeys,
-            6053 => MarginfiError::PythPushWrongAccountOwner,
-            6054 => MarginfiError::StakedPythPushWrongAccountOwner,
+            6053 => MarginfiError::Vacated2,
+            6054 => MarginfiError::Vacated3,
             6055 => MarginfiError::OracleMaxConfidenceExceeded,
             6056 => MarginfiError::PythPushInsufficientVerificationLevel,
             6057 => MarginfiError::ZeroAssetPrice,
@@ -433,8 +519,8 @@ impl From<u32> for MarginfiError {
             6070 => MarginfiError::TooSeverePayoff,
             6071 => MarginfiError::TooSevereLiquidation,
             6072 => MarginfiError::WorseHealthPostLiquidation,
-            6073 => MarginfiError::Vacated0,
-            6074 => MarginfiError::Vacated1,
+            6073 => MarginfiError::IntegrationPositionLimitExceeded,
+            6074 => MarginfiError::MaxInitLeverageExceeded,
             6075 => MarginfiError::BadEmodeConfig,
             6076 => MarginfiError::PythPushInvalidWindowSize,
             6077 => MarginfiError::InvalidFeesDestinationAccount,
@@ -463,6 +549,35 @@ impl From<u32> for MarginfiError {
             6100 => MarginfiError::FixedOraclePriceNegative,
             6101 => MarginfiError::DailyWithdrawalLimitExceeded,
             6102 => MarginfiError::ZeroWithdrawalLimit,
+            6103 => MarginfiError::AccountFrozen,
+            6104 => MarginfiError::DuplicateBalance,
+            6105 => MarginfiError::InvalidBalanceCount,
+            6106 => MarginfiError::LiquidatorOrderCloseNotAllowed,
+            6107 => MarginfiError::OrderTriggerNotMet,
+            6108 => MarginfiError::UnexpectedOrderExecutionState,
+            6109 => MarginfiError::OrderLiabilityNotClosed,
+            6110 => MarginfiError::InvalidAssetOrLiabilitiesCount,
+            6111 => MarginfiError::WorseHealthPostExecution,
+            6112 => MarginfiError::InvalidOrderTakeProfitOrStopLoss,
+            6113 => MarginfiError::InvalidSlippage,
+            6114 => MarginfiError::OrderExecutionOverWithdrawal,
+            6115 => MarginfiError::BankHourlyRateLimitExceeded,
+            6116 => MarginfiError::BankDailyRateLimitExceeded,
+            6117 => MarginfiError::GroupHourlyRateLimitExceeded,
+            6118 => MarginfiError::GroupDailyRateLimitExceeded,
+            6119 => MarginfiError::InvalidRateLimitPrice,
+            6120 => MarginfiError::GroupRateLimiterUpdateEmpty,
+            6121 => MarginfiError::GroupRateLimiterUpdateInvalidSlotRange,
+            6122 => MarginfiError::GroupRateLimiterUpdateFutureSlot,
+            6123 => MarginfiError::GroupRateLimiterUpdateStale,
+            6124 => MarginfiError::GroupRateLimiterUpdateOutOfOrderSlot,
+            6125 => MarginfiError::GroupRateLimiterUpdateOutOfOrderSeq,
+            6126 => MarginfiError::DeleverageWithdrawalUpdateEmpty,
+            6127 => MarginfiError::DeleverageWithdrawalUpdateInvalidSlotRange,
+            6128 => MarginfiError::DeleverageWithdrawalUpdateFutureSlot,
+            6129 => MarginfiError::DeleverageWithdrawalUpdateStale,
+            6130 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSlot,
+            6131 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSeq,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,
@@ -477,7 +592,7 @@ impl From<u32> for MarginfiError {
             6209 => MarginfiError::ObligationInitDepositInsufficient,
             6210 => MarginfiError::KaminoReserveValidationFailed,
             6211 => MarginfiError::KaminoInvalidOracleSetup,
-            6212 => MarginfiError::IntegrationPositionLimitExceeded,
+            6212 => MarginfiError::MaxMaintLeverageExceeded,
             6213 => MarginfiError::InvalidKaminoReserve,
             6214 => MarginfiError::InvalidKaminoObligation,
 
@@ -529,6 +644,21 @@ impl From<u32> for MarginfiError {
             6415 => MarginfiError::InvalidSolendReserve,
             6416 => MarginfiError::InvalidSolendObligation,
 
+            // Juplend-specific errors (starting at 6500)
+            6500 => MarginfiError::JuplendInvalidOracleSetup,
+            6501 => MarginfiError::JuplendLendingValidationFailed,
+            6502 => MarginfiError::WrongBankAssetTagForJuplendOperation,
+            6503 => MarginfiError::CantUseStandardOperationsOnJuplendAssets,
+            6504 => MarginfiError::JuplendLendingStale,
+            6505 => MarginfiError::InvalidJuplendLending,
+            6506 => MarginfiError::JuplendLendingMintMismatch,
+            6507 => MarginfiError::JuplendBankAlreadyActivated,
+            6508 => MarginfiError::InvalidJuplendFTokenVault,
+            6509 => MarginfiError::JuplendDepositFailed,
+            6510 => MarginfiError::JuplendWithdrawFailed,
+            6511 => MarginfiError::JuplendInitPositionDepositInsufficient,
+            6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
+
             _ => MarginfiError::InternalLogicError,
         }
     }
@@ -551,8 +681,6 @@ impl MarginfiError {
                 | MarginfiError::PythPushInvalidAccount
                 | MarginfiError::SwitchboardWrongAccountOwner
                 | MarginfiError::PythPushInsufficientVerificationLevel
-                | MarginfiError::StakedPythPushWrongAccountOwner
-                | MarginfiError::PythPushWrongAccountOwner
                 | MarginfiError::WrongOracleAccountKeys
                 | MarginfiError::PythPushStalePrice
                 | MarginfiError::SwitchboardStalePrice
@@ -564,6 +692,11 @@ impl MarginfiError {
                 | MarginfiError::PythPushInvalidWindowSize
                 | MarginfiError::OracleMaxConfidenceExceeded
                 | MarginfiError::ZeroSupplyInStakePool
+                // Lending protocol staleness errors - stale exchange rates mean unreliable prices
+                | MarginfiError::ReserveStale // Kamino
+                | MarginfiError::SolendReserveStale
+                | MarginfiError::DriftSpotMarketStale
+                | MarginfiError::JuplendLendingStale
         )
     }
 

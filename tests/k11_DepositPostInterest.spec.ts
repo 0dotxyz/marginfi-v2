@@ -6,7 +6,6 @@ import {
   ecosystem,
   kaminoAccounts,
   KAMINO_USDC_BANK,
-  kaminoGroup,
   MARKET,
   oracles,
   USDC_RESERVE,
@@ -19,6 +18,7 @@ import {
   banksClient,
   KAMINO_TOKEN_A_BANK as KAMINO_TOKEN_A_BANK,
   TOKEN_A_RESERVE,
+  groupAdmin,
 } from "./rootHooks";
 import {
   estimateCollateralFromDeposit,
@@ -27,17 +27,14 @@ import {
   simpleRefreshReserve,
   wrappedU68F60toBigNumber,
 } from "./utils/kamino-utils";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { assert } from "chai";
 import { MockUser, USER_ACCOUNT_K } from "./utils/mocks";
-import { omitPadding, processBankrunTransaction } from "./utils/tools";
+import { processBankrunTransaction } from "./utils/tools";
 import { makeKaminoDepositIx } from "./utils/kamino-instructions";
 import { ProgramTestContext } from "solana-bankrun";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import {
   assertBNEqual,
-  assertU68F60Approx,
-  assertI68F60Equal,
   assertI80F48Approx,
   assertI80F48Equal,
   assertKeysEqual,
@@ -51,9 +48,9 @@ import {
   deriveReserveCollateralSupply,
   deriveReserveLiquiditySupply,
 } from "./utils/pdas";
-import { getEpochAndSlot } from "./utils/stake-utils";
 import { BalanceRaw } from "@mrgnlabs/marginfi-client-v2";
 import { Reserve } from "@kamino-finance/klend-sdk";
+import { dummyIx, getEpochAndSlot } from "./utils/bankrunConnection";
 
 let ctx: ProgramTestContext;
 let bank: PublicKey;
@@ -74,29 +71,29 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
 
     [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
       KLEND_PROGRAM_ID,
-      market,
-      ecosystem.usdcMint.publicKey
+      usdcReserve,
     );
+
     [reserveCollateralSupply] = deriveReserveCollateralSupply(
       KLEND_PROGRAM_ID,
-      market,
-      ecosystem.usdcMint.publicKey
+      usdcReserve,
     );
 
     // Refresh to pick up any interest changes since the last test ended.
     let tx = new Transaction().add(
+      dummyIx(users[0].wallet.publicKey, groupAdmin.wallet.publicKey),
       await simpleRefreshReserve(
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         usdcBankObligation,
-        [usdcReserve]
-      )
+        [usdcReserve],
+      ),
     );
     await processBankrunTransaction(ctx, tx, [users[0].wallet]);
   });
@@ -104,7 +101,7 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
   async function executeDeposit(
     user: MockUser,
     amount: BN,
-    userLabel: string
+    userLabel: string,
   ): Promise<void> {
     const marginfiAccount = user.accounts.get(USER_ACCOUNT_K);
     /** Without decimals, e.g. 1.1 USDC = 1.1 */
@@ -112,7 +109,7 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
 
     if (verbose) {
       console.log(
-        `Deposit for user ${userLabel} Account: ${marginfiAccount.toString()}`
+        `Deposit for user ${userLabel} Account: ${marginfiAccount.toString()}`,
       );
     }
 
@@ -135,7 +132,7 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
     ]);
 
     const balanceMaybe = userAccBefore.lendingAccount.balances.find(
-      (b) => b.bankPk.equals(bank) && b.active === 1
+      (b) => b.bankPk.equals(bank) && b.active === 1,
     );
     const balanceAmtBefore = balanceMaybe
       ? wrappedI80F48toBigNumber(balanceMaybe.assetShares).toNumber()
@@ -150,18 +147,19 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
 
     const { epoch: _epoch, slot } = await getEpochAndSlot(banksClient);
     let tx = new Transaction().add(
+      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
       await simpleRefreshReserve(
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       ),
       // pass the USDC reserve since it's now part of the obligation
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         usdcBankObligation,
-        [usdcReserve]
+        [usdcReserve],
       ),
       await makeKaminoDepositIx(
         user.mrgnBankrunProgram,
@@ -170,10 +168,10 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
           bank,
           signerTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
-        amount
-      )
+        amount,
+      ),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
@@ -202,7 +200,7 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
       // Note: the net supply also includes available, borrowed, etc.
       console.log("res available:   " + resSupplyAfter.toString());
       console.log(
-        "col mint supply: " + resAfter.collateral.mintTotalSupply.toString()
+        "col mint supply: " + resAfter.collateral.mintTotalSupply.toString(),
       );
     }
     assertBNEqual(amount, userUsdcChange);
@@ -210,23 +208,23 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
     // Note: The ratio between collateral and liquidity is no longer 1:1.
     const expectedCollateral = estimateCollateralFromDeposit(
       resAfter as Reserve,
-      amount
+      amount,
     );
     assertBNEqual(expectedCollateral, colVaultAfter - colVaultBefore);
 
     const balancesAfter = userAccAfter.lendingAccount.balances;
     const balanceAfter: BalanceRaw = balancesAfter.find(
-      (b: BalanceRaw) => b.bankPk.equals(bank) && b.active === 1
+      (b: BalanceRaw) => b.bankPk.equals(bank) && b.active === 1,
     );
     assert.equal(balanceAfter.active, 1);
     assertI80F48Approx(
       balanceAfter.assetShares,
       // Note: the balance tracks your collateral token, NOT liquidity token!
-      balanceAmtBefore + expectedCollateral.toNumber()
+      balanceAmtBefore + expectedCollateral.toNumber(),
     );
     assertBNEqual(
-      resAfter.liquidity.availableAmount,
-      resBefore.liquidity.availableAmount.add(amount)
+      resAfter.liquidity.totalAvailableAmount,
+      resBefore.liquidity.totalAvailableAmount.add(amount),
     );
     // * Note: the collateral mint will have the same raw value, even though it may use different
     // decimals (fixed to 6) in the token program, it actually always uses mint_decimals.
@@ -236,23 +234,23 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
     assertBNApproximately(
       resAfter.collateral.mintTotalSupply,
       resBefore.collateral.mintTotalSupply.add(amount),
-      interestTolerance
+      interestTolerance,
     );
     // We know there are some borrows here, but we don't care how many.
     assert(
       wrappedU68F60toBigNumber(resAfter.liquidity.borrowedAmountSf).toNumber() >
-        10
+        10,
     );
 
     // Assert bank updated as expected
     const sharesBefore = wrappedI80F48toBigNumber(
-      bankBefore.totalAssetShares
+      bankBefore.totalAssetShares,
     ).toNumber();
     // No interest accumulates on Kamino banks, so the asset share value is always 1, and the
     // relationship between collateral tokens and shares is always 1:1
     assertI80F48Approx(
       bankAfter.totalAssetShares,
-      sharesBefore + expectedCollateral.toNumber()
+      sharesBefore + expectedCollateral.toNumber(),
     );
     assertI80F48Equal(bankAfter.assetShareValue, 1);
     assertI80F48Equal(bankAfter.collectedInsuranceFeesOutstanding, 0);
@@ -266,7 +264,7 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
     assertBNEqual(
       depositAfter.depositedAmount,
       // Note: the balance tracks your collateral token, NOT liquidity token!
-      depositBefore.depositedAmount.add(expectedCollateral)
+      depositBefore.depositedAmount.add(expectedCollateral),
     );
 
     // Oracle update assertions
@@ -290,18 +288,19 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
 
     // Note: Some values don't update until the NEXT refresh!
     let refreshTx = new Transaction().add(
+      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
       await simpleRefreshReserve(
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         usdcBankObligation,
-        [usdcReserve]
-      )
+        [usdcReserve],
+      ),
     );
     await processBankrunTransaction(ctx, refreshTx, [user.wallet]);
 
@@ -312,25 +311,25 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
     ]);
     const depositAfterRefresh = obAfterRefresh.deposits[0];
     const marketValueBefore = wrappedU68F60toBigNumber(
-      depositBefore.marketValueSf
+      depositBefore.marketValueSf,
     ).toNumber();
     const marketValueAfter = wrappedU68F60toBigNumber(
-      depositAfterRefresh.marketValueSf
+      depositAfterRefresh.marketValueSf,
     ).toNumber();
     const expectedDiff = amtFloat * oracles.usdcPrice;
     const expectedValue = marketValueBefore + expectedDiff;
     assert.approximately(
       marketValueAfter,
       expectedValue,
-      marketValueAfter * 0.0001
+      marketValueAfter * 0.0001,
     );
     // Note: the reserve, in a variable with the same name, records the token PRICE...
     assert.approximately(
       wrappedU68F60toBigNumber(
-        resAfterRefresh.liquidity.marketPriceSf
+        resAfterRefresh.liquidity.marketPriceSf,
       ).toNumber(),
       oracles.usdcPrice,
-      oracles.usdcPrice * 0.0001
+      oracles.usdcPrice * 0.0001,
     );
 
     // After another refresh, the stale flag is removed and the oracle data can be used again. Note:
@@ -377,33 +376,34 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
 
     const [authority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      bank
+      bank,
     );
     [tokenABankObligation] = deriveBaseObligation(authority, market);
+
     [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
       KLEND_PROGRAM_ID,
-      market,
-      ecosystem.tokenAMint.publicKey
+      tokenAReserve,
     );
+
     [reserveCollateralSupply] = deriveReserveCollateralSupply(
       KLEND_PROGRAM_ID,
-      market,
-      ecosystem.tokenAMint.publicKey
+      tokenAReserve,
     );
 
     let tx = new Transaction().add(
+      dummyIx(users[0].wallet.publicKey, groupAdmin.wallet.publicKey),
       await simpleRefreshReserve(
         klendBankrunProgram,
         tokenAReserve,
         market,
-        oracles.tokenAOracle.publicKey
+        oracles.tokenAOracle.publicKey,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         tokenABankObligation,
-        [tokenAReserve]
-      )
+        [tokenAReserve],
+      ),
     );
     await processBankrunTransaction(ctx, tx, [users[0].wallet]);
   });
@@ -411,14 +411,14 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
   async function executeDepositTokenA(
     user: MockUser,
     amount: BN,
-    userLabel: string
+    userLabel: string,
   ): Promise<void> {
     const marginfiAccount = user.accounts.get(USER_ACCOUNT_K);
     const amtFloat = amount.toNumber() / 10 ** ecosystem.tokenADecimals;
 
     if (verbose) {
       console.log(
-        `Deposit for user ${userLabel} Account: ${marginfiAccount.toString()}`
+        `Deposit for user ${userLabel} Account: ${marginfiAccount.toString()}`,
       );
     }
 
@@ -441,7 +441,7 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
     ]);
 
     const balanceMaybe: BalanceRaw = userAccBefore.lendingAccount.balances.find(
-      (b: BalanceRaw) => b.bankPk.equals(bank) && b.active === 1
+      (b: BalanceRaw) => b.bankPk.equals(bank) && b.active === 1,
     );
     const balanceAmtBefore = balanceMaybe
       ? wrappedI80F48toBigNumber(balanceMaybe.assetShares).toNumber()
@@ -456,17 +456,18 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
 
     const { epoch: _epoch, slot } = await getEpochAndSlot(banksClient);
     let tx = new Transaction().add(
+      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
       await simpleRefreshReserve(
         klendBankrunProgram,
         tokenAReserve,
         market,
-        oracles.tokenAOracle.publicKey
+        oracles.tokenAOracle.publicKey,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         tokenABankObligation,
-        [tokenAReserve]
+        [tokenAReserve],
       ),
       await makeKaminoDepositIx(
         user.mrgnBankrunProgram,
@@ -475,10 +476,10 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
           bank,
           signerTokenAccount: user.tokenAAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+          reserve: tokenAReserve,
         },
-        amount
-      )
+        amount,
+      ),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
@@ -504,33 +505,33 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
     const resSupplyAfter = getTotalSupply(resAfter as Reserve);
     if (verbose) {
       console.log(
-        ` Deposited ${amount} TokenA actual change ${userTokenAChange}`
+        ` Deposited ${amount} TokenA actual change ${userTokenAChange}`,
       );
       console.log("res available:   " + resSupplyAfter.toString());
       console.log(
-        "col mint supply: " + resAfter.collateral.mintTotalSupply.toString()
+        "col mint supply: " + resAfter.collateral.mintTotalSupply.toString(),
       );
     }
     assertBNEqual(amount, userTokenAChange);
     assertBNEqual(amount, liqVaultAfter - liqVaultBefore);
     const expectedCollateral = estimateCollateralFromDeposit(
       resAfter as Reserve,
-      amount
+      amount,
     );
     assertBNEqual(expectedCollateral, colVaultAfter - colVaultBefore);
 
     const balancesAfter = userAccAfter.lendingAccount.balances;
     const balanceAfter: BalanceRaw = balancesAfter.find(
-      (b: BalanceRaw) => b.bankPk.equals(bank) && b.active === 1
+      (b: BalanceRaw) => b.bankPk.equals(bank) && b.active === 1,
     );
     assert.equal(balanceAfter.active, 1);
     assertI80F48Approx(
       balanceAfter.assetShares,
-      balanceAmtBefore + expectedCollateral.toNumber()
+      balanceAmtBefore + expectedCollateral.toNumber(),
     );
     assertBNEqual(
-      resAfter.liquidity.availableAmount,
-      resBefore.liquidity.availableAmount.add(amount)
+      resAfter.liquidity.totalAvailableAmount,
+      resBefore.liquidity.totalAvailableAmount.add(amount),
     );
     // Note: Here with an 8 decimal mint, the mintTotalSupply still uses mint_decimals.
     const interestTolerance =
@@ -538,19 +539,19 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
     assertBNApproximately(
       resAfter.collateral.mintTotalSupply,
       resBefore.collateral.mintTotalSupply.add(amount),
-      interestTolerance
+      interestTolerance,
     );
     assert(
       wrappedU68F60toBigNumber(resAfter.liquidity.borrowedAmountSf).toNumber() >
-        10
+        10,
     );
 
     const sharesBefore = wrappedI80F48toBigNumber(
-      bankBefore.totalAssetShares
+      bankBefore.totalAssetShares,
     ).toNumber();
     assertI80F48Approx(
       bankAfter.totalAssetShares,
-      sharesBefore + expectedCollateral.toNumber()
+      sharesBefore + expectedCollateral.toNumber(),
     );
     assertI80F48Equal(bankAfter.assetShareValue, 1);
     assertI80F48Equal(bankAfter.collectedInsuranceFeesOutstanding, 0);
@@ -562,7 +563,7 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
     assertKeysEqual(depositAfter.depositReserve, tokenAReserve);
     assertBNEqual(
       depositAfter.depositedAmount,
-      depositBefore.depositedAmount.add(expectedCollateral)
+      depositBefore.depositedAmount.add(expectedCollateral),
     );
 
     assert.equal(obAfter.lastUpdate.slot.toNumber(), slot);
@@ -573,18 +574,19 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
     assert.equal(resAfter.lastUpdate.stale, 1);
 
     let refreshTx = new Transaction().add(
+      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
       await simpleRefreshReserve(
         klendBankrunProgram,
         tokenAReserve,
         market,
-        oracles.tokenAOracle.publicKey
+        oracles.tokenAOracle.publicKey,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         tokenABankObligation,
-        [tokenAReserve]
-      )
+        [tokenAReserve],
+      ),
     );
     await processBankrunTransaction(ctx, refreshTx, [user.wallet]);
 
@@ -594,24 +596,24 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
     ]);
     const depositAfterRefresh = obAfterRefresh.deposits[0];
     const marketValueBefore = wrappedU68F60toBigNumber(
-      depositBefore.marketValueSf
+      depositBefore.marketValueSf,
     ).toNumber();
     const marketValueAfter = wrappedU68F60toBigNumber(
-      depositAfterRefresh.marketValueSf
+      depositAfterRefresh.marketValueSf,
     ).toNumber();
     const expectedDiff = amtFloat * oracles.tokenAPrice;
     const expectedValue = marketValueBefore + expectedDiff;
     assert.approximately(
       marketValueAfter,
       expectedValue,
-      marketValueAfter * 0.0001
+      marketValueAfter * 0.0001,
     );
     assert.approximately(
       wrappedU68F60toBigNumber(
-        resAfterRefresh.liquidity.marketPriceSf
+        resAfterRefresh.liquidity.marketPriceSf,
       ).toNumber(),
       oracles.tokenAPrice,
-      oracles.tokenAPrice * 0.0001
+      oracles.tokenAPrice * 0.0001,
     );
 
     assert.equal(obAfterRefresh.lastUpdate.stale, 0);

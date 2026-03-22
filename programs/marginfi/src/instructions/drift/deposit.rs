@@ -1,5 +1,5 @@
 use crate::{
-    bank_signer, check,
+    bank_signer,
     constants::DRIFT_PROGRAM_ID,
     events::{AccountEventHeader, LendingAccountDepositEvent},
     state::{
@@ -10,7 +10,10 @@ use crate::{
         },
         marginfi_group::MarginfiGroupImpl,
     },
-    utils::{is_drift_asset_tag, validate_asset_tags, validate_bank_state, InstructionKind},
+    utils::{
+        is_drift_asset_tag, record_deposit_inflow, validate_asset_tags, validate_bank_state,
+        InstructionKind,
+    },
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -23,9 +26,7 @@ use drift_mocks::drift::cpi::{deposit, update_spot_market_cumulative_interest};
 use drift_mocks::state::MinimalUser;
 use fixed::types::I80F48;
 use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
-use marginfi_type_crate::types::{
-    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
-};
+use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
 /// Deposit into a Drift spot market through a marginfi account
 ///
@@ -35,7 +36,10 @@ use marginfi_type_crate::types::{
 /// 3. Deposits the tokens into Drift through a CPI call
 /// 4. Verifies the spot position was updated correctly
 /// 5. Updates the marginfi account's balance to reflect the deposit
-pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult {
+pub fn drift_deposit<'info>(
+    ctx: Context<'_, '_, 'info, 'info, DriftDeposit<'info>>,
+    amount: u64,
+) -> MarginfiResult {
     let authority_bump: u8;
     let market_index: u16;
     {
@@ -45,12 +49,6 @@ pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult 
 
         validate_asset_tags(&bank, &marginfi_account)?;
         validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
-
-        check!(
-            !marginfi_account.get_flag(ACCOUNT_DISABLED)
-                && !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP),
-            MarginfiError::AccountDisabled
-        );
 
         let integration_acc_1 = ctx.accounts.integration_acc_1.load()?;
         market_index = integration_acc_1.market_index;
@@ -86,7 +84,8 @@ pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult 
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let group = &ctx.accounts.group.load()?;
+        let group = ctx.accounts.group.load()?;
+        let clock = Clock::get()?;
 
         let mut bank_account = BankAccountWrapper::find_or_create(
             &ctx.accounts.bank.key(),
@@ -97,10 +96,19 @@ pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult 
         let scaled_balance_change_i80f48 = I80F48::from_num(scaled_balance_change);
         bank_account.deposit_no_repay(scaled_balance_change_i80f48)?;
 
+        record_deposit_inflow(
+            &mut bank,
+            &group,
+            ctx.accounts.group.key(),
+            ctx.accounts.bank.key(),
+            marginfi_account.account_flags,
+            amount,
+            &clock,
+        )?;
         // Update bank cache after modifying balances
-        bank.update_bank_cache(group)?;
+        bank.update_bank_cache(&group)?;
 
-        marginfi_account.last_update = Clock::get()?.unix_timestamp as u64;
+        marginfi_account.last_update = clock.unix_timestamp as u64;
         marginfi_account.lending_account.sort_balances();
 
         emit!(LendingAccountDepositEvent {
@@ -132,13 +140,17 @@ pub struct DriftDeposit<'info> {
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_DISABLED)
+        } @MarginfiError::AccountDisabled,
+        constraint = {
             let a = marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())
         } @ MarginfiError::AccountFrozen,
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false)
+            is_signer_authorized(&a, g.admin, authority.key(), false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

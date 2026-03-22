@@ -6,15 +6,15 @@ use crate::{
         get_discrim_hash, validate_not_cpi_by_stack_height, validate_not_cpi_with_sysvar, Hashable,
     },
     prelude::*,
-    state::marginfi_account::{MarginfiAccountImpl, RiskEngine},
+    state::marginfi_account::{check_account_init_health, MarginfiAccountImpl},
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::sysvar::{self, instructions};
 use marginfi_type_crate::{
     constants::ix_discriminators::END_FLASHLOAN,
     types::{
-        MarginfiAccount, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
-        ACCOUNT_IN_RECEIVERSHIP,
+        MarginfiAccount, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE,
+        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -38,7 +38,16 @@ pub fn lending_account_start_flashloan(
 pub struct LendingAccountStartFlashloan<'info> {
     #[account(
         mut,
-        has_one = authority @ MarginfiError::Unauthorized
+        has_one = authority @ MarginfiError::Unauthorized,
+        constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_IN_FLASHLOAN)
+                && !acc.get_flag(ACCOUNT_IN_DELEVERAGE)
+                && !acc.get_flag(ACCOUNT_IN_RECEIVERSHIP)
+                && !acc.get_flag(ACCOUNT_DISABLED)
+                && !acc.get_flag(ACCOUNT_FROZEN)
+                && !acc.get_flag(ACCOUNT_IN_ORDER_EXECUTION)
+        } @MarginfiError::IllegalFlashloan
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
@@ -60,11 +69,9 @@ impl Hashable for LendingAccountStartFlashloan<'_> {
 /// 1. `end_flashloan` ix index is after `start_flashloan` ix index
 /// 2. Ixs has an `end_flashloan` ix present
 /// 3. `end_flashloan` ix is for the marginfi program
-/// 3. `end_flashloan` ix is for the same marginfi account
-/// 4. Account is not disabled or in receivership
-/// 5. Account is not already in a flashloan
-/// 6. Start flashloan ix is not in CPI
-/// 7. End flashloan ix is not in CPI
+/// 4. `end_flashloan` ix is for the same marginfi account
+/// 5. Start flashloan ix is not in CPI
+/// 6. End flashloan ix is not in CPI
 pub fn check_flashloan_can_start(
     marginfi_account: &AccountLoader<MarginfiAccount>,
     sysvar_ixs: &AccountInfo,
@@ -100,26 +107,6 @@ pub fn check_flashloan_can_start(
         MarginfiError::IllegalFlashloan
     );
 
-    let marginf_account = marginfi_account.load()?;
-
-    check!(
-        !marginf_account.get_flag(ACCOUNT_DISABLED),
-        MarginfiError::AccountDisabled
-    );
-
-    check!(
-        !marginf_account.get_flag(ACCOUNT_IN_FLASHLOAN),
-        MarginfiError::IllegalFlashloan
-    );
-
-    check!(
-        !marginf_account.get_flag(ACCOUNT_IN_RECEIVERSHIP),
-        MarginfiError::ForbiddenIx
-    );
-    check!(
-        !marginf_account.get_flag(ACCOUNT_FROZEN),
-        MarginfiError::AccountFrozen
-    );
     Ok(())
 }
 
@@ -130,25 +117,9 @@ pub fn lending_account_end_flashloan<'info>(
 
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
 
-    check!(
-        !marginfi_account.get_flag(ACCOUNT_DISABLED),
-        MarginfiError::AccountDisabled
-    );
-
-    check!(
-        !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP),
-        MarginfiError::ForbiddenIx
-    );
-
-    check!(
-        !marginfi_account.get_flag(ACCOUNT_FROZEN),
-        MarginfiError::AccountFrozen
-    );
     marginfi_account.unset_flag(ACCOUNT_IN_FLASHLOAN, false);
 
-    let (risk_result, _engine) =
-        RiskEngine::check_account_init_health(&marginfi_account, ctx.remaining_accounts, &mut None);
-    risk_result?;
+    check_account_init_health(&marginfi_account, ctx.remaining_accounts, &mut None)?;
 
     Ok(())
 }
@@ -157,7 +128,16 @@ pub fn lending_account_end_flashloan<'info>(
 pub struct LendingAccountEndFlashloan<'info> {
     #[account(
         mut,
-        has_one = authority @ MarginfiError::Unauthorized
+        has_one = authority @ MarginfiError::Unauthorized,
+        constraint = {
+            let acc = marginfi_account.load()?;
+            acc.get_flag(ACCOUNT_IN_FLASHLOAN)
+                && !acc.get_flag(ACCOUNT_IN_DELEVERAGE)
+                && !acc.get_flag(ACCOUNT_IN_RECEIVERSHIP)
+                && !acc.get_flag(ACCOUNT_DISABLED)
+                && !acc.get_flag(ACCOUNT_FROZEN)
+                && !acc.get_flag(ACCOUNT_IN_ORDER_EXECUTION)
+        } @MarginfiError::IllegalFlashloan
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 

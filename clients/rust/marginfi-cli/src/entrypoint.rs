@@ -11,9 +11,9 @@ use anyhow::Result;
 use clap::{clap_derive::ArgEnum, Parser};
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{
-    make_points, Balance, Bank, BankConfig, BankConfigOpt, BankOperationalState,
+    centi_to_u32, make_points, Balance, Bank, BankConfig, BankConfigOpt, BankOperationalState,
     InterestRateConfig, InterestRateConfigOpt, LendingAccount, MarginfiAccount, MarginfiGroup,
-    RatePoint, RiskTier, WrappedI80F48, CURVE_POINTS,
+    OrderTrigger, RatePoint, RiskTier, WrappedI80F48, CURVE_POINTS,
 };
 use pyth_solana_receiver_sdk::price_update::get_feed_id_from_hex;
 use rand::Rng;
@@ -166,6 +166,10 @@ pub enum GroupCommand {
         program_fee_rate: f64,
         #[clap(long)]
         liquidation_max_fee: f64,
+        #[clap(long)]
+        order_init_flat_sol_fee: u32,
+        #[clap(long)]
+        order_execution_max_fee: f64,
     },
     EditFeeState {
         #[clap(long)]
@@ -182,6 +186,18 @@ pub enum GroupCommand {
         program_fee_rate: f64,
         #[clap(long)]
         liquidation_max_fee: f64,
+        #[clap(
+            long,
+            help = "Flat SOL fee (lamports) when creating an order",
+            default_value = "0"
+        )]
+        order_init_flat_sol_fee: u32,
+        #[clap(
+            long,
+            help = "Max order execution fee (as a decimal, e.g. 0.05 for 5%)",
+            default_value = "0"
+        )]
+        order_execution_max_fee: f64,
     },
     ConfigGroupFee {
         #[clap(
@@ -263,6 +279,58 @@ impl From<BankOperationalStateArg> for BankOperationalState {
             BankOperationalStateArg::Paused => BankOperationalState::Paused,
             BankOperationalStateArg::Operational => BankOperationalState::Operational,
             BankOperationalStateArg::ReduceOnly => BankOperationalState::ReduceOnly,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Parser, ArgEnum)]
+pub enum OrderTriggerTypeArg {
+    StopLoss,
+    TakeProfit,
+    Both,
+}
+
+impl OrderTriggerTypeArg {
+    pub fn into_order_trigger(
+        self,
+        stop_loss: Option<f64>,
+        take_profit: Option<f64>,
+        max_slippage_bps: u32,
+    ) -> Result<OrderTrigger> {
+        let max_slippage =
+            centi_to_u32(I80F48::from_num(max_slippage_bps as f64 / 10_000.0));
+        match self {
+            OrderTriggerTypeArg::StopLoss => {
+                let threshold = stop_loss.ok_or_else(|| {
+                    anyhow::anyhow!("stop_loss threshold required for StopLoss trigger")
+                })?;
+                Ok(OrderTrigger::StopLoss {
+                    threshold: I80F48::from_num(threshold).into(),
+                    max_slippage,
+                })
+            }
+            OrderTriggerTypeArg::TakeProfit => {
+                let threshold = take_profit.ok_or_else(|| {
+                    anyhow::anyhow!("take_profit threshold required for TakeProfit trigger")
+                })?;
+                Ok(OrderTrigger::TakeProfit {
+                    threshold: I80F48::from_num(threshold).into(),
+                    max_slippage,
+                })
+            }
+            OrderTriggerTypeArg::Both => {
+                let sl = stop_loss.ok_or_else(|| {
+                    anyhow::anyhow!("stop_loss threshold required for Both trigger")
+                })?;
+                let tp = take_profit.ok_or_else(|| {
+                    anyhow::anyhow!("take_profit threshold required for Both trigger")
+                })?;
+                Ok(OrderTrigger::Both {
+                    stop_loss: I80F48::from_num(sl).into(),
+                    take_profit: I80F48::from_num(tp).into(),
+                    max_slippage,
+                })
+            }
         }
     }
 }
@@ -368,35 +436,6 @@ pub enum BankCommand {
     },
     InspectPriceOracle {
         bank_pk: Pubkey,
-    },
-    SetupEmissions {
-        bank: Pubkey,
-        #[clap(long)]
-        deposits: bool,
-        #[clap(long)]
-        borrows: bool,
-        #[clap(long)]
-        mint: Pubkey,
-        #[clap(long)]
-        rate_apr: f64,
-        #[clap(long)]
-        total_amount_ui: f64,
-    },
-    UpdateEmissions {
-        bank: Pubkey,
-        #[clap(long)]
-        deposits: bool,
-        #[clap(long)]
-        borrows: bool,
-        #[clap(long)]
-        disable: bool,
-        #[clap(long)]
-        rate: Option<f64>,
-        #[clap(long)]
-        additional_amount_ui: Option<f64>,
-    },
-    SettleAllEmissions {
-        bank: Pubkey,
     },
     CollectFees {
         bank: Pubkey,
@@ -506,6 +545,38 @@ pub enum AccountCommand {
     },
     Create,
     Close,
+    PlaceOrder {
+        /// First bank public key (one must be an asset balance)
+        #[clap(long)]
+        bank_1: Pubkey,
+        /// Second bank public key (one must be a liability balance)
+        #[clap(long)]
+        bank_2: Pubkey,
+        /// Order trigger type
+        #[clap(long, arg_enum)]
+        trigger_type: OrderTriggerTypeArg,
+        /// Stop loss threshold value (required for stop-loss and both)
+        #[clap(long)]
+        stop_loss: Option<f64>,
+        /// Take profit threshold value (required for take-profit and both)
+        #[clap(long)]
+        take_profit: Option<f64>,
+        /// Max slippage in basis points (bps). Required by program; defaults to 0 if omitted.
+        #[clap(long)]
+        max_slippage_bps: u32,
+    },
+    CloseOrder {
+        /// The order account to close
+        order: Pubkey,
+        /// Recipient of lamports from closed order account (defaults to signer)
+        #[clap(long)]
+        fee_recipient: Option<Pubkey>,
+    },
+    SetKeeperCloseFlags {
+        /// Optional list of bank keys to clear tags for. If not provided, clears all tags.
+        #[clap(long)]
+        banks: Vec<Pubkey>,
+    },
 }
 
 pub fn entry(opts: Opts) -> Result<()> {
@@ -731,6 +802,8 @@ fn group(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<()> {
             program_fee_fixed,
             program_fee_rate,
             liquidation_max_fee,
+            order_init_flat_sol_fee,
+            order_execution_max_fee,
         } => processor::initialize_fee_state(
             config,
             admin,
@@ -740,6 +813,8 @@ fn group(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<()> {
             program_fee_fixed,
             program_fee_rate,
             liquidation_max_fee,
+            order_init_flat_sol_fee,
+            order_execution_max_fee,
         ),
         GroupCommand::EditFeeState {
             new_admin,
@@ -749,6 +824,8 @@ fn group(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<()> {
             program_fee_fixed,
             program_fee_rate,
             liquidation_max_fee,
+            order_init_flat_sol_fee,
+            order_execution_max_fee,
         } => processor::edit_fee_state(
             config,
             new_admin,
@@ -758,6 +835,8 @@ fn group(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<()> {
             program_fee_fixed,
             program_fee_rate,
             liquidation_max_fee,
+            order_init_flat_sol_fee,
+            order_execution_max_fee,
         ),
         GroupCommand::ConfigGroupFee { enable_program_fee } => {
             processor::config_group_fee(config, profile, enable_program_fee)
@@ -866,36 +945,6 @@ fn bank(subcmd: BankCommand, global_options: &GlobalOptions) -> Result<()> {
         BankCommand::InspectPriceOracle { bank_pk } => {
             processor::bank_inspect_price_oracle(config, bank_pk)
         }
-        BankCommand::SetupEmissions {
-            bank,
-            deposits,
-            borrows,
-            mint,
-            rate_apr: rate,
-            total_amount_ui: total_ui,
-        } => processor::bank_setup_emissions(
-            &config, &profile, bank, deposits, borrows, mint, rate, total_ui,
-        ),
-        BankCommand::UpdateEmissions {
-            bank,
-            deposits,
-            borrows,
-            disable,
-            rate,
-            additional_amount_ui,
-        } => processor::bank_update_emissions(
-            &config,
-            &profile,
-            bank,
-            deposits,
-            borrows,
-            disable,
-            rate,
-            additional_amount_ui,
-        ),
-        BankCommand::SettleAllEmissions { bank } => {
-            processor::emissions::claim_all_emissions_for_bank(&config, &profile, bank)
-        }
         BankCommand::CollectFees { bank, fee_ata } => {
             processor::admin::process_collect_fees(config, bank, fee_ata)
         }
@@ -984,6 +1033,26 @@ fn process_account_subcmd(subcmd: AccountCommand, global_options: &GlobalOptions
         ),
         AccountCommand::Create => processor::marginfi_account_create(&profile, &config),
         AccountCommand::Close => processor::marginfi_account_close(&profile, &config),
+        AccountCommand::PlaceOrder {
+            bank_1,
+            bank_2,
+            trigger_type,
+            stop_loss,
+            take_profit,
+            max_slippage_bps,
+        } => {
+            let trigger =
+                trigger_type.into_order_trigger(stop_loss, take_profit, max_slippage_bps)?;
+            processor::marginfi_account_place_order(&profile, &config, bank_1, bank_2, trigger)
+        }
+        AccountCommand::CloseOrder {
+            order,
+            fee_recipient,
+        } => processor::marginfi_account_close_order(&profile, &config, order, fee_recipient),
+        AccountCommand::SetKeeperCloseFlags { banks } => {
+            let bank_keys_opt = if banks.is_empty() { None } else { Some(banks) };
+            processor::marginfi_account_set_keeper_close_flags(&profile, &config, bank_keys_opt)
+        }
     }?;
 
     Ok(())

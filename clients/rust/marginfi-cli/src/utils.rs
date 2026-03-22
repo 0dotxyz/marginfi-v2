@@ -6,12 +6,15 @@ use {
     log::error,
     marginfi::{bank_authority_seed, bank_seed, state::bank::BankVaultType},
     marginfi_type_crate::{
-        constants::{EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED, FEE_STATE_SEED},
+        constants::{
+            EMISSIONS_TOKEN_ACCOUNT_SEED, FEE_STATE_SEED, ORDER_SEED,
+        },
         types::{Bank, BankConfig, MarginfiAccount},
     },
     solana_client::rpc_client::RpcClient,
     solana_sdk::{
-        instruction::AccountMeta, pubkey::Pubkey, signature::Signature, transaction::Transaction,
+        hash::hashv, instruction::AccountMeta, pubkey::Pubkey, signature::Signature,
+        transaction::Transaction,
     },
     std::collections::HashMap,
 };
@@ -78,21 +81,6 @@ pub fn find_bank_vault_authority_pda(
     Pubkey::find_program_address(bank_authority_seed!(vault_type, bank_pk), program_id)
 }
 
-pub fn find_bank_emssions_auth_pda(
-    bank: Pubkey,
-    emissions_mint: Pubkey,
-    program_id: Pubkey,
-) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
-        &[
-            EMISSIONS_AUTH_SEED.as_bytes(),
-            bank.as_ref(),
-            emissions_mint.as_ref(),
-        ],
-        &program_id,
-    )
-}
-
 pub fn find_bank_emssions_token_account_pda(
     bank: Pubkey,
     emissions_mint: Pubkey,
@@ -110,6 +98,25 @@ pub fn find_bank_emssions_token_account_pda(
 
 pub fn find_fee_state_pda(program_id: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[FEE_STATE_SEED.as_bytes()], program_id)
+}
+
+pub fn find_order_pda(
+    marginfi_account: &Pubkey,
+    bank_keys: &[Pubkey],
+    program_id: &Pubkey,
+) -> (Pubkey, u8) {
+    let mut slices: Vec<&[u8]> = bank_keys.iter().map(|pk| pk.as_ref()).collect();
+    slices.sort_unstable();
+    let bank_keys_hash = hashv(&slices).to_bytes();
+
+    Pubkey::find_program_address(
+        &[
+            ORDER_SEED.as_bytes(),
+            marginfi_account.as_ref(),
+            &bank_keys_hash,
+        ],
+        program_id,
+    )
 }
 
 pub const EXP_10_I80F48: [I80F48; 15] = [
@@ -181,10 +188,6 @@ pub fn load_observation_account_metas(
         })
         .collect::<Vec<_>>();
     account_metas
-}
-
-pub fn calc_emissions_rate(ui_rate: f64, emissions_mint_decimals: u8) -> u64 {
-    (ui_rate * 10u64.pow(emissions_mint_decimals as u32) as f64) as u64
 }
 
 pub fn ui_to_native(ui_amount: f64, decimals: u8) -> u64 {

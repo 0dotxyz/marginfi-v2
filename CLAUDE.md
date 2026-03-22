@@ -1,11 +1,12 @@
 ## Build Notes
 
-- Can only build the program or check if it's building using `anchor build -p marginfi -- --no-default-features`
+- Can only build the program or check if it's building using `anchor build -p marginfi -- --no-default-features --features custom-heap`
 
 ## Test Notes
 
-- When running tests for any purpose (checking if tests pass, debugging failures, etc.), use the @agent-test-runner-analyzer agent
-- The test-runner-analyzer agent will handle running the full test suite and extracting relevant results for specific tests
+- When running tests, use the @agent-anchor-test-runner agent with the specific script name from Anchor.toml
+- Available test scripts: `basic-tests`, `kamino-tests`, `drift-tests`, `solend-tests`, `juplend-tests`, `staked-tests`, `all-tests`, etc.
+- Output is saved to `test_output.txt` in the project directory for inspection
 
 ## TypeScript Error Checking
 

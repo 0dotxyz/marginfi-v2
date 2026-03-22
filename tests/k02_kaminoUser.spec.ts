@@ -1,4 +1,3 @@
-import { AnchorProvider, Wallet } from "@coral-xyz/anchor";
 import { PublicKey, SYSVAR_RENT_PUBKEY, Transaction } from "@solana/web3.js";
 import {
   kaminoAccounts,
@@ -6,7 +5,6 @@ import {
   users,
   verbose,
   bankrunContext,
-  bankRunProvider,
   klendBankrunProgram,
   ecosystem,
   globalProgramAdmin,
@@ -17,7 +15,7 @@ import { KAMINO_METADATA, KAMINO_OBLIGATION } from "./utils/mocks";
 import { processBankrunTransaction } from "./utils/tools";
 import { ProgramTestContext } from "solana-bankrun";
 import { createMintToInstruction } from "@solana/spl-token";
-import { InitObligationArgs } from "@kamino-finance/klend-sdk/dist/idl_codegen/types";
+import { InitObligationArgs } from "@kamino-finance/klend-sdk/dist/@codegen/klend/types";
 
 let ctx: ProgramTestContext;
 

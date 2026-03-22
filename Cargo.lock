@@ -2569,6 +2569,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "juplend-mocks"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "bytemuck",
+]
+
+[[package]]
 name = "kamino-mocks"
 version = "0.1.0"
 dependencies = [
@@ -2772,7 +2780,7 @@ dependencies = [
 
 [[package]]
 name = "marginfi"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
@@ -2789,6 +2797,7 @@ dependencies = [
  "fixed-macro",
  "futures",
  "id-crate",
+ "juplend-mocks",
  "kamino-mocks",
  "lazy_static",
  "marginfi-type-crate",
@@ -2813,7 +2822,7 @@ dependencies = [
 
 [[package]]
 name = "marginfi-type-crate"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anchor-lang",
  "bs58",
@@ -3518,9 +3527,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.95"
+version = "1.0.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02b3e5e68a3a1a02aad3ec490a98007cbc13c37cbe84a3cd7b8e406d76e7f778"
+checksum = "5ee95bc4ef87b8d5ba32e8b7714ccc834865276eab0aed5c9958d00ec45f49e8"
 dependencies = [
  "unicode-ident",
 ]
@@ -7403,9 +7412,11 @@ dependencies = [
  "assert_matches",
  "bincode",
  "bytemuck",
+ "drift-mocks",
  "fixed",
  "fixed-macro",
  "futures",
+ "juplend-mocks",
  "kamino-mocks",
  "lazy_static",
  "marginfi",

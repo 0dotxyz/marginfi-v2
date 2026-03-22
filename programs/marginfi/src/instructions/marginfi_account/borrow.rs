@@ -7,13 +7,15 @@ use crate::{
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
-            LendingAccountImpl, MarginfiAccountImpl, RiskEngine,
+            account_not_frozen_for_authority, check_account_init_health, is_signer_authorized,
+            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
+        rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
-        self, is_marginfi_asset_tag, validate_asset_tags, validate_bank_state, InstructionKind,
+        self, fetch_unbiased_price_for_bank, is_marginfi_asset_tag, record_withdrawal_outflow,
+        validate_asset_tags, validate_bank_state, InstructionKind,
     },
 };
 use anchor_lang::prelude::*;
@@ -58,7 +60,7 @@ pub fn lending_account_borrow<'info>(
     )?;
 
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
-    let group = &marginfi_group_loader.load()?;
+    let group = marginfi_group_loader.load()?;
 
     let program_fee_rate: I80F48 = group.fee_state_cache.program_fee_rate.into();
 
@@ -71,10 +73,12 @@ pub fn lending_account_borrow<'info>(
 
     bank_loader.load_mut()?.accrue_interest(
         clock.unix_timestamp,
-        group,
+        &group,
         #[cfg(not(feature = "client"))]
         bank_loader.key(),
     )?;
+
+    let group_rate_limit_enabled = group.rate_limiter.is_enabled();
 
     let mut origination_fee: I80F48 = I80F48::ZERO;
     {
@@ -190,21 +194,31 @@ pub fn lending_account_borrow<'info>(
 
     // Check account health, if below threshold fail transaction
     // Assuming `ctx.remaining_accounts` holds only oracle accounts
-    let (risk_result, risk_engine) = RiskEngine::check_account_init_health(
+    check_account_init_health(
         &marginfi_account,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
-    );
-    risk_result?;
+    )?;
     health_cache.program_version = PROGRAM_VERSION;
 
     let bank_pk = ctx.accounts.bank.key();
-    // Note: if engine none, skips price cache update.
-    let price =
-        risk_engine.and_then(|engine_ok| engine_ok.get_unbiased_price_for_bank(&bank_pk).ok());
-
     let mut bank = ctx.accounts.bank.load_mut()?;
-    bank.update_bank_cache(group)?;
+    let price = fetch_unbiased_price_for_bank(&bank_pk, &bank, &clock, ctx.remaining_accounts).ok();
+
+    let rate_limit_price = price.as_ref().map(|p| p.price).unwrap_or(I80F48::ZERO);
+    record_withdrawal_outflow(
+        group_rate_limit_enabled,
+        amount,
+        rate_limit_price,
+        &mut bank,
+        &group,
+        marginfi_group_loader.key(),
+        bank_pk,
+        &marginfi_account,
+        &clock,
+    )?;
+
+    bank.update_bank_cache(&group)?;
     bank.update_cache_price(price)?;
 
     health_cache.set_engine_ok(true);
@@ -232,7 +246,7 @@ pub struct LendingAccountBorrow<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false)
+            is_signer_authorized(&a, g.admin, authority.key(), false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

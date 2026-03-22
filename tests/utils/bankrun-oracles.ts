@@ -499,3 +499,166 @@ export async function setupPythOraclesBankrun(
 
   return oracles;
 }
+
+// ---------------------------------------------------------------------------
+// Switchboard Pull Oracle Helpers
+// ---------------------------------------------------------------------------
+
+export const SWITCHBOARD_PULL_PROGRAM_ID = new PublicKey(
+  "SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv"
+);
+
+/**
+ * Switchboard Pull feed discriminator (8 bytes).
+ *
+ * This matches `PullFeedAccountData::DISCRIMINATOR` from the `switchboard_on_demand` crate.
+ *
+ * Source of truth: the Rust unit test fixture in `programs/marginfi/src/state/price.rs`
+ * (`swb_pull_get_price_1`) starts with these 8 bytes.
+ */
+export const SWITCHBOARD_PULL_FEED_DISCRIMINATOR = Buffer.from([
+  0xc4, 0x1b, 0x6c, 0xc4, 0x0a, 0xd7, 0xdb, 0x28,
+]);
+
+/**
+ * Byte offset (from the *start* of the feed account data) for `last_update_timestamp: i64`.
+ *
+ * We use this to "refresh" Switchboard Pull oracles in bankrun by directly editing the account
+ * bytes, similar to how we refresh Pyth Pull oracles.
+ *
+ * IMPORTANT:
+ * - This offset assumes the 8-byte discriminator is present at `data[0..8]`.
+ * - If you accidentally strip the discriminator (making the buffer 3200 bytes), you will corrupt
+ *   unrelated fields (including `result.value`) and Marginfi may read price=0.
+ *
+ * Derived from the Rust fixture (`swb_pull_get_price_1`) by locating the embedded timestamp
+ * `0x0000000066b69e9e` (1723244190) in little-endian, which occurs at byte 2216.
+ */
+export const SWITCHBOARD_PULL_LAST_UPDATE_TIMESTAMP_OFFSET = 2216;
+
+/**
+ * Minimum expected size of a Switchboard Pull feed account.
+ *
+ * Currently: 8-byte discriminator + 3200-byte `PullFeedAccountData` = 3208 bytes.
+ *
+ * If this changes upstream, Marginfi's `SwitchboardPullPriceFeed::load_checked` will also change.
+ */
+export const SWITCHBOARD_PULL_MIN_FEED_ACCOUNT_DATA_LEN = 3208;
+
+function assertValidSwitchboardPullFeedData(data: Buffer): void {
+  if (data.length < SWITCHBOARD_PULL_MIN_FEED_ACCOUNT_DATA_LEN) {
+    throw new Error(
+      `Switchboard Pull feed buffer too small: got ${data.length}, expected >= ${SWITCHBOARD_PULL_MIN_FEED_ACCOUNT_DATA_LEN}`
+    );
+  }
+
+  const disc = data.subarray(0, 8);
+  if (!disc.equals(SWITCHBOARD_PULL_FEED_DISCRIMINATOR)) {
+    throw new Error(
+      `Switchboard Pull feed discriminator mismatch. Got ${disc.toString(
+        "hex"
+      )}, expected ${SWITCHBOARD_PULL_FEED_DISCRIMINATOR.toString("hex")}`
+    );
+  }
+}
+
+/**
+ * Creates a blank Switchboard Pull feed account in bankrun.
+ *
+ * The account data must be a valid `PullFeedAccountData` (Switchboard On-Demand).
+ * For tests, we typically create the account and then `setAccount` with a fixture buffer.
+ *
+ * @param space - The size (in bytes) of the PullFeedAccountData buffer you will write later.
+ * @param owner - The program that owns this feed account (defaults to SWITCHBOARD_PULL_PROGRAM_ID).
+ */
+export async function createBankrunSwitchboardPullFeedAccount(
+  bankrunContext: ProgramTestContext,
+  banksClient: BanksClient,
+  feedKeypair: Keypair,
+  space: number,
+  owner: PublicKey = SWITCHBOARD_PULL_PROGRAM_ID
+): Promise<Keypair> {
+  const rent = await banksClient.getRent();
+  const lamports = Number(rent.minimumBalance(BigInt(space)));
+
+  const tx = new Transaction().add(
+    SystemProgram.createAccount({
+      fromPubkey: bankrunContext.payer.publicKey,
+      newAccountPubkey: feedKeypair.publicKey,
+      lamports,
+      space,
+      programId: owner,
+    })
+  );
+
+  await processBankrunTransaction(bankrunContext, tx, [bankrunContext.payer, feedKeypair]);
+
+  return feedKeypair;
+}
+
+/**
+ * Overwrite an existing Switchboard Pull feed account's data buffer in bankrun.
+ *
+ * NOTE: We create the account via SystemProgram::create_account first to avoid bankrun "Account in use"
+ * edge cases. Then we use setAccount to write the real bytes.
+ */
+export async function setSwitchboardPullFeedAccountData(
+  bankrunContext: ProgramTestContext,
+  banksClient: BanksClient,
+  feedAccount: PublicKey,
+  data: Buffer
+): Promise<void> {
+  const existing = await banksClient.getAccount(feedAccount);
+
+  if (!existing) {
+    console.log("Switchboard Pull feed account does not exist (did you create it first?)");
+    return;
+  }
+
+  bankrunContext.setAccount(feedAccount, {
+    lamports: existing.lamports,
+    data,
+    owner: existing.owner, // Preserve existing owner
+    executable: existing.executable,
+    rentEpoch: existing.rentEpoch,
+  });
+}
+
+/**
+ * Refresh a Switchboard Pull feed's staleness timestamp in bankrun by editing bytes directly.
+ *
+ * This mirrors `refreshPullOraclesBankrun` (Pyth Pull) but for Switchboard Pull feeds.
+ *
+ * @param feedAccount - The Switchboard Pull feed account pubkey.
+ * @param unixTimestampOverride - If provided, write this value instead of the current bankrun clock.
+ */
+export async function refreshSwitchboardPullOracleBankrun(
+  bankrunContext: ProgramTestContext,
+  banksClient: BanksClient,
+  feedAccount: PublicKey,
+  unixTimestampOverride?: number
+): Promise<void> {
+  const existing = await banksClient.getAccount(feedAccount);
+
+  if (!existing) {
+    console.log("Switchboard Pull feed account does not exist (did you create it first?)");
+    return;
+  }
+
+  const data = Buffer.from(existing.data);
+  assertValidSwitchboardPullFeedData(data);
+
+  const clock = await banksClient.getClock();
+  const ts = unixTimestampOverride ?? Number(clock.unixTimestamp);
+
+  // Write i64 LE at the known field offset.
+  new BN(ts).toArrayLike(Buffer, "le", 8).copy(data, SWITCHBOARD_PULL_LAST_UPDATE_TIMESTAMP_OFFSET);
+
+  bankrunContext.setAccount(feedAccount, {
+    lamports: existing.lamports,
+    data,
+    owner: existing.owner,
+    executable: existing.executable,
+    rentEpoch: existing.rentEpoch,
+  });
+}

@@ -25,7 +25,6 @@ import {
   groupConfigure,
   handleBankruptcy,
 } from "./utils/group-instructions";
-import { getBankrunBlockhash } from "./utils/spl-staking-utils";
 import { assert } from "chai";
 import {
   blankBankConfigOptRaw,
@@ -55,7 +54,7 @@ import {
   assertI80F48Equal,
 } from "./utils/genericTests";
 import { initOrUpdatePriceUpdateV2 } from "./utils/pyth-pull-mocks";
-import { dumpAccBalances, bytesToF64, dumpBankrunLogs } from "./utils/tools";
+import { dumpAccBalances, bytesToF64, dumpBankrunLogs, getBankrunBlockhash } from "./utils/tools";
 
 const USER_ACCOUNT_THROWAWAY = "throwaway_account_zb01";
 const ONE_YEAR_IN_SECONDS = 2 * 365 * 24 * 60 * 60;
@@ -187,12 +186,12 @@ describe("Bank bankruptcy tests", () => {
     let now = Number(currentClock.unixTimestamp);
     const targetUnix = BigInt(now + ONE_YEAR_IN_SECONDS + ONE_YEAR_IN_SECONDS);
 
-    // Construct a new Clock; we only care about the unixTimestamp field here.
+    // Construct a new Clock; preserve current slot/epoch to avoid bankrun warp issues
     const newClock = new Clock(
-      0n, // slot
-      0n, // epochStartTimestamp
-      0n, // epoch
-      0n, // leaderScheduleEpoch
+      currentClock.slot, // preserve current slot
+      currentClock.epochStartTimestamp,
+      currentClock.epoch,
+      currentClock.leaderScheduleEpoch,
       targetUnix
     );
 

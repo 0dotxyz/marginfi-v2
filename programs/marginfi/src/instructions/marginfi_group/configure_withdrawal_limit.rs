@@ -1,4 +1,6 @@
-use crate::{check, errors::MarginfiError, MarginfiResult};
+use crate::{
+    check, errors::MarginfiError, state::marginfi_group::MarginfiGroupImpl, MarginfiResult,
+};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::types::MarginfiGroup;
 
@@ -32,7 +34,7 @@ pub fn configure_deleverage_withdrawal_limit(
 pub struct ConfigureDeleverageWithdrawalLimit<'info> {
     #[account(
         mut,
-        has_one = admin @ MarginfiError::Unauthorized
+        constraint = marginfi_group.load()?.is_admin_or_limit_admin(admin.key()) @ MarginfiError::Unauthorized
     )]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 

@@ -2,7 +2,6 @@ import { BN } from "@coral-xyz/anchor";
 import {
   PublicKey,
   Transaction,
-  SystemProgram,
   Keypair,
   ComputeBudgetProgram,
 } from "@solana/web3.js";
@@ -36,7 +35,6 @@ import {
   refreshDriftOracles,
   USDC_MARKET_INDEX,
   TOKEN_A_MARKET_INDEX,
-  DRIFT_SCALED_BALANCE_DECIMALS,
 } from "./utils/drift-utils";
 import {
   makeAddDriftBankIx,
@@ -44,8 +42,10 @@ import {
   makeDriftDepositIx,
   makeDriftWithdrawIx,
 } from "./utils/drift-instructions";
-import { getTokenBalance, assertBNEqual } from "./utils/genericTests";
-import { composeRemainingAccounts } from "./utils/user-instructions";
+import { getTokenBalance } from "./utils/genericTests";
+import {
+  composeRemainingAccounts,
+} from "./utils/user-instructions";
 import { createMintToInstruction } from "@solana/spl-token";
 import { Clock } from "solana-bankrun";
 import { ASSET_TAG_DRIFT } from "./utils/types";
@@ -98,13 +98,13 @@ describe("d10: Drift Interest Simulation", () => {
       bankrunProgram.programId,
       driftGroup.publicKey,
       ecosystem.usdcMint.publicKey,
-      usdcBankSeed
+      usdcBankSeed,
     );
     [newDriftTokenABank] = deriveBankWithSeed(
       bankrunProgram.programId,
       driftGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
-      tokenABankSeed
+      tokenABankSeed,
     );
 
     driftAccounts.set(NEW_DRIFT_USDC_BANK, newDriftUsdcBank);
@@ -112,7 +112,7 @@ describe("d10: Drift Interest Simulation", () => {
     const usdcConfig = defaultDriftBankConfig(oracles.usdcOracle.publicKey);
     // 10 million USDC in native 6-decimal units (will be converted to 9-decimal in program)
     usdcConfig.depositLimit = new BN(10_000_000).mul(
-      new BN(10 ** ecosystem.usdcDecimals)
+      new BN(10 ** ecosystem.usdcDecimals),
     );
 
     const addUsdcBankIx = await makeAddDriftBankIx(
@@ -127,13 +127,13 @@ describe("d10: Drift Interest Simulation", () => {
       {
         seed: usdcBankSeed,
         config: usdcConfig,
-      }
+      },
     );
 
     const tokenAConfig = defaultDriftBankConfig(oracles.tokenAOracle.publicKey);
     // 10 million Token A in native decimals (will be converted to 9-decimal in program)
     tokenAConfig.depositLimit = new BN(10_000_000).mul(
-      new BN(10 ** ecosystem.tokenADecimals)
+      new BN(10 ** ecosystem.tokenADecimals),
     );
 
     const addTokenABankIx = await makeAddDriftBankIx(
@@ -148,7 +148,7 @@ describe("d10: Drift Interest Simulation", () => {
       {
         seed: tokenABankSeed,
         config: tokenAConfig,
-      }
+      },
     );
 
     const tx1 = new Transaction().add(addUsdcBankIx);
@@ -157,7 +157,7 @@ describe("d10: Drift Interest Simulation", () => {
       tx1,
       [groupAdmin.wallet],
       false,
-      true
+      true,
     );
 
     const tx2 = new Transaction().add(addTokenABankIx);
@@ -166,7 +166,7 @@ describe("d10: Drift Interest Simulation", () => {
       tx2,
       [groupAdmin.wallet],
       false,
-      true
+      true,
     );
   });
 
@@ -178,16 +178,16 @@ describe("d10: Drift Interest Simulation", () => {
           ecosystem.usdcMint.publicKey,
           groupAdmin.usdcAccount,
           globalProgramAdmin.wallet.publicKey,
-          initUserAmount.toNumber()
-        )
+          initUserAmount.toNumber(),
+        ),
       )
       .add(
         createMintToInstruction(
           ecosystem.tokenAMint.publicKey,
           groupAdmin.tokenAAccount,
           globalProgramAdmin.wallet.publicKey,
-          initUserAmount.toNumber()
-        )
+          initUserAmount.toNumber(),
+        ),
       );
     await processBankrunTransaction(bankrunContext, fundAdminTx, [
       globalProgramAdmin.wallet,
@@ -202,7 +202,7 @@ describe("d10: Drift Interest Simulation", () => {
       {
         amount: initUserAmount,
       },
-      0
+      0,
     );
 
     const initTokenAUserIx = await makeInitDriftUserIx(
@@ -216,7 +216,7 @@ describe("d10: Drift Interest Simulation", () => {
       {
         amount: initUserAmount,
       },
-      1
+      1,
     );
 
     const tx = new Transaction().add(initUsdcUserIx).add(initTokenAUserIx);
@@ -226,14 +226,14 @@ describe("d10: Drift Interest Simulation", () => {
       tx,
       [groupAdmin.wallet],
       false,
-      true
+      true,
     );
   });
 
   it("funds users with tokens for testing", async () => {
     const LARGE_USDC_AMOUNT = new BN(1_000_000 * 10 ** ecosystem.usdcDecimals);
     const LARGE_TOKEN_A_AMOUNT = new BN(
-      50_000 * 10 ** ecosystem.tokenADecimals
+      50_000 * 10 ** ecosystem.tokenADecimals,
     );
     const fundUserATx = new Transaction()
       .add(
@@ -241,16 +241,16 @@ describe("d10: Drift Interest Simulation", () => {
           ecosystem.usdcMint.publicKey,
           userA.usdcAccount,
           globalProgramAdmin.wallet.publicKey,
-          LARGE_USDC_AMOUNT.toNumber()
-        )
+          LARGE_USDC_AMOUNT.toNumber(),
+        ),
       )
       .add(
         createMintToInstruction(
           ecosystem.tokenAMint.publicKey,
           userA.tokenAAccount,
           globalProgramAdmin.wallet.publicKey,
-          1000 * 10 ** ecosystem.tokenADecimals
-        )
+          1000 * 10 ** ecosystem.tokenADecimals,
+        ),
       );
     await processBankrunTransaction(bankrunContext, fundUserATx, [
       globalProgramAdmin.wallet,
@@ -261,16 +261,16 @@ describe("d10: Drift Interest Simulation", () => {
           ecosystem.usdcMint.publicKey,
           userB.usdcAccount,
           globalProgramAdmin.wallet.publicKey,
-          1_000_000 * 10 ** ecosystem.usdcDecimals
-        )
+          1_000_000 * 10 ** ecosystem.usdcDecimals,
+        ),
       )
       .add(
         createMintToInstruction(
           ecosystem.tokenAMint.publicKey,
           userB.tokenAAccount,
           globalProgramAdmin.wallet.publicKey,
-          LARGE_TOKEN_A_AMOUNT.toNumber()
-        )
+          LARGE_TOKEN_A_AMOUNT.toNumber(),
+        ),
       );
     await processBankrunTransaction(bankrunContext, fundUserBTx, [
       globalProgramAdmin.wallet,
@@ -302,7 +302,7 @@ describe("d10: Drift Interest Simulation", () => {
         tx,
         [user.wallet, accountKeypair],
         false,
-        true
+        true,
       );
     }
   });
@@ -310,7 +310,7 @@ describe("d10: Drift Interest Simulation", () => {
   async function makeDepositThroughMarginfi(
     user: MockUser,
     bank: PublicKey,
-    amount: BN
+    amount: BN,
   ): Promise<void> {
     const userAccount = user.accounts.get(NEW_DRIFT_ACCOUNT)!;
     const bankInfo = await bankrunProgram.account.bank.fetch(bank);
@@ -328,13 +328,13 @@ describe("d10: Drift Interest Simulation", () => {
       : driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE);
     const activePositions: PublicKey[][] = [];
     const marginfiAccount = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount
+      userAccount,
     );
 
     for (const balance of marginfiAccount.lendingAccount.balances) {
       if (balance.active === 1) {
         const balanceBank = await bankrunProgram.account.bank.fetch(
-          balance.bankPk
+          balance.bankPk,
         );
         const balanceOracle = balanceBank.config.oracleKeys[0];
 
@@ -351,7 +351,7 @@ describe("d10: Drift Interest Simulation", () => {
       }
     }
     const isDepositBankActive = activePositions.some((pos) =>
-      pos[0].equals(bank)
+      pos[0].equals(bank),
     );
     if (!isDepositBankActive) {
       activePositions.push([bank, oracle, spotMarket]);
@@ -366,7 +366,7 @@ describe("d10: Drift Interest Simulation", () => {
         driftOracle: driftOracle,
       },
       amount,
-      marketIndex
+      marketIndex,
     );
 
     const nonce = driftTxNonce++;
@@ -380,7 +380,7 @@ describe("d10: Drift Interest Simulation", () => {
         pubkey,
         isSigner: false,
         isWritable: false,
-      }))
+      })),
     );
 
     await processBankrunTransaction(
@@ -388,7 +388,7 @@ describe("d10: Drift Interest Simulation", () => {
       tx,
       [user.wallet],
       false,
-      true
+      true,
     );
   }
 
@@ -396,7 +396,7 @@ describe("d10: Drift Interest Simulation", () => {
     user: MockUser,
     bank: PublicKey,
     amount: BN,
-    withdrawAll: boolean = false
+    withdrawAll: boolean = false,
   ): Promise<void> {
     const userAccount = user.accounts.get(NEW_DRIFT_ACCOUNT)!;
     const bankInfo = await bankrunProgram.account.bank.fetch(bank);
@@ -408,17 +408,13 @@ describe("d10: Drift Interest Simulation", () => {
 
     const activePositions: PublicKey[][] = [];
     const marginfiAccount = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount
+      userAccount,
     );
 
     for (const balance of marginfiAccount.lendingAccount.balances) {
       if (balance.active === 1) {
-        if (withdrawAll && balance.bankPk.equals(bank)) {
-          continue;
-        }
-
         const balanceBank = await bankrunProgram.account.bank.fetch(
-          balance.bankPk
+          balance.bankPk,
         );
         const balanceOracle = balanceBank.config.oracleKeys[0];
 
@@ -445,10 +441,14 @@ describe("d10: Drift Interest Simulation", () => {
       },
       {
         amount: withdrawAll ? new BN(0) : amount,
-        withdraw_all: withdrawAll,
-        remaining: composeRemainingAccounts(activePositions),
+        withdrawAll: withdrawAll,
+        remaining: withdrawAll
+          ? composeRemainingAccounts(
+              activePositions.filter((group) => !group[0].equals(bank))
+            )
+          : composeRemainingAccounts(activePositions),
       },
-      driftBankrunProgram
+      driftBankrunProgram,
     );
 
     const nonce = driftTxNonce++;
@@ -463,7 +463,7 @@ describe("d10: Drift Interest Simulation", () => {
       tx,
       [user.wallet],
       false,
-      true
+      true,
     );
   }
 
@@ -552,39 +552,39 @@ describe("d10: Drift Interest Simulation", () => {
           const isUsdc = bank.mint.equals(ecosystem.usdcMint.publicKey);
 
           const marginfiAssetSharesBigNumber = wrappedI80F48toBigNumber(
-            balance.assetShares
+            balance.assetShares,
           );
           const marginfiAssetShares = new BN(
-            marginfiAssetSharesBigNumber.toString()
+            marginfiAssetSharesBigNumber.toString(),
           );
 
           if (marginfiAssetShares.gt(new BN(0))) {
-            await advanceTimeAndAccrueInterest(2);
+            await advanceTimeAndAccrueInterest(10);
 
             const marketIndex = isUsdc
               ? USDC_MARKET_INDEX
               : TOKEN_A_MARKET_INDEX;
             const spotMarket = await getSpotMarketAccount(
               driftBankrunProgram,
-              marketIndex
+              marketIndex,
             );
             const tokenAmount = scaledBalanceToTokenAmount(
               marginfiAssetShares,
               spotMarket,
-              true
+              true,
             );
 
             await makeWithdrawThroughMarginfi(
               user,
               balance.bankPk,
-              tokenAmount
+              tokenAmount,
             );
 
             await makeWithdrawThroughMarginfi(
               user,
               balance.bankPk,
               new BN(0),
-              true
+              true,
             );
           }
         }
@@ -615,41 +615,24 @@ describe("d10: Drift Interest Simulation", () => {
       0n,
       currentClock.epoch,
       0n,
-      BigInt(newTimestamp)
+      BigInt(newTimestamp),
     );
 
     bankrunContext.setClock(newClock);
 
-    const nonce = driftTxNonce++;
-    const computeUnits = 1_200_000 + (nonce % 1000);
-
-    const dummyTx = new Transaction()
-      .add(ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }))
-      .add(
-        SystemProgram.transfer({
-          fromPubkey: groupAdmin.wallet.publicKey,
-          toPubkey: groupAdmin.wallet.publicKey,
-          lamports: 1,
-        })
-      );
-    await processBankrunTransaction(bankrunContext, dummyTx, [
-      groupAdmin.wallet,
-    ]);
-
-    const refreshedClock = await banksClient.getClock();
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 
     await refreshDriftOracles(
       oracles,
       driftAccounts,
       bankrunContext,
-      banksClient
+      banksClient,
     );
   }
 
   async function simulateRandomOperation(
     user: MockUser,
-    banks: BankInfo[]
+    banks: BankInfo[],
   ): Promise<Operation> {
     const isDeposit = Math.random() < 0.5;
 
@@ -672,7 +655,7 @@ describe("d10: Drift Interest Simulation", () => {
       const tokenPrice = bankInfo.symbol === "USDC" ? 1 : 10;
       const tokenAmount = depositUsdValue / tokenPrice;
       const amount = new BN(Math.floor(tokenAmount)).mul(
-        new BN(10 ** bankInfo.decimals)
+        new BN(10 ** bankInfo.decimals),
       );
 
       const maxAmount = new BN(balance);
@@ -696,7 +679,7 @@ describe("d10: Drift Interest Simulation", () => {
         await bankrunProgram.account.marginfiAccount.fetch(userAccount);
 
       const balance = marginfiAccount.lendingAccount.balances.find(
-        (b) => b.active === 1 && b.bankPk.equals(bankInfo.bank)
+        (b) => b.active === 1 && b.bankPk.equals(bankInfo.bank),
       );
 
       if (!balance) {
@@ -706,7 +689,7 @@ describe("d10: Drift Interest Simulation", () => {
       const bank = await bankrunProgram.account.bank.fetch(bankInfo.bank);
       const driftUser = await getDriftUserAccount(
         driftBankrunProgram,
-        bank.integrationAcc2
+        bank.integrationAcc2,
       );
       const spotPosition = driftUser.spotPositions[0];
       const scaledBalance = spotPosition.scaledBalance;
@@ -716,20 +699,20 @@ describe("d10: Drift Interest Simulation", () => {
       }
 
       const marginfiAssetSharesBigNumber = wrappedI80F48toBigNumber(
-        balance.assetShares
+        balance.assetShares,
       );
       const marginfiAssetShares = new BN(
-        marginfiAssetSharesBigNumber.toString()
+        marginfiAssetSharesBigNumber.toString(),
       );
 
       const spotMarket = await getSpotMarketAccount(
         driftBankrunProgram,
-        bankInfo.marketIndex
+        bankInfo.marketIndex,
       );
       const maxTokenAmount = scaledBalanceToTokenAmount(
         marginfiAssetShares,
         spotMarket,
-        true
+        true,
       );
 
       const percentage = 0.1 + Math.random() * 0.8;
@@ -798,7 +781,7 @@ describe("d10: Drift Interest Simulation", () => {
 
       const percentage = 0.1 + Math.random() * 0.4;
       const depositAmount = new BN(
-        Math.floor(Number(tokenBalance) * percentage)
+        Math.floor(Number(tokenBalance) * percentage),
       );
 
       await makeDepositThroughMarginfi(user, bankInfo.bank, depositAmount);
@@ -807,13 +790,13 @@ describe("d10: Drift Interest Simulation", () => {
       const marginfiAccountBefore =
         await bankrunProgram.account.marginfiAccount.fetch(userAccount);
       const balanceBefore = marginfiAccountBefore.lendingAccount.balances.find(
-        (b) => b.active === 1 && b.bankPk.equals(bankInfo.bank)
+        (b) => b.active === 1 && b.bankPk.equals(bankInfo.bank),
       );
 
       let scaledBalanceBefore = new BN(0);
       if (balanceBefore) {
         const assetSharesBefore = wrappedI80F48toBigNumber(
-          balanceBefore.assetShares
+          balanceBefore.assetShares,
         );
         scaledBalanceBefore = new BN(assetSharesBefore.toString());
       }
@@ -823,13 +806,13 @@ describe("d10: Drift Interest Simulation", () => {
       const marginfiAccountAfter =
         await bankrunProgram.account.marginfiAccount.fetch(userAccount);
       const balanceAfter = marginfiAccountAfter.lendingAccount.balances.find(
-        (b) => b.active === 1 && b.bankPk.equals(bankInfo.bank)
+        (b) => b.active === 1 && b.bankPk.equals(bankInfo.bank),
       );
 
       let scaledBalanceAfter = new BN(0);
       if (balanceAfter) {
         const assetSharesAfter = wrappedI80F48toBigNumber(
-          balanceAfter.assetShares
+          balanceAfter.assetShares,
         );
         scaledBalanceAfter = new BN(assetSharesAfter.toString());
       }
@@ -855,12 +838,12 @@ describe("d10: Drift Interest Simulation", () => {
       } else {
         const spotMarket = await getSpotMarketAccount(
           driftBankrunProgram,
-          bankInfo.marketIndex
+          bankInfo.marketIndex,
         );
         const fullTokenAmount = scaledBalanceToTokenAmount(
           scaledBalanceAfter,
           spotMarket,
-          true
+          true,
         );
 
         // Withdraw between 40-60% to add randomization and avoid duplicate transactions
@@ -875,12 +858,12 @@ describe("d10: Drift Interest Simulation", () => {
         const marginfiAccountMid =
           await bankrunProgram.account.marginfiAccount.fetch(userAccount);
         const balanceMid = marginfiAccountMid.lendingAccount.balances.find(
-          (b) => b.active === 1 && b.bankPk.equals(bankInfo.bank)
+          (b) => b.active === 1 && b.bankPk.equals(bankInfo.bank),
         );
 
         if (balanceMid) {
           const assetSharesMid = wrappedI80F48toBigNumber(
-            balanceMid.assetShares
+            balanceMid.assetShares,
           );
           const scaledBalanceMid = new BN(assetSharesMid.toString());
 
@@ -889,7 +872,7 @@ describe("d10: Drift Interest Simulation", () => {
               user,
               bankInfo.bank,
               new BN(0),
-              true
+              true,
             );
           }
         }

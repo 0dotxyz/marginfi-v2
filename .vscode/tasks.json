@@ -4,25 +4,7 @@
         {
             "label": "Setup & Run Anchor Tests (+ IDL)",
             "type": "shell",
-            "command": "./scripts/build-workspace.sh && yarn install && anchor build -p marginfi -- --no-default-features && anchor build -p mocks && anchor test --skip-build",
-            "problemMatcher": [],
-            "group": {
-                "kind": "test",
-                "isDefault": true
-            },
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": true,
-                "panel": "shared",
-                "showReuseMessage": true,
-                "clear": true
-            }
-        },
-        {
-            "label": "Setup & Run Anchor Tests",
-            "type": "shell",
-            "command": "./scripts/build-workspace.sh && yarn install && anchor build --no-idl -p marginfi -- --no-default-features && anchor build --no-idl -p mocks && anchor test --skip-build",
+            "command": "./scripts/build-workspace.sh && yarn install && anchor build -p marginfi -- --no-default-features && anchor build -p test_transfer_hook --no-idl && anchor build -p mocks && anchor test --skip-build",
             "problemMatcher": [],
             "group": {
                 "kind": "test",
@@ -58,7 +40,7 @@
         {
             "label": "Setup & Run Rust Tests",
             "type": "shell",
-            "command": "./scripts/build-workspace.sh && cargo fmt && ./scripts/lint.sh && ./scripts/test-program-remix.sh -p marginfi -l warn -c mainnet-beta -f mainnet-beta",
+            "command": "./scripts/build-workspace.sh && cargo fmt && ./scripts/lint.sh && ./scripts/test-program-remix.sh -p marginfi -l warn -c mainnet-beta -f mainnet-beta -j 8",
             "problemMatcher": [],
             "group": {
                 "kind": "test",
@@ -76,7 +58,7 @@
         {
             "label": "Run Rust Tests",
             "type": "shell",
-            "command": "cargo fmt && ./scripts/lint.sh && ./scripts/test-program-remix.sh -p marginfi -l warn -c mainnet-beta -f mainnet-beta",
+            "command": "cargo fmt && ./scripts/lint.sh && ./scripts/test-program-remix.sh -p marginfi -l warn -c mainnet-beta -f mainnet-beta -j 8",
             "problemMatcher": [],
             "group": {
                 "kind": "test",
