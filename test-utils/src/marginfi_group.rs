@@ -1047,6 +1047,34 @@ impl MarginfiGroupFixture {
         ctx.banks_client.process_transaction(tx).await
     }
 
+    pub async fn try_lending_pool_backfill_bank_is_t22_flag(
+        &self,
+        bank: &BankFixture,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolBackfillBankIsT22Flag {
+                bank: bank.key,
+                bank_mint: bank.mint.key,
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolBackfillBankIsT22Flag {}.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
     pub fn get_size() -> usize {
         8 + mem::size_of::<MarginfiGroup>()
     }

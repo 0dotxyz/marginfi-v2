@@ -9,7 +9,7 @@ use marginfi::{
 };
 use marginfi_type_crate::{
     constants::{
-        CLOSE_ENABLED_FLAG, FREEZE_SETTINGS, PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG,
+        CLOSE_ENABLED_FLAG, FREEZE_SETTINGS, IS_T22, PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG,
         TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
@@ -149,6 +149,7 @@ async fn add_bank_success() -> anyhow::Result<()> {
             assert_eq!(total_asset_shares, I80F48!(0.0).into());
             assert_eq!(config, bank_config);
             assert_eq!(flags, CLOSE_ENABLED_FLAG);
+            assert_eq!(flags & IS_T22, 0);
             assert_eq!(emissions_rate, 0);
             assert_eq!(emissions_mint, Pubkey::new_from_array([0; 32]));
             assert_eq!(emissions_remaining, I80F48!(0.0).into());
@@ -292,6 +293,7 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(total_asset_shares, I80F48!(0.0).into());
             assert_eq!(config, bank_config);
             assert_eq!(flags, CLOSE_ENABLED_FLAG);
+            assert_eq!(flags & IS_T22, 0);
             assert_eq!(emissions_rate, 0);
             assert_eq!(emissions_mint, Pubkey::new_from_array([0; 32]));
             assert_eq!(emissions_remaining, I80F48!(0.0).into());
@@ -326,6 +328,35 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
         let actual_fee_delta = fee_balance_after - fee_balance_before;
         assert_eq!(expected_fee_delta, actual_fee_delta);
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn backfill_is_t22_noop_for_classic_bank() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+
+    let bank = test_f
+        .marginfi_group
+        .try_lending_pool_add_bank(
+            &test_f.usdc_mint,
+            None,
+            *DEFAULT_USDC_TEST_BANK_CONFIG,
+            None,
+        )
+        .await?;
+
+    let bank_before = bank.load().await;
+    assert_eq!(bank_before.flags & IS_T22, 0);
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_backfill_bank_is_t22_flag(&bank)
+        .await?;
+
+    let bank_after = bank.load().await;
+    assert_eq!(bank_after.flags & IS_T22, 0);
+    assert_eq!(bank_after.flags, bank_before.flags);
 
     Ok(())
 }

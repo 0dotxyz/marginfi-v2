@@ -1,5 +1,9 @@
 import { BN, Program } from "@coral-xyz/anchor";
-import { AccountMeta, PublicKey } from "@solana/web3.js";
+import {
+  AccountMeta,
+  PublicKey,
+  TransactionInstruction,
+} from "@solana/web3.js";
 import { Marginfi } from "../../target/types/marginfi";
 import { deriveStakedSettings } from "./pdas";
 import {
@@ -14,8 +18,14 @@ import {
 } from "./types";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { bigNumberToWrappedI80F48, WrappedI80F48 } from "@mrgnlabs/mrgn-common";
+import { createHash } from "crypto";
 
 export const MAX_ORACLE_KEYS = 5;
+
+const getIxDiscriminator = (name: string): Buffer => {
+  const hash = createHash("sha256").update(`global:${name}`).digest();
+  return hash.subarray(0, 8);
+};
 
 /**
  * * admin/feePayer - must sign
@@ -469,12 +479,12 @@ export const propagateStakedSettings = (
 ) => {
   const remainingAccounts = args.oracle
     ? [
-      {
-        pubkey: args.oracle,
-        isSigner: false,
-        isWritable: false,
-      } as AccountMeta,
-    ]
+        {
+          pubkey: args.oracle,
+          isSigner: false,
+          isWritable: false,
+        } as AccountMeta,
+      ]
     : [];
 
   const ix = program.methods
@@ -730,6 +740,33 @@ export const migrateCurve = (
     })
     .instruction();
   return ix;
+};
+
+export type BackfillBankIsT22FlagArgs = {
+  bank: PublicKey;
+  bankMint: PublicKey;
+};
+
+export const backfillBankIsT22Flag = (
+  program: Program<Marginfi>,
+  args: BackfillBankIsT22FlagArgs
+) => {
+  return new TransactionInstruction({
+    programId: program.programId,
+    keys: [
+      {
+        pubkey: args.bank,
+        isSigner: false,
+        isWritable: true,
+      },
+      {
+        pubkey: args.bankMint,
+        isSigner: false,
+        isWritable: false,
+      },
+    ],
+    data: getIxDiscriminator("lending_pool_backfill_bank_is_t22_flag"),
+  });
 };
 
 export type HandleBankruptcyArgs = {
