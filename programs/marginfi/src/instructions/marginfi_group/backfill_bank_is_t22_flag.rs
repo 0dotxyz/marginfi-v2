@@ -1,6 +1,5 @@
-use crate::{check, MarginfiError, MarginfiResult};
+use crate::{MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::Mint;
 use marginfi_type_crate::{constants::IS_T22, types::Bank};
 
 /// (permissionless) Backfill `IS_T22` on pre-upgrade banks.
@@ -13,16 +12,11 @@ pub fn lending_pool_backfill_bank_is_t22_flag(
 ) -> MarginfiResult {
     let mut bank = ctx.accounts.bank.load_mut()?;
 
-    check!(
-        bank.mint == ctx.accounts.bank_mint.key(),
-        MarginfiError::InvalidBankAccount
-    );
-
     if (bank.flags & IS_T22) != 0 {
         return Ok(());
     }
 
-    if ctx.accounts.bank_mint.to_account_info().owner == &anchor_spl::token_2022::ID {
+    if ctx.accounts.mint.owner == &anchor_spl::token_2022::ID {
         bank.flags |= IS_T22;
     }
 
@@ -31,8 +25,12 @@ pub fn lending_pool_backfill_bank_is_t22_flag(
 
 #[derive(Accounts)]
 pub struct LendingPoolBackfillBankIsT22Flag<'info> {
-    #[account(mut)]
+    #[account(
+        mut,
+        has_one = mint @ MarginfiError::InvalidBankAccount
+    )]
     pub bank: AccountLoader<'info, Bank>,
 
-    pub bank_mint: Box<InterfaceAccount<'info, Mint>>,
+    /// CHECK: Constrained by `has_one = mint`.
+    pub mint: UncheckedAccount<'info>,
 }

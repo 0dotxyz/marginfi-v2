@@ -1055,7 +1055,7 @@ impl MarginfiGroupFixture {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::LendingPoolBackfillBankIsT22Flag {
                 bank: bank.key,
-                bank_mint: bank.mint.key,
+                mint: bank.mint.key,
             }
             .to_account_metas(Some(true)),
             data: LendingPoolBackfillBankIsT22Flag {}.data(),

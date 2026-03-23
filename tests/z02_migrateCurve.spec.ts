@@ -90,12 +90,10 @@ const sendMigration = async () => {
 
 const sendT22Backfill = async () => {
   const user = users[0];
-  const bank = await bankrunProgram.account.bank.fetch(LEGACY_BANK_SAMPLE);
   const tx = new Transaction();
   tx.add(
-    backfillBankIsT22Flag(user.mrgnBankrunProgram, {
+    await backfillBankIsT22Flag(user.mrgnBankrunProgram, {
       bank: LEGACY_BANK_SAMPLE,
-      bankMint: bank.mint,
     })
   );
   await processBankrunTransaction(
