@@ -1,0 +1,4 @@
+{
+  "bank_pk": "<BANK_PUBKEY>",
+  "harvest_drift_spot_market": "<DRIFT_REWARD_SPOT_MARKET_PUBKEY>"
+}

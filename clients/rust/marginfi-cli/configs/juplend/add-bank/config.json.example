@@ -1,0 +1,16 @@
+{
+  "group": null,
+  "mint": "<UNDERLYING_MINT_PUBKEY>",
+  "seed": 0,
+  "oracle": "<MARGINFI_ORACLE_PUBKEY>",
+  "oracle_setup": "juplendPythPull",
+  "asset_weight_init": 0.8,
+  "asset_weight_maint": 0.9,
+  "deposit_limit": 1000000000000,
+  "total_asset_value_init_limit": 1000000000,
+  "oracle_max_age": 70,
+  "oracle_max_confidence": 0,
+  "risk_tier": "collateral",
+  "config_flags": 1,
+  "init_deposit_amount": 100
+}

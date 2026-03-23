@@ -1,5 +1,5 @@
 use crate::{config::Config, profile::Profile, utils};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use log::{debug, info, warn};
 use marginfi::state::bank::BankVaultType;
 use marginfi_type_crate::types::Bank;
@@ -20,7 +20,9 @@ pub fn process_check_lookup_tables(
     existing_lookup_tables: Vec<Pubkey>,
 ) -> Result<()> {
     let rpc = config.mfi_program.rpc();
-    let marginfi_group = profile.marginfi_group.expect("group not set");
+    let marginfi_group = profile
+        .marginfi_group
+        .context("marginfi group not set in profile")?;
 
     let mut accounts: Vec<Account> = vec![];
 
@@ -38,7 +40,9 @@ pub fn process_check_lookup_tables(
         .iter_mut()
         .zip(existing_lookup_tables.iter())
         .map(|(account, address)| {
-            let lookup_table = AddressLookupTable::deserialize(&account.data).unwrap();
+            let lookup_table = AddressLookupTable::deserialize(&account.data).map_err(|e| {
+                anyhow::anyhow!("failed to deserialize lookup table {}: {}", address, e)
+            })?;
             println!(
                 "Loaded table {} with {} addresses",
                 address,
@@ -52,9 +56,9 @@ pub fn process_check_lookup_tables(
                 );
             }
 
-            lookup_table
+            Ok(lookup_table)
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
 
     let banks = config
         .mfi_program
@@ -94,8 +98,11 @@ pub fn process_check_lookup_tables(
     for (bank_pk, bank) in banks.iter() {
         keys.push(*bank_pk);
         keys.push(bank.liquidity_vault);
-        let (vault_auth, _) =
-            utils::find_bank_vault_authority_pda(bank_pk, BankVaultType::Liquidity, &marginfi::ID);
+        let (vault_auth, _) = utils::find_bank_vault_authority_pda(
+            bank_pk,
+            BankVaultType::Liquidity,
+            &config.program_id,
+        );
 
         keys.push(vault_auth);
 
@@ -110,6 +117,7 @@ pub fn process_check_lookup_tables(
         );
     }
 
+    keys.sort();
     keys.dedup();
 
     // Find missing keys in lookup tables
@@ -138,7 +146,9 @@ pub fn process_update_lookup_tables(
     existing_lookup_tables: Vec<Pubkey>,
 ) -> Result<()> {
     let rpc = config.mfi_program.rpc();
-    let marginfi_group = profile.marginfi_group.expect("group not set");
+    let marginfi_group = profile
+        .marginfi_group
+        .context("marginfi group not set in profile")?;
 
     let mut accounts: Vec<Account> = vec![];
 
@@ -156,7 +166,9 @@ pub fn process_update_lookup_tables(
         .iter_mut()
         .zip(existing_lookup_tables.iter())
         .map(|(account, address)| {
-            let lookup_table = AddressLookupTable::deserialize(&account.data).unwrap();
+            let lookup_table = AddressLookupTable::deserialize(&account.data).map_err(|e| {
+                anyhow::anyhow!("failed to deserialize lookup table {}: {}", address, e)
+            })?;
             info!(
                 "Loaded table {} with {} addresses",
                 address,
@@ -170,9 +182,9 @@ pub fn process_update_lookup_tables(
                 );
             }
 
-            lookup_table
+            Ok(lookup_table)
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
 
     let banks = config
         .mfi_program
@@ -215,8 +227,11 @@ pub fn process_update_lookup_tables(
     for (bank_pk, bank) in banks.iter() {
         keys.push(*bank_pk);
         keys.push(bank.liquidity_vault);
-        let (vault_auth, _) =
-            utils::find_bank_vault_authority_pda(bank_pk, BankVaultType::Liquidity, &marginfi::ID);
+        let (vault_auth, _) = utils::find_bank_vault_authority_pda(
+            bank_pk,
+            BankVaultType::Liquidity,
+            &config.program_id,
+        );
 
         keys.push(vault_auth);
 
@@ -231,6 +246,7 @@ pub fn process_update_lookup_tables(
         );
     }
 
+    keys.sort();
     keys.dedup();
 
     // Find missing keys in lookup tables
