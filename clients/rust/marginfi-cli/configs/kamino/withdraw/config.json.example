@@ -1,0 +1,5 @@
+{
+  "bank_pk": "<BANK_PUBKEY>",
+  "ui_amount": 50.0,
+  "withdraw_all": false
+}

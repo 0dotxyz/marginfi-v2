@@ -13,21 +13,17 @@ use {
 
 #[derive(Default, Debug, Parser)]
 pub struct GlobalOptions {
-    // /// Cluster override.
-    // #[clap(global = true, long = "cluster")]
-    // pub cluster: Option<Cluster>,
-    // /// Wallet override.
-    // #[clap(global = true, long = "wallet")]
-    // pub wallet: Option<WalletPath>,
-    // /// Program ID override.
-    // #[clap(global = true, long = "pid")]
-    // pub pid: Option<Pubkey>,
-    // /// Commitment.
-    // #[clap(global = true, long = "commitment")]
-    // pub commitment: Option<CommitmentLevel>,
-    /// Dry run for any transactions involved.
-    #[clap(global = true, long = "dry-run", action, default_value_t = false)]
-    pub dry_run: bool,
+    #[clap(
+        global = true,
+        long = "profile",
+        help = "Use a saved profile for this command only"
+    )]
+    pub profile_name: Option<String>,
+
+    /// Do not sign and broadcast the transaction.
+    /// By default, the CLI simulates, signs, and sends the transaction.
+    #[clap(global = true, long = "no-send-tx", action, default_value_t = false)]
+    pub no_send_tx: bool,
 
     #[clap(
         global = true,
@@ -40,13 +36,34 @@ pub struct GlobalOptions {
 
     #[clap(global = true, long)]
     pub compute_unit_price: Option<u64>,
+
+    #[clap(global = true, long, help = "Compute unit limit for transactions")]
+    pub compute_unit_limit: Option<u32>,
+
+    #[clap(
+        global = true,
+        long = "lookup-table",
+        short = 'l',
+        help = "Address lookup table(s) for versioned transactions"
+    )]
+    pub lookup_tables: Vec<Pubkey>,
+
+    #[clap(
+        global = true,
+        long = "json",
+        action,
+        default_value_t = false,
+        help = "Output in JSON format"
+    )]
+    pub json_output: bool,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub enum TxMode {
-    DryRun,
-    Multisig,
-    Normal,
+    /// Default: simulate, sign, and broadcast
+    SendTx,
+    /// --no-send-tx: simulate and output unsigned base58 for external signing
+    MultisigOutput,
 }
 
 pub enum CliSigner {
@@ -84,18 +101,27 @@ pub struct Config {
     pub program_id: Pubkey,
     #[allow(dead_code)]
     pub commitment: CommitmentConfig,
-    pub dry_run: bool,
+    pub send_tx: bool,
+    pub json_output: bool,
+    pub compute_unit_price: Option<u64>,
+    pub compute_unit_limit: Option<u32>,
+    pub lookup_tables: Vec<Pubkey>,
     #[allow(dead_code)]
     pub client: Client<CliSigner>,
     pub mfi_program: Program<CliSigner>,
-    #[allow(dead_code)]
-    pub lip_program: Program<CliSigner>,
 }
 
 impl Config {
-    /// Use this only for transations that have a separate fee payer and authority.
+    /// Payer encoded into instructions and output transactions.
+    ///
+    /// In `--no-send-tx` multisig mode this switches to the multisig so the emitted
+    /// payload can actually be signed and executed externally.
     pub fn explicit_fee_payer(&self) -> Pubkey {
-        self.fee_payer.pubkey()
+        if !self.send_tx {
+            self.multisig.unwrap_or(self.fee_payer.pubkey())
+        } else {
+            self.fee_payer.pubkey()
+        }
     }
 
     /// Either the fee payer or the multisig authority.
@@ -108,12 +134,10 @@ impl Config {
     }
 
     pub fn get_tx_mode(&self) -> TxMode {
-        if self.dry_run {
-            TxMode::DryRun
-        } else if self.multisig.is_some() {
-            TxMode::Multisig
+        if self.send_tx {
+            TxMode::SendTx
         } else {
-            TxMode::Normal
+            TxMode::MultisigOutput
         }
     }
 
