@@ -1,4 +1,5 @@
 use anchor_lang::{InstructionData, ToAccountMetas};
+use anchor_spl::token_2022;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use fixtures::{assert_custom_error, prelude::*};
@@ -55,6 +56,12 @@ async fn add_bank_success() -> anyhow::Result<()> {
     assert_eq!(last_update, 0);
 
     for (mint_f, bank_config) in mints {
+        let expected_is_t22 = if mint_f.token_program == token_2022::ID {
+            IS_T22
+        } else {
+            0
+        };
+
         // This is just to test that the group's last_update field is properly updated upon bank creation
         {
             let ctx = test_f.context.borrow_mut();
@@ -148,8 +155,8 @@ async fn add_bank_success() -> anyhow::Result<()> {
             assert_eq!(total_liability_shares, I80F48!(0.0).into());
             assert_eq!(total_asset_shares, I80F48!(0.0).into());
             assert_eq!(config, bank_config);
-            assert_eq!(flags, CLOSE_ENABLED_FLAG);
-            assert_eq!(flags & IS_T22, 0);
+            assert_eq!(flags, CLOSE_ENABLED_FLAG | expected_is_t22);
+            assert_eq!(flags & IS_T22, expected_is_t22);
             assert_eq!(emissions_rate, 0);
             assert_eq!(emissions_mint, Pubkey::new_from_array([0; 32]));
             assert_eq!(emissions_remaining, I80F48!(0.0).into());
@@ -212,6 +219,12 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
     ];
 
     for (mint_f, bank_config) in mints {
+        let expected_is_t22 = if mint_f.token_program == token_2022::ID {
+            IS_T22
+        } else {
+            0
+        };
+
         let fee_balance_before: u64;
         {
             let ctx = test_f.context.borrow_mut();
@@ -292,8 +305,8 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(total_liability_shares, I80F48!(0.0).into());
             assert_eq!(total_asset_shares, I80F48!(0.0).into());
             assert_eq!(config, bank_config);
-            assert_eq!(flags, CLOSE_ENABLED_FLAG);
-            assert_eq!(flags & IS_T22, 0);
+            assert_eq!(flags, CLOSE_ENABLED_FLAG | expected_is_t22);
+            assert_eq!(flags & IS_T22, expected_is_t22);
             assert_eq!(emissions_rate, 0);
             assert_eq!(emissions_mint, Pubkey::new_from_array([0; 32]));
             assert_eq!(emissions_remaining, I80F48!(0.0).into());
