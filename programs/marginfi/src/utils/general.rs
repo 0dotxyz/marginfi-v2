@@ -2,7 +2,7 @@ use crate::{
     bank_authority_seed, bank_seed, check,
     events::RateLimitFlowEvent,
     state::{
-        bank::BankVaultType,
+        bank::{BankImpl, BankVaultType},
         marginfi_account::{calc_value, get_remaining_accounts_per_bank},
         price::{
             OraclePriceFeedAdapter, OraclePriceType, OraclePriceWithConfidence, PriceAdapter,
@@ -482,7 +482,8 @@ pub fn is_integration_asset_tag(asset_tag: u8) -> bool {
 /// `update_group_rate_limiter`.
 pub fn record_withdrawal_outflow(
     group_rate_limit_enabled: bool,
-    token_amount: u64,
+    native_amount: u64,
+    balance_amount: u64,
     price: I80F48,
     bank: &mut Bank,
     group: &MarginfiGroup,
@@ -493,10 +494,9 @@ pub fn record_withdrawal_outflow(
 ) -> MarginfiResult<()> {
     // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
     if !should_skip_rate_limit(marginfi_account.account_flags) {
-        // Bank-level rate limiting (native tokens)
         if bank.rate_limiter.is_enabled() {
             bank.rate_limiter
-                .try_record_outflow(token_amount, clock.unix_timestamp)?;
+                .try_record_outflow(native_amount, clock.unix_timestamp)?;
         }
 
         // Group-level rate limiting: read-only validation + event emission.
@@ -505,9 +505,9 @@ pub fn record_withdrawal_outflow(
             check!(price > I80F48::ZERO, MarginfiError::InvalidRateLimitPrice);
 
             let value = calc_value(
-                I80F48::from_num(token_amount),
+                I80F48::from_num(balance_amount),
                 price,
-                bank.mint_decimals,
+                bank.get_balance_decimals(),
                 None,
             )?;
             if group.rate_limiter.hourly.is_enabled() {
@@ -534,7 +534,7 @@ pub fn record_withdrawal_outflow(
                 bank: bank_key,
                 mint: bank.mint,
                 flow_direction: 0, // outflow
-                native_amount: token_amount,
+                native_amount: native_amount,
                 mint_decimals: bank.mint_decimals,
                 current_timestamp: clock.unix_timestamp,
             });

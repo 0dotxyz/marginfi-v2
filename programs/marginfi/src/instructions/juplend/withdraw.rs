@@ -150,12 +150,11 @@ pub fn juplend_withdraw<'info>(
             (amount, shares_to_burn)
         };
 
-        // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
-        let rate_limit_amount = if withdraw_all { token_amount } else { amount };
-
+        let native_outflow = if withdraw_all { token_amount } else { amount };
         record_withdrawal_outflow(
             group_rate_limit_enabled,
-            rate_limit_amount,
+            native_outflow,
+            shares_to_burn,
             price,
             &mut bank,
             &group,
