@@ -1,0 +1,11 @@
+{
+  "admin": "<ADMIN_PUBKEY>",
+  "fee_wallet": "<FEE_WALLET_PUBKEY>",
+  "bank_init_flat_sol_fee": 100000,
+  "liquidation_flat_sol_fee": 50000,
+  "program_fee_fixed": 0.0001,
+  "program_fee_rate": 0.05,
+  "liquidation_max_fee": 0.05,
+  "order_init_flat_sol_fee": 50000,
+  "order_execution_max_fee": 0.05
+}

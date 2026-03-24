@@ -1,7 +1,7 @@
 use {
     crate::config::{CliSigner, Config, GlobalOptions},
     anchor_client::{Client, Cluster},
-    anyhow::{anyhow, bail, Result},
+    anyhow::{anyhow, bail, Context, Result},
     dirs::home_dir,
     serde::{Deserialize, Serialize},
     solana_sdk::{
@@ -10,7 +10,11 @@ use {
         pubkey::Pubkey,
         signature::{read_keypair_file, Keypair},
     },
-    std::{fs, path::PathBuf},
+    std::{
+        fs,
+        panic::{catch_unwind, AssertUnwindSafe},
+        path::PathBuf,
+    },
 };
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -32,6 +36,21 @@ pub struct CliConfig {
 }
 
 impl Profile {
+    pub fn resolved_program_id(&self) -> Result<Pubkey> {
+        match self.program_id {
+            Some(pid) => Ok(pid),
+            None => match self.cluster {
+                Cluster::Localnet => Ok(pubkey!("2jGhuVUuy3umdzByFx8sNWUAaf5vaeuDm78RDPEnhrMr")),
+                Cluster::Devnet => Ok(pubkey!("neetcne3Ctrrud7vLdt2ypMm21gZHGN2mCmqWaMVcBQ")),
+                Cluster::Mainnet => Ok(pubkey!("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA")),
+                _ => bail!(
+                    "cluster {:?} does not have a default target program ID, please provide it through the --pid option",
+                    self.cluster
+                ),
+            },
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
@@ -58,27 +77,23 @@ impl Profile {
     }
 
     pub fn get_config(&self, global_options: Option<&GlobalOptions>) -> Result<Config> {
-        let fee_payer = read_keypair_file(&*shellexpand::tilde(&self.keypair_path))
-            .expect("Example requires a keypair file");
+        let fee_payer =
+            read_keypair_file(&*shellexpand::tilde(&self.keypair_path)).map_err(|err| {
+                anyhow!(
+                    "unable to read keypair file at {}: {}",
+                    self.keypair_path,
+                    err
+                )
+            })?;
 
         let multisig = self.multisig;
 
-        let dry_run = match global_options {
-            Some(options) => options.dry_run,
-            None => false,
+        let send_tx = match global_options {
+            Some(options) => !options.no_send_tx,
+            None => true,
         };
         let cluster = self.cluster.clone();
-        let program_id = match self.program_id {
-        Some(pid) => pid,
-        None => {
-            match cluster {
-                Cluster::Localnet => pubkey!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"),
-                Cluster::Devnet => pubkey!("mf2iDQbVTAE3tT4tgAZBhBAmKUW56GsXX7H3oeH4atr"),
-                Cluster::Mainnet => pubkey!("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA"),
-                _ => bail!("cluster {:?} does not have a default target program ID, please provide it through the --pid option", cluster)
-            }
-        }
-    };
+        let program_id = self.resolved_program_id()?;
         let commitment = CommitmentConfig {
             commitment: self.commitment.unwrap_or(CommitmentLevel::Processed),
         };
@@ -87,17 +102,30 @@ impl Profile {
             CliSigner::Keypair(Keypair::new()),
             commitment,
         );
-        let program = client.program(program_id).unwrap();
-        let lip_program = client
-            .program(match cluster {
-                Cluster::Mainnet => pubkey!("LipsxuAkFkwa4RKNzn51wAsW7Dedzt1RNHMkTkDEZUW"),
-                Cluster::Devnet => pubkey!("sexyDKo4Khm38YdJeiRdNNd5aMQqNtfDkxv7MnYNFeU"),
-                _ => bail!(
-                    "cluster {:?} doesn't have a default program ID for the LIP",
-                    cluster
+        let prev_panic_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let program_result = catch_unwind(AssertUnwindSafe(|| client.program(program_id)));
+        std::panic::set_hook(prev_panic_hook);
+        let program = program_result
+            .map_err(|_| {
+                anyhow!(
+                    "unable to initialize RPC client (proxy/system configuration lookup panicked)"
+                )
+            })?
+            .with_context(|| {
+                format!("unable to build marginfi program client for {}", program_id)
+            })?;
+
+        let (json_output, compute_unit_price, compute_unit_limit, lookup_tables) =
+            match global_options {
+                Some(opts) => (
+                    opts.json_output,
+                    opts.compute_unit_price,
+                    opts.compute_unit_limit,
+                    opts.lookup_tables.clone(),
                 ),
-            })
-            .unwrap();
+                None => (false, None, None, vec![]),
+            };
 
         Ok(Config {
             cluster,
@@ -105,10 +133,13 @@ impl Profile {
             multisig,
             program_id,
             commitment,
-            dry_run,
+            send_tx,
+            json_output,
+            compute_unit_price,
+            compute_unit_limit,
+            lookup_tables,
             client,
             mfi_program: program,
-            lip_program,
         })
     }
 
@@ -166,9 +197,13 @@ impl Profile {
         Ok(())
     }
 
-    pub fn get_marginfi_account(&self) -> Pubkey {
-        self.marginfi_account
-            .unwrap_or_else(|| panic!("No marginfi account set for profile \"{}\"", self.name))
+    pub fn get_marginfi_account(&self) -> Result<Pubkey> {
+        self.marginfi_account.ok_or_else(|| {
+            anyhow!(
+                "No default marginfi account set for profile \"{}\". Use `mfi account list`, `mfi account use <ACCOUNT>`, or `mfi account create`.",
+                self.name
+            )
+        })
     }
 
     pub fn set_marginfi_group(&mut self, address: Pubkey) -> Result<()> {
@@ -178,9 +213,17 @@ impl Profile {
         Ok(())
     }
 
+    pub fn set_marginfi_account(&mut self, address: Option<Pubkey>) -> Result<()> {
+        self.marginfi_account = address;
+        self.write_to_file()?;
+
+        Ok(())
+    }
+
     fn write_to_file(&self) -> Result<()> {
         let cli_config_dir = get_cli_config_dir();
         let cli_profiles_dir = cli_config_dir.join("profiles");
+        fs::create_dir_all(&cli_profiles_dir)?;
         let profile_file = cli_profiles_dir.join(self.name.clone() + ".json");
 
         fs::write(profile_file, serde_json::to_string(&self)?)?;
@@ -260,7 +303,20 @@ pub fn get_cli_config_dir() -> PathBuf {
 
 impl std::fmt::Debug for Profile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let config = self.get_config(None).map_err(|_| std::fmt::Error)?;
+        let (program, fee_payer, authority) = match self.get_config(None) {
+            Ok(config) => (
+                config.program_id.to_string(),
+                config.explicit_fee_payer().to_string(),
+                config.authority().to_string(),
+            ),
+            Err(err) => (
+                self.program_id
+                    .map(|pk| pk.to_string())
+                    .unwrap_or_else(|| "Unknown".to_owned()),
+                "Unknown".to_owned(),
+                format!("Unknown ({err})"),
+            ),
+        };
         write!(
             f,
             r#"
@@ -277,7 +333,7 @@ Profile:
     Multisig: {}
         "#,
             self.name,
-            config.program_id,
+            program,
             self.marginfi_group
                 .map(|x| x.to_string())
                 .unwrap_or_else(|| "None".to_owned()),
@@ -286,8 +342,8 @@ Profile:
                 .unwrap_or_else(|| "None".to_owned()),
             self.cluster,
             self.rpc_url,
-            config.explicit_fee_payer(),
-            config.authority(),
+            fee_payer,
+            authority,
             self.keypair_path.clone(),
             self.multisig
                 .map(|x| x.to_string())

@@ -1,0 +1,18 @@
+{
+  "group": null,
+  "mint": null,
+  "seed": 0,
+  "oracle": null,
+  "oracle_setup": "driftPythPull",
+  "drift_market_index": 0,
+  "drift_oracle": null,
+  "asset_weight_init": 0.55,
+  "asset_weight_maint": 0.65,
+  "deposit_limit": 10000000000,
+  "total_asset_value_init_limit": 10000000000,
+  "oracle_max_age": 70,
+  "oracle_max_confidence": 0,
+  "risk_tier": "collateral",
+  "config_flags": 1,
+  "init_deposit_amount": 100
+}

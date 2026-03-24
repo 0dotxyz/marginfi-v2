@@ -17,7 +17,7 @@ assert_struct_size!(Bank, 1856);
 assert_struct_align!(Bank, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy), derive(Default, PartialEq, Eq))]
-#[cfg_attr(not(feature = "anchor"), derive(Zeroable))]
+#[cfg_attr(not(feature = "anchor"), derive(Pod, Zeroable, Copy, Clone))]
 #[derive(Debug)]
 pub struct Bank {
     /// The SPL token mint this bank manages
