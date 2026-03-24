@@ -534,7 +534,7 @@ pub fn record_withdrawal_outflow(
                 bank: bank_key,
                 mint: bank.mint,
                 flow_direction: 0, // outflow
-                native_amount: native_amount,
+                native_amount,
                 mint_decimals: bank.mint_decimals,
                 current_timestamp: clock.unix_timestamp,
             });
