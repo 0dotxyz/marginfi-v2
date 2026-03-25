@@ -469,6 +469,7 @@ describe("Lending pool add bank (add bank to group)", () => {
     let pyUsdcBankKey = new PublicKey(
       "Fe5QkKPVAh629UPP5aJ8sDZu8HTfe6M26jDQkKyXVhoA"
     );
+    let pyMint = new PublicKey("2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo");
     let pyUsdcBankData = (
       await program.provider.connection.getAccountInfo(pyUsdcBankKey)
     ).data.subarray(8);
@@ -477,17 +478,20 @@ describe("Lending pool add bank (add bank to group)", () => {
     }
 
     const pbBefore = await program.account.bank.fetch(pyUsdcBankKey);
-    assertKeysEqual(
-      pbBefore.emissionsMint,
-      new PublicKey("2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo")
-    );
+    assertKeysEqual(pbBefore.emissionsMint, pyMint);
     assert.equal(pbBefore.flags.toNumber() & IS_T22_FLAG, 0);
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
-        await backfillBankIsT22Flag(groupAdmin.mrgnProgram, {
-          bank: pyUsdcBankKey,
-        })
+        await program.methods
+          .lendingPoolBackfillBankIsT22Flag()
+          .accounts({
+            bank: pyUsdcBankKey,
+          })
+          .accountsPartial({
+            mint: pyMint,
+          })
+          .instruction()
       )
     );
 
