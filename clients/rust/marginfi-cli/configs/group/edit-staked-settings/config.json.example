@@ -1,0 +1,9 @@
+{
+  "oracle": null,
+  "asset_weight_init": 0.78,
+  "asset_weight_maint": 0.88,
+  "deposit_limit": 2500000,
+  "total_asset_value_init_limit": 60000000,
+  "oracle_max_age": 70,
+  "risk_tier": "collateral"
+}

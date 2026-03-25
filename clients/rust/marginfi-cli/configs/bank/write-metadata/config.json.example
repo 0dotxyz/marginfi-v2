@@ -1,0 +1,22 @@
+[
+  {
+    "bankAddress": "<BANK_PUBKEY>",
+    "tokenAddress": null,
+    "tokenSymbol": "USDC",
+    "tokenName": "USD Coin",
+    "assetGroup": null,
+    "venue": null,
+    "venueIdentifier": null,
+    "riskTierName": null
+  },
+  {
+    "bankAddress": "<BANK_PUBKEY>",
+    "tokenAddress": null,
+    "tokenSymbol": "SOL",
+    "tokenName": "Wrapped SOL",
+    "assetGroup": "blue-chip",
+    "venue": null,
+    "venueIdentifier": null,
+    "riskTierName": null
+  }
+]

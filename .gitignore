@@ -34,3 +34,4 @@ test-ledger/
 !.vscode/tasks.json
 !idls/*.json
 !idls-complete/*.json
+!clients/rust/marginfi-cli/assets/*.json
