@@ -221,10 +221,9 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use crate::{
-        DriftWithdraw, EndDeleverage, EndExecuteOrder, EndLiquidation, InitLiquidationRecord,
-        KaminoWithdraw, LendingAccountEndFlashloan, LendingAccountRepay,
-        LendingAccountStartFlashloan, LendingAccountWithdraw, StartDeleverage, StartExecuteOrder,
-        StartLiquidation,
+        EndDeleverage, EndExecuteOrder, EndLiquidation, InitLiquidationRecord, IntegrationWithdraw,
+        LendingAccountEndFlashloan, LendingAccountRepay, LendingAccountStartFlashloan,
+        LendingAccountWithdraw, StartDeleverage, StartExecuteOrder, StartLiquidation,
     };
 
     use super::*;
@@ -319,15 +318,28 @@ mod tests {
         let want_end = ix_discriminators::END_DELEVERAGE;
         assert_eq!(got_end, want_end);
 
-        // ─── DriftWithdraw ─────────────────────────────────────────────────────
-        let got_drift = DriftWithdraw::get_hash();
-        let want_drift = ix_discriminators::DRIFT_WITHDRAW;
-        assert_eq!(got_drift, want_drift);
+        // ─── IntegrationWithdraw ─────────────────────────────────────────────────
+        let got_integration = IntegrationWithdraw::get_hash();
+        let want_integration = ix_discriminators::INTEGRATION_WITHDRAW;
+        assert_eq!(got_integration, want_integration);
 
-        // ─── KaminoWithdraw ────────────────────────────────────────────────────
-        let got_kamino = KaminoWithdraw::get_hash();
-        let want_kamino = ix_discriminators::KAMINO_WITHDRAW;
-        assert_eq!(got_kamino, want_kamino);
+        // ─── Per-venue withdraw discriminators ────────────────────────────────────
+        assert_eq!(
+            get_discrim_hash("global", "kamino_withdraw"),
+            ix_discriminators::KAMINO_WITHDRAW
+        );
+        assert_eq!(
+            get_discrim_hash("global", "drift_withdraw"),
+            ix_discriminators::DRIFT_WITHDRAW
+        );
+        assert_eq!(
+            get_discrim_hash("global", "solend_withdraw"),
+            ix_discriminators::SOLEND_WITHDRAW
+        );
+        assert_eq!(
+            get_discrim_hash("global", "juplend_withdraw"),
+            ix_discriminators::JUPLEND_WITHDRAW
+        );
 
         // ─── StartExecuteOrder ───────────────────────────────────────────────────
         let got_start_exec = StartExecuteOrder::get_hash();

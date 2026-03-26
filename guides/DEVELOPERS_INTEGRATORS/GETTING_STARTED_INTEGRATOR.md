@@ -28,6 +28,51 @@ Be aware of:
 * Contact us on telegram to be added to our "Integrators" list. We will make a best effort to ping
   you at least one week before any program update goes live.
 
+## Migration: Unified Integration Interface
+
+This release intentionally removes the old protocol-specific user entrypoints for wrapped
+integrations and replaces them with one shared interface.
+
+### Old -> New instruction mapping
+
+| Old instruction | New instruction |
+|----------------|-----------------|
+| `kamino_deposit` | `integration_deposit` |
+| `kamino_withdraw` | `integration_withdraw` |
+| `drift_deposit` | `integration_deposit` |
+| `drift_withdraw` | `integration_withdraw` |
+| `solend_deposit` | `integration_deposit` |
+| `solend_withdraw` | `integration_withdraw` |
+| `juplend_deposit` | `integration_deposit` |
+| `juplend_withdraw` | `integration_withdraw` |
+
+### What integrators must change
+
+- Stop building protocol-specific user deposit/withdraw instructions. They no longer exist in the
+  program interface.
+- Select the protocol behavior from `bank.config.asset_tag`.
+- For `integration_deposit`, pass the protocol-specific accounts in `remaining_accounts`.
+- For `integration_withdraw`, pass protocol-specific accounts first in `remaining_accounts`, then
+  append the usual health/risk accounts.
+- Update any discriminator allowlists or transaction inspectors that referenced
+  `*_withdraw` integration discriminators. There is now a single `integration_withdraw`
+  discriminator for all wrapped integrations.
+- Re-run all client-side account builders. This migration is not only a method rename; the account
+  packing model changed as well.
+
+### Exact account layouts
+
+The exact per-protocol account layouts are enforced by the program and mirrored in our TS helpers.
+Use the builders under:
+
+- `tests/utils/kamino-instructions.ts`
+- `tests/utils/drift-instructions.ts`
+- `tests/utils/solend-instructions.ts`
+- `tests/utils/juplend/user-instructions.ts`
+- `tests/utils/integration-account-layouts.ts`
+
+Those files are the current source of truth for the required ordering and optional-account padding.
+
 ## Important Instructions (click to learn more)
 
 <details>
@@ -53,12 +98,12 @@ the bank, and you attempt to deposit 10, `deposit_up_to_limit` = true will depos
 </details>
 
 <details>
-<summary> <b>kamino_deposit</b> - deposit into a Kamino Bank</summary>
+<summary> <b>integration_deposit</b> - deposit into an integration Bank (Kamino, Drift, Solend, JupLend)</summary>
 
-- Check `bank.config.asset_tag` ASSET_TAG_KAMINO (3) is allowed with this instruction. Others
-  have their own deposit instruction.
+- Check `bank.config.asset_tag` and pass the protocol-specific accounts in `remaining_accounts`.
+- Supported tags are the wrapped integration banks: Kamino (3), Drift (4), Solend (5), JupLend (6).
 - No Risk Engine check, always considered risk-free
-- `amount` is in native token (of the Kamino reserve), in native decimal, e.g. 1 SOL = 1 \* 10^9
+- `amount` is in native underlying token decimals for every supported integration deposit.
 </details>
 
 <details>
@@ -74,13 +119,15 @@ by configuring `amount` will always leave the Balance on your account, even with
 </details>
 
 <details>
-<summary> <b>kamino_withdraw</b> - withdraw from a Kamino Bank</summary>
+<summary> <b>integration_withdraw</b> - withdraw from an integration Bank (Kamino, Drift, Solend, JupLend)</summary>
 
-- Check `bank.config.asset_tag` ASSET_TAG_KAMINO (3) is allowed with this instruction. Others
-  have their own deposit instruction.
-- Requires a Risk Engine check (pass banks and oracles in remaining accounts)
-- `amount` is in **collateral** token, which always uses native decimal. Perform a conversion
-  from liquidity -> collateral token.
+- Check `bank.config.asset_tag` and pass protocol accounts first in `remaining_accounts`, followed
+  by the usual risk-engine bank/oracle accounts.
+- Requires a Risk Engine check for the post-withdraw health validation.
+- The program splits `remaining_accounts` by protocol-specific account count, so ordering matters.
+- `amount` semantics depend on the wrapped protocol:
+  - Kamino / Solend: amount is in collateral-share units.
+  - Drift / JupLend: amount is in native underlying token units.
 - Can fail if the Bank doesn't have enough liquidity, or the Account after the action would fail the
   risk check.
 </details>

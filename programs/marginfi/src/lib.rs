@@ -753,9 +753,36 @@ pub mod marginfi {
         kamino::kamino_init_obligation(ctx, amount)
     }
 
-    /// (user) Deposit into a Kamino pool through a marginfi account
-    /// * amount - in the liquidity token (e.g. if there is a Kamino USDC bank, pass the amount of
-    ///   USDC desired), in native decimals.
+    // Unified integration instructions
+
+    /// (user) Deposit into any integration protocol (Kamino, Drift, Solend, JupLend).
+    /// Protocol-specific accounts are passed via remaining_accounts.
+    /// `op_mode` identifies the protocol so the operation is readable from instruction args.
+    pub fn integration_deposit<'info>(
+        ctx: Context<'_, '_, 'info, 'info, IntegrationDeposit<'info>>,
+        amount: u64,
+        op_mode: IntegrationOpMode,
+    ) -> MarginfiResult {
+        integration::integration_deposit(ctx, amount, op_mode)
+    }
+
+    /// (user) Withdraw from any integration protocol (Kamino, Drift, Solend, JupLend).
+    /// Protocol-specific accounts are passed via remaining_accounts.
+    /// `op_mode` identifies the protocol so the operation is readable from instruction args.
+    pub fn integration_withdraw<'info>(
+        ctx: Context<'_, '_, 'info, 'info, IntegrationWithdraw<'info>>,
+        amount: u64,
+        withdraw_all: Option<bool>,
+        op_mode: IntegrationOpMode,
+    ) -> MarginfiResult {
+        integration::integration_withdraw(ctx, amount, withdraw_all, op_mode)
+    }
+
+    // Per-venue integration deposit/withdraw instructions
+    // These provide named instructions per protocol for easier indexing, while sharing
+    // all logic through the unified internal implementation.
+
+    /// (user) Deposit into a Kamino pool through a marginfi account.
     pub fn kamino_deposit<'info>(
         ctx: Context<'_, '_, 'info, 'info, KaminoDeposit<'info>>,
         amount: u64,
@@ -763,17 +790,64 @@ pub mod marginfi {
         kamino::kamino_deposit(ctx, amount)
     }
 
-    /// (user) Withdraw from a Kamino pool through a marginfi account
-    /// * amount - in the collateral token (NOT liquidity token), in native decimals. Must convert
-    ///     from collateral to liquidity token amounts using the current exchange rate.
-    /// * withdraw_all - if true, withdraw the entire mrgn balance (Note: due to rounding down, a
-    ///   deposit and withdraw back to back may result in several lamports less)
+    /// (user) Withdraw from a Kamino pool through a marginfi account.
     pub fn kamino_withdraw<'info>(
         ctx: Context<'_, '_, 'info, 'info, KaminoWithdraw<'info>>,
         amount: u64,
         withdraw_all: Option<bool>,
     ) -> MarginfiResult {
         kamino::kamino_withdraw(ctx, amount, withdraw_all)
+    }
+
+    /// (user) Deposit into a Drift spot market through a marginfi account.
+    pub fn drift_deposit<'info>(
+        ctx: Context<'_, '_, 'info, 'info, DriftDeposit<'info>>,
+        amount: u64,
+    ) -> MarginfiResult {
+        drift::drift_deposit(ctx, amount)
+    }
+
+    /// (user) Withdraw from a Drift spot market through a marginfi account.
+    pub fn drift_withdraw<'info>(
+        ctx: Context<'_, '_, 'info, 'info, DriftWithdraw<'info>>,
+        amount: u64,
+        withdraw_all: Option<bool>,
+    ) -> MarginfiResult {
+        drift::drift_withdraw(ctx, amount, withdraw_all)
+    }
+
+    /// (user) Deposit into a Solend reserve through a marginfi account.
+    pub fn solend_deposit<'info>(
+        ctx: Context<'_, '_, 'info, 'info, SolendDeposit<'info>>,
+        amount: u64,
+    ) -> MarginfiResult {
+        solend::solend_deposit(ctx, amount)
+    }
+
+    /// (user) Withdraw from a Solend reserve through a marginfi account.
+    pub fn solend_withdraw<'info>(
+        ctx: Context<'_, '_, 'info, 'info, SolendWithdraw<'info>>,
+        amount: u64,
+        withdraw_all: Option<bool>,
+    ) -> MarginfiResult {
+        solend::solend_withdraw(ctx, amount, withdraw_all)
+    }
+
+    /// (user) Deposit into a JupLend lending pool through a marginfi account.
+    pub fn juplend_deposit<'info>(
+        ctx: Context<'_, '_, 'info, 'info, JuplendDeposit<'info>>,
+        amount: u64,
+    ) -> MarginfiResult {
+        juplend::juplend_deposit(ctx, amount)
+    }
+
+    /// (user) Withdraw from a JupLend lending pool through a marginfi account.
+    pub fn juplend_withdraw<'info>(
+        ctx: Context<'_, '_, 'info, 'info, JuplendWithdraw<'info>>,
+        amount: u64,
+        withdraw_all: Option<bool>,
+    ) -> MarginfiResult {
+        juplend::juplend_withdraw(ctx, amount, withdraw_all)
     }
 
     /// (group admin only) Add a Kamino bank to the group. Pass the oracle and reserve in remaining
@@ -816,26 +890,6 @@ pub mod marginfi {
         drift::drift_init_user(ctx, amount)
     }
 
-    /// (user) Deposit into a Drift spot market through a marginfi account
-    /// * amount - in the underlying token (e.g., USDC), in native decimals
-    pub fn drift_deposit<'info>(
-        ctx: Context<'_, '_, 'info, 'info, DriftDeposit<'info>>,
-        amount: u64,
-    ) -> MarginfiResult {
-        drift::drift_deposit(ctx, amount)
-    }
-
-    /// (user) Withdraw from a Drift spot market through a marginfi account
-    /// * amount - in the underlying token (e.g., USDC), in native decimals
-    /// * withdraw_all - if true, withdraws entire position
-    pub fn drift_withdraw<'info>(
-        ctx: Context<'_, '_, 'info, 'info, DriftWithdraw<'info>>,
-        amount: u64,
-        withdraw_all: Option<bool>,
-    ) -> MarginfiResult {
-        drift::drift_withdraw(ctx, amount, withdraw_all)
-    }
-
     /// (permissionless) Harvest rewards from admin deposits in Drift spot markets.
     /// Rewards are always sent to the global fee wallet's canonical ATA.
     /// The harvest spot market must be different from the bank's main drift spot market.
@@ -866,26 +920,6 @@ pub mod marginfi {
         solend::solend_init_obligation(ctx, amount)
     }
 
-    /// (user) Deposit into a Solend reserve through a marginfi account
-    /// * amount - in the underlying token (e.g., USDC), in native decimals
-    pub fn solend_deposit<'info>(
-        ctx: Context<'_, '_, 'info, 'info, SolendDeposit<'info>>,
-        amount: u64,
-    ) -> MarginfiResult {
-        solend::solend_deposit(ctx, amount)
-    }
-
-    /// (user) Withdraw from a Solend reserve through a marginfi account
-    /// * amount - in collateral tokens (cTokens), in native decimals  
-    /// * withdraw_all - withdraw entire position if true
-    pub fn solend_withdraw<'info>(
-        ctx: Context<'_, '_, 'info, 'info, SolendWithdraw<'info>>,
-        amount: u64,
-        withdraw_all: Option<bool>,
-    ) -> MarginfiResult {
-        solend::solend_withdraw(ctx, amount, withdraw_all)
-    }
-
     // Juplend integration instructions
 
     /// (admin) Add a JupLend bank to the marginfi group.
@@ -908,22 +942,6 @@ pub mod marginfi {
     /// `Operational`.
     pub fn juplend_init_position(ctx: Context<JuplendInitPosition>, amount: u64) -> MarginfiResult {
         juplend::juplend_init_position(ctx, amount)
-    }
-
-    /// (user) Deposit into a JupLend lending pool through a marginfi account.
-    /// * amount - in the underlying token (e.g., USDC), in native decimals
-    pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiResult {
-        juplend::juplend_deposit(ctx, amount)
-    }
-
-    /// (user) Withdraw from a JupLend lending pool through a marginfi account.
-    /// * amount - in the underlying token (e.g., USDC), in native decimals
-    pub fn juplend_withdraw<'info>(
-        ctx: Context<'_, '_, 'info, 'info, JuplendWithdraw<'info>>,
-        amount: u64,
-        withdraw_all: Option<bool>,
-    ) -> MarginfiResult {
-        juplend::juplend_withdraw(ctx, amount, withdraw_all)
     }
 }
 

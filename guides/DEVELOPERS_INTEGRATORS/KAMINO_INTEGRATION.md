@@ -50,10 +50,10 @@ an obligation on that bank (caveat: the bank's `liquidity_vault_authority` actua
 obligation under the hood). In simple terms, Mrgn banks are like any other user/depositor of the
 Kamino platform, enjoying no special access or privileges.
 
-Wrapped banks have their own deposit and withdraw instructions, unique to Kamino wrapped banks. They
-can never borrow. Wrapped instructions are very similar to their mrgn equivalents, except they also
-require you to pass a variety of Kamino-specific accounts tied to the reserve/obligation that the
-bank uses.
+Wrapped banks now use the shared `integration_deposit` and `integration_withdraw` interface. They
+can never borrow. The Kamino variant still requires Kamino-specific reserve/obligation accounts,
+but those accounts are now passed through `remaining_accounts` rather than a dedicated Kamino user
+instruction.
 
 Remember to refresh reserves and the bank's obligation before any deposit/withdrawal.
 
@@ -103,11 +103,26 @@ proportional method to be determined in the future.
 If a user has a wrapped Kamino position, remember to refresh any reserves/obligations that are
 involved before attempting to liquidate.
 
-Liquidators may claim a wrapped Kamino position, which must be withdrawn using the separate
-"withdraw" instruction that is applicable only to wrapped banks.
+Liquidators may claim a wrapped Kamino position, which must be withdrawn using
+`integration_withdraw` on the wrapped bank.
 
 The withdraw instruction requires refreshing the reserve/obligation and consumes a significant
 amount of CU: it is recommended to do this in a separate tx to the liquidation ix in most cases.
+
+## Migration Notes
+
+If you previously built `kamino_deposit` or `kamino_withdraw`, migrate to:
+
+- `integration_deposit` for user deposits
+- `integration_withdraw` for user withdrawals
+
+For Kamino withdraws, `remaining_accounts` must be packed as:
+
+1. Kamino protocol accounts
+2. Marginfi health/risk accounts
+
+Do not interleave them. The shared integration withdraw flow uses the protocol account count to
+split `remaining_accounts` before running the post-withdraw health check.
 
 ## Token Amount Types by Instruction
 

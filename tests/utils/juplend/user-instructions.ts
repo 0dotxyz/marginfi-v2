@@ -2,9 +2,10 @@ import { BN, Program } from "@coral-xyz/anchor";
 import {
   AccountMeta,
   PublicKey,
+  SystemProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 
 import { Marginfi } from "../../../target/types/marginfi";
 import type {
@@ -12,11 +13,11 @@ import type {
   JuplendLiquidityIdl,
   JuplendPoolKeys,
 } from "./types";
-import { JUPLEND_LIQUIDITY_PROGRAM_ID } from "./juplend-pdas";
+import { JUPLEND_LENDING_PROGRAM_ID, JUPLEND_LIQUIDITY_PROGRAM_ID } from "./juplend-pdas";
+import { deriveLiquidityVaultAuthority } from "../pdas";
 
 export type JuplendDepositAccounts = {
   marginfiAccount: PublicKey;
-  // authority: PublicKey;
   signerTokenAccount: PublicKey;
   bank: PublicKey;
   pool: JuplendPoolKeys;
@@ -24,23 +25,59 @@ export type JuplendDepositAccounts = {
   tokenProgram?: PublicKey;
 };
 
+const resolveJuplendWrapperAccounts = async (
+  program: Program<Marginfi>,
+  marginfiAccountPk: PublicKey,
+  bankPk: PublicKey,
+) => {
+  const [marginfiAccount, bank] = await Promise.all([
+    program.account.marginfiAccount.fetch(marginfiAccountPk),
+    program.account.bank.fetch(bankPk),
+  ]);
+  const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
+    program.programId,
+    bankPk,
+  );
+
+  return {
+    group: marginfiAccount.group,
+    liquidityVaultAuthority,
+    integrationAcc1: bank.integrationAcc1,
+    integrationAcc2: bank.integrationAcc2,
+    integrationAcc3: bank.integrationAcc3,
+    liquidityVault: bank.liquidityVault,
+    mint: bank.mint,
+  };
+};
+
 /**
- * Build `juplend_deposit(amount)`.
- *
- * Note: `fTokenMint` still needs to be passed via `accountsPartial` because
- * Anchor cannot infer it through external JupLend account relations.
+ * Build `juplendDeposit(amount)` for JupLend.
  */
 export const makeJuplendDepositIx = async (
   program: Program<Marginfi>,
   accounts: JuplendDepositAccounts,
 ): Promise<TransactionInstruction> => {
+  const common = await resolveJuplendWrapperAccounts(
+    program,
+    accounts.marginfiAccount,
+    accounts.bank,
+  );
+  const authority = program.provider.publicKey as PublicKey;
+
   return program.methods
     .juplendDeposit(accounts.amount)
-    .accounts({
+    .accountsStrict({
+      group: common.group,
       marginfiAccount: accounts.marginfiAccount,
-      // authority: accounts.authority,
-      signerTokenAccount: accounts.signerTokenAccount,
+      authority,
       bank: accounts.bank,
+      signerTokenAccount: accounts.signerTokenAccount,
+      liquidityVaultAuthority: common.liquidityVaultAuthority,
+      liquidityVault: common.liquidityVault,
+      mint: common.mint,
+      integrationAcc1: common.integrationAcc1,
+      fTokenMint: accounts.pool.fTokenMint,
+      integrationAcc2: common.integrationAcc2,
       lendingAdmin: accounts.pool.lendingAdmin,
       supplyTokenReservesLiquidity: accounts.pool.tokenReserve,
       lendingSupplyPositionOnLiquidity: accounts.pool.supplyPositionOnLiquidity,
@@ -49,12 +86,10 @@ export const makeJuplendDepositIx = async (
       liquidity: accounts.pool.liquidity,
       liquidityProgram: JUPLEND_LIQUIDITY_PROGRAM_ID,
       rewardsRateModel: accounts.pool.lendingRewardsRateModel,
-      // integrationAcc2: accounts.fTokenVault,
-      tokenProgram:
-        accounts.tokenProgram ?? accounts.pool.tokenProgram ?? TOKEN_PROGRAM_ID,
-    })
-    .accountsPartial({
-      fTokenMint: accounts.pool.fTokenMint,
+      juplendProgram: JUPLEND_LENDING_PROGRAM_ID,
+      tokenProgram: accounts.tokenProgram ?? accounts.pool.tokenProgram ?? TOKEN_PROGRAM_ID,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
     })
     .instruction();
 };
@@ -72,15 +107,18 @@ export type JuplendWithdrawAccounts = {
 };
 
 /**
- * Build `juplend_withdraw(amount, withdraw_all)`.
- *
- * Note: `fTokenMint` still needs to be passed via `accountsPartial` because
- * Anchor cannot infer it through external JupLend account relations.
+ * Build `juplendWithdraw(amount, withdraw_all)` for JupLend.
  */
 export const makeJuplendWithdrawIx = async (
   program: Program<Marginfi>,
   accounts: JuplendWithdrawAccounts,
 ): Promise<TransactionInstruction> => {
+  const common = await resolveJuplendWrapperAccounts(
+    program,
+    accounts.marginfiAccount,
+    accounts.bank,
+  );
+  const authority = program.provider.publicKey as PublicKey;
   const remaining: AccountMeta[] = (accounts.remainingAccounts ?? []).map(
     (pubkey) => ({
       pubkey,
@@ -91,11 +129,18 @@ export const makeJuplendWithdrawIx = async (
 
   return program.methods
     .juplendWithdraw(accounts.amount, accounts.withdrawAll ? true : null)
-    .accounts({
+    .accountsStrict({
+      group: common.group,
       marginfiAccount: accounts.marginfiAccount,
-      destinationTokenAccount: accounts.destinationTokenAccount,
+      authority,
       bank: accounts.bank,
-      // integrationAcc3: accounts.withdrawIntermediaryAta,
+      destinationTokenAccount: accounts.destinationTokenAccount,
+      liquidityVaultAuthority: common.liquidityVaultAuthority,
+      mint: common.mint,
+      integrationAcc1: common.integrationAcc1,
+      fTokenMint: accounts.pool.fTokenMint,
+      integrationAcc2: common.integrationAcc2,
+      integrationAcc3: common.integrationAcc3,
       lendingAdmin: accounts.pool.lendingAdmin,
       supplyTokenReservesLiquidity: accounts.pool.tokenReserve,
       lendingSupplyPositionOnLiquidity: accounts.pool.supplyPositionOnLiquidity,
@@ -105,11 +150,10 @@ export const makeJuplendWithdrawIx = async (
       liquidity: accounts.pool.liquidity,
       liquidityProgram: JUPLEND_LIQUIDITY_PROGRAM_ID,
       rewardsRateModel: accounts.pool.lendingRewardsRateModel,
+      juplendProgram: JUPLEND_LENDING_PROGRAM_ID,
       tokenProgram: accounts.tokenProgram ?? TOKEN_PROGRAM_ID,
-      // systemProgram: accounts.systemProgram ?? SystemProgram.programId,
-    })
-    .accountsPartial({
-      fTokenMint: accounts.pool.fTokenMint,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
     })
     .remainingAccounts(remaining)
     .instruction();

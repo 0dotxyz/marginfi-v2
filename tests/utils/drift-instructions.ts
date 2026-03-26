@@ -1,6 +1,7 @@
 import {
   AccountMeta,
   PublicKey,
+  SystemProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
 import BN from "bn.js";
@@ -14,6 +15,7 @@ import { DRIFT_PROGRAM_ID } from "./types";
 import { DriftConfigCompact } from "./drift-utils";
 import { Drift } from "../fixtures/drift";
 import {
+  deriveLiquidityVaultAuthority,
   deriveDriftStatePDA,
   deriveSpotMarketVaultPDA,
 } from "./pdas";
@@ -111,7 +113,6 @@ export const makeInitDriftUserIx = async (
 ): Promise<TransactionInstruction> => {
   // Derive the drift state PDA using helper function
   const [driftState] = deriveDriftStatePDA(DRIFT_PROGRAM_ID);
-
   // Derive the spot market vault PDA using the market index
   const [driftSpotMarketVault] = deriveSpotMarketVaultPDA(
     DRIFT_PROGRAM_ID,
@@ -142,16 +143,36 @@ export interface DriftDepositAccounts {
   tokenProgram?: PublicKey;
 }
 
+const resolveDriftWrapperAccounts = async (
+  program: Program<Marginfi>,
+  marginfiAccountPk: PublicKey,
+  bankPk: PublicKey,
+) => {
+  const [marginfiAccount, bank] = await Promise.all([
+    program.account.marginfiAccount.fetch(marginfiAccountPk),
+    program.account.bank.fetch(bankPk),
+  ]);
+  const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
+    program.programId,
+    bankPk,
+  );
+
+  return {
+    group: marginfiAccount.group,
+    liquidityVaultAuthority,
+    liquidityVault: bank.liquidityVault,
+    integrationAcc1: bank.integrationAcc1,
+    integrationAcc2: bank.integrationAcc2,
+    integrationAcc3: bank.integrationAcc3,
+    mint: bank.mint,
+  };
+};
+
 /**
  * Deposit tokens into a Drift spot market through marginfi
  *
  * This instruction deposits tokens from the user's account into a Drift spot market
  * via a marginfi bank that's configured for Drift integration.
- *
- * Required remaining accounts for Drift (in order):
- * 1. Oracle account (optional - only if not using oracle type QuoteAsset)
- * 2. Spot market account (always required)
- * 3. Token mint (optional - only for Token-2022)
  *
  * @param program The marginfi program
  * @param accounts The required accounts
@@ -165,7 +186,12 @@ export const makeDriftDepositIx = async (
   amount: BN,
   marketIndex: number
 ): Promise<TransactionInstruction> => {
-  // Derive PDAs using helper functions
+  const common = await resolveDriftWrapperAccounts(
+    program,
+    accounts.marginfiAccount,
+    accounts.bank,
+  );
+  const authority = program.provider.publicKey as PublicKey;
   const [driftState] = deriveDriftStatePDA(DRIFT_PROGRAM_ID);
   const [driftSpotMarketVault] = deriveSpotMarketVaultPDA(
     DRIFT_PROGRAM_ID,
@@ -174,14 +200,24 @@ export const makeDriftDepositIx = async (
 
   const ix = await program.methods
     .driftDeposit(amount)
-    .accounts({
+    .accountsStrict({
+      group: common.group,
       marginfiAccount: accounts.marginfiAccount,
+      authority,
       bank: accounts.bank,
+      liquidityVaultAuthority: common.liquidityVaultAuthority,
+      liquidityVault: common.liquidityVault,
       signerTokenAccount: accounts.signerTokenAccount,
       driftState,
+      integrationAcc2: common.integrationAcc2,
+      integrationAcc3: common.integrationAcc3,
+      integrationAcc1: common.integrationAcc1,
       driftSpotMarketVault,
+      mint: common.mint,
+      driftProgram: DRIFT_PROGRAM_ID,
       driftOracle: accounts.driftOracle || null,
       tokenProgram: accounts.tokenProgram || TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
     })
     .instruction();
 
@@ -215,15 +251,6 @@ export interface DriftWithdrawArgs {
  * that's configured for Drift integration. The tokens are transferred to the
  * user's destination token account.
  *
- * Optional reward accounts are required when Drift admin has deposited reward assets:
- * - driftRewardOracle + driftRewardSpotMarket: Required if 2+ active deposits exist
- * - driftRewardOracle2 + driftRewardSpotMarket2: Required if exactly 3 active deposits exist
- *
- * Required remaining accounts for Drift (in order):
- * 1. Oracle account (optional - only if not using oracle type QuoteAsset)
- * 2. Spot market account (always required)
- * 3. Token mint (optional - only for Token-2022)
- *
  * @param program The marginfi program
  * @param accounts The required accounts including destination for withdrawn tokens
  * @param args The withdrawal parameters including amount and withdraw_all flag
@@ -236,16 +263,18 @@ export const makeDriftWithdrawIx = async (
   args: DriftWithdrawArgs,
   driftProgram: Program<Drift>
 ): Promise<TransactionInstruction> => {
-  // Get the bank to find the drift spot market
-  const bank = await program.account.bank.fetch(accounts.bank);
-
+  const common = await resolveDriftWrapperAccounts(
+    program,
+    accounts.marginfiAccount,
+    accounts.bank,
+  );
+  const authority = program.provider.publicKey as PublicKey;
   // Load the drift spot market to get the market index
   const driftSpotMarket = await driftProgram.account.spotMarket.fetch(
-    bank.integrationAcc1
+    common.integrationAcc1
   );
   const marketIndex = driftSpotMarket.marketIndex;
 
-  // Derive PDAs using helper functions - similar to deposit
   const [driftState] = deriveDriftStatePDA(DRIFT_PROGRAM_ID);
   const [driftSpotMarketVault] = deriveSpotMarketVaultPDA(
     DRIFT_PROGRAM_ID,
@@ -258,21 +287,31 @@ export const makeDriftWithdrawIx = async (
 
   const ix = await program.methods
     .driftWithdraw(args.amount, args.withdrawAll)
-    .accounts({
+    .accountsStrict({
+      group: common.group,
       marginfiAccount: accounts.marginfiAccount,
+      authority,
       bank: accounts.bank,
       destinationTokenAccount: accounts.destinationTokenAccount,
+      liquidityVaultAuthority: common.liquidityVaultAuthority,
+      liquidityVault: common.liquidityVault,
       driftState,
+      integrationAcc2: common.integrationAcc2,
+      integrationAcc3: common.integrationAcc3,
+      integrationAcc1: common.integrationAcc1,
       driftSpotMarketVault,
-      driftSigner,
-      driftOracle: accounts.driftOracle || null,
       driftRewardOracle: accounts.driftRewardOracle || null,
       driftRewardSpotMarket: accounts.driftRewardSpotMarket || null,
       driftRewardMint: accounts.driftRewardMint || null,
       driftRewardOracle2: accounts.driftRewardOracle2 || null,
       driftRewardSpotMarket2: accounts.driftRewardSpotMarket2 || null,
       driftRewardMint2: accounts.driftRewardMint2 || null,
+      driftSigner,
+      mint: common.mint,
+      driftProgram: DRIFT_PROGRAM_ID,
+      driftOracle: accounts.driftOracle || null,
       tokenProgram: accounts.tokenProgram || TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
     })
     .remainingAccounts(
       args.remaining.map((pubkey) => ({

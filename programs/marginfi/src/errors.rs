@@ -422,7 +422,17 @@ pub enum MarginfiError {
     JuplendInitPositionDepositInsufficient, // 6511
     #[msg("Invalid Juplend withdraw intermediary ATA")]
     InvalidJuplendWithdrawIntermediaryAta, // 6512
-                                           // **************END JUPLEND ERRORS
+    // **************END JUPLEND ERRORS
+
+    // **************INTEGRATION ERRORS
+    #[msg("Unsupported integration protocol for this asset tag")]
+    UnsupportedIntegration = 600, // 6600
+    #[msg("Integration protocol account count mismatch")]
+    IntegrationAccountCountMismatch, // 6601
+    #[msg("Integration protocol account key mismatch")]
+    IntegrationAccountKeyMismatch, // 6602
+    #[msg("Integration op_mode does not match bank asset tag")]
+    IntegrationOpModeMismatch, // 6603
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -658,6 +668,11 @@ impl From<u32> for MarginfiError {
             6510 => MarginfiError::JuplendWithdrawFailed,
             6511 => MarginfiError::JuplendInitPositionDepositInsufficient,
             6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
+
+            6600 => MarginfiError::UnsupportedIntegration,
+            6601 => MarginfiError::IntegrationAccountCountMismatch,
+            6602 => MarginfiError::IntegrationAccountKeyMismatch,
+            6603 => MarginfiError::IntegrationOpModeMismatch,
 
             _ => MarginfiError::InternalLogicError,
         }

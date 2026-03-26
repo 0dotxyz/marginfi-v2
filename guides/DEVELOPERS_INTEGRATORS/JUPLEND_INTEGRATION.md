@@ -23,8 +23,9 @@ vault`.
 - Liquidity token or underlying token - The token users deposit/withdraw (e.g. USDC, SOL), in
   native decimals.
 - Refreshing Lending - The "Lending" account stores information about the exchange rate of
-  fTokens/underlying. The refresh instruction is called `updateRate`. Our `juplend_deposit` and
-  `juplend_withdraw` handlers call this internally. For liquidation and other risk-sensitive flows,
+  fTokens/underlying. The refresh instruction is called `updateRate`. Our unified
+  `integration_deposit` and `integration_withdraw` JupLend flows call this internally. For
+  liquidation and other risk-sensitive flows,
   include `updateRate` for all involved Juplend banks in the same tx before health checks that read JupLend state.
 - Withdraw intermediary ATA - The bank's `integration_acc_3` account. JupLend withdrawals first land
   here, then marginfi forwards tokens to the user's destination token account. Currently, this is an
@@ -43,15 +44,15 @@ vault`.
   intermediary ATA (`integration_acc_3`) before first withdraw. This is not created by
   `lending_pool_add_bank_juplend` or `juplend_init_position`. This requirement will be removed when
   juplend allows withdrawal to pda accounts.
-- `juplend_deposit(amount)` (user) - Deposit underlying tokens (native amount). Internally calls
-  JupLend `updateRate`, deposits through CPI, verifies minted fTokens, and credits the user's
-  marginfi position.
-- `juplend_withdraw(amount, withdraw_all)` (user) - Withdraw underlying tokens (native amount).
-  Internally calls JupLend `updateRate`, burns fTokens via CPI, then transfers tokens from the
-  withdraw intermediary ATA to the user's destination token account.
+- `integration_deposit(amount)` (user, JupLend bank) - Deposit underlying tokens (native amount).
+  Internally calls JupLend `updateRate`, deposits through CPI, verifies minted fTokens, and
+  credits the user's marginfi position.
+- `integration_withdraw(amount, withdraw_all)` (user, JupLend bank) - Withdraw underlying tokens
+  (native amount). Internally calls JupLend `updateRate`, burns fTokens via CPI, then transfers
+  tokens from the withdraw intermediary ATA to the user's destination token account.
 - `lending_account_liquidate` or `start_liquidation` / `end_liquidation` (liquidators) - Liquidation
   still uses the standard marginfi liquidation instructions. If seized collateral includes JupLend
-  assets, the liquidator/receiver claims those assets with `juplend_withdraw`.
+  assets, the liquidator/receiver claims those assets with `integration_withdraw`.
 - Native JupLend `updateRate` (Lending program) - Used to refresh JupLend exchange rates before risk
   checks. Must run before withdraw, borrow, etc for every bank involved, in the same tx.
 
@@ -75,8 +76,12 @@ integrations, wrapped Juplend banks do not earn interest through marginfi's inte
 `asset_share_value`; yield is captured through Juplend's `token_exchange_price` (fToken appreciation
 vs underlying).
 
-Wrapped Juplend banks use dedicated deposit/withdraw instructions (`juplend_deposit`,
-`juplend_withdraw`) and cannot be borrowed.
+Wrapped Juplend banks use the shared integration deposit/withdraw interface
+(`integration_deposit`, `integration_withdraw`) and cannot be borrowed.
+
+If you previously built `juplend_deposit` or `juplend_withdraw`, migrate those user flows to the
+shared integration interface and pack JupLend protocol accounts first in `remaining_accounts`
+before any marginfi health/risk accounts.
 
 For risk checks such as borrows and liquidations, remember that Juplend pricing depends on the
 Lending state exchange rate. Include the correct remaining risk accounts and refresh with
@@ -111,8 +116,8 @@ Juplend risk accounts are the `bank, oracle, Lending` accounts, in that order.
 - Rewards accrue over time but are **materialized on rate refresh** (`updateRate`).
 - Rewards refresh whenever funds are updated (e.g. on deposit/withdraw/borrow/repay, etc), thus a
   pool that hasn't had activity in some time may show stale rewards.
-  - In mrgn, `juplend_deposit` and `juplend_withdraw` already call `updateRate` internally, so those
-    user actions crank rewards automatically.
+  - In mrgn, the JupLend variants of `integration_deposit` and `integration_withdraw` already call
+    `updateRate` internally, so those user actions crank rewards automatically.
   - For pure valuation/health freshness outside deposit/withdraw flows, include native Jup
     `updateRate` in the same transaction before risk checks.
 - Previewing earned rewards without cranking is somewhat complex, you may prefer to approximate:
@@ -125,8 +130,8 @@ Juplend risk accounts are the `bank, oracle, Lending` accounts, in that order.
 
 - Users do **not** call a Juplend claim instruction through mrgn to receive rewards.
 - Rewards appear as higher collateral valuation (e.g. visible after `healthPulse`).
-- To realize rewards into wallet tokens, users withdraw (`juplend_withdraw`), which burns fTokens at
-  the newer exchange rate and returns more underlying.
+- To realize rewards into wallet tokens, users withdraw with `integration_withdraw`, which burns
+  fTokens at the newer exchange rate and returns more underlying.
 
 ### Stopping / Changing Rewards (Juplend Admin)
 
