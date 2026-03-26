@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use marginfi_type_crate::types::{Bank, BankMetadata, MarginfiGroup};
+use marginfi_type_crate::types::{BankMetadata, MarginfiGroup};
 
 use crate::MarginfiError;
 
@@ -56,10 +56,8 @@ pub struct WriteBankMetadata<'info> {
     )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    #[account(
-        has_one = group,
-    )]
-    pub bank: AccountLoader<'info, Bank>,
+    /// CHECK: Bank may not be initialized yet. Validated via metadata.bank.
+    pub bank: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub metadata_admin: Signer<'info>,

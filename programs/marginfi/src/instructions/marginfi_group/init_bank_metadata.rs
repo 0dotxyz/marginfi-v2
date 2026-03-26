@@ -1,8 +1,5 @@
 use anchor_lang::prelude::*;
-use marginfi_type_crate::{
-    constants::METADATA_SEED,
-    types::{Bank, BankMetadata},
-};
+use marginfi_type_crate::{constants::METADATA_SEED, types::BankMetadata};
 
 pub fn init_bank_metadata(ctx: Context<InitBankMetadata>) -> Result<()> {
     let mut metadata = ctx.accounts.metadata.load_init()?;
@@ -15,7 +12,8 @@ pub fn init_bank_metadata(ctx: Context<InitBankMetadata>) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct InitBankMetadata<'info> {
-    pub bank: AccountLoader<'info, Bank>,
+    /// CHECK: Bank pubkey used only for PDA derivation. May not be initialized yet.
+    pub bank: UncheckedAccount<'info>,
 
     /// Pays the init fee
     #[account(mut)]
