@@ -3116,7 +3116,7 @@ dependencies = [
 
 [[package]]
 name = "marginfi-type-crate"
-version = "0.1.9"
+version = "0.1.8"
 dependencies = [
  "anchor-lang",
  "bs58",

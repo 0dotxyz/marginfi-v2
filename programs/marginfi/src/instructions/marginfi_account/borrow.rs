@@ -209,7 +209,7 @@ pub fn lending_account_borrow<'info>(
     let rate_limit_price = price.as_ref().map(|p| p.price).unwrap_or(I80F48::ZERO);
     record_withdrawal_outflow(
         group_rate_limit_enabled,
-        amount,
+        amount_pre_fee,
         amount_pre_fee,
         rate_limit_price,
         &mut bank,
