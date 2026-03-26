@@ -381,6 +381,7 @@ describe("Lending pool configure bank", () => {
     await users[0].mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await writeBankMetadata(users[0].mrgnProgram, {
+          group: marginfiGroup.publicKey,
           metadata: metaKey,
           ticker: tickerStr,
           description: descStr,

@@ -896,6 +896,7 @@ type WriteBankMetadataArgs = {
   ticker?: string;
   /// Pass undefined to skip. Limit 128 bytes
   description?: string;
+  group: PublicKey;
 };
 
 /**
@@ -934,7 +935,7 @@ export const writeBankMetadata = (
       descBuf // Option<Vec<u8>> -> Some(Buffer) | None(null)
     )
     .accounts({
-      // group: args.group, // implied from metadata
+      group: args.group,
       // bank: args.bank, // implied from metadata
       // metadataAdmin: args.metadataAdmin, // implied from metadata
       metadata: args.metadata,
