@@ -1,6 +1,6 @@
 [package]
 name = "marginfi-v2-cli"
-version = "0.1.6"
+version = "0.1.8"
 edition = "2021"
 
 [[bin]]
@@ -10,11 +10,10 @@ path = "src/bin/main.rs"
 [features]
 devnet = ["marginfi/devnet"]
 mainnet-beta = ["marginfi/mainnet-beta"]
-default = ["mainnet-beta", "admin", "dev", "lip"]
+default = ["mainnet-beta", "admin", "dev"]
 admin = []
 dev = []
 staging = ["marginfi/staging"]
-lip = []
 
 [dependencies]
 solana-client = { workspace = true }
@@ -35,8 +34,11 @@ marginfi = { path = "../../../programs/marginfi", version = "0.1.0", features = 
     "client",
     "no-entrypoint",
 ] }
+kamino-mocks = { path = "../../../programs/kamino-mocks", features = ["no-entrypoint"] }
+drift-mocks = { path = "../../../programs/drift-mocks", features = ["no-entrypoint"] }
+juplend-mocks = { path = "../../../programs/juplend-mocks", features = ["no-entrypoint"] }
 
-clap = { version = "3.2.6", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 anyhow = "1.0.58"
 log = "0.4.17"
 env_logger = "0.9.0"
@@ -53,3 +55,6 @@ bs58 = { workspace = true }
 rand = "0.8.4"
 pyth-solana-receiver-sdk = { workspace = true }
 hex = "0.4.3"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+comfy-table = "6"
+base64 = "0.22"

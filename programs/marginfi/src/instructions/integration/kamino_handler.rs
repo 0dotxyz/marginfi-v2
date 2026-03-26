@@ -12,8 +12,8 @@ use kamino_mocks::kamino_lending::cpi::deposit_reserve_liquidity_and_obligation_
 use kamino_mocks::kamino_lending::cpi::withdraw_obligation_collateral_and_redeem_reserve_collateral_v2;
 use kamino_mocks::{
     kamino_lending::cpi::accounts::{
-        DepositReserveLiquidityAndObligationCollateral,
-        DepositReserveLiquidityAndObligationCollateralV2, FarmsAccounts,
+        DepositFarmsAccounts, DepositReserveLiquidityAndObligationCollateral,
+        DepositReserveLiquidityAndObligationCollateralV2,
         WithdrawObligationCollateralAndRedeemReserveCollateral,
         WithdrawObligationCollateralAndRedeemReserveCollateralV2,
     },
@@ -100,8 +100,8 @@ fn validate_obligation<'a>(
     Ok(loader)
 }
 
-fn farms_accounts<'a>(protocol_accounts: &'a [AccountInfo<'a>]) -> FarmsAccounts<'a> {
-    FarmsAccounts {
+fn farms_accounts<'a>(protocol_accounts: &'a [AccountInfo<'a>]) -> DepositFarmsAccounts<'a> {
+    DepositFarmsAccounts {
         obligation_farm_user_state: optional_account(protocol_accounts.get(11)),
         reserve_farm_state: optional_account(protocol_accounts.get(12)),
     }

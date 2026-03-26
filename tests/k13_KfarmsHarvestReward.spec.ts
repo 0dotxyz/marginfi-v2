@@ -52,7 +52,7 @@ import {
 import { Clock, ProgramTestContext } from "solana-bankrun";
 import { FARMS_PROGRAM_ID, KLEND_PROGRAM_ID } from "./utils/types";
 import { Farms } from "./fixtures/kamino_farms";
-import farmsIdl from "../idls/kamino_farms.json";
+import farmsIdl from "../idls-complete/kamino_farms.json";
 import { USER_ACCOUNT_K } from "./utils/mocks";
 import {
   deriveLiquidityVaultAuthority,
@@ -557,6 +557,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
           marginfiAccount,
           authority: user.wallet.publicKey,
           bank: tokenABank,
+          mint: ecosystem.tokenAMint.publicKey,
           destinationTokenAccount: user.tokenAAccount,
           lendingMarket: market,
           reserve: tokenAReserve,

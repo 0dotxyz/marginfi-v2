@@ -1,0 +1,814 @@
+[
+  {
+    "bankName": "USD Coin",
+    "bankAddress": "2s37akK2eyBbp8DZgCm7RtsaEz8eJP3Nxd4urLHQv7yB",
+    "bankMetadataAddress": "6To2SdcUMuPF3RkPJxYjRJ9rFCf64jtKwnrxUAJVYqYf",
+    "ticker": "USDC | USD Coin",
+    "description": "USD Coin | stablecoins | USDC | P0 | -"
+  },
+  {
+    "bankName": "Wrapped SOL",
+    "bankAddress": "CCKtUs6Cgwo4aaQUmBPmyoApH2gUDErxNZCAntD6LYGh",
+    "bankMetadataAddress": "FXGTCwzXzhHtdWGjrsP5NjZYQ1uNdJNjRjkVWKBw7jSi",
+    "ticker": "SOL | Wrapped SOL",
+    "description": "Wrapped SOL | blue-chip | SOL | P0 | -"
+  },
+  {
+    "bankName": "Jito Staked SOL",
+    "bankAddress": "Bohoc1ikHLD7xKJuzTyiTyCwzaL5N7ggJQu75A8mKYM8",
+    "bankMetadataAddress": "2fWL3VCnmGkg8RVKbptvjq21sTDzSyQFS7HpU3doqwgW",
+    "ticker": "JitoSOL | Jito Staked SOL",
+    "description": "Jito Staked SOL | sol-lst | JitoSOL | P0 | -"
+  },
+  {
+    "bankName": "Marinade staked SOL (mSOL)",
+    "bankAddress": "22DcjMZrMwC5Bpa5AGBsmjc5V9VuQrXG6N9ZtdUNyYGE",
+    "bankMetadataAddress": "FdgRSVQHAUxLWBKZLVc5BLFp5qncigMA2xodoUgAuax7",
+    "ticker": "mSOL | Marinade staked SOL (mSOL)",
+    "description": "Marinade staked SOL (mSOL) | sol-lst | mSOL | P0 | -"
+  },
+  {
+    "bankName": "USDT",
+    "bankAddress": "HmpMfL8942u22htC4EMiWgLX931g3sacXFR6KjuLgKLV",
+    "bankMetadataAddress": "GbK2m6NPEXuLN6MjKMVUCLcJzP9DqfmkJ7D2prUGFu4o",
+    "ticker": "USDT | USDT",
+    "description": "USDT | stablecoins | USDT | P0 | -"
+  },
+  {
+    "bankName": "Jupiter Staked SOL",
+    "bankAddress": "8LaUZadNqtzuCG7iCvZd7d5cbquuYfv19KjAg6GPuuCb",
+    "bankMetadataAddress": "3na6KYUY8ppTt1iCWTUjxSPXmMVkSstzbBKiKtzTbAG7",
+    "ticker": "JupSOL | Jupiter Staked SOL",
+    "description": "Jupiter Staked SOL | sol-lst | JupSOL | P0 | -"
+  },
+  {
+    "bankName": "Bonk",
+    "bankAddress": "DeyH7QxWvnbbaVB4zFrf4hoq7Q8z1ZT14co42BGwGtfM",
+    "bankMetadataAddress": "EMby1Rt314Nqj1tCvJPukunWq2LBaqWHcfsTXRVjxH2v",
+    "ticker": "Bonk | Bonk",
+    "description": "Bonk | memes | Bonk | P0 | -"
+  },
+  {
+    "bankName": "Liquid Staking Token",
+    "bankAddress": "DMoqjmsuoru986HgfjqrKEvPv8YBufvBGADHUonkadC5",
+    "bankMetadataAddress": "FF8oU9eGVKnviKKCeGUaaSet7dN8tEYyGYwcdvFwnJt6",
+    "ticker": "LST | Liquid Staking Token",
+    "description": "Liquid Staking Token | sol-lst | LST | P0 | -"
+  },
+  {
+    "bankName": "Wrapped SOL",
+    "bankAddress": "CwbdVVmGfR4H9bQ39vmeKjt9Gd128iFGrc9Jvht2oPx6",
+    "bankMetadataAddress": "8f6TYDW9TcZfTUxSjRMXKzeFtCvBfjmKMefU58T4aytQ",
+    "ticker": "SOL | Wrapped SOL",
+    "description": "Wrapped SOL | blue-chip | SOL | Drift | Main Market"
+  },
+  {
+    "bankName": "BlazeStake Staked SOL (bSOL)",
+    "bankAddress": "6hS9i46WyTq1KXcoa2Chas2Txh9TJAVr6n1t3tnrE23K",
+    "bankMetadataAddress": "BzJK9qAoTFbKNoJAt3TBtyijTDQz3T2Ajdor8s7fJKds",
+    "ticker": "bSOL | BlazeStake Staked SOL (bSOL)",
+    "description": "BlazeStake Staked SOL (bSOL) | sol-lst | bSOL | P0 | -"
+  },
+  {
+    "bankName": "Infinity",
+    "bankAddress": "AwLRW3aPMMftXEjgWhTkYwM9CGBHdtKecvahCJZBwAqY",
+    "bankMetadataAddress": "3WM9eTUE6KxWTK4SniH2trrVygwwsXGNPdRvhAJb9hcj",
+    "ticker": "INF | Infinity",
+    "description": "Infinity | sol-lst | INF | P0 | -"
+  },
+  {
+    "bankName": "Hylo Staked SOL",
+    "bankAddress": "6zN8tRxMpuqruDF4ChjeNGCVggqWBMQQ9KmiNhYeiqXb",
+    "bankMetadataAddress": "2wQb2NtoBgJiQ5F2oK5yVmyFXa1bscsNicazGFPr1FUN",
+    "ticker": "hyloSOL | Hylo Staked SOL",
+    "description": "Hylo Staked SOL | sol-lst | hyloSOL | P0 | -"
+  },
+  {
+    "bankName": "Jupiter Perps LP",
+    "bankAddress": "Amtw3n7GZe5SWmyhMhaFhDTi39zbTkLeWErBsmZXwpDa",
+    "bankMetadataAddress": "AkmvDdV291cZXvuxvTcjdgh7PxEfYoa1epu7YY2Ac1fE",
+    "ticker": "JLP | Jupiter Perps LP",
+    "description": "Jupiter Perps LP | ecosystem | JLP | P0 | -"
+  },
+  {
+    "bankName": "Helius Staked SOL",
+    "bankAddress": "GJCi1uj3kYPZ64puA5sLUiCQfFapxT2xnREzrbDzFkYY",
+    "bankMetadataAddress": "8LJuniHFTfhujXDAX4fbst5BGs9MqvkVevQsGKbEYzBx",
+    "ticker": "hSOL | Helius Staked SOL",
+    "description": "Helius Staked SOL | sol-lst | hSOL | P0 | -"
+  },
+  {
+    "bankName": "USDS",
+    "bankAddress": "FDsf8sj6SoV313qrA91yms3u5b3P4hBxEPvanVs8LtJV",
+    "bankMetadataAddress": "64fDwLgMBRVqQsumwXee2kaGfWBw5cnnmn3TXiFXN75A",
+    "ticker": "USDS | USDS",
+    "description": "USDS | stablecoins | USDS | P0 | -"
+  },
+  {
+    "bankName": "Wrapped BTC (Wormhole)",
+    "bankAddress": "BKsfDJCMbYep6gr9pq8PsmJbb5XGLHbAJzUV8vmorz7a",
+    "bankMetadataAddress": "C64LE32ASyEKXzpDKzK1VvCQoV1rbuJq2wkn9zW2DjN6",
+    "ticker": "WBTC | Wrapped BTC (Wormhole)",
+    "description": "Wrapped BTC (Wormhole) | blue-chip | WBTC | P0 | -"
+  },
+  {
+    "bankName": "Wrapped Ether (Wormhole)",
+    "bankAddress": "BkUyfXjbBBALcfZvw76WAFRvYQ21xxMWWeoPtJrUqG3z",
+    "bankMetadataAddress": "4FdVbFtjM3C3iHdxhzKo24SPSvbCJWRDc7zjnVq6sLer",
+    "ticker": "WETH | Wrapped Ether (Wormhole)",
+    "description": "Wrapped Ether (Wormhole) | blue-chip | WETH | P0 | -"
+  },
+  {
+    "bankName": "zBTC",
+    "bankAddress": "3RVamPQE3nDViuUU7wdZJgnru7Q93cRzdysXA8kjxMiq",
+    "bankMetadataAddress": "4KRYv43icUGiJtxA1evpp7VMj3pMofDWYoV5JsSTtegA",
+    "ticker": "zBTC | zBTC",
+    "description": "zBTC | blue-chip | zBTC | P0 | -"
+  },
+  {
+    "bankName": "CASH",
+    "bankAddress": "4YPGUhxmAXgoGDRkg68zGnbGrV2xCgaoqQSfcZCjFhon",
+    "bankMetadataAddress": "jV2BYqV5nHFPtQgBvdaZCAZDSb41jQ5PFbJMcP274Ba",
+    "ticker": "CASH | CASH",
+    "description": "CASH | stablecoins | CASH | Kamino | Maple Market"
+  },
+  {
+    "bankName": "Jupiter",
+    "bankAddress": "Guu5uBc8k1WK1U2ihGosNaCy57LSgCkpWAabtzQqrQf8",
+    "bankMetadataAddress": "6amxwipFBhw5fJ9jH842Gje7iesUjyf4N6SgNw98PzAa",
+    "ticker": "JUP | Jupiter",
+    "description": "Jupiter | governance | JUP | P0 | -"
+  },
+  {
+    "bankName": "PayPal USD",
+    "bankAddress": "8UEiPmgZHXXEDrqLS3oiTxQxTbeYTtPbeMBxAd2XGbpu",
+    "bankMetadataAddress": "6nmqJjtXXvbd78sVqfYiJ7GJrBpjrvtkyHZLw7zyZX4g",
+    "ticker": "PYUSD | PayPal USD",
+    "description": "PayPal USD | stablecoins | PYUSD | P0 | -"
+  },
+  {
+    "bankName": "dogwifhat",
+    "bankAddress": "9dpu8KL5ABYiD3WP2Cnajzg1XaotcJvZspv29Y1Y3tn1",
+    "bankMetadataAddress": "7UTydk1voScH3bDWtaJioRnVdNN6NW4tZrFqPCnSXnfu",
+    "ticker": "$WIF | dogwifhat",
+    "description": "dogwifhat | memes | $WIF | P0 | -"
+  },
+  {
+    "bankName": "Coinbase Wrapped BTC",
+    "bankAddress": "Ac4KV5K5isDqtABtg6h5DiwzZMe3Sp9bc3pBiCUvUpaQ",
+    "bankMetadataAddress": "AnnmSNbmAE68xz9j656fmucJ2Uq3zquyoCMtzAjAuuW6",
+    "ticker": "cbBTC | Coinbase Wrapped BTC",
+    "description": "Coinbase Wrapped BTC | blue-chip | cbBTC | P0 | -"
+  },
+  {
+    "bankName": "USD Coin",
+    "bankAddress": "27Cpv49jQ3hav8zF3qZjp7T78ATdUTZN4m9x389Z8uH4",
+    "bankMetadataAddress": "8tdDpKoYsN2WyQjuj1nVzPzrYTAxitExbtYuZ85Xc2h6",
+    "ticker": "USDC | USD Coin",
+    "description": "USD Coin | stablecoins | USDC | Kamino | Main Market"
+  },
+  {
+    "bankName": "Helium Network Token",
+    "bankAddress": "JBcir4DPRPYVUpks9hkS1jtHMXejfeBo4xJGv3AYYHg6",
+    "bankMetadataAddress": "D48vNSm1ddZNsXR8WgBEKddsVR1udo7H9TeToK5Qsi7v",
+    "ticker": "HNT | Helium Network Token",
+    "description": "Helium Network Token | governance | HNT | P0 | -"
+  },
+  {
+    "bankName": "JITO",
+    "bankAddress": "EdB7YADw4XUt6wErT8kHGCUok4mnTpWGzPUU9rWDebzb",
+    "bankMetadataAddress": "GWeevugftcqV6CG8DGBsA7F9Q6xrn5PYVdgUzqbfo7kV",
+    "ticker": "JTO | JITO",
+    "description": "JITO | governance | JTO | P0 | -"
+  },
+  {
+    "bankName": "Render Token",
+    "bankAddress": "EbuSnXdFz1R4VPdaJ96KQQQmeYgZTHSzpNW94Tw1PE3H",
+    "bankMetadataAddress": "4aQNDiVes1h4mZvmszMTFRvec5LNURfArVQpAqZ364HK",
+    "ticker": "RENDER | Render Token",
+    "description": "Render Token | governance | RENDER | P0 | -"
+  },
+  {
+    "bankName": "BULK Staked SOL",
+    "bankAddress": "9p1TiAeTc6FSiNHhnR6BgmwRq49zywczAY4m77BbKGer",
+    "bankMetadataAddress": "H9S9GVhVM6gGjzf6YC9wFsvb8sbPg5roUNeLBcrrGEXY",
+    "ticker": "BulkSOL | BULK Staked SOL",
+    "description": "BULK Staked SOL | sol-lst | BulkSOL | P0 | -"
+  },
+  {
+    "bankName": "Zcash",
+    "bankAddress": "7GbG8B1aHpV4Q271ozU9EDEGPTLXpekv7m2UgyCgFzr5",
+    "bankMetadataAddress": "5cgnFpXX4XWVuNr96SzHUxwXR9sCrv6cFJK2ZMpT97cb",
+    "ticker": "ZEC | Zcash",
+    "description": "Zcash | ecosystem | ZEC | P0 | -"
+  },
+  {
+    "bankName": "Hylo USD",
+    "bankAddress": "5syijTAMBBmdjwUgYYBvvv26zTS6YX1bYV9EdXkgYqLa",
+    "bankMetadataAddress": "fkn5GyDc5WSEvRxG8Ufb2jo7NAGM7u49wP4XyPPmYhj",
+    "ticker": "hyUSD | Hylo USD",
+    "description": "Hylo USD | stablecoins | hyUSD | P0 | -"
+  },
+  {
+    "bankName": "Pump",
+    "bankAddress": "61Qx9kgWo9RVtPHf8Rku6gbaUtcnzgkpAuifQBUcMRVK",
+    "bankMetadataAddress": "9E9x51HgHyHpCsMW59CDqACqKCrnoo7YPpEK4hrbHxYz",
+    "ticker": "PUMP | Pump",
+    "description": "Pump | governance | PUMP | P0 | -"
+  },
+  {
+    "bankName": "USDS",
+    "bankAddress": "FLwQ2tV4gPHKWY1jwdB3Hp8Z18nU4WngvNgJn3qZVGd7",
+    "bankMetadataAddress": "5BG4D4cps74mtf7jqcgt319o7pDYECUcgZYc2RQUcj4n",
+    "ticker": "USDS | USDS",
+    "description": "USDS | stablecoins | USDS | Kamino | Maple Market"
+  },
+  {
+    "bankName": "Jito Staked SOL",
+    "bankAddress": "HSWzj4oipYaMD7DtpiFcBs3oH5ZwDp4PUTtzPCJNMSd4",
+    "bankMetadataAddress": "DVfp92y9RgPjveF2vRNpu8djmkoxrnYigebgdUHWDXNa",
+    "ticker": "JitoSOL | Jito Staked SOL",
+    "description": "Jito Staked SOL | sol-lst | JitoSOL | Drift | Main Market"
+  },
+  {
+    "bankName": "UXD Stablecoin",
+    "bankAddress": "BeNBJrAh1tZg5sqgt8D6AWKJLD5KkBrfZvtcgd7EuiAR",
+    "bankMetadataAddress": "6riRUkxgwzBQD6drMTxNYf95DjqqAfuvB5ySRxPxCryh",
+    "ticker": "UXD | UXD Stablecoin",
+    "description": "UXD Stablecoin | stablecoins | UXD | P0 | -"
+  },
+  {
+    "bankName": "Zenrock BTC",
+    "bankAddress": "Gj72XAUuNxNeDnW4tUh3H1U2Jbzshz27vtH8KvB972gi",
+    "bankMetadataAddress": "4nYYaE5dx9uVLBGRbedWLCJzefqZepfT24rF2SrEgoRR",
+    "ticker": "zenBTC | Zenrock BTC",
+    "description": "Zenrock BTC | blue-chip | zenBTC | P0 | -"
+  },
+  {
+    "bankName": "Infinity",
+    "bankAddress": "2D1dc9jo8CNjgVG4qTKpRuGA83zrXv9iuSHV9BWZ7Js9",
+    "bankMetadataAddress": "Azytw4ijpJvSX4YjYHL8sx5hoyQuZPXicaco9i5Rk6m8",
+    "ticker": "INF | Infinity",
+    "description": "Infinity | sol-lst | INF | Drift | Main Market"
+  },
+  {
+    "bankName": "CASH",
+    "bankAddress": "F4brCRJHx8epWah7p8Ace4ehutphxYZ1ctRq2LS3iiBh",
+    "bankMetadataAddress": "GRMiWtUEVTo8BVMh2eL9vNNzF2Nc3yCrJUcBtxodBr2G",
+    "ticker": "CASH | CASH",
+    "description": "CASH | stablecoins | CASH | P0 | -"
+  },
+  {
+    "bankName": "ORE",
+    "bankAddress": "FuyzDwmMbYYPPd3oLtjNk3ZLqsTBPaQtQrxRGzUGcAvp",
+    "bankMetadataAddress": "8UqCT7kQnxWdEikznqLWLKAKpyVY1tre8TAEX3sUsrC3",
+    "ticker": "ORE | ORE",
+    "description": "ORE | ecosystem | ORE | P0 | -"
+  },
+  {
+    "bankName": "Drift Staked SOL",
+    "bankAddress": "8W3GgWFFnHdd98GKGzvNNi9Wzjoq2CU4wW6cHz6cKxk1",
+    "bankMetadataAddress": "BvpUXHrXx3LmbZxnj1nMjUyEMrECqGbvm17SdEov7BZo",
+    "ticker": "dSOL | Drift Staked SOL",
+    "description": "Drift Staked SOL | sol-lst | dSOL | P0 | -"
+  },
+  {
+    "bankName": "Global Dollar",
+    "bankAddress": "Dj2CwMF3GM7mMT5hcyGXKuYSQ2kQ5zaVCkA1zX1qaTva",
+    "bankMetadataAddress": "GBEsTWveB8iE4hKg9J94wQFtNgq8Z39VuhMEUL7LmksT",
+    "ticker": "USDG | Global Dollar",
+    "description": "Global Dollar | stablecoins | USDG | P0 | -"
+  },
+  {
+    "bankName": "CASH",
+    "bankAddress": "HnKy41QrJNFLJmBGtgLWpy8NissUsNLKRMibRwsNhDnF",
+    "bankMetadataAddress": "5WN6g3qPfaBxPnoPcoEXmx6FhUTcxSNvSc3hc2Z4E4kQ",
+    "ticker": "CASH | CASH",
+    "description": "CASH | stablecoins | CASH | Kamino | Main Market"
+  },
+  {
+    "bankName": "Pyth Network",
+    "bankAddress": "E4td8i8PT2BZkMygzW4MGHCv2KPPs57dvz5W2ZXf9Twu",
+    "bankMetadataAddress": "EUoYK2KvShcEtwBNAKX4oYFFBJhy1xT86gR7bsCmAxhF",
+    "ticker": "PYTH | Pyth Network",
+    "description": "Pyth Network | governance | PYTH | P0 | -"
+  },
+  {
+    "bankName": "USD Star",
+    "bankAddress": "EKwXy2ui2jtJnvH4A2XufyqMyeSFecJE8xAKWpZEtDwd",
+    "bankMetadataAddress": "9jMkWuSfRvqNXAZJ72ezCZEMCLvqTFzoYFxtH2hTZg33",
+    "ticker": "USD* | USD Star",
+    "description": "USD Star | W/E | USD* | P0 | -"
+  },
+  {
+    "bankName": "Wrapped SOL",
+    "bankAddress": "J5mxC3hLXqmsJB4Nauf9YrtbNMSTHGz7FWfAmy1v6Fzr",
+    "bankMetadataAddress": "2cFCPsZ9VgeD6FgC5TPmBbpHGE6qn5JbdLbGRgUd1RcD",
+    "ticker": "SOL | Wrapped SOL",
+    "description": "Wrapped SOL | blue-chip | SOL | Kamino | Jito Market"
+  },
+  {
+    "bankName": "Global Dollar",
+    "bankAddress": "6KP94PsCrBk2gPqtqT4WSvZ8Zss7r1auz3azXpv5ptrS",
+    "bankMetadataAddress": "FTMwXdbAVAxuvfbKph37xysCKH8AV7Wvb9phkZMJkdq",
+    "ticker": "USDG | Global Dollar",
+    "description": "Global Dollar | stablecoins | USDG | Kamino | Main Market"
+  },
+  {
+    "bankName": "HONEY",
+    "bankAddress": "HWA59PLUXJmgrjGPWE2eH1381Wnz512qocV4PtyqhKqs",
+    "bankMetadataAddress": "BZ9Po4buA1Y4ER1szNfnwmjYYmSw4DBCTYTFqALAdoUJ",
+    "ticker": "HONEY | HONEY",
+    "description": "HONEY | W/E | HONEY | P0 | -"
+  },
+  {
+    "bankName": "Solayer USD",
+    "bankAddress": "FWZbU8TSPyjyrWQASzujo7FjgF9f3GEkjaFAtbKWqjMH",
+    "bankMetadataAddress": "5VghrQTQPU2WVU9c6am9cbQnQCJmshozE1z6J33kiyEM",
+    "ticker": "sUSD | Solayer USD",
+    "description": "Solayer USD | W/E | sUSD | P0 | -"
+  },
+  {
+    "bankName": "Meteora",
+    "bankAddress": "EmMhorGDR3N9ecNWVQjJi2QpFLkeHEvjZFdW6TuVgXjU",
+    "bankMetadataAddress": "7wLQpFNX4ifjSiL6VNeLLhAF9x4L9ZMHsQ5s4VArQMHu",
+    "ticker": "MET | Meteora",
+    "description": "Meteora | governance | MET | P0 | -"
+  },
+  {
+    "bankName": "Cloud",
+    "bankAddress": "4kNXetv8hSv9PzvzPZzEs1CTH6ARRRi2b8h6jk1ad1nP",
+    "bankMetadataAddress": "6Hh7UTBCzip9eNTettUB1rLkFMxKaqdfFZRVYRKUwE6u",
+    "ticker": "CLOUD | Cloud",
+    "description": "Cloud | governance | CLOUD | P0 | -"
+  },
+  {
+    "bankName": "Marinade staked SOL (mSOL)",
+    "bankAddress": "8yH6soQM2SUFjkRQiBo5UDLbLTWPCYEsyT22Xdi1sfh7",
+    "bankMetadataAddress": "BvJPP2GJKSdp4sAyEKiEhPaq9zsvKpGT3gvfN4kCKaNT",
+    "ticker": "mSOL | Marinade staked SOL (mSOL)",
+    "description": "Marinade staked SOL (mSOL) | sol-lst | mSOL | Drift | Main Market"
+  },
+  {
+    "bankName": "JPool Staked SOL",
+    "bankAddress": "5wZz2MV3dFJVq3Wp4tBoqrgrSGZqeLCdLE1L4w6okm9g",
+    "bankMetadataAddress": "9R2Rk8Pr5ndrxZUimWyh8Td8VFDE1aHBUzTv6VG9BzhM",
+    "ticker": "JSOL | JPool Staked SOL",
+    "description": "JPool Staked SOL | sol-lst | JSOL | P0 | -"
+  },
+  {
+    "bankName": "Wrapped SOL",
+    "bankAddress": "4uawSqEM2jDPKkQRtnoSTmBjFJ51Ehu79EvGfu3R45o7",
+    "bankMetadataAddress": "4CDRmVp5pqerQHyyHCgYKGP73r6SxGnxLY7SdS2DY3hT",
+    "ticker": "SOL | Wrapped SOL",
+    "description": "Wrapped SOL | blue-chip | SOL | Kamino | Marinade Market"
+  },
+  {
+    "bankName": "Wrapped SOL",
+    "bankAddress": "9SerK63jzwLimSP8nnH5aGoZzK2pVXBWTWmUZSyivwaV",
+    "bankMetadataAddress": "cpa24Vpq7EpKRghnj3xT64BntxYEuUufgxxu6TDwFd2",
+    "ticker": "SOL | Wrapped SOL",
+    "description": "Wrapped SOL | blue-chip | SOL | Kamino | Main Market"
+  },
+  {
+    "bankName": "picoSOL",
+    "bankAddress": "ARwrmohp8qMCkxQNiq5di4pTnTWhvXhAc7c18tZ877Kg",
+    "bankMetadataAddress": "6E93PL3gsPiitX8eUDznq2fZHh4vzjkkhydNwJzFtmPG",
+    "ticker": "picoSOL | picoSOL",
+    "description": "picoSOL | sol-lst | picoSOL | P0 | -"
+  },
+  {
+    "bankName": "Wen",
+    "bankAddress": "7aoit6hVmaqWn2VjhmDo5qev6QXjsJJf4q5RTd7yczZj",
+    "bankMetadataAddress": "EvzocC7gAzifUHog3SSguiANPFSSjGGsgUPuBVkaago6",
+    "ticker": "WEN | Wen",
+    "description": "Wen | W/E | WEN | P0 | -"
+  },
+  {
+    "bankName": "Wormhole Token",
+    "bankAddress": "EYp4j7oHV2SfEGSE3GJ4MjsCL33CzmqLTdvTCdacQ9uG",
+    "bankMetadataAddress": "G3XUitTTUncygUMCt4cE52aLVCxEbsNgnCvLau6XPM2r",
+    "ticker": "W | Wormhole Token",
+    "description": "Wormhole Token | governance | W | P0 | -"
+  },
+  {
+    "bankName": "USD Coin",
+    "bankAddress": "5GZmPEr6czroe3ax29D2FHyKuT64ixj5evB2NqWjUk1d",
+    "bankMetadataAddress": "C9nusVg2HRTQmw7hjpAGzwY2kstPbfQYPouPW6aj1Kjb",
+    "ticker": "USDC | USD Coin",
+    "description": "USD Coin | stablecoins | USDC | Drift | Main Market"
+  },
+  {
+    "bankName": "Starke Staked SOL",
+    "bankAddress": "GR9GNdjWf8kSf3b4REribKKSeVvkzjbAQJ1A8CDnFxLF",
+    "bankMetadataAddress": "DWeH7Dp2Uw3VKgWUV53S2DDe2BCcP4sRguNfZr8WXqTc",
+    "ticker": "rkSOL | Starke Staked SOL",
+    "description": "Starke Staked SOL | sol-lst | rkSOL | P0 | -"
+  },
+  {
+    "bankName": "OKX Wrapped BTC",
+    "bankAddress": "HDYFgNRTFL2tVwGyAHaTr4SW7Y7riXjew48qKLHgi8es",
+    "bankMetadataAddress": "AwzGgv5gB8py7cStvorfE18Dqsv8j85DyRBvi4qMgsMh",
+    "ticker": "xBTC | OKX Wrapped BTC",
+    "description": "OKX Wrapped BTC | blue-chip | xBTC | P0 | -"
+  },
+  {
+    "bankName": "BybitSOL",
+    "bankAddress": "4YipZHMNQjip1LrG3uF2fj1G5ieWQ9QRQRy1jhAWWKUZ",
+    "bankMetadataAddress": "E3rL8SxYuuCNmYhHUnGGjt5Tm43jPDvGNCjghysPaBHP",
+    "ticker": "bbSOL | BybitSOL",
+    "description": "BybitSOL | sol-lst | bbSOL | P0 | -"
+  },
+  {
+    "bankName": "Blaze",
+    "bankAddress": "6Fk3bzhqmUqupk6sN5CbfYMdafvyzDdqDNHW5CsJzq8K",
+    "bankMetadataAddress": "BfKm8FR2wx3H3Ne6Jr1WvN2TiaStC6uaK33wv1Ui1FQx",
+    "ticker": "BLZE | Blaze",
+    "description": "Blaze | W/E | BLZE | P0 | -"
+  },
+  {
+    "bankName": "Lantern Staked SOL",
+    "bankAddress": "FvrTUfd3kimMfXvGrvcS1XC8NrtmSSurX8yP6XeUFt2s",
+    "bankMetadataAddress": "HcJvater6D7NPomWy2vGvjovnfWs3aDbioMCDAYs7mC6",
+    "ticker": "lanternSOL | Lantern Staked SOL",
+    "description": "Lantern Staked SOL | sol-lst | lanternSOL | P0 | -"
+  },
+  {
+    "bankName": "USDT",
+    "bankAddress": "FLnBNuXqJYUNa8EwC1APQ4qV128f8iHQQ6vnr1PaD1ax",
+    "bankMetadataAddress": "CaBEfcXbKNmrS23q1xfX7bdnV3EzqkMqvYxjvGSxegZb",
+    "ticker": "USDT | USDT",
+    "description": "USDT | stablecoins | USDT | Kamino | Main Market"
+  },
+  {
+    "bankName": "Exponent PT-hyUSD-14APR26",
+    "bankAddress": "5KjGKr7pKBG7DLcPdZTiSji7cwNYJ5ERj2pPSNLTejoZ",
+    "bankMetadataAddress": "3orMoS12hE352p8peiuNY8kd65aUZCYJrmCoCbCAocQF",
+    "ticker": "PT-hyUSD | Exponent PT-hyUSD-14APR26",
+    "description": "Exponent PT-hyUSD-14APR26 | rate-products | PT-hyUSD | P0 | -"
+  },
+  {
+    "bankName": "Orca",
+    "bankAddress": "3Hd1VzDCd8xEzcqj6CHqqjeKdzKQPMczGnkSbpaubf3W",
+    "bankMetadataAddress": "5wjxRJX1HQiuzfSTdy2ifXUJmkH4QEPcqpHydn24NxHZ",
+    "ticker": "ORCA | Orca",
+    "description": "Orca | W/E | ORCA | P0 | -"
+  },
+  {
+    "bankName": "USDS",
+    "bankAddress": "BpEDE4y44E3JYhNoRycxiPxr4UnhtG5qAKX5AVtG7Wp5",
+    "bankMetadataAddress": "EuC9eXrjfVpot8jNpBwbcsCKUjXqpB6mDtraPoao94bu",
+    "ticker": "USDS | USDS",
+    "description": "USDS | stablecoins | USDS | Drift | Main Market"
+  },
+  {
+    "bankName": "Marinade",
+    "bankAddress": "5oNLkC42jSSrLER4tYjax99zkaGJegV1FjAtEbw81Xs6",
+    "bankMetadataAddress": "8PVEtNHMr1qo7yjEjGcbPTn1cT1omLKkEjkDhB95UeQM",
+    "ticker": "MNDE | Marinade",
+    "description": "Marinade | W/E | MNDE | P0 | -"
+  },
+  {
+    "bankName": "Guacamole",
+    "bankAddress": "44digRwKFeyiqDaxJRE6iag4cbXECKjG54v5ozxdu5mu",
+    "bankMetadataAddress": "2Gtn14UP6hy2e3JQjAWVZ5ScSpj7cNyFnGnXDw9KENJF",
+    "ticker": "GUAC | Guacamole",
+    "description": "Guacamole | W/E | GUAC | P0 | -"
+  },
+  {
+    "bankName": "Nosana",
+    "bankAddress": "G1pNtooUWPad3zCJLGAtjD3Zu9K56PrRpmvVB6AED1Tr",
+    "bankMetadataAddress": "6VY5BEfTwyiXpALETJow9kacbEt7rqKdVVedDu3pPvZB",
+    "ticker": "NOS | Nosana",
+    "description": "Nosana | W/E | NOS | P0 | -"
+  },
+  {
+    "bankName": "bonkSOL",
+    "bankAddress": "4ujXMjmbw5nJBmBYVSfQj5ATjRwCitcrsFQaYo7UqNRY",
+    "bankMetadataAddress": "ccfa6GQyXrNWiZUHQDeLuUJJCcbPPRARWAp4Gxq9nKB",
+    "ticker": "bonkSOL | bonkSOL",
+    "description": "bonkSOL | W/E | bonkSOL | P0 | -"
+  },
+  {
+    "bankName": "DRIFT",
+    "bankAddress": "DcpTd5URXYj77dxgCRouVJ71E6gBE32rk1ofW2M9boju",
+    "bankMetadataAddress": "44pTP2MMw3pJtYwiYhTCfVrFt2fZ253StU1TpwNamZQt",
+    "ticker": "DRIFT | DRIFT",
+    "description": "DRIFT | W/E | DRIFT | P0 | -"
+  },
+  {
+    "bankName": "DoubleZero",
+    "bankAddress": "CcVpzLenPRWGB8q3pB9kcNma1bp4SdPjJk9wmW5tMvPp",
+    "bankMetadataAddress": "9qj8xrExWxCnTqQMu97fwM6cTZQGZ7R7pC5tBaPeyZgJ",
+    "ticker": "2Z | DoubleZero",
+    "description": "DoubleZero | governance | 2Z | P0 | -"
+  },
+  {
+    "bankName": "Tensor",
+    "bankAddress": "9KbkQsu4EGAeM7ZxvwsZcpxoekZyg5LTk1BF5SAMPXdY",
+    "bankMetadataAddress": "FQw6wqjwr8NdzGd8wWbq3GLsmdhy5tQ7tvCQExYkMNr5",
+    "ticker": "TNSR | Tensor",
+    "description": "Tensor | governance | TNSR | P0 | -"
+  },
+  {
+    "bankName": "Binance Staked SOL",
+    "bankAddress": "FVVKPocxQqJNjDTjzvT3HFXte5oarfp29vJ9tqjAPUW4",
+    "bankMetadataAddress": "GRyZ1G7YrK1svZ1HyQfFGqy7d5bm3Tvj8PBCpMBzj2MK",
+    "ticker": "BNSOL | Binance Staked SOL",
+    "description": "Binance Staked SOL | sol-lst | BNSOL | P0 | -"
+  },
+  {
+    "bankName": "Solana Compass LST",
+    "bankAddress": "F541dsSsc6xYzHfvLfyEuLfM6a8JdwGaVpyWm2GxcJsA",
+    "bankMetadataAddress": "xnnvpdN16R9LSTGGTMtkSZz8bAciRn5SoM2qgrVkG7u",
+    "ticker": "compassSOL | Solana Compass LST",
+    "description": "Solana Compass LST | W/E | compassSOL | P0 | -"
+  },
+  {
+    "bankName": "Helium MOBILE",
+    "bankAddress": "2ZScBCNKfE6X6fGcBtB2uBuvZqUE3cjKQmRv8wVXTN5B",
+    "bankMetadataAddress": "267NohA6cSWXgd64KAseTMCLtafpHpcod2zeuZB9F1za",
+    "ticker": "MOBILE | Helium MOBILE",
+    "description": "Helium MOBILE | W/E | MOBILE | P0 | -"
+  },
+  {
+    "bankName": "DeFi Development Corp Staked SOL",
+    "bankAddress": "4gQYBXPg4GuUQ58pyRebJrtUt6TvFdznwMu7RLfNsipH",
+    "bankMetadataAddress": "FceeR1Qbd8hv4ZF8Nbd6xLbfu2oykd2BrxUcii8TeaCE",
+    "ticker": "dfdvSOL | DeFi Development Corp Staked SOL",
+    "description": "DeFi Development Corp Staked SOL | sol-lst | dfdvSOL | P0 | -"
+  },
+  {
+    "bankName": "Laine Stake Token",
+    "bankAddress": "2GDC61nu79ZHQBiwMx2BjarEEDZop81Ym9598a5WcCXJ",
+    "bankMetadataAddress": "HwngVfrYjfmxcWAqsZncPtqKpuu1Wp7m8K7FY7AaDdR7",
+    "ticker": "laineSOL | Laine Stake Token",
+    "description": "Laine Stake Token | W/E | laineSOL | P0 | -"
+  },
+  {
+    "bankName": "ProStaking SOL",
+    "bankAddress": "GH7ZQbAP8G4xDXaYb7PcGXnqBDBCMKF7d9XhZCk1w1pG",
+    "bankMetadataAddress": "VCDAazKR6niMrKwH7LoPrDSuZiTmSn5e73CRJgWFose",
+    "ticker": "proSOL | ProStaking SOL",
+    "description": "ProStaking SOL | W/E | proSOL | P0 | -"
+  },
+  {
+    "bankName": "Samoyed Coin",
+    "bankAddress": "5HSLxQN34V9jLihfBDwNLguDKWEPDBL7QBG5JKcAQ7ne",
+    "bankMetadataAddress": "ys3cauH9GXxf2sRJzWzqimqtfCZjQUcyyaCunfBG7om",
+    "ticker": "SAMO | Samoyed Coin",
+    "description": "Samoyed Coin | W/E | SAMO | P0 | -"
+  },
+  {
+    "bankName": "Parcl",
+    "bankAddress": "D1vPUa8JhMpxi5qjZeYLCJvHHQbAZ8pdfXum3AwWAk5H",
+    "bankMetadataAddress": "4qL5xAKEiR1uNsepLytC2YPXmB2wT7zSW7gneghVhVsx",
+    "ticker": "PRCL | Parcl",
+    "description": "Parcl | W/E | PRCL | P0 | -"
+  },
+  {
+    "bankName": "Exponent PT-hyloSOL-14APR26",
+    "bankAddress": "2VmE6PMRWLRxjMkoK2sWu3WyNGGdXFK1G38ZAaQu3r5Y",
+    "bankMetadataAddress": "Ctmmahn3XEfDMw6qCEZGx1m1NEMSFoUc6YDmi4FbmcfF",
+    "ticker": "PT-hyloSOL | Exponent PT-hyloSOL-14APR26",
+    "description": "Exponent PT-hyloSOL-14APR26 | rate-products | PT-hyloSOL | P0 | -"
+  },
+  {
+    "bankName": "tBTC v2",
+    "bankAddress": "AyeEyCiBU2CzZmxz3f3o3vk2hvMsM5G3t3D6vhLsiFkf",
+    "bankMetadataAddress": "AbR1x7ZwhASMBjH5TLxT4w4s2sc1ZPyoeLMF8AHQ51vF",
+    "ticker": "tBTC | tBTC v2",
+    "description": "tBTC v2 | W/E | tBTC | P0 | -"
+  },
+  {
+    "bankName": "PayPal USD",
+    "bankAddress": "9LfTcnXVa84mTwAxgHUkLBk1yg6vCWAMLSNY1oLBnnVx",
+    "bankMetadataAddress": "9PxBtwb6hsjYX6AJmAiaSDU1U7xPKkpCmmGDo88yT1EU",
+    "ticker": "PYUSD | PayPal USD",
+    "description": "PayPal USD | stablecoins | PYUSD | Kamino | Main Market"
+  },
+  {
+    "bankName": "DoubleZero Staked SOL",
+    "bankAddress": "E7LfHgmiWT6TxAcWq18yDBXWxHw4VasjD98aZaoXCp8T",
+    "bankMetadataAddress": "Fv6tHc76TktxFyYLZsui1nDX64T7tUtjTBohbjRjfTbH",
+    "ticker": "dzSOL | DoubleZero Staked SOL",
+    "description": "DoubleZero Staked SOL | sol-lst | dzSOL | P0 | -"
+  },
+  {
+    "bankName": "Exponent PT-BulkSOL-20JUN26",
+    "bankAddress": "9ThXmfwhNzc6qbkRLuSGHwKS7mxjn6QcuRD644Pjn4F",
+    "bankMetadataAddress": "4jB6PZt4vsq3CvjJHFwCvtkq3kKpHNJHTNT1uFnQEvGC",
+    "ticker": "PT-BulkSOL | Exponent PT-BulkSOL-20JUN26",
+    "description": "Exponent PT-BulkSOL-20JUN26 | rate-products | PT-BulkSOL | P0 | -"
+  },
+  {
+    "bankName": "Syrup USDC",
+    "bankAddress": "Dyuh6umsxbLAXKz3SrwXgYmmXuVWE9muYBvFUBPM58NY",
+    "bankMetadataAddress": "CW4yWvgm7bWeeBtf9SHfgDuwqrkgiMkgqeCCdr3hsFwi",
+    "ticker": "syrupUSDC | Syrup USDC",
+    "description": "Syrup USDC | stablecoins | syrupUSDC | P0 | -"
+  },
+  {
+    "bankName": "World Liberty Financial USD",
+    "bankAddress": "BtfZEcMywgzmQ1fj1mSzXPj2jpQX5Lpr2zZz6cV5WwXw",
+    "bankMetadataAddress": "GRpa3eeVRMjkp1XW4ri3GmzPhiRUUEH8zLXMW37rrVPe",
+    "ticker": "USD1 | World Liberty Financial USD",
+    "description": "World Liberty Financial USD | stablecoins | USD1 | Kamino | Main Market"
+  },
+  {
+    "bankName": "Ondo US Dollar Yield",
+    "bankAddress": "5WL5CnjWT71NPgj8iQR2FU5H3FsVci9cnsHSNJzxj788",
+    "bankMetadataAddress": "5vZYTa3kPDQhMkDjE6WNfTGoaANnjME9FwCxEzV66v6E",
+    "ticker": "USDY | Ondo US Dollar Yield",
+    "description": "Ondo US Dollar Yield | W/E | USDY | P0 | -"
+  },
+  {
+    "bankName": "EURC",
+    "bankAddress": "D7xjUTY2tH1QWd7cefecJy86DTWJaWRj6XevzChGDzXm",
+    "bankMetadataAddress": "FwM3eRPqRFvAgqH2NWWysaZSqJqoVU362TxKdFqt9WBE",
+    "ticker": "EURC | EURC",
+    "description": "EURC | stablecoins | EURC | P0 | -"
+  },
+  {
+    "bankName": "Wrapped liquid staked (Wormhole)",
+    "bankAddress": "9g3Tug2WbDwekghbPn2u3V84tvikAMBZiFbPUfkjwKNH",
+    "bankMetadataAddress": "4hR1p4QLfcSZokdGchMRjFZGqrmHi72oWHRjFxD7DtUC",
+    "ticker": "wstETH | Wrapped liquid staked (Wormhole)",
+    "description": "Wrapped liquid staked (Wormhole) | W/E | wstETH | P0 | -"
+  },
+  {
+    "bankName": "Drift Staked SOL",
+    "bankAddress": "BYZ4ZPjNw8Ha2o6DcNLUPfmuuacTno9j135XeYRubHfA",
+    "bankMetadataAddress": "DPmH6LjtFCKjdP8JPk83aLefczXq13JcRVP6EtVhxK32",
+    "ticker": "dSOL | Drift Staked SOL",
+    "description": "Drift Staked SOL | sol-lst | dSOL | Drift | Main Market"
+  },
+  {
+    "bankName": "Syrup USDC",
+    "bankAddress": "FKrkgcTCduBvnitwqg5GPnfK7M4aBNuZDjZZeeUhz7Uv",
+    "bankMetadataAddress": "FRW6A9pes8wiYPcigpdDvVAAkGe7aKYoSR85hLs2eqGe",
+    "ticker": "syrupUSDC | Syrup USDC",
+    "description": "Syrup USDC | stablecoins | syrupUSDC | Drift | Main Market"
+  },
+  {
+    "bankName": "STKE SOL",
+    "bankAddress": "Ffe4RTL4oYrzA9QKQVJ3PCATXnp3mS3s7buDKnnmHYGX",
+    "bankMetadataAddress": "89QGxat5DJ5AiNNJrifpb6FVwDWQ8WHcohnuCjRfhYym",
+    "ticker": "STKESOL | STKE SOL",
+    "description": "STKE SOL | sol-lst | STKESOL | P0 | -"
+  },
+  {
+    "bankName": "STKE SOL",
+    "bankAddress": "24gdUT9SNqeizCD1dHXWgjpa6NnWSFD6TWPAnCFSJnAk",
+    "bankMetadataAddress": "CwxymT3sYhy6spRsWaF3P5msHUeyAzc2fQzYHdPLwc8U",
+    "ticker": "STKESOL | STKE SOL",
+    "description": "STKE SOL | sol-lst | STKESOL | Kamino | Main Market"
+  },
+  {
+    "bankName": "MOTHER IGGY",
+    "bankAddress": "2z8C1CCoJBKMLCNbaMWXuTYKHjcdHQBVth5CHsSQq611",
+    "bankMetadataAddress": "FD4vuq9EymLJ7pZURnobDQZ88R3f9gq2arVEEr2NhUSr",
+    "ticker": "MOTHER | MOTHER IGGY",
+    "description": "MOTHER IGGY | W/E | MOTHER | P0 | -"
+  },
+  {
+    "bankName": "LessFnGas",
+    "bankAddress": "9ojzV5xFHtx2h2GhKRSgCwJK3BLswczdiiLW3hsyRE5c",
+    "bankMetadataAddress": "29EqTfFHaCuUFREopAKpX6jfNQb7PfgoDExJHUsdtmqj",
+    "ticker": "LFG | LessFnGas",
+    "description": "LessFnGas | W/E | LFG | P0 | -"
+  },
+  {
+    "bankName": "Forward Industries Staked SOL",
+    "bankAddress": "8iKgNvkQH9bBXyMbV5vor25gQRFM3tfyA7si68eKrLoa",
+    "bankMetadataAddress": "Err6kz7hZCHYDGNisq7wfjcvrrWiqFrzYw5ZDaDbpHfY",
+    "ticker": "fwdSOL | Forward Industries Staked SOL",
+    "description": "Forward Industries Staked SOL | sol-lst | fwdSOL | P0 | -"
+  },
+  {
+    "bankName": "Step",
+    "bankAddress": "3UwWCseMeKfoVtesjJycA7AYSE65MeKh1wK98FfeG8kM",
+    "bankMetadataAddress": "DAqwjZ35Wx2A3iKLQ4TdApLNw7r8pUVPshMKrKqiQwiT",
+    "ticker": "STEP | Step",
+    "description": "Step | W/E | STEP | P0 | -"
+  },
+  {
+    "bankName": "KIN",
+    "bankAddress": "GZK3yC3Kfn1ykFhLryzeKqemRNZ3wpZgWhbh5b5ygGML",
+    "bankMetadataAddress": "Hz5xpE6pyiPnWiJqyVNknURPQLURfvndxoAv1MCcdVpZ",
+    "ticker": "KIN | KIN",
+    "description": "KIN | W/E | KIN | P0 | -"
+  },
+  {
+    "bankName": "Exponent PT-BulkSOL-26FEB26",
+    "bankAddress": "4PtX5fLM5JwujjHmSyzbh5XLasKx9kiPxPfygi57jAov",
+    "bankMetadataAddress": "HmWbjPzNfZjyPWkXgL5FgKwWvawvYZavyPWagSjX6r3k",
+    "ticker": "PT-BulkSOL | Exponent PT-BulkSOL-26FEB26",
+    "description": "Exponent PT-BulkSOL-26FEB26 | rate-products | PT-BulkSOL | P0 | -"
+  },
+  {
+    "bankName": "Renzo Restaked SOL",
+    "bankAddress": "5tMcLP49P7CHKEM4KWAiSDNpEh5UFcCLsMVXi74YRg5C",
+    "bankMetadataAddress": "Cz65NCFokkwDaWc8TmvrrtCg6tpn6euZbhF1Nu4doLX4",
+    "ticker": "ezSOL | Renzo Restaked SOL",
+    "description": "Renzo Restaked SOL | W/E | ezSOL | P0 | -"
+  },
+  {
+    "bankName": "PayPal USD",
+    "bankAddress": "GEDEmTGC5hSaJj13mcnGR8TRwUbhGU7JsdnPdYjzSREk",
+    "bankMetadataAddress": "9oxzHNVCi62htrDgo3TUqR62rqfFYaAzjCwqzC5wfrvq",
+    "ticker": "PYUSD | PayPal USD",
+    "description": "PayPal USD | stablecoins | PYUSD | Kamino | JLP Market"
+  },
+  {
+    "bankName": "jeo boden",
+    "bankAddress": "5xVGr3pAWDtWPLcf6YsQTjKm6pGqLnJrENQXGajdP2wZ",
+    "bankMetadataAddress": "658pftEedgC5CBxUGE7uG6rrcYSrH2EE51hZWbZhaCpQ",
+    "ticker": "boden | jeo boden",
+    "description": "jeo boden | W/E | boden | P0 | -"
+  },
+  {
+    "bankName": "SynesisOne",
+    "bankAddress": "Emb5g6cEbRU2Yq9ZQnKhRDQLNRLSMWdgYRvJrBHzH6yB",
+    "bankMetadataAddress": "3LWcZVWDz2X3RLkhcmrBS3YoqVmQmcjVEQmhZyoNjAsc",
+    "ticker": "SNS | SynesisOne",
+    "description": "SynesisOne | W/E | SNS | P0 | -"
+  },
+  {
+    "bankName": "DUST Protocol",
+    "bankAddress": "GZcUY6egnYuXHGWPukTo8iKEZiv5CVKXutcphRuKryNE",
+    "bankMetadataAddress": "tzm7gqkyofCsPPJKN3qbF6eo98WCf1nojncqG6KSnF3",
+    "ticker": "DUST | DUST Protocol",
+    "description": "DUST Protocol | W/E | DUST | P0 | -"
+  },
+  {
+    "bankName": "Shadow Token",
+    "bankAddress": "2Ux4yKTTxQf14MzxRPUyybw9akqHC5jnViF1iKWZRxMb",
+    "bankMetadataAddress": "CMFLeLPF7PW3UpULjmXiF1RXDYvBwbHmAPP9FZWQYC5C",
+    "ticker": "SHDW | Shadow Token",
+    "description": "Shadow Token | W/E | SHDW | P0 | -"
+  },
+  {
+    "bankName": "Rollbit Coin",
+    "bankAddress": "BsrjGaXJNmzXBK855wXev2Jb846AbyRCoA6R8TnpfrNM",
+    "bankMetadataAddress": "9n1TCsgsk415EZCo7bbxmimym8yZ84fWpDs8zYJJhFn5",
+    "ticker": "RLB | Rollbit Coin",
+    "description": "Rollbit Coin | W/E | RLB | P0 | -"
+  },
+  {
+    "bankName": "Dither",
+    "bankAddress": "9cizJpitym7CGL2QauvgG4BtTvSeADvppUpwGTPRc6De",
+    "bankMetadataAddress": "ZdfdLsD5kZRpMBiewdRDyJ2wnzLmMbWhSE6P8v9Hteo",
+    "ticker": "DITH | Dither",
+    "description": "Dither | W/E | DITH | P0 | -"
+  },
+  {
+    "bankName": "Neiro",
+    "bankAddress": "GpNuWCghujQQNyyX1qv2p2r7WpX2hD6UyPnN8rRDGLs",
+    "bankMetadataAddress": "HC1M7Yw6xUA8GQ8Z4zFUfJMh1rVx21buznWbkDWf3tHu",
+    "ticker": "Neiro | Neiro",
+    "description": "Neiro | W/E | Neiro | P0 | -"
+  },
+  {
+    "bankName": "Only Possible On Solana",
+    "bankAddress": "4TBA2upbfULV5ryM8LxSqreztonu5xLYxN6qBEzHXR5f",
+    "bankMetadataAddress": "4hqH9QLJATuAK6VPWd5xanmmL5xfYFgQQHvTYw7w3Hst",
+    "ticker": "Only Possible On Solana | Only Possible On Solana",
+    "description": "Only Possible On Solana | W/E | Only Possible On Solana | P0 | -"
+  },
+  {
+    "bankName": "International Stable Currency",
+    "bankAddress": "BDo6z3urnxkMBPWP1PTcPDMNnvgTtEqtKtf219exvA87",
+    "bankMetadataAddress": "f6aE4KqLdHQTE3ju28N9NHmAn691pKjHbYdz2tn8RE7",
+    "ticker": "ISC | International Stable Currency",
+    "description": "International Stable Currency | W/E | ISC | P0 | -"
+  },
+  {
+    "bankName": "Lido Staked SOL",
+    "bankAddress": "7TZABdVVzqtGwgtqHM6VS8E34LtFq4dogNvTWEH9QaaM",
+    "bankMetadataAddress": "5edpAMiDRj7PpuQRJbdM2oXjjQMspHYP9yGFbmnt3unG",
+    "ticker": "stSOL | Lido Staked SOL",
+    "description": "Lido Staked SOL | W/E | stSOL | P0 | -"
+  },
+  {
+    "bankName": "META",
+    "bankAddress": "H6bfRmfZPoxDDs8eoVBgouTPowwyv7opfBbHd5KUmuUz",
+    "bankMetadataAddress": "tBJ4S3msAa8vhjZMwdULC5KaSd3rcxNSPYq3pw7QMbM",
+    "ticker": "META | META",
+    "description": "META | W/E | META | P0 | -"
+  },
+  {
+    "bankName": "Ore",
+    "bankAddress": "CQVtZK8rpL4M6JQzXxkPhadkVDFChfmdyw9MAXM3oFZT",
+    "bankMetadataAddress": "9UTWLTcZxiJDTX22Dmd69KhVhDvLLaUqkM5yRsAA1d86",
+    "ticker": "ORE | Ore",
+    "description": "Ore | W/E | ORE | P0 | -"
+  },
+  {
+    "bankName": "PayPal USD",
+    "bankAddress": "BsvoBGsejZTbkUckZtdQDav3PGvbatCoZTfJgB48CsCK",
+    "bankMetadataAddress": "AgV9owuPFj7LUtrQkKbVZGYmiz63whd3bTfadLxvBfzj",
+    "ticker": "PYUSD | PayPal USD",
+    "description": "PayPal USD | stablecoins | PYUSD | Drift | Main Market"
+  }
+]

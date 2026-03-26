@@ -9,8 +9,8 @@ use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
 use kamino_mocks::kamino_lending::cpi::accounts::{
-    DepositReserveLiquidityAndObligationCollateral,
-    DepositReserveLiquidityAndObligationCollateralV2, FarmsAccounts, InitObligation,
+    DepositFarmsAccounts, DepositReserveLiquidityAndObligationCollateral,
+    DepositReserveLiquidityAndObligationCollateralV2, InitObligation,
     InitObligationFarmsForReserve, InitUserMetadata, RefreshObligation, RefreshReserve,
 };
 use kamino_mocks::kamino_lending::cpi::{
@@ -312,7 +312,7 @@ impl<'info> KaminoInitObligation<'info> {
         };
 
         // --- optional “farms_accounts” group ---
-        let farms_accounts = FarmsAccounts {
+        let farms_accounts = DepositFarmsAccounts {
             obligation_farm_user_state: optional_account!(self.obligation_farm_user_state),
             reserve_farm_state: optional_account!(self.reserve_farm_state),
         };

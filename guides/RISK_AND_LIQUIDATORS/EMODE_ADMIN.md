@@ -106,13 +106,13 @@ entries: [
 ],
 
 bank: LST_C_BANK,
-tag: LST_AC,
+tag: LST_CD,
 entries: [
     tag: SOL,
     rate: LEND_SOL_BORROW_LST_CD
 ],
 bank: LST_D_BANK,
-tag: LST_AC,
+tag: LST_CD,
 entries: [
     tag: SOL,
     rate: LEND_SOL_BORROW_LST_CD
@@ -173,11 +173,11 @@ Now let's look at some examples of what rate users would get.
 
 - (1) We look at SOL_BANK to see what tag it has (SOL)
 - (2) We look at LST_A_BANK to see what tag it has (LST_AB)
-- (2) We look at LST_C_BANK to read the rate for tag SOL (LEND_SOL_BORROW_LST_AB)
-- (3) We look at LST_C_BANK and read the rate for tag LST_AB, but it doesn't have one.
-- (4) The SOL is treated at LEND_SOL_BORROW_LST_AB (.9) while LST_A is treated at the NORMAL RATE (.6)
+- (3) We look at LST_C_BANK to read the rate for tag SOL (LEND_SOL_BORROW_LST_CD)
+- (4) We look at LST_C_BANK and read the rate for tag LST_AB, but it doesn't have one.
+- (5) The SOL is treated at LEND_SOL_BORROW_LST_CD (.85) while LST_A is treated at the NORMAL RATE (.6)
 
-> The answer is .9 for SOL and .6 for LST_A
+> The answer is .85 for SOL and .6 for LST_A
 
 </details>
 

@@ -143,12 +143,10 @@ pub fn lending_account_withdraw<'info>(
             amount_pre_fee
         };
 
-        // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
-        let rate_limit_amount = if withdraw_all { amount_pre_fee } else { amount };
-
         record_withdrawal_outflow(
             group_rate_limit_enabled,
-            rate_limit_amount,
+            amount_pre_fee,
+            amount_pre_fee,
             price,
             &mut bank,
             &group,

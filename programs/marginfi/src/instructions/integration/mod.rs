@@ -277,6 +277,7 @@ pub(crate) fn integration_withdraw_impl<'info>(
         record_withdrawal_outflow(
             group_rate_limit_enabled,
             rate_limit_amount,
+            balance_unit,
             price,
             &mut bank,
             &group,
