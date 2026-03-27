@@ -12,6 +12,11 @@ The repo now keeps two IDL sets:
   - `idls-complete/kamino_lending.json` and `idls-complete/kamino_farms.json` stay full.
   - Drift/JupLend files are currently the same in both folders.
 
+Important: do **not** keep a local `programs/kamino-mocks/idls/` directory. Anchor's
+`declare_program!` resolves the nearest `idls/` folder up the directory tree; a local mock
+directory will override workspace-root `idls/` and can cause generated CPI type mismatches (for
+example `FarmsAccounts` vs `DepositFarmsAccounts`).
+
 ## Kamino minimal distillation workflow
 
 Use `distill_kamino_macro_idl.py` to generate minimal Kamino IDLs for macro generation.

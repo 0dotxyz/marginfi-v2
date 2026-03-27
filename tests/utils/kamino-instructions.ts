@@ -40,6 +40,7 @@ export const makeKaminoDepositIx = async (
   program: Program<Marginfi>,
   accounts: KaminoDepositAccounts,
   amount: BN,
+  refreshReserve = false,
 ): Promise<TransactionInstruction> => {
   // Merge with defaults...
   const accs = {
@@ -68,7 +69,7 @@ export const makeKaminoDepositIx = async (
   );
 
   return program.methods
-    .kaminoDeposit(amount)
+    .kaminoDeposit(amount, refreshReserve)
     .accounts({
       lendingMarketAuthority,
       reserveLiquiditySupply,
@@ -303,6 +304,7 @@ export interface KaminoWithdrawAccounts {
 export interface KaminoWithdrawArgs {
   amount: BN;
   isWithdrawAll: boolean;
+  refreshReserve?: boolean;
   /** Oracle and other remaining accounts needed for health checks */
   remaining: PublicKey[];
 }
@@ -345,7 +347,7 @@ export const makeKaminoWithdrawIx = async (
   );
 
   const ix = await program.methods
-    .kaminoWithdraw(args.amount, args.isWithdrawAll)
+    .kaminoWithdraw(args.amount, args.isWithdrawAll, args.refreshReserve ?? false)
     .accounts({
       lendingMarketAuthority, // derived
       reserveLiquiditySupply,

@@ -768,8 +768,9 @@ pub mod marginfi {
     pub fn kamino_deposit<'info>(
         ctx: Context<'_, '_, 'info, 'info, KaminoDeposit<'info>>,
         amount: u64,
+        refresh_reserve: Option<bool>,
     ) -> MarginfiResult {
-        kamino::kamino_deposit(ctx, amount)
+        kamino::kamino_deposit(ctx, amount, refresh_reserve)
     }
 
     /// (user) Withdraw from a Kamino pool through a marginfi account
@@ -781,8 +782,9 @@ pub mod marginfi {
         ctx: Context<'_, '_, 'info, 'info, KaminoWithdraw<'info>>,
         amount: u64,
         withdraw_all: Option<bool>,
+        refresh_reserve: Option<bool>,
     ) -> MarginfiResult {
-        kamino::kamino_withdraw(ctx, amount, withdraw_all)
+        kamino::kamino_withdraw(ctx, amount, withdraw_all, refresh_reserve)
     }
 
     /// (group admin only) Add a Kamino bank to the group. Pass the oracle and reserve in remaining

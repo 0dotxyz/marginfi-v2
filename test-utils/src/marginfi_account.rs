@@ -1507,7 +1507,11 @@ impl MarginfiAccountFixture {
                 instruction_sysvar_account: sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::KaminoDeposit { amount }.data(),
+            data: marginfi::instruction::KaminoDeposit {
+                amount,
+                refresh_reserve: Some(false),
+            }
+            .data(),
         }
     }
 
@@ -1573,6 +1577,7 @@ impl MarginfiAccountFixture {
             data: marginfi::instruction::KaminoWithdraw {
                 amount,
                 withdraw_all,
+                refresh_reserve: Some(false),
             }
             .data(),
         };

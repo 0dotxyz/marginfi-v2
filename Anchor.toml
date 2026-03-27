@@ -42,6 +42,7 @@ wallet = "~/.config/solana/id.json"
 
 # (remove RUST_LOG= to see bankRun logs)
 [scripts]
+# Use like `anchor test --skip-build --skip-local-validator --skip-deploy`
 test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.ts --exit --require tests/rootHooks.ts"
 
 # All tests (for CI)

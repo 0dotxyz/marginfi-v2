@@ -517,7 +517,11 @@ pub fn kamino_deposit(
             instruction_sysvar_account: sysvar::instructions::ID,
         }
         .to_account_metas(Some(true)),
-        data: marginfi::instruction::KaminoDeposit { amount }.data(),
+        data: marginfi::instruction::KaminoDeposit {
+            amount,
+            refresh_reserve: Some(false),
+        }
+        .data(),
     };
 
     // Prepend Kamino refresh instructions to ensure reserve/obligation are non-stale
@@ -615,6 +619,7 @@ pub fn kamino_withdraw(
         data: marginfi::instruction::KaminoWithdraw {
             amount,
             withdraw_all: if withdraw_all { Some(true) } else { None },
+            refresh_reserve: Some(false),
         }
         .data(),
     };

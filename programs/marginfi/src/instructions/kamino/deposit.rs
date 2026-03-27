@@ -25,11 +25,13 @@ use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
 use fixed::types::I80F48;
-use kamino_mocks::kamino_lending::cpi::deposit_reserve_liquidity_and_obligation_collateral_v2;
+use kamino_mocks::kamino_lending::cpi::{
+    deposit_reserve_liquidity_and_obligation_collateral_v2, refresh_reserves_batch,
+};
 use kamino_mocks::{
     kamino_lending::cpi::accounts::{
         DepositFarmsAccounts, DepositReserveLiquidityAndObligationCollateral,
-        DepositReserveLiquidityAndObligationCollateralV2,
+        DepositReserveLiquidityAndObligationCollateralV2, RefreshReservesBatch,
     },
     state::{MinimalObligation, MinimalReserve},
 };
@@ -46,7 +48,9 @@ use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_D
 pub fn kamino_deposit<'info>(
     ctx: Context<'_, '_, 'info, 'info, KaminoDeposit<'info>>,
     amount: u64,
+    refresh_reserve: Option<bool>,
 ) -> MarginfiResult {
+    let refresh_reserve = refresh_reserve.unwrap_or(false);
     let authority_bump: u8;
     {
         let marginfi_account = ctx.accounts.marginfi_account.load()?;
@@ -65,6 +69,10 @@ pub fn kamino_deposit<'info>(
         .integration_acc_1
         .load()?
         .liquidity_to_collateral(amount)?;
+
+    if refresh_reserve {
+        ctx.accounts.cpi_refresh_reserve()?;
+    }
 
     ctx.accounts.cpi_transfer_user_to_obligation_owner(amount)?;
     ctx.accounts.cpi_kamino_deposit(amount, authority_bump)?;
@@ -262,6 +270,17 @@ pub struct KaminoDeposit<'info> {
 }
 
 impl<'info> KaminoDeposit<'info> {
+    pub fn cpi_refresh_reserve(&self) -> MarginfiResult {
+        let accounts = RefreshReservesBatch {};
+        let program = self.kamino_program.to_account_info();
+        let cpi_ctx = CpiContext::new(program, accounts).with_remaining_accounts(vec![
+            self.integration_acc_1.to_account_info(),
+            self.lending_market.to_account_info(),
+        ]);
+        refresh_reserves_batch(cpi_ctx, true)?;
+        Ok(())
+    }
+
     pub fn cpi_transfer_user_to_obligation_owner(&self, amount: u64) -> MarginfiResult {
         let program = self.liquidity_token_program.to_account_info();
         let accounts = TransferChecked {
