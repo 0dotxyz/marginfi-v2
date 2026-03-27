@@ -9,9 +9,9 @@ use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
 use kamino_mocks::kamino_lending::cpi::accounts::{
-    DepositReserveLiquidityAndObligationCollateral, DepositReserveLiquidityAndObligationCollateralV2,
-    FarmsAccounts, InitObligation, InitObligationFarmsForReserve, InitUserMetadata,
-    RefreshObligation, RefreshReservesBatch,
+    DepositReserveLiquidityAndObligationCollateral,
+    DepositReserveLiquidityAndObligationCollateralV2, FarmsAccounts, InitObligation,
+    InitObligationFarmsForReserve, InitUserMetadata, RefreshObligation, RefreshReservesBatch,
 };
 use kamino_mocks::kamino_lending::cpi::{
     deposit_reserve_liquidity_and_obligation_collateral_v2, init_obligation,
