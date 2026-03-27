@@ -126,10 +126,6 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
         groupAdmin.tokenAAccount,
       );
 
-      await processBankrunTransaction(bankrunContext, updateReserveTx, [
-        groupAdmin.wallet,
-      ]);
-
       // Prime the reserve price: refresh reserves batch with skip_price_updates=true
       // requires the reserve to already have valid price data from a prior refresh.
       // This is only required because the reserves are newly created for this test, 
@@ -189,7 +185,7 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
             bank: bankKey,
             signerTokenAccount: groupAdmin.tokenAAccount,
             lendingMarket: marketKeypair.publicKey,
-            reserveLiquidityMint: mint,
+            reserve: reserveKeypair.publicKey,
           },
           new BN(100),
         ),

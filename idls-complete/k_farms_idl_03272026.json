@@ -1,0 +1,2163 @@
+{
+  "accounts": [
+    {
+      "name": "FarmState",
+      "type": {
+        "fields": [
+          {
+            "name": "farmAdmin",
+            "type": "publicKey"
+          },
+          {
+            "name": "globalConfig",
+            "type": "publicKey"
+          },
+          {
+            "name": "token",
+            "type": {
+              "defined": "TokenInfo"
+            }
+          },
+          {
+            "name": "rewardInfos",
+            "type": {
+              "array": [
+                {
+                  "defined": "RewardInfo"
+                },
+                10
+              ]
+            }
+          },
+          {
+            "name": "numRewardTokens",
+            "type": "u64"
+          },
+          {
+            "docs": [
+              "Data used to calculate the rewards of the user"
+            ],
+            "name": "numUsers",
+            "type": "u64"
+          },
+          {
+            "docs": [
+              "The number of token in the `farm_vault` staked (getting rewards and fees)",
+              "Set such as `farm_vault.amount = total_staked_amount + total_pending_amount`"
+            ],
+            "name": "totalStakedAmount",
+            "type": "u64"
+          },
+          {
+            "name": "farmVault",
+            "type": "publicKey"
+          },
+          {
+            "name": "farmVaultsAuthority",
+            "type": "publicKey"
+          },
+          {
+            "name": "farmVaultsAuthorityBump",
+            "type": "u64"
+          },
+          {
+            "docs": [
+              "Only used for delegate farms",
+              "Set to `default()` otherwise"
+            ],
+            "name": "delegateAuthority",
+            "type": "publicKey"
+          },
+          {
+            "docs": [
+              "Raw representation of a `TimeUnit`",
+              "Seconds = 0, Slots = 1"
+            ],
+            "name": "timeUnit",
+            "type": "u8"
+          },
+          {
+            "docs": [
+              "Automatically set to true in case of a full authority withdrawal",
+              "If true, the farm is frozen and no more deposits are allowed"
+            ],
+            "name": "isFarmFrozen",
+            "type": "u8"
+          },
+          {
+            "docs": [
+              "Indicates if the farm is a delegate farm",
+              "If true, the farm is a delegate farm and the `delegate_authority` is set*"
+            ],
+            "name": "isFarmDelegated",
+            "type": "u8"
+          },
+          {
+            "docs": [
+              "If set to 1, indicates that the \"reward user once\" feature is enabled"
+            ],
+            "name": "isRewardUserOnceEnabled",
+            "type": "u8"
+          },
+          {
+            "name": "isHarvestingPermissionless",
+            "type": "u8"
+          },
+          {
+            "name": "padding0",
+            "type": {
+              "array": [
+                "u8",
+                3
+              ]
+            }
+          },
+          {
+            "docs": [
+              "Withdraw authority for the farm, allowed to lock deposited funds and withdraw them",
+              "Set to `default()` if unused (only the depositors can withdraw their funds)"
+            ],
+            "name": "withdrawAuthority",
+            "type": "publicKey"
+          },
+          {
+            "docs": [
+              "Delay between a user deposit and the moment it is considered as staked",
+              "0 if unused"
+            ],
+            "name": "depositWarmupPeriod",
+            "type": "u32"
+          },
+          {
+            "docs": [
+              "Delay between a user unstake and the ability to withdraw his deposit."
+            ],
+            "name": "withdrawalCooldownPeriod",
+            "type": "u32"
+          },
+          {
+            "docs": [
+              "Total active stake of tokens in the farm (scaled from `Decimal` representation)."
+            ],
+            "name": "totalActiveStakeScaled",
+            "type": "u128"
+          },
+          {
+            "docs": [
+              "Total pending stake of tokens in the farm (scaled from `Decimal` representation).",
+              "(can be used by `withdraw_authority` but don't get rewards or fees)"
+            ],
+            "name": "totalPendingStakeScaled",
+            "type": "u128"
+          },
+          {
+            "docs": [
+              "Total pending amount of tokens in the farm"
+            ],
+            "name": "totalPendingAmount",
+            "type": "u64"
+          },
+          {
+            "docs": [
+              "Slashed amounts from early withdrawal"
+            ],
+            "name": "slashedAmountCurrent",
+            "type": "u64"
+          },
+          {
+            "name": "slashedAmountCumulative",
+            "type": "u64"
+          },
+          {
+            "name": "slashedAmountSpillAddress",
+            "type": "publicKey"
+          },
+          {
+            "docs": [
+              "Locking stake"
+            ],
+            "name": "lockingMode",
+            "type": "u64"
+          },
+          {
+            "name": "lockingStartTimestamp",
+            "type": "u64"
+          },
+          {
+            "name": "lockingDuration",
+            "type": "u64"
+          },
+          {
+            "name": "lockingEarlyWithdrawalPenaltyBps",
+            "type": "u64"
+          },
+          {
+            "name": "depositCapAmount",
+            "type": "u64"
+          },
+          {
+            "name": "scopePrices",
+            "type": "publicKey"
+          },
+          {
+            "name": "scopeOraclePriceId",
+            "type": "u64"
+          },
+          {
+            "name": "scopeOracleMaxAge",
+            "type": "u64"
+          },
+          {
+            "name": "pendingFarmAdmin",
+            "type": "publicKey"
+          },
+          {
+            "name": "strategyId",
+            "type": "publicKey"
+          },
+          {
+            "name": "delegatedRpsAdmin",
+            "type": "publicKey"
+          },
+          {
+            "name": "vaultId",
+            "type": "publicKey"
+          },
+          {
+            "name": "secondDelegatedAuthority",
+            "type": "publicKey"
+          },
+          {
+            "name": "padding",
+            "type": {
+              "array": [
+                "u64",
+                74
+              ]
+            }
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "GlobalConfig",
+      "type": {
+        "fields": [
+          {
+            "name": "globalAdmin",
+            "type": "publicKey"
+          },
+          {
+            "name": "treasuryFeeBps",
+            "type": "u64"
+          },
+          {
+            "name": "treasuryVaultsAuthority",
+            "type": "publicKey"
+          },
+          {
+            "name": "treasuryVaultsAuthorityBump",
+            "type": "u64"
+          },
+          {
+            "name": "pendingGlobalAdmin",
+            "type": "publicKey"
+          },
+          {
+            "name": "padding1",
+            "type": {
+              "array": [
+                "u128",
+                126
+              ]
+            }
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "UserState",
+      "type": {
+        "fields": [
+          {
+            "name": "userId",
+            "type": "u64"
+          },
+          {
+            "name": "farmState",
+            "type": "publicKey"
+          },
+          {
+            "name": "owner",
+            "type": "publicKey"
+          },
+          {
+            "docs": [
+              "Indicate if this user state is part of a delegated farm"
+            ],
+            "name": "isFarmDelegated",
+            "type": "u8"
+          },
+          {
+            "name": "padding0",
+            "type": {
+              "array": [
+                "u8",
+                7
+              ]
+            }
+          },
+          {
+            "docs": [
+              "Rewards tally used for computation of gained rewards",
+              "(scaled from `Decimal` representation)."
+            ],
+            "name": "rewardsTallyScaled",
+            "type": {
+              "array": [
+                "u128",
+                10
+              ]
+            }
+          },
+          {
+            "docs": [
+              "Number of reward tokens ready for claim"
+            ],
+            "name": "rewardsIssuedUnclaimed",
+            "type": {
+              "array": [
+                "u64",
+                10
+              ]
+            }
+          },
+          {
+            "name": "lastClaimTs",
+            "type": {
+              "array": [
+                "u64",
+                10
+              ]
+            }
+          },
+          {
+            "docs": [
+              "User stake deposited and usable, generating rewards and fees.",
+              "(scaled from `Decimal` representation)."
+            ],
+            "name": "activeStakeScaled",
+            "type": "u128"
+          },
+          {
+            "docs": [
+              "User stake deposited but not usable and not generating rewards yet.",
+              "(scaled from `Decimal` representation)."
+            ],
+            "name": "pendingDepositStakeScaled",
+            "type": "u128"
+          },
+          {
+            "docs": [
+              "After this timestamp, pending user stake can be moved to user stake",
+              "Initialized to now() + delayed user stake period"
+            ],
+            "name": "pendingDepositStakeTs",
+            "type": "u64"
+          },
+          {
+            "docs": [
+              "User deposits unstaked, pending for withdrawal, not usable and not generating rewards.",
+              "(scaled from `Decimal` representation)."
+            ],
+            "name": "pendingWithdrawalUnstakeScaled",
+            "type": "u128"
+          },
+          {
+            "docs": [
+              "After this timestamp, user can withdraw their deposit."
+            ],
+            "name": "pendingWithdrawalUnstakeTs",
+            "type": "u64"
+          },
+          {
+            "docs": [
+              "User bump used for account address validation"
+            ],
+            "name": "bump",
+            "type": "u64"
+          },
+          {
+            "docs": [
+              "Delegatee used for initialisation - useful to check against"
+            ],
+            "name": "delegatee",
+            "type": "publicKey"
+          },
+          {
+            "name": "lastStakeTs",
+            "type": "u64"
+          },
+          {
+            "docs": [
+              "Cumulative rewards issued to the user - ONLY used for stats/analytics",
+              "DO NOT USE IN ANY CALCULATIONS",
+              "Old userStates will have this field populated only from the point of release",
+              "not reflecting any historical data before this was released"
+            ],
+            "name": "rewardsIssuedCumulative",
+            "type": {
+              "array": [
+                "u64",
+                10
+              ]
+            }
+          },
+          {
+            "name": "padding1",
+            "type": {
+              "array": [
+                "u64",
+                40
+              ]
+            }
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "OraclePrices",
+      "type": {
+        "fields": [
+          {
+            "name": "oracleMappings",
+            "type": "publicKey"
+          },
+          {
+            "name": "prices",
+            "type": {
+              "array": [
+                {
+                  "defined": "DatedPrice"
+                },
+                512
+              ]
+            }
+          }
+        ],
+        "kind": "struct"
+      }
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "msg": "Cannot stake 0 amount",
+      "name": "StakeZero"
+    },
+    {
+      "code": 6001,
+      "msg": "Cannot unstake 0 amount",
+      "name": "UnstakeZero"
+    },
+    {
+      "code": 6002,
+      "msg": "Nothing to unstake",
+      "name": "NothingToUnstake"
+    },
+    {
+      "code": 6003,
+      "msg": "No reward to harvest",
+      "name": "NoRewardToHarvest"
+    },
+    {
+      "code": 6004,
+      "msg": "Reward not present in reward list",
+      "name": "NoRewardInList"
+    },
+    {
+      "code": 6005,
+      "msg": "Reward already initialized",
+      "name": "RewardAlreadyInitialized"
+    },
+    {
+      "code": 6006,
+      "msg": "Max number of reward tokens reached",
+      "name": "MaxRewardNumberReached"
+    },
+    {
+      "code": 6007,
+      "msg": "Reward does not exist",
+      "name": "RewardDoesNotExist"
+    },
+    {
+      "code": 6008,
+      "msg": "Reward vault exists but the account is wrong",
+      "name": "WrongRewardVaultAccount"
+    },
+    {
+      "code": 6009,
+      "msg": "Reward vault pubkey does not match staking pool vault",
+      "name": "RewardVaultMismatch"
+    },
+    {
+      "code": 6010,
+      "msg": "Reward vault authority pubkey does not match staking pool vault",
+      "name": "RewardVaultAuthorityMismatch"
+    },
+    {
+      "code": 6011,
+      "msg": "Nothing staked, cannot collect any rewards",
+      "name": "NothingStaked"
+    },
+    {
+      "code": 6012,
+      "msg": "Integer overflow",
+      "name": "IntegerOverflow"
+    },
+    {
+      "code": 6013,
+      "msg": "Conversion failure",
+      "name": "ConversionFailure"
+    },
+    {
+      "code": 6014,
+      "msg": "Unexpected account in instruction",
+      "name": "UnexpectedAccount"
+    },
+    {
+      "code": 6015,
+      "msg": "Operation forbidden",
+      "name": "OperationForbidden"
+    },
+    {
+      "code": 6016,
+      "msg": "Mathematical operation with overflow",
+      "name": "MathOverflow"
+    },
+    {
+      "code": 6017,
+      "msg": "Minimum claim duration has not been reached",
+      "name": "MinClaimDurationNotReached"
+    },
+    {
+      "code": 6018,
+      "msg": "Reward vault has a delegate",
+      "name": "RewardsVaultHasDelegate"
+    },
+    {
+      "code": 6019,
+      "msg": "Reward vault has a close authority",
+      "name": "RewardsVaultHasCloseAuthority"
+    },
+    {
+      "code": 6020,
+      "msg": "Farm vault has a delegate",
+      "name": "FarmVaultHasDelegate"
+    },
+    {
+      "code": 6021,
+      "msg": "Farm vault has a close authority",
+      "name": "FarmVaultHasCloseAuthority"
+    },
+    {
+      "code": 6022,
+      "msg": "Reward vault has a delegate",
+      "name": "RewardsTreasuryVaultHasDelegate"
+    },
+    {
+      "code": 6023,
+      "msg": "Reward vault has a close authority",
+      "name": "RewardsTreasuryVaultHasCloseAuthority"
+    },
+    {
+      "code": 6024,
+      "msg": "User ata and reward vault have different mints",
+      "name": "UserAtaRewardVaultMintMissmatch"
+    },
+    {
+      "code": 6025,
+      "msg": "User ata and farm token have different mints",
+      "name": "UserAtaFarmTokenMintMissmatch"
+    },
+    {
+      "code": 6026,
+      "msg": "Token mint and farm token have different mints",
+      "name": "TokenFarmTokenMintMissmatch"
+    },
+    {
+      "code": 6027,
+      "msg": "Reward ata mint is different than reward mint",
+      "name": "RewardAtaRewardMintMissmatch"
+    },
+    {
+      "code": 6028,
+      "msg": "Reward ata owner is different than payer",
+      "name": "RewardAtaOwnerNotPayer"
+    },
+    {
+      "code": 6029,
+      "msg": "Mode to update global_config is invalid",
+      "name": "InvalidGlobalConfigMode"
+    },
+    {
+      "code": 6030,
+      "msg": "Reward Index is higher than number of rewards",
+      "name": "RewardIndexOutOfRange"
+    },
+    {
+      "code": 6031,
+      "msg": "No tokens available to withdraw",
+      "name": "NothingToWithdraw"
+    },
+    {
+      "code": 6032,
+      "msg": "user, user_ref, authority and payer must match for non-delegated farm",
+      "name": "UserDelegatedFarmNonDelegatedMissmatch"
+    },
+    {
+      "code": 6033,
+      "msg": "Authority must match farm delegate authority",
+      "name": "AuthorityFarmDelegateMissmatch"
+    },
+    {
+      "code": 6034,
+      "msg": "Farm not delegated, can not complete operation",
+      "name": "FarmNotDelegated"
+    },
+    {
+      "code": 6035,
+      "msg": "Operation not allowed for delegated farm",
+      "name": "FarmDelegated"
+    },
+    {
+      "code": 6036,
+      "msg": "Unstake lockup period is not elapsed. Deposit is locked until end of unstake period",
+      "name": "UnstakeNotElapsed"
+    },
+    {
+      "code": 6037,
+      "msg": "Pending withdrawal already exist and not withdrawn yet",
+      "name": "PendingWithdrawalNotWithdrawnYet"
+    },
+    {
+      "code": 6038,
+      "msg": "Cannot deposit zero amount directly to farm vault",
+      "name": "DepositZero"
+    },
+    {
+      "code": 6039,
+      "msg": "Invalid config value",
+      "name": "InvalidConfigValue"
+    },
+    {
+      "code": 6040,
+      "msg": "Invalid penalty percentage",
+      "name": "InvalidPenaltyPercentage"
+    },
+    {
+      "code": 6041,
+      "msg": "Early withdrawal not allowed",
+      "name": "EarlyWithdrawalNotAllowed"
+    },
+    {
+      "code": 6042,
+      "msg": "Invalid locking timestamps",
+      "name": "InvalidLockingTimestamps"
+    },
+    {
+      "code": 6043,
+      "msg": "Invalid reward rate curve point",
+      "name": "InvalidRpsCurvePoint"
+    },
+    {
+      "code": 6044,
+      "msg": "Invalid timestamp",
+      "name": "InvalidTimestamp"
+    },
+    {
+      "code": 6045,
+      "msg": "Deposit cap reached",
+      "name": "DepositCapReached"
+    },
+    {
+      "code": 6046,
+      "msg": "Missing Scope Prices",
+      "name": "MissingScopePrices"
+    },
+    {
+      "code": 6047,
+      "msg": "Scope Oracle Price Too Old",
+      "name": "ScopeOraclePriceTooOld"
+    },
+    {
+      "code": 6048,
+      "msg": "Invalid Oracle Config",
+      "name": "InvalidOracleConfig"
+    },
+    {
+      "code": 6049,
+      "msg": "Could not deserialize scope",
+      "name": "CouldNotDeserializeScope"
+    },
+    {
+      "code": 6050,
+      "msg": "Reward ata owner is different than farm admin",
+      "name": "RewardAtaOwnerNotAdmin"
+    },
+    {
+      "code": 6051,
+      "msg": "Cannot withdraw reward as available amount is zero",
+      "name": "WithdrawRewardZeroAvailable"
+    },
+    {
+      "code": 6052,
+      "msg": "Cannot withdraw reward as reward schedule is set",
+      "name": "RewardScheduleCurveSet"
+    },
+    {
+      "code": 6053,
+      "msg": "Cannot initialize farm while having a mint with token22 and requested extensions",
+      "name": "UnsupportedTokenExtension"
+    },
+    {
+      "code": 6054,
+      "msg": "Invalid authority for updating farm config",
+      "name": "InvalidFarmConfigUpdateAuthority"
+    },
+    {
+      "code": 6055,
+      "msg": "Invalid authority for transfer ownersip new user state initialization",
+      "name": "InvalidTransferOwnershipOldOwner"
+    },
+    {
+      "code": 6056,
+      "msg": "Invalid farm state for transfer ownership new user state initialization",
+      "name": "InvalidTransferOwnershipFarmState"
+    },
+    {
+      "code": 6057,
+      "msg": "Invalid user state for transfer ownership, owner must match delegatee",
+      "name": "InvalidTransferOwnershipUserStateOwnerDelegatee"
+    },
+    {
+      "code": 6058,
+      "msg": "Invalid farm state locking mode for transfer ownership, must be 0",
+      "name": "InvalidTransferOwnershipFarmStateLockingMode"
+    },
+    {
+      "code": 6059,
+      "msg": "Invalid farm state withdrawal cooldown period for transfer ownership, must be 0",
+      "name": "InvalidTransferOwnershipFarmStateWithdrawCooldownPeriod"
+    },
+    {
+      "code": 6060,
+      "msg": "Invalid transfer ownership stake amount, must be equal to unstaked deposits",
+      "name": "InvalidTransferOwnershipStakeAmount"
+    },
+    {
+      "code": 6061,
+      "msg": "Invalid authority for transfer ownersip new user state initialization",
+      "name": "InvalidTransferOwnershipNewOwner"
+    },
+    {
+      "code": 6062,
+      "msg": "Invalid farm state deposit warmup period for transfer ownership, must be 0 if old user has stake",
+      "name": "InvalidTransferOwnershipFarmStateDepositWarmupPeriod"
+    },
+    {
+      "code": 6063,
+      "msg": "Reward User Once feature is disabled",
+      "name": "RewardUserOnceFeatureDisabled"
+    },
+    {
+      "code": 6064,
+      "msg": "Can not set delegate_authority to default pubkey - farm is delegated",
+      "name": "InvalidDelegatedAuthorityUpdate"
+    },
+    {
+      "code": 6065,
+      "msg": "User token account owner does not match user state owner",
+      "name": "UserTokenAccountOwnerMismatch"
+    },
+    {
+      "code": 6066,
+      "msg": "Harvesting is not permissionless, payer does not match user state owner",
+      "name": "HarvestingNotPermissionlessPayerMismatch"
+    },
+    {
+      "code": 6067,
+      "msg": "Current reward issued unclaimed does not match expected value",
+      "name": "CurrentRewardIssuedUnclaimedMismatch"
+    }
+  ],
+  "instructions": [
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "globalAdmin"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "globalConfig"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "treasuryVaultsAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        }
+      ],
+      "args": [],
+      "name": "initializeGlobalConfig"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "globalAdmin"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "globalConfig"
+        }
+      ],
+      "args": [
+        {
+          "name": "mode",
+          "type": "u8"
+        },
+        {
+          "name": "value",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ],
+      "name": "updateGlobalConfig"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "farmAdmin"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "globalConfig"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "farmVaultsAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenMint"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "rent"
+        }
+      ],
+      "args": [],
+      "name": "initializeFarm"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "farmAdmin"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "farmDelegate"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "globalConfig"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "farmVaultsAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "rent"
+        }
+      ],
+      "args": [],
+      "name": "initializeFarmDelegated"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "farmAdmin"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "globalConfig"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "rewardMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "rewardVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "rewardTreasuryVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "farmVaultsAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "treasuryVaultsAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "rent"
+        }
+      ],
+      "args": [],
+      "name": "initializeReward"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "payer"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "rewardMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "rewardVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "farmVaultsAuthority"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "payerRewardTokenAta"
+        },
+        {
+          "isMut": false,
+          "isOptional": true,
+          "isSigner": false,
+          "name": "scopePrices"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "rewardIndex",
+          "type": "u64"
+        }
+      ],
+      "name": "addRewards"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "signer"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": false,
+          "isOptional": true,
+          "isSigner": false,
+          "name": "scopePrices"
+        }
+      ],
+      "args": [
+        {
+          "name": "mode",
+          "type": "u16"
+        },
+        {
+          "name": "data",
+          "type": "bytes"
+        }
+      ],
+      "name": "updateFarmConfig"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "authority"
+        },
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "payer"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "owner"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "delegatee"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userState"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "rent"
+        }
+      ],
+      "args": [],
+      "name": "initializeUser"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "oldOwner"
+        },
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "payer"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "newOwner"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "oldUserState"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "newUserState"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": false,
+          "isOptional": true,
+          "isSigner": false,
+          "name": "scopePrices"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "rent"
+        }
+      ],
+      "args": [],
+      "name": "transferOwnership"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "delegateAuthority"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userState"
+        }
+      ],
+      "args": [
+        {
+          "name": "rewardIndex",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "expectedRewardIssuedUnclaimed",
+          "type": "u64"
+        }
+      ],
+      "name": "rewardUserOnce"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": false,
+          "isOptional": true,
+          "isSigner": false,
+          "name": "scopePrices"
+        }
+      ],
+      "args": [],
+      "name": "refreshFarm"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "owner"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userState"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userAta"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenMint"
+        },
+        {
+          "isMut": false,
+          "isOptional": true,
+          "isSigner": false,
+          "name": "scopePrices"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ],
+      "name": "stake"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "delegateAuthority"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userState"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        }
+      ],
+      "args": [
+        {
+          "name": "newAmount",
+          "type": "u64"
+        }
+      ],
+      "name": "setStakeDelegated"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "payer"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userState"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "globalConfig"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "rewardMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userRewardTokenAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "rewardsVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "rewardsTreasuryVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "farmVaultsAuthority"
+        },
+        {
+          "isMut": false,
+          "isOptional": true,
+          "isSigner": false,
+          "name": "scopePrices"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        }
+      ],
+      "args": [
+        {
+          "name": "rewardIndex",
+          "type": "u64"
+        }
+      ],
+      "name": "harvestReward"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "owner"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userState"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": false,
+          "isOptional": true,
+          "isSigner": false,
+          "name": "scopePrices"
+        }
+      ],
+      "args": [
+        {
+          "name": "stakeSharesScaled",
+          "type": "u128"
+        }
+      ],
+      "name": "unstake"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userState"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": false,
+          "isOptional": true,
+          "isSigner": false,
+          "name": "scopePrices"
+        }
+      ],
+      "args": [],
+      "name": "refreshUserState"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "owner"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userState"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userAta"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "farmVaultsAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        }
+      ],
+      "args": [],
+      "name": "withdrawUnstakedDeposits"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "globalAdmin"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "globalConfig"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "rewardMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "rewardTreasuryVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "treasuryVaultAuthority"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "withdrawDestinationTokenAccount"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ],
+      "name": "withdrawTreasury"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "depositor"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "depositorAta"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ],
+      "name": "depositToFarmVault"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "withdrawAuthority"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "withdrawerTokenAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "farmVaultsAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ],
+      "name": "withdrawFromFarmVault"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "crank"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "slashedAmountSpillAddress"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "farmVaultsAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        }
+      ],
+      "args": [],
+      "name": "withdrawSlashedAmount"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "pendingFarmAdmin"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        }
+      ],
+      "args": [],
+      "name": "updateFarmAdmin"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "pendingGlobalAdmin"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "globalConfig"
+        }
+      ],
+      "args": [],
+      "name": "updateGlobalConfigAdmin"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "farmAdmin"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "rewardMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "rewardVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "farmVaultsAuthority"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "adminRewardTokenAta"
+        },
+        {
+          "isMut": false,
+          "isOptional": true,
+          "isSigner": false,
+          "name": "scopePrices"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "rewardIndex",
+          "type": "u64"
+        }
+      ],
+      "name": "withdrawReward"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "globalAdmin"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "farmState"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "globalConfig"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "newSecondDelegatedAuthority"
+        }
+      ],
+      "args": [],
+      "name": "updateSecondDelegatedAuthority"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "globalAdmin"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "globalConfig"
+        }
+      ],
+      "args": [
+        {
+          "name": "globalConfigOptionKind",
+          "type": {
+            "defined": "GlobalConfigOption"
+          }
+        },
+        {
+          "name": "farmConfigOptionKind",
+          "type": {
+            "defined": "FarmConfigOption"
+          }
+        },
+        {
+          "name": "timeUnit",
+          "type": {
+            "defined": "TimeUnit"
+          }
+        },
+        {
+          "name": "lockingMode",
+          "type": {
+            "defined": "LockingMode"
+          }
+        },
+        {
+          "name": "rewardType",
+          "type": {
+            "defined": "RewardType"
+          }
+        }
+      ],
+      "name": "idlMissingTypes"
+    }
+  ],
+  "name": "farms",
+  "types": [
+    {
+      "name": "FarmConfigOption",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "UpdateRewardRps"
+          },
+          {
+            "name": "UpdateRewardMinClaimDuration"
+          },
+          {
+            "name": "WithdrawAuthority"
+          },
+          {
+            "name": "DepositWarmupPeriod"
+          },
+          {
+            "name": "WithdrawCooldownPeriod"
+          },
+          {
+            "name": "RewardType"
+          },
+          {
+            "name": "RpsDecimals"
+          },
+          {
+            "name": "LockingMode"
+          },
+          {
+            "name": "LockingStartTimestamp"
+          },
+          {
+            "name": "LockingDuration"
+          },
+          {
+            "name": "LockingEarlyWithdrawalPenaltyBps"
+          },
+          {
+            "name": "DepositCapAmount"
+          },
+          {
+            "name": "SlashedAmountSpillAddress"
+          },
+          {
+            "name": "ScopePricesAccount"
+          },
+          {
+            "name": "ScopeOraclePriceId"
+          },
+          {
+            "name": "ScopeOracleMaxAge"
+          },
+          {
+            "name": "UpdateRewardScheduleCurvePoints"
+          },
+          {
+            "name": "UpdatePendingFarmAdmin"
+          },
+          {
+            "name": "UpdateStrategyId"
+          },
+          {
+            "name": "UpdateDelegatedRpsAdmin"
+          },
+          {
+            "name": "UpdateVaultId"
+          },
+          {
+            "name": "UpdateExtraDelegatedAuthority"
+          },
+          {
+            "name": "UpdateIsRewardUserOnceEnabled"
+          },
+          {
+            "name": "UpdateDelegatedAuthority"
+          },
+          {
+            "name": "UpdateIsHarvestingPermissionless"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GlobalConfigOption",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "SetPendingGlobalAdmin"
+          },
+          {
+            "name": "SetTreasuryFeeBps"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LockingMode",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "None"
+          },
+          {
+            "name": "Continuous"
+          },
+          {
+            "name": "WithExpiry"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RewardInfo",
+      "type": {
+        "fields": [
+          {
+            "name": "token",
+            "type": {
+              "defined": "TokenInfo"
+            }
+          },
+          {
+            "name": "rewardsVault",
+            "type": "publicKey"
+          },
+          {
+            "name": "rewardsAvailable",
+            "type": "u64"
+          },
+          {
+            "name": "rewardScheduleCurve",
+            "type": {
+              "defined": "RewardScheduleCurve"
+            }
+          },
+          {
+            "name": "minClaimDurationSeconds",
+            "type": "u64"
+          },
+          {
+            "name": "lastIssuanceTs",
+            "type": "u64"
+          },
+          {
+            "name": "rewardsIssuedUnclaimed",
+            "type": "u64"
+          },
+          {
+            "name": "rewardsIssuedCumulative",
+            "type": "u64"
+          },
+          {
+            "name": "rewardPerShareScaled",
+            "type": "u128"
+          },
+          {
+            "name": "placeholder0",
+            "type": "u64"
+          },
+          {
+            "name": "rewardType",
+            "type": "u8"
+          },
+          {
+            "name": "rewardsPerSecondDecimals",
+            "type": "u8"
+          },
+          {
+            "name": "padding0",
+            "type": {
+              "array": [
+                "u8",
+                6
+              ]
+            }
+          },
+          {
+            "name": "padding1",
+            "type": {
+              "array": [
+                "u64",
+                20
+              ]
+            }
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "RewardPerTimeUnitPoint",
+      "type": {
+        "fields": [
+          {
+            "name": "tsStart",
+            "type": "u64"
+          },
+          {
+            "name": "rewardPerTimeUnit",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "RewardScheduleCurve",
+      "type": {
+        "fields": [
+          {
+            "docs": [
+              "This is a stepwise function, meaning that each point represents",
+              "how many rewards are issued per time unit since the beginning",
+              "of that point until the beginning of the next point.",
+              "This is not a linear curve, there is no interpolation going on.",
+              "A curve can be [[t0, 100], [t1, 50], [t2, 0]]",
+              "meaning that from t0 to t1, 100 rewards are issued per time unit,",
+              "from t1 to t2, 50 rewards are issued per time unit, and after t2 it stops",
+              "Another curve, can be [[t0, 100], [u64::max, 0]]",
+              "meaning that from t0 to u64::max, 100 rewards are issued per time unit"
+            ],
+            "name": "points",
+            "type": {
+              "array": [
+                {
+                  "defined": "RewardPerTimeUnitPoint"
+                },
+                20
+              ]
+            }
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "RewardType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Proportional"
+          },
+          {
+            "name": "Constant"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TimeUnit",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Seconds"
+          },
+          {
+            "name": "Slots"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenInfo",
+      "type": {
+        "fields": [
+          {
+            "name": "mint",
+            "type": "publicKey"
+          },
+          {
+            "name": "decimals",
+            "type": "u64"
+          },
+          {
+            "name": "tokenProgram",
+            "type": "publicKey"
+          },
+          {
+            "name": "padding",
+            "type": {
+              "array": [
+                "u64",
+                6
+              ]
+            }
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "DatedPrice",
+      "type": {
+        "fields": [
+          {
+            "name": "price",
+            "type": {
+              "defined": "Price"
+            }
+          },
+          {
+            "name": "lastUpdatedSlot",
+            "type": "u64"
+          },
+          {
+            "name": "unixTimestamp",
+            "type": "u64"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u64",
+                2
+              ]
+            }
+          },
+          {
+            "name": "reserved2",
+            "type": {
+              "array": [
+                "u16",
+                3
+              ]
+            }
+          },
+          {
+            "name": "index",
+            "type": "u16"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "Price",
+      "type": {
+        "fields": [
+          {
+            "name": "value",
+            "type": "u64"
+          },
+          {
+            "name": "exp",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    }
+  ],
+  "version": "1.6.5"
+}

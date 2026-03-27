@@ -149,7 +149,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
         bank: kaminoTokenABank,
         signerTokenAccount: groupAdmin.tokenAAccount,
         lendingMarket: market,
-        reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+        reserve: tokenAReserve,
       })
     );
     await processBankrunTx(bankrunContext, tx, [groupAdmin.wallet]);

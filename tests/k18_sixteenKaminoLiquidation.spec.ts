@@ -161,10 +161,6 @@ describe("k18: 16 Kamino position liquidation test", () => {
         groupAdmin.tokenAAccount,
       );
 
-      await processBankrunTransaction(bankrunContext, updateReserveTx, [
-        groupAdmin.wallet,
-      ]);
-
       // Prime the reserve price: refresh reserves batch with skip_price_updates=true
       // requires the reserve to already have valid price data from a prior refresh.
       // This is only required because the reserves are newly created for this test, 
@@ -224,7 +220,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
             bank: bankKey,
             signerTokenAccount: groupAdmin.tokenAAccount,
             lendingMarket: marketKeypair.publicKey,
-            reserveLiquidityMint: mint,
+            reserve: reserveKeypair.publicKey,
           },
           new BN(100),
         ),

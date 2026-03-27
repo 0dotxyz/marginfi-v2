@@ -158,7 +158,7 @@ describe("kx: Fixed Kamino price bank", () => {
           bank: fixedKaminoBank,
           signerTokenAccount: users[3].usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
         new BN(100),
       ),
