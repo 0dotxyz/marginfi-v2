@@ -1,7 +1,11 @@
 use anchor_lang::prelude::*;
-use marginfi_type_crate::{constants::METADATA_SEED, types::BankMetadata};
+use anchor_spl::token_interface::Mint;
+use marginfi_type_crate::{
+    constants::METADATA_SEED,
+    types::{BankMetadata, MarginfiGroup},
+};
 
-pub fn init_bank_metadata(ctx: Context<InitBankMetadata>) -> Result<()> {
+pub fn init_bank_metadata(ctx: Context<InitBankMetadata>, _bank_seed: u64) -> Result<()> {
     let mut metadata = ctx.accounts.metadata.load_init()?;
 
     metadata.bank = ctx.accounts.bank.key();
@@ -11,8 +15,21 @@ pub fn init_bank_metadata(ctx: Context<InitBankMetadata>) -> Result<()> {
 }
 
 #[derive(Accounts)]
+#[instruction(bank_seed: u64)]
 pub struct InitBankMetadata<'info> {
-    /// CHECK: Bank pubkey used only for PDA derivation. May not be initialized yet.
+    pub group: AccountLoader<'info, MarginfiGroup>,
+
+    pub bank_mint: Box<InterfaceAccount<'info, Mint>>,
+
+    /// CHECK: Canonical bank PDA; may not be initialized yet.
+    #[account(
+        seeds = [
+            group.key().as_ref(),
+            bank_mint.key().as_ref(),
+            &bank_seed.to_le_bytes(),
+        ],
+        bump,
+    )]
     pub bank: UncheckedAccount<'info>,
 
     /// Pays the init fee

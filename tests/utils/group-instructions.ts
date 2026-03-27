@@ -469,12 +469,12 @@ export const propagateStakedSettings = (
 ) => {
   const remainingAccounts = args.oracle
     ? [
-      {
-        pubkey: args.oracle,
-        isSigner: false,
-        isWritable: false,
-      } as AccountMeta,
-    ]
+        {
+          pubkey: args.oracle,
+          isSigner: false,
+          isWritable: false,
+        } as AccountMeta,
+      ]
     : [];
 
   const ix = program.methods
@@ -845,7 +845,10 @@ export const panicUnpausePermissionless = async (
 };
 
 type InitBankMetadataArgs = {
+  group: PublicKey;
+  bankMint: PublicKey;
   bank: PublicKey;
+  bankSeed: BN;
 };
 
 export const initBankMetadata = (
@@ -853,8 +856,10 @@ export const initBankMetadata = (
   args: InitBankMetadataArgs
 ) => {
   const ix = program.methods
-    .initBankMetadata()
+    .initBankMetadata(args.bankSeed)
     .accounts({
+      group: args.group,
+      bankMint: args.bankMint,
       // metadata: args.metadata, // derived from bank
       bank: args.bank,
     })
@@ -891,12 +896,15 @@ export const setFixedPrice = (
 };
 
 type WriteBankMetadataArgs = {
+  group: PublicKey;
+  bankMint: PublicKey;
+  bank: PublicKey;
+  bankSeed: BN;
   metadata: PublicKey;
   /// Pass undefined to skip. Limit 64 bytes
   ticker?: string;
   /// Pass undefined to skip. Limit 128 bytes
   description?: string;
-  group: PublicKey;
 };
 
 /**
@@ -931,12 +939,14 @@ export const writeBankMetadata = (
 
   const ix = program.methods
     .writeBankMetadata(
+      args.bankSeed,
       tickerBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
       descBuf // Option<Vec<u8>> -> Some(Buffer) | None(null)
     )
     .accounts({
       group: args.group,
-      // bank: args.bank, // implied from metadata
+      bankMint: args.bankMint,
+      bank: args.bank,
       // metadataAdmin: args.metadataAdmin, // implied from metadata
       metadata: args.metadata,
     })

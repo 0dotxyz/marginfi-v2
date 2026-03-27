@@ -12,6 +12,7 @@ import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairUsdc,
   bankrunProgram,
+  ecosystem,
   groupAdmin,
   marginfiGroup,
   oracles,
@@ -38,7 +39,7 @@ import {
   makeRatePoints,
   TOKENLESS_REPAYMENTS_ALLOWED,
 } from "./utils/types";
-import { deriveBankMetadata } from "./utils/pdas";
+import { deriveBankAndMetadataWithSeed } from "./utils/pdas";
 
 let program: Program<Marginfi>;
 
@@ -87,8 +88,8 @@ describe("Lending pool configure bank", () => {
         await configureBank(groupAdmin.mrgnProgram, {
           bank: bankKey,
           bankConfigOpt: bankConfigOpt,
-        }),
-      ),
+        })
+      )
     );
 
     const bank = await program.account.bank.fetch(bankKey);
@@ -140,7 +141,7 @@ describe("Lending pool configure bank", () => {
     // Note: The CLOSE_ENABLED_FLAG is never unset
     assertBNEqual(
       bank.flags,
-      TOKENLESS_REPAYMENTS_ALLOWED + CLOSE_ENABLED_FLAG,
+      TOKENLESS_REPAYMENTS_ALLOWED + CLOSE_ENABLED_FLAG
     );
   });
 
@@ -150,8 +151,8 @@ describe("Lending pool configure bank", () => {
         await configureBank(groupAdmin.mrgnProgram, {
           bank: bankKeypairUsdc.publicKey,
           bankConfigOpt: defaultBankConfigOptRaw(),
-        }),
-      ),
+        })
+      )
     );
   });
 
@@ -163,8 +164,8 @@ describe("Lending pool configure bank", () => {
           bank: bankKey,
           type: 3, // pyth pull
           oracle: oracles.tokenAOracle.publicKey,
-        }),
-      ),
+        })
+      )
     );
     const bank = await program.account.bank.fetch(bankKey);
     const config = bank.config;
@@ -180,8 +181,8 @@ describe("Lending pool configure bank", () => {
           bank: bankKey,
           type: 3, // pyth pull
           oracle: oracles.usdcOracle.publicKey,
-        }),
-      ),
+        })
+      )
     );
     const bank = await program.account.bank.fetch(bankKey);
     const config = bank.config;
@@ -199,12 +200,12 @@ describe("Lending pool configure bank", () => {
               bank: bankKey,
               type: 3,
               oracle: oracles.tokenAOracleFeed.publicKey, // sneaky sneaky
-            }),
-          ),
+            })
+          )
         );
       },
       "PythPushInvalidAccount",
-      6060,
+      6060
     );
 
     await expectFailedTxWithMessage(async () => {
@@ -214,8 +215,8 @@ describe("Lending pool configure bank", () => {
             bank: bankKey,
             type: 0,
             oracle: oracles.tokenAOracle.publicKey,
-          }),
-        ),
+          })
+        )
       );
     }, "OracleNotSetup");
 
@@ -226,8 +227,8 @@ describe("Lending pool configure bank", () => {
             bank: bankKey,
             type: 2,
             oracle: oracles.tokenAOracle.publicKey,
-          }),
-        ),
+          })
+        )
       );
     }, "swb v2 is deprecated");
 
@@ -238,8 +239,8 @@ describe("Lending pool configure bank", () => {
             bank: bankKey,
             type: 42,
             oracle: oracles.tokenAOracle.publicKey,
-          }),
-        ),
+          })
+        )
       );
     }, "unsupported oracle type");
   });
@@ -255,12 +256,12 @@ describe("Lending pool configure bank", () => {
               bank: bankKey,
               type: 3,
               oracle: oracles.wsolOracle.publicKey,
-            }),
-          ),
+            })
+          )
         );
       },
       "Unauthorized",
-      6042,
+      6042
     );
 
     await expectFailedTxWithMessage(async () => {
@@ -270,8 +271,8 @@ describe("Lending pool configure bank", () => {
             bank: bankKey,
             type: 3,
             oracle: oracles.wsolOracle.publicKey,
-          }),
-        ),
+          })
+        )
       );
     }, "Missing signature for");
   });
@@ -284,8 +285,8 @@ describe("Lending pool configure bank", () => {
         await configureBank(groupAdmin.mrgnProgram, {
           bank: bankKeypairUsdc.publicKey,
           bankConfigOpt: config,
-        }),
-      ),
+        })
+      )
     );
     const bank = await program.account.bank.fetch(bankKeypairUsdc.publicKey);
     // Note: The CLOSE_ENABLED_FLAG is never unset
@@ -302,8 +303,8 @@ describe("Lending pool configure bank", () => {
             bank: bankKey,
             type: 3,
             oracle: oracles.wsolOracle.publicKey,
-          }),
-        ),
+          })
+        )
       );
     }, "change oracle settings on frozen banks");
   });
@@ -324,8 +325,8 @@ describe("Lending pool configure bank", () => {
         await configureBank(groupAdmin.mrgnProgram, {
           bank: bankKeypairUsdc.publicKey,
           bankConfigOpt: configNew,
-        }),
-      ),
+        })
+      )
     );
     const bank = await program.account.bank.fetch(bankKeypairUsdc.publicKey);
     const config = bank.config;
@@ -337,38 +338,50 @@ describe("Lending pool configure bank", () => {
     assertBNEqual(bank.flags, FREEZE_SETTINGS + CLOSE_ENABLED_FLAG); // still frozen
   });
 
-  it("(permissionless) Init blank metadata for a bank", async () => {
+  it("(permissionless) Init blank metadata for a seeded bank before bank init", async () => {
+    const bankSeed = new BN(41);
+    const { bank, metadata, metadataBump } = deriveBankAndMetadataWithSeed(
+      program.programId,
+      marginfiGroup.publicKey,
+      ecosystem.usdcMint.publicKey,
+      bankSeed
+    );
+
     await users[1].mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await initBankMetadata(users[1].mrgnProgram, {
-          bank: bankKeypairUsdc.publicKey,
-        }),
-      ),
+          group: marginfiGroup.publicKey,
+          bankMint: ecosystem.usdcMint.publicKey,
+          bank,
+          bankSeed,
+        })
+      )
     );
 
-    const [metaKey, metaBump] = deriveBankMetadata(
-      program.programId,
-      bankKeypairUsdc.publicKey,
-    );
-    const meta = await program.account.bankMetadata.fetch(metaKey);
-    assertKeysEqual(meta.bank, bankKeypairUsdc.publicKey);
-    assert.equal(meta.bump, metaBump);
+    const meta = await program.account.bankMetadata.fetch(metadata);
+    assertKeysEqual(meta.bank, bank);
+    assert.equal(meta.bump, metadataBump);
   });
 
-  it("(attacker) create metadata for a bank that does not exist yet - should fail", async () => {
+  it("(attacker) init metadata for another group's seeded bank before bank init - should fail", async () => {
     const attacker = users[2];
     const attackerGroup = Keypair.generate();
-    const fakeBank = Keypair.generate().publicKey;
-    const [fakeMetadata] = deriveBankMetadata(program.programId, fakeBank);
+    const bankSeed = new BN(42);
+    const { bank } = deriveBankAndMetadataWithSeed(
+      program.programId,
+      marginfiGroup.publicKey,
+      ecosystem.usdcMint.publicKey,
+      bankSeed
+    );
 
     await attacker.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await groupInitialize(attacker.mrgnProgram, {
           marginfiGroup: attackerGroup.publicKey,
           admin: attacker.wallet.publicKey,
-        }),
+        })
       ),
-      [attackerGroup],
+      [attackerGroup]
     );
 
     await attacker.mrgnProgram.provider.sendAndConfirm(
@@ -376,58 +389,55 @@ describe("Lending pool configure bank", () => {
         await groupConfigure(attacker.mrgnProgram, {
           marginfiGroup: attackerGroup.publicKey,
           newMetadataAdmin: attacker.wallet.publicKey,
-        }),
-      ),
+        })
+      )
     );
 
-    await attacker.mrgnProgram.provider.sendAndConfirm(
-      new Transaction().add(
-        await initBankMetadata(attacker.mrgnProgram, {
-          bank: fakeBank,
-        }),
-      ),
-    );
-
-    // TODO expectFailedTxWithError once resolved...
-    let failed = false;
-    try {
+    await expectFailedTxWithMessage(async () => {
       await attacker.mrgnProgram.provider.sendAndConfirm(
         new Transaction().add(
-          await writeBankMetadata(attacker.mrgnProgram, {
+          await initBankMetadata(attacker.mrgnProgram, {
             group: attackerGroup.publicKey,
-            metadata: fakeMetadata,
-            ticker: "EVIL",
-            description: "P0 is a doodoo face",
-          }),
-        ),
+            bankMint: ecosystem.usdcMint.publicKey,
+            bank,
+            bankSeed,
+          })
+        )
       );
-    } catch (_err) {
-      failed = true;
-    }
-
-    assert.ok(
-      failed,
-      "Attacker could write metadata for a bank that does not exist yet",
-    );
+    }, "ConstraintSeeds");
   });
 
-  it("(meta admin) Update metadata for a bank", async () => {
+  it("(meta admin) Update metadata for a seeded bank", async () => {
+    const bankSeed = new BN(43);
+    const { bank, metadata } = deriveBankAndMetadataWithSeed(
+      program.programId,
+      marginfiGroup.publicKey,
+      ecosystem.usdcMint.publicKey,
+      bankSeed
+    );
+
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await groupConfigure(groupAdmin.mrgnProgram, {
           newMetadataAdmin: users[0].wallet.publicKey,
           marginfiGroup: marginfiGroup.publicKey,
-        }),
-      ),
+        })
+      )
     );
     const group = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey,
+      marginfiGroup.publicKey
     );
     assertKeysEqual(group.metadataAdmin, users[0].wallet.publicKey);
 
-    const [metaKey] = deriveBankMetadata(
-      program.programId,
-      bankKeypairUsdc.publicKey,
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await initBankMetadata(groupAdmin.mrgnProgram, {
+          group: marginfiGroup.publicKey,
+          bankMint: ecosystem.usdcMint.publicKey,
+          bank,
+          bankSeed,
+        })
+      )
     );
 
     const tickerStr = "USDCasdfg";
@@ -439,23 +449,23 @@ describe("Lending pool configure bank", () => {
       new Transaction().add(
         await writeBankMetadata(users[0].mrgnProgram, {
           group: marginfiGroup.publicKey,
-          metadata: metaKey,
+          bankMint: ecosystem.usdcMint.publicKey,
+          bank,
+          bankSeed,
+          metadata,
           ticker: tickerStr,
           description: descStr,
-        }),
-      ),
+        })
+      )
     );
-    const meta = await program.account.bankMetadata.fetch(metaKey);
-    // Note: buffer is zero-padded, but the subarray will match the expected str
+    const meta = await program.account.bankMetadata.fetch(metadata);
     const onchainTicker = Buffer.from(meta.ticker as number[]);
     assert.equal(
       onchainTicker.subarray(0, tickerUtf8.length).toString("utf8"),
-      tickerStr,
+      tickerStr
     );
-    // Use the end byte pointer to quickly get the end byte for subarray
     assert.equal(meta.endTickerByte, tickerUtf8.length - 1);
 
-    // Note: also the same as a zero-padded buffer allocated manually
     const expectedTicker = Buffer.alloc(64, 0);
     expectedTicker.set(tickerUtf8, 0);
     assert.deepStrictEqual(onchainTicker, expectedTicker);
@@ -463,7 +473,7 @@ describe("Lending pool configure bank", () => {
     const onchainDesc = Buffer.from(meta.description as number[]);
     assert.equal(
       onchainDesc.subarray(0, descUtf8.length).toString("utf8"),
-      descStr,
+      descStr
     );
     assert.equal(meta.endDescriptionByte, descUtf8.length - 1);
   });

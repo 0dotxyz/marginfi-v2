@@ -1,10 +1,12 @@
 use anchor_lang::prelude::*;
+use anchor_spl::token_interface::Mint;
 use marginfi_type_crate::types::{BankMetadata, MarginfiGroup};
 
 use crate::MarginfiError;
 
 pub fn write_bank_metadata(
     ctx: Context<WriteBankMetadata>,
+    _bank_seed: u64,
     ticker: Option<Vec<u8>>,
     description: Option<Vec<u8>>,
 ) -> Result<()> {
@@ -50,13 +52,24 @@ pub fn write_bank_metadata(
 }
 
 #[derive(Accounts)]
+#[instruction(bank_seed: u64)]
 pub struct WriteBankMetadata<'info> {
     #[account(
         has_one = metadata_admin,
     )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    /// CHECK: Bank may not be initialized yet. Validated via metadata.bank.
+    pub bank_mint: Box<InterfaceAccount<'info, Mint>>,
+
+    /// CHECK: Canonical bank PDA; may not be initialized yet.
+    #[account(
+        seeds = [
+            group.key().as_ref(),
+            bank_mint.key().as_ref(),
+            &bank_seed.to_le_bytes(),
+        ],
+        bump,
+    )]
     pub bank: UncheckedAccount<'info>,
 
     #[account(mut)]
