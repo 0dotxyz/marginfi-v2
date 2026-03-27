@@ -1,0 +1,29 @@
+{
+  "group": null,
+  "mint": "So11111111111111111111111111111111111111112",
+  "seed": 0,
+  "oracle": "<SWITCHBOARD_PULL_FEED_PUBKEY>",
+  "oracle_type": 4,
+  "asset_weight_init": 0.8,
+  "asset_weight_maint": 0.9,
+  "liability_weight_init": 1.14,
+  "liability_weight_maint": 1.1,
+  "deposit_limit_ui": 2000000,
+  "borrow_limit_ui": 500000,
+  "zero_util_rate": 0,
+  "hundred_util_rate": 858993459,
+  "points": [
+    { "util": 2147483647, "rate": 214748364 },
+    { "util": 3865470566, "rate": 429496729 }
+  ],
+  "insurance_fee_fixed_apr": 0.0,
+  "insurance_ir_fee": 0.0,
+  "protocol_fixed_fee_apr": 0.0001,
+  "protocol_ir_fee": 0.06,
+  "protocol_origination_fee": 0.0,
+  "risk_tier": "collateral",
+  "oracle_max_age": 70,
+  "oracle_max_confidence": 0,
+  "asset_tag": 0,
+  "global_fee_wallet": null
+}

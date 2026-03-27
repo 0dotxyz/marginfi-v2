@@ -190,7 +190,7 @@ describe("k10: Kamino Liquidation", () => {
           bank: kaminoUsdcBank,
           signerTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
         depositAmountUsdc
       ),

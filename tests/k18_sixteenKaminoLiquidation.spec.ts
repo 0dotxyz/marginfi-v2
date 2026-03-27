@@ -33,6 +33,8 @@ import {
   users,
   verbose,
   bankrunProgram,
+  kaminoAccounts,
+  TOKEN_A_RESERVE,
 } from "./rootHooks";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import {
@@ -49,6 +51,7 @@ import {
   deriveBankWithSeed,
   deriveLiquidityVaultAuthority,
   deriveBaseObligation,
+  deriveLendingMarketAuthority,
 } from "./utils/pdas";
 import {
   createLut,
@@ -69,7 +72,6 @@ import {
   BorrowRateCurveFields,
   PriceFeed,
   AssetReserveConfig,
-  updateEntireReserveConfigIx,
 } from "@kamino-finance/klend-sdk";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { ComputeBudgetProgram } from "@solana/web3.js";
@@ -77,6 +79,7 @@ import Decimal from "decimal.js";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
 import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "./utils/types";
+import { createReserve } from "./k01_kaminoInit.spec";
 
 /** Number of Kamino banks to create for this test (16 total banks)
  * User will deposit into 15 Kamino banks + 1 USDC borrow = 16 total positions */
@@ -95,6 +98,10 @@ describe("k18: 16 Kamino position liquidation test", () => {
   let usdcBank: PublicKey;
   let lutAddress: PublicKey;
   let lut: AddressLookupTableAccount;
+  let tokenAReserve: PublicKey;
+  before(async () => {
+    tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE)!;
+  });
 
   it("Refresh oracles", async () => {
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
@@ -107,9 +114,9 @@ describe("k18: 16 Kamino position liquidation test", () => {
       const marketKeypair = Keypair.generate();
       const quoteCurrency = Array(32).fill(0); // USD quote currency
       const id = klendBankrunProgram.programId;
-      const [lendingMarketAuthority] = lendingMarketAuthPda(
-        marketKeypair.publicKey,
+      const [lendingMarketAuthority] = deriveLendingMarketAuthority(
         id,
+        marketKeypair.publicKey,
       );
 
       const createMarketTx = new Transaction().add(
@@ -144,123 +151,14 @@ describe("k18: 16 Kamino position liquidation test", () => {
       const reserveKeypair = Keypair.generate();
       const mint = ecosystem.tokenAMint.publicKey;
 
-      const [reserveLiquiditySupply] = reserveLiqSupplyPda(
-        marketKeypair.publicKey,
-        mint,
-        id,
-      );
-      const [reserveFeeVault] = reserveFeeVaultPda(
-        marketKeypair.publicKey,
-        mint,
-        id,
-      );
-      const [collatMint] = reserveCollateralMintPda(
-        marketKeypair.publicKey,
-        mint,
-        id,
-      );
-      const [collatSupply] = reserveCollateralSupplyPda(
-        marketKeypair.publicKey,
-        mint,
-        id,
-      );
-
-      const createReserveTx = new Transaction().add(
-        SystemProgram.createAccount({
-          fromPubkey: groupAdmin.wallet.publicKey,
-          newAccountPubkey: reserveKeypair.publicKey,
-          space: RESERVE_SIZE + 8,
-          lamports:
-            await bankRunProvider.connection.getMinimumBalanceForRentExemption(
-              RESERVE_SIZE + 8,
-            ),
-          programId: id,
-        }),
-        await klendBankrunProgram.methods
-          .initReserve()
-          .accounts({
-            lendingMarketOwner: groupAdmin.wallet.publicKey,
-            lendingMarket: marketKeypair.publicKey,
-            lendingMarketAuthority,
-            reserve: reserveKeypair.publicKey,
-            reserveLiquidityMint: mint,
-            reserveLiquiditySupply,
-            feeReceiver: reserveFeeVault,
-            reserveCollateralMint: collatMint,
-            reserveCollateralSupply: collatSupply,
-            initialLiquiditySource: groupAdmin.tokenAAccount,
-            rent: SYSVAR_RENT_PUBKEY,
-            liquidityTokenProgram: TOKEN_PROGRAM_ID,
-            collateralTokenProgram: TOKEN_PROGRAM_ID,
-            systemProgram: SystemProgram.programId,
-          })
-          .instruction(),
-      );
-
-      await processBankrunTransaction(bankrunContext, createReserveTx, [
-        groupAdmin.wallet,
+      await createReserve(
         reserveKeypair,
-      ]);
-
-      // Update reserve config to make it operational
-      const marketAcc: LendingMarket = LendingMarket.decode(
-        (
-          await bankRunProvider.connection.getAccountInfo(
-            marketKeypair.publicKey,
-          )
-        ).data,
-      );
-      const marketWithAddress: MarketWithAddress = {
-        address: marketKeypair.publicKey,
-        state: marketAcc,
-      };
-
-      const borrowRateCurve = new BorrowRateCurve({
-        points: [
-          new CurvePoint({ utilizationRateBps: 0, borrowRateBps: 50000 }),
-          new CurvePoint({ utilizationRateBps: 5000, borrowRateBps: 100000 }),
-          new CurvePoint({ utilizationRateBps: 8000, borrowRateBps: 500000 }),
-          new CurvePoint({ utilizationRateBps: 10000, borrowRateBps: 1000000 }),
-          ...Array(7).fill(
-            new CurvePoint({
-              utilizationRateBps: 10000,
-              borrowRateBps: 1000000,
-            }),
-          ),
-        ],
-      } as BorrowRateCurveFields);
-
-      const assetReserveConfigParams = {
-        loanToValuePct: 75,
-        liquidationThresholdPct: 85,
-        borrowRateCurve,
-        depositLimit: new Decimal(1_000_000_000),
-        borrowLimit: new Decimal(1_000_000_000),
-      };
-
-      const priceFeed: PriceFeed = {
-        pythPrice: oracles.tokenAOracle.publicKey,
-      };
-
-      const assetReserveConfig = new AssetReserveConfig({
-        mint: mint,
-        mintTokenProgram: TOKEN_PROGRAM_ID,
-        tokenName: "TOKEN_A",
-        mintDecimals: ecosystem.tokenADecimals,
-        priceFeed: priceFeed,
-        ...assetReserveConfigParams,
-      }).getReserveConfig();
-
-      const updateReserveIx = updateEntireReserveConfigIx(
-        marketWithAddress,
-        reserveKeypair.publicKey,
-        assetReserveConfig,
-        klendBankrunProgram.programId,
-      );
-
-      const updateReserveTx = new Transaction().add(
-        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 }),
-        updateReserveIx,
+        marketKeypair.publicKey,
+        mint,
+        "TOKEN_A",
+        ecosystem.tokenADecimals,
+        oracles.tokenAOracle.publicKey,
+        groupAdmin.tokenAAccount,
       );
 
       await processBankrunTransaction(bankrunContext, updateReserveTx, [
@@ -503,10 +401,10 @@ describe("k18: 16 Kamino position liquidation test", () => {
           user.mrgnBankrunProgram,
           {
             marginfiAccount: userAccount,
-            bank: bank,
+            bank,
             signerTokenAccount: user.tokenAAccount,
             lendingMarket: market,
-            reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+            reserve,
           },
           depositAmount,
         ),
@@ -770,7 +668,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
           bank: kaminoBanks[0],
           signerTokenAccount: user.tokenAAccount,
           lendingMarket: kaminoMarkets[0],
-          reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+          reserve: kaminoReserves[0],
         },
         depositAmountTokenA,
       ),

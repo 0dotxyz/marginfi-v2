@@ -1,18 +1,19 @@
 use crate::{
     bank_signer, check,
     constants::PROGRAM_VERSION,
-    events::{AccountEventHeader, LendingAccountWithdrawEvent},
+    events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            calc_value, check_account_init_health, BankAccountWrapper, LendingAccountImpl,
-            MarginfiAccountImpl,
+            account_not_frozen_for_authority, calc_value, check_account_init_health,
+            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
+        rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
         fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank, is_juplend_asset_tag,
-        validate_bank_state, InstructionKind,
+        record_withdrawal_outflow, validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -31,7 +32,8 @@ use juplend_mocks::state::{
     Lending as JuplendLending,
 };
 use marginfi_type_crate::types::{
-    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+    ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
 };
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_IN_DELEVERAGE,
@@ -58,6 +60,7 @@ pub fn juplend_withdraw<'info>(
     ctx.accounts.cpi_update_rate()?;
 
     let bank_key = ctx.accounts.bank.key();
+    let bank_mint = ctx.accounts.bank.load()?.mint;
     let authority_bump: u8;
 
     // Update marginfi internal balances first (tx will revert if CPI fails later).
@@ -75,32 +78,36 @@ pub fn juplend_withdraw<'info>(
     let (token_amount, shares_to_burn) = {
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;
-        let mut group = ctx.accounts.group.load_mut()?;
+        let group = ctx.accounts.group.load()?;
         let lending = ctx.accounts.integration_acc_1.load()?;
 
         authority_bump = bank.liquidity_vault_authority_bump;
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
 
-        check!(
-            !marginfi_account.get_flag(ACCOUNT_DISABLED),
-            MarginfiError::AccountDisabled
-        );
-
-        // Validate price is non-zero during liquidation/deleverage to prevent exploits with stale oracles.
-        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
-        let price = if in_receivership {
+        // Fetch oracle price for rate limiting and deleverage tracking
+        let in_receivership_or_order_execution =
+            marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
+        // When group rate limiter is enabled, oracle is required
+        let group_rate_limit_enabled = group.rate_limiter.is_enabled();
+        let price = if in_receivership_or_order_execution || group_rate_limit_enabled {
             let price = fetch_asset_price_for_bank_low_bias(
                 &bank_key,
                 &bank,
                 &clock,
                 ctx.remaining_accounts,
             )?;
-            check!(price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
+
+            // Validate price is non-zero during liquidation/deleverage to prevent exploits with stale oracles
+            if in_receivership_or_order_execution {
+                check!(price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
+            }
+
             price
         } else {
             I80F48::ZERO
         };
 
+        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
         let mut bank_account = BankAccountWrapper::find(
             &ctx.accounts.bank.key(),
             &mut bank,
@@ -109,7 +116,7 @@ pub fn juplend_withdraw<'info>(
 
         let (token_amount, shares_to_burn) = if withdraw_all {
             // `withdraw_all` returns the user's full fToken share balance (u64).
-            let f_tokens_balance = bank_account.withdraw_all()?;
+            let f_tokens_balance = bank_account.withdraw_all(in_receivership)?;
             // Redeemable underlying = floor(shares * price / 1e12)
             // Then recalculate shares_to_burn from token_amount to guarantee we match
             // JupLend's expected burn amount (should be identical, but this is safer).
@@ -143,7 +150,20 @@ pub fn juplend_withdraw<'info>(
             (amount, shares_to_burn)
         };
 
-        // Track withdrawal limit for risk admin during deleverage.
+        let native_outflow = if withdraw_all { token_amount } else { amount };
+        record_withdrawal_outflow(
+            group_rate_limit_enabled,
+            native_outflow,
+            shares_to_burn,
+            price,
+            &mut bank,
+            &group,
+            ctx.accounts.group.key(),
+            bank_key,
+            &marginfi_account,
+            &clock,
+        )?;
+        // Note: we only care about the withdraw limit in case of deleverage
         if marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE) {
             let withdrawn_equity = calc_value(
                 I80F48::from_num(shares_to_burn),
@@ -151,8 +171,18 @@ pub fn juplend_withdraw<'info>(
                 bank.mint_decimals,
                 None,
             )?;
-            group.update_withdrawn_equity(withdrawn_equity, clock.unix_timestamp)?;
+            group.check_deleverage_withdraw_limit(withdrawn_equity, clock.unix_timestamp)?;
+            emit!(DeleverageWithdrawFlowEvent {
+                group: ctx.accounts.group.key(),
+                bank: bank_key,
+                mint: bank.mint,
+                outflow_usd: withdrawn_equity.to_num(),
+                current_timestamp: clock.unix_timestamp,
+            });
         }
+
+        bank.update_bank_cache(&group)?;
+        marginfi_account.last_update = clock.unix_timestamp as u64;
 
         (token_amount, shares_to_burn)
     };
@@ -226,13 +256,7 @@ pub fn juplend_withdraw<'info>(
 
     // Post-withdraw accounting + health check.
     {
-        let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let group = &ctx.accounts.group.load()?;
-
-        bank.update_bank_cache(group)?;
-
-        marginfi_account.last_update = clock.unix_timestamp as u64;
 
         emit!(LendingAccountWithdrawEvent {
             header: AccountEventHeader {
@@ -241,8 +265,8 @@ pub fn juplend_withdraw<'info>(
                 marginfi_account_authority: marginfi_account.authority,
                 marginfi_group: marginfi_account.group,
             },
-            bank: ctx.accounts.bank.key(),
-            mint: bank.mint,
+            bank: bank_key,
+            mint: bank_mint,
             amount: received_underlying,
             close_balance: withdraw_all,
         });
@@ -252,12 +276,14 @@ pub fn juplend_withdraw<'info>(
 
         marginfi_account.lending_account.sort_balances();
 
-        // Drop bank mutable borrow before health check (bank is in remaining_accounts).
-        drop(bank);
+        let in_receivership_or_order_execution =
+            marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
 
-        // Skip health checks during liquidation; checked at end of tx.
-        // During receivership we still update the price cache but skip the risk check.
-        if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
+        // Note: during liquidation/deleverage or order execution, we skip health checks until the end
+        // of the transaction, but we still update the price cache.
+        if !in_receivership_or_order_execution {
+            // Check account health, if below threshold fail transaction
+            // Assuming `ctx.remaining_accounts` holds only oracle accounts
             check_account_init_health(
                 &marginfi_account,
                 ctx.remaining_accounts,
@@ -266,8 +292,7 @@ pub fn juplend_withdraw<'info>(
             health_cache.program_version = PROGRAM_VERSION;
 
             let bank_loader = &ctx.accounts.bank;
-            let bank = bank_loader.load()?;
-            let clock = Clock::get()?;
+            let mut bank = bank_loader.load_mut()?;
             let price_for_cache = fetch_unbiased_price_for_bank(
                 &bank_loader.key(),
                 &bank,
@@ -275,10 +300,8 @@ pub fn juplend_withdraw<'info>(
                 ctx.remaining_accounts,
             )
             .ok();
-            drop(bank);
-            bank_loader
-                .load_mut()?
-                .update_cache_price(price_for_cache)?;
+
+            bank.update_cache_price(price_for_cache)?;
 
             health_cache.set_engine_ok(true);
             marginfi_account.health_cache = health_cache;
@@ -286,7 +309,6 @@ pub fn juplend_withdraw<'info>(
             // Note: the caller can simply omit risk accounts since the risk check is ignored here,
             // in that case the cache doesn't update and this does nothing.
             let mut bank = ctx.accounts.bank.load_mut()?;
-            let clock = Clock::get()?;
             let price_for_cache =
                 fetch_unbiased_price_for_bank(&bank_key, &bank, &clock, ctx.remaining_accounts)
                     .ok();
@@ -300,7 +322,6 @@ pub fn juplend_withdraw<'info>(
 #[derive(Accounts)]
 pub struct JuplendWithdraw<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused
@@ -311,8 +332,17 @@ pub struct JuplendWithdraw<'info> {
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_DISABLED)
+        } @MarginfiError::AccountDisabled,
+        constraint = {
             let a = marginfi_account.load()?;
-            a.authority == authority.key() || a.get_flag(ACCOUNT_IN_RECEIVERSHIP)
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), true, true)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
@@ -522,7 +552,6 @@ mod tests {
         // ceil(100 * 1e12 / 1.1e12) = ceil(90.909...) = 91
         let shares = expected_shares_for_withdraw_from_rate(100, 1_100_000_000_000).unwrap();
         assert_eq!(shares, 91);
-        assert!(shares < 100);
     }
 
     #[test]
@@ -530,7 +559,6 @@ mod tests {
         // ceil(100 * 1e12 / 0.9e12) = ceil(111.111...) = 112
         let shares = expected_shares_for_withdraw_from_rate(100, 900_000_000_000).unwrap();
         assert_eq!(shares, 112);
-        assert!(shares > 100);
     }
 
     #[test]

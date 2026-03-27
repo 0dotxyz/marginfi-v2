@@ -18,13 +18,13 @@ import {
   configureBank,
   configureBankRateLimits,
   configureGroupRateLimits,
+  updateGroupRateLimiter,
 } from "./utils/group-instructions";
 import {
   accountInit,
   borrowIx,
   composeRemainingAccounts,
   depositIx,
-  pulseBankPrice,
   withdrawIx,
   repayIx,
 } from "./utils/user-instructions";
@@ -34,10 +34,13 @@ import {
   expectFailedTxWithError,
   expectFailedTxWithMessage,
 } from "./utils/genericTests";
-import { advanceBankrunClock, getBankrunTime } from "./utils/tools";
+import {
+  advanceBankrunClock,
+  getBankrunTime,
+  processBankrunTransaction,
+} from "./utils/tools";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { assert } from "chai";
-import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { blankBankConfigOptRaw } from "./utils/types";
 import { dummyIx } from "./utils/bankrunConnection";
 
@@ -56,6 +59,70 @@ const usdcOnlyRemainingAccounts = (): PublicKey[] =>
   composeRemainingAccounts([
     [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
   ]);
+
+/**
+ * Parse RateLimitFlowEvent events from transaction log messages.
+ * Anchor emits events as "Program data: <base64>" in logs.
+ */
+type RateLimitFlowEvent = {
+  group: PublicKey;
+  bank: PublicKey;
+  mint: PublicKey;
+  flowDirection: number;
+  nativeAmount: BN;
+  mintDecimals: number;
+  currentTimestamp: BN;
+};
+
+function parseRateLimitFlowEvents(
+  program: Program<Marginfi>,
+  logMessages: string[],
+): RateLimitFlowEvent[] {
+  const events: RateLimitFlowEvent[] = [];
+  const DATA_PREFIX = "Program data: ";
+
+  for (const log of logMessages) {
+    if (!log.startsWith(DATA_PREFIX)) continue;
+    const base64Data = log.slice(DATA_PREFIX.length);
+    try {
+      const decoded = program.coder.events.decode(base64Data);
+      if (decoded && decoded.name === "rateLimitFlowEvent") {
+        events.push(decoded.data as unknown as RateLimitFlowEvent);
+      }
+    } catch {
+      // Not an event we care about
+    }
+  }
+  return events;
+}
+
+/**
+ * Aggregate RateLimitFlowEvent events into total inflow/outflow USD amounts.
+ * In production, the admin would use oracle prices to convert native amounts to USD.
+ * For testing with USDC ($1 = 1 USDC), native amount / 10^decimals = USD value.
+ */
+function aggregateFlowEvents(
+  events: RateLimitFlowEvent[],
+): { totalOutflowUsd: number; totalInflowUsd: number } {
+  let totalOutflowUsd = 0;
+  let totalInflowUsd = 0;
+
+  for (const event of events) {
+    const usdValue = event.nativeAmount.toNumber() / Math.pow(10, event.mintDecimals);
+    if (event.flowDirection === 0) {
+      totalOutflowUsd += usdValue;
+    } else {
+      totalInflowUsd += usdValue;
+    }
+  }
+
+  return { totalOutflowUsd, totalInflowUsd };
+}
+
+async function getCurrentBankrunSlot(): Promise<BN> {
+  const clock = await bankrunContext.banksClient.getClock();
+  return new BN(clock.slot.toString());
+}
 
 let program: Program<Marginfi>;
 let rateLimitAccount: PublicKey | null = null;
@@ -200,6 +267,29 @@ describe("Rate limiter", () => {
   };
 
   /**
+   * Borrow USDC and return parsed RateLimitFlowEvents from the transaction logs
+   */
+  const borrowUsdcWithEvents = async (amount: BN): Promise<RateLimitFlowEvent[]> => {
+    const prog = userProgram();
+    const tx = new Transaction().add(
+      dummyIx(prog.provider.publicKey, users[0].wallet.publicKey),
+      await borrowIx(prog, {
+        marginfiAccount: requireRateLimitAccount(),
+        bank: bankKeypairUsdc.publicKey,
+        tokenAccount: rateLimitUser.usdcAccount,
+        remaining: usdcRemainingAccounts(),
+        amount,
+      }),
+    );
+    const result = await processBankrunTransaction(
+      bankrunContext,
+      tx,
+      [rateLimitUser.wallet, users[0].wallet],
+    );
+    return parseRateLimitFlowEvents(prog, result.logMessages);
+  };
+
+  /**
    * Repay USDC to the rate limit account
    */
   const repayUsdc = async (amount: BN): Promise<void> => {
@@ -213,6 +303,62 @@ describe("Rate limiter", () => {
           tokenAccount: rateLimitUser.usdcAccount,
           remaining: usdcRemainingAccounts(),
           amount,
+        }),
+      ),
+    );
+  };
+
+  /**
+   * Repay USDC and return parsed RateLimitFlowEvents from the transaction logs
+   */
+  const repayUsdcWithEvents = async (amount: BN): Promise<RateLimitFlowEvent[]> => {
+    const prog = userProgram();
+    const tx = new Transaction().add(
+      dummyIx(prog.provider.publicKey, users[0].wallet.publicKey),
+      await repayIx(prog, {
+        marginfiAccount: requireRateLimitAccount(),
+        bank: bankKeypairUsdc.publicKey,
+        tokenAccount: rateLimitUser.usdcAccount,
+        remaining: usdcRemainingAccounts(),
+        amount,
+      }),
+    );
+    const result = await processBankrunTransaction(
+      bankrunContext,
+      tx,
+      [rateLimitUser.wallet, users[0].wallet],
+    );
+    return parseRateLimitFlowEvents(prog, result.logMessages);
+  };
+
+  const adminUpdateGroupRateLimiter = async (args: {
+    outflowUsd?: BN;
+    inflowUsd?: BN;
+  }) => {
+    const groupState = await program.account.marginfiGroup.fetch(
+      marginfiGroup.publicKey,
+    );
+    const updateSeq = groupState.rateLimiterLastAdminUpdateSeq.add(new BN(1));
+    const eventStartSlot = groupState.rateLimiterLastAdminUpdateSlot.add(new BN(1));
+    let eventEndSlot = await getCurrentBankrunSlot();
+
+    // Strict slot progression requires start > last_slot and start <= end.
+    // Back-to-back admin updates can happen in the same slot, so advance one slot if needed.
+    while (eventEndSlot.lt(eventStartSlot)) {
+      await advanceBankrunClock(bankrunContext, 1);
+      eventEndSlot = await getCurrentBankrunSlot();
+    }
+
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await updateGroupRateLimiter(groupAdmin.mrgnProgram, {
+          marginfiGroup: marginfiGroup.publicKey,
+          delegateFlowAdmin: groupAdmin.wallet.publicKey,
+          outflowUsd: args.outflowUsd ?? null,
+          inflowUsd: args.inflowUsd ?? null,
+          updateSeq,
+          eventStartSlot,
+          eventEndSlot,
         }),
       ),
     );
@@ -320,6 +466,36 @@ describe("Rate limiter", () => {
     assertBNEqual(groupAfter.rateLimiter.daily.maxOutflow, 300); // updated
   });
 
+  it("(admin) rejects overlapping admin update slot ranges", async () => {
+    const groupState = await program.account.marginfiGroup.fetch(
+      marginfiGroup.publicKey,
+    );
+
+    const updateSeq = groupState.rateLimiterLastAdminUpdateSeq.add(new BN(1));
+    const eventStartSlot = groupState.rateLimiterLastAdminUpdateSlot; // intentionally overlapping
+    const eventEndSlot = await getCurrentBankrunSlot();
+
+    await expectFailedTxWithError(
+      async () => {
+        await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+          new Transaction().add(
+            await updateGroupRateLimiter(groupAdmin.mrgnProgram, {
+              marginfiGroup: marginfiGroup.publicKey,
+              delegateFlowAdmin: groupAdmin.wallet.publicKey,
+              outflowUsd: new BN(1),
+              inflowUsd: null,
+              updateSeq,
+              eventStartSlot,
+              eventEndSlot,
+            }),
+          ),
+        );
+      },
+      "GroupRateLimiterUpdateOutOfOrderSlot",
+      6124,
+    );
+  });
+
   it("(user 2) bank hourly limit blocks excess outflow", async () => {
     const bankHourlyLimit = usdcNative(1);
 
@@ -380,47 +556,68 @@ describe("Rate limiter", () => {
     }, "Bank hourly rate limit exceeded");
   });
 
-  it("(user 2) group hourly limit offsets inflows", async () => {
+  it("(user 2) group hourly limit blocks borrow - event-driven admin update flow", async () => {
     // Set high bank limit so only group limit is the constraint
     await setRateLimits({
       bankHourly: usdcNative(1_000),
       bankDaily: new BN(0),
-      groupHourly: new BN(20),
+      groupHourly: new BN(10),
       groupDaily: new BN(0),
     });
 
-    // Borrow 15 USDC at $1 = 15 USD outflow
-    await borrowUsdc(usdcNative(15));
+    // Borrow 5 USDC and capture emitted events
+    const borrowEvents = await borrowUsdcWithEvents(usdcNative(5));
 
-    const groupAfterBorrow = await program.account.marginfiGroup.fetch(
+    // Verify a RateLimitFlowEvent was emitted with the correct values
+    assert.equal(borrowEvents.length, 1, "Expected 1 RateLimitFlowEvent");
+    assert.equal(borrowEvents[0].flowDirection, 0, "Expected outflow (0)");
+    assertBNEqual(borrowEvents[0].nativeAmount, usdcNative(5));
+    assert.equal(borrowEvents[0].mintDecimals, 6, "USDC has 6 decimals");
+    assert.ok(borrowEvents[0].currentTimestamp.toNumber() > 0, "Timestamp should be set");
+
+    // Admin aggregates events and updates group rate limiter (simulating off-chain flow)
+    const { totalOutflowUsd } = aggregateFlowEvents(borrowEvents);
+    assert.equal(totalOutflowUsd, 5, "5 USDC at $1 = $5 outflow");
+
+    await adminUpdateGroupRateLimiter({ outflowUsd: new BN(totalOutflowUsd) });
+
+    const groupAfterUpdate = await program.account.marginfiGroup.fetch(
       marginfiGroup.publicKey,
     );
-    assertBNEqual(groupAfterBorrow.rateLimiter.hourly.curWindowOutflow, 15);
+    assertBNEqual(groupAfterUpdate.rateLimiter.hourly.curWindowOutflow, 5);
 
-    // Try to borrow 10 more - should fail (15 + 10 = 25 > 20 limit)
+    // Try to borrow 8 more - should fail (5 + 8 = 13 > 10 limit)
     await expectFailedTxWithError(
       async () => {
-        await borrowUsdc(usdcNative(10));
+        await borrowUsdc(usdcNative(8));
       },
       "GroupHourlyRateLimitExceeded",
       6117,
     );
 
-    // Repay 5 USDC at $1 = 5 USD inflow, reducing net outflow to 10
+    // Repay 3 USDC and capture events
+    const repayEvents = await repayUsdcWithEvents(usdcNative(3));
+
+    assert.equal(repayEvents.length, 1, "Expected 1 RateLimitFlowEvent for repay");
+    assert.equal(repayEvents[0].flowDirection, 1, "Expected inflow (1)");
+    assertBNEqual(repayEvents[0].nativeAmount, usdcNative(3));
+
+    // Admin aggregates the inflow and updates group rate limiter
+    const { totalInflowUsd } = aggregateFlowEvents(repayEvents);
+    assert.equal(totalInflowUsd, 3, "3 USDC at $1 = $3 inflow");
+
+    await adminUpdateGroupRateLimiter({ inflowUsd: new BN(totalInflowUsd) });
+
+    const groupAfterInflow = await program.account.marginfiGroup.fetch(
+      marginfiGroup.publicKey,
+    );
+    assertBNEqual(groupAfterInflow.rateLimiter.hourly.curWindowOutflow, 2);
+
+    // Now borrow 3 more should succeed (2 + 3 = 5 < 10 limit)
+    await borrowUsdc(usdcNative(3));
+
+    // Repay what we borrowed
     await repayUsdc(usdcNative(5));
-
-    const groupAfterRepay = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey,
-    );
-    assertBNEqual(groupAfterRepay.rateLimiter.hourly.curWindowOutflow, 10);
-
-    // Now borrow 5 more should succeed (10 + 5 = 15 < 20 limit)
-    await borrowUsdc(usdcNative(5));
-
-    const groupFinal = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey,
-    );
-    assertBNEqual(groupFinal.rateLimiter.hourly.curWindowOutflow, 15);
   });
 
   it("(user 2) bank daily limit blocks excess outflow", async () => {
@@ -443,29 +640,40 @@ describe("Rate limiter", () => {
     await expectFailedTxWithMessage(async () => {
       await borrowUsdc(usdcNative(1));
     }, "Bank daily rate limit exceeded");
+
+    // Repay to keep account healthy for subsequent tests
+    await repayUsdc(bankDailyLimit);
   });
 
-  it("(user 2) group daily limit blocks excess outflow", async () => {
-    // Group daily limit is in USD, so 10 = $10
+  it("(user 2) group daily limit blocks borrow after admin records outflow", async () => {
+    // Group daily limit is in USD, so 5 = $5
     await setRateLimits({
       bankHourly: usdcNative(1_000),
       bankDaily: new BN(0),
       groupHourly: new BN(0),
-      groupDaily: new BN(10),
+      groupDaily: new BN(5),
     });
 
-    // Borrow 10 USDC at $1 = 10 USD outflow (exactly at limit)
-    await borrowUsdc(usdcNative(10));
+    // Borrow 3 USDC and capture events
+    const events = await borrowUsdcWithEvents(usdcNative(3));
+    const { totalOutflowUsd } = aggregateFlowEvents(events);
+    assert.equal(totalOutflowUsd, 3, "3 USDC at $1 = $3 outflow");
+
+    // Admin aggregates and updates group daily rate limiter
+    await adminUpdateGroupRateLimiter({ outflowUsd: new BN(totalOutflowUsd) });
 
     const groupAfter = await program.account.marginfiGroup.fetch(
       marginfiGroup.publicKey,
     );
-    assertBNEqual(groupAfter.rateLimiter.daily.curWindowOutflow, 10);
+    assertBNEqual(groupAfter.rateLimiter.daily.curWindowOutflow, 3);
 
-    // Try to borrow 5 more - should fail (10 + 5 = 15 > 10 limit)
+    // Try to borrow 3 more - should fail (3 + 3 = 6 > 5 limit)
     await expectFailedTxWithMessage(async () => {
-      await borrowUsdc(usdcNative(5));
+      await borrowUsdc(usdcNative(3));
     }, "Group daily rate limit exceeded");
+
+    // Repay to keep account healthy
+    await repayUsdc(usdcNative(3));
   });
 
   it("(user 2) deposit offsets withdraw outflow", async () => {
@@ -534,79 +742,19 @@ describe("Rate limiter", () => {
 
     // Now borrow succeeds (limit disabled)
     await borrowUsdc(usdcNative(3));
+
+    // Repay to keep account healthy for subsequent tests
+    await repayUsdc(usdcNative(5));
   });
 
-  it("(user 2) uses cached price for inflows (repay uses bank cache, not fresh oracle)", async () => {
+  it("(user 2) group rate limiter is read-only during user instructions", async () => {
+    // Configure group hourly limit
     await setRateLimits({
-      bankHourly: new BN(0),
+      bankHourly: usdcNative(1_000),
       bankDaily: new BN(0),
-      groupHourly: new BN(1_000),
+      groupHourly: new BN(100),
       groupDaily: new BN(0),
     });
-
-    // Pulse bank to cache a fresh oracle price
-    await userProgram().provider.sendAndConfirm(
-      new Transaction().add(
-        await pulseBankPrice(userProgram(), {
-          group: marginfiGroup.publicKey,
-          bank: bankKeypairUsdc.publicKey,
-          remaining: [oracles.usdcOracle.publicKey],
-        }),
-      ),
-    );
-
-    // Verify bank has a valid cached price
-    const bankAfterPulse = await program.account.bank.fetch(
-      bankKeypairUsdc.publicKey,
-    );
-    const cachedPrice = wrappedI80F48toBigNumber(
-      bankAfterPulse.cache.lastOraclePrice,
-    ).toNumber();
-    assert.ok(
-      cachedPrice > 0,
-      "Bank should have a valid cached price after pulse",
-    );
-
-    await borrowUsdc(usdcNative(1));
-
-    const groupAfterBorrow = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey,
-    );
-    assertBNEqual(groupAfterBorrow.rateLimiter.hourly.curWindowOutflow, 1);
-
-    await repayUsdc(usdcNative(1));
-
-    // Verify: inflow was applied directly (not tracked as untracked)
-    const bankAfterRepay = await program.account.bank.fetch(
-      bankKeypairUsdc.publicKey,
-    );
-    assertBNEqual(bankAfterRepay.rateLimiter.untrackedInflow, 0);
-
-    // Verify: net outflow = 0 (borrow 1, repay 1)
-    const groupAfterRepay = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey,
-    );
-    assertBNEqual(groupAfterRepay.rateLimiter.hourly.curWindowOutflow, 0);
-  });
-
-  it("(user 2) tracks untracked inflows when price is stale, applies on pulse", async () => {
-    await setRateLimits({
-      bankHourly: new BN(0),
-      bankDaily: new BN(0),
-      groupHourly: new BN(1_000),
-      groupDaily: new BN(0),
-    });
-
-    // Pulse bank price to get a fresh cached price
-    await userProgram().provider.sendAndConfirm(
-      new Transaction().add(
-        await pulseBankPrice(userProgram(), {
-          group: marginfiGroup.publicKey,
-          bank: bankKeypairUsdc.publicKey,
-          remaining: [oracles.usdcOracle.publicKey],
-        }),
-      ),
-    );
 
     const groupBefore = await program.account.marginfiGroup.fetch(
       marginfiGroup.publicKey,
@@ -614,18 +762,20 @@ describe("Rate limiter", () => {
     const outflowBefore =
       groupBefore.rateLimiter.hourly.curWindowOutflow.toNumber();
 
-    // Advance clock past oracle max age (makes cached price stale)
-    const bankBefore = await program.account.bank.fetch(
-      bankKeypairUsdc.publicKey,
-    );
-    await advanceClock(bankBefore.config.oracleMaxAge + 1, false);
+    // Borrow 5 USDC - this should succeed (within limit) but NOT update group state
+    await borrowUsdc(usdcNative(5));
 
-    await repayUsdc(usdcNative(1));
-
-    const bankAfterRepay = await program.account.bank.fetch(
-      bankKeypairUsdc.publicKey,
+    const groupAfterBorrow = await program.account.marginfiGroup.fetch(
+      marginfiGroup.publicKey,
     );
-    assertBNEqual(bankAfterRepay.rateLimiter.untrackedInflow, usdcNative(1));
+    // Group rate limiter should NOT have changed (it's read-only during user instructions)
+    assertBNEqual(
+      groupAfterBorrow.rateLimiter.hourly.curWindowOutflow,
+      outflowBefore,
+    );
+
+    // Repay 5 USDC - group state should also remain unchanged
+    await repayUsdc(usdcNative(5));
 
     const groupAfterRepay = await program.account.marginfiGroup.fetch(
       marginfiGroup.publicKey,
@@ -634,33 +784,89 @@ describe("Rate limiter", () => {
       groupAfterRepay.rateLimiter.hourly.curWindowOutflow,
       outflowBefore,
     );
+  });
 
-    // Refresh oracles and pulse bank to apply untracked inflows
-    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
-    await userProgram().provider.sendAndConfirm(
-      new Transaction().add(
-        await pulseBankPrice(userProgram(), {
-          group: marginfiGroup.publicKey,
-          bank: bankKeypairUsdc.publicKey,
-          remaining: [oracles.usdcOracle.publicKey],
-        }),
-      ),
-    );
+  it("(admin) batched event aggregation - multiple actions then single admin update", async () => {
+    // Simulates production flow: multiple user actions happen over a period,
+    // admin aggregates all emitted events and calls updateGroupRateLimiter once.
+    await setRateLimits({
+      bankHourly: usdcNative(1_000),
+      bankDaily: new BN(0),
+      groupHourly: new BN(10),
+      groupDaily: new BN(0),
+    });
 
-    // Untracked inflow should be applied (reset to 0)
-    const bankAfterPulse = await program.account.bank.fetch(
-      bankKeypairUsdc.publicKey,
-    );
-    assertBNEqual(bankAfterPulse.rateLimiter.untrackedInflow, 0);
+    const allEvents: RateLimitFlowEvent[] = [];
 
-    // Group outflow reduced by 1 USD (1 USDC at $1)
-    const groupAfterPulse = await program.account.marginfiGroup.fetch(
+    // Action 1: Borrow 3 USDC
+    const events1 = await borrowUsdcWithEvents(usdcNative(3));
+    allEvents.push(...events1);
+
+    // Action 2: Borrow 2 USDC
+    const events2 = await borrowUsdcWithEvents(usdcNative(2));
+    allEvents.push(...events2);
+
+    // Action 3: Repay 1 USDC
+    const events3 = await repayUsdcWithEvents(usdcNative(1));
+    allEvents.push(...events3);
+
+    // Action 4: Borrow 1 USDC
+    const events4 = await borrowUsdcWithEvents(usdcNative(1));
+    allEvents.push(...events4);
+
+    // Verify all events were captured
+    assert.equal(allEvents.length, 4, "Should have 4 events total");
+
+    // Admin aggregates all events at once (as would happen in production every ~10 minutes)
+    const { totalOutflowUsd, totalInflowUsd } = aggregateFlowEvents(allEvents);
+    assert.equal(totalOutflowUsd, 6, "3 + 2 + 1 = 6 USDC outflow");
+    assert.equal(totalInflowUsd, 1, "1 USDC inflow");
+
+    // Group state should still be unchanged (read-only during user instructions)
+    const groupBeforeAdmin = await program.account.marginfiGroup.fetch(
       marginfiGroup.publicKey,
     );
-    assertBNEqual(
-      groupAfterPulse.rateLimiter.hourly.curWindowOutflow,
-      outflowBefore - 1,
+    assertBNEqual(groupBeforeAdmin.rateLimiter.hourly.curWindowOutflow, 0);
+
+    // Admin submits both outflow and inflow in a single update
+    await adminUpdateGroupRateLimiter({
+      outflowUsd: new BN(totalOutflowUsd),
+      inflowUsd: new BN(totalInflowUsd),
+    });
+
+    // Net outflow = 6 - 1 = 5
+    const groupAfterAdmin = await program.account.marginfiGroup.fetch(
+      marginfiGroup.publicKey,
     );
+    assertBNEqual(groupAfterAdmin.rateLimiter.hourly.curWindowOutflow, 5);
+
+    // Borrow 2 more USDC and capture events for a second batch
+    const events5 = await borrowUsdcWithEvents(usdcNative(2));
+    const batch2 = aggregateFlowEvents(events5);
+    assert.equal(batch2.totalOutflowUsd, 2);
+
+    // Admin does second batch update
+    await adminUpdateGroupRateLimiter({
+      outflowUsd: new BN(batch2.totalOutflowUsd),
+    });
+
+    const groupAfterBatch2 = await program.account.marginfiGroup.fetch(
+      marginfiGroup.publicKey,
+    );
+    // 5 (previous) + 2 (new) = 7
+    assertBNEqual(groupAfterBatch2.rateLimiter.hourly.curWindowOutflow, 7);
+
+    // Borrow 4 more - should fail the read-only group capacity check (7 + 4 = 11 > 10)
+    await expectFailedTxWithError(
+      async () => {
+        await borrowUsdc(usdcNative(4));
+      },
+      "GroupHourlyRateLimitExceeded",
+      6117,
+    );
+
+    // Repay what we borrowed to keep the account healthy for subsequent tests
+    await repayUsdc(usdcNative(7));
   });
 
   it("(user 2) hourly window decays and resets", async () => {

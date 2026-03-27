@@ -166,27 +166,17 @@ const ix = program.methods
 Sometimes, an instruction will remove a Balance. For example, `withdraw_all` or `repay_all` closes
 the balance in that bank.
 
-When closing a balance, you **must still pass risk accounts for every active balance, including the
-one being closed**. The program uses those accounts for rate limiting and post-close health checks.
-
-**Withdraw all:** the closing bank's risk accounts must appear **last** in remaining accounts, with
-all other active balances first in the usual sorted order.
-
-**Repay all:** ordering is not enforced, but we recommend using the same sorted order for
-consistency.
+When closing a balance, pass the accounts needed for the instruction's risk/oracle reads. The
+closing bank does not need to remain in the health-account list just because the balance is being
+closed.
 
 Example (withdraw all USDC when the user also has SOL + Token A balances):
 
 ```
-const remaining = composeRemainingAccountsByBalances(
-    marginfiAccount.lendingAccount.balances,
-    [
-        [solBank, solOracle],
-        [tokenABank, tokenAOracle],
-        [usdcBank, usdcOracle],
-    ],
-    usdcBank // closing bank goes last
-);
+const remaining = composeRemainingAccounts([
+    [solBank, solOracle],
+    [tokenABank, tokenAOracle],
+]);
 ```
 
 ## Oracle Crank and Refresh Requirements

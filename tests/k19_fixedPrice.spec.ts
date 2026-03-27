@@ -42,7 +42,6 @@ import {
   depositIx,
   borrowIx,
   composeRemainingAccounts,
-  composeRemainingAccountsByBalances,
   healthPulse,
   pulseBankPrice,
   repayIx,
@@ -253,7 +252,12 @@ describe("kx: Fixed Kamino price bank", () => {
         remaining: [tokenAReserve],
       }),
     );
-    const result = await processBankrunTransaction(ctx, tx, [user.wallet], true);
+    const result = await processBankrunTransaction(
+      ctx,
+      tx,
+      [user.wallet],
+      true,
+    );
     // KaminoReserveValidationFailed
     assertBankrunTxFailed(result, 6210);
   });
@@ -290,7 +294,7 @@ describe("kx: Fixed Kamino price bank", () => {
           bank: fixedKaminoBank,
           signerTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
         depositAmount,
       ),
@@ -457,9 +461,10 @@ describe("kx: Fixed Kamino price bank", () => {
           marginfiAccount: userAccount,
           authority: user.wallet.publicKey,
           bank: fixedKaminoBank,
+          mint: ecosystem.usdcMint.publicKey,
           destinationTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
         {
           amount: withdrawAmount,
@@ -525,15 +530,11 @@ describe("kx: Fixed Kamino price bank", () => {
     );
     await processBankrunTransaction(ctx, repayTx, [user.wallet]);
 
-    const accountStateAfterRepay =
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
-    const remaining = composeRemainingAccountsByBalances(
-      accountStateAfterRepay.lendingAccount.balances,
+    const remaining = composeRemainingAccounts(
       [
         [fixedKaminoBank, usdcReserve],
         [borrowBank, oracles.tokenAOracle.publicKey],
-      ],
-      fixedKaminoBank,
+      ].filter((group) => !group[0].equals(fixedKaminoBank))
     );
 
     const withdrawAllTx = new Transaction().add(
@@ -555,9 +556,10 @@ describe("kx: Fixed Kamino price bank", () => {
           marginfiAccount: userAccount,
           authority: user.wallet.publicKey,
           bank: fixedKaminoBank,
+          mint: ecosystem.usdcMint.publicKey,
           destinationTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
         {
           amount: new BN(0),

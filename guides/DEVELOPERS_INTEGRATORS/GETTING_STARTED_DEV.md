@@ -65,6 +65,8 @@ number after the prefix determines their run order through the magic of filename
 anchor build --no-idl
 ./scripts/test-program.sh all
 ```
+Note: we recommend running `anchor clean` before using `anchor build --no-idl` if you ran
+`anchor build` before for the TS test suite.
 
 This is much slower than the remix test command, but stable on any system.
 
@@ -93,6 +95,10 @@ Benchmarks:
 | 9700X (8 threads) | `[  27.718s] 373 tests run: 373 passed, 0 skipped`
 
 | 9700X (16 threads) | `[  19.343s] 373 tests run: 373 passed (3 flaky), 0 skipped`
+
+0.1.8
+
+| 9700X (8 threads) | `[  53.024s] 622 tests run: 622 passed, 0 skipped`
 
 ## To run just one Rust test:
 
@@ -129,7 +135,10 @@ Update Node
 
 ## All the tests are failing in Rust and/or TS
 
-Make sure you build the correct version, Rust requires the mainnet version (default features), TS wants localnet (no features)
+Make sure you build the correct version, Rust requires the mainnet version (default features), TS
+wants localnet (no features). Also note that Rust localnet builds to a different target folder (e.g.
+`./scripts/build-workspace.sh` builds to target/sbf, `anchor build` goes to target/), see `Rust
+tests panic with` for more details.
 
 ## Program not deployed errors, when build seemingly worked otherwise
 
@@ -160,6 +169,10 @@ Just `anchor clean` and rebuild. This is particularly likely to occur when switc
 ## Rust tests fail with `Error: simulation error: BlockhashNotFound, logs: [], units_consumed: 0`
 
 Ensure your machine is not in Low Power battery mode (or in any other mode decreasing performance).
+
+### Anchor tests fail with `./scripts/test-program.sh: line 40: package_filter[@]: unbound variable`
+
+Just `anchor clean` and `cargo clean` and rebuild. If the error persists it's probably due to macOS default Bash `3.2` + `set -u` that ends up triggering `package_filter[@]: unbound variable` when all uses an empty array. Fix is basically upgrade your Bash to version `5` or higher via Homebrew or similar.
 
 ## BlockhashNotFound errors in Rust test suite
 

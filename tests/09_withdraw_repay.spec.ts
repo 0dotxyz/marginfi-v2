@@ -23,7 +23,6 @@ import { assert } from "chai";
 import {
   borrowIx,
   composeRemainingAccounts,
-  composeRemainingAccountsByBalances,
   depositIx,
   repayIx,
   withdrawIx,
@@ -233,11 +232,9 @@ describe("Withdraw funds", () => {
       wrappedI80F48toBigNumber(balancesBefore[1].liabilityShares).toNumber() *
       wrappedI80F48toBigNumber(bankBefore.liabilityShareValue).toNumber();
 
-    // For repayAll, include all active balances, including the closing bank.
-    const remaining = composeRemainingAccountsByBalances(
-      userAccBefore.lendingAccount.balances,
-      balanceAccountGroups,
-      bank
+    // For repayAll, pass remaining accounts excluding the closing bank.
+    const remaining = composeRemainingAccounts(
+      balanceAccountGroups.filter((group) => !group[0].equals(bank))
     );
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
@@ -318,11 +315,12 @@ describe("Withdraw funds", () => {
       wrappedI80F48toBigNumber(balancesBefore[0].assetShares).toNumber() *
       wrappedI80F48toBigNumber(bankBefore.liabilityShareValue).toNumber();
 
-    // For withdrawAll, include all active balances, including the closing bank.
-    const remaining = composeRemainingAccountsByBalances(
-      userAccBefore.lendingAccount.balances,
-      balanceAccountGroups,
-      bank
+    // After repaying USDC, user 0 has Token A and SOL. Exclude the closing
+    // bank (Token A) so the health check alignment is correct.
+    const remaining = composeRemainingAccounts(
+      [
+        [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
+      ]
     );
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
@@ -389,17 +387,12 @@ describe("Withdraw funds", () => {
     const userAccKey = user.accounts.get(USER_ACCOUNT);
     const bank = bankKeypairSol.publicKey;
 
-    // For withdrawAll, include all active balances, including the closing bank.
-    const userAccBefore =
-      await program.account.marginfiAccount.fetch(userAccKey);
-    const remaining = composeRemainingAccountsByBalances(
-      userAccBefore.lendingAccount.balances,
+    // User 1 only has USDC and SOL. Exclude the closing bank (SOL) from
+    // remaining accounts so the health check alignment is correct.
+    const remaining = composeRemainingAccounts(
       [
         [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
-        [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
-        [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
-      ],
-      bank
+      ]
     );
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(

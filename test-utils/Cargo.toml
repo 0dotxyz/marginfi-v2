@@ -11,6 +11,8 @@ transfer-hook = ["transfer_hook"]
 [dependencies]
 marginfi-type-crate = { workspace = true, features = ["anchor"] }
 kamino-mocks = { path = "../programs/kamino-mocks" , features = ["no-entrypoint"]}
+drift-mocks = { path = "../programs/drift-mocks" , features = ["no-entrypoint"]}
+juplend-mocks = { path = "../programs/juplend-mocks" , features = ["no-entrypoint"]}
 
 solana-cli-output = { workspace = true }
 solana-program = { workspace = true }

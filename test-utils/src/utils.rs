@@ -1,7 +1,9 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::hash::hashv;
 use anchor_lang::solana_program::instruction::Instruction;
+use anchor_lang::system_program;
 use anchor_lang::Discriminator;
+use anchor_spl::token::spl_token;
 use anchor_spl::token_2022::spl_token_2022::extension::transfer_fee::MAX_FEE_BASIS_POINTS;
 use marginfi::constants::SWITCHBOARD_PULL_ID;
 use marginfi_type_crate::constants::{EXECUTE_ORDER_SEED, ORDER_SEED};
@@ -16,6 +18,8 @@ use solana_sdk::{
     account::Account, account::AccountSharedData, hash::Hash, pubkey::Pubkey, rent::Rent,
     signature::Keypair,
 };
+use spl_token::solana_program::program_pack::Pack;
+use spl_token::state::{Account as SplAccount, AccountState, Mint as SplMint};
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
@@ -112,6 +116,114 @@ pub fn create_switch_pull_oracle_account_from_bytes(data: Vec<u8>) -> Account {
         executable: false,
         rent_epoch: 361,
     }
+}
+
+pub async fn create_system_account_if_missing(ctx: Rc<RefCell<ProgramTestContext>>, key: Pubkey) {
+    let existing = ctx
+        .borrow_mut()
+        .banks_client
+        .get_account(key)
+        .await
+        .unwrap();
+    if existing.is_some() {
+        return;
+    }
+
+    ctx.borrow_mut().set_account(
+        &key,
+        &Account {
+            lamports: 1_000_000,
+            data: vec![],
+            owner: system_program::ID,
+            executable: false,
+            rent_epoch: 0,
+        }
+        .into(),
+    );
+}
+
+pub async fn create_spl_mint_account_if_missing(
+    ctx: Rc<RefCell<ProgramTestContext>>,
+    mint_key: Pubkey,
+    authority: Pubkey,
+    supply: u64,
+    decimals: u8,
+) {
+    let existing = ctx
+        .borrow_mut()
+        .banks_client
+        .get_account(mint_key)
+        .await
+        .unwrap();
+    if existing.is_some() {
+        return;
+    }
+
+    let mint = SplMint {
+        mint_authority: spl_token::solana_program::program_option::COption::Some(authority),
+        supply,
+        decimals,
+        is_initialized: true,
+        ..Default::default()
+    };
+
+    let mut data = vec![0u8; SplMint::LEN];
+    SplMint::pack(mint, &mut data).unwrap();
+    let rent = ctx.borrow_mut().banks_client.get_rent().await.unwrap();
+
+    ctx.borrow_mut().set_account(
+        &mint_key,
+        &Account {
+            lamports: rent.minimum_balance(data.len()),
+            data,
+            owner: spl_token::ID,
+            executable: false,
+            rent_epoch: 0,
+        }
+        .into(),
+    );
+}
+
+pub async fn create_spl_token_account_if_missing(
+    ctx: Rc<RefCell<ProgramTestContext>>,
+    token_key: Pubkey,
+    mint: Pubkey,
+    owner: Pubkey,
+    amount: u64,
+) {
+    let existing = ctx
+        .borrow_mut()
+        .banks_client
+        .get_account(token_key)
+        .await
+        .unwrap();
+    if existing.is_some() {
+        return;
+    }
+
+    let token = SplAccount {
+        mint,
+        owner,
+        amount,
+        state: AccountState::Initialized,
+        ..Default::default()
+    };
+
+    let mut data = vec![0u8; SplAccount::LEN];
+    SplAccount::pack(token, &mut data).unwrap();
+    let rent = ctx.borrow_mut().banks_client.get_rent().await.unwrap();
+
+    ctx.borrow_mut().set_account(
+        &token_key,
+        &Account {
+            lamports: rent.minimum_balance(data.len()),
+            data,
+            owner: spl_token::ID,
+            executable: false,
+            rent_epoch: 0,
+        }
+        .into(),
+    );
 }
 
 #[macro_export]

@@ -69,7 +69,6 @@ import { createMintToInstruction } from "@solana/spl-token";
 import { BN } from "@coral-xyz/anchor";
 import {
   composeRemainingAccounts,
-  composeRemainingAccountsByBalances,
   healthPulse,
 } from "./utils/user-instructions";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
@@ -338,12 +337,10 @@ describe("d12: Drift Harvest Reward", () => {
     assertBankrunTxFailed(withdrawWithoutRewardsResult, 0x18b1); // DriftMissingRewardAccounts
 
     // STEP 3: Withdraw all with reward accounts - should succeed
-    const marginfiAccountState =
-      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
-    const remaining = composeRemainingAccountsByBalances(
-      marginfiAccountState.lendingAccount.balances,
-      getDriftBalanceAccountGroups(),
-      driftTokenABank,
+    const remaining = composeRemainingAccounts(
+      getDriftBalanceAccountGroups().filter(
+        (group) => !group[0].equals(driftTokenABank)
+      )
     );
     const withdrawAllIx = await makeDriftWithdrawIx(
       user.mrgnBankrunProgram,
@@ -856,6 +853,7 @@ describe("d12: Drift Harvest Reward", () => {
       [driftTokenBBank, oracles.tokenBOracle.publicKey, driftTokenBSpotMarket],
     ]);
     const healthBeforeTx = new Transaction().add(
+      dummyIx(user.wallet.publicKey, ecosystem.tokenBMint.publicKey),
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount,
         remaining: healthRemaining,
@@ -944,6 +942,7 @@ describe("d12: Drift Harvest Reward", () => {
     );
 
     const healthAfterTx = new Transaction().add(
+      dummyIx(user.wallet.publicKey, ecosystem.tokenBMint.publicKey),
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount,
         remaining: healthRemaining,
@@ -1086,12 +1085,10 @@ describe("d12: Drift Harvest Reward", () => {
       true,
     );
 
-    const marginfiAccountState =
-      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
-    const remaining = composeRemainingAccountsByBalances(
-      marginfiAccountState.lendingAccount.balances,
-      getDriftBalanceAccountGroups(),
-      driftTokenABank,
+    const remaining = composeRemainingAccounts(
+      getDriftBalanceAccountGroups().filter(
+        (group) => !group[0].equals(driftTokenABank)
+      )
     );
     const withdrawIx = await makeDriftWithdrawIx(
       user.mrgnBankrunProgram,
@@ -1186,12 +1183,10 @@ describe("d12: Drift Harvest Reward", () => {
       user.tokenAAccount,
     );
 
-    const marginfiAccountState =
-      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
-    const remaining = composeRemainingAccountsByBalances(
-      marginfiAccountState.lendingAccount.balances,
-      getDriftBalanceAccountGroups(),
-      driftTokenABank,
+    const remaining = composeRemainingAccounts(
+      getDriftBalanceAccountGroups().filter(
+        (group) => !group[0].equals(driftTokenABank)
+      )
     );
     const withdrawIx = await makeDriftWithdrawIx(
       user.mrgnBankrunProgram,
@@ -1300,12 +1295,10 @@ describe("d12: Drift Harvest Reward", () => {
       true,
     );
 
-    const marginfiAccountState =
-      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
-    const remaining = composeRemainingAccountsByBalances(
-      marginfiAccountState.lendingAccount.balances,
-      getDriftBalanceAccountGroups(),
-      driftTokenABank,
+    const remaining = composeRemainingAccounts(
+      getDriftBalanceAccountGroups().filter(
+        (group) => !group[0].equals(driftTokenABank)
+      )
     );
     const withdrawIx = await makeDriftWithdrawIx(
       user.mrgnBankrunProgram,

@@ -1,4 +1,5 @@
 use crate::{
+    state::marginfi_group::MarginfiGroupImpl,
     state::rate_limiter::{BankRateLimiterImpl, GroupRateLimiterImpl},
     MarginfiError, MarginfiResult,
 };
@@ -13,7 +14,7 @@ use marginfi_type_crate::types::{Bank, MarginfiGroup};
 /// Setting a limit to 0 disables rate limiting for that window.
 /// Both hourly and daily windows can be configured independently.
 ///
-/// Only the group admin can configure rate limits.
+/// Either the group admin or delegate limit admin can configure rate limits.
 pub fn configure_bank_rate_limits(
     ctx: Context<ConfigureBankRateLimits>,
     hourly_max_outflow: Option<u64>,
@@ -43,7 +44,7 @@ pub fn configure_bank_rate_limits(
 #[derive(Accounts)]
 pub struct ConfigureBankRateLimits<'info> {
     #[account(
-        has_one = admin @ MarginfiError::Unauthorized,
+        constraint = group.load()?.is_admin_or_limit_admin(admin.key()) @ MarginfiError::Unauthorized,
     )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
@@ -66,7 +67,7 @@ pub struct ConfigureBankRateLimits<'info> {
 /// Setting a limit to 0 disables rate limiting for that window.
 /// Both hourly and daily windows can be configured independently.
 ///
-/// Only the group admin can configure rate limits.
+/// Either the group admin or delegate limit admin can configure rate limits.
 pub fn configure_group_rate_limits(
     ctx: Context<ConfigureGroupRateLimits>,
     hourly_max_outflow_usd: Option<u64>,
@@ -96,7 +97,7 @@ pub fn configure_group_rate_limits(
 pub struct ConfigureGroupRateLimits<'info> {
     #[account(
         mut,
-        has_one = admin @ MarginfiError::Unauthorized,
+        constraint = marginfi_group.load()?.is_admin_or_limit_admin(admin.key()) @ MarginfiError::Unauthorized,
     )]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 

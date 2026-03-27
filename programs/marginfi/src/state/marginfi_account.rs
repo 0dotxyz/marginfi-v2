@@ -51,99 +51,6 @@ pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
     }
 }
 
-/// Validate remaining accounts for active balances, requiring the closing bank group to appear
-/// after all other active balances.
-///
-/// This is used for withdraw_all where the caller must include the closing bank's risk accounts,
-/// but post-close health checks should still see active balances first.
-pub fn validate_remaining_accounts_for_balances_close_last<'info>(
-    lending_account: &LendingAccount,
-    remaining_ais: &'info [AccountInfo<'info>],
-    close_bank: &Pubkey,
-) -> MarginfiResult<()> {
-    let mut account_index = 0;
-
-    for balance in lending_account
-        .balances
-        .iter()
-        .filter(|balance| balance.is_active())
-        .filter(|balance| balance.bank_pk != *close_bank)
-    {
-        let bank_ai = remaining_ais
-            .get(account_index)
-            .ok_or(MarginfiError::InvalidBankAccount)?;
-        let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
-        let bank = bank_al.load()?;
-
-        check_eq!(
-            balance.bank_pk,
-            *bank_ai.key,
-            MarginfiError::InvalidBankAccount
-        );
-
-        let num_accounts = get_remaining_accounts_per_bank(&bank)?;
-        let end_idx = account_index + num_accounts;
-        require_gte!(
-            remaining_ais.len(),
-            end_idx,
-            MarginfiError::WrongNumberOfOracleAccounts
-        );
-        account_index = end_idx;
-    }
-
-    let bank_ai = remaining_ais
-        .get(account_index)
-        .ok_or(MarginfiError::InvalidBankAccount)?;
-    check_eq!(*bank_ai.key, *close_bank, MarginfiError::InvalidBankAccount);
-    let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
-    let bank = bank_al.load()?;
-    let num_accounts = get_remaining_accounts_per_bank(&bank)?;
-    let end_idx = account_index + num_accounts;
-    require_gte!(
-        remaining_ais.len(),
-        end_idx,
-        MarginfiError::WrongNumberOfOracleAccounts
-    );
-
-    Ok(())
-}
-
-/// Validate that remaining accounts include the risk accounts for each active balance,
-/// without enforcing any specific ordering between balance groups.
-///
-/// This is useful for repay_all where the instruction does not rely on ordered accounts.
-pub fn validate_remaining_accounts_for_balances_unordered<'info>(
-    lending_account: &LendingAccount,
-    remaining_ais: &'info [AccountInfo<'info>],
-) -> MarginfiResult<()> {
-    for balance in lending_account
-        .balances
-        .iter()
-        .filter(|balance| balance.is_active())
-    {
-        let bank_idx = remaining_ais
-            .iter()
-            .position(|ai| ai.key == &balance.bank_pk)
-            .ok_or(MarginfiError::InvalidBankAccount)?;
-
-        let bank_ai = remaining_ais
-            .get(bank_idx)
-            .ok_or(MarginfiError::InvalidBankAccount)?;
-        let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
-        let bank = bank_al.load()?;
-
-        let num_accounts = get_remaining_accounts_per_bank(&bank)?;
-        let end_idx = bank_idx + num_accounts;
-        require_gte!(
-            remaining_ais.len(),
-            end_idx,
-            MarginfiError::WrongNumberOfOracleAccounts
-        );
-    }
-
-    Ok(())
-}
-
 /// 4 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool), 2 for most others (bank, oracle), 3
 /// for Kamino (bank, oracle, reserve), 1 for Fixed
 fn get_remaining_accounts_per_asset_tag(asset_tag: u8) -> MarginfiResult<usize> {
@@ -168,7 +75,7 @@ pub trait MarginfiAccountImpl {
 /// Returns `true` if the signer is authorized, `false` otherwise.
 ///
 /// Authorization rules (checked in order):
-/// 1. If `allow_receivership` is true and the account is in receivership → `true`
+/// 1. If `allow_receivership` is true and the (NOT signer's) account is in receivership → `true`
 /// 2. If `allow_order_execution` is true and the account is in order execution → `true`
 /// 3. If the account is frozen → `true` only if signer is the group admin
 /// 4. Otherwise → `true` only if signer is the account authority
@@ -180,7 +87,7 @@ pub fn is_signer_authorized(
     allow_order_execution: bool,
 ) -> bool {
     if allow_receivership && marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
-        return true;
+        return marginfi_account.authority != signer; // forbidden to take receivership of your own account
     }
 
     if allow_order_execution && marginfi_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION) {
@@ -1729,7 +1636,9 @@ impl<'a> BankAccountWrapper<'a> {
     }
 
     /// Withdraw existing asset in full - will error if there is no asset.
-    pub fn withdraw_all(&mut self) -> MarginfiResult<u64> {
+    /// When `in_receivership` is true, clears the bank's liquidation price cache lock
+    /// so that banks whose balances are closed mid-liquidation don't stay permanently locked.
+    pub fn withdraw_all(&mut self, in_receivership: bool) -> MarginfiResult<u64> {
         let balance = &mut self.balance;
         let bank = &mut self.bank;
 
@@ -1752,9 +1661,12 @@ impl<'a> BankAccountWrapper<'a> {
 
         balance.close()?;
 
-        // Note: We do this so that banks in the receivership/deleverage flow are unlocked, as
-        // closed-position banks will not make it to the "end" instruction to be unlocked there
-        bank.cache.clear_liquidation_price_cache_locked();
+        // Only clear the lock when this account is actually in receivership.
+        // The lock is bank-level global state, so clearing it unconditionally
+        // would affect unrelated accounts sharing the same bank.
+        if in_receivership {
+            bank.cache.clear_liquidation_price_cache_locked();
+        }
 
         bank.decrement_lending_position_count();
         bank.change_asset_shares(-total_asset_shares, false)?;
@@ -1779,7 +1691,9 @@ impl<'a> BankAccountWrapper<'a> {
     }
 
     /// Repay existing liability in full - will error if there is no liability.
-    pub fn repay_all(&mut self) -> MarginfiResult<u64> {
+    /// When `in_receivership` is true, clears the bank's liquidation price cache lock
+    /// so that banks whose balances are closed mid-liquidation don't stay permanently locked.
+    pub fn repay_all(&mut self, in_receivership: bool) -> MarginfiResult<u64> {
         let balance = &mut self.balance;
         let bank = &mut self.bank;
 
@@ -1801,9 +1715,12 @@ impl<'a> BankAccountWrapper<'a> {
 
         balance.close()?;
 
-        // Note: We do this so that banks in the receivership/deleverage flow are unlocked, as
-        // closed-position banks will not make it to the "end" instruction to be unlocked there
-        bank.cache.clear_liquidation_price_cache_locked();
+        // Only clear the lock when this account is actually in receivership.
+        // The lock is bank-level global state, so clearing it unconditionally
+        // would affect unrelated accounts sharing the same bank.
+        if in_receivership {
+            bank.cache.clear_liquidation_price_cache_locked();
+        }
 
         bank.decrement_borrowing_position_count();
         bank.change_liability_shares(-total_liability_shares, false)?;
@@ -1826,7 +1743,9 @@ impl<'a> BankAccountWrapper<'a> {
             .ok_or_else(math_error!())?)
     }
 
-    pub fn close_balance(&mut self) -> MarginfiResult<()> {
+    /// When `in_receivership` is true, clears the bank's liquidation price cache lock
+    /// so that banks whose balances are closed mid-liquidation don't stay permanently locked.
+    pub fn close_balance(&mut self, in_receivership: bool) -> MarginfiResult<()> {
         let balance = &mut self.balance;
         let bank = &mut self.bank;
 
@@ -1847,6 +1766,10 @@ impl<'a> BankAccountWrapper<'a> {
         );
 
         balance.close()?;
+
+        if in_receivership {
+            bank.cache.clear_liquidation_price_cache_locked();
+        }
 
         Ok(())
     }

@@ -85,6 +85,7 @@ impl MarginfiGroupFixture {
                     new_emode_admin: Some(admin),
                     new_curve_admin: Some(admin),
                     new_limit_admin: Some(admin),
+                    new_flow_admin: Some(admin),
                     new_emissions_admin: Some(admin),
                     new_metadata_admin: Some(admin),
                     new_risk_admin: Some(admin),
@@ -757,11 +758,13 @@ impl MarginfiGroupFixture {
         new_metadata_admin: Pubkey,
         new_risk_admin: Pubkey,
     ) -> Result<(), BanksClientError> {
-        self.try_update_with_emode_leverage(
+        let group = self.load().await;
+        self.try_update_with_emode_leverage_and_flow_admin(
             new_admin,
             new_emode_admin,
             new_curve_admin,
             new_limit_admin,
+            group.delegate_flow_admin,
             new_emissions_admin,
             new_metadata_admin,
             new_risk_admin,
@@ -783,6 +786,61 @@ impl MarginfiGroupFixture {
         emode_max_init_leverage: Option<WrappedI80F48>,
         emode_max_maint_leverage: Option<WrappedI80F48>,
     ) -> Result<(), BanksClientError> {
+        let group = self.load().await;
+        self.try_update_with_emode_leverage_and_flow_admin(
+            new_admin,
+            new_emode_admin,
+            new_curve_admin,
+            new_limit_admin,
+            group.delegate_flow_admin,
+            new_emissions_admin,
+            new_metadata_admin,
+            new_risk_admin,
+            emode_max_init_leverage,
+            emode_max_maint_leverage,
+        )
+        .await
+    }
+
+    pub async fn try_update_with_flow_admin(
+        &self,
+        new_admin: Pubkey,
+        new_emode_admin: Pubkey,
+        new_curve_admin: Pubkey,
+        new_limit_admin: Pubkey,
+        new_flow_admin: Pubkey,
+        new_emissions_admin: Pubkey,
+        new_metadata_admin: Pubkey,
+        new_risk_admin: Pubkey,
+    ) -> Result<(), BanksClientError> {
+        self.try_update_with_emode_leverage_and_flow_admin(
+            new_admin,
+            new_emode_admin,
+            new_curve_admin,
+            new_limit_admin,
+            new_flow_admin,
+            new_emissions_admin,
+            new_metadata_admin,
+            new_risk_admin,
+            None,
+            None,
+        )
+        .await
+    }
+
+    async fn try_update_with_emode_leverage_and_flow_admin(
+        &self,
+        new_admin: Pubkey,
+        new_emode_admin: Pubkey,
+        new_curve_admin: Pubkey,
+        new_limit_admin: Pubkey,
+        new_flow_admin: Pubkey,
+        new_emissions_admin: Pubkey,
+        new_metadata_admin: Pubkey,
+        new_risk_admin: Pubkey,
+        emode_max_init_leverage: Option<WrappedI80F48>,
+        emode_max_maint_leverage: Option<WrappedI80F48>,
+    ) -> Result<(), BanksClientError> {
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::MarginfiGroupConfigure {
@@ -795,6 +853,7 @@ impl MarginfiGroupFixture {
                 new_emode_admin: Some(new_emode_admin),
                 new_curve_admin: Some(new_curve_admin),
                 new_limit_admin: Some(new_limit_admin),
+                new_flow_admin: Some(new_flow_admin),
                 new_emissions_admin: Some(new_emissions_admin),
                 new_metadata_admin: Some(new_metadata_admin),
                 new_risk_admin: Some(new_risk_admin),
@@ -832,6 +891,45 @@ impl MarginfiGroupFixture {
             }
             .to_account_metas(Some(true)),
             data: ConfigureDeleverageWithdrawalLimit { limit }.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn try_admin_update_deleverage_withdrawals(
+        &self,
+        outflow_usd: u32,
+        update_seq: u64,
+        event_start_slot: u64,
+        event_end_slot: u64,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::UpdateDeleverageWithdrawals {
+                marginfi_group: self.key,
+                delegate_flow_admin: self.ctx.borrow().payer.pubkey(),
+            }
+            .to_account_metas(Some(true)),
+            data: UpdateDeleverageWithdrawals {
+                outflow_usd,
+                update_seq,
+                event_start_slot,
+                event_end_slot,
+            }
+            .data(),
         };
 
         let tx = Transaction::new_signed_with_payer(

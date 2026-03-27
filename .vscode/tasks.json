@@ -40,7 +40,7 @@
         {
             "label": "Setup & Run Rust Tests",
             "type": "shell",
-            "command": "./scripts/build-workspace.sh && cargo fmt && ./scripts/lint.sh && ./scripts/test-program-remix.sh -p marginfi -l warn -c mainnet-beta -f mainnet-beta",
+            "command": "./scripts/build-workspace.sh && cargo fmt && ./scripts/lint.sh && ./scripts/test-program-remix.sh -p marginfi -l warn -c mainnet-beta -f mainnet-beta -j 8",
             "problemMatcher": [],
             "group": {
                 "kind": "test",
@@ -58,7 +58,7 @@
         {
             "label": "Run Rust Tests",
             "type": "shell",
-            "command": "cargo fmt && ./scripts/lint.sh && ./scripts/test-program-remix.sh -p marginfi -l warn -c mainnet-beta -f mainnet-beta",
+            "command": "cargo fmt && ./scripts/lint.sh && ./scripts/test-program-remix.sh -p marginfi -l warn -c mainnet-beta -f mainnet-beta -j 8",
             "problemMatcher": [],
             "group": {
                 "kind": "test",

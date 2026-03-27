@@ -50,6 +50,28 @@ pub struct MintFixture {
 }
 
 impl MintFixture {
+    pub async fn from_existing(
+        ctx: Rc<RefCell<ProgramTestContext>>,
+        mint_key: Pubkey,
+    ) -> MintFixture {
+        let mint_account = ctx
+            .borrow_mut()
+            .banks_client
+            .get_account(mint_key)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let mint = spl_token_2022::state::Mint::unpack(&mint_account.data()[..Mint::LEN]).unwrap();
+
+        MintFixture {
+            ctx,
+            key: mint_key,
+            mint,
+            token_program: mint_account.owner().to_owned(),
+        }
+    }
+
     pub async fn new(
         ctx: Rc<RefCell<ProgramTestContext>>,
         mint_keypair: Option<Keypair>,
@@ -680,6 +702,7 @@ pub enum SupportedExtension {
     PermanentDelegate,
     TransferHook,
     TransferFee,
+    TransferFeeInactive,
 }
 
 impl SupportedExtension {
@@ -734,6 +757,17 @@ impl SupportedExtension {
             )
             .unwrap()
             }
+            Self::TransferFeeInactive => {
+                spl_token_2022::extension::transfer_fee::instruction::initialize_transfer_fee_config(
+                &token_2022::ID,
+                mint,
+                None,
+                None,
+                0,
+                0,
+            )
+            .unwrap()
+            }
         }
     }
 
@@ -743,7 +777,9 @@ impl SupportedExtension {
             SupportedExtension::InterestBearing => pod_get_packed_len::<InterestBearingConfig>(),
             SupportedExtension::PermanentDelegate => pod_get_packed_len::<PermanentDelegate>(),
             SupportedExtension::TransferHook => pod_get_packed_len::<TransferHook>(),
-            SupportedExtension::TransferFee => pod_get_packed_len::<TransferFee>(),
+            SupportedExtension::TransferFee | SupportedExtension::TransferFeeInactive => {
+                pod_get_packed_len::<TransferFee>()
+            }
         })
         .sum()
     }
@@ -754,7 +790,9 @@ impl SupportedExtension {
             SupportedExtension::InterestBearing => ExtensionType::InterestBearingConfig,
             SupportedExtension::PermanentDelegate => ExtensionType::PermanentDelegate,
             SupportedExtension::TransferHook => ExtensionType::TransferHook,
-            SupportedExtension::TransferFee => ExtensionType::TransferFeeConfig,
+            SupportedExtension::TransferFee | SupportedExtension::TransferFeeInactive => {
+                ExtensionType::TransferFeeConfig
+            }
         })
         .collect()
     }

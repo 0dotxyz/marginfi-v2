@@ -1,17 +1,17 @@
 use crate::{assert_struct_align, assert_struct_size, types::WrappedI80F48};
 
-use bytemuck::Zeroable;
 #[cfg(feature = "anchor")]
-use {anchor_lang::prelude::*, bytemuck::Pod};
+use anchor_lang::prelude::*;
+use bytemuck::{Pod, Zeroable};
 
 assert_struct_size!(BankCache, 160);
 assert_struct_align!(BankCache, 8);
 #[repr(C)]
 #[cfg_attr(
     feature = "anchor",
-    derive(AnchorDeserialize, AnchorSerialize, Copy, Clone, Pod, PartialEq, Eq,)
+    derive(AnchorDeserialize, AnchorSerialize, PartialEq, Eq,)
 )]
-#[derive(Zeroable, Debug)]
+#[derive(Zeroable, Copy, Clone, Pod, Debug)]
 /// A read-only cache of the bank's key metrics, e.g. spot interest/fee rates.
 pub struct BankCache {
     /// Actual (spot) interest/fee rates of the bank, based on utilization
@@ -57,8 +57,10 @@ pub struct BankCache {
     /// Liquidate as an additional safeguard, if the liquidation prices stored here were to be
     /// edited between start and end, it would completely break the risk engine. End validates that
     /// the lock is set, panics if not, and removes it - which prevents footguns if the cache was
-    /// e.g. accidently set to default. The lock is also removed when a Balance is closed with
-    /// repay_all or withdraw_all, since those Balances can be omitted from the risk check at End.
+    /// e.g. accidently set to default. The lock is also removed when a Balance is closed via
+    /// withdraw_all, repay_all, or close_balance, but only when the account has
+    /// ACCOUNT_IN_RECEIVERSHIP set, so that operations on unrelated accounts sharing the same
+    /// bank do not interfere with an in-progress liquidation.
     pub liq_cache_flags: u8,
     _padding: [u8; 23],
     // INFO: these are duplicative of `last_oracle_price` and `last_oracle_price_timestamp` so if

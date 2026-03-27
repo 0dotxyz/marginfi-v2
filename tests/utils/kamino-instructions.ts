@@ -30,7 +30,7 @@ export interface KaminoDepositAccounts {
   bank: PublicKey;
   signerTokenAccount: PublicKey;
   lendingMarket: PublicKey;
-  reserveLiquidityMint: PublicKey;
+  reserve: PublicKey;
 
   obligationFarmUserState?: PublicKey | null;
   reserveFarmState?: PublicKey | null;
@@ -51,20 +51,20 @@ export const makeKaminoDepositIx = async (
     KLEND_PROGRAM_ID,
     accounts.lendingMarket,
   );
+
   const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
     KLEND_PROGRAM_ID,
-    accounts.lendingMarket,
-    accounts.reserveLiquidityMint,
+    accounts.reserve,
   );
+
   const [reserveCollateralMint] = deriveReserveCollateralMint(
     KLEND_PROGRAM_ID,
-    accounts.lendingMarket,
-    accounts.reserveLiquidityMint,
+    accounts.reserve,
   );
+
   const [reserveCollateralSupply] = deriveReserveCollateralSupply(
     KLEND_PROGRAM_ID,
-    accounts.lendingMarket,
-    accounts.reserveLiquidityMint,
+    accounts.reserve,
   );
 
   return program.methods
@@ -204,7 +204,7 @@ export interface InitObligationAccounts {
   bank: PublicKey;
   signerTokenAccount: PublicKey;
   lendingMarket: PublicKey;
-  reserveLiquidityMint: PublicKey;
+  reserve: PublicKey;
 
   obligationFarmUserState?: PublicKey | null;
   reserveFarmState?: PublicKey | null;
@@ -249,20 +249,20 @@ export const makeInitObligationIx = async (
     KLEND_PROGRAM_ID,
     accounts.lendingMarket,
   );
+
   const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
     KLEND_PROGRAM_ID,
-    accounts.lendingMarket,
-    accounts.reserveLiquidityMint,
+    accounts.reserve,
   );
+
   const [reserveCollateralMint] = deriveReserveCollateralMint(
     KLEND_PROGRAM_ID,
-    accounts.lendingMarket,
-    accounts.reserveLiquidityMint,
+    accounts.reserve,
   );
+
   const [reserveCollateralSupply] = deriveReserveCollateralSupply(
     KLEND_PROGRAM_ID,
-    accounts.lendingMarket,
-    accounts.reserveLiquidityMint,
+    accounts.reserve,
   );
 
   const ix = await program.methods
@@ -291,9 +291,10 @@ export interface KaminoWithdrawAccounts {
   marginfiAccount: PublicKey;
   authority: PublicKey;
   bank: PublicKey;
+  mint: PublicKey;
   destinationTokenAccount: PublicKey;
   lendingMarket: PublicKey;
-  reserveLiquidityMint: PublicKey;
+  reserve: PublicKey;
 
   obligationFarmUserState?: PublicKey | null;
   reserveFarmState?: PublicKey | null;
@@ -327,29 +328,29 @@ export const makeKaminoWithdrawIx = async (
     KLEND_PROGRAM_ID,
     accounts.lendingMarket,
   );
+
   const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
     KLEND_PROGRAM_ID,
-    accounts.lendingMarket,
-    accounts.reserveLiquidityMint,
+    accounts.reserve,
   );
+
   const [reserveCollateralMint] = deriveReserveCollateralMint(
     KLEND_PROGRAM_ID,
-    accounts.lendingMarket,
-    accounts.reserveLiquidityMint,
+    accounts.reserve,
   );
-  const [reserveCollateralSupply] = deriveReserveCollateralSupply(
+
+  const [reserveSourceCollateral] = deriveReserveCollateralSupply(
     KLEND_PROGRAM_ID,
-    accounts.lendingMarket,
-    accounts.reserveLiquidityMint,
+    accounts.reserve,
   );
 
   const ix = await program.methods
     .kaminoWithdraw(args.amount, args.isWithdrawAll)
     .accounts({
       lendingMarketAuthority, // derived
-      reserveLiquiditySupply, // derived
-      reserveCollateralMint, // derived
-      reserveSourceCollateral: reserveCollateralSupply, // derived
+      reserveLiquiditySupply,
+      reserveCollateralMint,
+      reserveSourceCollateral,
       liquidityTokenProgram: TOKEN_PROGRAM_ID,
       ...accs,
     })
