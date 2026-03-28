@@ -588,6 +588,11 @@ pub fn kamino_withdraw(
         group,
         withdraw_all.then_some(bank_pk),
     )?;
+    let flags = if withdraw_all {
+        Some(0b0000_0001u8)
+    } else {
+        None
+    };
 
     let mut ix = Instruction {
         program_id: config.program_id,
@@ -618,8 +623,7 @@ pub fn kamino_withdraw(
         .to_account_metas(Some(true)),
         data: marginfi::instruction::KaminoWithdraw {
             amount,
-            withdraw_all: if withdraw_all { Some(true) } else { None },
-            refresh_reserve: Some(false),
+            flags,
         }
         .data(),
     };

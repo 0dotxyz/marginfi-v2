@@ -346,8 +346,11 @@ export const makeKaminoWithdrawIx = async (
     accounts.reserve,
   );
 
+  const flags =
+    (args.isWithdrawAll ? 1 : 0) | ((args.refreshReserve ?? false) ? 2 : 0);
+
   const ix = await program.methods
-    .kaminoWithdraw(args.amount, args.isWithdrawAll, args.refreshReserve ?? false)
+    .kaminoWithdraw(args.amount, flags === 0 ? null : flags)
     .accounts({
       lendingMarketAuthority, // derived
       reserveLiquiditySupply,

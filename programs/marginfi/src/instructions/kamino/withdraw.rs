@@ -79,11 +79,14 @@ use marginfi_type_crate::{
 pub fn kamino_withdraw<'info>(
     ctx: Context<'_, '_, 'info, 'info, KaminoWithdraw<'info>>,
     amount: u64, // Collateral token amount
-    withdraw_all: Option<bool>,
-    refresh_reserve: Option<bool>,
+    flags: Option<u8>,
 ) -> MarginfiResult {
-    let withdraw_all = withdraw_all.unwrap_or(false);
-    let refresh_reserve = refresh_reserve.unwrap_or(false);
+    const WITHDRAW_ALL_FLAG: u8 = 1 << 0;
+    const REFRESH_RESERVE_FLAG: u8 = 1 << 1;
+
+    let flags = flags.unwrap_or(0);
+    let withdraw_all = (flags & WITHDRAW_ALL_FLAG) != 0;
+    let refresh_reserve = (flags & REFRESH_RESERVE_FLAG) != 0;
 
     // Get initial values to verify successful withdrawal later
     let pre_transfer_vault_balance =

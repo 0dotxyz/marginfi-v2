@@ -1546,6 +1546,11 @@ impl MarginfiAccountFixture {
             load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
         let lending_market_authority =
             derive_kamino_lending_market_authority(reserve.lending_market);
+        let flags = if withdraw_all.unwrap_or(false) {
+            Some(0b0000_0001u8)
+        } else {
+            None
+        };
 
         let mut ix = Instruction {
             program_id: marginfi::ID,
@@ -1576,8 +1581,7 @@ impl MarginfiAccountFixture {
             .to_account_metas(Some(true)),
             data: marginfi::instruction::KaminoWithdraw {
                 amount,
-                withdraw_all,
-                refresh_reserve: Some(false),
+                flags,
             }
             .data(),
         };
