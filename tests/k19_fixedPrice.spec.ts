@@ -68,6 +68,7 @@ import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import {
   CONF_INTERVAL_MULTIPLE_FLOAT,
   defaultBankConfig,
+  ORACLE_SETUP_FIXED_KAMINO,
   ORACLE_SETUP_PYTH_PUSH,
 } from "./utils/types";
 import { Reserve } from "@kamino-finance/klend-sdk";
@@ -177,6 +178,25 @@ describe("kx: Fixed Kamino price bank", () => {
     if (verbose) {
       console.log("Fixed Kamino bank:", fixedKaminoBank.toString());
     }
+  });
+
+  it("(admin) configure_bank_oracle rejects FixedKamino setup - use set_fixed_oracle_price", async () => {
+    const tx = new Transaction().add(
+      await configureBankOracle(groupAdmin.mrgnBankrunProgram, {
+        bank: fixedKaminoBank,
+        type: ORACLE_SETUP_FIXED_KAMINO,
+        oracle: oracles.usdcOracle.publicKey,
+      }),
+    );
+    const result = await processBankrunTransaction(
+      ctx,
+      tx,
+      [groupAdmin.wallet],
+      true,
+    );
+    assert("result" in result && !!result.result, "tx should fail");
+    const logs = (result.meta?.logMessages ?? []).join("\n");
+    assert.include(logs, "Use set_fixed_oracle_price instead");
   });
 
   it("(admin) add throwaway regular Token A bank + seed liquidity", async () => {

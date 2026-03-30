@@ -50,6 +50,7 @@ import {
   ASSET_TAG_JUPLEND,
   CONF_INTERVAL_MULTIPLE_FLOAT,
   defaultBankConfig,
+  ORACLE_SETUP_FIXED_JUPLEND,
   ORACLE_SETUP_PYTH_PUSH,
 } from "./utils/types";
 
@@ -252,6 +253,25 @@ describe("jlrx: Fixed JupLend price bank", () => {
     assert.approximately(fixedPrice, FIXED_PRICE, 0.001);
 
     console.log("Fixed JupLend bank:", fixedJuplendBank.toString());
+  });
+
+  it("(admin) configure_bank_oracle rejects FixedJuplend setup - use set_fixed_oracle_price", async () => {
+    const tx = new Transaction().add(
+      await configureBankOracle(groupAdmin.mrgnBankrunProgram, {
+        bank: fixedJuplendBank,
+        type: ORACLE_SETUP_FIXED_JUPLEND,
+        oracle: oracles.usdcOracle.publicKey,
+      }),
+    );
+    const result = await processBankrunTransaction(
+      ctx,
+      tx,
+      [groupAdmin.wallet],
+      true,
+    );
+    assert("result" in result && !!result.result, "tx should fail");
+    const logs = (result.meta?.logMessages ?? []).join("\n");
+    assert.include(logs, "Use set_fixed_oracle_price instead");
   });
 
   it("(admin) add throwaway regular Token A bank + seed liquidity", async () => {

@@ -19,7 +19,13 @@ pub fn lending_pool_configure_bank_oracle(
     } else {
         let setup_type =
             OracleSetup::from_u8(setup).unwrap_or_else(|| panic!("unsupported oracle type"));
-        if setup_type == OracleSetup::Fixed {
+        if matches!(
+            setup_type,
+            OracleSetup::Fixed
+                | OracleSetup::FixedKamino
+                | OracleSetup::FixedDrift
+                | OracleSetup::FixedJuplend
+        ) {
             panic!("Use set_fixed_oracle_price instead");
         }
 
