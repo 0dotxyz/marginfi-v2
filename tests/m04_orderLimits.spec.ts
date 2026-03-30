@@ -662,6 +662,7 @@ SCENARIOS.forEach(
                 marginfiAccount: userAccount,
                 authority: user.wallet.publicKey,
                 bank: assetBank,
+                mint: ecosystem.tokenAMint.publicKey,
                 destinationTokenAccount: user.tokenAAccount,
                 lendingMarket,
                 reserve: tokenAReserve,

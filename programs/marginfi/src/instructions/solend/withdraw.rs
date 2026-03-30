@@ -128,6 +128,7 @@ pub fn solend_withdraw<'info>(
         record_withdrawal_outflow(
             group_rate_limit_enabled,
             rate_limit_amount,
+            rate_limit_amount,
             price,
             &mut bank,
             &group,

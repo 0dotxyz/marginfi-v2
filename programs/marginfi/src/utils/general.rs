@@ -2,7 +2,7 @@ use crate::{
     bank_authority_seed, bank_seed, check,
     events::RateLimitFlowEvent,
     state::{
-        bank::BankVaultType,
+        bank::{BankImpl, BankVaultType},
         marginfi_account::{calc_value, get_remaining_accounts_per_bank},
         price::{
             OraclePriceFeedAdapter, OraclePriceType, OraclePriceWithConfidence, PriceAdapter,
@@ -21,6 +21,7 @@ use anchor_spl::{
         self,
         extension::{
             transfer_fee::{TransferFee, TransferFeeConfig},
+            transfer_hook::TransferHook,
             BaseStateWithExtensions, StateWithExtensions,
         },
     },
@@ -124,6 +125,24 @@ pub fn nonzero_fee(mint_ai: AccountInfo, epoch: u64) -> MarginfiResult<bool> {
                 .get_epoch_fee(epoch)
                 .transfer_fee_basis_points,
         ) != 0);
+    }
+
+    Ok(false)
+}
+
+/// Returns `true` if the given mint has an active transfer hook program.
+/// If the hook is present but no program is active it would return false.
+pub fn has_transfer_hook(mint_ai: AccountInfo) -> MarginfiResult<bool> {
+    if mint_ai.owner.eq(&Token::id()) {
+        return Ok(false);
+    }
+
+    let mint_data = mint_ai.try_borrow_data()?;
+    let mint = StateWithExtensions::<spl_token_2022::state::Mint>::unpack(&mint_data)?;
+
+    if let Ok(hook) = mint.get_extension::<TransferHook>() {
+        let program_id: Option<Pubkey> = Option::from(hook.program_id);
+        return Ok(program_id.is_some());
     }
 
     Ok(false)
@@ -482,7 +501,8 @@ pub fn is_integration_asset_tag(asset_tag: u8) -> bool {
 /// `update_group_rate_limiter`.
 pub fn record_withdrawal_outflow(
     group_rate_limit_enabled: bool,
-    token_amount: u64,
+    native_amount: u64,
+    balance_amount: u64,
     price: I80F48,
     bank: &mut Bank,
     group: &MarginfiGroup,
@@ -493,10 +513,9 @@ pub fn record_withdrawal_outflow(
 ) -> MarginfiResult<()> {
     // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
     if !should_skip_rate_limit(marginfi_account.account_flags) {
-        // Bank-level rate limiting (native tokens)
         if bank.rate_limiter.is_enabled() {
             bank.rate_limiter
-                .try_record_outflow(token_amount, clock.unix_timestamp)?;
+                .try_record_outflow(native_amount, clock.unix_timestamp)?;
         }
 
         // Group-level rate limiting: read-only validation + event emission.
@@ -505,9 +524,9 @@ pub fn record_withdrawal_outflow(
             check!(price > I80F48::ZERO, MarginfiError::InvalidRateLimitPrice);
 
             let value = calc_value(
-                I80F48::from_num(token_amount),
+                I80F48::from_num(balance_amount),
                 price,
-                bank.mint_decimals,
+                bank.get_balance_decimals(),
                 None,
             )?;
             if group.rate_limiter.hourly.is_enabled() {
@@ -534,7 +553,7 @@ pub fn record_withdrawal_outflow(
                 bank: bank_key,
                 mint: bank.mint,
                 flow_direction: 0, // outflow
-                native_amount: token_amount,
+                native_amount,
                 mint_decimals: bank.mint_decimals,
                 current_timestamp: clock.unix_timestamp,
             });

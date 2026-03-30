@@ -28,8 +28,8 @@ use fixed::types::I80F48;
 use kamino_mocks::kamino_lending::cpi::deposit_reserve_liquidity_and_obligation_collateral_v2;
 use kamino_mocks::{
     kamino_lending::cpi::accounts::{
-        DepositReserveLiquidityAndObligationCollateral,
-        DepositReserveLiquidityAndObligationCollateralV2, FarmsAccounts,
+        DepositFarmsAccounts, DepositReserveLiquidityAndObligationCollateral,
+        DepositReserveLiquidityAndObligationCollateralV2,
     },
     state::{MinimalObligation, MinimalReserve},
 };
@@ -297,7 +297,7 @@ impl<'info> KaminoDeposit<'info> {
         };
 
         // --- optional “farms_accounts” group ---
-        let farms_accounts = FarmsAccounts {
+        let farms_accounts = DepositFarmsAccounts {
             obligation_farm_user_state: optional_account!(self.obligation_farm_user_state),
             reserve_farm_state: optional_account!(self.reserve_farm_state),
         };

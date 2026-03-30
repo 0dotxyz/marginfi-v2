@@ -81,6 +81,7 @@ pub fn lending_account_borrow<'info>(
     let group_rate_limit_enabled = group.rate_limiter.is_enabled();
 
     let mut origination_fee: I80F48 = I80F48::ZERO;
+    let amount_pre_fee;
     {
         let mut bank = bank_loader.load_mut()?;
 
@@ -99,7 +100,7 @@ pub fn lending_account_borrow<'info>(
             BankAccountWrapper::find_or_create(&bank_loader.key(), &mut bank, lending_account)?;
 
         // User needs to borrow amount + fee to receive amount
-        let amount_pre_fee = maybe_bank_mint
+        amount_pre_fee = maybe_bank_mint
             .as_ref()
             .map(|mint| {
                 utils::calculate_pre_fee_spl_deposit_amount(
@@ -208,7 +209,8 @@ pub fn lending_account_borrow<'info>(
     let rate_limit_price = price.as_ref().map(|p| p.price).unwrap_or(I80F48::ZERO);
     record_withdrawal_outflow(
         group_rate_limit_enabled,
-        amount,
+        amount_pre_fee,
+        amount_pre_fee,
         rate_limit_price,
         &mut bank,
         &group,

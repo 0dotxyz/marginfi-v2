@@ -53,9 +53,9 @@ const MOCKS_PROGRAM_ID = new PublicKey(
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { initGlobalFeeState } from "./utils/group-instructions";
 import { KaminoLending } from "./fixtures/kamino_lending";
-import klendIdl from "../idls/kamino_lending.json";
+import klendIdl from "../idls-complete/kamino_lending.json";
 import { Drift } from "./fixtures/drift";
-import driftIdl from "../idls/drift.json";
+import driftIdl from "../idls-complete/drift.json";
 import { Marginfi } from "../target/types/marginfi";
 import { Mocks } from "../target/types/mocks";
 import marginfiIdl from "../target/idl/marginfi.json";

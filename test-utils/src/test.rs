@@ -16,7 +16,6 @@ use juplend_mocks::juplend_earn::client as juplend_lending;
 use juplend_mocks::lending_reward_rate_model::client as juplend_rewards;
 use juplend_mocks::liquidity::client as juplend_liquidity;
 use juplend_mocks::state::Lending as JuplendLending;
-use kamino_mocks::kamino_lending::accounts::LendingMarket;
 use kamino_mocks::mock_kamino_lending_processor;
 use kamino_mocks::state::{MinimalObligation, MinimalReserve};
 use marginfi::{
@@ -673,6 +672,14 @@ const JUPLEND_TEST_BANK_SEED: u64 = 888;
 const JUPLEND_INIT_POSITION_NOMINAL_AMOUNT: u64 = 1_000_000;
 
 impl TestFixture {
+    // Full serialized LendingMarket account payload size (without 8-byte discriminator).
+    // Keep this aligned with Kamino's on-chain account layout used by integration tests.
+    const KAMINO_LENDING_MARKET_ACCOUNT_LEN: usize = 4656;
+    const KAMINO_LENDING_MARKET_BUMP_OFFSET: usize = 16;
+    const KAMINO_LENDING_MARKET_SCOPE_CHAIN_OFFSET: usize = 125;
+    // `LendingMarket` discriminator from complete Kamino IDL.
+    const KAMINO_LENDING_MARKET_DISCRIMINATOR: [u8; 8] = [246, 114, 50, 98, 72, 157, 28, 120];
+
     pub async fn new(test_settings: Option<TestSettings>) -> TestFixture {
         TestFixture::new_with_t22_extension(test_settings, &[]).await
     }
@@ -1314,12 +1321,8 @@ impl TestFixture {
         let reserve_liquidity_supply = reserve.supply_vault;
         let reserve_collateral_mint = reserve.collateral_mint_pubkey;
         let reserve_collateral_supply = reserve.collateral_supply_vault;
-        let reserve_pyth_oracle = kamino_fixture
-            .reserve
-            .config
-            .token_info
-            .pyth_configuration
-            .price;
+        let reserve_pyth_oracle =
+            get_oracle_id_from_feed_id(PYTH_USDC_FEED).unwrap_or(PYTH_USDC_FEED);
         create_spl_mint_account_if_missing(
             test_f.context.clone(),
             reserve.mint_pubkey,
@@ -1333,13 +1336,15 @@ impl TestFixture {
 
         let lending_market_account = test_f.try_load(&lending_market).await.unwrap();
         if lending_market_account.is_none() {
-            let mut data = vec![0u8; 8 + std::mem::size_of::<LendingMarket>()];
-            data[..8].copy_from_slice(LendingMarket::DISCRIMINATOR);
+            let mut data = vec![0u8; 8 + Self::KAMINO_LENDING_MARKET_ACCOUNT_LEN];
+            data[..8].copy_from_slice(&Self::KAMINO_LENDING_MARKET_DISCRIMINATOR);
             // `lending_market.bump_seed` is used in PDA seed constraints for `lending_market_authority`.
-            data[16..24].copy_from_slice(&(u64::from(lending_market_authority_bump)).to_le_bytes());
+            data[Self::KAMINO_LENDING_MARKET_BUMP_OFFSET
+                ..Self::KAMINO_LENDING_MARKET_BUMP_OFFSET + 8]
+                .copy_from_slice(&(u64::from(lending_market_authority_bump)).to_le_bytes());
             // Keep refresh behavior aligned with TS tests where `scopePrices` is null.
             // This prevents unconditional price refresh during local fixture setup.
-            data[125] = 100;
+            data[Self::KAMINO_LENDING_MARKET_SCOPE_CHAIN_OFFSET] = 100;
             test_f.context.borrow_mut().set_account(
                 &lending_market,
                 &Account {

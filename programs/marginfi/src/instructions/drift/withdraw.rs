@@ -165,6 +165,7 @@ pub fn drift_withdraw<'info>(
         record_withdrawal_outflow(
             group_rate_limit_enabled,
             token_amount,
+            expected_scaled_balance_change,
             price,
             &mut bank,
             &group,

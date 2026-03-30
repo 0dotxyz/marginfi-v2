@@ -2,7 +2,7 @@ use anchor_lang::{InstructionData, ToAccountMetas};
 use anchor_spl::token_2022;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
-use fixtures::{assert_custom_error, prelude::*};
+use fixtures::{assert_anchor_error, assert_custom_error, prelude::*};
 use marginfi::{
     constants::INIT_BANK_ORIGINATION_FEE_DEFAULT,
     prelude::MarginfiError,
@@ -10,12 +10,12 @@ use marginfi::{
 };
 use marginfi_type_crate::{
     constants::{
-        CLOSE_ENABLED_FLAG, FREEZE_SETTINGS, IS_T22, PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG,
-        TOKENLESS_REPAYMENTS_ALLOWED,
+        CLOSE_ENABLED_FLAG, FREEZE_SETTINGS, IS_T22, METADATA_SEED,
+        PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
-        make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt, EmodeEntry,
-        InterestRateConfigOpt, MarginfiGroup, OracleSetup, RatePoint, EMODE_ON,
+        make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt, BankMetadata,
+        EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup, RatePoint, EMODE_ON,
         INTEREST_CURVE_SEVEN_POINT,
     },
 };
@@ -24,8 +24,72 @@ use solana_program_test::*;
 use solana_sdk::{
     clock::Clock, instruction::Instruction, pubkey::Pubkey, transaction::Transaction,
 };
-use solana_sdk::{signature::Keypair, signer::Signer};
+use solana_sdk::{signature::Keypair, signer::Signer, system_program};
 use test_case::test_case;
+
+fn derive_seeded_bank(group: Pubkey, mint: Pubkey, bank_seed: u64) -> Pubkey {
+    Pubkey::find_program_address(
+        &[group.as_ref(), mint.as_ref(), &bank_seed.to_le_bytes()],
+        &marginfi::ID,
+    )
+    .0
+}
+
+fn derive_bank_metadata(bank: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[METADATA_SEED.as_bytes(), bank.as_ref()], &marginfi::ID).0
+}
+
+fn make_init_bank_metadata_ix(
+    group: Pubkey,
+    bank_mint: Pubkey,
+    bank: Pubkey,
+    fee_payer: Pubkey,
+    metadata: Pubkey,
+    bank_seed: u64,
+) -> Instruction {
+    Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::InitBankMetadata {
+            group,
+            bank_mint,
+            bank,
+            fee_payer,
+            metadata,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::InitBankMetadata { bank_seed }.data(),
+    }
+}
+
+fn make_write_bank_metadata_ix(
+    group: Pubkey,
+    bank_mint: Pubkey,
+    bank: Pubkey,
+    metadata_admin: Pubkey,
+    metadata: Pubkey,
+    bank_seed: u64,
+    ticker: Option<Vec<u8>>,
+    description: Option<Vec<u8>>,
+) -> Instruction {
+    Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::WriteBankMetadata {
+            group,
+            bank_mint,
+            bank,
+            metadata_admin,
+            metadata,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::WriteBankMetadata {
+            bank_seed,
+            ticker,
+            description,
+        }
+        .data(),
+    }
+}
 
 #[tokio::test]
 async fn add_bank_success() -> anyhow::Result<()> {
@@ -370,6 +434,164 @@ async fn backfill_is_t22_noop_for_classic_bank() -> anyhow::Result<()> {
     let bank_after = bank.load().await;
     assert_eq!(bank_after.flags & IS_T22, 0);
     assert_eq!(bank_after.flags, bank_before.flags);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn init_and_write_bank_metadata_for_seeded_bank_before_bank_init_success(
+) -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+    let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
+    let bank_seed = 42_u64;
+    let bank = derive_seeded_bank(test_f.marginfi_group.key, mint_f.key, bank_seed);
+    let metadata = derive_bank_metadata(bank);
+    let payer = test_f.context.borrow().payer.pubkey();
+
+    let init_ix = make_init_bank_metadata_ix(
+        test_f.marginfi_group.key,
+        mint_f.key,
+        bank,
+        payer,
+        metadata,
+        bank_seed,
+    );
+    let write_ix = make_write_bank_metadata_ix(
+        test_f.marginfi_group.key,
+        mint_f.key,
+        bank,
+        payer,
+        metadata,
+        bank_seed,
+        Some(b"USDC".to_vec()),
+        Some(b"USD Coin".to_vec()),
+    );
+
+    let tx = Transaction::new_signed_with_payer(
+        &[init_ix, write_ix],
+        Some(&payer),
+        &[&test_f.context.borrow().payer],
+        latest_blockhash(&test_f.context).await,
+    );
+
+    test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(tx)
+        .await?;
+
+    let metadata_state: BankMetadata = test_f.load_and_deserialize(&metadata).await;
+    assert_eq!(metadata_state.bank, bank);
+    assert_eq!(&metadata_state.ticker[..4], b"USDC");
+    assert_eq!(&metadata_state.description[..8], b"USD Coin");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn init_bank_metadata_rejects_cross_group_seed_squatting() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+    let attacker_group = MarginfiGroupFixture::new(test_f.context.clone()).await;
+    let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
+    let bank_seed = 7_u64;
+    let victim_bank = derive_seeded_bank(test_f.marginfi_group.key, mint_f.key, bank_seed);
+    let metadata = derive_bank_metadata(victim_bank);
+    let payer = test_f.context.borrow().payer.pubkey();
+
+    let init_ix = make_init_bank_metadata_ix(
+        attacker_group.key,
+        mint_f.key,
+        victim_bank,
+        payer,
+        metadata,
+        bank_seed,
+    );
+
+    let tx = Transaction::new_signed_with_payer(
+        &[init_ix],
+        Some(&payer),
+        &[&test_f.context.borrow().payer],
+        latest_blockhash(&test_f.context).await,
+    );
+
+    let res = test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(tx)
+        .await;
+
+    assert_anchor_error!(
+        res.unwrap_err(),
+        anchor_lang::error::ErrorCode::ConstraintSeeds
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn write_bank_metadata_rejects_cross_group_seed_squatting() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+    let attacker_group = MarginfiGroupFixture::new(test_f.context.clone()).await;
+    let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
+    let bank_seed = 8_u64;
+    let victim_bank = derive_seeded_bank(test_f.marginfi_group.key, mint_f.key, bank_seed);
+    let metadata = derive_bank_metadata(victim_bank);
+    let payer = test_f.context.borrow().payer.pubkey();
+
+    let init_ix = make_init_bank_metadata_ix(
+        test_f.marginfi_group.key,
+        mint_f.key,
+        victim_bank,
+        payer,
+        metadata,
+        bank_seed,
+    );
+
+    let init_tx = Transaction::new_signed_with_payer(
+        &[init_ix],
+        Some(&payer),
+        &[&test_f.context.borrow().payer],
+        latest_blockhash(&test_f.context).await,
+    );
+
+    test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(init_tx)
+        .await?;
+
+    let write_ix = make_write_bank_metadata_ix(
+        attacker_group.key,
+        mint_f.key,
+        victim_bank,
+        payer,
+        metadata,
+        bank_seed,
+        Some(b"BAD".to_vec()),
+        None,
+    );
+
+    let write_tx = Transaction::new_signed_with_payer(
+        &[write_ix],
+        Some(&payer),
+        &[&test_f.context.borrow().payer],
+        latest_blockhash(&test_f.context).await,
+    );
+
+    let res = test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(write_tx)
+        .await;
+
+    assert_anchor_error!(
+        res.unwrap_err(),
+        anchor_lang::error::ErrorCode::ConstraintSeeds
+    );
 
     Ok(())
 }

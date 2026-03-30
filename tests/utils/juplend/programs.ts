@@ -1,8 +1,8 @@
 import { Program } from "@coral-xyz/anchor";
 
-import liquidityIdl from "../../../idls/liquidity.json";
-import lendingIdl from "../../../idls/juplend_earn.json";
-import rewardsIdl from "../../../idls/lending_reward_rate_model.json";
+import liquidityIdl from "../../../idls-complete/liquidity.json";
+import lendingIdl from "../../../idls-complete/juplend_earn.json";
+import rewardsIdl from "../../../idls-complete/lending_reward_rate_model.json";
 import { bankRunProvider } from "../../rootHooks";
 import {
   JUPLEND_EARN_REWARDS_PROGRAM_ID,

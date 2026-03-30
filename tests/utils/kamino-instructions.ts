@@ -300,6 +300,7 @@ export interface KaminoWithdrawAccounts {
   marginfiAccount: PublicKey;
   authority: PublicKey;
   bank: PublicKey;
+  mint: PublicKey;
   destinationTokenAccount: PublicKey;
   lendingMarket: PublicKey;
   reserve: PublicKey;

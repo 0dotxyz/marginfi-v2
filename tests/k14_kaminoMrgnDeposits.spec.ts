@@ -777,6 +777,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
             marginfiAccount: userA.accounts.get(USER_ACCOUNT_K)!,
             authority: userA.wallet.publicKey,
             bank: usdcBank,
+            mint: ecosystem.usdcMint.publicKey,
             destinationTokenAccount: userA.usdcAccount,
             lendingMarket: kaminoAccounts.get(MARKET)!,
             reserve: usdcReserve,
@@ -1391,6 +1392,9 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
           marginfiAccount: userAccount,
           authority: user.wallet.publicKey,
           bank,
+          mint: isUsdc
+            ? ecosystem.usdcMint.publicKey
+            : ecosystem.tokenAMint.publicKey,
           destinationTokenAccount: tokenAccount,
           lendingMarket: kaminoAccounts.get(MARKET)!,
           reserve: isUsdc ? usdcReserve : tokenAReserve,

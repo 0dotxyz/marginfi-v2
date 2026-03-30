@@ -185,6 +185,15 @@ pub mod marginfi {
         marginfi_group::lending_pool_reclaim_emissions_vault(ctx)
     }
 
+    /// (permissionless) Deposit same-bank emissions directly into liquidity vault and increase
+    /// depositors' value via `asset_share_value`.
+    pub fn lending_pool_emissions_deposit(
+        ctx: Context<LendingPoolEmissionsDeposit>,
+        amount: u64,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_emissions_deposit(ctx, amount)
+    }
+
     /// (risk_admin or admin, unless `PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG` is set on the bank)
     /// Handle bad debt of a bankrupt marginfi account for a given bank. Covers bad debt from the
     /// insurance fund and socializes any remainder among depositors.
@@ -648,18 +657,19 @@ pub mod marginfi {
     }
 
     /// (permissionless) pay the rent to open a bank's metadata.
-    pub fn init_bank_metadata(ctx: Context<InitBankMetadata>) -> MarginfiResult {
-        marginfi_group::init_bank_metadata(ctx)
+    pub fn init_bank_metadata(ctx: Context<InitBankMetadata>, bank_seed: u64) -> MarginfiResult {
+        marginfi_group::init_bank_metadata(ctx, bank_seed)
     }
 
     /// (metadata admin only) Write ticker/description information for a bank on-chain. Optional, not
     /// all Banks are guaranteed to have metadata.
     pub fn write_bank_metadata(
         ctx: Context<WriteBankMetadata>,
+        bank_seed: u64,
         ticker: Option<Vec<u8>>,
         description: Option<Vec<u8>>,
     ) -> MarginfiResult {
-        marginfi_group::write_bank_metadata(ctx, ticker, description)
+        marginfi_group::write_bank_metadata(ctx, bank_seed, ticker, description)
     }
 
     /// (admin or delegate_limit_admin) Set the daily withdrawal limit for deleverages per group.

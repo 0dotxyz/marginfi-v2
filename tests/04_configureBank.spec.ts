@@ -3,14 +3,16 @@ import {
   configureBank,
   configureBankOracle,
   groupConfigure,
+  groupInitialize,
   initBankMetadata,
   writeBankMetadata,
 } from "./utils/group-instructions";
-import { Transaction } from "@solana/web3.js";
+import { Keypair, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairUsdc,
   bankrunProgram,
+  ecosystem,
   groupAdmin,
   marginfiGroup,
   oracles,
@@ -37,7 +39,7 @@ import {
   makeRatePoints,
   TOKENLESS_REPAYMENTS_ALLOWED,
 } from "./utils/types";
-import { deriveBankMetadata } from "./utils/pdas";
+import { deriveBankAndMetadataWithSeed } from "./utils/pdas";
 
 let program: Program<Marginfi>;
 
@@ -336,25 +338,84 @@ describe("Lending pool configure bank", () => {
     assertBNEqual(bank.flags, FREEZE_SETTINGS + CLOSE_ENABLED_FLAG); // still frozen
   });
 
-  it("(permissionless) Init blank metadata for a bank", async () => {
+  it("(permissionless) Init blank metadata for a seeded bank before bank init", async () => {
+    const bankSeed = new BN(41);
+    const { bank, metadata, metadataBump } = deriveBankAndMetadataWithSeed(
+      program.programId,
+      marginfiGroup.publicKey,
+      ecosystem.usdcMint.publicKey,
+      bankSeed
+    );
+
     await users[1].mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await initBankMetadata(users[1].mrgnProgram, {
-          bank: bankKeypairUsdc.publicKey,
+          group: marginfiGroup.publicKey,
+          bankMint: ecosystem.usdcMint.publicKey,
+          bank,
+          bankSeed,
         })
       )
     );
 
-    const [metaKey, metaBump] = deriveBankMetadata(
-      program.programId,
-      bankKeypairUsdc.publicKey
-    );
-    const meta = await program.account.bankMetadata.fetch(metaKey);
-    assertKeysEqual(meta.bank, bankKeypairUsdc.publicKey);
-    assert.equal(meta.bump, metaBump);
+    const meta = await program.account.bankMetadata.fetch(metadata);
+    assertKeysEqual(meta.bank, bank);
+    assert.equal(meta.bump, metadataBump);
   });
 
-  it("(meta admin) Update metadata for a bank", async () => {
+  it("(attacker) init metadata for another group's seeded bank before bank init - should fail", async () => {
+    const attacker = users[2];
+    const attackerGroup = Keypair.generate();
+    const bankSeed = new BN(42);
+    const { bank } = deriveBankAndMetadataWithSeed(
+      program.programId,
+      marginfiGroup.publicKey,
+      ecosystem.usdcMint.publicKey,
+      bankSeed
+    );
+
+    await attacker.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await groupInitialize(attacker.mrgnProgram, {
+          marginfiGroup: attackerGroup.publicKey,
+          admin: attacker.wallet.publicKey,
+        })
+      ),
+      [attackerGroup]
+    );
+
+    await attacker.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await groupConfigure(attacker.mrgnProgram, {
+          marginfiGroup: attackerGroup.publicKey,
+          newMetadataAdmin: attacker.wallet.publicKey,
+        })
+      )
+    );
+
+    await expectFailedTxWithMessage(async () => {
+      await attacker.mrgnProgram.provider.sendAndConfirm(
+        new Transaction().add(
+          await initBankMetadata(attacker.mrgnProgram, {
+            group: attackerGroup.publicKey,
+            bankMint: ecosystem.usdcMint.publicKey,
+            bank,
+            bankSeed,
+          })
+        )
+      );
+    }, "ConstraintSeeds");
+  });
+
+  it("(meta admin) Update metadata for a seeded bank", async () => {
+    const bankSeed = new BN(43);
+    const { bank, metadata } = deriveBankAndMetadataWithSeed(
+      program.programId,
+      marginfiGroup.publicKey,
+      ecosystem.usdcMint.publicKey,
+      bankSeed
+    );
+
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await groupConfigure(groupAdmin.mrgnProgram, {
@@ -368,9 +429,15 @@ describe("Lending pool configure bank", () => {
     );
     assertKeysEqual(group.metadataAdmin, users[0].wallet.publicKey);
 
-    const [metaKey] = deriveBankMetadata(
-      program.programId,
-      bankKeypairUsdc.publicKey
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await initBankMetadata(groupAdmin.mrgnProgram, {
+          group: marginfiGroup.publicKey,
+          bankMint: ecosystem.usdcMint.publicKey,
+          bank,
+          bankSeed,
+        })
+      )
     );
 
     const tickerStr = "USDCasdfg";
@@ -381,23 +448,24 @@ describe("Lending pool configure bank", () => {
     await users[0].mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await writeBankMetadata(users[0].mrgnProgram, {
-          metadata: metaKey,
+          group: marginfiGroup.publicKey,
+          bankMint: ecosystem.usdcMint.publicKey,
+          bank,
+          bankSeed,
+          metadata,
           ticker: tickerStr,
           description: descStr,
         })
       )
     );
-    const meta = await program.account.bankMetadata.fetch(metaKey);
-    // Note: buffer is zero-padded, but the subarray will match the expected str
+    const meta = await program.account.bankMetadata.fetch(metadata);
     const onchainTicker = Buffer.from(meta.ticker as number[]);
     assert.equal(
       onchainTicker.subarray(0, tickerUtf8.length).toString("utf8"),
       tickerStr
     );
-    // Use the end byte pointer to quickly get the end byte for subarray
     assert.equal(meta.endTickerByte, tickerUtf8.length - 1);
 
-    // Note: also the same as a zero-padded buffer allocated manually
     const expectedTicker = Buffer.alloc(64, 0);
     expectedTicker.set(tickerUtf8, 0);
     assert.deepStrictEqual(onchainTicker, expectedTicker);
