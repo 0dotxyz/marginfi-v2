@@ -269,9 +269,8 @@ describe("jlrx: Fixed JupLend price bank", () => {
       [groupAdmin.wallet],
       true,
     );
-    assert("result" in result && !!result.result, "tx should fail");
-    const logs = (result.meta?.logMessages ?? []).join("\n");
-    assert.include(logs, "Use set_fixed_oracle_price instead");
+    // UseSetFixedOraclePrice
+    assertBankrunTxFailed(result, 6132);
   });
 
   it("(admin) add throwaway regular Token A bank + seed liquidity", async () => {

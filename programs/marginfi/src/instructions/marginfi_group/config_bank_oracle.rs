@@ -26,7 +26,7 @@ pub fn lending_pool_configure_bank_oracle(
                 | OracleSetup::FixedDrift
                 | OracleSetup::FixedJuplend
         ) {
-            panic!("Use set_fixed_oracle_price instead");
+            return err!(MarginfiError::UseSetFixedOraclePrice);
         }
 
         bank.config.oracle_setup = setup_type;
