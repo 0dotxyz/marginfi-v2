@@ -77,7 +77,7 @@ pub fn test_settings_16_banks() -> TestSettings {
                 ..TestBankSetting::default()
             },
             TestBankSetting {
-                mint: BankMint::T22WithFee,
+                mint: BankMint::SolEquivalent7,
                 ..TestBankSetting::default()
             },
             TestBankSetting {

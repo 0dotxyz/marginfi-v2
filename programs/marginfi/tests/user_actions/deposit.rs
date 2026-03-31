@@ -18,9 +18,6 @@ use test_case::test_case;
 #[test_case(0.05, BankMint::Sol)]
 #[test_case(0.05, BankMint::PyUSD)]
 #[test_case(15_002.0, BankMint::PyUSD)]
-#[test_case(0.0, BankMint::T22WithFee)]
-#[test_case(0.05, BankMint::T22WithFee)]
-#[test_case(15_002.0, BankMint::T22WithFee)]
 #[test_case(0.05, BankMint::Fixed)]
 #[test_case(5_000., BankMint::FixedLow)]
 #[tokio::test]
@@ -120,8 +117,6 @@ async fn marginfi_account_deposit_success(
 #[test_case(1_000., 456., 2345., BankMint::Usdc)]
 #[test_case(1_000., 456., 2345., BankMint::Sol)]
 #[test_case(1_000., 456., 2345., BankMint::PyUSD)]
-#[test_case(1_000., 456., 2345., BankMint::T22WithFee)]
-#[test_case(1_000., 999.999999, 1000., BankMint::T22WithFee)]
 #[test_case(1_000., 456., 2345., BankMint::Fixed)]
 #[test_case(1_000., 456., 2345., BankMint::FixedLow)]
 #[tokio::test]
@@ -180,12 +175,19 @@ async fn marginfi_account_deposit_failure_wrong_token_program() -> anyhow::Resul
     // Setup
     // -------------------------------------------------------------------------
 
-    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![TestBankSetting {
+            mint: BankMint::UsdcT22,
+            ..TestBankSetting::default()
+        }],
+        protocol_fees: false,
+    }))
+    .await;
 
     // User
 
     let deposit_amount = 1_000.;
-    let bank_mint = BankMint::T22WithFee;
+    let bank_mint = BankMint::UsdcT22;
 
     let user_mfi_account_f = test_f.create_marginfi_account().await;
     let user_wallet_balance = get_max_deposit_amount_pre_fee(deposit_amount);
@@ -242,7 +244,6 @@ async fn marginfi_account_deposit_failure_wrong_token_program() -> anyhow::Resul
 #[test_case(1_000., 500., 800., 500., BankMint::Usdc)]
 #[test_case(1_000., 500., 800., 500., BankMint::Sol)]
 #[test_case(1_000., 500., 800., 500., BankMint::PyUSD)]
-#[test_case(1_000., 500., 800., 500., BankMint::T22WithFee)]
 #[tokio::test]
 async fn marginfi_account_deposit_up_to_limit_success(
     deposit_cap: f64,

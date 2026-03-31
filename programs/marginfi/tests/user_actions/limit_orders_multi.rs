@@ -600,7 +600,7 @@ async fn limit_orders_open_max_count() -> anyhow::Result<()> {
         (BankMint::PyUSD, 5.0),
         (BankMint::UsdcT22, 5.0),
         (BankMint::FixedLow, 5.0),
-        (BankMint::T22WithFee, 5.0),
+        (BankMint::SolEquivalent7, 5.0),
         (BankMint::SolSwbPull, 5.0),
         (BankMint::SolSwbOrigFee, 5.0),
         (BankMint::SolEquivalent6, 5.0),
@@ -674,7 +674,8 @@ async fn limit_orders_open_max_count() -> anyhow::Result<()> {
 
     for (bank_mint, amount) in liabilities.iter() {
         let bank = test_f.get_bank(bank_mint);
-        let mint_amount = get_max_deposit_amount_pre_fee(*amount);
+        // Repay-all on origination-fee banks needs slightly more than the nominal liability.
+        let mint_amount = get_max_deposit_amount_pre_fee(*amount * 1.1);
         let account = bank
             .mint
             .create_token_account_and_mint_to_with_owner(&keeper.pubkey(), mint_amount)

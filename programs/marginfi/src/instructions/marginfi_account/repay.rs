@@ -60,6 +60,7 @@ pub fn lending_account_repay<'info>(
         let bank = bank_loader.load()?;
         utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?
     };
+    utils::validate_bank_mint(maybe_bank_mint.as_ref())?;
 
     let mut bank = bank_loader.load_mut()?;
     validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
@@ -113,20 +114,8 @@ pub fn lending_account_repay<'info>(
         // they withdraw. Remaining lenders will either absorb the loss - or more likely - be repaid
         // through some OTC claims portal using assets seized from borrowers
     } else {
-        let repay_amount_pre_fee = maybe_bank_mint
-            .as_ref()
-            .map(|mint| {
-                utils::calculate_pre_fee_spl_deposit_amount(
-                    mint.to_account_info(),
-                    repay_amount_post_fee,
-                    clock.epoch,
-                )
-            })
-            .transpose()?
-            .unwrap_or(repay_amount_post_fee);
-
         bank.deposit_spl_transfer(
-            repay_amount_pre_fee,
+            repay_amount_post_fee,
             signer_token_account.to_account_info(),
             bank_liquidity_vault.to_account_info(),
             authority.to_account_info(),

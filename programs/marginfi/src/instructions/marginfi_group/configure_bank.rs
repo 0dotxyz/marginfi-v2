@@ -219,16 +219,7 @@ pub fn lending_pool_emissions_deposit(
 
     utils::validate_bank_state(&bank, utils::InstructionKind::FailsIfPausedOrReduceState)?;
 
-    // Reject mints with non-zero transfer fees or active transfer hooks.
-    let mint_ai = ctx.accounts.mint.to_account_info();
-    check!(
-        !utils::nonzero_fee(mint_ai.clone(), clock.epoch)?,
-        MarginfiError::InvalidTransfer
-    );
-    check!(
-        !utils::has_transfer_hook(mint_ai)?,
-        MarginfiError::InvalidTransfer
-    );
+    utils::validate_mint_extensions(ctx.accounts.mint.to_account_info())?;
 
     let total_asset_shares = I80F48::from(bank.total_asset_shares);
     check!(

@@ -20,9 +20,8 @@ use anchor_spl::{
     token_2022::spl_token_2022::{
         self,
         extension::{
-            transfer_fee::{TransferFee, TransferFeeConfig},
-            transfer_hook::TransferHook,
-            BaseStateWithExtensions, StateWithExtensions,
+            transfer_fee::TransferFeeConfig, transfer_hook::TransferHook, BaseStateWithExtensions,
+            StateWithExtensions,
         },
     },
     token_interface::Mint,
@@ -62,72 +61,23 @@ where
     }
 }
 
-pub fn calculate_pre_fee_spl_deposit_amount(
+fn with_token_2022_mint<T>(
     mint_ai: AccountInfo,
-    post_fee_amount: u64,
-    epoch: u64,
-) -> MarginfiResult<u64> {
-    if mint_ai.owner.eq(&Token::id()) {
-        return Ok(post_fee_amount);
-    }
-
+    f: impl FnOnce(&StateWithExtensions<spl_token_2022::state::Mint>) -> MarginfiResult<T>,
+) -> MarginfiResult<T> {
     let mint_data = mint_ai.try_borrow_data()?;
     let mint = StateWithExtensions::<spl_token_2022::state::Mint>::unpack(&mint_data)?;
-
-    match mint.get_extension::<TransferFeeConfig>() {
-        Ok(transfer_fee_config) => {
-            let epoch_fee = transfer_fee_config.get_epoch_fee(epoch);
-            let pre_fee_amount = calculate_pre_fee_amount(epoch_fee, post_fee_amount).unwrap();
-            Ok(pre_fee_amount)
-        }
-        Err(_) => Ok(post_fee_amount),
-    }
+    f(&mint)
 }
 
-pub fn calculate_post_fee_spl_deposit_amount(
-    mint_ai: AccountInfo,
-    input_amount: u64,
-    epoch: u64,
-) -> MarginfiResult<u64> {
-    if mint_ai.owner.eq(&Token::id()) {
-        return Ok(input_amount);
-    }
-
-    let mint_data = mint_ai.try_borrow_data()?;
-    let mint = StateWithExtensions::<spl_token_2022::state::Mint>::unpack(&mint_data)?;
-
-    let fee = if let Ok(transfer_fee_config) = mint.get_extension::<TransferFeeConfig>() {
-        transfer_fee_config
-            .calculate_epoch_fee(epoch, input_amount)
-            .unwrap()
-    } else {
-        0
-    };
-
-    let output_amount = input_amount
-        .checked_sub(fee)
-        .ok_or(MarginfiError::MathError)?;
-
-    Ok(output_amount)
-}
-
-pub fn nonzero_fee(mint_ai: AccountInfo, epoch: u64) -> MarginfiResult<bool> {
+pub fn has_transfer_fee_config(mint_ai: AccountInfo) -> MarginfiResult<bool> {
     if mint_ai.owner.eq(&Token::id()) {
         return Ok(false);
     }
 
-    let mint_data = mint_ai.try_borrow_data()?;
-    let mint = StateWithExtensions::<spl_token_2022::state::Mint>::unpack(&mint_data)?;
-
-    if let Ok(transfer_fee_config) = mint.get_extension::<TransferFeeConfig>() {
-        return Ok(u16::from(
-            transfer_fee_config
-                .get_epoch_fee(epoch)
-                .transfer_fee_basis_points,
-        ) != 0);
-    }
-
-    Ok(false)
+    with_token_2022_mint(mint_ai, |mint| {
+        Ok(mint.get_extension::<TransferFeeConfig>().is_ok())
+    })
 }
 
 /// Returns `true` if the given mint has an active transfer hook program.
@@ -137,15 +87,32 @@ pub fn has_transfer_hook(mint_ai: AccountInfo) -> MarginfiResult<bool> {
         return Ok(false);
     }
 
-    let mint_data = mint_ai.try_borrow_data()?;
-    let mint = StateWithExtensions::<spl_token_2022::state::Mint>::unpack(&mint_data)?;
+    with_token_2022_mint(mint_ai, |mint| {
+        if let Ok(hook) = mint.get_extension::<TransferHook>() {
+            let program_id: Option<Pubkey> = Option::from(hook.program_id);
+            return Ok(program_id.is_some());
+        }
 
-    if let Ok(hook) = mint.get_extension::<TransferHook>() {
-        let program_id: Option<Pubkey> = Option::from(hook.program_id);
-        return Ok(program_id.is_some());
+        Ok(false)
+    })
+}
+
+/// Reject Token-2022 mints that marginfi does not support for bank flows.
+pub fn validate_mint_extensions(mint_ai: AccountInfo) -> MarginfiResult {
+    check!(
+        !has_transfer_fee_config(mint_ai.clone())?,
+        MarginfiError::UnsupportedTransferFeeMint
+    );
+    check!(!has_transfer_hook(mint_ai)?, MarginfiError::InvalidTransfer);
+    Ok(())
+}
+
+pub fn validate_bank_mint(maybe_bank_mint: Option<&InterfaceAccount<'_, Mint>>) -> MarginfiResult {
+    if let Some(mint) = maybe_bank_mint {
+        validate_mint_extensions(mint.to_account_info())?;
     }
 
-    Ok(false)
+    Ok(())
 }
 
 /// Checks if first account is a mint account. If so, updates remaining_account -> &remaining_account[1..]
@@ -178,42 +145,6 @@ pub fn maybe_take_bank_mint<'info>(
 
         _ => panic!("unsupported token program"),
     }
-}
-
-const ONE_IN_BASIS_POINTS: u128 = 10_000;
-/// backported fix from
-/// https://github.com/solana-labs/solana-program-library/commit/20e6792179fc7f1251579c1c33a4a0feec48e15e
-pub fn calculate_pre_fee_amount(transfer_fee: &TransferFee, post_fee_amount: u64) -> Option<u64> {
-    let maximum_fee = u64::from(transfer_fee.maximum_fee);
-    let transfer_fee_basis_points = u16::from(transfer_fee.transfer_fee_basis_points) as u128;
-    match (transfer_fee_basis_points, post_fee_amount) {
-        // no fee, same amount
-        (0, _) => Some(post_fee_amount),
-        // 0 zero out, 0 in
-        (_, 0) => Some(0),
-        // 100%, cap at max fee
-        (ONE_IN_BASIS_POINTS, _) => maximum_fee.checked_add(post_fee_amount),
-        _ => {
-            let numerator = (post_fee_amount as u128).checked_mul(ONE_IN_BASIS_POINTS)?;
-            let denominator = ONE_IN_BASIS_POINTS.checked_sub(transfer_fee_basis_points)?;
-            let raw_pre_fee_amount = ceil_div(numerator, denominator)?;
-
-            if raw_pre_fee_amount.checked_sub(post_fee_amount as u128)? >= maximum_fee as u128 {
-                post_fee_amount.checked_add(maximum_fee)
-            } else {
-                // should return `None` if `pre_fee_amount` overflows
-                u64::try_from(raw_pre_fee_amount).ok()
-            }
-        }
-    }
-}
-
-// Private function from spl-program-library
-fn ceil_div(numerator: u128, denominator: u128) -> Option<u128> {
-    numerator
-        .checked_add(denominator)?
-        .checked_sub(1)?
-        .checked_div(denominator)
 }
 
 /// A minimal tool to convert a hex string like "22f123639" into the byte equivalent.

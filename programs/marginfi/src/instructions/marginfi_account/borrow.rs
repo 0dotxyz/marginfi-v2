@@ -58,6 +58,7 @@ pub fn lending_account_borrow<'info>(
         &*bank_loader.load()?,
         token_program.key,
     )?;
+    utils::validate_bank_mint(maybe_bank_mint.as_ref())?;
 
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
     let group = marginfi_group_loader.load()?;
@@ -100,17 +101,7 @@ pub fn lending_account_borrow<'info>(
             BankAccountWrapper::find_or_create(&bank_loader.key(), &mut bank, lending_account)?;
 
         // User needs to borrow amount + fee to receive amount
-        amount_pre_fee = maybe_bank_mint
-            .as_ref()
-            .map(|mint| {
-                utils::calculate_pre_fee_spl_deposit_amount(
-                    mint.to_account_info(),
-                    amount,
-                    clock.epoch,
-                )
-            })
-            .transpose()?
-            .unwrap_or(amount);
+        amount_pre_fee = amount;
 
         let origination_fee_u64: u64;
         if !origination_fee_rate.is_zero() {

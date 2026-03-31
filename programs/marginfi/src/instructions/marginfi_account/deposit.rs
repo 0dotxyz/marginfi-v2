@@ -52,6 +52,7 @@ pub fn lending_account_deposit<'info>(
         &*bank_loader.load()?,
         token_program.key,
     )?;
+    utils::validate_bank_mint(maybe_bank_mint.as_ref())?;
     let deposit_up_to_limit = deposit_up_to_limit.unwrap_or(false);
 
     let mut bank = bank_loader.load_mut()?;
@@ -101,20 +102,8 @@ pub fn lending_account_deposit<'info>(
         deposit_amount,
         &clock,
     )?;
-    let amount_pre_fee = maybe_bank_mint
-        .as_ref()
-        .map(|mint| {
-            utils::calculate_pre_fee_spl_deposit_amount(
-                mint.to_account_info(),
-                deposit_amount,
-                clock.epoch,
-            )
-        })
-        .transpose()?
-        .unwrap_or(deposit_amount);
-
     bank.deposit_spl_transfer(
-        amount_pre_fee,
+        deposit_amount,
         signer_token_account.to_account_info(),
         bank_liquidity_vault.to_account_info(),
         signer.to_account_info(),

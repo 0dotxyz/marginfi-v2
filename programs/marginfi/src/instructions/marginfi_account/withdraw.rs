@@ -67,6 +67,7 @@ pub fn lending_account_withdraw<'info>(
             let bank = bank_loader.load()?;
             utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?
         };
+        utils::validate_bank_mint(maybe_bank_mint.as_ref())?;
 
         let in_receivership_or_order_execution =
             marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
@@ -113,21 +114,8 @@ pub fn lending_account_withdraw<'info>(
             // Note: In liquidation, we still want this passed on the books
             bank_account.withdraw_all(in_receivership)?
         } else {
-            let amount_pre_fee = maybe_bank_mint
-                .as_ref()
-                .map(|mint| {
-                    utils::calculate_pre_fee_spl_deposit_amount(
-                        mint.to_account_info(),
-                        amount,
-                        clock.epoch,
-                    )
-                })
-                .transpose()?
-                .unwrap_or(amount);
-
-            bank_account.withdraw(I80F48::from_num(amount_pre_fee))?;
-
-            amount_pre_fee
+            bank_account.withdraw(I80F48::from_num(amount))?;
+            amount
         };
 
         // If in deleverage mode and deleverage is complete, you get what's left!

@@ -143,6 +143,7 @@ pub fn lending_account_liquidate<'info>(
         &*ctx.accounts.liab_bank.load()?,
         ctx.accounts.token_program.key,
     )?;
+    utils::validate_bank_mint(maybe_liab_bank_mint.as_ref())?;
     let group = &*marginfi_group_loader.load()?;
     {
         ctx.accounts.asset_bank.load_mut()?.accrue_interest(

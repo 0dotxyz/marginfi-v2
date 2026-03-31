@@ -1,6 +1,3 @@
-use anchor_spl::token_2022::spl_token_2022::extension::{
-    transfer_fee::TransferFeeConfig, BaseStateWithExtensions,
-};
 use fixtures::{
     assert_custom_error,
     spl::TokenAccountFixture,
@@ -14,7 +11,6 @@ use test_case::test_case;
 #[test_case(BankMint::Usdc)]
 #[test_case(BankMint::Sol)]
 #[test_case(BankMint::PyUSD)]
-#[test_case(BankMint::T22WithFee)]
 #[tokio::test]
 async fn marginfi_group_withdraw_fees_and_insurance_fund_as_admin_success(
     bank_mint: BankMint,
@@ -40,19 +36,7 @@ async fn marginfi_group_withdraw_fees_and_insurance_fund_as_admin_success(
         .try_withdraw_insurance(&receiving_account, insurance_vault_balance)
         .await?;
 
-    let transfer_fee = bank_f
-        .mint
-        .load_state()
-        .await
-        .get_extension::<TransferFeeConfig>()
-        .map(|tf| {
-            tf.calculate_epoch_fee(0, insurance_vault_balance)
-                .unwrap_or(0)
-        })
-        .unwrap_or(0);
-
-    let expected_received_balance = insurance_vault_balance - transfer_fee;
-    assert_eq!(receiving_account.balance().await, expected_received_balance); // Verifies that the receiving account balance is 1000 USDC
+    assert_eq!(receiving_account.balance().await, insurance_vault_balance);
 
     // Mint `fee_vault_balance` USDC to the fee vault
     bank_f
@@ -66,16 +50,7 @@ async fn marginfi_group_withdraw_fees_and_insurance_fund_as_admin_success(
         .try_withdraw_fees(&receiving_account, fee_vault_balance)
         .await?;
 
-    let transfer_fee = bank_f
-        .mint
-        .load_state()
-        .await
-        .get_extension::<TransferFeeConfig>()
-        .map(|tf| tf.calculate_epoch_fee(0, fee_vault_balance).unwrap_or(0))
-        .unwrap_or(0);
-
-    let expected_received_balance = fee_vault_balance - transfer_fee;
-    assert_eq!(receiving_account.balance().await, expected_received_balance); // Verifies that the receiving account balance is 750 USDC
+    assert_eq!(receiving_account.balance().await, fee_vault_balance);
 
     Ok(())
 }
@@ -83,7 +58,6 @@ async fn marginfi_group_withdraw_fees_and_insurance_fund_as_admin_success(
 #[test_case(BankMint::Usdc)]
 #[test_case(BankMint::Sol)]
 #[test_case(BankMint::PyUSD)]
-#[test_case(BankMint::T22WithFee)]
 #[tokio::test]
 async fn marginfi_group_withdraw_fees_and_insurance_fund_as_non_admin_failure(
     bank_mint: BankMint,
@@ -147,7 +121,6 @@ async fn marginfi_group_withdraw_fees_and_insurance_fund_as_non_admin_failure(
 #[test_case(BankMint::Usdc)]
 #[test_case(BankMint::Sol)]
 #[test_case(BankMint::PyUSD)]
-#[test_case(BankMint::T22WithFee)]
 #[tokio::test]
 async fn marginfi_group_withdraw_fees_permissonless(bank_mint: BankMint) -> anyhow::Result<()> {
     // Setup test executor with non-admin payer
@@ -206,16 +179,7 @@ async fn marginfi_group_withdraw_fees_permissonless(bank_mint: BankMint) -> anyh
         .try_withdraw_fees_permissionless(&destination_ata, fee_vault_balance)
         .await?;
 
-    let transfer_fee = bank_f
-        .mint
-        .load_state()
-        .await
-        .get_extension::<TransferFeeConfig>()
-        .map(|tf| tf.calculate_epoch_fee(0, fee_vault_balance).unwrap_or(0))
-        .unwrap_or(0);
-
-    let expected_received_balance = fee_vault_balance - transfer_fee;
-    assert_eq!(destination_ata.balance().await, expected_received_balance); // Verifies that the receiving account balance is 750 USDC
+    assert_eq!(destination_ata.balance().await, fee_vault_balance);
 
     Ok(())
 }

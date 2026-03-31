@@ -6,7 +6,7 @@ use crate::{
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{bank::BankImpl, bank_config::BankConfigImpl, marginfi_group::MarginfiGroupImpl},
-    MarginfiError, MarginfiResult,
+    utils, MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::*;
@@ -41,6 +41,7 @@ pub fn lending_pool_add_bank_permissionless(
     let mut bank = bank_loader.load_init()?;
     let settings = ctx.accounts.staked_settings.load()?;
     let mut group = ctx.accounts.marginfi_group.load_mut()?;
+    utils::validate_mint_extensions(bank_mint.to_account_info())?;
 
     let liquidity_vault_bump = ctx.bumps.liquidity_vault;
     let liquidity_vault_authority_bump = ctx.bumps.liquidity_vault_authority;

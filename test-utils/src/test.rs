@@ -97,10 +97,6 @@ impl TestSettings {
                 ..TestBankSetting::default()
             },
             TestBankSetting {
-                mint: BankMint::T22WithFee,
-                ..TestBankSetting::default()
-            },
-            TestBankSetting {
                 mint: BankMint::SolEqIsolated,
                 ..TestBankSetting::default()
             },
@@ -232,8 +228,6 @@ pub enum BankMint {
     SolEquivalent9,
     /// $1
     UsdcT22,
-    /// $0.50 (50 cents)
-    T22WithFee,
     /// $1
     PyUSD,
     /// $10
@@ -459,7 +453,6 @@ pub const PYTH_PUSH_REAL_USDC_FEED_ID: [u8; 32] = [
 ];
 pub const INEXISTENT_PYTH_USDC_FEED: Pubkey =
     pubkey!("FakePythUsdcPrice11111111111111111111111111");
-pub const PYTH_T22_WITH_FEE_FEED: Pubkey = pubkey!("PythT22WithFeePrice111111111111111111111111");
 pub const PYTH_PYUSD_FEED: Pubkey = pubkey!("PythPyusdPrice11111111111111111111111111111");
 pub const PYTH_PUSH_USDC_REAL_FEED: Pubkey = pubkey!("PythPushUsdcRea1Price1111111111111111111111");
 pub const PYTH_PUSH_SOL_REAL_FEED: Pubkey = pubkey!("PythPushSo1Rea1Price11111111111111111111111");
@@ -575,12 +568,6 @@ lazy_static! {
         asset_weight_init: I80F48!(0).into(),
         ..*DEFAULT_TEST_BANK_CONFIG
     };
-    pub static ref DEFAULT_T22_WITH_FEE_TEST_BANK_CONFIG: BankConfig = BankConfig {
-        deposit_limit: native!(1_000_000_000, "T22_WITH_FEE"),
-        borrow_limit: native!(1_000_000_000, "T22_WITH_FEE"),
-        oracle_keys: create_oracle_key_array(PYTH_T22_WITH_FEE_FEED),
-        ..*DEFAULT_TEST_BANK_CONFIG
-    };
     pub static ref DEFAULT_SOL_TEST_BANK_CONFIG: BankConfig = BankConfig {
         deposit_limit: native!(1_000_000, "SOL"),
         borrow_limit: native!(1_000_000, "SOL"),
@@ -648,7 +635,6 @@ lazy_static! {
 pub const USDC_MINT_DECIMALS: u8 = 6;
 pub const FIXED_MINT_DECIMALS: u8 = 6;
 pub const PYUSD_MINT_DECIMALS: u8 = 6;
-pub const T22_WITH_FEE_MINT_DECIMALS: u8 = 6;
 pub const SOL_MINT_DECIMALS: u8 = 9;
 pub const MNDE_MINT_DECIMALS: u8 = 9;
 
@@ -758,7 +744,6 @@ impl TestFixture {
         let sol_equivalent_keypair = Keypair::new();
         let mnde_keypair = Keypair::new();
         let usdc_t22_keypair = Keypair::new();
-        let t22_with_fee_keypair = Keypair::new();
 
         program.add_account(
             PYTH_USDC_FEED,
@@ -776,16 +761,6 @@ impl TestFixture {
                 PYTH_PYUSD_FEED.to_bytes(),
                 1.0,
                 PYUSD_MINT_DECIMALS.into(),
-                None,
-                VerificationLevel::Full,
-            ),
-        );
-        program.add_account(
-            PYTH_T22_WITH_FEE_FEED,
-            create_pyth_push_oracle_account(
-                PYTH_T22_WITH_FEE_FEED.to_bytes(),
-                0.5,
-                T22_WITH_FEE_MINT_DECIMALS.into(),
                 None,
                 VerificationLevel::Full,
             ),
@@ -928,14 +903,9 @@ impl TestFixture {
             extensions,
         )
         .await;
-        let pyusd_mint_f = MintFixture::new_from_file(&context, "src/fixtures/pyUSD.json");
-        let t22_with_fee_mint_f = MintFixture::new_token_22(
-            Rc::clone(&context),
-            Some(t22_with_fee_keypair),
-            Some(T22_WITH_FEE_MINT_DECIMALS),
-            &[SupportedExtension::TransferFee],
-        )
-        .await;
+        let pyusd_mint_f =
+            MintFixture::new_token_22(Rc::clone(&context), None, Some(PYUSD_MINT_DECIMALS), &[])
+                .await;
 
         let tester_group = MarginfiGroupFixture::new(Rc::clone(&context)).await;
 
@@ -995,9 +965,6 @@ impl TestFixture {
                     &sol_equivalent_mint_f,
                     *DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG,
                 ),
-                BankMint::T22WithFee => {
-                    (&t22_with_fee_mint_f, *DEFAULT_T22_WITH_FEE_TEST_BANK_CONFIG)
-                }
                 BankMint::UsdcT22 => (&usdc_t22_mint_f, *DEFAULT_USDC_TEST_BANK_CONFIG),
                 BankMint::PyUSD => (&pyusd_mint_f, *DEFAULT_PYUSD_TEST_BANK_CONFIG),
                 BankMint::SolEqIsolated => {
@@ -2355,20 +2322,29 @@ impl TestFixture {
     pub async fn get_sufficient_collateral_for_outflow(
         &self,
         outflow_amount: f64,
-        outflow_mint: &BankMint,
         collateral_mint: &BankMint,
+        debt_mint: &BankMint,
     ) -> f64 {
-        let outflow_bank = self.get_bank(outflow_mint);
         let collateral_bank = self.get_bank(collateral_mint);
+        let debt_bank = self.get_bank(debt_mint);
 
-        let outflow_mint_price = outflow_bank.get_price().await;
         let collateral_mint_price = collateral_bank.get_price().await;
+        let debt_mint_price = debt_bank.get_price().await;
+        let debt_bank_config = debt_bank.load().await;
+        let origination_fee_rate = I80F48::from(
+            debt_bank_config
+                .config
+                .interest_rate_config
+                .protocol_origination_fee,
+        )
+        .to_num::<f64>();
 
         let collateral_amount = get_sufficient_collateral_for_outflow(
-            outflow_amount,
-            outflow_mint_price,
+            outflow_amount * (1.0 + origination_fee_rate),
             collateral_mint_price,
+            debt_mint_price,
         );
+        let collateral_amount = collateral_amount * 1.05;
 
         let decimal_scaling = 10.0_f64.powi(collateral_bank.mint.mint.decimals as i32);
         let collateral_amount =
@@ -2380,8 +2356,6 @@ impl TestFixture {
 
 pub fn get_mint_price(mint: BankMint) -> f64 {
     match mint {
-        // For the T22 with fee variant, it's 50 cents
-        BankMint::T22WithFee => 0.5,
         BankMint::Fixed => 2.0,
         BankMint::FixedLow => 0.0001,
         // For USDC-based and PYUSD mints, the price is roughly 1.0.

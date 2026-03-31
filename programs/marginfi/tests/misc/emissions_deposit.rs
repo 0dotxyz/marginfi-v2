@@ -70,36 +70,6 @@ async fn emissions_deposit_fails_when_bank_reduce_only() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn emissions_deposit_fails_with_nonzero_transfer_fee() -> anyhow::Result<()> {
-    let test_f = TestFixture::new(Some(TestSettings {
-        banks: vec![TestBankSetting {
-            mint: BankMint::T22WithFee,
-            config: None,
-        }],
-        protocol_fees: false,
-    }))
-    .await;
-
-    let t22_bank = test_f.get_bank(&BankMint::T22WithFee);
-
-    let depositor = test_f.create_marginfi_account().await;
-    let depositor_t22 = t22_bank.mint.create_token_account_and_mint_to(100).await;
-    depositor
-        .try_bank_deposit(depositor_t22.key, t22_bank, 50.0, None)
-        .await?;
-
-    let funding = t22_bank.mint.create_token_account_and_mint_to(50).await;
-    let res = t22_bank
-        .try_emissions_deposit(native!(50, t22_bank.mint.mint.decimals), funding.key)
-        .await;
-
-    assert!(res.is_err());
-    assert_custom_error!(res.unwrap_err(), MarginfiError::InvalidTransfer);
-
-    Ok(())
-}
-
 #[cfg(feature = "transfer-hook")]
 #[tokio::test]
 async fn emissions_deposit_fails_with_transfer_hook() -> anyhow::Result<()> {
@@ -132,78 +102,6 @@ async fn emissions_deposit_fails_with_transfer_hook() -> anyhow::Result<()> {
 
     assert!(res.is_err());
     assert_custom_error!(res.unwrap_err(), MarginfiError::InvalidTransfer);
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn emissions_deposit_succeeds_with_inactive_t22_extensions() -> anyhow::Result<()> {
-    use fixtures::spl::SupportedExtension;
-
-    let test_f = TestFixture::new_with_t22_extension(
-        Some(TestSettings {
-            banks: vec![TestBankSetting {
-                mint: BankMint::UsdcT22,
-                config: None,
-            }],
-            protocol_fees: false,
-        }),
-        &[
-            SupportedExtension::TransferFeeInactive,
-            SupportedExtension::TransferHook,
-        ],
-    )
-    .await;
-
-    let t22_bank = test_f.get_bank(&BankMint::UsdcT22);
-
-    let depositor = test_f.create_marginfi_account().await;
-    let depositor_t22 = t22_bank.mint.create_token_account_and_mint_to(100).await;
-    depositor
-        .try_bank_deposit(depositor_t22.key, t22_bank, 100.0, None)
-        .await?;
-
-    let bank_before = t22_bank.load().await;
-    let shares_before = I80F48::from(bank_before.total_asset_shares);
-    let share_value_before = I80F48::from(bank_before.asset_share_value);
-    let liquidity_vault_before =
-        TokenAccountFixture::fetch(test_f.context.clone(), bank_before.liquidity_vault)
-            .await
-            .balance()
-            .await;
-
-    let emissions_deposit = 50;
-    let funding = t22_bank.mint.create_token_account_and_mint_to(50).await;
-    t22_bank
-        .try_emissions_deposit(native!(emissions_deposit, "USDC"), funding.key)
-        .await?;
-
-    let bank_after = t22_bank.load().await;
-    let shares_after = I80F48::from(bank_after.total_asset_shares);
-    let share_value_after = I80F48::from(bank_after.asset_share_value);
-    let liquidity_vault_after =
-        TokenAccountFixture::fetch(test_f.context.clone(), bank_after.liquidity_vault)
-            .await
-            .balance()
-            .await;
-
-    let deposit_amount = 100;
-    let asset_shares_value_multiplier = 1.0 + emissions_deposit as f64 / deposit_amount as f64;
-
-    assert_eq!(shares_after, shares_before);
-
-    // Should be equal, zero liabilities are present
-    assert_eq!(
-        share_value_before
-            .checked_mul(I80F48::from_num(asset_shares_value_multiplier))
-            .unwrap(),
-        share_value_after
-    );
-    assert_eq!(
-        liquidity_vault_after - liquidity_vault_before,
-        native!(emissions_deposit, "USDC")
-    );
-    assert_eq!(I80F48::from(bank_after.emissions_remaining), I80F48::ZERO);
 
     Ok(())
 }

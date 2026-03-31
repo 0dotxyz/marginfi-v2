@@ -1,6 +1,3 @@
-use anchor_spl::token_2022::spl_token_2022::extension::{
-    transfer_fee::TransferFeeConfig, BaseStateWithExtensions,
-};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use fixtures::{assert_custom_error, assert_eq_noise, native, prelude::*};
@@ -16,8 +13,6 @@ use test_case::test_case;
 
 #[test_case(100., 9.9, -1., 1., 2., BankMint::Usdc, BankMint::Sol)]
 #[test_case(123., 122., -4., -4., 10., BankMint::SolEquivalent, BankMint::SolEqIsolated)]
-#[test_case(1_000., 999., 0., 0., 10., BankMint::Usdc, BankMint::T22WithFee)]
-#[test_case(2_000., 99., 400., -50., 1_500., BankMint::T22WithFee, BankMint::SolEquivalent)]
 #[test_case(2_000., 1_999., 1000., 750., 2_000., BankMint::Usdc, BankMint::PyUSD)]
 #[test_case(150., 16.9, 50., 0., 5., BankMint::Fixed, BankMint::Sol)]
 #[test_case(50_000., 2., 75_000., 0., 1.5, BankMint::FixedLow, BankMint::Fixed)]
@@ -397,20 +392,8 @@ async fn marginfi_account_liquidation_success(
     // Check the insurance fees
     let insurance_fund_fee = liquidate_amount * 0.025 * collateral_bank_f.get_price().await
         / debt_bank_f.get_price().await;
-    let expected_insurance_fund_usdc_pre_fee =
-        native!(insurance_fund_fee, debt_bank_f.mint.mint.decimals, f64);
-    let if_transfer_fee = debt_bank_f
-        .mint
-        .load_state()
-        .await
-        .get_extension::<TransferFeeConfig>()
-        .map(|tf| {
-            tf.calculate_epoch_fee(0, expected_insurance_fund_usdc_pre_fee)
-                .unwrap_or(0)
-        })
-        .unwrap_or(0);
     let expected_insurance_fund_usdc =
-        (expected_insurance_fund_usdc_pre_fee - if_transfer_fee) as i64;
+        native!(insurance_fund_fee, debt_bank_f.mint.mint.decimals, f64) as i64;
 
     let insurance_fund_usdc = debt_bank_f
         .get_vault_token_account(BankVaultType::Insurance)
@@ -424,8 +407,6 @@ async fn marginfi_account_liquidation_success(
 
 #[test_case(100., 9.9, 1., BankMint::Usdc, BankMint::Sol)]
 #[test_case(123., 122., 10., BankMint::SolEquivalent, BankMint::SolEqIsolated)]
-#[test_case(1_000., 999., 10., BankMint::Usdc, BankMint::T22WithFee)]
-#[test_case(2_000., 99., 1500., BankMint::T22WithFee, BankMint::SolEquivalent)]
 #[test_case(2_000., 1_999., 2000., BankMint::Usdc, BankMint::PyUSD)]
 #[test_case(50., 9.9, 0.5, BankMint::Fixed, BankMint::Sol)]
 #[test_case(1_000_000., 49.5, 10_000., BankMint::FixedLow, BankMint::Fixed)]
@@ -749,20 +730,8 @@ async fn marginfi_account_liquidation_with_delays_success(
     // Check the insurance fees
     let insurance_fund_fee = liquidate_amount * 0.025 * collateral_bank_f.get_price().await
         / debt_bank_f.get_price().await;
-    let expected_insurance_fund_usdc_pre_fee =
-        native!(insurance_fund_fee, debt_bank_f.mint.mint.decimals, f64);
-    let if_transfer_fee = debt_bank_f
-        .mint
-        .load_state()
-        .await
-        .get_extension::<TransferFeeConfig>()
-        .map(|tf| {
-            tf.calculate_epoch_fee(0, expected_insurance_fund_usdc_pre_fee)
-                .unwrap_or(0)
-        })
-        .unwrap_or(0);
     let expected_insurance_fund_usdc =
-        (expected_insurance_fund_usdc_pre_fee - if_transfer_fee) as i64;
+        native!(insurance_fund_fee, debt_bank_f.mint.mint.decimals, f64) as i64;
 
     let insurance_fund_usdc = debt_bank_f
         .get_vault_token_account(BankVaultType::Insurance)
@@ -1203,8 +1172,6 @@ async fn marginfi_account_liquidation_failure_bank_not_liquidatable() -> anyhow:
 // ??? this test is occasionally too slow to complete, shave off some tests cases?
 #[test_case(100., 9.9, 1., BankMint::Usdc, BankMint::Sol)]
 #[test_case(123., 122., 1.23, BankMint::SolEquivalent, BankMint::SolEqIsolated)]
-#[test_case(1_000., 1900., 10., BankMint::Usdc, BankMint::T22WithFee)]
-#[test_case(2_000., 99., 20., BankMint::T22WithFee, BankMint::SolEquivalent)]
 #[test_case(2_000., 1_999., 20., BankMint::Usdc, BankMint::PyUSD)]
 #[test_case(50., 9.9, 0.5, BankMint::Fixed, BankMint::Sol)]
 #[test_case(1_000_000., 49.5, 10_000., BankMint::FixedLow, BankMint::Fixed)]

@@ -1,6 +1,3 @@
-use anchor_spl::token_2022::spl_token_2022::extension::{
-    transfer_fee::TransferFeeConfig, BaseStateWithExtensions,
-};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use fixtures::{assert_custom_error, assert_eq_noise, native, prelude::*};
@@ -15,8 +12,6 @@ use test_case::test_case;
 
 #[test_case(BankMint::Usdc, BankMint::Sol)]
 #[test_case(BankMint::Sol, BankMint::Usdc)]
-#[test_case(BankMint::PyUSD, BankMint::T22WithFee)]
-#[test_case(BankMint::T22WithFee, BankMint::Sol)]
 #[tokio::test]
 async fn marginfi_group_handle_bankruptcy_failure_not_bankrupt(
     collateral_mint: BankMint,
@@ -100,8 +95,6 @@ async fn marginfi_group_handle_bankruptcy_failure_not_bankrupt(
 
 #[test_case(BankMint::Usdc, BankMint::Sol)]
 #[test_case(BankMint::Sol, BankMint::Usdc)]
-#[test_case(BankMint::PyUSD, BankMint::T22WithFee)]
-#[test_case(BankMint::T22WithFee, BankMint::Sol)]
 #[tokio::test]
 async fn marginfi_group_handle_bankruptcy_failure_no_debt(
     collateral_mint: BankMint,
@@ -190,8 +183,6 @@ async fn marginfi_group_handle_bankruptcy_failure_no_debt(
 
 #[test_case(BankMint::Usdc, BankMint::Sol)]
 #[test_case(BankMint::Sol, BankMint::Usdc)]
-#[test_case(BankMint::PyUSD, BankMint::T22WithFee)]
-#[test_case(BankMint::T22WithFee, BankMint::Sol)]
 #[tokio::test]
 async fn marginfi_group_handle_bankruptcy_success(
     collateral_mint: BankMint,
@@ -279,8 +270,6 @@ async fn marginfi_group_handle_bankruptcy_success(
 
 #[test_case(10_000., BankMint::Usdc, BankMint::Sol)]
 #[test_case(10_000., BankMint::Sol, BankMint::Usdc)]
-#[test_case(10_000., BankMint::PyUSD, BankMint::T22WithFee)]
-#[test_case(10_000., BankMint::T22WithFee, BankMint::Sol)]
 #[test_case(10_000., BankMint::Usdc, BankMint::SolSwbOrigFee)] // Sol @ ~ $153
 #[tokio::test]
 async fn marginfi_group_handle_bankruptcy_success_fully_insured(
@@ -365,11 +354,34 @@ async fn marginfi_group_handle_bankruptcy_success_fully_insured(
         .nullify_assets_for_bank(collateral_bank_pk)
         .await?;
 
+    let borrow_amount_native = native!(
+        borrow_amount,
+        test_f.get_bank(&debt_mint).mint.mint.decimals,
+        f64
+    );
+    let origination_fee_rate: I80F48 = test_f
+        .get_bank(&debt_mint)
+        .load()
+        .await
+        .config
+        .interest_rate_config
+        .protocol_origination_fee
+        .into();
+    let origination_fee: I80F48 = I80F48::from_num(borrow_amount_native)
+        .checked_mul(origination_fee_rate)
+        .unwrap()
+        .ceil();
+    let origination_fee_u64: u64 = origination_fee.checked_to_num().expect("out of bounds");
+    let actual_borrow_position = borrow_amount_native + origination_fee_u64;
+    let actual_borrow_position_ui = actual_borrow_position as f64
+        / 10_u64.pow(test_f.get_bank(&debt_mint).mint.mint.decimals as u32) as f64;
+
     {
         let (insurance_vault, _) = test_f
             .get_bank(&debt_mint)
             .get_vault(BankVaultType::Insurance);
-        let max_amount_to_cover_bad_debt = get_max_deposit_amount_pre_fee(borrow_amount);
+        let max_amount_to_cover_bad_debt =
+            get_max_deposit_amount_pre_fee(actual_borrow_position_ui);
 
         test_f
             .get_bank_mut(&debt_mint)
@@ -444,7 +456,6 @@ async fn marginfi_group_handle_bankruptcy_success_fully_insured(
             .into(),
     )?;
 
-    // Check that no loss was socialized
     assert_eq_noise!(
         lp_collateral_value,
         I80F48::from(native!(
@@ -455,43 +466,7 @@ async fn marginfi_group_handle_bankruptcy_success_fully_insured(
         I80F48::ONE
     );
 
-    let debt_bank_mint_state = test_f.get_bank(&debt_mint).mint.load_state().await;
-
-    let borrow_amount_native = native!(
-        borrow_amount,
-        test_f.get_bank(&debt_mint).mint.mint.decimals,
-        f64
-    );
-    let origination_fee_rate: I80F48 = debt_bank
-        .config
-        .interest_rate_config
-        .protocol_origination_fee
-        .into();
-    let origination_fee: I80F48 = I80F48::from_num(borrow_amount_native)
-        .checked_mul(origination_fee_rate)
-        .unwrap()
-        .ceil(); // Round up when repaying
-    let origination_fee_u64: u64 = origination_fee.checked_to_num().expect("out of bounds");
-    let actual_borrow_position = borrow_amount_native
-        + origination_fee_u64
-        + debt_bank_mint_state
-            .get_extension::<TransferFeeConfig>()
-            .map(|tf| {
-                tf.calculate_inverse_epoch_fee(0, borrow_amount_native)
-                    .unwrap_or(0)
-            })
-            .unwrap_or(0);
-
-    let expected_insurance_vault_delta = I80F48::from(
-        actual_borrow_position
-            + debt_bank_mint_state
-                .get_extension::<TransferFeeConfig>()
-                .map(|tf| {
-                    tf.calculate_inverse_epoch_fee(0, actual_borrow_position)
-                        .unwrap_or(0)
-                })
-                .unwrap_or(0),
-    );
+    let expected_insurance_vault_delta = I80F48::from(actual_borrow_position);
 
     let expected_liquidity_vault_delta = I80F48::from(actual_borrow_position);
 
@@ -559,8 +534,6 @@ async fn marginfi_group_handle_bankruptcy_success_fully_insured(
 
 #[test_case(10_000., 5000., BankMint::Usdc, BankMint::Sol)]
 #[test_case(10_000., 5000., BankMint::Sol, BankMint::Usdc)]
-#[test_case(10_000., 5000., BankMint::PyUSD, BankMint::T22WithFee)]
-#[test_case(10_000., 5000., BankMint::T22WithFee, BankMint::Sol)]
 #[tokio::test]
 async fn marginfi_group_handle_bankruptcy_success_partially_insured(
     borrow_amount: f64,
@@ -704,22 +677,12 @@ async fn marginfi_group_handle_bankruptcy_success_partially_insured(
             .into(),
     )?;
 
-    let debt_bank_mint_state = test_f.get_bank(&debt_mint).mint.load_state().await;
-
     let initial_insurance_vault_balance_native = native!(
         initial_insurance_vault_balance,
         test_f.get_bank(&debt_mint).mint.mint.decimals,
         f64
     );
-    let insurance_fund_fee = debt_bank_mint_state
-        .get_extension::<TransferFeeConfig>()
-        .map(|tf| {
-            tf.calculate_epoch_fee(0, initial_insurance_vault_balance_native)
-                .unwrap_or(0)
-        })
-        .unwrap_or(0);
-
-    let available_insurance_amount = initial_insurance_vault_balance_native - insurance_fund_fee;
+    let available_insurance_amount = initial_insurance_vault_balance_native;
 
     let amount_not_covered = pre_user_debt_amount - I80F48::from(available_insurance_amount);
 
@@ -745,8 +708,6 @@ async fn marginfi_group_handle_bankruptcy_success_partially_insured(
 
 #[test_case(10_000., BankMint::Usdc, BankMint::Sol)]
 #[test_case(10_000., BankMint::Sol, BankMint::Usdc)]
-#[test_case(10_000., BankMint::PyUSD, BankMint::T22WithFee)]
-#[test_case(10_000., BankMint::T22WithFee, BankMint::Sol)]
 #[tokio::test]
 async fn marginfi_group_handle_bankruptcy_success_not_insured(
     borrow_amount: f64,
@@ -856,17 +817,7 @@ async fn marginfi_group_handle_bankruptcy_success_not_insured(
         test_f.get_bank(&debt_mint).mint.mint.decimals,
         f64
     );
-    let borrow_amount_with_fee = borrow_amount_native
-        + debt_bank_f
-            .mint
-            .load_state()
-            .await
-            .get_extension::<TransferFeeConfig>()
-            .map(|tf| {
-                tf.calculate_inverse_epoch_fee(0, borrow_amount_native)
-                    .unwrap_or(0)
-            })
-            .unwrap_or(0);
+    let borrow_amount_with_fee = borrow_amount_native;
     let expected_lender_collateral_amount = I80F48::from(
         native!(
             lp_deposit_amount,

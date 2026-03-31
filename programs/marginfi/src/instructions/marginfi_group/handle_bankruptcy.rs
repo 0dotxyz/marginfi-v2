@@ -53,6 +53,7 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
     let maybe_bank_mint =
         utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?;
+    utils::validate_bank_mint(maybe_bank_mint.as_ref())?;
 
     let clock = Clock::get()?;
 
@@ -119,18 +120,7 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     );
 
     let (covered_by_insurance, socialized_loss) = {
-        let available_insurance_fund: I80F48 = maybe_bank_mint
-            .as_ref()
-            .map(|mint| {
-                utils::calculate_post_fee_spl_deposit_amount(
-                    mint.to_account_info(),
-                    insurance_vault.amount,
-                    clock.epoch,
-                )
-            })
-            .transpose()?
-            .unwrap_or(insurance_vault.amount)
-            .into();
+        let available_insurance_fund: I80F48 = insurance_vault.amount.into();
 
         let covered_by_insurance = min(bad_debt, available_insurance_fund);
         let socialized_loss = max(bad_debt - covered_by_insurance, I80F48::ZERO);
@@ -150,20 +140,8 @@ pub fn lending_pool_handle_bankruptcy<'info>(
         socialized_loss.to_num::<f64>()
     );
 
-    let insurance_coverage_deposit_pre_fee = maybe_bank_mint
-        .as_ref()
-        .map(|mint| {
-            utils::calculate_pre_fee_spl_deposit_amount(
-                mint.to_account_info(),
-                covered_by_insurance_rounded_up,
-                clock.epoch,
-            )
-        })
-        .transpose()?
-        .unwrap_or(covered_by_insurance_rounded_up);
-
     bank.withdraw_spl_transfer(
-        insurance_coverage_deposit_pre_fee,
+        covered_by_insurance_rounded_up,
         ctx.accounts.insurance_vault.to_account_info(),
         ctx.accounts.liquidity_vault.to_account_info(),
         ctx.accounts.insurance_vault_authority.to_account_info(),

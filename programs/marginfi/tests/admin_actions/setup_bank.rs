@@ -107,7 +107,8 @@ async fn add_bank_success() -> anyhow::Result<()> {
             *DEFAULT_SOL_TEST_BANK_CONFIG,
         ),
         (
-            MintFixture::new_from_file(&test_f.context.clone(), "src/fixtures/pyUSD.json"),
+            MintFixture::new_token_22(test_f.context.clone(), None, Some(PYUSD_MINT_DECIMALS), &[])
+                .await,
             *DEFAULT_PYUSD_TEST_BANK_CONFIG,
         ),
     ];
@@ -269,7 +270,8 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             *DEFAULT_SOL_TEST_BANK_CONFIG,
         ),
         (
-            MintFixture::new_from_file(&test_f.context.clone(), "src/fixtures/pyUSD.json"),
+            MintFixture::new_token_22(test_f.context.clone(), None, Some(PYUSD_MINT_DECIMALS), &[])
+                .await,
             *DEFAULT_PYUSD_TEST_BANK_CONFIG,
         ),
     ];
@@ -390,6 +392,28 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
         let actual_fee_delta = fee_balance_after - fee_balance_before;
         assert_eq!(expected_fee_delta, actual_fee_delta);
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn add_bank_failure_transfer_fee_mint() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+    let mint_f = MintFixture::new_token_22(
+        test_f.context.clone(),
+        None,
+        Some(USDC_MINT_DECIMALS),
+        &[SupportedExtension::TransferFee],
+    )
+    .await;
+
+    let err = test_f
+        .marginfi_group
+        .try_lending_pool_add_bank(&mint_f, None, *DEFAULT_USDC_TEST_BANK_CONFIG, None)
+        .await
+        .unwrap_err();
+
+    assert_custom_error!(err, MarginfiError::UnsupportedTransferFeeMint);
 
     Ok(())
 }
@@ -685,7 +709,6 @@ async fn update_fixed_bank_price() -> anyhow::Result<()> {
 
 #[test_case(BankMint::Usdc)]
 #[test_case(BankMint::PyUSD)]
-#[test_case(BankMint::T22WithFee)]
 #[test_case(BankMint::SolSwbPull)]
 #[tokio::test]
 async fn configure_bank_success(bank_mint: BankMint) -> anyhow::Result<()> {
@@ -858,7 +881,6 @@ async fn config_group_admins() -> anyhow::Result<()> {
 
 #[test_case(BankMint::Usdc)]
 #[test_case(BankMint::PyUSD)]
-#[test_case(BankMint::T22WithFee)]
 #[test_case(BankMint::SolSwbPull)]
 #[tokio::test]
 async fn configure_bank_emode_success(bank_mint: BankMint) -> anyhow::Result<()> {
@@ -1078,7 +1100,6 @@ async fn lending_pool_clone_emode_unauthorized_fails() -> anyhow::Result<()> {
 
 #[test_case(BankMint::Usdc)]
 #[test_case(BankMint::PyUSD)]
-#[test_case(BankMint::T22WithFee)]
 #[test_case(BankMint::SolSwbPull)]
 #[tokio::test]
 async fn configure_bank_emode_invalid_args(bank_mint: BankMint) -> anyhow::Result<()> {

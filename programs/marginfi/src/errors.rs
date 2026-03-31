@@ -108,8 +108,8 @@ pub enum MarginfiError {
     WrongNumberOfOracleAccounts,
     #[msg("Oracle error: wrong account keys")] // 6052
     WrongOracleAccountKeys,
-    #[msg("Vacated2")] // 6053
-    Vacated2,
+    #[msg("Token-2022 mints with transfer fees not supported")] // 6053
+    UnsupportedTransferFeeMint,
     #[msg("Vacated3")] // 6054
     Vacated3,
     #[msg("Oracle max confidence exceeded: try again later")] // 6055
@@ -499,7 +499,7 @@ impl From<u32> for MarginfiError {
             6050 => MarginfiError::PythPushStalePrice,
             6051 => MarginfiError::WrongNumberOfOracleAccounts,
             6052 => MarginfiError::WrongOracleAccountKeys,
-            6053 => MarginfiError::Vacated2,
+            6053 => MarginfiError::UnsupportedTransferFeeMint,
             6054 => MarginfiError::Vacated3,
             6055 => MarginfiError::OracleMaxConfidenceExceeded,
             6056 => MarginfiError::PythPushInsufficientVerificationLevel,
@@ -658,7 +658,6 @@ impl From<u32> for MarginfiError {
             6510 => MarginfiError::JuplendWithdrawFailed,
             6511 => MarginfiError::JuplendInitPositionDepositInsufficient,
             6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
-
             _ => MarginfiError::InternalLogicError,
         }
     }

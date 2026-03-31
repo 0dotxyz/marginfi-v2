@@ -4,7 +4,6 @@ use anchor_lang::solana_program::instruction::Instruction;
 use anchor_lang::system_program;
 use anchor_lang::Discriminator;
 use anchor_spl::token::spl_token;
-use anchor_spl::token_2022::spl_token_2022::extension::transfer_fee::MAX_FEE_BASIS_POINTS;
 use marginfi::constants::SWITCHBOARD_PULL_ID;
 use marginfi_type_crate::constants::{EXECUTE_ORDER_SEED, ORDER_SEED};
 use pyth_solana_receiver_sdk::price_update::FeedId;
@@ -343,14 +342,6 @@ macro_rules! native {
     ($val: expr, "PYUSD", f64) => {
         (($val) * 10_u64.pow(6) as f64) as u64
     };
-    ($val: expr, "T22_WITH_FEE") => {
-        $val * 10_u64.pow(6)
-    };
-
-    ($val: expr, "T22_WITH_FEE", f64) => {
-        (($val) * 10_u64.pow(6) as f64) as u64
-    };
-
     ($val: expr, "SOL") => {
         $val * 10_u64.pow(9)
     };
@@ -455,7 +446,7 @@ pub fn clone_keypair(keypair: &Keypair) -> Keypair {
 }
 
 pub fn get_max_deposit_amount_pre_fee(amount: f64) -> f64 {
-    amount * (1f64 + MAX_FEE_BASIS_POINTS as f64 / 10_000f64)
+    amount
 }
 
 pub fn get_sufficient_collateral_for_outflow(

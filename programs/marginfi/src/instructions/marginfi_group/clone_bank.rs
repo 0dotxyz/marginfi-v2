@@ -3,7 +3,7 @@ use crate::{
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{bank::BankImpl, marginfi_group::MarginfiGroupImpl},
-    MarginfiError, MarginfiResult,
+    utils, MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::*;
@@ -91,6 +91,7 @@ pub fn lending_pool_clone_bank(
         ctx.accounts.bank_mint.decimals == source_mint_decimals,
         MarginfiError::InvalidBankAccount
     );
+    utils::validate_mint_extensions(ctx.accounts.bank_mint.to_account_info())?;
 
     let liquidity_vault_bump = ctx.bumps.liquidity_vault;
     let liquidity_vault_authority_bump = ctx.bumps.liquidity_vault_authority;

@@ -702,7 +702,6 @@ pub enum SupportedExtension {
     PermanentDelegate,
     TransferHook,
     TransferFee,
-    TransferFeeInactive,
 }
 
 impl SupportedExtension {
@@ -757,17 +756,6 @@ impl SupportedExtension {
             )
             .unwrap()
             }
-            Self::TransferFeeInactive => {
-                spl_token_2022::extension::transfer_fee::instruction::initialize_transfer_fee_config(
-                &token_2022::ID,
-                mint,
-                None,
-                None,
-                0,
-                0,
-            )
-            .unwrap()
-            }
         }
     }
 
@@ -777,9 +765,7 @@ impl SupportedExtension {
             SupportedExtension::InterestBearing => pod_get_packed_len::<InterestBearingConfig>(),
             SupportedExtension::PermanentDelegate => pod_get_packed_len::<PermanentDelegate>(),
             SupportedExtension::TransferHook => pod_get_packed_len::<TransferHook>(),
-            SupportedExtension::TransferFee | SupportedExtension::TransferFeeInactive => {
-                pod_get_packed_len::<TransferFee>()
-            }
+            SupportedExtension::TransferFee => pod_get_packed_len::<TransferFee>(),
         })
         .sum()
     }
@@ -790,9 +776,7 @@ impl SupportedExtension {
             SupportedExtension::InterestBearing => ExtensionType::InterestBearingConfig,
             SupportedExtension::PermanentDelegate => ExtensionType::PermanentDelegate,
             SupportedExtension::TransferHook => ExtensionType::TransferHook,
-            SupportedExtension::TransferFee | SupportedExtension::TransferFeeInactive => {
-                ExtensionType::TransferFeeConfig
-            }
+            SupportedExtension::TransferFee => ExtensionType::TransferFeeConfig,
         })
         .collect()
     }

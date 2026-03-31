@@ -1,6 +1,3 @@
-use anchor_spl::token_2022::spl_token_2022::extension::{
-    transfer_fee::TransferFeeConfig, BaseStateWithExtensions,
-};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use fixtures::{assert_custom_error, native, prelude::*, ui_to_native};
@@ -18,8 +15,6 @@ use test_case::test_case;
 #[test_case(100., 9., BankMint::Usdc, BankMint::Sol)]
 #[test_case(123456.0, 12345.599999999, BankMint::Usdc, BankMint::Sol)]
 #[test_case(1.0, 5.0, BankMint::Sol, BankMint::Usdc)]
-#[test_case(240., 0.092, BankMint::PyUSD, BankMint::T22WithFee)]
-#[test_case(36., 1.7, BankMint::T22WithFee, BankMint::Sol)]
 #[test_case(200., 1.1, BankMint::Usdc, BankMint::SolSwbOrigFee)] // Sol @ ~ $153
 #[test_case(150., 5., BankMint::Fixed, BankMint::Sol)]
 #[test_case(300_000., 10., BankMint::FixedLow, BankMint::Fixed)]
@@ -127,17 +122,7 @@ async fn marginfi_account_borrow_success(
         .unwrap();
 
     let borrow_amount_native = ui_to_native!(borrow_amount, debt_bank_f.mint.mint.decimals);
-    let borrow_fee = debt_bank_f
-        .mint
-        .load_state()
-        .await
-        .get_extension::<TransferFeeConfig>()
-        .map(|tf| {
-            tf.calculate_inverse_epoch_fee(0, borrow_amount_native)
-                .unwrap_or(0)
-        })
-        .unwrap_or(0);
-    let borrow_amount_pre_fee = borrow_amount_native + borrow_fee;
+    let borrow_amount_pre_fee = borrow_amount_native;
     let origination_fee_rate: I80F48 = bank_before
         .config
         .interest_rate_config
@@ -223,8 +208,6 @@ async fn marginfi_account_borrow_success(
 #[test_case(100., 9., 10.000000001, BankMint::Usdc, BankMint::Sol)]
 #[test_case(123_456., 12_345.6, 12_345.9, BankMint::Usdc, BankMint::Sol)]
 #[test_case(1., 5., 11.98224, BankMint::Sol, BankMint::Usdc)]
-#[test_case(240., 0.092, 500., BankMint::PyUSD, BankMint::T22WithFee)]
-#[test_case(36., 1.7, 1.9, BankMint::T22WithFee, BankMint::Sol)]
 #[test_case(1., 100., 155.9, BankMint::SolSwbPull, BankMint::Usdc)] // Sol @ ~ $155.1233
 #[test_case(150., 29., 31., BankMint::Fixed, BankMint::Sol)] // Fixed = 2, SOL = 10
 #[test_case(2_000., 0.02, 2.1, BankMint::FixedLow, BankMint::Fixed)] // Low = 0.0001, fixed = 2
@@ -315,8 +298,6 @@ async fn marginfi_account_borrow_failure_not_enough_collateral(
 #[test_case(505., 500., 505.0000000001, BankMint::Usdc, BankMint::Sol)]
 #[test_case(12_345.6, 12_345.5, 12_345.9, BankMint::Usdc, BankMint::Sol)]
 #[test_case(0.91, 0.1, 0.98, BankMint::Sol, BankMint::Usdc)]
-#[test_case(505., 0.092, 500., BankMint::PyUSD, BankMint::T22WithFee)]
-#[test_case(1.8, 1.7, 1.9, BankMint::T22WithFee, BankMint::Sol)]
 #[test_case(1.5, 1.4, 1.6, BankMint::SolSwbPull, BankMint::Usdc)]
 #[test_case(150., 5., 151., BankMint::Fixed, BankMint::Sol)]
 #[test_case(0.04, 0.02, 0.05, BankMint::FixedLow, BankMint::Fixed)]

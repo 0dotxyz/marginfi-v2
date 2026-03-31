@@ -1,6 +1,3 @@
-use anchor_spl::token_2022::spl_token_2022::extension::{
-    transfer_fee::TransferFeeConfig, BaseStateWithExtensions,
-};
 use fixed::types::I80F48;
 use fixtures::{assert_custom_error, prelude::*, ui_to_native};
 use marginfi::{
@@ -15,8 +12,6 @@ use test_case::test_case;
 
 #[test_case(0.03, 0.012, BankMint::Usdc)]
 #[test_case(128932.0, 9834.0, BankMint::PyUSD)]
-#[test_case(0.1, 0.092, BankMint::T22WithFee)]
-#[test_case(100.0, 92.0, BankMint::T22WithFee)]
 #[test_case(0.5, 0.2, BankMint::Fixed)]
 #[test_case(5_000., 2_000., BankMint::FixedLow)]
 #[tokio::test]
@@ -82,42 +77,8 @@ async fn marginfi_account_withdraw_success(
         .get_asset_amount(balance.asset_shares.into())
         .unwrap();
 
-    let deposit_amount_native = ui_to_native!(deposit_amount, bank_f.mint.mint.decimals);
-    let withdraw_amount_native = ui_to_native!(withdraw_amount, bank_f.mint.mint.decimals);
-    let withdraw_fee_to_use;
-    let (withdraw_fee, withdraw_fee_if_excessive) = bank_f
-        .mint
-        .load_state()
-        .await
-        .get_extension::<TransferFeeConfig>()
-        .map(|tf| {
-            (
-                // withdraw <= available case
-                tf.calculate_inverse_epoch_fee(0, withdraw_amount_native)
-                    .unwrap_or(0),
-                // withdraw all case, if withdraw > available
-                tf.calculate_epoch_fee(0, deposit_amount_native)
-                    .unwrap_or(0),
-            )
-        })
-        .unwrap_or((0, 0));
-
-    // If exceeds available, clamp to available.
-    // If it does not, use specified withdraw amount
-    let adjusted_withdraw_amount = if withdraw_amount_native + withdraw_fee > deposit_amount_native
-    {
-        // Clamp to deposit amount minus fee if excessive
-        withdraw_fee_to_use = withdraw_fee_if_excessive;
-        deposit_amount
-            - withdraw_fee_if_excessive as f64 / 10_f64.powi(bank_f.mint.mint.decimals as i32)
-    } else {
-        // Use specified withdraw amount
-        withdraw_fee_to_use = withdraw_fee;
-        withdraw_amount
-    };
-
     let res = marginfi_account_f
-        .try_bank_withdraw(token_account_f.key, bank_f, adjusted_withdraw_amount, None)
+        .try_bank_withdraw(token_account_f.key, bank_f, withdraw_amount, None)
         .await;
     assert!(res.is_ok());
 
@@ -147,9 +108,8 @@ async fn marginfi_account_withdraw_success(
         .count();
     assert_eq!(1, active_balance_count);
 
-    let expected_liquidity_vault_delta = -I80F48::from(
-        ui_to_native!(adjusted_withdraw_amount, bank_f.mint.mint.decimals) + withdraw_fee_to_use,
-    );
+    let expected_liquidity_vault_delta =
+        -I80F48::from(ui_to_native!(withdraw_amount, bank_f.mint.mint.decimals));
     let actual_liquidity_vault_delta =
         I80F48::from(post_vault_balance) - I80F48::from(pre_vault_balance);
 
@@ -171,7 +131,7 @@ async fn marginfi_account_withdraw_success(
 
     let asset_value: I80F48 = health_cache.asset_value.into();
     let asset_value: f64 = asset_value.to_num();
-    let diff = deposit_amount - adjusted_withdraw_amount - withdraw_fee as f64;
+    let diff = deposit_amount - withdraw_amount;
     assert!(asset_value >= (diff) * collateral_price_roughly * disc);
 
     for (i, bal) in marginfi_account.lending_account.balances.iter().enumerate() {
@@ -191,8 +151,6 @@ async fn marginfi_account_withdraw_success(
 #[test_case(100.0, BankMint::Usdc)]
 #[test_case(100.0, BankMint::Sol)]
 #[test_case(128932.0, BankMint::PyUSD)]
-#[test_case(0.1, BankMint::T22WithFee)]
-#[test_case(100.0, BankMint::T22WithFee)]
 #[test_case(0.5, BankMint::Fixed)]
 #[test_case(5_000., BankMint::FixedLow)]
 #[tokio::test]
@@ -293,8 +251,6 @@ async fn marginfi_account_withdraw_all_success(
 #[test_case(0.03, 0.030001, BankMint::Usdc)]
 #[test_case(100., 102., BankMint::Sol)]
 #[test_case(109247394., 109247394.000001, BankMint::PyUSD)]
-#[test_case(16., 16., BankMint::T22WithFee)]
-#[test_case(100., 98., BankMint::T22WithFee)]
 #[tokio::test]
 async fn marginfi_account_withdraw_failure_withdrawing_too_much(
     deposit_amount: f64,

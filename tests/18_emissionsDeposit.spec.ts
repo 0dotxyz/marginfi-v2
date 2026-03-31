@@ -55,6 +55,7 @@ import {
   setPythPullOraclePrice,
   PYTH_RECEIVER_PROGRAM_ID,
 } from "./utils/bankrun-oracles";
+import { dummyIx } from "./utils/bankrunConnection";
 import { accountInit } from "./utils/user-instructions";
 
 function assertSameBankDeposit(
@@ -195,6 +196,7 @@ describe("Same-bank deposit", () => {
           bank: bankKeypairA.publicKey,
           bankConfigOpt: cfg,
         }),
+        dummyIx(groupAdmin.wallet.publicKey, bankKeypairA.publicKey),
       ),
     );
   };
@@ -208,6 +210,7 @@ describe("Same-bank deposit", () => {
       await propagateFeeState(globalProgramAdmin.mrgnProgram, {
         group: marginfiGroup.publicKey,
       }),
+      dummyIx(globalProgramAdmin.wallet.publicKey, marginfiGroup.publicKey),
     );
     await globalProgramAdmin.mrgnProgram.provider.sendAndConfirm(tx);
   };
@@ -508,10 +511,8 @@ describe("Same-bank deposit - T22", () => {
     depositor = bankrunContext.payer.publicKey;
   });
 
-  it("emissions deposit succeeds with inactive T22 extensions (fee=0, hook=null)", async () => {
+  it("emissions deposit succeeds with T22 mint", async () => {
     await createT22MintWithExtensions(t22Mint, T22_DECIMALS, {
-      transferFee: { feeBasisPoints: 0, maxFee: BigInt(0) },
-      transferHook: { hookProgramId: PublicKey.default },
       freezeAuthority: depositor,
     });
 
@@ -657,66 +658,31 @@ describe("Same-bank deposit - T22", () => {
     );
   });
 
-  it("emissions deposit fails with nonzero transfer fee", async () => {
+  it("adding a T22 bank fails with transfer fee config", async () => {
     const [feeMint, feeBank] = [Keypair.generate(), Keypair.generate()];
 
     await createT22MintWithExtensions(feeMint, T22_DECIMALS, {
       transferFee: { feeBasisPoints: 100, maxFee: BigInt(1_000_000) },
     });
-    await addT22Bank(feeMint, feeBank);
-    await setEmissionsDirect(provider, feeBank.publicKey, feeMint.publicKey);
-
-    const ix = await program.methods
-      .lendingPoolEmissionsDeposit(new BN(8))
-      .accounts({
-        bank: feeBank.publicKey,
-        depositor,
-        emissionsFundingAccount: getAssociatedTokenAddressSync(
-          feeMint.publicKey,
-          depositor,
-          false,
-          TOKEN_2022_PROGRAM_ID,
-        ),
-        tokenProgram: TOKEN_2022_PROGRAM_ID,
-      })
-      .instruction();
-
     await expectFailedTxWithError(
       async () => {
-        await provider.sendAndConfirm(new Transaction().add(ix));
+        await addT22Bank(feeMint, feeBank);
       },
-      "InvalidTransfer",
-      6004,
+      "UnsupportedTransferFeeMint",
+      6053,
     );
   });
 
-  it("emissions deposit fails with active transfer hook", async () => {
+  it("adding a T22 bank fails with active transfer hook", async () => {
     const [hookMint, hookBank] = [Keypair.generate(), Keypair.generate()];
 
     await createT22MintWithExtensions(hookMint, T22_DECIMALS, {
       transferHook: { hookProgramId: Keypair.generate().publicKey },
     });
-    await addT22Bank(hookMint, hookBank);
-    await setEmissionsDirect(provider, hookBank.publicKey, hookMint.publicKey);
-
-    const ix = await program.methods
-      .lendingPoolEmissionsDeposit(new BN(9))
-      .accounts({
-        bank: hookBank.publicKey,
-        depositor,
-        emissionsFundingAccount: getAssociatedTokenAddressSync(
-          hookMint.publicKey,
-          depositor,
-          false,
-          TOKEN_2022_PROGRAM_ID,
-        ),
-        tokenProgram: TOKEN_2022_PROGRAM_ID,
-      })
-      .instruction();
 
     await expectFailedTxWithError(
       async () => {
-        await provider.sendAndConfirm(new Transaction().add(ix));
+        await addT22Bank(hookMint, hookBank);
       },
       "InvalidTransfer",
       6004,

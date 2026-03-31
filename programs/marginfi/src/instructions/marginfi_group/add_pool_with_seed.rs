@@ -2,7 +2,7 @@ use crate::{
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{bank::BankImpl, bank_config::BankConfigImpl, marginfi_group::MarginfiGroupImpl},
-    MarginfiError, MarginfiResult,
+    utils, MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::*;
@@ -48,6 +48,7 @@ pub fn lending_pool_add_bank_with_seed(
         bank_config.asset_tag == ASSET_TAG_DEFAULT || bank_config.asset_tag == ASSET_TAG_SOL,
         MarginfiError::WrongAssetTagForStandardInstructions
     );
+    utils::validate_mint_extensions(bank_mint.to_account_info())?;
 
     let liquidity_vault_bump = ctx.bumps.liquidity_vault;
     let liquidity_vault_authority_bump = ctx.bumps.liquidity_vault_authority;
