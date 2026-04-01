@@ -3,6 +3,7 @@ use crate::{
     constants::{LIQUIDATION_BONUS_FEE_MINIMUM, LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD},
     events::{DeleverageEvent, LiquidationReceiverEvent},
     ix_utils::{get_discrim_hash, validate_not_cpi_by_stack_height, Hashable},
+    math_error,
     prelude::*,
     state::marginfi_account::{
         check_pre_liquidation_condition_and_get_account_health,
@@ -48,6 +49,7 @@ pub fn end_liquidation<'info>(
         &mut liq_record,
         ctx.remaining_accounts,
         ignore_healthy,
+        I80F48::ZERO,
     )?;
 
     // Liquidator's allowed fee cannot go lower than the bonus fee minimum
@@ -101,6 +103,7 @@ pub fn end_deleverage<'info>(
         &mut liq_record,
         ctx.remaining_accounts,
         true,
+        I80F48!(0.05),
     )?;
 
     emit!(DeleverageEvent {
@@ -119,6 +122,7 @@ pub fn end_receivership<'info>(
     liq_record: &mut LiquidationRecord,
     remaining_ais: &'info [AccountInfo<'info>],
     ignore_healthy: bool,
+    health_threshold: I80F48,
 ) -> Result<(I80F48, f64, I80F48, f64)> {
     let pre_assets: I80F48 = liq_record.cache.asset_value_maint.into();
     let pre_liabs: I80F48 = liq_record.cache.liability_value_maint.into();
@@ -147,8 +151,14 @@ pub fn end_receivership<'info>(
     clear_liquidation_price_cache_locks(marginfi_account, remaining_ais)?;
     marginfi_account.health_cache = post_hc;
 
-    // health must not get worse
-    if pre_health > post_health {
+    let threshold = pre_assets
+        .checked_mul(health_threshold)
+        .ok_or_else(math_error!())?;
+    // health must not get worse more than a threshold (0% for liquidation, 5% for deleverage)
+    if pre_health
+        .checked_sub(post_health)
+        .is_some_and(|p| p > threshold)
+    {
         msg!(
             "pre_health > post_health: {} >= {}",
             pre_health,
