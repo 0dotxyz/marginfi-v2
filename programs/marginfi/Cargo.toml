@@ -3,10 +3,16 @@ name = "marginfi"
 version = "0.1.9"
 description = "Borrow Lending Prime Broker"
 edition = "2021"
+autotests = false
 
 [lib]
 crate-type = ["cdylib", "lib"]
 name = "marginfi"
+
+[[test]]
+name = "tests"
+path = "tests/tests.rs"
+required-features = ["test"]
 
 [features]
 no-entrypoint = []
@@ -17,7 +23,7 @@ custom-heap = []
 default = ["mainnet-beta", "custom-heap"]
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 test-bpf = ["test", "debug"]
-test = []
+test = ["fixtures/real"]
 client = []
 debug = []
 mainnet-beta = ["id-crate/mainnet-beta", "marginfi-type-crate/mainnet-beta"]
@@ -60,7 +66,7 @@ solana-cli-output = { workspace = true }
 solana-program-test = { workspace = true }
 # solana-logger = { workspace = true }
 solana-sdk = { workspace = true }
-fixtures = { workspace = true }
+fixtures = { path = "../../fixtures-shim", package = "fixtures-shim" }
 mocks = { workspace = true }
 
 anyhow = "1.0.66"

@@ -1,0 +1,12 @@
+[package]
+name = "fixtures-shim"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+default = []
+real = ["dep:real-fixtures"]
+
+[dependencies]
+real-fixtures = { path = "../test-utils", package = "test-utilities", optional = true }
