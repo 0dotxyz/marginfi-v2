@@ -730,7 +730,7 @@ async fn handle_bankruptcy_non_admin_succeeds_after_unpause() -> anyhow::Result<
     assert!(marginfi_group.panic_state_cache.is_paused_flag());
 
     // Advance clock past pause expiry
-    {
+    let new_timestamp = {
         let start_timestamp = {
             let ctx = test_f.context.borrow_mut();
             let clock: anchor_lang::prelude::Clock = ctx.banks_client.get_sysvar().await?;
@@ -739,10 +739,19 @@ async fn handle_bankruptcy_non_admin_succeeds_after_unpause() -> anyhow::Result<
 
         let ctx = test_f.context.borrow_mut();
         let mut clock: anchor_lang::prelude::Clock = ctx.banks_client.get_sysvar().await?;
-        clock.unix_timestamp =
+        let time =
             start_timestamp + marginfi_type_crate::types::PanicState::PAUSE_DURATION_SECONDS + 60;
+        clock.unix_timestamp = time;
         ctx.set_sysvar(&clock);
-    }
+        time
+    };
+
+    test_f
+        .set_pyth_oracle_timestamp(PYTH_USDC_FEED, new_timestamp)
+        .await;
+    test_f
+        .set_pyth_oracle_timestamp(PYTH_SOL_FEED, new_timestamp)
+        .await;
 
     // Propagate expired state
     test_f.marginfi_group.try_propagate_fee_state().await?;
