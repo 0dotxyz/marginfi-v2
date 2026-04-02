@@ -111,6 +111,25 @@ pub struct LendingPoolBankHandleBankruptcyEvent {
     pub socialized_amount: f64,
 }
 
+#[event]
+pub struct LendingPoolSuperAdminWithdrawEvent {
+    pub header: GroupEventHeader,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    pub vault_outflow_amount: u64,
+}
+
+#[event]
+pub struct LendingPoolSuperAdminDepositEvent {
+    pub header: GroupEventHeader,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    /// Amount requested in SPL transfer instruction.
+    pub transfer_amount: u64,
+    /// Effective vault inflow after transfer fees (Token-2022), or equal to transfer_amount on SPL.
+    pub vault_inflow_amount: u64,
+}
+
 // marginfi account events
 
 #[event]
