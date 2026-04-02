@@ -57,8 +57,8 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     let clock = Clock::get()?;
 
     let group = marginfi_group_loader.load()?;
-    let is_admin_or_risk_admin = ctx.accounts.signer.key() == group.risk_admin
-        || ctx.accounts.signer.key() == group.admin;
+    let is_admin_or_risk_admin =
+        ctx.accounts.signer.key() == group.risk_admin || ctx.accounts.signer.key() == group.admin;
 
     if !bank.get_flag(PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG) {
         check!(is_admin_or_risk_admin, MarginfiError::Unauthorized);

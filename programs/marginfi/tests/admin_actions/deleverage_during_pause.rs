@@ -1,6 +1,6 @@
+use fixed_macro::types::I80F48;
 use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{assert_custom_error, native, prelude::*};
-use fixed_macro::types::I80F48;
 use marginfi::prelude::*;
 use marginfi::state::{bank::BankVaultType, marginfi_account::MarginfiAccountImpl};
 use marginfi_type_crate::{
@@ -162,8 +162,7 @@ async fn normal_repay_still_blocked_during_pause() -> anyhow::Result<()> {
     // Setup: LP deposits SOL, borrower deposits USDC and borrows SOL
     let lp = test_f.create_marginfi_account().await;
     let sol_acc = test_f.sol_mint.create_token_account_and_mint_to(100).await;
-    lp.try_bank_deposit(sol_acc.key, sol_bank, 10, None)
-        .await?;
+    lp.try_bank_deposit(sol_acc.key, sol_bank, 10, None).await?;
 
     let borrower = test_f.create_marginfi_account().await;
     let usdc_acc = test_f
@@ -256,10 +255,7 @@ async fn liquidation_still_blocked_during_pause() -> anyhow::Result<()> {
     // Since withdraw checks pause and liquidation sets ACCOUNT_IN_RECEIVERSHIP
     // (not ACCOUNT_IN_DELEVERAGE), the withdraw inside should fail.
     let (record_pk, _) = Pubkey::find_program_address(
-        &[
-            LIQUIDATION_RECORD_SEED.as_bytes(),
-            liquidatee.key.as_ref(),
-        ],
+        &[LIQUIDATION_RECORD_SEED.as_bytes(), liquidatee.key.as_ref()],
         &marginfi::ID,
     );
 
@@ -335,7 +331,12 @@ async fn handle_bankruptcy_by_admin_succeeds_during_pause() -> anyhow::Result<()
         .create_token_account_and_mint_to(100_000)
         .await;
     lender
-        .try_bank_deposit(lender_usdc.key, test_f.get_bank(&BankMint::Usdc), 100_000, None)
+        .try_bank_deposit(
+            lender_usdc.key,
+            test_f.get_bank(&BankMint::Usdc),
+            100_000,
+            None,
+        )
         .await?;
 
     let mut borrower = test_f.create_marginfi_account().await;
@@ -359,7 +360,9 @@ async fn handle_bankruptcy_by_admin_succeeds_during_pause() -> anyhow::Result<()
 
     // Make account bankrupt by zeroing collateral
     let collateral_bank = test_f.get_bank(&BankMint::Sol);
-    borrower.nullify_assets_for_bank(collateral_bank.key).await?;
+    borrower
+        .nullify_assets_for_bank(collateral_bank.key)
+        .await?;
 
     // Fund insurance vault
     {
@@ -424,7 +427,12 @@ async fn handle_bankruptcy_by_non_admin_fails_during_pause() -> anyhow::Result<(
         .create_token_account_and_mint_to(100_000)
         .await;
     lender
-        .try_bank_deposit(lender_usdc.key, test_f.get_bank(&BankMint::Usdc), 100_000, None)
+        .try_bank_deposit(
+            lender_usdc.key,
+            test_f.get_bank(&BankMint::Usdc),
+            100_000,
+            None,
+        )
         .await?;
 
     let mut borrower = test_f.create_marginfi_account().await;
@@ -448,7 +456,9 @@ async fn handle_bankruptcy_by_non_admin_fails_during_pause() -> anyhow::Result<(
 
     // Make account bankrupt
     let collateral_bank = test_f.get_bank(&BankMint::Sol);
-    borrower.nullify_assets_for_bank(collateral_bank.key).await?;
+    borrower
+        .nullify_assets_for_bank(collateral_bank.key)
+        .await?;
 
     // Fund insurance vault
     {
@@ -531,7 +541,12 @@ async fn handle_bankruptcy_without_pause_permissionless_still_works() -> anyhow:
         .create_token_account_and_mint_to(100_000)
         .await;
     lender
-        .try_bank_deposit(lender_usdc.key, test_f.get_bank(&BankMint::Usdc), 100_000, None)
+        .try_bank_deposit(
+            lender_usdc.key,
+            test_f.get_bank(&BankMint::Usdc),
+            100_000,
+            None,
+        )
         .await?;
 
     let mut borrower = test_f.create_marginfi_account().await;
@@ -554,7 +569,9 @@ async fn handle_bankruptcy_without_pause_permissionless_still_works() -> anyhow:
         .await?;
 
     let collateral_bank = test_f.get_bank(&BankMint::Sol);
-    borrower.nullify_assets_for_bank(collateral_bank.key).await?;
+    borrower
+        .nullify_assets_for_bank(collateral_bank.key)
+        .await?;
 
     {
         let (insurance_vault, _) = test_f
@@ -636,7 +653,12 @@ async fn handle_bankruptcy_non_admin_succeeds_after_unpause() -> anyhow::Result<
         .create_token_account_and_mint_to(100_000)
         .await;
     lender
-        .try_bank_deposit(lender_usdc.key, test_f.get_bank(&BankMint::Usdc), 100_000, None)
+        .try_bank_deposit(
+            lender_usdc.key,
+            test_f.get_bank(&BankMint::Usdc),
+            100_000,
+            None,
+        )
         .await?;
 
     let mut borrower = test_f.create_marginfi_account().await;
@@ -659,7 +681,9 @@ async fn handle_bankruptcy_non_admin_succeeds_after_unpause() -> anyhow::Result<
         .await?;
 
     let collateral_bank = test_f.get_bank(&BankMint::Sol);
-    borrower.nullify_assets_for_bank(collateral_bank.key).await?;
+    borrower
+        .nullify_assets_for_bank(collateral_bank.key)
+        .await?;
 
     {
         let (insurance_vault, _) = test_f
