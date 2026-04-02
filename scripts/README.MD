@@ -1,5 +1,13 @@
 # IDL Distill Scripts Guide
 
+## Program Build Flow
+
+- Regular program builds should use `--no-idl` (for example `./scripts/build-workspace.sh` and
+  `./scripts/build-program.sh`).
+- Generate IDL only via `./scripts/build-idl.sh [program_lib_name]`.
+- `build-idl.sh` isolates host build artifacts under `target/idl-host` to avoid metadata
+  cross-contamination with `target/debug` or SBF outputs.
+
 ## IDL layout
 
 The repo now keeps two IDL sets:

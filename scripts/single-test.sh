@@ -22,12 +22,14 @@ SBF_OUT_DIR="$ROOT/target/sbf/deploy"
 if [ ! -d "$SBF_OUT_DIR" ]; then
     echo "Error: missing SBF output dir: $SBF_OUT_DIR"
     echo "Run ./scripts/build-workspace.sh first."
+    echo "If you need IDL artifacts, run ./scripts/build-idl.sh separately."
     exit 1
 fi
 
 if [ ! -f "$SBF_OUT_DIR/${program_name}.so" ]; then
     echo "Error: missing program artifact: $SBF_OUT_DIR/${program_name}.so"
     echo "Run ./scripts/build-workspace.sh first."
+    echo "If you need IDL artifacts, run ./scripts/build-idl.sh separately."
     exit 1
 fi
 

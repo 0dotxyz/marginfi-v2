@@ -32,6 +32,20 @@ extra_params=( "$@" )
 export SBF_OUT_DIR="$ROOT/target/sbf/deploy"
 export RUST_LOG="solana_runtime::message_processor::stable_log=warn"
 
+if [[ ! -d "$SBF_OUT_DIR" ]]; then
+  echo "Error: missing SBF output dir: $SBF_OUT_DIR"
+  echo "Run ./scripts/build-workspace.sh first."
+  echo "If you need IDL artifacts, run ./scripts/build-idl.sh separately."
+  exit 1
+fi
+
+if [[ "${program_lib_name}" != "all" ]] && [[ ! -f "$SBF_OUT_DIR/${program_lib_name}.so" ]]; then
+  echo "Error: missing program artifact: $SBF_OUT_DIR/${program_lib_name}.so"
+  echo "Run ./scripts/build-workspace.sh first."
+  echo "If you need IDL artifacts, run ./scripts/build-idl.sh separately."
+  exit 1
+fi
+
 cmd=(cargo nextest run
      --no-fail-fast
      "${package_filter[@]}"

@@ -40,11 +40,9 @@ jobs:
           echo "PROGRAM_ID=${PROGRAM_ID}" >> $GITHUB_ENV
           echo "PROGRAM_LIB_NAME=${PROGRAM_LIB_NAME}" >> $GITHUB_ENV
 
-      # Solely to generate the IDL
-      - name: Build program using Anchor
-        uses: ./.github/actions/build-program/
-        with:
-          program_lib_name: ${{ env.PROGRAM_LIB_NAME }}
+      # Solely to generate the IDL (host build, isolated from normal build targets)
+      - name: Build IDL
+        run: ./scripts/build-idl.sh ${{ env.PROGRAM_LIB_NAME }}
 
       # Build verifiable program - store it in target/deploy/${PROGRAM_LIB_NAME}.so
       - name: Build verifiable program

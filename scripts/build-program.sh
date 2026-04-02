@@ -21,6 +21,6 @@ else
     exit 1
 fi
 
-cmd="anchor build -p $program_lib_name -- $features"
+cmd="anchor build --no-idl -p $program_lib_name -- $features"
 echo "Running: $cmd"
 eval "$cmd"
