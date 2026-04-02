@@ -17,6 +17,9 @@ use marginfi_type_crate::{
 /// Group admin only.
 /// Transfers tokens from `admin_token_account` into the bank liquidity vault and raises
 /// `asset_share_value` so that existing depositor shares are increased proportionally.
+///
+/// Note: Token-2022 transfer-fee extensions are not handled here. This instruction assumes
+/// the vault receives exactly `amount`.
 pub fn super_admin_deposit<'info>(
     mut ctx: Context<'_, '_, 'info, 'info, SuperAdminDeposit<'info>>,
     amount: u64,
@@ -53,20 +56,8 @@ pub fn super_admin_deposit<'info>(
     check!(total_asset_shares > ZERO_AMOUNT_THRESHOLD, MarginfiError::NoAssetFound);
 
     let assets_before = bank.get_asset_amount(total_asset_shares)?;
-    let amount_post_fee = maybe_bank_mint
-        .as_ref()
-        .map(|mint| {
-            utils::calculate_post_fee_spl_deposit_amount(
-                mint.to_account_info(),
-                amount,
-                clock.epoch,
-            )
-        })
-        .transpose()?
-        .unwrap_or(amount);
-
     let assets_after = assets_before
-        .checked_add(I80F48::from_num(amount_post_fee))
+        .checked_add(I80F48::from_num(amount))
         .ok_or_else(math_error!())?;
     bank.asset_share_value = assets_after
         .checked_div(total_asset_shares)
@@ -93,7 +84,7 @@ pub fn super_admin_deposit<'info>(
         bank: bank_loader.key(),
         mint: bank.mint,
         transfer_amount: amount,
-        vault_inflow_amount: amount_post_fee,
+        vault_inflow_amount: amount,
     });
 
     Ok(())

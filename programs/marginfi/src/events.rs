@@ -126,7 +126,7 @@ pub struct LendingPoolSuperAdminDepositEvent {
     pub mint: Pubkey,
     /// Amount requested in SPL transfer instruction.
     pub transfer_amount: u64,
-    /// Effective vault inflow after transfer fees (Token-2022), or equal to transfer_amount on SPL.
+    /// Assumed vault inflow. Token-2022 transfer fees are not handled by this instruction path.
     pub vault_inflow_amount: u64,
 }
 
