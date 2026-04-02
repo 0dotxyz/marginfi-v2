@@ -111,6 +111,15 @@ pub struct LendingPoolBankHandleBankruptcyEvent {
     pub socialized_amount: f64,
 }
 
+#[event]
+pub struct AdminCrossBankSocializeLossEvent {
+    pub group: Pubkey,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    pub amount: u64,
+    pub kill_bank: bool,
+}
+
 // marginfi account events
 
 #[event]

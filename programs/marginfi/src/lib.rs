@@ -186,6 +186,16 @@ pub mod marginfi {
         marginfi_group::lending_pool_handle_bankruptcy(ctx)
     }
 
+    /// (risk admin only) Socialize a loss across a bank's depositors and transfer the
+    /// corresponding tokens out of the bank's vault. Used to spread bad debt from a compromised
+    /// integration across multiple banks proportionally. No pause checks.
+    pub fn admin_cross_bank_socialize<'info>(
+        ctx: Context<'_, '_, 'info, 'info, AdminCrossBankSocialize<'info>>,
+        amount: u64,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_admin_cross_bank_socialize(ctx, amount)
+    }
+
     // User instructions
 
     /// Initialize a marginfi account for a given group. The account is a fresh keypair, and must
