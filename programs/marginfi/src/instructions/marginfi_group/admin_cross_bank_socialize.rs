@@ -129,30 +129,35 @@ pub fn lending_pool_admin_cross_bank_socialize<'info>(
         I80F48::ZERO
     };
 
-    let socialized_loss = max(effective_loss - covered_by_insurance, I80F48::ZERO);
+    let requested_socialized_loss = max(effective_loss - covered_by_insurance, I80F48::ZERO);
 
     // Socialize the remainder among depositors
+    let mut realized_socialized_loss = I80F48::ZERO;
     let mut kill_bank = false;
-    if socialized_loss > I80F48::ZERO {
-        kill_bank = bank.socialize_loss(socialized_loss)?;
+    if requested_socialized_loss > I80F48::ZERO {
+        let vault_balance = accessor::amount(&bank_liquidity_vault.to_account_info())?;
+        let realizable_socialized_transfer: u64 = requested_socialized_loss
+            .checked_floor()
+            .ok_or_else(math_error!())?
+            .checked_to_num()
+            .ok_or_else(math_error!())?;
+        let realizable_socialized_transfer =
+            u64::min(realizable_socialized_transfer, vault_balance);
+
+        realized_socialized_loss = I80F48::from_num(realizable_socialized_transfer);
+
+        if realized_socialized_loss > I80F48::ZERO {
+            kill_bank = bank.socialize_loss(realized_socialized_loss)?;
+        }
         if kill_bank {
             msg!("socialized loss exceeded total deposits, bank killed");
             bank.config.operational_state = BankOperationalState::KilledByBankruptcy;
         }
 
-        let socialized_transfer: u64 = socialized_loss
-            .checked_floor()
-            .ok_or_else(math_error!())?
-            .checked_to_num()
-            .ok_or_else(math_error!())?;
-
-        let vault_balance = accessor::amount(&bank_liquidity_vault.to_account_info())?;
-        let socialized_transfer = u64::min(socialized_transfer, vault_balance);
-
-        if socialized_transfer > 0 {
+        if realizable_socialized_transfer > 0 {
             let liquidity_vault_authority_bump = bank.liquidity_vault_authority_bump;
             bank.withdraw_spl_transfer(
-                socialized_transfer,
+                realizable_socialized_transfer,
                 bank_liquidity_vault.to_account_info(),
                 destination_token_account.to_account_info(),
                 bank_liquidity_vault_authority.to_account_info(),
@@ -176,7 +181,7 @@ pub fn lending_pool_admin_cross_bank_socialize<'info>(
         mint: bank.mint,
         amount,
         covered_by_insurance: covered_by_insurance.to_num::<f64>(),
-        socialized_amount: socialized_loss.to_num::<f64>(),
+        socialized_amount: realized_socialized_loss.to_num::<f64>(),
         kill_bank,
     });
 
