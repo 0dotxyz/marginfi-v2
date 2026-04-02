@@ -52,20 +52,18 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     let maybe_bank_mint = {
         let bank = bank_loader.load()?;
         let group = marginfi_group_loader.load()?;
-        let is_admin_or_risk_admin =
-            ctx.accounts.signer.key() == group.risk_admin || ctx.accounts.signer.key() == group.admin;
+        let signer = ctx.accounts.signer.key();
+        let is_admin_or_risk_admin = signer == group.risk_admin || signer == group.admin;
         let permissionless_bad_debt_settlement =
             bank.get_flag(PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG);
 
         if permissionless_bad_debt_settlement {
+            // if permissionless, users can bankrupt reduce-only or operational banks
             validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
         } else {
+            // admin can bankrupt banks in any state
             validate_bank_state(&bank, InstructionKind::Unrestricted)?;
             check!(is_admin_or_risk_admin, MarginfiError::Unauthorized);
-        }
-
-        if group.is_protocol_paused() && !is_admin_or_risk_admin {
-            return err!(MarginfiError::ProtocolPaused);
         }
 
         utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?
@@ -226,6 +224,12 @@ pub fn lending_pool_handle_bankruptcy<'info>(
 
 #[derive(Accounts)]
 pub struct LendingPoolHandleBankruptcy<'info> {
+    #[account(
+        constraint = {
+            let g = group.load()?;
+            !g.is_protocol_paused() || signer.key() == g.admin || signer.key() == g.risk_admin
+        } @ MarginfiError::ProtocolPaused
+    )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
     /// Must be risk_admin or admin, unless the bank has PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
