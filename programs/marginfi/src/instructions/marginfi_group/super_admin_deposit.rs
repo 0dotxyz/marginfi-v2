@@ -4,13 +4,13 @@ use crate::{
     math_error,
     prelude::{MarginfiError, MarginfiResult},
     state::bank::BankImpl,
-    utils,
+    utils::{self, is_marginfi_asset_tag},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::ZERO_AMOUNT_THRESHOLD,
+    constants::{ASSET_TAG_DEFAULT, ASSET_TAG_SOL, ZERO_AMOUNT_THRESHOLD},
     types::{Bank, MarginfiGroup},
 };
 
@@ -53,7 +53,10 @@ pub fn super_admin_deposit<'info>(
     )?;
 
     let total_asset_shares: I80F48 = bank.total_asset_shares.into();
-    check!(total_asset_shares > ZERO_AMOUNT_THRESHOLD, MarginfiError::NoAssetFound);
+    check!(
+        total_asset_shares > ZERO_AMOUNT_THRESHOLD,
+        MarginfiError::NoAssetFound
+    );
 
     let assets_before = bank.get_asset_amount(total_asset_shares)?;
     let assets_after = assets_before
@@ -103,6 +106,10 @@ pub struct SuperAdminDeposit<'info> {
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
+        constraint = {
+            let b = bank.load()?;
+            b.config.asset_tag == ASSET_TAG_DEFAULT || b.config.asset_tag == ASSET_TAG_SOL
+        }
     )]
     pub bank: AccountLoader<'info, Bank>,
 

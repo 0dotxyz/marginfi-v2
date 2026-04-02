@@ -4,13 +4,16 @@ use crate::{
     math_error,
     prelude::{MarginfiError, MarginfiResult},
     state::bank::{BankImpl, BankVaultType},
-    utils,
+    utils::{self, is_marginfi_asset_tag},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
+use fixed_macro::types::I80F48;
 use marginfi_type_crate::{
-    constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, ZERO_AMOUNT_THRESHOLD},
+    constants::{
+        ASSET_TAG_DEFAULT, ASSET_TAG_SOL, LIQUIDITY_VAULT_AUTHORITY_SEED, ZERO_AMOUNT_THRESHOLD,
+    },
     types::{Bank, MarginfiGroup},
 };
 
@@ -71,6 +74,11 @@ pub fn super_admin_withdraw<'info>(
         .ok_or_else(math_error!())?
         .into();
 
+    let share_value_after: I80F48 = bank.asset_share_value.into();
+    if share_value_after <= I80F48!(0.8) {
+        panic!("too low, sausage fingers!");
+    }
+
     bank.withdraw_spl_transfer(
         amount,
         liquidity_vault.to_account_info(),
@@ -114,6 +122,10 @@ pub struct SuperAdminWithdraw<'info> {
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
+        constraint = {
+            let b = bank.load()?;
+            b.config.asset_tag == ASSET_TAG_DEFAULT || b.config.asset_tag == ASSET_TAG_SOL
+        }
     )]
     pub bank: AccountLoader<'info, Bank>,
 
