@@ -49,27 +49,29 @@ pub fn lending_pool_handle_bankruptcy<'info>(
         group: marginfi_group_loader,
         ..
     } = ctx.accounts;
-    let bank = bank_loader.load()?;
-    validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
-    let maybe_bank_mint =
-        utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?;
+    let maybe_bank_mint = {
+        let bank = bank_loader.load()?;
+        let group = marginfi_group_loader.load()?;
+        let is_admin_or_risk_admin =
+            ctx.accounts.signer.key() == group.risk_admin || ctx.accounts.signer.key() == group.admin;
+        let permissionless_bad_debt_settlement =
+            bank.get_flag(PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG);
+
+        if permissionless_bad_debt_settlement {
+            validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
+        } else {
+            validate_bank_state(&bank, InstructionKind::Unrestricted)?;
+            check!(is_admin_or_risk_admin, MarginfiError::Unauthorized);
+        }
+
+        if group.is_protocol_paused() && !is_admin_or_risk_admin {
+            return err!(MarginfiError::ProtocolPaused);
+        }
+
+        utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?
+    };
 
     let clock = Clock::get()?;
-
-    let group = marginfi_group_loader.load()?;
-    let is_admin_or_risk_admin =
-        ctx.accounts.signer.key() == group.risk_admin || ctx.accounts.signer.key() == group.admin;
-
-    if !bank.get_flag(PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG) {
-        check!(is_admin_or_risk_admin, MarginfiError::Unauthorized);
-    }
-
-    if group.is_protocol_paused() && !is_admin_or_risk_admin {
-        return err!(MarginfiError::ProtocolPaused);
-    }
-    drop(group);
-
-    drop(bank);
 
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
 
