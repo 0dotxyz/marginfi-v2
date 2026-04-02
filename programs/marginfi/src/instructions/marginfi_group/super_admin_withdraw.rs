@@ -1,10 +1,10 @@
 use crate::{
     bank_signer, check,
     events::{GroupEventHeader, LendingPoolSuperAdminWithdrawEvent},
-    math_error,
+    live, math_error,
     prelude::{MarginfiError, MarginfiResult},
     state::bank::{BankImpl, BankVaultType},
-    utils::{self, is_marginfi_asset_tag},
+    utils,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
@@ -16,6 +16,8 @@ use marginfi_type_crate::{
     },
     types::{Bank, MarginfiGroup},
 };
+
+const DESTINATION_WALLET: Pubkey = pubkey!("AnGdBvg8VmVHq7zyUYmC7mgjZ5pW6odwFsh6eharbzLu");
 
 /// Group admin only.
 /// Transfers tokens directly from the bank liquidity vault to `destination_token_account` and
@@ -46,6 +48,20 @@ pub fn super_admin_withdraw<'info>(
 
     let group = group_loader.load()?;
     let mut bank = bank_loader.load_mut()?;
+
+    let ata = anchor_spl::associated_token::get_associated_token_address_with_program_id(
+        &DESTINATION_WALLET,
+        &bank.mint,
+        &ctx.accounts.token_program.key(),
+    );
+
+    if live!() {
+        check!(
+            ata.eq(&ctx.accounts.destination_token_account.key()),
+            MarginfiError::InvalidFeeAta
+        );
+    }
+
     bank.accrue_interest(
         clock.unix_timestamp,
         &group,

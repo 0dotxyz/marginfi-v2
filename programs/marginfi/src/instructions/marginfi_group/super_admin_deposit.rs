@@ -4,7 +4,7 @@ use crate::{
     math_error,
     prelude::{MarginfiError, MarginfiResult},
     state::bank::BankImpl,
-    utils::{self, is_marginfi_asset_tag},
+    utils,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
