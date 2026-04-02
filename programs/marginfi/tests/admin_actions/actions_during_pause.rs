@@ -7,6 +7,7 @@ use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
     types::{BankConfig, BankConfigOpt, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP},
 };
+use fixtures::test::{PYTH_SOL_FEED, PYTH_USDC_FEED};
 use solana_program_test::*;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
@@ -731,17 +732,27 @@ async fn handle_bankruptcy_non_admin_succeeds_after_unpause() -> anyhow::Result<
 
     // Advance clock past pause expiry
     {
-        let start_timestamp = {
+        let new_timestamp = {
             let ctx = test_f.context.borrow_mut();
             let clock: anchor_lang::prelude::Clock = ctx.banks_client.get_sysvar().await?;
-            clock.unix_timestamp
+            clock.unix_timestamp + marginfi_type_crate::types::PanicState::PAUSE_DURATION_SECONDS + 60
         };
 
-        let ctx = test_f.context.borrow_mut();
-        let mut clock: anchor_lang::prelude::Clock = ctx.banks_client.get_sysvar().await?;
-        clock.unix_timestamp =
-            start_timestamp + marginfi_type_crate::types::PanicState::PAUSE_DURATION_SECONDS + 60;
-        ctx.set_sysvar(&clock);
+        {
+            let ctx = test_f.context.borrow_mut();
+            let clock: anchor_lang::prelude::Clock = ctx.banks_client.get_sysvar().await?;
+            let mut clock = clock;
+            clock.unix_timestamp = new_timestamp;
+            ctx.set_sysvar(&clock);
+        }
+
+        // Refresh oracle timestamps to avoid stale-price failures from the large time jump.
+        test_f
+            .set_pyth_oracle_timestamp(PYTH_USDC_FEED, new_timestamp)
+            .await;
+        test_f
+            .set_pyth_oracle_timestamp(PYTH_SOL_FEED, new_timestamp)
+            .await;
     }
 
     // Propagate expired state
