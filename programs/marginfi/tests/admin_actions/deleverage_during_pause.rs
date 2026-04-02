@@ -2,15 +2,16 @@ use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{assert_custom_error, native, prelude::*};
 use fixed_macro::types::I80F48;
 use marginfi::prelude::*;
-use marginfi::state::marginfi_account::MarginfiAccountImpl;
+use marginfi::state::{bank::BankVaultType, marginfi_account::MarginfiAccountImpl};
 use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
-    types::{BankConfigOpt, ACCOUNT_IN_RECEIVERSHIP},
+    types::{BankConfig, BankConfigOpt, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP},
 };
 use solana_program_test::*;
+use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 use solana_sdk::signer::Signer;
-use solana_sdk::{pubkey::Pubkey, transaction::Transaction};
+use solana_sdk::transaction::Transaction;
 
 /// Deleverage with withdraw + repay succeeds while protocol is paused.
 #[tokio::test]
@@ -302,6 +303,436 @@ async fn liquidation_still_blocked_during_pause() -> anyhow::Result<()> {
 
     // Should fail because withdraw/repay are blocked during pause for liquidations
     assert!(result.is_err());
+
+    Ok(())
+}
+
+/// Admin can handle_bankruptcy while protocol is paused.
+#[tokio::test]
+async fn handle_bankruptcy_by_admin_succeeds_during_pause() -> anyhow::Result<()> {
+    let mut test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: None,
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        ..Default::default()
+    }))
+    .await;
+
+    // Setup: lender deposits USDC, borrower deposits SOL and borrows USDC
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, test_f.get_bank(&BankMint::Usdc), 100_000, None)
+        .await?;
+
+    let mut borrower = test_f.create_marginfi_account().await;
+    let borrower_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_001)
+        .await;
+    borrower
+        .try_bank_deposit(
+            borrower_sol.key,
+            test_f.get_bank(&BankMint::Sol),
+            1_001,
+            None,
+        )
+        .await?;
+
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, test_f.get_bank(&BankMint::Usdc), 10_000)
+        .await?;
+
+    // Make account bankrupt by zeroing collateral
+    let collateral_bank = test_f.get_bank(&BankMint::Sol);
+    borrower.nullify_assets_for_bank(collateral_bank.key).await?;
+
+    // Fund insurance vault
+    {
+        let (insurance_vault, _) = test_f
+            .get_bank(&BankMint::Usdc)
+            .get_vault(BankVaultType::Insurance);
+        test_f
+            .get_bank_mut(&BankMint::Usdc)
+            .mint
+            .mint_to(&insurance_vault, 10_000)
+            .await;
+    }
+
+    // Pause the protocol
+    test_f.marginfi_group.try_panic_pause().await?;
+    test_f.marginfi_group.try_propagate_fee_state().await?;
+
+    let marginfi_group = test_f.marginfi_group.load().await;
+    assert!(marginfi_group.panic_state_cache.is_paused_flag());
+
+    // Admin calls handle_bankruptcy while paused — should succeed
+    let debt_bank = test_f.get_bank(&BankMint::Usdc);
+    let res = test_f
+        .marginfi_group
+        .try_handle_bankruptcy(debt_bank, &borrower)
+        .await;
+
+    assert!(res.is_ok());
+
+    // Verify account is disabled after bankruptcy
+    let borrower_account = borrower.load().await;
+    assert!(borrower_account.get_flag(ACCOUNT_DISABLED));
+
+    Ok(())
+}
+
+/// Non-admin cannot handle_bankruptcy while protocol is paused (even with permissionless flag).
+#[tokio::test]
+async fn handle_bankruptcy_by_non_admin_fails_during_pause() -> anyhow::Result<()> {
+    let mut test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: None,
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        ..Default::default()
+    }))
+    .await;
+
+    // Setup: lender deposits USDC, borrower deposits SOL and borrows USDC
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, test_f.get_bank(&BankMint::Usdc), 100_000, None)
+        .await?;
+
+    let mut borrower = test_f.create_marginfi_account().await;
+    let borrower_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_001)
+        .await;
+    borrower
+        .try_bank_deposit(
+            borrower_sol.key,
+            test_f.get_bank(&BankMint::Sol),
+            1_001,
+            None,
+        )
+        .await?;
+
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, test_f.get_bank(&BankMint::Usdc), 10_000)
+        .await?;
+
+    // Make account bankrupt
+    let collateral_bank = test_f.get_bank(&BankMint::Sol);
+    borrower.nullify_assets_for_bank(collateral_bank.key).await?;
+
+    // Fund insurance vault
+    {
+        let (insurance_vault, _) = test_f
+            .get_bank(&BankMint::Usdc)
+            .get_vault(BankVaultType::Insurance);
+        test_f
+            .get_bank_mut(&BankMint::Usdc)
+            .mint
+            .mint_to(&insurance_vault, 10_000)
+            .await;
+    }
+
+    // Enable permissionless bad debt settlement
+    let debt_bank = test_f.get_bank(&BankMint::Usdc);
+    debt_bank
+        .update_config(
+            BankConfigOpt {
+                permissionless_bad_debt_settlement: Some(true),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    // Change admin and risk_admin to random keys so payer is no longer admin
+    test_f
+        .marginfi_group
+        .try_update(
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        )
+        .await?;
+
+    // Pause the protocol
+    test_f.marginfi_group.try_panic_pause().await?;
+    test_f.marginfi_group.try_propagate_fee_state().await?;
+
+    // Non-admin calls handle_bankruptcy while paused — should fail
+    let res = test_f
+        .marginfi_group
+        .try_handle_bankruptcy(debt_bank, &borrower)
+        .await;
+
+    assert!(res.is_err());
+    assert_custom_error!(res.unwrap_err(), MarginfiError::ProtocolPaused);
+
+    Ok(())
+}
+
+/// Permissionless handle_bankruptcy still works when protocol is NOT paused (regression).
+#[tokio::test]
+async fn handle_bankruptcy_without_pause_permissionless_still_works() -> anyhow::Result<()> {
+    let mut test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: None,
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        ..Default::default()
+    }))
+    .await;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, test_f.get_bank(&BankMint::Usdc), 100_000, None)
+        .await?;
+
+    let mut borrower = test_f.create_marginfi_account().await;
+    let borrower_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_001)
+        .await;
+    borrower
+        .try_bank_deposit(
+            borrower_sol.key,
+            test_f.get_bank(&BankMint::Sol),
+            1_001,
+            None,
+        )
+        .await?;
+
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, test_f.get_bank(&BankMint::Usdc), 10_000)
+        .await?;
+
+    let collateral_bank = test_f.get_bank(&BankMint::Sol);
+    borrower.nullify_assets_for_bank(collateral_bank.key).await?;
+
+    {
+        let (insurance_vault, _) = test_f
+            .get_bank(&BankMint::Usdc)
+            .get_vault(BankVaultType::Insurance);
+        test_f
+            .get_bank_mut(&BankMint::Usdc)
+            .mint
+            .mint_to(&insurance_vault, 10_000)
+            .await;
+    }
+
+    let debt_bank = test_f.get_bank(&BankMint::Usdc);
+    debt_bank
+        .update_config(
+            BankConfigOpt {
+                permissionless_bad_debt_settlement: Some(true),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    // Change admin/risk_admin so payer is no longer admin
+    test_f
+        .marginfi_group
+        .try_update(
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        )
+        .await?;
+
+    // Protocol is NOT paused — permissionless caller should succeed
+    let marginfi_group = test_f.marginfi_group.load().await;
+    assert!(!marginfi_group.panic_state_cache.is_paused_flag());
+
+    let res = test_f
+        .marginfi_group
+        .try_handle_bankruptcy(debt_bank, &borrower)
+        .await;
+
+    assert!(res.is_ok());
+
+    let borrower_account = borrower.load().await;
+    assert!(borrower_account.get_flag(ACCOUNT_DISABLED));
+
+    Ok(())
+}
+
+/// Non-admin can handle_bankruptcy after pause expires.
+#[tokio::test]
+async fn handle_bankruptcy_non_admin_succeeds_after_unpause() -> anyhow::Result<()> {
+    let mut test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: None,
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        ..Default::default()
+    }))
+    .await;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, test_f.get_bank(&BankMint::Usdc), 100_000, None)
+        .await?;
+
+    let mut borrower = test_f.create_marginfi_account().await;
+    let borrower_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_001)
+        .await;
+    borrower
+        .try_bank_deposit(
+            borrower_sol.key,
+            test_f.get_bank(&BankMint::Sol),
+            1_001,
+            None,
+        )
+        .await?;
+
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, test_f.get_bank(&BankMint::Usdc), 10_000)
+        .await?;
+
+    let collateral_bank = test_f.get_bank(&BankMint::Sol);
+    borrower.nullify_assets_for_bank(collateral_bank.key).await?;
+
+    {
+        let (insurance_vault, _) = test_f
+            .get_bank(&BankMint::Usdc)
+            .get_vault(BankVaultType::Insurance);
+        test_f
+            .get_bank_mut(&BankMint::Usdc)
+            .mint
+            .mint_to(&insurance_vault, 10_000)
+            .await;
+    }
+
+    let debt_bank = test_f.get_bank(&BankMint::Usdc);
+    debt_bank
+        .update_config(
+            BankConfigOpt {
+                permissionless_bad_debt_settlement: Some(true),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    // Change admin/risk_admin so payer is no longer admin
+    test_f
+        .marginfi_group
+        .try_update(
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        )
+        .await?;
+
+    // Pause the protocol
+    test_f.marginfi_group.try_panic_pause().await?;
+    test_f.marginfi_group.try_propagate_fee_state().await?;
+
+    // Verify paused
+    let marginfi_group = test_f.marginfi_group.load().await;
+    assert!(marginfi_group.panic_state_cache.is_paused_flag());
+
+    // Advance clock past pause expiry
+    {
+        let start_timestamp = {
+            let ctx = test_f.context.borrow_mut();
+            let clock: anchor_lang::prelude::Clock = ctx.banks_client.get_sysvar().await?;
+            clock.unix_timestamp
+        };
+
+        let ctx = test_f.context.borrow_mut();
+        let mut clock: anchor_lang::prelude::Clock = ctx.banks_client.get_sysvar().await?;
+        clock.unix_timestamp =
+            start_timestamp + marginfi_type_crate::types::PanicState::PAUSE_DURATION_SECONDS + 60;
+        ctx.set_sysvar(&clock);
+    }
+
+    // Propagate expired state
+    test_f.marginfi_group.try_propagate_fee_state().await?;
+
+    // Non-admin calls handle_bankruptcy after pause expired — should succeed
+    let res = test_f
+        .marginfi_group
+        .try_handle_bankruptcy(debt_bank, &borrower)
+        .await;
+
+    assert!(res.is_ok());
+
+    let borrower_account = borrower.load().await;
+    assert!(borrower_account.get_flag(ACCOUNT_DISABLED));
 
     Ok(())
 }

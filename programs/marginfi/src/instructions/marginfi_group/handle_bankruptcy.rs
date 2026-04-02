@@ -56,13 +56,18 @@ pub fn lending_pool_handle_bankruptcy<'info>(
 
     let clock = Clock::get()?;
 
+    let group = marginfi_group_loader.load()?;
+    let is_admin_or_risk_admin = ctx.accounts.signer.key() == group.risk_admin
+        || ctx.accounts.signer.key() == group.admin;
+
     if !bank.get_flag(PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG) {
-        check!(
-            ctx.accounts.signer.key() == marginfi_group_loader.load()?.risk_admin
-                || ctx.accounts.signer.key() == marginfi_group_loader.load()?.admin,
-            MarginfiError::Unauthorized
-        );
+        check!(is_admin_or_risk_admin, MarginfiError::Unauthorized);
     }
+
+    if group.is_protocol_paused() && !is_admin_or_risk_admin {
+        return err!(MarginfiError::ProtocolPaused);
+    }
+    drop(group);
 
     drop(bank);
 
@@ -219,11 +224,6 @@ pub fn lending_pool_handle_bankruptcy<'info>(
 
 #[derive(Accounts)]
 pub struct LendingPoolHandleBankruptcy<'info> {
-    #[account(
-        constraint = (
-            !group.load()?.is_protocol_paused()
-        ) @ MarginfiError::ProtocolPaused
-    )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
     /// Must be risk_admin or admin, unless the bank has PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
