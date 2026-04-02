@@ -117,6 +117,8 @@ pub struct AdminCrossBankSocializeLossEvent {
     pub bank: Pubkey,
     pub mint: Pubkey,
     pub amount: u64,
+    pub covered_by_insurance: f64,
+    pub socialized_amount: f64,
     pub kill_bank: bool,
 }
 

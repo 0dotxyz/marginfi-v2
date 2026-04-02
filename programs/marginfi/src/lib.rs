@@ -192,8 +192,9 @@ pub mod marginfi {
     pub fn admin_cross_bank_socialize<'info>(
         ctx: Context<'_, '_, 'info, 'info, AdminCrossBankSocialize<'info>>,
         amount: u64,
+        use_insurance: bool,
     ) -> MarginfiResult {
-        marginfi_group::lending_pool_admin_cross_bank_socialize(ctx, amount)
+        marginfi_group::lending_pool_admin_cross_bank_socialize(ctx, amount, use_insurance)
     }
 
     // User instructions

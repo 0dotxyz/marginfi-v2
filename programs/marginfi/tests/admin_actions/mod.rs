@@ -2,6 +2,7 @@ mod account_transfer;
 mod bankruptcy;
 mod bankruptcy_auth;
 mod create_marginfi_group;
+mod cross_bank_socialize;
 mod deleverage;
 mod deleverage_withdraw_limit;
 mod emissions;

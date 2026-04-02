@@ -991,6 +991,51 @@ impl MarginfiGroupFixture {
         Ok(())
     }
 
+    pub async fn try_admin_cross_bank_socialize(
+        &self,
+        bank: &BankFixture,
+        destination_token_account: Pubkey,
+        amount: u64,
+        use_insurance: bool,
+    ) -> Result<(), BanksClientError> {
+        let mut accounts = marginfi::accounts::AdminCrossBankSocialize {
+            group: self.key,
+            risk_admin: self.ctx.borrow().payer.pubkey(),
+            bank: bank.key,
+            destination_token_account,
+            bank_liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+            insurance_vault: bank.get_vault(BankVaultType::Insurance).0,
+            insurance_vault_authority: bank.get_vault_authority(BankVaultType::Insurance).0,
+            token_program: bank.get_token_program(),
+        }
+        .to_account_metas(Some(true));
+        if bank.mint.token_program == anchor_spl::token_2022::ID {
+            accounts.push(AccountMeta::new_readonly(bank.mint.key, false));
+        }
+
+        let ctx = self.ctx.borrow_mut();
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: AdminCrossBankSocialize {
+                amount,
+                use_insurance,
+            }
+            .data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+
+        ctx.banks_client.process_transaction(tx).await
+    }
+
     pub async fn try_handle_bankruptcy(
         &self,
         bank: &BankFixture,
