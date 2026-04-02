@@ -186,7 +186,7 @@ describe("Panic Mode state test (Bankrun)", () => {
     assert.equal(fs.panicState.consecutivePauseCount, 2);
   });
 
-  it("(fee admin) tries extends an existing pause again - fails due to pause limits", async () => {
+  it("(fee admin) extends an existing pause a second time - happy path", async () => {
     const tx = new Transaction();
     tx.add(
       await panicPause(globalProgramAdmin.mrgnBankrunProgram, {}),
@@ -195,6 +195,28 @@ describe("Panic Mode state test (Bankrun)", () => {
         fromPubkey: globalProgramAdmin.wallet.publicKey,
         toPubkey: users[0].wallet.publicKey,
         lamports: 5675679,
+      })
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(globalProgramAdmin.wallet);
+
+    await banksClient.processTransaction(tx);
+
+    const fs = await bankrunProgram.account.feeState.fetch(feeStateKey);
+    assert.equal(fs.panicState.pauseFlags, 1);
+    assert.equal(fs.panicState.dailyPauseCount, 3);
+    assert.equal(fs.panicState.consecutivePauseCount, 3);
+  });
+
+  it("(fee admin) tries extends an existing pause again - fails due to daily pause limit", async () => {
+    const tx = new Transaction();
+    tx.add(
+      await panicPause(globalProgramAdmin.mrgnBankrunProgram, {}),
+      // Dummy tx to trick bankrun
+      SystemProgram.transfer({
+        fromPubkey: globalProgramAdmin.wallet.publicKey,
+        toPubkey: users[0].wallet.publicKey,
+        lamports: 9876543,
       })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
