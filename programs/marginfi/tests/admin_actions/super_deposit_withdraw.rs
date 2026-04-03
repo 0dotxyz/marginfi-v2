@@ -1,10 +1,12 @@
 use anchor_lang::prelude::Clock;
+use anchor_spl::token::spl_token;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use fixtures::time;
 use fixtures::{assert_eq_noise, prelude::*, ui_to_native};
 use marginfi::state::bank::BankImpl;
 use solana_program_test::*;
+use solana_sdk::program_pack::Pack;
 
 #[tokio::test]
 async fn super_admin_withdraw_and_deposit_adjust_asset_share_value_from_non_one_base(
@@ -73,12 +75,21 @@ async fn super_admin_withdraw_and_deposit_adjust_asset_share_value_from_non_one_
 
     let withdraw_ui = 120.0;
     let withdraw_native = ui_to_native!(withdraw_ui, usdc_bank.mint.mint.decimals);
-    let admin_destination = test_f.usdc_mint.create_empty_token_account().await;
-    test_f
+    let destination_ata = test_f
         .marginfi_group
-        .try_super_admin_withdraw_native(usdc_bank, admin_destination.key, withdraw_native)
+        .try_super_admin_withdraw_native(usdc_bank, withdraw_native)
         .await?;
-    assert_eq!(admin_destination.balance().await, withdraw_native);
+    let destination_balance = {
+        let ctx = test_f.context.borrow_mut();
+        let account = ctx
+            .banks_client
+            .get_account(destination_ata)
+            .await?
+            .unwrap();
+        let token_account = spl_token::state::Account::unpack_from_slice(&account.data)?;
+        token_account.amount
+    };
+    assert_eq!(destination_balance, withdraw_native);
 
     let bank_after_withdraw = usdc_bank.load().await;
     let share_after_withdraw: I80F48 = bank_after_withdraw.asset_share_value.into();
@@ -202,10 +213,9 @@ async fn super_admin_haircut_then_all_depositors_withdraw_all_get_expected_amoun
         .to_num::<u64>();
     assert!(haircut_native > 0);
 
-    let admin_destination = test_f.usdc_mint.create_empty_token_account().await;
     test_f
         .marginfi_group
-        .try_super_admin_withdraw_native(usdc_bank, admin_destination.key, haircut_native)
+        .try_super_admin_withdraw_native(usdc_bank, haircut_native)
         .await?;
 
     let bank_after_haircut = usdc_bank.load().await;
