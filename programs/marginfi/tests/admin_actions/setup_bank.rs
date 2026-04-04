@@ -6,7 +6,12 @@ use fixtures::{assert_anchor_error, assert_custom_error, prelude::*};
 use marginfi::{
     constants::INIT_BANK_ORIGINATION_FEE_DEFAULT,
     prelude::MarginfiError,
-    state::bank::{BankImpl, BankVaultType},
+    state::{
+        bank::{BankImpl, BankVaultType},
+        emode::{
+            DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE, DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE,
+        },
+    },
 };
 use marginfi_type_crate::{
     constants::{
@@ -14,9 +19,9 @@ use marginfi_type_crate::{
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
-        make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt, BankMetadata,
-        EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup, RatePoint, EMODE_ON,
-        INTEREST_CURVE_SEVEN_POINT,
+        make_points, u32_to_basis, u32_to_same_asset_leverage, Bank, BankCache, BankConfig,
+        BankConfigOpt, BankMetadata, EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup,
+        RatePoint, EMODE_ON, INTEREST_CURVE_SEVEN_POINT,
     },
 };
 use pretty_assertions::assert_eq;
@@ -1843,6 +1848,185 @@ async fn configure_group_max_emode_leverage_propagates_to_bank_cache(
     };
     let res = bank.update_config(config_bank_opt2, None).await;
     assert!(res.is_ok());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn configure_group_same_asset_emode_leverage_persists_and_rejects_invalid_ordering(
+) -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let group_before = test_f.marginfi_group.load().await;
+
+    test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(100).into()),
+            Some(I80F48::from_num(200).into()),
+        )
+        .await?;
+
+    let group_after: MarginfiGroup = test_f
+        .load_and_deserialize(&test_f.marginfi_group.key)
+        .await;
+    let decoded_init = u32_to_same_asset_leverage(group_after.same_asset_emode_init_leverage);
+    let decoded_maint = u32_to_same_asset_leverage(group_after.same_asset_emode_maint_leverage);
+    assert!(
+        (decoded_init - I80F48!(100)).abs() < I80F48!(0.000001),
+        "expected ~100, got {}",
+        decoded_init
+    );
+    assert!(
+        (decoded_maint - I80F48!(200)).abs() < I80F48!(0.000001),
+        "expected ~200, got {}",
+        decoded_maint
+    );
+
+    test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(1.5).into()),
+            Some(I80F48::from_num(2.5).into()),
+        )
+        .await?;
+
+    let group_after_fractional: MarginfiGroup = test_f
+        .load_and_deserialize(&test_f.marginfi_group.key)
+        .await;
+    let decoded_fractional_init =
+        u32_to_same_asset_leverage(group_after_fractional.same_asset_emode_init_leverage);
+    let decoded_fractional_maint =
+        u32_to_same_asset_leverage(group_after_fractional.same_asset_emode_maint_leverage);
+    assert!(
+        (decoded_fractional_init - I80F48!(1.5)).abs() < I80F48!(0.000001),
+        "expected ~1.5, got {}",
+        decoded_fractional_init
+    );
+    assert!(
+        (decoded_fractional_maint - I80F48!(2.5)).abs() < I80F48!(0.000001),
+        "expected ~2.5, got {}",
+        decoded_fractional_maint
+    );
+
+    let invalid_res = test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(2.5).into()),
+            Some(I80F48::from_num(2.0).into()),
+        )
+        .await;
+
+    assert!(invalid_res.is_err());
+    assert_custom_error!(invalid_res.unwrap_err(), MarginfiError::BadEmodeConfig);
+
+    let below_min_res = test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(0).into()),
+            Some(I80F48::from_num(200).into()),
+        )
+        .await;
+
+    assert!(below_min_res.is_err());
+    assert_custom_error!(below_min_res.unwrap_err(), MarginfiError::BadEmodeConfig);
+
+    test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(1).into()),
+            Some(I80F48::from_num(1).into()),
+        )
+        .await?;
+
+    let group_after_noop_floor: MarginfiGroup = test_f
+        .load_and_deserialize(&test_f.marginfi_group.key)
+        .await;
+    let decoded_floor_init =
+        u32_to_same_asset_leverage(group_after_noop_floor.same_asset_emode_init_leverage);
+    let decoded_floor_maint =
+        u32_to_same_asset_leverage(group_after_noop_floor.same_asset_emode_maint_leverage);
+    assert!(decoded_floor_init <= I80F48::ONE);
+    assert!(decoded_floor_maint <= I80F48::ONE);
+
+    let above_max_res = test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(1001).into()),
+            Some(I80F48::from_num(1002).into()),
+        )
+        .await;
+
+    assert!(above_max_res.is_err());
+    assert_custom_error!(above_max_res.unwrap_err(), MarginfiError::BadEmodeConfig);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn initialize_group_sets_same_asset_defaults_from_explicit_group_constants(
+) -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+    let group: MarginfiGroup = test_f
+        .load_and_deserialize(&test_f.marginfi_group.key)
+        .await;
+
+    let same_asset_init = u32_to_same_asset_leverage(group.same_asset_emode_init_leverage);
+    let same_asset_maint = u32_to_same_asset_leverage(group.same_asset_emode_maint_leverage);
+
+    assert!(
+        (same_asset_init - DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE).abs() < I80F48!(0.000001),
+        "expected ~{}, got {}",
+        DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE,
+        same_asset_init
+    );
+    assert!(
+        (same_asset_maint - DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE).abs() < I80F48!(0.000001),
+        "expected ~{}, got {}",
+        DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE,
+        same_asset_maint
+    );
 
     Ok(())
 }

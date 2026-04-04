@@ -14,6 +14,27 @@ use solana_program_test::*;
 use solana_sdk::clock::Clock;
 use test_case::test_case;
 
+async fn disable_same_asset_emode_for_liquidation_tests(
+    test_f: &TestFixture,
+) -> anyhow::Result<()> {
+    let group = test_f.marginfi_group.load().await;
+    test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group.admin,
+            group.emode_admin,
+            group.delegate_curve_admin,
+            group.delegate_limit_admin,
+            group.delegate_emissions_admin,
+            group.metadata_admin,
+            group.risk_admin,
+            Some(I80F48::ONE.into()),
+            Some(I80F48::ONE.into()),
+        )
+        .await?;
+    Ok(())
+}
+
 #[test_case(100., 9.9, -1., 1., 2., BankMint::Usdc, BankMint::Sol)]
 #[test_case(123., 122., -4., -4., 10., BankMint::SolEquivalent, BankMint::SolEqIsolated)]
 #[test_case(1_000., 999., 0., 0., 10., BankMint::Usdc, BankMint::T22WithFee)]
@@ -36,6 +57,7 @@ async fn marginfi_account_liquidation_success(
     // -------------------------------------------------------------------------
 
     let mut test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    disable_same_asset_emode_for_liquidation_tests(&test_f).await?;
 
     // LP
 
@@ -442,6 +464,7 @@ async fn marginfi_account_liquidation_with_delays_success(
     // -------------------------------------------------------------------------
 
     let mut test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    disable_same_asset_emode_for_liquidation_tests(&test_f).await?;
 
     // LP
 
@@ -1221,6 +1244,7 @@ async fn marginfi_account_liquidation_emode(
     // -------------------------------------------------------------------------
 
     let mut test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    disable_same_asset_emode_for_liquidation_tests(&test_f).await?;
 
     // Configure group to allow higher max emode leverage (100x instead of default 20x)
     let admin = test_f.payer();
