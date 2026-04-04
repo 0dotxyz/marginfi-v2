@@ -271,8 +271,10 @@ pub fn drift_withdraw<'info>(
         // Note: during liquidation/deleverage or order execution, we skip all health checks until
         // the end of the transaction.
         if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION) {
+            let group = ctx.accounts.group.load()?;
             check_account_init_health(
                 &marginfi_account,
+                &group,
                 ctx.remaining_accounts,
                 &mut Some(&mut health_cache),
             )?;

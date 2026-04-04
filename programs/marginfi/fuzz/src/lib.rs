@@ -1142,9 +1142,7 @@ fn initialize_fee_state<'a>(
 mod tests {
     use anchor_lang::AnchorDeserialize;
     use fixed::types::I80F48;
-    use marginfi::state::marginfi_account::{
-        get_health_components, HealthPriceMode, RiskRequirementType,
-    };
+    use marginfi::state::marginfi_account::{get_health_components, HealthPriceMode, RiskRequirementType};
     use marginfi_type_crate::types::MarginfiGroup;
     use pyth_solana_receiver_sdk::price_update::PriceUpdateV2;
 
@@ -1250,9 +1248,16 @@ mod tests {
             let bank_map = a.get_bank_map();
             let remaining_accounts =
                 margin_account.get_remaining_accounts(&bank_map, vec![], vec![], None);
+            let group_ai = AccountLoader::<MarginfiGroup>::try_from_unchecked(
+                &marginfi::ID,
+                &a.marginfi_group,
+            )
+            .unwrap();
+            let group = group_ai.load().unwrap();
 
             let (_assets, _liabs) = get_health_components(
                 &marginfi_account,
+                &group,
                 aisls(&remaining_accounts),
                 RiskRequirementType::Maintenance,
                 &mut None,
@@ -1309,9 +1314,16 @@ mod tests {
             let bank_map = a.get_bank_map();
             let remaining_accounts =
                 margin_account.get_remaining_accounts(&bank_map, vec![], vec![], None);
+            let group_ai = AccountLoader::<MarginfiGroup>::try_from_unchecked(
+                &marginfi::ID,
+                &a.marginfi_group,
+            )
+            .unwrap();
+            let group = group_ai.load().unwrap();
 
             let (_assets, _liabs) = get_health_components(
                 &marginfi_account,
+                &group,
                 aisls(&remaining_accounts),
                 RiskRequirementType::Maintenance,
                 &mut None,

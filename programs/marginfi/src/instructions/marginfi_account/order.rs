@@ -353,13 +353,14 @@ pub fn end_execute_order<'info>(
     let fee_state = fee_state_loader.load()?;
 
     let mut health_cache = HealthCache::zeroed();
-
+    let group = ctx.accounts.group.load()?;
     let (
         (order_assets_in_equity, _order_liabs_in_equity, _order_asset_count, order_liab_count),
         is_healthy,
     ) = {
         let (assets, liabs) = get_health_components(
             &marginfi_account,
+            &group,
             ctx.remaining_accounts,
             RequirementType::Maintenance,
             &mut Some(&mut health_cache),

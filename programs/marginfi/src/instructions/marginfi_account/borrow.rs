@@ -197,6 +197,7 @@ pub fn lending_account_borrow<'info>(
     // Assuming `ctx.remaining_accounts` holds only oracle accounts
     check_account_init_health(
         &marginfi_account,
+        &group,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
     )?;

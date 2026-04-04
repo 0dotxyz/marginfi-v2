@@ -1,7 +1,7 @@
 use anchor_lang::err;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
-use marginfi_type_crate::types::{BankConfig, EmodeSettings, RequirementType, EMODE_ON};
+use marginfi_type_crate::types::{BankConfig, EmodeSettings, EMODE_ON, EMODE_TAG_EMPTY, RequirementType};
 
 use crate::{
     check, errors::MarginfiError, math_error, prelude::MarginfiResult,
@@ -18,6 +18,14 @@ pub const DEFAULT_INIT_MAX_EMODE_LEVERAGE: I80F48 = I80F48!(15);
 /// L = 1 / (1 - CW/LW) where CW is collateral weight and LW is liability weight.
 /// A value of 20 means positions can theoretically leverage up to 20x through recursive borrowing.
 pub const DEFAULT_MAINT_MAX_EMODE_LEVERAGE: I80F48 = I80F48!(20);
+
+/// Default maximum allowed same-asset leverage for group initialization (initial).
+/// This is set to 2x the regular initial emode default leverage.
+pub const DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE: I80F48 = I80F48!(30);
+
+/// Default maximum allowed same-asset leverage for group initialization (maintenance).
+/// This is set to 2x the regular maintenance emode default leverage.
+pub const DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE: I80F48 = I80F48!(40);
 
 pub trait EmodeSettingsImpl {
     fn validate_entries_with_liability_weights(
@@ -146,21 +154,25 @@ impl EmodeSettingsImpl for EmodeSettings {
         Ok(())
     }
 
-    /// Note: expects entries to be sorted, invalid otherwise.
+    /// Note: expects entries to be sorted. Empty-tag slots are skipped, and duplicate
+    /// non-empty tags are detected with a single pass over the in-place array.
     fn check_dupes(&self) -> MarginfiResult {
-        let non_empty_tags: Vec<u16> = self
+        let mut prev_tag = EMODE_TAG_EMPTY;
+
+        for entry in self
             .emode_config
             .entries
             .iter()
-            .filter(|e| !e.is_empty())
-            .map(|e| e.collateral_bank_emode_tag)
-            .collect();
+            .filter(|entry| !entry.is_empty())
+        {
+            if entry.collateral_bank_emode_tag == prev_tag {
+                return err!(MarginfiError::BadEmodeConfig);
+            }
 
-        if non_empty_tags.windows(2).any(|w| w[0] == w[1]) {
-            err!(MarginfiError::BadEmodeConfig)
-        } else {
-            Ok(())
+            prev_tag = entry.collateral_bank_emode_tag;
         }
+
+        Ok(())
     }
 
     /// True if an emode configuration has been set (EMODE_ON)
@@ -181,11 +193,13 @@ impl EmodeSettingsImpl for EmodeSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assert_eq_with_tolerance;
     use bytemuck::Zeroable;
     use fixed_macro::types::I80F48;
     use marginfi_type_crate::types::{basis_to_u32, BankConfig};
     use marginfi_type_crate::types::{
-        reconcile_emode_configs, EmodeConfig, EmodeEntry, MAX_EMODE_ENTRIES,
+        reconcile_emode_configs, EmodeConfig, EmodeEntry, ReconciledEmodeRequirementType,
+        MAX_EMODE_ENTRIES,
     };
     fn create_entry(tag: u16, flags: u8, init: f32, maint: f32) -> EmodeEntry {
         EmodeEntry {
@@ -243,6 +257,27 @@ mod tests {
             emode_max_init_leverage,
             emode_max_maint_leverage,
         );
+        assert!(result.is_err());
+        assert_eq!(result.err().unwrap(), MarginfiError::BadEmodeConfig.into());
+    }
+
+    #[test]
+    fn test_check_dupes_accepts_zero_entries_between_unique_tags() {
+        let mut settings = EmodeSettings::zeroed();
+        settings.emode_config.entries[0] = generic_entry(1);
+        settings.emode_config.entries[2] = generic_entry(2);
+        settings.emode_config.entries[5] = generic_entry(3);
+
+        assert!(settings.check_dupes().is_ok());
+    }
+
+    #[test]
+    fn test_check_dupes_rejects_duplicate_tags_separated_by_zero_entries() {
+        let mut settings = EmodeSettings::zeroed();
+        settings.emode_config.entries[0] = generic_entry(7);
+        settings.emode_config.entries[3] = generic_entry(7);
+
+        let result = settings.check_dupes();
         assert!(result.is_err());
         assert_eq!(result.err().unwrap(), MarginfiError::BadEmodeConfig.into());
     }
@@ -312,16 +347,19 @@ mod tests {
         let config1 = EmodeConfig::from_entries(&[entry1]);
         let config2 = EmodeConfig::from_entries(&[entry2]);
 
-        let reconciled = reconcile_emode_configs(vec![config1, config2]);
+        let reconciled = reconcile_emode_configs(
+            vec![config1, config2],
+            ReconciledEmodeRequirementType::Initial,
+        );
 
-        // Expected: For tag 101, flags = min(1,0)=0, init = min(0.7,0.6)=0.6, maint = min(0.75,0.8)=0.75.
-        let expected_entry = create_entry(101, 0, 0.6, 0.75);
-
-        assert_eq!(reconciled.entries[0], expected_entry);
-        // The rest of the entries should be zeroed.
-        for entry in reconciled.entries.iter().skip(1) {
-            assert!(entry.is_empty());
-        }
+        // Expected: For tag 101 - init, init = min(0.7,0.6)=0.6
+        assert_eq!(reconciled.count, 1);
+        assert_eq!(reconciled.entries[0].collateral_bank_emode_tag, 101);
+        assert_eq_with_tolerance!(
+            reconciled.entries[0].asset_weight,
+            I80F48::from_num(0.6),
+            I80F48::from_num(1e-7)
+        );
     }
 
     #[test]
@@ -333,10 +371,12 @@ mod tests {
         let config1 = EmodeConfig::from_entries(&[generic_entry(99)]);
         let config2 = EmodeConfig::from_entries(&[generic_entry(101)]);
 
-        let reconciled = reconcile_emode_configs(vec![config1, config2]);
+        let reconciled = reconcile_emode_configs(
+            vec![config1, config2],
+            ReconciledEmodeRequirementType::Initial,
+        );
 
-        // Verify that all entries are empty.
-        assert!(reconciled.entries.iter().all(|entry| entry.is_empty()));
+        assert_eq!(reconciled.count, 0);
     }
 
     #[test]
@@ -362,15 +402,31 @@ mod tests {
         let config2 = EmodeConfig::from_entries(&[entry2]);
         let config3 = EmodeConfig::from_entries(&[entry3]);
 
-        let reconciled = reconcile_emode_configs(vec![config1, config2, config3]);
+        let reconciled = reconcile_emode_configs(
+            vec![config1, config2, config3],
+            ReconciledEmodeRequirementType::Initial,
+        );
 
-        let expected_entry = create_entry(101, 0, 0.6, 0.75);
+        assert_eq!(reconciled.count, 1);
+        assert_eq!(reconciled.entries[0].collateral_bank_emode_tag, 101);
+        assert_eq_with_tolerance!(
+            reconciled.entries[0].asset_weight,
+            I80F48::from_num(0.6),
+            I80F48::from_num(1e-7)
+        );
 
-        assert_eq!(reconciled.entries[0], expected_entry);
-        // All other entries should be zeroed.
-        for entry in reconciled.entries.iter().skip(1) {
-            assert!(entry.is_empty());
-        }
+        let reconciled = reconcile_emode_configs(
+            vec![config1, config2, config3],
+            ReconciledEmodeRequirementType::Maintenance,
+        );
+
+        assert_eq!(reconciled.count, 1);
+        assert_eq!(reconciled.entries[0].collateral_bank_emode_tag, 101);
+        assert_eq_with_tolerance!(
+            reconciled.entries[0].asset_weight,
+            I80F48::from_num(0.75),
+            I80F48::from_num(1e-7)
+        );
     }
 
     #[test]
