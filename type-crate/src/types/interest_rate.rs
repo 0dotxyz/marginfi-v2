@@ -145,6 +145,21 @@ pub fn u32_to_basis(value: u32) -> I80F48 {
     ratio * I80F48::from_num(100.0)
 }
 
+/// Useful when converting an I80F48 same-asset leverage into a value from 0-1000. Clamps to 1000
+/// if exceeding that amount. Clamps to zero for negative inputs.
+pub fn same_asset_leverage_to_u32(value: I80F48) -> u32 {
+    let max_value: I80F48 = I80F48::from_num(1000.0); // 0-1000 range
+    let clamped: I80F48 = value.min(max_value).max(I80F48::ZERO);
+    let ratio: I80F48 = clamped / max_value;
+    (ratio * I80F48::from_num(u32::MAX)).to_num::<u32>()
+}
+
+/// Converts encoded same-asset leverage back to an I80F48 value (0-1000 range).
+pub fn u32_to_same_asset_leverage(value: u32) -> I80F48 {
+    let ratio: I80F48 = I80F48::from_num(value) / I80F48::from_num(u32::MAX);
+    ratio * I80F48::from_num(1000.0)
+}
+
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct InterestRateConfigOpt {
@@ -228,5 +243,30 @@ impl From<InterestRateConfig> for InterestRateConfigCompact {
             hundred_util_rate: ir_config.hundred_util_rate,
             points: ir_config.points,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{same_asset_leverage_to_u32, u32_to_same_asset_leverage};
+    use fixed::types::I80F48;
+
+    #[test]
+    fn same_asset_leverage_round_trips_common_values() {
+        for expected in [1.0, 1.5, 15.0, 30.0, 100.0, 1000.0] {
+            let decoded =
+                u32_to_same_asset_leverage(same_asset_leverage_to_u32(I80F48::from_num(expected)));
+            assert!(
+                (decoded - I80F48::from_num(expected)).abs() < I80F48::from_num(1e-6),
+                "expected {}, got {}",
+                expected,
+                decoded
+            );
+        }
+    }
+
+    #[test]
+    fn same_asset_leverage_decodes_legacy_zero_to_zero() {
+        assert_eq!(u32_to_same_asset_leverage(0), I80F48::ZERO);
     }
 }
