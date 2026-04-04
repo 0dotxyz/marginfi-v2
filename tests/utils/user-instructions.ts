@@ -6,7 +6,12 @@ import {
 } from "@solana/web3.js";
 import { Marginfi } from "../../target/types/marginfi";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { deriveExecuteOrderPda, deriveGlobalFeeState, deriveOrderPda } from "./pdas";
+import {
+  deriveExecuteOrderPda,
+  deriveGlobalFeeState,
+  deriveLiquidationRecord,
+  deriveOrderPda,
+} from "./pdas";
 import { WrappedI80F48 } from "@mrgnlabs/mrgn-common";
 
 export type AccountInitArgs = {
@@ -319,11 +324,15 @@ export const startLiquidationIx = (
   args: StartLiquidationArgs
 ) => {
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
+  const [liquidationRecord] = deriveLiquidationRecord(
+    program.programId,
+    args.marginfiAccount,
+  );
   return program.methods
     .startLiquidation()
     .accounts({
       marginfiAccount: args.marginfiAccount,
-      // liquidationRecord: // implied from account
+      liquidationRecord,
       liquidationReceiver: args.liquidationReceiver,
       // instructionSysvar: // hard coded key
       // systemProgram: // hard coded key
@@ -342,12 +351,17 @@ export const endLiquidationIx = (
   args: EndLiquidationArgs
 ) => {
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
+  const [liquidationRecord] = deriveLiquidationRecord(
+    program.programId,
+    args.marginfiAccount,
+  );
+  const liquidationReceiver = program.provider.publicKey;
   return program.methods
     .endLiquidation()
     .accounts({
       marginfiAccount: args.marginfiAccount,
-      // liquidationRecord: // implied from account
-      // liquidationRecord: // implied from record
+      liquidationRecord,
+      liquidationReceiver,
       // feeState: // static pda
       // globalFeeWallet: // implied from feeState
       // systemProgram: // hard coded key
@@ -367,10 +381,16 @@ export const startDeleverageIx = (
   args: StartDeleverageArgs
 ) => {
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
+  const [liquidationRecord] = deriveLiquidationRecord(
+    program.programId,
+    args.marginfiAccount,
+  );
   return program.methods
     .startDeleverage()
     .accounts({
       marginfiAccount: args.marginfiAccount,
+      liquidationRecord,
+      riskAdmin: args.riskAdmin,
     })
     .remainingAccounts(oracleMeta)
     .instruction();
@@ -386,10 +406,17 @@ export const endDeleverageIx = (
   args: EndDeleverageArgs
 ) => {
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
+  const [liquidationRecord] = deriveLiquidationRecord(
+    program.programId,
+    args.marginfiAccount,
+  );
+  const riskAdmin = program.provider.publicKey;
   return program.methods
     .endDeleverage()
     .accounts({
       marginfiAccount: args.marginfiAccount,
+      liquidationRecord,
+      riskAdmin,
     })
     .remainingAccounts(oracleMeta)
     .instruction();

@@ -20,7 +20,10 @@ import {
 } from "./utils/genericTests";
 import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "./utils/types";
 import { deriveBankWithSeed } from "./utils/pdas";
-import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
+import {
+  bigNumberToWrappedI80F48,
+  wrappedI80F48toBigNumber,
+} from "@mrgnlabs/mrgn-common";
 import { USER_ACCOUNT_E } from "./utils/mocks";
 import {
   accountInit,
@@ -28,6 +31,7 @@ import {
   composeRemainingAccounts,
   depositIx,
 } from "./utils/user-instructions";
+import { groupConfigure } from "./utils/group-instructions";
 import { bytesToF64, getBankrunBlockhash } from "./utils/tools";
 
 // Banks are listed here in the sorted-by-public-keys order - the same used in the lending account balances
@@ -72,6 +76,19 @@ describe("Emode borrowing", () => {
       ecosystem.usdcMint.publicKey,
       seed.addn(1)
     );
+
+    // These suites cover classic eMode math; disable same-asset leverage explicitly so the
+    // tests are not affected
+    const tx = new Transaction().add(
+      await groupConfigure(groupAdmin.mrgnBankrunProgram, {
+        marginfiGroup: emodeGroup.publicKey,
+        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(1),
+        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(1),
+      })
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet);
+    await banksClient.processTransaction(tx);
   });
 
   it("Initialize user accounts (if needed)", async () => {
