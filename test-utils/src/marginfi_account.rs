@@ -1012,6 +1012,7 @@ impl MarginfiAccountFixture {
     ) -> Instruction {
         let mut account_metas = marginfi::accounts::LendingAccountEndFlashloan {
             marginfi_account: self.key,
+            group: self.load().await.group,
             authority: self.ctx.borrow().payer.pubkey(),
         }
         .to_account_metas(Some(true));
@@ -1329,6 +1330,7 @@ impl MarginfiAccountFixture {
                 marginfi_account: self.key,
                 liquidation_record,
                 liquidation_receiver,
+                group: self.load().await.group,
                 instruction_sysvar: sysvar::instructions::id(),
             }
             .to_account_metas(Some(true)),
@@ -1356,6 +1358,7 @@ impl MarginfiAccountFixture {
                 marginfi_account: self.key,
                 liquidation_record,
                 liquidation_receiver,
+                group: self.load().await.group,
                 fee_state,
                 global_fee_wallet,
                 system_program: system_program::ID,
@@ -1887,6 +1890,7 @@ impl MarginfiAccountFixture {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::PulseHealth {
                 marginfi_account: self.key,
+                group: self.load().await.group,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::LendingAccountPulseHealth {}.data(),
@@ -1897,8 +1901,13 @@ impl MarginfiAccountFixture {
             .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
 
         let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
-        let tx =
-            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
+        let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_400_000);
+        let tx = Transaction::new_signed_with_payer(
+            &[compute_budget_ix, ix],
+            Some(&payer.pubkey()),
+            &[&payer],
+            blockhash,
+        );
 
         banks_client
             .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)

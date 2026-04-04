@@ -91,6 +91,8 @@ impl MarginfiGroupFixture {
                     new_risk_admin: Some(admin),
                     emode_max_init_leverage: None,
                     emode_max_maint_leverage: None,
+                    same_asset_emode_init_leverage: None,
+                    same_asset_emode_maint_leverage: None,
                 }
                 .data(),
             };
@@ -802,6 +804,59 @@ impl MarginfiGroupFixture {
         .await
     }
 
+    pub async fn try_update_with_same_asset_emode_leverage(
+        &self,
+        new_admin: Pubkey,
+        new_emode_admin: Pubkey,
+        new_curve_admin: Pubkey,
+        new_limit_admin: Pubkey,
+        new_emissions_admin: Pubkey,
+        new_metadata_admin: Pubkey,
+        new_risk_admin: Pubkey,
+        same_asset_emode_init_leverage: Option<WrappedI80F48>,
+        same_asset_emode_maint_leverage: Option<WrappedI80F48>,
+    ) -> Result<(), BanksClientError> {
+        let group = self.load().await;
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::MarginfiGroupConfigure {
+                marginfi_group: self.key,
+                admin: self.ctx.borrow().payer.pubkey(),
+            }
+            .to_account_metas(Some(true)),
+            data: MarginfiGroupConfigure {
+                new_admin: Some(new_admin),
+                new_emode_admin: Some(new_emode_admin),
+                new_curve_admin: Some(new_curve_admin),
+                new_limit_admin: Some(new_limit_admin),
+                new_flow_admin: Some(group.delegate_flow_admin),
+                new_emissions_admin: Some(new_emissions_admin),
+                new_metadata_admin: Some(new_metadata_admin),
+                new_risk_admin: Some(new_risk_admin),
+                emode_max_init_leverage: None,
+                emode_max_maint_leverage: None,
+                same_asset_emode_init_leverage,
+                same_asset_emode_maint_leverage,
+            }
+            .data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn try_update_with_flow_admin(
         &self,
         new_admin: Pubkey,
@@ -859,6 +914,8 @@ impl MarginfiGroupFixture {
                 new_risk_admin: Some(new_risk_admin),
                 emode_max_init_leverage,
                 emode_max_maint_leverage,
+                same_asset_emode_init_leverage: None,
+                same_asset_emode_maint_leverage: None,
             }
             .data(),
         };
