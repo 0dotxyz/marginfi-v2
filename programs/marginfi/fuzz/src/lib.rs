@@ -1092,6 +1092,8 @@ fn initialize_marginfi_group<'a>(
         Some(admin.key()), // risk_admin
         None,        // emode_max_init_leverage
         None,        // emode_max_maint_leverage
+        None,        // same_asset_emode_init_leverage
+        None,        // same_asset_emode_maint_leverage
     )
     .unwrap();
 
