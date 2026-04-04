@@ -1,8 +1,11 @@
-use crate::state::emode::{DEFAULT_INIT_MAX_EMODE_LEVERAGE, DEFAULT_MAINT_MAX_EMODE_LEVERAGE};
+use crate::state::emode::{
+    DEFAULT_INIT_MAX_EMODE_LEVERAGE, DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE,
+    DEFAULT_MAINT_MAX_EMODE_LEVERAGE, DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE,
+};
 use crate::{prelude::MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::basis_to_u32;
+use marginfi_type_crate::types::{basis_to_u32, same_asset_leverage_to_u32};
 use marginfi_type_crate::{constants::DAILY_RESET_INTERVAL, types::MarginfiGroup};
 use std::fmt::Debug;
 
@@ -153,6 +156,10 @@ impl MarginfiGroupImpl for MarginfiGroup {
         self.set_program_fee_enabled(true);
         self.emode_max_init_leverage = basis_to_u32(DEFAULT_INIT_MAX_EMODE_LEVERAGE);
         self.emode_max_maint_leverage = basis_to_u32(DEFAULT_MAINT_MAX_EMODE_LEVERAGE);
+        self.same_asset_emode_init_leverage =
+            same_asset_leverage_to_u32(DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE);
+        self.same_asset_emode_maint_leverage =
+            same_asset_leverage_to_u32(DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE);
     }
 
     fn get_group_bank_config(&self) -> GroupBankConfig {

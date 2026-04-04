@@ -170,6 +170,7 @@ pub fn lending_account_liquidate<'info>(
     let liab_bank_key = ctx.accounts.liab_bank.key();
     let (pre_liquidation_health, _, _) = check_pre_liquidation_condition_and_get_account_health(
         &liquidatee_marginfi_account,
+        group,
         liquidatee_remaining_accounts,
         Some(&liab_bank_key),
         &mut None,
@@ -438,6 +439,7 @@ pub fn lending_account_liquidate<'info>(
     // Verify liquidatee liquidation post health using heap-efficient parity checks
     let post_liquidation_health = check_post_liquidation_condition_and_get_account_health(
         &liquidatee_marginfi_account,
+        group,
         liquidatee_remaining_accounts,
         &ctx.accounts.liab_bank.key(),
         pre_liquidation_health,
@@ -450,6 +452,7 @@ pub fn lending_account_liquidate<'info>(
     // Verify liquidator account health using heap-efficient version (includes isolated-tier check)
     check_account_init_health(
         &liquidator_marginfi_account,
+        group,
         liquidator_remaining_accounts,
         &mut None,
     )?;

@@ -72,8 +72,10 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     health_cache.timestamp = clock.unix_timestamp;
     health_cache.program_version = PROGRAM_VERSION;
 
+    let group = marginfi_group_loader.load()?;
     check_account_bankrupt(
         &marginfi_account,
+        &group,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
     )?;

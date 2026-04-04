@@ -244,8 +244,10 @@ pub fn kamino_withdraw<'info>(
     if !in_receivership_or_order_execution {
         // Check account health, if below threshold fail transaction
         // Assuming `ctx.remaining_accounts` holds only oracle accounts
+        let group = ctx.accounts.group.load()?;
         check_account_init_health(
             &marginfi_account,
+            &group,
             ctx.remaining_accounts,
             &mut Some(&mut health_cache),
         )?;
