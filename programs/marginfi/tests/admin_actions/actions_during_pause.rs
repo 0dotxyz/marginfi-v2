@@ -731,8 +731,8 @@ async fn handle_bankruptcy_non_admin_succeeds_after_unpause() -> anyhow::Result<
     assert!(marginfi_group.panic_state_cache.is_paused_flag());
 
     // Advance clock past pause expiry
-    {
-        let new_timestamp = {
+    let new_timestamp = {
+        let start_timestamp = {
             let ctx = test_f.context.borrow_mut();
             let clock: anchor_lang::prelude::Clock = ctx.banks_client.get_sysvar().await?;
             clock.unix_timestamp
@@ -740,22 +740,21 @@ async fn handle_bankruptcy_non_admin_succeeds_after_unpause() -> anyhow::Result<
                 + 60
         };
 
-        {
-            let ctx = test_f.context.borrow_mut();
-            let clock: anchor_lang::prelude::Clock = ctx.banks_client.get_sysvar().await?;
-            let mut clock = clock;
-            clock.unix_timestamp = new_timestamp;
-            ctx.set_sysvar(&clock);
-        }
+        let ctx = test_f.context.borrow_mut();
+        let mut clock: anchor_lang::prelude::Clock = ctx.banks_client.get_sysvar().await?;
+        let time =
+            start_timestamp + marginfi_type_crate::types::PanicState::PAUSE_DURATION_SECONDS + 60;
+        clock.unix_timestamp = time;
+        ctx.set_sysvar(&clock);
+        time
+    };
 
-        // Refresh oracle timestamps to avoid stale-price failures from the large time jump.
-        test_f
-            .set_pyth_oracle_timestamp(PYTH_USDC_FEED, new_timestamp)
-            .await;
-        test_f
-            .set_pyth_oracle_timestamp(PYTH_SOL_FEED, new_timestamp)
-            .await;
-    }
+    test_f
+        .set_pyth_oracle_timestamp(PYTH_USDC_FEED, new_timestamp)
+        .await;
+    test_f
+        .set_pyth_oracle_timestamp(PYTH_SOL_FEED, new_timestamp)
+        .await;
 
     // Propagate expired state
     test_f.marginfi_group.try_propagate_fee_state().await?;
