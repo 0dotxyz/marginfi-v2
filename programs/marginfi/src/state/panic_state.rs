@@ -247,8 +247,8 @@ mod panic_state_tests {
 
     #[test]
     fn test_pause_constants() {
-        assert_eq!(PanicState::PAUSE_DURATION_SECONDS, 30 * 60);
-        assert_eq!(PanicState::MAX_CONSECUTIVE_PAUSES, 2);
+        assert_eq!(PanicState::PAUSE_DURATION_SECONDS, 7 * 24 * 60 * 60);
+        assert_eq!(PanicState::MAX_CONSECUTIVE_PAUSES, 10);
         assert_eq!(PanicState::MAX_DAILY_PAUSES, 3);
     }
 
@@ -338,11 +338,11 @@ mod panic_state_tests {
         assert!(s.is_paused_flag());
         // Note: still 1, this doesn't count as consecutive because the previous one expired.
         assert_eq!(s.consecutive_pause_count, 1);
-        // Daily count still went up tho
-        assert_eq!(s.daily_pause_count, 2);
+        // New pause happened on a later day, so the daily counter reset before incrementing.
+        assert_eq!(s.daily_pause_count, 1);
 
-        // Time jumps to another day; but pause flag still set, we never bothered to unpause
-        let t3 = t + DAILY_RESET_INTERVAL * 3;
+        // Time jumps past the second pause expiry into another day.
+        let t3 = t2 + PanicState::PAUSE_DURATION_SECONDS + DAILY_RESET_INTERVAL + 1;
         // Should "unpause" and then start a new "pause"
         assert!(s.pause(t3).is_ok());
         assert!(s.is_paused_flag());
