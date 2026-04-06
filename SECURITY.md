@@ -45,3 +45,24 @@ A number of attacks are out of scope for the bug bounty, including but not limit
 8. Sybil attacks.
 9. Attempted phishing or other social engineering attacks involving marginfi contributors or users
 10. Denial of service, or automated testing of services that generate significant traffic.
+
+
+## Known Issues and Scope Clarifications
+
+### Solend Not Supported in ....
+
+We are aware that e.g. Solend withdraw is not yet supported during e.g. receivership liquidation, this was a deliberate choice to limit cpi exposure while there are not yet any Solend banks in production.
+
+The legacy liquidate instruction continues to support all bank types, including Solend, so there is no risk of bad debt even if Solend banks were to be added before we added Solend to the receivership allow list. We will add Solend instructions to the allowlist for other instructions if/when a Solend bank appears in production.
+
+Any instances of Solend missing from a whitelist are out-of-scope.
+
+### T22 Extensions
+
+Adding banks is an administrator function, and we do not make program level assumptions about which (if any) of these T22 features the admin might tolerate. In cases where an asset is highly trusted (e.g. PYUSD), an admin may still determine listing is viable even though it has Transfer Fee and permanentDelegate extensions enabled. Regarding transfer hook, again it is on the admin to ensure the usage is safe (e.g. PUMP).
+
+In summary, the program will not validate these extensions are disabled, we leave it to the admin to decide if they tolerate the associated risk, and the inclusion of these extensions is out-of-scope.
+
+### Staked Collateral Price Confidence
+
+Confidence bands on Staked Collateral oracles are currently priced incorrectly, slightly over-valuing Staked Collateral positions. Because Staked Collateral positions can only borrow SOL, they will never be liquidated unless the SOL borrow sustains above the native stake yield for a long period of time (weeks to months). Even if they are modestly over-valued during times of low SOL price confidence, these Staked Collateral positions would still be liquidated well before they went underwater. We have marked this Info/Low and expect a fix in ~1.9 (roughly late April).
