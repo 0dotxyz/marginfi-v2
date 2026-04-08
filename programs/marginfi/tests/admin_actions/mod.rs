@@ -1,5 +1,4 @@
 mod account_transfer;
-mod actions_during_pause;
 mod bankruptcy;
 mod bankruptcy_auth;
 mod create_marginfi_group;

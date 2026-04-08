@@ -24,10 +24,7 @@ use marginfi_type_crate::{
     constants::{
         TOKENLESS_REPAYMENTS_ALLOWED, TOKENLESS_REPAYMENTS_COMPLETE, ZERO_AMOUNT_THRESHOLD,
     },
-    types::{
-        Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_RECEIVERSHIP,
-    },
+    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP},
 };
 
 /// 1. Accrue interest
@@ -172,7 +169,6 @@ pub struct LendingAccountRepay<'info> {
     #[account(
         constraint = (
             !group.load()?.is_protocol_paused()
-            || marginfi_account.load()?.get_flag(ACCOUNT_IN_DELEVERAGE)
         ) @ MarginfiError::ProtocolPaused
     )]
     pub group: AccountLoader<'info, MarginfiGroup>,
