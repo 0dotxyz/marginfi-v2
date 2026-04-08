@@ -11,6 +11,7 @@ use crate::{
         bank::BankImpl,
         marginfi_account::{BalanceImpl, LendingAccountImpl, MarginfiAccountImpl},
     },
+    utils::is_marginfi_asset_tag,
 };
 
 pub fn lending_account_purge_delev_balance(
@@ -68,6 +69,8 @@ pub struct LendingAccountPurgeDelevBalance<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
+        constraint = is_marginfi_asset_tag(bank.load()?.config.asset_tag)
+            @ MarginfiError::WrongAssetTagForStandardInstructions,
         constraint = bank.load()?.get_flag(TOKENLESS_REPAYMENTS_COMPLETE)
             @ MarginfiError::ForbiddenIx
     )]
