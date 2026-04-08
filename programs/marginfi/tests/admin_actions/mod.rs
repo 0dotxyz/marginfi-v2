@@ -11,5 +11,4 @@ mod interest_accrual;
 mod panic_mode;
 mod rate_limiter;
 mod setup_bank;
-mod super_deposit_withdraw;
 mod withdraw_fees;

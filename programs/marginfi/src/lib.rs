@@ -186,24 +186,6 @@ pub mod marginfi {
         marginfi_group::lending_pool_handle_bankruptcy(ctx)
     }
 
-    /// (primary admin only) Withdraw directly from a bank liquidity vault and lower
-    /// `asset_share_value` proportionally. No marginfi account is involved.
-    pub fn super_admin_withdraw<'info>(
-        ctx: Context<'_, '_, 'info, 'info, SuperAdminWithdraw<'info>>,
-        amount: u64,
-    ) -> MarginfiResult {
-        marginfi_group::super_admin_withdraw(ctx, amount)
-    }
-
-    /// (primary admin only) Deposit directly into a bank liquidity vault and raise
-    /// `asset_share_value` proportionally. No marginfi account is involved.
-    pub fn super_admin_deposit<'info>(
-        ctx: Context<'_, '_, 'info, 'info, SuperAdminDeposit<'info>>,
-        amount: u64,
-    ) -> MarginfiResult {
-        marginfi_group::super_admin_deposit(ctx, amount)
-    }
-
     // User instructions
 
     /// Initialize a marginfi account for a given group. The account is a fresh keypair, and must
