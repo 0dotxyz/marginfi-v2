@@ -93,6 +93,9 @@ async fn marginfi_account_deposit_success(
 
     // If deposit_amount == 0, bank account doesn't get created -- no need to check balances
     if deposit_amount > 0. {
+        assert_eq!(marginfi_account.indexer_flags.is_empty, 0);
+        assert_eq!(marginfi_account.indexer_flags.is_lending_only, 1);
+
         let active_balance_count = marginfi_account
             .lending_account
             .get_active_balances_iter()

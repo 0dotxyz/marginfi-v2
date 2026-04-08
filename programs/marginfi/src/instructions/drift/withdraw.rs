@@ -264,6 +264,7 @@ pub fn drift_withdraw<'info>(
         health_cache.timestamp = Clock::get()?.unix_timestamp;
 
         marginfi_account.lending_account.sort_balances();
+        marginfi_account.sync_indexer_flags();
 
         // Note: during liquidation/deleverage or order execution, we skip all health checks until
         // the end of the transaction.

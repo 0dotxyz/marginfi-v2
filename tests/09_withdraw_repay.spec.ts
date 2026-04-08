@@ -285,6 +285,9 @@ describe("Withdraw funds", () => {
     assert.approximately(sharesAfter, 0, 0.000001);
     // This balance is now inactive
     assert.equal(balancesAfter[1].active, 0);
+    // After repaying all debt, account is lending-only again
+    assert.equal(userAccAfter.indexerFlags.isLendingOnly, 1);
+    assert.equal(userAccAfter.indexerFlags.isSingleBorrower, 0);
     assertKeysEqual(balancesAfter[0].bankPk, bankKeypairA.publicKey);
 
     // The bank has also lost the same amount of shares...

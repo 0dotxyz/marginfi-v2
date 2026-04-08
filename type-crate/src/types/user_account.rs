@@ -1,6 +1,9 @@
 use crate::{
     assert_struct_align, assert_struct_size,
-    constants::{discriminators, ASSET_TAG_DEFAULT, EMPTY_BALANCE_THRESHOLD},
+    constants::{
+        discriminators, ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO,
+        ASSET_TAG_SOL, ASSET_TAG_STAKED, EMPTY_BALANCE_THRESHOLD,
+    },
 };
 use bytemuck::{Pod, Zeroable};
 use fixed::types::I80F48;
@@ -73,7 +76,8 @@ pub struct MarginfiAccount {
     /// * Opening this account is permissionless. Typically the liquidator pays, but e.g. we may
     ///   also charge the user if they are opening a risky position on the front end.
     pub liquidation_record: Pubkey,
-    pub _padding0: [u64; 7],
+    pub indexer_flags: IndexerFlags,
+    pub _padding0: [u64; 4],
 }
 
 impl MarginfiAccount {
@@ -100,6 +104,108 @@ impl MarginfiAccount {
             ],
             program_id,
         )
+    }
+}
+
+assert_struct_size!(IndexerFlags, 24);
+assert_struct_align!(IndexerFlags, 1);
+/// On-chain flags for indexer tranching. Each flag is a full byte so off-chain consumers can
+/// filter accounts via `memcmp`. Balance-derived flags are synced automatically on every
+/// balance-mutating instruction. Pulse-derived flags are updated in `pulse_health`.
+#[repr(C)]
+#[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[derive(Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)]
+pub struct IndexerFlags {
+    /// 1 if the account has no liabilities
+    pub is_lending_only: u8,
+    /// 1 if the account has no balances above the dust threshold
+    pub is_empty: u8,
+    /// 1 if the account has exactly one liability position
+    pub is_single_borrower: u8,
+    /// 1 if the account has ever been liquidated (permanent, never unset)
+    pub has_ever_been_liquidated: u8,
+    /// 1 if the account has any non-default, non-SOL asset tag position
+    pub has_isolated: u8,
+    /// 1 if the account has a STAKED asset tag position
+    pub has_staked: u8,
+    /// 1 if the account has a KAMINO asset tag position
+    pub has_kamino: u8,
+    /// 1 if the account has a DRIFT asset tag position
+    pub has_drift: u8,
+    /// 1 if the account has a JUPLEND asset tag position
+    pub has_juplend: u8,
+    /// 1 if maintenance health was negative at last pulse
+    pub was_liquidatable: u8,
+    /// 1 if equity health was negative at last pulse
+    pub was_underwater: u8,
+    /// 1 if account was active within the last 30 days (at last pulse)
+    pub was_active_30d: u8,
+    /// 1 if account was active within the last 90 days (at last pulse)
+    pub was_active_90d: u8,
+    /// 1 if account was active within the last year (at last pulse)
+    pub was_active_1y: u8,
+    /// 1 if asset_value_equity < $1 (at last pulse)
+    pub has_trivial_balance: u8,
+    /// 1 if account is empty and inactive for >30 days (at last pulse). Cleared on user activity.
+    pub pending_closure: u8,
+    /// 1 if account has been pending closure for >30 additional days (>60d inactive, at last pulse).
+    /// Admin may close accounts with this flag set.
+    pub closeable: u8,
+    pub _pad: [u8; 7],
+}
+
+impl IndexerFlags {
+    /// Recompute all balance-derived flags from the lending account's active balances.
+    /// Does NOT touch pulse-derived or permanent flags (has_ever_been_liquidated).
+    pub fn sync_from_balances(&mut self, balances: &[Balance; MAX_LENDING_ACCOUNT_BALANCES]) {
+        let mut liability_count: u8 = 0;
+        let mut has_any_balance = false;
+        let mut isolated = false;
+        let mut staked = false;
+        let mut kamino = false;
+        let mut drift = false;
+        let mut juplend = false;
+
+        for balance in balances.iter() {
+            if !balance.is_active() {
+                continue;
+            }
+            if balance.get_side().is_none() {
+                continue;
+            }
+            has_any_balance = true;
+
+            if !balance.is_empty(BalanceSide::Liabilities) {
+                liability_count = liability_count.saturating_add(1);
+            }
+
+            let tag = balance.bank_asset_tag;
+            if tag != ASSET_TAG_DEFAULT && tag != ASSET_TAG_SOL {
+                isolated = true;
+            }
+            match tag {
+                ASSET_TAG_STAKED => staked = true,
+                ASSET_TAG_KAMINO => kamino = true,
+                ASSET_TAG_DRIFT => drift = true,
+                ASSET_TAG_JUPLEND => juplend = true,
+                _ => {}
+            }
+        }
+
+        self.is_empty = (!has_any_balance) as u8;
+        self.is_lending_only = (has_any_balance && liability_count == 0) as u8;
+        self.is_single_borrower = (liability_count == 1) as u8;
+        self.has_isolated = isolated as u8;
+        self.has_staked = staked as u8;
+        self.has_kamino = kamino as u8;
+        self.has_drift = drift as u8;
+        self.has_juplend = juplend as u8;
+
+        // Clear closure flags when account has activity (balances present)
+        if has_any_balance {
+            self.pending_closure = 0;
+            self.closeable = 0;
+        }
     }
 }
 

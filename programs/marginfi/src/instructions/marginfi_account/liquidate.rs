@@ -445,7 +445,12 @@ pub fn lending_account_liquidate<'info>(
 
     // TODO consider if health cache update here is worth blowing the extra CU
 
+    liquidatee_marginfi_account
+        .indexer_flags
+        .has_ever_been_liquidated = 1;
+    liquidatee_marginfi_account.sync_indexer_flags();
     liquidator_marginfi_account.lending_account.sort_balances();
+    liquidator_marginfi_account.sync_indexer_flags();
 
     // Verify liquidator account health using heap-efficient version (includes isolated-tier check)
     check_account_init_health(

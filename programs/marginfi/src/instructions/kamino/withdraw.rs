@@ -235,6 +235,7 @@ pub fn kamino_withdraw<'info>(
     health_cache.timestamp = clock.unix_timestamp;
 
     marginfi_account.lending_account.sort_balances();
+    marginfi_account.sync_indexer_flags();
 
     let in_receivership_or_order_execution =
         marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);

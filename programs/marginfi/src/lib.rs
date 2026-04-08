@@ -472,6 +472,12 @@ pub mod marginfi {
         marginfi_account::close_account(ctx)
     }
 
+    /// (admin) Close an account flagged as closeable (empty + inactive >60 days).
+    /// Rent is returned to the specified destination.
+    pub fn admin_close_account(ctx: Context<AdminCloseAccount>) -> MarginfiResult {
+        marginfi_account::admin_close_account(ctx)
+    }
+
     /// (permissionless) Zero out `emissions_outstanding` on a balance after emissions are disabled
     /// on the bank.
     pub fn lending_account_clear_emissions(
@@ -489,6 +495,14 @@ pub mod marginfi {
         ctx: Context<'_, '_, 'info, 'info, PulseHealth<'info>>,
     ) -> MarginfiResult {
         marginfi_account::lending_account_pulse_health(ctx)
+    }
+
+    /// (Permissionless) Batch-sync balance-derived indexer flags for existing accounts.
+    /// Pass MarginfiAccounts as writable remaining_accounts.
+    pub fn sync_indexer_flags<'info>(
+        ctx: Context<'_, '_, 'info, 'info, SyncIndexerFlags<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::sync_indexer_flags(ctx)
     }
 
     /// (Permissionless) Refresh the cached oracle price for a bank.

@@ -170,6 +170,8 @@ describe("Borrow funds", () => {
     );
 
     const userAcc = await program.account.marginfiAccount.fetch(user0Account);
+    assert.equal(userAcc.indexerFlags.isLendingOnly, 0);
+    assert.equal(userAcc.indexerFlags.isSingleBorrower, 1);
     const bankAfter = await program.account.bank.fetch(bank);
     const balances = userAcc.lendingAccount.balances;
     assert.equal(bankAfter.borrowingPositionCount, 1);

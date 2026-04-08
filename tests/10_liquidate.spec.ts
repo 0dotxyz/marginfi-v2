@@ -328,6 +328,15 @@ describe("Liquidate user", () => {
     const liquidatorMarginfiAccountAfter =
       await program.account.marginfiAccount.fetch(liquidatorAccount);
 
+    assert.equal(
+      liquidateeMarginfiAccountAfter.indexerFlags.hasEverBeenLiquidated,
+      1
+    );
+    assert.equal(
+      liquidatorMarginfiAccountAfter.indexerFlags.hasEverBeenLiquidated,
+      0
+    );
+
     const liquidateeBalancesAfter =
       liquidateeMarginfiAccountAfter.lendingAccount.balances;
     const liquidatorBalancesAfter =

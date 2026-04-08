@@ -110,6 +110,7 @@ pub fn drift_deposit<'info>(
 
         marginfi_account.last_update = clock.unix_timestamp as u64;
         marginfi_account.lending_account.sort_balances();
+        marginfi_account.sync_indexer_flags();
 
         emit!(LendingAccountDepositEvent {
             header: AccountEventHeader {
