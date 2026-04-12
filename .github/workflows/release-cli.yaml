@@ -118,7 +118,8 @@ jobs:
           files: |
             ${{ env.ARCHIVE_BASENAME }}.${{ matrix.archive_ext }}
             ${{ env.ARCHIVE_BASENAME }}.${{ matrix.archive_ext }}.sha256
-          generate_release_notes: true
+          draft: true
+          body: ""
 
       - name: Upload build artifact (non-release)
         if: github.ref_type != 'tag'
