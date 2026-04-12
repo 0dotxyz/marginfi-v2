@@ -6,25 +6,60 @@ Production-oriented Rust CLI for interacting with the `marginfi` on-chain progra
 
 ### Prebuilt releases (recommended)
 
-Tagged versions publish archives for Linux, macOS (Intel + Apple Silicon), and Windows:
+Tagged versions publish archives for Linux, macOS (Intel + Apple Silicon), and Windows. Download directly with `curl` — no `gh` or auth required.
+
+Set the version once:
 
 ```bash
-gh release download mfi-v0.1.9 --pattern 'mfi-*-<target>.tar.gz'
-tar -xzf mfi-*.tar.gz
-./mfi --help
+MFI_VERSION=0.1.8
 ```
 
-Replace `<target>` with one of `x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, or `x86_64-pc-windows-msvc`.
-
-#### macOS: clear the quarantine flag
-
-Binaries downloaded via a browser or `gh` are tagged by Gatekeeper and will fail to launch with an "Apple cannot verify this software is free of malware" error. Clear the quarantine attribute once after extracting:
+**macOS (Apple Silicon — M1/M2/M3/M4):**
 
 ```bash
-xattr -d com.apple.quarantine ./mfi
+curl --proto '=https' --tlsv1.2 -sSfL -o mfi.tar.gz \
+  https://github.com/0dotxyz/marginfi-v2/releases/download/mfi-v${MFI_VERSION}/mfi-${MFI_VERSION}-aarch64-apple-darwin.tar.gz
+tar -xzf mfi.tar.gz
+xattr -c ./mfi
+./mfi --version
 ```
 
-Alternatively, right-click `mfi` in Finder → Open on first launch.
+**macOS (Intel):**
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSfL -o mfi.tar.gz \
+  https://github.com/0dotxyz/marginfi-v2/releases/download/mfi-v${MFI_VERSION}/mfi-${MFI_VERSION}-x86_64-apple-darwin.tar.gz
+tar -xzf mfi.tar.gz
+xattr -c ./mfi
+./mfi --version
+```
+
+**Linux (x86_64):**
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSfL -o mfi.tar.gz \
+  https://github.com/0dotxyz/marginfi-v2/releases/download/mfi-v${MFI_VERSION}/mfi-${MFI_VERSION}-x86_64-unknown-linux-gnu.tar.gz
+tar -xzf mfi.tar.gz
+./mfi --version
+```
+
+**Windows (x86_64, PowerShell):**
+
+```powershell
+$MFI_VERSION = "0.1.8"
+Invoke-WebRequest -Uri "https://github.com/0dotxyz/marginfi-v2/releases/download/mfi-v$MFI_VERSION/mfi-$MFI_VERSION-x86_64-pc-windows-msvc.zip" -OutFile mfi.zip
+Expand-Archive mfi.zip -DestinationPath .
+.\mfi.exe --version
+```
+
+**Install to PATH** (optional, Unix):
+
+```bash
+mkdir -p ~/.local/bin && mv ./mfi ~/.local/bin/
+# ensure ~/.local/bin is on your $PATH
+```
+
+**macOS quarantine note:** Gatekeeper may flag unsigned binaries with an "Apple cannot verify this software is free of malware" error (typically when downloaded via a browser). The `xattr -c ./mfi` step clears any extended attributes and is a no-op when none are present, so it's safe to run either way. Alternatively, right-click `mfi` in Finder → Open on first launch.
 
 ### Build from source
 
