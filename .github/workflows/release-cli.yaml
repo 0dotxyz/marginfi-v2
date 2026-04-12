@@ -118,6 +118,7 @@ jobs:
           files: |
             ${{ env.ARCHIVE_BASENAME }}.${{ matrix.archive_ext }}
             ${{ env.ARCHIVE_BASENAME }}.${{ matrix.archive_ext }}.sha256
+          name: "marginfi CLI ${{ env.VERSION }}"
           draft: true
           body: ""
 
