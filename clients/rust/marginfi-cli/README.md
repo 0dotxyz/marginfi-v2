@@ -2,22 +2,35 @@
 
 Production-oriented Rust CLI for interacting with the `marginfi` on-chain program.
 
-## Build
+## Install
+
+### Prebuilt releases (recommended)
+
+Tagged versions publish archives for Linux, macOS (Intel + Apple Silicon), and Windows:
+
+```bash
+gh release download mfi-v0.1.9 --pattern 'mfi-*-<target>.tar.gz'
+tar -xzf mfi-*.tar.gz
+./mfi --help
+```
+
+Replace `<target>` with one of `x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, or `x86_64-pc-windows-msvc`.
+
+#### macOS: clear the quarantine flag
+
+Binaries downloaded via a browser or `gh` are tagged by Gatekeeper and will fail to launch with an "Apple cannot verify this software is free of malware" error. Clear the quarantine attribute once after extracting:
+
+```bash
+xattr -d com.apple.quarantine ./mfi
+```
+
+Alternatively, right-click `mfi` in Finder → Open on first launch.
+
+### Build from source
 
 ```bash
 cargo build -p marginfi-v2-cli
-```
-
-Install locally:
-
-```bash
 cargo install --path clients/rust/marginfi-cli --locked --force
-```
-
-GitHub release builds are published for tagged versions as archives containing the `mfi` binary:
-
-```bash
-gh release download mfi-v0.1.8 --pattern 'mfi-*'
 ```
 
 ## Help And Discovery
