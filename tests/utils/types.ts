@@ -101,7 +101,7 @@ export const ACCOUNT_FROZEN = 1 << 6;
 export const ACCOUNT_TRANSFER_FEE = 5_000_000;
 
 export const FLAG_PAUSED = 1;
-export const PAUSE_DURATION_SECONDS = 24 * 60 * 60; // 24 hours
+export const PAUSE_DURATION_SECONDS = 6 * 60 * 60; // 6 hours
 export const MAX_CONSECUTIVE_PAUSES = 4;
 export const MAX_DAILY_PAUSES = 3;
 export const DAILY_RESET_INTERVAL = 24 * 60 * 60; // 24 hours

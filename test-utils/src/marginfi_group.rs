@@ -1,10 +1,12 @@
 use super::{bank::BankFixture, marginfi_account::MarginfiAccountFixture};
 use crate::kamino::KaminoFixture;
 use crate::prelude::{get_oracle_id_from_feed_id, MintFixture};
+use crate::ui_to_native;
 use crate::utils::*;
 use anchor_lang::{prelude::*, solana_program::system_program, InstructionData};
 
 use anchor_spl::associated_token::get_associated_token_address_with_program_id;
+use anchor_spl::associated_token::spl_associated_token_account::instruction::create_associated_token_account_idempotent;
 use anyhow::Result;
 use bytemuck::bytes_of;
 use fixed::types::I80F48;
@@ -1045,6 +1047,149 @@ impl MarginfiGroupFixture {
         );
 
         ctx.banks_client.process_transaction(tx).await
+    }
+
+    pub fn make_super_admin_withdraw_ix_native(
+        &self,
+        bank: &BankFixture,
+        destination_token_account: Pubkey,
+        amount: u64,
+    ) -> Instruction {
+        let mut accounts = marginfi::accounts::SuperAdminWithdraw {
+            group: self.key,
+            admin: self.ctx.borrow().payer.pubkey(),
+            bank: bank.key,
+            destination_token_account,
+            liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+            token_program: bank.get_token_program(),
+        }
+        .to_account_metas(Some(true));
+        if bank.mint.token_program == anchor_spl::token_2022::ID {
+            accounts.push(AccountMeta::new_readonly(bank.mint.key, false));
+        }
+
+        Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: SuperAdminWithdraw { amount }.data(),
+        }
+    }
+
+    /// Withdraws from bank vault to the hardcoded DESTINATION_WALLET's ATA.
+    /// Creates the ATA if it doesn't exist. Returns the ATA pubkey.
+    pub async fn try_super_admin_withdraw_native(
+        &self,
+        bank: &BankFixture,
+        amount: u64,
+    ) -> std::result::Result<Pubkey, BanksClientError> {
+        let destination_wallet =
+            Pubkey::try_from("AnGdBvg8VmVHq7zyUYmC7mgjZ5pW6odwFsh6eharbzLu").unwrap();
+        let token_program = bank.get_token_program();
+        let ata = get_associated_token_address_with_program_id(
+            &destination_wallet,
+            &bank.mint.key,
+            &token_program,
+        );
+
+        let create_ata_ix = create_associated_token_account_idempotent(
+            &self.ctx.borrow().payer.pubkey(),
+            &destination_wallet,
+            &bank.mint.key,
+            &token_program,
+        );
+        let withdraw_ix = self.make_super_admin_withdraw_ix_native(bank, ata, amount);
+
+        let tx = Transaction::new_signed_with_payer(
+            &[create_ata_ix, withdraw_ix],
+            Some(&self.ctx.borrow().payer.pubkey()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(ata)
+    }
+
+    pub async fn try_super_admin_withdraw<T: Into<f64>>(
+        &self,
+        bank: &BankFixture,
+        ui_amount: T,
+    ) -> std::result::Result<Pubkey, BanksClientError> {
+        self.try_super_admin_withdraw_native(
+            bank,
+            ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+        )
+        .await
+    }
+
+    pub fn make_super_admin_deposit_ix_native(
+        &self,
+        bank: &BankFixture,
+        admin_token_account: Pubkey,
+        amount: u64,
+    ) -> Instruction {
+        let mut accounts = marginfi::accounts::SuperAdminDeposit {
+            group: self.key,
+            admin: self.ctx.borrow().payer.pubkey(),
+            bank: bank.key,
+            admin_token_account,
+            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+            token_program: bank.get_token_program(),
+        }
+        .to_account_metas(Some(true));
+        if bank.mint.token_program == anchor_spl::token_2022::ID {
+            accounts.push(AccountMeta::new_readonly(bank.mint.key, false));
+        }
+
+        Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: SuperAdminDeposit { amount }.data(),
+        }
+    }
+
+    pub async fn try_super_admin_deposit_native(
+        &self,
+        bank: &BankFixture,
+        admin_token_account: Pubkey,
+        amount: u64,
+    ) -> Result<(), BanksClientError> {
+        let ix = self.make_super_admin_deposit_ix_native(bank, admin_token_account, amount);
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn try_super_admin_deposit<T: Into<f64>>(
+        &self,
+        bank: &BankFixture,
+        admin_token_account: Pubkey,
+        ui_amount: T,
+    ) -> Result<(), BanksClientError> {
+        self.try_super_admin_deposit_native(
+            bank,
+            admin_token_account,
+            ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+        )
+        .await
     }
 
     pub fn get_size() -> usize {
