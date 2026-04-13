@@ -37,10 +37,6 @@ struct KaminoInitAccounts {
     reserve_collateral_mint: Pubkey,
     reserve_destination_deposit_collateral: Pubkey,
     user_metadata: Pubkey,
-    pyth_oracle: Option<Pubkey>,
-    switchboard_price_oracle: Option<Pubkey>,
-    switchboard_twap_oracle: Option<Pubkey>,
-    scope_prices: Option<Pubkey>,
     obligation_farm_user_state: Option<Pubkey>,
     reserve_farm_state: Option<Pubkey>,
 }
@@ -126,8 +122,8 @@ fn derive_kamino_init_accounts(
     rpc_client: &solana_client::rpc_client::RpcClient,
     reserve: Pubkey,
     lending_market: Pubkey,
-    reserve_oracle: Pubkey,
-    oracle_setup: u8,
+    _reserve_oracle: Pubkey,
+    _oracle_setup: u8,
     obligation: Pubkey,
     liquidity_vault_authority: Pubkey,
 ) -> Result<KaminoInitAccounts> {
@@ -173,22 +169,12 @@ fn derive_kamino_init_accounts(
         .0
     });
 
-    let (pyth_oracle, scope_prices) = match oracle_setup {
-        11 => (Some(reserve_oracle), None),
-        12 => (None, Some(reserve_oracle)),
-        _ => (None, None),
-    };
-
     Ok(KaminoInitAccounts {
         lending_market_authority,
         reserve_liquidity_supply,
         reserve_collateral_mint,
         reserve_destination_deposit_collateral,
         user_metadata,
-        pyth_oracle,
-        switchboard_price_oracle: None,
-        switchboard_twap_oracle: None,
-        scope_prices,
         obligation_farm_user_state,
         reserve_farm_state,
     })
@@ -268,10 +254,10 @@ fn build_kamino_init_obligation_ix(
     reserve_collateral_mint: Pubkey,
     reserve_destination_deposit_collateral: Pubkey,
     user_metadata: Pubkey,
-    pyth_oracle: Option<Pubkey>,
-    switchboard_price_oracle: Option<Pubkey>,
-    switchboard_twap_oracle: Option<Pubkey>,
-    scope_prices: Option<Pubkey>,
+    _pyth_oracle: Option<Pubkey>,
+    _switchboard_price_oracle: Option<Pubkey>,
+    _switchboard_twap_oracle: Option<Pubkey>,
+    _scope_prices: Option<Pubkey>,
     obligation_farm_user_state: Option<Pubkey>,
     reserve_farm_state: Option<Pubkey>,
     signer_token_account: Pubkey,
@@ -297,10 +283,6 @@ fn build_kamino_init_obligation_ix(
             reserve_liquidity_supply,
             reserve_collateral_mint,
             reserve_destination_deposit_collateral,
-            pyth_oracle,
-            switchboard_price_oracle,
-            switchboard_twap_oracle,
-            scope_prices,
             obligation_farm_user_state,
             reserve_farm_state,
             kamino_program: KAMINO_PROGRAM_ID,
@@ -535,7 +517,11 @@ pub fn kamino_deposit(
             instruction_sysvar_account: sysvar::instructions::ID,
         }
         .to_account_metas(Some(true)),
-        data: marginfi::instruction::KaminoDeposit { amount }.data(),
+        data: marginfi::instruction::KaminoDeposit {
+            amount,
+            refresh_reserve: Some(false),
+        }
+        .data(),
     };
 
     // Prepend Kamino refresh instructions to ensure reserve/obligation are non-stale
@@ -602,6 +588,11 @@ pub fn kamino_withdraw(
         group,
         withdraw_all.then_some(bank_pk),
     )?;
+    let flags = if withdraw_all {
+        Some(0b0000_0001u8)
+    } else {
+        None
+    };
 
     let mut ix = Instruction {
         program_id: config.program_id,
@@ -630,11 +621,7 @@ pub fn kamino_withdraw(
             instruction_sysvar_account: sysvar::instructions::ID,
         }
         .to_account_metas(Some(true)),
-        data: marginfi::instruction::KaminoWithdraw {
-            amount,
-            withdraw_all: if withdraw_all { Some(true) } else { None },
-        }
-        .data(),
+        data: marginfi::instruction::KaminoWithdraw { amount, flags }.data(),
     };
     ix.accounts.extend(observation_metas);
 
@@ -1444,10 +1431,6 @@ pub fn kamino_add_bank(config: &Config, request: KaminoBankCreateRequest) -> Res
             reserve_collateral_mint: init_accounts.reserve_collateral_mint,
             reserve_destination_deposit_collateral: init_accounts
                 .reserve_destination_deposit_collateral,
-            pyth_oracle: init_accounts.pyth_oracle,
-            switchboard_price_oracle: init_accounts.switchboard_price_oracle,
-            switchboard_twap_oracle: init_accounts.switchboard_twap_oracle,
-            scope_prices: init_accounts.scope_prices,
             obligation_farm_user_state: init_accounts.obligation_farm_user_state,
             reserve_farm_state: init_accounts.reserve_farm_state,
             kamino_program: KAMINO_PROGRAM_ID,

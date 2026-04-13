@@ -159,7 +159,6 @@ describe("kx: Fixed Kamino price bank", () => {
           signerTokenAccount: users[3].usdcAccount,
           lendingMarket: market,
           reserve: usdcReserve,
-          pythOracle: oracles.usdcOracle.publicKey,
         },
         new BN(100),
       ),

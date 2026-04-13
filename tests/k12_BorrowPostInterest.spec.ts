@@ -150,8 +150,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
         signerTokenAccount: groupAdmin.tokenAAccount,
         lendingMarket: market,
         reserve: tokenAReserve,
-        pythOracle: oracles.tokenAOracle.publicKey,
-      }),
+      })
     );
     await processBankrunTx(bankrunContext, tx, [groupAdmin.wallet]);
   });
@@ -273,7 +272,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
       console.log("expected value (w/ confidence): " + depValWithConf);
       console.log(
         "actual value:               " +
-          wrappedI80F48toBigNumber(cache.assetValueEquity).toString(),
+        wrappedI80F48toBigNumber(cache.assetValueEquity).toString()
       );
     }
     // Note: interest has accumulated, so we expect this position should be worth a few % more.

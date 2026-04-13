@@ -306,6 +306,34 @@ export const configureBankOracle = (
   return ix;
 };
 
+export type EmissionsDepositArgs = {
+  bank: PublicKey;
+  mint: PublicKey;
+  fundingAccount: PublicKey;
+  depositor: PublicKey;
+  liquidityVault: PublicKey;
+  amount: BN;
+};
+
+export const lendingPoolEmissionsDeposit = (
+  program: Program<Marginfi>,
+  args: EmissionsDepositArgs
+) => {
+  const ix = program.methods
+    .lendingPoolEmissionsDeposit(args.amount)
+    .accounts({
+      bank: args.bank,
+      depositor: args.depositor,
+      // mint: args.mint,
+      emissionsFundingAccount: args.fundingAccount,
+      // liquidityVault: args.liquidityVault,
+      tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .instruction();
+
+  return ix;
+};
+
 // ************* Below this line, not yet included in package ****************
 
 export type InitGlobalFeeStateArgs = {
@@ -469,12 +497,12 @@ export const propagateStakedSettings = (
 ) => {
   const remainingAccounts = args.oracle
     ? [
-      {
-        pubkey: args.oracle,
-        isSigner: false,
-        isWritable: false,
-      } as AccountMeta,
-    ]
+        {
+          pubkey: args.oracle,
+          isSigner: false,
+          isWritable: false,
+        } as AccountMeta,
+      ]
     : [];
 
   const ix = program.methods
@@ -845,7 +873,10 @@ export const panicUnpausePermissionless = async (
 };
 
 type InitBankMetadataArgs = {
+  group: PublicKey;
+  bankMint: PublicKey;
   bank: PublicKey;
+  bankSeed: BN;
 };
 
 export const initBankMetadata = (
@@ -853,8 +884,10 @@ export const initBankMetadata = (
   args: InitBankMetadataArgs
 ) => {
   const ix = program.methods
-    .initBankMetadata()
+    .initBankMetadata(args.bankSeed)
     .accounts({
+      group: args.group,
+      bankMint: args.bankMint,
       // metadata: args.metadata, // derived from bank
       bank: args.bank,
     })
@@ -891,6 +924,10 @@ export const setFixedPrice = (
 };
 
 type WriteBankMetadataArgs = {
+  group: PublicKey;
+  bankMint: PublicKey;
+  bank: PublicKey;
+  bankSeed: BN;
   metadata: PublicKey;
   /// Pass undefined to skip. Limit 64 bytes
   ticker?: string;
@@ -930,12 +967,14 @@ export const writeBankMetadata = (
 
   const ix = program.methods
     .writeBankMetadata(
+      args.bankSeed,
       tickerBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
       descBuf // Option<Vec<u8>> -> Some(Buffer) | None(null)
     )
     .accounts({
-      // group: args.group, // implied from metadata
-      // bank: args.bank, // implied from metadata
+      group: args.group,
+      bankMint: args.bankMint,
+      bank: args.bank,
       // metadataAdmin: args.metadataAdmin, // implied from metadata
       metadata: args.metadata,
     })

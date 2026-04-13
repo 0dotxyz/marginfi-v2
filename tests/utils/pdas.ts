@@ -5,62 +5,62 @@ import { KLEND_PROGRAM_ID } from "./types";
 
 export const deriveLiquidityVaultAuthority = (
   programId: PublicKey,
-  bank: PublicKey,
+  bank: PublicKey
 ) => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("liquidity_vault_auth", "utf-8"), bank.toBuffer()],
-    programId,
+    programId
   );
 };
 
 export const deriveLiquidityVault = (programId: PublicKey, bank: PublicKey) => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("liquidity_vault", "utf-8"), bank.toBuffer()],
-    programId,
+    programId
   );
 };
 
 export const deriveJuplendFTokenVault = (
   programId: PublicKey,
-  bank: PublicKey,
+  bank: PublicKey
 ) => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("f_token_vault", "utf-8"), bank.toBuffer()],
-    programId,
+    programId
   );
 };
 
 export const deriveInsuranceVaultAuthority = (
   programId: PublicKey,
-  bank: PublicKey,
+  bank: PublicKey
 ) => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("insurance_vault_auth", "utf-8"), bank.toBuffer()],
-    programId,
+    programId
   );
 };
 
 export const deriveInsuranceVault = (programId: PublicKey, bank: PublicKey) => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("insurance_vault", "utf-8"), bank.toBuffer()],
-    programId,
+    programId
   );
 };
 
 export const deriveFeeVaultAuthority = (
   programId: PublicKey,
-  bank: PublicKey,
+  bank: PublicKey
 ) => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("fee_vault_auth", "utf-8"), bank.toBuffer()],
-    programId,
+    programId
   );
 };
 
 export const deriveFeeVault = (programId: PublicKey, bank: PublicKey) => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("fee_vault", "utf-8"), bank.toBuffer()],
-    programId,
+    programId
   );
 };
 
@@ -71,7 +71,7 @@ export const deriveFeeVault = (programId: PublicKey, bank: PublicKey) => {
 export const deriveOrderPda = (
   programId: PublicKey,
   marginfiAccount: PublicKey,
-  bankKeys: PublicKey[],
+  bankKeys: PublicKey[]
 ): [PublicKey, number] => {
   const sorted = [...bankKeys].sort((a, b) => {
     const A = a.toBuffer();
@@ -88,7 +88,7 @@ export const deriveOrderPda = (
 
   return PublicKey.findProgramAddressSync(
     [Buffer.from("order", "utf-8"), marginfiAccount.toBuffer(), hash],
-    programId,
+    programId
   );
 };
 
@@ -98,18 +98,18 @@ export const deriveOrderPda = (
  */
 export const deriveExecuteOrderPda = (
   programId: PublicKey,
-  order: PublicKey,
+  order: PublicKey
 ): [PublicKey, number] => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("execute_order", "utf-8"), order.toBuffer()],
-    programId,
+    programId
   );
 };
 
 export const deriveEmissionsAuth = (
   programId: PublicKey,
   bank: PublicKey,
-  mint: PublicKey,
+  mint: PublicKey
 ) => {
   return PublicKey.findProgramAddressSync(
     [
@@ -117,14 +117,14 @@ export const deriveEmissionsAuth = (
       bank.toBuffer(),
       mint.toBuffer(),
     ],
-    programId,
+    programId
   );
 };
 
 export const deriveEmissionsTokenAccount = (
   programId: PublicKey,
   bank: PublicKey,
-  mint: PublicKey,
+  mint: PublicKey
 ) => {
   return PublicKey.findProgramAddressSync(
     [
@@ -132,7 +132,7 @@ export const deriveEmissionsTokenAccount = (
       bank.toBuffer(),
       mint.toBuffer(),
     ],
-    programId,
+    programId
   );
 };
 
@@ -140,12 +140,27 @@ export const deriveBankWithSeed = (
   programId: PublicKey,
   group: PublicKey,
   bankMint: PublicKey,
-  seed: BN,
+  seed: BN
 ) => {
   return PublicKey.findProgramAddressSync(
     [group.toBuffer(), bankMint.toBuffer(), seed.toArrayLike(Buffer, "le", 8)],
-    programId,
+    programId
   );
+};
+
+/**
+ * Derive the canonical bank PDA and its metadata PDA from the seeded bank inputs.
+ */
+export const deriveBankAndMetadataWithSeed = (
+  programId: PublicKey,
+  group: PublicKey,
+  bankMint: PublicKey,
+  seed: BN
+) => {
+  const [bank, bankBump] = deriveBankWithSeed(programId, group, bankMint, seed);
+  const [metadata, metadataBump] = deriveBankMetadata(programId, bank);
+
+  return { bank, bankBump, metadata, metadataBump };
 };
 
 // ************* Below this line, not yet included in package ****************
@@ -153,27 +168,27 @@ export const deriveBankWithSeed = (
 export const deriveGlobalFeeState = (programId: PublicKey) => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("feestate", "utf-8")],
-    programId,
+    programId
   );
 };
 
 export const deriveStakedSettings = (
   programId: PublicKey,
-  group: PublicKey,
+  group: PublicKey
 ) => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("staked_settings", "utf-8"), group.toBuffer()],
-    programId,
+    programId
   );
 };
 
 export const deriveLiquidationRecord = (
   programId: PublicKey,
-  marginfiAccount: PublicKey,
+  marginfiAccount: PublicKey
 ) => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("liq_record", "utf-8"), marginfiAccount.toBuffer()],
-    programId,
+    programId
   );
 };
 
@@ -182,7 +197,7 @@ export const deriveMarginfiAccountPda = (
   group: PublicKey,
   authority: PublicKey,
   accountIndex: number,
-  thirdPartyId?: number,
+  thirdPartyId?: number
 ) => {
   const accountIndexBuffer = Buffer.allocUnsafe(2);
   accountIndexBuffer.writeUInt16LE(accountIndex, 0);
@@ -198,14 +213,14 @@ export const deriveMarginfiAccountPda = (
       accountIndexBuffer,
       thirdPartyIdBuffer,
     ],
-    programId,
+    programId
   );
 };
 
 export const deriveBankMetadata = (programId: PublicKey, bank: PublicKey) => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("metadata", "utf-8"), bank.toBuffer()],
-    programId,
+    programId
   );
 };
 
@@ -226,112 +241,98 @@ export const SEED_GLOBAL_CONFIG_STATE = "global_config";
 
 export function deriveLendingMarketAuthority(
   programId: PublicKey,
-  lendingMarket: PublicKey,
+  lendingMarket: PublicKey
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from(SEED_LENDING_MARKET_AUTH), lendingMarket.toBuffer()],
-    programId,
+    programId
   );
 }
 
 export function deriveFeeReceiver(
   programId: PublicKey,
-  reserve: PublicKey,
+  reserve: PublicKey
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [
-      Buffer.from(SEED_FEE_RECEIVER),
-      reserve.toBuffer(),
-    ],
-    programId,
+    [Buffer.from(SEED_FEE_RECEIVER), reserve.toBuffer()],
+    programId
   );
 }
 
 export function deriveReserveLiquiditySupply(
   programId: PublicKey,
-  reserve: PublicKey,
+  reserve: PublicKey
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [
-      Buffer.from(SEED_RESERVE_LIQ_SUPPLY),
-      reserve.toBuffer(),
-    ],
-    programId,
+    [Buffer.from(SEED_RESERVE_LIQ_SUPPLY), reserve.toBuffer()],
+    programId
   );
 }
 
 export function deriveReserveCollateralMint(
   programId: PublicKey,
-  reserve: PublicKey,
+  reserve: PublicKey
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [
-      Buffer.from(SEED_RESERVE_COLL_MINT),
-      reserve.toBuffer(),
-    ],
+    [Buffer.from(SEED_RESERVE_COLL_MINT), reserve.toBuffer()],
     programId
   );
 }
 
 export function deriveReserveCollateralSupply(
   programId: PublicKey,
-  reserve: PublicKey,
+  reserve: PublicKey
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [
-      Buffer.from(SEED_RESERVE_COLL_SUPPLY),
-      reserve.toBuffer(),
-    ],
+    [Buffer.from(SEED_RESERVE_COLL_SUPPLY), reserve.toBuffer()],
     programId
   );
 }
 
 export function deriveReferrerTokenState(
   programId: PublicKey,
-  referrer: PublicKey,
+  referrer: PublicKey
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from(SEED_BASE_REFERRER_TOKEN_STATE), referrer.toBuffer()],
-    programId,
+    programId
   );
 }
 
 export function deriveUserMetadata(
   programId: PublicKey,
-  user: PublicKey,
+  user: PublicKey
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from(SEED_BASE_USER_METADATA), user.toBuffer()],
-    programId,
+    programId
   );
 }
 
 export function deriveReferrerState(
   programId: PublicKey,
-  user: PublicKey,
+  user: PublicKey
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from(SEED_BASE_REFERRER_STATE), user.toBuffer()],
-    programId,
+    programId
   );
 }
 
 export function deriveShortUrl(
   programId: PublicKey,
-  identifier: Buffer,
+  identifier: Buffer
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from(SEED_BASE_SHORT_URL), identifier],
-    programId,
+    programId
   );
 }
 
-export function deriveGlobalConfig(
-  programId: PublicKey,
-): [PublicKey, number] {
+export function deriveGlobalConfig(programId: PublicKey): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from(SEED_GLOBAL_CONFIG_STATE)],
-    programId,
+    programId
   );
 }
 
@@ -353,7 +354,7 @@ export const deriveBaseObligation = (
   seed1AccountKey: PublicKey = PublicKey.default,
   seed2AccountKey: PublicKey = PublicKey.default,
   tag: number = 0,
-  id: number = 0,
+  id: number = 0
 ) => {
   return deriveObligation(
     programId,
@@ -362,7 +363,7 @@ export const deriveBaseObligation = (
     ownerPublicKey,
     marketPublicKey,
     seed1AccountKey,
-    seed2AccountKey,
+    seed2AccountKey
   );
 };
 
@@ -373,7 +374,7 @@ export const deriveObligation = (
   ownerPublicKey: PublicKey,
   marketPublicKey: PublicKey,
   seed1AccountKey: PublicKey,
-  seed2AccountKey: PublicKey,
+  seed2AccountKey: PublicKey
 ) => {
   return PublicKey.findProgramAddressSync(
     [
@@ -384,7 +385,7 @@ export const deriveObligation = (
       seed1AccountKey.toBuffer(),
       seed2AccountKey.toBuffer(),
     ],
-    programId,
+    programId
   );
 };
 
@@ -399,87 +400,87 @@ export const deriveObligation = (
 export function deriveUserState(
   programId: PublicKey,
   farmState: PublicKey,
-  obligation: PublicKey,
+  obligation: PublicKey
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from(SEED_USER_STATE), farmState.toBuffer(), obligation.toBuffer()],
-    programId,
+    programId
   );
 }
 
 export function deriveFarmsVaultAuthority(
   programId: PublicKey,
-  farmState: PublicKey,
+  farmState: PublicKey
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from(SEED_AUTHORITY), farmState.toBuffer()],
-    programId,
+    programId
   );
 }
 
 // ************* Drift Related ****************
 
 export const deriveDriftStatePDA = (
-  programId: PublicKey,
+  programId: PublicKey
 ): [PublicKey, number] => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("drift_state")],
-    programId,
+    programId
   );
 };
 
 export const deriveDriftSignerPDA = (
-  programId: PublicKey,
+  programId: PublicKey
 ): [PublicKey, number] => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("drift_signer")],
-    programId,
+    programId
   );
 };
 
 export const deriveSpotMarketPDA = (
   programId: PublicKey,
-  marketIndex: number,
+  marketIndex: number
 ): [PublicKey, number] => {
   return PublicKey.findProgramAddressSync(
     [
       Buffer.from("spot_market"),
       new BN(marketIndex).toArrayLike(Buffer, "le", 2),
     ],
-    programId,
+    programId
   );
 };
 
 export const deriveSpotMarketVaultPDA = (
   programId: PublicKey,
-  marketIndex: number,
+  marketIndex: number
 ): [PublicKey, number] => {
   return PublicKey.findProgramAddressSync(
     [
       Buffer.from("spot_market_vault"),
       new BN(marketIndex).toArrayLike(Buffer, "le", 2),
     ],
-    programId,
+    programId
   );
 };
 
 export const deriveInsuranceFundVaultPDA = (
   programId: PublicKey,
-  marketIndex: number,
+  marketIndex: number
 ): [PublicKey, number] => {
   return PublicKey.findProgramAddressSync(
     [
       Buffer.from("insurance_fund_vault"),
       new BN(marketIndex).toArrayLike(Buffer, "le", 2),
     ],
-    programId,
+    programId
   );
 };
 
 export const deriveUserPDA = (
   programId: PublicKey,
   authority: PublicKey,
-  subAccountId: number,
+  subAccountId: number
 ): [PublicKey, number] => {
   return PublicKey.findProgramAddressSync(
     [
@@ -487,26 +488,26 @@ export const deriveUserPDA = (
       authority.toBuffer(),
       new BN(subAccountId).toArrayLike(Buffer, "le", 2),
     ],
-    programId,
+    programId
   );
 };
 
 export const deriveUserStatsPDA = (
   programId: PublicKey,
-  authority: PublicKey,
+  authority: PublicKey
 ): [PublicKey, number] => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("user_stats"), authority.toBuffer()],
-    programId,
+    programId
   );
 };
 
 export const deriveSolendObligation = (
   programId: PublicKey,
-  bank: PublicKey,
+  bank: PublicKey
 ): [PublicKey, number] => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("solend_obligation"), bank.toBuffer()],
-    programId,
+    programId
   );
 };

@@ -463,7 +463,6 @@ async function addGenericKaminoBank(
         signerTokenAccount: groupAdmin.tokenAAccount,
         lendingMarket: market,
         reserve,
-        pythOracle: oracles.tokenAOracle.publicKey,
         reserveFarmState: farmState,
         obligationFarmUserState: userState,
       },

@@ -29,10 +29,13 @@ use anchor_spl::token_interface::{
 };
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
-use kamino_mocks::kamino_lending::cpi::withdraw_obligation_collateral_and_redeem_reserve_collateral_v2;
+use kamino_mocks::kamino_lending::cpi::{
+    refresh_reserves_batch, withdraw_obligation_collateral_and_redeem_reserve_collateral_v2,
+};
 use kamino_mocks::{
     kamino_lending::cpi::accounts::{
-        DepositFarmsAccounts, WithdrawObligationCollateralAndRedeemReserveCollateral,
+        DepositFarmsAccounts, RefreshReservesBatch,
+        WithdrawObligationCollateralAndRedeemReserveCollateral,
         WithdrawObligationCollateralAndRedeemReserveCollateralV2,
     },
     state::{MinimalObligation, MinimalReserve},
@@ -76,9 +79,14 @@ use marginfi_type_crate::{
 pub fn kamino_withdraw<'info>(
     ctx: Context<'_, '_, 'info, 'info, KaminoWithdraw<'info>>,
     amount: u64, // Collateral token amount
-    withdraw_all: Option<bool>,
+    flags: Option<u8>,
 ) -> MarginfiResult {
-    let withdraw_all = withdraw_all.unwrap_or(false);
+    const WITHDRAW_ALL_FLAG: u8 = 1 << 0;
+    const REFRESH_RESERVE_FLAG: u8 = 1 << 1;
+
+    let flags = flags.unwrap_or(0);
+    let withdraw_all = (flags & WITHDRAW_ALL_FLAG) != 0;
+    let refresh_reserve = (flags & REFRESH_RESERVE_FLAG) != 0;
 
     // Get initial values to verify successful withdrawal later
     let pre_transfer_vault_balance =
@@ -175,6 +183,10 @@ pub fn kamino_withdraw<'info>(
         bank.update_bank_cache(&group)?;
 
         marginfi_account.last_update = clock.unix_timestamp as u64;
+    }
+
+    if refresh_reserve {
+        ctx.accounts.cpi_refresh_reserve()?;
     }
 
     let expected_liquidity_amount = ctx
@@ -418,6 +430,17 @@ pub struct KaminoWithdraw<'info> {
 }
 
 impl<'info> KaminoWithdraw<'info> {
+    pub fn cpi_refresh_reserve(&self) -> MarginfiResult {
+        let accounts = RefreshReservesBatch {};
+        let program = self.kamino_program.to_account_info();
+        let cpi_ctx = CpiContext::new(program, accounts).with_remaining_accounts(vec![
+            self.integration_acc_1.to_account_info(),
+            self.lending_market.to_account_info(),
+        ]);
+        refresh_reserves_batch(cpi_ctx, true)?;
+        Ok(())
+    }
+
     pub fn cpi_kamino_withdraw(&self, collateral_amount: u64) -> MarginfiResult {
         let withdraw_accounts = WithdrawObligationCollateralAndRedeemReserveCollateral {
             collateral_token_program: self.collateral_token_program.to_account_info(),
