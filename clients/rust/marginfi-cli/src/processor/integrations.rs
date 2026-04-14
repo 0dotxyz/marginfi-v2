@@ -17,8 +17,9 @@ use {
     marginfi::state::{bank::BankVaultType, bank_config::BankConfigImpl},
     marginfi_type_crate::{
         pdas::{
-            derive_kamino_lending_market_authority, derive_kamino_user_state, FARMS_PROGRAM_ID,
-            KAMINO_PROGRAM_ID,
+            derive_drift_spot_market, derive_drift_spot_market_vault, derive_drift_state,
+            derive_drift_user, derive_drift_user_stats, derive_kamino_lending_market_authority,
+            derive_kamino_user_state, DRIFT_PROGRAM_ID, FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID,
         },
         types::{Bank, MarginfiAccount, OracleSetup},
     },
@@ -29,8 +30,6 @@ use {
     },
     std::collections::HashMap,
 };
-
-const DRIFT_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH");
 
 struct KaminoInitAccounts {
     lending_market_authority: Pubkey,
@@ -1498,30 +1497,17 @@ pub fn drift_add_bank(config: &Config, request: DriftBankCreateRequest) -> Resul
     let fee_vault = find_bank_vault_pda(&bank_pda, BankVaultType::Fee, &config.program_id).0;
 
     // Derive Drift spot market PDA
-    let (drift_spot_market, _) = Pubkey::find_program_address(
-        &[b"spot_market", &request.drift_market_index.to_le_bytes()],
-        &DRIFT_PROGRAM_ID,
-    );
+    let (drift_spot_market, _) = derive_drift_spot_market(request.drift_market_index);
     bank_config
         .to_bank_config(drift_spot_market)
         .validate()
         .context("invalid Drift bank config")?;
 
     // Derive Drift user PDA (sub_account_id = 0)
-    let (drift_user, _) = Pubkey::find_program_address(
-        &[
-            b"user",
-            liquidity_vault_authority.as_ref(),
-            &0u16.to_le_bytes(),
-        ],
-        &DRIFT_PROGRAM_ID,
-    );
+    let (drift_user, _) = derive_drift_user(&liquidity_vault_authority, 0);
 
     // Derive Drift user stats PDA
-    let (drift_user_stats, _) = Pubkey::find_program_address(
-        &[b"user_stats", liquidity_vault_authority.as_ref()],
-        &DRIFT_PROGRAM_ID,
-    );
+    let (drift_user_stats, _) = derive_drift_user_stats(&liquidity_vault_authority);
 
     let oracle_meta = AccountMeta::new_readonly(request.oracle, false);
     let spot_market_meta = AccountMeta::new_readonly(drift_spot_market, false);
@@ -1538,14 +1524,8 @@ pub fn drift_add_bank(config: &Config, request: DriftBankCreateRequest) -> Resul
         &request.bank_mint,
         &request.token_program,
     );
-    let (drift_state, _) = Pubkey::find_program_address(&[b"drift_state"], &DRIFT_PROGRAM_ID);
-    let (drift_spot_market_vault, _) = Pubkey::find_program_address(
-        &[
-            b"spot_market_vault",
-            &request.drift_market_index.to_le_bytes(),
-        ],
-        &DRIFT_PROGRAM_ID,
-    );
+    let (drift_state, _) = derive_drift_state();
+    let (drift_spot_market_vault, _) = derive_drift_spot_market_vault(request.drift_market_index);
 
     let add_bank_ixs = config
         .mfi_program

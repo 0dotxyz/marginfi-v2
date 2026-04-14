@@ -8,9 +8,11 @@ use fixed::types::I80F48;
 use juplend_mocks::state::Lending as JuplendLending;
 use kamino_mocks::kamino_lending::client as kamino;
 use kamino_mocks::state::{MinimalObligation, MinimalReserve};
-use marginfi::constants::DRIFT_PROGRAM_ID;
 use marginfi::state::bank::BankVaultType;
-use marginfi_type_crate::pdas::derive_kamino_lending_market_authority;
+use marginfi_type_crate::pdas::{
+    derive_drift_signer, derive_drift_spot_market_vault, derive_drift_state,
+    derive_kamino_lending_market_authority, DRIFT_PROGRAM_ID,
+};
 use marginfi_type_crate::types::OracleSetup;
 use marginfi_type_crate::types::{Bank, FeeState, MarginfiAccount, Order, OrderTrigger};
 use solana_program::{instruction::Instruction, sysvar};
@@ -34,22 +36,6 @@ async fn ctx_parts(ctx: &Rc<RefCell<ProgramTestContext>>) -> (BanksClient, Keypa
     };
     let blockhash = banks_client.get_latest_blockhash().await.unwrap();
     (banks_client, payer, blockhash)
-}
-
-fn derive_drift_state() -> Pubkey {
-    Pubkey::find_program_address(&[b"drift_state"], &DRIFT_PROGRAM_ID).0
-}
-
-fn derive_drift_signer() -> Pubkey {
-    Pubkey::find_program_address(&[b"drift_signer"], &DRIFT_PROGRAM_ID).0
-}
-
-fn derive_drift_spot_market_vault(market_index: u16) -> Pubkey {
-    Pubkey::find_program_address(
-        &[b"spot_market_vault", &market_index.to_le_bytes()],
-        &DRIFT_PROGRAM_ID,
-    )
-    .0
 }
 
 fn derive_juplend_liquidity() -> Pubkey {
@@ -1609,8 +1595,8 @@ impl MarginfiAccountFixture {
         let bank_state = bank.load().await;
         let spot_market: MinimalSpotMarket =
             load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
-        let drift_state = derive_drift_state();
-        let drift_spot_market_vault = derive_drift_spot_market_vault(spot_market.market_index);
+        let drift_state = derive_drift_state().0;
+        let drift_spot_market_vault = derive_drift_spot_market_vault(spot_market.market_index).0;
 
         Instruction {
             program_id: marginfi::ID,
@@ -1669,9 +1655,9 @@ impl MarginfiAccountFixture {
         let bank_state = bank.load().await;
         let spot_market: MinimalSpotMarket =
             load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
-        let drift_state = derive_drift_state();
-        let drift_spot_market_vault = derive_drift_spot_market_vault(spot_market.market_index);
-        let drift_signer = derive_drift_signer();
+        let drift_state = derive_drift_state().0;
+        let drift_spot_market_vault = derive_drift_spot_market_vault(spot_market.market_index).0;
+        let drift_signer = derive_drift_signer().0;
 
         let mut ix = Instruction {
             program_id: marginfi::ID,

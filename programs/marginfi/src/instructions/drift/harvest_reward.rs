@@ -1,17 +1,19 @@
 use crate::{
-    bank_signer, constants::DRIFT_PROGRAM_ID, state::bank::BankVaultType,
-    utils::is_drift_asset_tag, MarginfiError, MarginfiResult,
+    bank_signer, state::bank::BankVaultType, utils::is_drift_asset_tag, MarginfiError,
+    MarginfiResult,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::{
     token::accessor,
     token_interface::{transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked},
 };
-use drift_mocks::drift::cpi::accounts::Withdraw;
-use drift_mocks::drift::cpi::withdraw;
+use drift_mocks::drift::cpi::{accounts::Withdraw, withdraw};
 use drift_mocks::state::{MinimalSpotMarket, MinimalUser};
-use marginfi_type_crate::constants::{FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED};
-use marginfi_type_crate::types::{Bank, FeeState};
+use marginfi_type_crate::{
+    constants::{FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED},
+    pdas::DRIFT_PROGRAM_ID,
+    types::{Bank, FeeState},
+};
 
 /// Harvest rewards from admin deposits in Drift spot markets
 /// This instruction allows withdrawing from positions that were created by admin deposits

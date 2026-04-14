@@ -28,7 +28,11 @@ use marginfi::{
     },
     utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
 };
-use marginfi_type_crate::pdas::derive_kamino_lending_market_authority;
+use marginfi_type_crate::pdas::{
+    derive_drift_insurance_fund_vault, derive_drift_signer, derive_drift_spot_market,
+    derive_drift_spot_market_vault, derive_drift_state, derive_drift_user, derive_drift_user_stats,
+    derive_kamino_lending_market_authority,
+};
 use marginfi_type_crate::{
     constants::{MAX_ORACLE_KEYS, PYTH_PUSH_MIGRATED_DEPRECATED},
     types::{
@@ -1206,54 +1210,6 @@ impl TestFixture {
         .0
     }
 
-    fn derive_drift_state() -> Pubkey {
-        Pubkey::find_program_address(&[b"drift_state"], &drift_mocks::drift::ID).0
-    }
-
-    fn derive_drift_signer() -> Pubkey {
-        Pubkey::find_program_address(&[b"drift_signer"], &drift_mocks::drift::ID).0
-    }
-
-    fn derive_drift_spot_market(market_index: u16) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"spot_market", &market_index.to_le_bytes()],
-            &drift_mocks::drift::ID,
-        )
-        .0
-    }
-
-    fn derive_drift_spot_market_vault(market_index: u16) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"spot_market_vault", &market_index.to_le_bytes()],
-            &drift_mocks::drift::ID,
-        )
-        .0
-    }
-
-    fn derive_drift_insurance_fund_vault(market_index: u16) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"insurance_fund_vault", &market_index.to_le_bytes()],
-            &drift_mocks::drift::ID,
-        )
-        .0
-    }
-
-    fn derive_drift_user(authority: Pubkey, user_index: u16) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"user", authority.as_ref(), &user_index.to_le_bytes()],
-            &drift_mocks::drift::ID,
-        )
-        .0
-    }
-
-    fn derive_drift_user_stats(authority: Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"user_stats", authority.as_ref()],
-            &drift_mocks::drift::ID,
-        )
-        .0
-    }
-
     async fn process_ixs(
         ctx: Rc<RefCell<ProgramTestContext>>,
         ixs: &[Instruction],
@@ -1506,11 +1462,11 @@ impl TestFixture {
         });
         let test_f = TestFixture::new_with_t22_extension_inner(Some(settings), &[], true).await;
 
-        let drift_state = Self::derive_drift_state();
-        let drift_signer = Self::derive_drift_signer();
-        let spot_market = Self::derive_drift_spot_market(DRIFT_USDC_MARKET_INDEX);
-        let spot_market_vault = Self::derive_drift_spot_market_vault(DRIFT_USDC_MARKET_INDEX);
-        let insurance_fund_vault = Self::derive_drift_insurance_fund_vault(DRIFT_USDC_MARKET_INDEX);
+        let drift_state = derive_drift_state().0;
+        let drift_signer = derive_drift_signer().0;
+        let spot_market = derive_drift_spot_market(DRIFT_USDC_MARKET_INDEX).0;
+        let spot_market_vault = derive_drift_spot_market_vault(DRIFT_USDC_MARKET_INDEX).0;
+        let insurance_fund_vault = derive_drift_insurance_fund_vault(DRIFT_USDC_MARKET_INDEX).0;
 
         let init_drift_state_ix = Instruction {
             program_id: drift_mocks::drift::ID,
@@ -1587,8 +1543,8 @@ impl TestFixture {
 
         let liquidity_vault_authority =
             find_bank_vault_authority_pda(&bank_key, BankVaultType::Liquidity).0;
-        let drift_user = Self::derive_drift_user(liquidity_vault_authority, 0);
-        let drift_user_stats = Self::derive_drift_user_stats(liquidity_vault_authority);
+        let drift_user = derive_drift_user(&liquidity_vault_authority, 0).0;
+        let drift_user_stats = derive_drift_user_stats(&liquidity_vault_authority).0;
         create_system_account_if_missing(test_f.context.clone(), drift_user).await;
         create_system_account_if_missing(test_f.context.clone(), drift_user_stats).await;
 

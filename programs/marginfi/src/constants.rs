@@ -67,8 +67,6 @@ pub const JUP_KEY: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4
 pub const TITAN_KEY: Pubkey = pubkey!("T1TANpTeScyeqVzzgNViGDNrkQ6qHz9KrSBS4aNXvGT");
 pub const ASSOCIATED_TOKEN_KEY: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
-pub const DRIFT_PROGRAM_ID: Pubkey = pubkey!("dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH");
-
 /// Drift uses a fixed 9 decimal precision for all spot market scaled balances,
 /// regardless of the underlying token's decimals
 pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
