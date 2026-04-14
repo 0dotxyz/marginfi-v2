@@ -31,7 +31,8 @@ use marginfi::{
 use marginfi_type_crate::pdas::{
     derive_drift_insurance_fund_vault, derive_drift_signer, derive_drift_spot_market,
     derive_drift_spot_market_vault, derive_drift_state, derive_drift_user, derive_drift_user_stats,
-    derive_kamino_lending_market_authority,
+    derive_kamino_base_obligation, derive_kamino_lending_market_authority,
+    derive_kamino_user_metadata,
 };
 use marginfi_type_crate::{
     constants::{MAX_ORACLE_KEYS, PYTH_PUSH_MIGRATED_DEPRECATED},
@@ -1187,29 +1188,6 @@ impl TestFixture {
         self.context.borrow_mut().last_blockhash = blockhash;
     }
 
-    fn derive_kamino_user_metadata(owner: Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"user_meta", owner.as_ref()],
-            &kamino_mocks::kamino_lending::ID,
-        )
-        .0
-    }
-
-    fn derive_kamino_base_obligation(owner: Pubkey, lending_market: Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[
-                &[0u8],
-                &[0u8],
-                owner.as_ref(),
-                lending_market.as_ref(),
-                system_program::ID.as_ref(),
-                system_program::ID.as_ref(),
-            ],
-            &kamino_mocks::kamino_lending::ID,
-        )
-        .0
-    }
-
     async fn process_ixs(
         ctx: Rc<RefCell<ProgramTestContext>>,
         ixs: &[Instruction],
@@ -1348,7 +1326,7 @@ impl TestFixture {
         let liquidity_vault_authority =
             find_bank_vault_authority_pda(&bank_key, BankVaultType::Liquidity).0;
         let obligation =
-            Self::derive_kamino_base_obligation(liquidity_vault_authority, lending_market);
+            derive_kamino_base_obligation(&liquidity_vault_authority, &lending_market).0;
         create_system_account_if_missing(test_f.context.clone(), obligation).await;
 
         let bank_config = KaminoConfigCompact::new(
@@ -1406,7 +1384,7 @@ impl TestFixture {
             .unwrap();
 
         let init_source = reserve_mint.create_token_account_and_mint_to(1.0).await;
-        let user_metadata = Self::derive_kamino_user_metadata(liquidity_vault_authority);
+        let user_metadata = derive_kamino_user_metadata(&liquidity_vault_authority).0;
         create_system_account_if_missing(test_f.context.clone(), user_metadata).await;
 
         let init_ix = Instruction {
