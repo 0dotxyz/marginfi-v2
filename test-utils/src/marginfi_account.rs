@@ -11,7 +11,8 @@ use kamino_mocks::state::{MinimalObligation, MinimalReserve};
 use marginfi::state::bank::BankVaultType;
 use marginfi_type_crate::pdas::{
     derive_drift_signer, derive_drift_spot_market_vault, derive_drift_state,
-    derive_kamino_lending_market_authority, DRIFT_PROGRAM_ID,
+    derive_juplend_claim_account, derive_juplend_lending_admin, derive_juplend_liquidity,
+    derive_juplend_rate_model, derive_kamino_lending_market_authority, DRIFT_PROGRAM_ID,
 };
 use marginfi_type_crate::types::OracleSetup;
 use marginfi_type_crate::types::{Bank, FeeState, MarginfiAccount, Order, OrderTrigger};
@@ -36,30 +37,6 @@ async fn ctx_parts(ctx: &Rc<RefCell<ProgramTestContext>>) -> (BanksClient, Keypa
     };
     let blockhash = banks_client.get_latest_blockhash().await.unwrap();
     (banks_client, payer, blockhash)
-}
-
-fn derive_juplend_liquidity() -> Pubkey {
-    Pubkey::find_program_address(&[b"liquidity"], &juplend_mocks::liquidity::ID).0
-}
-
-fn derive_juplend_rate_model(mint: Pubkey) -> Pubkey {
-    Pubkey::find_program_address(
-        &[b"rate_model", mint.as_ref()],
-        &juplend_mocks::liquidity::ID,
-    )
-    .0
-}
-
-fn derive_juplend_lending_admin() -> Pubkey {
-    Pubkey::find_program_address(&[b"lending_admin"], &juplend_mocks::ID).0
-}
-
-fn derive_juplend_claim_account(user: Pubkey, mint: Pubkey) -> Pubkey {
-    Pubkey::find_program_address(
-        &[b"user_claim", user.as_ref(), mint.as_ref()],
-        &juplend_mocks::liquidity::ID,
-    )
-    .0
 }
 
 fn should_include_oracle_observation_meta(bank: &Bank) -> bool {
@@ -1728,14 +1705,14 @@ impl MarginfiAccountFixture {
         let lending: JuplendLending =
             load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
 
-        let liquidity = derive_juplend_liquidity();
-        let rate_model = derive_juplend_rate_model(lending.mint);
+        let liquidity = derive_juplend_liquidity().0;
+        let rate_model = derive_juplend_rate_model(&lending.mint).0;
         let vault = get_associated_token_address_with_program_id(
             &liquidity,
             &lending.mint,
             &bank.get_token_program(),
         );
-        let lending_admin = derive_juplend_lending_admin();
+        let lending_admin = derive_juplend_lending_admin().0;
 
         Instruction {
             program_id: marginfi::ID,
@@ -1799,18 +1776,19 @@ impl MarginfiAccountFixture {
         let lending: JuplendLending =
             load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
 
-        let liquidity = derive_juplend_liquidity();
-        let rate_model = derive_juplend_rate_model(lending.mint);
+        let liquidity = derive_juplend_liquidity().0;
+        let rate_model = derive_juplend_rate_model(&lending.mint).0;
         let vault = get_associated_token_address_with_program_id(
             &liquidity,
             &lending.mint,
             &bank.get_token_program(),
         );
-        let lending_admin = derive_juplend_lending_admin();
+        let lending_admin = derive_juplend_lending_admin().0;
         let claim_account = derive_juplend_claim_account(
-            bank.get_vault_authority(BankVaultType::Liquidity).0,
-            lending.mint,
-        );
+            &bank.get_vault_authority(BankVaultType::Liquidity).0,
+            &lending.mint,
+        )
+        .0;
 
         let mut ix = Instruction {
             program_id: marginfi::ID,

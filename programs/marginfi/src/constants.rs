@@ -14,13 +14,6 @@ use crate::MarginfiResult;
 /// Mocks program ID for third-party ID restrictions
 pub const MOCKS_PROGRAM_ID: Pubkey = pubkey!("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ");
 
-pub const DRIFT_USER_SEED: &str = "user";
-pub const DRIFT_USER_STATS_SEED: &str = "user_stats";
-
-pub const JUPLEND_F_TOKEN_VAULT_SEED: &str = "f_token_vault";
-
-pub const SOLEND_OBLIGATION_SEED: &str = "solend_obligation";
-
 /// Used for the health cache to track which version of the program generated it.
 /// * 0 = invalid
 /// * 1 = 0.1.3

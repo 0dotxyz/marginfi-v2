@@ -1,9 +1,6 @@
 use crate::{
-    bank_signer,
-    constants::{DRIFT_USER_SEED, DRIFT_USER_STATS_SEED},
-    state::bank::BankVaultType,
-    utils::is_drift_asset_tag,
-    MarginfiError, MarginfiResult,
+    bank_signer, state::bank::BankVaultType, utils::is_drift_asset_tag, MarginfiError,
+    MarginfiResult,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{
@@ -17,7 +14,9 @@ use drift_mocks::{
     state::MinimalSpotMarket,
 };
 use marginfi_type_crate::{
-    constants::LIQUIDITY_VAULT_AUTHORITY_SEED, pdas::DRIFT_PROGRAM_ID, types::Bank,
+    constants::{DRIFT_USER_SEED, DRIFT_USER_STATS_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED},
+    pdas::DRIFT_PROGRAM_ID,
+    types::Bank,
 };
 
 /// Initialize a Drift user and user stats for a marginfi account

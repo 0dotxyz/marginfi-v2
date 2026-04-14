@@ -1,7 +1,6 @@
 // Adds a Drift type bank to a group with sane defaults. Used to integrate with Drift
 // allowing users to interact with Drift spot markets through marginfi
 use crate::{
-    constants::{DRIFT_USER_SEED, DRIFT_USER_STATS_SEED},
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{
@@ -15,8 +14,9 @@ use anchor_spl::token_interface::*;
 use drift_mocks::{constants::DRIFT_PRECISION_EXP, state::MinimalSpotMarket};
 use marginfi_type_crate::{
     constants::{
-        FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, INSURANCE_VAULT_AUTHORITY_SEED,
-        INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+        DRIFT_USER_SEED, DRIFT_USER_STATS_SEED, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED,
+        INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
+        LIQUIDITY_VAULT_SEED,
     },
     pdas::DRIFT_PROGRAM_ID,
     types::{Bank, MarginfiGroup, OracleSetup},

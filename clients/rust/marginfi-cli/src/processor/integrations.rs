@@ -8,7 +8,7 @@ use {
             derive_juplend_cpi_accounts, derive_juplend_cpi_accounts_for_lending,
             find_bank_vault_authority_pda, find_bank_vault_pda, find_fee_state_pda,
             load_observation_account_metas, load_observation_account_metas_close_last, send_tx,
-            EXP_10_I80F48, JUPLEND_LENDING_PROGRAM_ID,
+            EXP_10_I80F48,
         },
     },
     anchor_client::anchor_lang::{InstructionData, ToAccountMetas},
@@ -18,11 +18,12 @@ use {
     marginfi_type_crate::{
         pdas::{
             derive_drift_spot_market, derive_drift_spot_market_vault, derive_drift_state,
-            derive_drift_user, derive_drift_user_stats, derive_kamino_base_obligation,
-            derive_kamino_lending_market_authority, derive_kamino_reserve_collateral_mint,
-            derive_kamino_reserve_collateral_supply, derive_kamino_reserve_liquidity_supply,
-            derive_kamino_user_metadata, derive_kamino_user_state, DRIFT_PROGRAM_ID,
-            FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID,
+            derive_drift_user, derive_drift_user_stats, derive_juplend_f_token_vault,
+            derive_kamino_base_obligation, derive_kamino_lending_market_authority,
+            derive_kamino_reserve_collateral_mint, derive_kamino_reserve_collateral_supply,
+            derive_kamino_reserve_liquidity_supply, derive_kamino_user_metadata,
+            derive_kamino_user_state, DRIFT_PROGRAM_ID, FARMS_PROGRAM_ID,
+            JUPLEND_LENDING_PROGRAM_ID, KAMINO_PROGRAM_ID,
         },
         types::{Bank, MarginfiAccount, OracleSetup},
     },
@@ -1627,9 +1628,7 @@ pub fn juplend_add_bank(config: &Config, request: JuplendBankCreateRequest) -> R
         find_bank_vault_authority_pda(&bank_pda, BankVaultType::Fee, &config.program_id).0;
     let fee_vault = find_bank_vault_pda(&bank_pda, BankVaultType::Fee, &config.program_id).0;
 
-    // JupLend fToken vault PDA
-    let (f_token_vault, _) =
-        Pubkey::find_program_address(&[b"f_token_vault", bank_pda.as_ref()], &config.program_id);
+    let (f_token_vault, _) = derive_juplend_f_token_vault(&config.program_id, &bank_pda);
 
     let oracle_meta = AccountMeta::new_readonly(request.oracle, false);
     let lending_meta = AccountMeta::new_readonly(request.juplend_lending, false);

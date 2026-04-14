@@ -9,7 +9,11 @@ use {
             EMISSIONS_TOKEN_ACCOUNT_SEED, EXECUTE_ORDER_SEED, FEE_STATE_SEED,
             LIQUIDATION_RECORD_SEED, ORDER_SEED,
         },
-        pdas::KAMINO_PROGRAM_ID,
+        pdas::{
+            derive_juplend_claim_account, derive_juplend_lending_admin, derive_juplend_liquidity,
+            derive_juplend_liquidity_vault, derive_juplend_rate_model,
+            derive_juplend_rewards_rate_model, JUPLEND_LIQUIDITY_PROGRAM_ID, KAMINO_PROGRAM_ID,
+        },
         types::{Bank, MarginfiAccount, OracleSetup},
     },
     solana_client::rpc_client::RpcClient,
@@ -221,79 +225,6 @@ pub fn find_liquidation_record_pda(marginfi_account: &Pubkey, program_id: &Pubke
 // JupLend PDA derivation
 // ---------------------------------------------------------------------------
 
-pub const JUPLEND_LENDING_PROGRAM_ID: Pubkey =
-    solana_sdk::pubkey!("jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9");
-pub const JUPLEND_LIQUIDITY_PROGRAM_ID: Pubkey =
-    solana_sdk::pubkey!("jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC");
-pub const JUPLEND_REWARDS_PROGRAM_ID: Pubkey =
-    solana_sdk::pubkey!("jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar");
-
-/// `["lending_admin"]` on JupLend Lending program
-pub fn find_juplend_lending_admin() -> (Pubkey, u8) {
-    Pubkey::find_program_address(&[b"lending_admin"], &JUPLEND_LENDING_PROGRAM_ID)
-}
-
-/// `["f_token_mint", mint]` on JupLend Lending program
-pub fn find_juplend_f_token_mint(mint: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
-        &[b"f_token_mint", mint.as_ref()],
-        &JUPLEND_LENDING_PROGRAM_ID,
-    )
-}
-
-/// `["lending", mint, f_token_mint]` on JupLend Lending program
-pub fn find_juplend_lending(mint: &Pubkey, f_token_mint: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
-        &[b"lending", mint.as_ref(), f_token_mint.as_ref()],
-        &JUPLEND_LENDING_PROGRAM_ID,
-    )
-}
-
-pub fn derive_juplend_lending_from_mint(mint: &Pubkey) -> (Pubkey, Pubkey) {
-    let (f_token_mint, _) = find_juplend_f_token_mint(mint);
-    let (lending, _) = find_juplend_lending(mint, &f_token_mint);
-    (lending, f_token_mint)
-}
-
-/// `["rate_model", mint]` on JupLend Liquidity program
-pub fn find_juplend_rate_model(mint: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
-        &[b"rate_model", mint.as_ref()],
-        &JUPLEND_LIQUIDITY_PROGRAM_ID,
-    )
-}
-
-/// `["liquidity"]` on JupLend Liquidity program
-pub fn find_juplend_liquidity() -> (Pubkey, u8) {
-    Pubkey::find_program_address(&[b"liquidity"], &JUPLEND_LIQUIDITY_PROGRAM_ID)
-}
-
-/// ATA of the liquidity PDA for the given mint
-pub fn find_juplend_vault(mint: &Pubkey, token_program: &Pubkey) -> Pubkey {
-    let (liquidity, _) = find_juplend_liquidity();
-    anchor_spl::associated_token::get_associated_token_address_with_program_id(
-        &liquidity,
-        mint,
-        token_program,
-    )
-}
-
-/// `["user_claim", user, mint]` on JupLend Liquidity program
-pub fn find_juplend_claim_account(user: &Pubkey, mint: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
-        &[b"user_claim", user.as_ref(), mint.as_ref()],
-        &JUPLEND_LIQUIDITY_PROGRAM_ID,
-    )
-}
-
-/// `["lending_rewards_rate_model", mint]` on JupLend Rewards program
-pub fn find_juplend_rewards_rate_model(mint: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
-        &[b"lending_rewards_rate_model", mint.as_ref()],
-        &JUPLEND_REWARDS_PROGRAM_ID,
-    )
-}
-
 /// Load the JupLend Lending account from `integration_acc_1` on a bank,
 /// and extract the accounts needed for CPI calls.
 pub struct JuplendCpiAccounts {
@@ -316,12 +247,12 @@ pub fn derive_juplend_cpi_accounts_for_lending(
     token_program: &Pubkey,
     liquidity_vault_authority: &Pubkey,
 ) -> JuplendCpiAccounts {
-    let (lending_admin, _) = find_juplend_lending_admin();
-    let (rate_model, _) = find_juplend_rate_model(mint);
-    let (liquidity, _) = find_juplend_liquidity();
-    let vault = find_juplend_vault(mint, token_program);
-    let (claim_account, _) = find_juplend_claim_account(liquidity_vault_authority, mint);
-    let (rewards_rate_model, _) = find_juplend_rewards_rate_model(mint);
+    let (lending_admin, _) = derive_juplend_lending_admin();
+    let (rate_model, _) = derive_juplend_rate_model(mint);
+    let (liquidity, _) = derive_juplend_liquidity();
+    let vault = derive_juplend_liquidity_vault(mint, token_program);
+    let (claim_account, _) = derive_juplend_claim_account(liquidity_vault_authority, mint);
+    let (rewards_rate_model, _) = derive_juplend_rewards_rate_model(mint);
 
     JuplendCpiAccounts {
         f_token_mint: lending.f_token_mint,
