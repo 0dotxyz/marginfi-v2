@@ -245,6 +245,9 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     );
     assert.ok(userBalanceAfter, "missing active bank balance for user");
 
+    // Deposit into a Juplend bank sets has_juplend on the marginfi account
+    assert.equal(userAccountAfter.indexerFlags.hasJuplend, 1);
+
     assertI80F48Equal(
       userBalanceAfter.assetShares,
       EXPECTED_SHARES_FOR_50_USDC,

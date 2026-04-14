@@ -9,8 +9,8 @@ use crate::{
     events::HealthPulseEvent,
     state::marginfi_account::{
         check_account_bankrupt, check_account_init_health,
-        check_pre_liquidation_condition_and_get_account_health, HealthPriceMode,
-        MarginfiAccountImpl,
+        check_pre_liquidation_condition_and_get_account_health, compute_risk_tier_snapshot,
+        HealthPriceMode, MarginfiAccountImpl,
     },
     MarginfiError, MarginfiResult,
 };
@@ -106,7 +106,6 @@ pub fn lending_account_pulse_health<'info>(
         }
     }
 
-    // Update indexer flags
     let equity_assets: I80F48 = health_cache.asset_value_equity.into();
     let equity_liabs: I80F48 = health_cache.liability_value_equity.into();
     let elapsed = clock
@@ -116,18 +115,15 @@ pub fn lending_account_pulse_health<'info>(
     marginfi_account.indexer_flags.was_liquidatable = is_liquidatable as u8;
     marginfi_account.indexer_flags.was_underwater = (equity_assets < equity_liabs) as u8;
     marginfi_account.indexer_flags.was_active_30d = (elapsed <= 30 * SECONDS_PER_DAY) as u8;
-    marginfi_account.indexer_flags.was_active_90d = (elapsed <= 90 * SECONDS_PER_DAY) as u8;
-    marginfi_account.indexer_flags.was_active_1y = (elapsed <= 365 * SECONDS_PER_DAY) as u8;
+    marginfi_account.indexer_flags.was_active_60d = (elapsed <= 60 * SECONDS_PER_DAY) as u8;
     marginfi_account.indexer_flags.has_trivial_balance =
         (equity_assets < TRIVIAL_BALANCE_THRESHOLD) as u8;
 
-    // Sync balance-derived flags first so is_empty is fresh
     marginfi_account.sync_indexer_flags();
 
-    let is_empty = marginfi_account.indexer_flags.is_empty == 1;
-    marginfi_account.indexer_flags.pending_closure =
-        (is_empty && elapsed >= 30 * SECONDS_PER_DAY) as u8;
-    marginfi_account.indexer_flags.closeable = (is_empty && elapsed >= 60 * SECONDS_PER_DAY) as u8;
+    if let Ok(snapshot) = compute_risk_tier_snapshot(&marginfi_account, ctx.remaining_accounts) {
+        marginfi_account.indexer_flags.has_isolated = snapshot.has_isolated_liability() as u8;
+    }
 
     marginfi_account.health_cache = health_cache;
 

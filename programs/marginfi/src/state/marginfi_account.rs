@@ -129,6 +129,10 @@ impl MarginfiAccountImpl for MarginfiAccount {
         self.last_update = current_timestamp;
         self.migrated_to = Pubkey::default();
         self.indexer_flags.is_empty = 1;
+        // Seed activity flags so freshly-created accounts aren't immediately eligible for the
+        // permissionless close path before the first pulse.
+        self.indexer_flags.was_active_30d = 1;
+        self.indexer_flags.was_active_60d = 1;
     }
 
     fn set_flag(&mut self, flag: u64, msg: bool) {
@@ -1052,13 +1056,30 @@ pub fn check_account_bankrupt<'info>(
     Ok(())
 }
 
-/// Check the isolated-risk-tier constraint (internal helper).
-fn check_account_risk_tiers<'info>(
+pub struct RiskTierSnapshot {
+    pub isolated_liability_count: u32,
+    pub total_liability_count: u32,
+}
+
+impl RiskTierSnapshot {
+    pub fn invariant_ok(&self) -> bool {
+        self.isolated_liability_count == 0 || self.total_liability_count == 1
+    }
+
+    pub fn has_isolated_liability(&self) -> bool {
+        self.isolated_liability_count > 0
+    }
+}
+
+/// Walks active balances against their loaded banks in `remaining_ais` and tallies liabilities
+/// and isolated-tier liabilities. Used by `check_account_risk_tiers` to enforce the
+/// isolated-liability invariant and by `pulse_health` to refresh the `has_isolated` indexer flag.
+pub fn compute_risk_tier_snapshot<'info>(
     marginfi_account: &MarginfiAccount,
     remaining_ais: &'info [AccountInfo<'info>],
-) -> MarginfiResult {
-    let mut isolated_risk_count = 0;
-    let mut total_liability_balances = 0;
+) -> MarginfiResult<RiskTierSnapshot> {
+    let mut isolated_liability_count = 0u32;
+    let mut total_liability_count = 0u32;
 
     let mut account_index = 0usize;
     for balance in marginfi_account
@@ -1067,7 +1088,6 @@ fn check_account_risk_tiers<'info>(
         .iter()
         .filter(|b| b.is_active())
     {
-        // Load bank to read risk tier and remaining account count
         let bank_ai = remaining_ais
             .get(account_index)
             .ok_or(MarginfiError::InvalidBankAccount)?;
@@ -1080,26 +1100,34 @@ fn check_account_risk_tiers<'info>(
             MarginfiError::InvalidBankAccount
         );
 
-        let num_accounts = get_remaining_accounts_per_bank(&bank)?;
-
         if !balance.is_empty(BalanceSide::Liabilities) {
-            total_liability_balances += 1;
+            total_liability_count += 1;
             if bank.config.risk_tier == RiskTier::Isolated {
-                isolated_risk_count += 1;
-                if isolated_risk_count > 1 {
+                isolated_liability_count += 1;
+                if isolated_liability_count > 1 {
                     break;
                 }
             }
         }
 
-        account_index += num_accounts;
+        account_index += get_remaining_accounts_per_bank(&bank)?;
     }
 
+    Ok(RiskTierSnapshot {
+        isolated_liability_count,
+        total_liability_count,
+    })
+}
+
+fn check_account_risk_tiers<'info>(
+    marginfi_account: &MarginfiAccount,
+    remaining_ais: &'info [AccountInfo<'info>],
+) -> MarginfiResult {
+    let snapshot = compute_risk_tier_snapshot(marginfi_account, remaining_ais)?;
     check!(
-        isolated_risk_count == 0 || total_liability_balances == 1,
+        snapshot.invariant_ok(),
         MarginfiError::IsolatedAccountIllegalState
     );
-
     Ok(())
 }
 

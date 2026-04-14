@@ -513,6 +513,13 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     assertWithdrawDeltas(before, after, withdrawAmount);
     assertBNGreaterThan(after.userAssetShares, 0);
     assert.equal(after.hasActiveBalance, true);
+
+    // has_juplend persists across a partial withdraw
+    const user0AccAfterPartial =
+      await bankrunProgram.account.marginfiAccount.fetch(
+        activeMarginfiAccountPk,
+      );
+    assert.equal(user0AccAfterPartial.indexerFlags.hasJuplend, 1);
   });
 
   it("(user 1) clean deposit + withdraw_all - happy path", async () => {
@@ -528,6 +535,13 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     await executeWithdraw(new BN(0), true);
     const afterWithdrawAll = await fetchSnapshot();
     assertWithdrawAllDeltas(beforeWithdrawAll, afterWithdrawAll);
+
+    // has_juplend clears once the last Juplend position is withdrawn
+    const user1AccAfterAll =
+      await bankrunProgram.account.marginfiAccount.fetch(
+        activeMarginfiAccountPk,
+      );
+    assert.equal(user1AccAfterAll.indexerFlags.hasJuplend, 0);
   });
 
   it("(user 1) deposit + withdraw_all after one hour of interest", async () => {

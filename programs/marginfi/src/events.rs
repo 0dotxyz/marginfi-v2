@@ -220,7 +220,7 @@ pub struct SetKeeperCloseFlagsEvent {
 #[event]
 pub struct AdminCloseAccountEvent {
     pub header: AccountEventHeader,
-    pub rent_destination: Pubkey,
+    pub global_fee_wallet: Pubkey,
 }
 
 #[event]

@@ -26,7 +26,7 @@ use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, TOKENLESS_REPAYMENTS_ALLOWED},
     types::{
-        Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+        Bank, HealthCache, MarginfiAccount, MarginfiGroup, RiskTier, ACCOUNT_DISABLED,
         ACCOUNT_IN_RECEIVERSHIP,
     },
 };
@@ -193,6 +193,10 @@ pub fn lending_account_borrow<'info>(
     health_cache.timestamp = clock.unix_timestamp;
     marginfi_account.lending_account.sort_balances();
     marginfi_account.sync_indexer_flags();
+
+    if ctx.accounts.bank.load()?.config.risk_tier == RiskTier::Isolated {
+        marginfi_account.indexer_flags.has_isolated = 1;
+    }
 
     // Check account health, if below threshold fail transaction
     // Assuming `ctx.remaining_accounts` holds only oracle accounts

@@ -472,8 +472,8 @@ pub mod marginfi {
         marginfi_account::close_account(ctx)
     }
 
-    /// (admin) Close an account flagged as closeable (empty + inactive >60 days).
-    /// Rent is returned to the specified destination.
+    /// (permissionless) Close an account flagged as closeable (empty + inactive >60 days).
+    /// Rent is returned to the group's global fee wallet.
     pub fn admin_close_account(ctx: Context<AdminCloseAccount>) -> MarginfiResult {
         marginfi_account::admin_close_account(ctx)
     }

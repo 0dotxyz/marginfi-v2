@@ -8,16 +8,17 @@ use crate::{
     MarginfiError, MarginfiResult,
 };
 
-/// Admin-only instruction to close accounts flagged as `closeable` by pulse_health.
-/// The account must have no balances and no blocking flags (disabled, flashloan, receivership).
-/// Rent is returned to `rent_destination`.
+/// Permissionless instruction to close accounts that are empty and have been inactive for >60
+/// days (per the last pulse_health snapshot). The account must also have no blocking flags
+/// (disabled, flashloan, receivership). Rent is returned to the group's global fee wallet.
 pub fn admin_close_account(ctx: Context<AdminCloseAccount>) -> MarginfiResult {
     let marginfi_account = ctx.accounts.marginfi_account.load()?;
 
     check!(
-        marginfi_account.indexer_flags.closeable == 1,
+        marginfi_account.indexer_flags.is_empty == 1
+            && marginfi_account.indexer_flags.was_active_60d == 0,
         MarginfiError::IllegalAction,
-        "Account is not marked as closeable"
+        "Account is not eligible for close (not empty or active within 60d)"
     );
 
     check!(
@@ -28,12 +29,12 @@ pub fn admin_close_account(ctx: Context<AdminCloseAccount>) -> MarginfiResult {
 
     emit!(AdminCloseAccountEvent {
         header: AccountEventHeader {
-            signer: Some(ctx.accounts.admin.key()),
+            signer: None,
             marginfi_account: ctx.accounts.marginfi_account.key(),
             marginfi_account_authority: marginfi_account.authority,
             marginfi_group: ctx.accounts.group.key(),
         },
-        rent_destination: ctx.accounts.rent_destination.key(),
+        global_fee_wallet: ctx.accounts.global_fee_wallet.key(),
     });
 
     Ok(())
@@ -46,16 +47,15 @@ pub struct AdminCloseAccount<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
-        close = rent_destination
+        close = global_fee_wallet
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
+    /// CHECK: Validated against group fee state cache
     #[account(
-        constraint = group.load()?.admin == admin.key() @ MarginfiError::Unauthorized
+        mut,
+        constraint = global_fee_wallet.key() == group.load()?.fee_state_cache.global_fee_wallet
+            @ MarginfiError::InvalidGlobalFeeWallet
     )]
-    pub admin: Signer<'info>,
-
-    /// CHECK: Receives the closed account's rent. Can be any account.
-    #[account(mut)]
-    pub rent_destination: UncheckedAccount<'info>,
+    pub global_fee_wallet: UncheckedAccount<'info>,
 }

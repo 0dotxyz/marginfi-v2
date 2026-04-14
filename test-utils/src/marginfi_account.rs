@@ -2211,7 +2211,7 @@ impl MarginfiAccountFixture {
 
     pub async fn try_admin_close_account(
         &self,
-        rent_destination: Pubkey,
+        global_fee_wallet: Pubkey,
     ) -> std::result::Result<(), BanksClientError> {
         let marginfi_account = self.load().await;
 
@@ -2220,8 +2220,7 @@ impl MarginfiAccountFixture {
             accounts: marginfi::accounts::AdminCloseAccount {
                 group: marginfi_account.group,
                 marginfi_account: self.key,
-                admin: self.ctx.borrow().payer.pubkey(),
-                rent_destination,
+                global_fee_wallet,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::AdminCloseAccount {}.data(),

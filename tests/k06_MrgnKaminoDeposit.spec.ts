@@ -193,6 +193,7 @@ describe("k06: Kamino Deposit Tests", () => {
       (b: BalanceRaw) => b.bankPk.equals(bank) && b.active === 1,
     );
     assert.equal(balanceAfter.active, 1);
+    assert.equal(userAccAfter.indexerFlags.hasKamino, 1);
     assertI80F48Approx(
       balanceAfter.assetShares,
       // Note: Here collateral and liquidity are 1:1, so we can use amount, but this is actually
