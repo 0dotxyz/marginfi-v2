@@ -144,7 +144,7 @@ pub struct IndexerFlags {
     /// 1 if account was active within the last 60 days (at last pulse).
     /// Combined with `is_empty`, indicates an account eligible for permissionless close.
     pub was_active_60d: u8,
-    /// 1 if asset_value_equity < $1 (at last pulse)
+    /// 1 if net equity value was greater than $0 and less than $1 at last pulse
     pub has_trivial_balance: u8,
     pub _pad: [u8; 10],
 }

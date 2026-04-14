@@ -18,6 +18,14 @@ use crate::{
 const SECONDS_PER_DAY: i64 = 86_400;
 const TRIVIAL_BALANCE_THRESHOLD: I80F48 = I80F48::ONE;
 
+/// Marks accounts whose last pulse saw net equity greater than $0 and less than $1. This is
+/// intended for indexer pruning of dust accounts, so underwater accounts are excluded even if
+/// their gross assets are below the trivial threshold.
+fn has_trivial_balance(equity_assets: I80F48, equity_liabs: I80F48) -> bool {
+    let net_equity = equity_assets - equity_liabs;
+    net_equity > I80F48::ZERO && net_equity < TRIVIAL_BALANCE_THRESHOLD
+}
+
 pub fn lending_account_pulse_health<'info>(
     ctx: Context<'_, '_, 'info, 'info, PulseHealth<'info>>,
 ) -> MarginfiResult {
@@ -117,7 +125,7 @@ pub fn lending_account_pulse_health<'info>(
     marginfi_account.indexer_flags.was_active_30d = (elapsed <= 30 * SECONDS_PER_DAY) as u8;
     marginfi_account.indexer_flags.was_active_60d = (elapsed <= 60 * SECONDS_PER_DAY) as u8;
     marginfi_account.indexer_flags.has_trivial_balance =
-        (equity_assets < TRIVIAL_BALANCE_THRESHOLD) as u8;
+        has_trivial_balance(equity_assets, equity_liabs) as u8;
 
     marginfi_account.sync_indexer_flags();
 
@@ -139,4 +147,23 @@ pub fn lending_account_pulse_health<'info>(
 pub struct PulseHealth<'info> {
     #[account(mut)]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trivial_balance_uses_strictly_positive_net_equity() {
+        assert!(has_trivial_balance(I80F48::from_num(0.5), I80F48::ZERO));
+        assert!(!has_trivial_balance(I80F48::ZERO, I80F48::ZERO));
+        assert!(!has_trivial_balance(
+            I80F48::from_num(0.5),
+            I80F48::from_num(2)
+        ));
+        assert!(!has_trivial_balance(
+            I80F48::from_num(5),
+            I80F48::from_num(2)
+        ));
+    }
 }
