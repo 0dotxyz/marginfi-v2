@@ -10,6 +10,7 @@ use kamino_mocks::kamino_lending::client as kamino;
 use kamino_mocks::state::{MinimalObligation, MinimalReserve};
 use marginfi::constants::DRIFT_PROGRAM_ID;
 use marginfi::state::bank::BankVaultType;
+use marginfi_type_crate::pdas::derive_kamino_lending_market_authority;
 use marginfi_type_crate::types::OracleSetup;
 use marginfi_type_crate::types::{Bank, FeeState, MarginfiAccount, Order, OrderTrigger};
 use solana_program::{instruction::Instruction, sysvar};
@@ -33,14 +34,6 @@ async fn ctx_parts(ctx: &Rc<RefCell<ProgramTestContext>>) -> (BanksClient, Keypa
     };
     let blockhash = banks_client.get_latest_blockhash().await.unwrap();
     (banks_client, payer, blockhash)
-}
-
-fn derive_kamino_lending_market_authority(lending_market: Pubkey) -> Pubkey {
-    Pubkey::find_program_address(
-        &[b"lma", lending_market.as_ref()],
-        &kamino_mocks::kamino_lending::ID,
-    )
-    .0
 }
 
 fn derive_drift_state() -> Pubkey {
@@ -1477,8 +1470,8 @@ impl MarginfiAccountFixture {
         let bank_state = bank.load().await;
         let reserve: MinimalReserve =
             load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
-        let lending_market_authority =
-            derive_kamino_lending_market_authority(reserve.lending_market);
+        let (lending_market_authority, _) =
+            derive_kamino_lending_market_authority(&reserve.lending_market);
 
         Instruction {
             program_id: marginfi::ID,
@@ -1544,8 +1537,8 @@ impl MarginfiAccountFixture {
         let bank_state = bank.load().await;
         let reserve: MinimalReserve =
             load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
-        let lending_market_authority =
-            derive_kamino_lending_market_authority(reserve.lending_market);
+        let (lending_market_authority, _) =
+            derive_kamino_lending_market_authority(&reserve.lending_market);
         let flags = if withdraw_all.unwrap_or(false) {
             Some(0b0000_0001u8)
         } else {

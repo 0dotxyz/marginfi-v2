@@ -7,6 +7,9 @@ pub mod macros;
 pub mod types;
 
 #[cfg(feature = "anchor")]
+pub mod pdas;
+
+#[cfg(feature = "anchor")]
 pub use id_crate::ID;
 
 /// Just a sample function demonstrating usage.

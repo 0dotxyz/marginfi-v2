@@ -28,6 +28,7 @@ use marginfi::{
     },
     utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
 };
+use marginfi_type_crate::pdas::derive_kamino_lending_market_authority;
 use marginfi_type_crate::{
     constants::{MAX_ORACLE_KEYS, PYTH_PUSH_MIGRATED_DEPRECATED},
     types::{
@@ -1182,13 +1183,6 @@ impl TestFixture {
         self.context.borrow_mut().last_blockhash = blockhash;
     }
 
-    fn derive_kamino_lending_market_authority(lending_market: Pubkey) -> (Pubkey, u8) {
-        Pubkey::find_program_address(
-            &[b"lma", lending_market.as_ref()],
-            &kamino_mocks::kamino_lending::ID,
-        )
-    }
-
     fn derive_kamino_user_metadata(owner: Pubkey) -> Pubkey {
         Pubkey::find_program_address(
             &[b"user_meta", owner.as_ref()],
@@ -1317,7 +1311,7 @@ impl TestFixture {
 
         let lending_market = reserve.lending_market;
         let (lending_market_authority, lending_market_authority_bump) =
-            Self::derive_kamino_lending_market_authority(lending_market);
+            derive_kamino_lending_market_authority(&lending_market);
         let reserve_liquidity_supply = reserve.supply_vault;
         let reserve_collateral_mint = reserve.collateral_mint_pubkey;
         let reserve_collateral_supply = reserve.collateral_supply_vault;

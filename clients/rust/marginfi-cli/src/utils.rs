@@ -9,6 +9,7 @@ use {
             EMISSIONS_TOKEN_ACCOUNT_SEED, EXECUTE_ORDER_SEED, FEE_STATE_SEED,
             LIQUIDATION_RECORD_SEED, ORDER_SEED,
         },
+        pdas::KAMINO_PROGRAM_ID,
         types::{Bank, MarginfiAccount, OracleSetup},
     },
     solana_client::rpc_client::RpcClient,
@@ -586,9 +587,6 @@ pub fn ui_to_native(ui_amount: f64, decimals: u8) -> u64 {
 // ---------------------------------------------------------------------------
 // Kamino refresh instruction builders
 // ---------------------------------------------------------------------------
-
-const KAMINO_PROGRAM_ID: Pubkey =
-    solana_sdk::pubkey!("KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
 
 /// Build a standalone `refreshReserve` instruction for the Kamino program.
 ///

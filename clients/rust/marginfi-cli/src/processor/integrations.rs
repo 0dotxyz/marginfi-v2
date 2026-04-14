@@ -15,7 +15,13 @@ use {
     anyhow::{Context, Result},
     fixed::types::I80F48,
     marginfi::state::{bank::BankVaultType, bank_config::BankConfigImpl},
-    marginfi_type_crate::types::{Bank, MarginfiAccount, OracleSetup},
+    marginfi_type_crate::{
+        pdas::{
+            derive_kamino_lending_market_authority, derive_kamino_user_state, FARMS_PROGRAM_ID,
+            KAMINO_PROGRAM_ID,
+        },
+        types::{Bank, MarginfiAccount, OracleSetup},
+    },
     solana_sdk::{
         instruction::{AccountMeta, Instruction},
         pubkey::Pubkey,
@@ -24,11 +30,6 @@ use {
     std::collections::HashMap,
 };
 
-// Known program IDs for integrations
-const KAMINO_PROGRAM_ID: Pubkey =
-    solana_sdk::pubkey!("KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
-const FARMS_PROGRAM_ID: Pubkey =
-    solana_sdk::pubkey!("FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr");
 const DRIFT_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH");
 
 struct KaminoInitAccounts {
@@ -140,8 +141,7 @@ fn derive_kamino_init_accounts(
     }
     let reserve_state: &MinimalReserve = bytemuck::from_bytes(&reserve_data[8..8 + reserve_size]);
 
-    let (lending_market_authority, _) =
-        Pubkey::find_program_address(&[b"lma", lending_market.as_ref()], &KAMINO_PROGRAM_ID);
+    let (lending_market_authority, _) = derive_kamino_lending_market_authority(&lending_market);
     let (reserve_liquidity_supply, _) = Pubkey::find_program_address(
         &[b"reserve_liq_supply", reserve.as_ref()],
         &KAMINO_PROGRAM_ID,
@@ -161,13 +161,8 @@ fn derive_kamino_init_accounts(
 
     let reserve_farm_state = (reserve_state.farm_collateral != Pubkey::default())
         .then_some(reserve_state.farm_collateral);
-    let obligation_farm_user_state = reserve_farm_state.map(|farm_state| {
-        Pubkey::find_program_address(
-            &[b"user", farm_state.as_ref(), obligation.as_ref()],
-            &FARMS_PROGRAM_ID,
-        )
-        .0
-    });
+    let obligation_farm_user_state =
+        reserve_farm_state.map(|farm_state| derive_kamino_user_state(&farm_state, &obligation).0);
 
     Ok(KaminoInitAccounts {
         lending_market_authority,
