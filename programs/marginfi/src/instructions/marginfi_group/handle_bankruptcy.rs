@@ -225,9 +225,10 @@ pub fn lending_pool_handle_bankruptcy<'info>(
 #[derive(Accounts)]
 pub struct LendingPoolHandleBankruptcy<'info> {
     #[account(
-        constraint = (
-            !group.load()?.is_protocol_paused()
-        ) @ MarginfiError::ProtocolPaused
+        constraint = {
+            let g = group.load()?;
+            !g.is_protocol_paused() || signer.key() == g.admin || signer.key() == g.risk_admin
+        } @ MarginfiError::ProtocolPaused
     )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 

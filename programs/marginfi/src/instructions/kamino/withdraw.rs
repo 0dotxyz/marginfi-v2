@@ -283,6 +283,7 @@ pub struct KaminoWithdraw<'info> {
     #[account(
         constraint = (
             !group.load()?.is_protocol_paused()
+            || marginfi_account.load()?.get_flag(ACCOUNT_IN_DELEVERAGE)
         ) @ MarginfiError::ProtocolPaused
     )]
     pub group: AccountLoader<'info, MarginfiGroup>,
