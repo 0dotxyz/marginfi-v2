@@ -182,6 +182,10 @@ pub const ASSET_TAG_SOLEND: u8 = 5;
 /// assets (`ASSET_TAG_DEFAULT`).
 pub const ASSET_TAG_JUPLEND: u8 = 6;
 
+/// Drift uses a fixed 9 decimal precision for all spot market scaled balances,
+/// regardless of the underlying token's decimals
+pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
+
 /// Maximum number of integration positions (Kamino + Drift + Solend + JupLend) allowed per account. Hardcoded
 /// limit to prevent accounts from becoming unliquidatable due to CU/heap memory issues in
 /// liquidation. These integrations require 3 accounts per position for health checks (bank + oracle

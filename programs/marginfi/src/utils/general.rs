@@ -2,7 +2,7 @@ use crate::{
     bank_authority_seed, bank_seed, check,
     events::RateLimitFlowEvent,
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankVaultType,
         marginfi_account::{calc_value, get_remaining_accounts_per_bank},
         price::{
             OraclePriceFeedAdapter, OraclePriceType, OraclePriceWithConfidence, PriceAdapter,
