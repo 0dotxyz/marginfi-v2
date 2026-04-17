@@ -4,10 +4,7 @@ use crate::{
     state::{
         bank::BankVaultType,
         marginfi_account::{calc_value, get_remaining_accounts_per_bank},
-        price::{
-            OraclePriceFeedAdapter, OraclePriceType, OraclePriceWithConfidence, PriceAdapter,
-            PriceBias,
-        },
+        price::{OraclePriceFeedAdapter, OraclePriceWithConfidence, PriceAdapter, PriceBias},
         rate_limiter::{
             should_skip_rate_limit, BankRateLimiterImpl, GroupRateLimiterImpl, RateLimitWindowImpl,
         },
@@ -33,7 +30,9 @@ use marginfi_type_crate::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
         ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
     },
-    types::{Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, WrappedI80F48},
+    types::{
+        Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, OraclePriceType, WrappedI80F48,
+    },
 };
 
 pub fn find_bank_vault_pda(bank_pk: &Pubkey, vault_type: BankVaultType) -> (Pubkey, u8) {

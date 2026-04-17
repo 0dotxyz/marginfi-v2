@@ -7,7 +7,7 @@ use crate::state::marginfi_account::{
     is_signer_authorized, HealthPriceMode, LendingAccountImpl, MarginfiAccountImpl,
 };
 use crate::state::marginfi_group::MarginfiGroupImpl;
-use crate::state::price::{OraclePriceFeedAdapter, OraclePriceType, PriceAdapter, PriceBias};
+use crate::state::price::{OraclePriceFeedAdapter, PriceAdapter, PriceBias};
 use crate::utils::{
     fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank, is_marginfi_asset_tag,
     validate_asset_tags, validate_bank_asset_tags, validate_bank_state, InstructionKind,
@@ -23,7 +23,9 @@ use marginfi_type_crate::constants::{
     INSURANCE_VAULT_SEED, LIQUIDATION_INSURANCE_FEE, LIQUIDATION_LIQUIDATOR_FEE,
     LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
 };
-use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_IN_RECEIVERSHIP};
+use marginfi_type_crate::types::{
+    Bank, MarginfiAccount, MarginfiGroup, OraclePriceType, ACCOUNT_IN_RECEIVERSHIP,
+};
 
 /// Instruction liquidates a position owned by a margin account that is in a unhealthy state.
 /// The liquidator can purchase discounted collateral from the unhealthy account, in exchange for paying its debt.

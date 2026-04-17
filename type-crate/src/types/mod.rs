@@ -35,3 +35,32 @@ pub use rate_limiter::*;
 pub use staked_settings::*;
 pub use user_account::*;
 pub use wrapped_i80f48::*;
+
+#[derive(Copy, Clone, Debug)]
+pub enum OraclePriceType {
+    /// Time weighted price
+    /// EMA for PythEma
+    TimeWeighted,
+    /// Real time price
+    RealTime,
+}
+
+#[derive(Copy, Clone)]
+pub enum RequirementType {
+    Initial,
+    Maintenance,
+    Equity,
+}
+
+impl RequirementType {
+    /// Get oracle price type for the requirement type.
+    ///
+    /// Initial and equity requirements use the time weighted price feed.
+    /// Maintenance requirement uses the real time price feed, as its more accurate for triggering liquidations.
+    pub fn get_oracle_price_type(&self) -> OraclePriceType {
+        match self {
+            RequirementType::Initial | RequirementType::Equity => OraclePriceType::TimeWeighted,
+            RequirementType::Maintenance => OraclePriceType::RealTime,
+        }
+    }
+}

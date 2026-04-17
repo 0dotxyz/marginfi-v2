@@ -12,12 +12,15 @@ use marginfi::{
     bank_authority_seed,
     state::{
         bank::BankVaultType,
-        price::{OraclePriceFeedAdapter, OraclePriceType, PriceAdapter},
+        price::{OraclePriceFeedAdapter, PriceAdapter},
     },
     utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
 };
-use marginfi_type_crate::constants::{EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED};
 use marginfi_type_crate::types::{Bank, BankConfigOpt, OracleSetup};
+use marginfi_type_crate::{
+    constants::{EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED},
+    types::OraclePriceType,
+};
 use solana_program::{
     account_info::IntoAccountInfo, instruction::Instruction, sysvar::clock::Clock,
 };

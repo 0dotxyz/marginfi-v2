@@ -12,6 +12,7 @@ use enum_dispatch::enum_dispatch;
 use fixed::types::I80F48;
 use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION};
 use kamino_mocks::state::MinimalReserve;
+use marginfi_type_crate::types::OraclePriceType;
 use marginfi_type_crate::{
     constants::{
         CONF_INTERVAL_MULTIPLE, EXP_10_I80F48, MAX_CONF_INTERVAL, STD_DEV_MULTIPLE, U32_MAX,
@@ -40,15 +41,6 @@ pub enum PriceBias {
 pub struct OraclePriceWithConfidence {
     pub price: I80F48,
     pub confidence: I80F48,
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum OraclePriceType {
-    /// Time weighted price
-    /// EMA for PythEma
-    TimeWeighted,
-    /// Real time price
-    RealTime,
 }
 
 #[enum_dispatch]

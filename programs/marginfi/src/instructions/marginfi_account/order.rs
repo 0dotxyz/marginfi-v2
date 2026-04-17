@@ -8,7 +8,6 @@ use crate::ix_utils::{
 };
 use crate::state::marginfi_account::{
     get_health_components, get_tagged_account_health_components, HealthPriceMode,
-    RiskRequirementType,
 };
 use crate::{
     check,
@@ -26,8 +25,8 @@ use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::constants::{ix_discriminators, FEE_STATE_SEED, ORDER_ACTIVE_TAGS};
 use marginfi_type_crate::types::{
-    BalanceSide, ExecuteOrderRecord, FeeState, HealthCache, OrderTriggerType, ACCOUNT_FROZEN,
-    ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+    BalanceSide, ExecuteOrderRecord, FeeState, HealthCache, OrderTriggerType, RequirementType,
+    ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
 };
 use marginfi_type_crate::{
     constants::{EXECUTE_ORDER_SEED, ORDER_SEED},
@@ -365,7 +364,7 @@ pub fn end_execute_order<'info>(
         let (assets, liabs) = get_health_components(
             &marginfi_account,
             ctx.remaining_accounts,
-            RiskRequirementType::Maintenance,
+            RequirementType::Maintenance,
             &mut Some(&mut health_cache),
             HealthPriceMode::Live { liq_cache: None },
         )?;
