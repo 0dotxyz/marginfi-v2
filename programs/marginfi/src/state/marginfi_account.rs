@@ -1,4 +1,4 @@
-use super::price::{OraclePriceFeedAdapter, OraclePriceWithConfidence, PriceAdapter, PriceBias};
+use super::price::{OraclePriceFeedAdapter, PriceAdapter};
 use crate::{
     allocator::{heap_pos, heap_restore},
     check, check_eq, debug, live, math_error,
@@ -16,9 +16,10 @@ use marginfi_type_crate::{
     },
     types::{
         reconcile_emode_configs, Balance, BalanceSide, Bank, BankOperationalState, EmodeConfig,
-        HealthCache, LendingAccount, MarginfiAccount, OraclePriceType, OracleSetup,
-        RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP, MAX_LENDING_ACCOUNT_BALANCES,
+        HealthCache, HealthPriceMode, LendingAccount, LiquidationPriceCache, MarginfiAccount,
+        OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias, RequirementType,
+        RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 use std::{
@@ -172,39 +173,6 @@ pub enum BalanceDecreaseType {
     WithdrawOnly,
     BorrowOnly,
     BypassBorrowLimit,
-}
-
-/// Temporary struct used to store prices during receivership liquidation, these price will
-/// ultimately populate the respective Bank's BankCache, and then be loaded at End Liqudation.
-#[derive(Default)]
-pub struct LiquidationPriceCache {
-    real_time: [Option<OraclePriceWithConfidence>; MAX_LENDING_ACCOUNT_BALANCES],
-    time_weighted: [Option<OraclePriceWithConfidence>; MAX_LENDING_ACCOUNT_BALANCES],
-}
-
-impl LiquidationPriceCache {
-    pub fn record(
-        &mut self,
-        requirement_type: RequirementType,
-        index: usize,
-        price: OraclePriceWithConfidence,
-    ) {
-        match requirement_type.get_oracle_price_type() {
-            OraclePriceType::RealTime => self.real_time[index] = Some(price),
-            OraclePriceType::TimeWeighted => self.time_weighted[index] = Some(price),
-        }
-    }
-
-    pub fn get_price(
-        &self,
-        price_type: OraclePriceType,
-        index: usize,
-    ) -> Option<OraclePriceWithConfidence> {
-        match price_type {
-            OraclePriceType::RealTime => self.real_time[index],
-            OraclePriceType::TimeWeighted => self.time_weighted[index],
-        }
-    }
 }
 
 #[inline]
@@ -498,13 +466,6 @@ pub fn calc_amount(value: I80F48, price: I80F48, mint_decimals: u8) -> MarginfiR
     Ok(qt)
 }
 
-pub enum HealthPriceMode<'a> {
-    Live {
-        liq_cache: Option<&'a mut LiquidationPriceCache>,
-    },
-    Cached,
-}
-
 // =============================================================================
 // RISK ENGINE - HEAP-EFFICIENT HEALTH CALCULATION
 // =============================================================================
@@ -641,12 +602,12 @@ pub fn get_health_components<'info>(
         MarginfiError::AccountInFlashloan
     );
 
-    let (is_cached, mut liq_cache) = match price_mode {
-        HealthPriceMode::Live { liq_cache } => (false, liq_cache),
-        HealthPriceMode::Cached => (true, None),
+    let (is_cached, mut liq_cache, clock) = match price_mode {
+        HealthPriceMode::Live { liq_cache } => (false, liq_cache, Some(Clock::get()?)),
+        HealthPriceMode::Cached => (true, None, None),
+        HealthPriceMode::Client(clock) => (false, None, Some(clock)),
     };
 
-    let clock = if is_cached { None } else { Some(Clock::get()?) };
     let lending_account = &marginfi_account.lending_account;
 
     // =========================================================================

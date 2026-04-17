@@ -14,7 +14,6 @@ use crate::{
             InterestRateStateChanges,
         },
         marginfi_account::calc_value,
-        price::OraclePriceWithConfidence,
     },
 };
 use anchor_lang::prelude::*;
@@ -38,7 +37,10 @@ use marginfi_type_crate::{
         LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
-    types::{Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup},
+    types::{
+        Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup,
+        OraclePriceWithConfidence,
+    },
 };
 
 pub trait BankImpl {

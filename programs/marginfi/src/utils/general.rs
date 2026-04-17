@@ -4,7 +4,7 @@ use crate::{
     state::{
         bank::BankVaultType,
         marginfi_account::{calc_value, get_remaining_accounts_per_bank},
-        price::{OraclePriceFeedAdapter, OraclePriceWithConfidence, PriceAdapter, PriceBias},
+        price::{OraclePriceFeedAdapter, PriceAdapter},
         rate_limiter::{
             should_skip_rate_limit, BankRateLimiterImpl, GroupRateLimiterImpl, RateLimitWindowImpl,
         },
@@ -31,7 +31,8 @@ use marginfi_type_crate::{
         ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
     },
     types::{
-        Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, OraclePriceType, WrappedI80F48,
+        Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, OraclePriceType,
+        OraclePriceWithConfidence, PriceBias, WrappedI80F48,
     },
 };
 

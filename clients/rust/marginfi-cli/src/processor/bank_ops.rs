@@ -22,7 +22,7 @@ use {
         constants::METADATA_SEED,
         types::{
             Bank, BankConfigOpt, BankMetadata, InterestRateConfigOpt, MarginfiGroup,
-            OraclePriceType, OracleSetup, RatePoint, RiskTier, WrappedI80F48,
+            OraclePriceType, OracleSetup, PriceBias, RatePoint, RiskTier, WrappedI80F48,
         },
     },
     pyth_solana_receiver_sdk::price_update::PriceUpdateV2,
@@ -310,8 +310,6 @@ pub fn bank_get_all(config: Config, marginfi_group: Option<Pubkey>) -> Result<()
 }
 
 pub fn bank_inspect_price_oracle(config: Config, bank_pk: Pubkey) -> Result<()> {
-    use marginfi::state::price::PriceBias;
-
     let bank: Bank = config.mfi_program.account(bank_pk)?;
     let opfa = match bank.config.oracle_setup {
         OracleSetup::Fixed => OraclePriceFeedAdapter::try_from_bank_with_max_age(
