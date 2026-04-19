@@ -27,6 +27,7 @@ import {
   configureBank,
   configureBankOracle,
   groupConfigure,
+  handleBankruptcy,
 } from "./utils/group-instructions";
 import {
   accountInit,
@@ -82,7 +83,10 @@ import {
 } from "@mrgnlabs/mrgn-common";
 import { Reserve } from "@kamino-finance/klend-sdk";
 import {
+  assertSameAssetBadDebtSurvivability,
+  computeSameAssetBoundaryBorrowNative,
   computeSameValueBorrowNative,
+  setAssetShareValueHaircut,
 } from "./utils/same-asset-emode";
 
 const USER_ACCOUNT_SA_K = "same_asset_kamino_account";
@@ -92,10 +96,10 @@ const REGULAR_SOL_SEED = new BN(20_002);
 const RECEIVERSHIP_KAMINO_WITHDRAW = new BN(5_000);
 const RECEIVERSHIP_KAMINO_REPAY = new BN(5_000);
 const SAME_ASSET_DEPOSIT = new BN(100 * 10 ** ecosystem.usdcDecimals);
-const SAME_ASSET_INIT_LEVERAGE = 101;
-const SAME_ASSET_MAINT_LEVERAGE = 102;
-const SAME_ASSET_TIGHTENED_INIT_LEVERAGE = 99;
-const SAME_ASSET_TIGHTENED_MAINT_LEVERAGE = 100;
+const SAME_ASSET_INIT_LEVERAGE = 99;
+const SAME_ASSET_MAINT_LEVERAGE = 100;
+const SAME_ASSET_TIGHTENED_INIT_LEVERAGE = 97;
+const SAME_ASSET_TIGHTENED_MAINT_LEVERAGE = 98;
 const SAME_ASSET_BORROW_ORIGINATION_FEE_RATE = 0.01;
 const SAME_ASSET_BOUNDARY_GAP_POSITION = 0.5;
 
@@ -176,8 +180,9 @@ const computeKaminoSameAssetBorrowWindow = (
   const roundedBorrowPrincipalUi = new BigNumber(borrowNative.toString()).div(
     uiScale
   );
-  const roundedBorrowLiabilityUi =
-    roundedBorrowPrincipalUi.times(liabilityWithFeeFactor);
+  const roundedBorrowLiabilityUi = roundedBorrowPrincipalUi.times(
+    liabilityWithFeeFactor
+  );
 
   assert.isTrue(
     roundedBorrowLiabilityUi.isLessThan(healthyInitBoundaryUi),
@@ -397,9 +402,11 @@ describe("k20: Kamino same-asset emode", () => {
   const pulseKaminoSameAssetHealth = async (
     user: TestUser,
     marginfiAccount: PublicKey,
-    sameAssetRemaining: PublicKey[][]
+    sameAssetRemaining: PublicKey[][],
+    options: { refresh?: boolean } = {}
   ) => {
-    const refreshIxs = await buildKaminoRefreshIxs();
+    const refreshIxs =
+      options.refresh === false ? [] : await buildKaminoRefreshIxs();
 
     await processBankrunTransaction(
       bankrunContext,
@@ -646,17 +653,12 @@ describe("k20: Kamino same-asset emode", () => {
     await depositKaminoCollateral(user, marginfiAccount);
 
     const { accountedCollateralNative, accountedLiquidityNative } =
-      await getKaminoAccountedLiquidityNative(
-        marginfiAccount
-      );
+      await getKaminoAccountedLiquidityNative(marginfiAccount);
     const borrowWindow = computeKaminoSameAssetBorrowWindow(
       accountedLiquidityNative
     );
     const accountedCollateral = Number(accountedCollateralNative.toString());
-    assert.equal(
-      accountedCollateral,
-      Number(expectedCollateral.toString())
-    );
+    assert.equal(accountedCollateral, Number(expectedCollateral.toString()));
 
     // Kamino stores the deposit as reserve-collateral shares, so the first step is converting the
     // accounted shares back into liquidity-equivalent USDC under the live reserve exchange rate:
@@ -664,7 +666,7 @@ describe("k20: Kamino same-asset emode", () => {
     //
     // The borrow window is then:
     // - healthy init boundary =
-    //   collateral_liquidity * lower_oracle / upper_oracle * (100 / 101)
+    //   collateral_liquidity * lower_oracle / upper_oracle * (98 / 99)
     // - tightened maint boundary =
     //   collateral_liquidity * lower_oracle / upper_oracle * (99 / 100)
     //
@@ -677,7 +679,11 @@ describe("k20: Kamino same-asset emode", () => {
     //
     // `computeKaminoSameAssetBorrowWindow(...)` asserts the rounded result still satisfies:
     // tightened maint boundary < recorded liability < healthy init boundary.
-    await borrowFromRegularUsdc(user, marginfiAccount, borrowWindow.borrowNative);
+    await borrowFromRegularUsdc(
+      user,
+      marginfiAccount,
+      borrowWindow.borrowNative
+    );
 
     await processBankrunTransaction(
       bankrunContext,
@@ -691,10 +697,10 @@ describe("k20: Kamino same-asset emode", () => {
     );
 
     const accountBeforeTighten =
-      await bankrunProgram.account.marginfiAccount.fetch(
-      marginfiAccount
-      );
-    assert.ok((accountBeforeTighten.healthCache.flags & HEALTH_CACHE_HEALTHY) !== 0);
+      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
+    assert.ok(
+      (accountBeforeTighten.healthCache.flags & HEALTH_CACHE_HEALTHY) !== 0
+    );
 
     await tightenSameAssetLeverage();
 
@@ -717,9 +723,8 @@ describe("k20: Kamino same-asset emode", () => {
     await resetSameAssetLeverage();
     await depositKaminoCollateral(user, marginfiAccount);
 
-    const { accountedLiquidityNative } = await getKaminoAccountedLiquidityNative(
-      marginfiAccount
-    );
+    const { accountedLiquidityNative } =
+      await getKaminoAccountedLiquidityNative(marginfiAccount);
     const borrowWindow = computeKaminoSameAssetBorrowWindow(
       accountedLiquidityNative
     );
@@ -737,7 +742,7 @@ describe("k20: Kamino same-asset emode", () => {
     // - reserve-collateral shares are converted back into liquidity-equivalent USDC
     // - collateral uses the lower oracle bound and liabilities use the upper oracle bound
     // - the recorded debt is principal * 1.01 because of the origination fee
-    // - the liability is chosen between the 101x healthy-init boundary and the 100x
+    // - the liability is chosen between the 99x healthy-init boundary and the 98x
     //   tightened-maint boundary
     //
     // `computeSameValueBorrowNative(...)` preserves that same fee-adjusted debt value while
@@ -745,7 +750,11 @@ describe("k20: Kamino same-asset emode", () => {
     // Once the liability mint is SOL instead of USDC, the Kamino USDC collateral loses the
     // same-asset lift and falls back to the plain 0.5 regular weight, so the equal-value SOL
     // borrow must be rejected.
-    await borrowFromRegularUsdc(user, marginfiAccount, borrowWindow.borrowNative);
+    await borrowFromRegularUsdc(
+      user,
+      marginfiAccount,
+      borrowWindow.borrowNative
+    );
 
     const repayAllTx = new Transaction().add(
       await repayIx(user.mrgnBankrunProgram, {
@@ -813,7 +822,7 @@ describe("k20: Kamino same-asset emode", () => {
     // - collateral shares are converted back into liquidity-equivalent USDC
     // - the confidence haircut lowers collateral and raises liabilities
     // - the 1% origination fee means recorded debt is principal * 1.01
-    // - the recorded debt is placed halfway between the healthy 101x init boundary and the
+    // - the recorded debt is placed halfway between the healthy 99x init boundary and the
     //   tightened 100x maint boundary
     await borrowFromRegularUsdc(
       liquidatee,
@@ -876,7 +885,7 @@ describe("k20: Kamino same-asset emode", () => {
     // - Kamino collateral shares are converted back into liquidity-equivalent USDC
     // - collateral is haircut by the oracle lower bound and liabilities by the upper bound
     // - the 1% origination fee is included in the recorded debt
-    // - the resulting debt is halfway between the healthy 101x init boundary and the tightened
+    // - the resulting debt is halfway between the healthy 99x init boundary and the tightened
     //   100x maint boundary
     //
     // So the account is healthy before the tighten and becomes deleverage-eligible only after the
@@ -934,5 +943,152 @@ describe("k20: Kamino same-asset emode", () => {
       ),
       [riskAdmin.wallet]
     );
+  });
+
+  it("(admin) Kamino/P0 bad-debt haircut preserves the equity buffer and deleverages", async () => {
+    const deleveragee = users[2];
+    const deleverageeAccount = await initFreshAccount(deleveragee);
+    const sameAssetRemaining = getSameAssetRemainingGroups();
+    const startRemaining =
+      composeRemainingAccountsWriteableMeta(sameAssetRemaining);
+    const endRemaining =
+      composeRemainingAccountsMetaBanksOnly(sameAssetRemaining);
+
+    await mintToTokenAccount(
+      ecosystem.usdcMint.publicKey,
+      riskAdmin.usdcAccount,
+      new BN(300 * 10 ** ecosystem.usdcDecimals)
+    );
+
+    await resetSameAssetLeverage({ newRiskAdmin: riskAdmin.wallet.publicKey });
+    await depositKaminoCollateral(deleveragee, deleverageeAccount);
+
+    const { accountedLiquidityNative } =
+      await getKaminoAccountedLiquidityNative(deleverageeAccount);
+    const sameAssetBorrow = computeSameAssetBoundaryBorrowNative({
+      collateralNative: accountedLiquidityNative,
+      collateralDecimals: ecosystem.usdcDecimals,
+      collateralPrice: ecosystem.usdcPrice,
+      liabilityDecimals: ecosystem.usdcDecimals,
+      liabilityPrice: ecosystem.usdcPrice,
+      healthyInitLeverage: SAME_ASSET_INIT_LEVERAGE,
+      tightenedRequirementLeverage: SAME_ASSET_MAINT_LEVERAGE,
+      haircut: { numerator: 199, denominator: 200 },
+      liabilityOriginationFeeRate: SAME_ASSET_BORROW_ORIGINATION_FEE_RATE,
+    });
+
+    // Deposit = 300 USDC, then borrow between:
+    // - the pre-haircut init boundary at 99x: lower_oracle / upper_oracle * 98 / 99
+    // - the post-haircut maint boundary after a 199/200 bad-debt share-value drop:
+    //   lower_oracle / upper_oracle * 199 / 200 * 99 / 100
+    // So the borrow is initially valid, but the 50bps socialized loss leaves the account
+    // maintenance-underwater while still equity-solvent.
+    await borrowFromRegularUsdc(
+      deleveragee,
+      deleverageeAccount,
+      sameAssetBorrow
+    );
+
+    let { account } = await pulseKaminoSameAssetHealth(
+      deleveragee,
+      deleverageeAccount,
+      sameAssetRemaining
+    );
+    const originalAssetValueEquity = wrappedI80F48toBigNumber(
+      account.healthCache.assetValueEquity
+    );
+    assertSameAssetBadDebtSurvivability({
+      healthCache: account.healthCache,
+      originalAssetValueEquity,
+      label: "Kamino/P0 same-asset pre-haircut setup",
+      requireMaintenanceUnderwater: false,
+    });
+    let restoreAssetShareValue: (() => Promise<void>) | null = null;
+
+    try {
+      restoreAssetShareValue = await setAssetShareValueHaircut(
+        bankrunProgram,
+        banksClient,
+        bankrunContext,
+        kaminoUsdcBank,
+        199,
+        200
+      );
+      ({ account } = await pulseKaminoSameAssetHealth(
+        deleveragee,
+        deleverageeAccount,
+        sameAssetRemaining,
+        { refresh: false }
+      ));
+      assertSameAssetBadDebtSurvivability({
+        healthCache: account.healthCache,
+        originalAssetValueEquity,
+        label: "Kamino/P0 same-asset bad-debt haircut",
+      });
+
+      const bankruptcyTx = new Transaction().add(
+        await handleBankruptcy(groupAdmin.mrgnBankrunProgram, {
+          signer: groupAdmin.wallet.publicKey,
+          marginfiAccount: deleverageeAccount,
+          bank: regularUsdcBank,
+          remaining: composeRemainingAccounts(sameAssetRemaining),
+        })
+      );
+      bankruptcyTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+      bankruptcyTx.sign(groupAdmin.wallet);
+      const bankruptcyResult = await banksClient.tryProcessTransaction(
+        bankruptcyTx
+      );
+      assertBankrunTxFailed(bankruptcyResult, 6013);
+
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+          await initLiquidationRecordIx(riskAdmin.mrgnBankrunProgram, {
+            marginfiAccount: deleverageeAccount,
+            feePayer: riskAdmin.wallet.publicKey,
+          }),
+          await startDeleverageIx(riskAdmin.mrgnBankrunProgram, {
+            marginfiAccount: deleverageeAccount,
+            riskAdmin: riskAdmin.wallet.publicKey,
+            remaining: startRemaining,
+          }),
+          await makeKaminoWithdrawIx(
+            riskAdmin.mrgnBankrunProgram,
+            {
+              marginfiAccount: deleverageeAccount,
+              authority: riskAdmin.wallet.publicKey,
+              bank: kaminoUsdcBank,
+              mint: ecosystem.usdcMint.publicKey,
+              destinationTokenAccount: riskAdmin.usdcAccount,
+              lendingMarket: market,
+              reserve: usdcReserve,
+            },
+            {
+              amount: RECEIVERSHIP_KAMINO_WITHDRAW,
+              isWithdrawAll: false,
+              remaining: composeRemainingAccounts(sameAssetRemaining),
+            }
+          ),
+          await repayIx(riskAdmin.mrgnBankrunProgram, {
+            marginfiAccount: deleverageeAccount,
+            bank: regularUsdcBank,
+            tokenAccount: riskAdmin.usdcAccount,
+            amount: RECEIVERSHIP_KAMINO_REPAY,
+            remaining: composeRemainingAccounts(sameAssetRemaining),
+          }),
+          await endDeleverageIx(riskAdmin.mrgnBankrunProgram, {
+            marginfiAccount: deleverageeAccount,
+            remaining: endRemaining,
+          })
+        ),
+        [riskAdmin.wallet]
+      );
+    } finally {
+      if (restoreAssetShareValue) {
+        await restoreAssetShareValue();
+      }
+    }
   });
 });

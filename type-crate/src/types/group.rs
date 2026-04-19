@@ -63,11 +63,11 @@ pub struct MarginfiGroup {
     pub emode_max_maint_leverage: u32,
 
     /// Encoded same-asset automatic emode leverage for initial margin.
-    /// Decode with `u32_to_same_asset_leverage`. Same-asset treatment is disabled when the decoded
-    /// leverage is less than or equal to 1.
+    /// Decode with `u32_to_basis`. Same-asset treatment is disabled when the decoded leverage is
+    /// less than or equal to 1.
     pub same_asset_emode_init_leverage: u32,
     /// Encoded same-asset automatic emode leverage for maintenance margin.
-    /// Decode with `u32_to_same_asset_leverage`. Ordering is validated in decoded space.
+    /// Decode with `u32_to_basis`. Ordering is validated in decoded space.
     pub same_asset_emode_maint_leverage: u32,
 
     /// Rate limiter for controlling aggregate withdraw/borrow outflow across all banks.

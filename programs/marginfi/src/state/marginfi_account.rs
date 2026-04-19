@@ -15,13 +15,13 @@ use marginfi_type_crate::{
         MAX_INTEGRATION_POSITIONS, ORDER_ACTIVE_TAGS, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
-        compute_same_asset_emode_weight, reconcile_emode_configs, u32_to_same_asset_leverage,
+        compute_same_asset_emode_weight, reconcile_emode_configs, u32_to_basis,
         Balance, BalanceSide, Bank, BankOperationalState, EmodeConfig, HealthCache, HealthPriceMode,
         LendingAccount, LiquidationPriceCache, MarginfiAccount, MarginfiGroup, OraclePriceType,
         OraclePriceWithConfidence, OracleSetup, PriceBias, ReconciledEmodeConfig,
         ReconciledEmodeRequirementType, RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN,
         ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
-        MAX_LENDING_ACCOUNT_BALANCES,
+        
     },
 };
 use std::{
@@ -524,9 +524,9 @@ pub fn calc_amount(value: I80F48, price: I80F48, mint_decimals: u8) -> MarginfiR
 /// emode tag system.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct SameAssetEmodeConfig {
-    /// Encoded leverage for initial margin. Decode with `u32_to_same_asset_leverage`.
+    /// Encoded leverage for initial margin. Decode with `u32_to_basis`.
     pub init_leverage: u32,
-    /// Encoded leverage for maintenance margin. Decode with `u32_to_same_asset_leverage`.
+    /// Encoded leverage for maintenance margin. Decode with `u32_to_basis`.
     pub maint_leverage: u32,
 }
 
@@ -617,10 +617,8 @@ fn same_asset_leverage_for_requirement(
     same_asset_config: &SameAssetEmodeConfig,
 ) -> Option<I80F48> {
     let leverage = match requirement_type {
-        RequirementType::Initial => u32_to_same_asset_leverage(same_asset_config.init_leverage),
-        RequirementType::Maintenance => {
-            u32_to_same_asset_leverage(same_asset_config.maint_leverage)
-        }
+        RequirementType::Initial => u32_to_basis(same_asset_config.init_leverage),
+        RequirementType::Maintenance => u32_to_basis(same_asset_config.maint_leverage),
         RequirementType::Equity => return None,
     };
 
@@ -694,7 +692,6 @@ fn populate_reconciled_same_asset_config<'info>(
             continue;
         }
 
-        let heap_checkpoint = heap_pos();
         let num_accounts = {
             let bank_ai = remaining_ais
                 .get(account_index)
@@ -730,7 +727,6 @@ fn populate_reconciled_same_asset_config<'info>(
 
             num_accounts
         };
-        heap_restore(heap_checkpoint);
         account_index += num_accounts;
     }
 
@@ -801,9 +797,11 @@ pub fn get_health_components<'info>(
         let emode_iter = EmodeConfigIterator::new(lending_account, remaining_ais, is_cached);
         reconcile_emode_configs(
             emode_iter,
-            requirement_type
-                .to_weight_type()
-                .get_reconciled_emode_requirement_type(),
+            match requirement_type {
+                RequirementType::Initial => ReconciledEmodeRequirementType::Initial,
+                RequirementType::Maintenance => ReconciledEmodeRequirementType::Maintenance,
+                RequirementType::Equity => ReconciledEmodeRequirementType::Equity,
+            },
         )
     };
     heap_restore(emode_checkpoint);
@@ -817,7 +815,7 @@ pub fn get_health_components<'info>(
         lending_account,
         remaining_ais,
         is_cached,
-        requirement_type.to_weight_type(),
+        requirement_type,
         &same_asset_config,
     )?;
 
@@ -2077,7 +2075,7 @@ mod test {
     use super::*;
     use bytemuck::Zeroable;
     use fixed_macro::types::I80F48;
-    use marginfi_type_crate::types::{same_asset_leverage_to_u32, u32_to_same_asset_leverage};
+    use marginfi_type_crate::types::{basis_to_u32, u32_to_basis};
 
     #[test]
     fn test_calc_asset_value() {
@@ -2183,8 +2181,8 @@ mod test {
     #[test]
     fn same_asset_leverage_for_requirement_selects_enabled_non_equity_values() {
         let config = SameAssetEmodeConfig {
-            init_leverage: same_asset_leverage_to_u32(I80F48::from_num(1.5)),
-            maint_leverage: same_asset_leverage_to_u32(I80F48::from_num(2.5)),
+            init_leverage: basis_to_u32(I80F48::from_num(1.5)),
+            maint_leverage: basis_to_u32(I80F48::from_num(2.5)),
         };
 
         let init_leverage =
@@ -2209,8 +2207,8 @@ mod test {
             same_asset_leverage_for_requirement(
                 RequirementType::Initial,
                 &SameAssetEmodeConfig {
-                    init_leverage: same_asset_leverage_to_u32(I80F48::ONE),
-                    maint_leverage: same_asset_leverage_to_u32(I80F48::from_num(2.5)),
+                    init_leverage: basis_to_u32(I80F48::ONE),
+                    maint_leverage: basis_to_u32(I80F48::from_num(2.5)),
                 },
             ),
             None
@@ -2315,8 +2313,8 @@ mod test {
     #[test]
     fn same_asset_requirement_decoded_leverage_at_or_below_one_is_treated_as_disabled() {
         let config = SameAssetEmodeConfig {
-            init_leverage: same_asset_leverage_to_u32(I80F48::ONE),
-            maint_leverage: same_asset_leverage_to_u32(I80F48::ONE),
+            init_leverage: basis_to_u32(I80F48::ONE),
+            maint_leverage: basis_to_u32(I80F48::ONE),
         };
 
         assert_eq!(
@@ -2332,9 +2330,6 @@ mod test {
             init_leverage: 0,
             maint_leverage: 0,
         };
-        assert_eq!(
-            u32_to_same_asset_leverage(legacy_zero.init_leverage),
-            I80F48::ZERO
-        );
+        assert_eq!(u32_to_basis(legacy_zero.init_leverage), I80F48::ZERO);
     }
 }

@@ -28,6 +28,7 @@ import {
   configureBankOracle,
   configureBank,
   groupConfigure,
+  handleBankruptcy,
 } from "./utils/group-instructions";
 import {
   composeRemainingAccounts,
@@ -77,18 +78,20 @@ import {
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
 import {
+  assertSameAssetBadDebtSurvivability,
   computeSameAssetBoundaryBorrowNative,
   computeSameValueBorrowNative,
+  setAssetShareValueHaircut,
 } from "./utils/same-asset-emode";
 
 const USER_ACCOUNT_SA_JLR = "same_asset_juplend_account";
 const REGULAR_TOKEN_A_SEED = new BN(80_001);
 const RECEIVERSHIP_JUP_WITHDRAW = new BN(500_000);
 const SAME_ASSET_DEPOSIT = new BN(100 * 10 ** ecosystem.tokenADecimals);
-const SAME_ASSET_INIT_LEVERAGE = 101;
-const SAME_ASSET_MAINT_LEVERAGE = 102;
-const SAME_ASSET_TIGHTENED_INIT_LEVERAGE = 99;
-const SAME_ASSET_TIGHTENED_MAINT_LEVERAGE = 100;
+const SAME_ASSET_INIT_LEVERAGE = 99;
+const SAME_ASSET_MAINT_LEVERAGE = 100;
+const SAME_ASSET_TIGHTENED_INIT_LEVERAGE = 97;
+const SAME_ASSET_TIGHTENED_MAINT_LEVERAGE = 98;
 const EXCHANGE_PRICES_PRECISION = new BN("1000000000000");
 const SAME_ASSET_BORROW_ORIGINATION_FEE_RATE = 0.01;
 
@@ -298,12 +301,16 @@ describe("jlr08: JupLend same-asset emode", () => {
   const pulseJupLendSameAssetHealth = async (
     user: TestUser,
     marginfiAccount: PublicKey,
-    remainingGroups: PublicKey[][]
+    remainingGroups: PublicKey[][],
+    options: { refresh?: boolean } = {}
   ) => {
+    const refreshIxs =
+      options.refresh === false ? [] : [await refreshJupLendPoolIx()];
+
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(
-        await refreshJupLendPoolIx(),
+        ...refreshIxs,
         await healthPulse(user.mrgnBankrunProgram, {
           marginfiAccount,
           remaining: composeRemainingAccounts(remainingGroups),
@@ -523,7 +530,7 @@ describe("jlr08: JupLend same-asset emode", () => {
     // `computeJupLendSameAssetBorrow(accountedUnderlying)` then applies:
     // - the oracle lower/upper confidence haircut used by the risk engine
     // - a 1% origination fee on the liability side
-    // - a 25%-into-the-gap position between the healthy 101x init weight = 100 / 101 ~= 0.990099
+    // - a 25%-into-the-gap position between the healthy 99x init weight = 98 / 99 ~= 0.989899
     //   and the tightened 100x maint weight = 99 / 100 = 0.99
     await depositJuplendCollateral(user, marginfiAccount);
 
@@ -589,7 +596,7 @@ describe("jlr08: JupLend same-asset emode", () => {
     // Deposit = 100 Token A at $10, so the nominal collateral is worth $1,000 before weighting.
     // `computeJupLendSameAssetBorrow(accountedUnderlying)` sizes the Token A borrow from the live
     // underlying-equivalent collateral amount, using the oracle confidence haircut, the 1%
-    // origination fee, and a 25%-into-the-gap position inside the 101x-init vs 100x-tightened
+    // origination fee, and a 25%-into-the-gap position inside the 99x-init vs 98x-tightened
     // boundary window.
     // `computeSameValueUsdcBorrow(sameAssetBorrow)` then converts that exact fee-adjusted debt
     // notional into USDC, so only the liability mint changes.
@@ -764,8 +771,19 @@ describe("jlr08: JupLend same-asset emode", () => {
       riskAdmin.tokenAAccount,
       new BN(300 * 10 ** ecosystem.tokenADecimals)
     );
+    await mintToTokenAccount(
+      ecosystem.tokenAMint.publicKey,
+      deleveragee.tokenAAccount,
+      new BN(300 * 10 ** ecosystem.tokenADecimals)
+    );
 
     await resetSameAssetLeverage({ newRiskAdmin: riskAdmin.wallet.publicKey });
+    const liquidityProviderAccount = await initFreshAccount(deleveragee);
+    await depositRegularTokenACollateral(
+      deleveragee,
+      liquidityProviderAccount,
+      new BN(200 * 10 ** ecosystem.tokenADecimals)
+    );
     await depositJuplendCollateral(deleveragee, deleverageeAccount);
 
     const { accountedUnderlying: deleverageeUnderlying } =
@@ -778,7 +796,7 @@ describe("jlr08: JupLend same-asset emode", () => {
     // `computeJupLendSameAssetBorrow(deleverageeUnderlying)` uses the live redeemed underlying
     // amount, the oracle confidence haircut, and the 1% origination fee to place the fee-adjusted
     // Token A debt 25% of the way from the tightened 100x maint boundary back toward the healthy
-    // 101x init boundary.
+    // 99x init boundary.
     await borrowFromRegularTokenA(
       deleveragee,
       deleverageeAccount,
@@ -850,5 +868,160 @@ describe("jlr08: JupLend same-asset emode", () => {
       false,
       true
     );
+  });
+
+  it("(admin) JupLend/P0 bad-debt haircut preserves the equity buffer and deleverages", async () => {
+    const deleveragee = users[2];
+    const deleverageeAccount = await initFreshAccount(deleveragee);
+    const sameAssetRemaining = getSameAssetRemainingGroups();
+    const startRemaining =
+      composeRemainingAccountsWriteableMeta(sameAssetRemaining);
+    const endRemaining =
+      composeRemainingAccountsMetaBanksOnly(sameAssetRemaining);
+
+    await mintToTokenAccount(
+      ecosystem.tokenAMint.publicKey,
+      riskAdmin.tokenAAccount,
+      new BN(300 * 10 ** ecosystem.tokenADecimals)
+    );
+
+    await resetSameAssetLeverage({ newRiskAdmin: riskAdmin.wallet.publicKey });
+    await depositJuplendCollateral(deleveragee, deleverageeAccount);
+
+    const { accountedUnderlying } = await getJupLendAccountedCollateralNative(
+      deleverageeAccount
+    );
+    const sameAssetBorrow = computeSameAssetBoundaryBorrowNative({
+      collateralNative: accountedUnderlying,
+      collateralDecimals: ecosystem.tokenADecimals,
+      collateralPrice: ecosystem.tokenAPrice,
+      liabilityDecimals: ecosystem.tokenADecimals,
+      liabilityPrice: ecosystem.tokenAPrice,
+      healthyInitLeverage: SAME_ASSET_INIT_LEVERAGE,
+      tightenedRequirementLeverage: SAME_ASSET_MAINT_LEVERAGE,
+      haircut: { numerator: 199, denominator: 200 },
+      liabilityOriginationFeeRate: SAME_ASSET_BORROW_ORIGINATION_FEE_RATE,
+    });
+
+    // Deposit = 300 TOKENA, then borrow between:
+    // - the pre-haircut init boundary at 99x: lower_oracle / upper_oracle * 98 / 99
+    // - the post-haircut maint boundary after a 199/200 bad-debt share-value drop:
+    //   lower_oracle / upper_oracle * 199 / 200 * 99 / 100
+    // So the borrow is initially valid, but the 50bps socialized loss leaves the account
+    // maintenance-underwater while still equity-solvent.
+    await borrowFromRegularTokenA(
+      deleveragee,
+      deleverageeAccount,
+      sameAssetBorrow
+    );
+
+    let account = await pulseJupLendSameAssetHealth(
+      deleveragee,
+      deleverageeAccount,
+      sameAssetRemaining
+    );
+    const originalAssetValueEquity = wrappedI80F48toBigNumber(
+      account.healthCache.assetValueEquity
+    );
+    assertSameAssetBadDebtSurvivability({
+      healthCache: account.healthCache,
+      originalAssetValueEquity,
+      label: "JupLend/P0 same-asset pre-haircut setup",
+      requireMaintenanceUnderwater: false,
+    });
+    let restoreAssetShareValue: (() => Promise<void>) | null = null;
+
+    try {
+      restoreAssetShareValue = await setAssetShareValueHaircut(
+        bankrunProgram,
+        banksClient,
+        bankrunContext,
+        juplendTokenABank,
+        199,
+        200
+      );
+
+      account = await pulseJupLendSameAssetHealth(
+        deleveragee,
+        deleverageeAccount,
+        sameAssetRemaining,
+        { refresh: false }
+      );
+      assertSameAssetBadDebtSurvivability({
+        healthCache: account.healthCache,
+        originalAssetValueEquity,
+        label: "JupLend/P0 same-asset bad-debt haircut",
+      });
+
+      const bankruptcyTx = new Transaction().add(
+        await handleBankruptcy(groupAdmin.mrgnBankrunProgram, {
+          signer: groupAdmin.wallet.publicKey,
+          marginfiAccount: deleverageeAccount,
+          bank: regularTokenABank,
+          remaining: composeRemainingAccounts(sameAssetRemaining),
+        })
+      );
+      bankruptcyTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+      bankruptcyTx.sign(groupAdmin.wallet);
+      const bankruptcyResult = await banksClient.tryProcessTransaction(
+        bankruptcyTx
+      );
+      assertBankrunTxFailed(bankruptcyResult, 6013);
+
+      const deleverageIxs = [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+        await initLiquidationRecordIx(riskAdmin.mrgnBankrunProgram, {
+          marginfiAccount: deleverageeAccount,
+          feePayer: riskAdmin.wallet.publicKey,
+        }),
+        await startDeleverageIx(riskAdmin.mrgnBankrunProgram, {
+          marginfiAccount: deleverageeAccount,
+          riskAdmin: riskAdmin.wallet.publicKey,
+          remaining: startRemaining,
+        }),
+        await makeJuplendWithdrawSimpleIx(riskAdmin.mrgnBankrunProgram, {
+          marginfiAccount: deleverageeAccount,
+          destinationTokenAccount: riskAdmin.tokenAAccount,
+          bank: juplendTokenABank,
+          pool: tokenAPool,
+          amount: RECEIVERSHIP_JUP_WITHDRAW,
+          withdrawAll: false,
+          remainingAccounts: composeRemainingAccounts(sameAssetRemaining),
+        }),
+        await repayIx(riskAdmin.mrgnBankrunProgram, {
+          marginfiAccount: deleverageeAccount,
+          bank: regularTokenABank,
+          tokenAccount: riskAdmin.tokenAAccount,
+          amount: RECEIVERSHIP_JUP_WITHDRAW,
+          remaining: composeRemainingAccounts(sameAssetRemaining),
+        }),
+        await endDeleverageIx(riskAdmin.mrgnBankrunProgram, {
+          marginfiAccount: deleverageeAccount,
+          remaining: endRemaining,
+        }),
+      ];
+      const deleverageLut = await createLookupTableForInstructions(
+        riskAdmin.wallet,
+        deleverageIxs
+      );
+      const deleverageBlockhash = await getBankrunBlockhash(bankrunContext);
+      const deleverageMessage = new TransactionMessage({
+        payerKey: riskAdmin.wallet.publicKey,
+        recentBlockhash: deleverageBlockhash,
+        instructions: deleverageIxs,
+      }).compileToV0Message([deleverageLut]);
+      const deleverageTx = new VersionedTransaction(deleverageMessage);
+      await processBankrunV0Transaction(
+        bankrunContext,
+        deleverageTx,
+        [riskAdmin.wallet],
+        false,
+        true
+      );
+    } finally {
+      if (restoreAssetShareValue) {
+        await restoreAssetShareValue();
+      }
+    }
   });
 });

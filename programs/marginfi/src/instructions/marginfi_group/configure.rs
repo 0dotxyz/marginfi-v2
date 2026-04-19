@@ -3,10 +3,7 @@ use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::{MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::{
-    basis_to_u32, same_asset_leverage_to_u32, u32_to_same_asset_leverage, MarginfiGroup,
-    WrappedI80F48,
-};
+use marginfi_type_crate::types::{basis_to_u32, u32_to_basis, MarginfiGroup, WrappedI80F48};
 
 /// Validate and apply an optional emode leverage value. If `Some`, validates it is in [1, 100] and
 /// writes the basis-point encoding. If `None`, leaves the value as is.
@@ -30,7 +27,7 @@ fn validate_and_apply_emode_leverage(
 }
 
 /// Validate and apply an optional same-asset emode leverage value.
-/// If `Some`, validates it is in [1, 1000] and writes the encoded `u32` value.
+/// If `Some`, validates it is in [1, 100] and writes the encoded `u32` value.
 /// If `None`, leaves the stored value as is.
 fn validate_and_apply_same_asset_emode_leverage(
     new_value: Option<WrappedI80F48>,
@@ -42,11 +39,11 @@ fn validate_and_apply_same_asset_emode_leverage(
             msg!("same-asset emode leverage {} must be >= 1", leverage);
             return Err(MarginfiError::BadEmodeConfig.into());
         }
-        if leverage > I80F48::from_num(1000) {
-            msg!("same-asset emode leverage {} must be <= 1000", leverage);
+        if leverage > I80F48::from_num(100) {
+            msg!("same-asset emode leverage {} must be <= 100", leverage);
             return Err(MarginfiError::BadEmodeConfig.into());
         }
-        *current = same_asset_leverage_to_u32(leverage);
+        *current = basis_to_u32(leverage);
     }
     Ok(())
 }
@@ -126,10 +123,8 @@ pub fn configure(
         &mut marginfi_group.same_asset_emode_maint_leverage,
     )?;
 
-    let same_asset_init_leverage =
-        u32_to_same_asset_leverage(marginfi_group.same_asset_emode_init_leverage);
-    let same_asset_maint_leverage =
-        u32_to_same_asset_leverage(marginfi_group.same_asset_emode_maint_leverage);
+    let same_asset_init_leverage = u32_to_basis(marginfi_group.same_asset_emode_init_leverage);
+    let same_asset_maint_leverage = u32_to_basis(marginfi_group.same_asset_emode_maint_leverage);
 
     let same_asset_disabled =
         same_asset_init_leverage <= I80F48::ONE && same_asset_maint_leverage <= I80F48::ONE;

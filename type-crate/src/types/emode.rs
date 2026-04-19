@@ -8,6 +8,8 @@ use anchor_lang::prelude::*;
 
 use crate::{assert_struct_align, assert_struct_size};
 
+#[cfg(not(feature = "anchor"))]
+use super::Pubkey;
 use super::WrappedI80F48;
 
 pub const EMODE_ON: u64 = 1;
@@ -150,6 +152,7 @@ pub enum ReconciledEmodeRequirementType {
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
 pub struct ReconciledEmodeEntry {
     pub collateral_bank_emode_tag: u16,
+    pub flags: u8,
     pub asset_weight: I80F48,
 }
 
@@ -258,13 +261,17 @@ where
         Some(cfg) => cfg,
     };
 
-    let mut merged_entries: BTreeMap<u16, (I80F48, usize)> = BTreeMap::new();
+    let mut merged_entries: BTreeMap<u16, (I80F48, u8, usize)> = BTreeMap::new();
     let mut num_configs = 1;
 
     for entry in first.entries.iter().filter(|entry| !entry.is_empty()) {
         merged_entries.insert(
             entry.collateral_bank_emode_tag,
-            (projected_asset_weight(entry, requirement_type), 1),
+            (
+                projected_asset_weight(entry, requirement_type),
+                entry.flags,
+                1,
+            ),
         );
     }
 
@@ -273,13 +280,16 @@ where
         for entry in cfg.entries.iter().filter(|entry| !entry.is_empty()) {
             let tag = entry.collateral_bank_emode_tag;
             // Ignore entries that don't exist on the first config, we won't be using them anyways.
-            if let Some((merged_weight, cnt)) = merged_entries.get_mut(&tag) {
+            if let Some((merged_weight, merged_flags, cnt)) = merged_entries.get_mut(&tag) {
                 // Once a tag misses any prior config, it can never make it back into the
                 // intersection, so we can skip further weight work for it.
                 if *cnt == num_configs - 1 {
                     let new_weight = projected_asset_weight(entry, requirement_type);
                     if new_weight < *merged_weight {
                         *merged_weight = new_weight;
+                    }
+                    if entry.flags < *merged_flags {
+                        *merged_flags = entry.flags;
                     }
                     *cnt += 1;
                 }
@@ -291,10 +301,11 @@ where
     let mut buf_len = 0usize;
 
     // `merged_entries` is a BTreeMap, so iteration already yields tags in sorted order.
-    for (tag, (asset_weight, cnt)) in merged_entries {
+    for (tag, (asset_weight, flags, cnt)) in merged_entries {
         if cnt == num_configs {
             reconciled.entries[buf_len] = ReconciledEmodeEntry {
                 collateral_bank_emode_tag: tag,
+                flags,
                 asset_weight,
             };
             buf_len += 1;
@@ -387,18 +398,6 @@ mod tests {
     use super::*;
     use fixed::types::I80F48;
 
-    macro_rules! assert_eq_with_tolerance {
-        ($test_val:expr, $val:expr, $tolerance:expr) => {
-            assert!(
-                ($test_val - $val).abs() <= $tolerance,
-                "assertion failed: `({} - {}) <= {}`",
-                $test_val,
-                $val,
-                $tolerance
-            );
-        };
-    }
-
     // -----------------------------------------------------------------------
     // compute_same_asset_emode_weight
     // -----------------------------------------------------------------------
@@ -408,7 +407,9 @@ mod tests {
         // w = 1.0 * (1 - 1/100) = 0.99
         let w = compute_same_asset_emode_weight(I80F48::from_num(100), I80F48::ONE);
         let expected = I80F48::from_num(0.99);
-        assert_eq_with_tolerance!(w, expected, I80F48::from_num(1e-9));
+        let tolerance = I80F48::from_num(1e-9);
+        let diff = (w - expected).abs();
+        assert!(diff <= tolerance, "diff {} > tolerance {}", diff, tolerance);
     }
 
     #[test]
@@ -416,7 +417,9 @@ mod tests {
         // w = 1.0 * (1 - 1/2) = 0.5
         let w = compute_same_asset_emode_weight(I80F48::from_num(2), I80F48::ONE);
         let expected = I80F48::from_num(0.5);
-        assert_eq_with_tolerance!(w, expected, I80F48::from_num(1e-9));
+        let tolerance = I80F48::from_num(1e-9);
+        let diff = (w - expected).abs();
+        assert!(diff <= tolerance, "diff {} > tolerance {}", diff, tolerance);
     }
 
     #[test]
@@ -424,15 +427,9 @@ mod tests {
         // w = 1.0 * (1 - 1/10) = 0.9
         let w = compute_same_asset_emode_weight(I80F48::from_num(10), I80F48::ONE);
         let expected = I80F48::from_num(0.9);
-        assert_eq_with_tolerance!(w, expected, I80F48::from_num(1e-9));
-    }
-
-    #[test]
-    fn same_asset_weight_leverage_1000_liab_1() {
-        // w = 1.0 * (1 - 1/1000) = 0.999
-        let w = compute_same_asset_emode_weight(I80F48::from_num(1000), I80F48::ONE);
-        let expected = I80F48::from_num(0.999);
-        assert_eq_with_tolerance!(w, expected, I80F48::from_num(1e-9));
+        let tolerance = I80F48::from_num(1e-9);
+        let diff = (w - expected).abs();
+        assert!(diff <= tolerance, "diff {} > tolerance {}", diff, tolerance);
     }
 
     #[test]
@@ -441,14 +438,18 @@ mod tests {
         let liab_w = I80F48::from_num(1.05);
         let w = compute_same_asset_emode_weight(I80F48::from_num(100), liab_w);
         let expected = I80F48::from_num(1.0395);
-        assert_eq_with_tolerance!(w, expected, I80F48::from_num(1e-9));
+        let tolerance = I80F48::from_num(1e-9);
+        let diff = (w - expected).abs();
+        assert!(diff <= tolerance, "diff {} > tolerance {}", diff, tolerance);
     }
 
     #[test]
     fn same_asset_weight_fractional_leverage_changes_weight() {
         let w = compute_same_asset_emode_weight(I80F48::from_num(1.5), I80F48::ONE);
         let expected = I80F48::from_num(1.0 / 3.0);
-        assert_eq_with_tolerance!(w, expected, I80F48::from_num(1e-9));
+        let tolerance = I80F48::from_num(1e-9);
+        let diff = (w - expected).abs();
+        assert!(diff <= tolerance, "diff {} > tolerance {}", diff, tolerance);
     }
 
     #[test]
@@ -468,7 +469,7 @@ mod tests {
     #[test]
     fn same_asset_weight_never_reaches_1_for_finite_leverage() {
         // Even at the configured max leverage, weight should remain strictly < liab_weight.
-        let w = compute_same_asset_emode_weight(I80F48::from_num(1000), I80F48::ONE);
+        let w = compute_same_asset_emode_weight(I80F48::from_num(100), I80F48::ONE);
         assert!(
             w < I80F48::ONE,
             "same-asset weight should never equal or exceed the liability weight"
@@ -480,10 +481,8 @@ mod tests {
         let w2 = compute_same_asset_emode_weight(I80F48::from_num(2), I80F48::ONE);
         let w10 = compute_same_asset_emode_weight(I80F48::from_num(10), I80F48::ONE);
         let w100 = compute_same_asset_emode_weight(I80F48::from_num(100), I80F48::ONE);
-        let w1000 = compute_same_asset_emode_weight(I80F48::from_num(1000), I80F48::ONE);
         assert!(w2 < w10, "2x should be less than 10x");
         assert!(w10 < w100, "10x should be less than 100x");
-        assert!(w100 < w1000, "100x should be less than 1000x");
     }
 
     #[test]
@@ -530,6 +529,32 @@ mod tests {
         assert_eq!(reconciled.entries[0].collateral_bank_emode_tag, 101);
         assert_eq!(reconciled.entries[0].asset_weight, I80F48::from_num(0.65));
         assert!(!reconciled.same_asset.is_enabled());
+    }
+
+    #[test]
+    fn reconciled_emode_configs_merges_flags_with_least_favorable_rule() {
+        let config1 = EmodeConfig::from_entries(&[EmodeEntry {
+            collateral_bank_emode_tag: 101,
+            flags: 1,
+            pad0: [0; 5],
+            asset_weight_init: I80F48::from_num(0.7).into(),
+            asset_weight_maint: I80F48::from_num(0.8).into(),
+        }]);
+        let config2 = EmodeConfig::from_entries(&[EmodeEntry {
+            collateral_bank_emode_tag: 101,
+            flags: 0,
+            pad0: [0; 5],
+            asset_weight_init: I80F48::from_num(0.65).into(),
+            asset_weight_maint: I80F48::from_num(0.75).into(),
+        }]);
+
+        let reconciled = reconcile_emode_configs(
+            vec![config1, config2],
+            ReconciledEmodeRequirementType::Initial,
+        );
+
+        assert_eq!(reconciled.count, 1);
+        assert_eq!(reconciled.entries[0].flags, 0);
     }
 
     #[test]
