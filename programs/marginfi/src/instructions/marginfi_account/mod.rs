@@ -1,6 +1,7 @@
 mod borrow;
 mod close;
 mod close_balance;
+mod close_liquidation_record;
 mod deposit;
 mod emissions;
 mod flashloan;
@@ -20,6 +21,7 @@ mod withdraw;
 pub use borrow::*;
 pub use close::*;
 pub use close_balance::*;
+pub use close_liquidation_record::*;
 pub use deposit::*;
 pub use emissions::*;
 pub use flashloan::*;

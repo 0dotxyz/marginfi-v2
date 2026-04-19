@@ -229,6 +229,13 @@ pub mod marginfi {
         marginfi_account::initialize_liquidation_record(ctx)
     }
 
+    /// Close a liquidation record PDA and return rent to the original payer.
+    /// Permissionless — anyone can call, but rent always goes to `record_payer`.
+    /// Fails if the account is in receivership or deleverage (active liquidation).
+    pub fn close_liquidation_record(ctx: Context<CloseLiquidationRecord>) -> MarginfiResult {
+        marginfi_account::close_liquidation_record(ctx)
+    }
+
     /// The same as `marginfi_account_initialize`, except the created marginfi account uses a PDA
     /// (Program Derived Address)
     ///
