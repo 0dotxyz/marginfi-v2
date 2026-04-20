@@ -82,7 +82,9 @@ import {
   setAssetShareValueHaircut,
   computeSameAssetBoundaryBorrowNative,
   computeSameValueBorrowNative,
+  warpToNextBankrunSlot,
 } from "./utils/same-asset-emode";
+import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 
 const USER_ACCOUNT_SA_D = "same_asset_drift_account";
 const DRIFT_TOKEN_A_SA_SEED = new BN(16_000);
@@ -497,9 +499,7 @@ describe("d16: Drift same-asset emode", () => {
           depositUpToLimit: false,
         })
       );
-    seedTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    seedTx.sign(seedUser.wallet);
-    await banksClient.processTransaction(seedTx);
+    await processBankrunTransaction(bankrunContext, seedTx, [seedUser.wallet]);
   };
 
   before(async () => {
@@ -524,6 +524,8 @@ describe("d16: Drift same-asset emode", () => {
       ecosystem.usdcMint.publicKey,
       REGULAR_USDC_SEED
     );
+    await warpToNextBankrunSlot(bankrunContext); // This is to help with blockhash errors.
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
     await setupSameAssetScenario();
   });
 
@@ -676,11 +678,13 @@ describe("d16: Drift same-asset emode", () => {
         amount: differentMintSameValueBorrow,
       })
     );
-    unrelatedBorrowTx.recentBlockhash = await getBankrunBlockhash(
-      bankrunContext
+    const result = await processBankrunTransaction(
+      bankrunContext,
+      unrelatedBorrowTx,
+      [user.wallet],
+      true,
+      true
     );
-    unrelatedBorrowTx.sign(user.wallet);
-    const result = await banksClient.tryProcessTransaction(unrelatedBorrowTx);
     assertBankrunTxFailed(result, "0x1779");
   });
 
@@ -915,7 +919,7 @@ describe("d16: Drift same-asset emode", () => {
       label: "Drift/P0 same-asset pre-haircut setup",
       requireMaintenanceUnderwater: false,
     });
-    let restoreAssetShareValue: (() => Promise<void>) | null = null;
+    let restoreAssetShareValue: () => Promise<void> = async () => { };
 
     try {
       restoreAssetShareValue = await setAssetShareValueHaircut(
@@ -925,7 +929,8 @@ describe("d16: Drift same-asset emode", () => {
         driftTokenABank,
         199,
         200
-      );  
+      );
+      await warpToNextBankrunSlot(bankrunContext); // This is to help with blockhash errors.
       account = await pulseDriftSameAssetHealth(
         deleveragee,
         deleverageeAccount,
@@ -945,10 +950,12 @@ describe("d16: Drift same-asset emode", () => {
           remaining: composeRemainingAccounts(sameAssetRemaining),
         })
       );
-      bankruptcyTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      bankruptcyTx.sign(groupAdmin.wallet);
-      const bankruptcyResult = await banksClient.tryProcessTransaction(
-        bankruptcyTx
+      const bankruptcyResult = await processBankrunTransaction(
+        bankrunContext,
+        bankruptcyTx,
+        [groupAdmin.wallet],
+        true,
+        true
       );
       assertBankrunTxFailed(bankruptcyResult, 6013);
 
@@ -995,9 +1002,7 @@ describe("d16: Drift same-asset emode", () => {
         [riskAdmin.wallet]
       );
     } finally {
-      if (restoreAssetShareValue) {
-        await restoreAssetShareValue();
-      }
+      await restoreAssetShareValue();
     }
   });
 });

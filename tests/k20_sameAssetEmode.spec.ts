@@ -87,7 +87,9 @@ import {
   computeSameAssetBoundaryBorrowNative,
   computeSameValueBorrowNative,
   setAssetShareValueHaircut,
+  warpToNextBankrunSlot,
 } from "./utils/same-asset-emode";
+import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 
 const USER_ACCOUNT_SA_K = "same_asset_kamino_account";
 const KAMINO_USDC_SA_SEED = new BN(20_000);
@@ -402,11 +404,9 @@ describe("k20: Kamino same-asset emode", () => {
   const pulseKaminoSameAssetHealth = async (
     user: TestUser,
     marginfiAccount: PublicKey,
-    sameAssetRemaining: PublicKey[][],
-    options: { refresh?: boolean } = {}
+    sameAssetRemaining: PublicKey[][]
   ) => {
-    const refreshIxs =
-      options.refresh === false ? [] : await buildKaminoRefreshIxs();
+    const refreshIxs = await buildKaminoRefreshIxs();
 
     await processBankrunTransaction(
       bankrunContext,
@@ -601,9 +601,7 @@ describe("k20: Kamino same-asset emode", () => {
           depositUpToLimit: false,
         })
       );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(seedUser.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [seedUser.wallet]);
   };
 
   before(async () => {
@@ -634,6 +632,8 @@ describe("k20: Kamino same-asset emode", () => {
       kaminoUsdcBank
     );
     [kaminoObligation] = deriveBaseObligation(liquidityVaultAuthority, market);
+    await warpToNextBankrunSlot(bankrunContext); // This is to help with blockhash errors.
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
     await setupSameAssetScenario();
   });
 
@@ -779,11 +779,13 @@ describe("k20: Kamino same-asset emode", () => {
         amount: differentMintSameValueBorrow,
       })
     );
-    unrelatedBorrowTx.recentBlockhash = await getBankrunBlockhash(
-      bankrunContext
+    const result = await processBankrunTransaction(
+      bankrunContext,
+      unrelatedBorrowTx,
+      [user.wallet],
+      true,
+      true
     );
-    unrelatedBorrowTx.sign(user.wallet);
-    const result = await banksClient.tryProcessTransaction(unrelatedBorrowTx);
     assertBankrunTxFailed(result, "0x1779");
   });
 
@@ -1003,7 +1005,7 @@ describe("k20: Kamino same-asset emode", () => {
       label: "Kamino/P0 same-asset pre-haircut setup",
       requireMaintenanceUnderwater: false,
     });
-    let restoreAssetShareValue: (() => Promise<void>) | null = null;
+    let restoreAssetShareValue: () => Promise<void> = async () => {};
 
     try {
       restoreAssetShareValue = await setAssetShareValueHaircut(
@@ -1014,11 +1016,11 @@ describe("k20: Kamino same-asset emode", () => {
         199,
         200
       );
+      await warpToNextBankrunSlot(bankrunContext); // This is to help with blockhash errors.
       ({ account } = await pulseKaminoSameAssetHealth(
         deleveragee,
         deleverageeAccount,
-        sameAssetRemaining,
-        { refresh: false }
+        sameAssetRemaining
       ));
       assertSameAssetBadDebtSurvivability({
         healthCache: account.healthCache,
@@ -1034,10 +1036,12 @@ describe("k20: Kamino same-asset emode", () => {
           remaining: composeRemainingAccounts(sameAssetRemaining),
         })
       );
-      bankruptcyTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      bankruptcyTx.sign(groupAdmin.wallet);
-      const bankruptcyResult = await banksClient.tryProcessTransaction(
-        bankruptcyTx
+      const bankruptcyResult = await processBankrunTransaction(
+        bankrunContext,
+        bankruptcyTx,
+        [groupAdmin.wallet],
+        true,
+        true
       );
       assertBankrunTxFailed(bankruptcyResult, 6013);
 
@@ -1086,9 +1090,7 @@ describe("k20: Kamino same-asset emode", () => {
         [riskAdmin.wallet]
       );
     } finally {
-      if (restoreAssetShareValue) {
-        await restoreAssetShareValue();
-      }
+      await restoreAssetShareValue();
     }
   });
 });

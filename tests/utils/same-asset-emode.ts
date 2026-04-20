@@ -1,7 +1,11 @@
 import { BN, Program } from "@coral-xyz/anchor";
 import { assert } from "chai";
 import BigNumber from "bignumber.js";
-import { bigNumberToWrappedI80F48, WrappedI80F48, wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
+import {
+  bigNumberToWrappedI80F48,
+  WrappedI80F48,
+  wrappedI80F48toBigNumber,
+} from "@mrgnlabs/mrgn-common";
 import { CONF_INTERVAL_MULTIPLE_FLOAT } from "./types";
 import { PublicKey } from "@solana/web3.js";
 import { ProgramTestContext } from "solana-bankrun";
@@ -176,11 +180,10 @@ export const assertSameAssetBadDebtSurvivability = ({
   };
 };
 
-
 export const setAssetShareValueHaircut = async (
-  bankrunProgram:Program<Marginfi>,
+  bankrunProgram: Program<Marginfi>,
   banksClient: BanksClient,
-  bankrunContext:ProgramTestContext,
+  bankrunContext: ProgramTestContext,
   bank: PublicKey,
   numerator: number,
   denominator: number
@@ -225,6 +228,13 @@ export const setAssetShareValueHaircut = async (
       data: currentData,
     });
   };
+};
+
+export const warpToNextBankrunSlot = async (
+  bankrunContext: ProgramTestContext
+) => {
+  const clock = await bankrunContext.banksClient.getClock();
+  bankrunContext.warpToSlot(clock.slot + BigInt(1));
 };
 
 type SameValueBorrowParams = {

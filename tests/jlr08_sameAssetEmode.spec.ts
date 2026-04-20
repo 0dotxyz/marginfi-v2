@@ -82,7 +82,9 @@ import {
   computeSameAssetBoundaryBorrowNative,
   computeSameValueBorrowNative,
   setAssetShareValueHaircut,
+  warpToNextBankrunSlot,
 } from "./utils/same-asset-emode";
+import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 
 const USER_ACCOUNT_SA_JLR = "same_asset_juplend_account";
 const REGULAR_TOKEN_A_SEED = new BN(80_001);
@@ -301,11 +303,9 @@ describe("jlr08: JupLend same-asset emode", () => {
   const pulseJupLendSameAssetHealth = async (
     user: TestUser,
     marginfiAccount: PublicKey,
-    remainingGroups: PublicKey[][],
-    options: { refresh?: boolean } = {}
+    remainingGroups: PublicKey[][]
   ) => {
-    const refreshIxs =
-      options.refresh === false ? [] : [await refreshJupLendPoolIx()];
+    const refreshIxs = [await refreshJupLendPoolIx()];
 
     await processBankrunTransaction(
       bankrunContext,
@@ -499,6 +499,9 @@ describe("jlr08: JupLend same-asset emode", () => {
       ecosystem.tokenAMint.publicKey,
       REGULAR_TOKEN_A_SEED
     );
+
+    await warpToNextBankrunSlot(bankrunContext); // This is to help with blockhash errors.
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
     await setupSameAssetScenario();
   });
 
@@ -653,11 +656,13 @@ describe("jlr08: JupLend same-asset emode", () => {
         amount: differentMintSameValueBorrow,
       })
     );
-    unrelatedBorrowTx.recentBlockhash = await getBankrunBlockhash(
-      bankrunContext
+    const result = await processBankrunTransaction(
+      bankrunContext,
+      unrelatedBorrowTx,
+      [user.wallet],
+      true,
+      true
     );
-    unrelatedBorrowTx.sign(user.wallet);
-    const result = await banksClient.tryProcessTransaction(unrelatedBorrowTx);
     assertBankrunTxFailed(result, "0x1779");
   });
 
@@ -929,7 +934,7 @@ describe("jlr08: JupLend same-asset emode", () => {
       label: "JupLend/P0 same-asset pre-haircut setup",
       requireMaintenanceUnderwater: false,
     });
-    let restoreAssetShareValue: (() => Promise<void>) | null = null;
+    let restoreAssetShareValue: () => Promise<void> = async () => {};
 
     try {
       restoreAssetShareValue = await setAssetShareValueHaircut(
@@ -940,12 +945,12 @@ describe("jlr08: JupLend same-asset emode", () => {
         199,
         200
       );
+      await warpToNextBankrunSlot(bankrunContext); // This is to help with blockhash errors.
 
       account = await pulseJupLendSameAssetHealth(
         deleveragee,
         deleverageeAccount,
-        sameAssetRemaining,
-        { refresh: false }
+        sameAssetRemaining
       );
       assertSameAssetBadDebtSurvivability({
         healthCache: account.healthCache,
@@ -961,10 +966,12 @@ describe("jlr08: JupLend same-asset emode", () => {
           remaining: composeRemainingAccounts(sameAssetRemaining),
         })
       );
-      bankruptcyTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      bankruptcyTx.sign(groupAdmin.wallet);
-      const bankruptcyResult = await banksClient.tryProcessTransaction(
-        bankruptcyTx
+      const bankruptcyResult = await processBankrunTransaction(
+        bankrunContext,
+        bankruptcyTx,
+        [groupAdmin.wallet],
+        true,
+        true
       );
       assertBankrunTxFailed(bankruptcyResult, 6013);
 
@@ -1019,9 +1026,7 @@ describe("jlr08: JupLend same-asset emode", () => {
         true
       );
     } finally {
-      if (restoreAssetShareValue) {
-        await restoreAssetShareValue();
-      }
+      await restoreAssetShareValue();
     }
   });
 });

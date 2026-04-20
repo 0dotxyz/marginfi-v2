@@ -21,6 +21,7 @@ import {
   users,
   verbose,
 } from "./rootHooks";
+import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { assertBankrunTxFailed } from "./utils/genericTests";
 import {
   HEALTH_CACHE_ENGINE_OK,
@@ -50,14 +51,15 @@ import {
 } from "./utils/user-instructions";
 import {
   buildHealthRemainingAccounts,
-  getBankrunBlockhash,
   mintToTokenAccount,
+  processBankrunTransaction,
 } from "./utils/tools";
 import { deriveLiquidationRecord } from "./utils/pdas";
 import {
   assertSameAssetBadDebtSurvivability,
   computeSameAssetBoundaryBorrowNative,
   computeSameValueBorrowNative,
+  warpToNextBankrunSlot,
 } from "./utils/same-asset-emode";
 
 // Reuse banks from e01 (emode group) - these share the same USDC mint
@@ -123,9 +125,10 @@ describe("Same-asset automatic emode", () => {
         feePayer: user.wallet.publicKey,
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(user.wallet, accountKeypair);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [
+      user.wallet,
+      accountKeypair,
+    ]);
     return accountKeypair.publicKey;
   };
 
@@ -139,9 +142,7 @@ describe("Same-asset automatic emode", () => {
         remaining: composeRemainingAccounts(getSameAssetRemaining()),
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(user.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
 
     return bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
   };
@@ -205,9 +206,7 @@ describe("Same-asset automatic emode", () => {
         ),
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
     for (let i = 0; i < users.length; i++) {
       const userAccKeypair = Keypair.generate();
@@ -226,9 +225,10 @@ describe("Same-asset automatic emode", () => {
           feePayer: users[i].wallet.publicKey,
         })
       );
-      userinitTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      userinitTx.sign(users[i].wallet, userAccKeypair);
-      await banksClient.processTransaction(userinitTx);
+      await processBankrunTransaction(bankrunContext, userinitTx, [
+        users[i].wallet,
+        userAccKeypair,
+      ]);
     }
 
     for (const user of users) {
@@ -256,9 +256,7 @@ describe("Same-asset automatic emode", () => {
         depositUpToLimit: false,
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(seedUser.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [seedUser.wallet]);
 
     tx = new Transaction().add(
       await depositIx(seedUser.mrgnBankrunProgram, {
@@ -269,9 +267,7 @@ describe("Same-asset automatic emode", () => {
         depositUpToLimit: false,
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(seedUser.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [seedUser.wallet]);
   };
 
   // Leverage values for configuration
@@ -328,6 +324,8 @@ describe("Same-asset automatic emode", () => {
       ecosystem.wsolMint.publicKey,
       seed
     );
+    await warpToNextBankrunSlot(bankrunContext); // This is to help with blockhash errors.
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
     await setupSameAssetScenario();
   });
 
@@ -343,9 +341,13 @@ describe("Same-asset automatic emode", () => {
         sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(100),
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet);
-    let result = await banksClient.tryProcessTransaction(tx);
+    let result = await processBankrunTransaction(
+      bankrunContext,
+      tx,
+      [groupAdmin.wallet],
+      true,
+      true
+    );
     // BadEmodeConfig (6075 = 0x17bb)
     assertBankrunTxFailed(result, "0x17bb");
   });
@@ -358,9 +360,13 @@ describe("Same-asset automatic emode", () => {
         sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(2),
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet);
-    let result = await banksClient.tryProcessTransaction(tx);
+    let result = await processBankrunTransaction(
+      bankrunContext,
+      tx,
+      [groupAdmin.wallet],
+      true,
+      true
+    );
     // BadEmodeConfig (6075 = 0x17bb)
     assertBankrunTxFailed(result, "0x17bb");
   });
@@ -373,9 +379,13 @@ describe("Same-asset automatic emode", () => {
         sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(102),
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet);
-    let result = await banksClient.tryProcessTransaction(tx);
+    let result = await processBankrunTransaction(
+      bankrunContext,
+      tx,
+      [groupAdmin.wallet],
+      true,
+      true
+    );
     // BadEmodeConfig (6075 = 0x17bb)
     assertBankrunTxFailed(result, "0x17bb");
   });
@@ -414,9 +424,7 @@ describe("Same-asset automatic emode", () => {
         ),
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
     tx = new Transaction().add(
       await depositIx(user.mrgnBankrunProgram, {
@@ -434,9 +442,13 @@ describe("Same-asset automatic emode", () => {
         amount: naiveBorrow,
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(user.wallet);
-    const naiveResult = await banksClient.tryProcessTransaction(tx);
+    const naiveResult = await processBankrunTransaction(
+      bankrunContext,
+      tx,
+      [user.wallet],
+      true,
+      true
+    );
     assertBankrunTxFailed(naiveResult, "0x1779");
 
     tx = new Transaction().add(
@@ -455,9 +467,7 @@ describe("Same-asset automatic emode", () => {
         amount: SAME_ASSET_BORROW, // Pre-calculated borrow accounting for oracle weighting.
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(user.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
   });
 
   it("(admin) same-asset P0/P0 bad-debt haircut preserves the equity buffer and deleverages", async () => {
@@ -514,9 +524,10 @@ describe("Same-asset automatic emode", () => {
         amount: borrowAmount,
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet, deleveragee.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [
+      groupAdmin.wallet,
+      deleveragee.wallet,
+    ]);
 
     let account = await pulseSameAssetHealth(deleveragee, deleverageeAccount);
     const originalAssetValueEquity = wrappedI80F48toBigNumber(
@@ -528,7 +539,7 @@ describe("Same-asset automatic emode", () => {
       label: "P0/P0 same-asset pre-haircut setup",
       requireMaintenanceUnderwater: false,
     });
-    let restoreAssetShareValue: (() => Promise<void>) | null = null;
+    let restoreAssetShareValue: () => Promise<void> = async () => {};
 
     try {
       restoreAssetShareValue = await setAssetShareValueHaircut(
@@ -536,6 +547,7 @@ describe("Same-asset automatic emode", () => {
         199,
         200
       );
+      await warpToNextBankrunSlot(bankrunContext); // This is to help with blockhash errors.
       account = await pulseSameAssetHealth(deleveragee, deleverageeAccount);
       assertSameAssetBadDebtSurvivability({
         healthCache: account.healthCache,
@@ -551,9 +563,13 @@ describe("Same-asset automatic emode", () => {
           remaining: composeRemainingAccounts(sameAssetRemaining),
         })
       );
-      tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(groupAdmin.wallet);
-      const bankruptcyResult = await banksClient.tryProcessTransaction(tx);
+      const bankruptcyResult = await processBankrunTransaction(
+        bankrunContext,
+        tx,
+        [groupAdmin.wallet],
+        true,
+        true
+      );
       assertBankrunTxFailed(bankruptcyResult, 6013);
 
       tx = new Transaction().add(
@@ -586,13 +602,9 @@ describe("Same-asset automatic emode", () => {
           remaining: composeRemainingAccountsMetaBanksOnly(sameAssetRemaining),
         })
       );
-      tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(riskAdmin.wallet);
-      await banksClient.processTransaction(tx);
+      await processBankrunTransaction(bankrunContext, tx, [riskAdmin.wallet]);
     } finally {
-      if (restoreAssetShareValue) {
-        await restoreAssetShareValue();
-      }
+      await restoreAssetShareValue();
     }
   });
 
@@ -631,9 +643,7 @@ describe("Same-asset automatic emode", () => {
         remaining: composeRemainingAccounts(getSameAssetRemaining()),
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(user.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
 
     let account = await bankrunProgram.account.marginfiAccount.fetch(
       userAccount
@@ -660,9 +670,7 @@ describe("Same-asset automatic emode", () => {
         remaining: composeRemainingAccounts(getSameAssetRemaining()),
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
     account = await bankrunProgram.account.marginfiAccount.fetch(userAccount);
     health = getNetHealth(account.healthCache);
@@ -681,9 +689,7 @@ describe("Same-asset automatic emode", () => {
         ),
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
   });
 
   it("(user 1) repaying the same-mint borrow and switching to an equal-value SOL liability removes the lift", async () => {
@@ -721,9 +727,7 @@ describe("Same-asset automatic emode", () => {
         remaining: composeRemainingAccounts(getSameAssetRemaining()),
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(user.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
 
     let account = await bankrunProgram.account.marginfiAccount.fetch(
       userAccount
@@ -740,9 +744,7 @@ describe("Same-asset automatic emode", () => {
         remaining: composeRemainingAccounts(getSameAssetRemaining()),
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(user.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
 
     tx = new Transaction().add(
       await borrowIx(user.mrgnBankrunProgram, {
@@ -753,9 +755,13 @@ describe("Same-asset automatic emode", () => {
         amount: DIFFERENT_MINT_SAME_VALUE_BORROW,
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(user.wallet);
-    const result = await banksClient.tryProcessTransaction(tx);
+    const result = await processBankrunTransaction(
+      bankrunContext,
+      tx,
+      [user.wallet],
+      true,
+      true
+    );
     assertBankrunTxFailed(result, "0x1779");
   });
 
@@ -804,9 +810,11 @@ describe("Same-asset automatic emode", () => {
         depositUpToLimit: false,
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet, liquidatee.wallet, liquidator.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [
+      groupAdmin.wallet,
+      liquidatee.wallet,
+      liquidator.wallet,
+    ]);
 
     tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
@@ -819,9 +827,7 @@ describe("Same-asset automatic emode", () => {
         ),
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
     const liquidatorRemaining = await buildHealthRemainingAccounts(
       liquidatorAccount,
@@ -851,9 +857,7 @@ describe("Same-asset automatic emode", () => {
         liquidateeAccounts: liquidateeRemaining.length,
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(liquidator.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [liquidator.wallet]);
   });
 
   it("(admin) same-asset deleverage can improve a tightened P0/P0 position", async () => {
@@ -889,9 +893,7 @@ describe("Same-asset automatic emode", () => {
         ),
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
     tx = new Transaction().add(
       await depositIx(deleveragee.mrgnBankrunProgram, {
@@ -909,9 +911,7 @@ describe("Same-asset automatic emode", () => {
         amount: SAME_ASSET_BORROW,
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(deleveragee.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [deleveragee.wallet]);
 
     tx = new Transaction().add(
       await healthPulse(deleveragee.mrgnBankrunProgram, {
@@ -919,9 +919,7 @@ describe("Same-asset automatic emode", () => {
         remaining: composeRemainingAccounts(getSameAssetRemaining()),
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(deleveragee.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [deleveragee.wallet]);
 
     let account = await bankrunProgram.account.marginfiAccount.fetch(
       deleverageeAccount
@@ -939,9 +937,7 @@ describe("Same-asset automatic emode", () => {
         ),
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
     tx = new Transaction().add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 700_000 }),
@@ -977,8 +973,6 @@ describe("Same-asset automatic emode", () => {
         ),
       })
     );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(riskAdmin.wallet);
-    await banksClient.processTransaction(tx);
+    await processBankrunTransaction(bankrunContext, tx, [riskAdmin.wallet]);
   });
 });
