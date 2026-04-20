@@ -9,6 +9,8 @@ declare_id!("jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9");
 //
 // NOTE: This relies on the Anchor IDL located at `idls/juplend_earn.json` in the repo root.
 declare_program!(juplend_earn);
+declare_program!(liquidity);
+declare_program!(lending_reward_rate_model);
 
 #[program]
 pub mod juplend_mocks {}

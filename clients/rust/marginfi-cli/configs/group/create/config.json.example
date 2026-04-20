@@ -1,0 +1,11 @@
+{
+  "admin": null,
+  "emode_admin": null,
+  "curve_admin": null,
+  "limit_admin": null,
+  "emissions_admin": null,
+  "metadata_admin": null,
+  "risk_admin": null,
+  "emode_max_init_leverage": 4.0,
+  "emode_max_maint_leverage": 5.0
+}

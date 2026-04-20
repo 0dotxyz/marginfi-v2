@@ -1,0 +1,84 @@
+{
+  "blue-chip": {
+    "SOL": "So11111111111111111111111111111111111111112",
+    "cbBTC": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+    "xBTC": "CtzPWv73Sn1dMGVU3ZtLv9yWSyUAanBni19YWDaznnkn",
+    "zenBTC": "9hX59xHHnaZXLU6quvm5uGY2iDiT3jczaReHy6A6TYKw",
+    "zBTC": "zBTCug3er3tLyffELcvDNrKkCymbPWysGcWihESYfLg",
+    "WBTC": "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
+    "WETH": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs"
+  },
+  "stablecoins": {
+    "USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "USDT": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+    "UXD": "7kbnvuGBxxj8AG9qp8Scn56muWGaRaFqxg1FsRp3PaFT",
+    "USDS": "USDSwr9ApdHk5bvJKMjzff41FfuX8bSxdKcR81vTwcA",
+    "USDG": "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH",
+    "PYUSD": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+    "CASH": "CASHx9KJUStyftLFWGvEVf59SGeG9sh5FfcnZMVPCASH",
+    "hyUSD": "5YMkXAYccHSGnHn9nob9xEvv6Pvka9DZWH7nTbotTu9E",
+    "USX": "6FrrzDk5mQARGc1TDYoyVnSyRdds1t4PbtohCD6p3tgG",
+    "eUSX": "3ThdFZQKM6kRyVGLG48kaPg5TRMhYMKY1iCRa9xop1WC",
+    "EURC": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+    "USD1": "USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB",
+    "Syrup USD": "AvZZF1YaZDziPY2RCK4oJrRVrbN3mTD9NL24hPeaZeUj"
+  },
+  "sol-lst": {
+    "SOL": "So11111111111111111111111111111111111111112",
+    "mSOL": "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",
+    "JitoSOL": "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn",
+    "bSOL": "bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1",
+    "LST": "LSTxxxnJzKDFSLr4dUkPcmCf5VyryEqzPLz5j4bpxFp",
+    "JupSOL": "jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v",
+    "hSOL": "he1iusmfkpAdwvxLNGV8Y1iSbj4rUy6yMhEA3fotn9A",
+    "bbSOL": "Bybit2vBJGhPF52GBdNaQfUJ6ZpThSgHBobjWZpLPb4B",
+    "BNSOL": "BNso1VUJnh4zcfpZa6986Ea66P6TCp59hvtNJ8b1X85",
+    "INF": "5oVNBeEEQvYi1cX3ir8Dx5n1P7pdxydbGF2X4TxVusJm",
+    "dfdvSOL": "sctmB7GPi5L2Q5G9tUSzXvhZ4YiDMEGcRov9KfArQpx",
+    "rkSOL": "EPCz5LK372vmvCkZH3HgSuGNKACJJwwxsofW6fypCPZL",
+    "picoSOL": "picobAEvs6w7QEknPce34wAE4gknZA9v5tTonnmHYdX",
+    "lanternSOL": "LnTRntk2kTfWEY6cVB8K9649pgJbt6dJLS1Ns1GZCWg",
+    "JSOL": "7Q2afV64in6N6SeZsAAB81TJzwDoD6zpqmHkzi9Dcavn",
+    "dzSOL": "Gekfj7SL2fVpTDxJZmeC46cTYxinjB6gkAnb6EGT6mnn",
+    "BulkSOL": "BULKoNSGzxtCqzwTvg5hFJg8fx6dqZRScyXe5LYMfxrn",
+    "hyloSOL": "hy1oXYgrBW6PVcJ4s6s2FKavRdwgWTXdfE69AxT7kPT",
+    "fwdSOL": "cPQPBN7WubB3zyQDpzTK2ormx1BMdAym9xkrYUJsctm",
+    "dSOL": "Dso1bDeDjCQxTrWHqUUi63oBvV7Mdm6WaobLbQ7gnPQ",
+    "STKESOL": "stke7uu3fXHsGqKVVjKnkmj65LRPVrqr4bLG2SJg7rh"
+  },
+  "bitcoin": {
+    "cbBTC": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+    "xBTC": "CtzPWv73Sn1dMGVU3ZtLv9yWSyUAanBni19YWDaznnkn",
+    "zenBTC": "9hX59xHHnaZXLU6quvm5uGY2iDiT3jczaReHy6A6TYKw",
+    "zBTC": "zBTCug3er3tLyffELcvDNrKkCymbPWysGcWihESYfLg",
+    "WBTC": "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh"
+  },
+  "rate-products": {
+    "PT-hyloSOL": "CZCg4Euwif2h2LpctMpRaR2wU2eKaLGRueVfR8oyq28G",
+    "PT-hyUSD": "GJ3CvAnawvxwReu7MhBfTQBLcfcs1awP5h55SzoBBNYq",
+    "PT-BulkSOL": "Bw6zsBWadivcKo1n2wEyF79pSrKDGyggif4a7wv3dtVi",
+    "PT-BulkSOL-2": "CepgNWfh7p4pBenHCsWGC7ZfPwhFkskwvKXqmQMLnRRM"
+  },
+  "ecosystem": {
+    "JLP": "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4",
+    "ORE": "oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp",
+    "ZEC": "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS"
+  },
+  "governance": {
+    "JTO": "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",
+    "PUMP": "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn",
+    "W": "85VBFQZC9TZkfaptBWjvUw7YbZjy52A6mjtPGjstQAmQ",
+    "CLOUD": "CLoUDKc4Ane7HeQcPpE3YHnznRxhMimJ4MyaUqyHFzAu",
+    "TNSR": "TNSRxcUxoT9xBG3de7PiJyTDYu7kskLqcpddxnEJAS6",
+    "RENDER": "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof",
+    "JUP": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+    "HNT": "hntyVP6YFm1Hg25TN9WGLqM12b8TQmcknKrdu1oxWux",
+    "PYTH": "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3",
+    "2Z": "J6pQQ3FAcJQeWPPGppWRb4nM8jU3wLyYbRrLh7feMfvd",
+    "MET": "METvsvVRapdj9cFLzq4Tr43xK4tAjQfwX76z3n6mWQL"
+  },
+  "memes": {
+    "Bonk": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "$WIF": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm"
+  }
+}

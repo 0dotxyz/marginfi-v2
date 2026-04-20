@@ -439,11 +439,11 @@ async function addGenericKaminoBank(
     ),
   );
 
-  const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
+  const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
     bankrunProgram.programId,
     bankKey,
   );
-  const [obligation] = deriveBaseObligation(lendingVaultAuthority, market);
+  const [obligation] = deriveBaseObligation(liquidityVaultAuthority, market);
   const [userState] = PublicKey.findProgramAddressSync(
     [Buffer.from("user"), farmState.toBuffer(), obligation.toBuffer()],
     FARMS_PROGRAM_ID,
@@ -462,7 +462,7 @@ async function addGenericKaminoBank(
         bank: bankKey,
         signerTokenAccount: groupAdmin.tokenAAccount,
         lendingMarket: market,
-        reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+        reserve,
         pythOracle: oracles.tokenAOracle.publicKey,
         reserveFarmState: farmState,
         obligationFarmUserState: userState,

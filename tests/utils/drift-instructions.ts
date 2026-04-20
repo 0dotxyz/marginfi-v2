@@ -12,7 +12,7 @@ import {
 } from "@solana/spl-token";
 import { DRIFT_PROGRAM_ID } from "./types";
 import { DriftConfigCompact } from "./drift-utils";
-import { Drift } from "../fixtures/drift_v2";
+import { Drift } from "../fixtures/drift";
 import {
   deriveDriftStatePDA,
   deriveSpotMarketVaultPDA,

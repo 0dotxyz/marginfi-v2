@@ -1,0 +1,7 @@
+{
+  "bank_pk": "<BANK_PUBKEY>",
+  "reward_index": 0,
+  "global_config": "<KAMINO_GLOBAL_CONFIG_PUBKEY>",
+  "reward_mint": "<KAMINO_REWARD_MINT_PUBKEY>",
+  "scope_prices": null
+}

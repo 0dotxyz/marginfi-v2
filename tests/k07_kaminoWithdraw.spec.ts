@@ -76,9 +76,10 @@ describe("k07: Kamino Withdraw Tests", () => {
           marginfiAccount,
           authority: user.wallet.publicKey,
           bank,
+          mint: ecosystem.usdcMint.publicKey,
           destinationTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
         {
           amount: withdrawAmt,
@@ -158,9 +159,10 @@ describe("k07: Kamino Withdraw Tests", () => {
           marginfiAccount,
           authority: user.wallet.publicKey,
           bank,
+          mint: ecosystem.usdcMint.publicKey,
           destinationTokenAccount: user.usdcAccount,
           lendingMarket: market,
-          reserveLiquidityMint: ecosystem.usdcMint.publicKey,
+          reserve: usdcReserve,
         },
         {
           amount: excessiveWithdrawAmount,

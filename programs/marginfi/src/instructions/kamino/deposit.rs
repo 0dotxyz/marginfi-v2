@@ -1,26 +1,20 @@
 use crate::state::bank::BankVaultType;
+use crate::utils::record_deposit_inflow;
 use crate::{
-    bank_signer, check,
+    bank_signer,
     constants::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
     events::{AccountEventHeader, LendingAccountDepositEvent},
     optional_account,
     state::{
         bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, calc_value, is_signer_authorized, BankAccountWrapper,
+            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
             LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        rate_limiter::{
-            should_skip_rate_limit, BankRateLimiterImpl, BankRateLimiterUntrackedImpl,
-            GroupRateLimiterImpl,
-        },
     },
     utils::is_kamino_asset_tag,
-    utils::{
-        assert_within_one_token, fetch_rate_limit_price_for_inflow, validate_asset_tags,
-        validate_bank_state, InstructionKind,
-    },
+    utils::{assert_within_one_token, validate_asset_tags, validate_bank_state, InstructionKind},
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -34,15 +28,13 @@ use fixed::types::I80F48;
 use kamino_mocks::kamino_lending::cpi::deposit_reserve_liquidity_and_obligation_collateral_v2;
 use kamino_mocks::{
     kamino_lending::cpi::accounts::{
-        DepositReserveLiquidityAndObligationCollateral,
-        DepositReserveLiquidityAndObligationCollateralV2, SocializeLossV2FarmsAccounts,
+        DepositFarmsAccounts, DepositReserveLiquidityAndObligationCollateral,
+        DepositReserveLiquidityAndObligationCollateralV2,
     },
     state::{MinimalObligation, MinimalReserve},
 };
 use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
-use marginfi_type_crate::types::{
-    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
-};
+use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
 /// Deposit into a Kamino pool through a marginfi account
 ///
@@ -63,12 +55,6 @@ pub fn kamino_deposit<'info>(
 
         validate_asset_tags(&bank, &marginfi_account)?;
         validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
-
-        check!(
-            !marginfi_account.get_flag(ACCOUNT_DISABLED)
-                && !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP),
-            MarginfiError::AccountDisabled
-        );
     }
 
     // Get initial obligation data to verify deposit amount later
@@ -98,7 +84,7 @@ pub fn kamino_deposit<'info>(
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let mut group = ctx.accounts.group.load_mut()?;
+        let group = ctx.accounts.group.load()?;
         let clock = Clock::get()?;
 
         let mut bank_account = BankAccountWrapper::find_or_create(
@@ -111,30 +97,15 @@ pub fn kamino_deposit<'info>(
         let obligation_collateral_change_i80f48 = I80F48::from_num(obligation_collateral_change);
         bank_account.deposit_no_repay(obligation_collateral_change_i80f48)?;
 
-        // Record inflow so net-outflow windows release capacity.
-        if !should_skip_rate_limit(marginfi_account.account_flags) {
-            if bank.rate_limiter.is_enabled() {
-                bank.rate_limiter
-                    .record_inflow(amount, clock.unix_timestamp);
-            }
-
-            if group.rate_limiter.is_enabled() {
-                let rate_limit_price = fetch_rate_limit_price_for_inflow(&bank, &clock)?;
-                match rate_limit_price {
-                    Some(price) => {
-                        let usd_value =
-                            calc_value(I80F48::from_num(amount), price, bank.mint_decimals, None)?;
-                        group
-                            .rate_limiter
-                            .record_inflow(usd_value.to_num::<u64>(), clock.unix_timestamp);
-                    }
-                    None => {
-                        bank.rate_limiter.record_untracked_inflow(amount);
-                    }
-                }
-            }
-        }
-
+        record_deposit_inflow(
+            &mut bank,
+            &group,
+            ctx.accounts.group.key(),
+            ctx.accounts.bank.key(),
+            marginfi_account.account_flags,
+            amount,
+            &clock,
+        )?;
         // Update bank cache after modifying balances
         bank.update_bank_cache(&group)?;
 
@@ -160,7 +131,6 @@ pub fn kamino_deposit<'info>(
 #[derive(Accounts)]
 pub struct KaminoDeposit<'info> {
     #[account(
-        mut,
         constraint = (
             !group.load()?.is_protocol_paused()
         ) @ MarginfiError::ProtocolPaused
@@ -170,6 +140,10 @@ pub struct KaminoDeposit<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
+        constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_DISABLED)
+        } @MarginfiError::AccountDisabled,
         constraint = {
             let a = marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())
@@ -323,16 +297,15 @@ impl<'info> KaminoDeposit<'info> {
         };
 
         // --- optional “farms_accounts” group ---
-        let farms_accounts = SocializeLossV2FarmsAccounts {
+        let farms_accounts = DepositFarmsAccounts {
             obligation_farm_user_state: optional_account!(self.obligation_farm_user_state),
             reserve_farm_state: optional_account!(self.reserve_farm_state),
         };
 
         // --- wrap both groups in the outer struct ---
         let accounts = DepositReserveLiquidityAndObligationCollateralV2 {
-            deposit_reserve_liquidity_and_obligation_collateral_v2_deposit_accounts:
-                deposit_accounts,
-            deposit_reserve_liquidity_and_obligation_collateral_v2_farms_accounts: farms_accounts,
+            deposit_accounts,
+            deposit_farms_accounts: farms_accounts,
             farms_program: self.farms_program.to_account_info(),
         };
         let program = self.kamino_program.to_account_info();

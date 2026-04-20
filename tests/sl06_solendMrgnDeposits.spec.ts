@@ -28,7 +28,6 @@ import {
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import {
   composeRemainingAccounts,
-  composeRemainingAccountsByBalances,
 } from "./utils/user-instructions";
 import {
   makeSolendDepositIx,
@@ -862,10 +861,8 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
         amount: withdrawAll ? new BN(0) : amount,
         withdrawAll,
         remaining: withdrawAll
-          ? composeRemainingAccountsByBalances(
-              marginfiAccount.lendingAccount.balances,
-              activePositions,
-              bank
+          ? composeRemainingAccounts(
+              activePositions.filter((group) => !group[0].equals(bank))
             )
           : activePositions.flat(),
       }

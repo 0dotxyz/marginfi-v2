@@ -25,7 +25,7 @@ import {
 } from "@kamino-finance/klend-sdk";
 import Decimal from "decimal.js";
 import { Farms } from "../fixtures/kamino_farms";
-import farmsIdl from "../../idls/kamino_farms.json";
+import farmsIdl from "../../idls-complete/kamino_farms.json";
 import {
   A_FARM_STATE,
   A_FARM_VAULTS_AUTHORITY,
@@ -161,7 +161,7 @@ const createTokenAReserve = async (market: PublicKey): Promise<PublicKey> => {
     await klendBankrunProgram.methods
       .initReserve()
       .accounts({
-        lendingMarketOwner: groupAdmin.wallet.publicKey,
+        signer: groupAdmin.wallet.publicKey,
         lendingMarket: market,
         lendingMarketAuthority,
         reserve: reserve.publicKey,

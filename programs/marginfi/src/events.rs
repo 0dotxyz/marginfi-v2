@@ -239,3 +239,36 @@ pub struct DeleverageEvent {
     pub deleveragee_assets_seized: f64,
     pub deleveragee_liability_repaid: f64,
 }
+
+// Rate limit events
+
+/// Emitted when a bank-level inflow or outflow is recorded.
+/// The delegate flow admin aggregates these off-chain and
+/// updates the group rate limiter via `update_group_rate_limiter`.
+#[event]
+pub struct RateLimitFlowEvent {
+    pub group: Pubkey,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    /// 0 = outflow (withdraw/borrow), 1 = inflow (deposit/repay)
+    pub flow_direction: u8,
+    /// Amount in native tokens
+    pub native_amount: u64,
+    pub mint_decimals: u8,
+    /// Unix timestamp when the flow was recorded
+    pub current_timestamp: i64,
+}
+
+/// Emitted for deleverage-only withdraw outflows.
+/// The delegate flow admin aggregates these off-chain and
+/// updates the deleverage daily withdraws via `update_deleverage_withdrawals`.
+#[event]
+pub struct DeleverageWithdrawFlowEvent {
+    pub group: Pubkey,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    /// Equity-denominated outflow value in USD, rounded to integer.
+    pub outflow_usd: u32,
+    /// Unix timestamp when the flow was recorded
+    pub current_timestamp: i64,
+}

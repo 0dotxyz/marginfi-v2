@@ -104,12 +104,12 @@ impl<'info> KaminoHarvestReward<'info> {
     pub fn cpi_harvest_rewards(&self, reward_index: u64) -> MarginfiResult {
         let program = self.farms_program.to_account_info();
         let accounts = HarvestReward {
-            owner: self.liquidity_vault_authority.to_account_info(),
+            payer: self.liquidity_vault_authority.to_account_info(),
             user_state: self.user_state.to_account_info(),
             farm_state: self.farm_state.to_account_info(),
             global_config: self.global_config.to_account_info(),
             reward_mint: self.reward_mint.to_account_info(),
-            user_reward_ata: self.user_reward_ata.to_account_info(),
+            user_reward_token_account: self.user_reward_ata.to_account_info(),
             rewards_vault: self.rewards_vault.to_account_info(),
             rewards_treasury_vault: self.rewards_treasury_vault.to_account_info(),
             farm_vaults_authority: self.farm_vaults_authority.to_account_info(),

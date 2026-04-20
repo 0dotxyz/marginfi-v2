@@ -9,10 +9,9 @@ use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
 use kamino_mocks::kamino_lending::cpi::accounts::{
-    DepositReserveLiquidityAndObligationCollateral,
+    DepositFarmsAccounts, DepositReserveLiquidityAndObligationCollateral,
     DepositReserveLiquidityAndObligationCollateralV2, InitObligation,
     InitObligationFarmsForReserve, InitUserMetadata, RefreshObligation, RefreshReserve,
-    SocializeLossV2FarmsAccounts,
 };
 use kamino_mocks::kamino_lending::cpi::{
     deposit_reserve_liquidity_and_obligation_collateral_v2, init_obligation,
@@ -313,16 +312,15 @@ impl<'info> KaminoInitObligation<'info> {
         };
 
         // --- optional “farms_accounts” group ---
-        let farms_accounts = SocializeLossV2FarmsAccounts {
+        let farms_accounts = DepositFarmsAccounts {
             obligation_farm_user_state: optional_account!(self.obligation_farm_user_state),
             reserve_farm_state: optional_account!(self.reserve_farm_state),
         };
 
         // --- wrap both groups in the outer struct ---
         let accounts = DepositReserveLiquidityAndObligationCollateralV2 {
-            deposit_reserve_liquidity_and_obligation_collateral_v2_deposit_accounts:
-                deposit_accounts,
-            deposit_reserve_liquidity_and_obligation_collateral_v2_farms_accounts: farms_accounts,
+            deposit_accounts,
+            deposit_farms_accounts: farms_accounts,
             farms_program: self.farms_program.to_account_info(),
         };
         let program = self.kamino_program.to_account_info();

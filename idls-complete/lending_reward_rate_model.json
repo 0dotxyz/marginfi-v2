@@ -1,0 +1,869 @@
+{
+  "address": "jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar",
+  "metadata": {
+    "name": "lending_reward_rate_model",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "cancel_queued_rewards",
+      "discriminator": [
+        253,
+        198,
+        122,
+        96,
+        234,
+        226,
+        53,
+        229
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "lending_rewards_admin"
+        },
+        {
+          "name": "lending_account",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "f_token_mint"
+        },
+        {
+          "name": "supply_token_reserves_liquidity"
+        },
+        {
+          "name": "lending_rewards_rate_model",
+          "writable": true
+        },
+        {
+          "name": "lending_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "init_lending_rewards_admin",
+      "discriminator": [
+        202,
+        36,
+        47,
+        209,
+        3,
+        201,
+        173,
+        94
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lending_rewards_admin",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  114,
+                  101,
+                  119,
+                  97,
+                  114,
+                  100,
+                  115,
+                  95,
+                  97,
+                  100,
+                  109,
+                  105,
+                  110
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "authority",
+          "type": "pubkey"
+        },
+        {
+          "name": "lending_program",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "init_lending_rewards_rate_model",
+      "discriminator": [
+        117,
+        123,
+        196,
+        52,
+        246,
+        90,
+        168,
+        0
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "lending_rewards_admin"
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "lending_rewards_rate_model",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  114,
+                  101,
+                  119,
+                  97,
+                  114,
+                  100,
+                  115,
+                  95,
+                  114,
+                  97,
+                  116,
+                  101,
+                  95,
+                  109,
+                  111,
+                  100,
+                  101,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "queue_next_rewards",
+      "discriminator": [
+        12,
+        38,
+        248,
+        80,
+        128,
+        76,
+        155,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "lending_rewards_admin"
+        },
+        {
+          "name": "lending_account",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "f_token_mint"
+        },
+        {
+          "name": "supply_token_reserves_liquidity"
+        },
+        {
+          "name": "lending_rewards_rate_model",
+          "writable": true
+        },
+        {
+          "name": "lending_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "reward_amount",
+          "type": "u64"
+        },
+        {
+          "name": "duration",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "start_rewards",
+      "discriminator": [
+        62,
+        183,
+        108,
+        14,
+        161,
+        145,
+        121,
+        115
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "lending_rewards_admin"
+        },
+        {
+          "name": "lending_account",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "f_token_mint"
+        },
+        {
+          "name": "supply_token_reserves_liquidity"
+        },
+        {
+          "name": "lending_rewards_rate_model",
+          "writable": true
+        },
+        {
+          "name": "lending_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "reward_amount",
+          "type": "u64"
+        },
+        {
+          "name": "duration",
+          "type": "u64"
+        },
+        {
+          "name": "start_time",
+          "type": "u64"
+        },
+        {
+          "name": "start_tvl",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "stop_rewards",
+      "discriminator": [
+        39,
+        231,
+        201,
+        99,
+        230,
+        105,
+        100,
+        76
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "lending_rewards_admin"
+        },
+        {
+          "name": "lending_account",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "f_token_mint"
+        },
+        {
+          "name": "supply_token_reserves_liquidity"
+        },
+        {
+          "name": "lending_rewards_rate_model",
+          "writable": true
+        },
+        {
+          "name": "lending_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "transition_to_next_rewards",
+      "discriminator": [
+        167,
+        50,
+        233,
+        93,
+        0,
+        178,
+        154,
+        247
+      ],
+      "accounts": [
+        {
+          "name": "lending_rewards_admin"
+        },
+        {
+          "name": "lending_account",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "lending_rewards_rate_model"
+          ]
+        },
+        {
+          "name": "f_token_mint"
+        },
+        {
+          "name": "supply_token_reserves_liquidity"
+        },
+        {
+          "name": "lending_rewards_rate_model",
+          "writable": true
+        },
+        {
+          "name": "lending_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "update_authority",
+      "discriminator": [
+        32,
+        46,
+        64,
+        28,
+        149,
+        75,
+        243,
+        88
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "lending_rewards_admin",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_authority",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "update_auths",
+      "discriminator": [
+        93,
+        96,
+        178,
+        156,
+        57,
+        117,
+        253,
+        209
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "lending_rewards_admin",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "auth_status",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "AddressBool"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "LendingRewardsAdmin",
+      "discriminator": [
+        68,
+        18,
+        109,
+        18,
+        2,
+        9,
+        174,
+        101
+      ]
+    },
+    {
+      "name": "LendingRewardsRateModel",
+      "discriminator": [
+        166,
+        72,
+        71,
+        131,
+        172,
+        74,
+        166,
+        181
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "LogCancelQueuedRewards",
+      "discriminator": [
+        177,
+        173,
+        63,
+        139,
+        228,
+        173,
+        187,
+        204
+      ]
+    },
+    {
+      "name": "LogQueueNextRewards",
+      "discriminator": [
+        50,
+        129,
+        214,
+        126,
+        39,
+        205,
+        209,
+        116
+      ]
+    },
+    {
+      "name": "LogStartRewards",
+      "discriminator": [
+        30,
+        243,
+        168,
+        45,
+        233,
+        150,
+        101,
+        238
+      ]
+    },
+    {
+      "name": "LogStopRewards",
+      "discriminator": [
+        37,
+        218,
+        239,
+        232,
+        21,
+        149,
+        99,
+        31
+      ]
+    },
+    {
+      "name": "LogTransitionedToNextRewards",
+      "discriminator": [
+        177,
+        232,
+        239,
+        222,
+        224,
+        61,
+        9,
+        101
+      ]
+    },
+    {
+      "name": "LogUpdateAuthority",
+      "discriminator": [
+        150,
+        152,
+        157,
+        143,
+        6,
+        135,
+        193,
+        101
+      ]
+    },
+    {
+      "name": "LogUpdateAuths",
+      "discriminator": [
+        88,
+        80,
+        109,
+        48,
+        111,
+        203,
+        76,
+        251
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidParams",
+      "msg": "LENDING_REWARD_RATE_MODEL_INVALID_PARAMS"
+    },
+    {
+      "code": 6001,
+      "name": "AlreadyStopped",
+      "msg": "LENDING_REWARD_RATE_MODEL_ALREADY_STOPPED"
+    },
+    {
+      "code": 6002,
+      "name": "NextRewardsQueued",
+      "msg": "LENDING_REWARD_RATE_MODEL_NEXT_REWARDS_QUEUED"
+    },
+    {
+      "code": 6003,
+      "name": "NotEnded",
+      "msg": "LENDING_REWARD_RATE_MODEL_NOT_ENDED"
+    },
+    {
+      "code": 6004,
+      "name": "NoQueuedRewards",
+      "msg": "LENDING_REWARD_RATE_MODEL_NO_QUEUED_REWARDS"
+    },
+    {
+      "code": 6005,
+      "name": "MustTransitionToNext",
+      "msg": "LENDING_REWARD_RATE_MODEL_MUST_TRANSITION_TO_NEXT"
+    },
+    {
+      "code": 6006,
+      "name": "NoRewardsStarted",
+      "msg": "LENDING_REWARD_RATE_MODEL_NO_REWARDS_STARTED"
+    },
+    {
+      "code": 6007,
+      "name": "MaxAuthCountReached",
+      "msg": "LENDING_REWARD_RATE_MODEL_MAX_AUTH_COUNT_REACHED"
+    },
+    {
+      "code": 6008,
+      "name": "OnlyAuthority",
+      "msg": "LENDING_REWARD_RATE_MODEL_ONLY_AUTHORITY"
+    },
+    {
+      "code": 6009,
+      "name": "OnlyAuths",
+      "msg": "LENDING_REWARD_RATE_MODEL_ONLY_AUTH"
+    },
+    {
+      "code": 6010,
+      "name": "CpiToLendingProgramFailed",
+      "msg": "LENDING_REWARD_RATE_MODEL_CPI_TO_LENDING_PROGRAM_FAILED"
+    },
+    {
+      "code": 6011,
+      "name": "InvalidLendingProgram",
+      "msg": "LENDING_REWARD_RATE_MODEL_INVALID_LENDING_PROGRAM"
+    },
+    {
+      "code": 6012,
+      "name": "InvalidMint",
+      "msg": "LENDING_REWARD_RATE_MODEL_INVALID_MINT"
+    }
+  ],
+  "types": [
+    {
+      "name": "AddressBool",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "addr",
+            "type": "pubkey"
+          },
+          {
+            "name": "value",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LendingRewardsAdmin",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "lending_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "auths",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LendingRewardsRateModel",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "docs": [
+              "@dev mint address"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "start_tvl",
+            "docs": [
+              "@dev tvl below which rewards rate is 0. If current TVL is below this value, triggering `update_rate()` on the fToken",
+              "might bring the total TVL above this cut-off."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "duration",
+            "docs": [
+              "@dev for how long current rewards should run"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "start_time",
+            "docs": [
+              "@dev when current rewards got started"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "yearly_reward",
+            "docs": [
+              "@dev current annualized reward based on input params (duration, rewardAmount)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "next_duration",
+            "docs": [
+              "@dev Duration for the next rewards phase"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "next_reward_amount",
+            "docs": [
+              "@dev Amount of rewards for the next phase"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogCancelQueuedRewards",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogQueueNextRewards",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "reward_amount",
+            "type": "u64"
+          },
+          {
+            "name": "duration",
+            "type": "u64"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogStartRewards",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "reward_amount",
+            "type": "u64"
+          },
+          {
+            "name": "duration",
+            "type": "u64"
+          },
+          {
+            "name": "start_time",
+            "type": "u64"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogStopRewards",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogTransitionedToNextRewards",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "start_time",
+            "type": "u64"
+          },
+          {
+            "name": "end_time",
+            "type": "u64"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogUpdateAuthority",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "new_authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LogUpdateAuths",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "auth_status",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "AddressBool"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
