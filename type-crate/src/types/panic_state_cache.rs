@@ -77,8 +77,8 @@ pub struct PanicState {
 
 impl PanicState {
     pub const FLAG_PAUSED: u8 = 1 << 0;
-    pub const PAUSE_DURATION_SECONDS: i64 = 30 * 60; // 30 minutes
-    pub const MAX_CONSECUTIVE_PAUSES: u8 = 2;
+    pub const PAUSE_DURATION_SECONDS: i64 = 7 * 24 * 60 * 60; // 7 days
+    pub const MAX_CONSECUTIVE_PAUSES: u8 = 10;
     pub const MAX_DAILY_PAUSES: u8 = 3;
 
     /// Only checks if the paused flag is set.

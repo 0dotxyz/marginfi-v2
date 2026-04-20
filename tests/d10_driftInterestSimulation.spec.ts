@@ -580,12 +580,28 @@ describe("d10: Drift Interest Simulation", () => {
               tokenAmount,
             );
 
-            await makeWithdrawThroughMarginfi(
-              user,
-              balance.bankPk,
-              new BN(0),
-              true,
-            );
+            const updatedMarginfiAccount =
+              await bankrunProgram.account.marginfiAccount.fetch(userAccount);
+            const updatedBalance =
+              updatedMarginfiAccount.lendingAccount.balances.find(
+                (b) => b.active === 1 && b.bankPk.equals(balance.bankPk),
+              );
+
+            if (updatedBalance) {
+              const updatedAssetShares = wrappedI80F48toBigNumber(
+                updatedBalance.assetShares,
+              );
+              const scaledUpdatedBalance = new BN(updatedAssetShares.toString());
+
+              if (!scaledUpdatedBalance.isZero()) {
+                await makeWithdrawThroughMarginfi(
+                  user,
+                  balance.bankPk,
+                  new BN(0),
+                  true,
+                );
+              }
+            }
           }
         }
       }

@@ -160,6 +160,10 @@ pub fn validate_instructions(
             ),
             (
                 kamino_mocks::kamino_lending::ID,
+                kamino::RefreshReservesBatch::DISCRIMINATOR,
+            ),
+            (
+                kamino_mocks::kamino_lending::ID,
                 kamino::RefreshObligation::DISCRIMINATOR,
             ),
             (id_crate::ID, &ix_discriminators::INIT_LIQUIDATION_RECORD),

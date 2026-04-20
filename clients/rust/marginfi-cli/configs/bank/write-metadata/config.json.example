@@ -1,6 +1,8 @@
 [
   {
     "bankAddress": "<BANK_PUBKEY>",
+    "group": null,
+    "bankSeed": 0,
     "tokenAddress": null,
     "tokenSymbol": "USDC",
     "tokenName": "USD Coin",
@@ -11,6 +13,8 @@
   },
   {
     "bankAddress": "<BANK_PUBKEY>",
+    "group": null,
+    "bankSeed": 1,
     "tokenAddress": null,
     "tokenSymbol": "SOL",
     "tokenName": "Wrapped SOL",

@@ -1321,8 +1321,6 @@ impl TestFixture {
         let reserve_liquidity_supply = reserve.supply_vault;
         let reserve_collateral_mint = reserve.collateral_mint_pubkey;
         let reserve_collateral_supply = reserve.collateral_supply_vault;
-        let reserve_pyth_oracle =
-            get_oracle_id_from_feed_id(PYTH_USDC_FEED).unwrap_or(PYTH_USDC_FEED);
         create_spl_mint_account_if_missing(
             test_f.context.clone(),
             reserve.mint_pubkey,
@@ -1478,11 +1476,6 @@ impl TestFixture {
                 reserve_liquidity_supply,
                 reserve_collateral_mint,
                 reserve_destination_deposit_collateral: reserve_collateral_supply,
-                pyth_oracle: (reserve_pyth_oracle != Pubkey::default())
-                    .then_some(reserve_pyth_oracle),
-                switchboard_price_oracle: None,
-                switchboard_twap_oracle: None,
-                scope_prices: None,
                 obligation_farm_user_state: None,
                 reserve_farm_state: None,
                 kamino_program: kamino_mocks::kamino_lending::ID,
