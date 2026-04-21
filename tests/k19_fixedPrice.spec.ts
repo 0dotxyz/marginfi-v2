@@ -596,5 +596,10 @@ describe("kx: Fixed Kamino price bank", () => {
     // Note: you lose 1-2 lamports for Kamino withdraws
     assert.approximately(userUsdcAfter, userUsdcStart, 2);
     assert.isAtMost(userUsdcAfter, userUsdcStart);
+
+    // has_kamino clears once the last Kamino position is withdrawn
+    const userAccAfter =
+      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
+    assert.equal(userAccAfter.indexerFlags.hasKamino, 0);
   });
 });

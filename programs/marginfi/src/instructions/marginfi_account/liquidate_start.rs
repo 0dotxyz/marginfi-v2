@@ -121,6 +121,7 @@ pub fn start_receivership<'info>(
     write_liquidation_price_cache_from(marginfi_account, remaining_ais, &liq_price_cache)?;
     marginfi_account.health_cache = health_cache;
     marginfi_account.set_flag(ACCOUNT_IN_RECEIVERSHIP, false);
+    marginfi_account.indexer_flags.has_ever_been_liquidated = 1;
 
     // Snapshot values to use in later checks
     liq_record.cache.asset_value_maint = assets.into();

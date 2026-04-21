@@ -124,11 +124,11 @@ async fn lending_account_close_balance() -> anyhow::Result<()> {
 
     let res = borrower_mfi_account_f.try_balance_close(sol_eq_bank).await;
     assert!(res.is_ok());
+    let account = borrower_mfi_account_f.load().await;
     // Balance closing also updates last_update
-    assert_eq!(
-        borrower_mfi_account_f.load().await.last_update,
-        last_update_after_repay + 1
-    );
+    assert_eq!(account.last_update, last_update_after_repay + 1);
+    assert_eq!(account.indexer_flags.is_lending_only, 0);
+    assert_eq!(account.indexer_flags.is_single_borrower, 1);
 
     Ok(())
 }

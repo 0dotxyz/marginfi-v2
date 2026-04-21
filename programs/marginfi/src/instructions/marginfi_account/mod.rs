@@ -1,3 +1,4 @@
+mod admin_close;
 mod borrow;
 mod close;
 mod close_balance;
@@ -14,9 +15,11 @@ mod order;
 mod pulse_health;
 mod purge_delev_balance;
 mod repay;
+mod sync_indexer_flags;
 mod transfer_account;
 mod withdraw;
 
+pub use admin_close::*;
 pub use borrow::*;
 pub use close::*;
 pub use close_balance::*;
@@ -33,5 +36,6 @@ pub use order::*;
 pub use pulse_health::*;
 pub use purge_delev_balance::*;
 pub use repay::*;
+pub use sync_indexer_flags::*;
 pub use transfer_account::*;
 pub use withdraw::*;

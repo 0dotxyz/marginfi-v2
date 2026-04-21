@@ -15,6 +15,7 @@ import {
   bankRunProvider,
   oracles,
 } from "./rootHooks";
+import { assert } from "chai";
 import { USER_ACCOUNT_D } from "./utils/mocks";
 import { processBankrunTransaction } from "./utils/tools";
 import {
@@ -270,6 +271,11 @@ describe("d08: Drift Withdraw Tests", () => {
       driftTokenABank,
       sharesBefore.sub(scaledBalanceDecrease)
     );
+
+    // has_drift persists across a partial withdraw
+    const marginfiAccAfter =
+      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
+    assert.equal(marginfiAccAfter.indexerFlags.hasDrift, 1);
   });
 
   it("(user 0) Tries to withdraw more than deposited - should fail", async () => {
@@ -533,6 +539,11 @@ describe("d08: Drift Withdraw Tests", () => {
 
     // The balance should be cleared
     await assertBankBalance(marginfiAccount, driftTokenABank, null);
+
+    // has_drift clears once the last Drift position is withdrawn
+    const marginfiAccAfter =
+      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
+    assert.equal(marginfiAccAfter.indexerFlags.hasDrift, 0);
 
     // Note: this time the actual underlying Drift position is NOT simply the (initial_deposit -
     // count_of_withdrawals_so_far). This is because Drift uses fixed precision of 9 decimals and we

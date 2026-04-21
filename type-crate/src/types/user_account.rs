@@ -1,6 +1,9 @@
 use crate::{
     assert_struct_align, assert_struct_size,
-    constants::{discriminators, ASSET_TAG_DEFAULT, EMPTY_BALANCE_THRESHOLD},
+    constants::{
+        discriminators, ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO,
+        ASSET_TAG_STAKED, EMPTY_BALANCE_THRESHOLD,
+    },
 };
 use bytemuck::{Pod, Zeroable};
 use fixed::types::I80F48;
@@ -73,7 +76,8 @@ pub struct MarginfiAccount {
     /// * Opening this account is permissionless. Typically the liquidator pays, but e.g. we may
     ///   also charge the user if they are opening a risky position on the front end.
     pub liquidation_record: Pubkey,
-    pub _padding0: [u64; 7],
+    pub indexer_flags: IndexerFlags,
+    pub _padding0: [u64; 4],
 }
 
 impl MarginfiAccount {
@@ -100,6 +104,118 @@ impl MarginfiAccount {
             ],
             program_id,
         )
+    }
+}
+
+assert_struct_size!(IndexerFlags, 24);
+assert_struct_align!(IndexerFlags, 1);
+/// On-chain flags for indexer tranching. Each flag is a full byte so off-chain consumers can
+/// filter accounts via `memcmp`. Balance-derived flags are synced automatically on every
+/// balance-mutating instruction. Pulse-derived flags are updated in `pulse_health`.
+#[repr(C)]
+#[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[derive(Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)]
+pub struct IndexerFlags {
+    /// 1 if the account has no liabilities
+    pub is_lending_only: u8,
+    /// 1 if the account has no balances above the dust threshold
+    pub is_empty: u8,
+    /// 1 if the account has exactly one liability position
+    pub is_single_borrower: u8,
+    /// 1 if the account has ever been liquidated (permanent, never unset)
+    pub has_ever_been_liquidated: u8,
+    /// 1 if the account's sole liability is on a bank with `RiskTier::Isolated`. Set at
+    /// borrow time and cleared by balance-derived sync when the account has anything other than
+    /// exactly one liability. By the isolated-liability invariant enforced at borrow, an
+    /// isolated position cannot coexist with any other liability, so `has_isolated == 1`
+    /// implies `is_single_borrower == 1`.
+    pub has_isolated: u8,
+    /// 1 if the account has a STAKED asset tag position
+    pub has_staked: u8,
+    /// 1 if the account has a KAMINO asset tag position
+    pub has_kamino: u8,
+    /// 1 if the account has a DRIFT asset tag position
+    pub has_drift: u8,
+    /// 1 if the account has a JUPLEND asset tag position
+    pub has_juplend: u8,
+    /// 1 if maintenance health was negative at last pulse
+    pub was_liquidatable: u8,
+    /// 1 if equity health was negative at last pulse
+    pub was_underwater: u8,
+    /// 1 if account was active within the last 30 days. Raised to 1 on every
+    /// balance-mutating instruction; can only transition 1 → 0 at pulse time, when the
+    /// elapsed-since-`last_update` check fails.
+    /// Combined with `is_empty`, indicates an account pending closure.
+    pub was_active_30d: u8,
+    /// 1 if account was active within the last 60 days. Raised to 1 on every
+    /// balance-mutating instruction; can only transition 1 → 0 at pulse time, when the
+    /// elapsed-since-`last_update` check fails.
+    /// Combined with `is_empty`, indicates an account eligible for permissionless close.
+    pub was_active_60d: u8,
+    /// 1 if net equity value was greater than $0 and less than $1 at last pulse
+    pub has_trivial_balance: u8,
+    pub _pad: [u8; 10],
+}
+
+pub const SECONDS_PER_DAY: i64 = 86_400;
+
+impl IndexerFlags {
+    /// Recompute balance-derived flags only. This is safe to call from permissionless backfill
+    /// paths as it does not mutate time-based activity flags or risk-engine flags.
+    pub fn sync_balance_derived(&mut self, balances: &[Balance; MAX_LENDING_ACCOUNT_BALANCES]) {
+        let mut liability_count: u8 = 0;
+        let mut has_any_balance = false;
+        let mut staked = false;
+        let mut kamino = false;
+        let mut drift = false;
+        let mut juplend = false;
+
+        for balance in balances.iter() {
+            if !balance.is_active() {
+                continue;
+            }
+            if balance.get_side().is_none() {
+                continue;
+            }
+            has_any_balance = true;
+
+            if !balance.is_empty(BalanceSide::Liabilities) {
+                liability_count = liability_count.saturating_add(1);
+            }
+
+            match balance.bank_asset_tag {
+                ASSET_TAG_STAKED => staked = true,
+                ASSET_TAG_KAMINO => kamino = true,
+                ASSET_TAG_DRIFT => drift = true,
+                ASSET_TAG_JUPLEND => juplend = true,
+                _ => {}
+            }
+        }
+
+        self.is_empty = (!has_any_balance) as u8;
+        self.is_lending_only = (has_any_balance && liability_count == 0) as u8;
+        self.is_single_borrower = (liability_count == 1) as u8;
+        self.has_staked = staked as u8;
+        self.has_kamino = kamino as u8;
+        self.has_drift = drift as u8;
+        self.has_juplend = juplend as u8;
+
+        if liability_count != 1 {
+            self.has_isolated = 0;
+        }
+    }
+
+    /// Refresh the time-based activity flags from elapsed time since `last_update`.
+    /// `pulse_health` is the only caller that should age these flags down.
+    pub fn sync_activity_flags(&mut self, elapsed: i64) {
+        self.was_active_30d = (elapsed <= 30 * SECONDS_PER_DAY) as u8;
+        self.was_active_60d = (elapsed <= 60 * SECONDS_PER_DAY) as u8;
+    }
+
+    /// Mark the account as recently active without touching any balance or risk-engine flags.
+    pub fn mark_active_now(&mut self) {
+        self.was_active_30d = 1;
+        self.was_active_60d = 1;
     }
 }
 

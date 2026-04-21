@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{clock::Clock, sysvar::Sysvar};
 use bytemuck::Zeroable;
+use fixed::types::I80F48;
 use marginfi_type_crate::types::{HealthCache, MarginfiAccount};
 
 use crate::{
@@ -12,6 +13,16 @@ use crate::{
     },
     MarginfiError, MarginfiResult,
 };
+
+const TRIVIAL_BALANCE_THRESHOLD: I80F48 = I80F48::ONE;
+
+/// Marks accounts whose last pulse saw net equity greater than $0 and less than $1. This is
+/// intended for indexer pruning of dust accounts, so underwater accounts are excluded even if
+/// their gross assets are below the trivial threshold.
+fn has_trivial_balance(equity_assets: I80F48, equity_liabs: I80F48) -> bool {
+    let net_equity = equity_assets - equity_liabs;
+    net_equity > I80F48::ZERO && net_equity < TRIVIAL_BALANCE_THRESHOLD
+}
 
 pub fn lending_account_pulse_health<'info>(
     ctx: Context<'_, '_, 'info, 'info, PulseHealth<'info>>,
@@ -70,8 +81,8 @@ pub fn lending_account_pulse_health<'info>(
         HealthPriceMode::Live { liq_cache: None },
         false,
     );
-    if liq_result.is_err() {
-        let err = liq_result.unwrap_err();
+    let is_liquidatable = liq_result.is_ok();
+    if let Err(err) = liq_result {
         match err {
             // Note: in the vastly majority of cases, this will be "HealthyAccount"
             Error::AnchorError(anchor_error) => {
@@ -89,8 +100,7 @@ pub fn lending_account_pulse_health<'info>(
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
     );
-    if bankruptcy_result.is_err() {
-        let err = bankruptcy_result.unwrap_err();
+    if let Err(err) = bankruptcy_result {
         match err {
             // Note: in the vastly majority of cases, this will be "AccountNotBankrupt"
             Error::AnchorError(anchor_error) => {
@@ -102,7 +112,24 @@ pub fn lending_account_pulse_health<'info>(
         }
     }
 
-    marginfi_account.health_cache = health_cache;
+    let equity_assets: I80F48 = health_cache.asset_value_equity.into();
+    let equity_liabs: I80F48 = health_cache.liability_value_equity.into();
+    let elapsed = clock
+        .unix_timestamp
+        .saturating_sub(marginfi_account.last_update as i64);
+
+    // Reborrow through a single DerefMut so the borrow checker can split indexer_flags
+    // (mut) from lending_account.balances (shared).
+    let account = &mut *marginfi_account;
+    account
+        .indexer_flags
+        .sync_balance_derived(&account.lending_account.balances);
+    account.indexer_flags.sync_activity_flags(elapsed);
+    account.indexer_flags.was_liquidatable = is_liquidatable as u8;
+    account.indexer_flags.was_underwater = (equity_assets < equity_liabs) as u8;
+    account.indexer_flags.has_trivial_balance =
+        has_trivial_balance(equity_assets, equity_liabs) as u8;
+    account.health_cache = health_cache;
 
     emit!(HealthPulseEvent {
         account: ctx.accounts.marginfi_account.key(),
@@ -116,4 +143,23 @@ pub fn lending_account_pulse_health<'info>(
 pub struct PulseHealth<'info> {
     #[account(mut)]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trivial_balance_uses_strictly_positive_net_equity() {
+        assert!(has_trivial_balance(I80F48::from_num(0.5), I80F48::ZERO));
+        assert!(!has_trivial_balance(I80F48::ZERO, I80F48::ZERO));
+        assert!(!has_trivial_balance(
+            I80F48::from_num(0.5),
+            I80F48::from_num(2)
+        ));
+        assert!(!has_trivial_balance(
+            I80F48::from_num(5),
+            I80F48::from_num(2)
+        ));
+    }
 }

@@ -68,6 +68,7 @@ pub trait MarginfiAccountImpl {
     fn unset_flag(&mut self, flag: u64, msg: bool);
     fn get_flag(&self, flag: u64) -> bool;
     fn can_be_closed(&self) -> bool;
+    fn sync_indexer_flags(&mut self);
 }
 
 /// Checks if a signer is authorized to perform actions on a marginfi account.
@@ -127,6 +128,11 @@ impl MarginfiAccountImpl for MarginfiAccount {
         self.migrated_from = Pubkey::default();
         self.last_update = current_timestamp;
         self.migrated_to = Pubkey::default();
+        self.indexer_flags.is_empty = 1;
+        // Seed activity flags so freshly-created accounts aren't immediately eligible for the
+        // permissionless close path before the first pulse.
+        self.indexer_flags.was_active_30d = 1;
+        self.indexer_flags.was_active_60d = 1;
     }
 
     fn set_flag(&mut self, flag: u64, msg: bool) {
@@ -151,13 +157,24 @@ impl MarginfiAccountImpl for MarginfiAccount {
         let is_disabled = self.get_flag(ACCOUNT_DISABLED);
         let is_in_flashloan = self.get_flag(ACCOUNT_IN_FLASHLOAN);
         let is_in_receivership = self.get_flag(ACCOUNT_IN_RECEIVERSHIP);
+        let is_frozen = self.get_flag(ACCOUNT_FROZEN);
         let only_has_empty_balances = self
             .lending_account
             .balances
             .iter()
             .all(|balance| balance.get_side().is_none());
 
-        !is_disabled && only_has_empty_balances && !is_in_flashloan && !is_in_receivership
+        !is_disabled
+            && only_has_empty_balances
+            && !is_in_flashloan
+            && !is_in_receivership
+            && !is_frozen
+    }
+
+    fn sync_indexer_flags(&mut self) {
+        self.indexer_flags
+            .sync_balance_derived(&self.lending_account.balances);
+        self.indexer_flags.mark_active_now();
     }
 }
 

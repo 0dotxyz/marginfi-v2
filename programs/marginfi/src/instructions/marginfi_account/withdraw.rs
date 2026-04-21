@@ -209,6 +209,7 @@ pub fn lending_account_withdraw<'info>(
     health_cache.timestamp = clock.unix_timestamp;
 
     marginfi_account.lending_account.sort_balances();
+    marginfi_account.sync_indexer_flags();
 
     // To update the bank's price cache
     let maybe_price: Option<OraclePriceWithConfidence>;

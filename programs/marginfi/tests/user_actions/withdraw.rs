@@ -255,6 +255,7 @@ async fn marginfi_account_withdraw_all_success(
     assert!(res.is_ok());
 
     let marginfi_account = marginfi_account_f.load().await;
+    assert_eq!(marginfi_account.indexer_flags.is_empty, 1);
 
     let active_balance_count = marginfi_account
         .lending_account

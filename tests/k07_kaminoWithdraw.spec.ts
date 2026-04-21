@@ -122,6 +122,8 @@ describe("k07: Kamino Withdraw Tests", () => {
 
       // TODO assert balances
       assert.equal(kaminoBankBalance.active, 1);
+      // has_kamino persists across a partial withdraw
+      assert.equal(marginfiAccountData.indexerFlags.hasKamino, 1);
     }
   }
 
