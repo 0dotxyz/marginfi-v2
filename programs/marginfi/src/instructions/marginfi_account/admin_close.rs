@@ -20,8 +20,8 @@ pub fn admin_close_account(ctx: Context<AdminCloseAccount>) -> MarginfiResult {
     let elapsed = clock
         .unix_timestamp
         .saturating_sub(marginfi_account.last_update as i64);
-    let is_inactive = marginfi_account.indexer_flags.was_active_60d == 0
-        || elapsed > 60 * SECONDS_PER_DAY;
+    let is_inactive =
+        marginfi_account.indexer_flags.was_active_60d == 0 || elapsed > 60 * SECONDS_PER_DAY;
 
     check!(
         marginfi_account.indexer_flags.is_empty == 1 && is_inactive,

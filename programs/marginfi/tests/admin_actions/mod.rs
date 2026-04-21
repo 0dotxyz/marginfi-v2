@@ -1,4 +1,5 @@
 mod account_transfer;
+mod actions_during_pause;
 mod bankruptcy;
 mod bankruptcy_auth;
 mod create_marginfi_group;
@@ -10,4 +11,5 @@ mod interest_accrual;
 mod panic_mode;
 mod rate_limiter;
 mod setup_bank;
+mod super_deposit_withdraw;
 mod withdraw_fees;

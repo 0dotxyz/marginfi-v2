@@ -12,9 +12,7 @@ pub fn sync_indexer_flags<'info>(
         let loader = AccountLoader::<MarginfiAccount>::try_from(account_info)?;
         let mut account = loader.load_mut()?;
         let balances = account.lending_account.balances;
-        account
-            .indexer_flags
-            .sync_balance_derived(&balances);
+        account.indexer_flags.sync_balance_derived(&balances);
     }
 
     Ok(())

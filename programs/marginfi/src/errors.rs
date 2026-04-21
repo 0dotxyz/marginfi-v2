@@ -267,7 +267,9 @@ pub enum MarginfiError {
     DeleverageWithdrawalUpdateOutOfOrderSlot,
     #[msg("Deleverage withdrawal admin update sequence is out of order")] // 6131
     DeleverageWithdrawalUpdateOutOfOrderSeq,
-    #[msg("Provided global fee wallet does not match group fee state cache")] // 6132
+    #[msg("Use set_fixed_oracle_price instead")] // 6132
+    UseSetFixedOraclePrice,
+    #[msg("Provided global fee wallet does not match group fee state cache")] // 6133
     InvalidGlobalFeeWallet,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
@@ -580,7 +582,8 @@ impl From<u32> for MarginfiError {
             6129 => MarginfiError::DeleverageWithdrawalUpdateStale,
             6130 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSlot,
             6131 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSeq,
-            6132 => MarginfiError::InvalidGlobalFeeWallet,
+            6132 => MarginfiError::UseSetFixedOraclePrice,
+            6133 => MarginfiError::InvalidGlobalFeeWallet,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,

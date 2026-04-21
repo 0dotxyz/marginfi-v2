@@ -6,6 +6,8 @@
     "module": "commonjs",
     "target": "ES2022",
     "esModuleInterop": true,
+    "strict": false,
+    "strictNullChecks": false,
     "sourceMap": true,
 
     "baseUrl": ".",
