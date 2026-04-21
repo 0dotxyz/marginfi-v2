@@ -124,7 +124,11 @@ pub struct IndexerFlags {
     pub is_single_borrower: u8,
     /// 1 if the account has ever been liquidated (permanent, never unset)
     pub has_ever_been_liquidated: u8,
-    /// 1 if the account has any non-default, non-SOL asset tag position
+    /// 1 if the account's sole liability is on a bank with `RiskTier::Isolated`. Set at
+    /// borrow time and cleared by balance-derived sync when the account has anything other than
+    /// exactly one liability. By the isolated-liability invariant enforced at borrow, an
+    /// isolated position cannot coexist with any other liability, so `has_isolated == 1`
+    /// implies `is_single_borrower == 1`.
     pub has_isolated: u8,
     /// 1 if the account has a STAKED asset tag position
     pub has_staked: u8,
@@ -138,10 +142,14 @@ pub struct IndexerFlags {
     pub was_liquidatable: u8,
     /// 1 if equity health was negative at last pulse
     pub was_underwater: u8,
-    /// 1 if account was active within the last 30 days (at last pulse).
+    /// 1 if account was active within the last 30 days. Raised to 1 on every
+    /// balance-mutating instruction; can only transition 1 → 0 at pulse time, when the
+    /// elapsed-since-`last_update` check fails.
     /// Combined with `is_empty`, indicates an account pending closure.
     pub was_active_30d: u8,
-    /// 1 if account was active within the last 60 days (at last pulse).
+    /// 1 if account was active within the last 60 days. Raised to 1 on every
+    /// balance-mutating instruction; can only transition 1 → 0 at pulse time, when the
+    /// elapsed-since-`last_update` check fails.
     /// Combined with `is_empty`, indicates an account eligible for permissionless close.
     pub was_active_60d: u8,
     /// 1 if net equity value was greater than $0 and less than $1 at last pulse
@@ -149,12 +157,12 @@ pub struct IndexerFlags {
     pub _pad: [u8; 10],
 }
 
+pub const SECONDS_PER_DAY: i64 = 86_400;
+
 impl IndexerFlags {
-    /// Recompute balance-derived flags from the lending account's active balances. Does NOT
-    /// touch pulse-derived or permanent flags (has_ever_been_liquidated). `has_isolated` is
-    /// only cleared here (when `liability_count == 0`); it is set in `lending_account_borrow`
-    /// and refreshed at pulse.
-    pub fn sync_from_balances(&mut self, balances: &[Balance; MAX_LENDING_ACCOUNT_BALANCES]) {
+    /// Recompute balance-derived flags only. This is safe to call from permissionless backfill
+    /// paths as it does not mutate time-based activity flags or risk-engine flags.
+    pub fn sync_balance_derived(&mut self, balances: &[Balance; MAX_LENDING_ACCOUNT_BALANCES]) {
         let mut liability_count: u8 = 0;
         let mut has_any_balance = false;
         let mut staked = false;
@@ -192,9 +200,22 @@ impl IndexerFlags {
         self.has_drift = drift as u8;
         self.has_juplend = juplend as u8;
 
-        if liability_count == 0 {
+        if liability_count != 1 {
             self.has_isolated = 0;
         }
+    }
+
+    /// Refresh the time-based activity flags from elapsed time since `last_update`.
+    /// `pulse_health` is the only caller that should age these flags down.
+    pub fn sync_activity_flags(&mut self, elapsed: i64) {
+        self.was_active_30d = (elapsed <= 30 * SECONDS_PER_DAY) as u8;
+        self.was_active_60d = (elapsed <= 60 * SECONDS_PER_DAY) as u8;
+    }
+
+    /// Mark the account as recently active without touching any balance or risk-engine flags.
+    pub fn mark_active_now(&mut self) {
+        self.was_active_30d = 1;
+        self.was_active_60d = 1;
     }
 }
 

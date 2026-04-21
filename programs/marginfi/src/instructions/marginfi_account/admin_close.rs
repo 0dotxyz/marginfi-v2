@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
-use marginfi_type_crate::types::{MarginfiAccount, MarginfiGroup};
+use anchor_lang::solana_program::{clock::Clock, sysvar::Sysvar};
+use marginfi_type_crate::types::{MarginfiAccount, MarginfiGroup, SECONDS_PER_DAY};
 
 use crate::{
     check,
@@ -9,14 +10,21 @@ use crate::{
 };
 
 /// Permissionless instruction to close accounts that are empty and have been inactive for >60
-/// days (per the last pulse_health snapshot). The account must also have no blocking flags
-/// (disabled, flashloan, receivership). Rent is returned to the group's global fee wallet.
+/// days. Inactivity is accepted from either the `was_active_60d` indexer flag (for memcmp
+/// discovery by indexers) or `clock - last_update > 60d` (so a pulse is not required).
+/// The account must also have no blocking flags (disabled, flashloan, receivership).
+/// Rent is returned to the group's global fee wallet.
 pub fn admin_close_account(ctx: Context<AdminCloseAccount>) -> MarginfiResult {
     let marginfi_account = ctx.accounts.marginfi_account.load()?;
+    let clock = Clock::get()?;
+    let elapsed = clock
+        .unix_timestamp
+        .saturating_sub(marginfi_account.last_update as i64);
+    let is_inactive = marginfi_account.indexer_flags.was_active_60d == 0
+        || elapsed > 60 * SECONDS_PER_DAY;
 
     check!(
-        marginfi_account.indexer_flags.is_empty == 1
-            && marginfi_account.indexer_flags.was_active_60d == 0,
+        marginfi_account.indexer_flags.is_empty == 1 && is_inactive,
         MarginfiError::IllegalAction,
         "Account is not eligible for close (not empty or active within 60d)"
     );

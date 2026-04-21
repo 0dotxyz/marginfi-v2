@@ -9,13 +9,11 @@ use crate::{
     events::HealthPulseEvent,
     state::marginfi_account::{
         check_account_bankrupt, check_account_init_health,
-        check_pre_liquidation_condition_and_get_account_health, compute_risk_tier_snapshot,
-        HealthPriceMode, MarginfiAccountImpl,
+        check_pre_liquidation_condition_and_get_account_health, HealthPriceMode,
     },
     MarginfiError, MarginfiResult,
 };
 
-const SECONDS_PER_DAY: i64 = 86_400;
 const TRIVIAL_BALANCE_THRESHOLD: I80F48 = I80F48::ONE;
 
 /// Marks accounts whose last pulse saw net equity greater than $0 and less than $1. This is
@@ -120,20 +118,18 @@ pub fn lending_account_pulse_health<'info>(
         .unix_timestamp
         .saturating_sub(marginfi_account.last_update as i64);
 
-    marginfi_account.indexer_flags.was_liquidatable = is_liquidatable as u8;
-    marginfi_account.indexer_flags.was_underwater = (equity_assets < equity_liabs) as u8;
-    marginfi_account.indexer_flags.was_active_30d = (elapsed <= 30 * SECONDS_PER_DAY) as u8;
-    marginfi_account.indexer_flags.was_active_60d = (elapsed <= 60 * SECONDS_PER_DAY) as u8;
-    marginfi_account.indexer_flags.has_trivial_balance =
+    // Reborrow through a single DerefMut so the borrow checker can split indexer_flags
+    // (mut) from lending_account.balances (shared).
+    let account = &mut *marginfi_account;
+    account
+        .indexer_flags
+        .sync_balance_derived(&account.lending_account.balances);
+    account.indexer_flags.sync_activity_flags(elapsed);
+    account.indexer_flags.was_liquidatable = is_liquidatable as u8;
+    account.indexer_flags.was_underwater = (equity_assets < equity_liabs) as u8;
+    account.indexer_flags.has_trivial_balance =
         has_trivial_balance(equity_assets, equity_liabs) as u8;
-
-    marginfi_account.sync_indexer_flags();
-
-    if let Ok(snapshot) = compute_risk_tier_snapshot(&marginfi_account, ctx.remaining_accounts) {
-        marginfi_account.indexer_flags.has_isolated = snapshot.has_isolated_liability() as u8;
-    }
-
-    marginfi_account.health_cache = health_cache;
+    account.health_cache = health_cache;
 
     emit!(HealthPulseEvent {
         account: ctx.accounts.marginfi_account.key(),

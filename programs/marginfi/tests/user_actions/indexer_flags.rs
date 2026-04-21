@@ -115,6 +115,11 @@ async fn indexer_flags_sync_instruction_recomputes_flags() -> anyhow::Result<()>
     assert_eq!(account.indexer_flags.is_lending_only, 0);
     assert_eq!(account.indexer_flags.is_single_borrower, 1);
 
+    let mut stale_account = account;
+    stale_account.indexer_flags.was_active_30d = 0;
+    stale_account.indexer_flags.was_active_60d = 0;
+    user_f.set_account(&stale_account).await?;
+
     // Calling sync should produce the same result
     user_f.try_sync_indexer_flags().await?;
 
@@ -122,6 +127,8 @@ async fn indexer_flags_sync_instruction_recomputes_flags() -> anyhow::Result<()>
     assert_eq!(account.indexer_flags.is_empty, 0);
     assert_eq!(account.indexer_flags.is_lending_only, 0);
     assert_eq!(account.indexer_flags.is_single_borrower, 1);
+    assert_eq!(account.indexer_flags.was_active_30d, 0);
+    assert_eq!(account.indexer_flags.was_active_60d, 0);
 
     Ok(())
 }
