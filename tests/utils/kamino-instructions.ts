@@ -40,6 +40,7 @@ export const makeKaminoDepositIx = async (
   program: Program<Marginfi>,
   accounts: KaminoDepositAccounts,
   amount: BN,
+  refreshReserve = false,
 ): Promise<TransactionInstruction> => {
   // Merge with defaults...
   const accs = {
@@ -68,7 +69,7 @@ export const makeKaminoDepositIx = async (
   );
 
   return program.methods
-    .kaminoDeposit(amount)
+    .kaminoDeposit(amount, refreshReserve)
     .accounts({
       lendingMarketAuthority,
       reserveLiquiditySupply,
@@ -197,10 +198,6 @@ const DEFAULT_INIT_OBLIGATION_OPTIONAL_ACCOUNTS = {
   obligationFarmUserState: null,
   reserveFarmState: null,
   referrerUserMetadata: null,
-  pythOracle: null,
-  switchboardPriceOracle: null,
-  switchboardTwapOracle: null,
-  scopePrices: null,
 } as const;
 
 export interface InitObligationAccounts {
@@ -213,11 +210,6 @@ export interface InitObligationAccounts {
   obligationFarmUserState?: PublicKey | null;
   reserveFarmState?: PublicKey | null;
   referrerUserMetadata?: PublicKey | null;
-  // Oracle accounts for refreshing the reserve, pick just one.
-  pythOracle?: PublicKey | null;
-  switchboardPriceOracle?: PublicKey | null;
-  switchboardTwapOracle?: PublicKey | null;
-  scopePrices?: PublicKey | null;
 }
 
 /**
@@ -312,6 +304,7 @@ export interface KaminoWithdrawAccounts {
 export interface KaminoWithdrawArgs {
   amount: BN;
   isWithdrawAll: boolean;
+  refreshReserve?: boolean;
   /** Oracle and other remaining accounts needed for health checks */
   remaining: PublicKey[];
 }
@@ -353,8 +346,11 @@ export const makeKaminoWithdrawIx = async (
     accounts.reserve,
   );
 
+  const flags =
+    (args.isWithdrawAll ? 1 : 0) | ((args.refreshReserve ?? false) ? 2 : 0);
+
   const ix = await program.methods
-    .kaminoWithdraw(args.amount, args.isWithdrawAll)
+    .kaminoWithdraw(args.amount, flags === 0 ? null : flags)
     .accounts({
       lendingMarketAuthority, // derived
       reserveLiquiditySupply,

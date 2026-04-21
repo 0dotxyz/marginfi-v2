@@ -1507,7 +1507,11 @@ impl MarginfiAccountFixture {
                 instruction_sysvar_account: sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::KaminoDeposit { amount }.data(),
+            data: marginfi::instruction::KaminoDeposit {
+                amount,
+                refresh_reserve: Some(false),
+            }
+            .data(),
         }
     }
 
@@ -1542,6 +1546,11 @@ impl MarginfiAccountFixture {
             load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
         let lending_market_authority =
             derive_kamino_lending_market_authority(reserve.lending_market);
+        let flags = if withdraw_all.unwrap_or(false) {
+            Some(0b0000_0001u8)
+        } else {
+            None
+        };
 
         let mut ix = Instruction {
             program_id: marginfi::ID,
@@ -1570,11 +1579,7 @@ impl MarginfiAccountFixture {
                 instruction_sysvar_account: sysvar::instructions::ID,
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::KaminoWithdraw {
-                amount,
-                withdraw_all,
-            }
-            .data(),
+            data: marginfi::instruction::KaminoWithdraw { amount, flags }.data(),
         };
 
         self.append_integration_withdraw_health_accounts(&mut ix)

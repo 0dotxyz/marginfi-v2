@@ -39,6 +39,9 @@ solana transfer \
 - Execute after the vote passes.
 - Update the IDL with (~.25 SOL required):
 
+Make sure the IDL has the program address: `"address":
+"MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA",` (by default, this field is likely blank)
+
 ```
 anchor idl upgrade \
   MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA \

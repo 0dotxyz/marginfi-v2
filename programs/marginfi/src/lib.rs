@@ -203,6 +203,24 @@ pub mod marginfi {
         marginfi_group::lending_pool_handle_bankruptcy(ctx)
     }
 
+    /// (primary admin only) Withdraw directly from a bank liquidity vault and lower
+    /// `asset_share_value` proportionally. No marginfi account is involved.
+    pub fn super_admin_withdraw<'info>(
+        ctx: Context<'_, '_, 'info, 'info, SuperAdminWithdraw<'info>>,
+        amount: u64,
+    ) -> MarginfiResult {
+        marginfi_group::super_admin_withdraw(ctx, amount)
+    }
+
+    /// (primary admin only) Deposit directly into a bank liquidity vault and raise
+    /// `asset_share_value` proportionally. No marginfi account is involved.
+    pub fn super_admin_deposit<'info>(
+        ctx: Context<'_, '_, 'info, 'info, SuperAdminDeposit<'info>>,
+        amount: u64,
+    ) -> MarginfiResult {
+        marginfi_group::super_admin_deposit(ctx, amount)
+    }
+
     // User instructions
 
     /// Initialize a marginfi account for a given group. The account is a fresh keypair, and must
@@ -777,21 +795,23 @@ pub mod marginfi {
     pub fn kamino_deposit<'info>(
         ctx: Context<'_, '_, 'info, 'info, KaminoDeposit<'info>>,
         amount: u64,
+        refresh_reserve: Option<bool>,
     ) -> MarginfiResult {
-        kamino::kamino_deposit(ctx, amount)
+        kamino::kamino_deposit(ctx, amount, refresh_reserve)
     }
 
     /// (user) Withdraw from a Kamino pool through a marginfi account
     /// * amount - in the collateral token (NOT liquidity token), in native decimals. Must convert
     ///     from collateral to liquidity token amounts using the current exchange rate.
-    /// * withdraw_all - if true, withdraw the entire mrgn balance (Note: due to rounding down, a
-    ///   deposit and withdraw back to back may result in several lamports less)
+    /// * flags - optional bitflags:
+    ///   - bit 0 (`0x01`): withdraw all
+    ///   - bit 1 (`0x02`): refresh reserve via batch refresh
     pub fn kamino_withdraw<'info>(
         ctx: Context<'_, '_, 'info, 'info, KaminoWithdraw<'info>>,
         amount: u64,
-        withdraw_all: Option<bool>,
+        flags: Option<u8>,
     ) -> MarginfiResult {
-        kamino::kamino_withdraw(ctx, amount, withdraw_all)
+        kamino::kamino_withdraw(ctx, amount, flags)
     }
 
     /// (group admin only) Add a Kamino bank to the group. Pass the oracle and reserve in remaining

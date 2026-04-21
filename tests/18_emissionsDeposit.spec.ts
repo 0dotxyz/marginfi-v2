@@ -225,7 +225,7 @@ describe("Same-bank deposit", () => {
       ),
       depositor,
       liquidityVault: bank.liquidityVault,
-      amount: new BN(1),
+      amount: new BN(2),
     });
 
     await expectFailedTxWithError(
@@ -250,7 +250,7 @@ describe("Same-bank deposit", () => {
       ),
       depositor,
       liquidityVault: bank.liquidityVault,
-      amount: new BN(1),
+      amount: new BN(3),
     });
     await expectFailedTxWithError(
       async () => {
@@ -279,7 +279,7 @@ describe("Same-bank deposit", () => {
     const bank = await program.account.bank.fetch(bankKeypairA.publicKey);
 
     const ix = await program.methods
-      .lendingPoolEmissionsDeposit(new BN(1))
+      .lendingPoolEmissionsDeposit(new BN(4))
       .accountsStrict({
         group: marginfiGroup.publicKey,
         bank: bankKeypairA.publicKey,
@@ -318,7 +318,7 @@ describe("Same-bank deposit", () => {
         ecosystem.tokenAMint.publicKey,
         depositor,
       );
-      const amount = new BN(1);
+      const amount = new BN(5);
       await provider.sendAndConfirm(
         new Transaction().add(
           createMintToInstruction(
@@ -353,7 +353,7 @@ describe("Same-bank deposit", () => {
     const bank = await program.account.bank.fetch(bankKeypairA.publicKey);
 
     const ix = await program.methods
-      .lendingPoolEmissionsDeposit(new BN(1))
+      .lendingPoolEmissionsDeposit(new BN(6))
       .accountsStrict({
         group: marginfiGroup.publicKey,
         bank: bankKeypairA.publicKey,
@@ -383,7 +383,7 @@ describe("Same-bank deposit", () => {
       fundingAccount: bank.feeVault,
       depositor,
       liquidityVault: bank.liquidityVault,
-      amount: new BN(1),
+      amount: new BN(7),
     });
 
     await setProtocolPaused(true);
@@ -667,7 +667,7 @@ describe("Same-bank deposit - T22", () => {
     await setEmissionsDirect(provider, feeBank.publicKey, feeMint.publicKey);
 
     const ix = await program.methods
-      .lendingPoolEmissionsDeposit(new BN(1))
+      .lendingPoolEmissionsDeposit(new BN(8))
       .accounts({
         bank: feeBank.publicKey,
         depositor,
@@ -700,7 +700,7 @@ describe("Same-bank deposit - T22", () => {
     await setEmissionsDirect(provider, hookBank.publicKey, hookMint.publicKey);
 
     const ix = await program.methods
-      .lendingPoolEmissionsDeposit(new BN(1))
+      .lendingPoolEmissionsDeposit(new BN(9))
       .accounts({
         bank: hookBank.publicKey,
         depositor,
@@ -756,7 +756,7 @@ describe("Same-bank deposit - T22", () => {
     );
 
     const ix = await program.methods
-      .lendingPoolEmissionsDeposit(new BN(1))
+      .lendingPoolEmissionsDeposit(new BN(10))
       .accounts({
         bank: emptyBank.publicKey,
         depositor,
