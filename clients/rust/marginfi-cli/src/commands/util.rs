@@ -3,6 +3,7 @@ use clap::Parser;
 use fixed::types::I80F48;
 use rand::Rng;
 use solana_sdk::pubkey::Pubkey;
+use std::path::PathBuf;
 
 use marginfi_type_crate::types::{
     Balance, Bank, BankConfig, BankConfigOpt, InterestRateConfig, LendingAccount, MarginfiAccount,
@@ -11,14 +12,15 @@ use marginfi_type_crate::types::{
 use pyth_solana_receiver_sdk::price_update::get_feed_id_from_hex;
 
 use crate::config::GlobalOptions;
+use crate::configs;
 use crate::processor;
 use crate::processor::oracle::find_pyth_push_oracles_for_feed_id;
 
 /// Debug and utility commands.
 #[derive(Debug, Parser)]
 #[clap(
-    after_help = "Common subcommands:\n  mfi util inspect-size\n  mfi util make-test-i80f48\n  mfi util show-oracle-ages --group <GROUP_PUBKEY> --only-stale\n  mfi util inspect-pyth-push-oracle-feed <PYTH_FEED_PUBKEY>\n  mfi util find-pyth-push <PYTH_FEED_ID_HEX>\n  mfi util inspect-swb-pull-feed <SWITCHBOARD_FEED_PUBKEY>",
-    after_long_help = "Common subcommands:\n  mfi util inspect-size\n  mfi util make-test-i80f48\n  mfi util show-oracle-ages --group <GROUP_PUBKEY> --only-stale\n  mfi util inspect-pyth-push-oracle-feed <PYTH_FEED_PUBKEY>\n  mfi util find-pyth-push <PYTH_FEED_ID_HEX>\n  mfi util inspect-swb-pull-feed <SWITCHBOARD_FEED_PUBKEY>"
+    after_help = "Common subcommands:\n  mfi util inspect-size\n  mfi util make-test-i80f48\n  mfi util show-oracle-ages --group <GROUP_PUBKEY> --only-stale\n  mfi util inspect-pyth-push-oracle-feed <PYTH_FEED_PUBKEY>\n  mfi util find-pyth-push <PYTH_FEED_ID_HEX>\n  mfi util inspect-swb-pull-feed <SWITCHBOARD_FEED_PUBKEY>\n  mfi util derive-bank-pda --group <GROUP_PUBKEY> --mint <MINT_PUBKEY> --program <PROGRAM_ID> --next-available",
+    after_long_help = "Common subcommands:\n  mfi util inspect-size\n  mfi util make-test-i80f48\n  mfi util show-oracle-ages --group <GROUP_PUBKEY> --only-stale\n  mfi util inspect-pyth-push-oracle-feed <PYTH_FEED_PUBKEY>\n  mfi util find-pyth-push <PYTH_FEED_ID_HEX>\n  mfi util inspect-swb-pull-feed <SWITCHBOARD_FEED_PUBKEY>\n  mfi util derive-bank-pda --group <GROUP_PUBKEY> --mint <MINT_PUBKEY> --program <PROGRAM_ID> --next-available"
 )]
 pub enum UtilCommand {
     /// Print the byte size of core on-chain types
@@ -79,6 +81,30 @@ pub enum UtilCommand {
         after_long_help = "Example:\n  mfi util inspect-swb-pull-feed <SWITCHBOARD_FEED_PUBKEY>"
     )]
     InspectSwbPullFeed { address: Pubkey },
+    /// Derive a bank PDA by scanning seeds for a group + mint + program
+    ///
+    /// Example: `mfi util derive-bank-pda --config ./configs/util/derive-bank-pda/config.json.example`
+    #[clap(
+        name = "derive-bank-pda",
+        after_help = "Examples:\n  mfi util derive-bank-pda --group <GROUP_PUBKEY> --mint <MINT_PUBKEY> --program <PROGRAM_ID> --next-available\n  mfi util derive-bank-pda --group <GROUP_PUBKEY> --mint <MINT_PUBKEY> --program <PROGRAM_ID> --last-used\n  mfi util derive-bank-pda --config ./configs/util/derive-bank-pda/config.json.example",
+        after_long_help = "Examples:\n  mfi util derive-bank-pda --group <GROUP_PUBKEY> --mint <MINT_PUBKEY> --program <PROGRAM_ID> --next-available\n  mfi util derive-bank-pda --group <GROUP_PUBKEY> --mint <MINT_PUBKEY> --program <PROGRAM_ID> --last-used\n  mfi util derive-bank-pda --config ./configs/util/derive-bank-pda/config.json.example"
+    )]
+    DeriveBankPda {
+        #[clap(long, help = "Path to JSON config file (see --config-example)")]
+        config: Option<PathBuf>,
+        #[clap(long, help = "Print an example JSON config and exit", action)]
+        config_example: bool,
+        #[clap(long, help = "Defaults to the active profile group when omitted")]
+        group: Option<Pubkey>,
+        #[clap(long)]
+        mint: Option<Pubkey>,
+        #[clap(long, help = "Defaults to the active profile program when omitted")]
+        program: Option<Pubkey>,
+        #[clap(long, action)]
+        next_available: bool,
+        #[clap(long, action)]
+        last_used: bool,
+    },
 }
 
 pub fn dispatch(subcmd: UtilCommand, global_options: &GlobalOptions) -> Result<()> {
@@ -129,6 +155,74 @@ pub fn dispatch(subcmd: UtilCommand, global_options: &GlobalOptions) -> Result<(
             processor::oracle::inspect_swb_pull_feed(&config, address)?;
 
             Ok(())
+        }
+        UtilCommand::DeriveBankPda {
+            config: config_path,
+            config_example,
+            group,
+            mint,
+            program,
+            next_available,
+            last_used,
+        } => {
+            if config_example {
+                println!("{}", configs::DeriveBankPdaConfig::example_json());
+                return Ok(());
+            }
+
+            let (profile, config) = super::load_profile_and_config(global_options)?;
+            let (group, mint, program, mode) = if let Some(path) = config_path {
+                let cfg: configs::DeriveBankPdaConfig = configs::load_config(&path)?;
+                (
+                    cfg.group
+                        .as_deref()
+                        .map(configs::parse_pubkey)
+                        .transpose()?
+                        .or(profile.marginfi_group)
+                        .ok_or_else(|| anyhow!("group required in config or active profile"))?,
+                    configs::parse_pubkey(&cfg.mint)?,
+                    cfg.program
+                        .as_deref()
+                        .map(configs::parse_pubkey)
+                        .transpose()?
+                        .unwrap_or(config.program_id),
+                    cfg.mode,
+                )
+            } else {
+                let group = group
+                    .or(profile.marginfi_group)
+                    .ok_or_else(|| anyhow!("--group required (or set a profile group)"))?;
+                let mint = mint.ok_or_else(|| anyhow!("--mint required (or use --config)"))?;
+                let program = program.unwrap_or(config.program_id);
+                let mode = match (next_available, last_used) {
+                    (true, false) => "nextAvailable".to_string(),
+                    (false, true) => "lastUsed".to_string(),
+                    _ => {
+                        return Err(anyhow!(
+                            "exactly one of --next-available or --last-used is required"
+                        ))
+                    }
+                };
+                (group, mint, program, mode)
+            };
+
+            match mode.as_str() {
+                "nextAvailable" | "next_available" | "next-available" => processor::find_bank_pda(
+                    &config,
+                    group,
+                    mint,
+                    program,
+                    processor::BankPdaLookupMode::NextAvailable,
+                ),
+                "lastUsed" | "last_used" | "last-used" => processor::find_bank_pda(
+                    &config,
+                    group,
+                    mint,
+                    program,
+                    processor::BankPdaLookupMode::LastUsed,
+                ),
+                other => Err(anyhow!("unknown mode '{}'", other)),
+            }
         }
     }
 }

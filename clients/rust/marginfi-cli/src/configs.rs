@@ -100,8 +100,9 @@ pub struct FeeStateConfig {
 /// JSON config entry for `bank write-metadata --config <path>`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct WriteBankMetadataConfigEntry {
-    #[serde(alias = "bank")]
+    #[serde(alias = "bank", alias = "bankAddress")]
     pub bank_address: String,
+    pub group: Option<String>,
     #[serde(alias = "mint", alias = "tokenAddress")]
     pub token_address: Option<String>,
     #[serde(alias = "symbol", alias = "tokenSymbol")]
@@ -123,6 +124,15 @@ pub struct WriteBankMetadataConfigEntry {
 pub enum WriteBankMetadataConfig {
     Single(WriteBankMetadataConfigEntry),
     Multiple(Vec<WriteBankMetadataConfigEntry>),
+}
+
+/// JSON config for `util derive-bank-pda --config <path>`.
+#[derive(Debug, Deserialize)]
+pub struct DeriveBankPdaConfig {
+    pub group: Option<String>,
+    pub mint: String,
+    pub program: Option<String>,
+    pub mode: String,
 }
 
 /// JSON config for `group update --config <path>`.
@@ -452,25 +462,36 @@ impl WriteBankMetadataConfig {
         r#"[
   {
     "bankAddress": "<BANK_PUBKEY>",
-    "tokenAddress": null,
+    "group": "<GROUP_PUBKEY>",
+    "tokenAddress": "<MINT_PUBKEY>",
     "tokenSymbol": "USDC",
     "tokenName": "USD Coin",
-    "assetGroup": null,
-    "venue": null,
-    "venueIdentifier": null,
-    "riskTierName": null
+    "venue": "<VENUE e.g. Kamino, P0>",
+    "venueIdentifier": "<e.g. USDC - Kamino Prime Market>",
+    "riskTierName": "<Collateral | isolated>"
   },
   {
     "bankAddress": "<BANK_PUBKEY>",
-    "tokenAddress": null,
+    "group": "<GROUP_PUBKEY>",
+    "tokenAddress": "<MINT_PUBKEY>",
     "tokenSymbol": "SOL",
     "tokenName": "Wrapped SOL",
-    "assetGroup": "blue-chip",
-    "venue": null,
-    "venueIdentifier": null,
-    "riskTierName": null
+    "venue": "<VENUE e.g. Kamino, P0>",
+    "venueIdentifier": "<e.g. SOL - Kamino Prime Market>",
+    "riskTierName": "<Collateral | isolated>"
   }
 ]"#
+    }
+}
+
+impl DeriveBankPdaConfig {
+    pub fn example_json() -> &'static str {
+        r#"{
+  "group": null,
+  "mint": "<MINT_PUBKEY>",
+  "program": null,
+  "mode": "nextAvailable"
+}"#
     }
 }
 

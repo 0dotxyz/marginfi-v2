@@ -476,18 +476,30 @@ pub enum BankCommand {
     },
     /// Initialize on-chain metadata account for a bank
     ///
-    /// Example: `mfi bank init-metadata <BANK_PUBKEY>`
+    /// Example: `mfi bank init-metadata <BANK_PUBKEY> --group <GROUP_PUBKEY> --mint <MINT_PUBKEY>`
     #[clap(
-        after_help = "Example:\n  mfi bank init-metadata <BANK_PUBKEY>",
-        after_long_help = "Example:\n  mfi bank init-metadata <BANK_PUBKEY>"
+        after_help = "Examples:\n  mfi bank init-metadata <BANK_PUBKEY>\n  mfi bank init-metadata <BANK_PUBKEY> --group <GROUP_PUBKEY> --mint <MINT_PUBKEY>",
+        after_long_help = "Examples:\n  mfi bank init-metadata <BANK_PUBKEY>\n  mfi bank init-metadata <BANK_PUBKEY> --group <GROUP_PUBKEY> --mint <MINT_PUBKEY>"
     )]
-    InitMetadata { bank_pk: String },
+    InitMetadata {
+        bank_pk: String,
+        #[clap(
+            long,
+            help = "Required for pre-init banks if the bank account does not exist yet; defaults to profile group when available"
+        )]
+        group: Option<Pubkey>,
+        #[clap(
+            long,
+            help = "Required for pre-init banks if the bank account does not exist yet"
+        )]
+        mint: Option<Pubkey>,
+    },
     /// Initialize if needed, then write ticker and description to one or more bank metadata accounts
     ///
-    /// Example: `mfi bank write-metadata <BANK_PUBKEY> --symbol USDC --name "USD Coin" --wait-for-bank`
+    /// Example: `mfi bank write-metadata <BANK_PUBKEY> --symbol USDC --name "USD Coin"`
     #[clap(
-        after_help = "Examples:\n  mfi bank write-metadata <BANK_PUBKEY> --symbol USDC --name \"USD Coin\" --wait-for-bank\n  mfi bank write-metadata <BANK_PUBKEY> --ticker \"USDC | USD Coin\" --description \"USD Coin | stablecoins | USDC | P0 | -\"\n  mfi bank write-metadata --config ./configs/bank/write-metadata/config.json.example --wait-for-bank",
-        after_long_help = "Examples:\n  mfi bank write-metadata <BANK_PUBKEY> --symbol USDC --name \"USD Coin\" --wait-for-bank\n  mfi bank write-metadata <BANK_PUBKEY> --ticker \"USDC | USD Coin\" --description \"USD Coin | stablecoins | USDC | P0 | -\"\n  mfi bank write-metadata --config ./configs/bank/write-metadata/config.json.example --wait-for-bank"
+        after_help = "Examples:\n  mfi bank write-metadata <BANK_PUBKEY> --symbol USDC --name \"USD Coin\"\n  mfi bank write-metadata <BANK_PUBKEY> --group <GROUP_PUBKEY> --mint <MINT_PUBKEY> --symbol USDC --name \"USD Coin\"\n  mfi bank write-metadata <BANK_PUBKEY> --ticker \"USDC | USD Coin\" --description \"USD Coin | stablecoins | USDC | P0 | -\"\n  mfi bank write-metadata --config ./configs/bank/write-metadata/config.json.example",
+        after_long_help = "Examples:\n  mfi bank write-metadata <BANK_PUBKEY> --symbol USDC --name \"USD Coin\"\n  mfi bank write-metadata <BANK_PUBKEY> --group <GROUP_PUBKEY> --mint <MINT_PUBKEY> --symbol USDC --name \"USD Coin\"\n  mfi bank write-metadata <BANK_PUBKEY> --ticker \"USDC | USD Coin\" --description \"USD Coin | stablecoins | USDC | P0 | -\"\n  mfi bank write-metadata --config ./configs/bank/write-metadata/config.json.example"
     )]
     WriteMetadata {
         bank_pk: Option<String>,
@@ -498,6 +510,8 @@ pub enum BankCommand {
         config: Option<PathBuf>,
         #[clap(long, help = "Print an example JSON config and exit", action)]
         config_example: bool,
+        #[clap(long)]
+        group: Option<Pubkey>,
         #[clap(long)]
         ticker: Option<String>,
         #[clap(long)]
@@ -516,18 +530,6 @@ pub enum BankCommand {
         venue_identifier: Option<String>,
         #[clap(long = "risk-tier-name")]
         risk_tier_name: Option<String>,
-        #[clap(
-            long,
-            help = "Wait for each bank account to appear on-chain before initializing and writing metadata",
-            action
-        )]
-        wait_for_bank: bool,
-        #[clap(
-            long,
-            default_value_t = 300,
-            help = "Maximum time to wait for a missing bank account in seconds when --wait-for-bank is set"
-        )]
-        wait_for_bank_timeout_secs: u64,
     },
     /// Sync bank metadata from a metadata source and write it on-chain
     ///
@@ -776,6 +778,7 @@ fn build_bank_metadata_entries(
     profile_group: Option<Pubkey>,
     bank_pk: Option<String>,
     config_path: Option<PathBuf>,
+    group: Option<Pubkey>,
     ticker: Option<String>,
     description: Option<String>,
     mint: Option<Pubkey>,
@@ -794,6 +797,12 @@ fn build_bank_metadata_entries(
             .map(|entry| {
                 Ok(processor::BankMetadataInput {
                     bank: super::resolve_bank_for_group(&entry.bank_address, profile_group)?,
+                    group: entry
+                        .group
+                        .as_deref()
+                        .map(configs::parse_pubkey)
+                        .transpose()?
+                        .or(profile_group),
                     ticker: None,
                     description: None,
                     mint: entry
@@ -817,6 +826,7 @@ fn build_bank_metadata_entries(
             &bank_pk.context("bank_pk required unless --config is provided")?,
             profile_group,
         )?,
+        group,
         ticker,
         description,
         mint,
@@ -1293,14 +1303,19 @@ pub fn dispatch(subcmd: BankCommand, global_options: &GlobalOptions) -> Result<(
             let bank_pk = super::resolve_bank_for_group(&bank_pk, profile.marginfi_group)?;
             processor::bank_update_fees_destination(config, bank_pk, destination)
         }
-        BankCommand::InitMetadata { bank_pk } => {
+        BankCommand::InitMetadata {
+            bank_pk,
+            group,
+            mint,
+        } => {
             let bank_pk = super::resolve_bank_for_group(&bank_pk, profile.marginfi_group)?;
-            processor::bank_init_metadata(config, bank_pk)
+            processor::bank_init_metadata(config, bank_pk, group.or(profile.marginfi_group), mint)
         }
         BankCommand::WriteMetadata {
             bank_pk,
             config: config_path,
             config_example,
+            group,
             ticker,
             description,
             mint,
@@ -1310,8 +1325,6 @@ pub fn dispatch(subcmd: BankCommand, global_options: &GlobalOptions) -> Result<(
             venue,
             venue_identifier,
             risk_tier_name,
-            wait_for_bank,
-            wait_for_bank_timeout_secs,
         } => {
             if config_example {
                 println!("{}", configs::WriteBankMetadataConfig::example_json());
@@ -1321,6 +1334,7 @@ pub fn dispatch(subcmd: BankCommand, global_options: &GlobalOptions) -> Result<(
                 profile.marginfi_group,
                 bank_pk,
                 config_path,
+                group,
                 ticker,
                 description,
                 mint,
@@ -1331,12 +1345,8 @@ pub fn dispatch(subcmd: BankCommand, global_options: &GlobalOptions) -> Result<(
                 venue_identifier,
                 risk_tier_name,
             )?;
-            let options = processor::BankMetadataWriteOptions {
-                wait_for_bank,
-                wait_for_bank_timeout: std::time::Duration::from_secs(wait_for_bank_timeout_secs),
-            };
-            let entries = processor::resolve_bank_metadata_inputs(&config, inputs, &options)?;
-            processor::bank_write_metadata_entries(&config, entries, &options)
+            let entries = processor::resolve_bank_metadata_inputs(&config, inputs)?;
+            processor::bank_write_metadata_entries(&config, entries)
         }
         BankCommand::SyncMetadata {
             group,

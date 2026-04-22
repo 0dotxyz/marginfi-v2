@@ -1,22 +1,22 @@
 [
   {
     "bankAddress": "<BANK_PUBKEY>",
-    "tokenAddress": null,
+    "group": "<GROUP_PUBKEY>",
+    "tokenAddress": "<MINT_PUBKEY>",
     "tokenSymbol": "USDC",
     "tokenName": "USD Coin",
-    "assetGroup": null,
-    "venue": null,
-    "venueIdentifier": null,
-    "riskTierName": null
+    "venue": "<VENUE e.g. Kamino, P0>",
+    "venueIdentifier": "<e.g. USDC - Kamino Prime Market>",
+    "riskTierName": "<Collateral | isolated>"
   },
   {
     "bankAddress": "<BANK_PUBKEY>",
-    "tokenAddress": null,
+    "group": "<GROUP_PUBKEY>",
+    "tokenAddress": "<MINT_PUBKEY>",
     "tokenSymbol": "SOL",
     "tokenName": "Wrapped SOL",
-    "assetGroup": "blue-chip",
-    "venue": null,
-    "venueIdentifier": null,
-    "riskTierName": null
+    "venue": "<VENUE e.g. Kamino, P0>",
+    "venueIdentifier": "<e.g. SOL - Kamino Prime Market>",
+    "riskTierName": "<Collateral | isolated>"
   }
 ]
