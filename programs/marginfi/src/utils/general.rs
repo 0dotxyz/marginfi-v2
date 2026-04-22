@@ -5,8 +5,8 @@ use crate::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{calc_value, get_remaining_accounts_per_bank},
         price::{
-            OraclePriceFeedAdapter, OraclePriceType, OraclePriceWithConfidence, PriceAdapter,
-            PriceBias,
+            OraclePriceFeedAdapter, OraclePriceType, OraclePriceWithConfidence,
+            OraclePriceWithMultiplier, PriceAdapter, PriceBias,
         },
         rate_limiter::{
             should_skip_rate_limit, BankRateLimiterImpl, GroupRateLimiterImpl, RateLimitWindowImpl,
@@ -405,20 +405,49 @@ pub fn fetch_asset_price_for_bank_low_bias<'info>(
 /// Fetch an unbiased oracle price (no safety bias) for a given bank.
 ///
 /// * Errors if bank not found or bank/oracles don't appear in the slice in the correct order
+pub fn fetch_unbiased_price_for_bank_with_cache<'info>(
+    bank_key: &Pubkey,
+    bank: &Bank,
+    clock: &Clock,
+    remaining_accounts: &'info [AccountInfo<'info>],
+) -> Result<(OraclePriceWithConfidence, OraclePriceWithMultiplier)> {
+    let oracle_ais = oracle_accounts_for_bank(bank_key, bank, remaining_accounts)?;
+    let prices = OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
+        bank,
+        oracle_ais,
+        clock,
+        OraclePriceType::RealTime,
+    )?;
+
+    Ok(prices)
+}
+
+/// Fetch an unbiased oracle price (no safety bias) for a given bank.
+///
+/// * Errors if bank not found or bank/oracles don't appear in the slice in the correct order
 pub fn fetch_unbiased_price_for_bank<'info>(
     bank_key: &Pubkey,
     bank: &Bank,
     clock: &Clock,
     remaining_accounts: &'info [AccountInfo<'info>],
 ) -> Result<OraclePriceWithConfidence> {
-    let oracle_ais = oracle_accounts_for_bank(bank_key, bank, remaining_accounts)?;
-    let pf = OraclePriceFeedAdapter::try_from_bank(bank, oracle_ais, clock)?;
-    let price = pf.get_price_and_confidence_of_type(
-        OraclePriceType::RealTime,
-        bank.config.oracle_max_confidence,
-    )?;
-
+    let (price, _) =
+        fetch_unbiased_price_for_bank_with_cache(bank_key, bank, clock, remaining_accounts)?;
     Ok(price)
+}
+
+/// Fetch an unbiased raw oracle price (no safety bias) plus integration multiplier for cache.
+///
+/// * Errors if bank not found or bank/oracles don't appear in the slice in the correct order
+pub fn fetch_unbiased_price_for_bank_cache<'info>(
+    bank_key: &Pubkey,
+    bank: &Bank,
+    clock: &Clock,
+    remaining_accounts: &'info [AccountInfo<'info>],
+) -> Result<OraclePriceWithMultiplier> {
+    let (_, cache_price) =
+        fetch_unbiased_price_for_bank_with_cache(bank_key, bank, clock, remaining_accounts)?;
+    Ok(cache_price)
 }
 
 /// Locate a bank's oracle information from a properly formatted slice of remaining accounts.

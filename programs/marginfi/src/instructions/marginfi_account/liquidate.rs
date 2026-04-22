@@ -9,8 +9,9 @@ use crate::state::marginfi_account::{
 use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::state::price::{OraclePriceFeedAdapter, OraclePriceType, PriceAdapter, PriceBias};
 use crate::utils::{
-    fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank, is_marginfi_asset_tag,
-    validate_asset_tags, validate_bank_asset_tags, validate_bank_state, InstructionKind,
+    fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank_cache,
+    is_marginfi_asset_tag, validate_asset_tags, validate_bank_asset_tags, validate_bank_state,
+    InstructionKind,
 };
 use crate::{bank_signer, state::marginfi_account::BankAccountWrapper};
 use crate::{check, debug, prelude::*, utils};
@@ -178,7 +179,7 @@ pub fn lending_account_liquidate<'info>(
     )?;
 
     let asset_bank = ctx.accounts.asset_bank.load()?;
-    let asset_price_unbiased = fetch_unbiased_price_for_bank(
+    let asset_price_unbiased = fetch_unbiased_price_for_bank_cache(
         &asset_bank_key,
         &asset_bank,
         &clock,
@@ -188,7 +189,7 @@ pub fn lending_account_liquidate<'info>(
     drop(asset_bank);
 
     let liab_bank = ctx.accounts.liab_bank.load()?;
-    let liab_price_unbiased = fetch_unbiased_price_for_bank(
+    let liab_price_unbiased = fetch_unbiased_price_for_bank_cache(
         &liab_bank_key,
         &liab_bank,
         &clock,

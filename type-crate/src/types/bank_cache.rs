@@ -62,9 +62,15 @@ pub struct BankCache {
     /// ACCOUNT_IN_RECEIVERSHIP set, so that operations on unrelated accounts sharing the same
     /// bank do not interfere with an in-progress liquidation.
     pub liq_cache_flags: u8,
-    _padding: [u8; 23],
-    // INFO: these are duplicative of `last_oracle_price` and `last_oracle_price_timestamp` so if
-    // space is ever needed we can recycle at least two of these (32 bytes)
+    _pad0: [u8; 7],
+    /// For integration banks, this is the exchange rate of cToken/token or similar. The "real"
+    /// price of one deposited token is `price_multiplier` * `last_oracle_price`, we split it here
+    /// for consumers who are only interested in reading the oracle price and are applying the
+    /// multiplier already elsewhere.
+    pub price_multiplier: WrappedI80F48,
+    // INFO: these are duplicative of `last_oracle_price` (multiplied by `price_multiplier` when
+    // applicable) and `last_oracle_price_timestamp` so if space is ever needed we can recycle at
+    // least two of these (32 bytes)
     /// Cached real-time price for receivership liquidation.
     pub liquidation_price_rt: WrappedI80F48,
     /// Cached real-time price confidence for receivership liquidation.
@@ -89,12 +95,14 @@ impl BankCache {
         let last_oracle_price = self.last_oracle_price;
         let last_oracle_price_timestamp = self.last_oracle_price_timestamp;
         let last_oracle_price_confidence = self.last_oracle_price_confidence;
+        let price_multiplier = self.price_multiplier;
 
         *self = Self::default();
 
         self.last_oracle_price = last_oracle_price;
         self.last_oracle_price_timestamp = last_oracle_price_timestamp;
         self.last_oracle_price_confidence = last_oracle_price_confidence;
+        self.price_multiplier = price_multiplier;
     }
 
     pub fn is_liquidation_price_cache_locked(&self) -> bool {
