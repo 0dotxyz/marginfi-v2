@@ -20,9 +20,13 @@ use marginfi_type_crate::{
 const DESTINATION_WALLET: Pubkey = pubkey!("AnGdBvg8VmVHq7zyUYmC7mgjZ5pW6odwFsh6eharbzLu");
 const MAINNET_PROGRAM_ID: Pubkey = pubkey!("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA");
 
-/// Group admin only.
-/// Transfers tokens directly from the bank liquidity vault to `destination_token_account` and
-/// lowers `asset_share_value` so that existing depositor shares are decreased proportionally.
+/// Group admin only. Staging/localnet only — panics on mainnet. See
+/// `guides/ADMIN/PERMISSIONS_AND_ROLES.md` ("Protocol Panic-Pause") for rationale.
+///
+/// Transfers `amount` from the bank liquidity vault to `destination_token_account` and lowers
+/// `asset_share_value` so existing depositor shares are decreased proportionally. On live
+/// networks the destination must be the ATA of `DESTINATION_WALLET`, and the call is rejected if
+/// the resulting share value would fall to `0.8` or below.
 pub fn super_admin_withdraw<'info>(
     mut ctx: Context<'_, '_, 'info, 'info, SuperAdminWithdraw<'info>>,
     amount: u64,

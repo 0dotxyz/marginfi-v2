@@ -16,12 +16,14 @@ use marginfi_type_crate::{
 
 const MAINNET_PROGRAM_ID: Pubkey = pubkey!("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA");
 
-/// Group admin only.
-/// Transfers tokens from `admin_token_account` into the bank liquidity vault and raises
-/// `asset_share_value` so that existing depositor shares are increased proportionally.
+/// Group admin only. Staging/localnet only — panics on mainnet. See
+/// `guides/ADMIN/PERMISSIONS_AND_ROLES.md` ("Protocol Panic-Pause") for rationale.
 ///
-/// Note: Token-2022 transfer-fee extensions are not handled here. This instruction assumes
-/// the vault receives exactly `amount`.
+/// Transfers `amount` from `admin_token_account` into the bank liquidity vault and raises
+/// `asset_share_value` so existing depositor shares are increased proportionally.
+///
+/// Token-2022 transfer-fee extensions are not handled here; the vault is assumed to receive
+/// exactly `amount`.
 pub fn super_admin_deposit<'info>(
     mut ctx: Context<'_, '_, 'info, 'info, SuperAdminDeposit<'info>>,
     amount: u64,

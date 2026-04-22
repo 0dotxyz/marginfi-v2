@@ -304,6 +304,102 @@ async fn liquidation_still_blocked_during_pause() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Admin can handle_bankruptcy while protocol is paused.
+#[tokio::test]
+async fn handle_bankruptcy_by_admin_succeeds_during_pause() -> anyhow::Result<()> {
+    let mut test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: None,
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        ..Default::default()
+    }))
+    .await;
+
+    // Setup: lender deposits USDC, borrower deposits SOL and borrows USDC
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(
+            lender_usdc.key,
+            test_f.get_bank(&BankMint::Usdc),
+            100_000,
+            None,
+        )
+        .await?;
+
+    let mut borrower = test_f.create_marginfi_account().await;
+    let borrower_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_001)
+        .await;
+    borrower
+        .try_bank_deposit(
+            borrower_sol.key,
+            test_f.get_bank(&BankMint::Sol),
+            1_001,
+            None,
+        )
+        .await?;
+
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, test_f.get_bank(&BankMint::Usdc), 10_000)
+        .await?;
+
+    // Make account bankrupt by zeroing collateral
+    let collateral_bank = test_f.get_bank(&BankMint::Sol);
+    borrower
+        .nullify_assets_for_bank(collateral_bank.key)
+        .await?;
+
+    // Fund insurance vault
+    {
+        let (insurance_vault, _) = test_f
+            .get_bank(&BankMint::Usdc)
+            .get_vault(BankVaultType::Insurance);
+        test_f
+            .get_bank_mut(&BankMint::Usdc)
+            .mint
+            .mint_to(&insurance_vault, 10_000)
+            .await;
+    }
+
+    // Pause the protocol
+    test_f.marginfi_group.try_panic_pause().await?;
+    test_f.marginfi_group.try_propagate_fee_state().await?;
+
+    let marginfi_group = test_f.marginfi_group.load().await;
+    assert!(marginfi_group.panic_state_cache.is_paused_flag());
+
+    // Admin calls handle_bankruptcy while paused — should succeed
+    let debt_bank = test_f.get_bank(&BankMint::Usdc);
+    let res = test_f
+        .marginfi_group
+        .try_handle_bankruptcy(debt_bank, &borrower)
+        .await;
+
+    assert!(res.is_ok());
+
+    // Verify account is disabled after bankruptcy
+    let borrower_account = borrower.load().await;
+    assert!(borrower_account.get_flag(ACCOUNT_DISABLED));
+
+    Ok(())
+}
+
 /// Non-admin cannot handle_bankruptcy while protocol is paused (even with permissionless flag).
 #[tokio::test]
 async fn handle_bankruptcy_by_non_admin_fails_during_pause() -> anyhow::Result<()> {
