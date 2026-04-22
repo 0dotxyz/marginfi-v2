@@ -32,17 +32,20 @@ import {
   getDriftUserAccount,
   TOKEN_A_INIT_DEPOSIT_AMOUNT,
   TOKEN_A_MARKET_INDEX,
+  DRIFT_SPOT_CUMULATIVE_INTEREST_PRECISION,
   TOKEN_A_SCALING_FACTOR,
   scaledBalanceToTokenAmount,
   tokenAmountToScaledBalance,
   USDC_INIT_DEPOSIT_AMOUNT,
   USDC_SCALING_FACTOR,
+  getSpotMarketAccount,
 } from "./utils/drift-utils";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
-import {
-  composeRemainingAccounts,
-} from "./utils/user-instructions";
+import { composeRemainingAccounts } from "./utils/user-instructions";
 import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "./utils/types";
+
+const readPriceMultiplier = (cache: any) =>
+  cache?.priceMultiplier ?? cache?.price_multiplier ?? 0;
 
 describe("d08: Drift Withdraw Tests", () => {
   let driftUsdcBank: PublicKey;
@@ -80,7 +83,9 @@ describe("d08: Drift Withdraw Tests", () => {
 
     const marginfiAccount = user.accounts.get(USER_ACCOUNT_D);
     const remaining = composeRemainingAccounts(
-      driftBalanceAccountGroups.filter((group) => !group[0].equals(driftUsdcBank))
+      driftBalanceAccountGroups.filter(
+        (group) => !group[0].equals(driftUsdcBank)
+      )
     );
     const withdrawIx = await makeDriftWithdrawIx(
       user.mrgnBankrunProgram,
@@ -140,7 +145,9 @@ describe("d08: Drift Withdraw Tests", () => {
 
     const marginfiAccount = user.accounts.get(USER_ACCOUNT_D);
     const remaining = composeRemainingAccounts(
-      driftBalanceAccountGroups.filter((group) => !group[0].equals(driftUsdcBank))
+      driftBalanceAccountGroups.filter(
+        (group) => !group[0].equals(driftUsdcBank)
+      )
     );
     const withdrawIx = await makeDriftWithdrawIx(
       user.mrgnBankrunProgram,
@@ -262,8 +269,18 @@ describe("d08: Drift Withdraw Tests", () => {
     const expectedPrice = oracles.tokenAPrice;
     const expectedConf =
       expectedPrice * ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
+    const spotMarket = await getSpotMarketAccount(
+      driftBankrunProgram,
+      TOKEN_A_MARKET_INDEX
+    );
+    const expectedMultiplier =
+      Number(spotMarket.cumulativeDepositInterest.toString()) /
+      Number(DRIFT_SPOT_CUMULATIVE_INTEREST_PRECISION.toString());
+    const cachedMultiplier = readPriceMultiplier(bankAfter.cache);
     assertI80F48Approx(bankAfter.cache.lastOraclePrice, expectedPrice);
     assertI80F48Approx(bankAfter.cache.lastOraclePriceConfidence, expectedConf);
+    assertI80F48Approx(cachedMultiplier, expectedMultiplier, 0.000001);
+    assertI80F48Approx(cachedMultiplier, 1, 0.000001);
 
     await assertBankBalance(
       marginfiAccount,
@@ -489,7 +506,9 @@ describe("d08: Drift Withdraw Tests", () => {
     const scaledBalanceBefore = spotPositionBefore.scaledBalance;
     const marginfiAccount = user.accounts.get(USER_ACCOUNT_D);
     const remaining = composeRemainingAccounts(
-      driftBalanceAccountGroups.filter((group) => !group[0].equals(driftTokenABank))
+      driftBalanceAccountGroups.filter(
+        (group) => !group[0].equals(driftTokenABank)
+      )
     );
     const withdrawIx = await makeDriftWithdrawIx(
       user.mrgnBankrunProgram,

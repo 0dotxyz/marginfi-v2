@@ -41,6 +41,7 @@ import {
 } from "./utils/genericTests";
 import {
   defaultKaminoBankConfig,
+  getLiquidityExchangeRate,
   simpleRefreshObligation,
   simpleRefreshReserve,
 } from "./utils/kamino-utils";
@@ -55,6 +56,9 @@ import {
 } from "./utils/kamino-instructions";
 import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "./utils/types";
 import { BalanceRaw } from "@mrgnlabs/marginfi-client-v2";
+
+const readPriceMultiplier = (cache: any) =>
+  cache?.priceMultiplier ?? cache?.price_multiplier ?? 0;
 
 describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
   const startingSeed = 6;
@@ -282,6 +286,25 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
     // Note: Default asset weights for Kamino banks is also 1
     assertI80F48Approx(cache.assetValue, depValWithConf, t);
     assertI80F48Approx(cache.assetValueMaint, depValWithConf, t);
+
+    const [kaminoBank, reserve] = await Promise.all([
+      bankrunProgram.account.bank.fetch(kaminoUsdcBank),
+      klendBankrunProgram.account.reserve.fetch(usdcReserve),
+    ]);
+    const expectedMultiplier = Number(
+      getLiquidityExchangeRate(reserve as any).toString(),
+    );
+    const cachedMultiplier = readPriceMultiplier(kaminoBank.cache);
+    assertI80F48Approx(kaminoBank.cache.lastOraclePrice, oracles.usdcPrice, 0.000001);
+    assertI80F48Approx(cachedMultiplier, expectedMultiplier, 0.0001);
+    assert.isTrue(
+      expectedMultiplier > 1,
+      "expected Kamino liquidity exchange rate to be above 1 after accrued interest",
+    );
+    assert.isTrue(
+      wrappedI80F48toBigNumber(cachedMultiplier).gt(1),
+      "expected cached Kamino multiplier to be above 1 after accrued interest",
+    );
     // TODO repeat the above for the token A test below
   });
 

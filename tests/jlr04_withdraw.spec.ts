@@ -33,6 +33,7 @@ import {
   assertBNEqual,
   assertBNGreaterThan,
   assertBankrunTxFailed,
+  assertI80F48Approx,
   assertI80F48Equal,
   getTokenBalance,
 } from "./utils/genericTests";
@@ -81,6 +82,8 @@ type Snapshot = {
   bankTotalAssetShares: BN;
   bankAssetShareValue: any;
   bankLiabilityShareValue: any;
+  cacheLastOraclePrice: any;
+  cachePriceMultiplier: any;
   userAssetShares: BN;
   hasActiveBalance: boolean;
 };
@@ -181,6 +184,8 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
         .integerValue(BigNumber.ROUND_FLOOR)
         .toFixed(0),
     );
+  const readPriceMultiplier = (cache: any) =>
+    cache?.priceMultiplier ?? cache?.price_multiplier ?? 0;
 
   const previewSharesForDeposit = (
     assets: BN,
@@ -274,6 +279,8 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       bankTotalAssetShares: i80ToBn(bank.totalAssetShares),
       bankAssetShareValue: bank.assetShareValue,
       bankLiabilityShareValue: bank.liabilityShareValue,
+      cacheLastOraclePrice: bank.cache.lastOraclePrice,
+      cachePriceMultiplier: readPriceMultiplier(bank.cache),
       userAssetShares: shares,
       hasActiveBalance: active,
     };
@@ -550,6 +557,26 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       afterWithdrawAll.lendingTokenExchangePrice,
       beforeWithdrawAll.lendingTokenExchangePrice,
     );
+
+    const expectedAfterMultiplier =
+      Number(afterWithdrawAll.lendingTokenExchangePrice.toString()) /
+      Number(EXCHANGE_PRICES_PRECISION.toString());
+    assertI80F48Approx(
+      afterWithdrawAll.cachePriceMultiplier,
+      expectedAfterMultiplier,
+      expectedAfterMultiplier / 10000, // .001%
+    );
+    assert.isTrue(
+      wrappedI80F48toBigNumber(afterWithdrawAll.cachePriceMultiplier).gt(
+        wrappedI80F48toBigNumber(beforeWithdrawAll.cachePriceMultiplier),
+      ),
+      "expected Juplend cache multiplier to increase after one hour of interest",
+    );
+    assertI80F48Approx(
+      afterWithdrawAll.cacheLastOraclePrice,
+      beforeWithdrawAll.cacheLastOraclePrice,
+      0.000001,
+    );
   });
 
   it("(user 1) deposit + equal partial withdraws with interest between", async () => {
@@ -564,7 +591,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     );
 
     for (let i = 0; i < 3; i++) {
-    await advanceOneHour(banksClient, bankrunContext);
+      await advanceOneHour(banksClient, bankrunContext);
 
       const beforeWithdraw = await fetchSnapshot();
       await executeWithdraw(

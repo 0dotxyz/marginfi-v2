@@ -35,7 +35,8 @@ import { getBankrunBlockhash } from "./utils/tools";
 const readCacheFields = (cache: any) => {
   const price = cache?.lastOraclePrice ?? 0;
   const conf = cache?.lastOraclePriceConfidence ?? 0;
-  return { price, conf };
+  const multiplier = cache?.priceMultiplier ?? cache?.price_multiplier ?? 0;
+  return { price, conf, multiplier };
 };
 
 /**
@@ -86,11 +87,12 @@ describe("Bank cache last oracle price", () => {
     await banksClient.processTransaction(tx);
 
     const bank = await bankrunProgram.account.bank.fetch(banks[1]);
-    const { price, conf } = readCacheFields(bank.cache);
+    const { price, conf, multiplier } = readCacheFields(bank.cache);
 
     // No price-based instruction has run yet, cache should be zeroed
     assertI80F48Equal(price, 0);
     assertI80F48Equal(conf, 0);
+    assertI80F48Equal(multiplier, 0);
   });
 
   it("(user 0) borrow stamps last oracle price/confidence", async () => {
@@ -139,7 +141,7 @@ describe("Bank cache last oracle price", () => {
     }
 
     const bankAfter = await bankrunProgram.account.bank.fetch(banks[1]);
-    const { price, conf } = readCacheFields(bankAfter.cache);
+    const { price, conf, multiplier } = readCacheFields(bankAfter.cache);
     const expectedPrice = oracles.lstAlphaPrice;
     const expectedConf =
       expectedPrice * ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
@@ -147,6 +149,7 @@ describe("Bank cache last oracle price", () => {
     // Cache should record the last oracle price and confidence
     assertI80F48Approx(price, expectedPrice, 0.0001);
     assertI80F48Approx(conf, expectedConf, 0.01);
+    assertI80F48Approx(multiplier, 1, 0.000001);
   });
 
   it("cached price tracks oracle price increases on subsequent price-based tx", async () => {
@@ -174,15 +177,18 @@ describe("Bank cache last oracle price", () => {
     }
 
     const bankAfter = await bankrunProgram.account.bank.fetch(banks[1]);
-    const { price: updatedPrice, conf: updatedConf } = readCacheFields(
-      bankAfter.cache
-    );
+    const {
+      price: updatedPrice,
+      conf: updatedConf,
+      multiplier: updatedMultiplier,
+    } = readCacheFields(bankAfter.cache);
     const expectedConf =
       newOraclePrice * ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
 
     // Cached price should now reflect the higher oracle price
     assertI80F48Approx(updatedPrice, newOraclePrice, 0.0001);
     assertI80F48Approx(updatedConf, expectedConf, 0.01);
+    assertI80F48Approx(updatedMultiplier, 1, 0.000001);
 
     // Restore oracle price for any subsequent tests
     oracles.lstAlphaPrice = originalOraclePrice;
@@ -216,6 +222,7 @@ describe("Bank cache last oracle price", () => {
     // update_bank_cache was called with None, so price/confidence should be unchanged
     assertI80F48Equal(afterFields.price, beforeFields.price);
     assertI80F48Equal(afterFields.conf, beforeFields.conf);
+    assertI80F48Equal(afterFields.multiplier, beforeFields.multiplier);
   });
 
   it("(user 0) full repay resets bank cache, but not price, when liabs go to zero", async () => {
@@ -223,9 +230,11 @@ describe("Bank cache last oracle price", () => {
     const userAccount = user.accounts.get(USER_ACCOUNT_THROWAWAY);
 
     const bankBefore = await bankrunProgram.account.bank.fetch(banks[1]);
-    const { price: priceBefore, conf: confBefore } = readCacheFields(
-      bankBefore.cache
-    ); // ensure cache is populated before repay
+    const {
+      price: priceBefore,
+      conf: confBefore,
+      multiplier: multiplierBefore,
+    } = readCacheFields(bankBefore.cache); // ensure cache is populated before repay
 
     // For repayAll, include all active balances, including the closing bank.
     const remaining = composeRemainingAccounts([
@@ -247,10 +256,11 @@ describe("Bank cache last oracle price", () => {
     await banksClient.processTransaction(tx);
 
     const bankAfter = await bankrunProgram.account.bank.fetch(banks[1]);
-    const { price, conf } = readCacheFields(bankAfter.cache);
+    const { price, conf, multiplier } = readCacheFields(bankAfter.cache);
 
     // When liabilities (or assets) go to zero, resets rest of cache, not price
     assertI80F48Equal(price, priceBefore);
     assertI80F48Equal(conf, confBefore);
+    assertI80F48Equal(multiplier, multiplierBefore);
   });
 });
