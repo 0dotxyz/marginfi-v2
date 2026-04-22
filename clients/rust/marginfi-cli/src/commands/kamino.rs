@@ -6,6 +6,12 @@ use kamino_mocks::state::MinimalReserve;
 use marginfi::state::bank::BankVaultType;
 use marginfi_type_crate::{
     constants::{ASSET_TAG_KAMINO, PYTH_PUSH_MIGRATED_DEPRECATED},
+    pdas::{
+        derive_kamino_farm_vaults_authority, derive_kamino_lending_market_authority,
+        derive_kamino_reserve_collateral_mint, derive_kamino_reserve_collateral_supply,
+        derive_kamino_reserve_liquidity_supply, derive_kamino_rewards_treasury_vault,
+        derive_kamino_rewards_vault, derive_kamino_user_metadata, derive_kamino_user_state,
+    },
     types::{Bank, OracleSetup},
 };
 use solana_sdk::pubkey::Pubkey;
@@ -14,11 +20,6 @@ use crate::config::{Config, GlobalOptions};
 use crate::configs;
 use crate::processor;
 use crate::utils::find_bank_vault_authority_pda;
-
-const KAMINO_PROGRAM_ID: Pubkey =
-    solana_sdk::pubkey!("KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
-const FARMS_PROGRAM_ID: Pubkey =
-    solana_sdk::pubkey!("FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr");
 
 /// Kamino integration commands.
 #[derive(Debug, Parser)]
@@ -188,40 +189,18 @@ fn derive_kamino_accounts(
 
     let (liquidity_vault_authority, _) =
         find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
-    let (lending_market_authority, _) = Pubkey::find_program_address(
-        &[b"lma", reserve_state.lending_market.as_ref()],
-        &KAMINO_PROGRAM_ID,
-    );
-    let (reserve_liquidity_supply, _) = Pubkey::find_program_address(
-        &[b"reserve_liq_supply", reserve.as_ref()],
-        &KAMINO_PROGRAM_ID,
-    );
-    let (reserve_collateral_mint, _) = Pubkey::find_program_address(
-        &[b"reserve_coll_mint", reserve.as_ref()],
-        &KAMINO_PROGRAM_ID,
-    );
-    let (reserve_destination_deposit_collateral, _) = Pubkey::find_program_address(
-        &[b"reserve_coll_supply", reserve.as_ref()],
-        &KAMINO_PROGRAM_ID,
-    );
-    let (user_metadata, _) = Pubkey::find_program_address(
-        &[b"user_meta", liquidity_vault_authority.as_ref()],
-        &KAMINO_PROGRAM_ID,
-    );
+    let (lending_market_authority, _) =
+        derive_kamino_lending_market_authority(&reserve_state.lending_market);
+    let (reserve_liquidity_supply, _) = derive_kamino_reserve_liquidity_supply(&reserve);
+    let (reserve_collateral_mint, _) = derive_kamino_reserve_collateral_mint(&reserve);
+    let (reserve_destination_deposit_collateral, _) =
+        derive_kamino_reserve_collateral_supply(&reserve);
+    let (user_metadata, _) = derive_kamino_user_metadata(&liquidity_vault_authority);
 
     let reserve_farm_state = (reserve_state.farm_collateral != Pubkey::default())
         .then_some(reserve_state.farm_collateral);
-    let obligation_farm_user_state = reserve_farm_state.map(|farm_state| {
-        Pubkey::find_program_address(
-            &[
-                b"user",
-                farm_state.as_ref(),
-                bank.integration_acc_2.as_ref(),
-            ],
-            &FARMS_PROGRAM_ID,
-        )
-        .0
-    });
+    let obligation_farm_user_state = reserve_farm_state
+        .map(|farm_state| derive_kamino_user_state(&farm_state, &bank.integration_acc_2).0);
 
     let reserve_oracle =
         reserve_oracle_override
@@ -261,16 +240,10 @@ fn derive_kamino_harvest_reward_accounts(
     let farm_state = derived
         .reserve_farm_state
         .context("Kamino reserve has no farm state; rewards are not initialized for this bank")?;
-    let (farm_vaults_authority, _) =
-        Pubkey::find_program_address(&[b"authority", farm_state.as_ref()], &FARMS_PROGRAM_ID);
-    let (rewards_vault, _) = Pubkey::find_program_address(
-        &[b"rvault", farm_state.as_ref(), reward_mint.as_ref()],
-        &FARMS_PROGRAM_ID,
-    );
-    let (rewards_treasury_vault, _) = Pubkey::find_program_address(
-        &[b"tvault", global_config.as_ref(), reward_mint.as_ref()],
-        &FARMS_PROGRAM_ID,
-    );
+    let (farm_vaults_authority, _) = derive_kamino_farm_vaults_authority(&farm_state);
+    let (rewards_vault, _) = derive_kamino_rewards_vault(&farm_state, &reward_mint);
+    let (rewards_treasury_vault, _) =
+        derive_kamino_rewards_treasury_vault(&global_config, &reward_mint);
     let (liquidity_vault_authority, _) =
         find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
     let reward_mint_account = config.mfi_program.rpc().get_account(&reward_mint)?;

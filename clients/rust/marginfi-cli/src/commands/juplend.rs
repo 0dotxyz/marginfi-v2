@@ -4,13 +4,12 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use juplend_mocks::state::Lending;
 use marginfi_type_crate::constants::{ASSET_TAG_JUPLEND, PYTH_PUSH_MIGRATED_DEPRECATED};
+use marginfi_type_crate::pdas::derive_juplend_lending_from_mint;
 use solana_sdk::pubkey::Pubkey;
 
 use crate::config::GlobalOptions;
 use crate::configs;
 use crate::processor;
-use crate::utils::derive_juplend_lending_from_mint;
-
 /// JupLend integration commands.
 #[derive(Debug, Parser)]
 #[clap(

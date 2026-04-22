@@ -19,7 +19,8 @@ use marginfi_type_crate::{
     },
     types::{
         mul_div_i128, mul_div_i64, mul_div_u64, mul_i128_by_i80f48, mul_i64_by_i80f48,
-        mul_u64_by_i80f48, Bank, BankConfig, OracleSetup,
+        mul_u64_by_i80f48, Bank, BankConfig, OraclePriceType, OraclePriceWithConfidence,
+        OracleSetup, PriceBias,
     },
 };
 use pyth_solana_receiver_sdk::price_update::{self, FeedId, PriceUpdateV2};
@@ -29,22 +30,6 @@ use std::{cell::Ref, cmp::min};
 use switchboard_on_demand::{
     CurrentResult, Discriminator, PullFeedAccountData, SPL_TOKEN_PROGRAM_ID,
 };
-
-#[derive(Copy, Clone, Debug)]
-pub enum PriceBias {
-    Low,
-    High,
-}
-
-/// Generic `(price, confidence)` pair.
-/// * In risk/valuation flows this is typically the fully adjusted deposited-token price.
-/// * When nested under `OraclePriceWithMultiplier.oracle_price`, this is the raw pre-multiplier
-///   price used for cache display.
-#[derive(Copy, Clone, Debug)]
-pub struct OraclePriceWithConfidence {
-    pub price: I80F48,
-    pub confidence: I80F48,
-}
 
 /// Price per unit before any multipliers are applied, where `price_multiplier` shows what
 /// multipliers will be applied to generate the true deposited-token price.
@@ -57,16 +42,6 @@ pub struct OraclePriceWithMultiplier {
     pub oracle_price: OraclePriceWithConfidence,
     pub price_multiplier: I80F48,
 }
-
-#[derive(Copy, Clone, Debug)]
-pub enum OraclePriceType {
-    /// Time weighted price
-    /// EMA for PythEma
-    TimeWeighted,
-    /// Real time price
-    RealTime,
-}
-
 #[enum_dispatch]
 pub trait PriceAdapter {
     fn get_price_and_confidence_of_type(

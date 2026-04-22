@@ -1,13 +1,17 @@
 use crate::events::{AccountEventHeader, LendingAccountLiquidateEvent, LiquidationBalances};
-use crate::state::bank::{BankImpl, BankVaultType};
-use crate::state::marginfi_account::{
-    account_not_frozen_for_authority, calc_amount, calc_value, check_account_init_health,
-    check_post_liquidation_condition_and_get_account_health,
-    check_pre_liquidation_condition_and_get_account_health, get_remaining_accounts_per_bank,
-    is_signer_authorized, HealthPriceMode, LendingAccountImpl, MarginfiAccountImpl,
+use crate::state::{
+    bank::{BankImpl, BankVaultType},
+    marginfi_account::{
+        account_not_frozen_for_authority, calc_amount, calc_value, check_account_init_health,
+        check_post_liquidation_condition_and_get_account_health,
+        check_pre_liquidation_condition_and_get_account_health, get_remaining_accounts_per_bank,
+        is_signer_authorized, LendingAccountImpl, MarginfiAccountImpl,
+    },
+    {
+        marginfi_group::MarginfiGroupImpl,
+        price::{OraclePriceFeedAdapter, PriceAdapter},
+    },
 };
-use crate::state::marginfi_group::MarginfiGroupImpl;
-use crate::state::price::{OraclePriceFeedAdapter, OraclePriceType, PriceAdapter, PriceBias};
 use crate::utils::{
     fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank_cache,
     is_marginfi_asset_tag, validate_asset_tags, validate_bank_asset_tags, validate_bank_state,
@@ -15,16 +19,22 @@ use crate::utils::{
 };
 use crate::{bank_signer, state::marginfi_account::BankAccountWrapper};
 use crate::{check, debug, prelude::*, utils};
-use anchor_lang::prelude::*;
-use anchor_lang::solana_program::clock::Clock;
-use anchor_lang::solana_program::sysvar::Sysvar;
+use anchor_lang::{
+    prelude::*,
+    solana_program::{clock::Clock, sysvar::Sysvar},
+};
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
-use marginfi_type_crate::constants::{
-    INSURANCE_VAULT_SEED, LIQUIDATION_INSURANCE_FEE, LIQUIDATION_LIQUIDATOR_FEE,
-    LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+use marginfi_type_crate::{
+    constants::{
+        INSURANCE_VAULT_SEED, LIQUIDATION_INSURANCE_FEE, LIQUIDATION_LIQUIDATOR_FEE,
+        LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+    },
+    types::{
+        Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType, PriceBias,
+        ACCOUNT_IN_RECEIVERSHIP,
+    },
 };
-use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_IN_RECEIVERSHIP};
 
 /// Instruction liquidates a position owned by a margin account that is in a unhealthy state.
 /// The liquidator can purchase discounted collateral from the unhealthy account, in exchange for paying its debt.
