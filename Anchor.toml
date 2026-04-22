@@ -196,6 +196,10 @@ address = "Fe5QkKPVAh629UPP5aJ8sDZu8HTfe6M26jDQkKyXVhoA"
 filename = "tests/fixtures/pyusd_bank.json"
 
 [[test.validator.account]]
+address = "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo"
+filename = "tests/fixtures/pyusd_mint.json"
+
+[[test.validator.account]]
 address = "8FRFC6MoGGkMFQwngccyu69VnYbzykGeez7ignHVAFSN"
 filename = "tests/fixtures/localnet_usdc.json"
 

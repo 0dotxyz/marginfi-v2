@@ -760,6 +760,24 @@ export const migrateCurve = (
   return ix;
 };
 
+export type BackfillBankIsT22FlagArgs = {
+  bank: PublicKey;
+};
+
+export const backfillBankIsT22Flag = (
+  program: Program<Marginfi>,
+  args: BackfillBankIsT22FlagArgs
+) => {
+  const ix = program.methods
+    .lendingPoolBackfillBankIsT22Flag()
+    .accounts({
+      bank: args.bank,
+      // mint: // implied via has_one on bank
+    })
+    .instruction();
+  return ix;
+};
+
 export type HandleBankruptcyArgs = {
   signer: PublicKey;
   bank: PublicKey;

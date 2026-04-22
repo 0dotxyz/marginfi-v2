@@ -1,4 +1,5 @@
 use anchor_lang::{InstructionData, ToAccountMetas};
+use anchor_spl::token_2022;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use fixtures::{assert_anchor_error, assert_custom_error, prelude::*};
@@ -9,7 +10,7 @@ use marginfi::{
 };
 use marginfi_type_crate::{
     constants::{
-        CLOSE_ENABLED_FLAG, FREEZE_SETTINGS, METADATA_SEED,
+        CLOSE_ENABLED_FLAG, FREEZE_SETTINGS, IS_T22, METADATA_SEED,
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
@@ -119,6 +120,12 @@ async fn add_bank_success() -> anyhow::Result<()> {
     assert_eq!(last_update, 0);
 
     for (mint_f, bank_config) in mints {
+        let expected_is_t22 = if mint_f.token_program == token_2022::ID {
+            IS_T22
+        } else {
+            0
+        };
+
         // This is just to test that the group's last_update field is properly updated upon bank creation
         {
             let ctx = test_f.context.borrow_mut();
@@ -212,7 +219,8 @@ async fn add_bank_success() -> anyhow::Result<()> {
             assert_eq!(total_liability_shares, I80F48!(0.0).into());
             assert_eq!(total_asset_shares, I80F48!(0.0).into());
             assert_eq!(config, bank_config);
-            assert_eq!(flags, CLOSE_ENABLED_FLAG);
+            assert_eq!(flags, CLOSE_ENABLED_FLAG | expected_is_t22);
+            assert_eq!(flags & IS_T22, expected_is_t22);
             assert_eq!(emissions_rate, 0);
             assert_eq!(emissions_mint, Pubkey::new_from_array([0; 32]));
             assert_eq!(emissions_remaining, I80F48!(0.0).into());
@@ -275,6 +283,12 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
     ];
 
     for (mint_f, bank_config) in mints {
+        let expected_is_t22 = if mint_f.token_program == token_2022::ID {
+            IS_T22
+        } else {
+            0
+        };
+
         let fee_balance_before: u64;
         {
             let ctx = test_f.context.borrow_mut();
@@ -355,7 +369,8 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(total_liability_shares, I80F48!(0.0).into());
             assert_eq!(total_asset_shares, I80F48!(0.0).into());
             assert_eq!(config, bank_config);
-            assert_eq!(flags, CLOSE_ENABLED_FLAG);
+            assert_eq!(flags, CLOSE_ENABLED_FLAG | expected_is_t22);
+            assert_eq!(flags & IS_T22, expected_is_t22);
             assert_eq!(emissions_rate, 0);
             assert_eq!(emissions_mint, Pubkey::new_from_array([0; 32]));
             assert_eq!(emissions_remaining, I80F48!(0.0).into());
@@ -390,6 +405,35 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
         let actual_fee_delta = fee_balance_after - fee_balance_before;
         assert_eq!(expected_fee_delta, actual_fee_delta);
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn backfill_is_t22_noop_for_classic_bank() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+
+    let bank = test_f
+        .marginfi_group
+        .try_lending_pool_add_bank(
+            &test_f.usdc_mint,
+            None,
+            *DEFAULT_USDC_TEST_BANK_CONFIG,
+            None,
+        )
+        .await?;
+
+    let bank_before = bank.load().await;
+    assert_eq!(bank_before.flags & IS_T22, 0);
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_backfill_bank_is_t22_flag(&bank)
+        .await?;
+
+    let bank_after = bank.load().await;
+    assert_eq!(bank_after.flags & IS_T22, 0);
+    assert_eq!(bank_after.flags, bank_before.flags);
 
     Ok(())
 }

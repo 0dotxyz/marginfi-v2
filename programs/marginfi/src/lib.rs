@@ -95,6 +95,14 @@ pub mod marginfi {
         marginfi_group::lending_pool_add_bank_permissionless(ctx, bank_seed)
     }
 
+    /// (permissionless) Backfill `IS_T22` on existing banks created before this flag existed.
+    /// No-op if the bank mint is classic SPL Token or the flag is already set.
+    pub fn lending_pool_backfill_bank_is_t22_flag(
+        ctx: Context<LendingPoolBackfillBankIsT22Flag>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_backfill_bank_is_t22_flag(ctx)
+    }
+
     /// (admin only) Configure bank parameters. If the bank has `FREEZE_SETTINGS`, only
     /// deposit/borrow limits are updated and all other config changes are silently ignored.
     pub fn lending_pool_configure_bank(

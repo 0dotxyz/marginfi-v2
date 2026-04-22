@@ -37,6 +37,7 @@ import {
   FREEZE_SETTINGS,
   InterestRateConfigOpt1_6,
   makeRatePoints,
+  ORACLE_SETUP_FIXED,
   TOKENLESS_REPAYMENTS_ALLOWED,
 } from "./utils/types";
 import { deriveBankAndMetadataWithSeed } from "./utils/pdas";
@@ -188,6 +189,21 @@ describe("Lending pool configure bank", () => {
     const config = bank.config;
     assert.deepEqual(config.oracleSetup, { pythPushOracle: {} }); // no change
     assertKeysEqual(config.oracleKeys[0], oracles.usdcOracle.publicKey);
+  });
+
+  it("(admin) configure_bank_oracle rejects Fixed setup - use set_fixed_oracle_price", async () => {
+    const bankKey = bankKeypairUsdc.publicKey;
+    await expectFailedTxWithMessage(async () => {
+      await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
+        new Transaction().add(
+          await configureBankOracle(groupAdmin.mrgnProgram, {
+            bank: bankKey,
+            type: ORACLE_SETUP_FIXED,
+            oracle: oracles.usdcOracle.publicKey,
+          })
+        )
+      );
+    }, "Use set_fixed_oracle_price instead");
   });
 
   it("(admin) update oracle to invalid state - should fail", async () => {
