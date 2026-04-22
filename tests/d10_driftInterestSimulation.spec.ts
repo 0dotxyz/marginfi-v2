@@ -45,15 +45,10 @@ import {
   makeDriftWithdrawIx,
 } from "./utils/drift-instructions";
 import { getTokenBalance, assertI80F48Approx } from "./utils/genericTests";
-import {
-  composeRemainingAccounts,
-} from "./utils/user-instructions";
+import { composeRemainingAccounts } from "./utils/user-instructions";
 import { createMintToInstruction } from "@solana/spl-token";
 import { Clock } from "solana-bankrun";
 import { ASSET_TAG_DRIFT } from "./utils/types";
-
-const readPriceMultiplier = (cache: any) =>
-  cache?.priceMultiplier ?? cache?.price_multiplier ?? 0;
 
 describe("d10: Drift Interest Simulation", () => {
   const NEW_DRIFT_USDC_BANK = "new_drift_usdc_bank";
@@ -449,7 +444,7 @@ describe("d10: Drift Interest Simulation", () => {
         withdrawAll: withdrawAll,
         remaining: withdrawAll
           ? composeRemainingAccounts(
-              activePositions.filter((group) => !group[0].equals(bank))
+              activePositions.filter((group) => !group[0].equals(bank)),
             )
           : composeRemainingAccounts(activePositions),
       },
@@ -498,7 +493,7 @@ describe("d10: Drift Interest Simulation", () => {
       bankrunProgram.account.bank.fetch(newDriftUsdcBank),
       getSpotMarketAccount(driftBankrunProgram, USDC_MARKET_INDEX),
     ]);
-    const beforeMultiplier = readPriceMultiplier(bankBefore.cache);
+    const beforeMultiplier = bankBefore.cache.priceMultiplier;
     const expectedBeforeMultiplier =
       Number(spotBefore.cumulativeDepositInterest.toString()) /
       Number(DRIFT_SPOT_CUMULATIVE_INTEREST_PRECISION.toString());
@@ -516,7 +511,7 @@ describe("d10: Drift Interest Simulation", () => {
       bankrunProgram.account.bank.fetch(newDriftUsdcBank),
       getSpotMarketAccount(driftBankrunProgram, USDC_MARKET_INDEX),
     ]);
-    const afterMultiplier = readPriceMultiplier(bankAfter.cache);
+    const afterMultiplier = bankAfter.cache.priceMultiplier;
     const expectedAfterMultiplier =
       Number(spotAfter.cumulativeDepositInterest.toString()) /
       Number(DRIFT_SPOT_CUMULATIVE_INTEREST_PRECISION.toString());
@@ -525,13 +520,16 @@ describe("d10: Drift Interest Simulation", () => {
       bankBefore.cache.lastOraclePrice,
       0.000001,
     );
-    assertI80F48Approx(bankAfter.cache.lastOraclePrice, oracles.usdcPrice, 0.000001);
+    assertI80F48Approx(
+      bankAfter.cache.lastOraclePrice,
+      oracles.usdcPrice,
+      0.000001,
+    );
     assertI80F48Approx(afterMultiplier, expectedAfterMultiplier, 0.000001);
-    assert.isTrue(
+    assert(
       wrappedI80F48toBigNumber(afterMultiplier).gt(
         wrappedI80F48toBigNumber(beforeMultiplier),
       ),
-      "expected Drift cache multiplier to increase after accrual",
     );
   });
 
@@ -642,7 +640,9 @@ describe("d10: Drift Interest Simulation", () => {
               const updatedAssetShares = wrappedI80F48toBigNumber(
                 updatedBalance.assetShares,
               );
-              const scaledUpdatedBalance = new BN(updatedAssetShares.toString());
+              const scaledUpdatedBalance = new BN(
+                updatedAssetShares.toString(),
+              );
 
               if (!scaledUpdatedBalance.isZero()) {
                 await makeWithdrawThroughMarginfi(

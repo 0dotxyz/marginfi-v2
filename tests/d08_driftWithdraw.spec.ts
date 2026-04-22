@@ -44,9 +44,6 @@ import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { composeRemainingAccounts } from "./utils/user-instructions";
 import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "./utils/types";
 
-const readPriceMultiplier = (cache: any) =>
-  cache?.priceMultiplier ?? cache?.price_multiplier ?? 0;
-
 describe("d08: Drift Withdraw Tests", () => {
   let driftUsdcBank: PublicKey;
   let driftTokenABank: PublicKey;
@@ -276,7 +273,7 @@ describe("d08: Drift Withdraw Tests", () => {
     const expectedMultiplier =
       Number(spotMarket.cumulativeDepositInterest.toString()) /
       Number(DRIFT_SPOT_CUMULATIVE_INTEREST_PRECISION.toString());
-    const cachedMultiplier = readPriceMultiplier(bankAfter.cache);
+    const cachedMultiplier = bankAfter.cache.priceMultiplier;
     assertI80F48Approx(bankAfter.cache.lastOraclePrice, expectedPrice);
     assertI80F48Approx(bankAfter.cache.lastOraclePriceConfidence, expectedConf);
     assertI80F48Approx(cachedMultiplier, expectedMultiplier, 0.000001);

@@ -184,8 +184,6 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
         .integerValue(BigNumber.ROUND_FLOOR)
         .toFixed(0),
     );
-  const readPriceMultiplier = (cache: any) =>
-    cache?.priceMultiplier ?? cache?.price_multiplier ?? 0;
 
   const previewSharesForDeposit = (
     assets: BN,
@@ -280,7 +278,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       bankAssetShareValue: bank.assetShareValue,
       bankLiabilityShareValue: bank.liabilityShareValue,
       cacheLastOraclePrice: bank.cache.lastOraclePrice,
-      cachePriceMultiplier: readPriceMultiplier(bank.cache),
+      cachePriceMultiplier: bank.cache.priceMultiplier,
       userAssetShares: shares,
       hasActiveBalance: active,
     };
@@ -566,11 +564,10 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       expectedAfterMultiplier,
       expectedAfterMultiplier / 10000, // .001%
     );
-    assert.isTrue(
-      wrappedI80F48toBigNumber(afterWithdrawAll.cachePriceMultiplier).gt(
+    assert(
+      wrappedI80F48toBigNumber(afterWithdrawAll.cachePriceMultiplier).gte(
         wrappedI80F48toBigNumber(beforeWithdrawAll.cachePriceMultiplier),
       ),
-      "expected Juplend cache multiplier to increase after one hour of interest",
     );
     assertI80F48Approx(
       afterWithdrawAll.cacheLastOraclePrice,

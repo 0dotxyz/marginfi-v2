@@ -1,4 +1,4 @@
-import { BN } from "@coral-xyz/anchor";
+import { BN, IdlAccounts } from "@coral-xyz/anchor";
 import {
   ComputeBudgetProgram,
   PublicKey,
@@ -14,6 +14,7 @@ import {
   oracles,
   users,
 } from "./rootHooks";
+import { Marginfi } from "../target/types/marginfi";
 import { genericMultiBankTestSetup } from "./genericSetups";
 import {
   borrowIx,
@@ -32,10 +33,12 @@ import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { assertI80F48Approx, assertI80F48Equal } from "./utils/genericTests";
 import { getBankrunBlockhash } from "./utils/tools";
 
-const readCacheFields = (cache: any) => {
-  const price = cache?.lastOraclePrice ?? 0;
-  const conf = cache?.lastOraclePriceConfidence ?? 0;
-  const multiplier = cache?.priceMultiplier ?? cache?.price_multiplier ?? 0;
+type MarginfiBankAccount = IdlAccounts<Marginfi>["bank"];
+
+const readCacheFields = (bank: MarginfiBankAccount) => {
+  const price = bank.cache.lastOraclePrice;
+  const conf = bank.cache.lastOraclePriceConfidence;
+  const multiplier = bank.cache.priceMultiplier;
   return { price, conf, multiplier };
 };
 
@@ -87,7 +90,7 @@ describe("Bank cache last oracle price", () => {
     await banksClient.processTransaction(tx);
 
     const bank = await bankrunProgram.account.bank.fetch(banks[1]);
-    const { price, conf, multiplier } = readCacheFields(bank.cache);
+    const { price, conf, multiplier } = readCacheFields(bank);
 
     // No price-based instruction has run yet, cache should be zeroed
     assertI80F48Equal(price, 0);
@@ -141,7 +144,7 @@ describe("Bank cache last oracle price", () => {
     }
 
     const bankAfter = await bankrunProgram.account.bank.fetch(banks[1]);
-    const { price, conf, multiplier } = readCacheFields(bankAfter.cache);
+    const { price, conf, multiplier } = readCacheFields(bankAfter);
     const expectedPrice = oracles.lstAlphaPrice;
     const expectedConf =
       expectedPrice * ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
@@ -181,7 +184,7 @@ describe("Bank cache last oracle price", () => {
       price: updatedPrice,
       conf: updatedConf,
       multiplier: updatedMultiplier,
-    } = readCacheFields(bankAfter.cache);
+    } = readCacheFields(bankAfter);
     const expectedConf =
       newOraclePrice * ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
 
@@ -199,7 +202,7 @@ describe("Bank cache last oracle price", () => {
     const user = users[0];
 
     const bankBefore = await bankrunProgram.account.bank.fetch(banks[1]);
-    const beforeFields = readCacheFields(bankBefore.cache);
+    const beforeFields = readCacheFields(bankBefore);
 
     const tx = new Transaction().add(
       await accrueInterest(user.mrgnBankrunProgram, {
@@ -217,7 +220,7 @@ describe("Bank cache last oracle price", () => {
     await banksClient.processTransaction(tx);
 
     const bankAfter = await bankrunProgram.account.bank.fetch(banks[1]);
-    const afterFields = readCacheFields(bankAfter.cache);
+    const afterFields = readCacheFields(bankAfter);
 
     // update_bank_cache was called with None, so price/confidence should be unchanged
     assertI80F48Equal(afterFields.price, beforeFields.price);
@@ -234,7 +237,7 @@ describe("Bank cache last oracle price", () => {
       price: priceBefore,
       conf: confBefore,
       multiplier: multiplierBefore,
-    } = readCacheFields(bankBefore.cache); // ensure cache is populated before repay
+    } = readCacheFields(bankBefore); // ensure cache is populated before repay
 
     // For repayAll, include all active balances, including the closing bank.
     const remaining = composeRemainingAccounts([
@@ -256,7 +259,7 @@ describe("Bank cache last oracle price", () => {
     await banksClient.processTransaction(tx);
 
     const bankAfter = await bankrunProgram.account.bank.fetch(banks[1]);
-    const { price, conf, multiplier } = readCacheFields(bankAfter.cache);
+    const { price, conf, multiplier } = readCacheFields(bankAfter);
 
     // When liabilities (or assets) go to zero, resets rest of cache, not price
     assertI80F48Equal(price, priceBefore);

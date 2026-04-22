@@ -57,9 +57,6 @@ import {
 import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "./utils/types";
 import { BalanceRaw } from "@mrgnlabs/marginfi-client-v2";
 
-const readPriceMultiplier = (cache: any) =>
-  cache?.priceMultiplier ?? cache?.price_multiplier ?? 0;
-
 describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
   const startingSeed = 6;
   const throwawayGroup = Keypair.fromSeed(THROWAWAY_GROUP_SEED_K10);
@@ -154,7 +151,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
         signerTokenAccount: groupAdmin.tokenAAccount,
         lendingMarket: market,
         reserve: tokenAReserve,
-      })
+      }),
     );
     await processBankrunTx(bankrunContext, tx, [groupAdmin.wallet]);
   });
@@ -276,7 +273,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
       console.log("expected value (w/ confidence): " + depValWithConf);
       console.log(
         "actual value:               " +
-        wrappedI80F48toBigNumber(cache.assetValueEquity).toString()
+          wrappedI80F48toBigNumber(cache.assetValueEquity).toString(),
       );
     }
     // Note: interest has accumulated, so we expect this position should be worth a few % more.
@@ -294,17 +291,15 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
     const expectedMultiplier = Number(
       getLiquidityExchangeRate(reserve as any).toString(),
     );
-    const cachedMultiplier = readPriceMultiplier(kaminoBank.cache);
-    assertI80F48Approx(kaminoBank.cache.lastOraclePrice, oracles.usdcPrice, 0.000001);
+    const cachedMultiplier = kaminoBank.cache.priceMultiplier;
+    assertI80F48Approx(
+      kaminoBank.cache.lastOraclePrice,
+      oracles.usdcPrice,
+      0.000001,
+    );
     assertI80F48Approx(cachedMultiplier, expectedMultiplier, 0.0001);
-    assert.isTrue(
-      expectedMultiplier > 1,
-      "expected Kamino liquidity exchange rate to be above 1 after accrued interest",
-    );
-    assert.isTrue(
-      wrappedI80F48toBigNumber(cachedMultiplier).gt(1),
-      "expected cached Kamino multiplier to be above 1 after accrued interest",
-    );
+    assert(expectedMultiplier > 1);
+    assert(wrappedI80F48toBigNumber(cachedMultiplier).gt(1));
     // TODO repeat the above for the token A test below
   });
 
