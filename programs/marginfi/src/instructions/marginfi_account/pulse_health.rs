@@ -1,14 +1,14 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{clock::Clock, sysvar::Sysvar};
 use bytemuck::Zeroable;
-use marginfi_type_crate::types::{HealthCache, MarginfiAccount};
+use marginfi_type_crate::types::{HealthCache, HealthPriceMode, MarginfiAccount};
 
 use crate::{
     constants::PROGRAM_VERSION,
     events::HealthPulseEvent,
     state::marginfi_account::{
         check_account_bankrupt, check_account_init_health,
-        check_pre_liquidation_condition_and_get_account_health, HealthPriceMode,
+        check_pre_liquidation_condition_and_get_account_health,
     },
     MarginfiError, MarginfiResult,
 };
