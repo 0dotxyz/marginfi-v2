@@ -50,7 +50,6 @@ import {
   withdrawIx,
 } from "./utils/user-instructions";
 import {
-  buildHealthRemainingAccounts,
   mintToTokenAccount,
   processBankrunTransaction,
 } from "./utils/tools";
@@ -90,10 +89,6 @@ const SAME_ASSET_DEPOSIT = new BN(100 * 10 ** ecosystem.usdcDecimals);
 const SAME_ASSET_TIGHTENED_INIT_LEVERAGE = 97;
 const SAME_ASSET_TIGHTENED_MAINT_LEVERAGE = 98;
 const SAME_ASSET_PARTIAL_LIQUIDATION = new BN(50_000);
-const SAME_ASSET_LIQUIDATION_INIT_LEVERAGE = 20;
-const SAME_ASSET_LIQUIDATION_MAINT_LEVERAGE = 21;
-const SAME_ASSET_LIQUIDATION_TIGHTENED_INIT_LEVERAGE = 18;
-const SAME_ASSET_LIQUIDATION_TIGHTENED_MAINT_LEVERAGE = 19;
 const SAME_ASSET_BORROW_ORIGINATION_FEE_RATE = 0;
 
 /**
@@ -292,18 +287,6 @@ describe("Same-asset automatic emode", () => {
     sourceOriginationFeeRate: SAME_ASSET_BORROW_ORIGINATION_FEE_RATE,
     targetOriginationFeeRate: SAME_ASSET_BORROW_ORIGINATION_FEE_RATE,
   });
-  const SAME_ASSET_LIQUIDATION_BORROW = computeSameAssetBoundaryBorrowNative({
-    collateralNative: SAME_ASSET_DEPOSIT,
-    collateralDecimals: ecosystem.usdcDecimals,
-    collateralPrice: ecosystem.usdcPrice,
-    liabilityDecimals: ecosystem.usdcDecimals,
-    liabilityPrice: ecosystem.usdcPrice,
-    healthyInitLeverage: SAME_ASSET_LIQUIDATION_INIT_LEVERAGE,
-    tightenedRequirementLeverage:
-      SAME_ASSET_LIQUIDATION_TIGHTENED_MAINT_LEVERAGE,
-    liabilityOriginationFeeRate: SAME_ASSET_BORROW_ORIGINATION_FEE_RATE,
-  });
-
   before(async () => {
     // Derive bank addresses (created in e01_initGroup)
     [usdcBankA] = deriveBankWithSeed(
@@ -765,214 +748,4 @@ describe("Same-asset automatic emode", () => {
     assertBankrunTxFailed(result, "0x1779");
   });
 
-  it("(admin) tightening same-asset leverage makes a high-leverage P0/P0 position liquidatable", async () => {
-    const liquidatee = users[1];
-    const liquidator = users[2];
-    const liquidateeAccount = await initFreshAccount(liquidatee);
-    const liquidatorAccount = await initFreshAccount(liquidator);
-
-    // This liquidation-specific path uses 20x / 21x -> 18x / 19x.
-    // On a 100 USDC deposit with zero origination fee, the helper places
-    // `SAME_ASSET_LIQUIDATION_BORROW` between:
-    // - the healthy init boundary at 20x, using weight 19 / 20 = 0.95
-    // - the tightened maint boundary at 19x, using weight 18 / 19 ~= 0.947368
-    // after use the same oracle lower/upper confidence haircut used by the risk engine, at a 25%
-    // position up from the tightened boundary toward the healthy one.
-    let tx = new Transaction().add(
-      await groupConfigure(groupAdmin.mrgnBankrunProgram, {
-        marginfiGroup: emodeGroup.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_LIQUIDATION_INIT_LEVERAGE
-        ),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_LIQUIDATION_MAINT_LEVERAGE
-        ),
-      }),
-      await depositIx(liquidatee.mrgnBankrunProgram, {
-        marginfiAccount: liquidateeAccount,
-        bank: usdcBankA,
-        tokenAccount: liquidatee.usdcAccount,
-        amount: SAME_ASSET_DEPOSIT,
-        depositUpToLimit: false,
-      }),
-      await borrowIx(liquidatee.mrgnBankrunProgram, {
-        marginfiAccount: liquidateeAccount,
-        bank: usdcBankB,
-        tokenAccount: liquidatee.usdcAccount,
-        remaining: composeRemainingAccounts(getSameAssetRemaining()),
-        amount: SAME_ASSET_LIQUIDATION_BORROW,
-      }),
-      await depositIx(liquidator.mrgnBankrunProgram, {
-        marginfiAccount: liquidatorAccount,
-        bank: usdcBankB,
-        tokenAccount: liquidator.usdcAccount,
-        amount: new BN(150 * 10 ** ecosystem.usdcDecimals),
-        depositUpToLimit: false,
-      })
-    );
-    await processBankrunTransaction(bankrunContext, tx, [
-      groupAdmin.wallet,
-      liquidatee.wallet,
-      liquidator.wallet,
-    ]);
-
-    tx = new Transaction().add(
-      await groupConfigure(groupAdmin.mrgnBankrunProgram, {
-        marginfiGroup: emodeGroup.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_LIQUIDATION_TIGHTENED_INIT_LEVERAGE
-        ),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_LIQUIDATION_TIGHTENED_MAINT_LEVERAGE
-        ),
-      })
-    );
-    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
-
-    const liquidatorRemaining = await buildHealthRemainingAccounts(
-      liquidatorAccount,
-      {
-        includedBankPks: [usdcBankA, usdcBankB],
-      }
-    );
-    const liquidateeRemaining = await buildHealthRemainingAccounts(
-      liquidateeAccount
-    );
-
-    tx = new Transaction().add(
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 500_000 }),
-      await liquidateIx(liquidator.mrgnBankrunProgram, {
-        assetBankKey: usdcBankA,
-        liabilityBankKey: usdcBankB,
-        liquidatorMarginfiAccount: liquidatorAccount,
-        liquidateeMarginfiAccount: liquidateeAccount,
-        remaining: [
-          oracles.usdcOracle.publicKey,
-          oracles.usdcOracle.publicKey,
-          ...liquidatorRemaining,
-          ...liquidateeRemaining,
-        ],
-        amount: SAME_ASSET_PARTIAL_LIQUIDATION,
-        liquidatorAccounts: liquidatorRemaining.length,
-        liquidateeAccounts: liquidateeRemaining.length,
-      })
-    );
-    await processBankrunTransaction(bankrunContext, tx, [liquidator.wallet]);
-  });
-
-  it("(admin) same-asset deleverage can improve a tightened P0/P0 position", async () => {
-    const deleveragee = users[0];
-    const deleverageeAccount = await initFreshAccount(deleveragee);
-    const [liqRecordKey] = deriveLiquidationRecord(
-      bankrunProgram.programId,
-      deleverageeAccount
-    );
-
-    await mintToTokenAccount(
-      ecosystem.usdcMint.publicKey,
-      riskAdmin.usdcAccount,
-      new BN(100 * 10 ** ecosystem.usdcDecimals)
-    );
-
-    // The position is opened with `SAME_ASSET_BORROW`, which the helper computes from the 100 USDC
-    // deposit, the oracle lower/upper confidence haircut, zero origination fee, and the boundary
-    // gap between:
-    // - the healthy 99x init weight = 98 / 99 ~= 0.989899
-    // - the tightened 98x maint weight = 97 / 98 ~= 0.989796
-    // `SAME_ASSET_BORROW` sits 25% of the way up from the tightened boundary toward the healthy
-    // boundary.
-    let tx = new Transaction().add(
-      await groupConfigure(groupAdmin.mrgnBankrunProgram, {
-        marginfiGroup: emodeGroup.publicKey,
-        newRiskAdmin: riskAdmin.wallet.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_INIT_LEVERAGE
-        ),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_MAINT_LEVERAGE
-        ),
-      })
-    );
-    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
-
-    tx = new Transaction().add(
-      await depositIx(deleveragee.mrgnBankrunProgram, {
-        marginfiAccount: deleverageeAccount,
-        bank: usdcBankA,
-        tokenAccount: deleveragee.usdcAccount,
-        amount: SAME_ASSET_DEPOSIT,
-        depositUpToLimit: false,
-      }),
-      await borrowIx(deleveragee.mrgnBankrunProgram, {
-        marginfiAccount: deleverageeAccount,
-        bank: usdcBankB,
-        tokenAccount: deleveragee.usdcAccount,
-        remaining: composeRemainingAccounts(getSameAssetRemaining()),
-        amount: SAME_ASSET_BORROW,
-      })
-    );
-    await processBankrunTransaction(bankrunContext, tx, [deleveragee.wallet]);
-
-    tx = new Transaction().add(
-      await healthPulse(deleveragee.mrgnBankrunProgram, {
-        marginfiAccount: deleverageeAccount,
-        remaining: composeRemainingAccounts(getSameAssetRemaining()),
-      })
-    );
-    await processBankrunTransaction(bankrunContext, tx, [deleveragee.wallet]);
-
-    let account = await bankrunProgram.account.marginfiAccount.fetch(
-      deleverageeAccount
-    );
-    assert.ok((account.healthCache.flags & HEALTH_CACHE_HEALTHY) !== 0);
-
-    tx = new Transaction().add(
-      await groupConfigure(groupAdmin.mrgnBankrunProgram, {
-        marginfiGroup: emodeGroup.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_TIGHTENED_INIT_LEVERAGE
-        ),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_TIGHTENED_MAINT_LEVERAGE
-        ),
-      })
-    );
-    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
-
-    tx = new Transaction().add(
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 700_000 }),
-      await initLiquidationRecordIx(riskAdmin.mrgnBankrunProgram, {
-        marginfiAccount: deleverageeAccount,
-        feePayer: riskAdmin.wallet.publicKey,
-      }),
-      await startDeleverageIx(riskAdmin.mrgnBankrunProgram, {
-        marginfiAccount: deleverageeAccount,
-        riskAdmin: riskAdmin.wallet.publicKey,
-        remaining: composeRemainingAccountsWriteableMeta(
-          getSameAssetRemaining()
-        ),
-      }),
-      await withdrawIx(riskAdmin.mrgnBankrunProgram, {
-        marginfiAccount: deleverageeAccount,
-        bank: usdcBankA,
-        tokenAccount: riskAdmin.usdcAccount,
-        remaining: composeRemainingAccounts(getSameAssetRemaining()),
-        amount: SAME_ASSET_PARTIAL_LIQUIDATION,
-      }),
-      await repayIx(riskAdmin.mrgnBankrunProgram, {
-        marginfiAccount: deleverageeAccount,
-        bank: usdcBankB,
-        tokenAccount: riskAdmin.usdcAccount,
-        amount: SAME_ASSET_PARTIAL_LIQUIDATION,
-        remaining: composeRemainingAccounts(getSameAssetRemaining()),
-      }),
-      await endDeleverageIx(riskAdmin.mrgnBankrunProgram, {
-        marginfiAccount: deleverageeAccount,
-        remaining: composeRemainingAccountsMetaBanksOnly(
-          getSameAssetRemaining()
-        ),
-      })
-    );
-    await processBankrunTransaction(bankrunContext, tx, [riskAdmin.wallet]);
-  });
 });

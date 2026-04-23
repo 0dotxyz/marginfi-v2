@@ -61,7 +61,7 @@ emode-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/e
 # Pyth pull tests (p01)
 pyth-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/p*.spec.ts --exit --require tests/rootHooks.ts"
 
-# Multi-limits tests (m01-m02)
+# Multi-limits tests (m01-m05)
 limits-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/m*.spec.ts --exit --require tests/rootHooks.ts"
 
 # Drift tests (d01-d16)
