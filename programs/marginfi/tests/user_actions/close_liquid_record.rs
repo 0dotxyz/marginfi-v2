@@ -1,7 +1,7 @@
 use anchor_lang::prelude::Clock;
-use fixtures::{assert_custom_error, prelude::*};
 use fixed_macro::types::I80F48;
 use fixtures::marginfi_account::MarginfiAccountFixture;
+use fixtures::{assert_custom_error, prelude::*};
 use marginfi::errors::MarginfiError;
 use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
@@ -9,11 +9,7 @@ use marginfi_type_crate::{
 };
 use solana_program_test::*;
 use solana_sdk::{
-    account::Account,
-    pubkey::Pubkey,
-    signature::Keypair,
-    signer::Signer,
-    system_transaction,
+    account::Account, pubkey::Pubkey, signature::Keypair, signer::Signer, system_transaction,
     transaction::Transaction,
 };
 
@@ -22,11 +18,7 @@ const INACTIVITY_PERIOD_SECS: i64 = 60 * 24 * 60 * 60;
 
 /// Directly write a timestamp into the liquidation record's most recent entry.
 /// This simulates a past liquidation event without needing a full liquidation cycle.
-async fn set_record_entry_timestamp(
-    test_f: &TestFixture,
-    record_pk: Pubkey,
-    timestamp: i64,
-) {
+async fn set_record_entry_timestamp(test_f: &TestFixture, record_pk: Pubkey, timestamp: i64) {
     let mut account = {
         let ctx = test_f.context.borrow_mut();
         ctx.banks_client
@@ -38,7 +30,10 @@ async fn set_record_entry_timestamp(
     let record =
         bytemuck::from_bytes_mut::<LiquidationRecord>(&mut account.data.as_mut_slice()[8..]);
     record.entries[3].timestamp = timestamp;
-    test_f.context.borrow_mut().set_account(&record_pk, &account.into());
+    test_f
+        .context
+        .borrow_mut()
+        .set_account(&record_pk, &account.into());
 }
 
 /// Helper: create an unhealthy liquidatee with a liquidation record initialized.
@@ -76,13 +71,7 @@ async fn setup_with_liquidation_record(
         .create_empty_token_account_with_owner(&liquidatee_authority.pubkey())
         .await;
     liquidatee
-        .try_bank_borrow_with_authority(
-            user_usdc.key,
-            usdc_bank,
-            10.0,
-            0,
-            &liquidatee_authority,
-        )
+        .try_bank_borrow_with_authority(user_usdc.key, usdc_bank, 10.0, 0, &liquidatee_authority)
         .await?;
 
     // Make account unhealthy
@@ -181,9 +170,7 @@ async fn close_liquidation_record_fails_during_receivership() -> anyhow::Result<
     let (liquidatee, record_pk, payer) = setup_with_liquidation_record(&test_f).await?;
 
     // Start a liquidation to put account into receivership
-    let start_ix = liquidatee
-        .make_start_liquidation_ix(record_pk, payer)
-        .await;
+    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
     let end_ix = liquidatee
         .make_end_liquidation_ix(
             record_pk,
@@ -260,7 +247,12 @@ async fn close_liquidation_record_permissionless_caller() -> anyhow::Result<()> 
     {
         let ctx = test_f.context.borrow_mut();
         let blockhash = ctx.banks_client.get_latest_blockhash().await.unwrap();
-        let tx = system_transaction::transfer(&ctx.payer, &third_party.pubkey(), 1_000_000_000, blockhash);
+        let tx = system_transaction::transfer(
+            &ctx.payer,
+            &third_party.pubkey(),
+            1_000_000_000,
+            blockhash,
+        );
         ctx.banks_client.process_transaction(tx).await?;
     }
 
@@ -367,11 +359,17 @@ async fn close_liquidation_record_fails_wrong_record() -> anyhow::Result<()> {
 
     // Init liquidation records for both
     let (record_a, _) = Pubkey::find_program_address(
-        &[LIQUIDATION_RECORD_SEED.as_bytes(), liquidatee_a.key.as_ref()],
+        &[
+            LIQUIDATION_RECORD_SEED.as_bytes(),
+            liquidatee_a.key.as_ref(),
+        ],
         &marginfi::ID,
     );
     let (record_b, _) = Pubkey::find_program_address(
-        &[LIQUIDATION_RECORD_SEED.as_bytes(), liquidatee_b.key.as_ref()],
+        &[
+            LIQUIDATION_RECORD_SEED.as_bytes(),
+            liquidatee_b.key.as_ref(),
+        ],
         &marginfi::ID,
     );
 
