@@ -205,6 +205,15 @@ fn juplend_price_multiplier(lending: &JuplendLending) -> MarginfiResult<I80F48> 
         .ok_or_else(math_error!())?)
 }
 
+fn solend_price_multiplier(reserve: &SolendMinimalReserve) -> MarginfiResult<I80F48> {
+    let (total_liq, total_col) = reserve.scaled_supplies()?;
+    if total_col > I80F48::ZERO {
+        Ok(total_liq / total_col)
+    } else {
+        Ok(I80F48::ONE)
+    }
+}
+
 struct OracleLoadContext {
     adjusted_price_feed: OraclePriceFeedAdapter,
     cache_raw_price: Option<OraclePriceWithConfidence>,
@@ -566,6 +575,7 @@ impl OraclePriceFeedAdapter {
                 let reserve_loader = load_solend_reserve(bank_config, reserve_info)?;
                 let reserve = reserve_loader.load()?;
                 ensure_solend_reserve_fresh(&reserve)?;
+                let multiplier = solend_price_multiplier(&reserve)?;
 
                 let account_info = &ais[0];
 
@@ -573,11 +583,13 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
 
-                let (total_liq, total_col) = reserve.scaled_supplies()?;
-                if total_col > I80F48::ZERO {
-                    let multiplier = total_liq / total_col;
-
+                if multiplier > I80F48::ZERO {
                     // Adjust Pyth prices & confidence in place
                     price_feed.price.price = mul_i64_by_i80f48(price_feed.price.price, multiplier)
                         .ok_or_else(math_error!())?;
@@ -592,8 +604,8 @@ impl OraclePriceFeedAdapter {
                 }
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
-                    cache_raw_price: None,
-                    cache_multiplier: I80F48::ONE,
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
                 })
             }
             OracleSetup::SolendSwitchboardPull => {
@@ -608,17 +620,20 @@ impl OraclePriceFeedAdapter {
                 let reserve_loader = load_solend_reserve(bank_config, reserve_info)?;
                 let reserve = reserve_loader.load()?;
                 ensure_solend_reserve_fresh(&reserve)?;
+                let multiplier = solend_price_multiplier(&reserve)?;
 
                 let mut price_feed = SwitchboardPullPriceFeed::load_checked(
                     oracle_info,
                     clock.unix_timestamp,
                     max_age,
                 )?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
 
-                let (total_liq, total_col) = reserve.scaled_supplies()?;
-                if total_col > I80F48::ZERO {
-                    let multiplier = total_liq / total_col;
-
+                if multiplier > I80F48::ZERO {
                     // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
                     price_feed.feed.result.value =
                         mul_i128_by_i80f48(price_feed.feed.result.value, multiplier)
@@ -630,8 +645,8 @@ impl OraclePriceFeedAdapter {
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::SwitchboardPull(price_feed),
-                    cache_raw_price: None,
-                    cache_multiplier: I80F48::ONE,
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
                 })
             }
             OracleSetup::FixedDrift => {
