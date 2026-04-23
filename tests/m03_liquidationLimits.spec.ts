@@ -853,7 +853,7 @@ SCENARIOS.forEach(
             await bankrunProgram.account.marginfiAccount.fetch(
               liquidateeAccount,
             );
-          assert.ok(accountBefore.liquidationRecord.equals(PublicKey.default));
+          assertKeyDefault(accountBefore.liquidationRecord);
 
           await processBankrunTransaction(
             bankrunContext,
