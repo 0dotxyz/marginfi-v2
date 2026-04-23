@@ -15,13 +15,12 @@ use marginfi_type_crate::{
         MAX_INTEGRATION_POSITIONS, ORDER_ACTIVE_TAGS, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
-        compute_same_asset_emode_weight, reconcile_emode_configs, u32_to_basis,
-        Balance, BalanceSide, Bank, BankOperationalState, EmodeConfig, HealthCache, HealthPriceMode,
+        compute_same_asset_emode_weight, reconcile_emode_configs, u32_to_basis, Balance,
+        BalanceSide, Bank, BankOperationalState, EmodeConfig, HealthCache, HealthPriceMode,
         LendingAccount, LiquidationPriceCache, MarginfiAccount, MarginfiGroup, OraclePriceType,
         OraclePriceWithConfidence, OracleSetup, PriceBias, ReconciledEmodeConfig,
-        ReconciledEmodeRequirementType, RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN,
-        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
-        
+        ReconciledEmodeRequirementType, RequirementType, RiskTier, ACCOUNT_DISABLED,
+        ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 use std::{
@@ -176,7 +175,6 @@ pub enum BalanceDecreaseType {
     BorrowOnly,
     BypassBorrowLimit,
 }
-
 
 #[inline]
 fn apply_price_bias(price: OraclePriceWithConfidence, bias: PriceBias) -> MarginfiResult<I80F48> {

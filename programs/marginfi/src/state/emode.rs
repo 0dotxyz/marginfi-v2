@@ -1,7 +1,9 @@
 use anchor_lang::err;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
-use marginfi_type_crate::types::{BankConfig, EmodeSettings, EMODE_ON, EMODE_TAG_EMPTY, RequirementType};
+use marginfi_type_crate::types::{
+    BankConfig, EmodeSettings, RequirementType, EMODE_ON, EMODE_TAG_EMPTY,
+};
 
 use crate::{
     check, errors::MarginfiError, math_error, prelude::MarginfiResult,
