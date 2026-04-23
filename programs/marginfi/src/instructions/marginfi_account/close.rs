@@ -17,6 +17,12 @@ pub fn close_account(ctx: Context<MarginfiAccountClose>) -> MarginfiResult {
     );
 
     check!(
+        marginfi_account.active_orders == 0,
+        MarginfiError::IllegalAction,
+        "Close all active orders before closing account"
+    );
+
+    check!(
         marginfi_account.can_be_closed(),
         MarginfiError::IllegalAction,
         "Account cannot be closed"

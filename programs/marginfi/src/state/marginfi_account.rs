@@ -66,6 +66,8 @@ pub trait MarginfiAccountImpl {
     fn set_flag(&mut self, flag: u64, msg: bool);
     fn unset_flag(&mut self, flag: u64, msg: bool);
     fn get_flag(&self, flag: u64) -> bool;
+    fn increment_active_orders(&mut self) -> MarginfiResult;
+    fn decrement_active_orders(&mut self) -> MarginfiResult;
     fn can_be_closed(&self) -> bool;
 }
 
@@ -126,6 +128,7 @@ impl MarginfiAccountImpl for MarginfiAccount {
         self.migrated_from = Pubkey::default();
         self.last_update = current_timestamp;
         self.migrated_to = Pubkey::default();
+        self.active_orders = 0;
     }
 
     fn set_flag(&mut self, flag: u64, msg: bool) {
@@ -144,6 +147,26 @@ impl MarginfiAccountImpl for MarginfiAccount {
 
     fn get_flag(&self, flag: u64) -> bool {
         self.account_flags & flag != 0
+    }
+
+    fn increment_active_orders(&mut self) -> MarginfiResult {
+        check!(
+            self.active_orders < u8::MAX,
+            MarginfiError::IllegalAction,
+            "Too many active orders"
+        );
+        self.active_orders += 1;
+        Ok(())
+    }
+
+    fn decrement_active_orders(&mut self) -> MarginfiResult {
+        check!(
+            self.active_orders > 0,
+            MarginfiError::IllegalAction,
+            "No active orders to close"
+        );
+        self.active_orders -= 1;
+        Ok(())
     }
 
     fn can_be_closed(&self) -> bool {
