@@ -12,8 +12,13 @@ import {
   users,
   verbose,
 } from "./rootHooks";
-import { accrueInterest, migrateCurve } from "./utils/group-instructions";
 import {
+  accrueInterest,
+  backfillBankIsT22Flag,
+  migrateCurve,
+} from "./utils/group-instructions";
+import {
+  IS_T22_FLAG,
   INTEREST_CURVE_LEGACY,
   INTEREST_CURVE_SEVEN_POINT,
   aprToU32,
@@ -83,6 +88,23 @@ const sendMigration = async () => {
   );
 };
 
+const sendT22Backfill = async () => {
+  const user = users[0];
+  const tx = new Transaction();
+  tx.add(
+    await backfillBankIsT22Flag(user.mrgnBankrunProgram, {
+      bank: LEGACY_BANK_SAMPLE,
+    })
+  );
+  await processBankrunTransaction(
+    bankrunContext,
+    tx,
+    [user.wallet],
+    false,
+    true
+  );
+};
+
 describe("Legacy bank curve migration", () => {
   let initialLiabilityShareValue: BigNumber;
   let postWarmupLiabilityShareValue: BigNumber;
@@ -116,8 +138,26 @@ describe("Legacy bank curve migration", () => {
     assert.isAbove(optimalBefore, 0);
     assert.isAbove(plateauBefore, 0);
     assert.isAbove(maxRateBefore, 0);
+    assert.equal(bankBefore.flags.toNumber() & IS_T22_FLAG, 0);
 
     initialLiabilityShareValue = toBigNumber(bankBefore.liabilityShareValue);
+  });
+
+  it("backfill ix is a no-op for a classic bank", async () => {
+    const bankBefore = await bankrunProgram.account.bank.fetch(
+      LEGACY_BANK_SAMPLE
+    );
+    const flagsBefore = bankBefore.flags.toNumber();
+    assert.equal(flagsBefore & IS_T22_FLAG, 0);
+
+    await sendT22Backfill();
+
+    const bankAfter = await bankrunProgram.account.bank.fetch(
+      LEGACY_BANK_SAMPLE
+    );
+    const flagsAfter = bankAfter.flags.toNumber();
+    assert.equal(flagsAfter & IS_T22_FLAG, 0);
+    assert.equal(flagsAfter, flagsBefore);
   });
 
   // Note: we accrue a "warmup" first so we can have a fixed amount of time elapse in the next step

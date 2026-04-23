@@ -2,12 +2,9 @@ use crate::{
     bank_authority_seed, bank_seed, check,
     events::RateLimitFlowEvent,
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankVaultType,
         marginfi_account::{calc_value, get_remaining_accounts_per_bank},
-        price::{
-            OraclePriceFeedAdapter, OraclePriceType, OraclePriceWithConfidence, PriceAdapter,
-            PriceBias,
-        },
+        price::{OraclePriceFeedAdapter, PriceAdapter},
         rate_limiter::{
             should_skip_rate_limit, BankRateLimiterImpl, GroupRateLimiterImpl, RateLimitWindowImpl,
         },
@@ -33,7 +30,10 @@ use marginfi_type_crate::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
         ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
     },
-    types::{Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, WrappedI80F48},
+    types::{
+        Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, OraclePriceType,
+        OraclePriceWithConfidence, PriceBias, WrappedI80F48,
+    },
 };
 
 pub fn find_bank_vault_pda(bank_pk: &Pubkey, vault_type: BankVaultType) -> (Pubkey, u8) {
@@ -234,89 +234,17 @@ pub fn hex_to_bytes(hex: &str) -> Vec<u8> {
         .collect()
 }
 
-/// Validate that after a deposit to Bank, the users's account contains either all Default/SOL
-/// balances, or all Staked/Sol balances. Default and Staked assets cannot mix.
 pub fn validate_asset_tags(bank: &Bank, marginfi_account: &MarginfiAccount) -> MarginfiResult {
-    let mut has_default_asset = false;
-    let mut has_staked_asset = false;
-
-    let is_default_like = |asset_tag: u8| {
-        matches!(
-            asset_tag,
-            ASSET_TAG_DEFAULT
-                | ASSET_TAG_KAMINO
-                | ASSET_TAG_DRIFT
-                | ASSET_TAG_SOLEND
-                | ASSET_TAG_JUPLEND
-        )
+    if !marginfi_type_crate::types::validate_asset_tags(bank, marginfi_account) {
+        return err!(MarginfiError::AssetTagMismatch);
     };
-
-    for balance in marginfi_account.lending_account.balances.iter() {
-        if balance.is_active() {
-            match balance.bank_asset_tag {
-                ASSET_TAG_DEFAULT => has_default_asset = true,
-                ASSET_TAG_SOL => { /* Do nothing, SOL can mix with any asset type */ }
-                ASSET_TAG_STAKED => has_staked_asset = true,
-                // Kamino/Drift/Solend/JupLend assets behave like default assets
-                ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND => {
-                    has_default_asset = true
-                }
-                _ => panic!("unsupported asset tag"),
-            }
-        }
-    }
-
-    // 1. Default-like assets cannot mix with Staked assets
-    if is_default_like(bank.config.asset_tag) && has_staked_asset {
-        return err!(MarginfiError::AssetTagMismatch);
-    }
-
-    // 2. Staked SOL cannot mix with Default-like assets
-    if bank.config.asset_tag == ASSET_TAG_STAKED && has_default_asset {
-        return err!(MarginfiError::AssetTagMismatch);
-    }
-
     Ok(())
 }
 
-/// Validate that two banks are compatible based on their asset tags. See the following combinations
-/// (* is wildcard, e.g. any tag):
-///
-/// Allowed:
-/// 1) Default/Default
-/// 2) Sol/*
-/// 3) Staked/Staked
-///
-/// Forbidden:
-/// 1) Default/Staked
-///
-/// Returns an error if the two banks have mismatching asset tags according to the above.
 pub fn validate_bank_asset_tags(bank_a: &Bank, bank_b: &Bank) -> MarginfiResult {
-    let is_default_like = |asset_tag: u8| {
-        matches!(
-            asset_tag,
-            ASSET_TAG_DEFAULT
-                | ASSET_TAG_KAMINO
-                | ASSET_TAG_DRIFT
-                | ASSET_TAG_SOLEND
-                | ASSET_TAG_JUPLEND
-        )
+    if !marginfi_type_crate::types::validate_bank_asset_tags(bank_a, bank_b) {
+        return err!(MarginfiError::AssetTagMismatch);
     };
-
-    let is_bank_a_default = is_default_like(bank_a.config.asset_tag);
-    let is_bank_a_staked = bank_a.config.asset_tag == ASSET_TAG_STAKED;
-    let is_bank_b_default = is_default_like(bank_b.config.asset_tag);
-    let is_bank_b_staked = bank_b.config.asset_tag == ASSET_TAG_STAKED;
-    // Note: Sol is compatible with all other tags and doesn't matter...
-
-    // 1. Default assets cannot mix with Staked assets
-    if is_bank_a_default && is_bank_b_staked {
-        return err!(MarginfiError::AssetTagMismatch);
-    }
-    if is_bank_a_staked && is_bank_b_default {
-        return err!(MarginfiError::AssetTagMismatch);
-    }
-
     Ok(())
 }
 

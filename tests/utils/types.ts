@@ -47,6 +47,7 @@ export const FREEZE_SETTINGS = 8;
 export const CLOSE_ENABLED_FLAG = 16;
 export const TOKENLESS_REPAYMENTS_ALLOWED = 32;
 export const TOKENLESS_REPAYMENTS_COMPLETE = 64;
+export const IS_T22_FLAG = 128;
 
 export const ASSET_TAG_DEFAULT = 0;
 export const ASSET_TAG_SOL = 1;

@@ -1,8 +1,8 @@
 use {
     super::{group_get_all, load_all_banks},
-    crate::output,
     crate::{
         config::Config,
+        output,
         utils::{
             find_bank_emssions_token_account_pda, find_bank_vault_authority_pda,
             find_bank_vault_pda, send_tx,
@@ -21,8 +21,8 @@ use {
     marginfi_type_crate::{
         constants::METADATA_SEED,
         types::{
-            Bank, BankConfigOpt, BankMetadata, InterestRateConfigOpt, MarginfiGroup, OracleSetup,
-            RatePoint, RiskTier, WrappedI80F48,
+            Bank, BankConfigOpt, BankMetadata, InterestRateConfigOpt, MarginfiGroup,
+            OraclePriceType, OracleSetup, PriceBias, RatePoint, RiskTier, WrappedI80F48,
         },
     },
     pyth_solana_receiver_sdk::price_update::PriceUpdateV2,
@@ -310,8 +310,6 @@ pub fn bank_get_all(config: Config, marginfi_group: Option<Pubkey>) -> Result<()
 }
 
 pub fn bank_inspect_price_oracle(config: Config, bank_pk: Pubkey) -> Result<()> {
-    use marginfi::state::price::{OraclePriceType, PriceBias};
-
     let bank: Bank = config.mfi_program.account(bank_pk)?;
     let opfa = match bank.config.oracle_setup {
         OracleSetup::Fixed => OraclePriceFeedAdapter::try_from_bank_with_max_age(

@@ -1650,6 +1650,7 @@ dependencies = [
  "bytemuck",
  "fixed",
  "fixed-macro",
+ "marginfi-type-crate",
  "static_assertions",
 ]
 
@@ -3125,6 +3126,7 @@ dependencies = [
  "fixed-macro",
  "id-crate",
  "solana-instruction",
+ "spl-associated-token-account 6.0.0",
  "static_assertions",
 ]
 

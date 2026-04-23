@@ -8,7 +8,10 @@ pub const FEE_VAULT_AUTHORITY_SEED: &str = "fee_vault_auth";
 pub const LIQUIDITY_VAULT_SEED: &str = "liquidity_vault";
 pub const INSURANCE_VAULT_SEED: &str = "insurance_vault";
 pub const FEE_VAULT_SEED: &str = "fee_vault";
-pub const JUPLEND_F_TOKEN_VAULT_SEED: &str = "juplend_f_token_vault";
+pub const DRIFT_USER_SEED: &str = "user";
+pub const DRIFT_USER_STATS_SEED: &str = "user_stats";
+pub const SOLEND_OBLIGATION_SEED: &str = "solend_obligation";
+pub const JUPLEND_F_TOKEN_VAULT_SEED: &str = "f_token_vault";
 
 pub const FEE_STATE_SEED: &str = "feestate";
 pub const STAKED_SETTINGS_SEED: &str = "staked_settings";
@@ -81,6 +84,7 @@ pub const FREEZE_SETTINGS: u64 = 1 << 3;
 pub const CLOSE_ENABLED_FLAG: u64 = 1 << 4;
 pub const TOKENLESS_REPAYMENTS_ALLOWED: u64 = 1 << 5;
 pub const TOKENLESS_REPAYMENTS_COMPLETE: u64 = 1 << 6;
+pub const IS_T22: u64 = 1 << 7;
 
 /// True if bank created in 0.1.4 or later, or if migrated to the new oracle setup from a prior
 /// version. False otherwise.
@@ -178,6 +182,10 @@ pub const ASSET_TAG_SOLEND: u8 = 5;
 /// JupLend assets. Accounts with a JUPLEND position can only deposit other JUPLEND assets or regular
 /// assets (`ASSET_TAG_DEFAULT`).
 pub const ASSET_TAG_JUPLEND: u8 = 6;
+
+/// Drift uses a fixed 9 decimal precision for all spot market scaled balances,
+/// regardless of the underlying token's decimals
+pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
 
 /// Maximum number of integration positions (Kamino + Drift + Solend + JupLend) allowed per account. Hardcoded
 /// limit to prevent accounts from becoming unliquidatable due to CU/heap memory issues in
