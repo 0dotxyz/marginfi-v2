@@ -11,6 +11,12 @@ pub fn close_account(ctx: Context<MarginfiAccountClose>) -> MarginfiResult {
     }
 
     check!(
+        marginfi_account.liquidation_record == Pubkey::default(),
+        MarginfiError::IllegalAction,
+        "Close liquidation record before closing account"
+    );
+
+    check!(
         marginfi_account.can_be_closed(),
         MarginfiError::IllegalAction,
         "Account cannot be closed"
