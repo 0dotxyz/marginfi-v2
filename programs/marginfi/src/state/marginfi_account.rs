@@ -150,6 +150,8 @@ impl MarginfiAccountImpl for MarginfiAccount {
     }
 
     fn increment_active_orders(&mut self) -> MarginfiResult {
+        // Note: Sanity check, expected to be unreachable, as this vastly exceeds max theoretical
+        // orders one account can open.
         check!(
             self.active_orders < u8::MAX,
             MarginfiError::IllegalAction,
@@ -160,6 +162,7 @@ impl MarginfiAccountImpl for MarginfiAccount {
     }
 
     fn decrement_active_orders(&mut self) -> MarginfiResult {
+        // Note: Sanity check, expected to be unreachable
         check!(
             self.active_orders > 0,
             MarginfiError::IllegalAction,

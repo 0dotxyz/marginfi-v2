@@ -218,7 +218,7 @@ pub enum MarginfiError {
     LiquidatorOrderCloseNotAllowed,
     #[msg("Order trigger is yet to be met")] // 6107
     OrderTriggerNotMet,
-    #[msg("Order execution state issue. Check the invariants i.e not in flashloan or disabled etc")] // 6108
+    #[msg("Order execution state issue. Check not in flashloan, disabled, etc")] // 6108
     UnexpectedOrderExecutionState,
     #[msg("Order liability not closed")] // 6109
     OrderLiabilityNotClosed,
