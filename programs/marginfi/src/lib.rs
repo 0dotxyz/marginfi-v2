@@ -202,6 +202,15 @@ pub mod marginfi {
         marginfi_account::initialize_liquidation_record(ctx)
     }
 
+    /// (risk_admin only) Close a `LiquidationRecord` and refund rent to its original
+    /// `record_payer`. Cleared from the linked `marginfi_account` so a new record can be created
+    /// later. Forbidden while the account is in receivership or deleverage.
+    pub fn marginfi_account_close_liq_record(
+        ctx: Context<CloseLiquidationRecord>,
+    ) -> MarginfiResult {
+        marginfi_account::close_liquidation_record(ctx)
+    }
+
     /// The same as `marginfi_account_initialize`, except the created marginfi account uses a PDA
     /// (Program Derived Address)
     ///
