@@ -71,6 +71,7 @@ pub struct CloseLiquidationRecord<'info> {
     #[account(
         mut,
         close = record_payer,
+        has_one = marginfi_account @ MarginfiError::InvalidLiquidationRecord,
         constraint = {
             let record = liquidation_record.load()?;
             record.liquidation_receiver == Pubkey::default()
