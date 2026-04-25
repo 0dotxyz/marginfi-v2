@@ -703,7 +703,10 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(bank.integration_acc_2, Pubkey::default());
     assert_eq!(bank.integration_acc_3, Pubkey::default());
     assert_eq!(bank._pad_0, [0u8; 16]);
-    assert_eq!(bank._padding_1, [[0u64; 2]; 7]);
+    // Legacy banks pre-date the `bank_seed` field, so the bytes that now back it must read 0.
+    // Together with `_padding_1`, this still covers the original 16 + 112 = 128B reserve.
+    assert_eq!(bank.bank_seed, 0);
+    assert_eq!(bank._padding_1, [0u64; 13]);
 
     Ok(())
 }

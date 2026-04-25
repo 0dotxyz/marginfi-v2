@@ -115,6 +115,7 @@ pub fn lending_pool_clone_bank(
         insurance_vault_authority_bump,
         fee_vault_bump,
         fee_vault_authority_bump,
+        bank_seed,
     );
 
     bank.flags = source_flags;

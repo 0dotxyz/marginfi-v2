@@ -22,7 +22,7 @@ use marginfi_type_crate::{
 pub fn lending_pool_add_bank_with_seed(
     ctx: Context<LendingPoolAddBankWithSeed>,
     bank_config: BankConfigCompact,
-    _bank_seed: u64,
+    bank_seed: u64,
 ) -> MarginfiResult {
     // Transfer the flat sol init fee to the global fee wallet
     let fee_state = ctx.accounts.fee_state.load()?;
@@ -71,6 +71,7 @@ pub fn lending_pool_add_bank_with_seed(
         insurance_vault_authority_bump,
         fee_vault_bump,
         fee_vault_authority_bump,
+        bank_seed,
     );
 
     log_pool_info(&bank);

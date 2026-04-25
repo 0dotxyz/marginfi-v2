@@ -69,6 +69,7 @@ pub fn lending_pool_add_bank(
         insurance_vault_authority_bump,
         fee_vault_bump,
         fee_vault_authority_bump,
+        0, // legacy add_bank uses a fresh keypair, not a seeded PDA
     );
 
     log_pool_info(&bank);

@@ -159,8 +159,20 @@ pub struct Bank {
     /// Tracks net outflow (outflows - inflows) in native tokens.
     pub rate_limiter: BankRateLimiter,
 
-    pub _pad_0: [u8; 16],          // 16B
-    pub _padding_1: [[u64; 2]; 7], // 8 * 2 * 7 = 112B
+    pub _pad_0: [u8; 16], // 16B
+
+    /// The seed used to derive this bank's PDA, captured at creation time.
+    ///
+    /// * `0` for legacy banks created via `lending_pool_add_bank` (the bank account is a fresh
+    ///   keypair, not a PDA, so there is no seed). Banks created before this field existed will
+    ///   also read `0`, since these bytes were previously reserve padding.
+    /// * Otherwise the `bank_seed: u64` argument passed to `lending_pool_add_bank_with_seed`,
+    ///   `lending_pool_add_bank_permissionless`, `lending_pool_clone_bank`,
+    ///   `lending_pool_add_bank_kamino`, `lending_pool_add_bank_drift`,
+    ///   `lending_pool_add_bank_solend`, or `lending_pool_add_bank_juplend`. Lets clients
+    ///   re-derive the bank PDA and any seed-derived child PDAs from on-chain data alone.
+    pub bank_seed: u64, // 8B; carved from the first 8B of the old _padding_1: [[u64; 2]; 7] (112B).
+    pub _padding_1: [u64; 13], // 8 * 13 = 104B; total reserve still 16 + 8 + 104 = 128B.
 }
 
 impl Bank {

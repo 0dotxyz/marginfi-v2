@@ -25,7 +25,7 @@ use marginfi_type_crate::{
 
 pub fn lending_pool_add_bank_permissionless(
     ctx: Context<LendingPoolAddBankPermissionless>,
-    _bank_seed: u64,
+    bank_seed: u64,
 ) -> MarginfiResult {
     let LendingPoolAddBankPermissionless {
         bank_mint,
@@ -101,6 +101,7 @@ pub fn lending_pool_add_bank_permissionless(
         insurance_vault_authority_bump,
         fee_vault_bump,
         fee_vault_authority_bump,
+        bank_seed,
     );
     bank.config.oracle_setup = OracleSetup::StakedWithPythPush;
     bank.config.oracle_keys[0] = settings.oracle;

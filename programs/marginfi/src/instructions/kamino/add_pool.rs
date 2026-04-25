@@ -24,7 +24,7 @@ use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 pub fn lending_pool_add_bank_kamino(
     ctx: Context<LendingPoolAddBankKamino>,
     bank_config: KaminoConfigCompact,
-    _bank_seed: u64,
+    bank_seed: u64,
 ) -> MarginfiResult {
     // Note: Kamino banks don't need to debit the flat SOL fee because these will always be
     // first-party pools owned by mrgn and never permissionless pools
@@ -74,6 +74,7 @@ pub fn lending_pool_add_bank_kamino(
         insurance_vault_authority_bump,
         fee_vault_bump,
         fee_vault_authority_bump,
+        bank_seed,
     );
 
     bank.integration_acc_1 = reserve_key;

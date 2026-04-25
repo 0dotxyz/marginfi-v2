@@ -29,7 +29,7 @@ use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 pub fn lending_pool_add_bank_juplend(
     ctx: Context<LendingPoolAddBankJuplend>,
     bank_config: JuplendConfigCompact,
-    _bank_seed: u64,
+    bank_seed: u64,
 ) -> MarginfiResult {
     // Note: JupLend banks don't need to debit the flat SOL fee because these will always be
     // first-party pools owned by mrgn and never permissionless pools
@@ -79,6 +79,7 @@ pub fn lending_pool_add_bank_juplend(
         insurance_vault_authority_bump,
         fee_vault_bump,
         fee_vault_authority_bump,
+        bank_seed,
     );
 
     // Set JupLend-specific fields
