@@ -679,6 +679,13 @@ pub mod marginfi {
         marginfi_group::init_bank_metadata(ctx, bank_seed)
     }
 
+    /// (permissionless) pay the rent to open metadata for an already-initialized bank.
+    pub fn init_bank_metadata_no_seed(
+        ctx: Context<InitBankMetadataNoSeed>,
+    ) -> MarginfiResult {
+        marginfi_group::init_bank_metadata_no_seed(ctx)
+    }
+
     /// (metadata admin only) Write ticker/description information for a bank on-chain. Optional, not
     /// all Banks are guaranteed to have metadata.
     pub fn write_bank_metadata(
@@ -688,6 +695,15 @@ pub mod marginfi {
         description: Option<Vec<u8>>,
     ) -> MarginfiResult {
         marginfi_group::write_bank_metadata(ctx, bank_seed, ticker, description)
+    }
+
+    /// (metadata admin only) Write ticker/description for an already-initialized bank.
+    pub fn write_bank_metadata_no_seed(
+        ctx: Context<WriteBankMetadataNoSeed>,
+        ticker: Option<Vec<u8>>,
+        description: Option<Vec<u8>>,
+    ) -> MarginfiResult {
+        marginfi_group::write_bank_metadata_no_seed(ctx, ticker, description)
     }
 
     /// (admin or delegate_limit_admin) Set the daily withdrawal limit for deleverages per group.
