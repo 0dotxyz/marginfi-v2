@@ -9,8 +9,7 @@ use crate::{
     prelude::*,
     state::marginfi_account::{
         any_balance_bank_is_cb_halted, check_pre_liquidation_condition_and_get_account_health,
-        get_health_components, write_liquidation_price_cache_from, HealthPriceMode,
-        LiquidationPriceCache, MarginfiAccountImpl, RiskRequirementType,
+        get_health_components, write_liquidation_price_cache_from, MarginfiAccountImpl,
     },
 };
 use anchor_lang::{prelude::*, solana_program::sysvar};

@@ -785,7 +785,11 @@ impl BankImpl for Bank {
 
         // Dedup gates: same-slot replay, min-slot-gap rate limit, then strictly-advancing oracle
         // publish-time (skipped when the adapter reports `source_time == 0`, e.g. Fixed feeds).
-        if slot < self.cb_last_observed_slot.saturating_add(CB_MIN_PULSE_SLOT_GAP) {
+        if slot
+            < self
+                .cb_last_observed_slot
+                .saturating_add(CB_MIN_PULSE_SLOT_GAP)
+        {
             return Ok(());
         }
         if obs.source_time != 0 && obs.source_time <= self.cb_last_oracle_source_time {
