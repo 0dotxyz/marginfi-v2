@@ -1,6 +1,6 @@
 use crate::{
     check,
-    constants::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID, PROGRAM_VERSION},
+    constants::PROGRAM_VERSION,
     events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     ix_utils::{get_discrim_hash, Hashable},
     optional_account,
@@ -21,8 +21,10 @@ use crate::{
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::clock::Clock;
-use anchor_lang::solana_program::sysvar::{self, Sysvar};
+use anchor_lang::solana_program::{
+    clock::Clock,
+    sysvar::{self, Sysvar},
+};
 use anchor_spl::token::{accessor, Token};
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
@@ -40,13 +42,13 @@ use kamino_mocks::{
     },
     state::{MinimalObligation, MinimalReserve},
 };
-use marginfi_type_crate::types::{
-    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-    ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
-};
 use marginfi_type_crate::{
     constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED},
-    types::ACCOUNT_IN_DELEVERAGE,
+    pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
+    types::{
+        Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+    },
 };
 
 /// Withdraw from a Kamino reserve through a marginfi account
@@ -381,7 +383,6 @@ pub struct KaminoWithdraw<'info> {
 
     /// The liquidity token mint (e.g., USDC)
     /// Needs serde to get the mint decimals for transfer checked
-    /// TODO: rename to just 'mint' to make use of has_one and to be consistent with deposit
     #[account(mut)]
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 

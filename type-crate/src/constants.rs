@@ -8,7 +8,10 @@ pub const FEE_VAULT_AUTHORITY_SEED: &str = "fee_vault_auth";
 pub const LIQUIDITY_VAULT_SEED: &str = "liquidity_vault";
 pub const INSURANCE_VAULT_SEED: &str = "insurance_vault";
 pub const FEE_VAULT_SEED: &str = "fee_vault";
-pub const JUPLEND_F_TOKEN_VAULT_SEED: &str = "juplend_f_token_vault";
+pub const DRIFT_USER_SEED: &str = "user";
+pub const DRIFT_USER_STATS_SEED: &str = "user_stats";
+pub const SOLEND_OBLIGATION_SEED: &str = "solend_obligation";
+pub const JUPLEND_F_TOKEN_VAULT_SEED: &str = "f_token_vault";
 
 pub const FEE_STATE_SEED: &str = "feestate";
 pub const STAKED_SETTINGS_SEED: &str = "staked_settings";
@@ -182,6 +185,10 @@ pub const ASSET_TAG_SOLEND: u8 = 5;
 /// JupLend assets. Accounts with a JUPLEND position can only deposit other JUPLEND assets or regular
 /// assets (`ASSET_TAG_DEFAULT`).
 pub const ASSET_TAG_JUPLEND: u8 = 6;
+
+/// Drift uses a fixed 9 decimal precision for all spot market scaled balances,
+/// regardless of the underlying token's decimals
+pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
 
 /// Maximum number of integration positions (Kamino + Drift + Solend + JupLend) allowed per account. Hardcoded
 /// limit to prevent accounts from becoming unliquidatable due to CU/heap memory issues in

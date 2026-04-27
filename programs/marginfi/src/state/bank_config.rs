@@ -2,17 +2,14 @@ use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{MAX_PYTH_ORACLE_AGE, ORACLE_MIN_AGE, TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE},
-    types::{BalanceSide, BankConfig, OracleSetup, RiskTier},
+    types::{BalanceSide, BankConfig, OracleSetup, RequirementType, RiskTier},
 };
 
 use crate::{
     check,
     errors::MarginfiError,
     prelude::MarginfiResult,
-    state::{
-        interest_rate::InterestRateConfigImpl, marginfi_account::RequirementType,
-        price::OraclePriceFeedAdapter,
-    },
+    state::{interest_rate::InterestRateConfigImpl, price::OraclePriceFeedAdapter},
 };
 
 pub trait BankConfigImpl {

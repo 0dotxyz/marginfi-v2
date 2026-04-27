@@ -1,6 +1,6 @@
 use crate::{
     check,
-    constants::{ASSOCIATED_TOKEN_KEY, COMPUTE_PROGRAM_KEY, DRIFT_PROGRAM_ID, JUP_KEY, TITAN_KEY},
+    constants::{ASSOCIATED_TOKEN_KEY, COMPUTE_PROGRAM_KEY, JUP_KEY, TITAN_KEY},
     ix_utils::{
         get_discrim_hash, load_and_validate_instructions, validate_ix_first, validate_ix_last,
         validate_ixes_exclusive, validate_not_cpi_by_stack_height, validate_not_cpi_with_sysvar,
@@ -21,9 +21,9 @@ use kamino_mocks::kamino_lending::client::args as kamino;
 use marginfi_type_crate::{
     constants::ix_discriminators,
     types::{
-        HealthCache, LiquidationRecord, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
-        ACCOUNT_IN_RECEIVERSHIP,
+        HealthCache, HealthPriceMode, LiquidationPriceCache, LiquidationRecord, MarginfiAccount,
+        MarginfiGroup, RequirementType, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
+        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -118,7 +118,7 @@ pub fn start_receivership<'info>(
     let (assets_equity, liabs_equity) = get_health_components(
         marginfi_account,
         remaining_ais,
-        RiskRequirementType::Equity,
+        RequirementType::Equity,
         &mut Some(&mut health_cache),
         HealthPriceMode::Live {
             liq_cache: Some(&mut liq_price_cache),
@@ -149,7 +149,7 @@ pub fn validate_instructions(
         COMPUTE_PROGRAM_KEY,
         id_crate::ID,
         kamino_mocks::kamino_lending::ID,
-        DRIFT_PROGRAM_ID,
+        drift_mocks::drift::ID,
         juplend_mocks::juplend_earn::ID,
         JUP_KEY,
         TITAN_KEY,
@@ -175,7 +175,7 @@ pub fn validate_instructions(
             ),
             (id_crate::ID, &ix_discriminators::INIT_LIQUIDATION_RECORD),
             (
-                DRIFT_PROGRAM_ID,
+                drift_mocks::drift::ID,
                 drift::UpdateSpotMarketCumulativeInterest::DISCRIMINATOR,
             ),
             (

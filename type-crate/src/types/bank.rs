@@ -1,6 +1,6 @@
 use crate::{
     assert_struct_align, assert_struct_size,
-    constants::discriminators,
+    constants::{discriminators, ASSET_TAG_DRIFT, DRIFT_SCALED_BALANCE_DECIMALS},
     types::{BankCache, BankConfig},
 };
 
@@ -186,6 +186,14 @@ pub struct Bank {
 impl Bank {
     pub const LEN: usize = std::mem::size_of::<Bank>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::BANK;
+
+    pub fn get_balance_decimals(&self) -> u8 {
+        if self.config.asset_tag == ASSET_TAG_DRIFT {
+            DRIFT_SCALED_BALANCE_DECIMALS
+        } else {
+            self.mint_decimals
+        }
+    }
 }
 
 #[repr(u8)]

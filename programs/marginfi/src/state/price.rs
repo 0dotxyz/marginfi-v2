@@ -19,7 +19,8 @@ use marginfi_type_crate::{
     },
     types::{
         mul_div_i128, mul_div_i64, mul_div_u64, mul_i128_by_i80f48, mul_i64_by_i80f48,
-        mul_u64_by_i80f48, Bank, BankConfig, OracleSetup,
+        mul_u64_by_i80f48, Bank, BankConfig, OraclePriceType, OraclePriceWithConfidence,
+        OracleSetup, PriceBias,
     },
 };
 use pyth_solana_receiver_sdk::price_update::{self, FeedId, PriceUpdateV2};
