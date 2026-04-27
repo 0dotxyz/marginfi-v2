@@ -118,6 +118,41 @@ pub fn account_not_frozen_for_authority(
     !(marginfi_account.get_flag(ACCOUNT_FROZEN) && marginfi_account.authority == signer)
 }
 
+/// Returns `true` if any bank backing an active balance on `marginfi_account` is CB-halted.
+/// `remaining_ais` must be the standard bank+oracle layout used by the health computation:
+/// one bank account followed by `get_remaining_accounts_per_bank(bank) - 1` venue/oracle
+/// accounts per active balance.
+pub fn any_balance_bank_is_cb_halted<'info>(
+    marginfi_account: &MarginfiAccount,
+    remaining_ais: &'info [AccountInfo<'info>],
+) -> MarginfiResult<bool> {
+    let now = Clock::get()?.unix_timestamp;
+    let mut account_index = 0usize;
+    for balance in marginfi_account
+        .lending_account
+        .balances
+        .iter()
+        .filter(|b| b.is_active())
+    {
+        let bank_ai = remaining_ais
+            .get(account_index)
+            .ok_or(MarginfiError::InvalidBankAccount)?;
+        let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
+        let bank = bank_al.load()?;
+        check_eq!(
+            balance.bank_pk,
+            *bank_ai.key,
+            MarginfiError::InvalidBankAccount
+        );
+        if bank.is_cb_halted(now) {
+            return Ok(true);
+        }
+        let num_accounts = get_remaining_accounts_per_bank(&bank)?;
+        account_index = account_index.saturating_add(num_accounts);
+    }
+    Ok(false)
+}
+
 impl MarginfiAccountImpl for MarginfiAccount {
     /// Set the initial data for the marginfi account.
     fn initialize(&mut self, group: Pubkey, authority: Pubkey, current_timestamp: u64) {
@@ -313,6 +348,7 @@ impl<'info> BankAccountWithCache<'_, 'info> {
         let zero_price = OraclePriceWithConfidence {
             price: I80F48::ZERO,
             confidence: I80F48::ZERO,
+            source_time: 0,
         };
         let price_rt = liq_cache
             .get_price(OraclePriceType::RealTime, index)
@@ -357,10 +393,14 @@ fn get_cached_price_with_confidence(
         OraclePriceType::RealTime => OraclePriceWithConfidence {
             price: bank.cache.liquidation_price_rt.into(),
             confidence: bank.cache.liquidation_price_rt_confidence.into(),
+            // Cached prices are used for risk-engine math, not CB detection — source_time is
+            // meaningful only inside `update_circuit_breaker`.
+            source_time: 0,
         },
         OraclePriceType::TimeWeighted => OraclePriceWithConfidence {
             price: bank.cache.liquidation_price_twap.into(),
             confidence: bank.cache.liquidation_price_twap_confidence.into(),
+            source_time: 0,
         },
     }
 }

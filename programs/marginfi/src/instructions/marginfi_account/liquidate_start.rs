@@ -8,9 +8,9 @@ use crate::{
     },
     prelude::*,
     state::marginfi_account::{
-        check_pre_liquidation_condition_and_get_account_health, get_health_components,
-        write_liquidation_price_cache_from, HealthPriceMode, LiquidationPriceCache,
-        MarginfiAccountImpl, RiskRequirementType,
+        any_balance_bank_is_cb_halted, check_pre_liquidation_condition_and_get_account_health,
+        get_health_components, write_liquidation_price_cache_from, HealthPriceMode,
+        LiquidationPriceCache, MarginfiAccountImpl, RiskRequirementType,
     },
 };
 use anchor_lang::{prelude::*, solana_program::sysvar};
@@ -34,12 +34,19 @@ use marginfi_type_crate::{
 /// * Fails if the start liquidation instruction appears more than once in this tx.
 /// * Fails if any mrgn instruction other than start, end, withdraw, or repay (or the equivalent
 ///   from a third party integration) are used within this tx.
+/// * Fails with `CircuitBreakerAdminOnly` if any bank in the account's active balances is
+///   currently CB-halted. Admins should use `start_deleverage` or `lending_account_liquidate`
+///   instead — both accept admin/risk_admin during a halt.
 pub fn start_liquidation<'info>(
     ctx: Context<'_, '_, 'info, 'info, StartLiquidation<'info>>,
 ) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     liq_record.liquidation_receiver = ctx.accounts.liquidation_receiver.key();
+    check!(
+        !any_balance_bank_is_cb_halted(&marginfi_account, ctx.remaining_accounts)?,
+        MarginfiError::CircuitBreakerAdminOnly
+    );
     start_receivership(
         &mut marginfi_account,
         &mut liq_record,

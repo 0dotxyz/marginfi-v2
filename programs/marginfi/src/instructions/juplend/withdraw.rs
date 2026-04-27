@@ -82,7 +82,7 @@ pub fn juplend_withdraw<'info>(
         let lending = ctx.accounts.integration_acc_1.load()?;
 
         authority_bump = bank.liquidity_vault_authority_bump;
-        validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
+        validate_bank_state(&bank, InstructionKind::FailsInPausedState, false)?;
 
         // Fetch oracle price for rate limiting and deleverage tracking
         let in_receivership_or_order_execution =

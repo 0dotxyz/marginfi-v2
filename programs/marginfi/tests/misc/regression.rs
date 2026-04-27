@@ -674,7 +674,11 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     // Note: legacy banks that have a 0 value here will use 10%
     assert_eq!(bank.config.oracle_max_confidence, 0);
     assert_eq!(bank.config.fixed_price, I80F48::ZERO.into());
-    assert_eq!(bank.config._padding1, [0; 16]);
+    assert_eq!(bank.config.cb_deviation_bps_tiers, [0; 3]);
+    assert_eq!(bank.config.cb_tier_durations_seconds, [0; 3]);
+    assert_eq!(bank.config.cb_sustain_observations, 0);
+    assert_eq!(bank.config.cb_escalation_window_mult, 0);
+    assert_eq!(bank.config.cb_ema_alpha_bps, 0);
 
     assert_eq!(
         I80F48::from(bank.emissions_rate),
@@ -703,7 +707,14 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(bank.integration_acc_2, Pubkey::default());
     assert_eq!(bank.integration_acc_3, Pubkey::default());
     assert_eq!(bank._pad_0, [0u8; 16]);
-    assert_eq!(bank._padding_1, [[0u64; 2]; 7]);
+    assert_eq!(bank.cb_halt_started_at, 0);
+    assert_eq!(bank.cb_halt_ended_at, 0);
+    assert_eq!(bank.cb_last_observed_slot, 0);
+    assert_eq!(bank.cb_tier, 0);
+    assert_eq!(bank.cb_tier3_consecutive_trips, 0);
+    assert_eq!(bank._cb_pad, [0u8; 6]);
+    assert_eq!(bank.cb_last_oracle_source_time, 0);
+    assert_eq!(bank._padding_1, [0u64; 9]);
 
     Ok(())
 }

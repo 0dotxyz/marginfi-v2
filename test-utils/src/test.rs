@@ -53,6 +53,7 @@ use solana_sdk::{
 };
 
 use anchor_lang::system_program;
+use solana_program::clock::Clock;
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc};
 
 #[derive(Default, Debug, Clone)]
@@ -1132,6 +1133,61 @@ impl TestFixture {
         aso.set_data_from_slice(data.as_slice());
 
         ctx.set_account(&address, &aso);
+    }
+
+    /// Overwrite the Pyth push oracle account at `address` with a new native price, confidence,
+    /// and publish_time. `prev_publish_time` is set equal to `publish_time` so the message looks
+    /// freshly published. Decimals come from the price's `exponent` (preserved from the existing
+    /// account so the bank's price math stays consistent).
+    pub async fn set_pyth_oracle_price_native(
+        &self,
+        address: Pubkey,
+        native_price: i64,
+        conf: u64,
+        publish_time: i64,
+    ) {
+        let mut ctx = self.context.borrow_mut();
+        let mut account = ctx
+            .banks_client
+            .get_account(address)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let data = account.data.as_mut_slice();
+        let mut price_update = PriceUpdateV2::deserialize(&mut &data[8..]).unwrap();
+        price_update.price_message.price = native_price;
+        price_update.price_message.conf = conf;
+        price_update.price_message.publish_time = publish_time;
+        price_update.price_message.prev_publish_time = publish_time;
+        price_update.price_message.ema_price = native_price;
+        price_update.price_message.ema_conf = conf;
+
+        let mut new_data = vec![];
+        new_data.extend_from_slice(PriceUpdateV2::DISCRIMINATOR);
+        let mut serialized = vec![];
+        price_update.serialize(&mut serialized).unwrap();
+        new_data.extend_from_slice(&serialized);
+
+        let mut aso = AccountSharedData::from(account);
+        aso.set_data_from_slice(&new_data);
+        ctx.set_account(&address, &aso);
+    }
+
+    /// Set the Clock sysvar's `slot` and `unix_timestamp` directly. Used to drive the
+    /// circuit-breaker's slot/time gates from tests without coupling them to `warp_to_slot`'s
+    /// derived time.
+    pub async fn set_clock(&self, slot: u64, unix_timestamp: i64) {
+        let mut clock: Clock = self
+            .context
+            .borrow_mut()
+            .banks_client
+            .get_sysvar()
+            .await
+            .unwrap();
+        clock.slot = slot;
+        clock.unix_timestamp = unix_timestamp;
+        self.context.borrow_mut().set_sysvar(&clock);
     }
 
     pub async fn advance_time(&self, seconds: i64) {

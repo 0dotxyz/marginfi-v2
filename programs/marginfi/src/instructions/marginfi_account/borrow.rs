@@ -86,7 +86,7 @@ pub fn lending_account_borrow<'info>(
         let mut bank = bank_loader.load_mut()?;
 
         validate_asset_tags(&bank, &marginfi_account)?;
-        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
+        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState, false)?;
 
         let liquidity_vault_authority_bump = bank.liquidity_vault_authority_bump;
         let origination_fee_rate: I80F48 = bank

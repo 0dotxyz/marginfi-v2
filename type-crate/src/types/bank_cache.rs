@@ -62,9 +62,17 @@ pub struct BankCache {
     /// ACCOUNT_IN_RECEIVERSHIP set, so that operations on unrelated accounts sharing the same
     /// bank do not interfere with an in-progress liquidation.
     pub liq_cache_flags: u8,
-    _padding: [u8; 23],
-    // INFO: these are duplicative of `last_oracle_price` and `last_oracle_price_timestamp` so if
-    // space is ever needed we can recycle at least two of these (32 bytes)
+    /// Count of consecutive counted breaches; halt trips at `cb_sustain_observations`.
+    pub cb_breach_count: u8,
+    /// Highest tier crossed during the current breach streak; the halt trips at this tier from
+    /// operational so severity reflects the worst observation seen, not just the last one.
+    pub cb_max_breached_tier_in_streak: u8,
+    _cb_cache_pad: [u8; 5],
+    /// EMA reference price used by the circuit breaker. Frozen while halted, zero until the
+    /// first observation after enable.
+    pub cb_reference_price: WrappedI80F48,
+    // INFO: these are duplicative of `last_oracle_price` and `last_oracle_price_timestamp`; at
+    // least two of them (32 bytes) can be recycled if space is ever needed.
     /// Cached real-time price for receivership liquidation.
     pub liquidation_price_rt: WrappedI80F48,
     /// Cached real-time price confidence for receivership liquidation.
@@ -84,17 +92,25 @@ impl Default for BankCache {
 impl BankCache {
     pub const LIQ_CACHE_LOCKED_FLAG: u8 = 1 << 0;
 
-    /// Reset cached rate metrics while preserving the last oracle price snapshot.
-    pub fn reset_preserving_oracle_price(&mut self) {
+    /// Reset cached rate metrics while preserving the oracle-price snapshot and the cache-side
+    /// circuit-breaker state (reference price + breach counter). Bank-level CB fields are
+    /// unaffected; this method must not silently clear in-flight halt state.
+    pub fn reset_preserving_oracle_and_cb_state(&mut self) {
         let last_oracle_price = self.last_oracle_price;
         let last_oracle_price_timestamp = self.last_oracle_price_timestamp;
         let last_oracle_price_confidence = self.last_oracle_price_confidence;
+        let cb_reference_price = self.cb_reference_price;
+        let cb_breach_count = self.cb_breach_count;
+        let cb_max_breached_tier_in_streak = self.cb_max_breached_tier_in_streak;
 
         *self = Self::default();
 
         self.last_oracle_price = last_oracle_price;
         self.last_oracle_price_timestamp = last_oracle_price_timestamp;
         self.last_oracle_price_confidence = last_oracle_price_confidence;
+        self.cb_reference_price = cb_reference_price;
+        self.cb_breach_count = cb_breach_count;
+        self.cb_max_breached_tier_in_streak = cb_max_breached_tier_in_streak;
     }
 
     pub fn is_liquidation_price_cache_locked(&self) -> bool {

@@ -109,7 +109,11 @@ impl SolendConfigCompact {
             _padding0: [0; 2],
             oracle_max_confidence: self.oracle_max_confidence,
             fixed_price: I80F48::ZERO.into(),
-            _padding1: [0; 16],
+            cb_deviation_bps_tiers: [0; 3],
+            cb_tier_durations_seconds: [0; 3],
+            cb_sustain_observations: 0,
+            cb_escalation_window_mult: 0,
+            cb_ema_alpha_bps: 0,
         }
     }
 }

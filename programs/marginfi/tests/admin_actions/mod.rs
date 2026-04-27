@@ -2,6 +2,7 @@ mod account_transfer;
 mod actions_during_pause;
 mod bankruptcy;
 mod bankruptcy_auth;
+mod circuit_breaker;
 mod create_marginfi_group;
 mod deleverage;
 mod deleverage_withdraw_limit;

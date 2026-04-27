@@ -19,6 +19,8 @@ pub trait BankConfigImpl {
     fn get_weights(&self, req_type: RequirementType) -> (I80F48, I80F48);
     fn get_weight(&self, requirement_type: RequirementType, balance_side: BalanceSide) -> I80F48;
     fn validate(&self) -> MarginfiResult;
+    /// Validate circuit breaker parameters. Call only when `CIRCUIT_BREAKER_ENABLED` is set.
+    fn validate_circuit_breaker(&self) -> MarginfiResult;
     fn is_deposit_limit_active(&self) -> bool;
     fn is_borrow_limit_active(&self) -> bool;
     fn update_config_flag(&mut self, value: bool, flag: u8);
@@ -99,6 +101,54 @@ impl BankConfigImpl for BankConfig {
             MarginfiError::InvalidOracleSetup
         );
 
+        Ok(())
+    }
+
+    fn validate_circuit_breaker(&self) -> MarginfiResult {
+        // Sanity caps. `MIN_SUSTAIN_SLOTS = 3` ensures a halt requires multiple independent
+        // publications. `MAX_ALPHA_BPS = 0.2` plus the per-pulse shift cap blunts EMA-reanchor
+        // griefing.
+        const MIN_SUSTAIN_SLOTS: u8 = 3;
+        const MAX_SUSTAIN_SLOTS: u8 = 32;
+        const MAX_ESCALATION_MULT: u8 = 10;
+        const MAX_ALPHA_BPS: u16 = 2_000;
+        const MAX_DEVIATION_BPS: u16 = 5_000;
+        // Cap at u16::MAX (~18h). The breaker is meant for short-lived halts; longer cooldowns
+        // are admin-driven via `operational_state`.
+        const MAX_DURATION_SECONDS: u16 = u16::MAX;
+
+        check!(
+            self.cb_sustain_observations >= MIN_SUSTAIN_SLOTS
+                && self.cb_sustain_observations <= MAX_SUSTAIN_SLOTS,
+            MarginfiError::CircuitBreakerInvalidConfig
+        );
+        check!(
+            self.cb_ema_alpha_bps > 0 && self.cb_ema_alpha_bps <= MAX_ALPHA_BPS,
+            MarginfiError::CircuitBreakerInvalidConfig
+        );
+        check!(
+            self.cb_escalation_window_mult > 0
+                && self.cb_escalation_window_mult <= MAX_ESCALATION_MULT,
+            MarginfiError::CircuitBreakerInvalidConfig
+        );
+        // All three tiers must be populated and strictly monotonic — the state machine is
+        // explicitly three-tiered.
+        for i in 0..3 {
+            check!(
+                self.cb_deviation_bps_tiers[i] > 0
+                    && self.cb_deviation_bps_tiers[i] <= MAX_DEVIATION_BPS
+                    && self.cb_tier_durations_seconds[i] > 0
+                    && self.cb_tier_durations_seconds[i] <= MAX_DURATION_SECONDS,
+                MarginfiError::CircuitBreakerInvalidConfig
+            );
+            if i > 0 {
+                check!(
+                    self.cb_tier_durations_seconds[i] > self.cb_tier_durations_seconds[i - 1]
+                        && self.cb_deviation_bps_tiers[i] > self.cb_deviation_bps_tiers[i - 1],
+                    MarginfiError::CircuitBreakerInvalidConfig
+                );
+            }
+        }
         Ok(())
     }
 

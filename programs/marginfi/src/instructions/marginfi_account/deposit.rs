@@ -58,7 +58,7 @@ pub fn lending_account_deposit<'info>(
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
     let group = marginfi_group_loader.load()?;
     validate_asset_tags(&bank, &marginfi_account)?;
-    validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
+    validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState, true)?;
 
     check!(
         !marginfi_account.get_flag(ACCOUNT_DISABLED)

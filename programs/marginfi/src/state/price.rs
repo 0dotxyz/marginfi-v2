@@ -38,8 +38,14 @@ pub enum PriceBias {
 
 #[derive(Copy, Clone, Debug)]
 pub struct OraclePriceWithConfidence {
+    /// Spot oracle price in USD, no bias.
     pub price: I80F48,
+    /// Confidence band in absolute price units (same scale as `price`), already multiplied by
+    /// `STD_DEV_MULTIPLE` and clamped to the bank's max-confidence ceiling.
     pub confidence: I80F48,
+    /// Publisher-side timestamp (unix seconds): Pyth `publish_time` or Switchboard
+    /// `last_update_timestamp`. Zero when the adapter doesn't expose one (e.g. `Fixed`).
+    pub source_time: i64,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -1041,6 +1047,7 @@ impl PriceAdapter for FixedPriceFeed {
         Ok(OraclePriceWithConfidence {
             price: self.get_price_of_type(oracle_price_type, None, oracle_max_confidence)?,
             confidence: I80F48::ZERO,
+            source_time: 0,
         })
     }
 }
@@ -1189,6 +1196,7 @@ impl PriceAdapter for SwitchboardPullPriceFeed {
         Ok(OraclePriceWithConfidence {
             price,
             confidence: confidence_interval,
+            source_time: self.feed.last_update_timestamp,
         })
     }
 }
@@ -1462,10 +1470,15 @@ impl PriceAdapter for PythPushOraclePriceFeed {
             oracle_max_confidence,
         )?;
         let price = self.get_price_of_type(price_type, None, oracle_max_confidence)?;
+        let source_time = match price_type {
+            OraclePriceType::TimeWeighted => self.ema_price.publish_time,
+            OraclePriceType::RealTime => self.price.publish_time,
+        };
 
         Ok(OraclePriceWithConfidence {
             price,
             confidence: confidence_interval,
+            source_time,
         })
     }
 }
@@ -1477,7 +1490,6 @@ pub struct LitePullFeedAccountData {
     pub result: CurrentResult,
     #[cfg(feature = "client")]
     pub feed_hash: [u8; 32],
-    #[cfg(feature = "client")]
     pub last_update_timestamp: i64,
 }
 
@@ -1487,7 +1499,6 @@ impl From<&PullFeedAccountData> for LitePullFeedAccountData {
             result: feed.result,
             #[cfg(feature = "client")]
             feed_hash: feed.feed_hash,
-            #[cfg(feature = "client")]
             last_update_timestamp: feed.last_update_timestamp,
         }
     }
@@ -1499,7 +1510,6 @@ impl From<Ref<'_, PullFeedAccountData>> for LitePullFeedAccountData {
             result: feed.result,
             #[cfg(feature = "client")]
             feed_hash: feed.feed_hash,
-            #[cfg(feature = "client")]
             last_update_timestamp: feed.last_update_timestamp,
         }
     }

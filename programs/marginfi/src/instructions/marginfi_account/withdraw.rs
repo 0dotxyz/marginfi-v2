@@ -72,7 +72,7 @@ pub fn lending_account_withdraw<'info>(
             marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
         let group = marginfi_group_loader.load()?;
         let mut bank = bank_loader.load_mut()?;
-        validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
+        validate_bank_state(&bank, InstructionKind::FailsInPausedState, false)?;
 
         // Fetch oracle price for rate limiting and deleverage tracking
         // When group rate limiter is enabled, oracle is required
