@@ -1,5 +1,5 @@
 import { BN, Program } from "@coral-xyz/anchor";
-import { AccountMeta, PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { AccountMeta, PublicKey } from "@solana/web3.js";
 import { Marginfi } from "../../target/types/marginfi";
 import { deriveStakedSettings } from "./pdas";
 import {
@@ -14,7 +14,6 @@ import {
 } from "./types";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { bigNumberToWrappedI80F48, WrappedI80F48 } from "@mrgnlabs/mrgn-common";
-import { createHash } from "crypto";
 
 export const MAX_ORACLE_KEYS = 5;
 
@@ -790,47 +789,15 @@ export const backfillStakedBankValidatorVoteAccount = (
   program: Program<Marginfi>,
   args: BackfillStakedBankValidatorVoteAccountArgs
 ) => {
-  // Note: this ix may exist in program code before local IDL/types are regenerated.
-  // Fallback to manual instruction encoding if Anchor method binding is unavailable.
-  const maybeMethod = (
-    program.methods as Program<Marginfi>["methods"] & {
-      lendingPoolBackfillStakedBankValidatorVoteAccount?: () => {
-        accounts: (accs: {
-          bank: PublicKey;
-          validatorVoteAccount: PublicKey;
-        }) => { instruction: () => Promise<TransactionInstruction> };
-      };
-    }
-  ).lendingPoolBackfillStakedBankValidatorVoteAccount;
-
-  if (maybeMethod) {
-    return maybeMethod()
-      .accounts({
-        bank: args.bank,
-        validatorVoteAccount: args.validatorVoteAccount,
-      })
-      .instruction();
-  }
-
-  const discriminator = createHash("sha256")
-    .update("global:lending_pool_backfill_staked_bank_validator_vote_account")
-    .digest()
-    .subarray(0, 8);
-
-  return Promise.resolve(
-    new TransactionInstruction({
-      programId: program.programId,
-      keys: [
-        { pubkey: args.bank, isSigner: false, isWritable: true },
-        {
-          pubkey: args.validatorVoteAccount,
-          isSigner: false,
-          isWritable: false,
-        },
-      ],
-      data: discriminator,
+  const ix = program.methods
+    .lendingPoolBackfillStakedBankValidatorVoteAccount()
+    .accounts({
+      bank: args.bank,
+      validatorVoteAccount: args.validatorVoteAccount,
     })
-  );
+    .instruction();
+
+  return ix;
 };
 
 export type HandleBankruptcyArgs = {
