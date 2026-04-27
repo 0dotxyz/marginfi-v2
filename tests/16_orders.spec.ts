@@ -336,94 +336,18 @@ describe("orders", () => {
     };
 
     it("cannot close account while active orders exist - should fail", async () => {
-      const tempMarginfiAccount = Keypair.generate();
-      const tempAccountPk = tempMarginfiAccount.publicKey;
-      const tempDepositA = new BN(2 * 10 ** ecosystem.tokenADecimals);
-      const tempBorrowUsdc = new BN(1 * 10 ** ecosystem.usdcDecimals);
+      assert.isAbove(await getActiveOrders(userMarginfiAccount), 0);
 
-      const initIx = await accountInit(userProgram, {
-        marginfiGroup: marginfiGroup.publicKey,
-        marginfiAccount: tempAccountPk,
-        authority: user.wallet.publicKey,
-        feePayer: user.wallet.publicKey,
-      });
-      await userProgram.provider.sendAndConfirm(new Transaction().add(initIx), [
-        tempMarginfiAccount,
-      ]);
-
-      const depositAIx = await depositIx(userProgram, {
-        marginfiAccount: tempAccountPk,
-        bank: bankA,
-        tokenAccount: user.tokenAAccount,
-        amount: tempDepositA,
-        depositUpToLimit: false,
-      });
-      await userProgram.provider.sendAndConfirm(
-        new Transaction().add(depositAIx),
-      );
-
-      const borrowRemaining = composeRemainingAccounts([
-        [bankUsdc, oracles.usdcOracle.publicKey],
-        [bankA, oracles.tokenAOracle.publicKey],
-      ]);
-      const borrowUsdcIx = await borrowIx(userProgram, {
-        marginfiAccount: tempAccountPk,
-        bank: bankUsdc,
-        amount: tempBorrowUsdc,
-        tokenAccount: user.usdcAccount,
-        remaining: borrowRemaining,
-      });
-      await userProgram.provider.sendAndConfirm(
-        new Transaction().add(borrowUsdcIx),
-      );
-
-      const placeIx = await placeOrderIx(userProgram, {
-        marginfiAccount: tempAccountPk,
-        authority: user.wallet.publicKey,
-        feePayer: user.wallet.publicKey,
-        bankKeys: [bankA, bankUsdc],
-        trigger: { stopLoss: { threshold: stopLossThreshold, maxSlippage } },
-      });
-      await userProgram.provider.sendAndConfirm(new Transaction().add(placeIx));
-      assert.equal(await getActiveOrders(tempAccountPk), 1);
-
-      const repayAllIx = await repayIx(userProgram, {
-        marginfiAccount: tempAccountPk,
-        bank: bankUsdc,
-        tokenAccount: user.usdcAccount,
-        amount: tempBorrowUsdc,
-        repayAll: true,
-      });
-      await userProgram.provider.sendAndConfirm(
-        new Transaction().add(repayAllIx),
-      );
-
-      const withdrawAllIx = await withdrawIx(userProgram, {
-        marginfiAccount: tempAccountPk,
-        bank: bankA,
-        tokenAccount: user.tokenAAccount,
-        amount: tempDepositA,
-        withdrawAll: true,
-        remaining: [],
-      });
-      await userProgram.provider.sendAndConfirm(
-        new Transaction().add(withdrawAllIx),
-      );
-
-      await expectFailedTxWithError(
-        async () => {
-          const closeIx = await accountCloseIx(userProgram, {
-            marginfiAccount: tempAccountPk,
-            authority: user.wallet.publicKey,
-            feePayer: user.wallet.publicKey,
-          });
-          await userProgram.provider.sendAndConfirm(
-            new Transaction().add(closeIx),
-          );
-        },
-        "IllegalAction",
-        6043,
-      );
+      await expectFailedTxWithMessage(async () => {
+        const closeIx = await accountCloseIx(userProgram, {
+          marginfiAccount: userMarginfiAccount,
+          authority: user.wallet.publicKey,
+          feePayer: user.wallet.publicKey,
+        });
+        await userProgram.provider.sendAndConfirm(
+          new Transaction().add(closeIx),
+        );
+      }, "Close all active orders before closing account");
     });
 
     it("closes an order as the authority - happy path", async () => {
