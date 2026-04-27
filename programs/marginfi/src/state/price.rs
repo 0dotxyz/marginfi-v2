@@ -282,10 +282,7 @@ impl OraclePriceFeedAdapter {
                     .ok_or_else(math_error!())?
                     .checked_div(lst_supply as i128)
                     .ok_or_else(math_error!())?;
-                feed.price.price = adjusted_price
-                    .try_into()
-                    .ok()
-                    .ok_or_else(math_error!())?;
+                feed.price.price = adjusted_price.try_into().ok().ok_or_else(math_error!())?;
 
                 let adjusted_ema_price = (feed.ema_price.price as i128)
                     .checked_mul(sol_pool_adjusted_balance as i128)
