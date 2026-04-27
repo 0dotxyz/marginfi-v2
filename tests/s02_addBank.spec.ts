@@ -4,6 +4,7 @@ import { AccountMeta, Keypair, Transaction } from "@solana/web3.js";
 import {
   addBank,
   addBankPermissionless,
+  backfillStakedBankValidatorVoteAccount,
   groupInitialize,
   initStakedSettings,
 } from "./utils/group-instructions";
@@ -15,6 +16,8 @@ import {
   banksClient,
   ecosystem,
   groupAdmin,
+  STAKED_BACKFILL_BANK_SAMPLE,
+  STAKED_BACKFILL_VOTE_SAMPLE,
   stakedMarginfiGroup,
   oracles,
   users,
@@ -288,6 +291,9 @@ describe("Init group and add banks with asset category flags", () => {
             isSigner: false,
             isWritable: false,
           };
+          const validatorVoteAccount = stakePool.equals(goodStakePool)
+            ? validators[0].voteAccount
+            : validators[1].voteAccount;
           const lstMeta: AccountMeta = {
             pubkey: lstMint,
             isSigner: false,
@@ -307,6 +313,7 @@ describe("Init group and add banks with asset category flags", () => {
               bankMint: lstMint,
               solPool: solPool,
               stakePool: stakePool,
+              validatorVoteAccount: validatorVoteAccount,
               tokenProgram: TOKEN_PROGRAM_ID,
             })
             .remainingAccounts([oracleMeta, lstMeta, solPoolMeta])
@@ -374,6 +381,7 @@ describe("Init group and add banks with asset category flags", () => {
             bankMint: goodLstMint, // Good key
             solPool: goodSolPool, // Good key
             stakePool: goodStakePool, // Good key
+            validatorVoteAccount: validators[0].voteAccount,
             tokenProgram: TOKEN_PROGRAM_ID,
           })
           .remainingAccounts([oracleMeta, lstMeta, solPoolMeta]) // Bad metadata keys
@@ -415,6 +423,7 @@ describe("Init group and add banks with asset category flags", () => {
         bankMint: goodLstMint, // Good key
         solPool: goodSolPool, // Good key
         stakePool: goodStakePool, // Good key
+        validatorVoteAccount: validators[0].voteAccount,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .remainingAccounts([oracleMeta, lstMeta, solPoolMeta]) // Bad oracle meta
@@ -446,6 +455,7 @@ describe("Init group and add banks with asset category flags", () => {
         feePayer: groupAdmin.wallet.publicKey,
         pythOracle: oracles.wsolOracle.publicKey,
         stakePool: validators[0].splPool,
+        validatorVoteAccount: validators[0].voteAccount,
         seed: new BN(0),
       })
     );
@@ -564,6 +574,7 @@ describe("Init group and add banks with asset category flags", () => {
     assertKeysEqual(config.oracleKeys[0], settingsAcc.oracle);
     assertKeysEqual(config.oracleKeys[1], validators[0].splMint);
     assertKeysEqual(config.oracleKeys[2], validators[0].splSolPool);
+    assertKeysEqual(bank.integrationAcc1, validators[0].voteAccount);
 
     assertI80F48Equal(bank.collectedProgramFeesOutstanding, 0);
 
@@ -587,6 +598,7 @@ describe("Init group and add banks with asset category flags", () => {
         feePayer: groupAdmin.wallet.publicKey,
         pythOracle: oracles.wsolOracle.publicKey,
         stakePool: validators[1].splPool,
+        validatorVoteAccount: validators[1].voteAccount,
         seed: new BN(0),
       })
     );
@@ -597,5 +609,64 @@ describe("Init group and add banks with asset category flags", () => {
     if (verbose) {
       console.log("*init LST bank " + validators[1].bank + " (validator 1)");
     }
+
+    const bank = await bankrunProgram.account.bank.fetch(validators[1].bank);
+    assertKeysEqual(bank.integrationAcc1, validators[1].voteAccount);
+  });
+
+  it("(permissionless) Backfill staked vote account with wrong vote - should fail", async () => {
+    let tx = new Transaction();
+    tx.add(
+      await backfillStakedBankValidatorVoteAccount(groupAdmin.mrgnBankrunProgram, {
+        bank: validators[0].bank,
+        validatorVoteAccount: validators[1].voteAccount, // bad vote account
+      })
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(users[0].wallet);
+
+    const result = await banksClient.tryProcessTransaction(tx);
+    // StakePoolValidationFailed
+    assertBankrunTxFailed(result, "0x17a0");
+  });
+
+  it("(permissionless) Backfill staked vote account is idempotent - happy path", async () => {
+    let tx = new Transaction();
+    tx.add(
+      await backfillStakedBankValidatorVoteAccount(groupAdmin.mrgnBankrunProgram, {
+        bank: validators[0].bank,
+        validatorVoteAccount: validators[0].voteAccount,
+      })
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(users[0].wallet);
+    await banksClient.processTransaction(tx);
+
+    const bank = await bankrunProgram.account.bank.fetch(validators[0].bank);
+    assertKeysEqual(bank.integrationAcc1, validators[0].voteAccount);
+  });
+
+  it("(permissionless) Backfill legacy real-world staked bank fixture - happy path", async () => {
+    const bankBefore = await bankrunProgram.account.bank.fetch(
+      STAKED_BACKFILL_BANK_SAMPLE
+    );
+    assertKeyDefault(bankBefore.integrationAcc1);
+    assert.equal(bankBefore.config.assetTag, ASSET_TAG_STAKED);
+
+    let tx = new Transaction();
+    tx.add(
+      await backfillStakedBankValidatorVoteAccount(groupAdmin.mrgnBankrunProgram, {
+        bank: STAKED_BACKFILL_BANK_SAMPLE,
+        validatorVoteAccount: STAKED_BACKFILL_VOTE_SAMPLE,
+      })
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(users[0].wallet);
+    await banksClient.processTransaction(tx);
+
+    const bankAfter = await bankrunProgram.account.bank.fetch(
+      STAKED_BACKFILL_BANK_SAMPLE
+    );
+    assertKeysEqual(bankAfter.integrationAcc1, STAKED_BACKFILL_VOTE_SAMPLE);
   });
 });

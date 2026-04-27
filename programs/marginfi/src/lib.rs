@@ -103,6 +103,14 @@ pub mod marginfi {
         marginfi_group::lending_pool_backfill_bank_is_t22_flag(ctx)
     }
 
+    /// (permissionless) Backfill validator vote account on existing staked-collateral banks.
+    /// No-op if already set to the same validator vote account.
+    pub fn lending_pool_backfill_staked_bank_validator_vote_account(
+        ctx: Context<LendingPoolBackfillStakedBankValidatorVoteAccount>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_backfill_staked_bank_validator_vote_account(ctx)
+    }
+
     /// (admin only) Configure bank parameters. If the bank has `FREEZE_SETTINGS`, only
     /// deposit/borrow limits are updated and all other config changes are silently ignored.
     pub fn lending_pool_configure_bank(
