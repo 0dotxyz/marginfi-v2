@@ -680,9 +680,7 @@ pub mod marginfi {
     }
 
     /// (permissionless) pay the rent to open metadata for an already-initialized bank.
-    pub fn init_bank_metadata_no_seed(
-        ctx: Context<InitBankMetadataNoSeed>,
-    ) -> MarginfiResult {
+    pub fn init_bank_metadata_no_seed(ctx: Context<InitBankMetadataNoSeed>) -> MarginfiResult {
         marginfi_group::init_bank_metadata_no_seed(ctx)
     }
 
