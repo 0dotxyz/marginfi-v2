@@ -110,10 +110,6 @@ impl BankConfigImpl for BankConfig {
         const MAX_ESCALATION_MULT: u8 = 10;
         const MAX_ALPHA_BPS: u16 = 2_000;
         const MAX_DEVIATION_BPS: u16 = 5_000;
-        // Cap at u16::MAX (~18h). The breaker is meant for short-lived halts; longer cooldowns
-        // are admin-driven via `operational_state`.
-        const MAX_DURATION_SECONDS: u16 = u16::MAX;
-
         check!(
             self.cb_sustain_observations >= MIN_SUSTAIN_SLOTS
                 && self.cb_sustain_observations <= MAX_SUSTAIN_SLOTS,
@@ -134,8 +130,7 @@ impl BankConfigImpl for BankConfig {
             check!(
                 self.cb_deviation_bps_tiers[i] > 0
                     && self.cb_deviation_bps_tiers[i] <= MAX_DEVIATION_BPS
-                    && self.cb_tier_durations_seconds[i] > 0
-                    && self.cb_tier_durations_seconds[i] <= MAX_DURATION_SECONDS,
+                    && self.cb_tier_durations_seconds[i] > 0,
                 MarginfiError::CircuitBreakerInvalidConfig
             );
             if i > 0 {
