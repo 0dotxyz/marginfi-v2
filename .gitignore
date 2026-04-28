@@ -24,6 +24,8 @@ node_modules
 .idea/
 test-ledger/
 *.profraw
+.yarnrc.yml
+install-state.gz
 
 # keypairs
 *.json
