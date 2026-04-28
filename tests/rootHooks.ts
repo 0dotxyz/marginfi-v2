@@ -183,6 +183,14 @@ export const GAPPY4_SAMPLE = new PublicKey(
 export const LEGACY_BANK_SAMPLE = new PublicKey(
   "DeyH7QxWvnbbaVB4zFrf4hoq7Q8z1ZT14co42BGwGtfM",
 );
+/** Real-world staked bank fixture used to test vote-account backfill. */
+export const STAKED_BACKFILL_BANK_SAMPLE = new PublicKey(
+  "8g5qG6PVygcVSXV1cJnjXaD1yhrDwcWAMQCY2wR9VuAf",
+);
+/** Vote account matching STAKED_BACKFILL_BANK_SAMPLE's single-pool PDA chain. */
+export const STAKED_BACKFILL_VOTE_SAMPLE = new PublicKey(
+  "CooLbbZy5Xmdt7DiHPQ3ss2uRXawnTXXVgpMS8E8jDzr",
+);
 /** The production group (LEGACY_BANK_SAMPLE's group) */
 export const MAINNET_GROUP = new PublicKey(
   "4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8",
@@ -466,6 +474,8 @@ function getGenesisAccounts(): AddedAccount[] {
     loadJsonFixture("tests/fixtures/mainnet_group.json"),
     loadJsonFixture("tests/fixtures/sol_pyth_oracle.json"),
     loadJsonFixture("tests/fixtures/sol_pyth_price_feed.json"),
+    loadJsonFixture("tests/fixtures/mainnet_staked_backfill_bank.json"),
+    loadJsonFixture("tests/fixtures/mainnet_staked_backfill_vote_blank.json"),
     loadJsonFixture("tests/fixtures/kamino_global_config.json"),
   ];
 }

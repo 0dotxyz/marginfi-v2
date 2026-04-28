@@ -144,6 +144,7 @@ pub struct Bank {
     /// - Drift: spot market
     /// - Solend: reserve
     /// - JupLend: lending state
+    /// - Staked Collateral: Validator vote account
     pub integration_acc_1: Pubkey,
     /// Integration account slot 2 (default Pubkey for non-integrations).
     /// - Kamino: obligation
