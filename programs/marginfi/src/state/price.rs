@@ -12,9 +12,7 @@ use enum_dispatch::enum_dispatch;
 use fixed::types::I80F48;
 use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION};
 use kamino_mocks::state::MinimalReserve;
-pub use marginfi_type_crate::types::{
-    OraclePriceType, OraclePriceWithConfidence, PriceBias,
-};
+pub use marginfi_type_crate::types::{OraclePriceType, OraclePriceWithConfidence, PriceBias};
 use marginfi_type_crate::{
     constants::{
         CONF_INTERVAL_MULTIPLE, EXP_10_I80F48, MAX_CONF_INTERVAL, STD_DEV_MULTIPLE, U32_MAX,
