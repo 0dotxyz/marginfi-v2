@@ -1,4 +1,4 @@
-import { BN } from "@coral-xyz/anchor";
+import { BN, IdlAccounts } from "@coral-xyz/anchor";
 import {
   bigNumberToWrappedI80F48,
   wrappedI80F48toBigNumber,
@@ -11,6 +11,7 @@ import {
 } from "@solana/web3.js";
 import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-token";
 import { assert } from "chai";
+import { Marginfi } from "../target/types/marginfi";
 
 import {
   bankrunContext,
@@ -60,9 +61,6 @@ import {
   HEALTH_CACHE_ENGINE_OK,
   HEALTH_CACHE_HEALTHY,
   HEALTH_CACHE_ORACLE_OK,
-  MarginfiAccountRaw,
-  MarginfiBalanceRaw,
-  MarginfiHealthCacheRaw,
   ORACLE_CONF_INTERVAL,
   blankBankConfigOptRaw,
 } from "./utils/types";
@@ -89,6 +87,10 @@ const USER_BORROW_TOKEN_B = tokenB(5.2);
 const USER_REPAY_TOKEN_B = tokenB(1);
 const LIQUIDATOR_DEPOSIT_TOKEN_B = tokenB(5);
 const LIQUIDATION_USDC = usdc(0.01);
+
+type MarginfiAccount = IdlAccounts<Marginfi>["marginfiAccount"];
+type MarginfiBalance = MarginfiAccount["lendingAccount"]["balances"][number];
+type MarginfiHealthCache = MarginfiAccount["healthCache"];
 
 describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
   let borrower: (typeof users)[number];
@@ -144,7 +146,7 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
     return bankrunProgram.account.marginfiAccount.fetch(marginfiAccountPk);
   };
 
-  const netHealth = (healthCache: MarginfiHealthCacheRaw) =>
+  const netHealth = (healthCache: MarginfiHealthCache) =>
     wrappedI80F48toBigNumber(healthCache.assetValue).minus(
       wrappedI80F48toBigNumber(healthCache.liabilityValue),
     );
@@ -155,12 +157,12 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
   const confAdjLiability = 1 + ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
 
   const priceForBank = (
-    marginfiAccount: MarginfiAccountRaw,
+    marginfiAccount: MarginfiAccount,
     bankPk: PublicKey,
     errLabel: string,
   ): number => {
     const idx = marginfiAccount.lendingAccount.balances.findIndex(
-      (b: MarginfiBalanceRaw) => b.active && b.bankPk.equals(bankPk),
+      (b: MarginfiBalance) => b.active && b.bankPk.equals(bankPk),
     );
     assert.isAtLeast(idx, 0, `${errLabel}: missing active bank balance`);
     return bytesToF64(marginfiAccount.healthCache.prices[idx]);
@@ -326,7 +328,7 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
     assert.ok((healthCache.flags & HEALTH_CACHE_ENGINE_OK) !== 0);
     assert.ok((healthCache.flags & HEALTH_CACHE_ORACLE_OK) !== 0);
     const balanceIdx = accountAfterPulse.lendingAccount.balances.findIndex(
-      (b: MarginfiBalanceRaw) => b.active && b.bankPk.equals(switchboardJupBankPk),
+      (b: MarginfiBalance) => b.active && b.bankPk.equals(switchboardJupBankPk),
     );
     assert.isAtLeast(balanceIdx, 0, "missing active switchboard jup balance");
 

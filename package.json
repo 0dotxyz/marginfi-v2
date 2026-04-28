@@ -6,7 +6,7 @@
   "dependencies": {
     "@coral-xyz/anchor": "0.31.1",
     "@coral-xyz/spl-token": "^0.31.1",
-    "@kamino-finance/klend-sdk": "^7.4.0-beta.20",
+    "@kamino-finance/klend-sdk": "^7.3.22",
     "@mrgnlabs/marginfi-client-v2": "^6.0.1",
     "@mrgnlabs/mrgn-common": "^2.0.2",
     "@solana-developers/helpers": "2.8.0",

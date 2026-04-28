@@ -1,4 +1,4 @@
-import { BN } from "@coral-xyz/anchor";
+import { BN, IdlAccounts } from "@coral-xyz/anchor";
 import { inspect } from "util";
 import {
   BanksTransactionMeta,
@@ -39,6 +39,7 @@ import {
 import { getEpochAndSlot } from "./bankrunConnection";
 import { createMintToInstruction } from "@solana/spl-token";
 import { BankrunProvider } from "anchor-bankrun";
+import { Marginfi } from "target/types/marginfi";
 
 /**
  * Convert a human-readable amount to native token units based on decimals.
@@ -350,7 +351,8 @@ export const dumpBankrunLogs = (result: any): boolean => {
     findFieldDeep(result, "computeUnitsConsumed");
   const status = txResult === null || txResult === undefined ? "ok" : "failed";
   console.log(
-    `[bankrun] no logMessages available (status=${status}, meta=${result?.meta === null ? "null" : typeof result?.meta
+    `[bankrun] no logMessages available (status=${status}, meta=${
+      result?.meta === null ? "null" : typeof result?.meta
     })`,
   );
   if (txResult !== undefined) {
@@ -553,7 +555,13 @@ export function dumpAccBalances(
   console.table(activeBalances);
 }
 
-export const logHealthCache = (header: string, healthCache: any) => {
+type MarginfiAccount = IdlAccounts<Marginfi>["marginfiAccount"];
+type MarginfiHealthCache = MarginfiAccount["healthCache"];
+
+export const logHealthCache = (
+  header: string,
+  healthCache: MarginfiHealthCache,
+) => {
   const av = wrappedI80F48toBigNumber(healthCache.assetValue);
   const lv = wrappedI80F48toBigNumber(healthCache.liabilityValue);
   const aValMaint = wrappedI80F48toBigNumber(healthCache.assetValueMaint);
@@ -791,14 +799,16 @@ export async function setEmissionsDirect(
   if (!existing) throw new Error("Bank account not found in bankrun");
 
   const buf = Buffer.from(existing.data);
-  const prevMint = new PublicKey(buf.subarray(EMISSIONS_MINT_OFFSET, EMISSIONS_MINT_OFFSET + 32));
+  const prevMint = new PublicKey(
+    buf.subarray(EMISSIONS_MINT_OFFSET, EMISSIONS_MINT_OFFSET + 32),
+  );
 
   const emissionsSlice = emissionsMint.toBuffer();
   emissionsSlice.copy(buf, EMISSIONS_MINT_OFFSET);
 
   provider.context.setAccount(bank, {
     ...existing,
-    data: buf
+    data: buf,
   });
 
   return prevMint;

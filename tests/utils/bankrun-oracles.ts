@@ -12,10 +12,11 @@ import {
   DRIFT_ORACLE_RECEIVER_PROGRAM_ID,
 } from "./types";
 import { processBankrunTransaction } from "./tools";
+import { SWITCHBOARD_PULL_WSOL_FEED_HEX } from "../fixtures/switchboard_pull_wsol_fixture";
 
 /** Default Pyth receiver program ID (mocks program) */
 export const PYTH_RECEIVER_PROGRAM_ID = new PublicKey(
-  "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
+  "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ"
 );
 
 /**
@@ -27,7 +28,7 @@ export async function createBankrunPythFeedAccount(
   bankrunContext: ProgramTestContext,
   banksClient: BanksClient,
   feedKeypair: Keypair,
-  owner: PublicKey,
+  owner: PublicKey
 ): Promise<Keypair> {
   const space = 300;
   const rent = await banksClient.getRent();
@@ -40,7 +41,7 @@ export async function createBankrunPythFeedAccount(
       lamports,
       space,
       programId: owner,
-    }),
+    })
   );
 
   await processBankrunTransaction(bankrunContext, tx, [
@@ -60,7 +61,7 @@ export async function createBankrunPythOracleAccount(
   bankrunContext: ProgramTestContext,
   banksClient: BanksClient,
   oracleKeypair: Keypair,
-  owner: PublicKey,
+  owner: PublicKey
 ): Promise<Keypair> {
   const space = 134;
   const rent = await banksClient.getRent();
@@ -73,7 +74,7 @@ export async function createBankrunPythOracleAccount(
       lamports,
       space,
       programId: owner,
-    }),
+    })
   );
 
   await processBankrunTransaction(bankrunContext, tx, [
@@ -106,8 +107,8 @@ export async function setPythPullOraclePrice(
   decimals: number,
   confidence: number,
   owner: PublicKey = new PublicKey(
-    "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
-  ),
+    "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ"
+  )
 ) {
   // Get current clock for slot and timestamp
   const clock = await banksClient.getClock();
@@ -174,7 +175,7 @@ export async function setPythPullOraclePrice(
 
   if (!existing) {
     console.log(
-      "Account does not exist, not creating because this causes bankrun issues",
+      "Account does not exist, not creating because this causes bankrun issues"
     );
     return;
   } else {
@@ -203,8 +204,8 @@ export async function refreshPullOraclesBankrun(
   bankrunContext: ProgramTestContext,
   banksClient: BanksClient,
   owner: PublicKey = new PublicKey(
-    "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
-  ),
+    "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ"
+  )
 ) {
   // Update each oracle sequentially to avoid any race conditions
   await setPythPullOraclePrice(
@@ -215,7 +216,7 @@ export async function refreshPullOraclesBankrun(
     oracles.lstAlphaPrice,
     oracles.lstAlphaDecimals,
     ORACLE_CONF_INTERVAL,
-    owner,
+    owner
   );
 
   await setPythPullOraclePrice(
@@ -226,7 +227,7 @@ export async function refreshPullOraclesBankrun(
     oracles.wsolPrice,
     oracles.wsolDecimals,
     ORACLE_CONF_INTERVAL,
-    owner,
+    owner
   );
 
   await setPythPullOraclePrice(
@@ -237,7 +238,7 @@ export async function refreshPullOraclesBankrun(
     oracles.usdcPrice,
     oracles.usdcDecimals,
     ORACLE_CONF_INTERVAL,
-    owner,
+    owner
   );
 
   await setPythPullOraclePrice(
@@ -248,7 +249,7 @@ export async function refreshPullOraclesBankrun(
     oracles.tokenAPrice,
     oracles.tokenADecimals,
     ORACLE_CONF_INTERVAL,
-    owner,
+    owner
   );
 
   await setPythPullOraclePrice(
@@ -259,7 +260,7 @@ export async function refreshPullOraclesBankrun(
     oracles.tokenBPrice,
     oracles.tokenBDecimals,
     ORACLE_CONF_INTERVAL,
-    owner,
+    owner
   );
 }
 
@@ -283,46 +284,48 @@ export async function setupPythOraclesBankrun(
   tokenBDecimals: number,
   lstAlphaPrice: number,
   lstAlphaDecimals: number,
-  verbose: boolean = false,
-): Promise<Oracles> {
+  verbose: boolean = false
+): Promise<
+  Omit<Oracles, "wsolOracleSwb" | "wsolPriceSwb" | "wsolDecimalsSwb">
+> {
   const owner = PYTH_RECEIVER_PROGRAM_ID;
 
   // Deterministic keypairs (same as pyth_mocks.ts)
   const wsolPythPullOracle = Keypair.fromSeed(
-    Buffer.from("ORACLE_SEED_00000000000000F_WSOL"),
+    Buffer.from("ORACLE_SEED_00000000000000F_WSOL")
   );
   const wsolPythPullOracleFeed = Keypair.fromSeed(
-    Buffer.from("ORACLE_SEED_0000000000000ID_WSOL"),
+    Buffer.from("ORACLE_SEED_0000000000000ID_WSOL")
   );
   const usdcPythPullOracle = Keypair.fromSeed(
-    Buffer.from("ORACLE_SEED_00000000000000F_USDC"),
+    Buffer.from("ORACLE_SEED_00000000000000F_USDC")
   );
   const usdcPythPullOracleFeed = Keypair.fromSeed(
-    Buffer.from("ORACLE_SEED_0000000000000ID_USDC"),
+    Buffer.from("ORACLE_SEED_0000000000000ID_USDC")
   );
   const fakeUsdcPythPullOracle = Keypair.fromSeed(
-    Buffer.from("ORACLE_SEED_00000000000001F_USDC"),
+    Buffer.from("ORACLE_SEED_00000000000001F_USDC")
   );
   const fakeUsdcPythPullOracleFeed = Keypair.fromSeed(
-    Buffer.from("ORACLE_SEED_0000000000001ID_USDC"),
+    Buffer.from("ORACLE_SEED_0000000000001ID_USDC")
   );
   const tokenAPythPullOracle = Keypair.fromSeed(
-    Buffer.from("ORACLE_SEED_00000000000001F_00TA"),
+    Buffer.from("ORACLE_SEED_00000000000001F_00TA")
   );
   const tokenAPythPullOracleFeed = Keypair.fromSeed(
-    Buffer.from("ORACLE_SEED_0000000000001ID_00TA"),
+    Buffer.from("ORACLE_SEED_0000000000001ID_00TA")
   );
   const tokenBPythPullOracle = Keypair.fromSeed(
-    Buffer.from("ORACLE_SEED_00000000000001F_00TB"),
+    Buffer.from("ORACLE_SEED_00000000000001F_00TB")
   );
   const tokenBPythPullOracleFeed = Keypair.fromSeed(
-    Buffer.from("ORACLE_SEED_0000000000001ID_00TB"),
+    Buffer.from("ORACLE_SEED_0000000000001ID_00TB")
   );
   const lstPythPullOracle = Keypair.fromSeed(
-    Buffer.from("ORACLE_SEED_00000000000001F_0LST"),
+    Buffer.from("ORACLE_SEED_00000000000001F_0LST")
   );
   const lstPythPullOracleFeed = Keypair.fromSeed(
-    Buffer.from("ORACLE_SEED_0000000000001ID_0LST"),
+    Buffer.from("ORACLE_SEED_0000000000001ID_0LST")
   );
 
   // Create all feed accounts
@@ -330,37 +333,37 @@ export async function setupPythOraclesBankrun(
     bankrunContext,
     banksClient,
     wsolPythPullOracleFeed,
-    owner,
+    owner
   );
   await createBankrunPythFeedAccount(
     bankrunContext,
     banksClient,
     usdcPythPullOracleFeed,
-    owner,
+    owner
   );
   await createBankrunPythFeedAccount(
     bankrunContext,
     banksClient,
     fakeUsdcPythPullOracleFeed,
-    owner,
+    owner
   );
   await createBankrunPythFeedAccount(
     bankrunContext,
     banksClient,
     tokenAPythPullOracleFeed,
-    owner,
+    owner
   );
   await createBankrunPythFeedAccount(
     bankrunContext,
     banksClient,
     tokenBPythPullOracleFeed,
-    owner,
+    owner
   );
   await createBankrunPythFeedAccount(
     bankrunContext,
     banksClient,
     lstPythPullOracleFeed,
-    owner,
+    owner
   );
 
   // Create all oracle accounts
@@ -368,37 +371,37 @@ export async function setupPythOraclesBankrun(
     bankrunContext,
     banksClient,
     wsolPythPullOracle,
-    owner,
+    owner
   );
   await createBankrunPythOracleAccount(
     bankrunContext,
     banksClient,
     usdcPythPullOracle,
-    owner,
+    owner
   );
   await createBankrunPythOracleAccount(
     bankrunContext,
     banksClient,
     fakeUsdcPythPullOracle,
-    owner,
+    owner
   );
   await createBankrunPythOracleAccount(
     bankrunContext,
     banksClient,
     tokenAPythPullOracle,
-    owner,
+    owner
   );
   await createBankrunPythOracleAccount(
     bankrunContext,
     banksClient,
     tokenBPythPullOracle,
-    owner,
+    owner
   );
   await createBankrunPythOracleAccount(
     bankrunContext,
     banksClient,
     lstPythPullOracle,
-    owner,
+    owner
   );
 
   // Set prices using setAccount (WARNING: may break warpToSlot)
@@ -410,7 +413,7 @@ export async function setupPythOraclesBankrun(
     wsolPrice,
     wsolDecimals,
     ORACLE_CONF_INTERVAL,
-    owner,
+    owner
   );
   await setPythPullOraclePrice(
     bankrunContext,
@@ -420,7 +423,7 @@ export async function setupPythOraclesBankrun(
     usdcPrice,
     usdcDecimals,
     ORACLE_CONF_INTERVAL,
-    owner,
+    owner
   );
   await setPythPullOraclePrice(
     bankrunContext,
@@ -430,7 +433,7 @@ export async function setupPythOraclesBankrun(
     usdcPrice,
     usdcDecimals,
     ORACLE_CONF_INTERVAL,
-    owner,
+    owner
   );
   await setPythPullOraclePrice(
     bankrunContext,
@@ -440,7 +443,7 @@ export async function setupPythOraclesBankrun(
     tokenAPrice,
     tokenADecimals,
     ORACLE_CONF_INTERVAL,
-    owner,
+    owner
   );
   await setPythPullOraclePrice(
     bankrunContext,
@@ -450,7 +453,7 @@ export async function setupPythOraclesBankrun(
     tokenBPrice,
     tokenBDecimals,
     ORACLE_CONF_INTERVAL,
-    owner,
+    owner
   );
   await setPythPullOraclePrice(
     bankrunContext,
@@ -460,7 +463,7 @@ export async function setupPythOraclesBankrun(
     lstAlphaPrice,
     lstAlphaDecimals,
     ORACLE_CONF_INTERVAL,
-    owner,
+    owner
   );
 
   if (verbose) {
@@ -472,7 +475,10 @@ export async function setupPythOraclesBankrun(
     console.log("lst:     \t" + lstPythPullOracle.publicKey);
   }
 
-  const oracles: Oracles = {
+  const oracles: Omit<
+    Oracles,
+    "wsolOracleSwb" | "wsolPriceSwb" | "wsolDecimalsSwb"
+  > = {
     wsolOracle: wsolPythPullOracle,
     wsolOracleFeed: wsolPythPullOracleFeed,
     wsolDecimals: wsolDecimals,
@@ -537,6 +543,21 @@ export const SWITCHBOARD_PULL_FEED_DISCRIMINATOR = Buffer.from([
 export const SWITCHBOARD_PULL_LAST_UPDATE_TIMESTAMP_OFFSET = 2216;
 
 /**
+ * Byte offset (from the start of account data, including discriminator) for
+ * `result.value: i128` in `PullFeedAccountData`.
+ *
+ * Used to patch fixture prices for bankrun tests while keeping the rest of the
+ * account layout intact.
+ */
+export const SWITCHBOARD_PULL_RESULT_VALUE_OFFSET = 2264;
+
+/**
+ * Byte offset (from the start of account data, including discriminator) for
+ * `result.std_dev: i128` in `PullFeedAccountData`.
+ */
+export const SWITCHBOARD_PULL_RESULT_STD_DEV_OFFSET = 2280;
+
+/**
  * Minimum expected size of a Switchboard Pull feed account.
  *
  * Currently: 8-byte discriminator + 3200-byte `PullFeedAccountData` = 3208 bytes.
@@ -561,6 +582,68 @@ function assertValidSwitchboardPullFeedData(data: Buffer): void {
     );
   }
 }
+
+const scaledDecimalToI128 = (value: number, scale: number): bigint => {
+  const normalized = value.toFixed(scale);
+  const [wholeRaw, fracRaw = ""] = normalized.split(".");
+  const negative = wholeRaw.startsWith("-");
+  const whole = negative ? wholeRaw.slice(1) : wholeRaw;
+  const frac = fracRaw.padEnd(scale, "0").slice(0, scale);
+  const combined = `${whole}${frac}`;
+  const magnitude = BigInt(combined.length > 0 ? combined : "0");
+  return negative ? -magnitude : magnitude;
+};
+
+const writeI128LE = (buffer: Buffer, offset: number, value: bigint): void => {
+  const min = -(1n << 127n);
+  const max = (1n << 127n) - 1n;
+  if (value < min || value > max) {
+    throw new Error(`i128 overflow: ${value.toString()}`);
+  }
+
+  let v = value < 0 ? (1n << 128n) + value : value;
+  for (let i = 0; i < 16; i += 1) {
+    buffer[offset + i] = Number(v & 0xffn);
+    v >>= 8n;
+  }
+};
+
+/**
+ * Build a Switchboard Pull feed buffer by patching the default WSOL fixture.
+ *
+ * `price` and `stdDev` are encoded with Switchboard's fixed precision (1e18).
+ */
+export const buildSwitchboardPullFixtureFromTemplate = (args: {
+  price: number;
+  stdDev?: number;
+  templateHex?: string;
+}): Buffer => {
+  const { price, stdDev, templateHex = SWITCHBOARD_PULL_WSOL_FEED_HEX } = args;
+  const raw = Buffer.from(templateHex, "hex");
+  const data =
+    raw.length >= SWITCHBOARD_PULL_MIN_FEED_ACCOUNT_DATA_LEN
+      ? Buffer.from(raw)
+      : Buffer.concat([
+          raw,
+          Buffer.alloc(SWITCHBOARD_PULL_MIN_FEED_ACCOUNT_DATA_LEN - raw.length),
+        ]);
+
+  assertValidSwitchboardPullFeedData(data);
+  writeI128LE(
+    data,
+    SWITCHBOARD_PULL_RESULT_VALUE_OFFSET,
+    scaledDecimalToI128(price, 18)
+  );
+  if (stdDev !== undefined) {
+    writeI128LE(
+      data,
+      SWITCHBOARD_PULL_RESULT_STD_DEV_OFFSET,
+      scaledDecimalToI128(stdDev, 18)
+    );
+  }
+
+  return data;
+};
 
 /**
  * Creates a blank Switchboard Pull feed account in bankrun.
@@ -591,7 +674,60 @@ export async function createBankrunSwitchboardPullFeedAccount(
     })
   );
 
-  await processBankrunTransaction(bankrunContext, tx, [bankrunContext.payer, feedKeypair]);
+  await processBankrunTransaction(bankrunContext, tx, [
+    bankrunContext.payer,
+    feedKeypair,
+  ]);
+
+  return feedKeypair;
+}
+
+/**
+ * Create or overwrite a deterministic Switchboard Pull oracle account from the
+ * default fixture template, patching only price/std_dev.
+ */
+export async function setupSwitchboardPullOracleFromTemplate(
+  bankrunContext: ProgramTestContext,
+  banksClient: BanksClient,
+  feedKeypair: Keypair,
+  args: {
+    price: number;
+    stdDev?: number;
+    verbose?: boolean;
+    label?: string;
+  }
+): Promise<Keypair> {
+  const { price, stdDev, verbose = false, label } = args;
+  const feedData = buildSwitchboardPullFixtureFromTemplate({ price, stdDev });
+
+  const existing = await banksClient.getAccount(feedKeypair.publicKey);
+  if (!existing) {
+    await createBankrunSwitchboardPullFeedAccount(
+      bankrunContext,
+      banksClient,
+      feedKeypair,
+      feedData.length
+    );
+  }
+
+  await setSwitchboardPullFeedAccountData(
+    bankrunContext,
+    banksClient,
+    feedKeypair.publicKey,
+    feedData
+  );
+  await refreshSwitchboardPullOracleBankrun(
+    bankrunContext,
+    banksClient,
+    feedKeypair.publicKey
+  );
+
+  if (verbose) {
+    const prefix = label ? `${label}: ` : "";
+    console.log(
+      `${prefix}${feedKeypair.publicKey.toBase58()} (price=${price.toFixed(8)})`
+    );
+  }
 
   return feedKeypair;
 }
@@ -611,7 +747,9 @@ export async function setSwitchboardPullFeedAccountData(
   const existing = await banksClient.getAccount(feedAccount);
 
   if (!existing) {
-    console.log("Switchboard Pull feed account does not exist (did you create it first?)");
+    console.log(
+      "Switchboard Pull feed account does not exist (did you create it first?)"
+    );
     return;
   }
 
@@ -641,7 +779,9 @@ export async function refreshSwitchboardPullOracleBankrun(
   const existing = await banksClient.getAccount(feedAccount);
 
   if (!existing) {
-    console.log("Switchboard Pull feed account does not exist (did you create it first?)");
+    console.log(
+      "Switchboard Pull feed account does not exist (did you create it first?)"
+    );
     return;
   }
 
@@ -652,7 +792,9 @@ export async function refreshSwitchboardPullOracleBankrun(
   const ts = unixTimestampOverride ?? Number(clock.unixTimestamp);
 
   // Write i64 LE at the known field offset.
-  new BN(ts).toArrayLike(Buffer, "le", 8).copy(data, SWITCHBOARD_PULL_LAST_UPDATE_TIMESTAMP_OFFSET);
+  new BN(ts)
+    .toArrayLike(Buffer, "le", 8)
+    .copy(data, SWITCHBOARD_PULL_LAST_UPDATE_TIMESTAMP_OFFSET);
 
   bankrunContext.setAccount(feedAccount, {
     lamports: existing.lamports,
@@ -661,4 +803,33 @@ export async function refreshSwitchboardPullOracleBankrun(
     executable: existing.executable,
     rentEpoch: existing.rentEpoch,
   });
+}
+
+/**
+ * Create a deterministic Switchboard Pull SOL/USD oracle account in bankrun and seed it with the
+ * hardcoded fixture bytes.
+ */
+export async function setupSwbOraclesBankrun(
+  bankrunContext: ProgramTestContext,
+  banksClient: BanksClient,
+  verbose: boolean = false
+): Promise<
+  Pick<Oracles, "wsolOracleSwb" | "wsolPriceSwb" | "wsolDecimalsSwb">
+> {
+  const wsolOracleSwb = Keypair.fromSeed(
+    Buffer.from("ORACLE_SEED_00000000000000F_SWB0")
+  );
+
+  await setupSwitchboardPullOracleFromTemplate(
+    bankrunContext,
+    banksClient,
+    wsolOracleSwb,
+    { price: 155.59404527, verbose, label: "wsol swb" }
+  );
+
+  return {
+    wsolOracleSwb,
+    wsolPriceSwb: 155.59404527,
+    wsolDecimalsSwb: 9,
+  };
 }
