@@ -1,8 +1,5 @@
 use anchor_lang::prelude::*;
-use marginfi_type_crate::{
-    constants::EMISSION_FLAGS,
-    types::{Bank, MarginfiAccount, ACCOUNT_FROZEN},
-};
+use marginfi_type_crate::types::{MarginfiAccount, ACCOUNT_FROZEN};
 
 use crate::{
     check,
@@ -39,46 +36,4 @@ pub struct MarginfiAccountUpdateEmissionsDestinationAccount<'info> {
     /// CHECK: Any valid public key. Off-chain systems use this to derive
     /// the canonical ATA for each emissions mint.
     pub destination_account: AccountInfo<'info>,
-}
-
-/// Permissionlessly zero out `emissions_outstanding` on a balance after
-/// emissions have been disabled on the bank.
-pub fn lending_account_clear_emissions(
-    ctx: Context<LendingAccountClearEmissions>,
-) -> MarginfiResult {
-    let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-    let bank = ctx.accounts.bank.load()?;
-
-    check!(
-        bank.emissions_rate == 0,
-        MarginfiError::InvalidConfig,
-        "Emissions rate must be zero"
-    );
-    check!(
-        bank.flags & EMISSION_FLAGS == 0,
-        MarginfiError::InvalidConfig,
-        "Emission flags must be cleared"
-    );
-
-    let balance = marginfi_account
-        .lending_account
-        .balances
-        .iter_mut()
-        .find(|b| b.is_active() && b.bank_pk == ctx.accounts.bank.key())
-        .ok_or(MarginfiError::BankAccountNotFound)?;
-
-    balance.emissions_outstanding = fixed::types::I80F48::ZERO.into();
-
-    Ok(())
-}
-
-#[derive(Accounts)]
-pub struct LendingAccountClearEmissions<'info> {
-    #[account(
-        mut,
-        constraint = marginfi_account.load()?.group == bank.load()?.group,
-    )]
-    pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
-
-    pub bank: AccountLoader<'info, Bank>,
 }
