@@ -24,6 +24,9 @@ node_modules
 .idea/
 test-ledger/
 *.profraw
+# Needed if moving to Node 24+
+# .yarnrc.yml
+install-state.gz
 
 # keypairs
 *.json

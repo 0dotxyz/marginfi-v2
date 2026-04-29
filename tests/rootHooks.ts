@@ -22,9 +22,7 @@ import {
 } from "@solana/web3.js";
 import fs from "fs";
 import path from "path";
-import {
-  patchBankrunConnection,
-} from "./utils/bankrunConnection";
+import { patchBankrunConnection } from "./utils/bankrunConnection";
 
 // ---------------------------------------------------------------------------
 // Kamino farms (liquidity-incentive) program
@@ -60,7 +58,10 @@ import { Marginfi } from "../target/types/marginfi";
 import { Mocks } from "../target/types/mocks";
 import marginfiIdl from "../target/idl/marginfi.json";
 import mocksIdl from "../target/idl/mocks.json";
-import { setupPythOraclesBankrun } from "./utils/bankrun-oracles";
+import {
+  setupPythOraclesBankrun,
+  setupSwbOraclesBankrun,
+} from "./utils/bankrun-oracles";
 import { processBankrunTransaction } from "./utils/tools";
 
 import {
@@ -704,7 +705,7 @@ export const mochaHooks = {
     // -------------------------------------------------------------------------
     console.log("Creating oracles in bankrun...");
 
-    oracles = await setupPythOraclesBankrun(
+    const pythOracles = await setupPythOraclesBankrun(
       bankrunContext,
       banksClient,
       ecosystem.wsolPrice,
@@ -719,6 +720,23 @@ export const mochaHooks = {
       ecosystem.lstAlphaDecimals,
       verbose,
     );
+    const swbOracles = await setupSwbOraclesBankrun(
+      bankrunContext,
+      banksClient,
+      {
+        wsolPrice: 155.59404527,
+        wsolDecimals: ecosystem.wsolDecimals,
+        tokenAPrice: ecosystem.tokenAPrice,
+        tokenADecimals: ecosystem.tokenADecimals,
+        lstAlphaPrice: ecosystem.lstAlphaPrice,
+        lstAlphaDecimals: ecosystem.lstAlphaDecimals,
+      },
+      verbose,
+    );
+    oracles = {
+      ...pythOracles,
+      ...swbOracles,
+    };
 
     // ---------------------------------------------------------------------
     // Step 5b: Create validators + SPL single pools (staked collateral tests)
