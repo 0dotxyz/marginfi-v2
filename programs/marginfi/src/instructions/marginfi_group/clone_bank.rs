@@ -1,5 +1,6 @@
 use crate::{
     check,
+    constants::{LOCALNET_ID, MAINNET_PROGRAM_ID, STAGING_ID},
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{bank::BankImpl, marginfi_group::MarginfiGroupImpl},
@@ -15,10 +16,6 @@ use marginfi_type_crate::{
     },
     types::{Bank, MarginfiGroup},
 };
-
-const MAINNET_PROGRAM_ID: Pubkey = pubkey!("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA");
-const STAGING_ID: Pubkey = pubkey!("stag8sTKds2h4KzjUw3zKTsxbqvT4XKHdaR9X9E6Rct");
-const LOCALNET_ID: Pubkey = pubkey!("2jGhuVUuy3umdzByFx8sNWUAaf5vaeuDm78RDPEnhrMr");
 
 pub fn lending_pool_clone_bank(
     ctx: Context<LendingPoolCloneBank>,

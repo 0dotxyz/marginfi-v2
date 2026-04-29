@@ -1,5 +1,6 @@
 use crate::{
     check,
+    constants::{LOCALNET_ID, MAINNET_PROGRAM_ID, STAGING_ID},
     events::{GroupEventHeader, LendingPoolSuperAdminDepositEvent},
     math_error,
     prelude::{MarginfiError, MarginfiResult},
@@ -14,8 +15,6 @@ use marginfi_type_crate::{
     types::{Bank, MarginfiGroup},
 };
 
-const MAINNET_PROGRAM_ID: Pubkey = pubkey!("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA");
-
 /// Group admin only. Staging/localnet only — panics on mainnet. See
 /// `guides/ADMIN/PERMISSIONS_AND_ROLES.md` ("Protocol Panic-Pause") for rationale.
 ///
@@ -28,8 +27,13 @@ pub fn super_admin_deposit<'info>(
     mut ctx: Context<'_, '_, 'info, 'info, SuperAdminDeposit<'info>>,
     amount: u64,
 ) -> MarginfiResult {
-    if crate::ID == MAINNET_PROGRAM_ID {
-        panic!("super_admin_deposit cannot run on mainnet deployment");
+    if crate::ID != STAGING_ID && crate::ID != LOCALNET_ID {
+        panic!("Staging or localnet only!");
+    }
+
+    // Sanity check
+    if crate::ID == MAINNET_PROGRAM_ID || *ctx.program_id == MAINNET_PROGRAM_ID {
+        panic!("super admin ix cannot run on mainnet deployment");
     }
 
     if amount == 0 {
