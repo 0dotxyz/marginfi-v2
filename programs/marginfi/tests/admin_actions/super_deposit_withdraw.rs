@@ -1,3 +1,5 @@
+#![cfg(not(feature = "mainnet-beta"))]
+
 use anchor_lang::prelude::Clock;
 use anchor_spl::token::spl_token;
 use fixed::types::I80F48;
