@@ -141,6 +141,8 @@ async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails() -> anyhow::Result<()
             },
         )
         .await?;
+    let marginfi_account = borrower.load().await;
+    assert_eq!(marginfi_account.active_orders, 2);
 
     let keeper = Keypair::new();
     fund_keeper_for_fees(&test_f, &keeper).await?;
@@ -176,6 +178,8 @@ async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails() -> anyhow::Result<()
     )
     .await;
     assert_custom_error!(result.unwrap_err(), MarginfiError::IllegalBalanceState);
+    let marginfi_account = borrower.load().await;
+    assert_eq!(marginfi_account.active_orders, 2);
 
     // Execute A/B and withdraw most of A (leave a small balance so execution succeeds)
     execute_order_with_withdraw(
@@ -192,6 +196,8 @@ async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails() -> anyhow::Result<()
         vec![usdc_bank.key],
     )
     .await?;
+    let marginfi_account = borrower.load().await;
+    assert_eq!(marginfi_account.active_orders, 1);
 
     // Keeper cannot close A/D yet because both tags are still live (SOL not closed yet).
     test_f.refresh_blockhash().await;
@@ -202,6 +208,8 @@ async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails() -> anyhow::Result<()
         result.unwrap_err(),
         MarginfiError::LiquidatorOrderCloseNotAllowed
     );
+    let marginfi_account = borrower.load().await;
+    assert_eq!(marginfi_account.active_orders, 1);
 
     // Now close A outside of order execution.
     test_f.refresh_blockhash().await;
@@ -231,6 +239,8 @@ async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails() -> anyhow::Result<()
         result.unwrap_err(),
         MarginfiError::LendingAccountBalanceNotFound
     );
+    let marginfi_account = borrower.load().await;
+    assert_eq!(marginfi_account.active_orders, 1);
 
     // The SOL/USDC order should have been closed as part of execution.
     let order_ab_after = test_f.try_load(&order_ab).await?;
@@ -248,6 +258,8 @@ async fn limit_orders_overlap_ab_nearly_closes_a_ad_fails() -> anyhow::Result<()
         order_ad_after.is_none(),
         "SOL/PyUSD order should be closed after close_order"
     );
+    let marginfi_account = borrower.load().await;
+    assert_eq!(marginfi_account.active_orders, 0);
 
     Ok(())
 }
@@ -279,6 +291,8 @@ async fn limit_orders_overlap_ab_nearly_closes_a_no_withdraw_all_ok() -> anyhow:
             },
         )
         .await?;
+    let marginfi_account = borrower.load().await;
+    assert_eq!(marginfi_account.active_orders, 1);
 
     let keeper = Keypair::new();
     fund_keeper_for_fees(&test_f, &keeper).await?;
@@ -310,6 +324,7 @@ async fn limit_orders_overlap_ab_nearly_closes_a_no_withdraw_all_ok() -> anyhow:
     .await?;
 
     let mfi_after = borrower.load().await;
+    assert_eq!(mfi_after.active_orders, 0);
     let sol_balance = mfi_after
         .lending_account
         .balances
@@ -378,6 +393,8 @@ async fn limit_orders_overlap_ab_close_a_reopen_a_ad_fails() -> anyhow::Result<(
             },
         )
         .await?;
+    let marginfi_account = borrower.load().await;
+    assert_eq!(marginfi_account.active_orders, 2);
 
     let keeper = Keypair::new();
     fund_keeper_for_fees(&test_f, &keeper).await?;
@@ -407,6 +424,8 @@ async fn limit_orders_overlap_ab_close_a_reopen_a_ad_fails() -> anyhow::Result<(
         vec![usdc_bank.key],
     )
     .await?;
+    let marginfi_account = borrower.load().await;
+    assert_eq!(marginfi_account.active_orders, 1);
 
     // Close SOL outside order execution.
     test_f.refresh_blockhash().await;
@@ -424,6 +443,7 @@ async fn limit_orders_overlap_ab_close_a_reopen_a_ad_fails() -> anyhow::Result<(
 
     let order_ad_after = borrower.load_order(order_ad).await;
     let mfi_after = borrower.load().await;
+    assert_eq!(mfi_after.active_orders, 1);
     let sol_balance = mfi_after
         .lending_account
         .balances
@@ -453,6 +473,8 @@ async fn limit_orders_overlap_ab_close_a_reopen_a_ad_fails() -> anyhow::Result<(
         result.unwrap_err(),
         MarginfiError::LendingAccountBalanceNotFound
     );
+    let marginfi_account = borrower.load().await;
+    assert_eq!(marginfi_account.active_orders, 1);
 
     Ok(())
 }
@@ -497,6 +519,8 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
             },
         )
         .await?;
+    let marginfi_account = borrower.load().await;
+    assert_eq!(marginfi_account.active_orders, 2);
 
     let keeper = Keypair::new();
     fund_keeper_for_fees(&test_f, &keeper).await?;
@@ -531,6 +555,8 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
         vec![usdc_bank.key],
     )
     .await?;
+    let marginfi_account = borrower.load().await;
+    assert_eq!(marginfi_account.active_orders, 1);
 
     // At this point there is 6 SOL left ($60) and a debt of $50 PyUSD
 
@@ -555,6 +581,8 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
         result.unwrap_err(),
         MarginfiError::OrderExecutionOverWithdrawal
     );
+    let marginfi_account = borrower.load().await;
+    assert_eq!(marginfi_account.active_orders, 1);
 
     // Executing A/D with just enough still works as expected.
     let result = execute_order_with_withdraw(
@@ -573,6 +601,8 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
     .await;
 
     assert!(result.is_ok());
+    let marginfi_account = borrower.load().await;
+    assert_eq!(marginfi_account.active_orders, 0);
     Ok(())
 }
 
@@ -653,6 +683,8 @@ async fn limit_orders_open_max_count() -> anyhow::Result<()> {
         assets.len() * liabilities.len(),
         "expected max orders"
     );
+    let marginfi_account = borrower.load().await;
+    assert_eq!(marginfi_account.active_orders, all_orders.len() as u8);
 
     let keeper = Keypair::new();
     fund_keeper_for_fees(&test_f, &keeper).await?;
@@ -682,6 +714,9 @@ async fn limit_orders_open_max_count() -> anyhow::Result<()> {
             .key;
         keeper_liab_accounts.insert(bank.key, account);
     }
+
+    let marginfi_account = borrower.load().await;
+    assert_eq!(marginfi_account.active_orders, 64);
 
     let mut executed = std::collections::HashSet::new();
 
@@ -722,6 +757,12 @@ async fn limit_orders_open_max_count() -> anyhow::Result<()> {
         let order_after = test_f.try_load(order_pda).await?;
         assert!(order_after.is_some(), "order should remain open");
     }
+
+    let marginfi_account = borrower.load().await;
+    assert_eq!(
+        marginfi_account.active_orders,
+        (all_orders.len() - executed.len()) as u8
+    );
 
     Ok(())
 }

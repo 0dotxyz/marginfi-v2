@@ -1,14 +1,28 @@
-import { Keypair, LAMPORTS_PER_SOL, SystemProgram, Transaction } from "@solana/web3.js";
-import { Program } from "@coral-xyz/anchor";
+import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
+import {
+  Keypair,
+  LAMPORTS_PER_SOL,
+  SystemProgram,
+  Transaction,
+} from "@solana/web3.js";
+import { BN, Program } from "@coral-xyz/anchor";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankrunProgram,
+  bankKeypairA,
+  bankKeypairUsdc,
+  ecosystem,
+  oracles,
   marginfiGroup,
   users,
   globalFeeWallet,
 } from "./rootHooks";
 import {
   accountInit,
+  borrowIx,
+  composeRemainingAccounts,
+  depositIx,
+  placeOrderIx,
   transferAccountAuthorityIx,
 } from "./utils/user-instructions";
 import { USER_ACCOUNT } from "./utils/mocks";
@@ -154,6 +168,86 @@ describe("Transfer account authority", () => {
     }
   });
 
+  it("(user 0) transfer account with active orders - should fail", async () => {
+    const tempMarginfiAccount = Keypair.generate();
+    const tempAccountPk = tempMarginfiAccount.publicKey;
+    const newAccKeypair = Keypair.generate();
+    const newAuthority = Keypair.generate();
+
+    const depositAmount = new BN(1 * 10 ** ecosystem.tokenADecimals);
+    const borrowAmount = new BN(1 * 10 ** ecosystem.usdcDecimals);
+
+    const initIx = await accountInit(users[0].mrgnProgram, {
+      marginfiGroup: marginfiGroup.publicKey,
+      marginfiAccount: tempAccountPk,
+      authority: users[0].wallet.publicKey,
+      feePayer: users[0].wallet.publicKey,
+    });
+    await users[0].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(initIx),
+      [tempMarginfiAccount]
+    );
+
+    const depositTokenAIx = await depositIx(users[0].mrgnProgram, {
+      marginfiAccount: tempAccountPk,
+      bank: bankKeypairA.publicKey,
+      tokenAccount: users[0].tokenAAccount,
+      amount: depositAmount,
+      depositUpToLimit: false,
+    });
+    await users[0].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(depositTokenAIx)
+    );
+
+    const borrowRemaining = composeRemainingAccounts([
+      [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
+      [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+    ]);
+    const borrowUsdcIx = await borrowIx(users[0].mrgnProgram, {
+      marginfiAccount: tempAccountPk,
+      bank: bankKeypairUsdc.publicKey,
+      amount: borrowAmount,
+      tokenAccount: users[0].usdcAccount,
+      remaining: borrowRemaining,
+    });
+    await users[0].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(borrowUsdcIx)
+    );
+
+    const placeOrder = await placeOrderIx(users[0].mrgnProgram, {
+      marginfiAccount: tempAccountPk,
+      authority: users[0].wallet.publicKey,
+      feePayer: users[0].wallet.publicKey,
+      bankKeys: [bankKeypairA.publicKey, bankKeypairUsdc.publicKey],
+      trigger: {
+        stopLoss: {
+          threshold: bigNumberToWrappedI80F48(100),
+          maxSlippage: 0,
+        },
+      },
+    });
+    await users[0].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(placeOrder)
+    );
+
+    const acc = await program.account.marginfiAccount.fetch(tempAccountPk);
+    assert.equal(acc.activeOrders, 1);
+
+    const transferIx = await transferAccountAuthorityIx(users[0].mrgnProgram, {
+      oldAccount: tempAccountPk,
+      newAccount: newAccKeypair.publicKey,
+      newAuthority: newAuthority.publicKey,
+      globalFeeWallet: globalFeeWallet,
+    });
+
+    await expectFailedTxWithMessage(async () => {
+      await users[0].mrgnProgram.provider.sendAndConfirm(
+        new Transaction().add(transferIx),
+        [newAccKeypair]
+      );
+    }, "Close all active orders before transfer");
+  });
+
   it("(user 0) migrate account with bad global fee wallet - should fail", async () => {
     const oldAccKey = users[0].accounts.get(USER_ACCOUNT);
     const newAccKeypair = Keypair.generate();
@@ -273,9 +367,10 @@ describe("Transfer account authority", () => {
     ]);
 
     // Verify the authority wallet is now owned by Token Program
-    const authorityAccountInfo = await program.provider.connection.getAccountInfo(
-      authorityKeypair.publicKey
-    );
+    const authorityAccountInfo =
+      await program.provider.connection.getAccountInfo(
+        authorityKeypair.publicKey
+      );
     assertKeysEqual(authorityAccountInfo.owner, TOKEN_PROGRAM_ID);
 
     // Now transfer the marginfi account using the authority whose wallet ownership was transferred to Token Program
