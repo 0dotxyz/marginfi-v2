@@ -48,7 +48,12 @@ import {
   deriveLiquidityVaultAuthority,
   deriveUserMetadata,
 } from "./utils/pdas";
-import { ASSET_TAG_KAMINO, KLEND_PROGRAM_ID } from "./utils/types";
+import {
+  ASSET_TAG_KAMINO,
+  BANK_SEED_KNOWN_FLAG,
+  CLOSE_ENABLED_FLAG,
+  KLEND_PROGRAM_ID,
+} from "./utils/types";
 
 let ctx: ProgramTestContext;
 const seed = new BN(555);
@@ -113,10 +118,14 @@ describe("k05: Init Kamino banks", () => {
     assertKeysEqual(bank.mint, ecosystem.usdcMint.publicKey);
     assert.equal(bank.mintDecimals, ecosystem.usdcDecimals);
     assertKeysEqual(bank.group, kaminoGroup.publicKey);
+    assertBNEqual(bank.bankSeed, seed);
 
     assertKeysEqual(config.oracleKeys[0], oracles.usdcOracle.publicKey);
 
-    assertBNEqual(bank.flags, 16); // CLOSE_ENABLED_FLAG
+    assertBNEqual(
+      bank.flags,
+      CLOSE_ENABLED_FLAG + BANK_SEED_KNOWN_FLAG
+    );
 
     // Note: this doesn't work if we've warped the banks clock
     // let lastUpdate = bank.lastUpdate.toNumber();

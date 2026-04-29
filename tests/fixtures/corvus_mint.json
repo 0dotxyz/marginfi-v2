@@ -1,0 +1,14 @@
+{
+  "pubkey": "CorvuSSoLxPKLoXWXSfn8pFSMhCRHhe7Uwqe874cmwvg",
+  "account": {
+    "lamports": 1,
+    "data": [
+      "",
+      "base64"
+    ],
+    "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "executable": false,
+    "rentEpoch": 0,
+    "space": 0
+  }
+}

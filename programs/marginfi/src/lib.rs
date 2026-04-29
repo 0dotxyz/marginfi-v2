@@ -96,11 +96,13 @@ pub mod marginfi {
     }
 
     /// (permissionless) Backfill `IS_T22` on existing banks created before this flag existed.
-    /// No-op if the bank mint is classic SPL Token or the flag is already set.
+    /// Also optionally backfills `bank_seed` in the same call.
+    /// Pass `None` to skip seed backfill, `Some(seed)` to backfill (including `Some(0)`).
     pub fn lending_pool_backfill_bank_is_t22_flag(
         ctx: Context<LendingPoolBackfillBankIsT22Flag>,
+        bank_seed: Option<u64>,
     ) -> MarginfiResult {
-        marginfi_group::lending_pool_backfill_bank_is_t22_flag(ctx)
+        marginfi_group::lending_pool_backfill_bank_is_t22_flag(ctx, bank_seed)
     }
 
     /// (permissionless) Backfill validator vote account on existing staked-collateral banks.

@@ -10,7 +10,7 @@ use marginfi::{
 };
 use marginfi_type_crate::{
     constants::{
-        CLOSE_ENABLED_FLAG, FREEZE_SETTINGS, IS_T22, METADATA_SEED,
+        BANK_SEED_KNOWN, CLOSE_ENABLED_FLAG, FREEZE_SETTINGS, IS_T22, METADATA_SEED,
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
@@ -196,6 +196,7 @@ async fn add_bank_success() -> anyhow::Result<()> {
             integration_acc_2,
             integration_acc_3,
             _padding_1,
+            bank_seed,
             .. // ignore internal padding
         } = bank_f.load().await;
         #[rustfmt::skip]
@@ -234,7 +235,9 @@ async fn add_bank_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[[u64; 2]; 7] as Default>::default());
+            assert_eq!(_padding_1, <[u64; 13] as Default>::default());
+            // legacy add_bank does not pass a seed
+            assert_eq!(bank_seed, 0);
 
             // this is the only loosely checked field
             assert!(last_update >= 0 && last_update <= 5);
@@ -346,6 +349,7 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             integration_acc_2,
             integration_acc_3,
             _padding_1,
+            bank_seed,
             .. // ignore internal padding
         } = bank_f.load().await;
         #[rustfmt::skip]
@@ -369,7 +373,7 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(total_liability_shares, I80F48!(0.0).into());
             assert_eq!(total_asset_shares, I80F48!(0.0).into());
             assert_eq!(config, bank_config);
-            assert_eq!(flags, CLOSE_ENABLED_FLAG | expected_is_t22);
+            assert_eq!(flags, CLOSE_ENABLED_FLAG | expected_is_t22 | BANK_SEED_KNOWN);
             assert_eq!(flags & IS_T22, expected_is_t22);
             assert_eq!(emissions_rate, 0);
             assert_eq!(emissions_mint, Pubkey::new_from_array([0; 32]));
@@ -384,7 +388,9 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[[u64; 2]; 7] as Default>::default());
+            assert_eq!(_padding_1, <[u64; 13] as Default>::default());
+            // with-seed add_bank stores the seed used for PDA derivation
+            assert_eq!(bank_seed, 1200_u64);
 
             // this is the only loosely checked field
             assert!(last_update >= 0 && last_update <= 5);
@@ -428,7 +434,7 @@ async fn backfill_is_t22_noop_for_classic_bank() -> anyhow::Result<()> {
 
     test_f
         .marginfi_group
-        .try_lending_pool_backfill_bank_is_t22_flag(&bank)
+        .try_lending_pool_backfill_bank_is_t22_flag(&bank, None)
         .await?;
 
     let bank_after = bank.load().await;

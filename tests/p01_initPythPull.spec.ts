@@ -105,6 +105,7 @@ describe("Pyth pull oracles in localnet", () => {
     }
 
     const bank = await bankrunProgram.account.bank.fetch(bankKey);
+    assertBNEqual(bank.bankSeed, seed);
     assert.equal(bank.config.assetTag, ASSET_TAG_DEFAULT);
   });
 
@@ -154,6 +155,7 @@ describe("Pyth pull oracles in localnet", () => {
     }
 
     const bank = await bankrunProgram.account.bank.fetch(bankKey);
+    assertBNEqual(bank.bankSeed, seed);
     assert.equal(bank.config.assetTag, ASSET_TAG_DEFAULT);
   });
 
