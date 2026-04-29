@@ -5,7 +5,7 @@ use fixtures::prelude::*;
 use fixtures::{assert_custom_error, native};
 use marginfi::state::bank::{BankImpl, BankVaultType};
 use marginfi::{assert_eq_with_tolerance, prelude::*};
-use marginfi_type_crate::types::BankConfigOpt;
+use marginfi_type_crate::types::{BankConfig, BankConfigOpt};
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
 use solana_sdk::clock::Clock;
@@ -335,6 +335,145 @@ async fn marginfi_account_deposit_up_to_limit_success(
         .await;
 
     assert_eq!(pre_vault_balance, post_vault_balance);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn deposit_up_to_limit_post_interest_accrual() -> anyhow::Result<()> {
+    // -------------------------------------------------------------------------
+    // Setup
+    // -------------------------------------------------------------------------
+
+    const SECONDS_PER_THIRTY_DAYS: i64 = 30 * 24 * 60 * 60;
+
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    deposit_limit: native!(1_000, "USDC"),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48::from_num(1u32).into(),
+                    asset_weight_maint: I80F48::from_num(1u32).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let usdc_decimals = usdc_bank_f.mint.mint.decimals as u32;
+
+    let lender_account = test_f.create_marginfi_account().await;
+    let lender_usdc = usdc_bank_f
+        .mint
+        .create_token_account_and_mint_to(get_max_deposit_amount_pre_fee(600.0))
+        .await;
+    lender_account
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 600, None)
+        .await?;
+
+    // Liabilities on the USDC bank ensure interest accrues during the time advance.
+    let borrower_account = test_f.create_marginfi_account().await;
+    let borrower_sol = sol_bank_f
+        .mint
+        .create_token_account_and_mint_to(get_max_deposit_amount_pre_fee(10_000.0))
+        .await;
+    borrower_account
+        .try_bank_deposit(borrower_sol.key, sol_bank_f, 10_000, None)
+        .await?;
+    let borrower_usdc = usdc_bank_f.mint.create_empty_token_account().await;
+    borrower_account
+        .try_bank_borrow(borrower_usdc.key, usdc_bank_f, 400)
+        .await?;
+
+    let stale_capacity_native: u64 = usdc_bank_f
+        .load()
+        .await
+        .get_remaining_deposit_capacity()
+        .expect("should compute remaining capacity before time advance");
+    assert!(
+        stale_capacity_native > 0,
+        "pre-accrual capacity must be positive"
+    );
+
+    // -------------------------------------------------------------------------
+    // Test
+    // -------------------------------------------------------------------------
+    // Advance 30 days, enough for interest to accrue and reduce the remaining
+    // capacity, but not so much that total assets exceed the deposit limit.
+    {
+        let mut clock: Clock = test_f
+            .context
+            .borrow_mut()
+            .banks_client
+            .get_sysvar()
+            .await?;
+        clock.unix_timestamp += SECONDS_PER_THIRTY_DAYS;
+        test_f.context.borrow_mut().set_sysvar(&clock);
+    }
+
+    // Prepare a third account with enough USDC to try both paths.
+    let depositor_account = test_f.create_marginfi_account().await;
+    let depositor_usdc = usdc_bank_f
+        .mint
+        .create_token_account_and_mint_to(get_max_deposit_amount_pre_fee(500.0))
+        .await;
+
+    let vault_before = usdc_bank_f
+        .get_vault_token_account(BankVaultType::Liquidity)
+        .await
+        .balance()
+        .await;
+
+    // Depositing exactly the pre-accrual remaining capacity must fail,
+    // interest accrual (which runs first inside the instruction) causes the
+    // post-accrual deposit total to exceed the limit.
+    let stale_capacity_ui: f64 = stale_capacity_native as f64 / 10_f64.powi(usdc_decimals as i32);
+    let res = depositor_account
+        .try_bank_deposit(depositor_usdc.key, usdc_bank_f, stale_capacity_ui, None)
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::BankAssetCapacityExceeded);
+
+    // Deposit up to limit.
+    depositor_account
+        .try_bank_deposit(depositor_usdc.key, usdc_bank_f, 500, Some(true))
+        .await
+        .expect("deposit up to limit must succeed");
+
+    // The amount actually transferred must be strictly less than the pre-accrual capacity.
+    let vault_after = usdc_bank_f
+        .get_vault_token_account(BankVaultType::Liquidity)
+        .await
+        .balance()
+        .await;
+    let actual_deposited = vault_after - vault_before;
+    assert!(
+        actual_deposited < stale_capacity_native,
+        "actual deposit {} native must be < pre-accrual capacity {}",
+        actual_deposited,
+        stale_capacity_native
+    );
+
+    // Total assets must remain strictly below the deposit limit.
+    let bank_final = usdc_bank_f.load().await;
+    let total_after: I80F48 = bank_final.get_asset_amount(bank_final.total_asset_shares.into())?;
+    let limit: I80F48 = I80F48::from_num(bank_final.config.deposit_limit);
+    assert!(
+        total_after < limit,
+        "total deposits {} must remain below deposit_limit {}",
+        total_after,
+        limit
+    );
 
     Ok(())
 }

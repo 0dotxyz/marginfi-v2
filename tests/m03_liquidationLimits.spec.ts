@@ -32,6 +32,7 @@ import { configureBank } from "./utils/group-instructions";
 import { defaultBankConfigOptRaw, MAX_BALANCES } from "./utils/types";
 import {
   borrowIx,
+  closeLiquidationRecordIx,
   composeRemainingAccounts,
   composeRemainingAccountsMetaBanksOnly,
   composeRemainingAccountsWriteableMeta,
@@ -74,12 +75,18 @@ import { JuplendPoolKeys } from "./utils/juplend/types";
 import { getJuplendPrograms } from "./utils/juplend/programs";
 import {
   deriveBaseObligation,
+  deriveLiquidationRecord,
   deriveLiquidityVaultAuthority,
 } from "./utils/pdas";
 import { assert } from "chai";
+import {
+  assertBankrunTxFailed,
+  assertKeyDefault,
+  assertKeysEqual,
+} from "./utils/genericTests";
 import { ensureMultiSuiteIntegrationsSetup } from "./utils/multi-limits-setup";
 import { addJuplendBanksForGroup } from "./utils/multi-limits-juplend-setup";
-import { getEpochAndSlot } from "./utils/bankrunConnection";
+import { dummyIx, getEpochAndSlot } from "./utils/bankrunConnection";
 import { refreshSwitchboardPullOracleBankrun } from "./utils/bankrun-oracles";
 
 const startingSeed: number = 42;
@@ -856,6 +863,83 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
           await refreshScenarioOracles();
         });
 
+        it("(permissionless) closes liquidation record and resets account field", async () => {
+          const liquidatee = users[0];
+          const initializer = groupAdmin;
+          const caller = users[1];
+          const liquidateeAccount = liquidatee.accounts.get(
+            USER_ACCOUNT_THROWAWAY,
+          );
+          const [liqRecordPk] = deriveLiquidationRecord(
+            bankrunProgram.programId,
+            liquidateeAccount,
+          );
+
+          const accountBefore =
+            await bankrunProgram.account.marginfiAccount.fetch(
+              liquidateeAccount,
+            );
+          assertKeyDefault(accountBefore.liquidationRecord);
+
+          await processBankrunTransaction(
+            bankrunContext,
+            new Transaction().add(
+              await initLiquidationRecordIx(initializer.mrgnBankrunProgram, {
+                marginfiAccount: liquidateeAccount,
+                feePayer: initializer.wallet.publicKey,
+              }),
+            ),
+            [initializer.wallet],
+          );
+
+          const accountAfterInit =
+            await bankrunProgram.account.marginfiAccount.fetch(
+              liquidateeAccount,
+            );
+          assertKeysEqual(accountAfterInit.liquidationRecord, liqRecordPk);
+
+          const wrongPayerCloseResult = await processBankrunTransaction(
+            bankrunContext,
+            new Transaction().add(
+              await closeLiquidationRecordIx(caller.mrgnBankrunProgram, {
+                marginfiAccount: liquidateeAccount,
+                liquidationRecord: liqRecordPk,
+                recordPayer: caller.wallet.publicKey,
+              }),
+            ),
+            [caller.wallet],
+            true,
+          );
+          assertBankrunTxFailed(wrongPayerCloseResult, 6042); // Unauthorized
+
+          const recordAfterWrongPayer = await banksClient.getAccount(
+            liqRecordPk,
+          );
+          assert.ok(recordAfterWrongPayer !== null);
+
+          await processBankrunTransaction(
+            bankrunContext,
+            new Transaction().add(
+              await closeLiquidationRecordIx(caller.mrgnBankrunProgram, {
+                marginfiAccount: liquidateeAccount,
+                liquidationRecord: liqRecordPk,
+                recordPayer: initializer.wallet.publicKey,
+              }),
+            ),
+            [caller.wallet],
+          );
+
+          const recordAfterClose = await banksClient.getAccount(liqRecordPk);
+          assert.isNull(recordAfterClose);
+
+          const accountAfterClose =
+            await bankrunProgram.account.marginfiAccount.fetch(
+              liquidateeAccount,
+            );
+
+          assertKeyDefault(accountAfterClose.liquidationRecord);
+        });
+
         it("(admin) Receivership liquidates user 0 with start/end (Kamino/Drift/Juplend)", async () => {
           const liquidatee = users[0];
           const liquidator = groupAdmin;
@@ -885,6 +969,7 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
           }
 
           const initTx = new Transaction().add(
+            dummyIx(liquidator.wallet.publicKey, liquidatee.wallet.publicKey),
             await initLiquidationRecordIx(liquidator.mrgnBankrunProgram, {
               marginfiAccount: liquidateeAccount,
               feePayer: liquidator.wallet.publicKey,

@@ -65,8 +65,13 @@ pub struct MarginfiAccount {
     pub third_party_index: u16,
     /// This account's bump, if a PDA-based account (0.1.5 or later). Otherwise, does nothing.
     pub bump: u8,
+    /// Count of how many Orders this account has active. One is added when an Order is opened, and
+    /// subtracted when an Order is executed or cancelled.
+    /// * Accounts cannot open more than u8::MAX orders. Sorry power users: hopefully 256 stop
+    ///   losses is enough for you.
+    pub active_orders: u8,
     // For 8-byte alignment
-    pub _pad0: [u8; 3],
+    pub _pad0: [u8; 2],
     /// Stores information related to liquidations made against this account. A pda of this
     /// account's key, and "liq_record"
     /// * Typically pubkey default if this account has never been liquidated or close to liquidation
