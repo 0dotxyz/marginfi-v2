@@ -289,3 +289,128 @@ impl HistoryHeader {
 }
 
 const _: () = assert!(core::mem::size_of::<HistoryHeader>() == HistoryHeader::LEN);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct TestRecord {
+        ts: u64,
+        value: u64,
+    }
+
+    impl HistoryRecord for TestRecord {
+        const LEN: usize = 16;
+
+        fn parse(bytes: &[u8]) -> Option<Self> {
+            if bytes.len() != Self::LEN {
+                return None;
+            }
+            let ts = u64::from_le_bytes(bytes[0..8].try_into().ok()?);
+            let value = u64::from_le_bytes(bytes[8..16].try_into().ok()?);
+            Some(Self { ts, value })
+        }
+
+        fn to_bytes(&self, out: &mut [u8]) -> Option<()> {
+            if out.len() != Self::LEN {
+                return None;
+            }
+            out[0..8].copy_from_slice(&self.ts.to_le_bytes());
+            out[8..16].copy_from_slice(&self.value.to_le_bytes());
+            Some(())
+        }
+
+        fn timestamp(&self) -> u64 {
+            self.ts
+        }
+    }
+
+    fn new_header(capacity: u32) -> HistoryHeader {
+        HistoryHeader {
+            version: 1,
+            authority: Pubkey::default(),
+            _pad0: [0; 3],
+            head: 0,
+            len: 0,
+            capacity,
+            _pad1: [0; 8],
+            head_ts: 0,
+            latest_ts: 0,
+            _pad: [0; 5],
+        }
+    }
+
+    fn new_account_data(capacity: u32) -> Vec<u8> {
+        vec![0u8; HistoryHeader::PAYLOAD_OFFSET + (capacity as usize * TestRecord::LEN)]
+    }
+
+    #[test]
+    fn append_and_get_latest() {
+        let mut header = new_header(4);
+        let mut data = new_account_data(4);
+
+        let r1 = TestRecord { ts: 10, value: 111 };
+        let r2 = TestRecord { ts: 11, value: 222 };
+
+        assert_eq!(header.append(&mut data, &r1), Some(()));
+        assert_eq!(header.append(&mut data, &r2), Some(()));
+
+        assert_eq!(header.get_latest::<TestRecord>(&data), Some(r2));
+    }
+
+    #[test]
+    fn upsert_latest_when_timestamp_equal() {
+        let mut header = new_header(4);
+        let mut data = new_account_data(4);
+
+        let old = TestRecord { ts: 42, value: 1 };
+        let new = TestRecord { ts: 42, value: 999 };
+
+        assert_eq!(header.append(&mut data, &old), Some(()));
+        assert_eq!(header.append(&mut data, &new), Some(()));
+
+        assert_eq!(header.len, 1);
+        assert_eq!(header.get_latest::<TestRecord>(&data), Some(new));
+        assert_eq!(header.get::<TestRecord>(&data, 42), Some(new));
+    }
+
+    #[test]
+    fn ignore_older_timestamp_than_latest() {
+        let mut header = new_header(4);
+        let mut data = new_account_data(4);
+
+        let newer = TestRecord { ts: 100, value: 7 };
+        let older = TestRecord { ts: 99, value: 9 };
+
+        assert_eq!(header.append(&mut data, &newer), Some(()));
+        assert_eq!(header.append(&mut data, &older), Some(()));
+
+        assert_eq!(header.len, 1);
+        assert_eq!(header.get_latest::<TestRecord>(&data), Some(newer));
+        assert_eq!(header.get::<TestRecord>(&data, 99), None);
+    }
+
+    #[test]
+    fn overwrite_oldest_when_full() {
+        let mut header = new_header(3);
+        let mut data = new_account_data(3);
+
+        let r1 = TestRecord { ts: 1, value: 10 };
+        let r2 = TestRecord { ts: 2, value: 20 };
+        let r3 = TestRecord { ts: 3, value: 30 };
+        let r4 = TestRecord { ts: 4, value: 40 };
+
+        assert_eq!(header.append(&mut data, &r1), Some(()));
+        assert_eq!(header.append(&mut data, &r2), Some(()));
+        assert_eq!(header.append(&mut data, &r3), Some(()));
+        assert_eq!(header.append(&mut data, &r4), Some(()));
+
+        assert_eq!(header.len, 3);
+        assert_eq!(header.head_ts, 2);
+        assert_eq!(header.latest_ts, 4);
+        assert_eq!(header.get::<TestRecord>(&data, 1), None);
+        assert_eq!(header.get::<TestRecord>(&data, 2), Some(r2));
+        assert_eq!(header.get::<TestRecord>(&data, 4), Some(r4));
+    }
+}
