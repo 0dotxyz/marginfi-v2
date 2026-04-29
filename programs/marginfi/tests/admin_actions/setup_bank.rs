@@ -196,6 +196,7 @@ async fn add_bank_success() -> anyhow::Result<()> {
             integration_acc_2,
             integration_acc_3,
             _padding_1,
+            bank_seed,
             .. // ignore internal padding
         } = bank_f.load().await;
         #[rustfmt::skip]
@@ -234,7 +235,9 @@ async fn add_bank_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[[u64; 2]; 7] as Default>::default());
+            assert_eq!(_padding_1, <[u64; 13] as Default>::default());
+            // legacy add_bank does not pass a seed
+            assert_eq!(bank_seed, 0);
 
             // this is the only loosely checked field
             assert!(last_update >= 0 && last_update <= 5);
@@ -346,6 +349,7 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             integration_acc_2,
             integration_acc_3,
             _padding_1,
+            bank_seed,
             .. // ignore internal padding
         } = bank_f.load().await;
         #[rustfmt::skip]
@@ -384,7 +388,9 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[[u64; 2]; 7] as Default>::default());
+            assert_eq!(_padding_1, <[u64; 13] as Default>::default());
+            // with-seed add_bank stores the seed used for PDA derivation
+            assert_eq!(bank_seed, 1200_u64);
 
             // this is the only loosely checked field
             assert!(last_update >= 0 && last_update <= 5);
