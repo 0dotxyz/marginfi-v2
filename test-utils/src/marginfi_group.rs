@@ -1248,22 +1248,36 @@ impl MarginfiGroupFixture {
     }
 
     pub async fn try_panic_pause(&self) -> Result<(), BanksClientError> {
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        self.try_panic_pause_with_authority(&payer).await
+    }
+
+    pub async fn try_panic_pause_with_authority(
+        &self,
+        pause_authority: &Keypair,
+    ) -> Result<(), BanksClientError> {
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::PanicPause {
-                global_fee_admin: self.ctx.borrow().payer.pubkey(),
+                pause_authority: pause_authority.pubkey(),
                 fee_state: self.fee_state,
             }
             .to_account_metas(Some(true)),
             data: PanicPause {}.data(),
         };
 
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&self.ctx.borrow().payer.pubkey()),
-            &[&self.ctx.borrow().payer],
-            latest_blockhash(&self.ctx).await,
-        );
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        let blockhash = latest_blockhash(&self.ctx).await;
+        let tx = if payer.pubkey() == pause_authority.pubkey() {
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash)
+        } else {
+            Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&payer.pubkey()),
+                &[&payer, pause_authority],
+                blockhash,
+            )
+        };
 
         self.ctx
             .borrow_mut()
@@ -1273,14 +1287,59 @@ impl MarginfiGroupFixture {
     }
 
     pub async fn try_panic_unpause(&self) -> Result<(), BanksClientError> {
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        self.try_panic_unpause_with_authority(&payer).await
+    }
+
+    pub async fn try_panic_unpause_with_authority(
+        &self,
+        pause_authority: &Keypair,
+    ) -> Result<(), BanksClientError> {
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::PanicUnpause {
-                global_fee_admin: self.ctx.borrow().payer.pubkey(),
+                pause_authority: pause_authority.pubkey(),
                 fee_state: self.fee_state,
             }
             .to_account_metas(Some(true)),
             data: PanicUnpause {}.data(),
+        };
+
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        let blockhash = latest_blockhash(&self.ctx).await;
+        let tx = if payer.pubkey() == pause_authority.pubkey() {
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash)
+        } else {
+            Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&payer.pubkey()),
+                &[&payer, pause_authority],
+                blockhash,
+            )
+        };
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub async fn try_set_pause_delegate_admin(
+        &self,
+        new_pause_delegate_admin: Option<Pubkey>,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::SetPauseDelegateAdmin {
+                global_fee_admin: self.ctx.borrow().payer.pubkey(),
+                fee_state: self.fee_state,
+            }
+            .to_account_metas(Some(true)),
+            data: SetPauseDelegateAdmin {
+                new_pause_delegate_admin,
+            }
+            .data(),
         };
 
         let tx = Transaction::new_signed_with_payer(

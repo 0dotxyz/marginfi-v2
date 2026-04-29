@@ -587,6 +587,14 @@ pub mod marginfi {
         )
     }
 
+    /// (global fee admin only) Set or clear the dedicated pause/unpause delegate admin.
+    pub fn set_pause_delegate_admin(
+        ctx: Context<SetPauseDelegateAdmin>,
+        new_pause_delegate_admin: Option<Pubkey>,
+    ) -> MarginfiResult {
+        marginfi_group::set_pause_delegate_admin(ctx, new_pause_delegate_admin)
+    }
+
     /// (Permissionless) Force any group to adopt the current FeeState settings
     pub fn propagate_fee_state(ctx: Context<PropagateFee>) -> MarginfiResult {
         marginfi_group::propagate_fee(ctx)
@@ -657,13 +665,13 @@ pub mod marginfi {
         marginfi_account::end_deleverage(ctx)
     }
 
-    /// (global_fee_admin only) Pause the protocol. Auto-expires after 30 minutes. Limited to 3
-    /// pauses per day and 2 consecutive pauses.
+    /// (global_fee_admin or pause_delegate_admin only) Pause the protocol. Auto-expires after 30
+    /// minutes. Limited to 3 pauses per day and 2 consecutive pauses.
     pub fn panic_pause(ctx: Context<PanicPause>) -> MarginfiResult {
         marginfi_group::panic_pause(ctx)
     }
 
-    /// (global_fee_admin only) Unpause the protocol before the auto-expiry.
+    /// (global_fee_admin or pause_delegate_admin only) Unpause the protocol before auto-expiry.
     pub fn panic_unpause(ctx: Context<PanicUnpause>) -> MarginfiResult {
         marginfi_group::panic_unpause(ctx)
     }

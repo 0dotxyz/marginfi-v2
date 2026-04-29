@@ -118,11 +118,26 @@ account (a global singleton).
 **Can do:**
 - Edit global fee parameters (program fee rates, origination fee shares, init fees)
 - Change the global fee wallet
+- Set or clear the dedicated pause delegate admin
 - Panic-pause the entire protocol (with rate limiting: max 2 consecutive pauses, max 3 per day,
   each lasting 30 minutes)
 
 This role is intended for the protocol operator (e.g. the foundation) and controls protocol-level
 economics and emergency pause functionality.
+
+## Pause Delegate Admin
+
+The `pause_delegate_admin` is stored on the global `FeeState` account and can be set or cleared by
+the `global_fee_admin`.
+
+**Can do:**
+- Panic-pause the entire protocol
+- Manually unpause before the pause auto-expires
+
+**Cannot do:**
+- Edit fee parameters
+- Change the global fee wallet
+- Set or clear other admins
 
 ## User-Level Access
 
@@ -199,7 +214,8 @@ For more details see the [Receivership Liquidation Guide](../RISK_AND_LIQUIDATOR
 | Start forced deleverage | `risk_admin` |
 | Force tokenless repay complete | `risk_admin` |
 | Edit global fee state | `global_fee_admin` |
-| Panic-pause protocol | `global_fee_admin` |
+| Set pause delegate admin | `global_fee_admin` |
+| Panic-pause protocol | `global_fee_admin` or `pause_delegate_admin` |
 | Collect bank fees | Anyone |
 | Classic liquidation | Anyone (if account unhealthy) |
 | Receivership liquidation | Anyone (if account unhealthy) |

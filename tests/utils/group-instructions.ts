@@ -857,7 +857,7 @@ export const closeBank = (program: Program<Marginfi>, args: CloseBankArgs) => {
 };
 
 export type PanicPauseArgs = {
-  // No args (everything is inferred)...
+  // No args (pause authority and fee state are inferred)...
 };
 
 export const panicPause = async (
@@ -867,7 +867,7 @@ export const panicPause = async (
   const ix = await program.methods
     .panicPause()
     .accounts({
-      // globalFeeAdmin: args.admin,
+      // pauseAuthority: args.admin,
       // feeState: args.feeState,
     })
     .instruction();
@@ -876,7 +876,7 @@ export const panicPause = async (
 };
 
 export type PanicUnpauseArgs = {
-  // No args (everything is inferred)...
+  // No args (pause authority and fee state are inferred)...
 };
 
 export const panicUnpause = async (
@@ -886,7 +886,7 @@ export const panicUnpause = async (
   const ix = await program.methods
     .panicUnpause()
     .accounts({
-      // globalFeeAdmin: args.admin,
+      // pauseAuthority: args.admin,
       // feeState: args.feeState,
     })
     .instruction();
