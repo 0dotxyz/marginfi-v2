@@ -91,6 +91,49 @@ fn make_write_bank_metadata_ix(
     }
 }
 
+fn make_init_bank_metadata_no_seed_ix(
+    bank: Pubkey,
+    fee_payer: Pubkey,
+    metadata: Pubkey,
+) -> Instruction {
+    Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::InitBankMetadataNoSeed {
+            bank,
+            fee_payer,
+            metadata,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::InitBankMetadataNoSeed {}.data(),
+    }
+}
+
+fn make_write_bank_metadata_no_seed_ix(
+    group: Pubkey,
+    bank: Pubkey,
+    metadata_admin: Pubkey,
+    metadata: Pubkey,
+    ticker: Option<Vec<u8>>,
+    description: Option<Vec<u8>>,
+) -> Instruction {
+    Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::WriteBankMetadataNoSeed {
+            group,
+            bank,
+            metadata_admin,
+            metadata,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::WriteBankMetadataNoSeed {
+            ticker,
+            description,
+        }
+        .data(),
+    }
+}
+
 #[tokio::test]
 async fn add_bank_success() -> anyhow::Result<()> {
     // Setup test executor with non-admin payer
@@ -591,6 +634,143 @@ async fn write_bank_metadata_rejects_cross_group_seed_squatting() -> anyhow::Res
     assert_anchor_error!(
         res.unwrap_err(),
         anchor_lang::error::ErrorCode::ConstraintSeeds
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn init_and_write_bank_metadata_no_seed_for_existing_bank_success() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+
+    let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
+    let bank_f = test_f
+        .marginfi_group
+        .try_lending_pool_add_bank(&mint_f, None, *DEFAULT_USDC_TEST_BANK_CONFIG, None)
+        .await?;
+
+    let metadata = derive_bank_metadata(bank_f.key);
+    let payer = test_f.context.borrow().payer.pubkey();
+
+    let init_ix = make_init_bank_metadata_no_seed_ix(bank_f.key, payer, metadata);
+    let write_ix = make_write_bank_metadata_no_seed_ix(
+        test_f.marginfi_group.key,
+        bank_f.key,
+        payer,
+        metadata,
+        Some(b"USDC".to_vec()),
+        Some(b"USD Coin".to_vec()),
+    );
+
+    let tx = Transaction::new_signed_with_payer(
+        &[init_ix, write_ix],
+        Some(&payer),
+        &[&test_f.context.borrow().payer],
+        latest_blockhash(&test_f.context).await,
+    );
+
+    test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(tx)
+        .await?;
+
+    let metadata_state: BankMetadata = test_f.load_and_deserialize(&metadata).await;
+    assert_eq!(metadata_state.bank, bank_f.key);
+    assert_eq!(&metadata_state.ticker[..4], b"USDC");
+    assert_eq!(&metadata_state.description[..8], b"USD Coin");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn init_bank_metadata_no_seed_rejects_uninitialized_bank() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+    let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
+    let bank_seed = 99_u64;
+    let bank = derive_seeded_bank(test_f.marginfi_group.key, mint_f.key, bank_seed);
+    let metadata = derive_bank_metadata(bank);
+    let payer = test_f.context.borrow().payer.pubkey();
+
+    let init_ix = make_init_bank_metadata_no_seed_ix(bank, payer, metadata);
+
+    let tx = Transaction::new_signed_with_payer(
+        &[init_ix],
+        Some(&payer),
+        &[&test_f.context.borrow().payer],
+        latest_blockhash(&test_f.context).await,
+    );
+
+    let res = test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(tx)
+        .await;
+
+    assert_anchor_error!(
+        res.unwrap_err(),
+        anchor_lang::error::ErrorCode::AccountOwnedByWrongProgram
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn write_bank_metadata_no_seed_rejects_wrong_group() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+    let attacker_group = MarginfiGroupFixture::new(test_f.context.clone()).await;
+
+    let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
+    let bank_f = test_f
+        .marginfi_group
+        .try_lending_pool_add_bank(&mint_f, None, *DEFAULT_USDC_TEST_BANK_CONFIG, None)
+        .await?;
+
+    let metadata = derive_bank_metadata(bank_f.key);
+    let payer = test_f.context.borrow().payer.pubkey();
+
+    let init_ix = make_init_bank_metadata_no_seed_ix(bank_f.key, payer, metadata);
+    let init_tx = Transaction::new_signed_with_payer(
+        &[init_ix],
+        Some(&payer),
+        &[&test_f.context.borrow().payer],
+        latest_blockhash(&test_f.context).await,
+    );
+    test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(init_tx)
+        .await?;
+
+    let write_ix = make_write_bank_metadata_no_seed_ix(
+        attacker_group.key,
+        bank_f.key,
+        payer,
+        metadata,
+        Some(b"BAD".to_vec()),
+        None,
+    );
+
+    let write_tx = Transaction::new_signed_with_payer(
+        &[write_ix],
+        Some(&payer),
+        &[&test_f.context.borrow().payer],
+        latest_blockhash(&test_f.context).await,
+    );
+
+    let res = test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(write_tx)
+        .await;
+
+    assert_anchor_error!(
+        res.unwrap_err(),
+        anchor_lang::error::ErrorCode::ConstraintHasOne
     );
 
     Ok(())

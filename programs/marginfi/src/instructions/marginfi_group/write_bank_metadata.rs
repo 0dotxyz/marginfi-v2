@@ -11,7 +11,14 @@ pub fn write_bank_metadata(
     description: Option<Vec<u8>>,
 ) -> Result<()> {
     let mut metadata = ctx.accounts.metadata.load_mut()?;
+    apply_metadata_write(&mut metadata, ticker, description)
+}
 
+pub(super) fn apply_metadata_write(
+    metadata: &mut BankMetadata,
+    ticker: Option<Vec<u8>>,
+    description: Option<Vec<u8>>,
+) -> Result<()> {
     if let Some(bytes) = ticker {
         let cap = metadata.ticker.len();
         if bytes.len() > cap {
