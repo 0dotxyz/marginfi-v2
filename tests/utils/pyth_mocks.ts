@@ -244,6 +244,16 @@ export const setupPythOracles = async (
     fakeUsdcFeed: fakeUsdcPythPullOracleFeed.publicKey,
     pythPullLst: lstPythPullOracle,
     pythPullLstOracleFeed: lstPythPullOracleFeed,
+    // Legacy/mock suite placeholder values for Switchboard fields.
+    wsolOracleSwb: wsolPythPullOracle,
+    wsolPriceSwb: wsolPrice,
+    wsolDecimalsSwb: wsolDecimals,
+    tokenAOracleSwb: tokenAPythPullOracle,
+    tokenAPriceSwb: tokenAPrice,
+    tokenADecimalsSwb: tokenADecimals,
+    lstAlphaOracleSwb: lstPythPullOracle,
+    lstAlphaPriceSwb: lstAlphaPrice,
+    lstAlphaDecimalsSwb: lstAlphaDecimals,
   };
   return oracles;
 };

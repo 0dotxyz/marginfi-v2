@@ -575,6 +575,14 @@ export type Oracles = {
   /** Default 155.59404527 */
   wsolPriceSwb: number;
   wsolDecimalsSwb: number;
+  /** Switchboard pull oracle account for Token A. */
+  tokenAOracleSwb: Keypair;
+  tokenAPriceSwb: number;
+  tokenADecimalsSwb: number;
+  /** Switchboard pull oracle account for LST Alpha (same economic role as pythPullLst). */
+  lstAlphaOracleSwb: Keypair;
+  lstAlphaPriceSwb: number;
+  lstAlphaDecimalsSwb: number;
 };
 
 /**

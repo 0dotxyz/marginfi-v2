@@ -176,8 +176,6 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '24.15.0'
-        cache: 'yarn'
-        cache-dependency-path: '**/yarn.lock'
 
     - name: Enable Corepack and Yarn 4
       run: |
@@ -185,6 +183,17 @@ jobs:
         corepack prepare yarn@4.14.1 --activate
         yarn -v
         node -v
+
+    - name: Cache Yarn artifacts
+      uses: actions/cache@v3
+      with:
+        path: |
+          .yarn/cache
+          .yarn/unplugged
+        key: yarn4-${{ runner.os }}-node24.15.0-${{ hashFiles('**/yarn.lock') }}
+        restore-keys: |
+          yarn4-${{ runner.os }}-node24.15.0-
+          yarn4-${{ runner.os }}-
 
     - name: Install JS deps
       run: yarn install --immutable

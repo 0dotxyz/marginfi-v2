@@ -723,6 +723,14 @@ export const mochaHooks = {
     const swbOracles = await setupSwbOraclesBankrun(
       bankrunContext,
       banksClient,
+      {
+        wsolPrice: 155.59404527,
+        wsolDecimals: ecosystem.wsolDecimals,
+        tokenAPrice: ecosystem.tokenAPrice,
+        tokenADecimals: ecosystem.tokenADecimals,
+        lstAlphaPrice: ecosystem.lstAlphaPrice,
+        lstAlphaDecimals: ecosystem.lstAlphaDecimals,
+      },
       verbose,
     );
     oracles = {

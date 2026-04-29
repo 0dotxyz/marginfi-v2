@@ -286,7 +286,18 @@ export async function setupPythOraclesBankrun(
   lstAlphaDecimals: number,
   verbose: boolean = false
 ): Promise<
-  Omit<Oracles, "wsolOracleSwb" | "wsolPriceSwb" | "wsolDecimalsSwb">
+  Omit<
+    Oracles,
+    | "wsolOracleSwb"
+    | "wsolPriceSwb"
+    | "wsolDecimalsSwb"
+    | "tokenAOracleSwb"
+    | "tokenAPriceSwb"
+    | "tokenADecimalsSwb"
+    | "lstAlphaOracleSwb"
+    | "lstAlphaPriceSwb"
+    | "lstAlphaDecimalsSwb"
+  >
 > {
   const owner = PYTH_RECEIVER_PROGRAM_ID;
 
@@ -477,7 +488,15 @@ export async function setupPythOraclesBankrun(
 
   const oracles: Omit<
     Oracles,
-    "wsolOracleSwb" | "wsolPriceSwb" | "wsolDecimalsSwb"
+    | "wsolOracleSwb"
+    | "wsolPriceSwb"
+    | "wsolDecimalsSwb"
+    | "tokenAOracleSwb"
+    | "tokenAPriceSwb"
+    | "tokenADecimalsSwb"
+    | "lstAlphaOracleSwb"
+    | "lstAlphaPriceSwb"
+    | "lstAlphaDecimalsSwb"
   > = {
     wsolOracle: wsolPythPullOracle,
     wsolOracleFeed: wsolPythPullOracleFeed,
@@ -812,24 +831,75 @@ export async function refreshSwitchboardPullOracleBankrun(
 export async function setupSwbOraclesBankrun(
   bankrunContext: ProgramTestContext,
   banksClient: BanksClient,
+  prices: {
+    wsolPrice: number;
+    wsolDecimals: number;
+    tokenAPrice: number;
+    tokenADecimals: number;
+    lstAlphaPrice: number;
+    lstAlphaDecimals: number;
+  },
   verbose: boolean = false
 ): Promise<
-  Pick<Oracles, "wsolOracleSwb" | "wsolPriceSwb" | "wsolDecimalsSwb">
+  Pick<
+    Oracles,
+    | "wsolOracleSwb"
+    | "wsolPriceSwb"
+    | "wsolDecimalsSwb"
+    | "tokenAOracleSwb"
+    | "tokenAPriceSwb"
+    | "tokenADecimalsSwb"
+    | "lstAlphaOracleSwb"
+    | "lstAlphaPriceSwb"
+    | "lstAlphaDecimalsSwb"
+  >
 > {
+  const {
+    wsolPrice,
+    wsolDecimals,
+    tokenAPrice,
+    tokenADecimals,
+    lstAlphaPrice,
+    lstAlphaDecimals,
+  } = prices;
   const wsolOracleSwb = Keypair.fromSeed(
     Buffer.from("ORACLE_SEED_00000000000000F_SWB0")
+  );
+  const tokenAOracleSwb = Keypair.fromSeed(
+    Buffer.from("ORACLE_SEED_00000000000000F_SWB1")
+  );
+  const lstAlphaOracleSwb = Keypair.fromSeed(
+    Buffer.from("ORACLE_SEED_00000000000000F_SWB2")
   );
 
   await setupSwitchboardPullOracleFromTemplate(
     bankrunContext,
     banksClient,
     wsolOracleSwb,
-    { price: 155.59404527, verbose, label: "wsol swb" }
+    { price: wsolPrice, verbose, label: "wsol swb" }
+  );
+  await setupSwitchboardPullOracleFromTemplate(
+    bankrunContext,
+    banksClient,
+    tokenAOracleSwb,
+    { price: tokenAPrice, verbose, label: "tokenA swb" }
+  );
+  await setupSwitchboardPullOracleFromTemplate(
+    bankrunContext,
+    banksClient,
+    lstAlphaOracleSwb,
+    { price: lstAlphaPrice, verbose, label: "lstAlpha swb" }
   );
 
   return {
     wsolOracleSwb,
-    wsolPriceSwb: 155.59404527,
-    wsolDecimalsSwb: 9,
+    wsolPriceSwb: wsolPrice,
+    wsolDecimalsSwb: wsolDecimals,
+    tokenAOracleSwb,
+    tokenAPriceSwb: tokenAPrice,
+    tokenADecimalsSwb: tokenADecimals,
+    lstAlphaOracleSwb,
+    lstAlphaPriceSwb: lstAlphaPrice,
+    lstAlphaDecimalsSwb: lstAlphaDecimals,
   };
 }

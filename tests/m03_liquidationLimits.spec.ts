@@ -80,6 +80,7 @@ import { assert } from "chai";
 import { ensureMultiSuiteIntegrationsSetup } from "./utils/multi-limits-setup";
 import { addJuplendBanksForGroup } from "./utils/multi-limits-juplend-setup";
 import { getEpochAndSlot } from "./utils/bankrunConnection";
+import { refreshSwitchboardPullOracleBankrun } from "./utils/bankrun-oracles";
 
 const startingSeed: number = 42;
 
@@ -105,20 +106,24 @@ function groupSeedForScenario(index: number): Buffer {
   );
 }
 
-function userAccountNameForScenario(index: number): string {
-  return `throwaway_account_m3${index}`;
+function userAccountNameForScenario(index: number, modeSuffix: string): string {
+  return `throwaway_account_m3_${modeSuffix}_${index}`;
 }
 
 function scenarioName(
+  oracleMode: "pyth" | "switchboard",
   kaminoDeposits: number,
   driftDeposits: number,
   juplendDeposits: number,
 ) {
-  return `m03: Limits (Kamino=${kaminoDeposits}, Drift=${driftDeposits}, Juplend=${juplendDeposits}, RegularDebt=${P0_BORROWS})`;
+  return `m03: Limits [${oracleMode}] (Kamino=${kaminoDeposits}, Drift=${driftDeposits}, Juplend=${juplendDeposits}, RegularDebt=${P0_BORROWS})`;
 }
 
-SCENARIOS.forEach(
-  ({ kaminoDeposits, driftDeposits, juplendDeposits }, scenarioIndex) => {
+const ORACLE_MODES: Array<"pyth" | "switchboard"> = ["pyth", "switchboard"];
+
+ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
+  SCENARIOS.forEach(
+    ({ kaminoDeposits, driftDeposits, juplendDeposits }, scenarioIndex) => {
     const totalDeposits = kaminoDeposits + driftDeposits + juplendDeposits;
 
     if (totalDeposits !== MAX_BALANCES - P0_BORROWS) {
@@ -129,12 +134,23 @@ SCENARIOS.forEach(
       );
     }
 
-    const groupBuff = groupSeedForScenario(scenarioIndex);
-    const USER_ACCOUNT_THROWAWAY = userAccountNameForScenario(scenarioIndex);
+      const groupBuff = groupSeedForScenario(scenarioIndex + oracleModeIndex * 50);
+      const USER_ACCOUNT_THROWAWAY = userAccountNameForScenario(
+        scenarioIndex,
+        oracleMode,
+      );
 
-    describe(
-      scenarioName(kaminoDeposits, driftDeposits, juplendDeposits),
-      () => {
+      describe(
+        scenarioName(oracleMode, kaminoDeposits, driftDeposits, juplendDeposits),
+        () => {
+          const getTokenAOraclePk = () =>
+            oracleMode === "switchboard"
+              ? oracles.tokenAOracleSwb.publicKey
+              : oracles.tokenAOracle.publicKey;
+          const getLstOraclePk = () =>
+            oracleMode === "switchboard"
+              ? oracles.lstAlphaOracleSwb.publicKey
+              : oracles.pythPullLst.publicKey;
         let banks: PublicKey[] = [];
         let kaminoBanks: PublicKey[] = [];
         let driftBanks: PublicKey[] = [];
@@ -180,7 +196,7 @@ SCENARIOS.forEach(
           if (useKaminoWithdraw) {
             const bank = kaminoBanks[0];
             const kaminoRemaining = composeRemainingAccounts([
-              [bank, oracles.tokenAOracle.publicKey, tokenAReserve],
+              [bank, getTokenAOraclePk(), tokenAReserve],
             ]);
             const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
               bankrunProgram.programId,
@@ -240,7 +256,7 @@ SCENARIOS.forEach(
           if (useDriftWithdraw) {
             const bank = driftBanks[0];
             const driftRemaining = composeRemainingAccounts([
-              [bank, oracles.tokenAOracle.publicKey, driftSpotMarket],
+              [bank, getTokenAOraclePk(), driftSpotMarket],
             ]);
             preInstructions.push(
               await makeUpdateSpotMarketCumulativeInterestIx(
@@ -276,7 +292,7 @@ SCENARIOS.forEach(
             }
             const bank = juplendBanks[0];
             const juplendRemaining = composeRemainingAccounts([
-              [bank, oracles.tokenAOracle.publicKey, juplendPool.lending],
+              [bank, getTokenAOraclePk(), juplendPool.lending],
             ]);
             preInstructions.push(
               await refreshJupSimple(juplendPrograms.lending, {
@@ -319,6 +335,30 @@ SCENARIOS.forEach(
           return instructions;
         };
 
+          const refreshScenarioOracles = async () => {
+            const clock = await banksClient.getClock();
+            await refreshPullOracles(
+              oracles,
+              globalProgramAdmin.wallet,
+              new BN(Number(clock.slot)),
+              Number(clock.unixTimestamp),
+              bankrunContext,
+              false,
+            );
+            if (oracleMode === "switchboard") {
+              await refreshSwitchboardPullOracleBankrun(
+                bankrunContext,
+                banksClient,
+                oracles.tokenAOracleSwb.publicKey,
+              );
+              await refreshSwitchboardPullOracleBankrun(
+                bankrunContext,
+                banksClient,
+                oracles.lstAlphaOracleSwb.publicKey,
+              );
+            }
+          };
+
         before(async () => {
           await ensureMultiSuiteIntegrationsSetup();
           if (juplendDeposits > 0) {
@@ -337,6 +377,7 @@ SCENARIOS.forEach(
             startingSeed,
             kaminoDeposits,
             driftDeposits,
+            oracleMode,
           );
           banks = result.banks;
           kaminoBanks = result.kaminoBanks;
@@ -351,6 +392,7 @@ SCENARIOS.forEach(
               group: result.throwawayGroup.publicKey,
               numberOfBanks: juplendDeposits,
               startingSeed: 20_000 + scenarioIndex * 100,
+              oracleMode,
             });
             juplendBanks = created.juplendBanks;
             juplendPool = created.pool;
@@ -358,15 +400,7 @@ SCENARIOS.forEach(
         });
 
         it("Refresh oracles", async () => {
-          const clock = await banksClient.getClock();
-          await refreshPullOracles(
-            oracles,
-            globalProgramAdmin.wallet,
-            new BN(Number(clock.slot)),
-            Number(clock.unixTimestamp),
-            bankrunContext,
-            false,
-          );
+          await refreshScenarioOracles();
         });
 
         it("(admin) Seeds liquidity in all banks - happy path", async () => {
@@ -395,7 +429,7 @@ SCENARIOS.forEach(
               }),
             );
             await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
-            remainingAccounts.push([bank, oracles.pythPullLst.publicKey]);
+            remainingAccounts.push([bank, getLstOraclePk()]);
           }
 
           // kamino banks
@@ -450,7 +484,7 @@ SCENARIOS.forEach(
             await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
             remainingAccounts.push([
               bank,
-              oracles.tokenAOracle.publicKey,
+              getTokenAOraclePk(),
               tokenAReserve,
             ]);
           }
@@ -483,7 +517,7 @@ SCENARIOS.forEach(
 
             remainingAccounts.push([
               bank,
-              oracles.tokenAOracle.publicKey,
+              getTokenAOraclePk(),
               driftSpotMarket,
             ]);
           }
@@ -506,7 +540,7 @@ SCENARIOS.forEach(
             await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
             remainingAccounts.push([
               bank,
-              oracles.tokenAOracle.publicKey,
+              getTokenAOraclePk(),
               juplendPool.lending,
             ]);
           }
@@ -576,7 +610,7 @@ SCENARIOS.forEach(
 
             remainingAccounts.push([
               bank,
-              oracles.tokenAOracle.publicKey,
+              getTokenAOraclePk(),
               tokenAReserve,
             ]);
 
@@ -603,7 +637,7 @@ SCENARIOS.forEach(
 
             remainingAccounts.push([
               bank,
-              oracles.tokenAOracle.publicKey,
+              getTokenAOraclePk(),
               driftSpotMarket,
             ]);
 
@@ -627,14 +661,14 @@ SCENARIOS.forEach(
 
             remainingAccounts.push([
               bank,
-              oracles.tokenAOracle.publicKey,
+              getTokenAOraclePk(),
               juplendPool.lending,
             ]);
 
             await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
           }
 
-          remainingAccounts.push([banks[0], oracles.pythPullLst.publicKey]);
+          remainingAccounts.push([banks[0], getLstOraclePk()]);
           liquidateeRemainingGroups = remainingAccounts;
           liquidateeRemainingAccounts =
             composeRemainingAccounts(remainingAccounts);
@@ -700,9 +734,9 @@ SCENARIOS.forEach(
                 liquidatorMarginfiAccount: liquidatorAccount,
                 liquidateeMarginfiAccount: liquidateeAccount,
                 remaining: [
-                  oracles.tokenAOracle.publicKey, // asset oracle
+                  getTokenAOraclePk(), // asset oracle
                   tokenAReserve, // Kamino-specific "oracle"
-                  oracles.pythPullLst.publicKey, // liab oracle
+                  getLstOraclePk(), // liab oracle
                   ...liquidatorRemainingAccounts,
                   ...liquidateeRemainingAccounts,
                 ],
@@ -726,9 +760,9 @@ SCENARIOS.forEach(
                 liquidatorMarginfiAccount: liquidatorAccount,
                 liquidateeMarginfiAccount: liquidateeAccount,
                 remaining: [
-                  oracles.tokenAOracle.publicKey, // asset oracle
+                  getTokenAOraclePk(), // asset oracle
                   driftSpotMarket, // Drift-specific "oracle"
-                  oracles.pythPullLst.publicKey, // liab oracle
+                  getLstOraclePk(), // liab oracle
                   ...liquidatorRemainingAccounts,
                   ...liquidateeRemainingAccounts,
                 ],
@@ -765,9 +799,9 @@ SCENARIOS.forEach(
                 liquidatorMarginfiAccount: liquidatorAccount,
                 liquidateeMarginfiAccount: liquidateeAccount,
                 remaining: [
-                  oracles.tokenAOracle.publicKey, // asset oracle
+                  getTokenAOraclePk(), // asset oracle
                   juplendPool.lending, // Juplend-specific "oracle"
-                  oracles.pythPullLst.publicKey, // liab oracle
+                  getLstOraclePk(), // liab oracle
                   ...liquidatorRemainingAccounts,
                   ...liquidateeRemainingAccounts,
                 ],
@@ -819,15 +853,7 @@ SCENARIOS.forEach(
           bankrunContext.warpToSlot(BigInt(slot + slotsToAdvance));
 
           // Refresh oracles in case we advanced into staleness
-          const clock = await banksClient.getClock();
-          await refreshPullOracles(
-            oracles,
-            globalProgramAdmin.wallet,
-            new BN(Number(clock.slot)),
-            Number(clock.unixTimestamp),
-            bankrunContext,
-            false,
-          );
+          await refreshScenarioOracles();
         });
 
         it("(admin) Receivership liquidates user 0 with start/end (Kamino/Drift/Juplend)", async () => {
@@ -906,7 +932,8 @@ SCENARIOS.forEach(
             // passed, log nothing...
           }
         });
-      },
-    );
-  },
-);
+        },
+      );
+    },
+  );
+});
