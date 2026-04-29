@@ -26,7 +26,7 @@ pub fn lending_pool_backfill_bank_is_t22_flag(
 
     if let Some(bank_seed) = bank_seed {
         // Note: This enables localnet to derive mainnet keys for regression tests, even though the
-        // account is when loaded as a fixture is "owned" by the localnet program.
+        // account when loaded as a fixture is "owned" by the localnet program.
         let seed_derivation_program = if crate::ID == STAGING_ID || *ctx.program_id == STAGING_ID {
             STAGING_ID
         } else {

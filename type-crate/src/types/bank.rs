@@ -166,17 +166,10 @@ pub struct Bank {
 
     pub _pad_0: [u8; 16], // 16B
 
-    /// The seed used to derive this bank's PDA.
-    ///
-    /// * `0` for legacy banks created via `lending_pool_add_bank` (the bank account is a fresh
-    ///   keypair, not a PDA, so there is no seed), or pre-backfill banks where the seed remains
-    ///   unknown.
-    /// * Otherwise the `bank_seed: u64` argument passed to `lending_pool_add_bank_with_seed`,
-    ///   `lending_pool_add_bank_permissionless`, `lending_pool_clone_bank`,
-    ///   `lending_pool_add_bank_kamino`, `lending_pool_add_bank_drift`,
-    ///   `lending_pool_add_bank_solend`, or `lending_pool_add_bank_juplend`.
-    ///
-    /// Use `flags & BANK_SEED_KNOWN` to verify this value has known seed provenance.
+    /// * `0` for legacy banks created via `lending_pool_add_bank` (created via keypair, not a PDA),
+    ///   or pre-backfill banks (1.8 or earlier) where seed remains unknown.
+    /// * Otherwise the `bank_seed: u64` argument passed when creating the bank.
+    /// * Use `flags & BANK_SEED_KNOWN` to verify this value has known seed provenance.
     pub bank_seed: u64,
     pub _padding_1: [u64; 13], // 8 * 13 = 104B;
 }
