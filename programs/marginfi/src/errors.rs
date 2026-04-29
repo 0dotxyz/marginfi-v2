@@ -218,8 +218,7 @@ pub enum MarginfiError {
     LiquidatorOrderCloseNotAllowed,
     #[msg("Order trigger is yet to be met")] // 6107
     OrderTriggerNotMet,
-    #[msg("Order execution state issue. Check the necessary invariants i.e not in flashloan or disabled e.t.c")]
-    // 6108
+    #[msg("Order execution state issue. Check not in flashloan, disabled, etc")] // 6108
     UnexpectedOrderExecutionState,
     #[msg("Order liability not closed")] // 6109
     OrderLiabilityNotClosed,
@@ -267,6 +266,8 @@ pub enum MarginfiError {
     DeleverageWithdrawalUpdateOutOfOrderSlot,
     #[msg("Deleverage withdrawal admin update sequence is out of order")] // 6131
     DeleverageWithdrawalUpdateOutOfOrderSeq,
+    #[msg("Use set_fixed_oracle_price instead")] // 6132
+    UseSetFixedOraclePrice,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -578,6 +579,7 @@ impl From<u32> for MarginfiError {
             6129 => MarginfiError::DeleverageWithdrawalUpdateStale,
             6130 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSlot,
             6131 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSeq,
+            6132 => MarginfiError::UseSetFixedOraclePrice,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,

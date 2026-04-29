@@ -1,4 +1,3 @@
-use crate::constants::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID};
 use crate::state::bank::BankVaultType;
 use crate::utils::is_kamino_asset_tag;
 use crate::{bank_signer, optional_account, MarginfiError, MarginfiResult};
@@ -11,16 +10,20 @@ use anchor_spl::token_interface::{
 use kamino_mocks::kamino_lending::cpi::accounts::{
     DepositFarmsAccounts, DepositReserveLiquidityAndObligationCollateral,
     DepositReserveLiquidityAndObligationCollateralV2, InitObligation,
-    InitObligationFarmsForReserve, InitUserMetadata, RefreshObligation, RefreshReserve,
+    InitObligationFarmsForReserve, InitUserMetadata, RefreshObligation, RefreshReservesBatch,
 };
 use kamino_mocks::kamino_lending::cpi::{
     deposit_reserve_liquidity_and_obligation_collateral_v2, init_obligation,
-    init_obligation_farms_for_reserve, init_user_metadata, refresh_obligation, refresh_reserve,
+    init_obligation_farms_for_reserve, init_user_metadata, refresh_obligation,
+    refresh_reserves_batch,
 };
 use kamino_mocks::kamino_lending::types::InitObligationArgs;
 use kamino_mocks::state::MinimalReserve;
-use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
-use marginfi_type_crate::types::Bank;
+use marginfi_type_crate::{
+    constants::LIQUIDITY_VAULT_AUTHORITY_SEED,
+    pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
+    types::Bank,
+};
 
 /// Initialize a Kamino obligation for a marginfi account
 pub fn kamino_init_obligation(ctx: Context<KaminoInitObligation>, amount: u64) -> MarginfiResult {
@@ -141,16 +144,6 @@ pub struct KaminoInitObligation<'info> {
     #[account(mut)]
     pub reserve_destination_deposit_collateral: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    // Note: Only one of these four oracles accounts is required.
-    /// CHECK: validated by the Kamino program
-    pub pyth_oracle: Option<UncheckedAccount<'info>>,
-    /// CHECK: validated by the Kamino program
-    pub switchboard_price_oracle: Option<UncheckedAccount<'info>>,
-    /// CHECK: validated by the Kamino program
-    pub switchboard_twap_oracle: Option<UncheckedAccount<'info>>,
-    /// CHECK: validated by the Kamino program
-    pub scope_prices: Option<UncheckedAccount<'info>>,
-
     /// Required if the Kamino reserve has an active farm.
     /// CHECK: validated by the Kamino program
     #[account(mut)]
@@ -186,17 +179,13 @@ pub struct KaminoInitObligation<'info> {
 
 impl<'info> KaminoInitObligation<'info> {
     pub fn cpi_refresh_reserve(&self) -> MarginfiResult {
-        let accounts = RefreshReserve {
-            reserve: self.integration_acc_1.to_account_info(),
-            lending_market: self.lending_market.to_account_info(),
-            pyth_oracle: optional_account!(self.pyth_oracle),
-            switchboard_price_oracle: optional_account!(self.switchboard_price_oracle),
-            switchboard_twap_oracle: optional_account!(self.switchboard_twap_oracle),
-            scope_prices: optional_account!(self.scope_prices),
-        };
+        let accounts = RefreshReservesBatch {};
         let program = self.kamino_program.to_account_info();
-        let cpi_ctx = CpiContext::new(program, accounts);
-        refresh_reserve(cpi_ctx)?;
+        let cpi_ctx = CpiContext::new(program, accounts).with_remaining_accounts(vec![
+            self.integration_acc_1.to_account_info(),
+            self.lending_market.to_account_info(),
+        ]);
+        refresh_reserves_batch(cpi_ctx, true)?;
         Ok(())
     }
 

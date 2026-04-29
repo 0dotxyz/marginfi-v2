@@ -11,15 +11,13 @@ use crate::MarginfiResult;
 // 1. the constants used for testing/internal purposes
 // 2. or the ones dependant on some 3rd party crates which are not part of type-crate dependency tree
 
+// Yes, these are duplicates of the crate ID.
+pub const MAINNET_PROGRAM_ID: Pubkey = pubkey!("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA");
+pub const STAGING_ID: Pubkey = pubkey!("stag8sTKds2h4KzjUw3zKTsxbqvT4XKHdaR9X9E6Rct");
+pub const LOCALNET_ID: Pubkey = pubkey!("2jGhuVUuy3umdzByFx8sNWUAaf5vaeuDm78RDPEnhrMr");
+
 /// Mocks program ID for third-party ID restrictions
 pub const MOCKS_PROGRAM_ID: Pubkey = pubkey!("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ");
-
-pub const DRIFT_USER_SEED: &str = "user";
-pub const DRIFT_USER_STATS_SEED: &str = "user_stats";
-
-pub const JUPLEND_F_TOKEN_VAULT_SEED: &str = "f_token_vault";
-
-pub const SOLEND_OBLIGATION_SEED: &str = "solend_obligation";
 
 /// Used for the health cache to track which version of the program generated it.
 /// * 0 = invalid
@@ -66,16 +64,6 @@ pub const COMPUTE_PROGRAM_KEY: Pubkey = pubkey!("ComputeBudget111111111111111111
 pub const JUP_KEY: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
 pub const TITAN_KEY: Pubkey = pubkey!("T1TANpTeScyeqVzzgNViGDNrkQ6qHz9KrSBS4aNXvGT");
 pub const ASSOCIATED_TOKEN_KEY: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
-
-// Note: We mock Kamino/Kamino Farms with the same keys on localnet
-pub const KAMINO_PROGRAM_ID: Pubkey = pubkey!("KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
-pub const FARMS_PROGRAM_ID: Pubkey = pubkey!("FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr");
-
-pub const DRIFT_PROGRAM_ID: Pubkey = pubkey!("dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH");
-
-/// Drift uses a fixed 9 decimal precision for all spot market scaled balances,
-/// regardless of the underlying token's decimals
-pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
 
 pub const SOLEND_PROGRAM_ID: Pubkey = pubkey!("So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo");
 pub const NATIVE_STAKE_ID: Pubkey = pubkey!("Stake11111111111111111111111111111111111111");

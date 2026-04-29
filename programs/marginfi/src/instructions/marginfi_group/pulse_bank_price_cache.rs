@@ -1,8 +1,8 @@
 use crate::state::bank::BankImpl;
-use crate::state::price::{OraclePriceFeedAdapter, OraclePriceType, PriceAdapter};
+use crate::state::price::{OraclePriceFeedAdapter, PriceAdapter};
 use crate::{MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
-use marginfi_type_crate::types::{Bank, MarginfiGroup};
+use marginfi_type_crate::types::{Bank, MarginfiGroup, OraclePriceType};
 
 /// (permissionless) Refresh the cached oracle price for a bank.
 pub fn lending_pool_pulse_bank_price_cache<'info>(

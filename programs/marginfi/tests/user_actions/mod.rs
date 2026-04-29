@@ -2,6 +2,7 @@ mod bank_cache;
 mod borrow;
 mod close_account;
 mod close_balance;
+mod close_liquid_record;
 mod create_account;
 mod create_account_pda;
 mod create_account_pda_cpi;

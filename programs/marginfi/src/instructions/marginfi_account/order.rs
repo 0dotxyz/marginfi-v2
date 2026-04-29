@@ -6,10 +6,7 @@ use crate::instructions::marginfi_account::liquidate_start::validate_instruction
 use crate::ix_utils::{
     get_discrim_hash, keys_sha256_hash, validate_not_cpi_by_stack_height, Hashable,
 };
-use crate::state::marginfi_account::{
-    get_health_components, get_tagged_account_health_components, HealthPriceMode,
-    RiskRequirementType,
-};
+use crate::state::marginfi_account::{get_health_components, get_tagged_account_health_components};
 use crate::{
     check,
     prelude::*,
@@ -20,19 +17,18 @@ use crate::{
     },
 };
 use crate::{check_eq, math_error};
-use anchor_lang::system_program;
-use anchor_lang::{prelude::*, solana_program::sysvar};
+use anchor_lang::{prelude::*, solana_program::sysvar, system_program};
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
-use marginfi_type_crate::constants::{ix_discriminators, FEE_STATE_SEED, ORDER_ACTIVE_TAGS};
-use marginfi_type_crate::types::{
-    BalanceSide, ExecuteOrderRecord, FeeState, HealthCache, OrderTriggerType, ACCOUNT_FROZEN,
-    ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
-};
 use marginfi_type_crate::{
-    constants::{EXECUTE_ORDER_SEED, ORDER_SEED},
+    constants::{
+        ix_discriminators, EXECUTE_ORDER_SEED, FEE_STATE_SEED, ORDER_ACTIVE_TAGS, ORDER_SEED,
+    },
     types::{
-        MarginfiAccount, MarginfiGroup, Order, OrderTrigger, ACCOUNT_DISABLED, ACCOUNT_IN_FLASHLOAN,
+        BalanceSide, ExecuteOrderRecord, FeeState, HealthCache, HealthPriceMode, MarginfiAccount,
+        MarginfiGroup, Order, OrderTrigger, OrderTriggerType, RequirementType, ACCOUNT_DISABLED,
+        ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
+        ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -108,6 +104,7 @@ pub fn place_order(
     let mut order = order_loader.load_init()?;
 
     order.initialize(marginfi_account_key, trigger, tags, order_bump)?;
+    marginfi_account.increment_active_orders()?;
 
     let fee_state = fee_state_loader.load()?;
     let order_init_flat_sol_fee = fee_state.order_init_flat_sol_fee;
@@ -144,7 +141,8 @@ pub fn close_order(ctx: Context<CloseOrder>) -> MarginfiResult {
         ..
     } = &ctx.accounts;
 
-    let marginfi_account = marginfi_account_loader.load()?;
+    let mut marginfi_account = marginfi_account_loader.load_mut()?;
+    marginfi_account.decrement_active_orders()?;
 
     emit!(MarginfiAccountCloseOrderEvent {
         header: AccountEventHeader {
@@ -176,7 +174,7 @@ pub fn keeper_close_order(ctx: Context<KeeperCloseOrder>) -> MarginfiResult {
         (Pubkey::default(), Pubkey::default(), true)
     } else {
         // Deserialize manually using bytemuck to avoid lifetime issues
-        let data = marginfi_account_info.try_borrow_data()?;
+        let mut data = marginfi_account_info.try_borrow_mut_data()?;
 
         // Check discriminator
         require!(
@@ -191,8 +189,8 @@ pub fn keeper_close_order(ctx: Context<KeeperCloseOrder>) -> MarginfiResult {
             MarginfiError::InternalLogicError
         );
 
-        let marginfi_account: &MarginfiAccount =
-            bytemuck::from_bytes(&data[8..8 + std::mem::size_of::<MarginfiAccount>()]);
+        let marginfi_account: &mut MarginfiAccount =
+            bytemuck::from_bytes_mut(&mut data[8..8 + std::mem::size_of::<MarginfiAccount>()]);
 
         let balances = &marginfi_account.lending_account.balances;
         // Can close if any of the balances used in the order no longer exists (or if its tag was cleared)
@@ -201,6 +199,9 @@ pub fn keeper_close_order(ctx: Context<KeeperCloseOrder>) -> MarginfiResult {
                 .iter()
                 .any(|balance| balance.is_active() && balance.tag == *tag)
         });
+        if can_close {
+            marginfi_account.decrement_active_orders()?;
+        }
         (
             marginfi_account.authority,
             marginfi_account.group,
@@ -365,7 +366,7 @@ pub fn end_execute_order<'info>(
         let (assets, liabs) = get_health_components(
             &marginfi_account,
             ctx.remaining_accounts,
-            RiskRequirementType::Maintenance,
+            RequirementType::Maintenance,
             &mut Some(&mut health_cache),
             HealthPriceMode::Live { liq_cache: None },
         )?;
@@ -503,6 +504,7 @@ pub fn end_execute_order<'info>(
     //    still healthy overall.
 
     marginfi_account.unset_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
+    marginfi_account.decrement_active_orders()?;
 
     Ok(())
 }
@@ -607,6 +609,7 @@ pub struct KeeperCloseOrder<'info> {
     /// CHECK: This uses an unchecked account here so the instruction can be called even when the
     /// marginfi account was closed.
     /// The ownership check is checked in the handler or/and type checks are made in the handler.
+    #[account(mut)]
     pub marginfi_account: UncheckedAccount<'info>,
 
     /// CHECK: no checks whatsoever, keeper decides this without restriction

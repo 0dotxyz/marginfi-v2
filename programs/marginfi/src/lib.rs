@@ -95,6 +95,22 @@ pub mod marginfi {
         marginfi_group::lending_pool_add_bank_permissionless(ctx, bank_seed)
     }
 
+    /// (permissionless) Backfill `IS_T22` on existing banks created before this flag existed.
+    /// No-op if the bank mint is classic SPL Token or the flag is already set.
+    pub fn lending_pool_backfill_bank_is_t22_flag(
+        ctx: Context<LendingPoolBackfillBankIsT22Flag>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_backfill_bank_is_t22_flag(ctx)
+    }
+
+    /// (permissionless) Backfill validator vote account on existing staked-collateral banks.
+    /// No-op if already set to the same validator vote account.
+    pub fn lending_pool_backfill_staked_bank_validator_vote_account(
+        ctx: Context<LendingPoolBackfillStakedBankValidatorVoteAccount>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_backfill_staked_bank_validator_vote_account(ctx)
+    }
+
     /// (admin only) Configure bank parameters. If the bank has `FREEZE_SETTINGS`, only
     /// deposit/borrow limits are updated and all other config changes are silently ignored.
     pub fn lending_pool_configure_bank(
@@ -177,6 +193,15 @@ pub mod marginfi {
         marginfi_group::lending_pool_reclaim_emissions_vault(ctx)
     }
 
+    /// (permissionless) Deposit same-bank emissions directly into liquidity vault and increase
+    /// depositors' value via `asset_share_value`.
+    pub fn lending_pool_emissions_deposit(
+        ctx: Context<LendingPoolEmissionsDeposit>,
+        amount: u64,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_emissions_deposit(ctx, amount)
+    }
+
     /// (risk_admin or admin, unless `PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG` is set on the bank)
     /// Handle bad debt of a bankrupt marginfi account for a given bank. Covers bad debt from the
     /// insurance fund and socializes any remainder among depositors.
@@ -218,6 +243,14 @@ pub mod marginfi {
     /// pays rent; the record is required for receivership liquidation.
     pub fn marginfi_account_init_liq_record(ctx: Context<InitLiquidationRecord>) -> MarginfiResult {
         marginfi_account::initialize_liquidation_record(ctx)
+    }
+
+    /// (permissionless) Close a liquidation record PDA and return rent to the original payer.
+    /// Rent always goes to `record_payer`. Fails if the account is in receivership or deleverage.
+    pub fn marginfi_account_close_liq_record(
+        ctx: Context<CloseLiquidationRecord>,
+    ) -> MarginfiResult {
+        marginfi_account::close_liquidation_record(ctx)
     }
 
     /// The same as `marginfi_account_initialize`, except the created marginfi account uses a PDA
@@ -632,8 +665,8 @@ pub mod marginfi {
         marginfi_account::end_deleverage(ctx)
     }
 
-    /// (global_fee_admin only) Pause the protocol. Auto-expires after 30 minutes. Limited to 3
-    /// pauses per day and 2 consecutive pauses.
+    /// (global_fee_admin only) Pause the protocol. Auto-expires after 6 hours. Limited to 3
+    /// pauses per day and 4 consecutive pauses.
     pub fn panic_pause(ctx: Context<PanicPause>) -> MarginfiResult {
         marginfi_group::panic_pause(ctx)
     }
@@ -658,18 +691,19 @@ pub mod marginfi {
     }
 
     /// (permissionless) pay the rent to open a bank's metadata.
-    pub fn init_bank_metadata(ctx: Context<InitBankMetadata>) -> MarginfiResult {
-        marginfi_group::init_bank_metadata(ctx)
+    pub fn init_bank_metadata(ctx: Context<InitBankMetadata>, bank_seed: u64) -> MarginfiResult {
+        marginfi_group::init_bank_metadata(ctx, bank_seed)
     }
 
     /// (metadata admin only) Write ticker/description information for a bank on-chain. Optional, not
     /// all Banks are guaranteed to have metadata.
     pub fn write_bank_metadata(
         ctx: Context<WriteBankMetadata>,
+        bank_seed: u64,
         ticker: Option<Vec<u8>>,
         description: Option<Vec<u8>>,
     ) -> MarginfiResult {
-        marginfi_group::write_bank_metadata(ctx, ticker, description)
+        marginfi_group::write_bank_metadata(ctx, bank_seed, ticker, description)
     }
 
     /// (admin or delegate_limit_admin) Set the daily withdrawal limit for deleverages per group.
@@ -777,21 +811,23 @@ pub mod marginfi {
     pub fn kamino_deposit<'info>(
         ctx: Context<'_, '_, 'info, 'info, KaminoDeposit<'info>>,
         amount: u64,
+        refresh_reserve: Option<bool>,
     ) -> MarginfiResult {
-        kamino::kamino_deposit(ctx, amount)
+        kamino::kamino_deposit(ctx, amount, refresh_reserve)
     }
 
     /// (user) Withdraw from a Kamino pool through a marginfi account
     /// * amount - in the collateral token (NOT liquidity token), in native decimals. Must convert
     ///     from collateral to liquidity token amounts using the current exchange rate.
-    /// * withdraw_all - if true, withdraw the entire mrgn balance (Note: due to rounding down, a
-    ///   deposit and withdraw back to back may result in several lamports less)
+    /// * flags - optional bitflags:
+    ///   - bit 0 (`0x01`): withdraw all
+    ///   - bit 1 (`0x02`): refresh reserve via batch refresh
     pub fn kamino_withdraw<'info>(
         ctx: Context<'_, '_, 'info, 'info, KaminoWithdraw<'info>>,
         amount: u64,
-        withdraw_all: Option<bool>,
+        flags: Option<u8>,
     ) -> MarginfiResult {
-        kamino::kamino_withdraw(ctx, amount, withdraw_all)
+        kamino::kamino_withdraw(ctx, amount, flags)
     }
 
     /// (group admin only) Add a Kamino bank to the group. Pass the oracle and reserve in remaining

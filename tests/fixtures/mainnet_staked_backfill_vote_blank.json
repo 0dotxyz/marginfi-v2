@@ -1,0 +1,14 @@
+{
+  "pubkey": "CooLbbZy5Xmdt7DiHPQ3ss2uRXawnTXXVgpMS8E8jDzr",
+  "account": {
+    "lamports": 1,
+    "data": [
+      "",
+      "base64"
+    ],
+    "owner": "Vote111111111111111111111111111111111111111",
+    "executable": false,
+    "rentEpoch": 0,
+    "space": 0
+  }
+}

@@ -1,6 +1,6 @@
 use crate::{
     assert_struct_align, assert_struct_size,
-    constants::discriminators,
+    constants::{discriminators, ASSET_TAG_DRIFT, DRIFT_SCALED_BALANCE_DECIMALS},
     types::{BankCache, BankConfig},
 };
 
@@ -99,6 +99,7 @@ pub struct Bank {
     /// - Bit 4 (16): `CLOSE_ENABLED_FLAG` — bank can be closed (set at creation for banks >= 0.1.4)
     /// - Bit 5 (32): `TOKENLESS_REPAYMENTS_ALLOWED` — risk admin can repay debt without tokens
     /// - Bit 6 (64): `TOKENLESS_REPAYMENTS_COMPLETE` — all debt cleared, lender purge enabled
+    /// - Bit 7 (128): `IS_T22` — 1 if T22, 0 if token classic
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.
@@ -143,6 +144,7 @@ pub struct Bank {
     /// - Drift: spot market
     /// - Solend: reserve
     /// - JupLend: lending state
+    /// - Staked Collateral: Validator vote account
     pub integration_acc_1: Pubkey,
     /// Integration account slot 2 (default Pubkey for non-integrations).
     /// - Kamino: obligation
@@ -166,6 +168,14 @@ pub struct Bank {
 impl Bank {
     pub const LEN: usize = std::mem::size_of::<Bank>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::BANK;
+
+    pub fn get_balance_decimals(&self) -> u8 {
+        if self.config.asset_tag == ASSET_TAG_DRIFT {
+            DRIFT_SCALED_BALANCE_DECIMALS
+        } else {
+            self.mint_decimals
+        }
+    }
 }
 
 #[repr(u8)]

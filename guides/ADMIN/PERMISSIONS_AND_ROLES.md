@@ -118,11 +118,67 @@ account (a global singleton).
 **Can do:**
 - Edit global fee parameters (program fee rates, origination fee shares, init fees)
 - Change the global fee wallet
-- Panic-pause the entire protocol (with rate limiting: max 2 consecutive pauses, max 3 per day,
-  each lasting 30 minutes)
+- Panic-pause the entire protocol (with rate limiting: max 4 consecutive pauses, max 3 per day,
+  each lasting 6 hours)
 
 This role is intended for the protocol operator (e.g. the foundation) and controls protocol-level
 economics and emergency pause functionality.
+
+## Protocol Panic-Pause
+
+When the `global_fee_admin` invokes `panic_pause`, the protocol enters a group-wide paused state.
+The pause auto-expires (see `PanicState::PAUSE_DURATION_SECONDS`) and is rate-limited (max
+consecutive pauses per window, max per day) so it cannot be held indefinitely.
+
+### Blocked while paused
+
+All normal user flows are disabled:
+
+- Deposit, Borrow, Withdraw, Repay (both native banks and integration banks — Kamino, Drift,
+  Juplend, Solend)
+- Order placement / order flows
+- Account transfer
+- Classic liquidation (`LendingAccountLiquidate`)
+- Permissionless bank-fee collection
+- Permissionless bad-debt settlement (`HandleBankruptcy` when called by a non-admin, even on banks
+  with the `PERMISSIONLESS_BAD_DEBT_SETTLEMENT` flag)
+- Admin bank configuration changes that route through `LendingPoolConfigureBank`
+
+### Permitted while paused (admin exceptions)
+
+A narrow set of actions remain available so the admin/risk_admin can actually resolve the
+incident the pause was called for:
+
+- **Forced deleverage** — `risk_admin` can run the full deleverage flow (`StartLiquidation` in
+  deleverage mode, plus the withdraw/repay instructions that execute while
+  `ACCOUNT_IN_DELEVERAGE` is set). The pause checks on withdraw/repay (including integration
+  withdrawals on Kamino, Drift, Juplend, Solend) are bypassed when the account carries this flag,
+  so a deleverage can be completed end-to-end.
+- **Handle bankruptcy by admin** — `admin` or `risk_admin` can call `HandleBankruptcy` while
+  paused. This is needed because a forced deleverage often terminates in a bankruptcy, and
+  blocking bankruptcy would leave the bank in a half-resolved state. Non-admin callers (even on
+  banks with `PERMISSIONLESS_BAD_DEBT_SETTLEMENT`) remain blocked until the pause expires.
+- **Unpause** — `global_fee_admin` can always end the pause early via `panic_unpause`, and
+  anyone can permissionlessly clear an expired pause via `panic_unpause_permissionless`.
+
+### Emergency-only instructions (mainnet-disabled)
+
+Two instructions are compiled into the program but guarded to `panic!` if invoked on the mainnet
+deployment, following the same pattern as `lending_pool_clone_bank`:
+
+- `super_admin_deposit` — transfers tokens from the admin's account into a bank's liquidity
+  vault and raises `asset_share_value`, crediting the gain proportionally to existing depositors.
+  Intended for crediting recovered funds back to affected depositors after an incident.
+- `super_admin_withdraw` — the inverse: pulls tokens from a bank's liquidity vault (to a
+  hard-coded recovery wallet on live networks) and lowers `asset_share_value`. Additionally
+  refuses to run if the resulting share value would drop to ≤ `0.8`, as a safety rail.
+
+They live in source, not on a separate branch, so that they keep compiling against current types
+in CI and remain ready to enable via a targeted deployment if a future incident genuinely
+requires them. On mainnet they are inert. On staging/localnet they are available for reproducing
+specific bank states during testing.
+
+See the module-level doc comments on these instructions for the full rationale.
 
 ## User-Level Access
 
@@ -200,6 +256,11 @@ For more details see the [Receivership Liquidation Guide](../RISK_AND_LIQUIDATOR
 | Force tokenless repay complete | `risk_admin` |
 | Edit global fee state | `global_fee_admin` |
 | Panic-pause protocol | `global_fee_admin` |
+| Unpause protocol (early) | `global_fee_admin` |
+| Unpause protocol (after expiry) | Anyone |
+| Forced deleverage during pause | `risk_admin` |
+| Handle bankruptcy during pause | `admin` or `risk_admin` |
+| `super_admin_deposit` / `super_admin_withdraw` | `admin` (staging/localnet only — panics on mainnet) |
 | Collect bank fees | Anyone |
 | Classic liquidation | Anyone (if account unhealthy) |
 | Receivership liquidation | Anyone (if account unhealthy) |

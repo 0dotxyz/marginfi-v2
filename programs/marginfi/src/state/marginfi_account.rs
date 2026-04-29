@@ -1,6 +1,4 @@
-use super::price::{
-    OraclePriceFeedAdapter, OraclePriceType, OraclePriceWithConfidence, PriceAdapter, PriceBias,
-};
+use super::price::{OraclePriceFeedAdapter, PriceAdapter};
 use crate::{
     allocator::{heap_pos, heap_restore},
     check, check_eq, debug, live, math_error,
@@ -18,9 +16,10 @@ use marginfi_type_crate::{
     },
     types::{
         reconcile_emode_configs, Balance, BalanceSide, Bank, BankOperationalState, EmodeConfig,
-        HealthCache, LendingAccount, MarginfiAccount, OracleSetup, RiskTier, ACCOUNT_DISABLED,
-        ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
-        MAX_LENDING_ACCOUNT_BALANCES,
+        HealthCache, HealthPriceMode, LendingAccount, LiquidationPriceCache, MarginfiAccount,
+        OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias, RequirementType,
+        RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 use std::{
@@ -67,6 +66,8 @@ pub trait MarginfiAccountImpl {
     fn set_flag(&mut self, flag: u64, msg: bool);
     fn unset_flag(&mut self, flag: u64, msg: bool);
     fn get_flag(&self, flag: u64) -> bool;
+    fn increment_active_orders(&mut self) -> MarginfiResult;
+    fn decrement_active_orders(&mut self) -> MarginfiResult;
     fn can_be_closed(&self) -> bool;
 }
 
@@ -127,6 +128,7 @@ impl MarginfiAccountImpl for MarginfiAccount {
         self.migrated_from = Pubkey::default();
         self.last_update = current_timestamp;
         self.migrated_to = Pubkey::default();
+        self.active_orders = 0;
     }
 
     fn set_flag(&mut self, flag: u64, msg: bool) {
@@ -145,6 +147,29 @@ impl MarginfiAccountImpl for MarginfiAccount {
 
     fn get_flag(&self, flag: u64) -> bool {
         self.account_flags & flag != 0
+    }
+
+    fn increment_active_orders(&mut self) -> MarginfiResult {
+        // Note: Sanity check, expected to be unreachable, as this vastly exceeds max theoretical
+        // orders one account can open.
+        check!(
+            self.active_orders < u8::MAX,
+            MarginfiError::IllegalAction,
+            "Too many active orders"
+        );
+        self.active_orders += 1;
+        Ok(())
+    }
+
+    fn decrement_active_orders(&mut self) -> MarginfiResult {
+        // Note: Sanity check, expected to be unreachable
+        check!(
+            self.active_orders > 0,
+            MarginfiError::IllegalAction,
+            "No active orders to close"
+        );
+        self.active_orders -= 1;
+        Ok(())
     }
 
     fn can_be_closed(&self) -> bool {
@@ -174,59 +199,6 @@ pub enum BalanceDecreaseType {
     WithdrawOnly,
     BorrowOnly,
     BypassBorrowLimit,
-}
-
-#[derive(Copy, Clone)]
-pub enum RequirementType {
-    Initial,
-    Maintenance,
-    Equity,
-}
-
-impl RequirementType {
-    /// Get oracle price type for the requirement type.
-    ///
-    /// Initial and equity requirements use the time weighted price feed.
-    /// Maintenance requirement uses the real time price feed, as its more accurate for triggering liquidations.
-    pub fn get_oracle_price_type(&self) -> OraclePriceType {
-        match self {
-            RequirementType::Initial | RequirementType::Equity => OraclePriceType::TimeWeighted,
-            RequirementType::Maintenance => OraclePriceType::RealTime,
-        }
-    }
-}
-
-/// Temporary struct used to store prices during receivership liquidation, these price will
-/// ultimately populate the respective Bank's BankCache, and then be loaded at End Liqudation.
-#[derive(Default)]
-pub struct LiquidationPriceCache {
-    real_time: [Option<OraclePriceWithConfidence>; MAX_LENDING_ACCOUNT_BALANCES],
-    time_weighted: [Option<OraclePriceWithConfidence>; MAX_LENDING_ACCOUNT_BALANCES],
-}
-
-impl LiquidationPriceCache {
-    pub fn record(
-        &mut self,
-        requirement_type: RequirementType,
-        index: usize,
-        price: OraclePriceWithConfidence,
-    ) {
-        match requirement_type.get_oracle_price_type() {
-            OraclePriceType::RealTime => self.real_time[index] = Some(price),
-            OraclePriceType::TimeWeighted => self.time_weighted[index] = Some(price),
-        }
-    }
-
-    pub fn get_price(
-        &self,
-        price_type: OraclePriceType,
-        index: usize,
-    ) -> Option<OraclePriceWithConfidence> {
-        match price_type {
-            OraclePriceType::RealTime => self.real_time[index],
-            OraclePriceType::TimeWeighted => self.time_weighted[index],
-        }
-    }
 }
 
 #[inline]
@@ -520,29 +492,6 @@ pub fn calc_amount(value: I80F48, price: I80F48, mint_decimals: u8) -> MarginfiR
     Ok(qt)
 }
 
-pub enum RiskRequirementType {
-    Initial,
-    Maintenance,
-    Equity,
-}
-
-impl RiskRequirementType {
-    pub fn to_weight_type(&self) -> RequirementType {
-        match self {
-            RiskRequirementType::Initial => RequirementType::Initial,
-            RiskRequirementType::Maintenance => RequirementType::Maintenance,
-            RiskRequirementType::Equity => RequirementType::Equity,
-        }
-    }
-}
-
-pub enum HealthPriceMode<'a> {
-    Live {
-        liq_cache: Option<&'a mut LiquidationPriceCache>,
-    },
-    Cached,
-}
-
 // =============================================================================
 // RISK ENGINE - HEAP-EFFICIENT HEALTH CALCULATION
 // =============================================================================
@@ -670,7 +619,7 @@ impl<'a, 'info> Iterator for EmodeConfigIterator<'a, 'info> {
 pub fn get_health_components<'info>(
     marginfi_account: &MarginfiAccount,
     remaining_ais: &'info [AccountInfo<'info>],
-    requirement_type: RiskRequirementType,
+    requirement_type: RequirementType,
     health_cache: &mut Option<&mut HealthCache>,
     price_mode: HealthPriceMode<'_>,
 ) -> MarginfiResult<(I80F48, I80F48)> {
@@ -679,12 +628,12 @@ pub fn get_health_components<'info>(
         MarginfiError::AccountInFlashloan
     );
 
-    let (is_cached, mut liq_cache) = match price_mode {
-        HealthPriceMode::Live { liq_cache } => (false, liq_cache),
-        HealthPriceMode::Cached => (true, None),
+    let (is_cached, mut liq_cache, clock) = match price_mode {
+        HealthPriceMode::Live { liq_cache } => (false, liq_cache, Some(Clock::get()?)),
+        HealthPriceMode::Cached => (true, None, None),
+        HealthPriceMode::Client(clock) => (false, None, Some(clock)),
     };
 
-    let clock = if is_cached { None } else { Some(Clock::get()?) };
     let lending_account = &marginfi_account.lending_account;
 
     // =========================================================================
@@ -744,7 +693,7 @@ pub fn get_health_components<'info>(
             let (asset_val, liab_val, price) = calc_weighted_value_cached_for_balance(
                 balance,
                 &bank,
-                requirement_type.to_weight_type(),
+                requirement_type,
                 &reconciled_emode_config,
             )?;
             (asset_val, liab_val, price, 0)
@@ -780,7 +729,7 @@ pub fn get_health_components<'info>(
                 balance,
                 &bank,
                 &price_adapter_result,
-                requirement_type.to_weight_type(),
+                requirement_type,
                 &reconciled_emode_config,
                 &mut liq_cache,
                 position_index,
@@ -798,7 +747,7 @@ pub fn get_health_components<'info>(
 
         // Update health cache with price
         if let Some(cache) = health_cache.as_mut() {
-            if let RequirementType::Initial = requirement_type.to_weight_type() {
+            if let RequirementType::Initial = requirement_type {
                 cache.prices[position_index] = price.to_num::<f64>().to_le_bytes();
             }
         }
@@ -823,15 +772,15 @@ pub fn get_health_components<'info>(
     // Update health cache totals
     if let Some(cache) = health_cache.as_mut() {
         match requirement_type {
-            RiskRequirementType::Initial => {
+            RequirementType::Initial => {
                 cache.asset_value = total_assets.into();
                 cache.liability_value = total_liabilities.into();
             }
-            RiskRequirementType::Maintenance => {
+            RequirementType::Maintenance => {
                 cache.asset_value_maint = total_assets.into();
                 cache.liability_value_maint = total_liabilities.into();
             }
-            RiskRequirementType::Equity => {
+            RequirementType::Equity => {
                 cache.asset_value_equity = total_assets.into();
                 cache.liability_value_equity = total_liabilities.into();
             }
@@ -864,7 +813,7 @@ pub fn get_tagged_account_health_components<'info>(
     let reconciled_emode_config: EmodeConfig = reconciled_emode_config;
     heap_restore(emode_checkpoint);
 
-    let requirement_type = RiskRequirementType::Equity.to_weight_type();
+    let requirement_type = RequirementType::Equity;
     let mut total_assets: I80F48 = I80F48::ZERO;
     let mut total_liabilities: I80F48 = I80F48::ZERO;
     let mut asset_count = 0;
@@ -986,7 +935,7 @@ pub fn check_pre_liquidation_condition_and_get_account_health<'info>(
     let (assets, liabs) = get_health_components(
         marginfi_account,
         remaining_ais,
-        RiskRequirementType::Maintenance,
+        RequirementType::Maintenance,
         health_cache,
         price_mode,
     )?;
@@ -1028,7 +977,7 @@ pub fn check_account_bankrupt<'info>(
     let (equity_assets, equity_liabs) = get_health_components(
         marginfi_account,
         remaining_ais,
-        RiskRequirementType::Equity,
+        RequirementType::Equity,
         health_cache,
         HealthPriceMode::Live { liq_cache: None },
     )?;
@@ -1128,7 +1077,7 @@ pub fn check_account_init_health<'info>(
     let (assets, liabs) = get_health_components(
         marginfi_account,
         remaining_ais,
-        RiskRequirementType::Initial,
+        RequirementType::Initial,
         health_cache,
         HealthPriceMode::Live { liq_cache: None },
     )?;
@@ -1181,7 +1130,7 @@ pub fn check_post_liquidation_condition_and_get_account_health<'info>(
     let (assets, liabs) = get_health_components(
         marginfi_account,
         remaining_ais,
-        RiskRequirementType::Maintenance,
+        RequirementType::Maintenance,
         &mut None,
         HealthPriceMode::Live { liq_cache: None },
     )?;

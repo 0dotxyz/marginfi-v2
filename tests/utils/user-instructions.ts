@@ -3,11 +3,18 @@ import {
   AccountMeta,
   PublicKey,
   SYSVAR_INSTRUCTIONS_PUBKEY,
+  TransactionInstruction,
 } from "@solana/web3.js";
 import { Marginfi } from "../../target/types/marginfi";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { deriveExecuteOrderPda, deriveGlobalFeeState, deriveOrderPda } from "./pdas";
+import {
+  deriveExecuteOrderPda,
+  deriveGlobalFeeState,
+  deriveLiquidationRecord,
+  deriveOrderPda,
+} from "./pdas";
 import { WrappedI80F48 } from "@mrgnlabs/mrgn-common";
+import { createHash } from "crypto";
 
 export type AccountInitArgs = {
   marginfiGroup: PublicKey;
@@ -39,6 +46,26 @@ export const accountInit = (
     .instruction();
 
   return ix;
+};
+
+export type AccountCloseArgs = {
+  marginfiAccount: PublicKey;
+  authority: PublicKey;
+  feePayer: PublicKey;
+};
+
+export const accountCloseIx = (
+  program: Program<Marginfi>,
+  args: AccountCloseArgs
+) => {
+  return program.methods
+    .marginfiAccountClose()
+    .accounts({
+      marginfiAccount: args.marginfiAccount,
+      authority: args.authority,
+      feePayer: args.feePayer,
+    })
+    .instruction();
 };
 
 export type TransferAccountAuthorityArgs = {
@@ -282,6 +309,70 @@ export const initLiquidationRecordIx = (
       // systemProgram: // hard coded key
     })
     .instruction();
+};
+
+export type CloseLiquidationRecordArgs = {
+  marginfiAccount: PublicKey;
+  recordPayer: PublicKey;
+  liquidationRecord?: PublicKey;
+};
+
+const CLOSE_LIQ_RECORD_DISCRIMINATOR = createHash("sha256")
+  .update("global:marginfi_account_close_liq_record")
+  .digest()
+  .subarray(0, 8);
+
+export const closeLiquidationRecordIx = (
+  program: Program<Marginfi>,
+  args: CloseLiquidationRecordArgs
+) => {
+  const liquidationRecord =
+    args.liquidationRecord ??
+    deriveLiquidationRecord(program.programId, args.marginfiAccount)[0];
+  const accounts = {
+    marginfiAccount: args.marginfiAccount,
+    liquidationRecord,
+    recordPayer: args.recordPayer,
+  };
+  const methodsAny = program.methods as any;
+
+  if (typeof methodsAny.marginfiAccountCloseLiqRecord === "function") {
+    return methodsAny.marginfiAccountCloseLiqRecord()
+      .accounts(accounts)
+      .instruction();
+  }
+  if (typeof methodsAny.marginfiAccountCloseLiquidationRecord === "function") {
+    return methodsAny.marginfiAccountCloseLiquidationRecord()
+      .accounts(accounts)
+      .instruction();
+  }
+  if (typeof methodsAny.closeLiquidationRecord === "function") {
+    return methodsAny.closeLiquidationRecord().accounts(accounts).instruction();
+  }
+
+  return Promise.resolve(
+    new TransactionInstruction({
+      programId: program.programId,
+      keys: [
+        {
+          pubkey: args.marginfiAccount,
+          isSigner: false,
+          isWritable: true,
+        },
+        {
+          pubkey: liquidationRecord,
+          isSigner: false,
+          isWritable: true,
+        },
+        {
+          pubkey: args.recordPayer,
+          isSigner: false,
+          isWritable: true,
+        },
+      ],
+      data: CLOSE_LIQ_RECORD_DISCRIMINATOR,
+    }),
+  );
 };
 
 /**

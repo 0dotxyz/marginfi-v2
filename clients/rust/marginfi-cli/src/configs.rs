@@ -102,6 +102,9 @@ pub struct FeeStateConfig {
 pub struct WriteBankMetadataConfigEntry {
     #[serde(alias = "bank")]
     pub bank_address: String,
+    pub group: Option<String>,
+    #[serde(alias = "bankSeed")]
+    pub bank_seed: u64,
     #[serde(alias = "mint", alias = "tokenAddress")]
     pub token_address: Option<String>,
     #[serde(alias = "symbol", alias = "tokenSymbol")]
@@ -452,6 +455,8 @@ impl WriteBankMetadataConfig {
         r#"[
   {
     "bankAddress": "<BANK_PUBKEY>",
+    "group": null,
+    "bankSeed": 0,
     "tokenAddress": null,
     "tokenSymbol": "USDC",
     "tokenName": "USD Coin",
@@ -462,6 +467,8 @@ impl WriteBankMetadataConfig {
   },
   {
     "bankAddress": "<BANK_PUBKEY>",
+    "group": null,
+    "bankSeed": 1,
     "tokenAddress": null,
     "tokenSymbol": "SOL",
     "tokenName": "Wrapped SOL",

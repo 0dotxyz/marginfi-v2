@@ -1,8 +1,8 @@
 use {
     super::{group_get_all, load_all_banks},
-    crate::output,
     crate::{
         config::Config,
+        output,
         utils::{
             find_bank_emssions_token_account_pda, find_bank_vault_authority_pda,
             find_bank_vault_pda, send_tx,
@@ -21,8 +21,8 @@ use {
     marginfi_type_crate::{
         constants::METADATA_SEED,
         types::{
-            Bank, BankConfigOpt, BankMetadata, InterestRateConfigOpt, MarginfiGroup, OracleSetup,
-            RatePoint, RiskTier, WrappedI80F48,
+            Bank, BankConfigOpt, BankMetadata, InterestRateConfigOpt, MarginfiGroup,
+            OraclePriceType, OracleSetup, PriceBias, RatePoint, RiskTier, WrappedI80F48,
         },
     },
     pyth_solana_receiver_sdk::price_update::PriceUpdateV2,
@@ -151,6 +151,9 @@ impl BankUpdateRequest {
 #[derive(Debug, Clone)]
 pub struct BankMetadataEntry {
     pub bank: Pubkey,
+    pub group: Pubkey,
+    pub mint: Pubkey,
+    pub bank_seed: u64,
     pub ticker: String,
     pub description: String,
 }
@@ -158,6 +161,8 @@ pub struct BankMetadataEntry {
 #[derive(Debug, Clone)]
 pub struct BankMetadataInput {
     pub bank: Pubkey,
+    pub group: Option<Pubkey>,
+    pub bank_seed: u64,
     pub ticker: Option<String>,
     pub description: Option<String>,
     pub mint: Option<Pubkey>,
@@ -202,6 +207,10 @@ struct BankMetadataWriteResult {
 struct MetadataRow {
     #[serde(alias = "bankAddress")]
     bank_address: String,
+    #[serde(default, alias = "group", alias = "groupAddress")]
+    group: Option<String>,
+    #[serde(alias = "bankSeed")]
+    bank_seed: u64,
     #[serde(alias = "tokenAddress")]
     mint: String,
     #[serde(alias = "tokenSymbol")]
@@ -217,13 +226,6 @@ struct MetadataRow {
     #[serde(default, alias = "riskTierName")]
     risk_tier_name: Option<String>,
 }
-
-const STAGING_METADATA_URL_FRAGMENT: &str = "mrgn-bank-metadata-cache-stage";
-const ADDITIONAL_STAGING_BANKS: &[(&str, &str, &str)] = &[(
-    "GFMZQWGdfvcXQd6PM3ZTtMjYhEFh9gBEogfKsZKBsKjs",
-    "ptBulkSOL | PT-bulkSOL-26FEB26",
-    "PT-bulkSOL-26FEB26 | rate-products | ptBulkSOL | P0 | -",
-)];
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -308,8 +310,6 @@ pub fn bank_get_all(config: Config, marginfi_group: Option<Pubkey>) -> Result<()
 }
 
 pub fn bank_inspect_price_oracle(config: Config, bank_pk: Pubkey) -> Result<()> {
-    use marginfi::state::price::{OraclePriceType, PriceBias};
-
     let bank: Bank = config.mfi_program.account(bank_pk)?;
     let opfa = match bank.config.oracle_setup {
         OracleSetup::Fixed => OraclePriceFeedAdapter::try_from_bank_with_max_age(
@@ -758,13 +758,10 @@ fn metadata_write_status_label(status: MetadataWriteStatus) -> &'static str {
 fn apply_bank_metadata_entry(
     config: &Config,
     entry: &BankMetadataEntry,
-    options: &BankMetadataWriteOptions,
+    _options: &BankMetadataWriteOptions,
 ) -> Result<BankMetadataWriteResult> {
     let rpc_client = config.mfi_program.rpc();
     let metadata = derive_bank_metadata_address(&config.program_id, &entry.bank);
-    println!("  ensuring bank account {} exists", entry.bank);
-    let bank = wait_for_bank_account(config, entry.bank, options)?;
-    println!("  bank account found");
     println!("  metadata PDA: {}", metadata);
     let target_metadata = target_bank_metadata_snapshot(entry);
     let current_metadata = read_current_bank_metadata(config, entry.bank)?;
@@ -787,13 +784,18 @@ fn apply_bank_metadata_entry(
         ixs.push(Instruction {
             program_id: config.program_id,
             accounts: marginfi::accounts::InitBankMetadata {
+                group: entry.group,
+                bank_mint: entry.mint,
                 bank: entry.bank,
                 fee_payer: config.authority(),
                 metadata,
                 system_program: system_program::id(),
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::InitBankMetadata {}.data(),
+            data: marginfi::instruction::InitBankMetadata {
+                bank_seed: entry.bank_seed,
+            }
+            .data(),
         });
     } else {
         println!("  metadata account already exists");
@@ -803,13 +805,15 @@ fn apply_bank_metadata_entry(
     ixs.push(Instruction {
         program_id: config.program_id,
         accounts: marginfi::accounts::WriteBankMetadata {
-            group: bank.group,
+            group: entry.group,
+            bank_mint: entry.mint,
             bank: entry.bank,
             metadata_admin: config.authority(),
             metadata,
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::WriteBankMetadata {
+            bank_seed: entry.bank_seed,
             ticker: Some(entry.ticker.clone().into_bytes()),
             description: Some(entry.description.clone().into_bytes()),
         }
@@ -850,11 +854,11 @@ fn apply_bank_metadata_entry(
     })
 }
 
-fn wait_for_bank_account(
+fn resolve_bank_account(
     config: &Config,
     bank: Pubkey,
     options: &BankMetadataWriteOptions,
-) -> Result<Bank> {
+) -> Result<Option<Bank>> {
     let rpc_client = config.mfi_program.rpc();
     let started = std::time::Instant::now();
     let poll_interval = Duration::from_secs(1);
@@ -862,7 +866,7 @@ fn wait_for_bank_account(
 
     loop {
         match rpc_client.get_account(&bank) {
-            Ok(_) => return Ok(config.mfi_program.account(bank)?),
+            Ok(_) => return Ok(Some(config.mfi_program.account(bank)?)),
             Err(err) if options.wait_for_bank => {
                 if started.elapsed() >= options.wait_for_bank_timeout {
                     return Err(err).with_context(|| {
@@ -888,9 +892,59 @@ fn wait_for_bank_account(
                 );
                 sleep(poll_interval);
             }
-            Err(err) => return Err(err.into()),
+            Err(_) => return Ok(None),
         }
     }
+}
+
+fn resolve_metadata_bank_context(
+    config: &Config,
+    bank: Pubkey,
+    group: Option<Pubkey>,
+    mint: Option<Pubkey>,
+    options: &BankMetadataWriteOptions,
+) -> Result<(Pubkey, Pubkey)> {
+    let bank_state = resolve_bank_account(config, bank, options)?;
+
+    let resolved_group = match (group, bank_state.as_ref().map(|bank| bank.group)) {
+        (Some(group), Some(live_group)) if group != live_group => {
+            bail!(
+                "provided group {} does not match on-chain bank group {} for bank {}",
+                group,
+                live_group,
+                bank
+            );
+        }
+        (Some(group), _) => group,
+        (None, Some(group)) => group,
+        (None, None) => {
+            bail!(
+                "group required for bank {} when the bank account is not initialized yet",
+                bank
+            );
+        }
+    };
+
+    let resolved_mint = match (mint, bank_state.as_ref().map(|bank| bank.mint)) {
+        (Some(mint), Some(live_mint)) if mint != live_mint => {
+            bail!(
+                "provided mint {} does not match on-chain bank mint {} for bank {}",
+                mint,
+                live_mint,
+                bank
+            );
+        }
+        (Some(mint), _) => mint,
+        (None, Some(mint)) => mint,
+        (None, None) => {
+            bail!(
+                "mint required for bank {} when the bank account is not initialized yet",
+                bank
+            );
+        }
+    };
+
+    Ok((resolved_group, resolved_mint))
 }
 
 fn build_metadata_entry(row: MetadataRow) -> Result<BankMetadataEntry> {
@@ -918,6 +972,14 @@ fn build_metadata_entry(row: MetadataRow) -> Result<BankMetadataEntry> {
 
     Ok(BankMetadataEntry {
         bank: row.bank_address.parse()?,
+        group: row
+            .group
+            .as_deref()
+            .map(str::parse)
+            .transpose()?
+            .unwrap_or_default(),
+        mint: row.mint.parse()?,
+        bank_seed: row.bank_seed,
         ticker: format!("{} | {}", row.symbol, row.name),
         description: format!(
             "{} | {} | {} | {}{}",
@@ -933,6 +995,8 @@ fn resolve_bank_metadata_input(
 ) -> Result<BankMetadataEntry> {
     let BankMetadataInput {
         bank,
+        group,
+        bank_seed,
         ticker,
         description,
         mint,
@@ -944,24 +1008,26 @@ fn resolve_bank_metadata_input(
         risk_tier_name,
     } = input;
 
+    let (resolved_group, effective_mint) =
+        resolve_metadata_bank_context(config, bank, group, mint, options)?;
+
     if let (Some(ticker), Some(description)) = (&ticker, &description) {
         return Ok(BankMetadataEntry {
             bank,
+            group: resolved_group,
+            mint: effective_mint,
+            bank_seed,
             ticker: ticker.clone(),
             description: description.clone(),
         });
     }
-
-    let effective_mint = if let Some(mint) = mint {
-        mint
-    } else {
-        wait_for_bank_account(config, bank, options)?.mint
-    };
     if let (Some(asset_group), Some(symbol)) = (asset_group.as_deref(), symbol.as_deref()) {
         update_asset_groups_file(asset_group, symbol, &effective_mint)?;
     }
     let row = MetadataRow {
         bank_address: bank.to_string(),
+        group: Some(resolved_group.to_string()),
+        bank_seed,
         mint: effective_mint.to_string(),
         symbol: symbol.context("symbol required when --ticker or --description is omitted")?,
         name: name.context("name required when --ticker or --description is omitted")?,
@@ -974,6 +1040,9 @@ fn resolve_bank_metadata_input(
 
     Ok(BankMetadataEntry {
         bank,
+        group: resolved_group,
+        mint: effective_mint,
+        bank_seed,
         ticker: ticker.unwrap_or(derived.ticker),
         description: description.unwrap_or(derived.description),
     })
@@ -992,22 +1061,8 @@ pub fn resolve_bank_metadata_inputs(
 
 fn parse_metadata_source_rows(body: &str, url: &str) -> Result<Vec<BankMetadataEntry>> {
     let rows = parse_metadata_source_db(body)?;
-    let mut entries: Vec<BankMetadataEntry> = rows
-        .into_iter()
-        .map(build_metadata_entry)
-        .collect::<Result<Vec<_>>>()?;
-
-    if url.contains(STAGING_METADATA_URL_FRAGMENT) {
-        for (bank, ticker, description) in ADDITIONAL_STAGING_BANKS {
-            entries.push(BankMetadataEntry {
-                bank: bank.parse()?,
-                ticker: (*ticker).to_string(),
-                description: (*description).to_string(),
-            });
-        }
-    }
-
-    Ok(entries)
+    let _ = url;
+    rows.into_iter().map(build_metadata_entry).collect()
 }
 
 pub fn dump_bank_metadata(
@@ -1585,19 +1640,37 @@ pub fn bank_update_fees_destination(
     Ok(())
 }
 
-pub fn bank_init_metadata(config: Config, bank_pk: Pubkey) -> Result<()> {
+pub fn bank_init_metadata(
+    config: Config,
+    bank_pk: Pubkey,
+    group: Option<Pubkey>,
+    mint: Option<Pubkey>,
+    bank_seed: u64,
+) -> Result<()> {
+    let (resolved_group, resolved_mint) = resolve_metadata_bank_context(
+        &config,
+        bank_pk,
+        group,
+        mint,
+        &BankMetadataWriteOptions {
+            wait_for_bank: false,
+            wait_for_bank_timeout: Duration::from_secs(0),
+        },
+    )?;
     let metadata = derive_bank_metadata_address(&config.program_id, &bank_pk);
 
     let ix = Instruction {
         program_id: config.program_id,
         accounts: marginfi::accounts::InitBankMetadata {
+            group: resolved_group,
+            bank_mint: resolved_mint,
             bank: bank_pk,
             fee_payer: config.authority(),
             metadata,
             system_program: system_program::id(),
         }
         .to_account_metas(Some(true)),
-        data: marginfi::instruction::InitBankMetadata {}.data(),
+        data: marginfi::instruction::InitBankMetadata { bank_seed }.data(),
     };
 
     let signing_keypairs = config.get_signers(false);

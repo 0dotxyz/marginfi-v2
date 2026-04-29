@@ -1,9 +1,7 @@
 #[cfg(not(feature = "client"))]
 use crate::events::{GroupEventHeader, LendingPoolBankAccrueInterestEvent};
 use crate::{
-    check,
-    constants::DRIFT_SCALED_BALANCE_DECIMALS,
-    debug,
+    check, debug,
     errors::MarginfiError,
     math_error,
     prelude::MarginfiResult,
@@ -16,7 +14,6 @@ use crate::{
             InterestRateStateChanges,
         },
         marginfi_account::calc_value,
-        price::OraclePriceWithConfidence,
     },
 };
 use anchor_lang::prelude::*;
@@ -40,7 +37,10 @@ use marginfi_type_crate::{
         LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
-    types::{Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup},
+    types::{
+        Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup,
+        OraclePriceWithConfidence,
+    },
 };
 
 pub trait BankImpl {
@@ -67,7 +67,6 @@ pub trait BankImpl {
     fn get_asset_amount(&self, shares: I80F48) -> MarginfiResult<I80F48>;
     fn get_liability_shares(&self, value: I80F48) -> MarginfiResult<I80F48>;
     fn get_asset_shares(&self, value: I80F48) -> MarginfiResult<I80F48>;
-    fn get_balance_decimals(&self) -> u8;
     fn get_remaining_deposit_capacity(&self) -> MarginfiResult<u64>;
     fn change_asset_shares(&mut self, shares: I80F48, bypass_deposit_limit: bool)
         -> MarginfiResult;
@@ -203,14 +202,6 @@ impl BankImpl for Bank {
         Ok(value
             .checked_div(self.asset_share_value.into())
             .ok_or_else(math_error!())?)
-    }
-
-    fn get_balance_decimals(&self) -> u8 {
-        if self.config.asset_tag == ASSET_TAG_DRIFT {
-            DRIFT_SCALED_BALANCE_DECIMALS
-        } else {
-            self.mint_decimals
-        }
     }
 
     fn get_remaining_deposit_capacity(&self) -> MarginfiResult<u64> {
