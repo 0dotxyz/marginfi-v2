@@ -198,6 +198,7 @@ pub mod discriminators {
     pub const LIQUIDATION_RECORD: [u8; 8] = [95, 116, 23, 132, 89, 210, 245, 162];
     pub const ORDER: [u8; 8] = [134, 173, 223, 185, 77, 86, 28, 51];
     pub const EXECUTE_ORDER_RECORD: [u8; 8] = [6, 100, 107, 60, 164, 226, 56, 97];
+    pub const HISTORY_ARCHIVE: [u8; 8] = [16, 196, 77, 220, 174, 253, 214, 94];
 }
 
 pub mod ix_discriminators {
