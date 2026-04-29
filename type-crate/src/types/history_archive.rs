@@ -138,19 +138,11 @@ impl HistoryHeader {
     /// Serialize and write a record into the newest physical slot.
     ///
     /// Caller must ensure the archive is non-empty and `payload` points to the payload region.
-    fn write_latest_slot<T: HistoryRecord>(
-        &self,
-        payload: &mut [u8],
-        record: &T,
-    ) -> Option<()> {
+    fn write_latest_slot<T: HistoryRecord>(&self, payload: &mut [u8], record: &T) -> Option<()> {
         let latest_physical = self.latest_physical_index()? as usize;
 
-        let start = latest_physical
-            .checked_mul(T::LEN)
-            ?;
-        let end = start
-            .checked_add(T::LEN)
-            ?;
+        let start = latest_physical.checked_mul(T::LEN)?;
+        let end = start.checked_add(T::LEN)?;
 
         if end > payload.len() {
             return None;
@@ -171,11 +163,7 @@ impl HistoryHeader {
     /// - `account_data`: full mutable account data (discriminator + header + payload).
     /// - `record`: record value to serialize and write.
     ///
-    pub fn append<T: HistoryRecord>(
-        &mut self,
-        account_data: &mut [u8],
-        record: &T,
-    ) -> Option<()> {
+    pub fn append<T: HistoryRecord>(&mut self, account_data: &mut [u8], record: &T) -> Option<()> {
         if T::LEN == 0 {
             return None;
         }
@@ -206,34 +194,27 @@ impl HistoryHeader {
             return Some(());
         }
 
-
         let write_idx = if len < self.capacity {
             (self.head + len) % self.capacity
         } else {
             self.head
         } as usize;
 
-
-        let start = write_idx
-            .checked_mul(T::LEN)
-            ?;
-        let end = start
-            .checked_add(T::LEN)
-            ?;
+        let start = write_idx.checked_mul(T::LEN)?;
+        let end = start.checked_add(T::LEN)?;
         if end > payload.len() {
             return None;
         }
 
         record.to_bytes(&mut payload[start..end])?;
-        
+
         self.latest_ts = ts;
 
         if is_empty {
             self.head_ts = ts;
             self.len = 1;
-        }
-        else if len < self.capacity {
-            self.len = std::cmp::min(len+1, self.capacity);
+        } else if len < self.capacity {
+            self.len = std::cmp::min(len + 1, self.capacity);
         } else {
             self.head = (self.head + 1) % self.capacity;
             let head_record = self.parse_physical::<T>(payload, self.head)?;
