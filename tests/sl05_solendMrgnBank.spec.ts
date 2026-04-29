@@ -150,6 +150,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
 
     const bank = await bankrunProgram.account.bank.fetch(bankKey);
     assertKeysEqual(bank.mint, ecosystem.usdcMint.publicKey);
+    assertBNEqual(bank.bankSeed, seed);
     assert.equal(bank.config.assetTag, ASSET_TAG_SOLEND);
     assertKeysEqual(bank.group, solendGroup.publicKey);
 
@@ -211,6 +212,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
 
     const bank = await bankrunProgram.account.bank.fetch(bankKey);
     assertKeysEqual(bank.mint, ecosystem.tokenAMint.publicKey);
+    assertBNEqual(bank.bankSeed, seed);
     assert.equal(bank.config.assetTag, ASSET_TAG_SOLEND);
     assertKeysEqual(bank.group, solendGroup.publicKey);
 

@@ -10,7 +10,7 @@ use marginfi::{
 };
 use marginfi_type_crate::{
     constants::{
-        CLOSE_ENABLED_FLAG, FREEZE_SETTINGS, IS_T22, METADATA_SEED,
+        BANK_SEED_KNOWN, CLOSE_ENABLED_FLAG, FREEZE_SETTINGS, IS_T22, METADATA_SEED,
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
@@ -373,7 +373,7 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(total_liability_shares, I80F48!(0.0).into());
             assert_eq!(total_asset_shares, I80F48!(0.0).into());
             assert_eq!(config, bank_config);
-            assert_eq!(flags, CLOSE_ENABLED_FLAG | expected_is_t22);
+            assert_eq!(flags, CLOSE_ENABLED_FLAG | expected_is_t22 | BANK_SEED_KNOWN);
             assert_eq!(flags & IS_T22, expected_is_t22);
             assert_eq!(emissions_rate, 0);
             assert_eq!(emissions_mint, Pubkey::new_from_array([0; 32]));
@@ -434,7 +434,7 @@ async fn backfill_is_t22_noop_for_classic_bank() -> anyhow::Result<()> {
 
     test_f
         .marginfi_group
-        .try_lending_pool_backfill_bank_is_t22_flag(&bank)
+        .try_lending_pool_backfill_bank_is_t22_flag(&bank, None)
         .await?;
 
     let bank_after = bank.load().await;

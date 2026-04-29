@@ -8,9 +8,9 @@ use anchor_lang::prelude::*;
 use anchor_spl::token_interface::*;
 use marginfi_type_crate::{
     constants::{
-        ASSET_TAG_DEFAULT, ASSET_TAG_SOL, FEE_STATE_SEED, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED,
-        INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, IS_T22,
-        LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+        ASSET_TAG_DEFAULT, ASSET_TAG_SOL, BANK_SEED_KNOWN, FEE_STATE_SEED,
+        FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, INSURANCE_VAULT_AUTHORITY_SEED,
+        INSURANCE_VAULT_SEED, IS_T22, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
     },
     types::{Bank, BankConfigCompact, FeeState, MarginfiGroup},
 };
@@ -73,6 +73,7 @@ pub fn lending_pool_add_bank_with_seed(
         fee_vault_authority_bump,
         bank_seed,
     );
+    bank.flags |= BANK_SEED_KNOWN;
     if bank_mint.to_account_info().owner == &anchor_spl::token_2022::ID {
         bank.flags |= IS_T22;
     }

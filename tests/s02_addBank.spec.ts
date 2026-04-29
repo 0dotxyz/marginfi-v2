@@ -35,6 +35,7 @@ import {
 import {
   aprToU32,
   ASSET_TAG_DEFAULT,
+  BANK_SEED_KNOWN_FLAG,
   ASSET_TAG_SOL,
   ASSET_TAG_STAKED,
   CLOSE_ENABLED_FLAG,
@@ -483,6 +484,7 @@ describe("Init group and add banks with asset category flags", () => {
     const id = program.programId;
 
     assertKeysEqual(bank.mint, validators[0].splMint);
+    assertBNEqual(bank.bankSeed, new BN(0));
     // Note: stake accounts use SOL decimals
     assert.equal(bank.mintDecimals, ecosystem.wsolDecimals);
     assertKeysEqual(bank.group, marginfiGroup.publicKey);
@@ -515,7 +517,7 @@ describe("Init group and add banks with asset category flags", () => {
     assertI80F48Equal(bank.collectedGroupFeesOutstanding, 0);
     assertI80F48Equal(bank.totalLiabilityShares, 0);
     assertI80F48Equal(bank.totalAssetShares, 0);
-    assertBNEqual(bank.flags, CLOSE_ENABLED_FLAG);
+    assertBNEqual(bank.flags, CLOSE_ENABLED_FLAG + BANK_SEED_KNOWN_FLAG);
     assertBNEqual(bank.emissionsRate, 0);
     assertI80F48Equal(bank.emissionsRemaining, 0);
 
@@ -611,6 +613,7 @@ describe("Init group and add banks with asset category flags", () => {
     }
 
     const bank = await bankrunProgram.account.bank.fetch(validators[1].bank);
+    assertBNEqual(bank.bankSeed, new BN(0));
     assertKeysEqual(bank.integrationAcc1, validators[1].voteAccount);
   });
 

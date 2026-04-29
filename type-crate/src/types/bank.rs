@@ -100,6 +100,9 @@ pub struct Bank {
     /// - Bit 5 (32): `TOKENLESS_REPAYMENTS_ALLOWED` — risk admin can repay debt without tokens
     /// - Bit 6 (64): `TOKENLESS_REPAYMENTS_COMPLETE` — all debt cleared, lender purge enabled
     /// - Bit 7 (128): `IS_T22` — 1 if T22, 0 if token classic
+    /// - Bit 8 (256): `BANK_SEED_KNOWN` — bank is known to be PDA/seed-derived. If not set, bank
+    ///   may still be a PDA, but created before this flag launched (1.8 or earlier) or is a legacy
+    ///   keypair-based bank.
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.
@@ -163,18 +166,19 @@ pub struct Bank {
 
     pub _pad_0: [u8; 16], // 16B
 
-    /// The seed used to derive this bank's PDA, captured at creation time.
+    /// The seed used to derive this bank's PDA.
     ///
     /// * `0` for legacy banks created via `lending_pool_add_bank` (the bank account is a fresh
-    ///   keypair, not a PDA, so there is no seed). Banks created before this field existed will
-    ///   also read `0`, since these bytes were previously reserve padding.
+    ///   keypair, not a PDA, so there is no seed), or pre-backfill banks where the seed remains
+    ///   unknown.
     /// * Otherwise the `bank_seed: u64` argument passed to `lending_pool_add_bank_with_seed`,
     ///   `lending_pool_add_bank_permissionless`, `lending_pool_clone_bank`,
     ///   `lending_pool_add_bank_kamino`, `lending_pool_add_bank_drift`,
-    ///   `lending_pool_add_bank_solend`, or `lending_pool_add_bank_juplend`. Lets clients
-    ///   re-derive the bank PDA and any seed-derived child PDAs from on-chain data alone.
-    pub bank_seed: u64, // 8B; carved from the first 8B of the old _padding_1: [[u64; 2]; 7] (112B).
-    pub _padding_1: [u64; 13], // 8 * 13 = 104B; total reserve still 16 + 8 + 104 = 128B.
+    ///   `lending_pool_add_bank_solend`, or `lending_pool_add_bank_juplend`.
+    ///
+    /// Use `flags & BANK_SEED_KNOWN` to verify this value has known seed provenance.
+    pub bank_seed: u64,
+    pub _padding_1: [u64; 13], // 8 * 13 = 104B;
 }
 
 impl Bank {

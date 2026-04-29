@@ -468,6 +468,8 @@ function getGenesisAccounts(): AddedAccount[] {
     loadJsonFixture("tests/fixtures/cloud_bank.json"),
     loadJsonFixture("tests/fixtures/pyusd_bank.json"),
     loadJsonFixture("tests/fixtures/pyusd_mint.json"),
+    loadJsonFixture("tests/fixtures/corvus.json"),
+    loadJsonFixture("tests/fixtures/corvus_mint.json"),
     loadJsonFixture("tests/fixtures/localnet_usdc.json"),
     loadJsonFixture("tests/fixtures/gappy_user3.json"),
     loadJsonFixture("tests/fixtures/gappy_user4.json"),
