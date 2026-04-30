@@ -93,12 +93,11 @@ demand, without exposing other configuration.
 
 ### Delegate Emissions Admin
 
-A scoped admin that can only modify emissions settings.
+A deprecated scoped admin role retained for backward compatibility.
 
 **Can do:**
-- Modify emissions flags (enable/disable borrow and lending emissions)
-- Modify `emissions_rate` and `emissions_mint`
-- Top up emissions funding
+- Nothing on-chain today. This role is currently a no-op.
+- The pubkey can still be set/stored via group configuration for compatibility.
 
 ### Metadata Admin
 
@@ -262,7 +261,7 @@ For more details see the [Receivership Liquidation Guide](../RISK_AND_LIQUIDATOR
 | Configure deleverage withdraw daily limit | `admin` or `delegate_limit_admin` |
 | Settle group rate limiter batches | `admin` or `delegate_limit_admin` |
 | Settle deleverage withdraw batches | `admin` or `delegate_limit_admin` |
-| Configure emissions | `admin` or `delegate_emissions_admin` |
+| Configure emissions | Deprecated / no-op (no active authority path) |
 | Configure emode | `emode_admin` |
 | Write bank metadata | `metadata_admin` |
 | Freeze/unfreeze account | `admin` |

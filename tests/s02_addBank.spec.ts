@@ -526,9 +526,9 @@ describe("Init group and add banks with asset category flags", () => {
     assertI80F48Approx(config.liabilityWeightMaint, 1.25);
     assertBNEqual(config.depositLimit, settingsAcc.depositLimit);
 
-    assertI80F48Equal(interest.optimalUtilizationRate, 0);
-    assertI80F48Equal(interest.plateauInterestRate, 0);
-    assertI80F48Equal(interest.maxInterestRate, 0);
+    assertI80F48Equal(interest.placeholder0, 0);
+    assertI80F48Equal(interest.placeholder1, 0);
+    assertI80F48Equal(interest.placeholder2, 0);
 
     assertI80F48Equal(interest.insuranceFeeFixedApr, 0);
     assertI80F48Approx(interest.insuranceIrFee, 0.1);

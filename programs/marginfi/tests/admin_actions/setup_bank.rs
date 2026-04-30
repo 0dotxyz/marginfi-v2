@@ -782,7 +782,7 @@ async fn configure_bank_success(bank_mint: BankMint) -> anyhow::Result<()> {
     } = &config_bank_opt;
     // Compare bank field to opt field if Some, otherwise compare to old bank field
     macro_rules! check_bank_field {
-        // Note: some nested fields (e.g. optimal_utilization_rate) don't exist on the config struct
+        // Note: some nested fields (e.g. placeholder0) don't exist on the config struct
         ($field:ident, $subfield:ident) => {
             assert_eq!(
                 bank.config.$field.$subfield,
@@ -1552,9 +1552,9 @@ async fn configure_bank_interest_only_success() -> anyhow::Result<()> {
 
     let ir_config = InterestRateConfigOpt {
         // TODO deprecate in 1.7
-        // optimal_utilization_rate: Some(I80F48::from_num(0.9).into()),
-        // plateau_interest_rate: Some(I80F48::from_num(0.5).into()),
-        // max_interest_rate: Some(I80F48::from_num(1.5).into()),
+        // placeholder0: Some(I80F48::from_num(0.9).into()),
+        // placeholder1: Some(I80F48::from_num(0.5).into()),
+        // placeholder2: Some(I80F48::from_num(1.5).into()),
         insurance_fee_fixed_apr: Some(I80F48::from_num(0.01).into()),
         insurance_ir_fee: Some(I80F48::from_num(0.02).into()),
         protocol_fixed_fee_apr: Some(I80F48::from_num(0.03).into()),
@@ -1574,20 +1574,17 @@ async fn configure_bank_interest_only_success() -> anyhow::Result<()> {
 
     // TODO deprecate in 1.7
     assert_eq!(
-        bank_after
-            .config
-            .interest_rate_config
-            .optimal_utilization_rate,
+        bank_after.config.interest_rate_config.placeholder0,
         I80F48::ZERO.into()
     );
     // TODO deprecate in 1.7
     assert_eq!(
-        bank_after.config.interest_rate_config.plateau_interest_rate,
+        bank_after.config.interest_rate_config.placeholder1,
         I80F48::ZERO.into()
     );
     // TODO deprecate in 1.7
     assert_eq!(
-        bank_after.config.interest_rate_config.max_interest_rate,
+        bank_after.config.interest_rate_config.placeholder2,
         I80F48::ZERO.into()
     );
     assert_eq!(

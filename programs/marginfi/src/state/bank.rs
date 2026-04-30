@@ -500,8 +500,7 @@ impl BankImpl for Bank {
             &ir_calc,
             self.asset_share_value.into(),
             self.liability_share_value.into(),
-        )
-        .ok_or_else(math_error!())?;
+        )?;
 
         debug!("deposit share value: {}\nliability share value: {}\nfees collected: {}\ninsurance collected: {}",
             asset_share_value, liability_share_value, group_fees_collected, insurance_fees_collected);
@@ -589,9 +588,7 @@ impl BankImpl for Bank {
         let utilization_rate: I80F48 = total_liabilities_amount
             .checked_div(total_assets_amount)
             .ok_or_else(math_error!())?;
-        let interest_rates = ir_calc
-            .calc_interest_rate(utilization_rate)
-            .ok_or_else(math_error!())?;
+        let interest_rates = ir_calc.calc_interest_rate(utilization_rate)?;
 
         update_interest_rates(&mut self.cache, &interest_rates);
 

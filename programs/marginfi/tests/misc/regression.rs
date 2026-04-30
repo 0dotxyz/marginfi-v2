@@ -320,15 +320,15 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
         I80F48::from_str("1.2").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.optimal_utilization_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder0),
         I80F48::from_str("0.8").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.plateau_interest_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder1),
         I80F48::from_str("0.1").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.max_interest_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder2),
         I80F48::from_str("3").unwrap()
     );
     assert_eq!(
@@ -412,15 +412,15 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
         I80F48::from_str("1.5").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.optimal_utilization_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder0),
         I80F48::from_str("0.8").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.plateau_interest_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder1),
         I80F48::from_str("0.1").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.max_interest_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder2),
         I80F48::from_str("3").unwrap()
     );
     assert_eq!(
@@ -504,15 +504,15 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
         I80F48::from_str("1.1").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.optimal_utilization_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder0),
         I80F48::from_str("0.8").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.plateau_interest_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder1),
         I80F48::from_str("0.2").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.max_interest_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder2),
         I80F48::from_str("4").unwrap()
     );
     assert_eq!(
@@ -620,15 +620,15 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     );
     assert_eq!(bank.config.deposit_limit, 40000000000000);
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.optimal_utilization_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder0),
         I80F48::from_str("0.8").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.plateau_interest_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder1),
         I80F48::from_str("0.1").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.max_interest_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder2),
         I80F48::from_str("3").unwrap()
     );
     assert_eq!(
