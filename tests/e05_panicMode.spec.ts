@@ -6,7 +6,6 @@ import {
   Transaction,
 } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
-import { Clock } from "solana-bankrun";
 import {
   globalFeeWallet,
   globalProgramAdmin,
@@ -42,11 +41,8 @@ import {
   assertBNEqual,
   waitUntil,
 } from "./utils/genericTests";
-import {
-  DAILY_RESET_INTERVAL,
-  MAX_CONSECUTIVE_PAUSES,
-  PAUSE_DURATION_SECONDS,
-} from "./utils/types";
+import { MAX_DAILY_PAUSES, PAUSE_DURATION_SECONDS } from "./utils/types";
+import { dummyIx } from "./utils/bankrunConnection";
 import { USER_ACCOUNT_E } from "./utils/mocks";
 import {
   liquidateIx,
@@ -56,7 +52,6 @@ import {
   borrowIx,
   repayIx,
 } from "./utils/user-instructions";
-import { dummyIx } from "./utils/bankrunConnection";
 import { getBankrunBlockhash } from "./utils/tools";
 
 describe("Panic Mode state test (Bankrun)", () => {
@@ -66,7 +61,6 @@ describe("Panic Mode state test (Bankrun)", () => {
   let feeState: FeeState;
 
   let firstTimestamp: BN;
-  let latestDailyResetTimestamp: BN;
 
   const seed = new BN(EMODE_SEED);
   let usdcBank: PublicKey;
@@ -154,7 +148,6 @@ describe("Panic Mode state test (Bankrun)", () => {
     assertBNApproximately(fs.panicState.lastDailyResetTimestamp, now, 100);
 
     firstTimestamp = fs.panicState.lastDailyResetTimestamp;
-    latestDailyResetTimestamp = firstTimestamp;
     assert.equal(fs.panicState.dailyPauseCount, 1);
     assert.equal(fs.panicState.consecutivePauseCount, 1);
     // If you're getting issues having firstTimestamp in later tests, bump this. Yes it's a dumb
@@ -163,20 +156,20 @@ describe("Panic Mode state test (Bankrun)", () => {
   });
 
   it("(fee admin) extends an existing pause - happy path", async () => {
-    const tx = new Transaction();
-    tx.add(
-      await panicPause(globalProgramAdmin.mrgnBankrunProgram, {}),
-      // Dummy tx to trick bankrun
-      SystemProgram.transfer({
-        fromPubkey: globalProgramAdmin.wallet.publicKey,
-        toPubkey: users[0].wallet.publicKey,
-        lamports: 54321,
-      })
-    );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(globalProgramAdmin.wallet);
+    const adminPk = globalProgramAdmin.wallet.publicKey;
+    const recipientPk = users[0].wallet.publicKey;
 
-    await banksClient.processTransaction(tx);
+
+    for (let i = 1; i < MAX_DAILY_PAUSES; i++) {
+      const tx = new Transaction();
+      tx.add(
+        await panicPause(globalProgramAdmin.mrgnBankrunProgram, {}),
+        dummyIx(adminPk, recipientPk)
+      );
+      tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+      tx.sign(globalProgramAdmin.wallet);
+      await banksClient.processTransaction(tx);
+    }
 
     const fs = await bankrunProgram.account.feeState.fetch(feeStateKey);
     assert.equal(fs.panicState.pauseFlags, 1);
@@ -185,82 +178,25 @@ describe("Panic Mode state test (Bankrun)", () => {
     assertBNApproximately(
       fs.panicState.pauseStartTimestamp,
       // firstTimestamp undefined error here? Bump the wait in the above test.
-      firstTimestamp.toNumber() + PAUSE_DURATION_SECONDS,
+      firstTimestamp.toNumber() + PAUSE_DURATION_SECONDS * (MAX_DAILY_PAUSES - 1),
       10
     );
     // No change on reset
     assertBNEqual(fs.panicState.lastDailyResetTimestamp, firstTimestamp);
-    assert.equal(fs.panicState.dailyPauseCount, 2);
-    assert.equal(fs.panicState.consecutivePauseCount, 2);
+    assert.equal(fs.panicState.dailyPauseCount, MAX_DAILY_PAUSES);
+    assert.equal(fs.panicState.consecutivePauseCount, MAX_DAILY_PAUSES);
   });
 
   it("(fee admin) tries extends an existing pause again - fails due to pause limits", async () => {
-    const adminPk = globalProgramAdmin.wallet.publicKey;
-    const recipientPk = users[0].wallet.publicKey;
-
-    const sendPauseWithDummy = async () => {
-      const tx = new Transaction();
-      tx.add(
-        await panicPause(globalProgramAdmin.mrgnBankrunProgram, {}),
-        // Required to avoid bankrun treating repeated identical txs as already processed.
-        dummyIx(adminPk, recipientPk)
-      );
-      tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(globalProgramAdmin.wallet);
-      await banksClient.processTransaction(tx);
-    };
-
-    const advanceOneDay = async () => {
-      const clock = await banksClient.getClock();
-      bankrunContext.setClock(
-        new Clock(
-          clock.slot,
-          clock.epochStartTimestamp,
-          clock.epoch,
-          clock.leaderScheduleEpoch,
-          clock.unixTimestamp + BigInt(DAILY_RESET_INTERVAL + 1)
-        )
-      );
-    };
-
-    // We start this test with consecutivePauseCount = 2 from prior tests.
-    const remainingSuccessfulPauses = MAX_CONSECUTIVE_PAUSES - 2;
-    let successfulPauses = 0;
-
-    // Day 0 can only fit one more pause (daily count is already 2). Then we jump days and do
-    // up to 3 pauses/day (daily max) until consecutive reaches MAX_CONSECUTIVE_PAUSES.
-    const pausesByDay = [1, 3, 3, 3];
-    for (const pausesToday of pausesByDay) {
-      for (
-        let i = 0;
-        i < pausesToday && successfulPauses < remainingSuccessfulPauses;
-        i++
-      ) {
-        await sendPauseWithDummy();
-        successfulPauses += 1;
-      }
-
-      if (successfulPauses < remainingSuccessfulPauses) {
-        await advanceOneDay();
-      }
-    }
-
-    const fsBeforeFail = await bankrunProgram.account.feeState.fetch(feeStateKey);
-    assert.equal(
-      fsBeforeFail.panicState.consecutivePauseCount,
-      MAX_CONSECUTIVE_PAUSES
-    );
-    latestDailyResetTimestamp = fsBeforeFail.panicState.lastDailyResetTimestamp;
-
-    const failTx = new Transaction();
-    failTx.add(
+    const tx = new Transaction();
+    tx.add(
       await panicPause(globalProgramAdmin.mrgnBankrunProgram, {}),
-      dummyIx(adminPk, recipientPk)
+      dummyIx(globalProgramAdmin.wallet.publicKey, users[0].wallet.publicKey)
     );
-    failTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    failTx.sign(globalProgramAdmin.wallet);
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(globalProgramAdmin.wallet);
 
-    const result = await banksClient.tryProcessTransaction(failTx);
+    const result = await banksClient.tryProcessTransaction(tx);
     // PauseLimitExceeded
     assertBankrunTxFailed(result, 6082);
   });
@@ -488,9 +424,8 @@ describe("Panic Mode state test (Bankrun)", () => {
     const fs = await bankrunProgram.account.feeState.fetch(feeStateKey);
     assert.equal(fs.panicState.pauseFlags, 0);
     assertBNEqual(fs.panicState.pauseStartTimestamp, 0);
-    // TODO: Restore this to validating the timestamp doesn't change once pause is put back to <1d
-    // Here we assert against the latest reset value after the multi-day pause-limit test above.
-    assertBNEqual(fs.panicState.lastDailyResetTimestamp, latestDailyResetTimestamp);
+    // No change to reset timestamp
+    assertBNEqual(fs.panicState.lastDailyResetTimestamp, firstTimestamp);
     assert.equal(fs.panicState.consecutivePauseCount, 0);
   });
 

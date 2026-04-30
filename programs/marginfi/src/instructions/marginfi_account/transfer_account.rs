@@ -17,7 +17,7 @@ use marginfi_type_crate::{
     constants::MARGINFI_ACCOUNT_SEED,
     types::{
         LendingAccount, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_FLASHLOAN,
-        ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -41,6 +41,17 @@ pub fn transfer_to_new_account(ctx: Context<TransferToNewAccount>) -> MarginfiRe
     check!(
         !old_account.get_flag(ACCOUNT_IN_RECEIVERSHIP),
         MarginfiError::ForbiddenIx
+    );
+
+    check!(
+        !old_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION),
+        MarginfiError::ForbiddenIx
+    );
+
+    check!(
+        old_account.active_orders == 0,
+        MarginfiError::IllegalAction,
+        "Close all active orders before transfer"
     );
 
     // Prevent multiple migrations from the same account
@@ -166,6 +177,17 @@ pub fn transfer_to_new_account_pda(
     check!(
         !old_account.get_flag(ACCOUNT_IN_RECEIVERSHIP),
         MarginfiError::ForbiddenIx
+    );
+
+    check!(
+        !old_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION),
+        MarginfiError::ForbiddenIx
+    );
+
+    check!(
+        old_account.active_orders == 0,
+        MarginfiError::IllegalAction,
+        "Close all active orders before transfer"
     );
 
     // Prevent multiple migrations from the same account

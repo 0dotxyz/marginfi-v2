@@ -245,6 +245,14 @@ pub mod marginfi {
         marginfi_account::initialize_liquidation_record(ctx)
     }
 
+    /// (permissionless) Close a liquidation record PDA and return rent to the original payer.
+    /// Rent always goes to `record_payer`. Fails if the account is in receivership or deleverage.
+    pub fn marginfi_account_close_liq_record(
+        ctx: Context<CloseLiquidationRecord>,
+    ) -> MarginfiResult {
+        marginfi_account::close_liquidation_record(ctx)
+    }
+
     /// The same as `marginfi_account_initialize`, except the created marginfi account uses a PDA
     /// (Program Derived Address)
     ///
@@ -665,8 +673,8 @@ pub mod marginfi {
         marginfi_account::end_deleverage(ctx)
     }
 
-    /// (global_fee_admin or pause_delegate_admin only) Pause the protocol. Auto-expires after 30
-    /// minutes. Limited to 3 pauses per day and 2 consecutive pauses.
+    /// (global_fee_admin or pause_delegate_admin only) Pause the protocol. Auto-expires after 6
+    /// hours. Limited to 3 pauses per day and 4 consecutive pauses.
     pub fn panic_pause(ctx: Context<PanicPause>) -> MarginfiResult {
         marginfi_group::panic_pause(ctx)
     }

@@ -27,6 +27,7 @@ import {
   globalProgramAdmin,
   groupAdmin,
   marginfiGroup,
+  users,
 } from "./rootHooks";
 import { assert } from "chai";
 import { getTokenBalance, expectFailedTxWithError } from "./utils/genericTests";
@@ -56,6 +57,7 @@ import {
   PYTH_RECEIVER_PROGRAM_ID,
 } from "./utils/bankrun-oracles";
 import { accountInit } from "./utils/user-instructions";
+import { dummyIx } from "./utils/bankrunConnection";
 
 function assertSameBankDeposit(
   sharesBefore: { value: number[] },
@@ -191,6 +193,7 @@ describe("Same-bank deposit", () => {
     cfg.operationalState = state;
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
+        dummyIx(groupAdmin.wallet.publicKey, users[0].wallet.publicKey),
         await configureBank(groupAdmin.mrgnProgram, {
           bank: bankKeypairA.publicKey,
           bankConfigOpt: cfg,
@@ -204,6 +207,7 @@ describe("Same-bank deposit", () => {
       ? await panicPause(globalProgramAdmin.mrgnProgram, {})
       : await panicUnpause(globalProgramAdmin.mrgnProgram, {});
     const tx = new Transaction().add(
+      dummyIx(globalProgramAdmin.wallet.publicKey, users[0].wallet.publicKey),
       controlIx,
       await propagateFeeState(globalProgramAdmin.mrgnProgram, {
         group: marginfiGroup.publicKey,
@@ -230,7 +234,12 @@ describe("Same-bank deposit", () => {
 
     await expectFailedTxWithError(
       async () => {
-        await provider.sendAndConfirm(new Transaction().add(ix));
+        await provider.sendAndConfirm(
+          new Transaction().add(
+            ix,
+            dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey),
+          ),
+        );
       },
       "BankPaused",
       6016,
@@ -254,7 +263,12 @@ describe("Same-bank deposit", () => {
     });
     await expectFailedTxWithError(
       async () => {
-        await provider.sendAndConfirm(new Transaction().add(ix));
+        await provider.sendAndConfirm(
+          new Transaction().add(
+            ix,
+            dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey),
+          ),
+        );
       },
       "BankReduceOnly",
       6017,
@@ -296,7 +310,12 @@ describe("Same-bank deposit", () => {
 
     await expectFailedTxWithError(
       async () => {
-        await provider.sendAndConfirm(new Transaction().add(ix));
+        await provider.sendAndConfirm(
+          new Transaction().add(
+            ix,
+            dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey),
+          ),
+        );
       },
       "InvalidEmissionsMint",
       6097,
@@ -338,7 +357,12 @@ describe("Same-bank deposit", () => {
         liquidityVault: bank.liquidityVault,
         amount,
       });
-      await provider.sendAndConfirm(new Transaction().add(ix));
+      await provider.sendAndConfirm(
+        new Transaction().add(
+          ix,
+          dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey),
+        ),
+      );
     } finally {
       await setEmissionsDirect(
         provider,
@@ -367,7 +391,12 @@ describe("Same-bank deposit", () => {
 
     await expectFailedTxWithError(
       async () => {
-        await provider.sendAndConfirm(new Transaction().add(ix));
+        await provider.sendAndConfirm(
+          new Transaction().add(
+            ix,
+            dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey),
+          ),
+        );
       },
       "InvalidLiquidityVault",
       6094,
@@ -390,7 +419,12 @@ describe("Same-bank deposit", () => {
     try {
       await expectFailedTxWithError(
         async () => {
-          await provider.sendAndConfirm(new Transaction().add(ix));
+          await provider.sendAndConfirm(
+            new Transaction().add(
+              ix,
+              dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey),
+            ),
+          );
         },
         "ProtocolPaused",
         6080,

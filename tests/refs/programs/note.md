@@ -1,1 +1,0 @@
-This folder is solely for the AI to have context about juplend without consulting an external source and can be deleted at any time.

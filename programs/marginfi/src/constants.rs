@@ -11,6 +11,11 @@ use crate::MarginfiResult;
 // 1. the constants used for testing/internal purposes
 // 2. or the ones dependant on some 3rd party crates which are not part of type-crate dependency tree
 
+// Yes, these are duplicates of the crate ID.
+pub const MAINNET_PROGRAM_ID: Pubkey = pubkey!("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA");
+pub const STAGING_ID: Pubkey = pubkey!("stag8sTKds2h4KzjUw3zKTsxbqvT4XKHdaR9X9E6Rct");
+pub const LOCALNET_ID: Pubkey = pubkey!("2jGhuVUuy3umdzByFx8sNWUAaf5vaeuDm78RDPEnhrMr");
+
 /// Mocks program ID for third-party ID restrictions
 pub const MOCKS_PROGRAM_ID: Pubkey = pubkey!("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ");
 

@@ -1345,6 +1345,23 @@ impl MarginfiAccountFixture {
         }
     }
 
+    pub async fn make_close_liquidation_record_ix(
+        &self,
+        liquidation_record: Pubkey,
+        record_payer: Pubkey,
+    ) -> Instruction {
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::CloseLiquidationRecord {
+                marginfi_account: self.key,
+                liquidation_record,
+                record_payer,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountCloseLiqRecord {}.data(),
+        }
+    }
+
     pub async fn make_kamino_refresh_reserve_ix(&self, bank: &BankFixture) -> Instruction {
         let bank_state = bank.load().await;
         let (lending_market, pyth_oracle, scope_prices) = if let Some(kamino) = &bank.kamino {
