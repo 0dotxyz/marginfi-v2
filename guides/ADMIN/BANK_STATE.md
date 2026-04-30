@@ -129,8 +129,8 @@ without moving tokens.
 
 | Bit | Name | Value | Who Sets It | Effect |
 |-----|------|-------|-------------|--------|
-| 0 | `EMISSIONS_FLAG_BORROW_ACTIVE` | 1 | Emissions admin | Enables borrow emissions |
-| 1 | `EMISSIONS_FLAG_LENDING_ACTIVE` | 2 | Emissions admin | Enables lending emissions |
+| 0 | `EMISSIONS_FLAG_BORROW_ACTIVE` | 1 | Deprecated emissions role (no-op) | Historical borrow-emissions flag |
+| 1 | `EMISSIONS_FLAG_LENDING_ACTIVE` | 2 | Deprecated emissions role (no-op) | Historical lending-emissions flag |
 | 2 | `PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG` | 4 | Admin | Anyone can settle bad debt |
 | 3 | `FREEZE_SETTINGS` | 8 | Admin | Freezes most bank config (only deposit/borrow limits changeable) |
 | 4 | `CLOSE_ENABLED_FLAG` | 16 | Auto (at creation) | Allows bank closure. Cannot be toggled after creation. |

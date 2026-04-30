@@ -497,9 +497,9 @@ lazy_static! {
     pub static ref DEFAULT_TEST_BANK_INTEREST_RATE_CONFIG: InterestRateConfig =
         InterestRateConfig {
             // TODO deprecate in 1.7
-            optimal_utilization_rate: I80F48!(0.5).into(),
-            plateau_interest_rate: I80F48!(0.6).into(),
-            max_interest_rate: I80F48!(3).into(),
+            placeholder0: I80F48!(0.5).into(),
+            placeholder1: I80F48!(0.6).into(),
+            placeholder2: I80F48!(3).into(),
 
             insurance_fee_fixed_apr: I80F48!(0).into(),
             insurance_ir_fee: I80F48!(0).into(),
@@ -528,9 +528,9 @@ lazy_static! {
 
         interest_rate_config: InterestRateConfig {
             // TODO deprecate in 1.7
-            optimal_utilization_rate: I80F48!(0).into(),
-            plateau_interest_rate: I80F48!(0).into(),
-            max_interest_rate: I80F48!(0).into(),
+            placeholder0: I80F48!(0).into(),
+            placeholder1: I80F48!(0).into(),
+            placeholder2: I80F48!(0).into(),
 
             insurance_fee_fixed_apr: I80F48!(0).into(),
             insurance_ir_fee: I80F48!(0).into(),
