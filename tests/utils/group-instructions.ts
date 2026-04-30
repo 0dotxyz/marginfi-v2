@@ -920,8 +920,9 @@ export const initBankMetadata = (
       group: args.group,
       bankMint: args.bankMint,
       // metadata: args.metadata, // derived from bank
-      // bank: args.bank,
+      // bank: args.bank, // derived from seeds
     })
+    .accountsPartial({ bank: args.bank })
     .instruction();
 
   return ix;
