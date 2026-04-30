@@ -159,7 +159,7 @@ describe("Panic Mode state test (Bankrun)", () => {
     const adminPk = globalProgramAdmin.wallet.publicKey;
     const recipientPk = users[0].wallet.publicKey;
 
-  
+
     for (let i = 1; i < MAX_DAILY_PAUSES; i++) {
       const tx = new Transaction();
       tx.add(

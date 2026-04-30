@@ -117,7 +117,7 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
       oracles.wsolOracleSwb.publicKey,
     );
   };
- 
+
   const pulseHealth = async (
     user: (typeof users)[number],
     marginfiAccountPk: PublicKey,

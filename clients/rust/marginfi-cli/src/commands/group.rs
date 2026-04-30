@@ -211,6 +211,19 @@ pub enum GroupCommand {
         )]
         enable_program_fee: bool,
     },
+    /// Set or clear the dedicated pause delegate admin
+    ///
+    /// Example: `mfi group set-pause-delegate-admin --pause-delegate-admin <PUBKEY>`
+    #[clap(
+        after_help = "Examples:\n  mfi group set-pause-delegate-admin --pause-delegate-admin <PUBKEY>\n  mfi group set-pause-delegate-admin --clear",
+        after_long_help = "Examples:\n  mfi group set-pause-delegate-admin --pause-delegate-admin <PUBKEY>\n  mfi group set-pause-delegate-admin --clear"
+    )]
+    SetPauseDelegateAdmin {
+        #[clap(long)]
+        pause_delegate_admin: Option<Pubkey>,
+        #[clap(long, action, help = "Clear the pause delegate admin")]
+        clear: bool,
+    },
     /// Propagate fee state to a group
     ///
     /// Example: `mfi group propagate-fee`
@@ -681,6 +694,22 @@ pub fn dispatch(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<
         }
         GroupCommand::ConfigGroupFee { enable_program_fee } => {
             processor::config_group_fee(config, profile, enable_program_fee)
+        }
+        GroupCommand::SetPauseDelegateAdmin {
+            pause_delegate_admin,
+            clear,
+        } => {
+            if clear {
+                if pause_delegate_admin.is_some() {
+                    anyhow::bail!("Use either --pause-delegate-admin or --clear, not both");
+                }
+                processor::set_pause_delegate_admin(config, None)
+            } else {
+                processor::set_pause_delegate_admin(
+                    config,
+                    Some(pause_delegate_admin.context("--pause-delegate-admin required")?),
+                )
+            }
         }
         GroupCommand::PropagateFee { marginfi_group } => processor::propagate_fee(
             config,

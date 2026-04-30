@@ -61,7 +61,8 @@ pub struct FeeState {
     /// pun intended) e.g. (1 + this) * amount repaid >= asset seized
     /// * A percentage    
     pub order_execution_max_fee: WrappedI80F48,
-    _reserved1: [u8; 32],
+    /// Can pause and unpause the protocol, but cannot modify any fee configuration.
+    pub pause_delegate_admin: Pubkey,
 }
 
 impl FeeState {
