@@ -23,7 +23,7 @@ assert_struct_align!(FeeState, 8);
 pub struct FeeState {
     /// The fee state's own key. A PDA derived from just `b"feestate"`
     pub key: Pubkey,
-    /// Can modify fees
+    /// Can modify fees, pause the protocol, etc
     pub global_fee_admin: Pubkey,
     /// The base wallet for all protocol fees. All SOL fees go to this wallet. All non-SOL fees go
     /// to the cannonical ATA of this wallet for that asset.
@@ -61,7 +61,7 @@ pub struct FeeState {
     /// pun intended) e.g. (1 + this) * amount repaid >= asset seized
     /// * A percentage    
     pub order_execution_max_fee: WrappedI80F48,
-    /// Can pause and unpause the protocol, but cannot modify any fee configuration.
+    /// Can pause (not unpause) the protocol, but cannot modify any fee configuration.
     pub pause_delegate_admin: Pubkey,
 }
 
@@ -90,7 +90,7 @@ assert_struct_align!(FeeStateV2, 8);
 pub struct FeeStateV2 {
     /// The fee state's own key. A PDA derived from `b"feestate_v2"`
     pub key: Pubkey,
-    /// Can modify fees
+    /// Can modify fees, pause the protocol, etc
     pub global_fee_admin: Pubkey,
     /// The base wallet for all protocol fees. All SOL fees go to this wallet. All non-SOL fees go
     /// to the cannonical ATA of this wallet for that asset.
@@ -128,7 +128,7 @@ pub struct FeeStateV2 {
     /// pun intended) e.g. (1 + this) * amount repaid >= asset seized
     /// * A percentage
     pub order_execution_max_fee: WrappedI80F48,
-    /// Can pause and unpause the protocol, but cannot modify any fee configuration.
+    /// Can pause (not unpause) the protocol, but cannot modify any fee configuration.
     pub pause_delegate_admin: Pubkey,
     /// Extra reserved bytes for future expansions.
     pub _padding1: [u8; 256],
