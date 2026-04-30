@@ -495,6 +495,49 @@ impl BankFixture {
             .set_account(&self.key, &bank_ai.into());
     }
 
+    /// Inject an active circuit-breaker halt at `tier` until `halt_ended_at` by writing the
+    /// `CIRCUIT_BREAKER_ENABLED` flag, tier, and halt timestamps directly on the account.
+    pub async fn force_cb_halt(&self, tier: u8, halt_ended_at: i64) {
+        use marginfi_type_crate::constants::CIRCUIT_BREAKER_ENABLED;
+        let mut bank_ai = self
+            .ctx
+            .borrow_mut()
+            .banks_client
+            .get_account(self.key)
+            .await
+            .unwrap()
+            .unwrap();
+        let bank = bytemuck::from_bytes_mut::<Bank>(&mut bank_ai.data.as_mut_slice()[8..]);
+        bank.flags |= CIRCUIT_BREAKER_ENABLED;
+        bank.cb_tier = tier;
+        bank.cb_halt_started_at = 1;
+        bank.cb_halt_ended_at = halt_ended_at;
+        self.ctx
+            .borrow_mut()
+            .set_account(&self.key, &bank_ai.into());
+    }
+
+    /// Build (but do not send) a `lending_pool_clear_circuit_breaker` ix.
+    /// `authority` must be either `group.admin` or `group.risk_admin`.
+    pub async fn make_clear_circuit_breaker_ix(
+        &self,
+        authority: Pubkey,
+        reseed_reference: bool,
+    ) -> Instruction {
+        let bank = self.load().await;
+        let accounts = marginfi::accounts::LendingPoolClearCircuitBreaker {
+            group: bank.group,
+            authority,
+            bank: self.key,
+        }
+        .to_account_metas(Some(true));
+        Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: marginfi::instruction::LendingPoolClearCircuitBreaker { reseed_reference }.data(),
+        }
+    }
+
     pub async fn set_asset_share_value(&self, value: I80F48) {
         let mut bank_ai = self
             .ctx

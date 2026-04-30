@@ -856,6 +856,25 @@ export const closeBank = (program: Program<Marginfi>, args: CloseBankArgs) => {
   return ix;
 };
 
+export type ClearCircuitBreakerArgs = {
+  bank: PublicKey;
+  /** If true, also zero the EMA reference so the next pulse reseeds from live oracle data. */
+  reseedReference?: boolean;
+};
+
+export const clearCircuitBreaker = async (
+  program: Program<Marginfi>,
+  args: ClearCircuitBreakerArgs
+) => {
+  return program.methods
+    .lendingPoolClearCircuitBreaker(args.reseedReference ?? false)
+    .accounts({
+      bank: args.bank,
+      // group + riskAdmin: inferred from has_one + signer
+    })
+    .instruction();
+};
+
 export type PanicPauseArgs = {
   // No args (everything is inferred)...
 };

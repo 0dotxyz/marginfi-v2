@@ -12,6 +12,7 @@ use enum_dispatch::enum_dispatch;
 use fixed::types::I80F48;
 use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION};
 use kamino_mocks::state::MinimalReserve;
+pub use marginfi_type_crate::types::{OraclePriceType, OraclePriceWithConfidence, PriceBias};
 use marginfi_type_crate::{
     constants::{
         CONF_INTERVAL_MULTIPLE, EXP_10_I80F48, MAX_CONF_INTERVAL, STD_DEV_MULTIPLE, U32_MAX,
@@ -19,8 +20,7 @@ use marginfi_type_crate::{
     },
     types::{
         mul_div_i128, mul_div_i64, mul_div_u64, mul_i128_by_i80f48, mul_i64_by_i80f48,
-        mul_u64_by_i80f48, Bank, BankConfig, OraclePriceType, OraclePriceWithConfidence,
-        OracleSetup, PriceBias,
+        mul_u64_by_i80f48, Bank, BankConfig, OracleSetup,
     },
 };
 use pyth_solana_receiver_sdk::price_update::{self, FeedId, PriceUpdateV2};
@@ -1024,6 +1024,7 @@ impl PriceAdapter for FixedPriceFeed {
         Ok(OraclePriceWithConfidence {
             price: self.get_price_of_type(oracle_price_type, None, oracle_max_confidence)?,
             confidence: I80F48::ZERO,
+            source_time: 0,
         })
     }
 }
@@ -1172,6 +1173,7 @@ impl PriceAdapter for SwitchboardPullPriceFeed {
         Ok(OraclePriceWithConfidence {
             price,
             confidence: confidence_interval,
+            source_time: self.feed.last_update_timestamp,
         })
     }
 }
@@ -1445,10 +1447,15 @@ impl PriceAdapter for PythPushOraclePriceFeed {
             oracle_max_confidence,
         )?;
         let price = self.get_price_of_type(price_type, None, oracle_max_confidence)?;
+        let source_time = match price_type {
+            OraclePriceType::TimeWeighted => self.ema_price.publish_time,
+            OraclePriceType::RealTime => self.price.publish_time,
+        };
 
         Ok(OraclePriceWithConfidence {
             price,
             confidence: confidence_interval,
+            source_time,
         })
     }
 }
@@ -1460,7 +1467,6 @@ pub struct LitePullFeedAccountData {
     pub result: CurrentResult,
     #[cfg(feature = "client")]
     pub feed_hash: [u8; 32],
-    #[cfg(feature = "client")]
     pub last_update_timestamp: i64,
 }
 
@@ -1470,7 +1476,6 @@ impl From<&PullFeedAccountData> for LitePullFeedAccountData {
             result: feed.result,
             #[cfg(feature = "client")]
             feed_hash: feed.feed_hash,
-            #[cfg(feature = "client")]
             last_update_timestamp: feed.last_update_timestamp,
         }
     }
@@ -1482,7 +1487,6 @@ impl From<Ref<'_, PullFeedAccountData>> for LitePullFeedAccountData {
             result: feed.result,
             #[cfg(feature = "client")]
             feed_hash: feed.feed_hash,
-            #[cfg(feature = "client")]
             last_update_timestamp: feed.last_update_timestamp,
         }
     }

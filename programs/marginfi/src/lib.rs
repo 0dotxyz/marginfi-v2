@@ -153,6 +153,17 @@ pub mod marginfi {
         marginfi_group::lending_pool_force_tokenless_repay_complete(ctx)
     }
 
+    /// (admin or risk_admin) Clear an active circuit-breaker halt on a bank.
+    /// * `reseed_reference` - If true, also zero the EMA reference so the next pulse reseeds it
+    ///   from live oracle data (use when clearing because the new price level is valid and the
+    ///   pre-halt reference would cause an immediate re-halt).
+    pub fn lending_pool_clear_circuit_breaker(
+        ctx: Context<LendingPoolClearCircuitBreaker>,
+        reseed_reference: bool,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_clear_circuit_breaker(ctx, reseed_reference)
+    }
+
     /// (admin only)
     pub fn lending_pool_configure_bank_oracle(
         ctx: Context<LendingPoolConfigureBankOracle>,

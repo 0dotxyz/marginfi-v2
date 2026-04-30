@@ -85,6 +85,8 @@ pub const CLOSE_ENABLED_FLAG: u64 = 1 << 4;
 pub const TOKENLESS_REPAYMENTS_ALLOWED: u64 = 1 << 5;
 pub const TOKENLESS_REPAYMENTS_COMPLETE: u64 = 1 << 6;
 pub const IS_T22: u64 = 1 << 7;
+/// Enables the per-bank oracle circuit breaker.
+pub const CIRCUIT_BREAKER_ENABLED: u64 = 1 << 8;
 
 /// True if bank created in 0.1.4 or later, or if migrated to the new oracle setup from a prior
 /// version. False otherwise.
@@ -94,7 +96,8 @@ pub const EMISSION_FLAGS: u64 = EMISSIONS_FLAG_BORROW_ACTIVE | EMISSIONS_FLAG_LE
 pub const GROUP_FLAGS: u64 = PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
     | FREEZE_SETTINGS
     | TOKENLESS_REPAYMENTS_ALLOWED
-    | TOKENLESS_REPAYMENTS_COMPLETE;
+    | TOKENLESS_REPAYMENTS_COMPLETE
+    | CIRCUIT_BREAKER_ENABLED;
 
 pub const MAX_EXP_10_I80F48: usize = 24;
 pub const EXP_10_I80F48: [I80F48; MAX_EXP_10_I80F48] = [

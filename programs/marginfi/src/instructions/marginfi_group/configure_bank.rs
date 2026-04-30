@@ -217,7 +217,11 @@ pub fn lending_pool_emissions_deposit(
     let mut bank = ctx.accounts.bank.load_mut()?;
     let group = ctx.accounts.group.load()?;
 
-    utils::validate_bank_state(&bank, utils::InstructionKind::FailsIfPausedOrReduceState)?;
+    utils::validate_bank_state(
+        &bank,
+        utils::InstructionKind::FailsIfPausedOrReduceState,
+        true,
+    )?;
 
     // Reject mints with non-zero transfer fees or active transfer hooks.
     let mint_ai = ctx.accounts.mint.to_account_info();

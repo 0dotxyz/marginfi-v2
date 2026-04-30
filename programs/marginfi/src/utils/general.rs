@@ -2,7 +2,7 @@ use crate::{
     bank_authority_seed, bank_seed, check,
     events::RateLimitFlowEvent,
     state::{
-        bank::BankVaultType,
+        bank::{BankImpl, BankVaultType},
         marginfi_account::{calc_value, get_remaining_accounts_per_bank},
         price::{OraclePriceFeedAdapter, PriceAdapter},
         rate_limiter::{
@@ -262,10 +262,21 @@ pub enum InstructionKind {
 
 // TODO remove redundant checks for these elsewhere in the program (they are nested many laters deep
 // in various value delta functions)
-/// Validate the bank's state does not forbid the execution of an instruction
-pub fn validate_bank_state(bank: &Bank, kind: InstructionKind) -> MarginfiResult {
+/// Validate the bank's state does not forbid the execution of an instruction.
+///
+/// `is_halt_safe` marks an ix as allowed during a circuit-breaker halt
+/// (for example repay/deposit, or a caller that has already enforced risk-admin-only liquidation).
+pub fn validate_bank_state(
+    bank: &Bank,
+    kind: InstructionKind,
+    is_halt_safe: bool,
+) -> MarginfiResult {
     if bank.config.operational_state == BankOperationalState::KilledByBankruptcy {
         return err!(MarginfiError::BankKilledByBankruptcy);
+    }
+
+    if !is_halt_safe && bank.is_cb_halted(Clock::get()?.unix_timestamp) {
+        return err!(MarginfiError::BankCircuitBreakerHalted);
     }
 
     match kind {

@@ -105,7 +105,7 @@ pub fn kamino_withdraw<'info>(
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let group = ctx.accounts.group.load()?;
-        validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
+        validate_bank_state(&bank, InstructionKind::FailsInPausedState, false)?;
 
         let in_receivership_or_order_execution =
             marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);

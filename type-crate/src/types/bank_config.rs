@@ -108,7 +108,17 @@ pub struct BankConfig {
     /// Stored oracle price for `OracleSetup::Fixed`, otherwise does nothing
     pub fixed_price: WrappedI80F48,
 
-    pub _padding1: [u8; 16],
+    /// Deviation thresholds in basis points for tiers 1/2/3, strictly monotonic.
+    pub cb_deviation_bps_tiers: [u16; 3],
+    /// Halt durations in seconds for tiers 1/2/3, strictly monotonic.
+    pub cb_tier_durations_seconds: [u16; 3],
+    /// Consecutive counted breach observations required before a halt trips.
+    pub cb_sustain_observations: u8,
+    /// Escalation window multiplier: a re-breach within `prev_tier_duration * mult` seconds
+    /// after a halt ends ratchets to the next tier.
+    pub cb_escalation_window_mult: u8,
+    /// EMA smoothing factor for the reference price, in basis points (e.g. 1000 = α=0.1).
+    pub cb_ema_alpha_bps: u16,
 }
 
 impl Default for BankConfig {
@@ -134,7 +144,11 @@ impl Default for BankConfig {
             _padding0: [0; 2],
             oracle_max_confidence: 0,
             fixed_price: I80F48::ZERO.into(),
-            _padding1: [0; 16],
+            cb_deviation_bps_tiers: [0; 3],
+            cb_tier_durations_seconds: [0; 3],
+            cb_sustain_observations: 0,
+            cb_escalation_window_mult: 0,
+            cb_ema_alpha_bps: 0,
         }
     }
 }
@@ -168,6 +182,13 @@ pub struct BankConfigOpt {
     pub permissionless_bad_debt_settlement: Option<bool>,
     pub freeze_settings: Option<bool>,
     pub tokenless_repayments_allowed: Option<bool>,
+
+    pub circuit_breaker_enabled: Option<bool>,
+    pub cb_deviation_bps_tiers: Option<[u16; 3]>,
+    pub cb_tier_durations_seconds: Option<[u16; 3]>,
+    pub cb_sustain_observations: Option<u8>,
+    pub cb_escalation_window_mult: Option<u8>,
+    pub cb_ema_alpha_bps: Option<u16>,
 }
 
 #[repr(C)]
@@ -280,7 +301,11 @@ impl From<BankConfigCompact> for BankConfig {
             _padding0: [0; 2],
             oracle_max_confidence: config.oracle_max_confidence,
             fixed_price: I80F48::ZERO.into(),
-            _padding1: [0; 16],
+            cb_deviation_bps_tiers: [0; 3],
+            cb_tier_durations_seconds: [0; 3],
+            cb_sustain_observations: 0,
+            cb_escalation_window_mult: 0,
+            cb_ema_alpha_bps: 0,
         }
     }
 }

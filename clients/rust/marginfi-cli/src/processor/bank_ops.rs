@@ -144,6 +144,12 @@ impl BankUpdateRequest {
             permissionless_bad_debt_settlement: self.permissionless_bad_debt_settlement,
             freeze_settings: self.freeze_settings,
             tokenless_repayments_allowed: self.tokenless_repayments_allowed,
+            circuit_breaker_enabled: None,
+            cb_deviation_bps_tiers: None,
+            cb_tier_durations_seconds: None,
+            cb_sustain_observations: None,
+            cb_escalation_window_mult: None,
+            cb_ema_alpha_bps: None,
         }
     }
 }
