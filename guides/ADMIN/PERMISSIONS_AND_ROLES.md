@@ -132,12 +132,12 @@ the `global_fee_admin`.
 
 **Can do:**
 - Panic-pause the entire protocol
-- Manually unpause before the pause auto-expires
 
 **Cannot do:**
 - Edit fee parameters
 - Change the global fee wallet
 - Set or clear other admins
+- Manually unpause before the pause auto-expires
 
 ## Protocol Panic-Pause
 
@@ -173,9 +173,8 @@ incident the pause was called for:
   paused. This is needed because a forced deleverage often terminates in a bankruptcy, and
   blocking bankruptcy would leave the bank in a half-resolved state. Non-admin callers (even on
   banks with `PERMISSIONLESS_BAD_DEBT_SETTLEMENT`) remain blocked until the pause expires.
-- **Unpause** — `global_fee_admin` or `pause_delegate_admin` can always end the pause early via
-  `panic_unpause`, and anyone can permissionlessly clear an expired pause via
-  `panic_unpause_permissionless`.
+- **Unpause** — `global_fee_admin` can always end the pause early via `panic_unpause`, and anyone
+  can permissionlessly clear an expired pause via `panic_unpause_permissionless`.
 
 ### Emergency-only instructions (mainnet-disabled)
 
