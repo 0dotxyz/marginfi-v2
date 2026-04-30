@@ -180,7 +180,6 @@ The CLI now derives several deterministic accounts so JSON configs and direct in
 | `mfi bank set-fixed-price <BANK_PUBKEY>` | Override a bank with a fixed price |
 | `mfi bank configure-emode <BANK_PUBKEY>` | Set the bank e-mode tag |
 | `mfi bank clone-emode` | Copy e-mode settings between banks |
-| `mfi bank migrate-curve <BANK_PUBKEY>` | Convert a legacy curve to the 7-point format |
 | `mfi bank pulse-price-cache <BANK_PUBKEY>` | Refresh cached price data |
 | `mfi bank configure-rate-limits <BANK_PUBKEY>` | Set hourly and daily bank outflow caps |
 | `mfi bank withdraw-fees-permissionless <BANK_PUBKEY>` | Permissionless fee withdrawal |

@@ -185,14 +185,6 @@ pub mod marginfi {
         marginfi_group::lending_pool_clone_emode(ctx)
     }
 
-    /// (permissionless) Reclaim all remaining tokens from the emissions vault
-    /// to the global fee wallet ATA, and disable emissions on the bank.
-    pub fn lending_pool_reclaim_emissions_vault(
-        ctx: Context<LendingPoolReclaimEmissionsVault>,
-    ) -> MarginfiResult {
-        marginfi_group::lending_pool_reclaim_emissions_vault(ctx)
-    }
-
     /// (permissionless) Deposit same-bank emissions directly into liquidity vault and increase
     /// depositors' value via `asset_share_value`.
     pub fn lending_pool_emissions_deposit(
@@ -514,14 +506,6 @@ pub mod marginfi {
         marginfi_account::close_account(ctx)
     }
 
-    /// (permissionless) Zero out `emissions_outstanding` on a balance after emissions are disabled
-    /// on the bank.
-    pub fn lending_account_clear_emissions(
-        ctx: Context<LendingAccountClearEmissions>,
-    ) -> MarginfiResult {
-        marginfi_account::lending_account_clear_emissions(ctx)
-    }
-
     /// (Permissionless) Refresh the internal risk engine health cache. Useful for liquidators and
     /// other consumers that want to see the internal risk state of a user account. This cache is
     /// read-only and serves no purpose except being populated by this ix.
@@ -681,13 +665,6 @@ pub mod marginfi {
         ctx: Context<PanicUnpausePermissionless>,
     ) -> MarginfiResult {
         marginfi_group::panic_unpause_permissionless(ctx)
-    }
-
-    // TODO deprecate in 1.7
-    /// (Permissionless) Convert a bank from the legacy curve setup to the new setup, with no effect
-    /// on how interest accrues.
-    pub fn migrate_curve(ctx: Context<MigrateCurve>) -> MarginfiResult {
-        marginfi_group::migrate_curve(ctx)
     }
 
     /// (permissionless) pay the rent to open a bank's metadata.

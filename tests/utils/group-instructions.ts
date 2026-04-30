@@ -745,23 +745,6 @@ export const accrueInterest = (
   return ix;
 };
 
-export type MigrateCurveArgs = {
-  bank: PublicKey;
-};
-
-export const migrateCurve = (
-  program: Program<Marginfi>,
-  args: MigrateCurveArgs
-) => {
-  const ix = program.methods
-    .migrateCurve()
-    .accounts({
-      bank: args.bank,
-    })
-    .instruction();
-  return ix;
-};
-
 export type BackfillBankIsT22FlagArgs = {
   bank: PublicKey;
 };

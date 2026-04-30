@@ -420,14 +420,6 @@ pub enum BankCommand {
         #[clap(long)]
         copy_to_bank: String,
     },
-    /// Migrate legacy curve encoding to seven-point format
-    ///
-    /// Example: `mfi bank migrate-curve <BANK_PUBKEY>`
-    #[clap(
-        after_help = "Example:\n  mfi bank migrate-curve <BANK_PUBKEY>",
-        after_long_help = "Example:\n  mfi bank migrate-curve <BANK_PUBKEY>"
-    )]
-    MigrateCurve { bank_pk: String },
     /// Refresh the cached oracle price for a bank
     ///
     /// Example: `mfi bank pulse-price-cache <BANK_PUBKEY>`
@@ -1288,10 +1280,6 @@ pub fn dispatch(subcmd: BankCommand, global_options: &GlobalOptions) -> Result<(
             let copy_to_bank =
                 super::resolve_bank_for_group(&copy_to_bank, profile.marginfi_group)?;
             processor::bank_clone_emode(config, copy_from_bank, copy_to_bank)
-        }
-        BankCommand::MigrateCurve { bank_pk } => {
-            let bank_pk = super::resolve_bank_for_group(&bank_pk, profile.marginfi_group)?;
-            processor::bank_migrate_curve(config, bank_pk)
         }
         BankCommand::PulsePriceCache { bank_pk } => {
             let bank_pk = super::resolve_bank_for_group(&bank_pk, profile.marginfi_group)?;
