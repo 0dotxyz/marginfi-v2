@@ -348,7 +348,8 @@ pub mod marginfi {
 
     /// (account authority, or any signer during receivership) Withdraw assets from a bank. Accrues
     /// interest, records withdrawal, transfers tokens, and runs a health check (skipped during
-    /// receivership).
+    /// receivership). If group rate limits are enabled, `remaining_accounts` must include the
+    /// withdrawn bank's oracle group for USD pricing.
     pub fn lending_account_withdraw<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingAccountWithdraw<'info>>,
         amount: u64,
@@ -358,7 +359,9 @@ pub mod marginfi {
     }
 
     /// (account authority) Borrow assets from a bank. Accrues interest, records liability, applies
-    /// origination fee, transfers tokens, and runs a health check.
+    /// origination fee, transfers tokens, and runs a health check. If group rate limits are
+    /// enabled, `remaining_accounts` must include the borrowed bank's oracle group for USD
+    /// pricing.
     pub fn lending_account_borrow<'info>(
         ctx: Context<'_, '_, 'info, 'info, LendingAccountBorrow<'info>>,
         amount: u64,
@@ -811,6 +814,8 @@ pub mod marginfi {
     /// (user) Withdraw from a Kamino pool through a marginfi account
     /// * amount - in the collateral token (NOT liquidity token), in native decimals. Must convert
     ///     from collateral to liquidity token amounts using the current exchange rate.
+    /// * if group rate limits are enabled, include the withdrawn bank's oracle group in
+    ///   `remaining_accounts`
     /// * flags - optional bitflags:
     ///   - bit 0 (`0x01`): withdraw all
     ///   - bit 1 (`0x02`): refresh reserve via batch refresh
@@ -873,6 +878,8 @@ pub mod marginfi {
 
     /// (user) Withdraw from a Drift spot market through a marginfi account
     /// * amount - in the underlying token (e.g., USDC), in native decimals
+    /// * if group rate limits are enabled, include the withdrawn bank's oracle group in
+    ///   `remaining_accounts`
     /// * withdraw_all - if true, withdraws entire position
     pub fn drift_withdraw<'info>(
         ctx: Context<'_, '_, 'info, 'info, DriftWithdraw<'info>>,
@@ -923,6 +930,8 @@ pub mod marginfi {
 
     /// (user) Withdraw from a Solend reserve through a marginfi account
     /// * amount - in collateral tokens (cTokens), in native decimals  
+    /// * if group rate limits are enabled, include the withdrawn bank's oracle group in
+    ///   `remaining_accounts`
     /// * withdraw_all - withdraw entire position if true
     pub fn solend_withdraw<'info>(
         ctx: Context<'_, '_, 'info, 'info, SolendWithdraw<'info>>,
@@ -964,6 +973,8 @@ pub mod marginfi {
 
     /// (user) Withdraw from a JupLend lending pool through a marginfi account.
     /// * amount - in the underlying token (e.g., USDC), in native decimals
+    /// * if group rate limits are enabled, include the withdrawn bank's oracle group in
+    ///   `remaining_accounts`
     pub fn juplend_withdraw<'info>(
         ctx: Context<'_, '_, 'info, 'info, JuplendWithdraw<'info>>,
         amount: u64,

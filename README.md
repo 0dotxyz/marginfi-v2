@@ -310,6 +310,13 @@ callers might even prepend the Switchboard crank to the tx consuming the Oracle 
 runs into account and CU constraints for larger txes. For Kamino banks, `refresh_reserve` must also
 execute within 1 slot.
 
+If **group** rate limits are enabled, outflow instructions have one extra requirement: the
+withdrawn or borrowed bank and its oracle account group must appear in `remaining_accounts` even if
+the Risk Engine would otherwise not need that bank's oracle. This is because group rate limiting
+checks projected outflow in USD using the same contiguous `[bank, oracle_0, ..]` account layout.
+This most commonly matters for `withdraw_all`, low-risk withdraws that leave no liability, and
+borrows where some other collateral alone is enough for the health check.
+
 In some instructions, limited Oracle staleness is permitted. For example, when borrowing, the caller
 can pass enough non-stale oracle data to demonstrate collateral is sufficient. For example, if the
 user is lending \$1 in A and \$1000 in B, and trying to borrow \$100 in C, the caller might pass a
