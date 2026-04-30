@@ -60,7 +60,11 @@ pub fn edit_fee_state(
     if let Some(liquidation_max_fee) = liquidation_max_fee {
         let old_f64: f64 = wrapped_i80f48_to_f64(fee_state.liquidation_max_fee);
         let new_f64: f64 = wrapped_i80f48_to_f64(liquidation_max_fee);
-        msg!("Updating liquidation_max_fee: {:?} -> {:?}", old_f64, new_f64);
+        msg!(
+            "Updating liquidation_max_fee: {:?} -> {:?}",
+            old_f64,
+            new_f64
+        );
         fee_state.liquidation_max_fee = liquidation_max_fee;
     }
     if let Some(liquidation_flat_sol_fee) = liquidation_flat_sol_fee {

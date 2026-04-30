@@ -1,8 +1,5 @@
 use anchor_lang::prelude::*;
-use marginfi_type_crate::{
-    constants::FEE_STATE_V2_SEED,
-    types::FeeStateV2,
-};
+use marginfi_type_crate::{constants::FEE_STATE_V2_SEED, types::FeeStateV2};
 
 /// Runs once per program to initialize the V2 fee state account.
 pub fn initialize_fee_state_v2(ctx: Context<InitFeeStateV2>) -> Result<()> {

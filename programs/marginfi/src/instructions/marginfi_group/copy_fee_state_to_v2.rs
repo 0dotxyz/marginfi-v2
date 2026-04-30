@@ -1,4 +1,3 @@
-use crate::MarginfiError;
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
     constants::{FEE_STATE_SEED, FEE_STATE_V2_SEED},
