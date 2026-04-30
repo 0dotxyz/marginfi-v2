@@ -28,6 +28,7 @@ import {
 import { assert } from "chai";
 import { deriveBankWithSeed, deriveGlobalFeeState } from "./utils/pdas";
 import {
+  editGlobalFeeState,
   initGlobalFeeState,
   panicPause,
   panicUnpause,
@@ -155,19 +156,40 @@ describe("Panic Mode state test (Bankrun)", () => {
     waitUntil(now + 2);
   });
 
+  it("(fee admin) sets pause delegate admin via edit fee state - happy path", async () => {
+    const delegate = users[0].wallet.publicKey;
+
+    const tx = new Transaction();
+    tx.add(
+      await editGlobalFeeState(globalProgramAdmin.mrgnBankrunProgram, {
+        admin: globalProgramAdmin.wallet.publicKey,
+        pauseDelegateAdmin: delegate,
+      })
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(globalProgramAdmin.wallet);
+    await banksClient.processTransaction(tx);
+
+    const fs = await bankrunProgram.account.feeState.fetch(feeStateKey);
+    assert.equal(fs.pauseDelegateAdmin.toString(), delegate.toString());
+  });
+
   it("(fee admin) extends an existing pause - happy path", async () => {
-    const adminPk = globalProgramAdmin.wallet.publicKey;
-    const recipientPk = users[0].wallet.publicKey;
-
-
     for (let i = 1; i < MAX_DAILY_PAUSES; i++) {
+      const isDelegatePause = i === 1;
+      const caller = isDelegatePause
+        ? users[0]
+        : globalProgramAdmin;
+      const callerPk = caller.wallet.publicKey;
+      const recipientPk = users[1].wallet.publicKey;
+
       const tx = new Transaction();
       tx.add(
-        await panicPause(globalProgramAdmin.mrgnBankrunProgram, {}),
-        dummyIx(adminPk, recipientPk)
+        await panicPause(caller.mrgnBankrunProgram, {}),
+        dummyIx(callerPk, recipientPk)
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(globalProgramAdmin.wallet);
+      tx.sign(caller.wallet);
       await banksClient.processTransaction(tx);
     }
 
@@ -385,16 +407,16 @@ describe("Panic Mode state test (Bankrun)", () => {
   it("(attacker) tries to pause - should fail", async () => {
     const tx = new Transaction();
     tx.add(
-      await panicPause(users[0].mrgnBankrunProgram, {}),
+      await panicPause(users[1].mrgnBankrunProgram, {}),
       // Dummy tx to trick bankrun
       SystemProgram.transfer({
-        fromPubkey: users[0].wallet.publicKey,
-        toPubkey: users[1].wallet.publicKey,
+        fromPubkey: users[1].wallet.publicKey,
+        toPubkey: users[2].wallet.publicKey,
         lamports: 654321,
       })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(users[0].wallet);
+    tx.sign(users[1].wallet);
 
     const result = await banksClient.tryProcessTransaction(tx);
     // (fee state admin doesn't match fee state)
@@ -448,11 +470,22 @@ describe("Panic Mode state test (Bankrun)", () => {
     assertBankrunTxFailed(result, 6083);
   });
 
-  it("(attacker) non-admin tries to call admin unpause - should fail", async () => {
+  it("(pause delegate) tries to call admin unpause - should fail", async () => {
     const tx = new Transaction();
     tx.add(await panicUnpause(users[0].mrgnBankrunProgram, {}));
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(users[0].wallet);
+
+    const result = await banksClient.tryProcessTransaction(tx);
+    // Unauthorized
+    assertBankrunTxFailed(result, 6042);
+  });
+
+  it("(attacker) non-admin tries to call admin unpause - should fail", async () => {
+    const tx = new Transaction();
+    tx.add(await panicUnpause(users[1].mrgnBankrunProgram, {}));
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(users[1].wallet);
 
     const result = await banksClient.tryProcessTransaction(tx);
     // Unauthorized

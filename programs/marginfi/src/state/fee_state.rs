@@ -4,7 +4,6 @@ use anchor_lang::prelude::*;
 
 pub trait FeeStateImpl {
     fn is_pause_authority(&self, signer: Pubkey) -> bool;
-    fn set_pause_delegate_admin(&mut self, new_pause_delegate_admin: Option<Pubkey>);
 }
 
 impl FeeStateImpl for FeeState {
@@ -12,23 +11,6 @@ impl FeeStateImpl for FeeState {
         signer == self.global_fee_admin
             || (self.pause_delegate_admin != Pubkey::default()
                 && signer == self.pause_delegate_admin)
-    }
-
-    fn set_pause_delegate_admin(&mut self, new_pause_delegate_admin: Option<Pubkey>) {
-        let new_pause_delegate_admin = new_pause_delegate_admin.unwrap_or_default();
-        if self.pause_delegate_admin == new_pause_delegate_admin {
-            msg!(
-                "No change to pause delegate admin: {:?}",
-                new_pause_delegate_admin
-            );
-        } else {
-            msg!(
-                "Set pause delegate admin from {:?} to {:?}",
-                self.pause_delegate_admin,
-                new_pause_delegate_admin
-            );
-            self.pause_delegate_admin = new_pause_delegate_admin;
-        }
     }
 }
 

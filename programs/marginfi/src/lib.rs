@@ -571,18 +571,29 @@ pub mod marginfi {
         )
     }
 
-    /// (global fee admin only) Adjust fees, admin, or the destination wallet
+    /// (Runs once per program) Initialize the V2 fee state PDA.
+    pub fn init_global_fee_state_v2(ctx: Context<InitFeeStateV2>) -> MarginfiResult {
+        marginfi_group::initialize_fee_state_v2(ctx)
+    }
+
+    /// (permissionless) Copy current FeeState values into FeeStateV2.
+    pub fn copy_fee_state_to_v2(ctx: Context<CopyFeeStateToV2>) -> MarginfiResult {
+        marginfi_group::copy_fee_state_to_v2(ctx)
+    }
+
+    /// (global fee admin only) Adjust fees, admin, wallet, or pause delegate admin
     pub fn edit_global_fee_state(
         ctx: Context<EditFeeState>,
-        admin: Pubkey,
-        fee_wallet: Pubkey,
-        bank_init_flat_sol_fee: u32,
-        liquidation_flat_sol_fee: u32,
-        order_init_flat_sol_fee: u32,
-        program_fee_fixed: WrappedI80F48,
-        program_fee_rate: WrappedI80F48,
-        liquidation_max_fee: WrappedI80F48,
-        order_execution_max_fee: WrappedI80F48,
+        admin: Option<Pubkey>,
+        fee_wallet: Option<Pubkey>,
+        bank_init_flat_sol_fee: Option<u32>,
+        liquidation_flat_sol_fee: Option<u32>,
+        order_init_flat_sol_fee: Option<u32>,
+        program_fee_fixed: Option<WrappedI80F48>,
+        program_fee_rate: Option<WrappedI80F48>,
+        liquidation_max_fee: Option<WrappedI80F48>,
+        order_execution_max_fee: Option<WrappedI80F48>,
+        pause_delegate_admin: Option<Pubkey>,
     ) -> MarginfiResult {
         marginfi_group::edit_fee_state(
             ctx,
@@ -595,15 +606,8 @@ pub mod marginfi {
             program_fee_rate,
             liquidation_max_fee,
             order_execution_max_fee,
+            pause_delegate_admin,
         )
-    }
-
-    /// (global fee admin only) Set or clear the dedicated pause/unpause delegate admin.
-    pub fn set_pause_delegate_admin(
-        ctx: Context<SetPauseDelegateAdmin>,
-        new_pause_delegate_admin: Option<Pubkey>,
-    ) -> MarginfiResult {
-        marginfi_group::set_pause_delegate_admin(ctx, new_pause_delegate_admin)
     }
 
     /// (Permissionless) Force any group to adopt the current FeeState settings
@@ -682,7 +686,7 @@ pub mod marginfi {
         marginfi_group::panic_pause(ctx)
     }
 
-    /// (global_fee_admin or pause_delegate_admin only) Unpause the protocol before auto-expiry.
+    /// (global_fee_admin only) Unpause the protocol before auto-expiry.
     pub fn panic_unpause(ctx: Context<PanicUnpause>) -> MarginfiResult {
         marginfi_group::panic_unpause(ctx)
     }

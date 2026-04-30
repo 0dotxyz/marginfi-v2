@@ -14,6 +14,7 @@ pub const SOLEND_OBLIGATION_SEED: &str = "solend_obligation";
 pub const JUPLEND_F_TOKEN_VAULT_SEED: &str = "f_token_vault";
 
 pub const FEE_STATE_SEED: &str = "feestate";
+pub const FEE_STATE_V2_SEED: &str = "feestate_v2";
 pub const STAKED_SETTINGS_SEED: &str = "staked_settings";
 
 pub const EMISSIONS_AUTH_SEED: &str = "emissions_auth_seed";

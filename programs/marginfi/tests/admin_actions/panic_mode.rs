@@ -40,7 +40,7 @@ async fn test_panic_pause_and_unpause_instructions() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn test_pause_delegate_admin_can_pause_and_unpause() -> anyhow::Result<()> {
+async fn test_pause_delegate_admin_can_pause_but_cannot_unpause() -> anyhow::Result<()> {
     let test_f = TestFixture::new(None).await;
     let marginfi_group = &test_f.marginfi_group;
     let pause_delegate_admin = Keypair::new();
@@ -63,12 +63,13 @@ async fn test_pause_delegate_admin_can_pause_and_unpause() -> anyhow::Result<()>
     let fee_state: FeeState = test_f.load_and_deserialize(&marginfi_group.fee_state).await;
     assert!(fee_state.panic_state.is_paused_flag());
 
-    marginfi_group
+    let res = marginfi_group
         .try_panic_unpause_with_authority(&pause_delegate_admin)
-        .await?;
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::Unauthorized);
 
     let fee_state: FeeState = test_f.load_and_deserialize(&marginfi_group.fee_state).await;
-    assert!(!fee_state.panic_state.is_paused_flag());
+    assert!(fee_state.panic_state.is_paused_flag());
 
     Ok(())
 }
@@ -123,15 +124,16 @@ async fn test_pause_delegate_admin_cannot_edit_fee_state() -> anyhow::Result<()>
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::EditGlobalFeeState {
-            admin: fee_state.global_fee_admin,
-            fee_wallet: fee_state.global_fee_wallet,
-            bank_init_flat_sol_fee: fee_state.bank_init_flat_sol_fee,
-            liquidation_flat_sol_fee: fee_state.liquidation_flat_sol_fee,
-            order_init_flat_sol_fee: fee_state.order_init_flat_sol_fee,
-            program_fee_fixed: fee_state.program_fee_fixed,
-            program_fee_rate: fee_state.program_fee_rate,
-            liquidation_max_fee: fee_state.liquidation_max_fee,
-            order_execution_max_fee: fee_state.order_execution_max_fee,
+            admin: Some(fee_state.global_fee_admin),
+            fee_wallet: Some(fee_state.global_fee_wallet),
+            bank_init_flat_sol_fee: Some(fee_state.bank_init_flat_sol_fee),
+            liquidation_flat_sol_fee: Some(fee_state.liquidation_flat_sol_fee),
+            order_init_flat_sol_fee: Some(fee_state.order_init_flat_sol_fee),
+            program_fee_fixed: Some(fee_state.program_fee_fixed),
+            program_fee_rate: Some(fee_state.program_fee_rate),
+            liquidation_max_fee: Some(fee_state.liquidation_max_fee),
+            order_execution_max_fee: Some(fee_state.order_execution_max_fee),
+            pause_delegate_admin: None,
         }
         .data(),
     };

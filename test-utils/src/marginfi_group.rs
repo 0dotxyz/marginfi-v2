@@ -1298,7 +1298,7 @@ impl MarginfiGroupFixture {
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::PanicUnpause {
-                pause_authority: pause_authority.pubkey(),
+                global_fee_admin: pause_authority.pubkey(),
                 fee_state: self.fee_state,
             }
             .to_account_metas(Some(true)),
@@ -1331,13 +1331,22 @@ impl MarginfiGroupFixture {
     ) -> Result<(), BanksClientError> {
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::SetPauseDelegateAdmin {
+            accounts: marginfi::accounts::EditFeeState {
                 global_fee_admin: self.ctx.borrow().payer.pubkey(),
                 fee_state: self.fee_state,
             }
             .to_account_metas(Some(true)),
-            data: SetPauseDelegateAdmin {
-                new_pause_delegate_admin,
+            data: EditGlobalFeeState {
+                admin: None,
+                fee_wallet: None,
+                bank_init_flat_sol_fee: None,
+                liquidation_flat_sol_fee: None,
+                order_init_flat_sol_fee: None,
+                program_fee_fixed: None,
+                program_fee_rate: None,
+                liquidation_max_fee: None,
+                order_execution_max_fee: None,
+                pause_delegate_admin: Some(new_pause_delegate_admin.unwrap_or_default()),
             }
             .data(),
         };
