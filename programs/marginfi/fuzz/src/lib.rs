@@ -274,9 +274,9 @@ impl<'state> MarginfiFuzzContext<'state> {
                     deposit_limit: initial_bank_config.deposit_limit,
                     borrow_limit: initial_bank_config.borrow_limit,
                     interest_rate_config: InterestRateConfig {
-                        optimal_utilization_rate: I80F48::ZERO.into(),
-                        plateau_interest_rate: I80F48::ZERO.into(),
-                        max_interest_rate: I80F48::ZERO.into(),
+                        placeholder0: I80F48::ZERO.into(),
+                        placeholder1: I80F48::ZERO.into(),
+                        placeholder2: I80F48::ZERO.into(),
 
                         insurance_fee_fixed_apr: I80F48!(0.01).into(),
                         insurance_ir_fee: I80F48!(0.05).into(),

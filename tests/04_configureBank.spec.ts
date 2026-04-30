@@ -104,9 +104,9 @@ describe("Lending pool configure bank", () => {
     assertBNEqual(config.depositLimit, 5000);
 
     // Note: Zero since 1.6 replaced the legacy curve system
-    assertI80F48Equal(interest.optimalUtilizationRate, 0);
-    assertI80F48Equal(interest.plateauInterestRate, 0);
-    assertI80F48Equal(interest.maxInterestRate, 0);
+    assertI80F48Equal(interest.placeholder0, 0);
+    assertI80F48Equal(interest.placeholder1, 0);
+    assertI80F48Equal(interest.placeholder2, 0);
 
     assertI80F48Approx(interest.insuranceFeeFixedApr, 0.3);
     assertI80F48Approx(interest.insuranceIrFee, 0.4);

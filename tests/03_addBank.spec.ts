@@ -171,9 +171,9 @@ describe("Lending pool add bank (add bank to group)", () => {
 
     const tolerance = 0.000001;
     // Note: Zero since 1.6 replaced the legacy curve system
-    assertI80F48Equal(interest.optimalUtilizationRate, 0);
-    assertI80F48Equal(interest.plateauInterestRate, 0);
-    assertI80F48Equal(interest.maxInterestRate, 0);
+    assertI80F48Equal(interest.placeholder0, 0);
+    assertI80F48Equal(interest.placeholder1, 0);
+    assertI80F48Equal(interest.placeholder2, 0);
 
     assertI80F48Approx(interest.insuranceFeeFixedApr, 0.01, tolerance);
     assertI80F48Approx(interest.insuranceIrFee, 0.02, tolerance);

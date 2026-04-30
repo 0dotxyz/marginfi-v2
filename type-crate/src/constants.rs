@@ -16,7 +16,6 @@ pub const JUPLEND_F_TOKEN_VAULT_SEED: &str = "f_token_vault";
 pub const FEE_STATE_SEED: &str = "feestate";
 pub const STAKED_SETTINGS_SEED: &str = "staked_settings";
 
-pub const EMISSIONS_AUTH_SEED: &str = "emissions_auth_seed";
 pub const EMISSIONS_TOKEN_ACCOUNT_SEED: &str = "emissions_token_account_seed";
 
 pub const LIQUIDATION_RECORD_SEED: &str = "liq_record";
@@ -90,7 +89,6 @@ pub const IS_T22: u64 = 1 << 7;
 /// version. False otherwise.
 pub const PYTH_PUSH_MIGRATED_DEPRECATED: u8 = 1 << 0;
 
-pub const EMISSION_FLAGS: u64 = EMISSIONS_FLAG_BORROW_ACTIVE | EMISSIONS_FLAG_LENDING_ACTIVE;
 pub const GROUP_FLAGS: u64 = PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
     | FREEZE_SETTINGS
     | TOKENLESS_REPAYMENTS_ALLOWED

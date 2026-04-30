@@ -333,9 +333,9 @@ pub fn create_standard_bank(config: Config, request: StandardBankCreateRequest) 
     let liability_weight_maint: WrappedI80F48 =
         I80F48::from_num(request.liability_weight_maint).into();
 
-    let optimal_utilization_rate: WrappedI80F48 = I80F48::ZERO.into();
-    let plateau_interest_rate: WrappedI80F48 = I80F48::ZERO.into();
-    let max_interest_rate: WrappedI80F48 = I80F48::ZERO.into();
+    let placeholder0: WrappedI80F48 = I80F48::ZERO.into();
+    let placeholder1: WrappedI80F48 = I80F48::ZERO.into();
+    let placeholder2: WrappedI80F48 = I80F48::ZERO.into();
     let insurance_fee_fixed_apr: WrappedI80F48 =
         I80F48::from_num(request.insurance_fee_fixed_apr).into();
     let insurance_ir_fee: WrappedI80F48 = I80F48::from_num(request.insurance_ir_fee).into();
@@ -364,9 +364,9 @@ pub fn create_standard_bank(config: Config, request: StandardBankCreateRequest) 
     let points: [RatePoint; CURVE_POINTS] = make_points(&pts_raw);
 
     let interest_rate_config = InterestRateConfig {
-        optimal_utilization_rate,
-        plateau_interest_rate,
-        max_interest_rate,
+        placeholder0,
+        placeholder1,
+        placeholder2,
         insurance_fee_fixed_apr,
         insurance_ir_fee,
         protocol_fixed_fee_apr,
