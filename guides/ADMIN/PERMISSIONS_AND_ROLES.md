@@ -118,17 +118,32 @@ account (a global singleton).
 **Can do:**
 - Edit global fee parameters (program fee rates, origination fee shares, init fees)
 - Change the global fee wallet
+- Set or clear the dedicated pause delegate admin
 - Panic-pause the entire protocol (with rate limiting: max 4 consecutive pauses, max 3 per day,
   each lasting 6 hours)
 
 This role is intended for the protocol operator (e.g. the foundation) and controls protocol-level
 economics and emergency pause functionality.
 
+## Pause Delegate Admin
+
+The `pause_delegate_admin` is stored on the global `FeeState` account and can be set or cleared by
+the `global_fee_admin`.
+
+**Can do:**
+- Panic-pause the entire protocol
+- Manually unpause before the pause auto-expires
+
+**Cannot do:**
+- Edit fee parameters
+- Change the global fee wallet
+- Set or clear other admins
+
 ## Protocol Panic-Pause
 
-When the `global_fee_admin` invokes `panic_pause`, the protocol enters a group-wide paused state.
-The pause auto-expires (see `PanicState::PAUSE_DURATION_SECONDS`) and is rate-limited (max
-consecutive pauses per window, max per day) so it cannot be held indefinitely.
+When the `global_fee_admin` or `pause_delegate_admin` invokes `panic_pause`, the protocol enters a
+group-wide paused state. The pause auto-expires (see `PanicState::PAUSE_DURATION_SECONDS`) and is
+rate-limited (max consecutive pauses per window, max per day) so it cannot be held indefinitely.
 
 ### Blocked while paused
 
@@ -158,8 +173,9 @@ incident the pause was called for:
   paused. This is needed because a forced deleverage often terminates in a bankruptcy, and
   blocking bankruptcy would leave the bank in a half-resolved state. Non-admin callers (even on
   banks with `PERMISSIONLESS_BAD_DEBT_SETTLEMENT`) remain blocked until the pause expires.
-- **Unpause** — `global_fee_admin` can always end the pause early via `panic_unpause`, and
-  anyone can permissionlessly clear an expired pause via `panic_unpause_permissionless`.
+- **Unpause** — `global_fee_admin` or `pause_delegate_admin` can always end the pause early via
+  `panic_unpause`, and anyone can permissionlessly clear an expired pause via
+  `panic_unpause_permissionless`.
 
 ### Emergency-only instructions (mainnet-disabled)
 
@@ -255,8 +271,9 @@ For more details see the [Receivership Liquidation Guide](../RISK_AND_LIQUIDATOR
 | Start forced deleverage | `risk_admin` |
 | Force tokenless repay complete | `risk_admin` |
 | Edit global fee state | `global_fee_admin` |
-| Panic-pause protocol | `global_fee_admin` |
-| Unpause protocol (early) | `global_fee_admin` |
+| Set pause delegate admin | `global_fee_admin` |
+| Panic-pause protocol | `global_fee_admin` or `pause_delegate_admin` |
+| Unpause protocol (early) | `global_fee_admin` or `pause_delegate_admin` |
 | Unpause protocol (after expiry) | Anyone |
 | Forced deleverage during pause | `risk_admin` |
 | Handle bankruptcy during pause | `admin` or `risk_admin` |

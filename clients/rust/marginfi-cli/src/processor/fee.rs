@@ -135,13 +135,38 @@ pub fn config_group_fee(config: Config, profile: Profile, enable_program_fee: bo
     Ok(())
 }
 
+pub fn set_pause_delegate_admin(
+    config: Config,
+    pause_delegate_admin: Option<Pubkey>,
+) -> Result<()> {
+    let fee_state_pubkey = find_fee_state_pda(&config.program_id).0;
+
+    let set_pause_delegate_admin_ixs = config
+        .mfi_program
+        .request()
+        .accounts(marginfi::accounts::SetPauseDelegateAdmin {
+            global_fee_admin: config.authority(),
+            fee_state: fee_state_pubkey,
+        })
+        .args(marginfi::instruction::SetPauseDelegateAdmin {
+            new_pause_delegate_admin: pause_delegate_admin,
+        })
+        .instructions()?;
+
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(&config, set_pause_delegate_admin_ixs, &signing_keypairs)?;
+    println!("Pause delegate admin updated (sig: {})", sig);
+
+    Ok(())
+}
+
 pub fn panic_pause(config: Config) -> Result<()> {
     let fee_state = find_fee_state_pda(&config.program_id).0;
 
     let ix = Instruction {
         program_id: config.program_id,
         accounts: marginfi::accounts::PanicPause {
-            global_fee_admin: config.authority(),
+            pause_authority: config.authority(),
             fee_state,
         }
         .to_account_metas(Some(true)),
@@ -161,7 +186,7 @@ pub fn panic_unpause(config: Config) -> Result<()> {
     let ix = Instruction {
         program_id: config.program_id,
         accounts: marginfi::accounts::PanicUnpause {
-            global_fee_admin: config.authority(),
+            pause_authority: config.authority(),
             fee_state,
         }
         .to_account_metas(Some(true)),

@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{constants::FEE_STATE_SEED, types::FeeState};
 
-use crate::state::panic_state::PanicStateImpl;
+use crate::state::{fee_state::FeeStateImpl, panic_state::PanicStateImpl};
 use crate::MarginfiError;
 
 pub fn panic_unpause(ctx: Context<PanicUnpause>) -> Result<()> {
@@ -38,15 +38,15 @@ pub fn panic_unpause(ctx: Context<PanicUnpause>) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct PanicUnpause<'info> {
-    /// Admin of the global FeeState (can manually unpause)
+    /// Global fee admin or the dedicated pause delegate admin.
     #[account(mut)]
-    pub global_fee_admin: Signer<'info>,
+    pub pause_authority: Signer<'info>,
 
     #[account(
         mut,
         seeds = [FEE_STATE_SEED.as_bytes()],
         bump,
-        has_one = global_fee_admin @ MarginfiError::Unauthorized
+        constraint = fee_state.load()?.is_pause_authority(pause_authority.key()) @ MarginfiError::Unauthorized
     )]
     pub fee_state: AccountLoader<'info, FeeState>,
 }
