@@ -523,6 +523,7 @@ export type AddBankPermissionlessArgs = {
   feePayer: PublicKey;
   pythOracle: PublicKey;
   stakePool: PublicKey;
+  validatorVoteAccount: PublicKey;
   seed: BN;
 };
 
@@ -569,6 +570,7 @@ export const addBankPermissionless = (
       bankMint: lstMint,
       solPool: solPool,
       stakePool: args.stakePool,
+      validatorVoteAccount: args.validatorVoteAccount,
       // bank: bankKey, // deriveBankWithSeed
       // globalFeeState: deriveGlobalFeeState(id),
       // globalFeeWallet: // implied from globalFeeState,
@@ -758,6 +760,26 @@ export const backfillBankIsT22Flag = (
       // mint: // implied via has_one on bank
     })
     .instruction();
+  return ix;
+};
+
+export type BackfillStakedBankValidatorVoteAccountArgs = {
+  bank: PublicKey;
+  validatorVoteAccount: PublicKey;
+};
+
+export const backfillStakedBankValidatorVoteAccount = (
+  program: Program<Marginfi>,
+  args: BackfillStakedBankValidatorVoteAccountArgs
+) => {
+  const ix = program.methods
+    .lendingPoolBackfillStakedBankValidatorVoteAccount()
+    .accounts({
+      bank: args.bank,
+      validatorVoteAccount: args.validatorVoteAccount,
+    })
+    .instruction();
+
   return ix;
 };
 

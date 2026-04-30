@@ -73,9 +73,6 @@ solend-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/
 # JupLend tests (jl01-jl11)
 juplend-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/jl*.spec.ts --exit --require tests/rootHooks.ts"
 
-# JupLend Token-2022 test only (jl11)
-juplend-token2022-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/jl11*.spec.ts --exit --require tests/rootHooks.ts"
-
 # Bankruptcy tests (z*, zb*)
 bankruptcy-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/z*.spec.ts tests/zb*.spec.ts --exit --require tests/rootHooks.ts"
 

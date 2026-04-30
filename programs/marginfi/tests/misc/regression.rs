@@ -52,7 +52,8 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(account.account_index, 0);
     assert_eq!(account.third_party_index, 0);
     assert_eq!(account.bump, 0);
-    assert_eq!(account._pad0, [0; 3]);
+    assert_eq!(account.active_orders, 0);
+    assert_eq!(account._pad0, [0u8; 2]);
     assert_eq!(account.liquidation_record, Pubkey::default());
     assert_eq!(account._padding0, [0; 7]);
 
@@ -217,7 +218,7 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(account.account_index, 0);
     assert_eq!(account.third_party_index, 0);
     assert_eq!(account.bump, 0);
-    assert_eq!(account._pad0, [0; 3]);
+    assert_eq!(account._pad0, [0; 2]);
     assert_eq!(account.liquidation_record, Pubkey::default());
     assert_eq!(account._padding0, [0; 7]);
 

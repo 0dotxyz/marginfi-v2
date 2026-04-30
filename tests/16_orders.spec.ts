@@ -11,7 +11,7 @@ import {
   createAssociatedTokenAccountIdempotentInstruction,
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
-import { PublicKey, Transaction } from "@solana/web3.js";
+import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { assert, expect } from "chai";
 import { Marginfi } from "../target/types/marginfi";
 import {
@@ -23,8 +23,12 @@ import {
   closeOrderIx,
   keeperCloseOrderIx,
   setKeeperCloseFlagsIx,
+  accountInit,
+  accountCloseIx,
   depositIx,
   borrowIx,
+  repayIx,
+  withdrawIx,
 } from "./utils/user-instructions";
 import { deriveOrderPda, deriveExecuteOrderPda } from "./utils/pdas";
 import { refreshOracles as refreshPullOracles } from "./utils/pyth-pull-mocks";
@@ -107,6 +111,11 @@ describe("orders", () => {
   const U32_MAX = 0xffff_ffff;
   const bpsToU32 = (bps: number) => Math.floor((bps / 10_000) * U32_MAX);
   const maxSlippage = bpsToU32(100);
+  /** Lazy shorthand to fetch account and read the orders count */
+  const getActiveOrders = async (accountPk: PublicKey) => {
+    return (await program.account.marginfiAccount.fetch(accountPk))
+      .activeOrders;
+  };
 
   before(async () => {
     // We make changes to the oracle so we need to revert the changes after.
@@ -184,7 +193,6 @@ describe("orders", () => {
     await userProgram.provider.sendAndConfirm(
       new Transaction().add(borrowUsdcIx),
     );
-
   });
 
   after(async () => {
@@ -240,6 +248,7 @@ describe("orders", () => {
 
       assert.notDeepEqual(index0, -1);
       assert.notDeepEqual(index1, -1);
+      assert.equal(userAccount.activeOrders, 1);
     });
 
     it("rejects duplicate bank keys - should fail", async () => {
@@ -326,6 +335,21 @@ describe("orders", () => {
       return orderPk;
     };
 
+    it("cannot close account while active orders exist - should fail", async () => {
+      assert.isAbove(await getActiveOrders(userMarginfiAccount), 0);
+
+      await expectFailedTxWithMessage(async () => {
+        const closeIx = await accountCloseIx(userProgram, {
+          marginfiAccount: userMarginfiAccount,
+          authority: user.wallet.publicKey,
+          feePayer: user.wallet.publicKey,
+        });
+        await userProgram.provider.sendAndConfirm(
+          new Transaction().add(closeIx),
+        );
+      }, "Close all active orders before closing account");
+    });
+
     it("closes an order as the authority - happy path", async () => {
       const bankKeys = [bankA, bankUsdc];
       const [orderPk] = deriveOrderPda(
@@ -345,10 +369,12 @@ describe("orders", () => {
 
       const closed = await program.provider.connection.getAccountInfo(orderPk);
       expect(closed).to.be.null;
+      assert.equal(await getActiveOrders(userMarginfiAccount), 0);
     });
 
     it("keeper closes an order - happy path", async () => {
       const orderPk = await placeTestOrder();
+      assert.equal(await getActiveOrders(userMarginfiAccount), 1);
 
       // Clear the liability, so at least one order tag has no active balance
       const repayRemaining = composeRemainingAccounts([
@@ -383,6 +409,7 @@ describe("orders", () => {
 
       const closed = await program.provider.connection.getAccountInfo(orderPk);
       expect(closed).to.be.null;
+      assert.equal(await getActiveOrders(userMarginfiAccount), 0);
 
       // Borrow the USDC again for other tests
       const oracleMeta = composeRemainingAccounts([
@@ -410,6 +437,7 @@ describe("orders", () => {
 
     it("keeper close fails when the condition is not satisfied - should fail", async () => {
       const orderPk = await placeTestOrder();
+      assert.equal(await getActiveOrders(userMarginfiAccount), 1);
       const keeper = users[1];
       const keeperProgram = keeper.mrgnProgram as Program<Marginfi>;
 
@@ -427,6 +455,7 @@ describe("orders", () => {
         "LiquidatorOrderCloseNotAllowed",
         6105,
       );
+      assert.equal(await getActiveOrders(userMarginfiAccount), 1);
     });
 
     it("sets liquidator close flags - happy path", async () => {
@@ -470,6 +499,7 @@ describe("orders", () => {
 
       const closed = await program.provider.connection.getAccountInfo(orderPk);
       expect(closed).to.be.null;
+      assert.equal(await getActiveOrders(userMarginfiAccount), 0);
     });
   });
 
@@ -655,6 +685,7 @@ describe("orders", () => {
         trigger,
       });
       await userProgram.provider.sendAndConfirm(new Transaction().add(ixPlace));
+      assert.equal(await getActiveOrders(userMarginfiAccount), 1);
 
       [orderPk] = deriveOrderPda(
         program.programId,
@@ -673,6 +704,7 @@ describe("orders", () => {
       });
 
       await userProgram.provider.sendAndConfirm(new Transaction().add(ixPlace));
+      assert.equal(await getActiveOrders(userMarginfiAccount), 1);
 
       [orderPk] = deriveOrderPda(
         program.programId,
@@ -733,12 +765,8 @@ describe("orders", () => {
 
       const remaining = buildRemaining();
       const withdrawAmount = calcWithdrawAmount(oracles.tokenAPrice);
-      const {
-        startIx,
-        repayInstruction,
-        withdrawInstruction,
-        endIx,
-      } = await buildExecutionIxs(remaining, remaining, withdrawAmount);
+      const { startIx, repayInstruction, withdrawInstruction, endIx } =
+        await buildExecutionIxs(remaining, remaining, withdrawAmount);
 
       await expectFailedTxWithError(
         async () => {
@@ -788,12 +816,8 @@ describe("orders", () => {
       const startRemaining = buildRemaining();
       const endRemaining = buildRemaining(false, true, true);
       const withdrawAmount = calcWithdrawAmount(oracles.tokenAPrice);
-      const {
-        startIx,
-        repayInstruction,
-        withdrawInstruction,
-        endIx,
-      } = await buildExecutionIxs(startRemaining, endRemaining, withdrawAmount);
+      const { startIx, repayInstruction, withdrawInstruction, endIx } =
+        await buildExecutionIxs(startRemaining, endRemaining, withdrawAmount);
 
       // Ensure the keeper has a wSOL ATA
       const keeperWsolAta = getAssociatedTokenAddressSync(
@@ -876,12 +900,8 @@ describe("orders", () => {
 
       const remaining = buildRemaining();
       const excessiveWithdraw = calcWithdrawAmount(oracles.tokenAPrice).muln(3);
-      const {
-        startIx,
-        repayInstruction,
-        withdrawInstruction,
-        endIx,
-      } = await buildExecutionIxs(remaining, remaining, excessiveWithdraw);
+      const { startIx, repayInstruction, withdrawInstruction, endIx } =
+        await buildExecutionIxs(remaining, remaining, excessiveWithdraw);
 
       await expectFailedTxWithError(
         async () => {
@@ -945,19 +965,15 @@ describe("orders", () => {
         const remaining = buildRemaining();
         const baseWithdraw = calcWithdrawAmount(oracles.tokenAPrice);
         const excessiveWithdraw = baseWithdraw.muln(2); // +100%
-        const {
-          startIx,
-          repayInstruction,
-          withdrawInstruction,
-          endIx,
-        } = await buildExecutionIxs(remaining, remaining, excessiveWithdraw);
+        const { startIx, repayInstruction, withdrawInstruction, endIx } =
+          await buildExecutionIxs(remaining, remaining, excessiveWithdraw);
 
         await expectFailedTxWithError(
           async () => {
             await keeperProgram.provider.sendAndConfirm(
               new Transaction()
                 .add(startIx)
-  
+
                 .add(repayInstruction)
                 .add(withdrawInstruction)
                 .add(endIx),
@@ -1013,17 +1029,12 @@ describe("orders", () => {
       const startRemaining = buildRemaining();
       const endRemaining = buildRemaining(false, true, true);
       const withdrawAmount = calcWithdrawAmount(oracles.tokenAPrice);
-      const {
-        startIx,
-        repayInstruction,
-        withdrawInstruction,
-        endIx,
-      } = await buildExecutionIxs(startRemaining, endRemaining, withdrawAmount);
+      const { startIx, repayInstruction, withdrawInstruction, endIx } =
+        await buildExecutionIxs(startRemaining, endRemaining, withdrawAmount);
 
       await keeperProgram.provider.sendAndConfirm(
         new Transaction()
           .add(startIx)
-
           .add(repayInstruction)
           .add(withdrawInstruction)
           .add(endIx),
@@ -1042,6 +1053,7 @@ describe("orders", () => {
       const accAfter = await program.account.marginfiAccount.fetch(
         userMarginfiAccount,
       );
+      assert.equal(accAfter.activeOrders, 0);
 
       // Determine bank PKs for the asset and liability balances from pre-exec state
       const assetTag = orderBefore.tags[0];
@@ -1146,12 +1158,8 @@ describe("orders", () => {
 
       const remaining = buildRemaining();
       const withdrawAmount = calcWithdrawAmount(oracles.tokenAPrice);
-      const {
-        startIx,
-        repayInstruction,
-        withdrawInstruction,
-        endIx,
-      } = await buildExecutionIxs(remaining, remaining, withdrawAmount);
+      const { startIx, repayInstruction, withdrawInstruction, endIx } =
+        await buildExecutionIxs(remaining, remaining, withdrawAmount);
 
       await keeperProgram.provider.sendAndConfirm(
         new Transaction()
@@ -1173,6 +1181,7 @@ describe("orders", () => {
       const accAfter = await program.account.marginfiAccount.fetch(
         userMarginfiAccount,
       );
+      assert.equal(accAfter.activeOrders, 0);
 
       const postLiability = accAfter.lendingAccount.balances.find(
         (b: any) => b.bankPk && b.bankPk.equals(bankUsdc),
@@ -1245,12 +1254,8 @@ describe("orders", () => {
 
       const remaining = buildRemaining();
       const withdrawAmount = calcWithdrawAmount(oracles.tokenAPrice);
-      const {
-        startIx,
-        repayInstruction,
-        withdrawInstruction,
-        endIx,
-      } = await buildExecutionIxs(remaining, remaining, withdrawAmount);
+      const { startIx, repayInstruction, withdrawInstruction, endIx } =
+        await buildExecutionIxs(remaining, remaining, withdrawAmount);
 
       await keeperProgram.provider.sendAndConfirm(
         new Transaction()
@@ -1272,6 +1277,7 @@ describe("orders", () => {
       const accAfter = await program.account.marginfiAccount.fetch(
         userMarginfiAccount,
       );
+      assert.equal(accAfter.activeOrders, 0);
 
       const postLiability = accAfter.lendingAccount.balances.find(
         (b: any) => b.bankPk && b.bankPk.equals(bankUsdc),
