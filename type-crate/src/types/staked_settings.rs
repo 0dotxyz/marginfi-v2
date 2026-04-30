@@ -58,6 +58,7 @@ impl StakedSettings {
     pub const LEN: usize = std::mem::size_of::<StakedSettings>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::STAKED_SETTINGS;
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         key: Pubkey,
         marginfi_group: Pubkey,

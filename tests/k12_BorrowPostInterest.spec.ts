@@ -41,6 +41,7 @@ import {
 } from "./utils/genericTests";
 import {
   defaultKaminoBankConfig,
+  getLiquidityExchangeRate,
   simpleRefreshObligation,
   simpleRefreshReserve,
 } from "./utils/kamino-utils";
@@ -150,7 +151,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
         signerTokenAccount: groupAdmin.tokenAAccount,
         lendingMarket: market,
         reserve: tokenAReserve,
-      })
+      }),
     );
     await processBankrunTx(bankrunContext, tx, [groupAdmin.wallet]);
   });
@@ -272,7 +273,7 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
       console.log("expected value (w/ confidence): " + depValWithConf);
       console.log(
         "actual value:               " +
-        wrappedI80F48toBigNumber(cache.assetValueEquity).toString()
+          wrappedI80F48toBigNumber(cache.assetValueEquity).toString(),
       );
     }
     // Note: interest has accumulated, so we expect this position should be worth a few % more.
@@ -282,6 +283,23 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
     // Note: Default asset weights for Kamino banks is also 1
     assertI80F48Approx(cache.assetValue, depValWithConf, t);
     assertI80F48Approx(cache.assetValueMaint, depValWithConf, t);
+
+    const [kaminoBank, reserve] = await Promise.all([
+      bankrunProgram.account.bank.fetch(kaminoUsdcBank),
+      klendBankrunProgram.account.reserve.fetch(usdcReserve),
+    ]);
+    const expectedMultiplier = Number(
+      getLiquidityExchangeRate(reserve as any).toString(),
+    );
+    const cachedMultiplier = kaminoBank.cache.priceMultiplier;
+    assertI80F48Approx(
+      kaminoBank.cache.lastOraclePrice,
+      oracles.usdcPrice,
+      0.000001,
+    );
+    assertI80F48Approx(cachedMultiplier, expectedMultiplier, 0.0001);
+    assert(expectedMultiplier > 1);
+    assert(wrappedI80F48toBigNumber(cachedMultiplier).gt(1));
     // TODO repeat the above for the token A test below
   });
 

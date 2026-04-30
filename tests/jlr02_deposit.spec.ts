@@ -16,16 +16,19 @@ import {
   ecosystem,
   groupAdmin,
   juplendAccounts,
+  oracles,
   users,
 } from "./rootHooks";
 import {
   assertBankrunTxFailed,
   assertBNEqual,
   assertBNGreaterThan,
+  assertI80F48Approx,
   assertI80F48Equal,
   getTokenBalance,
 } from "./utils/genericTests";
-import { accountInit } from "./utils/user-instructions";
+import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
+import { accountInit, pulseBankPrice } from "./utils/user-instructions";
 import { dumpBankrunLogs, mintToTokenAccount, processBankrunTransaction } from "./utils/tools";
 import {
   makeJuplendDepositIx,
@@ -64,6 +67,7 @@ const ADMIN_USDC_BORROW_DEBT_CEILING = new BN(
   1_000 * 10 ** ecosystem.usdcDecimals,
 );
 const ONE_HOUR_IN_SECONDS = 60 * 60;
+const EXCHANGE_PRICES_PRECISION = new BN("1000000000000");
 
 describe("jlr02: JupLend deposits (bankrun)", () => {
   let juplendPrograms: ReturnType<typeof getJuplendPrograms>;
@@ -81,6 +85,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
   let postInterestMintedShares = new BN(0);
   let postInterestTokenExchangePrice = new BN(0);
   let postInterestLiquidityExchangePrice = new BN(0);
+  let firstDepositCacheMultiplier = 0;
 
   before(async () => {
     user = users[0];
@@ -285,6 +290,27 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       lendingAfter.liquidityExchangePrice,
       lendingBefore.liquidityExchangePrice,
     );
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+    const pulseInitialCacheIx = await pulseBankPrice(user.mrgnBankrunProgram!, {
+      group: groupPk,
+      bank: usdcJupBankPk,
+      remaining: bankAfter.config.oracleKeys.filter(
+        (key) => !key.equals(PublicKey.default),
+      ),
+    });
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(pulseInitialCacheIx),
+      [user.wallet],
+      false,
+      true,
+    );
+    const bankAfterPulse = await bankrunProgram.account.bank.fetch(usdcJupBankPk);
+    firstDepositCacheMultiplier = Number(
+      wrappedI80F48toBigNumber(bankAfterPulse.cache.priceMultiplier).toString(),
+    );
+    assertI80F48Approx(bankAfterPulse.cache.lastOraclePrice, oracles.usdcPrice, 0.000001);
+    assertI80F48Approx(bankAfterPulse.cache.priceMultiplier, 1, 0.01);
   });
 
   it("(user 0) deposit 0 into JupLend USDC bank - should fail", async () => {
@@ -758,6 +784,35 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       lendingAfter.liquidityExchangePrice,
       lendingBefore.liquidityExchangePrice,
     );
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+    const pulsePostInterestCacheIx = await pulseBankPrice(user.mrgnBankrunProgram!, {
+      group: groupPk,
+      bank: usdcJupBankPk,
+      remaining: bankAfter.config.oracleKeys.filter(
+        (key) => !key.equals(PublicKey.default),
+      ),
+    });
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(pulsePostInterestCacheIx),
+      [user.wallet],
+      false,
+      true,
+    );
+    const bankAfterPulse = await bankrunProgram.account.bank.fetch(usdcJupBankPk);
+    const expectedCacheMultiplier =
+      Number(lendingAfter.tokenExchangePrice.toString()) /
+      Number(EXCHANGE_PRICES_PRECISION.toString());
+    const observedCacheMultiplier = Number(
+      wrappedI80F48toBigNumber(bankAfterPulse.cache.priceMultiplier).toString(),
+    );
+    assertI80F48Approx(
+      bankAfterPulse.cache.priceMultiplier,
+      expectedCacheMultiplier,
+      expectedCacheMultiplier / 1000, // .01%
+    );
+    assertI80F48Approx(bankAfterPulse.cache.lastOraclePrice, oracles.usdcPrice, 0.000001);
+    assert.isAtLeast(observedCacheMultiplier, firstDepositCacheMultiplier);
     assert.equal(
       jupReserveVaultAfter - jupReserveVaultBefore,
       USER_DEPOSIT_AMOUNT.toNumber(),
