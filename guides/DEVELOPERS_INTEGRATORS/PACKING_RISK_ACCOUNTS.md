@@ -15,6 +15,36 @@ In some instances, you must also pack other accounts into remaining accounts.
 
 If the Mint for a given Bank is Token22, pack it first, before all the risk accounts.
 
+### Group Rate Limit Pricing
+
+If **group** rate limits are enabled, outflow instructions need one extra rule:
+
+- `lending_account_withdraw`
+- `lending_account_borrow`
+- `kamino_withdraw`
+- `drift_withdraw`
+- `solend_withdraw`
+- `juplend_withdraw`
+
+Each of those instructions must include the withdrawn or borrowed bank and its oracle account
+group in `remaining_accounts`, even when the health check would not otherwise need that bank's
+price.
+
+Why: the group rate limiter validates projected outflow in USD, so it reads the affected bank's
+price from the same contiguous `[bank, oracle_0, ..]` layout used by risk checks.
+
+This matters most for:
+
+- `withdraw_all`, where the closing bank may no longer be part of the post-instruction health set
+- low-risk withdraws that leave no liability
+- borrows where some other collateral alone is enough for health
+
+If the affected bank entry is missing, the instruction fails with `BankAccountNotFound`. If its
+oracle price cannot be read, it fails with `InvalidRateLimitPrice`.
+
+Inflow instructions such as `lending_account_deposit` and `lending_account_repay` do not need this
+extra pricing data.
+
 ### Liquidate Oracles
 
 For `lending_account_liquidate`, pack in the following order:
@@ -170,10 +200,14 @@ When closing a balance, pass the accounts needed for the instruction's risk/orac
 closing bank does not need to remain in the health-account list just because the balance is being
 closed.
 
+Exception: if group rate limits are enabled and the instruction is an outflow, still include the
+closing bank and its oracle account group so the program can price the outflow in USD.
+
 Example (withdraw all USDC when the user also has SOL + Token A balances):
 
 ```
 const remaining = composeRemainingAccounts([
+    [usdcBank, usdcOracle],
     [solBank, solOracle],
     [tokenABank, tokenAOracle],
 ]);

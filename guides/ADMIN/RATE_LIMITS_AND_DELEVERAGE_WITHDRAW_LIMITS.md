@@ -52,6 +52,24 @@ Important details:
 - `RateLimitFlowEvent` is an indexing aid, not a source of truth. Solana log truncation can drop
   events, so the off-chain worker must reconcile gaps instead of assuming no event means no flow.
 
+### Account requirements
+
+Enabling **group** rate limits changes what callers must include in `remaining_accounts` for any
+outflow instruction (`lending_account_withdraw`, `lending_account_borrow`, and the
+kamino/juplend/drift/solend withdraws).
+
+The group limiter checks capacity in USD, so the program must read the withdrawn or borrowed
+bank's price from `remaining_accounts`. Use the same contiguous `[bank, oracle_0, ..]` layout
+that the risk checks expect.
+
+Include the affected bank and its oracle(s) as one contiguous group, even if the instruction
+would not otherwise need that bank's oracle, such as a withdraw that leaves no liability.
+If the oracle is missing, the instruction fails with `InvalidRateLimitPrice`. If the bank entry
+is missing, it fails with `BankAccountNotFound`.
+
+Inflow instructions (`lending_account_deposit`, `lending_account_repay`) do not need price data,
+so they require no extra accounts. Bank-only rate limits also never require extra accounts.
+
 ### 3. Admin settlement path
 
 The off-chain worker batches the observed flows and calls `update_group_rate_limiter`.
@@ -133,4 +151,3 @@ When the update lands:
 - The on-chain daily counter is advanced with `update_withdrawn_equity`
 - Daily reset behavior is handled from timestamp
 - The resulting `withdrawn_today` value must still remain within the configured daily cap
-
