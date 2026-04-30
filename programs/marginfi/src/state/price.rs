@@ -188,7 +188,8 @@ fn kamino_price_multiplier(reserve: &MinimalReserve) -> MarginfiResult<I80F48> {
     if total_col > I80F48::ZERO {
         Ok(total_liq / total_col)
     } else {
-        Ok(I80F48::ONE)
+        // Note: expected to be unreachable
+        Err(MarginfiError::MathError.into())
     }
 }
 
@@ -210,7 +211,8 @@ fn solend_price_multiplier(reserve: &SolendMinimalReserve) -> MarginfiResult<I80
     if total_col > I80F48::ZERO {
         Ok(total_liq / total_col)
     } else {
-        Ok(I80F48::ONE)
+        // Note: expected to be unreachable
+        Err(MarginfiError::MathError.into())
     }
 }
 
@@ -382,7 +384,7 @@ impl OraclePriceFeedAdapter {
                 let reserve_loader = load_kamino_reserve(bank_config, reserve_info)?;
                 let reserve = reserve_loader.load()?;
                 ensure_kamino_reserve_fresh(&reserve, clock)?;
-                let multiplier = kamino_price_multiplier(&reserve)?;
+                let multiplier: I80F48 = kamino_price_multiplier(&reserve)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
@@ -392,19 +394,17 @@ impl OraclePriceFeedAdapter {
                     None
                 };
 
-                if multiplier > I80F48::ZERO {
-                    // Adjust prices & confidence in place
-                    price_feed.price.price = mul_i64_by_i80f48(price_feed.price.price, multiplier)
+                // Adjust prices & confidence in place
+                price_feed.price.price = mul_i64_by_i80f48(price_feed.price.price, multiplier)
+                    .ok_or_else(math_error!())?;
+                price_feed.ema_price.price =
+                    mul_i64_by_i80f48(price_feed.ema_price.price, multiplier)
                         .ok_or_else(math_error!())?;
-                    price_feed.ema_price.price =
-                        mul_i64_by_i80f48(price_feed.ema_price.price, multiplier)
-                            .ok_or_else(math_error!())?;
-                    price_feed.price.conf = mul_u64_by_i80f48(price_feed.price.conf, multiplier)
+                price_feed.price.conf = mul_u64_by_i80f48(price_feed.price.conf, multiplier)
+                    .ok_or_else(math_error!())?;
+                price_feed.ema_price.conf =
+                    mul_u64_by_i80f48(price_feed.ema_price.conf, multiplier)
                         .ok_or_else(math_error!())?;
-                    price_feed.ema_price.conf =
-                        mul_u64_by_i80f48(price_feed.ema_price.conf, multiplier)
-                            .ok_or_else(math_error!())?;
-                }
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
@@ -424,7 +424,7 @@ impl OraclePriceFeedAdapter {
                 let reserve_loader = load_kamino_reserve(bank_config, reserve_info)?;
                 let reserve = reserve_loader.load()?;
                 ensure_kamino_reserve_fresh(&reserve, clock)?;
-                let multiplier = kamino_price_multiplier(&reserve)?;
+                let multiplier: I80F48 = kamino_price_multiplier(&reserve)?;
 
                 let mut price_feed = SwitchboardPullPriceFeed::load_checked(
                     oracle_info,
@@ -437,15 +437,13 @@ impl OraclePriceFeedAdapter {
                     None
                 };
 
-                if multiplier > I80F48::ZERO {
-                    // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
-                    price_feed.feed.result.value =
-                        mul_i128_by_i80f48(price_feed.feed.result.value, multiplier)
-                            .ok_or_else(math_error!())?;
-                    price_feed.feed.result.std_dev =
-                        mul_i128_by_i80f48(price_feed.feed.result.std_dev, multiplier)
-                            .ok_or_else(math_error!())?;
-                }
+                // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
+                price_feed.feed.result.value =
+                    mul_i128_by_i80f48(price_feed.feed.result.value, multiplier)
+                        .ok_or_else(math_error!())?;
+                price_feed.feed.result.std_dev =
+                    mul_i128_by_i80f48(price_feed.feed.result.std_dev, multiplier)
+                        .ok_or_else(math_error!())?;
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::SwitchboardPull(price_feed),
@@ -575,7 +573,7 @@ impl OraclePriceFeedAdapter {
                 let reserve_loader = load_solend_reserve(bank_config, reserve_info)?;
                 let reserve = reserve_loader.load()?;
                 ensure_solend_reserve_fresh(&reserve)?;
-                let multiplier = solend_price_multiplier(&reserve)?;
+                let multiplier: I80F48 = solend_price_multiplier(&reserve)?;
 
                 let account_info = &ais[0];
 
@@ -589,19 +587,17 @@ impl OraclePriceFeedAdapter {
                     None
                 };
 
-                if multiplier > I80F48::ZERO {
-                    // Adjust Pyth prices & confidence in place
-                    price_feed.price.price = mul_i64_by_i80f48(price_feed.price.price, multiplier)
+                // Adjust Pyth prices & confidence in place
+                price_feed.price.price = mul_i64_by_i80f48(price_feed.price.price, multiplier)
+                    .ok_or_else(math_error!())?;
+                price_feed.ema_price.price =
+                    mul_i64_by_i80f48(price_feed.ema_price.price, multiplier)
                         .ok_or_else(math_error!())?;
-                    price_feed.ema_price.price =
-                        mul_i64_by_i80f48(price_feed.ema_price.price, multiplier)
-                            .ok_or_else(math_error!())?;
-                    price_feed.price.conf = mul_u64_by_i80f48(price_feed.price.conf, multiplier)
+                price_feed.price.conf = mul_u64_by_i80f48(price_feed.price.conf, multiplier)
+                    .ok_or_else(math_error!())?;
+                price_feed.ema_price.conf =
+                    mul_u64_by_i80f48(price_feed.ema_price.conf, multiplier)
                         .ok_or_else(math_error!())?;
-                    price_feed.ema_price.conf =
-                        mul_u64_by_i80f48(price_feed.ema_price.conf, multiplier)
-                            .ok_or_else(math_error!())?;
-                }
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
                     cache_raw_price,
@@ -620,7 +616,7 @@ impl OraclePriceFeedAdapter {
                 let reserve_loader = load_solend_reserve(bank_config, reserve_info)?;
                 let reserve = reserve_loader.load()?;
                 ensure_solend_reserve_fresh(&reserve)?;
-                let multiplier = solend_price_multiplier(&reserve)?;
+                let multiplier: I80F48 = solend_price_multiplier(&reserve)?;
 
                 let mut price_feed = SwitchboardPullPriceFeed::load_checked(
                     oracle_info,
@@ -633,15 +629,13 @@ impl OraclePriceFeedAdapter {
                     None
                 };
 
-                if multiplier > I80F48::ZERO {
-                    // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
-                    price_feed.feed.result.value =
-                        mul_i128_by_i80f48(price_feed.feed.result.value, multiplier)
-                            .ok_or_else(math_error!())?;
-                    price_feed.feed.result.std_dev =
-                        mul_i128_by_i80f48(price_feed.feed.result.std_dev, multiplier)
-                            .ok_or_else(math_error!())?;
-                }
+                // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
+                price_feed.feed.result.value =
+                    mul_i128_by_i80f48(price_feed.feed.result.value, multiplier)
+                        .ok_or_else(math_error!())?;
+                price_feed.feed.result.std_dev =
+                    mul_i128_by_i80f48(price_feed.feed.result.std_dev, multiplier)
+                        .ok_or_else(math_error!())?;
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::SwitchboardPull(price_feed),

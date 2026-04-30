@@ -14,7 +14,7 @@ use crate::{
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
-        self, fetch_unbiased_price_for_bank_cache, is_marginfi_asset_tag,
+        self, fetch_unbiased_price_for_bank_with_cache, is_marginfi_asset_tag,
         record_withdrawal_outflow, validate_asset_tags, validate_bank_state, InstructionKind,
     },
 };
@@ -204,13 +204,15 @@ pub fn lending_account_borrow<'info>(
 
     let bank_pk = ctx.accounts.bank.key();
     let mut bank = ctx.accounts.bank.load_mut()?;
-    let price_for_cache =
-        fetch_unbiased_price_for_bank_cache(&bank_pk, &bank, &clock, ctx.remaining_accounts).ok();
+    let prices =
+        fetch_unbiased_price_for_bank_with_cache(&bank_pk, &bank, &clock, ctx.remaining_accounts)
+            .ok();
 
-    let rate_limit_price = price_for_cache
+    let rate_limit_price = prices
         .as_ref()
-        .map(|p| p.oracle_price.price)
+        .map(|(adjusted, _)| adjusted.price)
         .unwrap_or(I80F48::ZERO);
+    let price_for_cache = prices.map(|(_, cache)| cache);
     record_withdrawal_outflow(
         group_rate_limit_enabled,
         amount_pre_fee,
