@@ -11,7 +11,7 @@ use crate::{
         marginfi_group::MarginfiGroupImpl,
     },
     utils::{
-        self, fetch_unbiased_price_for_bank, is_marginfi_asset_tag, validate_bank_state,
+        self, fetch_unbiased_price_for_bank_cache, is_marginfi_asset_tag, validate_bank_state,
         InstructionKind,
     },
     MarginfiResult,
@@ -84,9 +84,13 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     )?;
 
     let bank = bank_loader.load()?;
-    let cached_price =
-        fetch_unbiased_price_for_bank(&bank_loader.key(), &bank, &clock, ctx.remaining_accounts)
-            .ok();
+    let cached_price = fetch_unbiased_price_for_bank_cache(
+        &bank_loader.key(),
+        &bank,
+        &clock,
+        ctx.remaining_accounts,
+    )
+    .ok();
     drop(bank);
 
     health_cache.set_engine_ok(true);

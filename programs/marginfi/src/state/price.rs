@@ -31,6 +31,17 @@ use switchboard_on_demand::{
     CurrentResult, Discriminator, PullFeedAccountData, SPL_TOKEN_PROGRAM_ID,
 };
 
+/// Price per unit before any multipliers are applied, where `price_multiplier` shows what
+/// multipliers will be applied to generate the true deposited-token price.
+/// * Example: a Staked Collateral bank with an exchange rate of 2 for stake/sol and a price of $50
+/// for SOL will show $50 here, and multiplier will be 2.
+/// * For any bank that does not have a multiplier, `price_multiplier = 1` and `oracle_price`
+///   matches the adjusted value.
+#[derive(Copy, Clone, Debug)]
+pub struct OraclePriceWithMultiplier {
+    pub oracle_price: OraclePriceWithConfidence,
+    pub price_multiplier: I80F48,
+}
 #[enum_dispatch]
 pub trait PriceAdapter {
     fn get_price_and_confidence_of_type(
@@ -172,6 +183,43 @@ fn ensure_juplend_lending_fresh(lending: &JuplendLending, clock: &Clock) -> Marg
     Ok(())
 }
 
+fn kamino_price_multiplier(reserve: &MinimalReserve) -> MarginfiResult<I80F48> {
+    let (total_liq, total_col) = reserve.scaled_supplies()?;
+    if total_col > I80F48::ZERO {
+        Ok(total_liq / total_col)
+    } else {
+        Ok(I80F48::ONE)
+    }
+}
+
+fn drift_price_multiplier(spot_market: &MinimalSpotMarket) -> MarginfiResult<I80F48> {
+    let cumulative_interest = u128::from_le_bytes(spot_market.cumulative_deposit_interest);
+    Ok(I80F48::from_num(cumulative_interest)
+        .checked_div(I80F48::from_num(SPOT_CUMULATIVE_INTEREST_PRECISION))
+        .ok_or_else(math_error!())?)
+}
+
+fn juplend_price_multiplier(lending: &JuplendLending) -> MarginfiResult<I80F48> {
+    Ok(I80F48::from_num(lending.token_exchange_price)
+        .checked_div(I80F48::from_num(EXCHANGE_PRICES_PRECISION))
+        .ok_or_else(math_error!())?)
+}
+
+fn solend_price_multiplier(reserve: &SolendMinimalReserve) -> MarginfiResult<I80F48> {
+    let (total_liq, total_col) = reserve.scaled_supplies()?;
+    if total_col > I80F48::ZERO {
+        Ok(total_liq / total_col)
+    } else {
+        Ok(I80F48::ONE)
+    }
+}
+
+struct OracleLoadContext {
+    adjusted_price_feed: OraclePriceFeedAdapter,
+    cache_raw_price: Option<OraclePriceWithConfidence>,
+    cache_multiplier: I80F48,
+}
+
 impl OraclePriceFeedAdapter {
     pub fn try_from_bank<'info>(
         bank: &Bank,
@@ -187,6 +235,17 @@ impl OraclePriceFeedAdapter {
         clock: &Clock,
         max_age: u64,
     ) -> MarginfiResult<Self> {
+        let context = Self::load_oracle_context_with_max_age(bank, ais, clock, max_age, None)?;
+        Ok(context.adjusted_price_feed)
+    }
+
+    fn load_oracle_context_with_max_age<'info>(
+        bank: &Bank,
+        ais: &'info [AccountInfo<'info>],
+        clock: &Clock,
+        max_age: u64,
+        cache_price_type: Option<OraclePriceType>,
+    ) -> MarginfiResult<OracleLoadContext> {
         let bank_config = &bank.config;
         match bank_config.oracle_setup {
             OracleSetup::None => Err(MarginfiError::OracleNotSetup.into()),
@@ -203,17 +262,29 @@ impl OraclePriceFeedAdapter {
 
                 check_primary_oracle_key(bank_config, account_info)?;
 
-                Ok(OraclePriceFeedAdapter::PythPushOracle(
-                    PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?,
-                ))
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(
+                        PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?,
+                    ),
+                    cache_raw_price: None,
+                    cache_multiplier: I80F48::ONE,
+                })
             }
             OracleSetup::SwitchboardPull => {
                 check!(ais.len() == 1, MarginfiError::WrongNumberOfOracleAccounts);
                 check_primary_oracle_key(bank_config, &ais[0])?;
 
-                Ok(OraclePriceFeedAdapter::SwitchboardPull(
-                    SwitchboardPullPriceFeed::load_checked(&ais[0], clock.unix_timestamp, max_age)?,
-                ))
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::SwitchboardPull(
+                        SwitchboardPullPriceFeed::load_checked(
+                            &ais[0],
+                            clock.unix_timestamp,
+                            max_age,
+                        )?,
+                    ),
+                    cache_raw_price: None,
+                    cache_multiplier: I80F48::ONE,
+                })
             }
             OracleSetup::StakedWithPythPush => {
                 check!(ais.len() == 3, MarginfiError::WrongNumberOfOracleAccounts);
@@ -256,6 +327,14 @@ impl OraclePriceFeedAdapter {
                 check_primary_oracle_key(bank_config, account_info)?;
 
                 let mut feed = PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
+                let multiplier = I80F48::from_num(sol_pool_adjusted_balance)
+                    .checked_div(I80F48::from_num(lst_supply))
+                    .ok_or_else(math_error!())?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
 
                 let adjusted_price = (feed.price.price as i128)
                     .checked_mul(sol_pool_adjusted_balance as i128)
@@ -274,8 +353,25 @@ impl OraclePriceFeedAdapter {
                     .ok()
                     .ok_or_else(math_error!())?;
 
-                let price = OraclePriceFeedAdapter::PythPushOracle(feed);
-                Ok(price)
+                // Keep confidence scaling consistent with other multiplier-based integrations.
+                feed.price.conf = mul_div_u64(
+                    feed.price.conf,
+                    sol_pool_adjusted_balance as u128,
+                    lst_supply as u128,
+                )
+                .ok_or_else(math_error!())?;
+                feed.ema_price.conf = mul_div_u64(
+                    feed.ema_price.conf,
+                    sol_pool_adjusted_balance as u128,
+                    lst_supply as u128,
+                )
+                .ok_or_else(math_error!())?;
+
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(feed),
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
+                })
             }
             OracleSetup::KaminoPythPush => {
                 // (1) Pyth oracle (for price)_and (2) Kamino reserve (for exchange rate)
@@ -289,14 +385,17 @@ impl OraclePriceFeedAdapter {
                 let reserve_loader = load_kamino_reserve(bank_config, reserve_info)?;
                 let reserve = reserve_loader.load()?;
                 ensure_kamino_reserve_fresh(&reserve, clock)?;
+                let multiplier = kamino_price_multiplier(&reserve)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
 
-                let (total_liq, total_col) = reserve.scaled_supplies()?;
-                if total_col > I80F48::ZERO {
-                    let multiplier = total_liq / total_col;
-
+                if multiplier > I80F48::ZERO {
                     // Adjust prices & confidence in place
                     price_feed.price.price = mul_i64_by_i80f48(price_feed.price.price, multiplier)
                         .ok_or_else(math_error!())?;
@@ -310,7 +409,11 @@ impl OraclePriceFeedAdapter {
                             .ok_or_else(math_error!())?;
                 }
 
-                Ok(OraclePriceFeedAdapter::PythPushOracle(price_feed))
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
+                })
             }
             OracleSetup::KaminoSwitchboardPull => {
                 // (1) Switchboard oracle (for price) and (2) Kamino reserve (for exchange rate)
@@ -324,17 +427,20 @@ impl OraclePriceFeedAdapter {
                 let reserve_loader = load_kamino_reserve(bank_config, reserve_info)?;
                 let reserve = reserve_loader.load()?;
                 ensure_kamino_reserve_fresh(&reserve, clock)?;
+                let multiplier = kamino_price_multiplier(&reserve)?;
 
                 let mut price_feed = SwitchboardPullPriceFeed::load_checked(
                     oracle_info,
                     clock.unix_timestamp,
                     max_age,
                 )?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
 
-                let (total_liq, total_col) = reserve.scaled_supplies()?;
-                if total_col > I80F48::ZERO {
-                    let multiplier = total_liq / total_col;
-
+                if multiplier > I80F48::ZERO {
                     // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
                     price_feed.feed.result.value =
                         mul_i128_by_i80f48(price_feed.feed.result.value, multiplier)
@@ -344,7 +450,11 @@ impl OraclePriceFeedAdapter {
                             .ok_or_else(math_error!())?;
                 }
 
-                Ok(OraclePriceFeedAdapter::SwitchboardPull(price_feed))
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::SwitchboardPull(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
+                })
             }
             OracleSetup::Fixed => {
                 check!(ais.is_empty(), MarginfiError::WrongNumberOfOracleAccounts);
@@ -355,7 +465,11 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::FixedOraclePriceNegative
                 );
 
-                Ok(OraclePriceFeedAdapter::Fixed(FixedPriceFeed { price }))
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed { price }),
+                    cache_raw_price: None,
+                    cache_multiplier: I80F48::ONE,
+                })
             }
             OracleSetup::DriftPythPull => {
                 // (1) Pyth oracle (for price) and (2) Drift spot market (for exchange rate)
@@ -370,8 +484,14 @@ impl OraclePriceFeedAdapter {
                 let spot_market = spot_market_loader.load()?;
                 ensure_drift_spot_market_fresh(&spot_market, clock)?;
                 let numerator = u128::from_le_bytes(spot_market.cumulative_deposit_interest);
+                let multiplier = drift_price_multiplier(&spot_market)?;
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
 
                 // Adjust Pyth prices & confidence in place
                 price_feed.price.price = mul_div_i64(
@@ -399,7 +519,11 @@ impl OraclePriceFeedAdapter {
                 )
                 .ok_or_else(math_error!())?;
 
-                Ok(OraclePriceFeedAdapter::PythPushOracle(price_feed))
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
+                })
             }
             OracleSetup::DriftSwitchboardPull => {
                 // (1) Switchboard oracle (for price) and (2) Drift spot market (for exchange rate)
@@ -414,12 +538,18 @@ impl OraclePriceFeedAdapter {
                 let spot_market = spot_market_loader.load()?;
                 ensure_drift_spot_market_fresh(&spot_market, clock)?;
                 let numerator = u128::from_le_bytes(spot_market.cumulative_deposit_interest);
+                let multiplier = drift_price_multiplier(&spot_market)?;
 
                 let mut price_feed = SwitchboardPullPriceFeed::load_checked(
                     oracle_info,
                     clock.unix_timestamp,
                     max_age,
                 )?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
 
                 // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
                 price_feed.feed.result.value = mul_div_i128(
@@ -435,7 +565,11 @@ impl OraclePriceFeedAdapter {
                 )
                 .ok_or_else(math_error!())?;
 
-                Ok(OraclePriceFeedAdapter::SwitchboardPull(price_feed))
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::SwitchboardPull(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
+                })
             }
             OracleSetup::SolendPythPull => {
                 // (1) Pyth oracle (for price) and (2) Solend reserve (for exchange rate)
@@ -444,6 +578,7 @@ impl OraclePriceFeedAdapter {
                 let reserve_loader = load_solend_reserve(bank_config, reserve_info)?;
                 let reserve = reserve_loader.load()?;
                 ensure_solend_reserve_fresh(&reserve)?;
+                let multiplier = solend_price_multiplier(&reserve)?;
 
                 let account_info = &ais[0];
 
@@ -451,11 +586,13 @@ impl OraclePriceFeedAdapter {
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
 
-                let (total_liq, total_col) = reserve.scaled_supplies()?;
-                if total_col > I80F48::ZERO {
-                    let multiplier = total_liq / total_col;
-
+                if multiplier > I80F48::ZERO {
                     // Adjust Pyth prices & confidence in place
                     price_feed.price.price = mul_i64_by_i80f48(price_feed.price.price, multiplier)
                         .ok_or_else(math_error!())?;
@@ -468,7 +605,11 @@ impl OraclePriceFeedAdapter {
                         mul_u64_by_i80f48(price_feed.ema_price.conf, multiplier)
                             .ok_or_else(math_error!())?;
                 }
-                Ok(OraclePriceFeedAdapter::PythPushOracle(price_feed))
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
+                })
             }
             OracleSetup::SolendSwitchboardPull => {
                 // (1) Switchboard oracle (for price) and (2) Solend reserve (for exchange rate)
@@ -482,17 +623,20 @@ impl OraclePriceFeedAdapter {
                 let reserve_loader = load_solend_reserve(bank_config, reserve_info)?;
                 let reserve = reserve_loader.load()?;
                 ensure_solend_reserve_fresh(&reserve)?;
+                let multiplier = solend_price_multiplier(&reserve)?;
 
                 let mut price_feed = SwitchboardPullPriceFeed::load_checked(
                     oracle_info,
                     clock.unix_timestamp,
                     max_age,
                 )?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
 
-                let (total_liq, total_col) = reserve.scaled_supplies()?;
-                if total_col > I80F48::ZERO {
-                    let multiplier = total_liq / total_col;
-
+                if multiplier > I80F48::ZERO {
                     // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
                     price_feed.feed.result.value =
                         mul_i128_by_i80f48(price_feed.feed.result.value, multiplier)
@@ -502,7 +646,11 @@ impl OraclePriceFeedAdapter {
                             .ok_or_else(math_error!())?;
                 }
 
-                Ok(OraclePriceFeedAdapter::SwitchboardPull(price_feed))
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::SwitchboardPull(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
+                })
             }
             OracleSetup::FixedDrift => {
                 // Fixed base price + Drift spot market exchange rate
@@ -533,10 +681,18 @@ impl OraclePriceFeedAdapter {
                 let adjusted_price = base_price
                     .checked_mul(interest_ratio)
                     .ok_or_else(math_error!())?;
+                let cache_raw_price = cache_price_type.map(|_| OraclePriceWithConfidence {
+                    price: base_price,
+                    confidence: I80F48::ZERO,
+                });
 
-                Ok(OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
-                    price: adjusted_price,
-                }))
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                        price: adjusted_price,
+                    }),
+                    cache_raw_price,
+                    cache_multiplier: interest_ratio,
+                })
             }
             OracleSetup::FixedKamino => {
                 // Fixed base price + Kamino reserve exchange rate
@@ -566,10 +722,23 @@ impl OraclePriceFeedAdapter {
                 } else {
                     base_price
                 };
+                let multiplier = if total_col > I80F48::ZERO {
+                    total_liq / total_col
+                } else {
+                    I80F48::ONE
+                };
+                let cache_raw_price = cache_price_type.map(|_| OraclePriceWithConfidence {
+                    price: base_price,
+                    confidence: I80F48::ZERO,
+                });
 
-                Ok(OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
-                    price: adjusted_price,
-                }))
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                        price: adjusted_price,
+                    }),
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
+                })
             }
 
             OracleSetup::FixedJuplend => {
@@ -597,10 +766,19 @@ impl OraclePriceFeedAdapter {
                     .ok_or_else(math_error!())?
                     .checked_div(precision)
                     .ok_or_else(math_error!())?;
+                let multiplier = juplend_price_multiplier(&lending)?;
+                let cache_raw_price = cache_price_type.map(|_| OraclePriceWithConfidence {
+                    price: base_price,
+                    confidence: I80F48::ZERO,
+                });
 
-                Ok(OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
-                    price: adjusted_price,
-                }))
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::Fixed(FixedPriceFeed {
+                        price: adjusted_price,
+                    }),
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
+                })
             }
 
             OracleSetup::JuplendPythPull => {
@@ -620,9 +798,15 @@ impl OraclePriceFeedAdapter {
                 let lending = lending_loader.load()?;
                 ensure_juplend_lending_fresh(&lending, clock)?;
                 let numerator = lending.token_exchange_price as u128;
+                let multiplier = juplend_price_multiplier(&lending)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(oracle_info, clock, max_age)?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
 
                 // Adjust Pyth prices & confidence in place
                 price_feed.price.price =
@@ -644,7 +828,11 @@ impl OraclePriceFeedAdapter {
                 )
                 .ok_or_else(math_error!())?;
 
-                Ok(OraclePriceFeedAdapter::PythPushOracle(price_feed))
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
+                })
             }
 
             OracleSetup::JuplendSwitchboardPull => {
@@ -664,12 +852,18 @@ impl OraclePriceFeedAdapter {
                 let lending = lending_loader.load()?;
                 ensure_juplend_lending_fresh(&lending, clock)?;
                 let numerator = lending.token_exchange_price as u128;
+                let multiplier = juplend_price_multiplier(&lending)?;
 
                 let mut price_feed = SwitchboardPullPriceFeed::load_checked(
                     oracle_info,
                     clock.unix_timestamp,
                     max_age,
                 )?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
 
                 // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
                 price_feed.feed.result.value = mul_div_i128(
@@ -685,9 +879,55 @@ impl OraclePriceFeedAdapter {
                 )
                 .ok_or_else(math_error!())?;
 
-                Ok(OraclePriceFeedAdapter::SwitchboardPull(price_feed))
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::SwitchboardPull(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: multiplier,
+                })
             }
         }
+    }
+
+    pub fn get_price_and_confidence_and_cache_of_type<'info>(
+        bank: &Bank,
+        ais: &'info [AccountInfo<'info>],
+        clock: &Clock,
+        oracle_price_type: OraclePriceType,
+    ) -> MarginfiResult<(OraclePriceWithConfidence, OraclePriceWithMultiplier)> {
+        let max_age = bank.config.get_oracle_max_age();
+        let max_conf = bank.config.oracle_max_confidence;
+        let context = Self::load_oracle_context_with_max_age(
+            bank,
+            ais,
+            clock,
+            max_age,
+            Some(oracle_price_type),
+        )?;
+        let adjusted = context
+            .adjusted_price_feed
+            .get_price_and_confidence_of_type(oracle_price_type, max_conf)?;
+        let raw = context.cache_raw_price.unwrap_or(adjusted);
+        Ok((
+            adjusted,
+            OraclePriceWithMultiplier {
+                oracle_price: raw,
+                price_multiplier: context.cache_multiplier,
+            },
+        ))
+    }
+
+    pub fn get_price_and_confidence_for_cache<'info>(
+        bank: &Bank,
+        ais: &'info [AccountInfo<'info>],
+        clock: &Clock,
+    ) -> MarginfiResult<OraclePriceWithMultiplier> {
+        let (_, cache_price) = Self::get_price_and_confidence_and_cache_of_type(
+            bank,
+            ais,
+            clock,
+            OraclePriceType::RealTime,
+        )?;
+        Ok(cache_price)
     }
 
     /// * lst_mint, stake_pool, sol_pool - required only if configuring

@@ -26,6 +26,7 @@ import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { MockUser } from "./utils/mocks";
 import { processBankrunTransaction } from "./utils/tools";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
+import { assert } from "chai";
 import { deriveBankWithSeed } from "./utils/pdas";
 import {
   defaultDriftBankConfig,
@@ -33,6 +34,7 @@ import {
   getDriftUserAccount,
   scaledBalanceToTokenAmount,
   refreshDriftOracles,
+  DRIFT_SPOT_CUMULATIVE_INTEREST_PRECISION,
   USDC_MARKET_INDEX,
   TOKEN_A_MARKET_INDEX,
 } from "./utils/drift-utils";
@@ -42,10 +44,8 @@ import {
   makeDriftDepositIx,
   makeDriftWithdrawIx,
 } from "./utils/drift-instructions";
-import { getTokenBalance } from "./utils/genericTests";
-import {
-  composeRemainingAccounts,
-} from "./utils/user-instructions";
+import { getTokenBalance, assertI80F48Approx } from "./utils/genericTests";
+import { composeRemainingAccounts } from "./utils/user-instructions";
 import { createMintToInstruction } from "@solana/spl-token";
 import { Clock } from "solana-bankrun";
 import { ASSET_TAG_DRIFT } from "./utils/types";
@@ -444,7 +444,7 @@ describe("d10: Drift Interest Simulation", () => {
         withdrawAll: withdrawAll,
         remaining: withdrawAll
           ? composeRemainingAccounts(
-              activePositions.filter((group) => !group[0].equals(bank))
+              activePositions.filter((group) => !group[0].equals(bank)),
             )
           : composeRemainingAccounts(activePositions),
       },
@@ -482,6 +482,55 @@ describe("d10: Drift Interest Simulation", () => {
       slot: await getCurrentSlot(),
     });
     await advanceTimeAndAccrueInterest(30);
+  });
+
+  it("updates Drift cache multiplier after accrual while raw oracle price stays unchanged", async () => {
+    const stampAmount = new BN(100);
+    await makeDepositThroughMarginfi(userA, newDriftUsdcBank, stampAmount);
+    await makeWithdrawThroughMarginfi(userA, newDriftUsdcBank, new BN(1));
+
+    const [bankBefore, spotBefore] = await Promise.all([
+      bankrunProgram.account.bank.fetch(newDriftUsdcBank),
+      getSpotMarketAccount(driftBankrunProgram, USDC_MARKET_INDEX),
+    ]);
+    const beforeMultiplier = bankBefore.cache.priceMultiplier;
+    const expectedBeforeMultiplier =
+      Number(spotBefore.cumulativeDepositInterest.toString()) /
+      Number(DRIFT_SPOT_CUMULATIVE_INTEREST_PRECISION.toString());
+    assertI80F48Approx(beforeMultiplier, expectedBeforeMultiplier, 0.000001);
+    assertI80F48Approx(
+      bankBefore.cache.lastOraclePrice,
+      oracles.usdcPrice,
+      0.000001,
+    );
+
+    await advanceTimeAndAccrueInterest(30);
+    await makeWithdrawThroughMarginfi(userA, newDriftUsdcBank, new BN(1));
+
+    const [bankAfter, spotAfter] = await Promise.all([
+      bankrunProgram.account.bank.fetch(newDriftUsdcBank),
+      getSpotMarketAccount(driftBankrunProgram, USDC_MARKET_INDEX),
+    ]);
+    const afterMultiplier = bankAfter.cache.priceMultiplier;
+    const expectedAfterMultiplier =
+      Number(spotAfter.cumulativeDepositInterest.toString()) /
+      Number(DRIFT_SPOT_CUMULATIVE_INTEREST_PRECISION.toString());
+    assertI80F48Approx(
+      bankAfter.cache.lastOraclePrice,
+      bankBefore.cache.lastOraclePrice,
+      0.000001,
+    );
+    assertI80F48Approx(
+      bankAfter.cache.lastOraclePrice,
+      oracles.usdcPrice,
+      0.000001,
+    );
+    assertI80F48Approx(afterMultiplier, expectedAfterMultiplier, 0.000001);
+    assert(
+      wrappedI80F48toBigNumber(afterMultiplier).gt(
+        wrappedI80F48toBigNumber(beforeMultiplier),
+      ),
+    );
   });
 
   it("tests very large deposits without overflow", async () => {
@@ -591,7 +640,9 @@ describe("d10: Drift Interest Simulation", () => {
               const updatedAssetShares = wrappedI80F48toBigNumber(
                 updatedBalance.assetShares,
               );
-              const scaledUpdatedBalance = new BN(updatedAssetShares.toString());
+              const scaledUpdatedBalance = new BN(
+                updatedAssetShares.toString(),
+              );
 
               if (!scaledUpdatedBalance.isZero()) {
                 await makeWithdrawThroughMarginfi(

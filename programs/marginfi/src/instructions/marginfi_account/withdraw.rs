@@ -11,10 +11,11 @@ use crate::{
             is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
+        price::OraclePriceWithMultiplier,
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
-        self, fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank,
+        self, fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank_cache,
         is_marginfi_asset_tag, record_withdrawal_outflow, validate_bank_state, InstructionKind,
     },
 };
@@ -29,9 +30,8 @@ use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, TOKENLESS_REPAYMENTS_COMPLETE},
     types::{
-        Bank, HealthCache, MarginfiAccount, MarginfiGroup, OraclePriceWithConfidence,
-        ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_ORDER_EXECUTION,
-        ACCOUNT_IN_RECEIVERSHIP,
+        Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -211,7 +211,7 @@ pub fn lending_account_withdraw<'info>(
     marginfi_account.lending_account.sort_balances();
 
     // To update the bank's price cache
-    let maybe_price: Option<OraclePriceWithConfidence>;
+    let maybe_price: Option<OraclePriceWithMultiplier>;
     let bank_pk = bank_loader.key();
 
     // Note: during receivership and order execution, we skip all health checks until the end of the transaction.
@@ -235,7 +235,8 @@ pub fn lending_account_withdraw<'info>(
     {
         let bank = bank_loader.load()?;
         maybe_price =
-            fetch_unbiased_price_for_bank(&bank_pk, &bank, &clock, ctx.remaining_accounts).ok();
+            fetch_unbiased_price_for_bank_cache(&bank_pk, &bank, &clock, ctx.remaining_accounts)
+                .ok();
     }
 
     bank_loader.load_mut()?.update_cache_price(maybe_price)?;

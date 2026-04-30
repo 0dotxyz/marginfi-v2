@@ -14,6 +14,7 @@ use crate::{
             InterestRateStateChanges,
         },
         marginfi_account::calc_value,
+        price::OraclePriceWithMultiplier,
     },
 };
 use anchor_lang::prelude::*;
@@ -37,10 +38,7 @@ use marginfi_type_crate::{
         LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
-    types::{
-        Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup,
-        OraclePriceWithConfidence,
-    },
+    types::{Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup},
 };
 
 pub trait BankImpl {
@@ -89,7 +87,7 @@ pub trait BankImpl {
     fn update_bank_cache(&mut self, group: &MarginfiGroup) -> MarginfiResult<()>;
     fn update_cache_price(
         &mut self,
-        oracle_price: Option<OraclePriceWithConfidence>,
+        oracle_price: Option<OraclePriceWithMultiplier>,
     ) -> MarginfiResult<()>;
     fn deposit_spl_transfer<'info>(
         &self,
@@ -611,14 +609,16 @@ impl BankImpl for Bank {
     /// * `oracle_price` - Optional oracle price (with confidence) used in this instruction (if any)
     fn update_cache_price(
         &mut self,
-        oracle_price: Option<OraclePriceWithConfidence>,
+        oracle_price: Option<OraclePriceWithMultiplier>,
     ) -> MarginfiResult<()> {
         if self.cache.is_liquidation_price_cache_locked() {
             return Ok(());
         }
-        if let Some(price_with_confidence) = oracle_price {
-            self.cache.last_oracle_price = price_with_confidence.price.into();
-            self.cache.last_oracle_price_confidence = price_with_confidence.confidence.into();
+        if let Some(price_with_multiplier) = oracle_price {
+            self.cache.last_oracle_price = price_with_multiplier.oracle_price.price.into();
+            self.cache.last_oracle_price_confidence =
+                price_with_multiplier.oracle_price.confidence.into();
+            self.cache.price_multiplier = price_with_multiplier.price_multiplier.into();
             self.cache.last_oracle_price_timestamp = Clock::get()?.unix_timestamp;
         } else {
             // no cache update, nothing...
