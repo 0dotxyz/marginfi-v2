@@ -11,7 +11,11 @@ import {
   PYTH_ORACLE_FEED_SAMPLE,
   users,
 } from "./rootHooks";
-import { assertI80F48Approx, assertKeysEqual } from "./utils/genericTests";
+import {
+  assertBNEqual,
+  assertI80F48Approx,
+  assertKeysEqual,
+} from "./utils/genericTests";
 import { addBankWithSeed, groupInitialize } from "./utils/group-instructions";
 import { assert } from "chai";
 import {
@@ -29,7 +33,11 @@ import { createMintToInstruction } from "@solana/spl-token";
 import { USER_ACCOUNT } from "./utils/mocks";
 import { accountInit, depositIx, healthPulse } from "./utils/user-instructions";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
-import { bytesToF64, getBankrunBlockhash, processBankrunTransaction } from "./utils/tools";
+import {
+  bytesToF64,
+  getBankrunBlockhash,
+  processBankrunTransaction,
+} from "./utils/tools";
 
 const GROUP_SEED = Buffer.from("MARGINFI_GROUP_SEED_000000000pxx");
 const throwawayGroup = Keypair.fromSeed(GROUP_SEED);

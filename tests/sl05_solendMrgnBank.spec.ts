@@ -1,9 +1,5 @@
 import { BN } from "@coral-xyz/anchor";
-import {
-  Keypair,
-  PublicKey,
-  Transaction,
-} from "@solana/web3.js";
+import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 
 import { USER_ACCOUNT_SL, MockUser } from "./utils/mocks";
 import {
@@ -41,6 +37,7 @@ import {
   assertBankrunTxFailed,
   assertKeysEqual,
   assertI80F48Equal,
+  assertBNEqual,
 } from "./utils/genericTests";
 import { assert } from "chai";
 import { getTokenBalance } from "./utils/genericTests";
@@ -71,7 +68,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       await groupInitialize(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: solendGroup.publicKey,
         admin: groupAdmin.wallet.publicKey,
-      })
+      }),
     );
 
     await processBankrunTransaction(
@@ -79,7 +76,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       tx,
       [groupAdmin.wallet, solendGroup],
       false,
-      false
+      false,
     );
   });
 
@@ -96,7 +93,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
           marginfiAccount: kp.publicKey,
           authority: user.wallet.publicKey,
           feePayer: user.wallet.publicKey,
-        })
+        }),
       );
 
       await processBankrunTransaction(
@@ -104,7 +101,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
         tx,
         [user.wallet, kp],
         false,
-        false
+        false,
       );
     }
   });
@@ -117,7 +114,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       bankrunProgram.programId,
       solendGroup.publicKey,
       ecosystem.usdcMint.publicKey,
-      seed
+      seed,
     );
 
     const addBankIx = await makeAddSolendBankIx(
@@ -133,7 +130,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       {
         config,
         seed,
-      }
+      },
     );
 
     const tx = new Transaction().add(addBankIx);
@@ -142,7 +139,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       tx,
       [groupAdmin.wallet],
       false,
-      true
+      true,
     );
 
     solendAccounts.set(SOLEND_USDC_BANK, bankKey);
@@ -162,7 +159,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
 
     const [expectedObligation] = deriveSolendObligation(
       bankrunProgram.programId,
-      usdcBank
+      usdcBank,
     );
     assertKeysEqual(bank.integrationAcc2, expectedObligation);
     assert.ok(Object.keys(bank.config.oracleSetup).includes("solendPythPull"));
@@ -171,7 +168,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
   it("(admin) Add Token A bank", async () => {
     const config = defaultSolendBankConfig(
       oracles.tokenAOracle.publicKey,
-      ecosystem.tokenADecimals
+      ecosystem.tokenADecimals,
     );
 
     const seed = new BN(2);
@@ -179,7 +176,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       bankrunProgram.programId,
       solendGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
-      seed
+      seed,
     );
 
     const addBankIx = await makeAddSolendBankIx(
@@ -195,7 +192,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       {
         config,
         seed,
-      }
+      },
     );
 
     const tx = new Transaction().add(addBankIx);
@@ -204,7 +201,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       tx,
       [groupAdmin.wallet],
       false,
-      true
+      true,
     );
 
     solendAccounts.set(SOLEND_TOKEN_A_BANK, bankKey);
@@ -224,7 +221,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
 
     const [expectedTokenAObligation] = deriveSolendObligation(
       bankrunProgram.programId,
-      tokenABank
+      tokenABank,
     );
     assertKeysEqual(bank.integrationAcc2, expectedTokenAObligation);
     assert.ok(Object.keys(bank.config.oracleSetup).includes("solendPythPull"));
@@ -248,7 +245,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       {
         config,
         seed,
-      }
+      },
     );
 
     const tx = new Transaction().add(addBankIx);
@@ -257,7 +254,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       tx,
       [userA.wallet],
       true,
-      false
+      false,
     );
 
     assertBankrunTxFailed(result, 6042); // MarginfiError::Unauthorized
@@ -270,8 +267,8 @@ describe("sl05: Solend - MarginFi Integration", () => {
         ecosystem.usdcMint.publicKey,
         userA.usdcAccount,
         globalProgramAdmin.wallet.publicKey,
-        fundAmount.toNumber()
-      )
+        fundAmount.toNumber(),
+      ),
     );
     await processBankrunTransaction(bankrunContext, fundTx, [
       globalProgramAdmin.wallet,
@@ -281,13 +278,13 @@ describe("sl05: Solend - MarginFi Integration", () => {
 
     const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      usdcBank
+      usdcBank,
     );
 
     const userCollateral = getAssociatedTokenAddressSync(
       collateralMint,
       liquidityVaultAuthority,
-      true
+      true,
     );
 
     const createAtaIx = createAssociatedTokenAccountIdempotentInstruction(
@@ -295,7 +292,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       userCollateral,
       liquidityVaultAuthority,
       collateralMint,
-      TOKEN_PROGRAM_ID
+      TOKEN_PROGRAM_ID,
     );
 
     const initObligationIx = await makeSolendInitObligationIx(
@@ -309,7 +306,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       },
       {
         amount: new BN(5), // Less than minimum of 10
-      }
+      },
     );
 
     const tx = new Transaction().add(createAtaIx, initObligationIx);
@@ -318,7 +315,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       tx,
       [userA.wallet],
       true,
-      false
+      false,
     );
 
     assertBankrunTxFailed(result, 0x1841); // ObligationInitDepositInsufficient
@@ -337,7 +334,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       },
       {
         amount: new BN(10_000),
-      }
+      },
     );
 
     const tx = new Transaction().add(initObligationIx);
@@ -346,7 +343,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       tx,
       [userA.wallet],
       true,
-      false
+      false,
     );
 
     assertBankrunTxFailed(result, "invalid account data");
@@ -355,7 +352,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
   it("(admin) Initialize Solend obligation for USDC bank", async () => {
     const initialBalance = await getTokenBalance(
       bankRunProvider,
-      groupAdmin.usdcAccount
+      groupAdmin.usdcAccount,
     );
 
     const fundAmount = new BN(100 * 10 ** ecosystem.usdcDecimals); // 100 USDC
@@ -364,8 +361,8 @@ describe("sl05: Solend - MarginFi Integration", () => {
         ecosystem.usdcMint.publicKey,
         groupAdmin.usdcAccount,
         globalProgramAdmin.wallet.publicKey,
-        fundAmount.toNumber()
-      )
+        fundAmount.toNumber(),
+      ),
     );
     await processBankrunTransaction(bankrunContext, fundTx, [
       globalProgramAdmin.wallet,
@@ -373,7 +370,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
 
     const usdcReservePubkey = solendAccounts.get(SOLEND_USDC_RESERVE)!;
     const reserveAccountBefore = await bankrunContext.banksClient.getAccount(
-      usdcReservePubkey
+      usdcReservePubkey,
     );
     const reserveBefore = parseReserve(usdcReservePubkey, {
       ...reserveAccountBefore,
@@ -386,13 +383,13 @@ describe("sl05: Solend - MarginFi Integration", () => {
 
     const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      usdcBank
+      usdcBank,
     );
 
     const userCollateral = getAssociatedTokenAddressSync(
       collateralMint,
       liquidityVaultAuthority,
-      true
+      true,
     );
 
     const createAtaIx = createAssociatedTokenAccountIdempotentInstruction(
@@ -400,7 +397,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       userCollateral,
       liquidityVaultAuthority,
       collateralMint,
-      TOKEN_PROGRAM_ID
+      TOKEN_PROGRAM_ID,
     );
 
     const initObligationIx = await makeSolendInitObligationIx(
@@ -414,7 +411,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       },
       {
         amount: new BN(INIT_OBLIGATION_DEPOSIT_AMOUNT_USDC),
-      }
+      },
     );
 
     const tx = new Transaction().add(createAtaIx, initObligationIx);
@@ -423,12 +420,12 @@ describe("sl05: Solend - MarginFi Integration", () => {
       tx,
       [groupAdmin.wallet],
       false,
-      false
+      false,
     );
 
     const adminBalance = await getTokenBalance(
       bankRunProvider,
-      groupAdmin.usdcAccount
+      groupAdmin.usdcAccount,
     );
     const expectedBalance =
       initialBalance +
@@ -439,12 +436,12 @@ describe("sl05: Solend - MarginFi Integration", () => {
     const bank = await bankrunProgram.account.bank.fetch(usdcBank);
     const [expectedObligation] = deriveSolendObligation(
       bankrunProgram.programId,
-      usdcBank
+      usdcBank,
     );
     assertKeysEqual(bank.integrationAcc2, expectedObligation);
     assertI80F48Equal(bank.totalAssetShares, 0);
     const obligationAccount = await bankrunContext.banksClient.getAccount(
-      expectedObligation
+      expectedObligation,
     );
     assert.ok(obligationAccount);
 
@@ -457,7 +454,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
     assert.equal(obligationData.info.deposits.length, 1);
     assertKeysEqual(
       obligationData.info.deposits[0].depositReserve,
-      solendAccounts.get(SOLEND_USDC_RESERVE)!
+      solendAccounts.get(SOLEND_USDC_RESERVE)!,
     );
 
     const depositAmount =
@@ -468,7 +465,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
     assert.ok(depositAmount > 0);
 
     const reserveAccountAfter = await bankrunContext.banksClient.getAccount(
-      usdcReservePubkey
+      usdcReservePubkey,
     );
     const reserveAfter = parseReserve(usdcReservePubkey, {
       ...reserveAccountAfter,
@@ -479,14 +476,14 @@ describe("sl05: Solend - MarginFi Integration", () => {
 
     assert.equal(
       liquidityAfter - liquidityBefore,
-      INIT_OBLIGATION_DEPOSIT_AMOUNT_USDC
+      INIT_OBLIGATION_DEPOSIT_AMOUNT_USDC,
     );
   });
 
   it("(admin) Initialize Solend obligation for Token A bank", async () => {
     const initialBalance = await getTokenBalance(
       bankRunProvider,
-      groupAdmin.tokenAAccount
+      groupAdmin.tokenAAccount,
     );
 
     const fundAmount = new BN(1 * 10 ** ecosystem.tokenADecimals);
@@ -495,8 +492,8 @@ describe("sl05: Solend - MarginFi Integration", () => {
         ecosystem.tokenAMint.publicKey,
         groupAdmin.tokenAAccount,
         globalProgramAdmin.wallet.publicKey,
-        fundAmount.toNumber()
-      )
+        fundAmount.toNumber(),
+      ),
     );
     await processBankrunTransaction(bankrunContext, fundTx, [
       globalProgramAdmin.wallet,
@@ -504,7 +501,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
 
     const tokenAReservePubkey = solendAccounts.get(SOLEND_TOKEN_A_RESERVE)!;
     const reserveAccountBefore = await bankrunContext.banksClient.getAccount(
-      tokenAReservePubkey
+      tokenAReservePubkey,
     );
     const reserveBefore = parseReserve(tokenAReservePubkey, {
       ...reserveAccountBefore,
@@ -517,13 +514,13 @@ describe("sl05: Solend - MarginFi Integration", () => {
 
     const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      tokenABank
+      tokenABank,
     );
 
     const userCollateral = getAssociatedTokenAddressSync(
       collateralMint,
       liquidityVaultAuthority,
-      true
+      true,
     );
 
     const createAtaIx = createAssociatedTokenAccountIdempotentInstruction(
@@ -531,7 +528,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       userCollateral,
       liquidityVaultAuthority,
       collateralMint,
-      TOKEN_PROGRAM_ID
+      TOKEN_PROGRAM_ID,
     );
 
     const initObligationIx = await makeSolendInitObligationIx(
@@ -545,7 +542,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
       },
       {
         amount: new BN(INIT_OBLIGATION_DEPOSIT_AMOUNT_TOKEN_A),
-      }
+      },
     );
 
     const tx = new Transaction().add(createAtaIx, initObligationIx);
@@ -554,12 +551,12 @@ describe("sl05: Solend - MarginFi Integration", () => {
       tx,
       [groupAdmin.wallet],
       false,
-      false
+      false,
     );
 
     const adminBalance = await getTokenBalance(
       bankRunProvider,
-      groupAdmin.tokenAAccount
+      groupAdmin.tokenAAccount,
     );
     const expectedBalance =
       initialBalance +
@@ -570,13 +567,13 @@ describe("sl05: Solend - MarginFi Integration", () => {
     const bank = await bankrunProgram.account.bank.fetch(tokenABank);
     const [expectedTokenAObligation] = deriveSolendObligation(
       bankrunProgram.programId,
-      tokenABank
+      tokenABank,
     );
     assertKeysEqual(bank.integrationAcc2, expectedTokenAObligation);
     assertI80F48Equal(bank.totalAssetShares, 0);
 
     const obligationAccount = await bankrunContext.banksClient.getAccount(
-      expectedTokenAObligation
+      expectedTokenAObligation,
     );
     assert.ok(obligationAccount);
 
@@ -589,7 +586,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
     assert.equal(obligationData.info.deposits.length, 1);
     assertKeysEqual(
       obligationData.info.deposits[0].depositReserve,
-      solendAccounts.get(SOLEND_TOKEN_A_RESERVE)!
+      solendAccounts.get(SOLEND_TOKEN_A_RESERVE)!,
     );
 
     const depositAmount =
@@ -600,7 +597,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
     assert.ok(depositAmount > 0);
 
     const reserveAccountAfter = await bankrunContext.banksClient.getAccount(
-      tokenAReservePubkey
+      tokenAReservePubkey,
     );
     const reserveAfter = parseReserve(tokenAReservePubkey, {
       ...reserveAccountAfter,
@@ -611,7 +608,7 @@ describe("sl05: Solend - MarginFi Integration", () => {
 
     assert.equal(
       liquidityAfter - liquidityBefore,
-      INIT_OBLIGATION_DEPOSIT_AMOUNT_TOKEN_A
+      INIT_OBLIGATION_DEPOSIT_AMOUNT_TOKEN_A,
     );
   });
 });
