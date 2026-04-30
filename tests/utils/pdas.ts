@@ -1,7 +1,7 @@
 import { BN } from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
 import { createHash } from "crypto";
-import { KLEND_PROGRAM_ID } from "./types";
+import { KLEND_PROGRAM_ID, SINGLE_POOL_PROGRAM_ID } from "./types";
 
 export const deriveLiquidityVaultAuthority = (
   programId: PublicKey,
@@ -509,5 +509,55 @@ export const deriveSolendObligation = (
   return PublicKey.findProgramAddressSync(
     [Buffer.from("solend_obligation"), bank.toBuffer()],
     programId,
+  );
+};
+
+// *************** Below this line, spl-single-token **************
+
+/**
+ * SVSP stake pool that stores MEV rewards teporarily before they are merged into the main pool
+ * @param stakePool
+ * @returns
+ */
+export const deriveOnRampPool = (stakePool: PublicKey) => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("onramp"), stakePool.toBuffer()],
+    SINGLE_POOL_PROGRAM_ID,
+  );
+};
+
+/**
+ * Copy of SVSP `findPoolStakeAddress`
+ * @param stakePool
+ * @returns
+ */
+export const deriveStakePool = (stakePool: PublicKey) => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("stake"), stakePool.toBuffer()],
+    SINGLE_POOL_PROGRAM_ID,
+  );
+};
+
+/**
+ * Copy of SVSP `findPoolStakeAuthorityAddress`
+ * @param stakePool
+ * @returns
+ */
+export const deriveStakeAuthority = (stakePool: PublicKey) => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("stake_authority"), stakePool.toBuffer()],
+    SINGLE_POOL_PROGRAM_ID,
+  );
+};
+
+/**
+ * Copy of SVSP `findPoolAddress`
+ * @param stakePool
+ * @returns
+ */
+export const deriveSVSPpool = (voteAccount: PublicKey) => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("pool"), voteAccount.toBuffer()],
+    SINGLE_POOL_PROGRAM_ID,
   );
 };

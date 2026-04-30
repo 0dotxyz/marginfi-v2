@@ -5,13 +5,22 @@ New developer getting started working on the mrgnv2 program side? Read on.
 ## Things to Install (January 2026)
 
 - rust toolchain - 1.79.0
-- node - 23.0.0
-- yarn - 1.22.22
+- node - 24.15.0
+- yarn - 4.14.1 (via Corepack)
 - avm - 0.30.1 or later
 - anchor - 0.31.1
 - solana - 2.1.20
 - cargo-nextest - use `cargo install cargo-nextest --version "0.9.81" --locked` exactly
 - cargo-fuzz - 0.12.0
+
+Node/Yarn setup (recommended):
+
+```
+corepack enable
+corepack prepare yarn@4.14.1 --activate
+node -v
+yarn -v
+```
 
 # Running tests
 
@@ -32,7 +41,7 @@ anchor test --skip-build
 Note: you may need to build the other programs (mock, liquidity incentive, etc) if you have never
 run `anchor build` before.
 
-Note: you need to `yarn install` before your first run
+Note: you need to `yarn install --immutable` before your first run
 
 Segmentation fault? Just try again. That happens sometimes, generally on the first run of the day.
 Sometimes it happens on the CI pipeline as well, just kick it again it that occurs.

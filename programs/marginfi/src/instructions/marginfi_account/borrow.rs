@@ -14,8 +14,8 @@ use crate::{
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
-        self, fetch_unbiased_price_for_bank, is_marginfi_asset_tag, record_withdrawal_outflow,
-        validate_asset_tags, validate_bank_state, InstructionKind,
+        self, fetch_unbiased_price_for_bank_with_cache, is_marginfi_asset_tag,
+        record_withdrawal_outflow, validate_asset_tags, validate_bank_state, InstructionKind,
     },
 };
 use anchor_lang::prelude::*;
@@ -204,9 +204,15 @@ pub fn lending_account_borrow<'info>(
 
     let bank_pk = ctx.accounts.bank.key();
     let mut bank = ctx.accounts.bank.load_mut()?;
-    let price = fetch_unbiased_price_for_bank(&bank_pk, &bank, &clock, ctx.remaining_accounts).ok();
+    let prices =
+        fetch_unbiased_price_for_bank_with_cache(&bank_pk, &bank, &clock, ctx.remaining_accounts)
+            .ok();
 
-    let rate_limit_price = price.as_ref().map(|p| p.price).unwrap_or(I80F48::ZERO);
+    let rate_limit_price = prices
+        .as_ref()
+        .map(|(adjusted, _)| adjusted.price)
+        .unwrap_or(I80F48::ZERO);
+    let price_for_cache = prices.map(|(_, cache)| cache);
     record_withdrawal_outflow(
         group_rate_limit_enabled,
         amount_pre_fee,
@@ -221,7 +227,7 @@ pub fn lending_account_borrow<'info>(
     )?;
 
     bank.update_bank_cache(&group)?;
-    bank.update_cache_price(price)?;
+    bank.update_cache_price(price_for_cache)?;
 
     health_cache.set_engine_ok(true);
     marginfi_account.health_cache = health_cache;
