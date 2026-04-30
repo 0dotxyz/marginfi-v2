@@ -154,6 +154,8 @@ export type GroupConfigureArgs = {
   marginfiGroup: PublicKey;
   emodeMaxInitLeverage?: WrappedI80F48 | null;
   emodeMaxMaintLeverage?: WrappedI80F48 | null;
+  sameAssetEmodeInitLeverage?: WrappedI80F48 | null;
+  sameAssetEmodeMaintLeverage?: WrappedI80F48 | null;
 };
 
 export const groupConfigure = async (
@@ -172,6 +174,8 @@ export const groupConfigure = async (
   const newRiskAdmin = args.newRiskAdmin ?? group.riskAdmin;
   const emodeMaxInitLeverage = args.emodeMaxInitLeverage ?? null;
   const emodeMaxMaintLeverage = args.emodeMaxMaintLeverage ?? null;
+  const sameAssetEmodeInitLeverage = args.sameAssetEmodeInitLeverage ?? null;
+  const sameAssetEmodeMaintLeverage = args.sameAssetEmodeMaintLeverage ?? null;
 
   const ix = program.methods
     .marginfiGroupConfigure(
@@ -184,7 +188,9 @@ export const groupConfigure = async (
       newMetadataAdmin,
       newRiskAdmin,
       emodeMaxInitLeverage,
-      emodeMaxMaintLeverage
+      emodeMaxMaintLeverage,
+      sameAssetEmodeInitLeverage,
+      sameAssetEmodeMaintLeverage
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
@@ -497,12 +503,12 @@ export const propagateStakedSettings = (
 ) => {
   const remainingAccounts = args.oracle
     ? [
-        {
-          pubkey: args.oracle,
-          isSigner: false,
-          isWritable: false,
-        } as AccountMeta,
-      ]
+      {
+        pubkey: args.oracle,
+        isSigner: false,
+        isWritable: false,
+      } as AccountMeta,
+    ]
     : [];
 
   const ix = program.methods

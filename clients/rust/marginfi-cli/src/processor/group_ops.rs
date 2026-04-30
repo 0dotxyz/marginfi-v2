@@ -248,6 +248,8 @@ pub fn group_create(
                 emode_max_maint_leverage: create_config
                     .emode_max_maint_leverage
                     .map(|value| I80F48::from_num(value).into()),
+                same_asset_emode_init_leverage: None,
+                same_asset_emode_maint_leverage: None,
             })
             .instructions()?;
         group_ixs.extend(configure_ixs);
@@ -305,6 +307,8 @@ pub fn group_configure(
                 .map(|value| I80F48::from_num(value).into()),
             emode_max_maint_leverage: emode_max_maint_leverage
                 .map(|value| I80F48::from_num(value).into()),
+            same_asset_emode_init_leverage: None,
+            same_asset_emode_maint_leverage: None,
         })
         .instructions()?;
 
