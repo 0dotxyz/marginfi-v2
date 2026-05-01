@@ -1,9 +1,8 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{clock::Clock, sysvar::Sysvar};
 use marginfi_type_crate::types::{
-    MarginfiAccount, MarginfiGroup, SECONDS_PER_DAY, ACCOUNT_DISABLED, ACCOUNT_FROZEN,
-    ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
-    ACCOUNT_IN_RECEIVERSHIP,
+    MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE,
+    ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP, SECONDS_PER_DAY,
 };
 
 use crate::{
