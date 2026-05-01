@@ -1,8 +1,8 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{clock::Clock, sysvar::Sysvar};
 use marginfi_type_crate::types::{
-    MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE,
-    ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP, SECONDS_PER_DAY,
+    MarginfiAccount, MarginfiGroup, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_ORDER_EXECUTION,
+    SECONDS_PER_DAY,
 };
 
 use crate::{
@@ -22,24 +22,15 @@ pub fn admin_close_account(ctx: Context<AdminCloseAccount>) -> MarginfiResult {
         .unix_timestamp
         .saturating_sub(marginfi_account.last_update as i64);
     let is_inactive = elapsed > 60 * SECONDS_PER_DAY;
-    let only_has_empty_balances = marginfi_account
-        .lending_account
-        .balances
-        .iter()
-        .all(|balance| balance.get_side().is_none());
 
     check!(
-        only_has_empty_balances && is_inactive,
+        marginfi_account.can_be_closed() && is_inactive,
         MarginfiError::IllegalAction,
         "Account is not eligible for close (not empty or active within 60d)"
     );
 
     check!(
-        !marginfi_account.get_flag(ACCOUNT_DISABLED)
-            && !marginfi_account.get_flag(ACCOUNT_FROZEN)
-            && !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN)
-            && !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP)
-            && !marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE)
+        !marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE)
             && !marginfi_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION)
             && marginfi_account.active_orders == 0
             && marginfi_account.liquidation_record == Pubkey::default(),

@@ -21,7 +21,9 @@ const TRIVIAL_BALANCE_THRESHOLD: I80F48 = I80F48::ONE;
 /// intended for indexer pruning of dust accounts, so underwater accounts are excluded even if
 /// their gross assets are below the trivial threshold.
 fn has_trivial_balance(equity_assets: I80F48, equity_liabs: I80F48) -> bool {
-    let net_equity = equity_assets - equity_liabs;
+    let Some(net_equity) = equity_assets.checked_sub(equity_liabs) else {
+        return false;
+    };
     net_equity > I80F48::ZERO && net_equity < TRIVIAL_BALANCE_THRESHOLD
 }
 

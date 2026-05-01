@@ -1013,13 +1013,12 @@ pub fn check_account_bankrupt<'info>(
 
 /// Computes `indexer_flags.has_isolated` from live bank risk tiers and current liabilities.
 ///
-/// Returns 1 iff the account has exactly one liability and that liability's bank is isolated.
+/// Returns 1 iff the account has any isolated-tier liability.
 pub fn compute_has_isolated_liability_flag<'info>(
     marginfi_account: &MarginfiAccount,
     remaining_ais: &'info [AccountInfo<'info>],
 ) -> MarginfiResult<u8> {
-    let mut isolated_risk_count = 0;
-    let mut total_liability_balances = 0;
+    let mut has_isolated_liability = false;
     let mut account_index = 0usize;
 
     for balance in marginfi_account
@@ -1042,17 +1041,16 @@ pub fn compute_has_isolated_liability_flag<'info>(
 
         let num_accounts = get_remaining_accounts_per_bank(&bank)?;
 
-        if !balance.is_empty(BalanceSide::Liabilities) {
-            total_liability_balances += 1;
-            if bank.config.risk_tier == RiskTier::Isolated {
-                isolated_risk_count += 1;
-            }
+        if !balance.is_empty(BalanceSide::Liabilities)
+            && bank.config.risk_tier == RiskTier::Isolated
+        {
+            has_isolated_liability = true;
         }
 
         account_index += num_accounts;
     }
 
-    Ok((total_liability_balances == 1 && isolated_risk_count == 1) as u8)
+    Ok(has_isolated_liability as u8)
 }
 
 /// Check the isolated-risk-tier constraint (internal helper).

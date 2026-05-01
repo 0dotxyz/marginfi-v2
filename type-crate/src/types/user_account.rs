@@ -127,17 +127,17 @@ pub struct IndexerFlags {
     pub is_empty: u8,
     /// 1 if the account has exactly one liability position
     pub is_single_borrower: u8,
-    /// 1 if the account has ever been liquidated (permanent, never unset)
+    /// 1 if the account has ever entered receivership (liquidation or deleverage), permanent.
     pub has_ever_been_liquidated: u8,
     /// 1 if the account has ever been forcibly deleveraged (permanent, never unset)
     pub has_ever_been_deleveraged: u8,
     /// 1 if `handle_bankruptcy` has ever been executed on this account (permanent, never unset)
     pub has_been_bankrupted: u8,
-    /// 1 if the account's sole liability is on a bank with `RiskTier::Isolated`. Set at
-    /// borrow time and cleared by balance-derived sync when the account has anything other than
-    /// exactly one liability. By the isolated-liability invariant enforced at borrow, an
-    /// isolated position cannot coexist with any other liability, so `has_isolated == 1`
-    /// implies `is_single_borrower == 1`.
+    /// 1 if the account has any liability on a bank with `RiskTier::Isolated`. Note: Not
+    /// authoritative due to a variety of edge cases, such as a Bank being configured from
+    /// Collateral -> Isolated after the user deposits. Set at borrow time and refreshed best-effort
+    /// by pulse from live bank state. Cleared by balance-derived sync only when liability count
+    /// reaches zero.
     pub has_isolated: u8,
     /// 1 if the account has a STAKED asset tag position
     pub has_staked: u8,
@@ -209,7 +209,9 @@ impl IndexerFlags {
         self.has_drift = drift as u8;
         self.has_juplend = juplend as u8;
 
-        if liability_count != 1 {
+        // Safe clear condition: with zero liabilities, there cannot be an isolated liability.
+        // For non-zero liabilities this flag may need live bank data (pulse) to refresh.
+        if liability_count == 0 {
             self.has_isolated = 0;
         }
     }
