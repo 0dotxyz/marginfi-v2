@@ -67,6 +67,13 @@ pub fn lending_account_deposit<'info>(
         MarginfiError::AccountDisabled
     );
 
+    bank.accrue_interest(
+        clock.unix_timestamp,
+        &group,
+        #[cfg(not(feature = "client"))]
+        bank_loader.key(),
+    )?;
+
     let deposit_amount = if deposit_up_to_limit {
         amount.min(bank.get_remaining_deposit_capacity()?)
     } else {
@@ -76,12 +83,6 @@ pub fn lending_account_deposit<'info>(
     if deposit_amount == 0 {
         return Ok(());
     }
-    bank.accrue_interest(
-        clock.unix_timestamp,
-        &group,
-        #[cfg(not(feature = "client"))]
-        bank_loader.key(),
-    )?;
 
     let mut bank_account = BankAccountWrapper::find_or_create(
         &bank_loader.key(),

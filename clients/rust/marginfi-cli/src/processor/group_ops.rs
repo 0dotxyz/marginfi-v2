@@ -12,6 +12,7 @@ use {
     anchor_client::anchor_lang::{InstructionData, ToAccountMetas},
     anchor_spl::token_2022::spl_token_2022,
     anyhow::{bail, Context, Result},
+    borsh::BorshDeserialize,
     fixed::types::I80F48,
     log::info,
     marginfi::{
@@ -40,6 +41,7 @@ use {
         pubkey::Pubkey,
         signature::Keypair,
         signer::Signer,
+        stake::state::StakeStateV2,
         system_program,
     },
     std::{collections::HashMap, mem::size_of},
@@ -331,9 +333,9 @@ pub fn create_standard_bank(config: Config, request: StandardBankCreateRequest) 
     let liability_weight_maint: WrappedI80F48 =
         I80F48::from_num(request.liability_weight_maint).into();
 
-    let optimal_utilization_rate: WrappedI80F48 = I80F48::ZERO.into();
-    let plateau_interest_rate: WrappedI80F48 = I80F48::ZERO.into();
-    let max_interest_rate: WrappedI80F48 = I80F48::ZERO.into();
+    let placeholder0: WrappedI80F48 = I80F48::ZERO.into();
+    let placeholder1: WrappedI80F48 = I80F48::ZERO.into();
+    let placeholder2: WrappedI80F48 = I80F48::ZERO.into();
     let insurance_fee_fixed_apr: WrappedI80F48 =
         I80F48::from_num(request.insurance_fee_fixed_apr).into();
     let insurance_ir_fee: WrappedI80F48 = I80F48::from_num(request.insurance_ir_fee).into();
@@ -362,9 +364,9 @@ pub fn create_standard_bank(config: Config, request: StandardBankCreateRequest) 
     let points: [RatePoint; CURVE_POINTS] = make_points(&pts_raw);
 
     let interest_rate_config = InterestRateConfig {
-        optimal_utilization_rate,
-        plateau_interest_rate,
-        max_interest_rate,
+        placeholder0,
+        placeholder1,
+        placeholder2,
         insurance_fee_fixed_apr,
         insurance_ir_fee,
         protocol_fixed_fee_apr,
@@ -569,6 +571,22 @@ fn load_staked_settings_oracle(config: &Config, group: Pubkey) -> Result<(Pubkey
 pub fn create_staked_bank(config: Config, request: StakedBankCreateRequest) -> Result<()> {
     let rpc_client = config.mfi_program.rpc();
     let (bank_mint, sol_pool) = derive_staked_bank_dependencies(&request.stake_pool);
+    let sol_pool_account = rpc_client
+        .get_account(&sol_pool)
+        .with_context(|| format!("failed to load derived SOL pool {}", sol_pool))?;
+    if sol_pool_account.owner != solana_sdk::stake::program::id() {
+        bail!(
+            "derived SOL pool {} has unexpected owner {}",
+            sol_pool,
+            sol_pool_account.owner
+        );
+    }
+    let sol_pool_state = StakeStateV2::try_from_slice(&sol_pool_account.data)
+        .with_context(|| format!("failed to decode stake state for SOL pool {}", sol_pool))?;
+    let validator_vote_account = sol_pool_state
+        .delegation()
+        .map(|delegation| delegation.voter_pubkey)
+        .context("derived SOL pool is not in delegated stake state")?;
     let token_program = rpc_client
         .get_account(&bank_mint)
         .with_context(|| format!("failed to load derived LST mint {}", bank_mint))?
@@ -592,6 +610,7 @@ pub fn create_staked_bank(config: Config, request: StakedBankCreateRequest) -> R
             bank_mint,
             sol_pool,
             stake_pool: request.stake_pool,
+            validator_vote_account,
             bank: bank_pda,
             liquidity_vault_authority: find_bank_vault_authority_pda(
                 &bank_pda,
@@ -645,6 +664,7 @@ pub fn create_staked_bank(config: Config, request: StakedBankCreateRequest) -> R
     println!("Bank address (PDA): {}", bank_pda);
     println!("Derived LST mint: {}", bank_mint);
     println!("Derived SOL pool: {}", sol_pool);
+    println!("Derived validator vote account: {}", validator_vote_account);
 
     Ok(())
 }

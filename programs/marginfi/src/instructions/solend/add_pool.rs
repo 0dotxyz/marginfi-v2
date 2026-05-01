@@ -1,7 +1,6 @@
 // Adds a Solend type bank to a group with sane defaults. Used to integrate with Solend
 // allowing users to interact with Solend pools through marginfi
 use crate::{
-    constants::SOLEND_OBLIGATION_SEED,
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{
@@ -14,7 +13,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token_interface::*;
 use marginfi_type_crate::constants::{
     FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED,
-    LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+    IS_T22, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED, SOLEND_OBLIGATION_SEED,
 };
 use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 use solend_mocks::state::SolendMinimalReserve;
@@ -74,6 +73,9 @@ pub fn lending_pool_add_bank_solend(
         fee_vault_bump,
         fee_vault_authority_bump,
     );
+    if bank_mint.to_account_info().owner == &anchor_spl::token_2022::ID {
+        bank.flags |= IS_T22;
+    }
 
     // Set Solend-specific fields
     bank.integration_acc_1 = reserve_key;

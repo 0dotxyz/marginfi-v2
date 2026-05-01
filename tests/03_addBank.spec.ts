@@ -1,6 +1,10 @@
 import { BN, Program } from "@coral-xyz/anchor";
 import { AccountMeta, PublicKey, Transaction } from "@solana/web3.js";
-import { addBank, configureBankOracle } from "./utils/group-instructions";
+import {
+  addBank,
+  backfillBankIsT22Flag,
+  configureBankOracle,
+} from "./utils/group-instructions";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairA,
@@ -30,6 +34,7 @@ import {
   ASSET_TAG_DEFAULT,
   CLOSE_ENABLED_FLAG,
   defaultBankConfig,
+  IS_T22_FLAG,
   INTEREST_CURVE_SEVEN_POINT,
   makeRatePoints,
   ORACLE_SETUP_PYTH_PUSH,
@@ -166,9 +171,9 @@ describe("Lending pool add bank (add bank to group)", () => {
 
     const tolerance = 0.000001;
     // Note: Zero since 1.6 replaced the legacy curve system
-    assertI80F48Equal(interest.optimalUtilizationRate, 0);
-    assertI80F48Equal(interest.plateauInterestRate, 0);
-    assertI80F48Equal(interest.maxInterestRate, 0);
+    assertI80F48Equal(interest.placeholder0, 0);
+    assertI80F48Equal(interest.placeholder1, 0);
+    assertI80F48Equal(interest.placeholder2, 0);
 
     assertI80F48Approx(interest.insuranceFeeFixedApr, 0.01, tolerance);
     assertI80F48Approx(interest.insuranceIrFee, 0.02, tolerance);
@@ -464,6 +469,7 @@ describe("Lending pool add bank (add bank to group)", () => {
     let pyUsdcBankKey = new PublicKey(
       "Fe5QkKPVAh629UPP5aJ8sDZu8HTfe6M26jDQkKyXVhoA"
     );
+    let pyMint = new PublicKey("2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo");
     let pyUsdcBankData = (
       await program.provider.connection.getAccountInfo(pyUsdcBankKey)
     ).data.subarray(8);
@@ -471,11 +477,26 @@ describe("Lending pool add bank (add bank to group)", () => {
       printBufferGroups(pyUsdcBankData, 16, 896);
     }
 
-    const pb = await program.account.bank.fetch(pyUsdcBankKey);
-    assertKeysEqual(
-      pb.emissionsMint,
-      new PublicKey("2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo")
+    const pbBefore = await program.account.bank.fetch(pyUsdcBankKey);
+    assertKeysEqual(pbBefore.emissionsMint, pyMint);
+    assert.equal(pbBefore.flags.toNumber() & IS_T22_FLAG, 0);
+
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await program.methods
+          .lendingPoolBackfillBankIsT22Flag()
+          .accounts({
+            bank: pyUsdcBankKey,
+          })
+          .accountsPartial({
+            mint: pyMint,
+          })
+          .instruction()
+      )
     );
+
+    const pbAfter = await program.account.bank.fetch(pyUsdcBankKey);
+    assert.equal(pbAfter.flags.toNumber() & IS_T22_FLAG, IS_T22_FLAG);
   });
 });
 

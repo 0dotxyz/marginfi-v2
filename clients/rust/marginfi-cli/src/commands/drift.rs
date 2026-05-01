@@ -4,14 +4,16 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use drift_mocks::state::MinimalSpotMarket;
 use marginfi_type_crate::constants::{ASSET_TAG_DRIFT, PYTH_PUSH_MIGRATED_DEPRECATED};
+use marginfi_type_crate::pdas::{
+    derive_drift_signer, derive_drift_spot_market, derive_drift_spot_market_vault,
+    derive_drift_state,
+};
 use marginfi_type_crate::types::Bank;
 use solana_sdk::pubkey::Pubkey;
 
 use crate::config::{Config, GlobalOptions};
 use crate::configs;
 use crate::processor;
-
-const DRIFT_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH");
 
 /// Drift integration commands.
 #[derive(Debug, Parser)]
@@ -196,15 +198,10 @@ fn derive_drift_bank_accounts(config: &Config, bank_pk: Pubkey) -> Result<DriftD
     let spot_market_state: &MinimalSpotMarket =
         bytemuck::from_bytes(&spot_market_data[8..8 + spot_market_size]);
 
-    let (drift_state, _) = Pubkey::find_program_address(&[b"drift_state"], &DRIFT_PROGRAM_ID);
-    let (drift_spot_market_vault, _) = Pubkey::find_program_address(
-        &[
-            b"spot_market_vault",
-            &spot_market_state.market_index.to_le_bytes(),
-        ],
-        &DRIFT_PROGRAM_ID,
-    );
-    let (drift_signer, _) = Pubkey::find_program_address(&[b"drift_signer"], &DRIFT_PROGRAM_ID);
+    let (drift_state, _) = derive_drift_state();
+    let (drift_spot_market_vault, _) =
+        derive_drift_spot_market_vault(spot_market_state.market_index);
+    let (drift_signer, _) = derive_drift_signer();
 
     Ok(DriftDerivedAccounts {
         drift_state,
@@ -230,13 +227,7 @@ fn derive_drift_reward_market_accounts(
     }
     let spot_market_state: &MinimalSpotMarket =
         bytemuck::from_bytes(&spot_market_data[8..8 + spot_market_size]);
-    let (spot_market_vault, _) = Pubkey::find_program_address(
-        &[
-            b"spot_market_vault",
-            &spot_market_state.market_index.to_le_bytes(),
-        ],
-        &DRIFT_PROGRAM_ID,
-    );
+    let (spot_market_vault, _) = derive_drift_spot_market_vault(spot_market_state.market_index);
     Ok((spot_market_vault, spot_market_state.mint))
 }
 
@@ -305,11 +296,7 @@ pub fn dispatch(subcmd: DriftCommand, global_options: &GlobalOptions) -> Result<
                 .or(profile.marginfi_group)
                 .context("group required: set in config or profile")?;
             let rpc = config.mfi_program.rpc();
-            let drift_spot_market = Pubkey::find_program_address(
-                &[b"spot_market", &c.drift_market_index.to_le_bytes()],
-                &solana_sdk::pubkey!("dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH"),
-            )
-            .0;
+            let drift_spot_market = derive_drift_spot_market(c.drift_market_index).0;
             let (derived_mint, derived_drift_oracle) =
                 load_drift_spot_market_roots(&rpc, drift_spot_market)?;
             let mint = configs::parse_optional_pubkey(&c.mint)?.unwrap_or(derived_mint);

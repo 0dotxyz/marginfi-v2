@@ -40,6 +40,7 @@ import {
   I80F48_ZERO,
   makeRatePoints,
   ORACLE_SETUP_PYTH_PUSH,
+  ORACLE_SETUP_SWITCHBOARD_PULL,
 } from "./utils/types";
 import { defaultKaminoBankConfig } from "./utils/kamino-utils";
 import {
@@ -71,6 +72,7 @@ export const genericMultiBankTestSetup = async (
   startingSeed: number,
   numberOfKaminoBanks: number = 0,
   numberOfDriftBanks: number = 0,
+  oracleMode: "pyth" | "switchboard" = "pyth",
 ): Promise<{
   banks: PublicKey[];
   kaminoBanks: PublicKey[];
@@ -107,12 +109,19 @@ export const genericMultiBankTestSetup = async (
       const seed = startingSeed + i;
       await addGenericBank(throwawayGroup, {
         bankMint: ecosystem.lstAlphaMint.publicKey,
-        oracle: oracles.pythPullLst.publicKey,
+        oracle:
+          oracleMode === "switchboard"
+            ? oracles.lstAlphaOracleSwb.publicKey
+            : oracles.pythPullLst.publicKey,
         oracleMeta: {
-          pubkey: oracles.pythPullLst.publicKey,
+          pubkey:
+            oracleMode === "switchboard"
+              ? oracles.lstAlphaOracleSwb.publicKey
+              : oracles.pythPullLst.publicKey,
           isSigner: false,
           isWritable: false,
         },
+        oracleMode,
         seed: new BN(seed),
         verboseMessage: verbose ? `*init LST #${seed}:` : undefined,
       });
@@ -140,10 +149,13 @@ export const genericMultiBankTestSetup = async (
       market,
       tokenAReserve,
       ecosystem.tokenAMint.publicKey,
-      oracles.tokenAOracle.publicKey,
+      oracleMode === "switchboard"
+        ? oracles.tokenAOracleSwb.publicKey
+        : oracles.tokenAOracle.publicKey,
       new BN(seed),
       verbose ? `*init Token A #${seed}:` : undefined,
       farmState ? farmState : null,
+      oracleMode,
     );
 
     const [bankPk] = deriveBankWithSeed(
@@ -166,8 +178,13 @@ export const genericMultiBankTestSetup = async (
         startingSeed + numberOfBanks + numberOfKaminoBanks + i,
       );
       const defaultConfig = defaultDriftBankConfig(
-        oracles.tokenAOracle.publicKey,
+        oracleMode === "switchboard"
+          ? oracles.tokenAOracleSwb.publicKey
+          : oracles.tokenAOracle.publicKey,
       );
+      if (oracleMode === "switchboard") {
+        defaultConfig.oracleSetup = { driftSwitchboardPull: {} };
+      }
       const tx = new Transaction().add(
         await makeAddDriftBankIx(
           groupAdmin.mrgnBankrunProgram,
@@ -176,7 +193,10 @@ export const genericMultiBankTestSetup = async (
             feePayer: groupAdmin.wallet.publicKey,
             bankMint: ecosystem.tokenAMint.publicKey,
             integrationAcc1: driftSpotMarket,
-            oracle: oracles.tokenAOracle.publicKey,
+            oracle:
+              oracleMode === "switchboard"
+                ? oracles.tokenAOracleSwb.publicKey
+                : oracles.tokenAOracle.publicKey,
           },
           { config: defaultConfig, seed },
         ),
@@ -336,13 +356,21 @@ async function addGenericBank(
     bankMint: PublicKey;
     oracle: PublicKey;
     oracleMeta: AccountMeta;
+    oracleMode?: "pyth" | "switchboard";
     // Function to adjust the seed (for example, seed.addn(1))
     seed: BN;
     verboseMessage: string;
   },
 ) {
-  const { assetTag, bankMint, oracle, oracleMeta, seed, verboseMessage } =
-    options;
+  const {
+    assetTag,
+    bankMint,
+    oracle,
+    oracleMeta,
+    oracleMode = "pyth",
+    seed,
+    verboseMessage,
+  } = options;
 
   const config = defaultBankConfig();
   config.assetWeightInit = bigNumberToWrappedI80F48(0.5);
@@ -366,7 +394,10 @@ async function addGenericBank(
     seed,
   );
 
-  const setupType = ORACLE_SETUP_PYTH_PUSH;
+  const setupType =
+    oracleMode === "switchboard"
+      ? ORACLE_SETUP_SWITCHBOARD_PULL
+      : ORACLE_SETUP_PYTH_PUSH;
   const config_ix = await groupAdmin.mrgnProgram.methods
     .lendingPoolConfigureBankOracle(setupType, oracle)
     .accountsPartial({
@@ -416,8 +447,12 @@ async function addGenericKaminoBank(
   seed: BN,
   verboseMessage: string,
   farmState: PublicKey | null,
+  oracleMode: "pyth" | "switchboard" = "pyth",
 ) {
   const config = defaultKaminoBankConfig(oracle);
+  if (oracleMode === "switchboard") {
+    config.oracleSetup = { kaminoSwitchboardPull: {} };
+  }
   const [bankKey] = deriveBankWithSeed(
     bankrunProgram.programId,
     throwawayGroup.publicKey,

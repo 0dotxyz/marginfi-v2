@@ -1,5 +1,6 @@
 use crate::{
     check,
+    constants::{LOCALNET_ID, MAINNET_PROGRAM_ID, STAGING_ID},
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{bank::BankImpl, marginfi_group::MarginfiGroupImpl},
@@ -11,14 +12,10 @@ use bytemuck::from_bytes;
 use marginfi_type_crate::{
     constants::{
         FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, INSURANCE_VAULT_AUTHORITY_SEED,
-        INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+        INSURANCE_VAULT_SEED, IS_T22, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
     },
     types::{Bank, MarginfiGroup},
 };
-
-const MAINNET_PROGRAM_ID: Pubkey = pubkey!("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA");
-const STAGING_ID: Pubkey = pubkey!("stag8sTKds2h4KzjUw3zKTsxbqvT4XKHdaR9X9E6Rct");
-const LOCALNET_ID: Pubkey = pubkey!("2jGhuVUuy3umdzByFx8sNWUAaf5vaeuDm78RDPEnhrMr");
 
 pub fn lending_pool_clone_bank(
     ctx: Context<LendingPoolCloneBank>,
@@ -118,6 +115,9 @@ pub fn lending_pool_clone_bank(
     );
 
     bank.flags = source_flags;
+    if ctx.accounts.bank_mint.to_account_info().owner == &anchor_spl::token_2022::ID {
+        bank.flags |= IS_T22;
+    }
     bank.emissions_rate = source_emissions_rate;
     bank.emissions_mint = source_emissions_mint;
     bank.emode = source_emode;

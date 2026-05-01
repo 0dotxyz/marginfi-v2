@@ -2,14 +2,14 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{clock::Clock, sysvar::Sysvar};
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::{HealthCache, MarginfiAccount};
+use marginfi_type_crate::types::{HealthCache, HealthPriceMode, MarginfiAccount};
 
 use crate::{
     constants::PROGRAM_VERSION,
     events::HealthPulseEvent,
     state::marginfi_account::{
-        check_account_bankrupt, check_account_init_health,
-        check_pre_liquidation_condition_and_get_account_health, HealthPriceMode,
+        check_account_bankrupt, check_account_init_health, compute_has_isolated_liability_flag,
+        check_pre_liquidation_condition_and_get_account_health,
     },
     MarginfiError, MarginfiResult,
 };
@@ -81,17 +81,24 @@ pub fn lending_account_pulse_health<'info>(
         HealthPriceMode::Live { liq_cache: None },
         false,
     );
-    let is_liquidatable = liq_result.is_ok();
+    let mut liquidatable_flag_update: Option<u8> = None;
     if let Err(err) = liq_result {
         match err {
             // Note: in the vastly majority of cases, this will be "HealthyAccount"
             Error::AnchorError(anchor_error) => {
-                health_cache.internal_liq_err = anchor_error.error_code_number;
+                let err_code = anchor_error.error_code_number;
+                health_cache.internal_liq_err = err_code;
+                let mfi_err: MarginfiError = err_code.into();
+                if matches!(mfi_err, MarginfiError::HealthyAccount) {
+                    liquidatable_flag_update = Some(0);
+                }
             }
             Error::ProgramError(_) => {
                 msg!("generic program error, this should never happen.")
             }
         }
+    } else {
+        liquidatable_flag_update = Some(1);
     }
 
     // Check bankruptcy condition using heap reuse optimization
@@ -100,16 +107,24 @@ pub fn lending_account_pulse_health<'info>(
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
     );
+    let mut equity_flags_decisive = false;
     if let Err(err) = bankruptcy_result {
         match err {
             // Note: in the vastly majority of cases, this will be "AccountNotBankrupt"
             Error::AnchorError(anchor_error) => {
-                health_cache.internal_bankruptcy_err = anchor_error.error_code_number;
+                let err_code = anchor_error.error_code_number;
+                health_cache.internal_bankruptcy_err = err_code;
+                let mfi_err: MarginfiError = err_code.into();
+                if matches!(mfi_err, MarginfiError::AccountNotBankrupt) {
+                    equity_flags_decisive = true;
+                }
             }
             Error::ProgramError(_) => {
                 msg!("generic program error, this should never happen.")
             }
         }
+    } else {
+        equity_flags_decisive = true;
     }
 
     let equity_assets: I80F48 = health_cache.asset_value_equity.into();
@@ -117,6 +132,8 @@ pub fn lending_account_pulse_health<'info>(
     let elapsed = clock
         .unix_timestamp
         .saturating_sub(marginfi_account.last_update as i64);
+    let has_isolated_update =
+        compute_has_isolated_liability_flag(&marginfi_account, ctx.remaining_accounts).ok();
 
     // Reborrow through a single DerefMut so the borrow checker can split indexer_flags
     // (mut) from lending_account.balances (shared).
@@ -125,10 +142,17 @@ pub fn lending_account_pulse_health<'info>(
         .indexer_flags
         .sync_balance_derived(&account.lending_account.balances);
     account.indexer_flags.sync_activity_flags(elapsed);
-    account.indexer_flags.was_liquidatable = is_liquidatable as u8;
-    account.indexer_flags.was_underwater = (equity_assets < equity_liabs) as u8;
-    account.indexer_flags.has_trivial_balance =
-        has_trivial_balance(equity_assets, equity_liabs) as u8;
+    if let Some(has_isolated) = has_isolated_update {
+        account.indexer_flags.has_isolated = has_isolated;
+    }
+    if let Some(was_liquidatable) = liquidatable_flag_update {
+        account.indexer_flags.was_liquidatable = was_liquidatable;
+    }
+    if equity_flags_decisive {
+        account.indexer_flags.was_underwater = (equity_assets < equity_liabs) as u8;
+        account.indexer_flags.has_trivial_balance =
+            has_trivial_balance(equity_assets, equity_liabs) as u8;
+    }
     account.health_cache = health_cache;
 
     emit!(HealthPulseEvent {

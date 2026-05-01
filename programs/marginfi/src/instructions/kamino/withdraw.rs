@@ -1,6 +1,6 @@
 use crate::{
     check,
-    constants::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID, PROGRAM_VERSION},
+    constants::PROGRAM_VERSION,
     events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     ix_utils::{get_discrim_hash, Hashable},
     optional_account,
@@ -15,14 +15,16 @@ use crate::{
     },
     utils::{
         assert_within_one_token, fetch_asset_price_for_bank_low_bias,
-        fetch_unbiased_price_for_bank, is_kamino_asset_tag, record_withdrawal_outflow,
+        fetch_unbiased_price_for_bank_cache, is_kamino_asset_tag, record_withdrawal_outflow,
         validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::clock::Clock;
-use anchor_lang::solana_program::sysvar::{self, Sysvar};
+use anchor_lang::solana_program::{
+    clock::Clock,
+    sysvar::{self, Sysvar},
+};
 use anchor_spl::token::{accessor, Token};
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
@@ -40,13 +42,13 @@ use kamino_mocks::{
     },
     state::{MinimalObligation, MinimalReserve},
 };
-use marginfi_type_crate::types::{
-    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-    ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
-};
 use marginfi_type_crate::{
     constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED},
-    types::ACCOUNT_IN_DELEVERAGE,
+    pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
+    types::{
+        Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+    },
 };
 
 /// Withdraw from a Kamino reserve through a marginfi account
@@ -254,7 +256,7 @@ pub fn kamino_withdraw<'info>(
 
         let bank_loader = &ctx.accounts.bank;
         let mut bank = bank_loader.load_mut()?;
-        let price_for_cache = fetch_unbiased_price_for_bank(
+        let price_for_cache = fetch_unbiased_price_for_bank_cache(
             &bank_loader.key(),
             &bank,
             &clock,
@@ -271,7 +273,8 @@ pub fn kamino_withdraw<'info>(
         // that case the cache doesn't update and this does nothing.
         let mut bank = ctx.accounts.bank.load_mut()?;
         let price_for_cache =
-            fetch_unbiased_price_for_bank(&bank_key, &bank, &clock, ctx.remaining_accounts).ok();
+            fetch_unbiased_price_for_bank_cache(&bank_key, &bank, &clock, ctx.remaining_accounts)
+                .ok();
 
         bank.update_cache_price(price_for_cache)?;
     }
@@ -382,7 +385,6 @@ pub struct KaminoWithdraw<'info> {
 
     /// The liquidity token mint (e.g., USDC)
     /// Needs serde to get the mint decimals for transfer checked
-    /// TODO: rename to just 'mint' to make use of has_one and to be consistent with deposit
     #[account(mut)]
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 

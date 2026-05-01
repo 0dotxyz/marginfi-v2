@@ -68,8 +68,13 @@ pub struct MarginfiAccount {
     pub third_party_index: u16,
     /// This account's bump, if a PDA-based account (0.1.5 or later). Otherwise, does nothing.
     pub bump: u8,
+    /// Count of how many Orders this account has active. One is added when an Order is opened, and
+    /// subtracted when an Order is executed or cancelled.
+    /// * Accounts cannot open more than u8::MAX orders. Sorry power users: hopefully 256 stop
+    ///   losses is enough for you.
+    pub active_orders: u8,
     // For 8-byte alignment
-    pub _pad0: [u8; 3],
+    pub _pad0: [u8; 2],
     /// Stores information related to liquidations made against this account. A pda of this
     /// account's key, and "liq_record"
     /// * Typically pubkey default if this account has never been liquidated or close to liquidation
@@ -124,6 +129,10 @@ pub struct IndexerFlags {
     pub is_single_borrower: u8,
     /// 1 if the account has ever been liquidated (permanent, never unset)
     pub has_ever_been_liquidated: u8,
+    /// 1 if the account has ever been forcibly deleveraged (permanent, never unset)
+    pub has_ever_been_deleveraged: u8,
+    /// 1 if `handle_bankruptcy` has ever been executed on this account (permanent, never unset)
+    pub has_been_bankrupted: u8,
     /// 1 if the account's sole liability is on a bank with `RiskTier::Isolated`. Set at
     /// borrow time and cleared by balance-derived sync when the account has anything other than
     /// exactly one liability. By the isolated-liability invariant enforced at borrow, an
@@ -154,7 +163,7 @@ pub struct IndexerFlags {
     pub was_active_60d: u8,
     /// 1 if net equity value was greater than $0 and less than $1 at last pulse
     pub has_trivial_balance: u8,
-    pub _pad: [u8; 10],
+    pub _pad: [u8; 8],
 }
 
 pub const SECONDS_PER_DAY: i64 = 86_400;

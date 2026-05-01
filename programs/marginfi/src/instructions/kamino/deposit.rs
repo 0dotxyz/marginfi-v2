@@ -2,7 +2,6 @@ use crate::state::bank::BankVaultType;
 use crate::utils::record_deposit_inflow;
 use crate::{
     bank_signer,
-    constants::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
     events::{AccountEventHeader, LendingAccountDepositEvent},
     optional_account,
     state::{
@@ -36,6 +35,7 @@ use kamino_mocks::{
     state::{MinimalObligation, MinimalReserve},
 };
 use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
+use marginfi_type_crate::pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID};
 use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
 /// Deposit into a Kamino pool through a marginfi account

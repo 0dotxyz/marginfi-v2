@@ -1,6 +1,10 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{clock::Clock, sysvar::Sysvar};
-use marginfi_type_crate::types::{MarginfiAccount, MarginfiGroup, SECONDS_PER_DAY};
+use marginfi_type_crate::types::{
+    MarginfiAccount, MarginfiGroup, SECONDS_PER_DAY, ACCOUNT_DISABLED, ACCOUNT_FROZEN,
+    ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
+    ACCOUNT_IN_RECEIVERSHIP,
+};
 
 use crate::{
     check,
@@ -9,28 +13,37 @@ use crate::{
     MarginfiError, MarginfiResult,
 };
 
-/// Permissionless instruction to close accounts that are empty and have been inactive for >60
-/// days. Inactivity is accepted from either the `was_active_60d` indexer flag (for memcmp
-/// discovery by indexers) or `clock - last_update > 60d` (so a pulse is not required).
-/// The account must also have no blocking flags (disabled, flashloan, receivership).
-/// Rent is returned to the group's global fee wallet.
+/// Permissionless instruction to close legacy or new accounts that are empty and inactive for >60
+/// days. Eligibility is computed from direct account invariants (balances/flags/timestamps), not
+/// indexer flags, so pre-flag accounts remain safely closeable.
 pub fn admin_close_account(ctx: Context<AdminCloseAccount>) -> MarginfiResult {
     let marginfi_account = ctx.accounts.marginfi_account.load()?;
     let clock = Clock::get()?;
     let elapsed = clock
         .unix_timestamp
         .saturating_sub(marginfi_account.last_update as i64);
-    let is_inactive =
-        marginfi_account.indexer_flags.was_active_60d == 0 || elapsed > 60 * SECONDS_PER_DAY;
+    let is_inactive = elapsed > 60 * SECONDS_PER_DAY;
+    let only_has_empty_balances = marginfi_account
+        .lending_account
+        .balances
+        .iter()
+        .all(|balance| balance.get_side().is_none());
 
     check!(
-        marginfi_account.indexer_flags.is_empty == 1 && is_inactive,
+        only_has_empty_balances && is_inactive,
         MarginfiError::IllegalAction,
         "Account is not eligible for close (not empty or active within 60d)"
     );
 
     check!(
-        marginfi_account.can_be_closed(),
+        !marginfi_account.get_flag(ACCOUNT_DISABLED)
+            && !marginfi_account.get_flag(ACCOUNT_FROZEN)
+            && !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN)
+            && !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP)
+            && !marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE)
+            && !marginfi_account.get_flag(ACCOUNT_IN_ORDER_EXECUTION)
+            && marginfi_account.active_orders == 0
+            && marginfi_account.liquidation_record == Pubkey::default(),
         MarginfiError::IllegalAction,
         "Account cannot be closed"
     );

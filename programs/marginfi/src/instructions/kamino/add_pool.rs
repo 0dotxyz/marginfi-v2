@@ -1,7 +1,6 @@
 // Adds a Kamino type bank to a group with sane defaults. Used to integrate with Kamino
 // allowing users to interact with Kamino pools through marginfi
 use crate::{
-    constants::KAMINO_PROGRAM_ID,
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{
@@ -14,11 +13,14 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::system_program;
 use anchor_spl::token_interface::*;
 use kamino_mocks::state::MinimalReserve;
-use marginfi_type_crate::constants::{
-    FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED,
-    LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+use marginfi_type_crate::{
+    constants::{
+        FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, INSURANCE_VAULT_AUTHORITY_SEED,
+        INSURANCE_VAULT_SEED, IS_T22, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+    },
+    pdas::KAMINO_PROGRAM_ID,
+    types::{Bank, MarginfiGroup, OracleSetup},
 };
-use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 
 /// Add a Kamino bank to the marginfi lending pool
 pub fn lending_pool_add_bank_kamino(
@@ -75,6 +77,9 @@ pub fn lending_pool_add_bank_kamino(
         fee_vault_bump,
         fee_vault_authority_bump,
     );
+    if bank_mint.to_account_info().owner == &anchor_spl::token_2022::ID {
+        bank.flags |= IS_T22;
+    }
 
     bank.integration_acc_1 = reserve_key;
     bank.integration_acc_2 = obligation_key;
