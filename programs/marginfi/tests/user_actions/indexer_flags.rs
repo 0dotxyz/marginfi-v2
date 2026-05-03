@@ -321,12 +321,13 @@ async fn admin_close_account_succeeds_when_closeable() -> anyhow::Result<()> {
     )
     .await;
 
-    // Simulate a pulse snapshot after >60d of empty inactivity
-    let mut account = user_f.load().await;
-    account.indexer_flags.is_empty = 1;
-    account.indexer_flags.was_active_30d = 0;
-    account.indexer_flags.was_active_60d = 0;
-    user_f.set_account(&account).await?;
+    // Advance time by >60d so `clock - last_update` satisfies inactivity.
+    {
+        let ctx = test_f.context.borrow_mut();
+        let mut clock: Clock = ctx.banks_client.get_sysvar().await?;
+        clock.unix_timestamp += 60 * 24 * 60 * 60 + 1;
+        ctx.set_sysvar(&clock);
+    }
 
     let global_fee_wallet = test_f.marginfi_group.fee_wallet;
     user_f
