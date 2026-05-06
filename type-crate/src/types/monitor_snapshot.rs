@@ -46,6 +46,16 @@ impl Snapshot {
         borrow_apy: 0,
         native_apy: 0,
     };
+
+    pub const fn is_zero(&self) -> bool {
+        self.snapshot_hour == 0
+            && self.supply == 0
+            && self.borrow == 0
+            && self.price == 0
+            && self.supply_apy == 0
+            && self.borrow_apy == 0
+            && self.native_apy == 0
+    }
 }
 
 #[cfg(feature = "anchor")]
@@ -106,6 +116,37 @@ impl<const MAX_SNAPSHOTS: usize> BankSnapshotRecords<MAX_SNAPSHOTS> {
         }
         Some(())
     }
+
+    /// Insert latest snapshot at index 0 and shift older snapshots right by one.
+    ///
+    /// For `MAX_SNAPSHOTS = 3`:
+    /// `[A, _, _] -> [B, A, _] -> [C, B, A] -> [D, C, B]`
+    ///
+    /// Guardrails:
+    /// - Rejects zeroed snapshot payloads (`snapshot.is_zero()`).
+    /// - Rejects non-increasing timestamps when a latest snapshot exists.
+    pub fn push_latest_snapshot(&mut self, snapshot: Snapshot) -> Option<()> {
+        if MAX_SNAPSHOTS == 0 {
+            return None;
+        }
+        if snapshot.is_zero() {
+            return None;
+        }
+        let latest = self.snapshots[0];
+        if !latest.is_zero() && snapshot.snapshot_hour <= latest.snapshot_hour {
+            return None;
+        }
+        for i in (1..MAX_SNAPSHOTS).rev() {
+            self.snapshots[i] = self.snapshots[i - 1];
+        }
+        self.snapshots[0] = snapshot;
+        Some(())
+    }
+
+    /// Return true when this bank slot is unused.
+    pub fn is_empty_slot(&self) -> bool {
+        self.bank == ZERO_PUBKEY
+    }
 }
 
 impl<const MAX_BANKS: usize, const MAX_SNAPSHOTS: usize> ArchiveRecord
@@ -152,6 +193,36 @@ impl<const MAX_BANKS: usize, const MAX_SNAPSHOTS: usize> ArchiveRecord
 
     fn index(&self) -> [u8; 32] {
         self.mint.to_bytes()
+    }
+}
+
+impl<const MAX_BANKS: usize, const MAX_SNAPSHOTS: usize>
+    MintSnapshotRecords<MAX_BANKS, MAX_SNAPSHOTS>
+{
+    /// Find bank slot index by bank pubkey.
+    pub fn find_bank_index(&self, bank: &Pubkey) -> Option<usize> {
+        self.banks.iter().position(|b| b.bank == *bank)
+    }
+
+    /// Find an existing bank slot or allocate an empty one.
+    pub fn find_or_create_bank_slot(&mut self, bank: Pubkey) -> Option<usize> {
+        if let Some(idx) = self.find_bank_index(&bank) {
+            return Some(idx);
+        }
+        let idx = self.banks.iter().position(|b| b.is_empty_slot())?;
+        self.banks[idx].bank = bank;
+        Some(idx)
+    }
+
+    /// Apply one `{bank, snapshot}` update to this mint record.
+    ///
+    /// Behavior:
+    /// - Reuses existing bank slot when present.
+    /// - Otherwise allocates first empty bank slot.
+    /// - Pushes latest snapshot to index 0 and shifts older snapshots right.
+    pub fn apply_bank_snapshot(&mut self, bank: Pubkey, snapshot: Snapshot) -> Option<()> {
+        let idx = self.find_or_create_bank_slot(bank)?;
+        self.banks[idx].push_latest_snapshot(snapshot)
     }
 }
 
@@ -261,5 +332,83 @@ mod tests {
             header.get_record::<Rec>(&account_data, rec_b.index()),
             Some((Rec::LEN, rec_b))
         );
+    }
+
+    #[test]
+    fn bank_snapshot_push_latest_shifts_right() {
+        type BankRec = BankSnapshotRecords<3>;
+        let mut bank_rec = BankRec {
+            bank: pk(55),
+            snapshots: [Snapshot::ZERO, Snapshot::ZERO, Snapshot::ZERO],
+        };
+
+        let a = snap(100, 1);
+        let b = snap(101, 2);
+        let c = snap(102, 3);
+        let d = snap(103, 4);
+
+        assert_eq!(bank_rec.push_latest_snapshot(a), Some(()));
+        assert_eq!(bank_rec.snapshots, [a, Snapshot::ZERO, Snapshot::ZERO]);
+
+        assert_eq!(bank_rec.push_latest_snapshot(b), Some(()));
+        assert_eq!(bank_rec.snapshots, [b, a, Snapshot::ZERO]);
+
+        assert_eq!(bank_rec.push_latest_snapshot(c), Some(()));
+        assert_eq!(bank_rec.snapshots, [c, b, a]);
+
+        assert_eq!(bank_rec.push_latest_snapshot(d), Some(()));
+        assert_eq!(bank_rec.snapshots, [d, c, b]);
+    }
+
+    #[test]
+    fn apply_bank_snapshot_finds_or_creates_slot() {
+        type Rec = MintSnapshotRecords<2, 3>;
+        let mut rec = Rec {
+            mint: pk(99),
+            banks: [BankSnapshotRecords::ZERO, BankSnapshotRecords::ZERO],
+        };
+
+        let bank_a = pk(1);
+        let bank_b = pk(2);
+
+        let a1 = snap(10, 10);
+        let a2 = snap(11, 11);
+        let b1 = snap(12, 12);
+
+        assert_eq!(rec.apply_bank_snapshot(bank_a, a1), Some(()));
+        assert_eq!(rec.banks[0].bank, bank_a);
+        assert_eq!(rec.banks[0].snapshots[0], a1);
+
+        assert_eq!(rec.apply_bank_snapshot(bank_a, a2), Some(()));
+        assert_eq!(rec.banks[0].snapshots[0], a2);
+        assert_eq!(rec.banks[0].snapshots[1], a1);
+
+        assert_eq!(rec.apply_bank_snapshot(bank_b, b1), Some(()));
+        assert_eq!(rec.banks[1].bank, bank_b);
+        assert_eq!(rec.banks[1].snapshots[0], b1);
+    }
+
+    #[test]
+    fn push_latest_snapshot_rejects_zero_or_non_increasing() {
+        type BankRec = BankSnapshotRecords<3>;
+        let mut bank_rec = BankRec {
+            bank: pk(77),
+            snapshots: [Snapshot::ZERO, Snapshot::ZERO, Snapshot::ZERO],
+        };
+
+        assert_eq!(bank_rec.push_latest_snapshot(Snapshot::ZERO), None);
+        assert_eq!(
+            bank_rec.snapshots,
+            [Snapshot::ZERO, Snapshot::ZERO, Snapshot::ZERO]
+        );
+
+        let a = snap(200, 1);
+        let same_ts = snap(200, 2);
+        let lower_ts = snap(199, 3);
+
+        assert_eq!(bank_rec.push_latest_snapshot(a), Some(()));
+        assert_eq!(bank_rec.push_latest_snapshot(same_ts), None);
+        assert_eq!(bank_rec.push_latest_snapshot(lower_ts), None);
+        assert_eq!(bank_rec.snapshots[0], a);
     }
 }
