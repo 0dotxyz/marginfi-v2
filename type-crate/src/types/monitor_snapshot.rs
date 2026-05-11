@@ -210,16 +210,23 @@ impl<const MAX_SNAPSHOTS: usize> MintSnapshotRecords<MAX_SNAPSHOTS> {
             return None;
         }
 
-        let mut head =
-            u16::from_le_bytes(slot[Self::HEAD_OFFSET..Self::HEAD_OFFSET + 2].try_into().ok()?);
-        let mut tail =
-            u16::from_le_bytes(slot[Self::TAIL_OFFSET..Self::TAIL_OFFSET + 2].try_into().ok()?);
+        let mut head = u16::from_le_bytes(
+            slot[Self::HEAD_OFFSET..Self::HEAD_OFFSET + 2]
+                .try_into()
+                .ok()?,
+        );
+        let mut tail = u16::from_le_bytes(
+            slot[Self::TAIL_OFFSET..Self::TAIL_OFFSET + 2]
+                .try_into()
+                .ok()?,
+        );
         let cap_u16 = u16::try_from(MAX_SNAPSHOTS).ok()?;
         if head >= cap_u16 || tail >= cap_u16 {
             return None;
         }
 
-        let is_bootstrap_empty = head == 0 && tail == 0 && Self::read_snapshot_at(slot, 0)?.is_zero();
+        let is_bootstrap_empty =
+            head == 0 && tail == 0 && Self::read_snapshot_at(slot, 0)?.is_zero();
         if is_bootstrap_empty {
             Self::write_snapshot_at(slot, 0, snapshot)?;
             return Some(());
