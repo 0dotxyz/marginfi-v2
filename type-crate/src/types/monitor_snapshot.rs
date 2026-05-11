@@ -140,7 +140,7 @@ mod tests {
     }
 
     fn pk(seed: u8) -> Pubkey {
-        Pubkey::new([seed; 32])
+        Pubkey::from([seed; 32])
     }
 
     fn snap(hour: u64, seed: u64) -> Snapshot {
