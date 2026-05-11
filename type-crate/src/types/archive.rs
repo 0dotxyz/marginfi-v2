@@ -11,12 +11,6 @@ use {
 
 assert_struct_size!(ArchiveHeader, 48);
 assert_struct_align!(ArchiveHeader, 8);
-/// Fixed-size header stored at the beginning of an indexed archive account.
-///
-/// Layout on chain:
-/// - `[0..8)` account discriminator
-/// - `[8..8+ArchiveHeader::LEN)` header
-/// - `[ArchiveHeader::PAYLOAD_OFFSET..)` fixed-size record slots
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
 #[cfg_attr(
@@ -24,40 +18,27 @@ assert_struct_align!(ArchiveHeader, 8);
     derive(Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)
 )]
 pub struct ArchiveHeader {
-    /// Header schema version.
     pub version: u8,
-    /// Explicit alignment padding before `record_count`.
     pub _pad0: [u8; 7],
-    /// Number of populated records in payload.
     pub record_count: u64,
-    /// Authority allowed to mutate this archive.
     pub authority: Pubkey,
 }
 
-/// Trait implemented by each concrete fixed-size archive record.
-///
-/// Invariant:
-/// - First 32 bytes of serialized record are reserved for index key.
-/// - `index()` must match `out[0..32]` produced by `to_bytes`.
 pub trait ArchiveRecord: Sized {
-    /// Exact serialized record size in bytes.
-    const LEN: usize;
-
-    /// Parse one record from bytes.
+    fn len(version: u8) -> Option<usize>;
+    fn version(&self) -> u8;
     fn parse(bytes: &[u8]) -> Option<Self>;
-    /// Serialize one record into bytes.
     fn to_bytes(&self, out: &mut [u8]) -> Option<()>;
-    /// Record index key (always 32 bytes).
     fn index(&self) -> [u8; 32];
 }
 
 impl ArchiveHeader {
-    /// Header byte length (excluding discriminator).
     pub const LEN: usize = 48;
-    /// Anchor account discriminator length.
     pub const DISCRIMINATOR_LEN: usize = 8;
-    /// Payload start offset in account data.
     pub const PAYLOAD_OFFSET: usize = Self::DISCRIMINATOR_LEN + Self::LEN;
+    pub const INDEX_LEN: usize = 32;
+    pub const VERSION_LEN: usize = 1;
+    pub const SLOT_META_LEN: usize = Self::INDEX_LEN + Self::VERSION_LEN;
 
     fn payload_region<'a>(&self, account_data: &'a [u8]) -> Option<&'a [u8]> {
         if account_data.len() < Self::PAYLOAD_OFFSET {
@@ -73,65 +54,129 @@ impl ArchiveHeader {
         Some(&mut account_data[Self::PAYLOAD_OFFSET..])
     }
 
-    /// Find immutable slot bytes and byte position for given record index.
+    fn used_payload_len<T: ArchiveRecord>(&self, data: &[u8]) -> Option<usize> {
+        let max_records = usize::try_from(self.record_count).ok()?;
+        let mut offset = 0usize;
+        for _ in 0..max_records {
+            let meta_end = offset.checked_add(Self::SLOT_META_LEN)?;
+            if meta_end > data.len() {
+                return None;
+            }
+            let version = data[offset + Self::INDEX_LEN];
+            let slot_len = T::len(version)?;
+            if slot_len < Self::SLOT_META_LEN {
+                return None;
+            }
+            offset = offset.checked_add(slot_len)?;
+            if offset > data.len() {
+                return None;
+            }
+        }
+        Some(offset)
+    }
+
     pub fn find_slot<'a, T: ArchiveRecord>(
         &self,
         data: &'a [u8],
         index: [u8; 32],
     ) -> Option<(usize, &'a [u8])> {
-        if T::LEN < 32 {
-            return None;
-        }
         let max_records = usize::try_from(self.record_count).ok()?;
-        for (i, chunk) in data.chunks_exact(T::LEN).take(max_records).enumerate() {
-            if chunk[0..32] == index {
-                let pos = i.checked_mul(T::LEN)?;
-                return Some((pos, chunk));
+        let mut offset = 0usize;
+        for _ in 0..max_records {
+            let meta_end = offset.checked_add(Self::SLOT_META_LEN)?;
+            if meta_end > data.len() {
+                return None;
             }
+            let version = data[offset + Self::INDEX_LEN];
+            let slot_len = T::len(version)?;
+            let end = offset.checked_add(slot_len)?;
+            if end > data.len() {
+                return None;
+            }
+
+            if data[offset..offset + Self::INDEX_LEN] == index {
+                return Some((offset, &data[offset..end]));
+            }
+            offset = end;
         }
         None
     }
 
-    /// Find mutable slot bytes and byte position for given record index.
     pub fn find_slot_mut<'a, T: ArchiveRecord>(
         &self,
         data: &'a mut [u8],
         index: [u8; 32],
     ) -> Option<(usize, &'a mut [u8])> {
-        if T::LEN < 32 {
-            return None;
-        }
         let max_records = usize::try_from(self.record_count).ok()?;
-        for (i, chunk) in data.chunks_exact_mut(T::LEN).take(max_records).enumerate() {
-            if chunk[0..32] == index {
-                let pos = i.checked_mul(T::LEN)?;
-                return Some((pos, chunk));
+        let mut offset = 0usize;
+        for _ in 0..max_records {
+            let meta_end = offset.checked_add(Self::SLOT_META_LEN)?;
+            if meta_end > data.len() {
+                return None;
             }
+            let version = data[offset + Self::INDEX_LEN];
+            let slot_len = T::len(version)?;
+            let end = offset.checked_add(slot_len)?;
+            if end > data.len() {
+                return None;
+            }
+
+            if data[offset..offset + Self::INDEX_LEN] == index {
+                return Some((offset, &mut data[offset..end]));
+            }
+            offset = end;
         }
         None
     }
 
-    /// Update existing indexed record or append a new one if capacity permits.
     pub fn update_or_insert<T: ArchiveRecord>(
         &mut self,
         account_data: &mut [u8],
         record: &T,
     ) -> Option<()> {
-        if T::LEN < 32 {
+        let record_len = T::len(record.version())?;
+        if record_len < Self::SLOT_META_LEN {
             return None;
         }
 
         let data = self.payload_region_mut(account_data)?;
         let index = record.index();
+        if let Some((pos, slot)) = self.find_slot_mut::<T>(data, index) {
+            let existing_version = slot[Self::INDEX_LEN];
+            let existing_len = T::len(existing_version)?;
+            if existing_version == record.version() && existing_len == record_len {
+                record.to_bytes(slot)?;
+                return Some(());
+            }
 
-        if let Some((_, slot)) = self.find_slot_mut::<T>(data, index) {
-            record.to_bytes(slot)?;
+            // Version/len changed for same index: compact out old slot and append
+            // new record at tail if capacity permits.
+            let used_end = self.used_payload_len::<T>(data)?;
+            let remove_end = pos.checked_add(existing_len)?;
+            if remove_end > used_end {
+                return None;
+            }
+            let tail_len = used_end.checked_sub(remove_end)?;
+            let new_used_end = used_end
+                .checked_sub(existing_len)?
+                .checked_add(record_len)?;
+            if new_used_end > data.len() {
+                return None;
+            }
+            if tail_len > 0 {
+                data.copy_within(remove_end..used_end, pos);
+            }
+            record.to_bytes(&mut data[new_used_end - record_len..new_used_end])?;
+            if new_used_end < used_end {
+                for b in &mut data[new_used_end..used_end] {
+                    *b = 0;
+                }
+            }
             return Some(());
         }
 
-        let record_count = usize::try_from(self.record_count).ok()?;
-        let offset = record_count.checked_mul(T::LEN)?;
-        let end = offset.checked_add(T::LEN)?;
+        let offset = self.used_payload_len::<T>(data)?;
+        let end = offset.checked_add(record_len)?;
         if end > data.len() {
             return None;
         }
@@ -141,7 +186,6 @@ impl ArchiveHeader {
         Some(())
     }
 
-    /// Parse indexed record from archive and return `(position, record)`.
     pub fn get_record<T: ArchiveRecord>(
         &self,
         account_data: &[u8],
@@ -152,33 +196,27 @@ impl ArchiveHeader {
         Some((pos, T::parse(slot)?))
     }
 
-    /// Update existing record at `position`.
-    ///
-    /// Safety check:
-    /// - the index already present at `position` must match `record.index()`.
     pub fn update<T: ArchiveRecord>(
         &self,
         account_data: &mut [u8],
         position: usize,
         record: &T,
     ) -> Option<()> {
-        if T::LEN < 32 {
+        let record_len = T::len(record.version())?;
+        if record_len < Self::SLOT_META_LEN {
             return None;
         }
-
         let data = self.payload_region_mut(account_data)?;
-        let end = position.checked_add(T::LEN)?;
-        if end > data.len() {
+        let used_end = self.used_payload_len::<T>(data)?;
+        let end = position.checked_add(record_len)?;
+        if end > used_end {
             return None;
         }
-        let max_records = usize::try_from(self.record_count).ok()?;
-        let max_end = max_records.checked_mul(T::LEN)?;
-        if end > max_end {
-            return None;
-        }
-
         let slot = &mut data[position..end];
-        if slot[0..32] != record.index() {
+        if slot[0..Self::INDEX_LEN] != record.index() {
+            return None;
+        }
+        if slot[Self::INDEX_LEN] != record.version() {
             return None;
         }
         record.to_bytes(slot)
@@ -198,23 +236,79 @@ mod tests {
     }
 
     impl ArchiveRecord for TestRecord {
-        const LEN: usize = 40;
+        fn len(version: u8) -> Option<usize> {
+            match version {
+                1 => Some(41),
+                _ => None,
+            }
+        }
+
+        fn version(&self) -> u8 {
+            1
+        }
 
         fn parse(bytes: &[u8]) -> Option<Self> {
-            if bytes.len() != Self::LEN {
+            if bytes.len() != Self::len(1)? || bytes[32] != 1 {
                 return None;
             }
             let key: [u8; 32] = bytes[0..32].try_into().ok()?;
-            let value = u64::from_le_bytes(bytes[32..40].try_into().ok()?);
+            let value = u64::from_le_bytes(bytes[33..41].try_into().ok()?);
             Some(Self { key, value })
         }
 
         fn to_bytes(&self, out: &mut [u8]) -> Option<()> {
-            if out.len() != Self::LEN {
+            if out.len() != Self::len(self.version())? {
                 return None;
             }
             out[0..32].copy_from_slice(&self.key);
-            out[32..40].copy_from_slice(&self.value.to_le_bytes());
+            out[32] = self.version();
+            out[33..41].copy_from_slice(&self.value.to_le_bytes());
+            Some(())
+        }
+
+        fn index(&self) -> [u8; 32] {
+            self.key
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct TestRecordV2 {
+        key: [u8; 32],
+        value: u64,
+        extra: u64,
+    }
+
+    impl ArchiveRecord for TestRecordV2 {
+        fn len(version: u8) -> Option<usize> {
+            match version {
+                1 => Some(41),
+                2 => Some(49),
+                _ => None,
+            }
+        }
+
+        fn version(&self) -> u8 {
+            2
+        }
+
+        fn parse(bytes: &[u8]) -> Option<Self> {
+            if bytes.len() != Self::len(2)? || bytes[32] != 2 {
+                return None;
+            }
+            let key: [u8; 32] = bytes[0..32].try_into().ok()?;
+            let value = u64::from_le_bytes(bytes[33..41].try_into().ok()?);
+            let extra = u64::from_le_bytes(bytes[41..49].try_into().ok()?);
+            Some(Self { key, value, extra })
+        }
+
+        fn to_bytes(&self, out: &mut [u8]) -> Option<()> {
+            if out.len() != Self::len(self.version())? {
+                return None;
+            }
+            out[0..32].copy_from_slice(&self.key);
+            out[32] = self.version();
+            out[33..41].copy_from_slice(&self.value.to_le_bytes());
+            out[41..49].copy_from_slice(&self.extra.to_le_bytes());
             Some(())
         }
 
@@ -233,7 +327,7 @@ mod tests {
     }
 
     fn new_account_data(slots: usize) -> Vec<u8> {
-        vec![0u8; ArchiveHeader::PAYLOAD_OFFSET + (slots * TestRecord::LEN)]
+        vec![0u8; ArchiveHeader::PAYLOAD_OFFSET + (slots * TestRecord::len(1).unwrap())]
     }
 
     #[test]
@@ -244,7 +338,6 @@ mod tests {
             key: [7; 32],
             value: 99,
         };
-
         assert_eq!(
             header.update_or_insert::<TestRecord>(&mut data, &rec),
             Some(())
@@ -268,7 +361,6 @@ mod tests {
             key: [9; 32],
             value: 2,
         };
-
         assert_eq!(
             header.update_or_insert::<TestRecord>(&mut data, &old),
             Some(())
@@ -296,7 +388,6 @@ mod tests {
             key: [2; 32],
             value: 20,
         };
-
         assert_eq!(
             header.update_or_insert::<TestRecord>(&mut data, &a),
             Some(())
@@ -309,7 +400,6 @@ mod tests {
     fn get_record_and_update_with_index_guard() {
         let mut header = new_header();
         let mut data = new_account_data(2);
-
         let a = TestRecord {
             key: [3; 32],
             value: 10,
@@ -322,7 +412,6 @@ mod tests {
             key: [4; 32],
             value: 99,
         };
-
         assert_eq!(
             header.update_or_insert::<TestRecord>(&mut data, &a),
             Some(())
@@ -330,7 +419,6 @@ mod tests {
         let (pos, parsed) = header.get_record::<TestRecord>(&data, [3; 32]).unwrap();
         assert_eq!(pos, 0);
         assert_eq!(parsed, a);
-
         assert_eq!(
             header.update::<TestRecord>(&mut data, pos, &wrong_key),
             None
@@ -343,5 +431,48 @@ mod tests {
             header.get_record::<TestRecord>(&data, [3; 32]),
             Some((0, a_updated))
         );
+    }
+
+    #[test]
+    fn update_existing_index_with_new_len_relocates_to_tail() {
+        let mut header = new_header();
+        let mut data = vec![0u8; ArchiveHeader::PAYLOAD_OFFSET + 3 * TestRecordV2::len(2).unwrap()];
+
+        let key_a = [7u8; 32];
+        let key_b = [8u8; 32];
+
+        let rec_a_v1 = TestRecord {
+            key: key_a,
+            value: 11,
+        };
+        let rec_b_v1 = TestRecord {
+            key: key_b,
+            value: 22,
+        };
+        assert_eq!(
+            header.update_or_insert::<TestRecord>(&mut data, &rec_a_v1),
+            Some(())
+        );
+        assert_eq!(
+            header.update_or_insert::<TestRecord>(&mut data, &rec_b_v1),
+            Some(())
+        );
+
+        let rec_a_v2 = TestRecordV2 {
+            key: key_a,
+            value: 33,
+            extra: 44,
+        };
+        assert_eq!(
+            header.update_or_insert::<TestRecordV2>(&mut data, &rec_a_v2),
+            Some(())
+        );
+        assert_eq!(header.record_count, 2);
+
+        let (pos_b, got_b) = header.get_record::<TestRecord>(&data, key_b).unwrap();
+        let (pos_a, got_a) = header.get_record::<TestRecordV2>(&data, key_a).unwrap();
+        assert_eq!(got_b, rec_b_v1);
+        assert_eq!(got_a, rec_a_v2);
+        assert!(pos_b < pos_a);
     }
 }
