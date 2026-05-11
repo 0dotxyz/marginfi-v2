@@ -29,7 +29,8 @@ pub fn monitor_archive_upsert_batch(
         MarginfiError::InvalidConfig
     );
 
-    let mut header = ArchiveHeader::read_from_account_data(&data).ok_or(MarginfiError::InvalidConfig)?;
+    let mut header =
+        ArchiveHeader::read_from_account_data(&data).ok_or(MarginfiError::InvalidConfig)?;
     check!(header.authority == manager, MarginfiError::Unauthorized);
 
     check!(
@@ -50,15 +51,18 @@ pub fn monitor_archive_upsert_batch(
             native_apy: update.native_apy,
         };
 
-        if let Some((_, slot)) = header.find_slot_in_account_mut::<
-            MintSnapshotRecords<{ ArchiveHeader::MAX_SNAPSHOTS_PER_MINT }>,
-        >(&mut data, mint.to_bytes())
+        if let Some((_, slot)) = header.find_slot_in_account_mut::<MintSnapshotRecords<
+            { ArchiveHeader::MAX_SNAPSHOTS_PER_MINT },
+        >>(&mut data, mint.to_bytes())
         {
             MintSnapshotRecords::<{ ArchiveHeader::MAX_SNAPSHOTS_PER_MINT }>::push_latest_snapshot_bytes(slot, snapshot)
                 .ok_or(MarginfiError::InvalidConfig)?;
         } else {
-            let mut record = MintSnapshotRecords::<{ ArchiveHeader::MAX_SNAPSHOTS_PER_MINT }>::new(mint);
-            record.push_latest_snapshot(snapshot).ok_or(MarginfiError::InvalidConfig)?;
+            let mut record =
+                MintSnapshotRecords::<{ ArchiveHeader::MAX_SNAPSHOTS_PER_MINT }>::new(mint);
+            record
+                .push_latest_snapshot(snapshot)
+                .ok_or(MarginfiError::InvalidConfig)?;
             header
                 .update_or_insert::<MintSnapshotRecords<{ ArchiveHeader::MAX_SNAPSHOTS_PER_MINT }>>(
                     &mut data, &record,
