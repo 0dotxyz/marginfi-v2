@@ -14,21 +14,6 @@ pub struct Snapshot {
     pub native_apy: u64,
 }
 
-/// Historical record for a mint, sorted descending by `snapshot_hour`.
-///
-/// This is indexed by mint address and uses the first 32 bytes of the
-/// serialized representation as the archive key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MintSnapshotRecords<const MAX_SNAPSHOTS: usize> {
-    pub mint: Pubkey,
-    /// Physical index of the oldest snapshot currently stored.
-    pub head: u16,
-    /// Number of valid snapshots currently stored (always `<= MAX_SNAPSHOTS`).
-    pub len: u16,
-    pub _pad: [u8; 4],
-    pub snapshots: [Snapshot; MAX_SNAPSHOTS],
-}
-
 impl Snapshot {
     pub const LEN: usize = 24;
     pub const ZERO: Self = Self {
@@ -40,6 +25,21 @@ impl Snapshot {
     pub const fn is_zero(&self) -> bool {
         self.snapshot_hour == 0 && self.price == 0 && self.native_apy == 0
     }
+}
+
+/// Historical record for a mint, sorted descending by `snapshot_hour`.
+///
+/// This is indexed by mint address and uses the first 32 bytes of the
+/// serialized representation as the archive key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MintSnapshotRecords<const MAX_SNAPSHOTS: usize> {
+    pub mint: Pubkey,
+    /// Physical index of the oldest snapshot currently stored.
+    pub head: u16,
+    /// Physical index of the newest snapshot currently stored.
+    pub tail: u16,
+    pub _pad: [u8; 4],
+    pub snapshots: [Snapshot; MAX_SNAPSHOTS],
 }
 
 impl<const MAX_SNAPSHOTS: usize> ArchiveRecord for MintSnapshotRecords<MAX_SNAPSHOTS> {
@@ -66,8 +66,9 @@ impl<const MAX_SNAPSHOTS: usize> ArchiveRecord for MintSnapshotRecords<MAX_SNAPS
         let mint = Pubkey::new(mint_bytes);
 
         let head = u16::from_le_bytes(bytes[33..35].try_into().ok()?);
-        let len = u16::from_le_bytes(bytes[35..37].try_into().ok()?);
-        if usize::from(len) > MAX_SNAPSHOTS {
+        let tail = u16::from_le_bytes(bytes[35..37].try_into().ok()?);
+        let cap_u16 = u16::try_from(MAX_SNAPSHOTS).ok()?;
+        if head >= cap_u16 || tail >= cap_u16 {
             return None;
         }
 
@@ -84,7 +85,7 @@ impl<const MAX_SNAPSHOTS: usize> ArchiveRecord for MintSnapshotRecords<MAX_SNAPS
         Some(Self {
             mint,
             head,
-            len,
+            tail,
             _pad: [0; 4],
             snapshots,
         })
@@ -98,7 +99,7 @@ impl<const MAX_SNAPSHOTS: usize> ArchiveRecord for MintSnapshotRecords<MAX_SNAPS
         out[0..32].copy_from_slice(self.mint.as_ref());
         out[32] = self.version();
         out[33..35].copy_from_slice(&self.head.to_le_bytes());
-        out[35..37].copy_from_slice(&self.len.to_le_bytes());
+        out[35..37].copy_from_slice(&self.tail.to_le_bytes());
         out[37..41].copy_from_slice(&self._pad);
         for (i, snap) in self.snapshots.iter().enumerate() {
             let offset = 41 + (i * Snapshot::LEN);
@@ -117,13 +118,17 @@ impl<const MAX_SNAPSHOTS: usize> ArchiveRecord for MintSnapshotRecords<MAX_SNAPS
 impl<const MAX_SNAPSHOTS: usize> MintSnapshotRecords<MAX_SNAPSHOTS> {
     pub const VERSION_V1: u8 = 1;
     pub const LEN_V1: usize = 41 + (MAX_SNAPSHOTS * Snapshot::LEN);
+    pub const VERSION_OFFSET: usize = 32;
+    pub const HEAD_OFFSET: usize = 33;
+    pub const TAIL_OFFSET: usize = 35;
+    pub const SNAPSHOTS_OFFSET: usize = 41;
 
     /// Create a new mint snapshot record with an empty ring buffer.
     pub fn new(mint: Pubkey) -> Self {
         Self {
             mint,
             head: 0,
-            len: 0,
+            tail: 0,
             _pad: [0; 4],
             snapshots: [Snapshot::ZERO; MAX_SNAPSHOTS],
         }
@@ -146,41 +151,118 @@ impl<const MAX_SNAPSHOTS: usize> MintSnapshotRecords<MAX_SNAPSHOTS> {
             return None;
         }
 
-        if let Some(latest) = self.latest_snapshot() {
-            if snapshot.snapshot_hour <= latest.snapshot_hour {
-                return None;
-            }
-        }
-
         let cap_u16 = u16::try_from(MAX_SNAPSHOTS).ok()?;
-        if self.len < cap_u16 {
-            let tail = (usize::from(self.head) + usize::from(self.len)) % MAX_SNAPSHOTS;
-            self.snapshots[tail] = snapshot;
-            self.len = self.len.checked_add(1)?;
+        let is_bootstrap_empty = self.head == 0 && self.tail == 0 && self.snapshots[0].is_zero();
+        if is_bootstrap_empty {
+            self.snapshots[0] = snapshot;
             return Some(());
         }
 
-        let head_idx = usize::from(self.head);
-        if head_idx >= MAX_SNAPSHOTS {
+        let latest = self.latest_snapshot()?;
+        if snapshot.snapshot_hour <= latest.snapshot_hour {
             return None;
         }
-        self.snapshots[head_idx] = snapshot;
-        self.head = if self.head + 1 == cap_u16 {
+
+        let wrapped_tail = if self.tail + 1 == cap_u16 {
             0
         } else {
-            self.head + 1
+            self.tail + 1
         };
+        let (next_tail, next_head) = if wrapped_tail == self.head {
+            let bumped_head = if self.head + 1 == cap_u16 {
+                0
+            } else {
+                self.head + 1
+            };
+            (self.head, bumped_head)
+        } else {
+            (wrapped_tail, self.head)
+        };
+
+        self.tail = next_tail;
+        self.head = next_head;
+        self.snapshots[usize::from(self.tail)] = snapshot;
         Some(())
     }
 
     /// Return the newest stored snapshot.
     pub fn latest_snapshot(&self) -> Option<Snapshot> {
-        if self.len == 0 || MAX_SNAPSHOTS == 0 {
+        if MAX_SNAPSHOTS == 0 {
             return None;
         }
-        let latest_idx =
-            (usize::from(self.head) + usize::from(self.len).checked_sub(1)?) % MAX_SNAPSHOTS;
-        Some(self.snapshots[latest_idx])
+        if self.head == 0 && self.tail == 0 && self.snapshots[0].is_zero() {
+            return None;
+        }
+        Some(self.snapshots[usize::from(self.tail)])
+    }
+
+    /// Append a snapshot by mutating an already-serialized slot in place.
+    ///
+    /// This avoids full record parse/serialize in hot paths.
+    pub fn push_latest_snapshot_bytes(slot: &mut [u8], snapshot: Snapshot) -> Option<()> {
+        if MAX_SNAPSHOTS == 0 || snapshot.is_zero() || slot.len() != Self::LEN_V1 {
+            return None;
+        }
+        if *slot.get(Self::VERSION_OFFSET)? != Self::VERSION_V1 {
+            return None;
+        }
+
+        let mut head =
+            u16::from_le_bytes(slot[Self::HEAD_OFFSET..Self::HEAD_OFFSET + 2].try_into().ok()?);
+        let mut tail =
+            u16::from_le_bytes(slot[Self::TAIL_OFFSET..Self::TAIL_OFFSET + 2].try_into().ok()?);
+        let cap_u16 = u16::try_from(MAX_SNAPSHOTS).ok()?;
+        if head >= cap_u16 || tail >= cap_u16 {
+            return None;
+        }
+
+        let is_bootstrap_empty = head == 0 && tail == 0 && Self::read_snapshot_at(slot, 0)?.is_zero();
+        if is_bootstrap_empty {
+            Self::write_snapshot_at(slot, 0, snapshot)?;
+            return Some(());
+        }
+
+        {
+            let latest = Self::read_snapshot_at(slot, usize::from(tail))?;
+            if snapshot.snapshot_hour <= latest.snapshot_hour {
+                return None;
+            }
+        }
+
+        let wrapped_tail = if tail + 1 == cap_u16 { 0 } else { tail + 1 };
+        let (next_tail, next_head, write_idx) = if wrapped_tail == head {
+            let bumped_head = if head + 1 == cap_u16 { 0 } else { head + 1 };
+            (head, bumped_head, usize::from(head))
+        } else {
+            (wrapped_tail, head, usize::from(wrapped_tail))
+        };
+
+        tail = next_tail;
+        head = next_head;
+        Self::write_snapshot_at(slot, write_idx, snapshot)?;
+        slot[Self::HEAD_OFFSET..Self::HEAD_OFFSET + 2].copy_from_slice(&head.to_le_bytes());
+        slot[Self::TAIL_OFFSET..Self::TAIL_OFFSET + 2].copy_from_slice(&tail.to_le_bytes());
+        Some(())
+    }
+
+    fn read_snapshot_at(slot: &[u8], idx: usize) -> Option<Snapshot> {
+        let base = Self::SNAPSHOTS_OFFSET.checked_add(idx.checked_mul(Snapshot::LEN)?)?;
+        Some(Snapshot {
+            snapshot_hour: u64::from_le_bytes(slot.get(base..base + 8)?.try_into().ok()?),
+            price: u64::from_le_bytes(slot.get(base + 8..base + 16)?.try_into().ok()?),
+            native_apy: u64::from_le_bytes(slot.get(base + 16..base + 24)?.try_into().ok()?),
+        })
+    }
+
+    fn write_snapshot_at(slot: &mut [u8], idx: usize, snapshot: Snapshot) -> Option<()> {
+        let base = Self::SNAPSHOTS_OFFSET.checked_add(idx.checked_mul(Snapshot::LEN)?)?;
+        slot.get_mut(base..base + 8)?
+            .copy_from_slice(&snapshot.snapshot_hour.to_le_bytes());
+        slot.get_mut(base + 8..base + 16)?
+            .copy_from_slice(&snapshot.price.to_le_bytes());
+        slot.get_mut(base + 16..base + 24)?
+            .copy_from_slice(&snapshot.native_apy.to_le_bytes());
+        Some(())
     }
 }
 
@@ -199,7 +281,14 @@ mod tests {
     }
 
     fn pk(seed: u8) -> Pubkey {
-        Pubkey::from([seed; 32])
+        #[cfg(feature = "anchor")]
+        {
+            Pubkey::from([seed; 32])
+        }
+        #[cfg(not(feature = "anchor"))]
+        {
+            Pubkey::new([seed; 32])
+        }
     }
 
     fn snap(hour: u64, seed: u64) -> Snapshot {
@@ -270,22 +359,22 @@ mod tests {
 
         assert_eq!(rec.push_latest_snapshot(a), Some(()));
         assert_eq!(rec.head, 0);
-        assert_eq!(rec.len, 1);
+        assert_eq!(rec.tail, 0);
         assert_eq!(rec.latest_snapshot(), Some(a));
 
         assert_eq!(rec.push_latest_snapshot(b), Some(()));
         assert_eq!(rec.head, 0);
-        assert_eq!(rec.len, 2);
+        assert_eq!(rec.tail, 1);
         assert_eq!(rec.latest_snapshot(), Some(b));
 
         assert_eq!(rec.push_latest_snapshot(c), Some(()));
         assert_eq!(rec.head, 0);
-        assert_eq!(rec.len, 3);
+        assert_eq!(rec.tail, 2);
         assert_eq!(rec.latest_snapshot(), Some(c));
 
         assert_eq!(rec.push_latest_snapshot(d), Some(()));
         assert_eq!(rec.head, 1);
-        assert_eq!(rec.len, 3);
+        assert_eq!(rec.tail, 0);
         assert_eq!(rec.latest_snapshot(), Some(d));
     }
 

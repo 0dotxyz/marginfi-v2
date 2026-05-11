@@ -44,6 +44,47 @@ impl ArchiveHeader {
     pub const VERSION_LEN: usize = 1;
     pub const SLOT_META_LEN: usize = Self::INDEX_LEN + Self::VERSION_LEN;
 
+    pub fn read_from_account_data(account_data: &[u8]) -> Option<Self> {
+        if account_data.len() < Self::PAYLOAD_OFFSET {
+            return None;
+        }
+        let version = *account_data.get(Self::HEADER_VERSION_OFFSET)?;
+        let record_count = u64::from_le_bytes(
+            account_data
+                .get(Self::HEADER_RECORD_COUNT_OFFSET..Self::HEADER_RECORD_COUNT_OFFSET + 8)?
+                .try_into()
+                .ok()?,
+        );
+        let authority_bytes: [u8; 32] = account_data
+            .get(Self::HEADER_AUTHORITY_OFFSET..Self::HEADER_AUTHORITY_OFFSET + 32)?
+            .try_into()
+            .ok()?;
+
+        #[cfg(feature = "anchor")]
+        let authority = Pubkey::new_from_array(authority_bytes);
+        #[cfg(not(feature = "anchor"))]
+        let authority = Pubkey::new(authority_bytes);
+
+        Some(Self {
+            version,
+            _pad0: [0; 7],
+            record_count,
+            authority,
+        })
+    }
+
+    pub fn write_to_account_data(&self, account_data: &mut [u8]) -> Option<()> {
+        if account_data.len() < Self::PAYLOAD_OFFSET {
+            return None;
+        }
+        account_data[Self::HEADER_VERSION_OFFSET] = self.version;
+        account_data[Self::HEADER_RECORD_COUNT_OFFSET..Self::HEADER_RECORD_COUNT_OFFSET + 8]
+            .copy_from_slice(&self.record_count.to_le_bytes());
+        account_data[Self::HEADER_AUTHORITY_OFFSET..Self::HEADER_AUTHORITY_OFFSET + 32]
+            .copy_from_slice(self.authority.as_ref());
+        Some(())
+    }
+
     fn payload_region<'a>(&self, account_data: &'a [u8]) -> Option<&'a [u8]> {
         if account_data.len() < Self::PAYLOAD_OFFSET {
             return None;
@@ -131,6 +172,15 @@ impl ArchiveHeader {
             offset = end;
         }
         None
+    }
+
+    pub fn find_slot_in_account_mut<'a, T: ArchiveRecord>(
+        &self,
+        account_data: &'a mut [u8],
+        index: [u8; 32],
+    ) -> Option<(usize, &'a mut [u8])> {
+        let data = self.payload_region_mut(account_data)?;
+        self.find_slot_mut::<T>(data, index)
     }
 
     pub fn update_or_insert<T: ArchiveRecord>(
