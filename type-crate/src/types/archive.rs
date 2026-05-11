@@ -44,6 +44,9 @@ impl ArchiveHeader {
     pub const VERSION_LEN: usize = 1;
     pub const SLOT_META_LEN: usize = Self::INDEX_LEN + Self::VERSION_LEN;
 
+    /// Read archive header fields directly from account bytes.
+    ///
+    /// Layout is `[8-byte discriminator][ArchiveHeader][payload]`.
     pub fn read_from_account_data(account_data: &[u8]) -> Option<Self> {
         if account_data.len() < Self::PAYLOAD_OFFSET {
             return None;
@@ -73,6 +76,7 @@ impl ArchiveHeader {
         })
     }
 
+    /// Persist header fields back into account bytes without touching payload.
     pub fn write_to_account_data(&self, account_data: &mut [u8]) -> Option<()> {
         if account_data.len() < Self::PAYLOAD_OFFSET {
             return None;
@@ -179,6 +183,8 @@ impl ArchiveHeader {
         account_data: &'a mut [u8],
         index: [u8; 32],
     ) -> Option<(usize, &'a mut [u8])> {
+        // Slot offsets are relative to payload, so first slice off the
+        // discriminator + fixed header region.
         let data = self.payload_region_mut(account_data)?;
         self.find_slot_mut::<T>(data, index)
     }

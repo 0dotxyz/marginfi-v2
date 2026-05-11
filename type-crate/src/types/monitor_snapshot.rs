@@ -141,8 +141,9 @@ impl<const MAX_SNAPSHOTS: usize> MintSnapshotRecords<MAX_SNAPSHOTS> {
     /// - Rejects non-increasing timestamps relative to current latest.
     ///
     /// Behavior:
-    /// - If not full, writes to tail and increments `len`.
-    /// - If full, overwrites `head` (oldest) and advances `head` by one.
+    /// - Bootstrap empty state is encoded as `head=0, tail=0, snapshots[0]=ZERO`.
+    /// - If not full, advances `tail` and writes the new snapshot there.
+    /// - If full, overwrites `head` (oldest), then advances `head`.
     pub fn push_latest_snapshot(&mut self, snapshot: Snapshot) -> Option<()> {
         if MAX_SNAPSHOTS == 0 {
             return None;
@@ -152,6 +153,8 @@ impl<const MAX_SNAPSHOTS: usize> MintSnapshotRecords<MAX_SNAPSHOTS> {
         }
 
         let cap_u16 = u16::try_from(MAX_SNAPSHOTS).ok()?;
+        // Specialized sentinel for this record type:
+        // both cursors at zero + zero-value slot0 means "empty".
         let is_bootstrap_empty = self.head == 0 && self.tail == 0 && self.snapshots[0].is_zero();
         if is_bootstrap_empty {
             self.snapshots[0] = snapshot;
@@ -198,7 +201,7 @@ impl<const MAX_SNAPSHOTS: usize> MintSnapshotRecords<MAX_SNAPSHOTS> {
 
     /// Append a snapshot by mutating an already-serialized slot in place.
     ///
-    /// This avoids full record parse/serialize in hot paths.
+    /// This avoids full record parse/serialize in hot paths (CU optimization).
     pub fn push_latest_snapshot_bytes(slot: &mut [u8], snapshot: Snapshot) -> Option<()> {
         if MAX_SNAPSHOTS == 0 || snapshot.is_zero() || slot.len() != Self::LEN_V1 {
             return None;
