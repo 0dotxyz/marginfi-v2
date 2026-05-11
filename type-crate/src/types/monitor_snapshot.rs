@@ -152,10 +152,19 @@ impl<const MAX_SNAPSHOTS: usize> BankSnapshotRecords<MAX_SNAPSHOTS> {
 impl<const MAX_BANKS: usize, const MAX_SNAPSHOTS: usize> ArchiveRecord
     for MintSnapshotRecords<MAX_BANKS, MAX_SNAPSHOTS>
 {
-    const LEN: usize = 32 + (MAX_BANKS * BankSnapshotRecords::<MAX_SNAPSHOTS>::LEN);
+    fn len(version: u8) -> Option<usize> {
+        match version {
+            Self::VERSION_V1 => Some(Self::LEN_V1),
+            _ => None,
+        }
+    }
+
+    fn version(&self) -> u8 {
+        Self::VERSION_V1
+    }
 
     fn parse(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() != Self::LEN {
+        if bytes.len() != Self::LEN_V1 || bytes[32] != Self::VERSION_V1 {
             return None;
         }
 
@@ -167,7 +176,7 @@ impl<const MAX_BANKS: usize, const MAX_SNAPSHOTS: usize> ArchiveRecord
 
         let mut banks = [BankSnapshotRecords::<MAX_SNAPSHOTS>::ZERO; MAX_BANKS];
         for (i, slot) in banks.iter_mut().enumerate() {
-            let offset = 32 + (i * BankSnapshotRecords::<MAX_SNAPSHOTS>::LEN);
+            let offset = 33 + (i * BankSnapshotRecords::<MAX_SNAPSHOTS>::LEN);
             *slot = BankSnapshotRecords::<MAX_SNAPSHOTS>::parse(
                 &bytes[offset..offset + BankSnapshotRecords::<MAX_SNAPSHOTS>::LEN],
             )?;
@@ -177,14 +186,14 @@ impl<const MAX_BANKS: usize, const MAX_SNAPSHOTS: usize> ArchiveRecord
     }
 
     fn to_bytes(&self, out: &mut [u8]) -> Option<()> {
-        if out.len() != Self::LEN {
+        if out.len() != Self::LEN_V1 {
             return None;
         }
 
-        // Reserve first 32 bytes for index key (mint).
         out[0..32].copy_from_slice(self.mint.as_ref());
+        out[32] = self.version();
         for (i, bank_rec) in self.banks.iter().enumerate() {
-            let offset = 32 + (i * BankSnapshotRecords::<MAX_SNAPSHOTS>::LEN);
+            let offset = 33 + (i * BankSnapshotRecords::<MAX_SNAPSHOTS>::LEN);
             bank_rec
                 .to_bytes(&mut out[offset..offset + BankSnapshotRecords::<MAX_SNAPSHOTS>::LEN])?;
         }
@@ -199,6 +208,9 @@ impl<const MAX_BANKS: usize, const MAX_SNAPSHOTS: usize> ArchiveRecord
 impl<const MAX_BANKS: usize, const MAX_SNAPSHOTS: usize>
     MintSnapshotRecords<MAX_BANKS, MAX_SNAPSHOTS>
 {
+    pub const VERSION_V1: u8 = 1;
+    pub const LEN_V1: usize = 33 + (MAX_BANKS * BankSnapshotRecords::<MAX_SNAPSHOTS>::LEN);
+
     /// Find bank slot index by bank pubkey.
     pub fn find_bank_index(&self, bank: &Pubkey) -> Option<usize> {
         self.banks.iter().position(|b| b.bank == *bank)
@@ -273,7 +285,7 @@ mod tests {
             ],
         };
 
-        let mut out = vec![0u8; Rec::LEN];
+        let mut out = vec![0u8; Rec::LEN_V1];
         assert_eq!(rec.to_bytes(&mut out), Some(()));
         assert_eq!(Rec::parse(&out), Some(rec));
         assert_eq!(out[0..32], rec.index());
@@ -283,7 +295,7 @@ mod tests {
     fn archive_update_or_insert_by_mint_index() {
         type Rec = MintSnapshotRecords<1, 2>;
         let mut header = new_header();
-        let mut account_data = vec![0u8; ArchiveHeader::PAYLOAD_OFFSET + (2 * Rec::LEN)];
+        let mut account_data = vec![0u8; ArchiveHeader::PAYLOAD_OFFSET + (2 * Rec::LEN_V1)];
 
         let rec_a = Rec {
             mint: pk(11),
@@ -330,7 +342,7 @@ mod tests {
         assert_eq!(header.record_count, 2);
         assert_eq!(
             header.get_record::<Rec>(&account_data, rec_b.index()),
-            Some((Rec::LEN, rec_b))
+            Some((Rec::LEN_V1, rec_b))
         );
     }
 
