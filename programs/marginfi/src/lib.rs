@@ -187,6 +187,28 @@ pub mod marginfi {
         marginfi_group::lending_pool_clone_emode(ctx)
     }
 
+        /// (snapshot manager only) Upsert a batch of monitor snapshots into the archive account.
+    ///
+    /// Each update carries `mint_index`, which points into `remaining_accounts`.
+    /// This keeps ix data compact and LUT-friendly for large batches.
+    pub fn monitor_archive_initialize(
+        ctx: Context<MonitorArchiveInitialize>,
+        snapshot_manager: Pubkey,
+    ) -> MarginfiResult {
+        marginfi_group::monitor_archive_initialize(ctx, snapshot_manager)
+    }
+
+    /// (snapshot manager only) Upsert a batch of monitor snapshots into the archive account.
+    ///
+    /// Mints are sourced positionally from `remaining_accounts`: `updates[i]` maps to
+    /// `remaining_accounts[i]`.
+    pub fn monitor_archive_upsert_batch(
+        ctx: Context<MonitorArchiveUpsertBatch>,
+        updates: Vec<SnapshotUpdateInput>,
+    ) -> MarginfiResult {
+        marginfi_group::monitor_archive_upsert_batch(ctx, updates)
+    }
+    
     /// (permissionless) Deposit same-bank emissions directly into liquidity vault and increase
     /// depositors' value via `asset_share_value`.
     pub fn lending_pool_emissions_deposit(
