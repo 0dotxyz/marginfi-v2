@@ -29,7 +29,7 @@ pub fn monitor_archive_upsert_batch(
         MarginfiError::InvalidConfig
     );
 
-    let mut header = read_archive_header(&data)?;
+    let mut header = ArchiveHeader::read_from_account_data(&data).ok_or(MarginfiError::InvalidConfig)?;
     check!(header.authority == manager, MarginfiError::Unauthorized);
 
     check!(
@@ -50,63 +50,27 @@ pub fn monitor_archive_upsert_batch(
             native_apy: update.native_apy,
         };
 
-        let mut record = if let Some((_, existing)) = header.get_record::<MintSnapshotRecords<
-            { ArchiveHeader::MAX_SNAPSHOTS_PER_MINT },
-        >>(&data, mint.to_bytes())
+        if let Some((_, slot)) = header.find_slot_in_account_mut::<
+            MintSnapshotRecords<{ ArchiveHeader::MAX_SNAPSHOTS_PER_MINT }>,
+        >(&mut data, mint.to_bytes())
         {
-            existing
+            MintSnapshotRecords::<{ ArchiveHeader::MAX_SNAPSHOTS_PER_MINT }>::push_latest_snapshot_bytes(slot, snapshot)
+                .ok_or(MarginfiError::InvalidConfig)?;
         } else {
-            MintSnapshotRecords::<{ ArchiveHeader::MAX_SNAPSHOTS_PER_MINT }>::new(mint)
-        };
-
-        record
-            .push_latest_snapshot(snapshot)
-            .ok_or(MarginfiError::InvalidConfig)?;
-
-        header
-            .update_or_insert::<MintSnapshotRecords<{ ArchiveHeader::MAX_SNAPSHOTS_PER_MINT }>>(
-                &mut data, &record,
-            )
-            .ok_or(MarginfiError::InvalidConfig)?;
+            let mut record = MintSnapshotRecords::<{ ArchiveHeader::MAX_SNAPSHOTS_PER_MINT }>::new(mint);
+            record.push_latest_snapshot(snapshot).ok_or(MarginfiError::InvalidConfig)?;
+            header
+                .update_or_insert::<MintSnapshotRecords<{ ArchiveHeader::MAX_SNAPSHOTS_PER_MINT }>>(
+                    &mut data, &record,
+                )
+                .ok_or(MarginfiError::InvalidConfig)?;
+        }
     }
 
-    write_archive_header(&mut data, &header);
-    Ok(())
-}
-
-fn read_archive_header(data: &[u8]) -> Result<ArchiveHeader> {
-    let version = *data
-        .get(ArchiveHeader::HEADER_VERSION_OFFSET)
+    header
+        .write_to_account_data(&mut data)
         .ok_or(MarginfiError::InvalidConfig)?;
-    let record_count = u64::from_le_bytes(
-        data.get(
-            ArchiveHeader::HEADER_RECORD_COUNT_OFFSET
-                ..ArchiveHeader::HEADER_RECORD_COUNT_OFFSET + 8,
-        )
-        .ok_or(MarginfiError::InvalidConfig)?
-        .try_into()
-        .map_err(|_| MarginfiError::InvalidConfig)?,
-    );
-    let authority_bytes: [u8; 32] = data
-        .get(ArchiveHeader::HEADER_AUTHORITY_OFFSET..ArchiveHeader::HEADER_AUTHORITY_OFFSET + 32)
-        .ok_or(MarginfiError::InvalidConfig)?
-        .try_into()
-        .map_err(|_| MarginfiError::InvalidConfig)?;
-
-    Ok(ArchiveHeader {
-        version,
-        _pad0: [0; 7],
-        record_count,
-        authority: Pubkey::new_from_array(authority_bytes),
-    })
-}
-
-fn write_archive_header(data: &mut [u8], header: &ArchiveHeader) {
-    data[ArchiveHeader::HEADER_VERSION_OFFSET] = header.version;
-    data[ArchiveHeader::HEADER_RECORD_COUNT_OFFSET..ArchiveHeader::HEADER_RECORD_COUNT_OFFSET + 8]
-        .copy_from_slice(&header.record_count.to_le_bytes());
-    data[ArchiveHeader::HEADER_AUTHORITY_OFFSET..ArchiveHeader::HEADER_AUTHORITY_OFFSET + 32]
-        .copy_from_slice(header.authority.as_ref());
+    Ok(())
 }
 
 #[derive(Accounts)]
