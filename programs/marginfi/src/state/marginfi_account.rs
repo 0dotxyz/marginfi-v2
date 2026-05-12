@@ -1714,10 +1714,43 @@ impl<'a> BankAccountWrapper<'a> {
             "Balance has existing assets"
         );
 
+        let asset_shares: I80F48 = balance.asset_shares.into();
+        let liability_shares: I80F48 = balance.liability_shares.into();
+        // Counters are incremented in `*_balance_internal` when shares cross
+        // `ZERO_AMOUNT_THRESHOLD` upward; match that condition so we don't
+        // double-decrement positions that already crossed downward earlier.
+        let had_assets = asset_shares.is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD);
+        let had_liabs = liability_shares.is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD);
+
         balance.close()?;
 
         if in_receivership {
             bank.cache.clear_liquidation_price_cache_locked();
+        }
+
+        // Asset-side dust = real tokens still in the liquidity vault that the
+        // user never withdrew. Route to `collected_insurance_fees_outstanding`
+        // so vault content stays fully accounted for, mirroring the fractional-
+        // remainder handling in `withdraw_all`.
+        if current_asset_amount > I80F48::ZERO {
+            bank.collected_insurance_fees_outstanding =
+                I80F48::from(bank.collected_insurance_fees_outstanding)
+                    .checked_add(current_asset_amount)
+                    .ok_or_else(math_error!())?
+                    .into();
+        }
+
+        bank.change_asset_shares(-asset_shares, false)?;
+        // Liability-side dust = bad debt the borrower never repaid. Decrementing
+        // here makes the loss explicit instead of leaving phantom shares in
+        // `total_liability_shares` that would compound interest indefinitely.
+        bank.change_liability_shares(-liability_shares, true)?;
+
+        if had_assets {
+            bank.decrement_lending_position_count();
+        }
+        if had_liabs {
+            bank.decrement_borrowing_position_count();
         }
 
         Ok(())
@@ -2071,6 +2104,171 @@ mod test {
             };
             let err = wrapper.withdraw(I80F48::from_num(SHARES)).unwrap_err();
             assert_eq!(err, MarginfiError::OperationWithdrawOnly.into());
+        }
+    }
+
+    /// Regression tests for L6 (Ackee audit): `close_balance` zeroed the user's
+    /// `Balance` but never unwound the corresponding entries in
+    /// `bank.total_*_shares` / `*_position_count`. Over many calls, totals
+    /// drift and counters stick non-zero, eventually blocking
+    /// `lending_pool_close_bank`. Asset-side dust must also be routed to
+    /// `collected_insurance_fees_outstanding` so vault content stays fully
+    /// accounted for (mirroring `withdraw_all`).
+    mod close_balance_accounting {
+        use super::*;
+        use bytemuck::Zeroable;
+        use marginfi_type_crate::types::{Balance, Bank};
+
+        const BUFFER: i128 = 1_000;
+
+        fn make_bank_and_balance(
+            asset_share_value: I80F48,
+            liability_share_value: I80F48,
+            balance_asset_shares: I80F48,
+            balance_liability_shares: I80F48,
+            initial_lending_count: i32,
+            initial_borrowing_count: i32,
+        ) -> (Bank, Balance) {
+            let mut bank = Bank::zeroed();
+            bank.asset_share_value = asset_share_value.into();
+            bank.liability_share_value = liability_share_value.into();
+            // Bank holds the user's shares plus an external buffer so totals
+            // stay positive after dust removal.
+            let buffer = I80F48::from_num(BUFFER);
+            bank.total_asset_shares = (balance_asset_shares + buffer).into();
+            bank.total_liability_shares = balance_liability_shares.into();
+            bank.config.deposit_limit = u64::MAX;
+            bank.config.borrow_limit = u64::MAX;
+            bank.lending_position_count = initial_lending_count;
+            bank.borrowing_position_count = initial_borrowing_count;
+
+            let mut balance = Balance::zeroed();
+            balance.active = 1;
+            balance.asset_shares = balance_asset_shares.into();
+            balance.liability_shares = balance_liability_shares.into();
+            (bank, balance)
+        }
+
+        /// Dust shares (`shares < ZERO_AMOUNT_THRESHOLD`) — represents a
+        /// position that already crossed below threshold via a prior
+        /// withdraw/repay, so the counter was decremented earlier. Closing
+        /// must NOT decrement again, but must still unwind the dust from
+        /// `bank.total_asset_shares` and route the dust amount to
+        /// `collected_insurance_fees_outstanding`.
+        #[test]
+        fn asset_dust_unwinds_totals_and_routes_to_insurance_fees() {
+            let asset_share_value = I80F48::ONE;
+            let dust_shares = I80F48!(0.00005);
+            let (mut bank, mut balance) = make_bank_and_balance(
+                asset_share_value,
+                I80F48::ONE,
+                dust_shares,
+                I80F48::ZERO,
+                /* lending_count */ 5,
+                /* borrowing_count */ 0,
+            );
+            let expected_dust_amount = dust_shares * asset_share_value;
+            let total_asset_shares_before = I80F48::from(bank.total_asset_shares);
+            let insurance_fees_before = I80F48::from(bank.collected_insurance_fees_outstanding);
+
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+            wrapper.close_balance(false).unwrap();
+
+            assert_eq!(balance.active, 0, "balance slot not freed");
+            assert_eq!(
+                I80F48::from(bank.total_asset_shares),
+                total_asset_shares_before - dust_shares,
+                "bank.total_asset_shares not decremented by dust"
+            );
+            assert_eq!(
+                I80F48::from(bank.collected_insurance_fees_outstanding),
+                insurance_fees_before + expected_dust_amount,
+                "asset dust not routed to insurance fees"
+            );
+            // Counter was NOT incremented for this slot (shares < threshold),
+            // so closing must NOT decrement it.
+            assert_eq!(
+                bank.lending_position_count, 5,
+                "lending_position_count incorrectly decremented for sub-threshold shares"
+            );
+        }
+
+        /// Liability-side dust — analogous to asset case, but no insurance-fees
+        /// routing: the borrower kept the dust tokens (bad debt), and removing
+        /// the phantom shares makes that loss explicit instead of leaving it
+        /// to compound forever.
+        #[test]
+        fn liability_dust_unwinds_totals() {
+            let (mut bank, mut balance) = make_bank_and_balance(
+                I80F48::ONE,
+                I80F48::ONE,
+                I80F48::ZERO,
+                I80F48!(0.00005),
+                /* lending_count */ 0,
+                /* borrowing_count */ 3,
+            );
+            let total_liability_shares_before = I80F48::from(bank.total_liability_shares);
+            let insurance_fees_before = I80F48::from(bank.collected_insurance_fees_outstanding);
+
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+            wrapper.close_balance(false).unwrap();
+
+            assert_eq!(
+                I80F48::from(bank.total_liability_shares),
+                total_liability_shares_before - I80F48!(0.00005),
+                "bank.total_liability_shares not decremented by dust"
+            );
+            assert_eq!(
+                I80F48::from(bank.collected_insurance_fees_outstanding),
+                insurance_fees_before,
+                "liability dust should not affect insurance fees"
+            );
+            assert_eq!(
+                bank.borrowing_position_count, 3,
+                "borrowing_position_count incorrectly decremented for sub-threshold shares"
+            );
+        }
+
+        /// Counter-leak case: shares are ABOVE `ZERO_AMOUNT_THRESHOLD` but
+        /// the corresponding amount is BELOW it because `share_value` has
+        /// collapsed (e.g. after bad-debt socialization on the asset side).
+        /// The check on `current_amount` passes, so `close_balance` is
+        /// callable, and the position counter must be decremented here —
+        /// no prior op ever crossed it downward.
+        #[test]
+        fn collapsed_share_value_decrements_position_counter() {
+            // share_value tiny → amount = 0.01 * 0.001 = 1e-5 < threshold,
+            // but shares = 0.01 > threshold.
+            let asset_share_value = I80F48!(0.001);
+            let asset_shares = I80F48!(0.01);
+            let (mut bank, mut balance) = make_bank_and_balance(
+                asset_share_value,
+                I80F48::ONE,
+                asset_shares,
+                I80F48::ZERO,
+                /* lending_count */ 1,
+                /* borrowing_count */ 0,
+            );
+            assert!(asset_shares.is_positive_with_tolerance(ZERO_AMOUNT_THRESHOLD));
+            let current_asset_amount = asset_shares * asset_share_value;
+            assert!(current_asset_amount.is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD));
+
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+            wrapper.close_balance(false).unwrap();
+
+            assert_eq!(
+                bank.lending_position_count, 0,
+                "lending_position_count not decremented for above-threshold shares"
+            );
         }
     }
 }
