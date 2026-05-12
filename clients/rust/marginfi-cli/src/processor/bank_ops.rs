@@ -1504,20 +1504,6 @@ pub fn bank_clone_emode(
     Ok(())
 }
 
-pub fn bank_migrate_curve(config: Config, bank_pk: Pubkey) -> Result<()> {
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::MigrateCurve { bank: bank_pk }.to_account_metas(Some(true)),
-        data: marginfi::instruction::MigrateCurve {}.data(),
-    };
-
-    let signing_keypairs = config.get_signers(false);
-    let sig = send_tx(&config, vec![ix], &signing_keypairs)?;
-    println!("curve migrated (sig: {})", sig);
-
-    Ok(())
-}
-
 pub fn bank_pulse_price_cache(config: Config, bank_pk: Pubkey) -> Result<()> {
     let bank: Bank = config.mfi_program.account(bank_pk)?;
 

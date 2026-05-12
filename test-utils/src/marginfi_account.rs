@@ -924,30 +924,6 @@ impl MarginfiAccountFixture {
             .await
     }
 
-    pub async fn try_clear_emissions(
-        &self,
-        bank: &super::bank::BankFixture,
-    ) -> std::result::Result<(), BanksClientError> {
-        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
-
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingAccountClearEmissions {
-                marginfi_account: self.key,
-                bank: bank.key,
-            }
-            .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingAccountClearEmissions {}.data(),
-        };
-
-        let tx =
-            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
-
-        banks_client
-            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
-            .await
-    }
-
     pub async fn make_lending_account_start_flashloan_ix(&self, end_index: u64) -> Instruction {
         Instruction {
             program_id: marginfi::ID,
@@ -1342,6 +1318,23 @@ impl MarginfiAccountFixture {
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::MarginfiAccountInitLiqRecord {}.data(),
+        }
+    }
+
+    pub async fn make_close_liquidation_record_ix(
+        &self,
+        liquidation_record: Pubkey,
+        record_payer: Pubkey,
+    ) -> Instruction {
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::CloseLiquidationRecord {
+                marginfi_account: self.key,
+                liquidation_record,
+                record_payer,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountCloseLiqRecord {}.data(),
         }
     }
 
@@ -2164,5 +2157,51 @@ impl MarginfiAccountFixture {
         );
 
         ix
+    }
+
+    pub async fn try_admin_close_account(
+        &self,
+        global_fee_wallet: Pubkey,
+    ) -> std::result::Result<(), BanksClientError> {
+        let marginfi_account = self.load().await;
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::AdminCloseAccount {
+                group: marginfi_account.group,
+                marginfi_account: self.key,
+                global_fee_wallet,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::AdminCloseAccount {}.data(),
+        };
+
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
+
+        banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
+    }
+
+    pub async fn try_sync_indexer_flags(&self) -> std::result::Result<(), BanksClientError> {
+        let mut ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::SyncIndexerFlags {
+                payer: self.ctx.borrow().payer.pubkey(),
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::SyncIndexerFlags {}.data(),
+        };
+        ix.accounts.push(AccountMeta::new(self.key, false));
+
+        let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
+
+        banks_client
+            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
+            .await
     }
 }

@@ -211,6 +211,19 @@ pub enum GroupCommand {
         )]
         enable_program_fee: bool,
     },
+    /// Set or clear the dedicated pause delegate admin
+    ///
+    /// Example: `mfi group set-pause-delegate-admin --pause-delegate-admin <PUBKEY>`
+    #[clap(
+        after_help = "Examples:\n  mfi group set-pause-delegate-admin --pause-delegate-admin <PUBKEY>\n  mfi group set-pause-delegate-admin --clear",
+        after_long_help = "Examples:\n  mfi group set-pause-delegate-admin --pause-delegate-admin <PUBKEY>\n  mfi group set-pause-delegate-admin --clear"
+    )]
+    SetPauseDelegateAdmin {
+        #[clap(long)]
+        pause_delegate_admin: Option<Pubkey>,
+        #[clap(long, action, help = "Clear the pause delegate admin")]
+        clear: bool,
+    },
     /// Propagate fee state to a group
     ///
     /// Example: `mfi group propagate-fee`
@@ -654,33 +667,51 @@ pub fn dispatch(subcmd: GroupCommand, global_options: &GlobalOptions) -> Result<
                 let cfg: configs::FeeStateConfig = configs::load_config(&path)?;
                 processor::edit_fee_state(
                     config,
-                    configs::parse_pubkey(&cfg.admin)?,
-                    configs::parse_pubkey(&cfg.fee_wallet)?,
-                    cfg.bank_init_flat_sol_fee,
-                    cfg.liquidation_flat_sol_fee,
-                    cfg.program_fee_fixed,
-                    cfg.program_fee_rate,
-                    cfg.liquidation_max_fee,
-                    cfg.order_init_flat_sol_fee,
-                    cfg.order_execution_max_fee,
+                    Some(configs::parse_pubkey(&cfg.admin)?),
+                    Some(configs::parse_pubkey(&cfg.fee_wallet)?),
+                    Some(cfg.bank_init_flat_sol_fee),
+                    Some(cfg.liquidation_flat_sol_fee),
+                    Some(cfg.program_fee_fixed),
+                    Some(cfg.program_fee_rate),
+                    Some(cfg.liquidation_max_fee),
+                    Some(cfg.order_init_flat_sol_fee),
+                    Some(cfg.order_execution_max_fee),
+                    None,
                 )
             } else {
                 processor::edit_fee_state(
                     config,
-                    new_admin.context("--new-admin required (or use --config)")?,
-                    fee_wallet.context("--fee-wallet required")?,
-                    bank_init_flat_sol_fee.context("--bank-init-flat-sol-fee required")?,
-                    liquidation_flat_sol_fee.context("--liquidation-flat-sol-fee required")?,
-                    program_fee_fixed.context("--program-fee-fixed required")?,
-                    program_fee_rate.context("--program-fee-rate required")?,
-                    liquidation_max_fee.context("--liquidation-max-fee required")?,
-                    order_init_flat_sol_fee.unwrap_or(0),
-                    order_execution_max_fee.unwrap_or(0.0),
+                    new_admin,
+                    fee_wallet,
+                    bank_init_flat_sol_fee,
+                    liquidation_flat_sol_fee,
+                    program_fee_fixed,
+                    program_fee_rate,
+                    liquidation_max_fee,
+                    order_init_flat_sol_fee,
+                    order_execution_max_fee,
+                    None,
                 )
             }
         }
         GroupCommand::ConfigGroupFee { enable_program_fee } => {
             processor::config_group_fee(config, profile, enable_program_fee)
+        }
+        GroupCommand::SetPauseDelegateAdmin {
+            pause_delegate_admin,
+            clear,
+        } => {
+            if clear {
+                if pause_delegate_admin.is_some() {
+                    anyhow::bail!("Use either --pause-delegate-admin or --clear, not both");
+                }
+                processor::set_pause_delegate_admin(config, None)
+            } else {
+                processor::set_pause_delegate_admin(
+                    config,
+                    Some(pause_delegate_admin.context("--pause-delegate-admin required")?),
+                )
+            }
         }
         GroupCommand::PropagateFee { marginfi_group } => processor::propagate_fee(
             config,

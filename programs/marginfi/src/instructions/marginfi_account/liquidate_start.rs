@@ -68,6 +68,7 @@ pub fn start_deleverage<'info>(
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     liq_record.liquidation_receiver = ctx.accounts.risk_admin.key();
     marginfi_account.set_flag(ACCOUNT_IN_DELEVERAGE, false);
+    marginfi_account.indexer_flags.has_ever_been_deleveraged = 1;
     start_receivership(
         &mut marginfi_account,
         &mut liq_record,
@@ -120,6 +121,7 @@ pub fn start_receivership<'info>(
     write_liquidation_price_cache_from(marginfi_account, remaining_ais, &liq_price_cache)?;
     marginfi_account.health_cache = health_cache;
     marginfi_account.set_flag(ACCOUNT_IN_RECEIVERSHIP, false);
+    marginfi_account.indexer_flags.has_ever_been_liquidated = 1;
 
     // Snapshot values to use in later checks
     liq_record.cache.asset_value_maint = assets.into();

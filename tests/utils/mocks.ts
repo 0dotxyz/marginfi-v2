@@ -99,7 +99,7 @@ export const echoEcosystemInfo = (
     skipA = false,
     skipB = false,
     skipAlpha = false,
-  }
+  },
 ) => {
   if (!skipWsol) {
     console.log("wsol mint:........... " + ecosystem.wsolMint.publicKey);
@@ -204,7 +204,7 @@ export interface SetupTestUserOptions {
 export const setupTestUser = async (
   provider: AnchorProvider,
   wallet: Keypair,
-  options?: SetupTestUserOptions
+  options?: SetupTestUserOptions,
 ) => {
   // Creates a user wallet with some SOL in it to pay tx fees
   const userWalletKeypair = options.forceWallet || Keypair.generate();
@@ -215,7 +215,7 @@ export const setupTestUser = async (
       fromPubkey: wallet.publicKey,
       toPubkey: userWallet,
       lamports: 1000 * LAMPORTS_PER_SOL,
-    })
+    }),
   );
 
   let wsolAccount: PublicKey = PublicKey.default;
@@ -226,8 +226,8 @@ export const setupTestUser = async (
         wallet.publicKey,
         wsolAccount,
         userWallet,
-        options.wsolMint
-      )
+        options.wsolMint,
+      ),
     );
   }
 
@@ -239,8 +239,8 @@ export const setupTestUser = async (
         wallet.publicKey,
         usdcAccount,
         userWallet,
-        options.usdcMint
-      )
+        options.usdcMint,
+      ),
     );
   }
 
@@ -248,15 +248,15 @@ export const setupTestUser = async (
   if (options.tokenAMint) {
     tokenAAccount = getAssociatedTokenAddressSync(
       options.tokenAMint,
-      userWallet
+      userWallet,
     );
     tx.add(
       createAssociatedTokenAccountInstruction(
         wallet.publicKey,
         tokenAAccount,
         userWallet,
-        options.tokenAMint
-      )
+        options.tokenAMint,
+      ),
     );
   }
 
@@ -264,15 +264,15 @@ export const setupTestUser = async (
   if (options.tokenBMint) {
     tokenBAccount = getAssociatedTokenAddressSync(
       options.tokenBMint,
-      userWallet
+      userWallet,
     );
     tx.add(
       createAssociatedTokenAccountInstruction(
         wallet.publicKey,
         tokenBAccount,
         userWallet,
-        options.tokenBMint
-      )
+        options.tokenBMint,
+      ),
     );
   }
 
@@ -280,15 +280,15 @@ export const setupTestUser = async (
   if (options.lstAlphaMint) {
     alphaAccount = getAssociatedTokenAddressSync(
       options.lstAlphaMint,
-      userWallet
+      userWallet,
     );
     tx.add(
       createAssociatedTokenAccountInstruction(
         wallet.publicKey,
         alphaAccount,
         userWallet,
-        options.lstAlphaMint
-      )
+        options.lstAlphaMint,
+      ),
     );
   }
 
@@ -328,7 +328,7 @@ export interface SetupTestUserBankrunOptions {
 export const setupTestUserBankrun = async (
   bankrunContext: ProgramTestContext,
   payer: Keypair,
-  options?: SetupTestUserBankrunOptions
+  options?: SetupTestUserBankrunOptions,
 ): Promise<MockUser> => {
   const userWalletKeypair = options?.forceWallet || Keypair.generate();
   const userWallet = userWalletKeypair.publicKey;
@@ -340,7 +340,7 @@ export const setupTestUserBankrun = async (
       fromPubkey: payer.publicKey,
       toPubkey: userWallet,
       lamports: 1000 * LAMPORTS_PER_SOL,
-    })
+    }),
   );
 
   let wsolAccount: PublicKey = PublicKey.default;
@@ -351,8 +351,8 @@ export const setupTestUserBankrun = async (
         payer.publicKey,
         wsolAccount,
         userWallet,
-        options.wsolMint
-      )
+        options.wsolMint,
+      ),
     );
   }
 
@@ -364,8 +364,8 @@ export const setupTestUserBankrun = async (
         payer.publicKey,
         usdcAccount,
         userWallet,
-        options.usdcMint
-      )
+        options.usdcMint,
+      ),
     );
   }
 
@@ -373,15 +373,15 @@ export const setupTestUserBankrun = async (
   if (options?.tokenAMint) {
     tokenAAccount = getAssociatedTokenAddressSync(
       options.tokenAMint,
-      userWallet
+      userWallet,
     );
     tx.add(
       createAssociatedTokenAccountInstruction(
         payer.publicKey,
         tokenAAccount,
         userWallet,
-        options.tokenAMint
-      )
+        options.tokenAMint,
+      ),
     );
   }
 
@@ -389,15 +389,15 @@ export const setupTestUserBankrun = async (
   if (options?.tokenBMint) {
     tokenBAccount = getAssociatedTokenAddressSync(
       options.tokenBMint,
-      userWallet
+      userWallet,
     );
     tx.add(
       createAssociatedTokenAccountInstruction(
         payer.publicKey,
         tokenBAccount,
         userWallet,
-        options.tokenBMint
-      )
+        options.tokenBMint,
+      ),
     );
   }
 
@@ -405,15 +405,15 @@ export const setupTestUserBankrun = async (
   if (options?.lstAlphaMint) {
     alphaAccount = getAssociatedTokenAddressSync(
       options.lstAlphaMint,
-      userWallet
+      userWallet,
     );
     tx.add(
       createAssociatedTokenAccountInstruction(
         payer.publicKey,
         alphaAccount,
         userWallet,
-        options.lstAlphaMint
-      )
+        options.lstAlphaMint,
+      ),
     );
   }
 
@@ -443,7 +443,7 @@ export const createMintBankrun = async (
   bankrunContext: ProgramTestContext,
   payer: Keypair,
   decimals: number,
-  mintKeypair: Keypair
+  mintKeypair: Keypair,
 ): Promise<void> => {
   const rent = await bankrunContext.banksClient.getRent();
   const mintRentExemption = rent.minimumBalance(BigInt(MintLayout.span));
@@ -456,7 +456,7 @@ export const createMintBankrun = async (
       space: MintLayout.span,
       lamports: Number(mintRentExemption),
       programId: TOKEN_PROGRAM_ID,
-    })
+    }),
   );
   tx.add(
     createInitializeMintInstruction(
@@ -464,8 +464,8 @@ export const createMintBankrun = async (
       decimals,
       payer.publicKey,
       payer.publicKey,
-      TOKEN_PROGRAM_ID
-    )
+      TOKEN_PROGRAM_ID,
+    ),
   );
 
   await processBankrunTransaction(bankrunContext, tx, [payer, mintKeypair]);
@@ -479,7 +479,7 @@ export const createMintBankrun = async (
  */
 export const getUserMarginfiProgram = (
   program: Program<Marginfi>,
-  userWallet: Keypair | Wallet
+  userWallet: Keypair | Wallet,
 ): Program<Marginfi> => {
   const wallet =
     userWallet instanceof Keypair ? new Wallet(userWallet) : userWallet;
@@ -503,7 +503,7 @@ export const createSimpleMint = async (
   connection: Connection,
   decimals: number,
   mintKeypair?: Keypair,
-  lamps?: number
+  lamps?: number,
 ) => {
   const mint = mintKeypair ? mintKeypair : Keypair.generate();
   const ixes: TransactionInstruction[] = [];
@@ -517,7 +517,7 @@ export const createSimpleMint = async (
       space: MintLayout.span,
       lamports: lamports,
       programId: TOKEN_PROGRAM_ID,
-    })
+    }),
   );
   ixes.push(
     createInitializeMintInstruction(
@@ -525,8 +525,8 @@ export const createSimpleMint = async (
       decimals,
       payer,
       payer,
-      TOKEN_PROGRAM_ID
-    )
+      TOKEN_PROGRAM_ID,
+    ),
   );
 
   return { ixes, mint };
@@ -570,6 +570,19 @@ export type Oracles = {
   pythPullLst: Keypair;
   /** the feed ID that pythPullLst oracle uses. */
   pythPullLstOracleFeed: Keypair;
+  /** Switchboard pull oracle account (SOL/USD fixture style). */
+  wsolOracleSwb: Keypair;
+  /** Default 155.59404527 */
+  wsolPriceSwb: number;
+  wsolDecimalsSwb: number;
+  /** Switchboard pull oracle account for Token A. */
+  tokenAOracleSwb: Keypair;
+  tokenAPriceSwb: number;
+  tokenADecimalsSwb: number;
+  /** Switchboard pull oracle account for LST Alpha (same economic role as pythPullLst). */
+  lstAlphaOracleSwb: Keypair;
+  lstAlphaPriceSwb: number;
+  lstAlphaDecimalsSwb: number;
 };
 
 /**
@@ -585,7 +598,7 @@ export const createMockAccount = async (
   space: number,
   wallet: Wallet,
   keypair?: Keypair,
-  bankrunContext?: ProgramTestContext
+  bankrunContext?: ProgramTestContext,
 ) => {
   const newAccount = keypair ?? Keypair.generate();
   const createTx = new Transaction().add(
@@ -595,10 +608,10 @@ export const createMockAccount = async (
       programId: program.programId,
       lamports:
         await program.provider.connection.getMinimumBalanceForRentExemption(
-          space
+          space,
         ),
       space,
-    })
+    }),
   );
 
   if (bankrunContext) {
@@ -627,7 +640,7 @@ export const storeMockAccount = async (
   account: Keypair,
   offset: number,
   input: Buffer,
-  bankrunContext?: ProgramTestContext
+  bankrunContext?: ProgramTestContext,
 ) => {
   const tx = new Transaction().add(
     await program.methods
@@ -635,7 +648,7 @@ export const storeMockAccount = async (
       .accounts({
         target: account.publicKey,
       })
-      .instruction()
+      .instruction(),
   );
   if (bankrunContext) {
     await processBankrunTransaction(bankrunContext, tx, [

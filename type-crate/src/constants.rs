@@ -14,9 +14,9 @@ pub const SOLEND_OBLIGATION_SEED: &str = "solend_obligation";
 pub const JUPLEND_F_TOKEN_VAULT_SEED: &str = "f_token_vault";
 
 pub const FEE_STATE_SEED: &str = "feestate";
+pub const FEE_STATE_V2_SEED: &str = "feestate_v2";
 pub const STAKED_SETTINGS_SEED: &str = "staked_settings";
 
-pub const EMISSIONS_AUTH_SEED: &str = "emissions_auth_seed";
 pub const EMISSIONS_TOKEN_ACCOUNT_SEED: &str = "emissions_token_account_seed";
 
 pub const LIQUIDATION_RECORD_SEED: &str = "liq_record";
@@ -85,12 +85,13 @@ pub const CLOSE_ENABLED_FLAG: u64 = 1 << 4;
 pub const TOKENLESS_REPAYMENTS_ALLOWED: u64 = 1 << 5;
 pub const TOKENLESS_REPAYMENTS_COMPLETE: u64 = 1 << 6;
 pub const IS_T22: u64 = 1 << 7;
+/// Bank provenance bit: set when the bank is known to be seed-derived (PDA).
+pub const BANK_SEED_KNOWN: u64 = 1 << 8;
 
 /// True if bank created in 0.1.4 or later, or if migrated to the new oracle setup from a prior
 /// version. False otherwise.
 pub const PYTH_PUSH_MIGRATED_DEPRECATED: u8 = 1 << 0;
 
-pub const EMISSION_FLAGS: u64 = EMISSIONS_FLAG_BORROW_ACTIVE | EMISSIONS_FLAG_LENDING_ACTIVE;
 pub const GROUP_FLAGS: u64 = PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
     | FREEZE_SETTINGS
     | TOKENLESS_REPAYMENTS_ALLOWED
