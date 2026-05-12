@@ -754,6 +754,7 @@ export const accrueInterest = (
 
 export type BackfillBankIsT22FlagArgs = {
   bank: PublicKey;
+  bankSeed?: BN | null;
 };
 
 export const backfillBankIsT22Flag = (
@@ -761,9 +762,10 @@ export const backfillBankIsT22Flag = (
   args: BackfillBankIsT22FlagArgs,
 ) => {
   const ix = program.methods
-    .lendingPoolBackfillBankIsT22Flag()
+    .lendingPoolBackfillBankIsT22Flag(args.bankSeed ?? null)
     .accounts({
       bank: args.bank,
+      // group: // implied via has_one on bank
       // mint: // implied via has_one on bank
     })
     .instruction();

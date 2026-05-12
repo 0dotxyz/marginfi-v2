@@ -19,6 +19,7 @@ import {
   marginfiGroup,
   oracles,
   printBuffers,
+  users,
   verbose,
 } from "./rootHooks";
 import {
@@ -32,6 +33,7 @@ import { printBufferGroups, getBankrunTime } from "./utils/tools";
 import {
   aprToU32,
   ASSET_TAG_DEFAULT,
+  BANK_SEED_KNOWN_FLAG,
   CLOSE_ENABLED_FLAG,
   defaultBankConfig,
   IS_T22_FLAG,
@@ -42,6 +44,7 @@ import {
   utilToU32,
 } from "./utils/types";
 import {
+  deriveBankWithSeed,
   deriveLiquidityVaultAuthority,
   deriveLiquidityVault,
   deriveInsuranceVaultAuthority,
@@ -52,8 +55,25 @@ import {
 import { assert } from "chai";
 import { RiskTier } from "@mrgnlabs/marginfi-client-v2";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
+import { dummyIx } from "./utils/bankrunConnection";
 
 let program: Program<Marginfi>;
+
+const findBankSeed = (
+  programId: PublicKey,
+  group: PublicKey,
+  mint: PublicKey,
+  bank: PublicKey,
+) => {
+  const maxSeed = 1_000;
+  for (let seed = 0; seed <= maxSeed; seed++) {
+    const [derived] = deriveBankWithSeed(programId, group, mint, new BN(seed));
+    if (derived.equals(bank)) {
+      return seed;
+    }
+  }
+  throw new Error(`Could not derive bank seed within 0..${maxSeed}`);
+};
 
 describe("Lending pool add bank (add bank to group)", () => {
   before(() => {
@@ -67,7 +87,7 @@ describe("Lending pool add bank (add bank to group)", () => {
     const now = await getBankrunTime(bankrunContext);
 
     const feeAccSolBefore = await program.provider.connection.getBalance(
-      globalFeeWallet
+      globalFeeWallet,
     );
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
@@ -79,9 +99,9 @@ describe("Lending pool add bank (add bank to group)", () => {
           bank: bankKey,
           // globalFeeWallet: globalFeeWallet,
           config: setConfig,
-        })
+        }),
       ),
-      [bankKeypairUsdc]
+      [bankKeypairUsdc],
     );
 
     // Note: you can pack this in the same tx if you use partial accounts. See test below for an
@@ -92,18 +112,18 @@ describe("Lending pool add bank (add bank to group)", () => {
           bank: bankKey,
           type: ORACLE_SETUP_PYTH_PUSH,
           oracle: oracles.usdcOracle.publicKey,
-        })
-      )
+        }),
+      ),
     );
 
     const feeAccSolAfter = await program.provider.connection.getBalance(
-      globalFeeWallet
+      globalFeeWallet,
     );
 
     if (verbose) {
       console.log("*init USDC bank " + bankKey);
       console.log(
-        " Origination fee collected: " + (feeAccSolAfter - feeAccSolBefore)
+        " Origination fee collected: " + (feeAccSolAfter - feeAccSolBefore),
       );
     }
 
@@ -230,7 +250,7 @@ describe("Lending pool add bank (add bank to group)", () => {
     const config_ix = await program.methods
       .lendingPoolConfigureBankOracle(
         ORACLE_SETUP_PYTH_PUSH,
-        oracles.tokenAOracle.publicKey
+        oracles.tokenAOracle.publicKey,
       )
       .accountsPartial({
         group: marginfiGroup.publicKey,
@@ -250,9 +270,9 @@ describe("Lending pool add bank (add bank to group)", () => {
           // globalFeeWallet: globalFeeWallet,
           config: config,
         }),
-        config_ix
+        config_ix,
       ),
-      [bankKeypairA]
+      [bankKeypairA],
     );
 
     if (verbose) {
@@ -284,7 +304,7 @@ describe("Lending pool add bank (add bank to group)", () => {
     const config_ix = await program.methods
       .lendingPoolConfigureBankOracle(
         ORACLE_SETUP_PYTH_PUSH,
-        oracles.wsolOracle.publicKey
+        oracles.wsolOracle.publicKey,
       )
       .accountsPartial({
         group: marginfiGroup.publicKey,
@@ -303,9 +323,9 @@ describe("Lending pool add bank (add bank to group)", () => {
           bank: bankKey,
           config: config,
         }),
-        config_ix
+        config_ix,
       ),
-      [bankKeypairSol]
+      [bankKeypairSol],
     );
 
     if (verbose) {
@@ -321,7 +341,7 @@ describe("Lending pool add bank (add bank to group)", () => {
     const group = new PublicKey("4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8");
 
     let bonkBankKey = new PublicKey(
-      "DeyH7QxWvnbbaVB4zFrf4hoq7Q8z1ZT14co42BGwGtfM"
+      "DeyH7QxWvnbbaVB4zFrf4hoq7Q8z1ZT14co42BGwGtfM",
     );
     let bonkBankData = (
       await program.provider.connection.getAccountInfo(bonkBankKey)
@@ -331,7 +351,7 @@ describe("Lending pool add bank (add bank to group)", () => {
     }
 
     let cloudBankKey = new PublicKey(
-      "4kNXetv8hSv9PzvzPZzEs1CTH6ARRRi2b8h6jk1ad1nP"
+      "4kNXetv8hSv9PzvzPZzEs1CTH6ARRRi2b8h6jk1ad1nP",
     );
     let cloudBankData = (
       await program.provider.connection.getAccountInfo(cloudBankKey)
@@ -347,7 +367,7 @@ describe("Lending pool add bank (add bank to group)", () => {
 
     assertKeysEqual(
       bb.mint,
-      new PublicKey("DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263")
+      new PublicKey("DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"),
     );
     assert.equal(bb.mintDecimals, 5);
     assertKeysEqual(bb.group, group);
@@ -421,7 +441,7 @@ describe("Lending pool add bank (add bank to group)", () => {
 
     assertKeysEqual(
       cb.mint,
-      new PublicKey("CLoUDKc4Ane7HeQcPpE3YHnznRxhMimJ4MyaUqyHFzAu")
+      new PublicKey("CLoUDKc4Ane7HeQcPpE3YHnznRxhMimJ4MyaUqyHFzAu"),
     );
     assert.equal(cb.mintDecimals, 9);
     assertKeysEqual(cb.group, group);
@@ -465,38 +485,83 @@ describe("Lending pool add bank (add bank to group)", () => {
     assert.equal(cloudConfig.oracleMaxAge, 60);
     assert.equal(cloudConfig.oracleMaxConfidence, 0);
 
-    // Assert emissions mint (one of the last fields) is also aligned correctly.
-    let pyUsdcBankKey = new PublicKey(
-      "Fe5QkKPVAh629UPP5aJ8sDZu8HTfe6M26jDQkKyXVhoA"
+    // Corvus fixture bank is PDA-based and should be backfilled successfully.
+    let corvusBankKey = new PublicKey(
+      "4ecRL7M2fdmWjZd81PTZ9Sqg1e47ZpiwhkeDbsBJtqax",
     );
-    let pyMint = new PublicKey("2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo");
-    let pyUsdcBankData = (
-      await program.provider.connection.getAccountInfo(pyUsdcBankKey)
+    let corvusBankData = (
+      await program.provider.connection.getAccountInfo(corvusBankKey)
     ).data.subarray(8);
     if (printBuffers) {
-      printBufferGroups(pyUsdcBankData, 16, 896);
+      printBufferGroups(corvusBankData, 16, 896);
     }
 
-    const pbBefore = await program.account.bank.fetch(pyUsdcBankKey);
-    assertKeysEqual(pbBefore.emissionsMint, pyMint);
-    assert.equal(pbBefore.flags.toNumber() & IS_T22_FLAG, 0);
+    const pbBefore = await program.account.bank.fetch(corvusBankKey);
+    assertBNEqual(pbBefore.bankSeed, 0);
+    assert.equal(pbBefore.flags.toNumber() & BANK_SEED_KNOWN_FLAG, 0);
+
+    const backfillSeed = findBankSeed(
+      new PublicKey("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA"),
+      pbBefore.group,
+      pbBefore.mint,
+      corvusBankKey,
+    );
+    console.log("seed: " + backfillSeed);
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
-        await program.methods
-          .lendingPoolBackfillBankIsT22Flag()
-          .accounts({
-            bank: pyUsdcBankKey,
-          })
-          .accountsPartial({
-            mint: pyMint,
-          })
-          .instruction()
-      )
+        await backfillBankIsT22Flag(groupAdmin.mrgnProgram, {
+          bank: corvusBankKey,
+          bankSeed: new BN(backfillSeed),
+        }),
+      ),
     );
 
-    const pbAfter = await program.account.bank.fetch(pyUsdcBankKey);
-    assert.equal(pbAfter.flags.toNumber() & IS_T22_FLAG, IS_T22_FLAG);
+    const pbAfter = await program.account.bank.fetch(corvusBankKey);
+    assertBNEqual(pbAfter.bankSeed, backfillSeed);
+    assert.equal(
+      pbAfter.flags.toNumber() & BANK_SEED_KNOWN_FLAG,
+      BANK_SEED_KNOWN_FLAG,
+    );
+
+    // idempotent when called again with the same seed
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        dummyIx(groupAdmin.wallet.publicKey, users[0].wallet.publicKey),
+        await backfillBankIsT22Flag(groupAdmin.mrgnProgram, {
+          bank: corvusBankKey,
+          bankSeed: new BN(backfillSeed),
+        }),
+      ),
+    );
+
+    const pbAfterSecond = await program.account.bank.fetch(corvusBankKey);
+    assertBNEqual(pbAfterSecond.bankSeed, backfillSeed);
+    assert.equal(
+      pbAfterSecond.flags.toNumber() & BANK_SEED_KNOWN_FLAG,
+      BANK_SEED_KNOWN_FLAG,
+    );
+  });
+
+  it("Backfill-seed path is skipped when bankSeed is omitted", async () => {
+    let bonkBankKey = new PublicKey(
+      "DeyH7QxWvnbbaVB4zFrf4hoq7Q8z1ZT14co42BGwGtfM",
+    );
+    const bbBefore = await program.account.bank.fetch(bonkBankKey);
+    assertBNEqual(bbBefore.bankSeed, 0);
+    assert.equal(bbBefore.flags.toNumber() & BANK_SEED_KNOWN_FLAG, 0);
+
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await backfillBankIsT22Flag(groupAdmin.mrgnProgram, {
+          bank: bonkBankKey,
+        }),
+      ),
+    );
+
+    const bbAfter = await program.account.bank.fetch(bonkBankKey);
+    assertBNEqual(bbAfter.bankSeed, 0);
+    assert.equal(bbAfter.flags.toNumber() & BANK_SEED_KNOWN_FLAG, 0);
   });
 });
 

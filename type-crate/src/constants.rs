@@ -85,6 +85,8 @@ pub const CLOSE_ENABLED_FLAG: u64 = 1 << 4;
 pub const TOKENLESS_REPAYMENTS_ALLOWED: u64 = 1 << 5;
 pub const TOKENLESS_REPAYMENTS_COMPLETE: u64 = 1 << 6;
 pub const IS_T22: u64 = 1 << 7;
+/// Bank provenance bit: set when the bank is known to be seed-derived (PDA).
+pub const BANK_SEED_KNOWN: u64 = 1 << 8;
 
 /// True if bank created in 0.1.4 or later, or if migrated to the new oracle setup from a prior
 /// version. False otherwise.

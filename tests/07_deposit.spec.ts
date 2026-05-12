@@ -22,6 +22,7 @@ import {
 } from "./rootHooks";
 import {
   assertBNApproximately,
+  assertBNEqual,
   assertI80F48Approx,
   assertI80F48Equal,
   expectFailedTxWithError,
@@ -215,7 +216,7 @@ describe("Deposit funds", () => {
     // Init a dummy bank for this test...
     let config = defaultBankConfig();
     config.depositLimit = new BN(10_000);
-    const seed = new BN(0);
+    const seed = new BN(7639847);
     const [bankKey] = deriveBankWithSeed(
       program.programId,
       marginfiGroup.publicKey,
@@ -268,6 +269,7 @@ describe("Deposit funds", () => {
     );
 
     let bankAfter = await program.account.bank.fetch(bankKey);
+    assertBNEqual(bankAfter.bankSeed, seed);
     assert.equal(bankAfter.lendingPositionCount, 1);
 
     // And now user user 1 attempts to deposit up to the deposit cap

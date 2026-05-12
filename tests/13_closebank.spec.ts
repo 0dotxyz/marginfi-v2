@@ -22,7 +22,7 @@ import {
 } from "./utils/user-instructions";
 import { deriveBankWithSeed } from "./utils/pdas";
 import { assert } from "chai";
-import { expectFailedTxWithError } from "./utils/genericTests";
+import { assertBNEqual, expectFailedTxWithError } from "./utils/genericTests";
 import { closeBank } from "./utils/group-instructions";
 import { USER_ACCOUNT } from "./utils/mocks";
 import { dumpAccBalances } from "./utils/tools";
@@ -73,6 +73,9 @@ describe("Close bank", () => {
           .instruction()
       )
     );
+
+    const bank = await program.account.bank.fetch(bankKey);
+    assertBNEqual(bank.bankSeed, seed);
   });
 
   it("bank cannot close with open positions", async () => {

@@ -14,8 +14,9 @@ use anchor_spl::associated_token::get_associated_token_address_with_program_id;
 use anchor_spl::token_interface::*;
 use juplend_mocks::state::Lending as JuplendLending;
 use marginfi_type_crate::constants::{
-    FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED,
-    IS_T22, JUPLEND_F_TOKEN_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+    BANK_SEED_KNOWN, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, INSURANCE_VAULT_AUTHORITY_SEED,
+    INSURANCE_VAULT_SEED, IS_T22, JUPLEND_F_TOKEN_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
+    LIQUIDITY_VAULT_SEED,
 };
 use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 
@@ -28,7 +29,7 @@ use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 pub fn lending_pool_add_bank_juplend(
     ctx: Context<LendingPoolAddBankJuplend>,
     bank_config: JuplendConfigCompact,
-    _bank_seed: u64,
+    bank_seed: u64,
 ) -> MarginfiResult {
     // Note: JupLend banks don't need to debit the flat SOL fee because these will always be
     // first-party pools owned by mrgn and never permissionless pools
@@ -78,7 +79,9 @@ pub fn lending_pool_add_bank_juplend(
         insurance_vault_authority_bump,
         fee_vault_bump,
         fee_vault_authority_bump,
+        bank_seed,
     );
+    bank.flags |= BANK_SEED_KNOWN;
     if bank_mint.to_account_info().owner == &anchor_spl::token_2022::ID {
         bank.flags |= IS_T22;
     }

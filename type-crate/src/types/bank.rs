@@ -100,6 +100,9 @@ pub struct Bank {
     /// - Bit 5 (32): `TOKENLESS_REPAYMENTS_ALLOWED` — risk admin can repay debt without tokens
     /// - Bit 6 (64): `TOKENLESS_REPAYMENTS_COMPLETE` — all debt cleared, lender purge enabled
     /// - Bit 7 (128): `IS_T22` — 1 if T22, 0 if token classic
+    /// - Bit 8 (256): `BANK_SEED_KNOWN` — bank is known to be PDA/seed-derived. If not set, bank
+    ///   may still be a PDA, but created before this flag launched (1.8 or earlier) or is a legacy
+    ///   keypair-based bank.
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.
@@ -161,8 +164,14 @@ pub struct Bank {
     /// Tracks net outflow (outflows - inflows) in native tokens.
     pub rate_limiter: BankRateLimiter,
 
-    pub _pad_0: [u8; 16],          // 16B
-    pub _padding_1: [[u64; 2]; 7], // 8 * 2 * 7 = 112B
+    pub _pad_0: [u8; 16], // 16B
+
+    /// * `0` for legacy banks created via `lending_pool_add_bank` (created via keypair, not a PDA),
+    ///   or pre-backfill banks (1.8 or earlier) where seed remains unknown.
+    /// * Otherwise the `bank_seed: u64` argument passed when creating the bank.
+    /// * Use `flags & BANK_SEED_KNOWN` to verify this value has known seed provenance.
+    pub bank_seed: u64,
+    pub _padding_1: [u64; 13], // 8 * 13 = 104B;
 }
 
 impl Bank {
