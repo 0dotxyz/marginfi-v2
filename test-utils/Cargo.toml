@@ -24,7 +24,6 @@ spl-transfer-hook-interface = { workspace = true }
 anchor-lang = { workspace = true }
 anchor-spl = { workspace = true }
 
-pyth-solana-receiver-sdk = { workspace = true }
 switchboard-on-demand = { workspace = true }
 
 bytemuck = { workspace = true }
