@@ -1747,7 +1747,7 @@ impl<'a> BankAccountWrapper<'a> {
         let current_liability_shares: I80F48 = balance.liability_shares.into();
         let current_liability_amount = bank.get_liability_amount(current_liability_shares)?;
 
-        let (liability_amount_decrease, asset_amount_increase) = (
+        let (mut liability_amount_decrease, mut asset_amount_increase) = (
             min(current_liability_amount, balance_delta),
             max(
                 balance_delta
@@ -1763,12 +1763,16 @@ impl<'a> BankAccountWrapper<'a> {
                     asset_amount_increase.is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD),
                     MarginfiError::OperationRepayOnly
                 );
+                // Clamp tolerated dust to zero so it isn't booked as a new asset position.
+                asset_amount_increase = I80F48::ZERO;
             }
             BalanceIncreaseType::DepositOnly => {
                 check!(
                     liability_amount_decrease.is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD),
                     MarginfiError::OperationDepositOnly
                 );
+                // Clamp tolerated dust to zero so it isn't consumed from an unrelated liability.
+                liability_amount_decrease = I80F48::ZERO;
             }
             _ => {}
         }
@@ -1830,7 +1834,7 @@ impl<'a> BankAccountWrapper<'a> {
         let current_asset_shares: I80F48 = balance.asset_shares.into();
         let current_asset_amount = bank.get_asset_amount(current_asset_shares)?;
 
-        let (asset_amount_decrease, liability_amount_increase) = (
+        let (mut asset_amount_decrease, mut liability_amount_increase) = (
             min(current_asset_amount, balance_delta),
             max(
                 balance_delta
@@ -1846,12 +1850,16 @@ impl<'a> BankAccountWrapper<'a> {
                     liability_amount_increase.is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD),
                     MarginfiError::OperationWithdrawOnly
                 );
+                // Clamp tolerated dust to zero so it isn't booked as a new liability position.
+                liability_amount_increase = I80F48::ZERO;
             }
             BalanceDecreaseType::BorrowOnly => {
                 check!(
                     asset_amount_decrease.is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD),
                     MarginfiError::OperationBorrowOnly
                 );
+                // Clamp tolerated dust to zero so it isn't consumed from an unrelated asset.
+                asset_amount_decrease = I80F48::ZERO;
             }
             _ => {}
         }
@@ -1915,5 +1923,154 @@ mod test {
             calc_value(I80F48!(1_000_000_000), I80F48!(10_000_000), 9, None).unwrap(),
             I80F48!(10_000_000)
         );
+    }
+
+    /// Regression test for M12 (Ackee audit): the `WithdrawOnly` /
+    /// `BorrowOnly` / `RepayOnly` / `DepositOnly` checks use
+    /// `is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD)`, which accepts any value
+    /// in `(0, ZERO_AMOUNT_THRESHOLD)`. Without clamping, the tolerated dust
+    /// flows through to `change_*_shares` and creates real shares on the
+    /// prohibited side — breaking the invariant (e.g. withdraw can mint a
+    /// liability in a `ReduceOnly` bank). These tests build a balance whose
+    /// fractional `current_asset_amount` / `current_liability_amount` is
+    /// engineered so the prohibited side lands inside the tolerance window,
+    /// then assert the prohibited side stays at exactly zero after the call.
+    mod tolerance_clamping {
+        use super::*;
+        use bytemuck::Zeroable;
+        use marginfi_type_crate::types::{Balance, Bank};
+
+        const SHARES: i128 = 10;
+
+        /// Build a bank/balance pair where the user holds `(asset_shares,
+        /// liability_shares)` and the bank's totals carry a healthy buffer
+        /// from other (fictional) participants. Deposit and borrow caps are
+        /// disabled (`u64::MAX`) so the test isolates the operation-type
+        /// invariant rather than tripping on a downstream limit.
+        fn make_bank_and_balance(
+            asset_share_value: I80F48,
+            liability_share_value: I80F48,
+            asset_shares: I80F48,
+            liability_shares: I80F48,
+        ) -> (Bank, Balance) {
+            let mut bank = Bank::zeroed();
+            bank.asset_share_value = asset_share_value.into();
+            bank.liability_share_value = liability_share_value.into();
+            // Buffer the totals so utilization stays healthy after the call
+            // and so dust on the prohibited side, if leaked, doesn't fail the
+            // utilization-ratio check.
+            let buffer = I80F48::from_num(1_000);
+            bank.total_asset_shares = (asset_shares + buffer).into();
+            bank.total_liability_shares = liability_shares.into();
+            bank.config.deposit_limit = u64::MAX;
+            bank.config.borrow_limit = u64::MAX;
+
+            let mut balance = Balance::zeroed();
+            balance.active = 1;
+            balance.asset_shares = asset_shares.into();
+            balance.liability_shares = liability_shares.into();
+            (bank, balance)
+        }
+
+        /// `withdraw` on a bank with fractional `asset_share_value`. Choose an
+        /// integer `amount` slightly above `current_asset_amount` so that
+        /// `liability_amount_increase = amount - current_asset_amount` falls
+        /// inside `(0, ZERO_AMOUNT_THRESHOLD)`. With the bug, this mints
+        /// liability shares on a `WithdrawOnly` path.
+        #[test]
+        fn withdraw_only_does_not_mint_dust_liability() {
+            // share_value < 1 by 5e-6 → current_asset_amount = 10 * 0.999995 = 9.99995.
+            let asset_share_value = I80F48!(0.999995);
+            let asset_shares = I80F48::from_num(SHARES);
+            let (mut bank, mut balance) = make_bank_and_balance(
+                asset_share_value,
+                I80F48::ONE,
+                asset_shares,
+                I80F48::ZERO,
+            );
+            let current_asset_amount = asset_shares * asset_share_value;
+            // Withdraw exactly SHARES raw units → liability_amount_increase = 5e-5,
+            // which is < ZERO_AMOUNT_THRESHOLD (1e-4) and bypasses the check.
+            let withdraw_amount = I80F48::from_num(SHARES);
+            let dust = withdraw_amount - current_asset_amount;
+            assert!(dust > I80F48::ZERO && dust < ZERO_AMOUNT_THRESHOLD);
+            let bank_total_liability_shares_before = I80F48::from(bank.total_liability_shares);
+
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+            wrapper.withdraw(withdraw_amount).unwrap();
+
+            // With the fix, the prohibited liability side stays at zero — no
+            // dust is booked into shares on a `WithdrawOnly` path.
+            assert_eq!(
+                I80F48::from(balance.liability_shares),
+                I80F48::ZERO,
+                "WithdrawOnly leaked a dust liability into balance.liability_shares"
+            );
+            assert_eq!(
+                I80F48::from(bank.total_liability_shares),
+                bank_total_liability_shares_before,
+                "WithdrawOnly leaked dust into bank.total_liability_shares"
+            );
+        }
+
+        /// `repay` on a bank with fractional `liability_share_value`. Choose
+        /// `amount` slightly above the user's `current_liability_amount` so
+        /// that `asset_amount_increase = amount - current_liability_amount`
+        /// falls inside `(0, ZERO_AMOUNT_THRESHOLD)`. With the bug, this mints
+        /// asset shares on a `RepayOnly` path.
+        #[test]
+        fn repay_only_does_not_mint_dust_asset() {
+            let liability_share_value = I80F48!(0.999995);
+            let liability_shares = I80F48::from_num(SHARES);
+            let (mut bank, mut balance) = make_bank_and_balance(
+                I80F48::ONE,
+                liability_share_value,
+                I80F48::ZERO,
+                liability_shares,
+            );
+            let current_liability_amount = liability_shares * liability_share_value;
+            let repay_amount = I80F48::from_num(SHARES);
+            let dust = repay_amount - current_liability_amount;
+            assert!(dust > I80F48::ZERO && dust < ZERO_AMOUNT_THRESHOLD);
+            let bank_total_asset_shares_before = I80F48::from(bank.total_asset_shares);
+
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+            wrapper.repay(repay_amount).unwrap();
+
+            assert_eq!(
+                I80F48::from(balance.asset_shares),
+                I80F48::ZERO,
+                "RepayOnly leaked a dust asset into balance.asset_shares"
+            );
+            assert_eq!(
+                I80F48::from(bank.total_asset_shares),
+                bank_total_asset_shares_before,
+                "RepayOnly leaked dust into bank.total_asset_shares"
+            );
+        }
+
+        /// Sanity: a delta above the tolerance still errors with
+        /// `OperationWithdrawOnly` (the guard is preserved by the fix).
+        #[test]
+        fn withdraw_only_still_rejects_above_threshold() {
+            let (mut bank, mut balance) = make_bank_and_balance(
+                I80F48!(0.9),
+                I80F48::ONE,
+                I80F48::from_num(SHARES),
+                I80F48::ZERO,
+            );
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+            let err = wrapper.withdraw(I80F48::from_num(SHARES)).unwrap_err();
+            assert_eq!(err, MarginfiError::OperationWithdrawOnly.into());
+        }
     }
 }
