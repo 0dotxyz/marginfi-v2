@@ -5,12 +5,12 @@ use anchor_lang::{
     prelude::*,
     solana_program::{
         entrypoint::ProgramResult,
-        hash::hash,
         instruction::{AccountMeta, Instruction},
         program::invoke,
         program_error::ProgramError,
     },
 };
+use solana_program::hash::hash;
 
 declare_id!(marginfi_type_crate::pdas::KAMINO_PROGRAM_ID);
 
