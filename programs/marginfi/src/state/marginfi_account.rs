@@ -2160,6 +2160,62 @@ mod test {
             let err = wrapper.withdraw(I80F48::from_num(SHARES)).unwrap_err();
             assert_eq!(err, MarginfiError::OperationWithdrawOnly.into());
         }
+
+        /// `DepositOnly` clamp on the opposite (liability) side. A balance
+        /// carries sub-threshold leftover liability shares; without the clamp
+        /// a depositor would silently retire that dust.
+        #[test]
+        fn deposit_only_does_not_consume_dust_liability() {
+            let liability_shares = I80F48!(0.00005);
+            let (mut bank, mut balance) =
+                make_bank_and_balance(I80F48::ONE, I80F48::ONE, I80F48::ZERO, liability_shares);
+            let bank_total_liability_shares_before = I80F48::from(bank.total_liability_shares);
+
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+            wrapper.deposit(I80F48::from_num(SHARES)).unwrap();
+
+            assert_eq!(
+                I80F48::from(balance.liability_shares),
+                liability_shares,
+                "DepositOnly consumed dust from balance.liability_shares"
+            );
+            assert_eq!(
+                I80F48::from(bank.total_liability_shares),
+                bank_total_liability_shares_before,
+                "DepositOnly consumed dust from bank.total_liability_shares"
+            );
+        }
+
+        /// `BorrowOnly` clamp on the opposite (asset) side. Mirror of the
+        /// DepositOnly case — sub-threshold leftover asset shares must not
+        /// be silently forfeited by a borrow.
+        #[test]
+        fn borrow_only_does_not_consume_dust_asset() {
+            let asset_shares = I80F48!(0.00005);
+            let (mut bank, mut balance) =
+                make_bank_and_balance(I80F48::ONE, I80F48::ONE, asset_shares, I80F48::ZERO);
+            let bank_total_asset_shares_before = I80F48::from(bank.total_asset_shares);
+
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+            wrapper.borrow(I80F48::from_num(SHARES)).unwrap();
+
+            assert_eq!(
+                I80F48::from(balance.asset_shares),
+                asset_shares,
+                "BorrowOnly consumed dust from balance.asset_shares"
+            );
+            assert_eq!(
+                I80F48::from(bank.total_asset_shares),
+                bank_total_asset_shares_before,
+                "BorrowOnly consumed dust from bank.total_asset_shares"
+            );
+        }
     }
 
     /// Regression tests for L6 (Ackee audit): `close_balance` zeroed the user's
