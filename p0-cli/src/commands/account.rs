@@ -127,6 +127,11 @@ pub enum AccountCommand {
         #[clap(long, help = "Account to initialize the record for (defaults to profile default)")]
         account: Option<Pubkey>,
     },
+    /// Close the liquidation-record PDA and return rent to the original payer (permissionless)
+    CloseLiqRecord {
+        #[clap(long, help = "Account whose record is being closed (defaults to profile default)")]
+        account: Option<Pubkey>,
+    },
     /// Run the receivership liquidation flow
     LiquidateReceivership {
         #[clap(long)]
@@ -275,6 +280,9 @@ pub fn dispatch(subcmd: AccountCommand, global_options: &GlobalOptions) -> Resul
         }
         AccountCommand::InitLiqRecord { account } => {
             processor::marginfi_account_init_liquidation_record(&profile, &config, account)
+        }
+        AccountCommand::CloseLiqRecord { account } => {
+            processor::marginfi_account_close_liquidation_record(&profile, &config, account)
         }
         AccountCommand::LiquidateReceivership {
             liquidatee_marginfi_account,

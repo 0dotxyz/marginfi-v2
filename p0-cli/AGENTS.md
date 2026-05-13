@@ -98,6 +98,7 @@ Do not use:
 - `p0 account transfer <NEW_AUTHORITY_PUBKEY>`
 - `p0 account liquidate`
 - `p0 account init-liq-record`
+- `p0 account close-liq-record`
 - `p0 account liquidate-receivership`
 - `p0 account place-order`
 - `p0 account close-order <ORDER_PUBKEY>`

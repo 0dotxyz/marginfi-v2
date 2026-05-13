@@ -21,8 +21,9 @@ use {
     marginfi_type_crate::{
         constants::MARGINFI_ACCOUNT_SEED,
         types::{
-            Bank, FeeState, MarginfiAccount, Order, OrderTrigger, ACCOUNT_DISABLED, ACCOUNT_FROZEN,
-            ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+            Bank, FeeState, LiquidationRecord, MarginfiAccount, Order, OrderTrigger,
+            ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
+            ACCOUNT_IN_RECEIVERSHIP,
         },
     },
     serde::Deserialize,
@@ -817,6 +818,44 @@ pub fn marginfi_account_init_liquidation_record(
         sig, liq_record_pk
     );
 
+    Ok(())
+}
+
+/// Close a marginfi account's liquidation record PDA and return its rent to the original payer.
+/// Permissionless — anyone can call as long as the record is not currently engaged
+/// (no active receivership/deleverage, no recorded liquidation receiver).
+pub fn marginfi_account_close_liquidation_record(
+    profile: &Profile,
+    config: &Config,
+    marginfi_account_pk: Option<Pubkey>,
+) -> Result<()> {
+    let marginfi_account_pk = match marginfi_account_pk {
+        Some(pubkey) => pubkey,
+        None => profile.get_marginfi_account()?,
+    };
+    let liq_record_pk = find_liquidation_record_pda(&marginfi_account_pk, &config.program_id).0;
+    let record = config
+        .mfi_program
+        .account::<LiquidationRecord>(liq_record_pk)
+        .context("Liquidation record does not exist for this account")?;
+
+    let ix = Instruction {
+        program_id: config.program_id,
+        accounts: marginfi::accounts::CloseLiquidationRecord {
+            marginfi_account: marginfi_account_pk,
+            liquidation_record: liq_record_pk,
+            record_payer: record.record_payer,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::MarginfiAccountCloseLiqRecord.data(),
+    };
+
+    let signing_keypairs = config.get_signers(false);
+    let sig = send_tx(config, vec![ix], &signing_keypairs)?;
+    println!(
+        "Liquidation record closed (sig: {})\nRent returned to: {}",
+        sig, record.record_payer
+    );
     Ok(())
 }
 

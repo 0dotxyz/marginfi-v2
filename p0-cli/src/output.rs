@@ -143,9 +143,6 @@ pub fn print_bank_detail(address: &Pubkey, bank: &Bank, json: bool) {
                 "liability_weight_maint": format!("{:?}", bank.config.liability_weight_maint),
                 "borrow_limit": bank.config.borrow_limit,
                 "interest_rate": {
-                    "placeholder0": format!("{:?}", bank.config.interest_rate_config.placeholder0),
-                    "placeholder1": format!("{:?}", bank.config.interest_rate_config.placeholder1),
-                    "placeholder2": format!("{:?}", bank.config.interest_rate_config.placeholder2),
                     "insurance_fee_fixed_apr": format!("{:?}", bank.config.interest_rate_config.insurance_fee_fixed_apr),
                     "insurance_ir_fee": format!("{:?}", bank.config.interest_rate_config.insurance_ir_fee),
                     "protocol_fixed_fee_apr": format!("{:?}", bank.config.interest_rate_config.protocol_fixed_fee_apr),

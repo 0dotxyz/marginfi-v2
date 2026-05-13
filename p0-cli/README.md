@@ -155,6 +155,7 @@ Config templates live under `p0-cli/configs/`.
 | `p0 account transfer <NEW_AUTHORITY_PUBKEY>` | Transfer account authority |
 | `p0 account liquidate` | Liquidate an undercollateralized account |
 | `p0 account init-liq-record` | (permissionless) Initialize the liquidation record PDA |
+| `p0 account close-liq-record` | (permissionless) Close the liquidation record PDA and return rent to the original payer |
 | `p0 account liquidate-receivership` | Run the receivership liquidation flow |
 | `p0 account place-order` | Place a stop-loss or take-profit order |
 | `p0 account close-order <ORDER_PUBKEY>` | Close an order |
