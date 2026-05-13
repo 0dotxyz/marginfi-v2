@@ -124,19 +124,29 @@ pub enum AccountCommand {
     },
     /// Initialize the liquidation-record PDA for an account
     InitLiqRecord {
-        #[clap(long, help = "Account to initialize the record for (defaults to profile default)")]
+        #[clap(
+            long,
+            help = "Account to initialize the record for (defaults to profile default)"
+        )]
         account: Option<Pubkey>,
     },
     /// Close the liquidation-record PDA and return rent to the original payer (permissionless)
     CloseLiqRecord {
-        #[clap(long, help = "Account whose record is being closed (defaults to profile default)")]
+        #[clap(
+            long,
+            help = "Account whose record is being closed (defaults to profile default)"
+        )]
         account: Option<Pubkey>,
     },
     /// Run the receivership liquidation flow
     LiquidateReceivership {
         #[clap(long)]
         liquidatee_marginfi_account: Pubkey,
-        #[clap(long, default_value_t = false, help = "Auto-add init_liq_record if missing")]
+        #[clap(
+            long,
+            default_value_t = false,
+            help = "Auto-add init_liq_record if missing"
+        )]
         init_liq_record_if_missing: bool,
         #[clap(long, help = "JSON file with extra ixs placed between start/end")]
         extra_ixs_file: Option<PathBuf>,
@@ -211,7 +221,9 @@ pub fn dispatch(subcmd: AccountCommand, global_options: &GlobalOptions) -> Resul
         AccountCommand::CreatePda {
             account_index,
             third_party_id,
-        } => processor::marginfi_account_create_pda(&profile, &config, account_index, third_party_id),
+        } => {
+            processor::marginfi_account_create_pda(&profile, &config, account_index, third_party_id)
+        }
         AccountCommand::Close => processor::marginfi_account_close(&profile, &config),
         AccountCommand::Deposit {
             bank,

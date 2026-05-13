@@ -64,4 +64,3 @@ pub fn process_collect_fees(config: Config, bank_pk: Pubkey) -> Result<()> {
 
     Ok(())
 }
-

@@ -79,4 +79,3 @@ pub fn load_all_banks(
 
     Ok(banks_with_addresses)
 }
-

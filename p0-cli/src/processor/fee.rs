@@ -6,9 +6,7 @@ use {
     },
     anchor_client::anchor_lang::{InstructionData, ToAccountMetas},
     anyhow::{anyhow, Result},
-    marginfi_type_crate::{
-        constants::STAKED_SETTINGS_SEED,
-    },
+    marginfi_type_crate::constants::STAKED_SETTINGS_SEED,
     solana_sdk::{instruction::Instruction, pubkey::Pubkey},
 };
 

@@ -508,7 +508,6 @@ pub fn load_bank_oracle_account_metas(bank: &Bank) -> Vec<AccountMeta> {
         .collect()
 }
 
-
 // ---------------------------------------------------------------------------
 // Kamino refresh instruction builders
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::{Result};
+use anyhow::Result;
 use clap::Parser;
 use solana_sdk::pubkey::Pubkey;
 

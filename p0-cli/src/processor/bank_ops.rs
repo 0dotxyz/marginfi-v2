@@ -19,10 +19,7 @@ use {
     },
     marginfi_type_crate::{
         constants::METADATA_SEED,
-        types::{
-            Bank, BankMetadata, MarginfiGroup,
-            OraclePriceType, OracleSetup, PriceBias,
-        },
+        types::{Bank, BankMetadata, MarginfiGroup, OraclePriceType, OracleSetup, PriceBias},
     },
     pyth_solana_receiver_sdk::price_update::PriceUpdateV2,
     serde::{Deserialize, Serialize},
@@ -37,7 +34,7 @@ use {
     },
     std::{
         cell::RefCell,
-        collections::{HashSet},
+        collections::HashSet,
         fs,
         mem::size_of,
         path::PathBuf,
@@ -607,12 +604,10 @@ pub fn bank_init_metadata(
     let (resolved_group, resolved_mint) = match config.mfi_program.account::<Bank>(bank_pk) {
         Ok(bank) => (bank.group, bank.mint),
         Err(_) => {
-            let g = group.context(
-                "--group required when the bank account does not exist on-chain yet",
-            )?;
-            let m = mint.context(
-                "--mint required when the bank account does not exist on-chain yet",
-            )?;
+            let g = group
+                .context("--group required when the bank account does not exist on-chain yet")?;
+            let m =
+                mint.context("--mint required when the bank account does not exist on-chain yet")?;
             (g, m)
         }
     };
@@ -638,4 +633,3 @@ pub fn bank_init_metadata(
 
     Ok(())
 }
-

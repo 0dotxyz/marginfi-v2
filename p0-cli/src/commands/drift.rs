@@ -98,7 +98,9 @@ fn load_drift_spot_market(
             data.len()
         );
     }
-    Ok(*bytemuck::from_bytes::<MinimalSpotMarket>(&data[8..8 + size]))
+    Ok(*bytemuck::from_bytes::<MinimalSpotMarket>(
+        &data[8..8 + size],
+    ))
 }
 
 /// Derive a Drift reward spot market's vault and underlying mint, used when withdrawing.

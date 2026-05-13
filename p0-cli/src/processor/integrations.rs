@@ -5,21 +5,17 @@ use {
         profile::Profile,
         utils::{
             build_kamino_refresh_obligation_ix, build_kamino_refresh_reserve_ix,
-            derive_juplend_cpi_accounts,
-            find_bank_vault_authority_pda, find_fee_state_pda,
+            derive_juplend_cpi_accounts, find_bank_vault_authority_pda, find_fee_state_pda,
             load_observation_account_metas, load_observation_account_metas_close_last, send_tx,
             EXP_10_I80F48,
         },
     },
     anchor_client::anchor_lang::{InstructionData, ToAccountMetas},
-    anyhow::{Result},
+    anyhow::Result,
     fixed::types::I80F48,
-    marginfi::state::{bank::BankVaultType},
+    marginfi::state::bank::BankVaultType,
     marginfi_type_crate::{
-        pdas::{
-            DRIFT_PROGRAM_ID, FARMS_PROGRAM_ID,
-            JUPLEND_LENDING_PROGRAM_ID, KAMINO_PROGRAM_ID,
-        },
+        pdas::{DRIFT_PROGRAM_ID, FARMS_PROGRAM_ID, JUPLEND_LENDING_PROGRAM_ID, KAMINO_PROGRAM_ID},
         types::{Bank, MarginfiAccount, OracleSetup},
     },
     solana_sdk::{
@@ -1097,4 +1093,3 @@ pub fn juplend_withdraw(
 
     Ok(())
 }
-
