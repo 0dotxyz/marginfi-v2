@@ -2113,7 +2113,13 @@ impl MarginfiAccountFixture {
 
         let observation_metas = match observation_metas {
             Some(metas) => metas,
-            None => self.load_observation_account_metas(vec![], vec![]).await,
+            None => {
+                // start_execute_order accrues interest on order-tagged banks, which requires
+                // load_mut on the bank account. Mark observation banks as writable so the
+                // tx-level writable bit is set for the bank account.
+                self.load_observation_account_metas_with_flags(vec![], vec![], true, false)
+                    .await
+            }
         };
 
         ix.accounts.extend_from_slice(&observation_metas);

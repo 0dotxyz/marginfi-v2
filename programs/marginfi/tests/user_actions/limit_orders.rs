@@ -1029,8 +1029,10 @@ async fn limit_order_fails_with_spoofed_oracle() -> anyhow::Result<()> {
     let liability_bank_f = test_f.get_bank(&liability_mint);
     let wrong_oracle = liability_bank_f.load().await.config.oracle_keys[0];
 
+    // start_execute_order accrues interest on order-tagged banks (load_mut), so banks
+    // must be marked writable in the metas.
     let mut observation_metas = borrower_mfi_account_f
-        .load_observation_account_metas(vec![], vec![])
+        .load_observation_account_metas_with_flags(vec![], vec![], true, false)
         .await;
     let bank_index = observation_metas
         .iter()
