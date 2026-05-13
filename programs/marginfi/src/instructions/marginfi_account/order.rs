@@ -7,7 +7,8 @@ use crate::ix_utils::{
     get_discrim_hash, keys_sha256_hash, validate_not_cpi_by_stack_height, Hashable,
 };
 use crate::state::marginfi_account::{
-    get_health_components, get_remaining_accounts_per_bank, get_tagged_account_health_components,
+    account_not_frozen_for_authority, get_health_components, get_remaining_accounts_per_bank,
+    get_tagged_account_health_components, is_signer_authorized,
 };
 use crate::{
     check,
@@ -654,9 +655,20 @@ impl<'info> PlaceOrder<'info> {
 
 #[derive(Accounts)]
 pub struct CloseOrder<'info> {
+    pub group: AccountLoader<'info, MarginfiGroup>,
+
     #[account(
         mut,
-        has_one = authority @ MarginfiError::Unauthorized
+        has_one = group @ MarginfiError::InvalidGroup,
+        constraint = {
+            let a = marginfi_account.load()?;
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), false, false)
+        } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
@@ -698,9 +710,20 @@ pub struct KeeperCloseOrder<'info> {
 
 #[derive(Accounts)]
 pub struct SetKeeperCloseFlags<'info> {
+    pub group: AccountLoader<'info, MarginfiGroup>,
+
     #[account(
         mut,
-        has_one = authority @ MarginfiError::Unauthorized
+        has_one = group @ MarginfiError::InvalidGroup,
+        constraint = {
+            let a = marginfi_account.load()?;
+            account_not_frozen_for_authority(&a, authority.key())
+        } @ MarginfiError::AccountFrozen,
+        constraint = {
+            let a = marginfi_account.load()?;
+            let g = group.load()?;
+            is_signer_authorized(&a, g.admin, authority.key(), false, false)
+        } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
