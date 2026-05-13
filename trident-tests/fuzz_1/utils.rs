@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use trident_fuzz::fuzzing::*;
 
 use crate::types;
@@ -78,6 +80,33 @@ impl FuzzTest {
         invariant!(res.is_success());
     }
 
+    pub fn initialize_associated_token_account(
+        &mut self,
+        payer: Pubkey,
+        mint: Pubkey,
+        owner: Pubkey,
+        token_program: Pubkey,
+    ) -> Pubkey {
+        let ata = self
+            .trident
+            .get_associated_token_address(&mint, &owner, &token_program);
+
+        let ata_data = self.trident.get_token_account(ata);
+
+        match ata_data {
+            Ok(ata_data) => {}
+            Err(e) => {
+                let ix = self
+                    .trident
+                    .initialize_associated_token_account(&payer, &mint, &owner);
+
+                let res = self.trident.process_transaction(&[ix], None);
+                invariant!(res.is_success());
+            }
+        }
+        ata
+    }
+
     pub fn mint_to_2022(
         &mut self,
         token_account: Pubkey,
@@ -154,4 +183,39 @@ pub async fn get_slot() -> u64 {
     let slot = client.get_slot().await.expect("Failed to get slot");
 
     slot
+}
+
+#[macro_export]
+macro_rules! solana_amount {
+    ($amount: expr) => {
+        $amount * LAMPORTS_PER_SOL
+    };
+}
+
+#[macro_export]
+macro_rules! weth_amount {
+    ($amount: expr) => {
+        $amount * 10_u64.pow($crate::constants::WETH_DECIMALS as u32)
+    };
+}
+
+#[macro_export]
+macro_rules! btc_amount {
+    ($amount: expr) => {
+        $amount * 10_u64.pow($crate::constants::WBTC_DECIMALS as u32)
+    };
+}
+
+#[macro_export]
+macro_rules! usdc_amount {
+    ($amount: expr) => {
+        $amount * 10_u64.pow($crate::constants::USDC_DECIMALS as u32)
+    };
+}
+
+#[macro_export]
+macro_rules! coin_toss {
+    ($self: expr) => {
+        $self.trident.random_from_range(0..=1) == 0
+    };
 }

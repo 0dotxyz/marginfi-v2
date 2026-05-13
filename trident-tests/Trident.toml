@@ -1,105 +1,222 @@
 [fuzz.metrics]
 enabled = true
-dashboard = false
+dashboard = true
 json = false
 
-
+# ================================================================================================
+# PROGRAMS
+# ================================================================================================
+# Marginfi Program
 [[fuzz.programs]]
 address = "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA"
 program = "../target/deploy/marginfi.so"
- 
-
-[[fuzz.fork]]
-address = "SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv"
-cluster = "m"
-
-
-[[fuzz.fork]]
-address = "DPvVSQYhZXQ2ygfT2Qjdg6iyeQVAyiz8okj88YRjy6NN"
-cluster = "m"
-
-## USDC
-# [[fuzz.fork]]
-# address = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-# cluster = "m"
-
-
-## Pyth push USDC
-[[fuzz.fork]]
-overwrite = true
-address = "Dpw1EAVrSB1ibxiDQyTAW6Zip3J4Btk2x4SgApQCeFbX"
-cluster = "m"
-
-
-## Pyth push WETH
-[[fuzz.fork]]
-overwrite = true
-address = "42amVS4KgzR9rA28tkVYqVXjq9Qa8dcZQMbH5EYFX6XC"
-cluster = "m"
-
-## Pyth push BTC
-[[fuzz.fork]]
-overwrite = true
-address = "4cSM2e6rvbGQUFiJbqytoVMi5GgghSMr8LwVrT9VPSPo"
-cluster = "m"
-
-## KLend
+# ================================================================================================
+# Kamino Lending (KLend)
 [[fuzz.fork]]
 address = "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD"
 cluster = "m"
-
-
-## Lend Market (MAIN)
-[[fuzz.fork]]
-overwrite = true
-address = "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF"
-cluster = "m"
-
-
-## Kamino USDC reserve
-[[fuzz.fork]]
-overwrite = true
-address = "D6q6wuQSrifJKZYpR1M8R4YawnLDtDsMmWM1NbBmgJ59"
-cluster = "m"
-
-
-## USDC Reserve Scope prices
-[[fuzz.fork]]
-overwrite = true
-address = "3t4JZcueEzTbVP6kLxXrL3VpWx45jDer4eqysweBchNH"
-cluster = "m"
-
-
-## USDC Reserve liquidity supply
-[[fuzz.fork]]
-overwrite = true
-address = "Bgq7trRgVMeq33yt235zM2onQ4bRDBsY5EWiTetF4qw6"
-cluster = "m"
-
-
-## USDC Reserve collateral mint
-[[fuzz.fork]]
-overwrite = true
-address = "B8V6WVjPxW1UGwVDfxH2d2r8SyT4cqn7dQRK6XneVa7D"
-cluster = "m"
-
-
-## USDC Reserve collateral supply vault
-[[fuzz.fork]]
-overwrite = true
-address = "3DzjXRfxRm6iejfyyMynR4tScddaanrePJ1NJU2XnPPL"
-cluster = "m"
-
-
-## Kamino Farms program
+# ================================================================================================
+# Kamino Farms (KFarms)
 [[fuzz.fork]]
 address = "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr"
 cluster = "m"
-
-
-
-## Farms Accounts Reserve Farm State:
+# ================================================================================================
+# Kamino Scope Prices
 [[fuzz.fork]]
+address = "HFn8GnPADiny6XqUoWE8uRPPxb29ikn4yTuPa9MF2fWJ"
+cluster = "m"
+# ================================================================================================
+# Jupiter Lend Earn Program
+[[fuzz.fork]]
+address = "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9"
+cluster = "m"
+# ================================================================================================
+# Jupiter Lend Liquidity Program
+[[fuzz.fork]]
+address = "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC"
+cluster = "m"
+# ================================================================================================
+
+
+
+
+
+# ================================================================================================
+# SWITCHBOARD
+# ================================================================================================
+# Switchboard On Demand Program
+[[fuzz.fork]]
+address = "SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv"
+cluster = "m"
 overwrite = true
+# ================================================================================================
+# Switchboard PullFeedAccountData Account
+[[fuzz.fork]]
+address = "DPvVSQYhZXQ2ygfT2Qjdg6iyeQVAyiz8okj88YRjy6NN"
+cluster = "m"
+overwrite = true
+# ================================================================================================
+
+
+
+
+
+# ================================================================================================
+# MINTS
+# ================================================================================================
+# USDC
+[[fuzz.fork]]
+address = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+cluster = "m"
+overwrite = true
+# ================================================================================================
+# WETH
+[[fuzz.fork]]
+address = "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs"
+cluster = "m"
+overwrite = true
+# ================================================================================================
+# WBTC
+[[fuzz.fork]]
+address = "5XZw2LKTyrfvfiskJ78AMpackRjPcyCif1WhUsPDuVqQ"
+cluster = "m"
+overwrite = true
+# ================================================================================================
+
+
+
+
+
+# ================================================================================================
+# PYTH
+# ================================================================================================
+# Pyth push USDC (Pythnet Custody Price (USDC) Account)
+[[fuzz.fork]]
+address = "Dpw1EAVrSB1ibxiDQyTAW6Zip3J4Btk2x4SgApQCeFbX"
+cluster = "m"
+overwrite = true
+# ================================================================================================
+## Pyth push WETH (Pythnet Custody Price (WETH) Account)
+[[fuzz.fork]]
+address = "42amVS4KgzR9rA28tkVYqVXjq9Qa8dcZQMbH5EYFX6XC"
+cluster = "m"
+overwrite = true
+# ================================================================================================
+# Pyth push BTC (Pythnet Custody Price (BTC) Account)
+[[fuzz.fork]]
+address = "4cSM2e6rvbGQUFiJbqytoVMi5GgghSMr8LwVrT9VPSPo"
+cluster = "m"
+overwrite = true
+# ================================================================================================
+
+
+
+# ================================================================================================
+# KAMINO ACCOUNTS
+# ================================================================================================
+# Main Lending Market
+[[fuzz.fork]]
+address = "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF"
+cluster = "m"
+# overwrite = true
+# ================================================================================================
+# Main Market USDC Reserve
+[[fuzz.fork]]
+address = "D6q6wuQSrifJKZYpR1M8R4YawnLDtDsMmWM1NbBmgJ59"
+cluster = "m"
+# overwrite = true
+# ================================================================================================
+# Main Market USDC Reserve Liquidity Vault
+[[fuzz.fork]]
+address = "Bgq7trRgVMeq33yt235zM2onQ4bRDBsY5EWiTetF4qw6"
+cluster = "m"
+# overwrite = true
+# ================================================================================================
+# Main Market USDC Reserve Collateral Mint
+[[fuzz.fork]]
+address = "B8V6WVjPxW1UGwVDfxH2d2r8SyT4cqn7dQRK6XneVa7D"
+cluster = "m"
+# overwrite = true
+# ================================================================================================
+# Main Market USDC Reserve Collateral Vault
+[[fuzz.fork]]
+address = "3DzjXRfxRm6iejfyyMynR4tScddaanrePJ1NJU2XnPPL"
+cluster = "m"
+# overwrite = true
+# ================================================================================================
+# Scope Prices
+[[fuzz.fork]]
+address = "3t4JZcueEzTbVP6kLxXrL3VpWx45jDer4eqysweBchNH"
+cluster = "m"
+overwrite = true
+# ================================================================================================
+# Farms Accounts Reserve Farm State:
+[[fuzz.fork]]
 address = "JAvnB9AKtgPsTEoKmn24Bq64UMoYcrtWtq42HHBdsPkh"
 cluster = "m"
+# overwrite = true
+# ================================================================================================
+
+
+
+
+
+# ================================================================================================
+# JUPITER ACCOUNTS
+# ================================================================================================
+# Jupiter Lend USDC (jlUSDC)
+[[fuzz.fork]]
+address = "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D"
+cluster = "m"
+# ================================================================================================
+# Jupiter Lending State
+[[fuzz.fork]]
+address = "2vVYHYM8VYnvZqQWpTJSj8o8DBf1wM8pVs3bsTgYZiqJ"
+cluster = "m"
+# ================================================================================================
+# Jupiter Lending State Admin
+[[fuzz.fork]]
+address = "5nmGjA4s7ATzpBQXC5RNceRpaJ7pYw2wKsNBWyuSAZV6"
+cluster = "m"
+# ================================================================================================
+# Jupiter Supply Token Reserves Liquidity
+[[fuzz.fork]]
+address = "94vK29npVbyRHXH63rRcTiSr26SFhrQTzbpNJuhQEDu"
+cluster = "m"
+# ================================================================================================
+# Jupiter Lending Supply Position On Liquidity
+[[fuzz.fork]]
+address = "Hf9gtkM4dpVBahVSzEXSVCAPpKzBsBcns3s8As3z77oF"
+cluster = "m"
+# ================================================================================================
+# Jupiter Rate Model
+[[fuzz.fork]]
+address = "5pjzT5dFTsXcwixoab1QDLvZQvpYJxJeBphkyfHGn688"
+cluster = "m"
+# ================================================================================================
+# Jupiter Vault
+[[fuzz.fork]]
+address = "BmkUoKMFYBxNSzWXyUjyMJjMAaVz4d8ZnxwwmhDCUXFB"
+cluster = "m"
+# ================================================================================================
+# Jupiter Liquidity
+[[fuzz.fork]]
+address = "7s1da8DduuBFqGra5bJBjpnvL5E9mGzCuMk1Qkh4or2Z"
+cluster = "m"
+# ================================================================================================
+# Jupiter Rewards Rate Model
+[[fuzz.fork]]
+address = "5xSPBiD3TibamAnwHDhZABdB4z4F9dcj5PnbteroBTTd"
+cluster = "m"
+# ================================================================================================
+# Jupiter Claim Account
+[[fuzz.fork]]
+address = "HN1r4VfkDn53xQQfeGDYrNuDKFdemAhZsHYRwBrFhsW"
+cluster = "m"
+# ================================================================================================
+
+
+
+
+
+

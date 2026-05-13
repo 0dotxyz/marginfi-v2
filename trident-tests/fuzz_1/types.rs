@@ -5,6 +5,8 @@
 
 #![allow(dead_code)]
 #![allow(unused_imports)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::vec_init_then_push)]
 
 use borsh::BorshDeserialize;
 use borsh::BorshSerialize;
@@ -3951,7 +3953,7 @@ pub mod marginfi {
         }
 
         pub fn accounts(mut self, accounts: JuplendDepositInstructionAccounts) -> Self {
-            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
+            self.accounts.group = AccountMeta::new(accounts.group, false);
 
             self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
 

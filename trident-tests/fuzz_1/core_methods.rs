@@ -1,7 +1,6 @@
 use trident_fuzz::fuzzing::prelude::TridentTransactionResult;
 use trident_fuzz::fuzzing::*;
 
-use crate::constants::*;
 use crate::invariants;
 use crate::types;
 use crate::FuzzTestBank;
@@ -9,7 +8,10 @@ use crate::FuzzTestBank;
 use crate::FuzzTest;
 
 impl FuzzTest {
-    fn snapshot_liquidity_vaults_except(&mut self, except_bank: Pubkey) -> Vec<(Pubkey, u64)> {
+    pub(crate) fn snapshot_liquidity_vaults_except(
+        &mut self,
+        except_bank: Pubkey,
+    ) -> Vec<(Pubkey, u64)> {
         [
             self.usdc_bank.address,
             self.eth_bank.address,
@@ -24,7 +26,7 @@ impl FuzzTest {
         .collect()
     }
 
-    fn assert_liquidity_balance_snapshot_unchanged(&mut self, snap: &[(Pubkey, u64)]) {
+    pub(crate) fn assert_liquidity_balance_snapshot_unchanged(&mut self, snap: &[(Pubkey, u64)]) {
         for &(pk, before) in snap {
             invariants::assert_balance_unchanged(
                 before,
@@ -46,8 +48,6 @@ impl FuzzTest {
         .instruction()
     }
 
-    /// Permissionless: accrue interest on every fuzz bank. Use after `forward_in_time` so
-    /// `time_delta = clock.unix_timestamp - bank.last_update` is non-zero.
     pub fn lending_pool_accrue_all_banks(&mut self, msg: Option<&str>) {
         let bank_pks = [
             self.usdc_bank.address,
@@ -82,20 +82,26 @@ impl FuzzTest {
         authority: Pubkey,
         msg: Option<&str>,
     ) {
-        let mint_data = self.trident.get_account(&bank.mint);
+        let mint_data = self.trident.get_account(&bank.currency.mint);
         let bank_layout = self.bank_layout(bank.address);
         let user_before = invariants::token_balance(&mut self.trident, user_token_account);
         let vault_before =
             invariants::token_balance(&mut self.trident, bank_layout.liquidity_vault);
         let other_vaults_snap = self.snapshot_liquidity_vaults_except(bank.address);
 
-        let share_snap_before =
-            invariants::marginfi_bank_share_snapshot(&mut self.trident, marginfi_account, bank.address);
+        let share_snap_before = invariants::marginfi_bank_share_snapshot(
+            &mut self.trident,
+            marginfi_account,
+            bank.address,
+        );
 
         let banks = self.get_marginfi_account_banks(marginfi_account, None);
         let token_program = *mint_data.owner();
-        let remaining_accounts =
-            self.remaining_accounts_for_bank_risk_and_t22_transfer(bank.mint, token_program, banks);
+        let remaining_accounts = self.remaining_accounts_for_bank_risk_and_t22_transfer(
+            bank.currency.mint,
+            token_program,
+            banks,
+        );
 
         let ix = types::marginfi::LendingAccountDepositInstruction::data(
             types::marginfi::LendingAccountDepositInstructionData::new(amount, Some(false)),
@@ -165,20 +171,26 @@ impl FuzzTest {
         authority: Pubkey,
         msg: Option<&str>,
     ) {
-        let mint_data = self.trident.get_account(&bank.mint);
+        let mint_data = self.trident.get_account(&bank.currency.mint);
         let bank_layout = self.bank_layout(bank.address);
         let user_before = invariants::token_balance(&mut self.trident, user_token_account);
         let vault_before =
             invariants::token_balance(&mut self.trident, bank_layout.liquidity_vault);
         let other_vaults_snap = self.snapshot_liquidity_vaults_except(bank.address);
 
-        let share_snap_before =
-            invariants::marginfi_bank_share_snapshot(&mut self.trident, marginfi_account, bank.address);
+        let share_snap_before = invariants::marginfi_bank_share_snapshot(
+            &mut self.trident,
+            marginfi_account,
+            bank.address,
+        );
 
         let banks = self.get_marginfi_account_banks(marginfi_account, None);
         let token_program = *mint_data.owner();
-        let remaining_accounts =
-            self.remaining_accounts_for_bank_risk_and_t22_transfer(bank.mint, token_program, banks);
+        let remaining_accounts = self.remaining_accounts_for_bank_risk_and_t22_transfer(
+            bank.currency.mint,
+            token_program,
+            banks,
+        );
 
         let ix = types::marginfi::LendingAccountWithdrawInstruction::data(
             types::marginfi::LendingAccountWithdrawInstructionData::new(amount, Some(false)),
@@ -274,9 +286,6 @@ impl FuzzTest {
         .instruction()
     }
 
-    /// `pre_commit_interacting_bank`: set `true` when this instruction is serialized before an
-    /// earlier instruction in the same transaction opens the position (e.g. repay after borrow in
-    /// a flashloan bundle).
     #[allow(clippy::too_many_arguments)]
     pub fn lending_account_repay_ix(
         &mut self,
@@ -335,13 +344,16 @@ impl FuzzTest {
             invariants::token_balance(&mut self.trident, bank_layout.liquidity_vault);
         let other_vaults_snap = self.snapshot_liquidity_vaults_except(bank.address);
 
-        let share_snap_before =
-            invariants::marginfi_bank_share_snapshot(&mut self.trident, marginfi_account, bank.address);
+        let share_snap_before = invariants::marginfi_bank_share_snapshot(
+            &mut self.trident,
+            marginfi_account,
+            bank.address,
+        );
 
         let ix = self.lending_account_borrow_ix(
             amount,
             bank.address,
-            bank.mint,
+            bank.currency.mint,
             destination_token_account,
             marginfi_account,
             authority,
@@ -404,13 +416,16 @@ impl FuzzTest {
             invariants::token_balance(&mut self.trident, bank_layout.liquidity_vault);
         let other_vaults_snap = self.snapshot_liquidity_vaults_except(bank.address);
 
-        let share_snap_before =
-            invariants::marginfi_bank_share_snapshot(&mut self.trident, marginfi_account, bank.address);
+        let share_snap_before = invariants::marginfi_bank_share_snapshot(
+            &mut self.trident,
+            marginfi_account,
+            bank.address,
+        );
 
         let ix = self.lending_account_repay_ix(
             amount,
             bank.address,
-            bank.mint,
+            bank.currency.mint,
             source_token_account,
             marginfi_account,
             authority,
@@ -458,14 +473,6 @@ impl FuzzTest {
         self.assert_liquidity_balance_snapshot_unchanged(&other_vaults_snap);
     }
 
-    /// `[start_flashloan(end_index), ...inner_instructions, end_flashloan]`.
-    ///
-    /// `end_health_banks`: banks to pass into `end_flashloan` health/risk `remaining_accounts`
-    /// (bank + oracle per bank). Use **`None`** when the final active-bank list matches the
-    /// account **before** this transaction (e.g. empty inner). Use **`Some(vec![…])`** when inner
-    /// ixs touch banks that are not yet active on-chain at ix-build time but can still be **active**
-    /// after the tx (e.g. borrow→repay may leave an active empty slot — still needs that bank’s
-    /// risk accounts).
     pub fn lending_flashloan(
         &mut self,
         marginfi_account: Pubkey,
@@ -553,10 +560,6 @@ impl FuzzTest {
         res
     }
 
-    /// Flashloan with inner borrow (`borrow_amount`) then repay (`repay_amount`) on `bank`.
-    ///
-    /// For a closed loop, amounts must match; otherwise the transaction should revert once
-    /// end-flashloan health runs (or earlier if SPL repay exceeds the wallet).
     #[allow(clippy::too_many_arguments)]
     pub fn lending_flashloan_borrow_repay(
         &mut self,
@@ -571,7 +574,7 @@ impl FuzzTest {
         let borrow_ix = self.lending_account_borrow_ix(
             borrow_amount,
             bank.address,
-            bank.mint,
+            bank.currency.mint,
             user_token_account,
             marginfi_account,
             authority,
@@ -579,7 +582,7 @@ impl FuzzTest {
         let repay_ix = self.lending_account_repay_ix(
             repay_amount,
             bank.address,
-            bank.mint,
+            bank.currency.mint,
             user_token_account,
             marginfi_account,
             authority,
@@ -612,10 +615,6 @@ impl FuzzTest {
         }
     }
 
-    /// Permissionless-style liquidation: liquidator signs; liquidatee must be unhealthy.
-    ///
-    /// Does **not** use `start_liquidation` / `end_liquidation` (those are a separate receivership
-    /// flow with withdraw/repay-only inner instructions).
     #[allow(clippy::too_many_arguments)]
     pub fn lending_account_liquidate(
         &mut self,
@@ -664,7 +663,7 @@ impl FuzzTest {
                 liab_layout.liquidity_vault_authority,
                 liab_layout.liquidity_vault,
                 liab_layout.insurance_vault,
-                TOKEN_2022_PROGRAM_ID,
+                SPL_TOKEN_ID,
             ),
         )
         .remaining_accounts(remaining_accounts)
@@ -689,12 +688,6 @@ impl FuzzTest {
         }
     }
 
-    /// Receivership liquidation: `start_liquidation` → optional middle instructions → `end_liquidation` (last).
-    ///
-    /// Allowed middle ixs are marginfi withdraw/repay (and integration withdraws); see `validate_ixes_exclusive` in the program.
-    ///
-    /// **Signing:** Trident’s `process_transaction` uses a single fee-payer keypair. Pass that pubkey as
-    /// `liquidation_receiver` and `global_fee_wallet` (matches `init_global_fee_state` in this harness).
     pub fn lending_account_receivership_liquidation(
         &mut self,
         liquidatee_marginfi_account: Pubkey,
@@ -744,105 +737,4 @@ impl FuzzTest {
             );
         }
     }
-
-    // pub fn kamino_deposit(
-    //     &mut self,
-    //     kamino_reserve: Pubkey,
-    //     amount: u64,
-    //     marginfi_account: Pubkey,
-    //     authority: Pubkey,
-    //     signer_token_account: Pubkey,
-    //     msg: Option<&str>,
-    // ) {
-    //     let (bank, rsv) = kamino_fork::kamino_marginfi_bank_and_reserve(
-    //         &mut self.trident,
-    //         self.marginfi_group,
-    //         kamino_reserve,
-    //         kamino_fork::KAMINO_BANK_SEED,
-    //     );
-    //     let mint = rsv.liquidity_mint;
-    //     let layout = self.bank_layout(bank);
-    //     let obligation = kamino_fork::kamino_obligation_pda(layout.liquidity_vault_authority);
-    //     let lma = kamino_fork::kamino_lending_market_authority_pda();
-    //     let ph = kamino_fork::KAMINO_IX_OPTIONAL_PLACEHOLDER;
-
-    //     let ix = KaminoDepositInstruction::data(KaminoDepositInstructionData::new(amount))
-    //         .accounts(KaminoDepositInstructionAccounts::new(
-    //             self.marginfi_group,
-    //             marginfi_account,
-    //             authority,
-    //             bank,
-    //             signer_token_account,
-    //             layout.liquidity_vault_authority,
-    //             layout.liquidity_vault,
-    //             obligation,
-    //             kamino_fork::KAMINO_LENDING_MARKET,
-    //             lma,
-    //             kamino_reserve,
-    //             mint,
-    //             rsv.reserve_liquidity_supply,
-    //             rsv.reserve_collateral_mint,
-    //             rsv.reserve_collateral_supply_vault,
-    //             ph,
-    //             ph,
-    //             rsv.liquidity_token_program,
-    //         ))
-    //         .instruction();
-    //     let _ = self.trident.process_transaction(&[ix], msg);
-    // }
-
-    // /// Withdraw Kamino collateral via marginfi. `collateral_amount` is in **collateral** token units.
-    // pub fn kamino_withdraw(
-    //     &mut self,
-    //     kamino_reserve: Pubkey,
-    //     collateral_amount: u64,
-    //     withdraw_all: Option<bool>,
-    //     marginfi_account: Pubkey,
-    //     authority: Pubkey,
-    //     destination_token_account: Pubkey,
-    //     msg: Option<&str>,
-    // ) {
-    //     let (bank, rsv) = kamino_fork::kamino_marginfi_bank_and_reserve(
-    //         &mut self.trident,
-    //         self.marginfi_group,
-    //         kamino_reserve,
-    //         kamino_fork::KAMINO_BANK_SEED,
-    //     );
-    //     let mint = rsv.liquidity_mint;
-    //     let layout = self.bank_layout(bank);
-    //     let obligation = kamino_fork::kamino_obligation_pda(layout.liquidity_vault_authority);
-    //     let lma = kamino_fork::kamino_lending_market_authority_pda();
-    //     let ph = kamino_fork::KAMINO_IX_OPTIONAL_PLACEHOLDER;
-
-    //     let banks = self.get_marginfi_account_banks(marginfi_account, Some(bank));
-    //     let remaining = self.remaining_accounts_for_bank_risk_and_t22_transfer(mint, banks);
-
-    //     let ix = KaminoWithdrawInstruction::data(KaminoWithdrawInstructionData::new(
-    //         collateral_amount,
-    //         withdraw_all,
-    //     ))
-    //     .accounts(KaminoWithdrawInstructionAccounts::new(
-    //         self.marginfi_group,
-    //         marginfi_account,
-    //         authority,
-    //         bank,
-    //         destination_token_account,
-    //         layout.liquidity_vault_authority,
-    //         layout.liquidity_vault,
-    //         obligation,
-    //         kamino_fork::KAMINO_LENDING_MARKET,
-    //         lma,
-    //         kamino_reserve,
-    //         mint,
-    //         rsv.reserve_liquidity_supply,
-    //         rsv.reserve_collateral_mint,
-    //         rsv.reserve_collateral_supply_vault,
-    //         ph,
-    //         ph,
-    //         rsv.liquidity_token_program,
-    //     ))
-    //     .remaining_accounts(remaining)
-    //     .instruction();
-    //     let _ = self.trident.process_transaction(&[ix], msg);
-    // }
 }

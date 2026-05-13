@@ -38,7 +38,7 @@ impl FuzzTest {
                     solana_sdk::system_program::ID.as_ref(),
                     solana_sdk::system_program::ID.as_ref(),
                 ],
-                &constants::KLEND_PROGRAM_ID,
+                &constants::KLEND,
             )
             .0
     }
@@ -46,7 +46,7 @@ impl FuzzTest {
         self.trident
             .find_program_address(
                 &[b"user_meta", obligation_owner.as_ref()],
-                &constants::KLEND_PROGRAM_ID,
+                &constants::KLEND,
             )
             .0
     }
@@ -61,7 +61,7 @@ impl FuzzTest {
             RiskTier::Collateral,
             constants::PYTH_PULL_MIGRATED_CONFIG_FLAGS,
             1_000_000_000_000,
-            100,
+            300,
             0,
         )
     }
@@ -73,7 +73,7 @@ impl FuzzTest {
                     constants::KLEND_LENDING_MARKET_AUTH,
                     lending_market.as_ref(),
                 ],
-                &constants::KLEND_PROGRAM_ID,
+                &constants::KLEND,
             )
             .0
     }
@@ -90,7 +90,7 @@ impl FuzzTest {
                     farm_state.as_ref(),
                     delegatee.as_ref(),
                 ],
-                &constants::FARMS_PROGRAM_KEY,
+                &constants::KFARMS,
             )
             .0
     }
