@@ -152,8 +152,6 @@ impl BankUpdateRequest {
 pub struct BankMetadataEntry {
     pub bank: Pubkey,
     pub group: Pubkey,
-    pub mint: Pubkey,
-    pub bank_seed: u64,
     pub ticker: String,
     pub description: String,
 }
@@ -162,7 +160,6 @@ pub struct BankMetadataEntry {
 pub struct BankMetadataInput {
     pub bank: Pubkey,
     pub group: Option<Pubkey>,
-    pub bank_seed: u64,
     pub ticker: Option<String>,
     pub description: Option<String>,
     pub mint: Option<Pubkey>,
@@ -209,8 +206,6 @@ struct MetadataRow {
     bank_address: String,
     #[serde(default, alias = "group", alias = "groupAddress")]
     group: Option<String>,
-    #[serde(alias = "bankSeed")]
-    bank_seed: u64,
     #[serde(alias = "tokenAddress")]
     mint: String,
     #[serde(alias = "tokenSymbol")]
@@ -784,18 +779,13 @@ fn apply_bank_metadata_entry(
         ixs.push(Instruction {
             program_id: config.program_id,
             accounts: marginfi::accounts::InitBankMetadata {
-                group: entry.group,
-                bank_mint: entry.mint,
                 bank: entry.bank,
                 fee_payer: config.authority(),
                 metadata,
                 system_program: system_program::id(),
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::InitBankMetadata {
-                bank_seed: entry.bank_seed,
-            }
-            .data(),
+            data: marginfi::instruction::InitBankMetadata {}.data(),
         });
     } else {
         println!("  metadata account already exists");
@@ -806,14 +796,12 @@ fn apply_bank_metadata_entry(
         program_id: config.program_id,
         accounts: marginfi::accounts::WriteBankMetadata {
             group: entry.group,
-            bank_mint: entry.mint,
             bank: entry.bank,
             metadata_admin: config.authority(),
             metadata,
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::WriteBankMetadata {
-            bank_seed: entry.bank_seed,
             ticker: Some(entry.ticker.clone().into_bytes()),
             description: Some(entry.description.clone().into_bytes()),
         }
@@ -978,8 +966,6 @@ fn build_metadata_entry(row: MetadataRow) -> Result<BankMetadataEntry> {
             .map(str::parse)
             .transpose()?
             .unwrap_or_default(),
-        mint: row.mint.parse()?,
-        bank_seed: row.bank_seed,
         ticker: format!("{} | {}", row.symbol, row.name),
         description: format!(
             "{} | {} | {} | {}{}",
@@ -996,7 +982,6 @@ fn resolve_bank_metadata_input(
     let BankMetadataInput {
         bank,
         group,
-        bank_seed,
         ticker,
         description,
         mint,
@@ -1015,8 +1000,6 @@ fn resolve_bank_metadata_input(
         return Ok(BankMetadataEntry {
             bank,
             group: resolved_group,
-            mint: effective_mint,
-            bank_seed,
             ticker: ticker.clone(),
             description: description.clone(),
         });
@@ -1027,7 +1010,6 @@ fn resolve_bank_metadata_input(
     let row = MetadataRow {
         bank_address: bank.to_string(),
         group: Some(resolved_group.to_string()),
-        bank_seed,
         mint: effective_mint.to_string(),
         symbol: symbol.context("symbol required when --ticker or --description is omitted")?,
         name: name.context("name required when --ticker or --description is omitted")?,
@@ -1041,8 +1023,6 @@ fn resolve_bank_metadata_input(
     Ok(BankMetadataEntry {
         bank,
         group: resolved_group,
-        mint: effective_mint,
-        bank_seed,
         ticker: ticker.unwrap_or(derived.ticker),
         description: description.unwrap_or(derived.description),
     })
@@ -1626,37 +1606,19 @@ pub fn bank_update_fees_destination(
     Ok(())
 }
 
-pub fn bank_init_metadata(
-    config: Config,
-    bank_pk: Pubkey,
-    group: Option<Pubkey>,
-    mint: Option<Pubkey>,
-    bank_seed: u64,
-) -> Result<()> {
-    let (resolved_group, resolved_mint) = resolve_metadata_bank_context(
-        &config,
-        bank_pk,
-        group,
-        mint,
-        &BankMetadataWriteOptions {
-            wait_for_bank: false,
-            wait_for_bank_timeout: Duration::from_secs(0),
-        },
-    )?;
+pub fn bank_init_metadata(config: Config, bank_pk: Pubkey) -> Result<()> {
     let metadata = derive_bank_metadata_address(&config.program_id, &bank_pk);
 
     let ix = Instruction {
         program_id: config.program_id,
         accounts: marginfi::accounts::InitBankMetadata {
-            group: resolved_group,
-            bank_mint: resolved_mint,
             bank: bank_pk,
             fee_payer: config.authority(),
             metadata,
             system_program: system_program::id(),
         }
         .to_account_metas(Some(true)),
-        data: marginfi::instruction::InitBankMetadata { bank_seed }.data(),
+        data: marginfi::instruction::InitBankMetadata {}.data(),
     };
 
     let signing_keypairs = config.get_signers(false);

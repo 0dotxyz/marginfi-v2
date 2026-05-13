@@ -103,8 +103,6 @@ pub struct WriteBankMetadataConfigEntry {
     #[serde(alias = "bank")]
     pub bank_address: String,
     pub group: Option<String>,
-    #[serde(alias = "bankSeed")]
-    pub bank_seed: u64,
     #[serde(alias = "mint", alias = "tokenAddress")]
     pub token_address: Option<String>,
     #[serde(alias = "symbol", alias = "tokenSymbol")]

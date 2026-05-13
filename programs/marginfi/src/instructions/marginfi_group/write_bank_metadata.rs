@@ -1,15 +1,37 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::Mint;
-use marginfi_type_crate::types::{BankMetadata, MarginfiGroup};
+use marginfi_type_crate::{
+    constants::BANK_SEED_KNOWN,
+    types::{Bank, BankMetadata, MarginfiGroup},
+};
 
-use crate::MarginfiError;
+use crate::{check_eq, MarginfiError};
 
 pub fn write_bank_metadata(
     ctx: Context<WriteBankMetadata>,
-    _bank_seed: u64,
     ticker: Option<Vec<u8>>,
     description: Option<Vec<u8>>,
 ) -> Result<()> {
+    // When the bank's seed is on-chain, recompute the canonical PDA and verify the passed bank
+    // account matches it. Legacy keypair banks (BANK_SEED_KNOWN unset) skip the check.
+    {
+        let bank = ctx.accounts.bank.load()?;
+        if (bank.flags & BANK_SEED_KNOWN) != 0 {
+            let (expected, _) = Pubkey::find_program_address(
+                &[
+                    bank.group.as_ref(),
+                    bank.mint.as_ref(),
+                    &bank.bank_seed.to_le_bytes(),
+                ],
+                &crate::ID,
+            );
+            check_eq!(
+                expected,
+                ctx.accounts.bank.key(),
+                MarginfiError::InvalidBankAccount
+            );
+        }
+    }
+
     let mut metadata = ctx.accounts.metadata.load_mut()?;
     apply_metadata_write(&mut metadata, ticker, description)
 }
@@ -59,32 +81,18 @@ pub(super) fn apply_metadata_write(
 }
 
 #[derive(Accounts)]
-#[instruction(bank_seed: u64)]
 pub struct WriteBankMetadata<'info> {
-    #[account(
-        has_one = metadata_admin,
-    )]
+    #[account(has_one = metadata_admin)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub bank_mint: Box<InterfaceAccount<'info, Mint>>,
-
-    /// CHECK: Canonical bank PDA; may not be initialized yet.
-    #[account(
-        seeds = [
-            group.key().as_ref(),
-            bank_mint.key().as_ref(),
-            &bank_seed.to_le_bytes(),
-        ],
-        bump,
-    )]
-    pub bank: UncheckedAccount<'info>,
+    /// Must be initialized. The metadata-to-bank binding is enforced by `metadata.has_one = bank`,
+    /// and `bank.has_one = group` ties this bank to the admin's group.
+    #[account(has_one = group)]
+    pub bank: AccountLoader<'info, Bank>,
 
     #[account(mut)]
     pub metadata_admin: Signer<'info>,
 
-    #[account(
-        mut,
-        has_one = bank
-    )]
+    #[account(mut, has_one = bank)]
     pub metadata: AccountLoader<'info, BankMetadata>,
 }
