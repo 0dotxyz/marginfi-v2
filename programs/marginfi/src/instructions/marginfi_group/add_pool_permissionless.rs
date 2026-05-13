@@ -161,7 +161,7 @@ pub fn lending_pool_add_bank_permissionless(
     emit!(LendingPoolBankCreateEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.marginfi_group.key(),
-            signer: Some(group.admin)
+            signer: Some(ctx.accounts.fee_payer.key())
         },
         bank: bank_loader.key(),
         mint: bank_mint.key(),
