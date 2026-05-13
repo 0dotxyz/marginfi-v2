@@ -2017,16 +2017,8 @@ mod test {
         );
     }
 
-    /// Regression test for M12 (Ackee audit): the `WithdrawOnly` /
-    /// `BorrowOnly` / `RepayOnly` / `DepositOnly` checks use
-    /// `is_zero_with_tolerance(ZERO_AMOUNT_THRESHOLD)`, which accepts any value
-    /// in `(0, ZERO_AMOUNT_THRESHOLD)`. Without clamping, the tolerated dust
-    /// flows through to `change_*_shares` and creates real shares on the
-    /// prohibited side — breaking the invariant (e.g. withdraw can mint a
-    /// liability in a `ReduceOnly` bank). These tests build a balance whose
-    /// fractional `current_asset_amount` / `current_liability_amount` is
-    /// engineered so the prohibited side lands inside the tolerance window,
-    /// then assert the prohibited side stays at exactly zero after the call.
+    /// Verify the operation-kind checks clamp sub-threshold dust to zero so
+    /// it can't leak shares onto the prohibited side.
     mod tolerance_clamping {
         use super::*;
         use bytemuck::Zeroable;
@@ -2218,13 +2210,8 @@ mod test {
         }
     }
 
-    /// Regression tests for L6 (Ackee audit): `close_balance` zeroed the user's
-    /// `Balance` but never unwound the corresponding entries in
-    /// `bank.total_*_shares` / `*_position_count`. Over many calls, totals
-    /// drift and counters stick non-zero, eventually blocking
-    /// `lending_pool_close_bank`. Asset-side dust must also be routed to
-    /// `collected_insurance_fees_outstanding` so vault content stays fully
-    /// accounted for (mirroring `withdraw_all`).
+    /// Verify `close_balance` decrements bank totals + position counters and
+    /// routes asset-side residual to `collected_insurance_fees_outstanding`.
     mod close_balance_accounting {
         use super::*;
         use bytemuck::Zeroable;
