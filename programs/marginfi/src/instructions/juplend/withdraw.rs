@@ -35,6 +35,7 @@ use marginfi_type_crate::types::{
     Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
     ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
 };
+use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PROGRAM_ID;
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_IN_DELEVERAGE,
 };
@@ -456,10 +457,15 @@ pub struct JuplendWithdraw<'info> {
     #[account(mut)]
     pub liquidity: UncheckedAccount<'info>,
 
-    /// CHECK: validated by the JupLend program
+    /// CHECK: pinned to the JupLend liquidity program
+    #[account(address = JUPLEND_LIQUIDITY_PROGRAM_ID)]
     pub liquidity_program: UncheckedAccount<'info>,
 
-    /// CHECK: validated by the JupLend program
+    /// CHECK: cross-checked against integration_acc_1.rewards_rate_model
+    #[account(
+        constraint = rewards_rate_model.key() == integration_acc_1.load()?.rewards_rate_model
+            @ MarginfiError::InvalidJuplendLending,
+    )]
     pub rewards_rate_model: UncheckedAccount<'info>,
 
     /// CHECK: validated against hardcoded program id

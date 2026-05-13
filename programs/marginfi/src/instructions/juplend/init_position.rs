@@ -11,6 +11,7 @@ use juplend_mocks::juplend_earn::cpi::accounts::Deposit;
 use juplend_mocks::juplend_earn::cpi::deposit;
 use juplend_mocks::state::Lending as JuplendLending;
 use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
+use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PROGRAM_ID;
 use marginfi_type_crate::types::{Bank, BankOperationalState};
 
 /// Initialize the bank-level JupLend position used by marginfi.
@@ -136,10 +137,15 @@ pub struct JuplendInitPosition<'info> {
     #[account(mut)]
     pub liquidity: UncheckedAccount<'info>,
 
-    /// CHECK: validated by the JupLend program
+    /// CHECK: pinned to the JupLend liquidity program
+    #[account(address = JUPLEND_LIQUIDITY_PROGRAM_ID)]
     pub liquidity_program: UncheckedAccount<'info>,
 
-    /// CHECK: validated by the JupLend program
+    /// CHECK: cross-checked against integration_acc_1.rewards_rate_model
+    #[account(
+        constraint = rewards_rate_model.key() == integration_acc_1.load()?.rewards_rate_model
+            @ MarginfiError::InvalidJuplendLending,
+    )]
     pub rewards_rate_model: UncheckedAccount<'info>,
 
     /// CHECK: validated against hardcoded program id
