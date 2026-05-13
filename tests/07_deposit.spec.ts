@@ -22,6 +22,7 @@ import {
 } from "./rootHooks";
 import {
   assertBNApproximately,
+  assertBNEqual,
   assertI80F48Approx,
   assertI80F48Equal,
   expectFailedTxWithError,
@@ -139,6 +140,8 @@ describe("Deposit funds", () => {
     assert.equal(bankAfter.lendingPositionCount, 1);
 
     const userAcc = await program.account.marginfiAccount.fetch(user0Account);
+    assert.equal(userAcc.indexerFlags.isEmpty, 0);
+    assert.equal(userAcc.indexerFlags.isLendingOnly, 1);
     const balances = userAcc.lendingAccount.balances;
     assert.equal(balances[0].active, 1);
     // Note: The first deposit issues shares 1:1 and the shares use the same decimals
@@ -215,7 +218,7 @@ describe("Deposit funds", () => {
     // Init a dummy bank for this test...
     let config = defaultBankConfig();
     config.depositLimit = new BN(10_000);
-    const seed = new BN(0);
+    const seed = new BN(7639847);
     const [bankKey] = deriveBankWithSeed(
       program.programId,
       marginfiGroup.publicKey,
@@ -268,6 +271,7 @@ describe("Deposit funds", () => {
     );
 
     let bankAfter = await program.account.bank.fetch(bankKey);
+    assertBNEqual(bankAfter.bankSeed, seed);
     assert.equal(bankAfter.lendingPositionCount, 1);
 
     // And now user user 1 attempts to deposit up to the deposit cap

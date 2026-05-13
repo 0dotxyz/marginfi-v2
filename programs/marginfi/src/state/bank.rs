@@ -60,6 +60,7 @@ pub trait BankImpl {
         insurance_vault_authority_bump: u8,
         fee_vault_bump: u8,
         fee_vault_authority_bump: u8,
+        bank_seed: u64,
     ) -> Self;
     fn get_liability_amount(&self, shares: I80F48) -> MarginfiResult<I80F48>;
     fn get_asset_amount(&self, shares: I80F48) -> MarginfiResult<I80F48>;
@@ -137,6 +138,7 @@ impl BankImpl for Bank {
         insurance_vault_authority_bump: u8,
         fee_vault_bump: u8,
         fee_vault_authority_bump: u8,
+        bank_seed: u64,
     ) -> Self {
         Self {
             mint,
@@ -171,6 +173,7 @@ impl BankImpl for Bank {
             _padding_0: [0; 16],
             integration_acc_1: Pubkey::default(),
             integration_acc_2: Pubkey::default(),
+            bank_seed,
             ..Default::default()
         }
     }

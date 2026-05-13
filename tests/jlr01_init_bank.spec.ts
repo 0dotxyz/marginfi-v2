@@ -50,6 +50,7 @@ import {
 import { processBankrunTransaction, safeGetAccountInfo } from "./utils/tools";
 import {
   ASSET_TAG_DEFAULT,
+  BANK_SEED_KNOWN_FLAG,
   CLOSE_ENABLED_FLAG,
   ORACLE_SETUP_PYTH_PUSH,
   PYTH_PULL_MIGRATED,
@@ -344,7 +345,8 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
       assertI80F48Equal(bank.liabilityShareValue, 1);
       assertI80F48Equal(bank.totalAssetShares, 0);
       assertI80F48Equal(bank.totalLiabilityShares, 0);
-      assertBNEqual(bank.flags, CLOSE_ENABLED_FLAG);
+      assertBNEqual(bank.flags, CLOSE_ENABLED_FLAG + BANK_SEED_KNOWN_FLAG);
+      assertBNEqual(bank.bankSeed, spec.seed);
       assertKeyDefault(bank.emissionsMint);
       assertBNEqual(bank.emissionsRate, 0);
       assertI80F48Equal(bank.emissionsRemaining, 0);

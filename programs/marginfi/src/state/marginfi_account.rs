@@ -69,6 +69,7 @@ pub trait MarginfiAccountImpl {
     fn increment_active_orders(&mut self) -> MarginfiResult;
     fn decrement_active_orders(&mut self) -> MarginfiResult;
     fn can_be_closed(&self) -> bool;
+    fn sync_indexer_flags(&mut self);
 }
 
 /// Checks if a signer is authorized to perform actions on a marginfi account.
@@ -128,6 +129,11 @@ impl MarginfiAccountImpl for MarginfiAccount {
         self.migrated_from = Pubkey::default();
         self.last_update = current_timestamp;
         self.migrated_to = Pubkey::default();
+        self.indexer_flags.is_empty = 1;
+        // Seed activity flags so freshly-created accounts aren't immediately eligible for the
+        // permissionless close path before the first pulse.
+        self.indexer_flags.was_active_30d = 1;
+        self.indexer_flags.was_active_60d = 1;
         self.active_orders = 0;
     }
 
@@ -176,13 +182,24 @@ impl MarginfiAccountImpl for MarginfiAccount {
         let is_disabled = self.get_flag(ACCOUNT_DISABLED);
         let is_in_flashloan = self.get_flag(ACCOUNT_IN_FLASHLOAN);
         let is_in_receivership = self.get_flag(ACCOUNT_IN_RECEIVERSHIP);
+        let is_frozen = self.get_flag(ACCOUNT_FROZEN);
         let only_has_empty_balances = self
             .lending_account
             .balances
             .iter()
             .all(|balance| balance.get_side().is_none());
 
-        !is_disabled && only_has_empty_balances && !is_in_flashloan && !is_in_receivership
+        !is_disabled
+            && only_has_empty_balances
+            && !is_in_flashloan
+            && !is_in_receivership
+            && !is_frozen
+    }
+
+    fn sync_indexer_flags(&mut self) {
+        self.indexer_flags
+            .sync_balance_derived(&self.lending_account.balances);
+        self.indexer_flags.mark_active_now();
     }
 }
 
@@ -992,6 +1009,48 @@ pub fn check_account_bankrupt<'info>(
     }
 
     Ok(())
+}
+
+/// Computes `indexer_flags.has_isolated` from live bank risk tiers and current liabilities.
+///
+/// Returns 1 iff the account has any isolated-tier liability.
+pub fn compute_has_isolated_liability_flag<'info>(
+    marginfi_account: &MarginfiAccount,
+    remaining_ais: &'info [AccountInfo<'info>],
+) -> MarginfiResult<u8> {
+    let mut has_isolated_liability = false;
+    let mut account_index = 0usize;
+
+    for balance in marginfi_account
+        .lending_account
+        .balances
+        .iter()
+        .filter(|b| b.is_active())
+    {
+        let bank_ai = remaining_ais
+            .get(account_index)
+            .ok_or(MarginfiError::InvalidBankAccount)?;
+        let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
+        let bank = bank_al.load()?;
+
+        check_eq!(
+            balance.bank_pk,
+            *bank_ai.key,
+            MarginfiError::InvalidBankAccount
+        );
+
+        let num_accounts = get_remaining_accounts_per_bank(&bank)?;
+
+        if !balance.is_empty(BalanceSide::Liabilities)
+            && bank.config.risk_tier == RiskTier::Isolated
+        {
+            has_isolated_liability = true;
+        }
+
+        account_index += num_accounts;
+    }
+
+    Ok(has_isolated_liability as u8)
 }
 
 /// Check the isolated-risk-tier constraint (internal helper).

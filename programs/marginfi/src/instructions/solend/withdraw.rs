@@ -224,6 +224,7 @@ pub fn solend_withdraw<'info>(
         health_cache.timestamp = Clock::get()?.unix_timestamp;
 
         marginfi_account.lending_account.sort_balances();
+        marginfi_account.sync_indexer_flags();
 
         // SAFETY: The `bank` AccountLoader shares the same underlying account as one of the
         // entries in `remaining_accounts` (passed for oracle/health-check lookups). The Solana

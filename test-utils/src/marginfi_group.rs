@@ -1052,15 +1052,17 @@ impl MarginfiGroupFixture {
     pub async fn try_lending_pool_backfill_bank_is_t22_flag(
         &self,
         bank: &BankFixture,
+        bank_seed: Option<u64>,
     ) -> Result<(), BanksClientError> {
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::LendingPoolBackfillBankIsT22Flag {
                 bank: bank.key,
+                group: self.key,
                 mint: bank.mint.key,
             }
             .to_account_metas(Some(true)),
-            data: LendingPoolBackfillBankIsT22Flag {}.data(),
+            data: LendingPoolBackfillBankIsT22Flag { bank_seed }.data(),
         };
 
         let tx = Transaction::new_signed_with_payer(

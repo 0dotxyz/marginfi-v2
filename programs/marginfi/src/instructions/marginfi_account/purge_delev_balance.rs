@@ -45,6 +45,7 @@ pub fn lending_account_purge_delev_balance(
     bank.change_asset_shares(-asset_shares, false)?;
 
     lending_account.sort_balances();
+    marginfi_account.sync_indexer_flags();
     marginfi_account.last_update = Clock::get()?.unix_timestamp as u64;
 
     Ok(())

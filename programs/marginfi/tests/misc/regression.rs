@@ -55,7 +55,7 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(account.active_orders, 0);
     assert_eq!(account._pad0, [0u8; 2]);
     assert_eq!(account.liquidation_record, Pubkey::default());
-    assert_eq!(account._padding0, [0; 7]);
+    assert_eq!(account._padding0, [0; 4]);
 
     let balance_1 = account.lending_account.balances[0];
     assert!(balance_1.is_active());
@@ -135,7 +135,7 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     );
     assert_eq!(account.account_flags, 0);
     assert_eq!(account.last_update, 0);
-    assert_eq!(account._padding0, [0; 7]);
+    assert_eq!(account._padding0, [0; 4]);
 
     let balance_1 = account.lending_account.balances[0];
     assert!(balance_1.is_active());
@@ -220,7 +220,7 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(account.bump, 0);
     assert_eq!(account._pad0, [0; 2]);
     assert_eq!(account.liquidation_record, Pubkey::default());
-    assert_eq!(account._padding0, [0; 7]);
+    assert_eq!(account._padding0, [0; 4]);
 
     let balance_1 = account.lending_account.balances[0];
     assert!(!balance_1.is_active());
@@ -704,7 +704,10 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(bank.integration_acc_2, Pubkey::default());
     assert_eq!(bank.integration_acc_3, Pubkey::default());
     assert_eq!(bank._pad_0, [0u8; 16]);
-    assert_eq!(bank._padding_1, [[0u64; 2]; 7]);
+    // Legacy banks pre-date the `bank_seed` field, so the bytes that now back it must read 0.
+    // Together with `_padding_1`, this still covers the original 16 + 112 = 128B reserve.
+    assert_eq!(bank.bank_seed, 0);
+    assert_eq!(bank._padding_1, [0u64; 13]);
 
     Ok(())
 }

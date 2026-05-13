@@ -203,6 +203,7 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     bank.update_cache_price(cached_price)?;
 
     marginfi_account.set_flag(ACCOUNT_DISABLED, true);
+    marginfi_account.indexer_flags.has_been_bankrupted = 1;
     marginfi_account.last_update = clock.unix_timestamp as u64;
     if kill_bank {
         msg!("bank had debt exceeding liabilities and has been killed");
