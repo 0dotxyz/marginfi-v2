@@ -28,7 +28,7 @@ use marginfi_type_crate::{
         ix_discriminators, EXECUTE_ORDER_SEED, FEE_STATE_SEED, ORDER_ACTIVE_TAGS, ORDER_SEED,
     },
     types::{
-        Bank, BalanceSide, ExecuteOrderRecord, FeeState, HealthCache, HealthPriceMode,
+        BalanceSide, Bank, ExecuteOrderRecord, FeeState, HealthCache, HealthPriceMode,
         MarginfiAccount, MarginfiGroup, Order, OrderTrigger, OrderTriggerType, RequirementType,
         ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN,
         ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,

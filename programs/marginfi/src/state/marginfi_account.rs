@@ -2074,12 +2074,8 @@ mod test {
             // share_value < 1 by 5e-6 → current_asset_amount = 10 * 0.999995 = 9.99995.
             let asset_share_value = I80F48!(0.999995);
             let asset_shares = I80F48::from_num(SHARES);
-            let (mut bank, mut balance) = make_bank_and_balance(
-                asset_share_value,
-                I80F48::ONE,
-                asset_shares,
-                I80F48::ZERO,
-            );
+            let (mut bank, mut balance) =
+                make_bank_and_balance(asset_share_value, I80F48::ONE, asset_shares, I80F48::ZERO);
             let current_asset_amount = asset_shares * asset_share_value;
             // Withdraw exactly SHARES raw units → liability_amount_increase = 5e-5,
             // which is < ZERO_AMOUNT_THRESHOLD (1e-4) and bypasses the check.
