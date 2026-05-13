@@ -906,10 +906,7 @@ export const panicUnpausePermissionless = async (
 };
 
 type InitBankMetadataArgs = {
-  group: PublicKey;
-  bankMint: PublicKey;
   bank: PublicKey;
-  bankSeed: BN;
 };
 
 export const initBankMetadata = (
@@ -917,12 +914,9 @@ export const initBankMetadata = (
   args: InitBankMetadataArgs,
 ) => {
   const ix = program.methods
-    .initBankMetadata(args.bankSeed)
+    .initBankMetadata()
     .accounts({
-      group: args.group,
-      bankMint: args.bankMint,
-      // metadata: args.metadata, // derived from bank
-      // bank: args.bank, // derived from seeds
+      // metadata derived from bank
     })
     .accountsPartial({ bank: args.bank })
     .instruction();
@@ -959,9 +953,7 @@ export const setFixedPrice = (
 
 type WriteBankMetadataArgs = {
   group: PublicKey;
-  bankMint: PublicKey;
   bank: PublicKey;
-  bankSeed: BN;
   metadata: PublicKey;
   /// Pass undefined to skip. Limit 64 bytes
   ticker?: string;
@@ -1001,13 +993,11 @@ export const writeBankMetadata = (
 
   const ix = program.methods
     .writeBankMetadata(
-      args.bankSeed,
       tickerBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
       descBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
     )
     .accounts({
       group: args.group,
-      bankMint: args.bankMint,
       bank: args.bank,
       // metadataAdmin: args.metadataAdmin, // implied from metadata
       metadata: args.metadata,

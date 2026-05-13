@@ -3,11 +3,10 @@ import {
   configureBank,
   configureBankOracle,
   groupConfigure,
-  groupInitialize,
   initBankMetadata,
   writeBankMetadata,
 } from "./utils/group-instructions";
-import { Keypair, Transaction } from "@solana/web3.js";
+import { Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairUsdc,
@@ -40,7 +39,10 @@ import {
   ORACLE_SETUP_FIXED,
   TOKENLESS_REPAYMENTS_ALLOWED,
 } from "./utils/types";
-import { deriveBankAndMetadataWithSeed } from "./utils/pdas";
+import {
+  deriveBankAndMetadataWithSeed,
+  deriveBankMetadata,
+} from "./utils/pdas";
 
 let program: Program<Marginfi>;
 
@@ -354,7 +356,9 @@ describe("Lending pool configure bank", () => {
     assertBNEqual(bank.flags, FREEZE_SETTINGS + CLOSE_ENABLED_FLAG); // still frozen
   });
 
-  it("(permissionless) Init blank metadata for a seeded bank before bank init", async () => {
+  it("(permissionless) Init blank metadata for an arbitrary bank pubkey", async () => {
+    // init_bank_metadata accepts any pubkey; the caller is on the hook for the rent if the bank
+    // never materializes. write_bank_metadata is gated separately (requires init'd bank).
     const bankSeed = new BN(41);
     const { bank, metadata, metadataBump } = deriveBankAndMetadataWithSeed(
       program.programId,
@@ -365,12 +369,7 @@ describe("Lending pool configure bank", () => {
 
     await users[1].mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
-        await initBankMetadata(users[1].mrgnProgram, {
-          group: marginfiGroup.publicKey,
-          bankMint: ecosystem.usdcMint.publicKey,
-          bank,
-          bankSeed,
-        })
+        await initBankMetadata(users[1].mrgnProgram, { bank })
       )
     );
 
@@ -379,58 +378,9 @@ describe("Lending pool configure bank", () => {
     assert.equal(meta.bump, metadataBump);
   });
 
-  it("(attacker) init metadata for another group's seeded bank before bank init - should fail", async () => {
-    const attacker = users[2];
-    const attackerGroup = Keypair.generate();
-    const bankSeed = new BN(42);
-    const { bank } = deriveBankAndMetadataWithSeed(
-      program.programId,
-      marginfiGroup.publicKey,
-      ecosystem.usdcMint.publicKey,
-      bankSeed
-    );
-
-    await attacker.mrgnProgram.provider.sendAndConfirm(
-      new Transaction().add(
-        await groupInitialize(attacker.mrgnProgram, {
-          marginfiGroup: attackerGroup.publicKey,
-          admin: attacker.wallet.publicKey,
-        })
-      ),
-      [attackerGroup]
-    );
-
-    await attacker.mrgnProgram.provider.sendAndConfirm(
-      new Transaction().add(
-        await groupConfigure(attacker.mrgnProgram, {
-          marginfiGroup: attackerGroup.publicKey,
-          newMetadataAdmin: attacker.wallet.publicKey,
-        })
-      )
-    );
-
-    await expectFailedTxWithMessage(async () => {
-      await attacker.mrgnProgram.provider.sendAndConfirm(
-        new Transaction().add(
-          await initBankMetadata(attacker.mrgnProgram, {
-            group: attackerGroup.publicKey,
-            bankMint: ecosystem.usdcMint.publicKey,
-            bank,
-            bankSeed,
-          })
-        )
-      );
-    }, "ConstraintSeeds");
-  });
-
-  it("(meta admin) Update metadata for a seeded bank", async () => {
-    const bankSeed = new BN(43);
-    const { bank, metadata } = deriveBankAndMetadataWithSeed(
-      program.programId,
-      marginfiGroup.publicKey,
-      ecosystem.usdcMint.publicKey,
-      bankSeed
-    );
+  it("(meta admin) Update metadata for an initialized bank", async () => {
+    const bank = bankKeypairUsdc.publicKey;
+    const [metadata] = deriveBankMetadata(program.programId, bank);
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
@@ -447,12 +397,7 @@ describe("Lending pool configure bank", () => {
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
-        await initBankMetadata(groupAdmin.mrgnProgram, {
-          group: marginfiGroup.publicKey,
-          bankMint: ecosystem.usdcMint.publicKey,
-          bank,
-          bankSeed,
-        })
+        await initBankMetadata(groupAdmin.mrgnProgram, { bank })
       )
     );
 
@@ -465,9 +410,7 @@ describe("Lending pool configure bank", () => {
       new Transaction().add(
         await writeBankMetadata(users[0].mrgnProgram, {
           group: marginfiGroup.publicKey,
-          bankMint: ecosystem.usdcMint.publicKey,
           bank,
-          bankSeed,
           metadata,
           ticker: tickerStr,
           description: descStr,
