@@ -1,0 +1,105 @@
+[fuzz.metrics]
+enabled = true
+dashboard = false
+json = false
+
+
+[[fuzz.programs]]
+address = "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA"
+program = "../target/deploy/marginfi.so"
+ 
+
+[[fuzz.fork]]
+address = "SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv"
+cluster = "m"
+
+
+[[fuzz.fork]]
+address = "DPvVSQYhZXQ2ygfT2Qjdg6iyeQVAyiz8okj88YRjy6NN"
+cluster = "m"
+
+## USDC
+# [[fuzz.fork]]
+# address = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+# cluster = "m"
+
+
+## Pyth push USDC
+[[fuzz.fork]]
+overwrite = true
+address = "Dpw1EAVrSB1ibxiDQyTAW6Zip3J4Btk2x4SgApQCeFbX"
+cluster = "m"
+
+
+## Pyth push WETH
+[[fuzz.fork]]
+overwrite = true
+address = "42amVS4KgzR9rA28tkVYqVXjq9Qa8dcZQMbH5EYFX6XC"
+cluster = "m"
+
+## Pyth push BTC
+[[fuzz.fork]]
+overwrite = true
+address = "4cSM2e6rvbGQUFiJbqytoVMi5GgghSMr8LwVrT9VPSPo"
+cluster = "m"
+
+## KLend
+[[fuzz.fork]]
+address = "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD"
+cluster = "m"
+
+
+## Lend Market (MAIN)
+[[fuzz.fork]]
+overwrite = true
+address = "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF"
+cluster = "m"
+
+
+## Kamino USDC reserve
+[[fuzz.fork]]
+overwrite = true
+address = "D6q6wuQSrifJKZYpR1M8R4YawnLDtDsMmWM1NbBmgJ59"
+cluster = "m"
+
+
+## USDC Reserve Scope prices
+[[fuzz.fork]]
+overwrite = true
+address = "3t4JZcueEzTbVP6kLxXrL3VpWx45jDer4eqysweBchNH"
+cluster = "m"
+
+
+## USDC Reserve liquidity supply
+[[fuzz.fork]]
+overwrite = true
+address = "Bgq7trRgVMeq33yt235zM2onQ4bRDBsY5EWiTetF4qw6"
+cluster = "m"
+
+
+## USDC Reserve collateral mint
+[[fuzz.fork]]
+overwrite = true
+address = "B8V6WVjPxW1UGwVDfxH2d2r8SyT4cqn7dQRK6XneVa7D"
+cluster = "m"
+
+
+## USDC Reserve collateral supply vault
+[[fuzz.fork]]
+overwrite = true
+address = "3DzjXRfxRm6iejfyyMynR4tScddaanrePJ1NJU2XnPPL"
+cluster = "m"
+
+
+## Kamino Farms program
+[[fuzz.fork]]
+address = "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr"
+cluster = "m"
+
+
+
+## Farms Accounts Reserve Farm State:
+[[fuzz.fork]]
+overwrite = true
+address = "JAvnB9AKtgPsTEoKmn24Bq64UMoYcrtWtq42HHBdsPkh"
+cluster = "m"

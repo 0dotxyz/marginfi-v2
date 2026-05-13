@@ -1,0 +1,93 @@
+name: Trident Fuzz Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - develop
+      - master
+
+env:
+  CARGO_TERM_COLOR: always
+  SOLANA_VERSION: "v3.1.13"
+  TRIDENT_VERSION: "0.13.0-rc.3"
+
+jobs:
+  build:
+    name: Build Programs
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout Repository
+
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y build-essential libudev-dev protobuf-compiler libprotobuf-dev
+        shell: bash
+
+      - name: Install Solana
+        uses: ./.github/actions/solana/install-solana
+        with:
+          solana-version: ${{ env.SOLANA_VERSION }}
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          shared-key: "trident-build"
+
+      - name: Build Marginfi Program
+        run: cargo build-sbf --manifest-path programs/marginfi/Cargo.toml --arch v2
+
+      - name: Upload Program Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: program-binaries
+          path: target/deploy/*.so
+          retention-days: 1
+
+  fuzz-tests:
+    name: Fuzz - ${{ matrix.test.name }}
+    needs: build
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - name: "fuzz_0"
+            target: "fuzz_0"
+
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout Repository
+
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y build-essential libudev-dev protobuf-compiler libprotobuf-dev
+        shell: bash
+
+      - name: Download Program Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: program-binaries
+          path: target/deploy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          shared-key: "trident-fuzz-${{ matrix.test.target }}"
+          workspaces: |
+            ./trident-tests
+
+      - name: Install Trident
+        run: cargo install trident-cli --version ${{ env.TRIDENT_VERSION }}
+
+      - name: Run Fuzz Test
+        working-directory: trident-tests
+        run: trident fuzz run ${{ matrix.test.target }} -e invariants
+
+  checks:
+    name: Fuzz Tests (Checks)
+    needs: fuzz-tests
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "All fuzz tests completed successfully"
