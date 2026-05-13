@@ -1643,4 +1643,3 @@ async fn keeper_close_order_success_after_set_flags(
 
     Ok(())
 }
-
