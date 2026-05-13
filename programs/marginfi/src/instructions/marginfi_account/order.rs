@@ -7,14 +7,13 @@ use crate::ix_utils::{
     get_discrim_hash, keys_sha256_hash, validate_not_cpi_by_stack_height, Hashable,
 };
 use crate::state::marginfi_account::{
-    account_not_frozen_for_authority, get_health_components, get_remaining_accounts_per_bank,
-    get_tagged_account_health_components, is_signer_authorized,
+    account_not_frozen_for_authority, get_health_components, get_tagged_account_health_components,
+    is_signer_authorized,
 };
 use crate::{
     check,
     prelude::*,
     state::{
-        bank::BankImpl,
         marginfi_account::{LendingAccountImpl, MarginfiAccountImpl},
         marginfi_group::MarginfiGroupImpl,
         order::{ExecuteOrderRecordImpl, OrderImpl},
@@ -29,10 +28,10 @@ use marginfi_type_crate::{
         ix_discriminators, EXECUTE_ORDER_SEED, FEE_STATE_SEED, ORDER_ACTIVE_TAGS, ORDER_SEED,
     },
     types::{
-        BalanceSide, Bank, ExecuteOrderRecord, FeeState, HealthCache, HealthPriceMode,
-        MarginfiAccount, MarginfiGroup, Order, OrderTrigger, OrderTriggerType, RequirementType,
-        ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+        BalanceSide, ExecuteOrderRecord, FeeState, HealthCache, HealthPriceMode, MarginfiAccount,
+        MarginfiGroup, Order, OrderTrigger, OrderTriggerType, RequirementType, ACCOUNT_DISABLED,
+        ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
+        ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -269,60 +268,6 @@ pub fn set_keeper_close_flags(
     Ok(())
 }
 
-/// Accrue interest on every order-tagged bank so the snapshot taken immediately afterwards reflects
-/// current-slot-fresh `asset_share_value` / `liability_share_value`. Closes M14: without this, the
-/// `LENDING_ACCOUNT_WITHDRAW` / `LENDING_ACCOUNT_REPAY` (and integration withdraw equivalents)
-/// running between start and end accrue the same banks, lifting their share values, while the start
-/// snapshot was taken against the unaccrued state. After this call, any subsequent `accrue_interest`
-/// in the same slot is a no-op (`Δt = 0`), so snapshot equals end-state.
-fn accrue_order_tagged_banks<'info>(
-    marginfi_account: &MarginfiAccount,
-    remaining_ais: &'info [AccountInfo<'info>],
-    order_tags: &[u16],
-    group: &MarginfiGroup,
-    timestamp: i64,
-) -> MarginfiResult<()> {
-    let mut account_index = 0usize;
-
-    for balance in marginfi_account
-        .lending_account
-        .balances
-        .iter()
-        .filter(|b| b.is_active())
-    {
-        let bank_ai = remaining_ais
-            .get(account_index)
-            .ok_or(MarginfiError::InvalidBankAccount)?;
-        let bank_al: AccountLoader<Bank> = AccountLoader::try_from(bank_ai)?;
-        check_eq!(
-            balance.bank_pk,
-            *bank_ai.key,
-            MarginfiError::InvalidBankAccount
-        );
-
-        let is_tagged = balance.tag != 0 && order_tags.iter().any(|t| *t == balance.tag);
-
-        let num_accounts = if is_tagged {
-            let mut bank = bank_al.load_mut()?;
-            let n = get_remaining_accounts_per_bank(&bank)?;
-            bank.accrue_interest(
-                timestamp,
-                group,
-                #[cfg(not(feature = "client"))]
-                bank_al.key(),
-            )?;
-            n
-        } else {
-            let bank = bank_al.load()?;
-            get_remaining_accounts_per_bank(&bank)?
-        };
-
-        account_index += num_accounts;
-    }
-
-    Ok(())
-}
-
 pub fn start_execute_order<'info>(
     ctx: Context<'_, '_, 'info, 'info, StartExecuteOrder<'info>>,
 ) -> MarginfiResult {
@@ -333,7 +278,6 @@ pub fn start_execute_order<'info>(
         order: order_loader,
         execute_record: execute_record_loader,
         instruction_sysvar,
-        group: group_loader,
         ..
     } = &ctx.accounts;
 
@@ -341,20 +285,6 @@ pub fn start_execute_order<'info>(
     let mut order = order_loader.load_mut()?;
 
     marginfi_account.set_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
-
-    // Force-accrue the order-tagged banks *before* snapshotting. This synchronises the snapshot
-    // with the post-accrual state the keeper's withdraw/repay would have produced anyway, so
-    // end_execute_order doesn't compare a stale baseline against a freshly-accrued `net`.
-    {
-        let group = group_loader.load()?;
-        accrue_order_tagged_banks(
-            &marginfi_account,
-            ctx.remaining_accounts,
-            &order.tags,
-            &group,
-            Clock::get()?.unix_timestamp,
-        )?;
-    }
 
     let (order_assets_in_equity, order_liabs_in_equity, order_asset_count, order_liab_count) =
         get_tagged_account_health_components(
