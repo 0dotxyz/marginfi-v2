@@ -6,7 +6,7 @@ members = [
     "programs/test_transfer_hook",
     "type-crate",
     "id-crate",
-    "clients/rust/marginfi-cli"
+    "p0-cli"
 ]
 exclude = [
   "shamir-split",
