@@ -21,6 +21,7 @@ from typing import Any
 
 LENDING_KEEP_CANONICAL = {
     "refresh_reserve",
+    "refresh_reserves_batch",
     "init_user_metadata",
     "init_obligation",
     "init_obligation_farms_for_reserve",

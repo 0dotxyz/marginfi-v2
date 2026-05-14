@@ -117,6 +117,8 @@ async fn marginfi_account_borrow_success(
         .await;
     let marginfi_account = user_mfi_account_f.load().await;
     assert_eq!(marginfi_account.last_update, pre_last_update + 1);
+    assert_eq!(marginfi_account.indexer_flags.is_lending_only, 0);
+    assert_eq!(marginfi_account.indexer_flags.is_single_borrower, 1);
 
     let balance = marginfi_account
         .lending_account

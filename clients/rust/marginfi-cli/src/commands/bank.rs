@@ -420,14 +420,6 @@ pub enum BankCommand {
         #[clap(long)]
         copy_to_bank: String,
     },
-    /// Migrate legacy curve encoding to seven-point format
-    ///
-    /// Example: `mfi bank migrate-curve <BANK_PUBKEY>`
-    #[clap(
-        after_help = "Example:\n  mfi bank migrate-curve <BANK_PUBKEY>",
-        after_long_help = "Example:\n  mfi bank migrate-curve <BANK_PUBKEY>"
-    )]
-    MigrateCurve { bank_pk: String },
     /// Refresh the cached oracle price for a bank
     ///
     /// Example: `mfi bank pulse-price-cache <BANK_PUBKEY>`
@@ -481,7 +473,21 @@ pub enum BankCommand {
         after_help = "Example:\n  mfi bank init-metadata <BANK_PUBKEY>",
         after_long_help = "Example:\n  mfi bank init-metadata <BANK_PUBKEY>"
     )]
-    InitMetadata { bank_pk: String },
+    InitMetadata {
+        bank_pk: String,
+        #[clap(
+            long,
+            help = "Required for pre-init banks if the bank account does not exist yet"
+        )]
+        group: Option<Pubkey>,
+        #[clap(
+            long,
+            help = "Required for pre-init banks if the bank account does not exist yet"
+        )]
+        mint: Option<Pubkey>,
+        #[clap(long, help = "Canonical bank seed", required = true)]
+        seed: u64,
+    },
     /// Initialize if needed, then write ticker and description to one or more bank metadata accounts
     ///
     /// Example: `mfi bank write-metadata <BANK_PUBKEY> --symbol USDC --name "USD Coin" --wait-for-bank`
@@ -499,9 +505,13 @@ pub enum BankCommand {
         #[clap(long, help = "Print an example JSON config and exit", action)]
         config_example: bool,
         #[clap(long)]
+        group: Option<Pubkey>,
+        #[clap(long)]
         ticker: Option<String>,
         #[clap(long)]
         description: Option<String>,
+        #[clap(long, help = "Canonical bank seed")]
+        seed: Option<u64>,
         #[clap(long)]
         mint: Option<Pubkey>,
         #[clap(long)]
@@ -776,8 +786,10 @@ fn build_bank_metadata_entries(
     profile_group: Option<Pubkey>,
     bank_pk: Option<String>,
     config_path: Option<PathBuf>,
+    group: Option<Pubkey>,
     ticker: Option<String>,
     description: Option<String>,
+    bank_seed: Option<u64>,
     mint: Option<Pubkey>,
     symbol: Option<String>,
     name: Option<String>,
@@ -794,6 +806,12 @@ fn build_bank_metadata_entries(
             .map(|entry| {
                 Ok(processor::BankMetadataInput {
                     bank: super::resolve_bank_for_group(&entry.bank_address, profile_group)?,
+                    group: entry
+                        .group
+                        .as_deref()
+                        .map(configs::parse_pubkey)
+                        .transpose()?,
+                    bank_seed: entry.bank_seed,
                     ticker: None,
                     description: None,
                     mint: entry
@@ -817,6 +835,8 @@ fn build_bank_metadata_entries(
             &bank_pk.context("bank_pk required unless --config is provided")?,
             profile_group,
         )?,
+        group,
+        bank_seed: bank_seed.context("--seed required unless --config is provided")?,
         ticker,
         description,
         mint,
@@ -1261,10 +1281,6 @@ pub fn dispatch(subcmd: BankCommand, global_options: &GlobalOptions) -> Result<(
                 super::resolve_bank_for_group(&copy_to_bank, profile.marginfi_group)?;
             processor::bank_clone_emode(config, copy_from_bank, copy_to_bank)
         }
-        BankCommand::MigrateCurve { bank_pk } => {
-            let bank_pk = super::resolve_bank_for_group(&bank_pk, profile.marginfi_group)?;
-            processor::bank_migrate_curve(config, bank_pk)
-        }
         BankCommand::PulsePriceCache { bank_pk } => {
             let bank_pk = super::resolve_bank_for_group(&bank_pk, profile.marginfi_group)?;
             processor::bank_pulse_price_cache(config, bank_pk)
@@ -1293,16 +1309,23 @@ pub fn dispatch(subcmd: BankCommand, global_options: &GlobalOptions) -> Result<(
             let bank_pk = super::resolve_bank_for_group(&bank_pk, profile.marginfi_group)?;
             processor::bank_update_fees_destination(config, bank_pk, destination)
         }
-        BankCommand::InitMetadata { bank_pk } => {
+        BankCommand::InitMetadata {
+            bank_pk,
+            group,
+            mint,
+            seed,
+        } => {
             let bank_pk = super::resolve_bank_for_group(&bank_pk, profile.marginfi_group)?;
-            processor::bank_init_metadata(config, bank_pk)
+            processor::bank_init_metadata(config, bank_pk, group, mint, seed)
         }
         BankCommand::WriteMetadata {
             bank_pk,
             config: config_path,
             config_example,
+            group,
             ticker,
             description,
+            seed,
             mint,
             symbol,
             name,
@@ -1321,8 +1344,10 @@ pub fn dispatch(subcmd: BankCommand, global_options: &GlobalOptions) -> Result<(
                 profile.marginfi_group,
                 bank_pk,
                 config_path,
+                group,
                 ticker,
                 description,
+                seed,
                 mint,
                 symbol,
                 name,

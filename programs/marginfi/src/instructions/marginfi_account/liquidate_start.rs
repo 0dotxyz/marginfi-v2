@@ -1,6 +1,6 @@
 use crate::{
     check,
-    constants::{ASSOCIATED_TOKEN_KEY, COMPUTE_PROGRAM_KEY, DRIFT_PROGRAM_ID, JUP_KEY, TITAN_KEY},
+    constants::{ASSOCIATED_TOKEN_KEY, COMPUTE_PROGRAM_KEY, JUP_KEY, TITAN_KEY},
     ix_utils::{
         get_discrim_hash, load_and_validate_instructions, validate_ix_first, validate_ix_last,
         validate_ixes_exclusive, validate_not_cpi_by_stack_height, validate_not_cpi_with_sysvar,
@@ -9,8 +9,7 @@ use crate::{
     prelude::*,
     state::marginfi_account::{
         check_pre_liquidation_condition_and_get_account_health, get_health_components,
-        write_liquidation_price_cache_from, HealthPriceMode, LiquidationPriceCache,
-        MarginfiAccountImpl, RiskRequirementType,
+        write_liquidation_price_cache_from, MarginfiAccountImpl,
     },
 };
 use anchor_lang::{prelude::*, solana_program::sysvar};
@@ -21,9 +20,9 @@ use kamino_mocks::kamino_lending::client::args as kamino;
 use marginfi_type_crate::{
     constants::ix_discriminators,
     types::{
-        HealthCache, LiquidationRecord, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-        ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
-        ACCOUNT_IN_RECEIVERSHIP,
+        HealthCache, HealthPriceMode, LiquidationPriceCache, LiquidationRecord, MarginfiAccount,
+        MarginfiGroup, RequirementType, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
+        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -69,6 +68,7 @@ pub fn start_deleverage<'info>(
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     liq_record.liquidation_receiver = ctx.accounts.risk_admin.key();
     marginfi_account.set_flag(ACCOUNT_IN_DELEVERAGE, false);
+    marginfi_account.indexer_flags.has_ever_been_deleveraged = 1;
     start_receivership(
         &mut marginfi_account,
         &mut liq_record,
@@ -111,7 +111,7 @@ pub fn start_receivership<'info>(
     let (assets_equity, liabs_equity) = get_health_components(
         marginfi_account,
         remaining_ais,
-        RiskRequirementType::Equity,
+        RequirementType::Equity,
         &mut Some(&mut health_cache),
         HealthPriceMode::Live {
             liq_cache: Some(&mut liq_price_cache),
@@ -121,6 +121,7 @@ pub fn start_receivership<'info>(
     write_liquidation_price_cache_from(marginfi_account, remaining_ais, &liq_price_cache)?;
     marginfi_account.health_cache = health_cache;
     marginfi_account.set_flag(ACCOUNT_IN_RECEIVERSHIP, false);
+    marginfi_account.indexer_flags.has_ever_been_liquidated = 1;
 
     // Snapshot values to use in later checks
     liq_record.cache.asset_value_maint = assets.into();
@@ -142,7 +143,7 @@ pub fn validate_instructions(
         COMPUTE_PROGRAM_KEY,
         id_crate::ID,
         kamino_mocks::kamino_lending::ID,
-        DRIFT_PROGRAM_ID,
+        drift_mocks::drift::ID,
         juplend_mocks::juplend_earn::ID,
         JUP_KEY,
         TITAN_KEY,
@@ -160,11 +161,15 @@ pub fn validate_instructions(
             ),
             (
                 kamino_mocks::kamino_lending::ID,
+                kamino::RefreshReservesBatch::DISCRIMINATOR,
+            ),
+            (
+                kamino_mocks::kamino_lending::ID,
                 kamino::RefreshObligation::DISCRIMINATOR,
             ),
             (id_crate::ID, &ix_discriminators::INIT_LIQUIDATION_RECORD),
             (
-                DRIFT_PROGRAM_ID,
+                drift_mocks::drift::ID,
                 drift::UpdateSpotMarketCumulativeInterest::DISCRIMINATOR,
             ),
             (

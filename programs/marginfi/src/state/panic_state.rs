@@ -247,8 +247,8 @@ mod panic_state_tests {
 
     #[test]
     fn test_pause_constants() {
-        assert_eq!(PanicState::PAUSE_DURATION_SECONDS, 30 * 60);
-        assert_eq!(PanicState::MAX_CONSECUTIVE_PAUSES, 2);
+        assert_eq!(PanicState::PAUSE_DURATION_SECONDS, 6 * 60 * 60);
+        assert_eq!(PanicState::MAX_CONSECUTIVE_PAUSES, 4);
         assert_eq!(PanicState::MAX_DAILY_PAUSES, 3);
     }
 

@@ -111,6 +111,25 @@ pub struct LendingPoolBankHandleBankruptcyEvent {
     pub socialized_amount: f64,
 }
 
+#[event]
+pub struct LendingPoolSuperAdminWithdrawEvent {
+    pub header: GroupEventHeader,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    pub vault_outflow_amount: u64,
+}
+
+#[event]
+pub struct LendingPoolSuperAdminDepositEvent {
+    pub header: GroupEventHeader,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    /// Amount requested in SPL transfer instruction.
+    pub transfer_amount: u64,
+    /// Assumed vault inflow. Token-2022 transfer fees are not handled by this instruction path.
+    pub vault_inflow_amount: u64,
+}
+
 // marginfi account events
 
 #[event]
@@ -215,6 +234,12 @@ pub struct KeeperCloseOrderEvent {
 pub struct SetKeeperCloseFlagsEvent {
     pub header: AccountEventHeader,
     pub bank_keys: Option<Vec<Pubkey>>,
+}
+
+#[event]
+pub struct AdminCloseAccountEvent {
+    pub header: AccountEventHeader,
+    pub global_fee_wallet: Pubkey,
 }
 
 #[event]

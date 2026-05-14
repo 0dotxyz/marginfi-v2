@@ -1,10 +1,12 @@
 use super::{bank::BankFixture, marginfi_account::MarginfiAccountFixture};
 use crate::kamino::KaminoFixture;
 use crate::prelude::{get_oracle_id_from_feed_id, MintFixture};
+use crate::ui_to_native;
 use crate::utils::*;
 use anchor_lang::{prelude::*, solana_program::system_program, InstructionData};
 
 use anchor_spl::associated_token::get_associated_token_address_with_program_id;
+use anchor_spl::associated_token::spl_associated_token_account::instruction::create_associated_token_account_idempotent;
 use anyhow::Result;
 use bytemuck::bytes_of;
 use fixed::types::I80F48;
@@ -1047,6 +1049,179 @@ impl MarginfiGroupFixture {
         ctx.banks_client.process_transaction(tx).await
     }
 
+    pub async fn try_lending_pool_backfill_bank_is_t22_flag(
+        &self,
+        bank: &BankFixture,
+        bank_seed: Option<u64>,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolBackfillBankIsT22Flag {
+                bank: bank.key,
+                group: self.key,
+                mint: bank.mint.key,
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolBackfillBankIsT22Flag { bank_seed }.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub fn make_super_admin_withdraw_ix_native(
+        &self,
+        bank: &BankFixture,
+        destination_token_account: Pubkey,
+        amount: u64,
+    ) -> Instruction {
+        let mut accounts = marginfi::accounts::SuperAdminWithdraw {
+            group: self.key,
+            admin: self.ctx.borrow().payer.pubkey(),
+            bank: bank.key,
+            destination_token_account,
+            liquidity_vault_authority: bank.get_vault_authority(BankVaultType::Liquidity).0,
+            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+            token_program: bank.get_token_program(),
+        }
+        .to_account_metas(Some(true));
+        if bank.mint.token_program == anchor_spl::token_2022::ID {
+            accounts.push(AccountMeta::new_readonly(bank.mint.key, false));
+        }
+
+        Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: SuperAdminWithdraw { amount }.data(),
+        }
+    }
+
+    /// Withdraws from bank vault to the hardcoded DESTINATION_WALLET's ATA.
+    /// Creates the ATA if it doesn't exist. Returns the ATA pubkey.
+    pub async fn try_super_admin_withdraw_native(
+        &self,
+        bank: &BankFixture,
+        amount: u64,
+    ) -> std::result::Result<Pubkey, BanksClientError> {
+        let destination_wallet =
+            Pubkey::try_from("AnGdBvg8VmVHq7zyUYmC7mgjZ5pW6odwFsh6eharbzLu").unwrap();
+        let token_program = bank.get_token_program();
+        let ata = get_associated_token_address_with_program_id(
+            &destination_wallet,
+            &bank.mint.key,
+            &token_program,
+        );
+
+        let create_ata_ix = create_associated_token_account_idempotent(
+            &self.ctx.borrow().payer.pubkey(),
+            &destination_wallet,
+            &bank.mint.key,
+            &token_program,
+        );
+        let withdraw_ix = self.make_super_admin_withdraw_ix_native(bank, ata, amount);
+
+        let tx = Transaction::new_signed_with_payer(
+            &[create_ata_ix, withdraw_ix],
+            Some(&self.ctx.borrow().payer.pubkey()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(ata)
+    }
+
+    pub async fn try_super_admin_withdraw<T: Into<f64>>(
+        &self,
+        bank: &BankFixture,
+        ui_amount: T,
+    ) -> std::result::Result<Pubkey, BanksClientError> {
+        self.try_super_admin_withdraw_native(
+            bank,
+            ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+        )
+        .await
+    }
+
+    pub fn make_super_admin_deposit_ix_native(
+        &self,
+        bank: &BankFixture,
+        admin_token_account: Pubkey,
+        amount: u64,
+    ) -> Instruction {
+        let mut accounts = marginfi::accounts::SuperAdminDeposit {
+            group: self.key,
+            admin: self.ctx.borrow().payer.pubkey(),
+            bank: bank.key,
+            admin_token_account,
+            liquidity_vault: bank.get_vault(BankVaultType::Liquidity).0,
+            token_program: bank.get_token_program(),
+        }
+        .to_account_metas(Some(true));
+        if bank.mint.token_program == anchor_spl::token_2022::ID {
+            accounts.push(AccountMeta::new_readonly(bank.mint.key, false));
+        }
+
+        Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: SuperAdminDeposit { amount }.data(),
+        }
+    }
+
+    pub async fn try_super_admin_deposit_native(
+        &self,
+        bank: &BankFixture,
+        admin_token_account: Pubkey,
+        amount: u64,
+    ) -> Result<(), BanksClientError> {
+        let ix = self.make_super_admin_deposit_ix_native(bank, admin_token_account, amount);
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn try_super_admin_deposit<T: Into<f64>>(
+        &self,
+        bank: &BankFixture,
+        admin_token_account: Pubkey,
+        ui_amount: T,
+    ) -> Result<(), BanksClientError> {
+        self.try_super_admin_deposit_native(
+            bank,
+            admin_token_account,
+            ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+        )
+        .await
+    }
+
     pub fn get_size() -> usize {
         8 + mem::size_of::<MarginfiGroup>()
     }
@@ -1075,22 +1250,36 @@ impl MarginfiGroupFixture {
     }
 
     pub async fn try_panic_pause(&self) -> Result<(), BanksClientError> {
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        self.try_panic_pause_with_authority(&payer).await
+    }
+
+    pub async fn try_panic_pause_with_authority(
+        &self,
+        pause_authority: &Keypair,
+    ) -> Result<(), BanksClientError> {
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::PanicPause {
-                global_fee_admin: self.ctx.borrow().payer.pubkey(),
+                pause_authority: pause_authority.pubkey(),
                 fee_state: self.fee_state,
             }
             .to_account_metas(Some(true)),
             data: PanicPause {}.data(),
         };
 
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&self.ctx.borrow().payer.pubkey()),
-            &[&self.ctx.borrow().payer],
-            latest_blockhash(&self.ctx).await,
-        );
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        let blockhash = latest_blockhash(&self.ctx).await;
+        let tx = if payer.pubkey() == pause_authority.pubkey() {
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash)
+        } else {
+            Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&payer.pubkey()),
+                &[&payer, pause_authority],
+                blockhash,
+            )
+        };
 
         self.ctx
             .borrow_mut()
@@ -1100,14 +1289,68 @@ impl MarginfiGroupFixture {
     }
 
     pub async fn try_panic_unpause(&self) -> Result<(), BanksClientError> {
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        self.try_panic_unpause_with_authority(&payer).await
+    }
+
+    pub async fn try_panic_unpause_with_authority(
+        &self,
+        pause_authority: &Keypair,
+    ) -> Result<(), BanksClientError> {
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::PanicUnpause {
-                global_fee_admin: self.ctx.borrow().payer.pubkey(),
+                global_fee_admin: pause_authority.pubkey(),
                 fee_state: self.fee_state,
             }
             .to_account_metas(Some(true)),
             data: PanicUnpause {}.data(),
+        };
+
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        let blockhash = latest_blockhash(&self.ctx).await;
+        let tx = if payer.pubkey() == pause_authority.pubkey() {
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash)
+        } else {
+            Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&payer.pubkey()),
+                &[&payer, pause_authority],
+                blockhash,
+            )
+        };
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub async fn try_set_pause_delegate_admin(
+        &self,
+        new_pause_delegate_admin: Option<Pubkey>,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::EditFeeState {
+                global_fee_admin: self.ctx.borrow().payer.pubkey(),
+                fee_state: self.fee_state,
+            }
+            .to_account_metas(Some(true)),
+            data: EditGlobalFeeState {
+                admin: None,
+                fee_wallet: None,
+                bank_init_flat_sol_fee: None,
+                liquidation_flat_sol_fee: None,
+                order_init_flat_sol_fee: None,
+                program_fee_fixed: None,
+                program_fee_rate: None,
+                liquidation_max_fee: None,
+                order_execution_max_fee: None,
+                pause_delegate_admin: Some(new_pause_delegate_admin.unwrap_or_default()),
+            }
+            .data(),
         };
 
         let tx = Transaction::new_signed_with_payer(

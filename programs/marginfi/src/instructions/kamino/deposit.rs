@@ -1,5 +1,4 @@
 use crate::{
-    constants::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
     instructions::integration::{self, CommonDeposit},
     state::{
         marginfi_account::{
@@ -17,11 +16,13 @@ use anchor_spl::{
 };
 use kamino_mocks::state::{MinimalObligation, MinimalReserve};
 use marginfi_type_crate::constants::{ASSET_TAG_KAMINO, LIQUIDITY_VAULT_AUTHORITY_SEED};
+use marginfi_type_crate::pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID};
 use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
 pub fn kamino_deposit<'info>(
     ctx: Context<'_, '_, 'info, 'info, KaminoDeposit<'info>>,
     amount: u64,
+    refresh_reserve: Option<bool>,
 ) -> MarginfiResult {
     let common = ctx.accounts.to_common();
     let protocol_accounts = ctx.accounts.protocol_accounts();
@@ -31,6 +32,7 @@ pub fn kamino_deposit<'info>(
         protocol_accounts,
         amount,
         Some(ASSET_TAG_KAMINO),
+        refresh_reserve.unwrap_or(false),
     )
 }
 
