@@ -2,7 +2,9 @@ use crate::{
     constants::SOLEND_PROGRAM_ID,
     instructions::integration::{self, CommonDeposit},
     state::{
-        marginfi_account::{account_not_frozen_for_authority, is_signer_authorized},
+        marginfi_account::{
+            account_not_frozen_for_authority, is_signer_authorized, MarginfiAccountImpl,
+        },
         marginfi_group::MarginfiGroupImpl,
     },
     utils::is_solend_asset_tag,
@@ -11,7 +13,7 @@ use crate::{
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use marginfi_type_crate::constants::{ASSET_TAG_SOLEND, LIQUIDITY_VAULT_AUTHORITY_SEED};
-use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup};
+use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 use solend_mocks::state::SolendMinimalReserve;
 
 pub fn solend_deposit<'info>(
@@ -42,6 +44,10 @@ pub struct SolendDeposit<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
+        constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_DISABLED)
+        } @ MarginfiError::AccountDisabled,
         constraint = {
             let a = marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())

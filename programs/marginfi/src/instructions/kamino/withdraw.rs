@@ -22,7 +22,8 @@ use marginfi_type_crate::constants::{
 };
 use marginfi_type_crate::pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID};
 use marginfi_type_crate::types::{
-    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
+    ACCOUNT_IN_RECEIVERSHIP,
 };
 
 pub fn kamino_withdraw<'info>(
@@ -53,6 +54,7 @@ pub struct KaminoWithdraw<'info> {
     #[account(
         constraint = (
             !group.load()?.is_protocol_paused()
+                || marginfi_account.load()?.get_flag(ACCOUNT_IN_DELEVERAGE)
         ) @ MarginfiError::ProtocolPaused
     )]
     pub group: AccountLoader<'info, MarginfiGroup>,

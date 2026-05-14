@@ -50,10 +50,10 @@ an obligation on that bank (caveat: the bank's `liquidity_vault_authority` actua
 obligation under the hood). In simple terms, Mrgn banks are like any other user/depositor of the
 Kamino platform, enjoying no special access or privileges.
 
-Wrapped banks now use the shared `integration_deposit` and `integration_withdraw` interface. They
-can never borrow. The Kamino variant still requires Kamino-specific reserve/obligation accounts,
-but those accounts are now passed through `remaining_accounts` rather than a dedicated Kamino user
-instruction.
+Integrators can use the shared `integration_deposit` / `integration_withdraw` entrypoints or the
+existing `kamino_deposit` / `kamino_withdraw` user instructions on this branch. Wrapped banks can
+never borrow. The shared entrypoints still require Kamino-specific reserve/obligation accounts,
+passed through `remaining_accounts`.
 
 Remember to refresh reserves and the bank's obligation before any deposit/withdrawal.
 
@@ -111,7 +111,7 @@ amount of CU: it is recommended to do this in a separate tx to the liquidation i
 
 ## Migration Notes
 
-If you previously built `kamino_deposit` or `kamino_withdraw`, migrate to:
+If you want to migrate from the per-venue wrappers to the shared entrypoints, move:
 
 - `integration_deposit` for user deposits
 - `integration_withdraw` for user withdrawals

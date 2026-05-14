@@ -30,10 +30,10 @@ Be aware of:
 
 ## Migration: Unified Integration Interface
 
-This release intentionally removes the old protocol-specific user entrypoints for wrapped
-integrations and replaces them with one shared interface.
+This release adds a shared integration interface for wrapped integrations. The old
+protocol-specific user entrypoints still remain available on this branch.
 
-### Old -> New instruction mapping
+### Preferred shared equivalents
 
 | Old instruction | New instruction |
 |----------------|-----------------|
@@ -48,22 +48,23 @@ integrations and replaces them with one shared interface.
 
 ### What integrators must change
 
-- Stop building protocol-specific user deposit/withdraw instructions. They no longer exist in the
-  program interface.
-- Select the protocol behavior from `bank.config.asset_tag`.
+- Choose whether to keep using the protocol-specific user instructions or migrate to the shared
+  `integration_deposit` / `integration_withdraw` entrypoints.
+- Select the protocol behavior from `bank.config.asset_tag` when using the shared entrypoints.
 - For `integration_deposit`, pass the protocol-specific accounts in `remaining_accounts`.
 - For `integration_withdraw`, pass protocol-specific accounts first in `remaining_accounts`, then
   append the usual health/risk accounts.
-- Update any discriminator allowlists or transaction inspectors that referenced
-  `*_withdraw` integration discriminators. There is now a single `integration_withdraw`
-  discriminator for all wrapped integrations.
-- Re-run all client-side account builders. This migration is not only a method rename; the account
-  packing model changed as well.
+- Update any discriminator allowlists or transaction inspectors if you adopt the shared withdraw
+  flow. The unified `integration_withdraw` discriminator exists, and the per-venue `*_withdraw`
+  discriminators still remain available.
+- Re-run any client-side account builders you migrate. This is not only a method rename; the
+  shared instruction uses `remaining_accounts` packing for protocol-specific accounts.
 
 ### Exact account layouts
 
-The exact per-protocol account layouts are enforced by the program and mirrored in our TS helpers.
-Use the builders under:
+The exact per-protocol account layouts are enforced by the program. The current TS helpers in this
+repo still build the per-venue instructions and are the best local reference for protocol account
+ordering:
 
 - `tests/utils/kamino-instructions.ts`
 - `tests/utils/drift-instructions.ts`
@@ -71,7 +72,8 @@ Use the builders under:
 - `tests/utils/juplend/user-instructions.ts`
 - `tests/utils/integration-account-layouts.ts`
 
-Those files are the current source of truth for the required ordering and optional-account padding.
+`tests/utils/integration-account-layouts.ts` records the shared protocol-account counts, but it is
+not yet the single shared builder for these flows.
 
 ## Important Instructions (click to learn more)
 

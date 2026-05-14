@@ -41,12 +41,17 @@ use marginfi_type_crate::types::{
 
 pub use marginfi_type_crate::types::IntegrationOpMode;
 
+/// Coerces a borrowed `AccountInfo` slice to the `'info` lifetime so it can feed
+/// `integration_*_impl`, whose `AccountLoader` APIs require the borrow tied to `'info`.
+///
+/// SAFETY: callers are the per-venue wrappers, which build a `Vec<AccountInfo<'info>>` local and
+/// pass `&vec` here. The returned slice is only ever consumed by the synchronous
+/// `integration_*_impl` call that follows, and the backing `Vec` lives in the wrapper's stack
+/// frame for the whole call — so the `'info` borrow never outlives the data. The slice must not
+/// be stored beyond that call.
 pub(crate) fn account_info_slice<'info>(
     accounts: &[AccountInfo<'info>],
 ) -> &'info [AccountInfo<'info>] {
-    // Anchor's AccountLoader APIs require the account slice borrow to be tied to `'info`.
-    // Per-venue wrappers rebuild the ordered protocol account list from typed accounts, so we
-    // contain that coercion here instead of letting it shape the public instruction accounts.
     unsafe { std::mem::transmute::<&[AccountInfo<'info>], &'info [AccountInfo<'info>]>(accounts) }
 }
 
@@ -197,14 +202,14 @@ pub(crate) fn integration_withdraw_impl<'info>(
         );
     }
 
-    //Protocol-specific pre-refresh (before balance update)
+    // Protocol-specific pre-refresh (before balance update)
     match asset_tag {
         ASSET_TAG_DRIFT => drift_handler::pre_refresh(protocol_accounts, common)?,
         ASSET_TAG_JUPLEND => juplend_handler::pre_refresh(protocol_accounts, common)?,
         _ => {}
     }
 
-    //Balance update + rate limiting + deleverage tracking
+    // Balance update + rate limiting + deleverage tracking
     let authority_bump: u8;
     let collateral_amount: u64;
     // For Drift: (token_amount, expected_scaled_balance_change)
@@ -318,7 +323,7 @@ pub(crate) fn integration_withdraw_impl<'info>(
         (token_amt, balance_unit)
     };
 
-    //Protocol-specific CPI + verification + transfer
+    // Protocol-specific CPI + verification + transfer
     let received = match asset_tag {
         ASSET_TAG_KAMINO => kamino_handler::withdraw_cpi(
             protocol_accounts,
@@ -488,6 +493,7 @@ pub struct IntegrationWithdraw<'info> {
     #[account(
         constraint = (
             !group.load()?.is_protocol_paused()
+                || marginfi_account.load()?.get_flag(ACCOUNT_IN_DELEVERAGE)
         ) @ MarginfiError::ProtocolPaused
     )]
     pub group: AccountLoader<'info, MarginfiGroup>,
@@ -506,7 +512,9 @@ pub struct IntegrationWithdraw<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), true, true)
+            // Solend disallows withdraws mid-order-execution; other venues permit it.
+            let allow_order_execution = bank.load()?.config.asset_tag != ASSET_TAG_SOLEND;
+            is_signer_authorized(&a, g.admin, authority.key(), true, allow_order_execution)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
