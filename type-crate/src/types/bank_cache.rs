@@ -4,7 +4,7 @@ use crate::{assert_struct_align, assert_struct_size, types::WrappedI80F48};
 use anchor_lang::prelude::*;
 use bytemuck::{Pod, Zeroable};
 
-assert_struct_size!(BankCache, 160);
+assert_struct_size!(BankCache, 176);
 assert_struct_align!(BankCache, 8);
 #[repr(C)]
 #[cfg_attr(
@@ -71,8 +71,14 @@ pub struct BankCache {
     /// EMA reference price used by the circuit breaker. Frozen while halted, zero until the
     /// first observation after enable.
     pub cb_reference_price: WrappedI80F48,
-    // INFO: these are duplicative of `last_oracle_price` and `last_oracle_price_timestamp`; at
-    // least two of them (32 bytes) can be recycled if space is ever needed.
+    /// For integration banks, this is the exchange rate of cToken/token or similar. The "real"
+    /// price of one deposited token is `price_multiplier` * `last_oracle_price`, we split it here
+    /// for consumers who are only interested in reading the oracle price and are applying the
+    /// multiplier already elsewhere.
+    pub price_multiplier: WrappedI80F48,
+    // INFO: liquidation_price_* are duplicative of `last_oracle_price` (multiplied by
+    // `price_multiplier` when applicable) and `last_oracle_price_timestamp` so if space is ever
+    // needed we can recycle at least two of these (32 bytes).
     /// Cached real-time price for receivership liquidation.
     pub liquidation_price_rt: WrappedI80F48,
     /// Cached real-time price confidence for receivership liquidation.
@@ -102,6 +108,7 @@ impl BankCache {
         let cb_reference_price = self.cb_reference_price;
         let cb_breach_count = self.cb_breach_count;
         let cb_max_breached_tier_in_streak = self.cb_max_breached_tier_in_streak;
+        let price_multiplier = self.price_multiplier;
 
         *self = Self::default();
 
@@ -111,6 +118,7 @@ impl BankCache {
         self.cb_reference_price = cb_reference_price;
         self.cb_breach_count = cb_breach_count;
         self.cb_max_breached_tier_in_streak = cb_max_breached_tier_in_streak;
+        self.price_multiplier = price_multiplier;
     }
 
     pub fn is_liquidation_price_cache_locked(&self) -> bool {

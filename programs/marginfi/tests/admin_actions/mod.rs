@@ -6,7 +6,6 @@ mod circuit_breaker;
 mod create_marginfi_group;
 mod deleverage;
 mod deleverage_withdraw_limit;
-mod emissions;
 mod freeze;
 mod interest_accrual;
 mod panic_mode;

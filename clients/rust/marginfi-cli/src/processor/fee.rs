@@ -63,20 +63,25 @@ pub fn initialize_fee_state(
 
 pub fn edit_fee_state(
     config: Config,
-    new_admin: Pubkey,
-    fee_wallet: Pubkey,
-    bank_init_flat_sol_fee: u32,
-    liquidation_flat_sol_fee: u32,
-    program_fee_fixed: f64,
-    program_fee_rate: f64,
-    liquidation_max_fee: f64,
-    order_init_flat_sol_fee: u32,
-    order_execution_max_fee: f64,
+    new_admin: Option<Pubkey>,
+    fee_wallet: Option<Pubkey>,
+    bank_init_flat_sol_fee: Option<u32>,
+    liquidation_flat_sol_fee: Option<u32>,
+    program_fee_fixed: Option<f64>,
+    program_fee_rate: Option<f64>,
+    liquidation_max_fee: Option<f64>,
+    order_init_flat_sol_fee: Option<u32>,
+    order_execution_max_fee: Option<f64>,
+    pause_delegate_admin: Option<Pubkey>,
 ) -> Result<()> {
-    let program_fee_fixed: WrappedI80F48 = I80F48::from_num(program_fee_fixed).into();
-    let program_fee_rate: WrappedI80F48 = I80F48::from_num(program_fee_rate).into();
-    let liquidation_max_fee: WrappedI80F48 = I80F48::from_num(liquidation_max_fee).into();
-    let order_execution_max_fee: WrappedI80F48 = I80F48::from_num(order_execution_max_fee).into();
+    let program_fee_fixed: Option<WrappedI80F48> =
+        program_fee_fixed.map(|v| I80F48::from_num(v).into());
+    let program_fee_rate: Option<WrappedI80F48> =
+        program_fee_rate.map(|v| I80F48::from_num(v).into());
+    let liquidation_max_fee: Option<WrappedI80F48> =
+        liquidation_max_fee.map(|v| I80F48::from_num(v).into());
+    let order_execution_max_fee: Option<WrappedI80F48> =
+        order_execution_max_fee.map(|v| I80F48::from_num(v).into());
 
     let fee_state_pubkey = find_fee_state_pda(&config.program_id).0;
 
@@ -97,6 +102,7 @@ pub fn edit_fee_state(
             liquidation_max_fee,
             order_init_flat_sol_fee,
             order_execution_max_fee,
+            pause_delegate_admin,
         })
         .instructions()?;
 
@@ -135,13 +141,32 @@ pub fn config_group_fee(config: Config, profile: Profile, enable_program_fee: bo
     Ok(())
 }
 
+pub fn set_pause_delegate_admin(
+    config: Config,
+    pause_delegate_admin: Option<Pubkey>,
+) -> Result<()> {
+    edit_fee_state(
+        config,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(pause_delegate_admin.unwrap_or_default()),
+    )
+}
+
 pub fn panic_pause(config: Config) -> Result<()> {
     let fee_state = find_fee_state_pda(&config.program_id).0;
 
     let ix = Instruction {
         program_id: config.program_id,
         accounts: marginfi::accounts::PanicPause {
-            global_fee_admin: config.authority(),
+            pause_authority: config.authority(),
             fee_state,
         }
         .to_account_metas(Some(true)),

@@ -1,6 +1,6 @@
 use crate::{
     assert_struct_align, assert_struct_size,
-    constants::discriminators,
+    constants::{discriminators, ASSET_TAG_DRIFT, DRIFT_SCALED_BALANCE_DECIMALS},
     types::{BankCache, BankConfig},
 };
 
@@ -13,7 +13,7 @@ use bytemuck::{Pod, Zeroable};
 use super::Pubkey;
 use super::{BankRateLimiter, EmodeSettings, WrappedI80F48};
 
-assert_struct_size!(Bank, 1856);
+assert_struct_size!(Bank, 1872);
 assert_struct_align!(Bank, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy), derive(Default, PartialEq, Eq))]
@@ -100,7 +100,10 @@ pub struct Bank {
     /// - Bit 5 (32): `TOKENLESS_REPAYMENTS_ALLOWED` — risk admin can repay debt without tokens
     /// - Bit 6 (64): `TOKENLESS_REPAYMENTS_COMPLETE` — all debt cleared, lender purge enabled
     /// - Bit 7 (128): `IS_T22` — 1 if T22, 0 if token classic
-    /// - Bit 8 (256): `CIRCUIT_BREAKER_ENABLED` — oracle deviation breaker active on this bank
+    /// - Bit 8 (256): `BANK_SEED_KNOWN` — bank is known to be PDA/seed-derived. If not set, bank
+    ///   may still be a PDA, but created before this flag launched (1.8 or earlier) or is a legacy
+    ///   keypair-based bank.
+    /// - Bit 9 (512): `CIRCUIT_BREAKER_ENABLED` — oracle deviation breaker active on this bank
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.
@@ -145,6 +148,7 @@ pub struct Bank {
     /// - Drift: spot market
     /// - Solend: reserve
     /// - JupLend: lending state
+    /// - Staked Collateral: Validator vote account
     pub integration_acc_1: Pubkey,
     /// Integration account slot 2 (default Pubkey for non-integrations).
     /// - Kamino: obligation
@@ -163,6 +167,11 @@ pub struct Bank {
 
     pub _pad_0: [u8; 16], // 16B
 
+    /// * `0` for legacy banks created via `lending_pool_add_bank` (created via keypair, not a PDA),
+    ///   or pre-backfill banks (1.8 or earlier) where seed remains unknown.
+    /// * Otherwise the `bank_seed: u64` argument passed when creating the bank.
+    /// * Use `flags & BANK_SEED_KNOWN` to verify this value has known seed provenance.
+    pub bank_seed: u64,
     /// Unix-seconds when the current halt started, zero if not halted.
     pub cb_halt_started_at: i64,
     /// Unix-seconds when the current halt's tier duration ends. Tier stays sticky past this for
@@ -180,12 +189,20 @@ pub struct Bank {
     /// publication across multiple Solana slots. Zero when the adapter doesn't expose one.
     pub cb_last_oracle_source_time: i64,
 
-    pub _padding_1: [u64; 9], // 72B
+    pub _padding_1: [u64; 8], // 64B
 }
 
 impl Bank {
     pub const LEN: usize = std::mem::size_of::<Bank>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::BANK;
+
+    pub fn get_balance_decimals(&self) -> u8 {
+        if self.config.asset_tag == ASSET_TAG_DRIFT {
+            DRIFT_SCALED_BALANCE_DECIMALS
+        } else {
+            self.mint_decimals
+        }
+    }
 }
 
 #[repr(u8)]

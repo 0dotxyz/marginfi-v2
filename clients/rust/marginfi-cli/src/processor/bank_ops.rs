@@ -1,8 +1,8 @@
 use {
     super::{group_get_all, load_all_banks},
-    crate::output,
     crate::{
         config::Config,
+        output,
         utils::{
             find_bank_emssions_token_account_pda, find_bank_vault_authority_pda,
             find_bank_vault_pda, send_tx,
@@ -21,8 +21,8 @@ use {
     marginfi_type_crate::{
         constants::METADATA_SEED,
         types::{
-            Bank, BankConfigOpt, BankMetadata, InterestRateConfigOpt, MarginfiGroup, OracleSetup,
-            RatePoint, RiskTier, WrappedI80F48,
+            Bank, BankConfigOpt, BankMetadata, InterestRateConfigOpt, MarginfiGroup,
+            OraclePriceType, OracleSetup, PriceBias, RatePoint, RiskTier, WrappedI80F48,
         },
     },
     pyth_solana_receiver_sdk::price_update::PriceUpdateV2,
@@ -316,8 +316,6 @@ pub fn bank_get_all(config: Config, marginfi_group: Option<Pubkey>) -> Result<()
 }
 
 pub fn bank_inspect_price_oracle(config: Config, bank_pk: Pubkey) -> Result<()> {
-    use marginfi::state::price::{OraclePriceType, PriceBias};
-
     let bank: Bank = config.mfi_program.account(bank_pk)?;
     let opfa = match bank.config.oracle_setup {
         OracleSetup::Fixed => OraclePriceFeedAdapter::try_from_bank_with_max_age(
@@ -1508,20 +1506,6 @@ pub fn bank_clone_emode(
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(&config, vec![ix], &signing_keypairs)?;
     println!("emode cloned (sig: {})", sig);
-
-    Ok(())
-}
-
-pub fn bank_migrate_curve(config: Config, bank_pk: Pubkey) -> Result<()> {
-    let ix = Instruction {
-        program_id: config.program_id,
-        accounts: marginfi::accounts::MigrateCurve { bank: bank_pk }.to_account_metas(Some(true)),
-        data: marginfi::instruction::MigrateCurve {}.data(),
-    };
-
-    let signing_keypairs = config.get_signers(false);
-    let sig = send_tx(&config, vec![ix], &signing_keypairs)?;
-    println!("curve migrated (sig: {})", sig);
 
     Ok(())
 }

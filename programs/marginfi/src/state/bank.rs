@@ -1,9 +1,7 @@
 #[cfg(not(feature = "client"))]
 use crate::events::{GroupEventHeader, LendingPoolBankAccrueInterestEvent};
 use crate::{
-    check,
-    constants::DRIFT_SCALED_BALANCE_DECIMALS,
-    debug,
+    check, debug,
     errors::MarginfiError,
     math_error,
     prelude::MarginfiResult,
@@ -16,7 +14,7 @@ use crate::{
             InterestRateStateChanges,
         },
         marginfi_account::calc_value,
-        price::OraclePriceWithConfidence,
+        price::OraclePriceWithMultiplier,
     },
 };
 use anchor_lang::prelude::*;
@@ -40,7 +38,10 @@ use marginfi_type_crate::{
         INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
-    types::{Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup},
+    types::{
+        Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup,
+        OraclePriceWithConfidence,
+    },
 };
 
 /// Minimum Solana-slot gap between counted CB pulses. Rate-limits how fast the EMA can be
@@ -81,12 +82,12 @@ pub trait BankImpl {
         insurance_vault_authority_bump: u8,
         fee_vault_bump: u8,
         fee_vault_authority_bump: u8,
+        bank_seed: u64,
     ) -> Self;
     fn get_liability_amount(&self, shares: I80F48) -> MarginfiResult<I80F48>;
     fn get_asset_amount(&self, shares: I80F48) -> MarginfiResult<I80F48>;
     fn get_liability_shares(&self, value: I80F48) -> MarginfiResult<I80F48>;
     fn get_asset_shares(&self, value: I80F48) -> MarginfiResult<I80F48>;
-    fn get_balance_decimals(&self) -> u8;
     fn get_remaining_deposit_capacity(&self) -> MarginfiResult<u64>;
     fn change_asset_shares(&mut self, shares: I80F48, bypass_deposit_limit: bool)
         -> MarginfiResult;
@@ -109,7 +110,7 @@ pub trait BankImpl {
     fn update_bank_cache(&mut self, group: &MarginfiGroup) -> MarginfiResult<()>;
     fn update_cache_price(
         &mut self,
-        oracle_price: Option<OraclePriceWithConfidence>,
+        oracle_price: Option<OraclePriceWithMultiplier>,
     ) -> MarginfiResult<()>;
     fn is_cb_halted(&self, now: i64) -> bool;
     fn update_circuit_breaker(
@@ -168,6 +169,7 @@ impl BankImpl for Bank {
         insurance_vault_authority_bump: u8,
         fee_vault_bump: u8,
         fee_vault_authority_bump: u8,
+        bank_seed: u64,
     ) -> Self {
         Self {
             mint,
@@ -202,6 +204,7 @@ impl BankImpl for Bank {
             _padding_0: [0; 16],
             integration_acc_1: Pubkey::default(),
             integration_acc_2: Pubkey::default(),
+            bank_seed,
             ..Default::default()
         }
     }
@@ -231,14 +234,6 @@ impl BankImpl for Bank {
         Ok(value
             .checked_div(self.asset_share_value.into())
             .ok_or_else(math_error!())?)
-    }
-
-    fn get_balance_decimals(&self) -> u8 {
-        if self.config.asset_tag == ASSET_TAG_DRIFT {
-            DRIFT_SCALED_BALANCE_DECIMALS
-        } else {
-            self.mint_decimals
-        }
     }
 
     fn get_remaining_deposit_capacity(&self) -> MarginfiResult<u64> {
@@ -598,8 +593,7 @@ impl BankImpl for Bank {
             &ir_calc,
             self.asset_share_value.into(),
             self.liability_share_value.into(),
-        )
-        .ok_or_else(math_error!())?;
+        )?;
 
         debug!("deposit share value: {}\nliability share value: {}\nfees collected: {}\ninsurance collected: {}",
             asset_share_value, liability_share_value, group_fees_collected, insurance_fees_collected);
@@ -687,9 +681,7 @@ impl BankImpl for Bank {
         let utilization_rate: I80F48 = total_liabilities_amount
             .checked_div(total_assets_amount)
             .ok_or_else(math_error!())?;
-        let interest_rates = ir_calc
-            .calc_interest_rate(utilization_rate)
-            .ok_or_else(math_error!())?;
+        let interest_rates = ir_calc.calc_interest_rate(utilization_rate)?;
 
         update_interest_rates(&mut self.cache, &interest_rates);
 
@@ -704,17 +696,23 @@ impl BankImpl for Bank {
     /// no-op so callers don't need to coordinate.
     fn update_cache_price(
         &mut self,
-        oracle_price: Option<OraclePriceWithConfidence>,
+        oracle_price: Option<OraclePriceWithMultiplier>,
     ) -> MarginfiResult<()> {
         if self.cache.is_liquidation_price_cache_locked() {
             return Ok(());
         }
-        if let Some(price_with_confidence) = oracle_price {
+        if let Some(price_with_multiplier) = oracle_price {
             let clock = Clock::get()?;
-            self.cache.last_oracle_price = price_with_confidence.price.into();
-            self.cache.last_oracle_price_confidence = price_with_confidence.confidence.into();
+            self.cache.last_oracle_price = price_with_multiplier.oracle_price.price.into();
+            self.cache.last_oracle_price_confidence =
+                price_with_multiplier.oracle_price.confidence.into();
+            self.cache.price_multiplier = price_with_multiplier.price_multiplier.into();
             self.cache.last_oracle_price_timestamp = clock.unix_timestamp;
-            self.update_circuit_breaker(clock.unix_timestamp, clock.slot, price_with_confidence)?;
+            self.update_circuit_breaker(
+                clock.unix_timestamp,
+                clock.slot,
+                price_with_multiplier.oracle_price,
+            )?;
         }
 
         Ok(())
@@ -1125,7 +1123,7 @@ impl BankVaultType {
 #[cfg(test)]
 mod cb_tests {
     use super::*;
-    use crate::state::price::OraclePriceWithConfidence;
+    use marginfi_type_crate::types::OraclePriceWithConfidence;
     use bytemuck::Zeroable;
 
     fn make_cb_bank() -> Bank {

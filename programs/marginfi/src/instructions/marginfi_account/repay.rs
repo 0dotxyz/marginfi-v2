@@ -163,6 +163,7 @@ pub fn lending_account_repay<'info>(
     });
 
     marginfi_account.lending_account.sort_balances();
+    marginfi_account.sync_indexer_flags();
 
     Ok(())
 }

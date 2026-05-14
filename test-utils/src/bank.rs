@@ -12,11 +12,11 @@ use marginfi::{
     bank_authority_seed,
     state::{
         bank::BankVaultType,
-        price::{OraclePriceFeedAdapter, OraclePriceType, PriceAdapter},
+        price::{OraclePriceFeedAdapter, PriceAdapter},
     },
     utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
 };
-use marginfi_type_crate::constants::{EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED};
+use marginfi_type_crate::types::OraclePriceType;
 use marginfi_type_crate::types::{Bank, BankConfigOpt, OracleSetup};
 use solana_program::{
     account_info::IntoAccountInfo, instruction::Instruction, sysvar::clock::Clock,
@@ -405,63 +405,6 @@ impl BankFixture {
         self.ctx
             .borrow_mut()
             .set_account(&self.key, &bank_ai.into());
-    }
-
-    pub async fn try_reclaim_emissions_vault(
-        &self,
-        emissions_mint: &MintFixture,
-        fee_state: Pubkey,
-        destination_account: Pubkey,
-    ) -> Result<(), BanksClientError> {
-        let bank = self.load().await;
-        let ctx = self.ctx.borrow_mut();
-
-        let (emissions_auth, _) = Pubkey::find_program_address(
-            &[
-                EMISSIONS_AUTH_SEED.as_bytes(),
-                self.key.as_ref(),
-                emissions_mint.key.as_ref(),
-            ],
-            &marginfi::ID,
-        );
-
-        let (emissions_vault, _) = Pubkey::find_program_address(
-            &[
-                EMISSIONS_TOKEN_ACCOUNT_SEED.as_bytes(),
-                self.key.as_ref(),
-                emissions_mint.key.as_ref(),
-            ],
-            &marginfi::ID,
-        );
-
-        let accounts = marginfi::accounts::LendingPoolReclaimEmissionsVault {
-            group: bank.group,
-            bank: self.key,
-            emissions_mint: emissions_mint.key,
-            emissions_auth,
-            emissions_vault,
-            fee_state,
-            destination_account,
-            token_program: emissions_mint.token_program,
-        }
-        .to_account_metas(Some(true));
-
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts,
-            data: marginfi::instruction::LendingPoolReclaimEmissionsVault {}.data(),
-        };
-
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&ctx.payer.pubkey()),
-            &[&ctx.payer],
-            ctx.banks_client.get_latest_blockhash().await.unwrap(),
-        );
-
-        ctx.banks_client
-            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
-            .await
     }
 
     /// Directly mutate the bank's emissions fields in test state.

@@ -1,5 +1,5 @@
 use crate::state::bank::BankImpl;
-use crate::state::price::{OraclePriceFeedAdapter, OraclePriceType, PriceAdapter};
+use crate::state::price::OraclePriceFeedAdapter;
 use crate::{MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::types::{Bank, MarginfiGroup};
@@ -12,14 +12,13 @@ pub fn lending_pool_pulse_bank_price_cache<'info>(
 
     let mut bank = ctx.accounts.bank.load_mut()?;
 
-    let pf = OraclePriceFeedAdapter::try_from_bank(&bank, ctx.remaining_accounts, &clock)?;
-
-    let price_with_confidence = pf.get_price_and_confidence_of_type(
-        OraclePriceType::RealTime,
-        bank.config.oracle_max_confidence,
+    let price_for_cache = OraclePriceFeedAdapter::get_price_and_confidence_for_cache(
+        &bank,
+        ctx.remaining_accounts,
+        &clock,
     )?;
 
-    bank.update_cache_price(Some(price_with_confidence))?;
+    bank.update_cache_price(Some(price_for_cache))?;
 
     Ok(())
 }

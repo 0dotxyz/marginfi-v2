@@ -236,6 +236,11 @@ async fn create_dual_asset_account(
     Ok(mfi_account_f)
 }
 
+async fn assert_active_orders(mfi_account_f: &MarginfiAccountFixture, expected: u8) {
+    let marginfi_account = mfi_account_f.load().await;
+    assert_eq!(marginfi_account.active_orders, expected);
+}
+
 // With these cases our aim is to test the success of the execute order instruction for some edge cases
 // The below constraint always has to be satisfied:
 // For take profit:
@@ -304,6 +309,7 @@ async fn execute_order_fails_pre_trigger_not_met(
         trigger,
     )
     .await?;
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
     // ---------------------------------------------------------------------
     // Test
@@ -364,6 +370,9 @@ async fn execute_order_fails_pre_trigger_not_met(
 
     let result = ctx.banks_client.process_transaction(tx).await;
     assert_custom_error!(result.unwrap_err(), MarginfiError::OrderTriggerNotMet);
+    drop(ctx);
+
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
     Ok(())
 }
 
@@ -410,6 +419,7 @@ async fn execute_order_fails_post_trigger_not_met(
         trigger,
     )
     .await?;
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
     // ---------------------------------------------------------------------
     // Test
@@ -473,6 +483,9 @@ async fn execute_order_fails_post_trigger_not_met(
         result.unwrap_err(),
         MarginfiError::OrderExecutionOverWithdrawal
     );
+    drop(ctx);
+
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
     Ok(())
 }
 
@@ -518,6 +531,7 @@ async fn execute_order_fails_touch_uninvolved_balance(
         trigger,
     )
     .await?;
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
     // ---------------------------------------------------------------------
     // Test
@@ -590,6 +604,9 @@ async fn execute_order_fails_touch_uninvolved_balance(
 
     let result = ctx.banks_client.process_transaction(tx).await;
     assert_custom_error!(result.unwrap_err(), MarginfiError::IllegalBalanceState);
+    drop(ctx);
+
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
     Ok(())
 }
 
@@ -637,6 +654,7 @@ async fn execute_order_fails_health_check(
         trigger,
     )
     .await?;
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
     // ---------------------------------------------------------------------
     // Test
@@ -733,6 +751,9 @@ async fn execute_order_fails_health_check(
 
     let result = ctx.banks_client.process_transaction(tx).await;
     assert_custom_error!(result.unwrap_err(), MarginfiError::WorseHealthPostExecution);
+    drop(ctx);
+
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
     Ok(())
 }
 
@@ -779,6 +800,7 @@ async fn execute_order_success(
         trigger,
     )
     .await?;
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
     // ---------------------------------------------------------------------
     // Test
@@ -850,6 +872,7 @@ async fn execute_order_success(
         order_after.is_none(),
         "order should be closed after execution"
     );
+    assert_active_orders(&borrower_mfi_account_f, 0).await;
 
     // verify balances: asset still present, liability removed, uninvolved remains
     let mfi_after = borrower_mfi_account_f.load().await;
@@ -1006,6 +1029,7 @@ async fn place_order_success_one_asset_one_liability(
     let order_pda = borrower_mfi_account_f
         .try_place_order(bank_keys.clone(), trigger)
         .await?;
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
     // Verify order was created correctly
     let order = borrower_mfi_account_f.load_order(order_pda).await;
@@ -1075,6 +1099,7 @@ async fn place_order_fail_invalid_sl_or_tp(
         result.unwrap_err(),
         MarginfiError::InvalidOrderTakeProfitOrStopLoss
     );
+    assert_active_orders(&borrower_mfi_account_f, 0).await;
 
     Ok(())
 }
@@ -1118,6 +1143,7 @@ async fn place_order_fail_invalid_slippage(
         .await;
 
     assert_custom_error!(result.unwrap_err(), MarginfiError::InvalidSlippage);
+    assert_active_orders(&borrower_mfi_account_f, 0).await;
 
     Ok(())
 }
@@ -1162,6 +1188,7 @@ async fn place_order_fails_both_assets(
         result.unwrap_err(),
         MarginfiError::InvalidAssetOrLiabilitiesCount
     );
+    assert_active_orders(&mfi_account_f, 0).await;
 
     Ok(())
 }
@@ -1202,6 +1229,7 @@ async fn place_order_fails_same_order_twice(
     borrower_mfi_account_f
         .try_place_order(bank_keys.clone(), trigger)
         .await?;
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
     let trigger2 = both_trigger(fp!(50), fp!(200), 0);
     let result = borrower_mfi_account_f
@@ -1209,6 +1237,7 @@ async fn place_order_fails_same_order_twice(
         .await;
 
     assert_anchor_error!(result.unwrap_err(), SystemError::AccountAlreadyInUse);
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
     Ok(())
 }
@@ -1245,6 +1274,7 @@ async fn close_order_success_authority(
     let order_pda = borrower_mfi_account_f
         .try_place_order(bank_keys.clone(), trigger)
         .await?;
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
     // Verify order exists
     let order_account = test_f.try_load(&order_pda).await?;
@@ -1265,6 +1295,7 @@ async fn close_order_success_authority(
         order_account_after.is_none(),
         "order should be closed after close_order"
     );
+    assert_active_orders(&borrower_mfi_account_f, 0).await;
 
     Ok(())
 }
@@ -1301,6 +1332,7 @@ async fn keeper_close_order_success_after_clearing_side(
     let order_pda = borrower_mfi_account_f
         .try_place_order(bank_keys.clone(), trigger)
         .await?;
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
     // Clear the liability side by repaying fully
     let repay_amount = liability_borrow * 2.0;
@@ -1330,6 +1362,7 @@ async fn keeper_close_order_success_after_clearing_side(
         order_account_after.is_none(),
         "order should be closed after keeper_close_order"
     );
+    assert_active_orders(&borrower_mfi_account_f, 0).await;
 
     Ok(())
 }
@@ -1338,7 +1371,7 @@ async fn keeper_close_order_success_after_clearing_side(
 #[test_case(BankMint::Fixed, 100.0, BankMint::Sol, 10.0, stop_loss_trigger(fp!(80), 0))]
 #[test_case(BankMint::Sol, 20.0, BankMint::Usdc, 75.0, stop_loss_trigger(fp!(50), 0))]
 #[tokio::test]
-async fn keeper_can_close_order_after_marginfi_account_closed(
+async fn marginfi_account_cannot_close_with_pending_orders(
     asset_mint: BankMint,
     asset_deposit: f64,
     liability_mint: BankMint,
@@ -1363,8 +1396,9 @@ async fn keeper_can_close_order_after_marginfi_account_closed(
 
     let bank_keys = vec![asset_bank_f.key, liability_bank_f.key];
     let order_pda = borrower_mfi_account_f
-        .try_place_order(bank_keys.clone(), trigger)
+        .try_place_order(bank_keys, trigger)
         .await?;
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
     // Verify order exists
     let order_before = test_f.try_load(&order_pda).await?;
@@ -1394,22 +1428,31 @@ async fn keeper_can_close_order_after_marginfi_account_closed(
         .count();
     assert_eq!(active_balances, 0, "all balances should be closed");
 
-    borrower_mfi_account_f.try_close_account(1).await?;
+    let close_result = borrower_mfi_account_f.try_close_account(1).await;
+    assert_custom_error!(close_result.unwrap_err(), MarginfiError::IllegalAction);
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
-    // ---------------------------------------------------------------------
-    // Test
-    // ---------------------------------------------------------------------
+    let order_after = test_f.try_load(&order_pda).await?;
+    assert!(
+        order_after.is_some(),
+        "order should remain open after close_account failure"
+    );
 
     let keeper = Keypair::new();
     fund_keeper_for_fees(&test_f, &keeper).await?;
     let fee_recipient = keeper.pubkey();
-
     borrower_mfi_account_f
         .try_keeper_close_order(order_pda, &keeper, fee_recipient)
         .await?;
 
-    let order_after = test_f.try_load(&order_pda).await?;
-    assert!(order_after.is_none(), "order should be closed by keeper");
+    let order_closed = test_f.try_load(&order_pda).await?;
+    assert!(
+        order_closed.is_none(),
+        "order should be closed after keeper_close_order"
+    );
+    assert_active_orders(&borrower_mfi_account_f, 0).await;
+
+    borrower_mfi_account_f.try_close_account(1).await?;
 
     Ok(())
 }
@@ -1446,6 +1489,7 @@ async fn keeper_close_order_fails_active_tags(
     let order_pda = borrower_mfi_account_f
         .try_place_order(bank_keys.clone(), trigger)
         .await?;
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
     let keeper = Keypair::new();
     fund_keeper_for_fees(&test_f, &keeper).await?;
@@ -1463,6 +1507,7 @@ async fn keeper_close_order_fails_active_tags(
         result.unwrap_err(),
         MarginfiError::LiquidatorOrderCloseNotAllowed
     );
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
     Ok(())
 }
@@ -1501,6 +1546,7 @@ async fn set_liquidator_close_order_flags_success(
     let order_pda = borrower_mfi_account_f
         .try_place_order(bank_keys.clone(), trigger)
         .await?;
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
     // Verify tags are non-zero before
     let order_before = borrower_mfi_account_f.load_order(order_pda).await;
@@ -1532,6 +1578,7 @@ async fn set_liquidator_close_order_flags_success(
         0,
         "flagged balance tag should be zeroed after set_liquidator_close_flags"
     );
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
     Ok(())
 }
@@ -1568,6 +1615,7 @@ async fn keeper_close_order_success_after_set_flags(
     let order_pda = borrower_mfi_account_f
         .try_place_order(bank_keys.clone(), trigger)
         .await?;
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
 
     borrower_mfi_account_f
         .try_set_keeper_close_flags(Some(vec![asset_bank_f.key, liability_bank_f.key]))
@@ -1591,6 +1639,7 @@ async fn keeper_close_order_success_after_set_flags(
         order_account_after.is_none(),
         "order should be closed after keeper_close_order"
     );
+    assert_active_orders(&borrower_mfi_account_f, 0).await;
 
     Ok(())
 }

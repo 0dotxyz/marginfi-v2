@@ -1,23 +1,23 @@
 use crate::{
-    bank_signer,
-    constants::{DRIFT_PROGRAM_ID, DRIFT_USER_SEED, DRIFT_USER_STATS_SEED},
-    state::bank::BankVaultType,
-    utils::is_drift_asset_tag,
-    MarginfiError, MarginfiResult,
+    bank_signer, state::bank::BankVaultType, utils::is_drift_asset_tag, MarginfiError,
+    MarginfiResult,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
-use drift_mocks::drift::cpi::accounts::{
-    Deposit, InitializeUser, InitializeUserStats, UpdateUserPoolId,
+use drift_mocks::{
+    drift::cpi::{
+        accounts::{Deposit, InitializeUser, InitializeUserStats, UpdateUserPoolId},
+        deposit, initialize_user, initialize_user_stats, update_user_pool_id,
+    },
+    state::MinimalSpotMarket,
 };
-use drift_mocks::drift::cpi::{
-    deposit, initialize_user, initialize_user_stats, update_user_pool_id,
+use marginfi_type_crate::{
+    constants::{DRIFT_USER_SEED, DRIFT_USER_STATS_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED},
+    pdas::DRIFT_PROGRAM_ID,
+    types::Bank,
 };
-use drift_mocks::state::MinimalSpotMarket;
-use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
-use marginfi_type_crate::types::Bank;
 
 /// Initialize a Drift user and user stats for a marginfi account
 /// Sub-account ID is always 0 for the first account

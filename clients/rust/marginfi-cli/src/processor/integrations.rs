@@ -8,14 +8,25 @@ use {
             derive_juplend_cpi_accounts, derive_juplend_cpi_accounts_for_lending,
             find_bank_vault_authority_pda, find_bank_vault_pda, find_fee_state_pda,
             load_observation_account_metas, load_observation_account_metas_close_last, send_tx,
-            EXP_10_I80F48, JUPLEND_LENDING_PROGRAM_ID,
+            EXP_10_I80F48,
         },
     },
     anchor_client::anchor_lang::{InstructionData, ToAccountMetas},
     anyhow::{Context, Result},
     fixed::types::I80F48,
     marginfi::state::{bank::BankVaultType, bank_config::BankConfigImpl},
-    marginfi_type_crate::types::{Bank, MarginfiAccount, OracleSetup},
+    marginfi_type_crate::{
+        pdas::{
+            derive_drift_spot_market, derive_drift_spot_market_vault, derive_drift_state,
+            derive_drift_user, derive_drift_user_stats, derive_juplend_f_token_vault,
+            derive_kamino_base_obligation, derive_kamino_lending_market_authority,
+            derive_kamino_reserve_collateral_mint, derive_kamino_reserve_collateral_supply,
+            derive_kamino_reserve_liquidity_supply, derive_kamino_user_metadata,
+            derive_kamino_user_state, DRIFT_PROGRAM_ID, FARMS_PROGRAM_ID,
+            JUPLEND_LENDING_PROGRAM_ID, KAMINO_PROGRAM_ID,
+        },
+        types::{Bank, MarginfiAccount, OracleSetup},
+    },
     solana_sdk::{
         instruction::{AccountMeta, Instruction},
         pubkey::Pubkey,
@@ -23,13 +34,6 @@ use {
     },
     std::collections::HashMap,
 };
-
-// Known program IDs for integrations
-const KAMINO_PROGRAM_ID: Pubkey =
-    solana_sdk::pubkey!("KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
-const FARMS_PROGRAM_ID: Pubkey =
-    solana_sdk::pubkey!("FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr");
-const DRIFT_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH");
 
 struct KaminoInitAccounts {
     lending_market_authority: Pubkey,
@@ -140,34 +144,17 @@ fn derive_kamino_init_accounts(
     }
     let reserve_state: &MinimalReserve = bytemuck::from_bytes(&reserve_data[8..8 + reserve_size]);
 
-    let (lending_market_authority, _) =
-        Pubkey::find_program_address(&[b"lma", lending_market.as_ref()], &KAMINO_PROGRAM_ID);
-    let (reserve_liquidity_supply, _) = Pubkey::find_program_address(
-        &[b"reserve_liq_supply", reserve.as_ref()],
-        &KAMINO_PROGRAM_ID,
-    );
-    let (reserve_collateral_mint, _) = Pubkey::find_program_address(
-        &[b"reserve_coll_mint", reserve.as_ref()],
-        &KAMINO_PROGRAM_ID,
-    );
-    let (reserve_destination_deposit_collateral, _) = Pubkey::find_program_address(
-        &[b"reserve_coll_supply", reserve.as_ref()],
-        &KAMINO_PROGRAM_ID,
-    );
-    let (user_metadata, _) = Pubkey::find_program_address(
-        &[b"user_meta", liquidity_vault_authority.as_ref()],
-        &KAMINO_PROGRAM_ID,
-    );
+    let (lending_market_authority, _) = derive_kamino_lending_market_authority(&lending_market);
+    let (reserve_liquidity_supply, _) = derive_kamino_reserve_liquidity_supply(&reserve);
+    let (reserve_collateral_mint, _) = derive_kamino_reserve_collateral_mint(&reserve);
+    let (reserve_destination_deposit_collateral, _) =
+        derive_kamino_reserve_collateral_supply(&reserve);
+    let (user_metadata, _) = derive_kamino_user_metadata(&liquidity_vault_authority);
 
     let reserve_farm_state = (reserve_state.farm_collateral != Pubkey::default())
         .then_some(reserve_state.farm_collateral);
-    let obligation_farm_user_state = reserve_farm_state.map(|farm_state| {
-        Pubkey::find_program_address(
-            &[b"user", farm_state.as_ref(), obligation.as_ref()],
-            &FARMS_PROGRAM_ID,
-        )
-        .0
-    });
+    let obligation_farm_user_state =
+        reserve_farm_state.map(|farm_state| derive_kamino_user_state(&farm_state, &obligation).0);
 
     Ok(KaminoInitAccounts {
         lending_market_authority,
@@ -1346,17 +1333,8 @@ pub fn kamino_add_bank(config: &Config, request: KaminoBankCreateRequest) -> Res
     let fee_vault = find_bank_vault_pda(&bank_pda, BankVaultType::Fee, &config.program_id).0;
 
     // Kamino obligation PDA
-    let (obligation_pda, _) = Pubkey::find_program_address(
-        &[
-            &[0u8],
-            &[0u8],
-            liquidity_vault_authority.as_ref(),
-            request.kamino_market.as_ref(),
-            solana_sdk::system_program::id().as_ref(),
-            solana_sdk::system_program::id().as_ref(),
-        ],
-        &KAMINO_PROGRAM_ID,
-    );
+    let (obligation_pda, _) =
+        derive_kamino_base_obligation(&liquidity_vault_authority, &request.kamino_market);
 
     let oracle_meta = AccountMeta::new_readonly(request.oracle, false);
     let reserve_meta = AccountMeta::new_readonly(request.kamino_reserve, false);
@@ -1503,30 +1481,17 @@ pub fn drift_add_bank(config: &Config, request: DriftBankCreateRequest) -> Resul
     let fee_vault = find_bank_vault_pda(&bank_pda, BankVaultType::Fee, &config.program_id).0;
 
     // Derive Drift spot market PDA
-    let (drift_spot_market, _) = Pubkey::find_program_address(
-        &[b"spot_market", &request.drift_market_index.to_le_bytes()],
-        &DRIFT_PROGRAM_ID,
-    );
+    let (drift_spot_market, _) = derive_drift_spot_market(request.drift_market_index);
     bank_config
         .to_bank_config(drift_spot_market)
         .validate()
         .context("invalid Drift bank config")?;
 
     // Derive Drift user PDA (sub_account_id = 0)
-    let (drift_user, _) = Pubkey::find_program_address(
-        &[
-            b"user",
-            liquidity_vault_authority.as_ref(),
-            &0u16.to_le_bytes(),
-        ],
-        &DRIFT_PROGRAM_ID,
-    );
+    let (drift_user, _) = derive_drift_user(&liquidity_vault_authority, 0);
 
     // Derive Drift user stats PDA
-    let (drift_user_stats, _) = Pubkey::find_program_address(
-        &[b"user_stats", liquidity_vault_authority.as_ref()],
-        &DRIFT_PROGRAM_ID,
-    );
+    let (drift_user_stats, _) = derive_drift_user_stats(&liquidity_vault_authority);
 
     let oracle_meta = AccountMeta::new_readonly(request.oracle, false);
     let spot_market_meta = AccountMeta::new_readonly(drift_spot_market, false);
@@ -1543,14 +1508,8 @@ pub fn drift_add_bank(config: &Config, request: DriftBankCreateRequest) -> Resul
         &request.bank_mint,
         &request.token_program,
     );
-    let (drift_state, _) = Pubkey::find_program_address(&[b"drift_state"], &DRIFT_PROGRAM_ID);
-    let (drift_spot_market_vault, _) = Pubkey::find_program_address(
-        &[
-            b"spot_market_vault",
-            &request.drift_market_index.to_le_bytes(),
-        ],
-        &DRIFT_PROGRAM_ID,
-    );
+    let (drift_state, _) = derive_drift_state();
+    let (drift_spot_market_vault, _) = derive_drift_spot_market_vault(request.drift_market_index);
 
     let add_bank_ixs = config
         .mfi_program
@@ -1669,9 +1628,7 @@ pub fn juplend_add_bank(config: &Config, request: JuplendBankCreateRequest) -> R
         find_bank_vault_authority_pda(&bank_pda, BankVaultType::Fee, &config.program_id).0;
     let fee_vault = find_bank_vault_pda(&bank_pda, BankVaultType::Fee, &config.program_id).0;
 
-    // JupLend fToken vault PDA
-    let (f_token_vault, _) =
-        Pubkey::find_program_address(&[b"f_token_vault", bank_pda.as_ref()], &config.program_id);
+    let (f_token_vault, _) = derive_juplend_f_token_vault(&config.program_id, &bank_pda);
 
     let oracle_meta = AccountMeta::new_readonly(request.oracle, false);
     let lending_meta = AccountMeta::new_readonly(request.juplend_lending, false);
