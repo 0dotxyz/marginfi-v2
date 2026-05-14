@@ -1,5 +1,4 @@
 use crate::{
-    constants::DRIFT_PROGRAM_ID,
     instructions::integration::{self, CommonDeposit},
     state::{
         marginfi_account::{
@@ -14,6 +13,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use drift_mocks::state::MinimalUser;
 use marginfi_type_crate::constants::{ASSET_TAG_DRIFT, LIQUIDITY_VAULT_AUTHORITY_SEED};
+use marginfi_type_crate::pdas::DRIFT_PROGRAM_ID;
 use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
 pub fn drift_deposit<'info>(
@@ -23,7 +23,13 @@ pub fn drift_deposit<'info>(
     let common = ctx.accounts.to_common();
     let protocol_accounts = ctx.accounts.protocol_accounts();
     let protocol_accounts = integration::account_info_slice(&protocol_accounts);
-    integration::integration_deposit_impl(&common, protocol_accounts, amount, Some(ASSET_TAG_DRIFT))
+    integration::integration_deposit_impl(
+        &common,
+        protocol_accounts,
+        amount,
+        Some(ASSET_TAG_DRIFT),
+        false,
+    )
 }
 
 #[derive(Accounts)]

@@ -5,8 +5,8 @@ use crate::state::marginfi_account::{
     check_account_init_health, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
 };
 use crate::utils::{
-    fetch_unbiased_price_for_bank, record_deposit_inflow, validate_asset_tags, validate_bank_state,
-    InstructionKind,
+    fetch_unbiased_price_for_bank_cache, record_deposit_inflow, validate_asset_tags,
+    validate_bank_state, InstructionKind,
 };
 use crate::{check, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
@@ -103,6 +103,7 @@ pub fn finalize_integration_deposit(
 
     marginfi_account.last_update = clock.unix_timestamp as u64;
     marginfi_account.lending_account.sort_balances();
+    marginfi_account.sync_indexer_flags();
 
     emit!(LendingAccountDepositEvent {
         header: AccountEventHeader {
@@ -153,6 +154,7 @@ pub fn finalize_integration_withdraw<'info>(
     health_cache.timestamp = clock.unix_timestamp;
 
     marginfi_account.lending_account.sort_balances();
+    marginfi_account.sync_indexer_flags();
 
     let in_receivership_or_order_execution =
         marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
@@ -171,7 +173,7 @@ pub fn finalize_integration_withdraw<'info>(
     // Update price cache regardless of receivership status
     let mut bank = bank.load_mut()?;
     let price_for_cache =
-        fetch_unbiased_price_for_bank(&bank_key, &bank, clock, remaining_accounts).ok();
+        fetch_unbiased_price_for_bank_cache(&bank_key, &bank, clock, remaining_accounts).ok();
     bank.update_cache_price(price_for_cache)?;
 
     Ok(())

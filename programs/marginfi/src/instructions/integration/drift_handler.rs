@@ -1,6 +1,5 @@
 use crate::{
     bank_signer, check,
-    constants::DRIFT_PROGRAM_ID,
     state::{
         bank::BankVaultType,
         marginfi_account::{BankAccountWrapper, MarginfiAccountImpl},
@@ -11,6 +10,7 @@ use crate::{
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::system_program;
 use anchor_spl::token::accessor;
+use marginfi_type_crate::pdas::DRIFT_PROGRAM_ID;
 use drift_mocks::drift::cpi::accounts::{Deposit, UpdateSpotMarketCumulativeInterest, Withdraw};
 use drift_mocks::drift::cpi::{
     deposit as cpi_drift_deposit, update_spot_market_cumulative_interest,

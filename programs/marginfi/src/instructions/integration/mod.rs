@@ -88,6 +88,7 @@ pub fn integration_deposit<'info>(
         protocol_accounts,
         amount,
         Some(op_mode.to_asset_tag()),
+        false,
     )
 }
 
@@ -96,6 +97,7 @@ pub(crate) fn integration_deposit_impl<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
     amount: u64,
     expected_asset_tag: Option<u8>,
+    refresh_reserve: bool,
 ) -> MarginfiResult {
     let authority_bump = validate_integration_deposit(common.marginfi_account, common.bank)?;
 
@@ -111,9 +113,13 @@ pub(crate) fn integration_deposit_impl<'info>(
     cpi_transfer_signer_to_vault(common, amount)?;
 
     let (balance_change, inflow_amount) = match asset_tag {
-        ASSET_TAG_KAMINO => {
-            kamino_handler::deposit(protocol_accounts, common, amount, authority_bump)?
-        }
+        ASSET_TAG_KAMINO => kamino_handler::deposit(
+            protocol_accounts,
+            common,
+            amount,
+            authority_bump,
+            refresh_reserve,
+        )?,
         ASSET_TAG_DRIFT => {
             drift_handler::deposit(protocol_accounts, common, amount, authority_bump)?
         }
@@ -163,6 +169,7 @@ pub fn integration_withdraw<'info>(
         amount,
         withdraw_all,
         Some(asset_tag),
+        false,
     )
 }
 
@@ -173,6 +180,7 @@ pub(crate) fn integration_withdraw_impl<'info>(
     amount: u64,
     withdraw_all: Option<bool>,
     expected_asset_tag: Option<u8>,
+    refresh_reserve: bool,
 ) -> MarginfiResult {
     let withdraw_all = withdraw_all.unwrap_or(false);
     let bank_key = common.bank.key();
@@ -317,6 +325,7 @@ pub(crate) fn integration_withdraw_impl<'info>(
             common,
             collateral_amount,
             authority_bump,
+            refresh_reserve,
         )?,
         ASSET_TAG_DRIFT => drift_handler::withdraw_cpi(
             protocol_accounts,

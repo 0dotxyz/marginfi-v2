@@ -1,6 +1,5 @@
 use crate::{
     bank_signer, check,
-    constants::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
     state::bank::BankVaultType,
     utils::{assert_within_one_token, optional_account},
     MarginfiError, MarginfiResult,
@@ -8,12 +7,14 @@ use crate::{
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::sysvar;
 use anchor_spl::token::accessor;
+use marginfi_type_crate::pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID};
 use kamino_mocks::kamino_lending::cpi::deposit_reserve_liquidity_and_obligation_collateral_v2;
+use kamino_mocks::kamino_lending::cpi::refresh_reserves_batch;
 use kamino_mocks::kamino_lending::cpi::withdraw_obligation_collateral_and_redeem_reserve_collateral_v2;
 use kamino_mocks::{
     kamino_lending::cpi::accounts::{
         DepositFarmsAccounts, DepositReserveLiquidityAndObligationCollateral,
-        DepositReserveLiquidityAndObligationCollateralV2,
+        DepositReserveLiquidityAndObligationCollateralV2, RefreshReservesBatch,
         WithdrawObligationCollateralAndRedeemReserveCollateral,
         WithdrawObligationCollateralAndRedeemReserveCollateralV2,
     },
@@ -107,11 +108,23 @@ fn farms_accounts<'a>(protocol_accounts: &'a [AccountInfo<'a>]) -> DepositFarmsA
     }
 }
 
+/// CPI: batch-refresh the reserve so its exchange rate is current before the operation.
+fn refresh_reserve(protocol_accounts: &[AccountInfo]) -> MarginfiResult {
+    let cpi_ctx = CpiContext::new(protocol_accounts[7].clone(), RefreshReservesBatch {})
+        .with_remaining_accounts(vec![
+            protocol_accounts[3].clone(),
+            protocol_accounts[1].clone(),
+        ]);
+    refresh_reserves_batch(cpi_ctx, true)?;
+    Ok(())
+}
+
 pub(crate) fn deposit<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
     common: &CommonDeposit<'_, 'info>,
     amount: u64,
     authority_bump: u8,
+    refresh_reserve_first: bool,
 ) -> MarginfiResult<(u64, u64)> {
     let bank = common.bank.load()?;
     validate_protocol_accounts(
@@ -128,6 +141,10 @@ pub(crate) fn deposit<'info>(
 
     let reserve_loader = AccountLoader::<MinimalReserve>::try_from(reserve_info)?;
     let expected_collateral = reserve_loader.load()?.liquidity_to_collateral(amount)?;
+
+    if refresh_reserve_first {
+        refresh_reserve(protocol_accounts)?;
+    }
 
     // CPI: Kamino deposit
     {
@@ -177,6 +194,7 @@ pub(crate) fn withdraw_cpi<'info>(
     common: &CommonWithdraw<'_, 'info>,
     collateral_amount: u64,
     authority_bump: u8,
+    refresh_reserve_first: bool,
 ) -> MarginfiResult<u64> {
     let bank = common.bank.load()?;
     validate_protocol_accounts(
@@ -185,6 +203,10 @@ pub(crate) fn withdraw_cpi<'info>(
         bank.integration_acc_1,
     )?;
     drop(bank);
+
+    if refresh_reserve_first {
+        refresh_reserve(protocol_accounts)?;
+    }
 
     let reserve_info = &protocol_accounts[3];
     let obligation_loader = validate_obligation(&protocol_accounts[0], reserve_info.key())?;

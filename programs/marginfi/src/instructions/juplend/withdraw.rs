@@ -37,6 +37,7 @@ pub fn juplend_withdraw<'info>(
         amount,
         withdraw_all,
         Some(ASSET_TAG_JUPLEND),
+        false,
     )
 }
 

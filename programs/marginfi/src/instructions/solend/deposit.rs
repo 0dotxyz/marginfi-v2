@@ -26,6 +26,7 @@ pub fn solend_deposit<'info>(
         protocol_accounts,
         amount,
         Some(ASSET_TAG_SOLEND),
+        false,
     )
 }
 

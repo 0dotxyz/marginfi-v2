@@ -35,6 +35,7 @@ pub fn solend_withdraw<'info>(
         amount,
         withdraw_all,
         Some(ASSET_TAG_SOLEND),
+        false,
     )
 }
 

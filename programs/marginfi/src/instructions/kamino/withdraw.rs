@@ -1,5 +1,4 @@
 use crate::{
-    constants::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
     instructions::integration::{self, CommonWithdraw},
     ix_utils::{get_discrim_hash, Hashable},
     state::{
@@ -21,6 +20,7 @@ use kamino_mocks::state::{MinimalObligation, MinimalReserve};
 use marginfi_type_crate::constants::{
     ASSET_TAG_KAMINO, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
 };
+use marginfi_type_crate::pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID};
 use marginfi_type_crate::types::{
     Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
 };
@@ -28,8 +28,12 @@ use marginfi_type_crate::types::{
 pub fn kamino_withdraw<'info>(
     ctx: Context<'_, '_, 'info, 'info, KaminoWithdraw<'info>>,
     amount: u64,
-    withdraw_all: Option<bool>,
+    flags: Option<u8>,
 ) -> MarginfiResult {
+    // bit 0: withdraw all; bit 1: refresh reserve via batch refresh
+    let flags = flags.unwrap_or(0);
+    let withdraw_all = flags & 1 != 0;
+    let refresh_reserve = flags & 2 != 0;
     let common = ctx.accounts.to_common();
     let protocol_accounts = ctx.accounts.protocol_accounts();
     let protocol_accounts = integration::account_info_slice(&protocol_accounts);
@@ -38,8 +42,9 @@ pub fn kamino_withdraw<'info>(
         protocol_accounts,
         ctx.remaining_accounts,
         amount,
-        withdraw_all,
+        Some(withdraw_all),
         Some(ASSET_TAG_KAMINO),
+        refresh_reserve,
     )
 }
 
