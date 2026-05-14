@@ -56,8 +56,7 @@ jobs:
         run: |
           cargo run \
             --release \
-            --package marginfi-v2-cli \
-            --features dev \
+            --package p0-cli \
             -- patch-idl target/idl/${{ env.PROGRAM_LIB_NAME }}.json
           rm target/idl/${{ env.PROGRAM_LIB_NAME }}.json
           mv target/idl/${{ env.PROGRAM_LIB_NAME }}_patched.json target/idl/${{ env.PROGRAM_LIB_NAME }}.json
