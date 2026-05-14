@@ -3,6 +3,7 @@
 use trident_fuzz::fuzzing::*;
 
 use crate::constants;
+use crate::invariants;
 use crate::types;
 use crate::FuzzTest;
 
@@ -20,10 +21,6 @@ fn wrap_one() -> WrappedI80F48 {
 }
 
 impl FuzzTest {
-    // ============================================================================================
-    // PDA helpers (mirrors on-chain seeds)
-    // ============================================================================================
-
     pub fn juplend_bank_address(&mut self, group: Pubkey, mint: Pubkey, bank_seed: u64) -> Pubkey {
         self.trident
             .find_program_address(
@@ -42,40 +39,21 @@ impl FuzzTest {
             .0
     }
 
-    // ============================================================================================
-    // Config helper
-    // ============================================================================================
-
     pub fn default_juplend_bank_config(&mut self, oracle: Pubkey) -> JuplendConfigCompact {
         JuplendConfigCompact::new(
             oracle,
             wrap_one(),
             wrap_one(),
-            10_000_000_000_000, // deposit_limit
+            10_000_000_000_000,
             OracleSetup::JuplendPythPull,
             RiskTier::Collateral,
             constants::PYTH_PULL_MIGRATED_CONFIG_FLAGS,
-            1_000_000_000_000, // total_asset_value_init_limit
-            300,               // oracle_max_age
-            0,                 // oracle_max_confidence
+            1_000_000_000_000,
+            300,
+            0,
         )
     }
 
-    // ============================================================================================
-    // Juplend integration templates
-    // ============================================================================================
-
-    /// Create a Juplend bank in the marginfi group.
-    ///
-    /// You provide:
-    /// - the underlying mint (e.g. USDC)
-    /// - the Juplend `Lending` state (`integration_acc_1`)
-    /// - the Juplend fToken mint (from the lending state)
-    /// - oracle accounts required by your chosen `OracleSetup` (remaining accounts)
-    ///
-    /// After this, you must run:
-    /// - `juplend_init_position` (seed deposit; flips bank from Paused -> Operational)
-    /// - create the withdraw intermediary ATA (`integration_acc_3`) via ATA program (we provide a helper)
     pub fn init_juplend_bank(
         &mut self,
         payer: Pubkey,
@@ -212,6 +190,14 @@ impl FuzzTest {
         let layout = self.bank_layout(bank);
         let f_token_vault = self.juplend_f_token_vault_address(bank);
 
+        let user_before = invariants::token_balance(&mut self.trident, user_token_account);
+        let liquidity_vault_before =
+            invariants::token_balance(&mut self.trident, layout.liquidity_vault);
+        let f_token_vault_before = invariants::token_balance(&mut self.trident, f_token_vault);
+        let other_vaults_snap = self.snapshot_liquidity_vaults_except(bank);
+        let share_snap_before =
+            invariants::marginfi_bank_share_snapshot(&mut self.trident, marginfi_account, bank);
+
         let deposit_ix = types::marginfi::JuplendDepositInstruction::data(
             types::marginfi::JuplendDepositInstructionData::new(amount),
         )
@@ -240,6 +226,48 @@ impl FuzzTest {
         .instruction();
 
         let res = self.trident.process_transaction(&[deposit_ix], message);
+
+        let user_after = invariants::token_balance(&mut self.trident, user_token_account);
+        let liquidity_vault_after =
+            invariants::token_balance(&mut self.trident, layout.liquidity_vault);
+        let f_token_vault_after = invariants::token_balance(&mut self.trident, f_token_vault);
+        let share_snap_after =
+            invariants::marginfi_bank_share_snapshot(&mut self.trident, marginfi_account, bank);
+
+        if res.is_success() {
+            invariants::assert_juplend_deposit_success(
+                amount,
+                user_before,
+                user_after,
+                liquidity_vault_before,
+                liquidity_vault_after,
+                f_token_vault_before,
+                f_token_vault_after,
+            );
+            invariants::assert_deposit_success_share_invariants(
+                &share_snap_before,
+                &share_snap_after,
+                amount,
+            );
+        } else {
+            invariants::assert_juplend_deposit_failure_balances_unchanged(
+                amount,
+                user_before,
+                user_after,
+                liquidity_vault_before,
+                liquidity_vault_after,
+                f_token_vault_before,
+                f_token_vault_after,
+            );
+            invariant!(
+                share_snap_after == share_snap_before,
+                "juplend deposit failure: marginfi shares changed. before: {:?}, after: {:?}",
+                share_snap_before,
+                share_snap_after
+            );
+        }
+
+        self.assert_liquidity_balance_snapshot_unchanged(&other_vaults_snap);
     }
 
     pub fn withdraw_from_juplend(
@@ -278,6 +306,17 @@ impl FuzzTest {
             token_program,
         );
 
+        let user_before =
+            invariants::token_balance(&mut self.trident, user_destination_token_account);
+        let withdraw_intermediary_before =
+            invariants::token_balance(&mut self.trident, withdraw_intermediary_ata);
+        let liquidity_vault_before =
+            invariants::token_balance(&mut self.trident, layout.liquidity_vault);
+        let f_token_vault_before = invariants::token_balance(&mut self.trident, f_token_vault);
+        let other_vaults_snap = self.snapshot_liquidity_vaults_except(bank);
+        let share_snap_before =
+            invariants::marginfi_bank_share_snapshot(&mut self.trident, marginfi_account, bank);
+
         let banks = self.get_marginfi_account_banks(marginfi_account, Some(bank));
         let remaining =
             self.remaining_accounts_for_bank_risk_and_t22_transfer(mint, token_program, banks);
@@ -312,5 +351,58 @@ impl FuzzTest {
         .instruction();
 
         let res = self.trident.process_transaction(&[withdraw_ix], message);
+
+        let user_after =
+            invariants::token_balance(&mut self.trident, user_destination_token_account);
+        let withdraw_intermediary_after =
+            invariants::token_balance(&mut self.trident, withdraw_intermediary_ata);
+        let liquidity_vault_after =
+            invariants::token_balance(&mut self.trident, layout.liquidity_vault);
+        let f_token_vault_after = invariants::token_balance(&mut self.trident, f_token_vault);
+        let share_snap_after =
+            invariants::marginfi_bank_share_snapshot(&mut self.trident, marginfi_account, bank);
+
+        let withdraw_all_flag = withdraw_all.unwrap_or(false);
+        let share_amount_for_invariant = if withdraw_all_flag { 1 } else { amount };
+
+        if res.is_success() {
+            invariants::assert_juplend_withdraw_success(
+                amount,
+                withdraw_all_flag,
+                user_before,
+                user_after,
+                withdraw_intermediary_before,
+                withdraw_intermediary_after,
+                liquidity_vault_before,
+                liquidity_vault_after,
+                f_token_vault_before,
+                f_token_vault_after,
+            );
+            invariants::assert_withdraw_success_share_invariants(
+                &share_snap_before,
+                &share_snap_after,
+                share_amount_for_invariant,
+            );
+        } else {
+            invariants::assert_juplend_withdraw_failure_balances_unchanged(
+                amount,
+                user_before,
+                user_after,
+                withdraw_intermediary_before,
+                withdraw_intermediary_after,
+                liquidity_vault_before,
+                liquidity_vault_after,
+                f_token_vault_before,
+                f_token_vault_after,
+            );
+            invariant!(
+                share_snap_after == share_snap_before,
+                "juplend withdraw failure: marginfi shares changed. before: {:?}, after: {:?}",
+                share_snap_before,
+                share_snap_after
+            );
+        }
+
+        self.assert_liquidity_balance_snapshot_unchanged(&other_vaults_snap);
     }
 }

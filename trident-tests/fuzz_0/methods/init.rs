@@ -253,7 +253,6 @@ impl FuzzTest {
         invariant!(res.is_success());
     }
 
-    /// Permissionless: create the liquidation record PDA for a marginfi account (required before receivership liquidation).
     pub fn marginfi_account_init_liquidation_record(
         &mut self,
         marginfi_account: Pubkey,
@@ -274,10 +273,6 @@ impl FuzzTest {
         invariant!(res.is_success());
     }
 
-    /// Risk/oracle tail for deposit/withdraw/borrow/repay. Must match `maybe_take_bank_mint` in the
-    /// program: **prepend the bank mint only for Token-2022** (it is consumed before health). For
-    /// classic SPL (`Tokenkeg`), do not prepend — otherwise the first “bank” slot is the mint and
-    /// health loads it as `Bank` → `AccountOwnedByWrongProgram`.
     pub fn remaining_accounts_for_bank_risk_and_t22_transfer(
         &mut self,
         bank_mint: Pubkey,
@@ -304,18 +299,6 @@ impl FuzzTest {
         remaining_accounts
     }
 
-    /// Remaining accounts for `check_account_init_health` / end-flashloan (bank + risk/oracle per
-    /// active balance). No leading mint — unlike SPL deposit/withdraw/borrow/repay.
-    /// Remaining accounts for `LendingAccountLiquidate`:
-    /// 1. Token-2022 **liability** mint (consumed by `maybe_take_bank_mint`)
-    /// 2. **Primary oracle groups** for `asset_bank` then `liab_bank` (same order as
-    ///    `programs/marginfi/fuzz` — `liquidate.rs` indexes the liab oracle at
-    ///    `remaining[asset_len..asset_len+liab_len]` where each len is
-    ///    `get_remaining_accounts_per_bank - 1`)
-    /// 3. Bank+oracle groups for the liquidator: existing active banks **plus** this ix’s
-    ///    `liab_bank` and `asset_bank` (the liquidator receives asset + liability here; health
-    ///    runs with an empty slice if these are omitted → `InvalidBankAccount`).
-    /// 4. Bank+oracle groups for the liquidatee (suffix counted by `liquidatee_accounts`)
     pub fn remaining_accounts_for_liquidation(
         &mut self,
         asset_bank: Pubkey,
@@ -397,9 +380,6 @@ impl FuzzTest {
         remaining_accounts
     }
 
-    /// Remaining accounts for `EndLiquidation` / cached health: **one account per active bank only**.
-    /// `get_health_components` with `HealthPriceMode::Cached` advances by one slot per balance; oracles
-    /// must not appear between banks (unlike `StartLiquidation`, which uses `Live` and bank+oracle groups).
     pub fn remaining_accounts_for_bank_risk_banks_only(
         &mut self,
         banks: Vec<Pubkey>,
@@ -411,28 +391,18 @@ impl FuzzTest {
     }
 
     fn risk_accounts_for_bank(bank: &Bank) -> Vec<Pubkey> {
-        // These are the "extra" risk/oracle accounts required *after* the bank account itself.
-        //
-        // This must match what the on-chain risk engine expects, which is ultimately driven by
-        // `bank.config.oracle_setup` and the `bank.config.oracle_keys[]` slots (see
-        // `OraclePriceFeedAdapter::validate_bank_config` and `get_remaining_accounts_per_bank`).
         match bank.config.oracle_setup {
-            // Fixed: bank only
             OracleSetup::Fixed => vec![],
-
-            // Standard oracles: bank + oracle
             OracleSetup::PythPushOracle | OracleSetup::SwitchboardPull => {
                 vec![bank.config.oracle_keys[0]]
             }
 
-            // Staked: bank + oracle + (lst_mint) + (sol_pool)
             OracleSetup::StakedWithPythPush => vec![
                 bank.config.oracle_keys[0],
                 bank.config.oracle_keys[1],
                 bank.config.oracle_keys[2],
             ],
 
-            // Integrations (bank + oracle + reserve/spot-market/lending-state)
             OracleSetup::KaminoPythPush
             | OracleSetup::KaminoSwitchboardPull
             | OracleSetup::DriftPythPull
@@ -444,12 +414,10 @@ impl FuzzTest {
                 vec![bank.config.oracle_keys[0], bank.config.oracle_keys[1]]
             }
 
-            // Fixed integrations (bank + integration account; no oracle)
             OracleSetup::FixedKamino | OracleSetup::FixedDrift | OracleSetup::FixedJuplend => {
                 vec![bank.config.oracle_keys[1]]
             }
 
-            // Deprecated or unset: treat as bank + primary oracle key (best-effort).
             OracleSetup::None | OracleSetup::PythLegacy | OracleSetup::SwitchboardV2 => {
                 vec![bank.config.oracle_keys[0]]
             }

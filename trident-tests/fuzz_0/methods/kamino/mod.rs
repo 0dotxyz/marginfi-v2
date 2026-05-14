@@ -1,5 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 
+pub mod utils;
+
 use trident_fuzz::fuzzing::*;
 
 use crate::constants;

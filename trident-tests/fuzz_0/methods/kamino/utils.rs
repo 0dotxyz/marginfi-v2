@@ -95,3 +95,4 @@ impl FuzzTest {
             .0
     }
 }
+
