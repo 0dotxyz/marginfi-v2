@@ -717,6 +717,17 @@ pub mod marginfi {
         marginfi_group::write_bank_metadata(ctx, ticker, description)
     }
 
+    /// (metadata admin only) Write ticker/description before bank initialization, for canonical
+    /// seeded banks only.
+    pub fn write_bank_metadata_pre_init(
+        ctx: Context<WriteBankMetadataPreInit>,
+        bank_seed: u64,
+        ticker: Option<Vec<u8>>,
+        description: Option<Vec<u8>>,
+    ) -> MarginfiResult {
+        marginfi_group::write_bank_metadata_pre_init(ctx, bank_seed, ticker, description)
+    }
+
     /// (admin or delegate_limit_admin) Set the daily withdrawal limit for deleverages per group.
     pub fn configure_deleverage_withdrawal_limit(
         ctx: Context<ConfigureDeleverageWithdrawalLimit>,

@@ -36,6 +36,16 @@ pub fn write_bank_metadata(
     apply_metadata_write(&mut metadata, ticker, description)
 }
 
+pub fn write_bank_metadata_pre_init(
+    ctx: Context<WriteBankMetadataPreInit>,
+    _bank_seed: u64,
+    ticker: Option<Vec<u8>>,
+    description: Option<Vec<u8>>,
+) -> Result<()> {
+    let mut metadata = ctx.accounts.metadata.load_mut()?;
+    apply_metadata_write(&mut metadata, ticker, description)
+}
+
 pub(super) fn apply_metadata_write(
     metadata: &mut BankMetadata,
     ticker: Option<Vec<u8>>,
@@ -89,6 +99,33 @@ pub struct WriteBankMetadata<'info> {
     /// and `bank.has_one = group` ties this bank to the admin's group.
     #[account(has_one = group)]
     pub bank: AccountLoader<'info, Bank>,
+
+    #[account(mut)]
+    pub metadata_admin: Signer<'info>,
+
+    #[account(mut, has_one = bank)]
+    pub metadata: AccountLoader<'info, BankMetadata>,
+}
+
+#[derive(Accounts)]
+#[instruction(bank_seed: u64)]
+pub struct WriteBankMetadataPreInit<'info> {
+    #[account(has_one = metadata_admin)]
+    pub group: AccountLoader<'info, MarginfiGroup>,
+
+    /// CHECK: pubkey only used for canonical seeded bank PDA derivation.
+    pub bank_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Canonical bank PDA from (group, bank_mint, bank_seed); bank may be uninitialized.
+    #[account(
+        seeds = [
+            group.key().as_ref(),
+            bank_mint.key().as_ref(),
+            &bank_seed.to_le_bytes(),
+        ],
+        bump,
+    )]
+    pub bank: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub metadata_admin: Signer<'info>,

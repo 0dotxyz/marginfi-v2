@@ -5,6 +5,7 @@ import {
   groupConfigure,
   initBankMetadata,
   writeBankMetadata,
+  writeBankMetadataPreInit,
 } from "./utils/group-instructions";
 import { Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
@@ -378,6 +379,127 @@ describe("Lending pool configure bank", () => {
     assert.equal(meta.bump, metadataBump);
   });
 
+  it("(meta admin) Write metadata for canonical seeded bank before bank exists", async () => {
+    const bankSeed = new BN(42);
+    const { bank, metadata } = deriveBankAndMetadataWithSeed(
+      program.programId,
+      marginfiGroup.publicKey,
+      ecosystem.usdcMint.publicKey,
+      bankSeed
+    );
+
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await groupConfigure(groupAdmin.mrgnProgram, {
+          newMetadataAdmin: users[0].wallet.publicKey,
+          marginfiGroup: marginfiGroup.publicKey,
+        })
+      )
+    );
+
+    await users[1].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await initBankMetadata(users[1].mrgnProgram, { bank })
+      )
+    );
+
+    const bankAccount = await program.account.bank.fetchNullable(bank);
+    assert.isNull(bankAccount, "bank should not exist yet");
+
+    const tickerStr = "PREINIT-USDC";
+    const descStr = "Pre-init metadata";
+    const tickerUtf8 = Buffer.from(tickerStr, "utf8");
+    const descUtf8 = Buffer.from(descStr, "utf8");
+
+    await users[0].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await writeBankMetadataPreInit(users[0].mrgnProgram, {
+          group: marginfiGroup.publicKey,
+          bankMint: ecosystem.usdcMint.publicKey,
+          bankSeed,
+          metadata,
+          ticker: tickerStr,
+          description: descStr,
+        })
+      )
+    );
+
+    const meta = await program.account.bankMetadata.fetch(metadata);
+    const onchainTicker = Buffer.from(meta.ticker as number[]);
+    const onchainDesc = Buffer.from(meta.description as number[]);
+
+    assert.equal(
+      onchainTicker.subarray(0, tickerUtf8.length).toString("utf8"),
+      tickerStr
+    );
+    assert.equal(
+      onchainDesc.subarray(0, descUtf8.length).toString("utf8"),
+      descStr
+    );
+  });
+
+  it("(attacker) Cannot write pre-init metadata when not the group's metadata admin", async () => {
+    const bankSeed = new BN(43);
+    const { bank, metadata } = deriveBankAndMetadataWithSeed(
+      program.programId,
+      marginfiGroup.publicKey,
+      ecosystem.usdcMint.publicKey,
+      bankSeed
+    );
+
+    await users[1].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await initBankMetadata(users[1].mrgnProgram, { bank })
+      )
+    );
+
+    await expectFailedTxWithMessage(async () => {
+      await users[2].mrgnProgram.provider.sendAndConfirm(
+        new Transaction().add(
+          await writeBankMetadataPreInit(users[2].mrgnProgram, {
+            group: marginfiGroup.publicKey,
+            bankMint: ecosystem.usdcMint.publicKey,
+            bankSeed,
+            metadata,
+            ticker: "BAD",
+            description: "nope",
+          })
+        )
+      );
+    }, "ConstraintHasOne");
+  });
+
+  it("(attacker) Cannot spoof pre-init metadata write with wrong mint/seed tuple", async () => {
+    const bankSeed = new BN(44);
+    const { bank, metadata } = deriveBankAndMetadataWithSeed(
+      program.programId,
+      marginfiGroup.publicKey,
+      ecosystem.usdcMint.publicKey,
+      bankSeed
+    );
+
+    await users[1].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await initBankMetadata(users[1].mrgnProgram, { bank })
+      )
+    );
+
+    await expectFailedTxWithMessage(async () => {
+      await users[0].mrgnProgram.provider.sendAndConfirm(
+        new Transaction().add(
+          await writeBankMetadataPreInit(users[0].mrgnProgram, {
+            group: marginfiGroup.publicKey,
+            bankMint: ecosystem.wsolMint.publicKey,
+            bankSeed,
+            metadata,
+            ticker: "BAD",
+            description: "seed mismatch",
+          })
+        )
+      );
+    }, "ConstraintSeeds");
+  });
+
   it("(meta admin) Update metadata for an initialized bank", async () => {
     const bank = bankKeypairUsdc.publicKey;
     const [metadata] = deriveBankMetadata(program.programId, bank);
@@ -409,8 +531,6 @@ describe("Lending pool configure bank", () => {
     await users[0].mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await writeBankMetadata(users[0].mrgnProgram, {
-          group: marginfiGroup.publicKey,
-          bank,
           metadata,
           ticker: tickerStr,
           description: descStr,

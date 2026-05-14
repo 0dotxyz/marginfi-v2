@@ -952,8 +952,6 @@ export const setFixedPrice = (
 };
 
 type WriteBankMetadataArgs = {
-  group: PublicKey;
-  bank: PublicKey;
   metadata: PublicKey;
   /// Pass undefined to skip. Limit 64 bytes
   ticker?: string;
@@ -997,9 +995,62 @@ export const writeBankMetadata = (
       descBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
     )
     .accounts({
-      group: args.group,
-      bank: args.bank,
+      // group: implied
+      // bank: implied from metadata
       // metadataAdmin: args.metadataAdmin, // implied from metadata
+      metadata: args.metadata,
+    })
+    .instruction();
+
+  return ix;
+};
+
+type WriteBankMetadataPreInitArgs = {
+  group: PublicKey;
+  bankMint: PublicKey;
+  bankSeed: BN;
+  metadata: PublicKey;
+  /// Pass undefined to skip. Limit 64 bytes
+  ticker?: string;
+  /// Pass undefined to skip. Limit 128 bytes
+  description?: string;
+};
+
+export const writeBankMetadataPreInit = (
+  program: Program<Marginfi>,
+  args: WriteBankMetadataPreInitArgs,
+) => {
+  const TICKER_CAP = 64;
+  const DESC_CAP = 128;
+
+  const tickerBuf =
+    args.ticker !== undefined ? Buffer.from(args.ticker, "utf8") : null;
+  if (tickerBuf && tickerBuf.length > TICKER_CAP) {
+    throw new Error(
+      `Ticker is ${tickerBuf.length} bytes, exceeds ${TICKER_CAP} byte cap`,
+    );
+  }
+
+  const descBuf =
+    args.description !== undefined
+      ? Buffer.from(args.description, "utf8")
+      : null;
+  if (descBuf && descBuf.length > DESC_CAP) {
+    throw new Error(
+      `Description is ${descBuf.length} bytes, exceeds ${DESC_CAP} byte cap`,
+    );
+  }
+
+  const ix = program.methods
+    .writeBankMetadataPreInit(
+      args.bankSeed,
+      tickerBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
+      descBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
+    )
+    .accounts({
+      group: args.group,
+      bankMint: args.bankMint,
+      // bank: derived from seeds
       metadata: args.metadata,
     })
     .instruction();
