@@ -117,7 +117,7 @@ pub trait BankImpl {
         &mut self,
         now: i64,
         slot: u64,
-        obs: OraclePriceWithConfidence,
+        oracle: OraclePriceWithConfidence,
     ) -> MarginfiResult<()>;
     fn reset_cb_runtime_state(&mut self);
     fn trip_cb_halt(&mut self, now: i64, deviation_bps: u64);
@@ -467,8 +467,12 @@ impl BankImpl for Bank {
         if let Some(flag) = config.circuit_breaker_enabled {
             msg!("setting circuit breaker enabled: {:?}", flag);
             let was_enabled = self.get_flag(CIRCUIT_BREAKER_ENABLED);
-            // Seed the EMA from the cached oracle price (must be fresh) so the first post-enable
-            // pulse can't anchor the reference on attacker-supplied live data.
+            // Seed the EMA reference from the cached oracle price (must be non-zero and recent):
+            // a warm-cache sanity gate that also stops an attacker sandwiching the enable tx to
+            // pick the seed. NOT a defense against sustained manipulation — if the feed is
+            // already compromised, so is the cache. CB is meant to be enabled proactively under
+            // normal conditions; `clear_circuit_breaker` reseeds the reference if it ever ends
+            // up anchored badly.
             if flag && !was_enabled {
                 let last: I80F48 = self.cache.last_oracle_price.into();
                 check!(
@@ -738,7 +742,7 @@ impl BankImpl for Bank {
         &mut self,
         now: i64,
         slot: u64,
-        obs: OraclePriceWithConfidence,
+        oracle: OraclePriceWithConfidence,
     ) -> MarginfiResult<()> {
         if !self.get_flag(CIRCUIT_BREAKER_ENABLED) {
             return Ok(());
@@ -749,13 +753,13 @@ impl BankImpl for Bank {
             return Ok(());
         }
 
-        // Escalation window expired without a re-breach: fall back to operational.
         if self.cb_tier > 0 {
             let tier_dur =
                 self.config.cb_tier_durations_seconds[(self.cb_tier - 1) as usize] as i64;
             let escalation_deadline = self.cb_halt_ended_at.saturating_add(
                 tier_dur.saturating_mul(self.config.cb_escalation_window_mult as i64),
             );
+            // Escalation window expired without a re-breach: fall back to operational.
             if now >= escalation_deadline {
                 let prior_tier = self.cb_tier;
                 self.cb_tier = 0;
@@ -777,30 +781,34 @@ impl BankImpl for Bank {
         }
 
         let mut ref_price: I80F48 = self.cache.cb_reference_price.into();
-        let current = obs.price;
+        let current = oracle.price;
 
         // First-ever observation: seed the EMA and record dedup cursors. Normally already seeded
         // at enable-time, but this path also covers banks that were never pulsed before enable.
         if ref_price == I80F48::ZERO {
             self.cache.cb_reference_price = current.into();
             self.cb_last_observed_slot = slot;
-            if obs.source_time != 0 {
-                self.cb_last_oracle_source_time = obs.source_time;
+            if oracle.source_time != 0 {
+                self.cb_last_oracle_source_time = oracle.source_time;
             }
             return Ok(());
         }
 
         // Dedup gates: same-slot replay, min-slot-gap rate limit, then strictly-advancing oracle
         // publish-time (skipped when the adapter reports `source_time == 0`, e.g. Fixed feeds).
-        if slot < self.cb_last_observed_slot.saturating_add(CB_MIN_PULSE_SLOT_GAP) {
+        if slot
+            < self
+                .cb_last_observed_slot
+                .saturating_add(CB_MIN_PULSE_SLOT_GAP)
+        {
             return Ok(());
         }
-        if obs.source_time != 0 && obs.source_time <= self.cb_last_oracle_source_time {
+        if oracle.source_time != 0 && oracle.source_time <= self.cb_last_oracle_source_time {
             return Ok(());
         }
         self.cb_last_observed_slot = slot;
-        if obs.source_time != 0 {
-            self.cb_last_oracle_source_time = obs.source_time;
+        if oracle.source_time != 0 {
+            self.cb_last_oracle_source_time = oracle.source_time;
         }
 
         // Guard against a corrupted/decayed reference: reseed and defer detection rather than
@@ -812,7 +820,7 @@ impl BankImpl for Bank {
 
         // Confidence is already clamped by the adapter to `oracle_max_confidence`; subtracting it so
         // wide-band feeds don't trip on noise alone.
-        let confidence = obs.confidence.max(I80F48::ZERO);
+        let confidence = oracle.confidence.max(I80F48::ZERO);
         let raw_delta = (current - ref_price).abs();
         let effective_delta = (raw_delta - confidence).max(I80F48::ZERO);
         let deviation_bps: u64 =
@@ -1123,8 +1131,8 @@ impl BankVaultType {
 #[cfg(test)]
 mod cb_tests {
     use super::*;
-    use marginfi_type_crate::types::OraclePriceWithConfidence;
     use bytemuck::Zeroable;
+    use marginfi_type_crate::types::OraclePriceWithConfidence;
 
     fn make_cb_bank() -> Bank {
         let mut b = Bank::zeroed();
@@ -1453,7 +1461,7 @@ mod cb_tests {
     fn negative_confidence_clamped_to_zero() {
         // Below-tier-1 delta (4%) with a *negative* confidence: an unclamped subtraction would
         // inflate effective delta to 5% and cross tier 1 (500 bps). The clamp at
-        // `obs.confidence.max(I80F48::ZERO)` keeps effective delta at the raw 4%, no breach.
+        // `oracle.confidence.max(I80F48::ZERO)` keeps effective delta at the raw 4%, no breach.
         let mut b = make_cb_bank();
         b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
             .unwrap();
