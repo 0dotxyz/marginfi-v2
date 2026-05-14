@@ -10,7 +10,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   SOLANA_VERSION: "v3.1.13"
-  TRIDENT_VERSION: "0.13.0-rc.3"
+  TRIDENT_VERSION: "0.13.0-rc.4"
 
 jobs:
   build:

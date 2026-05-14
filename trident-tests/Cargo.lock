@@ -7821,8 +7821,9 @@ dependencies = [
 
 [[package]]
 name = "trident-config"
-version = "0.13.0-rc.3"
-source = "git+https://github.com/Ackee-Blockchain/trident?branch=develop#7fc4ec2e8be83fd97ec6f9d5e3fb5ac118115faf"
+version = "0.13.0-rc.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "932e5e4776a0b72348267c45e1ef5e07ede2d48350024afa98d129a4eef193d0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -7842,8 +7843,9 @@ dependencies = [
 
 [[package]]
 name = "trident-derive-flow-executor"
-version = "0.13.0-rc.3"
-source = "git+https://github.com/Ackee-Blockchain/trident?branch=develop#7fc4ec2e8be83fd97ec6f9d5e3fb5ac118115faf"
+version = "0.13.0-rc.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3684c7f1191673c0de2566cac3961f0d84c7c70b2593a97924a33f5f083b7535"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7853,8 +7855,9 @@ dependencies = [
 
 [[package]]
 name = "trident-derive-fuzz-test-methods"
-version = "0.13.0-rc.3"
-source = "git+https://github.com/Ackee-Blockchain/trident?branch=develop#7fc4ec2e8be83fd97ec6f9d5e3fb5ac118115faf"
+version = "0.13.0-rc.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e4dec605cd111f9e874bc198f68a80a6752b1b64e3b58dee141ad94daf8332c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7864,8 +7867,9 @@ dependencies = [
 
 [[package]]
 name = "trident-fuzz"
-version = "0.13.0-rc.3"
-source = "git+https://github.com/Ackee-Blockchain/trident?branch=develop#7fc4ec2e8be83fd97ec6f9d5e3fb5ac118115faf"
+version = "0.13.0-rc.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b54b5d53fc2b1f5a02add210cc2b852fe9c562791036e2aa1f58fb16f728edb"
 dependencies = [
  "bincode",
  "borsh 1.6.1",
@@ -7896,8 +7900,9 @@ dependencies = [
 
 [[package]]
 name = "trident-fuzz-metrics"
-version = "0.13.0-rc.3"
-source = "git+https://github.com/Ackee-Blockchain/trident?branch=develop#7fc4ec2e8be83fd97ec6f9d5e3fb5ac118115faf"
+version = "0.13.0-rc.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b5b0fc467ad4d6c63b41c2fdf91f27b48968cee7d893f443e54473e425c43a1"
 dependencies = [
  "hex",
  "prettytable",
@@ -7909,8 +7914,9 @@ dependencies = [
 
 [[package]]
 name = "trident-svm"
-version = "0.3.0-rc.3"
-source = "git+https://github.com/Ackee-Blockchain/trident-svm?branch=develop#920251c442e192e70c545b767d1e12b645c57fb1"
+version = "0.3.0-rc.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66a5b80da954bfbcb5051f1c96928879d898325b525618fe6c1aab4cf4431a2b"
 dependencies = [
  "agave-feature-set",
  "agave-precompiles",
@@ -7953,8 +7959,9 @@ dependencies = [
 
 [[package]]
 name = "trident-syn"
-version = "0.13.0-rc.3"
-source = "git+https://github.com/Ackee-Blockchain/trident?branch=develop#7fc4ec2e8be83fd97ec6f9d5e3fb5ac118115faf"
+version = "0.13.0-rc.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9a97e70ef5088c98980940e52f818905cca15d74ef724cf9477d1c77db0aeec"
 dependencies = [
  "petgraph",
  "proc-macro2",

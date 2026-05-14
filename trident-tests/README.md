@@ -7,7 +7,7 @@ For Trident source code, check out the [Trident repository](https://github.com/A
 ### 1. Install trident-cli
 
 ```bash
-cargo install trident-cli --version 0.13.0-rc.3
+cargo install trident-cli --version 0.13.0-rc.4
 ```
 
 ### 2. Build the programs
@@ -33,6 +33,9 @@ trident fuzz run fuzz_0
 # or another fuzz test by name
 ```
 
+
+> [!WARNING]
+> Due to the incident around the Drift protocol, the Drift integration tests are not present. From the onchain data, it looks like there is no current traffic, so there are no accounts to fork.
 
 
 ## Fuzz `fuzz_0` — invariant checklist
