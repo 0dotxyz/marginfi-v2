@@ -20,7 +20,6 @@ devnet = ["id-crate/devnet"]
 [dependencies]
 id-crate = { workspace = true }
 bytemuck = { workspace = true, features = ["derive"] }
-borsh = { workspace = true }
 fixed = { workspace = true }
 fixed-macro = { workspace = true }
 bs58 = { workspace = true }
