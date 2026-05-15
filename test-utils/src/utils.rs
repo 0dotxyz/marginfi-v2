@@ -1,5 +1,4 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::hash::hashv;
 use anchor_lang::solana_program::instruction::Instruction;
 use anchor_lang::system_program;
 use anchor_lang::Discriminator;
@@ -7,10 +6,9 @@ use anchor_spl::token::spl_token;
 use anchor_spl::token_2022::spl_token_2022::extension::transfer_fee::MAX_FEE_BASIS_POINTS;
 use marginfi::constants::SWITCHBOARD_PULL_ID;
 use marginfi_type_crate::constants::{EXECUTE_ORDER_SEED, ORDER_SEED};
-use pyth_solana_receiver_sdk::price_update::FeedId;
-use pyth_solana_receiver_sdk::price_update::PriceUpdateV2;
-use pyth_solana_receiver_sdk::price_update::VerificationLevel;
+use pyth_solana_receiver_sdk::price_update::{FeedId, PriceUpdateV2, VerificationLevel};
 use solana_cli_output::CliAccount;
+use solana_address::Address;
 use solana_program_test::*;
 use solana_sdk::account::ReadableAccount;
 use solana_sdk::account::WritableAccount;
@@ -81,7 +79,7 @@ pub fn create_pyth_push_oracle_account(
     let native_price = (ui_price * 10_f64.powf(mint_decimals as f64)) as i64;
 
     let price_update = PriceUpdateV2 {
-        write_authority: Pubkey::default(),
+        write_authority: Pubkey::new_from_array(Address::default().to_bytes()),
         verification_level,
         price_message: pyth_solana_receiver_sdk::price_update::PriceFeedMessage {
             feed_id,
@@ -495,13 +493,13 @@ pub fn find_order_pda(marginfi_account: &Pubkey, bank_keys: &[Pubkey]) -> (Pubke
     let hash = keys_sha256_hash(bank_keys);
     Pubkey::find_program_address(
         &[ORDER_SEED.as_bytes(), marginfi_account.as_ref(), &hash],
-        &marginfi::ID,
+        Address::new_from_array(marginfi::ID.to_bytes()),
     )
 }
 
 pub fn find_execute_order_pda(order: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(
         &[EXECUTE_ORDER_SEED.as_bytes(), order.as_ref()],
-        &marginfi::ID,
+        &marginfi::ID.as_ref().into(),
     )
 }

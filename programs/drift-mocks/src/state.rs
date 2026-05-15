@@ -38,8 +38,8 @@ pub struct SpotPosition {
 #[derive(Clone, Copy, Debug, PartialEq, AnchorSerialize, AnchorDeserialize)]
 #[repr(u8)]
 pub enum SpotBalanceType {
-    Deposit = 0,
-    Borrow = 1,
+    Deposit, // 0
+    Borrow, // 1
 }
 
 unsafe impl Zeroable for SpotBalanceType {}
@@ -93,6 +93,7 @@ pub struct MinimalSpotMarket {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, AnchorSerialize, AnchorDeserialize)]
+#[borsh(use_discriminant = true)]
 #[repr(u8)]
 pub enum UserStatus {
     Active = 0,

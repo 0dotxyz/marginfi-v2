@@ -15,7 +15,7 @@ drift-mocks = { path = "../programs/drift-mocks" , features = ["no-entrypoint"]}
 juplend-mocks = { path = "../programs/juplend-mocks" , features = ["no-entrypoint"]}
 
 solana-cli-output = { workspace = true }
-solana-program = { workspace = true }
+solana-address = { workspace = true }
 solana-logger = { workspace = true }
 solana-program-test = { workspace = true }
 solana-sdk = { workspace = true }
