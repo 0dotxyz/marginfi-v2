@@ -4,7 +4,7 @@ New developer getting started working on the mrgnv2 program side? Read on.
 
 ## Things to Install (January 2026)
 
-- rust toolchain - 1.79.0
+- rust toolchain - 1.90.0
 - node - 24.15.0
 - yarn - 4.14.1 (via Corepack)
 - avm - 0.30.1 or later

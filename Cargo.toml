@@ -13,14 +13,15 @@ exclude = [
 ]
 
 [workspace.dependencies]
-solana-cli-output = "=2.1.20"
-solana-client = "=2.1.20"
-solana-sdk = "=2.1.20"
-solana-logger = "=2.1.20"
-solana-program = "=2.1.20"
-solana-program-test = "=2.1.20"
-solana-account-decoder = "=2.1.20"
-solana-instruction = "2.1.20"
+solana-cli-output = "=3.1.11"
+solana-client = "=3.1.11"
+solana-sdk = "=3.0.0"
+solana-logger = "=3.0.0"
+solana-program = "=3.0.0"
+solana-program-test = "=3.1.11"
+solana-account-decoder = "=3.1.11"
+solana-instruction = "=3.4.0"
+solana-hash = "3.1.0"
 # solana-measure = "=2.1.20"
 # solana-metrics = "=2.1.20"
 # solana-transaction-status = "=2.1.20"
@@ -31,9 +32,9 @@ spl-tlv-account-resolution = "0.9.0"
 # spl-discriminator = "0.2.2"
 spl-token-2022 = { version = "7.0.0", features = ["no-entrypoint"] }
 
-anchor-lang = { version = "0.31.1" }
-anchor-spl = { version = "0.31.1", features = ["token_2022"] }
-anchor-client = { version = "0.31.1" }
+anchor-lang = { version = "0.32.1" }
+anchor-spl = { version = "0.32.1", features = ["token_2022"] }
+anchor-client = { version = "0.32.1" }
 
 fixtures = { path = "test-utils", package = "test-utilities" }
 marginfi = { path = "programs/marginfi", package = "marginfi" }
@@ -42,9 +43,9 @@ mocks = { path = "programs/mocks", package = "mocks" }
 id-crate = { path = "id-crate" }
 marginfi-type-crate = { path = "type-crate" }
 
-pyth-solana-receiver-sdk = "0.6.0"
+pyth-solana-receiver-sdk = "1.1.0"
 # pythnet-sdk = "2.3.1"
-switchboard-on-demand = "0.3.5"
+switchboard-on-demand = "0.7.4"
 
 borsh = "1.5.7"
 bytemuck = "1.22.0"
