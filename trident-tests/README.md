@@ -33,6 +33,15 @@ trident fuzz run fuzz_0
 # or another fuzz test by name
 ```
 
+## What’s implemented (current coverage)
+
+- **Core marginfi flows**: deposit (USDC), withdraw (USDC), borrow (ETH), repay (ETH)
+- **Flashloan**: BTC flashloan borrow+repay (includes mismatch case expecting failure)
+- **Liquidation**: liquidation (USDC vs ETH) and receivership liquidation start/end
+- **Interest accrual**: time warp + `LendingPoolAccrueBankInterest` for all fuzz banks
+- **Kamino integration (USDC)**: deposit to obligation + withdraw from obligation
+- **Juplend integration (USDC)**: init position + deposit + withdraw
+
 
 > [!WARNING]
 > Due to the incident around the Drift protocol, the Drift integration tests are not present. From the onchain data, it looks like there is no current traffic, so there are no accounts to fork.

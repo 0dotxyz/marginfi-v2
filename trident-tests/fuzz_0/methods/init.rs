@@ -21,6 +21,8 @@ use crate::types::marginfi::RatePoint;
 use crate::types::marginfi::RiskTier;
 use crate::types::marginfi::WrappedI80F48;
 use crate::usdc_amount;
+use crate::utils::initialize_token_account;
+use crate::utils::mint_to;
 
 fn wrap_i80f48(value: I80F48) -> WrappedI80F48 {
     WrappedI80F48::new(value.to_bits().to_le_bytes())
@@ -49,91 +51,95 @@ impl FuzzTest {
             self.payer.pubkey(),
             self.marginfi_group,
             self.fee_state,
-            Some("Init Marginfi Group"),
+            None,
         );
 
-        self.init_marginfi_account(
-            self.marginfi_group,
-            self.user_a.marginfi_account,
-            self.user_a.address,
-            Some("Init Marginfi Account for User A"),
-        );
+        // ================================================================================================
+        // Init Marginfi Accounts for Users
+        for user in self
+            .users
+            .clone()
+            .iter()
+            .chain([&self.seeder.clone(), &self.liquidator.clone()])
+        {
+            // ================================================================================================
+            // Init Marginfi Account for User
+            self.init_marginfi_account(
+                self.marginfi_group,
+                user.marginfi_account,
+                user.address,
+                None,
+            );
 
-        self.init_marginfi_account(
-            self.marginfi_group,
-            self.seeder.marginfi_account,
-            self.seeder.address,
-            Some("Init Marginfi Account for Seeder"),
-        );
+            // ================================================================================================
+            // Init Liquidation Record for User
+            self.marginfi_account_init_liquidation_record(
+                user.marginfi_account,
+                self.payer.pubkey(),
+                None,
+            );
+        }
 
-        self.init_marginfi_account(
-            self.marginfi_group,
-            self.user_b.marginfi_account,
-            self.user_b.address,
-            Some("Init Marginfi Account for User B"),
-        );
-
-        self.init_marginfi_account(
-            self.marginfi_group,
-            self.liquidator.marginfi_account,
-            self.liquidator.address,
-            Some("Init Marginfi Account for Liquidator"),
-        );
-
-        self.marginfi_account_init_liquidation_record(
-            self.user_a.marginfi_account,
-            self.payer.pubkey(),
-            Some("Init Liquidation Record for User A"),
-        );
-
+        // ================================================================================================
+        // Init Bank for USDC
         self.init_bank(
             self.payer.pubkey(),
             self.usdc_bank,
             Self::usdc_bank_config(),
             self.marginfi_group,
             self.fee_state,
-            Some("Init Bank for USDC"),
+            None,
         );
 
+        // ================================================================================================
+        // Init Bank for WETH
         self.init_bank(
             self.payer.pubkey(),
             self.eth_bank,
             Self::eth_bank_config(),
             self.marginfi_group,
             self.fee_state,
-            Some("Init Bank for WETH"),
+            None,
         );
 
+        // ================================================================================================
+        // Init Bank for cbBTC
         self.init_bank(
             self.payer.pubkey(),
             self.btc_bank,
             Self::btc_bank_config(),
             self.marginfi_group,
             self.fee_state,
-            Some("Init Bank for cbBTC"),
+            None,
         );
 
+        // ================================================================================================
+        // Init Kamino Bank for USDC
         self.init_kamino_bank(
             self.payer.pubkey(),
             self.usdc_bank.currency.mint,
             self.kamino_main_lending_market,
             self.kamino_usdc_reserve,
             self.kamino_oracle,
-            Some("Init Kamino Bank for USDC"),
+            None,
         );
 
+        // ================================================================================================
+        // Init Juplend Bank for USDC
         self.init_juplend_bank(
             self.payer.pubkey(),
             self.usdc_bank.currency.mint,
             self.juplend_usdc_lending_state,
             self.juplend_usdc_f_token_mint,
             self.juplend_oracle,
-            Some("Init Juplend Bank for USDC"),
+            None,
         );
 
+        // ================================================================================================
+        // Init Kamino Obligation
         self.init_kamino_obligation(
-            self.user_a.address,
-            self.user_a.usdc_token_account,
+            self.seeder.address,
+            self.seeder.usdc_token_account,
             self.usdc_bank.currency.mint,
             self.kamino_main_lending_market,
             self.kamino_usdc_reserve,
@@ -142,12 +148,14 @@ impl FuzzTest {
             self.kamino_usdc_reserve_collateral_supply_vault,
             self.kamino_usdc_reserve_farm_state,
             usdc_amount!(10_000),
-            Some("Init Kamino Obligation for User A"),
+            None,
         );
 
+        // ================================================================================================
+        // Init Juplend Position
         self.init_juplend_position(
-            self.user_a.address,
-            self.user_a.usdc_token_account,
+            self.seeder.address,
+            self.seeder.usdc_token_account,
             self.usdc_bank.currency.mint,
             self.juplend_usdc_lending_state,
             self.juplend_usdc_f_token_mint,
@@ -159,28 +167,34 @@ impl FuzzTest {
             self.juplend_usdc_liquidity,
             self.juplend_usdc_rewards_rate_model,
             usdc_amount!(10_000),
-            Some("Init Jupiter Position for User A"),
+            None,
         );
 
+        // ================================================================================================
+        // Update Bank Oracle for USDC
         self.update_bank_oracle(
             self.usdc_bank,
             self.marginfi_group,
             self.payer.pubkey(),
-            Some("Update Bank Oracle for USDC"),
+            None,
         );
 
+        // ================================================================================================
+        // Update Bank Oracle for WETH
         self.update_bank_oracle(
             self.eth_bank,
             self.marginfi_group,
             self.payer.pubkey(),
-            Some("Update Bank Oracle for WETH"),
+            None,
         );
 
+        // ================================================================================================
+        // Update Bank Oracle for cbBTC
         self.update_bank_oracle(
             self.btc_bank,
             self.marginfi_group,
             self.payer.pubkey(),
-            Some("Update Bank Oracle for cbBTC"),
+            None,
         );
     }
 
@@ -310,7 +324,15 @@ impl FuzzTest {
             .trident
             .get_account_with_type::<Bank>(&liab_bank, None)
             .expect("liab bank");
-        let mut metas = vec![AccountMeta::new_readonly(liab_bank_state.mint, false)];
+        let liab_mint_data = self.trident.get_account(&liab_bank_state.mint);
+        let liab_token_program = *liab_mint_data.owner();
+
+        // Liquidation uses the liab bank's token program for SPL transfers.
+        // For Token-2022, the mint must be the first remaining account (consumed by `maybe_take_bank_mint`).
+        let mut metas = Vec::new();
+        if liab_token_program == SPL_TOKEN_2022_ID {
+            metas.push(AccountMeta::new_readonly(liab_bank_state.mint, false));
+        }
 
         let asset_bank_state = self
             .trident
@@ -657,47 +679,56 @@ impl FuzzTest {
 
     #[allow(clippy::too_many_arguments)]
     pub fn init_token_accounts_and_mint_to(&mut self) {
-        for user in &[self.user_a, self.user_b, self.seeder, self.liquidator] {
-            self.trident.airdrop(&user.address, solana_amount!(500));
+        self.users
+            .iter()
+            .chain([&self.seeder, &self.liquidator])
+            .for_each(|user| {
+                self.trident.airdrop(&user.address, solana_amount!(500));
 
-            self.initialize_token_account(
-                user.address,
-                user.usdc_token_account,
-                self.usdc_bank.currency.mint,
-                user.address,
-            );
+                initialize_token_account(
+                    &mut self.trident,
+                    user.address,
+                    user.usdc_token_account,
+                    self.usdc_bank.currency.mint,
+                    user.address,
+                );
 
-            self.mint_to(
-                user.usdc_token_account,
-                self.usdc_bank.currency.mint,
-                self.usdc_bank.currency.mint_authority,
-                user.initial_usdc_amount,
-            );
-            self.initialize_token_account(
-                user.address,
-                user.eth_token_account,
-                self.eth_bank.currency.mint,
-                user.address,
-            );
-            self.mint_to(
-                user.eth_token_account,
-                self.eth_bank.currency.mint,
-                self.eth_bank.currency.mint_authority,
-                user.initial_eth_amount,
-            );
-            self.initialize_token_account(
-                user.address,
-                user.btc_token_account,
-                self.btc_bank.currency.mint,
-                user.address,
-            );
+                mint_to(
+                    &mut self.trident,
+                    user.usdc_token_account,
+                    self.usdc_bank.currency.mint,
+                    self.usdc_bank.currency.mint_authority,
+                    user.initial_usdc_amount,
+                );
+                initialize_token_account(
+                    &mut self.trident,
+                    user.address,
+                    user.eth_token_account,
+                    self.eth_bank.currency.mint,
+                    user.address,
+                );
+                mint_to(
+                    &mut self.trident,
+                    user.eth_token_account,
+                    self.eth_bank.currency.mint,
+                    self.eth_bank.currency.mint_authority,
+                    user.initial_eth_amount,
+                );
+                initialize_token_account(
+                    &mut self.trident,
+                    user.address,
+                    user.btc_token_account,
+                    self.btc_bank.currency.mint,
+                    user.address,
+                );
 
-            self.mint_to(
-                user.btc_token_account,
-                self.btc_bank.currency.mint,
-                self.btc_bank.currency.mint_authority,
-                user.initial_btc_amount,
-            );
-        }
+                mint_to(
+                    &mut self.trident,
+                    user.btc_token_account,
+                    self.btc_bank.currency.mint,
+                    self.btc_bank.currency.mint_authority,
+                    user.initial_btc_amount,
+                );
+            });
     }
 }

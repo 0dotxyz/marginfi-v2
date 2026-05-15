@@ -3,12 +3,18 @@
 use trident_fuzz::fuzzing::*;
 
 use crate::types;
+use crate::user::User;
 use crate::FuzzTest;
 
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 
 impl FuzzTest {
+    pub fn get_random_user(&mut self) -> User {
+        let index = self.trident.random_from_range(0..self.users.len());
+        self.users[index].to_owned()
+    }
+
     pub fn liquidation_record_pda(&self, marginfi_account: Pubkey) -> Pubkey {
         Pubkey::find_program_address(
             &[
@@ -18,122 +24,6 @@ impl FuzzTest {
             &types::marginfi::program_id(),
         )
         .0
-    }
-
-    pub fn initialize_mint_2022(
-        &mut self,
-        payer: Pubkey,
-        mint: Pubkey,
-        decimals: u8,
-        mint_authority: Pubkey,
-    ) {
-        let ixs =
-            self.trident
-                .initialize_mint_2022(&payer, &mint, decimals, &mint_authority, None, &[]);
-        let res = self.trident.process_transaction(&ixs, None);
-        invariant!(res.is_success());
-    }
-
-    pub fn initialize_mint(
-        &mut self,
-        payer: Pubkey,
-        mint: Pubkey,
-        decimals: u8,
-        mint_authority: Pubkey,
-    ) {
-        let ixs = self
-            .trident
-            .initialize_mint(&payer, &mint, decimals, &mint_authority, None);
-        let res = self.trident.process_transaction(&ixs, None);
-        invariant!(res.is_success());
-    }
-
-    pub fn initialize_token_account(
-        &mut self,
-        payer: Pubkey,
-        token_account: Pubkey,
-        mint: Pubkey,
-        owner: Pubkey,
-    ) {
-        let ixs = self
-            .trident
-            .initialize_token_account(&payer, &token_account, &mint, &owner);
-        let res = self.trident.process_transaction(&ixs, None);
-        invariant!(res.is_success());
-    }
-    pub fn initialize_token_account_2022(
-        &mut self,
-        payer: Pubkey,
-        token_account: Pubkey,
-        mint: Pubkey,
-        owner: Pubkey,
-        extensions: &[AccountExtension],
-    ) {
-        let ixs = self.trident.initialize_token_account_2022(
-            &payer,
-            &token_account,
-            &mint,
-            &owner,
-            extensions,
-        );
-        let res = self.trident.process_transaction(&ixs, None);
-        invariant!(res.is_success());
-    }
-
-    pub fn initialize_associated_token_account(
-        &mut self,
-        payer: Pubkey,
-        mint: Pubkey,
-        owner: Pubkey,
-        token_program: Pubkey,
-    ) -> Pubkey {
-        let ata = self
-            .trident
-            .get_associated_token_address(&mint, &owner, &token_program);
-
-        let ata_data = self.trident.get_token_account(ata);
-
-        match ata_data {
-            Ok(ata_data) => {}
-            Err(e) => {
-                let ix = self
-                    .trident
-                    .initialize_associated_token_account(&payer, &mint, &owner);
-
-                let res = self.trident.process_transaction(&[ix], None);
-                invariant!(res.is_success());
-            }
-        }
-        ata
-    }
-
-    pub fn mint_to_2022(
-        &mut self,
-        token_account: Pubkey,
-        mint: Pubkey,
-        mint_authority: Pubkey,
-        amount: u64,
-    ) {
-        let ix: Instruction =
-            self.trident
-                .mint_to_2022(&token_account, &mint, &mint_authority, amount);
-        let res = self.trident.process_transaction(&[ix], None);
-
-        invariant!(res.is_success());
-    }
-    pub fn mint_to(
-        &mut self,
-        token_account: Pubkey,
-        mint: Pubkey,
-        mint_authority: Pubkey,
-        amount: u64,
-    ) {
-        let ix: Instruction = self
-            .trident
-            .mint_to(&token_account, &mint, &mint_authority, amount);
-        let res = self.trident.process_transaction(&[ix], None);
-
-        invariant!(res.is_success());
     }
 
     pub fn get_marginfi_account_banks(
@@ -171,6 +61,103 @@ impl FuzzTest {
         slots.sort_by_key(|(i, _)| *i);
         slots.into_iter().map(|(_, pk)| pk).collect()
     }
+}
+
+pub fn initialize_mint_2022(
+    trident: &mut Trident,
+    payer: Pubkey,
+    mint: Pubkey,
+    decimals: u8,
+    mint_authority: Pubkey,
+) {
+    let ixs = trident.initialize_mint_2022(&payer, &mint, decimals, &mint_authority, None, &[]);
+    let res = trident.process_transaction(&ixs, None);
+    invariant!(res.is_success());
+}
+
+pub fn initialize_mint(
+    trident: &mut Trident,
+    payer: Pubkey,
+    mint: Pubkey,
+    decimals: u8,
+    mint_authority: Pubkey,
+) {
+    let ixs = trident.initialize_mint(&payer, &mint, decimals, &mint_authority, None);
+    let res = trident.process_transaction(&ixs, None);
+    invariant!(res.is_success());
+}
+
+pub fn initialize_token_account(
+    trident: &mut Trident,
+    payer: Pubkey,
+    token_account: Pubkey,
+    mint: Pubkey,
+    owner: Pubkey,
+) {
+    let ixs = trident.initialize_token_account(&payer, &token_account, &mint, &owner);
+    let res = trident.process_transaction(&ixs, None);
+    invariant!(res.is_success());
+}
+pub fn initialize_token_account_2022(
+    trident: &mut Trident,
+    payer: Pubkey,
+    token_account: Pubkey,
+    mint: Pubkey,
+    owner: Pubkey,
+    extensions: &[AccountExtension],
+) {
+    let ixs =
+        trident.initialize_token_account_2022(&payer, &token_account, &mint, &owner, extensions);
+    let res = trident.process_transaction(&ixs, None);
+    invariant!(res.is_success());
+}
+
+pub fn initialize_associated_token_account(
+    trident: &mut Trident,
+    payer: Pubkey,
+    mint: Pubkey,
+    owner: Pubkey,
+    token_program: Pubkey,
+) -> Pubkey {
+    let ata = trident.get_associated_token_address(&mint, &owner, &token_program);
+
+    let ata_data = trident.get_token_account(ata);
+
+    match ata_data {
+        Ok(ata_data) => {}
+        Err(e) => {
+            let ix = trident.initialize_associated_token_account(&payer, &mint, &owner);
+
+            let res = trident.process_transaction(&[ix], None);
+            invariant!(res.is_success());
+        }
+    }
+    ata
+}
+
+pub fn mint_to_2022(
+    trident: &mut Trident,
+    token_account: Pubkey,
+    mint: Pubkey,
+    mint_authority: Pubkey,
+    amount: u64,
+) {
+    let ix: Instruction = trident.mint_to_2022(&token_account, &mint, &mint_authority, amount);
+    let res = trident.process_transaction(&[ix], None);
+
+    invariant!(res.is_success());
+}
+pub fn mint_to(
+    trident: &mut Trident,
+    token_account: Pubkey,
+    mint: Pubkey,
+    mint_authority: Pubkey,
+    amount: u64,
+) {
+    let ix: Instruction = trident.mint_to(&token_account, &mint, &mint_authority, amount);
+    let res = trident.process_transaction(&[ix], None);
+
+    invariant!(res.is_success());
 }
 
 #[tokio::main]

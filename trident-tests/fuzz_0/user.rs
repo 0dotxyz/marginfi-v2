@@ -1,7 +1,8 @@
 use trident_fuzz::fuzzing::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct User {
+    pub name: String,
     pub address: Pubkey,
     pub marginfi_account: Pubkey,
     pub usdc_token_account: Pubkey,
@@ -15,6 +16,7 @@ pub struct User {
 impl User {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        name: String,
         address: Pubkey,
         marginfi_account: Pubkey,
         usdc_token_account: Pubkey,
@@ -25,6 +27,7 @@ impl User {
         initial_btc_amount: u64,
     ) -> Self {
         Self {
+            name,
             address,
             marginfi_account,
             usdc_token_account,

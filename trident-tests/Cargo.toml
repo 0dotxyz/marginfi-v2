@@ -14,7 +14,7 @@ anyhow = "1.0.68"
 solana-client = "2"
 klend-interface = "*"
 spl-associated-token-account = "8.0.0"
-
+# pyth-solana-receiver-sdk = "1.1"
 
 [dependencies.trident-fuzz]
 version = "0.13.0-rc.4"

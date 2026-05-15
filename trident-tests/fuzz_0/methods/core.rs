@@ -5,6 +5,7 @@ use crate::invariants;
 use crate::types;
 use crate::FuzzTestBank;
 
+use crate::user::User;
 use crate::FuzzTest;
 
 impl FuzzTest {
@@ -422,17 +423,43 @@ impl FuzzTest {
             bank.address,
         );
 
-        let ix = self.lending_account_repay_ix(
-            amount,
-            bank.address,
+        let bank_layout = self.bank_layout(bank.address);
+        let token_program = *self.trident.get_account(&bank.currency.mint).owner();
+        let banks = self.get_marginfi_account_banks(marginfi_account, Some(bank.address));
+        let remaining_accounts = self.remaining_accounts_for_bank_risk_and_t22_transfer(
             bank.currency.mint,
-            source_token_account,
-            marginfi_account,
-            authority,
-            false,
+            token_program,
+            banks,
         );
 
-        let res = self.trident.process_transaction(&[ix], msg);
+        let repay_ix = types::marginfi::LendingAccountRepayInstruction::data(
+            types::marginfi::LendingAccountRepayInstructionData::new(amount, Some(false)),
+        )
+        .accounts(
+            types::marginfi::LendingAccountRepayInstructionAccounts::new(
+                self.marginfi_group,
+                marginfi_account,
+                authority,
+                bank.address,
+                source_token_account,
+                bank_layout.liquidity_vault,
+                token_program,
+            ),
+        )
+        .remaining_accounts(remaining_accounts)
+        .instruction();
+
+        // let ix = self.lending_account_repay_ix(
+        //     amount,
+        //     bank.address,
+        //     bank.currency.mint,
+        //     source_token_account,
+        //     marginfi_account,
+        //     authority,
+        //     false,
+        // );
+
+        let res = self.trident.process_transaction(&[repay_ix], msg);
 
         let user_after = invariants::token_balance(&mut self.trident, source_token_account);
         let vault_after = invariants::token_balance(&mut self.trident, bank_layout.liquidity_vault);
@@ -475,8 +502,7 @@ impl FuzzTest {
 
     pub fn lending_flashloan(
         &mut self,
-        marginfi_account: Pubkey,
-        authority: Pubkey,
+        user: &User,
         inner_instructions: Vec<Instruction>,
         msg: Option<&str>,
         end_health_banks: Option<Vec<Pubkey>>,
@@ -486,7 +512,7 @@ impl FuzzTest {
                 b.sort_by(|a, c| c.cmp(a));
                 b
             }
-            None => self.get_marginfi_account_banks(marginfi_account, None),
+            None => self.get_marginfi_account_banks(user.marginfi_account, None),
         };
         let end_remaining = self.remaining_accounts_for_bank_risk_only(banks);
 
@@ -497,8 +523,8 @@ impl FuzzTest {
         )
         .accounts(
             types::marginfi::LendingAccountStartFlashloanInstructionAccounts::new(
-                marginfi_account,
-                authority,
+                user.marginfi_account,
+                user.address,
             ),
         )
         .instruction();
@@ -508,8 +534,8 @@ impl FuzzTest {
         )
         .accounts(
             types::marginfi::LendingAccountEndFlashloanInstructionAccounts::new(
-                marginfi_account,
-                authority,
+                user.marginfi_account,
+                user.address,
             ),
         )
         .remaining_accounts(end_remaining)
@@ -521,22 +547,11 @@ impl FuzzTest {
                 self.bank_layout(self.eth_bank.address).liquidity_vault,
                 self.bank_layout(self.btc_bank.address).liquidity_vault,
             ];
-            let extra = if authority == self.user_a.address {
-                vec![
-                    self.user_a.usdc_token_account,
-                    self.user_a.eth_token_account,
-                ]
-            } else if authority == self.user_b.address {
-                vec![self.user_b.btc_token_account]
-            } else if authority == self.seeder.address {
-                vec![
-                    self.seeder.usdc_token_account,
-                    self.seeder.eth_token_account,
-                    self.seeder.btc_token_account,
-                ]
-            } else {
-                vec![]
-            };
+            let extra = vec![
+                user.usdc_token_account,
+                user.eth_token_account,
+                user.btc_token_account,
+            ];
             Some(invariants::flashloan_empty_balance_snapshot(
                 &mut self.trident,
                 &vaults,
@@ -566,33 +581,30 @@ impl FuzzTest {
         borrow_amount: u64,
         repay_amount: u64,
         bank: FuzzTestBank,
-        marginfi_account: Pubkey,
-        authority: Pubkey,
-        user_token_account: Pubkey,
+        user: &User,
         msg: Option<&str>,
     ) {
         let borrow_ix = self.lending_account_borrow_ix(
             borrow_amount,
             bank.address,
             bank.currency.mint,
-            user_token_account,
-            marginfi_account,
-            authority,
+            user.btc_token_account,
+            user.marginfi_account,
+            user.address,
         );
         let repay_ix = self.lending_account_repay_ix(
             repay_amount,
             bank.address,
             bank.currency.mint,
-            user_token_account,
-            marginfi_account,
-            authority,
+            user.btc_token_account,
+            user.marginfi_account,
+            user.address,
             true,
         );
         let user_before_flashloan =
-            invariants::token_balance(&mut self.trident, user_token_account);
+            invariants::token_balance(&mut self.trident, user.btc_token_account);
         let res = self.lending_flashloan(
-            marginfi_account,
-            authority,
+            user,
             vec![borrow_ix, repay_ix],
             msg,
             Some(vec![bank.address]),
@@ -600,7 +612,7 @@ impl FuzzTest {
 
         if borrow_amount == repay_amount && res.is_success() {
             let user_after_flashloan =
-                invariants::token_balance(&mut self.trident, user_token_account);
+                invariants::token_balance(&mut self.trident, user.btc_token_account);
             invariants::assert_flashloan_closed_loop_user_unchanged(
                 user_before_flashloan,
                 user_after_flashloan,
@@ -627,6 +639,8 @@ impl FuzzTest {
         msg: Option<&str>,
     ) {
         let liab_layout = self.bank_layout(liab_bank.address);
+        let liab_mint_data = self.trident.get_account(&liab_bank.currency.mint);
+        let liab_token_program = *liab_mint_data.owner();
         let (remaining_accounts, liquidatee_accounts, liquidator_accounts) = self
             .remaining_accounts_for_liquidation(
                 asset_bank.address,
@@ -663,7 +677,7 @@ impl FuzzTest {
                 liab_layout.liquidity_vault_authority,
                 liab_layout.liquidity_vault,
                 liab_layout.insurance_vault,
-                SPL_TOKEN_ID,
+                liab_token_program,
             ),
         )
         .remaining_accounts(remaining_accounts)
@@ -738,4 +752,3 @@ impl FuzzTest {
         }
     }
 }
-

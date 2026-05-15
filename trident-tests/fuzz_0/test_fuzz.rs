@@ -32,17 +32,14 @@ struct FuzzTest {
     marginfi_group: Pubkey,
     fee_state: Pubkey,
     // ================================================================================================
-    // User A accounts
-    user_a: User,
-    // ================================================================================================
-    // Flashloan-only user (BTC bank).
-    user_b: User,
-    // ================================================================================================
     // Liquidator accounts
     liquidator: User,
     // ================================================================================================
     // Initial seeder
     seeder: User,
+    // ================================================================================================
+    // Users
+    users: Vec<User>,
     // ================================================================================================
     // Kamino integration accounts
     kamino_main_lending_market: Pubkey,
@@ -105,6 +102,7 @@ impl FuzzTest {
         // ================================================================================================
         // Seeder accounts
         let seeder = User::new(
+            "Seeder".to_string(),
             trident.random_keypair().pubkey(),
             trident.random_keypair().pubkey(),
             trident.random_keypair().pubkey(),
@@ -118,6 +116,7 @@ impl FuzzTest {
         // ================================================================================================
         // User A accounts
         let user_a = User::new(
+            "User A".to_string(),
             trident.random_keypair().pubkey(),
             trident.random_keypair().pubkey(),
             trident.random_keypair().pubkey(),
@@ -131,6 +130,7 @@ impl FuzzTest {
         // ================================================================================================
         // User B accounts
         let user_b = User::new(
+            "User B".to_string(),
             trident.random_keypair().pubkey(),
             trident.random_keypair().pubkey(),
             trident.random_keypair().pubkey(),
@@ -142,17 +142,44 @@ impl FuzzTest {
         );
 
         // ================================================================================================
+        // User C accounts
+        let user_c = User::new(
+            "User C".to_string(),
+            trident.random_keypair().pubkey(),
+            trident.random_keypair().pubkey(),
+            trident.random_keypair().pubkey(),
+            usdc_amount!(100_000_000_000),
+            trident.random_keypair().pubkey(),
+            weth_amount!(10_000_000),
+            trident.random_keypair().pubkey(),
+            btc_amount!(500_000),
+        );
+
+        // User D accounts
+        let user_d = User::new(
+            "User D".to_string(),
+            trident.random_keypair().pubkey(),
+            trident.random_keypair().pubkey(),
+            trident.random_keypair().pubkey(),
+            usdc_amount!(100_000_000_000),
+            trident.random_keypair().pubkey(),
+            weth_amount!(10_000_000),
+            trident.random_keypair().pubkey(),
+            btc_amount!(500_000),
+        );
+        // ================================================================================================
         // Liquidator accounts
-        let liquidator = User {
-            address: trident.random_keypair().pubkey(),
-            marginfi_account: trident.random_keypair().pubkey(),
-            usdc_token_account: trident.random_keypair().pubkey(),
-            initial_usdc_amount: usdc_amount!(10_000_000_000),
-            eth_token_account: trident.random_keypair().pubkey(),
-            initial_eth_amount: weth_amount!(1_000_000),
-            btc_token_account: trident.random_keypair().pubkey(),
-            initial_btc_amount: btc_amount!(500_000),
-        };
+        let liquidator = User::new(
+            "Liquidator".to_string(),
+            trident.random_keypair().pubkey(),
+            trident.random_keypair().pubkey(),
+            trident.random_keypair().pubkey(),
+            usdc_amount!(10_000_000_000),
+            trident.random_keypair().pubkey(),
+            weth_amount!(1_000_000),
+            trident.random_keypair().pubkey(),
+            btc_amount!(500_000),
+        );
 
         // ================================================================================================
         // Kamino integration accounts
@@ -187,8 +214,6 @@ impl FuzzTest {
         Self {
             trident,
             payer,
-            user_a,
-            user_b,
             liquidator,
             seeder,
             marginfi_group,
@@ -216,6 +241,7 @@ impl FuzzTest {
             juplend_usdc_rewards_rate_model,
             juplend_claim_account,
             juplend_oracle,
+            users: vec![user_a, user_b, user_c, user_d],
         }
     }
 
@@ -226,7 +252,7 @@ impl FuzzTest {
         self.init_foundation();
 
         // ================================================================================================
-        // Seeder deposits
+        // Seeder deposits USDC
         let amount: u64 = usdc_amount!(10_000_000);
         self.lending_account_deposit(
             amount,
@@ -237,7 +263,7 @@ impl FuzzTest {
             None,
         );
         // ================================================================================================
-        // Seeder deposits
+        // Seeder deposits WETH
         let amount: u64 = weth_amount!(1_000_000);
         self.lending_account_deposit(
             amount,
@@ -249,7 +275,7 @@ impl FuzzTest {
         );
 
         // ================================================================================================
-        // Seeder deposits
+        // Seeder deposits cbBTC
         let amount: u64 = btc_amount!(500_000);
         self.lending_account_deposit(
             amount,
@@ -262,59 +288,63 @@ impl FuzzTest {
     }
     // ================================================================================================
     // Deposit - USDC
-    #[flow(weight = 5)]
+    #[flow(weight = 16)]
     fn flow1(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
+        let user = self.get_random_user();
         self.lending_account_deposit(
             amount,
             self.usdc_bank,
-            self.user_a.usdc_token_account,
-            self.user_a.marginfi_account,
-            self.user_a.address,
-            Some("Lender Deposit - USDC"),
+            user.usdc_token_account,
+            user.marginfi_account,
+            user.address,
+            Some(format!("USDC deposit for {}", user.name).as_str()),
         );
     }
 
     // ================================================================================================
     // Withdraw - USDC
-    #[flow(weight = 10)]
+    #[flow(weight = 13)]
     fn flow2(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
+        let user = self.get_random_user();
         self.lending_account_withdraw(
             amount,
             self.usdc_bank,
-            self.user_a.usdc_token_account,
-            self.user_a.marginfi_account,
-            self.user_a.address,
-            Some("Lender Withdraw - USDC"),
+            user.usdc_token_account,
+            user.marginfi_account,
+            user.address,
+            Some(format!("USDC withdraw for {}", user.name).as_str()),
         );
     }
     // ================================================================================================
     // Borrow - ETH
-    #[flow(weight = 17)]
+    #[flow(weight = 15)]
     fn flow3(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
+        let user = self.get_random_user();
         self.lending_account_borrow(
             amount,
             self.eth_bank,
-            self.user_a.eth_token_account,
-            self.user_a.marginfi_account,
-            self.user_a.address,
-            Some("Lender Borrow - ETH"),
+            user.eth_token_account,
+            user.marginfi_account,
+            user.address,
+            Some(format!("ETH borrow for {}", user.name).as_str()),
         );
     }
     // ================================================================================================
     // Repay - ETH
-    #[flow(weight = 17)]
+    #[flow(weight = 15)]
     fn flow4(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
+        let user = self.get_random_user();
         self.lending_account_repay(
             amount,
             self.eth_bank,
-            self.user_a.eth_token_account,
-            self.user_a.marginfi_account,
-            self.user_a.address,
-            Some("Lender Repay - ETH"),
+            user.eth_token_account,
+            user.marginfi_account,
+            user.address,
+            Some(format!("ETH repay for {}", user.name).as_str()),
         );
     }
 
@@ -328,14 +358,13 @@ impl FuzzTest {
         } else {
             self.trident.random_log_uniform()
         };
+        let user = self.get_random_user();
         self.lending_flashloan_borrow_repay(
             borrow,
             repay,
             self.btc_bank,
-            self.user_b.marginfi_account,
-            self.user_b.address,
-            self.user_b.btc_token_account,
-            Some("User B flashloan - BTC borrow vs repay"),
+            &user,
+            Some(format!("BTC flashloan for {}", user.name).as_str()),
         );
     }
     // ================================================================================================
@@ -350,6 +379,7 @@ impl FuzzTest {
         let eth_oracle = crate::constants::WETH_PYTH_PUSH;
         let numerator: i64 = self.trident.random_from_range(1000..=1_000_000);
         let denominator: i64 = 1;
+        let user = self.get_random_user();
         self.scale_pyth_push_oracle_prices(&eth_oracle, numerator, denominator);
         self.lending_account_liquidate(
             asset_amount,
@@ -357,8 +387,8 @@ impl FuzzTest {
             self.eth_bank,
             self.liquidator.marginfi_account,
             self.liquidator.address,
-            self.user_a.marginfi_account,
-            Some("Liquidation — USDC vs ETH"),
+            user.marginfi_account,
+            Some(format!("Liquidation — USDC vs ETH, liquidatee: {}", user.name).as_str()),
         );
         self.scale_pyth_push_oracle_prices(&eth_oracle, denominator, numerator);
     }
@@ -371,12 +401,19 @@ impl FuzzTest {
         let numerator: i64 = self.trident.random_from_range(1000..=1_000_000);
         let denominator: i64 = 1;
         self.scale_pyth_push_oracle_prices(&eth_oracle, numerator, denominator);
+        let user = self.get_random_user();
         self.lending_account_receivership_liquidation(
-            self.user_a.marginfi_account,
+            user.marginfi_account,
             self.payer.pubkey(),
             self.payer.pubkey(),
             &[],
-            Some("Receivership liquidation — start/end"),
+            Some(
+                format!(
+                    "Receivership liquidation — start/end, liquidatee: {}",
+                    user.name
+                )
+                .as_str(),
+            ),
         );
         self.scale_pyth_push_oracle_prices(&eth_oracle, denominator, numerator);
     }
@@ -386,10 +423,11 @@ impl FuzzTest {
     #[flow(weight = 6)]
     fn flow10(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
+        let user = self.get_random_user();
         self.deposit_to_kamino_obligation(
-            self.user_a.marginfi_account,
-            self.user_a.address,
-            self.user_a.usdc_token_account,
+            user.marginfi_account,
+            user.address,
+            user.usdc_token_account,
             self.usdc_bank.currency.mint,
             self.kamino_main_lending_market,
             self.kamino_usdc_reserve,
@@ -399,7 +437,7 @@ impl FuzzTest {
             self.kamino_usdc_reserve_farm_state,
             Some(self.kamino_scope_prices),
             amount,
-            Some("Deposit to Kamino Obligation User A"),
+            Some(format!("Deposit to Kamino Obligation for {}", user.name).as_str()),
         );
     }
 
@@ -408,11 +446,11 @@ impl FuzzTest {
     #[flow(weight = 8)]
     fn flow12(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
-
+        let user = self.get_random_user();
         self.deposit_to_juplend(
-            self.user_a.marginfi_account,
-            self.user_a.address,
-            self.user_a.usdc_token_account,
+            user.marginfi_account,
+            user.address,
+            user.usdc_token_account,
             self.usdc_bank.currency.mint,
             self.juplend_usdc_lending_state,
             self.juplend_usdc_f_token_mint,
@@ -424,7 +462,7 @@ impl FuzzTest {
             self.juplend_usdc_liquidity,
             self.juplend_usdc_rewards_rate_model,
             amount,
-            Some("Deposit to Jupiter position for User A"),
+            Some(format!("Deposit to Jupiter position for {}", user.name).as_str()),
         );
     }
 
@@ -433,11 +471,11 @@ impl FuzzTest {
     #[flow(weight = 4)]
     fn flow11(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
-
+        let user = self.get_random_user();
         self.withdraw_from_kamino_obligation(
-            self.user_a.marginfi_account,
-            self.user_a.address,
-            self.user_a.usdc_token_account,
+            user.marginfi_account,
+            user.address,
+            user.usdc_token_account,
             self.usdc_bank.currency.mint,
             self.kamino_main_lending_market,
             self.kamino_usdc_reserve,
@@ -448,7 +486,7 @@ impl FuzzTest {
             Some(self.kamino_scope_prices),
             amount,
             None,
-            Some("Withdraw from Kamino Obligation User A"),
+            Some(format!("Withdraw from Kamino Obligation for {}", user.name).as_str()),
         );
     }
     // ================================================================================================
@@ -456,11 +494,11 @@ impl FuzzTest {
     #[flow(weight = 3)]
     fn flow13(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
-
+        let user = self.get_random_user();
         self.withdraw_from_juplend(
-            self.user_a.marginfi_account,
-            self.user_a.address,
-            self.user_a.usdc_token_account,
+            user.marginfi_account,
+            user.address,
+            user.usdc_token_account,
             self.usdc_bank.currency.mint,
             self.juplend_usdc_lending_state,
             self.juplend_usdc_f_token_mint,
@@ -474,17 +512,30 @@ impl FuzzTest {
             self.juplend_claim_account,
             amount,
             None,
-            Some("Withdraw from Jupiter Position for User A"),
+            Some(format!("Withdraw from Jupiter Position for {}", user.name).as_str()),
         );
     }
 
     // ================================================================================================
     // Forward In Time + accrue (clock / interest)
-    #[flow(weight = 15)]
+    #[flow(weight = 5)]
     fn flow9(&mut self) {
         let time_forward: i64 = self.trident.random_from_range(100..100000);
         self.trident.forward_in_time(time_forward);
         self.lending_pool_accrue_all_banks(Some("Accrue bank interest after time warp"));
+
+        self.update_pyth_timestamp(
+            &constants::USDC_PYTH_PUSH,
+            self.trident.get_current_timestamp(),
+        );
+        self.update_pyth_timestamp(
+            &constants::WETH_PYTH_PUSH,
+            self.trident.get_current_timestamp(),
+        );
+        self.update_pyth_timestamp(
+            &constants::BTC_PYTH_PUSH,
+            self.trident.get_current_timestamp(),
+        );
     }
 
     #[end]
@@ -492,5 +543,5 @@ impl FuzzTest {
 }
 
 fn main() {
-    FuzzTest::fuzz(1000, 50);
+    FuzzTest::fuzz(10000, 50);
 }

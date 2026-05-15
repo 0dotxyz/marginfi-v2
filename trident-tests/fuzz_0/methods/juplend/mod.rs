@@ -11,6 +11,7 @@ use crate::types::marginfi::JuplendConfigCompact;
 use crate::types::marginfi::OracleSetup;
 use crate::types::marginfi::RiskTier;
 use crate::types::marginfi::WrappedI80F48;
+use crate::utils::initialize_associated_token_account;
 
 use fixed_macro::types::I80F48;
 
@@ -299,7 +300,8 @@ impl FuzzTest {
 
         let f_token_vault = self.juplend_f_token_vault_address(bank);
 
-        let withdraw_intermediary_ata = self.initialize_associated_token_account(
+        let withdraw_intermediary_ata = initialize_associated_token_account(
+            &mut self.trident,
             self.payer.pubkey(),
             mint,
             layout.liquidity_vault_authority,
