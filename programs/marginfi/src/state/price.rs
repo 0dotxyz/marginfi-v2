@@ -1025,7 +1025,7 @@ impl OraclePriceFeedAdapter {
 
                     // Sanity check the mint. Note: spl-single-pool uses a classic Token, never Token22
                     check!(
-                        oracle_ais[1].owner == &SPL_TOKEN_PROGRAM_ID,
+                        oracle_ais[1].owner.to_bytes() == SPL_TOKEN_PROGRAM_ID.to_bytes(),
                         MarginfiError::StakePoolValidationFailed
                     );
                     check_eq!(
@@ -1767,7 +1767,7 @@ mod tests {
             lamports: Rc::new(RefCell::new(&mut lamports)),
             data: Rc::new(RefCell::new(&mut data[..])),
             owner: &SWITCHBOARD_PULL_ID,
-            rent_epoch: 361,
+            _unused: 361,
             is_signer: false,
             is_writable: true,
             executable: false,
@@ -1834,7 +1834,7 @@ mod tests {
             lamports: Rc::new(RefCell::new(&mut lamports)),
             data: Rc::new(RefCell::new(&mut data[..])),
             owner: &SWITCHBOARD_PULL_ID,
-            rent_epoch: 361,
+            _unused: 361,
             is_signer: false,
             is_writable: true,
             executable: false,
@@ -1901,7 +1901,7 @@ mod tests {
             lamports: Rc::new(RefCell::new(&mut lamports)),
             data: Rc::new(RefCell::new(&mut data[..])),
             owner: &pyth_solana_receiver_sdk::id(),
-            rent_epoch: 361,
+            _unused: 361,
             is_signer: false,
             is_writable: true,
             executable: false,

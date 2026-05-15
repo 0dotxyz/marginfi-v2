@@ -53,7 +53,7 @@ use marginfi_type_crate::{
 /// 7. Transfers tokens from liquidity vault to user's destination account
 /// 8. Updates health cache and emits events
 pub fn drift_withdraw<'info>(
-    ctx: Context<'_, '_, 'info, 'info, DriftWithdraw<'info>>,
+    ctx: Context<'info, DriftWithdraw<'info>>,
     amount: u64,
     withdraw_all: Option<bool>,
 ) -> MarginfiResult {
@@ -479,7 +479,7 @@ impl<'info> DriftWithdraw<'info> {
         };
 
         let program = self.drift_program.to_account_info();
-        let cpi_ctx = CpiContext::new(program, accounts);
+        let cpi_ctx = CpiContext::new(program.key(), accounts);
 
         update_spot_market_cumulative_interest(cpi_ctx)?;
         Ok(())
@@ -505,7 +505,7 @@ impl<'info> DriftWithdraw<'info> {
         let program = self.drift_program.to_account_info();
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
-        let mut cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let mut cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
 
         // Construct remaining accounts in the required order for Drift:
         // 1. Oracle accounts (if provided) - main oracle first, then reward oracle
@@ -580,7 +580,7 @@ impl<'info> DriftWithdraw<'info> {
             &[bump],
         ];
         let signer_seeds: &[&[&[u8]]] = &[seeds];
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())

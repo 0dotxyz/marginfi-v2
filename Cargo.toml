@@ -50,7 +50,7 @@ marginfi-type-crate = { path = "type-crate" }
 
 pyth-solana-receiver-sdk = { git = "https://github.com/IliaZyrin/pyth-crosschain", package = "pyth-solana-receiver-sdk", branch = "solana-borsh-up" }
 # pythnet-sdk = "2.3.1"
-switchboard-on-demand = "0.8.0"
+switchboard-on-demand = "0.9.5"
 
 borsh = "1.6.1"
 bytemuck = "1.22.0"
