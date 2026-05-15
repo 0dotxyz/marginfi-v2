@@ -7,7 +7,7 @@ pub(crate) fn derive_single_pool_keys_from_vote_and_validate_owner(
     validator_vote_account: &AccountInfo<'_>,
 ) -> MarginfiResult<(Pubkey, Pubkey, Pubkey)> {
     check!(
-        validator_vote_account.owner == &anchor_lang::solana_program::vote::program::id(),
+        validator_vote_account.owner == &solana_vote_interface::program::id(),
         MarginfiError::StakePoolValidationFailed
     );
 

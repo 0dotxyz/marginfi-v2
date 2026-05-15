@@ -13,6 +13,7 @@ no-idl = []
 no-log-ix-name = []
 cpi = ["no-entrypoint"]
 default = []
+anchor-debug = ["anchor-lang/anchor-debug"]
 
 [dependencies]
 anchor-lang = { workspace = true }

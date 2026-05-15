@@ -4,7 +4,8 @@ use crate::constants::{
 use crate::state::bank_config::BankConfigImpl;
 use crate::{check, check_eq, debug, math_error, prelude::*};
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{borsh1::try_from_slice_unchecked, stake::state::StakeStateV2};
+use solana_borsh::v1::try_from_slice_unchecked;
+use solana_stake_interface::state::StakeStateV2;
 use anchor_spl::token::Mint;
 use drift_mocks::constants::SPOT_CUMULATIVE_INTEREST_PRECISION;
 use drift_mocks::state::MinimalSpotMarket;
