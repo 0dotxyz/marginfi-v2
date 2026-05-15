@@ -30,7 +30,7 @@ solana-borsh = "3.0.2"
 # solana-metrics = "=3.1.0"
 # solana-transaction-status = "=3.1.0"
 spl-token = "7.0.0"
-spl-associated-token-account = "6.0.0"
+spl-associated-token-account = { version = "7.0.0", default-features = false, features = ["no-entrypoint"] }
 spl-transfer-hook-interface = "0.9.0"
 spl-tlv-account-resolution = "0.9.0"
 # spl-discriminator = "0.2.2"
@@ -51,7 +51,7 @@ pyth-solana-receiver-sdk = "1.1.0"
 # pythnet-sdk = "2.3.1"
 switchboard-on-demand = "0.7.4"
 
-borsh = "1.5.7"
+borsh = "1.6.1"
 bytemuck = "1.22.0"
 bs58 = "0.5.1"
 # Note: 1.29.0 and later require Rust 1.83+ which solana does not ship with (yet)

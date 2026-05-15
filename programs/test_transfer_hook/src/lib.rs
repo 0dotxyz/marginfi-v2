@@ -6,7 +6,6 @@ use {
         msg,
         program::invoke_signed,
         program_error::ProgramError,
-        pubkey,
         pubkey::Pubkey,
         system_instruction,
     },
@@ -25,7 +24,8 @@ use {
     },
 };
 
-pub static TEST_HOOK_ID: Pubkey = pubkey!("TRANSFERHKTRANSFERHKTRANSFERHKTRANSFERHKTRA");
+pub static TEST_HOOK_ID: Pubkey =
+    anchor_lang::pubkey!("TRANSFERHKTRANSFERHKTRANSFERHKTRANSFERHKTRA");
 
 #[cfg(not(feature = "no-entrypoint"))]
 anchor_lang::solana_program::entrypoint!(process);
@@ -175,7 +175,7 @@ pub fn process_update_extra_account_meta_list(
     let length = extra_account_metas.len();
     let account_size = ExtraAccountMetaList::size_of(length)?;
     if account_size >= original_account_size {
-        extra_account_metas_info.realloc(account_size, false)?;
+        extra_account_metas_info.resize(account_size)?;
         let mut data = extra_account_metas_info.try_borrow_mut_data()?;
         ExtraAccountMetaList::update::<ExecuteInstruction>(&mut data, extra_account_metas)?;
     } else {
@@ -183,7 +183,7 @@ pub fn process_update_extra_account_meta_list(
             let mut data = extra_account_metas_info.try_borrow_mut_data()?;
             ExtraAccountMetaList::update::<ExecuteInstruction>(&mut data, extra_account_metas)?;
         }
-        extra_account_metas_info.realloc(account_size, false)?;
+        extra_account_metas_info.resize(account_size)?;
     }
 
     Ok(())

@@ -25,12 +25,13 @@ staging = ["id-crate/staging", "marginfi-type-crate/staging"]
 stagingalt = ["id-crate/stagingalt", "marginfi-type-crate/stagingalt"]
 devnet = ["id-crate/devnet", "marginfi-type-crate/devnet"]
 anchor-debug = ["anchor-lang/anchor-debug"]
+custom-panic = []
 
 [dependencies]
 id-crate = { workspace = true }
 marginfi-type-crate = { workspace = true, features = ["anchor"] }
 spl-transfer-hook-interface = { workspace = true }
-solana-stake-interface = { workspace = true }
+solana-stake-interface = { workspace = true, features = ["borsh"] }
 solana-vote-interface = { workspace = true }
 solana-sha256-hasher = { workspace = true }
 solana-borsh = { workspace = true }
