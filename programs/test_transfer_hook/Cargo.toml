@@ -7,6 +7,9 @@ edition = "2021"
 idl-build = ["anchor-lang/idl-build"]
 no-entrypoint = []
 no-idl = []
+custom-heap = []
+custom-panic = []
+forbid-additional-mints = []
 
 [lib]
 crate-type = ["cdylib", "lib"]

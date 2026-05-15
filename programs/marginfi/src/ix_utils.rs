@@ -1,9 +1,7 @@
 use anchor_lang::solana_program::sysvar::instructions::*;
 use anchor_lang::{
     prelude::*,
-    solana_program::{
-        instruction::{get_stack_height, Instruction, TRANSACTION_LEVEL_STACK_HEIGHT},
-    },
+    solana_program::instruction::{get_stack_height, Instruction, TRANSACTION_LEVEL_STACK_HEIGHT},
 };
 use solana_sha256_hasher::{hash, hashv};
 
@@ -25,9 +23,7 @@ pub trait Hashable {
 pub fn get_discrim_hash(namespace: &str, name: &str) -> [u8; 8] {
     let preimage = format!("{}:{}", namespace, name);
     let mut sighash = [0u8; 8];
-    sighash.copy_from_slice(
-        &hash(preimage.as_bytes()).to_bytes()[..8],
-    );
+    sighash.copy_from_slice(&hash(preimage.as_bytes()).to_bytes()[..8]);
     sighash
 }
 
