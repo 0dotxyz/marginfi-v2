@@ -1,9 +1,8 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::sysvar::instructions as ix_sysvar;
-use anchor_lang::solana_program::sysvar::instructions::load_instruction_at_checked;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use pyth_solana_receiver_sdk::price_update::VerificationLevel;
+use solana_sdk::sysvar::instructions::{load_current_index_checked, load_instruction_at_checked};
 
 use crate::MarginfiResult;
 
@@ -161,7 +160,7 @@ pub fn is_allowed_cpi_for_third_party_id(
         }
     };
 
-    let current_ix_index = ix_sysvar::load_current_index_checked(sysvar_info)?;
+    let current_ix_index = load_current_index_checked(sysvar_info)?;
     let current_ixn = load_instruction_at_checked(current_ix_index as usize, sysvar_info)?;
 
     // If the current (top-level) instruction is *this* program, it's a direct call (not CPI) -> no

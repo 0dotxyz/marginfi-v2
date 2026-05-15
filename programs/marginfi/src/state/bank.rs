@@ -663,7 +663,7 @@ impl BankImpl for Bank {
             #[allow(deprecated)]
             transfer(
                 CpiContext::new_with_signer(
-                    program,
+                    program.key(),
                     Transfer {
                         from,
                         to,
@@ -714,7 +714,7 @@ impl BankImpl for Bank {
             #[allow(deprecated)]
             transfer(
                 CpiContext::new_with_signer(
-                    program,
+                    program.key(),
                     Transfer {
                         from,
                         to,

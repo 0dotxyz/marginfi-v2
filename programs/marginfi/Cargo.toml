@@ -35,6 +35,7 @@ solana-stake-interface = { workspace = true, features = ["borsh"] }
 solana-vote-interface = { workspace = true }
 solana-sha256-hasher = { workspace = true }
 solana-borsh = { workspace = true }
+solana-sdk = { workspace = true }
 
 # spl-tlv-account-resolution = { workspace = true }
 

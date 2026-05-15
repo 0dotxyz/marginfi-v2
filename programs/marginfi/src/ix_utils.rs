@@ -1,8 +1,8 @@
-use anchor_lang::solana_program::sysvar::instructions::*;
 use anchor_lang::{
     prelude::*,
     solana_program::instruction::{get_stack_height, Instruction, TRANSACTION_LEVEL_STACK_HEIGHT},
 };
+use solana_sdk::sysvar::instructions::{load_current_index_checked, load_instruction_at_checked};
 use solana_sha256_hasher::{hash, hashv};
 
 use crate::constants::COMPUTE_PROGRAM_KEY;

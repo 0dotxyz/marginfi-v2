@@ -416,26 +416,26 @@ impl<'info> SolendWithdraw<'info> {
         authority_bump: u8,
     ) -> MarginfiResult {
         let accounts = WithdrawObligationCollateralAndRedeemReserveCollateral {
-            source_collateral_info: self.reserve_collateral_supply.to_account_info(),
-            destination_collateral_info: self.user_collateral.to_account_info(),
-            reserve_info: self.integration_acc_1.to_account_info(),
-            obligation_info: self.integration_acc_2.to_account_info(),
-            lending_market_info: self.lending_market.to_account_info(),
-            lending_market_authority_info: self.lending_market_authority.to_account_info(),
-            destination_liquidity_info: self.liquidity_vault.to_account_info(),
-            reserve_collateral_mint_info: self.reserve_collateral_mint.to_account_info(),
-            reserve_liquidity_supply_info: self.reserve_liquidity_supply.to_account_info(),
-            obligation_owner_info: self.liquidity_vault_authority.to_account_info(),
-            user_transfer_authority_info: self.liquidity_vault_authority.to_account_info(),
-            token_program_info: self.token_program.to_account_info(),
-            deposit_reserve_info: self.integration_acc_1.to_account_info(),
+            source_collateral_info: self.reserve_collateral_supply.into(),
+            destination_collateral_info: self.user_collateral,
+            reserve_info: self.integration_acc_1.into(),
+            obligation_info: self.integration_acc_2,
+            lending_market_info: self.lending_market,
+            lending_market_authority_info: self.lending_market_authority,
+            destination_liquidity_info: self.liquidity_vault.into(),
+            reserve_collateral_mint_info: self.reserve_collateral_mint,
+            reserve_liquidity_supply_info: self.reserve_liquidity_supply.into(),
+            obligation_owner_info: self.liquidity_vault_authority.into(),
+            user_transfer_authority_info: self.liquidity_vault_authority.into(),
+            token_program_info: self.token_program.into(),
+            deposit_reserve_info: self.integration_acc_1.into(),
         };
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
 
         // Create CPI context with signer
         let cpi_ctx = CpiContext::new_with_signer(
-            self.solend_program.to_account_info(),
+            self.solend_program.key(),
             accounts,
             signer_seeds,
         );
@@ -458,7 +458,7 @@ impl<'info> SolendWithdraw<'info> {
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
 
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())
