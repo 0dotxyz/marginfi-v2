@@ -35,7 +35,7 @@ use switchboard_on_demand::{
 /// Price per unit before any multipliers are applied, where `price_multiplier` shows what
 /// multipliers will be applied to generate the true deposited-token price.
 /// * Example: a Staked Collateral bank with an exchange rate of 2 for stake/sol and a price of $50
-/// for SOL will show $50 here, and multiplier will be 2.
+///   for SOL will show $50 here, and multiplier will be 2.
 /// * For any bank that does not have a multiplier, `price_multiplier = 1` and `oracle_price`
 ///   matches the adjusted value.
 #[derive(Copy, Clone, Debug)]
@@ -1001,7 +1001,9 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::StakedWithPythPush => {
-                if lst_mint.is_some() && stake_pool.is_some() && sol_pool.is_some() {
+                if let (Some(lst_mint), Some(stake_pool), Some(sol_pool)) =
+                    (lst_mint, stake_pool, sol_pool)
+                {
                     check!(
                         oracle_ais.len() == 3,
                         MarginfiError::WrongNumberOfOracleAccounts
@@ -1009,10 +1011,6 @@ impl OraclePriceFeedAdapter {
 
                     check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                     load_price_update_v2_checked(&oracle_ais[0])?;
-
-                    let lst_mint = lst_mint.unwrap();
-                    let stake_pool = stake_pool.unwrap();
-                    let sol_pool = sol_pool.unwrap();
 
                     let program_id = &SPL_SINGLE_POOL_ID;
                     let stake_pool_bytes = &stake_pool.to_bytes();

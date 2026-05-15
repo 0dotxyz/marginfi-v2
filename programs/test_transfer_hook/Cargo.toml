@@ -20,3 +20,6 @@ anchor-lang = { workspace = true }
 spl-token-2022 = { workspace = true, features = ["no-entrypoint"] }
 spl-transfer-hook-interface = { workspace = true }
 spl-tlv-account-resolution = { workspace = true }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

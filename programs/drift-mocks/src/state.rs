@@ -231,7 +231,6 @@ impl MinimalSpotMarket {
         Ok(floored_token_amount)
     }
 
-    /// Adjust oracle price using Drift's internal exchange rate
     /// Check if the spot market's interest is stale and needs updating
     ///
     /// Returns true if the market hasn't been updated in the current timestamp.
@@ -239,17 +238,15 @@ impl MinimalSpotMarket {
     ///
     /// Based on Drift documentation, interest should be updated before any operation
     /// that uses the oracle price for valuation (deposits, withdrawals, liquidations).
-
+    ///
     /// Note that we allow last_interest_ts to be in the *future* compared to the current timestamp.
     /// This is useful for the external callers of the functions we expose, such as try_from_bank(),
     /// because they do not have to synchronize their clock before every call.
     pub fn is_stale(&self, current_timestamp: i64) -> bool {
-        // Market is stale if last_interest_ts is before the current timestamp
         (self.last_interest_ts as i64) < current_timestamp
     }
 }
 
-// Implementation methods for MinimalUser
 impl MinimalUser {
     pub fn count_active_deposits(&self) -> usize {
         self.spot_positions
