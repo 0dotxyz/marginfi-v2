@@ -24,12 +24,17 @@ mainnet-beta = ["id-crate/mainnet-beta", "marginfi-type-crate/mainnet-beta"]
 staging = ["id-crate/staging", "marginfi-type-crate/staging"]
 stagingalt = ["id-crate/stagingalt", "marginfi-type-crate/stagingalt"]
 devnet = ["id-crate/devnet", "marginfi-type-crate/devnet"]
+anchor-debug = ["anchor-lang/anchor-debug"]
 
 [dependencies]
 id-crate = { workspace = true }
 marginfi-type-crate = { workspace = true, features = ["anchor"] }
-# solana-program = { workspace = true }
 spl-transfer-hook-interface = { workspace = true }
+solana-stake-interface = { workspace = true }
+solana-vote-interface = { workspace = true }
+solana-sha256-hasher = { workspace = true }
+solana-borsh = { workspace = true }
+
 # spl-tlv-account-resolution = { workspace = true }
 
 anchor-lang = { workspace = true }
