@@ -438,7 +438,9 @@ pub enum MarginfiError {
         "Circuit breaker cannot be enabled until the oracle price cache is warm (call pulse first)"
     )]
     CircuitBreakerRequiresWarmCache, // 6603
-                                     // **************END CIRCUIT BREAKER ERRORS
+    #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
+    CircuitBreakerPriceJump, // 6604
+                             // **************END CIRCUIT BREAKER ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -680,6 +682,7 @@ impl From<u32> for MarginfiError {
             6601 => MarginfiError::CircuitBreakerAdminOnly,
             6602 => MarginfiError::CircuitBreakerInvalidConfig,
             6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
+            6604 => MarginfiError::CircuitBreakerPriceJump,
 
             _ => MarginfiError::InternalLogicError,
         }

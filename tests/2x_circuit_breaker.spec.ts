@@ -1,4 +1,4 @@
-import { BN, Program } from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
 import { Clock } from "solana-bankrun";
 import { Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
@@ -219,65 +219,58 @@ describe("Circuit breaker config + admin clear", () => {
     assert.equal(bank.cache.cbBreachCount, 0);
   });
 
-  // Walk slot + clock + Pyth price + pulse three times to force a sustained breach.
-  // - `warpToSlot(+5)` clears `CB_MIN_PULSE_SLOT_GAP` (= 2) and advances bankrun's internal
-  //   block state so each tx gets a fresh blockhash.
-  // - `setClock` then explicitly bumps `unix_timestamp` by 1s, since `warpToSlot` alone doesn't
-  //   reliably advance it. The CB's source-time dedup requires a strictly-advancing publish_time
-  //   (which `setPythPullOraclePrice` derives from the current clock) — without this bump only
-  //   the first pulse would count.
-  const driveSustainedBreachToSpike = async (uiPrice: number) => {
-    for (let i = 0; i < 3; i++) {
-      const pre = await banksClient.getClock();
-      bankrunContext.warpToSlot(pre.slot + 5n);
-      const post = await banksClient.getClock();
-      bankrunContext.setClock(
-        new Clock(
-          post.slot,
-          post.epochStartTimestamp,
-          post.epoch,
-          post.leaderScheduleEpoch,
-          post.unixTimestamp + 1n,
-        )
-      );
-      await setPythPullOraclePrice(
-        bankrunContext,
-        banksClient,
-        oracles.wsolOracle.publicKey,
-        oracles.wsolOracleFeed.publicKey,
-        uiPrice,
-        ecosystem.wsolDecimals,
-        0, // confidence interval — keep at 0 so the CB sees the full raw delta
-      );
-      const tx = new Transaction().add(
-        await pulseBankPrice(bankrunProgram, {
-          group: marginfiGroup.publicKey,
-          bank: bankKey,
-          remaining: [oracles.wsolOracle.publicKey],
-        })
-      );
-      tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(groupAdmin.wallet);
-      await banksClient.processTransaction(tx);
-    }
+  // Walk slot + clock, set the Pyth price, and land one pulse on the SOL bank. A single
+  // breaching pulse trips a halt outright, so one call is enough.
+  // - `warpToSlot(+5)` clears `CB_MIN_PULSE_SLOT_GAP` (= 2) and gives the tx a fresh blockhash.
+  // - `setClock` bumps `unix_timestamp` by 1s so the CB's source-time dedup — which derives
+  //   publish_time from the clock — accepts the observation.
+  const spikePriceAndPulse = async (uiPrice: number) => {
+    const pre = await banksClient.getClock();
+    bankrunContext.warpToSlot(pre.slot + 5n);
+    const post = await banksClient.getClock();
+    bankrunContext.setClock(
+      new Clock(
+        post.slot,
+        post.epochStartTimestamp,
+        post.epoch,
+        post.leaderScheduleEpoch,
+        post.unixTimestamp + 1n,
+      )
+    );
+    await setPythPullOraclePrice(
+      bankrunContext,
+      banksClient,
+      oracles.wsolOracle.publicKey,
+      oracles.wsolOracleFeed.publicKey,
+      uiPrice,
+      ecosystem.wsolDecimals,
+      0, // confidence interval — keep at 0 so the CB sees the full raw delta
+    );
+    const tx = new Transaction().add(
+      await pulseBankPrice(bankrunProgram, {
+        group: marginfiGroup.publicKey,
+        bank: bankKey,
+        remaining: [oracles.wsolOracle.publicKey],
+      })
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet);
+    await banksClient.processTransaction(tx);
   };
 
   it("(real spike) tier-1 trip → escalation watch → tier-2 escalation → admin clear", async () => {
-    // SOL bank starts operational with `cb_reference_price` seeded at $150 (the value enabled
-    // earlier in the happy-path test). With α=10%, tiers=[500,1000,2500] bps, sustain=3:
-    //   $162 → dev decays 800 → 714 → 638 bps (all tier 1, since 800 < 1000) → trips to tier 1.
-    //   $170 inside the escalation window → dev ~1100 → 1035 → 922 bps; the first two cross
-    //   tier 2 (>= 1000) and `cb_max_breached_tier_in_streak` records 2, but the escalation rule
-    //   `new_tier = (cb_tier+1).min(3)` bumps from tier 1 → 2 anyway.
-    // Note: $165 (the prior choice) lands at exactly 1000 bps on the first observation, which
-    // crosses the tier-2 threshold and makes the post-trip tier 2 instead of 1.
+    // SOL bank starts operational with `cb_reference_price` seeded at $150 (enabled earlier in
+    // the happy-path test). tiers = [500, 1000, 2500] bps:
+    //   $162 → +8% = 800 bps → tier 1 (>= 500, < 1000): the first breaching pulse trips tier 1.
+    //   $170 inside the escalation window → +13% past tier 2; the escalation rule
+    //   `new_tier = (cb_tier + 1).min(3)` bumps tier 1 → 2.
     const before = await bankrunProgram.account.bank.fetch(bankKey);
     assert.equal(before.cbTier, 0);
 
-    // ---- Stage 1: drive 3 sustained $162 pulses → tier-1 trip.
-    await driveSustainedBreachToSpike(162);
+    // ---- Stage 1: one $162 pulse → first-breach tier-1 trip.
+    await spikePriceAndPulse(162);
     const afterTrip1 = await bankrunProgram.account.bank.fetch(bankKey);
-    assert.equal(afterTrip1.cbTier, 1, "3 sustained pulses at $162 must trip tier 1");
+    assert.equal(afterTrip1.cbTier, 1, "a $162 pulse must trip tier 1 on first breach");
     const haltEnded1 = afterTrip1.cbHaltEndedAt.toNumber();
     assert.isAbove(haltEnded1, 0);
 
@@ -300,8 +293,8 @@ describe("Circuit breaker config + admin clear", () => {
       );
     }
 
-    // ---- Stage 3: 3 more sustained pulses at $170 → escalation to tier 2.
-    await driveSustainedBreachToSpike(170);
+    // ---- Stage 3: one $170 pulse inside the escalation window → escalate to tier 2.
+    await spikePriceAndPulse(170);
     const afterTrip2 = await bankrunProgram.account.bank.fetch(bankKey);
     assert.equal(
       afterTrip2.cbTier,

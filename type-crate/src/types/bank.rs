@@ -180,9 +180,13 @@ pub struct Bank {
     /// 0 = operational, 1..=3 = escalating halt severity.
     pub cb_tier: u8,
     /// Consecutive tier-3 trips with no clean escalation-window between them. Hitting
-    /// `CB_MAX_TIER3_BEFORE_PAUSE` forces the bank to `ReduceOnly`.
+    /// `CB_MAX_TIER3_BEFORE_PAUSE` forces the bank to `CircuitBroken`.
     pub cb_tier3_consecutive_trips: u8,
-    pub _cb_pad: [u8; 6],
+    /// `BankOperationalState` (as `u8`) the bank held before the breaker forced it to
+    /// `CircuitBroken`. Restored by `clear_circuit_breaker`. Meaningless unless
+    /// `operational_state == CircuitBroken`.
+    pub cb_pre_break_state: u8,
+    pub _cb_pad: [u8; 5],
     /// Solana slot of the last counted CB observation; used for slot-level dedup.
     pub cb_last_observed_slot: u64,
     /// Publisher-side timestamp of the last counted CB observation; rejects re-reads of the same
@@ -234,6 +238,12 @@ pub enum BankOperationalState {
     ReduceOnly,
     /// Bank was killed by a bankruptcy event (irrecoverable)
     KilledByBankruptcy,
+    /// Non-expiring circuit-breaker end state, reached after repeated breaker escalation.
+    /// Blocks borrows and risk-carrying withdraws and restricts liquidation to the risk admin;
+    /// deposit/repay/riskless-withdraw follow the pre-break state stashed in
+    /// `Bank.cb_pre_break_state`. Set only by the breaker, never by an admin. Cleared only by
+    /// `clear_circuit_breaker`, which restores the pre-break state.
+    CircuitBroken,
 }
 unsafe impl Zeroable for BankOperationalState {}
 unsafe impl Pod for BankOperationalState {}

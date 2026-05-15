@@ -722,7 +722,8 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(bank.cb_last_observed_slot, 0);
     assert_eq!(bank.cb_tier, 0);
     assert_eq!(bank.cb_tier3_consecutive_trips, 0);
-    assert_eq!(bank._cb_pad, [0u8; 6]);
+    assert_eq!(bank.cb_pre_break_state, 0);
+    assert_eq!(bank._cb_pad, [0u8; 5]);
     assert_eq!(bank.cb_last_oracle_source_time, 0);
     assert_eq!(bank._padding_1, [0u64; 8]);
 

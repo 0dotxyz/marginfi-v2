@@ -8,7 +8,7 @@ use crate::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
             account_not_frozen_for_authority, check_account_init_health, is_signer_authorized,
-            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            run_cb_price_gate, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         rate_limiter::GroupRateLimiterImpl,
@@ -206,6 +206,9 @@ pub fn lending_account_borrow<'info>(
         &mut Some(&mut health_cache),
     )?;
     health_cache.program_version = PROGRAM_VERSION;
+
+    // Revert if any involved bank's oracle price has jumped past the breach threshold.
+    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
 
     let bank_pk = ctx.accounts.bank.key();
     let mut bank = ctx.accounts.bank.load_mut()?;

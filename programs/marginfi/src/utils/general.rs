@@ -264,8 +264,11 @@ pub enum InstructionKind {
 // in various value delta functions)
 /// Validate the bank's state does not forbid the execution of an instruction.
 ///
-/// `is_halt_safe` marks an ix as allowed during a circuit-breaker halt
-/// (for example repay/deposit, or a caller that has already enforced risk-admin-only liquidation).
+/// `is_halt_safe` marks an ix as allowed while the bank is under a circuit-breaker halt or in
+/// the non-expiring `CircuitBroken` end state (for example repay/deposit, a risk-free withdraw,
+/// or a caller that has already enforced risk-admin-only liquidation). Even when halt-safe, the
+/// action still obeys the bank's effective operational state — and for a `CircuitBroken` bank
+/// that is the *pre-break* state, so e.g. a bank that was `ReduceOnly` keeps deposits disabled.
 pub fn validate_bank_state(
     bank: &Bank,
     kind: InstructionKind,
@@ -275,30 +278,34 @@ pub fn validate_bank_state(
         return err!(MarginfiError::BankKilledByBankruptcy);
     }
 
-    if !is_halt_safe && bank.is_cb_halted(Clock::get()?.unix_timestamp) {
+    // A temporal CB halt and the non-expiring `CircuitBroken` end state both block any action
+    // that isn't halt-safe (borrows, risk-carrying withdraws).
+    let circuit_broken = bank.config.operational_state == BankOperationalState::CircuitBroken;
+    if !is_halt_safe && (circuit_broken || bank.is_cb_halted(Clock::get()?.unix_timestamp)) {
         return err!(MarginfiError::BankCircuitBreakerHalted);
     }
 
+    // For a `CircuitBroken` bank this resolves to the pre-break state; otherwise it is just
+    // `operational_state`. Never `CircuitBroken` or `KilledByBankruptcy` here.
+    let effective_state = bank.cb_effective_operational_state();
     match kind {
         InstructionKind::FailsInReduceState
-            if bank.config.operational_state == BankOperationalState::ReduceOnly =>
+            if effective_state == BankOperationalState::ReduceOnly =>
         {
             return err!(MarginfiError::BankReduceOnly);
         }
 
-        InstructionKind::FailsInPausedState
-            if bank.config.operational_state == BankOperationalState::Paused =>
-        {
+        InstructionKind::FailsInPausedState if effective_state == BankOperationalState::Paused => {
             return err!(MarginfiError::BankPaused);
         }
 
         InstructionKind::FailsIfPausedOrReduceState
             if matches!(
-                bank.config.operational_state,
+                effective_state,
                 BankOperationalState::Paused | BankOperationalState::ReduceOnly
             ) =>
         {
-            return match bank.config.operational_state {
+            return match effective_state {
                 BankOperationalState::Paused => {
                     err!(MarginfiError::BankPaused)
                 }
