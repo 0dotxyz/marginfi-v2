@@ -859,7 +859,7 @@ pub fn get_tagged_account_health_components<'info>(
 
         let num_accounts = get_remaining_accounts_per_bank(&bank)?;
 
-        if !balance_tags.iter().any(|tag| *tag == balance.tag) {
+        if !balance_tags.contains(&balance.tag) {
             account_index += num_accounts;
             heap_restore(heap_checkpoint);
             continue;

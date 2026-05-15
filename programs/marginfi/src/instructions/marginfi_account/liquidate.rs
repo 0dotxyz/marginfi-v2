@@ -100,9 +100,8 @@ use marginfi_type_crate::{
 /// - Kamino: collateral tokens (user's share in the pool)
 /// - Drift: scaled balance (Drift's internal position representation)
 /// - Solend: cTokens (collateral tokens)
-/// Liquidators must understand they are specifying how many of these position tokens
-/// to take, rather than a specific amount of the underlying asset.
-
+///   Liquidators must understand they are specifying how many of these position tokens
+///   to take, rather than a specific amount of the underlying asset.
 pub fn lending_account_liquidate<'info>(
     mut ctx: Context<'_, '_, 'info, 'info, LendingAccountLiquidate<'info>>,
     asset_amount: u64,

@@ -111,12 +111,12 @@ pub fn process_initialize_extra_account_meta_list(
     let account_size = ExtraAccountMetaList::size_of(length)?;
     invoke_signed(
         &system_instruction::allocate(extra_account_metas_info.key, account_size as u64),
-        &[extra_account_metas_info.clone()],
+        std::slice::from_ref(extra_account_metas_info),
         &[&signer_seeds],
     )?;
     invoke_signed(
         &system_instruction::assign(extra_account_metas_info.key, program_id),
-        &[extra_account_metas_info.clone()],
+        std::slice::from_ref(extra_account_metas_info),
         &[&signer_seeds],
     )?;
 

@@ -125,7 +125,7 @@ pub fn validate_ixes_exclusive(
         let discrim = &ix.data[0..8];
 
         // If none of the allowed hashes match, reject
-        let is_allowed = expected_hashes.iter().any(|&h| h == discrim);
+        let is_allowed = expected_hashes.contains(&discrim);
         if !is_allowed {
             msg!("Forbidden ix discrim: {:?}", discrim);
             return err!(MarginfiError::ForbiddenIx);

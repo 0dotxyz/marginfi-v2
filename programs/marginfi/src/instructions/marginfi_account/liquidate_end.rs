@@ -85,7 +85,7 @@ pub fn end_liquidation<'info>(
 
 /// (Permissioned) Ends a deleverage. Records the liquidation event in the user's record.
 /// * Fails if account is less healthy than it was at start
-/// Note: no fees taken.
+///   Note: no fees taken.
 pub fn end_deleverage<'info>(
     ctx: Context<'_, '_, 'info, 'info, EndDeleverage<'info>>,
 ) -> MarginfiResult {

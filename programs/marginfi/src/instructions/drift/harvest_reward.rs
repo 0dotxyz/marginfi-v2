@@ -22,7 +22,7 @@ use marginfi_type_crate::{
 /// - Checks that harvest spot market does not match the bank's spot market
 /// - Checks that harvest spot market mint does not match bank's mint
 /// - Checks that the harvest spot market has a balance in index 2 - 7 on the user account
-///     The only possible exception to index 2-7 is if someone rewards USDC usage which is unlikely.
+///   The only possible exception to index 2-7 is if someone rewards USDC usage which is unlikely.
 ///
 /// Remaining accounts should be passed in the order required by Drift's withdraw instruction:
 /// 1. Oracle accounts (optional)

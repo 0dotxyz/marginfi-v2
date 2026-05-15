@@ -79,3 +79,6 @@ rust_decimal = "*"
 test-case = "3.3.1"
 serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1.0.115"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
