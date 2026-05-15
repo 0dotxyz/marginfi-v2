@@ -25,20 +25,21 @@ solana-sha256-hasher = "3.1.0"
 solana-stake-interface = "3.1.0"
 solana-vote-interface = "3.0.0"
 solana-borsh = "3.0.2"
+solana-address = "2.6.0"
 
 # solana-measure = "=3.1.0"
 # solana-metrics = "=3.1.0"
 # solana-transaction-status = "=3.1.0"
-spl-token = "7.0.0"
-spl-associated-token-account = { version = "7.0.0", default-features = false, features = ["no-entrypoint"] }
+spl-token = "9.0.0"
+spl-associated-token-account = { version = "8.0.0", default-features = false, features = ["no-entrypoint"] }
 spl-transfer-hook-interface = "0.9.0"
 spl-tlv-account-resolution = "0.9.0"
 # spl-discriminator = "0.2.2"
-spl-token-2022 = { version = "7.0.0", features = ["no-entrypoint"] }
+spl-token-2022 = { version = "11.0.0", features = ["no-entrypoint"] }
 
-anchor-lang = { version = "0.32.1" }
-anchor-spl = { version = "0.32.1", features = ["token_2022"] }
-anchor-client = { version = "0.32.1" }
+anchor-lang = { version = "1.0.2" }
+anchor-spl = { version = "1.0.2", features = ["token_2022"] }
+anchor-client = { version = "1.0.2" }
 
 fixtures = { path = "test-utils", package = "test-utilities" }
 marginfi = { path = "programs/marginfi", package = "marginfi" }
@@ -47,9 +48,9 @@ mocks = { path = "programs/mocks", package = "mocks" }
 id-crate = { path = "id-crate" }
 marginfi-type-crate = { path = "type-crate" }
 
-pyth-solana-receiver-sdk = "1.1.0"
+pyth-solana-receiver-sdk = { git = "https://github.com/IliaZyrin/pyth-crosschain", package = "pyth-solana-receiver-sdk", branch = "solana-borsh-up" }
 # pythnet-sdk = "2.3.1"
-switchboard-on-demand = "0.7.4"
+switchboard-on-demand = "0.8.0"
 
 borsh = "1.6.1"
 bytemuck = "1.22.0"
@@ -76,14 +77,6 @@ codegen-units = 1
 opt-level = 3
 incremental = false
 codegen-units = 1
-
-## Notes for usable lockfile generation in Solana land
-# OUTDATED Patch a version of half compatabile with fixed and Rust <=1.79:
-# cargo update -p half --precise 2.4.1
-# 
-# OUTDATED Patch zerofrom and litemap:
-# cargo update -p zerofrom --precise 0.1.5
-# cargo update -p litemap --precise 0.7.4
 
 ## To fix the Anchor idl generation bug:
 # cargo update -p proc-macro2 --precise 1.0.95

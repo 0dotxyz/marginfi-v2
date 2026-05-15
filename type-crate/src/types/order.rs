@@ -17,9 +17,9 @@ use super::{WrappedI80F48, MAX_LENDING_ACCOUNT_BALANCES};
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
 pub enum OrderTriggerType {
     #[default]
-    StopLoss = 0,
-    TakeProfit = 1,
-    Both = 2,
+    StopLoss, // 0
+    TakeProfit, // 1
+    Both, // 2
 }
 
 unsafe impl Zeroable for OrderTriggerType {}

@@ -4,8 +4,8 @@ use crate::{
     prelude::{MintFixture, TokenAccountFixture},
 };
 use anchor_lang::{
-    prelude::{AccountMeta, Pubkey},
-    InstructionData, ToAccountMetas,
+    InstructionData, ToAccountMetas, prelude::{AccountMeta, Pubkey}, solana_program::
+    {clock::Clock, account_info::IntoAccountInfo, instruction::Instruction}
 };
 use fixed::types::I80F48;
 use marginfi::{
@@ -16,20 +16,17 @@ use marginfi::{
     },
     utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
 };
-use marginfi_type_crate::types::OraclePriceType;
-use marginfi_type_crate::types::{Bank, BankConfigOpt, OracleSetup};
-use solana_program::{
-    account_info::IntoAccountInfo, instruction::Instruction, sysvar::clock::Clock,
-};
+use marginfi_type_crate::types::{Bank, BankConfigOpt, OracleSetup, OraclePriceType};
+use solana_address::Address;
 use solana_program_test::BanksClientError;
 use solana_program_test::ProgramTestContext;
-use solana_sdk::{commitment_config::CommitmentLevel, signer::Signer, transaction::Transaction};
 use std::{cell::RefCell, fmt::Debug, rc::Rc};
 
 #[derive(Clone)]
 pub struct BankFixture {
     ctx: Rc<RefCell<ProgramTestContext>>,
     pub key: Pubkey,
+    pub address: Address,
     pub mint: MintFixture,
     pub kamino: Option<KaminoFixture>,
 }
@@ -44,6 +41,7 @@ impl BankFixture {
         Self {
             ctx,
             key,
+            address: Address::new_from_array(key.to_bytes()),
             mint: mint_fixture.clone(),
             kamino,
         }
@@ -69,14 +67,16 @@ impl BankFixture {
             }
             _ => {
                 let oracle_key = bank.config.oracle_keys[0];
+                let oracle_address = Address::new_from_array(bank.config.oracle_keys[0].to_bytes());
                 let mut oracle_account = self
                     .ctx
                     .borrow_mut()
                     .banks_client
-                    .get_account(oracle_key)
+                    .get_account(oracle_address)
                     .await
                     .unwrap()
                     .unwrap();
+
                 let ai = (&oracle_key, &mut oracle_account).into_account_info();
                 OraclePriceFeedAdapter::try_from_bank(&bank, &[ai], &Clock::default()).unwrap()
             }
@@ -93,7 +93,7 @@ impl BankFixture {
     }
 
     pub async fn load(&self) -> Bank {
-        load_and_deserialize::<Bank>(self.ctx.clone(), &self.key).await
+        load_and_deserialize::<Bank>(self.ctx.clone(), &self.address).await
     }
 
     pub async fn update_config(
@@ -105,7 +105,7 @@ impl BankFixture {
 
         let accounts = marginfi::accounts::LendingPoolConfigureBank {
             group: self.load().await.group,
-            admin: self.ctx.borrow().payer.pubkey(),
+            admin: Pubkey::new_from_array(self.ctx.borrow().payer.pubkey().to_bytes()),
             bank: self.key,
         }
         .to_account_metas(Some(true));
@@ -124,7 +124,7 @@ impl BankFixture {
         if let Some((setup, oracle)) = oracle_update {
             let mut oracle_accounts = marginfi::accounts::LendingPoolConfigureBank {
                 group: self.load().await.group,
-                admin: self.ctx.borrow().payer.pubkey(),
+                admin: Pubkey::new_from_array(self.ctx.borrow().payer.pubkey().to_bytes()),
                 bank: self.key,
             }
             .to_account_metas(Some(true));
@@ -182,7 +182,7 @@ impl BankFixture {
                 bank: self.key,
                 mint,
                 emissions_funding_account: funding_account,
-                depositor: self.ctx.borrow().payer.pubkey(),
+                depositor: Pubkey::new_from_array(self.ctx.borrow().payer.pubkey().to_bytes()),
                 liquidity_vault: bank.liquidity_vault,
                 token_program: self.get_token_program(),
             }
@@ -217,7 +217,7 @@ impl BankFixture {
     ) -> Result<(), BanksClientError> {
         let bank = self.load().await;
         let ctx = self.ctx.borrow_mut();
-        let signer_pk = ctx.payer.pubkey();
+        let signer_pk = Pubkey::new_from_array(ctx.payer.pubkey().to_bytes());
         let (fee_vault_authority, _) = Pubkey::find_program_address(
             bank_authority_seed!(BankVaultType::Fee, self.key),
             &marginfi::ID,
@@ -306,7 +306,7 @@ impl BankFixture {
     ) -> Result<(), BanksClientError> {
         let bank = self.load().await;
         let ctx = self.ctx.borrow_mut();
-        let signer_pk = ctx.payer.pubkey();
+        let signer_pk = Pubkey::new_from_array(ctx.payer.pubkey().to_bytes());
 
         let mut accounts = marginfi::accounts::LendingPoolUpdateFeesDestinationAccount {
             group: bank.group,
@@ -344,7 +344,7 @@ impl BankFixture {
     ) -> Result<(), BanksClientError> {
         let bank = self.load().await;
         let ctx = self.ctx.borrow_mut();
-        let signer_pk = ctx.payer.pubkey();
+        let signer_pk = Pubkey::new_from_array(ctx.payer.pubkey().to_bytes());
         let (insurance_vault_authority, _) = Pubkey::find_program_address(
             bank_authority_seed!(BankVaultType::Insurance, self.key),
             &marginfi::ID,
@@ -393,7 +393,7 @@ impl BankFixture {
             .ctx
             .borrow_mut()
             .banks_client
-            .get_account(self.key)
+            .get_account(self.address)
             .await
             .unwrap()
             .unwrap();
@@ -404,7 +404,7 @@ impl BankFixture {
 
         self.ctx
             .borrow_mut()
-            .set_account(&self.key, &bank_ai.into());
+            .set_account(&self.address, &bank_ai.into());
     }
 
     pub async fn set_asset_share_value(&self, value: I80F48) {
@@ -412,7 +412,7 @@ impl BankFixture {
             .ctx
             .borrow_mut()
             .banks_client
-            .get_account(self.key)
+            .get_account(self.address)
             .await
             .unwrap()
             .unwrap();
@@ -422,7 +422,7 @@ impl BankFixture {
 
         self.ctx
             .borrow_mut()
-            .set_account(&self.key, &bank_ai.into());
+            .set_account(&self.address, &bank_ai.into());
     }
 }
 
