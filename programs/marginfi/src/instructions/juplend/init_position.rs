@@ -160,7 +160,7 @@ impl<'info> JuplendInitPosition<'info> {
             authority: self.fee_payer.to_account_info(),
             mint: self.mint.to_account_info(),
         };
-        let cpi_ctx = CpiContext::new(program, accounts);
+        let cpi_ctx = CpiContext::new(program.key(), accounts);
         transfer_checked(cpi_ctx, amount, self.mint.decimals)?;
         Ok(())
     }
@@ -192,7 +192,7 @@ impl<'info> JuplendInitPosition<'info> {
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
 
         let cpi_ctx = CpiContext::new_with_signer(
-            self.juplend_program.to_account_info(),
+            self.juplend_program.key(),
             accounts,
             signer_seeds,
         );

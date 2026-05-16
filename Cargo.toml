@@ -26,6 +26,7 @@ solana-stake-interface = "3.1.0"
 solana-vote-interface = "3.0.0"
 solana-borsh = "3.0.2"
 solana-address = "2.6.0"
+solana-instructions-sysvar = "3.0.0"
 
 # solana-measure = "=3.1.0"
 # solana-metrics = "=3.1.0"

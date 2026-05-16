@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{clock::Clock, sysvar::Sysvar};
+use anchor_lang::solana_program::{clock::Clock};
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{HealthCache, HealthPriceMode, MarginfiAccount};
@@ -28,7 +28,7 @@ fn has_trivial_balance(equity_assets: I80F48, equity_liabs: I80F48) -> bool {
 }
 
 pub fn lending_account_pulse_health<'info>(
-    ctx: Context<'_, '_, 'info, 'info, PulseHealth<'info>>,
+    ctx: Context<'info, PulseHealth<'info>>,
 ) -> MarginfiResult {
     let clock = Clock::get()?;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;

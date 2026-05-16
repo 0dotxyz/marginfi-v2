@@ -5,7 +5,6 @@ use crate::{
     prelude::*,
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::sysvar;
 use marginfi_type_crate::{
     constants::MARGINFI_ACCOUNT_SEED,
     types::{MarginfiAccount, MarginfiGroup},
@@ -127,7 +126,7 @@ pub struct MarginfiAccountInitializePda<'info> {
     /// Instructions sysvar for CPI validation
     ///
     /// CHECK: Standard sysvar account
-    #[account(address = sysvar::instructions::id())]
+    #[account(address = solana_instructions_sysvar::id())]
     pub instructions_sysvar: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,

@@ -50,7 +50,7 @@ use marginfi_type_crate::{
 /// 6. Transfer underlying from withdraw intermediary ATA -> destination token account.
 /// 7. Update health cache (unless receivership).
 pub fn juplend_withdraw<'info>(
-    ctx: Context<'_, '_, 'info, 'info, JuplendWithdraw<'info>>,
+    ctx: Context<'info, JuplendWithdraw<'info>>,
     amount: u64,
     withdraw_all: Option<bool>,
 ) -> MarginfiResult {
@@ -480,7 +480,7 @@ impl<'info> JuplendWithdraw<'info> {
             supply_token_reserves_liquidity: self.supply_token_reserves_liquidity.to_account_info(),
             rewards_rate_model: self.rewards_rate_model.to_account_info(),
         };
-        let cpi_ctx = CpiContext::new(self.juplend_program.to_account_info(), accounts);
+        let cpi_ctx = CpiContext::new(self.juplend_program.key(), accounts);
         update_rate(cpi_ctx)?;
         Ok(())
     }
@@ -513,7 +513,7 @@ impl<'info> JuplendWithdraw<'info> {
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
 
         let cpi_ctx = CpiContext::new_with_signer(
-            self.juplend_program.to_account_info(),
+            self.juplend_program.key(),
             accounts,
             signer_seeds,
         );
@@ -537,7 +537,7 @@ impl<'info> JuplendWithdraw<'info> {
 
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         transfer_checked(cpi_ctx, amount, self.mint.decimals)?;
         Ok(())
     }

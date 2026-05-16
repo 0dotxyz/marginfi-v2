@@ -3902,6 +3902,7 @@ dependencies = [
  "solana-account-decoder",
  "solana-borsh 3.0.2",
  "solana-cli-output",
+ "solana-instructions-sysvar 3.0.0",
  "solana-program-test",
  "solana-sdk",
  "solana-security-txt",

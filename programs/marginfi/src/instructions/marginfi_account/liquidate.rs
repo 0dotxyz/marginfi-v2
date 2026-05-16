@@ -21,7 +21,7 @@ use crate::{bank_signer, state::marginfi_account::BankAccountWrapper};
 use crate::{check, debug, prelude::*, utils};
 use anchor_lang::{
     prelude::*,
-    solana_program::{clock::Clock, sysvar::Sysvar},
+    solana_program::{clock::Clock},
 };
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
@@ -103,7 +103,7 @@ use marginfi_type_crate::{
 ///   Liquidators must understand they are specifying how many of these position tokens
 ///   to take, rather than a specific amount of the underlying asset.
 pub fn lending_account_liquidate<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, LendingAccountLiquidate<'info>>,
+    mut ctx: Context<'info, LendingAccountLiquidate<'info>>,
     asset_amount: u64,
     liquidatee_accounts: u8,
     liquidator_accounts: u8,
@@ -553,7 +553,7 @@ pub struct LendingAccountLiquidate<'info> {
         ],
         bump = liab_bank.load()?.liquidity_vault_authority_bump
     )]
-    pub bank_liquidity_vault_authority: AccountInfo<'info>,
+    pub bank_liquidity_vault_authority: UncheckedAccount<'info>,
 
     /// CHECK: Seed constraint
     #[account(
@@ -575,7 +575,7 @@ pub struct LendingAccountLiquidate<'info> {
         ],
         bump = liab_bank.load()?.insurance_vault_bump
     )]
-    pub bank_insurance_vault: AccountInfo<'info>,
+    pub bank_insurance_vault: UncheckedAccount<'info>,
 
     pub token_program: Interface<'info, TokenInterface>,
 }
