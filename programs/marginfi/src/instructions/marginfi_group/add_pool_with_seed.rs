@@ -126,7 +126,7 @@ pub struct LendingPoolAddBankWithSeed<'info> {
 
     /// CHECK: The fee admin's native SOL wallet, validated against fee state
     #[account(mut)]
-    pub global_fee_wallet: AccountInfo<'info>,
+    pub global_fee_wallet: UncheckedAccount<'info>,
 
     pub bank_mint: Box<InterfaceAccount<'info, Mint>>,
 
@@ -151,7 +151,7 @@ pub struct LendingPoolAddBankWithSeed<'info> {
         ],
         bump
     )]
-    pub liquidity_vault_authority: AccountInfo<'info>,
+    pub liquidity_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,
@@ -174,7 +174,7 @@ pub struct LendingPoolAddBankWithSeed<'info> {
         ],
         bump
     )]
-    pub insurance_vault_authority: AccountInfo<'info>,
+    pub insurance_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,
@@ -197,7 +197,7 @@ pub struct LendingPoolAddBankWithSeed<'info> {
         ],
         bump
     )]
-    pub fee_vault_authority: AccountInfo<'info>,
+    pub fee_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,
@@ -221,7 +221,7 @@ impl<'info> LendingPoolAddBankWithSeed<'info> {
         &self,
     ) -> CpiContext<'_, '_, '_, 'info, anchor_lang::system_program::Transfer<'info>> {
         CpiContext::new(
-            self.system_program.to_account_info(),
+            self.system_program.key(),
             anchor_lang::system_program::Transfer {
                 from: self.fee_payer.to_account_info(),
                 to: self.global_fee_wallet.to_account_info(),

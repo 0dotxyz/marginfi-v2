@@ -23,7 +23,6 @@ use crate::{
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{
     clock::Clock,
-    sysvar::{self, Sysvar},
 };
 use anchor_spl::token::{accessor, Token};
 use anchor_spl::token_interface::{
@@ -79,7 +78,7 @@ use marginfi_type_crate::{
 /// 5. Transfers funds to the user's account
 /// 6. Updates the marginfi account's balance to reflect the withdrawal
 pub fn kamino_withdraw<'info>(
-    ctx: Context<'_, '_, 'info, 'info, KaminoWithdraw<'info>>,
+    ctx: Context<'info, KaminoWithdraw<'info>>,
     amount: u64, // Collateral token amount
     flags: Option<u8>,
 ) -> MarginfiResult {
@@ -429,7 +428,7 @@ pub struct KaminoWithdraw<'info> {
 
     /// Used by kamino validate CPI calls
     /// CHECK: read‑only Instructions sysvar
-    #[account(address = sysvar::instructions::ID)]
+    #[account(address = solana_instructions_sysvar::ID)]
     pub instruction_sysvar_account: UncheckedAccount<'info>,
 }
 
@@ -437,7 +436,7 @@ impl<'info> KaminoWithdraw<'info> {
     pub fn cpi_refresh_reserve(&self) -> MarginfiResult {
         let accounts = RefreshReservesBatch {};
         let program = self.kamino_program.to_account_info();
-        let cpi_ctx = CpiContext::new(program, accounts).with_remaining_accounts(vec![
+        let cpi_ctx = CpiContext::new(program.key(), accounts).with_remaining_accounts(vec![
             self.integration_acc_1.to_account_info(),
             self.lending_market.to_account_info(),
         ]);
@@ -480,7 +479,7 @@ impl<'info> KaminoWithdraw<'info> {
             &[bump],
         ];
         let signer_seeds: &[&[&[u8]]] = &[seeds];
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         withdraw_obligation_collateral_and_redeem_reserve_collateral_v2(
             cpi_ctx,
             collateral_amount,
@@ -504,7 +503,7 @@ impl<'info> KaminoWithdraw<'info> {
             &[bump],
         ];
         let signer_seeds: &[&[&[u8]]] = &[seeds];
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())

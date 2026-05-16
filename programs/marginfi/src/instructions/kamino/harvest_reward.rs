@@ -120,7 +120,7 @@ impl<'info> KaminoHarvestReward<'info> {
         let bump = self.bank.load()?.liquidity_vault_authority_bump;
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), bump);
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         harvest_reward(cpi_ctx, reward_index)?;
         Ok(())
     }
@@ -136,7 +136,7 @@ impl<'info> KaminoHarvestReward<'info> {
         let bump = self.bank.load()?.liquidity_vault_authority_bump;
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), bump);
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         let decimals = self.reward_mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())

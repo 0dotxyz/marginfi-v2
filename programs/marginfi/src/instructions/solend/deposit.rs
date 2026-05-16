@@ -40,7 +40,7 @@ use solend_mocks::state::{
 /// 3. Verifies the obligation collateral was increased correctly
 /// 4. Updates the marginfi account's balance to reflect the deposit
 pub fn solend_deposit<'info>(
-    ctx: Context<'_, '_, 'info, 'info, SolendDeposit<'info>>,
+    ctx: Context<'info, SolendDeposit<'info>>,
     amount: u64,
 ) -> MarginfiResult {
     // Forced to validate here as unable to load obligation as ref in constraints
@@ -265,7 +265,7 @@ impl<'info> SolendDeposit<'info> {
             authority: self.authority.to_account_info(),
             mint: self.mint.to_account_info(),
         };
-        let cpi_ctx = CpiContext::new(program, accounts);
+        let cpi_ctx = CpiContext::new(program.key(), accounts);
         let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())
@@ -274,26 +274,26 @@ impl<'info> SolendDeposit<'info> {
     pub fn cpi_solend_deposit(&self, amount: u64, authority_bump: u8) -> MarginfiResult {
         let accounts = DepositReserveLiquidityAndObligationCollateral {
             source_liquidity_info: self.liquidity_vault.to_account_info(),
-            user_collateral_info: self.user_collateral.to_account_info(),
-            reserve_info: self.integration_acc_1.to_account_info(),
-            reserve_liquidity_supply_info: self.reserve_liquidity_supply.to_account_info(),
-            reserve_collateral_mint_info: self.reserve_collateral_mint.to_account_info(),
-            lending_market_info: self.lending_market.to_account_info(),
-            lending_market_authority_info: self.lending_market_authority.to_account_info(),
-            destination_deposit_collateral_info: self.reserve_collateral_supply.to_account_info(),
-            obligation_info: self.integration_acc_2.to_account_info(),
-            obligation_owner_info: self.liquidity_vault_authority.to_account_info(),
-            pyth_price_info: self.pyth_price.to_account_info(),
-            switchboard_feed_info: self.switchboard_feed.to_account_info(),
-            user_transfer_authority_info: self.liquidity_vault_authority.to_account_info(),
-            token_program_info: self.token_program.to_account_info(),
+            user_collateral_info: self.user_collateral,
+            reserve_info: self.integration_acc_1,
+            reserve_liquidity_supply_info: self.reserve_liquidity_supply,
+            reserve_collateral_mint_info: self.reserve_collateral_mint,
+            lending_market_info: self.lending_market,
+            lending_market_authority_info: self.lending_market_authority,
+            destination_deposit_collateral_info: self.reserve_collateral_supply,
+            obligation_info: self.integration_acc_2,
+            obligation_owner_info: self.liquidity_vault_authority,
+            pyth_price_info: self.pyth_price,
+            switchboard_feed_info: self.switchboard_feed,
+            user_transfer_authority_info: self.liquidity_vault_authority,
+            token_program_info: self.token_program,
         };
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
 
         // Create CPI context with signer
         let cpi_ctx = CpiContext::new_with_signer(
-            self.solend_program.to_account_info(),
+            self.solend_program.key(),
             accounts,
             signer_seeds,
         );

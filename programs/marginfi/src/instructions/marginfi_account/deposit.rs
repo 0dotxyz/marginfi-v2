@@ -17,7 +17,6 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
-use anchor_lang::solana_program::sysvar::Sysvar;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
@@ -32,7 +31,7 @@ use marginfi_type_crate::{
 ///
 /// Will error if there is an existing liability <=> repaying is not allowed.
 pub fn lending_account_deposit<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, LendingAccountDeposit<'info>>,
+    mut ctx: Context<'info, LendingAccountDeposit<'info>>,
     amount: u64,
     deposit_up_to_limit: Option<bool>,
 ) -> MarginfiResult {
@@ -182,7 +181,7 @@ pub struct LendingAccountDeposit<'info> {
 
     /// CHECK: Token mint/authority are checked at transfer
     #[account(mut)]
-    pub signer_token_account: AccountInfo<'info>,
+    pub signer_token_account: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
