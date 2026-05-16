@@ -39,7 +39,6 @@ impl ArchiveHeader {
     pub const HEADER_VERSION_OFFSET: usize = 8;
     pub const HEADER_RECORD_COUNT_OFFSET: usize = 16;
     pub const HEADER_AUTHORITY_OFFSET: usize = 24;
-    pub const MAX_SNAPSHOTS_PER_MINT: usize = 720; // 24 * 30 days
     pub const INDEX_LEN: usize = 32;
     pub const VERSION_LEN: usize = 1;
     pub const SLOT_META_LEN: usize = Self::INDEX_LEN + Self::VERSION_LEN;

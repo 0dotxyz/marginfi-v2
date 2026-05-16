@@ -51,22 +51,18 @@ pub fn monitor_archive_upsert_batch(
             native_apy: update.native_apy,
         };
 
-        if let Some((_, slot)) = header.find_slot_in_account_mut::<MintSnapshotRecords<
-            { ArchiveHeader::MAX_SNAPSHOTS_PER_MINT },
-        >>(&mut data, mint.to_bytes())
+        if let Some((_, slot)) =
+            header.find_slot_in_account_mut::<MintSnapshotRecords>(&mut data, mint.to_bytes())
         {
-            MintSnapshotRecords::<{ ArchiveHeader::MAX_SNAPSHOTS_PER_MINT }>::push_latest_snapshot_bytes(slot, snapshot)
+            MintSnapshotRecords::push_latest_snapshot_bytes(slot, snapshot)
                 .ok_or(MarginfiError::InvalidConfig)?;
         } else {
-            let mut record =
-                MintSnapshotRecords::<{ ArchiveHeader::MAX_SNAPSHOTS_PER_MINT }>::new(mint);
+            let mut record = MintSnapshotRecords::new(mint);
             record
                 .push_latest_snapshot(snapshot)
                 .ok_or(MarginfiError::InvalidConfig)?;
             header
-                .update_or_insert::<MintSnapshotRecords<{ ArchiveHeader::MAX_SNAPSHOTS_PER_MINT }>>(
-                    &mut data, &record,
-                )
+                .update_or_insert::<MintSnapshotRecords>(&mut data, &record)
                 .ok_or(MarginfiError::InvalidConfig)?;
         }
     }
