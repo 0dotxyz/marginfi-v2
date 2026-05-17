@@ -11,6 +11,7 @@ use {
 };
 
 pub trait ArchiveRecord: Sized {
+    const TYPE_DISCRIMINATOR: [u8; 8];
     fn len(version: u8) -> Option<usize>;
     fn version(&self) -> u8;
     fn self_len(&self) -> Option<usize> {
@@ -35,6 +36,14 @@ pub struct ArchiveMeta {
 
 impl ArchiveMeta {
     pub const LEN: usize = 48;
+
+    pub fn is_initialized(account_data: &[u8]) -> Option<bool> {
+        if account_data.len() < Self::LEN {
+            return Some(false);
+        }
+        let authority_bytes: [u8; 32] = account_data.get(16..48)?.try_into().ok()?;
+        Some(authority_bytes != [0; 32])
+    }
 
     pub fn read(account_data: &[u8]) -> Option<Self> {
         if account_data.len() < Self::LEN {
@@ -76,22 +85,59 @@ pub struct Archive<'a, 'info, const INDEX_MAP_LEN: usize, T: ArchiveRecord>(
     core::marker::PhantomData<T>,
 );
 #[cfg(feature = "anchor")]
-impl<'a, 'info, const INDEX_MAP_LEN: usize, T: ArchiveRecord> Archive<'a, 'info, INDEX_MAP_LEN, T> {
+impl<'a, 'info, const INDEX_MAP_LEN: usize, T: ArchiveRecord> Archive<'a, 'info, INDEX_MAP_LEN, T>
+where
+    'info: 'a,
+{
     pub const DISCRIMINATOR_BYTES: usize = 8;
-    pub const HEADER_BYTES: usize = ArchiveMeta::LEN;
     pub const INDEX_MAP_BYTES: usize = INDEX_MAP_LEN * 64;
+
+    pub fn initialize(account_info: &'a AccountInfo<'info>, authority: Pubkey) -> Option<Self> {
+        let mut data = account_info.try_borrow_mut_data().ok()?;
+
+        let discriminator = &data[0..Self::DISCRIMINATOR_BYTES];
+        if discriminator != [0; 8] {
+            return None;
+        }
+
+        if data.len() < Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN + Self::INDEX_MAP_BYTES {
+            return None;
+        }
+
+        if ArchiveMeta::is_initialized(&data[Self::DISCRIMINATOR_BYTES..Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN])? {
+            return None;
+        }
+
+        data[0..Self::DISCRIMINATOR_BYTES].copy_from_slice(&T::TYPE_DISCRIMINATOR);
+        let meta = ArchiveMeta {
+            version: 1,
+            _pad0: [0; 7],
+            record_count: 0,
+            authority,
+        };
+        meta.write(&mut data[Self::DISCRIMINATOR_BYTES..Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN])?;
+        Some(Self(meta, account_info, core::marker::PhantomData))
+    }
 
     pub fn from_account_info(account_info: &'a AccountInfo<'info>) -> Option<Self> {
         if account_info.data_len()
-            < Self::DISCRIMINATOR_BYTES + Self::HEADER_BYTES + Self::INDEX_MAP_BYTES
+            < Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN + Self::INDEX_MAP_BYTES
         {
             return None;
         }
+
         let data = match account_info.try_borrow_data() {
             Ok(data) => data,
             Err(_) => return None,
         };
-        let meta = ArchiveMeta::read(&data[8..ArchiveMeta::LEN + 8])?;
+
+        let discriminator = &data[0..Self::DISCRIMINATOR_BYTES];
+        if discriminator != T::TYPE_DISCRIMINATOR {
+            return None;
+        }
+
+        let meta = ArchiveMeta::read(&data[Self::DISCRIMINATOR_BYTES..Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN])?;
+        
         Some(Self(meta, account_info, core::marker::PhantomData))
     }
 
@@ -104,7 +150,7 @@ impl<'a, 'info, const INDEX_MAP_LEN: usize, T: ArchiveRecord> Archive<'a, 'info,
             Ok(data) => data,
             Err(_) => return None,
         };
-        self.0.write(&mut data[8..ArchiveMeta::LEN + 8])
+        self.0.write(&mut data[Self::DISCRIMINATOR_BYTES..Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN])
     }
 
     pub fn index_map_bytes(&self) -> Option<Ref<'_, [u8]>> {
@@ -113,7 +159,7 @@ impl<'a, 'info, const INDEX_MAP_LEN: usize, T: ArchiveRecord> Archive<'a, 'info,
             Err(_) => return None,
         };
 
-        let offset = Self::DISCRIMINATOR_BYTES + Self::HEADER_BYTES;
+        let offset = Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN;
         if data.len() < offset + Self::INDEX_MAP_BYTES {
             return None;
         }
@@ -129,7 +175,7 @@ impl<'a, 'info, const INDEX_MAP_LEN: usize, T: ArchiveRecord> Archive<'a, 'info,
             Err(_) => return None,
         };
 
-        let offset = Self::DISCRIMINATOR_BYTES + Self::HEADER_BYTES;
+        let offset = Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN;
         if data.len() < offset + Self::INDEX_MAP_BYTES {
             return None;
         }
@@ -145,7 +191,7 @@ impl<'a, 'info, const INDEX_MAP_LEN: usize, T: ArchiveRecord> Archive<'a, 'info,
             Err(_) => return None,
         };
 
-        let offset = Self::DISCRIMINATOR_BYTES + Self::HEADER_BYTES + Self::INDEX_MAP_BYTES;
+        let offset = Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN + Self::INDEX_MAP_BYTES;
         if data.len() < offset {
             return None;
         }
@@ -159,7 +205,7 @@ impl<'a, 'info, const INDEX_MAP_LEN: usize, T: ArchiveRecord> Archive<'a, 'info,
             Err(_) => return None,
         };
 
-        let offset = Self::DISCRIMINATOR_BYTES + Self::HEADER_BYTES + Self::INDEX_MAP_BYTES;
+        let offset = Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN + Self::INDEX_MAP_BYTES;
         if data.len() < offset {
             return None;
         }
@@ -333,6 +379,8 @@ mod tests {
     }
 
     impl ArchiveRecord for TestRecord {
+        const TYPE_DISCRIMINATOR: [u8; 8] = *b"TESTREC1";
+
         fn len(version: u8) -> Option<usize> {
             match version {
                 1 => Some(41),
