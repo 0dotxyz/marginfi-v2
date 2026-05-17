@@ -20,10 +20,13 @@ pub fn monitor_archive_upsert_batch(
 ) -> MarginfiResult {
     let manager = ctx.accounts.snapshot_manager.key();
 
-    let mut archive =
-        MintSnapshotsArchive::from_account_info(&ctx.accounts.archive).ok_or(MarginfiError::InvalidConfig)?;
+    let mut archive = MintSnapshotsArchive::from_account_info(&ctx.accounts.archive)
+        .ok_or(MarginfiError::InvalidConfig)?;
 
-    check!(archive.meta().authority == manager, MarginfiError::Unauthorized);
+    check!(
+        archive.meta().authority == manager,
+        MarginfiError::Unauthorized
+    );
 
     check!(
         updates.len() <= ctx.remaining_accounts.len(),

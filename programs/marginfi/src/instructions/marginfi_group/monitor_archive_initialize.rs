@@ -11,7 +11,8 @@ pub fn monitor_archive_initialize(
     ctx: Context<MonitorArchiveInitialize>,
     snapshot_manager: Pubkey,
 ) -> MarginfiResult {
-    MintSnapshotsArchive::initialize(&ctx.accounts.archive, snapshot_manager).ok_or(crate::MarginfiError::InvalidConfig)?;
+    MintSnapshotsArchive::initialize(&ctx.accounts.archive, snapshot_manager)
+        .ok_or(crate::MarginfiError::InvalidConfig)?;
     Ok(())
 }
 

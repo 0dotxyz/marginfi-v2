@@ -104,7 +104,9 @@ where
             return None;
         }
 
-        if ArchiveMeta::is_initialized(&data[Self::DISCRIMINATOR_BYTES..Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN])? {
+        if ArchiveMeta::is_initialized(
+            &data[Self::DISCRIMINATOR_BYTES..Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN],
+        )? {
             return None;
         }
 
@@ -115,7 +117,9 @@ where
             record_count: 0,
             authority,
         };
-        meta.write(&mut data[Self::DISCRIMINATOR_BYTES..Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN])?;
+        meta.write(
+            &mut data[Self::DISCRIMINATOR_BYTES..Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN],
+        )?;
         Some(Self(meta, account_info, core::marker::PhantomData))
     }
 
@@ -136,7 +140,9 @@ where
             return None;
         }
 
-        let meta = ArchiveMeta::read(&data[Self::DISCRIMINATOR_BYTES..Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN])?;
+        let meta = ArchiveMeta::read(
+            &data[Self::DISCRIMINATOR_BYTES..Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN],
+        )?;
 
         Some(Self(meta, account_info, core::marker::PhantomData))
     }
@@ -150,7 +156,9 @@ where
             Ok(data) => data,
             Err(_) => return None,
         };
-        self.0.write(&mut data[Self::DISCRIMINATOR_BYTES..Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN])
+        self.0.write(
+            &mut data[Self::DISCRIMINATOR_BYTES..Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN],
+        )
     }
 
     pub fn index_map_bytes(&self) -> Option<Ref<'_, [u8]>> {

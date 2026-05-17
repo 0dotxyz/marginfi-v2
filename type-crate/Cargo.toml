@@ -9,7 +9,7 @@ crate-type = ["cdylib", "lib"]
 name = "marginfi_type_crate"
 
 [features]
-default = ["client"]
+default = ["client", "anchor"]
 client = []
 anchor = ["anchor-lang"]
 mainnet-beta = ["id-crate/mainnet-beta"]
