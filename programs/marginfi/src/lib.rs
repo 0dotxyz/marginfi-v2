@@ -187,10 +187,7 @@ pub mod marginfi {
         marginfi_group::lending_pool_clone_emode(ctx)
     }
 
-    /// (snapshot manager only) Upsert a batch of monitor snapshots into the archive account.
-    ///
-    /// Each update carries `mint_index`, which points into `remaining_accounts`.
-    /// This keeps ix data compact and LUT-friendly for large batches.
+    /// (snapshot manager only) Initialize the monitor snapshot archive account metadata.
     pub fn monitor_archive_initialize(
         ctx: Context<MonitorArchiveInitialize>,
         snapshot_manager: Pubkey,

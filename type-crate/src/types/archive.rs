@@ -95,12 +95,12 @@ where
     pub fn initialize(account_info: &'a AccountInfo<'info>, authority: Pubkey) -> Option<Self> {
         let mut data = account_info.try_borrow_mut_data().ok()?;
 
-        let discriminator = &data[0..Self::DISCRIMINATOR_BYTES];
-        if discriminator != [0; 8] {
+        if data.len() < Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN + Self::INDEX_MAP_BYTES {
             return None;
         }
 
-        if data.len() < Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN + Self::INDEX_MAP_BYTES {
+        let discriminator = &data[0..Self::DISCRIMINATOR_BYTES];
+        if discriminator != [0; 8] {
             return None;
         }
 
@@ -137,7 +137,7 @@ where
         }
 
         let meta = ArchiveMeta::read(&data[Self::DISCRIMINATOR_BYTES..Self::DISCRIMINATOR_BYTES + ArchiveMeta::LEN])?;
-        
+
         Some(Self(meta, account_info, core::marker::PhantomData))
     }
 
@@ -295,7 +295,7 @@ where
         None
     }
 
-    fn append(&self, record: &T) -> Option<usize> {
+    pub fn append(&mut self, record: &T) -> Option<usize> {
         if record.self_len()? < 33 {
             return None;
         }
@@ -312,17 +312,21 @@ where
 
             record.to_bytes(&mut data_bytes[position..end])?;
 
+            drop(data_bytes);
+
+            self.0.record_count = self.0.record_count.checked_add(1)?;
+            self.persist_meta()?;
+
             return Some(position);
         }
         None
     }
 
-    fn update(&self, position: usize, record: &T) -> Option<()> {
+    pub fn update(&self, position: usize, record: &T) -> Option<()> {
         let mut data_bytes = self.data_mut_bytes()?;
         let version = *data_bytes.get(position + 32)?;
 
         if version != record.version() {
-            // remove this record and upgrade to new version and append to end
             return None;
         }
 
@@ -343,15 +347,10 @@ where
                 Some(position)
             } else {
                 // [TODO]: remove this version
-                self.append(record)
+                None
             }
         } else {
-            let position = self.append(record);
-            if position.is_some() {
-                self.0.record_count = self.0.record_count.checked_add(1)?;
-                self.persist_meta()?;
-            }
-            position
+            self.append(record)
         }
     }
 

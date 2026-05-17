@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use marginfi_type_crate::types::{ArchiveHeader, MintSnapshotRecords, Snapshot};
+use marginfi_type_crate::types::{MintSnapshotRecords, MintSnapshotsArchive, Snapshot};
 
 use crate::{check, MarginfiError, MarginfiResult};
 
@@ -20,18 +20,10 @@ pub fn monitor_archive_upsert_batch(
 ) -> MarginfiResult {
     let manager = ctx.accounts.snapshot_manager.key();
 
-    let archive_ai = &ctx.accounts.archive;
-    check!(archive_ai.owner == &crate::ID, MarginfiError::InvalidConfig);
+    let mut archive =
+        MintSnapshotsArchive::from_account_info(&ctx.accounts.archive).ok_or(MarginfiError::InvalidConfig)?;
 
-    let mut data = archive_ai.try_borrow_mut_data()?;
-    check!(
-        data.len() >= ArchiveHeader::PAYLOAD_OFFSET,
-        MarginfiError::InvalidConfig
-    );
-
-    let mut header =
-        ArchiveHeader::read_from_account_data(&data).ok_or(MarginfiError::InvalidConfig)?;
-    check!(header.authority == manager, MarginfiError::Unauthorized);
+    check!(archive.meta().authority == manager, MarginfiError::Unauthorized);
 
     check!(
         updates.len() <= ctx.remaining_accounts.len(),
@@ -39,48 +31,49 @@ pub fn monitor_archive_upsert_batch(
     );
 
     for (i, update) in updates.into_iter().enumerate() {
-        let mint_ai = ctx
+        let mint_info = ctx
             .remaining_accounts
             .get(i)
             .ok_or(MarginfiError::InvalidConfig)?;
 
-        let mint = *mint_ai.key;
+        let mint = *mint_info.key;
         let snapshot = Snapshot {
             snapshot_hour: update.snapshot_hour,
             price: update.price,
             native_apy: update.native_apy,
         };
 
-        if let Some((_, slot)) =
-            header.find_slot_in_account_mut::<MintSnapshotRecords>(&mut data, mint.to_bytes())
-        {
-            MintSnapshotRecords::push_latest_snapshot_bytes(slot, snapshot)
+        if let Some((position, mut record)) = archive.get(mint.to_bytes()) {
+            record
+                .push_latest_snapshot(snapshot)
+                .ok_or(MarginfiError::InvalidConfig)?;
+
+            archive
+                .update(position, &record)
                 .ok_or(MarginfiError::InvalidConfig)?;
         } else {
             let mut record = MintSnapshotRecords::new(mint);
             record
                 .push_latest_snapshot(snapshot)
                 .ok_or(MarginfiError::InvalidConfig)?;
-            header
-                .update_or_insert::<MintSnapshotRecords>(&mut data, &record)
+
+            archive
+                .append(&record)
                 .ok_or(MarginfiError::InvalidConfig)?;
         }
     }
 
-    header
-        .write_to_account_data(&mut data)
-        .ok_or(MarginfiError::InvalidConfig)?;
     Ok(())
 }
 
 #[derive(Accounts)]
 pub struct MonitorArchiveUpsertBatch<'info> {
     /// Dedicated signer for monitor snapshot archive writes. Must match
-    /// `ArchiveHeader.authority`.
+    /// `ArchiveMeta.authority`.
     pub snapshot_manager: Signer<'info>,
 
     /// CHECK: Program-owned archive account with raw bytes layout:
-    /// [8-byte discriminator][ArchiveHeader][payload].
+    /// [8-byte discriminator][ArchiveMeta][index_map][payload].
     #[account(mut, owner = crate::ID)]
     pub archive: AccountInfo<'info>,
 }
