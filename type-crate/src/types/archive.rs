@@ -49,7 +49,7 @@ impl ArchiveMeta {
         if account_data.len() < Self::LEN {
             return None;
         }
-        let version = *account_data.get(0)?;
+        let version = *account_data.first()?;
         let record_count = u64::from_le_bytes(account_data.get(8..16)?.try_into().ok()?);
         let authority_bytes: [u8; 32] = account_data.get(16..48)?.try_into().ok()?;
 
@@ -231,7 +231,7 @@ where
         for slot in index_map.chunks_exact(64) {
             let sec: [u8; 32] = slot[0..32].try_into().ok()?;
             if sec == secondary {
-                return Some(slot[32..64].try_into().ok()?);
+                return slot[32..64].try_into().ok();
             }
         }
 
