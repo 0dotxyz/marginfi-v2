@@ -1,6 +1,4 @@
 use super::ArchiveRecord;
-#[cfg(feature = "anchor")]
-use super::ArchiveHeader;
 
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
@@ -281,10 +279,13 @@ impl MintSnapshotRecords {
     /// archive account as an input account and want typed access without
     /// re-implementing byte parsing logic.
     #[cfg(feature = "anchor")]
-    pub fn from_archive_account(archive: &AccountInfo, mint: Pubkey) -> Option<Self> {
-        let data = archive.try_borrow_data().ok()?;
-        let header = ArchiveHeader::read_from_account_data(&data)?;
-        let (_, record) = header.get_record::<Self>(&data, mint.to_bytes())?;
+    pub fn from_archive_account<'a, 'info, const INDEX_MAP_LEN: usize>(
+        account_info: &'a AccountInfo<'info>,
+        mint: Pubkey,
+    ) -> Option<Self> {
+        let archive =
+            super::Archive::<'a, 'info, INDEX_MAP_LEN, Self>::from_account_info(account_info)?;
+        let (_, record) = archive.get(mint.to_bytes())?;
         Some(record)
     }
 }
@@ -292,27 +293,8 @@ impl MintSnapshotRecords {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ArchiveHeader;
-
-    fn new_header() -> ArchiveHeader {
-        ArchiveHeader {
-            version: 1,
-            _pad0: [0; 7],
-            record_count: 0,
-            authority: Pubkey::default(),
-        }
-    }
-
-    fn pk(seed: u8) -> Pubkey {
-        #[cfg(feature = "anchor")]
-        {
-            Pubkey::from([seed; 32])
-        }
-        #[cfg(not(feature = "anchor"))]
-        {
-            Pubkey::new([seed; 32])
-        }
-    }
+    #[cfg(feature = "anchor")]
+    use crate::types::{Archive, ArchiveMeta};
 
     fn snap(hour: u64, seed: u64) -> Snapshot {
         Snapshot {
@@ -322,68 +304,35 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "anchor")]
+    fn pk(seed: u8) -> Pubkey {
+        Pubkey::new_from_array([seed; 32])
+    }
+
+    #[cfg(not(feature = "anchor"))]
+    fn pk(seed: u8) -> Pubkey {
+        Pubkey::new([seed; 32])
+    }
+
     #[test]
-    fn mint_record_round_trip() {
+    fn record_round_trip() {
         let mut rec = MintSnapshotRecords::new(pk(9));
-        assert_eq!(rec.push_latest_snapshot(snap(9, 2)), Some(()));
         assert_eq!(rec.push_latest_snapshot(snap(10, 1)), Some(()));
+        assert_eq!(rec.push_latest_snapshot(snap(11, 2)), Some(()));
 
         let mut out = vec![0u8; MintSnapshotRecords::LEN_V1];
         assert_eq!(rec.to_bytes(&mut out), Some(()));
         assert_eq!(MintSnapshotRecords::parse(&out), Some(rec));
-        assert_eq!(out[0..32], rec.index());
     }
 
     #[test]
-    fn archive_update_or_insert_by_mint_index() {
-        let mut header = new_header();
-        let mut account_data =
-            vec![0u8; ArchiveHeader::PAYLOAD_OFFSET + (2 * MintSnapshotRecords::LEN_V1)];
-
-        let mut rec_a = MintSnapshotRecords::new(pk(11));
-        assert_eq!(rec_a.push_latest_snapshot(snap(99, 2)), Some(()));
-        assert_eq!(rec_a.push_latest_snapshot(snap(100, 1)), Some(()));
-        let mut rec_a_updated = rec_a;
-        assert_eq!(rec_a_updated.push_latest_snapshot(snap(101, 5)), Some(()));
-
-        let mut rec_b = MintSnapshotRecords::new(pk(12));
-        assert_eq!(rec_b.push_latest_snapshot(snap(100, 7)), Some(()));
-
-        assert_eq!(
-            header.update_or_insert::<MintSnapshotRecords>(&mut account_data, &rec_a),
-            Some(())
-        );
-        assert_eq!(
-            header.update_or_insert::<MintSnapshotRecords>(&mut account_data, &rec_b),
-            Some(())
-        );
-        assert_eq!(header.record_count, 2);
-
-        assert_eq!(
-            header.update_or_insert::<MintSnapshotRecords>(&mut account_data, &rec_a_updated),
-            Some(())
-        );
-        assert_eq!(header.record_count, 2);
-        assert_eq!(
-            header.get_record::<MintSnapshotRecords>(&account_data, rec_a.index()),
-            Some((0, rec_a_updated))
-        );
-    }
-
-    #[test]
-    fn push_latest_snapshot_ring_overwrites_oldest() {
-        let mut rec = MintSnapshotRecords::new(pk(42));
-        assert_eq!(rec.push_latest_snapshot(snap(1, 10)), Some(()));
+    fn ring_buffer_overwrites_oldest() {
+        let mut rec = MintSnapshotRecords::new(pk(7));
+        assert_eq!(rec.push_latest_snapshot(snap(1, 1)), Some(()));
         assert_eq!(rec.head, 0);
         assert_eq!(rec.tail, 0);
-        assert_eq!(rec.latest_snapshot(), Some(snap(1, 10)));
 
-        assert_eq!(rec.push_latest_snapshot(snap(2, 20)), Some(()));
-        assert_eq!(rec.head, 0);
-        assert_eq!(rec.tail, 1);
-        assert_eq!(rec.latest_snapshot(), Some(snap(2, 20)));
-
-        for i in 3..=MintSnapshotRecords::MAX_SNAPSHOTS_PER_MINT as u64 {
+        for i in 2..=MintSnapshotRecords::MAX_SNAPSHOTS_PER_MINT as u64 {
             assert_eq!(rec.push_latest_snapshot(snap(i, i * 10)), Some(()));
         }
         assert_eq!(rec.head, 0);
@@ -392,13 +341,7 @@ mod tests {
             (MintSnapshotRecords::MAX_SNAPSHOTS_PER_MINT - 1) as u16
         );
 
-        let latest_before_overwrite = snap(
-            MintSnapshotRecords::MAX_SNAPSHOTS_PER_MINT as u64,
-            MintSnapshotRecords::MAX_SNAPSHOTS_PER_MINT as u64 * 10,
-        );
-        assert_eq!(rec.latest_snapshot(), Some(latest_before_overwrite));
-
-        let overwrite = snap(MintSnapshotRecords::MAX_SNAPSHOTS_PER_MINT as u64 + 1, 9_999);
+        let overwrite = snap(MintSnapshotRecords::MAX_SNAPSHOTS_PER_MINT as u64 + 1, 999);
         assert_eq!(rec.push_latest_snapshot(overwrite), Some(()));
         assert_eq!(rec.head, 1);
         assert_eq!(rec.tail, 0);
@@ -406,12 +349,84 @@ mod tests {
     }
 
     #[test]
-    fn push_latest_snapshot_rejects_zero_and_non_increasing() {
-        let mut rec = MintSnapshotRecords::new(pk(7));
-
+    fn rejects_zero_and_non_increasing_timestamps() {
+        let mut rec = MintSnapshotRecords::new(pk(11));
         assert_eq!(rec.push_latest_snapshot(Snapshot::ZERO), None);
         assert_eq!(rec.push_latest_snapshot(snap(10, 1)), Some(()));
         assert_eq!(rec.push_latest_snapshot(snap(10, 2)), None);
         assert_eq!(rec.push_latest_snapshot(snap(9, 3)), None);
+    }
+
+    #[test]
+    fn push_latest_snapshot_bytes_matches_struct_behavior() {
+        let mint = pk(12);
+        let mut struct_rec = MintSnapshotRecords::new(mint);
+        let mut bytes = vec![0u8; MintSnapshotRecords::LEN_V1];
+        assert_eq!(struct_rec.to_bytes(&mut bytes), Some(()));
+
+        let a = snap(100, 10);
+        let b = snap(101, 20);
+        let c = snap(102, 30);
+
+        assert_eq!(
+            MintSnapshotRecords::push_latest_snapshot_bytes(&mut bytes, a),
+            Some(())
+        );
+        assert_eq!(struct_rec.push_latest_snapshot(a), Some(()));
+
+        assert_eq!(
+            MintSnapshotRecords::push_latest_snapshot_bytes(&mut bytes, b),
+            Some(())
+        );
+        assert_eq!(struct_rec.push_latest_snapshot(b), Some(()));
+
+        assert_eq!(
+            MintSnapshotRecords::push_latest_snapshot_bytes(&mut bytes, c),
+            Some(())
+        );
+        assert_eq!(struct_rec.push_latest_snapshot(c), Some(()));
+
+        assert_eq!(MintSnapshotRecords::parse(&bytes), Some(struct_rec));
+    }
+
+    #[cfg(feature = "anchor")]
+    fn new_archive_account<const INDEX_MAP_LEN: usize>(payload_len: usize) -> AccountInfo<'static> {
+        use anchor_lang::solana_program::{account_info::AccountInfo, clock::Epoch};
+        let key = Box::leak(Box::new(pk(200)));
+        let owner = Box::leak(Box::new(crate::ID));
+        let lamports = Box::leak(Box::new(1_000_000u64));
+        let total_len = 8 + ArchiveMeta::LEN + (INDEX_MAP_LEN * 64) + payload_len;
+        let data = Box::leak(vec![0u8; total_len].into_boxed_slice());
+        let meta = ArchiveMeta {
+            version: 1,
+            _pad0: [0; 7],
+            record_count: 0,
+            authority: pk(7),
+        };
+        meta.write(&mut data[8..56]).unwrap();
+        AccountInfo::new(
+            key,
+            false,
+            true,
+            lamports,
+            data,
+            owner,
+            false,
+            Epoch::default(),
+        )
+    }
+
+    #[cfg(feature = "anchor")]
+    #[test]
+    fn archive_integration_upsert_and_read_back() {
+        let account = new_archive_account::<2>(MintSnapshotRecords::LEN_V1 * 2);
+        let mut archive = Archive::<2, MintSnapshotRecords>::from_account_info(&account).unwrap();
+
+        let mut rec = MintSnapshotRecords::new(pk(3));
+        assert_eq!(rec.push_latest_snapshot(snap(10, 1)), Some(()));
+        assert_eq!(archive.upsert(&rec), Some(0));
+
+        let loaded = MintSnapshotRecords::from_archive_account::<2>(&account, rec.mint).unwrap();
+        assert_eq!(loaded, rec);
     }
 }

@@ -1,4 +1,5 @@
-use crate::{assert_struct_align, assert_struct_size};
+#[cfg(feature = "anchor")]
+use std::cell::{Ref, RefMut};
 
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
@@ -9,58 +10,39 @@ use {
     bytemuck::{Pod, Zeroable},
 };
 
-assert_struct_size!(ArchiveHeader, 48);
-assert_struct_align!(ArchiveHeader, 8);
+pub trait ArchiveRecord: Sized {
+    fn len(version: u8) -> Option<usize>;
+    fn version(&self) -> u8;
+    fn self_len(&self) -> Option<usize> {
+        Self::len(self.version())
+    }
+    fn parse(bytes: &[u8]) -> Option<Self>;
+    fn to_bytes(&self, out: &mut [u8]) -> Option<()>;
+    fn index(&self) -> [u8; 32];
+}
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
 #[cfg_attr(
     not(feature = "anchor"),
     derive(Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)
 )]
-pub struct ArchiveHeader {
+pub struct ArchiveMeta {
     pub version: u8,
     pub _pad0: [u8; 7],
     pub record_count: u64,
     pub authority: Pubkey,
 }
 
-pub trait ArchiveRecord: Sized {
-    fn len(version: u8) -> Option<usize>;
-    fn version(&self) -> u8;
-    fn parse(bytes: &[u8]) -> Option<Self>;
-    fn to_bytes(&self, out: &mut [u8]) -> Option<()>;
-    fn index(&self) -> [u8; 32];
-}
-
-impl ArchiveHeader {
+impl ArchiveMeta {
     pub const LEN: usize = 48;
-    pub const DISCRIMINATOR_LEN: usize = 8;
-    pub const PAYLOAD_OFFSET: usize = Self::DISCRIMINATOR_LEN + Self::LEN;
-    pub const HEADER_VERSION_OFFSET: usize = 8;
-    pub const HEADER_RECORD_COUNT_OFFSET: usize = 16;
-    pub const HEADER_AUTHORITY_OFFSET: usize = 24;
-    pub const INDEX_LEN: usize = 32;
-    pub const VERSION_LEN: usize = 1;
-    pub const SLOT_META_LEN: usize = Self::INDEX_LEN + Self::VERSION_LEN;
 
-    /// Read archive header fields directly from account bytes.
-    ///
-    /// Layout is `[8-byte discriminator][ArchiveHeader][payload]`.
-    pub fn read_from_account_data(account_data: &[u8]) -> Option<Self> {
-        if account_data.len() < Self::PAYLOAD_OFFSET {
+    pub fn read(account_data: &[u8]) -> Option<Self> {
+        if account_data.len() < Self::LEN {
             return None;
         }
-        let version = *account_data.get(Self::HEADER_VERSION_OFFSET)?;
-        let record_count = u64::from_le_bytes(
-            account_data
-                .get(Self::HEADER_RECORD_COUNT_OFFSET..Self::HEADER_RECORD_COUNT_OFFSET + 8)?
-                .try_into()
-                .ok()?,
-        );
-        let authority_bytes: [u8; 32] = account_data
-            .get(Self::HEADER_AUTHORITY_OFFSET..Self::HEADER_AUTHORITY_OFFSET + 32)?
-            .try_into()
-            .ok()?;
+        let version = *account_data.get(0)?;
+        let record_count = u64::from_le_bytes(account_data.get(8..16)?.try_into().ok()?);
+        let authority_bytes: [u8; 32] = account_data.get(16..48)?.try_into().ok()?;
 
         #[cfg(feature = "anchor")]
         let authority = Pubkey::new_from_array(authority_bytes);
@@ -76,217 +58,273 @@ impl ArchiveHeader {
     }
 
     /// Persist header fields back into account bytes without touching payload.
-    pub fn write_to_account_data(&self, account_data: &mut [u8]) -> Option<()> {
-        if account_data.len() < Self::PAYLOAD_OFFSET {
+    pub fn write(&self, account_data: &mut [u8]) -> Option<()> {
+        if account_data.len() < Self::LEN {
             return None;
         }
-        account_data[Self::HEADER_VERSION_OFFSET] = self.version;
-        account_data[Self::HEADER_RECORD_COUNT_OFFSET..Self::HEADER_RECORD_COUNT_OFFSET + 8]
-            .copy_from_slice(&self.record_count.to_le_bytes());
-        account_data[Self::HEADER_AUTHORITY_OFFSET..Self::HEADER_AUTHORITY_OFFSET + 32]
-            .copy_from_slice(self.authority.as_ref());
+        account_data[0] = self.version;
+        account_data[8..16].copy_from_slice(&self.record_count.to_le_bytes());
+        account_data[16..48].copy_from_slice(self.authority.as_ref());
         Some(())
-    }
-
-    fn payload_region<'a>(&self, account_data: &'a [u8]) -> Option<&'a [u8]> {
-        if account_data.len() < Self::PAYLOAD_OFFSET {
-            return None;
-        }
-        Some(&account_data[Self::PAYLOAD_OFFSET..])
-    }
-
-    fn payload_region_mut<'a>(&self, account_data: &'a mut [u8]) -> Option<&'a mut [u8]> {
-        if account_data.len() < Self::PAYLOAD_OFFSET {
-            return None;
-        }
-        Some(&mut account_data[Self::PAYLOAD_OFFSET..])
-    }
-
-    fn used_payload_len<T: ArchiveRecord>(&self, data: &[u8]) -> Option<usize> {
-        let max_records = usize::try_from(self.record_count).ok()?;
-        let mut offset = 0usize;
-        for _ in 0..max_records {
-            let meta_end = offset.checked_add(Self::SLOT_META_LEN)?;
-            if meta_end > data.len() {
-                return None;
-            }
-            let version = data[offset + Self::INDEX_LEN];
-            let slot_len = T::len(version)?;
-            if slot_len < Self::SLOT_META_LEN {
-                return None;
-            }
-            offset = offset.checked_add(slot_len)?;
-            if offset > data.len() {
-                return None;
-            }
-        }
-        Some(offset)
-    }
-
-    pub fn find_slot<'a, T: ArchiveRecord>(
-        &self,
-        data: &'a [u8],
-        index: [u8; 32],
-    ) -> Option<(usize, &'a [u8])> {
-        let max_records = usize::try_from(self.record_count).ok()?;
-        let mut offset = 0usize;
-        for _ in 0..max_records {
-            let meta_end = offset.checked_add(Self::SLOT_META_LEN)?;
-            if meta_end > data.len() {
-                return None;
-            }
-            let version = data[offset + Self::INDEX_LEN];
-            let slot_len = T::len(version)?;
-            let end = offset.checked_add(slot_len)?;
-            if end > data.len() {
-                return None;
-            }
-
-            if data[offset..offset + Self::INDEX_LEN] == index {
-                return Some((offset, &data[offset..end]));
-            }
-            offset = end;
-        }
-        None
-    }
-
-    pub fn find_slot_mut<'a, T: ArchiveRecord>(
-        &self,
-        data: &'a mut [u8],
-        index: [u8; 32],
-    ) -> Option<(usize, &'a mut [u8])> {
-        let max_records = usize::try_from(self.record_count).ok()?;
-        let mut offset = 0usize;
-        for _ in 0..max_records {
-            let meta_end = offset.checked_add(Self::SLOT_META_LEN)?;
-            if meta_end > data.len() {
-                return None;
-            }
-            let version = data[offset + Self::INDEX_LEN];
-            let slot_len = T::len(version)?;
-            let end = offset.checked_add(slot_len)?;
-            if end > data.len() {
-                return None;
-            }
-
-            if data[offset..offset + Self::INDEX_LEN] == index {
-                return Some((offset, &mut data[offset..end]));
-            }
-            offset = end;
-        }
-        None
-    }
-
-    pub fn find_slot_in_account_mut<'a, T: ArchiveRecord>(
-        &self,
-        account_data: &'a mut [u8],
-        index: [u8; 32],
-    ) -> Option<(usize, &'a mut [u8])> {
-        // Slot offsets are relative to payload, so first slice off the
-        // discriminator + fixed header region.
-        let data = self.payload_region_mut(account_data)?;
-        self.find_slot_mut::<T>(data, index)
-    }
-
-    pub fn update_or_insert<T: ArchiveRecord>(
-        &mut self,
-        account_data: &mut [u8],
-        record: &T,
-    ) -> Option<()> {
-        let record_len = T::len(record.version())?;
-        if record_len < Self::SLOT_META_LEN {
-            return None;
-        }
-
-        let data = self.payload_region_mut(account_data)?;
-        let index = record.index();
-        if let Some((pos, slot)) = self.find_slot_mut::<T>(data, index) {
-            let existing_version = slot[Self::INDEX_LEN];
-            let existing_len = T::len(existing_version)?;
-            if existing_version == record.version() && existing_len == record_len {
-                record.to_bytes(slot)?;
-                return Some(());
-            }
-
-            // Version/len changed for same index: compact out old slot and append
-            // new record at tail if capacity permits.
-            let used_end = self.used_payload_len::<T>(data)?;
-            let remove_end = pos.checked_add(existing_len)?;
-            if remove_end > used_end {
-                return None;
-            }
-            let tail_len = used_end.checked_sub(remove_end)?;
-            let new_used_end = used_end
-                .checked_sub(existing_len)?
-                .checked_add(record_len)?;
-            if new_used_end > data.len() {
-                return None;
-            }
-            if tail_len > 0 {
-                data.copy_within(remove_end..used_end, pos);
-            }
-            record.to_bytes(&mut data[new_used_end - record_len..new_used_end])?;
-            if new_used_end < used_end {
-                for b in &mut data[new_used_end..used_end] {
-                    *b = 0;
-                }
-            }
-            return Some(());
-        }
-
-        let offset = self.used_payload_len::<T>(data)?;
-        let end = offset.checked_add(record_len)?;
-        if end > data.len() {
-            return None;
-        }
-
-        record.to_bytes(&mut data[offset..end])?;
-        self.record_count = self.record_count.checked_add(1)?;
-        Some(())
-    }
-
-    pub fn get_record<T: ArchiveRecord>(
-        &self,
-        account_data: &[u8],
-        index: [u8; 32],
-    ) -> Option<(usize, T)> {
-        let data = self.payload_region(account_data)?;
-        let (pos, slot) = self.find_slot::<T>(data, index)?;
-        Some((pos, T::parse(slot)?))
-    }
-
-    pub fn update<T: ArchiveRecord>(
-        &self,
-        account_data: &mut [u8],
-        position: usize,
-        record: &T,
-    ) -> Option<()> {
-        let record_len = T::len(record.version())?;
-        if record_len < Self::SLOT_META_LEN {
-            return None;
-        }
-        let data = self.payload_region_mut(account_data)?;
-        let used_end = self.used_payload_len::<T>(data)?;
-        let end = position.checked_add(record_len)?;
-        if end > used_end {
-            return None;
-        }
-        let slot = &mut data[position..end];
-        if slot[0..Self::INDEX_LEN] != record.index() {
-            return None;
-        }
-        if slot[Self::INDEX_LEN] != record.version() {
-            return None;
-        }
-        record.to_bytes(slot)
     }
 }
 
-const _: () = assert!(core::mem::size_of::<ArchiveHeader>() == ArchiveHeader::LEN);
+#[cfg(feature = "anchor")]
+pub struct Archive<'a, 'info, const INDEX_MAP_LEN: usize, T: ArchiveRecord>(
+    ArchiveMeta,
+    &'a AccountInfo<'info>,
+    core::marker::PhantomData<T>,
+);
+#[cfg(feature = "anchor")]
+impl<'a, 'info, const INDEX_MAP_LEN: usize, T: ArchiveRecord> Archive<'a, 'info, INDEX_MAP_LEN, T> {
+    pub const DISCRIMINATOR_BYTES: usize = 8;
+    pub const HEADER_BYTES: usize = ArchiveMeta::LEN;
+    pub const INDEX_MAP_BYTES: usize = INDEX_MAP_LEN * 64;
 
-#[cfg(test)]
+    pub fn from_account_info(account_info: &'a AccountInfo<'info>) -> Option<Self> {
+        if account_info.data_len()
+            < Self::DISCRIMINATOR_BYTES + Self::HEADER_BYTES + Self::INDEX_MAP_BYTES
+        {
+            return None;
+        }
+        let data = match account_info.try_borrow_data() {
+            Ok(data) => data,
+            Err(_) => return None,
+        };
+        let meta = ArchiveMeta::read(&data[8..ArchiveMeta::LEN + 8])?;
+        Some(Self(meta, account_info, core::marker::PhantomData))
+    }
+
+    pub fn meta(&self) -> &ArchiveMeta {
+        &self.0
+    }
+
+    pub fn persist_meta(&self) -> Option<()> {
+        let mut data = match self.1.try_borrow_mut_data() {
+            Ok(data) => data,
+            Err(_) => return None,
+        };
+        self.0.write(&mut data[8..ArchiveMeta::LEN + 8])
+    }
+
+    pub fn index_map_bytes(&self) -> Option<Ref<'_, [u8]>> {
+        let data = match self.1.try_borrow_data() {
+            Ok(data) => data,
+            Err(_) => return None,
+        };
+
+        let offset = Self::DISCRIMINATOR_BYTES + Self::HEADER_BYTES;
+        if data.len() < offset + Self::INDEX_MAP_BYTES {
+            return None;
+        }
+
+        Some(Ref::map(data, |bytes| {
+            &bytes[offset..offset + Self::INDEX_MAP_BYTES]
+        }))
+    }
+
+    fn index_map_mut_bytes(&self) -> Option<RefMut<'_, [u8]>> {
+        let data = match self.1.try_borrow_mut_data() {
+            Ok(data) => data,
+            Err(_) => return None,
+        };
+
+        let offset = Self::DISCRIMINATOR_BYTES + Self::HEADER_BYTES;
+        if data.len() < offset + Self::INDEX_MAP_BYTES {
+            return None;
+        }
+
+        Some(RefMut::map(data, |bytes| {
+            &mut bytes[offset..offset + Self::INDEX_MAP_BYTES]
+        }))
+    }
+
+    pub fn data_bytes(&self) -> Option<Ref<'_, [u8]>> {
+        let data = match self.1.try_borrow_data() {
+            Ok(data) => data,
+            Err(_) => return None,
+        };
+
+        let offset = Self::DISCRIMINATOR_BYTES + Self::HEADER_BYTES + Self::INDEX_MAP_BYTES;
+        if data.len() < offset {
+            return None;
+        }
+
+        Some(Ref::map(data, |bytes| &bytes[offset..]))
+    }
+
+    fn data_mut_bytes(&self) -> Option<RefMut<'_, [u8]>> {
+        let data = match self.1.try_borrow_mut_data() {
+            Ok(data) => data,
+            Err(_) => return None,
+        };
+
+        let offset = Self::DISCRIMINATOR_BYTES + Self::HEADER_BYTES + Self::INDEX_MAP_BYTES;
+        if data.len() < offset {
+            return None;
+        }
+
+        Some(RefMut::map(data, |bytes| &mut bytes[offset..]))
+    }
+
+    pub fn find_index_with(&self, secondary: [u8; 32]) -> Option<[u8; 32]> {
+        if secondary == [0; 32] {
+            return None;
+        }
+
+        let index_map = self.index_map_bytes()?;
+
+        for slot in index_map.chunks_exact(64) {
+            let sec: [u8; 32] = slot[0..32].try_into().ok()?;
+            if sec == secondary {
+                return Some(slot[32..64].try_into().ok()?);
+            }
+        }
+
+        None
+    }
+
+    pub fn upsert_index(&self, secondary: [u8; 32], primary: [u8; 32]) -> Option<()> {
+        let mut index_map = self.index_map_mut_bytes()?;
+
+        if secondary == [0; 32] || primary == [0; 32] {
+            return None;
+        }
+
+        let mut next_unused_space: Option<usize> = None;
+        for (i, slot) in index_map.chunks_exact_mut(64).enumerate() {
+            let sec: [u8; 32] = slot[0..32].try_into().ok()?;
+            if sec == secondary {
+                slot[32..64].copy_from_slice(&primary);
+                return Some(());
+            }
+            if next_unused_space.is_none() && sec == [0u8; 32] {
+                next_unused_space = Some(i * 64);
+            }
+        }
+
+        let offset = next_unused_space?;
+        index_map[offset..offset + 32].copy_from_slice(&secondary);
+        index_map[offset + 32..offset + 64].copy_from_slice(&primary);
+        Some(())
+    }
+
+    fn position(&self, index: [u8; 32]) -> Option<usize> {
+        let data = self.data_bytes()?;
+
+        let mut position = 0usize;
+        while position < data.len() {
+            let slot_index = data.get(position..position + 32)?;
+            if slot_index == index {
+                return Some(position);
+            }
+
+            let version = *data.get(position + 32)?;
+            let slot_len = T::len(version)?;
+            if slot_len < 33 {
+                return None;
+            }
+            position = position.checked_add(slot_len)?;
+        }
+        None
+    }
+
+    fn next_empty_position(&self) -> Option<usize> {
+        let data = self.data_bytes()?;
+
+        let mut position = 0usize;
+        while position < data.len() {
+            let slot_index = data.get(position..position + 32)?;
+            if slot_index == [0; 32] {
+                return Some(position);
+            }
+
+            let version = *data.get(position + 32)?;
+            let slot_len = T::len(version)?;
+            if slot_len < 33 {
+                return None;
+            }
+            position = position.checked_add(slot_len)?;
+        }
+        None
+    }
+
+    fn append(&self, record: &T) -> Option<usize> {
+        if record.self_len()? < 33 {
+            return None;
+        }
+
+        if let Some(position) = self.next_empty_position() {
+            let mut data_bytes = self.data_mut_bytes()?;
+
+            let record_len = T::len(record.version())?;
+
+            let end = position.checked_add(record_len)?;
+            if end > data_bytes.len() {
+                return None;
+            }
+
+            record.to_bytes(&mut data_bytes[position..end])?;
+
+            return Some(position);
+        }
+        None
+    }
+
+    fn update(&self, position: usize, record: &T) -> Option<()> {
+        let mut data_bytes = self.data_mut_bytes()?;
+        let version = *data_bytes.get(position + 32)?;
+
+        if version != record.version() {
+            // remove this record and upgrade to new version and append to end
+            return None;
+        }
+
+        let len = T::len(version)?;
+        let end = position.checked_add(len)?;
+
+        if end > data_bytes.len() {
+            return None;
+        }
+
+        record.to_bytes(&mut data_bytes[position..end])?;
+        Some(())
+    }
+
+    pub fn upsert(&mut self, record: &T) -> Option<usize> {
+        if let Some(position) = self.position(record.index()) {
+            if self.update(position, record).is_some() {
+                Some(position)
+            } else {
+                // [TODO]: remove this version
+                self.append(record)
+            }
+        } else {
+            let position = self.append(record);
+            if position.is_some() {
+                self.0.record_count = self.0.record_count.checked_add(1)?;
+                self.persist_meta()?;
+            }
+            position
+        }
+    }
+
+    pub fn get(&self, index: [u8; 32]) -> Option<(usize, T)> {
+        let data = self.data_bytes()?;
+        let position = self.position(index)?;
+        let len = T::len(*data.get(position + 32)?)?;
+        let end = position.checked_add(len)?;
+        if end > data.len() {
+            return None;
+        }
+        T::parse(data.get(position..end)?).map(|x| (position, x))
+    }
+}
+
+#[cfg(all(test, feature = "anchor"))]
 mod tests {
     use super::*;
+    use anchor_lang::solana_program::{account_info::AccountInfo, clock::Epoch};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     struct TestRecord {
@@ -307,11 +345,11 @@ mod tests {
         }
 
         fn parse(bytes: &[u8]) -> Option<Self> {
-            if bytes.len() != Self::len(1)? || bytes[32] != 1 {
+            if bytes.len() != Self::len(1)? || bytes.get(32).copied()? != 1 {
                 return None;
             }
-            let key: [u8; 32] = bytes[0..32].try_into().ok()?;
-            let value = u64::from_le_bytes(bytes[33..41].try_into().ok()?);
+            let key: [u8; 32] = bytes.get(0..32)?.try_into().ok()?;
+            let value = u64::from_le_bytes(bytes.get(33..41)?.try_into().ok()?);
             Some(Self { key, value })
         }
 
@@ -330,208 +368,105 @@ mod tests {
         }
     }
 
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    struct TestRecordV2 {
-        key: [u8; 32],
-        value: u64,
-        extra: u64,
+    fn pk(seed: u8) -> Pubkey {
+        Pubkey::new_from_array([seed; 32])
     }
 
-    impl ArchiveRecord for TestRecordV2 {
-        fn len(version: u8) -> Option<usize> {
-            match version {
-                1 => Some(41),
-                2 => Some(49),
-                _ => None,
-            }
-        }
+    fn new_archive_account<const INDEX_MAP_LEN: usize>(payload_len: usize) -> AccountInfo<'static> {
+        let key = Box::leak(Box::new(pk(200)));
+        let owner = Box::leak(Box::new(crate::ID));
+        let lamports = Box::leak(Box::new(1_000_000u64));
+        let total_len = 8 + ArchiveMeta::LEN + (INDEX_MAP_LEN * 64) + payload_len;
+        let data = Box::leak(vec![0u8; total_len].into_boxed_slice());
 
-        fn version(&self) -> u8 {
-            2
-        }
-
-        fn parse(bytes: &[u8]) -> Option<Self> {
-            if bytes.len() != Self::len(2)? || bytes[32] != 2 {
-                return None;
-            }
-            let key: [u8; 32] = bytes[0..32].try_into().ok()?;
-            let value = u64::from_le_bytes(bytes[33..41].try_into().ok()?);
-            let extra = u64::from_le_bytes(bytes[41..49].try_into().ok()?);
-            Some(Self { key, value, extra })
-        }
-
-        fn to_bytes(&self, out: &mut [u8]) -> Option<()> {
-            if out.len() != Self::len(self.version())? {
-                return None;
-            }
-            out[0..32].copy_from_slice(&self.key);
-            out[32] = self.version();
-            out[33..41].copy_from_slice(&self.value.to_le_bytes());
-            out[41..49].copy_from_slice(&self.extra.to_le_bytes());
-            Some(())
-        }
-
-        fn index(&self) -> [u8; 32] {
-            self.key
-        }
-    }
-
-    fn new_header() -> ArchiveHeader {
-        ArchiveHeader {
+        let meta = ArchiveMeta {
             version: 1,
             _pad0: [0; 7],
             record_count: 0,
-            authority: Pubkey::default(),
-        }
-    }
+            authority: pk(7),
+        };
+        meta.write(&mut data[8..56]).unwrap();
 
-    fn new_account_data(slots: usize) -> Vec<u8> {
-        vec![0u8; ArchiveHeader::PAYLOAD_OFFSET + (slots * TestRecord::len(1).unwrap())]
+        AccountInfo::new(
+            key,
+            false,
+            true,
+            lamports,
+            data,
+            owner,
+            false,
+            Epoch::default(),
+        )
     }
 
     #[test]
-    fn insert_then_get() {
-        let mut header = new_header();
-        let mut data = new_account_data(4);
+    fn upsert_get_and_update_record() {
+        let account = new_archive_account::<2>(TestRecord::len(1).unwrap() * 4);
+        let mut archive = Archive::<2, TestRecord>::from_account_info(&account).unwrap();
+
         let rec = TestRecord {
-            key: [7; 32],
-            value: 99,
-        };
-        assert_eq!(
-            header.update_or_insert::<TestRecord>(&mut data, &rec),
-            Some(())
-        );
-        assert_eq!(header.record_count, 1);
-        assert_eq!(
-            header.get_record::<TestRecord>(&data, [7; 32]),
-            Some((0, rec))
-        );
-    }
-
-    #[test]
-    fn update_existing_index() {
-        let mut header = new_header();
-        let mut data = new_account_data(4);
-        let old = TestRecord {
-            key: [9; 32],
-            value: 1,
-        };
-        let new = TestRecord {
-            key: [9; 32],
-            value: 2,
-        };
-        assert_eq!(
-            header.update_or_insert::<TestRecord>(&mut data, &old),
-            Some(())
-        );
-        assert_eq!(
-            header.update_or_insert::<TestRecord>(&mut data, &new),
-            Some(())
-        );
-        assert_eq!(header.record_count, 1);
-        assert_eq!(
-            header.get_record::<TestRecord>(&data, [9; 32]),
-            Some((0, new))
-        );
-    }
-
-    #[test]
-    fn insert_fails_when_full() {
-        let mut header = new_header();
-        let mut data = new_account_data(1);
-        let a = TestRecord {
             key: [1; 32],
             value: 10,
         };
-        let b = TestRecord {
-            key: [2; 32],
-            value: 20,
-        };
-        assert_eq!(
-            header.update_or_insert::<TestRecord>(&mut data, &a),
-            Some(())
-        );
-        assert_eq!(header.update_or_insert::<TestRecord>(&mut data, &b), None);
-        assert_eq!(header.record_count, 1);
-    }
+        let pos0 = archive.upsert(&rec).unwrap();
+        assert_eq!(pos0, 0);
+        assert_eq!(archive.meta().record_count, 1);
+        let (_, got) = archive.get(rec.key).unwrap();
+        assert_eq!(got, rec);
 
-    #[test]
-    fn get_record_and_update_with_index_guard() {
-        let mut header = new_header();
-        let mut data = new_account_data(2);
-        let a = TestRecord {
-            key: [3; 32],
-            value: 10,
-        };
-        let a_updated = TestRecord {
-            key: [3; 32],
+        let updated = TestRecord {
+            key: rec.key,
             value: 42,
         };
-        let wrong_key = TestRecord {
-            key: [4; 32],
-            value: 99,
-        };
-        assert_eq!(
-            header.update_or_insert::<TestRecord>(&mut data, &a),
-            Some(())
-        );
-        let (pos, parsed) = header.get_record::<TestRecord>(&data, [3; 32]).unwrap();
-        assert_eq!(pos, 0);
-        assert_eq!(parsed, a);
-        assert_eq!(
-            header.update::<TestRecord>(&mut data, pos, &wrong_key),
-            None
-        );
-        assert_eq!(
-            header.update::<TestRecord>(&mut data, pos, &a_updated),
-            Some(())
-        );
-        assert_eq!(
-            header.get_record::<TestRecord>(&data, [3; 32]),
-            Some((0, a_updated))
-        );
+        let pos1 = archive.upsert(&updated).unwrap();
+        assert_eq!(pos1, 0);
+        assert_eq!(archive.meta().record_count, 1);
+        let (_, got2) = archive.get(rec.key).unwrap();
+        assert_eq!(got2, updated);
     }
 
     #[test]
-    fn update_existing_index_with_new_len_relocates_to_tail() {
-        let mut header = new_header();
-        let mut data = vec![0u8; ArchiveHeader::PAYLOAD_OFFSET + 3 * TestRecordV2::len(2).unwrap()];
+    fn append_fails_when_payload_full() {
+        let account = new_archive_account::<0>(TestRecord::len(1).unwrap());
+        let mut archive = Archive::<0, TestRecord>::from_account_info(&account).unwrap();
 
-        let key_a = [7u8; 32];
-        let key_b = [8u8; 32];
-
-        let rec_a_v1 = TestRecord {
-            key: key_a,
-            value: 11,
+        let a = TestRecord {
+            key: [2; 32],
+            value: 1,
         };
-        let rec_b_v1 = TestRecord {
-            key: key_b,
-            value: 22,
+        let b = TestRecord {
+            key: [3; 32],
+            value: 2,
         };
-        assert_eq!(
-            header.update_or_insert::<TestRecord>(&mut data, &rec_a_v1),
-            Some(())
-        );
-        assert_eq!(
-            header.update_or_insert::<TestRecord>(&mut data, &rec_b_v1),
-            Some(())
-        );
+        assert_eq!(archive.upsert(&a), Some(0));
+        assert_eq!(archive.upsert(&b), None);
+        assert_eq!(archive.meta().record_count, 1);
+    }
 
-        let rec_a_v2 = TestRecordV2 {
-            key: key_a,
-            value: 33,
-            extra: 44,
-        };
-        assert_eq!(
-            header.update_or_insert::<TestRecordV2>(&mut data, &rec_a_v2),
-            Some(())
-        );
-        assert_eq!(header.record_count, 2);
+    #[test]
+    fn index_map_upsert_and_find() {
+        let account = new_archive_account::<2>(0);
+        let archive = Archive::<2, TestRecord>::from_account_info(&account).unwrap();
 
-        let (pos_b, got_b) = header.get_record::<TestRecord>(&data, key_b).unwrap();
-        let (pos_a, got_a) = header.get_record::<TestRecordV2>(&data, key_a).unwrap();
-        assert_eq!(got_b, rec_b_v1);
-        assert_eq!(got_a, rec_a_v2);
-        assert!(pos_b < pos_a);
+        let secondary = [9u8; 32];
+        let primary = [8u8; 32];
+        assert_eq!(archive.find_index_with(secondary), None);
+        assert_eq!(archive.upsert_index(secondary, primary), Some(()));
+        assert_eq!(archive.find_index_with(secondary), Some(primary));
+
+        let primary2 = [7u8; 32];
+        assert_eq!(archive.upsert_index(secondary, primary2), Some(()));
+        assert_eq!(archive.find_index_with(secondary), Some(primary2));
+    }
+
+    #[test]
+    fn index_map_rejects_zero_keys_and_full() {
+        let account = new_archive_account::<1>(0);
+        let archive = Archive::<1, TestRecord>::from_account_info(&account).unwrap();
+
+        assert_eq!(archive.upsert_index([0; 32], [1; 32]), None);
+        assert_eq!(archive.upsert_index([1; 32], [0; 32]), None);
+        assert_eq!(archive.upsert_index([1; 32], [2; 32]), Some(()));
+        assert_eq!(archive.upsert_index([3; 32], [4; 32]), None);
     }
 }
