@@ -45,6 +45,8 @@ pub struct MintSnapshotRecords {
 }
 
 impl ArchiveRecord for MintSnapshotRecords {
+    const TYPE_DISCRIMINATOR: [u8; 8] = *b"MNTSNPRC";
+
     fn len(version: u8) -> Option<usize> {
         match version {
             Self::VERSION_V1 => Some(Self::LEN_V1),
@@ -289,6 +291,8 @@ impl MintSnapshotRecords {
         Some(record)
     }
 }
+
+pub type MintSnapshotsArchive<'a, 'info> = super::Archive<'a, 'info, 300, MintSnapshotRecords>;
 
 #[cfg(test)]
 mod tests {
