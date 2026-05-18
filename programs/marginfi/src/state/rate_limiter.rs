@@ -7,6 +7,22 @@ use marginfi_type_crate::{
         ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
+/// Converts a `u64` amount into the signed counter representation, returning
+/// `None` when it exceeds `i64::MAX` and cannot be tracked.
+fn amount_as_i64(amount: u64) -> Option<i64> {
+    i64::try_from(amount).ok()
+}
+
+/// Rate limiter state uses signed counters, so any amount or configured cap
+/// above `i64::MAX` cannot be represented and must be rejected by callers.
+pub(crate) fn is_valid_rate_limit_amount(amount: u64) -> bool {
+    amount_as_i64(amount).is_some()
+}
+
+fn clamp_i128_to_i64(value: i128) -> i64 {
+    value.clamp(i64::MIN as i128, i64::MAX as i128) as i64
+}
+
 /// Implementation trait for the sliding window rate limiter.
 pub trait RateLimitWindowImpl {
     /// Checks if rate limiting is enabled (max_outflow > 0).
@@ -116,14 +132,13 @@ impl RateLimitWindowImpl for RateLimitWindow {
             return Ok(());
         }
 
-        let amount_i64 = i64::try_from(amount).map_err(|_| MarginfiError::MathError)?;
-
+        let amount = amount_as_i64(amount).ok_or(MarginfiError::InternalLogicError)?;
         let remaining = self.remaining_capacity(current_timestamp);
-        if amount_i64 > remaining {
+        if amount > remaining {
             return Err(MarginfiError::InternalLogicError.into());
         }
 
-        self.cur_window_outflow = self.cur_window_outflow.saturating_add(amount_i64);
+        self.cur_window_outflow = self.cur_window_outflow.saturating_add(amount);
 
         Ok(())
     }
@@ -135,8 +150,11 @@ impl RateLimitWindowImpl for RateLimitWindow {
             return;
         }
 
-        // Inflow reduces net outflow
-        self.cur_window_outflow = self.cur_window_outflow.saturating_sub(amount as i64);
+        // Inflow reduces net outflow. Unlike an oversized outflow (rejected),
+        // an oversized inflow is clamped to the max representable credit so a
+        // legitimate large deposit is not trapped behind the outflow cap.
+        let inflow = amount_as_i64(amount).unwrap_or(i64::MAX);
+        self.cur_window_outflow = self.cur_window_outflow.saturating_sub(inflow);
     }
 }
 
@@ -186,8 +204,12 @@ fn remaining_capacity_from_state(
     cur_window_outflow: i64,
     current_timestamp: i64,
 ) -> i64 {
+    let Some(max_outflow) = amount_as_i64(max_outflow) else {
+        return 0;
+    };
+
     if window_duration == 0 {
-        return max_outflow as i64;
+        return max_outflow;
     }
 
     // Calculate elapsed time in current window
@@ -200,7 +222,7 @@ fn remaining_capacity_from_state(
     if elapsed >= window_duration {
         // We're past the window, only cur_window matters (it would become prev)
         // and it would be reset, so full capacity available
-        return max_outflow as i64;
+        return max_outflow;
     }
 
     // Weight the previous window by remaining time fraction
@@ -208,26 +230,19 @@ fn remaining_capacity_from_state(
     // weight = remaining_time / window_duration
     let remaining_time = window_duration.saturating_sub(elapsed);
 
-    // Calculate weighted previous window contribution
-    let prev_abs = prev_window_outflow.unsigned_abs();
-    let weighted_prev_abs = prev_abs
-        .saturating_mul(remaining_time)
-        .checked_div(window_duration)
+    // Use signed i128 arithmetic so the full i64 state space, including
+    // i64::MIN, remains representable during weighting.
+    let weighted_prev = (prev_window_outflow as i128)
+        .saturating_mul(remaining_time as i128)
+        .checked_div(window_duration as i128)
         .unwrap_or(0);
 
-    // Apply the sign back
-    let weighted_prev = if prev_window_outflow >= 0 {
-        weighted_prev_abs as i64
-    } else {
-        -(weighted_prev_abs as i64)
-    };
-
     // Total net outflow = weighted_prev + cur_window_outflow
-    let total_net_outflow = weighted_prev.saturating_add(cur_window_outflow);
+    let total_net_outflow = weighted_prev.saturating_add(cur_window_outflow as i128);
 
     // Remaining capacity = max_outflow - total_net_outflow
     // If total_net_outflow is negative (more inflows), we have extra capacity
-    (max_outflow as i64).saturating_sub(total_net_outflow)
+    clamp_i128_to_i64((max_outflow as i128).saturating_sub(total_net_outflow))
 }
 
 macro_rules! impl_dual_window_rate_limiter {
@@ -261,12 +276,17 @@ macro_rules! impl_dual_window_rate_limiter {
                 self.hourly.maybe_advance_window(current_timestamp);
                 self.daily.maybe_advance_window(current_timestamp);
 
-                let amount_i64 = i64::try_from(amount).map_err(|_| MarginfiError::MathError)?;
+                // An amount that does not fit in i64 cannot be represented and
+                // is treated as exceeding every window.
+                let amount_i64 = amount_as_i64(amount);
+                let exceeds = |remaining: i64| match amount_i64 {
+                    Some(a) => a > remaining,
+                    None => true,
+                };
 
-                // Check hourly limit first
                 if self.hourly.is_enabled() {
                     let remaining = self.hourly.remaining_capacity(current_timestamp);
-                    if amount_i64 > remaining {
+                    if exceeds(remaining) {
                         msg!(
                             concat!(
                                 $prefix,
@@ -279,10 +299,9 @@ macro_rules! impl_dual_window_rate_limiter {
                     }
                 }
 
-                // Check daily limit
                 if self.daily.is_enabled() {
                     let remaining = self.daily.remaining_capacity(current_timestamp);
-                    if amount_i64 > remaining {
+                    if exceeds(remaining) {
                         msg!(
                             concat!(
                                 $prefix,
@@ -295,7 +314,7 @@ macro_rules! impl_dual_window_rate_limiter {
                     }
                 }
 
-                // Both checks passed, record the outflow
+                // Both checks passed, record the outflow.
                 if self.hourly.is_enabled() {
                     self.hourly.try_record_outflow(amount, current_timestamp)?;
                 }
@@ -374,4 +393,109 @@ pub fn should_skip_rate_limit(account_flags: u64) -> bool {
     (account_flags & ACCOUNT_IN_FLASHLOAN) != 0
         || (account_flags & ACCOUNT_IN_RECEIVERSHIP) != 0
         || (account_flags & ACCOUNT_IN_DELEVERAGE) != 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An outflow above `i64::MAX` must fail the limiter closed instead of
+    /// wrapping into a negative `i64` and slipping past the signed comparison.
+    #[test]
+    fn oversized_outflow_does_not_fail_limiter_open() {
+        let mut window = RateLimitWindow::default();
+        window.initialize(i64::MAX as u64, HOURLY_RESET_DURATION, 0);
+
+        // `i64::MAX as u64 + 1` previously aliased to `i64::MIN` or `i64::MAX`,
+        // depending on the code path, and could slip through comparisons.
+        let oversized = i64::MAX as u64 + 1;
+        assert!(window.try_record_outflow(oversized, 1).is_err());
+
+        // The rejected outflow must not have corrupted the counter, and the
+        // exact signed boundary is still permitted.
+        assert_eq!(window.cur_window_outflow, 0);
+        assert!(window.try_record_outflow(i64::MAX as u64, 1).is_ok());
+        assert_eq!(window.cur_window_outflow, i64::MAX);
+    }
+
+    /// Inflows and outflows are deliberately asymmetric at the `i64::MAX`
+    /// boundary: an oversized outflow is rejected, but an oversized inflow is
+    /// clamped to the maximum representable credit so a legitimate large
+    /// deposit is not trapped behind the outflow cap. The clamp must not wrap
+    /// negative or leave the counter in an un-representable state.
+    #[test]
+    fn oversized_inflow_clamps_to_max_credit() {
+        let mut window = RateLimitWindow::default();
+        window.initialize(100, HOURLY_RESET_DURATION, 0);
+
+        window.record_inflow(i64::MAX as u64 + 1, 1);
+        assert_eq!(window.cur_window_outflow, -i64::MAX);
+        assert_eq!(window.remaining_capacity(1), i64::MAX);
+
+        // Further inflow saturates at `i64::MIN`; the i128 capacity math keeps
+        // that state representable and the limiter reads as fully open.
+        window.record_inflow(1, 1);
+        assert_eq!(window.cur_window_outflow, i64::MIN);
+        assert_eq!(window.remaining_capacity(1), i64::MAX);
+    }
+
+    #[test]
+    fn invalid_max_outflow_fails_closed() {
+        let mut window = RateLimitWindow::default();
+        window.initialize(i64::MAX as u64 + 1, HOURLY_RESET_DURATION, 0);
+
+        assert_eq!(window.remaining_capacity(1), 0);
+        assert_eq!(window.effective_remaining_capacity(1), 0);
+        assert!(window.try_record_outflow(1, 1).is_err());
+    }
+
+    #[test]
+    fn invalid_amounts_are_rejected_by_invariant() {
+        assert!(is_valid_rate_limit_amount(i64::MAX as u64));
+        assert!(!is_valid_rate_limit_amount(i64::MAX as u64 + 1));
+    }
+
+    /// The dual-window limiter is the production entry point. An outflow above
+    /// `i64::MAX` must be rejected with the window-specific error (not wrap
+    /// negative and slip past the check) and must not corrupt either counter.
+    #[test]
+    fn bank_limiter_rejects_oversized_outflow() {
+        let mut limiter = BankRateLimiter::default();
+        limiter.configure_hourly(100, 0);
+
+        let err = limiter
+            .try_record_outflow(i64::MAX as u64 + 1, 1)
+            .unwrap_err();
+        assert_eq!(err, MarginfiError::BankHourlyRateLimitExceeded.into());
+
+        // The rejected outflow left the counter untouched, so a later outflow
+        // above the 100-unit cap is still rejected.
+        assert_eq!(limiter.hourly.cur_window_outflow, 0);
+        assert!(limiter.try_record_outflow(101, 1).is_err());
+    }
+
+    /// When only the daily window is enabled, an oversized outflow must still
+    /// be rejected — via the daily error rather than the hourly one.
+    #[test]
+    fn bank_limiter_rejects_oversized_outflow_daily_only() {
+        let mut limiter = BankRateLimiter::default();
+        limiter.configure_daily(100, 0);
+
+        let err = limiter
+            .try_record_outflow(i64::MAX as u64 + 1, 1)
+            .unwrap_err();
+        assert_eq!(err, MarginfiError::BankDailyRateLimitExceeded.into());
+        assert_eq!(limiter.daily.cur_window_outflow, 0);
+    }
+
+    /// With no window enabled there is nothing to rate limit, so even an
+    /// oversized amount is accepted and no counter is touched.
+    #[test]
+    fn bank_limiter_allows_oversized_outflow_when_disabled() {
+        let mut limiter = BankRateLimiter::default();
+
+        assert!(limiter.try_record_outflow(i64::MAX as u64 + 1, 1).is_ok());
+        assert_eq!(limiter.hourly.cur_window_outflow, 0);
+        assert_eq!(limiter.daily.cur_window_outflow, 0);
+    }
 }
