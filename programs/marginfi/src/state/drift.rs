@@ -10,7 +10,7 @@ use marginfi_type_crate::{
 };
 
 /// Used to configure Drift banks. A simplified version of `BankConfigCompact` which omits most
-/// values related to interest since Drift banks cannot earn interest or be borrowed against.
+/// values related to interest since Drift banks cannot earn interest or be borrowed from.
 #[derive(AnchorDeserialize, AnchorSerialize, Debug, PartialEq, Eq)]
 pub struct DriftConfigCompact {
     pub oracle: Pubkey,

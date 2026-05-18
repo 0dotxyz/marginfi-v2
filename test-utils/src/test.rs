@@ -1230,6 +1230,10 @@ impl TestFixture {
         clock.unix_timestamp = reserve.market_price_last_updated_ts as i64;
         test_f.context.borrow_mut().set_sysvar(&clock);
 
+        test_f
+            .set_pyth_oracle_timestamp(PYTH_USDC_FEED, reserve.market_price_last_updated_ts as i64)
+            .await;
+
         // Keep fixture setup simple by disabling reserve farms for these local ix tests.
         if reserve.farm_collateral != Pubkey::default() || reserve.farm_debt != Pubkey::default() {
             let mut reserve_account = test_f.try_load(&reserve_key).await.unwrap().unwrap();
@@ -1424,6 +1428,9 @@ impl TestFixture {
             .data(),
         };
         let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
+
+        test_f.refresh_blockhash().await;
+
         Self::process_ixs(test_f.context.clone(), &[cu_ix, init_ix])
             .await
             .unwrap();

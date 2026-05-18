@@ -15,6 +15,7 @@ import {
   EMODE_SEED,
   emodeAdmin,
   emodeGroup,
+  groupAdmin,
   oracles,
   users,
   verbose,
@@ -40,7 +41,7 @@ import {
   repayIx,
   composeRemainingAccounts,
 } from "./utils/user-instructions";
-import { configBankEmode } from "./utils/group-instructions";
+import { configBankEmode, groupConfigure } from "./utils/group-instructions";
 import { bytesToF64, getBankrunBlockhash, logHealthCache } from "./utils/tools";
 import { assert } from "chai";
 import { dummyIx } from "./utils/bankrunConnection";
@@ -93,6 +94,19 @@ describe("Emode liquidation", () => {
       ecosystem.usdcMint.publicKey,
       seed.addn(1)
     );
+
+    // These suites cover classic eMode math; disable same-asset leverage explicitly so the
+    // tests are not affected
+    const tx = new Transaction().add(
+      await groupConfigure(groupAdmin.mrgnBankrunProgram, {
+        marginfiGroup: emodeGroup.publicKey,
+        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(1),
+        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(1),
+      })
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet);
+    await banksClient.processTransaction(tx);
   });
 
   it("(user 2 aka liquidator) Deposits SOL and USDC to operate as a liquidator", async () => {

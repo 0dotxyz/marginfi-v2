@@ -45,6 +45,8 @@ pub mod marginfi {
         new_risk_admin: Option<Pubkey>,
         emode_max_init_leverage: Option<WrappedI80F48>,
         emode_max_maint_leverage: Option<WrappedI80F48>,
+        same_asset_emode_init_leverage: Option<WrappedI80F48>,
+        same_asset_emode_maint_leverage: Option<WrappedI80F48>,
     ) -> MarginfiResult {
         marginfi_group::configure(
             ctx,
@@ -58,6 +60,8 @@ pub mod marginfi {
             new_risk_admin,
             emode_max_init_leverage,
             emode_max_maint_leverage,
+            same_asset_emode_init_leverage,
+            same_asset_emode_maint_leverage,
         )
     }
 
