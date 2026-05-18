@@ -116,12 +116,14 @@ impl RateLimitWindowImpl for RateLimitWindow {
             return Ok(());
         }
 
+        let amount_i64 = i64::try_from(amount).map_err(|_| MarginfiError::MathError)?;
+
         let remaining = self.remaining_capacity(current_timestamp);
-        if amount as i64 > remaining {
+        if amount_i64 > remaining {
             return Err(MarginfiError::InternalLogicError.into());
         }
 
-        self.cur_window_outflow = self.cur_window_outflow.saturating_add(amount as i64);
+        self.cur_window_outflow = self.cur_window_outflow.saturating_add(amount_i64);
 
         Ok(())
     }
@@ -259,10 +261,12 @@ macro_rules! impl_dual_window_rate_limiter {
                 self.hourly.maybe_advance_window(current_timestamp);
                 self.daily.maybe_advance_window(current_timestamp);
 
+                let amount_i64 = i64::try_from(amount).map_err(|_| MarginfiError::MathError)?;
+
                 // Check hourly limit first
                 if self.hourly.is_enabled() {
                     let remaining = self.hourly.remaining_capacity(current_timestamp);
-                    if (amount as i64) > remaining {
+                    if amount_i64 > remaining {
                         msg!(
                             concat!(
                                 $prefix,
@@ -278,7 +282,7 @@ macro_rules! impl_dual_window_rate_limiter {
                 // Check daily limit
                 if self.daily.is_enabled() {
                     let remaining = self.daily.remaining_capacity(current_timestamp);
-                    if (amount as i64) > remaining {
+                    if amount_i64 > remaining {
                         msg!(
                             concat!(
                                 $prefix,
