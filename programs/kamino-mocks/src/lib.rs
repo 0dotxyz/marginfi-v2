@@ -1,3 +1,9 @@
+#![allow(
+    clippy::diverging_sub_expression,
+    clippy::too_many_arguments,
+    unexpected_cfgs
+)]
+
 pub mod macros;
 pub mod state;
 
@@ -10,7 +16,7 @@ use anchor_lang::{
         program_error::ProgramError,
     },
 };
-use solana_program::hash::hash;
+use solana_sha256_hasher::hash;
 
 declare_id!(marginfi_type_crate::pdas::KAMINO_PROGRAM_ID);
 

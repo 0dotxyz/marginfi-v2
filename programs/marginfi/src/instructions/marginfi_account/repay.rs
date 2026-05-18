@@ -16,7 +16,7 @@ use crate::{
     },
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{clock::Clock};
+use anchor_lang::solana_program::clock::Clock;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;

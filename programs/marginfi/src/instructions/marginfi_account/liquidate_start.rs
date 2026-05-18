@@ -12,7 +12,7 @@ use crate::{
         write_liquidation_price_cache_from, MarginfiAccountImpl,
     },
 };
-use anchor_lang::{prelude::*};
+use anchor_lang::prelude::*;
 use bytemuck::Zeroable;
 use drift_mocks::drift::client::args as drift;
 use juplend_mocks::juplend_earn::client::args as juplend;
@@ -33,9 +33,7 @@ use marginfi_type_crate::{
 /// * Fails if the start liquidation instruction appears more than once in this tx.
 /// * Fails if any mrgn instruction other than start, end, withdraw, or repay (or the equivalent
 ///   from a third party integration) are used within this tx.
-pub fn start_liquidation<'info>(
-    ctx: Context<'info, StartLiquidation<'info>>,
-) -> MarginfiResult {
+pub fn start_liquidation<'info>(ctx: Context<'info, StartLiquidation<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     liq_record.liquidation_receiver = ctx.accounts.liquidation_receiver.key();
@@ -61,9 +59,7 @@ pub fn start_liquidation<'info>(
 /// * Fails if the start deleverage instruction appears more than once in this tx.
 /// * Fails if any mrgn instruction other than start, end, withdraw, or repay (or the equivalent
 ///   from a third party integration) are used within this tx.
-pub fn start_deleverage<'info>(
-    ctx: Context<'info, StartDeleverage<'info>>,
-) -> MarginfiResult {
+pub fn start_deleverage<'info>(ctx: Context<'info, StartDeleverage<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     liq_record.liquidation_receiver = ctx.accounts.risk_admin.key();

@@ -21,9 +21,7 @@ use crate::{
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{
-    clock::Clock,
-};
+use anchor_lang::solana_program::clock::Clock;
 use anchor_spl::token::{accessor, Token};
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,

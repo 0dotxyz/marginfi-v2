@@ -377,7 +377,7 @@ pub struct JuplendWithdraw<'info> {
     /// Token account that will receive the underlying withdrawal.
     /// WARN: Completely unchecked!
     #[account(mut)]
-    pub destination_token_account: InterfaceAccount<'info, TokenAccount>,
+    pub destination_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// The bank's liquidity vault authority PDA (acts as signer for JupLend CPIs).
     /// NOTE: JupLend marks the signer as writable in their withdraw instruction.
@@ -404,7 +404,7 @@ pub struct JuplendWithdraw<'info> {
 
     /// Bank's fToken vault (validated via has_one on bank).
     #[account(mut)]
-    pub integration_acc_2: InterfaceAccount<'info, TokenAccount>,
+    pub integration_acc_2: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Withdraw intermediary ATA (authority = liquidity_vault_authority).
     /// This must be an ATA to satisfy JupLend's withdraw constraints.
@@ -414,7 +414,7 @@ pub struct JuplendWithdraw<'info> {
         token::authority = liquidity_vault_authority,
         token::token_program = token_program,
     )]
-    pub integration_acc_3: InterfaceAccount<'info, TokenAccount>,
+    pub integration_acc_3: Box<InterfaceAccount<'info, TokenAccount>>,
 
     // ---- JupLend CPI accounts ----
     /// CHECK: validated by the JupLend program
@@ -512,11 +512,8 @@ impl<'info> JuplendWithdraw<'info> {
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
 
-        let cpi_ctx = CpiContext::new_with_signer(
-            self.juplend_program.key(),
-            accounts,
-            signer_seeds,
-        );
+        let cpi_ctx =
+            CpiContext::new_with_signer(self.juplend_program.key(), accounts, signer_seeds);
 
         cpi_withdraw(cpi_ctx, amount)?;
         Ok(())

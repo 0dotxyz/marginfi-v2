@@ -7,8 +7,9 @@ use anchor_spl::token_2022::spl_token_2022::extension::transfer_fee::MAX_FEE_BAS
 use marginfi::constants::SWITCHBOARD_PULL_ID;
 use marginfi_type_crate::constants::{EXECUTE_ORDER_SEED, ORDER_SEED};
 use pyth_solana_receiver_sdk::price_update::{FeedId, PriceUpdateV2, VerificationLevel};
-use solana_cli_output::CliAccount;
 use solana_address::Address;
+use solana_cli_output::CliAccount;
+use solana_program::{hash::hashv, program_option::COption, program_pack::Pack};
 use solana_program_test::*;
 use solana_sdk::account::ReadableAccount;
 use solana_sdk::account::WritableAccount;
@@ -16,7 +17,6 @@ use solana_sdk::{
     account::Account, account::AccountSharedData, hash::Hash, pubkey::Pubkey, rent::Rent,
     signature::Keypair,
 };
-use spl_token::solana_program::program_pack::Pack;
 use spl_token::state::{Account as SplAccount, AccountState, Mint as SplMint};
 use std::fs::File;
 use std::io::Read;
@@ -158,7 +158,7 @@ pub async fn create_spl_mint_account_if_missing(
     }
 
     let mint = SplMint {
-        mint_authority: spl_token::solana_program::program_option::COption::Some(authority),
+        mint_authority: COption::Some(authority),
         supply,
         decimals,
         is_initialized: true,
@@ -449,7 +449,7 @@ macro_rules! f_native {
 }
 
 pub fn clone_keypair(keypair: &Keypair) -> Keypair {
-    Keypair::from_bytes(&keypair.to_bytes()).unwrap()
+    keypair.insecure_clone()
 }
 
 pub fn get_max_deposit_amount_pre_fee(amount: f64) -> f64 {
@@ -493,13 +493,13 @@ pub fn find_order_pda(marginfi_account: &Pubkey, bank_keys: &[Pubkey]) -> (Pubke
     let hash = keys_sha256_hash(bank_keys);
     Pubkey::find_program_address(
         &[ORDER_SEED.as_bytes(), marginfi_account.as_ref(), &hash],
-        Address::new_from_array(marginfi::ID.to_bytes()),
+        &Address::new_from_array(marginfi::ID.to_bytes()),
     )
 }
 
 pub fn find_execute_order_pda(order: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(
         &[EXECUTE_ORDER_SEED.as_bytes(), order.as_ref()],
-        &marginfi::ID.as_ref().into(),
+        &marginfi::ID,
     )
 }

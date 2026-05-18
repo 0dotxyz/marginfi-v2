@@ -18,21 +18,23 @@ use anchor_spl::{
             },
         },
     },
-    token_interface::spl_pod::bytemuck::pod_get_packed_len,
 };
+use solana_commitment_config::CommitmentLevel;
+use solana_program::program_pack::{Pack, Sealed};
 use solana_program_test::ProgramTestContext;
+#[cfg(feature = "transfer-hook")]
+use solana_sdk::native_token::LAMPORTS_PER_SOL;
 use solana_sdk::{
     account::{ReadableAccount, WritableAccount},
-    commitment_config::CommitmentLevel,
     instruction::Instruction,
-    program_pack::{Pack, Sealed},
     signature::Keypair,
     signer::Signer,
-    system_instruction::create_account,
     transaction::Transaction,
 };
 #[cfg(feature = "transfer-hook")]
-use solana_sdk::{native_token::LAMPORTS_PER_SOL, system_instruction};
+use solana_system_interface::instruction as system_instruction;
+use solana_system_interface::instruction::create_account;
+use spl_pod::bytemuck::pod_get_packed_len;
 #[cfg(feature = "transfer-hook")]
 use spl_transfer_hook_interface::{
     get_extra_account_metas_address, instruction::initialize_extra_account_meta_list,

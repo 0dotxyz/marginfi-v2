@@ -19,10 +19,7 @@ use crate::utils::{
 };
 use crate::{bank_signer, state::marginfi_account::BankAccountWrapper};
 use crate::{check, debug, prelude::*, utils};
-use anchor_lang::{
-    prelude::*,
-    solana_program::{clock::Clock},
-};
+use anchor_lang::{prelude::*, solana_program::clock::Clock};
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{

@@ -39,7 +39,7 @@ pub struct SpotPosition {
 #[repr(u8)]
 pub enum SpotBalanceType {
     Deposit, // 0
-    Borrow, // 1
+    Borrow,  // 1
 }
 
 unsafe impl Zeroable for SpotBalanceType {}

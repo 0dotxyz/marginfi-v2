@@ -20,7 +20,7 @@ use crate::{
     },
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{clock::Clock};
+use anchor_lang::solana_program::clock::Clock;
 use anchor_spl::{
     token::accessor,
     token_interface::{TokenAccount, TokenInterface},
