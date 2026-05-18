@@ -19,6 +19,8 @@ pub struct JuplendConfigCompact {
     pub oracle: Pubkey,
     pub asset_weight_init: WrappedI80F48,
     pub asset_weight_maint: WrappedI80F48,
+    /// Cap in **fToken units**, not underlying. As `token_exchange_price` grows, the same
+    /// cap admits more underlying — re-tune against the current rate.
     pub deposit_limit: u64,
     /// Either `JuplendPythPull` or `JuplendSwitchboardPull`
     pub oracle_setup: OracleSetup,

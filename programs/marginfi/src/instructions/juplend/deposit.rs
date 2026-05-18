@@ -25,6 +25,7 @@ use fixed::types::I80F48;
 use juplend_mocks::juplend_earn::cpi::accounts::{Deposit, UpdateRate};
 use juplend_mocks::juplend_earn::cpi::{deposit, update_rate};
 use juplend_mocks::state::{expected_shares_for_deposit_from_rates, Lending as JuplendLending};
+use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PROGRAM_ID;
 use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup};
 use marginfi_type_crate::{constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_DISABLED};
 
@@ -229,9 +230,14 @@ pub struct JuplendDeposit<'info> {
     /// CHECK: validated by the JupLend program
     #[account(mut)]
     pub liquidity: UncheckedAccount<'info>,
-    /// CHECK: validated by the JupLend program
+    /// CHECK: pinned to the JupLend liquidity program
+    #[account(address = JUPLEND_LIQUIDITY_PROGRAM_ID)]
     pub liquidity_program: UncheckedAccount<'info>,
-    /// CHECK: validated by the JupLend program
+    /// CHECK: cross-checked against integration_acc_1.rewards_rate_model
+    #[account(
+        constraint = rewards_rate_model.key() == integration_acc_1.load()?.rewards_rate_model
+            @ MarginfiError::InvalidJuplendLending,
+    )]
     pub rewards_rate_model: UncheckedAccount<'info>,
 
     /// CHECK: validated against hardcoded program id
