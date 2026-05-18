@@ -1,8 +1,4 @@
-import {
-  PublicKey,
-  TransactionInstruction,
-  SYSVAR_RENT_PUBKEY,
-} from "@solana/web3.js";
+import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { BN, Program } from "@coral-xyz/anchor";
 import {
   TOKEN_PROGRAM_ID,
@@ -61,12 +57,6 @@ export const makeAddSolendBankIx = async (
     accounts.group,
     accounts.bankMint,
     args.seed
-  );
-
-  // Derive the liquidity vault authority for the bank
-  const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
-    program.programId,
-    bank
   );
 
   const ix = await program.methods
@@ -191,6 +181,30 @@ export interface SolendDepositAccounts {
   tokenProgram?: PublicKey;
 }
 
+const resolveSolendWrapperAccounts = async (
+  program: Program<Marginfi>,
+  marginfiAccountPk: PublicKey,
+  bankPk: PublicKey,
+) => {
+  const [marginfiAccount, bank] = await Promise.all([
+    program.account.marginfiAccount.fetch(marginfiAccountPk),
+    program.account.bank.fetch(bankPk),
+  ]);
+  const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
+    program.programId,
+    bankPk,
+  );
+
+  return {
+    group: marginfiAccount.group,
+    liquidityVaultAuthority,
+    liquidityVault: bank.liquidityVault,
+    integrationAcc1: bank.integrationAcc1,
+    integrationAcc2: bank.integrationAcc2,
+    mint: bank.mint,
+  };
+};
+
 export interface SolendDepositArgs {
   amount: BN;
 }
@@ -211,19 +225,22 @@ export const makeSolendDepositIx = async (
   accounts: SolendDepositAccounts,
   args: SolendDepositArgs
 ): Promise<TransactionInstruction> => {
-  // Load the bank to get the solend reserve
-  const bank = await program.account.bank.fetch(accounts.bank);
-
+  const common = await resolveSolendWrapperAccounts(
+    program,
+    accounts.marginfiAccount,
+    accounts.bank,
+  );
+  const authority = program.provider.publicKey as PublicKey;
   // Load the Solend reserve to get liquidity supply and collateral mint
   const reserveData = await program.provider.connection.getAccountInfo(
-    bank.integrationAcc1
+    common.integrationAcc1
   );
   if (!reserveData) {
     throw new Error("Solend reserve not found");
   }
 
   // Parse the reserve using the SDK
-  const reserve = parseSolendReserve(bank.integrationAcc1, reserveData);
+  const reserve = parseSolendReserve(common.integrationAcc1, reserveData);
   const liquiditySupplyPubkey = reserve.info.liquidity.supplyPubkey;
   const collateralMintPubkey = reserve.info.collateral.mintPubkey;
   const collateralSupplyPubkey = reserve.info.collateral.supplyPubkey;
@@ -234,33 +251,35 @@ export const makeSolendDepositIx = async (
     SOLEND_PROGRAM_ID
   );
 
-  // Derive liquidity vault authority
-  const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
-    program.programId,
-    accounts.bank
-  );
-
   // Derive user collateral ATA for the cTokens
   const userCollateral = getAssociatedTokenAddressSync(
     collateralMintPubkey,
-    liquidityVaultAuthority,
+    common.liquidityVaultAuthority,
     true
   );
 
   const ix = await program.methods
     .solendDeposit(args.amount)
-    .accounts({
+    .accountsStrict({
+      group: common.group,
       marginfiAccount: accounts.marginfiAccount,
+      authority,
       bank: accounts.bank,
       signerTokenAccount: accounts.signerTokenAccount,
+      liquidityVaultAuthority: common.liquidityVaultAuthority,
+      liquidityVault: common.liquidityVault,
+      integrationAcc2: common.integrationAcc2,
       lendingMarket: accounts.lendingMarket,
       lendingMarketAuthority,
+      integrationAcc1: common.integrationAcc1,
+      mint: common.mint,
       reserveLiquiditySupply: liquiditySupplyPubkey,
       reserveCollateralMint: collateralMintPubkey,
       reserveCollateralSupply: collateralSupplyPubkey,
       userCollateral,
       pythPrice: accounts.pythPrice,
       switchboardFeed: SOLEND_NULL_PUBKEY,
+      solendProgram: SOLEND_PROGRAM_ID,
       tokenProgram: accounts.tokenProgram || TOKEN_PROGRAM_ID,
     })
     .instruction();
@@ -301,19 +320,22 @@ export const makeSolendWithdrawIx = async (
   accounts: SolendWithdrawAccounts,
   args: SolendWithdrawArgs
 ): Promise<TransactionInstruction> => {
-  // Load the bank to get the solend reserve
-  const bank = await program.account.bank.fetch(accounts.bank);
-
+  const common = await resolveSolendWrapperAccounts(
+    program,
+    accounts.marginfiAccount,
+    accounts.bank,
+  );
+  const authority = program.provider.publicKey as PublicKey;
   // Load the Solend reserve to get liquidity supply and collateral mint
   const reserveData = await program.provider.connection.getAccountInfo(
-    bank.integrationAcc1
+    common.integrationAcc1
   );
   if (!reserveData) {
     throw new Error("Solend reserve not found");
   }
 
   // Parse the reserve using the SDK
-  const reserve = parseSolendReserve(bank.integrationAcc1, reserveData);
+  const reserve = parseSolendReserve(common.integrationAcc1, reserveData);
   const liquiditySupplyPubkey = reserve.info.liquidity.supplyPubkey;
   const collateralMintPubkey = reserve.info.collateral.mintPubkey;
   const collateralSupplyPubkey = reserve.info.collateral.supplyPubkey;
@@ -324,31 +346,33 @@ export const makeSolendWithdrawIx = async (
     SOLEND_PROGRAM_ID
   );
 
-  // Derive liquidity vault authority
-  const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
-    program.programId,
-    accounts.bank
-  );
-
   // Derive user collateral ATA for the cTokens
   const userCollateral = getAssociatedTokenAddressSync(
     collateralMintPubkey,
-    liquidityVaultAuthority,
+    common.liquidityVaultAuthority,
     true
   );
 
   const ix = await program.methods
     .solendWithdraw(args.amount, args.withdrawAll ? true : null)
-    .accounts({
+    .accountsStrict({
+      group: common.group,
       marginfiAccount: accounts.marginfiAccount,
+      authority,
       bank: accounts.bank,
       destinationTokenAccount: accounts.destinationTokenAccount,
+      liquidityVaultAuthority: common.liquidityVaultAuthority,
+      liquidityVault: common.liquidityVault,
+      integrationAcc2: common.integrationAcc2,
       lendingMarket: accounts.lendingMarket,
       lendingMarketAuthority,
+      integrationAcc1: common.integrationAcc1,
+      mint: common.mint,
       reserveLiquiditySupply: liquiditySupplyPubkey,
       reserveCollateralMint: collateralMintPubkey,
       reserveCollateralSupply: collateralSupplyPubkey,
       userCollateral,
+      solendProgram: SOLEND_PROGRAM_ID,
       tokenProgram: accounts.tokenProgram || TOKEN_PROGRAM_ID,
     })
     .remainingAccounts(
