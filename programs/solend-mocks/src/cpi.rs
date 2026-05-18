@@ -1,3 +1,6 @@
+// CPI helper structs intentionally use AccountInfo, matching Anchor SPL's CPI wrappers.
+#![allow(deprecated)]
+
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{
     account_info::AccountInfo,
@@ -24,68 +27,68 @@ pub mod accounts {
 #[derive(Accounts)]
 pub struct InitObligation<'info> {
     #[account(mut)]
-    pub obligation_info: UncheckedAccount<'info>,
-    pub lending_market_info: UncheckedAccount<'info>,
+    pub obligation_info: AccountInfo<'info>,
+    pub lending_market_info: AccountInfo<'info>,
     #[account(signer)]
-    pub obligation_owner_info: UncheckedAccount<'info>,
-    pub rent_info: UncheckedAccount<'info>,
-    pub token_program_info: UncheckedAccount<'info>,
+    pub obligation_owner_info: AccountInfo<'info>,
+    pub rent_info: AccountInfo<'info>,
+    pub token_program_info: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
 pub struct DepositReserveLiquidityAndObligationCollateral<'info> {
     #[account(mut)]
-    pub source_liquidity_info: UncheckedAccount<'info>,
+    pub source_liquidity_info: AccountInfo<'info>,
     #[account(mut)]
-    pub user_collateral_info: UncheckedAccount<'info>,
+    pub user_collateral_info: AccountInfo<'info>,
     #[account(mut)]
-    pub reserve_info: UncheckedAccount<'info>,
+    pub reserve_info: AccountInfo<'info>,
     #[account(mut)]
-    pub reserve_liquidity_supply_info: UncheckedAccount<'info>,
+    pub reserve_liquidity_supply_info: AccountInfo<'info>,
     #[account(mut)]
-    pub reserve_collateral_mint_info: UncheckedAccount<'info>,
+    pub reserve_collateral_mint_info: AccountInfo<'info>,
     #[account(mut)]
-    pub lending_market_info: UncheckedAccount<'info>,
-    pub lending_market_authority_info: UncheckedAccount<'info>,
+    pub lending_market_info: AccountInfo<'info>,
+    pub lending_market_authority_info: AccountInfo<'info>,
     #[account(mut)]
-    pub destination_deposit_collateral_info: UncheckedAccount<'info>,
+    pub destination_deposit_collateral_info: AccountInfo<'info>,
     #[account(mut)]
-    pub obligation_info: UncheckedAccount<'info>,
+    pub obligation_info: AccountInfo<'info>,
     #[account(signer)]
-    pub obligation_owner_info: UncheckedAccount<'info>,
-    pub pyth_price_info: UncheckedAccount<'info>,
-    pub switchboard_feed_info: UncheckedAccount<'info>,
+    pub obligation_owner_info: AccountInfo<'info>,
+    pub pyth_price_info: AccountInfo<'info>,
+    pub switchboard_feed_info: AccountInfo<'info>,
     #[account(signer)]
-    pub user_transfer_authority_info: UncheckedAccount<'info>,
-    pub token_program_info: UncheckedAccount<'info>,
+    pub user_transfer_authority_info: AccountInfo<'info>,
+    pub token_program_info: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
 pub struct WithdrawObligationCollateralAndRedeemReserveCollateral<'info> {
     #[account(mut)]
-    pub source_collateral_info: UncheckedAccount<'info>,
+    pub source_collateral_info: AccountInfo<'info>,
     #[account(mut)]
-    pub destination_collateral_info: UncheckedAccount<'info>,
+    pub destination_collateral_info: AccountInfo<'info>,
     #[account(mut)]
-    pub reserve_info: UncheckedAccount<'info>,
+    pub reserve_info: AccountInfo<'info>,
     #[account(mut)]
-    pub obligation_info: UncheckedAccount<'info>,
+    pub obligation_info: AccountInfo<'info>,
     #[account(mut)]
-    pub lending_market_info: UncheckedAccount<'info>,
-    pub lending_market_authority_info: UncheckedAccount<'info>,
+    pub lending_market_info: AccountInfo<'info>,
+    pub lending_market_authority_info: AccountInfo<'info>,
     #[account(mut)]
-    pub destination_liquidity_info: UncheckedAccount<'info>,
+    pub destination_liquidity_info: AccountInfo<'info>,
     #[account(mut)]
-    pub reserve_collateral_mint_info: UncheckedAccount<'info>,
+    pub reserve_collateral_mint_info: AccountInfo<'info>,
     #[account(mut)]
-    pub reserve_liquidity_supply_info: UncheckedAccount<'info>,
+    pub reserve_liquidity_supply_info: AccountInfo<'info>,
     #[account(signer)]
-    pub obligation_owner_info: UncheckedAccount<'info>,
+    pub obligation_owner_info: AccountInfo<'info>,
     #[account(signer)]
-    pub user_transfer_authority_info: UncheckedAccount<'info>,
-    pub token_program_info: UncheckedAccount<'info>,
+    pub user_transfer_authority_info: AccountInfo<'info>,
+    pub token_program_info: AccountInfo<'info>,
     #[account(mut)]
-    pub deposit_reserve_info: UncheckedAccount<'info>,
+    pub deposit_reserve_info: AccountInfo<'info>,
 }
 
 // CPI functions
@@ -158,7 +161,9 @@ pub fn deposit_reserve_liquidity_and_obligation_collateral<'info>(
             ctx.accounts.reserve_collateral_mint_info.to_account_info(),
             ctx.accounts.lending_market_info.to_account_info(),
             ctx.accounts.lending_market_authority_info.to_account_info(),
-            ctx.accounts.destination_deposit_collateral_info.to_account_info(),
+            ctx.accounts
+                .destination_deposit_collateral_info
+                .to_account_info(),
             ctx.accounts.obligation_info.to_account_info(),
             ctx.accounts.obligation_owner_info.to_account_info(),
             ctx.accounts.pyth_price_info.to_account_info(),

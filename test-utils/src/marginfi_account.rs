@@ -16,12 +16,11 @@ use marginfi_type_crate::pdas::{
 };
 use marginfi_type_crate::types::OracleSetup;
 use marginfi_type_crate::types::{Bank, FeeState, MarginfiAccount, Order, OrderTrigger};
+use solana_commitment_config::CommitmentLevel;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program::{instruction::Instruction, sysvar};
 use solana_program_test::{BanksClient, BanksClientError, ProgramTestContext};
-use solana_sdk::{
-    commitment_config::CommitmentLevel, compute_budget::ComputeBudgetInstruction, hash::Hash,
-    signature::Keypair, signer::Signer, transaction::Transaction,
-};
+use solana_sdk::{hash::Hash, signature::Keypair, signer::Signer, transaction::Transaction};
 use std::{cell::RefCell, mem, rc::Rc};
 
 #[cfg(feature = "transfer-hook")]

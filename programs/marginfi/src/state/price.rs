@@ -1,10 +1,17 @@
 use crate::constants::{
     MIN_PYTH_PUSH_VERIFICATION_LEVEL, NATIVE_STAKE_ID, SPL_SINGLE_POOL_ID, SWITCHBOARD_PULL_ID,
 };
+use crate::oracle_compat::{
+    pyth::{self as price_update, FeedId, PriceUpdateV2, PYTH_PUSH_ORACLE_ID},
+    switchboard::{
+        CurrentResult, PullFeedAccountData, PRECISION as SWITCHBOARD_PRECISION,
+        PULL_FEED_DISCRIMINATOR,
+    },
+};
 use crate::state::bank_config::BankConfigImpl;
 use crate::{check, check_eq, debug, math_error, prelude::*};
 use anchor_lang::prelude::*;
-use anchor_spl::token::Mint;
+use anchor_spl::token::{Mint, ID as SPL_TOKEN_PROGRAM_ID};
 use drift_mocks::constants::SPOT_CUMULATIVE_INTEREST_PRECISION;
 use drift_mocks::state::MinimalSpotMarket;
 use enum_dispatch::enum_dispatch;
@@ -22,15 +29,10 @@ use marginfi_type_crate::{
         OracleSetup, PriceBias,
     },
 };
-use pyth_solana_receiver_sdk::price_update::{self, FeedId, PriceUpdateV2};
-use pyth_solana_receiver_sdk::PYTH_PUSH_ORACLE_ID;
 use solana_borsh::v1::try_from_slice_unchecked;
 use solana_stake_interface::state::StakeStateV2;
 use solend_mocks::state::SolendMinimalReserve;
 use std::{cell::Ref, cmp::min};
-use switchboard_on_demand::{
-    CurrentResult, Discriminator, PullFeedAccountData, SPL_TOKEN_PROGRAM_ID,
-};
 
 /// Price per unit before any multipliers are applied, where `price_multiplier` shows what
 /// multipliers will be applied to generate the true deposited-token price.
@@ -1316,14 +1318,14 @@ impl SwitchboardPullPriceFeed {
         let sw_result = self.feed.result;
         // Note: Pull oracles support mean (result.mean) or median (result.value)
         let price: I80F48 = I80F48::from_num(sw_result.value)
-            .checked_div(EXP_10_I80F48[switchboard_on_demand::PRECISION as usize])
+            .checked_div(EXP_10_I80F48[SWITCHBOARD_PRECISION as usize])
             .ok_or_else(math_error!())?;
         Ok(price)
     }
 
     fn get_confidence_interval(&self, oracle_max_confidence: u32) -> MarginfiResult<I80F48> {
         let conf_interval: I80F48 = I80F48::from_num(self.feed.result.std_dev)
-            .checked_div(EXP_10_I80F48[switchboard_on_demand::PRECISION as usize])
+            .checked_div(EXP_10_I80F48[SWITCHBOARD_PRECISION as usize])
             .ok_or_else(math_error!())?
             .checked_mul(STD_DEV_MULTIPLE)
             .ok_or_else(math_error!())?;
@@ -1418,7 +1420,7 @@ pub fn parse_swb_ignore_alignment(data: Ref<&mut [u8]>) -> MarginfiResult<PullFe
         return err!(MarginfiError::SwitchboardInvalidAccount);
     }
 
-    if data[..8] != *PullFeedAccountData::DISCRIMINATOR {
+    if data[..8] != PULL_FEED_DISCRIMINATOR {
         return err!(MarginfiError::SwitchboardInvalidAccount);
     }
 
@@ -1451,8 +1453,8 @@ pub fn load_price_update_v2_checked(ai: &AccountInfo) -> MarginfiResult<PriceUpd
 
 #[cfg_attr(feature = "client", derive(Clone, Debug))]
 pub struct PythPushOraclePriceFeed {
-    ema_price: Box<pyth_solana_receiver_sdk::price_update::Price>,
-    price: Box<pyth_solana_receiver_sdk::price_update::Price>,
+    ema_price: Box<price_update::Price>,
+    price: Box<price_update::Price>,
 }
 
 impl PythPushOraclePriceFeed {
@@ -1492,7 +1494,7 @@ impl PythPushOraclePriceFeed {
                 ..
             } = price_feed_account.price_message;
 
-            pyth_solana_receiver_sdk::price_update::Price {
+            price_update::Price {
                 price: ema_price,
                 conf: ema_conf,
                 exponent,
@@ -1527,7 +1529,7 @@ impl PythPushOraclePriceFeed {
                 ..
             } = price_feed_account.price_message;
 
-            pyth_solana_receiver_sdk::price_update::Price {
+            price_update::Price {
                 price: ema_price,
                 conf: ema_conf,
                 exponent,
@@ -1900,7 +1902,7 @@ mod tests {
             key: &key,
             lamports: Rc::new(RefCell::new(&mut lamports)),
             data: Rc::new(RefCell::new(&mut data[..])),
-            owner: &pyth_solana_receiver_sdk::id(),
+            owner: &crate::oracle_compat::pyth::id(),
             _unused: 361,
             is_signer: false,
             is_writable: true,

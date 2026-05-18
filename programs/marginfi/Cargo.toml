@@ -31,21 +31,18 @@ custom-panic = []
 id-crate = { workspace = true }
 marginfi-type-crate = { workspace = true, features = ["anchor"] }
 spl-transfer-hook-interface = { workspace = true }
+spl-token-2022 = { workspace = true }
 solana-stake-interface = { workspace = true, features = ["borsh"] }
 solana-vote-interface = { workspace = true }
 solana-sha256-hasher = { workspace = true }
 solana-borsh = { workspace = true }
-solana-sdk = { workspace = true }
 solana-instructions-sysvar = { workspace = true }
+solana-msg = { workspace = true }
 
 # spl-tlv-account-resolution = { workspace = true }
 
 anchor-lang = { workspace = true }
 anchor-spl = { workspace = true }
-
-pyth-solana-receiver-sdk = { workspace = true }
-# switchboard-solana = { workspace = true }
-switchboard-on-demand = { workspace = true }
 
 borsh = { workspace = true }
 bytemuck = { workspace = true, features = ["derive"] }

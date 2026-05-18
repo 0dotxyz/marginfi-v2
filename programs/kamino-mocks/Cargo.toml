@@ -24,4 +24,4 @@ fixed = { workspace = true }
 fixed-macro = { workspace = true }
 static_assertions = { workspace = true }
 marginfi-type-crate = { workspace = true }
-solana-program = { workspace = true}
+solana-sha256-hasher = { workspace = true }

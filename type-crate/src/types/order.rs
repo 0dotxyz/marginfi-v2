@@ -19,7 +19,7 @@ pub enum OrderTriggerType {
     #[default]
     StopLoss, // 0
     TakeProfit, // 1
-    Both, // 2
+    Both,       // 2
 }
 
 unsafe impl Zeroable for OrderTriggerType {}

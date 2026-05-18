@@ -42,10 +42,7 @@ use marginfi_type_crate::{
 /// 3. Deposits the tokens into Drift through a CPI call
 /// 4. Verifies the spot position was updated correctly
 /// 5. Updates the marginfi account's balance to reflect the deposit
-pub fn drift_deposit<'info>(
-    ctx: Context<DriftDeposit>,
-    amount: u64,
-) -> MarginfiResult {
+pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult {
     let authority_bump: u8;
     let market_index: u16;
     {

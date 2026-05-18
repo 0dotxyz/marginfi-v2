@@ -27,9 +27,7 @@ use marginfi_type_crate::{
 /// * Fails if account is less healthy than it was at start
 /// * Fails if liquidator earned too much profit (took more assets in exchange for repayment of
 ///   liabs that they were allowed)
-pub fn end_liquidation<'info>(
-    ctx: Context<'info, EndLiquidation<'info>>,
-) -> MarginfiResult {
+pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     let fee_state = ctx.accounts.fee_state.load()?;
@@ -86,9 +84,7 @@ pub fn end_liquidation<'info>(
 /// (Permissioned) Ends a deleverage. Records the liquidation event in the user's record.
 /// * Fails if account is less healthy than it was at start
 ///   Note: no fees taken.
-pub fn end_deleverage<'info>(
-    ctx: Context<'info, EndDeleverage<'info>>,
-) -> MarginfiResult {
+pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
 

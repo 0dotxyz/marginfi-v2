@@ -27,7 +27,6 @@ use marginfi::{
     },
     utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
 };
-use solana_address::{address, Address};
 use marginfi_type_crate::pdas::{
     derive_drift_insurance_fund_vault, derive_drift_signer, derive_drift_spot_market,
     derive_drift_spot_market_vault, derive_drift_state, derive_drift_user, derive_drift_user_stats,
@@ -46,15 +45,16 @@ use marginfi_type_crate::{
     },
 };
 use pyth_solana_receiver_sdk::price_update::{PriceUpdateV2, VerificationLevel};
+use solana_address::{address, Address};
 use solana_sdk::{account::AccountSharedData, entrypoint::ProgramResult};
 
 use fixed_macro::types::I80F48;
 use lazy_static::lazy_static;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program::{hash::Hash, sysvar};
 use solana_program_test::*;
 use solana_sdk::{
     account::Account,
-    compute_budget::ComputeBudgetInstruction,
     instruction::{AccountMeta, Instruction},
     pubkey,
     signature::Keypair,
@@ -452,11 +452,14 @@ pub const PYTH_USDC_FEED: Address = address!("PythUsdcPrice111111111111111111111
 pub const SWITCHBOARD_USDC_FEED: Address = address!("SwchUsdcPrice111111111111111111111111111111");
 pub const PYTH_SOL_FEED: Address = address!("PythSo1Price1111111111111111111111111111111");
 pub const SWITCHBOARD_SOL_FEED: Address = address!("SwchSo1Price1111111111111111111111111111111");
-pub const PYTH_SOL_EQUIVALENT_FEED: Address = address!("PythSo1Equiva1entPrice111111111111111111111");
+pub const PYTH_SOL_EQUIVALENT_FEED: Address =
+    address!("PythSo1Equiva1entPrice111111111111111111111");
 pub const PYTH_MNDE_FEED: Address = address!("PythMndePrice111111111111111111111111111111");
 pub const FAKE_PYTH_USDC_FEED: Address = address!("FakePythUsdcPrice11111111111111111111111111");
-pub const PYTH_PUSH_SOL_FULLV_FEED: Address = address!("PythPushFu11So1Price11111111111111111111111");
-pub const PYTH_PUSH_SOL_PARTV_FEED: Address = address!("PythPushHa1fSo1Price11111111111111111111111");
+pub const PYTH_PUSH_SOL_FULLV_FEED: Address =
+    address!("PythPushFu11So1Price11111111111111111111111");
+pub const PYTH_PUSH_SOL_PARTV_FEED: Address =
+    address!("PythPushHa1fSo1Price11111111111111111111111");
 pub const PYTH_PUSH_FULLV_FEED_ID: [u8; 32] = [17; 32];
 pub const PYTH_PUSH_PARTV_FEED_ID: [u8; 32] = [18; 32];
 pub const PYTH_PUSH_REAL_SOL_FEED_ID: [u8; 32] = [
@@ -471,8 +474,10 @@ pub const INEXISTENT_PYTH_USDC_FEED: Address =
     address!("FakePythUsdcPrice11111111111111111111111111");
 pub const PYTH_T22_WITH_FEE_FEED: Address = address!("PythT22WithFeePrice111111111111111111111111");
 pub const PYTH_PYUSD_FEED: Address = address!("PythPyusdPrice11111111111111111111111111111");
-pub const PYTH_PUSH_USDC_REAL_FEED: Address = address!("PythPushUsdcRea1Price1111111111111111111111");
-pub const PYTH_PUSH_SOL_REAL_FEED: Address = address!("PythPushSo1Rea1Price11111111111111111111111");
+pub const PYTH_PUSH_USDC_REAL_FEED: Address =
+    address!("PythPushUsdcRea1Price1111111111111111111111");
+pub const PYTH_PUSH_SOL_REAL_FEED: Address =
+    address!("PythPushSo1Rea1Price11111111111111111111111");
 
 pub const SWITCH_PULL_SOL_REAL_FEED: Address =
     address!("BSzfJs4d1tAkSDqkepnfzEVcx2WtDVnwwXa2giy9PLeP");
@@ -663,9 +668,9 @@ pub const SOL_MINT_DECIMALS: u8 = 9;
 pub const MNDE_MINT_DECIMALS: u8 = 9;
 
 pub fn marginfi_entry<'info>(
-    program_id: &Address,
+    program_id: &'info Address,
     accounts: &'info [AccountInfo<'info>],
-    data: &[u8],
+    data: &'info [u8],
 ) -> ProgramResult {
     marginfi::entry(program_id, accounts, data)
 }
@@ -709,11 +714,16 @@ impl TestFixture {
         let settings = test_settings.clone().unwrap_or_default();
         let mut program = ProgramTest::default();
 
-        let mem_map_not_copy_feature_gate = address!("EenyoWx9UMXYKpR8mW5Jmfmy2fRjzUtM7NduYMY8bx33");
+        let mem_map_not_copy_feature_gate =
+            address!("EenyoWx9UMXYKpR8mW5Jmfmy2fRjzUtM7NduYMY8bx33");
         program.deactivate_feature(mem_map_not_copy_feature_gate);
 
         program.prefer_bpf(true);
-        program.add_program("marginfi", Address::new_from_array(marginfi::ID.to_bytes()), None);
+        program.add_program(
+            "marginfi",
+            Address::new_from_array(marginfi::ID.to_bytes()),
+            None,
+        );
         #[cfg(feature = "transfer-hook")]
         program.add_program("test_transfer_hook", TEST_HOOK_ID, None);
         program.add_program("mocks", Address::new_from_array(mocks::ID.to_bytes()), None);
@@ -731,11 +741,31 @@ impl TestFixture {
             std::env::set_var("SBF_OUT_DIR", fixtures_dir);
 
             program.prefer_bpf(true);
-            program.add_program("kamino_lending", Address::new_from_array(kamino_mocks::kamino_lending::ID.to_bytes()), None);
-            program.add_program("kamino_farms", Address::new_from_array(kamino_mocks::kamino_farms::ID.to_bytes()), None);
-            program.add_program("drift", Address::new_from_array(drift_mocks::drift::ID.to_bytes()), None);
-            program.add_program("juplend_lending", Address::new_from_array(juplend_mocks::ID.to_bytes()), None);
-            program.add_program("juplend_liquidity", Address::new_from_array(juplend_mocks::liquidity::ID.to_bytes()), None);
+            program.add_program(
+                "kamino_lending",
+                Address::new_from_array(kamino_mocks::kamino_lending::ID.to_bytes()),
+                None,
+            );
+            program.add_program(
+                "kamino_farms",
+                Address::new_from_array(kamino_mocks::kamino_farms::ID.to_bytes()),
+                None,
+            );
+            program.add_program(
+                "drift",
+                Address::new_from_array(drift_mocks::drift::ID.to_bytes()),
+                None,
+            );
+            program.add_program(
+                "juplend_lending",
+                Address::new_from_array(juplend_mocks::ID.to_bytes()),
+                None,
+            );
+            program.add_program(
+                "juplend_liquidity",
+                Address::new_from_array(juplend_mocks::liquidity::ID.to_bytes()),
+                None,
+            );
             program.add_program(
                 "juplend_rewards_rate_model",
                 Address::new_from_array(juplend_mocks::lending_reward_rate_model::ID.to_bytes()),
@@ -1232,7 +1262,8 @@ impl TestFixture {
         test_f.context.borrow_mut().set_sysvar(&clock);
 
         // Keep fixture setup simple by disabling reserve farms for these local ix tests.
-        if reserve.farm_collateral != Address::default() || reserve.farm_debt != Address::default() {
+        if reserve.farm_collateral != Address::default() || reserve.farm_debt != Address::default()
+        {
             let mut reserve_account = test_f.try_load(&reserve_key).await.unwrap().unwrap();
             let reserve_data =
                 bytemuck::from_bytes_mut::<MinimalReserve>(&mut reserve_account.data[8..]);

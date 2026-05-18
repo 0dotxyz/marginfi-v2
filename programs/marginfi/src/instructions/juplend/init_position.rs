@@ -191,11 +191,8 @@ impl<'info> JuplendInitPosition<'info> {
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
 
-        let cpi_ctx = CpiContext::new_with_signer(
-            self.juplend_program.key(),
-            accounts,
-            signer_seeds,
-        );
+        let cpi_ctx =
+            CpiContext::new_with_signer(self.juplend_program.key(), accounts, signer_seeds);
 
         deposit(cpi_ctx, amount)?;
         Ok(())

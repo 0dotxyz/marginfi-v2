@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{clock::Clock};
+use anchor_lang::solana_program::clock::Clock;
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{HealthCache, HealthPriceMode, MarginfiAccount};

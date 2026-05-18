@@ -265,9 +265,7 @@ pub fn set_keeper_close_flags(
     Ok(())
 }
 
-pub fn start_execute_order<'info>(
-    ctx: Context<'info, StartExecuteOrder<'info>>,
-) -> MarginfiResult {
+pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>) -> MarginfiResult {
     let StartExecuteOrder {
         marginfi_account: marginfi_account_loader,
         fee_payer: _fee_payer,
@@ -339,9 +337,7 @@ pub fn start_execute_order<'info>(
     )
 }
 
-pub fn end_execute_order<'info>(
-    ctx: Context<'info, EndExecuteOrder<'info>>,
-) -> MarginfiResult {
+pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> MarginfiResult {
     let EndExecuteOrder {
         marginfi_account: marginfi_account_loader,
         order: order_loader,
