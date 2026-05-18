@@ -689,10 +689,7 @@ impl MarginfiGroupFixture {
         Ok(())
     }
 
-    pub async fn try_accrue_interest(
-        &self,
-        bank: &BankFixture,
-    ) -> Result<(), BanksClientError> {
+    pub async fn try_accrue_interest(&self, bank: &BankFixture) -> Result<(), BanksClientError> {
         let ctx = self.ctx.borrow_mut();
 
         let ix = Instruction {
