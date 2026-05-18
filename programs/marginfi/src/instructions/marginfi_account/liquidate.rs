@@ -1,29 +1,40 @@
 use crate::events::{AccountEventHeader, LendingAccountLiquidateEvent, LiquidationBalances};
-use crate::state::bank::{BankImpl, BankVaultType};
-use crate::state::marginfi_account::{
-    account_not_frozen_for_authority, calc_amount, calc_value, check_account_init_health,
-    check_post_liquidation_condition_and_get_account_health,
-    check_pre_liquidation_condition_and_get_account_health, get_remaining_accounts_per_bank,
-    is_signer_authorized, HealthPriceMode, LendingAccountImpl, MarginfiAccountImpl,
+use crate::state::{
+    bank::{BankImpl, BankVaultType},
+    marginfi_account::{
+        account_not_frozen_for_authority, calc_amount, calc_value, check_account_init_health,
+        check_post_liquidation_condition_and_get_account_health,
+        check_pre_liquidation_condition_and_get_account_health, get_remaining_accounts_per_bank,
+        is_signer_authorized, LendingAccountImpl, MarginfiAccountImpl,
+    },
+    {
+        marginfi_group::MarginfiGroupImpl,
+        price::{OraclePriceFeedAdapter, PriceAdapter},
+    },
 };
-use crate::state::marginfi_group::MarginfiGroupImpl;
-use crate::state::price::{OraclePriceFeedAdapter, OraclePriceType, PriceAdapter, PriceBias};
 use crate::utils::{
-    fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank, is_marginfi_asset_tag,
-    validate_asset_tags, validate_bank_asset_tags, validate_bank_state, InstructionKind,
+    fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank_cache,
+    is_marginfi_asset_tag, validate_asset_tags, validate_bank_asset_tags, validate_bank_state,
+    InstructionKind,
 };
 use crate::{bank_signer, state::marginfi_account::BankAccountWrapper};
 use crate::{check, debug, prelude::*, utils};
-use anchor_lang::prelude::*;
-use anchor_lang::solana_program::clock::Clock;
-use anchor_lang::solana_program::sysvar::Sysvar;
+use anchor_lang::{
+    prelude::*,
+    solana_program::{clock::Clock, sysvar::Sysvar},
+};
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
-use marginfi_type_crate::constants::{
-    INSURANCE_VAULT_SEED, LIQUIDATION_INSURANCE_FEE, LIQUIDATION_LIQUIDATOR_FEE,
-    LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+use marginfi_type_crate::{
+    constants::{
+        INSURANCE_VAULT_SEED, LIQUIDATION_INSURANCE_FEE, LIQUIDATION_LIQUIDATOR_FEE,
+        LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+    },
+    types::{
+        Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType, PriceBias,
+        ACCOUNT_IN_RECEIVERSHIP,
+    },
 };
-use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_IN_RECEIVERSHIP};
 
 /// Instruction liquidates a position owned by a margin account that is in a unhealthy state.
 /// The liquidator can purchase discounted collateral from the unhealthy account, in exchange for paying its debt.
@@ -178,7 +189,7 @@ pub fn lending_account_liquidate<'info>(
     )?;
 
     let asset_bank = ctx.accounts.asset_bank.load()?;
-    let asset_price_unbiased = fetch_unbiased_price_for_bank(
+    let asset_price_unbiased = fetch_unbiased_price_for_bank_cache(
         &asset_bank_key,
         &asset_bank,
         &clock,
@@ -188,7 +199,7 @@ pub fn lending_account_liquidate<'info>(
     drop(asset_bank);
 
     let liab_bank = ctx.accounts.liab_bank.load()?;
-    let liab_price_unbiased = fetch_unbiased_price_for_bank(
+    let liab_price_unbiased = fetch_unbiased_price_for_bank_cache(
         &liab_bank_key,
         &liab_bank,
         &clock,
@@ -445,7 +456,12 @@ pub fn lending_account_liquidate<'info>(
 
     // TODO consider if health cache update here is worth blowing the extra CU
 
+    liquidatee_marginfi_account
+        .indexer_flags
+        .has_ever_been_liquidated = 1;
+    liquidatee_marginfi_account.sync_indexer_flags();
     liquidator_marginfi_account.lending_account.sort_balances();
+    liquidator_marginfi_account.sync_indexer_flags();
 
     // Verify liquidator account health using heap-efficient version (includes isolated-tier check)
     check_account_init_health(

@@ -1650,6 +1650,7 @@ dependencies = [
  "bytemuck",
  "fixed",
  "fixed-macro",
+ "marginfi-type-crate",
  "static_assertions",
 ]
 
@@ -3074,7 +3075,7 @@ dependencies = [
 
 [[package]]
 name = "marginfi"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
@@ -3116,7 +3117,7 @@ dependencies = [
 
 [[package]]
 name = "marginfi-type-crate"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anchor-lang",
  "bs58",
@@ -3125,47 +3126,8 @@ dependencies = [
  "fixed-macro",
  "id-crate",
  "solana-instruction",
- "static_assertions",
-]
-
-[[package]]
-name = "marginfi-v2-cli"
-version = "0.1.8"
-dependencies = [
- "anchor-client",
- "anchor-spl",
- "anyhow",
- "base64 0.22.1",
- "bincode",
- "borsh 1.5.7",
- "bs58",
- "bytemuck",
- "chrono",
- "clap 4.5.60",
- "comfy-table",
- "dirs",
- "drift-mocks",
- "env_logger",
- "fixed",
- "fixed-macro",
- "hex",
- "juplend-mocks",
- "kamino-mocks",
- "log",
- "marginfi",
- "marginfi-type-crate",
- "pyth-solana-receiver-sdk",
- "rand 0.8.5",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "shellexpand",
- "solana-account-decoder",
- "solana-client",
- "solana-sdk",
  "spl-associated-token-account 6.0.0",
- "spl-token 7.0.0",
- "switchboard-on-demand",
+ "static_assertions",
 ]
 
 [[package]]
@@ -3639,6 +3601,46 @@ dependencies = [
  "pin-project",
  "rand 0.8.5",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "p0-cli"
+version = "0.1.8"
+dependencies = [
+ "anchor-client",
+ "anchor-spl",
+ "anyhow",
+ "base64 0.22.1",
+ "bincode",
+ "borsh 1.5.7",
+ "bs58",
+ "bytemuck",
+ "chrono",
+ "clap 4.5.60",
+ "comfy-table",
+ "dirs",
+ "drift-mocks",
+ "env_logger",
+ "fixed",
+ "fixed-macro",
+ "hex",
+ "juplend-mocks",
+ "kamino-mocks",
+ "log",
+ "marginfi",
+ "marginfi-type-crate",
+ "pyth-solana-receiver-sdk",
+ "rand 0.8.5",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "shellexpand",
+ "solana-account-decoder",
+ "solana-client",
+ "solana-sdk",
+ "spl-associated-token-account 6.0.0",
+ "spl-token 7.0.0",
+ "switchboard-on-demand",
 ]
 
 [[package]]

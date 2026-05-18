@@ -39,14 +39,13 @@ export const SOLEND_PROGRAM_ID = new PublicKey(
   "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
 );
 
-export const EMISSIONS_FLAG_NONE = 0;
-export const EMISSIONS_FLAG_BORROW_ACTIVE = 1;
-export const EMISSIONS_FLAG_LENDING_ACTIVE = 2;
 export const PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG = 4;
 export const FREEZE_SETTINGS = 8;
 export const CLOSE_ENABLED_FLAG = 16;
 export const TOKENLESS_REPAYMENTS_ALLOWED = 32;
 export const TOKENLESS_REPAYMENTS_COMPLETE = 64;
+export const IS_T22_FLAG = 128;
+export const BANK_SEED_KNOWN_FLAG = 256;
 
 export const ASSET_TAG_DEFAULT = 0;
 export const ASSET_TAG_SOL = 1;
@@ -65,6 +64,9 @@ export const ORACLE_SETUP_SWITCHBOARD_v2 = 2;
 export const ORACLE_SETUP_PYTH_PUSH = 3;
 export const ORACLE_SETUP_SWITCHBOARD_PULL = 4;
 export const ORACLE_SETUP_STAKED_WITH_PYTH_PUSH = 5;
+export const ORACLE_SETUP_FIXED = 8;
+export const ORACLE_SETUP_FIXED_KAMINO = 13;
+export const ORACLE_SETUP_FIXED_DRIFT = 14;
 export const ORACLE_SETUP_FIXED_JUPLEND = 17;
 
 export const HEALTH_CACHE_NONE = 0;
@@ -101,8 +103,8 @@ export const ACCOUNT_FROZEN = 1 << 6;
 export const ACCOUNT_TRANSFER_FEE = 5_000_000;
 
 export const FLAG_PAUSED = 1;
-export const PAUSE_DURATION_SECONDS = 7 * 24 * 60 * 60; // 7 days
-export const MAX_CONSECUTIVE_PAUSES = 10;
+export const PAUSE_DURATION_SECONDS = 6 * 60 * 60; // 6 hours
+export const MAX_CONSECUTIVE_PAUSES = 4;
 export const MAX_DAILY_PAUSES = 3;
 export const DAILY_RESET_INTERVAL = 24 * 60 * 60; // 24 hours
 
