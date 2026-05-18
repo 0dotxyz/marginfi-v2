@@ -298,7 +298,7 @@ pub type MintSnapshotsArchive<'a, 'info> = super::Archive<'a, 'info, 300, MintSn
 mod tests {
     use super::*;
     #[cfg(feature = "anchor")]
-    use crate::types::{Archive, ArchiveMeta};
+    use crate::types::ArchiveMeta;
 
     fn snap(hour: u64, seed: u64) -> Snapshot {
         Snapshot {
@@ -394,21 +394,14 @@ mod tests {
     }
 
     #[cfg(feature = "anchor")]
-    fn new_archive_account<const INDEX_MAP_LEN: usize>(payload_len: usize) -> AccountInfo<'static> {
+    fn new_archive_account(payload_len: usize) -> AccountInfo<'static> {
         use anchor_lang::solana_program::{account_info::AccountInfo, clock::Epoch};
         let key = Box::leak(Box::new(pk(200)));
         let owner = Box::leak(Box::new(crate::ID));
         let lamports = Box::leak(Box::new(1_000_000u64));
-        let total_len = 8 + ArchiveMeta::LEN + (INDEX_MAP_LEN * 64) + payload_len;
+        let total_len = 8 + ArchiveMeta::LEN + (300 * 64) + payload_len;
         let data = Box::leak(vec![0u8; total_len].into_boxed_slice());
-        let meta = ArchiveMeta {
-            version: 1,
-            _pad0: [0; 7],
-            record_count: 0,
-            authority: pk(7),
-        };
-        meta.write(&mut data[8..56]).unwrap();
-        AccountInfo::new(
+        let account = AccountInfo::new(
             key,
             false,
             true,
@@ -417,20 +410,22 @@ mod tests {
             owner,
             false,
             Epoch::default(),
-        )
+        );
+        MintSnapshotsArchive::initialize(&account, pk(7)).unwrap();
+        account
     }
 
     #[cfg(feature = "anchor")]
     #[test]
     fn archive_integration_upsert_and_read_back() {
-        let account = new_archive_account::<2>(MintSnapshotRecords::LEN_V1 * 2);
-        let mut archive = Archive::<2, MintSnapshotRecords>::from_account_info(&account).unwrap();
+        let account = new_archive_account(MintSnapshotRecords::LEN_V1 * 2);
+        let mut archive = MintSnapshotsArchive::from_account_info(&account).unwrap();
 
         let mut rec = MintSnapshotRecords::new(pk(3));
         assert_eq!(rec.push_latest_snapshot(snap(10, 1)), Some(()));
         assert_eq!(archive.upsert(&rec), Some(0));
 
-        let loaded = MintSnapshotRecords::from_archive_account::<2>(&account, rec.mint).unwrap();
+        let loaded = MintSnapshotRecords::from_archive_account::<300>(&account, rec.mint).unwrap();
         assert_eq!(loaded, rec);
     }
 }

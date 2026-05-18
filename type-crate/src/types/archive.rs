@@ -433,16 +433,7 @@ mod tests {
         let lamports = Box::leak(Box::new(1_000_000u64));
         let total_len = 8 + ArchiveMeta::LEN + (INDEX_MAP_LEN * 64) + payload_len;
         let data = Box::leak(vec![0u8; total_len].into_boxed_slice());
-
-        let meta = ArchiveMeta {
-            version: 1,
-            _pad0: [0; 7],
-            record_count: 0,
-            authority: pk(7),
-        };
-        meta.write(&mut data[8..56]).unwrap();
-
-        AccountInfo::new(
+        let account = AccountInfo::new(
             key,
             false,
             true,
@@ -451,7 +442,9 @@ mod tests {
             owner,
             false,
             Epoch::default(),
-        )
+        );
+        Archive::<INDEX_MAP_LEN, TestRecord>::initialize(&account, pk(7)).unwrap();
+        account
     }
 
     #[test]
