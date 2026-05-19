@@ -64,7 +64,7 @@ pub fn drift_withdraw<'info>(
 
     let bank_key = ctx.accounts.bank.key();
     let bank_mint = ctx.accounts.bank.load()?.mint;
-    let (token_amount, expected_scaled_balance_change) = {
+    let (token_amount, expected_scaled_balance_change, share_amount) = {
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;
         let group = ctx.accounts.group.load()?;
@@ -105,8 +105,8 @@ pub fn drift_withdraw<'info>(
             &mut marginfi_account.lending_account,
         )?;
 
-        let (token_amount, expected_scaled_balance_change) = if withdraw_all {
-            let scaled_balance = bank_account.withdraw_all(in_receivership)?;
+        let (token_amount, expected_scaled_balance_change, share_amount) = if withdraw_all {
+            let (scaled_balance, share_amount) = bank_account.withdraw_all(in_receivership)?;
 
             let mut token_amount = integration_acc_1.get_withdraw_token_amount(scaled_balance)?;
             let mut expected_scaled_balance_change =
@@ -129,7 +129,7 @@ pub fn drift_withdraw<'info>(
                 MarginfiError::MathError
             );
 
-            (token_amount, expected_scaled_balance_change)
+            (token_amount, expected_scaled_balance_change, share_amount)
         } else {
             let mut scaled_decrement = integration_acc_1.get_scaled_balance_decrement(amount)?;
             let mut token_amount = amount;
@@ -157,9 +157,9 @@ pub fn drift_withdraw<'info>(
                 scaled_decrement = integration_acc_1.get_scaled_balance_decrement(token_amount)?;
             }
 
-            bank_account.withdraw(I80F48::from_num(scaled_decrement))?;
+            let share_amount = bank_account.withdraw(I80F48::from_num(scaled_decrement))?;
 
-            (token_amount, scaled_decrement)
+            (token_amount, scaled_decrement, share_amount)
         };
 
         record_withdrawal_outflow(
@@ -198,7 +198,7 @@ pub fn drift_withdraw<'info>(
 
         marginfi_account.last_update = clock.unix_timestamp as u64;
 
-        (token_amount, expected_scaled_balance_change)
+        (token_amount, expected_scaled_balance_change, share_amount)
     };
 
     // When calling withdraw_all, it's possible that the remaining scaled balance is worth less than
@@ -257,6 +257,7 @@ pub fn drift_withdraw<'info>(
             bank: bank_key,
             mint: bank_mint,
             amount: actual_amount_received,
+            share_amount,
             close_balance: withdraw_all,
         });
 

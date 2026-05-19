@@ -92,7 +92,7 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
             &mut marginfi_account.lending_account,
         )?;
 
-        bank_account.deposit_no_repay(I80F48::from_num(minted_shares))?;
+        let share_amount = bank_account.deposit_no_repay(I80F48::from_num(minted_shares))?;
 
         record_deposit_inflow(
             &mut bank,
@@ -119,6 +119,7 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
             bank: ctx.accounts.bank.key(),
             mint: bank.mint,
             amount,
+            share_amount,
         });
     }
 
