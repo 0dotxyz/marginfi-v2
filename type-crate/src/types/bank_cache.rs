@@ -4,7 +4,7 @@ use crate::{assert_struct_align, assert_struct_size, types::WrappedI80F48};
 use anchor_lang::prelude::*;
 use bytemuck::{Pod, Zeroable};
 
-assert_struct_size!(BankCache, 176);
+assert_struct_size!(BankCache, 160);
 assert_struct_align!(BankCache, 8);
 #[repr(C)]
 #[cfg_attr(
@@ -68,9 +68,6 @@ pub struct BankCache {
     /// operational so severity reflects the worst observation seen, not just the last one.
     pub cb_max_breached_tier_in_streak: u8,
     _cb_cache_pad: [u8; 5],
-    /// EMA reference price used by the circuit breaker. Frozen while halted, zero until the
-    /// first observation after enable.
-    pub cb_reference_price: WrappedI80F48,
     /// For integration banks, this is the exchange rate of cToken/token or similar. The "real"
     /// price of one deposited token is `price_multiplier` * `last_oracle_price`, we split it here
     /// for consumers who are only interested in reading the oracle price and are applying the
@@ -99,13 +96,12 @@ impl BankCache {
     pub const LIQ_CACHE_LOCKED_FLAG: u8 = 1 << 0;
 
     /// Reset cached rate metrics while preserving the oracle-price snapshot and the cache-side
-    /// circuit-breaker state (reference price + breach counter). Bank-level CB fields are
-    /// unaffected; this method must not silently clear in-flight halt state.
+    /// circuit-breaker state (breach counter). Bank-level CB fields (including
+    /// `cb_reference_price`) live on `Bank` and are unaffected by this reset.
     pub fn reset_preserving_oracle_and_cb_state(&mut self) {
         let last_oracle_price = self.last_oracle_price;
         let last_oracle_price_timestamp = self.last_oracle_price_timestamp;
         let last_oracle_price_confidence = self.last_oracle_price_confidence;
-        let cb_reference_price = self.cb_reference_price;
         let cb_breach_count = self.cb_breach_count;
         let cb_max_breached_tier_in_streak = self.cb_max_breached_tier_in_streak;
         let price_multiplier = self.price_multiplier;
@@ -115,7 +111,6 @@ impl BankCache {
         self.last_oracle_price = last_oracle_price;
         self.last_oracle_price_timestamp = last_oracle_price_timestamp;
         self.last_oracle_price_confidence = last_oracle_price_confidence;
-        self.cb_reference_price = cb_reference_price;
         self.cb_breach_count = cb_breach_count;
         self.cb_max_breached_tier_in_streak = cb_max_breached_tier_in_streak;
         self.price_multiplier = price_multiplier;

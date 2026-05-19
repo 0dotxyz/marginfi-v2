@@ -496,9 +496,9 @@ impl BankImpl for Bank {
                     (0..=CB_ENABLE_MAX_PRICE_AGE_SECONDS).contains(&age),
                     MarginfiError::CircuitBreakerRequiresWarmCache
                 );
-                let ref_price: I80F48 = self.cache.cb_reference_price.into();
+                let ref_price: I80F48 = self.cb_reference_price.into();
                 if ref_price == I80F48::ZERO {
-                    self.cache.cb_reference_price = last.into();
+                    self.cb_reference_price = last.into();
                 }
             }
             // Disable: zero halt + dedup state so a later re-enable starts clean.
@@ -769,7 +769,7 @@ impl BankImpl for Bank {
         // Without a usable reference there is nothing to compare against. The breaker seeds it
         // at enable-time (warm-cache gate) or on its first observation, so this only skips
         // genuinely cold banks.
-        let ref_price: I80F48 = self.cache.cb_reference_price.into();
+        let ref_price: I80F48 = self.cb_reference_price.into();
         if ref_price <= CB_MIN_REF_PRICE {
             return Ok(());
         }
@@ -857,13 +857,13 @@ impl BankImpl for Bank {
             }
         }
 
-        let mut ref_price: I80F48 = self.cache.cb_reference_price.into();
+        let mut ref_price: I80F48 = self.cb_reference_price.into();
         let current = oracle.price;
 
         // First-ever observation: seed the EMA and record dedup cursors. Normally already seeded
         // at enable-time, but this path also covers banks that were never pulsed before enable.
         if ref_price == I80F48::ZERO {
-            self.cache.cb_reference_price = current.into();
+            self.cb_reference_price = current.into();
             self.cb_last_observed_slot = slot;
             if oracle.source_time != 0 {
                 self.cb_last_oracle_source_time = oracle.source_time;
@@ -891,7 +891,7 @@ impl BankImpl for Bank {
         // Guard against a corrupted/decayed reference: reseed and defer detection rather than
         // dividing by a near-zero value and producing a megabps deviation.
         if ref_price <= CB_MIN_REF_PRICE {
-            self.cache.cb_reference_price = current.into();
+            self.cb_reference_price = current.into();
             return Ok(());
         }
 
@@ -934,7 +934,7 @@ impl BankImpl for Bank {
             / I80F48::from_num(10_000u64);
         let clipped_shift = (new_ref - ref_price).max(-max_shift).min(max_shift);
         ref_price += clipped_shift;
-        self.cache.cb_reference_price = ref_price.into();
+        self.cb_reference_price = ref_price.into();
 
         Ok(())
     }
@@ -1246,7 +1246,7 @@ mod cb_tests {
         let mut b = Bank::zeroed(); // flag off
         b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
             .unwrap();
-        assert_eq!(b.cache.cb_reference_price, I80F48::ZERO.into());
+        assert_eq!(b.cb_reference_price, I80F48::ZERO.into());
         assert_eq!(b.cb_tier, 0);
     }
 
@@ -1255,7 +1255,7 @@ mod cb_tests {
         let mut b = make_cb_bank();
         b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
             .unwrap();
-        assert_eq!(I80F48::from(b.cache.cb_reference_price), price(100));
+        assert_eq!(I80F48::from(b.cb_reference_price), price(100));
         assert_eq!(b.cb_tier, 0);
         assert_eq!(b.cb_last_observed_slot, 1_000);
     }
@@ -1265,7 +1265,7 @@ mod cb_tests {
         let mut b = make_cb_bank();
         feed(&mut b, 1_000, 1_000, &[price(100), price(101)]);
         // α=0.1: ref = 0.1 * 101 + 0.9 * 100 = 100.1
-        let r: I80F48 = b.cache.cb_reference_price.into();
+        let r: I80F48 = b.cb_reference_price.into();
         assert!((r - I80F48::from_num(100.1)).abs() < I80F48::from_num(0.001));
         assert_eq!(b.cb_tier, 0);
     }
@@ -1342,7 +1342,7 @@ mod cb_tests {
         b.update_circuit_breaker(1_001, 1_002, obs(price(101)))
             .unwrap();
         // EMA advanced once: 0.1*101 + 0.9*100 = 100.1.
-        let r: I80F48 = b.cache.cb_reference_price.into();
+        let r: I80F48 = b.cb_reference_price.into();
         assert!((r - I80F48::from_num(100.1)).abs() < I80F48::from_num(0.001));
         assert_eq!(b.cb_tier, 0);
     }
@@ -1405,7 +1405,7 @@ mod cb_tests {
             .unwrap();
         assert_eq!(b.cb_tier, 0);
         // ref: 100 → 100.1 → 100.29.
-        let r: I80F48 = b.cache.cb_reference_price.into();
+        let r: I80F48 = b.cb_reference_price.into();
         assert!((r - I80F48::from_num(100.29)).abs() < I80F48::from_num(0.001));
     }
 
@@ -1415,12 +1415,12 @@ mod cb_tests {
         b.cb_tier = 1;
         b.cb_halt_started_at = 1_000;
         b.cb_halt_ended_at = 1_600; // 10 min later
-        b.cache.cb_reference_price = price(100).into();
+        b.cb_reference_price = price(100).into();
         // Any read during halt is a no-op
         b.update_circuit_breaker(1_100, 1_100, obs(price(50)))
             .unwrap();
         assert_eq!(b.cb_tier, 1);
-        assert_eq!(I80F48::from(b.cache.cb_reference_price), price(100));
+        assert_eq!(I80F48::from(b.cb_reference_price), price(100));
     }
 
     #[test]
@@ -1429,7 +1429,7 @@ mod cb_tests {
         b.cb_tier = 1;
         b.cb_halt_started_at = 1_000;
         b.cb_halt_ended_at = 1_600;
-        b.cache.cb_reference_price = price(100).into();
+        b.cb_reference_price = price(100).into();
         // Escalation window = 600 * 2 = 1200 → deadline = 2800. Now = 1_700 (in window).
         // A single re-breach inside the window escalates tier 1 → 2.
         b.update_circuit_breaker(1_700, 1_700, obs(price(110)))
@@ -1443,7 +1443,7 @@ mod cb_tests {
         b.cb_tier = 1;
         b.cb_halt_started_at = 1_000;
         b.cb_halt_ended_at = 1_600;
-        b.cache.cb_reference_price = price(100).into();
+        b.cb_reference_price = price(100).into();
         // Deadline = 2800. A clean read past that resets tier and zeros halt timestamps.
         b.update_circuit_breaker(3_000, 3_000, obs(price(100)))
             .unwrap();
@@ -1458,7 +1458,7 @@ mod cb_tests {
         b.cb_tier = 3;
         b.cb_halt_started_at = 1_000;
         b.cb_halt_ended_at = 1_600;
-        b.cache.cb_reference_price = price(100).into();
+        b.cb_reference_price = price(100).into();
         // Still inside escalation window for tier 3 (240m * 2 = 480m → way past 1_700).
         // A re-breach escalates `(3 + 1).min(3) = 3`.
         b.update_circuit_breaker(1_700, 1_700, obs(price(200)))
@@ -1576,11 +1576,11 @@ mod cb_tests {
         let mut b = make_cb_bank();
         // Below CB_MIN_REF_PRICE (1<<20 bits) but above zero, to skip the first-observation seed
         // branch and hit the near-zero guard instead.
-        b.cache.cb_reference_price = I80F48::from_bits(1).into();
+        b.cb_reference_price = I80F48::from_bits(1).into();
         b.cb_last_observed_slot = 1_000; // so the dedup gate passes for slot >= 1_002
         b.update_circuit_breaker(2_000, 1_002, obs(price(500)))
             .unwrap();
-        assert_eq!(I80F48::from(b.cache.cb_reference_price), price(500));
+        assert_eq!(I80F48::from(b.cb_reference_price), price(500));
         assert_eq!(b.cb_tier, 0);
     }
 
@@ -1814,13 +1814,13 @@ mod cb_tests {
         b.cb_tier = 3;
         b.cb_halt_started_at = 1_000;
         b.cb_halt_ended_at = 2_000;
-        b.cache.cb_reference_price = price(100).into();
+        b.cb_reference_price = price(100).into();
         // A wild observation, well past any escalation deadline, changes nothing.
         b.update_circuit_breaker(9_999_999, 9_999_999, obs(price(1)))
             .unwrap();
         assert_eq!(b.cb_tier, 3);
         assert_eq!(b.cb_halt_ended_at, 2_000);
-        assert_eq!(I80F48::from(b.cache.cb_reference_price), price(100));
+        assert_eq!(I80F48::from(b.cb_reference_price), price(100));
         assert_eq!(
             b.config.operational_state,
             BankOperationalState::CircuitBroken
@@ -1850,7 +1850,7 @@ mod cb_tests {
         )
         .unwrap();
         assert_eq!(b.cb_tier, 0);
-        let r: I80F48 = b.cache.cb_reference_price.into();
+        let r: I80F48 = b.cb_reference_price.into();
         // ref starts at 100, raw EMA target 0.1*1000 + 0.9*100 = 190, shift clipped to
         // 100 * 0.05 = 5 → ref = 105 after one pulse.
         assert!(
@@ -1871,7 +1871,7 @@ mod cb_tests {
     fn price_gate_passes_below_tier_zero_threshold() {
         // A deviation strictly below `cb_deviation_bps_tiers[0]` (500 bps) does not trip the gate.
         let mut b = make_cb_bank();
-        b.cache.cb_reference_price = price(100).into();
+        b.cb_reference_price = price(100).into();
         // 4% deviation → 400 bps < 500.
         assert!(b.cb_price_gate(obs(price(104))).is_ok());
     }
@@ -1881,7 +1881,7 @@ mod cb_tests {
         // A deviation at/above `cb_deviation_bps_tiers[0]` (500 bps) fails the current action
         // with `CircuitBreakerPriceJump`, even before any halt is tripped.
         let mut b = make_cb_bank();
-        b.cache.cb_reference_price = price(100).into();
+        b.cb_reference_price = price(100).into();
         // 5% deviation → exactly 500 bps.
         let err = b.cb_price_gate(obs(price(105))).unwrap_err();
         assert_eq!(err, error!(MarginfiError::CircuitBreakerPriceJump));
@@ -1894,7 +1894,7 @@ mod cb_tests {
         // With the flag off the gate is a pure no-op regardless of how far the price moved.
         let mut b = make_cb_bank();
         b.flags &= !CIRCUIT_BREAKER_ENABLED;
-        b.cache.cb_reference_price = price(100).into();
+        b.cb_reference_price = price(100).into();
         assert!(b.cb_price_gate(obs(price(1_000))).is_ok());
     }
 
@@ -1904,7 +1904,7 @@ mod cb_tests {
         let mut b = make_cb_bank();
         // Reference left at zero (cold). Also exercise the near-zero guard.
         assert!(b.cb_price_gate(obs(price(1_000))).is_ok());
-        b.cache.cb_reference_price = I80F48::from_bits(1).into(); // <= CB_MIN_REF_PRICE
+        b.cb_reference_price = I80F48::from_bits(1).into(); // <= CB_MIN_REF_PRICE
         assert!(b.cb_price_gate(obs(price(1_000))).is_ok());
     }
 
@@ -1912,7 +1912,7 @@ mod cb_tests {
     fn price_gate_subtracts_confidence() {
         // Confidence is subtracted from the raw delta so a wide-band feed doesn't trip on noise.
         let mut b = make_cb_bank();
-        b.cache.cb_reference_price = price(100).into();
+        b.cb_reference_price = price(100).into();
         // Raw delta 6% but a 2% confidence band → effective 4% < 500 bps → passes.
         assert!(b
             .cb_price_gate(OraclePriceWithConfidence {

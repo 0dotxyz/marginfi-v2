@@ -13,7 +13,7 @@ use bytemuck::{Pod, Zeroable};
 use super::Pubkey;
 use super::{BankRateLimiter, EmodeSettings, WrappedI80F48};
 
-assert_struct_size!(Bank, 1872);
+assert_struct_size!(Bank, 1856);
 assert_struct_align!(Bank, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy), derive(Default, PartialEq, Eq))]
@@ -192,8 +192,11 @@ pub struct Bank {
     /// Publisher-side timestamp of the last counted CB observation; rejects re-reads of the same
     /// publication across multiple Solana slots. Zero when the adapter doesn't expose one.
     pub cb_last_oracle_source_time: i64,
+    /// EMA reference price used by the circuit breaker. Frozen while halted, zero until the
+    /// first observation after enable.
+    pub cb_reference_price: WrappedI80F48,
 
-    pub _padding_1: [u64; 8], // 64B
+    pub _padding_1: [u64; 6], // 48B
 }
 
 impl Bank {

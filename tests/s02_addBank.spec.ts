@@ -649,9 +649,7 @@ describe("Init group and add banks with asset category flags", () => {
     assertKeysEqual(bank.integrationAcc1, validators[0].voteAccount);
   });
 
-  // Pre-merge legacy staked bank fixture is sized for the old 1856B Bank layout. Re-fixture
-  // and re-enable after the price_multiplier + CB layout change ships.
-  it.skip("(permissionless) Backfill legacy real-world staked bank fixture - happy path", async () => {
+  it("(permissionless) Backfill legacy real-world staked bank fixture - happy path", async () => {
     const bankBefore = await bankrunProgram.account.bank.fetch(
       STAKED_BACKFILL_BANK_SAMPLE
     );
