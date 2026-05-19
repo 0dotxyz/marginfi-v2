@@ -67,6 +67,8 @@ the bank, and you attempt to deposit 10, `deposit_up_to_limit` = true will depos
 - Check `bank.config.asset_tag`, ASSET_TAG_DEFAULT (0) or ASSET_TAG_SOL (1) ASSET_TAG_STAKED (2)
   are allowed with this instruction. Others have their own deposit instruction.
 - Requires a Risk Engine check (pass banks and oracles in remaining accounts)
+- If group rate limits are enabled, also make sure the withdrawn bank and its oracle account group
+  are present in `remaining_accounts`, even if the health check would otherwise not need them.
 - `amount` is in native token, in native decimal, e.g. 1 SOL = 1 \* 10^9
 - Set `withdraw_all` to "true" to ignore your amount input and withdraw the entire balance. This
 is the only way to close a Balance so it no longer appears on your Account, simply withdrawing
@@ -79,6 +81,8 @@ by configuring `amount` will always leave the Balance on your account, even with
 - Check `bank.config.asset_tag` ASSET_TAG_KAMINO (3) is allowed with this instruction. Others
   have their own deposit instruction.
 - Requires a Risk Engine check (pass banks and oracles in remaining accounts)
+- If group rate limits are enabled, the withdrawn bank and its oracle account group must still be
+  present in `remaining_accounts` so the program can price the outflow in USD.
 - `amount` is in **collateral** token, which always uses native decimal. Perform a conversion
   from liquidity -> collateral token.
 - Can fail if the Bank doesn't have enough liquidity, or the Account after the action would fail the
@@ -104,6 +108,8 @@ way to close a Balance so it no longer appears on your Account, simply repaying 
 - Check `bank.config.asset_tag`, ASSET_TAG_DEFAULT (0) or ASSET_TAG_SOL (1) are allowed with this
   instruction. Others cannot borrow and.
 - Requires a Risk Engine check (pass banks and oracles in remaining accounts)
+- If group rate limits are enabled, the borrowed bank and its oracle account group must be present
+  in `remaining_accounts`, even if other collateral alone would satisfy the health check.
 - `amount` is in native token, in native decimal, e.g. 1 SOL = 1 \* 10^9
 - Can fail if the Bank doesn't have enough liquidity, or the Account after the action would fail the
   risk check.

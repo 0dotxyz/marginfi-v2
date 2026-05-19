@@ -17,12 +17,12 @@ assert_struct_size!(InterestRateConfig, 240);
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Pod, Zeroable, Default)]
 pub struct InterestRateConfig {
-    // TODO deprecate in 1.7
-    pub optimal_utilization_rate: WrappedI80F48,
-    // TODO deprecate in 1.7
-    pub plateau_interest_rate: WrappedI80F48,
-    // TODO deprecate in 1.7
-    pub max_interest_rate: WrappedI80F48,
+    /// DEPRECATED placeholder field. Formerly used for legacy curve math.
+    pub placeholder0: WrappedI80F48,
+    /// DEPRECATED placeholder field. Formerly used for legacy curve math.
+    pub placeholder1: WrappedI80F48,
+    /// DEPRECATED placeholder field. Formerly used for legacy curve math.
+    pub placeholder2: WrappedI80F48,
 
     // Fees
     /// Goes to insurance, funds `collected_insurance_fees_outstanding`
@@ -48,8 +48,9 @@ pub struct InterestRateConfig {
     /// * points where util = 0 are unused
     pub points: [RatePoint; CURVE_POINTS],
 
-    /// Determines which interest rate curve implementation is active. 0 (INTEREST_CURVE_LEGACY) =
-    /// legacy three point curve, 1 (INTEREST_CURVE_SEVEN_POINT) = multi-point curve.
+    /// Determines which interest rate curve implementation is active.
+    /// - 0 (`INTEREST_CURVE_LEGACY`) is deprecated and unsupported.
+    /// - 1 (`INTEREST_CURVE_SEVEN_POINT`) is the active multi-point curve.
     pub curve_type: u8,
 
     // Pad to nearest 8-byte multiple
@@ -196,9 +197,9 @@ pub struct InterestRateConfigCompact {
 impl From<InterestRateConfigCompact> for InterestRateConfig {
     fn from(ir_config: InterestRateConfigCompact) -> Self {
         InterestRateConfig {
-            optimal_utilization_rate: I80F48::ZERO.into(),
-            plateau_interest_rate: I80F48::ZERO.into(),
-            max_interest_rate: I80F48::ZERO.into(),
+            placeholder0: I80F48::ZERO.into(),
+            placeholder1: I80F48::ZERO.into(),
+            placeholder2: I80F48::ZERO.into(),
             insurance_fee_fixed_apr: ir_config.insurance_fee_fixed_apr,
             insurance_ir_fee: ir_config.insurance_ir_fee,
             protocol_fixed_fee_apr: ir_config.protocol_fixed_fee_apr,

@@ -243,6 +243,8 @@ async fn marginfi_account_liquidation_success(
 
     let liquidator_mfi_ma = liquidator_mfi_account_f.load().await;
     let liquidatee_mfi_ma = liquidatee_mfi_account_f.load().await;
+    assert_eq!(liquidatee_mfi_ma.indexer_flags.has_ever_been_liquidated, 1);
+    assert_eq!(liquidator_mfi_ma.indexer_flags.has_ever_been_liquidated, 0);
 
     // Due to balances sorting (and the LP deposit in the third bank), collateral and debt may be not at indices 0 and 1 -> determine them first
     let liquidator_collateral_index = liquidator_mfi_ma

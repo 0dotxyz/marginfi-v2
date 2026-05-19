@@ -1,5 +1,6 @@
 use crate::{
     bank_signer, check,
+    constants::{LOCALNET_ID, MAINNET_PROGRAM_ID, STAGING_ID},
     events::{GroupEventHeader, LendingPoolSuperAdminWithdrawEvent},
     live, math_error,
     prelude::{MarginfiError, MarginfiResult},
@@ -19,13 +20,26 @@ use marginfi_type_crate::{
 
 const DESTINATION_WALLET: Pubkey = pubkey!("AnGdBvg8VmVHq7zyUYmC7mgjZ5pW6odwFsh6eharbzLu");
 
-/// Group admin only.
-/// Transfers tokens directly from the bank liquidity vault to `destination_token_account` and
-/// lowers `asset_share_value` so that existing depositor shares are decreased proportionally.
+/// Group admin only. Staging/localnet only — panics on mainnet. See
+/// `guides/ADMIN/PERMISSIONS_AND_ROLES.md` ("Protocol Panic-Pause") for rationale.
+///
+/// Transfers `amount` from the bank liquidity vault to `destination_token_account` and lowers
+/// `asset_share_value` so existing depositor shares are decreased proportionally. On live
+/// networks the destination must be the ATA of `DESTINATION_WALLET`, and the call is rejected if
+/// the resulting share value would fall to `0.8` or below.
 pub fn super_admin_withdraw<'info>(
     mut ctx: Context<'_, '_, 'info, 'info, SuperAdminWithdraw<'info>>,
     amount: u64,
 ) -> MarginfiResult {
+    if crate::ID != STAGING_ID && crate::ID != LOCALNET_ID {
+        panic!("Staging or localnet only!");
+    }
+
+    // Sanity check
+    if crate::ID == MAINNET_PROGRAM_ID || *ctx.program_id == MAINNET_PROGRAM_ID {
+        panic!("super admin ix cannot run on mainnet deployment");
+    }
+
     if amount == 0 {
         return Ok(());
     }

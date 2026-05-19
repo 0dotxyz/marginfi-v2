@@ -12,6 +12,7 @@ import {
   driftBankrunProgram,
   bankRunProvider,
 } from "./rootHooks";
+import { assert } from "chai";
 import { USER_ACCOUNT_D } from "./utils/mocks";
 import { processBankrunTransaction } from "./utils/tools";
 import { makeDriftDepositIx } from "./utils/drift-instructions";
@@ -96,6 +97,11 @@ describe("d07: Drift Deposit Tests", () => {
       driftUsdcBank,
       amount.mul(USDC_SCALING_FACTOR)
     );
+
+    // Deposit into a Drift bank sets has_drift on the marginfi account
+    const marginfiAccAfterFirst =
+      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
+    assert.equal(marginfiAccAfterFirst.indexerFlags.hasDrift, 1);
 
     const secondAmount = new BN(50 * 10 ** ecosystem.usdcDecimals);
 

@@ -52,6 +52,7 @@ import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import {
   CONF_INTERVAL_MULTIPLE_FLOAT,
   defaultBankConfig,
+  ORACLE_SETUP_FIXED_DRIFT,
   ORACLE_SETUP_PYTH_PUSH,
 } from "./utils/types";
 import {
@@ -163,6 +164,24 @@ describe("d15: Fixed Drift price bank", () => {
     if (verbose) {
       console.log("Fixed Drift bank:", fixedDriftBank.toString());
     }
+  });
+
+  it("(admin) configure_bank_oracle rejects FixedDrift setup - use set_fixed_oracle_price", async () => {
+    const tx = new Transaction().add(
+      await configureBankOracle(groupAdmin.mrgnBankrunProgram, {
+        bank: fixedDriftBank,
+        type: ORACLE_SETUP_FIXED_DRIFT,
+        oracle: oracles.usdcOracle.publicKey,
+      }),
+    );
+    const result = await processBankrunTransaction(
+      ctx,
+      tx,
+      [groupAdmin.wallet],
+      true,
+    );
+    // UseSetFixedOraclePrice
+    assertBankrunTxFailed(result, 6132);
   });
 
   it("(admin) add throwaway regular Token A bank + seed liquidity", async () => {

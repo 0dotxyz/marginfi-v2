@@ -1,6 +1,6 @@
 use crate::{
     bank_signer, check,
-    constants::{DRIFT_PROGRAM_ID, PROGRAM_VERSION},
+    constants::PROGRAM_VERSION,
     events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     ix_utils::{get_discrim_hash, Hashable},
     state::{
@@ -13,8 +13,8 @@ use crate::{
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
-        fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank, is_drift_asset_tag,
-        record_withdrawal_outflow, validate_bank_state, InstructionKind,
+        fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank_cache,
+        is_drift_asset_tag, record_withdrawal_outflow, validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -30,12 +30,15 @@ use drift_mocks::drift::cpi::accounts::{UpdateSpotMarketCumulativeInterest, With
 use drift_mocks::drift::cpi::{update_spot_market_cumulative_interest, withdraw};
 use drift_mocks::state::MinimalUser;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::{
-    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-    ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
-};
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_IN_DELEVERAGE,
+};
+use marginfi_type_crate::{
+    pdas::DRIFT_PROGRAM_ID,
+    types::{
+        Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+    },
 };
 
 /// Withdraw from a Drift spot market through a marginfi account
@@ -264,6 +267,7 @@ pub fn drift_withdraw<'info>(
         health_cache.timestamp = Clock::get()?.unix_timestamp;
 
         marginfi_account.lending_account.sort_balances();
+        marginfi_account.sync_indexer_flags();
 
         // Note: during liquidation/deleverage or order execution, we skip all health checks until
         // the end of the transaction.
@@ -278,7 +282,7 @@ pub fn drift_withdraw<'info>(
             let bank_loader = &ctx.accounts.bank;
 
             let mut bank = bank_loader.load_mut()?;
-            let price_for_cache = fetch_unbiased_price_for_bank(
+            let price_for_cache = fetch_unbiased_price_for_bank_cache(
                 &bank_loader.key(),
                 &bank,
                 &clock,
@@ -292,9 +296,13 @@ pub fn drift_withdraw<'info>(
             marginfi_account.health_cache = health_cache;
         } else {
             let mut bank = ctx.accounts.bank.load_mut()?;
-            let price_for_cache =
-                fetch_unbiased_price_for_bank(&bank_key, &bank, &clock, ctx.remaining_accounts)
-                    .ok();
+            let price_for_cache = fetch_unbiased_price_for_bank_cache(
+                &bank_key,
+                &bank,
+                &clock,
+                ctx.remaining_accounts,
+            )
+            .ok();
 
             bank.update_cache_price(price_for_cache)?;
         }

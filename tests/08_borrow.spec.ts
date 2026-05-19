@@ -106,6 +106,12 @@ describe("Borrow funds", () => {
       )
     );
 
+    // Borrowing from an isolated-tier bank sets has_isolated in real time
+    const userAccAfterIsoBorrow = await program.account.marginfiAccount.fetch(
+      user0Account
+    );
+    assert.equal(userAccAfterIsoBorrow.indexerFlags.hasIsolated, 1);
+
     // Note: this test is really simple - it only tests that it's possible to borrow funds in one isolated tier bank.
     // All specifics and detailed numbers are checked in the next test (to not repeat here).
   });
@@ -170,6 +176,10 @@ describe("Borrow funds", () => {
     );
 
     const userAcc = await program.account.marginfiAccount.fetch(user0Account);
+    assert.equal(userAcc.indexerFlags.isLendingOnly, 0);
+    assert.equal(userAcc.indexerFlags.isSingleBorrower, 1);
+    // Full repay of the isolated borrow cleared has_isolated; the new USDC borrow is collateral-tier
+    assert.equal(userAcc.indexerFlags.hasIsolated, 0);
     const bankAfter = await program.account.bank.fetch(bank);
     const balances = userAcc.lendingAccount.balances;
     assert.equal(bankAfter.borrowingPositionCount, 1);
