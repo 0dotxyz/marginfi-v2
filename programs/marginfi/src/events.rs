@@ -143,6 +143,7 @@ pub struct LendingAccountDepositEvent {
     pub bank: Pubkey,
     pub mint: Pubkey,
     pub amount: u64,
+    pub share_amount: u64,
 }
 
 #[event]
@@ -151,6 +152,7 @@ pub struct LendingAccountRepayEvent {
     pub bank: Pubkey,
     pub mint: Pubkey,
     pub amount: u64,
+    pub share_amount: u64,
     pub close_balance: bool,
 }
 
@@ -160,6 +162,7 @@ pub struct LendingAccountBorrowEvent {
     pub bank: Pubkey,
     pub mint: Pubkey,
     pub amount: u64,
+    pub share_amount: u64,
 }
 
 #[event]
@@ -168,6 +171,7 @@ pub struct LendingAccountWithdrawEvent {
     pub bank: Pubkey,
     pub mint: Pubkey,
     pub amount: u64,
+    pub share_amount: u64,
     pub close_balance: bool,
 }
 

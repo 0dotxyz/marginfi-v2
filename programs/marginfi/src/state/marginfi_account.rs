@@ -1600,45 +1600,60 @@ impl<'a> BankAccountWrapper<'a> {
 
     // ------------ Borrow / Lend primitives
 
-    /// Deposit an asset, will error if this repays a liability instead of increasing a asset
-    pub fn deposit(&mut self, amount: I80F48) -> MarginfiResult {
+    fn shares_delta_to_u64(shares: I80F48) -> MarginfiResult<u64> {
+        shares
+            .abs()
+            .checked_to_num::<u64>()
+            .ok_or_else(math_error!())
+    }
+
+    /// Deposit an asset, will error if this repays a liability instead of increasing a asset.
+    /// Returns the asset share delta minted.
+    pub fn deposit(&mut self, amount: I80F48) -> MarginfiResult<u64> {
         self.increase_balance_internal(amount, BalanceIncreaseType::DepositOnly)
     }
 
     /// Deposit an asset, ignoring repayment of liabilities. Useful only for banks where borrowing is disabled.
-    pub fn deposit_no_repay(&mut self, amount: I80F48) -> MarginfiResult {
+    /// Returns the asset share delta minted.
+    pub fn deposit_no_repay(&mut self, amount: I80F48) -> MarginfiResult<u64> {
         self.increase_balance_internal(amount, BalanceIncreaseType::DepositOnly)
     }
 
     /// Repay a liability, will error if there is not enough liability - depositing is not allowed.
-    pub fn repay(&mut self, amount: I80F48) -> MarginfiResult {
+    /// Returns the liability share delta burned.
+    pub fn repay(&mut self, amount: I80F48) -> MarginfiResult<u64> {
         self.increase_balance_internal(amount, BalanceIncreaseType::RepayOnly)
     }
 
     /// Withdraw an asset, will error if there is not enough asset - borrowing is not allowed.
-    pub fn withdraw(&mut self, amount: I80F48) -> MarginfiResult {
+    /// Returns the asset share delta burned.
+    pub fn withdraw(&mut self, amount: I80F48) -> MarginfiResult<u64> {
         self.decrease_balance_internal(amount, BalanceDecreaseType::WithdrawOnly)
     }
 
-    /// Incur a borrow, will error if this withdraws an asset instead of increasing a liability
-    pub fn borrow(&mut self, amount: I80F48) -> MarginfiResult {
+    /// Incur a borrow, will error if this withdraws an asset instead of increasing a liability.
+    /// Returns the liability share delta minted.
+    pub fn borrow(&mut self, amount: I80F48) -> MarginfiResult<u64> {
         self.decrease_balance_internal(amount, BalanceDecreaseType::BorrowOnly)
     }
 
-    /// Deposit an asset, ignoring deposit caps, will error if this repays a liability instead of increasing a asset
-    pub fn deposit_ignore_deposit_cap(&mut self, amount: I80F48) -> MarginfiResult {
+    /// Deposit an asset, ignoring deposit caps, will error if this repays a liability instead of increasing a asset.
+    /// Returns the asset share delta minted.
+    pub fn deposit_ignore_deposit_cap(&mut self, amount: I80F48) -> MarginfiResult<u64> {
         self.increase_balance_internal(amount, BalanceIncreaseType::BypassDepositLimit)
     }
 
-    /// Incur a borrow, ignoring borrow caps, will error if this withdraws an asset instead of increasing a liability
-    pub fn withdraw_ignore_borrow_cap(&mut self, amount: I80F48) -> MarginfiResult {
+    /// Incur a borrow, ignoring borrow caps, will error if this withdraws an asset instead of increasing a liability.
+    /// Returns the liability share delta minted.
+    pub fn withdraw_ignore_borrow_cap(&mut self, amount: I80F48) -> MarginfiResult<u64> {
         self.decrease_balance_internal(amount, BalanceDecreaseType::BypassBorrowLimit)
     }
 
     /// Withdraw existing asset in full - will error if there is no asset.
     /// When `in_receivership` is true, clears the bank's liquidation price cache lock
     /// so that banks whose balances are closed mid-liquidation don't stay permanently locked.
-    pub fn withdraw_all(&mut self, in_receivership: bool) -> MarginfiResult<u64> {
+    /// Returns `(spl_withdraw_amount, asset_share_delta)`.
+    pub fn withdraw_all(&mut self, in_receivership: bool) -> MarginfiResult<(u64, u64)> {
         let balance = &mut self.balance;
         let bank = &mut self.bank;
 
@@ -1685,15 +1700,19 @@ impl<'a> BankAccountWrapper<'a> {
                 .into()
         };
 
-        Ok(spl_withdraw_amount
+        let spl_withdraw_amount = spl_withdraw_amount
             .checked_to_num()
-            .ok_or_else(math_error!())?)
+            .ok_or_else(math_error!())?;
+        let share_amount = Self::shares_delta_to_u64(total_asset_shares)?;
+
+        Ok((spl_withdraw_amount, share_amount))
     }
 
     /// Repay existing liability in full - will error if there is no liability.
     /// When `in_receivership` is true, clears the bank's liquidation price cache lock
     /// so that banks whose balances are closed mid-liquidation don't stay permanently locked.
-    pub fn repay_all(&mut self, in_receivership: bool) -> MarginfiResult<u64> {
+    /// Returns `(spl_repay_amount, liability_share_delta)`.
+    pub fn repay_all(&mut self, in_receivership: bool) -> MarginfiResult<(u64, u64)> {
         let balance = &mut self.balance;
         let bank = &mut self.bank;
 
@@ -1738,9 +1757,12 @@ impl<'a> BankAccountWrapper<'a> {
                 .into()
         };
 
-        Ok(spl_deposit_amount
+        let spl_repay_amount = spl_deposit_amount
             .checked_to_num()
-            .ok_or_else(math_error!())?)
+            .ok_or_else(math_error!())?;
+        let share_amount = Self::shares_delta_to_u64(total_liability_shares)?;
+
+        Ok((spl_repay_amount, share_amount))
     }
 
     /// When `in_receivership` is true, clears the bank's liquidation price cache lock
@@ -1781,7 +1803,7 @@ impl<'a> BankAccountWrapper<'a> {
         &mut self,
         balance_delta: I80F48,
         operation_type: BalanceIncreaseType,
-    ) -> MarginfiResult {
+    ) -> MarginfiResult<u64> {
         debug!(
             "Balance increase: {} (type: {:?})",
             balance_delta, operation_type
@@ -1855,7 +1877,12 @@ impl<'a> BankAccountWrapper<'a> {
             bank.decrement_borrowing_position_count();
         }
 
-        Ok(())
+        let share_amount = match operation_type {
+            BalanceIncreaseType::RepayOnly => Self::shares_delta_to_u64(liability_shares_decrease)?,
+            _ => Self::shares_delta_to_u64(asset_shares_increase)?,
+        };
+
+        Ok(share_amount)
     }
 
     /// Note: in `BypassBorrowLimit` mode, can flip a deposit into a liability, a behavior that is used in liquidations.
@@ -1865,7 +1892,7 @@ impl<'a> BankAccountWrapper<'a> {
         &mut self,
         balance_delta: I80F48,
         operation_type: BalanceDecreaseType,
-    ) -> MarginfiResult {
+    ) -> MarginfiResult<u64> {
         debug!(
             "Balance decrease: {} of (type: {:?})",
             balance_delta, operation_type
@@ -1941,7 +1968,14 @@ impl<'a> BankAccountWrapper<'a> {
             bank.decrement_borrowing_position_count();
         }
 
-        Ok(())
+        let share_amount = match operation_type {
+            BalanceDecreaseType::BorrowOnly | BalanceDecreaseType::BypassBorrowLimit => {
+                Self::shares_delta_to_u64(liability_shares_increase)?
+            }
+            _ => Self::shares_delta_to_u64(asset_shares_decrease)?,
+        };
+
+        Ok(share_amount)
     }
 }
 
