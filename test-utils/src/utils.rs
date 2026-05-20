@@ -5,8 +5,10 @@ use anchor_lang::Discriminator;
 use anchor_spl::token::spl_token;
 use anchor_spl::token_2022::spl_token_2022::extension::transfer_fee::MAX_FEE_BASIS_POINTS;
 use marginfi::constants::SWITCHBOARD_PULL_ID;
+use marginfi::oracle_compat::pyth::{
+    FeedId, PriceFeedMessage, PriceUpdateV2, VerificationLevel, PYTH_PUSH_ORACLE_ID,
+};
 use marginfi_type_crate::constants::{EXECUTE_ORDER_SEED, ORDER_SEED};
-use pyth_solana_receiver_sdk::price_update::{FeedId, PriceUpdateV2, VerificationLevel};
 use solana_address::Address;
 use solana_cli_output::CliAccount;
 use solana_program::{hash::hashv, program_option::COption, program_pack::Pack};
@@ -63,7 +65,7 @@ pub fn create_pyth_push_oracle_account_from_bytes(data: Vec<u8>) -> Account {
     Account {
         lamports: 1_000_000,
         data,
-        owner: pyth_solana_receiver_sdk::ID,
+        owner: PYTH_PUSH_ORACLE_ID,
         executable: false,
         rent_epoch: 361,
     }
@@ -81,7 +83,7 @@ pub fn create_pyth_push_oracle_account(
     let price_update = PriceUpdateV2 {
         write_authority: Pubkey::new_from_array(Address::default().to_bytes()),
         verification_level,
-        price_message: pyth_solana_receiver_sdk::price_update::PriceFeedMessage {
+        price_message: PriceFeedMessage {
             feed_id,
             price: native_price,
             conf: 0,
