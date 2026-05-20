@@ -4,7 +4,7 @@
         {
             "label": "Setup & Run Anchor Tests (+ IDL)",
             "type": "shell",
-            "command": "./scripts/build-workspace.sh && yarn install && anchor build -p marginfi -- --no-default-features && anchor build -p test_transfer_hook --no-idl && anchor build -p mocks && anchor test --skip-build",
+            "command": "./scripts/build-workspace.sh && yarn install && anchor build -p marginfi -- --no-default-features && anchor build -p test_transfer_hook --no-idl --ignore-keys && anchor build -p mocks --ignore-keys && anchor test --skip-build",
             "problemMatcher": [],
             "group": {
                 "kind": "test",
