@@ -232,14 +232,14 @@ macro_rules! assert_custom_error {
             solana_program_test::BanksClientError::TransactionError(
                 solana_sdk::transaction::TransactionError::InstructionError(
                     _,
-                    anchor_lang::solana_program::instruction::InstructionError::Custom(n),
+                    solana_sdk::instruction::InstructionError::Custom(n),
                 ),
             )
             // simulation (preflight) error
             | solana_program_test::BanksClientError::SimulationError {
                 err: solana_sdk::transaction::TransactionError::InstructionError(
                     _,
-                    anchor_lang::solana_program::instruction::InstructionError::Custom(n),
+                    solana_sdk::instruction::InstructionError::Custom(n),
                 ),
                 ..
             } => {
@@ -259,14 +259,14 @@ macro_rules! assert_anchor_error {
             solana_program_test::BanksClientError::TransactionError(
                 solana_sdk::transaction::TransactionError::InstructionError(
                     _,
-                    anchor_lang::solana_program::instruction::InstructionError::Custom(n),
+                    solana_sdk::instruction::InstructionError::Custom(n),
                 ),
             )
             // simulation (preflight) failure
             | solana_program_test::BanksClientError::SimulationError {
                 err: solana_sdk::transaction::TransactionError::InstructionError(
                     _,
-                    anchor_lang::solana_program::instruction::InstructionError::Custom(n),
+                    solana_sdk::instruction::InstructionError::Custom(n),
                 ),
                 ..
             } => {

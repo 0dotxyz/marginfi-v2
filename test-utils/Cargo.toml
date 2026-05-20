@@ -23,6 +23,7 @@ solana-program = { workspace = true }
 solana-program-pack = { workspace = true }
 solana-program-test = { workspace = true }
 solana-sdk = { workspace = true }
+solana-instructions-sysvar = { workspace = true }
 solana-system-interface = { workspace = true }
 solana-system-transaction = { workspace = true }
 spl-transfer-hook-interface = { workspace = true }

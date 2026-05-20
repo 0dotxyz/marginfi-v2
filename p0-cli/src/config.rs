@@ -1,14 +1,12 @@
 use {
     anchor_client::{Client, Cluster, Program},
     clap::Parser,
-    serde::{Deserialize, Serialize},
+    solana_commitment_config::CommitmentConfig,
     solana_sdk::{
-        commitment_config::CommitmentConfig,
         pubkey::Pubkey,
         signature::{Keypair, Signer},
     },
     std::ops::Deref,
-    std::str::FromStr,
 };
 
 #[derive(Default, Debug, Parser)]
@@ -71,7 +69,7 @@ pub enum CliSigner {
 }
 
 pub fn clone_keypair(keypair: &Keypair) -> Keypair {
-    Keypair::from_bytes(&keypair.to_bytes()).unwrap()
+    keypair.insecure_clone()
 }
 
 impl Clone for CliSigner {
@@ -159,13 +157,3 @@ impl Config {
         }
     }
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AccountEntry {
-    // Base58 pubkey string.
-    pub address: String,
-    // Name of JSON file containing the account data.
-    pub filename: String,
-}
-
-crate::home_path!(WalletPath, ".config/solana/id.json");

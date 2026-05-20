@@ -929,7 +929,7 @@ impl MarginfiAccountFixture {
             accounts: marginfi::accounts::LendingAccountStartFlashloan {
                 marginfi_account: self.key,
                 authority: self.ctx.borrow().payer.pubkey(),
-                ixs_sysvar: sysvar::instructions::id(),
+                ixs_sysvar: solana_instructions_sysvar::id(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::LendingAccountStartFlashloan { end_index }.data(),
@@ -1260,7 +1260,7 @@ impl MarginfiAccountFixture {
                 marginfi_account: self.key,
                 liquidation_record,
                 liquidation_receiver,
-                instruction_sysvar: sysvar::instructions::id(),
+                instruction_sysvar: solana_instructions_sysvar::id(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::StartLiquidation {}.data(),
@@ -1868,7 +1868,7 @@ impl MarginfiAccountFixture {
                 liquidation_record,
                 group: marginfi_account.group,
                 risk_admin,
-                instruction_sysvar: sysvar::instructions::id(),
+                instruction_sysvar: solana_instructions_sysvar::id(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::StartDeleverage {}.data(),
@@ -2103,7 +2103,7 @@ impl MarginfiAccountFixture {
                 executor,
                 order,
                 execute_record,
-                instruction_sysvar: sysvar::instructions::id(),
+                instruction_sysvar: solana_instructions_sysvar::id(),
                 system_program: system_program::ID,
             }
             .to_account_metas(Some(true)),

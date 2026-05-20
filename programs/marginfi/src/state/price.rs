@@ -1751,8 +1751,6 @@ mod tests {
     use super::*;
 
     use anchor_lang::solana_program::account_info::AccountInfo;
-    use std::cell::RefCell;
-    use std::rc::Rc;
 
     #[test]
     fn swb_pull_get_price_1() {
@@ -1764,16 +1762,15 @@ mod tests {
         let mut lamports = 1_000_000u64;
         let mut data = bytes.clone();
 
-        let ai = AccountInfo {
-            key: &key,
-            lamports: Rc::new(RefCell::new(&mut lamports)),
-            data: Rc::new(RefCell::new(&mut data[..])),
-            owner: &SWITCHBOARD_PULL_ID,
-            _unused: 361,
-            is_signer: false,
-            is_writable: true,
-            executable: false,
-        };
+        let ai = AccountInfo::new(
+            &key,
+            false,
+            true,
+            &mut lamports,
+            &mut data[..],
+            &SWITCHBOARD_PULL_ID,
+            false,
+        );
 
         let ai_check = SwitchboardPullPriceFeed::check_ais(&ai);
         assert!(ai_check.is_ok());
@@ -1831,16 +1828,15 @@ mod tests {
         let mut lamports = 1_000_000u64;
         let mut data = bytes.clone();
 
-        let ai = AccountInfo {
-            key: &key,
-            lamports: Rc::new(RefCell::new(&mut lamports)),
-            data: Rc::new(RefCell::new(&mut data[..])),
-            owner: &SWITCHBOARD_PULL_ID,
-            _unused: 361,
-            is_signer: false,
-            is_writable: true,
-            executable: false,
-        };
+        let ai = AccountInfo::new(
+            &key,
+            false,
+            true,
+            &mut lamports,
+            &mut data[..],
+            &SWITCHBOARD_PULL_ID,
+            false,
+        );
 
         let ai_check = SwitchboardPullPriceFeed::check_ais(&ai);
         assert!(ai_check.is_ok());
@@ -1895,19 +1891,19 @@ mod tests {
         // conf/Std_dev ~$8.1619e-8
         let bytes = hex_to_bytes("22f123639d7ef4cdb4eacbe402ae9165c2ab7dfcdbe5044d27f284106f88a90bfddefa5fbff60ca00172b021217ca3fe68922a19aaf990109cb9d84e9ad004b4d2025ad6f529314419fd510500000000006501000000000000f6ffffff29bc80680000000029bc806800000000af56050000000000810100000000000058d32b150000000000");
         let key = pubkey!("DBE3N8uNjhKPRHfANdwGvCZghWXyLPdqdSbEW2XFwBiX");
+        let owner = crate::oracle_compat::pyth::id();
         let mut lamports = 1_000_000u64;
         let mut data = bytes.clone();
 
-        let ai = AccountInfo {
-            key: &key,
-            lamports: Rc::new(RefCell::new(&mut lamports)),
-            data: Rc::new(RefCell::new(&mut data[..])),
-            owner: &crate::oracle_compat::pyth::id(),
-            _unused: 361,
-            is_signer: false,
-            is_writable: true,
-            executable: false,
-        };
+        let ai = AccountInfo::new(
+            &key,
+            false,
+            true,
+            &mut lamports,
+            &mut data[..],
+            &owner,
+            false,
+        );
 
         let max_age = 100;
         let feed: PythPushOraclePriceFeed =
