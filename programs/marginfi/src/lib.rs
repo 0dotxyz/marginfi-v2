@@ -536,7 +536,7 @@ pub mod marginfi {
     /// (Permissionless) Batch-sync balance-derived indexer flags for existing accounts.
     /// Pass MarginfiAccounts as writable remaining_accounts.
     pub fn sync_indexer_flags<'info>(
-        ctx: Context<'_, '_, 'info, 'info, SyncIndexerFlags<'info>>,
+        ctx: Context<'info, SyncIndexerFlags<'info>>,
     ) -> MarginfiResult {
         marginfi_account::sync_indexer_flags(ctx)
     }

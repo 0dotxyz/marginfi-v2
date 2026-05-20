@@ -328,7 +328,7 @@ impl MintFixture {
             .await
     }
 
-    pub async fn create_token_account_and_mint_to<'a, T: Into<f64>>(
+    pub async fn create_token_account_and_mint_to<T: Into<f64>>(
         &self,
         ui_amount: T,
     ) -> TokenAccountFixture {
@@ -337,7 +337,7 @@ impl MintFixture {
             .await
     }
 
-    pub async fn create_token_account_and_mint_to_with_owner<'a, T: Into<f64>>(
+    pub async fn create_token_account_and_mint_to_with_owner<T: Into<f64>>(
         &self,
         owner: &Pubkey,
         ui_amount: T,

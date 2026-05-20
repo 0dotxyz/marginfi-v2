@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{clock::Clock, sysvar::Sysvar};
+use anchor_lang::solana_program::clock::Clock;
 use marginfi_type_crate::types::{
     MarginfiAccount, MarginfiGroup, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_ORDER_EXECUTION,
     SECONDS_PER_DAY,

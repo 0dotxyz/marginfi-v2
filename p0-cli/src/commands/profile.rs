@@ -1,7 +1,8 @@
 use anchor_client::Cluster;
 use anyhow::Result;
 use clap::Parser;
-use solana_sdk::{commitment_config::CommitmentLevel, pubkey::Pubkey};
+use solana_commitment_config::CommitmentLevel;
+use solana_sdk::pubkey::Pubkey;
 
 use crate::processor;
 

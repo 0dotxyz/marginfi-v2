@@ -20,6 +20,7 @@ test-bpf = ["test", "debug"]
 test = []
 client = []
 debug = []
+transfer-hook = []
 mainnet-beta = ["id-crate/mainnet-beta", "marginfi-type-crate/mainnet-beta"]
 staging = ["id-crate/staging", "marginfi-type-crate/staging"]
 stagingalt = ["id-crate/stagingalt", "marginfi-type-crate/stagingalt"]
@@ -65,6 +66,9 @@ solana-cli-output = { workspace = true }
 solana-program-test = { workspace = true }
 # solana-logger = { workspace = true }
 solana-sdk = { workspace = true }
+solana-compute-budget-interface = { workspace = true }
+solana-system-interface = { workspace = true }
+solana-system-transaction = { workspace = true }
 fixtures = { workspace = true }
 mocks = { workspace = true }
 
