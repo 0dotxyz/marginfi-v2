@@ -114,15 +114,15 @@ jobs:
       uses: actions/cache@v3
       id: cache-nightly
       with:
-        path: ~/.rustup/toolchains/nightly-2024-06-05-x86_64-unknown-linux-gnu
-        key: rust-nightly-${{ runner.os }}-nightly-20240605
+        path: ~/.rustup/toolchains/nightly-2025-08-01-x86_64-unknown-linux-gnu
+        key: rust-nightly-${{ runner.os }}-nightly-20250801
 
     - name: Install nightly Rust + rust-src
       if: steps.cache-nightly.outputs.cache-hit != 'true'
       uses: actions-rs/toolchain@v1
       with:
         profile: minimal
-        toolchain: nightly-2024-06-05
+        toolchain: nightly-2025-08-01
         components: rust-src
 
     # ─── Cache cargo fuzz ----- ─────────────────────────────────────────────
@@ -131,7 +131,7 @@ jobs:
       id: cache-cargo-fuzz
       with:
         path: ~/.cargo/bin/cargo-fuzz
-        key: cargo-fuzz-${{ runner.os }}-nightly-20240605
+        key: cargo-fuzz-${{ runner.os }}-nightly-20250801
 
     - name: Install cargo-fuzz
       if: steps.cache-cargo-fuzz.outputs.cache-hit != 'true'
@@ -143,15 +143,15 @@ jobs:
       id: cache-fuzz-build
       with:
         path: target/fuzz/lend
-        key: fuzz-build-${{ runner.os }}-${{ hashFiles('programs/marginfi/fuzz/**/*.rs') }}
+        key: fuzz-build-${{ runner.os }}-${{ hashFiles('programs/marginfi/fuzz/Cargo.lock', 'programs/marginfi/fuzz/Cargo.toml', 'programs/marginfi/fuzz/**/*.rs') }}
 
     - name: Generate corpus
       run: python ./generate_corpus.py
 
     - name: Run fuzz tests
       run: |
-        cargo +nightly-2024-06-05 fuzz run lend \
-          -Zbuild-std --strip-dead-code --no-cfg-fuzzing \
+        cargo +nightly-2025-08-01 fuzz run lend \
+          --strip-dead-code --no-cfg-fuzzing \
             -- -max_total_time=150 \
               -timeout_exitcode=100 \
               -error_exitcode=101 \
