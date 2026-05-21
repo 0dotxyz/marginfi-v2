@@ -673,11 +673,7 @@ pub fn marginfi_entry<'info>(
     marginfi::entry(program_id, accounts, data)
 }
 
-fn noop_processor(
-    _program_id: &Address,
-    _accounts: &[AccountInfo],
-    _data: &[u8],
-) -> ProgramResult {
+fn noop_processor(_program_id: &Address, _accounts: &[AccountInfo], _data: &[u8]) -> ProgramResult {
     Ok(())
 }
 
