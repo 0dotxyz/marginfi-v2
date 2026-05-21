@@ -1,5 +1,7 @@
 ## Build Notes
 
+- Toolchain: Rust `1.90.0` (`rust-toolchain.toml`), Anchor CLI `1.0.2`
+  (`Anchor.toml`), Agave/Solana CLI `3.1.11`, Node `24.15.0`, Yarn `4.14.1`.
 - Quick `cargo check` of the program: `cargo check -p marginfi --no-default-features --features custom-heap`
 - Full SBF build for TS tests: `anchor build -p marginfi -- --no-default-features --features custom-heap` (produces `target/deploy/marginfi.so` with the **localnet** program ID and refreshes `target/idl/marginfi.json` + `target/types/marginfi.ts`)
 - The TS test runner also needs the mocks IDL: `anchor build -p mocks` (run once, or after touching `programs/mocks`)
@@ -14,7 +16,7 @@
 
 There are two distinct test stacks. They require **two separate `.so` builds** because each stack expects a different program ID (the test binary's `marginfi::ID` constant must match the ID baked into the `.so`; mismatches surface as `DeclaredProgramIdMismatch` / Anchor error `0x1004`).
 
-### TypeScript / anchor tests (bankrun, `tests/*.spec.ts`)
+### TypeScript / anchor tests (LiteSVM, `tests/*.spec.ts`)
 
 - Expects the **localnet** program ID (`2jGhuVUuy3umdzByFx8sNWUAaf5vaeuDm78RDPEnhrMr`) baked into `target/deploy/marginfi.so`.
 - Build with: `anchor build -p marginfi -- --no-default-features --features custom-heap` (Build B above).

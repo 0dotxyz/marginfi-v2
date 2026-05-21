@@ -45,17 +45,11 @@ import {
   USDC_MARKET_INDEX,
 } from "./drift-utils";
 import { makeInitializeDriftIx, makeInitializeSpotMarketIx } from "./drift-sdk";
-import {
-  LENDING_MARKET_SIZE,
-  simpleRefreshReserve,
-} from "./kamino-utils";
-import {
-  deriveDriftStatePDA,
-  deriveSpotMarketPDA,
-} from "./pdas";
+import { simpleRefreshReserve } from "./kamino-utils";
+import { deriveDriftStatePDA, deriveSpotMarketPDA } from "./pdas";
 import { processBankrunTransaction } from "./tools";
 import { DRIFT_ORACLE_RECEIVER_PROGRAM_ID } from "./types";
-import { createReserve } from "./kamino-reserve-setup";
+import { createKaminoMarket, createReserve } from "./kamino-reserve-setup";
 
 const FARMS_GLOBAL_CONFIG_SIZE = 2136;
 const FARMS_STATE_SIZE = 8336;
@@ -73,50 +67,6 @@ const hasAccount = async (pubkey: PublicKey | null | undefined) => {
   return account !== null;
 };
 
-const createKaminoMarket = async (): Promise<PublicKey> => {
-  const usdcString = "USDC";
-  const quoteCurrency = Array.from(usdcString.padEnd(32, "\0")).map((c) =>
-    c.charCodeAt(0),
-  );
-
-  const lendingMarket = Keypair.generate();
-  const [lendingMarketAuthorityAddress] = await lendingMarketAuthPda(
-    toAddress(lendingMarket.publicKey),
-    toAddress(klendBankrunProgram.programId),
-  );
-  const lendingMarketAuthority = toPublicKey(lendingMarketAuthorityAddress);
-
-  const tx = new Transaction().add(
-    SystemProgram.createAccount({
-      fromPubkey: groupAdmin.wallet.publicKey,
-      newAccountPubkey: lendingMarket.publicKey,
-      space: LENDING_MARKET_SIZE + 8,
-      lamports:
-        await bankRunProvider.connection.getMinimumBalanceForRentExemption(
-          LENDING_MARKET_SIZE + 8,
-        ),
-      programId: klendBankrunProgram.programId,
-    }),
-    await klendBankrunProgram.methods
-      .initLendingMarket(quoteCurrency)
-      .accounts({
-        lendingMarketOwner: groupAdmin.wallet.publicKey,
-        lendingMarket: lendingMarket.publicKey,
-        lendingMarketAuthority,
-        systemProgram: SystemProgram.programId,
-        rent: SYSVAR_RENT_PUBKEY,
-      })
-      .instruction(),
-  );
-
-  await processBankrunTransaction(bankrunContext, tx, [
-    groupAdmin.wallet,
-    lendingMarket,
-  ]);
-
-  return lendingMarket.publicKey;
-};
-
 const createTokenAReserve = async (market: PublicKey): Promise<PublicKey> => {
   const reserve = Keypair.generate();
   await createReserve(
@@ -127,7 +77,6 @@ const createTokenAReserve = async (market: PublicKey): Promise<PublicKey> => {
     ecosystem.tokenADecimals,
     oracles.tokenAOracle.publicKey,
     groupAdmin.tokenAAccount,
-    { syncInitialCollateralSupply: true },
   );
 
   const refreshTx = new Transaction().add(

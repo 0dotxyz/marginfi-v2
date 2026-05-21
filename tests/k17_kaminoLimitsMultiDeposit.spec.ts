@@ -3,8 +3,6 @@ import {
   AddressLookupTableAccount,
   Keypair,
   PublicKey,
-  SystemProgram,
-  SYSVAR_RENT_PUBKEY,
   Transaction,
   TransactionMessage,
   VersionedTransaction,
@@ -12,7 +10,6 @@ import {
 import {
   bankrunContext,
   banksClient,
-  bankRunProvider,
   ecosystem,
   groupAdmin,
   globalProgramAdmin,
@@ -40,7 +37,6 @@ import {
   deriveBankWithSeed,
   deriveLiquidityVaultAuthority,
   deriveBaseObligation,
-  deriveLendingMarketAuthority,
 } from "./utils/pdas";
 import {
   createLut,
@@ -51,13 +47,15 @@ import {
 import { ComputeBudgetProgram } from "@solana/web3.js";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
-import { createReserve } from "./utils/kamino-reserve-setup";
+import {
+  createKaminoMarket,
+  createReserve,
+} from "./utils/kamino-reserve-setup";
 
 const NUM_KAMINO_BANKS_FOR_TESTING = 15;
 const NUM_REGULAR_TOKEN_A_BANKS = 7;
 const USER_ACCOUNT = "user_account_k17";
 const STARTING_SEED = 17000;
-const LENDING_MARKET_SIZE = 4656;
 
 describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation with LUT", () => {
   let kaminoMarkets: PublicKey[] = [];
@@ -76,41 +74,9 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
     // Create all markets/reserves/banks sequentially
     for (let i = 0; i < NUM_KAMINO_BANKS_FOR_TESTING; i++) {
       // Create Kamino market
-      const marketKeypair = Keypair.generate();
-      const quoteCurrency = Array(32).fill(0); // USD quote currency
-      const id = klendBankrunProgram.programId;
-      const [lendingMarketAuthority] = deriveLendingMarketAuthority(
-        id,
-        marketKeypair.publicKey,
+      const market = await createKaminoMarket(
+        Array(32).fill(0), // USD quote currency
       );
-
-      const createMarketTx = new Transaction().add(
-        SystemProgram.createAccount({
-          fromPubkey: groupAdmin.wallet.publicKey,
-          newAccountPubkey: marketKeypair.publicKey,
-          space: LENDING_MARKET_SIZE + 8,
-          lamports:
-            await bankRunProvider.connection.getMinimumBalanceForRentExemption(
-              LENDING_MARKET_SIZE + 8,
-            ),
-          programId: id,
-        }),
-        await klendBankrunProgram.methods
-          .initLendingMarket(quoteCurrency)
-          .accounts({
-            lendingMarketOwner: groupAdmin.wallet.publicKey,
-            lendingMarket: marketKeypair.publicKey,
-            lendingMarketAuthority,
-            systemProgram: SystemProgram.programId,
-            rent: SYSVAR_RENT_PUBKEY,
-          })
-          .instruction(),
-      );
-
-      await processBankrunTransaction(bankrunContext, createMarketTx, [
-        groupAdmin.wallet,
-        marketKeypair,
-      ]);
 
       // Create Kamino reserve
       const reserveKeypair = Keypair.generate();
@@ -118,7 +84,7 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
 
       await createReserve(
         reserveKeypair,
-        marketKeypair.publicKey,
+        market,
         mint,
         "TOKEN_A",
         ecosystem.tokenADecimals,
@@ -134,7 +100,7 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
         await simpleRefreshReserve(
           klendBankrunProgram,
           reserveKeypair.publicKey,
-          marketKeypair.publicKey,
+          market,
           oracles.tokenAOracle.publicKey,
         ),
       );
@@ -161,7 +127,7 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
             feePayer: groupAdmin.wallet.publicKey,
             bankMint: mint,
             kaminoReserve: reserveKeypair.publicKey,
-            kaminoMarket: marketKeypair.publicKey,
+            kaminoMarket: market,
             oracle: oracles.tokenAOracle.publicKey,
           },
           {
@@ -184,7 +150,7 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
             feePayer: groupAdmin.wallet.publicKey,
             bank: bankKey,
             signerTokenAccount: groupAdmin.tokenAAccount,
-            lendingMarket: marketKeypair.publicKey,
+            lendingMarket: market,
             reserve: reserveKeypair.publicKey,
           },
           new BN(100),
@@ -196,7 +162,7 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
       ]);
 
       kaminoBanks.push(bankKey);
-      kaminoMarkets.push(marketKeypair.publicKey);
+      kaminoMarkets.push(market);
       kaminoReserves.push(reserveKeypair.publicKey);
     }
   });

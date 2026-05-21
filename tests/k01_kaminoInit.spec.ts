@@ -1,10 +1,4 @@
-import {
-  Keypair,
-  PublicKey,
-  SystemProgram,
-  SYSVAR_RENT_PUBKEY,
-  Transaction,
-} from "@solana/web3.js";
+import { Keypair, Transaction } from "@solana/web3.js";
 import {
   bankrunContext,
   bankRunProvider,
@@ -25,16 +19,17 @@ import { assert } from "chai";
 import { assertBNApproximately } from "./utils/genericTests";
 import Decimal from "decimal.js";
 import { Fraction } from "@kamino-finance/klend-sdk/dist/classes/fraction";
-import { LENDING_MARKET_SIZE, simpleRefreshReserve } from "./utils/kamino-utils";
+import { simpleRefreshReserve } from "./utils/kamino-utils";
 // Note: there's some glitch in Kamino's lib based on a Raydium static init, it's currently patch-package hacked...
 import { LendingMarket, Reserve } from "@kamino-finance/klend-sdk";
 import { createMintToInstruction } from "@solana/spl-token";
 import { ProgramTestContext } from "./utils/litesvm";
 
 let ctx: ProgramTestContext;
-import { KLEND_PROGRAM_ID } from "./utils/types";
-import { deriveLendingMarketAuthority } from "./utils/pdas";
-import { createReserve } from "./utils/kamino-reserve-setup";
+import {
+  createKaminoMarket,
+  createReserve,
+} from "./utils/kamino-reserve-setup";
 
 describe("k01: Init Kamino instance", () => {
   before(async () => {
@@ -44,55 +39,14 @@ describe("k01: Init Kamino instance", () => {
   // Note: We use the same admins for Kamino as for mrgn, but in practice the Kamino program is
   // adminstrated by a different organization
   it("(admin) Init Kamino Market - happy path", async () => {
-    const usdcString = "USDC";
-    const quoteCurrency = Array.from(usdcString.padEnd(32, "\0")).map((c) =>
-      c.charCodeAt(0),
-    );
-
-    const lendingMarket = Keypair.generate();
-    const [lendingMarketAuthority] = deriveLendingMarketAuthority(
-      KLEND_PROGRAM_ID,
-      lendingMarket.publicKey,
-    );
-
-    let tx = new Transaction();
-    tx.add(
-      // Create a zeroed account that's large enough to hold the lending market
-      SystemProgram.createAccount({
-        fromPubkey: groupAdmin.wallet.publicKey,
-        newAccountPubkey: lendingMarket.publicKey,
-        space: LENDING_MARKET_SIZE + 8,
-        lamports:
-          await bankRunProvider.connection.getMinimumBalanceForRentExemption(
-            LENDING_MARKET_SIZE + 8,
-          ),
-        programId: klendBankrunProgram.programId,
-      }),
-      // Init lending market
-      await klendBankrunProgram.methods
-        .initLendingMarket(quoteCurrency)
-        .accounts({
-          lendingMarketOwner: groupAdmin.wallet.publicKey,
-          lendingMarket: lendingMarket.publicKey,
-          lendingMarketAuthority: lendingMarketAuthority,
-          systemProgram: SystemProgram.programId,
-          rent: SYSVAR_RENT_PUBKEY,
-        })
-        .instruction(),
-    );
-
-    await processBankrunTransaction(ctx, tx, [
-      groupAdmin.wallet,
-      lendingMarket,
-    ]);
-    kaminoAccounts.set(MARKET, lendingMarket.publicKey);
+    const lendingMarket = await createKaminoMarket();
+    kaminoAccounts.set(MARKET, lendingMarket);
     if (verbose) {
-      console.log("Kamino market: " + lendingMarket.publicKey);
+      console.log("Kamino market: " + lendingMarket);
     }
 
     const marketAcc: LendingMarket = LendingMarket.decode(
-      (await bankRunProvider.connection.getAccountInfo(lendingMarket.publicKey))
-        .data,
+      (await bankRunProvider.connection.getAccountInfo(lendingMarket)).data,
     );
     assert.equal(
       marketAcc.lendingMarketOwner.toString(),

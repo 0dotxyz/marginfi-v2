@@ -48,7 +48,7 @@ test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.t
 # All tests (for CI)
 all-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.ts --exit --require tests/rootHooks.ts"
 
-# Bankrun-only runner (no local validator)
+# LiteSVM-only runner (no local validator)
 # Use: anchor run kamino-tests
 kamino-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/k*.spec.ts --exit --require tests/rootHooks.ts"
 

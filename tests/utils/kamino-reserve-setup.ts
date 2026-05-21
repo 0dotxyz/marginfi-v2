@@ -33,14 +33,13 @@ import Decimal from "decimal.js";
 import {
   bankrunContext,
   bankRunProvider,
-  banksClient,
   groupAdmin,
   kaminoAccounts,
   klendBankrunProgram,
   verbose,
 } from "../rootHooks";
 import { assertKeysEqual } from "./genericTests";
-import { RESERVE_SIZE, toWeb3Ix } from "./kamino-utils";
+import { LENDING_MARKET_SIZE, RESERVE_SIZE, toWeb3Ix } from "./kamino-utils";
 import {
   createLookupTableForInstructions,
   getBankrunBlockhash,
@@ -49,50 +48,58 @@ import {
 } from "./tools";
 import { KLEND_PROGRAM_ID } from "./types";
 
-const SPL_TOKEN_MINT_SUPPLY_OFFSET = 36;
-const SPL_TOKEN_ACCOUNT_AMOUNT_OFFSET = 64;
-
 const toAddress = (pubkey: PublicKey) => address(pubkey.toString());
 const toPublicKey = (pubkey: string) => new PublicKey(pubkey);
 
-type CreateReserveOptions = {
-  syncInitialCollateralSupply?: boolean;
+const encodeQuoteCurrency = (quoteCurrency: string | number[]) => {
+  if (Array.isArray(quoteCurrency)) {
+    return quoteCurrency;
+  }
+  return Array.from(quoteCurrency.padEnd(32, "\0")).map((c) => c.charCodeAt(0));
 };
 
-const syncInitialReserveCollateralSupply = async (
-  reserve: PublicKey,
-  collateralMint: PublicKey,
-  collateralSupply: PublicKey,
-) => {
-  const reserveInfo = await banksClient.getAccount(reserve);
-  const mintInfo = await banksClient.getAccount(collateralMint);
-  const supplyInfo = await banksClient.getAccount(collateralSupply);
-  if (!reserveInfo || !mintInfo || !supplyInfo) {
-    throw new Error("Kamino reserve collateral accounts not found after init");
-  }
+export async function createKaminoMarket(
+  quote: string | number[] = "USDC",
+): Promise<PublicKey> {
+  const lendingMarket = Keypair.generate();
+  const quoteCurrency = encodeQuoteCurrency(quote);
 
-  const reserveAcc = Reserve.decode(reserveInfo.data);
-  const initialSupply = BigInt(reserveAcc.collateral.mintTotalSupply.toString());
-  if (initialSupply === 0n) {
-    return;
-  }
-
-  // KLend init_reserve records this amount in reserve state, but LiteSVM does not
-  // mirror it into the local SPL fixture accounts.
-  const mintAccount = { ...mintInfo, data: Buffer.from(mintInfo.data) };
-  mintAccount.data.writeBigUInt64LE(
-    initialSupply,
-    SPL_TOKEN_MINT_SUPPLY_OFFSET,
+  const [lendingMarketAuthorityAddress] = await lendingMarketAuthPda(
+    toAddress(lendingMarket.publicKey),
+    toAddress(klendBankrunProgram.programId),
   );
-  bankrunContext.setAccount(collateralMint, mintAccount);
+  const lendingMarketAuthority = toPublicKey(lendingMarketAuthorityAddress);
 
-  const supplyAccount = { ...supplyInfo, data: Buffer.from(supplyInfo.data) };
-  supplyAccount.data.writeBigUInt64LE(
-    initialSupply,
-    SPL_TOKEN_ACCOUNT_AMOUNT_OFFSET,
+  const tx = new Transaction().add(
+    SystemProgram.createAccount({
+      fromPubkey: groupAdmin.wallet.publicKey,
+      newAccountPubkey: lendingMarket.publicKey,
+      space: LENDING_MARKET_SIZE + 8,
+      lamports:
+        await bankRunProvider.connection.getMinimumBalanceForRentExemption(
+          LENDING_MARKET_SIZE + 8,
+        ),
+      programId: klendBankrunProgram.programId,
+    }),
+    await klendBankrunProgram.methods
+      .initLendingMarket(quoteCurrency)
+      .accounts({
+        lendingMarketOwner: groupAdmin.wallet.publicKey,
+        lendingMarket: lendingMarket.publicKey,
+        lendingMarketAuthority,
+        systemProgram: SystemProgram.programId,
+        rent: SYSVAR_RENT_PUBKEY,
+      })
+      .instruction(),
   );
-  bankrunContext.setAccount(collateralSupply, supplyAccount);
-};
+
+  await processBankrunTransaction(bankrunContext, tx, [
+    groupAdmin.wallet,
+    lendingMarket,
+  ]);
+
+  return lendingMarket.publicKey;
+}
 
 export async function createReserve(
   reserve: Keypair,
@@ -102,7 +109,6 @@ export async function createReserve(
   decimals: number,
   oracle: PublicKey,
   liquiditySource: PublicKey,
-  options: CreateReserveOptions = {},
 ) {
   const programAddress = toAddress(klendBankrunProgram.programId);
   const reserveAddress = toAddress(reserve.publicKey);
@@ -172,14 +178,6 @@ export async function createReserve(
     groupAdmin.wallet,
     reserve,
   ]);
-
-  if (options.syncInitialCollateralSupply) {
-    await syncInitialReserveCollateralSupply(
-      reserve.publicKey,
-      reserveCollateralMint,
-      reserveCollateralSupply,
-    );
-  }
 
   kaminoAccounts.set(reserveLabel, reserve.publicKey);
 
