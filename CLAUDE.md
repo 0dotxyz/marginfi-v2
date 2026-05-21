@@ -4,11 +4,11 @@
   (`Anchor.toml`), Agave/Solana CLI `3.1.11`, Node `24.15.0`, Yarn `4.14.1`.
 - Quick `cargo check` of the program: `cargo check -p marginfi --no-default-features --features custom-heap`
 - Full SBF build for TS tests: `anchor build -p marginfi -- --no-default-features --features custom-heap` (produces `target/deploy/marginfi.so` with the **localnet** program ID and refreshes `target/idl/marginfi.json` + `target/types/marginfi.ts`)
-- The TS test runner also needs the mocks IDL: `anchor build -p mocks` (run once, or after touching `programs/mocks`)
+- The TS test runner also needs the mocks IDL: `anchor build -p mocks --ignore-keys` (run once, or after touching `programs/mocks`)
 - If `anchor build` fails with `found invalid metadata files for crate juplend_mocks`, delete the stale rlib and rebuild:
   ```sh
   find target/debug/deps -name "libjuplend_mocks*" -delete
-  anchor build -p mocks
+  anchor build -p mocks --ignore-keys
   anchor build -p marginfi -- --no-default-features --features custom-heap
   ```
 
@@ -68,7 +68,7 @@ These don't need a `.so` and don't hit either of the two stacks above.
 ```sh
 # 1. Build both targets
 ./scripts/build-workspace.sh                                          # mainnet ID → target/sbf/deploy
-anchor build -p mocks
+anchor build -p mocks --ignore-keys
 anchor build -p marginfi -- --no-default-features --features custom-heap   # localnet ID → target/deploy
 
 # 2. Run both stacks

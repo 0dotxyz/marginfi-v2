@@ -207,7 +207,7 @@ jobs:
 
     - name: Build transfer hook
       if: steps.cache-transfer.outputs.cache-hit != 'true'
-      run: anchor build -p test_transfer_hook --no-idl
+      run: anchor build -p test_transfer_hook --no-idl --ignore-keys
 
     # ─── Cache mocks program ─────────────────────────────────────────────
     - name: Cache mocks build & IDL
@@ -222,7 +222,7 @@ jobs:
 
     - name: Build mocks
       if: steps.cache-mocks.outputs.cache-hit != 'true'
-      run: anchor build -p mocks
+      run: anchor build -p mocks --ignore-keys
 
     # ─── Marginfi always builds from scratch ─────────────────────────
     - name: Build marginfi
