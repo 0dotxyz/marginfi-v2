@@ -240,8 +240,8 @@ export class BankrunProvider extends AnchorLiteSVMProvider {
 const programPath = (workspacePath: string, name: string): string => {
   const normalizedName = name.replace(/-/g, "_");
   const candidates = [
-    path.join(workspacePath, "target", "deploy", `${normalizedName}.so`),
     path.join(workspacePath, "tests", "fixtures", `${normalizedName}.so`),
+    path.join(workspacePath, "target", "deploy", `${normalizedName}.so`),
   ];
   const found = candidates.find((candidate) => fs.existsSync(candidate));
   if (!found) {

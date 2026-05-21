@@ -203,7 +203,7 @@ jobs:
       id: cache-transfer
       with:
         path: target/deploy/test_transfer_hook.so
-        key: anchor-transfer-hook-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('programs/test_transfer_hook/**/*') }}
+        key: anchor-transfer-hook-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', '**/Cargo.toml', 'programs/test_transfer_hook/src/**/*') }}
 
     - name: Build transfer hook
       if: steps.cache-transfer.outputs.cache-hit != 'true'
@@ -218,7 +218,7 @@ jobs:
           target/deploy/mocks.so
           target/idl/mocks.json
           target/types/mocks.ts
-        key: anchor-mocks-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('programs/mocks/**/*') }}
+        key: anchor-mocks-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', '**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/mocks/src/**/*', 'programs/marginfi/src/**/*', 'type-crate/src/**/*', 'id-crate/src/**/*') }}
 
     - name: Build mocks
       if: steps.cache-mocks.outputs.cache-hit != 'true'
