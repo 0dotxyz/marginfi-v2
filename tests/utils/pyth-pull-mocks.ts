@@ -11,7 +11,7 @@ import { Mocks } from "../../target/types/mocks";
 import { Marginfi } from "../../target/types/marginfi";
 import { Program, Wallet, workspace } from "@coral-xyz/anchor";
 import { printBuffers } from "../rootHooks";
-import { ProgramTestContext, BanksClient } from "solana-bankrun";
+import { ProgramTestContext, BanksClient } from "./litesvm";
 
 type VerificationLevel =
   | { kind: "Partial"; num_signatures: number }

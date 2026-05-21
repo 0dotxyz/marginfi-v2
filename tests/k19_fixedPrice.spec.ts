@@ -63,7 +63,7 @@ import {
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
 import { logHealthCache, processBankrunTransaction } from "./utils/tools";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./utils/litesvm";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import {
   CONF_INTERVAL_MULTIPLE_FLOAT,

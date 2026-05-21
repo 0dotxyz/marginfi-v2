@@ -51,7 +51,7 @@ import {
 import { ComputeBudgetProgram } from "@solana/web3.js";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
-import { createReserve } from "./k01_kaminoInit.spec";
+import { createReserve } from "./utils/kamino-reserve-setup";
 
 const NUM_KAMINO_BANKS_FOR_TESTING = 15;
 const NUM_REGULAR_TOKEN_A_BANKS = 7;

@@ -17,7 +17,7 @@ import BigNumber from "bignumber.js";
 import {
   BanksTransactionMeta,
   BanksTransactionResultWithMeta,
-} from "solana-bankrun";
+} from "./utils/litesvm";
 
 import {
   bankrunContext,

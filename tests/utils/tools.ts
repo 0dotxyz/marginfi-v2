@@ -3,8 +3,9 @@ import { inspect } from "util";
 import {
   BanksTransactionMeta,
   BanksTransactionResultWithMeta,
-} from "solana-bankrun";
-import { ProgramTestContext } from "solana-bankrun";
+  Clock,
+} from "./litesvm";
+import { ProgramTestContext } from "./litesvm";
 import BigNumber from "bignumber.js";
 import {
   AddressLookupTableAccount,
@@ -38,7 +39,7 @@ import {
 } from "../rootHooks";
 import { getEpochAndSlot } from "./bankrunConnection";
 import { createMintToInstruction } from "@solana/spl-token";
-import { BankrunProvider } from "anchor-bankrun";
+import { BankrunProvider } from "./litesvm";
 import { Marginfi } from "target/types/marginfi";
 
 /**
@@ -406,7 +407,7 @@ export const createLut = async (
     {
       authority: signer.publicKey,
       payer: signer.publicKey,
-      recentSlot: Math.max(0, recentSlot - 1),
+      recentSlot,
     },
   );
 
@@ -760,7 +761,6 @@ export async function advanceBankrunClock(
   ctx: ProgramTestContext,
   seconds: number,
 ): Promise<number> {
-  const { Clock } = await import("solana-bankrun");
   const clock = await ctx.banksClient.getClock();
   const newClock = new Clock(
     clock.slot + BigInt(1),

@@ -57,7 +57,7 @@ import {
   bigNumberToWrappedI80F48,
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
-import { BanksTransactionResultWithMeta } from "solana-bankrun";
+import { BanksTransactionResultWithMeta } from "./utils/litesvm";
 import { assert } from "chai";
 
 describe("sl07: Solend Liquidation", () => {

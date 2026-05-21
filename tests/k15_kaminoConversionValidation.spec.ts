@@ -7,7 +7,7 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import { assert } from "chai";
-import { Clock } from "solana-bankrun";
+import { Clock } from "./utils/litesvm";
 
 import {
   banksClient,

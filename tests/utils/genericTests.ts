@@ -3,14 +3,14 @@ import { WrappedI80F48, wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import type { RawAccount } from "@solana/spl-token";
 import { AccountLayout } from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
-import { BankrunProvider } from "anchor-bankrun";
+import { BankrunProvider } from "./litesvm";
 import BigNumber from "bignumber.js";
 import BN from "bn.js";
 import { assert } from "chai";
 import {
   BanksTransactionMeta,
   BanksTransactionResultWithMeta,
-} from "solana-bankrun";
+} from "./litesvm";
 import {
   WrappedI68F60 as WrappedU68F60,
   wrappedU68F60toBigNumber,

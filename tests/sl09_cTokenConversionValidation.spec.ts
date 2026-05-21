@@ -28,7 +28,7 @@ import { getTokenBalance, assertBNApproximately } from "./utils/genericTests";
 import { accountInit } from "./utils/user-instructions";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import BigNumber from "bignumber.js";
-import { Clock } from "solana-bankrun";
+import { Clock } from "./utils/litesvm";
 import assert from "assert";
 import { createMintToInstruction } from "@solana/spl-token";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";

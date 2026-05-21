@@ -19,7 +19,7 @@ import {
   I80F48_ONE,
   ORACLE_CONF_INTERVAL,
 } from "../utils/types";
-import { BanksClient, ProgramTestContext } from "solana-bankrun";
+import { BanksClient, ProgramTestContext } from "./litesvm";
 import {
   createBankrunPythOracleAccount,
   setPythPullOraclePrice,

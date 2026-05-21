@@ -1,7 +1,7 @@
 import { BN, Program } from "@coral-xyz/anchor";
-import { BankrunProvider } from "anchor-bankrun";
+import { BankrunProvider } from "./utils/litesvm";
 import { AccountMeta, Keypair, PublicKey, Transaction } from "@solana/web3.js";
-import { Clock } from "solana-bankrun";
+import { Clock } from "./utils/litesvm";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import BigNumber from "bignumber.js";
 import { Marginfi } from "../target/types/marginfi";

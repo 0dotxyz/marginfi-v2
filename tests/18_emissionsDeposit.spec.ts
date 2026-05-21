@@ -48,7 +48,7 @@ import {
   ORACLE_SETUP_PYTH_PUSH,
 } from "./utils/types";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
-import { BankrunProvider } from "anchor-bankrun";
+import { BankrunProvider } from "./utils/litesvm";
 import { createMintBankrun } from "./utils/mocks";
 import {
   createBankrunPythFeedAccount,

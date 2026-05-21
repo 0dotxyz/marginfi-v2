@@ -222,7 +222,7 @@ filename = "tests/fixtures/mainnet_group.json"
 
 
 # To update:
-# clone https://github.com/solana-labs/solana-program-library/tree/master and run cargo build-sbf in spl_single_pool
+# git clone https://github.com/solana-program/single-pool && cd single-pool && cargo build-sbf --manifest-path program/Cargo.toml
 [[test.genesis]]
 address = "SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE" # spl single pool program
 program = "tests/fixtures/spl_single_pool.so"

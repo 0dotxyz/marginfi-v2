@@ -40,7 +40,7 @@ import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { makeUpdateSpotMarketCumulativeInterestIx } from "./utils/drift-sdk";
 import { accountInit } from "./utils/user-instructions";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
-import { Clock } from "solana-bankrun";
+import { Clock } from "./utils/litesvm";
 import assert from "assert";
 
 describe("d13: Oracle Price Conversion and Interest Tracking", () => {

@@ -7,8 +7,8 @@ import {
   Transaction,
 } from "@solana/web3.js";
 import { createMintToInstruction } from "@solana/spl-token";
-import { ProgramTestContext } from "solana-bankrun";
-import { BanksTransactionResultWithMeta } from "solana-bankrun";
+import { ProgramTestContext } from "./litesvm";
+import { BanksTransactionResultWithMeta } from "./litesvm";
 import {
   bankrunContext,
   bankrunProgram,

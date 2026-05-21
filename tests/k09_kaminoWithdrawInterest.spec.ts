@@ -31,10 +31,10 @@ import {
   makeKaminoDepositIx,
   makeKaminoWithdrawIx,
 } from "./utils/kamino-instructions";
-import { Clock, ProgramTestContext } from "solana-bankrun";
+import { Clock, ProgramTestContext } from "./utils/litesvm";
 import { composeRemainingAccounts } from "./utils/user-instructions";
 import { getTokenBalance } from "./utils/genericTests";
-import { BankrunProvider } from "anchor-bankrun";
+import { BankrunProvider } from "./utils/litesvm";
 import { ONE_WEEK_IN_SECONDS } from "./utils/types";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import Decimal from "decimal.js";

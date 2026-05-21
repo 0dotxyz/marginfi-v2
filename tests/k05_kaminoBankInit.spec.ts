@@ -34,7 +34,7 @@ import {
 } from "./utils/kamino-utils";
 import { assert } from "chai";
 import { processBankrunTransaction } from "./utils/tools";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./utils/litesvm";
 import {
   makeAddKaminoBankIx,
   makeInitObligationIx,

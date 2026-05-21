@@ -35,7 +35,7 @@ import {
   logHealthCache,
   dumpAccBalances,
 } from "./utils/tools";
-import { BanksTransactionResultWithMeta } from "solana-bankrun";
+import { BanksTransactionResultWithMeta } from "./utils/litesvm";
 import {
   bigNumberToWrappedI80F48,
   wrappedI80F48toBigNumber,
@@ -61,7 +61,7 @@ import {
 } from "./utils/drift-instructions";
 import { genericMultiBankTestSetup } from "./genericSetups";
 import { deriveBankWithSeed } from "./utils/pdas";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./utils/litesvm";
 import { assertBNEqual } from "./utils/genericTests";
 
 const confidenceInterval = 0.01 * CONF_INTERVAL_MULTIPLE;

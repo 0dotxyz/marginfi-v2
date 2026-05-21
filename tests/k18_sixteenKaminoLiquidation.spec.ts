@@ -59,27 +59,11 @@ import {
   getBankrunBlockhash,
   processBankrunTransaction,
 } from "./utils/tools";
-import {
-  lendingMarketAuthPda,
-  reserveLiqSupplyPda,
-  reserveFeeVaultPda,
-  reserveCollateralMintPda,
-  reserveCollateralSupplyPda,
-  LendingMarket,
-  MarketWithAddress,
-  BorrowRateCurve,
-  CurvePoint,
-  BorrowRateCurveFields,
-  PriceFeed,
-  AssetReserveConfig,
-} from "@kamino-finance/klend-sdk";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { ComputeBudgetProgram } from "@solana/web3.js";
-import Decimal from "decimal.js";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
 import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "./utils/types";
-import { createReserve } from "./k01_kaminoInit.spec";
+import { createReserve } from "./utils/kamino-reserve-setup";
 
 /** Number of Kamino banks to create for this test (16 total banks)
  * User will deposit into 15 Kamino banks + 1 USDC borrow = 16 total positions */

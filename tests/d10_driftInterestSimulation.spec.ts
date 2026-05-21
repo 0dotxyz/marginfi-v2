@@ -47,7 +47,7 @@ import {
 import { getTokenBalance, assertI80F48Approx } from "./utils/genericTests";
 import { composeRemainingAccounts } from "./utils/user-instructions";
 import { createMintToInstruction } from "@solana/spl-token";
-import { Clock } from "solana-bankrun";
+import { Clock } from "./utils/litesvm";
 import { ASSET_TAG_DRIFT } from "./utils/types";
 
 describe("d10: Drift Interest Simulation", () => {
