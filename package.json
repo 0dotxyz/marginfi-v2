@@ -26,10 +26,10 @@
     "@types/bn.js": "^5.1.0",
     "@types/chai": "^4.3.0",
     "@types/mocha": "^10.0.10",
-    "anchor-litesvm": "^0.2.1",
+    "anchor-litesvm": "0.2.1",
     "big.js": "^6.2.1",
     "chai": "^4.3.4",
-    "litesvm": "^1.1.0",
+    "litesvm": "1.1.0",
     "prettier": "^2.6.2",
     "ts-node": "^10.9.1",
     "typescript": "^5.7.3"
