@@ -57,6 +57,7 @@ import {
   mintToTokenAccount,
   processBankrunTransaction,
 } from "./utils/tools";
+import { dummyIx } from "./utils/bankrunConnection";
 import {
   makeAddDriftBankIx,
   makeDriftDepositIx,
@@ -211,7 +212,8 @@ describe("d16: Drift same-asset emode", () => {
           newRiskAdmin: options?.newRiskAdmin,
           sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(initLeverage),
           sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(maintLeverage),
-        })
+        }),
+        dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey),
       ),
       [groupAdmin.wallet]
     );
@@ -291,7 +293,8 @@ describe("d16: Drift same-asset emode", () => {
         await healthPulse(user.mrgnBankrunProgram, {
           marginfiAccount,
           remaining: composeRemainingAccounts(remainingGroups),
-        })
+        }),
+        dummyIx(user.wallet.publicKey, user.wallet.publicKey),
       ),
       [user.wallet]
     );

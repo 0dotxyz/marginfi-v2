@@ -64,6 +64,7 @@ import {
   processBankrunTransaction,
   processBankrunV0Transaction,
 } from "./utils/tools";
+import { dummyIx } from "./utils/bankrunConnection";
 import { assertBankrunTxFailed } from "./utils/genericTests";
 import { JUPLEND_STATE_KEYS } from "./utils/juplend/test-state";
 import { deriveJuplendPoolKeys } from "./utils/juplend/juplend-pdas";
@@ -230,7 +231,8 @@ describe("jlr08: JupLend same-asset emode", () => {
           newRiskAdmin: options?.newRiskAdmin,
           sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(initLeverage),
           sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(maintLeverage),
-        })
+        }),
+        dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey),
       ),
       [groupAdmin.wallet]
     );
@@ -314,7 +316,8 @@ describe("jlr08: JupLend same-asset emode", () => {
         await healthPulse(user.mrgnBankrunProgram, {
           marginfiAccount,
           remaining: composeRemainingAccounts(remainingGroups),
-        })
+        }),
+        dummyIx(user.wallet.publicKey, user.wallet.publicKey),
       ),
       [user.wallet]
     );
@@ -981,6 +984,7 @@ describe("jlr08: JupLend same-asset emode", () => {
           marginfiAccount: deleverageeAccount,
           feePayer: riskAdmin.wallet.publicKey,
         }),
+        await refreshJupLendPoolIx(),
         await startDeleverageIx(riskAdmin.mrgnBankrunProgram, {
           marginfiAccount: deleverageeAccount,
           riskAdmin: riskAdmin.wallet.publicKey,

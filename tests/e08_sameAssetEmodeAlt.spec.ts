@@ -4,7 +4,7 @@ import {
   bigNumberToWrappedI80F48,
   type WrappedI80F48,
 } from "@mrgnlabs/mrgn-common";
-import { PublicKey, Transaction } from "@solana/web3.js";
+import { ComputeBudgetProgram, PublicKey, Transaction } from "@solana/web3.js";
 import BigNumber from "bignumber.js";
 import { assert } from "chai";
 import { genericMultiBankTestSetup } from "./genericSetups";
@@ -48,7 +48,6 @@ import {
   deriveBaseObligation,
   deriveLiquidityVaultAuthority,
 } from "./utils/pdas";
-import { simpleRefreshObligation, simpleRefreshReserve } from "./utils/kamino-utils";
 import { processBankrunTransaction } from "./utils/tools";
 import {
   blankBankConfigOptRaw,
@@ -63,6 +62,7 @@ import {
   healthPulse,
 } from "./utils/user-instructions";
 import { assertI80F48Approx } from "./utils/genericTests";
+import { dummyIx } from "./utils/bankrunConnection";
 
 const SAME_ASSET_DISABLED = 1;
 const SAME_ASSET_ENABLED_INIT_LEVERAGE = 10;
@@ -175,7 +175,10 @@ async function setSameAssetLeverage(group: PublicKey, initLeverage: number, main
 
   await processBankrunTransaction(
     bankrunContext,
-    new Transaction().add(ix),
+    new Transaction().add(
+      ix,
+      dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey),
+    ),
     [groupAdmin.wallet],
   );
 }
@@ -195,6 +198,7 @@ async function refreshScenarioOracles(kind: IntegrationKind, juplendPool: Juplen
         await refreshJupSimple(juplendPrograms.lending, {
           pool: juplendPool!,
         }),
+        dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey),
       ),
       [groupAdmin.wallet],
     );
@@ -238,7 +242,9 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
 
   const nativeBank = await createNativeAlphaBank(throwawayGroup.publicKey, new BN(startingSeed + 90));
 
-  await setAssetWeights(integrationBank, NATIVE_ASSET_WEIGHT_INIT, NATIVE_ASSET_WEIGHT_MAINT);
+  if (kind !== "kamino") {
+    await setAssetWeights(integrationBank, NATIVE_ASSET_WEIGHT_INIT, NATIVE_ASSET_WEIGHT_MAINT);
+  }
   await setSameAssetLeverage(throwawayGroup.publicKey, SAME_ASSET_DISABLED, SAME_ASSET_DISABLED);
 
   await refreshScenarioOracles(kind, juplendPool);
@@ -273,36 +279,79 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
       FARMS_PROGRAM_ID,
     );
 
-    await processBankrunTransaction(
-      bankrunContext,
-      new Transaction().add(
-        await simpleRefreshReserve(
-          klendBankrunProgram,
-          tokenAReserve,
-          lendingMarket,
-          oracles.tokenAOracle.publicKey,
+    const refreshBatchIx = await klendBankrunProgram.methods
+      .refreshReservesBatch(true)
+      .accounts({})
+      .remainingAccounts([
+        { pubkey: tokenAReserve, isSigner: false, isWritable: true },
+        { pubkey: lendingMarket, isSigner: false, isWritable: false },
+      ])
+      .instruction();
+    try {
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 }),
+          refreshBatchIx,
         ),
-        await simpleRefreshObligation(
-          klendBankrunProgram,
+        [user.wallet],
+      );
+    } catch (e) {
+      throw new Error(`kamino refresh_reserves_batch failed: ${String(e)}`);
+    }
+    try {
+      const refreshObligationIx = await klendBankrunProgram.methods
+        .refreshObligation()
+        .accounts({
           lendingMarket,
           obligation,
-          [tokenAReserve],
+        })
+        .remainingAccounts([
+          { pubkey: tokenAReserve, isSigner: false, isWritable: true },
+        ])
+        .instruction();
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 }),
+          refreshObligationIx,
         ),
-        await makeKaminoDepositIx(
-          user.mrgnBankrunProgram,
-          {
-            marginfiAccount: userAccount,
-            bank: integrationBank,
-            signerTokenAccount: user.tokenAAccount,
-            lendingMarket,
-            reserve: tokenAReserve,
-            reserveFarmState,
-            obligationFarmUserState,
-          },
-          uiToNative(COLLATERAL_UI, ecosystem.tokenADecimals),
+        [user.wallet],
+      );
+    } catch (e) {
+      throw new Error(`kamino refresh_obligation failed: ${String(e)}`);
+    }
+
+    try {
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 1_200_000 }),
+          await makeKaminoDepositIx(
+            user.mrgnBankrunProgram,
+            {
+              marginfiAccount: userAccount,
+              bank: integrationBank,
+              signerTokenAccount: user.tokenAAccount,
+              lendingMarket,
+              reserve: tokenAReserve,
+              reserveFarmState,
+              obligationFarmUserState,
+            },
+            uiToNative(COLLATERAL_UI, ecosystem.tokenADecimals),
+            false,
+          ),
         ),
-      ),
-      [user.wallet],
+        [user.wallet],
+      );
+    } catch (e) {
+      throw new Error(`kamino deposit failed: ${String(e)}`);
+    }
+
+    await setAssetWeights(
+      integrationBank,
+      NATIVE_ASSET_WEIGHT_INIT,
+      NATIVE_ASSET_WEIGHT_MAINT,
     );
   } else if (kind === "drift") {
     await processBankrunTransaction(
