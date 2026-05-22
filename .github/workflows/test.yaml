@@ -164,7 +164,7 @@ jobs:
       run: echo "✅ Fuzzing completed"
 
   localnet-test-marginfi:
-    name: Anchor LiteSVM Tests (Marginfi)
+    name: Anchor LiteSVM Tests
     runs-on: ubuntu-latest
     needs: [ test-unit ]
     steps:
@@ -248,7 +248,7 @@ jobs:
         set +e
 
         run_tests() {
-          anchor run all-tests 2>&1 | tee test_output.log
+          anchor test --skip-build --skip-local-validator --skip-deploy 2>&1 | tee test_output.log
           return $?
         }
 
