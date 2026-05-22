@@ -165,7 +165,7 @@ jobs:
 
   localnet-test-marginfi:
     name: Anchor LiteSVM Tests
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     needs: [ test-unit ]
     steps:
     - uses: actions/checkout@v3
