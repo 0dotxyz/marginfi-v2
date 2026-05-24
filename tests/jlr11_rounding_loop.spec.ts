@@ -68,6 +68,18 @@ type RoundingProbe = {
   loss: bigint;
 };
 
+const bigintFromIntegerLike = (value: unknown): bigint => {
+  const raw =
+    value !== null && value !== undefined && "toString" in Object(value)
+      ? (value as { toString: () => string }).toString()
+      : String(value);
+  const integerPrefix = raw.match(/^-?\d+/);
+  if (!integerPrefix) {
+    throw new Error(`Invalid integer-like value: ${raw}`);
+  }
+  return BigInt(integerPrefix[0]);
+};
+
 const P = BigInt(EXCHANGE_PRICES_PRECISION);
 
 const previewSharesForDeposit = (
@@ -137,8 +149,10 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
     );
 
     return {
-      tokenExchangePrice: BigInt(lending.tokenExchangePrice.toString()),
-      liquidityExchangePrice: BigInt(lending.liquidityExchangePrice.toString()),
+      tokenExchangePrice: bigintFromIntegerLike(lending.tokenExchangePrice),
+      liquidityExchangePrice: bigintFromIntegerLike(
+        lending.liquidityExchangePrice,
+      ),
     };
   };
 

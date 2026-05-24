@@ -130,8 +130,8 @@ describe("k05: Init Kamino banks", () => {
     // Note: this doesn't work if we've warped the banks clock
     // let lastUpdate = bank.lastUpdate.toNumber();
     // assert.approximately(now, lastUpdate, 2);
-    assertI80F48Equal(config.assetWeightInit, 1);
-    assertI80F48Equal(config.assetWeightMaint, 1);
+    assertI80F48Equal(config.assetWeightInit, new BN(1));
+    assertI80F48Equal(config.assetWeightMaint, new BN(1));
     assertBNEqual(config.depositLimit, 10_000_000_000_000); // 10mil usdc because big interest needed
 
     assert.deepEqual(config.operationalState, { operational: {} });

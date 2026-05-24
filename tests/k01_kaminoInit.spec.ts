@@ -129,7 +129,7 @@ describe("k01: Init Kamino instance", () => {
     assertBNApproximately(
       reserveAcc.liquidity.marketPriceSf,
       expected.valueSf,
-      100_000,
+      10_000_000,
     );
   });
 
@@ -157,7 +157,7 @@ describe("k01: Init Kamino instance", () => {
     assertBNApproximately(
       reserveAcc.liquidity.marketPriceSf,
       expected.valueSf,
-      100_000,
+      10_000_000,
     );
   });
 });

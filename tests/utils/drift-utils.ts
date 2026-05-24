@@ -43,7 +43,7 @@ import {
 import { makeInitializeSpotMarketIx, makeAdminDepositIx } from "./drift-sdk";
 import { deriveSpotMarketPDA } from "./pdas";
 import { accountInit } from "./user-instructions";
-import { processBankrunTransaction } from "./tools";
+import { processBankrunTransaction, toI80Scaled } from "./tools";
 
 // Import Drift account types using IdlAccounts - the clean Anchor-native way
 export type DriftState = IdlAccounts<Drift>["state"];
@@ -1110,13 +1110,11 @@ export const compareDriftValuations = async (
     throw new Error("No active balance found for drift bank");
   }
 
-  // Convert shares to BigNumber/BN
-  const assetSharesBigNumber = wrappedI80F48toBigNumber(balance.assetShares);
-  const liabilitySharesBigNumber = wrappedI80F48toBigNumber(
-    balance.liabilityShares,
+  // Convert shares exactly in integer space to avoid float/string precision artifacts.
+  const assetShares = new BN((toI80Scaled(balance.assetShares) >> 48n).toString());
+  const liabilityShares = new BN(
+    (toI80Scaled(balance.liabilityShares) >> 48n).toString(),
   );
-  const assetShares = new BN(assetSharesBigNumber.toString());
-  const liabilityShares = new BN(liabilitySharesBigNumber.toString());
 
   // For Drift banks, shares are actually the scaled balance from Drift
   // MarginFi stores Drift's scaled balance directly as shares (1:1 mapping)
@@ -1245,6 +1243,15 @@ export const getDriftUser = async (
   return await driftProgram.account.user.fetch(userPDA);
 };
 
+const bnToBigIntSafe = (value: BN): bigint => {
+  const bytes = value.toArrayLike(Uint8Array, "be");
+  let out = 0n;
+  for (const byte of bytes) {
+    out = (out << 8n) | BigInt(byte);
+  }
+  return value.isNeg() ? -out : out;
+};
+
 export async function assertBankBalance(
   marginfiAccount: PublicKey,
   bankPubkey: PublicKey,
@@ -1266,17 +1273,18 @@ export async function assertBankBalance(
 
   assert(balance);
 
-  let shares: BigNumber;
-  if (isLiability) {
-    shares = wrappedI80F48toBigNumber(balance.liabilityShares);
-  } else {
-    shares = wrappedI80F48toBigNumber(balance.assetShares);
-  }
+  const sharesWrapped = isLiability
+    ? balance.liabilityShares
+    : balance.assetShares;
 
   if (typeof expectedBalance === "number") {
+    const shares = wrappedI80F48toBigNumber(sharesWrapped);
     assert.approximately(shares.toNumber(), expectedBalance, 1);
   } else {
-    assert.equal(shares.toString(), expectedBalance.toString());
+    const sharesScaled = toI80Scaled(sharesWrapped);
+    const sharesWholeUnits = sharesScaled >> 48n;
+    const expectedWholeUnits = bnToBigIntSafe(expectedBalance);
+    assert.equal(sharesWholeUnits.toString(), expectedWholeUnits.toString());
   }
 }
 

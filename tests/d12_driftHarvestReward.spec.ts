@@ -24,7 +24,7 @@ import {
   bankRunProvider,
 } from "./rootHooks";
 import { assert } from "chai";
-import { processBankrunTransaction } from "./utils/tools";
+import { processBankrunTransaction, toBnFromI80 } from "./utils/tools";
 import {
   makeDriftDepositIx,
   makeDriftHarvestRewardIx,
@@ -896,7 +896,7 @@ describe("d12: Drift Harvest Reward", () => {
       await getTokenBalance(bankRunProvider, spotMarketBefore.vault),
     );
     const tokenAmountBefore = scaledBalanceToTokenAmount(
-      new BN(wrappedI80F48toBigNumber(balanceBefore.assetShares).toString()),
+      toBnFromI80(balanceBefore.assetShares),
       spotMarketBefore,
       true,
     );
@@ -996,7 +996,7 @@ describe("d12: Drift Harvest Reward", () => {
     assert(balanceAfter);
 
     const tokenAmountAfter = scaledBalanceToTokenAmount(
-      new BN(wrappedI80F48toBigNumber(balanceAfter.assetShares).toString()),
+      toBnFromI80(balanceAfter.assetShares),
       spotMarketAfter,
       true,
     );

@@ -24,7 +24,7 @@ import {
 } from "./rootHooks";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { MockUser } from "./utils/mocks";
-import { processBankrunTransaction } from "./utils/tools";
+import { processBankrunTransaction, toBnFromI80 } from "./utils/tools";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
 import { deriveBankWithSeed } from "./utils/pdas";
@@ -600,12 +600,7 @@ describe("d10: Drift Interest Simulation", () => {
 
           const isUsdc = bank.mint.equals(ecosystem.usdcMint.publicKey);
 
-          const marginfiAssetSharesBigNumber = wrappedI80F48toBigNumber(
-            balance.assetShares,
-          );
-          const marginfiAssetShares = new BN(
-            marginfiAssetSharesBigNumber.toString(),
-          );
+          const marginfiAssetShares = toBnFromI80(balance.assetShares);
 
           if (marginfiAssetShares.gt(new BN(0))) {
             await advanceTimeAndAccrueInterest(10);
@@ -637,11 +632,8 @@ describe("d10: Drift Interest Simulation", () => {
               );
 
             if (updatedBalance) {
-              const updatedAssetShares = wrappedI80F48toBigNumber(
+              const scaledUpdatedBalance = toBnFromI80(
                 updatedBalance.assetShares,
-              );
-              const scaledUpdatedBalance = new BN(
-                updatedAssetShares.toString(),
               );
 
               if (!scaledUpdatedBalance.isZero()) {
@@ -765,12 +757,7 @@ describe("d10: Drift Interest Simulation", () => {
         return simulateRandomOperation(user, banks);
       }
 
-      const marginfiAssetSharesBigNumber = wrappedI80F48toBigNumber(
-        balance.assetShares,
-      );
-      const marginfiAssetShares = new BN(
-        marginfiAssetSharesBigNumber.toString(),
-      );
+      const marginfiAssetShares = toBnFromI80(balance.assetShares);
 
       const spotMarket = await getSpotMarketAccount(
         driftBankrunProgram,
@@ -862,10 +849,7 @@ describe("d10: Drift Interest Simulation", () => {
 
       let scaledBalanceBefore = new BN(0);
       if (balanceBefore) {
-        const assetSharesBefore = wrappedI80F48toBigNumber(
-          balanceBefore.assetShares,
-        );
-        scaledBalanceBefore = new BN(assetSharesBefore.toString());
+        scaledBalanceBefore = toBnFromI80(balanceBefore.assetShares);
       }
 
       await advanceTimeAndAccrueInterest(1);
@@ -878,10 +862,7 @@ describe("d10: Drift Interest Simulation", () => {
 
       let scaledBalanceAfter = new BN(0);
       if (balanceAfter) {
-        const assetSharesAfter = wrappedI80F48toBigNumber(
-          balanceAfter.assetShares,
-        );
-        scaledBalanceAfter = new BN(assetSharesAfter.toString());
+        scaledBalanceAfter = toBnFromI80(balanceAfter.assetShares);
       }
 
       const interestEarned = scaledBalanceAfter.sub(scaledBalanceBefore);
@@ -929,10 +910,7 @@ describe("d10: Drift Interest Simulation", () => {
         );
 
         if (balanceMid) {
-          const assetSharesMid = wrappedI80F48toBigNumber(
-            balanceMid.assetShares,
-          );
-          const scaledBalanceMid = new BN(assetSharesMid.toString());
+          const scaledBalanceMid = toBnFromI80(balanceMid.assetShares);
 
           if (!scaledBalanceMid.isZero()) {
             await makeWithdrawThroughMarginfi(

@@ -442,7 +442,8 @@ describe("kx: Fixed Kamino price bank", () => {
 
   it("(user 3) withdraw from fixed Kamino bank - happy path", async () => {
     const user = users[3];
-    const withdrawAmount = new BN(100 * 10 ** ecosystem.usdcDecimals);
+    const withdrawAmountNative = "100000000"; // 100 USDC in native units
+    const withdrawAmount = new BN(withdrawAmountNative);
 
     const reserveBeforeWithdrawRaw =
       await klendBankrunProgram.account.reserve.fetch(usdcReserve);
@@ -501,9 +502,8 @@ describe("kx: Fixed Kamino price bank", () => {
     const diff = userUsdcAfter - userUsdcBefore;
     console.log("withdrew: " + diff.toLocaleString());
 
-    const expectedWithdraw = exchangeRateBeforeWithdraw
-      .mul(withdrawAmount.toString())
-      .toNumber();
+    const expectedWithdraw =
+      exchangeRateBeforeWithdraw.toNumber() * Number(withdrawAmountNative);
     assert.approximately(diff, expectedWithdraw, 2);
 
     const reserveAfterWithdrawRaw =

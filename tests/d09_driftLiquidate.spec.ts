@@ -34,6 +34,7 @@ import {
   processBankrunTransaction as processBankrunTx,
   logHealthCache,
   dumpAccBalances,
+  toBnFromI80,
 } from "./utils/tools";
 import { BanksTransactionResultWithMeta } from "./utils/litesvm";
 import {
@@ -372,10 +373,8 @@ describe("d09: Drift Liquidation", () => {
       liquidateeAccBefore.lendingAccount.balances.find(
         (b) => b.bankPk.equals(driftTokenABank) && b.active === 1
       );
-    const liquidateeAssetSharesBefore = new BN(
-      wrappedI80F48toBigNumber(
-        liquidateeTokenABalanceBefore.assetShares
-      ).toString()
+    const liquidateeAssetSharesBefore = toBnFromI80(
+      liquidateeTokenABalanceBefore.assetShares,
     );
 
     while (true) {

@@ -28,6 +28,22 @@ export const COLLATERAL_MINT_DECIMALS = 6;
 
 export type WrappedI68F60 = { value: number[] };
 
+const decimalFromIntegerLike = (value: unknown): Decimal => {
+  if (value instanceof Decimal) return value;
+  if (typeof value === "bigint") return new Decimal(value.toString());
+  if (typeof value === "number") return new Decimal(Math.trunc(value));
+
+  const asString =
+    value !== null && value !== undefined && "toString" in Object(value)
+      ? (value as { toString: () => string }).toString()
+      : String(value);
+  const integerPrefix = asString.match(/^-?\d+/);
+  if (!integerPrefix) {
+    throw new Error(`Invalid integer-like value: ${asString}`);
+  }
+  return new Decimal(integerPrefix[0]);
+};
+
 /**
  * Refresh a generic Kamino reserve with a legacy Pyth oracle
  * @param program
@@ -170,28 +186,28 @@ export function getBorrowedAmount(state: Reserve): Decimal {
  * @returns the available liquidity amount of the reserve in lamports
  */
 export function getLiquidityAvailableAmount(state: Reserve): Decimal {
-  return new Decimal(state.liquidity.totalAvailableAmount.toString());
+  return decimalFromIntegerLike(state.liquidity.totalAvailableAmount);
 }
 
 /**
  * @returns the total protocol fees accrued (in lamports) since last refresh
  */
 export function getAccumulatedProtocolFees(state: Reserve): Decimal {
-  return new Decimal(state.liquidity.accumulatedProtocolFeesSf.toString());
+  return decimalFromIntegerLike(state.liquidity.accumulatedProtocolFeesSf);
 }
 
 /**
  * @returns the total referrer fees accrued (in lamports) since last refresh
  */
 export function getAccumulatedReferrerFees(state: Reserve): Decimal {
-  return new Decimal(state.liquidity.accumulatedReferrerFeesSf.toString());
+  return decimalFromIntegerLike(state.liquidity.accumulatedReferrerFeesSf);
 }
 
 /**
  * @returns the total pending referrer fees (in lamports) since last refresh
  */
 export function getPendingReferrerFees(state: Reserve): Decimal {
-  return new Decimal(state.liquidity.pendingReferrerFeesSf.toString());
+  return decimalFromIntegerLike(state.liquidity.pendingReferrerFeesSf);
 }
 
 /**
@@ -213,10 +229,10 @@ export function getTotalSupply(state: Reserve): Decimal {
  * @returns
  */
 export function scaledSupplies(state: Reserve): [Decimal, Decimal] {
-  const liqMintDecimals = new Decimal(state.liquidity.mintDecimals.toString());
+  const liqMintDecimals = decimalFromIntegerLike(state.liquidity.mintDecimals);
   const totalSupplyLamports = getTotalSupply(state);
-  const mintTotalSupplyLam = new Decimal(
-    state.collateral.mintTotalSupply.toString()
+  const mintTotalSupplyLam = decimalFromIntegerLike(
+    state.collateral.mintTotalSupply,
   );
 
   const liqScale = new Decimal(10).pow(liqMintDecimals);
@@ -300,7 +316,7 @@ export function estimateCollateralFromDeposit(
   state: Reserve,
   depositAmountRaw: BN
 ): BN {
-  let depositRawDecimal = new Decimal(depositAmountRaw.toString());
+  let depositRawDecimal = decimalFromIntegerLike(depositAmountRaw);
   const rate = getCollateralExchangeRate(state);
 
   const collateralTokens = depositRawDecimal.mul(rate);

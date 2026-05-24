@@ -17,9 +17,8 @@ import {
   bankRunProvider,
 } from "./rootHooks";
 import { USER_ACCOUNT_D } from "./utils/mocks";
-import { processBankrunTransaction } from "./utils/tools";
+import { processBankrunTransaction, toBnFromI80 } from "./utils/tools";
 import { assertKeysEqual, getTokenBalance } from "./utils/genericTests";
-import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { makeInitializeSpotMarketIx } from "./utils/drift-sdk";
 import { deriveSpotMarketPDA } from "./utils/pdas";
 import {
@@ -418,9 +417,7 @@ describe("d11: Drift Pool ID Markets", () => {
       );
       assert.ok(balanceIndex >= 0);
       const balance = userAccountData.lendingAccount.balances[balanceIndex];
-      const assetSharesBN = new BN(
-        wrappedI80F48toBigNumber(balance.assetShares).toString()
-      );
+      const assetSharesBN = toBnFromI80(balance.assetShares);
       assert.ok(assetSharesBN.gt(new BN(0)));
     });
 
@@ -475,9 +472,7 @@ describe("d11: Drift Pool ID Markets", () => {
       );
       assert.ok(balanceIndex >= 0);
       const balance = userAccountData.lendingAccount.balances[balanceIndex];
-      const assetSharesBN = new BN(
-        wrappedI80F48toBigNumber(balance.assetShares).toString()
-      );
+      const assetSharesBN = toBnFromI80(balance.assetShares);
       assert.ok(assetSharesBN.gt(new BN(0)));
     });
 

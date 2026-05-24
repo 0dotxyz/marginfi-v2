@@ -418,7 +418,7 @@ describe("Deposit funds", () => {
     );
 
     // Note: The first deposit issues shares 1:1 and the shares use the same decimals
-    assertI80F48Approx(
+    assertI80F48Equal(
       balances[depositIndex].assetShares,
       depositAmountSol_native
     );

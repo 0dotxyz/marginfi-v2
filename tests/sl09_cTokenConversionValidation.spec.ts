@@ -23,7 +23,7 @@ import {
   SOLEND_USDC_RESERVE,
   SOLEND_TOKEN_A_RESERVE,
 } from "./rootHooks";
-import { processBankrunTransaction } from "./utils/tools";
+import { processBankrunTransaction, toBnFromI80 } from "./utils/tools";
 import { getTokenBalance, assertBNApproximately } from "./utils/genericTests";
 import { accountInit } from "./utils/user-instructions";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
@@ -160,9 +160,7 @@ describe("sl09: cToken Conversion Math Validation", () => {
     const balance0 = marginfiAccount0.lendingAccount.balances.find(
       (b) => b.active === 1 && b.bankPk.equals(usdcBank)
     );
-    user0InitialCTokens = new BN(
-      wrappedI80F48toBigNumber(balance0.assetShares).toString()
-    );
+    user0InitialCTokens = toBnFromI80(balance0.assetShares);
 
     assertBNApproximately(user0InitialCTokens, expectedUsdcCTokens, new BN(1));
 
@@ -214,9 +212,7 @@ describe("sl09: cToken Conversion Math Validation", () => {
     const balance1 = marginfiAccount1.lendingAccount.balances.find(
       (b) => b.active === 1 && b.bankPk.equals(tokenABank)
     );
-    user1InitialCTokens = new BN(
-      wrappedI80F48toBigNumber(balance1.assetShares).toString()
-    );
+    user1InitialCTokens = toBnFromI80(balance1.assetShares);
 
     assertBNApproximately(
       user1InitialCTokens,
@@ -297,9 +293,7 @@ describe("sl09: cToken Conversion Math Validation", () => {
     const balance0 = marginfiAccount0.lendingAccount.balances.find(
       (b) => b.active === 1 && b.bankPk.equals(usdcBank)
     );
-    const user0CTokens = new BN(
-      wrappedI80F48toBigNumber(balance0.assetShares).toString()
-    );
+    const user0CTokens = toBnFromI80(balance0.assetShares);
     const usdcReserve = await fetchAndParseReserve(
       solendAccounts.get(SOLEND_USDC_RESERVE)!
     );
@@ -344,9 +338,7 @@ describe("sl09: cToken Conversion Math Validation", () => {
     const balance1 = marginfiAccount1.lendingAccount.balances.find(
       (b) => b.active === 1 && b.bankPk.equals(tokenABank)
     );
-    const user1CTokens = new BN(
-      wrappedI80F48toBigNumber(balance1.assetShares).toString()
-    );
+    const user1CTokens = toBnFromI80(balance1.assetShares);
     const tokenAReserve = await fetchAndParseReserve(
       solendAccounts.get(SOLEND_TOKEN_A_RESERVE)!
     );
@@ -561,19 +553,15 @@ async function fetchAndParseReserve(reservePubkey: PublicKey): Promise<any> {
  * Where Total Liquidity = Available Amount + Borrowed Amount - Protocol Fees
  */
 function calculateExchangeRate(reserve: any): BN {
-  const availableAmount = new BN(reserve.liquidity.availableAmount.toString());
-  const borrowedAmountWads = new BN(
-    reserve.liquidity.borrowedAmountWads.toString()
-  );
+  const availableAmount = reserve.liquidity.availableAmount as BN;
+  const borrowedAmountWads = reserve.liquidity.borrowedAmountWads as BN;
   const borrowedAmount = borrowedAmountWads.div(WAD);
-  const protocolFeesWads = new BN(
-    reserve.liquidity.accumulatedProtocolFeesWads.toString()
-  );
+  const protocolFeesWads = reserve.liquidity.accumulatedProtocolFeesWads as BN;
   const protocolFees = protocolFeesWads.div(WAD);
 
   const totalLiquidity = availableAmount.add(borrowedAmount).sub(protocolFees);
 
-  const cTokenSupply = new BN(reserve.collateral.mintTotalSupply.toString());
+  const cTokenSupply = reserve.collateral.mintTotalSupply as BN;
 
   if (cTokenSupply.isZero()) {
     return new BN(1);
