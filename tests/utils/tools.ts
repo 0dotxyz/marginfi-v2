@@ -691,9 +691,11 @@ export async function getBankrunTime(ctx: ProgramTestContext): Promise<number> {
 export const toBnFromI80 = (value: any): BN =>
   new BN((toI80Scaled(value) >> 48n).toString());
 
-/** Convert BN to bigint without using decimal string conversion. */
+/** Convert BN to bigint without using decimal string conversion. On some Linux systems, NaN is
+ * randomly appended to certain BN when using BN.toString(). This uses the underlying UINT directly
+ * which bypasses whatever black magic causes that bug. */
 export const bnToBigIntSafe = (value: BN): bigint => {
-  const bytes = value.toArrayLike(Uint8Array, "be");
+  const bytes = Uint8Array.from(value.abs().toArray("be"));
   let out = 0n;
   for (const byte of bytes) {
     out = (out << 8n) | BigInt(byte);

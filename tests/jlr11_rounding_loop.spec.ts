@@ -24,6 +24,7 @@ import { accountInit } from "./utils/user-instructions";
 import { configureJuplendProtocolPermissions } from "./utils/juplend/jlr-pool-setup";
 import {
   buildHealthRemainingAccounts,
+  bnToBigIntSafe,
   mintToTokenAccount,
   processBankrunTransaction,
 } from "./utils/tools";
@@ -56,6 +57,7 @@ const roundingUserMarginfiAccount = Keypair.fromSeed(USER_ACCOUNT_SEED);
 const LOOP_ITERATIONS = 25;
 const SEARCH_MAX_AMOUNT = 2_000_000n;
 const SEARCH_STEP = 1n;
+const MIN_LOOP_DEPOSIT = 10n;
 const MIN_LOOP_SHARES = 10n;
 const FUND_USDC = new BN(100 * 10 ** ecosystem.usdcDecimals);
 const BOOTSTRAP_WARP_SECONDS = 3_255;
@@ -66,18 +68,6 @@ type RoundingProbe = {
   shares: bigint;
   redeem: bigint;
   loss: bigint;
-};
-
-const bigintFromIntegerLike = (value: unknown): bigint => {
-  const raw =
-    value !== null && value !== undefined && "toString" in Object(value)
-      ? (value as { toString: () => string }).toString()
-      : String(value);
-  const integerPrefix = raw.match(/^-?\d+/);
-  if (!integerPrefix) {
-    throw new Error(`Invalid integer-like value: ${raw}`);
-  }
-  return BigInt(integerPrefix[0]);
 };
 
 const P = BigInt(EXCHANGE_PRICES_PRECISION);
@@ -103,7 +93,11 @@ const findFirstPositiveLossAmount = (
   tokenExchangePrice: bigint,
   liquidityExchangePrice: bigint,
 ): RoundingProbe | null => {
-  for (let amount = 1n; amount <= SEARCH_MAX_AMOUNT; amount += SEARCH_STEP) {
+  for (
+    let amount = MIN_LOOP_DEPOSIT;
+    amount <= SEARCH_MAX_AMOUNT;
+    amount += SEARCH_STEP
+  ) {
     const shares = previewSharesForDeposit(
       amount,
       liquidityExchangePrice,
@@ -149,8 +143,8 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
     );
 
     return {
-      tokenExchangePrice: bigintFromIntegerLike(lending.tokenExchangePrice),
-      liquidityExchangePrice: bigintFromIntegerLike(
+      tokenExchangePrice: bnToBigIntSafe(lending.tokenExchangePrice),
+      liquidityExchangePrice: bnToBigIntSafe(
         lending.liquidityExchangePrice,
       ),
     };
