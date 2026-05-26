@@ -104,8 +104,16 @@ impl FuzzTest {
             banks,
         );
 
+        // Randomize `deposit_up_to_limit`: when true, marginfi caps the deposit
+        // at the bank's `deposit_limit`, so the actual moved amount may be
+        // less than `amount`. Conservation and share-direction invariants
+        // still hold, but the exact-amount equality check must be skipped.
+        let deposit_up_to_limit = self.trident.random_bool();
         let ix = types::marginfi::LendingAccountDepositInstruction::data(
-            types::marginfi::LendingAccountDepositInstructionData::new(amount, Some(false)),
+            types::marginfi::LendingAccountDepositInstructionData::new(
+                amount,
+                Some(deposit_up_to_limit),
+            ),
         )
         .accounts(
             types::marginfi::LendingAccountDepositInstructionAccounts::new(
@@ -127,30 +135,61 @@ impl FuzzTest {
         let vault_after = invariants::token_balance(&mut self.trident, bank_layout.liquidity_vault);
 
         if res.is_success() {
-            invariants::assert_deposit_balance_invariants(
-                amount,
-                user_before,
-                user_after,
-                vault_before,
-                vault_after,
-            );
-            invariants::assert_exact_deposit_token_leg(
-                amount,
-                user_before,
-                user_after,
-                vault_before,
-                vault_after,
-            );
+            // Transfer-fee banks have non-conserving balance flows: user −
+            // amount, vault + (amount − fee), fee → mint's withheld
+            // balance. Skip the strict conservation / exact-amount checks
+            // when the bank has a transfer fee. Direction checks (user
+            // tokens drop, vault rises) and share-direction invariants
+            // still hold.
+            if !bank.has_transfer_fee {
+                invariants::assert_deposit_balance_invariants(
+                    amount,
+                    user_before,
+                    user_after,
+                    vault_before,
+                    vault_after,
+                );
+                if !deposit_up_to_limit {
+                    invariants::assert_exact_deposit_token_leg(
+                        amount,
+                        user_before,
+                        user_after,
+                        vault_before,
+                        vault_after,
+                    );
+                }
+            } else {
+                // Weakest sanity for fee banks: user balance fell, vault
+                // balance rose. Both deltas non-zero when amount > 0.
+                invariant!(
+                    user_after <= user_before,
+                    "t22-fee deposit: user must not gain. before {user_before}, after {user_after}"
+                );
+                invariant!(
+                    vault_after >= vault_before,
+                    "t22-fee deposit: vault must not lose. before {vault_before}, after {vault_after}"
+                );
+            }
             let share_snap_after = invariants::marginfi_bank_share_snapshot(
                 &mut self.trident,
                 marginfi_account,
                 bank.address,
             );
+            // When `deposit_up_to_limit` is true and the bank is already at
+            // capacity, marginfi caps the deposit to 0 even though `amount`
+            // is positive. The share invariant key off the *actually moved*
+            // amount, derived from the user token delta.
+            let share_amount = if deposit_up_to_limit {
+                user_before.saturating_sub(user_after)
+            } else {
+                amount
+            };
             invariants::assert_deposit_success_share_invariants(
                 &share_snap_before,
                 &share_snap_after,
-                amount,
+                share_amount,
             );
+            invariants::assert_balances_packed(&mut self.trident, marginfi_account);
         } else {
             invariants::assert_no_balance_change(
                 user_before,
@@ -193,8 +232,12 @@ impl FuzzTest {
             banks,
         );
 
+        // Randomize `withdraw_all`: when true, marginfi ignores `amount`
+        // and withdraws the user's full asset position (and closes the
+        // balance). The exact-amount equality check must be skipped.
+        let withdraw_all = self.trident.random_bool();
         let ix = types::marginfi::LendingAccountWithdrawInstruction::data(
-            types::marginfi::LendingAccountWithdrawInstructionData::new(amount, Some(false)),
+            types::marginfi::LendingAccountWithdrawInstructionData::new(amount, Some(withdraw_all)),
         )
         .accounts(
             types::marginfi::LendingAccountWithdrawInstructionAccounts::new(
@@ -224,23 +267,34 @@ impl FuzzTest {
                 vault_before,
                 vault_after,
             );
-            invariants::assert_exact_user_vault_delta_withdraw(
-                amount,
-                user_before,
-                user_after,
-                vault_before,
-                vault_after,
-            );
+            if !withdraw_all {
+                invariants::assert_exact_user_vault_delta_withdraw(
+                    amount,
+                    user_before,
+                    user_after,
+                    vault_before,
+                    vault_after,
+                );
+            }
             let share_snap_after = invariants::marginfi_bank_share_snapshot(
                 &mut self.trident,
                 marginfi_account,
                 bank.address,
             );
+            // With `withdraw_all`, the actual moved amount is whatever the
+            // user's position was — derive it from the token delta so the
+            // share-direction invariant has the correct expectation.
+            let share_amount = if withdraw_all {
+                user_after.saturating_sub(user_before)
+            } else {
+                amount
+            };
             invariants::assert_withdraw_success_share_invariants(
                 &share_snap_before,
                 &share_snap_after,
-                amount,
+                share_amount,
             );
+            invariants::assert_balances_packed(&mut self.trident, marginfi_account);
         } else {
             invariants::assert_no_balance_change(
                 user_before,
@@ -390,6 +444,7 @@ impl FuzzTest {
                 &share_snap_after,
                 amount,
             );
+            invariants::assert_balances_packed(&mut self.trident, marginfi_account);
         } else {
             invariants::assert_no_balance_change(
                 user_before,
@@ -432,8 +487,12 @@ impl FuzzTest {
             banks,
         );
 
+        // Randomize `repay_all`: when true, marginfi ignores `amount` and
+        // pays off the user's entire liability (and closes the balance).
+        // The exact-amount equality check must be skipped.
+        let repay_all = self.trident.random_bool();
         let repay_ix = types::marginfi::LendingAccountRepayInstruction::data(
-            types::marginfi::LendingAccountRepayInstructionData::new(amount, Some(false)),
+            types::marginfi::LendingAccountRepayInstructionData::new(amount, Some(repay_all)),
         )
         .accounts(
             types::marginfi::LendingAccountRepayInstructionAccounts::new(
@@ -449,16 +508,6 @@ impl FuzzTest {
         .remaining_accounts(remaining_accounts)
         .instruction();
 
-        // let ix = self.lending_account_repay_ix(
-        //     amount,
-        //     bank.address,
-        //     bank.currency.mint,
-        //     source_token_account,
-        //     marginfi_account,
-        //     authority,
-        //     false,
-        // );
-
         let res = self.trident.process_transaction(&[repay_ix], msg);
 
         let user_after = invariants::token_balance(&mut self.trident, source_token_account);
@@ -472,23 +521,33 @@ impl FuzzTest {
                 vault_before,
                 vault_after,
             );
-            invariants::assert_repay_user_token_delta_matches_post_fee_amount(
-                amount,
-                user_before,
-                user_after,
-                vault_before,
-                vault_after,
-            );
+            if !repay_all {
+                invariants::assert_repay_user_token_delta_matches_post_fee_amount(
+                    amount,
+                    user_before,
+                    user_after,
+                    vault_before,
+                    vault_after,
+                );
+            }
             let share_snap_after = invariants::marginfi_bank_share_snapshot(
                 &mut self.trident,
                 marginfi_account,
                 bank.address,
             );
+            // With `repay_all`, the actual moved amount is whatever the
+            // user's liability was — derive from the token delta.
+            let share_amount = if repay_all {
+                user_before.saturating_sub(user_after)
+            } else {
+                amount
+            };
             invariants::assert_repay_success_share_invariants(
                 &share_snap_before,
                 &share_snap_after,
-                amount,
+                share_amount,
             );
+            invariants::assert_balances_packed(&mut self.trident, marginfi_account);
         } else {
             invariants::assert_no_balance_change(
                 user_before,
@@ -697,6 +756,8 @@ impl FuzzTest {
 
         if res.is_success() {
             invariants::assert_liquidation_success_share_invariants(&snap, &after, asset_amount);
+            invariants::assert_balances_packed(&mut self.trident, liquidator_marginfi_account);
+            invariants::assert_balances_packed(&mut self.trident, liquidatee_marginfi_account);
         } else {
             invariants::assert_liquidation_failure_state_unchanged(&snap, &after);
         }
@@ -749,6 +810,7 @@ impl FuzzTest {
                 liquidatee_marginfi_account,
                 record,
             );
+            invariants::assert_balances_packed(&mut self.trident, liquidatee_marginfi_account);
         }
     }
 }

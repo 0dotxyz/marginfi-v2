@@ -250,6 +250,7 @@ impl FuzzTest {
                 &share_snap_after,
                 amount,
             );
+            invariants::assert_balances_packed(&mut self.trident, marginfi_account);
         } else {
             invariants::assert_juplend_deposit_failure_balances_unchanged(
                 amount,
@@ -385,6 +386,7 @@ impl FuzzTest {
                 &share_snap_after,
                 share_amount_for_invariant,
             );
+            invariants::assert_balances_packed(&mut self.trident, marginfi_account);
         } else {
             invariants::assert_juplend_withdraw_failure_balances_unchanged(
                 amount,

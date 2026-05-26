@@ -24,6 +24,16 @@ use crate::usdc_amount;
 use crate::utils::initialize_token_account;
 use crate::utils::mint_to;
 
+/// Hardcoded transfer-fee parameters for the runtime-initialized T22 bank.
+/// 1% basis points, 1B native-unit maximum fee — values small enough that
+/// the seeder's bootstrap deposit (1e9 units below) reliably succeeds while
+/// still exercising marginfi's `transfer_checked_with_fee` codepath.
+const T22_TRANSFER_FEE_BPS: u16 = 100;
+const T22_MAX_FEE: u64 = 1_000_000_000;
+const T22_MINT_DECIMALS: u8 = 8;
+const T22_SEEDER_INITIAL_AMOUNT: u64 = 10_000_000_000_000;
+const T22_SEEDER_DEPOSIT_AMOUNT: u64 = 1_000_000_000;
+
 fn wrap_i80f48(value: I80F48) -> WrappedI80F48 {
     WrappedI80F48::new(value.to_bits().to_le_bytes())
 }
@@ -112,6 +122,12 @@ impl FuzzTest {
             self.fee_state,
             None,
         );
+
+        // ================================================================================================
+        // Init Token-2022 + TransferFeeConfig bank, then seed a deposit so
+        // every sequence exercises marginfi's T22-with-fee LendingAccountDeposit
+        // codepath at least once.
+        self.init_t22_with_fee_bank_and_seed();
 
         // ================================================================================================
         // Init Kamino Bank for USDC
@@ -730,5 +746,78 @@ impl FuzzTest {
                     user.initial_btc_amount,
                 );
             });
+    }
+
+    /// Bring up the Token-2022 + TransferFeeConfig bank: initialize the
+    /// mint with the extension, mint the seeder's stake, init the bank,
+    /// then run a single `LendingAccountDeposit` so every fuzz sequence
+    /// exercises marginfi's `transfer_checked_with_fee` codepath through
+    /// the deposit ix.
+    pub fn init_t22_with_fee_bank_and_seed(&mut self) {
+        let payer = self.payer.pubkey();
+        let mint = self.t22_bank.currency.mint;
+        let mint_authority = self.t22_mint_authority;
+        let seeder_token_account = self.t22_seeder_token_account;
+        let seeder_owner = self.seeder.address;
+
+        // 1) Initialize the T22 mint with TransferFeeConfig.
+        let mint_ixs = self.trident.initialize_mint_2022(
+            &payer,
+            &mint,
+            T22_MINT_DECIMALS,
+            &mint_authority,
+            None,
+            &[MintExtension::TransferFeeConfig {
+                transfer_fee_config_authority: Some(payer),
+                withdraw_withheld_authority: Some(payer),
+                transfer_fee_basis_points: T22_TRANSFER_FEE_BPS,
+                maximum_fee: T22_MAX_FEE,
+            }],
+        );
+        let res = self.trident.process_transaction(&mint_ixs, None);
+        invariant!(res.is_success());
+
+        // 2) Initialize the seeder's T22 token account.
+        let acc_ixs = self.trident.initialize_token_account_2022(
+            &payer,
+            &seeder_token_account,
+            &mint,
+            &seeder_owner,
+            &[],
+        );
+        let res = self.trident.process_transaction(&acc_ixs, None);
+        invariant!(res.is_success());
+
+        // 3) Mint the seeder's initial T22 balance.
+        let mint_to_ix =
+            self.trident
+                .mint_to_2022(&seeder_token_account, &mint, &mint_authority, T22_SEEDER_INITIAL_AMOUNT);
+        let res = self.trident.process_transaction(&[mint_to_ix], None);
+        invariant!(res.is_success());
+
+        // 4) Init the marginfi bank backed by the new T22 mint.
+        // Reuse `usdc_bank_config()`: weights/limits aren't the point here,
+        // we just need a bank we can deposit into through the standard ix.
+        self.init_bank(
+            payer,
+            self.t22_bank,
+            Self::usdc_bank_config(),
+            self.marginfi_group,
+            self.fee_state,
+            Some("Init T22-with-fee bank"),
+        );
+
+        // 5) Seeder deposit — drives the T22 transfer-fee codepath in
+        //    `LendingAccountDeposit`. `has_transfer_fee = true` on the bank
+        //    tells `lending_account_deposit` to relax exact-amount /
+        //    conservation invariants for this tx.
+        self.lending_account_deposit(
+            T22_SEEDER_DEPOSIT_AMOUNT,
+            self.t22_bank,
+            self.t22_seeder_token_account,
+            self.seeder.marginfi_account,
+            self.seeder.address,
+            Some("Seeder deposit — T22 transfer-fee bank"),
+        );
     }
 }

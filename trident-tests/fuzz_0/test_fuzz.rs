@@ -27,6 +27,12 @@ struct FuzzTest {
     usdc_bank: FuzzTestBank,
     eth_bank: FuzzTestBank,
     btc_bank: FuzzTestBank,
+    /// Token-2022 mint with `TransferFeeConfig` extension. Used to exercise
+    /// marginfi's T22-with-fee deposit math at init time. Only the seeder
+    /// holds a token account for this asset; no per-flow ops yet.
+    t22_bank: FuzzTestBank,
+    t22_seeder_token_account: Pubkey,
+    t22_mint_authority: Pubkey,
     // ================================================================================================
     // Marginfi Group
     marginfi_group: Pubkey,
@@ -87,17 +93,31 @@ impl FuzzTest {
             address: trident.random_keypair().pubkey(),
             currency: Currency::new(constants::USDC, constants::USDC_MINT_AUTHORITY),
             oracle_setup: (OracleSetup::PythPushOracle, constants::USDC_PYTH_PUSH),
+            has_transfer_fee: false,
         };
         let eth_bank = FuzzTestBank {
             address: trident.random_keypair().pubkey(),
             currency: Currency::new(constants::WETH, constants::WETH_MINT_AUTHORITY),
             oracle_setup: (OracleSetup::PythPushOracle, constants::WETH_PYTH_PUSH),
+            has_transfer_fee: false,
         };
         let btc_bank = FuzzTestBank {
             address: trident.random_keypair().pubkey(),
             currency: Currency::new(constants::WBTC, constants::WBTC_MINT_AUTHORITY),
             oracle_setup: (OracleSetup::PythPushOracle, constants::BTC_PYTH_PUSH),
+            has_transfer_fee: false,
         };
+        // T22-with-fee bank — fresh runtime mint, reuses USDC's Pyth-push
+        // for oracle so we don't need a 4th forked Pyth feed.
+        let t22_mint = trident.random_keypair().pubkey();
+        let t22_mint_authority = trident.random_keypair().pubkey();
+        let t22_bank = FuzzTestBank {
+            address: trident.random_keypair().pubkey(),
+            currency: Currency::new(t22_mint, t22_mint_authority),
+            oracle_setup: (OracleSetup::PythPushOracle, constants::USDC_PYTH_PUSH),
+            has_transfer_fee: true,
+        };
+        let t22_seeder_token_account = trident.random_keypair().pubkey();
 
         // ================================================================================================
         // Seeder accounts
@@ -221,6 +241,9 @@ impl FuzzTest {
             usdc_bank,
             eth_bank,
             btc_bank,
+            t22_bank,
+            t22_seeder_token_account,
+            t22_mint_authority,
             fuzz_accounts: AccountAddresses,
             kamino_usdc_reserve,
             kamino_main_lending_market,
@@ -288,7 +311,7 @@ impl FuzzTest {
     }
     // ================================================================================================
     // Deposit - USDC
-    #[flow(weight = 16)]
+    #[flow(weight = 15)]
     fn flow1(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
         let user = self.get_random_user();
@@ -319,7 +342,7 @@ impl FuzzTest {
     }
     // ================================================================================================
     // Borrow - ETH
-    #[flow(weight = 15)]
+    #[flow(weight = 14)]
     fn flow3(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
         let user = self.get_random_user();
@@ -334,7 +357,7 @@ impl FuzzTest {
     }
     // ================================================================================================
     // Repay - ETH
-    #[flow(weight = 15)]
+    #[flow(weight = 14)]
     fn flow4(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
         let user = self.get_random_user();
@@ -391,6 +414,31 @@ impl FuzzTest {
             Some(format!("Liquidation — USDC vs ETH, liquidatee: {}", user.name).as_str()),
         );
         self.scale_pyth_push_oracle_prices(&eth_oracle, denominator, numerator);
+    }
+
+    // ================================================================================================
+    // Standalone oracle move (does NOT revert)
+    //
+    // Flows 7/8 already scale the ETH oracle, but they revert in the same
+    // call so subsequent ops see the pre-scaled price. This flow is the
+    // analog of the legacy libfuzzer harness's `UpdateOracle` action: pick
+    // a random Pyth-push oracle, apply a random multiplier in [0.5×, 5×],
+    // and **leave it that way** so the next deposit/borrow/withdraw/repay
+    // exercises health checks against the new price. Catches bugs that
+    // only surface when prices drift between operations.
+    #[flow(weight = 3)]
+    fn flow_oracle_move(&mut self) {
+        let oracle = match self.trident.random_from_range(0u8..=2) {
+            0 => constants::USDC_PYTH_PUSH,
+            1 => constants::WETH_PYTH_PUSH,
+            _ => constants::BTC_PYTH_PUSH,
+        };
+        // Numerator in [50, 500], denominator = 100  → scale ∈ [0.5×, 5×].
+        // Weighted toward small moves because more integer values fall in
+        // the low half of the range.
+        let numerator: i64 = self.trident.random_from_range(50i64..=500);
+        let denominator: i64 = 100;
+        self.scale_pyth_push_oracle_prices(&oracle, numerator, denominator);
     }
 
     // ================================================================================================
@@ -539,9 +587,49 @@ impl FuzzTest {
     }
 
     #[end]
-    fn end(&mut self) {}
+    fn end(&mut self) {
+        // Advance time by an hour and accrue so any pending interest is
+        // materialized into the bank's totals before we run the end-of-
+        // sequence reconciliations.
+        self.trident.forward_in_time(3600);
+        self.lending_pool_accrue_all_banks(Some("End-of-sequence accrue for solvency check"));
+
+        let banks = [
+            self.usdc_bank.address,
+            self.eth_bank.address,
+            self.btc_bank.address,
+        ];
+
+        // Bank-level solvency: `vault − fees ≈ deposits − liabs` per bank.
+        for bank in banks {
+            invariants::assert_bank_solvency(&mut self.trident, bank);
+        }
+
+        // Bank position-counter consistency: `bank.lending_position_count`
+        // and `bank.borrowing_position_count` must equal the actual count
+        // of marginfi accounts with non-zero positions in each bank.
+        let marginfi_accounts: Vec<Pubkey> = self
+            .users
+            .iter()
+            .map(|u| u.marginfi_account)
+            .chain([self.seeder.marginfi_account, self.liquidator.marginfi_account])
+            .collect();
+        invariants::assert_bank_position_counts(&mut self.trident, &banks, &marginfi_accounts);
+    }
 }
 
 fn main() {
-    FuzzTest::fuzz(10000, 50);
+    // CI scales this per trigger: short on PR (e.g. 500), full on push to
+    // `main` (10000, the default), long on the nightly schedule (e.g. 50000).
+    // Defaults match the historical hard-coded values so local
+    // `trident fuzz run fuzz_0` behaves the same as before.
+    let iterations: u64 = std::env::var("FUZZ_ITERATIONS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10_000);
+    let flows_per_iter: u64 = std::env::var("FUZZ_FLOWS_PER_ITER")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(50);
+    FuzzTest::fuzz(iterations, flows_per_iter);
 }

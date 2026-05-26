@@ -226,6 +226,7 @@ impl FuzzTest {
                 &share_snap_after,
                 amount,
             );
+            invariants::assert_balances_packed(&mut self.trident, marginfi_account);
             self.forward_slot_based_on_reserve(reserve);
         } else {
             invariants::assert_kamino_deposit_failure_balances_unchanged(
@@ -359,6 +360,7 @@ impl FuzzTest {
                 &share_snap_after,
                 share_invariant_amount,
             );
+            invariants::assert_balances_packed(&mut self.trident, marginfi_account);
             self.forward_slot_based_on_reserve(reserve);
         } else {
             invariants::assert_kamino_withdraw_failure_balances_unchanged(
