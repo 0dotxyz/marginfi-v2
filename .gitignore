@@ -8,6 +8,7 @@ target
 .anchor
 /scripts/test-ledger
 /scripts/VALIDATOR_OUT
+.fuzz-artifacts
 
 # TS
 **/dist/
