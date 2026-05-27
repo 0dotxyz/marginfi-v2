@@ -10,7 +10,24 @@ For Trident source code, check out the [Trident repository](https://github.com/A
 cargo install trident-cli --version 0.13.0-rc.4
 ```
 
-### 2. Build the programs
+### 2. Generate `types.rs`
+
+`fuzz_0/types.rs` is **gitignored** — it's regenerated from the
+marginfi + mocks IDLs every CI run (avoids the "committed file goes
+stale" failure mode that anchor-version skew creates). On a fresh
+clone the harness won't compile until you generate it:
+
+```bash
+make types
+```
+
+Requires anchor `0.31.1` (the repo's pinned version) — other anchor
+versions emit different IDL JSON and produce a different `types.rs`.
+
+Re-run `make types` whenever you change marginfi/mocks source or
+account layouts; otherwise the cached `types.rs` is fine.
+
+### 3. Build the programs
 
 ```bash
 # execute from project root
@@ -26,7 +43,7 @@ make build
 > [!WARNING]
 > Make sure the Solana-CLI version is 3.1.13.
 
-### 3. Run the tests
+### 4. Run the tests
 
 ```bash
 trident fuzz run fuzz_0

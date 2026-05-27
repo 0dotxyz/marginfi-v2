@@ -61,10 +61,16 @@ jobs:
         include-anchor: "false"
     - run: cargo test --lib
 
-  build-and-test-workspace:
-    name: Build & Test Anchor Programs
+  # Shared Anchor build — runs in parallel with lint / test-unit /
+  # trident-build. Produces the SBF binaries (`target/sbf/deploy/*.so`)
+  # used by the Rust integration tests, the IDLs (`target/idl/*.json`)
+  # used by the trident harness's types.rs regen, and the TS types
+  # (`target/types/*.ts`) for the bankrun tests. Uploaded as an
+  # artifact so multiple downstream jobs reuse the same build instead
+  # of each running `anchor build` independently.
+  anchor-build:
+    name: Anchor build (shared artifact)
     runs-on: ubuntu-24.04
-    needs: [ test-unit ]
     steps:
     - uses: actions/checkout@v4
     - uses: ./.github/actions/base-setup/
@@ -76,6 +82,50 @@ jobs:
         key: anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}
         restore-keys: |
           anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-
+    - uses: ./.github/actions/build-workspace/
+    # `build-workspace.sh` runs `anchor build --no-idl`, so the IDL +
+    # TS types aren't produced. Regenerate them explicitly here so
+    # `fuzz-trident` can use them for the types.rs regen.
+    - name: Build IDLs (marginfi + mocks)
+      run: |
+        mkdir -p target/idl
+        anchor idl build -p marginfi -o target/idl/marginfi.json
+        anchor idl build -p mocks    -o target/idl/mocks.json
+        # Anchor 0.30+ writes `"address": ""`; trident bakes the
+        # address into `types::<program>::program_id()`, so patch it
+        # back to the canonical pubkey.
+        sed -i 's|"address": ""|"address": "'"${MARGINFI_PROGRAM_ID}"'"|' target/idl/marginfi.json
+        sed -i 's|"address": ""|"address": "'"${MOCKS_PROGRAM_ID}"'"|'    target/idl/mocks.json
+    - name: Upload anchor-build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: anchor-build
+        path: |
+          target/sbf/deploy/*.so
+          target/idl/*.json
+        retention-days: 1
+
+  test-anchor-programs:
+    name: Test Anchor Programs (rust integration)
+    runs-on: ubuntu-24.04
+    needs: [ test-unit, anchor-build ]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: ./.github/actions/base-setup/
+    - name: Download anchor-build artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: anchor-build
+        path: target
+    - name: Restore SBF deploy layout
+      # `upload-artifact` flattens the `target/sbf/deploy/*.so` and
+      # `target/idl/*.json` paths into `target/deploy/*.so` and
+      # `target/idl/*.json`. nextest's `SBF_OUT_DIR` (set by
+      # `scripts/test-program.sh`) expects `target/sbf/deploy/`, so
+      # restore the directory shape before running tests.
+      run: |
+        mkdir -p target/sbf/deploy
+        mv target/deploy/*.so target/sbf/deploy/ 2>/dev/null || true
     - name: Cache nextest host build
       uses: actions/cache@v4
       with:
@@ -84,22 +134,16 @@ jobs:
         key: nextest-host-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml', 'programs/**/src/**', 'programs/**/tests/**', 'test-utils/**') }}
         restore-keys: |
           nextest-host-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-
-    # TODO cache transfer hook and mocks here instead of rebuilding them each time...
-    - uses: ./.github/actions/build-workspace/
-    # ─── Cache cargo-nextest ─────────────────────────────────────────────
     - name: Cache cargo-nextest binary
       uses: actions/cache@v4
       id: cache-nextest
       with:
         path: ~/.cargo/bin/cargo-nextest
         key: cargo-nextest-${{ runner.os }}-v0.9.81
-
     - name: Install cargo-nextest
       if: steps.cache-nextest.outputs.cache-hit != 'true'
-      run: |
-        cargo install cargo-nextest --version "0.9.81" --locked
+      run: cargo install cargo-nextest --version "0.9.81" --locked
       shell: bash
-
     - run: ./scripts/test-program.sh all
 
 
@@ -345,7 +389,9 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
         (github.base_ref == 'main' || endsWith(github.base_ref, '-main')))
-    needs: [ trident-build ]
+    # Consumes IDLs from `anchor-build` (for the types.rs regen) and
+    # the SBF binary from `trident-build` (for LiteSVM to load).
+    needs: [ anchor-build, trident-build ]
     runs-on: ubuntu-24.04
     env:
       # Same SBF v2 override as `trident-build` so the harness binary
@@ -360,11 +406,25 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - uses: ./.github/actions/setup-common/
-    - name: Download program artifact
+    - name: Download trident program binary
       uses: actions/download-artifact@v4
       with:
         name: trident-program-binaries
         path: target/deploy
+    - name: Download anchor-build IDLs
+      uses: actions/download-artifact@v4
+      with:
+        name: anchor-build
+        path: target
+    - name: Restore IDL directory layout
+      # `upload-artifact` flattened `target/idl/*.json` to
+      # `target/*.json`; trident expects `target/idl/*.json`. Move
+      # them back. (The .so files in the same artifact land in
+      # `target/deploy/`, which is fine here — `fuzz-trident` doesn't
+      # use them; only the IDLs.)
+      run: |
+        mkdir -p target/idl
+        find target -maxdepth 1 -name "*.json" -exec mv {} target/idl/ \;
     - name: Cache Cargo registry & index
       uses: actions/cache@v4
       with:
@@ -383,6 +443,23 @@ jobs:
       if: steps.cache-trident-cli.outputs.cache-hit != 'true'
       working-directory: trident-tests
       run: cargo install trident-cli --version ${{ env.TRIDENT_VERSION }}
+
+    - name: Install nightly rustfmt
+      # `trident fuzz refresh` formats the regenerated `types.rs` with
+      # nightly rustfmt (uses unstable formatting features). Stable
+      # 1.79.0 from `setup-common` doesn't satisfy that.
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+        components: rustfmt
+
+    - name: Regenerate trident types.rs
+      # `types.rs` is gitignored — regenerate from the IDLs we just
+      # downloaded from `anchor-build`. No `--idl-paths` so trident
+      # loads every JSON from `../target/idl/`.
+      working-directory: trident-tests
+      run: trident fuzz refresh fuzz_0 -s
 
     - name: Set fuzz size
       id: size
