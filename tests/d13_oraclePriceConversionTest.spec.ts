@@ -1,9 +1,5 @@
 import { BN } from "@coral-xyz/anchor";
-import {
-  PublicKey,
-  Transaction,
-  Keypair,
-} from "@solana/web3.js";
+import { PublicKey, Transaction, Keypair } from "@solana/web3.js";
 import {
   ecosystem,
   driftAccounts,
@@ -35,6 +31,7 @@ import {
   DRIFT_UTILIZATION_PRECISION,
   ONE_YEAR,
   ONE,
+  safeBN,
 } from "./utils/drift-utils";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { makeUpdateSpotMarketCumulativeInterestIx } from "./utils/drift-sdk";
@@ -152,9 +149,11 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
       driftBankrunProgram,
       USDC_MARKET_INDEX
     );
-    initialUsdcBorrows = usdcSpotMarket.borrowBalance;
+    initialUsdcBorrows = safeBN(usdcSpotMarket.borrowBalance);
     lastInterestTs = usdcSpotMarket.lastInterestTs;
-    console.log("Initial USDC Deposits: " + usdcSpotMarket.depositBalance);
+    console.log(
+      "Initial USDC Deposits: " + safeBN(usdcSpotMarket.depositBalance)
+    );
     console.log("Initial USDC Borrows: " + initialUsdcBorrows);
 
     usdcInterestRate = calculateInterestRate(usdcSpotMarket);
@@ -171,9 +170,11 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
       driftBankrunProgram,
       TOKEN_A_MARKET_INDEX
     );
-    initialTokenABorrows = tokenASpotMarket.borrowBalance;
+    initialTokenABorrows = safeBN(tokenASpotMarket.borrowBalance);
     assertBNEqual(tokenASpotMarket.lastInterestTs, lastInterestTs);
-    console.log("Initial Token A Deposits: " + tokenASpotMarket.depositBalance);
+    console.log(
+      "Initial Token A Deposits: " + safeBN(tokenASpotMarket.depositBalance)
+    );
     console.log("Initial Token A Borrows: " + initialTokenABorrows);
 
     tokenAInterestRate = calculateInterestRate(tokenASpotMarket);
@@ -186,10 +187,12 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
         "%"
     ); // ~1000%
 
-    initialUsdcCumulativeBorrowInterest =
-      usdcSpotMarket.cumulativeBorrowInterest;
-    initialTokenACumulativeBorrowInterest =
-      tokenASpotMarket.cumulativeBorrowInterest;
+    initialUsdcCumulativeBorrowInterest = safeBN(
+      usdcSpotMarket.cumulativeBorrowInterest
+    );
+    initialTokenACumulativeBorrowInterest = safeBN(
+      tokenASpotMarket.cumulativeBorrowInterest
+    );
   });
 
   it("Advances time by 30 days and tracks interest accrual", async () => {
@@ -237,8 +240,9 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
 
     const timeSinceLastUpdate =
       usdcSpotMarketAfter.lastInterestTs.sub(lastInterestTs);
-    finalUsdcCumulativeDepositInterest =
-      usdcSpotMarketAfter.cumulativeDepositInterest;
+    finalUsdcCumulativeDepositInterest = safeBN(
+      usdcSpotMarketAfter.cumulativeDepositInterest
+    );
 
     const accumulatedUsdcBorrowInterest = initialUsdcCumulativeBorrowInterest
       .mul(usdcInterestRate)
@@ -251,7 +255,7 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
     );
 
     assertBNApproximately(
-      usdcSpotMarketAfter.cumulativeBorrowInterest.sub(
+      safeBN(usdcSpotMarketAfter.cumulativeBorrowInterest).sub(
         initialUsdcCumulativeBorrowInterest
       ),
       accumulatedUsdcBorrowInterest,
@@ -263,8 +267,9 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
       TOKEN_A_MARKET_INDEX
     );
 
-    finalTokenACumulativeDepositInterest =
-      tokenASpotMarketAfter.cumulativeDepositInterest;
+    finalTokenACumulativeDepositInterest = safeBN(
+      tokenASpotMarketAfter.cumulativeDepositInterest
+    );
 
     const accumulatedTokenABorrowInterest =
       initialTokenACumulativeBorrowInterest
@@ -278,7 +283,7 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
     );
 
     assertBNApproximately(
-      tokenASpotMarketAfter.cumulativeBorrowInterest.sub(
+      safeBN(tokenASpotMarketAfter.cumulativeBorrowInterest).sub(
         initialTokenACumulativeBorrowInterest
       ),
       accumulatedTokenABorrowInterest,
