@@ -406,16 +406,24 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - uses: ./.github/actions/setup-common/
-    - name: Download trident program binary
-      uses: actions/download-artifact@v4
-      with:
-        name: trident-program-binaries
-        path: target/deploy
+    # Download order matters: `anchor-build` ships a LOCALNET-ID
+    # marginfi.so at target/deploy/marginfi.so (for TS bankrun) and
+    # `trident-build` ships a MAINNET-ID marginfi.so at the same path
+    # (for Trident's LiteSVM, which loads the program at
+    # `types::marginfi::program_id()` = MAINNET). Putting trident-build
+    # *after* anchor-build means the mainnet .so wins the path
+    # collision — without this, every ix dies with
+    # `DeclaredProgramIdMismatch` (Anchor 0x1004) and init fails.
     - name: Download anchor-build IDLs
       uses: actions/download-artifact@v4
       with:
         name: anchor-build
         path: target
+    - name: Download trident program binary
+      uses: actions/download-artifact@v4
+      with:
+        name: trident-program-binaries
+        path: target/deploy
     - name: Patch IDL addresses for trident
       # `anchor-build` produces IDLs with whatever addresses the last
       # `anchor build` step bakes in (localnet for marginfi.json since
