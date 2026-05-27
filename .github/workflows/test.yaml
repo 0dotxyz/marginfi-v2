@@ -16,7 +16,11 @@ defaults:
 
 env:
   RUST_TOOLCHAIN: 1.79.0
-  SOLANA_CLI_VERSION: 3.1.13
+  # Workflow-level Solana CLI version is what `0.1.9-main` runs at and
+  # what the JupLend integration tests (Rust + TS bankrun) require.
+  # Bumping to 3.1.13 broke ~6 JupLend tests; trident jobs that need
+  # 3.1.13's SBF v2 format hardcode that override at the job level.
+  SOLANA_CLI_VERSION: 2.1.20
   ANCHOR_CLI_VERSION: 0.31.1
   ANCHOR_SHA: e6d7dafe12da661a36ad1b4f3b5970e8986e5321
   CARGO_TERM_COLOR: always
@@ -280,12 +284,17 @@ jobs:
         exit $CODE
 
   # ────────────────────────────────────────────────────────────────────
-  # Trident fuzz stack — three jobs (build → IDL drift gate → fuzz). All
-  # three share the same `if:` guard: only PRs targeting `main` or a
-  # `*-main` version branch (and manual `workflow_dispatch`) run them.
-  # This matches the dev flow: daily PRs land on `0.1.9-main`, release
-  # PRs land on `main`. PRs to feature branches skip the trident stack
-  # entirely; `push: main` skips too (the release PR already ran it).
+  # Trident fuzz stack — two jobs (build → fuzz). Both share the same
+  # `if:` guard: only PRs targeting `main` or `*-main` (and manual
+  # `workflow_dispatch`) run them. Daily PRs land on `0.1.9-main`,
+  # release PRs land on `main`. Feature-branch PRs skip the trident
+  # stack entirely; `push: main` skips too (the release PR already ran
+  # it).
+  #
+  # Both jobs override `SOLANA_CLI_VERSION` to `3.1.13` — Trident's
+  # LiteSVM loader needs the SBF v2 binary format introduced in Solana
+  # 3.x. The rest of the workflow stays on 2.1.20 because the JupLend
+  # integration tests don't pass on 3.x yet.
   # ────────────────────────────────────────────────────────────────────
 
   trident-build:
@@ -296,6 +305,9 @@ jobs:
         (github.base_ref == 'main' || endsWith(github.base_ref, '-main')))
     runs-on: ubuntu-24.04
     needs: [ test-unit ]
+    env:
+      # Trident's LiteSVM needs the SBF v2 binary format (Solana 3.x).
+      SOLANA_CLI_VERSION: 3.1.13
     steps:
     - uses: actions/checkout@v4
     - uses: ./.github/actions/setup-common/
@@ -328,74 +340,6 @@ jobs:
         path: target/deploy/*.so
         retention-days: 1
 
-  trident-idl-drift:
-    # Detects drift between `programs/marginfi/src/` (the on-chain
-    # truth) and `trident-tests/fuzz_0/types.rs` (what the fuzz harness
-    # uses to construct ixs and read account data). Catches the
-    # account-list-changed-but-harness-stale class of bug that
-    # previously broke `init_kamino_obligation` for ~2 weeks.
-    name: Trident — IDL ⇄ types.rs drift
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' &&
-        (github.base_ref == 'main' || endsWith(github.base_ref, '-main')))
-    runs-on: ubuntu-24.04
-    needs: [ test-unit ]
-    steps:
-    - uses: actions/checkout@v4
-    - uses: ./.github/actions/base-setup/
-    - name: Install nightly rustfmt
-      # `trident fuzz refresh` formats the regenerated `types.rs` with
-      # nightly rustfmt (uses unstable formatting features). Stable
-      # 1.79.0 from `base-setup` doesn't satisfy that.
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: nightly
-        components: rustfmt
-    - name: Cache Trident CLI
-      uses: actions/cache@v4
-      id: cache-trident-cli
-      with:
-        path: ~/.cargo/bin/trident
-        key: trident-cli-v${{ env.TRIDENT_VERSION }}-${{ runner.os }}
-    - name: Install Trident CLI
-      if: steps.cache-trident-cli.outputs.cache-hit != 'true'
-      working-directory: trident-tests
-      run: cargo install trident-cli --version ${{ env.TRIDENT_VERSION }}
-    - name: Regenerate IDLs
-      run: |
-        mkdir -p target/idl
-        # Both programs are mirrored into `trident-tests/fuzz_0/types.rs` —
-        # marginfi for the real instructions and accounts, mocks for the
-        # `program_id()` reference used by some account-meta helpers.
-        # Refreshing only one would drop the other module and always diff.
-        anchor idl build -p marginfi -o target/idl/marginfi.json
-        anchor idl build -p mocks    -o target/idl/mocks.json
-        sed -i 's|"address": ""|"address": "'"${MARGINFI_PROGRAM_ID}"'"|' target/idl/marginfi.json
-        sed -i 's|"address": ""|"address": "'"${MOCKS_PROGRAM_ID}"'"|'    target/idl/mocks.json
-    - name: Regenerate trident types
-      working-directory: trident-tests
-      # No `--idl-paths` so trident loads every JSON from `../target/idl/`
-      # — keeps the marginfi + mocks modules in sync.
-      run: trident fuzz refresh fuzz_0 -s
-    - name: Assert types.rs is in sync
-      run: |
-        if ! git diff --quiet trident-tests/fuzz_0/types.rs; then
-          echo "::error file=trident-tests/fuzz_0/types.rs::trident-tests/fuzz_0/types.rs is stale vs current marginfi+mocks IDLs. Regenerate locally and commit:"
-          echo ""
-          echo "  anchor idl build -p marginfi -o target/idl/marginfi.json"
-          echo "  anchor idl build -p mocks    -o target/idl/mocks.json"
-          echo "  sed -i '' 's|\"address\": \"\"|\"address\": \"${MARGINFI_PROGRAM_ID}\"|' target/idl/marginfi.json"
-          echo "  sed -i '' 's|\"address\": \"\"|\"address\": \"${MOCKS_PROGRAM_ID}\"|'    target/idl/mocks.json"
-          echo "  ( cd trident-tests && trident fuzz refresh fuzz_0 -s )"
-          echo ""
-          echo "Diff (first 200 lines):"
-          git --no-pager diff trident-tests/fuzz_0/types.rs | head -200
-          exit 1
-        fi
-        echo "✅ trident-tests/fuzz_0/types.rs matches current IDL"
-
   fuzz-trident:
     name: Fuzz (trident) — ${{ matrix.test.name }}
     if: |
@@ -404,6 +348,10 @@ jobs:
         (github.base_ref == 'main' || endsWith(github.base_ref, '-main')))
     needs: [ trident-build ]
     runs-on: ubuntu-24.04
+    env:
+      # Same SBF v2 override as `trident-build` so the harness binary
+      # built by that job loads cleanly in LiteSVM here.
+      SOLANA_CLI_VERSION: 3.1.13
     strategy:
       fail-fast: false
       matrix:

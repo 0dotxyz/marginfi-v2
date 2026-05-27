@@ -1,6 +1,6 @@
 [toolchain]
 anchor_version = "0.31.1"
-solana_version = "3.1.13"
+solana_version = "2.1.20"
 # Getting "thread 'main' panicked at cli/src/lib.rs:545:18:"? Check your toolchain matches the above.
 
 [workspace]
