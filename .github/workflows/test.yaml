@@ -406,31 +406,31 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - uses: ./.github/actions/setup-common/
-    # Download order matters: `anchor-build` ships a LOCALNET-ID
-    # marginfi.so at target/deploy/marginfi.so (for TS bankrun) and
-    # `trident-build` ships a MAINNET-ID marginfi.so at the same path
-    # (for Trident's LiteSVM, which loads the program at
-    # `types::marginfi::program_id()` = MAINNET). Putting trident-build
-    # *after* anchor-build means the mainnet .so wins the path
-    # collision — without this, every ix dies with
-    # `DeclaredProgramIdMismatch` (Anchor 0x1004) and init fails.
-    - name: Download anchor-build IDLs
+    # `anchor-build` ships a LOCALNET-ID marginfi.so at
+    # `target/deploy/marginfi.so` (for TS bankrun) AND `trident-build`
+    # ships a MAINNET-ID marginfi.so at the same path (for Trident's
+    # LiteSVM). To avoid the collision, we extract anchor-build to a
+    # scratch path and lift only the IDLs into `target/idl/`. Trident's
+    # binary then goes to `target/deploy/` with no contention.
+    - name: Download anchor-build (IDLs scratch path)
       uses: actions/download-artifact@v4
       with:
         name: anchor-build
-        path: target
+        path: anchor-build-scratch
+    - name: Stage anchor IDLs
+      run: |
+        mkdir -p target/idl
+        cp anchor-build-scratch/idl/*.json target/idl/
     - name: Download trident program binary
       uses: actions/download-artifact@v4
       with:
         name: trident-program-binaries
         path: target/deploy
     - name: Patch IDL addresses for trident
-      # `anchor-build` produces IDLs with whatever addresses the last
-      # `anchor build` step bakes in (localnet for marginfi.json since
-      # the localnet `anchor build -p marginfi -- --features custom-heap`
-      # runs last). Trident pins `types::<program>::program_id()` to
-      # whatever's in the IDL, so we patch back to mainnet here for
-      # the harness's view of the program.
+      # `anchor-build`'s `marginfi.json` ships a localnet address (the
+      # localnet anchor build was the last step in that job). Trident
+      # pins `types::<program>::program_id()` to whatever's in the IDL,
+      # so we patch it back to mainnet for the harness's view.
       run: |
         sed -i 's|"address": "[^"]*"|"address": "'"${MARGINFI_PROGRAM_ID}"'"|' target/idl/marginfi.json
         sed -i 's|"address": "[^"]*"|"address": "'"${MOCKS_PROGRAM_ID}"'"|'    target/idl/mocks.json
