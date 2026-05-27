@@ -348,10 +348,7 @@ mod tests {
         let config1 = EmodeConfig::from_entries(&[entry1]);
         let config2 = EmodeConfig::from_entries(&[entry2]);
 
-        let reconciled = reconcile_emode_configs(
-            vec![config1, config2],
-            RequirementType::Initial,
-        );
+        let reconciled = reconcile_emode_configs(vec![config1, config2], RequirementType::Initial);
 
         // Expected: For tag 101 - init, init = min(0.7,0.6)=0.6
         assert_eq!(reconciled.count, 1);
@@ -372,10 +369,7 @@ mod tests {
         let config1 = EmodeConfig::from_entries(&[generic_entry(99)]);
         let config2 = EmodeConfig::from_entries(&[generic_entry(101)]);
 
-        let reconciled = reconcile_emode_configs(
-            vec![config1, config2],
-            RequirementType::Initial,
-        );
+        let reconciled = reconcile_emode_configs(vec![config1, config2], RequirementType::Initial);
 
         assert_eq!(reconciled.count, 0);
     }
@@ -403,10 +397,8 @@ mod tests {
         let config2 = EmodeConfig::from_entries(&[entry2]);
         let config3 = EmodeConfig::from_entries(&[entry3]);
 
-        let reconciled = reconcile_emode_configs(
-            vec![config1, config2, config3],
-            RequirementType::Initial,
-        );
+        let reconciled =
+            reconcile_emode_configs(vec![config1, config2, config3], RequirementType::Initial);
 
         assert_eq!(reconciled.count, 1);
         assert_eq!(reconciled.entries[0].collateral_bank_emode_tag, 101);
