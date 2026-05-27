@@ -7,6 +7,42 @@ use marginfi_type_crate::types::{
     RiskTier, WrappedI80F48, INTEREST_CURVE_SEVEN_POINT,
 };
 
+use crate::errors::MarginfiError;
+use crate::prelude::MarginfiResult;
+
+// Byte offsets of the configured oracle pubkeys within Kamino's `Reserve` account data
+// (including the 8-byte Anchor discriminator). Derived from `idls-complete/kamino_lending.json`:
+// Reserve.config (offset 4848) → ReserveConfig.token_info (offset +176) → field within TokenInfo.
+const KAMINO_RESERVE_SWITCHBOARD_PRICE_OFFSET: usize = 4848 + 176 + 128 + 8;
+const KAMINO_RESERVE_PYTH_PRICE_OFFSET: usize = 4848 + 176 + 192 + 8;
+
+/// Reads the oracle pubkey that Kamino's reserve was configured with, for the given setup type.
+/// Returns `KaminoInvalidOracleSetup` for non-Kamino setups, `KaminoReserveValidationFailed` if
+/// the account is shorter than expected.
+pub fn read_kamino_reserve_oracle(
+    reserve_account: &AccountInfo,
+    oracle_setup: OracleSetup,
+) -> MarginfiResult<Pubkey> {
+    let data = reserve_account.try_borrow_data()?;
+    read_kamino_reserve_oracle_from_bytes(&data, oracle_setup)
+}
+
+fn read_kamino_reserve_oracle_from_bytes(
+    data: &[u8],
+    oracle_setup: OracleSetup,
+) -> MarginfiResult<Pubkey> {
+    let offset = match oracle_setup {
+        OracleSetup::KaminoPythPush => KAMINO_RESERVE_PYTH_PRICE_OFFSET,
+        OracleSetup::KaminoSwitchboardPull => KAMINO_RESERVE_SWITCHBOARD_PRICE_OFFSET,
+        _ => return err!(MarginfiError::KaminoInvalidOracleSetup),
+    };
+    let bytes: [u8; 32] = data
+        .get(offset..offset + 32)
+        .and_then(|slice| slice.try_into().ok())
+        .ok_or(MarginfiError::KaminoReserveValidationFailed)?;
+    Ok(Pubkey::new_from_array(bytes))
+}
+
 /// Used to configure Kamino banks. A simplified version of `BankConfigCompact` which omits most
 /// values related to interest since Kamino banks cannot earn interest or be borrowed against.
 // TODO: Jon mentioned there are some extra options he wants to see in config, investigate later.
@@ -129,5 +165,74 @@ impl Default for KaminoConfigCompact {
             oracle_max_age: 10,
             oracle_max_confidence: 0, // Use default 10%
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Kamino's `Reserve` account is 8 (discriminator) + 8616 (data) = 8624 bytes.
+    const KAMINO_RESERVE_DATA_LEN: usize = 8624;
+
+    fn reserve_buffer_with_oracle(offset: usize, oracle: Pubkey) -> Vec<u8> {
+        let mut buf = vec![0u8; KAMINO_RESERVE_DATA_LEN];
+        buf[offset..offset + 32].copy_from_slice(oracle.as_ref());
+        buf
+    }
+
+    #[test]
+    fn reads_pyth_oracle_from_kamino_reserve() {
+        let oracle = Pubkey::new_unique();
+        let buf = reserve_buffer_with_oracle(KAMINO_RESERVE_PYTH_PRICE_OFFSET, oracle);
+        let got =
+            read_kamino_reserve_oracle_from_bytes(&buf, OracleSetup::KaminoPythPush).unwrap();
+        assert_eq!(got, oracle);
+    }
+
+    #[test]
+    fn reads_switchboard_oracle_from_kamino_reserve() {
+        let oracle = Pubkey::new_unique();
+        let buf = reserve_buffer_with_oracle(KAMINO_RESERVE_SWITCHBOARD_PRICE_OFFSET, oracle);
+        let got = read_kamino_reserve_oracle_from_bytes(&buf, OracleSetup::KaminoSwitchboardPull)
+            .unwrap();
+        assert_eq!(got, oracle);
+    }
+
+    #[test]
+    fn rejects_non_kamino_oracle_setup() {
+        let buf = vec![0u8; KAMINO_RESERVE_DATA_LEN];
+        let err =
+            read_kamino_reserve_oracle_from_bytes(&buf, OracleSetup::PythPushOracle).unwrap_err();
+        assert_eq!(err, MarginfiError::KaminoInvalidOracleSetup.into());
+    }
+
+    #[test]
+    fn rejects_short_account_data() {
+        let buf = vec![0u8; KAMINO_RESERVE_PYTH_PRICE_OFFSET];
+        let err =
+            read_kamino_reserve_oracle_from_bytes(&buf, OracleSetup::KaminoPythPush).unwrap_err();
+        assert_eq!(err, MarginfiError::KaminoReserveValidationFailed.into());
+    }
+
+    #[test]
+    fn pyth_and_switchboard_offsets_are_distinct() {
+        let pyth_oracle = Pubkey::new_unique();
+        let switchboard_oracle = Pubkey::new_unique();
+        let mut buf = vec![0u8; KAMINO_RESERVE_DATA_LEN];
+        buf[KAMINO_RESERVE_PYTH_PRICE_OFFSET..KAMINO_RESERVE_PYTH_PRICE_OFFSET + 32]
+            .copy_from_slice(pyth_oracle.as_ref());
+        buf[KAMINO_RESERVE_SWITCHBOARD_PRICE_OFFSET..KAMINO_RESERVE_SWITCHBOARD_PRICE_OFFSET + 32]
+            .copy_from_slice(switchboard_oracle.as_ref());
+
+        assert_eq!(
+            read_kamino_reserve_oracle_from_bytes(&buf, OracleSetup::KaminoPythPush).unwrap(),
+            pyth_oracle
+        );
+        assert_eq!(
+            read_kamino_reserve_oracle_from_bytes(&buf, OracleSetup::KaminoSwitchboardPull)
+                .unwrap(),
+            switchboard_oracle
+        );
     }
 }

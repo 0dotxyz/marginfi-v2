@@ -302,6 +302,8 @@ pub enum MarginfiError {
     InvalidKaminoReserve, // 6213
     #[msg("Invalid Kamino obligation: account constraint violated")]
     InvalidKaminoObligation, // 6214
+    #[msg("Bank oracle does not match the Kamino reserve's configured oracle")]
+    KaminoOracleMismatch, // 6215
     // **************END KAMINO ERRORS
 
     // ************** BEGIN DRIFT ERRORS (starting at 6300)
@@ -600,6 +602,7 @@ impl From<u32> for MarginfiError {
             6212 => MarginfiError::MaxMaintLeverageExceeded,
             6213 => MarginfiError::InvalidKaminoReserve,
             6214 => MarginfiError::InvalidKaminoObligation,
+            6215 => MarginfiError::KaminoOracleMismatch,
 
             // Drift-specific errors (starting at 6300)
             6300 => MarginfiError::DriftInvalidOracleSetup,

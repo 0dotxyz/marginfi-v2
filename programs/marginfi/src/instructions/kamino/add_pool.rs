@@ -4,7 +4,9 @@ use crate::{
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{
-        bank::BankImpl, bank_config::BankConfigImpl, kamino::KaminoConfigCompact,
+        bank::BankImpl,
+        bank_config::BankConfigImpl,
+        kamino::{read_kamino_reserve_oracle, KaminoConfigCompact},
         marginfi_group::MarginfiGroupImpl,
     },
     MarginfiError, MarginfiResult,
@@ -50,6 +52,19 @@ pub fn lending_pool_add_bank_kamino(
             OracleSetup::KaminoPythPush | OracleSetup::KaminoSwitchboardPull
         ),
         MarginfiError::KaminoInvalidOracleSetup
+    );
+
+    // Marginfi prices Kamino positions as (marginfi_oracle_price × kamino_exchange_rate). If the
+    // admin-supplied oracle differs from the one Kamino's reserve was configured with, the same
+    // asset gets priced two different ways and Kamino's `refreshReserve` ix also breaks.
+    let kamino_oracle = read_kamino_reserve_oracle(
+        &reserve_loader.to_account_info(),
+        bank_config.oracle_setup,
+    )?;
+    require_keys_eq!(
+        bank_config.oracle,
+        kamino_oracle,
+        MarginfiError::KaminoOracleMismatch
     );
 
     let config = bank_config.to_bank_config(reserve_key);

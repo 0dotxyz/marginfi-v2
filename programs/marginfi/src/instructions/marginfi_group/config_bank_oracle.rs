@@ -1,6 +1,7 @@
 use crate::events::{GroupEventHeader, LendingPoolBankConfigureOracleEvent};
 use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
+use crate::state::kamino::read_kamino_reserve_oracle;
 use crate::{MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::constants::FREEZE_SETTINGS;
@@ -40,6 +41,18 @@ pub fn lending_pool_configure_bank_oracle(
 
         bank.config
             .validate_oracle_setup(ctx.remaining_accounts, None, None, None)?;
+
+        // For Kamino banks, enforce that marginfi's oracle equals the one Kamino's reserve was
+        // configured with. `validate_oracle_setup` has already confirmed `remaining_accounts[1]`
+        // is the bank's reserve (matches `oracle_keys[1]`), so it's safe to read from here.
+        if matches!(
+            setup_type,
+            OracleSetup::KaminoPythPush | OracleSetup::KaminoSwitchboardPull
+        ) {
+            let kamino_oracle =
+                read_kamino_reserve_oracle(&ctx.remaining_accounts[1], setup_type)?;
+            require_keys_eq!(oracle, kamino_oracle, MarginfiError::KaminoOracleMismatch);
+        }
 
         emit!(LendingPoolBankConfigureOracleEvent {
             header: GroupEventHeader {
