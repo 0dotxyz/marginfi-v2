@@ -304,7 +304,6 @@ jobs:
       (github.event_name == 'pull_request' &&
         (github.base_ref == 'main' || endsWith(github.base_ref, '-main')))
     runs-on: ubuntu-24.04
-    needs: [ test-unit ]
     env:
       # Trident's LiteSVM needs the SBF v2 binary format (Solana 3.x).
       SOLANA_CLI_VERSION: 3.1.13
