@@ -49,8 +49,7 @@ pub fn lending_pool_configure_bank_oracle(
             setup_type,
             OracleSetup::KaminoPythPush | OracleSetup::KaminoSwitchboardPull
         ) {
-            let kamino_oracle =
-                read_kamino_reserve_oracle(&ctx.remaining_accounts[1], setup_type)?;
+            let kamino_oracle = read_kamino_reserve_oracle(&ctx.remaining_accounts[1], setup_type)?;
             require_keys_eq!(oracle, kamino_oracle, MarginfiError::KaminoOracleMismatch);
         }
 

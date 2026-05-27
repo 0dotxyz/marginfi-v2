@@ -185,8 +185,7 @@ mod tests {
     fn reads_pyth_oracle_from_kamino_reserve() {
         let oracle = Pubkey::new_unique();
         let buf = reserve_buffer_with_oracle(KAMINO_RESERVE_PYTH_PRICE_OFFSET, oracle);
-        let got =
-            read_kamino_reserve_oracle_from_bytes(&buf, OracleSetup::KaminoPythPush).unwrap();
+        let got = read_kamino_reserve_oracle_from_bytes(&buf, OracleSetup::KaminoPythPush).unwrap();
         assert_eq!(got, oracle);
     }
 
