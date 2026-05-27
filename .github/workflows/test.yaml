@@ -62,19 +62,37 @@ jobs:
     - run: cargo test --lib
 
   # Shared Anchor build — runs in parallel with lint / test-unit /
-  # trident-build. Produces the SBF binaries (`target/sbf/deploy/*.so`)
-  # used by the Rust integration tests, the IDLs (`target/idl/*.json`)
-  # used by the trident harness's types.rs regen, and the TS types
-  # (`target/types/*.ts`) for the bankrun tests. Uploaded as an
-  # artifact so multiple downstream jobs reuse the same build instead
-  # of each running `anchor build` independently.
+  # trident-build. Produces:
+  #
+  #   target/sbf/deploy/*.so     – mainnet-ID workspace build, for Rust
+  #                                 nextest integration tests
+  #   target/deploy/marginfi.so   – LOCALNET-ID marginfi (via the
+  #                                 `--no-default-features --features
+  #                                 custom-heap` build flag), for the
+  #                                 TS bankrun stack
+  #   target/deploy/mocks.so      – no ID variation, for TS bankrun
+  #   target/deploy/test_transfer_hook.so – no ID variation, for TS bankrun
+  #   target/idl/*.json           – IDLs for both stacks. Address fields
+  #                                 reflect whichever variant was built
+  #                                 last (localnet for marginfi.json,
+  #                                 default for mocks.json). TS bankrun
+  #                                 uses them as-is; trident patches the
+  #                                 address downstream before regen.
+  #   target/types/*.ts           – TS bindings for bankrun
+  #
+  # Why the two-pass marginfi build: CLAUDE.md notes the program ID is
+  # baked into the `.so` via features (`custom-heap` ⇒ localnet ID,
+  # default ⇒ mainnet ID). One physical file can't satisfy both, so
+  # `build-workspace.sh` produces the mainnet variant into
+  # `target/sbf/deploy/` and the second `anchor build` produces the
+  # localnet variant into `target/deploy/`.
   anchor-build:
     name: Anchor build (shared artifact)
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
     - uses: ./.github/actions/base-setup/
-    - name: Cache Anchor SBF build
+    - name: Cache Anchor SBF build (mainnet workspace)
       uses: actions/cache@v4
       with:
         path: |
@@ -82,27 +100,33 @@ jobs:
         key: anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}
         restore-keys: |
           anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-
-    - uses: ./.github/actions/build-workspace/
-    # `build-workspace.sh` runs `anchor build --no-idl`, so the IDL +
-    # TS types aren't produced. Regenerate them explicitly here so
-    # `fuzz-trident` can use them for the types.rs regen.
-    - name: Build IDLs (marginfi + mocks)
-      run: |
-        mkdir -p target/idl
-        anchor idl build -p marginfi -o target/idl/marginfi.json
-        anchor idl build -p mocks    -o target/idl/mocks.json
-        # Anchor 0.30+ writes `"address": ""`; trident bakes the
-        # address into `types::<program>::program_id()`, so patch it
-        # back to the canonical pubkey.
-        sed -i 's|"address": ""|"address": "'"${MARGINFI_PROGRAM_ID}"'"|' target/idl/marginfi.json
-        sed -i 's|"address": ""|"address": "'"${MOCKS_PROGRAM_ID}"'"|'    target/idl/mocks.json
-    - name: Upload anchor-build artifacts
+    - name: Cache Anchor localnet build (TS bankrun consumers)
+      uses: actions/cache@v4
+      with:
+        path: |
+          target/deploy
+          target/idl
+          target/types
+        key: anchor-localnet-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}
+        restore-keys: |
+          anchor-localnet-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-
+    - name: Build workspace (mainnet IDs → target/sbf/)
+      uses: ./.github/actions/build-workspace/
+    - name: Build mocks (target/deploy/)
+      run: anchor build -p mocks
+    - name: Build transfer-hook (target/deploy/)
+      run: anchor build -p test_transfer_hook --no-idl
+    - name: Build marginfi localnet (target/deploy/)
+      run: anchor build -p marginfi -- --no-default-features --features custom-heap
+    - name: Upload anchor-build artifact
       uses: actions/upload-artifact@v4
       with:
         name: anchor-build
         path: |
           target/sbf/deploy/*.so
+          target/deploy/*.so
           target/idl/*.json
+          target/types/*.ts
         retention-days: 1
 
   test-anchor-programs:
@@ -117,15 +141,11 @@ jobs:
       with:
         name: anchor-build
         path: target
-    - name: Restore SBF deploy layout
-      # `upload-artifact` flattens the `target/sbf/deploy/*.so` and
-      # `target/idl/*.json` paths into `target/deploy/*.so` and
-      # `target/idl/*.json`. nextest's `SBF_OUT_DIR` (set by
-      # `scripts/test-program.sh`) expects `target/sbf/deploy/`, so
-      # restore the directory shape before running tests.
-      run: |
-        mkdir -p target/sbf/deploy
-        mv target/deploy/*.so target/sbf/deploy/ 2>/dev/null || true
+    # nextest reads `SBF_OUT_DIR=target/sbf/deploy` (set by
+    # `scripts/test-program.sh`). The artifact's `target/sbf/deploy/*.so`
+    # paths arrive intact thanks to the path-glob upload — no
+    # flattening to undo. `target/deploy/*.so` (the localnet variants
+    # used by bankrun) also land in the download but are unused here.
     - name: Cache nextest host build
       uses: actions/cache@v4
       with:
@@ -231,10 +251,21 @@ jobs:
   localnet-test-marginfi:
     name: Anchor Bankrun Tests (Marginfi)
     runs-on: ubuntu-24.04
-    needs: [ test-unit ]
+    # Consumes `anchor-build`'s artifacts for all three programs
+    # (marginfi-localnet + mocks + transfer_hook) — no local anchor
+    # builds. `test-unit` retained as the cheap-canary gate.
+    needs: [ test-unit, anchor-build ]
     steps:
     - uses: actions/checkout@v4
     - uses: ./.github/actions/base-setup/
+
+    - name: Download anchor-build artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: anchor-build
+        # The artifact preserves `target/{sbf/deploy,deploy,idl,types}/`
+        # subdir structure as-uploaded — no layout fix-up needed.
+        path: target
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -261,37 +292,6 @@ jobs:
 
     - name: Install JS deps
       run: yarn install --immutable
-
-    # ─── Cache transfer hook ─────────────────────────────────────────────
-    - name: Cache transfer-hook build
-      uses: actions/cache@v4
-      id: cache-transfer
-      with:
-        path: target/deploy/test_transfer_hook.so
-        key: anchor-transfer-hook-${{ runner.os }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('programs/test_transfer_hook/**/*') }}
-
-    - name: Build transfer hook
-      if: steps.cache-transfer.outputs.cache-hit != 'true'
-      run: anchor build -p test_transfer_hook --no-idl
-
-    # ─── Cache mocks program ─────────────────────────────────────────────
-    - name: Cache mocks build & IDL
-      uses: actions/cache@v4
-      id: cache-mocks
-      with:
-        path: |
-          target/deploy/mocks.so
-          target/idl/mocks.json
-          target/types/mocks.ts
-        key: anchor-mocks-${{ runner.os }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('programs/mocks/**/*') }}
-
-    - name: Build mocks
-      if: steps.cache-mocks.outputs.cache-hit != 'true'
-      run: anchor build -p mocks
-
-    # ─── Marginfi always builds from scratch ─────────────────────────
-    - name: Build marginfi
-      run: anchor build -p marginfi -- --no-default-features --features custom-heap
 
     - name: Run Anchor tests (retry on segfault)
       run: |
@@ -416,15 +416,16 @@ jobs:
       with:
         name: anchor-build
         path: target
-    - name: Restore IDL directory layout
-      # `upload-artifact` flattened `target/idl/*.json` to
-      # `target/*.json`; trident expects `target/idl/*.json`. Move
-      # them back. (The .so files in the same artifact land in
-      # `target/deploy/`, which is fine here — `fuzz-trident` doesn't
-      # use them; only the IDLs.)
+    - name: Patch IDL addresses for trident
+      # `anchor-build` produces IDLs with whatever addresses the last
+      # `anchor build` step bakes in (localnet for marginfi.json since
+      # the localnet `anchor build -p marginfi -- --features custom-heap`
+      # runs last). Trident pins `types::<program>::program_id()` to
+      # whatever's in the IDL, so we patch back to mainnet here for
+      # the harness's view of the program.
       run: |
-        mkdir -p target/idl
-        find target -maxdepth 1 -name "*.json" -exec mv {} target/idl/ \;
+        sed -i 's|"address": "[^"]*"|"address": "'"${MARGINFI_PROGRAM_ID}"'"|' target/idl/marginfi.json
+        sed -i 's|"address": "[^"]*"|"address": "'"${MOCKS_PROGRAM_ID}"'"|'    target/idl/mocks.json
     - name: Cache Cargo registry & index
       uses: actions/cache@v4
       with:
