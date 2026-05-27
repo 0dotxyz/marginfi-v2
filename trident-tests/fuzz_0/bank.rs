@@ -17,7 +17,12 @@ impl Currency {
     }
 }
 
-#[derive(Clone, Copy)]
+// `Copy` dropped: post-anchor-0.31.1 IDL regen no longer derives Copy
+// on `OracleSetup` (it's `Clone + PartialEq` only), so the
+// `(OracleSetup, Pubkey)` tuple can't be Copy either. Callers that
+// previously relied on implicit Copy now use `.clone()` explicitly.
+// See memory: "Trident fuzz refresh workflow — Copy/derive shifts".
+#[derive(Clone)]
 pub struct FuzzTestBank {
     pub currency: Currency,
     pub address: Pubkey,

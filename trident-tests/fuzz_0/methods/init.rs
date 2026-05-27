@@ -93,7 +93,7 @@ impl FuzzTest {
         // Init Bank for USDC
         self.init_bank(
             self.payer.pubkey(),
-            self.usdc_bank,
+            self.usdc_bank.clone(),
             Self::usdc_bank_config(),
             self.marginfi_group,
             self.fee_state,
@@ -104,7 +104,7 @@ impl FuzzTest {
         // Init Bank for WETH
         self.init_bank(
             self.payer.pubkey(),
-            self.eth_bank,
+            self.eth_bank.clone(),
             Self::eth_bank_config(),
             self.marginfi_group,
             self.fee_state,
@@ -115,7 +115,7 @@ impl FuzzTest {
         // Init Bank for cbBTC
         self.init_bank(
             self.payer.pubkey(),
-            self.btc_bank,
+            self.btc_bank.clone(),
             Self::btc_bank_config(),
             self.marginfi_group,
             self.fee_state,
@@ -197,7 +197,7 @@ impl FuzzTest {
         // ================================================================================================
         // Update Bank Oracle for USDC
         self.update_bank_oracle(
-            self.usdc_bank,
+            self.usdc_bank.clone(),
             self.marginfi_group,
             self.payer.pubkey(),
             None,
@@ -206,7 +206,7 @@ impl FuzzTest {
         // ================================================================================================
         // Update Bank Oracle for WETH
         self.update_bank_oracle(
-            self.eth_bank,
+            self.eth_bank.clone(),
             self.marginfi_group,
             self.payer.pubkey(),
             None,
@@ -215,7 +215,7 @@ impl FuzzTest {
         // ================================================================================================
         // Update Bank Oracle for cbBTC
         self.update_bank_oracle(
-            self.btc_bank,
+            self.btc_bank.clone(),
             self.marginfi_group,
             self.payer.pubkey(),
             None,
@@ -879,7 +879,7 @@ impl FuzzTest {
         // we just need a bank we can deposit into through the standard ix.
         self.init_bank(
             payer,
-            self.t22_bank,
+            self.t22_bank.clone(),
             Self::usdc_bank_config(),
             self.marginfi_group,
             self.fee_state,
@@ -892,7 +892,7 @@ impl FuzzTest {
         //    conservation invariants for this tx.
         self.lending_account_deposit(
             T22_SEEDER_DEPOSIT_AMOUNT,
-            self.t22_bank,
+            self.t22_bank.clone(),
             self.seeder.t22_token_account,
             self.seeder.marginfi_account,
             self.seeder.address,
@@ -946,7 +946,7 @@ impl FuzzTest {
         // 3) Init the marginfi bank with the isolated config.
         self.init_bank(
             payer,
-            self.isolated_bank,
+            self.isolated_bank.clone(),
             Self::isolated_bank_config(),
             self.marginfi_group,
             self.fee_state,

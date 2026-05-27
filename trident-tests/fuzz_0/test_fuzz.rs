@@ -360,7 +360,7 @@ impl FuzzTest {
         let amount: u64 = usdc_amount!(10_000_000);
         self.lending_account_deposit(
             amount,
-            self.usdc_bank,
+            self.usdc_bank.clone(),
             self.seeder.usdc_token_account,
             self.seeder.marginfi_account,
             self.seeder.address,
@@ -371,7 +371,7 @@ impl FuzzTest {
         let amount: u64 = weth_amount!(1_000_000);
         self.lending_account_deposit(
             amount,
-            self.eth_bank,
+            self.eth_bank.clone(),
             self.seeder.eth_token_account,
             self.seeder.marginfi_account,
             self.seeder.address,
@@ -383,7 +383,7 @@ impl FuzzTest {
         let amount: u64 = btc_amount!(500_000);
         self.lending_account_deposit(
             amount,
-            self.btc_bank,
+            self.btc_bank.clone(),
             self.seeder.btc_token_account,
             self.seeder.marginfi_account,
             self.seeder.address,
@@ -423,7 +423,7 @@ impl FuzzTest {
         let user_a = self.users[0].clone();
         self.lending_account_deposit(
             usdc_amount!(1_000),
-            self.usdc_bank,
+            self.usdc_bank.clone(),
             user_a.usdc_token_account,
             user_a.marginfi_account,
             user_a.address,
@@ -431,7 +431,7 @@ impl FuzzTest {
         );
         self.lending_account_borrow(
             100_000,
-            self.eth_bank,
+            self.eth_bank.clone(),
             user_a.eth_token_account,
             user_a.marginfi_account,
             user_a.address,
@@ -439,7 +439,7 @@ impl FuzzTest {
         );
         self.lending_account_repay(
             2,
-            self.eth_bank,
+            self.eth_bank.clone(),
             user_a.eth_token_account,
             user_a.marginfi_account,
             user_a.address,
@@ -481,7 +481,7 @@ impl FuzzTest {
         let user = self.get_random_user();
         self.lending_account_deposit(
             amount,
-            self.usdc_bank,
+            self.usdc_bank.clone(),
             user.usdc_token_account,
             user.marginfi_account,
             user.address,
@@ -497,7 +497,7 @@ impl FuzzTest {
         let user = self.get_random_user();
         self.lending_account_withdraw(
             amount,
-            self.usdc_bank,
+            self.usdc_bank.clone(),
             user.usdc_token_account,
             user.marginfi_account,
             user.address,
@@ -512,7 +512,7 @@ impl FuzzTest {
         let user = self.get_random_user();
         self.lending_account_borrow(
             amount,
-            self.eth_bank,
+            self.eth_bank.clone(),
             user.eth_token_account,
             user.marginfi_account,
             user.address,
@@ -527,7 +527,7 @@ impl FuzzTest {
         let user = self.get_random_user();
         self.lending_account_repay(
             amount,
-            self.eth_bank,
+            self.eth_bank.clone(),
             user.eth_token_account,
             user.marginfi_account,
             user.address,
@@ -614,7 +614,7 @@ impl FuzzTest {
         self.lending_flashloan_borrow_repay(
             borrow,
             repay,
-            self.btc_bank,
+            self.btc_bank.clone(),
             &user,
             Some(format!("BTC flashloan for {}", user.name).as_str()),
         );
@@ -635,8 +635,8 @@ impl FuzzTest {
         self.scale_pyth_push_oracle_prices(&eth_oracle, numerator, denominator);
         self.lending_account_liquidate(
             asset_amount,
-            self.usdc_bank,
-            self.eth_bank,
+            self.usdc_bank.clone(),
+            self.eth_bank.clone(),
             self.liquidator.marginfi_account,
             self.liquidator.address,
             user.marginfi_account,
@@ -685,7 +685,7 @@ impl FuzzTest {
         let user = self.get_random_user();
         self.lending_account_deposit(
             amount,
-            self.t22_bank,
+            self.t22_bank.clone(),
             user.t22_token_account,
             user.marginfi_account,
             user.address,
@@ -705,7 +705,7 @@ impl FuzzTest {
         let user = self.get_random_user();
         self.lending_account_deposit(
             amount,
-            self.isolated_bank,
+            self.isolated_bank.clone(),
             user.isolated_token_account,
             user.marginfi_account,
             user.address,
@@ -721,7 +721,7 @@ impl FuzzTest {
         let user = self.get_random_user();
         self.lending_account_withdraw(
             amount,
-            self.t22_bank,
+            self.t22_bank.clone(),
             user.t22_token_account,
             user.marginfi_account,
             user.address,
@@ -793,7 +793,7 @@ impl FuzzTest {
 
         self.lending_account_deposit(
             usdc_amount!(1_000_000),
-            self.usdc_bank,
+            self.usdc_bank.clone(),
             liquidator.usdc_token_account,
             liquidator.marginfi_account,
             liquidator.address,
@@ -802,7 +802,7 @@ impl FuzzTest {
 
         self.lending_account_deposit(
             usdc_amount!(10_000),
-            self.usdc_bank,
+            self.usdc_bank.clone(),
             victim.usdc_token_account,
             victim.marginfi_account,
             victim.address,
@@ -814,7 +814,7 @@ impl FuzzTest {
         // underwater regardless of the absolute borrow size.
         self.lending_account_borrow(
             10_000_000,
-            self.eth_bank,
+            self.eth_bank.clone(),
             victim.eth_token_account,
             victim.marginfi_account,
             victim.address,
@@ -837,8 +837,8 @@ impl FuzzTest {
 
         self.lending_account_liquidate(
             drain,
-            self.usdc_bank,
-            self.eth_bank,
+            self.usdc_bank.clone(),
+            self.eth_bank.clone(),
             liquidator.marginfi_account,
             liquidator.address,
             victim.marginfi_account,
@@ -861,9 +861,9 @@ impl FuzzTest {
     fn flow_handle_bankruptcy(&mut self) {
         let user = self.get_random_user();
         let bank = match self.trident.random_from_range(0u8..=2) {
-            0 => self.usdc_bank,
-            1 => self.eth_bank,
-            _ => self.btc_bank,
+            0 => self.usdc_bank.clone(),
+            1 => self.eth_bank.clone(),
+            _ => self.btc_bank.clone(),
         };
         self.lending_pool_handle_bankruptcy(
             bank,

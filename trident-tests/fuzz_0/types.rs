@@ -3557,6 +3557,10 @@ pub mod marginfi {
     /// Account metadata for InitBankMetadata instruction
     #[derive(Debug, Clone, Default)]
     pub struct InitBankMetadataInstructionAccountMetas {
+        pub group: AccountMeta,
+
+        pub bank_mint: AccountMeta,
+
         pub bank: AccountMeta,
 
         pub fee_payer: AccountMeta,
@@ -3569,6 +3573,10 @@ pub mod marginfi {
     /// Account pubkeys for InitBankMetadata instruction
     #[derive(Debug, Clone)]
     pub struct InitBankMetadataInstructionAccounts {
+        pub group: Pubkey,
+
+        pub bank_mint: Pubkey,
+
         pub bank: Pubkey,
 
         pub fee_payer: Pubkey,
@@ -3577,8 +3585,22 @@ pub mod marginfi {
     }
 
     impl InitBankMetadataInstructionAccounts {
-        pub fn new(bank: Pubkey, fee_payer: Pubkey, metadata: Pubkey) -> Self {
+        pub fn new(
+            group: Pubkey,
+
+            bank_mint: Pubkey,
+
+            bank: Pubkey,
+
+            fee_payer: Pubkey,
+
+            metadata: Pubkey,
+        ) -> Self {
             Self {
+                group,
+
+                bank_mint,
+
                 bank,
 
                 fee_payer,
@@ -3590,11 +3612,13 @@ pub mod marginfi {
 
     /// Instruction data for InitBankMetadata
     #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
-    pub struct InitBankMetadataInstructionData {}
+    pub struct InitBankMetadataInstructionData {
+        pub bank_seed: u64,
+    }
 
     impl InitBankMetadataInstructionData {
-        pub fn new() -> Self {
-            Self {}
+        pub fn new(bank_seed: u64) -> Self {
+            Self { bank_seed }
         }
     }
 
@@ -3613,6 +3637,10 @@ pub mod marginfi {
         }
 
         pub fn accounts(mut self, accounts: InitBankMetadataInstructionAccounts) -> Self {
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
+
+            self.accounts.bank_mint = AccountMeta::new_readonly(accounts.bank_mint, false);
+
             self.accounts.bank = AccountMeta::new_readonly(accounts.bank, false);
 
             self.accounts.fee_payer = AccountMeta::new(accounts.fee_payer, true);
@@ -3632,6 +3660,10 @@ pub mod marginfi {
 
         fn to_account_metas(&self) -> Vec<AccountMeta> {
             let mut metas = Vec::new();
+
+            metas.push(self.accounts.group.clone());
+
+            metas.push(self.accounts.bank_mint.clone());
 
             metas.push(self.accounts.bank.clone());
 
@@ -17142,6 +17174,8 @@ pub mod marginfi {
     pub struct WriteBankMetadataInstructionAccountMetas {
         pub group: AccountMeta,
 
+        pub bank_mint: AccountMeta,
+
         pub bank: AccountMeta,
 
         pub metadata_admin: AccountMeta,
@@ -17154,132 +17188,6 @@ pub mod marginfi {
     pub struct WriteBankMetadataInstructionAccounts {
         pub group: Pubkey,
 
-        pub bank: Pubkey,
-
-        pub metadata_admin: Pubkey,
-
-        pub metadata: Pubkey,
-    }
-
-    impl WriteBankMetadataInstructionAccounts {
-        pub fn new(group: Pubkey, bank: Pubkey, metadata_admin: Pubkey, metadata: Pubkey) -> Self {
-            Self {
-                group,
-
-                bank,
-
-                metadata_admin,
-
-                metadata,
-            }
-        }
-    }
-
-    /// Instruction data for WriteBankMetadata
-    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
-    pub struct WriteBankMetadataInstructionData {
-        pub ticker: Option<Vec<u8>>,
-
-        pub description: Option<Vec<u8>>,
-    }
-
-    impl WriteBankMetadataInstructionData {
-        pub fn new(ticker: Option<Vec<u8>>, description: Option<Vec<u8>>) -> Self {
-            Self {
-                ticker,
-
-                description,
-            }
-        }
-    }
-
-    /// Implementation for WriteBankMetadataInstruction
-    impl WriteBankMetadataInstruction {
-        fn discriminator() -> [u8; 8] {
-            [147u8, 78u8, 81u8, 133u8, 129u8, 138u8, 233u8, 59u8]
-        }
-
-        pub fn data(data: WriteBankMetadataInstructionData) -> Self {
-            Self {
-                accounts: WriteBankMetadataInstructionAccountMetas::default(),
-                data,
-                remaining_accounts: Vec::new(),
-            }
-        }
-
-        pub fn accounts(mut self, accounts: WriteBankMetadataInstructionAccounts) -> Self {
-            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
-
-            self.accounts.bank = AccountMeta::new_readonly(accounts.bank, false);
-
-            self.accounts.metadata_admin = AccountMeta::new(accounts.metadata_admin, true);
-
-            self.accounts.metadata = AccountMeta::new(accounts.metadata, false);
-
-            self
-        }
-
-        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
-            self.remaining_accounts = accounts;
-            self
-        }
-
-        fn to_account_metas(&self) -> Vec<AccountMeta> {
-            let mut metas = Vec::new();
-
-            metas.push(self.accounts.group.clone());
-
-            metas.push(self.accounts.bank.clone());
-
-            metas.push(self.accounts.metadata_admin.clone());
-
-            metas.push(self.accounts.metadata.clone());
-
-            metas.extend(self.remaining_accounts.clone());
-            metas
-        }
-
-        pub fn instruction(&self) -> Instruction {
-            let mut buffer: Vec<u8> = Vec::new();
-
-            buffer.extend_from_slice(&Self::discriminator());
-
-            self.data.serialize(&mut buffer).unwrap();
-
-            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
-        }
-    }
-
-    // ....................................................................
-    // Instruction: WriteBankMetadataPreInit
-    // ....................................................................
-
-    /// Main instruction struct for WriteBankMetadataPreInit
-    pub struct WriteBankMetadataPreInitInstruction {
-        pub accounts: WriteBankMetadataPreInitInstructionAccountMetas,
-        pub data: WriteBankMetadataPreInitInstructionData,
-        pub remaining_accounts: Vec<AccountMeta>,
-    }
-
-    /// Account metadata for WriteBankMetadataPreInit instruction
-    #[derive(Debug, Clone, Default)]
-    pub struct WriteBankMetadataPreInitInstructionAccountMetas {
-        pub group: AccountMeta,
-
-        pub bank_mint: AccountMeta,
-
-        pub bank: AccountMeta,
-
-        pub metadata_admin: AccountMeta,
-
-        pub metadata: AccountMeta,
-    }
-
-    /// Account pubkeys for WriteBankMetadataPreInit instruction
-    #[derive(Debug, Clone)]
-    pub struct WriteBankMetadataPreInitInstructionAccounts {
-        pub group: Pubkey,
-
         pub bank_mint: Pubkey,
 
         pub bank: Pubkey,
@@ -17289,7 +17197,7 @@ pub mod marginfi {
         pub metadata: Pubkey,
     }
 
-    impl WriteBankMetadataPreInitInstructionAccounts {
+    impl WriteBankMetadataInstructionAccounts {
         pub fn new(
             group: Pubkey,
 
@@ -17315,9 +17223,9 @@ pub mod marginfi {
         }
     }
 
-    /// Instruction data for WriteBankMetadataPreInit
+    /// Instruction data for WriteBankMetadata
     #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
-    pub struct WriteBankMetadataPreInitInstructionData {
+    pub struct WriteBankMetadataInstructionData {
         pub bank_seed: u64,
 
         pub ticker: Option<Vec<u8>>,
@@ -17325,7 +17233,7 @@ pub mod marginfi {
         pub description: Option<Vec<u8>>,
     }
 
-    impl WriteBankMetadataPreInitInstructionData {
+    impl WriteBankMetadataInstructionData {
         pub fn new(bank_seed: u64, ticker: Option<Vec<u8>>, description: Option<Vec<u8>>) -> Self {
             Self {
                 bank_seed,
@@ -17337,21 +17245,21 @@ pub mod marginfi {
         }
     }
 
-    /// Implementation for WriteBankMetadataPreInitInstruction
-    impl WriteBankMetadataPreInitInstruction {
+    /// Implementation for WriteBankMetadataInstruction
+    impl WriteBankMetadataInstruction {
         fn discriminator() -> [u8; 8] {
-            [224u8, 124u8, 22u8, 73u8, 60u8, 209u8, 80u8, 170u8]
+            [147u8, 78u8, 81u8, 133u8, 129u8, 138u8, 233u8, 59u8]
         }
 
-        pub fn data(data: WriteBankMetadataPreInitInstructionData) -> Self {
+        pub fn data(data: WriteBankMetadataInstructionData) -> Self {
             Self {
-                accounts: WriteBankMetadataPreInitInstructionAccountMetas::default(),
+                accounts: WriteBankMetadataInstructionAccountMetas::default(),
                 data,
                 remaining_accounts: Vec::new(),
             }
         }
 
-        pub fn accounts(mut self, accounts: WriteBankMetadataPreInitInstructionAccounts) -> Self {
+        pub fn accounts(mut self, accounts: WriteBankMetadataInstructionAccounts) -> Self {
             self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
 
             self.accounts.bank_mint = AccountMeta::new_readonly(accounts.bank_mint, false);
@@ -23163,7 +23071,7 @@ pub mod marginfi {
     }
 
     /// Custom enum: OracleSetup
-    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone, PartialEq, Copy)]
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone, PartialEq)]
     pub enum OracleSetup {
         None,
 
