@@ -78,7 +78,7 @@ impl FuzzTest {
             .0
     }
 
-    pub fn get_famrs_user_state_address(
+    pub fn get_farms_user_state_address(
         &mut self,
         farm_state: Pubkey,
         delegatee: Pubkey,

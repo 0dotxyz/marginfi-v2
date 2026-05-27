@@ -1224,6 +1224,112 @@ pub mod marginfi {
     // ------------------------------------------------------------------------
 
     // ....................................................................
+    // Instruction: AdminCloseAccount
+    // ....................................................................
+
+    /// Main instruction struct for AdminCloseAccount
+    pub struct AdminCloseAccountInstruction {
+        pub accounts: AdminCloseAccountInstructionAccountMetas,
+        pub data: AdminCloseAccountInstructionData,
+        pub remaining_accounts: Vec<AccountMeta>,
+    }
+
+    /// Account metadata for AdminCloseAccount instruction
+    #[derive(Debug, Clone, Default)]
+    pub struct AdminCloseAccountInstructionAccountMetas {
+        pub group: AccountMeta,
+
+        pub marginfi_account: AccountMeta,
+
+        pub global_fee_wallet: AccountMeta,
+    }
+
+    /// Account pubkeys for AdminCloseAccount instruction
+    #[derive(Debug, Clone)]
+    pub struct AdminCloseAccountInstructionAccounts {
+        pub group: Pubkey,
+
+        pub marginfi_account: Pubkey,
+
+        pub global_fee_wallet: Pubkey,
+    }
+
+    impl AdminCloseAccountInstructionAccounts {
+        pub fn new(group: Pubkey, marginfi_account: Pubkey, global_fee_wallet: Pubkey) -> Self {
+            Self {
+                group,
+
+                marginfi_account,
+
+                global_fee_wallet,
+            }
+        }
+    }
+
+    /// Instruction data for AdminCloseAccount
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
+    pub struct AdminCloseAccountInstructionData {}
+
+    impl AdminCloseAccountInstructionData {
+        pub fn new() -> Self {
+            Self {}
+        }
+    }
+
+    /// Implementation for AdminCloseAccountInstruction
+    impl AdminCloseAccountInstruction {
+        fn discriminator() -> [u8; 8] {
+            [131u8, 60u8, 75u8, 215u8, 109u8, 34u8, 157u8, 26u8]
+        }
+
+        pub fn data(data: AdminCloseAccountInstructionData) -> Self {
+            Self {
+                accounts: AdminCloseAccountInstructionAccountMetas::default(),
+                data,
+                remaining_accounts: Vec::new(),
+            }
+        }
+
+        pub fn accounts(mut self, accounts: AdminCloseAccountInstructionAccounts) -> Self {
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
+
+            self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
+
+            self.accounts.global_fee_wallet = AccountMeta::new(accounts.global_fee_wallet, false);
+
+            self
+        }
+
+        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
+            self.remaining_accounts = accounts;
+            self
+        }
+
+        fn to_account_metas(&self) -> Vec<AccountMeta> {
+            let mut metas = Vec::new();
+
+            metas.push(self.accounts.group.clone());
+
+            metas.push(self.accounts.marginfi_account.clone());
+
+            metas.push(self.accounts.global_fee_wallet.clone());
+
+            metas.extend(self.remaining_accounts.clone());
+            metas
+        }
+
+        pub fn instruction(&self) -> Instruction {
+            let mut buffer: Vec<u8> = Vec::new();
+
+            buffer.extend_from_slice(&Self::discriminator());
+
+            self.data.serialize(&mut buffer).unwrap();
+
+            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
+        }
+    }
+
+    // ....................................................................
     // Instruction: ConfigGroupFee
     // ....................................................................
 
@@ -1650,6 +1756,102 @@ pub mod marginfi {
     }
 
     // ....................................................................
+    // Instruction: CopyFeeStateToV2
+    // ....................................................................
+
+    /// Main instruction struct for CopyFeeStateToV2
+    pub struct CopyFeeStateToV2Instruction {
+        pub accounts: CopyFeeStateToV2InstructionAccountMetas,
+        pub data: CopyFeeStateToV2InstructionData,
+        pub remaining_accounts: Vec<AccountMeta>,
+    }
+
+    /// Account metadata for CopyFeeStateToV2 instruction
+    #[derive(Debug, Clone, Default)]
+    pub struct CopyFeeStateToV2InstructionAccountMetas {
+        pub fee_state: AccountMeta,
+
+        pub fee_state_v2: AccountMeta,
+    }
+
+    /// Account pubkeys for CopyFeeStateToV2 instruction
+    #[derive(Debug, Clone)]
+    pub struct CopyFeeStateToV2InstructionAccounts {
+        pub fee_state: Pubkey,
+
+        pub fee_state_v2: Pubkey,
+    }
+
+    impl CopyFeeStateToV2InstructionAccounts {
+        pub fn new(fee_state: Pubkey, fee_state_v2: Pubkey) -> Self {
+            Self {
+                fee_state,
+
+                fee_state_v2,
+            }
+        }
+    }
+
+    /// Instruction data for CopyFeeStateToV2
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
+    pub struct CopyFeeStateToV2InstructionData {}
+
+    impl CopyFeeStateToV2InstructionData {
+        pub fn new() -> Self {
+            Self {}
+        }
+    }
+
+    /// Implementation for CopyFeeStateToV2Instruction
+    impl CopyFeeStateToV2Instruction {
+        fn discriminator() -> [u8; 8] {
+            [100u8, 146u8, 124u8, 224u8, 95u8, 196u8, 206u8, 14u8]
+        }
+
+        pub fn data(data: CopyFeeStateToV2InstructionData) -> Self {
+            Self {
+                accounts: CopyFeeStateToV2InstructionAccountMetas::default(),
+                data,
+                remaining_accounts: Vec::new(),
+            }
+        }
+
+        pub fn accounts(mut self, accounts: CopyFeeStateToV2InstructionAccounts) -> Self {
+            self.accounts.fee_state = AccountMeta::new_readonly(accounts.fee_state, false);
+
+            self.accounts.fee_state_v2 = AccountMeta::new(accounts.fee_state_v2, false);
+
+            self
+        }
+
+        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
+            self.remaining_accounts = accounts;
+            self
+        }
+
+        fn to_account_metas(&self) -> Vec<AccountMeta> {
+            let mut metas = Vec::new();
+
+            metas.push(self.accounts.fee_state.clone());
+
+            metas.push(self.accounts.fee_state_v2.clone());
+
+            metas.extend(self.remaining_accounts.clone());
+            metas
+        }
+
+        pub fn instruction(&self) -> Instruction {
+            let mut buffer: Vec<u8> = Vec::new();
+
+            buffer.extend_from_slice(&Self::discriminator());
+
+            self.data.serialize(&mut buffer).unwrap();
+
+            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
+        }
+    }
+
+    // ....................................................................
     // Instruction: DriftDeposit
     // ....................................................................
 
@@ -1825,7 +2027,7 @@ pub mod marginfi {
         }
 
         pub fn accounts(mut self, accounts: DriftDepositInstructionAccounts) -> Self {
-            self.accounts.group = AccountMeta::new(accounts.group, false);
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
 
             self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
 
@@ -2672,7 +2874,7 @@ pub mod marginfi {
         }
 
         pub fn accounts(mut self, accounts: DriftWithdrawInstructionAccounts) -> Self {
-            self.accounts.group = AccountMeta::new(accounts.group, false);
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
 
             self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
 
@@ -2847,44 +3049,48 @@ pub mod marginfi {
     /// Instruction data for EditGlobalFeeState
     #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
     pub struct EditGlobalFeeStateInstructionData {
-        pub admin: Pubkey,
+        pub admin: Option<Pubkey>,
 
-        pub fee_wallet: Pubkey,
+        pub fee_wallet: Option<Pubkey>,
 
-        pub bank_init_flat_sol_fee: u32,
+        pub bank_init_flat_sol_fee: Option<u32>,
 
-        pub liquidation_flat_sol_fee: u32,
+        pub liquidation_flat_sol_fee: Option<u32>,
 
-        pub order_init_flat_sol_fee: u32,
+        pub order_init_flat_sol_fee: Option<u32>,
 
-        pub program_fee_fixed: WrappedI80F48,
+        pub program_fee_fixed: Option<WrappedI80F48>,
 
-        pub program_fee_rate: WrappedI80F48,
+        pub program_fee_rate: Option<WrappedI80F48>,
 
-        pub liquidation_max_fee: WrappedI80F48,
+        pub liquidation_max_fee: Option<WrappedI80F48>,
 
-        pub order_execution_max_fee: WrappedI80F48,
+        pub order_execution_max_fee: Option<WrappedI80F48>,
+
+        pub pause_delegate_admin: Option<Pubkey>,
     }
 
     impl EditGlobalFeeStateInstructionData {
         pub fn new(
-            admin: Pubkey,
+            admin: Option<Pubkey>,
 
-            fee_wallet: Pubkey,
+            fee_wallet: Option<Pubkey>,
 
-            bank_init_flat_sol_fee: u32,
+            bank_init_flat_sol_fee: Option<u32>,
 
-            liquidation_flat_sol_fee: u32,
+            liquidation_flat_sol_fee: Option<u32>,
 
-            order_init_flat_sol_fee: u32,
+            order_init_flat_sol_fee: Option<u32>,
 
-            program_fee_fixed: WrappedI80F48,
+            program_fee_fixed: Option<WrappedI80F48>,
 
-            program_fee_rate: WrappedI80F48,
+            program_fee_rate: Option<WrappedI80F48>,
 
-            liquidation_max_fee: WrappedI80F48,
+            liquidation_max_fee: Option<WrappedI80F48>,
 
-            order_execution_max_fee: WrappedI80F48,
+            order_execution_max_fee: Option<WrappedI80F48>,
+
+            pause_delegate_admin: Option<Pubkey>,
         ) -> Self {
             Self {
                 admin,
@@ -2904,6 +3110,8 @@ pub mod marginfi {
                 liquidation_max_fee,
 
                 order_execution_max_fee,
+
+                pause_delegate_admin,
             }
         }
     }
@@ -3583,6 +3791,109 @@ pub mod marginfi {
             metas.push(self.accounts.payer.clone());
 
             metas.push(self.accounts.fee_state.clone());
+
+            metas.push(self.accounts.system_program.clone());
+
+            metas.extend(self.remaining_accounts.clone());
+            metas
+        }
+
+        pub fn instruction(&self) -> Instruction {
+            let mut buffer: Vec<u8> = Vec::new();
+
+            buffer.extend_from_slice(&Self::discriminator());
+
+            self.data.serialize(&mut buffer).unwrap();
+
+            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
+        }
+    }
+
+    // ....................................................................
+    // Instruction: InitGlobalFeeStateV2
+    // ....................................................................
+
+    /// Main instruction struct for InitGlobalFeeStateV2
+    pub struct InitGlobalFeeStateV2Instruction {
+        pub accounts: InitGlobalFeeStateV2InstructionAccountMetas,
+        pub data: InitGlobalFeeStateV2InstructionData,
+        pub remaining_accounts: Vec<AccountMeta>,
+    }
+
+    /// Account metadata for InitGlobalFeeStateV2 instruction
+    #[derive(Debug, Clone, Default)]
+    pub struct InitGlobalFeeStateV2InstructionAccountMetas {
+        pub payer: AccountMeta,
+
+        pub fee_state_v2: AccountMeta,
+
+        pub system_program: AccountMeta,
+    }
+
+    /// Account pubkeys for InitGlobalFeeStateV2 instruction
+    #[derive(Debug, Clone)]
+    pub struct InitGlobalFeeStateV2InstructionAccounts {
+        pub payer: Pubkey,
+
+        pub fee_state_v2: Pubkey,
+    }
+
+    impl InitGlobalFeeStateV2InstructionAccounts {
+        pub fn new(payer: Pubkey, fee_state_v2: Pubkey) -> Self {
+            Self {
+                payer,
+
+                fee_state_v2,
+            }
+        }
+    }
+
+    /// Instruction data for InitGlobalFeeStateV2
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
+    pub struct InitGlobalFeeStateV2InstructionData {}
+
+    impl InitGlobalFeeStateV2InstructionData {
+        pub fn new() -> Self {
+            Self {}
+        }
+    }
+
+    /// Implementation for InitGlobalFeeStateV2Instruction
+    impl InitGlobalFeeStateV2Instruction {
+        fn discriminator() -> [u8; 8] {
+            [170u8, 82u8, 207u8, 84u8, 84u8, 17u8, 116u8, 124u8]
+        }
+
+        pub fn data(data: InitGlobalFeeStateV2InstructionData) -> Self {
+            Self {
+                accounts: InitGlobalFeeStateV2InstructionAccountMetas::default(),
+                data,
+                remaining_accounts: Vec::new(),
+            }
+        }
+
+        pub fn accounts(mut self, accounts: InitGlobalFeeStateV2InstructionAccounts) -> Self {
+            self.accounts.payer = AccountMeta::new(accounts.payer, true);
+
+            self.accounts.fee_state_v2 = AccountMeta::new(accounts.fee_state_v2, false);
+
+            self.accounts.system_program =
+                AccountMeta::new_readonly(pubkey!("11111111111111111111111111111111"), false);
+
+            self
+        }
+
+        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
+            self.remaining_accounts = accounts;
+            self
+        }
+
+        fn to_account_metas(&self) -> Vec<AccountMeta> {
+            let mut metas = Vec::new();
+
+            metas.push(self.accounts.payer.clone());
+
+            metas.push(self.accounts.fee_state_v2.clone());
 
             metas.push(self.accounts.system_program.clone());
 
@@ -4641,7 +4952,7 @@ pub mod marginfi {
         }
 
         pub fn accounts(mut self, accounts: JuplendWithdrawInstructionAccounts) -> Self {
-            self.accounts.group = AccountMeta::new(accounts.group, false);
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
 
             self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
 
@@ -4957,11 +5268,17 @@ pub mod marginfi {
     #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
     pub struct KaminoDepositInstructionData {
         pub amount: u64,
+
+        pub refresh_reserve: Option<bool>,
     }
 
     impl KaminoDepositInstructionData {
-        pub fn new(amount: u64) -> Self {
-            Self { amount }
+        pub fn new(amount: u64, refresh_reserve: Option<bool>) -> Self {
+            Self {
+                amount,
+
+                refresh_reserve,
+            }
         }
     }
 
@@ -4980,7 +5297,7 @@ pub mod marginfi {
         }
 
         pub fn accounts(mut self, accounts: KaminoDepositInstructionAccounts) -> Self {
-            self.accounts.group = AccountMeta::new(accounts.group, false);
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
 
             self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
 
@@ -5416,14 +5733,6 @@ pub mod marginfi {
 
         pub reserve_destination_deposit_collateral: AccountMeta,
 
-        pub pyth_oracle: AccountMeta,
-
-        pub switchboard_price_oracle: AccountMeta,
-
-        pub switchboard_twap_oracle: AccountMeta,
-
-        pub scope_prices: AccountMeta,
-
         pub obligation_farm_user_state: AccountMeta,
 
         pub reserve_farm_state: AccountMeta,
@@ -5474,14 +5783,6 @@ pub mod marginfi {
 
         pub reserve_destination_deposit_collateral: Pubkey,
 
-        pub pyth_oracle: Pubkey,
-
-        pub switchboard_price_oracle: Pubkey,
-
-        pub switchboard_twap_oracle: Pubkey,
-
-        pub scope_prices: Pubkey,
-
         pub obligation_farm_user_state: Pubkey,
 
         pub reserve_farm_state: Pubkey,
@@ -5519,14 +5820,6 @@ pub mod marginfi {
 
             reserve_destination_deposit_collateral: Pubkey,
 
-            pyth_oracle: Pubkey,
-
-            switchboard_price_oracle: Pubkey,
-
-            switchboard_twap_oracle: Pubkey,
-
-            scope_prices: Pubkey,
-
             obligation_farm_user_state: Pubkey,
 
             reserve_farm_state: Pubkey,
@@ -5561,14 +5854,6 @@ pub mod marginfi {
                 reserve_collateral_mint,
 
                 reserve_destination_deposit_collateral,
-
-                pyth_oracle,
-
-                switchboard_price_oracle,
-
-                switchboard_twap_oracle,
-
-                scope_prices,
 
                 obligation_farm_user_state,
 
@@ -5640,16 +5925,6 @@ pub mod marginfi {
 
             self.accounts.reserve_destination_deposit_collateral =
                 AccountMeta::new(accounts.reserve_destination_deposit_collateral, false);
-
-            self.accounts.pyth_oracle = AccountMeta::new_readonly(accounts.pyth_oracle, false);
-
-            self.accounts.switchboard_price_oracle =
-                AccountMeta::new_readonly(accounts.switchboard_price_oracle, false);
-
-            self.accounts.switchboard_twap_oracle =
-                AccountMeta::new_readonly(accounts.switchboard_twap_oracle, false);
-
-            self.accounts.scope_prices = AccountMeta::new_readonly(accounts.scope_prices, false);
 
             self.accounts.obligation_farm_user_state =
                 AccountMeta::new(accounts.obligation_farm_user_state, false);
@@ -5726,14 +6001,6 @@ pub mod marginfi {
 
             metas.push(self.accounts.reserve_destination_deposit_collateral.clone());
 
-            metas.push(self.accounts.pyth_oracle.clone());
-
-            metas.push(self.accounts.switchboard_price_oracle.clone());
-
-            metas.push(self.accounts.switchboard_twap_oracle.clone());
-
-            metas.push(self.accounts.scope_prices.clone());
-
             metas.push(self.accounts.obligation_farm_user_state.clone());
 
             metas.push(self.accounts.reserve_farm_state.clone());
@@ -5803,7 +6070,7 @@ pub mod marginfi {
 
         pub integration_acc_1: AccountMeta,
 
-        pub reserve_liquidity_mint: AccountMeta,
+        pub mint: AccountMeta,
 
         pub reserve_liquidity_supply: AccountMeta,
 
@@ -5851,7 +6118,7 @@ pub mod marginfi {
 
         pub integration_acc_1: Pubkey,
 
-        pub reserve_liquidity_mint: Pubkey,
+        pub mint: Pubkey,
 
         pub reserve_liquidity_supply: Pubkey,
 
@@ -5890,7 +6157,7 @@ pub mod marginfi {
 
             integration_acc_1: Pubkey,
 
-            reserve_liquidity_mint: Pubkey,
+            mint: Pubkey,
 
             reserve_liquidity_supply: Pubkey,
 
@@ -5927,7 +6194,7 @@ pub mod marginfi {
 
                 integration_acc_1,
 
-                reserve_liquidity_mint,
+                mint,
 
                 reserve_liquidity_supply,
 
@@ -5949,16 +6216,12 @@ pub mod marginfi {
     pub struct KaminoWithdrawInstructionData {
         pub amount: u64,
 
-        pub withdraw_all: Option<bool>,
+        pub flags: Option<u8>,
     }
 
     impl KaminoWithdrawInstructionData {
-        pub fn new(amount: u64, withdraw_all: Option<bool>) -> Self {
-            Self {
-                amount,
-
-                withdraw_all,
-            }
+        pub fn new(amount: u64, flags: Option<u8>) -> Self {
+            Self { amount, flags }
         }
     }
 
@@ -5977,7 +6240,7 @@ pub mod marginfi {
         }
 
         pub fn accounts(mut self, accounts: KaminoWithdrawInstructionAccounts) -> Self {
-            self.accounts.group = AccountMeta::new(accounts.group, false);
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
 
             self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
 
@@ -6003,8 +6266,7 @@ pub mod marginfi {
 
             self.accounts.integration_acc_1 = AccountMeta::new(accounts.integration_acc_1, false);
 
-            self.accounts.reserve_liquidity_mint =
-                AccountMeta::new(accounts.reserve_liquidity_mint, false);
+            self.accounts.mint = AccountMeta::new(accounts.mint, false);
 
             self.accounts.reserve_liquidity_supply =
                 AccountMeta::new(accounts.reserve_liquidity_supply, false);
@@ -6076,7 +6338,7 @@ pub mod marginfi {
 
             metas.push(self.accounts.integration_acc_1.clone());
 
-            metas.push(self.accounts.reserve_liquidity_mint.clone());
+            metas.push(self.accounts.mint.clone());
 
             metas.push(self.accounts.reserve_liquidity_supply.clone());
 
@@ -6229,7 +6491,7 @@ pub mod marginfi {
         }
 
         pub fn accounts(mut self, accounts: LendingAccountBorrowInstructionAccounts) -> Self {
-            self.accounts.group = AccountMeta::new(accounts.group, false);
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
 
             self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
 
@@ -6527,7 +6789,7 @@ pub mod marginfi {
         }
 
         pub fn accounts(mut self, accounts: LendingAccountDepositInstructionAccounts) -> Self {
-            self.accounts.group = AccountMeta::new(accounts.group, false);
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
 
             self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
 
@@ -7085,7 +7347,7 @@ pub mod marginfi {
         }
 
         pub fn accounts(mut self, accounts: LendingAccountRepayInstructionAccounts) -> Self {
-            self.accounts.group = AccountMeta::new(accounts.group, false);
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
 
             self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
 
@@ -7124,105 +7386,6 @@ pub mod marginfi {
             metas.push(self.accounts.liquidity_vault.clone());
 
             metas.push(self.accounts.token_program.clone());
-
-            metas.extend(self.remaining_accounts.clone());
-            metas
-        }
-
-        pub fn instruction(&self) -> Instruction {
-            let mut buffer: Vec<u8> = Vec::new();
-
-            buffer.extend_from_slice(&Self::discriminator());
-
-            self.data.serialize(&mut buffer).unwrap();
-
-            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
-        }
-    }
-
-    // ....................................................................
-    // Instruction: LendingAccountSettleEmissions
-    // ....................................................................
-
-    /// Main instruction struct for LendingAccountSettleEmissions
-    pub struct LendingAccountSettleEmissionsInstruction {
-        pub accounts: LendingAccountSettleEmissionsInstructionAccountMetas,
-        pub data: LendingAccountSettleEmissionsInstructionData,
-        pub remaining_accounts: Vec<AccountMeta>,
-    }
-
-    /// Account metadata for LendingAccountSettleEmissions instruction
-    #[derive(Debug, Clone, Default)]
-    pub struct LendingAccountSettleEmissionsInstructionAccountMetas {
-        pub marginfi_account: AccountMeta,
-
-        pub bank: AccountMeta,
-    }
-
-    /// Account pubkeys for LendingAccountSettleEmissions instruction
-    #[derive(Debug, Clone)]
-    pub struct LendingAccountSettleEmissionsInstructionAccounts {
-        pub marginfi_account: Pubkey,
-
-        pub bank: Pubkey,
-    }
-
-    impl LendingAccountSettleEmissionsInstructionAccounts {
-        pub fn new(marginfi_account: Pubkey, bank: Pubkey) -> Self {
-            Self {
-                marginfi_account,
-
-                bank,
-            }
-        }
-    }
-
-    /// Instruction data for LendingAccountSettleEmissions
-    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
-    pub struct LendingAccountSettleEmissionsInstructionData {}
-
-    impl LendingAccountSettleEmissionsInstructionData {
-        pub fn new() -> Self {
-            Self {}
-        }
-    }
-
-    /// Implementation for LendingAccountSettleEmissionsInstruction
-    impl LendingAccountSettleEmissionsInstruction {
-        fn discriminator() -> [u8; 8] {
-            [161u8, 58u8, 136u8, 174u8, 242u8, 223u8, 156u8, 176u8]
-        }
-
-        pub fn data(data: LendingAccountSettleEmissionsInstructionData) -> Self {
-            Self {
-                accounts: LendingAccountSettleEmissionsInstructionAccountMetas::default(),
-                data,
-                remaining_accounts: Vec::new(),
-            }
-        }
-
-        pub fn accounts(
-            mut self,
-            accounts: LendingAccountSettleEmissionsInstructionAccounts,
-        ) -> Self {
-            self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
-
-            self.accounts.bank = AccountMeta::new(accounts.bank, false);
-
-            self
-        }
-
-        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
-            self.remaining_accounts = accounts;
-            self
-        }
-
-        fn to_account_metas(&self) -> Vec<AccountMeta> {
-            let mut metas = Vec::new();
-
-            metas.push(self.accounts.marginfi_account.clone());
-
-            metas.push(self.accounts.bank.clone());
 
             metas.extend(self.remaining_accounts.clone());
             metas
@@ -7471,7 +7634,7 @@ pub mod marginfi {
         }
 
         pub fn accounts(mut self, accounts: LendingAccountWithdrawInstructionAccounts) -> Self {
-            self.accounts.group = AccountMeta::new(accounts.group, false);
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
 
             self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
 
@@ -7513,379 +7676,6 @@ pub mod marginfi {
             metas.push(self.accounts.bank_liquidity_vault_authority.clone());
 
             metas.push(self.accounts.liquidity_vault.clone());
-
-            metas.push(self.accounts.token_program.clone());
-
-            metas.extend(self.remaining_accounts.clone());
-            metas
-        }
-
-        pub fn instruction(&self) -> Instruction {
-            let mut buffer: Vec<u8> = Vec::new();
-
-            buffer.extend_from_slice(&Self::discriminator());
-
-            self.data.serialize(&mut buffer).unwrap();
-
-            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
-        }
-    }
-
-    // ....................................................................
-    // Instruction: LendingAccountWithdrawEmissions
-    // ....................................................................
-
-    /// Main instruction struct for LendingAccountWithdrawEmissions
-    pub struct LendingAccountWithdrawEmissionsInstruction {
-        pub accounts: LendingAccountWithdrawEmissionsInstructionAccountMetas,
-        pub data: LendingAccountWithdrawEmissionsInstructionData,
-        pub remaining_accounts: Vec<AccountMeta>,
-    }
-
-    /// Account metadata for LendingAccountWithdrawEmissions instruction
-    #[derive(Debug, Clone, Default)]
-    pub struct LendingAccountWithdrawEmissionsInstructionAccountMetas {
-        pub group: AccountMeta,
-
-        pub marginfi_account: AccountMeta,
-
-        pub authority: AccountMeta,
-
-        pub bank: AccountMeta,
-
-        pub emissions_mint: AccountMeta,
-
-        pub emissions_auth: AccountMeta,
-
-        pub emissions_vault: AccountMeta,
-
-        pub destination_account: AccountMeta,
-
-        pub token_program: AccountMeta,
-    }
-
-    /// Account pubkeys for LendingAccountWithdrawEmissions instruction
-    #[derive(Debug, Clone)]
-    pub struct LendingAccountWithdrawEmissionsInstructionAccounts {
-        pub group: Pubkey,
-
-        pub marginfi_account: Pubkey,
-
-        pub authority: Pubkey,
-
-        pub bank: Pubkey,
-
-        pub emissions_mint: Pubkey,
-
-        pub emissions_auth: Pubkey,
-
-        pub emissions_vault: Pubkey,
-
-        pub destination_account: Pubkey,
-
-        pub token_program: Pubkey,
-    }
-
-    impl LendingAccountWithdrawEmissionsInstructionAccounts {
-        pub fn new(
-            group: Pubkey,
-
-            marginfi_account: Pubkey,
-
-            authority: Pubkey,
-
-            bank: Pubkey,
-
-            emissions_mint: Pubkey,
-
-            emissions_auth: Pubkey,
-
-            emissions_vault: Pubkey,
-
-            destination_account: Pubkey,
-
-            token_program: Pubkey,
-        ) -> Self {
-            Self {
-                group,
-
-                marginfi_account,
-
-                authority,
-
-                bank,
-
-                emissions_mint,
-
-                emissions_auth,
-
-                emissions_vault,
-
-                destination_account,
-
-                token_program,
-            }
-        }
-    }
-
-    /// Instruction data for LendingAccountWithdrawEmissions
-    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
-    pub struct LendingAccountWithdrawEmissionsInstructionData {}
-
-    impl LendingAccountWithdrawEmissionsInstructionData {
-        pub fn new() -> Self {
-            Self {}
-        }
-    }
-
-    /// Implementation for LendingAccountWithdrawEmissionsInstruction
-    impl LendingAccountWithdrawEmissionsInstruction {
-        fn discriminator() -> [u8; 8] {
-            [234u8, 22u8, 84u8, 214u8, 118u8, 176u8, 140u8, 170u8]
-        }
-
-        pub fn data(data: LendingAccountWithdrawEmissionsInstructionData) -> Self {
-            Self {
-                accounts: LendingAccountWithdrawEmissionsInstructionAccountMetas::default(),
-                data,
-                remaining_accounts: Vec::new(),
-            }
-        }
-
-        pub fn accounts(
-            mut self,
-            accounts: LendingAccountWithdrawEmissionsInstructionAccounts,
-        ) -> Self {
-            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
-
-            self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
-
-            self.accounts.authority = AccountMeta::new_readonly(accounts.authority, true);
-
-            self.accounts.bank = AccountMeta::new(accounts.bank, false);
-
-            self.accounts.emissions_mint =
-                AccountMeta::new_readonly(accounts.emissions_mint, false);
-
-            self.accounts.emissions_auth =
-                AccountMeta::new_readonly(accounts.emissions_auth, false);
-
-            self.accounts.emissions_vault = AccountMeta::new(accounts.emissions_vault, false);
-
-            self.accounts.destination_account =
-                AccountMeta::new(accounts.destination_account, false);
-
-            self.accounts.token_program = AccountMeta::new_readonly(accounts.token_program, false);
-
-            self
-        }
-
-        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
-            self.remaining_accounts = accounts;
-            self
-        }
-
-        fn to_account_metas(&self) -> Vec<AccountMeta> {
-            let mut metas = Vec::new();
-
-            metas.push(self.accounts.group.clone());
-
-            metas.push(self.accounts.marginfi_account.clone());
-
-            metas.push(self.accounts.authority.clone());
-
-            metas.push(self.accounts.bank.clone());
-
-            metas.push(self.accounts.emissions_mint.clone());
-
-            metas.push(self.accounts.emissions_auth.clone());
-
-            metas.push(self.accounts.emissions_vault.clone());
-
-            metas.push(self.accounts.destination_account.clone());
-
-            metas.push(self.accounts.token_program.clone());
-
-            metas.extend(self.remaining_accounts.clone());
-            metas
-        }
-
-        pub fn instruction(&self) -> Instruction {
-            let mut buffer: Vec<u8> = Vec::new();
-
-            buffer.extend_from_slice(&Self::discriminator());
-
-            self.data.serialize(&mut buffer).unwrap();
-
-            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
-        }
-    }
-
-    // ....................................................................
-    // Instruction: LendingAccountWithdrawEmissionsPermissionless
-    // ....................................................................
-
-    /// Main instruction struct for
-    /// LendingAccountWithdrawEmissionsPermissionless
-    pub struct LendingAccountWithdrawEmissionsPermissionlessInstruction {
-        pub accounts: LendingAccountWithdrawEmissionsPermissionlessInstructionAccountMetas,
-        pub data: LendingAccountWithdrawEmissionsPermissionlessInstructionData,
-        pub remaining_accounts: Vec<AccountMeta>,
-    }
-
-    /// Account metadata for LendingAccountWithdrawEmissionsPermissionless
-    /// instruction
-    #[derive(Debug, Clone, Default)]
-    pub struct LendingAccountWithdrawEmissionsPermissionlessInstructionAccountMetas {
-        pub group: AccountMeta,
-
-        pub marginfi_account: AccountMeta,
-
-        pub bank: AccountMeta,
-
-        pub emissions_mint: AccountMeta,
-
-        pub emissions_auth: AccountMeta,
-
-        pub emissions_vault: AccountMeta,
-
-        pub destination_account: AccountMeta,
-
-        pub token_program: AccountMeta,
-    }
-
-    /// Account pubkeys for LendingAccountWithdrawEmissionsPermissionless
-    /// instruction
-    #[derive(Debug, Clone)]
-    pub struct LendingAccountWithdrawEmissionsPermissionlessInstructionAccounts {
-        pub group: Pubkey,
-
-        pub marginfi_account: Pubkey,
-
-        pub bank: Pubkey,
-
-        pub emissions_mint: Pubkey,
-
-        pub emissions_auth: Pubkey,
-
-        pub emissions_vault: Pubkey,
-
-        pub destination_account: Pubkey,
-
-        pub token_program: Pubkey,
-    }
-
-    impl LendingAccountWithdrawEmissionsPermissionlessInstructionAccounts {
-        pub fn new(
-            group: Pubkey,
-
-            marginfi_account: Pubkey,
-
-            bank: Pubkey,
-
-            emissions_mint: Pubkey,
-
-            emissions_auth: Pubkey,
-
-            emissions_vault: Pubkey,
-
-            destination_account: Pubkey,
-
-            token_program: Pubkey,
-        ) -> Self {
-            Self {
-                group,
-
-                marginfi_account,
-
-                bank,
-
-                emissions_mint,
-
-                emissions_auth,
-
-                emissions_vault,
-
-                destination_account,
-
-                token_program,
-            }
-        }
-    }
-
-    /// Instruction data for LendingAccountWithdrawEmissionsPermissionless
-    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
-    pub struct LendingAccountWithdrawEmissionsPermissionlessInstructionData {}
-
-    impl LendingAccountWithdrawEmissionsPermissionlessInstructionData {
-        pub fn new() -> Self {
-            Self {}
-        }
-    }
-
-    /// Implementation for
-    /// LendingAccountWithdrawEmissionsPermissionlessInstruction
-    impl LendingAccountWithdrawEmissionsPermissionlessInstruction {
-        fn discriminator() -> [u8; 8] {
-            [4u8, 174u8, 124u8, 203u8, 44u8, 49u8, 145u8, 150u8]
-        }
-
-        pub fn data(data: LendingAccountWithdrawEmissionsPermissionlessInstructionData) -> Self {
-            Self {
-                accounts:
-                    LendingAccountWithdrawEmissionsPermissionlessInstructionAccountMetas::default(),
-                data,
-                remaining_accounts: Vec::new(),
-            }
-        }
-
-        pub fn accounts(
-            mut self,
-            accounts: LendingAccountWithdrawEmissionsPermissionlessInstructionAccounts,
-        ) -> Self {
-            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
-
-            self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
-
-            self.accounts.bank = AccountMeta::new(accounts.bank, false);
-
-            self.accounts.emissions_mint =
-                AccountMeta::new_readonly(accounts.emissions_mint, false);
-
-            self.accounts.emissions_auth =
-                AccountMeta::new_readonly(accounts.emissions_auth, false);
-
-            self.accounts.emissions_vault = AccountMeta::new(accounts.emissions_vault, false);
-
-            self.accounts.destination_account =
-                AccountMeta::new(accounts.destination_account, false);
-
-            self.accounts.token_program = AccountMeta::new_readonly(accounts.token_program, false);
-
-            self
-        }
-
-        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
-            self.remaining_accounts = accounts;
-            self
-        }
-
-        fn to_account_metas(&self) -> Vec<AccountMeta> {
-            let mut metas = Vec::new();
-
-            metas.push(self.accounts.group.clone());
-
-            metas.push(self.accounts.marginfi_account.clone());
-
-            metas.push(self.accounts.bank.clone());
-
-            metas.push(self.accounts.emissions_mint.clone());
-
-            metas.push(self.accounts.emissions_auth.clone());
-
-            metas.push(self.accounts.emissions_vault.clone());
-
-            metas.push(self.accounts.destination_account.clone());
 
             metas.push(self.accounts.token_program.clone());
 
@@ -9097,6 +8887,8 @@ pub mod marginfi {
 
         pub stake_pool: AccountMeta,
 
+        pub validator_vote_account: AccountMeta,
+
         pub bank: AccountMeta,
 
         pub liquidity_vault_authority: AccountMeta,
@@ -9131,6 +8923,8 @@ pub mod marginfi {
 
         pub stake_pool: Pubkey,
 
+        pub validator_vote_account: Pubkey,
+
         pub bank: Pubkey,
 
         pub liquidity_vault_authority: Pubkey,
@@ -9162,6 +8956,8 @@ pub mod marginfi {
 
             stake_pool: Pubkey,
 
+            validator_vote_account: Pubkey,
+
             bank: Pubkey,
 
             liquidity_vault_authority: Pubkey,
@@ -9190,6 +8986,8 @@ pub mod marginfi {
                 sol_pool,
 
                 stake_pool,
+
+                validator_vote_account,
 
                 bank,
 
@@ -9253,6 +9051,9 @@ pub mod marginfi {
 
             self.accounts.stake_pool = AccountMeta::new_readonly(accounts.stake_pool, false);
 
+            self.accounts.validator_vote_account =
+                AccountMeta::new_readonly(accounts.validator_vote_account, false);
+
             self.accounts.bank = AccountMeta::new(accounts.bank, false);
 
             self.accounts.liquidity_vault_authority =
@@ -9297,6 +9098,8 @@ pub mod marginfi {
             metas.push(self.accounts.sol_pool.clone());
 
             metas.push(self.accounts.stake_pool.clone());
+
+            metas.push(self.accounts.validator_vote_account.clone());
 
             metas.push(self.accounts.bank.clone());
 
@@ -9841,6 +9644,217 @@ pub mod marginfi {
             metas.push(self.accounts.token_program.clone());
 
             metas.push(self.accounts.system_program.clone());
+
+            metas.extend(self.remaining_accounts.clone());
+            metas
+        }
+
+        pub fn instruction(&self) -> Instruction {
+            let mut buffer: Vec<u8> = Vec::new();
+
+            buffer.extend_from_slice(&Self::discriminator());
+
+            self.data.serialize(&mut buffer).unwrap();
+
+            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
+        }
+    }
+
+    // ....................................................................
+    // Instruction: LendingPoolBackfillBankIsT22Flag
+    // ....................................................................
+
+    /// Main instruction struct for LendingPoolBackfillBankIsT22Flag
+    pub struct LendingPoolBackfillBankIsT22FlagInstruction {
+        pub accounts: LendingPoolBackfillBankIsT22FlagInstructionAccountMetas,
+        pub data: LendingPoolBackfillBankIsT22FlagInstructionData,
+        pub remaining_accounts: Vec<AccountMeta>,
+    }
+
+    /// Account metadata for LendingPoolBackfillBankIsT22Flag instruction
+    #[derive(Debug, Clone, Default)]
+    pub struct LendingPoolBackfillBankIsT22FlagInstructionAccountMetas {
+        pub bank: AccountMeta,
+
+        pub group: AccountMeta,
+
+        pub mint: AccountMeta,
+    }
+
+    /// Account pubkeys for LendingPoolBackfillBankIsT22Flag instruction
+    #[derive(Debug, Clone)]
+    pub struct LendingPoolBackfillBankIsT22FlagInstructionAccounts {
+        pub bank: Pubkey,
+
+        pub group: Pubkey,
+
+        pub mint: Pubkey,
+    }
+
+    impl LendingPoolBackfillBankIsT22FlagInstructionAccounts {
+        pub fn new(bank: Pubkey, group: Pubkey, mint: Pubkey) -> Self {
+            Self { bank, group, mint }
+        }
+    }
+
+    /// Instruction data for LendingPoolBackfillBankIsT22Flag
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
+    pub struct LendingPoolBackfillBankIsT22FlagInstructionData {
+        pub bank_seed: Option<u64>,
+    }
+
+    impl LendingPoolBackfillBankIsT22FlagInstructionData {
+        pub fn new(bank_seed: Option<u64>) -> Self {
+            Self { bank_seed }
+        }
+    }
+
+    /// Implementation for LendingPoolBackfillBankIsT22FlagInstruction
+    impl LendingPoolBackfillBankIsT22FlagInstruction {
+        fn discriminator() -> [u8; 8] {
+            [189u8, 14u8, 205u8, 160u8, 172u8, 46u8, 157u8, 52u8]
+        }
+
+        pub fn data(data: LendingPoolBackfillBankIsT22FlagInstructionData) -> Self {
+            Self {
+                accounts: LendingPoolBackfillBankIsT22FlagInstructionAccountMetas::default(),
+                data,
+                remaining_accounts: Vec::new(),
+            }
+        }
+
+        pub fn accounts(
+            mut self,
+            accounts: LendingPoolBackfillBankIsT22FlagInstructionAccounts,
+        ) -> Self {
+            self.accounts.bank = AccountMeta::new(accounts.bank, false);
+
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
+
+            self.accounts.mint = AccountMeta::new_readonly(accounts.mint, false);
+
+            self
+        }
+
+        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
+            self.remaining_accounts = accounts;
+            self
+        }
+
+        fn to_account_metas(&self) -> Vec<AccountMeta> {
+            let mut metas = Vec::new();
+
+            metas.push(self.accounts.bank.clone());
+
+            metas.push(self.accounts.group.clone());
+
+            metas.push(self.accounts.mint.clone());
+
+            metas.extend(self.remaining_accounts.clone());
+            metas
+        }
+
+        pub fn instruction(&self) -> Instruction {
+            let mut buffer: Vec<u8> = Vec::new();
+
+            buffer.extend_from_slice(&Self::discriminator());
+
+            self.data.serialize(&mut buffer).unwrap();
+
+            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
+        }
+    }
+
+    // ....................................................................
+    // Instruction: LendingPoolBackfillStakedBankValidatorVoteAccount
+    // ....................................................................
+
+    /// Main instruction struct for
+    /// LendingPoolBackfillStakedBankValidatorVoteAccount
+    pub struct LendingPoolBackfillStakedBankValidatorVoteAccountInstruction {
+        pub accounts: LendingPoolBackfillStakedBankValidatorVoteAccountInstructionAccountMetas,
+        pub data: LendingPoolBackfillStakedBankValidatorVoteAccountInstructionData,
+        pub remaining_accounts: Vec<AccountMeta>,
+    }
+
+    /// Account metadata for LendingPoolBackfillStakedBankValidatorVoteAccount
+    /// instruction
+    #[derive(Debug, Clone, Default)]
+    pub struct LendingPoolBackfillStakedBankValidatorVoteAccountInstructionAccountMetas {
+        pub bank: AccountMeta,
+
+        pub validator_vote_account: AccountMeta,
+    }
+
+    /// Account pubkeys for LendingPoolBackfillStakedBankValidatorVoteAccount
+    /// instruction
+    #[derive(Debug, Clone)]
+    pub struct LendingPoolBackfillStakedBankValidatorVoteAccountInstructionAccounts {
+        pub bank: Pubkey,
+
+        pub validator_vote_account: Pubkey,
+    }
+
+    impl LendingPoolBackfillStakedBankValidatorVoteAccountInstructionAccounts {
+        pub fn new(bank: Pubkey, validator_vote_account: Pubkey) -> Self {
+            Self {
+                bank,
+
+                validator_vote_account,
+            }
+        }
+    }
+
+    /// Instruction data for LendingPoolBackfillStakedBankValidatorVoteAccount
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
+    pub struct LendingPoolBackfillStakedBankValidatorVoteAccountInstructionData {}
+
+    impl LendingPoolBackfillStakedBankValidatorVoteAccountInstructionData {
+        pub fn new() -> Self {
+            Self {}
+        }
+    }
+
+    /// Implementation for
+    /// LendingPoolBackfillStakedBankValidatorVoteAccountInstruction
+    impl LendingPoolBackfillStakedBankValidatorVoteAccountInstruction {
+        fn discriminator() -> [u8; 8] {
+            [141u8, 6u8, 23u8, 125u8, 72u8, 34u8, 199u8, 24u8]
+        }
+
+        pub fn data(
+            data: LendingPoolBackfillStakedBankValidatorVoteAccountInstructionData,
+        ) -> Self {
+            Self {
+                accounts: LendingPoolBackfillStakedBankValidatorVoteAccountInstructionAccountMetas::default(),
+                data,
+                remaining_accounts: Vec::new(),
+            }
+        }
+
+        pub fn accounts(
+            mut self,
+            accounts: LendingPoolBackfillStakedBankValidatorVoteAccountInstructionAccounts,
+        ) -> Self {
+            self.accounts.bank = AccountMeta::new(accounts.bank, false);
+
+            self.accounts.validator_vote_account =
+                AccountMeta::new_readonly(accounts.validator_vote_account, false);
+
+            self
+        }
+
+        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
+            self.remaining_accounts = accounts;
+            self
+        }
+
+        fn to_account_metas(&self) -> Vec<AccountMeta> {
+            let mut metas = Vec::new();
+
+            metas.push(self.accounts.bank.clone());
+
+            metas.push(self.accounts.validator_vote_account.clone());
 
             metas.extend(self.remaining_accounts.clone());
             metas
@@ -11076,6 +11090,172 @@ pub mod marginfi {
     }
 
     // ....................................................................
+    // Instruction: LendingPoolEmissionsDeposit
+    // ....................................................................
+
+    /// Main instruction struct for LendingPoolEmissionsDeposit
+    pub struct LendingPoolEmissionsDepositInstruction {
+        pub accounts: LendingPoolEmissionsDepositInstructionAccountMetas,
+        pub data: LendingPoolEmissionsDepositInstructionData,
+        pub remaining_accounts: Vec<AccountMeta>,
+    }
+
+    /// Account metadata for LendingPoolEmissionsDeposit instruction
+    #[derive(Debug, Clone, Default)]
+    pub struct LendingPoolEmissionsDepositInstructionAccountMetas {
+        pub group: AccountMeta,
+
+        pub bank: AccountMeta,
+
+        pub mint: AccountMeta,
+
+        pub emissions_funding_account: AccountMeta,
+
+        pub depositor: AccountMeta,
+
+        pub liquidity_vault: AccountMeta,
+
+        pub token_program: AccountMeta,
+    }
+
+    /// Account pubkeys for LendingPoolEmissionsDeposit instruction
+    #[derive(Debug, Clone)]
+    pub struct LendingPoolEmissionsDepositInstructionAccounts {
+        pub group: Pubkey,
+
+        pub bank: Pubkey,
+
+        pub mint: Pubkey,
+
+        pub emissions_funding_account: Pubkey,
+
+        pub depositor: Pubkey,
+
+        pub liquidity_vault: Pubkey,
+
+        pub token_program: Pubkey,
+    }
+
+    impl LendingPoolEmissionsDepositInstructionAccounts {
+        pub fn new(
+            group: Pubkey,
+
+            bank: Pubkey,
+
+            mint: Pubkey,
+
+            emissions_funding_account: Pubkey,
+
+            depositor: Pubkey,
+
+            liquidity_vault: Pubkey,
+
+            token_program: Pubkey,
+        ) -> Self {
+            Self {
+                group,
+
+                bank,
+
+                mint,
+
+                emissions_funding_account,
+
+                depositor,
+
+                liquidity_vault,
+
+                token_program,
+            }
+        }
+    }
+
+    /// Instruction data for LendingPoolEmissionsDeposit
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
+    pub struct LendingPoolEmissionsDepositInstructionData {
+        pub amount: u64,
+    }
+
+    impl LendingPoolEmissionsDepositInstructionData {
+        pub fn new(amount: u64) -> Self {
+            Self { amount }
+        }
+    }
+
+    /// Implementation for LendingPoolEmissionsDepositInstruction
+    impl LendingPoolEmissionsDepositInstruction {
+        fn discriminator() -> [u8; 8] {
+            [121u8, 118u8, 123u8, 58u8, 59u8, 192u8, 74u8, 138u8]
+        }
+
+        pub fn data(data: LendingPoolEmissionsDepositInstructionData) -> Self {
+            Self {
+                accounts: LendingPoolEmissionsDepositInstructionAccountMetas::default(),
+                data,
+                remaining_accounts: Vec::new(),
+            }
+        }
+
+        pub fn accounts(
+            mut self,
+            accounts: LendingPoolEmissionsDepositInstructionAccounts,
+        ) -> Self {
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
+
+            self.accounts.bank = AccountMeta::new(accounts.bank, false);
+
+            self.accounts.mint = AccountMeta::new_readonly(accounts.mint, false);
+
+            self.accounts.emissions_funding_account =
+                AccountMeta::new(accounts.emissions_funding_account, false);
+
+            self.accounts.depositor = AccountMeta::new(accounts.depositor, true);
+
+            self.accounts.liquidity_vault = AccountMeta::new(accounts.liquidity_vault, false);
+
+            self.accounts.token_program = AccountMeta::new_readonly(accounts.token_program, false);
+
+            self
+        }
+
+        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
+            self.remaining_accounts = accounts;
+            self
+        }
+
+        fn to_account_metas(&self) -> Vec<AccountMeta> {
+            let mut metas = Vec::new();
+
+            metas.push(self.accounts.group.clone());
+
+            metas.push(self.accounts.bank.clone());
+
+            metas.push(self.accounts.mint.clone());
+
+            metas.push(self.accounts.emissions_funding_account.clone());
+
+            metas.push(self.accounts.depositor.clone());
+
+            metas.push(self.accounts.liquidity_vault.clone());
+
+            metas.push(self.accounts.token_program.clone());
+
+            metas.extend(self.remaining_accounts.clone());
+            metas
+        }
+
+        pub fn instruction(&self) -> Instruction {
+            let mut buffer: Vec<u8> = Vec::new();
+
+            buffer.extend_from_slice(&Self::discriminator());
+
+            self.data.serialize(&mut buffer).unwrap();
+
+            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
+        }
+    }
+
+    // ....................................................................
     // Instruction: LendingPoolForceTokenlessRepayComplete
     // ....................................................................
 
@@ -11421,7 +11601,7 @@ pub mod marginfi {
             mut self,
             accounts: LendingPoolPulseBankPriceCacheInstructionAccounts,
         ) -> Self {
-            self.accounts.group = AccountMeta::new(accounts.group, false);
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
 
             self.accounts.bank = AccountMeta::new(accounts.bank, false);
 
@@ -11544,387 +11724,6 @@ pub mod marginfi {
             metas.push(self.accounts.admin.clone());
 
             metas.push(self.accounts.bank.clone());
-
-            metas.extend(self.remaining_accounts.clone());
-            metas
-        }
-
-        pub fn instruction(&self) -> Instruction {
-            let mut buffer: Vec<u8> = Vec::new();
-
-            buffer.extend_from_slice(&Self::discriminator());
-
-            self.data.serialize(&mut buffer).unwrap();
-
-            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
-        }
-    }
-
-    // ....................................................................
-    // Instruction: LendingPoolSetupEmissions
-    // ....................................................................
-
-    /// Main instruction struct for LendingPoolSetupEmissions
-    pub struct LendingPoolSetupEmissionsInstruction {
-        pub accounts: LendingPoolSetupEmissionsInstructionAccountMetas,
-        pub data: LendingPoolSetupEmissionsInstructionData,
-        pub remaining_accounts: Vec<AccountMeta>,
-    }
-
-    /// Account metadata for LendingPoolSetupEmissions instruction
-    #[derive(Debug, Clone, Default)]
-    pub struct LendingPoolSetupEmissionsInstructionAccountMetas {
-        pub group: AccountMeta,
-
-        pub delegate_emissions_admin: AccountMeta,
-
-        pub bank: AccountMeta,
-
-        pub emissions_mint: AccountMeta,
-
-        pub emissions_auth: AccountMeta,
-
-        pub emissions_token_account: AccountMeta,
-
-        pub emissions_funding_account: AccountMeta,
-
-        pub token_program: AccountMeta,
-
-        pub system_program: AccountMeta,
-    }
-
-    /// Account pubkeys for LendingPoolSetupEmissions instruction
-    #[derive(Debug, Clone)]
-    pub struct LendingPoolSetupEmissionsInstructionAccounts {
-        pub group: Pubkey,
-
-        pub delegate_emissions_admin: Pubkey,
-
-        pub bank: Pubkey,
-
-        pub emissions_mint: Pubkey,
-
-        pub emissions_auth: Pubkey,
-
-        pub emissions_token_account: Pubkey,
-
-        pub emissions_funding_account: Pubkey,
-
-        pub token_program: Pubkey,
-    }
-
-    impl LendingPoolSetupEmissionsInstructionAccounts {
-        pub fn new(
-            group: Pubkey,
-
-            delegate_emissions_admin: Pubkey,
-
-            bank: Pubkey,
-
-            emissions_mint: Pubkey,
-
-            emissions_auth: Pubkey,
-
-            emissions_token_account: Pubkey,
-
-            emissions_funding_account: Pubkey,
-
-            token_program: Pubkey,
-        ) -> Self {
-            Self {
-                group,
-
-                delegate_emissions_admin,
-
-                bank,
-
-                emissions_mint,
-
-                emissions_auth,
-
-                emissions_token_account,
-
-                emissions_funding_account,
-
-                token_program,
-            }
-        }
-    }
-
-    /// Instruction data for LendingPoolSetupEmissions
-    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
-    pub struct LendingPoolSetupEmissionsInstructionData {
-        pub flags: u64,
-
-        pub rate: u64,
-
-        pub total_emissions: u64,
-    }
-
-    impl LendingPoolSetupEmissionsInstructionData {
-        pub fn new(flags: u64, rate: u64, total_emissions: u64) -> Self {
-            Self {
-                flags,
-
-                rate,
-
-                total_emissions,
-            }
-        }
-    }
-
-    /// Implementation for LendingPoolSetupEmissionsInstruction
-    impl LendingPoolSetupEmissionsInstruction {
-        fn discriminator() -> [u8; 8] {
-            [206u8, 97u8, 120u8, 172u8, 113u8, 204u8, 169u8, 70u8]
-        }
-
-        pub fn data(data: LendingPoolSetupEmissionsInstructionData) -> Self {
-            Self {
-                accounts: LendingPoolSetupEmissionsInstructionAccountMetas::default(),
-                data,
-                remaining_accounts: Vec::new(),
-            }
-        }
-
-        pub fn accounts(mut self, accounts: LendingPoolSetupEmissionsInstructionAccounts) -> Self {
-            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
-
-            self.accounts.delegate_emissions_admin =
-                AccountMeta::new(accounts.delegate_emissions_admin, true);
-
-            self.accounts.bank = AccountMeta::new(accounts.bank, false);
-
-            self.accounts.emissions_mint =
-                AccountMeta::new_readonly(accounts.emissions_mint, false);
-
-            self.accounts.emissions_auth =
-                AccountMeta::new_readonly(accounts.emissions_auth, false);
-
-            self.accounts.emissions_token_account =
-                AccountMeta::new(accounts.emissions_token_account, false);
-
-            self.accounts.emissions_funding_account =
-                AccountMeta::new(accounts.emissions_funding_account, false);
-
-            self.accounts.token_program = AccountMeta::new_readonly(accounts.token_program, false);
-
-            self.accounts.system_program =
-                AccountMeta::new_readonly(pubkey!("11111111111111111111111111111111"), false);
-
-            self
-        }
-
-        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
-            self.remaining_accounts = accounts;
-            self
-        }
-
-        fn to_account_metas(&self) -> Vec<AccountMeta> {
-            let mut metas = Vec::new();
-
-            metas.push(self.accounts.group.clone());
-
-            metas.push(self.accounts.delegate_emissions_admin.clone());
-
-            metas.push(self.accounts.bank.clone());
-
-            metas.push(self.accounts.emissions_mint.clone());
-
-            metas.push(self.accounts.emissions_auth.clone());
-
-            metas.push(self.accounts.emissions_token_account.clone());
-
-            metas.push(self.accounts.emissions_funding_account.clone());
-
-            metas.push(self.accounts.token_program.clone());
-
-            metas.push(self.accounts.system_program.clone());
-
-            metas.extend(self.remaining_accounts.clone());
-            metas
-        }
-
-        pub fn instruction(&self) -> Instruction {
-            let mut buffer: Vec<u8> = Vec::new();
-
-            buffer.extend_from_slice(&Self::discriminator());
-
-            self.data.serialize(&mut buffer).unwrap();
-
-            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
-        }
-    }
-
-    // ....................................................................
-    // Instruction: LendingPoolUpdateEmissionsParameters
-    // ....................................................................
-
-    /// Main instruction struct for LendingPoolUpdateEmissionsParameters
-    pub struct LendingPoolUpdateEmissionsParametersInstruction {
-        pub accounts: LendingPoolUpdateEmissionsParametersInstructionAccountMetas,
-        pub data: LendingPoolUpdateEmissionsParametersInstructionData,
-        pub remaining_accounts: Vec<AccountMeta>,
-    }
-
-    /// Account metadata for LendingPoolUpdateEmissionsParameters instruction
-    #[derive(Debug, Clone, Default)]
-    pub struct LendingPoolUpdateEmissionsParametersInstructionAccountMetas {
-        pub group: AccountMeta,
-
-        pub delegate_emissions_admin: AccountMeta,
-
-        pub bank: AccountMeta,
-
-        pub emissions_mint: AccountMeta,
-
-        pub emissions_token_account: AccountMeta,
-
-        pub emissions_funding_account: AccountMeta,
-
-        pub token_program: AccountMeta,
-    }
-
-    /// Account pubkeys for LendingPoolUpdateEmissionsParameters instruction
-    #[derive(Debug, Clone)]
-    pub struct LendingPoolUpdateEmissionsParametersInstructionAccounts {
-        pub group: Pubkey,
-
-        pub delegate_emissions_admin: Pubkey,
-
-        pub bank: Pubkey,
-
-        pub emissions_mint: Pubkey,
-
-        pub emissions_token_account: Pubkey,
-
-        pub emissions_funding_account: Pubkey,
-
-        pub token_program: Pubkey,
-    }
-
-    impl LendingPoolUpdateEmissionsParametersInstructionAccounts {
-        pub fn new(
-            group: Pubkey,
-
-            delegate_emissions_admin: Pubkey,
-
-            bank: Pubkey,
-
-            emissions_mint: Pubkey,
-
-            emissions_token_account: Pubkey,
-
-            emissions_funding_account: Pubkey,
-
-            token_program: Pubkey,
-        ) -> Self {
-            Self {
-                group,
-
-                delegate_emissions_admin,
-
-                bank,
-
-                emissions_mint,
-
-                emissions_token_account,
-
-                emissions_funding_account,
-
-                token_program,
-            }
-        }
-    }
-
-    /// Instruction data for LendingPoolUpdateEmissionsParameters
-    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
-    pub struct LendingPoolUpdateEmissionsParametersInstructionData {
-        pub emissions_flags: Option<u64>,
-
-        pub emissions_rate: Option<u64>,
-
-        pub additional_emissions: Option<u64>,
-    }
-
-    impl LendingPoolUpdateEmissionsParametersInstructionData {
-        pub fn new(
-            emissions_flags: Option<u64>,
-
-            emissions_rate: Option<u64>,
-
-            additional_emissions: Option<u64>,
-        ) -> Self {
-            Self {
-                emissions_flags,
-
-                emissions_rate,
-
-                additional_emissions,
-            }
-        }
-    }
-
-    /// Implementation for LendingPoolUpdateEmissionsParametersInstruction
-    impl LendingPoolUpdateEmissionsParametersInstruction {
-        fn discriminator() -> [u8; 8] {
-            [55u8, 213u8, 224u8, 168u8, 153u8, 53u8, 197u8, 40u8]
-        }
-
-        pub fn data(data: LendingPoolUpdateEmissionsParametersInstructionData) -> Self {
-            Self {
-                accounts: LendingPoolUpdateEmissionsParametersInstructionAccountMetas::default(),
-                data,
-                remaining_accounts: Vec::new(),
-            }
-        }
-
-        pub fn accounts(
-            mut self,
-            accounts: LendingPoolUpdateEmissionsParametersInstructionAccounts,
-        ) -> Self {
-            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
-
-            self.accounts.delegate_emissions_admin =
-                AccountMeta::new(accounts.delegate_emissions_admin, true);
-
-            self.accounts.bank = AccountMeta::new(accounts.bank, false);
-
-            self.accounts.emissions_mint =
-                AccountMeta::new_readonly(accounts.emissions_mint, false);
-
-            self.accounts.emissions_token_account =
-                AccountMeta::new(accounts.emissions_token_account, false);
-
-            self.accounts.emissions_funding_account =
-                AccountMeta::new(accounts.emissions_funding_account, false);
-
-            self.accounts.token_program = AccountMeta::new_readonly(accounts.token_program, false);
-
-            self
-        }
-
-        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
-            self.remaining_accounts = accounts;
-            self
-        }
-
-        fn to_account_metas(&self) -> Vec<AccountMeta> {
-            let mut metas = Vec::new();
-
-            metas.push(self.accounts.group.clone());
-
-            metas.push(self.accounts.delegate_emissions_admin.clone());
-
-            metas.push(self.accounts.bank.clone());
-
-            metas.push(self.accounts.emissions_mint.clone());
-
-            metas.push(self.accounts.emissions_token_account.clone());
-
-            metas.push(self.accounts.emissions_funding_account.clone());
-
-            metas.push(self.accounts.token_program.clone());
 
             metas.extend(self.remaining_accounts.clone());
             metas
@@ -12643,6 +12442,121 @@ pub mod marginfi {
             metas.push(self.accounts.authority.clone());
 
             metas.push(self.accounts.fee_payer.clone());
+
+            metas.extend(self.remaining_accounts.clone());
+            metas
+        }
+
+        pub fn instruction(&self) -> Instruction {
+            let mut buffer: Vec<u8> = Vec::new();
+
+            buffer.extend_from_slice(&Self::discriminator());
+
+            self.data.serialize(&mut buffer).unwrap();
+
+            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
+        }
+    }
+
+    // ....................................................................
+    // Instruction: MarginfiAccountCloseLiqRecord
+    // ....................................................................
+
+    /// Main instruction struct for MarginfiAccountCloseLiqRecord
+    pub struct MarginfiAccountCloseLiqRecordInstruction {
+        pub accounts: MarginfiAccountCloseLiqRecordInstructionAccountMetas,
+        pub data: MarginfiAccountCloseLiqRecordInstructionData,
+        pub remaining_accounts: Vec<AccountMeta>,
+    }
+
+    /// Account metadata for MarginfiAccountCloseLiqRecord instruction
+    #[derive(Debug, Clone, Default)]
+    pub struct MarginfiAccountCloseLiqRecordInstructionAccountMetas {
+        pub marginfi_account: AccountMeta,
+
+        pub liquidation_record: AccountMeta,
+
+        pub record_payer: AccountMeta,
+    }
+
+    /// Account pubkeys for MarginfiAccountCloseLiqRecord instruction
+    #[derive(Debug, Clone)]
+    pub struct MarginfiAccountCloseLiqRecordInstructionAccounts {
+        pub marginfi_account: Pubkey,
+
+        pub liquidation_record: Pubkey,
+
+        pub record_payer: Pubkey,
+    }
+
+    impl MarginfiAccountCloseLiqRecordInstructionAccounts {
+        pub fn new(
+            marginfi_account: Pubkey,
+
+            liquidation_record: Pubkey,
+
+            record_payer: Pubkey,
+        ) -> Self {
+            Self {
+                marginfi_account,
+
+                liquidation_record,
+
+                record_payer,
+            }
+        }
+    }
+
+    /// Instruction data for MarginfiAccountCloseLiqRecord
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
+    pub struct MarginfiAccountCloseLiqRecordInstructionData {}
+
+    impl MarginfiAccountCloseLiqRecordInstructionData {
+        pub fn new() -> Self {
+            Self {}
+        }
+    }
+
+    /// Implementation for MarginfiAccountCloseLiqRecordInstruction
+    impl MarginfiAccountCloseLiqRecordInstruction {
+        fn discriminator() -> [u8; 8] {
+            [187u8, 222u8, 41u8, 134u8, 102u8, 10u8, 112u8, 147u8]
+        }
+
+        pub fn data(data: MarginfiAccountCloseLiqRecordInstructionData) -> Self {
+            Self {
+                accounts: MarginfiAccountCloseLiqRecordInstructionAccountMetas::default(),
+                data,
+                remaining_accounts: Vec::new(),
+            }
+        }
+
+        pub fn accounts(
+            mut self,
+            accounts: MarginfiAccountCloseLiqRecordInstructionAccounts,
+        ) -> Self {
+            self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
+
+            self.accounts.liquidation_record = AccountMeta::new(accounts.liquidation_record, false);
+
+            self.accounts.record_payer = AccountMeta::new(accounts.record_payer, false);
+
+            self
+        }
+
+        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
+            self.remaining_accounts = accounts;
+            self
+        }
+
+        fn to_account_metas(&self) -> Vec<AccountMeta> {
+            let mut metas = Vec::new();
+
+            metas.push(self.accounts.marginfi_account.clone());
+
+            metas.push(self.accounts.liquidation_record.clone());
+
+            metas.push(self.accounts.record_payer.clone());
 
             metas.extend(self.remaining_accounts.clone());
             metas
@@ -13430,8 +13344,7 @@ pub mod marginfi {
             mut self,
             accounts: MarginfiAccountKeeperCloseOrderInstructionAccounts,
         ) -> Self {
-            self.accounts.marginfi_account =
-                AccountMeta::new_readonly(accounts.marginfi_account, false);
+            self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
 
             self.accounts.fee_recipient = AccountMeta::new(accounts.fee_recipient, false);
 
@@ -14186,6 +14099,8 @@ pub mod marginfi {
 
         pub new_limit_admin: Option<Pubkey>,
 
+        pub new_flow_admin: Option<Pubkey>,
+
         pub new_emissions_admin: Option<Pubkey>,
 
         pub new_metadata_admin: Option<Pubkey>,
@@ -14207,6 +14122,8 @@ pub mod marginfi {
 
             new_limit_admin: Option<Pubkey>,
 
+            new_flow_admin: Option<Pubkey>,
+
             new_emissions_admin: Option<Pubkey>,
 
             new_metadata_admin: Option<Pubkey>,
@@ -14225,6 +14142,8 @@ pub mod marginfi {
                 new_curve_admin,
 
                 new_limit_admin,
+
+                new_flow_admin,
 
                 new_emissions_admin,
 
@@ -14402,90 +14321,6 @@ pub mod marginfi {
     }
 
     // ....................................................................
-    // Instruction: MigrateCurve
-    // ....................................................................
-
-    /// Main instruction struct for MigrateCurve
-    pub struct MigrateCurveInstruction {
-        pub accounts: MigrateCurveInstructionAccountMetas,
-        pub data: MigrateCurveInstructionData,
-        pub remaining_accounts: Vec<AccountMeta>,
-    }
-
-    /// Account metadata for MigrateCurve instruction
-    #[derive(Debug, Clone, Default)]
-    pub struct MigrateCurveInstructionAccountMetas {
-        pub bank: AccountMeta,
-    }
-
-    /// Account pubkeys for MigrateCurve instruction
-    #[derive(Debug, Clone)]
-    pub struct MigrateCurveInstructionAccounts {
-        pub bank: Pubkey,
-    }
-
-    impl MigrateCurveInstructionAccounts {
-        pub fn new(bank: Pubkey) -> Self {
-            Self { bank }
-        }
-    }
-
-    /// Instruction data for MigrateCurve
-    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
-    pub struct MigrateCurveInstructionData {}
-
-    impl MigrateCurveInstructionData {
-        pub fn new() -> Self {
-            Self {}
-        }
-    }
-
-    /// Implementation for MigrateCurveInstruction
-    impl MigrateCurveInstruction {
-        fn discriminator() -> [u8; 8] {
-            [151u8, 254u8, 50u8, 13u8, 112u8, 235u8, 152u8, 72u8]
-        }
-
-        pub fn data(data: MigrateCurveInstructionData) -> Self {
-            Self {
-                accounts: MigrateCurveInstructionAccountMetas::default(),
-                data,
-                remaining_accounts: Vec::new(),
-            }
-        }
-
-        pub fn accounts(mut self, accounts: MigrateCurveInstructionAccounts) -> Self {
-            self.accounts.bank = AccountMeta::new(accounts.bank, false);
-
-            self
-        }
-
-        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
-            self.remaining_accounts = accounts;
-            self
-        }
-
-        fn to_account_metas(&self) -> Vec<AccountMeta> {
-            let mut metas = Vec::new();
-
-            metas.push(self.accounts.bank.clone());
-
-            metas.extend(self.remaining_accounts.clone());
-            metas
-        }
-
-        pub fn instruction(&self) -> Instruction {
-            let mut buffer: Vec<u8> = Vec::new();
-
-            buffer.extend_from_slice(&Self::discriminator());
-
-            self.data.serialize(&mut buffer).unwrap();
-
-            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
-        }
-    }
-
-    // ....................................................................
     // Instruction: PanicPause
     // ....................................................................
 
@@ -14499,7 +14334,7 @@ pub mod marginfi {
     /// Account metadata for PanicPause instruction
     #[derive(Debug, Clone, Default)]
     pub struct PanicPauseInstructionAccountMetas {
-        pub global_fee_admin: AccountMeta,
+        pub pause_authority: AccountMeta,
 
         pub fee_state: AccountMeta,
     }
@@ -14507,15 +14342,15 @@ pub mod marginfi {
     /// Account pubkeys for PanicPause instruction
     #[derive(Debug, Clone)]
     pub struct PanicPauseInstructionAccounts {
-        pub global_fee_admin: Pubkey,
+        pub pause_authority: Pubkey,
 
         pub fee_state: Pubkey,
     }
 
     impl PanicPauseInstructionAccounts {
-        pub fn new(global_fee_admin: Pubkey, fee_state: Pubkey) -> Self {
+        pub fn new(pause_authority: Pubkey, fee_state: Pubkey) -> Self {
             Self {
-                global_fee_admin,
+                pause_authority,
 
                 fee_state,
             }
@@ -14547,8 +14382,8 @@ pub mod marginfi {
         }
 
         pub fn accounts(mut self, accounts: PanicPauseInstructionAccounts) -> Self {
-            self.accounts.global_fee_admin =
-                AccountMeta::new_readonly(accounts.global_fee_admin, true);
+            self.accounts.pause_authority =
+                AccountMeta::new_readonly(accounts.pause_authority, true);
 
             self.accounts.fee_state = AccountMeta::new(accounts.fee_state, false);
 
@@ -14563,7 +14398,7 @@ pub mod marginfi {
         fn to_account_metas(&self) -> Vec<AccountMeta> {
             let mut metas = Vec::new();
 
-            metas.push(self.accounts.global_fee_admin.clone());
+            metas.push(self.accounts.pause_authority.clone());
 
             metas.push(self.accounts.fee_state.clone());
 
@@ -15296,7 +15131,7 @@ pub mod marginfi {
         }
 
         pub fn accounts(mut self, accounts: SolendDepositInstructionAccounts) -> Self {
-            self.accounts.group = AccountMeta::new(accounts.group, false);
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
 
             self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
 
@@ -15924,7 +15759,7 @@ pub mod marginfi {
         }
 
         pub fn accounts(mut self, accounts: SolendWithdrawInstructionAccounts) -> Self {
-            self.accounts.group = AccountMeta::new(accounts.group, false);
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
 
             self.accounts.marginfi_account = AccountMeta::new(accounts.marginfi_account, false);
 
@@ -16270,6 +16105,405 @@ pub mod marginfi {
             metas.push(self.accounts.liquidation_receiver.clone());
 
             metas.push(self.accounts.instruction_sysvar.clone());
+
+            metas.extend(self.remaining_accounts.clone());
+            metas
+        }
+
+        pub fn instruction(&self) -> Instruction {
+            let mut buffer: Vec<u8> = Vec::new();
+
+            buffer.extend_from_slice(&Self::discriminator());
+
+            self.data.serialize(&mut buffer).unwrap();
+
+            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
+        }
+    }
+
+    // ....................................................................
+    // Instruction: SuperAdminDeposit
+    // ....................................................................
+
+    /// Main instruction struct for SuperAdminDeposit
+    pub struct SuperAdminDepositInstruction {
+        pub accounts: SuperAdminDepositInstructionAccountMetas,
+        pub data: SuperAdminDepositInstructionData,
+        pub remaining_accounts: Vec<AccountMeta>,
+    }
+
+    /// Account metadata for SuperAdminDeposit instruction
+    #[derive(Debug, Clone, Default)]
+    pub struct SuperAdminDepositInstructionAccountMetas {
+        pub group: AccountMeta,
+
+        pub admin: AccountMeta,
+
+        pub bank: AccountMeta,
+
+        pub admin_token_account: AccountMeta,
+
+        pub liquidity_vault: AccountMeta,
+
+        pub token_program: AccountMeta,
+    }
+
+    /// Account pubkeys for SuperAdminDeposit instruction
+    #[derive(Debug, Clone)]
+    pub struct SuperAdminDepositInstructionAccounts {
+        pub group: Pubkey,
+
+        pub admin: Pubkey,
+
+        pub bank: Pubkey,
+
+        pub admin_token_account: Pubkey,
+
+        pub liquidity_vault: Pubkey,
+
+        pub token_program: Pubkey,
+    }
+
+    impl SuperAdminDepositInstructionAccounts {
+        pub fn new(
+            group: Pubkey,
+
+            admin: Pubkey,
+
+            bank: Pubkey,
+
+            admin_token_account: Pubkey,
+
+            liquidity_vault: Pubkey,
+
+            token_program: Pubkey,
+        ) -> Self {
+            Self {
+                group,
+
+                admin,
+
+                bank,
+
+                admin_token_account,
+
+                liquidity_vault,
+
+                token_program,
+            }
+        }
+    }
+
+    /// Instruction data for SuperAdminDeposit
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
+    pub struct SuperAdminDepositInstructionData {
+        pub amount: u64,
+    }
+
+    impl SuperAdminDepositInstructionData {
+        pub fn new(amount: u64) -> Self {
+            Self { amount }
+        }
+    }
+
+    /// Implementation for SuperAdminDepositInstruction
+    impl SuperAdminDepositInstruction {
+        fn discriminator() -> [u8; 8] {
+            [241u8, 189u8, 199u8, 17u8, 207u8, 225u8, 64u8, 75u8]
+        }
+
+        pub fn data(data: SuperAdminDepositInstructionData) -> Self {
+            Self {
+                accounts: SuperAdminDepositInstructionAccountMetas::default(),
+                data,
+                remaining_accounts: Vec::new(),
+            }
+        }
+
+        pub fn accounts(mut self, accounts: SuperAdminDepositInstructionAccounts) -> Self {
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
+
+            self.accounts.admin = AccountMeta::new_readonly(accounts.admin, true);
+
+            self.accounts.bank = AccountMeta::new(accounts.bank, false);
+
+            self.accounts.admin_token_account =
+                AccountMeta::new(accounts.admin_token_account, false);
+
+            self.accounts.liquidity_vault = AccountMeta::new(accounts.liquidity_vault, false);
+
+            self.accounts.token_program = AccountMeta::new_readonly(accounts.token_program, false);
+
+            self
+        }
+
+        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
+            self.remaining_accounts = accounts;
+            self
+        }
+
+        fn to_account_metas(&self) -> Vec<AccountMeta> {
+            let mut metas = Vec::new();
+
+            metas.push(self.accounts.group.clone());
+
+            metas.push(self.accounts.admin.clone());
+
+            metas.push(self.accounts.bank.clone());
+
+            metas.push(self.accounts.admin_token_account.clone());
+
+            metas.push(self.accounts.liquidity_vault.clone());
+
+            metas.push(self.accounts.token_program.clone());
+
+            metas.extend(self.remaining_accounts.clone());
+            metas
+        }
+
+        pub fn instruction(&self) -> Instruction {
+            let mut buffer: Vec<u8> = Vec::new();
+
+            buffer.extend_from_slice(&Self::discriminator());
+
+            self.data.serialize(&mut buffer).unwrap();
+
+            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
+        }
+    }
+
+    // ....................................................................
+    // Instruction: SuperAdminWithdraw
+    // ....................................................................
+
+    /// Main instruction struct for SuperAdminWithdraw
+    pub struct SuperAdminWithdrawInstruction {
+        pub accounts: SuperAdminWithdrawInstructionAccountMetas,
+        pub data: SuperAdminWithdrawInstructionData,
+        pub remaining_accounts: Vec<AccountMeta>,
+    }
+
+    /// Account metadata for SuperAdminWithdraw instruction
+    #[derive(Debug, Clone, Default)]
+    pub struct SuperAdminWithdrawInstructionAccountMetas {
+        pub group: AccountMeta,
+
+        pub admin: AccountMeta,
+
+        pub bank: AccountMeta,
+
+        pub destination_token_account: AccountMeta,
+
+        pub liquidity_vault_authority: AccountMeta,
+
+        pub liquidity_vault: AccountMeta,
+
+        pub token_program: AccountMeta,
+    }
+
+    /// Account pubkeys for SuperAdminWithdraw instruction
+    #[derive(Debug, Clone)]
+    pub struct SuperAdminWithdrawInstructionAccounts {
+        pub group: Pubkey,
+
+        pub admin: Pubkey,
+
+        pub bank: Pubkey,
+
+        pub destination_token_account: Pubkey,
+
+        pub liquidity_vault_authority: Pubkey,
+
+        pub liquidity_vault: Pubkey,
+
+        pub token_program: Pubkey,
+    }
+
+    impl SuperAdminWithdrawInstructionAccounts {
+        pub fn new(
+            group: Pubkey,
+
+            admin: Pubkey,
+
+            bank: Pubkey,
+
+            destination_token_account: Pubkey,
+
+            liquidity_vault_authority: Pubkey,
+
+            liquidity_vault: Pubkey,
+
+            token_program: Pubkey,
+        ) -> Self {
+            Self {
+                group,
+
+                admin,
+
+                bank,
+
+                destination_token_account,
+
+                liquidity_vault_authority,
+
+                liquidity_vault,
+
+                token_program,
+            }
+        }
+    }
+
+    /// Instruction data for SuperAdminWithdraw
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
+    pub struct SuperAdminWithdrawInstructionData {
+        pub amount: u64,
+    }
+
+    impl SuperAdminWithdrawInstructionData {
+        pub fn new(amount: u64) -> Self {
+            Self { amount }
+        }
+    }
+
+    /// Implementation for SuperAdminWithdrawInstruction
+    impl SuperAdminWithdrawInstruction {
+        fn discriminator() -> [u8; 8] {
+            [202u8, 67u8, 85u8, 126u8, 104u8, 138u8, 79u8, 197u8]
+        }
+
+        pub fn data(data: SuperAdminWithdrawInstructionData) -> Self {
+            Self {
+                accounts: SuperAdminWithdrawInstructionAccountMetas::default(),
+                data,
+                remaining_accounts: Vec::new(),
+            }
+        }
+
+        pub fn accounts(mut self, accounts: SuperAdminWithdrawInstructionAccounts) -> Self {
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
+
+            self.accounts.admin = AccountMeta::new_readonly(accounts.admin, true);
+
+            self.accounts.bank = AccountMeta::new(accounts.bank, false);
+
+            self.accounts.destination_token_account =
+                AccountMeta::new(accounts.destination_token_account, false);
+
+            self.accounts.liquidity_vault_authority =
+                AccountMeta::new_readonly(accounts.liquidity_vault_authority, false);
+
+            self.accounts.liquidity_vault = AccountMeta::new(accounts.liquidity_vault, false);
+
+            self.accounts.token_program = AccountMeta::new_readonly(accounts.token_program, false);
+
+            self
+        }
+
+        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
+            self.remaining_accounts = accounts;
+            self
+        }
+
+        fn to_account_metas(&self) -> Vec<AccountMeta> {
+            let mut metas = Vec::new();
+
+            metas.push(self.accounts.group.clone());
+
+            metas.push(self.accounts.admin.clone());
+
+            metas.push(self.accounts.bank.clone());
+
+            metas.push(self.accounts.destination_token_account.clone());
+
+            metas.push(self.accounts.liquidity_vault_authority.clone());
+
+            metas.push(self.accounts.liquidity_vault.clone());
+
+            metas.push(self.accounts.token_program.clone());
+
+            metas.extend(self.remaining_accounts.clone());
+            metas
+        }
+
+        pub fn instruction(&self) -> Instruction {
+            let mut buffer: Vec<u8> = Vec::new();
+
+            buffer.extend_from_slice(&Self::discriminator());
+
+            self.data.serialize(&mut buffer).unwrap();
+
+            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
+        }
+    }
+
+    // ....................................................................
+    // Instruction: SyncIndexerFlags
+    // ....................................................................
+
+    /// Main instruction struct for SyncIndexerFlags
+    pub struct SyncIndexerFlagsInstruction {
+        pub accounts: SyncIndexerFlagsInstructionAccountMetas,
+        pub data: SyncIndexerFlagsInstructionData,
+        pub remaining_accounts: Vec<AccountMeta>,
+    }
+
+    /// Account metadata for SyncIndexerFlags instruction
+    #[derive(Debug, Clone, Default)]
+    pub struct SyncIndexerFlagsInstructionAccountMetas {
+        pub payer: AccountMeta,
+    }
+
+    /// Account pubkeys for SyncIndexerFlags instruction
+    #[derive(Debug, Clone)]
+    pub struct SyncIndexerFlagsInstructionAccounts {
+        pub payer: Pubkey,
+    }
+
+    impl SyncIndexerFlagsInstructionAccounts {
+        pub fn new(payer: Pubkey) -> Self {
+            Self { payer }
+        }
+    }
+
+    /// Instruction data for SyncIndexerFlags
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
+    pub struct SyncIndexerFlagsInstructionData {}
+
+    impl SyncIndexerFlagsInstructionData {
+        pub fn new() -> Self {
+            Self {}
+        }
+    }
+
+    /// Implementation for SyncIndexerFlagsInstruction
+    impl SyncIndexerFlagsInstruction {
+        fn discriminator() -> [u8; 8] {
+            [171u8, 146u8, 145u8, 43u8, 190u8, 175u8, 9u8, 32u8]
+        }
+
+        pub fn data(data: SyncIndexerFlagsInstructionData) -> Self {
+            Self {
+                accounts: SyncIndexerFlagsInstructionAccountMetas::default(),
+                data,
+                remaining_accounts: Vec::new(),
+            }
+        }
+
+        pub fn accounts(mut self, accounts: SyncIndexerFlagsInstructionAccounts) -> Self {
+            self.accounts.payer = AccountMeta::new(accounts.payer, true);
+
+            self
+        }
+
+        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
+            self.remaining_accounts = accounts;
+            self
+        }
+
+        fn to_account_metas(&self) -> Vec<AccountMeta> {
+            let mut metas = Vec::new();
+
+            metas.push(self.accounts.payer.clone());
 
             metas.extend(self.remaining_accounts.clone());
             metas
@@ -16642,6 +16876,257 @@ pub mod marginfi {
     }
 
     // ....................................................................
+    // Instruction: UpdateDeleverageWithdrawals
+    // ....................................................................
+
+    /// Main instruction struct for UpdateDeleverageWithdrawals
+    pub struct UpdateDeleverageWithdrawalsInstruction {
+        pub accounts: UpdateDeleverageWithdrawalsInstructionAccountMetas,
+        pub data: UpdateDeleverageWithdrawalsInstructionData,
+        pub remaining_accounts: Vec<AccountMeta>,
+    }
+
+    /// Account metadata for UpdateDeleverageWithdrawals instruction
+    #[derive(Debug, Clone, Default)]
+    pub struct UpdateDeleverageWithdrawalsInstructionAccountMetas {
+        pub marginfi_group: AccountMeta,
+
+        pub delegate_flow_admin: AccountMeta,
+    }
+
+    /// Account pubkeys for UpdateDeleverageWithdrawals instruction
+    #[derive(Debug, Clone)]
+    pub struct UpdateDeleverageWithdrawalsInstructionAccounts {
+        pub marginfi_group: Pubkey,
+
+        pub delegate_flow_admin: Pubkey,
+    }
+
+    impl UpdateDeleverageWithdrawalsInstructionAccounts {
+        pub fn new(marginfi_group: Pubkey, delegate_flow_admin: Pubkey) -> Self {
+            Self {
+                marginfi_group,
+
+                delegate_flow_admin,
+            }
+        }
+    }
+
+    /// Instruction data for UpdateDeleverageWithdrawals
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
+    pub struct UpdateDeleverageWithdrawalsInstructionData {
+        pub outflow_usd: u32,
+
+        pub update_seq: u64,
+
+        pub event_start_slot: u64,
+
+        pub event_end_slot: u64,
+    }
+
+    impl UpdateDeleverageWithdrawalsInstructionData {
+        pub fn new(
+            outflow_usd: u32,
+
+            update_seq: u64,
+
+            event_start_slot: u64,
+
+            event_end_slot: u64,
+        ) -> Self {
+            Self {
+                outflow_usd,
+
+                update_seq,
+
+                event_start_slot,
+
+                event_end_slot,
+            }
+        }
+    }
+
+    /// Implementation for UpdateDeleverageWithdrawalsInstruction
+    impl UpdateDeleverageWithdrawalsInstruction {
+        fn discriminator() -> [u8; 8] {
+            [56u8, 3u8, 181u8, 118u8, 27u8, 247u8, 207u8, 227u8]
+        }
+
+        pub fn data(data: UpdateDeleverageWithdrawalsInstructionData) -> Self {
+            Self {
+                accounts: UpdateDeleverageWithdrawalsInstructionAccountMetas::default(),
+                data,
+                remaining_accounts: Vec::new(),
+            }
+        }
+
+        pub fn accounts(
+            mut self,
+            accounts: UpdateDeleverageWithdrawalsInstructionAccounts,
+        ) -> Self {
+            self.accounts.marginfi_group = AccountMeta::new(accounts.marginfi_group, false);
+
+            self.accounts.delegate_flow_admin =
+                AccountMeta::new_readonly(accounts.delegate_flow_admin, true);
+
+            self
+        }
+
+        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
+            self.remaining_accounts = accounts;
+            self
+        }
+
+        fn to_account_metas(&self) -> Vec<AccountMeta> {
+            let mut metas = Vec::new();
+
+            metas.push(self.accounts.marginfi_group.clone());
+
+            metas.push(self.accounts.delegate_flow_admin.clone());
+
+            metas.extend(self.remaining_accounts.clone());
+            metas
+        }
+
+        pub fn instruction(&self) -> Instruction {
+            let mut buffer: Vec<u8> = Vec::new();
+
+            buffer.extend_from_slice(&Self::discriminator());
+
+            self.data.serialize(&mut buffer).unwrap();
+
+            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
+        }
+    }
+
+    // ....................................................................
+    // Instruction: UpdateGroupRateLimiter
+    // ....................................................................
+
+    /// Main instruction struct for UpdateGroupRateLimiter
+    pub struct UpdateGroupRateLimiterInstruction {
+        pub accounts: UpdateGroupRateLimiterInstructionAccountMetas,
+        pub data: UpdateGroupRateLimiterInstructionData,
+        pub remaining_accounts: Vec<AccountMeta>,
+    }
+
+    /// Account metadata for UpdateGroupRateLimiter instruction
+    #[derive(Debug, Clone, Default)]
+    pub struct UpdateGroupRateLimiterInstructionAccountMetas {
+        pub marginfi_group: AccountMeta,
+
+        pub delegate_flow_admin: AccountMeta,
+    }
+
+    /// Account pubkeys for UpdateGroupRateLimiter instruction
+    #[derive(Debug, Clone)]
+    pub struct UpdateGroupRateLimiterInstructionAccounts {
+        pub marginfi_group: Pubkey,
+
+        pub delegate_flow_admin: Pubkey,
+    }
+
+    impl UpdateGroupRateLimiterInstructionAccounts {
+        pub fn new(marginfi_group: Pubkey, delegate_flow_admin: Pubkey) -> Self {
+            Self {
+                marginfi_group,
+
+                delegate_flow_admin,
+            }
+        }
+    }
+
+    /// Instruction data for UpdateGroupRateLimiter
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
+    pub struct UpdateGroupRateLimiterInstructionData {
+        pub outflow_usd: Option<u64>,
+
+        pub inflow_usd: Option<u64>,
+
+        pub update_seq: u64,
+
+        pub event_start_slot: u64,
+
+        pub event_end_slot: u64,
+    }
+
+    impl UpdateGroupRateLimiterInstructionData {
+        pub fn new(
+            outflow_usd: Option<u64>,
+
+            inflow_usd: Option<u64>,
+
+            update_seq: u64,
+
+            event_start_slot: u64,
+
+            event_end_slot: u64,
+        ) -> Self {
+            Self {
+                outflow_usd,
+
+                inflow_usd,
+
+                update_seq,
+
+                event_start_slot,
+
+                event_end_slot,
+            }
+        }
+    }
+
+    /// Implementation for UpdateGroupRateLimiterInstruction
+    impl UpdateGroupRateLimiterInstruction {
+        fn discriminator() -> [u8; 8] {
+            [23u8, 78u8, 60u8, 139u8, 187u8, 44u8, 129u8, 37u8]
+        }
+
+        pub fn data(data: UpdateGroupRateLimiterInstructionData) -> Self {
+            Self {
+                accounts: UpdateGroupRateLimiterInstructionAccountMetas::default(),
+                data,
+                remaining_accounts: Vec::new(),
+            }
+        }
+
+        pub fn accounts(mut self, accounts: UpdateGroupRateLimiterInstructionAccounts) -> Self {
+            self.accounts.marginfi_group = AccountMeta::new(accounts.marginfi_group, false);
+
+            self.accounts.delegate_flow_admin =
+                AccountMeta::new_readonly(accounts.delegate_flow_admin, true);
+
+            self
+        }
+
+        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
+            self.remaining_accounts = accounts;
+            self
+        }
+
+        fn to_account_metas(&self) -> Vec<AccountMeta> {
+            let mut metas = Vec::new();
+
+            metas.push(self.accounts.marginfi_group.clone());
+
+            metas.push(self.accounts.delegate_flow_admin.clone());
+
+            metas.extend(self.remaining_accounts.clone());
+            metas
+        }
+
+        pub fn instruction(&self) -> Instruction {
+            let mut buffer: Vec<u8> = Vec::new();
+
+            buffer.extend_from_slice(&Self::discriminator());
+
+            self.data.serialize(&mut buffer).unwrap();
+
+            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
+        }
+    }
+
+    // ....................................................................
     // Instruction: WriteBankMetadata
     // ....................................................................
 
@@ -16765,6 +17250,154 @@ pub mod marginfi {
         }
     }
 
+    // ....................................................................
+    // Instruction: WriteBankMetadataPreInit
+    // ....................................................................
+
+    /// Main instruction struct for WriteBankMetadataPreInit
+    pub struct WriteBankMetadataPreInitInstruction {
+        pub accounts: WriteBankMetadataPreInitInstructionAccountMetas,
+        pub data: WriteBankMetadataPreInitInstructionData,
+        pub remaining_accounts: Vec<AccountMeta>,
+    }
+
+    /// Account metadata for WriteBankMetadataPreInit instruction
+    #[derive(Debug, Clone, Default)]
+    pub struct WriteBankMetadataPreInitInstructionAccountMetas {
+        pub group: AccountMeta,
+
+        pub bank_mint: AccountMeta,
+
+        pub bank: AccountMeta,
+
+        pub metadata_admin: AccountMeta,
+
+        pub metadata: AccountMeta,
+    }
+
+    /// Account pubkeys for WriteBankMetadataPreInit instruction
+    #[derive(Debug, Clone)]
+    pub struct WriteBankMetadataPreInitInstructionAccounts {
+        pub group: Pubkey,
+
+        pub bank_mint: Pubkey,
+
+        pub bank: Pubkey,
+
+        pub metadata_admin: Pubkey,
+
+        pub metadata: Pubkey,
+    }
+
+    impl WriteBankMetadataPreInitInstructionAccounts {
+        pub fn new(
+            group: Pubkey,
+
+            bank_mint: Pubkey,
+
+            bank: Pubkey,
+
+            metadata_admin: Pubkey,
+
+            metadata: Pubkey,
+        ) -> Self {
+            Self {
+                group,
+
+                bank_mint,
+
+                bank,
+
+                metadata_admin,
+
+                metadata,
+            }
+        }
+    }
+
+    /// Instruction data for WriteBankMetadataPreInit
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
+    pub struct WriteBankMetadataPreInitInstructionData {
+        pub bank_seed: u64,
+
+        pub ticker: Option<Vec<u8>>,
+
+        pub description: Option<Vec<u8>>,
+    }
+
+    impl WriteBankMetadataPreInitInstructionData {
+        pub fn new(bank_seed: u64, ticker: Option<Vec<u8>>, description: Option<Vec<u8>>) -> Self {
+            Self {
+                bank_seed,
+
+                ticker,
+
+                description,
+            }
+        }
+    }
+
+    /// Implementation for WriteBankMetadataPreInitInstruction
+    impl WriteBankMetadataPreInitInstruction {
+        fn discriminator() -> [u8; 8] {
+            [224u8, 124u8, 22u8, 73u8, 60u8, 209u8, 80u8, 170u8]
+        }
+
+        pub fn data(data: WriteBankMetadataPreInitInstructionData) -> Self {
+            Self {
+                accounts: WriteBankMetadataPreInitInstructionAccountMetas::default(),
+                data,
+                remaining_accounts: Vec::new(),
+            }
+        }
+
+        pub fn accounts(mut self, accounts: WriteBankMetadataPreInitInstructionAccounts) -> Self {
+            self.accounts.group = AccountMeta::new_readonly(accounts.group, false);
+
+            self.accounts.bank_mint = AccountMeta::new_readonly(accounts.bank_mint, false);
+
+            self.accounts.bank = AccountMeta::new_readonly(accounts.bank, false);
+
+            self.accounts.metadata_admin = AccountMeta::new(accounts.metadata_admin, true);
+
+            self.accounts.metadata = AccountMeta::new(accounts.metadata, false);
+
+            self
+        }
+
+        pub fn remaining_accounts(mut self, accounts: Vec<AccountMeta>) -> Self {
+            self.remaining_accounts = accounts;
+            self
+        }
+
+        fn to_account_metas(&self) -> Vec<AccountMeta> {
+            let mut metas = Vec::new();
+
+            metas.push(self.accounts.group.clone());
+
+            metas.push(self.accounts.bank_mint.clone());
+
+            metas.push(self.accounts.bank.clone());
+
+            metas.push(self.accounts.metadata_admin.clone());
+
+            metas.push(self.accounts.metadata.clone());
+
+            metas.extend(self.remaining_accounts.clone());
+            metas
+        }
+
+        pub fn instruction(&self) -> Instruction {
+            let mut buffer: Vec<u8> = Vec::new();
+
+            buffer.extend_from_slice(&Self::discriminator());
+
+            self.data.serialize(&mut buffer).unwrap();
+
+            Instruction::new_with_bytes(program_id(), &buffer, self.to_account_metas())
+        }
+    }
+
     // ------------------------------------------------------------------------
     // Data Accounts (with discriminators)
     // ------------------------------------------------------------------------
@@ -16794,6 +17427,13 @@ pub mod marginfi {
     impl AccountDiscriminator for FeeState {
         fn discriminator() -> &'static [u8] {
             &[63u8, 224u8, 16u8, 85u8, 193u8, 36u8, 235u8, 220u8]
+        }
+    }
+
+    /// AccountDiscriminator implementation for FeeStateV2
+    impl AccountDiscriminator for FeeStateV2 {
+        fn discriminator() -> &'static [u8] {
+            &[240u8, 43u8, 104u8, 108u8, 146u8, 39u8, 22u8, 38u8]
         }
     }
 
@@ -17214,8 +17854,7 @@ pub mod marginfi {
         /// Order trigger is yet to be met
         OrderTriggerNotMet = 6107,
 
-        /// Order execution state issue. Check the necessary invariants i.e not
-        /// in flashloan or disabled e.t.c
+        /// Order execution state issue. Check not in flashloan, disabled, etc
         UnexpectedOrderExecutionState = 6108,
 
         /// Order liability not closed
@@ -17250,6 +17889,48 @@ pub mod marginfi {
 
         /// Invalid rate limit price: pass oracle or pre-crank cache
         InvalidRateLimitPrice = 6119,
+
+        /// Group rate limiter admin update must include inflow and/or outflow
+        GroupRateLimiterUpdateEmpty = 6120,
+
+        /// Group rate limiter admin update slot range is invalid
+        GroupRateLimiterUpdateInvalidSlotRange = 6121,
+
+        /// Group rate limiter admin update cannot reference future slots
+        GroupRateLimiterUpdateFutureSlot = 6122,
+
+        /// Group rate limiter admin update is too stale
+        GroupRateLimiterUpdateStale = 6123,
+
+        /// Group rate limiter admin update slot progression is out of order
+        GroupRateLimiterUpdateOutOfOrderSlot = 6124,
+
+        /// Group rate limiter admin update sequence is out of order
+        GroupRateLimiterUpdateOutOfOrderSeq = 6125,
+
+        /// Deleverage withdrawal admin update must include outflow
+        DeleverageWithdrawalUpdateEmpty = 6126,
+
+        /// Deleverage withdrawal admin update slot range is invalid
+        DeleverageWithdrawalUpdateInvalidSlotRange = 6127,
+
+        /// Deleverage withdrawal admin update cannot reference future slots
+        DeleverageWithdrawalUpdateFutureSlot = 6128,
+
+        /// Deleverage withdrawal admin update is too stale
+        DeleverageWithdrawalUpdateStale = 6129,
+
+        /// Deleverage withdrawal admin update slot progression is out of order
+        DeleverageWithdrawalUpdateOutOfOrderSlot = 6130,
+
+        /// Deleverage withdrawal admin update sequence is out of order
+        DeleverageWithdrawalUpdateOutOfOrderSeq = 6131,
+
+        /// Use set_fixed_oracle_price instead
+        UseSetFixedOraclePrice = 6132,
+
+        /// Provided global fee wallet does not match group fee state cache
+        InvalidGlobalFeeWallet = 6133,
 
         /// Wrong asset tag for standard instructions, expected DEFAULT, SOL, or
         /// STAKED asset tag
@@ -17710,7 +18391,7 @@ pub mod marginfi {
 
                 Self::OrderTriggerNotMet => "Order trigger is yet to be met",
 
-                Self::UnexpectedOrderExecutionState => "Order execution state issue. Check the necessary invariants i.e not in flashloan or disabled e.t.c",
+                Self::UnexpectedOrderExecutionState => "Order execution state issue. Check not in flashloan, disabled, etc",
 
                 Self::OrderLiabilityNotClosed => "Order liability not closed",
 
@@ -17733,6 +18414,34 @@ pub mod marginfi {
                 Self::GroupDailyRateLimitExceeded => "Group daily rate limit exceeded: try again later",
 
                 Self::InvalidRateLimitPrice => "Invalid rate limit price: pass oracle or pre-crank cache",
+
+                Self::GroupRateLimiterUpdateEmpty => "Group rate limiter admin update must include inflow and/or outflow",
+
+                Self::GroupRateLimiterUpdateInvalidSlotRange => "Group rate limiter admin update slot range is invalid",
+
+                Self::GroupRateLimiterUpdateFutureSlot => "Group rate limiter admin update cannot reference future slots",
+
+                Self::GroupRateLimiterUpdateStale => "Group rate limiter admin update is too stale",
+
+                Self::GroupRateLimiterUpdateOutOfOrderSlot => "Group rate limiter admin update slot progression is out of order",
+
+                Self::GroupRateLimiterUpdateOutOfOrderSeq => "Group rate limiter admin update sequence is out of order",
+
+                Self::DeleverageWithdrawalUpdateEmpty => "Deleverage withdrawal admin update must include outflow",
+
+                Self::DeleverageWithdrawalUpdateInvalidSlotRange => "Deleverage withdrawal admin update slot range is invalid",
+
+                Self::DeleverageWithdrawalUpdateFutureSlot => "Deleverage withdrawal admin update cannot reference future slots",
+
+                Self::DeleverageWithdrawalUpdateStale => "Deleverage withdrawal admin update is too stale",
+
+                Self::DeleverageWithdrawalUpdateOutOfOrderSlot => "Deleverage withdrawal admin update slot progression is out of order",
+
+                Self::DeleverageWithdrawalUpdateOutOfOrderSeq => "Deleverage withdrawal admin update sequence is out of order",
+
+                Self::UseSetFixedOraclePrice => "Use set_fixed_oracle_price instead",
+
+                Self::InvalidGlobalFeeWallet => "Provided global fee wallet does not match group fee state cache",
 
                 Self::WrongAssetTagForStandardInstructions => "Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag",
 
@@ -18124,6 +18833,34 @@ pub mod marginfi {
 
                 6119 => Some(Self::InvalidRateLimitPrice),
 
+                6120 => Some(Self::GroupRateLimiterUpdateEmpty),
+
+                6121 => Some(Self::GroupRateLimiterUpdateInvalidSlotRange),
+
+                6122 => Some(Self::GroupRateLimiterUpdateFutureSlot),
+
+                6123 => Some(Self::GroupRateLimiterUpdateStale),
+
+                6124 => Some(Self::GroupRateLimiterUpdateOutOfOrderSlot),
+
+                6125 => Some(Self::GroupRateLimiterUpdateOutOfOrderSeq),
+
+                6126 => Some(Self::DeleverageWithdrawalUpdateEmpty),
+
+                6127 => Some(Self::DeleverageWithdrawalUpdateInvalidSlotRange),
+
+                6128 => Some(Self::DeleverageWithdrawalUpdateFutureSlot),
+
+                6129 => Some(Self::DeleverageWithdrawalUpdateStale),
+
+                6130 => Some(Self::DeleverageWithdrawalUpdateOutOfOrderSlot),
+
+                6131 => Some(Self::DeleverageWithdrawalUpdateOutOfOrderSeq),
+
+                6132 => Some(Self::UseSetFixedOraclePrice),
+
+                6133 => Some(Self::InvalidGlobalFeeWallet),
+
                 6200 => Some(Self::WrongAssetTagForStandardInstructions),
 
                 6201 => Some(Self::WrongAssetTagForKaminoInstructions),
@@ -18323,6 +19060,24 @@ pub mod marginfi {
         }
     }
 
+    /// Custom struct: AdminCloseAccountEvent
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone, PartialEq)]
+    pub struct AdminCloseAccountEvent {
+        pub header: AccountEventHeader,
+
+        pub global_fee_wallet: Pubkey,
+    }
+
+    impl AdminCloseAccountEvent {
+        pub fn new(header: AccountEventHeader, global_fee_wallet: Pubkey) -> Self {
+            Self {
+                header,
+
+                global_fee_wallet,
+            }
+        }
+    }
+
     /// Custom struct: Balance
     #[derive(Debug, BorshDeserialize, BorshSerialize, Clone, PartialEq)]
     pub struct Balance {
@@ -18472,9 +19227,11 @@ pub mod marginfi {
 
         pub rate_limiter: BankRateLimiter,
 
-        pub _pad_0: [u8; 8],
+        pub _pad_0: [u8; 16],
 
-        pub _padding_1: [[u64; 2]; 7],
+        pub bank_seed: u64,
+
+        pub _padding_1: [u64; 13],
     }
 
     impl Bank {
@@ -18555,9 +19312,11 @@ pub mod marginfi {
 
             rate_limiter: BankRateLimiter,
 
-            _pad_0: [u8; 8],
+            _pad_0: [u8; 16],
 
-            _padding_1: [[u64; 2]; 7],
+            bank_seed: u64,
+
+            _padding_1: [u64; 13],
         ) -> Self {
             Self {
                 mint,
@@ -18638,6 +19397,8 @@ pub mod marginfi {
 
                 _pad_0,
 
+                bank_seed,
+
                 _padding_1,
             }
         }
@@ -18664,7 +19425,9 @@ pub mod marginfi {
 
         pub liq_cache_flags: u8,
 
-        pub _padding: [u8; 23],
+        pub _pad0: [u8; 7],
+
+        pub price_multiplier: WrappedI80F48,
 
         pub liquidation_price_rt: WrappedI80F48,
 
@@ -18695,7 +19458,9 @@ pub mod marginfi {
 
             liq_cache_flags: u8,
 
-            _padding: [u8; 23],
+            _pad0: [u8; 7],
+
+            price_multiplier: WrappedI80F48,
 
             liquidation_price_rt: WrappedI80F48,
 
@@ -18724,7 +19489,9 @@ pub mod marginfi {
 
                 liq_cache_flags,
 
-                _padding,
+                _pad0,
+
+                price_multiplier,
 
                 liquidation_price_rt,
 
@@ -19167,19 +19934,11 @@ pub mod marginfi {
         pub hourly: RateLimitWindow,
 
         pub daily: RateLimitWindow,
-
-        pub untracked_inflow: i64,
     }
 
     impl BankRateLimiter {
-        pub fn new(hourly: RateLimitWindow, daily: RateLimitWindow, untracked_inflow: i64) -> Self {
-            Self {
-                hourly,
-
-                daily,
-
-                untracked_inflow,
-            }
+        pub fn new(hourly: RateLimitWindow, daily: RateLimitWindow) -> Self {
+            Self { hourly, daily }
         }
     }
 
@@ -19213,6 +19972,46 @@ pub mod marginfi {
                 deleveragee_assets_seized,
 
                 deleveragee_liability_repaid,
+            }
+        }
+    }
+
+    /// Custom struct: DeleverageWithdrawFlowEvent
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone, PartialEq)]
+    pub struct DeleverageWithdrawFlowEvent {
+        pub group: Pubkey,
+
+        pub bank: Pubkey,
+
+        pub mint: Pubkey,
+
+        pub outflow_usd: u32,
+
+        pub current_timestamp: i64,
+    }
+
+    impl DeleverageWithdrawFlowEvent {
+        pub fn new(
+            group: Pubkey,
+
+            bank: Pubkey,
+
+            mint: Pubkey,
+
+            outflow_usd: u32,
+
+            current_timestamp: i64,
+        ) -> Self {
+            Self {
+                group,
+
+                bank,
+
+                mint,
+
+                outflow_usd,
+
+                current_timestamp,
             }
         }
     }
@@ -19524,7 +20323,7 @@ pub mod marginfi {
 
         pub order_execution_max_fee: WrappedI80F48,
 
-        pub _reserved1: [u8; 32],
+        pub pause_delegate_admin: Pubkey,
     }
 
     impl FeeState {
@@ -19559,7 +20358,7 @@ pub mod marginfi {
 
             order_execution_max_fee: WrappedI80F48,
 
-            _reserved1: [u8; 32],
+            pause_delegate_admin: Pubkey,
         ) -> Self {
             Self {
                 key,
@@ -19592,7 +20391,7 @@ pub mod marginfi {
 
                 order_execution_max_fee,
 
-                _reserved1,
+                pause_delegate_admin,
             }
         }
     }
@@ -19627,6 +20426,118 @@ pub mod marginfi {
                 program_fee_rate,
 
                 last_update,
+            }
+        }
+    }
+
+    /// Custom struct: FeeStateV2
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone, PartialEq)]
+    pub struct FeeStateV2 {
+        pub key: Pubkey,
+
+        pub global_fee_admin: Pubkey,
+
+        pub global_fee_wallet: Pubkey,
+
+        pub placeholder0: u64,
+
+        pub bank_init_flat_sol_fee: u32,
+
+        pub bump_seed: u8,
+
+        pub _padding0: [u8; 3],
+
+        pub liquidation_max_fee: WrappedI80F48,
+
+        pub program_fee_fixed: WrappedI80F48,
+
+        pub program_fee_rate: WrappedI80F48,
+
+        pub panic_state: PanicState,
+
+        pub placeholder1: u64,
+
+        pub liquidation_flat_sol_fee: u32,
+
+        pub order_init_flat_sol_fee: u32,
+
+        pub order_execution_max_fee: WrappedI80F48,
+
+        pub pause_delegate_admin: Pubkey,
+
+        pub _padding1: [u8; 256],
+    }
+
+    impl FeeStateV2 {
+        pub fn new(
+            key: Pubkey,
+
+            global_fee_admin: Pubkey,
+
+            global_fee_wallet: Pubkey,
+
+            placeholder0: u64,
+
+            bank_init_flat_sol_fee: u32,
+
+            bump_seed: u8,
+
+            _padding0: [u8; 3],
+
+            liquidation_max_fee: WrappedI80F48,
+
+            program_fee_fixed: WrappedI80F48,
+
+            program_fee_rate: WrappedI80F48,
+
+            panic_state: PanicState,
+
+            placeholder1: u64,
+
+            liquidation_flat_sol_fee: u32,
+
+            order_init_flat_sol_fee: u32,
+
+            order_execution_max_fee: WrappedI80F48,
+
+            pause_delegate_admin: Pubkey,
+
+            _padding1: [u8; 256],
+        ) -> Self {
+            Self {
+                key,
+
+                global_fee_admin,
+
+                global_fee_wallet,
+
+                placeholder0,
+
+                bank_init_flat_sol_fee,
+
+                bump_seed,
+
+                _padding0,
+
+                liquidation_max_fee,
+
+                program_fee_fixed,
+
+                program_fee_rate,
+
+                panic_state,
+
+                placeholder1,
+
+                liquidation_flat_sol_fee,
+
+                order_init_flat_sol_fee,
+
+                order_execution_max_fee,
+
+                pause_delegate_admin,
+
+                _padding1,
             }
         }
     }
@@ -19799,14 +20710,126 @@ pub mod marginfi {
         }
     }
 
+    /// Custom struct: IndexerFlags
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone, PartialEq)]
+    pub struct IndexerFlags {
+        pub is_lending_only: u8,
+
+        pub is_empty: u8,
+
+        pub is_single_borrower: u8,
+
+        pub has_ever_been_liquidated: u8,
+
+        pub has_ever_been_deleveraged: u8,
+
+        pub has_been_bankrupted: u8,
+
+        pub has_isolated: u8,
+
+        pub has_staked: u8,
+
+        pub has_kamino: u8,
+
+        pub has_drift: u8,
+
+        pub has_juplend: u8,
+
+        pub was_liquidatable: u8,
+
+        pub was_underwater: u8,
+
+        pub was_active_30d: u8,
+
+        pub was_active_60d: u8,
+
+        pub has_trivial_balance: u8,
+
+        pub _pad: [u8; 8],
+    }
+
+    impl IndexerFlags {
+        pub fn new(
+            is_lending_only: u8,
+
+            is_empty: u8,
+
+            is_single_borrower: u8,
+
+            has_ever_been_liquidated: u8,
+
+            has_ever_been_deleveraged: u8,
+
+            has_been_bankrupted: u8,
+
+            has_isolated: u8,
+
+            has_staked: u8,
+
+            has_kamino: u8,
+
+            has_drift: u8,
+
+            has_juplend: u8,
+
+            was_liquidatable: u8,
+
+            was_underwater: u8,
+
+            was_active_30d: u8,
+
+            was_active_60d: u8,
+
+            has_trivial_balance: u8,
+
+            _pad: [u8; 8],
+        ) -> Self {
+            Self {
+                is_lending_only,
+
+                is_empty,
+
+                is_single_borrower,
+
+                has_ever_been_liquidated,
+
+                has_ever_been_deleveraged,
+
+                has_been_bankrupted,
+
+                has_isolated,
+
+                has_staked,
+
+                has_kamino,
+
+                has_drift,
+
+                has_juplend,
+
+                was_liquidatable,
+
+                was_underwater,
+
+                was_active_30d,
+
+                was_active_60d,
+
+                has_trivial_balance,
+
+                _pad,
+            }
+        }
+    }
+
     /// Custom struct: InterestRateConfig
     #[derive(Debug, BorshDeserialize, BorshSerialize, Clone, PartialEq)]
     pub struct InterestRateConfig {
-        pub optimal_utilization_rate: WrappedI80F48,
+        pub placeholder0: WrappedI80F48,
 
-        pub plateau_interest_rate: WrappedI80F48,
+        pub placeholder1: WrappedI80F48,
 
-        pub max_interest_rate: WrappedI80F48,
+        pub placeholder2: WrappedI80F48,
 
         pub insurance_fee_fixed_apr: WrappedI80F48,
 
@@ -19837,11 +20860,11 @@ pub mod marginfi {
 
     impl InterestRateConfig {
         pub fn new(
-            optimal_utilization_rate: WrappedI80F48,
+            placeholder0: WrappedI80F48,
 
-            plateau_interest_rate: WrappedI80F48,
+            placeholder1: WrappedI80F48,
 
-            max_interest_rate: WrappedI80F48,
+            placeholder2: WrappedI80F48,
 
             insurance_fee_fixed_apr: WrappedI80F48,
 
@@ -19870,11 +20893,11 @@ pub mod marginfi {
             _padding3: [u8; 8],
         ) -> Self {
             Self {
-                optimal_utilization_rate,
+                placeholder0,
 
-                plateau_interest_rate,
+                placeholder1,
 
-                max_interest_rate,
+                placeholder2,
 
                 insurance_fee_fixed_apr,
 
@@ -20789,6 +21812,80 @@ pub mod marginfi {
         }
     }
 
+    /// Custom struct: LendingPoolSuperAdminDepositEvent
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone, PartialEq)]
+    pub struct LendingPoolSuperAdminDepositEvent {
+        pub header: GroupEventHeader,
+
+        pub bank: Pubkey,
+
+        pub mint: Pubkey,
+
+        pub transfer_amount: u64,
+
+        pub vault_inflow_amount: u64,
+    }
+
+    impl LendingPoolSuperAdminDepositEvent {
+        pub fn new(
+            header: GroupEventHeader,
+
+            bank: Pubkey,
+
+            mint: Pubkey,
+
+            transfer_amount: u64,
+
+            vault_inflow_amount: u64,
+        ) -> Self {
+            Self {
+                header,
+
+                bank,
+
+                mint,
+
+                transfer_amount,
+
+                vault_inflow_amount,
+            }
+        }
+    }
+
+    /// Custom struct: LendingPoolSuperAdminWithdrawEvent
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone, PartialEq)]
+    pub struct LendingPoolSuperAdminWithdrawEvent {
+        pub header: GroupEventHeader,
+
+        pub bank: Pubkey,
+
+        pub mint: Pubkey,
+
+        pub vault_outflow_amount: u64,
+    }
+
+    impl LendingPoolSuperAdminWithdrawEvent {
+        pub fn new(
+            header: GroupEventHeader,
+
+            bank: Pubkey,
+
+            mint: Pubkey,
+
+            vault_outflow_amount: u64,
+        ) -> Self {
+            Self {
+                header,
+
+                bank,
+
+                mint,
+
+                vault_outflow_amount,
+            }
+        }
+    }
+
     /// Custom struct: LiquidationBalances
     #[derive(Debug, BorshDeserialize, BorshSerialize, Clone, PartialEq)]
     pub struct LiquidationBalances {
@@ -21040,11 +22137,15 @@ pub mod marginfi {
 
         pub bump: u8,
 
-        pub _pad0: [u8; 3],
+        pub active_orders: u8,
+
+        pub _pad0: [u8; 2],
 
         pub liquidation_record: Pubkey,
 
-        pub _padding0: [u64; 7],
+        pub indexer_flags: IndexerFlags,
+
+        pub _padding0: [u64; 4],
     }
 
     impl MarginfiAccount {
@@ -21073,11 +22174,15 @@ pub mod marginfi {
 
             bump: u8,
 
-            _pad0: [u8; 3],
+            active_orders: u8,
+
+            _pad0: [u8; 2],
 
             liquidation_record: Pubkey,
 
-            _padding0: [u64; 7],
+            indexer_flags: IndexerFlags,
+
+            _padding0: [u64; 4],
         ) -> Self {
             Self {
                 group,
@@ -21104,9 +22209,13 @@ pub mod marginfi {
 
                 bump,
 
+                active_orders,
+
                 _pad0,
 
                 liquidation_record,
+
+                indexer_flags,
 
                 _padding0,
             }
@@ -21270,7 +22379,17 @@ pub mod marginfi {
 
         pub rate_limiter: GroupRateLimiter,
 
-        pub _padding_0: [[u64; 2]; 6],
+        pub rate_limiter_last_admin_update_slot: u64,
+
+        pub rate_limiter_last_admin_update_seq: u64,
+
+        pub deleverage_withdraw_last_admin_update_slot: u64,
+
+        pub deleverage_withdraw_last_admin_update_seq: u64,
+
+        pub delegate_flow_admin: Pubkey,
+
+        pub _padding_0: [[u64; 2]; 2],
 
         pub _padding_1: [[u64; 2]; 32],
     }
@@ -21311,7 +22430,17 @@ pub mod marginfi {
 
             rate_limiter: GroupRateLimiter,
 
-            _padding_0: [[u64; 2]; 6],
+            rate_limiter_last_admin_update_slot: u64,
+
+            rate_limiter_last_admin_update_seq: u64,
+
+            deleverage_withdraw_last_admin_update_slot: u64,
+
+            deleverage_withdraw_last_admin_update_seq: u64,
+
+            delegate_flow_admin: Pubkey,
+
+            _padding_0: [[u64; 2]; 2],
 
             _padding_1: [[u64; 2]; 32],
         ) -> Self {
@@ -21349,6 +22478,16 @@ pub mod marginfi {
                 _padding,
 
                 rate_limiter,
+
+                rate_limiter_last_admin_update_slot,
+
+                rate_limiter_last_admin_update_seq,
+
+                deleverage_withdraw_last_admin_update_slot,
+
+                deleverage_withdraw_last_admin_update_seq,
+
+                delegate_flow_admin,
 
                 _padding_0,
 
@@ -22271,6 +23410,58 @@ pub mod marginfi {
         }
     }
 
+    /// Custom struct: RateLimitFlowEvent
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone, PartialEq)]
+    pub struct RateLimitFlowEvent {
+        pub group: Pubkey,
+
+        pub bank: Pubkey,
+
+        pub mint: Pubkey,
+
+        pub flow_direction: u8,
+
+        pub native_amount: u64,
+
+        pub mint_decimals: u8,
+
+        pub current_timestamp: i64,
+    }
+
+    impl RateLimitFlowEvent {
+        pub fn new(
+            group: Pubkey,
+
+            bank: Pubkey,
+
+            mint: Pubkey,
+
+            flow_direction: u8,
+
+            native_amount: u64,
+
+            mint_decimals: u8,
+
+            current_timestamp: i64,
+        ) -> Self {
+            Self {
+                group,
+
+                bank,
+
+                mint,
+
+                flow_direction,
+
+                native_amount,
+
+                mint_decimals,
+
+                current_timestamp,
+            }
+        }
+    }
+
     /// Custom struct: RateLimitWindow
     #[derive(Debug, BorshDeserialize, BorshSerialize, Clone, PartialEq)]
     pub struct RateLimitWindow {
@@ -22312,7 +23503,7 @@ pub mod marginfi {
     }
 
     /// Custom struct: RatePoint
-    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone, PartialEq, Copy)]
+    #[derive(Debug, BorshDeserialize, BorshSerialize, Clone, PartialEq)]
     pub struct RatePoint {
         pub util: u32,
 

@@ -1,3 +1,4 @@
+use fixed::types::I80F48;
 use trident_fuzz::fuzzing::prelude::TridentTransactionResult;
 use trident_fuzz::fuzzing::*;
 
@@ -9,6 +10,114 @@ use crate::user::User;
 use crate::FuzzTest;
 
 impl FuzzTest {
+    /// Submit a `LendingPoolConfigureBank` ix that flips only the bank's
+    /// `operational_state`, leaving every other field at its prior value
+    /// (`BankConfigOpt` with all-`None` except `operational_state`).
+    ///
+    /// Marginfi rejects new deposits when `Paused` and new borrows when
+    /// `ReduceOnly` — the harness's existing deposit/borrow/withdraw/repay
+    /// helpers already assert `state-unchanged on failure` semantics, so
+    /// the state-transition + downstream-rejection coverage emerges
+    /// naturally without modifying any other flow. The new state stays
+    /// in effect until a subsequent call (random or otherwise) cycles
+    /// it back.
+    pub fn lending_pool_configure_bank_state(
+        &mut self,
+        bank: Pubkey,
+        state: types::marginfi::BankOperationalState,
+        msg: Option<&str>,
+    ) {
+        let config = types::marginfi::BankConfigOpt {
+            asset_weight_init: None,
+            asset_weight_maint: None,
+            liability_weight_init: None,
+            liability_weight_maint: None,
+            deposit_limit: None,
+            borrow_limit: None,
+            operational_state: Some(state),
+            interest_rate_config: None,
+            risk_tier: None,
+            asset_tag: None,
+            total_asset_value_init_limit: None,
+            oracle_max_confidence: None,
+            oracle_max_age: None,
+            permissionless_bad_debt_settlement: None,
+            freeze_settings: None,
+            tokenless_repayments_allowed: None,
+        };
+
+        let ix = types::marginfi::LendingPoolConfigureBankInstruction::data(
+            types::marginfi::LendingPoolConfigureBankInstructionData::new(config),
+        )
+        .accounts(
+            types::marginfi::LendingPoolConfigureBankInstructionAccounts::new(
+                self.marginfi_group,
+                self.payer.pubkey(),
+                bank,
+            ),
+        )
+        .instruction();
+
+        // Most calls succeed (admin-signed, valid ix); a few may fail in
+        // late-sequence states (e.g. KilledByBankruptcy is set
+        // automatically by the program and rejects manual reconfig).
+        // No invariant on success/fail — the value of this flow is the
+        // downstream state-machine exercise.
+        let _ = self.trident.process_transaction(&[ix], msg);
+    }
+
+    /// Read the user's asset balance for a specific bank, denominated in
+    /// the bank's underlying token (native units). Returns 0 if the user
+    /// has no active balance on that bank.
+    ///
+    /// Used by engineered scenarios that need an exact-drain liquidation
+    /// — marginfi's liquidate ix rejects `asset_amount > pre_balance`
+    /// (see `liquidate.rs:318` in the program), so we can't use
+    /// `u64::MAX` as a "drain everything" sentinel. Callers typically
+    /// subtract a small buffer (~1000 native) to absorb any rounding-up
+    /// from the bank's own pre-liquidate accrue.
+    pub(crate) fn read_user_bank_asset_amount(
+        &mut self,
+        marginfi_account: Pubkey,
+        bank_pk: Pubkey,
+    ) -> u64 {
+        let bank = self
+            .trident
+            .get_account_with_type::<crate::types::marginfi::Bank>(&bank_pk, None)
+            .expect("bank deserialize");
+        let snap = invariants::marginfi_bank_share_snapshot(
+            &mut self.trident,
+            marginfi_account,
+            bank_pk,
+        );
+        if !snap.had_active_balance {
+            return 0;
+        }
+        let asset_shares = I80F48::from_bits(i128::from_le_bytes(snap.asset_shares));
+        let asset_share_value =
+            I80F48::from_bits(i128::from_le_bytes(bank.asset_share_value.value));
+        // Panic on overflow rather than silently returning 0 — a 0
+        // here would feed an out-of-bounds `asset_amount` to a
+        // downstream liquidate ix and silently lose bankruptcy
+        // coverage instead of surfacing the underlying bookkeeping
+        // bug.
+        asset_shares
+            .checked_mul(asset_share_value)
+            .expect("asset value (shares × share_value) overflow")
+            .to_num::<u64>()
+    }
+
+    /// Bump the per-sequence accrue counter for each touched bank.
+    /// Every state-modifying ix on a bank triggers an implicit accrue
+    /// inside the program, so the right place to call this is after a
+    /// successful bank-touching tx. The solvency tolerance in `#[end]`
+    /// reads these counts to bound expected I80F48 rounding drift.
+    pub(crate) fn bump_accrue(&mut self, banks: &[Pubkey]) {
+        for &b in banks {
+            *self.accrue_counts.entry(b).or_insert(0) += 1;
+        }
+    }
+
     pub(crate) fn snapshot_liquidity_vaults_except(
         &mut self,
         except_bank: Pubkey,
@@ -71,6 +180,7 @@ impl FuzzTest {
             &bank_pks,
             &last_before,
         );
+        self.bump_accrue(&bank_pks);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -169,6 +279,17 @@ impl FuzzTest {
                     vault_after >= vault_before,
                     "t22-fee deposit: vault must not lose. before {vault_before}, after {vault_after}"
                 );
+                // Asymmetric conservation: with a TransferFeeConfig the
+                // vault sees `amount − fee`, so the user must lose at
+                // least as much as the vault gained. Tokens go nowhere
+                // except into the mint's withheld balance — strict
+                // conservation as a one-sided inequality.
+                let user_drop = user_before.saturating_sub(user_after);
+                let vault_gain = vault_after.saturating_sub(vault_before);
+                invariant!(
+                    user_drop >= vault_gain,
+                    "t22-fee deposit: user loss must cover vault gain. user_drop {user_drop}, vault_gain {vault_gain}"
+                );
             }
             let share_snap_after = invariants::marginfi_bank_share_snapshot(
                 &mut self.trident,
@@ -190,6 +311,7 @@ impl FuzzTest {
                 share_amount,
             );
             invariants::assert_balances_packed(&mut self.trident, marginfi_account);
+            self.bump_accrue(&[bank.address]);
         } else {
             invariants::assert_no_balance_change(
                 user_before,
@@ -260,20 +382,44 @@ impl FuzzTest {
         let vault_after = invariants::token_balance(&mut self.trident, bank_layout.liquidity_vault);
 
         if res.is_success() {
-            invariants::assert_withdraw_balance_invariants(
-                amount,
-                user_before,
-                user_after,
-                vault_before,
-                vault_after,
-            );
-            if !withdraw_all {
-                invariants::assert_exact_user_vault_delta_withdraw(
+            // Transfer-fee banks: vault loses `amount`, user receives
+            // `amount − fee` (the fee is withheld on the user's account).
+            // Conservation and exact-amount invariants don't hold; gate them.
+            if !bank.has_transfer_fee {
+                invariants::assert_withdraw_balance_invariants(
                     amount,
                     user_before,
                     user_after,
                     vault_before,
                     vault_after,
+                );
+                if !withdraw_all {
+                    invariants::assert_exact_user_vault_delta_withdraw(
+                        amount,
+                        user_before,
+                        user_after,
+                        vault_before,
+                        vault_after,
+                    );
+                }
+            } else {
+                invariant!(
+                    user_after >= user_before,
+                    "t22-fee withdraw: user must not lose. before {user_before}, after {user_after}"
+                );
+                invariant!(
+                    vault_after <= vault_before,
+                    "t22-fee withdraw: vault must not gain. before {vault_before}, after {vault_after}"
+                );
+                // Asymmetric conservation: the vault paid out `amount`,
+                // user received `amount − fee`. Vault loss must cover
+                // the user's gain (delta is the fee withheld on
+                // receipt).
+                let vault_drop = vault_before.saturating_sub(vault_after);
+                let user_gain = user_after.saturating_sub(user_before);
+                invariant!(
+                    vault_drop >= user_gain,
+                    "t22-fee withdraw: vault loss must cover user gain. vault_drop {vault_drop}, user_gain {user_gain}"
                 );
             }
             let share_snap_after = invariants::marginfi_bank_share_snapshot(
@@ -281,10 +427,26 @@ impl FuzzTest {
                 marginfi_account,
                 bank.address,
             );
-            // With `withdraw_all`, the actual moved amount is whatever the
-            // user's position was — derive it from the token delta so the
-            // share-direction invariant has the correct expectation.
+            // With `withdraw_all` OR a transfer-fee bank, the actual moved
+            // amount differs from `amount`. Derive the value the invariant
+            // sees from observable state:
+            //
+            // * `withdraw_all`: the program closes the balance entirely. If
+            //   the bank's `asset_share_value` has been driven sub-1 by
+            //   socialised bad debt, a non-trivial share position can map
+            //   to 0 native tokens — so the user-token delta isn't a
+            //   reliable proxy. Use snapshot equality instead: if the
+            //   share state actually changed, pass a positive sentinel so
+            //   the invariant exercises the "shares decreased" branch.
+            // * transfer-fee: user receives `amount − fee`, still positive
+            //   when `amount > 0`.
             let share_amount = if withdraw_all {
+                if share_snap_before != share_snap_after {
+                    1
+                } else {
+                    0
+                }
+            } else if bank.has_transfer_fee {
                 user_after.saturating_sub(user_before)
             } else {
                 amount
@@ -295,6 +457,7 @@ impl FuzzTest {
                 share_amount,
             );
             invariants::assert_balances_packed(&mut self.trident, marginfi_account);
+            self.bump_accrue(&[bank.address]);
         } else {
             invariants::assert_no_balance_change(
                 user_before,
@@ -445,6 +608,7 @@ impl FuzzTest {
                 amount,
             );
             invariants::assert_balances_packed(&mut self.trident, marginfi_account);
+            self.bump_accrue(&[bank.address]);
         } else {
             invariants::assert_no_balance_change(
                 user_before,
@@ -535,10 +699,17 @@ impl FuzzTest {
                 marginfi_account,
                 bank.address,
             );
-            // With `repay_all`, the actual moved amount is whatever the
-            // user's liability was — derive from the token delta.
+            // With `repay_all`, the program closes the liability balance.
+            // Like the `withdraw_all` case in `lending_account_withdraw`, a
+            // sub-1 `liability_share_value` can map a real liability
+            // position to 0 native tokens, so the user-token delta isn't a
+            // reliable signal. Use snapshot equality.
             let share_amount = if repay_all {
-                user_before.saturating_sub(user_after)
+                if share_snap_before != share_snap_after {
+                    1
+                } else {
+                    0
+                }
             } else {
                 amount
             };
@@ -548,6 +719,7 @@ impl FuzzTest {
                 share_amount,
             );
             invariants::assert_balances_packed(&mut self.trident, marginfi_account);
+            self.bump_accrue(&[bank.address]);
         } else {
             invariants::assert_no_balance_change(
                 user_before,
@@ -758,6 +930,24 @@ impl FuzzTest {
             invariants::assert_liquidation_success_share_invariants(&snap, &after, asset_amount);
             invariants::assert_balances_packed(&mut self.trident, liquidator_marginfi_account);
             invariants::assert_balances_packed(&mut self.trident, liquidatee_marginfi_account);
+            self.bump_accrue(&[asset_bank.address, liab_bank.address]);
+
+            // Couple the bankruptcy ix to every successful liquidation, the
+            // way the legacy libfuzzer harness did
+            // (`process_liquidate_account` → `process_handle_bankruptcy`).
+            // Liquidations that drain the liquidatee's asset side leave
+            // bad debt on `liab_bank` — bankruptcy is the cleanup. Without
+            // this coupling the bad-debt write-down path only runs when a
+            // random `flow_handle_bankruptcy` happens to land on the same
+            // (account, bank) pair, which is statistically rare. Most calls
+            // here will still fail with `AccountNotBankrupt`; the handful
+            // that succeed exercise the real insurance → liquidity vault
+            // socialisation flow.
+            self.lending_pool_handle_bankruptcy(
+                liab_bank,
+                liquidatee_marginfi_account,
+                Some("Post-liquidation bankruptcy attempt"),
+            );
         } else {
             invariants::assert_liquidation_failure_state_unchanged(&snap, &after);
         }
@@ -811,6 +1001,87 @@ impl FuzzTest {
                 record,
             );
             invariants::assert_balances_packed(&mut self.trident, liquidatee_marginfi_account);
+        }
+    }
+
+    /// Submit `LendingPoolHandleBankruptcy` against a random user + bank.
+    /// The vast majority of calls will fail with `AccountNotBankrupt` (6013)
+    /// because the random target isn't actually bankrupt; that's the desired
+    /// fuzz behaviour — the bankruptcy codepath is exercised, and the
+    /// existing snapshot invariants assert state-unchanged on failure.
+    /// The rare success path (after a deep liquidation leaves a balance
+    /// with bad debt) exercises the real fee-vault drain and balance close.
+    pub fn lending_pool_handle_bankruptcy(
+        &mut self,
+        bank: FuzzTestBank,
+        marginfi_account: Pubkey,
+        msg: Option<&str>,
+    ) {
+        let bank_layout = self.bank_layout(bank.address);
+        let token_program = *self.trident.get_account(&bank.currency.mint).owner();
+        let banks = self.get_marginfi_account_banks(marginfi_account, Some(bank.address));
+        let remaining_accounts = self.remaining_accounts_for_bank_risk_and_t22_transfer(
+            bank.currency.mint,
+            token_program,
+            banks,
+        );
+
+        let liab_vault_before =
+            invariants::token_balance(&mut self.trident, bank_layout.liquidity_vault);
+        let insurance_vault_before =
+            invariants::token_balance(&mut self.trident, bank_layout.insurance_vault);
+
+        let ix = types::marginfi::LendingPoolHandleBankruptcyInstruction::data(
+            types::marginfi::LendingPoolHandleBankruptcyInstructionData::new(),
+        )
+        .accounts(
+            types::marginfi::LendingPoolHandleBankruptcyInstructionAccounts::new(
+                self.marginfi_group,
+                self.payer.pubkey(),
+                bank.address,
+                marginfi_account,
+                bank_layout.liquidity_vault,
+                bank_layout.insurance_vault,
+                bank_layout.insurance_vault_authority,
+                token_program,
+            ),
+        )
+        .remaining_accounts(remaining_accounts)
+        .instruction();
+
+        let res = self.trident.process_transaction(&[ix], msg);
+
+        let liab_vault_after =
+            invariants::token_balance(&mut self.trident, bank_layout.liquidity_vault);
+        let insurance_vault_after =
+            invariants::token_balance(&mut self.trident, bank_layout.insurance_vault);
+
+        if !res.is_success() {
+            // State-unchanged on failure (most random calls land here).
+            invariants::assert_balance_unchanged(liab_vault_before, liab_vault_after);
+            invariants::assert_balance_unchanged(insurance_vault_before, insurance_vault_after);
+        } else {
+            // On success, bankruptcy is allowed to drain insurance into
+            // the liquidity vault (covering bad debt). Direction-only:
+            //   liquidity_vault may go up (insurance-funded socialisation)
+            //   insurance_vault may go down (insurance drained)
+            invariant!(
+                liab_vault_after >= liab_vault_before,
+                "bankruptcy: liquidity vault should not decrease. before {liab_vault_before}, after {liab_vault_after}"
+            );
+            invariant!(
+                insurance_vault_after <= insurance_vault_before,
+                "bankruptcy: insurance vault should not grow. before {insurance_vault_before}, after {insurance_vault_after}"
+            );
+            invariants::assert_balances_packed(&mut self.trident, marginfi_account);
+            self.bump_accrue(&[bank.address]);
+            // Tell the bank_state directional invariants that this bank
+            // is now exempt from `asset_share_value` and
+            // `collected_insurance_fees_outstanding` monotonicity —
+            // bankruptcy socialises loss across remaining depositors
+            // and drains the insurance vault, both of which legitimately
+            // reduce the snapshotted baselines.
+            self.banks_with_bankruptcy.insert(bank.address);
         }
     }
 }

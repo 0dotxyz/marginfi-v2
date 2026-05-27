@@ -64,6 +64,34 @@ fn i80_from_share_bytes(bytes: &[u8; 16]) -> I80F48 {
     I80F48::from_bits(i128::from_le_bytes(*bytes))
 }
 
+/// Bit-precision tolerance for "must not change" share assertions
+/// (1e-10 in I80F48). Sized to land between two regimes:
+///
+/// * **Above** the I80F48 precision floor (≈ 2⁻⁴⁸ ≈ 3.55e-15) by ~5
+///   orders of magnitude — absorbs the sub-bit residues the audit-
+///   fixed `increase_balance_internal` / `decrease_balance_internal`
+///   leave behind (e.g. `0 → 4e-15` on a 1-native-unit repay, `4e-15
+///   → 0` on a borrow that touches a balance with residual dust).
+/// * **Below** `ZERO_AMOUNT_THRESHOLD` (1e-4) by 6 orders of magnitude
+///   — well under the M12 bug's typical 3e-6 dust, so the M12
+///   reproduction in `#[init]` still detects a regression.
+///
+/// In bits: 1e-10 × 2⁴⁸ ≈ 28_147_497. Roughly 280× the precision
+/// floor and 280×× looser than the M12 bug magnitude.
+const SHARE_INVARIANCE_TOLERANCE_BITS: i128 = 28_147_497;
+
+fn share_invariance_tolerance() -> I80F48 {
+    I80F48::from_bits(SHARE_INVARIANCE_TOLERANCE_BITS)
+}
+
+/// Returns true iff `before` and `after` differ by at most the
+/// bit-precision-residue tolerance — i.e. the change is "close enough
+/// to no change" to be the audit-fix's sub-precision clean-up
+/// rather than an M12-style dust injection.
+fn dust_clear_allowed(before: I80F48, after: I80F48) -> bool {
+    (after - before).abs() < share_invariance_tolerance()
+}
+
 pub fn assert_exact_deposit_token_leg(
     amount: u64,
     user_before: u64,
@@ -172,7 +200,7 @@ pub fn assert_deposit_success_share_invariants(
     let l0 = i80_from_share_bytes(&before.liability_shares);
     let l1 = i80_from_share_bytes(&after.liability_shares);
     invariant!(
-        l0 == l1,
+        l0 == l1 || dust_clear_allowed(l0, l1),
         "deposit shares: liability shares must not change. amount: {}, before: {}, after: {}",
         amount,
         l0,
@@ -213,7 +241,7 @@ pub fn assert_withdraw_success_share_invariants(
     let l0 = i80_from_share_bytes(&before.liability_shares);
     let l1 = i80_from_share_bytes(&after.liability_shares);
     invariant!(
-        l0 == l1,
+        l0 == l1 || dust_clear_allowed(l0, l1),
         "withdraw shares: liability shares must not change. amount: {}, before: {}, after: {}",
         amount,
         l0,
@@ -265,7 +293,7 @@ pub fn assert_borrow_success_share_invariants(
     let l0 = i80_from_share_bytes(&before.liability_shares);
     let l1 = i80_from_share_bytes(&after.liability_shares);
     invariant!(
-        a0 == a1,
+        a0 == a1 || dust_clear_allowed(a0, a1),
         "borrow shares: asset shares must not change. amount: {}, before: {}, after: {}",
         amount,
         a0,
@@ -306,7 +334,7 @@ pub fn assert_repay_success_share_invariants(
     let l0 = i80_from_share_bytes(&before.liability_shares);
     let l1 = i80_from_share_bytes(&after.liability_shares);
     invariant!(
-        a0 == a1,
+        a0 == a1 || dust_clear_allowed(a0, a1),
         "repay shares: asset shares must not change. amount: {}, before: {}, after: {}",
         amount,
         a0,

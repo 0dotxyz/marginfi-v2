@@ -31,7 +31,6 @@ use crate::utils::mint_to;
 const T22_TRANSFER_FEE_BPS: u16 = 100;
 const T22_MAX_FEE: u64 = 1_000_000_000;
 const T22_MINT_DECIMALS: u8 = 8;
-const T22_SEEDER_INITIAL_AMOUNT: u64 = 10_000_000_000_000;
 const T22_SEEDER_DEPOSIT_AMOUNT: u64 = 1_000_000_000;
 
 fn wrap_i80f48(value: I80F48) -> WrappedI80F48 {
@@ -128,6 +127,15 @@ impl FuzzTest {
         // every sequence exercises marginfi's T22-with-fee LendingAccountDeposit
         // codepath at least once.
         self.init_t22_with_fee_bank_and_seed();
+
+        // ================================================================================================
+        // Init the Isolated-risk-tier bank. Positions on this bank carry
+        // `asset_weight = 0` and mixing with default positions trips
+        // `IsolatedAccountIllegalState`. Per-user token accounts get
+        // minted here; the dedicated `flow_isolated_deposit` exercises
+        // them, and any random cross-bank op the harness happens to issue
+        // afterwards drives the isolated-violation path.
+        self.init_isolated_bank_and_mint();
 
         // ================================================================================================
         // Init Kamino Bank for USDC
@@ -509,7 +517,51 @@ impl FuzzTest {
         }
     }
 
+    /// Isolated-tier bank: `asset_weight = 0` (positions contribute zero
+    /// collateral value) and `RiskTier::Isolated` (an account holding a
+    /// position on this bank can hold at most one liability). Mixing
+    /// isolated + default positions trips `IsolatedAccountIllegalState`.
+    fn isolated_bank_config() -> BankConfigCompact {
+        BankConfigCompact::new(
+            wrap_i80f48(I80F48!(0.0)),  // asset_weight_init = 0
+            wrap_i80f48(I80F48!(0.0)),  // asset_weight_maint = 0
+            wrap_i80f48(I80F48!(1.5)),  // liability_weight_init
+            wrap_i80f48(I80F48!(1.25)), // liability_weight_maint
+            u64::MAX / 4,
+            InterestRateConfigCompact::new(
+                wrap_i80f48(I80F48!(0.0)),
+                wrap_i80f48(I80F48!(0.0)),
+                wrap_i80f48(I80F48!(0.0)),
+                wrap_i80f48(I80F48!(0.0)),
+                wrap_i80f48(I80F48!(0.0)),
+                0,
+                0,
+                // asset_weight = 0 on isolated banks means accrual semantics
+                // don't really matter; keep the curve flat.
+                core::array::from_fn(|_| RatePoint::new(0, 0)),
+            ),
+            BankOperationalState::Operational,
+            u64::MAX / 4,
+            RiskTier::Isolated,
+            0,
+            0,
+            [0; 5],
+            u64::MAX / 4,
+            300,
+            0,
+        )
+    }
+
     fn usdc_bank_config() -> BankConfigCompact {
+        // Mainnet USDC rate curve points (verbatim from upstream
+        // marginfi-v2-fuzz-tests / 0.1.9 update).
+        let points = [
+            RatePoint::new(2_147_483_648, 8_589_935),
+            RatePoint::new(3_435_973_836, 17_179_869),
+            RatePoint::new(3_865_470_566, 21_474_836),
+            RatePoint::new(4_080_218_930, 32_212_255),
+            RatePoint::new(4_209_067_949, 42_949_673),
+        ];
         BankConfigCompact::new(
             // https://solscan.io/account/2s37akK2eyBbp8DZgCm7RtsaEz8eJP3Nxd4urLHQv7yB#accountData
             wrap_i80f48(I80F48!(1.0)),
@@ -525,8 +577,8 @@ impl FuzzTest {
                 wrap_i80f48(I80F48!(0.0)),
                 wrap_i80f48(I80F48!(0.0)),
                 0,
-                0,
-                [RatePoint::new(0, 0); 5],
+                64_424_509,
+                points,
             ),
             BankOperationalState::Operational,
             200_000_000_000_000,
@@ -541,6 +593,14 @@ impl FuzzTest {
     }
 
     fn eth_bank_config() -> BankConfigCompact {
+        // Mainnet ETH rate curve (verbatim from upstream 0.1.9 update).
+        let points = [
+            RatePoint::new(3_435_973_836, 42_949_672),
+            RatePoint::new(0, 0),
+            RatePoint::new(0, 0),
+            RatePoint::new(0, 0),
+            RatePoint::new(0, 0),
+        ];
         BankConfigCompact::new(
             // https://solscan.io/account/BkUyfXjbBBALcfZvw76WAFRvYQ21xxMWWeoPtJrUqG3z#accountData
             wrap_i80f48(I80F48!(0.5)),
@@ -555,8 +615,8 @@ impl FuzzTest {
                 wrap_i80f48(I80F48!(0.0)),
                 wrap_i80f48(I80F48!(0.0)),
                 0,
-                0,
-                [RatePoint::new(0, 0); 5],
+                1_288_490_188,
+                points,
             ),
             BankOperationalState::Operational,
             u64::MAX / 4,
@@ -571,6 +631,15 @@ impl FuzzTest {
     }
 
     fn btc_bank_config() -> BankConfigCompact {
+        // Mainnet BTC rate curve (verbatim from upstream 0.1.9 update —
+        // same shape as ETH).
+        let points = [
+            RatePoint::new(3_435_973_836, 42_949_672),
+            RatePoint::new(0, 0),
+            RatePoint::new(0, 0),
+            RatePoint::new(0, 0),
+            RatePoint::new(0, 0),
+        ];
         BankConfigCompact::new(
             // Mainnet-style BTC weights from WrappedI80F48 LE bytes:
             // asset init 00..80.. (0.5), asset maint 66..a6.. (~0.65),
@@ -588,8 +657,8 @@ impl FuzzTest {
                 wrap_i80f48(I80F48!(0.0)),
                 wrap_i80f48(I80F48!(0.0)),
                 0,
-                0,
-                [RatePoint::new(0, 0); 5],
+                1_288_490_188,
+                points,
             ),
             BankOperationalState::Operational,
             u64::MAX / 4,
@@ -757,8 +826,6 @@ impl FuzzTest {
         let payer = self.payer.pubkey();
         let mint = self.t22_bank.currency.mint;
         let mint_authority = self.t22_mint_authority;
-        let seeder_token_account = self.t22_seeder_token_account;
-        let seeder_owner = self.seeder.address;
 
         // 1) Initialize the T22 mint with TransferFeeConfig.
         let mint_ixs = self.trident.initialize_mint_2022(
@@ -777,25 +844,37 @@ impl FuzzTest {
         let res = self.trident.process_transaction(&mint_ixs, None);
         invariant!(res.is_success());
 
-        // 2) Initialize the seeder's T22 token account.
-        let acc_ixs = self.trident.initialize_token_account_2022(
-            &payer,
-            &seeder_token_account,
-            &mint,
-            &seeder_owner,
-            &[],
-        );
-        let res = self.trident.process_transaction(&acc_ixs, None);
-        invariant!(res.is_success());
+        // 2) Initialize every actor's T22 token account (seeder + users +
+        //    liquidator) and mint each their initial T22 balance. The seeder
+        //    uses these in step 4 below; the 4 users use them in
+        //    `flow_t22_deposit` / `flow_t22_withdraw`.
+        for actor in self
+            .users
+            .clone()
+            .iter()
+            .chain([&self.seeder.clone(), &self.liquidator.clone()])
+        {
+            let acc_ixs = self.trident.initialize_token_account_2022(
+                &payer,
+                &actor.t22_token_account,
+                &mint,
+                &actor.address,
+                &[],
+            );
+            let res = self.trident.process_transaction(&acc_ixs, None);
+            invariant!(res.is_success());
 
-        // 3) Mint the seeder's initial T22 balance.
-        let mint_to_ix =
-            self.trident
-                .mint_to_2022(&seeder_token_account, &mint, &mint_authority, T22_SEEDER_INITIAL_AMOUNT);
-        let res = self.trident.process_transaction(&[mint_to_ix], None);
-        invariant!(res.is_success());
+            let mint_to_ix = self.trident.mint_to_2022(
+                &actor.t22_token_account,
+                &mint,
+                &mint_authority,
+                actor.initial_t22_amount,
+            );
+            let res = self.trident.process_transaction(&[mint_to_ix], None);
+            invariant!(res.is_success());
+        }
 
-        // 4) Init the marginfi bank backed by the new T22 mint.
+        // 3) Init the marginfi bank backed by the new T22 mint.
         // Reuse `usdc_bank_config()`: weights/limits aren't the point here,
         // we just need a bank we can deposit into through the standard ix.
         self.init_bank(
@@ -807,17 +886,71 @@ impl FuzzTest {
             Some("Init T22-with-fee bank"),
         );
 
-        // 5) Seeder deposit — drives the T22 transfer-fee codepath in
+        // 4) Seeder deposit — drives the T22 transfer-fee codepath in
         //    `LendingAccountDeposit`. `has_transfer_fee = true` on the bank
         //    tells `lending_account_deposit` to relax exact-amount /
         //    conservation invariants for this tx.
         self.lending_account_deposit(
             T22_SEEDER_DEPOSIT_AMOUNT,
             self.t22_bank,
-            self.t22_seeder_token_account,
+            self.seeder.t22_token_account,
             self.seeder.marginfi_account,
             self.seeder.address,
             Some("Seeder deposit — T22 transfer-fee bank"),
+        );
+    }
+
+    /// Bring up the Isolated-risk-tier bank: initialize the classic SPL
+    /// Token mint, init per-actor token accounts, mint each their initial
+    /// balance, and init the marginfi bank with `RiskTier::Isolated` and
+    /// `asset_weight = 0`. No automatic deposit — `flow_isolated_deposit`
+    /// drives the codepath at fuzz time. Cross-bank interactions with
+    /// other banks trigger `IsolatedAccountIllegalState` naturally.
+    pub fn init_isolated_bank_and_mint(&mut self) {
+        let payer = self.payer.pubkey();
+        let mint = self.isolated_bank.currency.mint;
+        let mint_authority = self.isolated_mint_authority;
+
+        // 1) Initialize the classic SPL Token mint.
+        crate::utils::initialize_mint(
+            &mut self.trident,
+            payer,
+            mint,
+            8,
+            mint_authority,
+        );
+
+        // 2) Per-actor token account + initial mint.
+        for actor in self
+            .users
+            .clone()
+            .iter()
+            .chain([&self.seeder.clone(), &self.liquidator.clone()])
+        {
+            crate::utils::initialize_token_account(
+                &mut self.trident,
+                payer,
+                actor.isolated_token_account,
+                mint,
+                actor.address,
+            );
+            crate::utils::mint_to(
+                &mut self.trident,
+                actor.isolated_token_account,
+                mint,
+                mint_authority,
+                actor.initial_isolated_amount,
+            );
+        }
+
+        // 3) Init the marginfi bank with the isolated config.
+        self.init_bank(
+            payer,
+            self.isolated_bank,
+            Self::isolated_bank_config(),
+            self.marginfi_group,
+            self.fee_state,
+            Some("Init isolated-tier bank"),
         );
     }
 }
