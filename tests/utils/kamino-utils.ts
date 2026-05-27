@@ -310,6 +310,25 @@ export function estimateCollateralFromDeposit(
   return new BN(rounded.toString());
 }
 
+/**
+ * Estimate raw underlying liquidity redeemed for some raw collateral amount. This is the inverse
+ * of `estimateCollateralFromDeposit`.
+ * @param state
+ * @param collateralAmountRaw
+ * @returns underlying liquidity, in native decimals
+ */
+export function estimateLiquidityFromCollateral(
+  state: Reserve,
+  collateralAmountRaw: BN
+): BN {
+  const collateralRawDecimal = new Decimal(collateralAmountRaw.toString());
+  const rate = getLiquidityExchangeRate(state);
+  const liquidityTokens = collateralRawDecimal.mul(rate);
+
+  const rounded = liquidityTokens.toDecimalPlaces(0, Decimal.ROUND_FLOOR);
+  return new BN(rounded.toString());
+}
+
 // TODO when porting this to the package, let's not convert buffer -> hex -> Decimal -> BigNumber,
 // this seems straight up goofy.
 /**

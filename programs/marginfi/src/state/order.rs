@@ -224,7 +224,7 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
         }
 
         // This implies that the inactive balances were also not touched.
-        // This check is not strictly necessary since deposits are not allowed
+        // This check is not strictly necessary since deposits & borrows are not allowed
         // during execution and the above has checked that the open balances are
         // still open and the same, but is left here as a sanity check.
         check_eq!(

@@ -6,23 +6,11 @@ import {
   SystemProgram,
   SYSVAR_RENT_PUBKEY,
   Transaction,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
 } from "@solana/web3.js";
 import { createMintToInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import {
-  AssetReserveConfig,
-  BorrowRateCurve,
-  BorrowRateCurveFields,
-  CurvePoint,
-  lendingMarketAuthPda,
-  LendingMarket,
-  MarketWithAddress,
-  PriceFeed,
-  reserveCollateralMintPda,
-  reserveCollateralSupplyPda,
-  reserveFeeVaultPda,
-  reserveLiqSupplyPda,
-  updateEntireReserveConfigIx,
-} from "@kamino-finance/klend-sdk";
 import Decimal from "decimal.js";
 import { Farms } from "../fixtures/kamino_farms";
 import farmsIdl from "../../idls-complete/kamino_farms.json";
@@ -49,6 +37,7 @@ import {
   MARKET,
   oracles,
   TOKEN_A_RESERVE,
+  USDC_RESERVE,
 } from "../rootHooks";
 import { createBankrunPythOracleAccount } from "./bankrun-oracles";
 import {
@@ -60,10 +49,40 @@ import {
   USDC_MARKET_INDEX,
 } from "./drift-utils";
 import { makeInitializeDriftIx, makeInitializeSpotMarketIx } from "./drift-sdk";
-import { LENDING_MARKET_SIZE, RESERVE_SIZE } from "./kamino-utils";
-import { deriveDriftStatePDA, deriveSpotMarketPDA } from "./pdas";
-import { processBankrunTransaction } from "./tools";
+import {
+  LENDING_MARKET_SIZE,
+  RESERVE_SIZE,
+  simpleRefreshReserve,
+  toWeb3Ix,
+} from "./kamino-utils";
+import {
+  deriveDriftStatePDA,
+  deriveFeeReceiver,
+  deriveLendingMarketAuthority,
+  deriveReserveCollateralMint,
+  deriveReserveCollateralSupply,
+  deriveReserveLiquiditySupply,
+  deriveSpotMarketPDA,
+} from "./pdas";
+import {
+  createLookupTableForInstructions,
+  getBankrunBlockhash,
+  processBankrunTransaction,
+} from "./tools";
 import { DRIFT_ORACLE_RECEIVER_PROGRAM_ID } from "./types";
+import { address } from "@solana/addresses";
+import { createNoopSigner } from "@solana/kit";
+import {
+  AssetReserveConfig,
+  BorrowRateCurve,
+  BorrowRateCurveFields,
+  CurvePoint,
+  LendingMarket,
+  MarketWithAddress,
+  PriceFeed,
+  Reserve,
+  parseForChangesReserveConfigAndGetIxs,
+} from "@kamino-finance/klend-sdk";
 
 const FARMS_GLOBAL_CONFIG_SIZE = 2136;
 const FARMS_STATE_SIZE = 8336;
@@ -85,9 +104,9 @@ const createKaminoMarket = async (): Promise<PublicKey> => {
   );
 
   const lendingMarket = Keypair.generate();
-  const [lendingMarketAuthority] = lendingMarketAuthPda(
-    lendingMarket.publicKey,
+  const [lendingMarketAuthority] = deriveLendingMarketAuthority(
     klendBankrunProgram.programId,
+    lendingMarket.publicKey,
   );
 
   const tx = new Transaction().add(
@@ -121,30 +140,36 @@ const createKaminoMarket = async (): Promise<PublicKey> => {
   return lendingMarket.publicKey;
 };
 
-const createTokenAReserve = async (market: PublicKey): Promise<PublicKey> => {
+const createReserve = async (params: {
+  market: PublicKey;
+  mint: PublicKey;
+  decimals: number;
+  oracle: PublicKey;
+  liquiditySource: PublicKey;
+  reserveLabel: string;
+}): Promise<PublicKey> => {
+  const { market, mint, decimals, oracle, liquiditySource, reserveLabel } =
+    params;
   const reserve = Keypair.generate();
-  const id = klendBankrunProgram.programId;
-
-  const [lendingMarketAuthority] = lendingMarketAuthPda(market, id);
-  const [reserveLiquiditySupply] = reserveLiqSupplyPda(
+  const [lendingMarketAuthority] = deriveLendingMarketAuthority(
+    klendBankrunProgram.programId,
     market,
-    ecosystem.tokenAMint.publicKey,
-    id,
   );
-  const [reserveFeeVault] = reserveFeeVaultPda(
-    market,
-    ecosystem.tokenAMint.publicKey,
-    id,
+  const [feeReceiver] = deriveFeeReceiver(
+    klendBankrunProgram.programId,
+    reserve.publicKey,
   );
-  const [collatMint] = reserveCollateralMintPda(
-    market,
-    ecosystem.tokenAMint.publicKey,
-    id,
+  const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
+    klendBankrunProgram.programId,
+    reserve.publicKey,
   );
-  const [collatSupply] = reserveCollateralSupplyPda(
-    market,
-    ecosystem.tokenAMint.publicKey,
-    id,
+  const [reserveCollateralMint] = deriveReserveCollateralMint(
+    klendBankrunProgram.programId,
+    reserve.publicKey,
+  );
+  const [reserveCollateralSupply] = deriveReserveCollateralSupply(
+    klendBankrunProgram.programId,
+    reserve.publicKey,
   );
 
   const initTx = new Transaction().add(
@@ -160,17 +185,17 @@ const createTokenAReserve = async (market: PublicKey): Promise<PublicKey> => {
     }),
     await klendBankrunProgram.methods
       .initReserve()
-      .accounts({
+      .accountsStrict({
         signer: groupAdmin.wallet.publicKey,
         lendingMarket: market,
         lendingMarketAuthority,
         reserve: reserve.publicKey,
-        reserveLiquidityMint: ecosystem.tokenAMint.publicKey,
+        reserveLiquidityMint: mint,
         reserveLiquiditySupply,
-        feeReceiver: reserveFeeVault,
-        reserveCollateralMint: collatMint,
-        reserveCollateralSupply: collatSupply,
-        initialLiquiditySource: groupAdmin.tokenAAccount,
+        feeReceiver,
+        reserveCollateralMint,
+        reserveCollateralSupply,
+        initialLiquiditySource: liquiditySource,
         rent: SYSVAR_RENT_PUBKEY,
         liquidityTokenProgram: TOKEN_PROGRAM_ID,
         collateralTokenProgram: TOKEN_PROGRAM_ID,
@@ -178,22 +203,22 @@ const createTokenAReserve = async (market: PublicKey): Promise<PublicKey> => {
       })
       .instruction(),
   );
-
   await processBankrunTransaction(bankrunContext, initTx, [
     groupAdmin.wallet,
     reserve,
   ]);
 
-  const marketInfo = await bankRunProvider.connection.getAccountInfo(market);
-  if (!marketInfo) {
-    throw new Error("Kamino lending market account not found after init");
-  }
-  const marketAcc: LendingMarket = LendingMarket.decode(marketInfo.data);
+  const marketAcc: LendingMarket = LendingMarket.decode(
+    (await bankRunProvider.connection.getAccountInfo(market))!.data,
+  );
+  const reserveAcc: Reserve = Reserve.decode(
+    (await bankRunProvider.connection.getAccountInfo(reserve.publicKey))!.data,
+  );
+
   const marketWithAddress: MarketWithAddress = {
-    address: market,
+    address: address(market.toString()),
     state: marketAcc,
   };
-
   const borrowRateCurve = new BorrowRateCurve({
     points: [
       new CurvePoint({ utilizationRateBps: 0, borrowRateBps: 50000 }),
@@ -205,16 +230,14 @@ const createTokenAReserve = async (market: PublicKey): Promise<PublicKey> => {
       ),
     ],
   } as BorrowRateCurveFields);
-
   const priceFeed: PriceFeed = {
-    pythPrice: oracles.tokenAOracle.publicKey,
+    pythPrice: address(oracle.toString()),
   };
-
   const assetReserveConfig = new AssetReserveConfig({
-    mint: ecosystem.tokenAMint.publicKey,
-    mintTokenProgram: TOKEN_PROGRAM_ID,
-    tokenName: TOKEN_A_RESERVE,
-    mintDecimals: ecosystem.tokenADecimals,
+    mint: address(mint.toString()),
+    mintTokenProgram: address(TOKEN_PROGRAM_ID.toString()),
+    tokenName: reserveLabel,
+    mintDecimals: decimals,
     priceFeed,
     loanToValuePct: 75,
     liquidationThresholdPct: 85,
@@ -223,22 +246,47 @@ const createTokenAReserve = async (market: PublicKey): Promise<PublicKey> => {
     borrowLimit: new Decimal(1_000_000_000),
   }).getReserveConfig();
 
-  const updateReserveIx = updateEntireReserveConfigIx(
+  const signer = createNoopSigner(address(groupAdmin.wallet.publicKey.toString()));
+  const instructions: TransactionInstruction[] = [
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+  ];
+  const ixes = await parseForChangesReserveConfigAndGetIxs(
     marketWithAddress,
-    reserve.publicKey,
+    reserveAcc,
+    address(reserve.publicKey.toString()),
     assetReserveConfig,
-    klendBankrunProgram.programId,
+    address(klendBankrunProgram.programId.toString()),
+    signer,
   );
+  for (const ix of ixes) {
+    instructions.push(toWeb3Ix(ix.ix as any));
+  }
 
-  const updateTx = new Transaction().add(
-    ComputeBudgetProgram.setComputeUnitLimit({
-      units: 1_000_000,
-    }),
-    updateReserveIx,
-  );
-  await processBankrunTransaction(bankrunContext, updateTx, [
+  const lutAccount = await createLookupTableForInstructions(
     groupAdmin.wallet,
-  ]);
+    instructions,
+  );
+  const messageV0 = new TransactionMessage({
+    payerKey: groupAdmin.wallet.publicKey,
+    recentBlockhash: await getBankrunBlockhash(bankrunContext),
+    instructions,
+  }).compileToV0Message([lutAccount]);
+  const versionedTx = new VersionedTransaction(messageV0);
+  versionedTx.sign([groupAdmin.wallet]);
+  await banksClient.processTransaction(versionedTx);
+
+  await processBankrunTransaction(
+    bankrunContext,
+    new Transaction().add(
+      await simpleRefreshReserve(
+        klendBankrunProgram,
+        reserve.publicKey,
+        market,
+        oracle,
+      ),
+    ),
+    [groupAdmin.wallet],
+  );
 
   return reserve.publicKey;
 };
@@ -374,9 +422,34 @@ const ensureKaminoSetup = async () => {
     kaminoAccounts.set(MARKET, market);
   }
 
+  let usdcReserve = kaminoAccounts.get(USDC_RESERVE);
+  if (!(await hasAccount(usdcReserve))) {
+    const mintUsdcTx = new Transaction().add(
+      createMintToInstruction(
+        ecosystem.usdcMint.publicKey,
+        groupAdmin.usdcAccount,
+        globalProgramAdmin.wallet.publicKey,
+        1000 * 10 ** ecosystem.usdcDecimals,
+      ),
+    );
+    await processBankrunTransaction(bankrunContext, mintUsdcTx, [
+      globalProgramAdmin.wallet,
+    ]);
+
+    usdcReserve = await createReserve({
+      market,
+      mint: ecosystem.usdcMint.publicKey,
+      decimals: ecosystem.usdcDecimals,
+      oracle: oracles.usdcOracle.publicKey,
+      liquiditySource: groupAdmin.usdcAccount,
+      reserveLabel: USDC_RESERVE,
+    });
+    kaminoAccounts.set(USDC_RESERVE, usdcReserve);
+  }
+
   let tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE);
   if (!(await hasAccount(tokenAReserve))) {
-    const mintTx = new Transaction().add(
+    const mintTokenATx = new Transaction().add(
       createMintToInstruction(
         ecosystem.tokenAMint.publicKey,
         groupAdmin.tokenAAccount,
@@ -384,11 +457,18 @@ const ensureKaminoSetup = async () => {
         1000 * 10 ** ecosystem.tokenADecimals,
       ),
     );
-    await processBankrunTransaction(bankrunContext, mintTx, [
+    await processBankrunTransaction(bankrunContext, mintTokenATx, [
       globalProgramAdmin.wallet,
     ]);
 
-    tokenAReserve = await createTokenAReserve(market);
+    tokenAReserve = await createReserve({
+      market,
+      mint: ecosystem.tokenAMint.publicKey,
+      decimals: ecosystem.tokenADecimals,
+      oracle: oracles.tokenAOracle.publicKey,
+      liquiditySource: groupAdmin.tokenAAccount,
+      reserveLabel: TOKEN_A_RESERVE,
+    });
     kaminoAccounts.set(TOKEN_A_RESERVE, tokenAReserve);
   }
 
@@ -443,9 +523,9 @@ const ensureKaminoSetup = async () => {
   }
 
   const farmState = Keypair.generate();
-  const [lendingMarketAuthority] = lendingMarketAuthPda(
-    market,
+  const [lendingMarketAuthority] = deriveLendingMarketAuthority(
     klendBankrunProgram.programId,
+    market,
   );
   const [farmVaultsAuthority] = PublicKey.findProgramAddressSync(
     [Buffer.from("authority"), farmState.publicKey.toBuffer()],

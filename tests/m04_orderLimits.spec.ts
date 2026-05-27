@@ -271,6 +271,39 @@ SCENARIOS.forEach(
           }
         };
 
+        // Sending all together causes transaction size problems
+        const pulseOrderHealth = async (
+          remaining: PublicKey[],
+        ): Promise<void> => {
+          const refreshIxs = await buildIntegrationRefreshIxs();
+          if (refreshIxs.length > 0) {
+            const refreshTx = new Transaction().add(...refreshIxs);
+            await processBankrunTransaction(
+              bankrunContext,
+              refreshTx,
+              [user.wallet],
+              false,
+              true,
+            );
+          }
+
+          const pulseIx = await healthPulse(user.mrgnBankrunProgram, {
+            marginfiAccount: userAccount,
+            remaining,
+          });
+          const pulseTx = new Transaction().add(
+            ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+            pulseIx,
+          );
+          await processBankrunTransaction(
+            bankrunContext,
+            pulseTx,
+            [user.wallet],
+            false,
+            true,
+          );
+        };
+
         it("init group, banks, and fund accounts", async () => {
           const result = await genericMultiBankTestSetup(
             1,
@@ -738,23 +771,7 @@ SCENARIOS.forEach(
           let liabilityValueBefore = 0;
           let netValueBefore = 0;
           {
-            const refreshIxs = await buildIntegrationRefreshIxs();
-            const pulseIx = await healthPulse(user.mrgnBankrunProgram, {
-              marginfiAccount: userAccount,
-              remaining: remainingAccounts,
-            });
-            const pulseTx = new Transaction().add(
-              ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-              ...refreshIxs,
-              pulseIx,
-            );
-            await processBankrunTransaction(
-              bankrunContext,
-              pulseTx,
-              [user.wallet],
-              false,
-              true,
-            );
+            await pulseOrderHealth(remainingAccounts);
             // const acc = await bankrunProgram.account.marginfiAccount.fetch(
             //   userAccount,
             // );
@@ -779,23 +796,7 @@ SCENARIOS.forEach(
           oracles.tokenAPrice = 200;
           await refreshAllOracleFeeds();
           {
-            const refreshIxs = await buildIntegrationRefreshIxs();
-            const pulseIx = await healthPulse(user.mrgnBankrunProgram, {
-              marginfiAccount: userAccount,
-              remaining: remainingAccounts,
-            });
-            const pulseTx = new Transaction().add(
-              ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-              ...refreshIxs,
-              pulseIx,
-            );
-            await processBankrunTransaction(
-              bankrunContext,
-              pulseTx,
-              [user.wallet],
-              false,
-              true,
-            );
+            await pulseOrderHealth(remainingAccounts);
             const acc = await bankrunProgram.account.marginfiAccount.fetch(
               userAccount,
             );
@@ -827,23 +828,7 @@ SCENARIOS.forEach(
           );
 
           {
-            const refreshIxs = await buildIntegrationRefreshIxs();
-            const pulseIx = await healthPulse(user.mrgnBankrunProgram, {
-              marginfiAccount: userAccount,
-              remaining: remainingAccountsPostRepay,
-            });
-            const pulseTx = new Transaction().add(
-              ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-              ...refreshIxs,
-              pulseIx,
-            );
-            await processBankrunTransaction(
-              bankrunContext,
-              pulseTx,
-              [user.wallet],
-              false,
-              true,
-            );
+            await pulseOrderHealth(remainingAccountsPostRepay);
           }
 
           const accountAfter =

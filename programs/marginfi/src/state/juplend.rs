@@ -10,7 +10,7 @@ use marginfi_type_crate::{
 };
 
 /// Used to configure JupLend banks. A simplified version of `BankConfigCompact` which omits most
-/// values related to interest since JupLend banks cannot earn interest or be borrowed against.
+/// values related to interest since JupLend banks cannot earn interest or be borrowed from.
 ///
 /// Note: JupLend banks do not take an Operational State, they always start in `Paused` state and
 /// are set to `Operational` via `juplend_init_position` (seed deposit + protocol fToken vault).
