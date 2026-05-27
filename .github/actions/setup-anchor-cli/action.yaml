@@ -9,7 +9,7 @@ runs:
 
   # ─── Cache the Anchor CLI binary ────────────────────────────────────
   - name: Cache Anchor CLI
-    uses: actions/cache@v3
+    uses: actions/cache@v4
     id: cache-anchor-cli
     with:
       path: ~/.cargo/bin/anchor
@@ -23,7 +23,7 @@ runs:
 
   # ─── Cache toml-cli if used ────────────────────────────────────────
   - name: Cache toml-cli
-    uses: actions/cache@v3
+    uses: actions/cache@v4
     id: cache-toml-cli
     with:
       path: ~/.cargo/bin/toml

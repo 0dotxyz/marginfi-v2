@@ -40,7 +40,7 @@ jobs:
     name: Rust Lint
     runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/base-setup/
       with:
         include-anchor: "false"
@@ -51,7 +51,7 @@ jobs:
     name: Rust Unit Tests
     runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/base-setup/
       with:
         include-anchor: "false"
@@ -62,10 +62,10 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [ test-unit ]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/base-setup/
     - name: Cache Anchor SBF build
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           target/sbf
@@ -73,7 +73,7 @@ jobs:
         restore-keys: |
           anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-
     - name: Cache nextest host build
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           target/host
@@ -84,7 +84,7 @@ jobs:
     - uses: ./.github/actions/build-workspace/
     # ─── Cache cargo-nextest ─────────────────────────────────────────────
     - name: Cache cargo-nextest binary
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-nextest
       with:
         path: ~/.cargo/bin/cargo-nextest
@@ -113,11 +113,11 @@ jobs:
         working-directory: ./programs/marginfi/fuzz
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     # ─── Cache Cargo registry ─────────────────────────────────────────────
     - name: Cache Cargo registry & index
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-cargo-registry
       with:
         path: |
@@ -128,7 +128,7 @@ jobs:
 
     # ─── Cache nightly Rust toolchain ───────────────────────────────
     - name: Cache Rust nightly toolchain
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-nightly
       with:
         path: ~/.rustup/toolchains/nightly-2024-06-05-x86_64-unknown-linux-gnu
@@ -144,7 +144,7 @@ jobs:
 
     # ─── Cache cargo fuzz ─────────────────────────────────────────────
     - name: Cache cargo-fuzz
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-cargo-fuzz
       with:
         path: ~/.cargo/bin/cargo-fuzz
@@ -156,7 +156,7 @@ jobs:
 
     # ─── Cache compiled fuzz target ─────────────────────────────────────────────
     - name: Cache fuzz target build
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-fuzz-build
       with:
         path: target/fuzz/lend
@@ -185,7 +185,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [ test-unit ]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/base-setup/
 
     - name: Setup Node.js
@@ -201,7 +201,7 @@ jobs:
         node -v
 
     - name: Cache Yarn artifacts
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           .yarn/cache
@@ -216,7 +216,7 @@ jobs:
 
     # ─── Cache transfer hook ─────────────────────────────────────────────
     - name: Cache transfer-hook build
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-transfer
       with:
         path: target/deploy/test_transfer_hook.so
@@ -228,7 +228,7 @@ jobs:
 
     # ─── Cache mocks program ─────────────────────────────────────────────
     - name: Cache mocks build & IDL
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-mocks
       with:
         path: |
@@ -297,11 +297,11 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [ test-unit ]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/setup-common/
     - uses: ./.github/actions/setup-solana-cli/
     - name: Cache Cargo registry & index
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/registry/index
@@ -309,7 +309,7 @@ jobs:
           ~/.cargo/git/db
         key: trident-cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
     - name: Cache SBF v2 build
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           target/deploy
@@ -342,10 +342,19 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [ test-unit ]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/base-setup/
+    - name: Install nightly rustfmt
+      # `trident fuzz refresh` formats the regenerated `types.rs` with
+      # nightly rustfmt (uses unstable formatting features). Stable
+      # 1.79.0 from `base-setup` doesn't satisfy that.
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+        components: rustfmt
     - name: Cache Trident CLI
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-trident-cli
       with:
         path: ~/.cargo/bin/trident
@@ -389,14 +398,11 @@ jobs:
 
   fuzz-trident:
     name: Fuzz (trident) — ${{ matrix.test.name }}
-    # Gate on both: the binary must exist AND types.rs must match the
-    # current IDL. Skipping the drift gate would let stale-types bugs
-    # reach the fuzz run, where they blow up at init and mask findings.
     if: |
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
         (github.base_ref == 'main' || endsWith(github.base_ref, '-main')))
-    needs: [ trident-build, trident-idl-drift ]
+    needs: [ trident-build ]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -405,7 +411,7 @@ jobs:
           - name: "fuzz_0"
             target: "fuzz_0"
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/setup-common/
     - name: Download program artifact
       uses: actions/download-artifact@v4
@@ -413,7 +419,7 @@ jobs:
         name: trident-program-binaries
         path: target/deploy
     - name: Cache Cargo registry & index
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/registry/index
@@ -421,7 +427,7 @@ jobs:
           ~/.cargo/git/db
         key: trident-fuzz-cargo-${{ runner.os }}-${{ hashFiles('trident-tests/Cargo.lock') }}
     - name: Cache Trident CLI
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-trident-cli
       with:
         path: ~/.cargo/bin/trident
