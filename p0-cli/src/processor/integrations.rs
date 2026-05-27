@@ -16,7 +16,7 @@ use {
     marginfi::state::bank::BankVaultType,
     marginfi_type_crate::{
         pdas::{DRIFT_PROGRAM_ID, FARMS_PROGRAM_ID, JUPLEND_LENDING_PROGRAM_ID, KAMINO_PROGRAM_ID},
-        types::{Bank, MarginfiAccount, OracleSetup},
+        types::{Bank, MarginfiAccount},
     },
     solana_sdk::{
         instruction::{AccountMeta, Instruction},
@@ -26,37 +26,28 @@ use {
     std::collections::HashMap,
 };
 
-fn kamino_refresh_oracle_accounts(
-    bank: &Bank,
-) -> (
-    Option<Pubkey>,
-    Option<Pubkey>,
-    Option<Pubkey>,
-    Option<Pubkey>,
-) {
-    let keys = &bank.config.oracle_keys;
-    match bank.config.oracle_setup {
-        OracleSetup::KaminoPythPush => (Some(keys[0]), None, None, None),
-        OracleSetup::KaminoSwitchboardPull => (None, None, None, Some(keys[0])),
-        _ => (None, None, None, None),
-    }
-}
-
-/// Build the pair of Kamino refresh instructions (refreshReserve + refreshObligation)
-/// that must be prepended before any Kamino deposit or withdraw.
-fn build_kamino_refresh_ixs(bank: &Bank, lending_market: Pubkey) -> Vec<Instruction> {
-    let (pyth_oracle, switchboard_price, switchboard_twap, scope_prices) =
-        kamino_refresh_oracle_accounts(bank);
-    let reserve = bank.integration_acc_1;
-    let obligation = bank.integration_acc_2;
-
+/// Build the pair of Kamino refresh instructions (refreshReserve + refreshObligation) that must
+/// be prepended before any Kamino deposit or withdraw. The four oracle slots must reflect what
+/// Kamino's *reserve* was configured with — independent of marginfi's own oracle — so callers
+/// should source them from `derive_kamino_accounts`, which reads them from the reserve's
+/// `TokenInfo`.
+#[allow(clippy::too_many_arguments)]
+fn build_kamino_refresh_ixs(
+    reserve: Pubkey,
+    obligation: Pubkey,
+    lending_market: Pubkey,
+    pyth_oracle: Option<Pubkey>,
+    switchboard_price_oracle: Option<Pubkey>,
+    switchboard_twap_oracle: Option<Pubkey>,
+    scope_prices: Option<Pubkey>,
+) -> Vec<Instruction> {
     vec![
         build_kamino_refresh_reserve_ix(
             reserve,
             lending_market,
             pyth_oracle,
-            switchboard_price,
-            switchboard_twap,
+            switchboard_price_oracle,
+            switchboard_twap_oracle,
             scope_prices,
         ),
         build_kamino_refresh_obligation_ix(obligation, lending_market, reserve),
@@ -319,6 +310,10 @@ pub fn kamino_deposit(
     reserve_liquidity_supply: Pubkey,
     reserve_collateral_mint: Pubkey,
     reserve_destination_deposit_collateral: Pubkey,
+    pyth_oracle: Option<Pubkey>,
+    switchboard_price_oracle: Option<Pubkey>,
+    switchboard_twap_oracle: Option<Pubkey>,
+    scope_prices: Option<Pubkey>,
     obligation_farm_user_state: Option<Pubkey>,
     reserve_farm_state: Option<Pubkey>,
 ) -> Result<()> {
@@ -387,7 +382,15 @@ pub fn kamino_deposit(
     };
 
     // Prepend Kamino refresh instructions to ensure reserve/obligation are non-stale
-    let mut ixs = build_kamino_refresh_ixs(&bank, lending_market);
+    let mut ixs = build_kamino_refresh_ixs(
+        bank.integration_acc_1,
+        bank.integration_acc_2,
+        lending_market,
+        pyth_oracle,
+        switchboard_price_oracle,
+        switchboard_twap_oracle,
+        scope_prices,
+    );
     ixs.push(ix);
 
     let signing_keypairs = config.get_signers(false);
@@ -409,6 +412,10 @@ pub fn kamino_withdraw(
     reserve_liquidity_supply: Pubkey,
     reserve_collateral_mint: Pubkey,
     reserve_source_collateral: Pubkey,
+    pyth_oracle: Option<Pubkey>,
+    switchboard_price_oracle: Option<Pubkey>,
+    switchboard_twap_oracle: Option<Pubkey>,
+    scope_prices: Option<Pubkey>,
     obligation_farm_user_state: Option<Pubkey>,
     reserve_farm_state: Option<Pubkey>,
 ) -> Result<()> {
@@ -491,7 +498,15 @@ pub fn kamino_withdraw(
     let create_ata_ix = build_signer_ata_ix(config, &authority, &bank.mint, &token_program);
 
     // Prepend Kamino refresh instructions to ensure reserve/obligation are non-stale
-    let mut ixs = build_kamino_refresh_ixs(&bank, lending_market);
+    let mut ixs = build_kamino_refresh_ixs(
+        bank.integration_acc_1,
+        bank.integration_acc_2,
+        lending_market,
+        pyth_oracle,
+        switchboard_price_oracle,
+        switchboard_twap_oracle,
+        scope_prices,
+    );
     ixs.push(create_ata_ix);
     ixs.push(ix);
 
