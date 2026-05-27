@@ -1,6 +1,7 @@
 name: Test
 
 on:
+  workflow_dispatch:
   push:
     branches:
     - main
@@ -19,6 +20,16 @@ env:
   ANCHOR_CLI_VERSION: 0.31.1
   ANCHOR_SHA: e6d7dafe12da661a36ad1b4f3b5970e8986e5321
   CARGO_TERM_COLOR: always
+  # Trident-stack-only env. Kept here so the whole file shares one
+  # convention; the libfuzzer + anchor stacks ignore these.
+  TRIDENT_VERSION: "0.13.0-rc.4"
+  # `anchor idl build` writes `"address": ""` (Anchor 0.30+ moved the
+  # address out of the source). Trident bakes the address into
+  # `types::<program>::program_id()`, so the IDL-drift check patches
+  # it back to the canonical pubkey before refreshing — otherwise
+  # the regenerated types.rs would always show a diff.
+  MARGINFI_PROGRAM_ID: "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA"
+  MOCKS_PROGRAM_ID: "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ"
 
 concurrency:
   group: build-${{ github.event.pull_request.number || github.ref }}
@@ -87,6 +98,87 @@ jobs:
 
     - run: ./scripts/test-program.sh all
 
+
+  fuzz-libfuzzer:
+    name: Fuzz (libfuzzer)
+    # In-process coverage-guided fuzzing on the `lend` target. Runs in
+    # parallel with `fuzz-trident` below; they exercise different
+    # surfaces. libfuzzer = raw byte-level coverage feedback;
+    # trident = state-machine + structured invariants.
+    runs-on: ubuntu-24.04
+    needs: [ test-unit ]
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./programs/marginfi/fuzz
+
+    steps:
+    - uses: actions/checkout@v3
+
+    # ─── Cache Cargo registry ─────────────────────────────────────────────
+    - name: Cache Cargo registry & index
+      uses: actions/cache@v3
+      id: cache-cargo-registry
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+        key: cargo-registry-${{ runner.os }}-${{ hashFiles('programs/marginfi/fuzz/Cargo.lock') }}
+
+    # ─── Cache nightly Rust toolchain ───────────────────────────────
+    - name: Cache Rust nightly toolchain
+      uses: actions/cache@v3
+      id: cache-nightly
+      with:
+        path: ~/.rustup/toolchains/nightly-2024-06-05-x86_64-unknown-linux-gnu
+        key: rust-nightly-${{ runner.os }}-nightly-20240605
+
+    - name: Install nightly Rust + rust-src
+      if: steps.cache-nightly.outputs.cache-hit != 'true'
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly-2024-06-05
+        components: rust-src
+
+    # ─── Cache cargo fuzz ─────────────────────────────────────────────
+    - name: Cache cargo-fuzz
+      uses: actions/cache@v3
+      id: cache-cargo-fuzz
+      with:
+        path: ~/.cargo/bin/cargo-fuzz
+        key: cargo-fuzz-${{ runner.os }}-nightly-20240605
+
+    - name: Install cargo-fuzz
+      if: steps.cache-cargo-fuzz.outputs.cache-hit != 'true'
+      run: cargo install cargo-fuzz --locked
+
+    # ─── Cache compiled fuzz target ─────────────────────────────────────────────
+    - name: Cache fuzz target build
+      uses: actions/cache@v3
+      id: cache-fuzz-build
+      with:
+        path: target/fuzz/lend
+        key: fuzz-build-${{ runner.os }}-${{ hashFiles('programs/marginfi/fuzz/**/*.rs') }}
+
+    - name: Generate corpus
+      run: python ./generate_corpus.py
+
+    - name: Run fuzz tests
+      run: |
+        cargo +nightly-2024-06-05 fuzz run lend \
+          -Zbuild-std --strip-dead-code --no-cfg-fuzzing \
+            -- -max_total_time=150 \
+              -timeout_exitcode=100 \
+              -error_exitcode=101 \
+              -print_pcs=0 \
+              -print_final_stats=1 \
+              -close_fd_mask=1 \
+              -jobs=2 \
+              -workers=2
+    - name: Pass after fuzzing
+      run: echo "✅ Fuzzing completed"
 
   localnet-test-marginfi:
     name: Anchor Bankrun Tests (Marginfi)
@@ -186,3 +278,220 @@ jobs:
 
         echo "✅ Tests finished with exit code $CODE"
         exit $CODE
+
+  # ────────────────────────────────────────────────────────────────────
+  # Trident fuzz stack — three jobs (build → IDL drift gate → fuzz). All
+  # three share the same `if:` guard: only PRs targeting `main` or a
+  # `*-main` version branch (and manual `workflow_dispatch`) run them.
+  # This matches the dev flow: daily PRs land on `0.1.9-main`, release
+  # PRs land on `main`. PRs to feature branches skip the trident stack
+  # entirely; `push: main` skips too (the release PR already ran it).
+  # ────────────────────────────────────────────────────────────────────
+
+  trident-build:
+    name: Trident — Build marginfi (SBF v2)
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+        (github.base_ref == 'main' || endsWith(github.base_ref, '-main')))
+    runs-on: ubuntu-24.04
+    needs: [ test-unit ]
+    steps:
+    - uses: actions/checkout@v3
+    - uses: ./.github/actions/setup-common/
+    - uses: ./.github/actions/setup-solana-cli/
+    - name: Cache Cargo registry & index
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+        key: trident-cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+    - name: Cache SBF v2 build
+      uses: actions/cache@v3
+      with:
+        path: |
+          target/deploy
+        key: trident-sbf-v2-${{ runner.os }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Cargo.lock', 'programs/marginfi/**/Cargo.toml', 'programs/marginfi/**/src/**') }}
+    - name: Build marginfi (SBF v2, mainnet program id)
+      # Trident's LiteSVM loader needs a v2-format `.so`. The artifact
+      # path is `target/deploy/marginfi.so` (mainnet program id baked
+      # in) — distinct from `target/sbf/deploy/marginfi.so` produced by
+      # `build-and-test-workspace`, which is also mainnet-id but built
+      # with anchor's defaults.
+      run: cargo build-sbf --manifest-path programs/marginfi/Cargo.toml --arch v2
+    - name: Upload program artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: trident-program-binaries
+        path: target/deploy/*.so
+        retention-days: 1
+
+  trident-idl-drift:
+    # Detects drift between `programs/marginfi/src/` (the on-chain
+    # truth) and `trident-tests/fuzz_0/types.rs` (what the fuzz harness
+    # uses to construct ixs and read account data). Catches the
+    # account-list-changed-but-harness-stale class of bug that
+    # previously broke `init_kamino_obligation` for ~2 weeks.
+    name: Trident — IDL ⇄ types.rs drift
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+        (github.base_ref == 'main' || endsWith(github.base_ref, '-main')))
+    runs-on: ubuntu-24.04
+    needs: [ test-unit ]
+    steps:
+    - uses: actions/checkout@v3
+    - uses: ./.github/actions/base-setup/
+    - name: Cache Trident CLI
+      uses: actions/cache@v3
+      id: cache-trident-cli
+      with:
+        path: ~/.cargo/bin/trident
+        key: trident-cli-v${{ env.TRIDENT_VERSION }}-${{ runner.os }}
+    - name: Install Trident CLI
+      if: steps.cache-trident-cli.outputs.cache-hit != 'true'
+      working-directory: trident-tests
+      run: cargo install trident-cli --version ${{ env.TRIDENT_VERSION }}
+    - name: Regenerate IDLs
+      run: |
+        mkdir -p target/idl
+        # Both programs are mirrored into `trident-tests/fuzz_0/types.rs` —
+        # marginfi for the real instructions and accounts, mocks for the
+        # `program_id()` reference used by some account-meta helpers.
+        # Refreshing only one would drop the other module and always diff.
+        anchor idl build -p marginfi -o target/idl/marginfi.json
+        anchor idl build -p mocks    -o target/idl/mocks.json
+        sed -i 's|"address": ""|"address": "'"${MARGINFI_PROGRAM_ID}"'"|' target/idl/marginfi.json
+        sed -i 's|"address": ""|"address": "'"${MOCKS_PROGRAM_ID}"'"|'    target/idl/mocks.json
+    - name: Regenerate trident types
+      working-directory: trident-tests
+      # No `--idl-paths` so trident loads every JSON from `../target/idl/`
+      # — keeps the marginfi + mocks modules in sync.
+      run: trident fuzz refresh fuzz_0 -s
+    - name: Assert types.rs is in sync
+      run: |
+        if ! git diff --quiet trident-tests/fuzz_0/types.rs; then
+          echo "::error file=trident-tests/fuzz_0/types.rs::trident-tests/fuzz_0/types.rs is stale vs current marginfi+mocks IDLs. Regenerate locally and commit:"
+          echo ""
+          echo "  anchor idl build -p marginfi -o target/idl/marginfi.json"
+          echo "  anchor idl build -p mocks    -o target/idl/mocks.json"
+          echo "  sed -i '' 's|\"address\": \"\"|\"address\": \"${MARGINFI_PROGRAM_ID}\"|' target/idl/marginfi.json"
+          echo "  sed -i '' 's|\"address\": \"\"|\"address\": \"${MOCKS_PROGRAM_ID}\"|'    target/idl/mocks.json"
+          echo "  ( cd trident-tests && trident fuzz refresh fuzz_0 -s )"
+          echo ""
+          echo "Diff (first 200 lines):"
+          git --no-pager diff trident-tests/fuzz_0/types.rs | head -200
+          exit 1
+        fi
+        echo "✅ trident-tests/fuzz_0/types.rs matches current IDL"
+
+  fuzz-trident:
+    name: Fuzz (trident) — ${{ matrix.test.name }}
+    # Gate on both: the binary must exist AND types.rs must match the
+    # current IDL. Skipping the drift gate would let stale-types bugs
+    # reach the fuzz run, where they blow up at init and mask findings.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+        (github.base_ref == 'main' || endsWith(github.base_ref, '-main')))
+    needs: [ trident-build, trident-idl-drift ]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - name: "fuzz_0"
+            target: "fuzz_0"
+    steps:
+    - uses: actions/checkout@v3
+    - uses: ./.github/actions/setup-common/
+    - name: Download program artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: trident-program-binaries
+        path: target/deploy
+    - name: Cache Cargo registry & index
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+        key: trident-fuzz-cargo-${{ runner.os }}-${{ hashFiles('trident-tests/Cargo.lock') }}
+    - name: Cache Trident CLI
+      uses: actions/cache@v3
+      id: cache-trident-cli
+      with:
+        path: ~/.cargo/bin/trident
+        key: trident-cli-v${{ env.TRIDENT_VERSION }}-${{ runner.os }}
+    - name: Install Trident CLI
+      if: steps.cache-trident-cli.outputs.cache-hit != 'true'
+      working-directory: trident-tests
+      run: cargo install trident-cli --version ${{ env.TRIDENT_VERSION }}
+
+    - name: Set fuzz size
+      id: size
+      # Target-scaled iteration budget. PR target branch decides depth:
+      # version-branch PRs (`0.1.9-main`, …) get 50K — daily dev work.
+      # Release PRs landing on `main` get the full 500K soak — last
+      # gate before the release lands. `workflow_dispatch` falls into
+      # the 10K middle tier for ad-hoc manual runs.
+      #
+      # Note on 500K: extrapolating from local smokes it can approach
+      # GitHub-hosted's 6h job cap. If a real release PR overruns,
+      # drop to 200-300K, or move this job onto a larger runner.
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          if [ "${{ github.base_ref }}" = "main" ]; then
+            echo "iters=500000" >> "$GITHUB_OUTPUT"
+          else
+            echo "iters=50000"  >> "$GITHUB_OUTPUT"
+          fi
+        else
+          echo "iters=10000" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Run regression seeds
+      # Deterministic regression checks run BEFORE the random fuzz so
+      # a known-bad seed fails the job even on the shortest trigger.
+      # Each `.seed` file is one per-iteration seed (as printed in
+      # Trident's `--- Invariant Failures (N) ---` output); we replay
+      # it with `trident fuzz debug`. `fuzz debug` doesn't propagate
+      # non-zero on assertion (Trident 0.13.0-rc.4 limitation), so we
+      # grep the output for "Assertion failed" and fail the step
+      # ourselves.
+      working-directory: trident-tests
+      run: |
+        shopt -s nullglob
+        found=(regression-seeds/*.seed)
+        if [ ${#found[@]} -eq 0 ]; then
+          echo "No regression seeds checked in — skipping."
+          exit 0
+        fi
+        rc=0
+        for f in "${found[@]}"; do
+          name=$(basename "$f" .seed)
+          seed=$(tr -d '[:space:]' < "$f")
+          echo "::group::Regression: $name (seed $seed)"
+          log=$(mktemp)
+          if ! trident fuzz debug ${{ matrix.test.target }} "$seed" 2>&1 | tee "$log"; then
+            echo "::error::Regression seed runner failed: $name"
+            rc=1
+          elif grep -q "Assertion failed" "$log"; then
+            echo "::error file=trident-tests/regression-seeds/${name}.md::Regression FIRED for ${name} (seed ${seed}). See regression-seeds/${name}.md for context."
+            rc=1
+          else
+            echo "✅ $name passed (no assertion fired)"
+          fi
+          echo "::endgroup::"
+        done
+        exit $rc
+
+    - name: Run Fuzz Test
+      working-directory: trident-tests
+      env:
+        FUZZ_ITERATIONS: ${{ steps.size.outputs.iters }}
+        FUZZ_FLOWS_PER_ITER: '50'
+      run: trident fuzz run ${{ matrix.test.target }} -e invariants
