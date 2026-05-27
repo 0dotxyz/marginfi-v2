@@ -10,7 +10,7 @@ use crate::{assert_struct_align, assert_struct_size};
 
 #[cfg(not(feature = "anchor"))]
 use super::Pubkey;
-use super::WrappedI80F48;
+use super::{RequirementType, WrappedI80F48};
 
 pub const EMODE_ON: u64 = 1;
 
@@ -142,13 +142,6 @@ impl EmodeEntry {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum ReconciledEmodeRequirementType {
-    Initial,
-    Maintenance,
-    Equity,
-}
-
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
 pub struct ReconciledEmodeEntry {
     pub collateral_bank_emode_tag: u16,
@@ -199,12 +192,12 @@ impl ReconciledEmodeConfig {
 
 fn projected_asset_weight(
     entry: &EmodeEntry,
-    requirement_type: ReconciledEmodeRequirementType,
+    requirement_type: RequirementType,
 ) -> I80F48 {
     match requirement_type {
-        ReconciledEmodeRequirementType::Initial => entry.asset_weight_init.into(),
-        ReconciledEmodeRequirementType::Maintenance => entry.asset_weight_maint.into(),
-        ReconciledEmodeRequirementType::Equity => I80F48::ONE,
+        RequirementType::Initial => entry.asset_weight_init.into(),
+        RequirementType::Maintenance => entry.asset_weight_maint.into(),
+        RequirementType::Equity => I80F48::ONE,
     }
 }
 
@@ -250,7 +243,7 @@ fn projected_asset_weight(
 /// * 101    75
 pub fn reconcile_emode_configs<I>(
     configs: I,
-    requirement_type: ReconciledEmodeRequirementType,
+    requirement_type: RequirementType,
 ) -> ReconciledEmodeConfig
 where
     I: IntoIterator<Item = EmodeConfig>,
@@ -522,7 +515,7 @@ mod tests {
 
         let reconciled = reconcile_emode_configs(
             vec![config1, config2],
-            ReconciledEmodeRequirementType::Initial,
+            RequirementType::Initial,
         );
 
         assert_eq!(reconciled.count, 1);
@@ -550,7 +543,7 @@ mod tests {
 
         let reconciled = reconcile_emode_configs(
             vec![config1, config2],
-            ReconciledEmodeRequirementType::Initial,
+            RequirementType::Initial,
         );
 
         assert_eq!(reconciled.count, 1);
@@ -594,7 +587,7 @@ mod tests {
 
         let reconciled = reconcile_emode_configs(
             vec![config1, config2],
-            ReconciledEmodeRequirementType::Maintenance,
+            RequirementType::Maintenance,
         );
 
         assert_eq!(reconciled.count, 2);
@@ -613,7 +606,7 @@ mod tests {
         }]);
 
         let reconciled =
-            reconcile_emode_configs(vec![config], ReconciledEmodeRequirementType::Equity);
+            reconcile_emode_configs(vec![config], RequirementType::Equity);
 
         assert_eq!(reconciled.count, 1);
         assert_eq!(reconciled.entries[0].asset_weight, I80F48::ONE);
@@ -645,7 +638,7 @@ mod tests {
 
         let reconciled = reconcile_emode_configs(
             vec![config1, config2, config3],
-            ReconciledEmodeRequirementType::Initial,
+            RequirementType::Initial,
         );
 
         assert_eq!(reconciled.count, 0);

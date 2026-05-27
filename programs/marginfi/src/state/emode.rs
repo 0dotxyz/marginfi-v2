@@ -200,8 +200,7 @@ mod tests {
     use fixed_macro::types::I80F48;
     use marginfi_type_crate::types::{basis_to_u32, BankConfig};
     use marginfi_type_crate::types::{
-        reconcile_emode_configs, EmodeConfig, EmodeEntry, ReconciledEmodeRequirementType,
-        MAX_EMODE_ENTRIES,
+        reconcile_emode_configs, EmodeConfig, EmodeEntry, RequirementType, MAX_EMODE_ENTRIES,
     };
     fn create_entry(tag: u16, flags: u8, init: f32, maint: f32) -> EmodeEntry {
         EmodeEntry {
@@ -351,7 +350,7 @@ mod tests {
 
         let reconciled = reconcile_emode_configs(
             vec![config1, config2],
-            ReconciledEmodeRequirementType::Initial,
+            RequirementType::Initial,
         );
 
         // Expected: For tag 101 - init, init = min(0.7,0.6)=0.6
@@ -375,7 +374,7 @@ mod tests {
 
         let reconciled = reconcile_emode_configs(
             vec![config1, config2],
-            ReconciledEmodeRequirementType::Initial,
+            RequirementType::Initial,
         );
 
         assert_eq!(reconciled.count, 0);
@@ -406,7 +405,7 @@ mod tests {
 
         let reconciled = reconcile_emode_configs(
             vec![config1, config2, config3],
-            ReconciledEmodeRequirementType::Initial,
+            RequirementType::Initial,
         );
 
         assert_eq!(reconciled.count, 1);
@@ -419,7 +418,7 @@ mod tests {
 
         let reconciled = reconcile_emode_configs(
             vec![config1, config2, config3],
-            ReconciledEmodeRequirementType::Maintenance,
+            RequirementType::Maintenance,
         );
 
         assert_eq!(reconciled.count, 1);

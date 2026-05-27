@@ -26,28 +26,6 @@ fn validate_and_apply_emode_leverage(
     Ok(())
 }
 
-/// Validate and apply an optional same-asset emode leverage value.
-/// If `Some`, validates it is in [1, 100] and writes the encoded `u32` value.
-/// If `None`, leaves the stored value as is.
-fn validate_and_apply_same_asset_emode_leverage(
-    new_value: Option<WrappedI80F48>,
-    current: &mut u32,
-) -> MarginfiResult {
-    if let Some(wrapped) = new_value {
-        let leverage: I80F48 = wrapped.into();
-        if leverage < I80F48::ONE {
-            msg!("same-asset emode leverage {} must be >= 1", leverage);
-            return Err(MarginfiError::BadEmodeConfig.into());
-        }
-        if leverage > I80F48::from_num(100) {
-            msg!("same-asset emode leverage {} must be <= 100", leverage);
-            return Err(MarginfiError::BadEmodeConfig.into());
-        }
-        *current = basis_to_u32(leverage);
-    }
-    Ok(())
-}
-
 /// Configure margin group.
 ///
 /// Note: not even the group admin can configure `PROGRAM_FEES_ENABLED`, only the program admin can
@@ -115,11 +93,11 @@ pub fn configure(
         return Err(MarginfiError::BadEmodeConfig.into());
     }
 
-    validate_and_apply_same_asset_emode_leverage(
+    validate_and_apply_emode_leverage(
         same_asset_emode_init_leverage,
         &mut marginfi_group.same_asset_emode_init_leverage,
     )?;
-    validate_and_apply_same_asset_emode_leverage(
+    validate_and_apply_emode_leverage(
         same_asset_emode_maint_leverage,
         &mut marginfi_group.same_asset_emode_maint_leverage,
     )?;
