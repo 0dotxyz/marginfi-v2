@@ -5,7 +5,7 @@ runs:
   steps:
   # ─── Cache the Solana install ────────────────────────────────
   - name: Cache Solana CLI
-    uses: actions/cache@v3
+    uses: actions/cache@v4
     id: cache-solana
     with:
       path: |
@@ -24,19 +24,6 @@ runs:
       echo "${HOME}/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
     shell: bash
 
-  # ─── Cache Solana keygen ────────────────────────────────
-  - name: Cache solana-keygen binary
-    uses: actions/cache@v3
-    id: cache-keygen
-    with:
-      path: ~/.cargo/bin/solana-keygen
-      key: solana-keygen-${{ runner.os }}-v${{ env.SOLANA_CLI_VERSION }}
-
-  - name: Install solana-keygen
-    if: steps.cache-keygen.outputs.cache-hit != 'true'
-    run: |
-      cargo install solana-keygen --version ${{ env.SOLANA_CLI_VERSION }} --locked
-    shell: bash
 
   # ─── Always generate a key and set localnet───────────────
   - name: Generate keypair
