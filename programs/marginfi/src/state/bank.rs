@@ -367,7 +367,8 @@ impl BankImpl for Bank {
 
         if let Some(new_state) = config.operational_state {
             check!(
-                new_state != BankOperationalState::KilledByBankruptcy,
+                new_state != BankOperationalState::KilledByBankruptcy
+                    && new_state != BankOperationalState::Uninitialized,
                 MarginfiError::Unauthorized
             );
             // Log operational state change

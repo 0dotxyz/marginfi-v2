@@ -216,6 +216,9 @@ pub enum BankOperationalState {
     ReduceOnly,
     /// Bank was killed by a bankruptcy event (irrecoverable)
     KilledByBankruptcy,
+    /// Awaiting one-time setup (JupLend `juplend_init_position` seed deposit). All operations are
+    /// blocked, and the state is unreachable from `lending_pool_configure_bank`.
+    Uninitialized,
 }
 unsafe impl Zeroable for BankOperationalState {}
 unsafe impl Pod for BankOperationalState {}
