@@ -18,10 +18,9 @@ import { processBankrunTransaction } from "./utils/tools";
 import { assert } from "chai";
 import { assertBNApproximately } from "./utils/genericTests";
 import Decimal from "decimal.js";
-import { Fraction } from "@kamino-finance/klend-sdk/dist/classes/fraction";
 import { simpleRefreshReserve } from "./utils/kamino-utils";
 // Note: there's some glitch in Kamino's lib based on a Raydium static init, it's currently patch-package hacked...
-import { LendingMarket, Reserve } from "@kamino-finance/klend-sdk";
+import { Fraction, LendingMarket, Reserve } from "@kamino-finance/klend-sdk";
 import { createMintToInstruction } from "@solana/spl-token";
 import { ProgramTestContext } from "./utils/litesvm";
 

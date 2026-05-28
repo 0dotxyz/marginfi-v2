@@ -18,6 +18,7 @@ import {
   WrappedI68F60 as WrappedU68F60,
   wrappedU68F60toBigNumber,
 } from "./kamino-utils";
+import { bnToBigIntSafe } from "./bn-utils";
 
 const I80F48_FRACTIONAL_BITS = 48n;
 const I80F48_TOTAL_BITS = 128n;
@@ -113,7 +114,7 @@ export const assertI68F60Equal = (
   if (typeof b === "number") {
     bigB = new BigNumber(b);
   } else if (b instanceof BN) {
-    bigB = new BigNumber(b.toString());
+    bigB = new BigNumber(bnToBigInt(b).toString());
   } else if (isWrappedU68F60(b)) {
     bigB = wrappedU68F60toBigNumber(b);
   } else {
@@ -145,7 +146,7 @@ export const assertI80F48Approx = (
   if (typeof b === "number") {
     bigB = new BigNumber(b);
   } else if (b instanceof BN) {
-    bigB = new BigNumber(b.toString());
+    bigB = new BigNumber(bnToBigInt(b).toString());
   } else if (isWrappedI80F48(b)) {
     bigB = wrappedI80F48toBigNumber(b);
   } else {
@@ -184,7 +185,7 @@ export const assertU68F60Approx = (
   if (typeof b === "number") {
     bigB = new BigNumber(b);
   } else if (b instanceof BN) {
-    bigB = new BigNumber(b.toString());
+    bigB = new BigNumber(bnToBigInt(b).toString());
   } else if (isWrappedU68F60(b)) {
     bigB = wrappedU68F60toBigNumber(b);
   } else {
@@ -237,13 +238,17 @@ function isWrappedU68F60(value: any): value is WrappedU68F60 {
 export const assertBNApproximately = (
   a: BN,
   b: BN | number,
-  tolerance: BN | number,
+  tolerance: BN | number
 ) => {
   const aB = BigNumber(bnToBigInt(a).toString());
   const bB = BigNumber(
-    typeof b === "number" ? b.toString() : bnToBigInt(b).toString(),
+    typeof b === "number" ? b.toString() : bnToBigInt(b).toString()
   );
-  const toleranceB = BigNumber(tolerance.toString());
+  const toleranceB = BigNumber(
+    typeof tolerance === "number"
+      ? tolerance.toString()
+      : bnToBigInt(tolerance).toString()
+  );
   const diff = aB.minus(bB).abs();
 
   if (diff.isGreaterThan(toleranceB)) {
@@ -447,15 +452,7 @@ export function aprToU32(value: number): number {
 }
 
 function bnToBigInt(value: BN): bigint {
-  const hex = value.toString(16);
-  const negative = hex.startsWith("-");
-  const absHex = negative ? hex.slice(1) : hex;
-  if (!absHex || absHex === "0") return 0n;
-  if (absHex.includes("NaN")) {
-    throw new Error(`Invalid BN representation: ${hex}`);
-  }
-  const parsed = BigInt(`0x${absHex}`);
-  return negative ? -parsed : parsed;
+  return bnToBigIntSafe(value);
 }
 
 function bytesToUnsignedBigIntLE(bytesLike: number[] | Uint8Array): bigint {

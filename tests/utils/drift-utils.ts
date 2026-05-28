@@ -44,6 +44,7 @@ import { makeInitializeSpotMarketIx, makeAdminDepositIx } from "./drift-sdk";
 import { deriveSpotMarketPDA } from "./pdas";
 import { accountInit } from "./user-instructions";
 import { processBankrunTransaction, toI80Scaled } from "./tools";
+import { bnToBigIntSafe } from "./bn-utils";
 
 // Import Drift account types using IdlAccounts - the clean Anchor-native way
 export type DriftState = IdlAccounts<Drift>["state"];
@@ -1249,15 +1250,6 @@ export const getDriftUser = async (
   );
 
   return await driftProgram.account.user.fetch(userPDA);
-};
-
-const bnToBigIntSafe = (value: BN): bigint => {
-  const bytes = value.toArrayLike(Uint8Array, "be");
-  let out = 0n;
-  for (const byte of bytes) {
-    out = (out << 8n) | BigInt(byte);
-  }
-  return value.isNeg() ? -out : out;
 };
 
 export async function assertBankBalance(

@@ -32,6 +32,7 @@ import type {
   MarginfiBankRaw,
 } from "./types";
 import { ASSET_TAG_JUPLEND } from "../types";
+import { bnToBigIntSafe } from "../bn-utils";
 
 export type AssertJuplendPoolArgs = {
   pool: JuplendPoolKeys;
@@ -42,7 +43,7 @@ export type AssertJuplendPoolArgs = {
 const toBigInt = (value: BN | number | bigint): bigint => {
   if (typeof value === "bigint") return value;
   if (typeof value === "number") return BigInt(value);
-  return BigInt(value.toString());
+  return bnToBigIntSafe(value);
 };
 
 export const assertDebtCeilingIsSupported = async (args: {
