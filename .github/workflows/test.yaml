@@ -429,11 +429,19 @@ jobs:
     - name: Patch IDL addresses for trident
       # `anchor-build`'s `marginfi.json` ships a localnet address (the
       # localnet anchor build was the last step in that job). Trident
-      # pins `types::<program>::program_id()` to whatever's in the IDL,
-      # so we patch it back to mainnet for the harness's view.
+      # pins `types::<program>::program_id()` to whatever's in the
+      # IDL's top-level `address`, so we patch only that back to
+      # mainnet.
+      #
+      # The leading-anchor `^  ` is load-bearing: every per-account
+      # `address` field (system_program, token_program, etc.) is
+      # nested at 10+ spaces of indent; a bare `"address":` regex
+      # would clobber those too and bake the marginfi program ID into
+      # every account-meta slot, causing `InvalidProgramId` (3008) on
+      # the first init ix.
       run: |
-        sed -i 's|"address": "[^"]*"|"address": "'"${MARGINFI_PROGRAM_ID}"'"|' target/idl/marginfi.json
-        sed -i 's|"address": "[^"]*"|"address": "'"${MOCKS_PROGRAM_ID}"'"|'    target/idl/mocks.json
+        sed -i 's|^  "address": "[^"]*"|  "address": "'"${MARGINFI_PROGRAM_ID}"'"|' target/idl/marginfi.json
+        sed -i 's|^  "address": "[^"]*"|  "address": "'"${MOCKS_PROGRAM_ID}"'"|'    target/idl/mocks.json
     - name: Cache Cargo registry & index
       uses: actions/cache@v4
       with:

@@ -46,6 +46,10 @@ types:
 	mkdir -p ../target/idl
 	cd .. && anchor idl build -p marginfi -o target/idl/marginfi.json
 	cd .. && anchor idl build -p mocks    -o target/idl/mocks.json
-	sed -i '' 's|"address": ""|"address": "$(MARGINFI_PROGRAM_ID)"|' ../target/idl/marginfi.json
-	sed -i '' 's|"address": ""|"address": "$(MOCKS_PROGRAM_ID)"|'    ../target/idl/mocks.json
+	# Only patch the TOP-LEVEL `"address"` field (2-space indent). A
+	# bare `"address":` regex would also clobber every per-account
+	# `address` (system_program at indent 10+, etc.) and bake the
+	# marginfi program ID into every account-meta slot.
+	sed -i '' 's|^  "address": "[^"]*"|  "address": "$(MARGINFI_PROGRAM_ID)"|' ../target/idl/marginfi.json
+	sed -i '' 's|^  "address": "[^"]*"|  "address": "$(MOCKS_PROGRAM_ID)"|'    ../target/idl/mocks.json
 	trident fuzz refresh fuzz_0 -s
