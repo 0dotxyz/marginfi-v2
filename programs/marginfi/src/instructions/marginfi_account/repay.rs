@@ -80,6 +80,7 @@ pub fn lending_account_repay<'info>(
     let mut bank_account =
         BankAccountWrapper::find(&bank_loader.key(), &mut bank, lending_account)?;
 
+    let pre_liability_shares: I80F48 = bank_account.balance.liability_shares.into();
     let repay_amount_post_fee = if repay_all {
         bank_account.repay_all(in_receivership)?
     } else {
@@ -87,6 +88,8 @@ pub fn lending_account_repay<'info>(
 
         amount
     };
+    let liability_shares_delta: I80F48 =
+        pre_liability_shares - I80F48::from(bank_account.balance.liability_shares);
     marginfi_account.last_update = clock.unix_timestamp as u64;
 
     // Record inflow so net-outflow windows release capacity.
@@ -160,6 +163,7 @@ pub fn lending_account_repay<'info>(
         mint: bank.mint,
         amount: repay_amount_post_fee,
         close_balance: repay_all,
+        share_amount: liability_shares_delta.into(),
     });
 
     marginfi_account.lending_account.sort_balances();

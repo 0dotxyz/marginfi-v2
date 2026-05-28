@@ -75,7 +75,7 @@ pub fn juplend_withdraw<'info>(
     // - call `bank_account.withdraw(shares_to_burn)`
     // - CPI JupLend `withdraw` for the requested underlying `amount`
     let clock = Clock::get()?;
-    let (token_amount, shares_to_burn) = {
+    let (token_amount, shares_to_burn, asset_shares_delta) = {
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;
         let group = ctx.accounts.group.load()?;
@@ -114,6 +114,7 @@ pub fn juplend_withdraw<'info>(
             &mut marginfi_account.lending_account,
         )?;
 
+        let pre_asset_shares: I80F48 = bank_account.balance.asset_shares.into();
         let (token_amount, shares_to_burn) = if withdraw_all {
             // `withdraw_all` returns the user's full fToken share balance (u64).
             let f_tokens_balance = bank_account.withdraw_all(in_receivership)?;
@@ -149,6 +150,8 @@ pub fn juplend_withdraw<'info>(
 
             (amount, shares_to_burn)
         };
+        let asset_shares_delta: I80F48 =
+            pre_asset_shares - I80F48::from(bank_account.balance.asset_shares);
 
         let native_outflow = if withdraw_all { token_amount } else { amount };
         record_withdrawal_outflow(
@@ -184,7 +187,7 @@ pub fn juplend_withdraw<'info>(
         bank.update_bank_cache(&group)?;
         marginfi_account.last_update = clock.unix_timestamp as u64;
 
-        (token_amount, shares_to_burn)
+        (token_amount, shares_to_burn, asset_shares_delta)
     };
 
     // Record balances to verify exact deltas.
@@ -269,6 +272,7 @@ pub fn juplend_withdraw<'info>(
             mint: bank_mint,
             amount: received_underlying,
             close_balance: withdraw_all,
+            share_amount: asset_shares_delta.into(),
         });
 
         let mut health_cache = HealthCache::zeroed();

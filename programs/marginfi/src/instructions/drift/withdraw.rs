@@ -67,7 +67,7 @@ pub fn drift_withdraw<'info>(
 
     let bank_key = ctx.accounts.bank.key();
     let bank_mint = ctx.accounts.bank.load()?.mint;
-    let (token_amount, expected_scaled_balance_change) = {
+    let (token_amount, expected_scaled_balance_change, asset_shares_delta) = {
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;
         let group = ctx.accounts.group.load()?;
@@ -108,6 +108,7 @@ pub fn drift_withdraw<'info>(
             &mut marginfi_account.lending_account,
         )?;
 
+        let pre_asset_shares: I80F48 = bank_account.balance.asset_shares.into();
         let (token_amount, expected_scaled_balance_change) = if withdraw_all {
             let scaled_balance = bank_account.withdraw_all(in_receivership)?;
 
@@ -164,6 +165,8 @@ pub fn drift_withdraw<'info>(
 
             (token_amount, scaled_decrement)
         };
+        let asset_shares_delta: I80F48 =
+            pre_asset_shares - I80F48::from(bank_account.balance.asset_shares);
 
         record_withdrawal_outflow(
             group_rate_limit_enabled,
@@ -201,7 +204,11 @@ pub fn drift_withdraw<'info>(
 
         marginfi_account.last_update = clock.unix_timestamp as u64;
 
-        (token_amount, expected_scaled_balance_change)
+        (
+            token_amount,
+            expected_scaled_balance_change,
+            asset_shares_delta,
+        )
     };
 
     // When calling withdraw_all, it's possible that the remaining scaled balance is worth less than
@@ -261,6 +268,7 @@ pub fn drift_withdraw<'info>(
             mint: bank_mint,
             amount: actual_amount_received,
             close_balance: withdraw_all,
+            share_amount: asset_shares_delta.into(),
         });
 
         let mut health_cache = HealthCache::zeroed();

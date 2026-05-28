@@ -100,7 +100,10 @@ pub fn drift_deposit<'info>(
         )?;
 
         let scaled_balance_change_i80f48 = I80F48::from_num(scaled_balance_change);
+        let pre_asset_shares: I80F48 = bank_account.balance.asset_shares.into();
         bank_account.deposit_no_repay(scaled_balance_change_i80f48)?;
+        let asset_shares_delta: I80F48 =
+            I80F48::from(bank_account.balance.asset_shares) - pre_asset_shares;
 
         record_deposit_inflow(
             &mut bank,
@@ -128,6 +131,7 @@ pub fn drift_deposit<'info>(
             bank: ctx.accounts.bank.key(),
             mint: bank.mint,
             amount,
+            share_amount: asset_shares_delta.into(),
         });
     }
 

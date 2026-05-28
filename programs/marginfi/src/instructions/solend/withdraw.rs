@@ -79,7 +79,7 @@ pub fn solend_withdraw<'info>(
     let authority_bump: u8;
     let bank_key = ctx.accounts.bank.key();
     let bank_mint = ctx.accounts.bank.load()?.mint;
-    let collateral_amount = {
+    let (collateral_amount, asset_shares_delta) = {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let group = ctx.accounts.group.load()?;
@@ -112,12 +112,15 @@ pub fn solend_withdraw<'info>(
         let mut bank_account =
             BankAccountWrapper::find(&bank_key, &mut bank, &mut marginfi_account.lending_account)?;
 
+        let pre_asset_shares: I80F48 = bank_account.balance.asset_shares.into();
         let collateral_amount = if withdraw_all {
             bank_account.withdraw_all(in_receivership)?
         } else {
             bank_account.withdraw(I80F48::from_num(amount))?;
             amount
         };
+        let asset_shares_delta: I80F48 =
+            pre_asset_shares - I80F48::from(bank_account.balance.asset_shares);
 
         // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
         let rate_limit_amount = if withdraw_all {
@@ -156,7 +159,7 @@ pub fn solend_withdraw<'info>(
             });
         }
 
-        collateral_amount
+        (collateral_amount, asset_shares_delta)
     };
 
     // Get initial obligation data to verify withdrawal amount later
@@ -218,6 +221,7 @@ pub fn solend_withdraw<'info>(
             mint: bank_mint,
             amount: collateral_amount,
             close_balance: withdraw_all,
+            share_amount: asset_shares_delta.into(),
         });
 
         let mut health_cache = HealthCache::zeroed();

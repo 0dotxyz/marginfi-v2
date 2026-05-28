@@ -109,6 +109,7 @@ pub fn lending_account_withdraw<'info>(
         let mut bank_account =
             BankAccountWrapper::find(&bank_loader.key(), &mut bank, lending_account)?;
 
+        let pre_asset_shares: I80F48 = bank_account.balance.asset_shares.into();
         let amount_pre_fee = if withdraw_all {
             // Note: In liquidation, we still want this passed on the books
             bank_account.withdraw_all(in_receivership)?
@@ -129,6 +130,8 @@ pub fn lending_account_withdraw<'info>(
 
             amount_pre_fee
         };
+        let asset_shares_delta: I80F48 =
+            pre_asset_shares - I80F48::from(bank_account.balance.asset_shares);
 
         // If in deleverage mode and deleverage is complete, you get what's left!
         let amount_pre_fee = if bank.get_flag(TOKENLESS_REPAYMENTS_COMPLETE) {
@@ -202,6 +205,7 @@ pub fn lending_account_withdraw<'info>(
             mint: bank.mint,
             amount: amount_pre_fee,
             close_balance: withdraw_all,
+            share_amount: asset_shares_delta.into(),
         });
     }
 

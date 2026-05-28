@@ -113,6 +113,7 @@ pub fn lending_account_borrow<'info>(
             .unwrap_or(amount);
 
         let origination_fee_u64: u64;
+        let pre_liability_shares: I80F48 = bank_account.balance.liability_shares.into();
         if !origination_fee_rate.is_zero() {
             origination_fee = I80F48::from_num(amount_pre_fee)
                 .checked_mul(origination_fee_rate)
@@ -126,6 +127,8 @@ pub fn lending_account_borrow<'info>(
             origination_fee_u64 = 0;
             bank_account.borrow(I80F48::from_num(amount_pre_fee))?;
         }
+        let liability_shares_delta: I80F48 =
+            I80F48::from(bank_account.balance.liability_shares) - pre_liability_shares;
 
         marginfi_account.last_update = clock.unix_timestamp as u64;
 
@@ -155,6 +158,7 @@ pub fn lending_account_borrow<'info>(
             bank: bank_loader.key(),
             mint: bank.mint,
             amount: amount_pre_fee + origination_fee_u64,
+            share_amount: liability_shares_delta.into(),
         });
     } // release mutable borrow of bank
 

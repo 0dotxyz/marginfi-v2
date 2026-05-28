@@ -105,7 +105,10 @@ pub fn solend_deposit<'info>(
 
         // Convert deposit amount to I80F48 for calculations
         let obligation_collateral_change_i80f48 = I80F48::from_num(obligation_collateral_change);
+        let pre_asset_shares: I80F48 = bank_account.balance.asset_shares.into();
         bank_account.deposit_no_repay(obligation_collateral_change_i80f48)?;
+        let asset_shares_delta: I80F48 =
+            I80F48::from(bank_account.balance.asset_shares) - pre_asset_shares;
 
         // Record inflow so net-outflow windows release capacity.
         record_deposit_inflow(
@@ -135,6 +138,7 @@ pub fn solend_deposit<'info>(
             bank: ctx.accounts.bank.key(),
             mint: bank.mint,
             amount,
+            share_amount: asset_shares_delta.into(),
         });
     }
 
