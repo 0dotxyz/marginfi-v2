@@ -39,7 +39,7 @@ import { accountInit } from "./utils/user-instructions";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { Clock } from "./utils/litesvm";
 import assert from "assert";
-import { bnToDecimalStringSafe } from "./utils/bn-utils";
+import { bnToBigIntSafe, bnToDecimalStringSafe } from "./utils/bn-utils";
 
 describe("d13: Oracle Price Conversion and Interest Tracking", () => {
   let user0Account: PublicKey;
@@ -151,7 +151,7 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
       USDC_MARKET_INDEX,
     );
     initialUsdcBorrows = safeBN(usdcSpotMarket.borrowBalance);
-    lastInterestTs = usdcSpotMarket.lastInterestTs;
+    lastInterestTs = safeBN(usdcSpotMarket.lastInterestTs);
     console.log(
       "Initial USDC Deposits: " +
         bnToDecimalStringSafe(usdcSpotMarket.depositBalance),
@@ -160,7 +160,7 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
       "Initial USDC Borrows: " + bnToDecimalStringSafe(initialUsdcBorrows),
     );
 
-    usdcInterestRate = calculateInterestRate(usdcSpotMarket);
+    usdcInterestRate = safeBN(calculateInterestRate(usdcSpotMarket));
     console.log(
       "USDC InterestRate: " +
         usdcInterestRate
@@ -184,7 +184,7 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
       "Initial Token A Borrows: " + bnToDecimalStringSafe(initialTokenABorrows),
     );
 
-    tokenAInterestRate = calculateInterestRate(tokenASpotMarket);
+    tokenAInterestRate = safeBN(calculateInterestRate(tokenASpotMarket));
     console.log(
       "Token A InterestRate: " +
         tokenAInterestRate
@@ -245,10 +245,29 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
     );
     assertBNEqual(usdcSpotMarketAfter.lastInterestTs, newTimestamp);
 
-    const timeSinceLastUpdate =
-      usdcSpotMarketAfter.lastInterestTs.sub(lastInterestTs);
+    const timeSinceLastUpdate = safeBN(
+      usdcSpotMarketAfter.lastInterestTs.sub(lastInterestTs),
+    );
     finalUsdcCumulativeDepositInterest = safeBN(
       usdcSpotMarketAfter.cumulativeDepositInterest,
+    );
+
+    const accumulatedUsdcBorrowInterest = calculateExpectedBorrowInterest(
+      initialUsdcCumulativeBorrowInterest,
+      usdcInterestRate,
+      timeSinceLastUpdate,
+    );
+    console.log(
+      "USDC Borrow Interest: " +
+        bnToDecimalStringSafe(accumulatedUsdcBorrowInterest),
+    );
+
+    assertBNApproximately(
+      safeBN(usdcSpotMarketAfter.cumulativeBorrowInterest).sub(
+        initialUsdcCumulativeBorrowInterest,
+      ),
+      accumulatedUsdcBorrowInterest,
+      new BN(1),
     );
 
     const tokenASpotMarketAfter = await getSpotMarketAccount(
@@ -260,33 +279,14 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
       tokenASpotMarketAfter.cumulativeDepositInterest,
     );
 
-    const accumulatedUsdcBorrowInterest = initialUsdcCumulativeBorrowInterest
-      .mul(usdcInterestRate)
-      .mul(timeSinceLastUpdate)
-      .div(ONE_YEAR)
-      .div(DRIFT_UTILIZATION_PRECISION)
-      .add(ONE);
-    console.log(
-      "USDC Borrow Interest: " + accumulatedUsdcBorrowInterest.toString(),
+    const accumulatedTokenABorrowInterest = calculateExpectedBorrowInterest(
+      initialTokenACumulativeBorrowInterest,
+      tokenAInterestRate,
+      timeSinceLastUpdate,
     );
-
-    assertBNApproximately(
-      safeBN(usdcSpotMarketAfter.cumulativeBorrowInterest).sub(
-        initialUsdcCumulativeBorrowInterest,
-      ),
-      accumulatedUsdcBorrowInterest,
-      new BN(1),
-    );
-
-    const accumulatedTokenABorrowInterest =
-      initialTokenACumulativeBorrowInterest
-        .mul(tokenAInterestRate)
-        .mul(timeSinceLastUpdate)
-        .div(ONE_YEAR)
-        .div(DRIFT_UTILIZATION_PRECISION)
-        .add(ONE);
     console.log(
-      "Token A Borrow Interest: " + accumulatedTokenABorrowInterest.toString(),
+      "Token A Borrow Interest: " +
+        bnToDecimalStringSafe(accumulatedTokenABorrowInterest),
     );
 
     assertBNApproximately(
@@ -438,4 +438,22 @@ function calculateExpectedValue(
   const weightedValue = expectedValue.mul(assetWeightMaint).div(new BN(1));
 
   return { expectedValue, weightedValue };
+}
+
+function calculateExpectedBorrowInterest(
+  initialCumulativeBorrowInterest: BN,
+  interestRate: BN,
+  timeSinceLastUpdate: BN,
+): BN {
+  // Match Drift's u128 integer math without relying on chained BN arithmetic,
+  // which can use stale decoded words on Linux/Node 24 before normalization.
+  const value =
+    (bnToBigIntSafe(initialCumulativeBorrowInterest) *
+      bnToBigIntSafe(interestRate) *
+      bnToBigIntSafe(timeSinceLastUpdate)) /
+      bnToBigIntSafe(ONE_YEAR) /
+      bnToBigIntSafe(DRIFT_UTILIZATION_PRECISION) +
+    bnToBigIntSafe(ONE);
+
+  return new BN(value.toString());
 }
