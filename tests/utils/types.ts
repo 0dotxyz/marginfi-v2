@@ -178,7 +178,6 @@ export const defaultBankConfigOptRaw = () => {
     circuitBreakerEnabled: null,
     cbDeviationBpsTiers: null,
     cbTierDurationsSeconds: null,
-    cbSustainObservations: null,
     cbEscalationWindowMult: null,
     cbEmaAlphaBps: null,
   };
@@ -207,7 +206,6 @@ export const blankBankConfigOptRaw = () => {
     circuitBreakerEnabled: null,
     cbDeviationBpsTiers: null,
     cbTierDurationsSeconds: null,
-    cbSustainObservations: null,
     cbEscalationWindowMult: null,
     cbEmaAlphaBps: null,
   };
@@ -429,7 +427,6 @@ export type BankConfigOptRaw = {
   circuitBreakerEnabled: boolean | null;
   cbDeviationBpsTiers: [number, number, number] | null;
   cbTierDurationsSeconds: [number, number, number] | null;
-  cbSustainObservations: number | null;
   cbEscalationWindowMult: number | null;
   cbEmaAlphaBps: number | null;
 };

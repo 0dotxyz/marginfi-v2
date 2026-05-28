@@ -62,12 +62,7 @@ pub struct BankCache {
     /// ACCOUNT_IN_RECEIVERSHIP set, so that operations on unrelated accounts sharing the same
     /// bank do not interfere with an in-progress liquidation.
     pub liq_cache_flags: u8,
-    /// Count of consecutive counted breaches; halt trips at `cb_sustain_observations`.
-    pub cb_breach_count: u8,
-    /// Highest tier crossed during the current breach streak; the halt trips at this tier from
-    /// operational so severity reflects the worst observation seen, not just the last one.
-    pub cb_max_breached_tier_in_streak: u8,
-    _cb_cache_pad: [u8; 5],
+    _cb_cache_pad: [u8; 7],
     /// For integration banks, this is the exchange rate of cToken/token or similar. The "real"
     /// price of one deposited token is `price_multiplier` * `last_oracle_price`, we split it here
     /// for consumers who are only interested in reading the oracle price and are applying the
@@ -95,15 +90,12 @@ impl Default for BankCache {
 impl BankCache {
     pub const LIQ_CACHE_LOCKED_FLAG: u8 = 1 << 0;
 
-    /// Reset cached rate metrics while preserving the oracle-price snapshot and the cache-side
-    /// circuit-breaker state (breach counter). Bank-level CB fields (including
-    /// `cb_reference_price`) live on `Bank` and are unaffected by this reset.
-    pub fn reset_preserving_oracle_and_cb_state(&mut self) {
+    /// Reset cached rate metrics while preserving the oracle-price snapshot. Bank-level CB fields
+    /// live on `Bank` and are unaffected by this reset.
+    pub fn reset_preserving_oracle_state(&mut self) {
         let last_oracle_price = self.last_oracle_price;
         let last_oracle_price_timestamp = self.last_oracle_price_timestamp;
         let last_oracle_price_confidence = self.last_oracle_price_confidence;
-        let cb_breach_count = self.cb_breach_count;
-        let cb_max_breached_tier_in_streak = self.cb_max_breached_tier_in_streak;
         let price_multiplier = self.price_multiplier;
 
         *self = Self::default();
@@ -111,8 +103,6 @@ impl BankCache {
         self.last_oracle_price = last_oracle_price;
         self.last_oracle_price_timestamp = last_oracle_price_timestamp;
         self.last_oracle_price_confidence = last_oracle_price_confidence;
-        self.cb_breach_count = cb_breach_count;
-        self.cb_max_breached_tier_in_streak = cb_max_breached_tier_in_streak;
         self.price_multiplier = price_multiplier;
     }
 

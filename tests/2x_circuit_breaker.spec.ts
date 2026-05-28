@@ -36,14 +36,13 @@ describe("Circuit breaker config + admin clear", () => {
   // SOL bank is not frozen by 04_configureBank (USDC is), so configureBank actually applies here.
   const bankKey = bankKeypairSol.publicKey;
 
-  // Reasonable defaults: 5% / 10% / 25% tiers, 10m / 1h / 4h durations, 3-slot sustain,
+  // Reasonable defaults: 5% / 10% / 25% tiers, 10m / 1h / 4h durations,
   // 2x escalation window, α=0.1.
   const validCbOpts = (): BankConfigOptRaw => ({
     ...blankBankConfigOptRaw(),
     circuitBreakerEnabled: true,
     cbDeviationBpsTiers: [500, 1000, 2500],
     cbTierDurationsSeconds: [600, 3600, 14400],
-    cbSustainObservations: 3,
     cbEscalationWindowMult: 2,
     cbEmaAlphaBps: 1000,
   });
@@ -89,10 +88,10 @@ describe("Circuit breaker config + admin clear", () => {
 
   it("(admin) enabling CB with invalid config fails", async () => {
     await freshPulse();
-    // sustain_observations = 0 is not usable — validate_circuit_breaker rejects.
+    // EMA alpha = 0 is not usable — validate_circuit_breaker rejects.
     const bad: BankConfigOptRaw = {
       ...validCbOpts(),
-      cbSustainObservations: 0,
+      cbEmaAlphaBps: 0,
     };
     const tx = new Transaction().add(
       await configureBank(groupAdmin.mrgnBankrunProgram, {
@@ -183,7 +182,6 @@ describe("Circuit breaker config + admin clear", () => {
     );
     assert.deepEqual(bank.config.cbDeviationBpsTiers, [500, 1000, 2500]);
     assert.deepEqual(bank.config.cbTierDurationsSeconds, [600, 3600, 14400]);
-    assert.equal(bank.config.cbSustainObservations, 3);
     assert.equal(bank.config.cbEscalationWindowMult, 2);
     assert.equal(bank.config.cbEmaAlphaBps, 1000);
     assert.equal(bank.cbTier, 0);
@@ -216,7 +214,6 @@ describe("Circuit breaker config + admin clear", () => {
     assert.equal(bank.cbTier, 0);
     assertBNEqual(bank.cbHaltStartedAt, 0);
     assertBNEqual(bank.cbHaltEndedAt, 0);
-    assert.equal(bank.cache.cbBreachCount, 0);
   });
 
   // Walk slot + clock, set the Pyth price, and land one pulse on the SOL bank. A single
@@ -275,7 +272,7 @@ describe("Circuit breaker config + admin clear", () => {
     assert.isAbove(haltEnded1, 0);
 
     // ---- Stage 2: advance past halt_ended_at into the escalation window. is_cb_halted goes
-    // false but cb_tier stays at 1 — a sustained re-breach inside the window will escalate.
+    // false but cb_tier stays at 1 — a re-breach inside the window will escalate.
     // warpToSlot advances slot + derived unix_time; setClock then pins unix_time to just past
     // halt_ended_at without rewinding the slot.
     {

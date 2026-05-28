@@ -102,19 +102,11 @@ impl BankConfigImpl for BankConfig {
     }
 
     fn validate_circuit_breaker(&self) -> MarginfiResult {
-        // Sanity caps. `MIN_SUSTAIN_SLOTS = 3` ensures a halt requires multiple independent
-        // publications. `MAX_ALPHA_BPS = 0.2` plus the per-pulse shift cap blunts EMA-reanchor
-        // griefing.
-        const MIN_SUSTAIN_SLOTS: u8 = 3;
-        const MAX_SUSTAIN_SLOTS: u8 = 32;
+        // Sanity caps. `MAX_ALPHA_BPS = 0.2` plus the per-pulse shift cap blunts
+        // EMA-reanchor griefing.
         const MAX_ESCALATION_MULT: u8 = 10;
         const MAX_ALPHA_BPS: u16 = 2_000;
         const MAX_DEVIATION_BPS: u16 = 5_000;
-        check!(
-            self.cb_sustain_observations >= MIN_SUSTAIN_SLOTS
-                && self.cb_sustain_observations <= MAX_SUSTAIN_SLOTS,
-            MarginfiError::CircuitBreakerInvalidConfig
-        );
         check!(
             self.cb_ema_alpha_bps > 0 && self.cb_ema_alpha_bps <= MAX_ALPHA_BPS,
             MarginfiError::CircuitBreakerInvalidConfig

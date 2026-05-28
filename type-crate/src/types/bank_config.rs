@@ -112,11 +112,10 @@ pub struct BankConfig {
     pub cb_deviation_bps_tiers: [u16; 3],
     /// Halt durations in seconds for tiers 1/2/3, strictly monotonic.
     pub cb_tier_durations_seconds: [u16; 3],
-    /// Consecutive counted breach observations required before a halt trips.
-    pub cb_sustain_observations: u8,
     /// Escalation window multiplier: a re-breach within `prev_tier_duration * mult` seconds
     /// after a halt ends ratchets to the next tier.
     pub cb_escalation_window_mult: u8,
+    pub _cb_config_pad: u8,
     /// EMA smoothing factor for the reference price, in basis points (e.g. 1000 = α=0.1).
     pub cb_ema_alpha_bps: u16,
 }
@@ -146,8 +145,8 @@ impl Default for BankConfig {
             fixed_price: I80F48::ZERO.into(),
             cb_deviation_bps_tiers: [0; 3],
             cb_tier_durations_seconds: [0; 3],
-            cb_sustain_observations: 0,
             cb_escalation_window_mult: 0,
+            _cb_config_pad: 0,
             cb_ema_alpha_bps: 0,
         }
     }
@@ -186,7 +185,6 @@ pub struct BankConfigOpt {
     pub circuit_breaker_enabled: Option<bool>,
     pub cb_deviation_bps_tiers: Option<[u16; 3]>,
     pub cb_tier_durations_seconds: Option<[u16; 3]>,
-    pub cb_sustain_observations: Option<u8>,
     pub cb_escalation_window_mult: Option<u8>,
     pub cb_ema_alpha_bps: Option<u16>,
 }
@@ -303,8 +301,8 @@ impl From<BankConfigCompact> for BankConfig {
             fixed_price: I80F48::ZERO.into(),
             cb_deviation_bps_tiers: [0; 3],
             cb_tier_durations_seconds: [0; 3],
-            cb_sustain_observations: 0,
             cb_escalation_window_mult: 0,
+            _cb_config_pad: 0,
             cb_ema_alpha_bps: 0,
         }
     }

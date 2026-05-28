@@ -235,7 +235,7 @@ async fn add_bank_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[u64; 6] as Default>::default());
+            assert_eq!(_padding_1, <[u64; 3] as Default>::default());
             // legacy add_bank does not pass a seed
             assert_eq!(bank_seed, 0);
 
@@ -388,7 +388,7 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[u64; 6] as Default>::default());
+            assert_eq!(_padding_1, <[u64; 3] as Default>::default());
             // with-seed add_bank stores the seed used for PDA derivation
             assert_eq!(bank_seed, 1200_u64);
 
@@ -788,7 +788,6 @@ async fn configure_bank_success(bank_mint: BankMint) -> anyhow::Result<()> {
         circuit_breaker_enabled: _,
         cb_deviation_bps_tiers: _,
         cb_tier_durations_seconds: _,
-        cb_sustain_observations: _,
         cb_escalation_window_mult: _,
         cb_ema_alpha_bps: _,
     } = &config_bank_opt;

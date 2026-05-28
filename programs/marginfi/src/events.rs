@@ -321,21 +321,9 @@ pub struct CircuitBreakerClearedEvent {
     pub current_timestamp: i64,
 }
 
-/// Emitted when a breach observation increments the counter but does not yet trip a halt.
+/// Emitted when consecutive tier-3 trips force a bank into `CircuitBroken`.
 #[event]
-pub struct CircuitBreakerBreachObservedEvent {
-    /// Tier threshold that the observation crossed (1/2/3).
-    pub tier_hit: u8,
-    pub deviation_bps: u64,
-    pub breach_count: u8,
-    pub sustain_observations: u8,
-    pub current_timestamp: i64,
-}
-
-/// Emitted when consecutive tier-3 trips hit `CB_MAX_TIER3_BEFORE_PAUSE` and the bank is
-/// auto-promoted to `Paused`.
-#[event]
-pub struct CircuitBreakerAutoPausedEvent {
+pub struct CircuitBreakerAutoBrokenEvent {
     pub consecutive_tier3_trips: u8,
     pub current_timestamp: i64,
 }

@@ -682,8 +682,8 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(bank.config.fixed_price, I80F48::ZERO.into());
     assert_eq!(bank.config.cb_deviation_bps_tiers, [0; 3]);
     assert_eq!(bank.config.cb_tier_durations_seconds, [0; 3]);
-    assert_eq!(bank.config.cb_sustain_observations, 0);
     assert_eq!(bank.config.cb_escalation_window_mult, 0);
+    assert_eq!(bank.config._cb_config_pad, 0);
     assert_eq!(bank.config.cb_ema_alpha_bps, 0);
 
     assert_eq!(
@@ -726,7 +726,9 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(bank._cb_pad, [0u8; 5]);
     assert_eq!(bank.cb_last_oracle_source_time, 0);
     assert_eq!(I80F48::from(bank.cb_reference_price), I80F48::ZERO);
-    assert_eq!(bank._padding_1, [0u64; 6]);
+    assert_eq!(I80F48::from(bank.cb_window_reference_price), I80F48::ZERO);
+    assert_eq!(bank.cb_window_started_at, 0);
+    assert_eq!(bank._padding_1, [0u64; 3]);
 
     Ok(())
 }

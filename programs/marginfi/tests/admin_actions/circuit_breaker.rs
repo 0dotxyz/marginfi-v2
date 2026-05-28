@@ -3,7 +3,7 @@ use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::test::{PYTH_PYUSD_FEED, PYTH_SOL_FEED, PYTH_USDC_FEED};
 use fixtures::{assert_custom_error, prelude::*};
 use marginfi::prelude::*;
-use marginfi_type_crate::types::BankConfigOpt;
+use marginfi_type_crate::types::{BankConfigOpt, BankOperationalState};
 use solana_program_test::{BanksClientError, *};
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer};
@@ -16,7 +16,6 @@ fn cb_config() -> BankConfigOpt {
         circuit_breaker_enabled: Some(true),
         cb_deviation_bps_tiers: Some([500, 1000, 2500]),
         cb_tier_durations_seconds: Some([600, 3600, 14400]),
-        cb_sustain_observations: Some(3),
         cb_escalation_window_mult: Some(2),
         cb_ema_alpha_bps: Some(1000),
         ..Default::default()
@@ -65,6 +64,55 @@ async fn enable_cb_and_trip_halt(
     for refreshed in [PYTH_SOL_FEED, PYTH_USDC_FEED, PYTH_PYUSD_FEED] {
         test_f.set_pyth_oracle_timestamp(refreshed, trip_time).await;
     }
+    Ok(())
+}
+
+async fn enable_cb_and_trip_tier3_storm(
+    test_f: &TestFixture,
+    bank: &BankFixture,
+    feed: Pubkey,
+    base_native: i64,
+    pre_break_state: Option<BankOperationalState>,
+) -> anyhow::Result<()> {
+    let mut clock_time: i64 = 100;
+    let mut clock_slot: u64 = 1_000;
+    test_f
+        .set_pyth_oracle_price_native(feed, base_native, 0, clock_time)
+        .await;
+    test_f.set_clock(clock_slot, clock_time).await;
+    test_f
+        .marginfi_group
+        .try_pulse_bank_price_cache(bank)
+        .await?;
+
+    bank.update_config(cb_config(), None).await?;
+    if let Some(operational_state) = pre_break_state {
+        bank.update_config(
+            BankConfigOpt {
+                operational_state: Some(operational_state),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    }
+
+    for _ in 0..3 {
+        clock_time += 1;
+        clock_slot += 10;
+        test_f.set_clock(clock_slot, clock_time).await;
+        test_f
+            .set_pyth_oracle_price_native(feed, base_native.saturating_mul(2), 0, clock_time)
+            .await;
+        test_f
+            .marginfi_group
+            .try_pulse_bank_price_cache(bank)
+            .await?;
+
+        let bank_state = bank.load().await;
+        clock_time = bank_state.cb_halt_ended_at;
+    }
+
     Ok(())
 }
 
@@ -435,7 +483,6 @@ async fn pyth_spike_trips_tier1_then_escalates_to_tier2_then_admin_clears() -> a
                 circuit_breaker_enabled: Some(true),
                 cb_deviation_bps_tiers: Some([500, 1000, 2500]),
                 cb_tier_durations_seconds: Some([600, 3600, 14400]),
-                cb_sustain_observations: Some(3),
                 cb_escalation_window_mult: Some(2),
                 cb_ema_alpha_bps: Some(1000),
                 ..Default::default()
@@ -590,7 +637,6 @@ async fn cb_enable_fails_on_cold_cache() -> anyhow::Result<()> {
                 circuit_breaker_enabled: Some(true),
                 cb_deviation_bps_tiers: Some([500, 1000, 2500]),
                 cb_tier_durations_seconds: Some([600, 3600, 14400]),
-                cb_sustain_observations: Some(3),
                 cb_escalation_window_mult: Some(2),
                 cb_ema_alpha_bps: Some(1000),
                 ..Default::default()
@@ -639,7 +685,6 @@ async fn cb_enable_fails_on_stale_cache() -> anyhow::Result<()> {
                 circuit_breaker_enabled: Some(true),
                 cb_deviation_bps_tiers: Some([500, 1000, 2500]),
                 cb_tier_durations_seconds: Some([600, 3600, 14400]),
-                cb_sustain_observations: Some(3),
                 cb_escalation_window_mult: Some(2),
                 cb_ema_alpha_bps: Some(1000),
                 ..Default::default()
@@ -712,6 +757,56 @@ async fn cb_halt_freezes_interest_accrual() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn cb_tier3_storm_forces_paused_bank_to_circuit_broken_and_restores_paused(
+) -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+
+    enable_cb_and_trip_tier3_storm(
+        &test_f,
+        sol_bank,
+        PYTH_SOL_FEED,
+        10_000_000_000,
+        Some(BankOperationalState::Paused),
+    )
+    .await?;
+
+    let broken = sol_bank.load().await;
+    assert_eq!(
+        broken.config.operational_state,
+        BankOperationalState::CircuitBroken
+    );
+    assert_eq!(
+        broken.cb_pre_break_state,
+        BankOperationalState::Paused as u8
+    );
+
+    let admin = test_f.payer().clone();
+    let clear_ix = sol_bank.make_clear_circuit_breaker_ix(admin, false).await;
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[clear_ix],
+            Some(&admin),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client
+            .process_transaction_with_preflight(tx)
+            .await?;
+    }
+
+    let cleared = sol_bank.load().await;
+    assert_eq!(
+        cleared.config.operational_state,
+        BankOperationalState::Paused
+    );
+    assert_eq!(cleared.cb_tier, 0);
+    assert_eq!(cleared.cb_tier3_consecutive_trips, 0);
+    Ok(())
+}
+
 /// `update_cache_price` is the single CB observation entry point. A live-oracle ix (here: a
 /// risk-free withdraw) on a bank whose price exceeds the tier-1 threshold must trip the halt on
 /// that first breach, even though no one ran the explicit pulse crank. Without this wiring the
@@ -741,7 +836,6 @@ async fn cb_observes_price_through_operational_path() -> anyhow::Result<()> {
                 circuit_breaker_enabled: Some(true),
                 cb_deviation_bps_tiers: Some([500, 1000, 2500]),
                 cb_tier_durations_seconds: Some([600, 3600, 14400]),
-                cb_sustain_observations: Some(3),
                 cb_escalation_window_mult: Some(2),
                 cb_ema_alpha_bps: Some(1000),
                 ..Default::default()

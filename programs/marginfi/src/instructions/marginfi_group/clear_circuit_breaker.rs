@@ -9,9 +9,9 @@ use marginfi_type_crate::types::{Bank, MarginfiGroup, WrappedI80F48};
 
 /// (admin or risk_admin) Clear a circuit-breaker halt on a bank.
 ///
-/// * `reseed_reference` - When true, also zero the EMA reference so the next pulse reseeds from
-///   live oracle data. Use when the new price level is considered valid; otherwise the pre-halt
-///   reference will likely cause an immediate re-halt.
+/// * `reseed_reference` - When true, also zero the EMA and long-window references so the next pulse
+///   reseeds from live oracle data. Use when the new price level is considered valid; otherwise the
+///   pre-halt reference will likely cause an immediate re-halt.
 pub fn lending_pool_clear_circuit_breaker(
     ctx: Context<LendingPoolClearCircuitBreaker>,
     reseed_reference: bool,
@@ -30,6 +30,8 @@ pub fn lending_pool_clear_circuit_breaker(
     bank.reset_cb_runtime_state();
     if reseed_reference {
         bank.cb_reference_price = WrappedI80F48::from(I80F48::ZERO);
+        bank.cb_window_reference_price = WrappedI80F48::from(I80F48::ZERO);
+        bank.cb_window_started_at = 0;
     }
 
     emit!(CircuitBreakerClearedEvent {

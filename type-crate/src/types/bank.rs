@@ -180,7 +180,7 @@ pub struct Bank {
     /// 0 = operational, 1..=3 = escalating halt severity.
     pub cb_tier: u8,
     /// Consecutive tier-3 trips with no clean escalation-window between them. Hitting
-    /// `CB_MAX_TIER3_BEFORE_PAUSE` forces the bank to `CircuitBroken`.
+    /// `CB_MAX_TIER3_BEFORE_CIRCUIT_BREAK` forces the bank to `CircuitBroken`.
     pub cb_tier3_consecutive_trips: u8,
     /// `BankOperationalState` (as `u8`) the bank held before the breaker forced it to
     /// `CircuitBroken`. Restored by `clear_circuit_breaker`. Meaningless unless
@@ -195,8 +195,13 @@ pub struct Bank {
     /// EMA reference price used by the circuit breaker. Frozen while halted, zero until the
     /// first observation after enable.
     pub cb_reference_price: WrappedI80F48,
+    /// Long-window reference price used to catch slow oracle walking that stays below the
+    /// per-observation breaker threshold.
+    pub cb_window_reference_price: WrappedI80F48,
+    /// Unix-seconds when `cb_window_reference_price` was anchored.
+    pub cb_window_started_at: i64,
 
-    pub _padding_1: [u64; 6], // 48B
+    pub _padding_1: [u64; 3], // 24B
 }
 
 impl Bank {

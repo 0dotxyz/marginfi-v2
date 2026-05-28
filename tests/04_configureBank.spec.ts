@@ -85,7 +85,6 @@ describe("Lending pool configure bank", () => {
       circuitBreakerEnabled: null,
       cbDeviationBpsTiers: null,
       cbTierDurationsSeconds: null,
-      cbSustainObservations: null,
       cbEscalationWindowMult: null,
       cbEmaAlphaBps: null,
     };

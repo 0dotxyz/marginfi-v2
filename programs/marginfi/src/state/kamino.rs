@@ -111,8 +111,8 @@ impl KaminoConfigCompact {
             fixed_price: I80F48::ZERO.into(),
             cb_deviation_bps_tiers: [0; 3],
             cb_tier_durations_seconds: [0; 3],
-            cb_sustain_observations: 0,
             cb_escalation_window_mult: 0,
+            _cb_config_pad: 0,
             cb_ema_alpha_bps: 0,
         }
     }
