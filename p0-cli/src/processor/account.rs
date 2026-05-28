@@ -734,6 +734,7 @@ pub fn marginfi_account_close_order(
     let marginfi_account = config
         .mfi_program
         .account::<MarginfiAccount>(marginfi_account_pk)?;
+    ensure_account_unblocked(&marginfi_account, "close-order")?;
     let group = marginfi_account.group;
 
     let fee_recipient = fee_recipient.unwrap_or(authority);
@@ -1032,6 +1033,7 @@ pub fn marginfi_account_set_keeper_close_flags(
     let marginfi_account = config
         .mfi_program
         .account::<MarginfiAccount>(marginfi_account_pk)?;
+    ensure_account_unblocked(&marginfi_account, "set-keeper-close-flags")?;
     let group = marginfi_account.group;
 
     match &bank_keys_opt {
