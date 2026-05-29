@@ -18,12 +18,13 @@ use marginfi_type_crate::types::{Bank, BankOperationalState};
 /// This instruction:
 /// 1. Transfers a small amount of underlying from the fee payer into the bank liquidity vault
 /// 2. Performs a `deposit` CPI into JupLend (seed deposit)
-/// 3. Flips the bank operational state from `Paused` -> `Operational`
+/// 3. Transitions the bank from `Uninitialized` to `Operational`
 ///
 /// Notes:
 /// - The fToken vault is created during `add_pool`, not here.
 /// - The seed deposit is intentionally not credited to any marginfi account.
-/// - The bank is created in `Paused` state; this instruction is what activates it.
+/// - `Uninitialized` is unreachable from `lending_pool_configure_bank`, so an admin pause cannot
+///   re-arm this instruction.
 pub fn juplend_init_position(ctx: Context<JuplendInitPosition>, amount: u64) -> MarginfiResult {
     // Require minimum seed deposit amount (same as other integrations)
     require_gte!(
@@ -39,7 +40,7 @@ pub fn juplend_init_position(ctx: Context<JuplendInitPosition>, amount: u64) -> 
     let authority_bump = ctx.accounts.bank.load()?.liquidity_vault_authority_bump;
     ctx.accounts.cpi_juplend_deposit(amount, authority_bump)?;
 
-    // Activate the bank (operational).
+    // Activate (one-time): Uninitialized -> Operational.
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
         bank.config.operational_state = BankOperationalState::Operational;
@@ -70,7 +71,7 @@ pub struct JuplendInitPosition<'info> {
         has_one = mint @ MarginfiError::InvalidMint,
         constraint = is_juplend_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongBankAssetTagForJuplendOperation,
-        constraint = bank.load()?.config.operational_state == BankOperationalState::Paused
+        constraint = bank.load()?.config.operational_state == BankOperationalState::Uninitialized
             @ MarginfiError::JuplendBankAlreadyActivated
     )]
     pub bank: AccountLoader<'info, Bank>,
