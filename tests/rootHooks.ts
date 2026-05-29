@@ -22,6 +22,7 @@ import {
 } from "@solana/web3.js";
 import fs from "fs";
 import path from "path";
+import Decimal from "decimal.js";
 import { patchBankrunConnection } from "./utils/bankrunConnection";
 
 // ---------------------------------------------------------------------------
@@ -78,6 +79,25 @@ export let oracles: Oracles = undefined;
 export const verbose = true;
 /** Show the raw buffer printout of various structs */
 export const printBuffers = false;
+
+const decimalConstructors = [Decimal];
+
+try {
+  decimalConstructors.push(
+    require("@mrgnlabs/mrgn-common/node_modules/decimal.js") as typeof Decimal,
+  );
+} catch {
+  // mrgn-common may use the hoisted Decimal constructor depending on install layout.
+}
+
+const resetDecimalConfig = () => {
+  for (const DecimalConstructor of decimalConstructors) {
+    DecimalConstructor.set({
+      precision: 20,
+      rounding: DecimalConstructor.ROUND_HALF_UP,
+    });
+  }
+};
 /** The program owner is also the provider wallet */
 export let globalProgramAdmin: MockUser = undefined;
 /** Administers the mrgnlend group and/or stake holder accounts */
@@ -489,6 +509,8 @@ function getGenesisAccounts(): AddedAccount[] {
 
 export const mochaHooks = {
   beforeAll: async () => {
+    resetDecimalConfig();
+
     // If false, you are in the wrong environment to run this, update Node or try polyfill
     console.log("Environment supports crypto: ", !!global.crypto?.subtle);
 
@@ -801,5 +823,11 @@ export const mochaHooks = {
       console.log("---End ecosystem setup (pure bankrun)---");
       console.log("");
     }
+  },
+  beforeEach: () => {
+    resetDecimalConfig();
+  },
+  afterEach: () => {
+    resetDecimalConfig();
   },
 };

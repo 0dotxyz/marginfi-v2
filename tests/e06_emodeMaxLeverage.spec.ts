@@ -1,6 +1,6 @@
 import { BN } from "@coral-xyz/anchor";
 import { Transaction } from "@solana/web3.js";
-import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
+import { bigNumberToWrappedI80F48 } from "./utils/i80f48";
 import {
   bankrunContext,
   bankrunProgram,
@@ -75,7 +75,7 @@ describe("Emode Max Leverage Configuration", () => {
         emodeGroup.publicKey
       );
       assert.approximately(u32ToBasis(group.emodeMaxInitLeverage), 10, 0.01);
-      assert.approximately(u32ToBasis(group.emodeMaxMaintLeverage), 15, 0.01); 
+      assert.approximately(u32ToBasis(group.emodeMaxMaintLeverage), 15, 0.01);
     });
 
   });
