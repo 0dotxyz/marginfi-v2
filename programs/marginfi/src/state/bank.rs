@@ -40,6 +40,14 @@ use marginfi_type_crate::{
     types::{Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup},
 };
 
+#[cfg(all(not(feature = "client"), feature = "debug"))]
+fn sol_log_compute_units() {
+    #[cfg(target_os = "solana")]
+    unsafe {
+        solana_msg::syscalls::sol_log_compute_units_();
+    }
+}
+
 pub trait BankImpl {
     const LEN: usize = std::mem::size_of::<Bank>();
 
@@ -456,7 +464,7 @@ impl BankImpl for Bank {
         #[cfg(not(feature = "client"))] bank: Pubkey,
     ) -> MarginfiResult<()> {
         #[cfg(all(not(feature = "client"), feature = "debug"))]
-        solana_msg::syscalls::sol_log_compute_units_();
+        sol_log_compute_units();
 
         let time_delta: u64 = (current_timestamp - self.last_update).try_into().unwrap();
         if time_delta == 0 {
@@ -545,7 +553,7 @@ impl BankImpl for Bank {
         #[cfg(not(feature = "client"))]
         {
             #[cfg(feature = "debug")]
-            solana_msg::syscalls::sol_log_compute_units_();
+            sol_log_compute_units();
 
             emit!(LendingPoolBankAccrueInterestEvent {
                 header: GroupEventHeader {
