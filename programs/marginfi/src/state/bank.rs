@@ -630,6 +630,7 @@ impl BankImpl for Bank {
         Ok(())
     }
 
+    #[allow(unused_variables)]
     fn deposit_spl_transfer<'info>(
         &self,
         amount: u64,
@@ -646,8 +647,8 @@ impl BankImpl for Bank {
         );
 
         debug!(
-            "deposit_spl_transfer: amount: {} from {} to {}, auth {}, mint {:?}, program {:?}, remaining_accounts {:?}",
-            amount, from.key, to.key, authority.key, maybe_mint, program, remaining_accounts
+            "deposit_spl_transfer: amount: {} from {} to {}, auth {}",
+            amount, from.key, to.key, authority.key
         );
 
         #[cfg(not(feature = "client"))]
@@ -682,6 +683,7 @@ impl BankImpl for Bank {
         Ok(())
     }
 
+    #[allow(unused_variables)]
     fn withdraw_spl_transfer<'info>(
         &self,
         amount: u64,
@@ -694,8 +696,8 @@ impl BankImpl for Bank {
         remaining_accounts: &[AccountInfo<'info>],
     ) -> MarginfiResult {
         debug!(
-            "withdraw_spl_transfer: amount: {} from {} to {}, auth {}, mint {:?}, program {:?}, remaining_accounts {:?}, signer_seeds: {:?}",
-            amount, from.key, to.key, authority.key, maybe_mint, program, remaining_accounts, signer_seeds
+            "withdraw_spl_transfer: amount: {} from {} to {}, auth {}",
+            amount, from.key, to.key, authority.key
         );
 
         #[cfg(not(feature = "client"))]
