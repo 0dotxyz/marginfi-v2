@@ -150,7 +150,7 @@ jobs:
 
     - name: Run fuzz tests
       run: |
-        cargo +nightly-2025-08-01 fuzz run lend \
+        RUST_BACKTRACE=1 cargo +nightly-2025-08-01 fuzz run lend \
           --strip-dead-code --no-cfg-fuzzing \
             -- -max_total_time=150 \
               -timeout_exitcode=100 \
