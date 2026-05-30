@@ -40,14 +40,6 @@ use marginfi_type_crate::{
     types::{Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup},
 };
 
-#[cfg(all(not(feature = "client"), feature = "debug"))]
-fn sol_log_compute_units() {
-    #[cfg(target_os = "solana")]
-    unsafe {
-        solana_msg::syscalls::sol_log_compute_units_();
-    }
-}
-
 pub trait BankImpl {
     const LEN: usize = std::mem::size_of::<Bank>();
 
@@ -464,7 +456,7 @@ impl BankImpl for Bank {
         #[cfg(not(feature = "client"))] bank: Pubkey,
     ) -> MarginfiResult<()> {
         #[cfg(all(not(feature = "client"), feature = "debug"))]
-        sol_log_compute_units();
+        solana_msg::syscalls::sol_log_compute_units_();
 
         let time_delta: u64 = (current_timestamp - self.last_update).try_into().unwrap();
         if time_delta == 0 {
@@ -553,7 +545,7 @@ impl BankImpl for Bank {
         #[cfg(not(feature = "client"))]
         {
             #[cfg(feature = "debug")]
-            sol_log_compute_units();
+            solana_msg::syscalls::sol_log_compute_units_();
 
             emit!(LendingPoolBankAccrueInterestEvent {
                 header: GroupEventHeader {
@@ -650,10 +642,11 @@ impl BankImpl for Bank {
         );
 
         debug!(
-            "deposit_spl_transfer: amount: {} from {} to {}, auth {}",
-            amount, from.key, to.key, authority.key
+            "deposit_spl_transfer: amount: {} from {} to {}, auth {}, mint {:?}, program {:?}, remaining_accounts {:?}",
+            amount, from.key, to.key, authority.key, maybe_mint, program, remaining_accounts
         );
 
+        #[cfg(not(feature = "client"))]
         if let Some(mint) = maybe_mint {
             spl_token_2022::onchain::invoke_transfer_checked(
                 program.key,
