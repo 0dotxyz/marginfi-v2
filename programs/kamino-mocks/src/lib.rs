@@ -32,16 +32,16 @@ pub enum KaminoMocksError {
     MathError,
 }
 
+/// Custom mock-kamino instruction payload that triggers a CPI into
+/// marginfi::lending_account_close_balance.
+pub const CPI_CLOSE_BALANCE_IX_DATA: [u8; 8] = *b"CPICLSBL";
+
 fn lending_account_close_balance_discriminator() -> [u8; 8] {
     let mut sighash = [0u8; 8];
     sighash
         .copy_from_slice(&hash("global:lending_account_close_balance".as_bytes()).to_bytes()[..8]);
     sighash
 }
-
-/// Custom mock-kamino instruction payload that triggers a CPI into
-/// marginfi::lending_account_close_balance.
-pub const CPI_CLOSE_BALANCE_IX_DATA: [u8; 8] = *b"CPICLSBL";
 
 fn process_cpi_close_balance(accounts: &[AccountInfo]) -> ProgramResult {
     if accounts.len() < 5 {

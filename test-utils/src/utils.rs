@@ -495,7 +495,7 @@ pub fn find_order_pda(marginfi_account: &Pubkey, bank_keys: &[Pubkey]) -> (Pubke
     let hash = keys_sha256_hash(bank_keys);
     Pubkey::find_program_address(
         &[ORDER_SEED.as_bytes(), marginfi_account.as_ref(), &hash],
-        &Address::new_from_array(marginfi::ID.to_bytes()),
+        &marginfi::ID,
     )
 }
 

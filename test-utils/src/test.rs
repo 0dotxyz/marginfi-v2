@@ -45,7 +45,6 @@ use marginfi_type_crate::{
         InterestRateConfig, OracleSetup, RatePoint, RiskTier, INTEREST_CURVE_SEVEN_POINT,
     },
 };
-use solana_address::{address, Address};
 use solana_sdk::{account::AccountSharedData, entrypoint::ProgramResult};
 
 use fixed_macro::types::I80F48;
@@ -280,8 +279,8 @@ pub struct TestFixture {
 pub struct KaminoBankSetup {
     pub test_f: TestFixture,
     pub bank_f: BankFixture,
-    pub obligation: Address,
-    pub reserve_liquidity_supply: Address,
+    pub obligation: Pubkey,
+    pub reserve_liquidity_supply: Pubkey,
 }
 
 impl KaminoBankSetup {
@@ -337,7 +336,7 @@ pub struct KaminoStateSnapshot {
 pub struct DriftBankSetup {
     pub test_f: TestFixture,
     pub bank_f: BankFixture,
-    pub spot_market_vault: Address,
+    pub spot_market_vault: Pubkey,
     pub market_index: u16,
 }
 
@@ -399,8 +398,8 @@ pub struct DriftStateSnapshot {
 pub struct JuplendBankSetup {
     pub test_f: TestFixture,
     pub bank_f: BankFixture,
-    pub lending: Address,
-    pub reserve_vault: Address,
+    pub lending: Pubkey,
+    pub reserve_vault: Pubkey,
 }
 
 impl JuplendBankSetup {
@@ -447,18 +446,15 @@ pub struct JuplendStateSnapshot {
     pub f_token_vault_balance: u64,
 }
 
-pub const PYTH_USDC_FEED: Address = address!("PythUsdcPrice111111111111111111111111111111");
-pub const SWITCHBOARD_USDC_FEED: Address = address!("SwchUsdcPrice111111111111111111111111111111");
-pub const PYTH_SOL_FEED: Address = address!("PythSo1Price1111111111111111111111111111111");
-pub const SWITCHBOARD_SOL_FEED: Address = address!("SwchSo1Price1111111111111111111111111111111");
-pub const PYTH_SOL_EQUIVALENT_FEED: Address =
-    address!("PythSo1Equiva1entPrice111111111111111111111");
-pub const PYTH_MNDE_FEED: Address = address!("PythMndePrice111111111111111111111111111111");
-pub const FAKE_PYTH_USDC_FEED: Address = address!("FakePythUsdcPrice11111111111111111111111111");
-pub const PYTH_PUSH_SOL_FULLV_FEED: Address =
-    address!("PythPushFu11So1Price11111111111111111111111");
-pub const PYTH_PUSH_SOL_PARTV_FEED: Address =
-    address!("PythPushHa1fSo1Price11111111111111111111111");
+pub const PYTH_USDC_FEED: Pubkey = pubkey!("PythUsdcPrice111111111111111111111111111111");
+pub const SWITCHBOARD_USDC_FEED: Pubkey = pubkey!("SwchUsdcPrice111111111111111111111111111111");
+pub const PYTH_SOL_FEED: Pubkey = pubkey!("PythSo1Price1111111111111111111111111111111");
+pub const SWITCHBOARD_SOL_FEED: Pubkey = pubkey!("SwchSo1Price1111111111111111111111111111111");
+pub const PYTH_SOL_EQUIVALENT_FEED: Pubkey = pubkey!("PythSo1Equiva1entPrice111111111111111111111");
+pub const PYTH_MNDE_FEED: Pubkey = pubkey!("PythMndePrice111111111111111111111111111111");
+pub const FAKE_PYTH_USDC_FEED: Pubkey = pubkey!("FakePythUsdcPrice11111111111111111111111111");
+pub const PYTH_PUSH_SOL_FULLV_FEED: Pubkey = pubkey!("PythPushFu11So1Price11111111111111111111111");
+pub const PYTH_PUSH_SOL_PARTV_FEED: Pubkey = pubkey!("PythPushHa1fSo1Price11111111111111111111111");
 pub const PYTH_PUSH_FULLV_FEED_ID: [u8; 32] = [17; 32];
 pub const PYTH_PUSH_PARTV_FEED_ID: [u8; 32] = [18; 32];
 pub const PYTH_PUSH_REAL_SOL_FEED_ID: [u8; 32] = [
@@ -469,19 +465,17 @@ pub const PYTH_PUSH_REAL_USDC_FEED_ID: [u8; 32] = [
     234, 160, 32, 198, 28, 196, 121, 113, 40, 19, 70, 28, 225, 83, 137, 74, 150, 166, 192, 11, 33,
     237, 12, 252, 39, 152, 209, 249, 169, 233, 201, 74,
 ];
-pub const INEXISTENT_PYTH_USDC_FEED: Address =
-    address!("FakePythUsdcPrice11111111111111111111111111");
-pub const PYTH_T22_WITH_FEE_FEED: Address = address!("PythT22WithFeePrice111111111111111111111111");
-pub const PYTH_PYUSD_FEED: Address = address!("PythPyusdPrice11111111111111111111111111111");
-pub const PYTH_PUSH_USDC_REAL_FEED: Address =
-    address!("PythPushUsdcRea1Price1111111111111111111111");
-pub const PYTH_PUSH_SOL_REAL_FEED: Address =
-    address!("PythPushSo1Rea1Price11111111111111111111111");
+pub const INEXISTENT_PYTH_USDC_FEED: Pubkey =
+    pubkey!("FakePythUsdcPrice11111111111111111111111111");
+pub const PYTH_T22_WITH_FEE_FEED: Pubkey = pubkey!("PythT22WithFeePrice111111111111111111111111");
+pub const PYTH_PYUSD_FEED: Pubkey = pubkey!("PythPyusdPrice11111111111111111111111111111");
+pub const PYTH_PUSH_USDC_REAL_FEED: Pubkey = pubkey!("PythPushUsdcRea1Price1111111111111111111111");
+pub const PYTH_PUSH_SOL_REAL_FEED: Pubkey = pubkey!("PythPushSo1Rea1Price11111111111111111111111");
 
-pub const SWITCH_PULL_SOL_REAL_FEED: Address =
-    address!("BSzfJs4d1tAkSDqkepnfzEVcx2WtDVnwwXa2giy9PLeP");
+pub const SWITCH_PULL_SOL_REAL_FEED: Pubkey =
+    pubkey!("BSzfJs4d1tAkSDqkepnfzEVcx2WtDVnwwXa2giy9PLeP");
 
-pub fn get_oracle_id_from_feed_id(feed_id: Address) -> Option<Address> {
+pub fn get_oracle_id_from_feed_id(feed_id: Pubkey) -> Option<Pubkey> {
     match feed_id.to_bytes() {
         PYTH_PUSH_FULLV_FEED_ID => Some(PYTH_PUSH_SOL_FULLV_FEED),
         PYTH_PUSH_PARTV_FEED_ID => Some(PYTH_PUSH_SOL_PARTV_FEED),
@@ -491,7 +485,7 @@ pub fn get_oracle_id_from_feed_id(feed_id: Address) -> Option<Address> {
     }
 }
 
-pub fn create_oracle_key_array(pyth_oracle: Address) -> [Pubkey; MAX_ORACLE_KEYS] {
+pub fn create_oracle_key_array(pyth_oracle: Pubkey) -> [Pubkey; MAX_ORACLE_KEYS] {
     let mut keys = [Pubkey::default(); MAX_ORACLE_KEYS];
     keys[0] = Pubkey::new_from_array(pyth_oracle.to_bytes());
 
@@ -667,16 +661,16 @@ pub const SOL_MINT_DECIMALS: u8 = 9;
 pub const MNDE_MINT_DECIMALS: u8 = 9;
 
 pub fn marginfi_entry<'info>(
-    program_id: &'info Address,
+    program_id: &'info Pubkey,
     accounts: &'info [AccountInfo<'info>],
     data: &'info [u8],
 ) -> ProgramResult {
     marginfi::entry(program_id, accounts, data)
 }
 
-pub const FAKE_KAMINO_PROGRAM_ID: Address = address!("KFake2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
-pub const TOKEN_METADATA_PROGRAM_ID: Address =
-    address!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+pub const FAKE_KAMINO_PROGRAM_ID: Pubkey = pubkey!("KFake2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
+pub const TOKEN_METADATA_PROGRAM_ID: Pubkey =
+    pubkey!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 const KAMINO_TEST_BANK_SEED: u64 = 555;
 const KAMINO_INIT_OBLIGATION_NOMINAL_AMOUNT: u64 = 500;
 const DRIFT_TEST_BANK_SEED: u64 = 777;
@@ -713,19 +707,14 @@ impl TestFixture {
         let settings = test_settings.clone().unwrap_or_default();
         let mut program = ProgramTest::default();
 
-        let mem_map_not_copy_feature_gate =
-            address!("EenyoWx9UMXYKpR8mW5Jmfmy2fRjzUtM7NduYMY8bx33");
+        let mem_map_not_copy_feature_gate = pubkey!("EenyoWx9UMXYKpR8mW5Jmfmy2fRjzUtM7NduYMY8bx33");
         program.deactivate_feature(mem_map_not_copy_feature_gate);
 
         program.prefer_bpf(true);
-        program.add_program(
-            "marginfi",
-            Address::new_from_array(marginfi::ID.to_bytes()),
-            None,
-        );
+        program.add_program("marginfi", marginfi::ID, None);
         #[cfg(feature = "transfer-hook")]
         program.add_program("test_transfer_hook", TEST_HOOK_ID, None);
-        program.add_program("mocks", Address::new_from_array(mocks::ID.to_bytes()), None);
+        program.add_program("mocks", mocks::ID, None);
 
         program.prefer_bpf(false);
         let requires_real_kamino_program = add_integration_programs;
@@ -740,34 +729,14 @@ impl TestFixture {
             std::env::set_var("SBF_OUT_DIR", fixtures_dir);
 
             program.prefer_bpf(true);
-            program.add_program(
-                "kamino_lending",
-                Address::new_from_array(kamino_mocks::kamino_lending::ID.to_bytes()),
-                None,
-            );
-            program.add_program(
-                "kamino_farms",
-                Address::new_from_array(kamino_mocks::kamino_farms::ID.to_bytes()),
-                None,
-            );
-            program.add_program(
-                "drift",
-                Address::new_from_array(drift_mocks::drift::ID.to_bytes()),
-                None,
-            );
-            program.add_program(
-                "juplend_lending",
-                Address::new_from_array(juplend_mocks::ID.to_bytes()),
-                None,
-            );
-            program.add_program(
-                "juplend_liquidity",
-                Address::new_from_array(juplend_mocks::liquidity::ID.to_bytes()),
-                None,
-            );
+            program.add_program("kamino_lending", kamino_mocks::kamino_lending::ID, None);
+            program.add_program("kamino_farms", kamino_mocks::kamino_farms::ID, None);
+            program.add_program("drift", drift_mocks::drift::ID, None);
+            program.add_program("juplend_lending", juplend_mocks::ID, None);
+            program.add_program("juplend_liquidity", juplend_mocks::liquidity::ID, None);
             program.add_program(
                 "juplend_rewards_rate_model",
-                Address::new_from_array(juplend_mocks::lending_reward_rate_model::ID.to_bytes()),
+                juplend_mocks::lending_reward_rate_model::ID,
                 None,
             );
             program.add_program("token_metadata", TOKEN_METADATA_PROGRAM_ID, None);
@@ -775,12 +744,12 @@ impl TestFixture {
         } else {
             program.add_program(
                 "kamino_lending",
-                Address::new_from_array(kamino_mocks::kamino_lending::ID.to_bytes()),
+                kamino_mocks::kamino_lending::ID,
                 processor!(mock_kamino_lending_processor),
             );
             program.add_program(
                 "kamino_farms",
-                Address::new_from_array(kamino_mocks::kamino_farms::ID.to_bytes()),
+                kamino_mocks::kamino_farms::ID,
                 processor!(mock_kamino_lending_processor),
             );
         }
@@ -1092,7 +1061,7 @@ impl TestFixture {
 
     pub async fn try_load(
         &self,
-        address: &Address,
+        address: &Pubkey,
     ) -> anyhow::Result<Option<Account>, BanksClientError> {
         self.context
             .borrow_mut()
@@ -1103,7 +1072,7 @@ impl TestFixture {
 
     pub async fn load_and_deserialize<T: anchor_lang::AccountDeserialize>(
         &self,
-        address: &Address,
+        address: &Pubkey,
     ) -> T {
         let ai = self
             .context
@@ -1117,7 +1086,7 @@ impl TestFixture {
         T::try_deserialize(&mut ai.data.as_slice()).unwrap()
     }
 
-    pub fn payer(&self) -> Address {
+    pub fn payer(&self) -> Pubkey {
         self.context.borrow().payer.pubkey()
     }
 
@@ -1141,7 +1110,7 @@ impl TestFixture {
         self.context.borrow_mut().set_sysvar(&clock);
     }
 
-    pub async fn set_pyth_oracle_timestamp(&self, address: Address, timestamp: i64) {
+    pub async fn set_pyth_oracle_timestamp(&self, address: Pubkey, timestamp: i64) {
         let mut ctx = self.context.borrow_mut();
 
         let mut account = ctx
@@ -1261,15 +1230,14 @@ impl TestFixture {
         test_f.context.borrow_mut().set_sysvar(&clock);
 
         // Keep fixture setup simple by disabling reserve farms for these local ix tests.
-        if reserve.farm_collateral != Address::default() || reserve.farm_debt != Address::default()
-        {
+        if reserve.farm_collateral != Pubkey::default() || reserve.farm_debt != Pubkey::default() {
             let mut reserve_account = test_f.try_load(&reserve_key).await.unwrap().unwrap();
             let reserve_data =
                 bytemuck::from_bytes_mut::<MinimalReserve>(&mut reserve_account.data[8..]);
-            reserve_data.farm_collateral = Address::default();
-            reserve_data.farm_debt = Address::default();
-            reserve.farm_collateral = Address::default();
-            reserve.farm_debt = Address::default();
+            reserve_data.farm_collateral = Pubkey::default();
+            reserve_data.farm_debt = Pubkey::default();
+            reserve.farm_collateral = Pubkey::default();
+            reserve.farm_debt = Pubkey::default();
 
             test_f
                 .context
@@ -1342,7 +1310,7 @@ impl TestFixture {
             reserve.mint_total_supply,
         )
         .await;
-        let (bank_key, _) = Address::find_program_address(
+        let (bank_key, _) = Pubkey::find_program_address(
             &[
                 test_f.marginfi_group.key.as_ref(),
                 reserve_mint.key.as_ref(),
@@ -1543,7 +1511,7 @@ impl TestFixture {
         .await
         .unwrap();
 
-        let (bank_key, _) = Address::find_program_address(
+        let (bank_key, _) = Pubkey::find_program_address(
             &[
                 test_f.marginfi_group.key.as_ref(),
                 test_f.usdc_mint.key.as_ref(),
@@ -1975,7 +1943,7 @@ impl TestFixture {
         .await
         .unwrap();
 
-        let (bank_key, _) = Address::find_program_address(
+        let (bank_key, _) = Pubkey::find_program_address(
             &[
                 test_f.marginfi_group.key.as_ref(),
                 test_f.usdc_mint.key.as_ref(),
@@ -2125,7 +2093,7 @@ impl TestFixture {
         &self,
         bank_f: &BankFixture,
         user: &MarginfiAccountFixture,
-        signer_token_account: Address,
+        signer_token_account: Pubkey,
         amount: u64,
     ) -> std::result::Result<(), BanksClientError> {
         let refresh_reserve_ix = user.make_kamino_refresh_reserve_ix(bank_f).await;
@@ -2142,7 +2110,7 @@ impl TestFixture {
         &self,
         bank_f: &BankFixture,
         user: &MarginfiAccountFixture,
-        destination_token_account: Address,
+        destination_token_account: Pubkey,
         amount: u64,
         withdraw_all: Option<bool>,
     ) -> std::result::Result<(), BanksClientError> {
@@ -2160,7 +2128,7 @@ impl TestFixture {
         &self,
         bank_f: &BankFixture,
         user: &MarginfiAccountFixture,
-        signer_token_account: Address,
+        signer_token_account: Pubkey,
         amount: u64,
     ) -> std::result::Result<(), BanksClientError> {
         let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
@@ -2175,7 +2143,7 @@ impl TestFixture {
         &self,
         bank_f: &BankFixture,
         user: &MarginfiAccountFixture,
-        destination_token_account: Address,
+        destination_token_account: Pubkey,
         amount: u64,
         withdraw_all: Option<bool>,
     ) -> std::result::Result<(), BanksClientError> {
@@ -2191,7 +2159,7 @@ impl TestFixture {
         &self,
         bank_f: &BankFixture,
         user: &MarginfiAccountFixture,
-        signer_token_account: Address,
+        signer_token_account: Pubkey,
         amount: u64,
     ) -> std::result::Result<(), BanksClientError> {
         let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
@@ -2206,7 +2174,7 @@ impl TestFixture {
         &self,
         bank_f: &BankFixture,
         user: &MarginfiAccountFixture,
-        destination_token_account: Address,
+        destination_token_account: Pubkey,
         amount: u64,
         withdraw_all: Option<bool>,
     ) -> std::result::Result<(), BanksClientError> {
@@ -2220,8 +2188,8 @@ impl TestFixture {
 
     pub async fn load_kamino_state(
         &self,
-        obligation: Address,
-        reserve_liquidity_supply: Address,
+        obligation: Pubkey,
+        reserve_liquidity_supply: Pubkey,
         user_token: &TokenAccountFixture,
     ) -> KaminoStateSnapshot {
         let obligation: MinimalObligation = self.load_and_deserialize(&obligation).await;
@@ -2242,7 +2210,7 @@ impl TestFixture {
     pub async fn load_drift_state(
         &self,
         bank_f: &BankFixture,
-        spot_market_vault: Address,
+        spot_market_vault: Pubkey,
         market_index: u16,
         user_token: &TokenAccountFixture,
     ) -> DriftStateSnapshot {
@@ -2265,7 +2233,7 @@ impl TestFixture {
     pub async fn load_juplend_state(
         &self,
         bank_f: &BankFixture,
-        reserve_vault: Address,
+        reserve_vault: Pubkey,
         user_token: &TokenAccountFixture,
     ) -> JuplendStateSnapshot {
         let bank = bank_f.load().await;
@@ -2362,8 +2330,8 @@ pub fn get_mint_price(mint: BankMint) -> f64 {
     }
 }
 
-fn derive_token_metadata(mint: Address) -> Address {
-    Address::find_program_address(
+fn derive_token_metadata(mint: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
         &[
             b"metadata",
             TOKEN_METADATA_PROGRAM_ID.as_ref(),
