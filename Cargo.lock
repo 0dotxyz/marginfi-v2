@@ -3557,6 +3557,7 @@ dependencies = [
  "fixed",
  "fixed-macro",
  "marginfi-type-crate",
+ "solana-program",
  "solana-sha256-hasher",
  "static_assertions",
 ]

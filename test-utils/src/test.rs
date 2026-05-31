@@ -16,6 +16,7 @@ use juplend_mocks::juplend_earn::client as juplend_lending;
 use juplend_mocks::lending_reward_rate_model::client as juplend_rewards;
 use juplend_mocks::liquidity::client as juplend_liquidity;
 use juplend_mocks::state::Lending as JuplendLending;
+use kamino_mocks::mock_kamino_lending_processor;
 use kamino_mocks::state::{MinimalObligation, MinimalReserve};
 use marginfi::{
     oracle_compat::pyth::{PriceUpdateV2, VerificationLevel},
@@ -673,10 +674,6 @@ pub fn marginfi_entry<'info>(
     marginfi::entry(program_id, accounts, data)
 }
 
-fn noop_processor(_program_id: &Address, _accounts: &[AccountInfo], _data: &[u8]) -> ProgramResult {
-    Ok(())
-}
-
 pub const FAKE_KAMINO_PROGRAM_ID: Address = address!("KFake2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
 pub const TOKEN_METADATA_PROGRAM_ID: Address =
     address!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
@@ -776,23 +773,21 @@ impl TestFixture {
             program.add_program("token_metadata", TOKEN_METADATA_PROGRAM_ID, None);
             program.prefer_bpf(false);
         } else {
-            program.prefer_bpf(true);
             program.add_program(
-                "kamino_mocks",
+                "kamino_lending",
                 Address::new_from_array(kamino_mocks::kamino_lending::ID.to_bytes()),
-                None,
+                processor!(mock_kamino_lending_processor),
             );
-            program.prefer_bpf(false);
             program.add_program(
                 "kamino_farms",
                 Address::new_from_array(kamino_mocks::kamino_farms::ID.to_bytes()),
-                processor!(noop_processor),
+                processor!(mock_kamino_lending_processor),
             );
         }
         program.add_program(
             "fake_kamino_lending",
             FAKE_KAMINO_PROGRAM_ID,
-            processor!(noop_processor),
+            processor!(mock_kamino_lending_processor),
         );
 
         let usdc_keypair = Keypair::new();

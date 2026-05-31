@@ -1759,7 +1759,7 @@ async fn liquidate_receiver_other_account_close_balance_via_cpi_does_not_clear_b
             AccountMeta::new(sol_bank.key, false),
             AccountMeta::new_readonly(marginfi::ID, false),
         ],
-        data: kamino_mocks::instruction::CloseBalanceViaCpi {}.data(),
+        data: kamino_mocks::CPI_CLOSE_BALANCE_IX_DATA.to_vec(),
     };
 
     let end_ix = liquidatee

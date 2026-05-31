@@ -4,8 +4,8 @@ Marginfi program authority is managed by squads (https://app.squads.so/squads/J3
 
 First you will need:
 
-- Agave/Solana tools 3.1.11 (`sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.11/install)"`)
-- Anchor CLI 1.0.2 (`cargo install anchor-cli --version "1.0.2" --locked`)
+- Agave/Solana tools 3.1.11 (`sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.11/install)"`, then ensure `$HOME/.local/share/solana/install/active_release/bin` is on `PATH`)
+- Anchor CLI 1.0.2 (`cargo install avm --git https://github.com/solana-foundation/anchor --locked`, then `avm install 1.0.2` and `avm use 1.0.2`)
 - solana-verify (`cargo install solana-verify`)
 - Docker (https://docs.docker.com/engine/install/ubuntu/)
 - A wallet with at least 15 SOL (this guide will assume your wallet is at `~/keys/mainnet-deploy.json`). Verify the pubkey of your wallet with `solana-keygen pubkey ~/keys/mainnet-deploy.json` and verify you have at least 15 SOL with `solana balance -k ~/keys/mainnet-deploy.json`

@@ -16,8 +16,16 @@ Rust/Solana/Anchor setup:
 
 ```
 rustup toolchain install 1.90.0
+
+# Install the pinned Agave/Solana CLI version.
 sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.11/install)"
-cargo install anchor-cli --version "1.0.2" --locked
+export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+
+# Install Anchor through AVM, then pin the workspace Anchor CLI version.
+cargo install avm --git https://github.com/solana-foundation/anchor --locked
+avm install 1.0.2
+avm use 1.0.2
+
 cargo install cargo-nextest --version "0.9.81" --locked
 cargo install cargo-fuzz --version "0.12.0" --locked
 ```
