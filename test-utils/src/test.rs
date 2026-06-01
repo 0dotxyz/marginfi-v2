@@ -19,7 +19,6 @@ use juplend_mocks::state::Lending as JuplendLending;
 use kamino_mocks::mock_kamino_lending_processor;
 use kamino_mocks::state::{MinimalObligation, MinimalReserve};
 use marginfi::{
-    oracle_compat::pyth::{PriceUpdateV2, VerificationLevel},
     state::{
         bank::{BankImpl, BankVaultType},
         drift::DriftConfigCompact,
@@ -45,6 +44,7 @@ use marginfi_type_crate::{
         InterestRateConfig, OracleSetup, RatePoint, RiskTier, INTEREST_CURVE_SEVEN_POINT,
     },
 };
+use pyth_solana_receiver_sdk::price_update::{PriceUpdateV2, VerificationLevel};
 use solana_sdk::{account::AccountSharedData, entrypoint::ProgramResult};
 
 use fixed_macro::types::I80F48;

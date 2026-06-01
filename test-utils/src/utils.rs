@@ -5,10 +5,11 @@ use anchor_lang::Discriminator;
 use anchor_spl::token::spl_token;
 use anchor_spl::token_2022::spl_token_2022::extension::transfer_fee::MAX_FEE_BASIS_POINTS;
 use marginfi::constants::SWITCHBOARD_PULL_ID;
-use marginfi::oracle_compat::pyth::{
-    FeedId, PriceFeedMessage, PriceUpdateV2, VerificationLevel, PYTH_PUSH_ORACLE_ID,
-};
 use marginfi_type_crate::constants::{EXECUTE_ORDER_SEED, ORDER_SEED};
+use pyth_solana_receiver_sdk::{
+    price_update::{FeedId, PriceFeedMessage, PriceUpdateV2, VerificationLevel},
+    PYTH_PUSH_ORACLE_ID,
+};
 use solana_address::Address;
 use solana_cli_output::CliAccount;
 use solana_program::{hash::hashv, program_option::COption, program_pack::Pack};

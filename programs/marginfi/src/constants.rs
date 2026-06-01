@@ -1,9 +1,9 @@
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
+use pyth_solana_receiver_sdk::price_update::VerificationLevel;
 use solana_instructions_sysvar::{load_current_index_checked, load_instruction_at_checked};
 
-use crate::oracle_compat::pyth::VerificationLevel;
 use crate::MarginfiResult;
 
 // This file should only contain the constants which couldn't be moved to type-crate:
