@@ -10,7 +10,6 @@ use pyth_solana_receiver_sdk::{
     price_update::{FeedId, PriceFeedMessage, PriceUpdateV2, VerificationLevel},
     PYTH_PUSH_ORACLE_ID,
 };
-use solana_address::Address;
 use solana_cli_output::CliAccount;
 use solana_program::{hash::hashv, program_option::COption, program_pack::Pack};
 use solana_program_test::*;
@@ -82,7 +81,7 @@ pub fn create_pyth_push_oracle_account(
     let native_price = (ui_price * 10_f64.powf(mint_decimals as f64)) as i64;
 
     let price_update = PriceUpdateV2 {
-        write_authority: Pubkey::new_from_array(Address::default().to_bytes()),
+        write_authority: Pubkey::default(),
         verification_level,
         price_message: PriceFeedMessage {
             feed_id,

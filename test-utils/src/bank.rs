@@ -104,7 +104,7 @@ impl BankFixture {
 
         let accounts = marginfi::accounts::LendingPoolConfigureBank {
             group: self.load().await.group,
-            admin: Pubkey::new_from_array(self.ctx.borrow().payer.pubkey().to_bytes()),
+            admin: self.ctx.borrow().payer.pubkey(),
             bank: self.key,
         }
         .to_account_metas(Some(true));
@@ -123,7 +123,7 @@ impl BankFixture {
         if let Some((setup, oracle)) = oracle_update {
             let mut oracle_accounts = marginfi::accounts::LendingPoolConfigureBank {
                 group: self.load().await.group,
-                admin: Pubkey::new_from_array(self.ctx.borrow().payer.pubkey().to_bytes()),
+                admin: self.ctx.borrow().payer.pubkey(),
                 bank: self.key,
             }
             .to_account_metas(Some(true));
@@ -181,7 +181,7 @@ impl BankFixture {
                 bank: self.key,
                 mint,
                 emissions_funding_account: funding_account,
-                depositor: Pubkey::new_from_array(self.ctx.borrow().payer.pubkey().to_bytes()),
+                depositor: self.ctx.borrow().payer.pubkey(),
                 liquidity_vault: bank.liquidity_vault,
                 token_program: self.get_token_program(),
             }
@@ -216,7 +216,7 @@ impl BankFixture {
     ) -> Result<(), BanksClientError> {
         let bank = self.load().await;
         let ctx = self.ctx.borrow_mut();
-        let signer_pk = Pubkey::new_from_array(ctx.payer.pubkey().to_bytes());
+        let signer_pk = ctx.payer.pubkey();
         let (fee_vault_authority, _) = Pubkey::find_program_address(
             bank_authority_seed!(BankVaultType::Fee, self.key),
             &marginfi::ID,
@@ -305,7 +305,7 @@ impl BankFixture {
     ) -> Result<(), BanksClientError> {
         let bank = self.load().await;
         let ctx = self.ctx.borrow_mut();
-        let signer_pk = Pubkey::new_from_array(ctx.payer.pubkey().to_bytes());
+        let signer_pk = ctx.payer.pubkey();
 
         let mut accounts = marginfi::accounts::LendingPoolUpdateFeesDestinationAccount {
             group: bank.group,
@@ -343,7 +343,7 @@ impl BankFixture {
     ) -> Result<(), BanksClientError> {
         let bank = self.load().await;
         let ctx = self.ctx.borrow_mut();
-        let signer_pk = Pubkey::new_from_array(ctx.payer.pubkey().to_bytes());
+        let signer_pk = ctx.payer.pubkey();
         let (insurance_vault_authority, _) = Pubkey::find_program_address(
             bank_authority_seed!(BankVaultType::Insurance, self.key),
             &marginfi::ID,

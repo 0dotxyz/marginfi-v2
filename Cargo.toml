@@ -59,7 +59,7 @@ id-crate = { path = "id-crate" }
 marginfi-type-crate = { path = "type-crate" }
 
 pyth-solana-receiver-sdk = { git = "https://github.com/IliaZyrin/pyth-crosschain", package = "pyth-solana-receiver-sdk", rev = "913ce2196a104635582d745c8fbd9a69e240070c" }
-switchboard-on-demand = { version = "0.9.5", default-features = false, features = ["cpi", "solana-v3"] }
+switchboard-on-demand = { git = "https://github.com/switchboard-xyz/switchboard-sdk", rev = "f1a570a65476d6d040bee1bd2d223c2c775ac2b6", default-features = false, features = ["cpi", "solana-v3"] }
 
 borsh = "1.6.1"
 bytemuck = "1.22.0"

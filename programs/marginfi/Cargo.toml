@@ -46,6 +46,7 @@ anchor-lang = { workspace = true }
 anchor-spl = { workspace = true }
 
 pyth-solana-receiver-sdk = { workspace = true }
+switchboard-on-demand = { workspace = true }
 
 borsh = { workspace = true }
 bytemuck = { workspace = true, features = ["derive"] }

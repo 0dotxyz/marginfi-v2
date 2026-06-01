@@ -7,7 +7,6 @@ pub mod events;
 pub mod instructions;
 pub mod ix_utils;
 pub mod macros;
-pub mod oracle_compat;
 pub mod prelude;
 pub mod state;
 pub mod utils;

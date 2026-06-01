@@ -487,7 +487,7 @@ pub fn get_oracle_id_from_feed_id(feed_id: Pubkey) -> Option<Pubkey> {
 
 pub fn create_oracle_key_array(pyth_oracle: Pubkey) -> [Pubkey; MAX_ORACLE_KEYS] {
     let mut keys = [Pubkey::default(); MAX_ORACLE_KEYS];
-    keys[0] = Pubkey::new_from_array(pyth_oracle.to_bytes());
+    keys[0] = pyth_oracle;
 
     keys
 }
