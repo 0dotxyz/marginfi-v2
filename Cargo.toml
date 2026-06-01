@@ -36,15 +36,11 @@ solana-address = "2.6.0"
 solana-instructions-sysvar = "3.0.0"
 solana-msg = "3.1.0"
 
-# solana-measure = "=3.1.0"
-# solana-metrics = "=3.1.0"
-# solana-transaction-status = "=3.1.0"
 spl-token = "9.0.0"
 spl-associated-token-account = { version = "8.0.0", default-features = false, features = ["no-entrypoint"] }
 spl-transfer-hook-interface = "2.1.0"
 spl-tlv-account-resolution = "0.11.1"
 spl-pod = "0.7.3"
-# spl-discriminator = "0.2.2"
 spl-token-2022 = { version = "11.0.0", features = ["no-entrypoint"] }
 
 anchor-lang = { version = "1.0.2" }
@@ -64,7 +60,6 @@ switchboard-on-demand = { git = "https://github.com/switchboard-xyz/switchboard-
 borsh = "1.6.1"
 bytemuck = "1.22.0"
 bs58 = "0.5.1"
-# Note: 1.29.0 and later require Rust 1.83+ which solana does not ship with (yet)
 fixed = "=1.28.0"
 fixed-macro = "1.2.0"
 lazy_static = "1.4.0"

@@ -442,8 +442,7 @@ describe("kx: Fixed Kamino price bank", () => {
 
   it("(user 3) withdraw from fixed Kamino bank - happy path", async () => {
     const user = users[3];
-    const withdrawAmountNative = "100000000"; // 100 USDC in native units
-    const withdrawAmount = new BN(withdrawAmountNative);
+    const withdrawAmount = new BN(100 * 10 ** ecosystem.usdcDecimals);
 
     const reserveBeforeWithdrawRaw =
       await klendBankrunProgram.account.reserve.fetch(usdcReserve);
@@ -502,8 +501,9 @@ describe("kx: Fixed Kamino price bank", () => {
     const diff = userUsdcAfter - userUsdcBefore;
     console.log("withdrew: " + diff.toLocaleString());
 
-    const expectedWithdraw =
-      exchangeRateBeforeWithdraw.toNumber() * Number(withdrawAmountNative);
+    const expectedWithdraw = exchangeRateBeforeWithdraw
+      .mul(withdrawAmount.toString())
+      .toNumber();
     assert.approximately(diff, expectedWithdraw, 2);
 
     const reserveAfterWithdrawRaw =
@@ -553,7 +553,7 @@ describe("kx: Fixed Kamino price bank", () => {
       [
         [fixedKaminoBank, usdcReserve],
         [borrowBank, oracles.tokenAOracle.publicKey],
-      ].filter((group) => !group[0].equals(fixedKaminoBank))
+      ].filter((group) => !group[0].equals(fixedKaminoBank)),
     );
 
     const withdrawAllTx = new Transaction().add(
@@ -598,8 +598,9 @@ describe("kx: Fixed Kamino price bank", () => {
     assert.isAtMost(userUsdcAfter, userUsdcStart);
 
     // has_kamino clears once the last Kamino position is withdrawn
-    const userAccAfter =
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
+    const userAccAfter = await bankrunProgram.account.marginfiAccount.fetch(
+      userAccount,
+    );
     assert.equal(userAccAfter.indexerFlags.hasKamino, 0);
   });
 });

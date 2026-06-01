@@ -199,7 +199,6 @@ describe("k06: Kamino Deposit Tests", () => {
       // Note: Here collateral and liquidity are 1:1, so we can use amount, but this is actually
       // tracking collateral token!
       balanceAmtBefore + amount.toNumber(),
-      0.01,
     );
     assertBNEqual(
       resAfter.liquidity.totalAvailableAmount,

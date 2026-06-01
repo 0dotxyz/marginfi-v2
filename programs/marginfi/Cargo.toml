@@ -40,8 +40,6 @@ solana-borsh = { workspace = true }
 solana-instructions-sysvar = { workspace = true }
 solana-msg = { workspace = true }
 
-# spl-tlv-account-resolution = { workspace = true }
-
 anchor-lang = { workspace = true }
 anchor-spl = { workspace = true }
 
@@ -67,7 +65,6 @@ juplend-mocks = { path = "../juplend-mocks" , features = ["no-entrypoint"]}
 solana-account-decoder = { workspace = true }
 solana-cli-output = { workspace = true }
 solana-program-test = { workspace = true }
-# solana-logger = { workspace = true }
 solana-sdk = { workspace = true }
 solana-compute-budget-interface = { workspace = true }
 solana-system-interface = { workspace = true }

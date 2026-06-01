@@ -31,7 +31,7 @@ use solana_stake_interface::state::StakeStateV2;
 use solend_mocks::state::SolendMinimalReserve;
 use std::{cell::Ref, cmp::min};
 use switchboard_on_demand::{
-    CurrentResult, Discriminator, PullFeedAccountData, PRECISION as SWITCHBOARD_PRECISION,
+    CurrentResult, Discriminator, PullFeedAccountData,
 };
 
 /// Price per unit before any multipliers are applied, where `price_multiplier` shows what
@@ -1027,7 +1027,7 @@ impl OraclePriceFeedAdapter {
 
                     // Sanity check the mint. Note: spl-single-pool uses a classic Token, never Token22
                     check!(
-                        oracle_ais[1].owner.to_bytes() == SPL_TOKEN_PROGRAM_ID.to_bytes(),
+                        oracle_ais[1].owner == &SPL_TOKEN_PROGRAM_ID,
                         MarginfiError::StakePoolValidationFailed
                     );
                     check_eq!(
@@ -1318,14 +1318,14 @@ impl SwitchboardPullPriceFeed {
         let sw_result = self.feed.result;
         // Note: Pull oracles support mean (result.mean) or median (result.value)
         let price: I80F48 = I80F48::from_num(sw_result.value)
-            .checked_div(EXP_10_I80F48[SWITCHBOARD_PRECISION as usize])
+            .checked_div(EXP_10_I80F48[switchboard_on_demand::PRECISION as usize])
             .ok_or_else(math_error!())?;
         Ok(price)
     }
 
     fn get_confidence_interval(&self, oracle_max_confidence: u32) -> MarginfiResult<I80F48> {
         let conf_interval: I80F48 = I80F48::from_num(self.feed.result.std_dev)
-            .checked_div(EXP_10_I80F48[SWITCHBOARD_PRECISION as usize])
+            .checked_div(EXP_10_I80F48[switchboard_on_demand::PRECISION as usize])
             .ok_or_else(math_error!())?
             .checked_mul(STD_DEV_MULTIPLE)
             .ok_or_else(math_error!())?;
