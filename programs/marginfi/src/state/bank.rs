@@ -63,7 +63,9 @@ pub const CB_ENABLE_MAX_PRICE_AGE_SECONDS: i64 = 30;
 /// how fast a sustained attacker can reanchor the EMA even at maximum α.
 pub const CB_MAX_EMA_SHIFT_BPS_PER_PULSE: u64 = 500;
 
-/// Long-window cap that catches slow oracle walking under the per-observation threshold.
+/// Defaults for the long-window cap that catches slow oracle walking under the per-observation
+/// threshold. Each is overridable per-bank via the matching `BankConfig::cb_window_*` field; a
+/// configured value of `0` falls back to the default here.
 pub const CB_WINDOW_SECONDS: i64 = 4 * 60 * 60;
 pub const CB_WINDOW_MAX_UP_BPS: u64 = 2_000;
 pub const CB_WINDOW_MAX_DOWN_BPS: u64 = 4_000;
@@ -80,6 +82,17 @@ fn cb_confidence_adjusted_deviation_bps(
 
 fn cb_deviation_bps(delta: I80F48, reference: I80F48) -> u64 {
     (delta * I80F48::from_num(10_000u64) / reference).to_num::<u64>()
+}
+
+/// Returns the configured long-window parameter, or `default` when it is `0` (unset). Lets banks
+/// override `CB_WINDOW_*` while keeping the documented defaults for banks that don't set them.
+#[inline]
+fn cb_window_or_default(configured: u64, default: u64) -> u64 {
+    if configured == 0 {
+        default
+    } else {
+        configured
+    }
 }
 
 fn cb_tier_for_deviation(tiers: &[u16; 3], deviation_bps: u64) -> u8 {
@@ -557,6 +570,15 @@ impl BankImpl for Bank {
             config.cb_escalation_window_mult
         );
         set_if_some!(self.config.cb_ema_alpha_bps, config.cb_ema_alpha_bps);
+        set_if_some!(self.config.cb_window_seconds, config.cb_window_seconds);
+        set_if_some!(
+            self.config.cb_window_max_up_bps,
+            config.cb_window_max_up_bps
+        );
+        set_if_some!(
+            self.config.cb_window_max_down_bps,
+            config.cb_window_max_down_bps
+        );
 
         self.config.validate()?;
         if self.get_flag(CIRCUIT_BREAKER_ENABLED) {
@@ -934,7 +956,6 @@ impl BankImpl for Bank {
         let deviation_bps = cb_confidence_adjusted_deviation_bps(current, ref_price, confidence);
         let tiers = &self.config.cb_deviation_bps_tiers;
 
-        let mut roll_window_anchor = false;
         let mut window_ref_price: I80F48 = self.cb_window_reference_price.into();
         if window_ref_price == I80F48::ZERO || window_ref_price <= CB_MIN_REF_PRICE {
             self.cb_window_reference_price = ref_price.into();
@@ -944,6 +965,19 @@ impl BankImpl for Bank {
         if self.cb_window_started_at == 0 {
             self.cb_window_started_at = now;
         }
+        let window_seconds = cb_window_or_default(
+            self.config.cb_window_seconds as u64,
+            CB_WINDOW_SECONDS as u64,
+        ) as i64;
+        let window_max_up_bps = cb_window_or_default(
+            self.config.cb_window_max_up_bps as u64,
+            CB_WINDOW_MAX_UP_BPS,
+        );
+        let window_max_down_bps = cb_window_or_default(
+            self.config.cb_window_max_down_bps as u64,
+            CB_WINDOW_MAX_DOWN_BPS,
+        );
+        let window_expired = now >= self.cb_window_started_at.saturating_add(window_seconds);
 
         let up_delta = (current - window_ref_price - confidence).max(I80F48::ZERO);
         let down_delta = (window_ref_price - current - confidence).max(I80F48::ZERO);
@@ -951,7 +985,7 @@ impl BankImpl for Bank {
         let window_down_bps = cb_deviation_bps(down_delta, window_ref_price);
         let window_deviation_bps = window_up_bps.max(window_down_bps);
 
-        if window_up_bps >= CB_WINDOW_MAX_UP_BPS || window_down_bps >= CB_WINDOW_MAX_DOWN_BPS {
+        if window_up_bps >= window_max_up_bps || window_down_bps >= window_max_down_bps {
             let breached = cb_tier_for_deviation(tiers, window_deviation_bps).max(1);
             msg!(
                 "CB long-window cap tripped: up {} bps / down {} bps",
@@ -959,11 +993,28 @@ impl BankImpl for Bank {
                 window_down_bps
             );
             self.trip_cb_halt(now, window_deviation_bps, breached);
-            return Ok(());
-        }
 
-        if now >= self.cb_window_started_at.saturating_add(CB_WINDOW_SECONDS) {
-            roll_window_anchor = true;
+            // A breach that lands *after* the window has already elapsed is the accumulation of
+            // a full window of slow drift, not a single jump. Leaving the anchor pinned to the
+            // old value would make every subsequent pulse at the new price re-breach and ratchet
+            // the tier up, even though the price has stopped moving. Instead creep the anchor to
+            // the cap edge and restart the window, so the bank can settle after a single halt.
+            // This still trips here, and still bounds an attacker to one cap-sized move per
+            // window with the per-pulse tiers unchanged, so it grants no extra leeway.
+            if window_expired {
+                let capped = if window_up_bps >= window_max_up_bps {
+                    window_ref_price
+                        * (I80F48::ONE
+                            + I80F48::from_num(window_max_up_bps) / I80F48::from_num(10_000u64))
+                } else {
+                    window_ref_price
+                        * (I80F48::ONE
+                            - I80F48::from_num(window_max_down_bps) / I80F48::from_num(10_000u64))
+                };
+                self.cb_window_reference_price = capped.into();
+                self.cb_window_started_at = now;
+            }
+            return Ok(());
         }
 
         let breached: u8 = cb_tier_for_deviation(tiers, deviation_bps);
@@ -973,7 +1024,7 @@ impl BankImpl for Bank {
             return Ok(());
         }
 
-        if roll_window_anchor {
+        if window_expired {
             self.cb_window_reference_price = current.into();
             self.cb_window_started_at = now;
         }
@@ -1414,6 +1465,73 @@ mod cb_tests {
         assert_eq!(b.cb_tier, 0);
         assert_eq!(I80F48::from(b.cb_window_reference_price), price(110));
         assert_eq!(b.cb_window_started_at, 1_000 + CB_WINDOW_SECONDS + 1);
+    }
+
+    #[test]
+    fn expired_window_breach_creeps_anchor_to_cap_and_recovers() {
+        let mut b = make_cb_bank();
+        // Per-pulse tiers set high so only the long-window cap (20% up) can trip here.
+        b.config.cb_deviation_bps_tiers = [5_000, 6_000, 7_000];
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+
+        // Window already elapsed; price is 121 = +21% vs the anchor of 100, past the 20% up cap.
+        let t_breach = 1_000 + CB_WINDOW_SECONDS + 1;
+        b.update_circuit_breaker(t_breach, 1_000 + CB_MIN_PULSE_SLOT_GAP, obs(price(121)))
+            .unwrap();
+
+        // It still trips, but the anchor creeps up to the cap edge (100 * 1.20 = 120) and the
+        // window restarts from the breach.
+        assert_eq!(b.cb_tier, 1);
+        let anchor: I80F48 = b.cb_window_reference_price.into();
+        assert!((anchor - price(120)).abs() < I80F48::from_num(0.001));
+        assert_eq!(b.cb_window_started_at, t_breach);
+
+        // After the tier-1 halt expires, the price holding at 121 is only ~0.8% above the new
+        // 120 anchor, so it does not re-breach the long window — the tier does not escalate.
+        let after_halt = b.cb_halt_ended_at + 1;
+        b.update_circuit_breaker(
+            after_halt,
+            1_000 + 2 * CB_MIN_PULSE_SLOT_GAP,
+            obs(price(121)),
+        )
+        .unwrap();
+        assert_eq!(b.cb_tier, 1);
+    }
+
+    #[test]
+    fn configured_window_cap_overrides_default() {
+        let mut b = make_cb_bank();
+        // Per-pulse tiers high so only the long-window cap can trip; tighten the up cap to 10%
+        // (default is 20% / CB_WINDOW_MAX_UP_BPS).
+        b.config.cb_deviation_bps_tiers = [5_000, 6_000, 7_000];
+        b.config.cb_window_max_up_bps = 1_000;
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+
+        // +12%: over the configured 10% cap, under the 20% default. Trips because the override
+        // is in force.
+        b.update_circuit_breaker(1_001, 1_002, obs(price(112)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 1);
+    }
+
+    #[test]
+    fn configured_window_seconds_overrides_default() {
+        let mut b = make_cb_bank();
+        b.config.cb_deviation_bps_tiers = [5_000, 6_000, 7_000];
+        b.config.cb_window_seconds = 100; // default is 4h
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+
+        // 101s later the configured 100s window has elapsed, so a clean read rolls the anchor
+        // forward to the current price rather than holding the stale anchor for 4h.
+        b.update_circuit_breaker(1_101, 1_002, obs(price(105)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 0);
+        let anchor: I80F48 = b.cb_window_reference_price.into();
+        assert!((anchor - price(105)).abs() < I80F48::from_num(0.001));
+        assert_eq!(b.cb_window_started_at, 1_101);
     }
 
     #[test]

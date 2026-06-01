@@ -180,6 +180,9 @@ export const defaultBankConfigOptRaw = () => {
     cbTierDurationsSeconds: null,
     cbEscalationWindowMult: null,
     cbEmaAlphaBps: null,
+    cbWindowSeconds: null,
+    cbWindowMaxUpBps: null,
+    cbWindowMaxDownBps: null,
   };
 
   return bankConfigOpt;
@@ -208,6 +211,9 @@ export const blankBankConfigOptRaw = () => {
     cbTierDurationsSeconds: null,
     cbEscalationWindowMult: null,
     cbEmaAlphaBps: null,
+    cbWindowSeconds: null,
+    cbWindowMaxUpBps: null,
+    cbWindowMaxDownBps: null,
   };
 
   return bankConfigOpt;
@@ -429,6 +435,9 @@ export type BankConfigOptRaw = {
   cbTierDurationsSeconds: [number, number, number] | null;
   cbEscalationWindowMult: number | null;
   cbEmaAlphaBps: number | null;
+  cbWindowSeconds: number | null;
+  cbWindowMaxUpBps: number | null;
+  cbWindowMaxDownBps: number | null;
 };
 
 export type StakedSettingsConfig = {

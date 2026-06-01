@@ -87,6 +87,9 @@ describe("Lending pool configure bank", () => {
       cbTierDurationsSeconds: null,
       cbEscalationWindowMult: null,
       cbEmaAlphaBps: null,
+      cbWindowSeconds: null,
+      cbWindowMaxUpBps: null,
+      cbWindowMaxDownBps: null,
     };
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm!(

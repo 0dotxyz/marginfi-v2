@@ -790,6 +790,9 @@ async fn configure_bank_success(bank_mint: BankMint) -> anyhow::Result<()> {
         cb_tier_durations_seconds: _,
         cb_escalation_window_mult: _,
         cb_ema_alpha_bps: _,
+        cb_window_seconds: _,
+        cb_window_max_up_bps: _,
+        cb_window_max_down_bps: _,
     } = &config_bank_opt;
     // Compare bank field to opt field if Some, otherwise compare to old bank field
     macro_rules! check_bank_field {

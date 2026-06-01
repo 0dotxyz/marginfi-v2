@@ -54,7 +54,11 @@ pub struct BankConfig {
     pub oracle_keys: [Pubkey; MAX_ORACLE_KEYS],
 
     // Note: Pubkey is aligned 1, so borrow_limit is the first aligned-8 value after deposit_limit
-    pub _pad0: [u8; 6], // Bank state (1) + Oracle Setup (1) + 6 = 8
+    /// CB long-window upward move cap in bps; `0` uses the `CB_WINDOW_MAX_UP_BPS` default.
+    pub cb_window_max_up_bps: u16,
+    /// CB long-window downward move cap in bps; `0` uses the `CB_WINDOW_MAX_DOWN_BPS` default.
+    pub cb_window_max_down_bps: u16,
+    pub _pad0: [u8; 2], // Bank state (1) + Oracle Setup (1) + 2x u16 (4) + 2 = 8
 
     /// Maximum total borrows allowed in this bank, in native token units (0 = no limit)
     pub borrow_limit: u64,
@@ -81,7 +85,10 @@ pub struct BankConfig {
     /// * 2, 4, 8, 16, etc - reserved for future use.
     pub config_flags: u8,
 
-    pub _pad1: [u8; 5],
+    pub _pad1: [u8; 1],
+
+    /// CB long-window length in seconds; `0` uses the `CB_WINDOW_SECONDS` default.
+    pub cb_window_seconds: u32,
 
     /// USD denominated limit for calculating asset value for initialization margin requirements.
     /// Example, if total SOL deposits are equal to $1M and the limit it set to $500K, then SOL
@@ -133,11 +140,14 @@ impl Default for BankConfig {
             operational_state: BankOperationalState::Paused,
             oracle_setup: OracleSetup::None,
             oracle_keys: [Pubkey::default(); MAX_ORACLE_KEYS],
-            _pad0: [0; 6],
+            cb_window_max_up_bps: 0,
+            cb_window_max_down_bps: 0,
+            _pad0: [0; 2],
             risk_tier: RiskTier::Isolated,
             asset_tag: ASSET_TAG_DEFAULT,
             config_flags: 0,
-            _pad1: [0; 5],
+            _pad1: [0; 1],
+            cb_window_seconds: 0,
             total_asset_value_init_limit: TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE,
             oracle_max_age: 0,
             _padding0: [0; 2],
@@ -187,6 +197,9 @@ pub struct BankConfigOpt {
     pub cb_tier_durations_seconds: Option<[u16; 3]>,
     pub cb_escalation_window_mult: Option<u8>,
     pub cb_ema_alpha_bps: Option<u16>,
+    pub cb_window_seconds: Option<u32>,
+    pub cb_window_max_up_bps: Option<u16>,
+    pub cb_window_max_down_bps: Option<u16>,
 }
 
 #[repr(C)]
@@ -288,12 +301,15 @@ impl From<BankConfigCompact> for BankConfig {
             operational_state: config.operational_state,
             oracle_setup: OracleSetup::None,
             oracle_keys: keys,
-            _pad0: [0; 6],
+            cb_window_max_up_bps: 0,
+            cb_window_max_down_bps: 0,
+            _pad0: [0; 2],
             borrow_limit: config.borrow_limit,
             risk_tier: config.risk_tier,
             asset_tag: config.asset_tag,
             config_flags: config.config_flags,
-            _pad1: [0; 5],
+            _pad1: [0; 1],
+            cb_window_seconds: 0,
             total_asset_value_init_limit: config.total_asset_value_init_limit,
             oracle_max_age: config.oracle_max_age,
             _padding0: [0; 2],

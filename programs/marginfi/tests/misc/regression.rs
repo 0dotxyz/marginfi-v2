@@ -667,13 +667,18 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
             Pubkey::default()
         ]
     );
-    assert_eq!(bank.config._pad0, [0; 6]);
+    // Reclaimed from the former `_pad0: [u8; 6]`; legacy banks read 0 (→ CB_WINDOW_* defaults).
+    assert_eq!(bank.config.cb_window_max_up_bps, 0);
+    assert_eq!(bank.config.cb_window_max_down_bps, 0);
+    assert_eq!(bank.config._pad0, [0; 2]);
     assert_eq!(bank.config.borrow_limit, 2000000000000);
     assert_eq!(bank.config.risk_tier, RiskTier::Collateral);
     assert_eq!(bank.config.asset_tag, ASSET_TAG_DEFAULT);
     // Note: created before 0.1.4 Pyth pull migration.
     assert_eq!(bank.config.config_flags, 0);
-    assert_eq!(bank.config._pad1, [0; 5]);
+    assert_eq!(bank.config._pad1, [0; 1]);
+    // Reclaimed from the former `_pad1: [u8; 5]`; legacy banks read 0 (→ CB_WINDOW_SECONDS).
+    assert_eq!(bank.config.cb_window_seconds, 0);
     assert_eq!(bank.config.total_asset_value_init_limit, 0);
     assert_eq!(bank.config.oracle_max_age, 300);
     assert_eq!(bank.config._padding0, [0; 2]);

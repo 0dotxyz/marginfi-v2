@@ -133,6 +133,18 @@ impl BankConfigImpl for BankConfig {
                 );
             }
         }
+        // `0` keeps the `CB_WINDOW_*` defaults, so `<=` bounds only the explicitly-set overrides.
+        const MAX_WINDOW_SECONDS: u32 = 7 * 24 * 60 * 60;
+        const MAX_WINDOW_DEVIATION_BPS: u16 = 10_000;
+        check!(
+            self.cb_window_seconds <= MAX_WINDOW_SECONDS,
+            MarginfiError::CircuitBreakerInvalidConfig
+        );
+        check!(
+            self.cb_window_max_up_bps <= MAX_WINDOW_DEVIATION_BPS
+                && self.cb_window_max_down_bps <= MAX_WINDOW_DEVIATION_BPS,
+            MarginfiError::CircuitBreakerInvalidConfig
+        );
         Ok(())
     }
 
