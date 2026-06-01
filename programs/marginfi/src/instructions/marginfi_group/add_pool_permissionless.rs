@@ -128,8 +128,8 @@ pub fn lending_pool_add_bank_permissionless(
     let sol_pool = sol_pool.key();
 
     // Validate the validator vote account by proving it derives this stake pool, and in turn
-    // this mint + SOL stake pool PDA.
-    let (exp_stake_pool, exp_mint, exp_sol_pool) =
+    // this mint + SOL stake pool + on-ramp PDA.
+    let (exp_stake_pool, exp_mint, exp_sol_pool, exp_onramp) =
         derive_single_pool_keys_from_vote_and_validate_owner(
             &ctx.accounts.validator_vote_account.to_account_info(),
         )?;
@@ -148,9 +148,10 @@ pub fn lending_pool_add_bank_permissionless(
     // Track the validator vote account for staked-collateral metadata.
     bank.integration_acc_1 = validator_vote_account;
 
-    // The mint (for supply) and stake pool (for sol balance) are recorded for price calculation
+    // The mint, stake pool, and on-ramp are recorded for price calculation.
     bank.config.oracle_keys[1] = lst_mint;
     bank.config.oracle_keys[2] = sol_pool;
+    bank.config.oracle_keys[3] = exp_onramp;
     bank.config.validate_oracle_setup(
         ctx.remaining_accounts,
         Some(lst_mint),
@@ -204,7 +205,7 @@ pub struct LendingPoolAddBankPermissionless<'info> {
     /// Validator vote account for this staked bank.
     ///
     /// CHECK: validated in handler by enforcing vote-account owner and PDA chain:
-    /// vote -> stake_pool -> mint/stake.
+    /// vote -> stake_pool -> mint/stake/on-ramp.
     pub validator_vote_account: UncheckedAccount<'info>,
 
     #[account(
