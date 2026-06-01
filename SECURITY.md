@@ -97,6 +97,15 @@ designed to stop a dedicated attacker.
 As above, the flow control limits are not intended to be canonical: we are aware that they round
 down in some instances, which under-counts withdraws, this is also out-of-scope.
 
+### Group Flow Control can be Bypassed Before it Updates
+
+We are aware that many withdraws can be sent back to back to bypass the group-level flow controls
+until the rate admin syncs them. Again, as above, the group level flow control limit is not intended
+to be canonical: because of its async nature, it's a best-effort system, there will be mechanisms
+for dedicated attackers to bypass group-level flow control under some circumstances (though there's
+always a chance we move faster and they fail!). Flow control is intended to handle economic vectors,
+not a dedicated attacker.
+
 ### Staked Collateral and Order Spam, Liquidation Record Spam
 
 We are aware that an attacker can create a slight nuisance by spamming the creation of Staked
@@ -191,3 +200,14 @@ first-served and will usually be denied if the program owner has already informe
 An example of such a bounty being paid is for the upcoming SVSP update (expected mainnet roughly
 June 2026), which is already on SVSP main branch and would be breaking to our Staked Collateral
 accounting.
+
+
+### Flow Control Under-Counts for Kamino, etc
+
+We are aware of an issue in prod where the flow control limiter under-counts for integrations like
+Kamino under certain circumstances. We mark it INFO/LOW because flow control is primarily an
+economic safeguard and at best a secondary defense against technical adversaries. At worst, if the
+flow control is bypassable due to this issue, the bank is no worse off than if it were simply
+disabled, no griefing, loss of funds, etc is enabled from this bug alone. Only integration banks are
+affected (not native P0 banks), a similar bug affecting P0 banks would still be in scope. This will
+be resolved in an upcoming update with low priority.
