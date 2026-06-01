@@ -18,7 +18,7 @@ import { assert } from "chai";
 import { accountInit } from "./utils/user-instructions";
 import { groupInitialize } from "./utils/group-instructions";
 import { processBankrunTransaction } from "./utils/tools";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./utils/litesvm";
 
 let ctx: ProgramTestContext;
 

@@ -11,7 +11,6 @@ use crate::{
     },
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::sysvar::Sysvar;
 use bytemuck::Zeroable;
 use marginfi_type_crate::{
     constants::MARGINFI_ACCOUNT_SEED,
@@ -171,7 +170,7 @@ impl<'info> TransferToNewAccount<'info> {
         &self,
     ) -> CpiContext<'_, '_, '_, 'info, anchor_lang::system_program::Transfer<'info>> {
         CpiContext::new(
-            self.system_program.to_account_info(),
+            self.system_program.key(),
             anchor_lang::system_program::Transfer {
                 from: self.fee_payer.to_account_info(),
                 to: self.global_fee_wallet.to_account_info(),
@@ -319,7 +318,7 @@ pub struct TransferToNewAccountPda<'info> {
 
     /// Instructions sysvar for CPI validation
     /// CHECK: Standard sysvar account
-    #[account(address = anchor_lang::solana_program::sysvar::instructions::id())]
+    #[account(address = solana_instructions_sysvar::id())]
     pub instructions_sysvar: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
@@ -330,7 +329,7 @@ impl<'info> TransferToNewAccountPda<'info> {
         &self,
     ) -> CpiContext<'_, '_, '_, 'info, anchor_lang::system_program::Transfer<'info>> {
         CpiContext::new(
-            self.system_program.to_account_info(),
+            self.system_program.key(),
             anchor_lang::system_program::Transfer {
                 from: self.fee_payer.to_account_info(),
                 to: self.global_fee_wallet.to_account_info(),

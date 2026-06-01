@@ -50,10 +50,10 @@ describe("sl04: Solend - Deposits and Borrows", () => {
 
   let usdcReserve: PublicKey;
   let tokenAReserve: PublicKey;
-  const USER_A_DEPOSIT_AMOUNT = new BN(50_000 * 10 ** ecosystem.tokenADecimals); // 50k Token A = $500k
-  const USER_A_BORROW_AMOUNT = new BN(10_000 * 10 ** ecosystem.usdcDecimals); // 10k USDC = $10k
-  const USER_B_DEPOSIT_AMOUNT = new BN(50_000 * 10 ** ecosystem.usdcDecimals); // 50k USDC = $50k
-  const USER_B_BORROW_AMOUNT = new BN(1_000 * 10 ** ecosystem.tokenADecimals); // 1k Token A = $10k
+  const USER_A_DEPOSIT_AMOUNT = new BN("5000000000000"); // 50k Token A (8 decimals)
+  const USER_A_BORROW_AMOUNT = new BN("10000000000"); // 10k USDC (6 decimals)
+  const USER_B_DEPOSIT_AMOUNT = new BN("50000000000"); // 50k USDC (6 decimals)
+  const USER_B_BORROW_AMOUNT = new BN("100000000000"); // 1k Token A (8 decimals)
 
   before(async () => {
     userA = users[0];
@@ -143,8 +143,8 @@ describe("sl04: Solend - Deposits and Borrows", () => {
     );
 
     assert.equal(
-      new BN(userTokenBefore).sub(new BN(userTokenAfter)).toString(),
-      USER_A_DEPOSIT_AMOUNT.toString()
+      (userTokenBefore - userTokenAfter).toString(),
+      "5000000000000"
     );
 
     userA.accounts.set("solend_ctokena", userACTokenA.publicKey);
@@ -228,8 +228,8 @@ describe("sl04: Solend - Deposits and Borrows", () => {
     );
 
     assert.equal(
-      new BN(userUsdcBefore).sub(new BN(userUsdcAfter)).toString(),
-      USER_B_DEPOSIT_AMOUNT.toString()
+      (userUsdcBefore - userUsdcAfter).toString(),
+      "50000000000"
     );
 
     userB.accounts.set("solend_cusdc", userBCUsdc.publicKey);
@@ -302,9 +302,9 @@ describe("sl04: Solend - Deposits and Borrows", () => {
       bankRunProvider,
       userA.usdcAccount
     );
-    const borrowedAmount = new BN(userUsdcAfter).sub(new BN(userUsdcBefore));
+    const borrowedAmount = userUsdcAfter - userUsdcBefore;
 
-    assert.equal(borrowedAmount.toString(), USER_A_BORROW_AMOUNT.toString());
+    assert.equal(borrowedAmount.toString(), "10000000000");
   });
 
   it("(user B) Borrow Token A against USDC collateral", async () => {
@@ -374,10 +374,8 @@ describe("sl04: Solend - Deposits and Borrows", () => {
       bankRunProvider,
       userB.tokenAAccount
     );
-    const borrowedAmount = new BN(userTokenAAfter).sub(
-      new BN(userTokenABefore)
-    );
+    const borrowedAmount = userTokenAAfter - userTokenABefore;
 
-    assert.equal(borrowedAmount.toString(), USER_B_BORROW_AMOUNT.toString());
+    assert.equal(borrowedAmount.toString(), "100000000000");
   });
 });

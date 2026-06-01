@@ -14,10 +14,9 @@ defaults:
     working-directory: .
 
 env:
-  RUST_TOOLCHAIN: 1.79.0
-  SOLANA_CLI_VERSION: 2.1.20
-  ANCHOR_CLI_VERSION: 0.31.1
-  ANCHOR_SHA: e6d7dafe12da661a36ad1b4f3b5970e8986e5321
+  RUST_TOOLCHAIN: 1.90.0
+  SOLANA_CLI_VERSION: 3.1.11
+  ANCHOR_CLI_VERSION: 1.0.2
   CARGO_TERM_COLOR: always
 
 concurrency:
@@ -58,9 +57,9 @@ jobs:
       with:
         path: |
           target/sbf
-        key: anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}
+        key: anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}
         restore-keys: |
-          anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-
+          anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-
     - name: Cache nextest host build
       uses: actions/cache@v3
       with:
@@ -115,15 +114,15 @@ jobs:
       uses: actions/cache@v3
       id: cache-nightly
       with:
-        path: ~/.rustup/toolchains/nightly-2024-06-05-x86_64-unknown-linux-gnu
-        key: rust-nightly-${{ runner.os }}-nightly-20240605
+        path: ~/.rustup/toolchains/nightly-2025-08-01-x86_64-unknown-linux-gnu
+        key: rust-nightly-${{ runner.os }}-nightly-20250801
 
     - name: Install nightly Rust + rust-src
       if: steps.cache-nightly.outputs.cache-hit != 'true'
       uses: actions-rs/toolchain@v1
       with:
         profile: minimal
-        toolchain: nightly-2024-06-05
+        toolchain: nightly-2025-08-01
         components: rust-src
 
     # ─── Cache cargo fuzz ----- ─────────────────────────────────────────────
@@ -132,7 +131,7 @@ jobs:
       id: cache-cargo-fuzz
       with:
         path: ~/.cargo/bin/cargo-fuzz
-        key: cargo-fuzz-${{ runner.os }}-nightly-20240605
+        key: cargo-fuzz-${{ runner.os }}-nightly-20250801
 
     - name: Install cargo-fuzz
       if: steps.cache-cargo-fuzz.outputs.cache-hit != 'true'
@@ -144,15 +143,15 @@ jobs:
       id: cache-fuzz-build
       with:
         path: target/fuzz/lend
-        key: fuzz-build-${{ runner.os }}-${{ hashFiles('programs/marginfi/fuzz/**/*.rs') }}
+        key: fuzz-build-${{ runner.os }}-${{ hashFiles('programs/marginfi/fuzz/Cargo.lock', 'programs/marginfi/fuzz/Cargo.toml', 'programs/marginfi/fuzz/**/*.rs') }}
 
     - name: Generate corpus
       run: python ./generate_corpus.py
 
     - name: Run fuzz tests
       run: |
-        cargo +nightly-2024-06-05 fuzz run lend \
-          -Zbuild-std --strip-dead-code --no-cfg-fuzzing \
+        RUST_BACKTRACE=1 cargo +nightly-2025-08-01 fuzz run lend \
+          --strip-dead-code --no-cfg-fuzzing \
             -- -max_total_time=150 \
               -timeout_exitcode=100 \
               -error_exitcode=101 \
@@ -165,7 +164,7 @@ jobs:
       run: echo "✅ Fuzzing completed"
 
   localnet-test-marginfi:
-    name: Anchor Bankrun Tests (Marginfi)
+    name: Anchor LiteSVM Tests
     runs-on: ubuntu-latest
     needs: [ test-unit ]
     steps:
@@ -204,11 +203,11 @@ jobs:
       id: cache-transfer
       with:
         path: target/deploy/test_transfer_hook.so
-        key: anchor-transfer-hook-${{ runner.os }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('programs/test_transfer_hook/**/*') }}
+        key: anchor-transfer-hook-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', '**/Cargo.toml', 'programs/test_transfer_hook/src/**/*') }}
 
     - name: Build transfer hook
       if: steps.cache-transfer.outputs.cache-hit != 'true'
-      run: anchor build -p test_transfer_hook --no-idl
+      run: anchor build -p test_transfer_hook --no-idl --ignore-keys
 
     # ─── Cache mocks program ─────────────────────────────────────────────
     - name: Cache mocks build & IDL
@@ -219,11 +218,11 @@ jobs:
           target/deploy/mocks.so
           target/idl/mocks.json
           target/types/mocks.ts
-        key: anchor-mocks-${{ runner.os }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('programs/mocks/**/*') }}
+        key: anchor-mocks-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', '**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/mocks/src/**/*', 'programs/marginfi/src/**/*', 'type-crate/src/**/*', 'id-crate/src/**/*') }}
 
     - name: Build mocks
       if: steps.cache-mocks.outputs.cache-hit != 'true'
-      run: anchor build -p mocks
+      run: anchor build -p mocks --ignore-keys
 
     # ─── Marginfi always builds from scratch ─────────────────────────
     - name: Build marginfi
@@ -234,7 +233,7 @@ jobs:
         set +e
 
         run_tests() {
-          anchor run all-tests 2>&1 | tee test_output.log
+          anchor test --skip-build --skip-local-validator --skip-deploy 2>&1 | tee test_output.log
           return $?
         }
 

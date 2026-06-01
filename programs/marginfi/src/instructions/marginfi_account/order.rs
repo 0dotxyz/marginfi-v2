@@ -17,7 +17,7 @@ use crate::{
     },
 };
 use crate::{check_eq, math_error};
-use anchor_lang::{prelude::*, solana_program::sysvar, system_program};
+use anchor_lang::{prelude::*, system_program};
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
@@ -265,9 +265,7 @@ pub fn set_keeper_close_flags(
     Ok(())
 }
 
-pub fn start_execute_order<'info>(
-    ctx: Context<'_, '_, 'info, 'info, StartExecuteOrder<'info>>,
-) -> MarginfiResult {
+pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>) -> MarginfiResult {
     let StartExecuteOrder {
         marginfi_account: marginfi_account_loader,
         fee_payer: _fee_payer,
@@ -339,9 +337,7 @@ pub fn start_execute_order<'info>(
     )
 }
 
-pub fn end_execute_order<'info>(
-    ctx: Context<'_, '_, 'info, 'info, EndExecuteOrder<'info>>,
-) -> MarginfiResult {
+pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> MarginfiResult {
     let EndExecuteOrder {
         marginfi_account: marginfi_account_loader,
         order: order_loader,
@@ -561,7 +557,7 @@ pub struct PlaceOrder<'info> {
 
     /// CHECK: The fee admin's native SOL wallet, validated against fee state
     #[account(mut)]
-    pub global_fee_wallet: AccountInfo<'info>,
+    pub global_fee_wallet: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
 }
@@ -571,7 +567,7 @@ impl<'info> PlaceOrder<'info> {
         &self,
     ) -> CpiContext<'_, '_, '_, 'info, anchor_lang::system_program::Transfer<'info>> {
         CpiContext::new(
-            self.system_program.to_account_info(),
+            self.system_program.key(),
             anchor_lang::system_program::Transfer {
                 from: self.fee_payer.to_account_info(),
                 to: self.global_fee_wallet.to_account_info(),
@@ -688,9 +684,9 @@ pub struct StartExecuteOrder<'info> {
 
     /// CHECK: validated against known hard-coded sysvar key
     #[account(
-        address = sysvar::instructions::id()
+        address = solana_instructions_sysvar::id()
     )]
-    pub instruction_sysvar: AccountInfo<'info>,
+    pub instruction_sysvar: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
 }

@@ -37,19 +37,21 @@ Build with `cargo build`.
 
 If this fails, you probably need to update your Rust toolchain:
 
-`rustup install nightly-2024-06-05`
+`rustup install nightly-2025-08-01`
 
 And possibly:
 
-`rustup component add rust-src --toolchain nightly-2024-06-05-x86_64-unknown-linux-gnu`
+`rustup component add rust-src --toolchain nightly-2025-08-01-aarch64-apple-darwin`
+or
+`rustup component add rust-src --toolchain nightly-2025-08-01-x86_64-unknown-linux-gnu`
 
-Run with `cargo +nightly-2024-06-05 fuzz run lend -Zbuild-std --strip-dead-code --no-cfg-fuzzing -- -max_total_time=300 -timeout_exitcode=100 -error_exitcode=101`
+Run with `cargo +nightly-2025-08-01 fuzz run lend --strip-dead-code --no-cfg-fuzzing -- -max_total_time=300 -timeout_exitcode=100 -error_exitcode=101`
 
 If your machine has 8 cores, yolo with:
 
 ```
-cargo +nightly-2024-06-05 fuzz run lend \
--Zbuild-std --strip-dead-code --no-cfg-fuzzing \
+cargo +nightly-2025-08-01 fuzz run lend \
+--strip-dead-code --no-cfg-fuzzing \
   -- -max_total_time=30 \
      -timeout_exitcode=100 \
      -error_exitcode=101 \
@@ -64,7 +66,7 @@ This will crush your machine for 30 seconds instead, but 30 \* 8 = 240 ~= 300 so
 same number of tests more or less. You will only get stdError instead of having your console spammed
 for an hour with buffered stdOut.
 
-To rerun some tests after a failure: `cargo +nightly-2024-06-05 fuzz run -Zbuild-std lend artifacts/lend/crash-ae5084b9433152babdaf7dcd75781eacd7ea55c7`, replacing the hash after crash- with the one you see in the terminal.
+To rerun some tests after a failure: `cargo +nightly-2025-08-01 fuzz run lend --strip-dead-code --no-cfg-fuzzing artifacts/lend/crash-ae5084b9433152babdaf7dcd75781eacd7ea55c7`, replacing the hash after crash- with the one you see in the terminal.
 
 ## It Failed Now What
 

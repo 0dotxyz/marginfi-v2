@@ -17,17 +17,12 @@ use crate::{
         price::OraclePriceWithMultiplier,
     },
 };
-use anchor_lang::prelude::*;
-use anchor_lang::{
-    err,
-    prelude::{AccountInfo, CpiContext, InterfaceAccount},
-    ToAccountInfo,
-};
-use anchor_spl::{
-    token::{transfer, Transfer},
-    token_2022::spl_token_2022,
-    token_interface::Mint,
-};
+#[cfg(not(feature = "client"))]
+use anchor_lang::ToAccountInfo;
+use anchor_lang::{err, prelude::*};
+#[cfg(not(feature = "client"))]
+use anchor_spl::token::{transfer, Transfer};
+use anchor_spl::token_interface::Mint;
 use bytemuck::Zeroable;
 use drift_mocks::constants::scale_drift_deposit_limit;
 use fixed::types::I80F48;
@@ -40,6 +35,14 @@ use marginfi_type_crate::{
     },
     types::{Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup},
 };
+
+#[cfg(all(not(feature = "client"), feature = "debug"))]
+fn sol_log_compute_units() {
+    #[cfg(target_os = "solana")]
+    unsafe {
+        solana_msg::syscalls::sol_log_compute_units_();
+    }
+}
 
 pub trait BankImpl {
     const LEN: usize = std::mem::size_of::<Bank>();
@@ -457,7 +460,7 @@ impl BankImpl for Bank {
         #[cfg(not(feature = "client"))] bank: Pubkey,
     ) -> MarginfiResult<()> {
         #[cfg(all(not(feature = "client"), feature = "debug"))]
-        anchor_lang::solana_program::log::sol_log_compute_units();
+        sol_log_compute_units();
 
         let time_delta: u64 = (current_timestamp - self.last_update).try_into().unwrap();
         if time_delta == 0 {
@@ -546,7 +549,7 @@ impl BankImpl for Bank {
         #[cfg(not(feature = "client"))]
         {
             #[cfg(feature = "debug")]
-            anchor_lang::solana_program::log::sol_log_compute_units();
+            sol_log_compute_units();
 
             emit!(LendingPoolBankAccrueInterestEvent {
                 header: GroupEventHeader {
@@ -627,6 +630,7 @@ impl BankImpl for Bank {
         Ok(())
     }
 
+    #[allow(unused_variables)]
     fn deposit_spl_transfer<'info>(
         &self,
         amount: u64,
@@ -647,6 +651,7 @@ impl BankImpl for Bank {
             amount, from.key, to.key, authority.key
         );
 
+        #[cfg(not(feature = "client"))]
         if let Some(mint) = maybe_mint {
             spl_token_2022::onchain::invoke_transfer_checked(
                 program.key,
@@ -663,7 +668,7 @@ impl BankImpl for Bank {
             #[allow(deprecated)]
             transfer(
                 CpiContext::new_with_signer(
-                    program,
+                    program.key(),
                     Transfer {
                         from,
                         to,
@@ -678,6 +683,7 @@ impl BankImpl for Bank {
         Ok(())
     }
 
+    #[allow(unused_variables)]
     fn withdraw_spl_transfer<'info>(
         &self,
         amount: u64,
@@ -694,6 +700,7 @@ impl BankImpl for Bank {
             amount, from.key, to.key, authority.key
         );
 
+        #[cfg(not(feature = "client"))]
         if let Some(mint) = maybe_mint {
             spl_token_2022::onchain::invoke_transfer_checked(
                 program.key,
@@ -714,7 +721,7 @@ impl BankImpl for Bank {
             #[allow(deprecated)]
             transfer(
                 CpiContext::new_with_signer(
-                    program,
+                    program.key(),
                     Transfer {
                         from,
                         to,

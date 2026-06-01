@@ -17,7 +17,7 @@ import {
 import { Marginfi } from "../../target/types/marginfi";
 import { Mocks } from "../../target/types/mocks";
 import { KaminoLending } from "../fixtures/kamino_lending";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./litesvm";
 import { processBankrunTransaction } from "./tools";
 
 export type Ecosystem = {

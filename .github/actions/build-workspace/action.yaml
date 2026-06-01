@@ -20,7 +20,7 @@ runs:
     #   with:
     #     path: |
     #       ./target/
-    #     key: build-${{ runner.os }}-${{env.ANCHOR_CLI_VERSION}}-${{env.ANCHOR_SHA}}-v0002-${{ hashFiles('./programs/**/**', '**/Cargo.lock') }}-workspace
+    #     key: build-${{ runner.os }}-${{env.ANCHOR_CLI_VERSION}}-${{env.SOLANA_CLI_VERSION}}-v0002-${{ hashFiles('./programs/**/**', '**/Cargo.lock') }}-workspace
 
     - run: ./scripts/build-workspace.sh
       # if: steps.cache-anchor-build.outputs.cache-hit != 'true'

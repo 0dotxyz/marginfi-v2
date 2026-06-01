@@ -31,7 +31,7 @@ import { assert } from "chai";
 import { MockUser, USER_ACCOUNT_K } from "./utils/mocks";
 import { processBankrunTransaction } from "./utils/tools";
 import { makeKaminoDepositIx } from "./utils/kamino-instructions";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./utils/litesvm";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import {
   assertBNEqual,

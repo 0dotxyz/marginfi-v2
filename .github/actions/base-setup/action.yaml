@@ -46,4 +46,4 @@ runs:
         target/deploy
         target/idl
         target/types
-      key: anchor-build-slim-v2-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}
+      key: anchor-build-slim-v3-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**', 'type-crate/**', 'id-crate/**') }}

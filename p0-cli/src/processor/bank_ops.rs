@@ -30,8 +30,8 @@ use {
         clock::Clock,
         instruction::{AccountMeta, Instruction},
         pubkey::Pubkey,
-        system_program,
     },
+    solana_system_interface::program as system_program,
     std::{
         cell::RefCell,
         collections::HashSet,
@@ -40,7 +40,6 @@ use {
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     },
-    switchboard_on_demand::PullFeedAccountData,
 };
 
 const DEFAULT_METADATA_DB_URL: &str = "https://app.0.xyz/api/banks/db";
@@ -312,9 +311,7 @@ pub fn show_oracle_ages(
 
             let data = account.data_as_mut_slice();
             let cell = RefCell::new(data);
-            let Ok(feed): Result<PullFeedAccountData, _> =
-                parse_swb_ignore_alignment(cell.borrow())
-            else {
+            let Ok(feed) = parse_swb_ignore_alignment(cell.borrow()) else {
                 continue;
             };
             let lite_feed = LitePullFeedAccountData::from(&feed);

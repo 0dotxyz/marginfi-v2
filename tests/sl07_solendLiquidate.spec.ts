@@ -51,13 +51,16 @@ import { genericMultiBankTestSetup } from "./genericSetups";
 import { blankBankConfigOptRaw } from "./utils/types";
 import { defaultSolendBankConfig } from "./utils/solend-utils";
 import { composeRemainingAccounts } from "./utils/user-instructions";
-import { processBankrunTransaction as processBankrunTx } from "./utils/tools";
+import {
+  processBankrunTransaction as processBankrunTx,
+  toBnFromI80,
+} from "./utils/tools";
 import { getTokenBalance } from "./utils/genericTests";
 import {
   bigNumberToWrappedI80F48,
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
-import { BanksTransactionResultWithMeta } from "solana-bankrun";
+import { BanksTransactionResultWithMeta } from "./utils/litesvm";
 import { assert } from "chai";
 
 describe("sl07: Solend Liquidation", () => {
@@ -564,15 +567,9 @@ describe("sl07: Solend Liquidation", () => {
       );
 
     if (liquidateeSolendBalBefore && liquidateeSolendBalAfter) {
-      const beforeShares = wrappedI80F48toBigNumber(
-        liquidateeSolendBalBefore.assetShares
-      );
-      const afterShares = wrappedI80F48toBigNumber(
-        liquidateeSolendBalAfter.assetShares
-      );
-      assert.ok(
-        new BN(afterShares.toString()).lt(new BN(beforeShares.toString()))
-      );
+      const beforeShares = toBnFromI80(liquidateeSolendBalBefore.assetShares);
+      const afterShares = toBnFromI80(liquidateeSolendBalAfter.assetShares);
+      assert.ok(afterShares.lt(beforeShares));
     }
 
     const liquidatorSolendBalAfter =
@@ -580,10 +577,8 @@ describe("sl07: Solend Liquidation", () => {
         b.bankPk.equals(solendUsdcBank)
       );
     if (liquidatorSolendBalAfter) {
-      const liquidatorShares = wrappedI80F48toBigNumber(
-        liquidatorSolendBalAfter.assetShares
-      );
-      assert.ok(new BN(liquidatorShares.toString()).gt(new BN(0)));
+      const liquidatorShares = toBnFromI80(liquidatorSolendBalAfter.assetShares);
+      assert.ok(liquidatorShares.gt(new BN(0)));
     }
   });
 
@@ -635,10 +630,9 @@ describe("sl07: Solend Liquidation", () => {
       );
 
     if (liquidatorSolendBalance) {
-      const assetShares = wrappedI80F48toBigNumber(
-        liquidatorSolendBalance.assetShares
+      const withdrawAmount = toBnFromI80(liquidatorSolendBalance.assetShares).div(
+        new BN(2)
       );
-      const withdrawAmount = new BN(assetShares.toString()).div(new BN(2));
 
       if (withdrawAmount.gt(new BN(0))) {
         const withdrawTx = new Transaction()

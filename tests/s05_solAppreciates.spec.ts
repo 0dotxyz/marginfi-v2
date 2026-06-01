@@ -222,16 +222,18 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
       await bankRunProvider.connection.getMinimumBalanceForRentExemption(
         StakeProgram.space,
       );
-    const rentIx = SystemProgram.transfer({
-      fromPubkey: wallet.payer.publicKey,
-      toPubkey: onRampPoolKey,
-      lamports: rent,
-    });
-    const ix = createPoolOnramp(validators[0].voteAccount);
-    let initOnRampTx = new Transaction().add(rentIx, ix);
-    initOnRampTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    initOnRampTx.sign(wallet.payer); // pays the tx fee and rent
-    await banksClient.processTransaction(initOnRampTx);
+    if (!(await bankRunProvider.connection.getAccountInfo(onRampPoolKey))) {
+      const rentIx = SystemProgram.transfer({
+        fromPubkey: wallet.payer.publicKey,
+        toPubkey: onRampPoolKey,
+        lamports: rent,
+      });
+      const ix = createPoolOnramp(validators[0].voteAccount);
+      let initOnRampTx = new Transaction().add(rentIx, ix);
+      initOnRampTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+      initOnRampTx.sign(wallet.payer); // pays the tx fee and rent
+      await banksClient.processTransaction(initOnRampTx);
+    }
 
     const onRampAccBefore = await bankRunProvider.connection.getAccountInfo(
       onRampPoolKey,

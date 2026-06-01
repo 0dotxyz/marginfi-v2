@@ -24,7 +24,7 @@ use marginfi_type_crate::{
 /// Token-2022 transfer-fee extensions are not handled here; the vault is assumed to receive
 /// exactly `amount`.
 pub fn super_admin_deposit<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, SuperAdminDeposit<'info>>,
+    mut ctx: Context<'info, SuperAdminDeposit<'info>>,
     amount: u64,
 ) -> MarginfiResult {
     if crate::ID != STAGING_ID && crate::ID != LOCALNET_ID {
@@ -127,7 +127,7 @@ pub struct SuperAdminDeposit<'info> {
 
     /// CHECK: token mint / authority validated by SPL transfer call.
     #[account(mut)]
-    pub admin_token_account: AccountInfo<'info>,
+    pub admin_token_account: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,

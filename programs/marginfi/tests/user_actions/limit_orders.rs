@@ -123,7 +123,7 @@ async fn fund_keeper_for_fees(test_f: &TestFixture, keeper: &Keypair) -> anyhow:
     let account = Account {
         lamports: min_balance + 1_000_000_000,
         data: vec![],
-        owner: solana_sdk::system_program::ID,
+        owner: solana_system_interface::program::ID,
         executable: false,
         rent_epoch: 0,
     };

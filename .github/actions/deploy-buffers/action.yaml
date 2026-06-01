@@ -29,8 +29,7 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - uses: ./.github/actions/setup-common/
-    - uses: ./.github/actions/setup-anchor/
+    - uses: ./.github/actions/setup-anchor-cli/
 
     - name: Dump deployer keypair to file for CLI use
       run: echo "$DEPLOYER_KEYPAIR" > ./deployer-keypair.json && chmod 600 ./deployer-keypair.json

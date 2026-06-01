@@ -24,7 +24,7 @@ runs:
     #   with:
     #     path: |
     #       ./target/
-    #     key: build-${{ runner.os }}-${{env.ANCHOR_CLI_VERSION}}-${{env.ANCHOR_SHA}}-v0002-${{ hashFiles('./programs/**/**', '**/Cargo.lock') }}-${{ inputs.program_lib_name }}
+    #     key: build-${{ runner.os }}-${{env.ANCHOR_CLI_VERSION}}-${{env.SOLANA_CLI_VERSION}}-v0002-${{ hashFiles('./programs/**/**', '**/Cargo.lock') }}-${{ inputs.program_lib_name }}
 
     - run: ./scripts/build-program.sh ${{ inputs.program_lib_name }} mainnet
       # if: steps.cache-anchor-build.outputs.cache-hit != 'true'

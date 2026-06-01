@@ -1,8 +1,8 @@
 use anchor_lang::prelude::{AccountInfo, Clock, Pubkey};
-use anchor_spl::token_2022::spl_token_2022;
+use anchor_lang::system_program;
 use lazy_static::lazy_static;
 use solana_program::{entrypoint::ProgramResult, instruction::Instruction, program_stubs};
-use solana_sdk::system_program;
+use spl_token_2022::processor::Processor as Token2022Processor;
 
 use crate::log;
 
@@ -74,7 +74,7 @@ impl program_stubs::SyscallStubs for TestSyscallStubs {
                 &instruction.data,
             )
         } else if instruction.program_id == anchor_spl::token_2022::ID {
-            spl_token_2022::processor::Processor::process(
+            Token2022Processor::process(
                 &instruction.program_id,
                 &new_account_infos,
                 &instruction.data,
