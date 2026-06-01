@@ -1,9 +1,6 @@
 use crate::constants::{
     MIN_PYTH_PUSH_VERIFICATION_LEVEL, NATIVE_STAKE_ID, SPL_SINGLE_POOL_ID, SWITCHBOARD_PULL_ID,
 };
-use crate::oracle_compat::switchboard::{
-    CurrentResult, PullFeedAccountData, PRECISION as SWITCHBOARD_PRECISION, PULL_FEED_DISCRIMINATOR,
-};
 use crate::state::bank_config::BankConfigImpl;
 use crate::{check, check_eq, debug, math_error, prelude::*};
 use anchor_lang::prelude::*;
@@ -33,6 +30,9 @@ use solana_borsh::v1::try_from_slice_unchecked;
 use solana_stake_interface::state::StakeStateV2;
 use solend_mocks::state::SolendMinimalReserve;
 use std::{cell::Ref, cmp::min};
+use switchboard_on_demand::{
+    CurrentResult, Discriminator, PullFeedAccountData, PRECISION as SWITCHBOARD_PRECISION,
+};
 
 /// Price per unit before any multipliers are applied, where `price_multiplier` shows what
 /// multipliers will be applied to generate the true deposited-token price.
@@ -1420,7 +1420,7 @@ pub fn parse_swb_ignore_alignment(data: Ref<&mut [u8]>) -> MarginfiResult<PullFe
         return err!(MarginfiError::SwitchboardInvalidAccount);
     }
 
-    if data[..8] != PULL_FEED_DISCRIMINATOR {
+    if &data[..8] != PullFeedAccountData::DISCRIMINATOR {
         return err!(MarginfiError::SwitchboardInvalidAccount);
     }
 
