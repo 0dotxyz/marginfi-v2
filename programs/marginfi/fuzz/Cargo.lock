@@ -1422,6 +1422,7 @@ dependencies = [
  "bytemuck",
  "fixed",
  "fixed-macro",
+ "marginfi-type-crate",
  "static_assertions",
 ]
 
@@ -2781,7 +2782,7 @@ dependencies = [
 
 [[package]]
 name = "marginfi"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
@@ -2839,7 +2840,7 @@ dependencies = [
 
 [[package]]
 name = "marginfi-type-crate"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anchor-lang",
  "bs58",
@@ -2848,6 +2849,7 @@ dependencies = [
  "fixed-macro",
  "id-crate",
  "solana-instruction",
+ "spl-associated-token-account 6.0.0",
  "static_assertions",
 ]
 

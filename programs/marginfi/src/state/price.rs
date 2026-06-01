@@ -42,6 +42,7 @@ pub struct OraclePriceWithMultiplier {
     pub oracle_price: OraclePriceWithConfidence,
     pub price_multiplier: I80F48,
 }
+
 #[enum_dispatch]
 pub trait PriceAdapter {
     fn get_price_and_confidence_of_type(
@@ -678,6 +679,7 @@ impl OraclePriceFeedAdapter {
                 let cache_raw_price = cache_price_type.map(|_| OraclePriceWithConfidence {
                     price: base_price,
                     confidence: I80F48::ZERO,
+                    source_time: 0,
                 });
 
                 Ok(OracleLoadContext {
@@ -724,6 +726,7 @@ impl OraclePriceFeedAdapter {
                 let cache_raw_price = cache_price_type.map(|_| OraclePriceWithConfidence {
                     price: base_price,
                     confidence: I80F48::ZERO,
+                    source_time: 0,
                 });
 
                 Ok(OracleLoadContext {
@@ -764,6 +767,7 @@ impl OraclePriceFeedAdapter {
                 let cache_raw_price = cache_price_type.map(|_| OraclePriceWithConfidence {
                     price: base_price,
                     confidence: I80F48::ZERO,
+                    source_time: 0,
                 });
 
                 Ok(OracleLoadContext {
@@ -1258,6 +1262,7 @@ impl PriceAdapter for FixedPriceFeed {
         Ok(OraclePriceWithConfidence {
             price: self.get_price_of_type(oracle_price_type, None, oracle_max_confidence)?,
             confidence: I80F48::ZERO,
+            source_time: 0,
         })
     }
 }
@@ -1406,6 +1411,7 @@ impl PriceAdapter for SwitchboardPullPriceFeed {
         Ok(OraclePriceWithConfidence {
             price,
             confidence: confidence_interval,
+            source_time: self.feed.last_update_timestamp,
         })
     }
 }
@@ -1679,10 +1685,15 @@ impl PriceAdapter for PythPushOraclePriceFeed {
             oracle_max_confidence,
         )?;
         let price = self.get_price_of_type(price_type, None, oracle_max_confidence)?;
+        let source_time = match price_type {
+            OraclePriceType::TimeWeighted => self.ema_price.publish_time,
+            OraclePriceType::RealTime => self.price.publish_time,
+        };
 
         Ok(OraclePriceWithConfidence {
             price,
             confidence: confidence_interval,
+            source_time,
         })
     }
 }
@@ -1694,7 +1705,6 @@ pub struct LitePullFeedAccountData {
     pub result: CurrentResult,
     #[cfg(feature = "client")]
     pub feed_hash: [u8; 32],
-    #[cfg(feature = "client")]
     pub last_update_timestamp: i64,
 }
 
@@ -1704,7 +1714,6 @@ impl From<&PullFeedAccountData> for LitePullFeedAccountData {
             result: feed.result,
             #[cfg(feature = "client")]
             feed_hash: feed.feed_hash,
-            #[cfg(feature = "client")]
             last_update_timestamp: feed.last_update_timestamp,
         }
     }
@@ -1716,7 +1725,6 @@ impl From<Ref<'_, PullFeedAccountData>> for LitePullFeedAccountData {
             result: feed.result,
             #[cfg(feature = "client")]
             feed_hash: feed.feed_hash,
-            #[cfg(feature = "client")]
             last_update_timestamp: feed.last_update_timestamp,
         }
     }

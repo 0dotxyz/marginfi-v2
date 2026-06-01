@@ -45,7 +45,7 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
         authority_bump = bank.liquidity_vault_authority_bump;
 
         validate_asset_tags(&bank, &marginfi_account)?;
-        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
+        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState, true)?;
     }
 
     // Refresh the exchange price (interest/rewards) for this slot.

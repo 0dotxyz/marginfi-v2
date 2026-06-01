@@ -46,6 +46,7 @@ export const TOKENLESS_REPAYMENTS_ALLOWED = 32;
 export const TOKENLESS_REPAYMENTS_COMPLETE = 64;
 export const IS_T22_FLAG = 128;
 export const BANK_SEED_KNOWN_FLAG = 256;
+export const CIRCUIT_BREAKER_ENABLED = 512;
 
 export const ASSET_TAG_DEFAULT = 0;
 export const ASSET_TAG_SOL = 1;
@@ -174,6 +175,14 @@ export const defaultBankConfigOptRaw = () => {
     freezeSettings: null,
     oracleMaxConfidence: 0,
     tokenlessRepaymentsAllowed: false,
+    circuitBreakerEnabled: null,
+    cbDeviationBpsTiers: null,
+    cbTierDurationsSeconds: null,
+    cbEscalationWindowMult: null,
+    cbEmaAlphaBps: null,
+    cbWindowSeconds: null,
+    cbWindowMaxUpBps: null,
+    cbWindowMaxDownBps: null,
   };
 
   return bankConfigOpt;
@@ -197,6 +206,14 @@ export const blankBankConfigOptRaw = () => {
     permissionlessBadDebtSettlement: null,
     freezeSettings: null,
     tokenlessRepaymentsAllowed: null,
+    circuitBreakerEnabled: null,
+    cbDeviationBpsTiers: null,
+    cbTierDurationsSeconds: null,
+    cbEscalationWindowMult: null,
+    cbEmaAlphaBps: null,
+    cbWindowSeconds: null,
+    cbWindowMaxUpBps: null,
+    cbWindowMaxDownBps: null,
   };
 
   return bankConfigOpt;
@@ -412,6 +429,15 @@ export type BankConfigOptRaw = {
   permissionlessBadDebtSettlement: boolean | null;
   freezeSettings: boolean | null;
   tokenlessRepaymentsAllowed: boolean | null;
+
+  circuitBreakerEnabled: boolean | null;
+  cbDeviationBpsTiers: [number, number, number] | null;
+  cbTierDurationsSeconds: [number, number, number] | null;
+  cbEscalationWindowMult: number | null;
+  cbEmaAlphaBps: number | null;
+  cbWindowSeconds: number | null;
+  cbWindowMaxUpBps: number | null;
+  cbWindowMaxDownBps: number | null;
 };
 
 export type StakedSettingsConfig = {

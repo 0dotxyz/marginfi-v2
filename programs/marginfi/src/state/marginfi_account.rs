@@ -11,8 +11,8 @@ use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
-        ASSET_TAG_SOLEND, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, EXP_10_I80F48,
-        MAX_INTEGRATION_POSITIONS, ORDER_ACTIVE_TAGS, ZERO_AMOUNT_THRESHOLD,
+        ASSET_TAG_SOLEND, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, CIRCUIT_BREAKER_ENABLED,
+        EXP_10_I80F48, MAX_INTEGRATION_POSITIONS, ORDER_ACTIVE_TAGS, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
         reconcile_emode_configs, Balance, BalanceSide, Bank, BankOperationalState, EmodeConfig,
@@ -118,6 +118,100 @@ pub fn account_not_frozen_for_authority(
     signer: Pubkey,
 ) -> bool {
     !(marginfi_account.get_flag(ACCOUNT_FROZEN) && marginfi_account.authority == signer)
+}
+
+/// Returns `true` if any bank backing an active balance on `marginfi_account` is CB-halted.
+/// `remaining_ais` must be the standard bank+oracle layout used by the health computation:
+/// one bank account followed by `get_remaining_accounts_per_bank(bank) - 1` venue/oracle
+/// accounts per active balance.
+pub fn any_balance_bank_is_cb_halted<'info>(
+    marginfi_account: &MarginfiAccount,
+    remaining_ais: &'info [AccountInfo<'info>],
+) -> MarginfiResult<bool> {
+    let now = Clock::get()?.unix_timestamp;
+    let mut account_index = 0usize;
+    for balance in marginfi_account
+        .lending_account
+        .balances
+        .iter()
+        .filter(|b| b.is_active())
+    {
+        let bank_ai = remaining_ais
+            .get(account_index)
+            .ok_or(MarginfiError::InvalidBankAccount)?;
+        let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
+        let bank = bank_al.load()?;
+        check_eq!(
+            balance.bank_pk,
+            *bank_ai.key,
+            MarginfiError::InvalidBankAccount
+        );
+        // Both a temporal halt and the non-expiring `CircuitBroken` state count as halted.
+        if bank.is_cb_halted(now)
+            || bank.config.operational_state == BankOperationalState::CircuitBroken
+        {
+            return Ok(true);
+        }
+        let num_accounts = get_remaining_accounts_per_bank(&bank)?;
+        account_index = account_index.saturating_add(num_accounts);
+    }
+    Ok(false)
+}
+
+/// Runs the inline circuit-breaker price gate (`BankImpl::cb_price_gate`) for every CB-enabled
+/// bank backing an active balance on `marginfi_account`. Pure read — reverts with
+/// `CircuitBreakerPriceJump` if any such bank's live oracle price has jumped past the breach
+/// threshold. Non-CB banks are skipped, so the common case pays no extra oracle reads.
+///
+/// `remaining_ais` must be the standard bank+oracle layout used by the health computation.
+pub fn run_cb_price_gate<'info>(
+    marginfi_account: &MarginfiAccount,
+    remaining_ais: &'info [AccountInfo<'info>],
+) -> MarginfiResult<()> {
+    let clock = Clock::get()?;
+    let mut account_index = 0usize;
+    for balance in marginfi_account
+        .lending_account
+        .balances
+        .iter()
+        .filter(|b| b.is_active())
+    {
+        let bank_ai = remaining_ais
+            .get(account_index)
+            .ok_or(MarginfiError::InvalidBankAccount)?;
+        let bank_al = AccountLoader::<Bank>::try_from(bank_ai)?;
+        let bank = bank_al.load()?;
+        check_eq!(
+            balance.bank_pk,
+            *bank_ai.key,
+            MarginfiError::InvalidBankAccount
+        );
+
+        let num_accounts = get_remaining_accounts_per_bank(&bank)?;
+
+        if bank.get_flag(CIRCUIT_BREAKER_ENABLED) {
+            let oracle_start = account_index + 1;
+            let oracle_end = oracle_start + num_accounts - 1;
+            require_gte!(
+                remaining_ais.len(),
+                oracle_end,
+                MarginfiError::WrongNumberOfOracleAccounts
+            );
+            let oracle_ais = &remaining_ais[oracle_start..oracle_end];
+            // The breaker reference tracks the raw (un-multiplied) oracle price.
+            let (_, cache_price) =
+                OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
+                    &bank,
+                    oracle_ais,
+                    &clock,
+                    OraclePriceType::RealTime,
+                )?;
+            bank.cb_price_gate(cache_price.oracle_price)?;
+        }
+
+        account_index = account_index.saturating_add(num_accounts);
+    }
+    Ok(())
 }
 
 impl MarginfiAccountImpl for MarginfiAccount {
@@ -302,6 +396,7 @@ impl<'info> BankAccountWithCache<'_, 'info> {
         let zero_price = OraclePriceWithConfidence {
             price: I80F48::ZERO,
             confidence: I80F48::ZERO,
+            source_time: 0,
         };
         let price_rt = liq_cache
             .get_price(OraclePriceType::RealTime, index)
@@ -346,10 +441,14 @@ fn get_cached_price_with_confidence(
         OraclePriceType::RealTime => OraclePriceWithConfidence {
             price: bank.cache.liquidation_price_rt.into(),
             confidence: bank.cache.liquidation_price_rt_confidence.into(),
+            // Cached prices are used for risk-engine math, not CB detection — source_time is
+            // meaningful only inside `update_circuit_breaker`.
+            source_time: 0,
         },
         OraclePriceType::TimeWeighted => OraclePriceWithConfidence {
             price: bank.cache.liquidation_price_twap.into(),
             confidence: bank.cache.liquidation_price_twap_confidence.into(),
+            source_time: 0,
         },
     }
 }
@@ -1426,11 +1525,20 @@ pub trait LendingAccountImpl {
     fn sort_balances(&mut self);
     fn reserve_n_tags(&mut self, n: usize) -> [u16; ORDER_ACTIVE_TAGS];
     fn get_balance_index(&self, bank_pk: &Pubkey) -> MarginfiResult<usize>;
+    fn has_liabilities(&self) -> bool;
 }
 
 impl LendingAccountImpl for LendingAccount {
     fn get_first_empty_balance(&self) -> Option<usize> {
         self.balances.iter().position(|b| !b.is_active())
+    }
+
+    /// True if any active balance carries a liability. A withdraw from an account with no
+    /// liabilities is risk-free and stays allowed during a circuit-breaker halt.
+    fn has_liabilities(&self) -> bool {
+        self.balances
+            .iter()
+            .any(|b| b.is_active() && !b.is_empty(BalanceSide::Liabilities))
     }
 
     fn sort_balances(&mut self) {

@@ -753,6 +753,24 @@ impl MarginfiAccountFixture {
         asset_ui_amount: T,
         liab_bank_fixture: &BankFixture,
     ) -> std::result::Result<(), BanksClientError> {
+        self.try_liquidate_with_authority(
+            liquidatee,
+            asset_bank_fixture,
+            asset_ui_amount,
+            liab_bank_fixture,
+            &self.ctx.borrow().payer.insecure_clone(),
+        )
+        .await
+    }
+
+    pub async fn try_liquidate_with_authority<T: Into<f64> + Copy>(
+        &self,
+        liquidatee: &MarginfiAccountFixture,
+        asset_bank_fixture: &BankFixture,
+        asset_ui_amount: T,
+        liab_bank_fixture: &BankFixture,
+        authority: &Keypair,
+    ) -> std::result::Result<(), BanksClientError> {
         let marginfi_account = self.load().await;
 
         let asset_bank = asset_bank_fixture.load().await;
@@ -763,7 +781,7 @@ impl MarginfiAccountFixture {
             asset_bank: asset_bank_fixture.key,
             liab_bank: liab_bank_fixture.key,
             liquidator_marginfi_account: self.key,
-            authority: self.ctx.borrow().payer.pubkey(),
+            authority: authority.pubkey(),
             liquidatee_marginfi_account: liquidatee.key,
             bank_liquidity_vault_authority: liab_bank_fixture
                 .get_vault_authority(BankVaultType::Liquidity)
@@ -849,10 +867,14 @@ impl MarginfiAccountFixture {
         let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_400_000);
 
         let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
+        let mut signers: Vec<&Keypair> = vec![&payer];
+        if authority.pubkey() != payer.pubkey() {
+            signers.push(authority);
+        }
         let tx = Transaction::new_signed_with_payer(
             &[compute_budget_ix, ix],
             Some(&payer.pubkey()),
-            &[&payer],
+            &signers,
             blockhash,
         );
 

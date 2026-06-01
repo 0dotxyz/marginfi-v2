@@ -222,7 +222,7 @@ async fn add_bank_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[u64; 13] as Default>::default());
+            assert_eq!(_padding_1, <[u64; 3] as Default>::default());
             // legacy add_bank does not pass a seed
             assert_eq!(bank_seed, 0);
 
@@ -375,7 +375,7 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[u64; 13] as Default>::default());
+            assert_eq!(_padding_1, <[u64; 3] as Default>::default());
             // with-seed add_bank stores the seed used for PDA derivation
             assert_eq!(bank_seed, 1200_u64);
 
@@ -806,6 +806,14 @@ async fn configure_bank_success(bank_mint: BankMint) -> anyhow::Result<()> {
         permissionless_bad_debt_settlement,
         freeze_settings,
         tokenless_repayments_allowed,
+        circuit_breaker_enabled: _,
+        cb_deviation_bps_tiers: _,
+        cb_tier_durations_seconds: _,
+        cb_escalation_window_mult: _,
+        cb_ema_alpha_bps: _,
+        cb_window_seconds: _,
+        cb_window_max_up_bps: _,
+        cb_window_max_down_bps: _,
     } = &config_bank_opt;
     // Compare bank field to opt field if Some, otherwise compare to old bank field
     macro_rules! check_bank_field {
