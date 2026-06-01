@@ -550,8 +550,12 @@ export const addBankPermissionless = (
     [Buffer.from("stake"), args.stakePool.toBuffer()],
     SINGLE_POOL_PROGRAM_ID,
   );
+  const [onRampPool] = PublicKey.findProgramAddressSync(
+    [Buffer.from("onramp"), args.stakePool.toBuffer()],
+    SINGLE_POOL_PROGRAM_ID,
+  );
 
-  // Note: oracle and lst mint/pool are also passed in meta for validation
+  // Note: oracle, lst mint, pool stake, and on-ramp are also passed in meta for validation.
   const oracleMeta: AccountMeta = {
     pubkey: args.pythOracle,
     isSigner: false,
@@ -564,6 +568,11 @@ export const addBankPermissionless = (
   };
   const solPoolMeta: AccountMeta = {
     pubkey: solPool,
+    isSigner: false,
+    isWritable: false,
+  };
+  const onRampMeta: AccountMeta = {
+    pubkey: onRampPool,
     isSigner: false,
     isWritable: false,
   };
@@ -591,7 +600,7 @@ export const addBankPermissionless = (
       tokenProgram: TOKEN_PROGRAM_ID,
       // systemProgram: SystemProgram.programId,
     })
-    .remainingAccounts([oracleMeta, lstMeta, solPoolMeta])
+    .remainingAccounts([oracleMeta, lstMeta, solPoolMeta, onRampMeta])
     .instruction();
 
   return ix;

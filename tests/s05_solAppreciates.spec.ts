@@ -2,7 +2,6 @@ import { BN, Wallet } from "@coral-xyz/anchor";
 import {
   Keypair,
   LAMPORTS_PER_SOL,
-  StakeProgram,
   SystemProgram,
   Transaction,
 } from "@solana/web3.js";
@@ -29,9 +28,8 @@ import { LST_ATA, LST_ATA_v1, USER_ACCOUNT } from "./utils/mocks";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { dumpBankrunLogs, getBankrunBlockhash } from "./utils/tools";
 import { getEpochAndSlot } from "./utils/bankrunConnection";
-import { deriveOnRampPool } from "./utils/pdas";
 import { getStakeAccount } from "./utils/stake-utils";
-import { createPoolOnramp, replenishPool } from "./utils/spl-staking-utils";
+import { replenishPool } from "./utils/spl-staking-utils";
 
 let bankKeypairSol: Keypair;
 
@@ -68,6 +66,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
             oracles.wsolOracle.publicKey,
             validators[0].splMint,
             validators[0].splSolPool,
+            validators[0].splOnRampPool,
           ],
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
@@ -123,6 +122,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
             oracles.wsolOracle.publicKey,
             validators[1].splMint, // Bad mint
             validators[0].splSolPool,
+            validators[0].splOnRampPool,
           ],
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
@@ -151,6 +151,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
             oracles.wsolOracle.publicKey,
             validators[0].splMint,
             validators[1].splSolPool,
+            validators[0].splOnRampPool,
           ], // Bad pool
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
@@ -181,6 +182,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
             oracles.wsolOracle.publicKey,
             validators[0].splMint,
             validators[0].splSolPool,
+            validators[0].splOnRampPool,
           ],
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
@@ -242,7 +244,6 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
     const stakeBefore = onRampBefore.stake.delegation.stake.toString();
     if (verbose) {
       console.log("On ramp lamps: " + onRampAccBefore.lamports);
-      console.log(" (rent was:    " + rent + ")");
       console.log("On ramp stake: " + stakeBefore);
     }
 
@@ -320,6 +321,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
             oracles.wsolOracle.publicKey,
             validators[0].splMint,
             validators[0].splSolPool,
+            validators[0].splOnRampPool,
           ],
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
@@ -378,12 +380,14 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
             oracles.wsolOracle.publicKey,
             validators[0].splMint,
             validators[0].splSolPool,
+            validators[0].splOnRampPool,
           ],
           [
             validators[1].bank,
             oracles.wsolOracle.publicKey,
             validators[1].splMint,
             validators[1].splSolPool,
+            validators[1].splOnRampPool,
           ],
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),

@@ -320,6 +320,18 @@ pub const EXP_10_I80F48: [I80F48; 15] = [
     I80F48!(100_000_000_000_000),
 ];
 
+fn derive_staked_onramp_from_vote(validator_vote_account: Pubkey) -> Pubkey {
+    let spl_single_pool_id =
+        Pubkey::from_str("SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE").unwrap();
+    let vote_account_bytes = validator_vote_account.to_bytes();
+    let (stake_pool, _) =
+        Pubkey::find_program_address(&[b"pool", &vote_account_bytes], &spl_single_pool_id);
+    let stake_pool_bytes = stake_pool.to_bytes();
+    let (pool_onramp, _) =
+        Pubkey::find_program_address(&[b"onramp", &stake_pool_bytes], &spl_single_pool_id);
+    pool_onramp
+}
+
 pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
     let keys = &bank.config.oracle_keys;
 
@@ -328,7 +340,16 @@ pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
         OracleSetup::FixedKamino | OracleSetup::FixedDrift | OracleSetup::FixedJuplend => {
             vec![keys[1]]
         }
-        OracleSetup::StakedWithPythPush => vec![keys[0], keys[1], keys[2]],
+        OracleSetup::StakedWithPythPush => {
+            let onramp = if keys[3] != Pubkey::default() {
+                keys[3]
+            } else if bank.integration_acc_1 != Pubkey::default() {
+                derive_staked_onramp_from_vote(bank.integration_acc_1)
+            } else {
+                Pubkey::default()
+            };
+            vec![keys[0], keys[1], keys[2], onramp]
+        }
         OracleSetup::PythLegacy
         | OracleSetup::SwitchboardV2
         | OracleSetup::PythPushOracle

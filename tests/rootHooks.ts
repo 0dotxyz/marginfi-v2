@@ -15,6 +15,7 @@ import {
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
+  StakeProgram,
   SystemProgram,
   Transaction,
   VoteInit,
@@ -71,6 +72,7 @@ import {
   findPoolStakeAuthorityAddress,
   SinglePoolProgram,
 } from "@solana/spl-single-pool-classic";
+import { createPoolOnramp } from "./utils/spl-staking-utils";
 
 export const ecosystem: Ecosystem = getGenericEcosystem();
 export let oracles: Oracles = undefined;
@@ -347,6 +349,7 @@ async function createValidatorBankrun(index: number): Promise<Validator> {
     splMint: PublicKey.default,
     splAuthority: PublicKey.default,
     splSolPool: PublicKey.default,
+    splOnRampPool: PublicKey.default,
     // Filled by staked tests after permissionless add-bank
     bank: PublicKey.default,
   };
@@ -382,10 +385,28 @@ async function createSplStakePoolBankrun(
     poolKey,
   );
   const poolStake = await findPoolStakeAddress(SINGLE_POOL_PROGRAM_ID, poolKey);
+  const [poolOnramp] = PublicKey.findProgramAddressSync(
+    [Buffer.from("onramp"), poolKey.toBuffer()],
+    SINGLE_POOL_PROGRAM_ID,
+  );
+
+  const onrampRent =
+    await bankRunProvider.connection.getMinimumBalanceForRentExemption(
+      StakeProgram.space,
+    );
+  const createOnrampTx = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: payer.publicKey,
+      toPubkey: poolOnramp,
+      lamports: onrampRent,
+    }),
+    createPoolOnramp(validator.voteAccount),
+  );
+  await processBankrunTransaction(bankrunContext, createOnrampTx, [payer]);
 
   if (verbose) {
     console.log(
-      `*init single-pool: pool=${poolKey.toBase58()} mint=${poolMintKey.toBase58()}`,
+      `*init single-pool: pool=${poolKey.toBase58()} mint=${poolMintKey.toBase58()} onramp=${poolOnramp.toBase58()}`,
     );
   }
 
@@ -395,6 +416,7 @@ async function createSplStakePoolBankrun(
     splMint: poolMintKey,
     splAuthority: poolAuthority,
     splSolPool: poolStake,
+    splOnRampPool: poolOnramp,
   };
 }
 

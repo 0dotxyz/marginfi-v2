@@ -2,10 +2,10 @@ use crate::{check, constants::SPL_SINGLE_POOL_ID, MarginfiError, MarginfiResult}
 use anchor_lang::prelude::*;
 
 /// Validate the vote account owner and derive the SPL single-pool PDA chain:
-/// `vote_account -> stake_pool -> (lst_mint, sol_pool)`.
+/// `vote_account -> stake_pool -> (lst_mint, sol_pool, pool_onramp)`.
 pub(crate) fn derive_single_pool_keys_from_vote_and_validate_owner(
     validator_vote_account: &AccountInfo<'_>,
-) -> MarginfiResult<(Pubkey, Pubkey, Pubkey)> {
+) -> MarginfiResult<(Pubkey, Pubkey, Pubkey, Pubkey)> {
     check!(
         validator_vote_account.owner.as_ref() == solana_vote_interface::program::id().as_ref(),
         MarginfiError::StakePoolValidationFailed
@@ -21,6 +21,8 @@ pub(crate) fn derive_single_pool_keys_from_vote_and_validate_owner(
         Pubkey::find_program_address(&[b"mint", &stake_pool_bytes], &SPL_SINGLE_POOL_ID);
     let (sol_pool, _) =
         Pubkey::find_program_address(&[b"stake", &stake_pool_bytes], &SPL_SINGLE_POOL_ID);
+    let (pool_onramp, _) =
+        Pubkey::find_program_address(&[b"onramp", &stake_pool_bytes], &SPL_SINGLE_POOL_ID);
 
-    Ok((stake_pool, lst_mint, sol_pool))
+    Ok((stake_pool, lst_mint, sol_pool, pool_onramp))
 }

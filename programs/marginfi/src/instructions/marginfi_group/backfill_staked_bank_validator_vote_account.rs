@@ -9,7 +9,7 @@ use marginfi_type_crate::{
 /// (permissionless) Backfill validator vote account on pre-upgrade staked banks.
 ///
 /// The vote account is validated by SPL single-pool PDA chain:
-/// `vote -> stake_pool -> (mint, sol_pool)`.
+/// `vote -> stake_pool -> (mint, sol_pool, onramp)`.
 pub fn lending_pool_backfill_staked_bank_validator_vote_account(
     ctx: Context<LendingPoolBackfillStakedBankValidatorVoteAccount>,
 ) -> MarginfiResult {
@@ -25,7 +25,7 @@ pub fn lending_pool_backfill_staked_bank_validator_vote_account(
     );
 
     let validator_vote = ctx.accounts.validator_vote_account.key();
-    let (_stake_pool, exp_mint, exp_sol_pool) =
+    let (_stake_pool, exp_mint, exp_sol_pool, exp_onramp) =
         derive_single_pool_keys_from_vote_and_validate_owner(
             &ctx.accounts.validator_vote_account.to_account_info(),
         )?;
@@ -45,6 +45,13 @@ pub fn lending_pool_backfill_staked_bank_validator_vote_account(
         bank.config.oracle_keys[2],
         MarginfiError::StakePoolValidationFailed
     );
+    if bank.config.oracle_keys[3] != Pubkey::default() {
+        check_eq!(
+            exp_onramp,
+            bank.config.oracle_keys[3],
+            MarginfiError::StakePoolValidationFailed
+        );
+    }
 
     // Idempotent: if already set, it must match.
     if bank.integration_acc_1 != Pubkey::default() {
@@ -53,10 +60,13 @@ pub fn lending_pool_backfill_staked_bank_validator_vote_account(
             validator_vote,
             MarginfiError::StakePoolValidationFailed
         );
-        return Ok(());
+    } else {
+        bank.integration_acc_1 = validator_vote;
     }
 
-    bank.integration_acc_1 = validator_vote;
+    if bank.config.oracle_keys[3] == Pubkey::default() {
+        bank.config.oracle_keys[3] = exp_onramp;
+    }
 
     Ok(())
 }

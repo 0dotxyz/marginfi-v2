@@ -34,7 +34,7 @@ use std::{
 /// - `FixedKamino`: 2 (bank + reserve)
 /// - `FixedDrift`: 2 (bank + spot market)
 /// - `FixedJuplend`: 2 (bank + lending state)
-/// - `ASSET_TAG_STAKED`: 4 (bank + oracle + lst_mint + stake_pool)
+/// - `ASSET_TAG_STAKED`: 5 (bank + oracle + lst_mint + stake_pool + onramp)
 /// - `ASSET_TAG_KAMINO` / `ASSET_TAG_DRIFT` / `ASSET_TAG_SOLEND` / `ASSET_TAG_JUPLEND`: 3 (bank + oracle + reserve)
 /// - `ASSET_TAG_DEFAULT` / `ASSET_TAG_SOL`: 2 (bank + oracle)
 pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
@@ -50,13 +50,13 @@ pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
     }
 }
 
-/// 4 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool), 2 for most others (bank, oracle), 3
+/// 5 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool, onramp), 2 for most others (bank, oracle), 3
 /// for Kamino (bank, oracle, reserve), 1 for Fixed
 fn get_remaining_accounts_per_asset_tag(asset_tag: u8) -> MarginfiResult<usize> {
     match asset_tag {
         ASSET_TAG_DEFAULT | ASSET_TAG_SOL => Ok(2),
         ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND => Ok(3),
-        ASSET_TAG_STAKED => Ok(4),
+        ASSET_TAG_STAKED => Ok(5),
         _ => err!(MarginfiError::AssetTagMismatch),
     }
 }
