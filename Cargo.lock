@@ -3760,7 +3760,6 @@ dependencies = [
  "spl-token-2022",
  "spl-transfer-hook-interface",
  "static_assertions",
- "switchboard-on-demand",
  "test-case",
  "test-utilities",
 ]
