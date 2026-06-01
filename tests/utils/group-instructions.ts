@@ -1,7 +1,7 @@
 import { BN, Program } from "@coral-xyz/anchor";
 import { AccountMeta, PublicKey } from "@solana/web3.js";
 import { Marginfi } from "../../target/types/marginfi";
-import { deriveStakedSettings } from "./pdas";
+import { deriveOnRampPool, deriveStakedSettings } from "./pdas";
 import {
   BankConfig,
   BankConfigOptRaw,
@@ -550,11 +550,7 @@ export const addBankPermissionless = (
     [Buffer.from("stake"), args.stakePool.toBuffer()],
     SINGLE_POOL_PROGRAM_ID,
   );
-  const [onRampPool] = PublicKey.findProgramAddressSync(
-    [Buffer.from("onramp"), args.stakePool.toBuffer()],
-    SINGLE_POOL_PROGRAM_ID,
-  );
-
+  const [poolOnramp] = deriveOnRampPool(args.stakePool);
   // Note: oracle, lst mint, pool stake, and on-ramp are also passed in meta for validation.
   const oracleMeta: AccountMeta = {
     pubkey: args.pythOracle,
@@ -571,12 +567,11 @@ export const addBankPermissionless = (
     isSigner: false,
     isWritable: false,
   };
-  const onRampMeta: AccountMeta = {
-    pubkey: onRampPool,
+  const onrampMeta: AccountMeta = {
+    pubkey: poolOnramp,
     isSigner: false,
     isWritable: false,
   };
-
   const ix = program.methods
     .lendingPoolAddBankPermissionless(args.seed)
     .accounts({
@@ -585,6 +580,7 @@ export const addBankPermissionless = (
       feePayer: args.feePayer,
       bankMint: lstMint,
       solPool: solPool,
+      poolOnramp,
       stakePool: args.stakePool,
       validatorVoteAccount: args.validatorVoteAccount,
       // bank: bankKey, // deriveBankWithSeed
@@ -600,7 +596,31 @@ export const addBankPermissionless = (
       tokenProgram: TOKEN_PROGRAM_ID,
       // systemProgram: SystemProgram.programId,
     })
-    .remainingAccounts([oracleMeta, lstMeta, solPoolMeta, onRampMeta])
+    .remainingAccounts([oracleMeta, lstMeta, solPoolMeta, onrampMeta])
+    .instruction();
+
+  return ix;
+};
+
+export type EnableStakedOracleOnrampArgs = {
+  bank: PublicKey;
+  stakePool: PublicKey;
+  validatorVoteAccount: PublicKey;
+};
+
+export const enableStakedOracleOnramp = (
+  program: Program<Marginfi>,
+  args: EnableStakedOracleOnrampArgs,
+) => {
+  const [poolOnramp] = deriveOnRampPool(args.stakePool);
+
+  const ix = program.methods
+    .lendingPoolEnableStakedOracleOnramp()
+    .accounts({
+      bank: args.bank,
+      validatorVoteAccount: args.validatorVoteAccount,
+      poolOnramp,
+    })
     .instruction();
 
   return ix;

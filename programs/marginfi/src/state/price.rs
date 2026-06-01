@@ -13,8 +13,8 @@ use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION}
 use kamino_mocks::state::MinimalReserve;
 use marginfi_type_crate::{
     constants::{
-        CONF_INTERVAL_MULTIPLE, EXP_10_I80F48, MAX_CONF_INTERVAL, STD_DEV_MULTIPLE, U32_MAX,
-        U32_MAX_DIV_10,
+        CONF_INTERVAL_MULTIPLE, EXP_10_I80F48, MAX_CONF_INTERVAL, STAKED_ORACLE_PRICE_USES_ONRAMP,
+        STD_DEV_MULTIPLE, U32_MAX, U32_MAX_DIV_10,
     },
     types::{
         mul_div_i128, mul_div_i64, mul_div_u64, mul_i128_by_i80f48, mul_i64_by_i80f48,
@@ -113,6 +113,11 @@ fn expected_staked_onramp(bank: &Bank) -> MarginfiResult<Pubkey> {
     Ok(derive_staked_onramp_from_vote(bank.integration_acc_1))
 }
 
+// To be removed once SVSP update is rolled out (likely in 1.10)
+fn staked_oracle_uses_onramp(bank_config: &BankConfig) -> bool {
+    bank_config.config_flags & STAKED_ORACLE_PRICE_USES_ONRAMP != 0
+}
+
 fn staked_pool_net_asset_value(
     pool_stake_info: &AccountInfo,
     pool_onramp_info: &AccountInfo,
@@ -129,6 +134,22 @@ fn staked_pool_net_asset_value(
         .saturating_sub(onramp_rent_exempt_reserve);
 
     main_stake_value.saturating_add(onramp_value)
+}
+
+// To be removed once SVSP update is rolled out (likely in 1.10)
+fn legacy_staked_pool_delegated_value(pool_stake_info: &AccountInfo) -> MarginfiResult<u64> {
+    let stake_state = try_from_slice_unchecked::<StakeStateV2>(&pool_stake_info.data.borrow())?;
+    let (_, stake) = match stake_state {
+        StakeStateV2::Stake(meta, stake, _) => (meta, stake),
+        _ => return err!(MarginfiError::StakePoolValidationFailed),
+    };
+
+    // Legacy pricing subtracts single-pool's initial non-refundable 1 SOL bootstrap stake.
+    Ok(stake
+        .delegation
+        .stake
+        .checked_sub(1_000_000_000)
+        .ok_or_else(math_error!())?)
 }
 
 fn load_kamino_reserve<'info>(
@@ -333,22 +354,19 @@ impl OraclePriceFeedAdapter {
                 })
             }
             OracleSetup::StakedWithPythPush => {
+                // To be removed once SVSP update is rolled out (likely in 1.10)
+                let uses_onramp = staked_oracle_uses_onramp(bank_config);
                 check!(ais.len() == 4, MarginfiError::WrongNumberOfOracleAccounts);
-
-                let expected_onramp = expected_staked_onramp(bank)?;
 
                 if ais[1].key != &bank_config.oracle_keys[1]
                     || ais[2].key != &bank_config.oracle_keys[2]
-                    || ais[3].key != &expected_onramp
                 {
                     msg!(
-                        "Expected oracle keys: [1] {:?}, [2] {:?}, [3] {:?}, got: [1] {:?}, [2] {:?}, [3] {:?}",
+                        "Expected oracle keys: [1] {:?}, [2] {:?}, got: [1] {:?}, [2] {:?}",
                         bank_config.oracle_keys[1],
                         bank_config.oracle_keys[2],
-                        expected_onramp,
                         ais[1].key,
                         ais[2].key,
-                        ais[3].key
                     );
                     return Err(error!(MarginfiError::WrongOracleAccountKeys));
                 }
@@ -357,13 +375,31 @@ impl OraclePriceFeedAdapter {
                 let lst_supply = lst_mint.supply;
                 check!(lst_supply > 0, MarginfiError::ZeroSupplyInStakePool);
                 check!(
-                    ais[2].owner == &NATIVE_STAKE_ID && ais[3].owner == &NATIVE_STAKE_ID,
+                    ais[2].owner == &NATIVE_STAKE_ID,
                     MarginfiError::StakePoolValidationFailed
                 );
 
-                let rent = Rent::get()?;
-                let sol_pool_adjusted_balance =
-                    staked_pool_net_asset_value(&ais[2], &ais[3], &rent);
+                let expected_onramp = expected_staked_onramp(bank)?;
+                if ais[3].key != &expected_onramp {
+                    msg!(
+                        "Expected staked on-ramp key: {:?}, got: {:?}",
+                        expected_onramp,
+                        ais[3].key
+                    );
+                    return Err(error!(MarginfiError::WrongOracleAccountKeys));
+                }
+                check!(
+                    ais[3].owner == &NATIVE_STAKE_ID,
+                    MarginfiError::StakePoolValidationFailed
+                );
+
+                let sol_pool_adjusted_balance = if uses_onramp {
+                    let rent = Rent::get()?;
+                    staked_pool_net_asset_value(&ais[2], &ais[3], &rent)
+                } else {
+                    // To be removed once SVSP update is rolled out (likely in 1.10)
+                    legacy_staked_pool_delegated_value(&ais[2])?
+                };
                 // Note: exchange rate is `pool_nav / lst_supply`, but we will do the
                 // division last to avoid precision loss. Division does not need to be
                 // decimal-adjusted because both SOL and stake positions use 9 decimals
@@ -967,10 +1003,9 @@ impl OraclePriceFeedAdapter {
         Ok(cache_price)
     }
 
-    /// * lst_mint, stake_pool, sol_pool - required only if configuring
-    ///   `OracleSetup::StakedWithPythPush` initially. The on-ramp PDA is derived from stake_pool
-    ///   and validated from remaining accounts. Subsequent validations of staked banks can omit
-    ///   these.
+    /// * lst_mint, stake_pool, sol_pool, pool_onramp - required only if configuring
+    ///   `OracleSetup::StakedWithPythPush` initially. Subsequent validations of staked banks can
+    ///   omit these.
     pub fn validate_bank_config(
         bank_config: &BankConfig,
         oracle_ais: &[AccountInfo<'_>],
@@ -1067,11 +1102,13 @@ impl OraclePriceFeedAdapter {
                     check_eq!(exp_pool, sol_pool, MarginfiError::StakePoolValidationFailed);
                     let (exp_onramp, _) =
                         Pubkey::find_program_address(&[b"onramp", stake_pool_bytes], program_id);
-                    check_eq!(
-                        bank_config.oracle_keys[3],
-                        exp_onramp,
-                        MarginfiError::StakePoolValidationFailed
-                    );
+                    if bank_config.oracle_keys[3] != Pubkey::default() {
+                        check_eq!(
+                            bank_config.oracle_keys[3],
+                            exp_onramp,
+                            MarginfiError::StakePoolValidationFailed
+                        );
+                    }
 
                     // Sanity check the mint. Note: spl-single-pool uses a classic Token, never Token22
                     check!(
@@ -1808,6 +1845,60 @@ mod tests {
     use super::*;
 
     use anchor_lang::solana_program::account_info::AccountInfo;
+    use anchor_lang::solana_program::stake::{
+        stake_flags::StakeFlags,
+        state::{Authorized, Delegation, Lockup, Meta, Stake, StakeStateV2},
+    };
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    fn test_account_info<'a>(
+        key: &'a Pubkey,
+        lamports: &'a mut u64,
+        data: &'a mut [u8],
+        owner: &'a Pubkey,
+    ) -> AccountInfo<'a> {
+        AccountInfo {
+            key,
+            lamports: Rc::new(RefCell::new(lamports)),
+            data: Rc::new(RefCell::new(data)),
+            owner,
+            rent_epoch: 0,
+            is_signer: false,
+            is_writable: false,
+            executable: false,
+        }
+    }
+
+    fn serialized_stake_account(delegated_stake: u64) -> Vec<u8> {
+        let authority = Pubkey::new_unique();
+        bincode::serialize(&StakeStateV2::Stake(
+            Meta {
+                rent_exempt_reserve: 0,
+                authorized: Authorized::auto(&authority),
+                lockup: Lockup::default(),
+            },
+            Stake {
+                delegation: Delegation {
+                    stake: delegated_stake,
+                    ..Delegation::default()
+                },
+                credits_observed: 0,
+            },
+            StakeFlags::empty(),
+        ))
+        .unwrap()
+    }
+
+    fn adjusted_native_price(price: i64, pool_nav: u64, lst_supply: u64) -> i64 {
+        (price as i128)
+            .checked_mul(pool_nav as i128)
+            .unwrap()
+            .checked_div(lst_supply as i128)
+            .unwrap()
+            .try_into()
+            .unwrap()
+    }
 
     #[test]
     fn staked_pool_nav_includes_onramp_lamports_less_rent() {
@@ -1845,6 +1936,85 @@ mod tests {
             staked_pool_net_asset_value(&stake_ai, &onramp_ai, &rent),
             17_000
         );
+    }
+
+    #[test]
+    fn legacy_staked_price_ignores_onramp_and_underprices_when_onramp_has_lamports() {
+        let rent = Rent::default();
+        let owner = NATIVE_STAKE_ID;
+        let stake_key = Pubkey::new_unique();
+        let onramp_key = Pubkey::new_unique();
+
+        let stake_nav = 100_000_000_000;
+        let onramp_nav = 50_000_000_000;
+        let lst_supply = stake_nav;
+        let sol_price = 170_000_000_000_i64;
+
+        let mut bank_config = BankConfig::default();
+        bank_config.config_flags &= !STAKED_ORACLE_PRICE_USES_ONRAMP;
+        assert!(!staked_oracle_uses_onramp(&bank_config));
+
+        let mut stake_data = serialized_stake_account(stake_nav + 1_000_000_000);
+        let mut onramp_data = vec![0; 200];
+        let mut stake_lamports = rent.minimum_balance(stake_data.len()) + stake_nav;
+        let mut onramp_lamports = rent.minimum_balance(onramp_data.len()) + onramp_nav;
+
+        let stake_ai =
+            test_account_info(&stake_key, &mut stake_lamports, &mut stake_data[..], &owner);
+        let onramp_ai = test_account_info(
+            &onramp_key,
+            &mut onramp_lamports,
+            &mut onramp_data[..],
+            &owner,
+        );
+
+        let legacy_nav = legacy_staked_pool_delegated_value(&stake_ai).unwrap();
+        let canonical_nav = staked_pool_net_asset_value(&stake_ai, &onramp_ai, &rent);
+        let legacy_price = adjusted_native_price(sol_price, legacy_nav, lst_supply);
+        let canonical_price = adjusted_native_price(sol_price, canonical_nav, lst_supply);
+
+        assert_eq!(legacy_nav, stake_nav);
+        assert_eq!(canonical_nav, stake_nav + onramp_nav);
+        assert_eq!(legacy_price, sol_price);
+        assert_eq!(canonical_price, 255_000_000_000);
+        assert!(legacy_price < canonical_price);
+    }
+
+    #[test]
+    fn switched_staked_price_includes_onramp_and_matches_canonical_nav() {
+        let rent = Rent::default();
+        let owner = NATIVE_STAKE_ID;
+        let stake_key = Pubkey::new_unique();
+        let onramp_key = Pubkey::new_unique();
+
+        let stake_nav = 100_000_000_000;
+        let onramp_nav = 50_000_000_000;
+        let lst_supply = stake_nav;
+        let sol_price = 170_000_000_000_i64;
+
+        let mut bank_config = BankConfig::default();
+        bank_config.config_flags |= STAKED_ORACLE_PRICE_USES_ONRAMP;
+        assert!(staked_oracle_uses_onramp(&bank_config));
+
+        let mut stake_data = serialized_stake_account(stake_nav + 1_000_000_000);
+        let mut onramp_data = vec![0; 200];
+        let mut stake_lamports = rent.minimum_balance(stake_data.len()) + stake_nav;
+        let mut onramp_lamports = rent.minimum_balance(onramp_data.len()) + onramp_nav;
+
+        let stake_ai =
+            test_account_info(&stake_key, &mut stake_lamports, &mut stake_data[..], &owner);
+        let onramp_ai = test_account_info(
+            &onramp_key,
+            &mut onramp_lamports,
+            &mut onramp_data[..],
+            &owner,
+        );
+
+        let switched_nav = staked_pool_net_asset_value(&stake_ai, &onramp_ai, &rent);
+        let switched_price = adjusted_native_price(sol_price, switched_nav, lst_supply);
+
+        assert_eq!(switched_nav, stake_nav + onramp_nav);
+        assert_eq!(switched_price, 255_000_000_000);
     }
 
     #[test]

@@ -3,7 +3,7 @@
 use super::staked_pool_utils::derive_single_pool_keys_from_vote_and_validate_owner;
 use crate::{
     check, check_eq,
-    constants::SPL_SINGLE_POOL_ID,
+    constants::{NATIVE_STAKE_ID, SPL_SINGLE_POOL_ID},
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{bank::BankImpl, bank_config::BankConfigImpl, marginfi_group::MarginfiGroupImpl},
@@ -36,6 +36,7 @@ pub fn lending_pool_add_bank_permissionless(
         bank: bank_loader,
         stake_pool,
         sol_pool,
+        pool_onramp,
         validator_vote_account,
         ..
     } = ctx.accounts;
@@ -144,11 +145,20 @@ pub fn lending_pool_add_bank_permissionless(
         sol_pool,
         MarginfiError::StakePoolValidationFailed
     );
+    check_eq!(
+        exp_onramp,
+        pool_onramp.key(),
+        MarginfiError::StakePoolValidationFailed
+    );
+    check!(
+        pool_onramp.owner == &NATIVE_STAKE_ID,
+        MarginfiError::StakePoolValidationFailed
+    );
 
     // Track the validator vote account for staked-collateral metadata.
     bank.integration_acc_1 = validator_vote_account;
 
-    // The mint, stake pool, and on-ramp are recorded for price calculation.
+    // The mint, stake pool, and validated on-ramp are recorded for price calculation.
     bank.config.oracle_keys[1] = lst_mint;
     bank.config.oracle_keys[2] = sol_pool;
     bank.config.oracle_keys[3] = exp_onramp;
@@ -194,6 +204,9 @@ pub struct LendingPoolAddBankPermissionless<'info> {
 
     /// CHECK: Validated using `stake_pool`
     pub sol_pool: UncheckedAccount<'info>,
+
+    /// CHECK: Validated using `stake_pool` and native stake-program ownership.
+    pub pool_onramp: AccountInfo<'info>,
 
     /// CHECK: We validate this is correct backwards, by deriving the PDA of the `bank_mint` using
     /// this key.

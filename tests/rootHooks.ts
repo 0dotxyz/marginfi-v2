@@ -15,7 +15,6 @@ import {
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
-  StakeProgram,
   SystemProgram,
   Transaction,
   VoteInit,
@@ -72,7 +71,6 @@ import {
   findPoolStakeAuthorityAddress,
   SinglePoolProgram,
 } from "@solana/spl-single-pool-classic";
-import { createPoolOnramp } from "./utils/spl-staking-utils";
 
 export const ecosystem: Ecosystem = getGenericEcosystem();
 export let oracles: Oracles = undefined;
@@ -389,20 +387,6 @@ async function createSplStakePoolBankrun(
     [Buffer.from("onramp"), poolKey.toBuffer()],
     SINGLE_POOL_PROGRAM_ID,
   );
-
-  const onrampRent =
-    await bankRunProvider.connection.getMinimumBalanceForRentExemption(
-      StakeProgram.space,
-    );
-  const createOnrampTx = new Transaction().add(
-    SystemProgram.transfer({
-      fromPubkey: payer.publicKey,
-      toPubkey: poolOnramp,
-      lamports: onrampRent,
-    }),
-    createPoolOnramp(validator.voteAccount),
-  );
-  await processBankrunTransaction(bankrunContext, createOnrampTx, [payer]);
 
   if (verbose) {
     console.log(
