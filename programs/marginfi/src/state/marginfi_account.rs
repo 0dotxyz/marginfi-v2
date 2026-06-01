@@ -46,17 +46,19 @@ pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
         OracleSetup::FixedDrift => Ok(2),
         // Fixed + JupLend: bank + lending state (no oracle)
         OracleSetup::FixedJuplend => Ok(2),
+        OracleSetup::StakedWithPythPush => Ok(5),
         _ => get_remaining_accounts_per_asset_tag(bank.config.asset_tag),
     }
 }
 
-/// 5 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool, onramp), 2 for most others (bank, oracle), 3
-/// for Kamino (bank, oracle, reserve), 1 for Fixed
+/// Asset-tag-only account counts are valid only for non-staked banks. Staked banks need bank config
+/// flags to decide whether the on-ramp account is required, so callers must use
+/// `get_remaining_accounts_per_bank`.
 fn get_remaining_accounts_per_asset_tag(asset_tag: u8) -> MarginfiResult<usize> {
     match asset_tag {
         ASSET_TAG_DEFAULT | ASSET_TAG_SOL => Ok(2),
         ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND => Ok(3),
-        ASSET_TAG_STAKED => Ok(5),
+        ASSET_TAG_STAKED => err!(MarginfiError::AssetTagMismatch),
         _ => err!(MarginfiError::AssetTagMismatch),
     }
 }
