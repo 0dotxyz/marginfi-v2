@@ -1,3 +1,9 @@
+#![allow(
+    clippy::diverging_sub_expression,
+    clippy::too_many_arguments,
+    unexpected_cfgs
+)]
+
 pub mod constants;
 pub mod macros;
 pub mod state;

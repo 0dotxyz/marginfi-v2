@@ -57,7 +57,7 @@ import {
   expectFailedTxWithMessage,
 } from "./utils/genericTests";
 import { editGlobalFeeState } from "./utils/group-instructions";
-import { BankrunProvider } from "anchor-bankrun";
+import { BankrunProvider } from "./utils/litesvm";
 import { dummyIx } from "./utils/bankrunConnection";
 
 let program: Program<Marginfi>;

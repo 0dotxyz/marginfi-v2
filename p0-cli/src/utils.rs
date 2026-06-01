@@ -1,8 +1,10 @@
 use {
     crate::config::{Config, TxMode},
+    anchor_client::anchor_lang::AccountDeserialize,
     anyhow::{bail, Context, Result},
     fixed::types::I80F48,
     fixed_macro::types::I80F48,
+    kamino_mocks::kamino_lending_complete::accounts::Reserve as KaminoReserve,
     marginfi::{bank_authority_seed, bank_seed, state::bank::BankVaultType},
     marginfi_type_crate::{
         constants::{
@@ -16,18 +18,18 @@ use {
         },
         types::{Bank, MarginfiAccount, OracleSetup},
     },
+    solana_address_lookup_table_interface::state::AddressLookupTable,
     solana_client::rpc_client::RpcClient,
+    solana_compute_budget_interface::ComputeBudgetInstruction,
     solana_sdk::{
-        address_lookup_table::{state::AddressLookupTable, AddressLookupTableAccount},
-        compute_budget::ComputeBudgetInstruction,
         hash::{hash, hashv},
         instruction::{AccountMeta, Instruction},
-        message::{v0, VersionedMessage},
+        message::{v0, AddressLookupTableAccount, VersionedMessage},
         pubkey::Pubkey,
         signature::{Keypair, Signature},
-        system_instruction,
         transaction::VersionedTransaction,
     },
+    solana_system_interface::instruction as system_instruction,
     std::collections::HashMap,
 };
 
@@ -84,6 +86,90 @@ fn load_lookup_tables(
     }
 
     Ok(out)
+}
+
+pub fn load_kamino_reserve(rpc_client: &RpcClient, reserve: Pubkey) -> Result<KaminoReserve> {
+    let reserve_data = rpc_client
+        .get_account_data(&reserve)
+        .with_context(|| format!("failed to fetch Kamino reserve account {reserve}"))?;
+    KaminoReserve::try_deserialize(&mut reserve_data.as_slice())
+        .map_err(|e| anyhow::anyhow!("failed to deserialize Kamino reserve account {reserve}: {e}"))
+}
+
+pub fn get_oracle_setup(
+    reserve: &KaminoReserve,
+) -> (
+    Option<Pubkey>,
+    Option<Pubkey>,
+    Option<Pubkey>,
+    Option<Pubkey>,
+) {
+    (
+        none_if_default(reserve.config.token_info.pyth_configuration.price),
+        none_if_default(
+            reserve
+                .config
+                .token_info
+                .switchboard_configuration
+                .price_aggregator,
+        ),
+        none_if_default(
+            reserve
+                .config
+                .token_info
+                .switchboard_configuration
+                .twap_aggregator,
+        ),
+        none_if_default(reserve.config.token_info.scope_configuration.price_feed),
+    )
+}
+
+fn none_if_default(pk: Pubkey) -> Option<Pubkey> {
+    (pk != Pubkey::default()).then_some(pk)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_oracle_setup_reads_kamino_reserve_token_info() {
+        let mut reserve: KaminoReserve = unsafe { std::mem::zeroed() };
+        let pyth_oracle = Pubkey::new_unique();
+        let switchboard_price_oracle = Pubkey::new_unique();
+        let switchboard_twap_oracle = Pubkey::new_unique();
+        let scope_prices = Pubkey::new_unique();
+
+        reserve.config.token_info.pyth_configuration.price = pyth_oracle;
+        reserve
+            .config
+            .token_info
+            .switchboard_configuration
+            .price_aggregator = switchboard_price_oracle;
+        reserve
+            .config
+            .token_info
+            .switchboard_configuration
+            .twap_aggregator = switchboard_twap_oracle;
+        reserve.config.token_info.scope_configuration.price_feed = scope_prices;
+
+        assert_eq!(
+            get_oracle_setup(&reserve),
+            (
+                Some(pyth_oracle),
+                Some(switchboard_price_oracle),
+                Some(switchboard_twap_oracle),
+                Some(scope_prices)
+            )
+        );
+    }
+
+    #[test]
+    fn get_oracle_setup_omits_default_pubkeys() {
+        let reserve: KaminoReserve = unsafe { std::mem::zeroed() };
+
+        assert_eq!(get_oracle_setup(&reserve), (None, None, None, None));
+    }
 }
 
 /// Build, simulate, and either sign/send (default) or output unsigned base58 (--no-send-tx).

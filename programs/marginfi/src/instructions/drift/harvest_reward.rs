@@ -22,14 +22,14 @@ use marginfi_type_crate::{
 /// - Checks that harvest spot market does not match the bank's spot market
 /// - Checks that harvest spot market mint does not match bank's mint
 /// - Checks that the harvest spot market has a balance in index 2 - 7 on the user account
-///     The only possible exception to index 2-7 is if someone rewards USDC usage which is unlikely.
+///   The only possible exception to index 2-7 is if someone rewards USDC usage which is unlikely.
 ///
 /// Remaining accounts should be passed in the order required by Drift's withdraw instruction:
 /// 1. Oracle accounts (optional)
 /// 2. Spot market accounts (always required)
 /// 3. Token mint (required for Token-2022)
 pub fn drift_harvest_reward<'info>(
-    ctx: Context<'_, '_, 'info, 'info, DriftHarvestReward<'info>>,
+    ctx: Context<'info, DriftHarvestReward<'info>>,
 ) -> MarginfiResult {
     let spot_market_index = {
         let harvest_spot_market = ctx.accounts.harvest_drift_spot_market.load()?;
@@ -159,7 +159,7 @@ impl<'info> DriftHarvestReward<'info> {
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), bump);
 
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds)
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds)
             .with_remaining_accounts(remaining_accounts.to_vec());
 
         withdraw(cpi_ctx, market_index, u64::MAX, true)?;
@@ -178,7 +178,7 @@ impl<'info> DriftHarvestReward<'info> {
         let bump = self.bank.load()?.liquidity_vault_authority_bump;
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), bump);
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
 
         let decimals = self.reward_mint.decimals;
         // Transfer entire balance

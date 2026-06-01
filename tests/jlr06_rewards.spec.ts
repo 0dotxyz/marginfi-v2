@@ -43,17 +43,20 @@ import {
 import type { JuplendPoolKeys } from "./utils/juplend/types";
 import { JUPLEND_STATE_KEYS } from "./utils/juplend/test-state";
 import { makeJuplendDepositIx } from "./utils/juplend/user-instructions";
+import { EXCHANGE_PRICES_PRECISION_BN } from "./utils/juplend/constants";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import {
   advanceBankrunClock,
   buildHealthRemainingAccounts,
   getUserAssetShares,
+  bnToBigIntSafe,
   mintToTokenAccount,
   processBankrunTransaction,
+  toI80Scaled,
 } from "./utils/tools";
 import { accountInit, healthPulse } from "./utils/user-instructions";
 
-const EXCHANGE_PRICES_PRECISION = new BN("1000000000000");
+const EXCHANGE_PRICES_PRECISION = EXCHANGE_PRICES_PRECISION_BN;
 const USER_0_ACCOUNT_SEED = Buffer.from("JLR06_USER0_ACCOUNT_SEED_0000000");
 const USER_1_ACCOUNT_SEED = Buffer.from("JLR06_USER1_ACCOUNT_SEED_0000000");
 const userMarginfiAccounts = [
@@ -70,6 +73,7 @@ const HALF_ACCRUAL_SECONDS = REWARD_ACCRUAL_SECONDS_TOTAL / 2;
 const USER_DEPOSIT_AMOUNT_BN = usdc(100000);
 const USER_DEPOSIT_AMOUNT = USER_DEPOSIT_AMOUNT_BN.toNumber();
 const REWARD_AMOUNT = usdc(24);
+const I80F48_SCALE_NUMBER = 2 ** 48;
 
 const oneUsdc = new BN(10 ** ecosystem.usdcDecimals);
 const totalWindowRewards = REWARD_AMOUNT.mul(
@@ -243,11 +247,18 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
     // i.e. Share value > 1 at this point due to minor interest accrued
     assert.isAbove(USER_DEPOSIT_AMOUNT_BN.toNumber(), user0Shares.toNumber());
 
-    const bankAfterDeposit = await bankrunProgram.account.bank.fetch(usdcJupBankPk);
+    const bankAfterDeposit = await bankrunProgram.account.bank.fetch(
+      usdcJupBankPk,
+    );
     cacheMultiplierBeforeAccrual = wrappedI80F48toBigNumber(
       bankAfterDeposit.cache.priceMultiplier,
     );
-    assertI80F48Approx(bankAfterDeposit.cache.lastOraclePrice, oracles.usdcPrice, 0.000001);
+    assert.approximately(
+      Number(toI80Scaled(bankAfterDeposit.cache.lastOraclePrice)) /
+        I80F48_SCALE_NUMBER,
+      oracles.usdcPrice,
+      0.000001,
+    );
   });
 
   it("(admin) starts rewards - 24 USDC per day", async () => {
@@ -325,9 +336,11 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
       USER_DEPOSIT_AMOUNT,
     );
 
-    const bankMidAccrual = await bankrunProgram.account.bank.fetch(usdcJupBankPk);
+    const bankMidAccrual = await bankrunProgram.account.bank.fetch(
+      usdcJupBankPk,
+    );
     const expectedMidCacheMultiplier =
-      Number(exchangePriceMidAccrual.toString()) /
+      Number(bnToBigIntSafe(exchangePriceMidAccrual)) /
       Number(EXCHANGE_PRICES_PRECISION.toString());
     assertI80F48Approx(
       bankMidAccrual.cache.priceMultiplier,
@@ -338,7 +351,12 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
       bankMidAccrual.cache.priceMultiplier,
     );
     assert.isTrue(cacheMultiplierMidAccrual.gte(cacheMultiplierBeforeAccrual));
-    assertI80F48Approx(bankMidAccrual.cache.lastOraclePrice, oracles.usdcPrice, 0.000001);
+    assert.approximately(
+      Number(toI80Scaled(bankMidAccrual.cache.lastOraclePrice)) /
+        I80F48_SCALE_NUMBER,
+      oracles.usdcPrice,
+      0.000001,
+    );
 
     const user1Shares = await getUserAssetShares(user1mrgnAcc, usdcJupBankPk);
     if (verbose) {
@@ -444,10 +462,12 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
     const exchangePriceAfterAccrual = lendingAfterAccrual.tokenExchangePrice;
     assertBNGreaterThan(exchangePriceAfterAccrual, exchangePriceMidAccrual);
 
-    const bankAfterAccrual = await bankrunProgram.account.bank.fetch(usdcJupBankPk);
+    const bankAfterAccrual = await bankrunProgram.account.bank.fetch(
+      usdcJupBankPk,
+    );
     const expectedAfterCacheMultiplier =
-      Number(exchangePriceAfterAccrual.toString()) /
-      Number(EXCHANGE_PRICES_PRECISION.toString());
+      Number(bnToBigIntSafe(exchangePriceAfterAccrual)) /
+      Number(bnToBigIntSafe(EXCHANGE_PRICES_PRECISION).toString());
     assertI80F48Approx(
       bankAfterAccrual.cache.priceMultiplier,
       expectedAfterCacheMultiplier,
@@ -457,7 +477,12 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
       bankAfterAccrual.cache.priceMultiplier,
     );
     assert.isTrue(cacheMultiplierAfterAccrual.gte(cacheMultiplierMidAccrual));
-    assertI80F48Approx(bankAfterAccrual.cache.lastOraclePrice, oracles.usdcPrice, 0.000001);
+    assert.approximately(
+      Number(toI80Scaled(bankAfterAccrual.cache.lastOraclePrice)) /
+        I80F48_SCALE_NUMBER,
+      oracles.usdcPrice,
+      0.000001,
+    );
 
     const user1AccountAfterSecondHalfPulse =
       await bankrunProgram.account.marginfiAccount.fetch(user1mrgnAccount);

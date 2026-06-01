@@ -19,7 +19,7 @@ use crate::{
     },
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{clock::Clock, sysvar::Sysvar};
+use anchor_lang::solana_program::clock::Clock;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
@@ -39,7 +39,7 @@ use marginfi_type_crate::{
 ///
 /// Will error if there is an existing asset <=> withdrawing is not allowed.
 pub fn lending_account_borrow<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, LendingAccountBorrow<'info>>,
+    mut ctx: Context<'info, LendingAccountBorrow<'info>>,
     amount: u64,
 ) -> MarginfiResult {
     let LendingAccountBorrow {
@@ -289,7 +289,7 @@ pub struct LendingAccountBorrow<'info> {
         ],
         bump = bank.load() ?.liquidity_vault_authority_bump,
     )]
-    pub bank_liquidity_vault_authority: AccountInfo<'info>,
+    pub bank_liquidity_vault_authority: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,

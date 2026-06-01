@@ -1,7 +1,6 @@
 use crate::state::bank::BankVaultType;
 use crate::utils::is_kamino_asset_tag;
 use crate::{bank_signer, optional_account, MarginfiError, MarginfiResult};
-use anchor_lang::solana_program::sysvar;
 use anchor_lang::{prelude::*, system_program};
 use anchor_spl::token::Token;
 use anchor_spl::token_interface::{
@@ -170,7 +169,7 @@ pub struct KaminoInitObligation<'info> {
     pub liquidity_token_program: Interface<'info, TokenInterface>,
 
     /// CHECK: validated against hardcoded program id
-    #[account(address = sysvar::instructions::ID)]
+    #[account(address = solana_instructions_sysvar::ID)]
     pub instruction_sysvar_account: UncheckedAccount<'info>,
 
     pub rent: Sysvar<'info, Rent>,
@@ -181,7 +180,7 @@ impl<'info> KaminoInitObligation<'info> {
     pub fn cpi_refresh_reserve(&self) -> MarginfiResult {
         let accounts = RefreshReservesBatch {};
         let program = self.kamino_program.to_account_info();
-        let cpi_ctx = CpiContext::new(program, accounts).with_remaining_accounts(vec![
+        let cpi_ctx = CpiContext::new(program.key(), accounts).with_remaining_accounts(vec![
             self.integration_acc_1.to_account_info(),
             self.lending_market.to_account_info(),
         ]);
@@ -202,7 +201,7 @@ impl<'info> KaminoInitObligation<'info> {
         let bump = self.bank.load()?.liquidity_vault_authority_bump;
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), bump);
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         // This is a non account, we handle our own LUTs separately
         let user_lookup_table = Pubkey::default();
         init_user_metadata(cpi_ctx, user_lookup_table)?;
@@ -225,7 +224,7 @@ impl<'info> KaminoInitObligation<'info> {
         let bump = self.bank.load()?.liquidity_vault_authority_bump;
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), bump);
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         let args = InitObligationArgs { id: 0, tag: 0 };
         init_obligation(cpi_ctx, args)?;
         Ok(())
@@ -237,7 +236,7 @@ impl<'info> KaminoInitObligation<'info> {
             obligation: self.integration_acc_2.to_account_info(),
         };
         let program = self.kamino_program.to_account_info();
-        let cpi_ctx = CpiContext::new(program, accounts);
+        let cpi_ctx = CpiContext::new(program.key(), accounts);
         refresh_obligation(cpi_ctx)?;
         Ok(())
     }
@@ -250,7 +249,7 @@ impl<'info> KaminoInitObligation<'info> {
             authority: self.fee_payer.to_account_info(),
             mint: self.mint.to_account_info(),
         };
-        let cpi_ctx = CpiContext::new(program, accounts);
+        let cpi_ctx = CpiContext::new(program.key(), accounts);
         let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())
@@ -274,7 +273,7 @@ impl<'info> KaminoInitObligation<'info> {
         let bump = self.bank.load()?.liquidity_vault_authority_bump;
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), bump);
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         // mode 0 = collateral
         init_obligation_farms_for_reserve(cpi_ctx, 0)?;
         Ok(())
@@ -316,7 +315,7 @@ impl<'info> KaminoInitObligation<'info> {
         let bump = self.bank.load()?.liquidity_vault_authority_bump;
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), bump);
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         deposit_reserve_liquidity_and_obligation_collateral_v2(cpi_ctx, amount)?;
         Ok(())
     }

@@ -6,47 +6,37 @@ use {
         utils::{
             build_kamino_refresh_obligation_ix, build_kamino_refresh_reserve_ix,
             derive_juplend_cpi_accounts, find_bank_vault_authority_pda, find_fee_state_pda,
-            load_observation_account_metas, load_observation_account_metas_close_last, send_tx,
-            EXP_10_I80F48,
+            get_oracle_setup, load_kamino_reserve, load_observation_account_metas,
+            load_observation_account_metas_close_last, send_tx, EXP_10_I80F48,
         },
     },
     anchor_client::anchor_lang::{InstructionData, ToAccountMetas},
     anyhow::Result,
     fixed::types::I80F48,
+    kamino_mocks::kamino_lending_complete::accounts::Reserve as KaminoReserve,
     marginfi::state::bank::BankVaultType,
     marginfi_type_crate::{
         pdas::{DRIFT_PROGRAM_ID, FARMS_PROGRAM_ID, JUPLEND_LENDING_PROGRAM_ID, KAMINO_PROGRAM_ID},
-        types::{Bank, MarginfiAccount, OracleSetup},
+        types::{Bank, MarginfiAccount},
     },
     solana_sdk::{
         instruction::{AccountMeta, Instruction},
         pubkey::Pubkey,
-        system_program, sysvar,
+        sysvar,
     },
+    solana_system_interface::program as system_program,
     std::collections::HashMap,
 };
 
-fn kamino_refresh_oracle_accounts(
-    bank: &Bank,
-) -> (
-    Option<Pubkey>,
-    Option<Pubkey>,
-    Option<Pubkey>,
-    Option<Pubkey>,
-) {
-    let keys = &bank.config.oracle_keys;
-    match bank.config.oracle_setup {
-        OracleSetup::KaminoPythPush => (Some(keys[0]), None, None, None),
-        OracleSetup::KaminoSwitchboardPull => (None, None, None, Some(keys[0])),
-        _ => (None, None, None, None),
-    }
-}
-
 /// Build the pair of Kamino refresh instructions (refreshReserve + refreshObligation)
 /// that must be prepended before any Kamino deposit or withdraw.
-fn build_kamino_refresh_ixs(bank: &Bank, lending_market: Pubkey) -> Vec<Instruction> {
+fn build_kamino_refresh_ixs(
+    bank: &Bank,
+    lending_market: Pubkey,
+    reserve_state: &KaminoReserve,
+) -> Vec<Instruction> {
     let (pyth_oracle, switchboard_price, switchboard_twap, scope_prices) =
-        kamino_refresh_oracle_accounts(bank);
+        get_oracle_setup(reserve_state);
     let reserve = bank.integration_acc_1;
     let obligation = bank.integration_acc_2;
 
@@ -387,7 +377,8 @@ pub fn kamino_deposit(
     };
 
     // Prepend Kamino refresh instructions to ensure reserve/obligation are non-stale
-    let mut ixs = build_kamino_refresh_ixs(&bank, lending_market);
+    let reserve_state = load_kamino_reserve(&rpc_client, bank.integration_acc_1)?;
+    let mut ixs = build_kamino_refresh_ixs(&bank, lending_market, &reserve_state);
     ixs.push(ix);
 
     let signing_keypairs = config.get_signers(false);
@@ -491,7 +482,8 @@ pub fn kamino_withdraw(
     let create_ata_ix = build_signer_ata_ix(config, &authority, &bank.mint, &token_program);
 
     // Prepend Kamino refresh instructions to ensure reserve/obligation are non-stale
-    let mut ixs = build_kamino_refresh_ixs(&bank, lending_market);
+    let reserve_state = load_kamino_reserve(&rpc_client, bank.integration_acc_1)?;
+    let mut ixs = build_kamino_refresh_ixs(&bank, lending_market, &reserve_state);
     ixs.push(create_ata_ix);
     ixs.push(ix);
 

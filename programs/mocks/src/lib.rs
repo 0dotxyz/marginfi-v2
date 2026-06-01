@@ -1,3 +1,5 @@
+#![allow(clippy::diverging_sub_expression)]
+
 use anchor_lang::prelude::*;
 
 pub mod errors;
@@ -29,7 +31,7 @@ pub mod mocks {
 
     /// Execute an exchange of a:b like-jupiter. You set the amount a sent and b received.
     pub fn swap_like_jupiter<'info>(
-        ctx: Context<'_, '_, '_, 'info, SwapLikeJupiter<'info>>,
+        ctx: Context<'info, SwapLikeJupiter<'info>>,
         amt_a: u64,
         amt_b: u64,
     ) -> Result<()> {
@@ -66,14 +68,14 @@ pub mod mocks {
 
     /// Start a liquidation via CPI
     pub fn start_liquidation_via_cpi<'info>(
-        ctx: Context<'_, '_, 'info, 'info, StartLiquidationViaCpi<'info>>,
+        ctx: Context<'info, StartLiquidationViaCpi<'info>>,
     ) -> Result<()> {
         instructions::start_liquidate::StartLiquidationViaCpi::start_liquidation_via_cpi(ctx)
     }
 
     /// Handle bankruptcy via CPI
     pub fn handle_bankruptcy<'info>(
-        ctx: Context<'_, '_, 'info, 'info, HandleBankruptcyViaCpi<'info>>,
+        ctx: Context<'info, HandleBankruptcyViaCpi<'info>>,
     ) -> Result<()> {
         instructions::handle_bankruptcy::HandleBankruptcyViaCpi::handle_bankruptcy_via_cpi(ctx)
     }

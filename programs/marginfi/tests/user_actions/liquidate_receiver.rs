@@ -13,9 +13,9 @@ use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
     types::{Bank, BankConfigOpt, ACCOUNT_IN_RECEIVERSHIP},
 };
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
 use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction,
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signature::Keypair,
@@ -1759,7 +1759,7 @@ async fn liquidate_receiver_other_account_close_balance_via_cpi_does_not_clear_b
             AccountMeta::new(sol_bank.key, false),
             AccountMeta::new_readonly(marginfi::ID, false),
         ],
-        data: kamino_mocks::CPI_CLOSE_BALANCE_IX_DATA.to_vec(),
+        data: kamino_mocks::instruction::CloseBalanceViaCpi {}.data(),
     };
 
     let end_ix = liquidatee

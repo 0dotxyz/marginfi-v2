@@ -479,10 +479,12 @@ async function addGenericKaminoBank(
     bankKey,
   );
   const [obligation] = deriveBaseObligation(liquidityVaultAuthority, market);
-  const [userState] = PublicKey.findProgramAddressSync(
-    [Buffer.from("user"), farmState.toBuffer(), obligation.toBuffer()],
-    FARMS_PROGRAM_ID,
-  );
+  const [userState] = farmState
+    ? PublicKey.findProgramAddressSync(
+        [Buffer.from("user"), farmState.toBuffer(), obligation.toBuffer()],
+        FARMS_PROGRAM_ID,
+      )
+    : [null];
   // console.log("farm state passed: " + farmState + " user " + userState);
 
   await processBankrunTransaction(bankrunContext, initBankTx, [

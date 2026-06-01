@@ -2,16 +2,25 @@
 
 New developer getting started working on the mrgnv2 program side? Read on.
 
-## Things to Install (January 2026)
+## Things to Install (May 2026)
 
-- rust toolchain - 1.79.0
-- node - 24.15.0
-- yarn - 4.14.1 (via Corepack)
-- avm - 0.30.1 or later
-- anchor - 0.31.1
-- solana - 2.1.20
-- cargo-nextest - use `cargo install cargo-nextest --version "0.9.81" --locked` exactly
+- Rust toolchain - 1.90.0 (`rust-toolchain.toml`)
+- Node - 24.15.0
+- Yarn - 4.14.1 (via Corepack)
+- Anchor CLI - 1.0.2 (`Anchor.toml`)
+- Agave/Solana CLI - 3.1.11 (`Anchor.toml`)
+- cargo-nextest - 0.9.81
 - cargo-fuzz - 0.12.0
+
+Rust/Solana/Anchor setup:
+
+```
+rustup toolchain install 1.90.0
+sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.11/install)"
+cargo install anchor-cli --version "1.0.2" --locked
+cargo install cargo-nextest --version "0.9.81" --locked
+cargo install cargo-fuzz --version "0.12.0" --locked
+```
 
 Node/Yarn setup (recommended):
 
@@ -47,7 +56,7 @@ Segmentation fault? Just try again. That happens sometimes, generally on the fir
 Sometimes it happens on the CI pipeline as well, just kick it again it that occurs.
 
 Each letter prefix is referred to as a "suite" and is broadly end-to-end. The localnet tests
-multithread with bankrun will create a fairly substantial CPU load. Completetion varies
+run through LiteSVM will create a fairly substantial CPU load. Completetion varies
 substantially by hardware. If you your workflow is too slow, go to this portion of `Anchor.toml` and
 comment out the top line, comment in the suite you actually want to run:
 
@@ -201,8 +210,8 @@ let blockhash = {
 Usually manifests as something like:
 
 ```
-Starting bankrun with pure bankrun setup...
-thread 'tokio-runtime-worker' panicked at /usr/local/cargo/registry/src/index.crates.io-6f17d22bba15001f/solana-program-test-1.18.0/src/lib.rs:716:17:
+Starting LiteSVM setup...
+thread 'tokio-runtime-worker' panicked at /usr/local/cargo/registry/src/index.crates.io-.../solana-program-test-3.1.11/src/lib.rs:...:
 Program file data not available <SOME GARBAGE>
 ```
 
@@ -213,7 +222,7 @@ Run `lsof -i :8899` to find the validator and then `kill -9 VALIDATOR_PID
 Usually manifests as:
 
 ```
-thread '...' panicked at .../solana-program-test-2.1.20/src/lib.rs:745:17:
+thread '...' panicked at .../solana-program-test-3.1.11/src/lib.rs:...:
 Program file data not available for marginfi (MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA)
 ```
 

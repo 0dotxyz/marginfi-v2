@@ -587,15 +587,11 @@ describe("Bank e2e sunset due to illiquid asset", () => {
       getTokenBalance(bankRunProvider, liqVault),
     ]);
 
-    const sharesBefore = wrappedI80F48toBigNumber(
-      bankBefore.totalAssetShares
-    ).toNumber();
-    const sharesAfter = wrappedI80F48toBigNumber(
-      bankAfter.totalAssetShares
-    ).toNumber();
+    const sharesBefore = wrappedI80F48toBigNumber(bankBefore.totalAssetShares);
+    const sharesAfter = wrappedI80F48toBigNumber(bankAfter.totalAssetShares);
     if (verbose) {
       console.log(
-        "asset shares before: " + sharesBefore + " after " + sharesAfter
+        "asset shares before: " + sharesBefore.toString() + " after " + sharesAfter.toString()
       );
       console.log("user before: " + lstBefore + " after: " + lstAfter);
     }
@@ -608,8 +604,8 @@ describe("Bank e2e sunset due to illiquid asset", () => {
     assert.equal(userBefore.lendingAccount.balances[0].active, 1);
     assert.equal(userAfter.lendingAccount.balances[0].active, 0);
     // Before we have user 1 and 2's balances, after all that's left is user 2's balance.
-    assert.equal(sharesBefore, 100 * 10 ** 9 + 42);
-    assert.equal(sharesAfter, 42);
+    assertI80F48Equal(bankBefore.totalAssetShares, new BN(100 * 10 ** 9 + 42));
+    assertI80F48Equal(bankAfter.totalAssetShares, new BN(42));
   });
 
   // Here the admin would fund some "claims portal" using the proceeds it secured earlier to make

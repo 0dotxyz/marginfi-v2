@@ -46,7 +46,7 @@ import {
   bigNumberToWrappedI80F48,
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
-import { Clock } from "solana-bankrun";
+import { Clock } from "./utils/litesvm";
 import { genericMultiBankTestSetup } from "./genericSetups";
 import {
   assertBankrunTxFailed,

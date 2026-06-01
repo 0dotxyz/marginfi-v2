@@ -1,16 +1,17 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::hash::hashv;
 use anchor_lang::solana_program::instruction::Instruction;
 use anchor_lang::system_program;
 use anchor_lang::Discriminator;
 use anchor_spl::token::spl_token;
 use anchor_spl::token_2022::spl_token_2022::extension::transfer_fee::MAX_FEE_BASIS_POINTS;
 use marginfi::constants::SWITCHBOARD_PULL_ID;
+use marginfi::oracle_compat::pyth::{
+    FeedId, PriceFeedMessage, PriceUpdateV2, VerificationLevel, PYTH_PUSH_ORACLE_ID,
+};
 use marginfi_type_crate::constants::{EXECUTE_ORDER_SEED, ORDER_SEED};
-use pyth_solana_receiver_sdk::price_update::FeedId;
-use pyth_solana_receiver_sdk::price_update::PriceUpdateV2;
-use pyth_solana_receiver_sdk::price_update::VerificationLevel;
+use solana_address::Address;
 use solana_cli_output::CliAccount;
+use solana_program::{hash::hashv, program_option::COption, program_pack::Pack};
 use solana_program_test::*;
 use solana_sdk::account::ReadableAccount;
 use solana_sdk::account::WritableAccount;
@@ -18,7 +19,6 @@ use solana_sdk::{
     account::Account, account::AccountSharedData, hash::Hash, pubkey::Pubkey, rent::Rent,
     signature::Keypair,
 };
-use spl_token::solana_program::program_pack::Pack;
 use spl_token::state::{Account as SplAccount, AccountState, Mint as SplMint};
 use std::fs::File;
 use std::io::Read;
@@ -65,7 +65,7 @@ pub fn create_pyth_push_oracle_account_from_bytes(data: Vec<u8>) -> Account {
     Account {
         lamports: 1_000_000,
         data,
-        owner: pyth_solana_receiver_sdk::ID,
+        owner: PYTH_PUSH_ORACLE_ID,
         executable: false,
         rent_epoch: 361,
     }
@@ -81,9 +81,9 @@ pub fn create_pyth_push_oracle_account(
     let native_price = (ui_price * 10_f64.powf(mint_decimals as f64)) as i64;
 
     let price_update = PriceUpdateV2 {
-        write_authority: Pubkey::default(),
+        write_authority: Pubkey::new_from_array(Address::default().to_bytes()),
         verification_level,
-        price_message: pyth_solana_receiver_sdk::price_update::PriceFeedMessage {
+        price_message: PriceFeedMessage {
             feed_id,
             price: native_price,
             conf: 0,
@@ -160,7 +160,7 @@ pub async fn create_spl_mint_account_if_missing(
     }
 
     let mint = SplMint {
-        mint_authority: spl_token::solana_program::program_option::COption::Some(authority),
+        mint_authority: COption::Some(authority),
         supply,
         decimals,
         is_initialized: true,
@@ -234,14 +234,14 @@ macro_rules! assert_custom_error {
             solana_program_test::BanksClientError::TransactionError(
                 solana_sdk::transaction::TransactionError::InstructionError(
                     _,
-                    anchor_lang::solana_program::instruction::InstructionError::Custom(n),
+                    solana_sdk::instruction::InstructionError::Custom(n),
                 ),
             )
             // simulation (preflight) error
             | solana_program_test::BanksClientError::SimulationError {
                 err: solana_sdk::transaction::TransactionError::InstructionError(
                     _,
-                    anchor_lang::solana_program::instruction::InstructionError::Custom(n),
+                    solana_sdk::instruction::InstructionError::Custom(n),
                 ),
                 ..
             } => {
@@ -261,14 +261,14 @@ macro_rules! assert_anchor_error {
             solana_program_test::BanksClientError::TransactionError(
                 solana_sdk::transaction::TransactionError::InstructionError(
                     _,
-                    anchor_lang::solana_program::instruction::InstructionError::Custom(n),
+                    solana_sdk::instruction::InstructionError::Custom(n),
                 ),
             )
             // simulation (preflight) failure
             | solana_program_test::BanksClientError::SimulationError {
                 err: solana_sdk::transaction::TransactionError::InstructionError(
                     _,
-                    anchor_lang::solana_program::instruction::InstructionError::Custom(n),
+                    solana_sdk::instruction::InstructionError::Custom(n),
                 ),
                 ..
             } => {
@@ -451,7 +451,7 @@ macro_rules! f_native {
 }
 
 pub fn clone_keypair(keypair: &Keypair) -> Keypair {
-    Keypair::from_bytes(&keypair.to_bytes()).unwrap()
+    keypair.insecure_clone()
 }
 
 pub fn get_max_deposit_amount_pre_fee(amount: f64) -> f64 {
@@ -495,7 +495,7 @@ pub fn find_order_pda(marginfi_account: &Pubkey, bank_keys: &[Pubkey]) -> (Pubke
     let hash = keys_sha256_hash(bank_keys);
     Pubkey::find_program_address(
         &[ORDER_SEED.as_bytes(), marginfi_account.as_ref(), &hash],
-        &marginfi::ID,
+        &Address::new_from_array(marginfi::ID.to_bytes()),
     )
 }
 

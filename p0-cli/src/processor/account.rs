@@ -33,8 +33,9 @@ use {
         pubkey::Pubkey,
         signature::Keypair,
         signer::Signer,
-        system_program, sysvar,
+        sysvar,
     },
+    solana_system_interface::program as system_program,
     spl_associated_token_account::instruction::create_associated_token_account_idempotent,
     std::{collections::HashMap, fs, path::PathBuf, str::FromStr},
 };
@@ -178,9 +179,7 @@ pub fn marginfi_account_list(profile: Profile, config: &Config) -> Result<()> {
     }
 
     for (address, marginfi_account) in &accounts {
-        let is_default = profile
-            .marginfi_account
-            .map_or(false, |default_account| default_account == *address);
+        let is_default = profile.marginfi_account == Some(*address);
         output::print_account_detail(*address, marginfi_account, &banks, is_default, json);
     }
 

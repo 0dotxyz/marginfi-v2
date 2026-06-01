@@ -171,7 +171,7 @@ pub struct JuplendDeposit<'info> {
 
     /// Owned by authority, the source account for the token deposit.
     #[account(mut)]
-    pub signer_token_account: InterfaceAccount<'info, TokenAccount>,
+    pub signer_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// The bank's liquidity vault authority PDA (acts as signer for JupLend CPIs).
     /// NOTE: JupLend marks the signer as writable in their deposit instruction.
@@ -187,7 +187,7 @@ pub struct JuplendDeposit<'info> {
 
     /// Bank liquidity vault (holds underlying mint and is used as depositor_token_account).
     #[account(mut)]
-    pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
+    pub liquidity_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Underlying mint.
     pub mint: Box<InterfaceAccount<'info, Mint>>,
@@ -202,7 +202,7 @@ pub struct JuplendDeposit<'info> {
 
     /// Bank's fToken vault (validated via has_one on bank).
     #[account(mut)]
-    pub integration_acc_2: InterfaceAccount<'info, TokenAccount>,
+    pub integration_acc_2: Box<InterfaceAccount<'info, TokenAccount>>,
 
     // ---- JupLend CPI accounts ----
     /// CHECK: validated by the JupLend program
@@ -252,7 +252,7 @@ impl<'info> JuplendDeposit<'info> {
             authority: self.authority.to_account_info(),
             mint: self.mint.to_account_info(),
         };
-        let cpi_ctx = CpiContext::new(program, accounts);
+        let cpi_ctx = CpiContext::new(program.key(), accounts);
         transfer_checked(cpi_ctx, amount, self.mint.decimals)?;
         Ok(())
     }
@@ -265,7 +265,7 @@ impl<'info> JuplendDeposit<'info> {
             supply_token_reserves_liquidity: self.supply_token_reserves_liquidity.to_account_info(),
             rewards_rate_model: self.rewards_rate_model.to_account_info(),
         };
-        let cpi_ctx = CpiContext::new(self.juplend_program.to_account_info(), accounts);
+        let cpi_ctx = CpiContext::new(self.juplend_program.key(), accounts);
         update_rate(cpi_ctx)?;
         Ok(())
     }
@@ -296,11 +296,8 @@ impl<'info> JuplendDeposit<'info> {
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
 
-        let cpi_ctx = CpiContext::new_with_signer(
-            self.juplend_program.to_account_info(),
-            accounts,
-            signer_seeds,
-        );
+        let cpi_ctx =
+            CpiContext::new_with_signer(self.juplend_program.key(), accounts, signer_seeds);
         deposit(cpi_ctx, amount)?;
         Ok(())
     }

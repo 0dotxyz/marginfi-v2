@@ -1,20 +1,27 @@
 import type { AnchorProvider } from "@coral-xyz/anchor";
-import { WrappedI80F48, wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
+import {
+  WrappedI80F48,
+  wrappedI80F48toBigNumber,
+} from "@mrgnlabs/mrgn-common";
 import type { RawAccount } from "@solana/spl-token";
 import { AccountLayout } from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
-import { BankrunProvider } from "anchor-bankrun";
+import { BankrunProvider } from "./litesvm";
 import BigNumber from "bignumber.js";
 import BN from "bn.js";
 import { assert } from "chai";
 import {
   BanksTransactionMeta,
   BanksTransactionResultWithMeta,
-} from "solana-bankrun";
+} from "./litesvm";
 import {
   WrappedI68F60 as WrappedU68F60,
   wrappedU68F60toBigNumber,
 } from "./kamino-utils";
+
+const I80F48_FRACTIONAL_BITS = 48n;
+const I80F48_TOTAL_BITS = 128n;
+const I80F48_SCALE = 1n << I80F48_FRACTIONAL_BITS;
 
 /**
  * Shorthand for `assert.equal(a.toString(), b.toString())`
@@ -40,9 +47,12 @@ export const assertKeyDefault = (a: PublicKey) => {
  */
 export const assertBNEqual = (a: BN, b: BN | number) => {
   if (typeof b === "number") {
+    if (!Number.isSafeInteger(b)) {
+      throw new Error(`Unsafe integer passed to assertBNEqual: ${b}`);
+    }
     b = new BN(b);
   }
-  assert.equal(a.toString(), b.toString());
+  assert.equal(bnToBigInt(a).toString(), bnToBigInt(b).toString());
 };
 
 /**
@@ -54,17 +64,18 @@ export const assertBNEqual = (a: BN, b: BN | number) => {
 export const assertBNGreaterThan = (
   a: BN,
   b: BN | number,
-  message?: string
+  message?: string,
 ) => {
   if (typeof b === "number") {
     b = new BN(b);
   }
-  const aB = BigInt(a.toString());
-  const bB = BigInt(b.toString());
+  const aB = bnToBigInt(a);
+  const bB = bnToBigInt(b);
 
   if (!(aB > bB)) {
     throw new Error(
-      message || `Expected ${aB.toString()} to be greater than ${bB.toString()}`
+      message ||
+        `Expected ${aB.toString()} to be greater than ${bB.toString()}`,
     );
   }
 };
@@ -78,26 +89,11 @@ export const assertBNGreaterThan = (
  */
 export const assertI80F48Equal = (
   a: WrappedI80F48,
-  b: WrappedI80F48 | BN | number
+  b: WrappedI80F48 | BN | number,
 ) => {
-  const bigA = wrappedI80F48toBigNumber(a);
-  let bigB: BigNumber;
-
-  if (typeof b === "number") {
-    bigB = new BigNumber(b);
-  } else if (b instanceof BN) {
-    bigB = new BigNumber(b.toString());
-  } else if (isWrappedI80F48(b)) {
-    bigB = wrappedI80F48toBigNumber(b);
-  } else {
-    throw new Error("Unsupported type for comparison");
-  }
-
-  if (bigA.isNaN() || bigB.isNaN()) {
-    throw new Error("One of the values is NaN");
-  }
-
-  assert.equal(bigA.toString(), bigB.toString());
+  const aScaled = i80f48ToScaledInt(a);
+  const bScaled = i80f48ExpectedToScaledInt(b);
+  assert.equal(aScaled.toString(), bScaled.toString());
 };
 
 /**
@@ -109,7 +105,7 @@ export const assertI80F48Equal = (
  */
 export const assertI68F60Equal = (
   a: WrappedU68F60 | BN,
-  b: WrappedU68F60 | BN | number
+  b: WrappedU68F60 | BN | number,
 ) => {
   const bigA = wrappedU68F60toBigNumber(a);
   let bigB: BigNumber;
@@ -140,8 +136,9 @@ export const assertI68F60Equal = (
 export const assertI80F48Approx = (
   a: WrappedI80F48,
   b: WrappedI80F48 | BN | number,
-  tolerance: number = 0.000001
+  tolerance: number = 0.000001,
 ) => {
+  // NOTE: Be careful changing this to use exact-precision, it can cause a general stallout.
   const bigA = wrappedI80F48toBigNumber(a);
   let bigB: BigNumber;
 
@@ -165,7 +162,7 @@ export const assertI80F48Approx = (
   if (diff.isGreaterThan(allowedDifference)) {
     throw new Error(
       `Values are not approximately equal. A: ${bigA.toString()} B: ${bigB.toString()} 
-      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`
+      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`,
     );
   }
 };
@@ -179,7 +176,7 @@ export const assertI80F48Approx = (
 export const assertU68F60Approx = (
   a: WrappedU68F60 | BN,
   b: WrappedU68F60 | BN | number,
-  tolerance: number = 0.000001
+  tolerance: number = 0.000001,
 ) => {
   const bigA = wrappedU68F60toBigNumber(a);
   let bigB: BigNumber;
@@ -204,7 +201,7 @@ export const assertU68F60Approx = (
   if (diff.isGreaterThan(allowedDifference)) {
     throw new Error(
       `Values are not approximately equal. A: ${bigA.toString()} B: ${bigB.toString()} 
-      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`
+      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`,
     );
   }
 };
@@ -215,7 +212,11 @@ export const assertU68F60Approx = (
  * @returns
  */
 function isWrappedI80F48(value: any): value is WrappedI80F48 {
-  return value && typeof value === "object" && Array.isArray(value.value);
+  if (!value || typeof value !== "object") return false;
+  if (!("value" in value)) return false;
+  return (
+    Array.isArray(value.value) || ArrayBuffer.isView(value.value as Uint8Array)
+  );
 }
 
 /**
@@ -236,17 +237,19 @@ function isWrappedU68F60(value: any): value is WrappedU68F60 {
 export const assertBNApproximately = (
   a: BN,
   b: BN | number,
-  tolerance: BN | number
+  tolerance: BN | number,
 ) => {
-  const aB = BigNumber(a.toString());
-  const bB = BigNumber(b.toString());
+  const aB = BigNumber(bnToBigInt(a).toString());
+  const bB = BigNumber(
+    typeof b === "number" ? b.toString() : bnToBigInt(b).toString(),
+  );
   const toleranceB = BigNumber(tolerance.toString());
   const diff = aB.minus(bB).abs();
 
   if (diff.isGreaterThan(toleranceB)) {
     throw new Error(
       `Values are not approximately equal. A: ${aB.toString()} B: ${bB.toString()} 
-      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`
+      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`,
     );
   }
 };
@@ -259,7 +262,7 @@ export const assertBNApproximately = (
  */
 export const getTokenBalance = async (
   provider: AnchorProvider | BankrunProvider,
-  account: PublicKey
+  account: PublicKey,
 ) => {
   const accountInfo = await provider.connection.getAccountInfo(account);
   if (!accountInfo) {
@@ -283,7 +286,7 @@ export const getTokenBalance = async (
  */
 export const waitUntil = async (
   time: number,
-  silenceWarning: boolean = false
+  silenceWarning: boolean = false,
 ) => {
   const now = Date.now() / 1000;
   if (time > now + 500) {
@@ -293,7 +296,7 @@ export const waitUntil = async (
   if (now > time) {
     if (!silenceWarning) {
       console.error(
-        "Tried to wait for a time that's in the past. You probably need to adjust test timings."
+        "Tried to wait for a time that's in the past. You probably need to adjust test timings.",
       );
       console.error("now: " + now + " and tried waiting until: " + time);
     }
@@ -312,7 +315,7 @@ export const waitUntil = async (
  */
 export const assertBankrunTxFailed = (
   result: BanksTransactionResultWithMeta | BanksTransactionMeta,
-  expectedErrorCode: string | number
+  expectedErrorCode: string | number,
 ) => {
   if (!("result" in result)) {
     throw new Error("TX succeeded when it should have failed");
@@ -330,7 +333,7 @@ export const assertBankrunTxFailed = (
   const lastLog = result.meta.logMessages.pop();
   assert(
     lastLog.includes(codeHex),
-    "\nExpected code " + codeHex + " but got: " + lastLog
+    "\nExpected code " + codeHex + " but got: " + lastLog,
   );
 };
 
@@ -361,7 +364,7 @@ export function logContainsError(logs: string[], errorCode: string): boolean {
 export async function expectFailedTxWithError(
   transactionFn: () => Promise<void>,
   errorCode: string,
-  errorNumber: number
+  errorNumber: number,
 ): Promise<void> {
   let failed = false;
   try {
@@ -373,13 +376,13 @@ export async function expectFailedTxWithError(
       assert.equal(
         parsedNumber,
         errorNumber,
-        `Expected error code ${errorNumber} but got ${parsedNumber}`
+        `Expected error code ${errorNumber} but got ${parsedNumber}`,
       );
       return;
     }
     assert.ok(
       logContainsError(err.logs, errorCode),
-      `Expected error code '${errorCode}' was not found in logs. Log dump: ${err.logs}`
+      `Expected error code '${errorCode}' was not found in logs. Log dump: ${err.logs}`,
     );
     failed = true;
   }
@@ -404,7 +407,7 @@ function extractCustomErrorCode(errorMessage) {
  */
 export async function expectFailedTxWithMessage(
   transactionFn: () => Promise<void>,
-  expectedString: string
+  expectedString: string,
 ): Promise<void> {
   let failed = false;
   try {
@@ -417,7 +420,7 @@ export async function expectFailedTxWithMessage(
     const fullString = errString + " " + logsString;
     assert.ok(
       fullString.includes(expectedString),
-      `Expected error code '${expectedString}' was not found in logs. Log dump: ${err} or ${err.logs}`
+      `Expected error code '${expectedString}' was not found in logs. Log dump: ${err} or ${err.logs}`,
     );
 
     failed = true;
@@ -441,4 +444,62 @@ export function aprToU32(value: number): number {
   const clamped = Math.min(value, MAX_PERCENT);
   const ratio = clamped / MAX_PERCENT;
   return Math.floor(ratio * MAX_U32);
+}
+
+function bnToBigInt(value: BN): bigint {
+  const hex = value.toString(16);
+  const negative = hex.startsWith("-");
+  const absHex = negative ? hex.slice(1) : hex;
+  if (!absHex || absHex === "0") return 0n;
+  if (absHex.includes("NaN")) {
+    throw new Error(`Invalid BN representation: ${hex}`);
+  }
+  const parsed = BigInt(`0x${absHex}`);
+  return negative ? -parsed : parsed;
+}
+
+function bytesToUnsignedBigIntLE(bytesLike: number[] | Uint8Array): bigint {
+  const bytes = Array.isArray(bytesLike) ? bytesLike : Array.from(bytesLike);
+  let value = 0n;
+  for (let i = 0; i < bytes.length; i++) {
+    value |= BigInt(bytes[i] & 0xff) << (8n * BigInt(i));
+  }
+  return value;
+}
+
+function i80f48ToScaledInt(wrapped: WrappedI80F48): bigint {
+  if (!wrapped?.value || wrapped.value.length !== 16) {
+    throw new Error(
+      `Invalid WrappedI80F48 length: ${wrapped?.value?.length ?? "unknown"}`,
+    );
+  }
+  const raw = bytesToUnsignedBigIntLE(wrapped.value);
+  const signBit = 1n << (I80F48_TOTAL_BITS - 1n);
+  return raw & signBit ? raw - (1n << I80F48_TOTAL_BITS) : raw;
+}
+
+function i80f48ExpectedToScaledInt(
+  expected: WrappedI80F48 | BN | number,
+): bigint {
+  if (isWrappedI80F48(expected)) {
+    return i80f48ToScaledInt(expected);
+  }
+  if (expected instanceof BN) {
+    return bnToBigInt(expected) * I80F48_SCALE;
+  }
+  if (typeof expected === "number") {
+    if (!Number.isFinite(expected)) {
+      throw new Error(`Unsupported numeric value for I80F48: ${expected}`);
+    }
+    // Keep integer literals exact (e.g. 1 => exactly 1<<48).
+    if (Number.isInteger(expected)) {
+      return BigInt(expected) * I80F48_SCALE;
+    }
+    // For fractional numbers, parse from decimal string and round to nearest tick.
+    const scaled = new BigNumber(expected.toString())
+      .times(new BigNumber(2).pow(Number(I80F48_FRACTIONAL_BITS)))
+      .integerValue(BigNumber.ROUND_HALF_UP);
+    return BigInt(scaled.toString());
+  }
+  throw new Error("Unsupported type for comparison");
 }

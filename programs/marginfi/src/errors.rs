@@ -434,9 +434,9 @@ impl From<MarginfiError> for ProgramError {
     }
 }
 
-impl From<pyth_solana_receiver_sdk::error::GetPriceError> for MarginfiError {
-    fn from(e: pyth_solana_receiver_sdk::error::GetPriceError) -> Self {
-        use pyth_solana_receiver_sdk::error::GetPriceError::*;
+impl From<crate::oracle_compat::pyth::GetPriceError> for MarginfiError {
+    fn from(e: crate::oracle_compat::pyth::GetPriceError) -> Self {
+        use crate::oracle_compat::pyth::GetPriceError::*;
         match e {
             PriceTooOld => MarginfiError::PythPushStalePrice,
             InsufficientVerificationLevel => MarginfiError::PythPushInsufficientVerificationLevel,

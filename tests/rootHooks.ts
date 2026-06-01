@@ -31,9 +31,9 @@ export const FARMS_PROGRAM_ID = new PublicKey(
   "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr",
 );
 
-import { BankrunProvider, startAnchor } from "anchor-bankrun";
-import { BanksClient, ProgramTestContext } from "solana-bankrun";
-import type { AddedAccount, AddedProgram } from "solana-bankrun";
+import { BankrunProvider, startAnchor } from "./utils/litesvm";
+import { BanksClient, ProgramTestContext } from "./utils/litesvm";
+import type { AddedAccount, AddedProgram } from "./utils/litesvm";
 import {
   SINGLE_POOL_PROGRAM_ID,
   KLEND_PROGRAM_ID,

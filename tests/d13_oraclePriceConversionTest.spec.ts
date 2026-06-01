@@ -21,7 +21,7 @@ import {
   banksClient,
   globalProgramAdmin,
 } from "./rootHooks";
-import { processBankrunTransaction } from "./utils/tools";
+import { processBankrunTransaction, toBnFromI80 } from "./utils/tools";
 import { assertBNApproximately, assertBNEqual } from "./utils/genericTests";
 import { makeDriftDepositIx } from "./utils/drift-instructions";
 import {
@@ -40,7 +40,7 @@ import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { makeUpdateSpotMarketCumulativeInterestIx } from "./utils/drift-sdk";
 import { accountInit } from "./utils/user-instructions";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
-import { Clock } from "solana-bankrun";
+import { Clock } from "./utils/litesvm";
 import assert from "assert";
 
 describe("d13: Oracle Price Conversion and Interest Tracking", () => {
@@ -138,9 +138,7 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
     const balance0 = marginfiAccount0.lendingAccount.balances.find(
       (b) => b.active === 1 && b.bankPk.equals(driftUsdcBank)
     );
-    initialAssetShares0 = new BN(
-      wrappedI80F48toBigNumber(balance0.assetShares).toString()
-    );
+    initialAssetShares0 = toBnFromI80(balance0.assetShares);
 
     const marginfiAccount1 = await bankrunProgram.account.marginfiAccount.fetch(
       user1Account
@@ -148,9 +146,7 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
     const balance1 = marginfiAccount1.lendingAccount.balances.find(
       (b) => b.active === 1 && b.bankPk.equals(driftTokenABank)
     );
-    initialAssetShares1 = new BN(
-      wrappedI80F48toBigNumber(balance1.assetShares).toString()
-    );
+    initialAssetShares1 = toBnFromI80(balance1.assetShares);
 
     const usdcSpotMarket = await getSpotMarketAccount(
       driftBankrunProgram,
@@ -294,18 +290,14 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
     const balance0After = marginfiAccount0After.lendingAccount.balances.find(
       (b) => b.active === 1 && b.bankPk.equals(driftUsdcBank)
     );
-    const assetShares0After = new BN(
-      wrappedI80F48toBigNumber(balance0After.assetShares).toString()
-    );
+    const assetShares0After = toBnFromI80(balance0After.assetShares);
 
     const marginfiAccount1After =
       await bankrunProgram.account.marginfiAccount.fetch(user1Account);
     const balance1After = marginfiAccount1After.lendingAccount.balances.find(
       (b) => b.active === 1 && b.bankPk.equals(driftTokenABank)
     );
-    const assetShares1After = new BN(
-      wrappedI80F48toBigNumber(balance1After.assetShares).toString()
-    );
+    const assetShares1After = toBnFromI80(balance1After.assetShares);
 
     assert.ok(assetShares0After.eq(initialAssetShares0));
     assert.ok(assetShares1After.eq(initialAssetShares1));
@@ -313,10 +305,6 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
 
   it("Validates USDC oracle price conversion matches health check valuation", async () => {
     const bank = await bankrunProgram.account.bank.fetch(driftUsdcBank);
-    const assetWeightMaint = wrappedI80F48toBigNumber(
-      bank.config.assetWeightMaint
-    );
-
     const usdcOraclePrice = new BN(
       oracles.usdcPrice * 10 ** ecosystem.usdcDecimals
     );
@@ -324,7 +312,7 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
       initialAssetShares0,
       usdcOraclePrice,
       finalUsdcCumulativeDepositInterest,
-      new BN(assetWeightMaint.toString())
+      toBnFromI80(bank.config.assetWeightMaint)
     );
 
     const pulseHealthIx = await makePulseHealthIx(
@@ -365,10 +353,6 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
 
   it("Validates Token A oracle price conversion matches health check valuation", async () => {
     const bank = await bankrunProgram.account.bank.fetch(driftTokenABank);
-    const assetWeightMaint = wrappedI80F48toBigNumber(
-      bank.config.assetWeightMaint
-    );
-
     const tokenAOraclePrice = new BN(
       oracles.tokenAPrice * 10 ** ecosystem.usdcDecimals
     );
@@ -376,7 +360,7 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
       initialAssetShares1,
       tokenAOraclePrice,
       finalTokenACumulativeDepositInterest,
-      new BN(assetWeightMaint.toString())
+      toBnFromI80(bank.config.assetWeightMaint)
     );
 
     const pulseHealthIx = await makePulseHealthIx(

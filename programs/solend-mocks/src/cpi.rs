@@ -1,3 +1,6 @@
+// CPI helper structs intentionally use AccountInfo, matching Anchor SPL's CPI wrappers.
+#![allow(deprecated)]
+
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{
     account_info::AccountInfo,
@@ -108,11 +111,11 @@ pub fn init_obligation<'info>(
     invoke_signed(
         &ix,
         &[
-            ctx.accounts.obligation_info.clone(),
-            ctx.accounts.lending_market_info.clone(),
-            ctx.accounts.obligation_owner_info.clone(),
-            ctx.accounts.rent_info.clone(),
-            ctx.accounts.token_program_info.clone(),
+            ctx.accounts.obligation_info.to_account_info(),
+            ctx.accounts.lending_market_info.to_account_info(),
+            ctx.accounts.obligation_owner_info.to_account_info(),
+            ctx.accounts.rent_info.to_account_info(),
+            ctx.accounts.token_program_info.to_account_info(),
         ],
         ctx.signer_seeds,
     )?;
@@ -151,20 +154,22 @@ pub fn deposit_reserve_liquidity_and_obligation_collateral<'info>(
     invoke_signed(
         &ix,
         &[
-            ctx.accounts.source_liquidity_info.clone(),
-            ctx.accounts.user_collateral_info.clone(),
-            ctx.accounts.reserve_info.clone(),
-            ctx.accounts.reserve_liquidity_supply_info.clone(),
-            ctx.accounts.reserve_collateral_mint_info.clone(),
-            ctx.accounts.lending_market_info.clone(),
-            ctx.accounts.lending_market_authority_info.clone(),
-            ctx.accounts.destination_deposit_collateral_info.clone(),
-            ctx.accounts.obligation_info.clone(),
-            ctx.accounts.obligation_owner_info.clone(),
-            ctx.accounts.pyth_price_info.clone(),
-            ctx.accounts.switchboard_feed_info.clone(),
-            ctx.accounts.user_transfer_authority_info.clone(),
-            ctx.accounts.token_program_info.clone(),
+            ctx.accounts.source_liquidity_info.to_account_info(),
+            ctx.accounts.user_collateral_info.to_account_info(),
+            ctx.accounts.reserve_info.to_account_info(),
+            ctx.accounts.reserve_liquidity_supply_info.to_account_info(),
+            ctx.accounts.reserve_collateral_mint_info.to_account_info(),
+            ctx.accounts.lending_market_info.to_account_info(),
+            ctx.accounts.lending_market_authority_info.to_account_info(),
+            ctx.accounts
+                .destination_deposit_collateral_info
+                .to_account_info(),
+            ctx.accounts.obligation_info.to_account_info(),
+            ctx.accounts.obligation_owner_info.to_account_info(),
+            ctx.accounts.pyth_price_info.to_account_info(),
+            ctx.accounts.switchboard_feed_info.to_account_info(),
+            ctx.accounts.user_transfer_authority_info.to_account_info(),
+            ctx.accounts.token_program_info.to_account_info(),
         ],
         ctx.signer_seeds,
     )?;
@@ -208,19 +213,19 @@ pub fn withdraw_obligation_collateral_and_redeem_reserve_collateral<'info>(
     invoke_signed(
         &ix,
         &[
-            ctx.accounts.source_collateral_info.clone(),
-            ctx.accounts.destination_collateral_info.clone(),
-            ctx.accounts.reserve_info.clone(),
-            ctx.accounts.obligation_info.clone(),
-            ctx.accounts.lending_market_info.clone(),
-            ctx.accounts.lending_market_authority_info.clone(),
-            ctx.accounts.destination_liquidity_info.clone(),
-            ctx.accounts.reserve_collateral_mint_info.clone(),
-            ctx.accounts.reserve_liquidity_supply_info.clone(),
-            ctx.accounts.obligation_owner_info.clone(),
-            ctx.accounts.user_transfer_authority_info.clone(),
-            ctx.accounts.token_program_info.clone(),
-            ctx.accounts.deposit_reserve_info.clone(),
+            ctx.accounts.source_collateral_info.to_account_info(),
+            ctx.accounts.destination_collateral_info.to_account_info(),
+            ctx.accounts.reserve_info.to_account_info(),
+            ctx.accounts.obligation_info.to_account_info(),
+            ctx.accounts.lending_market_info.to_account_info(),
+            ctx.accounts.lending_market_authority_info.to_account_info(),
+            ctx.accounts.destination_liquidity_info.to_account_info(),
+            ctx.accounts.reserve_collateral_mint_info.to_account_info(),
+            ctx.accounts.reserve_liquidity_supply_info.to_account_info(),
+            ctx.accounts.obligation_owner_info.to_account_info(),
+            ctx.accounts.user_transfer_authority_info.to_account_info(),
+            ctx.accounts.token_program_info.to_account_info(),
+            ctx.accounts.deposit_reserve_info.to_account_info(),
         ],
         ctx.signer_seeds,
     )?;

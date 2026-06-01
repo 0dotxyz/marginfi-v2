@@ -5,7 +5,7 @@ import {
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import { assert } from "chai";
-import { Clock } from "solana-bankrun";
+import { Clock } from "./utils/litesvm";
 import { Keypair, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 
 import {
@@ -24,6 +24,7 @@ import { accountInit } from "./utils/user-instructions";
 import { configureJuplendProtocolPermissions } from "./utils/juplend/jlr-pool-setup";
 import {
   buildHealthRemainingAccounts,
+  bnToBigIntSafe,
   mintToTokenAccount,
   processBankrunTransaction,
 } from "./utils/tools";
@@ -56,6 +57,7 @@ const roundingUserMarginfiAccount = Keypair.fromSeed(USER_ACCOUNT_SEED);
 const LOOP_ITERATIONS = 25;
 const SEARCH_MAX_AMOUNT = 2_000_000n;
 const SEARCH_STEP = 1n;
+const MIN_LOOP_DEPOSIT = 10n;
 const MIN_LOOP_SHARES = 10n;
 const FUND_USDC = new BN(100 * 10 ** ecosystem.usdcDecimals);
 const BOOTSTRAP_WARP_SECONDS = 3_255;
@@ -91,7 +93,11 @@ const findFirstPositiveLossAmount = (
   tokenExchangePrice: bigint,
   liquidityExchangePrice: bigint,
 ): RoundingProbe | null => {
-  for (let amount = 1n; amount <= SEARCH_MAX_AMOUNT; amount += SEARCH_STEP) {
+  for (
+    let amount = MIN_LOOP_DEPOSIT;
+    amount <= SEARCH_MAX_AMOUNT;
+    amount += SEARCH_STEP
+  ) {
     const shares = previewSharesForDeposit(
       amount,
       liquidityExchangePrice,
@@ -137,8 +143,10 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
     );
 
     return {
-      tokenExchangePrice: BigInt(lending.tokenExchangePrice.toString()),
-      liquidityExchangePrice: BigInt(lending.liquidityExchangePrice.toString()),
+      tokenExchangePrice: bnToBigIntSafe(lending.tokenExchangePrice),
+      liquidityExchangePrice: bnToBigIntSafe(
+        lending.liquidityExchangePrice,
+      ),
     };
   };
 

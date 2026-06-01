@@ -3,8 +3,9 @@ import { inspect } from "util";
 import {
   BanksTransactionMeta,
   BanksTransactionResultWithMeta,
-} from "solana-bankrun";
-import { ProgramTestContext } from "solana-bankrun";
+  Clock,
+} from "./litesvm";
+import { ProgramTestContext } from "./litesvm";
 import BigNumber from "bignumber.js";
 import {
   AddressLookupTableAccount,
@@ -19,6 +20,7 @@ import { Keypair } from "@solana/web3.js";
 import { MarginfiAccountRaw } from "@mrgnlabs/marginfi-client-v2";
 import {
   TOKEN_PROGRAM_ID,
+  WrappedI80F48,
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
 import {
@@ -38,7 +40,7 @@ import {
 } from "../rootHooks";
 import { getEpochAndSlot } from "./bankrunConnection";
 import { createMintToInstruction } from "@solana/spl-token";
-import { BankrunProvider } from "anchor-bankrun";
+import { BankrunProvider } from "./litesvm";
 import { Marginfi } from "target/types/marginfi";
 
 /**
@@ -49,6 +51,65 @@ import { Marginfi } from "target/types/marginfi";
  */
 export const toNative = (amount: number, decimals: number): BN =>
   new BN(amount).mul(new BN(10).pow(new BN(decimals)));
+
+const I80F48_FRACTIONAL_BITS = 48n;
+const I80F48_TOTAL_BITS = 128n;
+const I80F48_SCALE = 1n << I80F48_FRACTIONAL_BITS;
+const I80F48_MOD = 1n << I80F48_TOTAL_BITS;
+
+/**
+ * Used when you need EXACT precision on an I80 -> BigInt conversion, such as when comparing exact
+ * equality of I80 values after modifying them.
+ * @param wrapped
+ * @returns
+ */
+export const toI80Scaled = (wrapped: WrappedI80F48): bigint => {
+  const bytes = Array.from(wrapped.value);
+  if (bytes.length !== 16) {
+    throw new Error(`Invalid WrappedI80F48 length: ${bytes.length}`);
+  }
+
+  let raw = 0n;
+  for (let i = 0; i < bytes.length; i++) {
+    raw |= BigInt(bytes[i] & 0xff) << (8n * BigInt(i));
+  }
+
+  const signBit = 1n << (I80F48_TOTAL_BITS - 1n);
+  return raw & signBit ? raw - I80F48_MOD : raw;
+};
+
+/**
+ * Used when you need EXACT precision on an BigInt -> I80 conversion, such as when comparing exact
+ * equality of I80 values after modifying them.
+ * @param scaled
+ * @returns
+ */
+export const fromI80Scaled = (scaled: bigint): WrappedI80F48 => {
+  if (
+    scaled < -(1n << (I80F48_TOTAL_BITS - 1n)) ||
+    scaled >= 1n << (I80F48_TOTAL_BITS - 1n)
+  ) {
+    throw new Error(`I80F48 scaled value out of range: ${scaled.toString()}`);
+  }
+
+  let raw = scaled < 0 ? scaled + I80F48_MOD : scaled;
+  const bytes: number[] = new Array(16);
+  for (let i = 0; i < 16; i++) {
+    bytes[i] = Number(raw & 0xffn);
+    raw >>= 8n;
+  }
+
+  return { value: bytes };
+};
+
+export const mulI80 = (lhsScaled: bigint, rhsScaled: bigint): bigint =>
+  (lhsScaled * rhsScaled) >> I80F48_FRACTIONAL_BITS;
+
+export const divI80 = (lhsScaled: bigint, rhsScaled: bigint): bigint =>
+  (lhsScaled << I80F48_FRACTIONAL_BITS) / rhsScaled;
+
+export const nativeToI80Scaled = (native: BN): bigint =>
+  BigInt(native.toString()) * I80F48_SCALE;
 
 /**
  * Process a signed transaction in a bankrun context and return the transaction result. This
@@ -406,7 +467,7 @@ export const createLut = async (
     {
       authority: signer.publicKey,
       payer: signer.publicKey,
-      recentSlot: Math.max(0, recentSlot - 1),
+      recentSlot,
     },
   );
 
@@ -628,7 +689,19 @@ export async function getBankrunTime(ctx: ProgramTestContext): Promise<number> {
 
 /** Shorthand to convert an I80F48 to BN (rounding off decimals) */
 export const toBnFromI80 = (value: any): BN =>
-  new BN(wrappedI80F48toBigNumber(value).toFixed(0));
+  new BN((toI80Scaled(value) >> 48n).toString());
+
+/** Convert BN to bigint without using decimal string conversion. On some Linux systems, NaN is
+ * randomly appended to certain BN when using BN.toString(). This uses the underlying UINT directly
+ * which bypasses whatever black magic causes that bug. */
+export const bnToBigIntSafe = (value: BN): bigint => {
+  const bytes = Uint8Array.from(value.abs().toArray("be"));
+  let out = 0n;
+  for (const byte of bytes) {
+    out = (out << 8n) | BigInt(byte);
+  }
+  return value.isNeg() ? -out : out;
+};
 
 /** Shorthand to cast BN/number/bigint as BN */
 export const toBn = (value: BN | number | bigint) => {
@@ -666,7 +739,7 @@ export const mintToTokenAccount = async (
     mint,
     destination,
     globalProgramAdmin.wallet.publicKey,
-    BigInt(amount.toString()),
+    bnToBigIntSafe(amount),
     [],
     TOKEN_PROGRAM_ID,
   );
@@ -760,7 +833,6 @@ export async function advanceBankrunClock(
   ctx: ProgramTestContext,
   seconds: number,
 ): Promise<number> {
-  const { Clock } = await import("solana-bankrun");
   const clock = await ctx.banksClient.getClock();
   const newClock = new Clock(
     clock.slot + BigInt(1),

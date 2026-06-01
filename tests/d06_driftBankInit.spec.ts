@@ -41,7 +41,7 @@ import {
 } from "./utils/types";
 import { assert } from "chai";
 import { processBankrunTransaction } from "./utils/tools";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./utils/litesvm";
 import {
   makeAddDriftBankIx,
   makeInitDriftUserIx,

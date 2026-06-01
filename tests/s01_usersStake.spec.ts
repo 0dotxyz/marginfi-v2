@@ -226,7 +226,7 @@ describe("User stakes some native and creates an account", () => {
     );
     assertBNEqual(
       new BN(delegationBefore),
-      new BN(10 * LAMPORTS_PER_SOL).sub(rent)
+      new BN(stake * LAMPORTS_PER_SOL).sub(rent)
     );
 
     // The spl stake pool account is already infused with 1 SOL at init
@@ -275,9 +275,9 @@ describe("User stakes some native and creates an account", () => {
     if (verbose) {
       console.log("lst after: " + lstAfter.toLocaleString());
     }
-    // LST tokens are issued 1:1 with stake because there has been zero appreciation
+    // LST tokens are issued 1:1 with deposited stake-account lamports because there has been zero appreciation.
     // Also note that LST tokens use the same decimals.
-    assert.equal(lstAfter, delegationBefore);
+    assert.equal(lstAfter, stake * LAMPORTS_PER_SOL);
 
     const splStakePool = getStakeAccount(splStakePoolInfo.data);
     const delegationSplPoolAfter = new BN(
@@ -289,7 +289,7 @@ describe("User stakes some native and creates an account", () => {
     // The stake pool gained all of the stake that was held in the user stake acc
     assertBNEqual(
       delegationSplPoolAfter.sub(delegationSplPoolBefore),
-      delegationBefore
+      new BN(stake * LAMPORTS_PER_SOL),
     );
   });
 

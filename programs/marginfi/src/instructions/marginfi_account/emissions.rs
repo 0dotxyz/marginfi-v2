@@ -35,5 +35,5 @@ pub struct MarginfiAccountUpdateEmissionsDestinationAccount<'info> {
 
     /// CHECK: Any valid public key. Off-chain systems use this to derive
     /// the canonical ATA for each emissions mint.
-    pub destination_account: AccountInfo<'info>,
+    pub destination_account: UncheckedAccount<'info>,
 }
