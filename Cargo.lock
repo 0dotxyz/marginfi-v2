@@ -3748,6 +3748,7 @@ dependencies = [
  "solana-compute-budget-interface",
  "solana-instructions-sysvar",
  "solana-msg",
+ "solana-program",
  "solana-program-test",
  "solana-sdk",
  "solana-security-txt",

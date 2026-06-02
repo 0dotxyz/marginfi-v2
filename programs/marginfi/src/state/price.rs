@@ -30,9 +30,7 @@ use solana_borsh::v1::try_from_slice_unchecked;
 use solana_stake_interface::state::StakeStateV2;
 use solend_mocks::state::SolendMinimalReserve;
 use std::{cell::Ref, cmp::min};
-use switchboard_on_demand::{
-    CurrentResult, Discriminator, PullFeedAccountData,
-};
+use switchboard_on_demand::{CurrentResult, Discriminator, PullFeedAccountData};
 
 /// Price per unit before any multipliers are applied, where `price_multiplier` shows what
 /// multipliers will be applied to generate the true deposited-token price.

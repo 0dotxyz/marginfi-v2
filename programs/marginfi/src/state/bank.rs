@@ -17,9 +17,10 @@ use crate::{
         price::OraclePriceWithMultiplier,
     },
 };
-#[cfg(not(feature = "client"))]
 use anchor_lang::ToAccountInfo;
 use anchor_lang::{err, prelude::*};
+#[cfg(feature = "client")]
+use anchor_spl::token::spl_token;
 #[cfg(not(feature = "client"))]
 use anchor_spl::token::{transfer, Transfer};
 use anchor_spl::token_interface::Mint;
@@ -35,6 +36,52 @@ use marginfi_type_crate::{
     },
     types::{Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup},
 };
+
+#[cfg(feature = "client")]
+fn invoke_client_token_transfer<'info>(
+    token_program: &Pubkey,
+    amount: u64,
+    from: AccountInfo<'info>,
+    maybe_mint: Option<AccountInfo<'info>>,
+    to: AccountInfo<'info>,
+    authority: AccountInfo<'info>,
+    decimals: Option<u8>,
+    remaining_accounts: &[AccountInfo<'info>],
+    signer_seeds: &[&[&[u8]]],
+) -> MarginfiResult {
+    let ix = if let (Some(mint), Some(decimals)) = (maybe_mint.as_ref(), decimals) {
+        spl_token_2022::instruction::transfer_checked(
+            token_program,
+            from.key,
+            mint.key,
+            to.key,
+            authority.key,
+            &[],
+            amount,
+            decimals,
+        )?
+    } else {
+        spl_token::instruction::transfer(
+            token_program,
+            from.key,
+            to.key,
+            authority.key,
+            &[],
+            amount,
+        )?
+    };
+
+    let mut account_infos = if let Some(mint) = maybe_mint {
+        vec![from, mint, to, authority]
+    } else {
+        vec![from, to, authority]
+    };
+    account_infos.extend_from_slice(remaining_accounts);
+
+    solana_program::program::invoke_signed(&ix, &account_infos, signer_seeds)?;
+
+    Ok(())
+}
 
 #[cfg(all(not(feature = "client"), feature = "debug"))]
 fn sol_log_compute_units() {
@@ -651,6 +698,33 @@ impl BankImpl for Bank {
             amount, from.key, to.key, authority.key
         );
 
+        #[cfg(feature = "client")]
+        if let Some(mint) = maybe_mint {
+            invoke_client_token_transfer(
+                program.key,
+                amount,
+                from,
+                Some(mint.to_account_info()),
+                to,
+                authority,
+                Some(mint.decimals),
+                remaining_accounts,
+                &[],
+            )?;
+        } else {
+            invoke_client_token_transfer(
+                program.key,
+                amount,
+                from,
+                None,
+                to,
+                authority,
+                None,
+                remaining_accounts,
+                &[],
+            )?;
+        }
+
         #[cfg(not(feature = "client"))]
         if let Some(mint) = maybe_mint {
             spl_token_2022::onchain::invoke_transfer_checked(
@@ -699,6 +773,37 @@ impl BankImpl for Bank {
             "withdraw_spl_transfer: amount: {} from {} to {}, auth {}",
             amount, from.key, to.key, authority.key
         );
+
+        #[cfg(feature = "client")]
+        if let Some(mint) = maybe_mint {
+            invoke_client_token_transfer(
+                program.key,
+                amount,
+                from,
+                Some(mint.to_account_info()),
+                to,
+                authority,
+                Some(mint.decimals),
+                remaining_accounts,
+                signer_seeds,
+            )?;
+        } else {
+            // `transfer_checked` and `transfer` does the same thing, the additional `_checked` logic
+            // is only to assert the expected attributes by the user (mint, decimal scaling),
+            //
+            // Security of `transfer` is equal to `transfer_checked`.
+            invoke_client_token_transfer(
+                program.key,
+                amount,
+                from,
+                None,
+                to,
+                authority,
+                None,
+                remaining_accounts,
+                signer_seeds,
+            )?;
+        }
 
         #[cfg(not(feature = "client"))]
         if let Some(mint) = maybe_mint {
