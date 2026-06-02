@@ -27,6 +27,7 @@ import {
   assertI80F48Equal,
   expectFailedTxWithError,
   getTokenBalance,
+  parseMarginfiEvents,
 } from "./utils/genericTests";
 import { assert } from "chai";
 import {
@@ -46,7 +47,7 @@ import {
   ORACLE_SETUP_PYTH_PUSH,
   u64MAX_BN,
 } from "./utils/types";
-import { getBankrunBlockhash, getBankrunTime } from "./utils/tools";
+import { getBankrunBlockhash, getBankrunTime, processBankrunTransaction } from "./utils/tools";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 
 let program: Program<Marginfi>;
@@ -124,17 +125,20 @@ describe("Deposit funds", () => {
 
     const user0Account = user.accounts.get(USER_ACCOUNT);
 
-    await user.mrgnProgram.provider.sendAndConfirm(
-      new Transaction().add(
-        await depositIx(user.mrgnProgram, {
-          marginfiAccount: user0Account,
-          bank: bankKeypairA.publicKey,
-          tokenAccount: user.tokenAAccount,
-          amount: depositAmountA_native,
-          depositUpToLimit: false,
-        })
-      )
+    const tx = new Transaction().add(
+      await depositIx(user.mrgnProgram, {
+        marginfiAccount: user0Account,
+        bank: bankKeypairA.publicKey,
+        tokenAccount: user.tokenAAccount,
+        amount: depositAmountA_native,
+        depositUpToLimit: false,
+      })
     );
+    const result = await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
+    const events = parseMarginfiEvents(program, result.logMessages);
+    const depositEvent = events.find((e) => e.name === "lendingAccountDepositEvent");
+    assert.isDefined(depositEvent, "Expected lendingAccountDepositEvent");
+    assertI80F48Approx(depositEvent!.data.shareAmount, depositAmountA_native);
 
     const bankAfter = await program.account.bank.fetch(bankKeypairA.publicKey);
     assert.equal(bankAfter.lendingPositionCount, 1);
