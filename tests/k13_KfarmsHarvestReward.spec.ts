@@ -221,11 +221,20 @@ describe("k13: Kamino Farms Harvest Reward", () => {
       FARMS_PROGRAM_ID,
     );
 
-    // Extra initialization needed for rewards to accrue over time
+    const currentClock = await banksClient.getClock();
+    const rewardStartTs = Number(currentClock.unixTimestamp);
+
+    // Extra initialization needed for rewards to accrue over time. Keep the
+    // mocked schedule bounded so later Kamino tests do not accumulate rewards
+    // indefinitely when they advance the shared bankrun clock.
     const rewardPoints = [
       {
-        tsStart: 0,
+        tsStart: rewardStartTs,
         rewardPerTimeUnit: 1_000_000,
+      },
+      {
+        tsStart: rewardStartTs + 2 * 60 * 60,
+        rewardPerTimeUnit: 0,
       },
     ];
 

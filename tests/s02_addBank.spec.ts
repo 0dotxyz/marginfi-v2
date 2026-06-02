@@ -245,19 +245,26 @@ describe("Init group and add banks with asset category flags", () => {
       );
 
     for (const validator of validators) {
-      tx.add(
-        SystemProgram.transfer({
-          fromPubkey: groupAdmin.wallet.publicKey,
-          toPubkey: validator.splOnRampPool,
-          lamports: onrampRent,
-        }),
-        createPoolOnramp(validator.voteAccount),
+      const onrampInfo = await bankRunProvider.connection.getAccountInfo(
+        validator.splOnRampPool,
       );
+      if (onrampInfo === null) {
+        tx.add(
+          SystemProgram.transfer({
+            fromPubkey: groupAdmin.wallet.publicKey,
+            toPubkey: validator.splOnRampPool,
+            lamports: onrampRent,
+          }),
+          createPoolOnramp(validator.voteAccount),
+        );
+      }
     }
 
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet);
-    await banksClient.processTransaction(tx);
+    if (tx.instructions.length > 0) {
+      tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+      tx.sign(groupAdmin.wallet);
+      await banksClient.processTransaction(tx);
+    }
 
     for (const validator of validators) {
       const onrampInfo = await bankRunProvider.connection.getAccountInfo(
@@ -692,27 +699,55 @@ describe("Init group and add banks with asset category flags", () => {
   });
 
   it("(admin) Enable staked on-ramp oracle pricing - happy path", async () => {
+    const [testBank] = deriveBankWithSeed(
+      program.programId,
+      marginfiGroup.publicKey,
+      validators[0].splMint,
+      new BN(1),
+    );
+
     let tx = new Transaction();
-    for (const validator of validators) {
-      tx.add(
-        await enableStakedOracleOnramp(groupAdmin.mrgnBankrunProgram, {
-          bank: validator.bank,
-          stakePool: validator.splPool,
-          validatorVoteAccount: validator.voteAccount,
-        }),
-      );
-    }
+    tx.add(
+      await addBankPermissionless(groupAdmin.mrgnBankrunProgram, {
+        marginfiGroup: marginfiGroup.publicKey,
+        feePayer: groupAdmin.wallet.publicKey,
+        pythOracle: oracles.wsolOracle.publicKey,
+        stakePool: validators[0].splPool,
+        validatorVoteAccount: validators[0].voteAccount,
+        seed: new BN(1),
+      }),
+    );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
     await banksClient.processTransaction(tx);
 
+    tx = new Transaction();
+    tx.add(
+      await enableStakedOracleOnramp(groupAdmin.mrgnBankrunProgram, {
+        bank: testBank,
+        stakePool: validators[0].splPool,
+        validatorVoteAccount: validators[0].voteAccount,
+      }),
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet);
+    await banksClient.processTransaction(tx);
+
+    const bank = await bankrunProgram.account.bank.fetch(testBank);
+    assert.equal(
+      bank.config.configFlags & STAKED_ORACLE_PRICE_USES_ONRAMP,
+      STAKED_ORACLE_PRICE_USES_ONRAMP,
+    );
+    assertKeysEqual(bank.config.oracleKeys[3], validators[0].splOnRampPool);
+
     for (const validator of validators) {
-      const bank = await bankrunProgram.account.bank.fetch(validator.bank);
-      assert.equal(
-        bank.config.configFlags & STAKED_ORACLE_PRICE_USES_ONRAMP,
-        STAKED_ORACLE_PRICE_USES_ONRAMP,
+      const sharedBank = await bankrunProgram.account.bank.fetch(
+        validator.bank,
       );
-      assertKeysEqual(bank.config.oracleKeys[3], validator.splOnRampPool);
+      assert.equal(
+        sharedBank.config.configFlags & STAKED_ORACLE_PRICE_USES_ONRAMP,
+        0,
+      );
     }
   });
 

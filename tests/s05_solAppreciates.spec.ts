@@ -2,6 +2,7 @@ import { BN, Wallet } from "@coral-xyz/anchor";
 import {
   Keypair,
   LAMPORTS_PER_SOL,
+  StakeProgram,
   SystemProgram,
   Transaction,
 } from "@solana/web3.js";
@@ -29,7 +30,8 @@ import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { dumpBankrunLogs, getBankrunBlockhash } from "./utils/tools";
 import { getEpochAndSlot } from "./utils/bankrunConnection";
 import { getStakeAccount } from "./utils/stake-utils";
-import { replenishPool } from "./utils/spl-staking-utils";
+import { createPoolOnramp, replenishPool } from "./utils/spl-staking-utils";
+import { deriveOnRampPool } from "./utils/pdas";
 
 let bankKeypairSol: Keypair;
 
