@@ -1843,12 +1843,10 @@ mod tests {
     use super::*;
 
     use anchor_lang::solana_program::account_info::AccountInfo;
-    use anchor_lang::solana_program::stake::{
+    use solana_stake_interface::{
         stake_flags::StakeFlags,
         state::{Authorized, Delegation, Lockup, Meta, Stake, StakeStateV2},
     };
-    use std::cell::RefCell;
-    use std::rc::Rc;
 
     fn test_account_info<'a>(
         key: &'a Pubkey,
@@ -1856,24 +1854,14 @@ mod tests {
         data: &'a mut [u8],
         owner: &'a Pubkey,
     ) -> AccountInfo<'a> {
-        AccountInfo {
-            key,
-            lamports: Rc::new(RefCell::new(lamports)),
-            data: Rc::new(RefCell::new(data)),
-            owner,
-            rent_epoch: 0,
-            is_signer: false,
-            is_writable: false,
-            executable: false,
-        }
+        AccountInfo::new(key, false, false, lamports, data, owner, false)
     }
 
     fn serialized_stake_account(delegated_stake: u64) -> Vec<u8> {
-        let authority = Pubkey::new_unique();
-        bincode::serialize(&StakeStateV2::Stake(
+        borsh::to_vec(&StakeStateV2::Stake(
             Meta {
                 rent_exempt_reserve: 0,
-                authorized: Authorized::auto(&authority),
+                authorized: Authorized::default(),
                 lockup: Lockup::default(),
             },
             Stake {
@@ -1909,26 +1897,14 @@ mod tests {
         let mut stake_lamports = rent.minimum_balance(stake_data.len()) + 10_000;
         let mut onramp_lamports = rent.minimum_balance(onramp_data.len()) + 7_000;
 
-        let stake_ai = AccountInfo {
-            key: &stake_key,
-            lamports: Rc::new(RefCell::new(&mut stake_lamports)),
-            data: Rc::new(RefCell::new(&mut stake_data[..])),
-            owner: &owner,
-            rent_epoch: 0,
-            is_signer: false,
-            is_writable: false,
-            executable: false,
-        };
-        let onramp_ai = AccountInfo {
-            key: &onramp_key,
-            lamports: Rc::new(RefCell::new(&mut onramp_lamports)),
-            data: Rc::new(RefCell::new(&mut onramp_data[..])),
-            owner: &owner,
-            rent_epoch: 0,
-            is_signer: false,
-            is_writable: false,
-            executable: false,
-        };
+        let stake_ai =
+            test_account_info(&stake_key, &mut stake_lamports, &mut stake_data[..], &owner);
+        let onramp_ai = test_account_info(
+            &onramp_key,
+            &mut onramp_lamports,
+            &mut onramp_data[..],
+            &owner,
+        );
 
         assert_eq!(
             staked_pool_net_asset_value(&stake_ai, &onramp_ai, &rent),

@@ -206,7 +206,7 @@ pub struct LendingPoolAddBankPermissionless<'info> {
     pub sol_pool: UncheckedAccount<'info>,
 
     /// CHECK: Validated using `stake_pool` and native stake-program ownership.
-    pub pool_onramp: AccountInfo<'info>,
+    pub pool_onramp: UncheckedAccount<'info>,
 
     /// CHECK: We validate this is correct backwards, by deriving the PDA of the `bank_mint` using
     /// this key.
