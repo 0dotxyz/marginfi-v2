@@ -1639,13 +1639,15 @@ impl<'a> BankAccountWrapper<'a> {
     }
 
     /// Deposit an asset, ignoring deposit caps, will error if this repays a liability instead of increasing a asset.
-    /// Returns the asset share delta minted.
+    /// Returns the asset share delta minted. Note: in the bypass/flip case (liability -> asset) only the
+    /// asset side is reported, not any liability shares burned, so don't use this return value for events.
     pub fn deposit_ignore_deposit_cap(&mut self, amount: I80F48) -> MarginfiResult<I80F48> {
         self.increase_balance_internal(amount, BalanceIncreaseType::BypassDepositLimit)
     }
 
     /// Incur a borrow, ignoring borrow caps, will error if this withdraws an asset instead of increasing a liability.
-    /// Returns the liability share delta minted.
+    /// Returns the liability share delta minted. Note: in the bypass/flip case (asset -> liability) only the
+    /// liability side is reported, not any asset shares burned, so don't use this return value for events.
     pub fn withdraw_ignore_borrow_cap(&mut self, amount: I80F48) -> MarginfiResult<I80F48> {
         self.decrease_balance_internal(amount, BalanceDecreaseType::BypassBorrowLimit)
     }

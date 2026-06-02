@@ -338,17 +338,28 @@ describe("Withdraw funds", () => {
         [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
       ]
     );
-    await user.mrgnProgram.provider.sendAndConfirm(
-      new Transaction().add(
-        await withdrawIx(user.mrgnProgram, {
-          marginfiAccount: userAccKey,
-          bank: bank,
-          tokenAccount: user.tokenAAccount,
-          remaining,
-          amount: withdrawAmountTokenA_native,
-          withdrawAll: true,
-        })
-      )
+    const tx = new Transaction().add(
+      await withdrawIx(user.mrgnProgram, {
+        marginfiAccount: userAccKey,
+        bank: bank,
+        tokenAccount: user.tokenAAccount,
+        remaining,
+        amount: withdrawAmountTokenA_native,
+        withdrawAll: true,
+      })
+    );
+    const result = await processBankrunTransaction(bankrunContext, tx, [
+      user.wallet,
+    ]);
+    const events = parseMarginfiEvents(program, result.logMessages);
+    const withdrawEvent = events.find(
+      (e) => e.name === "lendingAccountWithdrawEvent"
+    );
+    assert.isDefined(withdrawEvent, "Expected lendingAccountWithdrawEvent");
+    // withdrawAll closes the balance, so share_amount is the full pre-close asset shares
+    assertI80F48Approx(
+      withdrawEvent!.data.shareAmount,
+      balancesBefore[0].assetShares
     );
 
     const bankAfter = await program.account.bank.fetch(bank);
