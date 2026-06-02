@@ -20,7 +20,6 @@ import { Keypair } from "@solana/web3.js";
 import { MarginfiAccountRaw } from "@mrgnlabs/marginfi-client-v2";
 import {
   TOKEN_PROGRAM_ID,
-  WrappedI80F48,
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
 import {
@@ -44,7 +43,17 @@ import { BankrunProvider } from "./litesvm";
 import { Marginfi } from "target/types/marginfi";
 import { bnToBigIntSafe } from "./bn-utils";
 
-export { bnToBigIntSafe } from "./bn-utils";
+export {
+  addNativeAmountToI80,
+  bnToBigIntSafe,
+  divI80,
+  fromI80Scaled,
+  mulI80,
+  nativeToI80Scaled,
+  toBn,
+  toBnFromI80,
+  toI80Scaled,
+} from "./bn-utils";
 
 /**
  * Convert a human-readable amount to native token units based on decimals.
@@ -54,84 +63,6 @@ export { bnToBigIntSafe } from "./bn-utils";
  */
 export const toNative = (amount: number, decimals: number): BN =>
   new BN(amount).mul(new BN(10).pow(new BN(decimals)));
-
-const I80F48_FRACTIONAL_BITS = 48n;
-const I80F48_TOTAL_BITS = 128n;
-const I80F48_SCALE = 1n << I80F48_FRACTIONAL_BITS;
-const I80F48_MOD = 1n << I80F48_TOTAL_BITS;
-
-/**
- * Used when you need EXACT precision on an I80 -> BigInt conversion, such as when comparing exact
- * equality of I80 values after modifying them.
- * @param wrapped
- * @returns
- */
-export const toI80Scaled = (wrapped: WrappedI80F48): bigint => {
-  const bytes = Array.from(wrapped.value);
-  if (bytes.length !== 16) {
-    throw new Error(`Invalid WrappedI80F48 length: ${bytes.length}`);
-  }
-
-  let raw = 0n;
-  for (let i = 0; i < bytes.length; i++) {
-    raw |= BigInt(bytes[i] & 0xff) << (8n * BigInt(i));
-  }
-
-  const signBit = 1n << (I80F48_TOTAL_BITS - 1n);
-  return raw & signBit ? raw - I80F48_MOD : raw;
-};
-
-/**
- * Used when you need EXACT precision on an BigInt -> I80 conversion, such as when comparing exact
- * equality of I80 values after modifying them.
- * @param scaled
- * @returns
- */
-export const fromI80Scaled = (scaled: bigint): WrappedI80F48 => {
-  if (
-    scaled < -(1n << (I80F48_TOTAL_BITS - 1n)) ||
-    scaled >= 1n << (I80F48_TOTAL_BITS - 1n)
-  ) {
-    throw new Error(`I80F48 scaled value out of range: ${scaled.toString()}`);
-  }
-
-  let raw = scaled < 0 ? scaled + I80F48_MOD : scaled;
-  const bytes: number[] = new Array(16);
-  for (let i = 0; i < 16; i++) {
-    bytes[i] = Number(raw & 0xffn);
-    raw >>= 8n;
-  }
-
-  return { value: bytes };
-};
-
-export const mulI80 = (lhsScaled: bigint, rhsScaled: bigint): bigint =>
-  (lhsScaled * rhsScaled) >> I80F48_FRACTIONAL_BITS;
-
-export const divI80 = (lhsScaled: bigint, rhsScaled: bigint): bigint =>
-  (lhsScaled << I80F48_FRACTIONAL_BITS) / rhsScaled;
-
-const bnToNativeBigInt = (native: BN): bigint => {
-  const asString = native.toString();
-  if (/^-?\d+$/.test(asString)) {
-    return BigInt(asString);
-  }
-
-  const asNumber = native.toNumber();
-  if (!Number.isSafeInteger(asNumber)) {
-    throw new Error(`Unsafe native amount: ${asString}`);
-  }
-  return BigInt(asNumber);
-};
-
-export const nativeToI80Scaled = (native: BN): bigint =>
-  bnToNativeBigInt(native) * I80F48_SCALE;
-
-export const addNativeAmountToI80 = (
-  base: WrappedI80F48 | null | undefined,
-  amount: BN,
-): WrappedI80F48 =>
-  fromI80Scaled((base ? toI80Scaled(base) : 0n) + nativeToI80Scaled(amount));
 
 /**
  * Process a signed transaction in a bankrun context and return the transaction result. This
@@ -708,17 +639,6 @@ export async function getBankrunTime(ctx: ProgramTestContext): Promise<number> {
   const clock = await ctx.banksClient.getClock();
   return Number(clock.unixTimestamp);
 }
-
-/** Shorthand to convert an I80F48 to BN (rounding off decimals) */
-export const toBnFromI80 = (value: any): BN =>
-  new BN((toI80Scaled(value) >> 48n).toString());
-
-/** Shorthand to cast BN/number/bigint as BN */
-export const toBn = (value: BN | number | bigint) => {
-  if (typeof value === "bigint") return new BN(value.toString());
-  if (typeof value === "number") return new BN(value);
-  return value;
-};
 
 /**
  * Returns the user's active asset shares for a given bank as raw BigNumber precision.

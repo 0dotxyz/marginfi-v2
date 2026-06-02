@@ -1,8 +1,5 @@
 import type { AnchorProvider } from "@coral-xyz/anchor";
-import {
-  WrappedI80F48,
-  wrappedI80F48toBigNumber,
-} from "@mrgnlabs/mrgn-common";
+import { WrappedI80F48, wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import type { RawAccount } from "@solana/spl-token";
 import { AccountLayout } from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
@@ -18,11 +15,13 @@ import {
   WrappedI68F60 as WrappedU68F60,
   wrappedU68F60toBigNumber,
 } from "./kamino-utils";
-import { bnToBigIntSafe } from "./bn-utils";
-
-const I80F48_FRACTIONAL_BITS = 48n;
-const I80F48_TOTAL_BITS = 128n;
-const I80F48_SCALE = 1n << I80F48_FRACTIONAL_BITS;
+import {
+  integerToBigInt,
+  integerToBigNumber,
+  isWrappedI80F48,
+  numericToBigNumber,
+  toI80Scaled,
+} from "./bn-utils";
 
 /**
  * Shorthand for `assert.equal(a.toString(), b.toString())`
@@ -47,13 +46,7 @@ export const assertKeyDefault = (a: PublicKey) => {
  * @param b - a BN or number
  */
 export const assertBNEqual = (a: BN, b: BN | number) => {
-  if (typeof b === "number") {
-    if (!Number.isSafeInteger(b)) {
-      throw new Error(`Unsafe integer passed to assertBNEqual: ${b}`);
-    }
-    b = new BN(b);
-  }
-  assert.equal(bnToBigInt(a).toString(), bnToBigInt(b).toString());
+  assert.equal(integerToBigInt(a).toString(), integerToBigInt(b).toString());
 };
 
 /**
@@ -67,11 +60,8 @@ export const assertBNGreaterThan = (
   b: BN | number,
   message?: string,
 ) => {
-  if (typeof b === "number") {
-    b = new BN(b);
-  }
-  const aB = bnToBigInt(a);
-  const bB = bnToBigInt(b);
+  const aB = integerToBigInt(a);
+  const bB = integerToBigInt(b);
 
   if (!(aB > bB)) {
     throw new Error(
@@ -92,9 +82,7 @@ export const assertI80F48Equal = (
   a: WrappedI80F48,
   b: WrappedI80F48 | BN | number,
 ) => {
-  const aScaled = i80f48ToScaledInt(a);
-  const bScaled = i80f48ExpectedToScaledInt(b);
-  assert.equal(aScaled.toString(), bScaled.toString());
+  assert.equal(toI80Scaled(a).toString(), toI80Scaled(b).toString());
 };
 
 /**
@@ -114,7 +102,7 @@ export const assertI68F60Equal = (
   if (typeof b === "number") {
     bigB = new BigNumber(b);
   } else if (b instanceof BN) {
-    bigB = new BigNumber(bnToBigInt(b).toString());
+    bigB = integerToBigNumber(b);
   } else if (isWrappedU68F60(b)) {
     bigB = wrappedU68F60toBigNumber(b);
   } else {
@@ -146,7 +134,7 @@ export const assertI80F48Approx = (
   if (typeof b === "number") {
     bigB = new BigNumber(b);
   } else if (b instanceof BN) {
-    bigB = new BigNumber(bnToBigInt(b).toString());
+    bigB = integerToBigNumber(b);
   } else if (isWrappedI80F48(b)) {
     bigB = wrappedI80F48toBigNumber(b);
   } else {
@@ -185,7 +173,7 @@ export const assertU68F60Approx = (
   if (typeof b === "number") {
     bigB = new BigNumber(b);
   } else if (b instanceof BN) {
-    bigB = new BigNumber(bnToBigInt(b).toString());
+    bigB = integerToBigNumber(b);
   } else if (isWrappedU68F60(b)) {
     bigB = wrappedU68F60toBigNumber(b);
   } else {
@@ -208,19 +196,6 @@ export const assertU68F60Approx = (
 };
 
 /**
- * Type guard to check if a value is WrappedI80F48
- * @param value
- * @returns
- */
-function isWrappedI80F48(value: any): value is WrappedI80F48 {
-  if (!value || typeof value !== "object") return false;
-  if (!("value" in value)) return false;
-  return (
-    Array.isArray(value.value) || ArrayBuffer.isView(value.value as Uint8Array)
-  );
-}
-
-/**
  * Type guard to check if a value is WrappedU68F60
  * @param value
  * @returns
@@ -238,17 +213,11 @@ function isWrappedU68F60(value: any): value is WrappedU68F60 {
 export const assertBNApproximately = (
   a: BN,
   b: BN | number,
-  tolerance: BN | number
+  tolerance: BN | number,
 ) => {
-  const aB = BigNumber(bnToBigInt(a).toString());
-  const bB = BigNumber(
-    typeof b === "number" ? b.toString() : bnToBigInt(b).toString()
-  );
-  const toleranceB = BigNumber(
-    typeof tolerance === "number"
-      ? tolerance.toString()
-      : bnToBigInt(tolerance).toString()
-  );
+  const aB = numericToBigNumber(a);
+  const bB = numericToBigNumber(b);
+  const toleranceB = numericToBigNumber(tolerance);
   const diff = aB.minus(bB).abs();
 
   if (diff.isGreaterThan(toleranceB)) {
@@ -449,54 +418,4 @@ export function aprToU32(value: number): number {
   const clamped = Math.min(value, MAX_PERCENT);
   const ratio = clamped / MAX_PERCENT;
   return Math.floor(ratio * MAX_U32);
-}
-
-function bnToBigInt(value: BN): bigint {
-  return bnToBigIntSafe(value);
-}
-
-function bytesToUnsignedBigIntLE(bytesLike: number[] | Uint8Array): bigint {
-  const bytes = Array.isArray(bytesLike) ? bytesLike : Array.from(bytesLike);
-  let value = 0n;
-  for (let i = 0; i < bytes.length; i++) {
-    value |= BigInt(bytes[i] & 0xff) << (8n * BigInt(i));
-  }
-  return value;
-}
-
-function i80f48ToScaledInt(wrapped: WrappedI80F48): bigint {
-  if (!wrapped?.value || wrapped.value.length !== 16) {
-    throw new Error(
-      `Invalid WrappedI80F48 length: ${wrapped?.value?.length ?? "unknown"}`,
-    );
-  }
-  const raw = bytesToUnsignedBigIntLE(wrapped.value);
-  const signBit = 1n << (I80F48_TOTAL_BITS - 1n);
-  return raw & signBit ? raw - (1n << I80F48_TOTAL_BITS) : raw;
-}
-
-function i80f48ExpectedToScaledInt(
-  expected: WrappedI80F48 | BN | number,
-): bigint {
-  if (isWrappedI80F48(expected)) {
-    return i80f48ToScaledInt(expected);
-  }
-  if (expected instanceof BN) {
-    return bnToBigInt(expected) * I80F48_SCALE;
-  }
-  if (typeof expected === "number") {
-    if (!Number.isFinite(expected)) {
-      throw new Error(`Unsupported numeric value for I80F48: ${expected}`);
-    }
-    // Keep integer literals exact (e.g. 1 => exactly 1<<48).
-    if (Number.isInteger(expected)) {
-      return BigInt(expected) * I80F48_SCALE;
-    }
-    // For fractional numbers, parse from decimal string and round to nearest tick.
-    const scaled = new BigNumber(expected.toString())
-      .times(new BigNumber(2).pow(Number(I80F48_FRACTIONAL_BITS)))
-      .integerValue(BigNumber.ROUND_HALF_UP);
-    return BigInt(scaled.toString());
-  }
-  throw new Error("Unsupported type for comparison");
 }
