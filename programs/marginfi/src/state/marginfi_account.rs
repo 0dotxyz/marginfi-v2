@@ -1878,7 +1878,9 @@ impl<'a> BankAccountWrapper<'a> {
 
         let share_amount = match operation_type {
             BalanceIncreaseType::RepayOnly => liability_shares_decrease,
-            _ => asset_shares_increase,
+            BalanceIncreaseType::Any
+            | BalanceIncreaseType::DepositOnly
+            | BalanceIncreaseType::BypassDepositLimit => asset_shares_increase,
         };
 
         Ok(share_amount)
@@ -1971,7 +1973,7 @@ impl<'a> BankAccountWrapper<'a> {
             BalanceDecreaseType::BorrowOnly | BalanceDecreaseType::BypassBorrowLimit => {
                 liability_shares_increase
             }
-            _ => asset_shares_decrease,
+            BalanceDecreaseType::WithdrawOnly => asset_shares_decrease,
         };
 
         Ok(share_amount)
