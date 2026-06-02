@@ -34,6 +34,7 @@ import {
 } from "./utils/drift-utils";
 import {
   ASSET_TAG_DRIFT,
+  BANK_SEED_KNOWN_FLAG,
   ASSET_TAG_KAMINO,
   CLOSE_ENABLED_FLAG,
   blankBankConfigOptRaw,
@@ -135,10 +136,11 @@ describe("d06: Init Drift banks", () => {
     assertKeysEqual(bank.mint, ecosystem.usdcMint.publicKey);
     assert.equal(bank.mintDecimals, ecosystem.usdcDecimals);
     assertKeysEqual(bank.group, driftGroup.publicKey);
+    assertBNEqual(bank.bankSeed, seed);
 
     assertKeysEqual(config.oracleKeys[0], oracles.usdcOracle.publicKey);
 
-    assertBNEqual(bank.flags, CLOSE_ENABLED_FLAG);
+    assertBNEqual(bank.flags, CLOSE_ENABLED_FLAG + BANK_SEED_KNOWN_FLAG);
 
     assertI80F48Equal(config.assetWeightInit, 1);
     assertI80F48Equal(config.assetWeightMaint, 1);
@@ -232,6 +234,7 @@ describe("d06: Init Drift banks", () => {
 
     const bank = await bankrunProgram.account.bank.fetch(tokenABankKey);
     assert.equal(bank.mintDecimals, ecosystem.tokenADecimals);
+    assertBNEqual(bank.bankSeed, seed);
   });
 
   it("(admin) Configure wrong asset tag for Token A bank - happy path (but all Drift operations will now fail on it)", async () => {

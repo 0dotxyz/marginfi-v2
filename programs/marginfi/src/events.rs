@@ -241,6 +241,12 @@ pub struct SetKeeperCloseFlagsEvent {
 }
 
 #[event]
+pub struct AdminCloseAccountEvent {
+    pub header: AccountEventHeader,
+    pub global_fee_wallet: Pubkey,
+}
+
+#[event]
 pub struct HealthPulseEvent {
     pub account: Pubkey,
     pub health_cache: HealthCache,

@@ -1,6 +1,5 @@
 use crate::{
     bank_signer,
-    constants::DRIFT_PROGRAM_ID,
     events::{AccountEventHeader, LendingAccountDepositEvent},
     state::{
         bank::{BankImpl, BankVaultType},
@@ -21,12 +20,19 @@ use anchor_lang::solana_program::clock::Clock;
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
-use drift_mocks::drift::cpi::accounts::{Deposit, UpdateSpotMarketCumulativeInterest};
-use drift_mocks::drift::cpi::{deposit, update_spot_market_cumulative_interest};
-use drift_mocks::state::MinimalUser;
+use drift_mocks::{
+    drift::cpi::{
+        accounts::{Deposit, UpdateSpotMarketCumulativeInterest},
+        {deposit, update_spot_market_cumulative_interest},
+    },
+    state::MinimalUser,
+};
 use fixed::types::I80F48;
-use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
-use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
+use marginfi_type_crate::{
+    constants::LIQUIDITY_VAULT_AUTHORITY_SEED,
+    pdas::DRIFT_PROGRAM_ID,
+    types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED},
+};
 
 /// Deposit into a Drift spot market through a marginfi account
 ///
@@ -110,6 +116,7 @@ pub fn drift_deposit<'info>(
 
         marginfi_account.last_update = clock.unix_timestamp as u64;
         marginfi_account.lending_account.sort_balances();
+        marginfi_account.sync_indexer_flags();
 
         emit!(LendingAccountDepositEvent {
             header: AccountEventHeader {

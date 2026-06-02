@@ -20,5 +20,6 @@ bytemuck = { workspace = true }
 fixed = { workspace = true }
 fixed-macro = { workspace = true }
 static_assertions = { workspace = true }
+marginfi-type-crate = { workspace = true, features = ["anchor"] }
 
 [dev-dependencies]

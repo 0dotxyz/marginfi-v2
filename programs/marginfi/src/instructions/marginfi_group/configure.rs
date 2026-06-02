@@ -30,6 +30,7 @@ fn validate_and_apply_emode_leverage(
 ///
 /// Note: not even the group admin can configure `PROGRAM_FEES_ENABLED`, only the program admin can
 /// with `configure_group_fee`
+/// Note: `new_emissions_admin` is deprecated and currently has no on-chain effect.
 ///
 /// Admin only
 pub fn configure(

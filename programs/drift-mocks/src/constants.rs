@@ -2,6 +2,7 @@ use crate::DriftMocksError;
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
+use marginfi_type_crate::constants::DRIFT_SCALED_BALANCE_DECIMALS;
 
 // Drift precision constants
 pub const SPOT_CUMULATIVE_INTEREST_PRECISION: u128 = 10_000_000_000; // 10^10
@@ -13,9 +14,6 @@ pub const BASIS_PRECISION_U128: u128 = 10_000; // 10^4
 
 // Drift uses 10^(19 - decimals) for precision increase calculations
 pub const DRIFT_PRECISION_EXP: u32 = 19;
-
-// All Drift scaled balances use 9 decimal precision, regardless of the underlying token decimals
-pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
 
 // Maximum number of positions in drift
 pub const MAX_SPOT_POSITIONS: usize = 8;

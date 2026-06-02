@@ -12,7 +12,7 @@ use anchor_lang::{
     },
 };
 
-declare_id!("KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
+declare_id!(marginfi_type_crate::pdas::KAMINO_PROGRAM_ID);
 
 declare_program!(kamino_lending);
 declare_program!(kamino_farms);

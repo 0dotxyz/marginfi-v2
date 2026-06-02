@@ -1,14 +1,16 @@
 use marginfi_type_crate::types::FeeState;
 
-use crate::MarginfiResult;
+use anchor_lang::prelude::*;
 
 pub trait FeeStateImpl {
-    fn _placeholder(&self) -> MarginfiResult;
+    fn is_pause_authority(&self, signer: Pubkey) -> bool;
 }
 
 impl FeeStateImpl for FeeState {
-    fn _placeholder(&self) -> MarginfiResult {
-        Ok(())
+    fn is_pause_authority(&self, signer: Pubkey) -> bool {
+        signer == self.global_fee_admin
+            || (self.pause_delegate_admin != Pubkey::default()
+                && signer == self.pause_delegate_admin)
     }
 }
 

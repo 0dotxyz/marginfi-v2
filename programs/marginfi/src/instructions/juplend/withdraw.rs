@@ -12,8 +12,8 @@ use crate::{
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
-        fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank, is_juplend_asset_tag,
-        record_withdrawal_outflow, validate_bank_state, InstructionKind,
+        fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank_cache,
+        is_juplend_asset_tag, record_withdrawal_outflow, validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -276,6 +276,7 @@ pub fn juplend_withdraw<'info>(
         health_cache.timestamp = clock.unix_timestamp;
 
         marginfi_account.lending_account.sort_balances();
+        marginfi_account.sync_indexer_flags();
 
         let in_receivership_or_order_execution =
             marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
@@ -294,7 +295,7 @@ pub fn juplend_withdraw<'info>(
 
             let bank_loader = &ctx.accounts.bank;
             let mut bank = bank_loader.load_mut()?;
-            let price_for_cache = fetch_unbiased_price_for_bank(
+            let price_for_cache = fetch_unbiased_price_for_bank_cache(
                 &bank_loader.key(),
                 &bank,
                 &clock,
@@ -310,9 +311,13 @@ pub fn juplend_withdraw<'info>(
             // Note: the caller can simply omit risk accounts since the risk check is ignored here,
             // in that case the cache doesn't update and this does nothing.
             let mut bank = ctx.accounts.bank.load_mut()?;
-            let price_for_cache =
-                fetch_unbiased_price_for_bank(&bank_key, &bank, &clock, ctx.remaining_accounts)
-                    .ok();
+            let price_for_cache = fetch_unbiased_price_for_bank_cache(
+                &bank_key,
+                &bank,
+                &clock,
+                ctx.remaining_accounts,
+            )
+            .ok();
             bank.update_cache_price(price_for_cache)?;
         }
     }
