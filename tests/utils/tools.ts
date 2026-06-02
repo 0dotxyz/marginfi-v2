@@ -111,8 +111,27 @@ export const mulI80 = (lhsScaled: bigint, rhsScaled: bigint): bigint =>
 export const divI80 = (lhsScaled: bigint, rhsScaled: bigint): bigint =>
   (lhsScaled << I80F48_FRACTIONAL_BITS) / rhsScaled;
 
+const bnToNativeBigInt = (native: BN): bigint => {
+  const asString = native.toString();
+  if (/^-?\d+$/.test(asString)) {
+    return BigInt(asString);
+  }
+
+  const asNumber = native.toNumber();
+  if (!Number.isSafeInteger(asNumber)) {
+    throw new Error(`Unsafe native amount: ${asString}`);
+  }
+  return BigInt(asNumber);
+};
+
 export const nativeToI80Scaled = (native: BN): bigint =>
-  BigInt(native.toString()) * I80F48_SCALE;
+  bnToNativeBigInt(native) * I80F48_SCALE;
+
+export const addNativeAmountToI80 = (
+  base: WrappedI80F48 | null | undefined,
+  amount: BN,
+): WrappedI80F48 =>
+  fromI80Scaled((base ? toI80Scaled(base) : 0n) + nativeToI80Scaled(amount));
 
 /**
  * Process a signed transaction in a bankrun context and return the transaction result. This

@@ -17,10 +17,12 @@ import {
 import { processBankrunTransaction } from "./utils/tools";
 import { assert } from "chai";
 import { assertBNApproximately } from "./utils/genericTests";
-import Decimal from "decimal.js";
-import { simpleRefreshReserve } from "./utils/kamino-utils";
+import {
+  integerPriceToFractionSf,
+  simpleRefreshReserve,
+} from "./utils/kamino-utils";
 // Note: there's some glitch in Kamino's lib based on a Raydium static init, it's currently patch-package hacked...
-import { Fraction, LendingMarket, Reserve } from "@kamino-finance/klend-sdk";
+import { LendingMarket, Reserve } from "@kamino-finance/klend-sdk";
 import { createMintToInstruction } from "@solana/spl-token";
 import { ProgramTestContext } from "./utils/litesvm";
 
@@ -124,10 +126,9 @@ describe("k01: Init Kamino instance", () => {
 
     // Note: prices are stored as scaled fraction (multiply price by 2^60)
     // E.g. the price is 10 so 10 * 2^60 ~= 1.15292e+19
-    let expected = Fraction.fromDecimal(new Decimal(oracles.usdcPrice));
     assertBNApproximately(
       reserveAcc.liquidity.marketPriceSf,
-      expected.valueSf,
+      integerPriceToFractionSf(oracles.usdcPrice),
       100_000,
     );
   });
@@ -152,10 +153,9 @@ describe("k01: Init Kamino instance", () => {
 
     // Note: prices are stored as scaled fraction (multiply price by 2^60)
     // E.g. the price is 10 so 10 * 2^60 ~= 1.15292e+19
-    let expected = Fraction.fromDecimal(new Decimal(oracles.tokenAPrice));
     assertBNApproximately(
       reserveAcc.liquidity.marketPriceSf,
-      expected.valueSf,
+      integerPriceToFractionSf(oracles.tokenAPrice),
       100_000,
     );
   });

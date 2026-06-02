@@ -29,13 +29,12 @@ import {
 } from "./utils/kamino-utils";
 import { assert } from "chai";
 import { MockUser, USER_ACCOUNT_K } from "./utils/mocks";
-import { processBankrunTransaction } from "./utils/tools";
+import { addNativeAmountToI80, processBankrunTransaction } from "./utils/tools";
 import { makeKaminoDepositIx } from "./utils/kamino-instructions";
 import { ProgramTestContext } from "./utils/litesvm";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import {
   assertBNEqual,
-  assertI80F48Approx,
   assertI80F48Equal,
   assertKeysEqual,
   getTokenBalance,
@@ -210,6 +209,10 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
       resAfter as Reserve,
       amount,
     );
+    const expectedBalanceShares = addNativeAmountToI80(
+      balanceMaybe?.assetShares,
+      expectedCollateral,
+    );
     assertBNEqual(expectedCollateral, colVaultAfter - colVaultBefore);
 
     const balancesAfter = userAccAfter.lendingAccount.balances;
@@ -217,10 +220,10 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
       (b: BalanceRaw) => b.bankPk.equals(bank) && b.active === 1,
     );
     assert.equal(balanceAfter.active, 1);
-    assertI80F48Approx(
+    assertI80F48Equal(
       balanceAfter.assetShares,
       // Note: the balance tracks your collateral token, NOT liquidity token!
-      balanceAmtBefore + expectedCollateral.toNumber(),
+      expectedBalanceShares,
     );
     assertBNEqual(
       resAfter.liquidity.totalAvailableAmount,
@@ -243,14 +246,15 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
     );
 
     // Assert bank updated as expected
-    const sharesBefore = wrappedI80F48toBigNumber(
+    const expectedTotalAssetShares = addNativeAmountToI80(
       bankBefore.totalAssetShares,
-    ).toNumber();
+      expectedCollateral,
+    );
     // No interest accumulates on Kamino banks, so the asset share value is always 1, and the
     // relationship between collateral tokens and shares is always 1:1
-    assertI80F48Approx(
+    assertI80F48Equal(
       bankAfter.totalAssetShares,
-      sharesBefore + expectedCollateral.toNumber(),
+      expectedTotalAssetShares,
     );
     assertI80F48Equal(bankAfter.assetShareValue, 1);
     assertI80F48Equal(bankAfter.collectedInsuranceFeesOutstanding, 0);
@@ -518,6 +522,10 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
       resAfter as Reserve,
       amount,
     );
+    const expectedBalanceShares = addNativeAmountToI80(
+      balanceMaybe?.assetShares,
+      expectedCollateral,
+    );
     assertBNEqual(expectedCollateral, colVaultAfter - colVaultBefore);
 
     const balancesAfter = userAccAfter.lendingAccount.balances;
@@ -525,9 +533,9 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
       (b: BalanceRaw) => b.bankPk.equals(bank) && b.active === 1,
     );
     assert.equal(balanceAfter.active, 1);
-    assertI80F48Approx(
+    assertI80F48Equal(
       balanceAfter.assetShares,
-      balanceAmtBefore + expectedCollateral.toNumber(),
+      expectedBalanceShares,
     );
     assertBNEqual(
       resAfter.liquidity.totalAvailableAmount,
@@ -546,12 +554,13 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
         10,
     );
 
-    const sharesBefore = wrappedI80F48toBigNumber(
+    const expectedTotalAssetShares = addNativeAmountToI80(
       bankBefore.totalAssetShares,
-    ).toNumber();
-    assertI80F48Approx(
+      expectedCollateral,
+    );
+    assertI80F48Equal(
       bankAfter.totalAssetShares,
-      sharesBefore + expectedCollateral.toNumber(),
+      expectedTotalAssetShares,
     );
     assertI80F48Equal(bankAfter.assetShareValue, 1);
     assertI80F48Equal(bankAfter.collectedInsuranceFeesOutstanding, 0);
