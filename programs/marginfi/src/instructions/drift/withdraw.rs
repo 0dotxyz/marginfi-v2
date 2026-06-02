@@ -257,7 +257,7 @@ pub fn drift_withdraw<'info>(
             bank: bank_key,
             mint: bank_mint,
             amount: actual_amount_received,
-            share_amount,
+            share_amount: share_amount.into(),
             close_balance: withdraw_all,
         });
 

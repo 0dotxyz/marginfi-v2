@@ -134,7 +134,7 @@ pub fn lending_account_deposit<'info>(
         bank: bank_loader.key(),
         mint: bank.mint,
         amount: deposit_amount,
-        share_amount,
+        share_amount: share_amount.into(),
     });
 
     marginfi_account.lending_account.sort_balances();

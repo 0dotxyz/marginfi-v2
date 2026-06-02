@@ -159,7 +159,7 @@ pub fn lending_account_repay<'info>(
         bank: bank_loader.key(),
         mint: bank.mint,
         amount: repay_amount_post_fee,
-        share_amount,
+        share_amount: share_amount.into(),
         close_balance: repay_all,
     });
 

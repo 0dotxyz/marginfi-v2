@@ -119,7 +119,7 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
             bank: ctx.accounts.bank.key(),
             mint: bank.mint,
             amount,
-            share_amount,
+            share_amount: share_amount.into(),
         });
     }
 

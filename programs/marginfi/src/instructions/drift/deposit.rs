@@ -121,7 +121,7 @@ pub fn drift_deposit<'info>(
             bank: ctx.accounts.bank.key(),
             mint: bank.mint,
             amount,
-            share_amount,
+            share_amount: share_amount.into(),
         });
     }
 

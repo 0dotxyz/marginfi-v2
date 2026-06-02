@@ -217,7 +217,7 @@ pub fn solend_withdraw<'info>(
             bank: bank_key,
             mint: bank_mint,
             amount: collateral_amount,
-            share_amount,
+            share_amount: share_amount.into(),
             close_balance: withdraw_all,
         });
 

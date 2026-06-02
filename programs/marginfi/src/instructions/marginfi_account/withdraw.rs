@@ -201,7 +201,7 @@ pub fn lending_account_withdraw<'info>(
             bank: bank_loader.key(),
             mint: bank.mint,
             amount: amount_pre_fee,
-            share_amount,
+            share_amount: share_amount.into(),
             close_balance: withdraw_all,
         });
     }

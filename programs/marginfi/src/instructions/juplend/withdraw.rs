@@ -268,7 +268,7 @@ pub fn juplend_withdraw<'info>(
             bank: bank_key,
             mint: bank_mint,
             amount: received_underlying,
-            share_amount,
+            share_amount: share_amount.into(),
             close_balance: withdraw_all,
         });
 
