@@ -233,7 +233,7 @@ jobs:
         set +e
 
         run_tests() {
-          anchor test --skip-build --skip-local-validator --skip-deploy 2>&1 | tee test_output.log
+          anchor run all-tests 2>&1 | tee test_output.log
           return $?
         }
 
