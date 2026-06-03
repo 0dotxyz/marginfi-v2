@@ -150,7 +150,7 @@ jobs:
 
     - name: Run fuzz tests
       run: |
-        cargo +nightly-2025-08-01 fuzz run lend \
+        RUST_BACKTRACE=1 cargo +nightly-2025-08-01 fuzz run lend \
           --strip-dead-code --no-cfg-fuzzing \
             -- -max_total_time=150 \
               -timeout_exitcode=100 \
@@ -170,21 +170,6 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - uses: ./.github/actions/base-setup/
-
-    - name: Debug checked out commit
-      run: |
-        echo "github.event_name=${{ github.event_name }}"
-        echo "github.sha=${{ github.sha }}"
-        echo "github.ref=${{ github.ref }}"
-        echo "github.head_ref=${{ github.head_ref }}"
-        echo "pr.head.sha=${{ github.event.pull_request.head.sha }}"
-        echo "pr.base.sha=${{ github.event.pull_request.base.sha }}"
-        echo "HEAD=$(git rev-parse HEAD)"
-        git log -1 --oneline
-        git show -s --format='parents: %P' HEAD
-        git remote -v
-        grep -n "Init blank metadata" tests/04_configureBank.spec.ts || true
-        grep -n "canonical seeded bank" tests/04_configureBank.spec.ts || true
 
     - name: Setup Node.js
       uses: actions/setup-node@v4

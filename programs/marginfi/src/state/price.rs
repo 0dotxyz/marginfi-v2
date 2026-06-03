@@ -1,12 +1,8 @@
 use crate::constants::{
     MIN_PYTH_PUSH_VERIFICATION_LEVEL, NATIVE_STAKE_ID, SPL_SINGLE_POOL_ID, SWITCHBOARD_PULL_ID,
 };
-use crate::oracle_compat::{
-    pyth::{self as price_update, FeedId, PriceUpdateV2, PYTH_PUSH_ORACLE_ID},
-    switchboard::{
-        CurrentResult, PullFeedAccountData, PRECISION as SWITCHBOARD_PRECISION,
-        PULL_FEED_DISCRIMINATOR,
-    },
+use crate::oracle_compat::switchboard::{
+    CurrentResult, PullFeedAccountData, PRECISION as SWITCHBOARD_PRECISION, PULL_FEED_DISCRIMINATOR,
 };
 use crate::state::bank_config::BankConfigImpl;
 use crate::{check, check_eq, debug, math_error, prelude::*};
@@ -28,6 +24,10 @@ use marginfi_type_crate::{
         mul_u64_by_i80f48, Bank, BankConfig, OraclePriceType, OraclePriceWithConfidence,
         OracleSetup, PriceBias,
     },
+};
+use pyth_solana_receiver_sdk::{
+    price_update::{self, FeedId, PriceUpdateV2},
+    PYTH_PUSH_ORACLE_ID,
 };
 use solana_borsh::v1::try_from_slice_unchecked;
 use solana_stake_interface::state::StakeStateV2;
@@ -1891,7 +1891,7 @@ mod tests {
         // conf/Std_dev ~$8.1619e-8
         let bytes = hex_to_bytes("22f123639d7ef4cdb4eacbe402ae9165c2ab7dfcdbe5044d27f284106f88a90bfddefa5fbff60ca00172b021217ca3fe68922a19aaf990109cb9d84e9ad004b4d2025ad6f529314419fd510500000000006501000000000000f6ffffff29bc80680000000029bc806800000000af56050000000000810100000000000058d32b150000000000");
         let key = pubkey!("DBE3N8uNjhKPRHfANdwGvCZghWXyLPdqdSbEW2XFwBiX");
-        let owner = crate::oracle_compat::pyth::id();
+        let owner = pyth_solana_receiver_sdk::id();
         let mut lamports = 1_000_000u64;
         let mut data = bytes.clone();
 

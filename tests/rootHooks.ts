@@ -489,6 +489,7 @@ function getGenesisAccounts(): AddedAccount[] {
 
 export const mochaHooks = {
   beforeAll: async () => {
+
     // If false, you are in the wrong environment to run this, update Node or try polyfill
     console.log("Environment supports crypto: ", !!global.crypto?.subtle);
 

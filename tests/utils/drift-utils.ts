@@ -44,6 +44,7 @@ import { makeInitializeSpotMarketIx, makeAdminDepositIx } from "./drift-sdk";
 import { deriveSpotMarketPDA } from "./pdas";
 import { accountInit } from "./user-instructions";
 import { processBankrunTransaction, toI80Scaled } from "./tools";
+import { bnToBigIntSafe } from "./bn-utils";
 
 // Import Drift account types using IdlAccounts - the clean Anchor-native way
 export type DriftState = IdlAccounts<Drift>["state"];
@@ -170,6 +171,9 @@ export const ZERO = new BN(0);
 export const ONE = new BN(1);
 export const TEN = new BN(10);
 export const ONE_YEAR = new BN(31536000);
+
+export const safeBN = (value: BN): BN =>
+  new BN(bnToBigIntSafe(value).toString());
 
 // Default spot market configuration
 export interface SpotMarketConfig {
@@ -314,17 +318,18 @@ export function getTokenAmount(
   spotMarket: DriftSpotMarket,
   isDeposit: boolean,
 ): BN {
+  const safeBalanceAmount = safeBN(balanceAmount);
   const precisionDecrease = TEN.pow(
     new BN(DRIFT_PRECISION_EXP - spotMarket.decimals),
   );
 
   if (isDeposit) {
-    return balanceAmount
-      .mul(spotMarket.cumulativeDepositInterest)
+    return safeBalanceAmount
+      .mul(safeBN(spotMarket.cumulativeDepositInterest))
       .div(precisionDecrease);
   } else {
     return divCeil(
-      balanceAmount.mul(spotMarket.cumulativeBorrowInterest),
+      safeBalanceAmount.mul(safeBN(spotMarket.cumulativeBorrowInterest)),
       precisionDecrease,
     );
   }
@@ -523,7 +528,10 @@ export const formatDepositAmount = (
  * @returns Formatted string with commas but no decimal places
  */
 export const formatRawAmount = (amount: BN | number | string): string => {
-  return parseInt(amount.toString()).toLocaleString("en-US");
+  const value = BN.isBN(amount)
+    ? bnToBigIntSafe(amount).toString()
+    : amount.toString();
+  return parseInt(value).toLocaleString("en-US");
 };
 
 /**
@@ -533,7 +541,8 @@ export const formatRawAmount = (amount: BN | number | string): string => {
  */
 export const hasActivePositions = (spotMarket: DriftSpotMarket): boolean => {
   return (
-    !spotMarket.depositBalance.isZero() || !spotMarket.borrowBalance.isZero()
+    !safeBN(spotMarket.depositBalance).isZero() ||
+    !safeBN(spotMarket.borrowBalance).isZero()
   );
 };
 
@@ -568,9 +577,7 @@ export const tokenAmountToScaledBalance = (
   spotMarket: DriftSpotMarket,
 ): BN => {
   const decimals = spotMarket.decimals;
-  const cumulativeInterest = new BN(
-    spotMarket.cumulativeDepositInterest.toString(),
-  );
+  const cumulativeInterest = safeBN(spotMarket.cumulativeDepositInterest);
 
   // Calculate precision increase: 10^(19 - decimals)
   const precisionIncrease = new BN(10).pow(new BN(19 - decimals));
@@ -598,14 +605,14 @@ export const scaledBalanceToTokenAmount = (
 ): BN => {
   const decimals = spotMarket.decimals;
   const cumulativeInterest = isDeposit
-    ? new BN(spotMarket.cumulativeDepositInterest.toString())
-    : new BN(spotMarket.cumulativeBorrowInterest.toString());
+    ? safeBN(spotMarket.cumulativeDepositInterest)
+    : safeBN(spotMarket.cumulativeBorrowInterest);
   if (decimals > DRIFT_PRECISION_EXP) {
     console.error("decimals > drift precision, likely invalid");
   }
 
   const precisionIncrease = TEN.pow(new BN(DRIFT_PRECISION_EXP - decimals));
-  const product = scaledBalance.mul(cumulativeInterest);
+  const product = safeBN(scaledBalance).mul(cumulativeInterest);
   const quotient = product.div(precisionIncrease);
   return quotient;
 };
@@ -1111,7 +1118,9 @@ export const compareDriftValuations = async (
   }
 
   // Convert shares exactly in integer space to avoid float/string precision artifacts.
-  const assetShares = new BN((toI80Scaled(balance.assetShares) >> 48n).toString());
+  const assetShares = new BN(
+    (toI80Scaled(balance.assetShares) >> 48n).toString(),
+  );
   const liabilityShares = new BN(
     (toI80Scaled(balance.liabilityShares) >> 48n).toString(),
   );
@@ -1241,15 +1250,6 @@ export const getDriftUser = async (
   );
 
   return await driftProgram.account.user.fetch(userPDA);
-};
-
-const bnToBigIntSafe = (value: BN): bigint => {
-  const bytes = value.toArrayLike(Uint8Array, "be");
-  let out = 0n;
-  for (const byte of bytes) {
-    out = (out << 8n) | BigInt(byte);
-  }
-  return value.isNeg() ? -out : out;
 };
 
 export async function assertBankBalance(

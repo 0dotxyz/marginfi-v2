@@ -17,16 +17,12 @@ use crate::{
         price::OraclePriceWithMultiplier,
     },
 };
-use anchor_lang::prelude::*;
-use anchor_lang::{
-    err,
-    prelude::{AccountInfo, CpiContext, InterfaceAccount},
-    ToAccountInfo,
-};
-use anchor_spl::{
-    token::{transfer, Transfer},
-    token_interface::Mint,
-};
+#[cfg(not(feature = "client"))]
+use anchor_lang::ToAccountInfo;
+use anchor_lang::{err, prelude::*};
+#[cfg(not(feature = "client"))]
+use anchor_spl::token::{transfer, Transfer};
+use anchor_spl::token_interface::Mint;
 use bytemuck::Zeroable;
 use drift_mocks::constants::scale_drift_deposit_limit;
 use fixed::types::I80F48;
@@ -634,6 +630,7 @@ impl BankImpl for Bank {
         Ok(())
     }
 
+    #[allow(unused_variables)]
     fn deposit_spl_transfer<'info>(
         &self,
         amount: u64,
@@ -654,6 +651,7 @@ impl BankImpl for Bank {
             amount, from.key, to.key, authority.key
         );
 
+        #[cfg(not(feature = "client"))]
         if let Some(mint) = maybe_mint {
             spl_token_2022::onchain::invoke_transfer_checked(
                 program.key,
@@ -685,6 +683,7 @@ impl BankImpl for Bank {
         Ok(())
     }
 
+    #[allow(unused_variables)]
     fn withdraw_spl_transfer<'info>(
         &self,
         amount: u64,
@@ -701,6 +700,7 @@ impl BankImpl for Bank {
             amount, from.key, to.key, authority.key
         );
 
+        #[cfg(not(feature = "client"))]
         if let Some(mint) = maybe_mint {
             spl_token_2022::onchain::invoke_transfer_checked(
                 program.key,

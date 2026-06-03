@@ -18,7 +18,6 @@ use marginfi::{
     utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
 };
 use marginfi_type_crate::types::{Bank, BankConfigOpt, OraclePriceType, OracleSetup};
-use solana_address::Address;
 use solana_commitment_config::CommitmentLevel;
 use solana_program_test::BanksClientError;
 use solana_program_test::ProgramTestContext;
@@ -29,7 +28,6 @@ use std::{cell::RefCell, fmt::Debug, rc::Rc};
 pub struct BankFixture {
     ctx: Rc<RefCell<ProgramTestContext>>,
     pub key: Pubkey,
-    pub address: Address,
     pub mint: MintFixture,
     pub kamino: Option<KaminoFixture>,
 }
@@ -44,7 +42,6 @@ impl BankFixture {
         Self {
             ctx,
             key,
-            address: Address::new_from_array(key.to_bytes()),
             mint: mint_fixture.clone(),
             kamino,
         }
@@ -70,12 +67,11 @@ impl BankFixture {
             }
             _ => {
                 let oracle_key = bank.config.oracle_keys[0];
-                let oracle_address = Address::new_from_array(bank.config.oracle_keys[0].to_bytes());
                 let mut oracle_account = self
                     .ctx
                     .borrow_mut()
                     .banks_client
-                    .get_account(oracle_address)
+                    .get_account(oracle_key)
                     .await
                     .unwrap()
                     .unwrap();
@@ -96,7 +92,7 @@ impl BankFixture {
     }
 
     pub async fn load(&self) -> Bank {
-        load_and_deserialize::<Bank>(self.ctx.clone(), &self.address).await
+        load_and_deserialize::<Bank>(self.ctx.clone(), &self.key).await
     }
 
     pub async fn update_config(
@@ -396,7 +392,7 @@ impl BankFixture {
             .ctx
             .borrow_mut()
             .banks_client
-            .get_account(self.address)
+            .get_account(self.key)
             .await
             .unwrap()
             .unwrap();
@@ -407,7 +403,7 @@ impl BankFixture {
 
         self.ctx
             .borrow_mut()
-            .set_account(&self.address, &bank_ai.into());
+            .set_account(&self.key, &bank_ai.into());
     }
 
     pub async fn set_asset_share_value(&self, value: I80F48) {
@@ -415,7 +411,7 @@ impl BankFixture {
             .ctx
             .borrow_mut()
             .banks_client
-            .get_account(self.address)
+            .get_account(self.key)
             .await
             .unwrap()
             .unwrap();
@@ -425,7 +421,7 @@ impl BankFixture {
 
         self.ctx
             .borrow_mut()
-            .set_account(&self.address, &bank_ai.into());
+            .set_account(&self.key, &bank_ai.into());
     }
 }
 

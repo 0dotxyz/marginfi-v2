@@ -58,7 +58,7 @@ mocks = { path = "programs/mocks", package = "mocks" }
 id-crate = { path = "id-crate" }
 marginfi-type-crate = { path = "type-crate" }
 
-pyth-solana-receiver-sdk = { git = "https://github.com/IliaZyrin/pyth-crosschain", package = "pyth-solana-receiver-sdk", branch = "solana-borsh-up" }
+pyth-solana-receiver-sdk = { git = "https://github.com/IliaZyrin/pyth-crosschain", package = "pyth-solana-receiver-sdk", rev = "913ce2196a104635582d745c8fbd9a69e240070c" }
 switchboard-on-demand = { version = "0.9.5", default-features = false, features = ["cpi", "solana-v3"] }
 
 borsh = "1.6.1"

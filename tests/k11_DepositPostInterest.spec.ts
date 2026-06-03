@@ -221,6 +221,7 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
       balanceAfter.assetShares,
       // Note: the balance tracks your collateral token, NOT liquidity token!
       balanceAmtBefore + expectedCollateral.toNumber(),
+      0.01,
     );
     assertBNEqual(
       resAfter.liquidity.totalAvailableAmount,

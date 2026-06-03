@@ -75,7 +75,7 @@ describe("Emode Max Leverage Configuration", () => {
         emodeGroup.publicKey
       );
       assert.approximately(u32ToBasis(group.emodeMaxInitLeverage), 10, 0.01);
-      assert.approximately(u32ToBasis(group.emodeMaxMaintLeverage), 15, 0.01); 
+      assert.approximately(u32ToBasis(group.emodeMaxMaintLeverage), 15, 0.01);
     });
 
   });
@@ -240,6 +240,8 @@ describe("Emode Max Leverage Configuration", () => {
       // SOL bank has liability weights of 1.0/1.0 (init/maint)
       // Setting asset weight = 1.0 would cause division by zero in leverage calculation
       // L = 1/(1-CW/LW) => when CW = LW, denominator = 0 (infinite leverage)
+      // TODO: Remove this once mrgn-common's i80f48 converter is isolated from Decimal global state.
+      bigNumberToWrappedI80F48(1.0);
       const tx = new Transaction().add(
         await configBankEmode(emodeAdmin.mrgnBankrunProgram, {
           bank: solBank,
