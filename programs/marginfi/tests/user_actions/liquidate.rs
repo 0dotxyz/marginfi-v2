@@ -297,8 +297,10 @@ async fn marginfi_account_liquidation_success(
         collateral_mint_liquidator_balance
     );
 
-    let debt_paid_out = liquidate_amount * 0.975 * collateral_bank_f.get_price().await
-        / debt_bank_f.get_price().await;
+    let on_ramp_transition = test_f.marginfi_group.load().await.on_ramp_transition();
+    let debt_paid_out =
+        liquidate_amount * 0.975 * collateral_bank_f.get_price(on_ramp_transition).await
+            / debt_bank_f.get_price(on_ramp_transition).await;
     let debt_paid_out_native =
         I80F48::from(native!(debt_paid_out, debt_bank_f.mint.mint.decimals, f64));
 
@@ -333,8 +335,9 @@ async fn marginfi_account_liquidation_success(
     );
 
     // Check liquidatee collateral and debt balances
-    let debt_covered = liquidate_amount * 0.95 * collateral_bank_f.get_price().await
-        / debt_bank_f.get_price().await;
+    let debt_covered =
+        liquidate_amount * 0.95 * collateral_bank_f.get_price(on_ramp_transition).await
+            / debt_bank_f.get_price(on_ramp_transition).await;
 
     let borrow_amount_native = I80F48::from(native!(
         liquidatee_borrow_amount_actual,
@@ -397,8 +400,9 @@ async fn marginfi_account_liquidation_success(
     );
 
     // Check the insurance fees
-    let insurance_fund_fee = liquidate_amount * 0.025 * collateral_bank_f.get_price().await
-        / debt_bank_f.get_price().await;
+    let insurance_fund_fee =
+        liquidate_amount * 0.025 * collateral_bank_f.get_price(on_ramp_transition).await
+            / debt_bank_f.get_price(on_ramp_transition).await;
     let expected_insurance_fund_usdc_pre_fee =
         native!(insurance_fund_fee, debt_bank_f.mint.mint.decimals, f64);
     let if_transfer_fee = debt_bank_f
@@ -647,8 +651,10 @@ async fn marginfi_account_liquidation_with_delays_success(
         1.
     );
 
-    let debt_paid_out = liquidate_amount * 0.975 * collateral_bank_f.get_price().await
-        / debt_bank_f.get_price().await;
+    let on_ramp_transition = test_f.marginfi_group.load().await.on_ramp_transition();
+    let debt_paid_out =
+        liquidate_amount * 0.975 * collateral_bank_f.get_price(on_ramp_transition).await
+            / debt_bank_f.get_price(on_ramp_transition).await;
     let debt_paid_out_native =
         I80F48::from(native!(debt_paid_out, debt_bank_f.mint.mint.decimals, f64));
 
@@ -677,8 +683,9 @@ async fn marginfi_account_liquidation_with_delays_success(
 
     // Check liquidatee collateral and debt balances
 
-    let debt_covered = liquidate_amount * 0.95 * collateral_bank_f.get_price().await
-        / debt_bank_f.get_price().await;
+    let debt_covered =
+        liquidate_amount * 0.95 * collateral_bank_f.get_price(on_ramp_transition).await
+            / debt_bank_f.get_price(on_ramp_transition).await;
 
     // We have to account for updated share value here due to 1 second of delay we introduced to check last_update
     let borrow_amount_native = I80F48::from(native!(
@@ -749,8 +756,9 @@ async fn marginfi_account_liquidation_with_delays_success(
     );
 
     // Check the insurance fees
-    let insurance_fund_fee = liquidate_amount * 0.025 * collateral_bank_f.get_price().await
-        / debt_bank_f.get_price().await;
+    let insurance_fund_fee =
+        liquidate_amount * 0.025 * collateral_bank_f.get_price(on_ramp_transition).await
+            / debt_bank_f.get_price(on_ramp_transition).await;
     let expected_insurance_fund_usdc_pre_fee =
         native!(insurance_fund_fee, debt_bank_f.mint.mint.decimals, f64);
     let if_transfer_fee = debt_bank_f

@@ -31,8 +31,8 @@ use marginfi_type_crate::{
         ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
     },
     types::{
-        Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, OraclePriceType,
-        OraclePriceWithConfidence, PriceBias, WrappedI80F48,
+        Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, OnRampTransition,
+        OraclePriceType, OraclePriceWithConfidence, PriceBias, WrappedI80F48,
     },
 };
 
@@ -318,9 +318,10 @@ pub fn fetch_asset_price_for_bank_low_bias<'info>(
     bank: &Bank,
     clock: &Clock,
     remaining_accounts: &'info [AccountInfo<'info>],
+    on_ramp_transition: OnRampTransition,
 ) -> Result<I80F48> {
     let oracle_ais = oracle_accounts_for_bank(bank_key, bank, remaining_accounts)?;
-    let pf = OraclePriceFeedAdapter::try_from_bank(bank, oracle_ais, clock)?;
+    let pf = OraclePriceFeedAdapter::try_from_bank(bank, oracle_ais, clock, on_ramp_transition)?;
     let price = pf.get_price_of_type(
         OraclePriceType::RealTime,
         Some(PriceBias::Low),
@@ -338,6 +339,7 @@ pub fn fetch_unbiased_price_for_bank_with_cache<'info>(
     bank: &Bank,
     clock: &Clock,
     remaining_accounts: &'info [AccountInfo<'info>],
+    on_ramp_transition: OnRampTransition,
 ) -> Result<(OraclePriceWithConfidence, OraclePriceWithMultiplier)> {
     let oracle_ais = oracle_accounts_for_bank(bank_key, bank, remaining_accounts)?;
     let prices = OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
@@ -345,6 +347,7 @@ pub fn fetch_unbiased_price_for_bank_with_cache<'info>(
         oracle_ais,
         clock,
         OraclePriceType::RealTime,
+        on_ramp_transition,
     )?;
 
     Ok(prices)
@@ -358,9 +361,15 @@ pub fn fetch_unbiased_price_for_bank<'info>(
     bank: &Bank,
     clock: &Clock,
     remaining_accounts: &'info [AccountInfo<'info>],
+    on_ramp_transition: OnRampTransition,
 ) -> Result<OraclePriceWithConfidence> {
-    let (price, _) =
-        fetch_unbiased_price_for_bank_with_cache(bank_key, bank, clock, remaining_accounts)?;
+    let (price, _) = fetch_unbiased_price_for_bank_with_cache(
+        bank_key,
+        bank,
+        clock,
+        remaining_accounts,
+        on_ramp_transition,
+    )?;
     Ok(price)
 }
 
@@ -372,9 +381,15 @@ pub fn fetch_unbiased_price_for_bank_cache<'info>(
     bank: &Bank,
     clock: &Clock,
     remaining_accounts: &'info [AccountInfo<'info>],
+    on_ramp_transition: OnRampTransition,
 ) -> Result<OraclePriceWithMultiplier> {
-    let (_, cache_price) =
-        fetch_unbiased_price_for_bank_with_cache(bank_key, bank, clock, remaining_accounts)?;
+    let (_, cache_price) = fetch_unbiased_price_for_bank_with_cache(
+        bank_key,
+        bank,
+        clock,
+        remaining_accounts,
+        on_ramp_transition,
+    )?;
     Ok(cache_price)
 }
 

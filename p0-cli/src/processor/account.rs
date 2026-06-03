@@ -980,6 +980,7 @@ pub fn marginfi_account_liquidate_receivership(
         program_id: config.program_id,
         accounts: marginfi::accounts::StartLiquidation {
             marginfi_account: liquidatee_marginfi_account_pk,
+            group: group_pk,
             liquidation_record: liq_record_pk,
             liquidation_receiver: authority,
             instruction_sysvar: sysvar::instructions::id(),
@@ -996,6 +997,7 @@ pub fn marginfi_account_liquidate_receivership(
         program_id: config.program_id,
         accounts: marginfi::accounts::EndLiquidation {
             marginfi_account: liquidatee_marginfi_account_pk,
+            group: group_pk,
             liquidation_record: liq_record_pk,
             liquidation_receiver: authority,
             fee_state: fee_state_pk,
@@ -1285,6 +1287,7 @@ pub fn marginfi_account_pulse_health(
     let mut ix = Instruction {
         program_id: config.program_id,
         accounts: marginfi::accounts::PulseHealth {
+            group: marginfi_account.group,
             marginfi_account: marginfi_account_pk,
         }
         .to_account_metas(Some(true)),

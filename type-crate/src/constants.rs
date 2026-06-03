@@ -91,9 +91,11 @@ pub const BANK_SEED_KNOWN: u64 = 1 << 8;
 /// True if bank created in 0.1.4 or later, or if migrated to the new oracle setup from a prior
 /// version. False otherwise.
 pub const PYTH_PUSH_MIGRATED_DEPRECATED: u8 = 1 << 0;
+
 /// Staked-collateral price calculation includes SPL single-pool's on-ramp account in NAV.
 /// To be removed once SVSP update is rolled out (likely in 1.10)
-pub const STAKED_ORACLE_PRICE_USES_ONRAMP: u8 = 1 << 1;
+pub const STAKED_ORACLE_DISABLED: u64 = 1 << 1;
+pub const STAKED_ORACLE_PRICE_USES_ONRAMP: u64 = 1 << 2;
 
 pub const GROUP_FLAGS: u64 = PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
     | FREEZE_SETTINGS

@@ -114,7 +114,7 @@ async fn liquidate_start_then_cpi_start_on_different_accounts_exploit() -> anyho
     // The "normal" start for A
     let payer = test_f.payer();
     let start_ix_a = liquidatee_a
-        .make_start_liquidation_ix(record_a, payer)
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_a, payer)
         .await;
 
     // The shifty start-via-CPI for B
@@ -146,6 +146,7 @@ async fn liquidate_start_then_cpi_start_on_different_accounts_exploit() -> anyho
     // End for A
     let end_ix_a = liquidatee_a
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_a,
             payer,
             test_f.marginfi_group.fee_state,
@@ -270,7 +271,9 @@ async fn handle_bankruptcy_via_cpi_fails() -> anyhow::Result<()> {
     } // release borrow
 
     let payer = test_f.payer();
-    let start_ix = attacker_acc.make_start_liquidation_ix(rec, payer).await;
+    let start_ix = attacker_acc
+        .make_start_liquidation_ix(test_f.marginfi_group.key, rec, payer)
+        .await;
 
     // Withdraw THE ENTIRE AMOUNT
     // * Note: Attacker has to liquidate their own account for this exploit to work, otherwise it's
@@ -283,6 +286,7 @@ async fn handle_bankruptcy_via_cpi_fails() -> anyhow::Result<()> {
     // Note: no repay required! We're going to clear that debt throught bankruptcy instead!
     let end_ix = attacker_acc
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             rec,
             payer,
             test_f.marginfi_group.fee_state,

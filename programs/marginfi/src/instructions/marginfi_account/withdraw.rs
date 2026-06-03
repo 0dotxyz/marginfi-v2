@@ -61,6 +61,8 @@ pub fn lending_account_withdraw<'info>(
 
     let withdraw_all = withdraw_all.unwrap_or(false);
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
+    let group = marginfi_group_loader.load()?;
+    let on_ramp_transition = group.on_ramp_transition();
 
     {
         let maybe_bank_mint = {
@@ -70,7 +72,6 @@ pub fn lending_account_withdraw<'info>(
 
         let in_receivership_or_order_execution =
             marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
-        let group = marginfi_group_loader.load()?;
         let mut bank = bank_loader.load_mut()?;
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
 
@@ -83,6 +84,7 @@ pub fn lending_account_withdraw<'info>(
                 &bank,
                 &clock,
                 ctx.remaining_accounts,
+                on_ramp_transition,
             )?;
 
             // Validate price is non-zero during liquidation/deleverage to prevent exploits
@@ -224,6 +226,7 @@ pub fn lending_account_withdraw<'info>(
             &marginfi_account,
             ctx.remaining_accounts,
             &mut Some(&mut health_cache),
+            on_ramp_transition,
         )?;
         health_cache.program_version = PROGRAM_VERSION;
 
@@ -235,9 +238,14 @@ pub fn lending_account_withdraw<'info>(
     // Note: during receivership, callers may omit oracle accounts; the cache simply won't update.
     {
         let bank = bank_loader.load()?;
-        maybe_price =
-            fetch_unbiased_price_for_bank_cache(&bank_pk, &bank, &clock, ctx.remaining_accounts)
-                .ok();
+        maybe_price = fetch_unbiased_price_for_bank_cache(
+            &bank_pk,
+            &bank,
+            &clock,
+            ctx.remaining_accounts,
+            on_ramp_transition,
+        )
+        .ok();
     }
 
     bank_loader.load_mut()?.update_cache_price(maybe_price)?;

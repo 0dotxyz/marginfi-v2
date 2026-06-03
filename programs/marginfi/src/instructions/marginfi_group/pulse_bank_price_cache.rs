@@ -11,11 +11,13 @@ pub fn lending_pool_pulse_bank_price_cache<'info>(
     let clock = Clock::get()?;
 
     let mut bank = ctx.accounts.bank.load_mut()?;
+    let group = ctx.accounts.group.load()?;
 
     let price_for_cache = OraclePriceFeedAdapter::get_price_and_confidence_for_cache(
         &bank,
         ctx.remaining_accounts,
         &clock,
+        group.on_ramp_transition(),
     )?;
 
     bank.update_cache_price(Some(price_for_cache))?;

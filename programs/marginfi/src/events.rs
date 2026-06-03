@@ -59,14 +59,6 @@ pub struct LendingPoolBankConfigureOracleEvent {
 }
 
 #[event]
-pub struct LendingPoolStakedOracleOnrampEnabledEvent {
-    pub header: GroupEventHeader,
-    pub bank: Pubkey,
-    pub validator_vote_account: Pubkey,
-    pub pool_onramp: Pubkey,
-}
-
-#[event]
 pub struct LendingPoolBankSetFixedOraclePriceEvent {
     pub header: GroupEventHeader,
     pub bank: Pubkey,

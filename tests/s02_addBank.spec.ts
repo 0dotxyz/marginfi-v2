@@ -41,7 +41,6 @@ import {
   assertKeysEqual,
 } from "./utils/genericTests";
 import {
-  aprToU32,
   ASSET_TAG_DEFAULT,
   BANK_SEED_KNOWN_FLAG,
   ASSET_TAG_SOL,
@@ -69,6 +68,7 @@ import {
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { getBankrunBlockhash } from "./utils/tools";
 import { createPoolOnramp } from "./utils/spl-staking-utils";
+import { pulseBankPrice } from "./utils/user-instructions";
 
 let program: Program<Marginfi>;
 let marginfiGroup: Keypair;
@@ -106,7 +106,32 @@ describe("Init group and add banks with asset category flags", () => {
     }
   });
 
-  // TODO add bank permissionless fails prior to opting in
+  it("(permissionless) Add staked collateral bank before group opt-in - should fail", async () => {
+    const [bankKey] = deriveBankWithSeed(
+      program.programId,
+      marginfiGroup.publicKey,
+      validators[0].splMint,
+      new BN(0),
+    );
+    validators[0].bank = bankKey;
+
+    let tx = new Transaction();
+    tx.add(
+      await addBankPermissionless(groupAdmin.mrgnBankrunProgram, {
+        marginfiGroup: marginfiGroup.publicKey,
+        feePayer: groupAdmin.wallet.publicKey,
+        pythOracle: oracles.wsolOracle.publicKey,
+        stakePool: validators[0].splPool,
+        validatorVoteAccount: validators[0].voteAccount,
+        seed: new BN(0),
+      }),
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet);
+          let result = await banksClient.tryProcessTransaction(tx);
+          // StakePoolValidationFailed
+          assertBankrunTxFailed(result, "0x17a0");
+  });
 
   it("(admin) Init staked settings for group - opts in to use staked collateral", async () => {
     const settings = defaultStakedInterestSettings(
@@ -248,23 +273,20 @@ describe("Init group and add banks with asset category flags", () => {
       const onrampInfo = await bankRunProvider.connection.getAccountInfo(
         validator.splOnRampPool,
       );
-      if (onrampInfo === null) {
-        tx.add(
-          SystemProgram.transfer({
-            fromPubkey: groupAdmin.wallet.publicKey,
-            toPubkey: validator.splOnRampPool,
-            lamports: onrampRent,
-          }),
-          createPoolOnramp(validator.voteAccount),
-        );
-      }
+      assert.equal(onrampInfo, null);
+      tx.add(
+        SystemProgram.transfer({
+          fromPubkey: groupAdmin.wallet.publicKey,
+          toPubkey: validator.splOnRampPool,
+          lamports: onrampRent,
+        }),
+        createPoolOnramp(validator.voteAccount),
+      );
     }
 
-    if (tx.instructions.length > 0) {
-      tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      tx.sign(groupAdmin.wallet);
-      await banksClient.processTransaction(tx);
-    }
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet);
+    await banksClient.processTransaction(tx);
 
     for (const validator of validators) {
       const onrampInfo = await bankRunProvider.connection.getAccountInfo(
@@ -451,7 +473,7 @@ describe("Init group and add banks with asset category flags", () => {
               feePayer: users[0].wallet.publicKey,
               bankMint: goodLstMint, // Good key
               solPool: goodSolPool, // Good key
-              poolOnramp: onRamp,
+              poolOnramp: onRamp, // Good key
               stakePool: goodStakePool, // Good key
               validatorVoteAccount: validators[0].voteAccount,
               tokenProgram: TOKEN_PROGRAM_ID,
@@ -698,59 +720,6 @@ describe("Init group and add banks with asset category flags", () => {
     assert.equal(bank.config.configFlags & STAKED_ORACLE_PRICE_USES_ONRAMP, 0);
   });
 
-  it("(admin) Enable staked on-ramp oracle pricing - happy path", async () => {
-    const [testBank] = deriveBankWithSeed(
-      program.programId,
-      marginfiGroup.publicKey,
-      validators[0].splMint,
-      new BN(1),
-    );
-
-    let tx = new Transaction();
-    tx.add(
-      await addBankPermissionless(groupAdmin.mrgnBankrunProgram, {
-        marginfiGroup: marginfiGroup.publicKey,
-        feePayer: groupAdmin.wallet.publicKey,
-        pythOracle: oracles.wsolOracle.publicKey,
-        stakePool: validators[0].splPool,
-        validatorVoteAccount: validators[0].voteAccount,
-        seed: new BN(1),
-      }),
-    );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet);
-    await banksClient.processTransaction(tx);
-
-    tx = new Transaction();
-    tx.add(
-      await enableStakedOracleOnramp(groupAdmin.mrgnBankrunProgram, {
-        bank: testBank,
-        stakePool: validators[0].splPool,
-        validatorVoteAccount: validators[0].voteAccount,
-      }),
-    );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet);
-    await banksClient.processTransaction(tx);
-
-    const bank = await bankrunProgram.account.bank.fetch(testBank);
-    assert.equal(
-      bank.config.configFlags & STAKED_ORACLE_PRICE_USES_ONRAMP,
-      STAKED_ORACLE_PRICE_USES_ONRAMP,
-    );
-    assertKeysEqual(bank.config.oracleKeys[3], validators[0].splOnRampPool);
-
-    for (const validator of validators) {
-      const sharedBank = await bankrunProgram.account.bank.fetch(
-        validator.bank,
-      );
-      assert.equal(
-        sharedBank.config.configFlags & STAKED_ORACLE_PRICE_USES_ONRAMP,
-        0,
-      );
-    }
-  });
-
   it("(permissionless) Backfill staked vote account with wrong vote - should fail", async () => {
     let tx = new Transaction();
     tx.add(
@@ -818,5 +787,95 @@ describe("Init group and add banks with asset category flags", () => {
     const [onRampPool] = deriveOnRampPool(stakePool);
     assertKeysEqual(bankAfter.integrationAcc1, STAKED_BACKFILL_VOTE_SAMPLE);
     assertKeysEqual(bankAfter.config.oracleKeys[3], onRampPool);
+  });
+
+  it("(permissionless) Pulse staked bank with arbitrary fourth oracle before on-ramp pricing is enabled - happy path", async () => {
+    const tx = new Transaction().add(
+      await pulseBankPrice(groupAdmin.mrgnBankrunProgram, {
+        bank: validators[0].bank,
+        remaining: [
+          oracles.wsolOracle.publicKey,
+          validators[0].splMint,
+          validators[0].splSolPool,
+          validators[1].splOnRampPool,
+        ],
+      }),
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet);
+    await banksClient.processTransaction(tx);
+  });
+
+  it("(admin) Enable staked on-ramp oracle pricing with bad stake pool - should fail", async () => {
+    let tx = new Transaction();
+    tx.add(
+      await enableStakedOracleOnramp(groupAdmin.mrgnBankrunProgram, {
+        bank: validators[0].bank,
+        stakePool: validators[1].splPool,
+        validatorVoteAccount: validators[0].voteAccount,
+      }),
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet);
+    const result = await banksClient.tryProcessTransaction(tx);
+    // WrongOracleAccountKeys
+    assertBankrunTxFailed(result, 6052);
+  });
+
+  it("(admin) Enable staked on-ramp oracle pricing with bad vote account - should fail", async () => {
+    let tx = new Transaction();
+    tx.add(
+      await enableStakedOracleOnramp(groupAdmin.mrgnBankrunProgram, {
+        bank: validators[0].bank,
+        stakePool: validators[0].splPool,
+        validatorVoteAccount: validators[1].voteAccount,
+      }),
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet);
+    const result = await banksClient.tryProcessTransaction(tx);
+    // WrongOracleAccountKeys
+    assertBankrunTxFailed(result, 6052);
+  });
+
+  it("(admin) Enable staked on-ramp oracle pricing for bank (validator 1) - happy path", async () => {
+    let tx = new Transaction();
+    tx.add(
+      await enableStakedOracleOnramp(groupAdmin.mrgnBankrunProgram, {
+        bank: validators[0].bank,
+        stakePool: validators[0].splPool,
+        validatorVoteAccount: validators[0].voteAccount,
+      }),
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet);
+    await banksClient.processTransaction(tx);
+
+    const bank = await bankrunProgram.account.bank.fetch(validators[0].bank);
+    assert.equal(
+      bank.config.configFlags & STAKED_ORACLE_PRICE_USES_ONRAMP,
+      STAKED_ORACLE_PRICE_USES_ONRAMP,
+    );
+    assertKeysEqual(bank.config.oracleKeys[3], validators[0].splOnRampPool);
+  });
+
+  it("(permissionless) Pulse staked bank (validator 1) with wrong on-ramp - should fail", async () => {
+    const tx = new Transaction().add(
+      await pulseBankPrice(groupAdmin.mrgnBankrunProgram, {
+        bank: validators[0].bank,
+        remaining: [
+          oracles.wsolOracle.publicKey,
+          validators[0].splMint,
+          validators[0].splSolPool,
+          validators[1].splOnRampPool,
+        ],
+      }),
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet);
+
+    const result = await banksClient.tryProcessTransaction(tx);
+    // WrongOracleAccountKeys
+    assertBankrunTxFailed(result, 6052);
   });
 });
