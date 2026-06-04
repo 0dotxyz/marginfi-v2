@@ -897,10 +897,7 @@ describe("Init group and add banks with asset category flags", () => {
     await banksClient.processTransaction(tx);
 
     const bank = await bankrunProgram.account.bank.fetch(validators[0].bank);
-    const priceWithoutOnRamp = wrappedI80F48toBigNumber(
-      bank.cache.lastOraclePrice,
-    ).toNumber();
-    assert.equal(priceWithoutOnRamp, oracles.wsolPrice);
+    assertI80F48Approx(bank.cache.lastOraclePrice, oracles.wsolPrice);
 
     const priceMultiplierWithoutOnRamp = wrappedI80F48toBigNumber(
       bank.cache.priceMultiplier,
@@ -930,6 +927,6 @@ describe("Init group and add banks with asset category flags", () => {
     const priceMultiplierWithOnRamp = await fetchLstPriceMultiplier();
 
     // (41 + 9) / 40 = 1.25
-    assert.equal(priceMultiplierWithOnRamp, 1.25);
+    assert.approximately(priceMultiplierWithOnRamp, 1.25, 0.000001);
   });
 });

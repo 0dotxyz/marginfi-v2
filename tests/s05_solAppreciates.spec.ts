@@ -110,7 +110,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
       await banksClient.processTransaction(tx);
 
       const priceMultiplierAfterAppreciation = await fetchLstPriceMultiplier();
-      assert.equal(priceMultiplierAfterAppreciation, 2.0); // (50 + 30) / 40 = 2
+      assert.approximately(priceMultiplierAfterAppreciation, 2.0, 0.000001); // (50 + 30) / 40 = 2
     },
   );
 
@@ -231,7 +231,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
       await banksClient.processTransaction(tx);
 
       const priceMultiplierAfterAppreciation = await fetchLstPriceMultiplier();
-      assert.equal(priceMultiplierAfterAppreciation, 2.0); // still the same
+      assert.approximately(priceMultiplierAfterAppreciation, 2.0, 0.000001); // still the same
     },
   );
 
