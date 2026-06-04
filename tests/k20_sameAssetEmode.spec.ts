@@ -86,6 +86,7 @@ import {
   assertSameAssetBadDebtSurvivability,
   computeSameAssetBoundaryBorrowNative,
   computeSameValueBorrowNative,
+  enableSameAssetEmodeForBanks,
   setAssetShareValueHaircut,
   warpToNextBankrunSlot,
 } from "./utils/same-asset-emode";
@@ -522,6 +523,14 @@ describe("k20: Kamino same-asset emode", () => {
     await processBankrunTransaction(bankrunContext, solOracleTx, [
       groupAdmin.wallet,
     ]);
+
+    await enableSameAssetEmodeForBanks({
+      program: groupAdmin.mrgnBankrunProgram,
+      bankrunContext,
+      group: kaminoGroup.publicKey,
+      signer: groupAdmin.wallet,
+      banks: [kaminoUsdcBank, regularUsdcBank],
+    });
 
     await resetSameAssetLeverage();
 

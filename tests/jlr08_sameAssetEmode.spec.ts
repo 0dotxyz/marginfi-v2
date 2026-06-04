@@ -82,6 +82,7 @@ import {
   assertSameAssetBadDebtSurvivability,
   computeSameAssetBoundaryBorrowNative,
   computeSameValueBorrowNative,
+  enableSameAssetEmodeForBanks,
   setAssetShareValueHaircut,
   warpToNextBankrunSlot,
 } from "./utils/same-asset-emode";
@@ -398,6 +399,14 @@ describe("jlr08: JupLend same-asset emode", () => {
     await processBankrunTransaction(bankrunContext, regularTokenAOracleTx, [
       groupAdmin.wallet,
     ]);
+
+    await enableSameAssetEmodeForBanks({
+      program: groupAdmin.mrgnBankrunProgram,
+      bankrunContext,
+      group: groupPk,
+      signer: groupAdmin.wallet,
+      banks: [juplendTokenABank, regularTokenABank],
+    });
 
     await resetSameAssetLeverage();
 

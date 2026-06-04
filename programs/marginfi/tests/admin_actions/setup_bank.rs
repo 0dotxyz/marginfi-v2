@@ -15,8 +15,9 @@ use marginfi::{
 };
 use marginfi_type_crate::{
     constants::{
-        BANK_SEED_KNOWN, CLOSE_ENABLED_FLAG, FREEZE_SETTINGS, IS_T22, METADATA_SEED,
-        PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
+        BANK_SAME_ASSET_EMODE_ELIGIBLE, BANK_SEED_KNOWN, CLOSE_ENABLED_FLAG, FREEZE_SETTINGS,
+        IS_T22, METADATA_SEED, PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG,
+        TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
         make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt, BankMetadata,
@@ -703,6 +704,58 @@ async fn configure_bank_to_fixed_oracle() -> anyhow::Result<()> {
     assert_eq!(bank_after.config.oracle_setup, OracleSetup::Fixed);
     assert_eq!(I80F48::from(bank_after.config.fixed_price), price_value);
     assert_eq!(bank_after.config.oracle_keys[0], Pubkey::default());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn set_same_asset_emode_eligibility_success_and_fixed_rejects() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(usdc_bank, true)
+        .await?;
+    let usdc_after_enable = usdc_bank.load().await;
+    assert_eq!(
+        usdc_after_enable.flags & BANK_SAME_ASSET_EMODE_ELIGIBLE,
+        BANK_SAME_ASSET_EMODE_ELIGIBLE
+    );
+
+    let set_fixed_res = {
+        let ctx = test_f.context.borrow_mut();
+        let ix = test_f
+            .marginfi_group
+            .make_lending_pool_set_fixed_oracle_price_ix(usdc_bank, I80F48!(1).into());
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client.process_transaction(tx).await
+    };
+    assert!(set_fixed_res.is_err());
+    assert_custom_error!(set_fixed_res.unwrap_err(), MarginfiError::BadEmodeConfig);
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(usdc_bank, false)
+        .await?;
+    let usdc_after_disable = usdc_bank.load().await;
+    assert_eq!(
+        usdc_after_disable.flags & BANK_SAME_ASSET_EMODE_ELIGIBLE,
+        0
+    );
+
+    let fixed_bank = test_f.get_bank(&BankMint::Fixed);
+    let fixed_res = test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(fixed_bank, true)
+        .await;
+    assert!(fixed_res.is_err());
+    assert_custom_error!(fixed_res.unwrap_err(), MarginfiError::BadEmodeConfig);
 
     Ok(())
 }

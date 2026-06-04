@@ -69,6 +69,11 @@ pub(super) async fn add_same_asset_regular_bank(
         }
     };
 
+    test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(&bank, true)
+        .await?;
+
     Ok(bank)
 }
 
@@ -78,10 +83,16 @@ pub(super) async fn add_same_asset_regular_bank_with_mint_fixture(
     bank_config: BankConfig,
     seed: u64,
 ) -> anyhow::Result<BankFixture> {
-    Ok(test_f
+    let bank = test_f
         .marginfi_group
         .try_lending_pool_add_bank_with_seed(mint_fixture, None, bank_config, seed)
-        .await?)
+        .await?;
+    test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(&bank, true)
+        .await?;
+
+    Ok(bank)
 }
 
 pub(super) async fn set_bank_asset_weights(
@@ -113,6 +124,14 @@ pub(super) async fn configure_same_asset_pair(
 ) -> anyhow::Result<()> {
     set_bank_asset_weights(bank_a, asset_weight_init, asset_weight_maint).await?;
     set_bank_asset_weights(bank_b, asset_weight_init, asset_weight_maint).await?;
+    test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(bank_a, true)
+        .await?;
+    test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(bank_b, true)
+        .await?;
     reconfigure_same_asset_leverage(test_f, same_asset_init_leverage, same_asset_maint_leverage)
         .await?;
 

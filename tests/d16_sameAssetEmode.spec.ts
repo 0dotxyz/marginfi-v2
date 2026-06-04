@@ -80,9 +80,10 @@ import {
 } from "./utils/drift-utils";
 import {
   assertSameAssetBadDebtSurvivability,
-  setAssetShareValueHaircut,
   computeSameAssetBoundaryBorrowNative,
   computeSameValueBorrowNative,
+  enableSameAssetEmodeForBanks,
+  setAssetShareValueHaircut,
   warpToNextBankrunSlot,
 } from "./utils/same-asset-emode";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
@@ -415,6 +416,14 @@ describe("d16: Drift same-asset emode", () => {
     await processBankrunTransaction(bankrunContext, usdcOracleTx, [
       groupAdmin.wallet,
     ]);
+
+    await enableSameAssetEmodeForBanks({
+      program: groupAdmin.mrgnBankrunProgram,
+      bankrunContext,
+      group: driftGroup.publicKey,
+      signer: groupAdmin.wallet,
+      banks: [driftTokenABank, regularTokenABank],
+    });
 
     await resetSameAssetLeverage();
 

@@ -957,6 +957,29 @@ export const setFixedPrice = (
   return ix;
 };
 
+export type SetBankSameAssetEmodeEligibilityArgs = {
+  group: PublicKey;
+  signer: PublicKey;
+  bank: PublicKey;
+  enabled: boolean;
+};
+
+export const setBankSameAssetEmodeEligibility = (
+  program: Program<Marginfi>,
+  args: SetBankSameAssetEmodeEligibilityArgs,
+) => {
+  const ix = program.methods
+    .lendingPoolSetBankSameAssetEmodeEligibility(args.enabled)
+    .accounts({
+      group: args.group,
+      signer: args.signer,
+      bank: args.bank,
+    })
+    .instruction();
+
+  return ix;
+};
+
 type WriteBankMetadataArgs = {
   metadata: PublicKey;
   /// Pass undefined to skip. Limit 64 bytes

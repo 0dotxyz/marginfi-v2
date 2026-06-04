@@ -152,6 +152,7 @@ pub struct ReconciledEmodeEntry {
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
 pub struct ReconciledSameAssetConfig {
     pub mint: Pubkey,
+    pub oracle_key: Pubkey,
     pub asset_weight: I80F48,
 }
 

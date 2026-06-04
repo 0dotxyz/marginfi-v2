@@ -11,8 +11,9 @@ use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
-        ASSET_TAG_SOLEND, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, EXP_10_I80F48,
-        MAX_INTEGRATION_POSITIONS, ORDER_ACTIVE_TAGS, ZERO_AMOUNT_THRESHOLD,
+        ASSET_TAG_SOLEND, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD,
+        BANK_SAME_ASSET_EMODE_ELIGIBLE, EXP_10_I80F48, MAX_INTEGRATION_POSITIONS,
+        ORDER_ACTIVE_TAGS, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
         compute_same_asset_emode_weight, reconcile_emode_configs, u32_to_basis, Balance,
@@ -364,6 +365,9 @@ fn get_same_asset_weight_for_balance(
     if balance.is_empty(BalanceSide::Assets)
         || !reconciled_emode_config.same_asset.is_enabled()
         || bank.mint != reconciled_emode_config.same_asset.mint
+        || bank.config.oracle_keys[0] != reconciled_emode_config.same_asset.oracle_key
+        || bank.config.oracle_setup.is_fixed_price()
+        || !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE)
         || !matches!(bank.config.risk_tier, RiskTier::Collateral)
         || matches!(
             (bank.config.operational_state, requirement_type),
@@ -575,8 +579,9 @@ struct EmodeConfigIterator<'a, 'info> {
     requirement_type: RequirementType,
     same_asset_leverage: Option<I80F48>,
     shared_mint: Option<Pubkey>,
+    shared_oracle_key: Option<Pubkey>,
     lowest_liab_weight: Option<I80F48>,
-    has_different_liab_mints: bool,
+    same_asset_invalid: bool,
 }
 
 impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
@@ -596,8 +601,9 @@ impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
             requirement_type,
             same_asset_leverage,
             shared_mint: None,
+            shared_oracle_key: None,
             lowest_liab_weight: None,
-            has_different_liab_mints: false,
+            same_asset_invalid: false,
         }
     }
 
@@ -607,13 +613,15 @@ impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
     fn reconcile(mut self) -> ReconciledEmodeConfig {
         let requirement_type = self.requirement_type;
         let mut reconciled = reconcile_emode_configs(&mut self, requirement_type);
-        if let (Some(leverage), false, Some(mint), Some(liab_weight)) = (
+        if let (Some(leverage), false, Some(mint), Some(oracle_key), Some(liab_weight)) = (
             self.same_asset_leverage,
-            self.has_different_liab_mints,
+            self.same_asset_invalid,
             self.shared_mint,
+            self.shared_oracle_key,
             self.lowest_liab_weight,
         ) {
             reconciled.same_asset.mint = mint;
+            reconciled.same_asset.oracle_key = oracle_key;
             reconciled.same_asset.asset_weight =
                 compute_same_asset_emode_weight(leverage, liab_weight);
         }
@@ -651,17 +659,19 @@ impl<'a, 'info> Iterator for EmodeConfigIterator<'a, 'info> {
             self.balance_index += 1;
 
             if !balance.is_empty(BalanceSide::Liabilities) {
-                if self.same_asset_leverage.is_some() && !self.has_different_liab_mints {
+                if self.same_asset_leverage.is_some() && !self.same_asset_invalid {
                     let liab_weight = bank
                         .config
                         .get_weight(self.requirement_type, BalanceSide::Liabilities);
                     if !update_reconciled_same_asset_config(
                         &mut self.shared_mint,
+                        &mut self.shared_oracle_key,
                         &mut self.lowest_liab_weight,
+                        &bank,
                         bank.mint,
                         liab_weight,
                     ) {
-                        self.has_different_liab_mints = true;
+                        self.same_asset_invalid = true;
                     }
                 }
                 return Some(bank.emode.emode_config);
@@ -685,16 +695,29 @@ fn same_asset_leverage_for_requirement(
 }
 
 /// Folds one liability mint/weight into the running same-asset accumulators.
-/// Returns `false` (clearing the lowest weight) when `mint` diverges from a previously seen mint;
-/// callers must stop folding on a `false` result.
+/// Returns `false` when any liability bank is ineligible, fixed-price, missing an oracle key, or
+/// diverges from a previously seen mint/oracle-key pair. Callers must stop folding on `false`.
 fn update_reconciled_same_asset_config(
     shared_mint: &mut Option<Pubkey>,
+    shared_oracle_key: &mut Option<Pubkey>,
     lowest_liab_weight: &mut Option<I80F48>,
+    bank: &Bank,
     mint: Pubkey,
     liab_weight: I80F48,
 ) -> bool {
+    if !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE)
+        || bank.config.oracle_setup.is_fixed_price()
+        || bank.config.oracle_keys[0] == Pubkey::default()
+    {
+        *lowest_liab_weight = None;
+        return false;
+    }
+
+    let oracle_key = bank.config.oracle_keys[0];
     match shared_mint {
-        Some(existing_mint) if *existing_mint != mint => {
+        Some(existing_mint)
+            if *existing_mint != mint || shared_oracle_key.as_ref() != Some(&oracle_key) =>
+        {
             *lowest_liab_weight = None;
             false
         }
@@ -706,6 +729,7 @@ fn update_reconciled_same_asset_config(
         }
         None => {
             *shared_mint = Some(mint);
+            *shared_oracle_key = Some(oracle_key);
             *lowest_liab_weight = Some(liab_weight);
             true
         }
@@ -2079,6 +2103,17 @@ mod test {
     use fixed_macro::types::I80F48;
     use marginfi_type_crate::types::basis_to_u32;
 
+    fn same_asset_eligible_bank(mint: Pubkey, oracle_key: Pubkey, liab_weight: I80F48) -> Bank {
+        let mut bank = Bank::zeroed();
+        bank.mint = mint;
+        bank.config.oracle_setup = OracleSetup::PythPushOracle;
+        bank.config.oracle_keys[0] = oracle_key;
+        bank.config.liability_weight_init = liab_weight.into();
+        bank.config.liability_weight_maint = liab_weight.into();
+        bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+        bank
+    }
+
     #[test]
     fn test_calc_asset_value() {
         assert_eq!(
@@ -2104,6 +2139,8 @@ mod test {
         bank.mint = mint;
         bank.config.risk_tier = RiskTier::Collateral;
         bank.config.operational_state = BankOperationalState::Operational;
+        bank.config.oracle_keys[0] = Pubkey::new_unique();
+        bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
 
         let mut balance = Balance::empty_deactivated();
         balance.set_active(true);
@@ -2111,6 +2148,7 @@ mod test {
 
         let mut reconciled = ReconciledEmodeConfig::default();
         reconciled.same_asset.mint = mint;
+        reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
         reconciled.same_asset.asset_weight = I80F48!(0.99);
 
         assert_eq!(
@@ -2142,6 +2180,8 @@ mod test {
         bank.mint = mint;
         bank.config.risk_tier = RiskTier::Collateral;
         bank.config.operational_state = BankOperationalState::ReduceOnly;
+        bank.config.oracle_keys[0] = Pubkey::new_unique();
+        bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
 
         let mut balance = Balance::empty_deactivated();
         balance.set_active(true);
@@ -2149,6 +2189,7 @@ mod test {
 
         let mut reconciled = ReconciledEmodeConfig::default();
         reconciled.same_asset.mint = mint;
+        reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
         reconciled.same_asset.asset_weight = I80F48!(0.99);
 
         assert_eq!(
@@ -2236,23 +2277,32 @@ mod test {
     #[test]
     fn same_asset_config_enables_when_all_liabilities_share_one_mint() {
         let mint = Pubkey::new_unique();
+        let oracle_key = Pubkey::new_unique();
         let mut shared_mint = None;
+        let mut shared_oracle_key = None;
         let mut lowest_liab_weight = None;
+        let bank_a = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
+        let bank_b = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.05));
 
         assert!(update_reconciled_same_asset_config(
             &mut shared_mint,
+            &mut shared_oracle_key,
             &mut lowest_liab_weight,
-            mint,
+            &bank_a,
+            bank_a.mint,
             I80F48!(1.00),
         ));
         assert!(update_reconciled_same_asset_config(
             &mut shared_mint,
+            &mut shared_oracle_key,
             &mut lowest_liab_weight,
-            mint,
+            &bank_b,
+            bank_b.mint,
             I80F48!(1.05),
         ));
 
         assert_eq!(shared_mint, Some(mint));
+        assert_eq!(shared_oracle_key, Some(oracle_key));
         assert_eq!(lowest_liab_weight, Some(I80F48!(1.00)));
         assert_eq!(
             compute_same_asset_emode_weight(I80F48::from_num(100), lowest_liab_weight.unwrap()),
@@ -2264,19 +2314,27 @@ mod test {
     fn same_asset_config_disables_when_liability_mints_diverge() {
         let mint_a = Pubkey::new_unique();
         let mint_b = Pubkey::new_unique();
+        let oracle_key = Pubkey::new_unique();
         let mut shared_mint = None;
+        let mut shared_oracle_key = None;
         let mut lowest_liab_weight = None;
+        let bank_a = same_asset_eligible_bank(mint_a, oracle_key, I80F48!(1.00));
+        let bank_b = same_asset_eligible_bank(mint_b, oracle_key, I80F48!(1.00));
 
         assert!(update_reconciled_same_asset_config(
             &mut shared_mint,
+            &mut shared_oracle_key,
             &mut lowest_liab_weight,
-            mint_a,
+            &bank_a,
+            bank_a.mint,
             I80F48!(1.00),
         ));
         assert!(!update_reconciled_same_asset_config(
             &mut shared_mint,
+            &mut shared_oracle_key,
             &mut lowest_liab_weight,
-            mint_b,
+            &bank_b,
+            bank_b.mint,
             I80F48!(1.00),
         ));
 
@@ -2285,21 +2343,81 @@ mod test {
     }
 
     #[test]
-    fn same_asset_config_uses_least_favorable_liability_weight() {
+    fn same_asset_config_disables_when_liability_oracles_diverge() {
         let mint = Pubkey::new_unique();
         let mut shared_mint = None;
+        let mut shared_oracle_key = None;
         let mut lowest_liab_weight = None;
+        let bank_a = same_asset_eligible_bank(mint, Pubkey::new_unique(), I80F48!(1.00));
+        let bank_b = same_asset_eligible_bank(mint, Pubkey::new_unique(), I80F48!(1.00));
 
         assert!(update_reconciled_same_asset_config(
             &mut shared_mint,
+            &mut shared_oracle_key,
             &mut lowest_liab_weight,
-            mint,
+            &bank_a,
+            bank_a.mint,
+            I80F48!(1.00),
+        ));
+        assert!(!update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut lowest_liab_weight,
+            &bank_b,
+            bank_b.mint,
+            I80F48!(1.00),
+        ));
+
+        assert_eq!(shared_mint, Some(mint));
+        assert_eq!(lowest_liab_weight, None);
+    }
+
+    #[test]
+    fn same_asset_config_disables_when_liability_bank_is_not_eligible() {
+        let mint = Pubkey::new_unique();
+        let oracle_key = Pubkey::new_unique();
+        let mut shared_mint = None;
+        let mut shared_oracle_key = None;
+        let mut lowest_liab_weight = None;
+        let mut bank = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
+        bank.update_flag(false, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+
+        assert!(!update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut lowest_liab_weight,
+            &bank,
+            bank.mint,
+            I80F48!(1.00),
+        ));
+        assert_eq!(shared_mint, None);
+        assert_eq!(lowest_liab_weight, None);
+    }
+
+    #[test]
+    fn same_asset_config_uses_least_favorable_liability_weight() {
+        let mint = Pubkey::new_unique();
+        let oracle_key = Pubkey::new_unique();
+        let mut shared_mint = None;
+        let mut shared_oracle_key = None;
+        let mut lowest_liab_weight = None;
+        let bank_a = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.05));
+        let bank_b = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
+
+        assert!(update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut lowest_liab_weight,
+            &bank_a,
+            bank_a.mint,
             I80F48!(1.05),
         ));
         assert!(update_reconciled_same_asset_config(
             &mut shared_mint,
+            &mut shared_oracle_key,
             &mut lowest_liab_weight,
-            mint,
+            &bank_b,
+            bank_b.mint,
             I80F48!(1.00),
         ));
 

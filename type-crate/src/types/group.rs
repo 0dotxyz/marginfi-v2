@@ -64,7 +64,7 @@ pub struct MarginfiGroup {
 
     /// Encoded same-asset automatic emode leverage for initial margin.
     /// Decode with `u32_to_basis`. Same-asset treatment is disabled when the decoded leverage is
-    /// less than or equal to 1.
+    /// less than or equal to 1 and also requires each participating bank to opt in.
     pub same_asset_emode_init_leverage: u32,
     /// Encoded same-asset automatic emode leverage for maintenance margin.
     /// Decode with `u32_to_basis`. Ordering is validated in decoded space.

@@ -1,9 +1,11 @@
 // Permissionless ix to propagate a group's staked collateral settings to any bank in that group.
+use crate::check;
+use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
 use crate::MarginfiError;
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
-    constants::ASSET_TAG_STAKED,
+    constants::{ASSET_TAG_STAKED, BANK_SAME_ASSET_EMODE_ELIGIBLE},
     types::{Bank, MarginfiGroup, StakedSettings},
 };
 
@@ -12,6 +14,12 @@ pub fn propagate_staked_settings(ctx: Context<PropagateStakedSettings>) -> Resul
     let mut bank = ctx.accounts.bank.load_mut()?;
 
     let (oracle_before, oracle_after) = (bank.config.oracle_keys[0], settings.oracle);
+
+    check!(
+        oracle_before == oracle_after || !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE),
+        MarginfiError::BadEmodeConfig,
+        "disable same-asset e-mode eligibility before changing oracle_keys[0]"
+    );
 
     bank.config.oracle_keys[0] = settings.oracle;
     bank.config.asset_weight_init = settings.asset_weight_init;

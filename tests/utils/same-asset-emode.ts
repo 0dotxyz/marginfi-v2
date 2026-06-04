@@ -7,10 +7,12 @@ import {
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
 import { CONF_INTERVAL_MULTIPLE_FLOAT } from "./types";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, Transaction, type Signer } from "@solana/web3.js";
 import { ProgramTestContext } from "solana-bankrun";
 import { Marginfi } from "target/types/marginfi";
 import { BanksClient } from "solana-bankrun";
+import { setBankSameAssetEmodeEligibility } from "./group-instructions";
+import { processBankrunTransaction } from "./tools";
 
 const ORACLE_PRICE_LOWER_FACTOR = new BigNumber(
   1 - CONF_INTERVAL_MULTIPLE_FLOAT
@@ -33,6 +35,33 @@ const toBigNumber = (value: BN | BigNumber | number | string): BigNumber => {
 
 const getSameAssetWeight = (leverage: number) =>
   new BigNumber(leverage - 1).div(leverage);
+
+export const enableSameAssetEmodeForBanks = async ({
+  program,
+  bankrunContext,
+  group,
+  signer,
+  banks,
+}: {
+  program: Program<Marginfi>;
+  bankrunContext: ProgramTestContext;
+  group: PublicKey;
+  signer: Signer;
+  banks: PublicKey[];
+}) => {
+  const tx = new Transaction();
+  for (const bank of banks) {
+    tx.add(
+      await setBankSameAssetEmodeEligibility(program, {
+        group,
+        signer: signer.publicKey,
+        bank,
+        enabled: true,
+      })
+    );
+  }
+  await processBankrunTransaction(bankrunContext, tx, [signer]);
+};
 
 type BoundaryBorrowParams = {
   collateralNative: BN | BigNumber | number | string;

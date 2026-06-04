@@ -68,6 +68,7 @@ import {
 import {
   assertSameAssetBadDebtSurvivability,
   computeSameAssetBoundaryBorrowNative,
+  enableSameAssetEmodeForBanks,
   setAssetShareValueHaircut,
   warpToNextBankrunSlot,
 } from "./utils/same-asset-emode";
@@ -301,6 +302,14 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
       );
       await processBankrunTransaction(bankrunContext, oracleTx, [groupAdmin.wallet]);
     }
+
+    await enableSameAssetEmodeForBanks({
+      program: groupAdmin.mrgnBankrunProgram,
+      bankrunContext,
+      group: throwawayGroup.publicKey,
+      signer: groupAdmin.wallet,
+      banks,
+    });
 
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 

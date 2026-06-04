@@ -52,6 +52,7 @@ import {
 import {
   assertSameAssetBadDebtSurvivability,
   computeSameAssetBoundaryBorrowNative,
+  enableSameAssetEmodeForBanks,
   setAssetShareValueHaircut,
   warpToNextBankrunSlot,
 } from "./utils/same-asset-emode";
@@ -180,6 +181,13 @@ describe("Same-asset emode safety", () => {
     );
     await warpToNextBankrunSlot(bankrunContext);
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+    await enableSameAssetEmodeForBanks({
+      program: groupAdmin.mrgnBankrunProgram,
+      bankrunContext,
+      group: emodeGroup.publicKey,
+      signer: groupAdmin.wallet,
+      banks: [usdcBankA, usdcBankB],
+    });
 
     for (const user of users) {
       await mintToTokenAccount(

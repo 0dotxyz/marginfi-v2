@@ -103,6 +103,7 @@ pub struct Bank {
     /// - Bit 8 (256): `BANK_SEED_KNOWN` — bank is known to be PDA/seed-derived. If not set, bank
     ///   may still be a PDA, but created before this flag launched (1.8 or earlier) or is a legacy
     ///   keypair-based bank.
+    /// - Bit 9 (512): `BANK_SAME_ASSET_EMODE_ELIGIBLE` — bank may participate in same-asset e-mode.
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.
@@ -269,5 +270,12 @@ impl OracleSetup {
             17 => Some(Self::FixedJuplend),
             _ => None,
         }
+    }
+
+    pub fn is_fixed_price(self) -> bool {
+        matches!(
+            self,
+            Self::Fixed | Self::FixedKamino | Self::FixedDrift | Self::FixedJuplend
+        )
     }
 }

@@ -426,12 +426,53 @@ impl MarginfiGroupFixture {
         }
     }
 
+    pub fn make_lending_pool_set_bank_same_asset_emode_eligibility_ix(
+        &self,
+        bank: &BankFixture,
+        enabled: bool,
+    ) -> Instruction {
+        let accounts = marginfi::accounts::LendingPoolSetBankSameAssetEmodeEligibility {
+            group: self.key,
+            signer: self.ctx.borrow().payer.pubkey(),
+            bank: bank.key,
+        }
+        .to_account_metas(Some(true));
+
+        Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: LendingPoolSetBankSameAssetEmodeEligibility { enabled }.data(),
+        }
+    }
+
     pub async fn try_lending_pool_configure_bank(
         &self,
         bank: &BankFixture,
         bank_config_opt: BankConfigOpt,
     ) -> Result<(), BanksClientError> {
         let ix = self.make_lending_pool_configure_bank_ix(bank, bank_config_opt);
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn try_lending_pool_set_bank_same_asset_emode_eligibility(
+        &self,
+        bank: &BankFixture,
+        enabled: bool,
+    ) -> Result<(), BanksClientError> {
+        let ix = self.make_lending_pool_set_bank_same_asset_emode_eligibility_ix(bank, enabled);
         let tx = Transaction::new_signed_with_payer(
             &[ix],
             Some(&self.ctx.borrow().payer.pubkey().clone()),

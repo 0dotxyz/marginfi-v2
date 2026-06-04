@@ -22,12 +22,12 @@ pub const DEFAULT_INIT_MAX_EMODE_LEVERAGE: I80F48 = I80F48!(15);
 pub const DEFAULT_MAINT_MAX_EMODE_LEVERAGE: I80F48 = I80F48!(20);
 
 /// Default maximum allowed same-asset leverage for group initialization (initial).
-/// This is set to 2x the regular initial emode default leverage.
-pub const DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE: I80F48 = I80F48!(30);
+/// Same-asset e-mode is disabled by default for new groups.
+pub const DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE: I80F48 = I80F48!(1);
 
 /// Default maximum allowed same-asset leverage for group initialization (maintenance).
-/// This is set to 2x the regular maintenance emode default leverage.
-pub const DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE: I80F48 = I80F48!(40);
+/// Same-asset e-mode is disabled by default for new groups.
+pub const DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE: I80F48 = I80F48!(1);
 
 pub trait EmodeSettingsImpl {
     fn validate_entries_with_liability_weights(

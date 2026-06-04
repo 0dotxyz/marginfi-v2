@@ -63,6 +63,7 @@ import {
 } from "./utils/user-instructions";
 import { assertI80F48Approx } from "./utils/genericTests";
 import { dummyIx } from "./utils/bankrunConnection";
+import { enableSameAssetEmodeForBanks } from "./utils/same-asset-emode";
 
 const SAME_ASSET_DISABLED = 1;
 const SAME_ASSET_ENABLED_INIT_LEVERAGE = 10;
@@ -241,6 +242,13 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
   }
 
   const nativeBank = await createNativeAlphaBank(throwawayGroup.publicKey, new BN(startingSeed + 90));
+  await enableSameAssetEmodeForBanks({
+    program: groupAdmin.mrgnBankrunProgram,
+    bankrunContext,
+    group: throwawayGroup.publicKey,
+    signer: groupAdmin.wallet,
+    banks: [nativeBank, integrationBank],
+  });
 
   if (kind !== "kamino") {
     await setAssetWeights(integrationBank, NATIVE_ASSET_WEIGHT_INIT, NATIVE_ASSET_WEIGHT_MAINT);

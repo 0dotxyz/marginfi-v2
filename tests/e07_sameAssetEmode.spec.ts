@@ -58,6 +58,7 @@ import {
   assertSameAssetBadDebtSurvivability,
   computeSameAssetBoundaryBorrowNative,
   computeSameValueBorrowNative,
+  enableSameAssetEmodeForBanks,
   warpToNextBankrunSlot,
 } from "./utils/same-asset-emode";
 
@@ -202,6 +203,13 @@ describe("Same-asset automatic emode", () => {
       })
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
+    await enableSameAssetEmodeForBanks({
+      program: groupAdmin.mrgnBankrunProgram,
+      bankrunContext,
+      group: emodeGroup.publicKey,
+      signer: groupAdmin.wallet,
+      banks: [usdcBankA, usdcBankB],
+    });
 
     for (let i = 0; i < users.length; i++) {
       const userAccKeypair = Keypair.generate();
