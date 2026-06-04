@@ -20,7 +20,6 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import { SINGLE_POOL_PROGRAM_ID } from "./types";
-import { ProgramTestContext } from "./litesvm";
 import {
   deriveSVSPpool,
   deriveOnRampPool,

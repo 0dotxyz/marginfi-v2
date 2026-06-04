@@ -107,7 +107,7 @@ fn staked_pool_net_asset_value(
     pool_stake_info: &AccountInfo,
     pool_onramp_info: &AccountInfo,
     rent: &Rent,
-) -> u64 {
+) -> MarginfiResult<u64> {
     let pool_rent_exempt_reserve = rent.minimum_balance(pool_stake_info.data_len());
     let onramp_rent_exempt_reserve = rent.minimum_balance(pool_onramp_info.data_len());
 
@@ -118,7 +118,7 @@ fn staked_pool_net_asset_value(
         .lamports()
         .saturating_sub(onramp_rent_exempt_reserve);
 
-    main_stake_value.saturating_add(onramp_value)
+    Ok(main_stake_value.saturating_add(onramp_value))
 }
 
 // To be removed once SVSP update is rolled out (likely in 1.10)
@@ -387,14 +387,14 @@ impl OraclePriceFeedAdapter {
                         }
 
                         let rent = Rent::get()?;
-                        staked_pool_net_asset_value(&ais[2], &ais[3], &rent)
+                        staked_pool_net_asset_value(&ais[2], &ais[3], &rent)?
                     }
                     OnRampTransition::PreTransition => {
                         // To be removed once SVSP update is rolled out (likely in 1.10)
                         legacy_staked_pool_delegated_value(&ais[2])?
                     }
                     OnRampTransition::StakeOraclesDisabled => {
-                        return Err(error!(MarginfiError::StakeBanksDisabled));
+                        return Err(error!(MarginfiError::StakeOraclesDisabled));
                     }
                 };
 
@@ -1912,7 +1912,7 @@ mod tests {
         );
 
         assert_eq!(
-            staked_pool_net_asset_value(&stake_ai, &onramp_ai, &rent),
+            staked_pool_net_asset_value(&stake_ai, &onramp_ai, &rent).unwrap(),
             17_000
         );
     }
@@ -1944,7 +1944,7 @@ mod tests {
         );
 
         let legacy_nav = legacy_staked_pool_delegated_value(&stake_ai).unwrap();
-        let canonical_nav = staked_pool_net_asset_value(&stake_ai, &onramp_ai, &rent);
+        let canonical_nav = staked_pool_net_asset_value(&stake_ai, &onramp_ai, &rent).unwrap();
         let legacy_price = adjusted_native_price(sol_price, legacy_nav, lst_supply);
         let canonical_price = adjusted_native_price(sol_price, canonical_nav, lst_supply);
 

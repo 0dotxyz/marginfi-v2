@@ -2,7 +2,6 @@ import { BN, Wallet } from "@coral-xyz/anchor";
 import {
   Keypair,
   LAMPORTS_PER_SOL,
-  StakeProgram,
   SystemProgram,
   Transaction,
 } from "@solana/web3.js";
@@ -17,6 +16,7 @@ import {
   validators,
   bankRunProvider,
   verbose,
+  groupAdmin,
 } from "./rootHooks";
 import { assertBankrunTxFailed } from "./utils/genericTests";
 import { assert } from "chai";
@@ -24,14 +24,15 @@ import {
   borrowIx,
   composeRemainingAccounts,
   depositIx,
+  pulseBankPrice,
 } from "./utils/user-instructions";
 import { LST_ATA, LST_ATA_v1, USER_ACCOUNT } from "./utils/mocks";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
-import { dumpBankrunLogs, getBankrunBlockhash } from "./utils/tools";
+import { getBankrunBlockhash } from "./utils/tools";
 import { getEpochAndSlot } from "./utils/bankrunConnection";
 import { getStakeAccount } from "./utils/stake-utils";
-import { createPoolOnramp, replenishPool } from "./utils/spl-staking-utils";
-import { deriveOnRampPool } from "./utils/pdas";
+import { replenishPool } from "./utils/spl-staking-utils";
+import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 
 let bankKeypairSol: Keypair;
 
@@ -40,11 +41,15 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
     bankKeypairSol = stakedBankKeypairSol;
   });
 
-  // User 2 has a validator 0 staked depost [0] position - net value = 1 LST token Users 0/1/2
-  // deposited 10 SOL each, so a total of 30 is staked with validator 0 (minus the 1 SOL staked to
-  // start the pool, which is non-refundable and doesn't function as collateral)
+  // User 2 has a validator 0 staked deposit [0] position with 1 LST token.
+  // Users 0/1/2/3 deposited 10 SOL each, so v0 LST supply is 40 SOL.
+  // The v0 pool NAV is 50 SOL: 40 SOL user deposits + 1 SOL initial pool stake
+  // + 9 SOL supplied through the v0 onramp. We no longer subtract the initial
+  // 1 SOL bootstrap stake, so the price is 50 / 40 = 1.25 SOL per LST.
+
   /** SOL to add to the validator as pretend-earned mev rewards */
-  const appreciation = 30;
+  const stakeSolAppreciation = 30;
+  const splPoolAppreciation = 40; // different to simplify the calculations
   let wallet: Wallet;
 
   before(async () => {
@@ -53,7 +58,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
     wallet = bankRunProvider.wallet;
   });
 
-  it("(user 2) tries to borrow 1.1 SOL against 1 v0 STAKED - fails, not enough funds", async () => {
+  it("(user 2) tries to borrow 1.3 SOL against 1 v0 STAKED - fails, not enough funds", async () => {
     const user = users[2];
     const userAccount = user.accounts.get(USER_ACCOUNT);
 
@@ -72,7 +77,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
           ],
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
-        amount: new BN(1.1 * 10 ** ecosystem.wsolDecimals),
+        amount: new BN(1.3 * 10 ** ecosystem.wsolDecimals),
       }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -90,23 +95,25 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
   });
 
   // Note: there is also some natural appreciation here because a few epochs have elapsed...
-
-  // In older versions of SVSP, MEV rewards like this would be orphaned here forever and would not
-  // count as stake for pricing purposes.
   it(
-    "v0 stake sol pool grows by " + appreciation + " SOL (e.g. MEV rewards)",
+    "v0 stake sol pool grows by " +
+      stakeSolAppreciation +
+      " SOL (e.g. MEV rewards) - LST price grows",
     async () => {
       let tx = new Transaction();
       tx.add(
         SystemProgram.transfer({
           fromPubkey: wallet.publicKey,
           toPubkey: validators[0].splSolPool,
-          lamports: appreciation * LAMPORTS_PER_SOL,
+          lamports: stakeSolAppreciation * LAMPORTS_PER_SOL,
         }),
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(wallet.payer);
       await banksClient.processTransaction(tx);
+
+      const priceMultiplierAfterAppreciation = await fetchPriceMultiplier();
+      assert.equal(priceMultiplierAfterAppreciation, 2.0); // (50 + 30) / 40 = 2
     },
   );
 
@@ -168,9 +175,8 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
     assertBankrunTxFailed(result, "0x1779");
   });
 
-  // The stake hasn't changed (even though the SOL balance did) so this should still fail. For this
-  // to count, we must realize the MEV rewards first (see the next test)
-  it("(user 2) borrows 1.1 SOL against their STAKED position - fails", async () => {
+  // Now the stake is worth enough now (1 LST = 2 SOL) and the user can borrow
+  it("(user 2) borrows 1.3 SOL against their STAKED position - succeeds", async () => {
     const user = users[2];
     const userAccount = user.accounts.get(USER_ACCOUNT);
     let tx = new Transaction().add(
@@ -188,57 +194,52 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
           ],
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
-        // Note: We use a different (slightly higher) amount, so Bankrun treats this as a different
-        // tx. Using the exact same values as above can cause the test to fail on faster machines
-        // because the same tx was already sent for this blockhash (i.e. "this transaction has
-        // already been processed")
-        amount: new BN(1.112 * 10 ** ecosystem.wsolDecimals),
+        amount: new BN(1.3 * 10 ** ecosystem.wsolDecimals),
       }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(user.wallet);
-    let result = await banksClient.tryProcessTransaction(tx);
+    await banksClient.tryProcessTransaction(tx);
 
-    // 6009 (Generic risk engine rejection)
-    assertBankrunTxFailed(result, "0x1779");
+    const userAcc = await bankrunProgram.account.marginfiAccount.fetch(
+      userAccount,
+    );
+    const balances = userAcc.lendingAccount.balances;
+    assert.equal(balances[1].active, 1);
+
+    // Note: the newly added balance may NOT be the last one in the list, due to sorting, so we have to find its position first
+    const borrowIndex = balances.findIndex((balance) =>
+      balance.bankPk.equals(bankKeypairSol.publicKey),
+    );
+    assert.notEqual(borrowIndex, -1);
   });
 
   // Note: MEV rewards or other kickbacks to stakers often get admin-deposited directly to the
   // splPool just like this.
-  it("v0 pool grows by " + appreciation + " SOL (MEV rewards)", async () => {
-    let tx = new Transaction();
-    tx.add(
-      SystemProgram.transfer({
-        fromPubkey: wallet.publicKey,
-        toPubkey: validators[0].splPool,
-        lamports: appreciation * LAMPORTS_PER_SOL,
-      }),
-    );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(wallet.payer);
-    await banksClient.processTransaction(tx);
-  });
-
-  it("Realize income from MEV rewards", async () => {
-    // First, create the on-ramp account that will temporarily stake MEV rewards (once only)
-    const [onRampPoolKey] = deriveOnRampPool(validators[0].splPool);
-    const rent =
-      await bankRunProvider.connection.getMinimumBalanceForRentExemption(
-        StakeProgram.space,
+  it(
+    "v0 pool grows by " +
+      splPoolAppreciation +
+      " SOL (MEV rewards) - LST price doesn't change",
+    async () => {
+      let tx = new Transaction();
+      tx.add(
+        SystemProgram.transfer({
+          fromPubkey: wallet.publicKey,
+          toPubkey: validators[0].splPool,
+          lamports: splPoolAppreciation * LAMPORTS_PER_SOL,
+        }),
       );
-    if (!(await bankRunProvider.connection.getAccountInfo(onRampPoolKey))) {
-      const rentIx = SystemProgram.transfer({
-        fromPubkey: wallet.payer.publicKey,
-        toPubkey: onRampPoolKey,
-        lamports: rent,
-      });
-      const ix = createPoolOnramp(validators[0].voteAccount);
-      let initOnRampTx = new Transaction().add(rentIx, ix);
-      initOnRampTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-      initOnRampTx.sign(wallet.payer); // pays the tx fee and rent
-      await banksClient.processTransaction(initOnRampTx);
-    }
+      tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+      tx.sign(wallet.payer);
+      await banksClient.processTransaction(tx);
 
+      const priceMultiplierAfterAppreciation = await fetchPriceMultiplier();
+      assert.equal(priceMultiplierAfterAppreciation, 2.0); // still the same
+    },
+  );
+
+  it("Realize income from MEV rewards - price grows again", async () => {
+    const onRampPoolKey = validators[0].splOnRampPool;
     const onRampAccBefore = await bankRunProvider.connection.getAccountInfo(
       onRampPoolKey,
     );
@@ -284,35 +285,27 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
     );
     replenishTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     replenishTx.sign(wallet.payer); // pays the tx fee and rent
-    let result = await banksClient.tryProcessTransaction(replenishTx);
-    // TODO figure out why this BPF panics in localnet (likely Solana version)
-    dumpBankrunLogs(result);
+    await banksClient.processTransaction(replenishTx);
 
-    // const onRampAccAfter = await bankRunProvider.connection.getAccountInfo(
-    //   onRampPoolKey,
-    // );
-    // const onRampAfter = getStakeAccount(onRampAccAfter.data);
-    // const stakeAfter = onRampAfter.stake.delegation.stake.toString();
-    // if (verbose) {
-    //   console.log("On ramp lamps: " + onRampAccAfter.lamports);
-    //   console.log(" (rent was:    " + rent + ")");
-    //   console.log("On ramp stake: " + stakeAfter);
-    // }
+    const onRampAccAfter = await bankRunProvider.connection.getAccountInfo(
+      onRampPoolKey,
+    );
+    const onRampAfter = getStakeAccount(onRampAccAfter.data);
+    const stakeAfter = onRampAfter.stake.delegation.stake.toString();
+    if (verbose) {
+      console.log("On ramp lamps: " + onRampAccAfter.lamports);
+      console.log("On ramp stake: " + stakeAfter);
+    }
+
+    const priceMultiplierAfterAppreciation = await fetchPriceMultiplier();
+    assert.equal(priceMultiplierAfterAppreciation, 3.0); // (80 + 40) / 40 = 3
   });
 
   // Now the stake is worth enough and the user can borrow
-  it("(user 2) borrows 1.1 SOL against their STAKED position - succeeds", async () => {
+  it("(user 2) borrows 1.6 SOL against their STAKED position - succeeds", async () => {
     const user = users[2];
     const userAccount = user.accounts.get(USER_ACCOUNT);
-    const userLstAta = user.accounts.get(LST_ATA);
     let tx = new Transaction().add(
-      // TODO if we find a way to make stake appreciate on localnet, remove...
-      await depositIx(user.mrgnBankrunProgram, {
-        marginfiAccount: userAccount,
-        bank: validators[0].bank,
-        tokenAccount: userLstAta,
-        amount: new BN(1 * 10 ** ecosystem.wsolDecimals),
-      }),
       await borrowIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         bank: bankKeypairSol.publicKey,
@@ -327,7 +320,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
           ],
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
-        amount: new BN(1.113 * 10 ** ecosystem.wsolDecimals),
+        amount: new BN(1.6 * 10 ** ecosystem.wsolDecimals),
       }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -401,3 +394,29 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
     await banksClient.processTransaction(tx);
   });
 });
+
+const fetchPriceMultiplier = async () => {
+  const pulseTx = new Transaction().add(
+    await pulseBankPrice(groupAdmin.mrgnBankrunProgram, {
+      bank: validators[0].bank,
+      remaining: [
+        oracles.wsolOracle.publicKey,
+        validators[0].splMint,
+        validators[0].splSolPool,
+        validators[0].splOnRampPool,
+      ],
+    }),
+  );
+  pulseTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+  pulseTx.sign(groupAdmin.wallet);
+
+  await banksClient.processTransaction(pulseTx);
+
+  const bank = await bankrunProgram.account.bank.fetch(validators[0].bank);
+  const priceWithOnRamp = wrappedI80F48toBigNumber(
+    bank.cache.lastOraclePrice,
+  ).toNumber();
+  assert.equal(priceWithOnRamp, oracles.wsolPrice);
+
+  return wrappedI80F48toBigNumber(bank.cache.priceMultiplier).toNumber();
+};

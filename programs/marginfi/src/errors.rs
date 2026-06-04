@@ -108,8 +108,8 @@ pub enum MarginfiError {
     WrongNumberOfOracleAccounts,
     #[msg("Oracle error: wrong account keys")] // 6052
     WrongOracleAccountKeys,
-    #[msg("Stake banks are temporarily disabled")] // 6053
-    StakeBanksDisabled,
+    #[msg("Stake oracles are temporarily disabled")] // 6053
+    StakeOraclesDisabled,
     #[msg("Vacated3")] // 6054
     Vacated3,
     #[msg("Oracle max confidence exceeded: try again later")] // 6055
@@ -502,7 +502,7 @@ impl From<u32> for MarginfiError {
             6050 => MarginfiError::PythPushStalePrice,
             6051 => MarginfiError::WrongNumberOfOracleAccounts,
             6052 => MarginfiError::WrongOracleAccountKeys,
-            6053 => MarginfiError::StakeBanksDisabled,
+            6053 => MarginfiError::StakeOraclesDisabled,
             6054 => MarginfiError::Vacated3,
             6055 => MarginfiError::OracleMaxConfidenceExceeded,
             6056 => MarginfiError::PythPushInsufficientVerificationLevel,

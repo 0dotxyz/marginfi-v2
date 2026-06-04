@@ -353,7 +353,6 @@ describe("Rate limiter", () => {
       new Transaction().add(
         await updateGroupRateLimiter(groupAdmin.mrgnProgram, {
           marginfiGroup: marginfiGroup.publicKey,
-          delegateFlowAdmin: groupAdmin.wallet.publicKey,
           outflowUsd: args.outflowUsd ?? null,
           inflowUsd: args.inflowUsd ?? null,
           updateSeq,
@@ -481,7 +480,6 @@ describe("Rate limiter", () => {
           new Transaction().add(
             await updateGroupRateLimiter(groupAdmin.mrgnProgram, {
               marginfiGroup: marginfiGroup.publicKey,
-              delegateFlowAdmin: groupAdmin.wallet.publicKey,
               outflowUsd: new BN(1),
               inflowUsd: null,
               updateSeq,
