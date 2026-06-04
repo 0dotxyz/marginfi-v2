@@ -3,7 +3,7 @@ use crate::{
     allocator::{heap_pos, heap_restore},
     check, check_eq, debug, live, math_error,
     prelude::{MarginfiError, MarginfiResult},
-    state::{bank::BankImpl, bank_config::BankConfigImpl},
+    state::bank::BankImpl,
     utils::{is_integration_asset_tag, NumTraitsWithTolerance},
 };
 use anchor_lang::prelude::*;
@@ -371,22 +371,7 @@ fn calc_weighted_asset_value_cached_standalone(
                 return Ok((I80F48::ZERO, I80F48::ZERO));
             }
 
-            let mut asset_weight = if let Some(emode_entry) =
-                emode_config.find_with_tag(bank.emode.emode_tag)
-            {
-                let bank_weight = bank
-                    .config
-                    .get_weight(requirement_type, BalanceSide::Assets);
-                let emode_weight = match requirement_type {
-                    RequirementType::Initial => I80F48::from(emode_entry.asset_weight_init),
-                    RequirementType::Maintenance => I80F48::from(emode_entry.asset_weight_maint),
-                    RequirementType::Equity => I80F48::ONE,
-                };
-                max(bank_weight, emode_weight)
-            } else {
-                bank.config
-                    .get_weight(requirement_type, BalanceSide::Assets)
-            };
+            let mut asset_weight = bank.get_asset_weight(requirement_type, emode_config);
 
             let price_with_confidence = get_cached_price_with_confidence(bank, requirement_type);
             let lower_price = apply_price_bias(price_with_confidence, PriceBias::Low)?;
@@ -1327,23 +1312,7 @@ fn calc_weighted_asset_value_standalone(
                 .as_ref()
                 .map_err(|_| error!(MarginfiError::from(err_code)))?;
 
-            // Determine asset weight (emode or bank default)
-            let mut asset_weight = if let Some(emode_entry) =
-                emode_config.find_with_tag(bank.emode.emode_tag)
-            {
-                let bank_weight = bank
-                    .config
-                    .get_weight(requirement_type, BalanceSide::Assets);
-                let emode_weight = match requirement_type {
-                    RequirementType::Initial => I80F48::from(emode_entry.asset_weight_init),
-                    RequirementType::Maintenance => I80F48::from(emode_entry.asset_weight_maint),
-                    RequirementType::Equity => I80F48::ONE,
-                };
-                max(bank_weight, emode_weight)
-            } else {
-                bank.config
-                    .get_weight(requirement_type, BalanceSide::Assets)
-            };
+            let mut asset_weight = bank.get_asset_weight(requirement_type, emode_config);
 
             let lower_price = if let Some(cache) = liq_cache.as_mut() {
                 let price_with_confidence = price_feed.get_price_and_confidence_of_type(

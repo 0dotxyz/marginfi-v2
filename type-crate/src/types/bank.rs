@@ -1,13 +1,16 @@
+use std::cmp::max;
+
 use crate::{
     assert_struct_align, assert_struct_size,
     constants::{discriminators, ASSET_TAG_DRIFT, DRIFT_SCALED_BALANCE_DECIMALS},
-    types::{BankCache, BankConfig},
+    types::{BalanceSide, BankCache, BankConfig, EmodeConfig, RequirementType},
 };
 
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
 
 use bytemuck::{Pod, Zeroable};
+use fixed::types::I80F48;
 
 #[cfg(not(feature = "anchor"))]
 use super::Pubkey;
@@ -183,6 +186,27 @@ impl Bank {
             DRIFT_SCALED_BALANCE_DECIMALS
         } else {
             self.mint_decimals
+        }
+    }
+
+    pub fn get_asset_weight(
+        &self,
+        requirement_type: RequirementType,
+        emode_config: &EmodeConfig,
+    ) -> I80F48 {
+        if let Some(emode_entry) = emode_config.find_with_tag(self.emode.emode_tag) {
+            let bank_weight = self
+                .config
+                .get_weight(requirement_type, BalanceSide::Assets);
+            let emode_weight = match requirement_type {
+                RequirementType::Initial => I80F48::from(emode_entry.asset_weight_init),
+                RequirementType::Maintenance => I80F48::from(emode_entry.asset_weight_maint),
+                RequirementType::Equity => I80F48::ONE,
+            };
+            max(bank_weight, emode_weight)
+        } else {
+            self.config
+                .get_weight(requirement_type, BalanceSide::Assets)
         }
     }
 }
