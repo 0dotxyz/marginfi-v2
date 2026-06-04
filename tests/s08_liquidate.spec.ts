@@ -47,6 +47,7 @@ import {
 import { deriveStakedSettings } from "./utils/pdas";
 import { getStakeAccount } from "./utils/stake-utils";
 import { getBankrunBlockhash } from "./utils/tools";
+import { fetchLSTPriceMultiplier } from "./utils/spl-staking-utils";
 
 let program: Program<Marginfi>;
 let marginfiGroup: Keypair;
@@ -164,24 +165,8 @@ describe("Liquidate user (including staked assets)", () => {
       liabilityBankBefore.liabilityShareValue,
     ).toNumber();
 
-    const solPool = await bankRunProvider.connection.getAccountInfo(
-      validators[0].splSolPool,
-    );
-
-    // This is close enough in most cases, but in edge cases someone can send sol here as a troll..
-    // const solPoolLamports = solPool.lamports;
-
-    // What you really want to do is...
-    const splStakePoolBefore = getStakeAccount(solPool.data);
-    const stakeActual = Number(splStakePoolBefore.stake.delegation.stake);
-    const mintData = await getMint(
-      bankRunProvider.connection,
-      validators[0].splMint,
-    );
-    // there is 1 SOL used to init the pool that is non-refundable and doesn't count as stake
-    const stakedPrice =
-      (oracles.wsolPrice * (stakeActual - LAMPORTS_PER_SOL)) /
-      Number(mintData.supply);
+    const lstPriceMultiplier = await fetchLSTPriceMultiplier();
+    const stakedPrice = oracles.wsolPrice * lstPriceMultiplier;
 
     if (verbose) {
       console.log("BEFORE");

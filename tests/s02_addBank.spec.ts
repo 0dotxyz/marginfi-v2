@@ -70,6 +70,7 @@ import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { getBankrunBlockhash } from "./utils/tools";
 import { pulseBankPrice } from "./utils/user-instructions";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
+import { fetchLSTPriceMultiplier } from "./utils/spl-staking-utils";
 
 let program: Program<Marginfi>;
 let marginfiGroup: Keypair;
@@ -914,7 +915,7 @@ describe("Init group and add banks with asset category flags", () => {
     assert.approximately(priceMultiplierWithoutOnRamp, 1.025, 0.000001);
   });
 
-  it("(user 0) Adds 9 SOL to the validator 0's on-ramp pool", async () => {
+  it("(user 0) Adds 9 SOL to the validator 0's on-ramp pool - multiplier changes again", async () => {
     let tx = new Transaction();
     tx.add(
       SystemProgram.transfer({
@@ -926,34 +927,8 @@ describe("Init group and add banks with asset category flags", () => {
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(users[0].wallet);
     await banksClient.processTransaction(tx);
-  });
 
-  it("(permissionless) Pulse staked bank (validator 0) with on-ramp balance - multiplier changes again", async () => {
-    const tx = new Transaction().add(
-      await pulseBankPrice(groupAdmin.mrgnBankrunProgram, {
-        bank: validators[0].bank,
-        remaining: [
-          oracles.wsolOracle.publicKey,
-          validators[0].splMint,
-          validators[0].splSolPool,
-          validators[0].splOnRampPool,
-        ],
-      }),
-    );
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(groupAdmin.wallet);
-
-    await banksClient.processTransaction(tx);
-
-    const bank = await bankrunProgram.account.bank.fetch(validators[0].bank);
-    const priceWithOnRamp = wrappedI80F48toBigNumber(
-      bank.cache.lastOraclePrice,
-    ).toNumber();
-    assert.equal(priceWithOnRamp, oracles.wsolPrice);
-
-    const priceMultiplierWithOnRamp = wrappedI80F48toBigNumber(
-      bank.cache.priceMultiplier,
-    ).toNumber();
+    const priceMultiplierWithOnRamp = await fetchLSTPriceMultiplier();
 
     // (41 + 9) / 40 = 1.25
     assert.equal(priceMultiplierWithOnRamp, 1.25);
