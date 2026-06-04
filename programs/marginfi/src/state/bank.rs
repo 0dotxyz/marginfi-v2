@@ -33,9 +33,9 @@ use drift_mocks::constants::scale_drift_deposit_limit;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        ASSET_TAG_DRIFT, CLOSE_ENABLED_FLAG, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED,
-        FREEZE_SETTINGS, GROUP_FLAGS, INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED,
-        LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+        ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, CLOSE_ENABLED_FLAG, FEE_VAULT_AUTHORITY_SEED,
+        FEE_VAULT_SEED, FREEZE_SETTINGS, GROUP_FLAGS, INSURANCE_VAULT_AUTHORITY_SEED,
+        INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup},
@@ -366,8 +366,16 @@ impl BankImpl for Bank {
         set_if_some!(self.config.borrow_limit, config.borrow_limit);
 
         if let Some(new_state) = config.operational_state {
+            // JupLend banks must be activated exactly once through `juplend_init_position`.
             check!(
-                new_state != BankOperationalState::KilledByBankruptcy,
+                !(self.config.asset_tag == ASSET_TAG_JUPLEND
+                    && self.config.operational_state == BankOperationalState::Uninitialized),
+                MarginfiError::Unauthorized
+            );
+            // These states are unreachable by configuration
+            check!(
+                new_state != BankOperationalState::KilledByBankruptcy
+                    && new_state != BankOperationalState::Uninitialized,
                 MarginfiError::Unauthorized
             );
             // Log operational state change

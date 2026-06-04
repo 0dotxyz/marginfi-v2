@@ -267,6 +267,11 @@ pub fn validate_bank_state(bank: &Bank, kind: InstructionKind) -> MarginfiResult
     if bank.config.operational_state == BankOperationalState::KilledByBankruptcy {
         return err!(MarginfiError::BankKilledByBankruptcy);
     }
+    // Bank exists but has not completed one-time setup (e.g. JupLend seed deposit). Block every
+    // operation until init runs.
+    if bank.config.operational_state == BankOperationalState::Uninitialized {
+        return err!(MarginfiError::BankUninitialized);
+    }
 
     match kind {
         InstructionKind::FailsInReduceState
