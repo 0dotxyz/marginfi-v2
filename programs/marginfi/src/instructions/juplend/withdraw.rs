@@ -76,7 +76,7 @@ pub fn juplend_withdraw<'info>(
     // - call `bank_account.withdraw(shares_to_burn)`
     // - CPI JupLend `withdraw` for the requested underlying `amount`
     let clock = Clock::get()?;
-    let (token_amount, shares_to_burn) = {
+    let (token_amount, shares_to_burn, share_amount) = {
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;
         let group = ctx.accounts.group.load()?;
@@ -115,9 +115,9 @@ pub fn juplend_withdraw<'info>(
             &mut marginfi_account.lending_account,
         )?;
 
-        let (token_amount, shares_to_burn) = if withdraw_all {
-            // `withdraw_all` returns the user's full fToken share balance (u64).
-            let f_tokens_balance = bank_account.withdraw_all(in_receivership)?;
+        let (token_amount, shares_to_burn, share_amount) = if withdraw_all {
+            // `withdraw_all` returns the user's full position amount and marginfi share delta.
+            let (f_tokens_balance, share_amount) = bank_account.withdraw_all(in_receivership)?;
             // Redeemable underlying = floor(shares * price / 1e12)
             // Then recalculate shares_to_burn from token_amount to guarantee we match
             // JupLend's expected burn amount (should be identical, but this is safer).
@@ -138,7 +138,7 @@ pub fn juplend_withdraw<'info>(
             // Sanity check: recalculated shares should never exceed what we have
             require!(shares_to_burn <= f_tokens_balance, MarginfiError::MathError);
 
-            (token_amount, shares_to_burn)
+            (token_amount, shares_to_burn, share_amount)
         } else {
             // shares = ceil(assets * 1e12 / token_exchange_price)
             let shares_to_burn = {
@@ -146,9 +146,9 @@ pub fn juplend_withdraw<'info>(
                     .ok_or_else(|| error!(MarginfiError::MathError))?
             };
 
-            bank_account.withdraw(I80F48::from_num(shares_to_burn))?;
+            let share_amount = bank_account.withdraw(I80F48::from_num(shares_to_burn))?;
 
-            (amount, shares_to_burn)
+            (amount, shares_to_burn, share_amount)
         };
 
         let native_outflow = if withdraw_all { token_amount } else { amount };
@@ -185,7 +185,7 @@ pub fn juplend_withdraw<'info>(
         bank.update_bank_cache(&group)?;
         marginfi_account.last_update = clock.unix_timestamp as u64;
 
-        (token_amount, shares_to_burn)
+        (token_amount, shares_to_burn, share_amount)
     };
 
     // Record balances to verify exact deltas.
@@ -269,6 +269,7 @@ pub fn juplend_withdraw<'info>(
             bank: bank_key,
             mint: bank_mint,
             amount: received_underlying,
+            share_amount: share_amount.into(),
             close_balance: withdraw_all,
         });
 

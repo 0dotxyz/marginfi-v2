@@ -442,3 +442,25 @@ export function aprToU32(value: number): number {
   const ratio = clamped / MAX_PERCENT;
   return Math.floor(ratio * MAX_U32);
 }
+
+export function parseMarginfiEvents(
+  program: any,
+  logMessages: string[]
+): { name: string; data: any }[] {
+  const events: { name: string; data: any }[] = [];
+  if (!logMessages) return events;
+  for (const log of logMessages) {
+    if (log.startsWith("Program data: ")) {
+      const base64Data = log.replace("Program data: ", "");
+      try {
+        const decoded = program.coder.events.decode(base64Data);
+        if (decoded) {
+          events.push(decoded);
+        }
+      } catch (e) {
+        // Not an event we care about
+      }
+    }
+  }
+  return events;
+}
