@@ -29,7 +29,7 @@ import { LST_ATA_v1, USER_ACCOUNT } from "./utils/mocks";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { getBankrunBlockhash } from "./utils/tools";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
-import { fetchLSTPriceMultiplier } from "./utils/spl-staking-utils";
+import { fetchLstPriceMultiplier } from "./utils/spl-staking-utils";
 
 let bankKeypairSol: Keypair;
 
@@ -109,7 +109,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
       tx.sign(wallet.payer);
       await banksClient.processTransaction(tx);
 
-      const priceMultiplierAfterAppreciation = await fetchLSTPriceMultiplier();
+      const priceMultiplierAfterAppreciation = await fetchLstPriceMultiplier();
       assert.equal(priceMultiplierAfterAppreciation, 2.0); // (50 + 30) / 40 = 2
     },
   );
@@ -230,7 +230,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
       tx.sign(wallet.payer);
       await banksClient.processTransaction(tx);
 
-      const priceMultiplierAfterAppreciation = await fetchLSTPriceMultiplier();
+      const priceMultiplierAfterAppreciation = await fetchLstPriceMultiplier();
       assert.equal(priceMultiplierAfterAppreciation, 2.0); // still the same
     },
   );

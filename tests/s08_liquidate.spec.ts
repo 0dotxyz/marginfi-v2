@@ -47,7 +47,7 @@ import {
 import { deriveStakedSettings } from "./utils/pdas";
 import { getStakeAccount } from "./utils/stake-utils";
 import { getBankrunBlockhash } from "./utils/tools";
-import { fetchLSTPriceMultiplier } from "./utils/spl-staking-utils";
+import { fetchLstPriceMultiplier } from "./utils/spl-staking-utils";
 
 let program: Program<Marginfi>;
 let marginfiGroup: Keypair;
@@ -165,7 +165,7 @@ describe("Liquidate user (including staked assets)", () => {
       liabilityBankBefore.liabilityShareValue,
     ).toNumber();
 
-    const lstPriceMultiplier = await fetchLSTPriceMultiplier();
+    const lstPriceMultiplier = await fetchLstPriceMultiplier();
     const stakedPrice = oracles.wsolPrice * lstPriceMultiplier;
 
     if (verbose) {

@@ -46,7 +46,6 @@ pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
         OracleSetup::FixedDrift => Ok(2),
         // Fixed + JupLend: bank + lending state (no oracle)
         OracleSetup::FixedJuplend => Ok(2),
-        OracleSetup::StakedWithPythPush => Ok(5),
         _ => get_remaining_accounts_per_asset_tag(bank.config.asset_tag),
     }
 }

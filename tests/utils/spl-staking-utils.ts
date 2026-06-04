@@ -149,7 +149,7 @@ export const depositToSinglePoolIxes = async (
   return ixes;
 };
 
-export const fetchLSTPriceMultiplier = async () => {
+export const fetchLstPriceMultiplier = async () => {
   const pulseTx = new Transaction().add(
     await pulseBankPrice(groupAdmin.mrgnBankrunProgram, {
       bank: validators[0].bank,

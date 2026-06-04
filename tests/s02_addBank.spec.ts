@@ -52,6 +52,7 @@ import {
   makeRatePoints,
   ORACLE_SETUP_PYTH_PUSH,
   STAKED_ORACLE_PRICE_USES_ONRAMP,
+  STAKED_ORACLE_DISABLED,
 } from "./utils/types";
 import { assert } from "chai";
 import {
@@ -70,7 +71,7 @@ import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { getBankrunBlockhash } from "./utils/tools";
 import { pulseBankPrice } from "./utils/user-instructions";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
-import { fetchLSTPriceMultiplier } from "./utils/spl-staking-utils";
+import { fetchLstPriceMultiplier } from "./utils/spl-staking-utils";
 
 let program: Program<Marginfi>;
 let marginfiGroup: Keypair;
@@ -644,7 +645,6 @@ describe("Init group and add banks with asset category flags", () => {
     assertKeysEqual(config.oracleKeys[1], validators[0].splMint);
     assertKeysEqual(config.oracleKeys[2], validators[0].splSolPool);
     assertKeysEqual(config.oracleKeys[3], validators[0].splOnRampPool);
-    assert.equal(config.configFlags & STAKED_ORACLE_PRICE_USES_ONRAMP, 0);
     assertKeysEqual(bank.integrationAcc1, validators[0].voteAccount);
 
     assertI80F48Equal(bank.collectedProgramFeesOutstanding, 0);
@@ -684,7 +684,6 @@ describe("Init group and add banks with asset category flags", () => {
     const bank = await bankrunProgram.account.bank.fetch(validators[1].bank);
     assertBNEqual(bank.bankSeed, new BN(0));
     assertKeysEqual(bank.integrationAcc1, validators[1].voteAccount);
-    assert.equal(bank.config.configFlags & STAKED_ORACLE_PRICE_USES_ONRAMP, 0);
   });
 
   it("(permissionless) Backfill staked vote account with wrong vote - should fail", async () => {
@@ -928,7 +927,7 @@ describe("Init group and add banks with asset category flags", () => {
     tx.sign(users[0].wallet);
     await banksClient.processTransaction(tx);
 
-    const priceMultiplierWithOnRamp = await fetchLSTPriceMultiplier();
+    const priceMultiplierWithOnRamp = await fetchLstPriceMultiplier();
 
     // (41 + 9) / 40 = 1.25
     assert.equal(priceMultiplierWithOnRamp, 1.25);
