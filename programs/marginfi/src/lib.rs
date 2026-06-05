@@ -178,6 +178,13 @@ pub mod marginfi {
         marginfi_group::lending_pool_set_fixed_oracle_price(ctx, price)
     }
 
+    /// (admin or emode_admin only) Initialize the per-group same-asset e-mode registry.
+    pub fn lending_pool_init_same_asset_emode_registry(
+        ctx: Context<LendingPoolInitSameAssetEmodeRegistry>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_init_same_asset_emode_registry(ctx)
+    }
+
     /// (admin or emode_admin only) Opt a bank in/out of same-asset e-mode participation.
     pub fn lending_pool_set_bank_same_asset_emode_eligibility(
         ctx: Context<LendingPoolSetBankSameAssetEmodeEligibility>,

@@ -744,10 +744,7 @@ async fn set_same_asset_emode_eligibility_success_and_fixed_rejects() -> anyhow:
         .try_lending_pool_set_bank_same_asset_emode_eligibility(usdc_bank, false)
         .await?;
     let usdc_after_disable = usdc_bank.load().await;
-    assert_eq!(
-        usdc_after_disable.flags & BANK_SAME_ASSET_EMODE_ELIGIBLE,
-        0
-    );
+    assert_eq!(usdc_after_disable.flags & BANK_SAME_ASSET_EMODE_ELIGIBLE, 0);
 
     let fixed_bank = test_f.get_bank(&BankMint::Fixed);
     let fixed_res = test_f

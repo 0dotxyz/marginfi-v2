@@ -1,7 +1,7 @@
 import { BN, Program } from "@coral-xyz/anchor";
 import { AccountMeta, PublicKey } from "@solana/web3.js";
 import { Marginfi } from "../../target/types/marginfi";
-import { deriveStakedSettings } from "./pdas";
+import { deriveSameAssetEmodeRegistry, deriveStakedSettings } from "./pdas";
 import {
   BankConfig,
   BankConfigOptRaw,
@@ -930,6 +930,32 @@ export const initBankMetadata = (
   return ix;
 };
 
+export type InitSameAssetEmodeRegistryArgs = {
+  group: PublicKey;
+  signer: PublicKey;
+};
+
+export const initSameAssetEmodeRegistry = (
+  program: Program<Marginfi>,
+  args: InitSameAssetEmodeRegistryArgs,
+) => {
+  const [sameAssetEmodeRegistry] = deriveSameAssetEmodeRegistry(
+    program.programId,
+    args.group,
+  );
+
+  const ix = program.methods
+    .lendingPoolInitSameAssetEmodeRegistry()
+    .accounts({
+      group: args.group,
+      signer: args.signer,
+      sameAssetEmodeRegistry,
+    })
+    .instruction();
+
+  return ix;
+};
+
 export type SetFixedPriceArgs = {
   bank: PublicKey;
   price: number;
@@ -968,12 +994,18 @@ export const setBankSameAssetEmodeEligibility = (
   program: Program<Marginfi>,
   args: SetBankSameAssetEmodeEligibilityArgs,
 ) => {
+  const [sameAssetEmodeRegistry] = deriveSameAssetEmodeRegistry(
+    program.programId,
+    args.group,
+  );
+
   const ix = program.methods
     .lendingPoolSetBankSameAssetEmodeEligibility(args.enabled)
     .accounts({
       group: args.group,
       signer: args.signer,
       bank: args.bank,
+      sameAssetEmodeRegistry,
     })
     .instruction();
 

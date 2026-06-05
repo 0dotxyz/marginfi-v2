@@ -20,6 +20,7 @@ use marginfi::{
 };
 use marginfi_type_crate::constants::{
     FEE_STATE_SEED, PROTOCOL_FEE_FIXED_DEFAULT, PROTOCOL_FEE_RATE_DEFAULT,
+    SAME_ASSET_EMODE_REGISTRY_SEED,
 };
 use marginfi_type_crate::types::WrappedI80F48;
 use marginfi_type_crate::types::{
@@ -43,6 +44,7 @@ async fn airdrop_sol(context: &mut ProgramTestContext, key: &Pubkey, amount: u64
 pub struct MarginfiGroupFixture {
     ctx: Rc<RefCell<ProgramTestContext>>,
     pub key: Pubkey,
+    pub same_asset_emode_registry: Pubkey,
     pub fee_state: Pubkey,
     pub fee_wallet: Pubkey,
 }
@@ -52,6 +54,13 @@ impl MarginfiGroupFixture {
         let ctx_ref = ctx.clone();
 
         let group_key = Keypair::new();
+        let (same_asset_emode_registry, _registry_bump) = Pubkey::find_program_address(
+            &[
+                SAME_ASSET_EMODE_REGISTRY_SEED.as_bytes(),
+                group_key.pubkey().as_ref(),
+            ],
+            &marginfi::ID,
+        );
         let fee_wallet_key: Pubkey;
         let (fee_state_key, _bump) =
             Pubkey::find_program_address(&[FEE_STATE_SEED.as_bytes()], &marginfi::ID);
@@ -166,6 +175,7 @@ impl MarginfiGroupFixture {
         MarginfiGroupFixture {
             ctx: ctx_ref.clone(),
             key: group_key.pubkey(),
+            same_asset_emode_registry,
             fee_state: fee_state_key,
             fee_wallet: fee_wallet_key,
         }
@@ -435,6 +445,7 @@ impl MarginfiGroupFixture {
             group: self.key,
             signer: self.ctx.borrow().payer.pubkey(),
             bank: bank.key,
+            same_asset_emode_registry: self.same_asset_emode_registry,
         }
         .to_account_metas(Some(true));
 
@@ -443,6 +454,42 @@ impl MarginfiGroupFixture {
             accounts,
             data: LendingPoolSetBankSameAssetEmodeEligibility { enabled }.data(),
         }
+    }
+
+    pub fn make_lending_pool_init_same_asset_emode_registry_ix(&self) -> Instruction {
+        let accounts = marginfi::accounts::LendingPoolInitSameAssetEmodeRegistry {
+            group: self.key,
+            signer: self.ctx.borrow().payer.pubkey(),
+            same_asset_emode_registry: self.same_asset_emode_registry,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(Some(true));
+
+        Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: LendingPoolInitSameAssetEmodeRegistry {}.data(),
+        }
+    }
+
+    pub async fn try_lending_pool_init_same_asset_emode_registry(
+        &self,
+    ) -> Result<(), BanksClientError> {
+        let ix = self.make_lending_pool_init_same_asset_emode_registry_ix();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(())
     }
 
     pub async fn try_lending_pool_configure_bank(
@@ -472,6 +519,17 @@ impl MarginfiGroupFixture {
         bank: &BankFixture,
         enabled: bool,
     ) -> Result<(), BanksClientError> {
+        let registry_account = self
+            .ctx
+            .borrow_mut()
+            .banks_client
+            .get_account(self.same_asset_emode_registry)
+            .await?;
+        if registry_account.is_none() {
+            self.try_lending_pool_init_same_asset_emode_registry()
+                .await?;
+        }
+
         let ix = self.make_lending_pool_set_bank_same_asset_emode_eligibility_ix(bank, enabled);
         let tx = Transaction::new_signed_with_payer(
             &[ix],

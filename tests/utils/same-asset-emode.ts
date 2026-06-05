@@ -10,8 +10,11 @@ import { CONF_INTERVAL_MULTIPLE_FLOAT } from "./types";
 import { PublicKey, Transaction, type Signer } from "@solana/web3.js";
 import { ProgramTestContext } from "solana-bankrun";
 import { Marginfi } from "target/types/marginfi";
-import { BanksClient } from "solana-bankrun";
-import { setBankSameAssetEmodeEligibility } from "./group-instructions";
+import {
+  initSameAssetEmodeRegistry,
+  setBankSameAssetEmodeEligibility,
+} from "./group-instructions";
+import { deriveSameAssetEmodeRegistry } from "./pdas";
 import { processBankrunTransaction } from "./tools";
 
 const ORACLE_PRICE_LOWER_FACTOR = new BigNumber(
@@ -49,6 +52,23 @@ export const enableSameAssetEmodeForBanks = async ({
   signer: Signer;
   banks: PublicKey[];
 }) => {
+  const [sameAssetEmodeRegistry] = deriveSameAssetEmodeRegistry(
+    program.programId,
+    group,
+  );
+  const registryAccount = await bankrunContext.banksClient.getAccount(
+    sameAssetEmodeRegistry,
+  );
+  if (!registryAccount) {
+    const initTx = new Transaction().add(
+      await initSameAssetEmodeRegistry(program, {
+        group,
+        signer: signer.publicKey,
+      }),
+    );
+    await processBankrunTransaction(bankrunContext, initTx, [signer]);
+  }
+
   const tx = new Transaction();
   for (const bank of banks) {
     tx.add(
