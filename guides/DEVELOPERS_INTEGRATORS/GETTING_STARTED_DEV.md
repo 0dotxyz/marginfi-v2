@@ -8,7 +8,7 @@ New developer getting started working on the mrgnv2 program side? Read on.
 - Node - 24.15.0
 - Yarn - 4.14.1 (via Corepack)
 - Anchor CLI - 1.0.2 (`Anchor.toml`)
-- Agave/Solana CLI - 3.1.11 (`Anchor.toml`)
+- Agave/Solana CLI - 3.1.13 (`Anchor.toml`)
 - cargo-nextest - 0.9.81
 - cargo-fuzz - 0.12.0
 
@@ -18,7 +18,7 @@ Rust/Solana/Anchor setup:
 rustup toolchain install 1.90.0
 
 # Install the pinned Agave/Solana CLI version.
-sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.11/install)"
+sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.13/install)"
 export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
 
 # Install Anchor through AVM, then pin the workspace Anchor CLI version.
@@ -219,7 +219,7 @@ Usually manifests as something like:
 
 ```
 Starting LiteSVM setup...
-thread 'tokio-runtime-worker' panicked at /usr/local/cargo/registry/src/index.crates.io-.../solana-program-test-3.1.11/src/lib.rs:...:
+thread 'tokio-runtime-worker' panicked at /usr/local/cargo/registry/src/index.crates.io-.../solana-program-test-3.1.12/src/lib.rs:...:
 Program file data not available <SOME GARBAGE>
 ```
 
@@ -230,7 +230,7 @@ Run `lsof -i :8899` to find the validator and then `kill -9 VALIDATOR_PID
 Usually manifests as:
 
 ```
-thread '...' panicked at .../solana-program-test-3.1.11/src/lib.rs:...:
+thread '...' panicked at .../solana-program-test-3.1.12/src/lib.rs:...:
 Program file data not available for marginfi (MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA)
 ```
 

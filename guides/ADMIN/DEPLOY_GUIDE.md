@@ -4,7 +4,7 @@ Marginfi program authority is managed by squads (https://app.squads.so/squads/J3
 
 First you will need:
 
-- Agave/Solana tools 3.1.11 (`sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.11/install)"`, then ensure `$HOME/.local/share/solana/install/active_release/bin` is on `PATH`)
+- Agave/Solana tools 3.1.13 (`sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.13/install)"`, then ensure `$HOME/.local/share/solana/install/active_release/bin` is on `PATH`)
 - Anchor CLI 1.0.2 (`cargo install avm --git https://github.com/solana-foundation/anchor --locked`, then `avm install 1.0.2` and `avm use 1.0.2`)
 - solana-verify (`cargo install solana-verify`)
 - Docker (https://docs.docker.com/engine/install/ubuntu/)
@@ -115,7 +115,7 @@ Update solana-verify (`cargo install solana-verify`) or manually edit cargo.lock
 version from 3 to 4
 
 ```
-Unable to find docker image for Solana version 3.1.11
+Unable to find docker image for Solana version 3.1.13
 ```
 
 Update `solana-verify` first. If no image exists for the exact toolchain version, do not silently
