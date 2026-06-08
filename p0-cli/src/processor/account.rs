@@ -730,6 +730,12 @@ pub fn marginfi_account_close_order(
     let authority = config.authority();
     let marginfi_account_pk = profile.get_marginfi_account()?;
 
+    let marginfi_account = config
+        .mfi_program
+        .account::<MarginfiAccount>(marginfi_account_pk)?;
+    ensure_account_unblocked(&marginfi_account, "close-order")?;
+    let group = marginfi_account.group;
+
     let fee_recipient = fee_recipient.unwrap_or(authority);
 
     println!("Closing order: {}", order_pk);
@@ -738,6 +744,7 @@ pub fn marginfi_account_close_order(
     let ix = Instruction {
         program_id: config.program_id,
         accounts: marginfi::accounts::CloseOrder {
+            group,
             marginfi_account: marginfi_account_pk,
             authority,
             order: order_pk,
@@ -1022,6 +1029,12 @@ pub fn marginfi_account_set_keeper_close_flags(
 ) -> Result<()> {
     let marginfi_account_pk = profile.get_marginfi_account()?;
 
+    let marginfi_account = config
+        .mfi_program
+        .account::<MarginfiAccount>(marginfi_account_pk)?;
+    ensure_account_unblocked(&marginfi_account, "set-keeper-close-flags")?;
+    let group = marginfi_account.group;
+
     match &bank_keys_opt {
         Some(keys) => {
             println!("Setting liquidator close flags for specific banks:");
@@ -1037,6 +1050,7 @@ pub fn marginfi_account_set_keeper_close_flags(
     let ix = Instruction {
         program_id: config.program_id,
         accounts: marginfi::accounts::SetKeeperCloseFlags {
+            group,
             marginfi_account: marginfi_account_pk,
             authority: config.authority(),
         }

@@ -24,6 +24,7 @@ import {
   getTokenBalance,
   assertBankrunTxFailed,
   assertI80F48Approx,
+  parseMarginfiEvents,
 } from "./utils/genericTests";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import {
@@ -97,9 +98,11 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
             { amount: DEPOSIT_AMOUNT }
           )
         );
-        await processBankrunTransaction(bankrunContext, depositTx, [
-          userA.wallet,
-        ]);
+        const depositResult = await processBankrunTransaction(
+          bankrunContext,
+          depositTx,
+          [userA.wallet]
+        );
 
         const userBalanceAfterDeposit = await getTokenBalance(
           bankRunProvider,
@@ -116,6 +119,17 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
           );
 
         const cTokenAmount = toBnFromI80(balanceAfterDeposit.assetShares);
+
+        // First deposit into this balance, so share_amount == the resulting asset shares
+        const depositEvent = parseMarginfiEvents(
+          bankrunProgram,
+          depositResult.logMessages
+        ).find((e) => e.name === "lendingAccountDepositEvent");
+        assert.isDefined(depositEvent, "Expected lendingAccountDepositEvent");
+        assertI80F48Approx(
+          depositEvent!.data.shareAmount,
+          balanceAfterDeposit.assetShares
+        );
 
         assert.ok(
           userBalanceAfterDeposit ===
@@ -141,9 +155,21 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
             }
           )
         );
-        await processBankrunTransaction(bankrunContext, withdrawTx, [
-          userA.wallet,
-        ]);
+        const withdrawResult = await processBankrunTransaction(
+          bankrunContext,
+          withdrawTx,
+          [userA.wallet]
+        );
+        // Withdrew `cTokenAmount` asset shares (collateral is 1:1 here)
+        const withdrawEvent = parseMarginfiEvents(
+          bankrunProgram,
+          withdrawResult.logMessages
+        ).find((e) => e.name === "lendingAccountWithdrawEvent");
+        assert.isDefined(withdrawEvent, "Expected lendingAccountWithdrawEvent");
+        assertI80F48Approx(
+          withdrawEvent!.data.shareAmount,
+          cTokenAmount.toNumber()
+        );
 
         const bankAfter = await bankrunProgram.account.bank.fetch(usdcBank);
         const expectedPrice = oracles.usdcPrice;

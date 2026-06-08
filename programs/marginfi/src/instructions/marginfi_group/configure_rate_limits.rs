@@ -1,6 +1,7 @@
 use crate::{
+    check,
     state::marginfi_group::MarginfiGroupImpl,
-    state::rate_limiter::{BankRateLimiterImpl, GroupRateLimiterImpl},
+    state::rate_limiter::{is_valid_rate_limit_amount, BankRateLimiterImpl, GroupRateLimiterImpl},
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -24,6 +25,10 @@ pub fn configure_bank_rate_limits(
     let clock = Clock::get()?;
 
     if let Some(hourly) = hourly_max_outflow {
+        check!(
+            is_valid_rate_limit_amount(hourly),
+            MarginfiError::InvalidConfig
+        );
         bank.rate_limiter
             .configure_hourly(hourly, clock.unix_timestamp);
         msg!(
@@ -33,6 +38,10 @@ pub fn configure_bank_rate_limits(
     }
 
     if let Some(daily) = daily_max_outflow {
+        check!(
+            is_valid_rate_limit_amount(daily),
+            MarginfiError::InvalidConfig
+        );
         bank.rate_limiter
             .configure_daily(daily, clock.unix_timestamp);
         msg!("Bank daily rate limit configured: {} native tokens", daily);
@@ -77,6 +86,10 @@ pub fn configure_group_rate_limits(
     let clock = Clock::get()?;
 
     if let Some(hourly) = hourly_max_outflow_usd {
+        check!(
+            is_valid_rate_limit_amount(hourly),
+            MarginfiError::InvalidConfig
+        );
         group
             .rate_limiter
             .configure_hourly(hourly, clock.unix_timestamp);
@@ -84,6 +97,10 @@ pub fn configure_group_rate_limits(
     }
 
     if let Some(daily) = daily_max_outflow_usd {
+        check!(
+            is_valid_rate_limit_amount(daily),
+            MarginfiError::InvalidConfig
+        );
         group
             .rate_limiter
             .configure_daily(daily, clock.unix_timestamp);
