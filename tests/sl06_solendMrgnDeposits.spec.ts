@@ -23,6 +23,7 @@ import { processBankrunTransaction, toBnFromI80 } from "./utils/tools";
 import {
   getTokenBalance,
   assertBankrunTxFailed,
+  assertI80F48Equal,
   assertI80F48Approx,
   parseMarginfiEvents,
 } from "./utils/genericTests";
@@ -126,7 +127,7 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
           depositResult.logMessages
         ).find((e) => e.name === "lendingAccountDepositEvent");
         assert.isDefined(depositEvent, "Expected lendingAccountDepositEvent");
-        assertI80F48Approx(
+        assertI80F48Equal(
           depositEvent!.data.shareAmount,
           balanceAfterDeposit.assetShares
         );
@@ -166,9 +167,9 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
           withdrawResult.logMessages
         ).find((e) => e.name === "lendingAccountWithdrawEvent");
         assert.isDefined(withdrawEvent, "Expected lendingAccountWithdrawEvent");
-        assertI80F48Approx(
+        assertI80F48Equal(
           withdrawEvent!.data.shareAmount,
-          cTokenAmount.toNumber()
+          cTokenAmount
         );
 
         const bankAfter = await bankrunProgram.account.bank.fetch(usdcBank);

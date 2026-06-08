@@ -20,7 +20,7 @@ import {
   assertBNEqual,
   getTokenBalance,
   assertBankrunTxFailed,
-  assertI80F48Approx,
+  assertI80F48Equal,
   parseMarginfiEvents,
 } from "./utils/genericTests";
 import {
@@ -179,9 +179,9 @@ describe("d07: Drift Deposit Tests", () => {
     ).find((e) => e.name === "lendingAccountDepositEvent");
     assert.isDefined(depositEvent, "Expected lendingAccountDepositEvent");
     // user 1's first deposit into the USDC bank: asset shares minted == scaled balance
-    assertI80F48Approx(
+    assertI80F48Equal(
       depositEvent!.data.shareAmount,
-      amount.mul(USDC_SCALING_FACTOR).toNumber()
+      amount.mul(USDC_SCALING_FACTOR),
     );
 
     const driftUserAfter = await getDriftUserAccount(

@@ -30,7 +30,6 @@ import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import {
   assertBNEqual,
   assertI68F60Equal,
-  assertI80F48Approx,
   assertI80F48Equal,
   assertKeysEqual,
   getTokenBalance,
@@ -173,7 +172,7 @@ describe("k06: Kamino Deposit Tests", () => {
     ).find((e) => e.name === "lendingAccountDepositEvent");
     assert.isDefined(depositEvent, "Expected lendingAccountDepositEvent");
     // collateral:liquidity is 1:1 here, so this deposit mints `amount` asset shares
-    assertI80F48Approx(depositEvent!.data.shareAmount, amount.toNumber());
+    assertI80F48Equal(depositEvent!.data.shareAmount, amount);
 
     const [
       obAfter,
