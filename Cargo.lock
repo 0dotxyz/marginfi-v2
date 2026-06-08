@@ -2398,6 +2398,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fast-math"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2465292146cdfc2011350fe3b1c616ac83cf0faeedb33463ba1c332ed8948d66"
+dependencies = [
+ "ieee754",
+]
+
+[[package]]
 name = "fastbloom"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2900,6 +2909,9 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "histogram"
@@ -3239,6 +3251,12 @@ dependencies = [
  "icu_normalizer",
  "icu_properties",
 ]
+
+[[package]]
+name = "ieee754"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9007da9cacbd3e6343da136e98b0d2df013f553d35bdec8b518f07bea768e19c"
 
 [[package]]
 name = "im"
@@ -4723,7 +4741,7 @@ dependencies = [
 [[package]]
 name = "pyth-solana-receiver-sdk"
 version = "1.2.1"
-source = "git+https://github.com/IliaZyrin/pyth-crosschain?rev=913ce2196a104635582d745c8fbd9a69e240070c#913ce2196a104635582d745c8fbd9a69e240070c"
+source = "git+https://github.com/IliaZyrin/pyth-crosschain?rev=0300c6dab983f2a8abf1d861e2ad3abcd1af184f#0300c6dab983f2a8abf1d861e2ad3abcd1af184f"
 dependencies = [
  "anchor-lang",
  "borsh",
@@ -4735,11 +4753,20 @@ dependencies = [
 [[package]]
 name = "pythnet-sdk"
 version = "2.3.2"
-source = "git+https://github.com/IliaZyrin/pyth-crosschain?rev=913ce2196a104635582d745c8fbd9a69e240070c#913ce2196a104635582d745c8fbd9a69e240070c"
+source = "git+https://github.com/IliaZyrin/pyth-crosschain?rev=0300c6dab983f2a8abf1d861e2ad3abcd1af184f#0300c6dab983f2a8abf1d861e2ad3abcd1af184f"
 dependencies = [
  "anchor-lang",
+ "bincode",
  "borsh",
+ "bytemuck",
+ "byteorder",
+ "fast-math",
+ "hex",
+ "rustc_version",
  "serde",
+ "sha3",
+ "slow_primes",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -5697,6 +5724,15 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
+name = "slow_primes"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58267dd2fbaa6dceecba9e3e106d2d90a2b02497c0e8b01b8759beccf5113938"
+dependencies = [
+ "num",
+]
 
 [[package]]
 name = "smallvec"
@@ -9498,7 +9534,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "switchboard-on-demand"
 version = "0.12.1"
-source = "git+https://github.com/switchboard-xyz/switchboard-sdk?rev=f1a570a65476d6d040bee1bd2d223c2c775ac2b6#f1a570a65476d6d040bee1bd2d223c2c775ac2b6"
+source = "git+https://github.com/switchboard-xyz/switchboard-sdk?rev=f75b1ef63e10eda35d046b1838810ec2935d7f39#f75b1ef63e10eda35d046b1838810ec2935d7f39"
 dependencies = [
  "anyhow",
  "arrayref",

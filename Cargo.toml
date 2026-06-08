@@ -54,8 +54,8 @@ mocks = { path = "programs/mocks", package = "mocks" }
 id-crate = { path = "id-crate" }
 marginfi-type-crate = { path = "type-crate" }
 
-pyth-solana-receiver-sdk = { git = "https://github.com/IliaZyrin/pyth-crosschain", package = "pyth-solana-receiver-sdk", rev = "913ce2196a104635582d745c8fbd9a69e240070c" }
-switchboard-on-demand = { git = "https://github.com/switchboard-xyz/switchboard-sdk", rev = "f1a570a65476d6d040bee1bd2d223c2c775ac2b6", default-features = false, features = ["cpi", "solana-v3"] }
+pyth-solana-receiver-sdk = { git = "https://github.com/0dotxyz/pyth-crosschain", package = "pyth-solana-receiver-sdk", rev = "0f170d205e47a6ea34ad30c424d9ec8cc61a1f1fc" }
+switchboard-on-demand = { git = "https://github.com/switchboard-xyz/switchboard-sdk", rev = "f75b1ef63e10eda35d046b1838810ec2935d7f39", default-features = false, features = ["cpi", "solana-v3"] }
 
 borsh = "1.6.1"
 bytemuck = "1.22.0"
