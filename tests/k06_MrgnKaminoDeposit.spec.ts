@@ -30,6 +30,7 @@ import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import {
   assertBNEqual,
   assertI68F60Equal,
+  assertI80F48Approx,
   assertI80F48Equal,
   assertKeysEqual,
   getTokenBalance,
