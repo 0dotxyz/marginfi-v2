@@ -1,5 +1,5 @@
 import { BN, Program } from "@coral-xyz/anchor";
-import { BankrunProvider } from "anchor-bankrun";
+import { BankrunProvider } from "./utils/litesvm";
 import { AccountMeta, PublicKey, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import {

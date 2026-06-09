@@ -26,12 +26,12 @@ use marginfi_type_crate::types::{
     BankConfig, BankConfigCompact, BankConfigOpt, EmodeEntry, FeeState, InterestRateConfigOpt,
     MarginfiGroup, OracleSetup, MAX_EMODE_ENTRIES,
 };
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
-use solana_sdk::system_transaction;
 use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction, instruction::Instruction, signature::Keypair,
-    signer::Signer, transaction::Transaction,
+    instruction::Instruction, signature::Keypair, signer::Signer, transaction::Transaction,
 };
+use solana_system_transaction as system_transaction;
 use std::{cell::RefCell, mem, rc::Rc};
 
 async fn airdrop_sol(context: &mut ProgramTestContext, key: &Pubkey, amount: u64) {
@@ -689,7 +689,7 @@ impl MarginfiGroupFixture {
         Ok(())
     }
 
-    pub async fn try_accrue_interest(&self, bank: &BankFixture) -> Result<()> {
+    pub async fn try_accrue_interest(&self, bank: &BankFixture) -> Result<(), BanksClientError> {
         let ctx = self.ctx.borrow_mut();
 
         let ix = Instruction {
@@ -709,9 +709,7 @@ impl MarginfiGroupFixture {
             ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
-        ctx.banks_client.process_transaction(tx).await?;
-
-        Ok(())
+        ctx.banks_client.process_transaction(tx).await
     }
 
     pub async fn try_pulse_bank_price_cache(

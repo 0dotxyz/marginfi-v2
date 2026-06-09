@@ -11,7 +11,7 @@ use solana_sdk::{clock::Clock, transaction::Transaction};
 async fn fund_signer(test_f: &TestFixture, signer: &Keypair) -> anyhow::Result<()> {
     let ctx = test_f.context.borrow_mut();
     let recent_blockhash = ctx.banks_client.get_latest_blockhash().await?;
-    let tx = solana_sdk::system_transaction::transfer(
+    let tx = solana_system_transaction::transfer(
         &ctx.payer,
         &signer.pubkey(),
         10_000_000,
@@ -342,7 +342,7 @@ async fn update_deleverage_withdraw_limit_guard_errors() -> anyhow::Result<()> {
         {
             let ctx = test_f.context.borrow_mut();
             let recent_blockhash = ctx.banks_client.get_latest_blockhash().await?;
-            let tx = solana_sdk::system_transaction::transfer(
+            let tx = solana_system_transaction::transfer(
                 &ctx.payer,
                 &attacker.pubkey(),
                 10_000_000,

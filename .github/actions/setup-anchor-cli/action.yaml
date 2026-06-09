@@ -18,7 +18,7 @@ runs:
   - name: Install Anchor CLI
     if: steps.cache-anchor-cli.outputs.cache-hit != 'true'
     run: |
-      cargo install --git https://github.com/coral-xyz/anchor --tag "v${{ env.ANCHOR_CLI_VERSION }}" anchor-cli --locked
+      cargo install anchor-cli --version "${{ env.ANCHOR_CLI_VERSION }}" --locked
     shell: bash
 
   # ─── Cache toml-cli if used ────────────────────────────────────────

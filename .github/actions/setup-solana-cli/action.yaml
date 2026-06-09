@@ -24,6 +24,19 @@ runs:
       echo "${HOME}/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
     shell: bash
 
+  # ─── Cache Solana keygen ────────────────────────────────
+  - name: Cache solana-keygen binary
+    uses: actions/cache@v3
+    id: cache-keygen
+    with:
+      path: ~/.cargo/bin/solana-keygen
+      key: solana-keygen-${{ runner.os }}-v3.1.14
+
+  - name: Install solana-keygen
+    if: steps.cache-keygen.outputs.cache-hit != 'true'
+    run: |
+      cargo install solana-keygen --version 3.1.14 --locked
+    shell: bash
 
   # ─── Always generate a key and set localnet───────────────
   - name: Generate keypair

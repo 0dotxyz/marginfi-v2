@@ -14,8 +14,6 @@ import {
   AddressLookupTableAccount,
   Keypair,
   PublicKey,
-  SystemProgram,
-  SYSVAR_RENT_PUBKEY,
   Transaction,
   TransactionMessage,
   VersionedTransaction,
@@ -23,7 +21,6 @@ import {
 import {
   bankrunContext,
   banksClient,
-  bankRunProvider,
   ecosystem,
   groupAdmin,
   globalProgramAdmin,
@@ -51,7 +48,6 @@ import {
   deriveBankWithSeed,
   deriveLiquidityVaultAuthority,
   deriveBaseObligation,
-  deriveLendingMarketAuthority,
 } from "./utils/pdas";
 import {
   createLut,
@@ -59,27 +55,14 @@ import {
   getBankrunBlockhash,
   processBankrunTransaction,
 } from "./utils/tools";
-import {
-  lendingMarketAuthPda,
-  reserveLiqSupplyPda,
-  reserveFeeVaultPda,
-  reserveCollateralMintPda,
-  reserveCollateralSupplyPda,
-  LendingMarket,
-  MarketWithAddress,
-  BorrowRateCurve,
-  CurvePoint,
-  BorrowRateCurveFields,
-  PriceFeed,
-  AssetReserveConfig,
-} from "@kamino-finance/klend-sdk";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { ComputeBudgetProgram } from "@solana/web3.js";
-import Decimal from "decimal.js";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
 import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "./utils/types";
-import { createReserve } from "./k01_kaminoInit.spec";
+import {
+  createKaminoMarket,
+  createReserve,
+} from "./utils/kamino-reserve-setup";
 
 /** Number of Kamino banks to create for this test (16 total banks)
  * User will deposit into 15 Kamino banks + 1 USDC borrow = 16 total positions */
@@ -88,8 +71,6 @@ const NUM_KAMINO_BANKS = 16;
 const NUM_KAMINO_DEPOSITS = 15;
 const USER_ACCOUNT = "user_account_k18";
 const STARTING_SEED = 18000;
-const LENDING_MARKET_SIZE = 4656;
-const RESERVE_SIZE = 8616;
 
 describe("k18: 16 Kamino position liquidation test", () => {
   let kaminoMarkets: PublicKey[] = [];
@@ -111,41 +92,9 @@ describe("k18: 16 Kamino position liquidation test", () => {
     // Create all 16 markets/reserves/banks sequentially
     for (let i = 0; i < NUM_KAMINO_BANKS; i++) {
       // Create Kamino market
-      const marketKeypair = Keypair.generate();
-      const quoteCurrency = Array(32).fill(0); // USD quote currency
-      const id = klendBankrunProgram.programId;
-      const [lendingMarketAuthority] = deriveLendingMarketAuthority(
-        id,
-        marketKeypair.publicKey,
+      const market = await createKaminoMarket(
+        Array(32).fill(0), // USD quote currency
       );
-
-      const createMarketTx = new Transaction().add(
-        SystemProgram.createAccount({
-          fromPubkey: groupAdmin.wallet.publicKey,
-          newAccountPubkey: marketKeypair.publicKey,
-          space: LENDING_MARKET_SIZE + 8,
-          lamports:
-            await bankRunProvider.connection.getMinimumBalanceForRentExemption(
-              LENDING_MARKET_SIZE + 8,
-            ),
-          programId: id,
-        }),
-        await klendBankrunProgram.methods
-          .initLendingMarket(quoteCurrency)
-          .accounts({
-            lendingMarketOwner: groupAdmin.wallet.publicKey,
-            lendingMarket: marketKeypair.publicKey,
-            lendingMarketAuthority,
-            systemProgram: SystemProgram.programId,
-            rent: SYSVAR_RENT_PUBKEY,
-          })
-          .instruction(),
-      );
-
-      await processBankrunTransaction(bankrunContext, createMarketTx, [
-        groupAdmin.wallet,
-        marketKeypair,
-      ]);
 
       // Create Kamino reserve
       const reserveKeypair = Keypair.generate();
@@ -153,7 +102,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
 
       await createReserve(
         reserveKeypair,
-        marketKeypair.publicKey,
+        market,
         mint,
         "TOKEN_A",
         ecosystem.tokenADecimals,
@@ -169,7 +118,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
         await simpleRefreshReserve(
           klendBankrunProgram,
           reserveKeypair.publicKey,
-          marketKeypair.publicKey,
+          market,
           oracles.tokenAOracle.publicKey,
         ),
       );
@@ -196,7 +145,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
             feePayer: groupAdmin.wallet.publicKey,
             bankMint: mint,
             kaminoReserve: reserveKeypair.publicKey,
-            kaminoMarket: marketKeypair.publicKey,
+            kaminoMarket: market,
             oracle: oracles.tokenAOracle.publicKey,
           },
           {
@@ -219,7 +168,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
             feePayer: groupAdmin.wallet.publicKey,
             bank: bankKey,
             signerTokenAccount: groupAdmin.tokenAAccount,
-            lendingMarket: marketKeypair.publicKey,
+            lendingMarket: market,
             reserve: reserveKeypair.publicKey,
           },
           new BN(100),
@@ -231,7 +180,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
       ]);
 
       kaminoBanks.push(bankKey);
-      kaminoMarkets.push(marketKeypair.publicKey);
+      kaminoMarkets.push(market);
       kaminoReserves.push(reserveKeypair.publicKey);
     }
 

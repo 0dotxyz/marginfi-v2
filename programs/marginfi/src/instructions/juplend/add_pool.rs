@@ -22,7 +22,7 @@ use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 
 /// Add a JupLend bank to the marginfi lending pool.
 ///
-/// Bank starts `Paused` because once the fToken vault exists, the bank can be interacted
+/// Bank starts `Uninitialized` because once the fToken vault exists, the bank can be interacted
 /// with even without a seed deposit. Call `juplend_init_position` to activate.
 ///
 /// Remaining accounts: 0. oracle feed, 1. JupLend `Lending` state

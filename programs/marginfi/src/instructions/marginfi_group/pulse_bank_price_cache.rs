@@ -6,7 +6,7 @@ use marginfi_type_crate::types::{Bank, MarginfiGroup};
 
 /// (permissionless) Refresh the cached oracle price for a bank.
 pub fn lending_pool_pulse_bank_price_cache<'info>(
-    ctx: Context<'_, '_, 'info, 'info, LendingPoolPulseBankPriceCache<'info>>,
+    ctx: Context<'info, LendingPoolPulseBankPriceCache<'info>>,
 ) -> MarginfiResult {
     let clock = Clock::get()?;
 

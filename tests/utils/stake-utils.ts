@@ -8,7 +8,7 @@ import {
   SYSVAR_CLOCK_PUBKEY,
 } from "@solana/web3.js";
 import { MockUser } from "./mocks";
-import { BanksClient } from "solana-bankrun";
+import { BanksClient } from "./litesvm";
 import { BN } from "@coral-xyz/anchor";
 
 /**

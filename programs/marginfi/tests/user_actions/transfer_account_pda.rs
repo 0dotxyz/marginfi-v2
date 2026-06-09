@@ -3,9 +3,9 @@ use fixtures::test::TestFixture;
 use marginfi_type_crate::types::{MarginfiAccount, ACCOUNT_DISABLED};
 use solana_program_test::tokio;
 use solana_sdk::{
-    instruction::Instruction, signature::Keypair, signer::Signer, system_program, sysvar,
-    transaction::Transaction,
+    instruction::Instruction, signature::Keypair, signer::Signer, transaction::Transaction,
 };
+use solana_system_interface::program as system_program;
 
 #[tokio::test]
 async fn transfer_to_new_account_pda_success() -> anyhow::Result<()> {
@@ -72,7 +72,7 @@ async fn transfer_to_new_account_pda_success() -> anyhow::Result<()> {
         fee_payer: old_authority,
         new_authority,
         global_fee_wallet: test_f.marginfi_group.fee_wallet,
-        instructions_sysvar: sysvar::instructions::id(),
+        instructions_sysvar: solana_instructions_sysvar::id(),
         system_program: system_program::id(),
     };
 
@@ -184,7 +184,7 @@ async fn transfer_to_new_account_pda_with_third_party_id() -> anyhow::Result<()>
         fee_payer: old_authority,
         new_authority,
         global_fee_wallet: test_f.marginfi_group.fee_wallet,
-        instructions_sysvar: sysvar::instructions::id(),
+        instructions_sysvar: solana_instructions_sysvar::id(),
         system_program: system_program::id(),
     };
 
@@ -289,7 +289,7 @@ async fn transfer_double_migration_fails() -> anyhow::Result<()> {
         fee_payer: old_authority,
         new_authority: new_authority1,
         global_fee_wallet: test_f.marginfi_group.fee_wallet,
-        instructions_sysvar: sysvar::instructions::id(),
+        instructions_sysvar: solana_instructions_sysvar::id(),
         system_program: system_program::id(),
     };
 
@@ -337,7 +337,7 @@ async fn transfer_double_migration_fails() -> anyhow::Result<()> {
         fee_payer: old_authority,
         new_authority: new_authority2,
         global_fee_wallet: test_f.marginfi_group.fee_wallet,
-        instructions_sysvar: sysvar::instructions::id(),
+        instructions_sysvar: solana_instructions_sysvar::id(),
         system_program: system_program::id(),
     };
 

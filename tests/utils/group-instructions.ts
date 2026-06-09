@@ -906,10 +906,7 @@ export const panicUnpausePermissionless = async (
 };
 
 type InitBankMetadataArgs = {
-  group: PublicKey;
-  bankMint: PublicKey;
   bank: PublicKey;
-  bankSeed: BN;
 };
 
 export const initBankMetadata = (
@@ -917,12 +914,9 @@ export const initBankMetadata = (
   args: InitBankMetadataArgs,
 ) => {
   const ix = program.methods
-    .initBankMetadata(args.bankSeed)
+    .initBankMetadata()
     .accounts({
-      group: args.group,
-      bankMint: args.bankMint,
-      // metadata: args.metadata, // derived from bank
-      // bank: args.bank, // derived from seeds
+      // metadata derived from bank
     })
     .accountsPartial({ bank: args.bank })
     .instruction();
@@ -958,10 +952,6 @@ export const setFixedPrice = (
 };
 
 type WriteBankMetadataArgs = {
-  group: PublicKey;
-  bankMint: PublicKey;
-  bank: PublicKey;
-  bankSeed: BN;
   metadata: PublicKey;
   /// Pass undefined to skip. Limit 64 bytes
   ticker?: string;
@@ -1001,6 +991,58 @@ export const writeBankMetadata = (
 
   const ix = program.methods
     .writeBankMetadata(
+      tickerBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
+      descBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
+    )
+    .accounts({
+      // group: implied
+      // bank: implied from metadata
+      // metadataAdmin: args.metadataAdmin, // implied from metadata
+      metadata: args.metadata,
+    })
+    .instruction();
+
+  return ix;
+};
+
+type WriteBankMetadataPreInitArgs = {
+  group: PublicKey;
+  bankMint: PublicKey;
+  bankSeed: BN;
+  metadata: PublicKey;
+  /// Pass undefined to skip. Limit 64 bytes
+  ticker?: string;
+  /// Pass undefined to skip. Limit 128 bytes
+  description?: string;
+};
+
+export const writeBankMetadataPreInit = (
+  program: Program<Marginfi>,
+  args: WriteBankMetadataPreInitArgs,
+) => {
+  const TICKER_CAP = 64;
+  const DESC_CAP = 128;
+
+  const tickerBuf =
+    args.ticker !== undefined ? Buffer.from(args.ticker, "utf8") : null;
+  if (tickerBuf && tickerBuf.length > TICKER_CAP) {
+    throw new Error(
+      `Ticker is ${tickerBuf.length} bytes, exceeds ${TICKER_CAP} byte cap`,
+    );
+  }
+
+  const descBuf =
+    args.description !== undefined
+      ? Buffer.from(args.description, "utf8")
+      : null;
+  if (descBuf && descBuf.length > DESC_CAP) {
+    throw new Error(
+      `Description is ${descBuf.length} bytes, exceeds ${DESC_CAP} byte cap`,
+    );
+  }
+
+  const ix = program.methods
+    .writeBankMetadataPreInit(
       args.bankSeed,
       tickerBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
       descBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
@@ -1008,8 +1050,7 @@ export const writeBankMetadata = (
     .accounts({
       group: args.group,
       bankMint: args.bankMint,
-      bank: args.bank,
-      // metadataAdmin: args.metadataAdmin, // implied from metadata
+      // bank: derived from seeds
       metadata: args.metadata,
     })
     .instruction();

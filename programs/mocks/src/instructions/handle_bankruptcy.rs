@@ -38,7 +38,7 @@ pub struct HandleBankruptcyViaCpi<'info> {
 
 impl HandleBankruptcyViaCpi<'_> {
     pub fn handle_bankruptcy_via_cpi<'info>(
-        ctx: Context<'_, '_, 'info, 'info, HandleBankruptcyViaCpi<'info>>,
+        ctx: Context<'info, HandleBankruptcyViaCpi<'info>>,
     ) -> Result<()> {
         let mut account_metas = vec![
             AccountMeta::new_readonly(ctx.accounts.group.key(), false),

@@ -1,9 +1,9 @@
-import { WrappedI80F48, bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
+import { WrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { PublicKey } from "@solana/web3.js";
-import BigNumber from "bignumber.js";
 import BN from "bn.js";
 import type { IdlAccounts, Program } from "@coral-xyz/anchor";
 import type { Marginfi } from "../../../target/types/marginfi";
+import { fromI80Scaled } from "../tools";
 import type { Liquidity } from "./idl-types/liquidity";
 import type { Lending } from "./idl-types/juplend-earn";
 import type { LendingRewardRateModel } from "./idl-types/lending-reward-rate-model";
@@ -119,6 +119,12 @@ export interface JuplendConfigCompact {
   oracleMaxConfidence: number;
 }
 
+const I80F48_SCALE = 1n << 48n;
+
+// Match Rust `I80F48!(0.8)` and `I80F48!(0.9)` conversion behavior exactly (trunc toward zero).
+const JUPLEND_ASSET_WEIGHT_INIT = fromI80Scaled((I80F48_SCALE * 4n) / 5n);
+const JUPLEND_ASSET_WEIGHT_MAINT = fromI80Scaled((I80F48_SCALE * 9n) / 10n);
+
 /**
  * Default JupLend bank config used in tests.
  *
@@ -134,8 +140,8 @@ export const defaultJuplendBankConfig = (
 ): JuplendConfigCompact => {
   return {
     oracle,
-    assetWeightInit: bigNumberToWrappedI80F48(new BigNumber(0.8)),
-    assetWeightMaint: bigNumberToWrappedI80F48(new BigNumber(0.9)),
+    assetWeightInit: JUPLEND_ASSET_WEIGHT_INIT,
+    assetWeightMaint: JUPLEND_ASSET_WEIGHT_MAINT,
     depositLimit: new BN(1_000_000).mul(new BN(10).pow(new BN(decimals))),
     oracleSetup: { juplendPythPull: {} },
     riskTier: { collateral: {} },

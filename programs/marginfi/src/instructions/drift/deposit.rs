@@ -42,10 +42,7 @@ use marginfi_type_crate::{
 /// 3. Deposits the tokens into Drift through a CPI call
 /// 4. Verifies the spot position was updated correctly
 /// 5. Updates the marginfi account's balance to reflect the deposit
-pub fn drift_deposit<'info>(
-    ctx: Context<'_, '_, 'info, 'info, DriftDeposit<'info>>,
-    amount: u64,
-) -> MarginfiResult {
+pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult {
     let authority_bump: u8;
     let market_index: u16;
     {
@@ -100,7 +97,7 @@ pub fn drift_deposit<'info>(
         )?;
 
         let scaled_balance_change_i80f48 = I80F48::from_num(scaled_balance_change);
-        bank_account.deposit_no_repay(scaled_balance_change_i80f48)?;
+        let share_amount = bank_account.deposit_no_repay(scaled_balance_change_i80f48)?;
 
         record_deposit_inflow(
             &mut bank,
@@ -128,6 +125,7 @@ pub fn drift_deposit<'info>(
             bank: ctx.accounts.bank.key(),
             mint: bank.mint,
             amount,
+            share_amount: share_amount.into(),
         });
     }
 
@@ -256,7 +254,7 @@ impl<'info> DriftDeposit<'info> {
             spot_market_vault: self.drift_spot_market_vault.to_account_info(),
         };
         let program = self.drift_program.to_account_info();
-        let cpi_ctx = CpiContext::new(program, accounts);
+        let cpi_ctx = CpiContext::new(program.key(), accounts);
         update_spot_market_cumulative_interest(cpi_ctx)?;
         Ok(())
     }
@@ -269,7 +267,7 @@ impl<'info> DriftDeposit<'info> {
             authority: self.authority.to_account_info(),
             mint: self.mint.to_account_info(),
         };
-        let cpi_ctx = CpiContext::new(program, accounts);
+        let cpi_ctx = CpiContext::new(program.key(), accounts);
         let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())
@@ -294,7 +292,7 @@ impl<'info> DriftDeposit<'info> {
         let program = self.drift_program.to_account_info();
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
-        let mut cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let mut cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
 
         // Construct remaining accounts in the required order for Drift:
         // 1. Oracle accounts (if provided)

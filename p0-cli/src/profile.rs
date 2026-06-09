@@ -4,8 +4,8 @@ use {
     anyhow::{anyhow, bail, Context, Result},
     dirs::home_dir,
     serde::{Deserialize, Serialize},
+    solana_commitment_config::{CommitmentConfig, CommitmentLevel},
     solana_sdk::{
-        commitment_config::{CommitmentConfig, CommitmentLevel},
         pubkey,
         pubkey::Pubkey,
         signature::{read_keypair_file, Keypair},

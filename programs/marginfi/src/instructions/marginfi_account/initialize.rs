@@ -1,11 +1,11 @@
 use crate::constants::is_allowed_cpi_for_third_party_id;
 use crate::state::marginfi_account::MarginfiAccountImpl;
+use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::{
     events::{AccountEventHeader, MarginfiAccountCreateEvent},
     prelude::*,
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::sysvar;
 use marginfi_type_crate::{
     constants::MARGINFI_ACCOUNT_SEED,
     types::{MarginfiAccount, MarginfiGroup},
@@ -41,6 +41,9 @@ pub fn initialize_account(ctx: Context<MarginfiAccountInitialize>) -> MarginfiRe
 
 #[derive(Accounts)]
 pub struct MarginfiAccountInitialize<'info> {
+    #[account(
+        constraint = !marginfi_group.load()?.is_protocol_paused() @ MarginfiError::ProtocolPaused
+    )]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
     #[account(
@@ -102,6 +105,9 @@ pub fn initialize_account_pda(
 #[derive(Accounts)]
 #[instruction(account_index: u16, third_party_id: Option<u16>)]
 pub struct MarginfiAccountInitializePda<'info> {
+    #[account(
+        constraint = !marginfi_group.load()?.is_protocol_paused() @ MarginfiError::ProtocolPaused
+    )]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
     #[account(
@@ -127,7 +133,7 @@ pub struct MarginfiAccountInitializePda<'info> {
     /// Instructions sysvar for CPI validation
     ///
     /// CHECK: Standard sysvar account
-    #[account(address = sysvar::instructions::id())]
+    #[account(address = solana_instructions_sysvar::id())]
     pub instructions_sysvar: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,

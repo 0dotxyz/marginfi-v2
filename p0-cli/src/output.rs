@@ -275,12 +275,12 @@ pub fn print_banks_table(banks: &[(Pubkey, Bank)], json: bool) {
         };
 
         table.add_row(vec![
-            Cell::new(&addr_short),
-            Cell::new(&bank.mint.to_string()),
-            Cell::new(&format!("{:.2}", total_deposits)),
-            Cell::new(&format!("{:.2}", total_liabilities)),
-            Cell::new(&format!("{:?}", bank.config.operational_state)),
-            Cell::new(&format!("{:?}", bank.config.risk_tier)),
+            Cell::new(addr_short),
+            Cell::new(bank.mint.to_string()),
+            Cell::new(format!("{:.2}", total_deposits)),
+            Cell::new(format!("{:.2}", total_liabilities)),
+            Cell::new(format!("{:?}", bank.config.operational_state)),
+            Cell::new(format!("{:?}", bank.config.risk_tier)),
         ]);
     }
 

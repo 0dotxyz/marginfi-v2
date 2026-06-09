@@ -6,7 +6,7 @@ import {
   SystemProgram,
 } from "@solana/web3.js";
 import { assert } from "chai";
-import { Clock } from "solana-bankrun";
+import { Clock } from "./utils/litesvm";
 import {
   banksClient,
   bankrunContext,
@@ -28,7 +28,7 @@ import {
   groupAdmin,
 } from "./rootHooks";
 import { MockUser, USER_ACCOUNT_K } from "./utils/mocks";
-import { processBankrunTransaction } from "./utils/tools";
+import { processBankrunTransaction, toBnFromI80 } from "./utils/tools";
 import { getTokenBalance, assertBankrunTxFailed } from "./utils/genericTests";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import {
@@ -116,8 +116,8 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
           );
 
         const collateralSharesBefore = balanceBeforeDeposit
-          ? wrappedI80F48toBigNumber(balanceBeforeDeposit.assetShares)
-          : new (require("@mrgnlabs/mrgn-common").BigNumber)(0);
+          ? toBnFromI80(balanceBeforeDeposit.assetShares)
+          : new BN(0);
 
         // Refresh reserves and obligation first (follow k06 pattern)
         const refreshTx = new Transaction().add(
@@ -177,13 +177,9 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
           )!;
 
         // Get collateral amount from marginfi balance difference (since user had existing deposits)
-        const collateralSharesAfterDeposit = wrappedI80F48toBigNumber(
+        const collateralAmount = toBnFromI80(
           balanceAfterDeposit.assetShares,
-        );
-        const collateralDifference = collateralSharesAfterDeposit.minus(
-          collateralSharesBefore,
-        );
-        const collateralAmount = new BN(collateralDifference.toString());
+        ).sub(collateralSharesBefore);
 
         // Verify deposit
         assert.ok(
@@ -287,8 +283,8 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
           );
 
         const collateralSharesBefore = balanceBeforeDeposit
-          ? wrappedI80F48toBigNumber(balanceBeforeDeposit.assetShares)
-          : new (require("@mrgnlabs/mrgn-common").BigNumber)(0);
+          ? toBnFromI80(balanceBeforeDeposit.assetShares)
+          : new BN(0);
 
         // Refresh reserve before deposit
         const refreshTx = new Transaction().add(
@@ -353,13 +349,9 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
           )!;
 
         // Get collateral amount from marginfi balance difference (since user had existing deposits)
-        const collateralSharesAfterDeposit = wrappedI80F48toBigNumber(
+        const collateralAmount = toBnFromI80(
           balanceAfterDeposit.assetShares,
-        );
-        const collateralDifference = collateralSharesAfterDeposit.minus(
-          collateralSharesBefore,
-        );
-        const collateralAmount = new BN(collateralDifference.toString());
+        ).sub(collateralSharesBefore);
 
         // Verify deposit
         assert.ok(
@@ -412,8 +404,8 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
           );
 
         const collateralSharesBefore = balanceBeforeDeposit
-          ? wrappedI80F48toBigNumber(balanceBeforeDeposit.assetShares)
-          : new (require("@mrgnlabs/mrgn-common").BigNumber)(0);
+          ? toBnFromI80(balanceBeforeDeposit.assetShares)
+          : new BN(0);
 
         // Refresh reserve
         const refreshTx = new Transaction().add(
@@ -467,13 +459,9 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
             (b) => b.active === 1 && b.bankPk.equals(usdcBank),
           )!;
 
-        const collateralSharesAfterDeposit = wrappedI80F48toBigNumber(
+        const collateralAmount = toBnFromI80(
           balanceAfterDeposit.assetShares,
-        );
-        const collateralDifference = collateralSharesAfterDeposit.minus(
-          collateralSharesBefore,
-        );
-        const collateralAmount = new BN(collateralDifference.toString());
+        ).sub(collateralSharesBefore);
 
         // Verify deposit
         const userBalanceAfterDeposit = await getTokenBalance(
@@ -528,8 +516,8 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
           );
 
         const collateralSharesBefore = balanceBeforeDeposit
-          ? wrappedI80F48toBigNumber(balanceBeforeDeposit.assetShares)
-          : new (require("@mrgnlabs/mrgn-common").BigNumber)(0);
+          ? toBnFromI80(balanceBeforeDeposit.assetShares)
+          : new BN(0);
 
         // Refresh reserve before deposit
         const refreshTx = new Transaction().add(
@@ -587,13 +575,9 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
             (b) => b.active === 1 && b.bankPk.equals(tokenABank),
           )!;
 
-        const collateralSharesAfterDeposit = wrappedI80F48toBigNumber(
+        const collateralAmount = toBnFromI80(
           balanceAfterDeposit.assetShares,
-        );
-        const collateralDifference = collateralSharesAfterDeposit.minus(
-          collateralSharesBefore,
-        );
-        const collateralAmount = new BN(collateralDifference.toString());
+        ).sub(collateralSharesBefore);
 
         // Verify deposit
         const userBalanceAfterDeposit = await getTokenBalance(
@@ -748,10 +732,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
         return; // Skip if no position
       }
 
-      const assetSharesBefore = wrappedI80F48toBigNumber(
-        balanceBefore.assetShares,
-      );
-      const halfAmount = new BN(assetSharesBefore.toString()).div(new BN(2));
+      const halfAmount = toBnFromI80(balanceBefore.assetShares).div(new BN(2));
 
       // Advance time again to make reserve even more stale
       const currentClock = await banksClient.getClock();
@@ -878,9 +859,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
       const balanceBefore = marginfiAccountBefore.lendingAccount.balances.find(
         (b) => b.active === 1 && b.bankPk.equals(usdcBank),
       )!;
-      const collateralTokensBefore = new BN(
-        wrappedI80F48toBigNumber(balanceBefore.assetShares).toString(),
-      );
+      const collateralTokensBefore = toBnFromI80(balanceBefore.assetShares);
 
       // Advance time by 1 day (86400 seconds)
       const currentClock = await banksClient.getClock();
@@ -1010,9 +989,7 @@ describe("k14: Kamino - Marginfi Deposits & Withdrawals", () => {
         if (shouldWithdraw) {
           // Withdraw - helper will handle refresh internally
           const withdrawAll = Math.random() < 0.5;
-          const cTokenAmount = new BN(
-            wrappedI80F48toBigNumber(existingBalance!.assetShares).toString(),
-          );
+          const cTokenAmount = toBnFromI80(existingBalance!.assetShares);
           const withdrawAmount = withdrawAll
             ? cTokenAmount
             : cTokenAmount

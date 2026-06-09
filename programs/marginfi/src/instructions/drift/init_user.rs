@@ -165,7 +165,7 @@ impl<'info> DriftInitUser<'info> {
         let program = self.drift_program.to_account_info();
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         initialize_user_stats(cpi_ctx)?;
         Ok(())
     }
@@ -183,7 +183,7 @@ impl<'info> DriftInitUser<'info> {
         let program = self.drift_program.to_account_info();
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         // Initialize with sub_account_id = 0 and empty name
         let name: [u8; 32] = [0; 32];
         initialize_user(cpi_ctx, 0, name)?;
@@ -198,7 +198,7 @@ impl<'info> DriftInitUser<'info> {
             authority: self.fee_payer.to_account_info(),
             mint: self.mint.to_account_info(),
         };
-        let cpi_ctx = CpiContext::new(program, accounts);
+        let cpi_ctx = CpiContext::new(program.key(), accounts);
         let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())
@@ -222,7 +222,7 @@ impl<'info> DriftInitUser<'info> {
         let program = self.drift_program.to_account_info();
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
-        let mut cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let mut cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
 
         // Construct remaining accounts in the required order for Drift:
         // 1. Oracle accounts (if provided)
@@ -256,7 +256,7 @@ impl<'info> DriftInitUser<'info> {
         let program = self.drift_program.to_account_info();
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         // Update pool ID for sub_account_id = 0
         update_user_pool_id(cpi_ctx, 0, pool_id)?;
         Ok(())

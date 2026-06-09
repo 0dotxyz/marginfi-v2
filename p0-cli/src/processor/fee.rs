@@ -67,7 +67,7 @@ pub fn propagate_fee(config: Config, marginfi_group: Pubkey) -> Result<()> {
             marginfi_group,
         })
         .args(marginfi::instruction::PropagateFeeState {})
-        .instructions()?;
+        .instructions();
 
     let signing_keypairs = config.get_signers(false);
     let sig = send_tx(&config, propagate_fee_ixs, &signing_keypairs)?;

@@ -3,9 +3,9 @@ use fixtures::test::TestFixture;
 use marginfi_type_crate::types::MarginfiAccount;
 use solana_program_test::tokio;
 use solana_sdk::{
-    instruction::Instruction, signature::Keypair, signer::Signer, system_program, sysvar,
-    transaction::Transaction,
+    instruction::Instruction, signature::Keypair, signer::Signer, transaction::Transaction,
 };
+use solana_system_interface::program as system_program;
 
 #[tokio::test]
 async fn marginfi_account_create_pda_success() -> anyhow::Result<()> {
@@ -29,7 +29,7 @@ async fn marginfi_account_create_pda_success() -> anyhow::Result<()> {
         marginfi_account: marginfi_account_pda,
         authority,
         fee_payer: authority,
-        instructions_sysvar: sysvar::instructions::id(),
+        instructions_sysvar: solana_instructions_sysvar::id(),
         system_program: system_program::id(),
     };
 
@@ -98,7 +98,7 @@ async fn marginfi_account_create_pda_with_third_party_id_success() -> anyhow::Re
         marginfi_account: marginfi_account_pda,
         authority: authority,
         fee_payer: authority,
-        instructions_sysvar: sysvar::instructions::id(),
+        instructions_sysvar: solana_instructions_sysvar::id(),
         system_program: system_program::id(),
     };
 
@@ -160,7 +160,7 @@ async fn marginfi_account_create_pda_multiple_accounts_same_authority() -> anyho
             marginfi_account: marginfi_account_pda,
             authority: authority,
             fee_payer: authority,
-            instructions_sysvar: sysvar::instructions::id(),
+            instructions_sysvar: solana_instructions_sysvar::id(),
             system_program: system_program::id(),
         };
 
@@ -242,7 +242,7 @@ async fn marginfi_account_create_pda_different_authorities() -> anyhow::Result<(
         marginfi_account: marginfi_account_pda1,
         authority: authority1,
         fee_payer: authority1,
-        instructions_sysvar: sysvar::instructions::id(),
+        instructions_sysvar: solana_instructions_sysvar::id(),
         system_program: system_program::id(),
     };
 
@@ -279,7 +279,7 @@ async fn marginfi_account_create_pda_different_authorities() -> anyhow::Result<(
         marginfi_account: marginfi_account_pda2,
         authority: authority2,
         fee_payer: test_f.payer(),
-        instructions_sysvar: sysvar::instructions::id(),
+        instructions_sysvar: solana_instructions_sysvar::id(),
         system_program: system_program::id(),
     };
 
@@ -335,7 +335,7 @@ async fn marginfi_account_create_pda_duplicate_fails() -> anyhow::Result<()> {
         marginfi_account: marginfi_account_pda,
         authority: authority,
         fee_payer: authority,
-        instructions_sysvar: sysvar::instructions::id(),
+        instructions_sysvar: solana_instructions_sysvar::id(),
         system_program: system_program::id(),
     };
 

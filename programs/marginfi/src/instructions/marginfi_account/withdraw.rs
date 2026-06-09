@@ -20,7 +20,7 @@ use crate::{
     },
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{clock::Clock, sysvar::Sysvar};
+use anchor_lang::solana_program::clock::Clock;
 use anchor_spl::{
     token::accessor,
     token_interface::{TokenAccount, TokenInterface},
@@ -43,7 +43,7 @@ use marginfi_type_crate::{
 ///
 /// Will error if there is no existing asset <=> borrowing is not allowed.
 pub fn lending_account_withdraw<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, LendingAccountWithdraw<'info>>,
+    mut ctx: Context<'info, LendingAccountWithdraw<'info>>,
     amount: u64,
     withdraw_all: Option<bool>,
 ) -> MarginfiResult {
@@ -109,7 +109,7 @@ pub fn lending_account_withdraw<'info>(
         let mut bank_account =
             BankAccountWrapper::find(&bank_loader.key(), &mut bank, lending_account)?;
 
-        let amount_pre_fee = if withdraw_all {
+        let (amount_pre_fee, share_amount) = if withdraw_all {
             // Note: In liquidation, we still want this passed on the books
             bank_account.withdraw_all(in_receivership)?
         } else {
@@ -125,9 +125,9 @@ pub fn lending_account_withdraw<'info>(
                 .transpose()?
                 .unwrap_or(amount);
 
-            bank_account.withdraw(I80F48::from_num(amount_pre_fee))?;
+            let share_amount = bank_account.withdraw(I80F48::from_num(amount_pre_fee))?;
 
-            amount_pre_fee
+            (amount_pre_fee, share_amount)
         };
 
         // If in deleverage mode and deleverage is complete, you get what's left!
@@ -201,6 +201,7 @@ pub fn lending_account_withdraw<'info>(
             bank: bank_loader.key(),
             mint: bank.mint,
             amount: amount_pre_fee,
+            share_amount: share_amount.into(),
             close_balance: withdraw_all,
         });
     }
@@ -309,7 +310,7 @@ pub struct LendingAccountWithdraw<'info> {
         ],
         bump = bank.load()?.liquidity_vault_authority_bump,
     )]
-    pub bank_liquidity_vault_authority: AccountInfo<'info>,
+    pub bank_liquidity_vault_authority: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
