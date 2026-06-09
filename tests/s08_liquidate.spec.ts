@@ -22,6 +22,7 @@ import {
   verbose,
 } from "./rootHooks";
 import {
+  assertBNApproximately,
   assertI80F48Equal,
   getTokenBalance,
 } from "./utils/genericTests";
@@ -442,13 +443,18 @@ describe("Liquidate user (including staked assets)", () => {
       );
     }
 
-    // Note: this doesn't work if we've warped the banks clock
-    // let now = Math.floor(Date.now() / 1000);
-    // assertBNApproximately(liquidatorBalancesAfter[0].lastUpdate, now, 30);
-    // assertBNApproximately(liquidatorBalancesAfter[1].lastUpdate, now, 30);
-    // assertBNApproximately(liquidateeBalancesAfter[0].lastUpdate, now, 30);
-    // assertBNApproximately(liquidateeBalancesAfter[1].lastUpdate, now, 30);
+    // Liquidation stamps both accounts' top-level `last_update`. Compare against the SVM clock, not
+    // Date.now(), since the staking tests warp the bank clock far ahead of wall time.
+    const nowOnChain = Number((await banksClient.getClock()).unixTimestamp);
+    assertBNApproximately(
+      liquidatorMarginfiAccountAfter.lastUpdate,
+      nowOnChain,
+      30
+    );
+    assertBNApproximately(
+      liquidateeMarginfiAccountAfter.lastUpdate,
+      nowOnChain,
+      30
+    );
   });
 });
-
-// TODO: 0,1 - should fail
