@@ -426,6 +426,8 @@ export const startLiquidationIx = (
 export type EndLiquidationArgs = {
   marginfiAccount: PublicKey;
   remaining: PublicKey[] | AccountMeta[];
+  /** Optional separate payer (must sign) for the flat fee; omitted => the receiver pays. */
+  feePayer?: PublicKey;
 };
 
 export const endLiquidationIx = (
@@ -438,10 +440,10 @@ export const endLiquidationIx = (
     .accounts({
       marginfiAccount: args.marginfiAccount,
       // liquidationRecord: // implied from account
-      // liquidationRecord: // implied from record
       // feeState: // static pda
       // globalFeeWallet: // implied from feeState
       // systemProgram: // hard coded key
+      feePayer: args.feePayer ?? null, // null => optional account omitted (receiver pays)
     })
     .remainingAccounts(oracleMeta)
     .instruction();

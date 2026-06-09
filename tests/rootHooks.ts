@@ -219,7 +219,6 @@ export const KAMINO_USDC_BANK = "kamino_usdc_bank";
 /** mrgn Token A bank trading on `TOKEN_A_RESERVE` (the reserve for ecosystem.tokenAMint) */
 export const KAMINO_TOKEN_A_BANK = "kamino_tokenA_bank";
 
-// TODO: This should really be an object with defined fields not a dict
 export let driftAccounts: Map<string, PublicKey>;
 /** Drift USDC Spot Market */
 export const DRIFT_USDC_SPOT_MARKET = "drift_usdc_spot_market";
