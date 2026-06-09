@@ -7,7 +7,7 @@ inputs:
 runs:
   using: "composite"
   steps:
-    # - uses: actions/cache@v2
+    # - uses: actions/cache@v4
     #   name: Cache Cargo registry + index
     #   id: cache-cargo-registry
     #   with:
@@ -19,7 +19,7 @@ runs:
     #     key: cargo-${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
 
     # - name: Cache Anchor Build
-    #   uses: actions/cache@v2
+    #   uses: actions/cache@v4
     #   id: cache-anchor-build
     #   with:
     #     path: |
