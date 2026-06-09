@@ -74,7 +74,7 @@ let throwawayGroup: Keypair;
 ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
   const groupBuff = Buffer.from(
     oracleMode === "switchboard"
-      ? "MARGINFI_. GROUP_SEED_123400000K1S"
+      ? "MARGINFI_GROUP_SEED_123400000K1S"
       : "MARGINFI_GROUP_SEED_123400000K14"
   );
   const USER_ACCOUNT_THROWAWAY = `throwaway_account_k14_${oracleMode}`;
