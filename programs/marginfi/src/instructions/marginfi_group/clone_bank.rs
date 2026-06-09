@@ -187,7 +187,7 @@ pub struct LendingPoolCloneBank<'info> {
         ],
         bump
     )]
-    pub liquidity_vault_authority: AccountInfo<'info>,
+    pub liquidity_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,
@@ -210,7 +210,7 @@ pub struct LendingPoolCloneBank<'info> {
         ],
         bump
     )]
-    pub insurance_vault_authority: AccountInfo<'info>,
+    pub insurance_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,
@@ -233,7 +233,7 @@ pub struct LendingPoolCloneBank<'info> {
         ],
         bump
     )]
-    pub fee_vault_authority: AccountInfo<'info>,
+    pub fee_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,

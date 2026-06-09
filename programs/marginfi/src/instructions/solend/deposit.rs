@@ -40,7 +40,7 @@ use solend_mocks::state::{
 /// 3. Verifies the obligation collateral was increased correctly
 /// 4. Updates the marginfi account's balance to reflect the deposit
 pub fn solend_deposit<'info>(
-    ctx: Context<'_, '_, 'info, 'info, SolendDeposit<'info>>,
+    ctx: Context<'info, SolendDeposit<'info>>,
     amount: u64,
 ) -> MarginfiResult {
     // Forced to validate here as unable to load obligation as ref in constraints
@@ -266,7 +266,7 @@ impl<'info> SolendDeposit<'info> {
             authority: self.authority.to_account_info(),
             mint: self.mint.to_account_info(),
         };
-        let cpi_ctx = CpiContext::new(program, accounts);
+        let cpi_ctx = CpiContext::new(program.key(), accounts);
         let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())
@@ -293,11 +293,8 @@ impl<'info> SolendDeposit<'info> {
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
 
         // Create CPI context with signer
-        let cpi_ctx = CpiContext::new_with_signer(
-            self.solend_program.to_account_info(),
-            accounts,
-            signer_seeds,
-        );
+        let cpi_ctx =
+            CpiContext::new_with_signer(self.solend_program.key(), accounts, signer_seeds);
         deposit_reserve_liquidity_and_obligation_collateral(cpi_ctx, amount)?;
         Ok(())
     }

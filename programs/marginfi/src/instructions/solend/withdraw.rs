@@ -66,7 +66,7 @@ use solend_mocks::state::{
 /// 5. Transfers funds to the user's account
 /// 6. Updates the marginfi account's balance to reflect the withdrawal
 pub fn solend_withdraw<'info>(
-    ctx: Context<'_, '_, 'info, 'info, SolendWithdraw<'info>>,
+    ctx: Context<'info, SolendWithdraw<'info>>,
     amount: u64, // Collateral token amount (cTokens)
     withdraw_all: Option<bool>,
 ) -> MarginfiResult {
@@ -435,11 +435,8 @@ impl<'info> SolendWithdraw<'info> {
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
 
         // Create CPI context with signer
-        let cpi_ctx = CpiContext::new_with_signer(
-            self.solend_program.to_account_info(),
-            accounts,
-            signer_seeds,
-        );
+        let cpi_ctx =
+            CpiContext::new_with_signer(self.solend_program.key(), accounts, signer_seeds);
         withdraw_obligation_collateral_and_redeem_reserve_collateral(cpi_ctx, collateral_amount)?;
         Ok(())
     }
@@ -459,7 +456,7 @@ impl<'info> SolendWithdraw<'info> {
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
 
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())

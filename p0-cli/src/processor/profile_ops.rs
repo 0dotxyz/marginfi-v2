@@ -1,7 +1,8 @@
 use crate::profile::{self, get_cli_config_dir, load_profile, CliConfig, Profile};
 use anchor_client::Cluster;
 use anyhow::{anyhow, Result};
-use solana_sdk::{commitment_config::CommitmentLevel, pubkey::Pubkey};
+use solana_commitment_config::CommitmentLevel;
+use solana_sdk::pubkey::Pubkey;
 use std::fs;
 
 fn load_cli_config_file() -> Result<Option<CliConfig>> {

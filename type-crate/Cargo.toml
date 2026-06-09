@@ -28,3 +28,4 @@ solana-instruction = { workspace = true }
 spl-associated-token-account = { workspace = true }
 
 anchor-lang = { workspace = true, optional = true }
+borsh = { workspace = true, optional = true }

@@ -3,18 +3,25 @@ import { WrappedI80F48, wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import type { RawAccount } from "@solana/spl-token";
 import { AccountLayout } from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
-import { BankrunProvider } from "anchor-bankrun";
+import { BankrunProvider } from "./litesvm";
 import BigNumber from "bignumber.js";
 import BN from "bn.js";
 import { assert } from "chai";
 import {
   BanksTransactionMeta,
   BanksTransactionResultWithMeta,
-} from "solana-bankrun";
+} from "./litesvm";
 import {
   WrappedI68F60 as WrappedU68F60,
   wrappedU68F60toBigNumber,
 } from "./kamino-utils";
+import {
+  integerToBigInt,
+  integerToBigNumber,
+  isWrappedI80F48,
+  numericToBigNumber,
+  toI80Scaled,
+} from "./bn-utils";
 
 /**
  * Shorthand for `assert.equal(a.toString(), b.toString())`
@@ -39,10 +46,7 @@ export const assertKeyDefault = (a: PublicKey) => {
  * @param b - a BN or number
  */
 export const assertBNEqual = (a: BN, b: BN | number) => {
-  if (typeof b === "number") {
-    b = new BN(b);
-  }
-  assert.equal(a.toString(), b.toString());
+  assert.equal(integerToBigInt(a).toString(), integerToBigInt(b).toString());
 };
 
 /**
@@ -54,17 +58,15 @@ export const assertBNEqual = (a: BN, b: BN | number) => {
 export const assertBNGreaterThan = (
   a: BN,
   b: BN | number,
-  message?: string
+  message?: string,
 ) => {
-  if (typeof b === "number") {
-    b = new BN(b);
-  }
-  const aB = BigInt(a.toString());
-  const bB = BigInt(b.toString());
+  const aB = integerToBigInt(a);
+  const bB = integerToBigInt(b);
 
   if (!(aB > bB)) {
     throw new Error(
-      message || `Expected ${aB.toString()} to be greater than ${bB.toString()}`
+      message ||
+        `Expected ${aB.toString()} to be greater than ${bB.toString()}`,
     );
   }
 };
@@ -78,26 +80,9 @@ export const assertBNGreaterThan = (
  */
 export const assertI80F48Equal = (
   a: WrappedI80F48,
-  b: WrappedI80F48 | BN | number
+  b: WrappedI80F48 | BN | number,
 ) => {
-  const bigA = wrappedI80F48toBigNumber(a);
-  let bigB: BigNumber;
-
-  if (typeof b === "number") {
-    bigB = new BigNumber(b);
-  } else if (b instanceof BN) {
-    bigB = new BigNumber(b.toString());
-  } else if (isWrappedI80F48(b)) {
-    bigB = wrappedI80F48toBigNumber(b);
-  } else {
-    throw new Error("Unsupported type for comparison");
-  }
-
-  if (bigA.isNaN() || bigB.isNaN()) {
-    throw new Error("One of the values is NaN");
-  }
-
-  assert.equal(bigA.toString(), bigB.toString());
+  assert.equal(toI80Scaled(a).toString(), toI80Scaled(b).toString());
 };
 
 /**
@@ -109,7 +94,7 @@ export const assertI80F48Equal = (
  */
 export const assertI68F60Equal = (
   a: WrappedU68F60 | BN,
-  b: WrappedU68F60 | BN | number
+  b: WrappedU68F60 | BN | number,
 ) => {
   const bigA = wrappedU68F60toBigNumber(a);
   let bigB: BigNumber;
@@ -117,7 +102,7 @@ export const assertI68F60Equal = (
   if (typeof b === "number") {
     bigB = new BigNumber(b);
   } else if (b instanceof BN) {
-    bigB = new BigNumber(b.toString());
+    bigB = integerToBigNumber(b);
   } else if (isWrappedU68F60(b)) {
     bigB = wrappedU68F60toBigNumber(b);
   } else {
@@ -140,15 +125,16 @@ export const assertI68F60Equal = (
 export const assertI80F48Approx = (
   a: WrappedI80F48,
   b: WrappedI80F48 | BN | number,
-  tolerance: number = 0.000001
+  tolerance: number = 0.000001,
 ) => {
+  // NOTE: Be careful changing this to use exact-precision, it can cause a general stallout.
   const bigA = wrappedI80F48toBigNumber(a);
   let bigB: BigNumber;
 
   if (typeof b === "number") {
     bigB = new BigNumber(b);
   } else if (b instanceof BN) {
-    bigB = new BigNumber(b.toString());
+    bigB = integerToBigNumber(b);
   } else if (isWrappedI80F48(b)) {
     bigB = wrappedI80F48toBigNumber(b);
   } else {
@@ -165,7 +151,7 @@ export const assertI80F48Approx = (
   if (diff.isGreaterThan(allowedDifference)) {
     throw new Error(
       `Values are not approximately equal. A: ${bigA.toString()} B: ${bigB.toString()} 
-      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`
+      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`,
     );
   }
 };
@@ -179,7 +165,7 @@ export const assertI80F48Approx = (
 export const assertU68F60Approx = (
   a: WrappedU68F60 | BN,
   b: WrappedU68F60 | BN | number,
-  tolerance: number = 0.000001
+  tolerance: number = 0.000001,
 ) => {
   const bigA = wrappedU68F60toBigNumber(a);
   let bigB: BigNumber;
@@ -187,7 +173,7 @@ export const assertU68F60Approx = (
   if (typeof b === "number") {
     bigB = new BigNumber(b);
   } else if (b instanceof BN) {
-    bigB = new BigNumber(b.toString());
+    bigB = integerToBigNumber(b);
   } else if (isWrappedU68F60(b)) {
     bigB = wrappedU68F60toBigNumber(b);
   } else {
@@ -204,19 +190,10 @@ export const assertU68F60Approx = (
   if (diff.isGreaterThan(allowedDifference)) {
     throw new Error(
       `Values are not approximately equal. A: ${bigA.toString()} B: ${bigB.toString()} 
-      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`
+      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`,
     );
   }
 };
-
-/**
- * Type guard to check if a value is WrappedI80F48
- * @param value
- * @returns
- */
-function isWrappedI80F48(value: any): value is WrappedI80F48 {
-  return value && typeof value === "object" && Array.isArray(value.value);
-}
 
 /**
  * Type guard to check if a value is WrappedU68F60
@@ -236,17 +213,17 @@ function isWrappedU68F60(value: any): value is WrappedU68F60 {
 export const assertBNApproximately = (
   a: BN,
   b: BN | number,
-  tolerance: BN | number
+  tolerance: BN | number,
 ) => {
-  const aB = BigNumber(a.toString());
-  const bB = BigNumber(b.toString());
-  const toleranceB = BigNumber(tolerance.toString());
+  const aB = numericToBigNumber(a);
+  const bB = numericToBigNumber(b);
+  const toleranceB = numericToBigNumber(tolerance);
   const diff = aB.minus(bB).abs();
 
   if (diff.isGreaterThan(toleranceB)) {
     throw new Error(
       `Values are not approximately equal. A: ${aB.toString()} B: ${bB.toString()} 
-      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`
+      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`,
     );
   }
 };
@@ -259,7 +236,7 @@ export const assertBNApproximately = (
  */
 export const getTokenBalance = async (
   provider: AnchorProvider | BankrunProvider,
-  account: PublicKey
+  account: PublicKey,
 ) => {
   const accountInfo = await provider.connection.getAccountInfo(account);
   if (!accountInfo) {
@@ -283,7 +260,7 @@ export const getTokenBalance = async (
  */
 export const waitUntil = async (
   time: number,
-  silenceWarning: boolean = false
+  silenceWarning: boolean = false,
 ) => {
   const now = Date.now() / 1000;
   if (time > now + 500) {
@@ -293,7 +270,7 @@ export const waitUntil = async (
   if (now > time) {
     if (!silenceWarning) {
       console.error(
-        "Tried to wait for a time that's in the past. You probably need to adjust test timings."
+        "Tried to wait for a time that's in the past. You probably need to adjust test timings.",
       );
       console.error("now: " + now + " and tried waiting until: " + time);
     }
@@ -312,7 +289,7 @@ export const waitUntil = async (
  */
 export const assertBankrunTxFailed = (
   result: BanksTransactionResultWithMeta | BanksTransactionMeta,
-  expectedErrorCode: string | number
+  expectedErrorCode: string | number,
 ) => {
   if (!("result" in result)) {
     throw new Error("TX succeeded when it should have failed");
@@ -330,7 +307,7 @@ export const assertBankrunTxFailed = (
   const lastLog = result.meta.logMessages.pop();
   assert(
     lastLog.includes(codeHex),
-    "\nExpected code " + codeHex + " but got: " + lastLog
+    "\nExpected code " + codeHex + " but got: " + lastLog,
   );
 };
 
@@ -361,7 +338,7 @@ export function logContainsError(logs: string[], errorCode: string): boolean {
 export async function expectFailedTxWithError(
   transactionFn: () => Promise<void>,
   errorCode: string,
-  errorNumber: number
+  errorNumber: number,
 ): Promise<void> {
   let failed = false;
   try {
@@ -373,13 +350,13 @@ export async function expectFailedTxWithError(
       assert.equal(
         parsedNumber,
         errorNumber,
-        `Expected error code ${errorNumber} but got ${parsedNumber}`
+        `Expected error code ${errorNumber} but got ${parsedNumber}`,
       );
       return;
     }
     assert.ok(
       logContainsError(err.logs, errorCode),
-      `Expected error code '${errorCode}' was not found in logs. Log dump: ${err.logs}`
+      `Expected error code '${errorCode}' was not found in logs. Log dump: ${err.logs}`,
     );
     failed = true;
   }
@@ -404,7 +381,7 @@ function extractCustomErrorCode(errorMessage) {
  */
 export async function expectFailedTxWithMessage(
   transactionFn: () => Promise<void>,
-  expectedString: string
+  expectedString: string,
 ): Promise<void> {
   let failed = false;
   try {
@@ -417,7 +394,7 @@ export async function expectFailedTxWithMessage(
     const fullString = errString + " " + logsString;
     assert.ok(
       fullString.includes(expectedString),
-      `Expected error code '${expectedString}' was not found in logs. Log dump: ${err} or ${err.logs}`
+      `Expected error code '${expectedString}' was not found in logs. Log dump: ${err} or ${err.logs}`,
     );
 
     failed = true;

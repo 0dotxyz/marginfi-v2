@@ -969,7 +969,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
     const [createLutIx, lookupTable] = AddressLookupTableProgram.createLookupTable({
       authority: groupAdmin.wallet.publicKey,
       payer: groupAdmin.wallet.publicKey,
-      recentSlot: recentSlot - 1,
+      recentSlot,
     });
     await processBankrunTransaction(
       bankrunContext,

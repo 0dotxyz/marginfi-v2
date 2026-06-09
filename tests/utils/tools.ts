@@ -3,8 +3,9 @@ import { inspect } from "util";
 import {
   BanksTransactionMeta,
   BanksTransactionResultWithMeta,
-} from "solana-bankrun";
-import { ProgramTestContext } from "solana-bankrun";
+  Clock,
+} from "./litesvm";
+import { ProgramTestContext } from "./litesvm";
 import BigNumber from "bignumber.js";
 import {
   AddressLookupTableAccount,
@@ -38,8 +39,21 @@ import {
 } from "../rootHooks";
 import { getEpochAndSlot } from "./bankrunConnection";
 import { createMintToInstruction } from "@solana/spl-token";
-import { BankrunProvider } from "anchor-bankrun";
+import { BankrunProvider } from "./litesvm";
 import { Marginfi } from "target/types/marginfi";
+import { bnToBigIntSafe } from "./bn-utils";
+
+export {
+  addNativeAmountToI80,
+  bnToBigIntSafe,
+  divI80,
+  fromI80Scaled,
+  mulI80,
+  nativeToI80Scaled,
+  toBn,
+  toBnFromI80,
+  toI80Scaled,
+} from "./bn-utils";
 
 /**
  * Convert a human-readable amount to native token units based on decimals.
@@ -406,7 +420,7 @@ export const createLut = async (
     {
       authority: signer.publicKey,
       payer: signer.publicKey,
-      recentSlot: Math.max(0, recentSlot - 1),
+      recentSlot,
     },
   );
 
@@ -626,17 +640,6 @@ export async function getBankrunTime(ctx: ProgramTestContext): Promise<number> {
   return Number(clock.unixTimestamp);
 }
 
-/** Shorthand to convert an I80F48 to BN (rounding off decimals) */
-export const toBnFromI80 = (value: any): BN =>
-  new BN(wrappedI80F48toBigNumber(value).toFixed(0));
-
-/** Shorthand to cast BN/number/bigint as BN */
-export const toBn = (value: BN | number | bigint) => {
-  if (typeof value === "bigint") return new BN(value.toString());
-  if (typeof value === "number") return new BN(value);
-  return value;
-};
-
 /**
  * Returns the user's active asset shares for a given bank as raw BigNumber precision.
  * Returns zero when no active balance exists for that bank.
@@ -666,7 +669,7 @@ export const mintToTokenAccount = async (
     mint,
     destination,
     globalProgramAdmin.wallet.publicKey,
-    BigInt(amount.toString()),
+    bnToBigIntSafe(amount),
     [],
     TOKEN_PROGRAM_ID,
   );
@@ -760,7 +763,6 @@ export async function advanceBankrunClock(
   ctx: ProgramTestContext,
   seconds: number,
 ): Promise<number> {
-  const { Clock } = await import("solana-bankrun");
   const clock = await ctx.banksClient.getClock();
   const newClock = new Clock(
     clock.slot + BigInt(1),

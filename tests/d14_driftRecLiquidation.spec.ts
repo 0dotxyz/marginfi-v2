@@ -56,7 +56,7 @@ import { blankBankConfigOptRaw } from "./utils/types";
 import { configureBank } from "./utils/group-instructions";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { assertBankrunTxFailed } from "./utils/genericTests";
-import { Clock } from "solana-bankrun";
+import { Clock } from "./utils/litesvm";
 import { getEpochAndSlot } from "./utils/bankrunConnection";
 
 const USER_ACCOUNT_D15 = "d15_account";

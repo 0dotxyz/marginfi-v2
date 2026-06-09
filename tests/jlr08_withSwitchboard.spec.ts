@@ -35,6 +35,7 @@ import {
 import {
   buildHealthRemainingAccounts,
   bytesToF64,
+  bnToBigIntSafe,
   mintToTokenAccount,
   processBankrunTransaction,
 } from "./utils/tools";
@@ -338,7 +339,8 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
       bankrunProgram.account.bank.fetch(switchboardJupBankPk),
     ]);
     const exchange =
-      Number(lending.tokenExchangePrice.toString()) / EXCHANGE_PRICES_PRECISION;
+      Number(bnToBigIntSafe(lending.tokenExchangePrice)) /
+      EXCHANGE_PRICES_PRECISION;
     const expectedSwitchboardPrice = oracles.wsolPriceSwb * exchange;
     const assetWeight = wrappedI80F48toBigNumber(
       switchboardBank.config.assetWeightInit,
@@ -487,7 +489,7 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
 
     const expectedSwitchboardPrice =
       oracles.wsolPriceSwb *
-      (Number(lending.tokenExchangePrice.toString()) /
+      (Number(bnToBigIntSafe(lending.tokenExchangePrice)) /
         EXCHANGE_PRICES_PRECISION);
     const expectedTokenBPrice = ecosystem.tokenBPrice * confAdjLiability;
 

@@ -22,15 +22,14 @@ import {
 } from "./utils/kamino-utils";
 import { assert } from "chai";
 import { MockUser, USER_ACCOUNT_K } from "./utils/mocks";
-import { processBankrunTransaction } from "./utils/tools";
+import { addNativeAmountToI80, processBankrunTransaction } from "./utils/tools";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { makeKaminoDepositIx } from "./utils/kamino-instructions";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./utils/litesvm";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import {
   assertBNEqual,
   assertI68F60Equal,
-  assertI80F48Approx,
   assertI80F48Equal,
   assertKeysEqual,
   getTokenBalance,
@@ -112,6 +111,10 @@ describe("k06: Kamino Deposit Tests", () => {
     const balanceMaybe = userAccBefore.lendingAccount.balances.find(
       (b) => b.bankPk.equals(bank) && b.active === 1,
     );
+    const expectedBalanceShares = addNativeAmountToI80(
+      balanceMaybe?.assetShares,
+      amount,
+    );
     const balanceAmtBefore = balanceMaybe
       ? wrappedI80F48toBigNumber(balanceMaybe.assetShares).toNumber()
       : 0;
@@ -169,7 +172,7 @@ describe("k06: Kamino Deposit Tests", () => {
     ).find((e) => e.name === "lendingAccountDepositEvent");
     assert.isDefined(depositEvent, "Expected lendingAccountDepositEvent");
     // collateral:liquidity is 1:1 here, so this deposit mints `amount` asset shares
-    assertI80F48Approx(depositEvent!.data.shareAmount, amount.toNumber());
+    assertI80F48Equal(depositEvent!.data.shareAmount, amount);
 
     const [
       obAfter,
@@ -204,11 +207,11 @@ describe("k06: Kamino Deposit Tests", () => {
     );
     assert.equal(balanceAfter.active, 1);
     assert.equal(userAccAfter.indexerFlags.hasKamino, 1);
-    assertI80F48Approx(
+    assertI80F48Equal(
       balanceAfter.assetShares,
       // Note: Here collateral and liquidity are 1:1, so we can use amount, but this is actually
       // tracking collateral token!
-      balanceAmtBefore + amount.toNumber(),
+      expectedBalanceShares,
     );
     assertBNEqual(
       resAfter.liquidity.totalAvailableAmount,
@@ -217,14 +220,15 @@ describe("k06: Kamino Deposit Tests", () => {
     assertI68F60Equal(resAfter.liquidity.borrowedAmountSf, 0);
 
     // Assert bank updated as expected
-    const sharesBefore = wrappedI80F48toBigNumber(
+    const expectedTotalAssetShares = addNativeAmountToI80(
       bankBefore.totalAssetShares,
-    ).toNumber();
+      amount,
+    );
     // No interest accumulates on Kamino banks, so the asset share value is always 1, and the
     // relationship between collateral tokens and shares is always 1:1
-    assertI80F48Approx(
+    assertI80F48Equal(
       bankAfter.totalAssetShares,
-      sharesBefore + amount.toNumber(),
+      expectedTotalAssetShares,
     );
     assertI80F48Equal(bankAfter.assetShareValue, 1);
     assertI80F48Equal(bankAfter.collectedInsuranceFeesOutstanding, 0);
@@ -284,14 +288,13 @@ describe("k06: Kamino Deposit Tests", () => {
       klendBankrunProgram.account.reserve.fetch(usdcReserve),
     ]);
     const depositAfterRefresh = obAfterRefresh.deposits[0];
-    const marketValueBefore = wrappedU68F60toBigNumber(
-      depositBefore.marketValueSf,
-    ).toNumber();
     const marketValueAfter = wrappedU68F60toBigNumber(
       depositAfterRefresh.marketValueSf,
     ).toNumber();
-    const expectedDiff = amtFloat * oracles.usdcPrice;
-    const expectedValue = marketValueBefore + expectedDiff;
+    const expectedValue =
+      depositAfterRefresh.depositedAmount.toNumber() /
+      10 ** ecosystem.usdcDecimals *
+      oracles.usdcPrice;
     assert.approximately(
       marketValueAfter,
       expectedValue,

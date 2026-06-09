@@ -18,7 +18,6 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
-use anchor_lang::solana_program::sysvar::{self, Sysvar};
 use anchor_spl::token::Token;
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
@@ -46,7 +45,7 @@ use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_D
 /// 3. Verifies the obligation deposit amount was increased correctly
 /// 4. Updates the marginfi account's balance to reflect the deposit
 pub fn kamino_deposit<'info>(
-    ctx: Context<'_, '_, 'info, 'info, KaminoDeposit<'info>>,
+    ctx: Context<'info, KaminoDeposit<'info>>,
     amount: u64,
     refresh_reserve: Option<bool>,
 ) -> MarginfiResult {
@@ -267,7 +266,7 @@ pub struct KaminoDeposit<'info> {
     pub liquidity_token_program: Interface<'info, TokenInterface>,
 
     /// CHECK: validated against hardcoded program id
-    #[account(address = sysvar::instructions::ID)]
+    #[account(address = solana_instructions_sysvar::ID)]
     pub instruction_sysvar_account: UncheckedAccount<'info>,
 }
 
@@ -275,7 +274,7 @@ impl<'info> KaminoDeposit<'info> {
     pub fn cpi_refresh_reserve(&self) -> MarginfiResult {
         let accounts = RefreshReservesBatch {};
         let program = self.kamino_program.to_account_info();
-        let cpi_ctx = CpiContext::new(program, accounts).with_remaining_accounts(vec![
+        let cpi_ctx = CpiContext::new(program.key(), accounts).with_remaining_accounts(vec![
             self.integration_acc_1.to_account_info(),
             self.lending_market.to_account_info(),
         ]);
@@ -291,7 +290,7 @@ impl<'info> KaminoDeposit<'info> {
             authority: self.authority.to_account_info(),
             mint: self.mint.to_account_info(),
         };
-        let cpi_ctx = CpiContext::new(program, accounts);
+        let cpi_ctx = CpiContext::new(program.key(), accounts);
         let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())
@@ -332,7 +331,7 @@ impl<'info> KaminoDeposit<'info> {
         let program = self.kamino_program.to_account_info();
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         deposit_reserve_liquidity_and_obligation_collateral_v2(cpi_ctx, amount)?;
         Ok(())
     }

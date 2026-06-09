@@ -18,7 +18,7 @@ import {
   simpleRefreshReserve,
 } from "./utils/kamino-utils";
 import { processBankrunTransaction } from "./utils/tools";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./utils/litesvm";
 import { assert } from "chai";
 import { assertBankrunTxFailed, getTokenBalance } from "./utils/genericTests";
 import {

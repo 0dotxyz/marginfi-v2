@@ -17,7 +17,7 @@ import {
 } from "./rootHooks";
 import { assert } from "chai";
 import { USER_ACCOUNT_D } from "./utils/mocks";
-import { processBankrunTransaction } from "./utils/tools";
+import { processBankrunTransaction, toI80Scaled } from "./utils/tools";
 import {
   makeDriftDepositIx,
   makeDriftWithdrawIx,
@@ -41,7 +41,6 @@ import {
   USDC_SCALING_FACTOR,
   getSpotMarketAccount,
 } from "./utils/drift-utils";
-import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { composeRemainingAccounts } from "./utils/user-instructions";
 import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "./utils/types";
 
@@ -215,7 +214,7 @@ describe("d08: Drift Withdraw Tests", () => {
         (b) => b.bankPk.equals(driftTokenABank) && b.active === 1
       );
     const sharesBefore = new BN(
-      wrappedI80F48toBigNumber(marginfiBalanceBefore.assetShares).toString()
+      (toI80Scaled(marginfiBalanceBefore.assetShares) >> 48n).toString()
     );
 
     const withdrawIx = await makeDriftWithdrawIx(
@@ -411,7 +410,7 @@ describe("d08: Drift Withdraw Tests", () => {
       );
 
     const assetSharesBefore = new BN(
-      wrappedI80F48toBigNumber(marginfiBalanceBefore.assetShares).toString()
+      (toI80Scaled(marginfiBalanceBefore.assetShares) >> 48n).toString()
     );
     const maxTokenAmount = scaledBalanceToTokenAmount(
       assetSharesBefore,

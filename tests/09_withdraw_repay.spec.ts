@@ -1,5 +1,5 @@
 import { BN, Program } from "@coral-xyz/anchor";
-import { BankrunProvider } from "anchor-bankrun";
+import { BankrunProvider } from "./utils/litesvm";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import {
@@ -16,6 +16,7 @@ import {
 } from "./rootHooks";
 import {
   assertBNApproximately,
+  assertI80F48Equal,
   assertKeysEqual,
   getTokenBalance,
   parseMarginfiEvents,
@@ -32,7 +33,15 @@ import {
 import { USER_ACCOUNT } from "./utils/mocks";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { u64MAX_BN } from "./utils/types";
-import { getBankrunTime, processBankrunTransaction } from "./utils/tools";
+import {
+  divI80,
+  fromI80Scaled,
+  getBankrunTime,
+  mulI80,
+  nativeToI80Scaled,
+  processBankrunTransaction,
+  toI80Scaled,
+} from "./utils/tools";
 
 let program: Program<Marginfi>;
 let provider: BankrunProvider;
@@ -52,12 +61,12 @@ describe("Withdraw funds", () => {
 
   const withdrawAmountTokenA = 0.1;
   const withdrawAmountTokenA_native = new BN(
-    withdrawAmountTokenA * 10 ** ecosystem.tokenADecimals
+    withdrawAmountTokenA * 10 ** ecosystem.tokenADecimals,
   );
 
   const repayAmountUsdc = 0.1;
   const repayAmountUsdc_native = new BN(
-    repayAmountUsdc * 10 ** ecosystem.usdcDecimals
+    repayAmountUsdc * 10 ** ecosystem.usdcDecimals,
   );
 
   it("(user 0) withdraws some token A - happy path", async () => {
@@ -73,6 +82,10 @@ describe("Withdraw funds", () => {
         getTokenBalance(provider, bankBefore.liquidityVault),
       ]);
     const balancesBefore = userAccBefore.lendingAccount.balances;
+    const userTokenABalanceBefore = balancesBefore.find((b) =>
+      b.bankPk.equals(bank),
+    );
+    assert(userTokenABalanceBefore, "missing token-A balance before withdraw");
 
     const tx = new Transaction().add(
       await withdrawIx(user.mrgnProgram, {
@@ -98,12 +111,16 @@ describe("Withdraw funds", () => {
         program.account.marginfiAccount.fetch(userAccKey),
         getTokenBalance(provider, user.tokenAAccount),
         getTokenBalance(provider, bankAfter.liquidityVault),
-      ]
+      ],
     );
     let now = await getBankrunTime(bankrunContext);
     assertBNApproximately(userAccAfter.lastUpdate, now, 2);
 
     const balancesAfter = userAccAfter.lendingAccount.balances;
+    const userTokenABalanceAfter = balancesAfter.find((b) =>
+      b.bankPk.equals(bank),
+    );
+    assert(userTokenABalanceAfter, "missing token-A balance after withdraw");
     // Partial withdraw only, position is still open
     assert.equal(bankAfter.lendingPositionCount, 1);
 
@@ -114,7 +131,7 @@ describe("Withdraw funds", () => {
           withdrawAmountTokenA +
           " token A (" +
           withdrawExpected.toString() +
-          ") native"
+          ") native",
       );
     }
 
@@ -122,24 +139,30 @@ describe("Withdraw funds", () => {
     assert.equal(userTokenAAfter, userTokenABefore + withdrawExpected);
     assert.equal(vaultTokenAAfter, vaultTokenABefore - withdrawExpected);
 
-    // User loses the shares of Token A...
-    // Since there hasn't been any interest (no Token A borrowed), shares and Token A are 1:1
-    const sharesBefore = wrappedI80F48toBigNumber(
-      balancesBefore[0].assetShares
-    ).toNumber();
-    const sharesAfter = wrappedI80F48toBigNumber(
-      balancesAfter[0].assetShares
-    ).toNumber();
-    assert.equal(sharesAfter, sharesBefore - withdrawExpected);
+    // Note: here we do all the math in I80 space to show they are exactly equal. You can usually do
+    // this in JS math by simplying going toNumber() but in some OSes (linux) float rounding will
+    // break this.
+    const shareValueScaled = toI80Scaled(bankBefore.assetShareValue);
+    const withdrawnShareScaled = divI80(
+      nativeToI80Scaled(withdrawAmountTokenA_native),
+      shareValueScaled,
+    );
+    const userSharesBeforeScaled = toI80Scaled(
+      userTokenABalanceBefore.assetShares,
+    );
+    const bankSharesBeforeScaled = toI80Scaled(bankBefore.totalAssetShares);
 
-    // The bank has also lost the same amount of shares...
-    const bankSharesBefore = wrappedI80F48toBigNumber(
-      bankBefore.totalAssetShares
-    ).toNumber();
-    const bankSharesAfter = wrappedI80F48toBigNumber(
-      bankAfter.totalAssetShares
-    ).toNumber();
-    assert.equal(bankSharesAfter, bankSharesBefore - withdrawExpected);
+    // User loses token-A shares exactly by amount / asset_share_value in I80F48 arithmetic.
+    assertI80F48Equal(
+      userTokenABalanceAfter.assetShares,
+      fromI80Scaled(userSharesBeforeScaled - withdrawnShareScaled),
+    );
+
+    // Bank-wide shares must decrease by the same exact amount.
+    assertI80F48Equal(
+      bankAfter.totalAssetShares,
+      fromI80Scaled(bankSharesBeforeScaled - withdrawnShareScaled),
+    );
   });
 
   it("(user 0) repays some USDC debt - happy path", async () => {
@@ -196,7 +219,7 @@ describe("Withdraw funds", () => {
           repayAmountUsdc +
           " usdc (" +
           repayExpected.toString() +
-          ") native"
+          ") native",
       );
     }
 
@@ -207,19 +230,19 @@ describe("Withdraw funds", () => {
     // User loses the liability shares of USDC...
     // USDC has some borrows, so there is trivial interest here that affects accounting
     const sharesBefore = wrappedI80F48toBigNumber(
-      balancesBefore[1].liabilityShares
+      balancesBefore[1].liabilityShares,
     ).toNumber();
     const sharesAfter = wrappedI80F48toBigNumber(
-      balancesAfter[1].liabilityShares
+      balancesAfter[1].liabilityShares,
     ).toNumber();
     assert.approximately(sharesAfter, sharesBefore - repayExpected, 1);
 
     // The bank has also lost the same amount of shares...
     const bankSharesBefore = wrappedI80F48toBigNumber(
-      bankBefore.totalLiabilityShares
+      bankBefore.totalLiabilityShares,
     ).toNumber();
     const bankSharesAfter = wrappedI80F48toBigNumber(
-      bankAfter.totalLiabilityShares
+      bankAfter.totalLiabilityShares,
     ).toNumber();
     assert.approximately(bankSharesAfter, bankSharesBefore - repayExpected, 1);
   });
@@ -243,7 +266,7 @@ describe("Withdraw funds", () => {
 
     // For repayAll, pass remaining accounts excluding the closing bank.
     const remaining = composeRemainingAccounts(
-      balanceAccountGroups.filter((group) => !group[0].equals(bank))
+      balanceAccountGroups.filter((group) => !group[0].equals(bank)),
     );
     const tx = new Transaction().add(
       await repayIx(user.mrgnProgram, {
@@ -277,7 +300,7 @@ describe("Withdraw funds", () => {
 
     if (verbose) {
       console.log(
-        "User 0 repaid entire USDC balance: ~" + actualOwed.toLocaleString()
+        "User 0 repaid entire USDC balance: ~" + actualOwed.toLocaleString(),
       );
     }
 
@@ -289,10 +312,10 @@ describe("Withdraw funds", () => {
 
     // User loses the liability shares of USDC...
     const sharesBefore = wrappedI80F48toBigNumber(
-      balancesBefore[1].liabilityShares
+      balancesBefore[1].liabilityShares,
     ).toNumber();
     const sharesAfter = wrappedI80F48toBigNumber(
-      balancesAfter[1].liabilityShares
+      balancesAfter[1].liabilityShares,
     ).toNumber();
     // repayAll should burn *all* liability shares (the amount paid is shares * shareValue).
     assert.approximately(sharesAfter, 0, 0.000001);
@@ -305,10 +328,10 @@ describe("Withdraw funds", () => {
 
     // The bank has also lost the same amount of shares...
     const bankSharesBefore = wrappedI80F48toBigNumber(
-      bankBefore.totalLiabilityShares
+      bankBefore.totalLiabilityShares,
     ).toNumber();
     const bankSharesAfter = wrappedI80F48toBigNumber(
-      bankAfter.totalLiabilityShares
+      bankAfter.totalLiabilityShares,
     ).toNumber();
     assert.approximately(bankSharesAfter, bankSharesBefore - sharesBefore, 2);
   });
@@ -326,10 +349,23 @@ describe("Withdraw funds", () => {
         getTokenBalance(provider, bankBefore.liquidityVault),
       ]);
     const balancesBefore = userAccBefore.lendingAccount.balances;
+    const userTokenABalanceBefore = balancesBefore.find((b) =>
+      b.bankPk.equals(bank),
+    );
+    assert(
+      userTokenABalanceBefore,
+      "missing token-A balance before withdrawAll",
+    );
 
-    const actualDeposited =
-      wrappedI80F48toBigNumber(balancesBefore[0].assetShares).toNumber() *
-      wrappedI80F48toBigNumber(bankBefore.liabilityShareValue).toNumber();
+    const userSharesBeforeScaled = toI80Scaled(
+      userTokenABalanceBefore.assetShares,
+    );
+    const shareValueScaled = toI80Scaled(bankBefore.assetShareValue);
+    const currentAssetAmountScaled = mulI80(
+      userSharesBeforeScaled,
+      shareValueScaled,
+    );
+    const withdrawExpected = Number(currentAssetAmountScaled >> 48n);
 
     // After repaying USDC, user 0 has Token A and SOL. Exclude the closing
     // bank (Token A) so the health check alignment is correct.
@@ -375,10 +411,9 @@ describe("Withdraw funds", () => {
     assert(userAccBefore.lastUpdate != userAccAfter.lastUpdate);
     assertBNApproximately(userAccAfter.lastUpdate, now, 2);
 
-    const withdrawExpected = actualDeposited;
     if (verbose) {
       console.log(
-        "User 0 withdrew all Token A: " + actualDeposited.toLocaleString()
+        "User 0 withdrew all Token A: " + withdrawExpected.toLocaleString(),
       );
     }
 
@@ -386,26 +421,21 @@ describe("Withdraw funds", () => {
     assert.equal(userTokenAAfter, userTokenABefore + withdrawExpected);
     assert.equal(vaultUsdcAfter, vaultUsdcBefore - withdrawExpected);
 
-    // User loses the shares of Token A...
-    // Since there hasn't been any interest (no Token A borrowed), shares and Token A are 1:1
-    const sharesBefore = wrappedI80F48toBigNumber(
-      balancesBefore[0].assetShares
-    ).toNumber();
-    const sharesAfter = wrappedI80F48toBigNumber(
-      balancesAfter[0].assetShares
-    ).toNumber();
-    assert.equal(sharesAfter, sharesBefore - withdrawExpected);
-    // This balance is now inactive
-    assert.equal(balancesAfter[0].active, 0);
+    const userTokenABalanceAfter = balancesAfter.find((b) =>
+      b.bankPk.equals(bank),
+    );
+    assert.isUndefined(
+      userTokenABalanceAfter,
+      "token-A balance should be removed after withdrawAll",
+    );
 
-    // The bank has also lost the same amount of shares...
-    const bankSharesBefore = wrappedI80F48toBigNumber(
-      bankBefore.totalAssetShares
-    ).toNumber();
-    const bankSharesAfter = wrappedI80F48toBigNumber(
-      bankAfter.totalAssetShares
-    ).toNumber();
-    assert.equal(bankSharesAfter, bankSharesBefore - withdrawExpected);
+    // Bank-wide asset shares should drop exactly by the user's prior share balance.
+    assertI80F48Equal(
+      bankAfter.totalAssetShares,
+      fromI80Scaled(
+        toI80Scaled(bankBefore.totalAssetShares) - userSharesBeforeScaled,
+      ),
+    );
   });
 
   it("(user 1) withdraws all SOL balance - happy path", async () => {
@@ -416,11 +446,9 @@ describe("Withdraw funds", () => {
 
     // User 1 only has USDC and SOL. Exclude the closing bank (SOL) from
     // remaining accounts so the health check alignment is correct.
-    const remaining = composeRemainingAccounts(
-      [
-        [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
-      ]
-    );
+    const remaining = composeRemainingAccounts([
+      [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
+    ]);
     await user.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await withdrawIx(user.mrgnProgram, {
@@ -430,22 +458,19 @@ describe("Withdraw funds", () => {
           remaining,
           amount: new BN(0),
           withdrawAll: true,
-        })
-      )
+        }),
+      ),
     );
     const bankAfter = await program.account.bank.fetch(bank);
     const userAccAfter = await program.account.marginfiAccount.fetch(
-      userAccKey
+      userAccKey,
     );
     const balancesAfter = userAccAfter.lendingAccount.balances;
     assert.equal(bankAfter.lendingPositionCount, 0);
 
     // This balance is now inactive
     assert.equal(balancesAfter[1].active, 0);
-
   });
-
-
 
   it("(user 0) restores previous Token A deposits and USDC borrows", async () => {
     const user = users[0];
@@ -453,7 +478,7 @@ describe("Withdraw funds", () => {
 
     const depositAmountA = 2;
     const depositAmountA_native = new BN(
-      depositAmountA * 10 ** ecosystem.tokenADecimals
+      depositAmountA * 10 ** ecosystem.tokenADecimals,
     );
 
     await user.mrgnProgram.provider.sendAndConfirm(
@@ -463,13 +488,13 @@ describe("Withdraw funds", () => {
           bank: bankKeypairA.publicKey,
           tokenAccount: user.tokenAAccount,
           amount: depositAmountA_native,
-        })
-      )
+        }),
+      ),
     );
 
     const borrowAmountUsdc = 5;
     const borrowAmountUsdc_native = new BN(
-      borrowAmountUsdc * 10 ** ecosystem.usdcDecimals
+      borrowAmountUsdc * 10 ** ecosystem.usdcDecimals,
     );
 
     await user.mrgnProgram.provider.sendAndConfirm(
@@ -483,8 +508,8 @@ describe("Withdraw funds", () => {
             [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
           ]),
           amount: borrowAmountUsdc_native,
-        })
-      )
+        }),
+      ),
     );
 
     const userAccAfter = await program.account.marginfiAccount.fetch(userAcc);

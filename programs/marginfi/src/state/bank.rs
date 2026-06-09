@@ -17,17 +17,13 @@ use crate::{
         price::OraclePriceWithMultiplier,
     },
 };
-use anchor_lang::prelude::*;
-use anchor_lang::{
-    err,
-    prelude::{AccountInfo, CpiContext, InterfaceAccount},
-    ToAccountInfo,
-};
-use anchor_spl::{
-    token::{transfer, Transfer},
-    token_2022::spl_token_2022,
-    token_interface::Mint,
-};
+use anchor_lang::ToAccountInfo;
+use anchor_lang::{err, prelude::*};
+#[cfg(feature = "client")]
+use anchor_spl::token::spl_token;
+#[cfg(not(feature = "client"))]
+use anchor_spl::token::{transfer, Transfer};
+use anchor_spl::token_interface::Mint;
 use bytemuck::Zeroable;
 use drift_mocks::constants::scale_drift_deposit_limit;
 use fixed::types::I80F48;
@@ -40,6 +36,60 @@ use marginfi_type_crate::{
     },
     types::{Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup},
 };
+
+#[cfg(feature = "client")]
+fn invoke_client_token_transfer<'info>(
+    token_program: &Pubkey,
+    amount: u64,
+    from: AccountInfo<'info>,
+    maybe_mint: Option<AccountInfo<'info>>,
+    to: AccountInfo<'info>,
+    authority: AccountInfo<'info>,
+    decimals: Option<u8>,
+    remaining_accounts: &[AccountInfo<'info>],
+    signer_seeds: &[&[&[u8]]],
+) -> MarginfiResult {
+    let ix = if let (Some(mint), Some(decimals)) = (maybe_mint.as_ref(), decimals) {
+        spl_token_2022::instruction::transfer_checked(
+            token_program,
+            from.key,
+            mint.key,
+            to.key,
+            authority.key,
+            &[],
+            amount,
+            decimals,
+        )?
+    } else {
+        spl_token::instruction::transfer(
+            token_program,
+            from.key,
+            to.key,
+            authority.key,
+            &[],
+            amount,
+        )?
+    };
+
+    let mut account_infos = if let Some(mint) = maybe_mint {
+        vec![from, mint, to, authority]
+    } else {
+        vec![from, to, authority]
+    };
+    account_infos.extend_from_slice(remaining_accounts);
+
+    solana_program::program::invoke_signed(&ix, &account_infos, signer_seeds)?;
+
+    Ok(())
+}
+
+#[cfg(all(not(feature = "client"), feature = "debug"))]
+fn sol_log_compute_units() {
+    #[cfg(target_os = "solana")]
+    unsafe {
+        solana_msg::syscalls::sol_log_compute_units_();
+    }
+}
 
 pub trait BankImpl {
     const LEN: usize = std::mem::size_of::<Bank>();
@@ -465,7 +515,7 @@ impl BankImpl for Bank {
         #[cfg(not(feature = "client"))] bank: Pubkey,
     ) -> MarginfiResult<()> {
         #[cfg(all(not(feature = "client"), feature = "debug"))]
-        anchor_lang::solana_program::log::sol_log_compute_units();
+        sol_log_compute_units();
 
         let time_delta: u64 = (current_timestamp - self.last_update).try_into().unwrap();
         if time_delta == 0 {
@@ -554,7 +604,7 @@ impl BankImpl for Bank {
         #[cfg(not(feature = "client"))]
         {
             #[cfg(feature = "debug")]
-            anchor_lang::solana_program::log::sol_log_compute_units();
+            sol_log_compute_units();
 
             emit!(LendingPoolBankAccrueInterestEvent {
                 header: GroupEventHeader {
@@ -635,6 +685,7 @@ impl BankImpl for Bank {
         Ok(())
     }
 
+    #[allow(unused_variables)]
     fn deposit_spl_transfer<'info>(
         &self,
         amount: u64,
@@ -655,6 +706,34 @@ impl BankImpl for Bank {
             amount, from.key, to.key, authority.key
         );
 
+        #[cfg(feature = "client")]
+        if let Some(mint) = maybe_mint {
+            invoke_client_token_transfer(
+                program.key,
+                amount,
+                from,
+                Some(mint.to_account_info()),
+                to,
+                authority,
+                Some(mint.decimals),
+                remaining_accounts,
+                &[],
+            )?;
+        } else {
+            invoke_client_token_transfer(
+                program.key,
+                amount,
+                from,
+                None,
+                to,
+                authority,
+                None,
+                remaining_accounts,
+                &[],
+            )?;
+        }
+
+        #[cfg(not(feature = "client"))]
         if let Some(mint) = maybe_mint {
             spl_token_2022::onchain::invoke_transfer_checked(
                 program.key,
@@ -671,7 +750,7 @@ impl BankImpl for Bank {
             #[allow(deprecated)]
             transfer(
                 CpiContext::new_with_signer(
-                    program,
+                    program.key(),
                     Transfer {
                         from,
                         to,
@@ -686,6 +765,7 @@ impl BankImpl for Bank {
         Ok(())
     }
 
+    #[allow(unused_variables)]
     fn withdraw_spl_transfer<'info>(
         &self,
         amount: u64,
@@ -702,6 +782,38 @@ impl BankImpl for Bank {
             amount, from.key, to.key, authority.key
         );
 
+        #[cfg(feature = "client")]
+        if let Some(mint) = maybe_mint {
+            invoke_client_token_transfer(
+                program.key,
+                amount,
+                from,
+                Some(mint.to_account_info()),
+                to,
+                authority,
+                Some(mint.decimals),
+                remaining_accounts,
+                signer_seeds,
+            )?;
+        } else {
+            // `transfer_checked` and `transfer` does the same thing, the additional `_checked` logic
+            // is only to assert the expected attributes by the user (mint, decimal scaling),
+            //
+            // Security of `transfer` is equal to `transfer_checked`.
+            invoke_client_token_transfer(
+                program.key,
+                amount,
+                from,
+                None,
+                to,
+                authority,
+                None,
+                remaining_accounts,
+                signer_seeds,
+            )?;
+        }
+
+        #[cfg(not(feature = "client"))]
         if let Some(mint) = maybe_mint {
             spl_token_2022::onchain::invoke_transfer_checked(
                 program.key,
@@ -722,7 +834,7 @@ impl BankImpl for Bank {
             #[allow(deprecated)]
             transfer(
                 CpiContext::new_with_signer(
-                    program,
+                    program.key(),
                     Transfer {
                         from,
                         to,
