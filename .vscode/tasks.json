@@ -74,6 +74,24 @@
             }
         },
         {
+            "label": "Run Lint",
+            "type": "shell",
+            "command": "./scripts/lint.sh",
+            "problemMatcher": [],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            }
+        },
+        {
             "label": "Run Fuzz Tests",
             "type": "shell",
             "command": "cargo fmt && ./scripts/lint.sh && cd programs/marginfi/fuzz && python3 ./generate_corpus.py && cargo +nightly-2025-08-01 fuzz run lend --strip-dead-code --no-cfg-fuzzing -- -max_total_time=300",
