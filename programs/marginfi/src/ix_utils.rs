@@ -5,7 +5,7 @@ use anchor_lang::{
 use solana_instructions_sysvar::{load_current_index_checked, load_instruction_at_checked};
 use solana_sha256_hasher::{hash, hashv};
 
-use crate::constants::COMPUTE_PROGRAM_KEY;
+use crate::constants::{COMPUTE_PROGRAM_KEY, PDA_FREE_THRESHOLD, THIRD_PARTY_CPI_RULES};
 use crate::{check, check_eq, MarginfiError, MarginfiResult};
 
 /// Structs that implement this trait have a `get_hash` tool that returns the function discriminator
@@ -209,8 +209,47 @@ pub fn keys_sha256_hash(keys: &[Pubkey]) -> [u8; 32] {
     hashv(&slices).to_bytes()
 }
 
-// TODO eventually compare these against the generated discrim in the IDL to prevent sausage fingers
-// from changing an ix name and thusly the hash.
+/// third_party_id > PDA_FREE_THRESHOLD are restricted, contact us to secure one.
+///
+///
+/// Returns:
+/// - Ok(true)  => it *is* a CPI from the allowed program for `third_party_id`, or uses an
+///   unrestricted seed that isn't subject to any limits.
+/// - Ok(false) => not a CPI (direct call) OR CPI from a different program that has not registered
+///   that seed.
+pub fn is_allowed_cpi_for_third_party_id(
+    sysvar_info: &AccountInfo,
+    third_party_id: u16,
+) -> MarginfiResult<bool> {
+    // Free tier: no gating at all.
+    if third_party_id < PDA_FREE_THRESHOLD {
+        return Ok(true);
+    }
+
+    // Restricted tier: must have a rule.
+    let allowed_program = match THIRD_PARTY_CPI_RULES
+        .iter()
+        .find(|(id, _)| *id == third_party_id)
+        .map(|(_, program_id)| *program_id)
+    {
+        Some(p) => p,
+        None => {
+            return Ok(false);
+        }
+    };
+
+    let current_ix_index = load_current_index_checked(sysvar_info)?;
+    let current_ixn = load_instruction_at_checked(current_ix_index as usize, sysvar_info)?;
+
+    // If the current (top-level) instruction is *this* program, it's a direct call (not CPI) -> no
+    // "third party" id allowed in the restricted zone.
+    if current_ixn.program_id == crate::ID {
+        return Ok(false);
+    }
+
+    Ok(current_ixn.program_id == allowed_program)
+}
+
 #[cfg(test)]
 mod tests {
     use marginfi_type_crate::constants::{discriminators, ix_discriminators};
@@ -334,5 +373,131 @@ mod tests {
         let got_end_exec = EndExecuteOrder::get_hash();
         let want_end_exec = ix_discriminators::END_EXECUTE_ORDER;
         assert_eq!(got_end_exec, want_end_exec);
+    }
+
+    /// The golden discriminator constants must match the generated IDL
+    /// (`target/idl/marginfi.json`). The tests above pin them against the in-code hash; this pins
+    /// them against the client-facing IDL too, so renaming an account/instruction in the program
+    /// (which changes its IDL name + discriminator) trips this instead of silently shipping a
+    /// breaking change. Requires a fresh IDL — run `anchor build -p marginfi` first.
+    #[test]
+    fn check_discrims_match_idl() {
+        let idl_str = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../target/idl/marginfi.json"
+        ))
+        .expect("target/idl/marginfi.json not found — run `anchor build -p marginfi`");
+        let idl: serde_json::Value =
+            serde_json::from_str(&idl_str).expect("marginfi.json is not valid JSON");
+
+        // name -> 8-byte discriminator, for the IDL's `accounts` or `instructions` section
+        let discrim_map = |section: &str| -> std::collections::HashMap<String, [u8; 8]> {
+            idl[section]
+                .as_array()
+                .unwrap_or_else(|| panic!("IDL has no `{section}` array"))
+                .iter()
+                .map(|entry| {
+                    let name = entry["name"].as_str().unwrap().to_string();
+                    let bytes: Vec<u8> = entry["discriminator"]
+                        .as_array()
+                        .unwrap_or_else(|| panic!("`{name}` has no discriminator in the IDL"))
+                        .iter()
+                        .map(|b| b.as_u64().unwrap() as u8)
+                        .collect();
+                    let arr: [u8; 8] = bytes.try_into().expect("discriminator must be 8 bytes");
+                    (name, arr)
+                })
+                .collect()
+        };
+        let idl_accounts = discrim_map("accounts");
+        let idl_ixs = discrim_map("instructions");
+
+        let check = |map: &std::collections::HashMap<String, [u8; 8]>,
+                     idl_name: &str,
+                     want: [u8; 8]| {
+            let got = map.get(idl_name).unwrap_or_else(|| {
+                panic!("IDL is missing `{idl_name}` (renamed in the program?)")
+            });
+            assert_eq!(*got, want, "discriminator drift for `{idl_name}`");
+        };
+
+        // Accounts (constant -> IDL account name)
+        check(&idl_accounts, "MarginfiGroup", discriminators::GROUP);
+        check(&idl_accounts, "Bank", discriminators::BANK);
+        check(&idl_accounts, "MarginfiAccount", discriminators::ACCOUNT);
+        check(&idl_accounts, "FeeState", discriminators::FEE_STATE);
+        check(&idl_accounts, "StakedSettings", discriminators::STAKED_SETTINGS);
+        check(
+            &idl_accounts,
+            "LiquidationRecord",
+            discriminators::LIQUIDATION_RECORD,
+        );
+        check(&idl_accounts, "Order", discriminators::ORDER);
+        check(
+            &idl_accounts,
+            "ExecuteOrderRecord",
+            discriminators::EXECUTE_ORDER_RECORD,
+        );
+        check(&idl_accounts, "BankMetadata", discriminators::BANK_METADATA);
+
+        // Instructions (constant -> IDL instruction name)
+        check(
+            &idl_ixs,
+            "marginfi_account_init_liq_record",
+            ix_discriminators::INIT_LIQUIDATION_RECORD,
+        );
+        check(
+            &idl_ixs,
+            "start_liquidation",
+            ix_discriminators::START_LIQUIDATION,
+        );
+        check(&idl_ixs, "end_liquidation", ix_discriminators::END_LIQUIDATION);
+        check(
+            &idl_ixs,
+            "marginfi_account_start_execute_order",
+            ix_discriminators::START_EXECUTE_ORDER,
+        );
+        check(
+            &idl_ixs,
+            "marginfi_account_end_execute_order",
+            ix_discriminators::END_EXECUTE_ORDER,
+        );
+        check(
+            &idl_ixs,
+            "lending_account_withdraw",
+            ix_discriminators::LENDING_ACCOUNT_WITHDRAW,
+        );
+        check(
+            &idl_ixs,
+            "lending_account_repay",
+            ix_discriminators::LENDING_ACCOUNT_REPAY,
+        );
+        check(
+            &idl_ixs,
+            "kamino_withdraw",
+            ix_discriminators::KAMINO_WITHDRAW,
+        );
+        check(&idl_ixs, "drift_withdraw", ix_discriminators::DRIFT_WITHDRAW);
+        check(
+            &idl_ixs,
+            "juplend_withdraw",
+            ix_discriminators::JUPLEND_WITHDRAW,
+        );
+        check(
+            &idl_ixs,
+            "lending_account_start_flashloan",
+            ix_discriminators::START_FLASHLOAN,
+        );
+        check(
+            &idl_ixs,
+            "lending_account_end_flashloan",
+            ix_discriminators::END_FLASHLOAN,
+        );
+        check(
+            &idl_ixs,
+            "start_deleverage",
+            ix_discriminators::START_DELEVERAGE,
+        );
+        check(&idl_ixs, "end_deleverage", ix_discriminators::END_DELEVERAGE);
     }
 }
