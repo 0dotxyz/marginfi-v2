@@ -92,7 +92,6 @@ describe("Liquidate user", () => {
             })
           )
         );
-        // TODO this should throw a more oracle-specific error further upstream, this is kinda dumb.
       },
       "HealthyAccount",
       6068

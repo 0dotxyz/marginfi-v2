@@ -21,6 +21,7 @@ import {
   assertBNEqual,
   assertI80F48Approx,
   assertKeysEqual,
+  expectFailedTxWithError,
 } from "./utils/genericTests";
 import { assert } from "chai";
 import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
@@ -254,25 +255,19 @@ describe("Init group", () => {
       marginfiGroup.publicKey
     );
 
-    let failed = false;
-    try {
-      await groupAdmin.mrgnProgram.provider.sendAndConfirm(
-        new Transaction().add(
-          await editStakedSettings(groupAdmin.mrgnProgram, {
-            settingsKey: settingsKey,
-            settings: settings,
-          })
-        )
-      );
-    } catch (err) {
-      // TODO create a util for this that fails with more detail
-      assert.ok(
-        err.logs.some((log: string) =>
-          log.includes("Error Code: InvalidConfig")
-        )
-      );
-      failed = true;
-    }
-    assert.ok(failed, "Transaction succeeded when it should have failed");
+    await expectFailedTxWithError(
+      async () => {
+        await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+          new Transaction().add(
+            await editStakedSettings(groupAdmin.mrgnProgram, {
+              settingsKey: settingsKey,
+              settings: settings,
+            })
+          )
+        );
+      },
+      "InvalidConfig",
+      6015
+    );
   });
 });

@@ -16,7 +16,9 @@ import {
   marginfiGroup,
   users,
   globalFeeWallet,
+  globalProgramAdmin,
 } from "./rootHooks";
+import { editGlobalFeeState } from "./utils/group-instructions";
 import {
   accountInit,
   borrowIx,
@@ -97,6 +99,65 @@ describe("Transfer account authority", () => {
     assert.equal(
       feeWalletBefore.lamports,
       feeWalletAfter.lamports - ACCOUNT_TRANSFER_FEE
+    );
+  });
+
+  // The transfer fee is configurable on the FeeState (stored in lamports).
+  it("(fee admin) configures a custom account-transfer fee, which is then charged", async () => {
+    const FEE_LAMPORTS = 7_000_000;
+
+    // Admin sets a distinctive non-default fee.
+    await globalProgramAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await editGlobalFeeState(globalProgramAdmin.mrgnProgram, {
+          admin: globalProgramAdmin.wallet.publicKey,
+          accountTransferFee: FEE_LAMPORTS,
+        })
+      )
+    );
+
+    const oldAcc = Keypair.generate();
+    const newAcc = Keypair.generate();
+    const newAuth = Keypair.generate();
+    await users[0].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await accountInit(users[0].mrgnProgram, {
+          marginfiGroup: marginfiGroup.publicKey,
+          marginfiAccount: oldAcc.publicKey,
+          authority: users[0].wallet.publicKey,
+          feePayer: users[0].wallet.publicKey,
+        })
+      ),
+      [oldAcc]
+    );
+
+    const before =
+      await program.provider.connection.getAccountInfo(globalFeeWallet);
+    await users[0].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await transferAccountAuthorityIx(users[0].mrgnProgram, {
+          oldAccount: oldAcc.publicKey,
+          newAccount: newAcc.publicKey,
+          newAuthority: newAuth.publicKey,
+          globalFeeWallet: globalFeeWallet,
+        })
+      ),
+      [newAcc]
+    );
+    const after =
+      await program.provider.connection.getAccountInfo(globalFeeWallet);
+
+    // The configured fee (not the 5,000,000-lamport default) was charged.
+    assert.equal(after.lamports - before.lamports, FEE_LAMPORTS);
+
+    // Restore the default (0 => use default) so later tests/suites see the standard fee.
+    await globalProgramAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await editGlobalFeeState(globalProgramAdmin.mrgnProgram, {
+          admin: globalProgramAdmin.wallet.publicKey,
+          accountTransferFee: 0,
+        })
+      )
     );
   });
 
@@ -267,7 +328,62 @@ describe("Transfer account authority", () => {
     }, "InvalidFeeAta");
   });
 
-  // TODO emissions destination and/or flags?
+  it("(user 0) transfer propagates the emissions destination to the new account", async () => {
+    const oldAccKeypair = Keypair.generate();
+    const newAccKeypair = Keypair.generate();
+    const newAuthority = Keypair.generate();
+    const emissionsDest = Keypair.generate().publicKey;
+
+    // Create the old account.
+    await users[0].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await accountInit(users[0].mrgnProgram, {
+          marginfiGroup: marginfiGroup.publicKey,
+          marginfiAccount: oldAccKeypair.publicKey,
+          authority: users[0].wallet.publicKey,
+          feePayer: users[0].wallet.publicKey,
+        })
+      ),
+      [oldAccKeypair]
+    );
+
+    // Set a distinctive emissions destination on the old account.
+    await users[0].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await users[0].mrgnProgram.methods
+          .marginfiAccountUpdateEmissionsDestinationAccount()
+          .accounts({
+            marginfiAccount: oldAccKeypair.publicKey,
+            authority: users[0].wallet.publicKey,
+            destinationAccount: emissionsDest,
+          })
+          .instruction()
+      )
+    );
+    const oldBefore = await program.account.marginfiAccount.fetch(
+      oldAccKeypair.publicKey
+    );
+    assertKeysEqual(oldBefore.emissionsDestinationAccount, emissionsDest);
+
+    // Transfer to a new account.
+    await users[0].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await transferAccountAuthorityIx(users[0].mrgnProgram, {
+          oldAccount: oldAccKeypair.publicKey,
+          newAccount: newAccKeypair.publicKey,
+          newAuthority: newAuthority.publicKey,
+          globalFeeWallet: globalFeeWallet,
+        })
+      ),
+      [newAccKeypair]
+    );
+
+    // The new account inherits the emissions destination (transfer_account.rs copies it).
+    const newAcc = await program.account.marginfiAccount.fetch(
+      newAccKeypair.publicKey
+    );
+    assertKeysEqual(newAcc.emissionsDestinationAccount, emissionsDest);
+  });
 
   it("(user 0) transfer account with separate fee payer - happy path", async () => {
     const oldAccKeypair = Keypair.generate();
