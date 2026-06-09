@@ -807,6 +807,8 @@ async fn configure_bank_success(bank_mint: BankMint) -> anyhow::Result<()> {
         permissionless_bad_debt_settlement,
         freeze_settings,
         tokenless_repayments_allowed,
+        liquidation_liquidator_fee_bps,
+        liquidation_insurance_fee_bps,
     } = &config_bank_opt;
     // Compare bank field to opt field if Some, otherwise compare to old bank field
     macro_rules! check_bank_field {
@@ -849,6 +851,8 @@ async fn configure_bank_success(bank_mint: BankMint) -> anyhow::Result<()> {
         check_bank_field!(total_asset_value_init_limit);
         check_bank_field!(oracle_max_age);
         check_bank_field!(oracle_max_confidence);
+        check_bank_field!(liquidation_liquidator_fee_bps);
+        check_bank_field!(liquidation_insurance_fee_bps);
 
         assert!(permissionless_bad_debt_settlement
             // If Some(...) check flag set properly
@@ -1579,10 +1583,6 @@ async fn configure_bank_interest_only_success() -> anyhow::Result<()> {
     ]);
 
     let ir_config = InterestRateConfigOpt {
-        // TODO deprecate in 1.7
-        // placeholder0: Some(I80F48::from_num(0.9).into()),
-        // placeholder1: Some(I80F48::from_num(0.5).into()),
-        // placeholder2: Some(I80F48::from_num(1.5).into()),
         insurance_fee_fixed_apr: Some(I80F48::from_num(0.01).into()),
         insurance_ir_fee: Some(I80F48::from_num(0.02).into()),
         protocol_fixed_fee_apr: Some(I80F48::from_num(0.03).into()),
@@ -1600,17 +1600,14 @@ async fn configure_bank_interest_only_success() -> anyhow::Result<()> {
 
     let bank_after: Bank = test_f.load_and_deserialize(&bank.key).await;
 
-    // TODO deprecate in 1.7
     assert_eq!(
         bank_after.config.interest_rate_config.placeholder0,
         I80F48::ZERO.into()
     );
-    // TODO deprecate in 1.7
     assert_eq!(
         bank_after.config.interest_rate_config.placeholder1,
         I80F48::ZERO.into()
     );
-    // TODO deprecate in 1.7
     assert_eq!(
         bank_after.config.interest_rate_config.placeholder2,
         I80F48::ZERO.into()

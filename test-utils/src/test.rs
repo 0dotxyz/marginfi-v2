@@ -495,7 +495,6 @@ pub fn create_oracle_key_array(pyth_oracle: Pubkey) -> [Pubkey; MAX_ORACLE_KEYS]
 lazy_static! {
     pub static ref DEFAULT_TEST_BANK_INTEREST_RATE_CONFIG: InterestRateConfig =
         InterestRateConfig {
-            // TODO deprecate in 1.7
             placeholder0: I80F48!(0.5).into(),
             placeholder1: I80F48!(0.6).into(),
             placeholder2: I80F48!(3).into(),
@@ -526,7 +525,6 @@ lazy_static! {
         config_flags: PYTH_PUSH_MIGRATED_DEPRECATED,
 
         interest_rate_config: InterestRateConfig {
-            // TODO deprecate in 1.7
             placeholder0: I80F48!(0).into(),
             placeholder1: I80F48!(0).into(),
             placeholder2: I80F48!(0).into(),

@@ -1056,4 +1056,90 @@ async fn limit_order_fails_with_spoofed_oracle() -> anyhow::Result<()> {
     Ok(())
 }
 
-// TODO test that without repay_all enabled, always fails...
+
+#[tokio::test]
+async fn limit_order_partial_repay_without_repay_all_fails() -> anyhow::Result<()> {
+    let asset_mint = BankMint::Sol;
+    let liability_mint = BankMint::Usdc;
+    let asset_deposit = 50.0;
+    let liability_borrow = 100.0;
+    let trigger = take_profit_trigger(fp!(100), 0);
+
+    let (
+        test_f,
+        borrower_mfi_account_f,
+        asset_mint,
+        liability_mint,
+        order_pda,
+        keeper,
+        keeper_liab_account,
+        keeper_asset_account,
+    ) = setup_limit_order_fixture(
+        asset_mint,
+        asset_deposit,
+        liability_mint,
+        liability_borrow,
+        trigger,
+    )
+    .await?;
+
+    let price = default_price_for_mint(&asset_mint);
+    let asset_bank_f = test_f.get_bank(&asset_mint);
+    let liability_bank_f = test_f.get_bank(&liability_mint);
+
+    let (start_ix, execute_record) = borrower_mfi_account_f
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
+
+    let repay_ix = borrower_mfi_account_f
+        .make_repay_ix_with_authority(
+            keeper_liab_account,
+            liability_bank_f,
+            liability_borrow / 2.0,
+            Some(false),
+            keeper.pubkey(),
+        )
+        .await;
+
+    let withdraw_amt = estimate_withdraw_amount(
+        default_price_for_mint(&liability_mint) * liability_borrow,
+        price,
+    );
+    let withdraw_ix = borrower_mfi_account_f
+        .make_withdraw_ix_with_authority(
+            keeper_asset_account,
+            asset_bank_f,
+            withdraw_amt,
+            None,
+            keeper.pubkey(),
+        )
+        .await;
+
+    // The liability is only partially repaid, so its bank stays active — unlike the happy path it
+    // must NOT be excluded from the end-execute observation accounts.
+    let end_ix = borrower_mfi_account_f
+        .make_end_execute_ix(
+            order_pda,
+            execute_record,
+            keeper.pubkey(),
+            keeper.pubkey(),
+            vec![],
+        )
+        .await;
+
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(
+        &[start_ix, repay_ix, withdraw_ix, end_ix],
+        Some(&keeper.pubkey()),
+        &[&keeper],
+        ctx.banks_client.get_latest_blockhash().await.unwrap(),
+    );
+
+    let result = ctx.banks_client.process_transaction(tx).await;
+    assert_custom_error!(
+        result.unwrap_err(),
+        MarginfiError::OrderLiabilityNotClosed
+    );
+
+    Ok(())
+}

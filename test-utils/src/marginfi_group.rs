@@ -1349,6 +1349,7 @@ impl MarginfiGroupFixture {
                 liquidation_max_fee: None,
                 order_execution_max_fee: None,
                 pause_delegate_admin: Some(new_pause_delegate_admin.unwrap_or_default()),
+                account_transfer_fee: None,
             }
             .data(),
         };
