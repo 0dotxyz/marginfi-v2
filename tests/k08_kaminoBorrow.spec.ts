@@ -440,11 +440,32 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
       );
     }
 
-    // TODO assert more specific interest increase...
-    assert(borrowedAfter > borrowedBefore);
-    // Note: available balance only changes in response to borrows, interest does not impact the actual
-    // liquidity available for lending.
-    // TODO assert this value does decrease during a borrow?
+    // Interest accrued over the warped hour. Kamino tracks accrual on the reserve's cumulative
+    // borrow rate and scales the outstanding borrowed amount by it,
+    const bsfToRaw = (bsf: { value: BN[] }): bigint =>
+      bsf.value.reduce(
+        (acc, limb, i) => acc + (BigInt(limb.toString()) << BigInt(64 * i)),
+        0n,
+      );
+    const cumRateBefore = bsfToRaw(resBefore.liquidity.cumulativeBorrowRateBsf);
+    const cumRateAfter = bsfToRaw(resAfter.liquidity.cumulativeBorrowRateBsf);
+    // The cumulative borrow rate strictly increased (interest accrued).
+    assert(cumRateAfter > cumRateBefore);
+
+    // expectedBorrowedAfter = borrowedBefore * (cumRateAfter / cumRateBefore).
+    const RATIO_SCALE = 10n ** 30n;
+    const rateRatioScaled = (cumRateAfter * RATIO_SCALE) / cumRateBefore;
+    const expectedBorrowedAfter = borrowedBefore
+      .times(rateRatioScaled.toString())
+      .div(RATIO_SCALE.toString());
+    assert.approximately(
+      borrowedAfter.toNumber(),
+      expectedBorrowedAfter.toNumber(),
+      expectedBorrowedAfter.toNumber() * 1e-9,
+    );
+
+    // Available liquidity only moves on borrows/repays, not interest accrual, so it is unchanged
+    // here (this test only warps time + refreshes the reserve; it never borrows).
     assert.equal(availableAfter, availableBefore);
   });
 });

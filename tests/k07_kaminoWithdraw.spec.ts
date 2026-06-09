@@ -20,6 +20,7 @@ import {
   simpleRefreshReserve,
 } from "./utils/kamino-utils";
 import { assert } from "chai";
+import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { MockUser, USER_ACCOUNT_K } from "./utils/mocks";
 import { processBankrunTransaction } from "./utils/tools";
 import { ProgramTestContext } from "./utils/litesvm";
@@ -53,6 +54,12 @@ describe("k07: Kamino Withdraw Tests", () => {
       bankRunProvider,
       user.usdcAccount
     );
+    const marginfiAccountBefore =
+      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
+    const kaminoBalanceBefore =
+      marginfiAccountBefore.lendingAccount.balances.find(
+        (b) => b.bankPk.equals(bank) && b.active === 1
+      )!;
 
     console.log(
       `Executing withdrawal of ${
@@ -120,8 +127,13 @@ describe("k07: Kamino Withdraw Tests", () => {
         (b) => b.bankPk.equals(bank) && b.active === 1
       );
 
-      // TODO assert balances
       assert.equal(kaminoBankBalance.active, 1);
+      // The Kamino bank position shrinks by the partial withdrawal.
+      assert.isTrue(
+        wrappedI80F48toBigNumber(kaminoBankBalance.assetShares).lt(
+          wrappedI80F48toBigNumber(kaminoBalanceBefore.assetShares)
+        )
+      );
       // has_kamino persists across a partial withdraw
       assert.equal(marginfiAccountData.indexerFlags.hasKamino, 1);
     }

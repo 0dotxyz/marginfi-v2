@@ -30,7 +30,11 @@ import {
   processBankrunTransaction as processBankrunTx,
   logHealthCache,
 } from "./utils/tools";
-import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
+import {
+  bigNumberToWrappedI80F48,
+  wrappedI80F48toBigNumber,
+} from "@mrgnlabs/mrgn-common";
+import { assert } from "chai";
 import { blankBankConfigOptRaw } from "./utils/types";
 import { configureBank } from "./utils/group-instructions";
 import {
@@ -358,7 +362,30 @@ describe("k10: Kamino Liquidation", () => {
       logHealthCache("user 0 cache post-liquidate ", cacheAfter);
     }
 
-    // TODO assert asset balances
+    // The liquidation seizes the liquidatee's Kamino collateral (asset = kaminoUsdcBank) and pays
+    // down their bank[0] debt, so both their asset and liability share counts shrink.
+    const collBefore = liquidateeAcc.lendingAccount.balances.find(
+      (b) => b.bankPk.equals(kaminoUsdcBank) && b.active === 1
+    )!;
+    const collAfter = accAfter.lendingAccount.balances.find(
+      (b) => b.bankPk.equals(kaminoUsdcBank) && b.active === 1
+    )!;
+    assert.isTrue(
+      wrappedI80F48toBigNumber(collAfter.assetShares).lt(
+        wrappedI80F48toBigNumber(collBefore.assetShares)
+      )
+    );
+    const debtBefore = liquidateeAcc.lendingAccount.balances.find(
+      (b) => b.bankPk.equals(banks[0]) && b.active === 1
+    )!;
+    const debtAfter = accAfter.lendingAccount.balances.find(
+      (b) => b.bankPk.equals(banks[0]) && b.active === 1
+    )!;
+    assert.isTrue(
+      wrappedI80F48toBigNumber(debtAfter.liabilityShares).lt(
+        wrappedI80F48toBigNumber(debtBefore.liabilityShares)
+      )
+    );
   });
 
   it("(admin) restore bank 0 default liability ratios", async () => {
@@ -373,5 +400,7 @@ describe("k10: Kamino Liquidation", () => {
     await processBankrunTx(ctx, tx, [groupAdmin.wallet]);
   });
 
-  // TODO test OOM limits at max accounts
+  // Note: the max-accounts (16-balance) OOM / worst-case compute scenario is covered end-to-end by
+  // sl08_16BanksStressTest.spec.ts (8 Solend deposits + 1 borrow, and 1 Solend deposit + 15 borrows,
+  // each with a health calc over all 16 slots), so it isn't duplicated here.
 });

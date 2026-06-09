@@ -793,6 +793,4 @@ describe("k13: Kamino Farms Harvest Reward", () => {
     );
   });
 
-  // TODO approximate whatever our mechanism will be to distribute these rewards to margin users and
-  // test that the distribution is approximately fair.
 });

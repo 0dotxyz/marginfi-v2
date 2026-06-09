@@ -4,7 +4,9 @@ import {
   kaminoAccounts,
   MARKET,
   USDC_RESERVE,
+  TOKEN_A_RESERVE,
   KAMINO_USDC_BANK,
+  KAMINO_TOKEN_A_BANK,
   users,
   bankrunContext,
   klendBankrunProgram,
@@ -26,6 +28,7 @@ import {
   wrappedU68F60toBigNumber,
 } from "./utils/kamino-utils";
 import { assert } from "chai";
+import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { processBankrunTransaction } from "./utils/tools";
 import {
   makeKaminoDepositIx,
@@ -170,6 +173,18 @@ describe("k09: Withdraw from Kamino reserve with accrued interest", () => {
     await processBankrunTransaction(ctx, tx, [user.wallet]);
   }
 
+  /** The user's active Kamino-bank asset shares (0 if no active position). */
+  async function kaminoAssetShares(user: number): Promise<number> {
+    const marginfiAccount = users[user].accounts.get(USER_ACCOUNT_K);
+    const acc = await bankrunProgram.account.marginfiAccount.fetch(
+      marginfiAccount
+    );
+    const bal = acc.lendingAccount.balances.find(
+      (b) => b.bankPk.equals(bankUsdc) && b.active === 1
+    );
+    return bal ? wrappedI80F48toBigNumber(bal.assetShares).toNumber() : 0;
+  }
+
   /** In collateral tokens, as a scaled Fraction */
   let interestAccumulated: number;
   // ??? in rare cases bankrun throws a `Account in use` here.
@@ -237,6 +252,7 @@ describe("k09: Withdraw from Kamino reserve with accrued interest", () => {
 
   it("Should withdraw from Kamino reserve with accrued interest", async () => {
     const preBal = await getBalances(0);
+    const sharesBefore = await kaminoAssetShares(0);
     prettyPrintBalances("---Before withdraw", preBal);
 
     // After k07 test, User 0 should have 200 USDC and User 1 has 150 USDC in the reserve
@@ -264,37 +280,46 @@ describe("k09: Withdraw from Kamino reserve with accrued interest", () => {
     assert.approximately(diffUser, amt * exchangeRate.toNumber(), amt * 0.0001);
     assert.equal(diffUser, -diffReserve);
 
-    // TODO moar asserts
+    // The withdrawal shrinks the user's Kamino collateral position by ~the withdrawn amount, and
+    // the position stays active (partial withdrawal).
+    const sharesAfter = await kaminoAssetShares(0);
+    assert.isBelow(sharesAfter, sharesBefore);
+    assert.approximately(sharesBefore - sharesAfter, amt, amt * 0.0001);
   });
 
   it("Should deposit to Kamino reserve after interest has accrued", async () => {
     const preDepositBalances = await getBalances(1);
+    const sharesBefore = await kaminoAssetShares(1);
 
     const depositAmount = new BN(50 * 10 ** ecosystem.usdcDecimals); // 50 USDC
 
     await executeDeposit(users[1], depositAmount);
 
     const postDepositBalances = await getBalances(1);
-    // TODO assert collateral token deposits increase?
-    // const initialUserUsdcBalance = preDepositBalances.userTokenBalance;
-    // const finalUserUsdcBalance = postDepositBalances.userTokenBalance;
-    // const userUsdcChange = finalUserUsdcBalance - initialUserUsdcBalance;
-    // assertBNApproximately(
-    //   depositAmount,
-    //   userUsdcChange,
-    //   userUsdcChange * 0.00001
-    // );
+    // The deposit moves exactly `depositAmount` USDC from the user into the reserve supply vault,
+    // and mints collateral that grows the user's Kamino position.
+    assert.equal(
+      postDepositBalances.userUsdcBal - preDepositBalances.userUsdcBal,
+      -depositAmount.toNumber()
+    );
+    assert.equal(
+      postDepositBalances.reserveUsdcBal - preDepositBalances.reserveUsdcBal,
+      depositAmount.toNumber()
+    );
+    const sharesAfter = await kaminoAssetShares(1);
+    assert.isAbove(sharesAfter, sharesBefore);
   });
 
   it("Should withdraw remaining balance from Kamino reserve", async () => {
     const preWithdrawBalances = await getBalances(0);
+    const sharesBefore = await kaminoAssetShares(0);
 
     const remainingWithdrawAmount = new BN(
       10_000 * 10 ** ecosystem.usdcDecimals
     ); // 10k USDC
 
-    // TODO mark final?
-    // Execute the withdrawal using our helper function - mark as final withdrawal
+    // This is a PARTIAL withdrawal of a large position, so isFinalWithdrawal stays false (the user
+    // keeps a balance) despite the "remaining balance" naming.
     await executeWithdraw(
       users[0],
       remainingWithdrawAmount,
@@ -305,15 +330,21 @@ describe("k09: Withdraw from Kamino reserve with accrued interest", () => {
     );
 
     const postWithdrawBalances = await getBalances(0);
-    // TODO assert interest....
-    // const initialUserUsdcBalance = preWithdrawBalances.userTokenBalance;
-    // const finalUserUsdcBalance = postWithdrawBalances.userTokenBalance;
-    // const userUsdcChange = finalUserUsdcBalance - initialUserUsdcBalance;
-    // assertBNApproximately(
-    //   remainingWithdrawAmount,
-    //   userUsdcChange,
-    //   userUsdcChange * 0.00001
-    // );
+    const sharesAfter = await kaminoAssetShares(0);
+    const userDelta =
+      postWithdrawBalances.userUsdcBal - preWithdrawBalances.userUsdcBal;
+    const reserveDelta =
+      postWithdrawBalances.reserveUsdcBal - preWithdrawBalances.reserveUsdcBal;
+    // The position shrinks by the requested collateral amount, and USDC conservation holds.
+    assert.equal(userDelta, -reserveDelta);
+    assert.approximately(
+      sharesBefore - sharesAfter,
+      remainingWithdrawAmount.toNumber(),
+      remainingWithdrawAmount.toNumber() * 0.0001
+    );
+    // Interest check: the user receives MORE USDC than the collateral redeemed, because the
+    // collateral has appreciated from the interest accrued earlier in this suite.
+    assert.isAbove(userDelta, remainingWithdrawAmount.toNumber());
 
     const marginfiAccount = users[0].accounts.get(USER_ACCOUNT_K);
     const acc = await bankrunProgram.account.marginfiAccount.fetch(
@@ -325,5 +356,110 @@ describe("k09: Withdraw from Kamino reserve with accrued interest", () => {
     assert.equal(kaminoBankBalance.active, 1);
   });
 
-  // TODO repeat for token A (for non-6-decimals result)
+  it("(user 0) withdraws token A with accrued interest (non-6-decimal result)", async () => {
+    const tokenABank = kaminoAccounts.get(KAMINO_TOKEN_A_BANK);
+    const tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE);
+    const tokenAObligation = kaminoAccounts.get(
+      `${tokenABank.toString()}_OBLIGATION`
+    );
+    const user = users[0];
+    const marginfiAccount = user.accounts.get(USER_ACCOUNT_K);
+
+    await refreshPullOraclesBankrun(oracles, ctx, banksClient);
+
+    // Deposit token A so user 0 holds a token A Kamino position to withdraw from.
+    const depositAmt = new BN(50 * 10 ** ecosystem.tokenADecimals);
+    await processBankrunTransaction(
+      ctx,
+      new Transaction().add(
+        await simpleRefreshReserve(
+          klendBankrunProgram,
+          tokenAReserve,
+          market,
+          oracles.tokenAOracle.publicKey
+        ),
+        await simpleRefreshObligation(
+          klendBankrunProgram,
+          market,
+          tokenAObligation,
+          [tokenAReserve]
+        ),
+        await makeKaminoDepositIx(
+          user.mrgnBankrunProgram,
+          {
+            marginfiAccount,
+            bank: tokenABank,
+            signerTokenAccount: user.tokenAAccount,
+            lendingMarket: market,
+            reserve: tokenAReserve,
+          },
+          depositAmt
+        )
+      ),
+      [user.wallet]
+    );
+
+    const reserveBefore = await klendBankrunProgram.account.reserve.fetch(
+      tokenAReserve
+    );
+    const userTokenABefore = await getTokenBalance(provider, user.tokenAAccount);
+
+    const withdrawAmt = 20 * 10 ** ecosystem.tokenADecimals;
+    // User 0 also holds a USDC Kamino position from earlier, so the post-withdraw health check needs
+    // both banks' observations (with fresh reserves) — not just token A's.
+    await processBankrunTransaction(
+      ctx,
+      new Transaction().add(
+        await simpleRefreshReserve(
+          klendBankrunProgram,
+          usdcReserve,
+          market,
+          oracles.usdcOracle.publicKey
+        ),
+        await simpleRefreshReserve(
+          klendBankrunProgram,
+          tokenAReserve,
+          market,
+          oracles.tokenAOracle.publicKey
+        ),
+        await simpleRefreshObligation(
+          klendBankrunProgram,
+          market,
+          tokenAObligation,
+          [tokenAReserve]
+        ),
+        await makeKaminoWithdrawIx(
+          user.mrgnBankrunProgram,
+          {
+            marginfiAccount,
+            authority: user.wallet.publicKey,
+            bank: tokenABank,
+            mint: ecosystem.tokenAMint.publicKey,
+            destinationTokenAccount: user.tokenAAccount,
+            lendingMarket: market,
+            reserve: tokenAReserve,
+          },
+          {
+            amount: new BN(withdrawAmt),
+            isWithdrawAll: false,
+            remaining: composeRemainingAccounts([
+              [tokenABank, oracles.tokenAOracle.publicKey, tokenAReserve],
+              [bankUsdc, oracles.usdcOracle.publicKey, usdcReserve],
+            ]),
+          }
+        )
+      ),
+      [user.wallet]
+    );
+
+    const userTokenAAfter = await getTokenBalance(provider, user.tokenAAccount);
+    const diffUser = userTokenAAfter - userTokenABefore;
+
+    // The withdrawn collateral redeems for `amt * exchangeRate` of the (interest-appreciated) liquidity.
+    const exchangeRate = getLiquidityExchangeRate(reserveBefore as any);
+    const expected = withdrawAmt * exchangeRate.toNumber();
+    assert.approximately(diffUser, expected, expected * 0.0001);
+    // Interest realized: with a >1 exchange rate, the user receives MORE token A than redeemed.
+    assert.isAtLeast(diffUser, withdrawAmt);
+  });
 });
