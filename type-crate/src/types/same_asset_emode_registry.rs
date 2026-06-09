@@ -21,7 +21,8 @@ assert_struct_align!(SameAssetEmodeGroup, 1);
 #[cfg_attr(not(feature = "anchor"), derive(PartialEq, Pod, Zeroable, Copy, Clone))]
 #[derive(Debug)]
 pub struct SameAssetEmodeGroup {
-    /// Representative bank for this `(mint, oracle_key)` grouping.
+    /// Representative bank for this `(mint, oracle_key)` grouping. Typically, this is whichever
+    /// bank was added to the group first. The bank's mint = mint and oracle_keys[0] = oracle_key.
     pub bank: Pubkey,
     pub mint: Pubkey,
     /// The canonical price source, matching `Bank.config.oracle_keys[0]`.
@@ -55,6 +56,8 @@ impl Default for SameAssetEmodeBank {
 
 assert_struct_size!(SameAssetEmodeRegistry, 32976);
 assert_struct_align!(SameAssetEmodeRegistry, 8);
+/// Read-only archive of same-asset-emode banks. Enables the emode admin to see, at a glance, which
+/// banks are participating in same asset emode.
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
 #[cfg_attr(not(feature = "anchor"), derive(PartialEq, Pod, Zeroable, Copy, Clone))]
@@ -69,7 +72,9 @@ pub struct SameAssetEmodeRegistry {
     pub group_count: u8,
     pub bump: u8,
     pub _padding_1: [u8; 4],
+    /// Describes the same-asset-emode groupings that exist
     pub groups: [SameAssetEmodeGroup; MAX_SAME_ASSET_EMODE_GROUPS],
+    /// Describes which bank belongs to which group
     pub banks: [SameAssetEmodeBank; MAX_SAME_ASSET_EMODE_BANKS],
     pub _padding_2: [u8; 128],
 }
