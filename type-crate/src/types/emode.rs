@@ -182,11 +182,29 @@ impl EmodeEntry {
 /// - Result
 /// * tag | flags | init | maint
 /// * 101    0       60     75
+///
+/// # Compute cost
+///
+/// `N` is how many configs get merged. In the risk engine that's the number of emode liability
+/// balances the borrower has. Each merged config adds roughly 1.5k compute units:
+///
+/// | N (configs) | compute units |
+/// |-------------|---------------|
+/// | 1           | ~2,700        |
+/// | 2           | ~4,200        |
+/// | 5           | ~8,900        |
+/// | 10          | ~16,600       |
+///
+/// (Measured worst case: every config packed with the maximum MAX_EMODE_ENTRIES entries, all sharing
+/// tags so none drop out during the merge — real inputs are smaller.) This version uses a fixed
+/// stack buffer (no heap) and runs ~800-1050 CU cheaper than `reconcile_emode_configs_classic` once
+/// N ≥ 2. At the typical small N it's a tiny slice of the health check's CU budget.
+///
+/// Reproduce these numbers with `anchor run bench-emode` (tests/bench/emodeReconcile.bench.ts).
 pub fn reconcile_emode_configs<I>(configs: I) -> EmodeConfig
 where
     I: IntoIterator<Item = EmodeConfig>,
 {
-    // TODO benchmark this in the mock program
     let mut iter = configs.into_iter();
     // Pull off the first config (if any)
     let first = match iter.next() {
@@ -249,10 +267,11 @@ where
     EmodeConfig::from_entries(&buf[..buf_len])
 }
 
-/// The same functionality as `reconcile_emode_configs`, but uses more heap space (which renders it
-/// unusable on-chain). Perfectly fine for off-chain applications where heap space is not a concern.
+/// Same result as `reconcile_emode_configs`, but uses heap allocation (BTreeMap/Vec) instead of a
+/// fixed stack buffer. It still works on-chain — just ~800-1050 CU more expensive than the
+/// fixed-buffer version once N ≥ 2 (N = number of configs) — so prefer that one on-chain and keep
+/// this as the off-chain helper. (For a single config it returns early, ~140 CU.)
 pub fn reconcile_emode_configs_classic(configs: Vec<EmodeConfig>) -> EmodeConfig {
-    // TODO benchmark this in the mock program
     // If no configs, return a zeroed config.
     if configs.is_empty() {
         return EmodeConfig::zeroed();
