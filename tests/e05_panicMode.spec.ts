@@ -40,9 +40,15 @@ import {
   assertBankrunTxFailed,
   assertBNApproximately,
   assertBNEqual,
+  assertI80F48Approx,
+  assertKeysEqual,
   waitUntil,
 } from "./utils/genericTests";
-import { MAX_DAILY_PAUSES, PAUSE_DURATION_SECONDS } from "./utils/types";
+import {
+  DAILY_RESET_INTERVAL,
+  MAX_DAILY_PAUSES,
+  PAUSE_DURATION_SECONDS,
+} from "./utils/types";
 import { dummyIx } from "./utils/bankrunConnection";
 import { USER_ACCOUNT_E } from "./utils/mocks";
 import {
@@ -53,7 +59,8 @@ import {
   borrowIx,
   repayIx,
 } from "./utils/user-instructions";
-import { getBankrunBlockhash } from "./utils/tools";
+import { advanceBankrunClock, getBankrunBlockhash } from "./utils/tools";
+import { Clock } from "./utils/litesvm";
 
 describe("Panic Mode state test (Bankrun)", () => {
   type FeeState = IdlAccounts<Marginfi>["feeState"];
@@ -89,7 +96,9 @@ describe("Panic Mode state test (Bankrun)", () => {
           programFeeFixed: bigNumberToWrappedI80F48(PROGRAM_FEE_FIXED),
           programFeeRate: bigNumberToWrappedI80F48(PROGRAM_FEE_RATE),
           liquidationMaxFee: bigNumberToWrappedI80F48(LIQUIDATION_MAX_FEE),
-          orderExecutionMaxFee: bigNumberToWrappedI80F48(ORDER_EXECUTION_MAX_FEE),
+          orderExecutionMaxFee: bigNumberToWrappedI80F48(
+            ORDER_EXECUTION_MAX_FEE
+          ),
         })
       );
 
@@ -129,6 +138,86 @@ describe("Panic Mode state test (Bankrun)", () => {
       emodeGroup.publicKey,
       ecosystem.usdcMint.publicKey,
       seed.addn(1)
+    );
+  });
+
+  it("(fee admin) edits all global fee fields and restores them - happy path", async () => {
+    const before = await bankrunProgram.account.feeState.fetch(feeStateKey);
+
+    const orig = {
+      bankInitFlatSolFee: before.bankInitFlatSolFee,
+      liquidationFlatSolFee: before.liquidationFlatSolFee,
+      orderInitFlatSolFee: before.orderInitFlatSolFee,
+      programFeeFixed: before.programFeeFixed,
+      programFeeRate: before.programFeeRate,
+      liquidationMaxFee: before.liquidationMaxFee,
+      orderExecutionMaxFee: before.orderExecutionMaxFee,
+    };
+
+    const newBankInit = orig.bankInitFlatSolFee + 7;
+    const newLiqFlat = orig.liquidationFlatSolFee + 11;
+    const newOrderInit = orig.orderInitFlatSolFee + 13;
+    const newProgFixed = 0.005;
+    const newProgRate = 0.01;
+    const newLiqMax = 0.4;
+    const newOrderExecMax = 0.04;
+
+    const editTx = new Transaction().add(
+      await editGlobalFeeState(globalProgramAdmin.mrgnBankrunProgram, {
+        admin: globalProgramAdmin.wallet.publicKey,
+        bankInitFlatSolFee: newBankInit,
+        liquidationFlatSolFee: newLiqFlat,
+        orderInitFlatFeeDefault: newOrderInit,
+        programFeeFixed: bigNumberToWrappedI80F48(newProgFixed),
+        programFeeRate: bigNumberToWrappedI80F48(newProgRate),
+        liquidationMaxFee: bigNumberToWrappedI80F48(newLiqMax),
+        orderExecutionMaxFee: bigNumberToWrappedI80F48(newOrderExecMax),
+      })
+    );
+    editTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    editTx.sign(globalProgramAdmin.wallet);
+    await banksClient.processTransaction(editTx);
+
+    const after = await bankrunProgram.account.feeState.fetch(feeStateKey);
+    assert.equal(after.bankInitFlatSolFee, newBankInit);
+    assert.equal(after.liquidationFlatSolFee, newLiqFlat);
+    assert.equal(after.orderInitFlatSolFee, newOrderInit);
+    assertI80F48Approx(after.programFeeFixed, newProgFixed);
+    assertI80F48Approx(after.programFeeRate, newProgRate);
+    assertI80F48Approx(after.liquidationMaxFee, newLiqMax);
+    assertI80F48Approx(after.orderExecutionMaxFee, newOrderExecMax);
+    // Fields passed as null (admin/wallet/pauseDelegate) must be left untouched.
+    assertKeysEqual(after.globalFeeAdmin, before.globalFeeAdmin);
+    assertKeysEqual(after.globalFeeWallet, before.globalFeeWallet);
+    assertKeysEqual(after.pauseDelegateAdmin, before.pauseDelegateAdmin);
+
+    // Restore the shared fee state so later tests/suites see the original values.
+    const restoreTx = new Transaction().add(
+      await editGlobalFeeState(globalProgramAdmin.mrgnBankrunProgram, {
+        admin: globalProgramAdmin.wallet.publicKey,
+        bankInitFlatSolFee: orig.bankInitFlatSolFee,
+        liquidationFlatSolFee: orig.liquidationFlatSolFee,
+        orderInitFlatFeeDefault: orig.orderInitFlatSolFee,
+        programFeeFixed: orig.programFeeFixed,
+        programFeeRate: orig.programFeeRate,
+        liquidationMaxFee: orig.liquidationMaxFee,
+        orderExecutionMaxFee: orig.orderExecutionMaxFee,
+      })
+    );
+    restoreTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    restoreTx.sign(globalProgramAdmin.wallet);
+    await banksClient.processTransaction(restoreTx);
+
+    const restored = await bankrunProgram.account.feeState.fetch(feeStateKey);
+    assert.equal(restored.bankInitFlatSolFee, orig.bankInitFlatSolFee);
+    assert.equal(restored.liquidationFlatSolFee, orig.liquidationFlatSolFee);
+    assert.equal(restored.orderInitFlatSolFee, orig.orderInitFlatSolFee);
+    assertI80F48Approx(restored.programFeeFixed, orig.programFeeFixed);
+    assertI80F48Approx(restored.programFeeRate, orig.programFeeRate);
+    assertI80F48Approx(restored.liquidationMaxFee, orig.liquidationMaxFee);
+    assertI80F48Approx(
+      restored.orderExecutionMaxFee,
+      orig.orderExecutionMaxFee
     );
   });
 
@@ -177,9 +266,7 @@ describe("Panic Mode state test (Bankrun)", () => {
   it("(fee admin) extends an existing pause - happy path", async () => {
     for (let i = 1; i < MAX_DAILY_PAUSES; i++) {
       const isDelegatePause = i === 1;
-      const caller = isDelegatePause
-        ? users[0]
-        : globalProgramAdmin;
+      const caller = isDelegatePause ? users[0] : globalProgramAdmin;
       const callerPk = caller.wallet.publicKey;
       const recipientPk = users[1].wallet.publicKey;
 
@@ -200,7 +287,8 @@ describe("Panic Mode state test (Bankrun)", () => {
     assertBNApproximately(
       fs.panicState.pauseStartTimestamp,
       // firstTimestamp undefined error here? Bump the wait in the above test.
-      firstTimestamp.toNumber() + PAUSE_DURATION_SECONDS * (MAX_DAILY_PAUSES - 1),
+      firstTimestamp.toNumber() +
+        PAUSE_DURATION_SECONDS * (MAX_DAILY_PAUSES - 1),
       10
     );
     // No change on reset
@@ -529,7 +617,88 @@ describe("Panic Mode state test (Bankrun)", () => {
     assertBNApproximately(cache.lastCacheUpdate, now, 100);
   });
 
-  // TODO settings can be changed while paused
-  // TODO bankrun into the future and show we can pause again
-  // TODO bankrun into the future and show permissionless unpause
+  // The following three tests warp the bankrun clock far into the future. Save the current time and
+  // restore it in the after() hook below so the next spec (e06) still sees fresh oracles.
+  let savedClockUnix: bigint | undefined;
+
+  it("(fee admin) can pause again after the daily reset window elapses", async () => {
+    // The daily pause limit was exhausted above. Warp past the 24h reset window so the daily
+    // counter resets and a fresh pause is allowed again.
+    savedClockUnix = (await banksClient.getClock()).unixTimestamp;
+    await advanceBankrunClock(bankrunContext, DAILY_RESET_INTERVAL + 60);
+
+    const tx = new Transaction();
+    tx.add(await panicPause(globalProgramAdmin.mrgnBankrunProgram, {}));
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(globalProgramAdmin.wallet);
+    await banksClient.processTransaction(tx);
+
+    const fs = await bankrunProgram.account.feeState.fetch(feeStateKey);
+    assert.equal(fs.panicState.pauseFlags, 1);
+    // Daily counter reset to 0 by the warp, then this pause brings it to 1.
+    assert.equal(fs.panicState.dailyPauseCount, 1);
+    assert.equal(fs.panicState.consecutivePauseCount, 1);
+  });
+
+  it("(fee admin) settings can still be changed while paused", async () => {
+    // A pause blocks user actions (deposit/withdraw/borrow/repay/liquidate, asserted above) but must
+    // NOT block the admin from adjusting protocol settings during the emergency.
+    const newDelegate = users[1].wallet.publicKey;
+
+    const tx = new Transaction();
+    tx.add(
+      await editGlobalFeeState(globalProgramAdmin.mrgnBankrunProgram, {
+        admin: globalProgramAdmin.wallet.publicKey,
+        pauseDelegateAdmin: newDelegate,
+      })
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(globalProgramAdmin.wallet);
+    await banksClient.processTransaction(tx); // succeeds despite the active pause
+
+    const fs = await bankrunProgram.account.feeState.fetch(feeStateKey);
+    assert.equal(fs.pauseDelegateAdmin.toString(), newDelegate.toString());
+    assert.equal(fs.panicState.pauseFlags, 1); // still paused
+  });
+
+  it("(permissionless) anyone can unpause once the pause duration has elapsed", async () => {
+    // Before expiry, a permissionless unpause is rejected (only the admin can unpause early).
+    const earlyTx = new Transaction().add(
+      await panicUnpausePermissionless(users[1].mrgnBankrunProgram, {})
+    );
+    earlyTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    earlyTx.sign(users[1].wallet);
+    const earlyResult = await banksClient.tryProcessTransaction(earlyTx);
+    // PauseLimitExceeded (the pause has not yet expired)
+    assertBankrunTxFailed(earlyResult, 6082);
+
+    // Warp past the 6h pause duration; now any caller may clear the expired pause.
+    await advanceBankrunClock(bankrunContext, PAUSE_DURATION_SECONDS + 60);
+
+    const tx = new Transaction().add(
+      await panicUnpausePermissionless(users[1].mrgnBankrunProgram, {})
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(users[1].wallet);
+    await banksClient.processTransaction(tx);
+
+    const fs = await bankrunProgram.account.feeState.fetch(feeStateKey);
+    assert.equal(fs.panicState.pauseFlags, 0);
+  });
+
+  after(async () => {
+    // Restore the clock so e06 (next spec) isn't tripped by stale oracles from the warps above.
+    if (savedClockUnix !== undefined) {
+      const cur = await banksClient.getClock();
+      bankrunContext.setClock(
+        new Clock(
+          cur.slot,
+          cur.epochStartTimestamp,
+          cur.epoch,
+          cur.leaderScheduleEpoch,
+          savedClockUnix
+        )
+      );
+    }
+  });
 });

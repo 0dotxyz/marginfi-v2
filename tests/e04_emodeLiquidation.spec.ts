@@ -254,7 +254,13 @@ describe("Emode liquidation", () => {
   // instead of $150, the "actual" price of the collateral for liquidation purposes is $146.82
   // (150 * (1 - 1 * 0.0212))
 
-  // TODO look into above, is this a footgun with assets that have broad confidence bands?
+  // This confidence-interval discount is bounded, so a broad-band oracle can't run the collateral
+  // price away toward zero. `get_confidence_interval` (price.rs, both the Pyth and Switchboard
+  // adapters) caps the discount at MAX_CONF_INTERVAL = 5% of price via `min(conf, price * 0.05)`,
+  // and if the raw confidence exceeds the bank's `oracle_max_confidence` (default 10%) the read
+  // fails safe with OracleMaxConfidenceExceeded instead of returning a wildly discounted price. So
+  // a broad-band asset degrades gracefully: at most a 5% maint discount, and beyond the configured
+  // max it becomes temporarily unpriceable (txns revert) — the safe failure mode, tunable per bank.
 
   // * SOL is worth $146.82 (see above for confidence discount)
   // * Liquidator will claim .1 sol worth ~= $14.682 (this is really $15 with conf discount)
