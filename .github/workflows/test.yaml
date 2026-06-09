@@ -68,7 +68,6 @@ jobs:
         key: nextest-host-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml', 'programs/**/src/**', 'programs/**/tests/**', 'test-utils/**') }}
         restore-keys: |
           nextest-host-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-
-    # TODO cache transfer hook and mocks here instead of rebuilding them each time...
     - uses: ./.github/actions/build-workspace/
     # ─── Cache cargo-nextest ─────────────────────────────────────────────
     - name: Cache cargo-nextest binary

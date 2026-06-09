@@ -135,9 +135,16 @@ The protocol has two liquidation mechanisms, each with their own fee structure:
 
 ### Classic Liquidation
 
-- **Liquidator fee**: 2.5% of the repaid amount (goes to the liquidator as profit)
-- **Insurance fee**: 2.5% of the repaid amount (goes to the bank's insurance fund)
-- Total discount to the liquidatee: ~5%
+- **Liquidator fee**: liquidator's profit, configured per bank via
+  `BankConfig.liquidation_liquidator_fee_bps` (default 2.5% when unset)
+- **Insurance fee**: goes to the bank's insurance fund, configured per bank via
+  `BankConfig.liquidation_insurance_fee_bps` (default 2.5% when unset)
+- Total discount to the liquidatee: liquidator fee + insurance fee (~5% at the defaults)
+
+Both fees are read from the **liability bank** being repaid, expressed in basis points, and each is
+capped at `MAX_LIQUIDATION_FEE_BPS` (50%). A stored value of `0` falls back to
+`DEFAULT_LIQUIDATION_FEE_BPS` (250 bps = 2.5%), so banks created before these were configurable keep
+the historical 2.5% / 2.5% behavior with no migration.
 
 The liquidator chooses an asset to seize and a liability to repay. The exchange rate is the oracle
 price adjusted by these fees. A liquidation cannot make an account healthy; the liquidator can only
@@ -155,8 +162,10 @@ protocol enforces that the receiver does not extract more than the max fee as pr
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `LIQUIDATION_LIQUIDATOR_FEE` | 2.5% | Classic liquidation: liquidator's share |
-| `LIQUIDATION_INSURANCE_FEE` | 2.5% | Classic liquidation: insurance fund's share |
+| `BankConfig.liquidation_liquidator_fee_bps` | per-bank, bps | Classic liquidation: liquidator's share on the liability bank (0 ⇒ default) |
+| `BankConfig.liquidation_insurance_fee_bps` | per-bank, bps | Classic liquidation: insurance fund's share on the liability bank (0 ⇒ default) |
+| `DEFAULT_LIQUIDATION_FEE_BPS` | 250 (2.5%) | Fallback for either fee when its bank value is `0` |
+| `MAX_LIQUIDATION_FEE_BPS` | 5000 (50%) | Per-fee cap enforced in `BankConfig::validate` |
 | `BANKRUPT_THRESHOLD` | $0.10 | Equity below this triggers bankruptcy |
 | `EMPTY_BALANCE_THRESHOLD` | 1 (native unit) | Balances below this are considered empty |
 | `ZERO_AMOUNT_THRESHOLD` | 0.0001 | Amounts below this are treated as zero |
