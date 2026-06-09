@@ -94,7 +94,85 @@ describe("Init group and add banks with asset category flags", () => {
     }
   });
 
-  // TODO add bank permissionless fails prior to opting in
+  it("(permissionless) add staked bank before opting in - should fail", async () => {
+    // The group has not yet created its StakedSettings (the opt-in below), so a permissionless
+    // staked-bank add must fail up front: the stakedSettings account it requires doesn't exist yet.
+    const [settingsKey] = deriveStakedSettings(
+      program.programId,
+      marginfiGroup.publicKey
+    );
+
+    const oracleMeta: AccountMeta = {
+      pubkey: oracles.wsolOracle.publicKey,
+      isSigner: false,
+      isWritable: false,
+    };
+    const lstMeta: AccountMeta = {
+      pubkey: validators[0].splMint,
+      isSigner: false,
+      isWritable: false,
+    };
+    const solPoolMeta: AccountMeta = {
+      pubkey: validators[0].splSolPool,
+      isSigner: false,
+      isWritable: false,
+    };
+
+    // Supply every account explicitly: Anchor normally derives the group/bank/vaults by reading
+    // stakedSettings, but it doesn't exist yet, so we provide them so the PROGRAM is what rejects.
+    const [bankKey] = deriveBankWithSeed(
+      program.programId,
+      marginfiGroup.publicKey,
+      validators[0].splMint,
+      new BN(0)
+    );
+    const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
+      program.programId,
+      bankKey
+    );
+    const [liquidityVault] = deriveLiquidityVault(program.programId, bankKey);
+    const [insuranceVaultAuthority] = deriveInsuranceVaultAuthority(
+      program.programId,
+      bankKey
+    );
+    const [insuranceVault] = deriveInsuranceVault(program.programId, bankKey);
+    const [feeVaultAuthority] = deriveFeeVaultAuthority(
+      program.programId,
+      bankKey
+    );
+    const [feeVault] = deriveFeeVault(program.programId, bankKey);
+
+    const ix = await bankrunProgram.methods
+      .lendingPoolAddBankPermissionless(new BN(0))
+      .accounts({
+        marginfiGroup: marginfiGroup.publicKey,
+        stakedSettings: settingsKey,
+        feePayer: users[0].wallet.publicKey,
+        bankMint: validators[0].splMint,
+        solPool: validators[0].splSolPool,
+        stakePool: validators[0].splPool,
+        validatorVoteAccount: validators[0].voteAccount,
+        bank: bankKey,
+        liquidityVaultAuthority,
+        liquidityVault,
+        insuranceVaultAuthority,
+        insuranceVault,
+        feeVaultAuthority,
+        feeVault,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .remainingAccounts([oracleMeta, lstMeta, solPoolMeta])
+      .instruction();
+
+    const tx = new Transaction().add(ix);
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(users[0].wallet);
+
+    const result = await banksClient.tryProcessTransaction(tx);
+    // AccountOwnedByWrongProgram (3007): the stakedSettings PDA does not exist until the opt-in
+    // below, so it is still owned by the System Program rather than marginfi.
+    assertBankrunTxFailed(result, 3007);
+  });
 
   it("(admin) Init staked settings for group - opts in to use staked collateral", async () => {
     const settings = defaultStakedInterestSettings(

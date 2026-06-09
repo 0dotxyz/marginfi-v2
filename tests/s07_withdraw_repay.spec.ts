@@ -99,6 +99,8 @@ describe("Withdraw staked asset", () => {
     const userLstAta = user.accounts.get(LST_ATA);
 
     const lstBefore = await getTokenBalance(bankRunProvider, userLstAta);
+    const userAccBefore =
+      await user.mrgnBankrunProgram.account.marginfiAccount.fetch(userAccount);
 
     let tx = new Transaction().add(
       await withdrawIx(user.mrgnBankrunProgram, {
@@ -131,7 +133,29 @@ describe("Withdraw staked asset", () => {
     const balances = userAcc.lendingAccount.balances;
     assert.equal(balances[0].active, 1);
 
-    // TODO assert other balances changes as expected...
+    // The withdrawn LST asset position shrinks; the SOL borrow must be untouched.
+    const lstBalBefore = userAccBefore.lendingAccount.balances.find((b) =>
+      b.bankPk.equals(validators[0].bank)
+    )!;
+    const lstBalAfter = balances.find((b) =>
+      b.bankPk.equals(validators[0].bank)
+    )!;
+    assert.isTrue(
+      wrappedI80F48toBigNumber(lstBalAfter.assetShares).lt(
+        wrappedI80F48toBigNumber(lstBalBefore.assetShares)
+      )
+    );
+    const solBalBefore = userAccBefore.lendingAccount.balances.find((b) =>
+      b.bankPk.equals(bankKeypairSol.publicKey)
+    )!;
+    const solBalAfter = balances.find((b) =>
+      b.bankPk.equals(bankKeypairSol.publicKey)
+    )!;
+    assert.equal(solBalAfter.active, 1);
+    assert.equal(
+      wrappedI80F48toBigNumber(solBalAfter.liabilityShares).toString(),
+      wrappedI80F48toBigNumber(solBalBefore.liabilityShares).toString()
+    );
   });
 
   it("(user 3) repays a small amount of SOL borrowed against stake - happy path", async () => {
@@ -140,6 +164,8 @@ describe("Withdraw staked asset", () => {
     const userAccount = user.accounts.get(USER_ACCOUNT);
 
     const solBefore = await getTokenBalance(bankRunProvider, user.wsolAccount);
+    const userAccBefore =
+      await user.mrgnBankrunProgram.account.marginfiAccount.fetch(userAccount);
 
     let tx = new Transaction().add(
       await repayIx(user.mrgnBankrunProgram, {
@@ -172,7 +198,29 @@ describe("Withdraw staked asset", () => {
     const balances = userAcc.lendingAccount.balances;
     assert.equal(balances[1].active, 1);
 
-    // TODO assert other balances changes as expected...
+    // The repaid SOL liability shrinks; the LST collateral must be untouched.
+    const solBalBefore = userAccBefore.lendingAccount.balances.find((b) =>
+      b.bankPk.equals(bankKeypairSol.publicKey)
+    )!;
+    const solBalAfter = balances.find((b) =>
+      b.bankPk.equals(bankKeypairSol.publicKey)
+    )!;
+    assert.isTrue(
+      wrappedI80F48toBigNumber(solBalAfter.liabilityShares).lt(
+        wrappedI80F48toBigNumber(solBalBefore.liabilityShares)
+      )
+    );
+    const lstBalBefore = userAccBefore.lendingAccount.balances.find((b) =>
+      b.bankPk.equals(validators[0].bank)
+    )!;
+    const lstBalAfter = balances.find((b) =>
+      b.bankPk.equals(validators[0].bank)
+    )!;
+    assert.equal(lstBalAfter.active, 1);
+    assert.equal(
+      wrappedI80F48toBigNumber(lstBalAfter.assetShares).toString(),
+      wrappedI80F48toBigNumber(lstBalBefore.assetShares).toString()
+    );
   });
 
   it("(user 3) repays the entire borrowed SOL balance - happy path", async () => {
@@ -234,7 +282,20 @@ describe("Withdraw staked asset", () => {
     assertI80F48Equal(balances[1].liabilityShares, 0);
     assert.equal(balances[1].active, 0);
 
-    // TODO assert other balances changes as expected...
+    // repayAll closed the SOL liability without disturbing the LST collateral, which remains the
+    // only active balance with its share count unchanged.
+    const lstBalBefore = userAccBefore.lendingAccount.balances.find((b) =>
+      b.bankPk.equals(validators[0].bank)
+    )!;
+    const lstBalAfter = balances.find((b) =>
+      b.bankPk.equals(validators[0].bank)
+    )!;
+    assert.equal(lstBalAfter.active, 1);
+    assert.equal(
+      wrappedI80F48toBigNumber(lstBalAfter.assetShares).toString(),
+      wrappedI80F48toBigNumber(lstBalBefore.assetShares).toString()
+    );
+    assert.equal(balances.filter((b) => b.active === 1).length, 1);
   });
 
   it("(user 3) withdraws the entire native staked position - happy path", async () => {
@@ -292,6 +353,8 @@ describe("Withdraw staked asset", () => {
     assertI80F48Equal(balances[0].assetShares, 0);
     assert.equal(balances[0].active, 0);
 
-    // TODO assert other balances changes as expected...
+    // withdrawAll closed the LST collateral; the SOL liability was already repaid in full, so the
+    // account now has no active balances left.
+    assert.equal(balances.filter((b) => b.active === 1).length, 0);
   });
 });
