@@ -3900,6 +3900,8 @@ dependencies = [
  "anchor-spl",
  "bytemuck",
  "marginfi",
+ "marginfi-type-crate",
+ "solana-program",
  "static_assertions",
 ]
 

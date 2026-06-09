@@ -48,6 +48,10 @@ test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.t
 # All tests (for CI)
 all-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.ts --exit --require tests/rootHooks.ts"
 
+# Opt-in CU benchmark (NOT in any *.spec.ts slice, so it never runs in CI). Regenerates the CU
+# tables documented on reconcile_emode_configs* in type-crate/src/types/emode.rs.
+bench-emode = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/bench/emodeReconcile.bench.ts --exit --require tests/rootHooks.ts"
+
 # LiteSVM-only runner (no local validator)
 # Use: anchor run kamino-tests
 kamino-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/k*.spec.ts --exit --require tests/rootHooks.ts"
