@@ -172,11 +172,6 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
         );
       });
 
-      // TODO: Add negative test cases for bad oracle/reserve validation during withdraw operations
-      // Should test that health checks properly validate oracle accounts and reserve parameters
-      // This covers oracle account validation during health checks (not liquidation-specific)
-      // Related to PR #115 comment #49: https://github.com/mrgnlabs/marginfi-v2-internal/pull/115#discussion_r2250715403
-
       it("User B - Deposit and withdraw $1M worth of Token A", async () => {
         const tokenAAmount = 100_000;
         const DEPOSIT_AMOUNT = new BN(tokenAAmount).mul(
