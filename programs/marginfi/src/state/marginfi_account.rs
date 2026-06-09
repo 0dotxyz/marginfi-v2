@@ -985,7 +985,13 @@ pub fn check_account_bankrupt<'info>(
     remaining_ais: &'info [AccountInfo<'info>],
     health_cache: &mut Option<&mut HealthCache>,
 ) -> MarginfiResult {
-    // TODO remove this check here and raise it to the top-level instruction
+    // Reject bankruptcy checks while a flashloan is open. During a flashloan the account is allowed
+    // to be temporarily insolvent (collateral isn't posted yet), so it can look bankrupt while it
+    // actually isn't. Without this, an attacker could open a flashloan and have their own solvent
+    // account "bankrupted" — which seizes the position and socializes its losses to depositors.
+    //
+    // This lives in the shared check, not in each instruction (as an old TODO suggested), so callers
+    // can react differently: `handle_bankruptcy` fails on this error, `pulse_health` just records it.
     check!(
         !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
         MarginfiError::AccountInFlashloan
@@ -1832,17 +1838,23 @@ impl<'a> BankAccountWrapper<'a> {
             _ => {}
         }
 
-        let asset_shares_increase = bank.get_asset_shares(asset_amount_increase)?;
-        balance.change_asset_shares(asset_shares_increase)?;
-        bank.change_asset_shares(
-            asset_shares_increase,
-            matches!(operation_type, BalanceIncreaseType::BypassDepositLimit),
-        )?;
+        // Skip the no-op share updates when a side has no movement (e.g. a pure deposit has no
+        // liability to repay, a pure repay adds no assets). The amounts are `max(_, 0)`, so `> 0`
+        // captures exactly the cases where `change_*_shares(0)` would have been a no-op.
+        if asset_amount_increase > I80F48::ZERO {
+            let asset_shares_increase = bank.get_asset_shares(asset_amount_increase)?;
+            balance.change_asset_shares(asset_shares_increase)?;
+            bank.change_asset_shares(
+                asset_shares_increase,
+                matches!(operation_type, BalanceIncreaseType::BypassDepositLimit),
+            )?;
+        }
 
-        let liability_shares_decrease = bank.get_liability_shares(liability_amount_decrease)?;
-        // TODO: Use `IncreaseType` to skip certain balance updates, and save on compute.
-        balance.change_liability_shares(-liability_shares_decrease)?;
-        bank.change_liability_shares(-liability_shares_decrease, true)?;
+        if liability_amount_decrease > I80F48::ZERO {
+            let liability_shares_decrease = bank.get_liability_shares(liability_amount_decrease)?;
+            balance.change_liability_shares(-liability_shares_decrease)?;
+            bank.change_liability_shares(-liability_shares_decrease, true)?;
+        }
 
         // Record if the balance was an asset/liability after
         let has_assets =
@@ -1915,16 +1927,23 @@ impl<'a> BankAccountWrapper<'a> {
             _ => {}
         }
 
-        let asset_shares_decrease = bank.get_asset_shares(asset_amount_decrease)?;
-        balance.change_asset_shares(-asset_shares_decrease)?;
-        bank.change_asset_shares(-asset_shares_decrease, false)?;
+        // Skip the no-op share updates when a side has no movement (e.g. a pure withdraw adds no
+        // liability, a pure borrow removes no assets). The amounts are `max(_, 0)`, so `> 0`
+        // captures exactly the cases where `change_*_shares(0)` would have been a no-op.
+        if asset_amount_decrease > I80F48::ZERO {
+            let asset_shares_decrease = bank.get_asset_shares(asset_amount_decrease)?;
+            balance.change_asset_shares(-asset_shares_decrease)?;
+            bank.change_asset_shares(-asset_shares_decrease, false)?;
+        }
 
-        let liability_shares_increase = bank.get_liability_shares(liability_amount_increase)?;
-        balance.change_liability_shares(liability_shares_increase)?;
-        bank.change_liability_shares(
-            liability_shares_increase,
-            matches!(operation_type, BalanceDecreaseType::BypassBorrowLimit),
-        )?;
+        if liability_amount_increase > I80F48::ZERO {
+            let liability_shares_increase = bank.get_liability_shares(liability_amount_increase)?;
+            balance.change_liability_shares(liability_shares_increase)?;
+            bank.change_liability_shares(
+                liability_shares_increase,
+                matches!(operation_type, BalanceDecreaseType::BypassBorrowLimit),
+            )?;
+        }
 
         // Only liquidation is allowed to bypass this check.
         if !matches!(operation_type, BalanceDecreaseType::BypassBorrowLimit) {

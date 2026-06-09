@@ -260,9 +260,7 @@ pub enum InstructionKind {
     FailsIfPausedOrReduceState,
 }
 
-// TODO remove redundant checks for these elsewhere in the program (they are nested many laters deep
-// in various value delta functions)
-/// Validate the bank's state does not forbid the execution of an instruction
+/// Validate the bank's state does not forbid the execution of an instruction.
 pub fn validate_bank_state(bank: &Bank, kind: InstructionKind) -> MarginfiResult {
     if bank.config.operational_state == BankOperationalState::KilledByBankruptcy {
         return err!(MarginfiError::BankKilledByBankruptcy);

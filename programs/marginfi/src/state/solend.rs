@@ -109,7 +109,9 @@ impl SolendConfigCompact {
             _padding0: [0; 2],
             oracle_max_confidence: self.oracle_max_confidence,
             fixed_price: I80F48::ZERO.into(),
-            _padding1: [0; 16],
+            liquidation_liquidator_fee_bps: 0,
+            liquidation_insurance_fee_bps: 0,
+            _padding1: [0; 12],
         }
     }
 }

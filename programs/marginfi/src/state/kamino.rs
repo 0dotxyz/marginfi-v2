@@ -9,7 +9,6 @@ use marginfi_type_crate::types::{
 
 /// Used to configure Kamino banks. A simplified version of `BankConfigCompact` which omits most
 /// values related to interest since Kamino banks cannot earn interest or be borrowed against.
-// TODO: Jon mentioned there are some extra options he wants to see in config, investigate later.
 #[derive(AnchorDeserialize, AnchorSerialize, Debug, PartialEq, Eq)]
 pub struct KaminoConfigCompact {
     pub oracle: Pubkey,
@@ -109,7 +108,9 @@ impl KaminoConfigCompact {
             _padding0: [0; 2],
             oracle_max_confidence: self.oracle_max_confidence,
             fixed_price: I80F48::ZERO.into(),
-            _padding1: [0; 16],
+            liquidation_liquidator_fee_bps: 0,
+            liquidation_insurance_fee_bps: 0,
+            _padding1: [0; 12],
         }
     }
 }
