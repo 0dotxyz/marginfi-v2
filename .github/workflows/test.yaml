@@ -108,7 +108,7 @@ jobs:
     - name: Build workspace (mainnet IDs → target/sbf/)
       uses: ./.github/actions/build-workspace/
     - name: Build mocks (target/deploy/)
-      run: anchor build -p mocks
+      run: anchor build -p mocks --ignore-keys
     - name: Build transfer-hook (target/deploy/)
       run: anchor build -p test_transfer_hook --no-idl
     - name: Build marginfi localnet (target/deploy/)
@@ -246,7 +246,7 @@ jobs:
   localnet-test-marginfi:
     name: Anchor LiteSVM Tests
     runs-on: ubuntu-latest
-    needs: [ test-unit ]
+    needs: [ test-unit, anchor-build ]
     steps:
     - uses: actions/checkout@v4
     - uses: ./.github/actions/base-setup/
