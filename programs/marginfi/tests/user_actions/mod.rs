@@ -122,8 +122,12 @@ async fn automatic_interest_payments() -> anyhow::Result<()> {
         let clock: Clock = ctx.banks_client.get_sysvar().await?;
         clock.unix_timestamp
     };
-    test_f.set_pyth_oracle_timestamp(PYTH_SOL_FEED, now_ts).await;
-    test_f.set_pyth_oracle_timestamp(PYTH_USDC_FEED, now_ts).await;
+    test_f
+        .set_pyth_oracle_timestamp(PYTH_SOL_FEED, now_ts)
+        .await;
+    test_f
+        .set_pyth_oracle_timestamp(PYTH_USDC_FEED, now_ts)
+        .await;
 
     // Pulse the risk engine and verify the borrower is in a sane, healthy state: it holds ~1000
     // USDC of collateral against only the residual SOL interest as a liability.

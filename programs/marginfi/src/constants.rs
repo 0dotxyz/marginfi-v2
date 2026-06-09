@@ -116,4 +116,3 @@ pub const THIRD_PARTY_CPI_RULES: &[(u16, Pubkey)] = &[
 ///
 /// * IDs >= PDA_FREE_THRESHOLD are "restricted": must contact us to register first.
 pub const PDA_FREE_THRESHOLD: u16 = 10_000;
-

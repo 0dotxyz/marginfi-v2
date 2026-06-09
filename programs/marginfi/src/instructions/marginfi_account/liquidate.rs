@@ -246,8 +246,10 @@ pub fn lending_account_liquidate<'info>(
         check!(liab_price > I80F48::ZERO, MarginfiError::ZeroLiabilityPrice);
 
         // Liquidation fees are configured per-bank on the liability bank (0 => default 250 bps).
-        let liquidator_fee = liquidation_fee_fraction(liab_bank.config.liquidation_liquidator_fee_bps);
-        let insurance_fee = liquidation_fee_fraction(liab_bank.config.liquidation_insurance_fee_bps);
+        let liquidator_fee =
+            liquidation_fee_fraction(liab_bank.config.liquidation_liquidator_fee_bps);
+        let insurance_fee =
+            liquidation_fee_fraction(liab_bank.config.liquidation_insurance_fee_bps);
         let final_discount: I80F48 = I80F48::ONE - (insurance_fee + liquidator_fee);
         let liquidator_discount: I80F48 = I80F48::ONE - liquidator_fee;
 

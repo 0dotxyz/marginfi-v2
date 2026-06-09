@@ -1427,12 +1427,18 @@ fn load_swb_lite_feed(data: Ref<&mut [u8]>) -> MarginfiResult<(LitePullFeedAccou
     {
         let feed = PullFeedAccountData::parse(data)
             .map_err(|_| MarginfiError::SwitchboardInvalidAccount)?;
-        Ok((LitePullFeedAccountData::from(&*feed), feed.last_update_timestamp))
+        Ok((
+            LitePullFeedAccountData::from(&*feed),
+            feed.last_update_timestamp,
+        ))
     }
     #[cfg(not(target_os = "solana"))]
     {
         let feed = parse_swb_ignore_alignment(data)?;
-        Ok((LitePullFeedAccountData::from(&feed), feed.last_update_timestamp))
+        Ok((
+            LitePullFeedAccountData::from(&feed),
+            feed.last_update_timestamp,
+        ))
     }
 }
 

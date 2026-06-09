@@ -412,21 +412,24 @@ mod tests {
         let idl_accounts = discrim_map("accounts");
         let idl_ixs = discrim_map("instructions");
 
-        let check = |map: &std::collections::HashMap<String, [u8; 8]>,
-                     idl_name: &str,
-                     want: [u8; 8]| {
-            let got = map.get(idl_name).unwrap_or_else(|| {
-                panic!("IDL is missing `{idl_name}` (renamed in the program?)")
-            });
-            assert_eq!(*got, want, "discriminator drift for `{idl_name}`");
-        };
+        let check =
+            |map: &std::collections::HashMap<String, [u8; 8]>, idl_name: &str, want: [u8; 8]| {
+                let got = map.get(idl_name).unwrap_or_else(|| {
+                    panic!("IDL is missing `{idl_name}` (renamed in the program?)")
+                });
+                assert_eq!(*got, want, "discriminator drift for `{idl_name}`");
+            };
 
         // Accounts (constant -> IDL account name)
         check(&idl_accounts, "MarginfiGroup", discriminators::GROUP);
         check(&idl_accounts, "Bank", discriminators::BANK);
         check(&idl_accounts, "MarginfiAccount", discriminators::ACCOUNT);
         check(&idl_accounts, "FeeState", discriminators::FEE_STATE);
-        check(&idl_accounts, "StakedSettings", discriminators::STAKED_SETTINGS);
+        check(
+            &idl_accounts,
+            "StakedSettings",
+            discriminators::STAKED_SETTINGS,
+        );
         check(
             &idl_accounts,
             "LiquidationRecord",
@@ -451,7 +454,11 @@ mod tests {
             "start_liquidation",
             ix_discriminators::START_LIQUIDATION,
         );
-        check(&idl_ixs, "end_liquidation", ix_discriminators::END_LIQUIDATION);
+        check(
+            &idl_ixs,
+            "end_liquidation",
+            ix_discriminators::END_LIQUIDATION,
+        );
         check(
             &idl_ixs,
             "marginfi_account_start_execute_order",
@@ -477,7 +484,11 @@ mod tests {
             "kamino_withdraw",
             ix_discriminators::KAMINO_WITHDRAW,
         );
-        check(&idl_ixs, "drift_withdraw", ix_discriminators::DRIFT_WITHDRAW);
+        check(
+            &idl_ixs,
+            "drift_withdraw",
+            ix_discriminators::DRIFT_WITHDRAW,
+        );
         check(
             &idl_ixs,
             "juplend_withdraw",
@@ -498,6 +509,10 @@ mod tests {
             "start_deleverage",
             ix_discriminators::START_DELEVERAGE,
         );
-        check(&idl_ixs, "end_deleverage", ix_discriminators::END_DELEVERAGE);
+        check(
+            &idl_ixs,
+            "end_deleverage",
+            ix_discriminators::END_DELEVERAGE,
+        );
     }
 }

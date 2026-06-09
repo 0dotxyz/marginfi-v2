@@ -1056,7 +1056,6 @@ async fn limit_order_fails_with_spoofed_oracle() -> anyhow::Result<()> {
     Ok(())
 }
 
-
 #[tokio::test]
 async fn limit_order_partial_repay_without_repay_all_fails() -> anyhow::Result<()> {
     let asset_mint = BankMint::Sol;
@@ -1136,10 +1135,7 @@ async fn limit_order_partial_repay_without_repay_all_fails() -> anyhow::Result<(
     );
 
     let result = ctx.banks_client.process_transaction(tx).await;
-    assert_custom_error!(
-        result.unwrap_err(),
-        MarginfiError::OrderLiabilityNotClosed
-    );
+    assert_custom_error!(result.unwrap_err(), MarginfiError::OrderLiabilityNotClosed);
 
     Ok(())
 }

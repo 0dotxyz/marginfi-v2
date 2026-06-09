@@ -1,9 +1,9 @@
 use anchor_lang::prelude::*;
 use bytemuck::Zeroable;
-use solana_program::log::sol_log_compute_units;
 use marginfi_type_crate::types::{
     reconcile_emode_configs, reconcile_emode_configs_classic, EmodeConfig,
 };
+use solana_program::log::sol_log_compute_units;
 
 #[derive(Accounts)]
 pub struct BenchReconcileEmode<'info> {
