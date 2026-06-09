@@ -5,7 +5,7 @@ runs:
   steps:
   # ─── Cache the Solana install ────────────────────────────────
   - name: Cache Solana CLI
-    uses: actions/cache@v3
+    uses: actions/cache@v4
     id: cache-solana
     with:
       path: |
