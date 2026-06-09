@@ -108,7 +108,15 @@ pub struct BankConfig {
     /// Stored oracle price for `OracleSetup::Fixed`, otherwise does nothing
     pub fixed_price: WrappedI80F48,
 
-    pub _padding1: [u8; 16],
+    /// Fee (in basis points) the liquidator earns when liquidating against this bank's liability.
+    /// * 0 falls back to the default (`DEFAULT_LIQUIDATION_FEE_BPS` = 250 bps = 2.5%).
+    pub liquidation_liquidator_fee_bps: u16,
+    /// Fee (in basis points) routed to this bank's insurance fund on a liquidation against its
+    /// liability.
+    /// * 0 falls back to the default (`DEFAULT_LIQUIDATION_FEE_BPS` = 250 bps = 2.5%).
+    pub liquidation_insurance_fee_bps: u16,
+
+    pub _padding1: [u8; 12],
 }
 
 impl Default for BankConfig {
@@ -134,7 +142,9 @@ impl Default for BankConfig {
             _padding0: [0; 2],
             oracle_max_confidence: 0,
             fixed_price: I80F48::ZERO.into(),
-            _padding1: [0; 16],
+            liquidation_liquidator_fee_bps: 0,
+            liquidation_insurance_fee_bps: 0,
+            _padding1: [0; 12],
         }
     }
 }
@@ -168,6 +178,10 @@ pub struct BankConfigOpt {
     pub permissionless_bad_debt_settlement: Option<bool>,
     pub freeze_settings: Option<bool>,
     pub tokenless_repayments_allowed: Option<bool>,
+
+    /// Per-bank liquidation fees in basis points (0 => default 250 bps = 2.5%).
+    pub liquidation_liquidator_fee_bps: Option<u16>,
+    pub liquidation_insurance_fee_bps: Option<u16>,
 }
 
 #[repr(C)]
@@ -280,7 +294,9 @@ impl From<BankConfigCompact> for BankConfig {
             _padding0: [0; 2],
             oracle_max_confidence: config.oracle_max_confidence,
             fixed_price: I80F48::ZERO.into(),
-            _padding1: [0; 16],
+            liquidation_liquidator_fee_bps: 0,
+            liquidation_insurance_fee_bps: 0,
+            _padding1: [0; 12],
         }
     }
 }

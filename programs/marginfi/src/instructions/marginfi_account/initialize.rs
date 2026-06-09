@@ -1,4 +1,4 @@
-use crate::constants::is_allowed_cpi_for_third_party_id;
+use crate::ix_utils::is_allowed_cpi_for_third_party_id;
 use crate::state::marginfi_account::MarginfiAccountImpl;
 use crate::{
     events::{AccountEventHeader, MarginfiAccountCreateEvent},

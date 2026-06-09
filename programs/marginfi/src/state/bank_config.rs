@@ -1,7 +1,10 @@
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::{MAX_PYTH_ORACLE_AGE, ORACLE_MIN_AGE, TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE},
+    constants::{
+        MAX_LIQUIDATION_FEE_BPS, MAX_PYTH_ORACLE_AGE, ORACLE_MIN_AGE,
+        TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE,
+    },
     types::{BalanceSide, BankConfig, OracleSetup, RequirementType, RiskTier},
 };
 
@@ -94,6 +97,13 @@ impl BankConfigImpl for BankConfig {
         check!(
             self.oracle_max_age >= ORACLE_MIN_AGE,
             MarginfiError::InvalidOracleSetup
+        );
+
+        // Each liquidation fee is capped so the two together stay below 100% (0 => default).
+        check!(
+            self.liquidation_liquidator_fee_bps <= MAX_LIQUIDATION_FEE_BPS
+                && self.liquidation_insurance_fee_bps <= MAX_LIQUIDATION_FEE_BPS,
+            MarginfiError::InvalidConfig
         );
 
         Ok(())

@@ -18,7 +18,7 @@ pub fn copy_fee_state_to_v2(ctx: Context<CopyFeeStateToV2>) -> Result<()> {
     // All other fields are copied from the v1 state.
     fee_state_v2.global_fee_admin = fee_state.global_fee_admin;
     fee_state_v2.global_fee_wallet = fee_state.global_fee_wallet;
-    fee_state_v2.placeholder0 = fee_state.placeholder0;
+    fee_state_v2.account_transfer_fee = fee_state.account_transfer_fee;
     fee_state_v2.bank_init_flat_sol_fee = fee_state.bank_init_flat_sol_fee;
     fee_state_v2.liquidation_max_fee = fee_state.liquidation_max_fee;
     fee_state_v2.program_fee_fixed = fee_state.program_fee_fixed;

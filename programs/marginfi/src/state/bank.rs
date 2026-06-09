@@ -459,6 +459,15 @@ impl BankImpl for Bank {
 
         set_if_some!(self.config.oracle_max_age, config.oracle_max_age);
 
+        set_if_some!(
+            self.config.liquidation_liquidator_fee_bps,
+            config.liquidation_liquidator_fee_bps
+        );
+        set_if_some!(
+            self.config.liquidation_insurance_fee_bps,
+            config.liquidation_insurance_fee_bps
+        );
+
         if let Some(flag) = config.permissionless_bad_debt_settlement {
             msg!(
                 "setting bad debt settlement: {:?}",

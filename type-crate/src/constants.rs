@@ -26,9 +26,14 @@ pub const EXECUTE_ORDER_SEED: &str = "execute_order";
 
 pub const METADATA_SEED: &str = "metadata";
 
-/// TODO: Make these variable per bank
-pub const LIQUIDATION_LIQUIDATOR_FEE: I80F48 = I80F48!(0.025);
-pub const LIQUIDATION_INSURANCE_FEE: I80F48 = I80F48!(0.025);
+/// Default liquidation fee in basis points, used when a bank's `liquidation_liquidator_fee_bps` /
+/// `liquidation_insurance_fee_bps` is 0. 250 bps = 2.5%, matching the historical hardcoded values.
+pub const DEFAULT_LIQUIDATION_FEE_BPS: u16 = 250;
+
+/// Maximum per-fee liquidation fee (bps) an admin may configure. Caps each of the two fees so their
+/// sum stays below 100% — otherwise the liquidatee's collateral credit (`final_discount`) would go
+/// negative.
+pub const MAX_LIQUIDATION_FEE_BPS: u16 = 5_000;
 
 pub const SECONDS_PER_YEAR: I80F48 = I80F48!(31_536_000);
 pub const DAILY_RESET_INTERVAL: i64 = 24 * 60 * 60; // 24 hours
@@ -208,6 +213,7 @@ pub mod discriminators {
     pub const LIQUIDATION_RECORD: [u8; 8] = [95, 116, 23, 132, 89, 210, 245, 162];
     pub const ORDER: [u8; 8] = [134, 173, 223, 185, 77, 86, 28, 51];
     pub const EXECUTE_ORDER_RECORD: [u8; 8] = [6, 100, 107, 60, 164, 226, 56, 97];
+    pub const BANK_METADATA: [u8; 8] = [49, 207, 31, 34, 67, 225, 169, 186];
 }
 
 pub mod ix_discriminators {

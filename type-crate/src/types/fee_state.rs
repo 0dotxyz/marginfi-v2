@@ -28,8 +28,13 @@ pub struct FeeState {
     /// The base wallet for all protocol fees. All SOL fees go to this wallet. All non-SOL fees go
     /// to the cannonical ATA of this wallet for that asset.
     pub global_fee_wallet: Pubkey,
-    // Reserved for future use, forces 8-byte alignment
-    pub placeholder0: u64,
+    /// Flat fee in lamports paid to the global fee wallet when initiating an account transfer
+    /// (anti-spam; 5,000,000 lamports ~= $0.50). A stored 0 means "use the default"
+    /// (`DEFAULT_ACCOUNT_TRANSFER_FEE_LAMPORTS`), which preserves the legacy fee for FeeStates
+    /// created before this field existed.
+    pub account_transfer_fee: u32,
+    // Reserved for future use — remainder of the former `placeholder0: u64`, keeps 8-byte alignment
+    _placeholder0: [u8; 4],
     /// Flat fee assessed when a new bank is initialized, in lamports.
     /// * In SOL, in native decimals.
     pub bank_init_flat_sol_fee: u32,
@@ -95,8 +100,13 @@ pub struct FeeStateV2 {
     /// The base wallet for all protocol fees. All SOL fees go to this wallet. All non-SOL fees go
     /// to the cannonical ATA of this wallet for that asset.
     pub global_fee_wallet: Pubkey,
-    // Reserved for future use, forces 8-byte alignment
-    pub placeholder0: u64,
+    /// Flat fee in lamports paid to the global fee wallet when initiating an account transfer
+    /// (anti-spam; 5,000,000 lamports ~= $0.50). A stored 0 means "use the default"
+    /// (`DEFAULT_ACCOUNT_TRANSFER_FEE_LAMPORTS`), which preserves the legacy fee for FeeStates
+    /// created before this field existed.
+    pub account_transfer_fee: u32,
+    // Reserved for future use — remainder of the former `placeholder0: u64`, keeps 8-byte alignment
+    _placeholder0: [u8; 4],
     /// Flat fee assessed when a new bank is initialized, in lamports.
     /// * In SOL, in native decimals.
     pub bank_init_flat_sol_fee: u32,
