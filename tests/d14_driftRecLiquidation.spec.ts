@@ -2,9 +2,12 @@ import { BN } from "@coral-xyz/anchor";
 import {
   ComputeBudgetProgram,
   AccountMeta,
+  AddressLookupTableAccount,
   Keypair,
   PublicKey,
   Transaction,
+  TransactionMessage,
+  VersionedTransaction,
 } from "@solana/web3.js";
 import { createMintToInstruction } from "@solana/spl-token";
 import {
@@ -21,9 +24,20 @@ import {
   DRIFT_TOKEN_A_PULL_FEED,
   DRIFT_TOKEN_A_PULL_ORACLE,
   DRIFT_TOKEN_A_SPOT_MARKET,
+  klendBankrunProgram,
+  kaminoAccounts,
+  farmAccounts,
+  MARKET,
+  TOKEN_A_RESERVE,
+  A_FARM_STATE,
+  FARMS_PROGRAM_ID,
 } from "./rootHooks";
 import { genericMultiBankTestSetup } from "./genericSetups";
-import { processBankrunTransaction } from "./utils/tools";
+import {
+  createLut,
+  getBankrunBlockhash,
+  processBankrunTransaction,
+} from "./utils/tools";
 import {
   makeAddDriftBankIx,
   makeInitDriftUserIx,
@@ -35,10 +49,21 @@ import {
   TOKEN_A_MARKET_INDEX,
   refreshDriftOracles,
 } from "./utils/drift-utils";
-import { deriveBankWithSeed } from "./utils/pdas";
 import {
-  refreshPullOraclesBankrun,
-} from "./utils/bankrun-oracles";
+  deriveBankWithSeed,
+  deriveBaseObligation,
+  deriveLiquidityVaultAuthority,
+} from "./utils/pdas";
+import {
+  makeKaminoDepositIx,
+  makeKaminoWithdrawIx,
+} from "./utils/kamino-instructions";
+import {
+  simpleRefreshObligation,
+  simpleRefreshReserve,
+} from "./utils/kamino-utils";
+import { ensureMultiSuiteIntegrationsSetup } from "./utils/multi-limits-setup";
+import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { makeUpdateSpotMarketCumulativeInterestIx } from "./utils/drift-sdk";
 import {
   borrowIx,
@@ -61,7 +86,7 @@ import { getEpochAndSlot } from "./utils/bankrunConnection";
 
 const USER_ACCOUNT_D15 = "d15_account";
 const THROWAWAY_GROUP_SEED_D15 = Buffer.from(
-  "MARGINFI_GROUP_SEED_123400000015",
+  "MARGINFI_GROUP_SEED_123400000015"
 );
 const STARTING_SEED = 150;
 const TIME_TO_WAIT = 0.1 * 60 * 60;
@@ -81,7 +106,7 @@ describe("d14: Drift rec liquidation", () => {
       1,
       USER_ACCOUNT_D15,
       THROWAWAY_GROUP_SEED_D15,
-      STARTING_SEED,
+      STARTING_SEED
     );
     throwawayGroup = result.throwawayGroup;
     liabBank = result.banks[0];
@@ -95,7 +120,7 @@ describe("d14: Drift rec liquidation", () => {
       bankrunProgram.programId,
       throwawayGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
-      bankSeed,
+      bankSeed
     );
 
     const driftConfig = defaultDriftBankConfig(oracles.tokenAOracle.publicKey);
@@ -112,7 +137,7 @@ describe("d14: Drift rec liquidation", () => {
       {
         seed: bankSeed,
         config: driftConfig,
-      },
+      }
     );
 
     const addBankTx = new Transaction().add(addBankIx);
@@ -121,7 +146,7 @@ describe("d14: Drift rec liquidation", () => {
       addBankTx,
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const initUserAmount = new BN(100);
@@ -130,15 +155,15 @@ describe("d14: Drift rec liquidation", () => {
         ecosystem.tokenAMint.publicKey,
         groupAdmin.tokenAAccount,
         globalProgramAdmin.wallet.publicKey,
-        initUserAmount.toNumber(),
-      ),
+        initUserAmount.toNumber()
+      )
     );
     await processBankrunTransaction(
       bankrunContext,
       fundAdminTx,
       [globalProgramAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const initUserIx = await makeInitDriftUserIx(
@@ -152,7 +177,7 @@ describe("d14: Drift rec liquidation", () => {
       {
         amount: initUserAmount,
       },
-      TOKEN_A_MARKET_INDEX,
+      TOKEN_A_MARKET_INDEX
     );
 
     const initUserTx = new Transaction().add(initUserIx);
@@ -161,7 +186,7 @@ describe("d14: Drift rec liquidation", () => {
       initUserTx,
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const adminAccount = groupAdmin.accounts.get(USER_ACCOUNT_D15);
@@ -173,14 +198,14 @@ describe("d14: Drift rec liquidation", () => {
         tokenAccount: groupAdmin.lstAlphaAccount,
         amount: seedLiqAmount,
         depositUpToLimit: false,
-      }),
+      })
     );
     await processBankrunTransaction(
       bankrunContext,
       seedLiqTx,
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
   });
 
@@ -196,23 +221,22 @@ describe("d14: Drift rec liquidation", () => {
     const remaining = composeRemainingAccounts(remainingAccounts);
     remainingStartMeta =
       composeRemainingAccountsWriteableMeta(remainingAccounts);
-    remainingEndMeta =
-      composeRemainingAccountsMetaBanksOnly(remainingAccounts);
+    remainingEndMeta = composeRemainingAccountsMetaBanksOnly(remainingAccounts);
 
     const fundTokenATx = new Transaction().add(
       createMintToInstruction(
         ecosystem.tokenAMint.publicKey,
         liquidatee.tokenAAccount,
         globalProgramAdmin.wallet.publicKey,
-        100 * 10 ** ecosystem.tokenADecimals,
-      ),
+        100 * 10 ** ecosystem.tokenADecimals
+      )
     );
     await processBankrunTransaction(
       bankrunContext,
       fundTokenATx,
       [globalProgramAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const depositAmount = new BN(50 * 10 ** ecosystem.tokenADecimals);
@@ -225,7 +249,7 @@ describe("d14: Drift rec liquidation", () => {
         driftOracle: driftTokenAPullOracle,
       },
       depositAmount,
-      TOKEN_A_MARKET_INDEX,
+      TOKEN_A_MARKET_INDEX
     );
 
     const depositTx = new Transaction().add(depositIx);
@@ -234,7 +258,7 @@ describe("d14: Drift rec liquidation", () => {
       depositTx,
       [liquidatee.wallet],
       false,
-      true,
+      true
     );
 
     const borrowAmount = new BN(2 * 10 ** ecosystem.lstAlphaDecimals);
@@ -246,14 +270,14 @@ describe("d14: Drift rec liquidation", () => {
         tokenAccount: liquidatee.lstAlphaAccount,
         remaining,
         amount: borrowAmount,
-      }),
+      })
     );
     await processBankrunTransaction(
       bankrunContext,
       borrowTx,
       [liquidatee.wallet],
       false,
-      true,
+      true
     );
   });
 
@@ -277,14 +301,14 @@ describe("d14: Drift rec liquidation", () => {
       await configureBank(groupAdmin.mrgnBankrunProgram, {
         bank: liabBank,
         bankConfigOpt: config,
-      }),
+      })
     );
     await processBankrunTransaction(
       bankrunContext,
       configTx,
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const healthTx = new Transaction().add(
@@ -292,28 +316,28 @@ describe("d14: Drift rec liquidation", () => {
       await healthPulse(liquidatee.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
         remaining,
-      }),
+      })
     );
     await processBankrunTransaction(
       bankrunContext,
       healthTx,
       [liquidatee.wallet],
       false,
-      true,
+      true
     );
 
     const initLiqRecordTx = new Transaction().add(
       await initLiquidationRecordIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
         feePayer: liquidator.wallet.publicKey,
-      }),
+      })
     );
     await processBankrunTransaction(
       bankrunContext,
       initLiqRecordTx,
       [liquidator.wallet],
       false,
-      true,
+      true
     );
 
     const withdrawAmount = new BN(1 * 10 ** ecosystem.tokenADecimals);
@@ -339,7 +363,7 @@ describe("d14: Drift rec liquidation", () => {
           withdrawAll: false,
           remaining,
         },
-        driftBankrunProgram,
+        driftBankrunProgram
       ),
       await repayIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
@@ -350,7 +374,7 @@ describe("d14: Drift rec liquidation", () => {
       await endLiquidationIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
         remaining: remainingEndMeta,
-      }),
+      })
     );
 
     await processBankrunTransaction(
@@ -358,7 +382,7 @@ describe("d14: Drift rec liquidation", () => {
       liquidationTx,
       [liquidator.wallet],
       false,
-      true,
+      true
     );
   });
 
@@ -373,7 +397,7 @@ describe("d14: Drift rec liquidation", () => {
       0n,
       BigInt(epoch),
       0n,
-      targetUnix,
+      targetUnix
     );
     bankrunContext.setClock(newClock);
 
@@ -382,7 +406,7 @@ describe("d14: Drift rec liquidation", () => {
       oracles,
       driftAccounts,
       bankrunContext,
-      banksClient,
+      banksClient
     );
   });
 
@@ -412,7 +436,7 @@ describe("d14: Drift rec liquidation", () => {
         withdrawAll: false,
         remaining,
       },
-      driftBankrunProgram,
+      driftBankrunProgram
     );
 
     const repayAmount = new BN((1 / 5) * 10 ** ecosystem.lstAlphaDecimals);
@@ -436,7 +460,7 @@ describe("d14: Drift rec liquidation", () => {
       startLiqIx,
       driftWithdrawIx,
       repayLiqIx,
-      endLiqIx,
+      endLiqIx
     );
 
     // Passes without refreshSpotMarketIx
@@ -445,7 +469,7 @@ describe("d14: Drift rec liquidation", () => {
       liquidationTx,
       [liquidator.wallet],
       true,
-      false,
+      false
     );
 
     assertBankrunTxFailed(result, 6322);
@@ -454,7 +478,7 @@ describe("d14: Drift rec liquidation", () => {
     const refreshSpotMarketIx = await makeUpdateSpotMarketCumulativeInterestIx(
       driftBankrunProgram,
       { oracle: driftTokenAPullOracle },
-      TOKEN_A_MARKET_INDEX,
+      TOKEN_A_MARKET_INDEX
     );
 
     const refreshedLiquidationTx = new Transaction().add(
@@ -463,7 +487,7 @@ describe("d14: Drift rec liquidation", () => {
       startLiqIx,
       driftWithdrawIx,
       repayLiqIx,
-      endLiqIx,
+      endLiqIx
     );
 
     await processBankrunTransaction(
@@ -471,9 +495,394 @@ describe("d14: Drift rec liquidation", () => {
       refreshedLiquidationTx,
       [liquidator.wallet],
       false,
-      true,
+      true
     );
   });
 });
 
-// TODO same for mixed-balances including Kamino
+// Same flow as d14 above, but the liquidatee holds collateral in BOTH a Drift
+// and a Kamino bank, and a single receivership transaction
+// (start -> driftWithdraw + kaminoWithdraw -> repay -> end) unwinds both legs.
+const USER_ACCOUNT_D14B = "d14b_account";
+const THROWAWAY_GROUP_SEED_D14B = Buffer.from(
+  "MARGINFI_GROUP_SEED_123400000016"
+);
+const STARTING_SEED_B = 160;
+
+describe("d14b: Drift + Kamino mixed rec liquidation", () => {
+  let throwawayGroup: Keypair;
+  let liabBank: PublicKey;
+  let kaminoBank: PublicKey;
+  let driftBank: PublicKey;
+  let lendingMarket: PublicKey;
+  let tokenAReserve: PublicKey;
+  let reserveFarmState: PublicKey;
+  let driftSpotMarket: PublicKey;
+  let driftPullOracle: PublicKey;
+
+  // Drift bank, Kamino bank, then the regular liability bank.
+  let remainingGroups: PublicKey[][] = [];
+  let remaining: PublicKey[] = [];
+  let remainingStartMeta: AccountMeta[] = [];
+  let remainingEndMeta: AccountMeta[] = [];
+
+  const kaminoObligationFarmUserState = (): PublicKey => {
+    const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
+      bankrunProgram.programId,
+      kaminoBank
+    );
+    const [obligation] = deriveBaseObligation(
+      lendingVaultAuthority,
+      lendingMarket
+    );
+    const [userState] = PublicKey.findProgramAddressSync(
+      [Buffer.from("user"), reserveFarmState.toBuffer(), obligation.toBuffer()],
+      FARMS_PROGRAM_ID
+    );
+    return userState;
+  };
+
+  const refreshKaminoIxs = async () => {
+    const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
+      bankrunProgram.programId,
+      kaminoBank
+    );
+    const [obligation] = deriveBaseObligation(
+      lendingVaultAuthority,
+      lendingMarket
+    );
+    return [
+      await simpleRefreshReserve(
+        klendBankrunProgram,
+        tokenAReserve,
+        lendingMarket,
+        oracles.tokenAOracle.publicKey
+      ),
+      await simpleRefreshObligation(
+        klendBankrunProgram,
+        lendingMarket,
+        obligation,
+        [tokenAReserve]
+      ),
+    ];
+  };
+
+  before(async () => {
+    // The drift slice doesn't run the k* setup specs, so bootstrap the Kamino
+    // market/reserve/farm (and Drift) before adding integration banks.
+    await ensureMultiSuiteIntegrationsSetup();
+
+    const result = await genericMultiBankTestSetup(
+      1,
+      USER_ACCOUNT_D14B,
+      THROWAWAY_GROUP_SEED_D14B,
+      STARTING_SEED_B,
+      1, // one Kamino bank
+      1 // one Drift bank
+    );
+    throwawayGroup = result.throwawayGroup;
+    liabBank = result.banks[0];
+    kaminoBank = result.kaminoBanks[0];
+    driftBank = result.driftBanks[0];
+
+    lendingMarket = kaminoAccounts.get(MARKET);
+    tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE);
+    reserveFarmState = farmAccounts.get(A_FARM_STATE);
+    driftSpotMarket = driftAccounts.get(DRIFT_TOKEN_A_SPOT_MARKET);
+    driftPullOracle = driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE);
+
+    // Drift, Kamino, then the regular liability bank.
+    remainingGroups = [
+      [driftBank, oracles.tokenAOracle.publicKey, driftSpotMarket],
+      [kaminoBank, oracles.tokenAOracle.publicKey, tokenAReserve],
+      [liabBank, oracles.pythPullLst.publicKey],
+    ];
+    remaining = composeRemainingAccounts(remainingGroups);
+    remainingStartMeta = composeRemainingAccountsWriteableMeta(remainingGroups);
+    remainingEndMeta = composeRemainingAccountsMetaBanksOnly(remainingGroups);
+
+    // Seed the liability bank so the liquidatee has something to borrow.
+    const adminAccount = groupAdmin.accounts.get(USER_ACCOUNT_D14B);
+    const seedLiqAmount = new BN(1_000 * 10 ** ecosystem.lstAlphaDecimals);
+    const seedLiqTx = new Transaction().add(
+      await depositIx(groupAdmin.mrgnBankrunProgram, {
+        marginfiAccount: adminAccount,
+        bank: liabBank,
+        tokenAccount: groupAdmin.lstAlphaAccount,
+        amount: seedLiqAmount,
+        depositUpToLimit: false,
+      })
+    );
+    await processBankrunTransaction(
+      bankrunContext,
+      seedLiqTx,
+      [groupAdmin.wallet],
+      false,
+      true
+    );
+  });
+
+  it("(user 0) Fund, deposit to drift + kamino, borrow", async () => {
+    const liquidatee = users[0];
+    const liquidateeAccount = liquidatee.accounts.get(USER_ACCOUNT_D14B);
+
+    // Oracles may be stale after the preceding d14 suite advanced the clock.
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+    await refreshDriftOracles(
+      oracles,
+      driftAccounts,
+      bankrunContext,
+      banksClient
+    );
+
+    const fundTokenATx = new Transaction().add(
+      createMintToInstruction(
+        ecosystem.tokenAMint.publicKey,
+        liquidatee.tokenAAccount,
+        globalProgramAdmin.wallet.publicKey,
+        100 * 10 ** ecosystem.tokenADecimals
+      )
+    );
+    await processBankrunTransaction(
+      bankrunContext,
+      fundTokenATx,
+      [globalProgramAdmin.wallet],
+      false,
+      true
+    );
+
+    const depositAmount = new BN(50 * 10 ** ecosystem.tokenADecimals);
+
+    // Deposit to Kamino (needs a fresh reserve + obligation first).
+    const kaminoDepositTx = new Transaction().add(
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+      ...(await refreshKaminoIxs()),
+      await makeKaminoDepositIx(
+        liquidatee.mrgnBankrunProgram,
+        {
+          marginfiAccount: liquidateeAccount,
+          bank: kaminoBank,
+          signerTokenAccount: liquidatee.tokenAAccount,
+          lendingMarket,
+          reserve: tokenAReserve,
+          obligationFarmUserState: kaminoObligationFarmUserState(),
+          reserveFarmState,
+        },
+        depositAmount
+      )
+    );
+    await processBankrunTransaction(
+      bankrunContext,
+      kaminoDepositTx,
+      [liquidatee.wallet],
+      false,
+      true
+    );
+
+    // Deposit to Drift.
+    const driftDepositTx = new Transaction().add(
+      await makeDriftDepositIx(
+        liquidatee.mrgnBankrunProgram,
+        {
+          marginfiAccount: liquidateeAccount,
+          bank: driftBank,
+          signerTokenAccount: liquidatee.tokenAAccount,
+          driftOracle: driftPullOracle,
+        },
+        depositAmount,
+        TOKEN_A_MARKET_INDEX
+      )
+    );
+    await processBankrunTransaction(
+      bankrunContext,
+      driftDepositTx,
+      [liquidatee.wallet],
+      false,
+      true
+    );
+
+    const borrowAmount = new BN(2 * 10 ** ecosystem.lstAlphaDecimals);
+    const borrowTx = new Transaction().add(
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+      ...(await refreshKaminoIxs()),
+      await borrowIx(liquidatee.mrgnBankrunProgram, {
+        marginfiAccount: liquidateeAccount,
+        bank: liabBank,
+        tokenAccount: liquidatee.lstAlphaAccount,
+        remaining,
+        amount: borrowAmount,
+      })
+    );
+    await processBankrunTransaction(
+      bankrunContext,
+      borrowTx,
+      [liquidatee.wallet],
+      false,
+      true
+    );
+  });
+
+  it("(user 1) Receivership-liquidates user 0's drift + kamino collateral", async () => {
+    const liquidatee = users[0];
+    const liquidator = users[1];
+    const liquidateeAccount = liquidatee.accounts.get(USER_ACCOUNT_D14B);
+
+    // Crank the liability weights so user 0 is unhealthy.
+    const config = blankBankConfigOptRaw();
+    config.liabilityWeightInit = bigNumberToWrappedI80F48(6.0);
+    config.liabilityWeightMaint = bigNumberToWrappedI80F48(5.5);
+    const configTx = new Transaction().add(
+      await configureBank(groupAdmin.mrgnBankrunProgram, {
+        bank: liabBank,
+        bankConfigOpt: config,
+      })
+    );
+    await processBankrunTransaction(
+      bankrunContext,
+      configTx,
+      [groupAdmin.wallet],
+      false,
+      true
+    );
+
+    const healthTx = new Transaction().add(
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+      ...(await refreshKaminoIxs()),
+      await healthPulse(liquidatee.mrgnBankrunProgram, {
+        marginfiAccount: liquidateeAccount,
+        remaining,
+      })
+    );
+    await processBankrunTransaction(
+      bankrunContext,
+      healthTx,
+      [liquidatee.wallet],
+      false,
+      true
+    );
+
+    const initLiqRecordTx = new Transaction().add(
+      await initLiquidationRecordIx(liquidator.mrgnBankrunProgram, {
+        marginfiAccount: liquidateeAccount,
+        feePayer: liquidator.wallet.publicKey,
+      })
+    );
+    await processBankrunTransaction(
+      bankrunContext,
+      initLiqRecordTx,
+      [liquidator.wallet],
+      false,
+      true
+    );
+
+    const driftRemaining = composeRemainingAccounts([
+      [driftBank, oracles.tokenAOracle.publicKey, driftSpotMarket],
+    ]);
+    const kaminoRemaining = composeRemainingAccounts([
+      [kaminoBank, oracles.tokenAOracle.publicKey, tokenAReserve],
+    ]);
+
+    const withdrawAmount = new BN(1 * 10 ** ecosystem.tokenADecimals);
+    const repayAmount = new BN((1 / 5) * 10 ** ecosystem.lstAlphaDecimals);
+
+    const receiverInstructions = [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+      // Both integration legs need a fresh price before the unwind.
+      await makeUpdateSpotMarketCumulativeInterestIx(
+        driftBankrunProgram,
+        { oracle: driftPullOracle },
+        TOKEN_A_MARKET_INDEX
+      ),
+      ...(await refreshKaminoIxs()),
+      await startLiquidationIx(liquidator.mrgnBankrunProgram, {
+        marginfiAccount: liquidateeAccount,
+        liquidationReceiver: liquidator.wallet.publicKey,
+        remaining: remainingStartMeta,
+      }),
+      await makeDriftWithdrawIx(
+        liquidator.mrgnBankrunProgram,
+        {
+          marginfiAccount: liquidateeAccount,
+          bank: driftBank,
+          destinationTokenAccount: liquidator.tokenAAccount,
+          driftOracle: driftPullOracle,
+        },
+        {
+          amount: withdrawAmount,
+          withdrawAll: false,
+          remaining: driftRemaining,
+        },
+        driftBankrunProgram
+      ),
+      await makeKaminoWithdrawIx(
+        liquidator.mrgnBankrunProgram,
+        {
+          marginfiAccount: liquidateeAccount,
+          authority: liquidator.wallet.publicKey,
+          bank: kaminoBank,
+          mint: ecosystem.tokenAMint.publicKey,
+          destinationTokenAccount: liquidator.tokenAAccount,
+          lendingMarket,
+          reserve: tokenAReserve,
+          obligationFarmUserState: kaminoObligationFarmUserState(),
+          reserveFarmState,
+        },
+        {
+          amount: withdrawAmount,
+          isWithdrawAll: false,
+          remaining: kaminoRemaining,
+        }
+      ),
+      await repayIx(liquidator.mrgnBankrunProgram, {
+        marginfiAccount: liquidateeAccount,
+        bank: liabBank,
+        tokenAccount: liquidator.lstAlphaAccount,
+        amount: repayAmount,
+      }),
+      await endLiquidationIx(liquidator.mrgnBankrunProgram, {
+        marginfiAccount: liquidateeAccount,
+        remaining: remainingEndMeta,
+      }),
+    ];
+
+    // Pulling from both Kamino and Drift in one tx blows the 1232-byte legacy
+    // limit, so pack the accounts into a LUT and send a v0 transaction.
+    const lutAddresses: PublicKey[] = [];
+    const seen = new Set<string>();
+    for (const ix of receiverInstructions) {
+      for (const key of [ix.programId, ...ix.keys.map((k) => k.pubkey)]) {
+        if (!seen.has(key.toBase58())) {
+          seen.add(key.toBase58());
+          lutAddresses.push(key);
+        }
+      }
+    }
+    const lut = await createLut(liquidator.wallet, lutAddresses);
+
+    // Advance a few slots so the LUT activates, then refresh oracles in case we
+    // warped into staleness.
+    const { slot } = await getEpochAndSlot(banksClient);
+    bankrunContext.warpToSlot(BigInt(slot + 24));
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+    await refreshDriftOracles(
+      oracles,
+      driftAccounts,
+      bankrunContext,
+      banksClient
+    );
+
+    const lutRaw = await banksClient.getAccount(lut.key);
+    const lutAccount = new AddressLookupTableAccount({
+      key: lut.key,
+      state: AddressLookupTableAccount.deserialize(lutRaw.data),
+    });
+    const messageV0 = new TransactionMessage({
+      payerKey: liquidator.wallet.publicKey,
+      recentBlockhash: await getBankrunBlockhash(bankrunContext),
+      instructions: receiverInstructions,
+    }).compileToV0Message([lutAccount]);
+    const versionedTx = new VersionedTransaction(messageV0);
+    versionedTx.sign([liquidator.wallet]);
+    await banksClient.processTransaction(versionedTx);
+  });
+});

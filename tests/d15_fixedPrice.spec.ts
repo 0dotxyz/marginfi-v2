@@ -5,6 +5,7 @@ import {
   PublicKey,
   Transaction,
 } from "@solana/web3.js";
+import { createMintToInstruction } from "@solana/spl-token";
 import {
   bankrunContext,
   bankrunProgram,
@@ -89,6 +90,34 @@ describe("d15: Fixed Drift price bank", () => {
     ctx = bankrunContext;
     usdcSpotMarket = driftAccounts.get(DRIFT_USDC_SPOT_MARKET);
     tokenASpotMarket = driftAccounts.get(DRIFT_TOKEN_A_SPOT_MARKET);
+
+    // user 3's token accounts are funded by the basic specs (03/07), which don't
+    // run in the standalone drift slice. Top up any shortfall so this suite can
+    // run on its own; a no-op in the full suite (all assertions here are
+    // diff-based, so extra balance is harmless).
+    const payer = bankrunContext.payer;
+    const fundIfShort = async (
+      account: PublicKey,
+      mint: PublicKey,
+      min: number
+    ) => {
+      const balance = await getTokenBalance(bankRunProvider, account);
+      if (balance >= min) return;
+      const tx = new Transaction().add(
+        createMintToInstruction(mint, account, payer.publicKey, min - balance)
+      );
+      await processBankrunTransaction(ctx, tx, [payer]);
+    };
+    await fundIfShort(
+      users[3].usdcAccount,
+      ecosystem.usdcMint.publicKey,
+      2_000 * 10 ** ecosystem.usdcDecimals
+    );
+    await fundIfShort(
+      users[3].tokenAAccount,
+      ecosystem.tokenAMint.publicKey,
+      100 * 10 ** ecosystem.tokenADecimals
+    );
   });
 
   it("(user 3) initialize marginfi account for main group", async () => {
@@ -102,7 +131,7 @@ describe("d15: Fixed Drift price bank", () => {
         marginfiAccount: userAccount,
         authority: user.wallet.publicKey,
         feePayer: user.wallet.publicKey,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, tx, [user.wallet, accountKeypair]);
   });
@@ -113,7 +142,7 @@ describe("d15: Fixed Drift price bank", () => {
       bankrunProgram.programId,
       driftGroup.publicKey,
       ecosystem.usdcMint.publicKey,
-      FIXED_SEED,
+      FIXED_SEED
     );
     fixedDriftBank = bankKey;
 
@@ -130,8 +159,8 @@ describe("d15: Fixed Drift price bank", () => {
         {
           config: defaultConfig,
           seed: FIXED_SEED,
-        },
-      ),
+        }
+      )
     );
     await processBankrunTransaction(ctx, addBankTx, [groupAdmin.wallet]);
 
@@ -147,8 +176,8 @@ describe("d15: Fixed Drift price bank", () => {
         {
           amount: USDC_INIT_DEPOSIT_AMOUNT,
         },
-        0,
-      ),
+        0
+      )
     );
     await processBankrunTransaction(ctx, initUserTx, [users[3].wallet]);
 
@@ -157,7 +186,7 @@ describe("d15: Fixed Drift price bank", () => {
         bank: fixedDriftBank,
         price: FIXED_PRICE,
         remaining: [usdcSpotMarket],
-      }),
+      })
     );
     await processBankrunTransaction(ctx, setFixedTx, [groupAdmin.wallet]);
 
@@ -172,13 +201,13 @@ describe("d15: Fixed Drift price bank", () => {
         bank: fixedDriftBank,
         type: ORACLE_SETUP_FIXED_DRIFT,
         oracle: oracles.usdcOracle.publicKey,
-      }),
+      })
     );
     const result = await processBankrunTransaction(
       ctx,
       tx,
       [groupAdmin.wallet],
-      true,
+      true
     );
     // UseSetFixedOraclePrice
     assertBankrunTxFailed(result, 6132);
@@ -194,21 +223,21 @@ describe("d15: Fixed Drift price bank", () => {
         marginfiAccount: adminAccount,
         authority: groupAdmin.wallet.publicKey,
         feePayer: groupAdmin.wallet.publicKey,
-      }),
+      })
     );
     await processBankrunTransaction(
       ctx,
       initAdminTx,
       [groupAdmin.wallet, adminAccountKeypair],
       false,
-      true,
+      true
     );
 
     const [bankKey] = deriveBankWithSeed(
       bankrunProgram.programId,
       driftGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
-      BORROW_SEED,
+      BORROW_SEED
     );
     borrowBank = bankKey;
 
@@ -223,7 +252,7 @@ describe("d15: Fixed Drift price bank", () => {
         bankMint: ecosystem.tokenAMint.publicKey,
         config,
         seed: BORROW_SEED,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, addBankTx, [groupAdmin.wallet]);
 
@@ -232,7 +261,7 @@ describe("d15: Fixed Drift price bank", () => {
         bank: borrowBank,
         type: ORACLE_SETUP_PYTH_PUSH,
         oracle: oracles.tokenAOracle.publicKey,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, configOracleTx, [groupAdmin.wallet]);
 
@@ -243,7 +272,7 @@ describe("d15: Fixed Drift price bank", () => {
         bank: borrowBank,
         tokenAccount: groupAdmin.tokenAAccount,
         amount: seedAmount,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, seedTx, [groupAdmin.wallet]);
   });
@@ -255,13 +284,13 @@ describe("d15: Fixed Drift price bank", () => {
         group: driftGroup.publicKey,
         bank: fixedDriftBank,
         remaining: [tokenASpotMarket],
-      }),
+      })
     );
     const result = await processBankrunTransaction(
       ctx,
       tx,
       [user.wallet],
-      true,
+      true
     );
     // DriftSpotMarketValidationFailed
     assertBankrunTxFailed(result, 6304);
@@ -275,7 +304,7 @@ describe("d15: Fixed Drift price bank", () => {
 
     const userUsdcBefore = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount,
+      user.usdcAccount
     );
     userUsdcStart = userUsdcBefore;
 
@@ -288,14 +317,14 @@ describe("d15: Fixed Drift price bank", () => {
           signerTokenAccount: user.usdcAccount,
         },
         depositAmount,
-        0,
-      ),
+        0
+      )
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
     const userUsdcAfter = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount,
+      user.usdcAccount
     );
     const diff = userUsdcBefore - userUsdcAfter;
     console.log("deposited: " + diff.toLocaleString());
@@ -304,13 +333,16 @@ describe("d15: Fixed Drift price bank", () => {
     const bank = await bankrunProgram.account.bank.fetch(fixedDriftBank);
     const driftUserAfterDeposit = await getDriftUserAccount(
       driftBankrunProgram,
-      bank.integrationAcc2,
+      bank.integrationAcc2
     );
     const scaledBalanceAfterDeposit =
       driftUserAfterDeposit.spotPositions[0].scaledBalance;
 
     const spotMarket = await getSpotMarketAccount(driftBankrunProgram, 0);
-    const scaledBalance = tokenAmountToScaledBalance(depositAmount.add(USDC_INIT_DEPOSIT_AMOUNT), spotMarket);
+    const scaledBalance = tokenAmountToScaledBalance(
+      depositAmount.add(USDC_INIT_DEPOSIT_AMOUNT),
+      spotMarket
+    );
 
     assertBNApproximately(scaledBalanceAfterDeposit, scaledBalance, 1);
   });
@@ -322,7 +354,7 @@ describe("d15: Fixed Drift price bank", () => {
 
     const userTokenABefore = await getTokenBalance(
       bankRunProvider,
-      user.tokenAAccount,
+      user.tokenAAccount
     );
 
     const remaining = composeRemainingAccounts([
@@ -337,13 +369,13 @@ describe("d15: Fixed Drift price bank", () => {
         tokenAccount: user.tokenAAccount,
         remaining,
         amount: BORROW_AMOUNT,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, tx, [user.wallet], false, true);
 
     const userTokenAAfter = await getTokenBalance(
       bankRunProvider,
-      user.tokenAAccount,
+      user.tokenAAccount
     );
     assert.equal(userTokenAAfter - userTokenABefore, BORROW_AMOUNT.toNumber());
   });
@@ -361,21 +393,21 @@ describe("d15: Fixed Drift price bank", () => {
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         remaining,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
     const accAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount,
+      userAccount
     );
     const cache = accAfter.healthCache;
     logHealthCache("cache after deposit", cache);
 
     const actualAssetValue = wrappedI80F48toBigNumber(
-      cache.assetValue,
+      cache.assetValue
     ).toNumber();
     const actualLiabilityValue = wrappedI80F48toBigNumber(
-      cache.liabilityValue,
+      cache.liabilityValue
     ).toNumber();
 
     // Note: The way this actually works is convoluted: Before the Fixed Price update to Drift, the
@@ -395,7 +427,7 @@ describe("d15: Fixed Drift price bank", () => {
     assert.approximately(
       actualLiabilityValue,
       expectedLiabilityValue,
-      liabTolerance,
+      liabTolerance
     );
   });
 
@@ -406,14 +438,14 @@ describe("d15: Fixed Drift price bank", () => {
     const bank = await bankrunProgram.account.bank.fetch(fixedDriftBank);
     const driftUserBeforeWithdraw = await getDriftUserAccount(
       driftBankrunProgram,
-      bank.integrationAcc2,
+      bank.integrationAcc2
     );
     const scaledBalanceBeforeWithdraw =
       driftUserBeforeWithdraw.spotPositions[0].scaledBalance;
 
     const userUsdcBefore = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount,
+      user.usdcAccount
     );
 
     const remaining = composeRemainingAccounts([
@@ -434,29 +466,36 @@ describe("d15: Fixed Drift price bank", () => {
           withdrawAll: false,
           remaining,
         },
-        driftBankrunProgram,
-      ),
+        driftBankrunProgram
+      )
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
     const userUsdcAfter = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount,
+      user.usdcAccount
     );
     const diff = userUsdcAfter - userUsdcBefore;
     console.log("withdrew: " + diff.toLocaleString());
 
     const driftUserAfterWithdraw = await getDriftUserAccount(
       driftBankrunProgram,
-      bank.integrationAcc2,
+      bank.integrationAcc2
     );
     const scaledBalanceAfterWithdraw =
       driftUserAfterWithdraw.spotPositions[0].scaledBalance;
 
     const spotMarket = await getSpotMarketAccount(driftBankrunProgram, 0);
-    const scaledBalanceDiff = tokenAmountToScaledBalance(withdrawAmount, spotMarket);
+    const scaledBalanceDiff = tokenAmountToScaledBalance(
+      withdrawAmount,
+      spotMarket
+    );
 
-    assertBNApproximately(scaledBalanceBeforeWithdraw.sub(scaledBalanceAfterWithdraw), scaledBalanceDiff, 1);
+    assertBNApproximately(
+      scaledBalanceBeforeWithdraw.sub(scaledBalanceAfterWithdraw),
+      scaledBalanceDiff,
+      1
+    );
   });
 
   it("(user 3) repay borrow and withdraw all - gets initial deposit back", async () => {
@@ -473,7 +512,7 @@ describe("d15: Fixed Drift price bank", () => {
           [fixedDriftBank, usdcSpotMarket],
           [borrowBank, oracles.tokenAOracle.publicKey],
         ]),
-      }),
+      })
     );
     await processBankrunTransaction(ctx, repayTx, [user.wallet]);
 
@@ -497,14 +536,14 @@ describe("d15: Fixed Drift price bank", () => {
           withdrawAll: true,
           remaining,
         },
-        driftBankrunProgram,
-      ),
+        driftBankrunProgram
+      )
     );
     await processBankrunTransaction(ctx, withdrawAllTx, [user.wallet]);
 
     const userUsdcAfter = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount,
+      user.usdcAccount
     );
 
     // We lose 1 lamport when deposit and immediately withdraw all (see details in drift_withdraw instruction)
