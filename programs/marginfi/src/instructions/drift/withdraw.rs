@@ -69,7 +69,7 @@ pub fn drift_withdraw<'info>(
     let bank_mint = ctx.accounts.bank.load()?.mint;
     let group = ctx.accounts.group.load()?;
     let on_ramp_transition = group.on_ramp_transition();
-    let (token_amount, expected_scaled_balance_change) = {
+    let (token_amount, expected_scaled_balance_change, share_amount) = {
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;
         authority_bump = bank.liquidity_vault_authority_bump;

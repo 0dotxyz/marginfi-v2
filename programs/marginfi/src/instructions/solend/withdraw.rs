@@ -81,7 +81,7 @@ pub fn solend_withdraw<'info>(
     let bank_mint = ctx.accounts.bank.load()?.mint;
     let group = ctx.accounts.group.load()?;
     let on_ramp_transition = group.on_ramp_transition();
-    let collateral_amount = {
+    let (collateral_amount, share_amount) = {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let clock = Clock::get()?;
