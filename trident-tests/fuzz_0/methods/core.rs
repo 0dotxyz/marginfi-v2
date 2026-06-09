@@ -44,6 +44,8 @@ impl FuzzTest {
             permissionless_bad_debt_settlement: None,
             freeze_settings: None,
             tokenless_repayments_allowed: None,
+            liquidation_liquidator_fee_bps: None,
+            liquidation_insurance_fee_bps: None,
         };
 
         let ix = types::marginfi::LendingPoolConfigureBankInstruction::data(
@@ -986,6 +988,9 @@ impl FuzzTest {
             liquidation_receiver,
             self.fee_state,
             global_fee_wallet,
+            // fee_payer (optional account, added in #23). Naming the receiver here keeps the default
+            // behavior: the liquidation_receiver pays the flat fee.
+            liquidation_receiver,
         ))
         .remaining_accounts(health_remaining_end)
         .instruction();
