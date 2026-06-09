@@ -25,12 +25,12 @@ import {
   composeRemainingAccounts,
   depositIx,
 } from "./utils/user-instructions";
-import { LST_ATA, LST_ATA_v1, USER_ACCOUNT } from "./utils/mocks";
+import { LST_ATA_v1, USER_ACCOUNT } from "./utils/mocks";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
-import { dumpBankrunLogs, getBankrunBlockhash } from "./utils/tools";
+import { getBankrunBlockhash } from "./utils/tools";
 import { getEpochAndSlot } from "./utils/bankrunConnection";
 import { deriveOnRampPool } from "./utils/pdas";
-import { getStakeAccount } from "./utils/stake-utils";
+import { encodeStakeAccount, getStakeAccount } from "./utils/stake-utils";
 import { createPoolOnramp, replenishPool } from "./utils/spl-staking-utils";
 
 let bankKeypairSol: Keypair;
@@ -275,41 +275,53 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
       console.log("It is now epoch: " + epoch + " slot " + slot);
     }
 
-    // Next, the replenish crank cycles free SOL into the "on ramp" pool
+    // Next, the replenish crank cycles free SOL into the "on ramp" pool.
+    // Note: this used to BPF-panic on localnet; as of the Solana 3 upgrade the single-pool program
+    // executes it successfully, so we now assert the tx lands (processTransaction throws on failure)
+    // rather than swallowing it. This is the regression guard — if a future runtime bump re-breaks
+    // the crank, this test fails loudly.
     let replenishTx = new Transaction().add(
       replenishPool(validators[0].voteAccount),
     );
     replenishTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     replenishTx.sign(wallet.payer); // pays the tx fee and rent
-    let result = await banksClient.tryProcessTransaction(replenishTx);
-    // TODO figure out why this BPF panics in localnet (likely Solana version)
-    dumpBankrunLogs(result);
+    await banksClient.processTransaction(replenishTx);
 
-    // const onRampAccAfter = await bankRunProvider.connection.getAccountInfo(
-    //   onRampPoolKey,
-    // );
-    // const onRampAfter = getStakeAccount(onRampAccAfter.data);
-    // const stakeAfter = onRampAfter.stake.delegation.stake.toString();
-    // if (verbose) {
-    //   console.log("On ramp lamps: " + onRampAccAfter.lamports);
-    //   console.log(" (rent was:    " + rent + ")");
-    //   console.log("On ramp stake: " + stakeAfter);
-    // }
+    // The crank lands, but in bankrun the stake never warms up off a bare lamport transfer, so the
+    // on-ramp's delegated stake is unchanged.
+    const onRampAccAfter = await bankRunProvider.connection.getAccountInfo(
+      onRampPoolKey,
+    );
+    const onRampAfter = getStakeAccount(onRampAccAfter.data);
+    const stakeAfter = onRampAfter.stake.delegation.stake.toString();
+    if (verbose) {
+      console.log("On ramp lamps before/after: " + onRampAccBefore.lamports + " / " + onRampAccAfter.lamports);
+      console.log(" (rent was:    " + rent + ")");
+      console.log("On ramp stake before/after: " + stakeBefore + " / " + stakeAfter);
+    }
+
+    // Simulate the warmed-up crank directly: `StakedWithPythPush` values the LST off the sol pool's
+    // `stake.delegation.stake` (price.rs), so bump that by the lamports already donated above,
+    // keeping LST supply flat. 1 LST is now worth ~2 SOL.
+    const solPoolAcc = await bankRunProvider.connection.getAccountInfo(
+      validators[0].splSolPool,
+    );
+    const solPool = getStakeAccount(solPoolAcc.data);
+    solPool.stake.delegation.stake += BigInt(appreciation * LAMPORTS_PER_SOL);
+    bankrunContext.setAccount(validators[0].splSolPool, {
+      lamports: solPoolAcc.lamports,
+      data: encodeStakeAccount(solPool, solPoolAcc.data),
+      owner: solPoolAcc.owner,
+      executable: solPoolAcc.executable,
+      rentEpoch: solPoolAcc.rentEpoch,
+    });
   });
 
   // Now the stake is worth enough and the user can borrow
   it("(user 2) borrows 1.1 SOL against their STAKED position - succeeds", async () => {
     const user = users[2];
     const userAccount = user.accounts.get(USER_ACCOUNT);
-    const userLstAta = user.accounts.get(LST_ATA);
     let tx = new Transaction().add(
-      // TODO if we find a way to make stake appreciate on localnet, remove...
-      await depositIx(user.mrgnBankrunProgram, {
-        marginfiAccount: userAccount,
-        bank: validators[0].bank,
-        tokenAccount: userLstAta,
-        amount: new BN(1 * 10 ** ecosystem.wsolDecimals),
-      }),
       await borrowIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         bank: bankKeypairSol.publicKey,
