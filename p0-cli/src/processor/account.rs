@@ -1005,6 +1005,8 @@ pub fn marginfi_account_liquidate_receivership(
             marginfi_account: liquidatee_marginfi_account_pk,
             liquidation_record: liq_record_pk,
             liquidation_receiver: authority,
+            // Optional override; None ⇒ the liquidation_receiver pays the flat fee (default).
+            fee_payer: None,
             fee_state: fee_state_pk,
             global_fee_wallet: fee_state.global_fee_wallet,
             system_program: system_program::id(),
@@ -1200,6 +1202,7 @@ pub fn marginfi_account_transfer(
             authority,
             fee_payer: config.explicit_fee_payer(),
             new_authority,
+            fee_state: fee_state_pk,
             global_fee_wallet: fee_state.global_fee_wallet,
             system_program: system_program::ID,
         }
