@@ -22,6 +22,7 @@ import {
   composeRemainingAccounts,
 } from "./utils/user-instructions";
 import {
+  advanceBankrunClock,
   processBankrunTransaction,
   bytesToF64,
   bnToBigIntSafe,
@@ -351,6 +352,70 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
     const absDiff = actualAssetValue.minus(expectedAssetValue).abs();
     assert.ok(absDiff.lte(assetValueTolerance));
   });
-});
 
-// TODO repeat this at the end of the suite once interest has accrued
+  it("(user 0) JupLend prices reflect accrued interest after a longer wait, still healthy", async () => {
+    const readExchange = async (lending: PublicKey) =>
+      Number(
+        bnToBigIntSafe(
+          (await juplendPrograms.lending.account.lending.fetch(lending))
+            .tokenExchangePrice
+        )
+      );
+    const jupCtxs = [...jupCtxByBank.values()];
+    const exchangesBefore = await Promise.all(
+      jupCtxs.map((c) => readExchange(c.pool.lending))
+    );
+
+    // Advance ~1 day so interest accrues on the JupLend positions.
+    await advanceBankrunClock(bankrunContext, 24 * 60 * 60);
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+
+    // Re-pulse with fresh JupLend rates so the cache reflects the accrued interest.
+    const userAccountBefore =
+      await bankrunProgram.account.marginfiAccount.fetch(userMarginfiAccountPk);
+    const remainingGroups: PublicKey[][] = [];
+    const refreshRateIxs = [];
+    for (const balance of userAccountBefore.lendingAccount.balances) {
+      if (!balance.active) continue;
+      const bank = await bankrunProgram.account.bank.fetch(balance.bankPk);
+      const accounts = [balance.bankPk, bank.config.oracleKeys[0]];
+      if (!bank.config.oracleKeys[1].equals(PublicKey.default)) {
+        accounts.push(bank.config.oracleKeys[1]);
+      }
+      remainingGroups.push(accounts);
+      const ctx = jupCtxByBank.get(balance.bankPk.toBase58());
+      if (ctx) {
+        refreshRateIxs.push(
+          await refreshJupSimple(juplendPrograms.lending, { pool: ctx.pool })
+        );
+      }
+    }
+    const pulseIx = await healthPulse(user.mrgnBankrunProgram!, {
+      marginfiAccount: userMarginfiAccountPk,
+      remaining: composeRemainingAccounts(remainingGroups),
+    });
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(...refreshRateIxs, pulseIx),
+      [user.wallet],
+      false,
+      true
+    );
+
+    // Interest accrued: at least one JupLend share exchange price strictly increased.
+    const exchangesAfter = await Promise.all(
+      jupCtxs.map((c) => readExchange(c.pool.lending))
+    );
+    const anyIncreased = exchangesAfter.some((e, i) => e > exchangesBefore[i]);
+    assert.ok(anyIncreased, "expected JupLend interest to accrue over the wait");
+
+    // The account still pulses healthy with valid engine/oracle state at the new rates.
+    const healthCache = (
+      await bankrunProgram.account.marginfiAccount.fetch(userMarginfiAccountPk)
+    ).healthCache;
+    assert.ok((healthCache.flags & HEALTH_CACHE_HEALTHY) !== 0);
+    assert.ok((healthCache.flags & HEALTH_CACHE_ENGINE_OK) !== 0);
+    assert.ok((healthCache.flags & HEALTH_CACHE_ORACLE_OK) !== 0);
+    assert.equal(healthCache.internalErr, 0);
+  });
+});
