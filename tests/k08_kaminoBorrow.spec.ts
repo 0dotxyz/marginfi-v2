@@ -45,6 +45,31 @@ let usdcReserve: PublicKey;
 let tokenAReserve: PublicKey;
 let market: PublicKey;
 
+// Byte offset of `liquidity.cumulative_borrow_rate_bsf` within a klend Reserve account.
+// = 8 (discriminator) + 120 (Reserve header through `lending_market`) + 96 (3 pubkeys)
+//   + 8 (total_available_amount) + 16 (borrowed_amount_sf) + 16 (market_price_sf)
+//   + 8 (market_price_last_updated_ts) + 8 (mint_decimals)
+//   + 8 (deposit_limit_crossed_timestamp) + 8 (borrow_limit_crossed_timestamp).
+const CUM_BORROW_RATE_BSF_OFFSET = 296;
+
+// Read `cumulative_borrow_rate_bsf` straight from the raw account bytes as a bigint. The field is
+// a BigFractionBytes (`value: [u64; 4]`, little-endian limbs of a u256 scaled fraction). We bypass
+// Anchor's coder because its bn.js path can mis-render these large limbs (a trailing "NaN" that
+// BigInt() then rejects); reading the bytes directly is value-exact on every platform.
+const readCumBorrowRateBsf = async (reserve: PublicKey): Promise<bigint> => {
+  const acct = await banksClient.getAccount(reserve);
+  if (!acct) {
+    throw new Error(`Reserve account not found: ${reserve.toString()}`);
+  }
+  const data = Buffer.from(acct.data);
+  let value = 0n;
+  for (let i = 0; i < 4; i++) {
+    const limb = data.readBigUInt64LE(CUM_BORROW_RATE_BSF_OFFSET + i * 8);
+    value += limb << BigInt(64 * i);
+  }
+  return value;
+};
+
 describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
   before(async () => {
     ctx = bankrunContext;
@@ -380,6 +405,7 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
     const borrowedBefore = wrappedU68F60toBigNumber(
       resBefore.liquidity.borrowedAmountSf,
     );
+    const cumRateBefore = await readCumBorrowRateBsf(usdcReserve);
 
     // Warp to 1 hour in the future (1 hour = 3600 seconds, at ~2.4s per slot = ~1500 slots)
     const clock = await banksClient.getClock();
@@ -427,6 +453,7 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
     const borrowedAfter = wrappedU68F60toBigNumber(
       resAfter.liquidity.borrowedAmountSf,
     );
+    const cumRateAfter = await readCumBorrowRateBsf(usdcReserve);
     const borrowedDiff = Number(borrowedAfter.minus(borrowedBefore));
 
     if (verbose) {
@@ -441,14 +468,7 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
     }
 
     // Interest accrued over the warped hour. Kamino tracks accrual on the reserve's cumulative
-    // borrow rate and scales the outstanding borrowed amount by it,
-    const bsfToRaw = (bsf: { value: BN[] }): bigint =>
-      bsf.value.reduce(
-        (acc, limb, i) => acc + (BigInt(limb.toString()) << BigInt(64 * i)),
-        0n,
-      );
-    const cumRateBefore = bsfToRaw(resBefore.liquidity.cumulativeBorrowRateBsf);
-    const cumRateAfter = bsfToRaw(resAfter.liquidity.cumulativeBorrowRateBsf);
+    // borrow rate and scales the outstanding borrowed amount by it.
     // The cumulative borrow rate strictly increased (interest accrued).
     assert(cumRateAfter > cumRateBefore);
 
