@@ -154,7 +154,6 @@ impl FuzzTest {
                 rate_model,
                 vault,
                 liquidity,
-                constants::LIQUIDITY_PROGRAM,
                 rewards_rate_model,
                 *mint_data.owner(),
             ),
@@ -220,7 +219,6 @@ impl FuzzTest {
             rate_model,
             vault,
             liquidity,
-            constants::LIQUIDITY_PROGRAM,
             rewards_rate_model,
             token_program,
         ))
@@ -346,7 +344,6 @@ impl FuzzTest {
             vault,
             claim_account,
             liquidity,
-            constants::LIQUIDITY_PROGRAM,
             rewards_rate_model,
             token_program,
         ))
