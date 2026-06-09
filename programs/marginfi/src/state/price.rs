@@ -311,7 +311,10 @@ impl OraclePriceFeedAdapter {
                 let stake_state = try_from_slice_unchecked::<StakeStateV2>(&ais[2].data.borrow())?;
                 let (_, stake) = match stake_state {
                     StakeStateV2::Stake(meta, stake, _) => (meta, stake),
-                    _ => panic!("unsupported stake state"), // TODO emit more specific error
+                    _ => {
+                        msg!("expected a delegated stake account (StakeStateV2::Stake)");
+                        return Err(error!(MarginfiError::StakePoolValidationFailed));
+                    }
                 };
                 let sol_pool_balance = stake.delegation.stake;
                 // Note: When the pool is fresh, it has 1 SOL in it (an initial and non-refundable
@@ -1279,14 +1282,9 @@ impl SwitchboardPullPriceFeed {
             MarginfiError::SwitchboardWrongAccountOwner
         );
 
-        let feed: PullFeedAccountData = parse_swb_ignore_alignment(ai_data)?;
-        let lite_feed = LitePullFeedAccountData::from(&feed);
-        // TODO restore when swb fixes alignment issue in crate.
-        // let feed = PullFeedAccountData::parse(ai_data)
-        //     .map_err(|_| MarginfiError::SwitchboardInvalidAccount)?;
+        let (lite_feed, last_updated) = load_swb_lite_feed(ai_data)?;
 
         // Check staleness
-        let last_updated = feed.last_update_timestamp;
         if current_timestamp.saturating_sub(last_updated) > max_age as i64 {
             return err!(MarginfiError::SwitchboardStalePrice);
         }
@@ -1304,10 +1302,7 @@ impl SwitchboardPullPriceFeed {
             MarginfiError::SwitchboardWrongAccountOwner
         );
 
-        let _feed = parse_swb_ignore_alignment(ai_data)?;
-        // TODO restore when swb fixes alignment issue in crate.
-        // PullFeedAccountData::parse(ai_data)
-        //     .map_err(|_| MarginfiError::SwitchboardInvalidAccount)?;
+        load_swb_lite_feed(ai_data)?;
 
         Ok(())
     }
@@ -1409,10 +1404,41 @@ impl PriceAdapter for SwitchboardPullPriceFeed {
     }
 }
 
-// TODO remove when swb fixes the alignment issue in their crate
-// (TargetAlignmentGreaterAndInputNotAligned) when bytemuck::from_bytes executes on any local system
-// (including bpf next-test) where the struct is "properly" aligned 16
-/// The same as PullFeedAccountData::parse but completely ignores input alignment.
+/// Parse a Switchboard pull feed into the lite form we retain, plus its `last_update_timestamp`
+/// (for the caller's staleness check).
+///
+/// `PullFeedAccountData` is ~3.2 KB and its 16-byte alignment comes from the `i128` fields in
+/// `CurrentResult`/`OracleSubmission`. The two targets disagree on that alignment, so we parse
+/// differently per target:
+///
+/// * On-chain (`target_os = "solana"`): `i128` is 8-byte aligned (the SBF data layout has no
+///   `i128:128` entry, so it inherits `i64`'s 8-byte alignment), and account data sits at an
+///   8-aligned offset, so upstream's zero-copy `PullFeedAccountData::parse` succeeds. We use it to
+///   avoid copying ~3.2 KB onto the 4 KB BPF stack on every price read.
+/// * Off-chain (host / `client`): native `i128` is 16-byte aligned, so the data at offset 8 is
+///   misaligned and `parse`'s `bytemuck::try_from_bytes` fails with `AccountDeserializeError`. We
+///   copy via `parse_swb_ignore_alignment` (`try_pod_read_unaligned`), which has no alignment
+///   requirement.
+///
+/// Verified alignment-sensitive upstream through switchboard-sdk `main` and the pinned rev f1a570a
+/// (2026-06-01) — `parse` still returns a `Ref` via `try_from_bytes`, so the off-chain copy stays.
+fn load_swb_lite_feed(data: Ref<&mut [u8]>) -> MarginfiResult<(LitePullFeedAccountData, i64)> {
+    #[cfg(target_os = "solana")]
+    {
+        let feed = PullFeedAccountData::parse(data)
+            .map_err(|_| MarginfiError::SwitchboardInvalidAccount)?;
+        Ok((LitePullFeedAccountData::from(&*feed), feed.last_update_timestamp))
+    }
+    #[cfg(not(target_os = "solana"))]
+    {
+        let feed = parse_swb_ignore_alignment(data)?;
+        Ok((LitePullFeedAccountData::from(&feed), feed.last_update_timestamp))
+    }
+}
+
+/// The same as PullFeedAccountData::parse but completely ignores input alignment by copying the
+/// bytes (`try_pod_read_unaligned`). Used off-chain, where native `i128` alignment (16) makes the
+/// zero-copy reference cast fail — see [`load_swb_lite_feed`]. Also reused by tests/clients.
 pub fn parse_swb_ignore_alignment(data: Ref<&mut [u8]>) -> MarginfiResult<PullFeedAccountData> {
     if data.len() < 8 {
         return err!(MarginfiError::SwitchboardInvalidAccount);
