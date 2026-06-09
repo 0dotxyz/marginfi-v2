@@ -19,6 +19,7 @@ pub trait OrderImpl {
         trigger: OrderTrigger,
         tags: [u16; ORDER_ACTIVE_TAGS],
         bump: u8,
+        current_timestamp: i64,
     ) -> MarginfiResult;
 }
 
@@ -29,6 +30,7 @@ impl OrderImpl for Order {
         trigger: OrderTrigger,
         tags: [u16; ORDER_ACTIVE_TAGS],
         bump: u8,
+        current_timestamp: i64,
     ) -> MarginfiResult {
         self.marginfi_account = marginfi_account;
         match trigger {
@@ -85,6 +87,7 @@ impl OrderImpl for Order {
 
         self.tags = tags;
         self.bump = bump;
+        self.created_at = current_timestamp;
 
         Ok(())
     }
