@@ -1993,11 +1993,13 @@ impl MarginfiAccountFixture {
         order: Pubkey,
         fee_recipient: Pubkey,
     ) -> std::result::Result<(), BanksClientError> {
+        let marginfi_account = self.load().await;
         let ctx = self.ctx.borrow();
 
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::CloseOrder {
+                group: marginfi_account.group,
                 marginfi_account: self.key,
                 authority: ctx.payer.pubkey(),
                 order,
@@ -2061,11 +2063,13 @@ impl MarginfiAccountFixture {
         &self,
         bank_keys_opt: Option<Vec<Pubkey>>,
     ) -> std::result::Result<(), BanksClientError> {
+        let marginfi_account = self.load().await;
         let ctx = self.ctx.borrow();
 
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::SetKeeperCloseFlags {
+                group: marginfi_account.group,
                 marginfi_account: self.key,
                 authority: ctx.payer.pubkey(),
             }

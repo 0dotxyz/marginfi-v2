@@ -1,5 +1,6 @@
 use crate::ix_utils::is_allowed_cpi_for_third_party_id;
 use crate::state::marginfi_account::MarginfiAccountImpl;
+use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::{
     events::{AccountEventHeader, MarginfiAccountCreateEvent},
     prelude::*,
@@ -40,6 +41,9 @@ pub fn initialize_account(ctx: Context<MarginfiAccountInitialize>) -> MarginfiRe
 
 #[derive(Accounts)]
 pub struct MarginfiAccountInitialize<'info> {
+    #[account(
+        constraint = !marginfi_group.load()?.is_protocol_paused() @ MarginfiError::ProtocolPaused
+    )]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
     #[account(
@@ -101,6 +105,9 @@ pub fn initialize_account_pda(
 #[derive(Accounts)]
 #[instruction(account_index: u16, third_party_id: Option<u16>)]
 pub struct MarginfiAccountInitializePda<'info> {
+    #[account(
+        constraint = !marginfi_group.load()?.is_protocol_paused() @ MarginfiError::ProtocolPaused
+    )]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
     #[account(
