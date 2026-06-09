@@ -80,12 +80,12 @@ pub fn lending_account_repay<'info>(
     let mut bank_account =
         BankAccountWrapper::find(&bank_loader.key(), &mut bank, lending_account)?;
 
-    let repay_amount_post_fee = if repay_all {
+    let (repay_amount_post_fee, share_amount) = if repay_all {
         bank_account.repay_all(in_receivership)?
     } else {
-        bank_account.repay(I80F48::from_num(amount))?;
+        let share_amount = bank_account.repay(I80F48::from_num(amount))?;
 
-        amount
+        (amount, share_amount)
     };
     marginfi_account.last_update = clock.unix_timestamp as u64;
 
@@ -159,6 +159,7 @@ pub fn lending_account_repay<'info>(
         bank: bank_loader.key(),
         mint: bank.mint,
         amount: repay_amount_post_fee,
+        share_amount: share_amount.into(),
         close_balance: repay_all,
     });
 

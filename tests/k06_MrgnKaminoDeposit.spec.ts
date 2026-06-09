@@ -33,6 +33,7 @@ import {
   assertI80F48Equal,
   assertKeysEqual,
   getTokenBalance,
+  parseMarginfiEvents,
 } from "./utils/genericTests";
 import { BalanceRaw } from "@mrgnlabs/marginfi-client-v2";
 import { getEpochAndSlot } from "./utils/bankrunConnection";
@@ -162,7 +163,16 @@ describe("k06: Kamino Deposit Tests", () => {
         amount,
       ),
     );
-    await processBankrunTransaction(ctx, tx, [user.wallet]);
+    const depositResult = await processBankrunTransaction(ctx, tx, [
+      user.wallet,
+    ]);
+    const depositEvent = parseMarginfiEvents(
+      bankrunProgram,
+      depositResult.logMessages
+    ).find((e) => e.name === "lendingAccountDepositEvent");
+    assert.isDefined(depositEvent, "Expected lendingAccountDepositEvent");
+    // collateral:liquidity is 1:1 here, so this deposit mints `amount` asset shares
+    assertI80F48Equal(depositEvent!.data.shareAmount, amount);
 
     const [
       obAfter,

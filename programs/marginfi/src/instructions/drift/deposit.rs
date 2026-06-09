@@ -97,7 +97,7 @@ pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult 
         )?;
 
         let scaled_balance_change_i80f48 = I80F48::from_num(scaled_balance_change);
-        bank_account.deposit_no_repay(scaled_balance_change_i80f48)?;
+        let share_amount = bank_account.deposit_no_repay(scaled_balance_change_i80f48)?;
 
         record_deposit_inflow(
             &mut bank,
@@ -125,6 +125,7 @@ pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult 
             bank: ctx.accounts.bank.key(),
             mint: bank.mint,
             amount,
+            share_amount: share_amount.into(),
         });
     }
 

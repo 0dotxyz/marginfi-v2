@@ -20,6 +20,7 @@ import {
   assertI80F48Equal,
   expectFailedTxWithError,
   getTokenBalance,
+  parseMarginfiEvents,
 } from "./utils/genericTests";
 import { assert } from "chai";
 import {
@@ -29,7 +30,7 @@ import {
 } from "./utils/user-instructions";
 import { USER_ACCOUNT } from "./utils/mocks";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
-import { getBankrunTime } from "./utils/tools";
+import { getBankrunTime, processBankrunTransaction } from "./utils/tools";
 
 let program: Program<Marginfi>;
 let provider: BankrunProvider;
@@ -91,26 +92,35 @@ describe("Borrow funds", () => {
     const user = users[0];
     const user0Account = user.accounts.get(USER_ACCOUNT);
 
-    await user.mrgnProgram.provider.sendAndConfirm(
-      new Transaction().add(
-        await borrowIx(user.mrgnProgram, {
-          marginfiAccount: user0Account,
-          bank: bankKeypairSol.publicKey,
-          tokenAccount: user.wsolAccount,
-          remaining: composeRemainingAccounts([
-            [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
-            [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
-          ]),
-          amount: borrowAmountSol_native,
-        })
-      )
+    const tx = new Transaction().add(
+      await borrowIx(user.mrgnProgram, {
+        marginfiAccount: user0Account,
+        bank: bankKeypairSol.publicKey,
+        tokenAccount: user.wsolAccount,
+        remaining: composeRemainingAccounts([
+          [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
+          [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+        ]),
+        amount: borrowAmountSol_native,
+      })
     );
+    const result = await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
+    const events = parseMarginfiEvents(program, result.logMessages);
+    const borrowEvent = events.find((e) => e.name === "lendingAccountBorrowEvent");
+    assert.isDefined(borrowEvent, "Expected lendingAccountBorrowEvent");
 
     // Borrowing from an isolated-tier bank sets has_isolated in real time
     const userAccAfterIsoBorrow = await program.account.marginfiAccount.fetch(
       user0Account
     );
     assert.equal(userAccAfterIsoBorrow.indexerFlags.hasIsolated, 1);
+
+    // share_amount includes origination fee, so compare against actual liability shares
+    const solBalance = userAccAfterIsoBorrow.lendingAccount.balances.find(
+      (b) => b.active && b.bankPk.equals(bankKeypairSol.publicKey)
+    );
+    assert.isDefined(solBalance, "Expected SOL liability balance");
+    assertI80F48Approx(borrowEvent!.data.shareAmount, solBalance!.liabilityShares);
 
     // Note: this test is really simple - it only tests that it's possible to borrow funds in one isolated tier bank.
     // All specifics and detailed numbers are checked in the next test (to not repeat here).

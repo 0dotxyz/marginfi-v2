@@ -94,6 +94,7 @@ pub fn kamino_withdraw<'info>(
         ctx.accounts.integration_acc_2.load()?.deposits[0].deposited_amount;
 
     let collateral_amount;
+    let share_amount;
     let bank_key = ctx.accounts.bank.key();
     let bank_mint = ctx.accounts.bank.load()?.mint;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
@@ -136,11 +137,11 @@ pub fn kamino_withdraw<'info>(
             &mut marginfi_account.lending_account,
         )?;
 
-        collateral_amount = if withdraw_all {
+        (collateral_amount, share_amount) = if withdraw_all {
             bank_account.withdraw_all(in_receivership)?
         } else {
-            bank_account.withdraw(I80F48::from_num(amount))?;
-            amount
+            let share_amount = bank_account.withdraw(I80F48::from_num(amount))?;
+            (amount, share_amount)
         };
 
         // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
@@ -229,6 +230,7 @@ pub fn kamino_withdraw<'info>(
         bank: bank_key,
         mint: bank_mint,
         amount: collateral_amount,
+        share_amount: share_amount.into(),
         close_balance: withdraw_all,
     });
 

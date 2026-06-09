@@ -1,4 +1,7 @@
-use crate::{state::bank::BankImpl, MarginfiError, MarginfiResult};
+use crate::{
+    state::{bank::BankImpl, marginfi_group::MarginfiGroupImpl},
+    MarginfiError, MarginfiResult,
+};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::types::{Bank, MarginfiGroup};
 
@@ -24,6 +27,11 @@ pub fn lending_pool_accrue_bank_interest(
 
 #[derive(Accounts)]
 pub struct LendingPoolAccrueBankInterest<'info> {
+    #[account(
+        constraint = (
+            !group.load()?.is_protocol_paused()
+        ) @ MarginfiError::ProtocolPaused
+    )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
     #[account(

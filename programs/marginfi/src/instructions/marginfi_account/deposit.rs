@@ -89,7 +89,7 @@ pub fn lending_account_deposit<'info>(
         &mut marginfi_account.lending_account,
     )?;
 
-    bank_account.deposit(I80F48::from_num(deposit_amount))?;
+    let share_amount = bank_account.deposit(I80F48::from_num(deposit_amount))?;
     marginfi_account.last_update = clock.unix_timestamp as u64;
 
     record_deposit_inflow(
@@ -134,6 +134,7 @@ pub fn lending_account_deposit<'info>(
         bank: bank_loader.key(),
         mint: bank.mint,
         amount: deposit_amount,
+        share_amount: share_amount.into(),
     });
 
     marginfi_account.lending_account.sort_balances();

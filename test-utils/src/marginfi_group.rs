@@ -689,7 +689,7 @@ impl MarginfiGroupFixture {
         Ok(())
     }
 
-    pub async fn try_accrue_interest(&self, bank: &BankFixture) -> Result<()> {
+    pub async fn try_accrue_interest(&self, bank: &BankFixture) -> Result<(), BanksClientError> {
         let ctx = self.ctx.borrow_mut();
 
         let ix = Instruction {
@@ -709,9 +709,7 @@ impl MarginfiGroupFixture {
             ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
-        ctx.banks_client.process_transaction(tx).await?;
-
-        Ok(())
+        ctx.banks_client.process_transaction(tx).await
     }
 
     pub async fn try_pulse_bank_price_cache(

@@ -193,6 +193,31 @@ async fn normal_repay_still_blocked_during_pause() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Permissionless `lending_pool_accrue_bank_interest` is rejected while the protocol is paused.
+#[tokio::test]
+async fn accrue_bank_interest_blocked_during_pause() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    // Sanity check: accrue works while unpaused.
+    test_f.marginfi_group.try_accrue_interest(usdc_bank).await?;
+
+    // Pause and propagate so the group cache reflects the paused state.
+    test_f.marginfi_group.try_panic_pause().await?;
+    test_f.marginfi_group.try_propagate_fee_state().await?;
+
+    let marginfi_group = test_f.marginfi_group.load().await;
+    assert!(marginfi_group.panic_state_cache.is_paused_flag());
+
+    // While paused, the permissionless crank must be rejected.
+    let result = test_f.marginfi_group.try_accrue_interest(usdc_bank).await;
+
+    assert_custom_error!(result.unwrap_err(), MarginfiError::ProtocolPaused);
+
+    Ok(())
+}
+
 /// Permissionless liquidation still fails during pause.
 #[tokio::test]
 async fn liquidation_still_blocked_during_pause() -> anyhow::Result<()> {

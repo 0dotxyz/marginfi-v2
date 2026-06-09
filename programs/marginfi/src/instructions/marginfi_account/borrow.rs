@@ -113,7 +113,7 @@ pub fn lending_account_borrow<'info>(
             .transpose()?
             .unwrap_or(amount);
 
-        let origination_fee_u64: u64;
+        let (origination_fee_u64, share_amount): (u64, I80F48);
         if !origination_fee_rate.is_zero() {
             origination_fee = I80F48::from_num(amount_pre_fee)
                 .checked_mul(origination_fee_rate)
@@ -121,11 +121,12 @@ pub fn lending_account_borrow<'info>(
             origination_fee_u64 = origination_fee.checked_to_num().ok_or_else(math_error!())?;
 
             // Incurs a borrow that includes the origination fee (but withdraws just the amt)
-            bank_account.borrow(I80F48::from_num(amount_pre_fee) + origination_fee)?;
+            share_amount =
+                bank_account.borrow(I80F48::from_num(amount_pre_fee) + origination_fee)?;
         } else {
             // Incurs a borrow for the amount without any fee
             origination_fee_u64 = 0;
-            bank_account.borrow(I80F48::from_num(amount_pre_fee))?;
+            share_amount = bank_account.borrow(I80F48::from_num(amount_pre_fee))?;
         }
 
         marginfi_account.last_update = clock.unix_timestamp as u64;
@@ -156,6 +157,7 @@ pub fn lending_account_borrow<'info>(
             bank: bank_loader.key(),
             mint: bank.mint,
             amount: amount_pre_fee + origination_fee_u64,
+            share_amount: share_amount.into(),
         });
     } // release mutable borrow of bank
 

@@ -17,7 +17,7 @@ doc = false
 marginfi-type-crate = { path = "../../../type-crate", features = ["anchor"] }
 solana-sdk = "=3.0.0"
 solana-program = "=3.0.0"
-solana-program-test = { version = "=3.1.11", features = ["agave-unstable-api"] }
+solana-program-test = { version = "=3.1.12", features = ["agave-unstable-api"] }
 spl-token = "9.0.0"
 spl-token-2022 = "11.0.0"
 
