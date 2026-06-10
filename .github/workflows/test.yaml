@@ -247,6 +247,10 @@ jobs:
     name: Anchor LiteSVM Tests
     runs-on: ubuntu-latest
     needs: [ test-unit, anchor-build ]
+    # The suite normally finishes well under 30 minutes. A hung run (e.g. the V8
+    # JIT infinite-loop this suite hit on node 24.15.0) produces no output and no
+    # mocha timeout, so without this cap it burns the runner for 6 hours.
+    timeout-minutes: 40
     steps:
     - uses: actions/checkout@v4
     - uses: ./.github/actions/base-setup/

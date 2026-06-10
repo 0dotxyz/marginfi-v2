@@ -473,15 +473,19 @@ describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
     assert(cumRateAfter > cumRateBefore);
 
     // expectedBorrowedAfter = borrowedBefore * (cumRateAfter / cumRateBefore).
+    // Computed in bigint + double only. Feeding the ~100-digit scaled ratio through
+    // BigNumber.times here made V8's optimized bignumber.js multiply spin in an
+    // uninterruptible infinite loop on CI (node 24.15.0 linux-x64) — the silent
+    // multi-hour "Anchor LiteSVM Tests" hang. The ratio is ~1.0, so double math is
+    // exact to ~1e-16 relative, well inside the 1e-9 tolerance.
     const RATIO_SCALE = 10n ** 30n;
     const rateRatioScaled = (cumRateAfter * RATIO_SCALE) / cumRateBefore;
-    const expectedBorrowedAfter = borrowedBefore
-      .times(rateRatioScaled.toString())
-      .div(RATIO_SCALE.toString());
+    const expectedBorrowedAfter =
+      borrowedBefore.toNumber() * (Number(rateRatioScaled) / Number(RATIO_SCALE));
     assert.approximately(
       borrowedAfter.toNumber(),
-      expectedBorrowedAfter.toNumber(),
-      expectedBorrowedAfter.toNumber() * 1e-9,
+      expectedBorrowedAfter,
+      expectedBorrowedAfter * 1e-9,
     );
 
     // Available liquidity only moves on borrows/repays, not interest accrual, so it is unchanged
