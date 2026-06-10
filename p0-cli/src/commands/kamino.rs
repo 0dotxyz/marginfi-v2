@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use kamino_mocks::state::MinimalReserve;
 use marginfi::state::bank::BankVaultType;
 use marginfi_type_crate::{
     pdas::{
@@ -11,7 +10,7 @@ use marginfi_type_crate::{
         derive_kamino_reserve_liquidity_supply, derive_kamino_rewards_treasury_vault,
         derive_kamino_rewards_vault, derive_kamino_user_metadata, derive_kamino_user_state,
     },
-    types::{Bank, OracleSetup},
+    types::Bank,
 };
 use solana_sdk::pubkey::Pubkey;
 
@@ -19,7 +18,7 @@ use super::require_field;
 use crate::config::{Config, GlobalOptions};
 use crate::configs;
 use crate::processor;
-use crate::utils::find_bank_vault_authority_pda;
+use crate::utils::{find_bank_vault_authority_pda, get_oracle_setup, load_kamino_reserve};
 
 /// Kamino integration commands (user / permissionless).
 #[derive(Debug, Parser)]
@@ -103,6 +102,57 @@ struct KaminoHarvestDerivedAccounts {
     scope_prices: Option<Pubkey>,
 }
 
+fn apply_reserve_oracle_override(
+    oracle_setup: (
+        Option<Pubkey>,
+        Option<Pubkey>,
+        Option<Pubkey>,
+        Option<Pubkey>,
+    ),
+    reserve_oracle_override: Option<Pubkey>,
+) -> (
+    Option<Pubkey>,
+    Option<Pubkey>,
+    Option<Pubkey>,
+    Option<Pubkey>,
+) {
+    let Some(reserve_oracle) = reserve_oracle_override else {
+        return oracle_setup;
+    };
+    let (pyth_oracle, switchboard_price_oracle, switchboard_twap_oracle, scope_prices) =
+        oracle_setup;
+
+    if pyth_oracle.is_some() {
+        (
+            Some(reserve_oracle),
+            switchboard_price_oracle,
+            switchboard_twap_oracle,
+            scope_prices,
+        )
+    } else if scope_prices.is_some() {
+        (
+            pyth_oracle,
+            switchboard_price_oracle,
+            switchboard_twap_oracle,
+            Some(reserve_oracle),
+        )
+    } else if switchboard_price_oracle.is_some() || switchboard_twap_oracle.is_some() {
+        (
+            pyth_oracle,
+            Some(reserve_oracle),
+            switchboard_twap_oracle,
+            scope_prices,
+        )
+    } else {
+        (
+            Some(reserve_oracle),
+            switchboard_price_oracle,
+            switchboard_twap_oracle,
+            scope_prices,
+        )
+    }
+}
+
 fn derive_kamino_accounts(
     config: &Config,
     bank_pk: Pubkey,
@@ -110,54 +160,39 @@ fn derive_kamino_accounts(
 ) -> Result<KaminoDerivedAccounts> {
     let rpc = config.mfi_program.rpc();
     let bank = config.mfi_program.account::<Bank>(bank_pk)?;
-    let reserve = bank.integration_acc_1;
-    let reserve_data = rpc.get_account_data(&reserve)?;
-    let reserve_size = std::mem::size_of::<MinimalReserve>();
-    if reserve_data.len() < 8 + reserve_size {
-        anyhow::bail!(
-            "Kamino reserve account {} data too small ({} bytes)",
-            reserve,
-            reserve_data.len()
-        );
-    }
-    let reserve_state: &MinimalReserve = bytemuck::from_bytes(&reserve_data[8..8 + reserve_size]);
+    let reserve_pk = bank.integration_acc_1;
+    let reserve_state = load_kamino_reserve(&rpc, reserve_pk)?;
+    let reserve = &reserve_state;
 
     let (liquidity_vault_authority, _) =
         find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
     let (lending_market_authority, _) =
-        derive_kamino_lending_market_authority(&reserve_state.lending_market);
-    let (reserve_liquidity_supply, _) = derive_kamino_reserve_liquidity_supply(&reserve);
-    let (reserve_collateral_mint, _) = derive_kamino_reserve_collateral_mint(&reserve);
+        derive_kamino_lending_market_authority(&reserve.lending_market);
+    let (reserve_liquidity_supply, _) = derive_kamino_reserve_liquidity_supply(&reserve_pk);
+    let (reserve_collateral_mint, _) = derive_kamino_reserve_collateral_mint(&reserve_pk);
     let (reserve_destination_deposit_collateral, _) =
-        derive_kamino_reserve_collateral_supply(&reserve);
+        derive_kamino_reserve_collateral_supply(&reserve_pk);
     let (user_metadata, _) = derive_kamino_user_metadata(&liquidity_vault_authority);
 
-    let reserve_farm_state = (reserve_state.farm_collateral != Pubkey::default())
-        .then_some(reserve_state.farm_collateral);
+    let reserve_farm_state =
+        (reserve.farm_collateral != Pubkey::default()).then_some(reserve.farm_collateral);
     let obligation_farm_user_state = reserve_farm_state
         .map(|farm_state| derive_kamino_user_state(&farm_state, &bank.integration_acc_2).0);
 
-    let reserve_oracle =
-        reserve_oracle_override
-            .or((bank.config.oracle_keys[0] != Pubkey::default())
-                .then_some(bank.config.oracle_keys[0]));
-    let (pyth_oracle, scope_prices) = match bank.config.oracle_setup {
-        OracleSetup::KaminoPythPush => (reserve_oracle, None),
-        OracleSetup::KaminoSwitchboardPull => (None, reserve_oracle),
-        _ => (None, None),
-    };
+    let (pyth_oracle, switchboard_price_oracle, switchboard_twap_oracle, scope_prices) =
+        apply_reserve_oracle_override(get_oracle_setup(&reserve_state), reserve_oracle_override);
 
     Ok(KaminoDerivedAccounts {
-        lending_market: reserve_state.lending_market,
+        lending_market: reserve.lending_market,
         lending_market_authority,
         reserve_liquidity_supply,
         reserve_collateral_mint,
         reserve_destination_deposit_collateral,
-        reserve_source_collateral: reserve_state.collateral_supply_vault,
+        reserve_source_collateral: reserve.collateral.supply_vault,
         user_metadata,
         pyth_oracle,
-        switchboard_price_oracle: None,
-        switchboard_twap_oracle: None,
+        switchboard_price_oracle,
+        switchboard_twap_oracle,
         scope_prices,
         obligation_farm_user_state,
         reserve_farm_state,
