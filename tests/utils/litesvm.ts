@@ -218,27 +218,7 @@ export class ProgramTestContext {
   }
 
   warpToSlot(slot: bigint): void {
-    // `litesvm.warpToSlot` re-derives the clock's wall-clock fields
-    // (`unix_timestamp`, `epoch_start_timestamp`) from the new slot, and that
-    // derivation is NOT identical across host platforms — it drifts on Linux
-    // vs macOS, so the same warp yields different timestamps (which then
-    // diverge kamino/kfarms interest + reward accrual and break CI while
-    // passing locally). Tests drive wall-clock time explicitly via `setClock`,
-    // so warping must move ONLY the slot axis (slot/epoch) and keep the time
-    // axis fixed at whatever was last set. This makes the clock a deterministic,
-    // platform-independent function of explicit `setClock` calls.
-    const before = this.svm.getClock();
     this.svm.warpToSlot(slot);
-    const after = this.svm.getClock();
-    this.svm.setClock(
-      new Clock(
-        after.slot,
-        before.epochStartTimestamp,
-        after.epoch,
-        after.leaderScheduleEpoch,
-        before.unixTimestamp,
-      ),
-    );
     syncRecentSlotHash(this.svm);
   }
 
