@@ -317,8 +317,57 @@ jobs:
       run: anchor build -p marginfi -- --no-default-features --features custom-heap
 
     - name: Run Anchor tests (retry on segfault)
+      env:
+        NODE_OPTIONS: --report-on-signal
       run: |
         set +e
+
+        sudo apt-get install -y -qq gdb >/dev/null 2>&1 || true
+
+        # Watchdog: the LiteSVM suite has hung indefinitely on CI (silent
+        # freeze mid-suite). If test_output.log goes quiet for 5 minutes,
+        # dump JS + native stacks of every node process, then kill the run.
+        watchdog() {
+          while true; do
+            sleep 60
+            [ -f test_output.log ] || continue
+            now=$(date +%s)
+            mt=$(stat -c %Y test_output.log)
+            if [ $((now - mt)) -gt 300 ]; then
+              echo "=== WATCHDOG: no output for $((now - mt))s — dumping diagnostics ==="
+              ps -eLf | grep -E "node|anchor|mocha" | grep -v grep
+              echo "--- per-process CPU/state ---"
+              ps -eo pid,stat,pcpu,wchan:32,comm | grep -E "node|anchor|MainThread" || true
+              for pid in $(pgrep node); do
+                echo "=== node pid $pid /proc/syscall ==="
+                sudo cat /proc/$pid/syscall 2>/dev/null || true
+                echo "=== node pid $pid thread kernel stacks ==="
+                for t in /proc/$pid/task/*; do
+                  echo "--- tid $(basename $t) ($(cat $t/comm 2>/dev/null)) state $(awk '{print $3}' $t/stat 2>/dev/null) ---"
+                  sudo cat $t/stack 2>/dev/null || true
+                done
+                echo "=== node pid $pid SIGUSR2 (node diagnostic report) ==="
+                kill -USR2 $pid 2>/dev/null || true
+              done
+              sleep 15
+              for f in report.*.json; do
+                [ -f "$f" ] || continue
+                echo "=== $f (javascriptStack/nativeStack) ==="
+                python3 -c "import json,sys; r=json.load(open('$f')); print(json.dumps({k: r.get(k) for k in ('javascriptStack','nativeStack')}, indent=1))" || head -c 5000 "$f"
+              done
+              for pid in $(pgrep node); do
+                echo "=== gdb native backtrace pid $pid ==="
+                sudo timeout 120 gdb -p $pid -batch -ex "set pagination off" -ex "thread apply all bt" 2>&1 | head -300 || true
+              done
+              echo "=== WATCHDOG: killing hung test run ==="
+              pkill -9 node 2>/dev/null || true
+              pkill -9 anchor 2>/dev/null || true
+              exit 0
+            fi
+          done
+        }
+        watchdog &
+        WATCHDOG_PID=$!
 
         run_tests() {
           anchor run all-tests 2>&1 | tee test_output.log
@@ -327,6 +376,7 @@ jobs:
 
         run_tests
         CODE=$?
+        kill $WATCHDOG_PID 2>/dev/null
 
         if [ $CODE -eq 139 ]; then
           echo "⚠️ Segmentation fault detected. Retrying tests once…"
