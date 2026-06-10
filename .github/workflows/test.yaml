@@ -338,7 +338,9 @@ jobs:
               ps -eLf | grep -E "node|anchor|mocha" | grep -v grep
               echo "--- per-process CPU/state ---"
               ps -eo pid,stat,pcpu,wchan:32,comm | grep -E "node|anchor|MainThread" || true
-              for pid in $(pgrep node); do
+              NODE_PIDS=$(ps -eo pid=,comm= | awk '$2=="MainThread"||$2=="node"{print $1}')
+              echo "node pids: $NODE_PIDS"
+              for pid in $NODE_PIDS; do
                 echo "=== node pid $pid /proc/syscall ==="
                 sudo cat /proc/$pid/syscall 2>/dev/null || true
                 echo "=== node pid $pid thread kernel stacks ==="
@@ -355,13 +357,14 @@ jobs:
                 echo "=== $f (javascriptStack/nativeStack) ==="
                 python3 -c "import json,sys; r=json.load(open('$f')); print(json.dumps({k: r.get(k) for k in ('javascriptStack','nativeStack')}, indent=1))" || head -c 5000 "$f"
               done
-              for pid in $(pgrep node); do
+              for pid in $NODE_PIDS; do
                 echo "=== gdb native backtrace pid $pid ==="
                 sudo timeout 120 gdb -p $pid -batch -ex "set pagination off" -ex "thread apply all bt" 2>&1 | head -300 || true
               done
               echo "=== WATCHDOG: killing hung test run ==="
-              pkill -9 node 2>/dev/null || true
+              kill -9 $NODE_PIDS 2>/dev/null || true
               pkill -9 anchor 2>/dev/null || true
+              pkill -9 tee 2>/dev/null || true
               exit 0
             fi
           done
