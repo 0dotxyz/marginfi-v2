@@ -6,11 +6,9 @@ use marginfi::{assert_eq_with_tolerance, errors::MarginfiError};
 use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED, types::compute_same_asset_emode_weight,
 };
-use solana_program_test::*;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
-use solana_sdk::{
-    pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction,
-};
+use solana_program_test::*;
+use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction};
 
 fn midpoint(left: FixedI80F48, right: FixedI80F48) -> FixedI80F48 {
     (left + right) / FixedI80F48::from_num(2)

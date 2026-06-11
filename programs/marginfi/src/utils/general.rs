@@ -314,6 +314,10 @@ pub fn wrapped_i80f48_to_f64(n: WrappedI80F48) -> f64 {
     as_f64
 }
 
+pub fn i80f48_to_f64(n: I80F48) -> f64 {
+    n.to_num()
+}
+
 /// Fetch a low-biased price for a given bank from a properly structured remaining accounts slice as
 /// passed to any risk check.
 ///

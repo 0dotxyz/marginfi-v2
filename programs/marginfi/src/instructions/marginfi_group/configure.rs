@@ -1,5 +1,6 @@
 use crate::events::{GroupEventHeader, MarginfiGroupConfigureEvent};
 use crate::state::marginfi_group::MarginfiGroupImpl;
+use crate::utils::i80f48_to_f64;
 use crate::{MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
@@ -14,12 +15,14 @@ fn validate_and_apply_emode_leverage(
     if let Some(wrapped) = new_value {
         let leverage: I80F48 = wrapped.into();
         if leverage < I80F48::ONE {
-            msg!("emode leverage {} must be >= 1", leverage);
-            return Err(MarginfiError::BadEmodeConfig.into());
+            let leverage_f64 = i80f48_to_f64(leverage);
+            msg!("emode leverage ({:.6}) must be >= 1", leverage_f64);
+            return Err(error!(MarginfiError::BadEmodeConfig));
         }
         if leverage > I80F48::from_num(100) {
-            msg!("emode leverage {} must be <= 100", leverage);
-            return Err(MarginfiError::BadEmodeConfig.into());
+            let leverage_f64 = i80f48_to_f64(leverage);
+            msg!("emode leverage ({:.6}) must be <= 100", leverage_f64);
+            return Err(error!(MarginfiError::BadEmodeConfig));
         }
         *current = basis_to_u32(leverage);
     }
@@ -83,14 +86,17 @@ pub fn configure(
         &mut marginfi_group.emode_max_maint_leverage,
     )?;
 
+    let emode_init_leverage = u32_to_basis(marginfi_group.emode_max_init_leverage);
+    let emode_maint_leverage = u32_to_basis(marginfi_group.emode_max_maint_leverage);
+
     // Validate that init < maint
-    if marginfi_group.emode_max_init_leverage >= marginfi_group.emode_max_maint_leverage {
+    if emode_init_leverage >= emode_maint_leverage {
         msg!(
-            "emode init leverage ({}) must be < maint leverage ({})",
-            marginfi_group.emode_max_init_leverage,
-            marginfi_group.emode_max_maint_leverage
+            "emode init leverage ({:.6}) must be < maint leverage ({:.6})",
+            i80f48_to_f64(emode_init_leverage),
+            i80f48_to_f64(emode_maint_leverage)
         );
-        return Err(MarginfiError::BadEmodeConfig.into());
+        return Err(error!(MarginfiError::BadEmodeConfig));
     }
 
     validate_and_apply_emode_leverage(
@@ -102,19 +108,30 @@ pub fn configure(
         &mut marginfi_group.same_asset_emode_maint_leverage,
     )?;
 
-    let same_asset_init_leverage = u32_to_basis(marginfi_group.same_asset_emode_init_leverage);
-    let same_asset_maint_leverage = u32_to_basis(marginfi_group.same_asset_emode_maint_leverage);
+    let same_asset_init_leverage: I80F48 =
+        u32_to_basis(marginfi_group.same_asset_emode_init_leverage);
+    let same_asset_maint_leverage: I80F48 =
+        u32_to_basis(marginfi_group.same_asset_emode_maint_leverage);
 
-    let same_asset_disabled =
-        same_asset_init_leverage <= I80F48::ONE && same_asset_maint_leverage <= I80F48::ONE;
+    let same_asset_init_enabled = same_asset_init_leverage > I80F48::ONE;
+    let same_asset_maint_enabled = same_asset_maint_leverage > I80F48::ONE;
 
-    if !same_asset_disabled && same_asset_init_leverage >= same_asset_maint_leverage {
+    if same_asset_init_enabled != same_asset_maint_enabled {
         msg!(
-            "same-asset emode init leverage ({}) must be < maint leverage ({})",
-            same_asset_init_leverage,
-            same_asset_maint_leverage
+            "same-asset emode init leverage ({:.6}) and maint leverage ({:.6}) must both be enabled or both be disabled",
+            i80f48_to_f64(same_asset_init_leverage),
+            i80f48_to_f64(same_asset_maint_leverage)
         );
-        return Err(MarginfiError::BadEmodeConfig.into());
+        return Err(error!(MarginfiError::BadEmodeConfig));
+    }
+
+    if same_asset_init_enabled && same_asset_init_leverage >= same_asset_maint_leverage {
+        msg!(
+            "same-asset emode init leverage ({:.6}) must be < maint leverage ({:.6})",
+            i80f48_to_f64(same_asset_init_leverage),
+            i80f48_to_f64(same_asset_maint_leverage)
+        );
+        return Err(error!(MarginfiError::BadEmodeConfig));
     }
     // The fuzzer should ignore this because the "Clock" mock sysvar doesn't load until after the
     // group is init. Eventually we might fix the fuzzer to load the clock first...

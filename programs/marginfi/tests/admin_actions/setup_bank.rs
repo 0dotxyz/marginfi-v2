@@ -2033,6 +2033,27 @@ async fn configure_group_same_asset_emode_leverage_persists_and_rejects_invalid_
     assert!(below_min_res.is_err());
     assert_custom_error!(below_min_res.unwrap_err(), MarginfiError::BadEmodeConfig);
 
+    let asymmetric_disabled_res = test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(1).into()),
+            Some(I80F48::from_num(2).into()),
+        )
+        .await;
+
+    assert!(asymmetric_disabled_res.is_err());
+    assert_custom_error!(
+        asymmetric_disabled_res.unwrap_err(),
+        MarginfiError::BadEmodeConfig
+    );
+
     test_f
         .marginfi_group
         .try_update_with_same_asset_emode_leverage(

@@ -33,6 +33,8 @@ pub mod marginfi {
     /// (admin only) Configure group admin keys and emode leverage caps. All admin keys must be
     /// provided on every call. Emode leverage caps are set if provided, otherwise the existing
     /// (non-zero) values are kept. Pass `Some(value)` to update, `None` to leave unchanged.
+    /// Same-asset emode leverage is disabled by configuring both init and maint leverage to `1`;
+    /// values below `1`, including `0`, are invalid.
     ///
     /// Note: `new_emissions_admin` is deprecated and currently has no on-chain effect.
     pub fn marginfi_group_configure(
