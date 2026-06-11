@@ -33,8 +33,9 @@ use {
         pubkey::Pubkey,
         signature::Keypair,
         signer::Signer,
-        system_program, sysvar,
+        sysvar,
     },
+    solana_system_interface::program as system_program,
     spl_associated_token_account::instruction::create_associated_token_account_idempotent,
     std::{collections::HashMap, fs, path::PathBuf, str::FromStr},
 };
@@ -178,9 +179,7 @@ pub fn marginfi_account_list(profile: Profile, config: &Config) -> Result<()> {
     }
 
     for (address, marginfi_account) in &accounts {
-        let is_default = profile
-            .marginfi_account
-            .map_or(false, |default_account| default_account == *address);
+        let is_default = profile.marginfi_account == Some(*address);
         output::print_account_detail(*address, marginfi_account, &banks, is_default, json);
     }
 
@@ -731,6 +730,12 @@ pub fn marginfi_account_close_order(
     let authority = config.authority();
     let marginfi_account_pk = profile.get_marginfi_account()?;
 
+    let marginfi_account = config
+        .mfi_program
+        .account::<MarginfiAccount>(marginfi_account_pk)?;
+    ensure_account_unblocked(&marginfi_account, "close-order")?;
+    let group = marginfi_account.group;
+
     let fee_recipient = fee_recipient.unwrap_or(authority);
 
     println!("Closing order: {}", order_pk);
@@ -739,6 +744,7 @@ pub fn marginfi_account_close_order(
     let ix = Instruction {
         program_id: config.program_id,
         accounts: marginfi::accounts::CloseOrder {
+            group,
             marginfi_account: marginfi_account_pk,
             authority,
             order: order_pk,
@@ -1025,6 +1031,12 @@ pub fn marginfi_account_set_keeper_close_flags(
 ) -> Result<()> {
     let marginfi_account_pk = profile.get_marginfi_account()?;
 
+    let marginfi_account = config
+        .mfi_program
+        .account::<MarginfiAccount>(marginfi_account_pk)?;
+    ensure_account_unblocked(&marginfi_account, "set-keeper-close-flags")?;
+    let group = marginfi_account.group;
+
     match &bank_keys_opt {
         Some(keys) => {
             println!("Setting liquidator close flags for specific banks:");
@@ -1040,6 +1052,7 @@ pub fn marginfi_account_set_keeper_close_flags(
     let ix = Instruction {
         program_id: config.program_id,
         accounts: marginfi::accounts::SetKeeperCloseFlags {
+            group,
             marginfi_account: marginfi_account_pk,
             authority: config.authority(),
         }

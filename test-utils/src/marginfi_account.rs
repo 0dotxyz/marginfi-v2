@@ -16,12 +16,11 @@ use marginfi_type_crate::pdas::{
 };
 use marginfi_type_crate::types::OracleSetup;
 use marginfi_type_crate::types::{Bank, FeeState, MarginfiAccount, Order, OrderTrigger};
+use solana_commitment_config::CommitmentLevel;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program::{instruction::Instruction, sysvar};
 use solana_program_test::{BanksClient, BanksClientError, ProgramTestContext};
-use solana_sdk::{
-    commitment_config::CommitmentLevel, compute_budget::ComputeBudgetInstruction, hash::Hash,
-    signature::Keypair, signer::Signer, transaction::Transaction,
-};
+use solana_sdk::{hash::Hash, signature::Keypair, signer::Signer, transaction::Transaction};
 use std::{cell::RefCell, mem, rc::Rc};
 
 #[cfg(feature = "transfer-hook")]
@@ -930,7 +929,7 @@ impl MarginfiAccountFixture {
             accounts: marginfi::accounts::LendingAccountStartFlashloan {
                 marginfi_account: self.key,
                 authority: self.ctx.borrow().payer.pubkey(),
-                ixs_sysvar: sysvar::instructions::id(),
+                ixs_sysvar: solana_instructions_sysvar::id(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::LendingAccountStartFlashloan { end_index }.data(),
@@ -1263,7 +1262,7 @@ impl MarginfiAccountFixture {
                 liquidation_record,
                 liquidation_receiver,
                 group: self.load().await.group,
-                instruction_sysvar: sysvar::instructions::id(),
+                instruction_sysvar: solana_instructions_sysvar::id(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::StartLiquidation {}.data(),
@@ -1878,7 +1877,7 @@ impl MarginfiAccountFixture {
                 liquidation_record,
                 group: marginfi_account.group,
                 risk_admin,
-                instruction_sysvar: sysvar::instructions::id(),
+                instruction_sysvar: solana_instructions_sysvar::id(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::StartDeleverage {}.data(),
@@ -1986,11 +1985,13 @@ impl MarginfiAccountFixture {
         order: Pubkey,
         fee_recipient: Pubkey,
     ) -> std::result::Result<(), BanksClientError> {
+        let marginfi_account = self.load().await;
         let ctx = self.ctx.borrow();
 
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::CloseOrder {
+                group: marginfi_account.group,
                 marginfi_account: self.key,
                 authority: ctx.payer.pubkey(),
                 order,
@@ -2054,11 +2055,13 @@ impl MarginfiAccountFixture {
         &self,
         bank_keys_opt: Option<Vec<Pubkey>>,
     ) -> std::result::Result<(), BanksClientError> {
+        let marginfi_account = self.load().await;
         let ctx = self.ctx.borrow();
 
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::SetKeeperCloseFlags {
+                group: marginfi_account.group,
                 marginfi_account: self.key,
                 authority: ctx.payer.pubkey(),
             }
@@ -2113,7 +2116,7 @@ impl MarginfiAccountFixture {
                 executor,
                 order,
                 execute_record,
-                instruction_sysvar: sysvar::instructions::id(),
+                instruction_sysvar: solana_instructions_sysvar::id(),
                 system_program: system_program::ID,
             }
             .to_account_metas(Some(true)),

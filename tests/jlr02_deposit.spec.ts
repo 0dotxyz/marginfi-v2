@@ -6,7 +6,7 @@ import {
 } from "@solana/spl-token";
 import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { assert } from "chai";
-import { Clock } from "solana-bankrun";
+import { Clock } from "./utils/litesvm";
 
 import {
   bankrunContext,
@@ -29,7 +29,13 @@ import {
 } from "./utils/genericTests";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { accountInit, pulseBankPrice } from "./utils/user-instructions";
-import { dumpBankrunLogs, mintToTokenAccount, processBankrunTransaction } from "./utils/tools";
+import {
+  dumpBankrunLogs,
+  bnToBigIntSafe,
+  mintToTokenAccount,
+  processBankrunTransaction,
+  toI80Scaled,
+} from "./utils/tools";
 import {
   makeJuplendDepositIx,
   makeJuplendNativeBorrowIx,
@@ -47,6 +53,7 @@ import {
   type JuplendPoolKeys,
 } from "./utils/juplend/types";
 import { JUPLEND_STATE_KEYS } from "./utils/juplend/test-state";
+import { EXCHANGE_PRICES_PRECISION_BN } from "./utils/juplend/constants";
 import {
   initJuplendProtocolPositionsIx,
   updateJuplendUserBorrowConfigIx,
@@ -67,7 +74,8 @@ const ADMIN_USDC_BORROW_DEBT_CEILING = new BN(
   1_000 * 10 ** ecosystem.usdcDecimals,
 );
 const ONE_HOUR_IN_SECONDS = 60 * 60;
-const EXCHANGE_PRICES_PRECISION = new BN("1000000000000");
+const EXCHANGE_PRICES_PRECISION = EXCHANGE_PRICES_PRECISION_BN;
+const I80F48_SCALE_NUMBER = 2 ** 48;
 
 describe("jlr02: JupLend deposits (bankrun)", () => {
   let juplendPrograms: ReturnType<typeof getJuplendPrograms>;
@@ -312,7 +320,12 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     firstDepositCacheMultiplier = Number(
       wrappedI80F48toBigNumber(bankAfterPulse.cache.priceMultiplier).toString(),
     );
-    assertI80F48Approx(bankAfterPulse.cache.lastOraclePrice, oracles.usdcPrice, 0.000001);
+    assert.approximately(
+      Number(toI80Scaled(bankAfterPulse.cache.lastOraclePrice)) /
+        I80F48_SCALE_NUMBER,
+      oracles.usdcPrice,
+      0.000001,
+    );
     assertI80F48Approx(bankAfterPulse.cache.priceMultiplier, 1, 0.01);
   });
 
@@ -804,17 +817,31 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     );
     const bankAfterPulse = await bankrunProgram.account.bank.fetch(usdcJupBankPk);
     const expectedCacheMultiplier =
-      Number(lendingAfter.tokenExchangePrice.toString()) /
+      Number(bnToBigIntSafe(lendingAfter.tokenExchangePrice)) /
       Number(EXCHANGE_PRICES_PRECISION.toString());
     const observedCacheMultiplier = Number(
       wrappedI80F48toBigNumber(bankAfterPulse.cache.priceMultiplier).toString(),
     );
-    assertI80F48Approx(
-      bankAfterPulse.cache.priceMultiplier,
-      expectedCacheMultiplier,
-      expectedCacheMultiplier / 1000, // .01%
+    const i80Scale = 1n << 48n;
+    const expectedScaled =
+      (bnToBigIntSafe(lendingAfter.tokenExchangePrice) * i80Scale) /
+      bnToBigIntSafe(EXCHANGE_PRICES_PRECISION);
+    const observedScaled = toI80Scaled(bankAfterPulse.cache.priceMultiplier);
+    const diffScaled =
+      observedScaled > expectedScaled
+        ? observedScaled - expectedScaled
+        : expectedScaled - observedScaled;
+    const toleranceScaled = expectedScaled / 1000n; // .1%
+    assert.isTrue(
+      diffScaled <= toleranceScaled,
+      `cache multiplier mismatch scaled: observed=${observedScaled.toString()} expected=${expectedScaled.toString()} diff=${diffScaled.toString()} tol=${toleranceScaled.toString()}`,
     );
-    assertI80F48Approx(bankAfterPulse.cache.lastOraclePrice, oracles.usdcPrice, 0.000001);
+    assert.approximately(
+      Number(toI80Scaled(bankAfterPulse.cache.lastOraclePrice)) /
+        I80F48_SCALE_NUMBER,
+      oracles.usdcPrice,
+      0.000001,
+    );
     assert.isAtLeast(observedCacheMultiplier, firstDepositCacheMultiplier);
     assert.equal(
       jupReserveVaultAfter - jupReserveVaultBefore,

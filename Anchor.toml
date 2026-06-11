@@ -1,10 +1,10 @@
 [toolchain]
-anchor_version = "0.31.1"
-solana_version = "2.1.20"
+anchor_version = "1.0.2"
+solana_version = "3.1.13"
 # Getting "thread 'main' panicked at cli/src/lib.rs:545:18:"? Check your toolchain matches the above.
 
 [workspace]
-members = ["programs/marginfi", "programs/mocks", "programs/test_transfer_hook"]
+members = ["programs/marginfi", "programs/mocks", "programs/kamino-mocks", "programs/test_transfer_hook"]
 # exclude = [
 #   "programs/test_transfer_hook",
 # ]
@@ -48,7 +48,7 @@ test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.t
 # All tests (for CI)
 all-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/*.spec.ts --exit --require tests/rootHooks.ts"
 
-# Bankrun-only runner (no local validator)
+# LiteSVM-only runner (no local validator)
 # Use: anchor run kamino-tests
 kamino-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/k*.spec.ts --exit --require tests/rootHooks.ts"
 
@@ -222,7 +222,7 @@ filename = "tests/fixtures/mainnet_group.json"
 
 
 # To update:
-# clone https://github.com/solana-labs/solana-program-library/tree/master and run cargo build-sbf in spl_single_pool
+# git clone https://github.com/solana-program/single-pool && cd single-pool && cargo build-sbf --manifest-path program/Cargo.toml
 [[test.genesis]]
 address = "SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE" # spl single pool program
 program = "tests/fixtures/spl_single_pool.so"

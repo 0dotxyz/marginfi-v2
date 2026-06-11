@@ -26,6 +26,7 @@ import {
 
 import {
   addBankWithSeed,
+  configureBank,
   configureBankOracle,
   groupInitialize,
 } from "./utils/group-instructions";
@@ -54,6 +55,7 @@ import {
   CLOSE_ENABLED_FLAG,
   ORACLE_SETUP_PYTH_PUSH,
   PYTH_PULL_MIGRATED,
+  blankBankConfigOptRaw,
   defaultBankConfig,
 } from "./utils/types";
 
@@ -587,7 +589,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         pool,
         addresses,
         config,
-        expectedState: { paused: {} },
+        expectedState: { uninitialized: {} },
       });
 
       juplendAccounts.set(jlr01BankStateKey(spec.name), addresses.bank);
@@ -741,7 +743,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
       );
       assert.deepEqual(
         bankAfter.config.operationalState,
-        { paused: {} },
+        { uninitialized: {} },
         `bank init when it should have failed: ${badCase.name}`,
       );
     }
@@ -800,6 +802,130 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
     }
   });
 
+  it("(attacker) cannot reactivate a paused juplend bank via init_position", async () => {
+    // Regression: an admin pause must not be reversible by re-running init_position.
+    const spec = juplendSpecs.find((s) => s.name === "USDC")!;
+    const pool = juplendPools.USDC;
+    const addresses = juplendAddresses.USDC;
+    const attacker = users[0];
+
+    // Admin pauses the (already initialized + operational) bank.
+    const pauseConfig = blankBankConfigOptRaw();
+    pauseConfig.operationalState = { paused: undefined };
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(
+        await configureBank(groupAdmin.mrgnBankrunProgram, {
+          bank: addresses.bank,
+          bankConfigOpt: pauseConfig,
+        }),
+      ),
+      [groupAdmin.wallet],
+      false,
+      true,
+    );
+
+    const bankPaused = await bankrunProgram.account.bank.fetch(addresses.bank);
+    assert.deepEqual(bankPaused.config.operationalState, { paused: {} });
+
+    // Mint USDC to the attacker so the transfer step would otherwise succeed.
+    await mintToTokenAccount(
+      ecosystem.usdcMint.publicKey,
+      attacker.usdcAccount,
+      toUnit(ecosystem.usdcDecimals),
+    );
+
+    // Attacker tries to re-run init_position: gate is operational_state == Uninitialized, which
+    // a paused (previously activated) bank no longer matches.
+    const attackerIx = await makeJuplendInitPositionIx(
+      attacker.mrgnBankrunProgram!,
+      {
+        feePayer: attacker.wallet.publicKey,
+        signerTokenAccount: attacker.usdcAccount,
+        bank: addresses.bank,
+        pool,
+        seedDepositAmount: toUnit(ecosystem.usdcDecimals),
+      },
+    );
+
+    const attackerResult = await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(attackerIx),
+      [attacker.wallet],
+      true,
+      false,
+    );
+    assertBankrunTxFailed(attackerResult, 6507); // JuplendBankAlreadyActivated
+
+    // Admin re-init also fails, for the same reason.
+    const adminIx = await makeJuplendInitPositionIx(
+      groupAdmin.mrgnBankrunProgram,
+      {
+        feePayer: groupAdmin.wallet.publicKey,
+        signerTokenAccount: getAdminTokenAccountForMint(spec.mint.publicKey),
+        bank: addresses.bank,
+        pool,
+        seedDepositAmount: toUnit(spec.decimals),
+      },
+    );
+    const adminResult = await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(adminIx),
+      [groupAdmin.wallet],
+      true,
+      false,
+    );
+    assertBankrunTxFailed(adminResult, 6507); // JuplendBankAlreadyActivated
+
+    // Bank stays Paused (not flipped back to Operational, not regressed to Uninitialized).
+    const bankAfter = await bankrunProgram.account.bank.fetch(addresses.bank);
+    assert.deepEqual(bankAfter.config.operationalState, { paused: {} });
+
+    // Restore the bank to Operational for downstream tests that share this group/LUT.
+    const restoreConfig = blankBankConfigOptRaw();
+    restoreConfig.operationalState = { operational: undefined };
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(
+        await configureBank(groupAdmin.mrgnBankrunProgram, {
+          bank: addresses.bank,
+          bankConfigOpt: restoreConfig,
+        }),
+      ),
+      [groupAdmin.wallet],
+      false,
+      true,
+    );
+    const bankRestored = await bankrunProgram.account.bank.fetch(
+      addresses.bank,
+    );
+    assert.deepEqual(bankRestored.config.operationalState, { operational: {} });
+  });
+
+  it("(admin) cannot set operational_state to Uninitialized via configure_bank", async () => {
+    // The Uninitialized state must be unreachable from configure_bank — otherwise the admin
+    // could re-arm juplend_init_position and bypass its one-time semantics.
+    const addresses = juplendAddresses.USDC;
+    const bogusConfig = blankBankConfigOptRaw();
+    bogusConfig.operationalState = { uninitialized: undefined };
+    const result = await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(
+        await configureBank(groupAdmin.mrgnBankrunProgram, {
+          bank: addresses.bank,
+          bankConfigOpt: bogusConfig,
+        }),
+      ),
+      [groupAdmin.wallet],
+      true,
+      false,
+    );
+    assertBankrunTxFailed(result, 6042); // Unauthorized
+
+    const bank = await bankrunProgram.account.bank.fetch(addresses.bank);
+    assert.deepEqual(bank.config.operationalState, { operational: {} });
+  });
+
   it("(admin) create JupLend LUT for downstream tests", async () => {
     const lutAddresses: PublicKey[] = [];
     const seen = new Set<string>();
@@ -843,7 +969,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
     const [createLutIx, lookupTable] = AddressLookupTableProgram.createLookupTable({
       authority: groupAdmin.wallet.publicKey,
       payer: groupAdmin.wallet.publicKey,
-      recentSlot: recentSlot - 1,
+      recentSlot,
     });
     await processBankrunTransaction(
       bankrunContext,

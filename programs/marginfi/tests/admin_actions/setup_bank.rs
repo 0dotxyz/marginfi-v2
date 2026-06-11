@@ -30,7 +30,8 @@ use solana_program_test::*;
 use solana_sdk::{
     clock::Clock, instruction::Instruction, pubkey::Pubkey, transaction::Transaction,
 };
-use solana_sdk::{signature::Keypair, signer::Signer, system_program};
+use solana_sdk::{signature::Keypair, signer::Signer};
+use solana_system_interface::program as system_program;
 use test_case::test_case;
 
 fn derive_seeded_bank(group: Pubkey, mint: Pubkey, bank_seed: u64) -> Pubkey {

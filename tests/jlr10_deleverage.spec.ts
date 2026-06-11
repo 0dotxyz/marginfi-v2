@@ -4,7 +4,7 @@ import {
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import { assert } from "chai";
-import { Clock } from "solana-bankrun";
+import { Clock } from "./utils/litesvm";
 import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 
 import {

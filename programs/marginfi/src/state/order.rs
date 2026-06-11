@@ -132,7 +132,7 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
             }
 
             // Skip balances that belong to this order, they can be changed by the keeper
-            if balance.tag != 0 && order_tags.iter().any(|t| *t == balance.tag) {
+            if balance.tag != 0 && order_tags.contains(&balance.tag) {
                 continue;
             }
 

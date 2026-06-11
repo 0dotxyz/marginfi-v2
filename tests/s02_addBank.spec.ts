@@ -511,8 +511,8 @@ describe("Init group and add banks with asset category flags", () => {
     assertKeyDefault(bank.emissionsMint);
 
     // Constants/Defaults...
-    assertI80F48Equal(bank.assetShareValue, 1);
-    assertI80F48Equal(bank.liabilityShareValue, 1);
+    assertI80F48Equal(bank.assetShareValue, new BN(1));
+    assertI80F48Equal(bank.liabilityShareValue, new BN(1));
     assertI80F48Equal(bank.collectedInsuranceFeesOutstanding, 0);
     assertI80F48Equal(bank.collectedGroupFeesOutstanding, 0);
     assertI80F48Equal(bank.totalLiabilityShares, 0);

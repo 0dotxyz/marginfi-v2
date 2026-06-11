@@ -284,7 +284,7 @@ describe("Rate limiter", () => {
     const result = await processBankrunTransaction(
       bankrunContext,
       tx,
-      [rateLimitUser.wallet, users[0].wallet],
+      [rateLimitUser.wallet],
     );
     return parseRateLimitFlowEvents(prog, result.logMessages);
   };
@@ -326,7 +326,7 @@ describe("Rate limiter", () => {
     const result = await processBankrunTransaction(
       bankrunContext,
       tx,
-      [rateLimitUser.wallet, users[0].wallet],
+      [rateLimitUser.wallet],
     );
     return parseRateLimitFlowEvents(prog, result.logMessages);
   };

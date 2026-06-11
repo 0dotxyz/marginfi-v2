@@ -22,6 +22,9 @@ devnet = []
 mainnet-beta = []
 debug = []
 staging = []
+custom-heap = []
+custom-panic = []
+anchor-debug = ["anchor-lang/anchor-debug"]
 
 [dependencies]
 anchor-lang = { workspace = true }

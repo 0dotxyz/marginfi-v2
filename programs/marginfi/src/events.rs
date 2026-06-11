@@ -151,6 +151,7 @@ pub struct LendingAccountDepositEvent {
     pub bank: Pubkey,
     pub mint: Pubkey,
     pub amount: u64,
+    pub share_amount: WrappedI80F48,
 }
 
 #[event]
@@ -160,6 +161,7 @@ pub struct LendingAccountRepayEvent {
     pub mint: Pubkey,
     pub amount: u64,
     pub close_balance: bool,
+    pub share_amount: WrappedI80F48,
 }
 
 #[event]
@@ -168,6 +170,7 @@ pub struct LendingAccountBorrowEvent {
     pub bank: Pubkey,
     pub mint: Pubkey,
     pub amount: u64,
+    pub share_amount: WrappedI80F48,
 }
 
 #[event]
@@ -177,6 +180,7 @@ pub struct LendingAccountWithdrawEvent {
     pub mint: Pubkey,
     pub amount: u64,
     pub close_balance: bool,
+    pub share_amount: WrappedI80F48,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize)]

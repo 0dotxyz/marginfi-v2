@@ -11,9 +11,9 @@ use solana_sdk::{
     account::Account,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
-    system_instruction::SystemError,
     transaction::Transaction,
 };
+use solana_system_interface::error::SystemError;
 use test_case::test_case;
 
 /// Helper to create an OrderTrigger with a stop-loss threshold.
@@ -149,7 +149,7 @@ async fn fund_keeper_for_fees(test_f: &TestFixture, keeper: &Keypair) -> anyhow:
     let account = Account {
         lamports: min_balance + 1_000_000_000,
         data: vec![],
-        owner: solana_sdk::system_program::ID,
+        owner: solana_system_interface::program::ID,
         executable: false,
         rent_epoch: 0,
     };

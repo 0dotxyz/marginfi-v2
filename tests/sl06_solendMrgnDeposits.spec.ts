@@ -1,7 +1,7 @@
 import { BN } from "@coral-xyz/anchor";
 import { Transaction, PublicKey } from "@solana/web3.js";
 import { assert } from "chai";
-import { Clock } from "solana-bankrun";
+import { Clock } from "./utils/litesvm";
 import {
   banksClient,
   bankrunContext,
@@ -19,11 +19,13 @@ import {
   oracles,
 } from "./rootHooks";
 import { MockUser, USER_ACCOUNT_SL } from "./utils/mocks";
-import { processBankrunTransaction } from "./utils/tools";
+import { processBankrunTransaction, toBnFromI80 } from "./utils/tools";
 import {
   getTokenBalance,
   assertBankrunTxFailed,
+  assertI80F48Equal,
   assertI80F48Approx,
+  parseMarginfiEvents,
 } from "./utils/genericTests";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import {
@@ -97,9 +99,11 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
             { amount: DEPOSIT_AMOUNT }
           )
         );
-        await processBankrunTransaction(bankrunContext, depositTx, [
-          userA.wallet,
-        ]);
+        const depositResult = await processBankrunTransaction(
+          bankrunContext,
+          depositTx,
+          [userA.wallet]
+        );
 
         const userBalanceAfterDeposit = await getTokenBalance(
           bankRunProvider,
@@ -115,10 +119,18 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
             (b) => b.active === 1 && b.bankPk.equals(usdcBank)
           );
 
-        const assetSharesAfterDeposit = wrappedI80F48toBigNumber(
+        const cTokenAmount = toBnFromI80(balanceAfterDeposit.assetShares);
+
+        // First deposit into this balance, so share_amount == the resulting asset shares
+        const depositEvent = parseMarginfiEvents(
+          bankrunProgram,
+          depositResult.logMessages
+        ).find((e) => e.name === "lendingAccountDepositEvent");
+        assert.isDefined(depositEvent, "Expected lendingAccountDepositEvent");
+        assertI80F48Equal(
+          depositEvent!.data.shareAmount,
           balanceAfterDeposit.assetShares
         );
-        const cTokenAmount = new BN(assetSharesAfterDeposit.toString());
 
         assert.ok(
           userBalanceAfterDeposit ===
@@ -144,9 +156,21 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
             }
           )
         );
-        await processBankrunTransaction(bankrunContext, withdrawTx, [
-          userA.wallet,
-        ]);
+        const withdrawResult = await processBankrunTransaction(
+          bankrunContext,
+          withdrawTx,
+          [userA.wallet]
+        );
+        // Withdrew `cTokenAmount` asset shares (collateral is 1:1 here)
+        const withdrawEvent = parseMarginfiEvents(
+          bankrunProgram,
+          withdrawResult.logMessages
+        ).find((e) => e.name === "lendingAccountWithdrawEvent");
+        assert.isDefined(withdrawEvent, "Expected lendingAccountWithdrawEvent");
+        assertI80F48Equal(
+          withdrawEvent!.data.shareAmount,
+          cTokenAmount
+        );
 
         const bankAfter = await bankrunProgram.account.bank.fetch(usdcBank);
         const expectedPrice = oracles.usdcPrice;
@@ -249,10 +273,7 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
             (b) => b.active === 1 && b.bankPk.equals(tokenABank)
           );
 
-        const assetSharesAfterDeposit = wrappedI80F48toBigNumber(
-          balanceAfterDeposit.assetShares
-        );
-        const cTokenAmount = new BN(assetSharesAfterDeposit.toString());
+        const cTokenAmount = toBnFromI80(balanceAfterDeposit.assetShares);
 
         assert.ok(
           userBalanceAfterDeposit ===
@@ -346,10 +367,7 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
           marginfiAccountAfterDeposit.lendingAccount.balances.find(
             (b) => b.active === 1 && b.bankPk.equals(usdcBank)
           );
-        const assetSharesAfterDeposit = wrappedI80F48toBigNumber(
-          balanceAfterDeposit.assetShares
-        );
-        const cTokenAmount = new BN(assetSharesAfterDeposit.toString());
+        const cTokenAmount = toBnFromI80(balanceAfterDeposit.assetShares);
 
         const withdrawTx = new Transaction().add(
           await makeSolendWithdrawIx(
@@ -490,10 +508,7 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
         return;
       }
 
-      const assetSharesBefore = wrappedI80F48toBigNumber(
-        balanceBefore.assetShares
-      );
-      const halfAmount = new BN(assetSharesBefore.toString()).div(new BN(2));
+      const halfAmount = toBnFromI80(balanceBefore.assetShares).div(new BN(2));
 
       const currentClock = await banksClient.getClock();
       const newTimestamp = currentClock.unixTimestamp + BigInt(3600);
@@ -742,9 +757,7 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
 
         if (shouldWithdraw) {
           const withdrawAll = Math.random() < 0.5;
-          const cTokenAmount = new BN(
-            wrappedI80F48toBigNumber(existingBalance.assetShares).toString()
-          );
+          const cTokenAmount = toBnFromI80(existingBalance.assetShares);
           const withdrawAmount = withdrawAll
             ? new BN(0)
             : cTokenAmount.div(new BN(2));

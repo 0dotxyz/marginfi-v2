@@ -4,7 +4,7 @@
         {
             "label": "Setup & Run Anchor Tests (+ IDL)",
             "type": "shell",
-            "command": "./scripts/build-workspace.sh && yarn install && anchor build -p marginfi -- --no-default-features && anchor build -p test_transfer_hook --no-idl && anchor build -p mocks && anchor test --skip-build",
+            "command": "./scripts/build-workspace.sh && yarn install && anchor build -p test_transfer_hook --no-idl --ignore-keys && anchor build -p mocks --ignore-keys && anchor build -p marginfi -- --no-default-features --features custom-heap && anchor test --skip-build --skip-local-validator --skip-deploy",
             "problemMatcher": [],
             "group": {
                 "kind": "test",
@@ -22,7 +22,7 @@
         {
             "label": "Run Anchor Tests",
             "type": "shell",
-            "command": "anchor test --skip-build",
+            "command": "anchor test --skip-build --skip-local-validator --skip-deploy",
             "problemMatcher": [],
             "group": {
                 "kind": "test",
@@ -76,7 +76,7 @@
         {
             "label": "Run Fuzz Tests",
             "type": "shell",
-            "command": "cargo fmt && ./scripts/lint.sh && cd programs/marginfi/fuzz && python3 ./generate_corpus.py && cargo +nightly-2024-06-05 fuzz run lend -Zbuild-std --strip-dead-code --no-cfg-fuzzing -- -max_total_time=300",
+            "command": "cargo fmt && ./scripts/lint.sh && cd programs/marginfi/fuzz && python3 ./generate_corpus.py && cargo +nightly-2025-08-01 fuzz run lend --strip-dead-code --no-cfg-fuzzing -- -max_total_time=300",
             "problemMatcher": [],
             "group": {
                 "kind": "test",

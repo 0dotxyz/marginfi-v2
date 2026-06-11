@@ -7,6 +7,9 @@ edition = "2021"
 idl-build = ["anchor-lang/idl-build"]
 no-entrypoint = []
 no-idl = []
+custom-heap = []
+custom-panic = []
+forbid-additional-mints = []
 
 [lib]
 crate-type = ["cdylib", "lib"]
@@ -17,3 +20,6 @@ anchor-lang = { workspace = true }
 spl-token-2022 = { workspace = true, features = ["no-entrypoint"] }
 spl-transfer-hook-interface = { workspace = true }
 spl-tlv-account-resolution = { workspace = true }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

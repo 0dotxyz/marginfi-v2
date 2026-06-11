@@ -7,12 +7,11 @@ use marginfi_type_crate::constants::{
     INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_SEED,
 };
 use pretty_assertions::assert_eq;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
 use solana_sdk::signature::Keypair;
-use solana_sdk::system_program;
-use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction, signer::Signer, transaction::Transaction,
-};
+use solana_sdk::{signer::Signer, transaction::Transaction};
+use solana_system_interface::program as system_program;
 
 // Flashloan tests
 // 1. Flashloan success (1 action)

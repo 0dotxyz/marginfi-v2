@@ -12,13 +12,16 @@ use marginfi_type_crate::{
 /// Used to configure JupLend banks. A simplified version of `BankConfigCompact` which omits most
 /// values related to interest since JupLend banks cannot earn interest or be borrowed from.
 ///
-/// Note: JupLend banks do not take an Operational State, they always start in `Paused` state and
-/// are set to `Operational` via `juplend_init_position` (seed deposit + protocol fToken vault).
+/// Note: JupLend banks do not take an Operational State, they always start in `Uninitialized`
+/// state and are set to `Operational` via `juplend_init_position` (seed deposit + protocol fToken
+/// vault).
 #[derive(AnchorDeserialize, AnchorSerialize, Debug, PartialEq, Eq)]
 pub struct JuplendConfigCompact {
     pub oracle: Pubkey,
     pub asset_weight_init: WrappedI80F48,
     pub asset_weight_maint: WrappedI80F48,
+    /// Cap in **fToken units**, not underlying. As `token_exchange_price` grows, the same
+    /// cap admits more underlying — re-tune against the current rate.
     pub deposit_limit: u64,
     /// Either `JuplendPythPull` or `JuplendSwitchboardPull`
     pub oracle_setup: OracleSetup,
@@ -101,8 +104,8 @@ impl JuplendConfigCompact {
             liability_weight_maint: I80F48!(1.25).into(), // placeholder
             deposit_limit: self.deposit_limit,
             interest_rate_config: default_ir_config,
-            // Always start Paused; only juplend_init_position can activate.
-            operational_state: BankOperationalState::Paused,
+            // Always start Uninitialized; only juplend_init_position can activate.
+            operational_state: BankOperationalState::Uninitialized,
             oracle_setup: self.oracle_setup,
             oracle_keys: keys,
             _pad0: [0; 6],

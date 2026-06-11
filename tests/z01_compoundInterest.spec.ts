@@ -38,7 +38,7 @@ import {
 } from "./utils/user-instructions";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { genericMultiBankTestSetup } from "./genericSetups";
-import { Clock } from "solana-bankrun";
+import { Clock } from "./utils/litesvm";
 import { aprToU32 } from "./utils/genericTests";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { u32_MAX } from "./utils/types";
