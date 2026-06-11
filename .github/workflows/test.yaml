@@ -211,11 +211,12 @@ jobs:
       id: cache-cargo-fuzz
       with:
         path: ~/.cargo/bin/cargo-fuzz
-        key: cargo-fuzz-${{ runner.os }}-nightly-20250801
+        key: cargo-fuzz-0.13.1-${{ runner.os }}-nightly-20250801
 
     - name: Install cargo-fuzz
       if: steps.cache-cargo-fuzz.outputs.cache-hit != 'true'
-      run: cargo install cargo-fuzz --locked
+      # Pinned: 0.13.2+ locks cargo-platform 0.3.3, which needs rustc 1.91 (we pin 1.90)
+      run: cargo install cargo-fuzz --version 0.13.1 --locked
 
     # ─── Cache compiled fuzz target ─────────────────────────────────────────────
     - name: Cache fuzz target build
