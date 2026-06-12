@@ -390,23 +390,20 @@ describe("Same-asset automatic emode", () => {
     const user = users[0];
     const naiveAccount = await initFreshAccount(user);
     const confidenceAwareAccount = await initFreshAccount(user);
-    console.log("init acc?");
     const liabilityScale = decimalScale(ecosystem.usdcDecimals);
-    console.log("decimal?");
     // This naive size uses only `deposit * same_asset_weight`. The risk engine is stricter:
     // even with the same oracle on both sides, collateral is valued at the lower confidence
     // bound and liabilities at the upper confidence bound, so the accepted borrow must also
     // include the `lower_oracle / upper_oracle` discount.
     const naiveBorrow = new BN(
       new BigNumber(SAME_ASSET_DEPOSIT.toString())
-        //.div(liabilityScale)
-        //.times(SAME_ASSET_INIT_LEVERAGE - 1)
-        //.div(SAME_ASSET_INIT_LEVERAGE)
-        //.times(liabilityScale)
+        .div(liabilityScale)
+        .times(SAME_ASSET_INIT_LEVERAGE - 1)
+        .div(SAME_ASSET_INIT_LEVERAGE)
+        .times(liabilityScale)
         .integerValue(BigNumber.ROUND_FLOOR)
         .toFixed(0),
     );
-    console.log("native borrow?");
 
     let tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
@@ -469,7 +466,6 @@ describe("Same-asset automatic emode", () => {
     const deleveragee = users[3];
     const deleverageeAccount = await initFreshAccount(deleveragee);
     const sameAssetRemaining = getSameAssetRemaining();
-    console.log("A:");
     const borrowAmount = computeSameAssetBoundaryBorrowNative({
       collateralNative: SAME_ASSET_DEPOSIT,
       collateralDecimals: ecosystem.usdcDecimals,
@@ -481,7 +477,6 @@ describe("Same-asset automatic emode", () => {
       haircut: { numerator: 199, denominator: 200 },
       liabilityOriginationFeeRate: SAME_ASSET_BORROW_ORIGINATION_FEE_RATE,
     });
-    console.log("B:");
 
     await mintToTokenAccount(
       ecosystem.usdcMint.publicKey,

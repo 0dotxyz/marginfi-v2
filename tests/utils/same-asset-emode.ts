@@ -128,16 +128,13 @@ export const computeSameAssetBoundaryBorrowNative = ({
   liabilityOriginationFeeRate = 0,
   gapPosition,
 }: BoundaryBorrowParams) => {
-  console.log("A0");
   const collateralUi = toBigNumber(collateralNative).div(
     decimalScale(collateralDecimals),
   );
-  console.log("A0a");
   const haircutFactor = haircut
     ? new BigNumber(haircut.numerator).div(haircut.denominator)
     : new BigNumber(1);
   const requirementCollateralUi = collateralUi.times(haircutFactor);
-  console.log("A1");
   const liabilityScale = decimalScale(liabilityDecimals);
   const liabilityWithFeeFactor = new BigNumber(1).plus(
     liabilityOriginationFeeRate,
@@ -159,7 +156,6 @@ export const computeSameAssetBoundaryBorrowNative = ({
   const boundaryGapUi = healthyInitBoundaryUi.minus(
     tightenedRequirementBoundaryUi,
   );
-  console.log("A2");
   const effectiveLiabilityUi = tightenedRequirementBoundaryUi.plus(
     boundaryGapUi.times(effectiveGapPosition),
   );
@@ -170,7 +166,6 @@ export const computeSameAssetBoundaryBorrowNative = ({
       .integerValue(BigNumber.ROUND_FLOOR)
       .toFixed(0),
   );
-  console.log("A3");
   const borrowUi = new BigNumber(borrowNative.toString()).div(liabilityScale);
   const liabilityUi = borrowUi.times(liabilityWithFeeFactor);
   const requirementLabel = haircut ? "post-haircut maintenance" : "tightened";

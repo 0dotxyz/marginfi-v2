@@ -18,7 +18,7 @@ import { Marginfi } from "../../target/types/marginfi";
 import { Mocks } from "../../target/types/mocks";
 import { KaminoLending } from "../fixtures/kamino_lending";
 import { ProgramTestContext } from "./litesvm";
-import { getBankrunBlockhash, processBankrunTransaction } from "./tools";
+import { processBankrunTransaction } from "./tools";
 
 export type Ecosystem = {
   /** A generic wsol mint with 9 decimals (same as native) */
@@ -335,71 +335,71 @@ export const setupTestUserBankrun = async (
   const tx: Transaction = new Transaction();
 
   // Fund user wallet with SOL
-  // tx.add(
-  //   SystemProgram.transfer({
-  //     fromPubkey: payer.publicKey,
-  //     toPubkey: userWallet,
-  //     lamports: 1000 * LAMPORTS_PER_SOL,
-  //   }),
-  // );
+  tx.add(
+    SystemProgram.transfer({
+      fromPubkey: payer.publicKey,
+      toPubkey: userWallet,
+      lamports: 1000 * LAMPORTS_PER_SOL,
+    }),
+  );
 
   let wsolAccount: PublicKey = PublicKey.default;
-  // if (options?.wsolMint) {
-  //   wsolAccount = getAssociatedTokenAddressSync(options.wsolMint, userWallet);
-  //   tx.add(
-  //     createAssociatedTokenAccountInstruction(
-  //       payer.publicKey,
-  //       wsolAccount,
-  //       userWallet,
-  //       options.wsolMint,
-  //     ),
-  //   );
-  // }
+  if (options?.wsolMint) {
+    wsolAccount = getAssociatedTokenAddressSync(options.wsolMint, userWallet);
+    tx.add(
+      createAssociatedTokenAccountInstruction(
+        payer.publicKey,
+        wsolAccount,
+        userWallet,
+        options.wsolMint,
+      ),
+    );
+  }
 
   let usdcAccount: PublicKey = PublicKey.default;
-  // if (options?.usdcMint) {
-  //   usdcAccount = getAssociatedTokenAddressSync(options.usdcMint, userWallet);
-  //   tx.add(
-  //     createAssociatedTokenAccountInstruction(
-  //       payer.publicKey,
-  //       usdcAccount,
-  //       userWallet,
-  //       options.usdcMint,
-  //     ),
-  //   );
-  // }
+  if (options?.usdcMint) {
+    usdcAccount = getAssociatedTokenAddressSync(options.usdcMint, userWallet);
+    tx.add(
+      createAssociatedTokenAccountInstruction(
+        payer.publicKey,
+        usdcAccount,
+        userWallet,
+        options.usdcMint,
+      ),
+    );
+  }
 
   let tokenAAccount: PublicKey = PublicKey.default;
-  // if (options?.tokenAMint) {
-  //   tokenAAccount = getAssociatedTokenAddressSync(
-  //     options.tokenAMint,
-  //     userWallet,
-  //   );
-  //   tx.add(
-  //     createAssociatedTokenAccountInstruction(
-  //       payer.publicKey,
-  //       tokenAAccount,
-  //       userWallet,
-  //       options.tokenAMint,
-  //     ),
-  //   );
-  // }
+  if (options?.tokenAMint) {
+    tokenAAccount = getAssociatedTokenAddressSync(
+      options.tokenAMint,
+      userWallet,
+    );
+    tx.add(
+      createAssociatedTokenAccountInstruction(
+        payer.publicKey,
+        tokenAAccount,
+        userWallet,
+        options.tokenAMint,
+      ),
+    );
+  }
 
   let tokenBAccount: PublicKey = PublicKey.default;
-  // if (options?.tokenBMint) {
-  //   tokenBAccount = getAssociatedTokenAddressSync(
-  //     options.tokenBMint,
-  //     userWallet,
-  //   );
-  //   tx.add(
-  //     createAssociatedTokenAccountInstruction(
-  //       payer.publicKey,
-  //       tokenBAccount,
-  //       userWallet,
-  //       options.tokenBMint,
-  //     ),
-  //   );
-  // }
+  if (options?.tokenBMint) {
+    tokenBAccount = getAssociatedTokenAddressSync(
+      options.tokenBMint,
+      userWallet,
+    );
+    tx.add(
+      createAssociatedTokenAccountInstruction(
+        payer.publicKey,
+        tokenBAccount,
+        userWallet,
+        options.tokenBMint,
+      ),
+    );
+  }
 
   let alphaAccount: PublicKey = PublicKey.default;
   if (options?.lstAlphaMint) {
@@ -418,11 +418,7 @@ export const setupTestUserBankrun = async (
   }
 
   // Process via bankrun
-    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-    tx.sign(payer);
-    await bankrunContext.banksClient.processTransaction(tx);
-    
-  // await processBankrunTransaction(bankrunContext, tx, [payer]);
+  await processBankrunTransaction(bankrunContext, tx, [payer]);
 
   const user: MockUser = {
     wallet: userWalletKeypair,

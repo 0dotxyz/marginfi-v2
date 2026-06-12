@@ -272,6 +272,7 @@ export async function startAnchor(
     .withTransactionHistory(0n)
     .withLogBytesLimit(undefined);
   svm.warpToSlot(INITIAL_SLOT);
+  
   const clock = svm.getClock();
   svm.setClock(
     new Clock(
