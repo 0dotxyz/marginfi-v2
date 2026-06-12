@@ -7,8 +7,7 @@ import {
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
 import { CONF_INTERVAL_MULTIPLE_FLOAT } from "./types";
-import { PublicKey, Transaction, type Signer } from "@solana/web3.js";
-import { ProgramTestContext } from "solana-bankrun";
+import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { Marginfi } from "target/types/marginfi";
 import {
   initSameAssetEmodeRegistry,
@@ -16,12 +15,13 @@ import {
 } from "./group-instructions";
 import { deriveSameAssetEmodeRegistry } from "./pdas";
 import { processBankrunTransaction } from "./tools";
+import { ProgramTestContext } from "./litesvm";
 
 const ORACLE_PRICE_LOWER_FACTOR = new BigNumber(
-  1 - CONF_INTERVAL_MULTIPLE_FLOAT
+  1 - CONF_INTERVAL_MULTIPLE_FLOAT,
 );
 const ORACLE_PRICE_UPPER_FACTOR = new BigNumber(
-  1 + CONF_INTERVAL_MULTIPLE_FLOAT
+  1 + CONF_INTERVAL_MULTIPLE_FLOAT,
 );
 
 const toBigNumber = (value: BN | BigNumber | number | string): BigNumber => {
@@ -39,6 +39,19 @@ const toBigNumber = (value: BN | BigNumber | number | string): BigNumber => {
 const getSameAssetWeight = (leverage: number) =>
   new BigNumber(leverage - 1).div(leverage);
 
+export const decimalScale = (decimals: number) => {
+  const normalizedDecimals = Number(decimals);
+  if (
+    !Number.isSafeInteger(normalizedDecimals) ||
+    normalizedDecimals < 0 ||
+    normalizedDecimals > 18
+  ) {
+    throw new Error(`Invalid token decimals: ${decimals}`);
+  }
+
+  return new BigNumber(`1e${normalizedDecimals}`);
+};
+
 export const enableSameAssetEmodeForBanks = async ({
   program,
   bankrunContext,
@@ -49,7 +62,7 @@ export const enableSameAssetEmodeForBanks = async ({
   program: Program<Marginfi>;
   bankrunContext: ProgramTestContext;
   group: PublicKey;
-  signer: Signer;
+  signer: Keypair;
   banks: PublicKey[];
 }) => {
   const [sameAssetEmodeRegistry] = deriveSameAssetEmodeRegistry(
@@ -73,11 +86,11 @@ export const enableSameAssetEmodeForBanks = async ({
   for (const bank of banks) {
     tx.add(
       await setBankSameAssetEmodeEligibility(program, {
-        group,
+        // group,
         signer: signer.publicKey,
         bank,
         enabled: true,
-      })
+      }),
     );
   }
   await processBankrunTransaction(bankrunContext, tx, [signer]);
@@ -115,19 +128,22 @@ export const computeSameAssetBoundaryBorrowNative = ({
   liabilityOriginationFeeRate = 0,
   gapPosition,
 }: BoundaryBorrowParams) => {
+  console.log("A0");
   const collateralUi = toBigNumber(collateralNative).div(
-    new BigNumber(10).pow(collateralDecimals)
+    decimalScale(collateralDecimals),
   );
+  console.log("A0a");
   const haircutFactor = haircut
     ? new BigNumber(haircut.numerator).div(haircut.denominator)
     : new BigNumber(1);
   const requirementCollateralUi = collateralUi.times(haircutFactor);
-  const liabilityScale = new BigNumber(10).pow(liabilityDecimals);
+  console.log("A1");
+  const liabilityScale = decimalScale(liabilityDecimals);
   const liabilityWithFeeFactor = new BigNumber(1).plus(
-    liabilityOriginationFeeRate
+    liabilityOriginationFeeRate,
   );
   const liabilityPriceWithConfidence = new BigNumber(liabilityPrice).times(
-    ORACLE_PRICE_UPPER_FACTOR
+    ORACLE_PRICE_UPPER_FACTOR,
   );
   const effectiveGapPosition = gapPosition ?? (haircut ? 0.5 : 0.25);
   const healthyInitBoundaryUi = collateralUi
@@ -141,29 +157,31 @@ export const computeSameAssetBoundaryBorrowNative = ({
     .times(getSameAssetWeight(tightenedRequirementLeverage))
     .div(liabilityPriceWithConfidence);
   const boundaryGapUi = healthyInitBoundaryUi.minus(
-    tightenedRequirementBoundaryUi
+    tightenedRequirementBoundaryUi,
   );
+  console.log("A2");
   const effectiveLiabilityUi = tightenedRequirementBoundaryUi.plus(
-    boundaryGapUi.times(effectiveGapPosition)
+    boundaryGapUi.times(effectiveGapPosition),
   );
   const borrowNative = new BN(
     effectiveLiabilityUi
       .div(liabilityWithFeeFactor)
       .times(liabilityScale)
       .integerValue(BigNumber.ROUND_FLOOR)
-      .toFixed(0)
+      .toFixed(0),
   );
+  console.log("A3");
   const borrowUi = new BigNumber(borrowNative.toString()).div(liabilityScale);
   const liabilityUi = borrowUi.times(liabilityWithFeeFactor);
   const requirementLabel = haircut ? "post-haircut maintenance" : "tightened";
 
   assert.isTrue(
     liabilityUi.isGreaterThan(tightenedRequirementBoundaryUi),
-    `fee-adjusted liability should stay above the ${requirementLabel} boundary`
+    `fee-adjusted liability should stay above the ${requirementLabel} boundary`,
   );
   assert.isTrue(
     liabilityUi.isLessThan(healthyInitBoundaryUi),
-    "fee-adjusted liability should stay below the healthy init boundary"
+    "fee-adjusted liability should stay below the healthy init boundary",
   );
 
   return borrowNative;
@@ -188,14 +206,14 @@ export const assertSameAssetBadDebtSurvivability = ({
   requireMaintenanceUnderwater?: boolean;
 }) => {
   const assetValueEquity = wrappedI80F48toBigNumber(
-    healthCache.assetValueEquity
+    healthCache.assetValueEquity,
   );
   const assetValueMaint = wrappedI80F48toBigNumber(healthCache.assetValueMaint);
   const liabilityValueEquity = wrappedI80F48toBigNumber(
-    healthCache.liabilityValueEquity
+    healthCache.liabilityValueEquity,
   );
   const liabilityValueMaint = wrappedI80F48toBigNumber(
-    healthCache.liabilityValueMaint
+    healthCache.liabilityValueMaint,
   );
   const minBuffer = originalAssetValueEquity.times(0.005); // 50bps
   const assetBuffer = assetValueEquity.minus(assetValueMaint);
@@ -204,21 +222,21 @@ export const assertSameAssetBadDebtSurvivability = ({
 
   assert.isTrue(
     assetBuffer.gte(minBuffer),
-    `${label}: equity-to-maint asset buffer ${assetBuffer.toFixed()} should be at least 50bp of original equity assets ${minBuffer.toFixed()}`
+    `${label}: equity-to-maint asset buffer ${assetBuffer.toFixed()} should be at least 50bp of original equity assets ${minBuffer.toFixed()}`,
   );
   assert.isTrue(
     equityHealth.gt(0),
-    `${label}: account should remain equity-solvent after the haircut`
+    `${label}: account should remain equity-solvent after the haircut`,
   );
   if (requireMaintenanceUnderwater) {
     assert.isTrue(
       maintHealth.lt(0),
-      `${label}: account should be maintenance-underwater after the haircut`
+      `${label}: account should be maintenance-underwater after the haircut`,
     );
   } else {
     assert.isTrue(
       maintHealth.gt(0),
-      `${label}: account should remain maintenance-healthy before the haircut`
+      `${label}: account should remain maintenance-healthy before the haircut`,
     );
   }
 
@@ -235,7 +253,7 @@ export const setAssetShareValueHaircut = async (
   bankrunContext: ProgramTestContext,
   bank: PublicKey,
   numerator: number,
-  denominator: number
+  denominator: number,
 ) => {
   const ASSET_SHARE_VALUE_OFFSET = 80;
   const I80F48_BYTES = 16;
@@ -248,17 +266,17 @@ export const setAssetShareValueHaircut = async (
   const originalAssetShareValueBytes = Buffer.from(
     originalData.subarray(
       ASSET_SHARE_VALUE_OFFSET,
-      ASSET_SHARE_VALUE_OFFSET + I80F48_BYTES
-    )
+      ASSET_SHARE_VALUE_OFFSET + I80F48_BYTES,
+    ),
   );
   const updatedAssetShareValue = bigNumberToWrappedI80F48(
     wrappedI80F48toBigNumber(bankAccount.assetShareValue)
       .times(numerator)
-      .div(denominator)
+      .div(denominator),
   );
   Buffer.from(updatedAssetShareValue.value).copy(
     originalData,
-    ASSET_SHARE_VALUE_OFFSET
+    ASSET_SHARE_VALUE_OFFSET,
   );
   bankrunContext.setAccount(bank, {
     ...existingAccount,
@@ -280,7 +298,7 @@ export const setAssetShareValueHaircut = async (
 };
 
 export const warpToNextBankrunSlot = async (
-  bankrunContext: ProgramTestContext
+  bankrunContext: ProgramTestContext,
 ) => {
   const clock = await bankrunContext.banksClient.getClock();
   bankrunContext.warpToSlot(clock.slot + BigInt(1));
@@ -306,21 +324,21 @@ export const computeSameValueBorrowNative = ({
   targetOriginationFeeRate = 0,
 }: SameValueBorrowParams) => {
   const sourceUi = toBigNumber(sourceBorrowNative).div(
-    new BigNumber(10).pow(sourceDecimals)
+    decimalScale(sourceDecimals),
   );
   const sourceLiabilityValue = sourceUi
     .times(new BigNumber(1).plus(sourceOriginationFeeRate))
     .times(sourcePrice);
   const targetUi = sourceLiabilityValue.div(
     new BigNumber(targetPrice).times(
-      new BigNumber(1).plus(targetOriginationFeeRate)
-    )
+      new BigNumber(1).plus(targetOriginationFeeRate),
+    ),
   );
 
   return new BN(
     targetUi
-      .times(new BigNumber(10).pow(targetDecimals))
+      .times(decimalScale(targetDecimals))
       .integerValue(BigNumber.ROUND_FLOOR)
-      .toFixed(0)
+      .toFixed(0),
   );
 };

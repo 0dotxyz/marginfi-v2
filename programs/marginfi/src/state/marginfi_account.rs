@@ -721,7 +721,7 @@ fn update_reconciled_same_asset_config(
             false
         }
         Some(_) => {
-            if lowest_liab_weight.map_or(true, |existing| liab_weight < existing) {
+            if lowest_liab_weight.is_none_or(|existing| liab_weight < existing) {
                 *lowest_liab_weight = Some(liab_weight);
             }
             true

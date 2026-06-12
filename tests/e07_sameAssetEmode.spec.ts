@@ -49,15 +49,13 @@ import {
   startDeleverageIx,
   withdrawIx,
 } from "./utils/user-instructions";
-import {
-  mintToTokenAccount,
-  processBankrunTransaction,
-} from "./utils/tools";
+import { mintToTokenAccount, processBankrunTransaction } from "./utils/tools";
 import { deriveLiquidationRecord } from "./utils/pdas";
 import {
   assertSameAssetBadDebtSurvivability,
   computeSameAssetBoundaryBorrowNative,
   computeSameValueBorrowNative,
+  decimalScale,
   enableSameAssetEmodeForBanks,
   warpToNextBankrunSlot,
 } from "./utils/same-asset-emode";
@@ -75,10 +73,10 @@ const getNetHealth = (cache: {
   liabilityValueMaint: WrappedI80F48;
 }) => {
   const init = wrappedI80F48toBigNumber(cache.assetValue).minus(
-    wrappedI80F48toBigNumber(cache.liabilityValue)
+    wrappedI80F48toBigNumber(cache.liabilityValue),
   );
   const maint = wrappedI80F48toBigNumber(cache.assetValueMaint).minus(
-    wrappedI80F48toBigNumber(cache.liabilityValueMaint)
+    wrappedI80F48toBigNumber(cache.liabilityValueMaint),
   );
   return { init, maint };
 };
@@ -119,7 +117,7 @@ describe("Same-asset automatic emode", () => {
         marginfiAccount: accountKeypair.publicKey,
         authority: user.wallet.publicKey,
         feePayer: user.wallet.publicKey,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [
       user.wallet,
@@ -130,13 +128,13 @@ describe("Same-asset automatic emode", () => {
 
   const pulseSameAssetHealth = async (
     user: (typeof users)[number],
-    marginfiAccount: PublicKey
+    marginfiAccount: PublicKey,
   ) => {
     const tx = new Transaction().add(
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount,
         remaining: composeRemainingAccounts(getSameAssetRemaining()),
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
 
@@ -146,7 +144,7 @@ describe("Same-asset automatic emode", () => {
   const setAssetShareValueHaircut = async (
     bank: PublicKey,
     numerator: number,
-    denominator: number
+    denominator: number,
   ) => {
     const ASSET_SHARE_VALUE_OFFSET = 80;
     const I80F48_BYTES = 16;
@@ -159,17 +157,17 @@ describe("Same-asset automatic emode", () => {
     const originalAssetShareValueBytes = Buffer.from(
       originalData.subarray(
         ASSET_SHARE_VALUE_OFFSET,
-        ASSET_SHARE_VALUE_OFFSET + I80F48_BYTES
-      )
+        ASSET_SHARE_VALUE_OFFSET + I80F48_BYTES,
+      ),
     );
     const updatedAssetShareValue = bigNumberToWrappedI80F48(
       wrappedI80F48toBigNumber(bankAccount.assetShareValue)
         .times(numerator)
-        .div(denominator)
+        .div(denominator),
     );
     Buffer.from(updatedAssetShareValue.value).copy(
       originalData,
-      ASSET_SHARE_VALUE_OFFSET
+      ASSET_SHARE_VALUE_OFFSET,
     );
     bankrunContext.setAccount(bank, {
       ...existingAccount,
@@ -195,12 +193,12 @@ describe("Same-asset automatic emode", () => {
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
         sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_INIT_LEVERAGE
+          SAME_ASSET_INIT_LEVERAGE,
         ),
         sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_MAINT_LEVERAGE
+          SAME_ASSET_MAINT_LEVERAGE,
         ),
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
     await enableSameAssetEmodeForBanks({
@@ -226,7 +224,7 @@ describe("Same-asset automatic emode", () => {
           marginfiAccount: userAccount,
           authority: users[i].wallet.publicKey,
           feePayer: users[i].wallet.publicKey,
-        })
+        }),
       );
       await processBankrunTransaction(bankrunContext, userinitTx, [
         users[i].wallet,
@@ -238,12 +236,12 @@ describe("Same-asset automatic emode", () => {
       await mintToTokenAccount(
         ecosystem.usdcMint.publicKey,
         user.usdcAccount,
-        new BN(2_000 * 10 ** ecosystem.usdcDecimals)
+        new BN(2_000 * 10 ** ecosystem.usdcDecimals),
       );
       await mintToTokenAccount(
         ecosystem.wsolMint.publicKey,
         user.wsolAccount,
-        new BN(20 * 10 ** ecosystem.wsolDecimals)
+        new BN(20 * 10 ** ecosystem.wsolDecimals),
       );
     }
 
@@ -257,7 +255,7 @@ describe("Same-asset automatic emode", () => {
         tokenAccount: seedUser.usdcAccount,
         amount: new BN(1000 * 10 ** ecosystem.usdcDecimals),
         depositUpToLimit: false,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [seedUser.wallet]);
 
@@ -268,7 +266,7 @@ describe("Same-asset automatic emode", () => {
         tokenAccount: seedUser.wsolAccount,
         amount: new BN(10 * 10 ** ecosystem.wsolDecimals),
         depositUpToLimit: false,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [seedUser.wallet]);
   };
@@ -301,19 +299,19 @@ describe("Same-asset automatic emode", () => {
       bankrunProgram.programId,
       emodeGroup.publicKey,
       ecosystem.usdcMint.publicKey,
-      seed
+      seed,
     );
     [usdcBankB] = deriveBankWithSeed(
       bankrunProgram.programId,
       emodeGroup.publicKey,
       ecosystem.usdcMint.publicKey,
-      seed.addn(1)
+      seed.addn(1),
     );
     [solBank] = deriveBankWithSeed(
       bankrunProgram.programId,
       emodeGroup.publicKey,
       ecosystem.wsolMint.publicKey,
-      seed
+      seed,
     );
     await warpToNextBankrunSlot(bankrunContext); // This is to help with blockhash errors.
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
@@ -330,17 +328,18 @@ describe("Same-asset automatic emode", () => {
         marginfiGroup: emodeGroup.publicKey,
         sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(100),
         sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(100),
-      })
+      }),
     );
     let result = await processBankrunTransaction(
       bankrunContext,
       tx,
       [groupAdmin.wallet],
       true,
-      true
+      true,
     );
     // BadEmodeConfig (6075 = 0x17bb)
     assertBankrunTxFailed(result, "0x17bb");
+    await warpToNextBankrunSlot(bankrunContext);
   });
 
   it("(admin) Configure same-asset emode with leverage < 1 - fails", async () => {
@@ -349,17 +348,18 @@ describe("Same-asset automatic emode", () => {
         marginfiGroup: emodeGroup.publicKey,
         sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(0),
         sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(2),
-      })
+      }),
     );
     let result = await processBankrunTransaction(
       bankrunContext,
       tx,
       [groupAdmin.wallet],
       true,
-      true
+      true,
     );
     // BadEmodeConfig (6075 = 0x17bb)
     assertBankrunTxFailed(result, "0x17bb");
+    await warpToNextBankrunSlot(bankrunContext);
   });
 
   it("(admin) Configure same-asset emode with leverage > 100 - fails", async () => {
@@ -368,17 +368,18 @@ describe("Same-asset automatic emode", () => {
         marginfiGroup: emodeGroup.publicKey,
         sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(101),
         sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(102),
-      })
+      }),
     );
     let result = await processBankrunTransaction(
       bankrunContext,
       tx,
       [groupAdmin.wallet],
       true,
-      true
+      true,
     );
     // BadEmodeConfig (6075 = 0x17bb)
     assertBankrunTxFailed(result, "0x17bb");
+    await warpToNextBankrunSlot(bankrunContext);
   });
 
   // -----------------------------------------------------------------------
@@ -389,31 +390,34 @@ describe("Same-asset automatic emode", () => {
     const user = users[0];
     const naiveAccount = await initFreshAccount(user);
     const confidenceAwareAccount = await initFreshAccount(user);
-    const liabilityScale = new BigNumber(10).pow(ecosystem.usdcDecimals);
+    console.log("init acc?");
+    const liabilityScale = decimalScale(ecosystem.usdcDecimals);
+    console.log("decimal?");
     // This naive size uses only `deposit * same_asset_weight`. The risk engine is stricter:
     // even with the same oracle on both sides, collateral is valued at the lower confidence
     // bound and liabilities at the upper confidence bound, so the accepted borrow must also
     // include the `lower_oracle / upper_oracle` discount.
     const naiveBorrow = new BN(
       new BigNumber(SAME_ASSET_DEPOSIT.toString())
-        .div(liabilityScale)
-        .times(SAME_ASSET_INIT_LEVERAGE - 1)
-        .div(SAME_ASSET_INIT_LEVERAGE)
-        .times(liabilityScale)
+        //.div(liabilityScale)
+        //.times(SAME_ASSET_INIT_LEVERAGE - 1)
+        //.div(SAME_ASSET_INIT_LEVERAGE)
+        //.times(liabilityScale)
         .integerValue(BigNumber.ROUND_FLOOR)
-        .toFixed(0)
+        .toFixed(0),
     );
+    console.log("native borrow?");
 
     let tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
         sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_INIT_LEVERAGE
+          SAME_ASSET_INIT_LEVERAGE,
         ),
         sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_MAINT_LEVERAGE
+          SAME_ASSET_MAINT_LEVERAGE,
         ),
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
@@ -431,14 +435,14 @@ describe("Same-asset automatic emode", () => {
         tokenAccount: user.usdcAccount,
         remaining: composeRemainingAccounts(getSameAssetRemaining()),
         amount: naiveBorrow,
-      })
+      }),
     );
     const naiveResult = await processBankrunTransaction(
       bankrunContext,
       tx,
       [user.wallet],
       true,
-      true
+      true,
     );
     assertBankrunTxFailed(naiveResult, "0x1779");
 
@@ -456,7 +460,7 @@ describe("Same-asset automatic emode", () => {
         tokenAccount: user.usdcAccount,
         remaining: composeRemainingAccounts(getSameAssetRemaining()),
         amount: SAME_ASSET_BORROW, // Pre-calculated borrow accounting for oracle weighting.
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
   });
@@ -465,6 +469,7 @@ describe("Same-asset automatic emode", () => {
     const deleveragee = users[3];
     const deleverageeAccount = await initFreshAccount(deleveragee);
     const sameAssetRemaining = getSameAssetRemaining();
+    console.log("A:");
     const borrowAmount = computeSameAssetBoundaryBorrowNative({
       collateralNative: SAME_ASSET_DEPOSIT,
       collateralDecimals: ecosystem.usdcDecimals,
@@ -476,11 +481,12 @@ describe("Same-asset automatic emode", () => {
       haircut: { numerator: 199, denominator: 200 },
       liabilityOriginationFeeRate: SAME_ASSET_BORROW_ORIGINATION_FEE_RATE,
     });
+    console.log("B:");
 
     await mintToTokenAccount(
       ecosystem.usdcMint.publicKey,
       riskAdmin.usdcAccount,
-      new BN(100 * 10 ** ecosystem.usdcDecimals)
+      new BN(100 * 10 ** ecosystem.usdcDecimals),
     );
 
     // Deposit = 100 USDC, then borrow between:
@@ -494,10 +500,10 @@ describe("Same-asset automatic emode", () => {
         marginfiGroup: emodeGroup.publicKey,
         newRiskAdmin: riskAdmin.wallet.publicKey,
         sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_INIT_LEVERAGE
+          SAME_ASSET_INIT_LEVERAGE,
         ),
         sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_MAINT_LEVERAGE
+          SAME_ASSET_MAINT_LEVERAGE,
         ),
       }),
       await depositIx(deleveragee.mrgnBankrunProgram, {
@@ -513,7 +519,7 @@ describe("Same-asset automatic emode", () => {
         tokenAccount: deleveragee.usdcAccount,
         remaining: composeRemainingAccounts(sameAssetRemaining),
         amount: borrowAmount,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [
       groupAdmin.wallet,
@@ -522,7 +528,7 @@ describe("Same-asset automatic emode", () => {
 
     let account = await pulseSameAssetHealth(deleveragee, deleverageeAccount);
     const originalAssetValueEquity = wrappedI80F48toBigNumber(
-      account.healthCache.assetValueEquity
+      account.healthCache.assetValueEquity,
     );
     assertSameAssetBadDebtSurvivability({
       healthCache: account.healthCache,
@@ -536,7 +542,7 @@ describe("Same-asset automatic emode", () => {
       restoreAssetShareValue = await setAssetShareValueHaircut(
         usdcBankA,
         199,
-        200
+        200,
       );
       await warpToNextBankrunSlot(bankrunContext); // This is to help with blockhash errors.
       account = await pulseSameAssetHealth(deleveragee, deleverageeAccount);
@@ -552,14 +558,14 @@ describe("Same-asset automatic emode", () => {
           marginfiAccount: deleverageeAccount,
           bank: usdcBankB,
           remaining: composeRemainingAccounts(sameAssetRemaining),
-        })
+        }),
       );
       const bankruptcyResult = await processBankrunTransaction(
         bankrunContext,
         tx,
         [groupAdmin.wallet],
         true,
-        true
+        true,
       );
       assertBankrunTxFailed(bankruptcyResult, 6013);
 
@@ -591,7 +597,7 @@ describe("Same-asset automatic emode", () => {
         await endDeleverageIx(riskAdmin.mrgnBankrunProgram, {
           marginfiAccount: deleverageeAccount,
           remaining: composeRemainingAccountsMetaBanksOnly(sameAssetRemaining),
-        })
+        }),
       );
       await processBankrunTransaction(bankrunContext, tx, [riskAdmin.wallet]);
     } finally {
@@ -632,12 +638,12 @@ describe("Same-asset automatic emode", () => {
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         remaining: composeRemainingAccounts(getSameAssetRemaining()),
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
 
     let account = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount
+      userAccount,
     );
     let health = getNetHealth(account.healthCache);
     assert.ok((account.healthCache.flags & HEALTH_CACHE_HEALTHY) !== 0);
@@ -650,16 +656,16 @@ describe("Same-asset automatic emode", () => {
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
         sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_TIGHTENED_INIT_LEVERAGE
+          SAME_ASSET_TIGHTENED_INIT_LEVERAGE,
         ),
         sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_TIGHTENED_MAINT_LEVERAGE
+          SAME_ASSET_TIGHTENED_MAINT_LEVERAGE,
         ),
       }),
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         remaining: composeRemainingAccounts(getSameAssetRemaining()),
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
@@ -673,12 +679,12 @@ describe("Same-asset automatic emode", () => {
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
         sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_INIT_LEVERAGE
+          SAME_ASSET_INIT_LEVERAGE,
         ),
         sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(
-          SAME_ASSET_MAINT_LEVERAGE
+          SAME_ASSET_MAINT_LEVERAGE,
         ),
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
   });
@@ -716,12 +722,12 @@ describe("Same-asset automatic emode", () => {
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         remaining: composeRemainingAccounts(getSameAssetRemaining()),
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
 
     let account = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount
+      userAccount,
     );
     assert.ok((account.healthCache.flags & HEALTH_CACHE_HEALTHY) !== 0);
 
@@ -733,7 +739,7 @@ describe("Same-asset automatic emode", () => {
         amount: new BN(0),
         repayAll: true,
         remaining: composeRemainingAccounts(getSameAssetRemaining()),
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
 
@@ -744,16 +750,15 @@ describe("Same-asset automatic emode", () => {
         tokenAccount: user.wsolAccount,
         remaining: composeRemainingAccounts(getCollateralAndSolRemaining()),
         amount: DIFFERENT_MINT_SAME_VALUE_BORROW,
-      })
+      }),
     );
     const result = await processBankrunTransaction(
       bankrunContext,
       tx,
       [user.wallet],
       true,
-      true
+      true,
     );
     assertBankrunTxFailed(result, "0x1779");
   });
-
 });

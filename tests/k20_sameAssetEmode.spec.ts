@@ -86,6 +86,7 @@ import {
   assertSameAssetBadDebtSurvivability,
   computeSameAssetBoundaryBorrowNative,
   computeSameValueBorrowNative,
+  decimalScale,
   enableSameAssetEmodeForBanks,
   setAssetShareValueHaircut,
   warpToNextBankrunSlot,
@@ -143,7 +144,7 @@ type KaminoSameAssetBorrowWindow = {
 const computeKaminoSameAssetBorrowWindow = (
   collateralLiquidityNative: BN
 ): KaminoSameAssetBorrowWindow => {
-  const uiScale = new BigNumber(10).pow(ecosystem.usdcDecimals);
+  const uiScale = decimalScale(ecosystem.usdcDecimals);
   const collateralLiquidityUi = new BigNumber(
     collateralLiquidityNative.toString()
   ).div(uiScale);

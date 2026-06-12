@@ -510,12 +510,12 @@ export const propagateStakedSettings = (
 ) => {
   const remainingAccounts = args.oracle
     ? [
-      {
-        pubkey: args.oracle,
-        isSigner: false,
-        isWritable: false,
-      } as AccountMeta,
-    ]
+        {
+          pubkey: args.oracle,
+          isSigner: false,
+          isWritable: false,
+        } as AccountMeta,
+      ]
     : [];
 
   const ix = program.methods
@@ -939,17 +939,12 @@ export const initSameAssetEmodeRegistry = (
   program: Program<Marginfi>,
   args: InitSameAssetEmodeRegistryArgs,
 ) => {
-  const [sameAssetEmodeRegistry] = deriveSameAssetEmodeRegistry(
-    program.programId,
-    args.group,
-  );
-
   const ix = program.methods
     .lendingPoolInitSameAssetEmodeRegistry()
     .accounts({
       group: args.group,
       signer: args.signer,
-      sameAssetEmodeRegistry,
+      // sameAssetEmodeRegistry,
     })
     .instruction();
 
@@ -984,7 +979,7 @@ export const setFixedPrice = (
 };
 
 export type SetBankSameAssetEmodeEligibilityArgs = {
-  group: PublicKey;
+  // group: PublicKey;
   signer: PublicKey;
   bank: PublicKey;
   enabled: boolean;
@@ -994,18 +989,13 @@ export const setBankSameAssetEmodeEligibility = (
   program: Program<Marginfi>,
   args: SetBankSameAssetEmodeEligibilityArgs,
 ) => {
-  const [sameAssetEmodeRegistry] = deriveSameAssetEmodeRegistry(
-    program.programId,
-    args.group,
-  );
-
   const ix = program.methods
     .lendingPoolSetBankSameAssetEmodeEligibility(args.enabled)
     .accounts({
-      group: args.group,
+      // group: args.group,
       signer: args.signer,
       bank: args.bank,
-      sameAssetEmodeRegistry,
+      // sameAssetEmodeRegistry,
     })
     .instruction();
 
@@ -1121,7 +1111,7 @@ export const writeBankMetadataPreInit = (
 
 export type UpdateGroupRateLimiterArgs = {
   marginfiGroup: PublicKey;
-  delegateFlowAdmin?: PublicKey;
+  // delegateFlowAdmin?: PublicKey;
   outflowUsd?: BN | null;
   inflowUsd?: BN | null;
   updateSeq: BN;
@@ -1143,8 +1133,7 @@ export const updateGroupRateLimiter = (
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
-      delegateFlowAdmin:
-        args.delegateFlowAdmin ?? (program.provider.publicKey as PublicKey),
+      // delegateFlowAdmin: args.delegateFlowAdmin,
     })
     .instruction();
   return ix;
@@ -1172,8 +1161,7 @@ export const updateDeleverageWithdrawals = (
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
-      delegateFlowAdmin:
-        args.delegateFlowAdmin ?? (program.provider.publicKey as PublicKey),
+      // delegateFlowAdmin: args.delegateFlowAdmin,
     })
     .instruction();
   return ix;

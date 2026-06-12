@@ -11,8 +11,8 @@ use {
     bytemuck::{Pod, Zeroable},
 };
 
-pub const MAX_SAME_ASSET_EMODE_GROUPS: usize = 128;
-pub const MAX_SAME_ASSET_EMODE_BANKS: usize = 512;
+pub const MAX_SAME_ASSET_EMODE_GROUPS: usize = 32;
+pub const MAX_SAME_ASSET_EMODE_BANKS: usize = 128;
 
 assert_struct_size!(SameAssetEmodeGroup, 96);
 assert_struct_align!(SameAssetEmodeGroup, 1);
@@ -54,10 +54,10 @@ impl Default for SameAssetEmodeBank {
     }
 }
 
-assert_struct_size!(SameAssetEmodeRegistry, 32976);
+assert_struct_size!(SameAssetEmodeRegistry, 10064);
 assert_struct_align!(SameAssetEmodeRegistry, 8);
 /// Read-only archive of same-asset-emode banks. Enables the emode admin to see, at a glance, which
-/// banks are participating in same asset emode.
+/// banks are participating in same-asset-emode.
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
 #[cfg_attr(not(feature = "anchor"), derive(PartialEq, Pod, Zeroable, Copy, Clone))]
@@ -76,7 +76,9 @@ pub struct SameAssetEmodeRegistry {
     pub groups: [SameAssetEmodeGroup; MAX_SAME_ASSET_EMODE_GROUPS],
     /// Describes which bank belongs to which group
     pub banks: [SameAssetEmodeBank; MAX_SAME_ASSET_EMODE_BANKS],
-    pub _padding_2: [u8; 128],
+    pub _padding_2: [u8; 1024],
+    pub _padding_3: [u8; 512],
+    pub _padding_4: [u8; 256],
 }
 
 impl SameAssetEmodeRegistry {
