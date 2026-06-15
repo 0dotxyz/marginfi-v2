@@ -731,13 +731,13 @@ async fn set_same_asset_emode_eligibility_success_and_fixed_rejects() -> anyhow:
         BANK_SAME_ASSET_EMODE_ELIGIBLE
     );
 
+    let set_fixed_ix = test_f
+        .marginfi_group
+        .make_lending_pool_set_fixed_oracle_price_ix(usdc_bank, I80F48!(1).into());
     let set_fixed_res = {
         let ctx = test_f.context.borrow_mut();
-        let ix = test_f
-            .marginfi_group
-            .make_lending_pool_set_fixed_oracle_price_ix(usdc_bank, I80F48!(1).into());
         let tx = Transaction::new_signed_with_payer(
-            &[ix],
+            &[set_fixed_ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
             ctx.banks_client.get_latest_blockhash().await.unwrap(),
@@ -754,13 +754,13 @@ async fn set_same_asset_emode_eligibility_success_and_fixed_rejects() -> anyhow:
     let usdc_after_disable = usdc_bank.load().await;
     assert_eq!(usdc_after_disable.flags & BANK_SAME_ASSET_EMODE_ELIGIBLE, 0);
 
+    let set_fixed_ix = test_f
+        .marginfi_group
+        .make_lending_pool_set_fixed_oracle_price_ix(usdc_bank, I80F48!(1).into());
     {
         let ctx = test_f.context.borrow_mut();
-        let ix = test_f
-            .marginfi_group
-            .make_lending_pool_set_fixed_oracle_price_ix(usdc_bank, I80F48!(1).into());
         let tx = Transaction::new_signed_with_payer(
-            &[ix],
+            &[set_fixed_ix],
             Some(&ctx.payer.pubkey()),
             &[&ctx.payer],
             ctx.banks_client.get_latest_blockhash().await.unwrap(),

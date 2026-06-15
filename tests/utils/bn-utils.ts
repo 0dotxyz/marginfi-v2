@@ -23,6 +23,22 @@ export const bnToBigIntSafe = (value: BN): bigint => {
 export const bnToDecimalStringSafe = (value: BN): string =>
   bnToBigIntSafe(value).toString();
 
+export const bigIntToBnSafe = (value: bigint): BN => {
+  const negative = value < 0n;
+  let remaining = negative ? -value : value;
+  const bytes: number[] = [];
+  while (remaining > 0n) {
+    bytes.unshift(Number(remaining & 0xffn));
+    remaining >>= 8n;
+  }
+
+  const out = new BN(bytes.length === 0 ? [0] : bytes);
+  return negative ? out.neg() : out;
+};
+
+export const decimalStringToBnSafe = (value: string): BN =>
+  bigIntToBnSafe(BigInt(value));
+
 export const integerToBigInt = (value: IntegerLike): bigint => {
   if (typeof value === "bigint") return value;
   if (typeof value === "number") {

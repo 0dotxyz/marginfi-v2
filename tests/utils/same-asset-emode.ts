@@ -10,6 +10,7 @@ import {
 import { CONF_INTERVAL_MULTIPLE_FLOAT } from "./types";
 import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { Marginfi } from "target/types/marginfi";
+import { bigIntToBnSafe, bnToDecimalStringSafe } from "./bn-utils";
 import {
   initSameAssetEmodeRegistry,
   setBankSameAssetEmodeEligibility,
@@ -18,23 +19,37 @@ import { deriveSameAssetEmodeRegistry } from "./pdas";
 import { processBankrunTransaction } from "./tools";
 import { ProgramTestContext } from "./litesvm";
 
-const ORACLE_PRICE_LOWER_FACTOR = new Decimal(
-  1 - CONF_INTERVAL_MULTIPLE_FLOAT,
-);
-const ORACLE_PRICE_UPPER_FACTOR = new Decimal(
-  1 + CONF_INTERVAL_MULTIPLE_FLOAT,
-);
+const isBnLike = (value: unknown): value is BN =>
+  BN.isBN(value) ||
+  (!!value &&
+    typeof value === "object" &&
+    "abs" in value &&
+    "toArray" in value &&
+    "isNeg" in value);
 
 const toDecimal = (value: BN | BigNumber | Decimal | number | string): Decimal => {
-  if (value instanceof BN) {
-    return new Decimal(value.toString());
+  if (isBnLike(value)) {
+    return new Decimal(bnToDecimalStringSafe(value));
   }
 
   return new Decimal(value.toString());
 };
 
-const getSameAssetWeight = (leverage: number) =>
-  new Decimal(leverage - 1).div(leverage);
+const toSafeNumber = (
+  value: BN | BigNumber | Decimal | number | string,
+  label: string,
+) => {
+  const out = Number(
+    isBnLike(value) ? bnToDecimalStringSafe(value) : value.toString(),
+  );
+  if (!Number.isFinite(out)) {
+    throw new Error(`Invalid ${label}: ${value.toString()}`);
+  }
+  if (Math.abs(out) > Number.MAX_SAFE_INTEGER) {
+    throw new Error(`Unsafe ${label}: ${value.toString()}`);
+  }
+  return out;
+};
 
 export const decimalScale = (decimals: number) => {
   const normalizedDecimals = Number(decimals);
@@ -125,55 +140,51 @@ export const computeSameAssetBoundaryBorrowNative = ({
   liabilityOriginationFeeRate = 0,
   gapPosition,
 }: BoundaryBorrowParams) => {
-  const collateralUi = toDecimal(collateralNative).div(
-    decimalScale(collateralDecimals),
-  );
+  const collateralUi =
+    toSafeNumber(collateralNative, "collateral native") /
+    10 ** collateralDecimals;
   const haircutFactor = haircut
-    ? new Decimal(haircut.numerator).div(haircut.denominator)
-    : new Decimal(1);
-  const requirementCollateralUi = collateralUi.times(haircutFactor);
-  const liabilityScale = decimalScale(liabilityDecimals);
-  const liabilityWithFeeFactor = new Decimal(1).plus(
-    liabilityOriginationFeeRate,
-  );
-  const liabilityPriceWithConfidence = new Decimal(liabilityPrice).times(
-    ORACLE_PRICE_UPPER_FACTOR,
-  );
+    ? haircut.numerator / haircut.denominator
+    : 1;
+  const requirementCollateralUi = collateralUi * haircutFactor;
+  const liabilityScale = 10 ** liabilityDecimals;
+  const liabilityWithFeeFactor = 1 + liabilityOriginationFeeRate;
+  const liabilityPriceWithConfidence =
+    liabilityPrice * (1 + CONF_INTERVAL_MULTIPLE_FLOAT);
   const effectiveGapPosition = gapPosition ?? (haircut ? 0.5 : 0.25);
-  const healthyInitBoundaryUi = collateralUi
-    .times(collateralPrice)
-    .times(ORACLE_PRICE_LOWER_FACTOR)
-    .times(getSameAssetWeight(healthyInitLeverage))
-    .div(liabilityPriceWithConfidence);
-  const tightenedRequirementBoundaryUi = requirementCollateralUi
-    .times(collateralPrice)
-    .times(ORACLE_PRICE_LOWER_FACTOR)
-    .times(getSameAssetWeight(tightenedRequirementLeverage))
-    .div(liabilityPriceWithConfidence);
-  const boundaryGapUi = healthyInitBoundaryUi.minus(
-    tightenedRequirementBoundaryUi,
+  const healthyInitBoundaryUi =
+    (collateralUi *
+      collateralPrice *
+      (1 - CONF_INTERVAL_MULTIPLE_FLOAT) *
+      ((healthyInitLeverage - 1) / healthyInitLeverage)) /
+    liabilityPriceWithConfidence;
+  const tightenedRequirementBoundaryUi =
+    (requirementCollateralUi *
+      collateralPrice *
+      (1 - CONF_INTERVAL_MULTIPLE_FLOAT) *
+      ((tightenedRequirementLeverage - 1) / tightenedRequirementLeverage)) /
+    liabilityPriceWithConfidence;
+  const boundaryGapUi = healthyInitBoundaryUi - tightenedRequirementBoundaryUi;
+  const effectiveLiabilityUi =
+    tightenedRequirementBoundaryUi + boundaryGapUi * effectiveGapPosition;
+  const borrowNativeNumber = Math.floor(
+    (effectiveLiabilityUi / liabilityWithFeeFactor) * liabilityScale,
   );
-  const effectiveLiabilityUi = tightenedRequirementBoundaryUi.plus(
-    boundaryGapUi.times(effectiveGapPosition),
-  );
-  const borrowNative = new BN(
-    effectiveLiabilityUi
-      .div(liabilityWithFeeFactor)
-      .times(liabilityScale)
-      .floor()
-      .toFixed(0),
-  );
-  const borrowUi = new Decimal(borrowNative.toString()).div(liabilityScale);
-  const liabilityUi = borrowUi.times(liabilityWithFeeFactor);
+  if (!Number.isSafeInteger(borrowNativeNumber) || borrowNativeNumber < 0) {
+    throw new Error(`Unsafe borrow native: ${borrowNativeNumber}`);
+  }
+  const borrowNative = bigIntToBnSafe(BigInt(borrowNativeNumber)) as BN;
+  const borrowUi = borrowNativeNumber / liabilityScale;
+  const liabilityUi = borrowUi * liabilityWithFeeFactor;
   const requirementLabel = haircut ? "post-haircut maintenance" : "tightened";
 
   assert.isTrue(
-    liabilityUi.gt(tightenedRequirementBoundaryUi),
-    `fee-adjusted liability should stay above the ${requirementLabel} boundary`,
+    liabilityUi > tightenedRequirementBoundaryUi,
+    `fee-adjusted liability ${liabilityUi} should stay above the ${requirementLabel} boundary ${tightenedRequirementBoundaryUi}`,
   );
   assert.isTrue(
-    liabilityUi.lt(healthyInitBoundaryUi),
-    "fee-adjusted liability should stay below the healthy init boundary",
+    liabilityUi < healthyInitBoundaryUi,
+    `fee-adjusted liability ${liabilityUi} should stay below the healthy init boundary ${healthyInitBoundaryUi}`,
   );
 
   return borrowNative;
@@ -316,22 +327,17 @@ export const computeSameValueBorrowNative = ({
   sourceOriginationFeeRate = 0,
   targetOriginationFeeRate = 0,
 }: SameValueBorrowParams) => {
-  const sourceUi = toDecimal(sourceBorrowNative).div(
-    decimalScale(sourceDecimals),
-  );
-  const sourceLiabilityValue = sourceUi
-    .times(new Decimal(1).plus(sourceOriginationFeeRate))
-    .times(sourcePrice);
-  const targetUi = sourceLiabilityValue.div(
-    new Decimal(targetPrice).times(
-      new Decimal(1).plus(targetOriginationFeeRate),
-    ),
-  );
+  const sourceUi =
+    toSafeNumber(sourceBorrowNative, "source borrow native") /
+    10 ** sourceDecimals;
+  const sourceLiabilityValue =
+    sourceUi * (1 + sourceOriginationFeeRate) * sourcePrice;
+  const targetUi =
+    sourceLiabilityValue / (targetPrice * (1 + targetOriginationFeeRate));
+  const targetNative = Math.floor(targetUi * 10 ** targetDecimals);
+  if (!Number.isSafeInteger(targetNative) || targetNative < 0) {
+    throw new Error(`Unsafe same-value borrow native: ${targetNative}`);
+  }
 
-  return new BN(
-    targetUi
-      .times(decimalScale(targetDecimals))
-      .floor()
-      .toFixed(0),
-  );
+  return bigIntToBnSafe(BigInt(targetNative)) as BN;
 };
