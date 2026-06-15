@@ -54,7 +54,13 @@ import {
   assertI80F48Equal,
 } from "./utils/genericTests";
 import { initOrUpdatePriceUpdateV2 } from "./utils/pyth-pull-mocks";
-import { dumpAccBalances, bytesToF64, dumpBankrunLogs, getBankrunBlockhash } from "./utils/tools";
+import {
+  dumpAccBalances,
+  bytesToF64,
+  dumpBankrunLogs,
+  getBankrunBlockhash,
+  toWrappedI80F48Safe,
+} from "./utils/tools";
 
 const USER_ACCOUNT_THROWAWAY = "throwaway_account_zb01";
 const ONE_YEAR_IN_SECONDS = 2 * 365 * 24 * 60 * 60;
@@ -81,8 +87,8 @@ describe("Bank bankruptcy tests", () => {
     const disableSameAssetTx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(1),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(1),
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(1),
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(1),
       })
     );
     disableSameAssetTx.recentBlockhash = await getBankrunBlockhash(

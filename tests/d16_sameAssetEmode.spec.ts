@@ -56,6 +56,8 @@ import {
   getBankrunBlockhash,
   mintToTokenAccount,
   processBankrunTransaction,
+  toBnFromI80,
+  toWrappedI80F48Safe,
 } from "./utils/tools";
 import { dummyIx } from "./utils/bankrunConnection";
 import {
@@ -146,10 +148,8 @@ const getDriftAccountedCollateralNative = async (
   const account = await bankrunProgram.account.marginfiAccount.fetch(
     marginfiAccount
   );
-  const accountedScaledBalance = new BN(
-    wrappedI80F48toBigNumber(
-      account.lendingAccount.balances[0].assetShares
-    ).toString()
+  const accountedScaledBalance = toBnFromI80(
+    account.lendingAccount.balances[0].assetShares
   );
   const spotMarket = await getSpotMarketAccount(
     driftBankrunProgram,
@@ -211,8 +211,8 @@ describe("d16: Drift same-asset emode", () => {
         await groupConfigure(groupAdmin.mrgnBankrunProgram, {
           marginfiGroup: driftGroup.publicKey,
           newRiskAdmin: options?.newRiskAdmin,
-          sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(initLeverage),
-          sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(maintLeverage),
+          sameAssetEmodeInitLeverage: toWrappedI80F48Safe(initLeverage),
+          sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(maintLeverage),
         }),
         dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey),
       ),

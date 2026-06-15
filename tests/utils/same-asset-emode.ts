@@ -1,6 +1,7 @@
 import { BN, Program } from "@coral-xyz/anchor";
 import { assert } from "chai";
-import BigNumber from "bignumber.js";
+import type BigNumber from "bignumber.js";
+import Decimal from "decimal.js";
 import {
   bigNumberToWrappedI80F48,
   WrappedI80F48,
@@ -17,27 +18,23 @@ import { deriveSameAssetEmodeRegistry } from "./pdas";
 import { processBankrunTransaction } from "./tools";
 import { ProgramTestContext } from "./litesvm";
 
-const ORACLE_PRICE_LOWER_FACTOR = new BigNumber(
+const ORACLE_PRICE_LOWER_FACTOR = new Decimal(
   1 - CONF_INTERVAL_MULTIPLE_FLOAT,
 );
-const ORACLE_PRICE_UPPER_FACTOR = new BigNumber(
+const ORACLE_PRICE_UPPER_FACTOR = new Decimal(
   1 + CONF_INTERVAL_MULTIPLE_FLOAT,
 );
 
-const toBigNumber = (value: BN | BigNumber | number | string): BigNumber => {
-  if (BigNumber.isBigNumber(value)) {
-    return value;
-  }
-
+const toDecimal = (value: BN | BigNumber | Decimal | number | string): Decimal => {
   if (value instanceof BN) {
-    return new BigNumber(value.toString());
+    return new Decimal(value.toString());
   }
 
-  return new BigNumber(value.toString());
+  return new Decimal(value.toString());
 };
 
 const getSameAssetWeight = (leverage: number) =>
-  new BigNumber(leverage - 1).div(leverage);
+  new Decimal(leverage - 1).div(leverage);
 
 export const decimalScale = (decimals: number) => {
   const normalizedDecimals = Number(decimals);
@@ -49,7 +46,7 @@ export const decimalScale = (decimals: number) => {
     throw new Error(`Invalid token decimals: ${decimals}`);
   }
 
-  return new BigNumber(`1e${normalizedDecimals}`);
+  return new Decimal(`1e${normalizedDecimals}`);
 };
 
 export const enableSameAssetEmodeForBanks = async ({
@@ -128,18 +125,18 @@ export const computeSameAssetBoundaryBorrowNative = ({
   liabilityOriginationFeeRate = 0,
   gapPosition,
 }: BoundaryBorrowParams) => {
-  const collateralUi = toBigNumber(collateralNative).div(
+  const collateralUi = toDecimal(collateralNative).div(
     decimalScale(collateralDecimals),
   );
   const haircutFactor = haircut
-    ? new BigNumber(haircut.numerator).div(haircut.denominator)
-    : new BigNumber(1);
+    ? new Decimal(haircut.numerator).div(haircut.denominator)
+    : new Decimal(1);
   const requirementCollateralUi = collateralUi.times(haircutFactor);
   const liabilityScale = decimalScale(liabilityDecimals);
-  const liabilityWithFeeFactor = new BigNumber(1).plus(
+  const liabilityWithFeeFactor = new Decimal(1).plus(
     liabilityOriginationFeeRate,
   );
-  const liabilityPriceWithConfidence = new BigNumber(liabilityPrice).times(
+  const liabilityPriceWithConfidence = new Decimal(liabilityPrice).times(
     ORACLE_PRICE_UPPER_FACTOR,
   );
   const effectiveGapPosition = gapPosition ?? (haircut ? 0.5 : 0.25);
@@ -163,19 +160,19 @@ export const computeSameAssetBoundaryBorrowNative = ({
     effectiveLiabilityUi
       .div(liabilityWithFeeFactor)
       .times(liabilityScale)
-      .integerValue(BigNumber.ROUND_FLOOR)
+      .floor()
       .toFixed(0),
   );
-  const borrowUi = new BigNumber(borrowNative.toString()).div(liabilityScale);
+  const borrowUi = new Decimal(borrowNative.toString()).div(liabilityScale);
   const liabilityUi = borrowUi.times(liabilityWithFeeFactor);
   const requirementLabel = haircut ? "post-haircut maintenance" : "tightened";
 
   assert.isTrue(
-    liabilityUi.isGreaterThan(tightenedRequirementBoundaryUi),
+    liabilityUi.gt(tightenedRequirementBoundaryUi),
     `fee-adjusted liability should stay above the ${requirementLabel} boundary`,
   );
   assert.isTrue(
-    liabilityUi.isLessThan(healthyInitBoundaryUi),
+    liabilityUi.lt(healthyInitBoundaryUi),
     "fee-adjusted liability should stay below the healthy init boundary",
   );
 
@@ -265,9 +262,10 @@ export const setAssetShareValueHaircut = async (
     ),
   );
   const updatedAssetShareValue = bigNumberToWrappedI80F48(
-    wrappedI80F48toBigNumber(bankAccount.assetShareValue)
+    new Decimal(wrappedI80F48toBigNumber(bankAccount.assetShareValue).toString())
       .times(numerator)
-      .div(denominator),
+      .div(denominator)
+      .toString(),
   );
   Buffer.from(updatedAssetShareValue.value).copy(
     originalData,
@@ -318,22 +316,22 @@ export const computeSameValueBorrowNative = ({
   sourceOriginationFeeRate = 0,
   targetOriginationFeeRate = 0,
 }: SameValueBorrowParams) => {
-  const sourceUi = toBigNumber(sourceBorrowNative).div(
+  const sourceUi = toDecimal(sourceBorrowNative).div(
     decimalScale(sourceDecimals),
   );
   const sourceLiabilityValue = sourceUi
-    .times(new BigNumber(1).plus(sourceOriginationFeeRate))
+    .times(new Decimal(1).plus(sourceOriginationFeeRate))
     .times(sourcePrice);
   const targetUi = sourceLiabilityValue.div(
-    new BigNumber(targetPrice).times(
-      new BigNumber(1).plus(targetOriginationFeeRate),
+    new Decimal(targetPrice).times(
+      new Decimal(1).plus(targetOriginationFeeRate),
     ),
   );
 
   return new BN(
     targetUi
       .times(decimalScale(targetDecimals))
-      .integerValue(BigNumber.ROUND_FLOOR)
+      .floor()
       .toFixed(0),
   );
 };

@@ -711,7 +711,14 @@ async fn configure_bank_to_fixed_oracle() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn set_same_asset_emode_eligibility_success_and_fixed_rejects() -> anyhow::Result<()> {
-    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![TestBankSetting {
+            mint: BankMint::Usdc,
+            ..Default::default()
+        }],
+        ..Default::default()
+    }))
+    .await;
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
 
     test_f
@@ -747,10 +754,29 @@ async fn set_same_asset_emode_eligibility_success_and_fixed_rejects() -> anyhow:
     let usdc_after_disable = usdc_bank.load().await;
     assert_eq!(usdc_after_disable.flags & BANK_SAME_ASSET_EMODE_ELIGIBLE, 0);
 
-    let fixed_bank = test_f.get_bank(&BankMint::Fixed);
+    {
+        let ctx = test_f.context.borrow_mut();
+        let ix = test_f
+            .marginfi_group
+            .make_lending_pool_set_fixed_oracle_price_ix(usdc_bank, I80F48!(1).into());
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client.process_transaction(tx).await?;
+    }
+    let usdc_after_fixed = usdc_bank.load().await;
+    assert_eq!(usdc_after_fixed.config.oracle_setup, OracleSetup::Fixed);
+    assert_eq!(
+        I80F48::from(usdc_after_fixed.config.fixed_price),
+        I80F48!(1)
+    );
+
     let fixed_res = test_f
         .marginfi_group
-        .try_lending_pool_set_bank_same_asset_emode_eligibility(fixed_bank, true)
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(usdc_bank, true)
         .await;
     assert!(fixed_res.is_err());
     assert_custom_error!(fixed_res.unwrap_err(), MarginfiError::BadEmodeConfig);

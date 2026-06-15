@@ -63,6 +63,7 @@ import {
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
 import { logHealthCache, processBankrunTransaction } from "./utils/tools";
+import { bnToDecimalStringSafe } from "./utils/bn-utils";
 import { ProgramTestContext } from "./utils/litesvm";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import {
@@ -502,7 +503,7 @@ describe("kx: Fixed Kamino price bank", () => {
     console.log("withdrew: " + diff.toLocaleString());
 
     const expectedWithdraw = exchangeRateBeforeWithdraw
-      .mul(withdrawAmount.toString())
+      .mul(bnToDecimalStringSafe(withdrawAmount))
       .toNumber();
     assert.approximately(diff, expectedWithdraw, 2);
 

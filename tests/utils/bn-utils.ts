@@ -114,6 +114,9 @@ export const fromI80Scaled = (scaled: bigint): WrappedI80F48 => {
   return { value: bytes };
 };
 
+export const toWrappedI80F48Safe = (value: I80F48Like): WrappedI80F48 =>
+  fromI80Scaled(toI80Scaled(value));
+
 export const mulI80 = (lhsScaled: bigint, rhsScaled: bigint): bigint =>
   (lhsScaled * rhsScaled) >> I80F48_FRACTIONAL_BITS;
 

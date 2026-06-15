@@ -1,5 +1,5 @@
 import { BN } from "@coral-xyz/anchor";
-import BigNumber from "bignumber.js";
+import Decimal from "decimal.js";
 import {
   ComputeBudgetProgram,
   Keypair,
@@ -69,6 +69,14 @@ const DEFAULT_MAINT_LEVERAGE = 100;
 const BOUNDARY_TIGHTENED_LEVERAGE = DEFAULT_INIT_LEVERAGE - 1;
 const DEFAULT_LIAB_WEIGHT = 1;
 const RiskEngineInitRejected = "0x1779";
+
+const toDecimal = (value: { toString(): string } | number | string) =>
+  new Decimal(value.toString());
+
+const decimalScale = (decimals: number) => new Decimal(10).pow(decimals);
+
+const uiToNative = (ui: Decimal, decimals: number) =>
+  new BN(ui.times(decimalScale(decimals)).floor().toFixed(0));
 
 const getNetHealth = (cache: {
   assetValue: WrappedI80F48;
@@ -265,17 +273,17 @@ describe("Same-asset emode safety", () => {
     // be a pre-existing failure rather than the boost-collapse we want to detect.
     const preAcc = await bankrunProgram.account.marginfiAccount.fetch(account);
     assert.ok((preAcc.healthCache.flags & HEALTH_CACHE_HEALTHY) !== 0);
-    const preBoostRatio = wrappedI80F48toBigNumber(
-      preAcc.healthCache.assetValueMaint
-    ).div(wrappedI80F48toBigNumber(preAcc.healthCache.assetValueEquity));
-    const expectedPreBoostRatio = new BigNumber(DEFAULT_MAINT_LEVERAGE - 1).div(
+    const preBoostRatio = toDecimal(
+      wrappedI80F48toBigNumber(preAcc.healthCache.assetValueMaint)
+    ).div(toDecimal(wrappedI80F48toBigNumber(preAcc.healthCache.assetValueEquity)));
+    const expectedPreBoostRatio = new Decimal(DEFAULT_MAINT_LEVERAGE - 1).div(
       DEFAULT_MAINT_LEVERAGE
     );
     assert.isTrue(
       preBoostRatio
         .minus(expectedPreBoostRatio)
         .abs()
-        .lt(new BigNumber(0.0001)),
+        .lt(new Decimal(0.0001)),
       `pre-borrow maint/equity should equal ${expectedPreBoostRatio.toFixed()}; got ${preBoostRatio.toFixed()}`
     );
 
@@ -363,12 +371,12 @@ describe("Same-asset emode safety", () => {
 
       // Both sides scale by `elevatedLiabWeight / DEFAULT_LIAB_WEIGHT`. Tolerance absorbs
       // interest accrual between the two pulses and I80F48 quantization.
-      const expectedRatio = new BigNumber(elevatedLiabWeight).div(
+      const expectedRatio = new Decimal(elevatedLiabWeight).div(
         DEFAULT_LIAB_WEIGHT
       );
-      const ratioTolerance = new BigNumber(0.0001);
-      const assetRatio = adjustedAsset.div(baselineAsset);
-      const liabRatio = adjustedLiab.div(baselineLiab);
+      const ratioTolerance = new Decimal(0.0001);
+      const assetRatio = toDecimal(adjustedAsset).div(toDecimal(baselineAsset));
+      const liabRatio = toDecimal(adjustedLiab).div(toDecimal(baselineLiab));
       assert.isTrue(
         assetRatio.minus(expectedRatio).abs().lt(ratioTolerance),
         `asset side should scale by exactly ${expectedRatio.toFixed()}; got ${assetRatio.toFixed()}`
@@ -393,13 +401,8 @@ describe("Same-asset emode safety", () => {
   it("(user 0) withdraw under same-asset boost succeeds up to the init boundary and rejects beyond it", async () => {
     const user = users[0];
     const account = await initFreshAccount(user);
-    const collateralUi = new BigNumber(200);
-    const depositAmount = new BN(
-      collateralUi
-        .times(10 ** ecosystem.usdcDecimals)
-        .integerValue(BigNumber.ROUND_FLOOR)
-        .toFixed(0)
-    );
+    const collateralUi = new Decimal(200);
+    const depositAmount = uiToNative(collateralUi, ecosystem.usdcDecimals);
     const borrowAmount = boundaryBorrow(depositAmount);
 
     const openTx = new Transaction().add(
@@ -422,14 +425,14 @@ describe("Same-asset emode safety", () => {
 
     // (C - W) * lower * (1 - 1/L_init) >= B * upper
     // → C_min = B * (1 + eps) / [(1 - eps) * (1 - 1/L_init)]
-    const liabWithConfidence = new BigNumber(borrowAmount.toString())
-      .div(new BigNumber(10).pow(ecosystem.usdcDecimals))
-      .times(new BigNumber(1).plus(CONF_INTERVAL_MULTIPLE_FLOAT));
+    const liabWithConfidence = new Decimal(borrowAmount.toString())
+      .div(decimalScale(ecosystem.usdcDecimals))
+      .times(new Decimal(1).plus(CONF_INTERVAL_MULTIPLE_FLOAT));
     const remainingCollateralUi = liabWithConfidence.div(
-      new BigNumber(1)
+      new Decimal(1)
         .minus(CONF_INTERVAL_MULTIPLE_FLOAT)
         .times(
-          new BigNumber(DEFAULT_INIT_LEVERAGE - 1).div(DEFAULT_INIT_LEVERAGE)
+          new Decimal(DEFAULT_INIT_LEVERAGE - 1).div(DEFAULT_INIT_LEVERAGE)
         )
     );
     const maxWithdrawUi = collateralUi.minus(remainingCollateralUi);
@@ -437,8 +440,8 @@ describe("Same-asset emode safety", () => {
     // -1 native unit absorbs I80F48 rounding direction drift.
     const safeWithdrawNative = new BN(
       maxWithdrawUi
-        .times(10 ** ecosystem.usdcDecimals)
-        .integerValue(BigNumber.ROUND_FLOOR)
+        .times(decimalScale(ecosystem.usdcDecimals))
+        .floor()
         .toFixed(0)
     ).subn(1);
     assert.isTrue(safeWithdrawNative.gtn(0));
@@ -496,12 +499,10 @@ describe("Same-asset emode safety", () => {
 
     try {
       const account = await initFreshAccount(user);
-      const initialCollateralUi = new BigNumber(50);
-      const initialDepositNative = new BN(
-        initialCollateralUi
-          .times(10 ** ecosystem.usdcDecimals)
-          .integerValue(BigNumber.ROUND_FLOOR)
-          .toFixed(0)
+      const initialCollateralUi = new Decimal(50);
+      const initialDepositNative = uiToNative(
+        initialCollateralUi,
+        ecosystem.usdcDecimals
       );
       const seedTx = new Transaction().add(
         await depositIx(user.mrgnBankrunProgram, {
@@ -516,22 +517,22 @@ describe("Same-asset emode safety", () => {
 
       // Per-borrow constraint:  C * lower * (1 - 1/L_init) >= L * upper
       // Convergence:            L∞ = C0 * lower * boost / (upper - lower * boost)
-      const lower = new BigNumber(1).minus(CONF_INTERVAL_MULTIPLE_FLOAT);
-      const upper = new BigNumber(1).plus(CONF_INTERVAL_MULTIPLE_FLOAT);
-      const boostWeight = new BigNumber(loopInit - 1).div(loopInit);
+      const lower = new Decimal(1).minus(CONF_INTERVAL_MULTIPLE_FLOAT);
+      const upper = new Decimal(1).plus(CONF_INTERVAL_MULTIPLE_FLOAT);
+      const boostWeight = new Decimal(loopInit - 1).div(loopInit);
       const realizedMaxBorrowUi = initialCollateralUi
         .times(lower)
         .times(boostWeight)
         .div(upper.minus(lower.times(boostWeight)));
 
       let totalDepositedUi = initialCollateralUi;
-      let totalBorrowedUi = new BigNumber(0);
+      let totalBorrowedUi = new Decimal(0);
       let iterationsRan = 0;
 
       // Geometric ratio per iteration is ~0.76 (lower*boost/upper), so 0.5 USDC headroom is
       // reached in ~15 iterations.
       const maxIterations = 20;
-      const convergenceEpsilonUi = new BigNumber(0.5);
+      const convergenceEpsilonUi = new Decimal(0.5);
       for (let i = 0; i < maxIterations; i++) {
         // δ_max = (C * lower * boost - L * upper) / upper.  ×0.999 absorbs I80F48 drift.
         const maxAdditional = totalDepositedUi
@@ -543,8 +544,8 @@ describe("Same-asset emode safety", () => {
         if (maxAdditional.lte(convergenceEpsilonUi)) break;
         const stepBorrowNative = new BN(
           maxAdditional
-            .times(10 ** ecosystem.usdcDecimals)
-            .integerValue(BigNumber.ROUND_FLOOR)
+            .times(decimalScale(ecosystem.usdcDecimals))
+            .floor()
             .toFixed(0)
         );
         if (stepBorrowNative.isZero()) break;
@@ -566,8 +567,8 @@ describe("Same-asset emode safety", () => {
           })
         );
         await processBankrunTransaction(bankrunContext, stepTx, [user.wallet]);
-        const stepUi = new BigNumber(stepBorrowNative.toString()).div(
-          10 ** ecosystem.usdcDecimals
+        const stepUi = new Decimal(stepBorrowNative.toString()).div(
+          decimalScale(ecosystem.usdcDecimals)
         );
         totalBorrowedUi = totalBorrowedUi.plus(stepUi);
         totalDepositedUi = totalDepositedUi.plus(stepUi);
@@ -592,8 +593,8 @@ describe("Same-asset emode safety", () => {
       // On-chain liability_value carries the upper-oracle factor; compare in matching units.
       const accAfterLoop =
         await bankrunProgram.account.marginfiAccount.fetch(account);
-      const liabValueUi = wrappedI80F48toBigNumber(
-        accAfterLoop.healthCache.liabilityValue
+      const liabValueUi = toDecimal(
+        wrappedI80F48toBigNumber(accAfterLoop.healthCache.liabilityValue)
       ).div(ecosystem.usdcPrice);
       assert.isTrue(
         liabValueUi.lt(realizedMaxBorrowUi.times(upper)),
@@ -661,20 +662,22 @@ describe("Same-asset emode safety", () => {
     await processBankrunTransaction(bankrunContext, openTx, [user.wallet]);
 
     const acc = await bankrunProgram.account.marginfiAccount.fetch(account);
-    const assetValueInit = wrappedI80F48toBigNumber(acc.healthCache.assetValue);
-    const lowerOracle = new BigNumber(1).minus(CONF_INTERVAL_MULTIPLE_FLOAT);
-    const usdcUi = new BigNumber(usdcDeposit.toString()).div(
-      10 ** ecosystem.usdcDecimals
+    const assetValueInit = toDecimal(
+      wrappedI80F48toBigNumber(acc.healthCache.assetValue)
     );
-    const solUi = new BigNumber(solDeposit.toString()).div(
-      10 ** ecosystem.wsolDecimals
+    const lowerOracle = new Decimal(1).minus(CONF_INTERVAL_MULTIPLE_FLOAT);
+    const usdcUi = new Decimal(usdcDeposit.toString()).div(
+      decimalScale(ecosystem.usdcDecimals)
+    );
+    const solUi = new Decimal(solDeposit.toString()).div(
+      decimalScale(ecosystem.wsolDecimals)
     );
     // USDC: boosted weight (1 - 1/L_init).  SOL: plain bank-A asset weight (0.5).
     const expectedUsdcContribution = usdcUi
       .times(ecosystem.usdcPrice)
       .times(lowerOracle)
       .times(
-        new BigNumber(DEFAULT_INIT_LEVERAGE - 1).div(DEFAULT_INIT_LEVERAGE)
+        new Decimal(DEFAULT_INIT_LEVERAGE - 1).div(DEFAULT_INIT_LEVERAGE)
       );
     const expectedSolContribution = solUi
       .times(ecosystem.wsolPrice)
@@ -688,7 +691,7 @@ describe("Same-asset emode safety", () => {
       .times(ecosystem.wsolPrice)
       .times(lowerOracle)
       .times(
-        new BigNumber(DEFAULT_INIT_LEVERAGE - 1).div(DEFAULT_INIT_LEVERAGE)
+        new Decimal(DEFAULT_INIT_LEVERAGE - 1).div(DEFAULT_INIT_LEVERAGE)
       );
     const counterfactualAssetValue = expectedUsdcContribution.plus(
       counterfactualSolContribution
@@ -841,11 +844,11 @@ describe("Same-asset emode safety", () => {
       aAcc.healthCache.assetValueMaint
     );
     // maint/equity = boost = (L_maint - 1) / L_maint. Plain fallback would give ~0.6/1.0.
-    const expectedBoostRatio = new BigNumber(DEFAULT_MAINT_LEVERAGE - 1).div(
+    const expectedBoostRatio = new Decimal(DEFAULT_MAINT_LEVERAGE - 1).div(
       DEFAULT_MAINT_LEVERAGE
     );
-    const boostRatioTolerance = new BigNumber(0.0001);
-    const preBoostRatio = preAssetMaint.div(preAssetEquity);
+    const boostRatioTolerance = new Decimal(0.0001);
+    const preBoostRatio = toDecimal(preAssetMaint).div(toDecimal(preAssetEquity));
     assert.isTrue(
       preBoostRatio.minus(expectedBoostRatio).abs().lt(boostRatioTolerance),
       `pre-haircut maint/equity should equal ${expectedBoostRatio.toFixed()}; got ${preBoostRatio.toFixed()}`
@@ -879,16 +882,18 @@ describe("Same-asset emode safety", () => {
         aAcc.healthCache.assetValueMaint
       );
 
-      const postBoostRatio = postAssetMaint.div(postAssetEquity);
+      const postBoostRatio = toDecimal(postAssetMaint).div(
+        toDecimal(postAssetEquity)
+      );
       assert.isTrue(
         postBoostRatio.minus(expectedBoostRatio).abs().lt(boostRatioTolerance),
         `post-haircut maint/equity should equal ${expectedBoostRatio.toFixed()}; got ${postBoostRatio.toFixed()}`
       );
 
       // Equity shrinks by exactly the haircut factor (199/200).
-      const expectedEquityRatio = new BigNumber(199).div(200);
-      const equityRatioTolerance = new BigNumber(0.0001);
-      const equityRatio = postAssetEquity.div(preAssetEquity);
+      const expectedEquityRatio = new Decimal(199).div(200);
+      const equityRatioTolerance = new Decimal(0.0001);
+      const equityRatio = toDecimal(postAssetEquity).div(toDecimal(preAssetEquity));
       assert.isTrue(
         equityRatio.minus(expectedEquityRatio).abs().lt(equityRatioTolerance),
         `equity value should reflect the 50bp haircut exactly (${expectedEquityRatio.toFixed()}); got ${equityRatio.toFixed()}`

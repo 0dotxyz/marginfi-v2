@@ -5,7 +5,8 @@ import {
   type WrappedI80F48,
 } from "@mrgnlabs/mrgn-common";
 import { ComputeBudgetProgram, PublicKey, Transaction } from "@solana/web3.js";
-import BigNumber from "bignumber.js";
+import type BigNumber from "bignumber.js";
+import Decimal from "decimal.js";
 import { assert } from "chai";
 import { genericMultiBankTestSetup } from "./genericSetups";
 import {
@@ -48,7 +49,7 @@ import {
   deriveBaseObligation,
   deriveLiquidityVaultAuthority,
 } from "./utils/pdas";
-import { processBankrunTransaction } from "./utils/tools";
+import { processBankrunTransaction, toWrappedI80F48Safe } from "./utils/tools";
 import {
   blankBankConfigOptRaw,
   defaultBankConfig,
@@ -92,7 +93,7 @@ function fixedSeed(label: string): Buffer {
 }
 
 function uiToNative(ui: number, decimals: number): BN {
-  return new BN(new BigNumber(ui).times(new BigNumber(10).pow(decimals)).toFixed(0));
+  return new BN(new Decimal(ui).times(new Decimal(10).pow(decimals)).toFixed(0));
 }
 
 function healthFromCache(cache: {
@@ -170,8 +171,8 @@ async function setAssetWeights(bank: PublicKey, initWeight: number, maintWeight:
 async function setSameAssetLeverage(group: PublicKey, initLeverage: number, maintLeverage: number) {
   const ix = await groupConfigure(groupAdmin.mrgnBankrunProgram, {
     marginfiGroup: group,
-    sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(initLeverage),
-    sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(maintLeverage),
+    sameAssetEmodeInitLeverage: toWrappedI80F48Safe(initLeverage),
+    sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(maintLeverage),
   });
 
   await processBankrunTransaction(
@@ -512,7 +513,7 @@ describe("e08 same-asset emode with integration collateral", () => {
   });
 
   it("Kamino Alpha collateral: health improves after enabling same-asset emode", async () => {
-    await runIntegrationScenario("kamino", 0);
+    await runIntegrationScenario("kamino", 1);
   });
 
   it("Drift Alpha collateral: health improves after enabling same-asset emode", async () => {

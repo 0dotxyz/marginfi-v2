@@ -1,5 +1,5 @@
 import { BN } from "@coral-xyz/anchor";
-import BigNumber from "bignumber.js";
+import Decimal from "decimal.js";
 import {
   ComputeBudgetProgram,
   Keypair,
@@ -49,7 +49,11 @@ import {
   startDeleverageIx,
   withdrawIx,
 } from "./utils/user-instructions";
-import { mintToTokenAccount, processBankrunTransaction } from "./utils/tools";
+import {
+  mintToTokenAccount,
+  processBankrunTransaction,
+  toWrappedI80F48Safe,
+} from "./utils/tools";
 import { deriveLiquidationRecord } from "./utils/pdas";
 import {
   assertSameAssetBadDebtSurvivability,
@@ -161,9 +165,10 @@ describe("Same-asset automatic emode", () => {
       ),
     );
     const updatedAssetShareValue = bigNumberToWrappedI80F48(
-      wrappedI80F48toBigNumber(bankAccount.assetShareValue)
+      new Decimal(wrappedI80F48toBigNumber(bankAccount.assetShareValue).toString())
         .times(numerator)
-        .div(denominator),
+        .div(denominator)
+        .toString(),
     );
     Buffer.from(updatedAssetShareValue.value).copy(
       originalData,
@@ -192,10 +197,10 @@ describe("Same-asset automatic emode", () => {
     let tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(
           SAME_ASSET_INIT_LEVERAGE,
         ),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(
           SAME_ASSET_MAINT_LEVERAGE,
         ),
       }),
@@ -326,8 +331,8 @@ describe("Same-asset automatic emode", () => {
     let tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(100),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(100),
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(100),
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(100),
       }),
     );
     let result = await processBankrunTransaction(
@@ -346,8 +351,8 @@ describe("Same-asset automatic emode", () => {
     let tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(0),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(2),
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(0),
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(2),
       }),
     );
     let result = await processBankrunTransaction(
@@ -366,8 +371,8 @@ describe("Same-asset automatic emode", () => {
     let tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(101),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(102),
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(101),
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(102),
       }),
     );
     let result = await processBankrunTransaction(
@@ -396,22 +401,22 @@ describe("Same-asset automatic emode", () => {
     // bound and liabilities at the upper confidence bound, so the accepted borrow must also
     // include the `lower_oracle / upper_oracle` discount.
     const naiveBorrow = new BN(
-      new BigNumber(SAME_ASSET_DEPOSIT.toString())
+      new Decimal(SAME_ASSET_DEPOSIT.toString())
         .div(liabilityScale)
         .times(SAME_ASSET_INIT_LEVERAGE - 1)
         .div(SAME_ASSET_INIT_LEVERAGE)
         .times(liabilityScale)
-        .integerValue(BigNumber.ROUND_FLOOR)
+        .floor()
         .toFixed(0),
     );
 
     let tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(
           SAME_ASSET_INIT_LEVERAGE,
         ),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(
           SAME_ASSET_MAINT_LEVERAGE,
         ),
       }),
@@ -494,10 +499,10 @@ describe("Same-asset automatic emode", () => {
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
         newRiskAdmin: riskAdmin.wallet.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(
           SAME_ASSET_INIT_LEVERAGE,
         ),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(
           SAME_ASSET_MAINT_LEVERAGE,
         ),
       }),
@@ -650,10 +655,10 @@ describe("Same-asset automatic emode", () => {
     tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(
           SAME_ASSET_TIGHTENED_INIT_LEVERAGE,
         ),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(
           SAME_ASSET_TIGHTENED_MAINT_LEVERAGE,
         ),
       }),
@@ -673,10 +678,10 @@ describe("Same-asset automatic emode", () => {
     tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: emodeGroup.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(
           SAME_ASSET_INIT_LEVERAGE,
         ),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(
           SAME_ASSET_MAINT_LEVERAGE,
         ),
       }),

@@ -63,6 +63,9 @@ import {
   mintToTokenAccount,
   processBankrunTransaction,
   processBankrunV0Transaction,
+  toBn,
+  toBnFromI80,
+  toWrappedI80F48Safe,
 } from "./utils/tools";
 import { dummyIx } from "./utils/bankrunConnection";
 import { assertBankrunTxFailed } from "./utils/genericTests";
@@ -184,17 +187,15 @@ describe("jlr08: JupLend same-asset emode", () => {
     let account = await bankrunProgram.account.marginfiAccount.fetch(
       marginfiAccount
     );
-    const accountedShares = new BN(
-      wrappedI80F48toBigNumber(
-        account.lendingAccount.balances[0].assetShares
-      ).toString()
+    const accountedShares = toBnFromI80(
+      account.lendingAccount.balances[0].assetShares
     );
     const lending = await juplendPrograms.lending.account.lending.fetch(
       tokenAPool.lending
     );
     const accountedUnderlying = expectedAssetsForRedeem(
       accountedShares,
-      new BN(lending.tokenExchangePrice.toString())
+      toBn(lending.tokenExchangePrice)
     );
 
     return { accountedShares, accountedUnderlying };
@@ -230,8 +231,8 @@ describe("jlr08: JupLend same-asset emode", () => {
         await groupConfigure(groupAdmin.mrgnBankrunProgram, {
           marginfiGroup: groupPk,
           newRiskAdmin: options?.newRiskAdmin,
-          sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(initLeverage),
-          sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(maintLeverage),
+          sameAssetEmodeInitLeverage: toWrappedI80F48Safe(initLeverage),
+          sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(maintLeverage),
         }),
         dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey),
       ),
@@ -525,12 +526,8 @@ describe("jlr08: JupLend same-asset emode", () => {
     const lendingBefore = await juplendPrograms.lending.account.lending.fetch(
       tokenAPool.lending
     );
-    const liquidityExchangePrice = new BN(
-      lendingBefore.liquidityExchangePrice.toString()
-    );
-    const tokenExchangePrice = new BN(
-      lendingBefore.tokenExchangePrice.toString()
-    );
+    const liquidityExchangePrice = toBn(lendingBefore.liquidityExchangePrice);
+    const tokenExchangePrice = toBn(lendingBefore.tokenExchangePrice);
     const expectedShares = expectedSharesForDeposit(
       SAME_ASSET_DEPOSIT,
       liquidityExchangePrice,
@@ -604,8 +601,8 @@ describe("jlr08: JupLend same-asset emode", () => {
     );
     const expectedShares = expectedSharesForDeposit(
       SAME_ASSET_DEPOSIT,
-      new BN(lendingBefore.liquidityExchangePrice.toString()),
-      new BN(lendingBefore.tokenExchangePrice.toString())
+      toBn(lendingBefore.liquidityExchangePrice),
+      toBn(lendingBefore.tokenExchangePrice)
     );
 
     // Deposit = 100 Token A at $10, so the nominal collateral is worth $1,000 before weighting.

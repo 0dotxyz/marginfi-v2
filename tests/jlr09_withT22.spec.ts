@@ -46,6 +46,7 @@ import {
   mintToTokenAccount,
   processBankrunTransaction,
 } from "./utils/tools";
+import { bnToBigIntSafe } from "./utils/bn-utils";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import {
   addJuplendBankIx,
@@ -133,7 +134,7 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       t22Mint.publicKey,
       destination,
       globalProgramAdmin.wallet.publicKey,
-      BigInt(amount.toString()),
+      bnToBigIntSafe(amount),
       [],
       TOKEN_2022_PROGRAM_ID,
     );

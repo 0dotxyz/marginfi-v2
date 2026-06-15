@@ -64,6 +64,7 @@ import {
   getBankrunBlockhash,
   mintToTokenAccount,
   processBankrunTransaction,
+  toWrappedI80F48Safe,
 } from "./utils/tools";
 import {
   assertSameAssetBadDebtSurvivability,
@@ -251,8 +252,8 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
         newRiskAdmin: riskAdmin.wallet.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(INIT_LEVERAGE),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(MAINT_LEVERAGE),
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(INIT_LEVERAGE),
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(MAINT_LEVERAGE),
       }),
       dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey)
     );
@@ -363,12 +364,13 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
       seederKeypair,
     ]);
 
-    // 500 USDC per liability bank; 4 users each borrow ~92 USDC/bank = ~368 USDC total demand per bank.
-    const seedAmount = new BN(500 * 10 ** ecosystem.usdcDecimals);
+    // Seed enough per liability bank for the independent m05 users to open positions
+    // without reusing liquidity from earlier cases in the same suite.
+    const seedAmount = new BN(2_000 * 10 ** ecosystem.usdcDecimals);
     await mintToTokenAccount(
       ecosystem.usdcMint.publicKey,
       groupAdmin.usdcAccount,
-      new BN(NUM_LIABILITY_BANKS * 500 * 10 ** ecosystem.usdcDecimals)
+      new BN(NUM_LIABILITY_BANKS * 2_000 * 10 ** ecosystem.usdcDecimals)
     );
     const SEED_PER_TX = 4;
     const liabilityBanks = banks.slice(NUM_COLLATERAL_BANKS);
@@ -447,8 +449,8 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
     tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(TIGHTENED_INIT_LEVERAGE),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(TIGHTENED_MAINT_LEVERAGE),
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(TIGHTENED_INIT_LEVERAGE),
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(TIGHTENED_MAINT_LEVERAGE),
       }),
       dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey)
     );
@@ -497,8 +499,8 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
     const resetTx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(INIT_LEVERAGE),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(MAINT_LEVERAGE),
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(INIT_LEVERAGE),
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(MAINT_LEVERAGE),
       }),
       dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey)
     );
@@ -524,8 +526,8 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
     tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(TIGHTENED_INIT_LEVERAGE),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(TIGHTENED_MAINT_LEVERAGE),
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(TIGHTENED_INIT_LEVERAGE),
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(TIGHTENED_MAINT_LEVERAGE),
       }),
       dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey)
     );
@@ -576,8 +578,8 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
     tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(INIT_LEVERAGE),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(MAINT_LEVERAGE),
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(INIT_LEVERAGE),
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(MAINT_LEVERAGE),
       }),
       dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey)
     );
@@ -592,8 +594,8 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
     const resetTx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
-        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(INIT_LEVERAGE),
-        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(MAINT_LEVERAGE),
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(INIT_LEVERAGE),
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(MAINT_LEVERAGE),
       }),
       dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey)
     );
