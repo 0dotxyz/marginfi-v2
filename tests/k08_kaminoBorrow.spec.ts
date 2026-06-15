@@ -31,7 +31,7 @@ import {
 import { assert } from "chai";
 import { processBankrunTransaction } from "./utils/tools";
 import { getTokenBalance } from "./utils/genericTests";
-import { Clock, ProgramTestContext } from "solana-bankrun";
+import { Clock, ProgramTestContext } from "./utils/litesvm";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import { getEpochAndSlot } from "./utils/bankrunConnection";
 import { deriveGlobalConfig, deriveLendingMarketAuthority } from "./utils/pdas";

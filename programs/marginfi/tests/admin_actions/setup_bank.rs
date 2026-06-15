@@ -24,7 +24,8 @@ use solana_program_test::*;
 use solana_sdk::{
     clock::Clock, instruction::Instruction, pubkey::Pubkey, transaction::Transaction,
 };
-use solana_sdk::{signature::Keypair, signer::Signer, system_program};
+use solana_sdk::{signature::Keypair, signer::Signer};
+use solana_system_interface::program as system_program;
 use test_case::test_case;
 
 fn derive_seeded_bank(group: Pubkey, mint: Pubkey, bank_seed: u64) -> Pubkey {
@@ -39,36 +40,25 @@ fn derive_bank_metadata(bank: Pubkey) -> Pubkey {
     Pubkey::find_program_address(&[METADATA_SEED.as_bytes(), bank.as_ref()], &marginfi::ID).0
 }
 
-fn make_init_bank_metadata_ix(
-    group: Pubkey,
-    bank_mint: Pubkey,
-    bank: Pubkey,
-    fee_payer: Pubkey,
-    metadata: Pubkey,
-    bank_seed: u64,
-) -> Instruction {
+fn make_init_bank_metadata_ix(bank: Pubkey, fee_payer: Pubkey, metadata: Pubkey) -> Instruction {
     Instruction {
         program_id: marginfi::ID,
         accounts: marginfi::accounts::InitBankMetadata {
-            group,
-            bank_mint,
             bank,
             fee_payer,
             metadata,
             system_program: system_program::id(),
         }
         .to_account_metas(Some(true)),
-        data: marginfi::instruction::InitBankMetadata { bank_seed }.data(),
+        data: marginfi::instruction::InitBankMetadata {}.data(),
     }
 }
 
 fn make_write_bank_metadata_ix(
     group: Pubkey,
-    bank_mint: Pubkey,
     bank: Pubkey,
     metadata_admin: Pubkey,
     metadata: Pubkey,
-    bank_seed: u64,
     ticker: Option<Vec<u8>>,
     description: Option<Vec<u8>>,
 ) -> Instruction {
@@ -76,14 +66,12 @@ fn make_write_bank_metadata_ix(
         program_id: marginfi::ID,
         accounts: marginfi::accounts::WriteBankMetadata {
             group,
-            bank_mint,
             bank,
             metadata_admin,
             metadata,
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::WriteBankMetadata {
-            bank_seed,
             ticker,
             description,
         }
@@ -445,30 +433,57 @@ async fn backfill_is_t22_noop_for_classic_bank() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn init_and_write_bank_metadata_for_seeded_bank_before_bank_init_success(
-) -> anyhow::Result<()> {
+async fn init_bank_metadata_for_pre_init_bank_success() -> anyhow::Result<()> {
+    // The bank account does not exist yet — init_bank_metadata accepts any pubkey and the caller
+    // is on the hook for the rent if the bank never materializes. write_bank_metadata is NOT
+    // tested here because it requires the bank account to exist.
     let test_f = TestFixture::new(None).await;
     let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
-    let bank_seed = 42_u64;
-    let bank = derive_seeded_bank(test_f.marginfi_group.key, mint_f.key, bank_seed);
+    let bank = derive_seeded_bank(test_f.marginfi_group.key, mint_f.key, 42);
     let metadata = derive_bank_metadata(bank);
     let payer = test_f.context.borrow().payer.pubkey();
 
-    let init_ix = make_init_bank_metadata_ix(
-        test_f.marginfi_group.key,
-        mint_f.key,
-        bank,
-        payer,
-        metadata,
-        bank_seed,
+    let init_ix = make_init_bank_metadata_ix(bank, payer, metadata);
+
+    let tx = Transaction::new_signed_with_payer(
+        &[init_ix],
+        Some(&payer),
+        &[&test_f.context.borrow().payer],
+        latest_blockhash(&test_f.context).await,
     );
+
+    test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(tx)
+        .await?;
+
+    let metadata_state: BankMetadata = test_f.load_and_deserialize(&metadata).await;
+    assert_eq!(metadata_state.bank, bank);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn init_and_write_bank_metadata_for_existing_bank_success() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+
+    let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
+    let bank_f = test_f
+        .marginfi_group
+        .try_lending_pool_add_bank(&mint_f, None, *DEFAULT_USDC_TEST_BANK_CONFIG, None)
+        .await?;
+
+    let metadata = derive_bank_metadata(bank_f.key);
+    let payer = test_f.context.borrow().payer.pubkey();
+
+    let init_ix = make_init_bank_metadata_ix(bank_f.key, payer, metadata);
     let write_ix = make_write_bank_metadata_ix(
         test_f.marginfi_group.key,
-        mint_f.key,
-        bank,
+        bank_f.key,
         payer,
         metadata,
-        bank_seed,
         Some(b"USDC".to_vec()),
         Some(b"USD Coin".to_vec()),
     );
@@ -488,7 +503,7 @@ async fn init_and_write_bank_metadata_for_seeded_bank_before_bank_init_success(
         .await?;
 
     let metadata_state: BankMetadata = test_f.load_and_deserialize(&metadata).await;
-    assert_eq!(metadata_state.bank, bank);
+    assert_eq!(metadata_state.bank, bank_f.key);
     assert_eq!(&metadata_state.ticker[..4], b"USDC");
     assert_eq!(&metadata_state.description[..8], b"USD Coin");
 
@@ -496,26 +511,38 @@ async fn init_and_write_bank_metadata_for_seeded_bank_before_bank_init_success(
 }
 
 #[tokio::test]
-async fn init_bank_metadata_rejects_cross_group_seed_squatting() -> anyhow::Result<()> {
+async fn write_bank_metadata_rejects_uninitialized_bank() -> anyhow::Result<()> {
     let test_f = TestFixture::new(None).await;
-    let attacker_group = MarginfiGroupFixture::new(test_f.context.clone()).await;
     let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
-    let bank_seed = 7_u64;
-    let victim_bank = derive_seeded_bank(test_f.marginfi_group.key, mint_f.key, bank_seed);
-    let metadata = derive_bank_metadata(victim_bank);
+    let bank = derive_seeded_bank(test_f.marginfi_group.key, mint_f.key, 99);
+    let metadata = derive_bank_metadata(bank);
     let payer = test_f.context.borrow().payer.pubkey();
 
-    let init_ix = make_init_bank_metadata_ix(
-        attacker_group.key,
-        mint_f.key,
-        victim_bank,
+    // init succeeds for any pubkey; write must reject because the bank account does not exist.
+    let init_ix = make_init_bank_metadata_ix(bank, payer, metadata);
+    let init_tx = Transaction::new_signed_with_payer(
+        &[init_ix],
+        Some(&payer),
+        &[&test_f.context.borrow().payer],
+        latest_blockhash(&test_f.context).await,
+    );
+    test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(init_tx)
+        .await?;
+
+    let write_ix = make_write_bank_metadata_ix(
+        test_f.marginfi_group.key,
+        bank,
         payer,
         metadata,
-        bank_seed,
+        Some(b"BAD".to_vec()),
+        None,
     );
-
-    let tx = Transaction::new_signed_with_payer(
-        &[init_ix],
+    let write_tx = Transaction::new_signed_with_payer(
+        &[write_ix],
         Some(&payer),
         &[&test_f.context.borrow().payer],
         latest_blockhash(&test_f.context).await,
@@ -525,43 +552,38 @@ async fn init_bank_metadata_rejects_cross_group_seed_squatting() -> anyhow::Resu
         .context
         .borrow_mut()
         .banks_client
-        .process_transaction(tx)
+        .process_transaction(write_tx)
         .await;
 
     assert_anchor_error!(
         res.unwrap_err(),
-        anchor_lang::error::ErrorCode::ConstraintSeeds
+        anchor_lang::error::ErrorCode::AccountOwnedByWrongProgram
     );
 
     Ok(())
 }
 
 #[tokio::test]
-async fn write_bank_metadata_rejects_cross_group_seed_squatting() -> anyhow::Result<()> {
+async fn write_bank_metadata_rejects_wrong_group() -> anyhow::Result<()> {
     let test_f = TestFixture::new(None).await;
     let attacker_group = MarginfiGroupFixture::new(test_f.context.clone()).await;
+
     let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
-    let bank_seed = 8_u64;
-    let victim_bank = derive_seeded_bank(test_f.marginfi_group.key, mint_f.key, bank_seed);
-    let metadata = derive_bank_metadata(victim_bank);
+    let bank_f = test_f
+        .marginfi_group
+        .try_lending_pool_add_bank(&mint_f, None, *DEFAULT_USDC_TEST_BANK_CONFIG, None)
+        .await?;
+
+    let metadata = derive_bank_metadata(bank_f.key);
     let payer = test_f.context.borrow().payer.pubkey();
 
-    let init_ix = make_init_bank_metadata_ix(
-        test_f.marginfi_group.key,
-        mint_f.key,
-        victim_bank,
-        payer,
-        metadata,
-        bank_seed,
-    );
-
+    let init_ix = make_init_bank_metadata_ix(bank_f.key, payer, metadata);
     let init_tx = Transaction::new_signed_with_payer(
         &[init_ix],
         Some(&payer),
         &[&test_f.context.borrow().payer],
         latest_blockhash(&test_f.context).await,
     );
-
     test_f
         .context
         .borrow_mut()
@@ -569,13 +591,13 @@ async fn write_bank_metadata_rejects_cross_group_seed_squatting() -> anyhow::Res
         .process_transaction(init_tx)
         .await?;
 
+    // Bank belongs to test_f.marginfi_group; write with attacker_group must fail the bank's
+    // `has_one = group` constraint.
     let write_ix = make_write_bank_metadata_ix(
         attacker_group.key,
-        mint_f.key,
-        victim_bank,
+        bank_f.key,
         payer,
         metadata,
-        bank_seed,
         Some(b"BAD".to_vec()),
         None,
     );
@@ -596,7 +618,7 @@ async fn write_bank_metadata_rejects_cross_group_seed_squatting() -> anyhow::Res
 
     assert_anchor_error!(
         res.unwrap_err(),
-        anchor_lang::error::ErrorCode::ConstraintSeeds
+        anchor_lang::error::ErrorCode::ConstraintHasOne
     );
 
     Ok(())

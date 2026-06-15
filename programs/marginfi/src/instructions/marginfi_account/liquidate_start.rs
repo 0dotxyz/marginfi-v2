@@ -12,7 +12,7 @@ use crate::{
         get_health_components, write_liquidation_price_cache_from, MarginfiAccountImpl,
     },
 };
-use anchor_lang::{prelude::*, solana_program::sysvar};
+use anchor_lang::prelude::*;
 use bytemuck::Zeroable;
 use drift_mocks::drift::client::args as drift;
 use juplend_mocks::juplend_earn::client::args as juplend;
@@ -37,7 +37,7 @@ use marginfi_type_crate::{
 ///   currently CB-halted. Admins should use `start_deleverage` or `lending_account_liquidate`
 ///   instead — both accept admin/risk_admin during a halt.
 pub fn start_liquidation<'info>(
-    ctx: Context<'_, '_, 'info, 'info, StartLiquidation<'info>>,
+    ctx: Context<'info, StartLiquidation<'info>>,
 ) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
@@ -68,9 +68,7 @@ pub fn start_liquidation<'info>(
 /// * Fails if the start deleverage instruction appears more than once in this tx.
 /// * Fails if any mrgn instruction other than start, end, withdraw, or repay (or the equivalent
 ///   from a third party integration) are used within this tx.
-pub fn start_deleverage<'info>(
-    ctx: Context<'_, '_, 'info, 'info, StartDeleverage<'info>>,
-) -> MarginfiResult {
+pub fn start_deleverage<'info>(ctx: Context<'info, StartDeleverage<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     liq_record.liquidation_receiver = ctx.accounts.risk_admin.key();
@@ -242,9 +240,9 @@ pub struct StartLiquidation<'info> {
 
     /// CHECK: validated against known hard-coded sysvar key
     #[account(
-        address = sysvar::instructions::id()
+        address = solana_instructions_sysvar::id()
     )]
-    pub instruction_sysvar: AccountInfo<'info>,
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 impl Hashable for StartLiquidation<'_> {
@@ -287,9 +285,9 @@ pub struct StartDeleverage<'info> {
 
     /// CHECK: validated against known hard-coded sysvar key
     #[account(
-        address = sysvar::instructions::id()
+        address = solana_instructions_sysvar::id()
     )]
-    pub instruction_sysvar: AccountInfo<'info>,
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 impl Hashable for StartDeleverage<'_> {

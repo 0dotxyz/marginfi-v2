@@ -16,18 +16,18 @@ use {
         },
         types::{Bank, MarginfiAccount, OracleSetup},
     },
+    solana_address_lookup_table_interface::state::AddressLookupTable,
     solana_client::rpc_client::RpcClient,
+    solana_compute_budget_interface::ComputeBudgetInstruction,
     solana_sdk::{
-        address_lookup_table::{state::AddressLookupTable, AddressLookupTableAccount},
-        compute_budget::ComputeBudgetInstruction,
         hash::{hash, hashv},
         instruction::{AccountMeta, Instruction},
-        message::{v0, VersionedMessage},
+        message::{v0, AddressLookupTableAccount, VersionedMessage},
         pubkey::Pubkey,
         signature::{Keypair, Signature},
-        system_instruction,
         transaction::VersionedTransaction,
     },
+    solana_system_interface::instruction as system_instruction,
     std::collections::HashMap,
 };
 

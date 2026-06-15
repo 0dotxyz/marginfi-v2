@@ -127,7 +127,7 @@ pub fn lending_pool_emissions_deposit(
 
     transfer_checked(
         CpiContext::new(
-            ctx.accounts.token_program.to_account_info(),
+            ctx.accounts.token_program.key(),
             TransferChecked {
                 from: ctx.accounts.emissions_funding_account.to_account_info(),
                 to: ctx.accounts.liquidity_vault.to_account_info(),
@@ -184,7 +184,7 @@ pub struct LendingPoolEmissionsDeposit<'info> {
     ///
     /// CHECK: Account provided only for funding rewards
     #[account(mut)]
-    pub emissions_funding_account: AccountInfo<'info>,
+    pub emissions_funding_account: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub depositor: Signer<'info>,

@@ -9,7 +9,6 @@ use crate::{
     state::marginfi_account::{check_account_init_health, MarginfiAccountImpl},
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::sysvar::{self, instructions};
 use marginfi_type_crate::{
     constants::ix_discriminators::END_FLASHLOAN,
     types::{
@@ -17,6 +16,7 @@ use marginfi_type_crate::{
         ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
+use solana_instructions_sysvar::load_instruction_at_checked;
 
 pub fn lending_account_start_flashloan(
     ctx: Context<LendingAccountStartFlashloan>,
@@ -54,8 +54,8 @@ pub struct LendingAccountStartFlashloan<'info> {
     pub authority: Signer<'info>,
 
     /// CHECK: Instructions sysvar
-    #[account(address = sysvar::instructions::ID)]
-    pub ixs_sysvar: AccountInfo<'info>,
+    #[account(address = solana_instructions_sysvar::ID)]
+    pub ixs_sysvar: UncheckedAccount<'info>,
 }
 
 const END_FL_IX_MARGINFI_ACCOUNT_AI_IDX: usize = 0;
@@ -82,7 +82,7 @@ pub fn check_flashloan_can_start(
     validate_not_cpi_by_stack_height()?;
 
     // Will error if ix doesn't exist
-    let unchecked_end_fl_ix = instructions::load_instruction_at_checked(end_fl_idx, sysvar_ixs)?;
+    let unchecked_end_fl_ix = load_instruction_at_checked(end_fl_idx, sysvar_ixs)?;
 
     let discrim = &unchecked_end_fl_ix.data[..8];
     if discrim != END_FLASHLOAN {
@@ -111,7 +111,7 @@ pub fn check_flashloan_can_start(
 }
 
 pub fn lending_account_end_flashloan<'info>(
-    ctx: Context<'_, '_, 'info, 'info, LendingAccountEndFlashloan<'info>>,
+    ctx: Context<'info, LendingAccountEndFlashloan<'info>>,
 ) -> MarginfiResult<()> {
     validate_not_cpi_by_stack_height()?;
 

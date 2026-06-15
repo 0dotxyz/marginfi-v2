@@ -29,15 +29,7 @@ pub enum BankCommand {
         amount: u64,
     },
     /// Initialize the on-chain metadata PDA for a bank (permissionless rent payment)
-    InitMetadata {
-        bank_pk: String,
-        #[clap(long, help = "Required when the bank account does not yet exist")]
-        group: Option<Pubkey>,
-        #[clap(long, help = "Required when the bank account does not yet exist")]
-        mint: Option<Pubkey>,
-        #[clap(long, help = "Canonical bank seed", required = true)]
-        seed: u64,
-    },
+    InitMetadata { bank_pk: String },
     /// Dump bank metadata PDAs and decoded on-chain metadata to a local JSON file
     DumpMetadata {
         #[clap(long, help = "Optional group to filter source banks by")]
@@ -106,14 +98,9 @@ pub fn dispatch(subcmd: BankCommand, global_options: &GlobalOptions) -> Result<(
             let bank_pk = super::resolve_bank_for_group(&bank_pk, profile.marginfi_group)?;
             processor::bank_withdraw_fees_permissionless(config, bank_pk, amount)
         }
-        BankCommand::InitMetadata {
-            bank_pk,
-            group,
-            mint,
-            seed,
-        } => {
+        BankCommand::InitMetadata { bank_pk } => {
             let bank_pk = super::resolve_bank_for_group(&bank_pk, profile.marginfi_group)?;
-            processor::bank_init_metadata(config, bank_pk, group, mint, seed)
+            processor::bank_init_metadata(config, bank_pk)
         }
         BankCommand::DumpMetadata {
             group,

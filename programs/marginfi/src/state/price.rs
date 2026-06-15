@@ -4,8 +4,7 @@ use crate::constants::{
 use crate::state::bank_config::BankConfigImpl;
 use crate::{check, check_eq, debug, math_error, prelude::*};
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{borsh1::try_from_slice_unchecked, stake::state::StakeStateV2};
-use anchor_spl::token::Mint;
+use anchor_spl::token::{Mint, ID as SPL_TOKEN_PROGRAM_ID};
 use drift_mocks::constants::SPOT_CUMULATIVE_INTEREST_PRECISION;
 use drift_mocks::state::MinimalSpotMarket;
 use enum_dispatch::enum_dispatch;
@@ -23,18 +22,20 @@ use marginfi_type_crate::{
         OracleSetup, PriceBias,
     },
 };
-use pyth_solana_receiver_sdk::price_update::{self, FeedId, PriceUpdateV2};
-use pyth_solana_receiver_sdk::PYTH_PUSH_ORACLE_ID;
+use pyth_solana_receiver_sdk::{
+    price_update::{self, FeedId, PriceUpdateV2},
+    PYTH_PUSH_ORACLE_ID,
+};
+use solana_borsh::v1::try_from_slice_unchecked;
+use solana_stake_interface::state::StakeStateV2;
 use solend_mocks::state::SolendMinimalReserve;
 use std::{cell::Ref, cmp::min};
-use switchboard_on_demand::{
-    CurrentResult, Discriminator, PullFeedAccountData, SPL_TOKEN_PROGRAM_ID,
-};
+use switchboard_on_demand::{CurrentResult, Discriminator, PullFeedAccountData};
 
 /// Price per unit before any multipliers are applied, where `price_multiplier` shows what
 /// multipliers will be applied to generate the true deposited-token price.
 /// * Example: a Staked Collateral bank with an exchange rate of 2 for stake/sol and a price of $50
-/// for SOL will show $50 here, and multiplier will be 2.
+///   for SOL will show $50 here, and multiplier will be 2.
 /// * For any bank that does not have a multiplier, `price_multiplier = 1` and `oracle_price`
 ///   matches the adjusted value.
 #[derive(Copy, Clone, Debug)]
@@ -1004,7 +1005,9 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::StakedWithPythPush => {
-                if lst_mint.is_some() && stake_pool.is_some() && sol_pool.is_some() {
+                if let (Some(lst_mint), Some(stake_pool), Some(sol_pool)) =
+                    (lst_mint, stake_pool, sol_pool)
+                {
                     check!(
                         oracle_ais.len() == 3,
                         MarginfiError::WrongNumberOfOracleAccounts
@@ -1012,10 +1015,6 @@ impl OraclePriceFeedAdapter {
 
                     check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                     load_price_update_v2_checked(&oracle_ais[0])?;
-
-                    let lst_mint = lst_mint.unwrap();
-                    let stake_pool = stake_pool.unwrap();
-                    let sol_pool = sol_pool.unwrap();
 
                     let program_id = &SPL_SINGLE_POOL_ID;
                     let stake_pool_bytes = &stake_pool.to_bytes();
@@ -1425,7 +1424,7 @@ pub fn parse_swb_ignore_alignment(data: Ref<&mut [u8]>) -> MarginfiResult<PullFe
         return err!(MarginfiError::SwitchboardInvalidAccount);
     }
 
-    if data[..8] != PullFeedAccountData::DISCRIMINATOR {
+    if &data[..8] != PullFeedAccountData::DISCRIMINATOR {
         return err!(MarginfiError::SwitchboardInvalidAccount);
     }
 
@@ -1458,8 +1457,8 @@ pub fn load_price_update_v2_checked(ai: &AccountInfo) -> MarginfiResult<PriceUpd
 
 #[cfg_attr(feature = "client", derive(Clone, Debug))]
 pub struct PythPushOraclePriceFeed {
-    ema_price: Box<pyth_solana_receiver_sdk::price_update::Price>,
-    price: Box<pyth_solana_receiver_sdk::price_update::Price>,
+    ema_price: Box<price_update::Price>,
+    price: Box<price_update::Price>,
 }
 
 impl PythPushOraclePriceFeed {
@@ -1499,7 +1498,7 @@ impl PythPushOraclePriceFeed {
                 ..
             } = price_feed_account.price_message;
 
-            pyth_solana_receiver_sdk::price_update::Price {
+            price_update::Price {
                 price: ema_price,
                 conf: ema_conf,
                 exponent,
@@ -1534,7 +1533,7 @@ impl PythPushOraclePriceFeed {
                 ..
             } = price_feed_account.price_message;
 
-            pyth_solana_receiver_sdk::price_update::Price {
+            price_update::Price {
                 price: ema_price,
                 conf: ema_conf,
                 exponent,
@@ -1758,8 +1757,6 @@ mod tests {
     use super::*;
 
     use anchor_lang::solana_program::account_info::AccountInfo;
-    use std::cell::RefCell;
-    use std::rc::Rc;
 
     #[test]
     fn swb_pull_get_price_1() {
@@ -1771,16 +1768,15 @@ mod tests {
         let mut lamports = 1_000_000u64;
         let mut data = bytes.clone();
 
-        let ai = AccountInfo {
-            key: &key,
-            lamports: Rc::new(RefCell::new(&mut lamports)),
-            data: Rc::new(RefCell::new(&mut data[..])),
-            owner: &SWITCHBOARD_PULL_ID,
-            rent_epoch: 361,
-            is_signer: false,
-            is_writable: true,
-            executable: false,
-        };
+        let ai = AccountInfo::new(
+            &key,
+            false,
+            true,
+            &mut lamports,
+            &mut data[..],
+            &SWITCHBOARD_PULL_ID,
+            false,
+        );
 
         let ai_check = SwitchboardPullPriceFeed::check_ais(&ai);
         assert!(ai_check.is_ok());
@@ -1838,16 +1834,15 @@ mod tests {
         let mut lamports = 1_000_000u64;
         let mut data = bytes.clone();
 
-        let ai = AccountInfo {
-            key: &key,
-            lamports: Rc::new(RefCell::new(&mut lamports)),
-            data: Rc::new(RefCell::new(&mut data[..])),
-            owner: &SWITCHBOARD_PULL_ID,
-            rent_epoch: 361,
-            is_signer: false,
-            is_writable: true,
-            executable: false,
-        };
+        let ai = AccountInfo::new(
+            &key,
+            false,
+            true,
+            &mut lamports,
+            &mut data[..],
+            &SWITCHBOARD_PULL_ID,
+            false,
+        );
 
         let ai_check = SwitchboardPullPriceFeed::check_ais(&ai);
         assert!(ai_check.is_ok());
@@ -1902,19 +1897,19 @@ mod tests {
         // conf/Std_dev ~$8.1619e-8
         let bytes = hex_to_bytes("22f123639d7ef4cdb4eacbe402ae9165c2ab7dfcdbe5044d27f284106f88a90bfddefa5fbff60ca00172b021217ca3fe68922a19aaf990109cb9d84e9ad004b4d2025ad6f529314419fd510500000000006501000000000000f6ffffff29bc80680000000029bc806800000000af56050000000000810100000000000058d32b150000000000");
         let key = pubkey!("DBE3N8uNjhKPRHfANdwGvCZghWXyLPdqdSbEW2XFwBiX");
+        let owner = pyth_solana_receiver_sdk::id();
         let mut lamports = 1_000_000u64;
         let mut data = bytes.clone();
 
-        let ai = AccountInfo {
-            key: &key,
-            lamports: Rc::new(RefCell::new(&mut lamports)),
-            data: Rc::new(RefCell::new(&mut data[..])),
-            owner: &pyth_solana_receiver_sdk::id(),
-            rent_epoch: 361,
-            is_signer: false,
-            is_writable: true,
-            executable: false,
-        };
+        let ai = AccountInfo::new(
+            &key,
+            false,
+            true,
+            &mut lamports,
+            &mut data[..],
+            &owner,
+            false,
+        );
 
         let max_age = 100;
         let feed: PythPushOraclePriceFeed =

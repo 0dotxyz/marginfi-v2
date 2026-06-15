@@ -277,6 +277,11 @@ pub fn validate_bank_state(
     if bank.config.operational_state == BankOperationalState::KilledByBankruptcy {
         return err!(MarginfiError::BankKilledByBankruptcy);
     }
+    // Bank exists but has not completed one-time setup (e.g. JupLend seed deposit). Block every
+    // operation until init runs.
+    if bank.config.operational_state == BankOperationalState::Uninitialized {
+        return err!(MarginfiError::BankUninitialized);
+    }
 
     // A temporal CB halt and the non-expiring `CircuitBroken` end state both block any action
     // that isn't halt-safe (borrows, risk-carrying withdraws).
@@ -286,8 +291,15 @@ pub fn validate_bank_state(
     }
 
     // For a `CircuitBroken` bank this resolves to the pre-break state; otherwise it is just
-    // `operational_state`. Never `CircuitBroken` or `KilledByBankruptcy` here.
+    // `operational_state`.
     let effective_state = bank.cb_effective_operational_state();
+    if effective_state == BankOperationalState::KilledByBankruptcy {
+        return err!(MarginfiError::BankKilledByBankruptcy);
+    }
+    if effective_state == BankOperationalState::Uninitialized {
+        return err!(MarginfiError::BankUninitialized);
+    }
+
     match kind {
         InstructionKind::FailsInReduceState
             if effective_state == BankOperationalState::ReduceOnly =>

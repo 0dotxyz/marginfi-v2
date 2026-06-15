@@ -22,7 +22,7 @@ import {
 import { assert } from "chai";
 import { MockUser, USER_ACCOUNT_K } from "./utils/mocks";
 import { processBankrunTransaction } from "./utils/tools";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./utils/litesvm";
 import { makeKaminoWithdrawIx } from "./utils/kamino-instructions";
 import { composeRemainingAccounts } from "./utils/user-instructions";
 import { assertBNApproximately, getTokenBalance, assertBankrunTxFailed } from "./utils/genericTests";

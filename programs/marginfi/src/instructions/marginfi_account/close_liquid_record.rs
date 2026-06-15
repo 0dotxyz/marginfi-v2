@@ -89,7 +89,7 @@ pub struct CloseLiquidationRecord<'info> {
             record.record_payer == record_payer.key()
         } @ MarginfiError::Unauthorized
     )]
-    pub record_payer: AccountInfo<'info>,
+    pub record_payer: UncheckedAccount<'info>,
 }
 
 impl Hashable for CloseLiquidationRecord<'_> {

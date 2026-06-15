@@ -1,6 +1,6 @@
 use std::{fs::File, io::Read, path::PathBuf, str::FromStr};
 
-use anchor_lang::solana_program::pubkey;
+use anchor_lang::pubkey;
 use anchor_lang::AccountDeserialize;
 use anyhow::bail;
 use base64::{prelude::BASE64_STANDARD, Engine};

@@ -28,7 +28,7 @@ pub struct SwapLikeJupiter<'info> {
 
 impl<'info> SwapLikeJupiter<'info> {
     pub fn swap_like_jup(
-        ctx: Context<'_, '_, '_, 'info, SwapLikeJupiter<'info>>,
+        ctx: Context<'info, SwapLikeJupiter<'info>>,
         amt_a: u64,
         amt_b: u64,
     ) -> Result<()> {
@@ -54,7 +54,7 @@ impl<'info> SwapLikeJupiter<'info> {
 impl<'info> SwapLikeJupiter<'info> {
     fn transfer_a_to_pool(&self) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
         CpiContext::new(
-            self.token_program.to_account_info(),
+            self.token_program.key(),
             Transfer {
                 from: self.source_a.to_account_info(),
                 to: self.pool_a.to_account_info(),
@@ -64,7 +64,7 @@ impl<'info> SwapLikeJupiter<'info> {
     }
     fn transfer_b_to_user(&self) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
         CpiContext::new(
-            self.token_program.to_account_info(),
+            self.token_program.key(),
             Transfer {
                 from: self.pool_b.to_account_info(),
                 to: self.destination_b.to_account_info(),

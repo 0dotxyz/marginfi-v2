@@ -1,6 +1,7 @@
 name: Test
 
 on:
+  workflow_dispatch:
   push:
     branches:
     - main
@@ -14,11 +15,20 @@ defaults:
     working-directory: .
 
 env:
-  RUST_TOOLCHAIN: 1.79.0
-  SOLANA_CLI_VERSION: 2.1.20
-  ANCHOR_CLI_VERSION: 0.31.1
-  ANCHOR_SHA: e6d7dafe12da661a36ad1b4f3b5970e8986e5321
+  RUST_TOOLCHAIN: 1.90.0
+  SOLANA_CLI_VERSION: 3.1.13
+  ANCHOR_CLI_VERSION: 1.0.2
   CARGO_TERM_COLOR: always
+  # Trident-stack-only env. Kept here so the whole file shares one
+  # convention; the libfuzzer + anchor stacks ignore these.
+  TRIDENT_VERSION: "0.13.0-rc.4"
+  # `anchor idl build` writes `"address": ""` (Anchor 0.30+ moved the
+  # address out of the source). Trident bakes the address into
+  # `types::<program>::program_id()`, so the IDL-drift check patches
+  # it back to the canonical pubkey before refreshing — otherwise
+  # the regenerated types.rs would always show a diff.
+  MARGINFI_PROGRAM_ID: "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA"
+  MOCKS_PROGRAM_ID: "rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ"
 
 concurrency:
   group: build-${{ github.event.pull_request.number || github.ref }}
@@ -27,9 +37,9 @@ concurrency:
 jobs:
   lint:
     name: Rust Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/base-setup/
       with:
         include-anchor: "false"
@@ -38,58 +48,127 @@ jobs:
 
   test-unit:
     name: Rust Unit Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/base-setup/
       with:
         include-anchor: "false"
     - run: cargo test --lib
 
-  build-and-test-workspace:
-    name: Build & Test Anchor Programs
-    runs-on: ubuntu-latest
-    needs: [ test-unit ]
+  # Shared Anchor build — runs in parallel with lint / test-unit /
+  # trident-build. Produces:
+  #
+  #   target/sbf/deploy/*.so     – mainnet-ID workspace build, for Rust
+  #                                 nextest integration tests
+  #   target/deploy/marginfi.so   – LOCALNET-ID marginfi (via the
+  #                                 `--no-default-features --features
+  #                                 custom-heap` build flag), for the
+  #                                 TS bankrun stack
+  #   target/deploy/mocks.so      – no ID variation, for TS bankrun
+  #   target/deploy/test_transfer_hook.so – no ID variation, for TS bankrun
+  #   target/idl/*.json           – IDLs for both stacks. Address fields
+  #                                 reflect whichever variant was built
+  #                                 last (localnet for marginfi.json,
+  #                                 default for mocks.json). TS bankrun
+  #                                 uses them as-is; trident patches the
+  #                                 address downstream before regen.
+  #   target/types/*.ts           – TS bindings for bankrun
+  #
+  # Why the two-pass marginfi build: CLAUDE.md notes the program ID is
+  # baked into the `.so` via features (`custom-heap` ⇒ localnet ID,
+  # default ⇒ mainnet ID). One physical file can't satisfy both, so
+  # `build-workspace.sh` produces the mainnet variant into
+  # `target/sbf/deploy/` and the second `anchor build` produces the
+  # localnet variant into `target/deploy/`.
+  anchor-build:
+    name: Anchor build (shared artifact)
+    runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/base-setup/
-    - name: Cache Anchor SBF build
-      uses: actions/cache@v3
+    - name: Cache Anchor SBF build (mainnet workspace)
+      uses: actions/cache@v4
       with:
         path: |
           target/sbf
-        key: anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}
+        key: anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}
         restore-keys: |
           anchor-sbf-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-
+    - name: Cache Anchor localnet build (TS bankrun consumers)
+      uses: actions/cache@v4
+      with:
+        path: |
+          target/deploy
+          target/idl
+          target/types
+        key: anchor-localnet-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', 'programs/**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/**/src/**') }}
+        restore-keys: |
+          anchor-localnet-${{ runner.os }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.ANCHOR_SHA }}-
+    - name: Build workspace (mainnet IDs → target/sbf/)
+      uses: ./.github/actions/build-workspace/
+    - name: Build mocks (target/deploy/)
+      run: anchor build -p mocks --ignore-keys
+    - name: Build transfer-hook (target/deploy/)
+      run: anchor build -p test_transfer_hook --no-idl
+    - name: Build marginfi localnet (target/deploy/)
+      run: anchor build -p marginfi -- --no-default-features --features custom-heap
+    - name: Upload anchor-build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: anchor-build
+        path: |
+          target/sbf/deploy/*.so
+          target/deploy/*.so
+          target/idl/*.json
+          target/types/*.ts
+        retention-days: 1
+
+  test-anchor-programs:
+    name: Test Anchor Programs (rust integration)
+    runs-on: ubuntu-24.04
+    needs: [ test-unit, anchor-build ]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: ./.github/actions/base-setup/
+    - name: Download anchor-build artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: anchor-build
+        path: target
+    # nextest reads `SBF_OUT_DIR=target/sbf/deploy` (set by
+    # `scripts/test-program.sh`). The artifact's `target/sbf/deploy/*.so`
+    # paths arrive intact thanks to the path-glob upload — no
+    # flattening to undo. `target/deploy/*.so` (the localnet variants
+    # used by bankrun) also land in the download but are unused here.
     - name: Cache nextest host build
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           target/host
         key: nextest-host-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml', 'programs/**/src/**', 'programs/**/tests/**', 'test-utils/**') }}
         restore-keys: |
           nextest-host-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-
-    # TODO cache transfer hook and mocks here instead of rebuilding them each time...
-    - uses: ./.github/actions/build-workspace/
-    # ─── Cache cargo-nextest ─────────────────────────────────────────────
     - name: Cache cargo-nextest binary
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-nextest
       with:
         path: ~/.cargo/bin/cargo-nextest
         key: cargo-nextest-${{ runner.os }}-v0.9.81
-
     - name: Install cargo-nextest
       if: steps.cache-nextest.outputs.cache-hit != 'true'
-      run: |
-        cargo install cargo-nextest --version "0.9.81" --locked
+      run: cargo install cargo-nextest --version "0.9.81" --locked
       shell: bash
-
     - run: ./scripts/test-program.sh all
 
-  fuzz:
-    name: Fuzz The marginfi Program
-    runs-on: ubuntu-latest
+
+  fuzz-libfuzzer:
+    name: Fuzz (libfuzzer)
+    # In-process coverage-guided fuzzing on the `lend` target. Runs in
+    # parallel with `fuzz-trident` below; they exercise different
+    # surfaces. libfuzzer = raw byte-level coverage feedback;
+    # trident = state-machine + structured invariants.
+    runs-on: ubuntu-24.04
     needs: [ test-unit ]
     defaults:
       run:
@@ -97,11 +176,11 @@ jobs:
         working-directory: ./programs/marginfi/fuzz
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     # ─── Cache Cargo registry ─────────────────────────────────────────────
     - name: Cache Cargo registry & index
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-cargo-registry
       with:
         path: |
@@ -112,27 +191,27 @@ jobs:
 
     # ─── Cache nightly Rust toolchain ───────────────────────────────
     - name: Cache Rust nightly toolchain
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-nightly
       with:
-        path: ~/.rustup/toolchains/nightly-2024-06-05-x86_64-unknown-linux-gnu
-        key: rust-nightly-${{ runner.os }}-nightly-20240605
+        path: ~/.rustup/toolchains/nightly-2025-08-01-x86_64-unknown-linux-gnu
+        key: rust-nightly-${{ runner.os }}-nightly-20250801
 
     - name: Install nightly Rust + rust-src
       if: steps.cache-nightly.outputs.cache-hit != 'true'
       uses: actions-rs/toolchain@v1
       with:
         profile: minimal
-        toolchain: nightly-2024-06-05
+        toolchain: nightly-2025-08-01
         components: rust-src
 
-    # ─── Cache cargo fuzz ----- ─────────────────────────────────────────────
+    # ─── Cache cargo fuzz ─────────────────────────────────────────────
     - name: Cache cargo-fuzz
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-cargo-fuzz
       with:
         path: ~/.cargo/bin/cargo-fuzz
-        key: cargo-fuzz-${{ runner.os }}-nightly-20240605
+        key: cargo-fuzz-${{ runner.os }}-nightly-20250801
 
     - name: Install cargo-fuzz
       if: steps.cache-cargo-fuzz.outputs.cache-hit != 'true'
@@ -140,19 +219,19 @@ jobs:
 
     # ─── Cache compiled fuzz target ─────────────────────────────────────────────
     - name: Cache fuzz target build
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-fuzz-build
       with:
         path: target/fuzz/lend
-        key: fuzz-build-${{ runner.os }}-${{ hashFiles('programs/marginfi/fuzz/**/*.rs') }}
+        key: fuzz-build-${{ runner.os }}-${{ hashFiles('programs/marginfi/fuzz/Cargo.lock', 'programs/marginfi/fuzz/Cargo.toml', 'programs/marginfi/fuzz/**/*.rs') }}
 
     - name: Generate corpus
       run: python ./generate_corpus.py
 
     - name: Run fuzz tests
       run: |
-        cargo +nightly-2024-06-05 fuzz run lend \
-          -Zbuild-std --strip-dead-code --no-cfg-fuzzing \
+        RUST_BACKTRACE=1 cargo +nightly-2025-08-01 fuzz run lend \
+          --strip-dead-code --no-cfg-fuzzing \
             -- -max_total_time=150 \
               -timeout_exitcode=100 \
               -error_exitcode=101 \
@@ -165,12 +244,20 @@ jobs:
       run: echo "✅ Fuzzing completed"
 
   localnet-test-marginfi:
-    name: Anchor Bankrun Tests (Marginfi)
+    name: Anchor LiteSVM Tests
     runs-on: ubuntu-latest
-    needs: [ test-unit ]
+    needs: [ test-unit, anchor-build ]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: ./.github/actions/base-setup/
+
+    - name: Download anchor-build artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: anchor-build
+        # The artifact preserves `target/{sbf/deploy,deploy,idl,types}/`
+        # subdir structure as-uploaded — no layout fix-up needed.
+        path: target
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -185,7 +272,7 @@ jobs:
         node -v
 
     - name: Cache Yarn artifacts
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           .yarn/cache
@@ -204,11 +291,11 @@ jobs:
       id: cache-transfer
       with:
         path: target/deploy/test_transfer_hook.so
-        key: anchor-transfer-hook-${{ runner.os }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('programs/test_transfer_hook/**/*') }}
+        key: anchor-transfer-hook-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', '**/Cargo.toml', 'programs/test_transfer_hook/src/**/*') }}
 
     - name: Build transfer hook
       if: steps.cache-transfer.outputs.cache-hit != 'true'
-      run: anchor build -p test_transfer_hook --no-idl
+      run: anchor build -p test_transfer_hook --no-idl --ignore-keys
 
     # ─── Cache mocks program ─────────────────────────────────────────────
     - name: Cache mocks build & IDL
@@ -219,11 +306,11 @@ jobs:
           target/deploy/mocks.so
           target/idl/mocks.json
           target/types/mocks.ts
-        key: anchor-mocks-${{ runner.os }}-${{ env.ANCHOR_SHA }}-${{ hashFiles('programs/mocks/**/*') }}
+        key: anchor-mocks-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ env.ANCHOR_CLI_VERSION }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Anchor.toml', 'Cargo.lock', '**/Cargo.toml', 'programs/**/Xargo.toml', 'programs/mocks/src/**/*', 'programs/marginfi/src/**/*', 'type-crate/src/**/*', 'id-crate/src/**/*') }}
 
     - name: Build mocks
       if: steps.cache-mocks.outputs.cache-hit != 'true'
-      run: anchor build -p mocks
+      run: anchor build -p mocks --ignore-keys
 
     # ─── Marginfi always builds from scratch ─────────────────────────
     - name: Build marginfi
@@ -262,3 +349,219 @@ jobs:
 
         echo "✅ Tests finished with exit code $CODE"
         exit $CODE
+
+  # ────────────────────────────────────────────────────────────────────
+  # Trident fuzz stack — two jobs (build → fuzz). Both share the same
+  # `if:` guard: only PRs targeting `main` or `*-main` (and manual
+  # `workflow_dispatch`) run them. Daily PRs land on `0.1.9-main`,
+  # release PRs land on `main`. Feature-branch PRs skip the trident
+  # stack entirely; `push: main` skips too (the release PR already ran
+  # it).
+  #
+  # Both jobs override `SOLANA_CLI_VERSION` to `3.1.13` — Trident's
+  # LiteSVM loader needs the SBF v2 binary format introduced in Solana
+  # 3.x. The rest of the workflow stays on 2.1.20 because the JupLend
+  # integration tests don't pass on 3.x yet.
+  # ────────────────────────────────────────────────────────────────────
+
+  trident-build:
+    name: Trident — Build marginfi (SBF v2)
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+        (github.base_ref == 'main' || endsWith(github.base_ref, '-main')))
+    runs-on: ubuntu-24.04
+    env:
+      # Trident's LiteSVM needs the SBF v2 binary format (Solana 3.x).
+      SOLANA_CLI_VERSION: 3.1.13
+    steps:
+    - uses: actions/checkout@v4
+    - uses: ./.github/actions/setup-common/
+    - uses: ./.github/actions/setup-solana-cli/
+    - name: Cache Cargo registry & index
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+        key: trident-cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+    - name: Cache SBF v2 build
+      uses: actions/cache@v4
+      with:
+        path: |
+          target/deploy
+        key: trident-sbf-v2-${{ runner.os }}-${{ env.SOLANA_CLI_VERSION }}-${{ hashFiles('Cargo.lock', 'programs/marginfi/**/Cargo.toml', 'programs/marginfi/**/src/**') }}
+    - name: Build marginfi (SBF v2, mainnet program id)
+      # Trident's LiteSVM loader needs a v2-format `.so`. The artifact
+      # path is `target/deploy/marginfi.so` (mainnet program id baked
+      # in) — distinct from `target/sbf/deploy/marginfi.so` produced by
+      # `build-and-test-workspace`, which is also mainnet-id but built
+      # with anchor's defaults.
+      run: cargo build-sbf --manifest-path programs/marginfi/Cargo.toml --arch v2
+    - name: Upload program artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: trident-program-binaries
+        path: target/deploy/*.so
+        retention-days: 1
+
+  fuzz-trident:
+    name: Fuzz (trident) — ${{ matrix.test.name }}
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+        (github.base_ref == 'main' || endsWith(github.base_ref, '-main')))
+    # Consumes IDLs from `anchor-build` (for the types.rs regen) and
+    # the SBF binary from `trident-build` (for LiteSVM to load).
+    needs: [ anchor-build, trident-build ]
+    runs-on: ubuntu-24.04
+    env:
+      # Same SBF v2 override as `trident-build` so the harness binary
+      # built by that job loads cleanly in LiteSVM here.
+      SOLANA_CLI_VERSION: 3.1.13
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - name: "fuzz_0"
+            target: "fuzz_0"
+    steps:
+    - uses: actions/checkout@v4
+    - uses: ./.github/actions/setup-common/
+    # `anchor-build` ships a LOCALNET-ID marginfi.so at
+    # `target/deploy/marginfi.so` (for TS bankrun) AND `trident-build`
+    # ships a MAINNET-ID marginfi.so at the same path (for Trident's
+    # LiteSVM). To avoid the collision, we extract anchor-build to a
+    # scratch path and lift only the IDLs into `target/idl/`. Trident's
+    # binary then goes to `target/deploy/` with no contention.
+    - name: Download anchor-build (IDLs scratch path)
+      uses: actions/download-artifact@v4
+      with:
+        name: anchor-build
+        path: anchor-build-scratch
+    - name: Stage anchor IDLs
+      run: |
+        mkdir -p target/idl
+        cp anchor-build-scratch/idl/*.json target/idl/
+    - name: Download trident program binary
+      uses: actions/download-artifact@v4
+      with:
+        name: trident-program-binaries
+        path: target/deploy
+    - name: Patch IDL addresses for trident
+      # `anchor-build`'s `marginfi.json` ships a localnet address (the
+      # localnet anchor build was the last step in that job). Trident
+      # pins `types::<program>::program_id()` to whatever's in the
+      # IDL's top-level `address`, so we patch only that back to
+      # mainnet.
+      #
+      # The leading-anchor `^  ` is load-bearing: every per-account
+      # `address` field (system_program, token_program, etc.) is
+      # nested at 10+ spaces of indent; a bare `"address":` regex
+      # would clobber those too and bake the marginfi program ID into
+      # every account-meta slot, causing `InvalidProgramId` (3008) on
+      # the first init ix.
+      run: |
+        sed -i 's|^  "address": "[^"]*"|  "address": "'"${MARGINFI_PROGRAM_ID}"'"|' target/idl/marginfi.json
+        sed -i 's|^  "address": "[^"]*"|  "address": "'"${MOCKS_PROGRAM_ID}"'"|'    target/idl/mocks.json
+    - name: Cache Cargo registry & index
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+        key: trident-fuzz-cargo-${{ runner.os }}-${{ hashFiles('trident-tests/Cargo.lock') }}
+    - name: Cache Trident CLI
+      uses: actions/cache@v4
+      id: cache-trident-cli
+      with:
+        path: ~/.cargo/bin/trident
+        key: trident-cli-v${{ env.TRIDENT_VERSION }}-${{ runner.os }}
+    - name: Install Trident CLI
+      if: steps.cache-trident-cli.outputs.cache-hit != 'true'
+      working-directory: trident-tests
+      run: cargo install trident-cli --version ${{ env.TRIDENT_VERSION }}
+
+    - name: Install nightly rustfmt
+      # `trident fuzz refresh` formats the regenerated `types.rs` with
+      # nightly rustfmt (uses unstable formatting features). Stable
+      # 1.79.0 from `setup-common` doesn't satisfy that.
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+        components: rustfmt
+
+    - name: Regenerate trident types.rs
+      # `types.rs` is gitignored — regenerate from the IDLs we just
+      # downloaded from `anchor-build`. No `--idl-paths` so trident
+      # loads every JSON from `../target/idl/`.
+      working-directory: trident-tests
+      run: trident fuzz refresh fuzz_0 -s
+
+    - name: Set fuzz size
+      id: size
+      # Target-scaled iteration budget. PR target branch decides depth:
+      # version-branch PRs (`0.1.9-main`, …) get 50K — daily dev work.
+      # Release PRs landing on `main` get the full 500K soak — last
+      # gate before the release lands. `workflow_dispatch` falls into
+      # the 10K middle tier for ad-hoc manual runs.
+      #
+      # Note on 500K: extrapolating from local smokes it can approach
+      # GitHub-hosted's 6h job cap. If a real release PR overruns,
+      # drop to 200-300K, or move this job onto a larger runner.
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          if [ "${{ github.base_ref }}" = "main" ]; then
+            echo "iters=500000" >> "$GITHUB_OUTPUT"
+          else
+            echo "iters=50000"  >> "$GITHUB_OUTPUT"
+          fi
+        else
+          echo "iters=10000" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Run regression seeds
+      # Deterministic regression checks run BEFORE the random fuzz so
+      # a known-bad seed fails the job even on the shortest trigger.
+      # Each `.seed` file is one per-iteration seed (as printed in
+      # Trident's `--- Invariant Failures (N) ---` output); we replay
+      # it with `trident fuzz debug`. `fuzz debug` doesn't propagate
+      # non-zero on assertion (Trident 0.13.0-rc.4 limitation), so we
+      # grep the output for "Assertion failed" and fail the step
+      # ourselves.
+      working-directory: trident-tests
+      run: |
+        shopt -s nullglob
+        found=(regression-seeds/*.seed)
+        if [ ${#found[@]} -eq 0 ]; then
+          echo "No regression seeds checked in — skipping."
+          exit 0
+        fi
+        rc=0
+        for f in "${found[@]}"; do
+          name=$(basename "$f" .seed)
+          seed=$(tr -d '[:space:]' < "$f")
+          echo "::group::Regression: $name (seed $seed)"
+          log=$(mktemp)
+          if ! trident fuzz debug ${{ matrix.test.target }} "$seed" 2>&1 | tee "$log"; then
+            echo "::error::Regression seed runner failed: $name"
+            rc=1
+          elif grep -q "Assertion failed" "$log"; then
+            echo "::error file=trident-tests/regression-seeds/${name}.md::Regression FIRED for ${name} (seed ${seed}). See regression-seeds/${name}.md for context."
+            rc=1
+          else
+            echo "✅ $name passed (no assertion fired)"
+          fi
+          echo "::endgroup::"
+        done
+        exit $rc
+
+    - name: Run Fuzz Test
+      working-directory: trident-tests
+      env:
+        FUZZ_ITERATIONS: ${{ steps.size.outputs.iters }}
+        FUZZ_FLOWS_PER_ITER: '50'
+      run: trident fuzz run ${{ matrix.test.target }} -e invariants

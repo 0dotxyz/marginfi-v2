@@ -97,9 +97,9 @@ pub fn lending_pool_clone_bank(
     let fee_vault_authority_bump = ctx.bumps.fee_vault_authority;
 
     let mut bank = ctx.accounts.bank.load_init()?;
-    *bank = Bank::new(
+    bank.init(
         ctx.accounts.marginfi_group.key(),
-        source_config,
+        &source_config,
         source_mint,
         source_mint_decimals,
         ctx.accounts.liquidity_vault.key(),
@@ -187,7 +187,7 @@ pub struct LendingPoolCloneBank<'info> {
         ],
         bump
     )]
-    pub liquidity_vault_authority: AccountInfo<'info>,
+    pub liquidity_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,
@@ -210,7 +210,7 @@ pub struct LendingPoolCloneBank<'info> {
         ],
         bump
     )]
-    pub insurance_vault_authority: AccountInfo<'info>,
+    pub insurance_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,
@@ -233,7 +233,7 @@ pub struct LendingPoolCloneBank<'info> {
         ],
         bump
     )]
-    pub fee_vault_authority: AccountInfo<'info>,
+    pub fee_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,

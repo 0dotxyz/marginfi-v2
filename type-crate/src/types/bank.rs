@@ -222,14 +222,14 @@ impl Bank {
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
 pub enum RiskTier {
     #[default]
-    Collateral = 0,
+    Collateral, // 0
     /// ## Isolated Risk
     /// Assets in this tier can be borrowed only in isolation.
     /// They can't be borrowed together with other assets.
     ///
     /// For example, if users has USDC, and wants to borrow XYZ which is isolated,
     /// they can't borrow XYZ together with SOL, only XYZ alone.
-    Isolated = 1,
+    Isolated, // 1
 }
 unsafe impl Zeroable for RiskTier {}
 unsafe impl Pod for RiskTier {}
@@ -246,6 +246,9 @@ pub enum BankOperationalState {
     ReduceOnly,
     /// Bank was killed by a bankruptcy event (irrecoverable)
     KilledByBankruptcy,
+    /// Awaiting one-time setup (JupLend `juplend_init_position` seed deposit). All operations are
+    /// blocked, and the state is unreachable from `lending_pool_configure_bank`.
+    Uninitialized,
     /// Non-expiring circuit-breaker end state, reached after repeated breaker escalation.
     /// Blocks borrows and risk-carrying withdraws and restricts liquidation to the risk admin;
     /// deposit/repay/riskless-withdraw follow the pre-break state stashed in
@@ -260,24 +263,24 @@ unsafe impl Pod for BankOperationalState {}
 #[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum OracleSetup {
-    None = 0,
-    PythLegacy = 1,
-    SwitchboardV2 = 2,
-    PythPushOracle = 3,
-    SwitchboardPull = 4,
-    StakedWithPythPush = 5,
-    KaminoPythPush = 6,
-    KaminoSwitchboardPull = 7,
-    Fixed = 8,
-    DriftPythPull = 9,
-    DriftSwitchboardPull = 10,
-    SolendPythPull = 11,
-    SolendSwitchboardPull = 12,
-    FixedKamino = 13,
-    FixedDrift = 14,
-    JuplendPythPull = 15,
-    JuplendSwitchboardPull = 16,
-    FixedJuplend = 17,
+    None,                   // 0
+    PythLegacy,             // 1
+    SwitchboardV2,          // 2
+    PythPushOracle,         // 3
+    SwitchboardPull,        // 4
+    StakedWithPythPush,     // 5
+    KaminoPythPush,         // 6
+    KaminoSwitchboardPull,  // 7
+    Fixed,                  // 8
+    DriftPythPull,          // 9
+    DriftSwitchboardPull,   // 10
+    SolendPythPull,         // 11
+    SolendSwitchboardPull,  // 12
+    FixedKamino,            // 13
+    FixedDrift,             // 14
+    JuplendPythPull,        // 15
+    JuplendSwitchboardPull, // 16
+    FixedJuplend,           // 17
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}

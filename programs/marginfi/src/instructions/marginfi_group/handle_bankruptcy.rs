@@ -39,7 +39,7 @@ use std::cmp::{max, min};
 /// 4. Transfer the insured amount from the insurance fund.
 /// 5. Socialize the loss between lenders if any.
 pub fn lending_pool_handle_bankruptcy<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, LendingPoolHandleBankruptcy<'info>>,
+    mut ctx: Context<'info, LendingPoolHandleBankruptcy<'info>>,
 ) -> MarginfiResult {
     let LendingPoolHandleBankruptcy {
         marginfi_account: marginfi_account_loader,
@@ -270,7 +270,7 @@ pub struct LendingPoolHandleBankruptcy<'info> {
         ],
         bump = bank.load()?.liquidity_vault_bump
     )]
-    pub liquidity_vault: AccountInfo<'info>,
+    pub liquidity_vault: UncheckedAccount<'info>,
 
     #[account(
         mut,
@@ -290,7 +290,7 @@ pub struct LendingPoolHandleBankruptcy<'info> {
         ],
         bump = bank.load()?.insurance_vault_authority_bump
     )]
-    pub insurance_vault_authority: AccountInfo<'info>,
+    pub insurance_vault_authority: UncheckedAccount<'info>,
 
     pub token_program: Interface<'info, TokenInterface>,
 }

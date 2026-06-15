@@ -87,10 +87,11 @@ pub fn lending_pool_add_bank_permissionless(
     };
 
     let now = Clock::get().unwrap().unix_timestamp;
+    let config = default_config.into();
 
-    *bank = Bank::new(
+    bank.init(
         ctx.accounts.marginfi_group.key(),
-        default_config.into(),
+        &config,
         bank_mint.key(),
         bank_mint.decimals,
         liquidity_vault.key(),
@@ -161,7 +162,7 @@ pub fn lending_pool_add_bank_permissionless(
     emit!(LendingPoolBankCreateEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.marginfi_group.key(),
-            signer: Some(group.admin)
+            signer: Some(ctx.accounts.fee_payer.key())
         },
         bank: bank_loader.key(),
         mint: bank_mint.key(),
@@ -192,14 +193,14 @@ pub struct LendingPoolAddBankPermissionless<'info> {
     pub bank_mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// CHECK: Validated using `stake_pool`
-    pub sol_pool: AccountInfo<'info>,
+    pub sol_pool: UncheckedAccount<'info>,
 
     /// CHECK: We validate this is correct backwards, by deriving the PDA of the `bank_mint` using
     /// this key.
     ///
     /// If derives the same `bank_mint`, then this must be the correct stake pool for that mint, and
     /// we can subsequently use it to validate the `sol_pool`
-    pub stake_pool: AccountInfo<'info>,
+    pub stake_pool: UncheckedAccount<'info>,
 
     /// Validator vote account for this staked bank.
     ///
@@ -228,7 +229,7 @@ pub struct LendingPoolAddBankPermissionless<'info> {
         ],
         bump
     )]
-    pub liquidity_vault_authority: AccountInfo<'info>,
+    pub liquidity_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,
@@ -251,7 +252,7 @@ pub struct LendingPoolAddBankPermissionless<'info> {
         ],
         bump
     )]
-    pub insurance_vault_authority: AccountInfo<'info>,
+    pub insurance_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,
@@ -274,7 +275,7 @@ pub struct LendingPoolAddBankPermissionless<'info> {
         ],
         bump
     )]
-    pub fee_vault_authority: AccountInfo<'info>,
+    pub fee_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,

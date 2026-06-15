@@ -30,8 +30,8 @@ use {
         clock::Clock,
         instruction::{AccountMeta, Instruction},
         pubkey::Pubkey,
-        system_program,
     },
+    solana_system_interface::program as system_program,
     std::{
         cell::RefCell,
         collections::HashSet,
@@ -40,7 +40,6 @@ use {
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     },
-    switchboard_on_demand::PullFeedAccountData,
 };
 
 const DEFAULT_METADATA_DB_URL: &str = "https://app.0.xyz/api/banks/db";
@@ -312,9 +311,7 @@ pub fn show_oracle_ages(
 
             let data = account.data_as_mut_slice();
             let cell = RefCell::new(data);
-            let Ok(feed): Result<PullFeedAccountData, _> =
-                parse_swb_ignore_alignment(cell.borrow())
-            else {
+            let Ok(feed) = parse_swb_ignore_alignment(cell.borrow()) else {
                 continue;
             };
             let lite_feed = LitePullFeedAccountData::from(&feed);
@@ -592,39 +589,19 @@ pub fn bank_withdraw_fees_permissionless(
     Ok(())
 }
 
-pub fn bank_init_metadata(
-    config: Config,
-    bank_pk: Pubkey,
-    group: Option<Pubkey>,
-    mint: Option<Pubkey>,
-    bank_seed: u64,
-) -> Result<()> {
-    // Prefer on-chain (group, mint) from the bank; fall back to CLI overrides when the bank
-    // account does not exist yet.
-    let (resolved_group, resolved_mint) = match config.mfi_program.account::<Bank>(bank_pk) {
-        Ok(bank) => (bank.group, bank.mint),
-        Err(_) => {
-            let g = group
-                .context("--group required when the bank account does not exist on-chain yet")?;
-            let m =
-                mint.context("--mint required when the bank account does not exist on-chain yet")?;
-            (g, m)
-        }
-    };
+pub fn bank_init_metadata(config: Config, bank_pk: Pubkey) -> Result<()> {
     let metadata = derive_bank_metadata_address(&config.program_id, &bank_pk);
 
     let ix = Instruction {
         program_id: config.program_id,
         accounts: marginfi::accounts::InitBankMetadata {
-            group: resolved_group,
-            bank_mint: resolved_mint,
             bank: bank_pk,
             fee_payer: config.authority(),
             metadata,
             system_program: system_program::id(),
         }
         .to_account_metas(Some(true)),
-        data: marginfi::instruction::InitBankMetadata { bank_seed }.data(),
+        data: marginfi::instruction::InitBankMetadata {}.data(),
     };
 
     let signing_keypairs = config.get_signers(false);

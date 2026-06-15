@@ -54,13 +54,13 @@ pub struct BankCache {
     pub last_oracle_price_confidence: WrappedI80F48,
     /// Liquidation cache flags, set during receivership flow.
     /// * 1 (LIQ_CACHE_LOCKED_FLAG) - We "lock" the liquidation cache when writing to it in Start
-    /// Liquidate as an additional safeguard, if the liquidation prices stored here were to be
-    /// edited between start and end, it would completely break the risk engine. End validates that
-    /// the lock is set, panics if not, and removes it - which prevents footguns if the cache was
-    /// e.g. accidently set to default. The lock is also removed when a Balance is closed via
-    /// withdraw_all, repay_all, or close_balance, but only when the account has
-    /// ACCOUNT_IN_RECEIVERSHIP set, so that operations on unrelated accounts sharing the same
-    /// bank do not interfere with an in-progress liquidation.
+    ///   Liquidate as an additional safeguard, if the liquidation prices stored here were to be
+    ///   edited between start and end, it would completely break the risk engine. End validates that
+    ///   the lock is set, panics if not, and removes it - which prevents footguns if the cache was
+    ///   e.g. accidently set to default. The lock is also removed when a Balance is closed via
+    ///   withdraw_all, repay_all, or close_balance, but only when the account has
+    ///   ACCOUNT_IN_RECEIVERSHIP set, so that operations on unrelated accounts sharing the same
+    ///   bank do not interfere with an in-progress liquidation.
     pub liq_cache_flags: u8,
     _cb_cache_pad: [u8; 7],
     /// For integration banks, this is the exchange rate of cToken/token or similar. The "real"

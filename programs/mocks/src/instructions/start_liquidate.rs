@@ -24,7 +24,7 @@ pub struct StartLiquidationViaCpi<'info> {
 
 impl StartLiquidationViaCpi<'_> {
     pub fn start_liquidation_via_cpi<'info>(
-        ctx: Context<'_, '_, 'info, 'info, StartLiquidationViaCpi<'info>>,
+        ctx: Context<'info, StartLiquidationViaCpi<'info>>,
     ) -> Result<()> {
         let mut account_metas = vec![
             AccountMeta::new(ctx.accounts.marginfi_account.key(), false),

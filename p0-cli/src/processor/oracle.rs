@@ -10,8 +10,8 @@ use solana_account_decoder::UiAccountEncoding;
 use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
 use solana_client::rpc_filter::{Memcmp, RpcFilterType};
-use solana_sdk::account_info::IntoAccountInfo;
 use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{account::Account, account_info::IntoAccountInfo};
 use std::time::{SystemTime, UNIX_EPOCH};
 use switchboard_on_demand::PullFeedAccountData;
 
@@ -19,7 +19,7 @@ pub fn find_pyth_push_oracles_for_feed_id(
     rpc_client: &RpcClient,
     feed_id: FeedId,
 ) -> anyhow::Result<()> {
-    let mut res = rpc_client.get_program_accounts_with_config(
+    let res = rpc_client.get_program_ui_accounts_with_config(
         &pyth_solana_receiver_sdk::ID,
         RpcProgramAccountsConfig {
             filters: Some(vec![RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
@@ -36,8 +36,11 @@ pub fn find_pyth_push_oracles_for_feed_id(
 
     println!("Found {} price feeds", res.len());
 
-    for (ref address, account) in res.iter_mut() {
-        let ai = (address, account).into_account_info();
+    for (address, ui_account) in res {
+        let mut account: Account = ui_account
+            .decode()
+            .ok_or_else(|| anyhow::anyhow!("failed to decode account {}", address))?;
+        let ai = (&address, &mut account).into_account_info();
         let price_update_v2 = marginfi::state::price::load_price_update_v2_checked(&ai)?;
 
         let feed_id = &price_update_v2.price_message.feed_id;

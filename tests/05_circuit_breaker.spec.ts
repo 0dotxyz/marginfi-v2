@@ -1,7 +1,7 @@
 import { Program } from "@coral-xyz/anchor";
-import { Clock } from "solana-bankrun";
 import { Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
+import { Clock } from "./utils/litesvm";
 import {
   bankKeypairSol,
   bankrunProgram,

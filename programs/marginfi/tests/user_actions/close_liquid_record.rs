@@ -9,9 +9,9 @@ use marginfi_type_crate::{
 };
 use solana_program_test::*;
 use solana_sdk::{
-    account::Account, pubkey::Pubkey, signature::Keypair, signer::Signer, system_transaction,
-    transaction::Transaction,
+    account::Account, pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction,
 };
+use solana_system_transaction as system_transaction;
 
 /// 60 days in seconds (must match the constant in the instruction)
 const INACTIVITY_PERIOD_SECS: i64 = 60 * 24 * 60 * 60;

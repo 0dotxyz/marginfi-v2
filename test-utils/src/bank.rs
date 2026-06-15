@@ -5,6 +5,7 @@ use crate::{
 };
 use anchor_lang::{
     prelude::{AccountMeta, Pubkey},
+    solana_program::{account_info::IntoAccountInfo, clock::Clock, instruction::Instruction},
     InstructionData, ToAccountMetas,
 };
 use fixed::types::I80F48;
@@ -16,14 +17,11 @@ use marginfi::{
     },
     utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
 };
-use marginfi_type_crate::types::OraclePriceType;
-use marginfi_type_crate::types::{Bank, BankConfigOpt, OracleSetup};
-use solana_program::{
-    account_info::IntoAccountInfo, instruction::Instruction, sysvar::clock::Clock,
-};
+use marginfi_type_crate::types::{Bank, BankConfigOpt, OraclePriceType, OracleSetup};
+use solana_commitment_config::CommitmentLevel;
 use solana_program_test::BanksClientError;
 use solana_program_test::ProgramTestContext;
-use solana_sdk::{commitment_config::CommitmentLevel, signer::Signer, transaction::Transaction};
+use solana_sdk::{signer::Signer, transaction::Transaction};
 use std::{cell::RefCell, fmt::Debug, rc::Rc};
 
 #[derive(Clone)]
@@ -77,6 +75,7 @@ impl BankFixture {
                     .await
                     .unwrap()
                     .unwrap();
+
                 let ai = (&oracle_key, &mut oracle_account).into_account_info();
                 OraclePriceFeedAdapter::try_from_bank(&bank, &[ai], &Clock::default()).unwrap()
             }

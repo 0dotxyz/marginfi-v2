@@ -13,7 +13,7 @@ inputs:
 runs:
   using: "composite"
   steps:
-    # - uses: actions/cache@v2
+    # - uses: actions/cache@v4
     #   name: Cache Cargo registry + index
     #   id: cache-cargo-registry
     #   with:
@@ -23,7 +23,7 @@ runs:
     #       ~/.cargo/git/db/
     #     key: cargo-${{ runner.os }}-v0001-${{ hashFiles('**/Cargo.lock') }}
 
-    # - uses: actions/cache@v2
+    # - uses: actions/cache@v4
     #   name: Cache Solana Verify
     #   id: cache-solana-verify
     #   with:

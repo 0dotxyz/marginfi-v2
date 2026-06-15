@@ -85,7 +85,7 @@ import {
   deriveBankWithSeed,
   deriveLiquidityVaultAuthority,
 } from "./utils/pdas";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./utils/litesvm";
 import { getJuplendPrograms } from "./utils/juplend/programs";
 import { dummyIx } from "./utils/bankrunConnection";
 

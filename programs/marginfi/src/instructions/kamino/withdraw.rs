@@ -22,10 +22,7 @@ use crate::{
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{
-    clock::Clock,
-    sysvar::{self, Sysvar},
-};
+use anchor_lang::solana_program::clock::Clock;
 use anchor_spl::token::{accessor, Token};
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
@@ -80,7 +77,7 @@ use marginfi_type_crate::{
 /// 5. Transfers funds to the user's account
 /// 6. Updates the marginfi account's balance to reflect the withdrawal
 pub fn kamino_withdraw<'info>(
-    ctx: Context<'_, '_, 'info, 'info, KaminoWithdraw<'info>>,
+    ctx: Context<'info, KaminoWithdraw<'info>>,
     amount: u64, // Collateral token amount
     flags: Option<u8>,
 ) -> MarginfiResult {
@@ -98,6 +95,7 @@ pub fn kamino_withdraw<'info>(
         ctx.accounts.integration_acc_2.load()?.deposits[0].deposited_amount;
 
     let collateral_amount;
+    let share_amount;
     let bank_key = ctx.accounts.bank.key();
     let bank_mint = ctx.accounts.bank.load()?.mint;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
@@ -145,11 +143,11 @@ pub fn kamino_withdraw<'info>(
             &mut marginfi_account.lending_account,
         )?;
 
-        collateral_amount = if withdraw_all {
+        (collateral_amount, share_amount) = if withdraw_all {
             bank_account.withdraw_all(in_receivership)?
         } else {
-            bank_account.withdraw(I80F48::from_num(amount))?;
-            amount
+            let share_amount = bank_account.withdraw(I80F48::from_num(amount))?;
+            (amount, share_amount)
         };
 
         // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
@@ -238,6 +236,7 @@ pub fn kamino_withdraw<'info>(
         bank: bank_key,
         mint: bank_mint,
         amount: collateral_amount,
+        share_amount: share_amount.into(),
         close_balance: withdraw_all,
     });
 
@@ -445,7 +444,7 @@ pub struct KaminoWithdraw<'info> {
 
     /// Used by kamino validate CPI calls
     /// CHECK: read‑only Instructions sysvar
-    #[account(address = sysvar::instructions::ID)]
+    #[account(address = solana_instructions_sysvar::ID)]
     pub instruction_sysvar_account: UncheckedAccount<'info>,
 }
 
@@ -453,7 +452,7 @@ impl<'info> KaminoWithdraw<'info> {
     pub fn cpi_refresh_reserve(&self) -> MarginfiResult {
         let accounts = RefreshReservesBatch {};
         let program = self.kamino_program.to_account_info();
-        let cpi_ctx = CpiContext::new(program, accounts).with_remaining_accounts(vec![
+        let cpi_ctx = CpiContext::new(program.key(), accounts).with_remaining_accounts(vec![
             self.integration_acc_1.to_account_info(),
             self.lending_market.to_account_info(),
         ]);
@@ -496,7 +495,7 @@ impl<'info> KaminoWithdraw<'info> {
             &[bump],
         ];
         let signer_seeds: &[&[&[u8]]] = &[seeds];
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         withdraw_obligation_collateral_and_redeem_reserve_collateral_v2(
             cpi_ctx,
             collateral_amount,
@@ -520,7 +519,7 @@ impl<'info> KaminoWithdraw<'info> {
             &[bump],
         ];
         let signer_seeds: &[&[&[u8]]] = &[seeds];
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())

@@ -24,6 +24,7 @@ import {
 import {
   processBankrunTransaction,
   bytesToF64,
+  bnToBigIntSafe,
   mintToTokenAccount,
 } from "./utils/tools";
 import {
@@ -270,7 +271,9 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
       const jupCtx = jupCtxByBank.get(balance.bankPk.toBase58());
       if (jupCtx) {
         refreshRateIxs.push(
-          await refreshJupSimple(juplendPrograms.lending, { pool: jupCtx.pool }),
+          await refreshJupSimple(juplendPrograms.lending, {
+            pool: jupCtx.pool,
+          }),
         );
       }
     }
@@ -316,8 +319,9 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
         const lending = await juplendPrograms.lending.account.lending.fetch(
           jupCtx.pool.lending,
         );
+
         const exchange =
-          Number(lending.tokenExchangePrice.toString()) /
+          Number(bnToBigIntSafe(lending.tokenExchangePrice)) /
           EXCHANGE_PRICES_PRECISION;
         expectedPrice *= exchange;
       }
