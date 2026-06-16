@@ -36,9 +36,7 @@ use marginfi_type_crate::{
 /// * Fails with `CircuitBreakerAdminOnly` if any bank in the account's active balances is
 ///   currently CB-halted. Admins should use `start_deleverage` or `lending_account_liquidate`
 ///   instead — both accept admin/risk_admin during a halt.
-pub fn start_liquidation<'info>(
-    ctx: Context<'info, StartLiquidation<'info>>,
-) -> MarginfiResult {
+pub fn start_liquidation<'info>(ctx: Context<'info, StartLiquidation<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     liq_record.liquidation_receiver = ctx.accounts.liquidation_receiver.key();
