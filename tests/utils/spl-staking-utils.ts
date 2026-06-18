@@ -10,23 +10,23 @@ import {
 import {
   Connection,
   PublicKey,
+  STAKE_CONFIG_ID,
   StakeAuthorizationLayout,
   StakeProgram,
-  Transaction,
+  SystemProgram,
+  SYSVAR_CLOCK_PUBKEY,
+  SYSVAR_RENT_PUBKEY,
+  SYSVAR_STAKE_HISTORY_PUBKEY,
   TransactionInstruction,
 } from "@solana/web3.js";
 import { SINGLE_POOL_PROGRAM_ID } from "./types";
-import { pulseBankPrice } from "./user-instructions";
+import { ProgramTestContext } from "./litesvm";
 import {
-  bankrunContext,
-  bankrunProgram,
-  banksClient,
-  groupAdmin,
-  oracles,
-  validators,
-} from "../rootHooks";
-import { getBankrunBlockhash } from "./tools";
-import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
+  deriveSVSPpool,
+  deriveOnRampPool,
+  deriveStakeAuthority,
+  deriveStakePool,
+} from "./pdas";
 
 export enum SinglePoolAccountType {
   Uninitialized = 0,
@@ -149,23 +149,91 @@ export const depositToSinglePoolIxes = async (
   return ixes;
 };
 
-export const fetchLstPriceMultiplier = async () => {
-  const pulseTx = new Transaction().add(
-    await pulseBankPrice(groupAdmin.mrgnBankrunProgram, {
-      bank: validators[0].bank,
-      remaining: [
-        oracles.wsolOracle.publicKey,
-        validators[0].splMint,
-        validators[0].splSolPool,
-        validators[0].splOnRampPool,
-      ],
-    }),
-  );
-  pulseTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
-  pulseTx.sign(groupAdmin.wallet);
+/**
+ * Spl Single Pool's CreateOnRamp instruction.
+ *
+ * Accounts (in order):
+ *
+ * * 0. `[]` Pool account
+ * * 1. `[w]` Pool onramp account
+ * * 2. `[]` Pool stake authority
+ * * 3. `[]` Rent sysvar
+ * * 4. `[]` System program
+ * * 5. `[]` Stake program
+ *
+ * @param voteAccount - Validator's vote account
+ *
+ * @returns A TransactionInstruction
+ */
+export function createPoolOnramp(
+  voteAccount: PublicKey,
+): TransactionInstruction {
+  const [poolAccount] = deriveSVSPpool(voteAccount);
+  const [onRampAccount] = deriveOnRampPool(poolAccount);
+  const [poolStakeAuthority] = deriveStakeAuthority(poolAccount);
 
-  await banksClient.processTransaction(pulseTx);
+  const keys = [
+    { pubkey: poolAccount, isSigner: false, isWritable: false },
+    { pubkey: onRampAccount, isSigner: false, isWritable: true },
+    { pubkey: poolStakeAuthority, isSigner: false, isWritable: false },
+    { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    { pubkey: StakeProgram.programId, isSigner: false, isWritable: false },
+  ];
 
-  const bank = await bankrunProgram.account.bank.fetch(validators[0].bank);
-  return wrappedI80F48toBigNumber(bank.cache.priceMultiplier).toNumber();
-};
+  // Note: Hard-coded, if foundation ever changes the ix index, then woops.
+  const data = Buffer.from(Uint8Array.of(6));
+
+  return new TransactionInstruction({
+    keys,
+    programId: SINGLE_POOL_PROGRAM_ID,
+    data,
+  });
+}
+
+/**
+ * Spl Single Pool's CreateOnRamp instruction.
+ *
+ * Accounts (in order):
+ *
+ * * 0. `[]` Validator vote account
+ * * 1. `[]` Pool account
+ * * 2. `[w]` Pool stake account
+ * * 3. `[w]` Pool onramp account
+ * * 4. `[]` Pool stake authority
+ * * 5. `[]` Clock sysvar
+ * * 6. `[]` Stake history sysvar
+ * * 7. `[]` Stake config sysvar
+ * * 8. `[]` Stake program
+ *
+ * @param voteAccount - Validator's vote account
+ *
+ * @returns A TransactionInstruction
+ */
+export function replenishPool(voteAccount: PublicKey): TransactionInstruction {
+  const [poolAccount] = deriveSVSPpool(voteAccount);
+  const [stakePool] = deriveStakePool(poolAccount);
+  const [onRampPool] = deriveOnRampPool(poolAccount);
+  const [authority] = deriveStakeAuthority(poolAccount);
+
+  const keys = [
+    { pubkey: voteAccount, isSigner: false, isWritable: false },
+    { pubkey: poolAccount, isSigner: false, isWritable: false },
+    { pubkey: stakePool, isSigner: false, isWritable: true },
+    { pubkey: onRampPool, isSigner: false, isWritable: true },
+    { pubkey: authority, isSigner: false, isWritable: false },
+    { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false },
+    { pubkey: SYSVAR_STAKE_HISTORY_PUBKEY, isSigner: false, isWritable: false },
+    { pubkey: STAKE_CONFIG_ID, isSigner: false, isWritable: false },
+    { pubkey: StakeProgram.programId, isSigner: false, isWritable: false },
+  ];
+
+  // Note: Hard-coded, if foundation ever changes the ix index, then woops.
+  const data = Buffer.from(Uint8Array.of(1));
+
+  return new TransactionInstruction({
+    keys,
+    programId: SINGLE_POOL_PROGRAM_ID,
+    data,
+  });
+}

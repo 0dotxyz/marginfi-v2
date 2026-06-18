@@ -303,6 +303,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     );
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
     const pulseInitialCacheIx = await pulseBankPrice(user.mrgnBankrunProgram!, {
+      group: groupPk,
       bank: usdcJupBankPk,
       remaining: bankAfter.config.oracleKeys.filter(
         (key) => !key.equals(PublicKey.default),
@@ -801,6 +802,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     );
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
     const pulsePostInterestCacheIx = await pulseBankPrice(user.mrgnBankrunProgram!, {
+      group: groupPk,
       bank: usdcJupBankPk,
       remaining: bankAfter.config.oracleKeys.filter(
         (key) => !key.equals(PublicKey.default),

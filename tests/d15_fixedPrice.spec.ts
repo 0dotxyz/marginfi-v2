@@ -252,6 +252,7 @@ describe("d15: Fixed Drift price bank", () => {
     const user = users[3];
     const tx = new Transaction().add(
       await pulseBankPrice(user.mrgnBankrunProgram, {
+        group: driftGroup.publicKey,
         bank: fixedDriftBank,
         remaining: [tokenASpotMarket],
       }),

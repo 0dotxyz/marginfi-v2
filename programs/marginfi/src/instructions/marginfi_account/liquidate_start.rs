@@ -21,7 +21,7 @@ use marginfi_type_crate::{
     constants::ix_discriminators,
     types::{
         HealthCache, HealthPriceMode, LiquidationPriceCache, LiquidationRecord, MarginfiAccount,
-        MarginfiGroup, OnRampTransition, RequirementType, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
+        MarginfiGroup, RequirementType, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
         ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
@@ -36,15 +36,12 @@ use marginfi_type_crate::{
 pub fn start_liquidation<'info>(ctx: Context<'info, StartLiquidation<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
-    let group = ctx.accounts.group.load()?;
-    let on_ramp_transition = group.on_ramp_transition();
     liq_record.liquidation_receiver = ctx.accounts.liquidation_receiver.key();
     start_receivership(
         &mut marginfi_account,
         &mut liq_record,
         ctx.remaining_accounts,
         false,
-        on_ramp_transition,
     )?;
 
     let sysvar = &ctx.accounts.instruction_sysvar;
@@ -65,8 +62,6 @@ pub fn start_liquidation<'info>(ctx: Context<'info, StartLiquidation<'info>>) ->
 pub fn start_deleverage<'info>(ctx: Context<'info, StartDeleverage<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
-    let group = ctx.accounts.group.load()?;
-    let on_ramp_transition = group.on_ramp_transition();
     liq_record.liquidation_receiver = ctx.accounts.risk_admin.key();
     marginfi_account.set_flag(ACCOUNT_IN_DELEVERAGE, false);
     marginfi_account.indexer_flags.has_ever_been_deleveraged = 1;
@@ -75,7 +70,6 @@ pub fn start_deleverage<'info>(ctx: Context<'info, StartDeleverage<'info>>) -> M
         &mut liq_record,
         ctx.remaining_accounts,
         true,
-        on_ramp_transition,
     )?;
 
     let sysvar = &ctx.accounts.instruction_sysvar;
@@ -93,7 +87,6 @@ pub fn start_receivership<'info>(
     liq_record: &mut LiquidationRecord,
     remaining_ais: &'info [AccountInfo<'info>],
     ignore_healthy: bool,
-    on_ramp_transition: OnRampTransition,
 ) -> MarginfiResult {
     // Note: the receiver can use the health cache state after this ix concludes to plan their
     // liquidation/deleverage strategy.
@@ -108,7 +101,6 @@ pub fn start_receivership<'info>(
             liq_cache: Some(&mut liq_price_cache),
         },
         ignore_healthy,
-        on_ramp_transition,
     )?;
 
     // Use heap-efficient equity calculation
@@ -120,7 +112,6 @@ pub fn start_receivership<'info>(
         HealthPriceMode::Live {
             liq_cache: Some(&mut liq_price_cache),
         },
-        on_ramp_transition,
     )?;
 
     write_liquidation_price_cache_from(marginfi_account, remaining_ais, &liq_price_cache)?;
@@ -216,7 +207,6 @@ pub struct StartLiquidation<'info> {
     /// Account under liquidation
     #[account(
         mut,
-        has_one = group @ MarginfiError::InvalidGroup,
         has_one = liquidation_record @ MarginfiError::InvalidLiquidationRecord,
         constraint = {
             let acc = marginfi_account.load()?;
@@ -228,8 +218,6 @@ pub struct StartLiquidation<'info> {
         } @MarginfiError::UnexpectedLiquidationState
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
-
-    pub group: AccountLoader<'info, MarginfiGroup>,
 
     /// The associated liquidation record PDA for the given `marginfi_account`
     #[account(mut)]
@@ -261,7 +249,7 @@ pub struct StartDeleverage<'info> {
     #[account(
         mut,
         has_one = liquidation_record,
-        has_one = group @ MarginfiError::InvalidGroup,
+        has_one = group,
         constraint = {
             let acc = marginfi_account.load()?;
             !acc.get_flag(ACCOUNT_IN_RECEIVERSHIP)

@@ -221,7 +221,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
       FARMS_PROGRAM_ID,
     );
 
-    // Extra initialization needed for rewards to accrue over time.
+    // Extra initialization needed for rewards to accrue over time
     const rewardPoints = [
       {
         tsStart: 0,

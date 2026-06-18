@@ -10,34 +10,6 @@ pub const JUPLEND_LIQUIDITY_PROGRAM_ID: Pubkey =
     pubkey!("jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC");
 pub const JUPLEND_REWARDS_PROGRAM_ID: Pubkey =
     pubkey!("jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar");
-pub const SPL_SINGLE_POOL_PROGRAM_ID: Pubkey =
-    pubkey!("SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE");
-
-/// Derive the SPL single-pool PDA chain from a validator vote account:
-/// `vote_account -> stake_pool -> (lst_mint, sol_pool, pool_onramp)`.
-pub fn derive_single_pool_keys_from_vote(
-    validator_vote_account: Pubkey,
-) -> (Pubkey, Pubkey, Pubkey, Pubkey) {
-    let vote_account_bytes = validator_vote_account.to_bytes();
-    let (stake_pool, _) =
-        Pubkey::find_program_address(&[b"pool", &vote_account_bytes], &SPL_SINGLE_POOL_PROGRAM_ID);
-
-    let stake_pool_bytes = stake_pool.to_bytes();
-    let (lst_mint, _) =
-        Pubkey::find_program_address(&[b"mint", &stake_pool_bytes], &SPL_SINGLE_POOL_PROGRAM_ID);
-    let (sol_pool, _) =
-        Pubkey::find_program_address(&[b"stake", &stake_pool_bytes], &SPL_SINGLE_POOL_PROGRAM_ID);
-    let (pool_onramp, _) =
-        Pubkey::find_program_address(&[b"onramp", &stake_pool_bytes], &SPL_SINGLE_POOL_PROGRAM_ID);
-
-    (stake_pool, lst_mint, sol_pool, pool_onramp)
-}
-
-pub fn derive_staked_onramp_from_vote(validator_vote_account: Pubkey) -> Pubkey {
-    let (_stake_pool, _lst_mint, _sol_pool, pool_onramp) =
-        derive_single_pool_keys_from_vote(validator_vote_account);
-    pool_onramp
-}
 
 pub fn derive_juplend_lending_admin() -> (Pubkey, u8) {
     Pubkey::find_program_address(&[b"lending_admin"], &JUPLEND_LENDING_PROGRAM_ID)

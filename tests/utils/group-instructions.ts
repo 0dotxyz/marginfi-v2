@@ -1,11 +1,7 @@
 import { BN, Program } from "@coral-xyz/anchor";
 import { AccountMeta, PublicKey } from "@solana/web3.js";
 import { Marginfi } from "../../target/types/marginfi";
-import {
-  deriveBankWithSeed,
-  deriveOnRampPool,
-  deriveStakedSettings,
-} from "./pdas";
+import { deriveStakedSettings } from "./pdas";
 import {
   BankConfig,
   BankConfigOptRaw,
@@ -554,8 +550,8 @@ export const addBankPermissionless = (
     [Buffer.from("stake"), args.stakePool.toBuffer()],
     SINGLE_POOL_PROGRAM_ID,
   );
-  const [poolOnramp] = deriveOnRampPool(args.stakePool);
-  // Note: oracle, lst mint, pool stake, and on-ramp are also passed in meta for validation.
+
+  // Note: oracle and lst mint/pool are also passed in meta for validation
   const oracleMeta: AccountMeta = {
     pubkey: args.pythOracle,
     isSigner: false,
@@ -571,26 +567,18 @@ export const addBankPermissionless = (
     isSigner: false,
     isWritable: false,
   };
-  const onrampMeta: AccountMeta = {
-    pubkey: poolOnramp,
-    isSigner: false,
-    isWritable: false,
-  };
-  const [bank] = deriveBankWithSeed(
-    program.programId,
-    args.marginfiGroup,
-    lstMint,
-    args.seed,
-  );
+
   const ix = program.methods
     .lendingPoolAddBankPermissionless(args.seed)
     .accounts({
+      // marginfiGroup: args.marginfiGroup, // implied from stakedSettings
+      stakedSettings: settingsKey,
       feePayer: args.feePayer,
       bankMint: lstMint,
       solPool: solPool,
-      poolOnramp,
       stakePool: args.stakePool,
       validatorVoteAccount: args.validatorVoteAccount,
+      // bank: bankKey, // deriveBankWithSeed
       // globalFeeState: deriveGlobalFeeState(id),
       // globalFeeWallet: // implied from globalFeeState,
       // liquidityVaultAuthority = deriveLiquidityVaultAuthority(id, bank);
@@ -603,44 +591,7 @@ export const addBankPermissionless = (
       tokenProgram: TOKEN_PROGRAM_ID,
       // systemProgram: SystemProgram.programId,
     })
-    .accountsPartial({
-      marginfiGroup: args.marginfiGroup,
-      stakedSettings: settingsKey,
-      bank,
-    })
-    .remainingAccounts([oracleMeta, lstMeta, solPoolMeta, onrampMeta])
-    .instruction();
-
-  return ix;
-};
-
-export const disableStakedOracles = (
-  program: Program<Marginfi>,
-  group: PublicKey,
-  admin?: PublicKey,
-) => {
-  const ix = program.methods
-    .disableStakedOracles()
-    .accounts({
-      group,
-    })
-    .accountsPartial({ admin })
-    .instruction();
-
-  return ix;
-};
-
-export const enableStakedOracleOnramp = (
-  program: Program<Marginfi>,
-  group: PublicKey,
-  admin?: PublicKey,
-) => {
-  const ix = program.methods
-    .enableStakedOracleOnramp()
-    .accounts({
-      group,
-    })
-    .accountsPartial({ admin })
+    .remainingAccounts([oracleMeta, lstMeta, solPoolMeta])
     .instruction();
 
   return ix;
@@ -1109,6 +1060,7 @@ export const writeBankMetadataPreInit = (
 
 export type UpdateGroupRateLimiterArgs = {
   marginfiGroup: PublicKey;
+  delegateFlowAdmin?: PublicKey;
   outflowUsd?: BN | null;
   inflowUsd?: BN | null;
   updateSeq: BN;
@@ -1130,6 +1082,8 @@ export const updateGroupRateLimiter = (
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
+      delegateFlowAdmin:
+        args.delegateFlowAdmin ?? (program.provider.publicKey as PublicKey),
     })
     .instruction();
   return ix;
@@ -1137,6 +1091,7 @@ export const updateGroupRateLimiter = (
 
 export type UpdateDeleverageWithdrawalsArgs = {
   marginfiGroup: PublicKey;
+  delegateFlowAdmin?: PublicKey;
   outflowUsd: number;
   updateSeq: BN;
   eventStartSlot: BN;
@@ -1156,6 +1111,8 @@ export const updateDeleverageWithdrawals = (
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
+      delegateFlowAdmin:
+        args.delegateFlowAdmin ?? (program.provider.publicKey as PublicKey),
     })
     .instruction();
   return ix;

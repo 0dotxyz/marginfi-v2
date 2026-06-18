@@ -117,21 +117,6 @@ pub mod marginfi {
         marginfi_group::lending_pool_backfill_staked_bank_validator_vote_account(ctx)
     }
 
-    /// (admin only) Disable stake pricing, i.e. effectively forbidding all operations involving stake banks.
-    /// To be used during the rollout of the SVSP upgrade.
-    /// To be removed once SVSP update is rolled out (likely in 1.10)
-    pub fn disable_staked_oracles(ctx: Context<DisableStakedOracles>) -> MarginfiResult {
-        marginfi_group::disable_staked_oracles(ctx)
-    }
-
-    /// (admin only) Enable SPL single-pool on-ramp lamports in staked-collateral oracle pricing.
-    /// To be removed once SVSP update is rolled out (likely in 1.10)
-    /// This flips a per-group config flag so that every staked oracle uses the canonical single-pool NAV
-    /// formula.
-    pub fn enable_staked_oracle_onramp(ctx: Context<EnableStakedOracleOnramp>) -> MarginfiResult {
-        marginfi_group::enable_staked_oracle_onramp(ctx)
-    }
-
     /// (admin only) Configure bank parameters. If the bank has `FREEZE_SETTINGS`, only
     /// deposit/borrow limits are updated and all other config changes are silently ignored.
     pub fn lending_pool_configure_bank(

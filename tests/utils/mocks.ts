@@ -673,8 +673,6 @@ export type Validator = {
   splAuthority: PublicKey;
   /** spl pool's stake account (a PDA automatically created on init, contains the SOL held by the pool) */
   splSolPool: PublicKey;
-  /** spl pool's on-ramp stake account for liquid SOL and reward replenishment */
-  splOnRampPool: PublicKey;
   /** bank created for this validator's LST on the "main" group */
   bank: PublicKey;
 };

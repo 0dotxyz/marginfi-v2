@@ -37,7 +37,7 @@ describe("Deposit funds (included staked assets)", () => {
     const userAccount = user.accounts.get(USER_ACCOUNT);
 
     const userAccBefore = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount,
+      userAccount
     );
     const balancesBefore = userAccBefore.lendingAccount.balances;
     assert.equal(balancesBefore[1].active, 0);
@@ -53,23 +53,23 @@ describe("Deposit funds (included staked assets)", () => {
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
         amount: new BN(0.01 * 10 ** ecosystem.wsolDecimals),
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(user.wallet);
     await banksClient.processTransaction(tx);
 
     const userAcc = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount,
+      userAccount
     );
     const balances = userAcc.lendingAccount.balances;
 
     // Find balances by bank key (order may vary due to pubkey sorting)
     const solBalanceIndex = balances.findIndex((b) =>
-      b.bankPk.equals(bankKeypairSol.publicKey),
+      b.bankPk.equals(bankKeypairSol.publicKey)
     );
     const usdcBalanceIndex = balances.findIndex((b) =>
-      b.bankPk.equals(bankKeypairUsdc.publicKey),
+      b.bankPk.equals(bankKeypairUsdc.publicKey)
     );
 
     assert.notEqual(solBalanceIndex, -1, "SOL balance not found");
@@ -97,12 +97,11 @@ describe("Deposit funds (included staked assets)", () => {
             oracles.wsolOracle.publicKey, // Note the Staked bank uses wsol oracle too
             validators[0].splMint,
             validators[0].splSolPool,
-            validators[0].splOnRampPool,
           ],
           [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
         ]),
         amount: new BN(0.1 * 10 ** ecosystem.usdcDecimals),
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(user.wallet);
@@ -112,7 +111,7 @@ describe("Deposit funds (included staked assets)", () => {
 
     // Verify the deposit worked and the entry does not exist
     const userAcc = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount,
+      userAccount
     );
     const balances = userAcc.lendingAccount.balances;
     assert.equal(balances[2].active, 0);

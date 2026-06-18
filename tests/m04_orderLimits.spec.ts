@@ -220,31 +220,6 @@ SCENARIOS.forEach(
           return versionedTx;
         };
 
-        const buildHealthPulseTx = async (
-          signer: MockUser,
-          remaining: PublicKey[],
-          refreshIxs: TransactionInstruction[] = [],
-        ): Promise<VersionedTransaction> => {
-          const pulseIx = await healthPulse(signer.mrgnBankrunProgram, {
-            marginfiAccount: userAccount,
-            remaining,
-          });
-
-          const blockhash = await getBankrunBlockhash(bankrunContext);
-          const messageV0 = new TransactionMessage({
-            payerKey: signer.wallet.publicKey,
-            recentBlockhash: blockhash,
-            instructions: [
-              ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-              ...refreshIxs,
-              pulseIx,
-            ],
-          }).compileToV0Message([lutAccount]);
-
-          const versionedTx = new VersionedTransaction(messageV0);
-          versionedTx.sign([signer.wallet]);
-          return versionedTx;
-        };
         const buildIntegrationRefreshIxs = async (): Promise<
           TransactionInstruction[]
         > => {
@@ -751,26 +726,10 @@ SCENARIOS.forEach(
             remaining: remainingAccountsPostRepay,
           });
 
-          const pulseAllIx = await healthPulse(user.mrgnBankrunProgram, {
-            marginfiAccount: userAccount,
-            remaining: remainingAccounts,
-          });
-
-          const pulsePostRepayIx = await healthPulse(user.mrgnBankrunProgram, {
-            marginfiAccount: userAccount,
-            remaining: remainingAccountsPostRepay,
-          });
-
-          lutAccount = await createLookupTableForInstructions(user.wallet, [
-            startIx,
-            repayInstruction,
-            withdrawInstruction,
-            endIx,
-            ...preIxs,
-
-            pulseAllIx,
-            pulsePostRepayIx,
-          ]);
+          lutAccount = await createLookupTableForInstructions(
+            user.wallet,
+            [startIx, repayInstruction, withdrawInstruction, endIx, ...preIxs],
+          );
 
           // low price -> should fail trigger
           oracles.tokenAPrice = 10;
@@ -780,19 +739,26 @@ SCENARIOS.forEach(
           let netValueBefore = 0;
           {
             const refreshIxs = await buildIntegrationRefreshIxs();
-            const pulseTx = await buildHealthPulseTx(
-              user,
-              remainingAccounts,
-              refreshIxs,
+            const pulseIx = await healthPulse(user.mrgnBankrunProgram, {
+              marginfiAccount: userAccount,
+              remaining: remainingAccounts,
+            });
+            const pulseTx = new Transaction().add(
+              ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+              ...refreshIxs,
+              pulseIx,
             );
-
-            await processBankrunV0Transaction(
+            await processBankrunTransaction(
               bankrunContext,
               pulseTx,
               [user.wallet],
               false,
               true,
             );
+            // const acc = await bankrunProgram.account.marginfiAccount.fetch(
+            //   userAccount,
+            // );
+            // logHealthCache("m04 health cache (low price)", acc.healthCache);
           }
 
           // Trigger not met, fails until the price changes...
@@ -814,20 +780,22 @@ SCENARIOS.forEach(
           await refreshAllOracleFeeds();
           {
             const refreshIxs = await buildIntegrationRefreshIxs();
-            const pulseTx = await buildHealthPulseTx(
-              user,
-              remainingAccounts,
-              refreshIxs,
+            const pulseIx = await healthPulse(user.mrgnBankrunProgram, {
+              marginfiAccount: userAccount,
+              remaining: remainingAccounts,
+            });
+            const pulseTx = new Transaction().add(
+              ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+              ...refreshIxs,
+              pulseIx,
             );
-
-            await processBankrunV0Transaction(
+            await processBankrunTransaction(
               bankrunContext,
               pulseTx,
               [user.wallet],
               false,
               true,
             );
-
             const acc = await bankrunProgram.account.marginfiAccount.fetch(
               userAccount,
             );
@@ -860,13 +828,16 @@ SCENARIOS.forEach(
 
           {
             const refreshIxs = await buildIntegrationRefreshIxs();
-            const pulseTx = await buildHealthPulseTx(
-              user,
-              remainingAccountsPostRepay,
-              refreshIxs,
+            const pulseIx = await healthPulse(user.mrgnBankrunProgram, {
+              marginfiAccount: userAccount,
+              remaining: remainingAccountsPostRepay,
+            });
+            const pulseTx = new Transaction().add(
+              ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+              ...refreshIxs,
+              pulseIx,
             );
-
-            await processBankrunV0Transaction(
+            await processBankrunTransaction(
               bankrunContext,
               pulseTx,
               [user.wallet],

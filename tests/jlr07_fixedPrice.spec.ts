@@ -357,6 +357,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
     const wrongLending = Keypair.generate().publicKey;
     const tx = new Transaction().add(
       await pulseBankPrice(user.mrgnBankrunProgram, {
+        group: juplendGroup.publicKey,
         bank: fixedJuplendBank,
         remaining: [wrongLending],
       }),

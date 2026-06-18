@@ -99,11 +99,10 @@ pub fn kamino_withdraw<'info>(
     let bank_mint = ctx.accounts.bank.load()?.mint;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let clock = Clock::get()?;
-    let group = ctx.accounts.group.load()?;
-    let on_ramp_transition = group.on_ramp_transition();
 
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
+        let group = ctx.accounts.group.load()?;
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
 
         let in_receivership_or_order_execution =
@@ -117,7 +116,6 @@ pub fn kamino_withdraw<'info>(
                 &bank,
                 &clock,
                 ctx.remaining_accounts,
-                on_ramp_transition,
             )?;
 
             // Validate price is non-zero during liquidation/deleverage to prevent exploits with stale oracles
@@ -252,7 +250,6 @@ pub fn kamino_withdraw<'info>(
             &marginfi_account,
             ctx.remaining_accounts,
             &mut Some(&mut health_cache),
-            on_ramp_transition,
         )?;
         health_cache.program_version = PROGRAM_VERSION;
 
@@ -263,7 +260,6 @@ pub fn kamino_withdraw<'info>(
             &bank,
             &clock,
             ctx.remaining_accounts,
-            on_ramp_transition,
         )
         .ok();
 
@@ -275,14 +271,9 @@ pub fn kamino_withdraw<'info>(
         // Note: the caller can simply omit risk accounts since the risk check is ignored here, in
         // that case the cache doesn't update and this does nothing.
         let mut bank = ctx.accounts.bank.load_mut()?;
-        let price_for_cache = fetch_unbiased_price_for_bank_cache(
-            &bank_key,
-            &bank,
-            &clock,
-            ctx.remaining_accounts,
-            on_ramp_transition,
-        )
-        .ok();
+        let price_for_cache =
+            fetch_unbiased_price_for_bank_cache(&bank_key, &bank, &clock, ctx.remaining_accounts)
+                .ok();
 
         bank.update_cache_price(price_for_cache)?;
     }

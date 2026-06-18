@@ -743,11 +743,7 @@ export const buildHealthRemainingAccounts = async (
     }
 
     if (assetTag === ASSET_TAG_STAKED) {
-      group.push(
-        bank.config.oracleKeys[1],
-        bank.config.oracleKeys[2],
-        bank.config.oracleKeys[3],
-      );
+      group.push(bank.config.oracleKeys[1], bank.config.oracleKeys[2]);
     }
 
     groups.push(group);

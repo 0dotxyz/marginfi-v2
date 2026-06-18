@@ -317,7 +317,7 @@ async fn marginfi_group_bank_reduce_only_worthless_for_new_loans() -> anyhow::Re
     assert_custom_error!(res.unwrap_err(), MarginfiError::RiskEngineInitRejected);
 
     borrower_mfi_account
-        .try_lending_account_pulse_health(test_f.marginfi_group.key)
+        .try_lending_account_pulse_health()
         .await?;
 
     let borrower_account_data = test_f
