@@ -87,6 +87,8 @@ pub const ORDER_EXECUTION_MAX_FEE: I80F48 = I80F48!(0.05); // 5%
 pub const ORDER_INIT_FLAT_FEE_DEFAULT: u32 = 100_000;
 /// Maximum percent encoded as u32 (100% == u32::MAX)
 pub const MAX_BPS: u32 = u32::MAX;
+/// Maximum slippage allowed for any Order , encoded as a u32 percent (see `MAX_BPS`). Set to ~10%.
+pub const MAX_ORDER_SLIPPAGE: u32 = u32::MAX / 10;
 
 pub const MIN_PYTH_PUSH_VERIFICATION_LEVEL: VerificationLevel = VerificationLevel::Full;
 
