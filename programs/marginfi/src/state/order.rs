@@ -1,8 +1,5 @@
 use crate::{
-    check, check_eq,
-    constants::MAX_ORDER_SLIPPAGE,
-    errors::MarginfiError,
-    prelude::MarginfiResult,
+    check, check_eq, constants::MAX_ORDER_SLIPPAGE, errors::MarginfiError, prelude::MarginfiResult,
     state::marginfi_account::LendingAccountImpl,
 };
 use anchor_lang::prelude::*;
