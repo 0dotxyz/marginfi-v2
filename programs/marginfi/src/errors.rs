@@ -272,6 +272,8 @@ pub enum MarginfiError {
     InvalidGlobalFeeWallet,
     #[msg("Bank has not completed one-time initialization")] // 6134
     BankUninitialized,
+    #[msg("Max slippage exceeds the allowed cap")] // 6135
+    SlippageTooHigh,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
