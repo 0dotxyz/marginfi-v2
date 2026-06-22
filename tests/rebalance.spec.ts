@@ -25,8 +25,6 @@ import {
 import { assert } from "chai";
 import { Marginfi } from "../target/types/marginfi";
 import {
-  bankKeypairSol,
-  bankKeypairUsdc,
   bankrunContext,
   bankrunProgram,
   bankRunProvider,
@@ -35,7 +33,6 @@ import {
   klendBankrunProgram,
   ecosystem,
   groupAdmin,
-  marginfiGroup,
   oracles,
   users,
 } from "./rootHooks";
@@ -46,7 +43,6 @@ import {
   depositIx,
 } from "./utils/user-instructions";
 import {
-  addBank,
   addBankWithSeed,
   configureBankOracle,
   groupInitialize,
@@ -182,14 +178,18 @@ const toMeta = (keys: PublicKey[]): AccountMeta[] =>
 describe("Auto-rebalance orders (native -> native)", () => {
   let program: Program<Marginfi>;
 
-  const group = marginfiGroup.publicKey;
+
+  const rebalanceGroup = Keypair.generate();
+  const group = rebalanceGroup.publicKey;
   const usdcMint = ecosystem.usdcMint.publicKey;
   let usdcOracle: PublicKey;
   let wsolOracle: PublicKey;
 
-  const srcBank = bankKeypairUsdc.publicKey; // src USDC bank (util 0 -> rate 0)
-  const solBank = bankKeypairSol.publicKey; // borrower collateral
-  const DST_SEED = new BN(1);
+  const SRC_SEED = new BN(8_801);
+  const DST_SEED = new BN(8_802);
+  const SOL_SEED = new BN(8_803);
+  let srcBank: PublicKey; // src USDC bank (util 0 -> rate 0)
+  let solBank: PublicKey; // borrower collateral
   let dstBank: PublicKey; // dst USDC bank (util ~50% -> rate > 0)
 
   // users[0] = rebalancing user, users[1] = keeper, users[2] = dst lender, users[3] = borrower
@@ -429,11 +429,13 @@ describe("Auto-rebalance orders (native -> native)", () => {
     usdcOracle = oracles.usdcOracle.publicKey;
     wsolOracle = oracles.wsolOracle.publicKey;
     [owner, keeper, lender, borrower] = [users[0], users[1], users[2], users[3]];
-    [dstBank] = deriveBankWithSeed(
+    [srcBank] = deriveBankWithSeed(program.programId, group, usdcMint, SRC_SEED);
+    [dstBank] = deriveBankWithSeed(program.programId, group, usdcMint, DST_SEED);
+    [solBank] = deriveBankWithSeed(
       program.programId,
       group,
-      usdcMint,
-      DST_SEED,
+      ecosystem.wsolMint.publicKey,
+      SOL_SEED,
     );
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
@@ -443,21 +445,20 @@ describe("Auto-rebalance orders (native -> native)", () => {
           admin: groupAdmin.wallet.publicKey,
         }),
       ),
-      [marginfiGroup],
+      [rebalanceGroup],
     );
 
-    // src USDC bank (keypair)
+    // src USDC bank (PDA via seed)
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
-        await addBank(groupAdmin.mrgnProgram, {
+        await addBankWithSeed(groupAdmin.mrgnProgram, {
           marginfiGroup: group,
           feePayer: groupAdmin.wallet.publicKey,
           bankMint: usdcMint,
-          bank: srcBank,
           config: defaultBankConfig(),
+          seed: SRC_SEED,
         }),
       ),
-      [bankKeypairUsdc],
     );
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
@@ -494,15 +495,14 @@ describe("Auto-rebalance orders (native -> native)", () => {
     // SOL bank for borrower collateral (default config: usable as collateral)
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
-        await addBank(groupAdmin.mrgnProgram, {
+        await addBankWithSeed(groupAdmin.mrgnProgram, {
           marginfiGroup: group,
           feePayer: groupAdmin.wallet.publicKey,
           bankMint: ecosystem.wsolMint.publicKey,
-          bank: solBank,
           config: defaultBankConfig(),
+          seed: SOL_SEED,
         }),
       ),
-      [bankKeypairSol],
     );
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
@@ -1502,9 +1502,37 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
       groupAdmin.wallet.publicKey,
     );
     const debtCeiling = usdc(100_000);
-    await processBankrunTransaction(
-      bankrunContext,
-      new Transaction().add(
+    // The protocol borrow position is a singleton keyed by (protocol, mint); the jl* specs already
+    // init it for groupAdmin on this mint in the full suite. Only run InitProtocolPositions when it
+    // is absent; the class/borrow-config updates are idempotent and keep our debt ceiling high enough
+    // for the borrow below.
+    const borrowPosExists = await safeGetAccountInfo(
+      bankRunProvider.connection,
+      borrowPos,
+    );
+    const setupIxs = [
+      await updateJuplendUserClassIx(juplendPrograms, {
+        authority: groupAdmin.wallet.publicKey,
+        authList: juplendPool.authList,
+        entries: [{ addr: groupAdmin.wallet.publicKey, value: 1 }],
+      }),
+      await updateJuplendUserBorrowConfigIx(juplendPrograms, {
+        authority: groupAdmin.wallet.publicKey,
+        protocol: groupAdmin.wallet.publicKey,
+        authList: juplendPool.authList,
+        rateModel: juplendPool.rateModel,
+        mint,
+        tokenReserve: juplendPool.tokenReserve,
+        userBorrowPosition: borrowPos,
+        config: {
+          ...DEFAULT_BORROW_CONFIG,
+          baseDebtCeiling: debtCeiling,
+          maxDebtCeiling: debtCeiling,
+        },
+      }),
+    ];
+    if (!borrowPosExists) {
+      setupIxs.unshift(
         await initJuplendProtocolPositionsIx(juplendPrograms, {
           authority: groupAdmin.wallet.publicKey,
           authList: juplendPool.authList,
@@ -1512,54 +1540,72 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
           borrowMint: mint,
           protocol: groupAdmin.wallet.publicKey,
         }),
-        await updateJuplendUserClassIx(juplendPrograms, {
-          authority: groupAdmin.wallet.publicKey,
-          authList: juplendPool.authList,
-          entries: [{ addr: groupAdmin.wallet.publicKey, value: 1 }],
-        }),
-        await updateJuplendUserBorrowConfigIx(juplendPrograms, {
-          authority: groupAdmin.wallet.publicKey,
-          protocol: groupAdmin.wallet.publicKey,
-          authList: juplendPool.authList,
-          rateModel: juplendPool.rateModel,
-          mint,
-          tokenReserve: juplendPool.tokenReserve,
-          userBorrowPosition: borrowPos,
-          config: {
-            ...DEFAULT_BORROW_CONFIG,
-            baseDebtCeiling: debtCeiling,
-            maxDebtCeiling: debtCeiling,
-          },
-        }),
-      ),
+      );
+    }
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(...setupIxs),
       [groupAdmin.wallet],
       false,
       true,
     );
-    // ~70% utilization -> supply rate well above the Drift quote-asset market.
+    // Drive utilization to a high target so the supply rate clears the Drift quote-asset market.
+    // The borrow amount is computed from the live reserve totals (rather than a fixed 70%) because in
+    // the full suite this pool is shared with the jl* specs: their existing deposits/borrows make a
+    // fixed borrow yield a much lower utilization than in isolation, leaving the rate below Drift's.
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(
-        await makeJuplendNativePreOperateIx(juplendPrograms.liquidity, {
-          protocol: groupAdmin.wallet.publicKey,
-          mint,
-          pool: juplendPool,
-          userSupplyPosition: supplyPos,
-          userBorrowPosition: borrowPos,
-        }),
-        await makeJuplendNativeBorrowIx(juplendPrograms.liquidity, {
-          protocol: groupAdmin.wallet.publicKey,
-          pool: juplendPool,
-          userSupplyPosition: supplyPos,
-          userBorrowPosition: borrowPos,
-          borrowTo: groupAdmin.wallet.publicKey,
-          borrowAmount: usdc(7_000),
-        }),
+        await refreshJupSimple(juplendPrograms.lending, { pool: juplendPool }),
       ),
       [groupAdmin.wallet],
       false,
       true,
     );
+    const reserve = await juplendPrograms.liquidity.account.tokenReserve.fetch(
+      juplendPool.tokenReserve,
+    );
+    const totalSupply = reserve.totalSupplyWithInterest.add(
+      reserve.totalSupplyInterestFree,
+    );
+    const totalBorrow = reserve.totalBorrowWithInterest.add(
+      reserve.totalBorrowInterestFree,
+    );
+    // Target 90% of the reserve's max utilization, capped by both the debt ceiling and the available
+    // liquidity so the borrow can never exceed what the pool holds.
+    const targetBorrow = totalSupply
+      .muln(Math.round(reserve.maxUtilization * 0.9))
+      .divn(10_000);
+    const headroom = totalSupply.sub(totalBorrow);
+    let borrowAmount = targetBorrow.sub(totalBorrow);
+    if (borrowAmount.gt(headroom)) borrowAmount = headroom;
+    const ceilingRoom = debtCeiling.sub(totalBorrow);
+    if (borrowAmount.gt(ceilingRoom)) borrowAmount = ceilingRoom;
+    if (borrowAmount.gtn(0)) {
+      await processBankrunTransaction(
+        bankrunContext,
+        new Transaction().add(
+          await makeJuplendNativePreOperateIx(juplendPrograms.liquidity, {
+            protocol: groupAdmin.wallet.publicKey,
+            mint,
+            pool: juplendPool,
+            userSupplyPosition: supplyPos,
+            userBorrowPosition: borrowPos,
+          }),
+          await makeJuplendNativeBorrowIx(juplendPrograms.liquidity, {
+            protocol: groupAdmin.wallet.publicKey,
+            pool: juplendPool,
+            userSupplyPosition: supplyPos,
+            userBorrowPosition: borrowPos,
+            borrowTo: groupAdmin.wallet.publicKey,
+            borrowAmount,
+          }),
+        ),
+        [groupAdmin.wallet],
+        false,
+        true,
+      );
+    }
   };
 
   const driftTail = (): PublicKey[] => [usdcOracle, driftMMarket];
