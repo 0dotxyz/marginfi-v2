@@ -19,7 +19,7 @@ use marginfi_type_crate::{
         HealthCache, HealthPriceMode, LendingAccount, LiquidationPriceCache, MarginfiAccount,
         OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias, RequirementType,
         RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 use std::{
@@ -88,6 +88,13 @@ pub fn is_signer_authorized(
     allow_receivership: bool,
     allow_order_execution: bool,
 ) -> bool {
+    // Within a rebalance sandwich, any keeper may drive withdraw/deposit between the user's
+    // same-mint banks. Bounded by the rebalance start/end value-conservation checks and the
+    // exclusive-ix allowlist (only withdraw/deposit + start/end may appear).
+    if marginfi_account.get_flag(ACCOUNT_IN_REBALANCE) {
+        return true;
+    }
+
     if allow_receivership && marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
         return marginfi_account.authority != signer; // forbidden to take receivership of your own account
     }
@@ -1148,6 +1155,40 @@ pub fn check_account_init_health<'info>(
 
     if !healthy {
         return err!(MarginfiError::RiskEngineInitRejected);
+    }
+
+    check_account_risk_tiers(marginfi_account, remaining_ais)
+}
+
+/// Maintenance health check using the heap-reuse health calculator. Like
+/// [`check_account_init_health`] but against the MAINTENANCE requirement: the account need only stay
+/// non-liquidatable. Used by actions that move existing positions without opening new risk (e.g. an
+/// auto-rebalance between same-mint venues), where the stricter initial requirement does not apply.
+pub fn check_account_maint_health<'info>(
+    marginfi_account: &MarginfiAccount,
+    remaining_ais: &'info [AccountInfo<'info>],
+    health_cache: &mut Option<&mut HealthCache>,
+) -> MarginfiResult {
+    if marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN) {
+        // Risk checks are skipped during flashloans
+        return Ok(());
+    }
+
+    let (assets, liabs) = get_health_components(
+        marginfi_account,
+        remaining_ais,
+        RequirementType::Maintenance,
+        health_cache,
+        HealthPriceMode::Live { liq_cache: None },
+    )?;
+
+    let healthy = assets >= liabs;
+    if let Some(cache) = health_cache.as_mut() {
+        cache.set_healthy(healthy);
+    }
+
+    if !healthy {
+        return err!(MarginfiError::WorseHealthPostExecution);
     }
 
     check_account_risk_tiers(marginfi_account, remaining_ais)

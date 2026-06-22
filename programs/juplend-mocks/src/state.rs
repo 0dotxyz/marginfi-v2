@@ -1,8 +1,12 @@
 use anchor_lang::prelude::*;
+use fixed::types::I80F48;
 
 // Account discriminator from JupLend IDL for `Lending`.
 // Anchor discriminator = sha256("account:Lending")[0..8].
 pub const LENDING_DISCRIMINATOR: [u8; 8] = [135, 199, 82, 16, 249, 131, 182, 241];
+
+// Anchor discriminator = sha256("account:TokenReserve")[0..8].
+pub const TOKEN_RESERVE_DISCRIMINATOR: [u8; 8] = [21, 18, 59, 135, 120, 20, 31, 12];
 
 /// Precision used for exchange prices in JupLend (1e12).
 ///
@@ -188,5 +192,256 @@ impl Lending {
     #[inline]
     pub fn expected_assets_for_redeem(&self, shares: u64) -> Option<u64> {
         expected_assets_for_redeem_from_rate(shares, self.token_exchange_price)
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<TokenReserve>() == 184);
+
+/// Minimal mirror of the Juplend's liquidity-layer `TokenReserve` account — the rate-bearing account a
+/// JupLend `Lending` references via `token_reserves_liquidity`.
+/// https://github.com/Instadapp/fluid-solana-programs/blob/master/programs/liquidity/src/state/token_reserve.rs#L14-L40
+#[zero_copy]
+#[repr(C, packed)]
+pub struct TokenReserve {
+    pub mint: Pubkey,
+    pub vault: Pubkey,
+
+    /// Stored borrow rate (1e2: 100% == 10_000).
+    pub borrow_rate: u16,
+    /// Fee taken on interest (1e2: 100% == 10_000).
+    pub fee_on_interest: u16,
+    /// Last stored utilization (1e2: 100% == 10_000).
+    pub last_utilization: u16,
+    pub last_update_timestamp: u64,
+    /// Supply exchange price (1e12).
+    pub supply_exchange_price: u64,
+    /// Borrow exchange price (1e12).
+    pub borrow_exchange_price: u64,
+
+    pub max_utilization: u16,
+
+    pub total_supply_with_interest: u64,
+    pub total_supply_interest_free: u64,
+    pub total_borrow_with_interest: u64,
+    pub total_borrow_interest_free: u64,
+    pub total_claim_amount: u64,
+
+    pub interacting_protocol: Pubkey,
+    pub interacting_timestamp: u64,
+    pub interacting_balance: u64,
+}
+
+impl TokenReserve {
+    /// True when the reserve's rate/exchange prices were not updated for `current_timestamp`.
+    /// A future `last_update_timestamp` is treated as fresh (mirrors `Lending::is_stale`).
+    #[inline]
+    pub fn is_stale(&self, current_timestamp: i64) -> bool {
+        (self.last_update_timestamp as i64) < current_timestamp
+    }
+
+    /// Decode a `TokenReserve` from raw Fluid account data: an 8-byte Anchor discriminator followed by
+    /// the packed body. Because the struct is `#[repr(C, packed)]` (matching Fluid's exact byte layout)
+    /// it can't be borrowed zero-copy via `AccountLoader`, so the body is copied out with an unaligned
+    /// read. Returns `None` on a length or discriminator mismatch.
+    pub fn from_account_data(data: &[u8]) -> Option<Self> {
+        const LEN: usize = core::mem::size_of::<TokenReserve>();
+        if data.len() < 8 + LEN || data[..8] != TOKEN_RESERVE_DISCRIMINATOR {
+            return None;
+        }
+        bytemuck::try_pod_read_unaligned(&data[8..8 + LEN]).ok()
+    }
+
+    /// Fluid liquidity-layer supply rate (I80F48, 1.0 == 100%) from the lagged stored fields. The
+    /// caller must ensure the reserve was refreshed this slot (see [`TokenReserve::is_stale`]).
+    /// Yields zero for an uninitialized reserve and `None` on overflow. Mirrors the supply branch of
+    /// `TokenReserve::calculate_exchange_prices`:
+    /// https://github.com/Instadapp/fluid-solana-programs/blob/master/programs/liquidity/src/state/token_reserve.rs#L362-L539
+    pub fn supply_rate(&self) -> Option<I80F48> {
+        juplend_supply_rate_from_parts(
+            u128::from(self.borrow_rate),
+            u128::from(self.fee_on_interest),
+            u128::from(self.last_utilization),
+            u128::from(self.supply_exchange_price),
+            u128::from(self.borrow_exchange_price),
+            u128::from(self.total_supply_with_interest),
+            u128::from(self.total_supply_interest_free),
+            u128::from(self.total_borrow_with_interest),
+            u128::from(self.total_borrow_interest_free),
+        )
+    }
+}
+
+/// Fluid liquidity-layer scale constants: `FOUR_DECIMALS` (1e4) and
+/// `EXCHANGE_PRICE_RATE_OUTPUT_DECIMALS` (1e17).
+const FOUR_DECIMALS: u128 = 10_000;
+const EXCHANGE_PRICE_RATE_OUTPUT_DECIMALS: u128 = 100_000_000_000_000_000;
+
+/// Mirrors Fluid `get_with_interest_vs_free_ratio`: the smaller-over-larger ratio scaled to
+/// `FOUR_DECIMALS`.
+/// https://github.com/Instadapp/fluid-solana-programs/blob/master/programs/liquidity/src/state/token_reserve.rs#L67-L94
+fn get_with_interest_vs_free_ratio(with_interest: u128, interest_free: u128) -> u128 {
+    if with_interest > interest_free {
+        interest_free * FOUR_DECIMALS / with_interest
+    } else if with_interest < interest_free {
+        with_interest * FOUR_DECIMALS / interest_free
+    } else if with_interest > 0 {
+        FOUR_DECIMALS
+    } else {
+        0
+    }
+}
+
+/// Juplend's supply-rate computation from `TokenReserve` parts (all 1e2/1e12 native units)
+/// Returns the supply APR as I80F48 (zero when uninitialized, `None` on overflow). Mirrors the `ratio_supply_yield` +
+/// `supply_rate` block of `TokenReserve::calculate_exchange_prices` (`get_supply_ratio` /
+/// `get_borrow_ratio` are `get_with_interest_vs_free_ratio` at the supply / borrow totals):
+/// https://github.com/Instadapp/fluid-solana-programs/blob/master/programs/liquidity/src/state/token_reserve.rs#L422-L520
+#[allow(clippy::too_many_arguments)]
+pub fn juplend_supply_rate_from_parts(
+    borrow_rate: u128,
+    fee_on_interest: u128,
+    utilization: u128,
+    supply_exchange_price: u128,
+    borrow_exchange_price: u128,
+    total_supply_with_interest: u128,
+    total_supply_interest_free: u128,
+    total_borrow_with_interest: u128,
+    total_borrow_interest_free: u128,
+) -> Option<I80F48> {
+    if borrow_rate == 0
+        || total_borrow_with_interest == 0
+        || total_supply_with_interest == 0
+        || supply_exchange_price == 0
+        || borrow_exchange_price == 0
+    {
+        return Some(I80F48::ZERO);
+    }
+    // `get_supply_ratio`
+    let supply_ratio =
+        get_with_interest_vs_free_ratio(total_supply_with_interest, total_supply_interest_free);
+
+    // step 1: ratio_supply_yield without the borrow_ratio part.
+    let mut ratio_supply_yield = if total_supply_with_interest < total_supply_interest_free {
+        if supply_ratio == 0 {
+            return Some(I80F48::ZERO);
+        }
+
+        let supply_ratio = EXCHANGE_PRICE_RATE_OUTPUT_DECIMALS * FOUR_DECIMALS / supply_ratio;
+        utilization.saturating_mul(EXCHANGE_PRICE_RATE_OUTPUT_DECIMALS + supply_ratio)
+            / FOUR_DECIMALS
+    } else {
+        utilization
+            .saturating_mul(EXCHANGE_PRICE_RATE_OUTPUT_DECIMALS)
+            .saturating_mul(FOUR_DECIMALS + supply_ratio)
+            / (FOUR_DECIMALS * FOUR_DECIMALS)
+    };
+
+    // `get_borrow_ratio`, then x of borrowers paying yield (scaled to EXCHANGE_PRICE_RATE_OUTPUT_DECIMALS).
+    let borrow_ratio =
+        get_with_interest_vs_free_ratio(total_borrow_with_interest, total_borrow_interest_free);
+    let borrow_ratio = if total_borrow_with_interest < total_borrow_interest_free {
+        borrow_ratio * EXCHANGE_PRICE_RATE_OUTPUT_DECIMALS / (FOUR_DECIMALS + borrow_ratio)
+    } else {
+        EXCHANGE_PRICE_RATE_OUTPUT_DECIMALS
+            - borrow_ratio * EXCHANGE_PRICE_RATE_OUTPUT_DECIMALS / (FOUR_DECIMALS + borrow_ratio)
+    };
+
+    // safe_multiply_divide(ratio_supply_yield, borrow_ratio, E17), then * FOUR_DECIMALS / E17. Fluid
+    // uses u256 here; we checked-mul in u128 (None on overflow is fine for a ranking signal).
+    ratio_supply_yield = ratio_supply_yield.checked_mul(borrow_ratio)?
+        / EXCHANGE_PRICE_RATE_OUTPUT_DECIMALS
+        * FOUR_DECIMALS
+        / EXCHANGE_PRICE_RATE_OUTPUT_DECIMALS;
+
+    // supply_rate = borrow_rate * ratio_supply_yield * (FOUR_DECIMALS - fee_on_interest).
+    let supply_rate = borrow_rate
+        .checked_mul(ratio_supply_yield)?
+        .checked_mul(FOUR_DECIMALS.saturating_sub(fee_on_interest))?;
+    Some(I80F48::from_num(supply_rate) / I80F48::from_num(1_000_000_000_000u128))
+}
+
+#[cfg(test)]
+mod rate_tests {
+    use super::*;
+
+    fn approx(actual: I80F48, expected: f64) {
+        let a = actual.to_num::<f64>();
+        assert!((a - expected).abs() < 1e-5, "got {a}, expected {expected}");
+    }
+
+    #[test]
+    fn supply_rate_from_real_mainnet_values() {
+        // USDC TokenReserve (94vK29np...): borrow_rate 4.42%, fee 10%, util 83.57%. With no
+        // interest-free split the formula reduces to borrow * util * (1 - fee) ≈ 0.033244.
+        let r = juplend_supply_rate_from_parts(
+            442,
+            1000,
+            8357,
+            1_029_996_710_353,
+            1_000_000_000_000,
+            401_387_174_957_279,
+            0,
+            100_000_000_000,
+            0,
+        );
+        approx(r.unwrap(), 0.033244);
+    }
+
+    #[test]
+    fn supply_rate_uninitialized_reserve_is_zero() {
+        let r = juplend_supply_rate_from_parts(0, 0, 0, 0, 0, 0, 0, 0, 0).unwrap();
+        assert_eq!(r, I80F48::ZERO);
+    }
+
+    /// The `supply_rate()` method must forward `TokenReserve` fields to
+    /// `juplend_supply_rate_from_parts` in the right order.
+    #[test]
+    fn supply_rate_method_matches_from_parts() {
+        use bytemuck::Zeroable;
+        let mut tr = TokenReserve::zeroed();
+        tr.borrow_rate = 442;
+        tr.fee_on_interest = 1000;
+        tr.last_utilization = 8357;
+        tr.supply_exchange_price = 1_029_996_710_353;
+        tr.borrow_exchange_price = 1_000_000_000_000;
+        tr.total_supply_with_interest = 401_387_174_957_279;
+        tr.total_borrow_with_interest = 100_000_000_000;
+        assert_eq!(
+            tr.supply_rate(),
+            juplend_supply_rate_from_parts(
+                442,
+                1000,
+                8357,
+                1_029_996_710_353,
+                1_000_000_000_000,
+                401_387_174_957_279,
+                0,
+                100_000_000_000,
+                0
+            )
+        );
+    }
+
+    /// `from_account_data` must round-trip a valid `[discriminator][body]` buffer and reject a wrong
+    /// discriminator or a truncated body.
+    #[test]
+    fn from_account_data_round_trips_and_rejects_bad_input() {
+        use bytemuck::Zeroable;
+        let mut tr = TokenReserve::zeroed();
+        tr.borrow_rate = 442;
+        tr.last_update_timestamp = 1_700_000_000;
+
+        let mut buf = TOKEN_RESERVE_DISCRIMINATOR.to_vec();
+        buf.extend_from_slice(bytemuck::bytes_of(&tr));
+
+        let decoded = TokenReserve::from_account_data(&buf).unwrap();
+        assert_eq!({ decoded.borrow_rate }, 442);
+        assert_eq!({ decoded.last_update_timestamp }, 1_700_000_000);
+
+        let mut wrong_discriminator = buf.clone();
+        wrong_discriminator[0] ^= 0xFF;
+        assert!(TokenReserve::from_account_data(&wrong_discriminator).is_none());
+
+        assert!(TokenReserve::from_account_data(&buf[..buf.len() - 1]).is_none());
     }
 }

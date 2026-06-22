@@ -146,7 +146,11 @@ pub fn mul_div_i128(value: i128, numerator: u128, denominator: u128) -> Option<i
     adjusted_value.try_into().ok()
 }
 
-/// Convert collateral tokens to liquidity tokens given scaled supplies.
+/// Convert collateral tokens to liquidity tokens given scaled supplies (`collateral * total_liq /
+/// total_col`). Shared by the Kamino and Solend mocks; equals their
+/// `CollateralExchangeRate::collateral_to_liquidity` in inverse-ratio form:
+/// https://github.com/Kamino-Finance/klend/blob/master/programs/klend/src/state/reserve.rs#L1404-L1441
+/// https://github.com/solendprotocol/solana-program-library/blob/master/token-lending/sdk/src/state/reserve.rs#L903-L915
 /// Returns None on overflow or divide-by-zero.
 #[inline]
 pub fn collateral_to_liquidity_from_scaled(
@@ -164,7 +168,11 @@ pub fn collateral_to_liquidity_from_scaled(
         .checked_to_num::<u64>()
 }
 
-/// Convert liquidity tokens to collateral tokens given scaled supplies.
+/// Convert liquidity tokens to collateral tokens given scaled supplies (`liquidity * total_col /
+/// total_liq`). Shared by the Kamino and Solend mocks; equals their
+/// `CollateralExchangeRate::liquidity_to_collateral` in inverse-ratio form:
+/// https://github.com/Kamino-Finance/klend/blob/master/programs/klend/src/state/reserve.rs#L1488-L1514
+/// https://github.com/solendprotocol/solana-program-library/blob/master/token-lending/sdk/src/state/reserve.rs#L917-L929
 /// Returns None on overflow or divide-by-zero.
 #[inline]
 pub fn liquidity_to_collateral_from_scaled(
@@ -203,6 +211,8 @@ pub fn col_to_liq_ratio(total_liq: I80F48, total_col: I80F48) -> Option<I80F48> 
 }
 
 /// Scale raw total_liq and total_col by 10^decimals. Returns None on overflow or bad index.
+/// Mock-only normalization (Kamino/Solend keep raw token units); the common 10^decimals factor
+/// cancels in the exchange-rate ratio, so results still match upstream.
 #[inline]
 pub fn scale_supplies(
     total_liq_raw: I80F48,

@@ -238,6 +238,19 @@ pub const ACCOUNT_IN_RECEIVERSHIP: u64 = 1 << 4;
 pub const ACCOUNT_IN_DELEVERAGE: u64 = 1 << 5;
 pub const ACCOUNT_FROZEN: u64 = 1 << 6;
 pub const ACCOUNT_IN_ORDER_EXECUTION: u64 = 1 << 7;
+/// The account is mid auto-rebalance (keeper moving one asset between same-mint venues). Transient,
+/// only set within a `start_rebalance`..`end_rebalance` sandwich.
+pub const ACCOUNT_IN_REBALANCE: u64 = 1 << 8;
+
+/// Account states that block placing or starting an order/rebalance sandwich (disabled, in a
+/// flashloan, frozen, in receivership, or being deleveraged). The transient in-flight flags
+/// (`ACCOUNT_IN_ORDER_EXECUTION` / `ACCOUNT_IN_REBALANCE`) are checked separately per entry point.
+pub const ORDER_BLOCKING_FLAGS: u64 = ACCOUNT_DISABLED
+    | ACCOUNT_IN_FLASHLOAN
+    | ACCOUNT_FROZEN
+    | ACCOUNT_IN_RECEIVERSHIP
+    | ACCOUNT_IN_DELEVERAGE;
+
 pub const MAX_LENDING_ACCOUNT_BALANCES: usize = 16;
 
 assert_struct_size!(LendingAccount, 1728);

@@ -5,8 +5,12 @@ use anchor_lang::{
 use solana_instructions_sysvar::{load_current_index_checked, load_instruction_at_checked};
 use solana_sha256_hasher::{hash, hashv};
 
-use crate::constants::COMPUTE_PROGRAM_KEY;
+use crate::constants::{ASSOCIATED_TOKEN_KEY, COMPUTE_PROGRAM_KEY};
 use crate::{check, check_eq, MarginfiError, MarginfiResult};
+use marginfi_type_crate::constants::ix_discriminators as ixd;
+use marginfi_type_crate::pdas::{
+    DRIFT_PROGRAM_ID, JUPLEND_LENDING_PROGRAM_ID, JUPLEND_LIQUIDITY_PROGRAM_ID, KAMINO_PROGRAM_ID,
+};
 
 /// Structs that implement this trait have a `get_hash` tool that returns the function discriminator
 pub trait Hashable {
@@ -202,6 +206,71 @@ pub fn load_and_validate_instructions(
     Ok(ixes)
 }
 
+/// Tx-structure sandwich for rebalance: the end instruction must be last, start must be top-level
+/// (not CPI), and only an allowlisted set of instructions may appear — the marginfi
+/// rebalance/withdraw/deposit legs, plus each venue program's (non-mutating) refresh/crank ixs ONLY.
+/// Forbidding the venues' deposit/borrow/withdraw ops here is what stops an attacker-keeper from
+/// spiking a venue's utilization-derived supply rate inside the sandwich to pass the improvement gate
+/// and farm fees.
+pub fn validate_rebalance_instructions(sysvar: &AccountInfo) -> MarginfiResult {
+    let allowed_programs = [
+        id_crate::ID,
+        COMPUTE_PROGRAM_KEY,
+        KAMINO_PROGRAM_ID,
+        DRIFT_PROGRAM_ID,
+        JUPLEND_LENDING_PROGRAM_ID,
+        JUPLEND_LIQUIDITY_PROGRAM_ID,
+        ASSOCIATED_TOKEN_KEY,
+        anchor_spl::token::ID,
+        anchor_spl::token_2022::ID,
+    ];
+    let ixes = load_and_validate_instructions(sysvar, Some(&allowed_programs))?;
+    validate_ix_last(&ixes, &id_crate::ID, &ixd::END_REBALANCE)?;
+    validate_ixes_exclusive(
+        &ixes,
+        &id_crate::ID,
+        &[
+            &ixd::START_REBALANCE,
+            &ixd::END_REBALANCE,
+            &ixd::LENDING_ACCOUNT_WITHDRAW,
+            &ixd::LENDING_ACCOUNT_DEPOSIT,
+            &ixd::KAMINO_WITHDRAW,
+            &ixd::KAMINO_DEPOSIT,
+            &ixd::DRIFT_WITHDRAW,
+            &ixd::DRIFT_DEPOSIT,
+            &ixd::JUPLEND_WITHDRAW,
+            &ixd::JUPLEND_DEPOSIT,
+        ],
+    )?;
+    // Venue programs may appear ONLY as their refresh/crank ixs (which recompute at current
+    // utilization without changing it). Any other venue ix — deposit/borrow/withdraw — is rejected,
+    // closing the in-sandwich rate-manipulation path.
+    validate_ixes_exclusive(
+        &ixes,
+        &KAMINO_PROGRAM_ID,
+        &[
+            &ixd::KAMINO_REFRESH_RESERVE,
+            &ixd::KAMINO_REFRESH_OBLIGATION,
+        ],
+    )?;
+    validate_ixes_exclusive(
+        &ixes,
+        &DRIFT_PROGRAM_ID,
+        &[&ixd::DRIFT_UPDATE_SPOT_MARKET_CUMULATIVE_INTEREST],
+    )?;
+    validate_ixes_exclusive(
+        &ixes,
+        &JUPLEND_LIQUIDITY_PROGRAM_ID,
+        &[&ixd::JUPLEND_UPDATE_RATE],
+    )?;
+    validate_ixes_exclusive(
+        &ixes,
+        &JUPLEND_LENDING_PROGRAM_ID,
+        &[&ixd::JUPLEND_UPDATE_RATE],
+    )?;
+    validate_not_cpi_by_stack_height()
+}
+
 /// Finds the hash of a slice of keys, sorting them before hashing
 pub fn keys_sha256_hash(keys: &[Pubkey]) -> [u8; 32] {
     let mut slices: Vec<&[u8]> = keys.iter().map(|pk| pk.as_ref()).collect();
@@ -227,42 +296,34 @@ mod tests {
 
     #[test]
     fn check_struct_discrims_generated() {
-        // ─── Bank ──────────────────────────────────────────────────────────────────
         let got_bank = get_discrim_hash("account", "Bank");
         let want_bank = discriminators::BANK;
         assert_eq!(got_bank, want_bank);
 
-        // ─── MarginfiGroup ─────────────────────────────────────────────────────────
         let got_group = get_discrim_hash("account", "MarginfiGroup");
         let want_group = discriminators::GROUP;
         assert_eq!(got_group, want_group);
 
-        // ─── MarginfiAccount ───────────────────────────────────────────────────────
         let got_account = get_discrim_hash("account", "MarginfiAccount");
         let want_account = discriminators::ACCOUNT;
         assert_eq!(got_account, want_account);
 
-        // ─── FeeState ──────────────────────────────────────────────────────────────
         let got_fee_state = get_discrim_hash("account", "FeeState");
         let want_fee_state = discriminators::FEE_STATE;
         assert_eq!(got_fee_state, want_fee_state);
 
-        // ─── StakedSettings ─────────────────────────────────────────────────────────
         let got_staked = get_discrim_hash("account", "StakedSettings");
         let want_staked = discriminators::STAKED_SETTINGS;
         assert_eq!(got_staked, want_staked);
 
-        // ─── LiquidationRecord ─────────────────────────────────────────────────────
         let got_liquidation = get_discrim_hash("account", "LiquidationRecord");
         let want_liquidation = discriminators::LIQUIDATION_RECORD;
         assert_eq!(got_liquidation, want_liquidation);
 
-        // ─── Order ──────────────────────────────────────────────────
         let got_order = get_discrim_hash("account", "Order");
         let want_order = discriminators::ORDER;
         assert_eq!(got_order, want_order);
 
-        // ─── ExecuteOrderRecord ─────────────────────────────────────
         let got_exec_record = get_discrim_hash("account", "ExecuteOrderRecord");
         let want_exec_record = discriminators::EXECUTE_ORDER_RECORD;
         assert_eq!(got_exec_record, want_exec_record);
@@ -270,69 +331,107 @@ mod tests {
 
     #[test]
     fn check_instruction_hash_generated() {
-        // ─── InitLiquidationRecord ───────────────────────────────────────────────
         let got_init = InitLiquidationRecord::get_hash();
         let want_init = ix_discriminators::INIT_LIQUIDATION_RECORD;
         assert_eq!(got_init, want_init);
 
-        // ─── StartLiquidation ────────────────────────────────────────────────────
         let got_start = StartLiquidation::get_hash();
         let want_start = ix_discriminators::START_LIQUIDATION;
         assert_eq!(got_start, want_start);
 
-        // ─── EndLiquidation ──────────────────────────────────────────────────────
         let got_end = EndLiquidation::get_hash();
         let want_end = ix_discriminators::END_LIQUIDATION;
         assert_eq!(got_end, want_end);
 
-        // ─── LendingAccountWithdraw ──────────────────────────────────────────────
         let got_withdraw = LendingAccountWithdraw::get_hash();
         let want_withdraw = ix_discriminators::LENDING_ACCOUNT_WITHDRAW;
         assert_eq!(got_withdraw, want_withdraw);
 
-        // ─── LendingAccountRepay ─────────────────────────────────────────────────
         let got_repay = LendingAccountRepay::get_hash();
         let want_repay = ix_discriminators::LENDING_ACCOUNT_REPAY;
         assert_eq!(got_repay, want_repay);
 
-        // ─── LendingAccountStartFlashloan ─────────────────────────────────────────────────
         let got_flash = LendingAccountStartFlashloan::get_hash();
         let want_flash = ix_discriminators::START_FLASHLOAN;
         assert_eq!(got_flash, want_flash);
 
-        // ─── LendingAccountEndFlashloan ─────────────────────────────────────────────────
         let got_flash = LendingAccountEndFlashloan::get_hash();
         let want_flash = ix_discriminators::END_FLASHLOAN;
         assert_eq!(got_flash, want_flash);
 
-        // ─── StartDeleverage ────────────────────────────────────────────────────
         let got_start = StartDeleverage::get_hash();
         let want_start = ix_discriminators::START_DELEVERAGE;
         assert_eq!(got_start, want_start);
 
-        // ─── EndDeleverage ──────────────────────────────────────────────────────
         let got_end = EndDeleverage::get_hash();
         let want_end = ix_discriminators::END_DELEVERAGE;
         assert_eq!(got_end, want_end);
 
-        // ─── DriftWithdraw ─────────────────────────────────────────────────────
         let got_drift = DriftWithdraw::get_hash();
         let want_drift = ix_discriminators::DRIFT_WITHDRAW;
         assert_eq!(got_drift, want_drift);
 
-        // ─── KaminoWithdraw ────────────────────────────────────────────────────
         let got_kamino = KaminoWithdraw::get_hash();
         let want_kamino = ix_discriminators::KAMINO_WITHDRAW;
         assert_eq!(got_kamino, want_kamino);
 
-        // ─── StartExecuteOrder ───────────────────────────────────────────────────
         let got_start_exec = StartExecuteOrder::get_hash();
         let want_start_exec = ix_discriminators::START_EXECUTE_ORDER;
         assert_eq!(got_start_exec, want_start_exec);
 
-        // ─── EndExecuteOrder ─────────────────────────────────────────────────────
         let got_end_exec = EndExecuteOrder::get_hash();
         let want_end_exec = ix_discriminators::END_EXECUTE_ORDER;
         assert_eq!(got_end_exec, want_end_exec);
+    }
+
+    #[test]
+    fn venue_crank_discrims_match_anchor() {
+        // The foreign venue crank discriminators must equal the standard anchor derivation.
+        assert_eq!(
+            get_discrim_hash("global", "refresh_reserve"),
+            ix_discriminators::KAMINO_REFRESH_RESERVE
+        );
+        assert_eq!(
+            get_discrim_hash("global", "refresh_obligation"),
+            ix_discriminators::KAMINO_REFRESH_OBLIGATION
+        );
+        assert_eq!(
+            get_discrim_hash("global", "update_spot_market_cumulative_interest"),
+            ix_discriminators::DRIFT_UPDATE_SPOT_MARKET_CUMULATIVE_INTEREST
+        );
+        assert_eq!(
+            get_discrim_hash("global", "update_rate"),
+            ix_discriminators::JUPLEND_UPDATE_RATE
+        );
+    }
+
+    #[test]
+    fn rebalance_allowlist_rejects_venue_mutations() {
+        let kamino_ix = |discrim: [u8; 8]| Instruction {
+            program_id: KAMINO_PROGRAM_ID,
+            accounts: vec![],
+            data: discrim.to_vec(),
+        };
+        let cranks: &[&[u8]] = &[
+            &ix_discriminators::KAMINO_REFRESH_RESERVE,
+            &ix_discriminators::KAMINO_REFRESH_OBLIGATION,
+        ];
+        // A refresh crank is permitted...
+        assert!(validate_ixes_exclusive(
+            &[kamino_ix(ix_discriminators::KAMINO_REFRESH_RESERVE)],
+            &KAMINO_PROGRAM_ID,
+            cranks,
+        )
+        .is_ok());
+        // ...but a rate-manipulating Kamino deposit is rejected.
+        assert!(validate_ixes_exclusive(
+            &[
+                kamino_ix(ix_discriminators::KAMINO_REFRESH_RESERVE),
+                kamino_ix(ix_discriminators::KAMINO_DEPOSIT),
+            ],
+            &KAMINO_PROGRAM_ID,
+            cranks,
+        )
+        .is_err());
     }
 }

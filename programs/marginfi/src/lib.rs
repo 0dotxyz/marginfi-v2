@@ -286,6 +286,74 @@ pub mod marginfi {
         marginfi_account::close_order(ctx)
     }
 
+    /// (user) Create a persistent same-mint auto-rebalance order: keep `mint` in the highest-yield
+    /// bank among `allowed_banks`. Persists until cancelled.
+    pub fn marginfi_account_place_rebalance_order(
+        ctx: Context<PlaceRebalanceOrder>,
+        allowed_banks: Vec<Pubkey>,
+        min_improvement: Option<WrappedI80F48>,
+        cooldown_seconds: Option<u64>,
+        amount: Option<u64>,
+    ) -> MarginfiResult {
+        marginfi_account::place_rebalance_order(
+            ctx,
+            allowed_banks,
+            min_improvement,
+            cooldown_seconds,
+            amount,
+        )
+    }
+
+    /// (user) Update an existing auto-rebalance order's allowlist and/or policy in place; `None`
+    /// fields are left unchanged.
+    pub fn marginfi_account_update_rebalance_order(
+        ctx: Context<UpdateRebalanceOrder>,
+        allowed_banks: Option<Vec<Pubkey>>,
+        min_improvement: Option<WrappedI80F48>,
+        cooldown_seconds: Option<u64>,
+        amount: Option<u64>,
+    ) -> MarginfiResult {
+        marginfi_account::update_rebalance_order(
+            ctx,
+            allowed_banks,
+            min_improvement,
+            cooldown_seconds,
+            amount,
+        )
+    }
+
+    /// (user) Cancel an auto-rebalance order; rent returns to the authority.
+    pub fn marginfi_account_close_rebalance_order(
+        ctx: Context<CloseRebalanceOrder>,
+    ) -> MarginfiResult {
+        marginfi_account::close_rebalance_order(ctx)
+    }
+
+    /// (permissionless keeper) Begin an auto-rebalance. Validates same-mint, allowed venue, and
+    /// dst supply APR > src + min_improvement; opens the start/end sandwich. `end_rebalance` must be
+    /// the last ix; CPI forbidden.
+    pub fn marginfi_account_start_rebalance<'info>(
+        ctx: Context<'info, StartRebalance<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::start_rebalance(ctx)
+    }
+
+    /// (permissionless keeper) End an auto-rebalance. Re-checks dst >= src post-move, value
+    /// conservation, untouched balances, and health; the order persists.
+    pub fn marginfi_account_end_rebalance<'info>(
+        ctx: Context<'info, EndRebalance<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::end_rebalance(ctx)
+    }
+
+    /// (permissionless keeper) Close a stale rebalance order after the user account was closed or it
+    /// no longer holds a position in any allowed venue. Keeper keeps the rent.
+    pub fn marginfi_account_keeper_close_rebalance_order(
+        ctx: Context<KeeperCloseRebalanceOrder>,
+    ) -> MarginfiResult {
+        marginfi_account::keeper_close_rebalance_order(ctx)
+    }
+
     /// (permissionless keeper) Close an existing Order after the user account was closed, or it no
     /// longer has the associated positions, or the user has executed
     /// `marginfi_account_set_keeper_close_flags`. Keeper keeps the rent.

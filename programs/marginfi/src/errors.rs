@@ -427,7 +427,30 @@ pub enum MarginfiError {
     JuplendInitPositionDepositInsufficient, // 6511
     #[msg("Invalid Juplend withdraw intermediary ATA")]
     InvalidJuplendWithdrawIntermediaryAta, // 6512
-                                           // **************END JUPLEND ERRORS
+    // **************END JUPLEND ERRORS
+
+    // **************BEGIN AUTO-REBALANCE ERRORS
+    #[msg("Rebalance venue not supported for on-chain rate verification")]
+    RebalanceVenueUnsupported = 600, // 6600
+    #[msg("Rebalance cooldown has not elapsed")]
+    RebalanceCooldown, // 6601
+    #[msg("Rebalance did not move the full source balance")]
+    RebalanceIncompleteMove, // 6602
+    #[msg("Rebalance destination rate not better than source by the required margin")]
+    RebalanceNotImproving, // 6603
+    #[msg("Rebalance overshot: destination rate no longer >= source after the move")]
+    RebalanceOvershoot, // 6604
+    #[msg("Rebalance leaked value beyond the allowed fee + dust")]
+    RebalanceValueLeak, // 6605
+    #[msg("Rebalance src/dst mint mismatch")]
+    RebalanceMintMismatch, // 6606
+    #[msg("Rebalance bank not in the order's allowed venue set")]
+    RebalanceBankNotAllowed, // 6607
+    #[msg("Rebalance min improvement must be non-negative")]
+    RebalanceInvalidMinImprovement, // 6608
+    #[msg("Rebalance moved more than the order's amount")]
+    RebalanceExceedsAmount, // 6609
+                            // **************END AUTO-REBALANCE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {

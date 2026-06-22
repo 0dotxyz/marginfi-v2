@@ -3,6 +3,7 @@ use crate::ui_to_native;
 use crate::utils::find_order_pda;
 use anchor_lang::{prelude::*, system_program, InstructionData, ToAccountMetas};
 use anchor_spl::associated_token::get_associated_token_address_with_program_id;
+use drift_mocks::drift::client as drift;
 use drift_mocks::state::MinimalSpotMarket;
 use fixed::types::I80F48;
 use juplend_mocks::state::Lending as JuplendLending;
@@ -15,7 +16,9 @@ use marginfi_type_crate::pdas::{
     derive_juplend_rate_model, derive_kamino_lending_market_authority, DRIFT_PROGRAM_ID,
 };
 use marginfi_type_crate::types::OracleSetup;
-use marginfi_type_crate::types::{Bank, FeeState, MarginfiAccount, Order, OrderTrigger};
+use marginfi_type_crate::types::{
+    Bank, FeeState, MarginfiAccount, Order, OrderTrigger, WrappedI80F48,
+};
 use solana_commitment_config::CommitmentLevel;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program::{instruction::Instruction, sysvar};
@@ -995,6 +998,256 @@ impl MarginfiAccountFixture {
             .await
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub async fn make_place_rebalance_order_ix(
+        &self,
+        mint: Pubkey,
+        rebalance_order: Pubkey,
+        authority: Pubkey,
+        fee_payer: Pubkey,
+        allowed_banks: Vec<Pubkey>,
+        min_improvement: Option<WrappedI80F48>,
+        cooldown_seconds: Option<u64>,
+        amount: Option<u64>,
+    ) -> Instruction {
+        let group = self.load().await.group;
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::PlaceRebalanceOrder {
+                group,
+                marginfi_account: self.key,
+                authority,
+                mint,
+                rebalance_order,
+                fee_payer,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountPlaceRebalanceOrder {
+                allowed_banks,
+                min_improvement,
+                cooldown_seconds,
+                amount,
+            }
+            .data(),
+        }
+    }
+
+    pub async fn make_close_rebalance_order_ix(
+        &self,
+        rebalance_order: Pubkey,
+        authority: Pubkey,
+    ) -> Instruction {
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::CloseRebalanceOrder {
+                marginfi_account: self.key,
+                authority,
+                rebalance_order,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountCloseRebalanceOrder {}.data(),
+        }
+    }
+
+    pub async fn make_update_rebalance_order_ix(
+        &self,
+        rebalance_order: Pubkey,
+        authority: Pubkey,
+        allowed_banks: Option<Vec<Pubkey>>,
+        min_improvement: Option<WrappedI80F48>,
+        cooldown_seconds: Option<u64>,
+        amount: Option<u64>,
+    ) -> Instruction {
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::UpdateRebalanceOrder {
+                marginfi_account: self.key,
+                authority,
+                rebalance_order,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountUpdateRebalanceOrder {
+                allowed_banks,
+                min_improvement,
+                cooldown_seconds,
+                amount,
+            }
+            .data(),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn make_rebalance_start_ix(
+        &self,
+        src_bank: Pubkey,
+        dst_bank: Pubkey,
+        rebalance_order: Pubkey,
+        rebalance_record: Pubkey,
+        executor: Pubkey,
+        fee_payer: Pubkey,
+        oracle_metas: Vec<AccountMeta>,
+    ) -> Instruction {
+        self.make_rebalance_start_ix_with_reserves(
+            src_bank,
+            dst_bank,
+            rebalance_order,
+            rebalance_record,
+            executor,
+            fee_payer,
+            None,
+            None,
+            oracle_metas,
+        )
+        .await
+    }
+
+    /// Like [`make_rebalance_start_ix`] but passes the JupLend `TokenReserve` for the src/dst legs.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn make_rebalance_start_ix_with_reserves(
+        &self,
+        src_bank: Pubkey,
+        dst_bank: Pubkey,
+        rebalance_order: Pubkey,
+        rebalance_record: Pubkey,
+        executor: Pubkey,
+        fee_payer: Pubkey,
+        src_token_reserve: Option<Pubkey>,
+        dst_token_reserve: Option<Pubkey>,
+        oracle_metas: Vec<AccountMeta>,
+    ) -> Instruction {
+        let group = self.load().await.group;
+        let mut accounts = marginfi::accounts::StartRebalance {
+            group,
+            marginfi_account: self.key,
+            src_bank,
+            dst_bank,
+            src_token_reserve,
+            dst_token_reserve,
+            rebalance_order,
+            executor,
+            rebalance_record,
+            fee_payer,
+            instruction_sysvar: solana_instructions_sysvar::id(),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(Some(true));
+        accounts.extend(oracle_metas);
+        Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: marginfi::instruction::MarginfiAccountStartRebalance {}.data(),
+        }
+    }
+
+    pub async fn make_rebalance_end_ix(
+        &self,
+        src_bank: Pubkey,
+        dst_bank: Pubkey,
+        rebalance_order: Pubkey,
+        rebalance_record: Pubkey,
+        executor: Pubkey,
+        oracle_metas: Vec<AccountMeta>,
+    ) -> Instruction {
+        self.make_rebalance_end_ix_with_reserves(
+            src_bank,
+            dst_bank,
+            rebalance_order,
+            rebalance_record,
+            executor,
+            None,
+            None,
+            true,
+            oracle_metas,
+        )
+        .await
+    }
+
+    /// End-ix for a bounded (partial) rebalance: the source keeps its unmoved remainder, so it stays
+    /// active and must remain in the post-move health observation set.
+    pub async fn make_rebalance_partial_end_ix(
+        &self,
+        src_bank: Pubkey,
+        dst_bank: Pubkey,
+        rebalance_order: Pubkey,
+        rebalance_record: Pubkey,
+        executor: Pubkey,
+        oracle_metas: Vec<AccountMeta>,
+    ) -> Instruction {
+        self.make_rebalance_end_ix_with_reserves(
+            src_bank,
+            dst_bank,
+            rebalance_order,
+            rebalance_record,
+            executor,
+            None,
+            None,
+            false,
+            oracle_metas,
+        )
+        .await
+    }
+
+    /// Like [`make_rebalance_end_ix`] but passes the JupLend `TokenReserve` for the src/dst legs.
+    /// `exclude_src` drops the source from the post-move observation set (true after a full move,
+    /// when the source slot is emptied; false for a bounded move that leaves a remainder).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn make_rebalance_end_ix_with_reserves(
+        &self,
+        src_bank: Pubkey,
+        dst_bank: Pubkey,
+        rebalance_order: Pubkey,
+        rebalance_record: Pubkey,
+        executor: Pubkey,
+        src_token_reserve: Option<Pubkey>,
+        dst_token_reserve: Option<Pubkey>,
+        exclude_src: bool,
+        oracle_metas: Vec<AccountMeta>,
+    ) -> Instruction {
+        let group = self.load().await.group;
+        let mut accounts = marginfi::accounts::EndRebalance {
+            group,
+            marginfi_account: self.key,
+            rebalance_order,
+            rebalance_record,
+            executor,
+            src_bank,
+            dst_bank,
+            src_token_reserve,
+            dst_token_reserve,
+        }
+        .to_account_metas(Some(true));
+        accounts.extend(oracle_metas);
+        // Post-move health observation set: active balances + dst, minus the src when it was emptied.
+        let exclude = if exclude_src { vec![src_bank] } else { vec![] };
+        accounts.extend(
+            self.load_observation_account_metas(vec![dst_bank], exclude)
+                .await,
+        );
+        Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: marginfi::instruction::MarginfiAccountEndRebalance {}.data(),
+        }
+    }
+
+    pub async fn make_keeper_close_rebalance_order_ix(
+        &self,
+        rebalance_order: Pubkey,
+        fee_recipient: Pubkey,
+    ) -> Instruction {
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::KeeperCloseRebalanceOrder {
+                marginfi_account: self.key,
+                fee_recipient,
+                rebalance_order,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountKeeperCloseRebalanceOrder {}.data(),
+        }
+    }
+
     pub async fn load_observation_account_metas(
         &self,
         include_banks: Vec<Pubkey>,
@@ -1534,6 +1787,32 @@ impl MarginfiAccountFixture {
             .await;
 
         ix
+    }
+
+    /// Drift `update_spot_market_cumulative_interest` crank, the only Drift program ix (besides
+    /// deposit/withdraw) allowed inside a rebalance sandwich. Run it top-level for each Drift bank so
+    /// the spot market is fresh (`!is_stale`) when `start_rebalance` reads the rate before any leg.
+    /// USDC markets price off the system program, matching the venue deposit/withdraw oracle.
+    pub async fn make_drift_update_spot_market_cumulative_interest_ix(
+        &self,
+        bank: &BankFixture,
+    ) -> Instruction {
+        let bank_state = bank.load().await;
+        let spot_market: MinimalSpotMarket =
+            load_and_deserialize(self.ctx.clone(), &bank_state.integration_acc_1).await;
+        let spot_market_vault = derive_drift_spot_market_vault(spot_market.market_index).0;
+
+        Instruction {
+            program_id: DRIFT_PROGRAM_ID,
+            accounts: drift::accounts::UpdateSpotMarketCumulativeInterest {
+                state: derive_drift_state().0,
+                spot_market: bank_state.integration_acc_1,
+                oracle: system_program::ID,
+                spot_market_vault,
+            }
+            .to_account_metas(Some(true)),
+            data: drift::args::UpdateSpotMarketCumulativeInterest {}.data(),
+        }
     }
 
     pub async fn make_drift_deposit_ix(

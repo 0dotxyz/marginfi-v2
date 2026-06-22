@@ -59,28 +59,36 @@ pub struct SolendMinimalReserve {
     pub collateral_mint_total_supply: u64, // offset 258-266
     pub collateral_supply_pubkey: Pubkey,  // offset 266-298
 
-    // Config rates - we only care about first 4
-    pub config_optimal_utilization_rate: u8, // offset 298-299
-    pub config_loan_to_value_ratio: u8,      // offset 299-300
-    pub config_liquidation_bonus: u8,        // offset 300-301
-    pub config_liquidation_threshold: u8,    // offset 301-302
+    // ReserveConfig, in Solend's `pack_into_slice` byte order: the original (2-slope) rate fields
+    // sit here; the newer 3-slope fields (max_utilization_rate, super_max_borrow_rate) were appended
+    // further down for backwards compatibility, not inserted inline. Offsets verified against the
+    // deployed `mainnet` branch.
+    pub config_optimal_utilization_rate: u8, // 298
+    pub config_loan_to_value_ratio: u8,      // 299
+    pub config_liquidation_bonus: u8,        // 300
+    pub config_liquidation_threshold: u8,    // 301
+    pub config_min_borrow_rate: u8,          // 302
+    pub config_optimal_borrow_rate: u8,      // 303
+    pub config_max_borrow_rate: u8,          // 304
+    _gap_to_take_rate_a1: [u8; 32],          // 305..337
+    _gap_to_take_rate_a2: [u8; 29],          // 337..366
+    _gap_to_take_rate_b: [u8; 5],            // 366..371
+    pub config_protocol_take_rate: u8,       // 371
 
-    // Padding to reach protocol fees (skipping fields we don't need)
-    // Padding: 70 bytes total
-    // 70 = 64 + 6
-    _padding_to_fees_64: [u8; 64], // offset 302-366
-    _padding_to_fees_6: [u8; 6],   // offset 366-372
+    pub liquidity_accumulated_protocol_fees_wads: [u8; 16], // 372..388
 
-    pub liquidity_accumulated_protocol_fees_wads: [u8; 16], // offset 372-388
-
-    // Final padding to reach exactly 618 bytes
-    // Padding: 230 bytes total
-    // 230 = 128 + 64 + 32 + 6
-    _padding_final_128: [u8; 128], // offset 388-516
-    _padding_final_64: [u8; 64],   // offset 516-580
-    _padding_final_32: [u8; 32],   // offset 580-612
-    _padding_final_6: [u8; 6],     // offset 612-618
+    _gap_to_max_util_1: [u8; 64],          // 388..452
+    _gap_to_max_util_2: [u8; 17],          // 452..469
+    pub config_max_utilization_rate: u8,   // 469
+    pub config_super_max_borrow_rate: u64, // 470..478
+    _gap_after_super_max_1: [u8; 32],      // 478..510
+    _gap_after_super_max_2: [u8; 6],       // 510..516
+    _padding_final_64: [u8; 64],           // 516..580
+    _padding_final_32: [u8; 32],           // 580..612
+    _padding_final_6: [u8; 6],             // 612..618
 }
+
+const _: () = assert!(core::mem::size_of::<SolendMinimalReserve>() == 618);
 
 impl SolendMinimalReserve {
     /// Returns (total_liquidity, total_collateral) both as I80F48
@@ -113,9 +121,9 @@ impl SolendMinimalReserve {
             .ok_or(SolendMocksError::MathError.into())
     }
 
-    /// Calculate total liquidity supply
-    /// Returns total in liquidity_mint_decimals
-    /// Formula: available + borrowed - protocol_fees (matches Solend exactly)
+    /// Calculate total liquidity supply (in liquidity_mint_decimals). Mirrors Solend
+    /// `ReserveLiquidity::total_supply` = available + borrowed - protocol_fees:
+    /// https://github.com/solendprotocol/solana-program-library/blob/master/token-lending/sdk/src/state/reserve.rs#L688-L693
     pub fn calculate_total_liquidity(&self) -> Result<I80F48> {
         let available = I80F48::from_num(self.liquidity_available_amount);
         let borrowed = decimal_to_i80f48(self.liquidity_borrowed_amount_wads)?;
@@ -124,7 +132,10 @@ impl SolendMinimalReserve {
         Ok(available + borrowed - fees)
     }
 
-    /// Check if reserve is stale
+    /// Check if reserve is stale. Mirrors Solend `LastUpdate::is_stale`; with
+    /// `STALE_AFTER_SLOTS_ELAPSED` == 1, `last_update_slot < slot` is equivalent (but drops upstream's
+    /// explicit `stale` flag):
+    /// https://github.com/solendprotocol/solana-program-library/blob/master/token-lending/sdk/src/state/last_update.rs#L42-L45
     pub fn is_stale(&self) -> Result<bool> {
         let clock = Clock::get()?;
         // let stale = self.last_update_stale != 0;
@@ -132,14 +143,109 @@ impl SolendMinimalReserve {
         Ok(slot_expired)
     }
 
-    /// Get the initial collateral exchange rate (used when supply is 0)
+    /// Get the initial collateral exchange rate (used when supply is 0). Solend's
+    /// `INITIAL_COLLATERAL_RATIO`, currently 1:
+    /// https://github.com/solendprotocol/solana-program-library/blob/master/token-lending/sdk/src/state/mod.rs#L20-L23
     pub fn initial_exchange_rate(&self) -> I80F48 {
         // Solend uses INITIAL_COLLATERAL_RATE = 1
         I80F48::from_num(1)
     }
+
+    /// Net Solend supply (lender) APR (I80F48, 1.0 == 100%): `borrow_rate(util) * util *
+    /// (1 - protocol_take_rate)`, `util = borrowed / total_supply`. The caller must ensure the
+    /// reserve was refreshed this slot (see [`SolendMinimalReserve::is_stale`]). `None` on overflow
+    /// or a degenerate config. Mirrors `Reserve::current_borrow_rate` netted by `protocol_take_rate`:
+    /// https://github.com/solendprotocol/solana-program-library/blob/master/token-lending/sdk/src/state/reserve.rs#L222-L270
+    pub fn supply_rate(&self) -> Option<I80F48> {
+        let total_supply = self.calculate_total_liquidity().ok()?;
+        if total_supply <= I80F48::ZERO {
+            return None;
+        }
+        let borrowed = decimal_to_i80f48(self.liquidity_borrowed_amount_wads).ok()?;
+        let utilization = borrowed.checked_div(total_supply)?;
+        let pct = |x: u8| I80F48::from_num(x) / I80F48::from_num(100u8);
+        solend_supply_rate_from_parts(
+            utilization,
+            pct(self.config_optimal_utilization_rate),
+            pct(self.config_max_utilization_rate),
+            pct(self.config_min_borrow_rate),
+            pct(self.config_optimal_borrow_rate),
+            pct(self.config_max_borrow_rate),
+            I80F48::from_num(self.config_super_max_borrow_rate) / I80F48::from_num(100u64),
+            pct(self.config_protocol_take_rate),
+        )
+    }
 }
 
-/// Convert a Solend WAD-scaled `u128` (value × 10¹⁸) to `I80F48`.
+/// Pure Solend 3-slope borrow rate (`Reserve::current_borrow_rate`), all args I80F48 ratios: linear
+/// `min->optimal` up to `optimal_utilization`, `optimal->max` up to `max_utilization`, then
+/// `max->super_max` to 100% utilization. `None` on a non-monotone config.
+/// https://github.com/solendprotocol/solana-program-library/blob/master/token-lending/sdk/src/state/reserve.rs#L222-L270
+#[allow(clippy::too_many_arguments)]
+pub fn solend_borrow_rate_from_parts(
+    utilization: I80F48,
+    optimal_utilization: I80F48,
+    max_utilization: I80F48,
+    min_borrow_rate: I80F48,
+    optimal_borrow_rate: I80F48,
+    max_borrow_rate: I80F48,
+    super_max_borrow_rate: I80F48,
+) -> Option<I80F48> {
+    if utilization <= optimal_utilization {
+        if optimal_utilization == I80F48::ZERO {
+            return Some(min_borrow_rate);
+        }
+        let normalized_rate = utilization.checked_div(optimal_utilization)?;
+        let rate_range = optimal_borrow_rate.checked_sub(min_borrow_rate)?;
+        normalized_rate
+            .checked_mul(rate_range)?
+            .checked_add(min_borrow_rate)
+    } else if utilization <= max_utilization {
+        let weight = utilization
+            .checked_sub(optimal_utilization)?
+            .checked_div(max_utilization.checked_sub(optimal_utilization)?)?;
+        let rate_range = max_borrow_rate.checked_sub(optimal_borrow_rate)?;
+        weight
+            .checked_mul(rate_range)?
+            .checked_add(optimal_borrow_rate)
+    } else {
+        let weight = utilization
+            .checked_sub(max_utilization)?
+            .checked_div(I80F48::ONE.checked_sub(max_utilization)?)?;
+        let rate_range = super_max_borrow_rate.checked_sub(max_borrow_rate)?;
+        weight.checked_mul(rate_range)?.checked_add(max_borrow_rate)
+    }
+}
+
+/// Pure Solend net supply rate: `borrow_rate(util) * util * (1 - protocol_take_rate)`.
+#[allow(clippy::too_many_arguments)]
+pub fn solend_supply_rate_from_parts(
+    utilization: I80F48,
+    optimal_utilization: I80F48,
+    max_utilization: I80F48,
+    min_borrow_rate: I80F48,
+    optimal_borrow_rate: I80F48,
+    max_borrow_rate: I80F48,
+    super_max_borrow_rate: I80F48,
+    protocol_take_rate: I80F48,
+) -> Option<I80F48> {
+    let borrow_rate = solend_borrow_rate_from_parts(
+        utilization,
+        optimal_utilization,
+        max_utilization,
+        min_borrow_rate,
+        optimal_borrow_rate,
+        max_borrow_rate,
+        super_max_borrow_rate,
+    )?;
+    borrow_rate
+        .checked_mul(utilization)?
+        .checked_mul(I80F48::ONE.checked_sub(protocol_take_rate)?)
+}
+
+/// Convert a Solend WAD-scaled `u128` (value × 10¹⁸) to `I80F48`. Inverts Solend's `Decimal`
+/// (U192 WAD fixed-point, `WAD` = 10¹⁸):
+/// https://github.com/solendprotocol/solana-program-library/blob/master/token-lending/sdk/src/math/decimal.rs#L28-L77
 ///
 /// * Assumes the on-chain number is **always non-negative** (Solend never
 ///   writes negatives; protocol logic would fail long before that).
@@ -379,7 +485,10 @@ pub fn validate_solend_reserve(
 pub struct CollateralExchangeRate(pub I80F48);
 
 impl CollateralExchangeRate {
-    /// Create from reserve state
+    /// Create from reserve state. Fuses Solend `Reserve::collateral_exchange_rate` +
+    /// `ReserveCollateral::exchange_rate`: rate = mint_total_supply / total_liquidity, or
+    /// `INITIAL_COLLATERAL_RATIO` when either is zero:
+    /// https://github.com/solendprotocol/solana-program-library/blob/master/token-lending/sdk/src/state/reserve.rs#L874-L887
     pub fn from_reserve(reserve: &SolendMinimalReserve) -> Result<Self> {
         let total_liquidity: I80F48 = reserve.calculate_total_liquidity()?;
 
@@ -387,10 +496,10 @@ impl CollateralExchangeRate {
             // Use initial rate when no supply
             Ok(CollateralExchangeRate(reserve.initial_exchange_rate()))
         } else {
-            let mint_supply: I80F48 = I80F48::from_num(reserve.collateral_mint_total_supply);
+            let mint_total_supply: I80F48 = I80F48::from_num(reserve.collateral_mint_total_supply);
 
             // Safe to do the unchecked version here since we explicitly check for zeros above
-            let rate: I80F48 = mint_supply
+            let rate: I80F48 = mint_total_supply
                 .checked_div(total_liquidity)
                 .ok_or_else(math_error!())?;
 
@@ -398,7 +507,9 @@ impl CollateralExchangeRate {
         }
     }
 
-    /// Convert collateral to liquidity using this rate
+    /// Convert collateral to liquidity using this rate. Mirrors Solend
+    /// `CollateralExchangeRate::collateral_to_liquidity` (divide by rate):
+    /// https://github.com/solendprotocol/solana-program-library/blob/master/token-lending/sdk/src/state/reserve.rs#L903-L915
     pub fn collateral_to_liquidity(&self, collateral_amount: u64) -> Result<u64> {
         let collateral: I80F48 = I80F48::from_num(collateral_amount);
         let liquidity: I80F48 = collateral.checked_div(self.0).ok_or_else(math_error!())?;
@@ -408,7 +519,9 @@ impl CollateralExchangeRate {
             .ok_or(SolendMocksError::MathError.into())
     }
 
-    /// Convert liquidity to collateral using this rate
+    /// Convert liquidity to collateral using this rate. Mirrors Solend
+    /// `CollateralExchangeRate::liquidity_to_collateral` (multiply by rate):
+    /// https://github.com/solendprotocol/solana-program-library/blob/master/token-lending/sdk/src/state/reserve.rs#L917-L929
     pub fn liquidity_to_collateral(&self, liquidity_amount: u64) -> Result<u64> {
         let liquidity: I80F48 = I80F48::from_num(liquidity_amount);
         let collateral: I80F48 = liquidity.checked_mul(self.0).ok_or_else(math_error!())?;
@@ -416,5 +529,66 @@ impl CollateralExchangeRate {
         collateral
             .checked_to_num::<u64>()
             .ok_or(SolendMocksError::MathError.into())
+    }
+}
+
+#[cfg(test)]
+mod rate_tests {
+    use super::*;
+
+    fn approx(actual: I80F48, expected: f64) {
+        let a = actual.to_num::<f64>();
+        assert!((a - expected).abs() < 1e-6, "got {a}, expected {expected}");
+    }
+
+    #[test]
+    fn supply_rate_below_optimal() {
+        // util 0.5 (< optimal 0.8): borrow = 0.05 + (0.5/0.8)*(0.20-0.05) = 0.14375;
+        // supply = 0.14375 * 0.5 * (1 - 0.10) = 0.0646875.
+        let f = |x: f64| I80F48::from_num(x);
+        let r = solend_supply_rate_from_parts(
+            f(0.5),
+            f(0.8),
+            f(0.9),
+            f(0.05),
+            f(0.20),
+            f(0.50),
+            f(2.0),
+            f(0.10),
+        );
+        approx(r.unwrap(), 0.0646875);
+    }
+
+    /// The `supply_rate()` method (decodes the WAD `borrowed_amount_wads`, sums total_supply, reads
+    /// the carved-out config bytes) must agree with `solend_supply_rate_from_parts`.
+    #[test]
+    fn supply_rate_method_matches_from_parts() {
+        use bytemuck::Zeroable;
+        // available 500 + borrowed 500 - 0 fees -> total_supply 1000; util = 0.5.
+        let wad = |x: u128| (x * 1_000_000_000_000_000_000u128).to_le_bytes();
+        let mut r = SolendMinimalReserve::zeroed();
+        r.liquidity_available_amount = 500;
+        r.liquidity_borrowed_amount_wads = wad(500);
+        r.config_optimal_utilization_rate = 80;
+        r.config_max_utilization_rate = 90;
+        r.config_min_borrow_rate = 5;
+        r.config_optimal_borrow_rate = 20;
+        r.config_max_borrow_rate = 50;
+        r.config_super_max_borrow_rate = 200;
+        r.config_protocol_take_rate = 10;
+        let pct = |x: u8| I80F48::from_num(x) / I80F48::from_num(100u8);
+        assert_eq!(
+            r.supply_rate(),
+            solend_supply_rate_from_parts(
+                I80F48::from_num(0.5),
+                pct(80),
+                pct(90),
+                pct(5),
+                pct(20),
+                pct(50),
+                I80F48::from_num(200) / I80F48::from_num(100u64),
+                pct(10),
+            )
+        );
     }
 }

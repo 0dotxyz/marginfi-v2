@@ -241,6 +241,39 @@ pub struct SetKeeperCloseFlagsEvent {
 }
 
 #[event]
+pub struct MarginfiAccountPlaceRebalanceOrderEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+    pub mint: Pubkey,
+    pub allowed_banks: Vec<Pubkey>,
+    pub min_improvement: WrappedI80F48,
+    pub cooldown_seconds: u64,
+    pub amount: u64,
+}
+
+#[event]
+pub struct MarginfiAccountUpdateRebalanceOrderEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+    pub allowed_banks: Vec<Pubkey>,
+    pub min_improvement: WrappedI80F48,
+    pub cooldown_seconds: u64,
+    pub amount: u64,
+}
+
+#[event]
+pub struct MarginfiAccountCloseRebalanceOrderEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+}
+
+#[event]
+pub struct KeeperCloseRebalanceOrderEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+}
+
+#[event]
 pub struct AdminCloseAccountEvent {
     pub header: AccountEventHeader,
     pub global_fee_wallet: Pubkey,
