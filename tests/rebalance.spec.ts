@@ -56,6 +56,7 @@ import {
 } from "./utils/pdas";
 import { USER_ACCOUNT } from "./utils/mocks";
 import { expectFailedTxWithError, getTokenBalance } from "./utils/genericTests";
+import { bnToBigIntSafe, bnToDecimalStringSafe } from "./utils/bn-utils";
 import {
   createLookupTableForInstructions,
   getBankrunBlockhash,
@@ -791,7 +792,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
     // Share value is 1 in-tx, so shares == native; with no skim same-mint shares are conserved.
     assert.equal(
       dstAfter.toString(),
-      usdc(500).toString(),
+      bnToDecimalStringSafe(usdc(500)),
       "exactly the ordered amount moved to dst",
     );
     assert.equal(
@@ -977,7 +978,7 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
       mint,
       acc,
       bankrunContext.payer.publicKey,
-      BigInt(amount.toString()),
+      bnToBigIntSafe(amount),
     );
     await bankRunProvider.sendAndConfirm(new Transaction().add(ix));
   };
@@ -987,7 +988,7 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
       ecosystem.wsolMint.publicKey,
       acc,
       bankrunContext.payer.publicKey,
-      BigInt(amount.toString()),
+      bnToBigIntSafe(amount),
     );
     await bankRunProvider.sendAndConfirm(new Transaction().add(ix));
   };
