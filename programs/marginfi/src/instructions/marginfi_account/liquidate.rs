@@ -151,6 +151,7 @@ pub fn lending_account_liquidate<'info>(
         ctx.accounts.token_program.key,
     )?;
     let group = &*marginfi_group_loader.load()?;
+    let on_ramp_transition = group.on_ramp_transition();
     {
         ctx.accounts.asset_bank.load_mut()?.accrue_interest(
             current_timestamp,
@@ -182,6 +183,7 @@ pub fn lending_account_liquidate<'info>(
         &mut None,
         HealthPriceMode::Live { liq_cache: None },
         false,
+        on_ramp_transition,
     )?;
 
     let asset_bank = ctx.accounts.asset_bank.load()?;
@@ -190,6 +192,7 @@ pub fn lending_account_liquidate<'info>(
         &asset_bank,
         &clock,
         liquidatee_remaining_accounts,
+        on_ramp_transition,
     )
     .ok();
     drop(asset_bank);
@@ -200,6 +203,7 @@ pub fn lending_account_liquidate<'info>(
         &liab_bank,
         &clock,
         liquidatee_remaining_accounts,
+        on_ramp_transition,
     )
     .ok();
     drop(liab_bank);
@@ -217,6 +221,7 @@ pub fn lending_account_liquidate<'info>(
             &asset_bank,
             &clock,
             ctx.remaining_accounts,
+            on_ramp_transition,
         )?;
         check!(asset_price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
 
@@ -225,7 +230,12 @@ pub fn lending_account_liquidate<'info>(
         let liab_price: I80F48 = {
             let oracle_ais = &ctx.remaining_accounts[asset_bank_remaining_accounts_len
                 ..(asset_bank_remaining_accounts_len + liab_bank_remaining_accounts_len)];
-            let liab_pf = OraclePriceFeedAdapter::try_from_bank(&liab_bank, oracle_ais, &clock)?;
+            let liab_pf = OraclePriceFeedAdapter::try_from_bank(
+                &liab_bank,
+                oracle_ais,
+                &clock,
+                group.on_ramp_transition(),
+            )?;
             liab_pf.get_price_of_type(
                 OraclePriceType::RealTime,
                 Some(PriceBias::High),
@@ -448,6 +458,7 @@ pub fn lending_account_liquidate<'info>(
         liquidatee_remaining_accounts,
         &ctx.accounts.liab_bank.key(),
         pre_liquidation_health,
+        on_ramp_transition,
     )?;
 
     // TODO consider if health cache update here is worth blowing the extra CU
@@ -464,6 +475,7 @@ pub fn lending_account_liquidate<'info>(
         &liquidator_marginfi_account,
         liquidator_remaining_accounts,
         &mut None,
+        on_ramp_transition,
     )?;
 
     emit!(LendingAccountLiquidateEvent {

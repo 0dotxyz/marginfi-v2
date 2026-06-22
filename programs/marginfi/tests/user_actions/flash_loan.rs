@@ -61,7 +61,13 @@ async fn flashloan_success_1op() -> anyhow::Result<()> {
         .await;
 
     let flash_loan_result = borrower_mfi_account_f
-        .try_flashloan(vec![borrow_ix, repay_ix], vec![], vec![], None)
+        .try_flashloan(
+            test_f.marginfi_group.key,
+            vec![borrow_ix, repay_ix],
+            vec![],
+            vec![],
+            None,
+        )
         .await;
 
     assert!(flash_loan_result.is_ok());
@@ -113,7 +119,7 @@ async fn flashloan_success_3op() -> anyhow::Result<()> {
     ixs.push(ComputeBudgetInstruction::set_compute_unit_limit(1_400_000));
 
     let flash_loan_result = borrower_mfi_account_f
-        .try_flashloan(ixs, vec![], vec![], None)
+        .try_flashloan(test_f.marginfi_group.key, ixs, vec![], vec![], None)
         .await;
 
     assert!(flash_loan_result.is_ok());
@@ -147,7 +153,13 @@ async fn flashloan_fail_account_health() -> anyhow::Result<()> {
         .await;
 
     let flash_loan_result = borrower_mfi_account_f
-        .try_flashloan(vec![borrow_ix], vec![], vec![sol_bank.key], None)
+        .try_flashloan(
+            test_f.marginfi_group.key,
+            vec![borrow_ix],
+            vec![],
+            vec![sol_bank.key],
+            None,
+        )
         .await;
 
     assert_custom_error!(
@@ -196,7 +208,13 @@ async fn flashloan_ok_missing_flag() -> anyhow::Result<()> {
         .await;
 
     let flash_loan_result = borrower_mfi_account_f
-        .try_flashloan(vec![borrow_ix, repay_ix], vec![], vec![], None)
+        .try_flashloan(
+            test_f.marginfi_group.key,
+            vec![borrow_ix, repay_ix],
+            vec![],
+            vec![],
+            None,
+        )
         .await;
 
     assert!(flash_loan_result.is_ok());
@@ -317,7 +335,7 @@ async fn flashloan_fail_missing_invalid_sysvar_ixs() -> anyhow::Result<()> {
     };
 
     let end_ix = borrower_mfi_account_f
-        .make_lending_account_end_flashloan_ix(vec![], vec![])
+        .make_lending_account_end_flashloan_ix(test_f.marginfi_group.key, vec![], vec![])
         .await;
 
     ixs.insert(0, start_ix);
@@ -373,7 +391,7 @@ async fn flashloan_fail_invalid_end_fl_order() -> anyhow::Result<()> {
         .await;
 
     let end_ix = borrower_mfi_account_f
-        .make_lending_account_end_flashloan_ix(vec![], vec![])
+        .make_lending_account_end_flashloan_ix(test_f.marginfi_group.key, vec![], vec![])
         .await;
 
     ixs.insert(0, start_ix);
@@ -429,7 +447,7 @@ async fn flashloan_fail_invalid_end_fl_different_m_account() -> anyhow::Result<(
         .await;
 
     let end_ix = lender_mfi_account_f
-        .make_lending_account_end_flashloan_ix(vec![], vec![])
+        .make_lending_account_end_flashloan_ix(test_f.marginfi_group.key, vec![], vec![])
         .await;
 
     ixs.insert(0, start_ix);
@@ -485,7 +503,7 @@ async fn flashloan_fail_already_in_flashloan() -> anyhow::Result<()> {
         .await;
 
     let end_ix = borrower_mfi_account_f
-        .make_lending_account_end_flashloan_ix(vec![], vec![])
+        .make_lending_account_end_flashloan_ix(test_f.marginfi_group.key, vec![], vec![])
         .await;
 
     ixs.insert(0, start_ix.clone());
@@ -557,6 +575,7 @@ async fn flashloan_fail_account_transfer_during_flashloan() -> anyhow::Result<()
 
     let flash_loan_result = borrower_mfi_account_f
         .try_flashloan(
+            test_f.marginfi_group.key,
             vec![borrow_ix, transfer_account_ix],
             vec![],
             vec![sol_bank.key],
@@ -660,6 +679,7 @@ async fn flashloan_fail_bankruptcy_during_flashloan() -> anyhow::Result<()> {
 
     let flash_loan_result = borrower_mfi_account_f
         .try_flashloan(
+            test_f.marginfi_group.key,
             vec![borrow_ix, bankrupt_via_cpi_ix],
             vec![],
             vec![sol_bank.key],

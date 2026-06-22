@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::{HealthCache, HealthPriceMode, MarginfiAccount};
+use marginfi_type_crate::types::{HealthCache, HealthPriceMode, MarginfiAccount, MarginfiGroup};
 
 use crate::{
     constants::PROGRAM_VERSION,
@@ -32,6 +32,9 @@ pub fn lending_account_pulse_health<'info>(
 ) -> MarginfiResult {
     let clock = Clock::get()?;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
+    let group = ctx.accounts.group.load()?;
+
+    let on_ramp_transition = group.on_ramp_transition();
 
     let mut health_cache = HealthCache::zeroed();
     health_cache.timestamp = clock.unix_timestamp;
@@ -42,6 +45,7 @@ pub fn lending_account_pulse_health<'info>(
         &marginfi_account,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
+        on_ramp_transition,
     );
     match engine_result {
         Ok(()) => {
@@ -83,6 +87,7 @@ pub fn lending_account_pulse_health<'info>(
         &mut Some(&mut health_cache),
         HealthPriceMode::Live { liq_cache: None },
         false,
+        on_ramp_transition,
     );
     let mut liquidatable_flag_update: Option<u8> = None;
     if let Err(err) = liq_result {
@@ -109,6 +114,7 @@ pub fn lending_account_pulse_health<'info>(
         &marginfi_account,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
+        on_ramp_transition,
     );
     let mut equity_flags_decisive = false;
     if let Err(err) = bankruptcy_result {
@@ -168,7 +174,12 @@ pub fn lending_account_pulse_health<'info>(
 
 #[derive(Accounts)]
 pub struct PulseHealth<'info> {
-    #[account(mut)]
+    pub group: AccountLoader<'info, MarginfiGroup>,
+
+    #[account(
+        mut,
+        has_one = group @ MarginfiError::InvalidGroup,
+    )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 }
 

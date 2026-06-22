@@ -61,6 +61,7 @@ pub fn lending_account_borrow<'info>(
 
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
     let group = marginfi_group_loader.load()?;
+    let on_ramp_transition = group.on_ramp_transition();
 
     let program_fee_rate: I80F48 = group.fee_state_cache.program_fee_rate.into();
 
@@ -206,14 +207,20 @@ pub fn lending_account_borrow<'info>(
         &marginfi_account,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
+        on_ramp_transition,
     )?;
     health_cache.program_version = PROGRAM_VERSION;
 
     let bank_pk = ctx.accounts.bank.key();
     let mut bank = ctx.accounts.bank.load_mut()?;
-    let prices =
-        fetch_unbiased_price_for_bank_with_cache(&bank_pk, &bank, &clock, ctx.remaining_accounts)
-            .ok();
+    let prices = fetch_unbiased_price_for_bank_with_cache(
+        &bank_pk,
+        &bank,
+        &clock,
+        ctx.remaining_accounts,
+        on_ramp_transition,
+    )
+    .ok();
 
     let rate_limit_price = prices
         .as_ref()
