@@ -274,9 +274,7 @@ pub fn validate_bank_state(bank: &Bank, kind: InstructionKind) -> MarginfiResult
     }
 
     match kind {
-        InstructionKind::FailsInReduceState
-            if bank.config.operational_state == BankOperationalState::ReduceOnly =>
-        {
+        InstructionKind::FailsInReduceState if bank.config.operational_state.is_reduce_only() => {
             return err!(MarginfiError::BankReduceOnly);
         }
 
@@ -289,14 +287,16 @@ pub fn validate_bank_state(bank: &Bank, kind: InstructionKind) -> MarginfiResult
         InstructionKind::FailsIfPausedOrReduceState
             if matches!(
                 bank.config.operational_state,
-                BankOperationalState::Paused | BankOperationalState::ReduceOnly
+                BankOperationalState::Paused
+                    | BankOperationalState::ReduceOnly
+                    | BankOperationalState::ReduceOnlyWithBorrowingPower
             ) =>
         {
             return match bank.config.operational_state {
                 BankOperationalState::Paused => {
                     err!(MarginfiError::BankPaused)
                 }
-                BankOperationalState::ReduceOnly => {
+                state if state.is_reduce_only() => {
                     err!(MarginfiError::BankReduceOnly)
                 }
                 _ => unreachable!(),

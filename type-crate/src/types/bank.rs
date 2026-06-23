@@ -243,9 +243,20 @@ pub enum BankOperationalState {
     /// Awaiting one-time setup (JupLend `juplend_init_position` seed deposit). All operations are
     /// blocked, and the state is unreachable from `lending_pool_configure_bank`.
     Uninitialized,
+    /// Same instruction restrictions as ReduceOnly, but assets still count for initial health.
+    ReduceOnlyWithBorrowingPower,
 }
 unsafe impl Zeroable for BankOperationalState {}
 unsafe impl Pod for BankOperationalState {}
+
+impl BankOperationalState {
+    pub fn is_reduce_only(self) -> bool {
+        matches!(
+            self,
+            BankOperationalState::ReduceOnly | BankOperationalState::ReduceOnlyWithBorrowingPower
+        )
+    }
+}
 
 #[repr(u8)]
 #[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
