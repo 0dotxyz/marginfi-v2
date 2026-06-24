@@ -271,9 +271,7 @@ impl<'info> DriftClaimBadDebt<'info> {
     }
 
     fn claimant_token_balance(&self) -> MarginfiResult<u64> {
-        Ok(accessor::amount(
-            &self.claimant_token_account.to_account_info(),
-        )?)
+        accessor::amount(&self.claimant_token_account.to_account_info())
     }
 
     fn emit_claim_event(
