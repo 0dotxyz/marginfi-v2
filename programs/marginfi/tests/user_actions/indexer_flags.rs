@@ -42,9 +42,7 @@ async fn indexer_flags_pulse_sets_activity_and_trivial_balance() -> anyhow::Resu
         .try_bank_deposit(user_usdc.key, usdc_bank_f, 0.000001, None)
         .await?;
 
-    user_f
-        .try_lending_account_pulse_health(test_f.marginfi_group.key)
-        .await?;
+    user_f.try_lending_account_pulse_health().await?;
 
     let account = user_f.load().await;
     assert_eq!(account.indexer_flags.has_trivial_balance, 1);
@@ -77,9 +75,7 @@ async fn indexer_flags_pulse_stale_account_clears_activity() -> anyhow::Result<(
         ctx.set_sysvar(&clock);
     }
 
-    user_f
-        .try_lending_account_pulse_health(test_f.marginfi_group.key)
-        .await?;
+    user_f.try_lending_account_pulse_health().await?;
 
     let account = user_f.load().await;
     assert_eq!(account.indexer_flags.was_active_30d, 0);
@@ -270,9 +266,7 @@ async fn indexer_flags_pulse_clears_60d_activity_after_60d_empty() -> anyhow::Re
         ctx.set_sysvar(&clock);
     }
 
-    user_f
-        .try_lending_account_pulse_health(test_f.marginfi_group.key)
-        .await?;
+    user_f.try_lending_account_pulse_health().await?;
 
     let account = user_f.load().await;
     assert_eq!(account.indexer_flags.is_empty, 1);
@@ -304,9 +298,7 @@ async fn indexer_flags_activity_tracked_independently_of_balance() -> anyhow::Re
         ctx.set_sysvar(&clock);
     }
 
-    user_f
-        .try_lending_account_pulse_health(test_f.marginfi_group.key)
-        .await?;
+    user_f.try_lending_account_pulse_health().await?;
 
     let account = user_f.load().await;
     assert_eq!(account.indexer_flags.is_empty, 0);

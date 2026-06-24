@@ -292,7 +292,7 @@ async fn liquidation_still_blocked_during_pause() -> anyhow::Result<()> {
         .make_init_liquidation_record_ix(record_pk, risk_admin)
         .await;
     let start_ix = liquidatee
-        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, risk_admin)
+        .make_start_liquidation_ix(record_pk, risk_admin)
         .await;
     let withdraw_ix = liquidatee
         .make_bank_withdraw_ix(liquidator_sol_acc.key, sol_bank, 0.5, None)
@@ -302,7 +302,6 @@ async fn liquidation_still_blocked_during_pause() -> anyhow::Result<()> {
         .await;
     let end_ix = liquidatee
         .make_end_liquidation_ix(
-            test_f.marginfi_group.key,
             record_pk,
             risk_admin,
             test_f.marginfi_group.fee_state,

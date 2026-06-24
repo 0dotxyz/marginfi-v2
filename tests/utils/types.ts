@@ -46,6 +46,8 @@ export const TOKENLESS_REPAYMENTS_ALLOWED = 32;
 export const TOKENLESS_REPAYMENTS_COMPLETE = 64;
 export const IS_T22_FLAG = 128;
 export const BANK_SEED_KNOWN_FLAG = 256;
+export const STAKED_ORACLE_DISABLED = 1 << 9;
+export const STAKED_ORACLE_PRICE_USES_ONRAMP = 1 << 10;
 
 export const ASSET_TAG_DEFAULT = 0;
 export const ASSET_TAG_SOL = 1;

@@ -55,10 +55,9 @@ async fn bank_cache_records_last_oracle_price_on_borrow() -> anyhow::Result<()> 
     let bank_after = sol_bank.load().await;
     let cache = bank_after.cache;
 
-    let on_ramp_transition = test_f.marginfi_group.load().await.on_ramp_transition();
     let cached_price: I80F48 = cache.last_oracle_price.into();
     let cached_confidence: I80F48 = cache.last_oracle_price_confidence.into();
-    let expected_price = I80F48::from_num(sol_bank.get_price(on_ramp_transition).await);
+    let expected_price = I80F48::from_num(sol_bank.get_price().await);
 
     assert_eq_noise!(cached_price, expected_price);
     assert_eq!(cached_confidence, I80F48::ZERO);
@@ -82,8 +81,7 @@ async fn bank_cache_resets_after_full_repay() -> anyhow::Result<()> {
 
     let bank_after_repay = sol_bank.load().await;
     // No change (uses the price from the prior borrow price!)
-    let on_ramp_transition = test_f.marginfi_group.load().await.on_ramp_transition();
-    let expected_price: I80F48 = I80F48::from_num(sol_bank.get_price(on_ramp_transition).await);
+    let expected_price: I80F48 = I80F48::from_num(sol_bank.get_price().await);
     let cached_price: I80F48 = bank_after_repay.cache.last_oracle_price.into();
     assert_eq_noise!(cached_price, expected_price);
     assert_eq!(
@@ -134,8 +132,7 @@ async fn bank_cache_pulse_refreshes_price_from_oracle() -> anyhow::Result<()> {
     let cached_price_after_pulse: I80F48 = bank_after_pulse.cache.last_oracle_price.into();
     let cached_conf_after_pulse: I80F48 =
         bank_after_pulse.cache.last_oracle_price_confidence.into();
-    let on_ramp_transition = test_f.marginfi_group.load().await.on_ramp_transition();
-    let expected_price: I80F48 = I80F48::from_num(sol_bank_f.get_price(on_ramp_transition).await);
+    let expected_price: I80F48 = I80F48::from_num(sol_bank_f.get_price().await);
 
     assert_eq_noise!(cached_price_after_pulse, expected_price);
     // Note: No confidence bands in the Rust tests
@@ -212,8 +209,7 @@ async fn bank_cache_updates_on_liquidation() -> anyhow::Result<()> {
     let sol_price_post: I80F48 = sol_bank_post.cache.last_oracle_price.into();
     let usdc_price_post: I80F48 = usdc_bank_post.cache.last_oracle_price.into();
 
-    let on_ramp_transition = test_f.marginfi_group.load().await.on_ramp_transition();
-    let expected_price: I80F48 = I80F48::from_num(sol_bank_f.get_price(on_ramp_transition).await);
+    let expected_price: I80F48 = I80F48::from_num(sol_bank_f.get_price().await);
 
     // SOL bank (asset bank) cache price still set even though it has no shares now
     assert_eq_noise!(sol_price_post, expected_price);
@@ -225,7 +221,7 @@ async fn bank_cache_updates_on_liquidation() -> anyhow::Result<()> {
     );
 
     // USDC price should match oracle price
-    let expected_usdc_price = I80F48::from_num(usdc_bank_f.get_price(on_ramp_transition).await);
+    let expected_usdc_price = I80F48::from_num(usdc_bank_f.get_price().await);
     assert_eq_noise!(usdc_price_post, expected_usdc_price);
 
     Ok(())

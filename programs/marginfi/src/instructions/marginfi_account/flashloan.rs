@@ -12,7 +12,7 @@ use anchor_lang::prelude::*;
 use marginfi_type_crate::{
     constants::ix_discriminators::END_FLASHLOAN,
     types::{
-        MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE,
+        MarginfiAccount, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE,
         ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
@@ -116,16 +116,10 @@ pub fn lending_account_end_flashloan<'info>(
     validate_not_cpi_by_stack_height()?;
 
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-    let group = ctx.accounts.group.load()?;
 
     marginfi_account.unset_flag(ACCOUNT_IN_FLASHLOAN, false);
 
-    check_account_init_health(
-        &marginfi_account,
-        ctx.remaining_accounts,
-        &mut None,
-        group.on_ramp_transition(),
-    )?;
+    check_account_init_health(&marginfi_account, ctx.remaining_accounts, &mut None)?;
 
     Ok(())
 }
@@ -134,7 +128,6 @@ pub fn lending_account_end_flashloan<'info>(
 pub struct LendingAccountEndFlashloan<'info> {
     #[account(
         mut,
-        has_one = group @ MarginfiError::InvalidGroup,
         has_one = authority @ MarginfiError::Unauthorized,
         constraint = {
             let acc = marginfi_account.load()?;
@@ -147,8 +140,6 @@ pub struct LendingAccountEndFlashloan<'info> {
         } @MarginfiError::IllegalFlashloan
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
-
-    pub group: AccountLoader<'info, MarginfiGroup>,
 
     pub authority: Signer<'info>,
 }

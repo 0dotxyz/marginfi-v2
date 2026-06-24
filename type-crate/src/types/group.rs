@@ -3,10 +3,7 @@ use super::Pubkey;
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::{
-    assert_struct_size,
-    constants::{discriminators, STAKED_ORACLE_DISABLED, STAKED_ORACLE_PRICE_USES_ONRAMP},
-};
+use crate::{assert_struct_size, constants::discriminators};
 
 use super::{GroupRateLimiter, PanicStateCache, WrappedI80F48};
 
@@ -23,9 +20,7 @@ pub struct MarginfiGroup {
     pub admin: Pubkey,
     /// Bitmask for group settings flags.
     /// * Bit 0 (1): `PROGRAM_FEES_ENABLED` — If set, program-level fees are enabled.
-    /// * Bit 1 (2): `DISABLE_STAKE` — If set, all staked banks are temporarily disabled - pricing will panic. This is unset once the SVSP upgrade is live and the below flag is set.
-    /// * Bit 2 (4): `ENABLE_ONRAMP` — If set, all staked banks include SPL single-pool's on-ramp account in NAV. When set, auto-unsets the above flag.
-    /// * Bits 2-63: Reserved for future use.
+    /// * Bits 1-63: Reserved for future use.
     pub group_flags: u64,
     /// Caches information from the global `FeeState` so the FeeState can be omitted on certain ixes
     pub fee_state_cache: FeeStateCache,
@@ -96,28 +91,9 @@ pub struct MarginfiGroup {
     pub _padding_1: [[u64; 2]; 32],
 }
 
-// To be removed once SVSP update is rolled out (likely in 1.10)
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OnRampTransition {
-    PreTransition,
-    StakeOraclesDisabled,
-    OnRampEnabled,
-}
-
 impl MarginfiGroup {
     pub const LEN: usize = std::mem::size_of::<MarginfiGroup>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::GROUP;
-
-    // To be removed once SVSP update is rolled out (likely in 1.10)
-    pub fn on_ramp_transition(&self) -> OnRampTransition {
-        if self.group_flags & STAKED_ORACLE_PRICE_USES_ONRAMP != 0 {
-            OnRampTransition::OnRampEnabled
-        } else if self.group_flags & STAKED_ORACLE_DISABLED != 0 {
-            OnRampTransition::StakeOraclesDisabled
-        } else {
-            OnRampTransition::PreTransition
-        }
-    }
 }
 
 #[repr(C)]

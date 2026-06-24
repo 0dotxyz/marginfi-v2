@@ -143,14 +143,12 @@ pub fn bank_get_all(config: Config, marginfi_group: Option<Pubkey>) -> Result<()
 
 pub fn bank_inspect_price_oracle(config: Config, bank_pk: Pubkey) -> Result<()> {
     let bank: Bank = config.mfi_program.account(bank_pk)?;
-    let group: MarginfiGroup = config.mfi_program.account(bank.group)?;
     let opfa = match bank.config.oracle_setup {
         OracleSetup::Fixed => OraclePriceFeedAdapter::try_from_bank_with_max_age(
             &bank,
             &[],
             &Clock::default(),
             u64::MAX,
-            group.on_ramp_transition(),
         )
         .map_err(|e| anyhow::anyhow!("failed to create oracle price feed adapter: {:?}", e))?,
         _ => {
@@ -171,7 +169,6 @@ pub fn bank_inspect_price_oracle(config: Config, bank_pk: Pubkey) -> Result<()> 
                 &oracle_ais,
                 &Clock::default(),
                 u64::MAX,
-                group.on_ramp_transition(),
             )
             .map_err(|e| anyhow::anyhow!("failed to create oracle price feed adapter: {:?}", e))?
         }
