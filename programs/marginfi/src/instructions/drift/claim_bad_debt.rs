@@ -1,5 +1,9 @@
 use crate::{
-    bank_signer, ix_utils::get_discrim_hash, state::bank::BankVaultType, utils::is_drift_asset_tag,
+    bank_signer,
+    events::{DriftClaimBadDebtEvent, GroupEventHeader},
+    ix_utils::get_discrim_hash,
+    state::bank::BankVaultType,
+    utils::is_drift_asset_tag,
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::{
@@ -46,8 +50,15 @@ pub fn drift_claim_bad_debt<'info>(
     ctx.accounts.create_claimant_token_account()?;
     ctx.accounts.create_destination_token_account()?;
     ctx.accounts.prefund_claim_status()?;
+    let pre_claim_balance = ctx.accounts.claimant_token_balance()?;
     ctx.accounts.cpi_new_claim(amount, proof)?;
-    ctx.accounts.cpi_transfer_to_destination()?;
+    let post_claim_balance = ctx.accounts.claimant_token_balance()?;
+    let received_amount = post_claim_balance
+        .checked_sub(pre_claim_balance)
+        .ok_or_else(|| error!(MarginfiError::InternalLogicError))?;
+    let swept_amount = ctx.accounts.cpi_transfer_to_destination()?;
+    ctx.accounts
+        .emit_claim_event(amount, received_amount, swept_amount)?;
     Ok(())
 }
 
@@ -239,10 +250,10 @@ impl<'info> DriftClaimBadDebt<'info> {
         Ok(())
     }
 
-    fn cpi_transfer_to_destination(&self) -> MarginfiResult {
+    fn cpi_transfer_to_destination(&self) -> MarginfiResult<u64> {
         let amount = accessor::amount(&self.claimant_token_account.to_account_info())?;
         if amount == 0 {
-            return Ok(());
+            return Ok(0);
         }
 
         let accounts = Transfer {
@@ -256,6 +267,39 @@ impl<'info> DriftClaimBadDebt<'info> {
         let cpi_ctx = CpiContext::new_with_signer(self.token_program.key(), accounts, signer_seeds);
 
         token::transfer(cpi_ctx, amount)?;
+        Ok(amount)
+    }
+
+    fn claimant_token_balance(&self) -> MarginfiResult<u64> {
+        Ok(accessor::amount(
+            &self.claimant_token_account.to_account_info(),
+        )?)
+    }
+
+    fn emit_claim_event(
+        &self,
+        requested_amount: u64,
+        received_amount: u64,
+        swept_amount: u64,
+    ) -> MarginfiResult {
+        let bank = self.bank.load()?;
+
+        emit!(DriftClaimBadDebtEvent {
+            header: GroupEventHeader {
+                signer: Some(self.payer.key()),
+                marginfi_group: bank.group,
+            },
+            bank: self.bank.key(),
+            claim_mint: self.claim_mint.key(),
+            distributor: self.distributor.key(),
+            claim_status: self.claim_status.key(),
+            liquidity_vault_authority: self.liquidity_vault_authority.key(),
+            global_fee_wallet: self.global_fee_wallet.key(),
+            requested_amount,
+            received_amount,
+            swept_amount,
+        });
+
         Ok(())
     }
 }
