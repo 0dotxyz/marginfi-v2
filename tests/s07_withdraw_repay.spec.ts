@@ -42,13 +42,13 @@ describe("Withdraw staked asset", () => {
 
     [settingsKey] = deriveStakedSettings(
       bankrunProgram.programId,
-      marginfiGroup.publicKey
+      marginfiGroup.publicKey,
     );
     [bankKey] = deriveBankWithSeed(
       bankrunProgram.programId,
       marginfiGroup.publicKey,
       validators[0].splMint,
-      new BN(0)
+      new BN(0),
     );
   });
 
@@ -63,7 +63,7 @@ describe("Withdraw staked asset", () => {
         bank: validators[0].bank,
         tokenAccount: userLstAta,
         amount: new BN(1 * 10 ** ecosystem.wsolDecimals),
-      })
+      }),
     );
 
     depositTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -81,11 +81,12 @@ describe("Withdraw staked asset", () => {
             oracles.wsolOracle.publicKey,
             validators[0].splMint,
             validators[0].splSolPool,
+            validators[0].splOnRampPool,
           ],
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
         amount: new BN(0.5 * 10 ** ecosystem.wsolDecimals),
-      })
+      }),
     );
     borrowTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     borrowTx.sign(user.wallet);
@@ -114,10 +115,11 @@ describe("Withdraw staked asset", () => {
             oracles.wsolOracle.publicKey,
             validators[0].splMint,
             validators[0].splSolPool,
+            validators[0].splOnRampPool,
           ],
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
-      })
+      }),
     );
 
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -128,7 +130,7 @@ describe("Withdraw staked asset", () => {
     assert.equal(lstAfter, lstBefore + amtNative);
 
     const userAcc = await user.mrgnBankrunProgram.account.marginfiAccount.fetch(
-      userAccount
+      userAccount,
     );
     const balances = userAcc.lendingAccount.balances;
     assert.equal(balances[0].active, 1);
@@ -179,10 +181,11 @@ describe("Withdraw staked asset", () => {
             oracles.wsolOracle.publicKey,
             validators[0].splMint,
             validators[0].splSolPool,
+            validators[0].splOnRampPool,
           ],
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
-      })
+      }),
     );
 
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -193,7 +196,7 @@ describe("Withdraw staked asset", () => {
     assert.equal(solAfter, solBefore - amtNative);
 
     const userAcc = await user.mrgnBankrunProgram.account.marginfiAccount.fetch(
-      userAccount
+      userAccount,
     );
     const balances = userAcc.lendingAccount.balances;
     assert.equal(balances[1].active, 1);
@@ -232,17 +235,17 @@ describe("Withdraw staked asset", () => {
     const userAccBefore =
       await user.mrgnBankrunProgram.account.marginfiAccount.fetch(userAccount);
     const bankBefore = await user.mrgnBankrunProgram.account.bank.fetch(
-      bankKeypairSol.publicKey
+      bankKeypairSol.publicKey,
     );
 
     // Note: the SOL balance may NOT be the last one in the list, due to sorting, so we have to find its position first
     const solIndex = userAccBefore.lendingAccount.balances.findIndex(
-      (balance) => balance.bankPk.equals(bankKeypairSol.publicKey)
+      (balance) => balance.bankPk.equals(bankKeypairSol.publicKey),
     );
 
     const amtExpected =
       wrappedI80F48toBigNumber(
-        userAccBefore.lendingAccount.balances[solIndex].liabilityShares
+        userAccBefore.lendingAccount.balances[solIndex].liabilityShares,
       ).toNumber() *
       wrappedI80F48toBigNumber(bankBefore.liabilityShareValue).toNumber();
 
@@ -252,6 +255,7 @@ describe("Withdraw staked asset", () => {
         oracles.wsolOracle.publicKey,
         validators[0].splMint,
         validators[0].splSolPool,
+        validators[0].splOnRampPool,
       ],
       [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
     ]);
@@ -265,7 +269,7 @@ describe("Withdraw staked asset", () => {
         // For repayAll, include all active balances, including the closing bank.
         remaining,
         repayAll: true,
-      })
+      }),
     );
 
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -276,7 +280,7 @@ describe("Withdraw staked asset", () => {
     assert.approximately(solAfter, solBefore - amtExpected, 2);
 
     const userAcc = await user.mrgnBankrunProgram.account.marginfiAccount.fetch(
-      userAccount
+      userAccount,
     );
     const balances = userAcc.lendingAccount.balances;
     assertI80F48Equal(balances[1].liabilityShares, 0);
@@ -308,11 +312,11 @@ describe("Withdraw staked asset", () => {
     const userAccBefore =
       await user.mrgnBankrunProgram.account.marginfiAccount.fetch(userAccount);
     const bankBefore = await user.mrgnBankrunProgram.account.bank.fetch(
-      bankKeypairSol.publicKey
+      bankKeypairSol.publicKey,
     );
     const amtExpected =
       wrappedI80F48toBigNumber(
-        userAccBefore.lendingAccount.balances[0].assetShares
+        userAccBefore.lendingAccount.balances[0].assetShares,
       ).toNumber() *
       wrappedI80F48toBigNumber(bankBefore.assetShareValue).toNumber();
 
@@ -323,8 +327,9 @@ describe("Withdraw staked asset", () => {
           oracles.wsolOracle.publicKey,
           validators[0].splMint,
           validators[0].splSolPool,
+          validators[0].splOnRampPool,
         ],
-      ].filter((group) => !group[0].equals(validators[0].bank))
+      ].filter((group) => !group[0].equals(validators[0].bank)),
     );
 
     let tx = new Transaction().add(
@@ -336,7 +341,7 @@ describe("Withdraw staked asset", () => {
         // For withdrawAll, include all active balances, including the closing bank.
         remaining,
         withdrawAll: true,
-      })
+      }),
     );
 
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -347,7 +352,7 @@ describe("Withdraw staked asset", () => {
     assert.equal(lstAfter, lstBefore + amtExpected);
 
     const userAcc = await user.mrgnBankrunProgram.account.marginfiAccount.fetch(
-      userAccount
+      userAccount,
     );
     const balances = userAcc.lendingAccount.balances;
     assertI80F48Equal(balances[0].assetShares, 0);

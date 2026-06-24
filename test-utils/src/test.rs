@@ -2284,9 +2284,10 @@ impl TestFixture {
     ) -> f64 {
         let outflow_bank = self.get_bank(outflow_mint);
         let collateral_bank = self.get_bank(collateral_mint);
+        let on_ramp_transition = self.marginfi_group.load().await.on_ramp_transition();
 
-        let outflow_mint_price = outflow_bank.get_price().await;
-        let collateral_mint_price = collateral_bank.get_price().await;
+        let outflow_mint_price = outflow_bank.get_price(on_ramp_transition).await;
+        let collateral_mint_price = collateral_bank.get_price(on_ramp_transition).await;
 
         let collateral_amount = get_sufficient_collateral_for_outflow(
             outflow_amount,

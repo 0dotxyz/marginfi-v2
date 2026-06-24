@@ -49,7 +49,7 @@ pub fn lending_pool_handle_bankruptcy<'info>(
         group: marginfi_group_loader,
         ..
     } = ctx.accounts;
-    let maybe_bank_mint = {
+    let (maybe_bank_mint, on_ramp_transition) = {
         let bank = bank_loader.load()?;
         let group = marginfi_group_loader.load()?;
         let signer = ctx.accounts.signer.key();
@@ -66,7 +66,10 @@ pub fn lending_pool_handle_bankruptcy<'info>(
             check!(is_admin_or_risk_admin, MarginfiError::Unauthorized);
         }
 
-        utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?
+        (
+            utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?,
+            group.on_ramp_transition(),
+        )
     };
 
     let clock = Clock::get()?;
@@ -81,6 +84,7 @@ pub fn lending_pool_handle_bankruptcy<'info>(
         &marginfi_account,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
+        on_ramp_transition,
     )?;
 
     let bank = bank_loader.load()?;
@@ -89,6 +93,7 @@ pub fn lending_pool_handle_bankruptcy<'info>(
         &bank,
         &clock,
         ctx.remaining_accounts,
+        on_ramp_transition,
     )
     .ok();
     drop(bank);

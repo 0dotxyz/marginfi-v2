@@ -14,7 +14,8 @@ use {
         pdas::{
             derive_juplend_claim_account, derive_juplend_lending_admin, derive_juplend_liquidity,
             derive_juplend_liquidity_vault, derive_juplend_rate_model,
-            derive_juplend_rewards_rate_model, JUPLEND_LIQUIDITY_PROGRAM_ID, KAMINO_PROGRAM_ID,
+            derive_juplend_rewards_rate_model, derive_staked_onramp_from_vote,
+            JUPLEND_LIQUIDITY_PROGRAM_ID, KAMINO_PROGRAM_ID,
         },
         types::{Bank, MarginfiAccount, OracleSetup},
     },
@@ -414,7 +415,16 @@ pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
         OracleSetup::FixedKamino | OracleSetup::FixedDrift | OracleSetup::FixedJuplend => {
             vec![keys[1]]
         }
-        OracleSetup::StakedWithPythPush => vec![keys[0], keys[1], keys[2]],
+        OracleSetup::StakedWithPythPush => {
+            let onramp = if keys[3] != Pubkey::default() {
+                keys[3]
+            } else if bank.integration_acc_1 != Pubkey::default() {
+                derive_staked_onramp_from_vote(bank.integration_acc_1)
+            } else {
+                Pubkey::default()
+            };
+            vec![keys[0], keys[1], keys[2], onramp]
+        }
         OracleSetup::PythLegacy
         | OracleSetup::SwitchboardV2
         | OracleSetup::PythPushOracle

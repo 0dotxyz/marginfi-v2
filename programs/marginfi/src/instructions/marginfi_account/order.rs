@@ -282,12 +282,15 @@ pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>)
         order: order_loader,
         execute_record: execute_record_loader,
         instruction_sysvar,
+        group: group_loader,
         ..
     } = &ctx.accounts;
 
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
     let mut order = order_loader.load_mut()?;
+    let group = group_loader.load()?;
 
+    let on_ramp_transition = group.on_ramp_transition();
     marginfi_account.set_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
 
     let (order_assets_in_equity, order_liabs_in_equity, order_asset_count, order_liab_count) =
@@ -295,6 +298,7 @@ pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>)
             &marginfi_account,
             ctx.remaining_accounts,
             &order.tags,
+            on_ramp_transition,
         )?;
 
     check!(
@@ -352,6 +356,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
         order: order_loader,
         execute_record: execute_record_loader,
         fee_state: fee_state_loader,
+        group: group_loader,
         ..
     } = &ctx.accounts;
 
@@ -361,6 +366,9 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
     let order = order_loader.load()?;
     let execute_record = execute_record_loader.load()?;
     let fee_state = fee_state_loader.load()?;
+    let group = group_loader.load()?;
+
+    let on_ramp_transition = group.on_ramp_transition();
 
     let mut health_cache = HealthCache::zeroed();
 
@@ -374,6 +382,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
             RequirementType::Maintenance,
             &mut Some(&mut health_cache),
             HealthPriceMode::Live { liq_cache: None },
+            on_ramp_transition,
         )?;
 
         let account_health = assets.checked_sub(liabs).ok_or_else(math_error!())?;
@@ -387,6 +396,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
                 &marginfi_account,
                 ctx.remaining_accounts,
                 &order.tags,
+                on_ramp_transition,
             )?,
             is_healthy,
         )

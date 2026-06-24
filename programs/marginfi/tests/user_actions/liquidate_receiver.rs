@@ -39,9 +39,12 @@ async fn liquidate_start_fails_on_healthy_account() -> anyhow::Result<()> {
     );
 
     let init_ix = user.make_init_liquidation_record_ix(record_pk, payer).await;
-    let start_ix = user.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = user
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
     let end_ix = user
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,
@@ -152,9 +155,12 @@ async fn liquidate_start_must_be_first() -> anyhow::Result<()> {
     let init_ix = liquidatee
         .make_init_liquidation_record_ix(record_pk, payer)
         .await;
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = liquidatee
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
     let end_ix = liquidatee
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,
@@ -352,9 +358,12 @@ async fn liquidate_end_missing_fails() -> anyhow::Result<()> {
     let init_ix = liquidatee
         .make_init_liquidation_record_ix(record_pk, payer)
         .await;
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = liquidatee
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
     let end_ix = liquidatee
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer, // Note: payer must sign to pay the sol fee
             test_f.marginfi_group.fee_state,
@@ -478,13 +487,16 @@ async fn liquidate_with_forbidden_ix_fails() -> anyhow::Result<()> {
     let init_ix = liquidatee
         .make_init_liquidation_record_ix(record_pk, payer)
         .await;
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = liquidatee
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
     // Sneaky sneaky...
     let forbidden_deposit_ix = liquidator
         .make_deposit_ix(liq_token_account.key, usdc_bank, 1.0, None)
         .await;
     let end_ix = liquidatee
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,
@@ -606,7 +618,9 @@ async fn liquidate_receiver_happy_path() -> anyhow::Result<()> {
     } // release borrow of test_f via ctx
 
     let payer = test_f.payer().clone();
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = liquidatee
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
     // withdraw some sol to the liquidator and repay some usdc
     let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
     // Seize .210 * 10 = $2.10
@@ -619,6 +633,7 @@ async fn liquidate_receiver_happy_path() -> anyhow::Result<()> {
         .await;
     let end_ix = liquidatee
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer, // Note: payer must sign to pay the sol fee
             test_f.marginfi_group.fee_state,
@@ -837,7 +852,9 @@ async fn liquidate_receiver_repay_without_oracles_should_succeed() -> anyhow::Re
         .set_account(&usdc_bank.key, &bank_ai.into());
 
     let payer = test_f.payer().clone();
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = liquidatee
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
     let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
     let withdraw_ix = liquidatee
         .make_bank_withdraw_ix(liquidator_sol_acc.key, sol_bank, 0.0001, None)
@@ -847,6 +864,7 @@ async fn liquidate_receiver_repay_without_oracles_should_succeed() -> anyhow::Re
         .await;
     let end_ix = liquidatee
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,
@@ -952,7 +970,9 @@ async fn liquidate_receiver_premium_too_high() -> anyhow::Result<()> {
     }
 
     let payer = test_f.payer().clone();
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = liquidatee
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
     let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
     // .3 * 10 = $3
     let withdraw_ix = liquidatee
@@ -964,6 +984,7 @@ async fn liquidate_receiver_premium_too_high() -> anyhow::Result<()> {
         .await;
     let end_ix = liquidatee
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,
@@ -1067,7 +1088,9 @@ async fn liquidate_receiver_rejects_zero_weight_asset() -> anyhow::Result<()> {
     }
 
     let payer = test_f.payer().clone();
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = liquidatee
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
     let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
     let withdraw_ix = liquidatee
         .make_bank_withdraw_ix(liquidator_sol_acc.key, sol_bank, 0.1, None)
@@ -1077,6 +1100,7 @@ async fn liquidate_receiver_rejects_zero_weight_asset() -> anyhow::Result<()> {
         .await;
     let end_ix = liquidatee
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,
@@ -1182,7 +1206,9 @@ async fn liquidate_receiver_closes_out_low_value_acc() -> anyhow::Result<()> {
     }
 
     let payer = test_f.payer().clone();
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = liquidatee
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
     let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
     // NOTE: In receivership liquidation, you MUST PASS the oracle for the withdrawn asset even for
     // a withdraw-all. The entire balance is still withdrawn!
@@ -1200,6 +1226,7 @@ async fn liquidate_receiver_closes_out_low_value_acc() -> anyhow::Result<()> {
         .await;
     let end_ix = liquidatee
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,
@@ -1313,7 +1340,9 @@ async fn liquidate_receiver_allows_negative_profit() -> anyhow::Result<()> {
     }
 
     let payer = test_f.payer().clone();
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = liquidatee
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
     let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
 
     // Seize 0.09 * 10 = $0.90
@@ -1326,6 +1355,7 @@ async fn liquidate_receiver_allows_negative_profit() -> anyhow::Result<()> {
         .await;
     let end_ix = liquidatee
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,
@@ -1439,7 +1469,9 @@ async fn liquidate_receiver_other_account_withdraw_all_does_not_clear_bank_cache
     }
 
     let payer = test_f.payer().clone();
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = liquidatee
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
 
     // Partial withdraw from liquidatee (does NOT clear liq_cache_locked)
     let liquidator_sol_dest = test_f.sol_mint.create_empty_token_account().await;
@@ -1460,6 +1492,7 @@ async fn liquidate_receiver_other_account_withdraw_all_does_not_clear_bank_cache
 
     let end_ix = liquidatee
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,
@@ -1588,7 +1621,9 @@ async fn liquidate_receiver_other_account_repay_all_does_not_clear_bank_cache_lo
     }
 
     let payer = test_f.payer().clone();
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = liquidatee
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
 
     // Partial withdraw from liquidatee
     let liquidator_sol_dest = test_f.sol_mint.create_empty_token_account().await;
@@ -1608,6 +1643,7 @@ async fn liquidate_receiver_other_account_repay_all_does_not_clear_bank_cache_lo
 
     let end_ix = liquidatee
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,
@@ -1737,7 +1773,9 @@ async fn liquidate_receiver_other_account_close_balance_via_cpi_does_not_clear_b
     }
 
     let payer = test_f.payer();
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = liquidatee
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
 
     // Partial liquidation operations on liquidatee.
     let liquidator_sol_dest = test_f.sol_mint.create_empty_token_account().await;
@@ -1764,6 +1802,7 @@ async fn liquidate_receiver_other_account_close_balance_via_cpi_does_not_clear_b
 
     let end_ix = liquidatee
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,
@@ -1920,7 +1959,9 @@ async fn liquidate_receiver_external_user_signed_withdraw_all_does_not_clear_ban
     }
 
     let payer = test_f.payer();
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = liquidatee
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
 
     // Normal liquidation ops on A.
     let liquidator_sol_dest = test_f.sol_mint.create_empty_token_account().await;
@@ -1948,6 +1989,7 @@ async fn liquidate_receiver_external_user_signed_withdraw_all_does_not_clear_ban
 
     let end_ix = liquidatee
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,
@@ -2063,12 +2105,15 @@ async fn liquidate_receiver_same_authority_withdraw_fails_unauthorized() -> anyh
     }
 
     let payer = test_f.payer();
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = liquidatee
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
     let withdraw_ix = liquidatee
         .make_bank_withdraw_ix(user_token_sol.key, sol_bank, 0.1, None)
         .await;
     let end_ix = liquidatee
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,
@@ -2153,7 +2198,9 @@ async fn liquidate_receiver_close_balance_forbidden() -> anyhow::Result<()> {
     }
 
     let payer = test_f.payer().clone();
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = liquidatee
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
 
     // Build a close_balance ix targeting the liquidator's own account on usdc_bank
     let liquidator_account = liquidator.load().await;
@@ -2171,6 +2218,7 @@ async fn liquidate_receiver_close_balance_forbidden() -> anyhow::Result<()> {
 
     let end_ix = liquidatee
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,
@@ -2292,7 +2340,9 @@ async fn liquidate_receiver_closed_balances_do_not_leave_stale_cache_lock() -> a
     }
 
     let payer = test_f.payer().clone();
-    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
+    let start_ix = liquidatee
+        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
+        .await;
     let liquidator_sol_acc = test_f.sol_mint.create_empty_token_account().await;
     // withdraw_all closes the sol balance entirely
     let withdraw_ix = liquidatee
@@ -2305,6 +2355,7 @@ async fn liquidate_receiver_closed_balances_do_not_leave_stale_cache_lock() -> a
     // Exclude both banks from end_ix remaining accounts since both balances are closed.
     let end_ix = liquidatee
         .make_end_liquidation_ix(
+            test_f.marginfi_group.key,
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,

@@ -22,6 +22,9 @@ env:
   # Trident-stack-only env. Kept here so the whole file shares one
   # convention; the libfuzzer + anchor stacks ignore these.
   TRIDENT_VERSION: "0.13.0-rc.4"
+  # cargo-fuzz 0.13.2 pulls cargo-platform 0.3.3, whose MSRV is rustc 1.91.
+  # Keep the libfuzzer job on a version compatible with the repo's 1.90 toolchain.
+  CARGO_FUZZ_VERSION: "0.13.1"
   # `anchor idl build` writes `"address": ""` (Anchor 0.30+ moved the
   # address out of the source). Trident bakes the address into
   # `types::<program>::program_id()`, so the IDL-drift check patches
@@ -161,7 +164,6 @@ jobs:
       shell: bash
     - run: ./scripts/test-program.sh all
 
-
   fuzz-libfuzzer:
     name: Fuzz (libfuzzer)
     # In-process coverage-guided fuzzing on the `lend` target. Runs in
@@ -195,7 +197,7 @@ jobs:
       id: cache-nightly
       with:
         path: ~/.rustup/toolchains/nightly-2025-08-01-x86_64-unknown-linux-gnu
-        key: rust-nightly-${{ runner.os }}-nightly-20250801
+        key: cargo-fuzz-${{ runner.os }}-v${{ env.CARGO_FUZZ_VERSION }}-nightly-20250801
 
     - name: Install nightly Rust + rust-src
       if: steps.cache-nightly.outputs.cache-hit != 'true'
@@ -215,7 +217,7 @@ jobs:
 
     - name: Install cargo-fuzz
       if: steps.cache-cargo-fuzz.outputs.cache-hit != 'true'
-      run: cargo install cargo-fuzz --locked
+      run: cargo install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
 
     # ─── Cache compiled fuzz target ─────────────────────────────────────────────
     - name: Cache fuzz target build
@@ -428,8 +430,8 @@ jobs:
       fail-fast: false
       matrix:
         test:
-          - name: "fuzz_0"
-            target: "fuzz_0"
+        - name: "fuzz_0"
+          target: "fuzz_0"
     steps:
     - uses: actions/checkout@v4
     - uses: ./.github/actions/setup-common/

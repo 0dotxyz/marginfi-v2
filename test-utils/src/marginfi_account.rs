@@ -949,11 +949,13 @@ impl MarginfiAccountFixture {
 
     pub async fn make_lending_account_end_flashloan_ix(
         &self,
+        group: Pubkey,
         include_banks: Vec<Pubkey>,
         exclude_banks: Vec<Pubkey>,
     ) -> Instruction {
         let mut account_metas = marginfi::accounts::LendingAccountEndFlashloan {
             marginfi_account: self.key,
+            group,
             authority: self.ctx.borrow().payer.pubkey(),
         }
         .to_account_metas(Some(true));
@@ -974,6 +976,7 @@ impl MarginfiAccountFixture {
     /// automatically sets the end index and send the transaction
     pub async fn try_flashloan(
         &self,
+        group: Pubkey,
         ixs: Vec<Instruction>,
         exclude_banks: Vec<Pubkey>,
         include_banks: Vec<Pubkey>,
@@ -984,7 +987,7 @@ impl MarginfiAccountFixture {
             .make_lending_account_start_flashloan_ix(ixs.len() as u64 + 1)
             .await;
         let end_ix = self
-            .make_lending_account_end_flashloan_ix(include_banks, exclude_banks)
+            .make_lending_account_end_flashloan_ix(group, include_banks, exclude_banks)
             .await;
 
         ixs.insert(0, start_ix);
@@ -1267,6 +1270,7 @@ impl MarginfiAccountFixture {
 
     pub async fn make_start_liquidation_ix(
         &self,
+        group: Pubkey,
         liquidation_record: Pubkey,
         liquidation_receiver: Pubkey,
     ) -> Instruction {
@@ -1274,6 +1278,7 @@ impl MarginfiAccountFixture {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::StartLiquidation {
                 marginfi_account: self.key,
+                group,
                 liquidation_record,
                 liquidation_receiver,
                 instruction_sysvar: solana_instructions_sysvar::id(),
@@ -1291,6 +1296,7 @@ impl MarginfiAccountFixture {
 
     pub async fn make_end_liquidation_ix(
         &self,
+        group: Pubkey,
         liquidation_record: Pubkey,
         liquidation_receiver: Pubkey,
         fee_state: Pubkey,
@@ -1301,6 +1307,7 @@ impl MarginfiAccountFixture {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::EndLiquidation {
                 marginfi_account: self.key,
+                group,
                 liquidation_record,
                 liquidation_receiver,
                 fee_state,
@@ -1848,10 +1855,12 @@ impl MarginfiAccountFixture {
 
     pub async fn try_lending_account_pulse_health(
         &self,
+        group: Pubkey,
     ) -> std::result::Result<(), BanksClientError> {
         let mut ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::PulseHealth {
+                group,
                 marginfi_account: self.key,
             }
             .to_account_metas(Some(true)),

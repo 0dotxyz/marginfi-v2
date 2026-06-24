@@ -24,12 +24,6 @@ pub mod mocks {
         instructions::do_nothing::do_nothing(ctx)
     }
 
-    /// Benchmark the emode reconcile functions' compute cost (logs CU via sol_log_compute_units).
-    /// Not used in normal flows — invoked only by the opt-in `anchor run bench-emode`.
-    pub fn bench_reconcile_emode(ctx: Context<BenchReconcileEmode>, num_configs: u8) -> Result<()> {
-        instructions::bench_emode::bench_reconcile_emode(ctx, num_configs)
-    }
-
     /// Init authority for fake jupiter-like swap pools
     pub fn init_pool_auth(ctx: Context<InitPoolAuth>, nonce: u16) -> Result<()> {
         instructions::init_pool_auth::init_pool_auth(ctx, nonce)

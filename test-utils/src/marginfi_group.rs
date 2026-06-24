@@ -1390,4 +1390,54 @@ impl MarginfiGroupFixture {
             .process_transaction(tx)
             .await
     }
+
+    pub async fn try_disable_staked_oracles(&self) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::DisableStakedOracles {
+                group: self.key,
+                admin: self.ctx.borrow().payer.pubkey(),
+            }
+            .to_account_metas(Some(true)),
+            data: DisableStakedOracles {}.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub async fn try_enable_staked_oracle_onramp(&self) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::EnableStakedOracleOnramp {
+                group: self.key,
+                admin: self.ctx.borrow().payer.pubkey(),
+            }
+            .to_account_metas(Some(true)),
+            data: EnableStakedOracleOnramp {}.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
 }
