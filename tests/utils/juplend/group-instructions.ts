@@ -36,7 +36,7 @@ export type AddJuplendBankAccounts = {
 
 export const addJuplendBankIx = async (
   program: Program<Marginfi>,
-  accounts: AddJuplendBankAccounts,
+  accounts: AddJuplendBankAccounts
 ): Promise<TransactionInstruction> => {
   const tokenProgram = accounts.tokenProgram ?? TOKEN_PROGRAM_ID;
 
@@ -75,7 +75,7 @@ export type JuplendInitPositionAccounts = {
  */
 export const makeJuplendInitPositionIx = async (
   program: Program<Marginfi>,
-  accounts: JuplendInitPositionAccounts,
+  accounts: JuplendInitPositionAccounts
 ): Promise<TransactionInstruction> => {
   return (
     program.methods
@@ -86,7 +86,8 @@ export const makeJuplendInitPositionIx = async (
         bank: accounts.bank,
         lendingAdmin: accounts.pool.lendingAdmin,
         supplyTokenReservesLiquidity: accounts.pool.tokenReserve,
-        lendingSupplyPositionOnLiquidity: accounts.pool.supplyPositionOnLiquidity,
+        lendingSupplyPositionOnLiquidity:
+          accounts.pool.supplyPositionOnLiquidity,
         rateModel: accounts.pool.rateModel,
         vault: accounts.pool.vault,
         liquidity: accounts.pool.liquidity,

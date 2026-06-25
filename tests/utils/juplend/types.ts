@@ -136,7 +136,7 @@ const JUPLEND_ASSET_WEIGHT_MAINT = fromI80Scaled((I80F48_SCALE * 9n) / 10n);
  */
 export const defaultJuplendBankConfig = (
   oracle: PublicKey,
-  decimals: number,
+  decimals: number
 ): JuplendConfigCompact => {
   return {
     oracle,
@@ -147,7 +147,7 @@ export const defaultJuplendBankConfig = (
     riskTier: { collateral: {} },
     configFlags: 1,
     totalAssetValueInitLimit: new BN(1_000_000_000).mul(
-      new BN(10).pow(new BN(decimals)),
+      new BN(10).pow(new BN(decimals))
     ),
     oracleMaxAge: 60,
     oracleMaxConfidence: 0,
@@ -275,10 +275,10 @@ export type JuplendUserClassEntry = {
 export const U64_MAX = new BN("18446744073709551615");
 export const DEFAULT_PERCENT_PRECISION = new BN(100);
 export const DEFAULT_EXPAND_WITHDRAWAL_LIMIT_PERCENT = new BN(20).mul(
-  DEFAULT_PERCENT_PRECISION,
+  DEFAULT_PERCENT_PRECISION
 );
 export const DEFAULT_EXPAND_WITHDRAWAL_LIMIT_DURATION_SECONDS = new BN(
-  2 * 24 * 60 * 60,
+  2 * 24 * 60 * 60
 );
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -287,7 +287,7 @@ export const DEFAULT_MAX_DEBT_CEILING = new BN(1e6 * LAMPORTS_PER_SOL);
 
 export const percent = (
   value: number,
-  precision: BN = DEFAULT_PERCENT_PRECISION,
+  precision: BN = DEFAULT_PERCENT_PRECISION
 ) => new BN(value).mul(precision);
 
 /** (0, 4), (80, 10), (100, 150) */

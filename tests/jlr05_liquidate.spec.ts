@@ -92,7 +92,7 @@ const TOKEN_B_BORROW_AMOUNT = new BN(2.5 * 10 ** ecosystem.tokenBDecimals); // 2
 const JUP_USDC_LIQUIDATION_AMOUNT = new BN(1 * 10 ** ecosystem.usdcDecimals); // 1 USDC
 const RECEIVERSHIP_WITHDRAW_USDC = new BN(1 * 10 ** ecosystem.usdcDecimals); // 1 USDC
 const RECEIVERSHIP_REPAY_TOKEN_B = new BN(
-  0.05 * 10 ** ecosystem.tokenBDecimals,
+  0.05 * 10 ** ecosystem.tokenBDecimals
 ); // 0.05 TOKEN_B ($1)
 const LIAB_WEIGHT_INDUCED = 2;
 
@@ -110,16 +110,16 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
     groupPk = juplendAccounts.get(JUPLEND_STATE_KEYS.jlr01Group);
     jupUsdcBankPk = juplendAccounts.get(JUPLEND_STATE_KEYS.jlr01BankUsdc);
     regTokenBBankPk = juplendAccounts.get(
-      JUPLEND_STATE_KEYS.jlr01RegularBankTokenB,
+      JUPLEND_STATE_KEYS.jlr01RegularBankTokenB
     );
     user0MarginfiAccountPk = juplendAccounts.get(
-      JUPLEND_STATE_KEYS.jlr02User0MarginfiAccount,
+      JUPLEND_STATE_KEYS.jlr02User0MarginfiAccount
     );
 
     await mintToTokenAccount(
       ecosystem.usdcMint.publicKey,
       user.usdcAccount,
-      JUP_USDC_DEPOSIT_AMOUNT.mul(new BN(2)),
+      JUP_USDC_DEPOSIT_AMOUNT.mul(new BN(2))
     );
 
     const initIx = await accountInit(user.mrgnBankrunProgram!, {
@@ -133,12 +133,12 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       new Transaction().add(initIx),
       [user.wallet, user1MarginfiAccount],
       false,
-      true,
+      true
     );
 
     juplendAccounts.set(
       JUPLEND_STATE_KEYS.jlr05User1MarginfiAccount,
-      user1MarginfiAccount.publicKey,
+      user1MarginfiAccount.publicKey
     );
   });
 
@@ -158,7 +158,7 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       new Transaction().add(depositIx),
       [user.wallet],
       false,
-      true,
+      true
     );
 
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
@@ -166,7 +166,7 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
     const pulseBeforeIx = await healthPulse(user.mrgnBankrunProgram!, {
       marginfiAccount: user1MarginfiAccount.publicKey,
       remaining: await buildHealthRemainingAccounts(
-        user1MarginfiAccount.publicKey,
+        user1MarginfiAccount.publicKey
       ),
     });
     await processBankrunTransaction(
@@ -174,22 +174,22 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       new Transaction().add(pulseBeforeIx),
       [user.wallet],
       false,
-      true,
+      true
     );
 
     const accountBeforeBorrow =
       await bankrunProgram.account.marginfiAccount.fetch(
-        user1MarginfiAccount.publicKey,
+        user1MarginfiAccount.publicKey
       );
     const healthBefore = accountBeforeBorrow.healthCache;
     const netHealthBefore = wrappedI80F48toBigNumber(
-      healthBefore.assetValue,
+      healthBefore.assetValue
     ).minus(wrappedI80F48toBigNumber(healthBefore.liabilityValue));
 
     const borrowBank = await bankrunProgram.account.bank.fetch(regTokenBBankPk);
     const tokenBBalanceBefore = await getTokenBalance(
       bankRunProvider,
-      user.tokenBAccount,
+      user.tokenBAccount
     );
 
     const borrowInstruction = await borrowIx(user.mrgnBankrunProgram!, {
@@ -200,7 +200,7 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
         user1MarginfiAccount.publicKey,
         {
           includedBankPks: [regTokenBBankPk],
-        },
+        }
       ),
       amount: TOKEN_B_BORROW_AMOUNT,
     });
@@ -209,22 +209,22 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       new Transaction().add(borrowInstruction),
       [user.wallet],
       false,
-      true,
+      true
     );
 
     const tokenBBalanceAfter = await getTokenBalance(
       bankRunProvider,
-      user.tokenBAccount,
+      user.tokenBAccount
     );
     assertBNEqual(
       new BN(tokenBBalanceAfter - tokenBBalanceBefore),
-      TOKEN_B_BORROW_AMOUNT,
+      TOKEN_B_BORROW_AMOUNT
     );
 
     const pulseAfterIx = await healthPulse(user.mrgnBankrunProgram!, {
       marginfiAccount: user1MarginfiAccount.publicKey,
       remaining: await buildHealthRemainingAccounts(
-        user1MarginfiAccount.publicKey,
+        user1MarginfiAccount.publicKey
       ),
     });
     await processBankrunTransaction(
@@ -232,12 +232,12 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       new Transaction().add(pulseAfterIx),
       [user.wallet],
       false,
-      true,
+      true
     );
 
     const accountAfterBorrow =
       await bankrunProgram.account.marginfiAccount.fetch(
-        user1MarginfiAccount.publicKey,
+        user1MarginfiAccount.publicKey
       );
     const healthAfter = accountAfterBorrow.healthCache;
 
@@ -246,22 +246,22 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
     assert.ok((healthAfter.flags & HEALTH_CACHE_ORACLE_OK) !== 0);
 
     const netHealthAfter = wrappedI80F48toBigNumber(
-      healthAfter.assetValue,
+      healthAfter.assetValue
     ).minus(wrappedI80F48toBigNumber(healthAfter.liabilityValue));
     const actualDecline = netHealthBefore.minus(netHealthAfter);
     assertBNGreaterThan(
       new BN(actualDecline.integerValue(BigNumber.ROUND_FLOOR).toFixed(0)),
-      0,
+      0
     );
 
     const borrowUi = new BigNumber(TOKEN_B_BORROW_AMOUNT.toString()).div(
-      new BigNumber(10).pow(ecosystem.tokenBDecimals),
+      new BigNumber(10).pow(ecosystem.tokenBDecimals)
     );
     const originationFeeRate = wrappedI80F48toBigNumber(
-      borrowBank.config.interestRateConfig.protocolOriginationFee,
+      borrowBank.config.interestRateConfig.protocolOriginationFee
     );
     const liabilityWeight = wrappedI80F48toBigNumber(
-      borrowBank.config.liabilityWeightInit,
+      borrowBank.config.liabilityWeightInit
     );
     const tokenBPriceHigh =
       ecosystem.tokenBPrice *
@@ -298,7 +298,7 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       new Transaction().add(reweightIx),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
@@ -308,34 +308,34 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       {
         marginfiAccount: user1MarginfiAccount.publicKey,
         remaining: await buildHealthRemainingAccounts(
-          user1MarginfiAccount.publicKey,
+          user1MarginfiAccount.publicKey
         ),
-      },
+      }
     );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(
         dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
-        pulseBeforeLiquidationIx,
+        pulseBeforeLiquidationIx
       ),
       [user.wallet],
       false,
-      true,
+      true
     );
 
     const liquidateeBefore = await bankrunProgram.account.marginfiAccount.fetch(
-      user1MarginfiAccount.publicKey,
+      user1MarginfiAccount.publicKey
     );
     const healthBefore = liquidateeBefore.healthCache;
     logHealthCache(
       "jlr05 user 1 health before partial liquidation",
-      healthBefore,
+      healthBefore
     );
     const netHealthBefore = wrappedI80F48toBigNumber(
-      healthBefore.assetValue,
+      healthBefore.assetValue
     ).minus(wrappedI80F48toBigNumber(healthBefore.liabilityValue));
     const netHealthBeforeMaint = wrappedI80F48toBigNumber(
-      healthBefore.assetValueMaint,
+      healthBefore.assetValueMaint
     ).minus(wrappedI80F48toBigNumber(healthBefore.liabilityValueMaint));
     // Unhealthy...
     assert.ok(netHealthBefore.lt(0));
@@ -352,10 +352,10 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 
     const liquidatorRemaining = await buildHealthRemainingAccounts(
-      user0MarginfiAccountPk,
+      user0MarginfiAccountPk
     );
     const liquidateeRemaining = await buildHealthRemainingAccounts(
-      user1MarginfiAccount.publicKey,
+      user1MarginfiAccount.publicKey
     );
 
     const liqIx = await liquidateIx(users[0].mrgnBankrunProgram!, {
@@ -380,11 +380,11 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       new Transaction().add(
         ComputeBudgetProgram.setComputeUnitLimit({ units: 450_000 }),
         await refreshJupSimple(juplendPrograms.lending, { pool: jupPool }),
-        liqIx,
+        liqIx
       ),
       [users[0].wallet],
       false,
-      true,
+      true
     );
 
     const pulseAfterLiquidationIx = await healthPulse(
@@ -392,24 +392,24 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       {
         marginfiAccount: user1MarginfiAccount.publicKey,
         remaining: await buildHealthRemainingAccounts(
-          user1MarginfiAccount.publicKey,
+          user1MarginfiAccount.publicKey
         ),
-      },
+      }
     );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(pulseAfterLiquidationIx),
       [user.wallet],
       false,
-      true,
+      true
     );
 
     const liquidateeAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      user1MarginfiAccount.publicKey,
+      user1MarginfiAccount.publicKey
     );
     const healthAfter = liquidateeAfter.healthCache;
     const netHealthAfter = wrappedI80F48toBigNumber(
-      healthAfter.assetValue,
+      healthAfter.assetValue
     ).minus(wrappedI80F48toBigNumber(healthAfter.liabilityValue));
 
     // Healthier!
@@ -419,7 +419,7 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
 
     logHealthCache(
       "jlr05 user 1 health after partial liquidation",
-      healthAfter,
+      healthAfter
     );
   });
 
@@ -431,13 +431,13 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
     const liquidateeAccountPk = user1MarginfiAccount.publicKey;
     const [liqRecordKey] = deriveLiquidationRecord(
       bankrunProgram.programId,
-      liquidateeAccountPk,
+      liquidateeAccountPk
     );
 
     await mintToTokenAccount(
       ecosystem.tokenBMint.publicKey,
       liquidator.tokenBAccount,
-      RECEIVERSHIP_REPAY_TOKEN_B.mul(new BN(4)),
+      RECEIVERSHIP_REPAY_TOKEN_B.mul(new BN(4))
     );
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 
@@ -449,20 +449,20 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       bankrunContext,
       new Transaction().add(
         dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
-        pulseBeforeRxIx,
+        pulseBeforeRxIx
       ),
       [user.wallet],
       false,
-      true,
+      true
     );
 
     const liquidateeBefore = await bankrunProgram.account.marginfiAccount.fetch(
-      liquidateeAccountPk,
+      liquidateeAccountPk
     );
     assertKeyDefault(liquidateeBefore.liquidationRecord);
     const healthBefore = liquidateeBefore.healthCache;
     const netHealthBefore = wrappedI80F48toBigNumber(
-      healthBefore.assetValue,
+      healthBefore.assetValue
     ).minus(wrappedI80F48toBigNumber(healthBefore.liabilityValue));
 
     const initLiqRecordIx = await initLiquidationRecordIx(
@@ -470,18 +470,18 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       {
         marginfiAccount: liquidateeAccountPk,
         feePayer: liquidator.wallet.publicKey,
-      },
+      }
     );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(initLiqRecordIx),
       [liquidator.wallet],
       false,
-      true,
+      true
     );
 
     const recordBefore = await bankrunProgram.account.liquidationRecord.fetch(
-      liqRecordKey,
+      liqRecordKey
     );
     assertKeysEqual(recordBefore.key, liqRecordKey);
     assertKeysEqual(recordBefore.marginfiAccount, liquidateeAccountPk);
@@ -494,14 +494,14 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
     const jupPool = deriveJuplendPoolKeys({ mint: assetBank.mint });
     const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      jupUsdcBankPk,
+      jupUsdcBankPk
     );
     const withdrawIntermediaryAta = assetBank.integrationAcc3;
     const expectedIntermediaryAta = getAssociatedTokenAddressSync(
       assetBank.mint,
       liquidityVaultAuthority,
       true,
-      jupPool.tokenProgram,
+      jupPool.tokenProgram
     );
     assertKeysEqual(withdrawIntermediaryAta, expectedIntermediaryAta);
 
@@ -511,14 +511,14 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
         withdrawIntermediaryAta,
         liquidityVaultAuthority,
         assetBank.mint,
-        jupPool.tokenProgram,
+        jupPool.tokenProgram
       );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(createWithdrawIntermediaryAtaIx),
       [liquidator.wallet],
       false,
-      true,
+      true
     );
 
     const assetGroup: PublicKey[] = [
@@ -543,16 +543,16 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
 
     const liquidatorUsdcBefore = await getTokenBalance(
       bankRunProvider,
-      liquidator.usdcAccount,
+      liquidator.usdcAccount
     );
     const liquidatorTokenBBefore = await getTokenBalance(
       bankRunProvider,
-      liquidator.tokenBAccount,
+      liquidator.tokenBAccount
     );
 
     // groupAdmin (a separate, funded wallet) pays the flat liquidation fee instead of the receiver.
     const feePayerSolBefore = Number(
-      await banksClient.getBalance(groupAdmin.wallet.publicKey),
+      await banksClient.getBalance(groupAdmin.wallet.publicKey)
     );
 
     const rxLiquidationIxs = [
@@ -586,7 +586,7 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
 
     const rxLutAccount = await createLookupTableForInstructions(
       liquidator.wallet,
-      rxLiquidationIxs,
+      rxLiquidationIxs
     );
     const blockhash = await getBankrunBlockhash(bankrunContext);
     const messageV0 = new TransactionMessage({
@@ -600,34 +600,34 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       rxLiquidationTx,
       [liquidator.wallet, groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     // The flat liquidation fee was charged to the separate fee payer, not the receiver.
     const feePayerSolAfter = Number(
-      await banksClient.getBalance(groupAdmin.wallet.publicKey),
+      await banksClient.getBalance(groupAdmin.wallet.publicKey)
     );
     assert.equal(feePayerSolBefore - feePayerSolAfter, LIQUIDATION_FLAT_FEE);
 
     const liquidatorUsdcAfter = await getTokenBalance(
       bankRunProvider,
-      liquidator.usdcAccount,
+      liquidator.usdcAccount
     );
     const liquidatorTokenBAfter = await getTokenBalance(
       bankRunProvider,
-      liquidator.tokenBAccount,
+      liquidator.tokenBAccount
     );
     assertBNEqual(
       new BN(liquidatorUsdcAfter - liquidatorUsdcBefore),
-      RECEIVERSHIP_WITHDRAW_USDC,
+      RECEIVERSHIP_WITHDRAW_USDC
     );
     assertBNEqual(
       new BN(liquidatorTokenBBefore - liquidatorTokenBAfter),
-      RECEIVERSHIP_REPAY_TOKEN_B,
+      RECEIVERSHIP_REPAY_TOKEN_B
     );
 
     const recordAfter = await bankrunProgram.account.liquidationRecord.fetch(
-      liqRecordKey,
+      liqRecordKey
     );
     const rxEntry = recordAfter.entries[3];
     assert(rxEntry.timestamp.toNumber() > 0);
@@ -656,21 +656,21 @@ describe("jlr05: Juplend collateral + mrgn borrow + health pulse (bankrun)", () 
       new Transaction().add(pulseAfterRxIx),
       [user.wallet],
       false,
-      true,
+      true
     );
 
     const liquidateeAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      liquidateeAccountPk,
+      liquidateeAccountPk
     );
     const healthAfter = liquidateeAfter.healthCache;
     const netHealthAfter = wrappedI80F48toBigNumber(
-      healthAfter.assetValue,
+      healthAfter.assetValue
     ).minus(wrappedI80F48toBigNumber(healthAfter.liabilityValue));
     assert.ok(netHealthAfter.gt(netHealthBefore));
 
     logHealthCache(
       "jlr05 user 1 health after receivership liquidation",
-      healthAfter,
+      healthAfter
     );
   });
 });

@@ -28,9 +28,7 @@ import {
   parseMarginfiEvents,
 } from "./utils/genericTests";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
-import {
-  composeRemainingAccounts,
-} from "./utils/user-instructions";
+import { composeRemainingAccounts } from "./utils/user-instructions";
 import {
   makeSolendDepositIx,
   makeSolendWithdrawIx,
@@ -167,17 +165,17 @@ describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
           withdrawResult.logMessages
         ).find((e) => e.name === "lendingAccountWithdrawEvent");
         assert.isDefined(withdrawEvent, "Expected lendingAccountWithdrawEvent");
-        assertI80F48Equal(
-          withdrawEvent!.data.shareAmount,
-          cTokenAmount
-        );
+        assertI80F48Equal(withdrawEvent!.data.shareAmount, cTokenAmount);
 
         const bankAfter = await bankrunProgram.account.bank.fetch(usdcBank);
         const expectedPrice = oracles.usdcPrice;
         const expectedConf =
           expectedPrice * ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
         assertI80F48Approx(bankAfter.cache.lastOraclePrice, expectedPrice);
-        assertI80F48Approx(bankAfter.cache.lastOraclePriceConfidence, expectedConf);
+        assertI80F48Approx(
+          bankAfter.cache.lastOraclePriceConfidence,
+          expectedConf
+        );
 
         const userBalanceFinal = await getTokenBalance(
           bankRunProvider,

@@ -75,7 +75,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
         amount: new BN(1.3 * 10 ** ecosystem.wsolDecimals),
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(user.wallet);
@@ -85,7 +85,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
     assertBankrunTxFailed(result, "0x1779");
 
     const userAcc = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount,
+      userAccount
     );
     const balances = userAcc.lendingAccount.balances;
     assert.equal(balances[1].active, 0);
@@ -103,7 +103,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
           fromPubkey: wallet.publicKey,
           toPubkey: validators[0].splSolPool,
           lamports: stakeSolAppreciation * LAMPORTS_PER_SOL,
-        }),
+        })
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(wallet.payer);
@@ -111,7 +111,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
 
       const priceMultiplierAfterAppreciation = await fetchLstPriceMultiplier();
       assert.approximately(priceMultiplierAfterAppreciation, 2.0, 0.000001); // (50 + 30) / 40 = 2
-    },
+    }
   );
 
   it("(user 2 - attacker) ties to sneak in bad lst mint - should fail", async () => {
@@ -133,7 +133,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
         amount: new BN(0.1 * 10 ** ecosystem.wsolDecimals),
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(user.wallet);
@@ -162,7 +162,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
         amount: new BN(0.2 * 10 ** ecosystem.wsolDecimals),
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(user.wallet);
@@ -192,21 +192,21 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
         amount: new BN(1.3 * 10 ** ecosystem.wsolDecimals),
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(user.wallet);
     await banksClient.tryProcessTransaction(tx);
 
     const userAcc = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount,
+      userAccount
     );
     const balances = userAcc.lendingAccount.balances;
     assert.equal(balances[1].active, 1);
 
     // Note: the newly added balance may NOT be the last one in the list, due to sorting, so we have to find its position first
     const borrowIndex = balances.findIndex((balance) =>
-      balance.bankPk.equals(bankKeypairSol.publicKey),
+      balance.bankPk.equals(bankKeypairSol.publicKey)
     );
     assert.notEqual(borrowIndex, -1);
   });
@@ -224,7 +224,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
           fromPubkey: wallet.publicKey,
           toPubkey: validators[0].splPool,
           lamports: splPoolAppreciation * LAMPORTS_PER_SOL,
-        }),
+        })
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(wallet.payer);
@@ -232,7 +232,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
 
       const priceMultiplierAfterAppreciation = await fetchLstPriceMultiplier();
       assert.approximately(priceMultiplierAfterAppreciation, 2.0, 0.000001); // still the same
-    },
+    }
   );
 
   it("(user 2) deposits to another staked bank - should succeed", async () => {
@@ -248,7 +248,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
         // some nominal amount...
         amount: new BN(0.000001 * 10 ** ecosystem.wsolDecimals),
         depositUpToLimit: false,
-      }),
+      })
     );
 
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -282,7 +282,7 @@ describe("Borrow power grows as v0 Staked SOL gains value from appreciation", ()
           [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
         ]),
         amount: new BN(0.00001 * 10 ** ecosystem.wsolDecimals),
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(user.wallet);

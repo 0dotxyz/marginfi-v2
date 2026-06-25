@@ -1,7 +1,12 @@
 import { Keypair, Transaction } from "@solana/web3.js";
 import { Program } from "@coral-xyz/anchor";
 import { Marginfi } from "../target/types/marginfi";
-import { bankrunProgram, marginfiGroup, users, globalFeeWallet } from "./rootHooks";
+import {
+  bankrunProgram,
+  marginfiGroup,
+  users,
+  globalFeeWallet,
+} from "./rootHooks";
 import {
   accountInit,
   transferAccountAuthorityPdaIx,
@@ -138,7 +143,7 @@ describe("Transfer account authority to PDA", () => {
     assertBNEqual(oldAcc.accountFlags, ACCOUNT_DISABLED);
     assertKeysEqual(oldAcc.migratedTo, newAccountPda);
     assert.equal(newAcc.accountIndex, accountIndex);
-    assert.equal(newAcc.thirdPartyIndex, thirdPartyId)
+    assert.equal(newAcc.thirdPartyIndex, thirdPartyId);
     assert.equal(newAcc.bump, bump);
   });
 
@@ -174,7 +179,7 @@ describe("Transfer account authority to PDA", () => {
     const [newAccountPda, bump] = deriveMarginfiAccountPda(
       program.programId,
       marginfiGroup.publicKey,
-      users[0].wallet.publicKey,  // Keep same authority
+      users[0].wallet.publicKey, // Keep same authority
       accountIndex
     );
 
@@ -256,5 +261,4 @@ describe("Transfer account authority to PDA", () => {
       await users[0].mrgnProgram.provider.sendAndConfirm(tx2, []);
     }, "InvalidFeeAta");
   });
-
 });

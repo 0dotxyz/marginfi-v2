@@ -18,7 +18,7 @@ import { BN, utils } from "@coral-xyz/anchor";
  */
 export function patchBankrunConnection(
   connection: Connection,
-  banksClient: BanksClient,
+  banksClient: BanksClient
 ): void {
   type PatchedConnection = Connection & {
     getBalance: (publicKey: PublicKey) => Promise<number>;
@@ -27,7 +27,7 @@ export function patchBankrunConnection(
       lastValidBlockHeight: number;
     }>;
     sendRawTransaction: (
-      rawTransaction: Buffer | Uint8Array,
+      rawTransaction: Buffer | Uint8Array
     ) => Promise<string>;
   };
 
@@ -39,7 +39,7 @@ export function patchBankrunConnection(
   const originalGetAccountInfo = connection.getAccountInfo.bind(connection);
   conn.getAccountInfo = async (
     publicKey: PublicKey,
-    commitment?: Commitment,
+    commitment?: Commitment
   ) => {
     try {
       return await originalGetAccountInfo(publicKey, commitment);
@@ -55,7 +55,7 @@ export function patchBankrunConnection(
     connection.getAccountInfoAndContext.bind(connection);
   conn.getAccountInfoAndContext = async (
     publicKey: PublicKey,
-    commitment?: Commitment,
+    commitment?: Commitment
   ) => {
     try {
       return await originalGetAccountInfoAndContext(publicKey, commitment);
@@ -125,7 +125,7 @@ export function patchBankrunConnection(
  */
 export function dummyIx(
   from: PublicKey,
-  to: PublicKey,
+  to: PublicKey
 ): TransactionInstruction {
   let ix = SystemProgram.transfer({
     fromPubkey: from,
@@ -143,7 +143,7 @@ const ONE_HOUR_IN_SECONDS = 60 * 60;
  */
 export const advanceOneHour = async (
   banksClient: BanksClient,
-  bankrunContext: ProgramTestContext,
+  bankrunContext: ProgramTestContext
 ) => {
   const before = await banksClient.getClock();
   bankrunContext.setClock(
@@ -152,8 +152,8 @@ export const advanceOneHour = async (
       before.epochStartTimestamp,
       before.epoch,
       before.leaderScheduleEpoch,
-      before.unixTimestamp + BigInt(ONE_HOUR_IN_SECONDS),
-    ),
+      before.unixTimestamp + BigInt(ONE_HOUR_IN_SECONDS)
+    )
   );
 };
 
@@ -165,7 +165,7 @@ const FIVE_MINUTES_IN_SECONDS = 5 * 60;
  */
 export const advanceFiveMinutes = async (
   banksClient: BanksClient,
-  bankrunContext: ProgramTestContext,
+  bankrunContext: ProgramTestContext
 ) => {
   const before = await banksClient.getClock();
   bankrunContext.setClock(
@@ -174,8 +174,8 @@ export const advanceFiveMinutes = async (
       before.epochStartTimestamp,
       before.epoch,
       before.leaderScheduleEpoch,
-      before.unixTimestamp + BigInt(FIVE_MINUTES_IN_SECONDS),
-    ),
+      before.unixTimestamp + BigInt(FIVE_MINUTES_IN_SECONDS)
+    )
   );
 };
 

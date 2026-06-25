@@ -38,7 +38,6 @@ import {
   depositIx,
   endDeleverageIx,
   initLiquidationRecordIx,
-  purgeDeveleragedBalance,
   repayIx,
   startDeleverageIx,
   withdrawIx,
@@ -591,7 +590,10 @@ describe("Bank e2e sunset due to illiquid asset", () => {
     const sharesAfter = wrappedI80F48toBigNumber(bankAfter.totalAssetShares);
     if (verbose) {
       console.log(
-        "asset shares before: " + sharesBefore.toString() + " after " + sharesAfter.toString()
+        "asset shares before: " +
+          sharesBefore.toString() +
+          " after " +
+          sharesAfter.toString()
       );
       console.log("user before: " + lstBefore + " after: " + lstAfter);
     }
@@ -609,12 +611,10 @@ describe("Bank e2e sunset due to illiquid asset", () => {
   });
 
   // Here the admin would fund some "claims portal" using the proceeds it secured earlier to make
-  // users whole OTC. Any remaining users with lending funds, for example user 2, will be purged so
-  // they don't have this position in their accounts.
-
-  // User 2 could also withdraw here, but if they don't bother, we would do this to simply close
-  // their balance, simplifying bookkeeping.
-  it("(risk admin) Purge user 2's remaining b1 lending account", async () => {
+  // users whole OTC. Any remaining users with lending funds, for example user 2, close out their
+  // leftover position with a withdraw_all on the now-empty, sunset bank (the deprecated purge ix
+  // covered the same cleanup: it released nothing and removed the balance).
+  it("(user 2) Closes remaining b1 lending account via withdraw_all", async () => {
     const user = users[2];
     const userAccount = user.accounts.get(USER_ACCOUNT_THROWAWAY);
 
@@ -627,14 +627,21 @@ describe("Bank e2e sunset due to illiquid asset", () => {
         getTokenBalance(bankRunProvider, liqVault),
       ]);
 
+    const remainingWithdraw = composeRemainingAccounts([
+      [banks[1], oracles.pythPullLst.publicKey],
+    ]);
     const tx = new Transaction();
     tx.add(
-      await purgeDeveleragedBalance(riskAdmin.mrgnBankrunProgram, {
-        account: userAccount,
+      await withdrawIx(user.mrgnBankrunProgram, {
+        marginfiAccount: userAccount,
         bank: banks[1],
+        tokenAccount: user.lstAlphaAccount,
+        remaining: remainingWithdraw,
+        amount: new BN(1),
+        withdrawAll: true,
       })
     );
-    await processBankrunTransaction(bankrunContext, tx, [riskAdmin.wallet]);
+    await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
 
     const [bankAfter, userAfter, lstAfter, liqVaultAfter] = await Promise.all([
       bankrunProgram.account.bank.fetch(banks[1]),

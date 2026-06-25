@@ -260,6 +260,7 @@ pub struct LendingPoolHandleBankruptcy<'info> {
         constraint = {
             !marginfi_account.load()?.get_flag(ACCOUNT_IN_RECEIVERSHIP)
         } @MarginfiError::UnexpectedLiquidationState,
+        // Reject bankruptcy during an open flashloan: the account may be only transiently insolvent.
         constraint = {
             !marginfi_account.load()?.get_flag(ACCOUNT_IN_FLASHLOAN)
         } @MarginfiError::AccountInFlashloan

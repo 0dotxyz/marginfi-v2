@@ -66,11 +66,11 @@ describe("Account freeze", () => {
     freezeUser = await setupTestUserBankrun(
       bankrunContext,
       bankrunContext.payer,
-      options,
+      options
     );
     freezeUser.mrgnProgram = getUserMarginfiProgram(
       bankrunProgram,
-      freezeUser.wallet,
+      freezeUser.wallet
     );
 
     await freezeUser.mrgnProgram.provider.sendAndConfirm(
@@ -80,9 +80,9 @@ describe("Account freeze", () => {
           marginfiAccount: frozenAccount.publicKey,
           authority: freezeUser.wallet.publicKey,
           feePayer: freezeUser.wallet.publicKey,
-        }),
+        })
       ),
-      [frozenAccount],
+      [frozenAccount]
     );
 
     const mintTx = new Transaction();
@@ -91,16 +91,16 @@ describe("Account freeze", () => {
         ecosystem.usdcMint.publicKey,
         freezeUser.usdcAccount,
         mintAuthority,
-        200 * 10 ** ecosystem.usdcDecimals,
-      ),
+        200 * 10 ** ecosystem.usdcDecimals
+      )
     );
     mintTx.add(
       createMintToInstruction(
         ecosystem.usdcMint.publicKey,
         groupAdmin.usdcAccount,
         mintAuthority,
-        200 * 10 ** ecosystem.usdcDecimals,
-      ),
+        200 * 10 ** ecosystem.usdcDecimals
+      )
     );
     await provider.sendAndConfirm(mintTx);
 
@@ -112,8 +112,8 @@ describe("Account freeze", () => {
           tokenAccount: freezeUser.usdcAccount,
           amount: initialDeposit,
           depositUpToLimit: false,
-        }),
-      ),
+        })
+      )
     );
   });
 
@@ -125,16 +125,16 @@ describe("Account freeze", () => {
           marginfiAccount: frozenAccount.publicKey,
           admin: groupAdmin.wallet.publicKey,
           frozen: true,
-        }),
-      ),
+        })
+      )
     );
 
     let account = await program.account.marginfiAccount.fetch(
-      frozenAccount.publicKey,
+      frozenAccount.publicKey
     );
     assert.equal(
       account.accountFlags.toNumber() & ACCOUNT_FROZEN,
-      ACCOUNT_FROZEN,
+      ACCOUNT_FROZEN
     );
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
@@ -144,12 +144,12 @@ describe("Account freeze", () => {
           marginfiAccount: frozenAccount.publicKey,
           admin: groupAdmin.wallet.publicKey,
           frozen: false,
-        }),
-      ),
+        })
+      )
     );
 
     account = await program.account.marginfiAccount.fetch(
-      frozenAccount.publicKey,
+      frozenAccount.publicKey
     );
     assert.equal(account.accountFlags.toNumber() & ACCOUNT_FROZEN, 0);
   });
@@ -163,8 +163,8 @@ describe("Account freeze", () => {
           marginfiAccount: frozenAccount.publicKey,
           admin: groupAdmin.wallet.publicKey,
           frozen: true,
-        }),
-      ),
+        })
+      )
     );
 
     await expectFailedTxWithError(
@@ -177,12 +177,12 @@ describe("Account freeze", () => {
               tokenAccount: freezeUser.usdcAccount,
               amount: authorityAttemptWhileFrozen,
               depositUpToLimit: false,
-            }),
-          ),
+            })
+          )
         );
       },
       "AccountFrozen",
-      6103,
+      6103
     );
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
@@ -193,25 +193,25 @@ describe("Account freeze", () => {
           tokenAccount: groupAdmin.usdcAccount,
           amount: adminTopUp,
           depositUpToLimit: false,
-        }),
-      ),
+        })
+      )
     );
 
     const account = await program.account.marginfiAccount.fetch(
-      frozenAccount.publicKey,
+      frozenAccount.publicKey
     );
     const usdcBalance = account.lendingAccount.balances.find((bal) =>
-      bal.bankPk.equals(bankKeypairUsdc.publicKey),
+      bal.bankPk.equals(bankKeypairUsdc.publicKey)
     );
     assert.ok(usdcBalance);
     assertI80F48Approx(
       usdcBalance.assetShares,
       initialDeposit.add(adminTopUp),
-      10,
+      10
     );
     assert.equal(
       account.accountFlags.toNumber() & ACCOUNT_FROZEN,
-      ACCOUNT_FROZEN,
+      ACCOUNT_FROZEN
     );
   });
 
@@ -230,12 +230,12 @@ describe("Account freeze", () => {
               ]),
               amount: adminWithdraw,
               withdrawAll: false,
-            }),
-          ),
+            })
+          )
         );
       },
       "AccountFrozen",
-      6103,
+      6103
     );
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
@@ -249,8 +249,8 @@ describe("Account freeze", () => {
           ]),
           amount: adminWithdraw,
           withdrawAll: false,
-        }),
-      ),
+        })
+      )
     );
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
@@ -260,8 +260,8 @@ describe("Account freeze", () => {
           marginfiAccount: frozenAccount.publicKey,
           admin: groupAdmin.wallet.publicKey,
           frozen: false,
-        }),
-      ),
+        })
+      )
     );
 
     await freezeUser.mrgnProgram.provider.sendAndConfirm(
@@ -272,15 +272,15 @@ describe("Account freeze", () => {
           tokenAccount: freezeUser.usdcAccount,
           amount: authorityUnfreezeDeposit,
           depositUpToLimit: false,
-        }),
-      ),
+        })
+      )
     );
 
     const account = await program.account.marginfiAccount.fetch(
-      frozenAccount.publicKey,
+      frozenAccount.publicKey
     );
     const usdcBalance = account.lendingAccount.balances.find((bal) =>
-      bal.bankPk.equals(bankKeypairUsdc.publicKey),
+      bal.bankPk.equals(bankKeypairUsdc.publicKey)
     );
     const expected = initialDeposit
       .add(adminTopUp)

@@ -44,19 +44,19 @@ describe("k03: Deposit to Kamino reserve", () => {
 
     const [lendingMarketAuthority] = deriveLendingMarketAuthority(
       KLEND_PROGRAM_ID,
-      market,
+      market
     );
     const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
       KLEND_PROGRAM_ID,
-      usdcReserve,
+      usdcReserve
     );
     const [reserveCollateralMint] = deriveReserveCollateralMint(
       KLEND_PROGRAM_ID,
-      usdcReserve,
+      usdcReserve
     );
     const [reserveDestinationDepositCollateral] = deriveReserveCollateralSupply(
       KLEND_PROGRAM_ID,
-      usdcReserve,
+      usdcReserve
     );
 
     const obligation = user.accounts.get(KAMINO_OBLIGATION);
@@ -71,7 +71,7 @@ describe("k03: Deposit to Kamino reserve", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey,
+        oracles.usdcOracle.publicKey
       ),
       await simpleRefreshObligation(klendBankrunProgram, market, obligation),
       await klendBankrunProgram.methods
@@ -92,7 +92,7 @@ describe("k03: Deposit to Kamino reserve", () => {
           liquidityTokenProgram: TOKEN_PROGRAM_ID,
           instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
         })
-        .instruction(),
+        .instruction()
     );
 
     await processBankrunTransaction(ctx, tx, [user.wallet]);
@@ -112,19 +112,19 @@ describe("k03: Deposit to Kamino reserve", () => {
 
     const [lendingMarketAuthority] = deriveLendingMarketAuthority(
       KLEND_PROGRAM_ID,
-      market,
+      market
     );
     const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
       KLEND_PROGRAM_ID,
-      usdcReserve,
+      usdcReserve
     );
     const [reserveCollateralMint] = deriveReserveCollateralMint(
       KLEND_PROGRAM_ID,
-      usdcReserve,
+      usdcReserve
     );
     const [reserveDestinationDepositCollateral] = deriveReserveCollateralSupply(
       KLEND_PROGRAM_ID,
-      usdcReserve,
+      usdcReserve
     );
 
     const obligation = user.accounts.get(KAMINO_OBLIGATION);
@@ -134,7 +134,7 @@ describe("k03: Deposit to Kamino reserve", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey,
+        oracles.usdcOracle.publicKey
       ),
       await simpleRefreshObligation(klendBankrunProgram, market, obligation, [
         usdcReserve,
@@ -157,10 +157,15 @@ describe("k03: Deposit to Kamino reserve", () => {
           liquidityTokenProgram: TOKEN_PROGRAM_ID,
           instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
         })
-        .instruction(),
+        .instruction()
     );
 
-    const result = await processBankrunTransaction(ctx, tx, [user.wallet], true);
+    const result = await processBankrunTransaction(
+      ctx,
+      tx,
+      [user.wallet],
+      true
+    );
     // Kamino Error Code: InvalidAmount. Error Number: 6003.
     assertBankrunTxFailed(result, 6003);
   });
@@ -173,19 +178,19 @@ describe("k03: Deposit to Kamino reserve", () => {
 
     const [lendingMarketAuthority] = deriveLendingMarketAuthority(
       KLEND_PROGRAM_ID,
-      market,
+      market
     );
     const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
       KLEND_PROGRAM_ID,
-      usdcReserve,
+      usdcReserve
     );
     const [reserveCollateralMint] = deriveReserveCollateralMint(
       KLEND_PROGRAM_ID,
-      usdcReserve,
+      usdcReserve
     );
     const [reserveSourceCollateral] = deriveReserveCollateralSupply(
       KLEND_PROGRAM_ID,
-      usdcReserve,
+      usdcReserve
     );
 
     const obligation = user.accounts.get(KAMINO_OBLIGATION);
@@ -200,14 +205,14 @@ describe("k03: Deposit to Kamino reserve", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey,
+        oracles.usdcOracle.publicKey
       ),
       await simpleRefreshObligation(klendBankrunProgram, market, obligation, [
         usdcReserve,
       ]),
       await klendBankrunProgram.methods
         .withdrawObligationCollateralAndRedeemReserveCollateral(
-          new BN(withdrawAmt),
+          new BN(withdrawAmt)
         )
         .accounts({
           owner: user.wallet.publicKey,
@@ -225,7 +230,7 @@ describe("k03: Deposit to Kamino reserve", () => {
           liquidityTokenProgram: TOKEN_PROGRAM_ID,
           instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
         })
-        .instruction(),
+        .instruction()
     );
 
     await processBankrunTransaction(ctx, tx, [user.wallet]);

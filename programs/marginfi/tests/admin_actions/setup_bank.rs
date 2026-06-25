@@ -1600,14 +1600,17 @@ async fn configure_bank_interest_only_success() -> anyhow::Result<()> {
 
     let bank_after: Bank = test_f.load_and_deserialize(&bank.key).await;
 
+    // TODO deprecate in 1.7
     assert_eq!(
         bank_after.config.interest_rate_config.placeholder0,
         I80F48::ZERO.into()
     );
+    // TODO deprecate in 1.7
     assert_eq!(
         bank_after.config.interest_rate_config.placeholder1,
         I80F48::ZERO.into()
     );
+    // TODO deprecate in 1.7
     assert_eq!(
         bank_after.config.interest_rate_config.placeholder2,
         I80F48::ZERO.into()

@@ -577,7 +577,9 @@ describe("sl07: Solend Liquidation", () => {
         b.bankPk.equals(solendUsdcBank)
       );
     if (liquidatorSolendBalAfter) {
-      const liquidatorShares = toBnFromI80(liquidatorSolendBalAfter.assetShares);
+      const liquidatorShares = toBnFromI80(
+        liquidatorSolendBalAfter.assetShares
+      );
       assert.ok(liquidatorShares.gt(new BN(0)));
     }
   });
@@ -630,9 +632,9 @@ describe("sl07: Solend Liquidation", () => {
       );
 
     if (liquidatorSolendBalance) {
-      const withdrawAmount = toBnFromI80(liquidatorSolendBalance.assetShares).div(
-        new BN(2)
-      );
+      const withdrawAmount = toBnFromI80(
+        liquidatorSolendBalance.assetShares
+      ).div(new BN(2));
 
       if (withdrawAmount.gt(new BN(0))) {
         const withdrawTx = new Transaction()

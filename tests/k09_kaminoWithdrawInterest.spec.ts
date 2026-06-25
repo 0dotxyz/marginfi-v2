@@ -283,7 +283,6 @@ describe("k09: Withdraw from Kamino reserve with accrued interest", () => {
     // The withdrawal shrinks the user's Kamino collateral position by ~the withdrawn amount, and
     // the position stays active (partial withdrawal).
     const sharesAfter = await kaminoAssetShares(0);
-    assert.isBelow(sharesAfter, sharesBefore);
     assert.approximately(sharesBefore - sharesAfter, amt, amt * 0.0001);
   });
 
@@ -402,7 +401,10 @@ describe("k09: Withdraw from Kamino reserve with accrued interest", () => {
     const reserveBefore = await klendBankrunProgram.account.reserve.fetch(
       tokenAReserve
     );
-    const userTokenABefore = await getTokenBalance(provider, user.tokenAAccount);
+    const userTokenABefore = await getTokenBalance(
+      provider,
+      user.tokenAAccount
+    );
 
     const withdrawAmt = 20 * 10 ** ecosystem.tokenADecimals;
     // User 0 also holds a USDC Kamino position from earlier, so the post-withdraw health check needs

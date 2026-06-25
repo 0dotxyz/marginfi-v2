@@ -24,7 +24,7 @@ use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        DEFAULT_LIQUIDATION_FEE_BPS, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
+        DEFAULT_LIQUIDATION_FEE, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
         LIQUIDITY_VAULT_SEED,
     },
     types::{
@@ -34,16 +34,14 @@ use marginfi_type_crate::{
 };
 
 /// Converts a per-bank liquidation fee in basis points to an I80F48 fraction. A 0 value falls back
-/// to `DEFAULT_LIQUIDATION_FEE_BPS`
+/// to the `DEFAULT_LIQUIDATION_FEE` constant.
 fn liquidation_fee_fraction(bps: u16) -> I80F48 {
-    let bps = if bps == 0 {
-        DEFAULT_LIQUIDATION_FEE_BPS
+    if bps == 0 {
+        DEFAULT_LIQUIDATION_FEE // const of I80F48 type
     } else {
-        bps
-    };
-    I80F48::from_num(bps) / I80F48::from_num(10_000)
+        I80F48::from_num(bps) / I80F48::from_num(10_000)
+    }
 }
-
 /// Instruction liquidates a position owned by a margin account that is in a unhealthy state.
 /// The liquidator can purchase discounted collateral from the unhealthy account, in exchange for paying its debt.
 ///

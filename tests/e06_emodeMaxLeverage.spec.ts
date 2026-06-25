@@ -11,13 +11,8 @@ import {
   emodeGroup,
   groupAdmin,
 } from "./rootHooks";
-import {
-  assertBankrunTxFailed,
-} from "./utils/genericTests";
-import {
-  configBankEmode,
-  groupConfigure,
-} from "./utils/group-instructions";
+import { assertBankrunTxFailed } from "./utils/genericTests";
+import { configBankEmode, groupConfigure } from "./utils/group-instructions";
 import {
   EMODE_APPLIES_TO_ISOLATED,
   EMODE_LST_TAG,
@@ -77,7 +72,6 @@ describe("Emode Max Leverage Configuration", () => {
       assert.approximately(u32ToBasis(group.emodeMaxInitLeverage), 10, 0.01);
       assert.approximately(u32ToBasis(group.emodeMaxMaintLeverage), 15, 0.01);
     });
-
   });
 
   describe("Group Configuration - Invalid Max Leverage", () => {
@@ -250,7 +244,7 @@ describe("Emode Max Leverage Configuration", () => {
             newEmodeEntry(
               EMODE_LST_TAG,
               EMODE_APPLIES_TO_ISOLATED,
-              bigNumberToWrappedI80F48(1.0),  // equals liability weight (invalid!)
+              bigNumberToWrappedI80F48(1.0), // equals liability weight (invalid!)
               bigNumberToWrappedI80F48(1.0)
             ),
           ],
@@ -275,8 +269,8 @@ describe("Emode Max Leverage Configuration", () => {
             newEmodeEntry(
               EMODE_LST_TAG,
               EMODE_APPLIES_TO_ISOLATED,
-              bigNumberToWrappedI80F48(0.8),  // init weight
-              bigNumberToWrappedI80F48(0.7)   // maint weight < init (invalid!)
+              bigNumberToWrappedI80F48(0.8), // init weight
+              bigNumberToWrappedI80F48(0.7) // maint weight < init (invalid!)
             ),
           ],
         })
@@ -297,13 +291,13 @@ describe("Emode Max Leverage Configuration", () => {
           tag: EMODE_SOL_TAG,
           entries: [
             newEmodeEntry(
-              EMODE_LST_TAG,  // tag 1
+              EMODE_LST_TAG, // tag 1
               EMODE_APPLIES_TO_ISOLATED,
               bigNumberToWrappedI80F48(0.7),
               bigNumberToWrappedI80F48(0.8)
             ),
             newEmodeEntry(
-              EMODE_LST_TAG,  // duplicate tag 1 (invalid!)
+              EMODE_LST_TAG, // duplicate tag 1 (invalid!)
               EMODE_APPLIES_TO_ISOLATED,
               bigNumberToWrappedI80F48(0.6),
               bigNumberToWrappedI80F48(0.75)
@@ -319,5 +313,4 @@ describe("Emode Max Leverage Configuration", () => {
       assertBankrunTxFailed(result, "0x17bb");
     });
   });
-
 });

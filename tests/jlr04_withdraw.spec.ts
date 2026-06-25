@@ -108,7 +108,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     groupPk = juplendAccounts.get(JUPLEND_STATE_KEYS.jlr01Group);
     usdcJupBankPk = juplendAccounts.get(JUPLEND_STATE_KEYS.jlr01BankUsdc);
     user0MarginfiAccountPk = juplendAccounts.get(
-      JUPLEND_STATE_KEYS.jlr02User0MarginfiAccount,
+      JUPLEND_STATE_KEYS.jlr02User0MarginfiAccount
     );
 
     const bank = await bankrunProgram.account.bank.fetch(usdcJupBankPk);
@@ -118,7 +118,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
 
     const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      usdcJupBankPk,
+      usdcJupBankPk
     );
     liquidityVaultAuthorityPk = liquidityVaultAuthority;
 
@@ -126,17 +126,17 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       bank.mint,
       liquidityVaultAuthorityPk,
       true,
-      usdcJupPool.tokenProgram,
+      usdcJupPool.tokenProgram
     );
     assert.equal(
       withdrawIntermediaryAtaPk.toBase58(),
-      expectedWithdrawIntermediaryAta.toBase58(),
+      expectedWithdrawIntermediaryAta.toBase58()
     );
 
     await mintToTokenAccount(
       ecosystem.usdcMint.publicKey,
       user.usdcAccount,
-      usdc(500),
+      usdc(500)
     );
 
     const initUserIx = await accountInit(user.mrgnBankrunProgram!, {
@@ -150,7 +150,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       new Transaction().add(initUserIx),
       [user.wallet, user1MarginfiAccount],
       false,
-      true,
+      true
     );
 
     const createWithdrawIntermediaryAtaIx =
@@ -159,20 +159,20 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
         withdrawIntermediaryAtaPk,
         liquidityVaultAuthorityPk,
         usdcJupPool.mint,
-        usdcJupPool.tokenProgram,
+        usdcJupPool.tokenProgram
       );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(createWithdrawIntermediaryAtaIx),
       [user.wallet],
       false,
-      true,
+      true
     );
   });
 
   const setActiveUser = (
     nextUser: (typeof users)[number],
-    marginfiAccount: PublicKey,
+    marginfiAccount: PublicKey
   ) => {
     user = nextUser;
     activeMarginfiAccountPk = marginfiAccount;
@@ -182,13 +182,13 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     new BN(
       wrappedI80F48toBigNumber(value)
         .integerValue(BigNumber.ROUND_FLOOR)
-        .toFixed(0),
+        .toFixed(0)
     );
 
   const previewSharesForDeposit = (
     assets: BN,
     liquidityExchangePrice: BN,
-    tokenExchangePrice: BN,
+    tokenExchangePrice: BN
   ): BN => {
     if (liquidityExchangePrice.isZero() || tokenExchangePrice.isZero()) {
       return undefined;
@@ -221,10 +221,10 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
 
   const getActiveUserAssetShares = (
     marginfiAccount: any,
-    bankPk: PublicKey,
+    bankPk: PublicKey
   ): { shares: BN; active: boolean } => {
     const userBalance = marginfiAccount.lendingAccount.balances.find(
-      (b: any) => b.active && b.bankPk.equals(bankPk),
+      (b: any) => b.active && b.bankPk.equals(bankPk)
     );
     if (!userBalance) {
       return { shares: new BN(0), active: false };
@@ -250,10 +250,10 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       getTokenBalance(bankRunProvider, usdcJupPool.vault),
       juplendPrograms.lending.account.lending.fetch(usdcJupPool.lending),
       juplendPrograms.liquidity.account.tokenReserve.fetch(
-        usdcJupPool.tokenReserve,
+        usdcJupPool.tokenReserve
       ),
       juplendPrograms.liquidity.account.userSupplyPosition.fetch(
-        usdcJupPool.supplyPositionOnLiquidity,
+        usdcJupPool.supplyPositionOnLiquidity
       ),
       bankrunProgram.account.bank.fetch(usdcJupBankPk),
       bankrunProgram.account.marginfiAccount.fetch(activeMarginfiAccountPk),
@@ -261,7 +261,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
 
     const { shares, active } = getActiveUserAssetShares(
       userAccount,
-      usdcJupBankPk,
+      usdcJupBankPk
     );
 
     return {
@@ -285,7 +285,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
   };
 
   const executeDeposit = async (
-    amount: BN,
+    amount: BN
   ): Promise<{ before: Snapshot; after: Snapshot }> => {
     const before = await fetchSnapshot();
     const depositIx = await makeJuplendDepositIx(user.mrgnBankrunProgram!, {
@@ -301,7 +301,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       new Transaction().add(depositIx),
       [user.wallet],
       false,
-      true,
+      true
     );
     const after = await fetchSnapshot();
     return { before, after };
@@ -312,10 +312,10 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     withdrawAll: boolean,
     trySend: boolean = false,
     withDummyIx: boolean = false,
-    useLut: boolean = false,
+    useLut: boolean = false
   ): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta> => {
     const remainingAccounts = await buildHealthRemainingAccounts(
-      activeMarginfiAccountPk,
+      activeMarginfiAccountPk
     );
 
     const ix = await makeJuplendWithdrawSimpleIx(user.mrgnBankrunProgram!, {
@@ -340,7 +340,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     if (useLut) {
       const lutAccount = await createLookupTableForInstructions(
         user.wallet,
-        tx.instructions,
+        tx.instructions
       );
       const blockhash = await getBankrunBlockhash(bankrunContext);
       const messageV0 = new TransactionMessage({
@@ -354,7 +354,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
         vtx,
         [user.wallet],
         trySend,
-        true,
+        true
       );
     }
 
@@ -363,20 +363,20 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
       tx,
       [user.wallet],
       trySend,
-      false,
+      false
     );
   };
 
   const assertDepositDeltas = (
     before: Snapshot,
     after: Snapshot,
-    amount: BN,
+    amount: BN
   ) => {
     const mintedShares = after.fTokenVault.sub(before.fTokenVault);
     const expectedMintedShares = previewSharesForDeposit(
       amount,
       before.lendingLiquidityExchangePrice,
-      before.lendingTokenExchangePrice,
+      before.lendingTokenExchangePrice
     );
     assertBNApproximately(mintedShares, expectedMintedShares!, 1);
     assertBNGreaterThan(mintedShares, 0);
@@ -385,14 +385,14 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     assertBNEqual(after.jupReserveVault.sub(before.jupReserveVault), amount);
     assertBNEqual(
       after.withdrawIntermediaryAta,
-      before.withdrawIntermediaryAta,
+      before.withdrawIntermediaryAta
     );
 
     const reserveRawSupplyDelta = after.tokenReserveSupplyRaw.sub(
-      before.tokenReserveSupplyRaw,
+      before.tokenReserveSupplyRaw
     );
     const supplyPositionRawDelta = after.supplyPositionRaw.sub(
-      before.supplyPositionRaw,
+      before.supplyPositionRaw
     );
     assertBNEqual(reserveRawSupplyDelta, supplyPositionRawDelta);
     assertBNApproximately(supplyPositionRawDelta, mintedShares, 1);
@@ -400,28 +400,28 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
 
     assertBNEqual(
       after.userAssetShares.sub(before.userAssetShares),
-      mintedShares,
+      mintedShares
     );
     assertBNEqual(
       after.bankTotalAssetShares.sub(before.bankTotalAssetShares),
-      mintedShares,
+      mintedShares
     );
     assertI80F48Equal(after.bankAssetShareValue, before.bankAssetShareValue);
     assertI80F48Equal(
       after.bankLiabilityShareValue,
-      before.bankLiabilityShareValue,
+      before.bankLiabilityShareValue
     );
   };
 
   const assertWithdrawDeltas = (
     before: Snapshot,
     after: Snapshot,
-    amount: BN,
+    amount: BN
   ) => {
     const burnedShares = before.fTokenVault.sub(after.fTokenVault);
     const expectedBurnedShares = previewSharesForWithdraw(
       amount,
-      after.lendingTokenExchangePrice,
+      after.lendingTokenExchangePrice
     );
     assertBNEqual(burnedShares, expectedBurnedShares!);
     assertBNGreaterThan(burnedShares, 0);
@@ -430,14 +430,14 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     assertBNEqual(before.jupReserveVault.sub(after.jupReserveVault), amount);
     assertBNEqual(
       after.withdrawIntermediaryAta,
-      before.withdrawIntermediaryAta,
+      before.withdrawIntermediaryAta
     );
 
     const reserveRawSupplyDelta = before.tokenReserveSupplyRaw.sub(
-      after.tokenReserveSupplyRaw,
+      after.tokenReserveSupplyRaw
     );
     const supplyPositionRawDelta = before.supplyPositionRaw.sub(
-      after.supplyPositionRaw,
+      after.supplyPositionRaw
     );
     assertBNEqual(reserveRawSupplyDelta, supplyPositionRawDelta);
     assertBNApproximately(supplyPositionRawDelta, burnedShares, 1);
@@ -445,7 +445,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
 
     const userShareDelta = before.userAssetShares.sub(after.userAssetShares);
     const bankShareDelta = before.bankTotalAssetShares.sub(
-      after.bankTotalAssetShares,
+      after.bankTotalAssetShares
     );
     assertBNEqual(userShareDelta, burnedShares);
     assertBNEqual(bankShareDelta, burnedShares);
@@ -454,7 +454,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     assertI80F48Equal(after.bankAssetShareValue, before.bankAssetShareValue);
     assertI80F48Equal(
       after.bankLiabilityShareValue,
-      before.bankLiabilityShareValue,
+      before.bankLiabilityShareValue
     );
   };
 
@@ -462,29 +462,29 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     const burnedShares = before.fTokenVault.sub(after.fTokenVault);
     const expectedTokenAmount = previewAssetsForRedeem(
       before.userAssetShares,
-      after.lendingTokenExchangePrice,
+      after.lendingTokenExchangePrice
     );
     const expectedBurnedShares = previewSharesForWithdraw(
       expectedTokenAmount!,
-      after.lendingTokenExchangePrice,
+      after.lendingTokenExchangePrice
     );
     assertBNEqual(burnedShares, expectedBurnedShares!);
 
     assertBNEqual(after.userUsdc.sub(before.userUsdc), expectedTokenAmount!);
     assertBNEqual(
       before.jupReserveVault.sub(after.jupReserveVault),
-      expectedTokenAmount!,
+      expectedTokenAmount!
     );
     assertBNEqual(
       after.withdrawIntermediaryAta,
-      before.withdrawIntermediaryAta,
+      before.withdrawIntermediaryAta
     );
 
     const reserveRawSupplyDelta = before.tokenReserveSupplyRaw.sub(
-      after.tokenReserveSupplyRaw,
+      after.tokenReserveSupplyRaw
     );
     const supplyPositionRawDelta = before.supplyPositionRaw.sub(
-      after.supplyPositionRaw,
+      after.supplyPositionRaw
     );
     assertBNEqual(reserveRawSupplyDelta, supplyPositionRawDelta);
     assertBNApproximately(supplyPositionRawDelta, burnedShares, 1);
@@ -492,7 +492,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
 
     const userShareDelta = before.userAssetShares.sub(after.userAssetShares);
     const bankShareDelta = before.bankTotalAssetShares.sub(
-      after.bankTotalAssetShares,
+      after.bankTotalAssetShares
     );
     assertBNEqual(after.userAssetShares, 0);
     assert.equal(after.hasActiveBalance, false);
@@ -503,7 +503,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     assertI80F48Equal(after.bankAssetShareValue, before.bankAssetShareValue);
     assertI80F48Equal(
       after.bankLiabilityShareValue,
-      before.bankLiabilityShareValue,
+      before.bankLiabilityShareValue
     );
   };
 
@@ -522,7 +522,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     // has_juplend persists across a partial withdraw
     const user0AccAfterPartial =
       await bankrunProgram.account.marginfiAccount.fetch(
-        activeMarginfiAccountPk,
+        activeMarginfiAccountPk
       );
     assert.equal(user0AccAfterPartial.indexerFlags.hasJuplend, 1);
   });
@@ -533,7 +533,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     assertDepositDeltas(
       deposited.before,
       deposited.after,
-      CLEAN_DEPOSIT_AMOUNT,
+      CLEAN_DEPOSIT_AMOUNT
     );
 
     const beforeWithdrawAll = await fetchSnapshot();
@@ -542,10 +542,9 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     assertWithdrawAllDeltas(beforeWithdrawAll, afterWithdrawAll);
 
     // has_juplend clears once the last Juplend position is withdrawn
-    const user1AccAfterAll =
-      await bankrunProgram.account.marginfiAccount.fetch(
-        activeMarginfiAccountPk,
-      );
+    const user1AccAfterAll = await bankrunProgram.account.marginfiAccount.fetch(
+      activeMarginfiAccountPk
+    );
     assert.equal(user1AccAfterAll.indexerFlags.hasJuplend, 0);
   });
 
@@ -555,7 +554,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     assertDepositDeltas(
       deposited.before,
       deposited.after,
-      INTEREST_DEPOSIT_AMOUNT,
+      INTEREST_DEPOSIT_AMOUNT
     );
 
     await advanceOneHour(banksClient, bankrunContext);
@@ -567,7 +566,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
 
     assertBNGreaterThan(
       afterWithdrawAll.lendingTokenExchangePrice,
-      beforeWithdrawAll.lendingTokenExchangePrice,
+      beforeWithdrawAll.lendingTokenExchangePrice
     );
 
     const expectedAfterMultiplier =
@@ -576,29 +575,29 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     assertI80F48Approx(
       afterWithdrawAll.cachePriceMultiplier,
       expectedAfterMultiplier,
-      expectedAfterMultiplier / 10000, // .001%
+      expectedAfterMultiplier / 10000 // .001%
     );
     assert(
       wrappedI80F48toBigNumber(afterWithdrawAll.cachePriceMultiplier).gte(
-        wrappedI80F48toBigNumber(beforeWithdrawAll.cachePriceMultiplier),
-      ),
+        wrappedI80F48toBigNumber(beforeWithdrawAll.cachePriceMultiplier)
+      )
     );
     assertI80F48Approx(
       afterWithdrawAll.cacheLastOraclePrice,
       beforeWithdrawAll.cacheLastOraclePrice,
-      0.000001,
+      0.000001
     );
   });
 
   it("(user 1) deposit + equal partial withdraws with interest between", async () => {
     setActiveUser(users[1], user1MarginfiAccount.publicKey);
     const deposited = await executeDeposit(
-      PARTIALS_WITH_INTEREST_DEPOSIT_AMOUNT,
+      PARTIALS_WITH_INTEREST_DEPOSIT_AMOUNT
     );
     assertDepositDeltas(
       deposited.before,
       deposited.after,
-      PARTIALS_WITH_INTEREST_DEPOSIT_AMOUNT,
+      PARTIALS_WITH_INTEREST_DEPOSIT_AMOUNT
     );
 
     for (let i = 0; i < 3; i++) {
@@ -609,17 +608,17 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
         PARTIALS_WITH_INTEREST_WITHDRAW_AMOUNT,
         false,
         false,
-        true,
+        true
       );
       const afterWithdraw = await fetchSnapshot();
       assertWithdrawDeltas(
         beforeWithdraw,
         afterWithdraw,
-        PARTIALS_WITH_INTEREST_WITHDRAW_AMOUNT,
+        PARTIALS_WITH_INTEREST_WITHDRAW_AMOUNT
       );
       assertBNGreaterThan(
         afterWithdraw.lendingTokenExchangePrice,
-        beforeWithdraw.lendingTokenExchangePrice,
+        beforeWithdraw.lendingTokenExchangePrice
       );
     }
 
@@ -634,13 +633,13 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     assertDepositDeltas(
       deposited.before,
       deposited.after,
-      FULL_WITHOUT_FLAG_DEPOSIT_AMOUNT,
+      FULL_WITHOUT_FLAG_DEPOSIT_AMOUNT
     );
 
     const beforeFullWithdraw = await fetchSnapshot();
     const fullRedeemAmount = previewAssetsForRedeem(
       beforeFullWithdraw.userAssetShares,
-      beforeFullWithdraw.lendingTokenExchangePrice,
+      beforeFullWithdraw.lendingTokenExchangePrice
     );
     assertBNGreaterThan(fullRedeemAmount!, 0);
 
@@ -649,7 +648,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     assertWithdrawDeltas(
       beforeFullWithdraw,
       afterFullWithdraw,
-      fullRedeemAmount!,
+      fullRedeemAmount!
     );
 
     const closeAttempt = await executeWithdraw(new BN(0), true, true);
@@ -663,7 +662,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     assertDepositDeltas(
       deposited.before,
       deposited.after,
-      PARTIALS_THEN_ALL_DEPOSIT_AMOUNT,
+      PARTIALS_THEN_ALL_DEPOSIT_AMOUNT
     );
 
     for (let i = 0; i < 3; i++) {
@@ -672,13 +671,13 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
         PARTIALS_THEN_ALL_WITHDRAW_AMOUNT,
         false,
         false,
-        true,
+        true
       );
       const afterWithdraw = await fetchSnapshot();
       assertWithdrawDeltas(
         beforeWithdraw,
         afterWithdraw,
-        PARTIALS_THEN_ALL_WITHDRAW_AMOUNT,
+        PARTIALS_THEN_ALL_WITHDRAW_AMOUNT
       );
     }
 

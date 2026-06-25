@@ -63,7 +63,7 @@ const INITIAL_SLOT = 1n;
 const INITIAL_UNIX_TIMESTAMP = 1_700_000_000n;
 
 const asBufferAccount = (
-  account: AccountInfo<Uint8Array> | null,
+  account: AccountInfo<Uint8Array> | null
 ): AccountInfo<Buffer> | null => {
   if (!account) return null;
   return {
@@ -76,14 +76,17 @@ const MAX_U64 = 18_446_744_073_709_551_615n;
 
 const normalizeRentEpoch = (rentEpoch: number | bigint): bigint => {
   if (typeof rentEpoch === "bigint") return rentEpoch;
-  if (!Number.isSafeInteger(rentEpoch) && rentEpoch >= Number.MAX_SAFE_INTEGER) {
+  if (
+    !Number.isSafeInteger(rentEpoch) &&
+    rentEpoch >= Number.MAX_SAFE_INTEGER
+  ) {
     return MAX_U64;
   }
   return BigInt(rentEpoch);
 };
 
 const normalizeAccount = (
-  account: AccountInfo<Buffer>,
+  account: AccountInfo<Buffer>
 ): AccountInfo<Uint8Array> => ({
   ...account,
   data: new Uint8Array(account.data),
@@ -115,7 +118,7 @@ const metaFrom = (meta: TransactionMetadata): LiteSVMTransactionMeta => ({
 });
 
 const failedFrom = (
-  failed: FailedTransactionMetadata,
+  failed: FailedTransactionMetadata
 ): LiteSVMTransactionResultWithMeta => ({
   result: failed.err().toString(),
   meta: metaFrom(failed.meta()),
@@ -123,12 +126,11 @@ const failedFrom = (
 
 const throwFailedTransaction = (
   failed: FailedTransactionMetadata,
-  tx: Transaction | VersionedTransaction,
+  tx: Transaction | VersionedTransaction
 ): never => {
-  const transactionMessage = [
-    failed.err().toString(),
-    failed.toString(),
-  ].join("\n");
+  const transactionMessage = [failed.err().toString(), failed.toString()].join(
+    "\n"
+  );
   throw new SendTransactionError({
     action: "send",
     signature: txSignature(tx),
@@ -165,7 +167,7 @@ export class BanksClient {
   }
 
   async processTransaction(
-    tx: Transaction | VersionedTransaction,
+    tx: Transaction | VersionedTransaction
   ): Promise<LiteSVMTransactionMeta> {
     const result = this.svm.sendTransaction(tx);
     if (result instanceof FailedTransactionMetadata) {
@@ -175,7 +177,7 @@ export class BanksClient {
   }
 
   async tryProcessTransaction(
-    tx: Transaction | VersionedTransaction,
+    tx: Transaction | VersionedTransaction
   ): Promise<LiteSVMTransactionResultWithMeta> {
     const result = this.svm.sendTransaction(tx);
     if (result instanceof FailedTransactionMetadata) {
@@ -188,7 +190,7 @@ export class BanksClient {
   }
 
   async simulateTransaction(
-    tx: Transaction | VersionedTransaction,
+    tx: Transaction | VersionedTransaction
   ): Promise<LiteSVMTransactionMeta | LiteSVMTransactionResultWithMeta> {
     const result = this.svm.simulateTransaction(tx);
     if (result instanceof FailedTransactionMetadata) {
@@ -201,10 +203,7 @@ export class BanksClient {
 export class ProgramTestContext {
   readonly banksClient: BanksClient;
 
-  constructor(
-    readonly svm: LiteSVM,
-    readonly payer: Keypair,
-  ) {
+  constructor(readonly svm: LiteSVM, readonly payer: Keypair) {
     this.banksClient = new BanksClient(svm);
   }
 
@@ -247,8 +246,8 @@ const programPath = (workspacePath: string, name: string): string => {
   if (!found) {
     throw new Error(
       `Could not find LiteSVM program artifact for ${name}; tried ${candidates.join(
-        ", ",
-      )}`,
+        ", "
+      )}`
     );
   }
   return found;
@@ -265,7 +264,7 @@ const dedupePrograms = (programs: AddedProgram[]): AddedProgram[] => {
 export async function startAnchor(
   workspacePath: string,
   programs: AddedProgram[],
-  accounts: AddedAccount[],
+  accounts: AddedAccount[]
 ): Promise<ProgramTestContext> {
   const svm = new LiteSVM()
     .withLamports(PAYER_LAMPORTS * 2n)
@@ -279,20 +278,22 @@ export async function startAnchor(
       clock.epochStartTimestamp,
       clock.epoch,
       clock.leaderScheduleEpoch,
-      INITIAL_UNIX_TIMESTAMP,
-    ),
+      INITIAL_UNIX_TIMESTAMP
+    )
   );
   syncRecentSlotHash(svm);
   const payer = Keypair.generate();
   const airdropResult = svm.airdrop(payer.publicKey, PAYER_LAMPORTS);
   if (airdropResult instanceof FailedTransactionMetadata) {
-    throw new Error(`LiteSVM payer airdrop failed: ${airdropResult.toString()}`);
+    throw new Error(
+      `LiteSVM payer airdrop failed: ${airdropResult.toString()}`
+    );
   }
 
   for (const program of dedupePrograms([...LOCAL_PROGRAMS, ...programs])) {
     svm.addProgramFromFile(
       program.programId,
-      programPath(workspacePath, program.name),
+      programPath(workspacePath, program.name)
     );
   }
 

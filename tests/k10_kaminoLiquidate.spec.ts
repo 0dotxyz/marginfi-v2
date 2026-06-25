@@ -35,7 +35,11 @@ import {
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
 import { assert } from "chai";
-import { blankBankConfigOptRaw } from "./utils/types";
+import {
+  blankBankConfigOptRaw,
+  CONF_INTERVAL_MULTIPLE,
+  ORACLE_CONF_INTERVAL,
+} from "./utils/types";
 import { configureBank } from "./utils/group-instructions";
 import {
   defaultKaminoBankConfig,
@@ -370,10 +374,12 @@ describe("k10: Kamino Liquidation", () => {
     const collAfter = accAfter.lendingAccount.balances.find(
       (b) => b.bankPk.equals(kaminoUsdcBank) && b.active === 1
     )!;
-    assert.isTrue(
-      wrappedI80F48toBigNumber(collAfter.assetShares).lt(
-        wrappedI80F48toBigNumber(collBefore.assetShares)
-      )
+    assert.approximately(
+      wrappedI80F48toBigNumber(collBefore.assetShares)
+        .minus(wrappedI80F48toBigNumber(collAfter.assetShares))
+        .toNumber(),
+      liquidateAmount.toNumber(),
+      liquidateAmount.toNumber() * 0.0001
     );
     const debtBefore = liquidateeAcc.lendingAccount.balances.find(
       (b) => b.bankPk.equals(banks[0]) && b.active === 1
@@ -381,10 +387,22 @@ describe("k10: Kamino Liquidation", () => {
     const debtAfter = accAfter.lendingAccount.balances.find(
       (b) => b.bankPk.equals(banks[0]) && b.active === 1
     )!;
-    assert.isTrue(
-      wrappedI80F48toBigNumber(debtAfter.liabilityShares).lt(
-        wrappedI80F48toBigNumber(debtBefore.liabilityShares)
-      )
+    // The debt repaid follows the liquidation math: the seized collateral value (low-bias asset,
+    // minus the 2.5% + 2.5% liquidator/insurance fees) buys down the LST debt at its high-bias price.
+    const conf = ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
+    const seizedUsdc =
+      liquidateAmount.toNumber() / 10 ** ecosystem.usdcDecimals;
+    const debtValueReduced =
+      seizedUsdc * ecosystem.usdcPrice * (1 - conf) * (1 - 0.05);
+    const expectedDebtSharesDelta =
+      (debtValueReduced / (ecosystem.lstAlphaPrice * (1 + conf))) *
+      10 ** ecosystem.lstAlphaDecimals;
+    assert.approximately(
+      wrappedI80F48toBigNumber(debtBefore.liabilityShares)
+        .minus(wrappedI80F48toBigNumber(debtAfter.liabilityShares))
+        .toNumber(),
+      expectedDebtSharesDelta,
+      expectedDebtSharesDelta * 0.03
     );
   });
 

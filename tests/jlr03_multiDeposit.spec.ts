@@ -99,14 +99,14 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
     juplendPrograms = getJuplendPrograms();
     user = users[0];
     userMarginfiAccountPk = requireStateKey(
-      JUPLEND_STATE_KEYS.jlr02User0MarginfiAccount,
+      JUPLEND_STATE_KEYS.jlr02User0MarginfiAccount
     );
 
     jupUsdcBankPk = requireStateKey(JUPLEND_STATE_KEYS.jlr01BankUsdc);
     jupTokenABankPk = requireStateKey(JUPLEND_STATE_KEYS.jlr01BankTokenA);
     jupWsolBankPk = requireStateKey(JUPLEND_STATE_KEYS.jlr01BankWsol);
     regTokenBBankPk = requireStateKey(
-      JUPLEND_STATE_KEYS.jlr01RegularBankTokenB,
+      JUPLEND_STATE_KEYS.jlr01RegularBankTokenB
     );
     regLstBankPk = requireStateKey(JUPLEND_STATE_KEYS.jlr01RegularBankLst);
 
@@ -142,22 +142,22 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
       mintToTokenAccount(
         ecosystem.tokenAMint.publicKey,
         user.tokenAAccount,
-        JUP_TOKEN_A_DEPOSIT.mul(new BN(2)),
+        JUP_TOKEN_A_DEPOSIT.mul(new BN(2))
       ),
       mintToTokenAccount(
         ecosystem.wsolMint.publicKey,
         user.wsolAccount,
-        JUP_WSOL_DEPOSIT.mul(new BN(2)),
+        JUP_WSOL_DEPOSIT.mul(new BN(2))
       ),
       mintToTokenAccount(
         ecosystem.tokenBMint.publicKey,
         user.tokenBAccount,
-        REG_TOKEN_B_DEPOSIT.mul(new BN(2)),
+        REG_TOKEN_B_DEPOSIT.mul(new BN(2))
       ),
       mintToTokenAccount(
         ecosystem.lstAlphaMint.publicKey,
         user.lstAlphaAccount,
-        REG_LST_DEPOSIT.mul(new BN(2)),
+        REG_LST_DEPOSIT.mul(new BN(2))
       ),
     ]);
   });
@@ -179,7 +179,7 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
         bank: jupTokenABankPk,
         pool: jupCtxByBank.get(jupTokenABankPk.toBase58())!.pool,
         amount: JUP_TOKEN_A_DEPOSIT,
-      },
+      }
     );
 
     const depositWsolJupIx = await makeJuplendDepositIx(
@@ -190,7 +190,7 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
         bank: jupWsolBankPk,
         pool: jupCtxByBank.get(jupWsolBankPk.toBase58())!.pool,
         amount: JUP_WSOL_DEPOSIT,
-      },
+      }
     );
 
     const depositTokenBMrgnIx = await depositIx(user.mrgnBankrunProgram!, {
@@ -218,7 +218,7 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
         new Transaction().add(ix),
         [user.wallet],
         false,
-        true,
+        true
       );
     }
 
@@ -274,7 +274,7 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
         refreshRateIxs.push(
           await refreshJupSimple(juplendPrograms.lending, {
             pool: jupCtx.pool,
-          }),
+          })
         );
       }
     }
@@ -289,11 +289,11 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
       new Transaction().add(...refreshRateIxs, pulseIx),
       [user.wallet],
       false,
-      true,
+      true
     );
 
     const userAccountAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      userMarginfiAccountPk,
+      userMarginfiAccountPk
     );
     const healthCache = userAccountAfter.healthCache;
 
@@ -318,7 +318,7 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
       if (bank.config.assetTag === ASSET_TAG_JUPLEND) {
         const jupCtx = jupCtxByBank.get(balance.bankPk.toBase58());
         const lending = await juplendPrograms.lending.account.lending.fetch(
-          jupCtx.pool.lending,
+          jupCtx.pool.lending
         );
 
         const exchange =
@@ -336,14 +336,14 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
         pulsePrice,
         expectedPrice,
         priceTolerance,
-        `pulse price mismatch for bank=${balance.bankPk.toBase58()} idx=${idx}`,
+        `pulse price mismatch for bank=${balance.bankPk.toBase58()} idx=${idx}`
       );
 
       const shares = wrappedI80F48toBigNumber(balance.assetShares);
       const amountUi = shares.div(new BigNumber(10).pow(bank.mintDecimals));
       const weight = wrappedI80F48toBigNumber(bank.config.assetWeightInit);
       expectedAssetValue = expectedAssetValue.plus(
-        amountUi.multipliedBy(expectedPrice).multipliedBy(weight),
+        amountUi.multipliedBy(expectedPrice).multipliedBy(weight)
       );
     }
 
@@ -407,7 +407,10 @@ describe("jlr03: JupLend multi-deposit + health pulse (bankrun)", () => {
       jupCtxs.map((c) => readExchange(c.pool.lending))
     );
     const anyIncreased = exchangesAfter.some((e, i) => e > exchangesBefore[i]);
-    assert.ok(anyIncreased, "expected JupLend interest to accrue over the wait");
+    assert.ok(
+      anyIncreased,
+      "expected JupLend interest to accrue over the wait"
+    );
 
     // The account still pulses healthy with valid engine/oracle state at the new rates.
     const healthCache = (

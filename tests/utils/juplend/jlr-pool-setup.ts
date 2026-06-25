@@ -51,7 +51,7 @@ async function getTokenProgramForMint(mint: PublicKey): Promise<PublicKey> {
   }
 
   throw new Error(
-    `Unsupported mint owner for ${mint.toBase58()}: ${info.owner.toBase58()}`,
+    `Unsupported mint owner for ${mint.toBase58()}: ${info.owner.toBase58()}`
   );
 }
 
@@ -85,17 +85,17 @@ export async function fetchJuplendPool(args: {
     programs.liquidity.account.rateModel.fetch(keys.rateModel),
     programs.liquidity.account.tokenReserve.fetch(keys.tokenReserve),
     programs.liquidity.account.userSupplyPosition.fetch(
-      keys.supplyPositionOnLiquidity,
+      keys.supplyPositionOnLiquidity
     ),
     programs.liquidity.account.userBorrowPosition.fetch(
-      keys.borrowPositionOnLiquidity,
+      keys.borrowPositionOnLiquidity
     ),
     programs.lending.account.lendingAdmin.fetch(keys.lendingAdmin),
     programs.rewards.account.lendingRewardsAdmin.fetch(
-      keys.lendingRewardsAdmin,
+      keys.lendingRewardsAdmin
     ),
     programs.rewards.account.lendingRewardsRateModel.fetch(
-      keys.lendingRewardsRateModel,
+      keys.lendingRewardsRateModel
     ),
     programs.lending.account.lending.fetch(keys.lending),
   ]);
@@ -136,7 +136,7 @@ export async function initJuplendGlobals(args: {
     new Transaction().add(initLiquidity),
     [args.admin],
     false,
-    true,
+    true
   );
 
   const initRewardsAdmin = await initJuplendLendingRewardsAdminIx(programs, {
@@ -149,7 +149,7 @@ export async function initJuplendGlobals(args: {
     new Transaction().add(initRewardsAdmin),
     [args.admin],
     false,
-    true,
+    true
   );
 
   const initLendingAdmin = await initJuplendLendingAdminIx(programs, {
@@ -163,29 +163,29 @@ export async function initJuplendGlobals(args: {
     new Transaction().add(initLendingAdmin),
     [args.admin],
     false,
-    true,
+    true
   );
 
   const liquidityAcc = await programs.liquidity.account.liquidity.fetch(
-    liquidity,
+    liquidity
   );
   assertKeysEqual(liquidityAcc.authority, args.admin.publicKey);
   assertKeysEqual(liquidityAcc.revenueCollector, args.admin.publicKey);
 
   const rewardsAdminAcc =
     await programs.rewards.account.lendingRewardsAdmin.fetch(
-      lendingRewardsAdmin,
+      lendingRewardsAdmin
     );
   assertKeysEqual(rewardsAdminAcc.authority, args.admin.publicKey);
   assertKeysEqual(rewardsAdminAcc.lendingProgram, JUPLEND_LENDING_PROGRAM_ID);
 
   const lendingAdminAcc = await programs.lending.account.lendingAdmin.fetch(
-    lendingAdmin,
+    lendingAdmin
   );
   assertKeysEqual(lendingAdminAcc.authority, args.admin.publicKey);
   assertKeysEqual(
     lendingAdminAcc.liquidityProgram,
-    JUPLEND_LIQUIDITY_PROGRAM_ID,
+    JUPLEND_LIQUIDITY_PROGRAM_ID
   );
   assertKeysEqual(lendingAdminAcc.rebalancer, args.admin.publicKey);
 
@@ -231,7 +231,7 @@ async function initJuplendLiquidityForMint(args: {
     new Transaction().add(initTokenReserveIx),
     [args.admin],
     false,
-    true,
+    true
   );
 
   const updateRateIx = await programs.liquidity.methods
@@ -268,11 +268,11 @@ async function initJuplendLiquidityForMint(args: {
     new Transaction().add(updateRateIx, updateTokenConfigIx),
     [args.admin],
     false,
-    true,
+    true
   );
 
   const reserveAfter = await programs.liquidity.account.tokenReserve.fetch(
-    poolKeys.tokenReserve,
+    poolKeys.tokenReserve
   );
   assertKeysEqual(reserveAfter.mint, args.mint);
   assertKeysEqual(reserveAfter.vault, poolKeys.vault);
@@ -280,7 +280,7 @@ async function initJuplendLiquidityForMint(args: {
   assert.equal(reserveAfter.feeOnInterest, tokenConfig.fee.toNumber());
 
   const rateModelAfter = await programs.liquidity.account.rateModel.fetch(
-    poolKeys.rateModel,
+    poolKeys.rateModel
   );
   assertKeysEqual(rateModelAfter.mint, args.mint);
   assert.equal(rateModelAfter.kink1Utilization, rateConfig.kink.toNumber());
@@ -299,7 +299,7 @@ async function initJuplendRewardsRateModel(args: {
   const { lendingRewardsAdmin } = deriveJuplendGlobalKeys();
   const [lendingRewardsRateModel] = findJuplendRewardsRateModelPdaBestEffort(
     args.mint,
-    JUPLEND_EARN_REWARDS_PROGRAM_ID,
+    JUPLEND_EARN_REWARDS_PROGRAM_ID
   );
 
   const ix = await programs.rewards.methods
@@ -316,11 +316,11 @@ async function initJuplendRewardsRateModel(args: {
     new Transaction().add(ix),
     [args.admin],
     false,
-    true,
+    true
   );
 
   const rewards = await programs.rewards.account.lendingRewardsRateModel.fetch(
-    lendingRewardsRateModel,
+    lendingRewardsRateModel
   );
   assertKeysEqual(rewards.mint, args.mint);
   assertBNEqual(rewards.startTvl, 0);
@@ -365,7 +365,7 @@ async function initJuplendLendingForMint(args: {
     new Transaction().add(initLendingIx),
     [args.admin],
     false,
-    true,
+    true
   );
 
   const setRewardsIx = await programs.lending.methods
@@ -384,11 +384,11 @@ async function initJuplendLendingForMint(args: {
     new Transaction().add(setRewardsIx),
     [args.admin],
     false,
-    true,
+    true
   );
 
   const lendingState = await programs.lending.account.lending.fetch(
-    poolKeys.lending,
+    poolKeys.lending
   );
   assertKeysEqual(lendingState.mint, args.mint);
   assert.equal(lendingState.decimals, args.decimals);
@@ -424,17 +424,17 @@ async function initJuplendLiquidityPositions(args: {
     new Transaction().add(ix),
     [args.admin],
     false,
-    true,
+    true
   );
 
   const supplyPos = await programs.liquidity.account.userSupplyPosition.fetch(
-    poolKeys.supplyPositionOnLiquidity,
+    poolKeys.supplyPositionOnLiquidity
   );
   assertKeysEqual(supplyPos.protocol, args.lending);
   assertKeysEqual(supplyPos.mint, args.mint);
 
   const borrowPos = await programs.liquidity.account.userBorrowPosition.fetch(
-    poolKeys.borrowPositionOnLiquidity,
+    poolKeys.borrowPositionOnLiquidity
   );
   assertKeysEqual(borrowPos.protocol, args.lending);
   assertKeysEqual(borrowPos.mint, args.mint);
@@ -515,42 +515,42 @@ export async function configureJuplendProtocolPermissions(args: {
     new Transaction().add(supplyIx, borrowIx, userClassIx),
     [args.admin],
     false,
-    true,
+    true
   );
 
   const supplyPos = await programs.liquidity.account.userSupplyPosition.fetch(
-    args.supplyPositionOnLiquidity,
+    args.supplyPositionOnLiquidity
   );
   assert.equal(supplyPos.withInterest, supplyConfig.mode);
   assert.equal(supplyPos.expandPct, supplyConfig.expandPercent.toNumber());
   assertBNEqual(supplyPos.expandDuration, supplyConfig.expandDuration);
   assertBNEqual(
     supplyPos.baseWithdrawalLimit,
-    supplyConfig.baseWithdrawalLimit,
+    supplyConfig.baseWithdrawalLimit
   );
 
   const borrowPos = await programs.liquidity.account.userBorrowPosition.fetch(
-    args.borrowPositionOnLiquidity,
+    args.borrowPositionOnLiquidity
   );
   assert.equal(borrowPos.withInterest, borrowConfig.mode);
   assert.equal(borrowPos.expandPct, borrowConfig.expandPercent.toNumber());
   assert.equal(
     Number(borrowPos.expandDuration),
-    borrowConfig.expandDuration.toNumber(),
+    borrowConfig.expandDuration.toNumber()
   );
   assertBNEqual(borrowPos.baseDebtCeiling, borrowConfig.baseDebtCeiling);
   assertBNEqual(borrowPos.maxDebtCeiling, borrowConfig.maxDebtCeiling);
 
   const authListAcc = await programs.liquidity.account.authorizationList.fetch(
-    authList,
+    authList
   );
   const userClass = authListAcc.userClasses.find((entry: any) =>
-    entry.addr.equals(args.lending),
+    entry.addr.equals(args.lending)
   );
   assert.ok(userClass, "missing user class entry");
   assert.equal(
     userClass.class,
-    userClassEntries.find((entry) => entry.addr.equals(args.lending))?.value,
+    userClassEntries.find((entry) => entry.addr.equals(args.lending))?.value
   );
 }
 

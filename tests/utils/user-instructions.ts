@@ -335,12 +335,14 @@ export const closeLiquidationRecordIx = (
   const methodsAny = program.methods as any;
 
   if (typeof methodsAny.marginfiAccountCloseLiqRecord === "function") {
-    return methodsAny.marginfiAccountCloseLiqRecord()
+    return methodsAny
+      .marginfiAccountCloseLiqRecord()
       .accounts(accounts)
       .instruction();
   }
   if (typeof methodsAny.marginfiAccountCloseLiquidationRecord === "function") {
-    return methodsAny.marginfiAccountCloseLiquidationRecord()
+    return methodsAny
+      .marginfiAccountCloseLiquidationRecord()
       .accounts(accounts)
       .instruction();
   }
@@ -369,7 +371,7 @@ export const closeLiquidationRecordIx = (
         },
       ],
       data: CLOSE_LIQ_RECORD_DISCRIMINATOR,
-    }),
+    })
   );
 };
 
@@ -636,8 +638,8 @@ export const composeRemainingAccounts = (
 /**
  * Use in place of `composeRemainingAccounts` when building Meta for Start Liquidate (marks banks as
  * mutable, which is required)
- * @param banksAndOracles 
- * @returns 
+ * @param banksAndOracles
+ * @returns
  */
 export const composeRemainingAccountsWriteableMeta = (
   banksAndOracles: PublicKey[][]
@@ -665,8 +667,8 @@ export const composeRemainingAccountsWriteableMeta = (
 /**
  * Use in place of `composeRemainingAccounts` when building Meta for End Liquidate (marks banks as
  * mutable and ignores/excludes all other accounts)
- * @param banksAndOracles 
- * @returns 
+ * @param banksAndOracles
+ * @returns
  */
 export const composeRemainingAccountsMetaBanksOnly = (
   banksAndOracles: PublicKey[][]
@@ -757,26 +759,6 @@ export const transferAccountAuthorityPdaIx = (
   return ix;
 };
 
-export type PurgeDevelerageArgs = {
-  account: PublicKey;
-  bank: PublicKey;
-};
-
-export const purgeDeveleragedBalance = (
-  program: Program<Marginfi>,
-  args: PurgeDevelerageArgs
-) => {
-  const ix = program.methods
-    .purgeDeleverageBalance()
-    .accounts({
-      marginfiAccount: args.account,
-      bank: args.bank,
-    })
-    .instruction();
-
-  return ix;
-};
-
 // ---------------------------------------------------------------------------
 // Orders
 // ---------------------------------------------------------------------------
@@ -784,7 +766,13 @@ export const purgeDeveleragedBalance = (
 export type OrderTriggerArgs =
   | { stopLoss: { threshold: WrappedI80F48; maxSlippage: number } }
   | { takeProfit: { threshold: WrappedI80F48; maxSlippage: number } }
-  | { both: { stopLoss: WrappedI80F48; takeProfit: WrappedI80F48; maxSlippage: number } };
+  | {
+      both: {
+        stopLoss: WrappedI80F48;
+        takeProfit: WrappedI80F48;
+        maxSlippage: number;
+      };
+    };
 
 export type PlaceOrderArgs = {
   marginfiAccount: PublicKey;
@@ -807,8 +795,9 @@ export const placeOrderIx = async (
   );
 
   const feeState = args.feeState ?? deriveGlobalFeeState(program.programId)[0];
-  const globalFeeWallet = args.globalFeeWallet
-    ?? (await program.account.feeState.fetch(feeState)).globalFeeWallet;
+  const globalFeeWallet =
+    args.globalFeeWallet ??
+    (await program.account.feeState.fetch(feeState)).globalFeeWallet;
 
   const accounts = {
     authority: args.authority,

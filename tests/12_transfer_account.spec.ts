@@ -131,8 +131,9 @@ describe("Transfer account authority", () => {
       [oldAcc]
     );
 
-    const before =
-      await program.provider.connection.getAccountInfo(globalFeeWallet);
+    const before = await program.provider.connection.getAccountInfo(
+      globalFeeWallet
+    );
     await users[0].mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await transferAccountAuthorityIx(users[0].mrgnProgram, {
@@ -144,8 +145,9 @@ describe("Transfer account authority", () => {
       ),
       [newAcc]
     );
-    const after =
-      await program.provider.connection.getAccountInfo(globalFeeWallet);
+    const after = await program.provider.connection.getAccountInfo(
+      globalFeeWallet
+    );
 
     // The configured fee (not the 5,000,000-lamport default) was charged.
     assert.equal(after.lamports - before.lamports, FEE_LAMPORTS);

@@ -816,22 +816,6 @@ pub mod marginfi {
         )
     }
 
-    /// (risk admin only) DEPRECATED: this functionality has been folded into the forced-deleverage
-    /// withdraw flow (`start_deleverage`, then `lending_account_withdraw` with `withdraw_all`, then
-    /// `end_deleverage`). On a bank flagged `TOKENLESS_REPAYMENTS_COMPLETE`, `lending_account_withdraw`
-    /// releases whatever remains in the liquidity vault and removes the position, covering the same
-    /// cleanup. Retained for backwards compatibility;
-    ///
-    /// Purge a user's lending balance without withdrawing anything. Only usable after all the debt
-    /// has been settled on a bank in deleveraging mode, e.g. when `TOKENLESS_REPAYMENTS_ALLOWED` and
-    /// `TOKENLESS_REPAYMENTS_COMPLETE`. Used to purge remaining lending assets in a now-worthless
-    /// bank before it is fully sunset.
-    pub fn purge_deleverage_balance(
-        ctx: Context<LendingAccountPurgeDelevBalance>,
-    ) -> MarginfiResult {
-        marginfi_account::lending_account_purge_delev_balance(ctx)
-    }
-
     /****** Kamino integration instructions *****/
 
     /// (permissionless) Initialize a Kamino obligation for a marginfi bank

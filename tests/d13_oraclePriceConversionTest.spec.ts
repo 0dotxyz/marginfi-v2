@@ -101,13 +101,13 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
         signerTokenAccount: users[0].usdcAccount,
       },
       usdcDepositAmount,
-      USDC_MARKET_INDEX,
+      USDC_MARKET_INDEX
     );
 
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(depositIx0),
-      [users[0].wallet],
+      [users[0].wallet]
     );
 
     const tokenADepositAmount = new BN(0.1 * 10 ** ecosystem.tokenADecimals);
@@ -121,43 +121,43 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
         driftOracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE),
       },
       tokenADepositAmount,
-      TOKEN_A_MARKET_INDEX,
+      TOKEN_A_MARKET_INDEX
     );
 
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(depositIx1),
-      [users[1].wallet],
+      [users[1].wallet]
     );
 
     const marginfiAccount0 = await bankrunProgram.account.marginfiAccount.fetch(
-      user0Account,
+      user0Account
     );
     const balance0 = marginfiAccount0.lendingAccount.balances.find(
-      (b) => b.active === 1 && b.bankPk.equals(driftUsdcBank),
+      (b) => b.active === 1 && b.bankPk.equals(driftUsdcBank)
     );
     initialAssetShares0 = toBnFromI80(balance0.assetShares);
 
     const marginfiAccount1 = await bankrunProgram.account.marginfiAccount.fetch(
-      user1Account,
+      user1Account
     );
     const balance1 = marginfiAccount1.lendingAccount.balances.find(
-      (b) => b.active === 1 && b.bankPk.equals(driftTokenABank),
+      (b) => b.active === 1 && b.bankPk.equals(driftTokenABank)
     );
     initialAssetShares1 = toBnFromI80(balance1.assetShares);
 
     const usdcSpotMarket = await getSpotMarketAccount(
       driftBankrunProgram,
-      USDC_MARKET_INDEX,
+      USDC_MARKET_INDEX
     );
     initialUsdcBorrows = safeBN(usdcSpotMarket.borrowBalance);
     lastInterestTs = safeBN(usdcSpotMarket.lastInterestTs);
     console.log(
       "Initial USDC Deposits: " +
-        bnToDecimalStringSafe(usdcSpotMarket.depositBalance),
+        bnToDecimalStringSafe(usdcSpotMarket.depositBalance)
     );
     console.log(
-      "Initial USDC Borrows: " + bnToDecimalStringSafe(initialUsdcBorrows),
+      "Initial USDC Borrows: " + bnToDecimalStringSafe(initialUsdcBorrows)
     );
 
     usdcInterestRate = safeBN(calculateInterestRate(usdcSpotMarket));
@@ -167,21 +167,21 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
           .mul(new BN(100))
           .div(DRIFT_UTILIZATION_PRECISION)
           .toNumber() +
-        "%",
+        "%"
     ); // ~1%
 
     const tokenASpotMarket = await getSpotMarketAccount(
       driftBankrunProgram,
-      TOKEN_A_MARKET_INDEX,
+      TOKEN_A_MARKET_INDEX
     );
     initialTokenABorrows = safeBN(tokenASpotMarket.borrowBalance);
     assertBNEqual(tokenASpotMarket.lastInterestTs, lastInterestTs);
     console.log(
       "Initial Token A Deposits: " +
-        bnToDecimalStringSafe(tokenASpotMarket.depositBalance),
+        bnToDecimalStringSafe(tokenASpotMarket.depositBalance)
     );
     console.log(
-      "Initial Token A Borrows: " + bnToDecimalStringSafe(initialTokenABorrows),
+      "Initial Token A Borrows: " + bnToDecimalStringSafe(initialTokenABorrows)
     );
 
     tokenAInterestRate = safeBN(calculateInterestRate(tokenASpotMarket));
@@ -191,14 +191,14 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
           .mul(new BN(100))
           .div(DRIFT_UTILIZATION_PRECISION)
           .toNumber() +
-        "%",
+        "%"
     ); // ~1000%
 
     initialUsdcCumulativeBorrowInterest = safeBN(
-      usdcSpotMarket.cumulativeBorrowInterest,
+      usdcSpotMarket.cumulativeBorrowInterest
     );
     initialTokenACumulativeBorrowInterest = safeBN(
-      tokenASpotMarket.cumulativeBorrowInterest,
+      tokenASpotMarket.cumulativeBorrowInterest
     );
   });
 
@@ -215,7 +215,7 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
       0n,
       currentClock.epoch,
       0n,
-      BigInt(newTimestamp),
+      BigInt(newTimestamp)
     );
 
     bankrunContext.setClock(newClock);
@@ -225,13 +225,13 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
     const updateUsdcIx = await makeUpdateSpotMarketCumulativeInterestIx(
       driftBankrunProgram,
       {},
-      USDC_MARKET_INDEX,
+      USDC_MARKET_INDEX
     );
 
     const updateTokenAIx = await makeUpdateSpotMarketCumulativeInterestIx(
       driftBankrunProgram,
       { oracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE) },
-      TOKEN_A_MARKET_INDEX,
+      TOKEN_A_MARKET_INDEX
     );
 
     const updateTx = new Transaction().add(updateUsdcIx, updateTokenAIx);
@@ -241,73 +241,73 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
 
     const usdcSpotMarketAfter = await getSpotMarketAccount(
       driftBankrunProgram,
-      USDC_MARKET_INDEX,
+      USDC_MARKET_INDEX
     );
     assertBNEqual(usdcSpotMarketAfter.lastInterestTs, newTimestamp);
 
     const timeSinceLastUpdate = safeBN(
-      usdcSpotMarketAfter.lastInterestTs.sub(lastInterestTs),
+      usdcSpotMarketAfter.lastInterestTs.sub(lastInterestTs)
     );
     finalUsdcCumulativeDepositInterest = safeBN(
-      usdcSpotMarketAfter.cumulativeDepositInterest,
+      usdcSpotMarketAfter.cumulativeDepositInterest
     );
 
     const accumulatedUsdcBorrowInterest = calculateExpectedBorrowInterest(
       initialUsdcCumulativeBorrowInterest,
       usdcInterestRate,
-      timeSinceLastUpdate,
+      timeSinceLastUpdate
     );
     console.log(
       "USDC Borrow Interest: " +
-        bnToDecimalStringSafe(accumulatedUsdcBorrowInterest),
+        bnToDecimalStringSafe(accumulatedUsdcBorrowInterest)
     );
 
     assertBNApproximately(
       safeBN(usdcSpotMarketAfter.cumulativeBorrowInterest).sub(
-        initialUsdcCumulativeBorrowInterest,
+        initialUsdcCumulativeBorrowInterest
       ),
       accumulatedUsdcBorrowInterest,
-      new BN(1),
+      new BN(1)
     );
 
     const tokenASpotMarketAfter = await getSpotMarketAccount(
       driftBankrunProgram,
-      TOKEN_A_MARKET_INDEX,
+      TOKEN_A_MARKET_INDEX
     );
 
     finalTokenACumulativeDepositInterest = safeBN(
-      tokenASpotMarketAfter.cumulativeDepositInterest,
+      tokenASpotMarketAfter.cumulativeDepositInterest
     );
 
     const accumulatedTokenABorrowInterest = calculateExpectedBorrowInterest(
       initialTokenACumulativeBorrowInterest,
       tokenAInterestRate,
-      timeSinceLastUpdate,
+      timeSinceLastUpdate
     );
     console.log(
       "Token A Borrow Interest: " +
-        bnToDecimalStringSafe(accumulatedTokenABorrowInterest),
+        bnToDecimalStringSafe(accumulatedTokenABorrowInterest)
     );
 
     assertBNApproximately(
       safeBN(tokenASpotMarketAfter.cumulativeBorrowInterest).sub(
-        initialTokenACumulativeBorrowInterest,
+        initialTokenACumulativeBorrowInterest
       ),
       accumulatedTokenABorrowInterest,
-      new BN(1),
+      new BN(1)
     );
 
     const marginfiAccount0After =
       await bankrunProgram.account.marginfiAccount.fetch(user0Account);
     const balance0After = marginfiAccount0After.lendingAccount.balances.find(
-      (b) => b.active === 1 && b.bankPk.equals(driftUsdcBank),
+      (b) => b.active === 1 && b.bankPk.equals(driftUsdcBank)
     );
     const assetShares0After = toBnFromI80(balance0After.assetShares);
 
     const marginfiAccount1After =
       await bankrunProgram.account.marginfiAccount.fetch(user1Account);
     const balance1After = marginfiAccount1After.lendingAccount.balances.find(
-      (b) => b.active === 1 && b.bankPk.equals(driftTokenABank),
+      (b) => b.active === 1 && b.bankPk.equals(driftTokenABank)
     );
     const assetShares1After = toBnFromI80(balance1After.assetShares);
 
@@ -318,13 +318,13 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
   it("Validates USDC oracle price conversion matches health check valuation", async () => {
     const bank = await bankrunProgram.account.bank.fetch(driftUsdcBank);
     const usdcOraclePrice = new BN(
-      oracles.usdcPrice * 10 ** ecosystem.usdcDecimals,
+      oracles.usdcPrice * 10 ** ecosystem.usdcDecimals
     );
     const { expectedValue: expectedUsdcValue } = calculateExpectedValue(
       initialAssetShares0,
       usdcOraclePrice,
       finalUsdcCumulativeDepositInterest,
-      toBnFromI80(bank.config.assetWeightMaint),
+      toBnFromI80(bank.config.assetWeightMaint)
     );
 
     const pulseHealthIx = await makePulseHealthIx(
@@ -342,23 +342,23 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
           isSigner: false,
           isWritable: false,
         },
-      ],
+      ]
     );
 
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(pulseHealthIx),
-      [users[0].wallet],
+      [users[0].wallet]
     );
 
     const accAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      user0Account,
+      user0Account
     );
     const healthCache = accAfter.healthCache;
 
     const assetValue = wrappedI80F48toBigNumber(healthCache.assetValue);
     const actualUsdcValue = new BN(
-      Math.floor(assetValue.toNumber() * 10 ** ecosystem.usdcDecimals),
+      Math.floor(assetValue.toNumber() * 10 ** ecosystem.usdcDecimals)
     );
     // The ±2 base-unit slack is precision drift, not nondeterminism: the program keeps the
     // price * interest * (1 - conf) * shares product in fractional I80F48 the whole way, whereas
@@ -371,13 +371,13 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
   it("Validates Token A oracle price conversion matches health check valuation", async () => {
     const bank = await bankrunProgram.account.bank.fetch(driftTokenABank);
     const tokenAOraclePrice = new BN(
-      oracles.tokenAPrice * 10 ** ecosystem.usdcDecimals,
+      oracles.tokenAPrice * 10 ** ecosystem.usdcDecimals
     );
     const { expectedValue: expectedTokenAValue } = calculateExpectedValue(
       initialAssetShares1,
       tokenAOraclePrice,
       finalTokenACumulativeDepositInterest,
-      toBnFromI80(bank.config.assetWeightMaint),
+      toBnFromI80(bank.config.assetWeightMaint)
     );
 
     const pulseHealthIx = await makePulseHealthIx(
@@ -395,23 +395,23 @@ describe("d13: Oracle Price Conversion and Interest Tracking", () => {
           isSigner: false,
           isWritable: false,
         },
-      ],
+      ]
     );
 
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(pulseHealthIx),
-      [users[1].wallet],
+      [users[1].wallet]
     );
 
     const accAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      user1Account,
+      user1Account
     );
     const healthCache = accAfter.healthCache;
 
     const assetValue = wrappedI80F48toBigNumber(healthCache.assetValue);
     const actualTokenAValue = new BN(
-      Math.floor(assetValue.toNumber() * 10 ** ecosystem.usdcDecimals),
+      Math.floor(assetValue.toNumber() * 10 ** ecosystem.usdcDecimals)
     );
     assertBNApproximately(actualTokenAValue, expectedTokenAValue, new BN(1));
   });
@@ -421,7 +421,7 @@ function calculateExpectedValue(
   assetShares: BN,
   oraclePrice: BN,
   cumulativeInterest: BN,
-  assetWeightMaint: BN,
+  assetWeightMaint: BN
 ): { expectedValue: BN; weightedValue: BN } {
   // Apply Drift's cumulative interest adjustment
   const adjustedOraclePrice = oraclePrice
@@ -448,7 +448,7 @@ function calculateExpectedValue(
 function calculateExpectedBorrowInterest(
   initialCumulativeBorrowInterest: BN,
   interestRate: BN,
-  timeSinceLastUpdate: BN,
+  timeSinceLastUpdate: BN
 ): BN {
   // Match Drift's u128 integer math without relying on chained BN arithmetic,
   // which can use stale decoded words on Linux/Node 24 before normalization.

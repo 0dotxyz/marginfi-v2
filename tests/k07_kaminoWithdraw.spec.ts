@@ -1,7 +1,5 @@
 import { BN } from "@coral-xyz/anchor";
-import {
-  Transaction,
-} from "@solana/web3.js";
+import { Transaction } from "@solana/web3.js";
 import {
   ecosystem,
   kaminoAccounts,
@@ -26,7 +24,11 @@ import { processBankrunTransaction } from "./utils/tools";
 import { ProgramTestContext } from "./utils/litesvm";
 import { makeKaminoWithdrawIx } from "./utils/kamino-instructions";
 import { composeRemainingAccounts } from "./utils/user-instructions";
-import { assertBNApproximately, getTokenBalance, assertBankrunTxFailed } from "./utils/genericTests";
+import {
+  assertBNApproximately,
+  getTokenBalance,
+  assertBankrunTxFailed,
+} from "./utils/genericTests";
 
 let ctx: ProgramTestContext;
 
@@ -128,11 +130,14 @@ describe("k07: Kamino Withdraw Tests", () => {
       );
 
       assert.equal(kaminoBankBalance.active, 1);
-      // The Kamino bank position shrinks by the partial withdrawal.
-      assert.isTrue(
-        wrappedI80F48toBigNumber(kaminoBankBalance.assetShares).lt(
-          wrappedI80F48toBigNumber(kaminoBalanceBefore.assetShares)
-        )
+      // The Kamino bank position shrinks by ~the partial withdrawal amount (collateral ≈ liquidity
+      // at this fresh reserve's ~1:1 exchange rate).
+      assert.approximately(
+        wrappedI80F48toBigNumber(kaminoBalanceBefore.assetShares)
+          .minus(wrappedI80F48toBigNumber(kaminoBankBalance.assetShares))
+          .toNumber(),
+        withdrawAmt.toNumber(),
+        withdrawAmt.toNumber() * 0.0001
       );
       // has_kamino persists across a partial withdraw
       assert.equal(marginfiAccountData.indexerFlags.hasKamino, 1);
@@ -155,7 +160,9 @@ describe("k07: Kamino Withdraw Tests", () => {
     const obligation = kaminoAccounts.get(`${bankKey}_OBLIGATION`);
 
     // Try to withdraw an extremely large amount (10 million USDC)
-    const excessiveWithdrawAmount = new BN(10_000_000 * 10 ** ecosystem.usdcDecimals);
+    const excessiveWithdrawAmount = new BN(
+      10_000_000 * 10 ** ecosystem.usdcDecimals
+    );
 
     let tx = new Transaction().add(
       await simpleRefreshReserve(
@@ -188,7 +195,13 @@ describe("k07: Kamino Withdraw Tests", () => {
       )
     );
 
-    let result = await processBankrunTransaction(ctx, tx, [user.wallet], true, true);
+    let result = await processBankrunTransaction(
+      ctx,
+      tx,
+      [user.wallet],
+      true,
+      true
+    );
     // OperationWithdrawOnly error code 6020
     assertBankrunTxFailed(result, 6020);
   });

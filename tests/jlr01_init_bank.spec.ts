@@ -116,21 +116,21 @@ const mintToAdmin = async (mint: PublicKey, amount: BN) => {
     globalProgramAdmin.wallet.publicKey,
     BigInt(amount.toString()),
     [],
-    TOKEN_PROGRAM_ID,
+    TOKEN_PROGRAM_ID
   );
   await processBankrunTransaction(
     bankrunContext,
     new Transaction().add(ix),
     [globalProgramAdmin.wallet],
     false,
-    true,
+    true
   );
 };
 
 const mintToTokenAccount = async (
   mint: PublicKey,
   destination: PublicKey,
-  amount: BN,
+  amount: BN
 ) => {
   const ix = createMintToInstruction(
     mint,
@@ -138,14 +138,14 @@ const mintToTokenAccount = async (
     globalProgramAdmin.wallet.publicKey,
     BigInt(amount.toString()),
     [],
-    TOKEN_PROGRAM_ID,
+    TOKEN_PROGRAM_ID
   );
   await processBankrunTransaction(
     bankrunContext,
     new Transaction().add(ix),
     [globalProgramAdmin.wallet],
     false,
-    true,
+    true
   );
 };
 
@@ -248,11 +248,11 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
       new Transaction().add(ix),
       [groupAdmin.wallet, jlrGroup],
       false,
-      true,
+      true
     );
 
     const group = await bankrunProgram.account.marginfiGroup.fetch(
-      jlrGroup.publicKey,
+      jlrGroup.publicKey
     );
     assertKeysEqual(group.admin, groupAdmin.wallet.publicKey);
     assertI80F48Approx(group.feeStateCache.programFeeFixed, PROGRAM_FEE_FIXED);
@@ -279,7 +279,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         new Transaction().add(addIx),
         [groupAdmin.wallet],
         false,
-        true,
+        true
       );
 
       const oracleIx = await configureBankOracle(
@@ -289,11 +289,11 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
             bankrunProgram.programId,
             jlrGroup.publicKey,
             spec.mint.publicKey,
-            spec.seed,
+            spec.seed
           )[0],
           type: ORACLE_SETUP_PYTH_PUSH,
           oracle: spec.oracle,
-        },
+        }
       );
 
       await processBankrunTransaction(
@@ -301,14 +301,14 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         new Transaction().add(oracleIx),
         [groupAdmin.wallet],
         false,
-        true,
+        true
       );
 
       const [bankPk] = deriveBankWithSeed(
         bankrunProgram.programId,
         jlrGroup.publicKey,
         spec.mint.publicKey,
-        spec.seed,
+        spec.seed
       );
 
       const bank = await bankrunProgram.account.bank.fetch(bankPk);
@@ -325,11 +325,11 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
       assertI80F48Equal(bank.config.assetWeightMaint, config.assetWeightMaint);
       assertI80F48Equal(
         bank.config.liabilityWeightInit,
-        config.liabilityWeightInit,
+        config.liabilityWeightInit
       );
       assertI80F48Equal(
         bank.config.liabilityWeightMaint,
-        config.liabilityWeightMain,
+        config.liabilityWeightMain
       );
       assertBNEqual(bank.config.depositLimit, config.depositLimit);
       assertBNEqual(bank.config.borrowLimit, config.borrowLimit);
@@ -338,7 +338,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
       assert.equal(bank.config.configFlags, PYTH_PULL_MIGRATED);
       assertBNEqual(
         bank.config.totalAssetValueInitLimit,
-        config.totalAssetValueInitLimit,
+        config.totalAssetValueInitLimit
       );
       assert.equal(bank.config.oracleMaxAge, config.oracleMaxAge);
       assert.equal(bank.config.oracleMaxConfidence, config.oracleMaxConfidence);
@@ -355,11 +355,11 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
 
       const [_liqAuth, liqAuthBump] = deriveLiquidityVaultAuthority(
         bankrunProgram.programId,
-        bankPk,
+        bankPk
       );
       const [liqVault, liqVaultBump] = deriveLiquidityVault(
         bankrunProgram.programId,
-        bankPk,
+        bankPk
       );
       assertKeysEqual(bank.liquidityVault, liqVault);
       assert.equal(bank.liquidityVaultAuthorityBump, liqAuthBump);
@@ -367,11 +367,11 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
 
       const [_insAuth, insAuthBump] = deriveInsuranceVaultAuthority(
         bankrunProgram.programId,
-        bankPk,
+        bankPk
       );
       const [insVault, insVaultBump] = deriveInsuranceVault(
         bankrunProgram.programId,
-        bankPk,
+        bankPk
       );
       assertKeysEqual(bank.insuranceVault, insVault);
       assert.equal(bank.insuranceVaultAuthorityBump, insAuthBump);
@@ -379,11 +379,11 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
 
       const [_feeAuth, feeAuthBump] = deriveFeeVaultAuthority(
         bankrunProgram.programId,
-        bankPk,
+        bankPk
       );
       const [feeVault, feeVaultBump] = deriveFeeVault(
         bankrunProgram.programId,
-        bankPk,
+        bankPk
       );
       assertKeysEqual(bank.feeVault, feeVault);
       assert.equal(bank.feeVaultAuthorityBump, feeAuthBump);
@@ -464,7 +464,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
           fTokenMint: usdcPool.fTokenMint,
           config: defaultJuplendBankConfig(
             tokenASpec.oracle, // sneaky sneaky
-            usdcSpec.decimals,
+            usdcSpec.decimals
           ),
         },
       },
@@ -512,7 +512,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         bankrunProgram.programId,
         jlrGroup.publicKey,
         testCase.params.bankMint,
-        testCase.seed,
+        testCase.seed
       );
 
       const addIx = await addJuplendBankIx(groupAdmin.mrgnBankrunProgram, {
@@ -531,13 +531,13 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         new Transaction().add(addIx),
         [groupAdmin.wallet],
         true,
-        false,
+        false
       );
       assertBankrunTxFailed(result, testCase.expectedErrorCode);
 
       const candidateBank = await safeGetAccountInfo(
         bankRunProvider.connection,
-        candidateBankPk,
+        candidateBankPk
       );
       assert.isNull(candidateBank, `failed: ${testCase.name}`);
     }
@@ -574,7 +574,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         new Transaction().add(addIx),
         [groupAdmin.wallet],
         false,
-        true,
+        true
       );
 
       const bank = await bankrunProgram.account.bank.fetch(addresses.bank);
@@ -642,7 +642,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         new Transaction().add(ix),
         [attacker.wallet],
         true,
-        false,
+        false
       );
       assertBankrunTxFailed(result, badCase.expectedErrorCode);
     }
@@ -661,7 +661,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
     await mintToTokenAccount(
       ecosystem.usdcMint.publicKey,
       attacker.usdcAccount,
-      toUnit(ecosystem.usdcDecimals).mul(new BN(10)),
+      toUnit(ecosystem.usdcDecimals).mul(new BN(10))
     );
 
     const badJupCases = [
@@ -699,7 +699,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
 
       const config = defaultJuplendBankConfig(
         usdcSpec.oracle,
-        ecosystem.usdcDecimals,
+        ecosystem.usdcDecimals
       );
       const addIx = await addJuplendBankIx(groupAdmin.mrgnBankrunProgram, {
         group: jlrGroup.publicKey,
@@ -717,7 +717,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         new Transaction().add(addIx),
         [groupAdmin.wallet],
         false,
-        true,
+        true
       );
 
       const ix = await makeJuplendInitPositionIx(attacker.mrgnBankrunProgram!, {
@@ -733,18 +733,18 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         new Transaction().add(ix),
         [attacker.wallet],
         true,
-        false,
+        false
       );
       // Something on juplend's end, we don't really care about the specific error
       assertBankrunTxFailed(result, "custom program error");
 
       const bankAfter = await bankrunProgram.account.bank.fetch(
-        throwawayAddresses.bank,
+        throwawayAddresses.bank
       );
       assert.deepEqual(
         bankAfter.config.operationalState,
         { uninitialized: {} },
-        `bank init when it should have failed: ${badCase.name}`,
+        `bank init when it should have failed: ${badCase.name}`
       );
     }
   });
@@ -765,7 +765,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
           bank: addresses.bank,
           pool,
           seedDepositAmount: toUnit(spec.decimals),
-        },
+        }
       );
 
       await processBankrunTransaction(
@@ -773,7 +773,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         new Transaction().add(initIx),
         [groupAdmin.wallet],
         false,
-        true,
+        true
       );
 
       const bankAfter = await bankrunProgram.account.bank.fetch(addresses.bank);
@@ -793,7 +793,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
 
       const fTokenBalance = await getTokenBalance(
         bankRunProvider,
-        addresses.fTokenVault,
+        addresses.fTokenVault
       );
       assert.isAbove(fTokenBalance, 0, `${spec.name} fToken vault balance`);
 
@@ -818,11 +818,11 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         await configureBank(groupAdmin.mrgnBankrunProgram, {
           bank: addresses.bank,
           bankConfigOpt: pauseConfig,
-        }),
+        })
       ),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const bankPaused = await bankrunProgram.account.bank.fetch(addresses.bank);
@@ -832,7 +832,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
     await mintToTokenAccount(
       ecosystem.usdcMint.publicKey,
       attacker.usdcAccount,
-      toUnit(ecosystem.usdcDecimals),
+      toUnit(ecosystem.usdcDecimals)
     );
 
     // Attacker tries to re-run init_position: gate is operational_state == Uninitialized, which
@@ -845,7 +845,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         bank: addresses.bank,
         pool,
         seedDepositAmount: toUnit(ecosystem.usdcDecimals),
-      },
+      }
     );
 
     const attackerResult = await processBankrunTransaction(
@@ -853,7 +853,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
       new Transaction().add(attackerIx),
       [attacker.wallet],
       true,
-      false,
+      false
     );
     assertBankrunTxFailed(attackerResult, 6507); // JuplendBankAlreadyActivated
 
@@ -866,14 +866,14 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         bank: addresses.bank,
         pool,
         seedDepositAmount: toUnit(spec.decimals),
-      },
+      }
     );
     const adminResult = await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(adminIx),
       [groupAdmin.wallet],
       true,
-      false,
+      false
     );
     assertBankrunTxFailed(adminResult, 6507); // JuplendBankAlreadyActivated
 
@@ -890,14 +890,14 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         await configureBank(groupAdmin.mrgnBankrunProgram, {
           bank: addresses.bank,
           bankConfigOpt: restoreConfig,
-        }),
+        })
       ),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
     const bankRestored = await bankrunProgram.account.bank.fetch(
-      addresses.bank,
+      addresses.bank
     );
     assert.deepEqual(bankRestored.config.operationalState, { operational: {} });
   });
@@ -914,11 +914,11 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         await configureBank(groupAdmin.mrgnBankrunProgram, {
           bank: addresses.bank,
           bankConfigOpt: bogusConfig,
-        }),
+        })
       ),
       [groupAdmin.wallet],
       true,
-      false,
+      false
     );
     assertBankrunTxFailed(result, 6042); // Unauthorized
 
@@ -947,7 +947,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         bankrunProgram.programId,
         jlrGroup.publicKey,
         spec.mint.publicKey,
-        spec.seed,
+        spec.seed
       );
       addAddress(spec.mint.publicKey);
       addAddress(spec.oracle);
@@ -966,17 +966,18 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
     }
 
     const recentSlot = Number(await banksClient.getSlot());
-    const [createLutIx, lookupTable] = AddressLookupTableProgram.createLookupTable({
-      authority: groupAdmin.wallet.publicKey,
-      payer: groupAdmin.wallet.publicKey,
-      recentSlot,
-    });
+    const [createLutIx, lookupTable] =
+      AddressLookupTableProgram.createLookupTable({
+        authority: groupAdmin.wallet.publicKey,
+        payer: groupAdmin.wallet.publicKey,
+        recentSlot,
+      });
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(createLutIx),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const LUT_CHUNK_SIZE = 20;
@@ -993,7 +994,7 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
         new Transaction().add(extendLutIx),
         [groupAdmin.wallet],
         false,
-        true,
+        true
       );
     }
 

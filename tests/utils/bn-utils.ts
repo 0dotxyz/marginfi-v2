@@ -125,7 +125,7 @@ export const nativeToI80Scaled = (native: BN): bigint =>
 
 export const addNativeAmountToI80 = (
   base: WrappedI80F48 | null | undefined,
-  amount: BN,
+  amount: BN
 ): WrappedI80F48 =>
   fromI80Scaled((base ? toI80Scaled(base) : 0n) + nativeToI80Scaled(amount));
 

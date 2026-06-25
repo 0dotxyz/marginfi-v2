@@ -247,7 +247,12 @@ describe("Order position extremes (16 balances, mixed normal + integration)", ()
       [user.wallet]
     );
 
-    await refreshDriftOracles(oracles, driftAccounts, bankrunContext, banksClient);
+    await refreshDriftOracles(
+      oracles,
+      driftAccounts,
+      bankrunContext,
+      banksClient
+    );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(
@@ -414,7 +419,12 @@ describe("Order position extremes (16 balances, mixed normal + integration)", ()
     const { slot } = await getEpochAndSlot(banksClient);
     bankrunContext.warpToSlot(BigInt(slot + 24));
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
-    await refreshDriftOracles(oracles, driftAccounts, bankrunContext, banksClient);
+    await refreshDriftOracles(
+      oracles,
+      driftAccounts,
+      bankrunContext,
+      banksClient
+    );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(
@@ -442,7 +452,11 @@ describe("Order position extremes (16 balances, mixed normal + integration)", ()
     const accAfter = await bankrunProgram.account.marginfiAccount.fetch(
       userAccount
     );
-    assert.equal(accAfter.activeOrders, 0, "order should be closed post-execution");
+    assert.equal(
+      accAfter.activeOrders,
+      0,
+      "order should be closed post-execution"
+    );
     const active = accAfter.lendingAccount.balances.filter(
       (b) => b.active === 1
     );

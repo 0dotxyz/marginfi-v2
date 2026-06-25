@@ -190,7 +190,7 @@ impl MinimalReserve {
 
     /// Returns true if this reserve has not been refreshed in `current_slot`.
     ///
-    /// we call this on-chain (in `ensure_kamino_reserve_fresh`) to require that a Kamino
+    /// We call this on-chain (in `ensure_kamino_reserve_fresh`) to require that a Kamino
     /// reserve was refreshed in the current slot before it trusts the reserve's collateral
     /// exchange rate when pricing a Kamino bank.
     ///

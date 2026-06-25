@@ -1541,7 +1541,7 @@ fn load_swb_lite_feed(data: Ref<&mut [u8]>) -> MarginfiResult<(LitePullFeedAccou
 /// bytes (`try_pod_read_unaligned`). Used off-chain, where native `i128` alignment (16) makes the
 /// zero-copy reference cast fail — see [`load_swb_lite_feed`]. Also reused by tests/clients.
 pub fn parse_swb_ignore_alignment(data: Ref<&mut [u8]>) -> MarginfiResult<PullFeedAccountData> {
-    if data.len() < 8 {
+    if data.len() < 8 + std::mem::size_of::<PullFeedAccountData>() {
         return err!(MarginfiError::SwitchboardInvalidAccount);
     }
 

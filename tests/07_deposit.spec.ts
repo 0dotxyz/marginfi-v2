@@ -47,7 +47,11 @@ import {
   ORACLE_SETUP_PYTH_PUSH,
   u64MAX_BN,
 } from "./utils/types";
-import { getBankrunBlockhash, getBankrunTime, processBankrunTransaction } from "./utils/tools";
+import {
+  getBankrunBlockhash,
+  getBankrunTime,
+  processBankrunTransaction,
+} from "./utils/tools";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 
 let program: Program<Marginfi>;
@@ -134,9 +138,13 @@ describe("Deposit funds", () => {
         depositUpToLimit: false,
       })
     );
-    const result = await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
+    const result = await processBankrunTransaction(bankrunContext, tx, [
+      user.wallet,
+    ]);
     const events = parseMarginfiEvents(program, result.logMessages);
-    const depositEvent = events.find((e) => e.name === "lendingAccountDepositEvent");
+    const depositEvent = events.find(
+      (e) => e.name === "lendingAccountDepositEvent"
+    );
     assert.isDefined(depositEvent, "Expected lendingAccountDepositEvent");
     assertI80F48Approx(depositEvent!.data.shareAmount, depositAmountA_native);
 
@@ -190,7 +198,9 @@ describe("Deposit funds", () => {
       )
     );
 
-    const bankAfter = await program.account.bank.fetch(bankKeypairUsdc.publicKey);
+    const bankAfter = await program.account.bank.fetch(
+      bankKeypairUsdc.publicKey
+    );
     assert.equal(bankAfter.lendingPositionCount, 1);
 
     const userAcc = await program.account.marginfiAccount.fetch(user1Account);
@@ -646,10 +656,12 @@ describe("Deposit up to limit with accrued interest", () => {
 
     // Capture the remaining deposit capacity before advancing the clock.
     const bankBefore = await bankrunProgram.account.bank.fetch(usdcBankKey);
-    const currentAssets = wrappedI80F48toBigNumber(bankBefore.totalAssetShares).multipliedBy(
-      wrappedI80F48toBigNumber(bankBefore.assetShareValue)
-    );
-    staleCapacityNative = new BigNumber(bankBefore.config.depositLimit.toString())
+    const currentAssets = wrappedI80F48toBigNumber(
+      bankBefore.totalAssetShares
+    ).multipliedBy(wrappedI80F48toBigNumber(bankBefore.assetShareValue));
+    staleCapacityNative = new BigNumber(
+      bankBefore.config.depositLimit.toString()
+    )
       .minus(currentAssets)
       .minus(1)
       .integerValue(BigNumber.ROUND_FLOOR);
@@ -718,17 +730,21 @@ describe("Deposit up to limit with accrued interest", () => {
 
     // Total assets must remain strictly below the deposit limit
     const bankFinal = await bankrunProgram.account.bank.fetch(usdcBankKey);
-    const totalAssets = wrappedI80F48toBigNumber(bankFinal.totalAssetShares).multipliedBy(
-      wrappedI80F48toBigNumber(bankFinal.assetShareValue)
-    );
+    const totalAssets = wrappedI80F48toBigNumber(
+      bankFinal.totalAssetShares
+    ).multipliedBy(wrappedI80F48toBigNumber(bankFinal.assetShareValue));
     assert.ok(
-      totalAssets.isLessThan(new BigNumber(bankFinal.config.depositLimit.toString())),
+      totalAssets.isLessThan(
+        new BigNumber(bankFinal.config.depositLimit.toString())
+      ),
       "total assets must remain below deposit limit"
     );
 
     if (verbose) {
       console.log(
-        `deposited: ${actualDeposited}, pre-accrual capacity was: ${staleCapacityNative.toFixed(0)}`
+        `deposited: ${actualDeposited}, pre-accrual capacity was: ${staleCapacityNative.toFixed(
+          0
+        )}`
       );
     }
   });

@@ -6,7 +6,12 @@ import {
 } from "@solana/spl-token";
 import { assert } from "chai";
 import { Clock } from "./utils/litesvm";
-import { Keypair, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
+import {
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+} from "@solana/web3.js";
 
 import {
   bankRunProvider,
@@ -75,7 +80,7 @@ const P = BigInt(EXCHANGE_PRICES_PRECISION);
 const previewSharesForDeposit = (
   assets: bigint,
   liquidityExchangePrice: bigint,
-  tokenExchangePrice: bigint,
+  tokenExchangePrice: bigint
 ): bigint => {
   const registeredRaw = (assets * P) / liquidityExchangePrice;
   const registered = (registeredRaw * liquidityExchangePrice) / P;
@@ -84,14 +89,14 @@ const previewSharesForDeposit = (
 
 const previewAssetsForRedeem = (
   shares: bigint,
-  tokenExchangePrice: bigint,
+  tokenExchangePrice: bigint
 ): bigint => {
   return (shares * tokenExchangePrice) / P;
 };
 
 const findFirstPositiveLossAmount = (
   tokenExchangePrice: bigint,
-  liquidityExchangePrice: bigint,
+  liquidityExchangePrice: bigint
 ): RoundingProbe | null => {
   for (
     let amount = MIN_LOOP_DEPOSIT;
@@ -101,7 +106,7 @@ const findFirstPositiveLossAmount = (
     const shares = previewSharesForDeposit(
       amount,
       liquidityExchangePrice,
-      tokenExchangePrice,
+      tokenExchangePrice
     );
     if (shares < MIN_LOOP_SHARES) continue;
 
@@ -139,14 +144,12 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
 
   const fetchExchangePrices = async () => {
     const lending = await juplendPrograms.lending.account.lending.fetch(
-      jupUsdcPool.lending,
+      jupUsdcPool.lending
     );
 
     return {
       tokenExchangePrice: bnToBigIntSafe(lending.tokenExchangePrice),
-      liquidityExchangePrice: bnToBigIntSafe(
-        lending.liquidityExchangePrice,
-      ),
+      liquidityExchangePrice: bnToBigIntSafe(lending.liquidityExchangePrice),
     };
   };
 
@@ -154,11 +157,11 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
     const protocol = groupAdmin.wallet.publicKey;
     const [supplyPosition] = findJuplendLiquiditySupplyPositionPda(
       jupUsdcPool.mint,
-      protocol,
+      protocol
     );
     const [borrowPosition] = findJuplendLiquidityBorrowPositionPda(
       jupUsdcPool.mint,
-      protocol,
+      protocol
     );
 
     const [supplyInfo, borrowInfo] = await Promise.all([
@@ -183,7 +186,7 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
         new Transaction().add(...setupBorrowerIxs),
         [groupAdmin.wallet],
         false,
-        true,
+        true
       );
 
       await configureJuplendProtocolPermissions({
@@ -228,7 +231,7 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
       new Transaction().add(...createUtilizationIxs),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const clock = await banksClient.getClock();
@@ -238,8 +241,8 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
         0n,
         clock.epoch,
         clock.epochStartTimestamp,
-        clock.unixTimestamp + BigInt(BOOTSTRAP_WARP_SECONDS),
-      ),
+        clock.unixTimestamp + BigInt(BOOTSTRAP_WARP_SECONDS)
+      )
     );
 
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
@@ -247,11 +250,11 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
       bankrunContext,
       new Transaction().add(
         await refreshJupSimple(juplendPrograms.lending, { pool: jupUsdcPool }),
-        dummyIx(groupAdmin.wallet.publicKey, user.wallet.publicKey),
+        dummyIx(groupAdmin.wallet.publicKey, user.wallet.publicKey)
       ),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
   };
 
@@ -264,21 +267,21 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
 
     const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      juplendUsdcBankPk,
+      juplendUsdcBankPk
     );
     const withdrawIntermediaryAta = getAssociatedTokenAddressSync(
       jupUsdcPool.mint,
       liquidityVaultAuthority,
       true,
-      jupUsdcPool.tokenProgram,
+      jupUsdcPool.tokenProgram
     );
     const [claimAccount] = findJuplendClaimAccountPda(
       liquidityVaultAuthority,
-      jupUsdcPool.mint,
+      jupUsdcPool.mint
     );
 
     const claimInfo = await bankRunProvider.connection.getAccountInfo(
-      claimAccount,
+      claimAccount
     );
     const integrationSetupIxs = [
       createAssociatedTokenAccountIdempotentInstruction(
@@ -286,7 +289,7 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
         withdrawIntermediaryAta,
         liquidityVaultAuthority,
         jupUsdcPool.mint,
-        jupUsdcPool.tokenProgram,
+        jupUsdcPool.tokenProgram
       ),
     ];
     if (!claimInfo) {
@@ -296,7 +299,7 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
           mint: jupUsdcPool.mint,
           accountFor: liquidityVaultAuthority,
           claimAccount,
-        }),
+        })
       );
     }
     await processBankrunTransaction(
@@ -304,7 +307,7 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
       new Transaction().add(...integrationSetupIxs),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const initUserIx = await accountInit(user.mrgnBankrunProgram!, {
@@ -318,13 +321,13 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
       new Transaction().add(initUserIx),
       [user.wallet, roundingUserMarginfiAccount],
       false,
-      true,
+      true
     );
 
     await mintToTokenAccount(
       ecosystem.usdcMint.publicKey,
       user.usdcAccount,
-      FUND_USDC,
+      FUND_USDC
     );
 
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
@@ -332,30 +335,30 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
       bankrunContext,
       new Transaction().add(
         await refreshJupSimple(juplendPrograms.lending, { pool: jupUsdcPool }),
-        dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
+        dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey)
       ),
       [user.wallet],
       false,
-      true,
+      true
     );
 
     let prices = await fetchExchangePrices();
     let probe = findFirstPositiveLossAmount(
       prices.tokenExchangePrice,
-      prices.liquidityExchangePrice,
+      prices.liquidityExchangePrice
     );
     if (!probe) {
       await bootstrapNonIntegerExchangePrice();
       prices = await fetchExchangePrices();
       probe = findFirstPositiveLossAmount(
         prices.tokenExchangePrice,
-        prices.liquidityExchangePrice,
+        prices.liquidityExchangePrice
       );
     }
 
     assert.ok(
       probe,
-      `could not find a positive rounding-loss case up to amount=${SEARCH_MAX_AMOUNT.toString()}`,
+      `could not find a positive rounding-loss case up to amount=${SEARCH_MAX_AMOUNT.toString()}`
     );
     assert.isTrue(probe!.loss > 0n, "expected a positive per-round-trip loss");
 
@@ -366,12 +369,16 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
 
   it("loops tiny deposit/withdraw-all cycles and applies a consistent rounding loss per cycle with stable prices", async () => {
     const beforePrices = await fetchExchangePrices();
-    const bankBefore = await bankrunProgram.account.bank.fetch(juplendUsdcBankPk);
-    const userStart = BigInt(await getTokenBalance(bankRunProvider, user.usdcAccount));
+    const bankBefore = await bankrunProgram.account.bank.fetch(
+      juplendUsdcBankPk
+    );
+    const userStart = BigInt(
+      await getTokenBalance(bankRunProvider, user.usdcAccount)
+    );
 
     for (let i = 0; i < LOOP_ITERATIONS; i++) {
       const cycleStart = BigInt(
-        await getTokenBalance(bankRunProvider, user.usdcAccount),
+        await getTokenBalance(bankRunProvider, user.usdcAccount)
       );
 
       const depositIx = await makeJuplendDepositIx(user.mrgnBankrunProgram!, {
@@ -385,15 +392,15 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
         bankrunContext,
         new Transaction().add(
           depositIx,
-          dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
+          dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey)
         ),
         [user.wallet],
         false,
-        true,
+        true
       );
 
       const remaining = await buildHealthRemainingAccounts(
-        roundingUserMarginfiAccount.publicKey,
+        roundingUserMarginfiAccount.publicKey
       );
       const withdrawAllIx = await makeJuplendWithdrawSimpleIx(
         user.mrgnBankrunProgram!,
@@ -405,25 +412,27 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
           amount: new BN(0),
           withdrawAll: true,
           remainingAccounts: remaining,
-        },
+        }
       );
       await processBankrunTransaction(
         bankrunContext,
         new Transaction().add(
           withdrawAllIx,
-          dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
+          dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey)
         ),
         [user.wallet],
         false,
-        true,
+        true
       );
 
-      const cycleEnd = BigInt(await getTokenBalance(bankRunProvider, user.usdcAccount));
+      const cycleEnd = BigInt(
+        await getTokenBalance(bankRunProvider, user.usdcAccount)
+      );
       const cycleLoss = cycleStart - cycleEnd;
       assert.equal(
         cycleLoss.toString(),
         perLoopExpectedLoss.toString(),
-        `cycle ${i} should lose exactly ${perLoopExpectedLoss.toString()} lamports`,
+        `cycle ${i} should lose exactly ${perLoopExpectedLoss.toString()} lamports`
       );
 
       const cycleRedeem =
@@ -431,48 +440,56 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
       assert.equal(
         cycleRedeem.toString(),
         perLoopExpectedRedeem.toString(),
-        `cycle ${i} should redeem exact floor(shares*price/1e12)`,
+        `cycle ${i} should redeem exact floor(shares*price/1e12)`
       );
 
-      const marginfiAccount = await bankrunProgram.account.marginfiAccount.fetch(
-        roundingUserMarginfiAccount.publicKey,
-      );
+      const marginfiAccount =
+        await bankrunProgram.account.marginfiAccount.fetch(
+          roundingUserMarginfiAccount.publicKey
+        );
       const activeBalance = marginfiAccount.lendingAccount.balances.find(
-        (b) => b.active && b.bankPk.equals(juplendUsdcBankPk),
+        (b) => b.active && b.bankPk.equals(juplendUsdcBankPk)
       );
-      assert.isUndefined(activeBalance, `cycle ${i} should close the bank balance`);
+      assert.isUndefined(
+        activeBalance,
+        `cycle ${i} should close the bank balance`
+      );
 
       const pricesNow = await fetchExchangePrices();
       assert.equal(
         pricesNow.tokenExchangePrice.toString(),
         beforePrices.tokenExchangePrice.toString(),
-        `cycle ${i} token exchange price drifted`,
+        `cycle ${i} token exchange price drifted`
       );
       assert.equal(
         pricesNow.liquidityExchangePrice.toString(),
         beforePrices.liquidityExchangePrice.toString(),
-        `cycle ${i} liquidity exchange price drifted`,
+        `cycle ${i} liquidity exchange price drifted`
       );
     }
 
-    const userEnd = BigInt(await getTokenBalance(bankRunProvider, user.usdcAccount));
+    const userEnd = BigInt(
+      await getTokenBalance(bankRunProvider, user.usdcAccount)
+    );
     const expectedTotalLoss = BigInt(LOOP_ITERATIONS) * perLoopExpectedLoss;
     assert.equal(
       (userStart - userEnd).toString(),
       expectedTotalLoss.toString(),
-      "total rounding loss should be exactly per-cycle loss times iteration count",
+      "total rounding loss should be exactly per-cycle loss times iteration count"
     );
 
-    const bankAfter = await bankrunProgram.account.bank.fetch(juplendUsdcBankPk);
+    const bankAfter = await bankrunProgram.account.bank.fetch(
+      juplendUsdcBankPk
+    );
     assert.equal(
       bankAfter.assetShareValue.toString(),
       bankBefore.assetShareValue.toString(),
-      "asset share value should remain unchanged (no interest accrual in loop)",
+      "asset share value should remain unchanged (no interest accrual in loop)"
     );
     assert.equal(
       bankAfter.liabilityShareValue.toString(),
       bankBefore.liabilityShareValue.toString(),
-      "liability share value should remain unchanged (no interest accrual in loop)",
+      "liability share value should remain unchanged (no interest accrual in loop)"
     );
   });
 });

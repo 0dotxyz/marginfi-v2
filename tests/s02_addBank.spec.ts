@@ -93,14 +93,14 @@ describe("Init group and add banks with asset category flags", () => {
       await groupInitialize(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: marginfiGroup.publicKey,
         admin: groupAdmin.wallet.publicKey,
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet, marginfiGroup);
     await banksClient.processTransaction(tx);
 
     let group = await bankrunProgram.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey,
+      marginfiGroup.publicKey
     );
     assertKeysEqual(group.admin, groupAdmin.wallet.publicKey);
     if (verbose) {
@@ -114,7 +114,7 @@ describe("Init group and add banks with asset category flags", () => {
       program.programId,
       marginfiGroup.publicKey,
       validators[0].splMint,
-      new BN(0),
+      new BN(0)
     );
     validators[0].bank = bankKey;
 
@@ -127,7 +127,7 @@ describe("Init group and add banks with asset category flags", () => {
         stakePool: validators[0].splPool,
         validatorVoteAccount: validators[0].voteAccount,
         seed: new BN(0),
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
@@ -138,7 +138,7 @@ describe("Init group and add banks with asset category flags", () => {
 
   it("(admin) Init staked settings for group - opts in to use staked collateral", async () => {
     const settings = defaultStakedInterestSettings(
-      oracles.wsolOracle.publicKey,
+      oracles.wsolOracle.publicKey
     );
     let tx = new Transaction();
 
@@ -147,7 +147,7 @@ describe("Init group and add banks with asset category flags", () => {
         group: marginfiGroup.publicKey,
         feePayer: groupAdmin.wallet.publicKey,
         settings: settings,
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
@@ -155,14 +155,14 @@ describe("Init group and add banks with asset category flags", () => {
 
     const [settingsKey] = deriveStakedSettings(
       program.programId,
-      marginfiGroup.publicKey,
+      marginfiGroup.publicKey
     );
     if (verbose) {
       console.log("*init staked settings: " + settingsKey);
     }
 
     let settingsAcc = await bankrunProgram.account.stakedSettings.fetch(
-      settingsKey,
+      settingsKey
     );
     assertKeysEqual(settingsAcc.key, settingsKey);
     assertKeysEqual(settingsAcc.oracle, oracles.wsolOracle.publicKey);
@@ -186,7 +186,7 @@ describe("Init group and add banks with asset category flags", () => {
     const config_ix = await groupAdmin.mrgnProgram.methods
       .lendingPoolConfigureBankOracle(
         ORACLE_SETUP_PYTH_PUSH,
-        oracles.usdcOracle.publicKey,
+        oracles.usdcOracle.publicKey
       )
       .accountsPartial({
         group: marginfiGroup.publicKey,
@@ -205,7 +205,7 @@ describe("Init group and add banks with asset category flags", () => {
         bank: bankKey,
         config: setConfig,
       }),
-      config_ix,
+      config_ix
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet, bankKeypairUsdc);
@@ -232,7 +232,7 @@ describe("Init group and add banks with asset category flags", () => {
     const config_ix = await groupAdmin.mrgnProgram.methods
       .lendingPoolConfigureBankOracle(
         ORACLE_SETUP_PYTH_PUSH,
-        oracles.wsolOracle.publicKey,
+        oracles.wsolOracle.publicKey
       )
       .accountsPartial({
         group: marginfiGroup.publicKey,
@@ -251,7 +251,7 @@ describe("Init group and add banks with asset category flags", () => {
         bank: bankKey,
         config: setConfig,
       }),
-      config_ix,
+      config_ix
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet, bankKeypairSol);
@@ -279,7 +279,7 @@ describe("Init group and add banks with asset category flags", () => {
         bankMint: validators[0].splMint,
         bank: bankKeypair.publicKey,
         config: setConfig,
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet, bankKeypair);
@@ -291,7 +291,7 @@ describe("Init group and add banks with asset category flags", () => {
   it("(attacker) Add bank (validator 0) with bad accounts + bad metadata - should fail", async () => {
     const [settingsKey] = deriveStakedSettings(
       program.programId,
-      marginfiGroup.publicKey,
+      marginfiGroup.publicKey
     );
     const goodStakePool = validators[0].splPool;
     const goodLstMint = validators[0].splMint;
@@ -383,7 +383,7 @@ describe("Init group and add banks with asset category flags", () => {
   it("(attacker) Add bank (validator 0) with good accounts but bad metadata - should fail", async () => {
     const [settingsKey] = deriveStakedSettings(
       program.programId,
-      marginfiGroup.publicKey,
+      marginfiGroup.publicKey
     );
 
     const goodStakePool = validators[0].splPool;
@@ -513,7 +513,7 @@ describe("Init group and add banks with asset category flags", () => {
       program.programId,
       marginfiGroup.publicKey,
       validators[0].splMint,
-      new BN(0),
+      new BN(0)
     );
     validators[0].bank = bankKey;
 
@@ -526,7 +526,7 @@ describe("Init group and add banks with asset category flags", () => {
         stakePool: validators[0].splPool,
         validatorVoteAccount: validators[0].voteAccount,
         seed: new BN(0),
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
@@ -538,10 +538,10 @@ describe("Init group and add banks with asset category flags", () => {
     const bank = await bankrunProgram.account.bank.fetch(validators[0].bank);
     const [settingsKey] = deriveStakedSettings(
       program.programId,
-      marginfiGroup.publicKey,
+      marginfiGroup.publicKey
     );
     const settingsAcc = await bankrunProgram.account.stakedSettings.fetch(
-      settingsKey,
+      settingsKey
     );
     // Noteworthy fields
     assert.equal(bank.config.assetTag, ASSET_TAG_STAKED);
@@ -635,7 +635,7 @@ describe("Init group and add banks with asset category flags", () => {
     assert.equal(config.assetTag, ASSET_TAG_STAKED);
     assertBNEqual(
       config.totalAssetValueInitLimit,
-      settingsAcc.totalAssetValueInitLimit,
+      settingsAcc.totalAssetValueInitLimit
     );
 
     // Oracle information....
@@ -658,7 +658,7 @@ describe("Init group and add banks with asset category flags", () => {
       program.programId,
       marginfiGroup.publicKey,
       validators[1].splMint,
-      new BN(0),
+      new BN(0)
     );
     validators[1].bank = bankKey;
 
@@ -671,7 +671,7 @@ describe("Init group and add banks with asset category flags", () => {
         stakePool: validators[1].splPool,
         validatorVoteAccount: validators[1].voteAccount,
         seed: new BN(0),
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
@@ -694,8 +694,8 @@ describe("Init group and add banks with asset category flags", () => {
         {
           bank: validators[0].bank,
           validatorVoteAccount: validators[1].voteAccount, // bad vote account
-        },
-      ),
+        }
+      )
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(users[0].wallet);
@@ -713,8 +713,8 @@ describe("Init group and add banks with asset category flags", () => {
         {
           bank: validators[0].bank,
           validatorVoteAccount: validators[0].voteAccount,
-        },
-      ),
+        }
+      )
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(users[0].wallet);
@@ -726,7 +726,7 @@ describe("Init group and add banks with asset category flags", () => {
 
   it("(permissionless) Backfill legacy real-world staked bank fixture - happy path", async () => {
     const bankBefore = await bankrunProgram.account.bank.fetch(
-      STAKED_BACKFILL_BANK_SAMPLE,
+      STAKED_BACKFILL_BANK_SAMPLE
     );
     assertKeyDefault(bankBefore.integrationAcc1);
     assertKeyDefault(bankBefore.config.oracleKeys[3]);
@@ -739,15 +739,15 @@ describe("Init group and add banks with asset category flags", () => {
         {
           bank: STAKED_BACKFILL_BANK_SAMPLE,
           validatorVoteAccount: STAKED_BACKFILL_VOTE_SAMPLE,
-        },
-      ),
+        }
+      )
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(users[0].wallet);
     await banksClient.processTransaction(tx);
 
     const bankAfter = await bankrunProgram.account.bank.fetch(
-      STAKED_BACKFILL_BANK_SAMPLE,
+      STAKED_BACKFILL_BANK_SAMPLE
     );
     const [stakePool] = deriveSVSPpool(STAKED_BACKFILL_VOTE_SAMPLE);
     const [onRampPool] = deriveOnRampPool(stakePool);
@@ -765,7 +765,7 @@ describe("Init group and add banks with asset category flags", () => {
           validators[0].splSolPool,
           validators[1].splOnRampPool,
         ],
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
@@ -774,7 +774,7 @@ describe("Init group and add banks with asset category flags", () => {
     const bank = await bankrunProgram.account.bank.fetch(validators[0].bank);
     assertI80F48Approx(bank.cache.lastOraclePrice, oracles.wsolPrice);
     const priceMultiplierBeforeOnRamp = wrappedI80F48toBigNumber(
-      bank.cache.priceMultiplier,
+      bank.cache.priceMultiplier
     ).toNumber();
     assert.equal(priceMultiplierBeforeOnRamp, 1.0);
   });
@@ -785,8 +785,8 @@ describe("Init group and add banks with asset category flags", () => {
       await disableStakedOracles(
         groupAdmin.mrgnBankrunProgram,
         marginfiGroup.publicKey,
-        users[0].wallet.publicKey,
-      ),
+        users[0].wallet.publicKey
+      )
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(users[0].wallet);
@@ -800,8 +800,8 @@ describe("Init group and add banks with asset category flags", () => {
     tx.add(
       await disableStakedOracles(
         groupAdmin.mrgnBankrunProgram,
-        marginfiGroup.publicKey,
-      ),
+        marginfiGroup.publicKey
+      )
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
@@ -819,7 +819,7 @@ describe("Init group and add banks with asset category flags", () => {
             validators[i].splSolPool,
             validators[i].splOnRampPool,
           ],
-        }),
+        })
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(groupAdmin.wallet);
@@ -836,8 +836,8 @@ describe("Init group and add banks with asset category flags", () => {
       await enableStakedOracleOnramp(
         groupAdmin.mrgnBankrunProgram,
         marginfiGroup.publicKey,
-        users[0].wallet.publicKey,
-      ),
+        users[0].wallet.publicKey
+      )
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(users[0].wallet);
@@ -851,8 +851,8 @@ describe("Init group and add banks with asset category flags", () => {
     tx.add(
       await enableStakedOracleOnramp(
         groupAdmin.mrgnBankrunProgram,
-        marginfiGroup.publicKey,
-      ),
+        marginfiGroup.publicKey
+      )
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
@@ -869,7 +869,7 @@ describe("Init group and add banks with asset category flags", () => {
           validators[0].splSolPool,
           validators[1].splOnRampPool,
         ],
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
@@ -889,7 +889,7 @@ describe("Init group and add banks with asset category flags", () => {
           validators[0].splSolPool,
           validators[0].splOnRampPool,
         ],
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
@@ -900,7 +900,7 @@ describe("Init group and add banks with asset category flags", () => {
     assertI80F48Approx(bank.cache.lastOraclePrice, oracles.wsolPrice);
 
     const priceMultiplierWithoutOnRamp = wrappedI80F48toBigNumber(
-      bank.cache.priceMultiplier,
+      bank.cache.priceMultiplier
     ).toNumber();
 
     // The price multiplier grows by 1/40 because we now account for that one initial SOL
@@ -918,7 +918,7 @@ describe("Init group and add banks with asset category flags", () => {
         fromPubkey: users[0].wallet.publicKey,
         toPubkey: validators[0].splOnRampPool,
         lamports: 9 * LAMPORTS_PER_SOL, // Total canonical NAV now becomes 50
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(users[0].wallet);

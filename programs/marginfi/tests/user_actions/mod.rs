@@ -132,7 +132,7 @@ async fn automatic_interest_payments() -> anyhow::Result<()> {
     // Pulse the risk engine and verify the borrower is in a sane, healthy state: it holds ~1000
     // USDC of collateral against only the residual SOL interest as a liability.
     borrower_mfi_account_f
-        .try_lending_account_pulse_health()
+        .try_lending_account_pulse_health(test_f.marginfi_group.key)
         .await?;
     let health_cache = borrower_mfi_account_f.load().await.health_cache;
     assert!(

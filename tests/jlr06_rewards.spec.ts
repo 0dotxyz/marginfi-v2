@@ -77,10 +77,10 @@ const I80F48_SCALE_NUMBER = 2 ** 48;
 
 const oneUsdc = new BN(10 ** ecosystem.usdcDecimals);
 const totalWindowRewards = REWARD_AMOUNT.mul(
-  new BN(REWARD_ACCRUAL_SECONDS_TOTAL),
+  new BN(REWARD_ACCRUAL_SECONDS_TOTAL)
 ).div(REWARD_DURATION_SECONDS);
 const halfWindowRewards = REWARD_AMOUNT.mul(new BN(HALF_ACCRUAL_SECONDS)).div(
-  REWARD_DURATION_SECONDS,
+  REWARD_DURATION_SECONDS
 );
 assertBNEqual(totalWindowRewards, oneUsdc.mul(new BN(3)));
 assertBNEqual(halfWindowRewards, oneUsdc.mul(new BN(3)).div(new BN(2)));
@@ -94,7 +94,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
   let withdrawIntermediaryAtaPk = PublicKey.default;
   const decimals = 10 ** ecosystem.usdcDecimals;
   const exchangePricesPrecisionBig = new BigNumber(
-    EXCHANGE_PRICES_PRECISION.toString(),
+    EXCHANGE_PRICES_PRECISION.toString()
   );
 
   let user0UsdcBeforeDeposit = new BN(0);
@@ -118,14 +118,14 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
       new Transaction().add(stopIx),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
   };
 
   const getPoolSupplyShares = async (): Promise<BN> => {
     const supplyPosition =
       await juplendPrograms.liquidity.account.userSupplyPosition.fetch(
-        usdcJupPool.supplyPositionOnLiquidity,
+        usdcJupPool.supplyPositionOnLiquidity
       );
     return supplyPosition.amount;
   };
@@ -145,20 +145,20 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
 
     const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      usdcJupBankPk,
+      usdcJupBankPk
     );
     liqVaultAuth = liquidityVaultAuthority;
 
     assertKeysEqual(
       withdrawIntermediaryAtaPk,
-      usdcJupPool.withdrawIntermediaryAta!,
+      usdcJupPool.withdrawIntermediaryAta!
     );
 
     for (let i = 0; i < 2; i++) {
       await mintToTokenAccount(
         ecosystem.usdcMint.publicKey,
         users[i].usdcAccount,
-        usdc(300000),
+        usdc(300000)
       );
       const marginfiAccount = userMarginfiAccounts[i];
       const initUserIx = await accountInit(users[i].mrgnBankrunProgram!, {
@@ -172,7 +172,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
         new Transaction().add(initUserIx),
         [users[i].wallet, marginfiAccount],
         false,
-        true,
+        true
       );
     }
 
@@ -182,14 +182,14 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
         withdrawIntermediaryAtaPk,
         liqVaultAuth,
         usdcJupPool.mint,
-        usdcJupPool.tokenProgram,
+        usdcJupPool.tokenProgram
       );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(createWithdrawIntermediaryAtaIx),
       [users[0].wallet],
       false,
-      true,
+      true
     );
 
     const initClaimIx = await initJuplendClaimAccountIx(juplendPrograms, {
@@ -202,7 +202,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
       new Transaction().add(initClaimIx),
       [users[0].wallet],
       false,
-      true,
+      true
     );
   });
 
@@ -214,7 +214,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
     const user0mrgnAcc = userMarginfiAccounts[0].publicKey;
 
     user0UsdcBeforeDeposit = new BN(
-      await getTokenBalance(bankRunProvider, users[0].usdcAccount),
+      await getTokenBalance(bankRunProvider, users[0].usdcAccount)
     );
 
     const depositUser0Ix = await makeJuplendDepositIx(
@@ -225,22 +225,22 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
         bank: usdcJupBankPk,
         pool: usdcJupPool,
         amount: USER_DEPOSIT_AMOUNT_BN,
-      },
+      }
     );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(depositUser0Ix),
       [users[0].wallet],
       false,
-      true,
+      true
     );
 
     user0UsdcAfterDeposit = new BN(
-      await getTokenBalance(bankRunProvider, users[0].usdcAccount),
+      await getTokenBalance(bankRunProvider, users[0].usdcAccount)
     );
     assertBNEqual(
       user0UsdcBeforeDeposit.sub(user0UsdcAfterDeposit),
-      USER_DEPOSIT_AMOUNT_BN,
+      USER_DEPOSIT_AMOUNT_BN
     );
 
     user0Shares = await getUserAssetShares(user0mrgnAcc, usdcJupBankPk);
@@ -248,16 +248,16 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
     assert.isAbove(USER_DEPOSIT_AMOUNT_BN.toNumber(), user0Shares.toNumber());
 
     const bankAfterDeposit = await bankrunProgram.account.bank.fetch(
-      usdcJupBankPk,
+      usdcJupBankPk
     );
     cacheMultiplierBeforeAccrual = wrappedI80F48toBigNumber(
-      bankAfterDeposit.cache.priceMultiplier,
+      bankAfterDeposit.cache.priceMultiplier
     );
     assert.approximately(
       Number(toI80Scaled(bankAfterDeposit.cache.lastOraclePrice)) /
         I80F48_SCALE_NUMBER,
       oracles.usdcPrice,
-      0.000001,
+      0.000001
     );
   });
 
@@ -283,7 +283,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
       new Transaction().add(startRewardsIx),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
   });
 
@@ -297,7 +297,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(refreshIX),
-      [users[0].wallet],
+      [users[0].wallet]
     );
     const lendingMidAccrual =
       await juplendPrograms.lending.account.lending.fetch(usdcJupPool.lending);
@@ -307,7 +307,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
     const user1mrgnAcc = userMarginfiAccounts[1].publicKey;
     const user1UsdcBeforeDeposit = await getTokenBalance(
       bankRunProvider,
-      users[1].usdcAccount,
+      users[1].usdcAccount
     );
     const depositUser1Ix = await makeJuplendDepositIx(
       users[1].mrgnBankrunProgram!,
@@ -317,27 +317,27 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
         bank: usdcJupBankPk,
         pool: usdcJupPool,
         amount: USER_DEPOSIT_AMOUNT_BN,
-      },
+      }
     );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(depositUser1Ix),
       [users[1].wallet],
       false,
-      true,
+      true
     );
 
     const user1UsdcAfterDeposit = await getTokenBalance(
       bankRunProvider,
-      users[1].usdcAccount,
+      users[1].usdcAccount
     );
     assert.equal(
       user1UsdcBeforeDeposit - user1UsdcAfterDeposit,
-      USER_DEPOSIT_AMOUNT,
+      USER_DEPOSIT_AMOUNT
     );
 
     const bankMidAccrual = await bankrunProgram.account.bank.fetch(
-      usdcJupBankPk,
+      usdcJupBankPk
     );
     const expectedMidCacheMultiplier =
       Number(bnToBigIntSafe(exchangePriceMidAccrual)) /
@@ -345,17 +345,17 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
     assertI80F48Approx(
       bankMidAccrual.cache.priceMultiplier,
       expectedMidCacheMultiplier,
-      expectedMidCacheMultiplier / 10000, // .001%
+      expectedMidCacheMultiplier / 10000 // .001%
     );
     cacheMultiplierMidAccrual = wrappedI80F48toBigNumber(
-      bankMidAccrual.cache.priceMultiplier,
+      bankMidAccrual.cache.priceMultiplier
     );
     assert.isTrue(cacheMultiplierMidAccrual.gte(cacheMultiplierBeforeAccrual));
     assert.approximately(
       Number(toI80Scaled(bankMidAccrual.cache.lastOraclePrice)) /
         I80F48_SCALE_NUMBER,
       oracles.usdcPrice,
-      0.000001,
+      0.000001
     );
 
     const user1Shares = await getUserAssetShares(user1mrgnAcc, usdcJupBankPk);
@@ -364,14 +364,14 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
         "user 0 shares: " +
           user0Shares.toString() +
           "\nuser 1 shares " +
-          user1Shares.toString(),
+          user1Shares.toString()
       );
     }
     // Note: Since B deposited after A, and some rewards were earned, between the deposits, B gets
     // *nominally* fewer shares. Here we show B < A * 99.99
     assert.isTrue(user0Shares.gt(user1Shares));
     assert.isTrue(
-      user1Shares.multipliedBy(1000).gte(user0Shares.multipliedBy(999)),
+      user1Shares.multipliedBy(1000).gte(user0Shares.multipliedBy(999))
     );
 
     const supplySharesPhase2 = await getPoolSupplyShares();
@@ -395,7 +395,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
           user0ExpRewardHalf2 +
           "\n user 1 reward: $" +
           user1ExpRewardHalf2,
-        "\n  diff: $" + rewardsDiff,
+        "\n  diff: $" + rewardsDiff
       );
     }
     // Again we note that user 0 gets *slightly* more because they deposited earlier.
@@ -406,7 +406,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
 
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
     const user1RemainingBefore = await buildHealthRemainingAccounts(
-      user1mrgnAcc,
+      user1mrgnAcc
     );
     const pulseUser1BeforeIx = await healthPulse(users[1].mrgnBankrunProgram!, {
       marginfiAccount: user1mrgnAcc,
@@ -417,16 +417,16 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
       new Transaction().add(pulseUser1BeforeIx),
       [users[1].wallet],
       false,
-      true,
+      true
     );
 
     const user1BeforeSecondHalfPulse =
       await bankrunProgram.account.marginfiAccount.fetch(user1mrgnAcc);
     user1HealthAssetBefore = wrappedI80F48toBigNumber(
-      user1BeforeSecondHalfPulse.healthCache.assetValue,
+      user1BeforeSecondHalfPulse.healthCache.assetValue
     ).toNumber();
     user1UsdcAfterBaselinePulse = new BN(
-      await getTokenBalance(bankRunProvider, users[1].usdcAccount),
+      await getTokenBalance(bankRunProvider, users[1].usdcAccount)
     );
   });
 
@@ -437,13 +437,13 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
     const user0mrgnAccount = userMarginfiAccounts[0].publicKey;
     const user1mrgnAccount = userMarginfiAccounts[1].publicKey;
     const user1RemainingAfter = await buildHealthRemainingAccounts(
-      user1mrgnAccount,
+      user1mrgnAccount
     );
     const refreshRateSecondHalfIx = await refreshJupSimple(
       juplendPrograms.lending,
       {
         pool: usdcJupPool,
-      },
+      }
     );
     const pulseUser1AfterIx = await healthPulse(users[1].mrgnBankrunProgram!, {
       marginfiAccount: user1mrgnAccount,
@@ -454,7 +454,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
       new Transaction().add(refreshRateSecondHalfIx, pulseUser1AfterIx),
       [users[1].wallet],
       false,
-      true,
+      true
     );
 
     const lendingAfterAccrual =
@@ -463,7 +463,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
     assertBNGreaterThan(exchangePriceAfterAccrual, exchangePriceMidAccrual);
 
     const bankAfterAccrual = await bankrunProgram.account.bank.fetch(
-      usdcJupBankPk,
+      usdcJupBankPk
     );
     const expectedAfterCacheMultiplier =
       Number(bnToBigIntSafe(exchangePriceAfterAccrual)) /
@@ -471,23 +471,23 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
     assertI80F48Approx(
       bankAfterAccrual.cache.priceMultiplier,
       expectedAfterCacheMultiplier,
-      expectedAfterCacheMultiplier / 10000, // .001%
+      expectedAfterCacheMultiplier / 10000 // .001%
     );
     const cacheMultiplierAfterAccrual = wrappedI80F48toBigNumber(
-      bankAfterAccrual.cache.priceMultiplier,
+      bankAfterAccrual.cache.priceMultiplier
     );
     assert.isTrue(cacheMultiplierAfterAccrual.gte(cacheMultiplierMidAccrual));
     assert.approximately(
       Number(toI80Scaled(bankAfterAccrual.cache.lastOraclePrice)) /
         I80F48_SCALE_NUMBER,
       oracles.usdcPrice,
-      0.000001,
+      0.000001
     );
 
     const user1AccountAfterSecondHalfPulse =
       await bankrunProgram.account.marginfiAccount.fetch(user1mrgnAccount);
     const user1HealthAssetAfter = wrappedI80F48toBigNumber(
-      user1AccountAfterSecondHalfPulse.healthCache.assetValue,
+      user1AccountAfterSecondHalfPulse.healthCache.assetValue
     ).toNumber();
     const healthDiff = user1HealthAssetAfter - user1HealthAssetBefore;
     if (verbose) {
@@ -497,7 +497,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
           user1HealthAssetBefore +
           "\n user 1 health after " +
           user1HealthAssetAfter,
-        "\n  diff " + healthDiff,
+        "\n  diff " + healthDiff
       );
     }
 
@@ -508,7 +508,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
     assert.approximately(healthDiff, 0.58728, 0.03);
 
     const user1UsdcAfterSecondHalfPulse = new BN(
-      await getTokenBalance(bankRunProvider, users[1].usdcAccount),
+      await getTokenBalance(bankRunProvider, users[1].usdcAccount)
     );
     // No withdraw, ergo no USDC gain, just a paper gain
     assertBNEqual(user1UsdcAfterSecondHalfPulse, user1UsdcAfterBaselinePulse);
@@ -523,18 +523,18 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
         amount: new BN(0),
         withdrawAll: true,
         remainingAccounts: await buildHealthRemainingAccounts(user0mrgnAccount),
-      },
+      }
     );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(withdrawAllIx),
       [users[0].wallet],
       false,
-      true,
+      true
     );
 
     const user0UsdcAfterWithdraw = new BN(
-      await getTokenBalance(bankRunProvider, users[0].usdcAccount),
+      await getTokenBalance(bankRunProvider, users[0].usdcAccount)
     );
     const withdrawnAmount = user0UsdcAfterWithdraw.sub(user0UsdcAfterDeposit);
 

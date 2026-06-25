@@ -434,5 +434,4 @@ describe("Emode borrowing", () => {
       liabsExpected * 0.001
     );
   });
-
 });

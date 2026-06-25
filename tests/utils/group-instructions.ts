@@ -89,7 +89,7 @@ export type AddBankWithSeedArgs = {
 
 export const addBankWithSeed = (
   program: Program<Marginfi>,
-  args: AddBankWithSeedArgs,
+  args: AddBankWithSeedArgs
 ) => {
   const ix = program.methods
     .lendingPoolAddBankWithSeed(
@@ -110,7 +110,7 @@ export const addBankWithSeed = (
         oracleMaxAge: args.config.oracleMaxAge,
         oracleMaxConfidence: args.config.oracleMaxConfidence,
       },
-      args.seed ?? new BN(0),
+      args.seed ?? new BN(0)
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
@@ -162,7 +162,7 @@ export type GroupConfigureArgs = {
 
 export const groupConfigure = async (
   program: Program<Marginfi>,
-  args: GroupConfigureArgs,
+  args: GroupConfigureArgs
 ) => {
   const group = await program.account.marginfiGroup.fetch(args.marginfiGroup);
   const newAdmin = args.newAdmin ?? group.admin;
@@ -188,7 +188,7 @@ export const groupConfigure = async (
       newMetadataAdmin,
       newRiskAdmin,
       emodeMaxInitLeverage,
-      emodeMaxMaintLeverage,
+      emodeMaxMaintLeverage
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
@@ -206,7 +206,7 @@ export type GroupInitializeArgs = {
 
 export const groupInitialize = (
   program: Program<Marginfi>,
-  args: GroupInitializeArgs,
+  args: GroupInitializeArgs
 ) => {
   const ix = program.methods
     .marginfiGroupInitialize()
@@ -228,7 +228,7 @@ export type ConfigureBankArgs = {
 
 export const configureBank = (
   program: Program<Marginfi>,
-  args: ConfigureBankArgs,
+  args: ConfigureBankArgs
 ) => {
   const ix = program.methods
     .lendingPoolConfigureBank(args.bankConfigOpt)
@@ -248,12 +248,12 @@ export type ConfigureBankRateLimitsArgs = {
 
 export const configureBankRateLimits = (
   program: Program<Marginfi>,
-  args: ConfigureBankRateLimitsArgs,
+  args: ConfigureBankRateLimitsArgs
 ) => {
   const ix = program.methods
     .configureBankRateLimits(
       args.hourlyMaxOutflow ?? null,
-      args.dailyMaxOutflow ?? null,
+      args.dailyMaxOutflow ?? null
     )
     .accounts({
       bank: args.bank,
@@ -270,12 +270,12 @@ export type ConfigureGroupRateLimitsArgs = {
 
 export const configureGroupRateLimits = (
   program: Program<Marginfi>,
-  args: ConfigureGroupRateLimitsArgs,
+  args: ConfigureGroupRateLimitsArgs
 ) => {
   const ix = program.methods
     .configureGroupRateLimits(
       args.hourlyMaxOutflowUsd ?? null,
-      args.dailyMaxOutflowUsd ?? null,
+      args.dailyMaxOutflowUsd ?? null
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
@@ -292,7 +292,7 @@ export type ConfigureBankOracleArgs = {
 
 export const configureBankOracle = (
   program: Program<Marginfi>,
-  args: ConfigureBankOracleArgs,
+  args: ConfigureBankOracleArgs
 ) => {
   const oracleMeta: AccountMeta = {
     pubkey: args.oracle,
@@ -321,7 +321,7 @@ export type EmissionsDepositArgs = {
 
 export const lendingPoolEmissionsDeposit = (
   program: Program<Marginfi>,
-  args: EmissionsDepositArgs,
+  args: EmissionsDepositArgs
 ) => {
   const ix = program.methods
     .lendingPoolEmissionsDeposit(args.amount)
@@ -355,7 +355,7 @@ export type InitGlobalFeeStateArgs = {
 
 export const initGlobalFeeState = (
   program: Program<Marginfi>,
-  args: InitGlobalFeeStateArgs,
+  args: InitGlobalFeeStateArgs
 ) => {
   const ix = program.methods
     .initGlobalFeeState(
@@ -367,7 +367,7 @@ export const initGlobalFeeState = (
       args.programFeeFixed,
       args.programFeeRate,
       args.liquidationMaxFee,
-      args.orderExecutionMaxFee,
+      args.orderExecutionMaxFee
     )
     .accounts({
       payer: args.payer,
@@ -398,7 +398,7 @@ export type EditGlobalFeeStateArgs = {
 // Covered by e05_panicMode "(fee admin) edits all global fee fields and restores them".
 export const editGlobalFeeState = (
   program: Program<Marginfi>,
-  args: EditGlobalFeeStateArgs,
+  args: EditGlobalFeeStateArgs
 ) => {
   const pauseDelegateAdminArg =
     args.pauseDelegateAdmin === undefined
@@ -417,7 +417,7 @@ export const editGlobalFeeState = (
       args.liquidationMaxFee ?? null,
       args.orderExecutionMaxFee ?? null,
       pauseDelegateAdminArg,
-      args.accountTransferFee ?? null,
+      args.accountTransferFee ?? null
     )
     .accounts({
       globalFeeAdmin: args.admin,
@@ -434,7 +434,7 @@ export type PropogateFeeStateArgs = {
 
 export const propagateFeeState = (
   program: Program<Marginfi>,
-  args: PropogateFeeStateArgs,
+  args: PropogateFeeStateArgs
 ) => {
   const ix = program.methods
     .propagateFeeState()
@@ -455,7 +455,7 @@ export type InitStakedSettingsArgs = {
 
 export const initStakedSettings = (
   program: Program<Marginfi>,
-  args: InitStakedSettingsArgs,
+  args: InitStakedSettingsArgs
 ) => {
   const ix = program.methods
     .initStakedSettings(args.settings)
@@ -479,7 +479,7 @@ export type EditStakedSettingsArgs = {
 
 export const editStakedSettings = (
   program: Program<Marginfi>,
-  args: EditStakedSettingsArgs,
+  args: EditStakedSettingsArgs
 ) => {
   const ix = program.methods
     .editStakedSettings(args.settings)
@@ -506,7 +506,7 @@ export type PropagateStakedSettingsArgs = {
 
 export const propagateStakedSettings = (
   program: Program<Marginfi>,
-  args: PropagateStakedSettingsArgs,
+  args: PropagateStakedSettingsArgs
 ) => {
   const remainingAccounts = args.oracle
     ? [
@@ -542,19 +542,19 @@ export type AddBankPermissionlessArgs = {
 
 export const addBankPermissionless = (
   program: Program<Marginfi>,
-  args: AddBankPermissionlessArgs,
+  args: AddBankPermissionlessArgs
 ) => {
   const [settingsKey] = deriveStakedSettings(
     program.programId,
-    args.marginfiGroup,
+    args.marginfiGroup
   );
   const [lstMint] = PublicKey.findProgramAddressSync(
     [Buffer.from("mint"), args.stakePool.toBuffer()],
-    SINGLE_POOL_PROGRAM_ID,
+    SINGLE_POOL_PROGRAM_ID
   );
   const [solPool] = PublicKey.findProgramAddressSync(
     [Buffer.from("stake"), args.stakePool.toBuffer()],
-    SINGLE_POOL_PROGRAM_ID,
+    SINGLE_POOL_PROGRAM_ID
   );
   const [poolOnramp] = deriveOnRampPool(args.stakePool);
   // Note: oracle, lst mint, pool stake, and on-ramp are also passed in meta for validation.
@@ -582,7 +582,7 @@ export const addBankPermissionless = (
     program.programId,
     args.marginfiGroup,
     lstMint,
-    args.seed,
+    args.seed
   );
   const ix = program.methods
     .lendingPoolAddBankPermissionless(args.seed)
@@ -619,7 +619,7 @@ export const addBankPermissionless = (
 export const disableStakedOracles = (
   program: Program<Marginfi>,
   group: PublicKey,
-  admin?: PublicKey,
+  admin?: PublicKey
 ) => {
   const ix = program.methods
     .disableStakedOracles()
@@ -635,7 +635,7 @@ export const disableStakedOracles = (
 export const enableStakedOracleOnramp = (
   program: Program<Marginfi>,
   group: PublicKey,
-  admin?: PublicKey,
+  admin?: PublicKey
 ) => {
   const ix = program.methods
     .enableStakedOracleOnramp()
@@ -657,7 +657,7 @@ export type ConfigureBankEmodeArgs = {
 
 export const configBankEmode = (
   program: Program<Marginfi>,
-  args: ConfigureBankEmodeArgs,
+  args: ConfigureBankEmodeArgs
 ) => {
   const paddedEntries = padEmodeEntries(args.entries);
 
@@ -676,7 +676,7 @@ export const configBankEmode = (
 const padEmodeEntries = (entries: EmodeEntry[]): EmodeEntry[] => {
   if (entries.length > MAX_EMODE_ENTRIES) {
     throw new Error(
-      `Too many entries provided. Maximum allowed is ${MAX_EMODE_ENTRIES}`,
+      `Too many entries provided. Maximum allowed is ${MAX_EMODE_ENTRIES}`
     );
   }
   const padded = [...entries];
@@ -707,7 +707,7 @@ export type UpdateBankFeesDestinationAccountArgs = {
  */
 export const updateBankFeesDestinationAccount = (
   program: Program<Marginfi>,
-  args: UpdateBankFeesDestinationAccountArgs,
+  args: UpdateBankFeesDestinationAccountArgs
 ) => {
   const ix = program.methods
     .lendingPoolUpdateFeesDestinationAccount()
@@ -733,7 +733,7 @@ export type WithdrawFeesPermissionlessArgs = {
  */
 export const withdrawFeesPermissionless = (
   program: Program<Marginfi>,
-  args: WithdrawFeesPermissionlessArgs,
+  args: WithdrawFeesPermissionlessArgs
 ) => {
   const ix = program.methods
     .lendingPoolWithdrawFeesPermissionless(args.amount)
@@ -763,7 +763,7 @@ export type CollectBankFeesArgs = {
  */
 export const collectBankFees = (
   program: Program<Marginfi>,
-  args: CollectBankFeesArgs,
+  args: CollectBankFeesArgs
 ) => {
   const ix = program.methods
     .lendingPoolCollectBankFees()
@@ -791,7 +791,7 @@ export type AccrueInterestArgs = {
 
 export const accrueInterest = (
   program: Program<Marginfi>,
-  args: AccrueInterestArgs,
+  args: AccrueInterestArgs
 ) => {
   const ix = program.methods
     .lendingPoolAccrueBankInterest()
@@ -810,7 +810,7 @@ export type BackfillBankIsT22FlagArgs = {
 
 export const backfillBankIsT22Flag = (
   program: Program<Marginfi>,
-  args: BackfillBankIsT22FlagArgs,
+  args: BackfillBankIsT22FlagArgs
 ) => {
   const ix = program.methods
     .lendingPoolBackfillBankIsT22Flag(args.bankSeed ?? null)
@@ -830,7 +830,7 @@ export type BackfillStakedBankValidatorVoteAccountArgs = {
 
 export const backfillStakedBankValidatorVoteAccount = (
   program: Program<Marginfi>,
-  args: BackfillStakedBankValidatorVoteAccountArgs,
+  args: BackfillStakedBankValidatorVoteAccountArgs
 ) => {
   const ix = program.methods
     .lendingPoolBackfillStakedBankValidatorVoteAccount()
@@ -859,7 +859,7 @@ export type HandleBankruptcyArgs = {
  */
 export const handleBankruptcy = (
   program: Program<Marginfi>,
-  args: HandleBankruptcyArgs,
+  args: HandleBankruptcyArgs
 ) => {
   const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => {
     return { pubkey, isSigner: false, isWritable: false };
@@ -906,7 +906,7 @@ export type PanicPauseArgs = {
 
 export const panicPause = async (
   program: Program<Marginfi>,
-  args: PanicPauseArgs,
+  args: PanicPauseArgs
 ) => {
   const ix = await program.methods
     .panicPause()
@@ -925,7 +925,7 @@ export type PanicUnpauseArgs = {
 
 export const panicUnpause = async (
   program: Program<Marginfi>,
-  _args: PanicUnpauseArgs,
+  _args: PanicUnpauseArgs
 ) => {
   const ix = await program.methods
     .panicUnpause()
@@ -944,7 +944,7 @@ export type PanicUnpausePermissionlessArgs = {
 
 export const panicUnpausePermissionless = async (
   program: Program<Marginfi>,
-  _args: PanicUnpausePermissionlessArgs,
+  _args: PanicUnpausePermissionlessArgs
 ) => {
   const ix = await program.methods
     .panicUnpausePermissionless()
@@ -962,7 +962,7 @@ type InitBankMetadataArgs = {
 
 export const initBankMetadata = (
   program: Program<Marginfi>,
-  args: InitBankMetadataArgs,
+  args: InitBankMetadataArgs
 ) => {
   const ix = program.methods
     .initBankMetadata()
@@ -983,7 +983,7 @@ export type SetFixedPriceArgs = {
 
 export const setFixedPrice = (
   program: Program<Marginfi>,
-  args: SetFixedPriceArgs,
+  args: SetFixedPriceArgs
 ) => {
   const oracleMeta: AccountMeta[] = (args.remaining ?? []).map((pubkey) => {
     return { pubkey, isSigner: false, isWritable: false };
@@ -1017,7 +1017,7 @@ type WriteBankMetadataArgs = {
  */
 export const writeBankMetadata = (
   program: Program<Marginfi>,
-  args: WriteBankMetadataArgs,
+  args: WriteBankMetadataArgs
 ) => {
   const TICKER_CAP = 64;
   const DESC_CAP = 128;
@@ -1026,7 +1026,7 @@ export const writeBankMetadata = (
     args.ticker !== undefined ? Buffer.from(args.ticker, "utf8") : null;
   if (tickerBuf && tickerBuf.length > TICKER_CAP) {
     throw new Error(
-      `Ticker is ${tickerBuf.length} bytes, exceeds ${TICKER_CAP} byte cap`,
+      `Ticker is ${tickerBuf.length} bytes, exceeds ${TICKER_CAP} byte cap`
     );
   }
 
@@ -1036,14 +1036,14 @@ export const writeBankMetadata = (
       : null;
   if (descBuf && descBuf.length > DESC_CAP) {
     throw new Error(
-      `Description is ${descBuf.length} bytes, exceeds ${DESC_CAP} byte cap`,
+      `Description is ${descBuf.length} bytes, exceeds ${DESC_CAP} byte cap`
     );
   }
 
   const ix = program.methods
     .writeBankMetadata(
       tickerBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
-      descBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
+      descBuf // Option<Vec<u8>> -> Some(Buffer) | None(null)
     )
     .accounts({
       // group: implied
@@ -1069,7 +1069,7 @@ type WriteBankMetadataPreInitArgs = {
 
 export const writeBankMetadataPreInit = (
   program: Program<Marginfi>,
-  args: WriteBankMetadataPreInitArgs,
+  args: WriteBankMetadataPreInitArgs
 ) => {
   const TICKER_CAP = 64;
   const DESC_CAP = 128;
@@ -1078,7 +1078,7 @@ export const writeBankMetadataPreInit = (
     args.ticker !== undefined ? Buffer.from(args.ticker, "utf8") : null;
   if (tickerBuf && tickerBuf.length > TICKER_CAP) {
     throw new Error(
-      `Ticker is ${tickerBuf.length} bytes, exceeds ${TICKER_CAP} byte cap`,
+      `Ticker is ${tickerBuf.length} bytes, exceeds ${TICKER_CAP} byte cap`
     );
   }
 
@@ -1088,7 +1088,7 @@ export const writeBankMetadataPreInit = (
       : null;
   if (descBuf && descBuf.length > DESC_CAP) {
     throw new Error(
-      `Description is ${descBuf.length} bytes, exceeds ${DESC_CAP} byte cap`,
+      `Description is ${descBuf.length} bytes, exceeds ${DESC_CAP} byte cap`
     );
   }
 
@@ -1096,7 +1096,7 @@ export const writeBankMetadataPreInit = (
     .writeBankMetadataPreInit(
       args.bankSeed,
       tickerBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
-      descBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
+      descBuf // Option<Vec<u8>> -> Some(Buffer) | None(null)
     )
     .accounts({
       group: args.group,
@@ -1120,7 +1120,7 @@ export type UpdateGroupRateLimiterArgs = {
 
 export const updateGroupRateLimiter = (
   program: Program<Marginfi>,
-  args: UpdateGroupRateLimiterArgs,
+  args: UpdateGroupRateLimiterArgs
 ) => {
   const ix = program.methods
     .updateGroupRateLimiter(
@@ -1128,7 +1128,7 @@ export const updateGroupRateLimiter = (
       args.inflowUsd ?? null,
       args.updateSeq,
       args.eventStartSlot,
-      args.eventEndSlot,
+      args.eventEndSlot
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
@@ -1147,14 +1147,14 @@ export type UpdateDeleverageWithdrawalsArgs = {
 
 export const updateDeleverageWithdrawals = (
   program: Program<Marginfi>,
-  args: UpdateDeleverageWithdrawalsArgs,
+  args: UpdateDeleverageWithdrawalsArgs
 ) => {
   const ix = program.methods
     .updateDeleverageWithdrawals(
       args.outflowUsd,
       args.updateSeq,
       args.eventStartSlot,
-      args.eventEndSlot,
+      args.eventEndSlot
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
@@ -1170,7 +1170,7 @@ export type ConfigureDeleverageWithdrawalLimitArgs = {
 
 export const configureDeleverageWithdrawalLimit = async (
   program: Program<Marginfi>,
-  args: ConfigureDeleverageWithdrawalLimitArgs,
+  args: ConfigureDeleverageWithdrawalLimitArgs
 ) => {
   const ix = await program.methods
     .configureDeleverageWithdrawalLimit(args.limit)

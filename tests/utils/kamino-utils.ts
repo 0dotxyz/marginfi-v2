@@ -29,7 +29,7 @@ const I68F60_FRACTIONAL_BITS = 60;
 const I68F60_SCALE_BN = new BN(1).shln(I68F60_FRACTIONAL_BITS);
 const FractionDecimal = Decimal.clone({ precision: 40 });
 const I68F60_PRECISE_DIVISOR = new FractionDecimal(2).pow(
-  I68F60_FRACTIONAL_BITS,
+  I68F60_FRACTIONAL_BITS
 );
 
 export const COLLATERAL_MINT_DECIMALS = 6;
@@ -70,7 +70,7 @@ const decimalFromScaledFraction = (value: BN): Decimal =>
   new Decimal(
     new FractionDecimal(bnToBigIntSafe(value).toString())
       .div(I68F60_PRECISE_DIVISOR)
-      .toString(),
+      .toString()
   );
 
 /**
@@ -85,7 +85,7 @@ export const simpleRefreshReserve = (
   program: Program<KaminoLending>,
   reserve: PublicKey,
   market: PublicKey,
-  oracle: PublicKey,
+  oracle: PublicKey
 ) => {
   const ix = program.methods
     .refreshReserve()
@@ -116,7 +116,7 @@ export const simpleRefreshObligation = (
   program: Program<KaminoLending>,
   market: PublicKey,
   obligation: PublicKey,
-  remaining: PublicKey[] = [],
+  remaining: PublicKey[] = []
 ) => {
   const accMeta: AccountMeta[] = remaining.map((pubkey) => ({
     pubkey,
@@ -171,7 +171,7 @@ export type KaminoConfigCompact = {
  * @returns
  */
 export const defaultKaminoBankConfig = (
-  oracle: PublicKey,
+  oracle: PublicKey
 ): KaminoConfigCompact => {
   let config: KaminoConfigCompact = {
     oracle: oracle,
@@ -249,7 +249,7 @@ export function scaledSupplies(state: Reserve): [Decimal, Decimal] {
   const liqMintDecimals = decimalFromIntegerLike(state.liquidity.mintDecimals);
   const totalSupplyLamports = getTotalSupply(state);
   const mintTotalSupplyLam = decimalFromIntegerLike(
-    state.collateral.mintTotalSupply,
+    state.collateral.mintTotalSupply
   );
 
   const liqScale = new Decimal(10).pow(liqMintDecimals);
@@ -271,7 +271,7 @@ export function scaledSupplies(state: Reserve): [Decimal, Decimal] {
 export function scaleDecimals(
   n: Decimal,
   fromDec: number,
-  toDec: number,
+  toDec: number
 ): Decimal {
   const scaleFrom = new Decimal(10).pow(fromDec);
   const scaleTo = new Decimal(10).pow(toDec);
@@ -331,7 +331,7 @@ export function getLiquidityExchangeRate(state: Reserve): Decimal {
  */
 export function estimateCollateralFromDeposit(
   state: Reserve,
-  depositAmountRaw: BN,
+  depositAmountRaw: BN
 ): BN {
   let depositRawDecimal = decimalFromIntegerLike(depositAmountRaw);
   const rate = getCollateralExchangeRate(state);
@@ -352,7 +352,7 @@ export function estimateCollateralFromDeposit(
  * @returns
  */
 export function wrappedU68F60toBigNumber(
-  wrapped: WrappedI68F60 | BN, // Note: Kamino generally encodes as BN instead of number[]
+  wrapped: WrappedI68F60 | BN // Note: Kamino generally encodes as BN instead of number[]
 ): BigNumber {
   let bytesLE: number[];
   if (BN.isBN(wrapped)) {

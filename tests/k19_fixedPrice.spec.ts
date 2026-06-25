@@ -109,7 +109,7 @@ describe("kx: Fixed Kamino price bank", () => {
         marginfiAccount: userAccount,
         authority: user.wallet.publicKey,
         feePayer: user.wallet.publicKey,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, tx, [user.wallet, accountKeypair]);
   });
@@ -120,7 +120,7 @@ describe("kx: Fixed Kamino price bank", () => {
       bankrunProgram.programId,
       kaminoGroup.publicKey,
       ecosystem.usdcMint.publicKey,
-      FIXED_SEED,
+      FIXED_SEED
     );
     fixedKaminoBank = bankKey;
 
@@ -138,14 +138,14 @@ describe("kx: Fixed Kamino price bank", () => {
         {
           config: defaultConfig,
           seed: FIXED_SEED,
-        },
-      ),
+        }
+      )
     );
     await processBankrunTransaction(ctx, addBankTx, [groupAdmin.wallet]);
 
     const [authority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      fixedKaminoBank,
+      fixedKaminoBank
     );
     const [obligation] = deriveBaseObligation(authority, market);
     fixedKaminoObligation = obligation;
@@ -161,8 +161,8 @@ describe("kx: Fixed Kamino price bank", () => {
           lendingMarket: market,
           reserve: usdcReserve,
         },
-        new BN(100),
-      ),
+        new BN(100)
+      )
     );
     await processBankrunTransaction(ctx, initObligationTx, [users[3].wallet]);
 
@@ -171,7 +171,7 @@ describe("kx: Fixed Kamino price bank", () => {
         bank: fixedKaminoBank,
         price: FIXED_PRICE,
         remaining: [usdcReserve],
-      }),
+      })
     );
     await processBankrunTransaction(ctx, setFixedTx, [groupAdmin.wallet]);
 
@@ -186,13 +186,13 @@ describe("kx: Fixed Kamino price bank", () => {
         bank: fixedKaminoBank,
         type: ORACLE_SETUP_FIXED_KAMINO,
         oracle: oracles.usdcOracle.publicKey,
-      }),
+      })
     );
     const result = await processBankrunTransaction(
       ctx,
       tx,
       [groupAdmin.wallet],
-      true,
+      true
     );
     // UseSetFixedOraclePrice
     assertBankrunTxFailed(result, 6132);
@@ -208,21 +208,21 @@ describe("kx: Fixed Kamino price bank", () => {
         marginfiAccount: adminAccount,
         authority: groupAdmin.wallet.publicKey,
         feePayer: groupAdmin.wallet.publicKey,
-      }),
+      })
     );
     await processBankrunTransaction(
       ctx,
       initAdminTx,
       [groupAdmin.wallet, adminAccountKeypair],
       false,
-      true,
+      true
     );
 
     const [bankKey] = deriveBankWithSeed(
       bankrunProgram.programId,
       kaminoGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
-      BORROW_SEED,
+      BORROW_SEED
     );
     borrowBank = bankKey;
 
@@ -237,7 +237,7 @@ describe("kx: Fixed Kamino price bank", () => {
         bankMint: ecosystem.tokenAMint.publicKey,
         config,
         seed: BORROW_SEED,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, addBankTx, [groupAdmin.wallet]);
 
@@ -246,7 +246,7 @@ describe("kx: Fixed Kamino price bank", () => {
         bank: borrowBank,
         type: ORACLE_SETUP_PYTH_PUSH,
         oracle: oracles.tokenAOracle.publicKey,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, configOracleTx, [groupAdmin.wallet]);
 
@@ -257,7 +257,7 @@ describe("kx: Fixed Kamino price bank", () => {
         bank: borrowBank,
         tokenAccount: groupAdmin.tokenAAccount,
         amount: seedAmount,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, seedTx, [groupAdmin.wallet]);
   });
@@ -268,13 +268,13 @@ describe("kx: Fixed Kamino price bank", () => {
       await pulseBankPrice(user.mrgnBankrunProgram, {
         bank: fixedKaminoBank,
         remaining: [tokenAReserve],
-      }),
+      })
     );
     const result = await processBankrunTransaction(
       ctx,
       tx,
       [user.wallet],
-      true,
+      true
     );
     // KaminoReserveValidationFailed
     assertBankrunTxFailed(result, 6210);
@@ -288,7 +288,7 @@ describe("kx: Fixed Kamino price bank", () => {
 
     const userUsdcBefore = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount,
+      user.usdcAccount
     );
     userUsdcStart = userUsdcBefore;
 
@@ -297,13 +297,13 @@ describe("kx: Fixed Kamino price bank", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey,
+        oracles.usdcOracle.publicKey
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         fixedKaminoObligation,
-        [usdcReserve],
+        [usdcReserve]
       ),
       await makeKaminoDepositIx(
         user.mrgnBankrunProgram,
@@ -314,14 +314,14 @@ describe("kx: Fixed Kamino price bank", () => {
           lendingMarket: market,
           reserve: usdcReserve,
         },
-        depositAmount,
-      ),
+        depositAmount
+      )
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
     const userUsdcAfter = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount,
+      user.usdcAccount
     );
     const diff = userUsdcBefore - userUsdcAfter;
     console.log("deposited: " + diff.toLocaleString());
@@ -339,7 +339,7 @@ describe("kx: Fixed Kamino price bank", () => {
       "\n liq/coll",
       getLiquidityExchangeRate(reserveAfterDeposit).toString(),
       "\n coll/liq",
-      getCollateralExchangeRate(reserveAfterDeposit).toString(),
+      getCollateralExchangeRate(reserveAfterDeposit).toString()
     );
   });
 
@@ -350,7 +350,7 @@ describe("kx: Fixed Kamino price bank", () => {
 
     const userTokenABefore = await getTokenBalance(
       bankRunProvider,
-      user.tokenAAccount,
+      user.tokenAAccount
     );
 
     const remaining = composeRemainingAccounts([
@@ -363,7 +363,7 @@ describe("kx: Fixed Kamino price bank", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey,
+        oracles.usdcOracle.publicKey
       ),
       await borrowIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
@@ -371,13 +371,13 @@ describe("kx: Fixed Kamino price bank", () => {
         tokenAccount: user.tokenAAccount,
         remaining,
         amount: BORROW_AMOUNT,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, tx, [user.wallet], false, true);
 
     const userTokenAAfter = await getTokenBalance(
       bankRunProvider,
-      user.tokenAAccount,
+      user.tokenAAccount
     );
     assert.equal(userTokenAAfter - userTokenABefore, BORROW_AMOUNT.toNumber());
   });
@@ -396,26 +396,26 @@ describe("kx: Fixed Kamino price bank", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey,
+        oracles.usdcOracle.publicKey
       ),
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         remaining,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
     const accAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount,
+      userAccount
     );
     const cache = accAfter.healthCache;
     logHealthCache("cache after deposit", cache);
 
     const actualAssetValue = wrappedI80F48toBigNumber(
-      cache.assetValue,
+      cache.assetValue
     ).toNumber();
     const actualLiabilityValue = wrappedI80F48toBigNumber(
-      cache.liabilityValue,
+      cache.liabilityValue
     ).toNumber();
 
     // Note: The way this actually works is convoluted: Before the Fixed Price update to Kamino, the
@@ -435,7 +435,7 @@ describe("kx: Fixed Kamino price bank", () => {
     assert.approximately(
       actualLiabilityValue,
       expectedLiabilityValue,
-      liabTolerance,
+      liabTolerance
     );
   });
 
@@ -447,12 +447,12 @@ describe("kx: Fixed Kamino price bank", () => {
       await klendBankrunProgram.account.reserve.fetch(usdcReserve);
     const reserveBeforeWithdraw = { ...reserveBeforeWithdrawRaw } as Reserve;
     const exchangeRateBeforeWithdraw = getLiquidityExchangeRate(
-      reserveBeforeWithdraw,
+      reserveBeforeWithdraw
     );
 
     const userUsdcBefore = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount,
+      user.usdcAccount
     );
 
     const remaining = composeRemainingAccounts([
@@ -465,13 +465,13 @@ describe("kx: Fixed Kamino price bank", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey,
+        oracles.usdcOracle.publicKey
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         fixedKaminoObligation,
-        [usdcReserve],
+        [usdcReserve]
       ),
       await makeKaminoWithdrawIx(
         user.mrgnBankrunProgram,
@@ -488,14 +488,14 @@ describe("kx: Fixed Kamino price bank", () => {
           amount: withdrawAmount,
           isWithdrawAll: false,
           remaining,
-        },
-      ),
+        }
+      )
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
     const userUsdcAfter = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount,
+      user.usdcAccount
     );
     const diff = userUsdcAfter - userUsdcBefore;
     console.log("withdrew: " + diff.toLocaleString());
@@ -509,10 +509,10 @@ describe("kx: Fixed Kamino price bank", () => {
       await klendBankrunProgram.account.reserve.fetch(usdcReserve);
     const reserveAfterWithdraw = { ...reserveAfterWithdrawRaw } as Reserve;
     const availableDelta = getLiquidityAvailableAmount(
-      reserveBeforeWithdraw,
+      reserveBeforeWithdraw
     ).sub(getLiquidityAvailableAmount(reserveAfterWithdraw));
     const totalDelta = getTotalSupply(reserveBeforeWithdraw).sub(
-      getTotalSupply(reserveAfterWithdraw),
+      getTotalSupply(reserveAfterWithdraw)
     );
 
     assert.approximately(availableDelta.toNumber(), diff, 2);
@@ -526,7 +526,7 @@ describe("kx: Fixed Kamino price bank", () => {
       "\n liq/coll",
       getLiquidityExchangeRate(reserveAfterWithdraw).toString(),
       "\n coll/liq",
-      getCollateralExchangeRate(reserveAfterWithdraw).toString(),
+      getCollateralExchangeRate(reserveAfterWithdraw).toString()
     );
   });
 
@@ -544,7 +544,7 @@ describe("kx: Fixed Kamino price bank", () => {
           [fixedKaminoBank, usdcReserve],
           [borrowBank, oracles.tokenAOracle.publicKey],
         ]),
-      }),
+      })
     );
     await processBankrunTransaction(ctx, repayTx, [user.wallet]);
 
@@ -552,7 +552,7 @@ describe("kx: Fixed Kamino price bank", () => {
       [
         [fixedKaminoBank, usdcReserve],
         [borrowBank, oracles.tokenAOracle.publicKey],
-      ].filter((group) => !group[0].equals(fixedKaminoBank)),
+      ].filter((group) => !group[0].equals(fixedKaminoBank))
     );
 
     const withdrawAllTx = new Transaction().add(
@@ -560,13 +560,13 @@ describe("kx: Fixed Kamino price bank", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey,
+        oracles.usdcOracle.publicKey
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         market,
         fixedKaminoObligation,
-        [usdcReserve],
+        [usdcReserve]
       ),
       await makeKaminoWithdrawIx(
         user.mrgnBankrunProgram,
@@ -583,14 +583,14 @@ describe("kx: Fixed Kamino price bank", () => {
           amount: new BN(0),
           isWithdrawAll: true,
           remaining,
-        },
-      ),
+        }
+      )
     );
     await processBankrunTransaction(ctx, withdrawAllTx, [user.wallet]);
 
     const userUsdcAfter = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount,
+      user.usdcAccount
     );
     // Note: you lose 1-2 lamports for Kamino withdraws
     assert.approximately(userUsdcAfter, userUsdcStart, 2);
@@ -598,7 +598,7 @@ describe("kx: Fixed Kamino price bank", () => {
 
     // has_kamino clears once the last Kamino position is withdrawn
     const userAccAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount,
+      userAccount
     );
     assert.equal(userAccAfter.indexerFlags.hasKamino, 0);
   });

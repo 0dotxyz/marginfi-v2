@@ -87,7 +87,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
 
     kfarmsBankrunProgram = new Program<Farms>(
       farmsIdl as Farms,
-      bankRunProvider,
+      bankRunProvider
     );
   });
 
@@ -96,7 +96,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
 
     const [treasuryVaultsAuthority] = PublicKey.findProgramAddressSync(
       [Buffer.from("authority"), globalConfig.publicKey.toBuffer()],
-      FARMS_PROGRAM_ID,
+      FARMS_PROGRAM_ID
     );
 
     const tx = new Transaction().add(
@@ -106,7 +106,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
         space: 8 + CONFIG_SIZE,
         lamports:
           await bankRunProvider.connection.getMinimumBalanceForRentExemption(
-            8 + CONFIG_SIZE,
+            8 + CONFIG_SIZE
           ),
         programId: FARMS_PROGRAM_ID,
       }),
@@ -118,7 +118,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
           treasuryVaultsAuthority: treasuryVaultsAuthority,
           systemProgram: SystemProgram.programId,
         })
-        .instruction(),
+        .instruction()
     );
 
     await processBankrunTransaction(
@@ -126,7 +126,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
       tx,
       [groupAdmin.wallet, globalConfig],
       false,
-      true,
+      true
     );
     farmAccounts.set(GLOBAL_CONFIG, globalConfig.publicKey);
     farmAccounts.set(TREASURY_VAULTS_AUTHORITY, treasuryVaultsAuthority);
@@ -147,12 +147,12 @@ describe("k13: Kamino Farms Harvest Reward", () => {
 
     const [lendingMarketAuthority] = deriveLendingMarketAuthority(
       KLEND_PROGRAM_ID,
-      market,
+      market
     );
 
     const [farmsVaultAuthority] = deriveFarmsVaultAuthority(
       FARMS_PROGRAM_ID,
-      farmState.publicKey,
+      farmState.publicKey
     );
 
     const tx = new Transaction().add(
@@ -162,7 +162,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
         space: 8 + FARM_SIZE,
         lamports:
           await bankRunProvider.connection.getMinimumBalanceForRentExemption(
-            8 + FARM_SIZE,
+            8 + FARM_SIZE
           ),
         programId: FARMS_PROGRAM_ID,
       }),
@@ -180,7 +180,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
           rent: SYSVAR_RENT_PUBKEY,
           systemProgram: SystemProgram.programId,
         })
-        .instruction(),
+        .instruction()
     );
 
     await processBankrunTransaction(
@@ -188,13 +188,13 @@ describe("k13: Kamino Farms Harvest Reward", () => {
       tx,
       [groupAdmin.wallet, farmState],
       false,
-      true,
+      true
     );
     farmAccounts.set(A_FARM_STATE, farmState.publicKey);
     farmAccounts.set(A_FARM_VAULTS_AUTHORITY, farmsVaultAuthority);
 
     const reserveAccount = await klendBankrunProgram.account.reserve.fetch(
-      tokenAReserve,
+      tokenAReserve
     );
     assertKeysEqual(reserveAccount.farmCollateral, farmState.publicKey);
 
@@ -213,12 +213,12 @@ describe("k13: Kamino Farms Harvest Reward", () => {
     // Derive reward vault and treasury vault PDAs
     const [rewardVault] = PublicKey.findProgramAddressSync(
       [Buffer.from("rvault"), farmState.toBuffer(), rewardMint.toBuffer()],
-      FARMS_PROGRAM_ID,
+      FARMS_PROGRAM_ID
     );
 
     const [rewardTreasuryVault] = PublicKey.findProgramAddressSync(
       [Buffer.from("tvault"), globalConfig.toBuffer(), rewardMint.toBuffer()],
-      FARMS_PROGRAM_ID,
+      FARMS_PROGRAM_ID
     );
 
     // Extra initialization needed for rewards to accrue over time.
@@ -232,7 +232,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
     // Manual serialization based on Kamino farm SDK approach
     function serializeRewardCurvePoint(
       reward_index: number,
-      points: { tsStart: number; rewardPerTimeUnit: number }[],
+      points: { tsStart: number; rewardPerTimeUnit: number }[]
     ): Uint8Array {
       const buffer = Buffer.alloc(8 + 4 + 16 * points.length); // u64 reward_index + u32 length + points
       buffer.writeBigUint64LE(BigInt(reward_index), 0); // reward_index
@@ -241,7 +241,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
         buffer.writeBigUint64LE(BigInt(points[i].tsStart), 12 + 16 * i);
         buffer.writeBigUint64LE(
           BigInt(points[i].rewardPerTimeUnit),
-          20 + 16 * i,
+          20 + 16 * i
         );
       }
       return Uint8Array.from(buffer);
@@ -267,14 +267,14 @@ describe("k13: Kamino Farms Harvest Reward", () => {
       await kfarmsBankrunProgram.methods
         .updateFarmConfig(
           16, // mode 16 = UpdateRewardScheduleCurvePoints in FarmConfigOption enum
-          Buffer.from(serializeRewardCurvePoint(0, rewardPoints)),
+          Buffer.from(serializeRewardCurvePoint(0, rewardPoints))
         )
         .accounts({
           signer: groupAdmin.wallet.publicKey,
           farmState,
           scopePrices: null,
         })
-        .instruction(),
+        .instruction()
     );
 
     await processBankrunTransaction(ctx, tx, [groupAdmin.wallet], false, true);
@@ -295,7 +295,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
 
     const adminRewardAta = getAssociatedTokenAddressSync(
       rewardMint,
-      groupAdmin.wallet.publicKey,
+      groupAdmin.wallet.publicKey
     );
 
     const tx = new Transaction().add(
@@ -303,18 +303,18 @@ describe("k13: Kamino Farms Harvest Reward", () => {
         groupAdmin.wallet.publicKey,
         adminRewardAta,
         groupAdmin.wallet.publicKey,
-        rewardMint,
+        rewardMint
       ),
       createMintToInstruction(
         rewardMint,
         adminRewardAta,
         globalProgramAdmin.wallet.publicKey,
-        REWARD_AMOUNT * 10 ** ecosystem.tokenADecimals,
+        REWARD_AMOUNT * 10 ** ecosystem.tokenADecimals
       ),
       await kfarmsBankrunProgram.methods
         .addRewards(
           new BN(REWARD_AMOUNT * 10 ** ecosystem.tokenADecimals),
-          new BN(0),
+          new BN(0)
         )
         .accounts({
           payer: groupAdmin.wallet.publicKey,
@@ -333,7 +333,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
           farmState,
           scopePrices: null,
         })
-        .instruction(),
+        .instruction()
     );
 
     await processBankrunTransaction(
@@ -341,17 +341,17 @@ describe("k13: Kamino Farms Harvest Reward", () => {
       tx,
       [groupAdmin.wallet, globalProgramAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const rewardVaultBalance = await getTokenBalance(
       bankRunProvider,
-      rewardVault,
+      rewardVault
     );
     assert.equal(
       rewardVaultBalance,
       REWARD_AMOUNT * 10 ** ecosystem.tokenADecimals,
-      "Reward vault should contain the added rewards",
+      "Reward vault should contain the added rewards"
     );
 
     if (verbose) {
@@ -367,18 +367,18 @@ describe("k13: Kamino Farms Harvest Reward", () => {
 
     const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      tokenABank,
+      tokenABank
     );
     const [obligation] = deriveBaseObligation(lendingVaultAuthority, market);
     const [userState] = deriveUserState(
       FARMS_PROGRAM_ID,
       farmState,
-      obligation,
+      obligation
     );
 
     const [lendingMarketAuthority] = deriveLendingMarketAuthority(
       KLEND_PROGRAM_ID,
-      market,
+      market
     );
 
     const tx = new Transaction().add(
@@ -397,7 +397,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
           rent: SYSVAR_RENT_PUBKEY,
           systemProgram: SystemProgram.programId,
         })
-        .instruction(),
+        .instruction()
     );
 
     await processBankrunTransaction(ctx, tx, [groupAdmin.wallet], false, true);
@@ -406,7 +406,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
 
     // Verify the user state was created correctly
     const userStateAccount = await kfarmsBankrunProgram.account.userState.fetch(
-      userState,
+      userState
     );
     assertKeysEqual(userStateAccount.farmState, farmState);
     assertKeysEqual(userStateAccount.delegatee, obligation);
@@ -430,12 +430,12 @@ describe("k13: Kamino Farms Harvest Reward", () => {
 
     const userTokenABefore = await getTokenBalance(
       bankRunProvider,
-      user.tokenAAccount,
+      user.tokenAAccount
     );
 
     const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      tokenABank,
+      tokenABank
     );
     const [obligation] = deriveBaseObligation(lendingVaultAuthority, market);
 
@@ -444,7 +444,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
         klendBankrunProgram,
         tokenAReserve,
         market,
-        oracles.tokenAOracle.publicKey,
+        oracles.tokenAOracle.publicKey
       ),
       await simpleRefreshObligation(klendBankrunProgram, market, obligation, [
         tokenAReserve,
@@ -460,7 +460,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
           obligationFarmUserState: userState,
           reserveFarmState: farmState,
         },
-        depositAmount,
+        depositAmount
       ),
       await kfarmsBankrunProgram.methods
         .refreshUserState()
@@ -469,25 +469,25 @@ describe("k13: Kamino Farms Harvest Reward", () => {
           farmState,
           scopePrices: null,
         })
-        .instruction(),
+        .instruction()
     );
 
     await processBankrunTransaction(ctx, tx, [user.wallet], false, true);
 
     const userTokenAAfter = await getTokenBalance(
       bankRunProvider,
-      user.tokenAAccount,
+      user.tokenAAccount
     );
     const deposited = userTokenABefore - userTokenAAfter;
 
     assert.equal(
       deposited,
       depositAmount.toNumber(),
-      "Should have deposited the correct amount",
+      "Should have deposited the correct amount"
     );
 
     const userStateAccount = await kfarmsBankrunProgram.account.userState.fetch(
-      userState,
+      userState
     );
     const obligationAccount =
       await klendBankrunProgram.account.obligation.fetch(obligation);
@@ -499,7 +499,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
 
     const clockBefore = await banksClient.getClock();
     console.log(
-      `Clock before - Slot: ${clockBefore.slot}, Timestamp: ${clockBefore.unixTimestamp}`,
+      `Clock before - Slot: ${clockBefore.slot}, Timestamp: ${clockBefore.unixTimestamp}`
     );
     ctx.setClock(
       new Clock(
@@ -507,14 +507,14 @@ describe("k13: Kamino Farms Harvest Reward", () => {
         clockBefore.epochStartTimestamp,
         clockBefore.epoch,
         clockBefore.leaderScheduleEpoch,
-        clockBefore.unixTimestamp + BigInt(1 * 60 * 60),
-      ),
+        clockBefore.unixTimestamp + BigInt(1 * 60 * 60)
+      )
     );
     const clockAfter = await banksClient.getClock();
     console.log(
       `Time jump: ${
         clockAfter.unixTimestamp - clockBefore.unixTimestamp
-      } seconds`,
+      } seconds`
     );
   });
 
@@ -532,12 +532,12 @@ describe("k13: Kamino Farms Harvest Reward", () => {
 
     const userTokenABefore = await getTokenBalance(
       bankRunProvider,
-      user.tokenAAccount,
+      user.tokenAAccount
     );
 
     const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      tokenABank,
+      tokenABank
     );
     const [obligation] = deriveBaseObligation(lendingVaultAuthority, market);
 
@@ -546,7 +546,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
         klendBankrunProgram,
         tokenAReserve,
         market,
-        oracles.tokenAOracle.publicKey,
+        oracles.tokenAOracle.publicKey
       ),
       await simpleRefreshObligation(klendBankrunProgram, market, obligation, [
         tokenAReserve,
@@ -580,26 +580,26 @@ describe("k13: Kamino Farms Harvest Reward", () => {
           //   oracles.tokenAOracle.publicKey,
           //   tokenAReserve,
           // ],
-        },
-      ),
+        }
+      )
     );
 
     await processBankrunTransaction(ctx, tx, [user.wallet], false, true);
 
     const userTokenAAfter = await getTokenBalance(
       bankRunProvider,
-      user.tokenAAccount,
+      user.tokenAAccount
     );
     const withdrawn = userTokenAAfter - userTokenABefore;
 
     assert.isAtLeast(
       withdrawn,
       withdrawAmount.toNumber(),
-      "Should have withdrawn at least the requested amount (plus interest)",
+      "Should have withdrawn at least the requested amount (plus interest)"
     );
 
     const userStateAccount = await kfarmsBankrunProgram.account.userState.fetch(
-      userState,
+      userState
     );
     const obligationAccount =
       await klendBankrunProgram.account.obligation.fetch(obligation);
@@ -609,7 +609,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
 
     assert.isTrue(
       userStateStake.eq(obligationDeposit.depositedAmount),
-      "Farm user state active stake should match obligation deposit amount after withdrawal",
+      "Farm user state active stake should match obligation deposit amount after withdrawal"
     );
 
     if (verbose) {
@@ -631,7 +631,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
 
     const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      tokenABank,
+      tokenABank
     );
 
     const [feeState] = deriveGlobalFeeState(bankrunProgram.programId);
@@ -639,13 +639,13 @@ describe("k13: Kamino Farms Harvest Reward", () => {
     const userRewardAta = getAssociatedTokenAddressSync(
       rewardMint,
       liquidityVaultAuthority,
-      true,
+      true
     );
 
     // Try to use a destination ATA owned by groupAdmin instead of globalProgramAdmin
     const wrongDestinationAta = getAssociatedTokenAddressSync(
       rewardMint,
-      groupAdmin.wallet.publicKey, // Wrong owner - should be globalProgramAdmin
+      groupAdmin.wallet.publicKey // Wrong owner - should be globalProgramAdmin
     );
 
     const tx = new Transaction().add(
@@ -653,13 +653,13 @@ describe("k13: Kamino Farms Harvest Reward", () => {
         groupAdmin.wallet.publicKey,
         userRewardAta,
         liquidityVaultAuthority,
-        rewardMint,
+        rewardMint
       ),
       createAssociatedTokenAccountIdempotentInstruction(
         groupAdmin.wallet.publicKey,
         wrongDestinationAta,
         groupAdmin.wallet.publicKey, // Wrong owner
-        rewardMint,
+        rewardMint
       ),
       await kfarmsBankrunProgram.methods
         .refreshUserState()
@@ -685,15 +685,15 @@ describe("k13: Kamino Farms Harvest Reward", () => {
           farmVaultsAuthority,
           scopePrices: null,
         },
-        new BN(0), // reward_index = 0 (first reward)
-      ),
+        new BN(0) // reward_index = 0 (first reward)
+      )
     );
 
     const result = await processBankrunTransaction(
       ctx,
       tx,
       [groupAdmin.wallet],
-      true,
+      true
     );
     // ConstraintTokenOwner: 2015 = 0x7df = A token owner constraint was violated.
     assertBankrunTxFailed(result, 2015);
@@ -712,7 +712,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
 
     const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
       bankrunProgram.programId,
-      tokenABank,
+      tokenABank
     );
 
     const [feeState] = deriveGlobalFeeState(bankrunProgram.programId);
@@ -720,18 +720,18 @@ describe("k13: Kamino Farms Harvest Reward", () => {
     const userRewardAta = getAssociatedTokenAddressSync(
       rewardMint,
       liquidityVaultAuthority,
-      true,
+      true
     );
 
     // Destination ATA must be owned by the global fee wallet
     const destinationAta = getAssociatedTokenAddressSync(
       rewardMint,
-      globalFeeWallet,
+      globalFeeWallet
     );
 
     const destinationBalanceBefore = await getTokenBalance(
       bankRunProvider,
-      destinationAta,
+      destinationAta
     ).catch(() => 0);
 
     const tx = new Transaction().add(
@@ -739,13 +739,13 @@ describe("k13: Kamino Farms Harvest Reward", () => {
         groupAdmin.wallet.publicKey,
         userRewardAta,
         liquidityVaultAuthority,
-        rewardMint,
+        rewardMint
       ),
       createAssociatedTokenAccountIdempotentInstruction(
         groupAdmin.wallet.publicKey,
         destinationAta,
         globalFeeWallet,
-        rewardMint,
+        rewardMint
       ),
       await kfarmsBankrunProgram.methods
         .refreshUserState()
@@ -771,15 +771,15 @@ describe("k13: Kamino Farms Harvest Reward", () => {
           farmVaultsAuthority,
           scopePrices: null,
         },
-        new BN(0), // reward_index = 0 (first reward)
-      ),
+        new BN(0) // reward_index = 0 (first reward)
+      )
     );
 
     await processBankrunTransaction(ctx, tx, [groupAdmin.wallet], false, true);
 
     const destinationBalanceAfter = await getTokenBalance(
       bankRunProvider,
-      destinationAta,
+      destinationAta
     );
     const harvestedAmount = destinationBalanceAfter - destinationBalanceBefore;
 
@@ -789,8 +789,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
 
     assert.isTrue(
       harvestedAmount > 0,
-      "Should have harvested some rewards from the farm",
+      "Should have harvested some rewards from the farm"
     );
   });
-
 });

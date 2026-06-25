@@ -983,18 +983,6 @@ pub fn check_account_bankrupt<'info>(
     health_cache: &mut Option<&mut HealthCache>,
     on_ramp_transition: OnRampTransition,
 ) -> MarginfiResult {
-    // Reject bankruptcy checks while a flashloan is open. During a flashloan the account is allowed
-    // to be temporarily insolvent (collateral isn't posted yet), so it can look bankrupt while it
-    // actually isn't. Without this, an attacker could open a flashloan and have their own solvent
-    // account "bankrupted" — which seizes the position and socializes its losses to depositors.
-    //
-    // This lives in the shared check, not in each instruction (as an old TODO suggested), so callers
-    // can react differently: `handle_bankruptcy` fails on this error, `pulse_health` just records it.
-    check!(
-        !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
-        MarginfiError::AccountInFlashloan
-    );
-
     let (equity_assets, equity_liabs) = get_health_components(
         marginfi_account,
         remaining_ais,

@@ -128,14 +128,14 @@ describe("jlrx: Fixed JupLend price bank", () => {
         ecosystem.usdcMint.publicKey,
         usdcAccount,
         globalProgramAdmin.wallet.publicKey,
-        mintAmount,
+        mintAmount
       );
       await processBankrunTransaction(
         ctx,
         new Transaction().add(mintIx),
         [globalProgramAdmin.wallet],
         false,
-        true,
+        true
       );
     }
 
@@ -157,7 +157,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
       new Transaction().add(ix),
       [groupAdmin.wallet, juplendGroup],
       false,
-      true,
+      true
     );
   });
 
@@ -172,7 +172,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
         marginfiAccount: userAccount,
         authority: user.wallet.publicKey,
         feePayer: user.wallet.publicKey,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, tx, [user.wallet, accountKeypair]);
   });
@@ -192,7 +192,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
 
     const config = defaultJuplendBankConfig(
       oracles.usdcOracle.publicKey,
-      ecosystem.usdcDecimals,
+      ecosystem.usdcDecimals
     );
 
     // 1. Add bank
@@ -206,7 +206,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
         jupLendingState: pool.lending,
         fTokenMint: pool.fTokenMint,
         config,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, addBankTx, [groupAdmin.wallet]);
 
@@ -218,7 +218,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
         bank: fixedJuplendBank,
         pool,
         seedDepositAmount: SEED_DEPOSIT_AMOUNT,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, initPosTx, [groupAdmin.wallet]);
 
@@ -228,7 +228,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
         bank: fixedJuplendBank,
         price: FIXED_PRICE,
         remaining: [pool.lending],
-      }),
+      })
     );
     await processBankrunTransaction(ctx, setFixedTx, [groupAdmin.wallet]);
 
@@ -243,12 +243,12 @@ describe("jlrx: Fixed JupLend price bank", () => {
     const expectedWithdrawIntermediaryAta = getAssociatedTokenAddressSync(
       bank.mint,
       derived.liquidityVaultAuthority,
-      true,
+      true
     );
     assertKeysEqual(bank.integrationAcc3, expectedWithdrawIntermediaryAta);
 
     const fixedPrice = wrappedI80F48toBigNumber(
-      bank.config.fixedPrice,
+      bank.config.fixedPrice
     ).toNumber();
     assert.approximately(fixedPrice, FIXED_PRICE, 0.001);
 
@@ -261,13 +261,13 @@ describe("jlrx: Fixed JupLend price bank", () => {
         bank: fixedJuplendBank,
         type: ORACLE_SETUP_FIXED_JUPLEND,
         oracle: oracles.usdcOracle.publicKey,
-      }),
+      })
     );
     const result = await processBankrunTransaction(
       ctx,
       tx,
       [groupAdmin.wallet],
-      true,
+      true
     );
     // UseSetFixedOraclePrice
     assertBankrunTxFailed(result, 6132);
@@ -283,21 +283,21 @@ describe("jlrx: Fixed JupLend price bank", () => {
         marginfiAccount: adminAccount,
         authority: groupAdmin.wallet.publicKey,
         feePayer: groupAdmin.wallet.publicKey,
-      }),
+      })
     );
     await processBankrunTransaction(
       ctx,
       initAdminTx,
       [groupAdmin.wallet, adminAccountKeypair],
       false,
-      true,
+      true
     );
 
     const [bankKey] = deriveBankWithSeed(
       bankrunProgram.programId,
       juplendGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
-      BORROW_SEED,
+      BORROW_SEED
     );
     borrowBank = bankKey;
 
@@ -312,7 +312,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
         bankMint: ecosystem.tokenAMint.publicKey,
         config,
         seed: BORROW_SEED,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, addBankTx, [groupAdmin.wallet]);
 
@@ -321,7 +321,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
         bank: borrowBank,
         type: ORACLE_SETUP_PYTH_PUSH,
         oracle: oracles.tokenAOracle.publicKey,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, configOracleTx, [groupAdmin.wallet]);
 
@@ -330,14 +330,14 @@ describe("jlrx: Fixed JupLend price bank", () => {
       ecosystem.tokenAMint.publicKey,
       groupAdmin.tokenAAccount,
       globalProgramAdmin.wallet.publicKey,
-      BigInt(seedAmount.toString()),
+      BigInt(seedAmount.toString())
     );
     await processBankrunTransaction(
       ctx,
       new Transaction().add(mintSeedLiquidityIx),
       [globalProgramAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const seedTx = new Transaction().add(
@@ -346,7 +346,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
         bank: borrowBank,
         tokenAccount: groupAdmin.tokenAAccount,
         amount: seedAmount,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, seedTx, [groupAdmin.wallet]);
   });
@@ -359,13 +359,13 @@ describe("jlrx: Fixed JupLend price bank", () => {
       await pulseBankPrice(user.mrgnBankrunProgram, {
         bank: fixedJuplendBank,
         remaining: [wrongLending],
-      }),
+      })
     );
     const result = await processBankrunTransaction(
       ctx,
       tx,
       [user.wallet],
-      true,
+      true
     );
     // JuplendLendingValidationFailed = 6501
     assertBankrunTxFailed(result, 6501);
@@ -379,16 +379,16 @@ describe("jlrx: Fixed JupLend price bank", () => {
 
     // Refresh JupLend rates to ensure lending state is fresh
     const updateRateTx = new Transaction().add(
-      await refreshJupSimple(juplendPrograms.lending, { pool }),
+      await refreshJupSimple(juplendPrograms.lending, { pool })
     );
     updateRateTx.add(
-      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
+      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey)
     );
     await processBankrunTransaction(ctx, updateRateTx, [user.wallet]);
 
     const userUsdcBefore = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount,
+      user.usdcAccount
     );
     userUsdcStart = userUsdcBefore;
 
@@ -399,13 +399,13 @@ describe("jlrx: Fixed JupLend price bank", () => {
         signerTokenAccount: user.usdcAccount,
         pool,
         amount: depositAmount,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
     const userUsdcAfter = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount,
+      user.usdcAccount
     );
     const diff = userUsdcBefore - userUsdcAfter;
     if (verbose) {
@@ -421,16 +421,16 @@ describe("jlrx: Fixed JupLend price bank", () => {
 
     // Refresh JupLend rates
     const updateRateTx = new Transaction().add(
-      await refreshJupSimple(juplendPrograms.lending, { pool }),
+      await refreshJupSimple(juplendPrograms.lending, { pool })
     );
     updateRateTx.add(
-      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
+      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey)
     );
     await processBankrunTransaction(ctx, updateRateTx, [user.wallet]);
 
     const userTokenABefore = await getTokenBalance(
       bankRunProvider,
-      user.tokenAAccount,
+      user.tokenAAccount
     );
 
     // FixedJuplend remaining: [bank, lendingState] (only 2 accounts, no oracle)
@@ -446,13 +446,13 @@ describe("jlrx: Fixed JupLend price bank", () => {
         tokenAccount: user.tokenAAccount,
         remaining,
         amount: BORROW_AMOUNT,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, tx, [user.wallet], false, true);
 
     const userTokenAAfter = await getTokenBalance(
       bankRunProvider,
-      user.tokenAAccount,
+      user.tokenAAccount
     );
     assert.equal(userTokenAAfter - userTokenABefore, BORROW_AMOUNT.toNumber());
   });
@@ -463,10 +463,10 @@ describe("jlrx: Fixed JupLend price bank", () => {
 
     // Refresh JupLend rates
     const updateRateTx = new Transaction().add(
-      await refreshJupSimple(juplendPrograms.lending, { pool }),
+      await refreshJupSimple(juplendPrograms.lending, { pool })
     );
     updateRateTx.add(
-      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
+      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey)
     );
     await processBankrunTransaction(ctx, updateRateTx, [user.wallet]);
 
@@ -479,12 +479,12 @@ describe("jlrx: Fixed JupLend price bank", () => {
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         remaining,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
     const accAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount,
+      userAccount
     );
     const cache = accAfter.healthCache;
     if (verbose) {
@@ -492,10 +492,10 @@ describe("jlrx: Fixed JupLend price bank", () => {
     }
 
     const actualAssetValue = wrappedI80F48toBigNumber(
-      cache.assetValue,
+      cache.assetValue
     ).toNumber();
     const actualLiabilityValue = wrappedI80F48toBigNumber(
-      cache.liabilityValue,
+      cache.liabilityValue
     ).toNumber();
 
     // Fixed price applied to the deposit amount, weighted by assetWeightInit (0.8).
@@ -513,7 +513,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
     assert.approximately(
       actualLiabilityValue,
       expectedLiabilityValue,
-      liabTolerance,
+      liabTolerance
     );
   });
 
@@ -525,10 +525,10 @@ describe("jlrx: Fixed JupLend price bank", () => {
 
     // Refresh JupLend rates
     const updateRateTx = new Transaction().add(
-      await refreshJupSimple(juplendPrograms.lending, { pool }),
+      await refreshJupSimple(juplendPrograms.lending, { pool })
     );
     updateRateTx.add(
-      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
+      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey)
     );
     await processBankrunTransaction(ctx, updateRateTx, [user.wallet]);
 
@@ -538,17 +538,17 @@ describe("jlrx: Fixed JupLend price bank", () => {
         withdrawIntermediaryAta,
         liquidityVaultAuthority,
         ecosystem.usdcMint.publicKey,
-        pool.tokenProgram,
+        pool.tokenProgram
       );
     await processBankrunTransaction(
       ctx,
       new Transaction().add(createWithdrawIntermediaryAtaIx),
-      [user.wallet],
+      [user.wallet]
     );
 
     const userUsdcBefore = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount,
+      user.usdcAccount
     );
 
     const remaining = composeRemainingAccounts([
@@ -564,13 +564,13 @@ describe("jlrx: Fixed JupLend price bank", () => {
         pool,
         amount: withdrawAmount,
         remainingAccounts: remaining,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
     const userUsdcAfter = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount,
+      user.usdcAccount
     );
     const diff = userUsdcAfter - userUsdcBefore;
     if (verbose) {
@@ -595,7 +595,7 @@ describe("jlrx: Fixed JupLend price bank", () => {
           [fixedJuplendBank, pool.lending],
           [borrowBank, oracles.tokenAOracle.publicKey],
         ]),
-      }),
+      })
     );
     await processBankrunTransaction(ctx, repayTx, [user.wallet]);
 
@@ -610,10 +610,10 @@ describe("jlrx: Fixed JupLend price bank", () => {
 
     // Refresh JupLend rates
     const updateRateTx = new Transaction().add(
-      await refreshJupSimple(juplendPrograms.lending, { pool }),
+      await refreshJupSimple(juplendPrograms.lending, { pool })
     );
     updateRateTx.add(
-      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
+      dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey)
     );
     await processBankrunTransaction(ctx, updateRateTx, [user.wallet]);
 
@@ -626,13 +626,13 @@ describe("jlrx: Fixed JupLend price bank", () => {
         amount: new BN(0),
         withdrawAll: true,
         remainingAccounts: remaining,
-      }),
+      })
     );
     await processBankrunTransaction(ctx, withdrawAllTx, [user.wallet]);
 
     const userUsdcAfter = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount,
+      user.usdcAccount
     );
     // Note: JupLend round-trip rounding can lose a few lamports per operation
     assert.approximately(userUsdcAfter, userUsdcStart, 5);
