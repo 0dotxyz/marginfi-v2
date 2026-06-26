@@ -69,7 +69,6 @@ import {
 import { assertBankrunTxFailed } from "./utils/genericTests";
 import {
   bigNumberToWrappedI80F48,
-  WrappedI80F48,
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
 import {
@@ -85,6 +84,7 @@ import {
   computeSameAssetBoundaryBorrowNative,
   computeSameValueBorrowNative,
   enableSameAssetEmodeForBanks,
+  getNetHealth,
   setAssetShareValueHaircut,
   warpToNextBankrunSlot,
 } from "./utils/same-asset-emode";
@@ -103,21 +103,6 @@ const SAME_ASSET_TIGHTENED_MAINT_LEVERAGE = 98;
 const SAME_ASSET_BORROW_ORIGINATION_FEE_RATE = 0.01;
 
 type TestUser = (typeof users)[number];
-
-const getNetHealth = (cache: {
-  assetValue: WrappedI80F48;
-  liabilityValue: WrappedI80F48;
-  assetValueMaint: WrappedI80F48;
-  liabilityValueMaint: WrappedI80F48;
-}) => {
-  const init = wrappedI80F48toBigNumber(cache.assetValue).minus(
-    wrappedI80F48toBigNumber(cache.liabilityValue)
-  );
-  const maint = wrappedI80F48toBigNumber(cache.assetValueMaint).minus(
-    wrappedI80F48toBigNumber(cache.liabilityValueMaint)
-  );
-  return { init, maint };
-};
 
 const computeDriftSameAssetBorrow = (accountedUnderlyingNative: BN) =>
   computeSameAssetBoundaryBorrowNative({

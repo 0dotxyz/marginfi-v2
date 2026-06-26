@@ -59,7 +59,6 @@ import {
   bytesToF64,
   dumpBankrunLogs,
   getBankrunBlockhash,
-  toWrappedI80F48Safe,
 } from "./utils/tools";
 
 const USER_ACCOUNT_THROWAWAY = "throwaway_account_zb01";
@@ -81,21 +80,6 @@ describe("Bank bankruptcy tests", () => {
     );
     banks = result.banks;
     throwawayGroup = result.throwawayGroup;
-
-    // These suites cover classic eMode math; disable same-asset leverage explicitly so the
-    // tests are not affected
-    const disableSameAssetTx = new Transaction().add(
-      await groupConfigure(groupAdmin.mrgnBankrunProgram, {
-        marginfiGroup: throwawayGroup.publicKey,
-        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(1),
-        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(1),
-      })
-    );
-    disableSameAssetTx.recentBlockhash = await getBankrunBlockhash(
-      bankrunContext
-    );
-    disableSameAssetTx.sign(groupAdmin.wallet);
-    await banksClient.processTransaction(disableSameAssetTx);
 
     // Crank oracles so that the prices are not stale
     // Use bankrun clock instead of wall clock to avoid timestamp mismatch

@@ -64,6 +64,23 @@ export const decimalScale = (decimals: number) => {
   return new Decimal(`1e${normalizedDecimals}`);
 };
 
+export type HealthCacheSnapshot = {
+  assetValue: WrappedI80F48;
+  liabilityValue: WrappedI80F48;
+  assetValueMaint: WrappedI80F48;
+  liabilityValueMaint: WrappedI80F48;
+};
+
+export const getNetHealth = (cache: HealthCacheSnapshot) => {
+  const init = wrappedI80F48toBigNumber(cache.assetValue).minus(
+    wrappedI80F48toBigNumber(cache.liabilityValue),
+  );
+  const maint = wrappedI80F48toBigNumber(cache.assetValueMaint).minus(
+    wrappedI80F48toBigNumber(cache.liabilityValueMaint),
+  );
+  return { init, maint };
+};
+
 export const enableSameAssetEmodeForBanks = async ({
   program,
   bankrunContext,

@@ -291,6 +291,8 @@ async fn same_asset_emode_regular_matching_collateral_uses_the_largest_available
     let usdc_bank = test_f.get_bank(&BankMint::Usdc).clone();
     let fixed_bank = test_f.get_bank(&BankMint::Fixed).clone();
 
+    // Same-asset leverage 4 / 5 yields init / maint weights of 1 - 1/4 = 0.75 and 1 - 1/5 = 0.8
+    // (compute_same_asset_emode_weight); these are the 0.75 / 0.8 referenced in the phase math below.
     configure_same_asset_pair(&test_f, &sol_bank_a, &sol_bank_b, 0.81, 0.81, 4, 5).await?;
     set_bank_asset_weights(&sol_bank_c, 0.81, 0.81).await?;
     set_bank_asset_weights(&usdc_bank, 0.63, 0.63).await?;

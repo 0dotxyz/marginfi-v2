@@ -90,11 +90,7 @@ fn add_bank_to_registry(
                 "same-asset e-mode registry group table is full"
             );
 
-            registry.groups[index] = SameAssetEmodeGroup {
-                bank: bank_key,
-                mint,
-                oracle_key,
-            };
+            registry.groups[index] = SameAssetEmodeGroup { mint, oracle_key };
             registry.group_count += 1;
             index
         }
@@ -128,11 +124,6 @@ fn remove_bank_from_registry(registry: &mut SameAssetEmodeRegistry, bank_key: Pu
     registry.bank_count -= 1;
 
     if registry.group_member_count(removed_group_index) > 0 {
-        if registry.groups[removed_group_index as usize].bank == bank_key {
-            if let Some(representative) = registry.first_bank_for_group(removed_group_index) {
-                registry.groups[removed_group_index as usize].bank = representative;
-            }
-        }
         return;
     }
 

@@ -14,16 +14,13 @@ use {
 pub const MAX_SAME_ASSET_EMODE_GROUPS: usize = 32;
 pub const MAX_SAME_ASSET_EMODE_BANKS: usize = 128;
 
-assert_struct_size!(SameAssetEmodeGroup, 96);
+assert_struct_size!(SameAssetEmodeGroup, 64);
 assert_struct_align!(SameAssetEmodeGroup, 1);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", zero_copy)]
 #[cfg_attr(not(feature = "anchor"), derive(PartialEq, Pod, Zeroable, Copy, Clone))]
 #[derive(Debug)]
 pub struct SameAssetEmodeGroup {
-    /// Representative bank for this `(mint, oracle_key)` grouping. Typically, this is whichever
-    /// bank was added to the group first. The bank's mint = mint and oracle_keys[0] = oracle_key.
-    pub bank: Pubkey,
     pub mint: Pubkey,
     /// The canonical price source, matching `Bank.config.oracle_keys[0]`.
     pub oracle_key: Pubkey,
@@ -54,7 +51,7 @@ impl Default for SameAssetEmodeBank {
     }
 }
 
-assert_struct_size!(SameAssetEmodeRegistry, 10064);
+assert_struct_size!(SameAssetEmodeRegistry, 9040);
 assert_struct_align!(SameAssetEmodeRegistry, 8);
 /// Read-only archive of same-asset-emode banks. Enables the emode admin to see, at a glance, which
 /// banks are participating in same-asset-emode.
@@ -102,12 +99,5 @@ impl SameAssetEmodeRegistry {
             .iter()
             .filter(|entry| entry.group_index == group_index)
             .count()
-    }
-
-    pub fn first_bank_for_group(&self, group_index: u8) -> Option<Pubkey> {
-        self.banks[..self.bank_count as usize]
-            .iter()
-            .find(|entry| entry.group_index == group_index)
-            .map(|entry| entry.bank)
     }
 }
