@@ -170,12 +170,9 @@ async fn close_liquidation_record_fails_during_receivership() -> anyhow::Result<
     let (liquidatee, record_pk, payer) = setup_with_liquidation_record(&test_f).await?;
 
     // Start a liquidation to put account into receivership
-    let start_ix = liquidatee
-        .make_start_liquidation_ix(test_f.marginfi_group.key, record_pk, payer)
-        .await;
+    let start_ix = liquidatee.make_start_liquidation_ix(record_pk, payer).await;
     let end_ix = liquidatee
         .make_end_liquidation_ix(
-            test_f.marginfi_group.key,
             record_pk,
             payer,
             test_f.marginfi_group.fee_state,

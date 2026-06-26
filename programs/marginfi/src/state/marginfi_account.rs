@@ -17,8 +17,8 @@ use marginfi_type_crate::{
     types::{
         reconcile_emode_configs, Balance, BalanceSide, Bank, BankOperationalState, EmodeConfig,
         HealthCache, HealthPriceMode, LendingAccount, LiquidationPriceCache, MarginfiAccount,
-        OnRampTransition, OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias,
-        RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
+        OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias, RequirementType,
+        RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
         ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
@@ -624,7 +624,6 @@ pub fn get_health_components<'info>(
     requirement_type: RequirementType,
     health_cache: &mut Option<&mut HealthCache>,
     price_mode: HealthPriceMode<'_>,
-    on_ramp_transition: OnRampTransition,
 ) -> MarginfiResult<(I80F48, I80F48)> {
     check!(
         !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
@@ -712,12 +711,8 @@ pub fn get_health_components<'info>(
             let oracle_ais = &remaining_ais[oracle_ai_idx..end_idx];
 
             // Create oracle adapter (heap allocation happens here)
-            let price_adapter_result = OraclePriceFeedAdapter::try_from_bank(
-                &bank,
-                oracle_ais,
-                clock.as_ref().unwrap(),
-                on_ramp_transition,
-            );
+            let price_adapter_result =
+                OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, clock.as_ref().unwrap());
 
             // Log heap usage per position for measurement/debugging
             // Measured results: Pyth ~64 bytes, Switchboard ~128 bytes per position
@@ -804,7 +799,6 @@ pub fn get_tagged_account_health_components<'info>(
     marginfi_account: &MarginfiAccount,
     remaining_ais: &'info [AccountInfo<'info>],
     balance_tags: &[u16],
-    on_ramp_transition: OnRampTransition,
 ) -> MarginfiResult<(I80F48, I80F48, usize, usize)> {
     if balance_tags.is_empty() {
         return Ok((I80F48::ZERO, I80F48::ZERO, 0, 0));
@@ -866,12 +860,8 @@ pub fn get_tagged_account_health_components<'info>(
         let oracle_ais = &remaining_ais[oracle_ai_idx..end_idx];
 
         let (asset_val, liab_val) = {
-            let price_adapter_result = OraclePriceFeedAdapter::try_from_bank(
-                &bank,
-                oracle_ais,
-                &clock,
-                on_ramp_transition,
-            );
+            let price_adapter_result =
+                OraclePriceFeedAdapter::try_from_bank(&bank, oracle_ais, &clock);
 
             let (asset_val, liab_val, _price, _err_code) = calc_weighted_value_for_balance(
                 balance,
@@ -918,7 +908,6 @@ pub fn check_pre_liquidation_condition_and_get_account_health<'info>(
     health_cache: &mut Option<&mut HealthCache>,
     price_mode: HealthPriceMode<'_>,
     ignore_healthy: bool,
-    on_ramp_transition: OnRampTransition,
 ) -> MarginfiResult<(I80F48, I80F48, I80F48)> {
     check!(
         !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
@@ -951,7 +940,6 @@ pub fn check_pre_liquidation_condition_and_get_account_health<'info>(
         RequirementType::Maintenance,
         health_cache,
         price_mode,
-        on_ramp_transition,
     )?;
 
     let account_health = assets.checked_sub(liabs).ok_or_else(math_error!())?;
@@ -981,7 +969,6 @@ pub fn check_account_bankrupt<'info>(
     marginfi_account: &MarginfiAccount,
     remaining_ais: &'info [AccountInfo<'info>],
     health_cache: &mut Option<&mut HealthCache>,
-    on_ramp_transition: OnRampTransition,
 ) -> MarginfiResult {
     // TODO remove this check here and raise it to the top-level instruction
     check!(
@@ -995,7 +982,6 @@ pub fn check_account_bankrupt<'info>(
         RequirementType::Equity,
         health_cache,
         HealthPriceMode::Live { liq_cache: None },
-        on_ramp_transition,
     )?;
 
     let has_liabilities = equity_liabs > I80F48::ZERO;
@@ -1126,7 +1112,6 @@ pub fn check_account_init_health<'info>(
     marginfi_account: &MarginfiAccount,
     remaining_ais: &'info [AccountInfo<'info>],
     health_cache: &mut Option<&mut HealthCache>,
-    on_ramp_transition: OnRampTransition,
 ) -> MarginfiResult {
     if marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN) {
         // Risk checks are skipped during flashloans
@@ -1139,7 +1124,6 @@ pub fn check_account_init_health<'info>(
         RequirementType::Initial,
         health_cache,
         HealthPriceMode::Live { liq_cache: None },
-        on_ramp_transition,
     )?;
 
     let healthy = assets >= liabs;
@@ -1164,7 +1148,6 @@ pub fn check_post_liquidation_condition_and_get_account_health<'info>(
     remaining_ais: &'info [AccountInfo<'info>],
     bank_pk: &Pubkey,
     pre_liquidation_health: I80F48,
-    on_ramp_transition: OnRampTransition,
 ) -> MarginfiResult<I80F48> {
     check!(
         !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
@@ -1194,7 +1177,6 @@ pub fn check_post_liquidation_condition_and_get_account_health<'info>(
         RequirementType::Maintenance,
         &mut None,
         HealthPriceMode::Live { liq_cache: None },
-        on_ramp_transition,
     )?;
 
     let account_health = assets.checked_sub(liabs).ok_or_else(math_error!())?;
