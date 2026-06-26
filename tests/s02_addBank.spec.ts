@@ -15,6 +15,7 @@ import {
   enableStakedOracleOnramp,
   groupInitialize,
   initStakedSettings,
+  propagateStakedSettings,
 } from "./utils/group-instructions";
 import {
   stakedBankKeypairSol,
@@ -85,6 +86,14 @@ describe("Init group and add banks with asset category flags", () => {
     bankKeypairSol = stakedBankKeypairSol;
     bankKeypairUsdc = stakedBankKeypairUsdc;
   });
+
+  const fetchStakedSettings = async () => {
+    const [settingsKey] = deriveStakedSettings(
+      program.programId,
+      marginfiGroup.publicKey,
+    );
+    return bankrunProgram.account.stakedSettings.fetch(settingsKey);
+  };
 
   it("(admin) Init group - happy path", async () => {
     let tx = new Transaction();
@@ -172,6 +181,7 @@ describe("Init group and add banks with asset category flags", () => {
     assertBNEqual(settingsAcc.totalAssetValueInitLimit, 150_000_000);
     assert.equal(settingsAcc.oracleMaxAge, 60);
     assert.deepEqual(settingsAcc.riskTier, { collateral: {} });
+    assertBNEqual(settingsAcc.flags, 0);
   });
 
   it("(admin) Add bank (USDC) - is neither SOL nor staked LST", async () => {
@@ -683,6 +693,7 @@ describe("Init group and add banks with asset category flags", () => {
 
     const bank = await bankrunProgram.account.bank.fetch(validators[1].bank);
     assertBNEqual(bank.bankSeed, new BN(0));
+    assertBNEqual(bank.flags, CLOSE_ENABLED_FLAG + BANK_SEED_KNOWN_FLAG);
     assertKeysEqual(bank.integrationAcc1, validators[1].voteAccount);
   });
 
@@ -806,6 +817,32 @@ describe("Init group and add banks with asset category flags", () => {
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
     await banksClient.processTransaction(tx);
+
+    const settingsAcc = await fetchStakedSettings();
+    assertBNEqual(settingsAcc.flags, STAKED_ORACLE_DISABLED);
+
+    const [settingsKey] = deriveStakedSettings(
+      program.programId,
+      marginfiGroup.publicKey,
+    );
+
+    for (let i = 0; i < numValidators; i++) {
+      const propagateTx = new Transaction().add(
+        await propagateStakedSettings(groupAdmin.mrgnBankrunProgram, {
+          settings: settingsKey,
+          bank: validators[i].bank,
+        }),
+      );
+      propagateTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+      propagateTx.sign(groupAdmin.wallet);
+      await banksClient.processTransaction(propagateTx);
+
+      const bank = await bankrunProgram.account.bank.fetch(validators[i].bank);
+      assertBNEqual(
+        bank.flags,
+        CLOSE_ENABLED_FLAG + BANK_SEED_KNOWN_FLAG + STAKED_ORACLE_DISABLED,
+      );
+    }
   });
 
   it("(permissionless) Pulse any staked bank with stake oracles disabled - should fail", async () => {
@@ -847,6 +884,10 @@ describe("Init group and add banks with asset category flags", () => {
   });
 
   it("(admin) Enables staked on-ramp oracle pricing - happy path", async () => {
+    const [settingsKey] = deriveStakedSettings(
+      program.programId,
+      marginfiGroup.publicKey,
+    );
     let tx = new Transaction();
     tx.add(
       await enableStakedOracleOnramp(
@@ -857,6 +898,29 @@ describe("Init group and add banks with asset category flags", () => {
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
     await banksClient.processTransaction(tx);
+
+    const settingsAcc = await fetchStakedSettings();
+    assertBNEqual(settingsAcc.flags, STAKED_ORACLE_PRICE_USES_ONRAMP);
+
+    for (let i = 0; i < numValidators; i++) {
+      const propagateTx = new Transaction().add(
+        await propagateStakedSettings(groupAdmin.mrgnBankrunProgram, {
+          settings: settingsKey,
+          bank: validators[i].bank,
+        }),
+      );
+      propagateTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+      propagateTx.sign(groupAdmin.wallet);
+      await banksClient.processTransaction(propagateTx);
+
+      const bank = await bankrunProgram.account.bank.fetch(validators[i].bank);
+      assertBNEqual(
+        bank.flags,
+        CLOSE_ENABLED_FLAG +
+          BANK_SEED_KNOWN_FLAG +
+          STAKED_ORACLE_PRICE_USES_ONRAMP,
+      );
+    }
   });
 
   it("(permissionless) Pulse staked bank (validator 0) with wrong on-ramp - should fail", async () => {

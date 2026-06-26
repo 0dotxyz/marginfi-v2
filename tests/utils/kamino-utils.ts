@@ -158,7 +158,7 @@ export type KaminoConfigCompact = {
   assetWeightMaint: WrappedI80F48;
   depositLimit: BN;
   oracleSetup: OracleSetupRawWithKamino;
-  /** Paused = 0, Operational = 1, ReduceOnly = 2 */
+  /** Paused = 0, Operational = 1, ReduceOnly = 2, ... */
   operationalState: OperationalStateRaw;
   /** Collateral = 0, Isolated = 1 */
   riskTier: RiskTierRaw;

@@ -47,7 +47,7 @@ use marginfi_type_crate::{
         REBALANCE_FLAT_FEE_USD, REBALANCE_ORDER_SEED, REBALANCE_RECORD_SEED,
     },
     types::{
-        BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup, OnRampTransition,
+        BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup,
         OraclePriceType, RebalanceOrder, RebalanceRecord, WrappedI80F48,
         ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ORDER_BLOCKING_FLAGS,
     },
@@ -59,10 +59,8 @@ fn value_of_native<'info>(
     bank: &Bank,
     oracle_ais: &'info [AccountInfo<'info>],
     clock: &Clock,
-    on_ramp_transition: OnRampTransition,
 ) -> MarginfiResult<I80F48> {
-    let adapter =
-        OraclePriceFeedAdapter::try_from_bank(bank, oracle_ais, clock, on_ramp_transition)?;
+    let adapter = OraclePriceFeedAdapter::try_from_bank(bank, oracle_ais, clock)?;
     let price = adapter.get_price_of_type(
         OraclePriceType::RealTime,
         None,
@@ -79,14 +77,13 @@ fn bank_asset_value<'info>(
     bank: &Bank,
     oracle_ais: &'info [AccountInfo<'info>],
     clock: &Clock,
-    on_ramp_transition: OnRampTransition,
 ) -> MarginfiResult<I80F48> {
     let balance = match account.lending_account.get_balance(bank_key) {
         Some(b) => b,
         None => return Ok(I80F48::ZERO),
     };
     let amount = bank.get_asset_amount(balance.asset_shares.into())?;
-    value_of_native(amount, bank, oracle_ais, clock, on_ramp_transition)
+    value_of_native(amount, bank, oracle_ais, clock)
 }
 
 pub fn place_rebalance_order(
@@ -418,7 +415,6 @@ pub fn start_rebalance<'info>(ctx: Context<'info, StartRebalance<'info>>) -> Mar
             MarginfiError::RebalanceNotImproving
         );
 
-        let on_ramp_transition = ctx.accounts.group.load()?.on_ramp_transition();
         let account = ctx.accounts.marginfi_account.load()?;
         let pre_src_value = bank_asset_value(
             &account,
@@ -426,7 +422,6 @@ pub fn start_rebalance<'info>(ctx: Context<'info, StartRebalance<'info>>) -> Mar
             &src_bank,
             src_oracle,
             &clock,
-            on_ramp_transition,
         )?;
         let pre_dst_value = bank_asset_value(
             &account,
@@ -434,7 +429,6 @@ pub fn start_rebalance<'info>(ctx: Context<'info, StartRebalance<'info>>) -> Mar
             &dst_bank,
             dst_oracle,
             &clock,
-            on_ramp_transition,
         )?;
 
         let mut record = ctx.accounts.rebalance_record.load_init()?;
@@ -562,7 +556,6 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         let dst_post = rate_of(&dst_bank, dst_oracle, dst_tr, &clock)?;
         check!(dst_post >= src_post, MarginfiError::RebalanceOvershoot);
 
-        let on_ramp_transition = ctx.accounts.group.load()?.on_ramp_transition();
         let account = ctx.accounts.marginfi_account.load()?;
         let post_src_value = bank_asset_value(
             &account,
@@ -570,7 +563,6 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
             &src_bank,
             src_oracle,
             &clock,
-            on_ramp_transition,
         )?;
         let post_dst_value = bank_asset_value(
             &account,
@@ -578,7 +570,6 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
             &dst_bank,
             dst_oracle,
             &clock,
-            on_ramp_transition,
         )?;
 
         let order_amount = ctx.accounts.rebalance_order.load()?.amount;
@@ -605,7 +596,6 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
                 &src_bank,
                 src_oracle,
                 &clock,
-                on_ramp_transition,
             )?;
             let src_moved = pre_src_value
                 .checked_sub(post_src_value)
@@ -651,7 +641,6 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
             &account,
             health_obs,
             &mut Some(&mut health_cache),
-            on_ramp_transition,
         )?;
         health_cache.program_version = PROGRAM_VERSION;
         health_cache.set_engine_ok(true);

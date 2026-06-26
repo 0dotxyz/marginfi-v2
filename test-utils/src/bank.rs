@@ -17,9 +17,7 @@ use marginfi::{
     },
     utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
 };
-use marginfi_type_crate::types::{
-    Bank, BankConfigOpt, OnRampTransition, OraclePriceType, OracleSetup,
-};
+use marginfi_type_crate::types::{Bank, BankConfigOpt, OraclePriceType, OracleSetup};
 use solana_commitment_config::CommitmentLevel;
 use solana_program_test::BanksClientError;
 use solana_program_test::ProgramTestContext;
@@ -61,16 +59,12 @@ impl BankFixture {
         find_bank_vault_authority_pda(&self.key, vault_type)
     }
 
-    pub async fn get_price(&self, on_ramp_transition: OnRampTransition) -> f64 {
+    pub async fn get_price(&self) -> f64 {
         let bank = self.load().await;
         let oracle_adapter = match bank.config.oracle_setup {
-            OracleSetup::Fixed => OraclePriceFeedAdapter::try_from_bank(
-                &bank,
-                &[],
-                &Clock::default(),
-                on_ramp_transition,
-            )
-            .unwrap(),
+            OracleSetup::Fixed => {
+                OraclePriceFeedAdapter::try_from_bank(&bank, &[], &Clock::default()).unwrap()
+            }
             _ => {
                 let oracle_key = bank.config.oracle_keys[0];
                 let mut oracle_account = self
@@ -83,13 +77,7 @@ impl BankFixture {
                     .unwrap();
 
                 let ai = (&oracle_key, &mut oracle_account).into_account_info();
-                OraclePriceFeedAdapter::try_from_bank(
-                    &bank,
-                    &[ai],
-                    &Clock::default(),
-                    on_ramp_transition,
-                )
-                .unwrap()
+                OraclePriceFeedAdapter::try_from_bank(&bank, &[ai], &Clock::default()).unwrap()
             }
         };
 

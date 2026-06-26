@@ -42,7 +42,7 @@ Flags available (one byte per flag, to enable `memcmp`-filtering):
 - has_ever_been_liquidated/deleveraged, has_been_bankrupted - account has ever been subject to
   liquidation, deleverage, or bankruptcy
 - has_isolated/staked/kamino/drift/juplend - has a position in the given asset/risk category
-- was_liquidatable/underwater - at least health pulse, not canonical if health has not recently been pulsed!
+- was_liquidatable/underwater - at last health pulse, not canonical if health has not recently been pulsed!
 - was_active_30d/60d - idle for given time. Combined with is_empty, this flag indicates an account
   can be closed permissionlessly
 - has_trivial_balance - Worth less than $1 in Equity terms, but more than $0
@@ -146,6 +146,14 @@ Option<u8>`** — bit 0 (`0x01`) = withdraw all, bit 1 (`0x02`) = refresh reserv
 
 - `lending_pool_emissions_deposit(amount)` (permissionless) — deposit same-bank emissions directly
   into the liquidity vault, raising `asset_share_value`.
+
+### Drift
+
+- `drift_claim_bad_debt(amount, proof)` (permissionless) — claims a Drift bad-debt portal
+  allocation for a Drift bank. The bank's `liquidity_vault_authority` PDA must be the claimant in
+  Drift's merkle tree. The instruction creates the claimant/global-fee ATAs idempotently, prefunds
+  the Drift distributor `ClaimStatus` rent from the payer, claims through Drift's merkle distributor,
+  and sweeps the claimed tokens to the global fee wallet's canonical ATA.
 
 ### Fee state
 

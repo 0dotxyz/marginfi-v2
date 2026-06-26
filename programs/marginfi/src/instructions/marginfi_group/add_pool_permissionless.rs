@@ -17,6 +17,7 @@ use marginfi_type_crate::{
         ASSET_TAG_STAKED, BANK_SEED_KNOWN, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED,
         INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, IS_T22,
         LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED, PYTH_PUSH_MIGRATED_DEPRECATED,
+        STAKED_ORACLE_FLAGS,
     },
     types::{
         make_points, Bank, BankConfigCompact, BankOperationalState, InterestRateConfig,
@@ -107,6 +108,7 @@ pub fn lending_pool_add_bank_permissionless(
         bank_seed,
     );
     bank.flags |= BANK_SEED_KNOWN;
+    bank.flags |= settings.flags & STAKED_ORACLE_FLAGS;
     if bank_mint.to_account_info().owner == &anchor_spl::token_2022::ID {
         bank.flags |= IS_T22;
     }
