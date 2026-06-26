@@ -50,7 +50,6 @@ export const accountInit = (
 
 export type AccountCloseArgs = {
   marginfiAccount: PublicKey;
-  authority: PublicKey;
   feePayer: PublicKey;
 };
 
@@ -62,7 +61,6 @@ export const accountCloseIx = (
     .marginfiAccountClose()
     .accounts({
       marginfiAccount: args.marginfiAccount,
-      authority: args.authority,
       feePayer: args.feePayer,
     })
     .instruction();
@@ -563,7 +561,6 @@ export type HealthPulseArgs = {
 };
 
 export type PulseBankPriceArgs = {
-  group: PublicKey;
   bank: PublicKey;
   remaining: PublicKey[];
 };

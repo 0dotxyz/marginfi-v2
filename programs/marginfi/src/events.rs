@@ -120,6 +120,20 @@ pub struct LendingPoolBankHandleBankruptcyEvent {
 }
 
 #[event]
+pub struct DriftClaimBadDebtEvent {
+    pub header: GroupEventHeader,
+    pub bank: Pubkey,
+    pub claim_mint: Pubkey,
+    pub distributor: Pubkey,
+    pub claim_status: Pubkey,
+    pub liquidity_vault_authority: Pubkey,
+    pub global_fee_wallet: Pubkey,
+    pub requested_amount: u64,
+    pub received_amount: u64,
+    pub swept_amount: u64,
+}
+
+#[event]
 pub struct LendingPoolSuperAdminWithdrawEvent {
     pub header: GroupEventHeader,
     pub bank: Pubkey,

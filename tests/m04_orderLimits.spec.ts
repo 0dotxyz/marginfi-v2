@@ -220,6 +220,31 @@ SCENARIOS.forEach(
           return versionedTx;
         };
 
+        const buildHealthPulseTx = async (
+          signer: MockUser,
+          remaining: PublicKey[],
+          refreshIxs: TransactionInstruction[] = [],
+        ): Promise<VersionedTransaction> => {
+          const pulseIx = await healthPulse(signer.mrgnBankrunProgram, {
+            marginfiAccount: userAccount,
+            remaining,
+          });
+
+          const blockhash = await getBankrunBlockhash(bankrunContext);
+          const messageV0 = new TransactionMessage({
+            payerKey: signer.wallet.publicKey,
+            recentBlockhash: blockhash,
+            instructions: [
+              ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+              ...refreshIxs,
+              pulseIx,
+            ],
+          }).compileToV0Message([lutAccount]);
+
+          const versionedTx = new VersionedTransaction(messageV0);
+          versionedTx.sign([signer.wallet]);
+          return versionedTx;
+        };
         const buildIntegrationRefreshIxs = async (): Promise<
           TransactionInstruction[]
         > => {
@@ -759,10 +784,26 @@ SCENARIOS.forEach(
             remaining: remainingAccountsPostRepay,
           });
 
-          lutAccount = await createLookupTableForInstructions(
-            user.wallet,
-            [startIx, repayInstruction, withdrawInstruction, endIx, ...preIxs],
-          );
+          const pulseAllIx = await healthPulse(user.mrgnBankrunProgram, {
+            marginfiAccount: userAccount,
+            remaining: remainingAccounts,
+          });
+
+          const pulsePostRepayIx = await healthPulse(user.mrgnBankrunProgram, {
+            marginfiAccount: userAccount,
+            remaining: remainingAccountsPostRepay,
+          });
+
+          lutAccount = await createLookupTableForInstructions(user.wallet, [
+            startIx,
+            repayInstruction,
+            withdrawInstruction,
+            endIx,
+            ...preIxs,
+
+            pulseAllIx,
+            pulsePostRepayIx,
+          ]);
 
           // low price -> should fail trigger
           oracles.tokenAPrice = 10;

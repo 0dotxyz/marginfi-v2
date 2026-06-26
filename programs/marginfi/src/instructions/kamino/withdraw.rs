@@ -99,10 +99,10 @@ pub fn kamino_withdraw<'info>(
     let bank_mint = ctx.accounts.bank.load()?.mint;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let clock = Clock::get()?;
+    let group = ctx.accounts.group.load()?;
 
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
-        let group = ctx.accounts.group.load()?;
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
 
         let in_receivership_or_order_execution =

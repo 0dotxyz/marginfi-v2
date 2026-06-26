@@ -5,10 +5,7 @@ use marginfi_type_crate::types::{
     BankConfig, EmodeSettings, RequirementType, EMODE_ON, EMODE_TAG_EMPTY,
 };
 
-use crate::{
-    check, errors::MarginfiError, math_error, prelude::MarginfiResult,
-    state::bank_config::BankConfigImpl,
-};
+use crate::{check, errors::MarginfiError, math_error, prelude::MarginfiResult};
 use marginfi_type_crate::types::u32_to_basis;
 
 /// Default Maximum allowed theoretical leverage for emode configurations (initial).

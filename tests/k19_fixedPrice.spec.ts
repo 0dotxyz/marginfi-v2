@@ -267,7 +267,6 @@ describe("kx: Fixed Kamino price bank", () => {
     const user = users[3];
     const tx = new Transaction().add(
       await pulseBankPrice(user.mrgnBankrunProgram, {
-        group: kaminoGroup.publicKey,
         bank: fixedKaminoBank,
         remaining: [tokenAReserve],
       }),

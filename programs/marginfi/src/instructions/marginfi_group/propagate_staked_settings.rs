@@ -5,7 +5,7 @@ use crate::state::bank_config::BankConfigImpl;
 use crate::MarginfiError;
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
-    constants::{ASSET_TAG_STAKED, BANK_SAME_ASSET_EMODE_ELIGIBLE},
+    constants::{ASSET_TAG_STAKED, BANK_SAME_ASSET_EMODE_ELIGIBLE, STAKED_ORACLE_FLAGS},
     types::{Bank, MarginfiGroup, StakedSettings},
 };
 
@@ -28,6 +28,8 @@ pub fn propagate_staked_settings(ctx: Context<PropagateStakedSettings>) -> Resul
     bank.config.total_asset_value_init_limit = settings.total_asset_value_init_limit;
     bank.config.oracle_max_age = settings.oracle_max_age;
     bank.config.risk_tier = settings.risk_tier;
+    bank.flags &= !STAKED_ORACLE_FLAGS;
+    bank.flags |= settings.flags & STAKED_ORACLE_FLAGS;
 
     // Only validate the oracle info if it has changed
     if oracle_before != oracle_after {

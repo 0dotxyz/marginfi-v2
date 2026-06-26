@@ -76,10 +76,10 @@ pub fn juplend_withdraw<'info>(
     // - call `bank_account.withdraw(shares_to_burn)`
     // - CPI JupLend `withdraw` for the requested underlying `amount`
     let clock = Clock::get()?;
+    let group = ctx.accounts.group.load()?;
     let (token_amount, shares_to_burn, share_amount) = {
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;
-        let group = ctx.accounts.group.load()?;
         let lending = ctx.accounts.integration_acc_1.load()?;
 
         authority_bump = bank.liquidity_vault_authority_bump;

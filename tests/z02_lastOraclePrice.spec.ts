@@ -169,7 +169,6 @@ describe("Bank cache last oracle price", () => {
     {
       const tx = new Transaction().add(
         await pulseBankPrice(user.mrgnBankrunProgram, {
-          group: throwawayGroupPk,
           bank: banks[1],
           remaining: [oracles.pythPullLst.publicKey],
         })
