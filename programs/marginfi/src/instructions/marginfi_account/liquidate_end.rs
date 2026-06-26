@@ -17,8 +17,8 @@ use marginfi_type_crate::{
     constants::FEE_STATE_SEED,
     types::{
         FeeState, HealthCache, HealthPriceMode, LiquidationRecord, MarginfiAccount, MarginfiGroup,
-        OnRampTransition, RequirementType, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+        RequirementType, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE, ACCOUNT_IN_FLASHLOAN,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -31,8 +31,6 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     let fee_state = ctx.accounts.fee_state.load()?;
-    let group = ctx.accounts.group.load()?;
-    let on_ramp_transition = group.on_ramp_transition();
 
     validate_not_cpi_by_stack_height()?;
 
@@ -47,7 +45,6 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
         &mut liq_record,
         ctx.remaining_accounts,
         ignore_healthy,
-        on_ramp_transition,
     )?;
 
     // Liquidator's allowed fee cannot go lower than the bonus fee minimum
@@ -90,8 +87,6 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
 pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
-    let group = ctx.accounts.group.load()?;
-    let on_ramp_transition = group.on_ramp_transition();
 
     validate_not_cpi_by_stack_height()?;
 
@@ -101,7 +96,6 @@ pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> Margi
         &mut liq_record,
         ctx.remaining_accounts,
         true,
-        on_ramp_transition,
     )?;
 
     emit!(DeleverageEvent {
@@ -120,7 +114,6 @@ pub fn end_receivership<'info>(
     liq_record: &mut LiquidationRecord,
     remaining_ais: &'info [AccountInfo<'info>],
     ignore_healthy: bool,
-    on_ramp_transition: OnRampTransition,
 ) -> Result<(I80F48, f64, I80F48, f64)> {
     let pre_assets: I80F48 = liq_record.cache.asset_value_maint.into();
     let pre_liabs: I80F48 = liq_record.cache.liability_value_maint.into();
@@ -137,7 +130,6 @@ pub fn end_receivership<'info>(
             &mut Some(&mut post_hc),
             HealthPriceMode::Cached,
             ignore_healthy,
-            on_ramp_transition,
         )?;
     let (post_assets_equity, post_liabilities_equity) = get_health_components(
         marginfi_account,
@@ -145,7 +137,6 @@ pub fn end_receivership<'info>(
         RequirementType::Equity,
         &mut Some(&mut post_hc),
         HealthPriceMode::Cached,
-        on_ramp_transition,
     )?;
 
     clear_liquidation_price_cache_locks(marginfi_account, remaining_ais)?;
@@ -195,7 +186,6 @@ pub struct EndLiquidation<'info> {
     /// Account under liquidation
     #[account(
         mut,
-        has_one = group @ MarginfiError::InvalidGroup,
         has_one = liquidation_record @ MarginfiError::InvalidLiquidationRecord,
         constraint = {
             let acc = marginfi_account.load()?;
@@ -207,8 +197,6 @@ pub struct EndLiquidation<'info> {
         } @MarginfiError::UnexpectedLiquidationState
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
-
-    pub group: AccountLoader<'info, MarginfiGroup>,
 
     /// The associated liquidation record PDA for the given `marginfi_account`
     #[account(
