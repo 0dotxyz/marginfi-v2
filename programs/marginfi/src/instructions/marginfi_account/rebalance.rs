@@ -47,9 +47,9 @@ use marginfi_type_crate::{
         REBALANCE_FLAT_FEE_USD, REBALANCE_ORDER_SEED, REBALANCE_RECORD_SEED,
     },
     types::{
-        BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup,
-        OraclePriceType, RebalanceOrder, RebalanceRecord, WrappedI80F48,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ORDER_BLOCKING_FLAGS,
+        BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup, OraclePriceType,
+        RebalanceOrder, RebalanceRecord, WrappedI80F48, ACCOUNT_IN_ORDER_EXECUTION,
+        ACCOUNT_IN_REBALANCE, ORDER_BLOCKING_FLAGS,
     },
 };
 
@@ -416,20 +416,8 @@ pub fn start_rebalance<'info>(ctx: Context<'info, StartRebalance<'info>>) -> Mar
         );
 
         let account = ctx.accounts.marginfi_account.load()?;
-        let pre_src_value = bank_asset_value(
-            &account,
-            &src_key,
-            &src_bank,
-            src_oracle,
-            &clock,
-        )?;
-        let pre_dst_value = bank_asset_value(
-            &account,
-            &dst_key,
-            &dst_bank,
-            dst_oracle,
-            &clock,
-        )?;
+        let pre_src_value = bank_asset_value(&account, &src_key, &src_bank, src_oracle, &clock)?;
+        let pre_dst_value = bank_asset_value(&account, &dst_key, &dst_bank, dst_oracle, &clock)?;
 
         let mut record = ctx.accounts.rebalance_record.load_init()?;
         record.initialize(
@@ -557,20 +545,8 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         check!(dst_post >= src_post, MarginfiError::RebalanceOvershoot);
 
         let account = ctx.accounts.marginfi_account.load()?;
-        let post_src_value = bank_asset_value(
-            &account,
-            &src_key,
-            &src_bank,
-            src_oracle,
-            &clock,
-        )?;
-        let post_dst_value = bank_asset_value(
-            &account,
-            &dst_key,
-            &dst_bank,
-            dst_oracle,
-            &clock,
-        )?;
+        let post_src_value = bank_asset_value(&account, &src_key, &src_bank, src_oracle, &clock)?;
+        let post_dst_value = bank_asset_value(&account, &dst_key, &dst_bank, dst_oracle, &clock)?;
 
         let order_amount = ctx.accounts.rebalance_order.load()?.amount;
         if order_amount == 0 {
@@ -637,11 +613,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         // applies: the account need only stay non-liquidatable, not pass the stricter initial bar. A
         // same-mint, value-conserving move can still shift health via venue weights/oracles, emode,
         // risk tiers, and the flat-fee skim, so a full health check is needed
-        check_account_maint_health(
-            &account,
-            health_obs,
-            &mut Some(&mut health_cache),
-        )?;
+        check_account_maint_health(&account, health_obs, &mut Some(&mut health_cache))?;
         health_cache.program_version = PROGRAM_VERSION;
         health_cache.set_engine_ok(true);
 

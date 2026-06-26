@@ -17,8 +17,8 @@ use marginfi_type_crate::{
     types::{
         reconcile_emode_configs, Balance, BalanceSide, Bank, BankOperationalState, EmodeConfig,
         HealthCache, HealthPriceMode, LendingAccount, LiquidationPriceCache, MarginfiAccount,
-        OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias,
-        RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
+        OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias, RequirementType,
+        RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
         ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
