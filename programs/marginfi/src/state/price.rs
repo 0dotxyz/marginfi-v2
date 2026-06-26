@@ -277,15 +277,8 @@ impl OraclePriceFeedAdapter {
         bank: &Bank,
         ais: &'info [AccountInfo<'info>],
         clock: &Clock,
-        on_ramp_transition: OnRampTransition,
     ) -> MarginfiResult<Self> {
-        Self::try_from_bank_with_max_age(
-            bank,
-            ais,
-            clock,
-            bank.config.get_oracle_max_age(),
-            on_ramp_transition,
-        )
+        Self::try_from_bank_with_max_age(bank, ais, clock, bank.config.get_oracle_max_age())
     }
 
     pub fn try_from_bank_with_max_age<'info>(
@@ -293,16 +286,8 @@ impl OraclePriceFeedAdapter {
         ais: &'info [AccountInfo<'info>],
         clock: &Clock,
         max_age: u64,
-        on_ramp_transition: OnRampTransition,
     ) -> MarginfiResult<Self> {
-        let context = Self::load_oracle_context_with_max_age(
-            bank,
-            ais,
-            clock,
-            max_age,
-            None,
-            on_ramp_transition,
-        )?;
+        let context = Self::load_oracle_context_with_max_age(bank, ais, clock, max_age, None)?;
         Ok(context.adjusted_price_feed)
     }
 
@@ -312,7 +297,6 @@ impl OraclePriceFeedAdapter {
         clock: &Clock,
         max_age: u64,
         cache_price_type: Option<OraclePriceType>,
-        on_ramp_transition: OnRampTransition,
     ) -> MarginfiResult<OracleLoadContext> {
         let bank_config = &bank.config;
         match bank_config.oracle_setup {
@@ -374,7 +358,7 @@ impl OraclePriceFeedAdapter {
                 let lst_supply = lst_mint.supply;
                 check!(lst_supply > 0, MarginfiError::ZeroSupplyInStakePool);
 
-                let sol_pool_adjusted_balance = match on_ramp_transition {
+                let sol_pool_adjusted_balance = match bank.on_ramp_transition() {
                     OnRampTransition::OnRampEnabled => {
                         let expected_onramp = expected_staked_onramp(bank)?;
                         if ais[3].key != &expected_onramp {
@@ -964,7 +948,6 @@ impl OraclePriceFeedAdapter {
         ais: &'info [AccountInfo<'info>],
         clock: &Clock,
         oracle_price_type: OraclePriceType,
-        on_ramp_transition: OnRampTransition,
     ) -> MarginfiResult<(OraclePriceWithConfidence, OraclePriceWithMultiplier)> {
         let max_age = bank.config.get_oracle_max_age();
         let max_conf = bank.config.oracle_max_confidence;
@@ -974,7 +957,6 @@ impl OraclePriceFeedAdapter {
             clock,
             max_age,
             Some(oracle_price_type),
-            on_ramp_transition,
         )?;
         let adjusted = context
             .adjusted_price_feed
@@ -993,14 +975,12 @@ impl OraclePriceFeedAdapter {
         bank: &Bank,
         ais: &'info [AccountInfo<'info>],
         clock: &Clock,
-        on_ramp_transition: OnRampTransition,
     ) -> MarginfiResult<OraclePriceWithMultiplier> {
         let (_, cache_price) = Self::get_price_and_confidence_and_cache_of_type(
             bank,
             ais,
             clock,
             OraclePriceType::RealTime,
-            on_ramp_transition,
         )?;
         Ok(cache_price)
     }

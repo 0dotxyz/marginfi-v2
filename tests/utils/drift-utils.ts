@@ -18,6 +18,7 @@ import {
   DRIFT_ORACLE_RECEIVER_PROGRAM_ID,
   I80F48_ONE,
   ORACLE_CONF_INTERVAL,
+  OperationalStateRaw,
 } from "../utils/types";
 import { BanksClient, ProgramTestContext } from "./litesvm";
 import {
@@ -623,7 +624,7 @@ export interface DriftConfigCompact {
   assetWeightMaint: WrappedI80F48;
   depositLimit: BN;
   oracleSetup: { driftPythPull: {} } | { driftSwitchboardPull: {} };
-  operationalState: { operational: {} } | { paused: {} } | { reduceOnly: {} };
+  operationalState: OperationalStateRaw;
   riskTier: { collateral: {} } | { isolated: {} };
   configFlags: number;
   totalAssetValueInitLimit: BN;

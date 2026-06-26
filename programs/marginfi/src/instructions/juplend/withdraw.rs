@@ -77,7 +77,6 @@ pub fn juplend_withdraw<'info>(
     // - CPI JupLend `withdraw` for the requested underlying `amount`
     let clock = Clock::get()?;
     let group = ctx.accounts.group.load()?;
-    let on_ramp_transition = group.on_ramp_transition();
     let (token_amount, shares_to_burn, share_amount) = {
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;
@@ -97,7 +96,6 @@ pub fn juplend_withdraw<'info>(
                 &bank,
                 &clock,
                 ctx.remaining_accounts,
-                on_ramp_transition,
             )?;
 
             // Validate price is non-zero during liquidation/deleverage to prevent exploits with stale oracles
@@ -293,7 +291,6 @@ pub fn juplend_withdraw<'info>(
                 &marginfi_account,
                 ctx.remaining_accounts,
                 &mut Some(&mut health_cache),
-                on_ramp_transition,
             )?;
             health_cache.program_version = PROGRAM_VERSION;
 
@@ -304,7 +301,6 @@ pub fn juplend_withdraw<'info>(
                 &bank,
                 &clock,
                 ctx.remaining_accounts,
-                on_ramp_transition,
             )
             .ok();
 
@@ -321,7 +317,6 @@ pub fn juplend_withdraw<'info>(
                 &bank,
                 &clock,
                 ctx.remaining_accounts,
-                on_ramp_transition,
             )
             .ok();
             bank.update_cache_price(price_for_cache)?;

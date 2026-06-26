@@ -4,7 +4,10 @@ use {
     bytemuck::{Pod, Zeroable},
 };
 
-use crate::{assert_struct_align, assert_struct_size, constants::discriminators};
+use crate::{
+    assert_struct_align, assert_struct_size,
+    constants::{discriminators, STAKED_ORACLE_DISABLED, STAKED_ORACLE_PRICE_USES_ONRAMP},
+};
 
 use super::{RiskTier, WrappedI80F48};
 use fixed_macro::types::I80F48;
@@ -43,15 +46,29 @@ pub struct StakedSettings {
     pub risk_tier: RiskTier,
     _pad0: [u8; 5],
 
+    /// Desired bitmask for staked-bank transition flags. These bits are copied to `Bank.flags`
+    /// when staked settings are propagated or when a new staked bank is created.
+    /// * Bit 9 (512): `STAKED_ORACLE_DISABLED` — staked oracle pricing is temporarily disabled.
+    /// * Bit 10 (1024): `STAKED_ORACLE_PRICE_USES_ONRAMP` — staked oracle pricing includes the SPL
+    ///   single-pool on-ramp account in NAV.
+    pub flags: u64,
+
     /// The following values are irrelevant because staked collateral positions do not support
     /// borrowing.
     // * interest_config,
     // * liability_weight_init
     // * liability_weight_maint
     // * borrow_limit
-    _reserved0: [u8; 8],
     _reserved1: [u8; 32],
     _reserved2: [u8; 64],
+}
+
+// To be removed once SVSP update is rolled out (likely in 1.10)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OnRampTransition {
+    PreTransition,
+    StakeOraclesDisabled,
+    OnRampEnabled,
 }
 
 impl StakedSettings {
@@ -83,6 +100,17 @@ impl StakedSettings {
             ..Default::default()
         }
     }
+
+    // To be removed once SVSP update is rolled out (likely in 1.10)
+    pub fn on_ramp_transition(&self) -> OnRampTransition {
+        if self.flags & STAKED_ORACLE_PRICE_USES_ONRAMP != 0 {
+            OnRampTransition::OnRampEnabled
+        } else if self.flags & STAKED_ORACLE_DISABLED != 0 {
+            OnRampTransition::StakeOraclesDisabled
+        } else {
+            OnRampTransition::PreTransition
+        }
+    }
 }
 
 impl Default for StakedSettings {
@@ -98,7 +126,7 @@ impl Default for StakedSettings {
             oracle_max_age: 10,
             risk_tier: RiskTier::Collateral,
             _pad0: [0; 5],
-            _reserved0: [0; 8],
+            flags: 0,
             _reserved1: [0; 32],
             _reserved2: [0; 64],
         }

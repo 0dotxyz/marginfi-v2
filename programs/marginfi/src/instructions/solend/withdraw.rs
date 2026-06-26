@@ -80,7 +80,6 @@ pub fn solend_withdraw<'info>(
     let bank_key = ctx.accounts.bank.key();
     let bank_mint = ctx.accounts.bank.load()?.mint;
     let group = ctx.accounts.group.load()?;
-    let on_ramp_transition = group.on_ramp_transition();
     let (collateral_amount, share_amount) = {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
@@ -98,7 +97,6 @@ pub fn solend_withdraw<'info>(
                 &bank,
                 &clock,
                 ctx.remaining_accounts,
-                on_ramp_transition,
             )?;
 
             // Validate price is non-zero during liquidation/deleverage to prevent exploits with stale oracles
@@ -251,7 +249,6 @@ pub fn solend_withdraw<'info>(
                 &marginfi_account,
                 ctx.remaining_accounts,
                 &mut Some(&mut health_cache),
-                on_ramp_transition,
             )?;
             health_cache.program_version = PROGRAM_VERSION;
 
@@ -263,7 +260,6 @@ pub fn solend_withdraw<'info>(
                 &bank,
                 &clock,
                 ctx.remaining_accounts,
-                on_ramp_transition,
             )
             .ok();
 
@@ -281,7 +277,6 @@ pub fn solend_withdraw<'info>(
                 &bank,
                 &clock,
                 ctx.remaining_accounts,
-                on_ramp_transition,
             )
             .ok();
 

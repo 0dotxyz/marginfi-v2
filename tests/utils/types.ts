@@ -46,6 +46,8 @@ export const TOKENLESS_REPAYMENTS_ALLOWED = 32;
 export const TOKENLESS_REPAYMENTS_COMPLETE = 64;
 export const IS_T22_FLAG = 128;
 export const BANK_SEED_KNOWN_FLAG = 256;
+export const STAKED_ORACLE_DISABLED = 1 << 9;
+export const STAKED_ORACLE_PRICE_USES_ONRAMP = 1 << 10;
 
 export const ASSET_TAG_DEFAULT = 0;
 export const ASSET_TAG_SOL = 1;
@@ -378,7 +380,10 @@ export type InterestRateConfigOpt1_6 = {
 export type OperationalStateRaw =
   | { paused: {} }
   | { operational: {} }
-  | { reduceOnly: {} };
+  | { reduceOnly: {} }
+  | { killedByBankruptcy: {} }
+  | { uninitialized: {} }
+  | { reduceOnlyWithBorrowingPower: {} };
 
 export type BankConfig = {
   assetWeightInit: WrappedI80F48;
@@ -390,7 +395,7 @@ export type BankConfig = {
   depositLimit: BN;
   interestRateConfig: InterestRateConfig1_6;
 
-  /** Paused = 0, Operational = 1, ReduceOnly = 2 */
+  /** Paused = 0, Operational = 1, ReduceOnly = 2, ... */
   operationalState: OperationalStateRaw;
 
   borrowLimit: BN;
@@ -418,11 +423,7 @@ export type BankConfigOptRaw = {
   totalAssetValueInitLimit: BN | null;
 
   interestRateConfig: InterestRateConfigOpt1_6 | null;
-  operationalState:
-    | { paused: {} }
-    | { operational: {} }
-    | { reduceOnly: {} }
-    | null;
+  operationalState: OperationalStateRaw | null;
 
   oracleMaxConfidence: number | null;
   oracleMaxAge: number | null;

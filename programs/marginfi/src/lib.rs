@@ -924,6 +924,17 @@ pub mod marginfi {
         drift::drift_harvest_reward(ctx)
     }
 
+    /// (permissionless) Claim a Drift bad-debt portal allocation for a Drift bank.
+    /// The merkle claimant is the bank's liquidity_vault_authority PDA, and claimed tokens are
+    /// swept to the global fee wallet's canonical ATA.
+    pub fn drift_claim_bad_debt<'info>(
+        ctx: Context<'info, DriftClaimBadDebt<'info>>,
+        amount: u64,
+        proof: Vec<[u8; 32]>,
+    ) -> MarginfiResult {
+        drift::drift_claim_bad_debt(ctx, amount, proof)
+    }
+
     // Solend integration instructions
 
     /// (admin) Add a Solend bank to the marginfi group
