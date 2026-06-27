@@ -972,7 +972,6 @@ impl FuzzTest {
         )
         .accounts(types::marginfi::StartLiquidationInstructionAccounts::new(
             liquidatee_marginfi_account,
-            self.marginfi_group,
             record,
             self.marginfi_group,
             liquidation_receiver,
@@ -985,7 +984,6 @@ impl FuzzTest {
         )
         .accounts(types::marginfi::EndLiquidationInstructionAccounts::new(
             liquidatee_marginfi_account,
-            self.marginfi_group,
             record,
             self.marginfi_group,
             liquidation_receiver,
