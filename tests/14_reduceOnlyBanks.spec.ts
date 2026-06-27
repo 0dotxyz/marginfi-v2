@@ -125,6 +125,149 @@ describe("Reduce-Only Bank Tests", () => {
     }
   });
 
+  it("(user 0) ReduceOnlyWithBorrowingPower collateral counts for new loans", async () => {
+    const user = users[0];
+    const userAccountKeypair = Keypair.generate();
+    const userAccount = userAccountKeypair.publicKey;
+
+    await user.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await accountInit(program, {
+          marginfiGroup: marginfiGroup.publicKey,
+          marginfiAccount: userAccount,
+          authority: user.wallet.publicKey,
+          feePayer: user.wallet.publicKey,
+        }),
+      ),
+      [userAccountKeypair],
+    );
+
+    const depositAmountTokenA = 0.5;
+    const depositAmountTokenA_native = new BN(
+      depositAmountTokenA * 10 ** ecosystem.tokenADecimals,
+    );
+    const borrowAmountUsdc = 1;
+    const borrowAmountUsdc_native = new BN(
+      borrowAmountUsdc * 10 ** ecosystem.usdcDecimals,
+    );
+
+    try {
+      await user.mrgnProgram.provider.sendAndConfirm!(
+        new Transaction().add(
+          await depositIx(user.mrgnProgram, {
+            marginfiAccount: userAccount,
+            bank: bankKeypairA.publicKey,
+            tokenAccount: user.tokenAAccount,
+            amount: depositAmountTokenA_native,
+            depositUpToLimit: false,
+          }),
+        ),
+      );
+
+      await user.mrgnProgram.provider.sendAndConfirm!(
+        new Transaction().add(
+          await healthPulse(user.mrgnProgram, {
+            marginfiAccount: userAccount,
+            remaining: composeRemainingAccounts([
+              [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+            ]),
+          }),
+        ),
+      );
+
+      const accBefore = await program.account.marginfiAccount.fetch(
+        userAccount,
+      );
+      const assetValueBefore = wrappedI80F48toBigNumber(
+        accBefore.healthCache.assetValue,
+      ).toNumber();
+
+      await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
+        new Transaction().add(
+          await configureBank(groupAdmin.mrgnProgram, {
+            bank: bankKeypairA.publicKey,
+            bankConfigOpt: {
+              ...defaultBankConfigOptRaw(),
+              operationalState: {
+                reduceOnlyWithBorrowingPower: undefined,
+              },
+            },
+          }),
+        ),
+      );
+
+      await user.mrgnProgram.provider.sendAndConfirm!(
+        new Transaction().add(
+          dummyIx(user.wallet.publicKey, users[1].wallet.publicKey),
+          await healthPulse(user.mrgnProgram, {
+            marginfiAccount: userAccount,
+            remaining: composeRemainingAccounts([
+              [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+            ]),
+          }),
+        ),
+      );
+
+      const accAfter = await program.account.marginfiAccount.fetch(userAccount);
+      const assetValueAfter = wrappedI80F48toBigNumber(
+        accAfter.healthCache.assetValue,
+      ).toNumber();
+
+      assert.equal(
+        assetValueAfter,
+        assetValueBefore,
+        "Initial asset value must not be discounted by this state",
+      );
+
+      await expectFailedTxWithError(
+        async () => {
+          await user.mrgnProgram.provider.sendAndConfirm!(
+            new Transaction().add(
+              await depositIx(user.mrgnProgram, {
+                marginfiAccount: userAccount,
+                bank: bankKeypairA.publicKey,
+                tokenAccount: user.tokenAAccount,
+                amount: new BN(1),
+                depositUpToLimit: false,
+              }),
+            ),
+          );
+        },
+        "BankReduceOnly",
+        6017,
+      );
+
+      await user.mrgnProgram.provider.sendAndConfirm!(
+        new Transaction().add(
+          await borrowIx(user.mrgnProgram, {
+            marginfiAccount: userAccount,
+            bank: bankKeypairUsdc.publicKey,
+            tokenAccount: user.usdcAccount,
+            remaining: composeRemainingAccounts([
+              [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
+              [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
+            ]),
+            amount: borrowAmountUsdc_native,
+          }),
+        ),
+      );
+    } finally {
+      await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
+        new Transaction().add(
+          await configureBank(groupAdmin.mrgnProgram, {
+            bank: bankKeypairA.publicKey,
+            bankConfigOpt: {
+              ...defaultBankConfigOptRaw(),
+              operationalState: {
+                operational: undefined,
+              },
+            },
+          }),
+        ),
+      );
+    }
+  });
+
   it("(user 0) ReduceOnly collateral is worthless for new loans - should fail with RiskEngineInitRejected", async () => {
     const user = users[0];
     const userAccount = user.accounts.get(USER_ACCOUNT);

@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 import { BN } from "@coral-xyz/anchor";
 import { WrappedI80F48, bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
-import { I80F48_ONE } from "./types";
+import { I80F48_ONE, OperationalStateRaw } from "./types";
 import BigNumber from "bignumber.js";
 
 // Solend's canonical null pubkey for oracles
@@ -69,7 +69,7 @@ export interface SolendConfigCompact {
   assetWeightMaint: WrappedI80F48;
   depositLimit: BN;
   oracleSetup: { solendPythPull: {} } | { solendSwitchboardPull: {} };
-  operationalState: { operational: {} } | { paused: {} } | { reduceOnly: {} };
+  operationalState: OperationalStateRaw;
   riskTier: { collateral: {} } | { isolated: {} };
   configFlags: number;
   totalAssetValueInitLimit: BN;

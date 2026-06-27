@@ -117,6 +117,21 @@ pub mod marginfi {
         marginfi_group::lending_pool_backfill_staked_bank_validator_vote_account(ctx)
     }
 
+    /// (admin only) Disable stake pricing, i.e. effectively forbidding all operations involving stake banks.
+    /// To be used during the rollout of the SVSP upgrade.
+    /// To be removed once SVSP update is rolled out (likely in 1.10)
+    pub fn disable_staked_oracles(ctx: Context<DisableStakedOracles>) -> MarginfiResult {
+        marginfi_group::disable_staked_oracles(ctx)
+    }
+
+    /// (admin only) Enable SPL single-pool on-ramp lamports in staked-collateral oracle pricing.
+    /// To be removed once SVSP update is rolled out (likely in 1.10)
+    /// This flips a per-group config flag so that every staked oracle uses the canonical single-pool NAV
+    /// formula.
+    pub fn enable_staked_oracle_onramp(ctx: Context<EnableStakedOracleOnramp>) -> MarginfiResult {
+        marginfi_group::enable_staked_oracle_onramp(ctx)
+    }
+
     /// (admin only) Configure bank parameters. If the bank has `FREEZE_SETTINGS`, only
     /// deposit/borrow limits are updated and all other config changes are silently ignored.
     pub fn lending_pool_configure_bank(
@@ -916,6 +931,17 @@ pub mod marginfi {
         ctx: Context<'info, DriftHarvestReward<'info>>,
     ) -> MarginfiResult {
         drift::drift_harvest_reward(ctx)
+    }
+
+    /// (permissionless) Claim a Drift bad-debt portal allocation for a Drift bank.
+    /// The merkle claimant is the bank's liquidity_vault_authority PDA, and claimed tokens are
+    /// swept to the global fee wallet's canonical ATA.
+    pub fn drift_claim_bad_debt<'info>(
+        ctx: Context<'info, DriftClaimBadDebt<'info>>,
+        amount: u64,
+        proof: Vec<[u8; 32]>,
+    ) -> MarginfiResult {
+        drift::drift_claim_bad_debt(ctx, amount, proof)
     }
 
     // Solend integration instructions

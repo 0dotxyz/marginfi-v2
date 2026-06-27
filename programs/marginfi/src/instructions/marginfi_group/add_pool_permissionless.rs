@@ -3,7 +3,7 @@
 use super::staked_pool_utils::derive_single_pool_keys_from_vote_and_validate_owner;
 use crate::{
     check, check_eq,
-    constants::SPL_SINGLE_POOL_ID,
+    constants::{NATIVE_STAKE_ID, SPL_SINGLE_POOL_ID},
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{bank::BankImpl, bank_config::BankConfigImpl, marginfi_group::MarginfiGroupImpl},
@@ -17,6 +17,7 @@ use marginfi_type_crate::{
         ASSET_TAG_STAKED, BANK_SEED_KNOWN, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED,
         INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, IS_T22,
         LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED, PYTH_PUSH_MIGRATED_DEPRECATED,
+        STAKED_ORACLE_FLAGS,
     },
     types::{
         make_points, Bank, BankConfigCompact, BankOperationalState, InterestRateConfig,
@@ -36,6 +37,7 @@ pub fn lending_pool_add_bank_permissionless(
         bank: bank_loader,
         stake_pool,
         sol_pool,
+        pool_onramp,
         validator_vote_account,
         ..
     } = ctx.accounts;
@@ -106,6 +108,7 @@ pub fn lending_pool_add_bank_permissionless(
         bank_seed,
     );
     bank.flags |= BANK_SEED_KNOWN;
+    bank.flags |= settings.flags & STAKED_ORACLE_FLAGS;
     if bank_mint.to_account_info().owner == &anchor_spl::token_2022::ID {
         bank.flags |= IS_T22;
     }
@@ -128,8 +131,8 @@ pub fn lending_pool_add_bank_permissionless(
     let sol_pool = sol_pool.key();
 
     // Validate the validator vote account by proving it derives this stake pool, and in turn
-    // this mint + SOL stake pool PDA.
-    let (exp_stake_pool, exp_mint, exp_sol_pool) =
+    // this mint + SOL stake pool + on-ramp PDA.
+    let (exp_stake_pool, exp_mint, exp_sol_pool, exp_onramp) =
         derive_single_pool_keys_from_vote_and_validate_owner(
             &ctx.accounts.validator_vote_account.to_account_info(),
         )?;
@@ -144,13 +147,23 @@ pub fn lending_pool_add_bank_permissionless(
         sol_pool,
         MarginfiError::StakePoolValidationFailed
     );
+    check_eq!(
+        exp_onramp,
+        pool_onramp.key(),
+        MarginfiError::StakePoolValidationFailed
+    );
+    check!(
+        pool_onramp.owner == &NATIVE_STAKE_ID,
+        MarginfiError::StakePoolValidationFailed
+    );
 
     // Track the validator vote account for staked-collateral metadata.
     bank.integration_acc_1 = validator_vote_account;
 
-    // The mint (for supply) and stake pool (for sol balance) are recorded for price calculation
+    // The mint, stake pool, and validated on-ramp are recorded for price calculation.
     bank.config.oracle_keys[1] = lst_mint;
     bank.config.oracle_keys[2] = sol_pool;
+    bank.config.oracle_keys[3] = exp_onramp;
     bank.config.validate_oracle_setup(
         ctx.remaining_accounts,
         Some(lst_mint),
@@ -194,6 +207,9 @@ pub struct LendingPoolAddBankPermissionless<'info> {
     /// CHECK: Validated using `stake_pool`
     pub sol_pool: UncheckedAccount<'info>,
 
+    /// CHECK: Validated using `stake_pool` and native stake-program ownership.
+    pub pool_onramp: UncheckedAccount<'info>,
+
     /// CHECK: We validate this is correct backwards, by deriving the PDA of the `bank_mint` using
     /// this key.
     ///
@@ -204,7 +220,7 @@ pub struct LendingPoolAddBankPermissionless<'info> {
     /// Validator vote account for this staked bank.
     ///
     /// CHECK: validated in handler by enforcing vote-account owner and PDA chain:
-    /// vote -> stake_pool -> mint/stake.
+    /// vote -> stake_pool -> mint/stake/on-ramp.
     pub validator_vote_account: UncheckedAccount<'info>,
 
     #[account(
