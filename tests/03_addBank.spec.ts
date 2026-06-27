@@ -64,7 +64,7 @@ const findBankSeed = (
   programId: PublicKey,
   group: PublicKey,
   mint: PublicKey,
-  bank: PublicKey
+  bank: PublicKey,
 ) => {
   const maxSeed = 1_000;
   for (let seed = 0; seed <= maxSeed; seed++) {
@@ -88,7 +88,7 @@ describe("Lending pool add bank (add bank to group)", () => {
     const now = await getBankrunTime(bankrunContext);
 
     const feeAccSolBefore = await program.provider.connection.getBalance(
-      globalFeeWallet
+      globalFeeWallet,
     );
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
@@ -100,9 +100,9 @@ describe("Lending pool add bank (add bank to group)", () => {
           bank: bankKey,
           // globalFeeWallet: globalFeeWallet,
           config: setConfig,
-        })
+        }),
       ),
-      [bankKeypairUsdc]
+      [bankKeypairUsdc],
     );
 
     // Note: you can pack this in the same tx if you use partial accounts. See test below for an
@@ -113,18 +113,18 @@ describe("Lending pool add bank (add bank to group)", () => {
           bank: bankKey,
           type: ORACLE_SETUP_PYTH_PUSH,
           oracle: oracles.usdcOracle.publicKey,
-        })
-      )
+        }),
+      ),
     );
 
     const feeAccSolAfter = await program.provider.connection.getBalance(
-      globalFeeWallet
+      globalFeeWallet,
     );
 
     if (verbose) {
       console.log("*init USDC bank " + bankKey);
       console.log(
-        " Origination fee collected: " + (feeAccSolAfter - feeAccSolBefore)
+        " Origination fee collected: " + (feeAccSolAfter - feeAccSolBefore),
       );
     }
 
@@ -251,7 +251,7 @@ describe("Lending pool add bank (add bank to group)", () => {
     const config_ix = await program.methods
       .lendingPoolConfigureBankOracle(
         ORACLE_SETUP_PYTH_PUSH,
-        oracles.tokenAOracle.publicKey
+        oracles.tokenAOracle.publicKey,
       )
       .accountsPartial({
         group: marginfiGroup.publicKey,
@@ -271,9 +271,9 @@ describe("Lending pool add bank (add bank to group)", () => {
           // globalFeeWallet: globalFeeWallet,
           config: config,
         }),
-        config_ix
+        config_ix,
       ),
-      [bankKeypairA]
+      [bankKeypairA],
     );
 
     if (verbose) {
@@ -305,7 +305,7 @@ describe("Lending pool add bank (add bank to group)", () => {
     const config_ix = await program.methods
       .lendingPoolConfigureBankOracle(
         ORACLE_SETUP_PYTH_PUSH,
-        oracles.wsolOracle.publicKey
+        oracles.wsolOracle.publicKey,
       )
       .accountsPartial({
         group: marginfiGroup.publicKey,
@@ -324,9 +324,9 @@ describe("Lending pool add bank (add bank to group)", () => {
           bank: bankKey,
           config: config,
         }),
-        config_ix
+        config_ix,
       ),
-      [bankKeypairSol]
+      [bankKeypairSol],
     );
 
     if (verbose) {
@@ -342,7 +342,7 @@ describe("Lending pool add bank (add bank to group)", () => {
     const group = new PublicKey("4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8");
 
     let bonkBankKey = new PublicKey(
-      "DeyH7QxWvnbbaVB4zFrf4hoq7Q8z1ZT14co42BGwGtfM"
+      "DeyH7QxWvnbbaVB4zFrf4hoq7Q8z1ZT14co42BGwGtfM",
     );
     let bonkBankData = (
       await program.provider.connection.getAccountInfo(bonkBankKey)
@@ -352,7 +352,7 @@ describe("Lending pool add bank (add bank to group)", () => {
     }
 
     let cloudBankKey = new PublicKey(
-      "4kNXetv8hSv9PzvzPZzEs1CTH6ARRRi2b8h6jk1ad1nP"
+      "4kNXetv8hSv9PzvzPZzEs1CTH6ARRRi2b8h6jk1ad1nP",
     );
     let cloudBankData = (
       await program.provider.connection.getAccountInfo(cloudBankKey)
@@ -368,7 +368,7 @@ describe("Lending pool add bank (add bank to group)", () => {
 
     assertKeysEqual(
       bb.mint,
-      new PublicKey("DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263")
+      new PublicKey("DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"),
     );
     assert.equal(bb.mintDecimals, 5);
     assertKeysEqual(bb.group, group);
@@ -442,7 +442,7 @@ describe("Lending pool add bank (add bank to group)", () => {
 
     assertKeysEqual(
       cb.mint,
-      new PublicKey("CLoUDKc4Ane7HeQcPpE3YHnznRxhMimJ4MyaUqyHFzAu")
+      new PublicKey("CLoUDKc4Ane7HeQcPpE3YHnznRxhMimJ4MyaUqyHFzAu"),
     );
     assert.equal(cb.mintDecimals, 9);
     assertKeysEqual(cb.group, group);
@@ -488,7 +488,7 @@ describe("Lending pool add bank (add bank to group)", () => {
 
     // Corvus fixture bank is PDA-based and should be backfilled successfully.
     let corvusBankKey = new PublicKey(
-      "4ecRL7M2fdmWjZd81PTZ9Sqg1e47ZpiwhkeDbsBJtqax"
+      "4ecRL7M2fdmWjZd81PTZ9Sqg1e47ZpiwhkeDbsBJtqax",
     );
     let corvusBankData = (
       await program.provider.connection.getAccountInfo(corvusBankKey)
@@ -505,7 +505,7 @@ describe("Lending pool add bank (add bank to group)", () => {
       new PublicKey("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA"),
       pbBefore.group,
       pbBefore.mint,
-      corvusBankKey
+      corvusBankKey,
     );
     console.log("seed: " + backfillSeed);
 
@@ -514,15 +514,15 @@ describe("Lending pool add bank (add bank to group)", () => {
         await backfillBankIsT22Flag(groupAdmin.mrgnProgram, {
           bank: corvusBankKey,
           bankSeed: new BN(backfillSeed),
-        })
-      )
+        }),
+      ),
     );
 
     const pbAfter = await program.account.bank.fetch(corvusBankKey);
     assertBNEqual(pbAfter.bankSeed, backfillSeed);
     assert.equal(
       pbAfter.flags.toNumber() & BANK_SEED_KNOWN_FLAG,
-      BANK_SEED_KNOWN_FLAG
+      BANK_SEED_KNOWN_FLAG,
     );
 
     // idempotent when called again with the same seed
@@ -532,21 +532,21 @@ describe("Lending pool add bank (add bank to group)", () => {
         await backfillBankIsT22Flag(groupAdmin.mrgnProgram, {
           bank: corvusBankKey,
           bankSeed: new BN(backfillSeed),
-        })
-      )
+        }),
+      ),
     );
 
     const pbAfterSecond = await program.account.bank.fetch(corvusBankKey);
     assertBNEqual(pbAfterSecond.bankSeed, backfillSeed);
     assert.equal(
       pbAfterSecond.flags.toNumber() & BANK_SEED_KNOWN_FLAG,
-      BANK_SEED_KNOWN_FLAG
+      BANK_SEED_KNOWN_FLAG,
     );
   });
 
   it("Backfill-seed path is skipped when bankSeed is omitted", async () => {
     let bonkBankKey = new PublicKey(
-      "DeyH7QxWvnbbaVB4zFrf4hoq7Q8z1ZT14co42BGwGtfM"
+      "DeyH7QxWvnbbaVB4zFrf4hoq7Q8z1ZT14co42BGwGtfM",
     );
     const bbBefore = await program.account.bank.fetch(bonkBankKey);
     assertBNEqual(bbBefore.bankSeed, 0);
@@ -556,8 +556,8 @@ describe("Lending pool add bank (add bank to group)", () => {
       new Transaction().add(
         await backfillBankIsT22Flag(groupAdmin.mrgnProgram, {
           bank: bonkBankKey,
-        })
-      )
+        }),
+      ),
     );
 
     const bbAfter = await program.account.bank.fetch(bonkBankKey);

@@ -374,7 +374,7 @@ describe("d09: Drift Liquidation", () => {
         (b) => b.bankPk.equals(driftTokenABank) && b.active === 1
       );
     const liquidateeAssetSharesBefore = toBnFromI80(
-      liquidateeTokenABalanceBefore.assetShares
+      liquidateeTokenABalanceBefore.assetShares,
     );
 
     while (true) {

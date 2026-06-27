@@ -51,19 +51,19 @@ export const assertDebtCeilingIsSupported = async (args: {
     bankRunProvider.connection,
     args.mint,
     undefined,
-    args.tokenProgram
+    args.tokenProgram,
   );
 
   const supply = mintInfo.supply;
   const maxDebt = integerToBigInt(args.maxDebtCeiling);
   assert.ok(
     maxDebt <= supply * 10n,
-    `max_debt_ceiling (${maxDebt.toString()}) exceeds 10x total supply (${supply.toString()})`
+    `max_debt_ceiling (${maxDebt.toString()}) exceeds 10x total supply (${supply.toString()})`,
   );
 };
 
 export const assertJuplendPoolInitialized = async (
-  args: AssertJuplendPoolArgs
+  args: AssertJuplendPoolArgs,
 ) => {
   const { pool, mint, decimals } = args;
   const connection = bankRunProvider.connection;
@@ -71,7 +71,7 @@ export const assertJuplendPoolInitialized = async (
 
   const lendingPdas = deriveJuplendLendingPdas(
     mint,
-    JUPLEND_LENDING_PROGRAM_ID
+    JUPLEND_LENDING_PROGRAM_ID,
   );
   assertKeysEqual(pool.lendingAdmin, lendingPdas.lendingAdmin);
   assertKeysEqual(pool.fTokenMint, lendingPdas.fTokenMint);
@@ -82,34 +82,34 @@ export const assertJuplendPoolInitialized = async (
 
   const [tokenReserve] = findJuplendLiquidityTokenReservePda(
     mint,
-    JUPLEND_LIQUIDITY_PROGRAM_ID
+    JUPLEND_LIQUIDITY_PROGRAM_ID,
   );
   assertKeysEqual(pool.tokenReserve, tokenReserve);
 
   const [rateModel] = findJuplendLiquidityRateModelPda(
     mint,
-    JUPLEND_LIQUIDITY_PROGRAM_ID
+    JUPLEND_LIQUIDITY_PROGRAM_ID,
   );
   assertKeysEqual(pool.rateModel, rateModel);
 
   const expectedVault = deriveJuplendLiquidityVaultAta(
     mint,
     pool.liquidity,
-    pool.tokenProgram
+    pool.tokenProgram,
   );
   assertKeysEqual(pool.vault, expectedVault);
 
   const [supplyPositionOnLiquidity] = findJuplendLiquiditySupplyPositionPda(
     mint,
     pool.lending,
-    JUPLEND_LIQUIDITY_PROGRAM_ID
+    JUPLEND_LIQUIDITY_PROGRAM_ID,
   );
   assertKeysEqual(pool.supplyPositionOnLiquidity, supplyPositionOnLiquidity);
 
   const [borrowPositionOnLiquidity] = findJuplendLiquidityBorrowPositionPda(
     mint,
     pool.lending,
-    JUPLEND_LIQUIDITY_PROGRAM_ID
+    JUPLEND_LIQUIDITY_PROGRAM_ID,
   );
   assertKeysEqual(pool.borrowPositionOnLiquidity, borrowPositionOnLiquidity);
 
@@ -175,7 +175,7 @@ export const assertJuplendPoolInitialized = async (
   assertKeysEqual(metadataInfo.owner, TOKEN_METADATA_PROGRAM_ID);
 
   const lendingState = await programs.lending.account.lending.fetch(
-    pool.lending
+    pool.lending,
   );
   assertKeysEqual(lendingState.mint, mint);
   assertKeysEqual(lendingState.fTokenMint, pool.fTokenMint);
@@ -184,7 +184,7 @@ export const assertJuplendPoolInitialized = async (
   assertKeysEqual(lendingState.tokenReservesLiquidity, pool.tokenReserve);
   assertKeysEqual(
     lendingState.supplyPositionOnLiquidity,
-    pool.supplyPositionOnLiquidity
+    pool.supplyPositionOnLiquidity,
   );
   assert.notEqual(lendingState.tokenExchangePrice.toString(), "0");
 
@@ -192,7 +192,7 @@ export const assertJuplendPoolInitialized = async (
     connection,
     pool.fTokenMint,
     undefined,
-    pool.tokenProgram
+    pool.tokenProgram,
   );
   assert.equal(fTokenMint.decimals, decimals);
 
@@ -251,7 +251,7 @@ export const assertJuplendBankState = (args: AssertJuplendBankArgs) => {
   assertBNEqual(bank.config.depositLimit, config.depositLimit);
   assertBNEqual(
     bank.config.totalAssetValueInitLimit,
-    config.totalAssetValueInitLimit
+    config.totalAssetValueInitLimit,
   );
   assert.deepEqual(bank.config.riskTier, config.riskTier);
   assert.equal(bank.config.configFlags, config.configFlags);

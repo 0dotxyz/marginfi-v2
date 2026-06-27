@@ -76,7 +76,7 @@ const createTokenAReserve = async (market: PublicKey): Promise<PublicKey> => {
     TOKEN_A_RESERVE,
     ecosystem.tokenADecimals,
     oracles.tokenAOracle.publicKey,
-    groupAdmin.tokenAAccount
+    groupAdmin.tokenAAccount,
   );
 
   const refreshTx = new Transaction().add(
@@ -84,8 +84,8 @@ const createTokenAReserve = async (market: PublicKey): Promise<PublicKey> => {
       klendBankrunProgram,
       reserve.publicKey,
       market,
-      oracles.tokenAOracle.publicKey
-    )
+      oracles.tokenAOracle.publicKey,
+    ),
   );
   await processBankrunTransaction(bankrunContext, refreshTx, [
     groupAdmin.wallet,
@@ -111,7 +111,7 @@ const ensureDriftSetup = async () => {
 
   const [usdcSpotMarketPk] = deriveSpotMarketPDA(
     driftBankrunProgram.programId,
-    USDC_MARKET_INDEX
+    USDC_MARKET_INDEX,
   );
   if (!(await hasAccount(usdcSpotMarketPk))) {
     const config = quoteAssetSpotMarketConfig();
@@ -132,7 +132,7 @@ const ensureDriftSetup = async () => {
         initialLiabilityWeight: config.initialLiabilityWeight,
         maintenanceLiabilityWeight: config.maintenanceLiabilityWeight,
         marketIndex: USDC_MARKET_INDEX,
-      }
+      },
     );
 
     const tx = new Transaction().add(initUsdcIx);
@@ -142,7 +142,7 @@ const ensureDriftSetup = async () => {
 
   const [tokenASpotMarketPk] = deriveSpotMarketPDA(
     driftBankrunProgram.programId,
-    TOKEN_A_MARKET_INDEX
+    TOKEN_A_MARKET_INDEX,
   );
 
   if (!(await hasAccount(tokenASpotMarketPk))) {
@@ -153,7 +153,7 @@ const ensureDriftSetup = async () => {
         bankrunContext,
         banksClient,
         tokenAOracleKp,
-        DRIFT_ORACLE_RECEIVER_PROGRAM_ID
+        DRIFT_ORACLE_RECEIVER_PROGRAM_ID,
       );
       tokenAOracle = tokenAOracleKp.publicKey;
       driftAccounts.set(DRIFT_TOKEN_A_PULL_ORACLE, tokenAOracle);
@@ -167,7 +167,7 @@ const ensureDriftSetup = async () => {
       oracles,
       driftAccounts,
       bankrunContext,
-      banksClient
+      banksClient,
     );
 
     const config = defaultSpotMarketConfig();
@@ -188,14 +188,14 @@ const ensureDriftSetup = async () => {
         initialLiabilityWeight: config.initialLiabilityWeight,
         maintenanceLiabilityWeight: config.maintenanceLiabilityWeight,
         marketIndex: TOKEN_A_MARKET_INDEX,
-      }
+      },
     );
 
     const tx = new Transaction().add(initTokenAIx);
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
   } else {
     const tokenAMarket = await driftBankrunProgram.account.spotMarket.fetch(
-      tokenASpotMarketPk
+      tokenASpotMarketPk,
     );
     if (!tokenAMarket.oracle.equals(PublicKey.default)) {
       driftAccounts.set(DRIFT_TOKEN_A_PULL_ORACLE, tokenAMarket.oracle);
@@ -210,7 +210,7 @@ const ensureDriftSetup = async () => {
     oracles,
     driftAccounts,
     bankrunContext,
-    banksClient
+    banksClient,
   );
 };
 
@@ -232,8 +232,8 @@ const ensureKaminoSetup = async () => {
         ecosystem.tokenAMint.publicKey,
         groupAdmin.tokenAAccount,
         globalProgramAdmin.wallet.publicKey,
-        1000 * 10 ** ecosystem.tokenADecimals
-      )
+        1000 * 10 ** ecosystem.tokenADecimals,
+      ),
     );
     await processBankrunTransaction(bankrunContext, mintTx, [
       globalProgramAdmin.wallet,
@@ -244,7 +244,7 @@ const ensureKaminoSetup = async () => {
   }
 
   const reserveAcc = await klendBankrunProgram.account.reserve.fetch(
-    tokenAReserve
+    tokenAReserve,
   );
 
   if (!reserveAcc.farmCollateral.equals(PublicKey.default)) {
@@ -259,7 +259,7 @@ const ensureKaminoSetup = async () => {
     const globalConfigKp = Keypair.generate();
     const [treasuryVaultsAuthority] = PublicKey.findProgramAddressSync(
       [Buffer.from("authority"), globalConfigKp.publicKey.toBuffer()],
-      FARMS_PROGRAM_ID
+      FARMS_PROGRAM_ID,
     );
 
     const initGlobalConfigTx = new Transaction().add(
@@ -269,7 +269,7 @@ const ensureKaminoSetup = async () => {
         space: 8 + FARMS_GLOBAL_CONFIG_SIZE,
         lamports:
           await bankRunProvider.connection.getMinimumBalanceForRentExemption(
-            8 + FARMS_GLOBAL_CONFIG_SIZE
+            8 + FARMS_GLOBAL_CONFIG_SIZE,
           ),
         programId: FARMS_PROGRAM_ID,
       }),
@@ -281,7 +281,7 @@ const ensureKaminoSetup = async () => {
           treasuryVaultsAuthority,
           systemProgram: SystemProgram.programId,
         })
-        .instruction()
+        .instruction(),
     );
 
     await processBankrunTransaction(bankrunContext, initGlobalConfigTx, [
@@ -296,12 +296,12 @@ const ensureKaminoSetup = async () => {
   const farmState = Keypair.generate();
   const [lendingMarketAuthorityAddress] = await lendingMarketAuthPda(
     toAddress(market),
-    toAddress(klendBankrunProgram.programId)
+    toAddress(klendBankrunProgram.programId),
   );
   const lendingMarketAuthority = toPublicKey(lendingMarketAuthorityAddress);
   const [farmVaultsAuthority] = PublicKey.findProgramAddressSync(
     [Buffer.from("authority"), farmState.publicKey.toBuffer()],
-    FARMS_PROGRAM_ID
+    FARMS_PROGRAM_ID,
   );
 
   const initFarmStateTx = new Transaction().add(
@@ -311,7 +311,7 @@ const ensureKaminoSetup = async () => {
       space: 8 + FARMS_STATE_SIZE,
       lamports:
         await bankRunProvider.connection.getMinimumBalanceForRentExemption(
-          8 + FARMS_STATE_SIZE
+          8 + FARMS_STATE_SIZE,
         ),
       programId: FARMS_PROGRAM_ID,
     }),
@@ -329,7 +329,7 @@ const ensureKaminoSetup = async () => {
         rent: SYSVAR_RENT_PUBKEY,
         systemProgram: SystemProgram.programId,
       })
-      .instruction()
+      .instruction(),
   );
 
   await processBankrunTransaction(bankrunContext, initFarmStateTx, [

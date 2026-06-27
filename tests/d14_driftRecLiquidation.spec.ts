@@ -86,7 +86,7 @@ import { getEpochAndSlot } from "./utils/bankrunConnection";
 
 const USER_ACCOUNT_D15 = "d15_account";
 const THROWAWAY_GROUP_SEED_D15 = Buffer.from(
-  "MARGINFI_GROUP_SEED_123400000015"
+  "MARGINFI_GROUP_SEED_123400000015",
 );
 const STARTING_SEED = 150;
 const TIME_TO_WAIT = 0.1 * 60 * 60;
@@ -106,7 +106,7 @@ describe("d14: Drift rec liquidation", () => {
       1,
       USER_ACCOUNT_D15,
       THROWAWAY_GROUP_SEED_D15,
-      STARTING_SEED
+      STARTING_SEED,
     );
     throwawayGroup = result.throwawayGroup;
     liabBank = result.banks[0];
@@ -120,7 +120,7 @@ describe("d14: Drift rec liquidation", () => {
       bankrunProgram.programId,
       throwawayGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
-      bankSeed
+      bankSeed,
     );
 
     const driftConfig = defaultDriftBankConfig(oracles.tokenAOracle.publicKey);
@@ -137,7 +137,7 @@ describe("d14: Drift rec liquidation", () => {
       {
         seed: bankSeed,
         config: driftConfig,
-      }
+      },
     );
 
     const addBankTx = new Transaction().add(addBankIx);
@@ -146,7 +146,7 @@ describe("d14: Drift rec liquidation", () => {
       addBankTx,
       [groupAdmin.wallet],
       false,
-      true
+      true,
     );
 
     const initUserAmount = new BN(100);
@@ -155,15 +155,15 @@ describe("d14: Drift rec liquidation", () => {
         ecosystem.tokenAMint.publicKey,
         groupAdmin.tokenAAccount,
         globalProgramAdmin.wallet.publicKey,
-        initUserAmount.toNumber()
-      )
+        initUserAmount.toNumber(),
+      ),
     );
     await processBankrunTransaction(
       bankrunContext,
       fundAdminTx,
       [globalProgramAdmin.wallet],
       false,
-      true
+      true,
     );
 
     const initUserIx = await makeInitDriftUserIx(
@@ -177,7 +177,7 @@ describe("d14: Drift rec liquidation", () => {
       {
         amount: initUserAmount,
       },
-      TOKEN_A_MARKET_INDEX
+      TOKEN_A_MARKET_INDEX,
     );
 
     const initUserTx = new Transaction().add(initUserIx);
@@ -186,7 +186,7 @@ describe("d14: Drift rec liquidation", () => {
       initUserTx,
       [groupAdmin.wallet],
       false,
-      true
+      true,
     );
 
     const adminAccount = groupAdmin.accounts.get(USER_ACCOUNT_D15);
@@ -198,14 +198,14 @@ describe("d14: Drift rec liquidation", () => {
         tokenAccount: groupAdmin.lstAlphaAccount,
         amount: seedLiqAmount,
         depositUpToLimit: false,
-      })
+      }),
     );
     await processBankrunTransaction(
       bankrunContext,
       seedLiqTx,
       [groupAdmin.wallet],
       false,
-      true
+      true,
     );
   });
 
@@ -228,15 +228,15 @@ describe("d14: Drift rec liquidation", () => {
         ecosystem.tokenAMint.publicKey,
         liquidatee.tokenAAccount,
         globalProgramAdmin.wallet.publicKey,
-        100 * 10 ** ecosystem.tokenADecimals
-      )
+        100 * 10 ** ecosystem.tokenADecimals,
+      ),
     );
     await processBankrunTransaction(
       bankrunContext,
       fundTokenATx,
       [globalProgramAdmin.wallet],
       false,
-      true
+      true,
     );
 
     const depositAmount = new BN(50 * 10 ** ecosystem.tokenADecimals);
@@ -249,7 +249,7 @@ describe("d14: Drift rec liquidation", () => {
         driftOracle: driftTokenAPullOracle,
       },
       depositAmount,
-      TOKEN_A_MARKET_INDEX
+      TOKEN_A_MARKET_INDEX,
     );
 
     const depositTx = new Transaction().add(depositIx);
@@ -258,7 +258,7 @@ describe("d14: Drift rec liquidation", () => {
       depositTx,
       [liquidatee.wallet],
       false,
-      true
+      true,
     );
 
     const borrowAmount = new BN(2 * 10 ** ecosystem.lstAlphaDecimals);
@@ -270,14 +270,14 @@ describe("d14: Drift rec liquidation", () => {
         tokenAccount: liquidatee.lstAlphaAccount,
         remaining,
         amount: borrowAmount,
-      })
+      }),
     );
     await processBankrunTransaction(
       bankrunContext,
       borrowTx,
       [liquidatee.wallet],
       false,
-      true
+      true,
     );
   });
 
@@ -301,14 +301,14 @@ describe("d14: Drift rec liquidation", () => {
       await configureBank(groupAdmin.mrgnBankrunProgram, {
         bank: liabBank,
         bankConfigOpt: config,
-      })
+      }),
     );
     await processBankrunTransaction(
       bankrunContext,
       configTx,
       [groupAdmin.wallet],
       false,
-      true
+      true,
     );
 
     const healthTx = new Transaction().add(
@@ -316,28 +316,28 @@ describe("d14: Drift rec liquidation", () => {
       await healthPulse(liquidatee.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
         remaining,
-      })
+      }),
     );
     await processBankrunTransaction(
       bankrunContext,
       healthTx,
       [liquidatee.wallet],
       false,
-      true
+      true,
     );
 
     const initLiqRecordTx = new Transaction().add(
       await initLiquidationRecordIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
         feePayer: liquidator.wallet.publicKey,
-      })
+      }),
     );
     await processBankrunTransaction(
       bankrunContext,
       initLiqRecordTx,
       [liquidator.wallet],
       false,
-      true
+      true,
     );
 
     const withdrawAmount = new BN(1 * 10 ** ecosystem.tokenADecimals);
@@ -363,7 +363,7 @@ describe("d14: Drift rec liquidation", () => {
           withdrawAll: false,
           remaining,
         },
-        driftBankrunProgram
+        driftBankrunProgram,
       ),
       await repayIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
@@ -374,7 +374,7 @@ describe("d14: Drift rec liquidation", () => {
       await endLiquidationIx(liquidator.mrgnBankrunProgram, {
         marginfiAccount: liquidateeAccount,
         remaining: remainingEndMeta,
-      })
+      }),
     );
 
     await processBankrunTransaction(
@@ -382,7 +382,7 @@ describe("d14: Drift rec liquidation", () => {
       liquidationTx,
       [liquidator.wallet],
       false,
-      true
+      true,
     );
   });
 
@@ -397,7 +397,7 @@ describe("d14: Drift rec liquidation", () => {
       0n,
       BigInt(epoch),
       0n,
-      targetUnix
+      targetUnix,
     );
     bankrunContext.setClock(newClock);
 
@@ -406,7 +406,7 @@ describe("d14: Drift rec liquidation", () => {
       oracles,
       driftAccounts,
       bankrunContext,
-      banksClient
+      banksClient,
     );
   });
 
@@ -436,7 +436,7 @@ describe("d14: Drift rec liquidation", () => {
         withdrawAll: false,
         remaining,
       },
-      driftBankrunProgram
+      driftBankrunProgram,
     );
 
     const repayAmount = new BN((1 / 5) * 10 ** ecosystem.lstAlphaDecimals);
@@ -460,7 +460,7 @@ describe("d14: Drift rec liquidation", () => {
       startLiqIx,
       driftWithdrawIx,
       repayLiqIx,
-      endLiqIx
+      endLiqIx,
     );
 
     // Passes without refreshSpotMarketIx
@@ -469,7 +469,7 @@ describe("d14: Drift rec liquidation", () => {
       liquidationTx,
       [liquidator.wallet],
       true,
-      false
+      false,
     );
 
     assertBankrunTxFailed(result, 6322);
@@ -478,7 +478,7 @@ describe("d14: Drift rec liquidation", () => {
     const refreshSpotMarketIx = await makeUpdateSpotMarketCumulativeInterestIx(
       driftBankrunProgram,
       { oracle: driftTokenAPullOracle },
-      TOKEN_A_MARKET_INDEX
+      TOKEN_A_MARKET_INDEX,
     );
 
     const refreshedLiquidationTx = new Transaction().add(
@@ -487,7 +487,7 @@ describe("d14: Drift rec liquidation", () => {
       startLiqIx,
       driftWithdrawIx,
       repayLiqIx,
-      endLiqIx
+      endLiqIx,
     );
 
     await processBankrunTransaction(
@@ -495,7 +495,7 @@ describe("d14: Drift rec liquidation", () => {
       refreshedLiquidationTx,
       [liquidator.wallet],
       false,
-      true
+      true,
     );
   });
 });

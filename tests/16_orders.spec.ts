@@ -137,16 +137,16 @@ describe("orders", () => {
         ecosystem.tokenAMint.publicKey,
         user.tokenAAccount,
         wallet.publicKey,
-        50 * 10 ** ecosystem.tokenADecimals
-      )
+        50 * 10 ** ecosystem.tokenADecimals,
+      ),
     );
     fundTx.add(
       createMintToInstruction(
         ecosystem.wsolMint.publicKey,
         user.wsolAccount,
         wallet.publicKey,
-        10 * 10 ** ecosystem.wsolDecimals
-      )
+        10 * 10 ** ecosystem.wsolDecimals,
+      ),
     );
 
     await provider.sendAndConfirm(fundTx, [wallet.payer]);
@@ -160,7 +160,7 @@ describe("orders", () => {
     });
 
     await userProgram.provider.sendAndConfirm(
-      new Transaction().add(depositSolIx)
+      new Transaction().add(depositSolIx),
     );
 
     const depositAIx = await depositIx(user.mrgnProgram, {
@@ -172,7 +172,7 @@ describe("orders", () => {
     });
 
     await userProgram.provider.sendAndConfirm(
-      new Transaction().add(depositAIx)
+      new Transaction().add(depositAIx),
     );
 
     const oracleMeta = composeRemainingAccounts([
@@ -190,7 +190,7 @@ describe("orders", () => {
     });
 
     await userProgram.provider.sendAndConfirm(
-      new Transaction().add(borrowUsdcIx)
+      new Transaction().add(borrowUsdcIx),
     );
   });
 
@@ -219,15 +219,15 @@ describe("orders", () => {
       const [orderPk] = deriveOrderPda(
         program.programId,
         userMarginfiAccount,
-        bankKeys
+        bankKeys,
       );
       const orderAccount = await program.account.order.fetch(orderPk);
       const userAccount = await program.account.marginfiAccount.fetch(
-        userMarginfiAccount
+        userMarginfiAccount,
       );
 
       expect(orderAccount.marginfiAccount.toBase58()).to.equal(
-        userMarginfiAccount.toBase58()
+        userMarginfiAccount.toBase58(),
       );
       assert.isAbove(Number(orderAccount.createdAt), 0);
       expect(orderAccount.tags.length).to.equal(2);
@@ -236,14 +236,14 @@ describe("orders", () => {
 
       assert.notDeepEqual(
         Number(orderAccount.tags[0]),
-        Number(orderAccount.tags[1])
+        Number(orderAccount.tags[1]),
       );
 
       const index0 = userAccount.lendingAccount.balances.findIndex(
-        (balance) => balance.tag == orderAccount.tags[0]
+        (balance) => balance.tag == orderAccount.tags[0],
       );
       const index1 = userAccount.lendingAccount.balances.findIndex(
-        (balance) => balance.tag == orderAccount.tags[1]
+        (balance) => balance.tag == orderAccount.tags[1],
       );
 
       assert.notDeepEqual(index0, -1);
@@ -267,7 +267,7 @@ describe("orders", () => {
           await userProgram.provider.sendAndConfirm(new Transaction().add(ix));
         },
         "DuplicateBalance",
-        6103
+        6103,
       );
     });
 
@@ -287,7 +287,7 @@ describe("orders", () => {
           await userProgram.provider.sendAndConfirm(new Transaction().add(ix));
         },
         "InvalidAssetOrLiabilitiesCount",
-        6110
+        6110,
       );
     });
 
@@ -316,7 +316,7 @@ describe("orders", () => {
 
   describe("order maintenance", () => {
     const placeTestOrder = async (
-      bankKeys: PublicKey[] = [bankA, bankUsdc]
+      bankKeys: PublicKey[] = [bankA, bankUsdc],
     ) => {
       const ix = await placeOrderIx(program, {
         marginfiAccount: userMarginfiAccount,
@@ -330,7 +330,7 @@ describe("orders", () => {
       const [orderPk] = deriveOrderPda(
         program.programId,
         userMarginfiAccount,
-        bankKeys
+        bankKeys,
       );
       return orderPk;
     };
@@ -345,7 +345,7 @@ describe("orders", () => {
           feePayer: user.wallet.publicKey,
         });
         await userProgram.provider.sendAndConfirm(
-          new Transaction().add(closeIx)
+          new Transaction().add(closeIx),
         );
       }, "Close all active orders before closing account");
     });
@@ -355,7 +355,7 @@ describe("orders", () => {
       const [orderPk] = deriveOrderPda(
         program.programId,
         userMarginfiAccount,
-        bankKeys
+        bankKeys,
       );
 
       const ix = await closeOrderIx(program, {
@@ -396,7 +396,7 @@ describe("orders", () => {
         .instruction();
 
       await userProgram.provider.sendAndConfirm(
-        new Transaction().add(repayInstruction)
+        new Transaction().add(repayInstruction),
       );
 
       const ix = await keeperCloseOrderIx(program, {
@@ -431,7 +431,7 @@ describe("orders", () => {
         .instruction();
 
       await userProgram.provider.sendAndConfirm(
-        new Transaction().add(borrowIx)
+        new Transaction().add(borrowIx),
       );
     });
 
@@ -449,11 +449,11 @@ describe("orders", () => {
             feeRecipient: keeper.wallet.publicKey,
           });
           await keeperProgram.provider.sendAndConfirm(
-            new Transaction().add(ix)
+            new Transaction().add(ix),
           );
         },
         "LiquidatorOrderCloseNotAllowed",
-        6105
+        6105,
       );
       assert.equal(await getActiveOrders(userMarginfiAccount), 1);
     });
@@ -468,7 +468,7 @@ describe("orders", () => {
       await userProgram.provider.sendAndConfirm(new Transaction().add(ix));
 
       const acc = await program.account.marginfiAccount.fetch(
-        userMarginfiAccount
+        userMarginfiAccount,
       );
       expect(acc).to.exist;
     });
@@ -478,7 +478,7 @@ describe("orders", () => {
       const [orderPk] = deriveOrderPda(
         program.programId,
         userMarginfiAccount,
-        bankKeys
+        bankKeys,
       );
 
       const keeper = users[1];
@@ -493,8 +493,8 @@ describe("orders", () => {
       await keeperProgram.provider.sendAndConfirm(
         new Transaction().add(
           dummyIx(keeper.wallet.publicKey, user.wallet.publicKey),
-          ix
-        )
+          ix,
+        ),
       );
 
       const closed = await program.provider.connection.getAccountInfo(orderPk);
@@ -514,7 +514,7 @@ describe("orders", () => {
     const buildRemaining = (
       includeUsdc = true,
       includeA = true,
-      includeSol = true
+      includeSol = true,
     ) => {
       const pairs: [PublicKey, PublicKey][] = [];
 
@@ -537,28 +537,28 @@ describe("orders", () => {
       const bankAAccount = await program.account.bank.fetch(bankA);
       const bankUsdcAccount = await program.account.bank.fetch(bankUsdc);
       const accBeforePricing = await program.account.marginfiAccount.fetch(
-        userMarginfiAccount
+        userMarginfiAccount,
       );
 
       const balA = accBeforePricing.lendingAccount.balances.find(
-        (b: any) => b.bankPk && b.bankPk.equals(bankA)
+        (b: any) => b.bankPk && b.bankPk.equals(bankA),
       );
       const balUsdc = accBeforePricing.lendingAccount.balances.find(
-        (b: any) => b.bankPk && b.bankPk.equals(bankUsdc)
+        (b: any) => b.bankPk && b.bankPk.equals(bankUsdc),
       );
 
       const assetShares = wrappedI80F48toBigNumber(balA.assetShares).toNumber();
       const assetShareValue = wrappedI80F48toBigNumber(
-        bankAAccount.assetShareValue
+        bankAAccount.assetShareValue,
       ).toNumber();
       const assetNative =
         (assetShares * assetShareValue) / 10 ** bankAAccount.mintDecimals;
 
       const liabShares = wrappedI80F48toBigNumber(
-        balUsdc.liabilityShares
+        balUsdc.liabilityShares,
       ).toNumber();
       const liabShareValue = wrappedI80F48toBigNumber(
-        bankUsdcAccount.liabilityShareValue
+        bankUsdcAccount.liabilityShareValue,
       ).toNumber();
       const liabNative =
         (liabShares * liabShareValue) / 10 ** bankUsdcAccount.mintDecimals;
@@ -571,7 +571,7 @@ describe("orders", () => {
       liabNative: number,
       threshold: number,
       confFactor: number,
-      offset: number
+      offset: number,
     ) => {
       const biasedLiabValue =
         liabNative * (oracles.usdcPrice * (1 + confFactor));
@@ -586,7 +586,7 @@ describe("orders", () => {
       const liabilityValue = liabilityAmountFloat * oracles.usdcPrice;
       const assetAmountFloat = liabilityValue / assetPrice;
       const assetAmountUnits = Math.ceil(
-        assetAmountFloat * 10 ** ecosystem.tokenADecimals
+        assetAmountFloat * 10 ** ecosystem.tokenADecimals,
       );
       return new BN(assetAmountUnits);
     };
@@ -594,11 +594,11 @@ describe("orders", () => {
     const buildExecutionIxs = async (
       startRemaining: PublicKey[],
       endRemaining: PublicKey[],
-      withdrawAmount: BN
+      withdrawAmount: BN,
     ) => {
       const [executeRecordPk] = deriveExecuteOrderPda(
         program.programId,
-        orderPk
+        orderPk,
       );
 
       const startIx = await startExecuteOrderIx(program, {
@@ -624,7 +624,7 @@ describe("orders", () => {
             pubkey,
             isSigner: false,
             isWritable: false,
-          }))
+          })),
         )
         .instruction();
 
@@ -674,7 +674,7 @@ describe("orders", () => {
         remaining,
       });
       await userProgram.provider.sendAndConfirm(
-        new Transaction().add(reBorrowIx)
+        new Transaction().add(reBorrowIx),
       );
 
       const ixPlace = await placeOrderIx(program, {
@@ -690,7 +690,7 @@ describe("orders", () => {
       [orderPk] = deriveOrderPda(
         program.programId,
         userMarginfiAccount,
-        bankKeys
+        bankKeys,
       );
     };
 
@@ -709,7 +709,7 @@ describe("orders", () => {
       [orderPk] = deriveOrderPda(
         program.programId,
         userMarginfiAccount,
-        bankKeys
+        bankKeys,
       );
 
       // Fund keeper with USDC so they can repay during execution
@@ -722,24 +722,24 @@ describe("orders", () => {
           ecosystem.usdcMint.publicKey,
           keeper.usdcAccount,
           wallet.publicKey,
-          Number(borrowUsdc) * 10
-        )
+          Number(borrowUsdc) * 10,
+        ),
       );
       await program.provider.sendAndConfirm(mintUsdcToKeeperTx, [wallet.payer]);
 
       keeperTokenAata = getAssociatedTokenAddressSync(
         ecosystem.tokenAMint.publicKey,
-        keeper.wallet.publicKey
+        keeper.wallet.publicKey,
       );
 
       const ensureKeeperAta = createAssociatedTokenAccountIdempotentInstruction(
         keeper.wallet.publicKey,
         keeperTokenAata,
         keeper.wallet.publicKey,
-        ecosystem.tokenAMint.publicKey
+        ecosystem.tokenAMint.publicKey,
       );
       await keeperProgram.provider.sendAndConfirm(
-        new Transaction().add(ensureKeeperAta)
+        new Transaction().add(ensureKeeperAta),
       );
     });
 
@@ -751,7 +751,7 @@ describe("orders", () => {
         liabNative,
         threshold,
         confFactor,
-        -1
+        -1,
       );
 
       oracles.tokenAPrice = biasedPrice;
@@ -760,7 +760,7 @@ describe("orders", () => {
         oracles,
         wallet.payer,
         slot,
-        Math.floor(Date.now() / 1000)
+        Math.floor(Date.now() / 1000),
       );
 
       const remaining = buildRemaining();
@@ -776,11 +776,11 @@ describe("orders", () => {
 
               .add(repayInstruction)
               .add(withdrawInstruction)
-              .add(endIx)
+              .add(endIx),
           );
         },
         "OrderTriggerNotMet",
-        6107
+        6107,
       );
 
       oracles.tokenAPrice = 10; // Reset price for other tests
@@ -788,7 +788,7 @@ describe("orders", () => {
         oracles,
         wallet.payer,
         slot,
-        Math.floor(Date.now() / 1000)
+        Math.floor(Date.now() / 1000),
       );
     });
 
@@ -800,7 +800,7 @@ describe("orders", () => {
         liabNative,
         threshold,
         confFactor,
-        1
+        1,
       );
 
       // Place price above trigger
@@ -810,7 +810,7 @@ describe("orders", () => {
         oracles,
         wallet.payer,
         slot,
-        Math.floor(Date.now() / 1000)
+        Math.floor(Date.now() / 1000),
       );
 
       const startRemaining = buildRemaining();
@@ -822,18 +822,18 @@ describe("orders", () => {
       // Ensure the keeper has a wSOL ATA
       const keeperWsolAta = getAssociatedTokenAddressSync(
         ecosystem.wsolMint.publicKey,
-        keeper.wallet.publicKey
+        keeper.wallet.publicKey,
       );
       const ensureKeeperWsolAtaIx =
         createAssociatedTokenAccountIdempotentInstruction(
           keeper.wallet.publicKey,
           keeperWsolAta,
           keeper.wallet.publicKey,
-          ecosystem.wsolMint.publicKey
+          ecosystem.wsolMint.publicKey,
         );
 
       await keeperProgram.provider.sendAndConfirm(
-        new Transaction().add(ensureKeeperWsolAtaIx)
+        new Transaction().add(ensureKeeperWsolAtaIx),
       );
       keeper.wsolAccount = keeperWsolAta;
 
@@ -862,11 +862,11 @@ describe("orders", () => {
               .add(repayInstruction)
               .add(withdrawInstruction)
               .add(withdrawSol) // This touches an uninvolved balance
-              .add(endIx)
+              .add(endIx),
           );
         },
         "IllegalBalanceState",
-        6040
+        6040,
       );
 
       oracles.tokenAPrice = 10; // Reset price
@@ -874,7 +874,7 @@ describe("orders", () => {
         oracles,
         wallet.payer,
         slot,
-        Math.floor(Date.now() / 1000)
+        Math.floor(Date.now() / 1000),
       );
     });
 
@@ -886,7 +886,7 @@ describe("orders", () => {
         liabNative,
         threshold,
         confFactor,
-        1
+        1,
       );
 
       oracles.tokenAPrice = biasedPrice;
@@ -895,7 +895,7 @@ describe("orders", () => {
         oracles,
         wallet.payer,
         slot,
-        Math.floor(Date.now() / 1000)
+        Math.floor(Date.now() / 1000),
       );
 
       const remaining = buildRemaining();
@@ -911,11 +911,11 @@ describe("orders", () => {
 
               .add(repayInstruction)
               .add(withdrawInstruction)
-              .add(endIx)
+              .add(endIx),
           );
         },
         "OrderExecutionOverWithdrawal",
-        6114
+        6114,
       );
 
       oracles.tokenAPrice = 10;
@@ -923,7 +923,7 @@ describe("orders", () => {
         oracles,
         wallet.payer,
         slot,
-        Math.floor(Date.now() / 1000)
+        Math.floor(Date.now() / 1000),
       );
     });
 
@@ -950,7 +950,7 @@ describe("orders", () => {
           liabNative,
           threshold,
           confFactor,
-          1
+          1,
         );
 
         oracles.tokenAPrice = biasedPrice;
@@ -959,7 +959,7 @@ describe("orders", () => {
           oracles,
           wallet.payer,
           slot,
-          Math.floor(Date.now() / 1000)
+          Math.floor(Date.now() / 1000),
         );
 
         const remaining = buildRemaining();
@@ -976,11 +976,11 @@ describe("orders", () => {
 
                 .add(repayInstruction)
                 .add(withdrawInstruction)
-                .add(endIx)
+                .add(endIx),
             );
           },
           "OrderExecutionOverWithdrawal",
-          6114
+          6114,
         );
       } finally {
         const resetIx = await editGlobalFeeState(program, {
@@ -993,7 +993,7 @@ describe("orders", () => {
           programFeeRate: bigNumberToWrappedI80F48(PROGRAM_FEE_RATE),
           liquidationMaxFee: bigNumberToWrappedI80F48(LIQUIDATION_MAX_FEE),
           orderExecutionMaxFee: bigNumberToWrappedI80F48(
-            ORDER_EXECUTION_MAX_FEE
+            ORDER_EXECUTION_MAX_FEE,
           ),
         });
         await program.provider.sendAndConfirm(new Transaction().add(resetIx));
@@ -1009,7 +1009,7 @@ describe("orders", () => {
         liabNative,
         threshold,
         confFactor,
-        1
+        1,
       );
 
       oracles.tokenAPrice = biasedPrice;
@@ -1018,12 +1018,12 @@ describe("orders", () => {
         oracles,
         wallet.payer,
         slot,
-        Math.floor(Date.now() / 1000)
+        Math.floor(Date.now() / 1000),
       );
 
       const orderBefore = await program.account.order.fetch(orderPk);
       const accBefore = await program.account.marginfiAccount.fetch(
-        userMarginfiAccount
+        userMarginfiAccount,
       );
 
       const startRemaining = buildRemaining();
@@ -1037,21 +1037,21 @@ describe("orders", () => {
           .add(startIx)
           .add(repayInstruction)
           .add(withdrawInstruction)
-          .add(endIx)
+          .add(endIx),
       );
 
       // Verify the order account has been closed
       const orderInfo = await program.provider.connection.getAccountInfo(
-        orderPk
+        orderPk,
       );
       assert.isNull(
         orderInfo,
-        "expected order account to be closed after execution"
+        "expected order account to be closed after execution",
       );
 
       // Fetch post-execution marginfi account
       const accAfter = await program.account.marginfiAccount.fetch(
-        userMarginfiAccount
+        userMarginfiAccount,
       );
       assert.equal(accAfter.activeOrders, 0);
 
@@ -1059,10 +1059,10 @@ describe("orders", () => {
       const assetTag = orderBefore.tags[0];
       const liabilityTag = orderBefore.tags[1];
       const preAsset = accBefore.lendingAccount.balances.find(
-        (b: any) => Number(b.tag) === Number(assetTag)
+        (b: any) => Number(b.tag) === Number(assetTag),
       );
       const preLiability = accBefore.lendingAccount.balances.find(
-        (b: any) => Number(b.tag) === Number(liabilityTag)
+        (b: any) => Number(b.tag) === Number(liabilityTag),
       );
 
       const assetBankPk = preAsset.bankPk.toString();
@@ -1070,20 +1070,20 @@ describe("orders", () => {
 
       // Asset should still exist
       const postAsset = accAfter.lendingAccount.balances.find(
-        (b: any) => b.bankPk && b.bankPk.toString() === assetBankPk
+        (b: any) => b.bankPk && b.bankPk.toString() === assetBankPk,
       );
       assert.exists(
         postAsset,
-        `expected asset balance for bank ${assetBankPk} to still exist after execution`
+        `expected asset balance for bank ${assetBankPk} to still exist after execution`,
       );
 
       // Liability should no longer exist
       const postLiability = accAfter.lendingAccount.balances.find(
-        (b: any) => b.bankPk && b.bankPk.toString() === liabilityBankPk
+        (b: any) => b.bankPk && b.bankPk.toString() === liabilityBankPk,
       );
       assert.isUndefined(
         postLiability,
-        `expected liability balance for bank ${liabilityBankPk} to be removed after execution`
+        `expected liability balance for bank ${liabilityBankPk} to be removed after execution`,
       );
 
       // Balances not part of the order must remain unchanged
@@ -1093,16 +1093,16 @@ describe("orders", () => {
         if (orderBankSet.has(preBank)) continue;
 
         const postBal = accAfter.lendingAccount.balances.find(
-          (b: any) => b.bankPk && b.bankPk.toString() === preBank
+          (b: any) => b.bankPk && b.bankPk.toString() === preBank,
         );
         assert.exists(
           postBal,
-          `expected other balance for bank ${preBank} to still exist after execution`
+          `expected other balance for bank ${preBank} to still exist after execution`,
         );
         assert.deepEqual(
           preBal,
           postBal,
-          `pre balance to equal post balance ${preBank}`
+          `pre balance to equal post balance ${preBank}`,
         );
       }
 
@@ -1113,7 +1113,7 @@ describe("orders", () => {
       const singleAssetDecimals = ecosystem.tokenADecimals;
 
       const assetSharesPost = wrappedI80F48toBigNumber(
-        postAsset.assetShares
+        postAsset.assetShares,
       ).toNumber();
       const assetNativeAmount = assetSharesPost / 10 ** singleAssetDecimals;
       const assetValue = assetNativeAmount * singleAssetPrice;
@@ -1121,7 +1121,7 @@ describe("orders", () => {
       assert.isAbove(
         assetValue,
         wrappedI80F48toBigNumber(highTakeProfit).toNumber(),
-        `expected asset value (${assetValue}) to exceed 800`
+        `expected asset value (${assetValue}) to exceed 800`,
       );
     });
 
@@ -1140,7 +1140,7 @@ describe("orders", () => {
         liabNative,
         slThreshold,
         confFactor,
-        -1
+        -1,
       );
 
       oracles.tokenAPrice = biasedPrice;
@@ -1149,11 +1149,11 @@ describe("orders", () => {
         oracles,
         wallet.payer,
         slot,
-        Math.floor(Date.now() / 1000)
+        Math.floor(Date.now() / 1000),
       );
 
       const accBefore = await program.account.marginfiAccount.fetch(
-        userMarginfiAccount
+        userMarginfiAccount,
       );
 
       const remaining = buildRemaining();
@@ -1167,36 +1167,36 @@ describe("orders", () => {
 
           .add(repayInstruction)
           .add(withdrawInstruction)
-          .add(endIx)
+          .add(endIx),
       );
 
       const orderInfo = await program.provider.connection.getAccountInfo(
-        orderPk
+        orderPk,
       );
       assert.isNull(
         orderInfo,
-        "expected order to be closed after stop-loss execution"
+        "expected order to be closed after stop-loss execution",
       );
 
       const accAfter = await program.account.marginfiAccount.fetch(
-        userMarginfiAccount
+        userMarginfiAccount,
       );
       assert.equal(accAfter.activeOrders, 0);
 
       const postLiability = accAfter.lendingAccount.balances.find(
-        (b: any) => b.bankPk && b.bankPk.equals(bankUsdc)
+        (b: any) => b.bankPk && b.bankPk.equals(bankUsdc),
       );
       assert.isUndefined(
         postLiability,
-        "expected liability to be removed after stop-loss"
+        "expected liability to be removed after stop-loss",
       );
 
       const postAsset = accAfter.lendingAccount.balances.find(
-        (b: any) => b.bankPk && b.bankPk.equals(bankA)
+        (b: any) => b.bankPk && b.bankPk.equals(bankA),
       );
       assert.exists(
         postAsset,
-        "expected asset balance to still exist after stop-loss"
+        "expected asset balance to still exist after stop-loss",
       );
 
       for (const preBal of accBefore.lendingAccount.balances) {
@@ -1205,16 +1205,16 @@ describe("orders", () => {
           continue;
 
         const postBal = accAfter.lendingAccount.balances.find(
-          (b: any) => b.bankPk && b.bankPk.toString() === preBank
+          (b: any) => b.bankPk && b.bankPk.toString() === preBank,
         );
         assert.exists(
           postBal,
-          `expected balance for bank ${preBank} to remain after stop-loss`
+          `expected balance for bank ${preBank} to remain after stop-loss`,
         );
         assert.deepEqual(
           preBal,
           postBal,
-          `balance ${preBank} should be unchanged after stop-loss`
+          `balance ${preBank} should be unchanged after stop-loss`,
         );
       }
     });
@@ -1236,7 +1236,7 @@ describe("orders", () => {
         liabNative,
         bothSl,
         confFactor,
-        -1
+        -1,
       );
 
       oracles.tokenAPrice = biasedPrice;
@@ -1245,11 +1245,11 @@ describe("orders", () => {
         oracles,
         wallet.payer,
         slot,
-        Math.floor(Date.now() / 1000)
+        Math.floor(Date.now() / 1000),
       );
 
       const accBefore = await program.account.marginfiAccount.fetch(
-        userMarginfiAccount
+        userMarginfiAccount,
       );
 
       const remaining = buildRemaining();
@@ -1263,28 +1263,28 @@ describe("orders", () => {
 
           .add(repayInstruction)
           .add(withdrawInstruction)
-          .add(endIx)
+          .add(endIx),
       );
 
       const orderInfo = await program.provider.connection.getAccountInfo(
-        orderPk
+        orderPk,
       );
       assert.isNull(
         orderInfo,
-        "expected order to be closed after both-trigger SL execution"
+        "expected order to be closed after both-trigger SL execution",
       );
 
       const accAfter = await program.account.marginfiAccount.fetch(
-        userMarginfiAccount
+        userMarginfiAccount,
       );
       assert.equal(accAfter.activeOrders, 0);
 
       const postLiability = accAfter.lendingAccount.balances.find(
-        (b: any) => b.bankPk && b.bankPk.equals(bankUsdc)
+        (b: any) => b.bankPk && b.bankPk.equals(bankUsdc),
       );
       assert.isUndefined(
         postLiability,
-        "expected liability to be removed after both-trigger SL"
+        "expected liability to be removed after both-trigger SL",
       );
 
       for (const preBal of accBefore.lendingAccount.balances) {
@@ -1293,16 +1293,16 @@ describe("orders", () => {
           continue;
 
         const postBal = accAfter.lendingAccount.balances.find(
-          (b: any) => b.bankPk && b.bankPk.toString() === preBank
+          (b: any) => b.bankPk && b.bankPk.toString() === preBank,
         );
         assert.exists(
           postBal,
-          `expected balance for bank ${preBank} to remain after both-trigger`
+          `expected balance for bank ${preBank} to remain after both-trigger`,
         );
         assert.deepEqual(
           preBal,
           postBal,
-          `balance ${preBank} should be unchanged after both-trigger`
+          `balance ${preBank} should be unchanged after both-trigger`,
         );
       }
     });

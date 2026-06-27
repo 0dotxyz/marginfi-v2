@@ -371,7 +371,7 @@ export const closeLiquidationRecordIx = (
         },
       ],
       data: CLOSE_LIQ_RECORD_DISCRIMINATOR,
-    })
+    }),
   );
 };
 
@@ -638,8 +638,8 @@ export const composeRemainingAccounts = (
 /**
  * Use in place of `composeRemainingAccounts` when building Meta for Start Liquidate (marks banks as
  * mutable, which is required)
- * @param banksAndOracles
- * @returns
+ * @param banksAndOracles 
+ * @returns 
  */
 export const composeRemainingAccountsWriteableMeta = (
   banksAndOracles: PublicKey[][]
@@ -667,8 +667,8 @@ export const composeRemainingAccountsWriteableMeta = (
 /**
  * Use in place of `composeRemainingAccounts` when building Meta for End Liquidate (marks banks as
  * mutable and ignores/excludes all other accounts)
- * @param banksAndOracles
- * @returns
+ * @param banksAndOracles 
+ * @returns 
  */
 export const composeRemainingAccountsMetaBanksOnly = (
   banksAndOracles: PublicKey[][]

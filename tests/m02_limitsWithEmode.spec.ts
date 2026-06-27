@@ -140,7 +140,7 @@ ORACLE_MODES.forEach((oracleMode) => {
           marginfiGroup: throwawayGroup.publicKey,
           newAdmin: groupAdmin.wallet.publicKey,
           newEmodeAdmin: groupAdmin.wallet.publicKey,
-        })
+        }),
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(groupAdmin.wallet);
@@ -175,7 +175,7 @@ ORACLE_MODES.forEach((oracleMode) => {
             bank,
             tag: bankIndex, // bank’s own tag = its index
             entries,
-          })
+          }),
         );
         tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
         tx.sign(groupAdmin.wallet);
@@ -225,7 +225,7 @@ ORACLE_MODES.forEach((oracleMode) => {
           tokenAccount: user.lstAlphaAccount,
           amount: depositAmount,
           depositUpToLimit: false,
-        })
+        }),
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(user.wallet);
@@ -371,7 +371,7 @@ ORACLE_MODES.forEach((oracleMode) => {
       if (result.result) {
         const logs = result.meta.logMessages;
         const isOOM = logs.some((msg) =>
-          msg.toLowerCase().includes("memory allocation failed, out of memory")
+          msg.toLowerCase().includes("memory allocation failed, out of memory"),
         );
 
         if (isOOM) {

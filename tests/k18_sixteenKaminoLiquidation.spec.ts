@@ -107,20 +107,20 @@ describe("k18: 16 Kamino position liquidation test", () => {
         "TOKEN_A",
         ecosystem.tokenADecimals,
         oracles.tokenAOracle.publicKey,
-        groupAdmin.tokenAAccount
+        groupAdmin.tokenAAccount,
       );
 
       // Prime the reserve price: refresh reserves batch with skip_price_updates=true
       // requires the reserve to already have valid price data from a prior refresh.
-      // This is only required because the reserves are newly created for this test,
+      // This is only required because the reserves are newly created for this test, 
       // otherwise it would not have been necessary.
       const primeReserveTx = new Transaction().add(
         await simpleRefreshReserve(
           klendBankrunProgram,
           reserveKeypair.publicKey,
           market,
-          oracles.tokenAOracle.publicKey
-        )
+          oracles.tokenAOracle.publicKey,
+        ),
       );
       await processBankrunTransaction(bankrunContext, primeReserveTx, [
         groupAdmin.wallet,
@@ -134,7 +134,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
         groupAdmin.mrgnBankrunProgram.programId,
         kaminoGroup.publicKey,
         mint,
-        seed
+        seed,
       );
 
       const createBankTx = new Transaction().add(
@@ -151,8 +151,8 @@ describe("k18: 16 Kamino position liquidation test", () => {
           {
             config,
             seed,
-          }
-        )
+          },
+        ),
       );
 
       await processBankrunTransaction(bankrunContext, createBankTx, [
@@ -171,8 +171,8 @@ describe("k18: 16 Kamino position liquidation test", () => {
             lendingMarket: market,
             reserve: reserveKeypair.publicKey,
           },
-          new BN(100)
-        )
+          new BN(100),
+        ),
       );
 
       await processBankrunTransaction(bankrunContext, initObligationTx, [
@@ -199,7 +199,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
       groupAdmin.mrgnBankrunProgram.programId,
       kaminoGroup.publicKey,
       ecosystem.usdcMint.publicKey,
-      seed
+      seed,
     );
 
     const config = defaultBankConfig();
@@ -211,7 +211,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
     const configOracleIx = await groupAdmin.mrgnBankrunProgram.methods
       .lendingPoolConfigureBankOracle(
         ORACLE_SETUP_PYTH_PUSH,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       )
       .accountsPartial({
         group: kaminoGroup.publicKey,
@@ -235,7 +235,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
         config,
         seed,
       }),
-      configOracleIx
+      configOracleIx,
     );
 
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
@@ -257,7 +257,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
         marginfiAccount: accountKeypair.publicKey,
         authority: groupAdmin.wallet.publicKey,
         feePayer: groupAdmin.wallet.publicKey,
-      })
+      }),
     );
 
     await processBankrunTransaction(bankrunContext, tx, [
@@ -275,14 +275,14 @@ describe("k18: 16 Kamino position liquidation test", () => {
         ecosystem.usdcMint.publicKey,
         groupAdmin.usdcAccount,
         globalProgramAdmin.wallet.publicKey,
-        10_000_000 * 10 ** ecosystem.usdcDecimals
+        10_000_000 * 10 ** ecosystem.usdcDecimals,
       ),
       await depositIx(groupAdmin.mrgnBankrunProgram, {
         marginfiAccount: accountKeypair.publicKey,
         bank: usdcBank,
         tokenAccount: groupAdmin.usdcAccount,
         amount: depositAmount,
-      })
+      }),
     );
 
     await processBankrunTransaction(bankrunContext, tx, [
@@ -301,7 +301,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
         marginfiAccount: accountKeypair.publicKey,
         authority: users[0].wallet.publicKey,
         feePayer: users[0].wallet.publicKey,
-      })
+      }),
     );
 
     await processBankrunTransaction(bankrunContext, tx, [
@@ -325,11 +325,11 @@ describe("k18: 16 Kamino position liquidation test", () => {
 
       const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
         groupAdmin.mrgnBankrunProgram.programId,
-        bank
+        bank,
       );
       const [obligation] = deriveBaseObligation(
         liquidityVaultAuthority,
-        market
+        market,
       );
 
       const tx = new Transaction().add(
@@ -337,7 +337,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
           klendBankrunProgram,
           reserve,
           market,
-          oracles.tokenAOracle.publicKey
+          oracles.tokenAOracle.publicKey,
         ),
         await simpleRefreshObligation(klendBankrunProgram, market, obligation, [
           reserve,
@@ -351,8 +351,8 @@ describe("k18: 16 Kamino position liquidation test", () => {
             lendingMarket: market,
             reserve,
           },
-          depositAmount
-        )
+          depositAmount,
+        ),
       );
 
       await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
@@ -360,15 +360,15 @@ describe("k18: 16 Kamino position liquidation test", () => {
 
     // Verify all 15 positions were created
     const account = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount
+      userAccount,
     );
     const activeBalances = account.lendingAccount.balances.filter(
-      (b) => !b.bankPk.equals(PublicKey.default)
+      (b) => !b.bankPk.equals(PublicKey.default),
     );
     assert.equal(
       activeBalances.length,
       15,
-      "User should have 15 active positions (Kamino deposits)"
+      "User should have 15 active positions (Kamino deposits)",
     );
   });
 
@@ -476,15 +476,15 @@ describe("k18: 16 Kamino position liquidation test", () => {
 
     // Verify user now has 16 positions (15 Kamino deposits + 1 USDC borrow)
     const account = await bankrunProgram.account.marginfiAccount.fetch(
-      userAccount
+      userAccount,
     );
     const activeBalances = account.lendingAccount.balances.filter(
-      (b) => !b.bankPk.equals(PublicKey.default)
+      (b) => !b.bankPk.equals(PublicKey.default),
     );
     assert.equal(
       activeBalances.length,
       16,
-      "User should have 16 active positions (15 Kamino + 1 USDC borrow)"
+      "User should have 16 active positions (15 Kamino + 1 USDC borrow)",
     );
   });
 
@@ -504,7 +504,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
       await configureBank(groupAdmin.mrgnBankrunProgram, {
         bank: usdcBank,
         bankConfigOpt: config,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
 
@@ -561,7 +561,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
         marginfiAccount: accountKeypair.publicKey,
         authority: user.wallet.publicKey,
         feePayer: user.wallet.publicKey,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [
       user.wallet,
@@ -577,7 +577,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
         bank: usdcBank,
         tokenAccount: user.usdcAccount,
         amount: depositAmountUsdc,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
 
@@ -586,11 +586,11 @@ describe("k18: 16 Kamino position liquidation test", () => {
 
     const [liquidityVaultAuthority0] = deriveLiquidityVaultAuthority(
       user.mrgnBankrunProgram.programId,
-      kaminoBanks[0]
+      kaminoBanks[0],
     );
     const [obligation0] = deriveBaseObligation(
       liquidityVaultAuthority0,
-      kaminoMarkets[0]
+      kaminoMarkets[0],
     );
 
     tx = new Transaction().add(
@@ -598,13 +598,13 @@ describe("k18: 16 Kamino position liquidation test", () => {
         klendBankrunProgram,
         kaminoReserves[0],
         kaminoMarkets[0],
-        oracles.tokenAOracle.publicKey
+        oracles.tokenAOracle.publicKey,
       ),
       await simpleRefreshObligation(
         klendBankrunProgram,
         kaminoMarkets[0],
         obligation0,
-        [kaminoReserves[0]]
+        [kaminoReserves[0]],
       ),
       await makeKaminoDepositIx(
         user.mrgnBankrunProgram,
@@ -615,8 +615,8 @@ describe("k18: 16 Kamino position liquidation test", () => {
           lendingMarket: kaminoMarkets[0],
           reserve: kaminoReserves[0],
         },
-        depositAmountTokenA
-      )
+        depositAmountTokenA,
+      ),
     );
     await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
   });
@@ -633,10 +633,10 @@ describe("k18: 16 Kamino position liquidation test", () => {
     const liquidateeAccount = liquidatee.accounts.get(USER_ACCOUNT);
 
     const liqorAcc = await bankrunProgram.account.marginfiAccount.fetch(
-      liquidatorAccount
+      liquidatorAccount,
     );
     const liqeeAcc = await bankrunProgram.account.marginfiAccount.fetch(
-      liquidateeAccount
+      liquidateeAccount,
     );
     if (verbose) {
       console.log("Liquidatee positions before liquidation:");
@@ -644,22 +644,22 @@ describe("k18: 16 Kamino position liquidation test", () => {
     }
 
     const liabIndex = liqeeAcc.lendingAccount.balances.findIndex((balance) =>
-      balance.bankPk.equals(usdcBank)
+      balance.bankPk.equals(usdcBank),
     );
     const liqeeAssetIndex = liqeeAcc.lendingAccount.balances.findIndex(
-      (balance) => balance.bankPk.equals(kaminoBanks[0])
+      (balance) => balance.bankPk.equals(kaminoBanks[0]),
     );
     const liqorAssetIndex = liqorAcc.lendingAccount.balances.findIndex(
-      (balance) => balance.bankPk.equals(kaminoBanks[0])
+      (balance) => balance.bankPk.equals(kaminoBanks[0]),
     );
     const liabBefore = wrappedI80F48toBigNumber(
-      liqeeAcc.lendingAccount.balances[liabIndex].liabilityShares
+      liqeeAcc.lendingAccount.balances[liabIndex].liabilityShares,
     );
     const liqeeAssetBefore = wrappedI80F48toBigNumber(
-      liqeeAcc.lendingAccount.balances[liqeeAssetIndex].assetShares
+      liqeeAcc.lendingAccount.balances[liqeeAssetIndex].assetShares,
     );
     const liqorAssetBefore = wrappedI80F48toBigNumber(
-      liqorAcc.lendingAccount.balances[liqorAssetIndex].assetShares
+      liqorAcc.lendingAccount.balances[liqorAssetIndex].assetShares,
     );
 
     // Liquidate from Kamino bank 0
@@ -707,7 +707,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
         amount: liquidateAmount,
         liquidateeAccounts: liquidateeAccounts.length,
         liquidatorAccounts: liquidatorAccounts.length,
-      }
+      },
     );
 
     // Fetch the LUT
@@ -770,10 +770,10 @@ describe("k18: 16 Kamino position liquidation test", () => {
 
     // Verify liquidation occurred
     const liqorAccAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      liquidatorAccount
+      liquidatorAccount,
     );
     const liqeeAccAfter = await bankrunProgram.account.marginfiAccount.fetch(
-      liquidateeAccount
+      liquidateeAccount,
     );
     if (verbose) {
       console.log("Liquidatee positions after liquidation:");
@@ -781,20 +781,20 @@ describe("k18: 16 Kamino position liquidation test", () => {
     }
 
     const liabAfter = wrappedI80F48toBigNumber(
-      liqeeAccAfter.lendingAccount.balances[liabIndex].liabilityShares
+      liqeeAccAfter.lendingAccount.balances[liabIndex].liabilityShares,
     );
     const liqeeAssetAfter = wrappedI80F48toBigNumber(
-      liqeeAccAfter.lendingAccount.balances[liqeeAssetIndex].assetShares
+      liqeeAccAfter.lendingAccount.balances[liqeeAssetIndex].assetShares,
     );
     const liqorAssetAfter = wrappedI80F48toBigNumber(
-      liqorAccAfter.lendingAccount.balances[liqorAssetIndex].assetShares
+      liqorAccAfter.lendingAccount.balances[liqorAssetIndex].assetShares,
     );
 
     // Verify liabilities decreased (liquidation worked)
     const liabDelta = Number(liabBefore) - Number(liabAfter);
     assert.isTrue(
       liabDelta > 0,
-      "Liquidatee liabilities should have decreased"
+      "Liquidatee liabilities should have decreased",
     );
 
     // Expected repayment using on-chain liquidation math (mirrors Rust ix)
@@ -813,17 +813,17 @@ describe("k18: 16 Kamino position liquidation test", () => {
       liabDelta,
       expectedLiabDeltaNative,
       5_000, // tolerance in native units
-      "Liability repayment should match liquidation math"
+      "Liability repayment should match liquidation math",
     );
 
     // Asset movements: liquidator gains assets, liquidatee loses assets
     assert.isTrue(
       Number(liqorAssetAfter) > Number(liqorAssetBefore),
-      "Liquidator should receive asset shares"
+      "Liquidator should receive asset shares",
     );
     assert.isTrue(
       Number(liqeeAssetAfter) < Number(liqeeAssetBefore),
-      "Liquidatee asset shares should decrease"
+      "Liquidatee asset shares should decrease",
     );
   });
 });

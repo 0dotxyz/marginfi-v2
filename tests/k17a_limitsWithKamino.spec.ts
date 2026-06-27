@@ -127,7 +127,7 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
           marginfiGroup: throwawayGroup.publicKey,
           newAdmin: groupAdmin.wallet.publicKey,
           newEmodeAdmin: groupAdmin.wallet.publicKey,
-        })
+        }),
       );
       await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
     });
@@ -167,7 +167,7 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
             bank: regularBank,
             tag: bankIndex, // bank’s own tag = its index
             entries,
-          })
+          }),
         );
         await processBankrunTransaction(bankrunContext, tx, [
           groupAdmin.wallet,
@@ -483,13 +483,13 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
             klendBankrunProgram,
             tokenAReserve,
             market,
-            oracles.tokenAOracle.publicKey
+            oracles.tokenAOracle.publicKey,
           ),
           await simpleRefreshObligation(
             klendBankrunProgram,
             market,
             kaminoObligation,
-            [tokenAReserve]
+            [tokenAReserve],
           ),
           await borrowIx(user.mrgnBankrunProgram, {
             marginfiAccount: userAccount,
@@ -617,7 +617,7 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
           amount: liquidateAmount,
           liquidateeAccounts: liquidateeAccounts.length,
           liquidatorAccounts: 7,
-        })
+        }),
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       tx.sign(liquidator.wallet);
@@ -635,7 +635,7 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
       if (result.result) {
         const logs = result.meta.logMessages;
         const isOOM = logs.some((msg) =>
-          msg.toLowerCase().includes("memory allocation failed, out of memory")
+          msg.toLowerCase().includes("memory allocation failed, out of memory"),
         );
 
         if (isOOM) {

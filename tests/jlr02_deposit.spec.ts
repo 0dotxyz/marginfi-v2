@@ -67,11 +67,11 @@ const USER_DEPOSIT_AMOUNT = new BN(50 * 10 ** ecosystem.usdcDecimals); // 50 USD
 const EXPECTED_SHARES_FOR_50_USDC = new BN(50 * 10 ** ecosystem.usdcDecimals);
 
 const NATIVE_TOKEN_A_DEPOSIT_AMOUNT = new BN(
-  25 * 10 ** ecosystem.tokenADecimals
+  25 * 10 ** ecosystem.tokenADecimals,
 );
 const NATIVE_USDC_BORROW_AMOUNT = new BN(45 * 10 ** ecosystem.usdcDecimals);
 const ADMIN_USDC_BORROW_DEBT_CEILING = new BN(
-  1_000 * 10 ** ecosystem.usdcDecimals
+  1_000 * 10 ** ecosystem.usdcDecimals,
 );
 const ONE_HOUR_IN_SECONDS = 60 * 60;
 const EXCHANGE_PRICES_PRECISION = EXCHANGE_PRICES_PRECISION_BN;
@@ -102,7 +102,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
 
     const usdcBankPk = juplendAccounts.get(JUPLEND_STATE_KEYS.jlr01BankUsdc);
     const tokenABankPk = juplendAccounts.get(
-      JUPLEND_STATE_KEYS.jlr01BankTokenA
+      JUPLEND_STATE_KEYS.jlr01BankTokenA,
     );
 
     const [usdcBank, tokenABank] = await Promise.all([
@@ -123,7 +123,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     await mintToTokenAccount(
       usdcBank.mint,
       user.usdcAccount,
-      USER_DEPOSIT_AMOUNT.mul(new BN(3))
+      USER_DEPOSIT_AMOUNT.mul(new BN(3)),
     );
 
     const initUserIx = await accountInit(user.mrgnBankrunProgram, {
@@ -137,12 +137,12 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       new Transaction().add(initUserIx),
       [user.wallet, user0MarginfiAccount],
       false,
-      true
+      true,
     );
 
     juplendAccounts.set(
       JUPLEND_STATE_KEYS.jlr02User0MarginfiAccount,
-      user0MarginfiAccount.publicKey
+      user0MarginfiAccount.publicKey,
     );
   });
 
@@ -167,18 +167,18 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
         bankRunProvider.connection,
         usdcJupPool.fTokenMint,
         undefined,
-        usdcJupPool.tokenProgram
+        usdcJupPool.tokenProgram,
       ),
       bankrunProgram.account.bank.fetch(usdcJupBankPk),
       bankrunProgram.account.marginfiAccount.fetch(
-        user0MarginfiAccount.publicKey
+        user0MarginfiAccount.publicKey,
       ),
       juplendPrograms.lending.account.lending.fetch(usdcJupPool.lending),
       juplendPrograms.liquidity.account.tokenReserve.fetch(
-        usdcJupPool.tokenReserve
+        usdcJupPool.tokenReserve,
       ),
       juplendPrograms.liquidity.account.userSupplyPosition.fetch(
-        usdcJupPool.supplyPositionOnLiquidity
+        usdcJupPool.supplyPositionOnLiquidity,
       ),
     ]);
 
@@ -195,7 +195,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       new Transaction().add(depositIx),
       [user.wallet],
       false,
-      true
+      true,
     );
 
     const [
@@ -218,24 +218,24 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
         bankRunProvider.connection,
         usdcJupPool.fTokenMint,
         undefined,
-        usdcJupPool.tokenProgram
+        usdcJupPool.tokenProgram,
       ),
       bankrunProgram.account.bank.fetch(usdcJupBankPk),
       bankrunProgram.account.marginfiAccount.fetch(
-        user0MarginfiAccount.publicKey
+        user0MarginfiAccount.publicKey,
       ),
       juplendPrograms.lending.account.lending.fetch(usdcJupPool.lending),
       juplendPrograms.liquidity.account.tokenReserve.fetch(
-        usdcJupPool.tokenReserve
+        usdcJupPool.tokenReserve,
       ),
       juplendPrograms.liquidity.account.userSupplyPosition.fetch(
-        usdcJupPool.supplyPositionOnLiquidity
+        usdcJupPool.supplyPositionOnLiquidity,
       ),
     ]);
 
     assert.equal(
       userUsdcBefore - userUsdcAfter,
-      USER_DEPOSIT_AMOUNT.toNumber()
+      USER_DEPOSIT_AMOUNT.toNumber(),
     );
 
     const mintedShares = new BN(fTokenVaultAfter - fTokenVaultBefore);
@@ -246,15 +246,15 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     assert.equal(liquidityVaultAfter, liquidityVaultBefore);
     assert.equal(
       jupReserveVaultAfter - jupReserveVaultBefore,
-      USER_DEPOSIT_AMOUNT.toNumber()
+      USER_DEPOSIT_AMOUNT.toNumber(),
     );
     assert.equal(
       fTokenMintAfter.supply - fTokenMintBefore.supply,
-      BigInt(EXPECTED_SHARES_FOR_50_USDC.toString())
+      BigInt(EXPECTED_SHARES_FOR_50_USDC.toString()),
     );
 
     const userBalanceAfter = userAccountAfter.lendingAccount.balances.find(
-      (b) => b.active && b.bankPk.equals(usdcJupBankPk)
+      (b) => b.active && b.bankPk.equals(usdcJupBankPk),
     );
     assert.ok(userBalanceAfter, "missing active bank balance for user");
 
@@ -263,49 +263,49 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
 
     assertI80F48Equal(
       userBalanceAfter.assetShares,
-      EXPECTED_SHARES_FOR_50_USDC
+      EXPECTED_SHARES_FOR_50_USDC,
     );
     assertI80F48Equal(bankBefore.totalAssetShares, 0);
     assertI80F48Equal(bankAfter.totalAssetShares, EXPECTED_SHARES_FOR_50_USDC);
 
     const bankSharesDelta = wrappedI80F48toBigNumber(
-      bankAfter.totalAssetShares
+      bankAfter.totalAssetShares,
     ).minus(wrappedI80F48toBigNumber(bankBefore.totalAssetShares));
     assert.equal(
       bankSharesDelta.toFixed(0),
-      EXPECTED_SHARES_FOR_50_USDC.toString()
+      EXPECTED_SHARES_FOR_50_USDC.toString(),
     );
 
     assertI80F48Equal(userBalanceAfter.liabilityShares, 0);
     assertI80F48Equal(userBalanceAfter.emissionsOutstanding, 0);
     assert.equal(
       bankAfter.lendingPositionCount,
-      bankBefore.lendingPositionCount + 1
+      bankBefore.lendingPositionCount + 1,
     );
 
     assertBNEqual(
       tokenReserveAfter.totalSupplyWithInterest.sub(
-        tokenReserveBefore.totalSupplyWithInterest
+        tokenReserveBefore.totalSupplyWithInterest,
       ),
-      USER_DEPOSIT_AMOUNT
+      USER_DEPOSIT_AMOUNT,
     );
     assertBNEqual(
       supplyPositionAfter.amount.sub(supplyPositionBefore.amount),
-      USER_DEPOSIT_AMOUNT
+      USER_DEPOSIT_AMOUNT,
     );
     assertBNEqual(
       lendingAfter.tokenExchangePrice,
-      lendingBefore.tokenExchangePrice
+      lendingBefore.tokenExchangePrice,
     );
     assertBNEqual(
       lendingAfter.liquidityExchangePrice,
-      lendingBefore.liquidityExchangePrice
+      lendingBefore.liquidityExchangePrice,
     );
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
     const pulseInitialCacheIx = await pulseBankPrice(user.mrgnBankrunProgram!, {
       bank: usdcJupBankPk,
       remaining: bankAfter.config.oracleKeys.filter(
-        (key) => !key.equals(PublicKey.default)
+        (key) => !key.equals(PublicKey.default),
       ),
     });
     await processBankrunTransaction(
@@ -313,19 +313,19 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       new Transaction().add(pulseInitialCacheIx),
       [user.wallet],
       false,
-      true
+      true,
     );
     const bankAfterPulse = await bankrunProgram.account.bank.fetch(
       usdcJupBankPk
     );
     firstDepositCacheMultiplier = Number(
-      wrappedI80F48toBigNumber(bankAfterPulse.cache.priceMultiplier).toString()
+      wrappedI80F48toBigNumber(bankAfterPulse.cache.priceMultiplier).toString(),
     );
     assert.approximately(
       Number(toI80Scaled(bankAfterPulse.cache.lastOraclePrice)) /
         I80F48_SCALE_NUMBER,
       oracles.usdcPrice,
-      0.000001
+      0.000001,
     );
     assertI80F48Approx(bankAfterPulse.cache.priceMultiplier, 1, 0.01);
   });
@@ -344,7 +344,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       new Transaction().add(depositIx),
       [user.wallet],
       true,
-      true
+      true,
     );
 
     // Juplend's OperateAmountsNearlyZero.
@@ -354,18 +354,18 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
   it("(admin) deposits tokenA and borrows USDC from native jup to generate interest", async () => {
     const [adminUsdcSupplyPosition] = findJuplendLiquiditySupplyPositionPda(
       usdcJupPool.mint,
-      groupAdmin.wallet.publicKey
+      groupAdmin.wallet.publicKey,
     );
     const [adminUsdcBorrowPosition] = findJuplendLiquidityBorrowPositionPda(
       usdcJupPool.mint,
-      groupAdmin.wallet.publicKey
+      groupAdmin.wallet.publicKey,
     );
 
     adminTokenAFTokenAta = getAssociatedTokenAddressSync(
       tokenAPool.fTokenMint,
       groupAdmin.wallet.publicKey,
       false,
-      tokenAPool.tokenProgram
+      tokenAPool.tokenProgram,
     );
 
     const createAdminTokenAFTokenAtaIx =
@@ -374,14 +374,14 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
         adminTokenAFTokenAta,
         groupAdmin.wallet.publicKey,
         tokenAPool.fTokenMint,
-        tokenAPool.tokenProgram
+        tokenAPool.tokenProgram,
       );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(createAdminTokenAFTokenAtaIx),
       [groupAdmin.wallet],
       false,
-      true
+      true,
     );
 
     const adminBorrowConfig = {
@@ -421,17 +421,17 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       new Transaction().add(
         initProtocolIx,
         updateUserClassIx,
-        updateBorrowConfigIx
+        updateBorrowConfigIx,
       ),
       [groupAdmin.wallet],
       false,
-      true
+      true,
     );
 
     await mintToTokenAccount(
       ecosystem.tokenAMint.publicKey,
       groupAdmin.tokenAAccount,
-      NATIVE_TOKEN_A_DEPOSIT_AMOUNT
+      NATIVE_TOKEN_A_DEPOSIT_AMOUNT,
     );
 
     const [
@@ -445,10 +445,10 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       getTokenBalance(bankRunProvider, adminTokenAFTokenAta),
       getTokenBalance(bankRunProvider, groupAdmin.usdcAccount),
       juplendPrograms.liquidity.account.tokenReserve.fetch(
-        usdcJupPool.tokenReserve
+        usdcJupPool.tokenReserve,
       ),
       juplendPrograms.liquidity.account.userBorrowPosition.fetch(
-        adminUsdcBorrowPosition
+        adminUsdcBorrowPosition,
       ),
     ]);
 
@@ -460,14 +460,14 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
         recipientTokenAccount: adminTokenAFTokenAta,
         pool: tokenAPool,
         assets: NATIVE_TOKEN_A_DEPOSIT_AMOUNT,
-      }
+      },
     );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(tokenADepositIx),
       [groupAdmin.wallet],
       false,
-      true
+      true,
     );
 
     const [preOperateIx, borrowIx] = await Promise.all([
@@ -492,7 +492,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       new Transaction().add(preOperateIx, borrowIx),
       [groupAdmin.wallet],
       false,
-      true
+      true,
     );
 
     const [
@@ -506,38 +506,38 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       getTokenBalance(bankRunProvider, adminTokenAFTokenAta),
       getTokenBalance(bankRunProvider, groupAdmin.usdcAccount),
       juplendPrograms.liquidity.account.tokenReserve.fetch(
-        usdcJupPool.tokenReserve
+        usdcJupPool.tokenReserve,
       ),
       juplendPrograms.liquidity.account.userBorrowPosition.fetch(
-        adminUsdcBorrowPosition
+        adminUsdcBorrowPosition,
       ),
     ]);
 
     assert.equal(
       adminTokenABefore - adminTokenAAfter,
-      NATIVE_TOKEN_A_DEPOSIT_AMOUNT.toNumber()
+      NATIVE_TOKEN_A_DEPOSIT_AMOUNT.toNumber(),
     );
     assert.equal(
       adminTokenAFTokenAfter - adminTokenAFTokenBefore,
-      NATIVE_TOKEN_A_DEPOSIT_AMOUNT.toNumber()
+      NATIVE_TOKEN_A_DEPOSIT_AMOUNT.toNumber(),
     );
     assert.equal(
       adminUsdcAfter - adminUsdcBefore,
-      NATIVE_USDC_BORROW_AMOUNT.toNumber()
+      NATIVE_USDC_BORROW_AMOUNT.toNumber(),
     );
     assertBNEqual(
       usdcReserveAfter.totalBorrowWithInterest.sub(
-        usdcReserveBefore.totalBorrowWithInterest
+        usdcReserveBefore.totalBorrowWithInterest,
       ),
-      NATIVE_USDC_BORROW_AMOUNT
+      NATIVE_USDC_BORROW_AMOUNT,
     );
     assertBNEqual(
       adminBorrowPosAfter.amount.sub(adminBorrowPosBefore.amount),
-      NATIVE_USDC_BORROW_AMOUNT
+      NATIVE_USDC_BORROW_AMOUNT,
     );
     assert.isAbove(
       usdcReserveAfter.lastUtilization,
-      usdcReserveBefore.lastUtilization
+      usdcReserveBefore.lastUtilization,
     );
     assert.isAbove(usdcReserveAfter.borrowRate, usdcReserveBefore.borrowRate);
   });
@@ -550,14 +550,14 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
         clockBefore.epochStartTimestamp,
         clockBefore.epoch,
         clockBefore.leaderScheduleEpoch,
-        clockBefore.unixTimestamp + BigInt(ONE_HOUR_IN_SECONDS)
-      )
+        clockBefore.unixTimestamp + BigInt(ONE_HOUR_IN_SECONDS),
+      ),
     );
 
     const clockAfter = await banksClient.getClock();
     assert.equal(
       clockAfter.unixTimestamp.toString(),
-      (clockBefore.unixTimestamp + BigInt(ONE_HOUR_IN_SECONDS)).toString()
+      (clockBefore.unixTimestamp + BigInt(ONE_HOUR_IN_SECONDS)).toString(),
     );
   });
 
@@ -568,7 +568,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       usdcJupPool.fTokenMint,
       user.wallet.publicKey,
       false,
-      usdcJupPool.tokenProgram
+      usdcJupPool.tokenProgram,
     );
 
     const createUserUsdcFTokenAtaIx = createAssociatedTokenAccountInstruction(
@@ -576,14 +576,14 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       userUsdcFTokenAta,
       user.wallet.publicKey,
       usdcJupPool.fTokenMint,
-      usdcJupPool.tokenProgram
+      usdcJupPool.tokenProgram,
     );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(createUserUsdcFTokenAtaIx),
       [user.wallet],
       false,
-      true
+      true,
     );
 
     const [
@@ -599,10 +599,10 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       getTokenBalance(bankRunProvider, usdcJupPool.vault),
       juplendPrograms.lending.account.lending.fetch(usdcJupPool.lending),
       juplendPrograms.liquidity.account.tokenReserve.fetch(
-        usdcJupPool.tokenReserve
+        usdcJupPool.tokenReserve,
       ),
       juplendPrograms.liquidity.account.userSupplyPosition.fetch(
-        usdcJupPool.supplyPositionOnLiquidity
+        usdcJupPool.supplyPositionOnLiquidity,
       ),
     ]);
 
@@ -614,14 +614,14 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
         recipientTokenAccount: userUsdcFTokenAta,
         pool: usdcJupPool,
         assets: USER_DEPOSIT_AMOUNT,
-      }
+      },
     );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(nativeDepositIx),
       [user.wallet],
       false,
-      true
+      true,
     );
 
     const [
@@ -637,15 +637,15 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       getTokenBalance(bankRunProvider, usdcJupPool.vault),
       juplendPrograms.lending.account.lending.fetch(usdcJupPool.lending),
       juplendPrograms.liquidity.account.tokenReserve.fetch(
-        usdcJupPool.tokenReserve
+        usdcJupPool.tokenReserve,
       ),
       juplendPrograms.liquidity.account.userSupplyPosition.fetch(
-        usdcJupPool.supplyPositionOnLiquidity
+        usdcJupPool.supplyPositionOnLiquidity,
       ),
     ]);
 
     const mintedSharesAfterInterest = new BN(
-      userUsdcFTokenAfter - userUsdcFTokenBefore
+      userUsdcFTokenAfter - userUsdcFTokenBefore,
     );
     postInterestMintedShares = mintedSharesAfterInterest;
     postInterestTokenExchangePrice = lendingAfter.tokenExchangePrice;
@@ -653,47 +653,47 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
 
     assert.equal(
       userUsdcBefore - userUsdcAfter,
-      USER_DEPOSIT_AMOUNT.toNumber()
+      USER_DEPOSIT_AMOUNT.toNumber(),
     );
     assert.isTrue(
       mintedSharesAfterInterest.lt(firstDepositMintedShares),
-      `before=${firstDepositMintedShares.toString()} after=${mintedSharesAfterInterest.toString()}`
+      `before=${firstDepositMintedShares.toString()} after=${mintedSharesAfterInterest.toString()}`,
     );
 
     assertBNGreaterThan(
       lendingAfter.tokenExchangePrice,
-      firstDepositTokenExchangePrice
+      firstDepositTokenExchangePrice,
     );
     assertBNGreaterThan(
       lendingAfter.tokenExchangePrice,
-      lendingBefore.tokenExchangePrice
+      lendingBefore.tokenExchangePrice,
     );
     assertBNGreaterThan(
       lendingAfter.liquidityExchangePrice,
-      lendingBefore.liquidityExchangePrice
+      lendingBefore.liquidityExchangePrice,
     );
 
     assert.equal(
       jupReserveVaultAfter - jupReserveVaultBefore,
-      USER_DEPOSIT_AMOUNT.toNumber()
+      USER_DEPOSIT_AMOUNT.toNumber(),
     );
 
     const reserveRawSupplyDelta = tokenReserveAfter.totalSupplyWithInterest.sub(
-      tokenReserveBefore.totalSupplyWithInterest
+      tokenReserveBefore.totalSupplyWithInterest,
     );
     const supplyPositionRawDelta = supplyPositionAfter.amount.sub(
-      supplyPositionBefore.amount
+      supplyPositionBefore.amount,
     );
     nativeSupplyPositionRawDelta = supplyPositionRawDelta;
     assertBNEqual(reserveRawSupplyDelta, supplyPositionRawDelta);
     assert.isTrue(
       reserveRawSupplyDelta.lt(USER_DEPOSIT_AMOUNT),
-      `raw=${reserveRawSupplyDelta.toString()} assets=${USER_DEPOSIT_AMOUNT.toString()}`
+      `raw=${reserveRawSupplyDelta.toString()} assets=${USER_DEPOSIT_AMOUNT.toString()}`,
     );
 
     assertBNEqual(
       tokenReserveAfter.totalBorrowWithInterest,
-      tokenReserveBefore.totalBorrowWithInterest
+      tokenReserveBefore.totalBorrowWithInterest,
     );
   });
 
@@ -713,24 +713,24 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       getTokenBalance(bankRunProvider, usdcJupPool.vault),
       juplendPrograms.lending.account.lending.fetch(usdcJupPool.lending),
       juplendPrograms.liquidity.account.tokenReserve.fetch(
-        usdcJupPool.tokenReserve
+        usdcJupPool.tokenReserve,
       ),
       juplendPrograms.liquidity.account.userSupplyPosition.fetch(
-        usdcJupPool.supplyPositionOnLiquidity
+        usdcJupPool.supplyPositionOnLiquidity,
       ),
       bankrunProgram.account.bank.fetch(usdcJupBankPk),
       bankrunProgram.account.marginfiAccount.fetch(
-        user0MarginfiAccount.publicKey
+        user0MarginfiAccount.publicKey,
       ),
     ]);
 
     assertBNEqual(
       lendingBefore.tokenExchangePrice,
-      postInterestTokenExchangePrice
+      postInterestTokenExchangePrice,
     );
     assertBNEqual(
       lendingBefore.liquidityExchangePrice,
-      postInterestLiquidityExchangePrice
+      postInterestLiquidityExchangePrice,
     );
 
     const depositIx = await makeJuplendDepositIx(user.mrgnBankrunProgram!, {
@@ -746,7 +746,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       new Transaction().add(depositIx),
       [user.wallet],
       false,
-      true
+      true,
     );
 
     const [
@@ -764,22 +764,22 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       getTokenBalance(bankRunProvider, usdcJupPool.vault),
       juplendPrograms.lending.account.lending.fetch(usdcJupPool.lending),
       juplendPrograms.liquidity.account.tokenReserve.fetch(
-        usdcJupPool.tokenReserve
+        usdcJupPool.tokenReserve,
       ),
       juplendPrograms.liquidity.account.userSupplyPosition.fetch(
-        usdcJupPool.supplyPositionOnLiquidity
+        usdcJupPool.supplyPositionOnLiquidity,
       ),
       bankrunProgram.account.bank.fetch(usdcJupBankPk),
       bankrunProgram.account.marginfiAccount.fetch(
-        user0MarginfiAccount.publicKey
+        user0MarginfiAccount.publicKey,
       ),
     ]);
 
     const userBalanceBefore = userAccountBefore.lendingAccount.balances.find(
-      (b) => b.active && b.bankPk.equals(usdcJupBankPk)
+      (b) => b.active && b.bankPk.equals(usdcJupBankPk),
     );
     const userBalanceAfter = userAccountAfter.lendingAccount.balances.find(
-      (b) => b.active && b.bankPk.equals(usdcJupBankPk)
+      (b) => b.active && b.bankPk.equals(usdcJupBankPk),
     );
 
     assert.ok(userBalanceBefore, "missing user balance before mrgn deposit");
@@ -787,7 +787,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
 
     assert.equal(
       userUsdcBefore - userUsdcAfter,
-      USER_DEPOSIT_AMOUNT.toNumber()
+      USER_DEPOSIT_AMOUNT.toNumber(),
     );
     const mintedShares = new BN(fTokenVaultAfter - fTokenVaultBefore);
     assertBNEqual(mintedShares, postInterestMintedShares);
@@ -795,11 +795,11 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
 
     assertBNEqual(
       lendingAfter.tokenExchangePrice,
-      lendingBefore.tokenExchangePrice
+      lendingBefore.tokenExchangePrice,
     );
     assertBNEqual(
       lendingAfter.liquidityExchangePrice,
-      lendingBefore.liquidityExchangePrice
+      lendingBefore.liquidityExchangePrice,
     );
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
     const pulsePostInterestCacheIx = await pulseBankPrice(
@@ -816,7 +816,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       new Transaction().add(pulsePostInterestCacheIx),
       [user.wallet],
       false,
-      true
+      true,
     );
     const bankAfterPulse = await bankrunProgram.account.bank.fetch(
       usdcJupBankPk
@@ -825,7 +825,7 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
       Number(bnToBigIntSafe(lendingAfter.tokenExchangePrice)) /
       Number(EXCHANGE_PRICES_PRECISION.toString());
     const observedCacheMultiplier = Number(
-      wrappedI80F48toBigNumber(bankAfterPulse.cache.priceMultiplier).toString()
+      wrappedI80F48toBigNumber(bankAfterPulse.cache.priceMultiplier).toString(),
     );
     const i80Scale = 1n << 48n;
     const expectedScaled =
@@ -839,52 +839,52 @@ describe("jlr02: JupLend deposits (bankrun)", () => {
     const toleranceScaled = expectedScaled / 1000n; // .1%
     assert.isTrue(
       diffScaled <= toleranceScaled,
-      `cache multiplier mismatch scaled: observed=${observedScaled.toString()} expected=${expectedScaled.toString()} diff=${diffScaled.toString()} tol=${toleranceScaled.toString()}`
+      `cache multiplier mismatch scaled: observed=${observedScaled.toString()} expected=${expectedScaled.toString()} diff=${diffScaled.toString()} tol=${toleranceScaled.toString()}`,
     );
     assert.approximately(
       Number(toI80Scaled(bankAfterPulse.cache.lastOraclePrice)) /
         I80F48_SCALE_NUMBER,
       oracles.usdcPrice,
-      0.000001
+      0.000001,
     );
     assert.isAtLeast(observedCacheMultiplier, firstDepositCacheMultiplier);
     assert.equal(
       jupReserveVaultAfter - jupReserveVaultBefore,
-      USER_DEPOSIT_AMOUNT.toNumber()
+      USER_DEPOSIT_AMOUNT.toNumber(),
     );
 
     const reserveRawSupplyDelta = tokenReserveAfter.totalSupplyWithInterest.sub(
-      tokenReserveBefore.totalSupplyWithInterest
+      tokenReserveBefore.totalSupplyWithInterest,
     );
     const supplyPositionRawDelta = supplyPositionAfter.amount.sub(
-      supplyPositionBefore.amount
+      supplyPositionBefore.amount,
     );
     // Here we confirm that a $50 into jup natively is equivalent to a $50 through p0
     assertBNEqual(nativeSupplyPositionRawDelta, supplyPositionRawDelta);
     assertBNEqual(reserveRawSupplyDelta, supplyPositionRawDelta);
     assert.isTrue(
       reserveRawSupplyDelta.lt(USER_DEPOSIT_AMOUNT),
-      `raw=${reserveRawSupplyDelta.toString()} assets=${USER_DEPOSIT_AMOUNT.toString()}`
+      `raw=${reserveRawSupplyDelta.toString()} assets=${USER_DEPOSIT_AMOUNT.toString()}`,
     );
     assertBNEqual(
       tokenReserveAfter.totalBorrowWithInterest,
-      tokenReserveBefore.totalBorrowWithInterest
+      tokenReserveBefore.totalBorrowWithInterest,
     );
 
     const userAssetShareDelta = wrappedI80F48toBigNumber(
-      userBalanceAfter.assetShares
+      userBalanceAfter.assetShares,
     ).minus(wrappedI80F48toBigNumber(userBalanceBefore.assetShares));
     assert.equal(userAssetShareDelta.toFixed(0), mintedShares.toString());
 
     const bankTotalAssetSharesDelta = wrappedI80F48toBigNumber(
-      bankAfter.totalAssetShares
+      bankAfter.totalAssetShares,
     ).minus(wrappedI80F48toBigNumber(bankBefore.totalAssetShares));
     assert.equal(bankTotalAssetSharesDelta.toFixed(0), mintedShares.toString());
 
     assertI80F48Equal(bankAfter.assetShareValue, bankBefore.assetShareValue);
     assertI80F48Equal(
       bankAfter.liabilityShareValue,
-      bankBefore.liabilityShareValue
+      bankBefore.liabilityShareValue,
     );
   });
 });

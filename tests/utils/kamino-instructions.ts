@@ -40,7 +40,7 @@ export const makeKaminoDepositIx = async (
   program: Program<Marginfi>,
   accounts: KaminoDepositAccounts,
   amount: BN,
-  refreshReserve = false
+  refreshReserve = false,
 ): Promise<TransactionInstruction> => {
   // Merge with defaults...
   const accs = {
@@ -50,22 +50,22 @@ export const makeKaminoDepositIx = async (
 
   const [lendingMarketAuthority] = deriveLendingMarketAuthority(
     KLEND_PROGRAM_ID,
-    accounts.lendingMarket
+    accounts.lendingMarket,
   );
 
   const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
     KLEND_PROGRAM_ID,
-    accounts.reserve
+    accounts.reserve,
   );
 
   const [reserveCollateralMint] = deriveReserveCollateralMint(
     KLEND_PROGRAM_ID,
-    accounts.reserve
+    accounts.reserve,
   );
 
   const [reserveCollateralSupply] = deriveReserveCollateralSupply(
     KLEND_PROGRAM_ID,
-    accounts.reserve
+    accounts.reserve,
   );
 
   return program.methods
@@ -99,7 +99,7 @@ export interface KaminoHarvestRewardAccounts {
 export const makeKaminoHarvestRewardIx = async (
   program: Program<Marginfi>,
   accounts: KaminoHarvestRewardAccounts,
-  rewardIndex: BN
+  rewardIndex: BN,
 ): Promise<TransactionInstruction> => {
   return program.methods
     .kaminoHarvestReward(rewardIndex)
@@ -152,7 +152,7 @@ export interface AddKaminoBankArgs {
 export const makeAddKaminoBankIx = (
   program: Program<Marginfi>,
   accounts: AddKaminoBankAccounts,
-  args: AddKaminoBankArgs
+  args: AddKaminoBankArgs,
 ): Promise<TransactionInstruction> => {
   const oracleMeta: AccountMeta = {
     pubkey: accounts.oracle,
@@ -169,15 +169,15 @@ export const makeAddKaminoBankIx = (
     program.programId,
     accounts.group,
     accounts.bankMint,
-    args.seed
+    args.seed,
   );
   const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
     program.programId,
-    bankKey
+    bankKey,
   );
   const [kaminoObligation] = deriveBaseObligation(
     liquidityVaultAuthority,
-    accounts.kaminoMarket
+    accounts.kaminoMarket,
   );
 
   const ix = program.methods
@@ -230,7 +230,7 @@ export interface InitObligationAccounts {
 export const makeInitObligationIx = async (
   program: Program<Marginfi>,
   accounts: InitObligationAccounts,
-  amount?: BN
+  amount?: BN,
 ): Promise<TransactionInstruction> => {
   // Merge with defaults...
   const accs = {
@@ -240,30 +240,30 @@ export const makeInitObligationIx = async (
 
   const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
     program.programId,
-    accounts.bank
+    accounts.bank,
   );
   const [userMetadata] = deriveUserMetadata(
     KLEND_PROGRAM_ID,
-    liquidityVaultAuthority
+    liquidityVaultAuthority,
   );
   const [lendingMarketAuthority] = deriveLendingMarketAuthority(
     KLEND_PROGRAM_ID,
-    accounts.lendingMarket
+    accounts.lendingMarket,
   );
 
   const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
     KLEND_PROGRAM_ID,
-    accounts.reserve
+    accounts.reserve,
   );
 
   const [reserveCollateralMint] = deriveReserveCollateralMint(
     KLEND_PROGRAM_ID,
-    accounts.reserve
+    accounts.reserve,
   );
 
   const [reserveCollateralSupply] = deriveReserveCollateralSupply(
     KLEND_PROGRAM_ID,
-    accounts.reserve
+    accounts.reserve,
   );
 
   const ix = await program.methods
@@ -312,7 +312,7 @@ export interface KaminoWithdrawArgs {
 export const makeKaminoWithdrawIx = async (
   program: Program<Marginfi>,
   accounts: KaminoWithdrawAccounts,
-  args: KaminoWithdrawArgs
+  args: KaminoWithdrawArgs,
 ): Promise<TransactionInstruction> => {
   // Merge with defaults...
   const accs = {
@@ -328,22 +328,22 @@ export const makeKaminoWithdrawIx = async (
 
   const [lendingMarketAuthority] = deriveLendingMarketAuthority(
     KLEND_PROGRAM_ID,
-    accounts.lendingMarket
+    accounts.lendingMarket,
   );
 
   const [reserveLiquiditySupply] = deriveReserveLiquiditySupply(
     KLEND_PROGRAM_ID,
-    accounts.reserve
+    accounts.reserve,
   );
 
   const [reserveCollateralMint] = deriveReserveCollateralMint(
     KLEND_PROGRAM_ID,
-    accounts.reserve
+    accounts.reserve,
   );
 
   const [reserveSourceCollateral] = deriveReserveCollateralSupply(
     KLEND_PROGRAM_ID,
-    accounts.reserve
+    accounts.reserve,
   );
 
   const flags =
