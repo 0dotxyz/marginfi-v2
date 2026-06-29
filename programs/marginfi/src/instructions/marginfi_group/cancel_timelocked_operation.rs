@@ -83,7 +83,7 @@ pub fn cancel_timelocked_operation(
 pub struct CancelTimelockedOperation<'info> {
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
-    /// For ADD_BANK: bank_mint. For other ops: bank pubkey.
+    /// CHECK: For ADD_BANK: bank_mint. For other ops: bank pubkey. Used only to derive the PDA seed.
     pub bank_or_mint: AccountInfo<'info>,
 
     #[account(mut)]

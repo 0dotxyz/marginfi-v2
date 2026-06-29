@@ -1,4 +1,4 @@
-use bytemuck::{Pod, Zeroable};
+use std::fmt::Debug;
 
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
@@ -40,8 +40,11 @@ pub struct TimelockedOperation {
     pub data: TimelockedOperationData,
 }
 
-#[repr(C)]
-#[derive(Default, Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)]
+#[cfg_attr(feature = "anchor", zero_copy)]
+#[cfg_attr(
+    not(feature = "anchor"),
+    derive(Default, Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)
+)]
 pub struct TimelockedOperationData {
     /// u64 slots for operation-specific data. Meaning depends on operation_type.
     pub value_u64_1: u64,
@@ -71,3 +74,55 @@ impl TimelockedOperation {
     pub const LEN: usize = std::mem::size_of::<TimelockedOperation>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::TIMELOCKED_OPERATION;
 }
+
+#[cfg(feature = "anchor")]
+impl Default for TimelockedOperationData {
+    fn default() -> Self {
+        Self {
+            value_u64_1: 0,
+            value_u64_2: 0,
+            value_u64_3: 0,
+            value_u64_4: 0,
+            pubkey_1: Pubkey::default(),
+            pubkey_2: Pubkey::default(),
+            pubkey_3: Pubkey::default(),
+            extra: [0; 32],
+            extra_extended: [0; 32],
+        }
+    }
+}
+
+#[cfg(feature = "anchor")]
+impl Debug for TimelockedOperationData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TimelockedOperationData")
+            .field("value_u64_1", &self.value_u64_1)
+            .field("value_u64_2", &self.value_u64_2)
+            .field("value_u64_3", &self.value_u64_3)
+            .field("value_u64_4", &self.value_u64_4)
+            .field("pubkey_1", &self.pubkey_1)
+            .field("pubkey_2", &self.pubkey_2)
+            .field("pubkey_3", &self.pubkey_3)
+            .field("extra", &self.extra)
+            .field("extra_extended", &self.extra_extended)
+            .finish()
+    }
+}
+
+#[cfg(feature = "anchor")]
+impl PartialEq for TimelockedOperationData {
+    fn eq(&self, other: &Self) -> bool {
+        self.value_u64_1 == other.value_u64_1
+            && self.value_u64_2 == other.value_u64_2
+            && self.value_u64_3 == other.value_u64_3
+            && self.value_u64_4 == other.value_u64_4
+            && self.pubkey_1 == other.pubkey_1
+            && self.pubkey_2 == other.pubkey_2
+            && self.pubkey_3 == other.pubkey_3
+            && self.extra == other.extra
+            && self.extra_extended == other.extra_extended
+    }
+}
+
+#[cfg(feature = "anchor")]
+impl Eq for TimelockedOperationData {}

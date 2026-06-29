@@ -32,7 +32,7 @@ pub fn lending_pool_schedule_set_fixed_oracle_price(
     require!(!bank.get_flag(FREEZE_SETTINGS), MarginfiError::Unauthorized);
 
     check!(
-        price_i80 >= I80F48::ZERO,
+        I80F48::from_le_bytes(price.value) >= I80F48::ZERO,
         MarginfiError::FixedOraclePriceNegative
     );
 
