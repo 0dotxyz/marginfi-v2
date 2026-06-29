@@ -17,6 +17,8 @@ pub trait MarginfiGroupImpl {
     fn update_emissions_admin(&mut self, new_emissions_admin: Pubkey);
     fn update_metadata_admin(&mut self, new_metadata_admin: Pubkey);
     fn update_risk_admin(&mut self, new_risk_admin: Pubkey);
+    fn update_timelocked_admin(&mut self, new_timelocked_admin: Pubkey);
+    fn set_timelocked_operation_delay(&mut self, delay_seconds: u64);
     fn set_initial_configuration(&mut self, admin_pk: Pubkey);
     fn get_group_bank_config(&self) -> GroupBankConfig;
     fn set_program_fee_enabled(&mut self, fee_enabled: bool);
@@ -142,6 +144,24 @@ impl MarginfiGroupImpl for MarginfiGroup {
             );
             self.risk_admin = new_risk_admin;
         }
+    }
+
+    fn update_timelocked_admin(&mut self, new_timelocked_admin: Pubkey) {
+        msg!(
+            "Set timelocked admin from {:?} to {:?}",
+            self.timelocked_admin,
+            new_timelocked_admin
+        );
+        self.timelocked_admin = new_timelocked_admin;
+    }
+
+    fn set_timelocked_operation_delay(&mut self, delay_seconds: u64) {
+        msg!(
+            "Set timelocked operation delay from {} to {} seconds",
+            self.timelocked_operation_delay_seconds,
+            delay_seconds
+        );
+        self.timelocked_operation_delay_seconds = delay_seconds;
     }
 
     /// Set the group parameters when initializing a group.

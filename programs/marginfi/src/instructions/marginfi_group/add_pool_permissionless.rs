@@ -1,5 +1,6 @@
 // Adds a ASSET_TAG_STAKED type bank to a group with sane defaults. Used by validators to add their
 // stake pool to a group so users can borrow SOL against it
+use super::timelocked_utils::*;
 use crate::{
     check,
     constants::SPL_SINGLE_POOL_ID,
@@ -27,6 +28,11 @@ pub fn lending_pool_add_bank_permissionless(
     ctx: Context<LendingPoolAddBankPermissionless>,
     _bank_seed: u64,
 ) -> MarginfiResult {
+    {
+        let marginfi_group = ctx.accounts.marginfi_group.load()?;
+        assert_timelocked_admin_not_set(&marginfi_group)?;
+    }
+
     let LendingPoolAddBankPermissionless {
         bank_mint,
         liquidity_vault,

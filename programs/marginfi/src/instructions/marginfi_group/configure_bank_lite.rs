@@ -1,3 +1,4 @@
+use super::timelocked_utils::*;
 use crate::set_if_some;
 use crate::state::bank::BankImpl;
 use crate::state::interest_rate::InterestRateConfigImpl;
@@ -13,6 +14,11 @@ pub fn lending_pool_configure_bank_interest_only(
     ctx: Context<LendingPoolConfigureBankInterestOnly>,
     interest_rate_config: InterestRateConfigOpt,
 ) -> MarginfiResult {
+    {
+        let group = ctx.accounts.group.load()?;
+        assert_timelocked_admin_not_set(&group)?;
+    }
+
     let mut bank = ctx.accounts.bank.load_mut()?;
     msg!(
         "Configuring bank: {:?} mint: {:?}",
@@ -37,11 +43,11 @@ pub fn lending_pool_configure_bank_interest_only(
 #[derive(Accounts)]
 pub struct LendingPoolConfigureBankInterestOnly<'info> {
     #[account(
-        has_one = delegate_curve_admin @ MarginfiError::Unauthorized,
+        has_one = admin @ MarginfiError::Unauthorized,
     )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub delegate_curve_admin: Signer<'info>,
+    pub admin: Signer<'info>,
 
     #[account(
         mut,
@@ -56,6 +62,11 @@ pub fn lending_pool_configure_bank_limits_only(
     borrow_limit: Option<u64>,
     total_asset_value_init_limit: Option<u64>,
 ) -> MarginfiResult {
+    {
+        let group = ctx.accounts.group.load()?;
+        assert_timelocked_admin_not_set(&group)?;
+    }
+
     let mut bank = ctx.accounts.bank.load_mut()?;
     msg!(
         "Configuring bank: {:?} mint: {:?}",
@@ -86,11 +97,11 @@ pub fn lending_pool_configure_bank_limits_only(
 #[derive(Accounts)]
 pub struct LendingPoolConfigureBankLimitsOnly<'info> {
     #[account(
-        has_one = delegate_limit_admin @ MarginfiError::Unauthorized,
+        has_one = admin @ MarginfiError::Unauthorized,
     )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub delegate_limit_admin: Signer<'info>,
+    pub admin: Signer<'info>,
 
     #[account(
         mut,

@@ -59,12 +59,54 @@ pub mod marginfi {
         )
     }
 
+    /// (admin or timelocked_admin only) Configure the timelocked admin and timelock delay.
+    /// If timelocked admin is already set, only the timelocked admin can update it.
+    pub fn marginfi_group_configure_timelocked_admin(
+        ctx: Context<ConfigureTimelockedAdmin>,
+        new_timelocked_admin: Pubkey,
+        timelocked_operation_delay_seconds: u64,
+    ) -> MarginfiResult {
+        marginfi_group::configure_timelocked_admin(
+            ctx,
+            new_timelocked_admin,
+            timelocked_operation_delay_seconds,
+        )
+    }
+
     /// (admin only) Add a new bank to the lending pool
     pub fn lending_pool_add_bank(
         ctx: Context<LendingPoolAddBank>,
         bank_config: BankConfigCompact,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_add_bank(ctx, bank_config)
+    }
+
+    /// (timelocked_admin only) Schedule an add bank operation to be executed after the timelock period
+    pub fn lending_pool_schedule_add_bank(
+        ctx: Context<LendingPoolScheduleAddBank>,
+        bank_config: BankConfigCompact,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_schedule_add_bank(ctx, bank_config)
+    }
+
+    /// (timelocked_admin or admin only) Validate a scheduled add bank operation after the timelock period.
+    /// This locks in all bank configuration parameters for verification during finalization.
+    /// Call this second in the 3-step workflow: schedule → validate → finalize
+    pub fn lending_pool_validate_timelocked_add_bank(
+        ctx: Context<LendingPoolValidateTimelockedAddBank>,
+        bank_config: BankConfigCompact,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_validate_timelocked_add_bank(ctx, bank_config)
+    }
+
+    /// (timelocked_admin or admin only) Finalize a scheduled add bank operation to actually create the bank.
+    /// Call this third in the 3-step workflow: schedule → validate → finalize
+    /// Must be called after lending_pool_validate_timelocked_add_bank succeeds.
+    pub fn lending_pool_finalize_timelocked_add_bank(
+        ctx: Context<LendingPoolFinalizeTimelockedAddBank>,
+        bank_config: BankConfigCompact,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_finalize_timelocked_add_bank(ctx, bank_config)
     }
 
     /// (admin only) A copy of lending_pool_add_bank with an additional bank seed.
@@ -104,7 +146,7 @@ pub mod marginfi {
         marginfi_group::lending_pool_configure_bank(ctx, bank_config_opt)
     }
 
-    /// (delegate_curve_admin only) Update interest rate config. Does nothing if bank has
+    /// (admin only) Update interest rate config. Does nothing if bank has
     /// `FREEZE_SETTINGS`.
     pub fn lending_pool_configure_bank_interest_only(
         ctx: Context<LendingPoolConfigureBankInterestOnly>,
@@ -113,7 +155,7 @@ pub mod marginfi {
         marginfi_group::lending_pool_configure_bank_interest_only(ctx, interest_rate_config)
     }
 
-    /// (delegate_limit_admin only) Update deposit/borrow/init limits only.
+    /// (admin only) Update deposit/borrow/init limits only.
     pub fn lending_pool_configure_bank_limits_only(
         ctx: Context<LendingPoolConfigureBankLimitsOnly>,
         deposit_limit: Option<u64>,
@@ -146,12 +188,46 @@ pub mod marginfi {
         marginfi_group::lending_pool_configure_bank_oracle(ctx, setup, oracle)
     }
 
+    /// (timelocked_admin only) Schedule an oracle configuration operation
+    pub fn lending_pool_schedule_configure_bank_oracle(
+        ctx: Context<LendingPoolScheduleConfigureBankOracle>,
+        setup: u8,
+        oracle: Pubkey,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_schedule_configure_bank_oracle(ctx, setup, oracle)
+    }
+
+    /// (timelocked_admin or admin only) Execute a scheduled oracle configuration after timelock
+    pub fn lending_pool_execute_timelocked_configure_bank_oracle(
+        ctx: Context<LendingPoolExecuteTimelockedConfigureBankOracle>,
+        setup: u8,
+        oracle: Pubkey,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_execute_timelocked_configure_bank_oracle(ctx, setup, oracle)
+    }
+
     /// (admin only)
     pub fn lending_pool_set_fixed_oracle_price(
         ctx: Context<LendingPoolSetFixedOraclePrice>,
         price: WrappedI80F48,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_set_fixed_oracle_price(ctx, price)
+    }
+
+    /// (timelocked_admin only) Schedule a fixed oracle price operation
+    pub fn lending_pool_schedule_set_fixed_oracle_price(
+        ctx: Context<LendingPoolScheduleSetFixedOraclePrice>,
+        price: WrappedI80F48,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_schedule_set_fixed_oracle_price(ctx, price)
+    }
+
+    /// (timelocked_admin or admin only) Execute a scheduled fixed oracle price after timelock
+    pub fn lending_pool_execute_timelocked_set_fixed_oracle_price(
+        ctx: Context<LendingPoolExecuteTimelockedSetFixedOraclePrice>,
+        price: WrappedI80F48,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_execute_timelocked_set_fixed_oracle_price(ctx, price)
     }
 
     /// (emode_admin only)
@@ -167,6 +243,46 @@ pub mod marginfi {
     /// emode settings from e.g. one LST to another.
     pub fn lending_pool_clone_emode(ctx: Context<LendingPoolCloneEmode>) -> MarginfiResult {
         marginfi_group::lending_pool_clone_emode(ctx)
+    }
+
+    /// (timelocked_admin only) Schedule a bank activation operation (transition from ReduceOnly/Paused to Operational)
+    pub fn lending_pool_schedule_activate_bank(
+        ctx: Context<LendingPoolScheduleActivateBank>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_schedule_activate_bank(ctx)
+    }
+
+    /// (timelocked_admin or admin only) Execute a scheduled bank activation after timelock
+    pub fn lending_pool_execute_timelocked_activate_bank(
+        ctx: Context<LendingPoolExecuteTimelockedActivateBank>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_execute_timelocked_activate_bank(ctx)
+    }
+
+    /// (timelocked_admin only) Schedule a risk tier configuration operation.
+    /// Risk tier changes (Isolated ↔ Collateral) are high-risk and require timelock governance.
+    pub fn lending_pool_schedule_configure_bank_risk_tier(
+        ctx: Context<LendingPoolScheduleConfigureBankRiskTier>,
+        new_risk_tier: u8,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_schedule_configure_bank_risk_tier(ctx, new_risk_tier)
+    }
+
+    /// (timelocked_admin or admin only) Execute a scheduled risk tier configuration after timelock
+    pub fn lending_pool_execute_timelocked_configure_bank_risk_tier(
+        ctx: Context<LendingPoolExecuteTimelockedConfigureBankRiskTier>,
+        new_risk_tier: u8,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_execute_timelocked_configure_bank_risk_tier(ctx, new_risk_tier)
+    }
+
+    /// (timelocked_admin or admin only) Cancel a scheduled timelocked operation before execution.
+    /// Allows recovery if an operation was scheduled by mistake or if the timelocked admin key is compromised.
+    pub fn cancel_timelocked_operation(
+        ctx: Context<CancelTimelockedOperation>,
+        operation_type_: u8,
+    ) -> MarginfiResult {
+        marginfi_group::cancel_timelocked_operation(ctx, operation_type_)
     }
 
     /// (permissionless) Reclaim all remaining tokens from the emissions vault
@@ -655,6 +771,13 @@ pub mod marginfi {
     /// on how interest accrues.
     pub fn migrate_curve(ctx: Context<MigrateCurve>) -> MarginfiResult {
         marginfi_group::migrate_curve(ctx)
+    }
+
+    /// (Admin only) Reallocate a MarginfiGroup account to accommodate timelocked admin fields.
+    /// Expands the account to the new required size and zero-fills new bytes.
+    /// Required for existing groups to use timelocked admin features.
+    pub fn migrate_group_realloc(ctx: Context<MigrateGroupRealloc>) -> MarginfiResult {
+        marginfi_group::migrate_group_realloc(ctx)
     }
 
     /// (permissionless) pay the rent to open a bank's metadata.

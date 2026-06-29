@@ -1,3 +1,4 @@
+use super::timelocked_utils::*;
 use crate::events::{GroupEventHeader, LendingPoolBankSetFixedOraclePriceEvent};
 use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
@@ -16,6 +17,11 @@ pub fn lending_pool_set_fixed_oracle_price(
     ctx: Context<LendingPoolSetFixedOraclePrice>,
     price: WrappedI80F48,
 ) -> MarginfiResult {
+    {
+        let marginfi_group = ctx.accounts.group.load()?;
+        assert_timelocked_admin_not_set(&marginfi_group)?;
+    }
+
     let mut bank = ctx.accounts.bank.load_mut()?;
 
     if bank.get_flag(FREEZE_SETTINGS) {

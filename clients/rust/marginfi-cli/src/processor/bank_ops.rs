@@ -1177,12 +1177,12 @@ pub fn bank_configure_interest_only(
     let bank: Bank = config.mfi_program.account(bank_pk)?;
     let group: MarginfiGroup = config.mfi_program.account(bank.group)?;
 
-    if group.delegate_curve_admin != config.authority() {
+    if group.admin != config.authority() {
         bail!(
-            "Authority {} does not match the group's delegate_curve_admin {}. \
-             Only the delegate curve admin can configure interest rates via this command.",
+            "Authority {} does not match the group's admin {}. \
+             Only the admin can configure interest rates via this command.",
             config.authority(),
-            group.delegate_curve_admin
+            group.admin
         );
     }
 
@@ -1190,7 +1190,7 @@ pub fn bank_configure_interest_only(
         program_id: config.program_id,
         accounts: marginfi::accounts::LendingPoolConfigureBankInterestOnly {
             group: bank.group,
-            delegate_curve_admin: config.authority(),
+            admin: config.authority(),
             bank: bank_pk,
         }
         .to_account_metas(Some(true)),
@@ -1217,12 +1217,12 @@ pub fn bank_configure_limits_only(
     let bank: Bank = config.mfi_program.account(bank_pk)?;
     let group: MarginfiGroup = config.mfi_program.account(bank.group)?;
 
-    if group.delegate_limit_admin != config.authority() {
+    if group.admin != config.authority() {
         bail!(
-            "Authority {} does not match the group's delegate_limit_admin {}. \
-             Only the delegate limit admin can configure limits via this command.",
+            "Authority {} does not match the group's admin {}. \
+             Only the admin can configure limits via this command.",
             config.authority(),
-            group.delegate_limit_admin
+            group.admin
         );
     }
 
@@ -1235,7 +1235,7 @@ pub fn bank_configure_limits_only(
         program_id: config.program_id,
         accounts: marginfi::accounts::LendingPoolConfigureBankLimitsOnly {
             group: bank.group,
-            delegate_limit_admin: config.authority(),
+            admin: config.authority(),
             bank: bank_pk,
         }
         .to_account_metas(Some(true)),

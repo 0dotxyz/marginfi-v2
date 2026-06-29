@@ -10,7 +10,7 @@ use super::{GroupRateLimiter, PanicStateCache, WrappedI80F48};
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
 
-assert_struct_size!(MarginfiGroup, 1056);
+assert_struct_size!(MarginfiGroup, 1080);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
 #[cfg_attr(not(feature = "anchor"), derive(Pod, Zeroable, Copy, Clone))]
@@ -87,13 +87,31 @@ pub struct MarginfiGroup {
     /// does not itself compromise any funds, and is merely annoying.
     pub delegate_flow_admin: Pubkey,
 
-    pub _padding_0: [[u64; 2]; 2],
+    pub _padding_0: [[u64; 2]; 1],
+
+    /// Timelocked admin who can perform high-risk operations (add banks, configure oracles, etc.)
+    /// Only this admin can change the timelocked_admin itself after initial setup.
+    /// The timelocked admin is the only one authorized to schedule operations.
+    pub timelocked_admin: Pubkey,
+
+    /// Delay in seconds before timelocked operations can be executed.
+    /// Enforces a minimum timelock duration for high-risk admin operations.
+    /// Must be > 0 to enable the timelocked admin feature.
+    pub timelocked_operation_delay_seconds: u64,
+
+    /// Reserved for future use (padding remains at 32 slots; reduction was in _padding_0)
     pub _padding_1: [[u64; 2]; 32],
 }
 
 impl MarginfiGroup {
     pub const LEN: usize = std::mem::size_of::<MarginfiGroup>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::GROUP;
+
+    /// Check if a timelocked admin is configured for this group.
+    /// Returns true if timelocked_admin is not the default (zero) pubkey.
+    pub fn has_timelocked_admin(&self) -> bool {
+        self.timelocked_admin != Pubkey::default()
+    }
 }
 
 #[repr(C)]

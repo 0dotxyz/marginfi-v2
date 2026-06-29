@@ -453,7 +453,7 @@ impl MarginfiGroupFixture {
     ) -> Instruction {
         let accounts = marginfi::accounts::LendingPoolConfigureBankInterestOnly {
             group: self.key,
-            delegate_curve_admin: self.ctx.borrow().payer.pubkey(),
+            admin: self.ctx.borrow().payer.pubkey(),
             bank: bank.key,
         }
         .to_account_metas(Some(true));
@@ -499,7 +499,7 @@ impl MarginfiGroupFixture {
     ) -> Instruction {
         let accounts = marginfi::accounts::LendingPoolConfigureBankLimitsOnly {
             group: self.key,
-            delegate_limit_admin: self.ctx.borrow().payer.pubkey(),
+            admin: self.ctx.borrow().payer.pubkey(),
             bank: bank.key,
         }
         .to_account_metas(Some(true));

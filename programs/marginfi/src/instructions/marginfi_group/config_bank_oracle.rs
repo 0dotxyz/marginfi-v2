@@ -1,3 +1,4 @@
+use super::timelocked_utils::*;
 use crate::events::{GroupEventHeader, LendingPoolBankConfigureOracleEvent};
 use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
@@ -11,9 +12,13 @@ pub fn lending_pool_configure_bank_oracle(
     setup: u8,
     oracle: Pubkey,
 ) -> MarginfiResult {
+    {
+        let marginfi_group = ctx.accounts.group.load()?;
+        assert_timelocked_admin_not_set(&marginfi_group)?;
+    }
+
     let mut bank = ctx.accounts.bank.load_mut()?;
 
-    // If settings are frozen, you can only update the deposit and borrow limits, so this ix will fail
     if bank.get_flag(FREEZE_SETTINGS) {
         panic!("cannot change oracle settings on frozen banks");
     } else {

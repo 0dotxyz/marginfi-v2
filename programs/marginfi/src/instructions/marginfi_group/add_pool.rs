@@ -1,3 +1,4 @@
+use super::timelocked_utils::*;
 use crate::{
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
@@ -15,14 +16,16 @@ use marginfi_type_crate::{
     types::{Bank, BankConfigCompact, FeeState, MarginfiGroup},
 };
 
-/// Add a bank to the lending pool
-///
-/// Admin only
+/// Admin only. GATED: Once timelocked admin is set, use lending_pool_schedule_add_bank.
 pub fn lending_pool_add_bank(
     ctx: Context<LendingPoolAddBank>,
     bank_config: BankConfigCompact,
 ) -> MarginfiResult {
-    // Transfer the flat sol init fee to the global fee wallet
+    {
+        let marginfi_group = ctx.accounts.marginfi_group.load()?;
+        assert_timelocked_admin_not_set(&marginfi_group)?;
+    }
+
     let fee_state = ctx.accounts.fee_state.load()?;
     let bank_init_flat_sol_fee = fee_state.bank_init_flat_sol_fee;
     if bank_init_flat_sol_fee > 0 {

@@ -14,6 +14,7 @@ pub mod price;
 pub mod pubkey;
 pub mod rate_limiter;
 pub mod staked_settings;
+pub mod timelocked_operation;
 pub mod user_account;
 pub mod wrapped_i80f48;
 
@@ -33,5 +34,6 @@ pub use price::*;
 pub use pubkey::*;
 pub use rate_limiter::*;
 pub use staked_settings::*;
+pub use timelocked_operation::*;
 pub use user_account::*;
 pub use wrapped_i80f48::*;

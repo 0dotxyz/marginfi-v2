@@ -185,6 +185,24 @@ pub enum RiskTier {
 unsafe impl Zeroable for RiskTier {}
 unsafe impl Pod for RiskTier {}
 
+impl From<RiskTier> for u8 {
+    fn from(tier: RiskTier) -> u8 {
+        tier as u8
+    }
+}
+
+impl std::convert::TryFrom<u8> for RiskTier {
+    type Error = ();
+
+    fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
+        match value {
+            0 => Ok(RiskTier::Collateral),
+            1 => Ok(RiskTier::Isolated),
+            _ => Err(()),
+        }
+    }
+}
+
 #[repr(u8)]
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]

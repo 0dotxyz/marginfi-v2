@@ -121,6 +121,7 @@ pub trait BankImpl {
     fn decrement_lending_position_count(&mut self);
     fn increment_borrowing_position_count(&mut self);
     fn decrement_borrowing_position_count(&mut self);
+    fn is_activatable(&self) -> bool;
 }
 
 impl BankImpl for Bank {
@@ -806,6 +807,12 @@ impl BankImpl for Bank {
 
     fn decrement_borrowing_position_count(&mut self) {
         self.borrowing_position_count = self.borrowing_position_count.saturating_sub(1);
+    }
+
+    fn is_activatable(&self) -> bool {
+        use marginfi_type_crate::types::BankOperationalState;
+        self.config.operational_state != BankOperationalState::Operational
+            && self.config.operational_state != BankOperationalState::KilledByBankruptcy
     }
 }
 

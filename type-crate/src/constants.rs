@@ -20,6 +20,7 @@ pub const LIQUIDATION_RECORD_SEED: &str = "liq_record";
 pub const MARGINFI_ACCOUNT_SEED: &str = "marginfi_account";
 pub const ORDER_SEED: &str = "order";
 pub const EXECUTE_ORDER_SEED: &str = "execute_order";
+pub const TIMELOCKED_OPERATION_SEED: &str = "timelocked_op";
 
 pub const METADATA_SEED: &str = "metadata";
 
@@ -198,6 +199,7 @@ pub mod discriminators {
     pub const LIQUIDATION_RECORD: [u8; 8] = [95, 116, 23, 132, 89, 210, 245, 162];
     pub const ORDER: [u8; 8] = [134, 173, 223, 185, 77, 86, 28, 51];
     pub const EXECUTE_ORDER_RECORD: [u8; 8] = [6, 100, 107, 60, 164, 226, 56, 97];
+    pub const TIMELOCKED_OPERATION: [u8; 8] = [71, 155, 200, 180, 242, 37, 224, 140];
 }
 
 pub mod ix_discriminators {

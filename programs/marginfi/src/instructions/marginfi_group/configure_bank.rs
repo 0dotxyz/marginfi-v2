@@ -1,3 +1,4 @@
+use super::timelocked_utils::*;
 use crate::check;
 use crate::events::{
     GroupEventHeader, LendingPoolBankConfigureEvent, LendingPoolBankConfigureFrozenEvent,
@@ -23,9 +24,15 @@ pub fn lending_pool_configure_bank(
     ctx: Context<LendingPoolConfigureBank>,
     bank_config: BankConfigOpt,
 ) -> MarginfiResult {
+    // GATED: risk_tier and operational_state changes require timelocked path
+    if bank_config.risk_tier.is_some() || bank_config.operational_state.is_some() {
+        let marginfi_group = ctx.accounts.group.load()?;
+        assert_timelocked_admin_not_set(&marginfi_group)?;
+    }
+
     let mut bank = ctx.accounts.bank.load_mut()?;
 
-    // If settings are frozen, you can only update the deposit and borrow limits, everything else is ignored.
+    // If settings frozen, only deposit/borrow limits can be updated
     if bank.get_flag(FREEZE_SETTINGS) {
         bank.configure_unfrozen_fields_only(&bank_config)?;
 

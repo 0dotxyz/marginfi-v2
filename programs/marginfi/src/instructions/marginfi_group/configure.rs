@@ -46,7 +46,13 @@ pub fn configure(
     emode_max_maint_leverage: Option<WrappedI80F48>,
 ) -> MarginfiResult {
     let marginfi_group = &mut ctx.accounts.marginfi_group.load_mut()?;
+
+    // Prevent role collapse: admin cannot equal timelocked_admin
     if let Some(new_admin) = new_admin {
+        require!(
+            new_admin != marginfi_group.timelocked_admin,
+            MarginfiError::InvalidConfig
+        );
         marginfi_group.update_admin(new_admin);
     }
     if let Some(new_emode_admin) = new_emode_admin {
