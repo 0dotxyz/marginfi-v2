@@ -422,7 +422,18 @@ pub enum MarginfiError {
     JuplendInitPositionDepositInsufficient, // 6511
     #[msg("Invalid Juplend withdraw intermediary ATA")]
     InvalidJuplendWithdrawIntermediaryAta, // 6512
-                                           // **************END JUPLEND ERRORS
+    // **************END JUPLEND ERRORS
+
+    // **************SCOPE ERRORS
+    #[msg("Scope oracle account has wrong owner")]
+    ScopeWrongAccountOwner, // 6513
+    #[msg("Scope oracle account is invalid (bad discriminator or length)")]
+    ScopeInvalidAccount, // 6514
+    #[msg("Scope price is stale")]
+    ScopeStalePrice, // 6515
+    #[msg("Scope price index is out of range")]
+    ScopeInvalidPriceIndex, // 6516
+    // **************END SCOPE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {

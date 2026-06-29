@@ -81,6 +81,7 @@ pub enum OraclePriceFeedAdapter {
     PythPushOracle(PythPushOraclePriceFeed),
     SwitchboardPull(SwitchboardPullPriceFeed),
     Fixed(FixedPriceFeed),
+    Scope(ScopePriceFeed),
 }
 
 /// Checks oracles[0], which is typically the Pyth or Switchboard key.
@@ -704,6 +705,91 @@ impl OraclePriceFeedAdapter {
 
                 Ok(OraclePriceFeedAdapter::SwitchboardPull(price_feed))
             }
+            OracleSetup::Scope => {
+                // Single account: the Scope `OraclePrices` aggregator account.
+                check!(ais.len() == 1, MarginfiError::WrongNumberOfOracleAccounts);
+                check_primary_oracle_key(bank_config, &ais[0])?;
+
+                let entry_id = scope_entry_id(bank_config);
+
+                Ok(OraclePriceFeedAdapter::Scope(ScopePriceFeed::load_checked(
+                    &ais[0],
+                    entry_id,
+                    clock.unix_timestamp,
+                    max_age,
+                )?))
+            }
+            OracleSetup::KaminoScope => {
+                // (1) Scope price account and (2) Kamino reserve (for exchange rate)
+                check!(ais.len() == 2, MarginfiError::WrongNumberOfOracleAccounts);
+                check_primary_oracle_key(bank_config, &ais[0])?;
+
+                let reserve_loader = load_kamino_reserve(bank_config, &ais[1])?;
+                let reserve = reserve_loader.load()?;
+                ensure_kamino_reserve_fresh(&reserve, clock)?;
+
+                let mut feed = ScopePriceFeed::load_checked(
+                    &ais[0],
+                    scope_entry_id(bank_config),
+                    clock.unix_timestamp,
+                    max_age,
+                )?;
+
+                let (total_liq, total_col) = reserve.scaled_supplies()?;
+                if total_col > I80F48::ZERO {
+                    feed.apply_multiplier(total_liq / total_col)?;
+                }
+
+                Ok(OraclePriceFeedAdapter::Scope(feed))
+            }
+            OracleSetup::DriftScope => {
+                // (1) Scope price account and (2) Drift spot market (for exchange rate)
+                check!(ais.len() == 2, MarginfiError::WrongNumberOfOracleAccounts);
+                check_primary_oracle_key(bank_config, &ais[0])?;
+
+                let spot_market_loader = load_drift_spot_market(bank_config, &ais[1])?;
+                let spot_market = spot_market_loader.load()?;
+                ensure_drift_spot_market_fresh(&spot_market, clock)?;
+                let numerator = u128::from_le_bytes(spot_market.cumulative_deposit_interest);
+
+                let mut feed = ScopePriceFeed::load_checked(
+                    &ais[0],
+                    scope_entry_id(bank_config),
+                    clock.unix_timestamp,
+                    max_age,
+                )?;
+
+                let multiplier = I80F48::from_num(numerator)
+                    .checked_div(I80F48::from_num(SPOT_CUMULATIVE_INTEREST_PRECISION))
+                    .ok_or_else(math_error!())?;
+                feed.apply_multiplier(multiplier)?;
+
+                Ok(OraclePriceFeedAdapter::Scope(feed))
+            }
+            OracleSetup::JuplendScope => {
+                // (1) Scope price account and (2) JupLend Lending state (for exchange rate)
+                check!(ais.len() == 2, MarginfiError::WrongNumberOfOracleAccounts);
+                check_primary_oracle_key(bank_config, &ais[0])?;
+
+                let lending_loader = load_juplend_lending(bank_config, &ais[1])?;
+                let lending = lending_loader.load()?;
+                ensure_juplend_lending_fresh(&lending, clock)?;
+                let numerator = lending.token_exchange_price as u128;
+
+                let mut feed = ScopePriceFeed::load_checked(
+                    &ais[0],
+                    scope_entry_id(bank_config),
+                    clock.unix_timestamp,
+                    max_age,
+                )?;
+
+                let multiplier = I80F48::from_num(numerator)
+                    .checked_div(I80F48::from_num(EXCHANGE_PRICES_PRECISION))
+                    .ok_or_else(math_error!())?;
+                feed.apply_multiplier(multiplier)?;
+
+                Ok(OraclePriceFeedAdapter::Scope(feed))
+            }
         }
     }
 
@@ -1015,6 +1101,45 @@ impl OraclePriceFeedAdapter {
                 );
                 Ok(())
             }
+            OracleSetup::Scope => {
+                require_eq!(oracle_ais.len(), 1, MarginfiError::WrongNumberOfOracleAccounts);
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
+                ScopePriceFeed::check_ais(&oracle_ais[0])?;
+                Ok(())
+            }
+            OracleSetup::KaminoScope => {
+                require_eq!(oracle_ais.len(), 2, MarginfiError::WrongNumberOfOracleAccounts);
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
+                ScopePriceFeed::check_ais(&oracle_ais[0])?;
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::KaminoReserveValidationFailed
+                );
+                Ok(())
+            }
+            OracleSetup::DriftScope => {
+                require_eq!(oracle_ais.len(), 2, MarginfiError::WrongNumberOfOracleAccounts);
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
+                ScopePriceFeed::check_ais(&oracle_ais[0])?;
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::DriftSpotMarketValidationFailed
+                );
+                Ok(())
+            }
+            OracleSetup::JuplendScope => {
+                require_eq!(oracle_ais.len(), 2, MarginfiError::WrongNumberOfOracleAccounts);
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
+                ScopePriceFeed::check_ais(&oracle_ais[0])?;
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::JuplendLendingValidationFailed
+                );
+                Ok(())
+            }
         }
     }
 }
@@ -1033,6 +1158,148 @@ impl PriceAdapter for FixedPriceFeed {
     ) -> MarginfiResult<I80F48> {
         Ok(self.price)
     }
+    fn get_price_and_confidence_of_type(
+        &self,
+        oracle_price_type: OraclePriceType,
+        oracle_max_confidence: u32,
+    ) -> MarginfiResult<OraclePriceWithConfidence> {
+        Ok(OraclePriceWithConfidence {
+            price: self.get_price_of_type(oracle_price_type, None, oracle_max_confidence)?,
+            confidence: I80F48::ZERO,
+        })
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Scope (Kamino oracle aggregator) price feed
+//
+// Scope publishes a single `OraclePrices` account holding up to 512 `DatedPrice`
+// entries. A bank selects one entry by index. The account layout (zero-copy) is:
+//
+//   [0..8]    anchor discriminator
+//   [8..40]   oracle_mappings: Pubkey
+//   [40..]    prices: [DatedPrice; 512]
+//
+//   DatedPrice (56 bytes):
+//     [0..8]    price.value:        u64   (price = value / 10^exp)
+//     [8..16]   price.exp:          u64
+//     [16..24]  last_updated_slot:  u64
+//     [24..32]  unix_timestamp:     u64
+//     [32..56]  generic_data:       [u8; 24]
+//
+// This integration is intentionally confidence-less: Scope validates source
+// divergence at write time (e.g. CappedMostRecentOf), so price bias and the
+// `oracle_max_confidence` gate are no-ops here. Time-weighted == real-time.
+// ----------------------------------------------------------------------------
+
+/// Kamino Scope program id (mainnet). A self-hosted fork would use its own id.
+pub const SCOPE_PROGRAM_ID: Pubkey = anchor_lang::solana_program::pubkey!("HFn8GnPADiny6XqUoWE8uRPPxb29ikn4yTuPa9MF2fWJ");
+/// Anchor discriminator of the Scope `OraclePrices` account.
+const SCOPE_ORACLE_PRICES_DISCRIMINATOR: [u8; 8] = [0x59, 0x80, 0x76, 0xdd, 0x06, 0x48, 0xb4, 0x92];
+const SCOPE_HEADER_LEN: usize = 8 + 32; // discriminator + oracle_mappings
+const SCOPE_ENTRY_LEN: usize = 56; // Price(16) + slot(8) + ts(8) + generic_data(24)
+const SCOPE_MAX_ENTRIES: usize = 512;
+
+/// The Scope price index (0..512) is stored in the low 2 bytes of the last oracle key
+/// slot (`oracle_keys[4]`), which is unused by every Scope-based setup (plain Scope uses
+/// only [0]; the Kamino/Drift/Juplend wrappers use [0] for the Scope account and [1] for
+/// the reserve). No account migration needed.
+const SCOPE_ENTRY_ID_KEY_INDEX: usize = 4;
+fn scope_entry_id(bank_config: &BankConfig) -> u16 {
+    let key_bytes = bank_config.oracle_keys[SCOPE_ENTRY_ID_KEY_INDEX].to_bytes();
+    u16::from_le_bytes([key_bytes[0], key_bytes[1]])
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct ScopePriceFeed {
+    pub price: I80F48,
+}
+
+impl ScopePriceFeed {
+    pub fn load_checked(
+        ai: &AccountInfo,
+        entry_id: u16,
+        current_timestamp: i64,
+        max_age: u64,
+    ) -> MarginfiResult<Self> {
+        check!(
+            ai.owner.eq(&SCOPE_PROGRAM_ID),
+            MarginfiError::ScopeWrongAccountOwner
+        );
+
+        let data = ai.data.borrow();
+        check!(
+            data.len() >= SCOPE_HEADER_LEN && data[..8] == SCOPE_ORACLE_PRICES_DISCRIMINATOR,
+            MarginfiError::ScopeInvalidAccount
+        );
+
+        let entry_id = entry_id as usize;
+        check!(
+            entry_id < SCOPE_MAX_ENTRIES,
+            MarginfiError::ScopeInvalidPriceIndex
+        );
+
+        let off = SCOPE_HEADER_LEN + entry_id * SCOPE_ENTRY_LEN;
+        check!(
+            data.len() >= off + SCOPE_ENTRY_LEN,
+            MarginfiError::ScopeInvalidAccount
+        );
+
+        let value = u64::from_le_bytes(data[off..off + 8].try_into().unwrap());
+        let exp = u64::from_le_bytes(data[off + 8..off + 16].try_into().unwrap()) as usize;
+        // data[off + 16..off + 24] is last_updated_slot (unused: we gate on unix ts)
+        let unix_timestamp = u64::from_le_bytes(data[off + 24..off + 32].try_into().unwrap());
+
+        // Staleness
+        let last_updated = unix_timestamp as i64;
+        if current_timestamp.saturating_sub(last_updated) > max_age as i64 {
+            return err!(MarginfiError::ScopeStalePrice);
+        }
+
+        check!(exp < EXP_10_I80F48.len(), MarginfiError::ScopeInvalidAccount);
+        let price = I80F48::from_num(value)
+            .checked_div(EXP_10_I80F48[exp])
+            .ok_or_else(math_error!())?;
+        check!(price >= I80F48::ZERO, MarginfiError::ScopeInvalidAccount);
+
+        Ok(Self { price })
+    }
+
+    fn check_ais(ai: &AccountInfo) -> MarginfiResult {
+        check!(
+            ai.owner.eq(&SCOPE_PROGRAM_ID),
+            MarginfiError::ScopeWrongAccountOwner
+        );
+        let data = ai.data.borrow();
+        check!(
+            data.len() >= SCOPE_HEADER_LEN && data[..8] == SCOPE_ORACLE_PRICES_DISCRIMINATOR,
+            MarginfiError::ScopeInvalidAccount
+        );
+        Ok(())
+    }
+
+    /// Scales the price by a lending-reserve exchange rate (e.g. kToken/underlying).
+    /// Used by the Kamino/Drift/Juplend Scope wrappers.
+    fn apply_multiplier(&mut self, multiplier: I80F48) -> MarginfiResult<()> {
+        self.price = self
+            .price
+            .checked_mul(multiplier)
+            .ok_or_else(math_error!())?;
+        Ok(())
+    }
+}
+
+impl PriceAdapter for ScopePriceFeed {
+    fn get_price_of_type(
+        &self,
+        _oracle_price_type: OraclePriceType,
+        _bias: Option<PriceBias>,
+        _oracle_max_confidence: u32,
+    ) -> MarginfiResult<I80F48> {
+        // Confidence-less: divergence is enforced upstream by Scope, so bias is a no-op.
+        Ok(self.price)
+    }
+
     fn get_price_and_confidence_of_type(
         &self,
         oracle_price_type: OraclePriceType,
@@ -1668,6 +1935,105 @@ mod tests {
         let min_price: I80F48 = target_price_high.checked_sub(price_tolerance).unwrap();
         let max_price: I80F48 = target_price_high.checked_add(price_tolerance).unwrap();
         assert!(price_bias_high >= min_price && price_bias_high <= max_price);
+    }
+
+    #[test]
+    fn scope_get_price_sol_usd() {
+        // From mainnet Scope OraclePrices account:
+        // https://solscan.io/account/3NJYftD5sjVfxSnUdZ1wVML8f3aC6mp1CXCL6L7TnU8C
+        // Entry 0 = SOL/USD. value=7281283948 exp=8 => $72.81283948
+        // Fixture = discriminator (8) + oracle_mappings (32) + entry 0 (56) = 96 bytes.
+        let bytes = hex_to_bytes("598076dd0648b492ade5f267699be10caaa9de3b9ca70dfd1d47e996e3096b3dc82f818ea7ab5d256c93ffb10100000008000000000000001bc59b1900000000003b426a00000000000000000000000000000000000000000000000000000000");
+        let key = pubkey!("3NJYftD5sjVfxSnUdZ1wVML8f3aC6mp1CXCL6L7TnU8C");
+        let mut lamports = 1_000_000u64;
+        let mut data = bytes.clone();
+
+        let ai = AccountInfo {
+            key: &key,
+            lamports: Rc::new(RefCell::new(&mut lamports)),
+            data: Rc::new(RefCell::new(&mut data[..])),
+            owner: &SCOPE_PROGRAM_ID,
+            rent_epoch: 361,
+            is_signer: false,
+            is_writable: true,
+            executable: false,
+        };
+
+        // Wrong owner is rejected.
+        let wrong_owner = Pubkey::new_unique();
+        let ai_wrong = AccountInfo {
+            owner: &wrong_owner,
+            ..ai.clone()
+        };
+        assert!(ScopePriceFeed::check_ais(&ai_wrong).is_err());
+
+        // Valid account passes the cheap pre-check.
+        assert!(ScopePriceFeed::check_ais(&ai).is_ok());
+
+        // The price for entry 0 (SOL/USD) is set ~unix ts 1782725376 in the fixture.
+        let current_timestamp = 1782725400;
+        let max_age = 100;
+        let entry_id = 0u16;
+        let feed = ScopePriceFeed::load_checked(&ai, entry_id, current_timestamp, max_age).unwrap();
+
+        let price: I80F48 = feed
+            .get_price_of_type(OraclePriceType::RealTime, None, 0)
+            .unwrap();
+        let target_price: I80F48 = I80F48::from_num(72.81283948);
+        let tolerance: I80F48 = target_price * I80F48::from_num(0.0001);
+        assert!(price >= target_price - tolerance && price <= target_price + tolerance);
+
+        // Confidence-less: bias is a no-op (collateral & liability value identically).
+        let low = feed
+            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), 0)
+            .unwrap();
+        let high = feed
+            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::High), 0)
+            .unwrap();
+        assert_eq!(price, low);
+        assert_eq!(price, high);
+
+        // Time-weighted == real-time for Scope.
+        let twap = feed
+            .get_price_of_type(OraclePriceType::TimeWeighted, None, 0)
+            .unwrap();
+        assert_eq!(price, twap);
+
+        // Confidence is reported as zero.
+        let with_conf = feed
+            .get_price_and_confidence_of_type(OraclePriceType::RealTime, 0)
+            .unwrap();
+        assert_eq!(with_conf.confidence, I80F48::ZERO);
+        assert_eq!(with_conf.price, price);
+
+        // Stale price (current ts far ahead of the fixture ts) is rejected.
+        let stale = ScopePriceFeed::load_checked(&ai, entry_id, current_timestamp + 10_000, max_age);
+        assert!(stale.is_err());
+
+        // Out-of-range index is rejected.
+        let bad_idx = ScopePriceFeed::load_checked(&ai, 511, current_timestamp, max_age);
+        assert!(bad_idx.is_err());
+    }
+
+    #[test]
+    fn scope_apply_multiplier() {
+        // The Kamino/Drift/Juplend Scope wrappers scale the Scope base price by a
+        // lending-reserve exchange rate. e.g. a kSOL reserve at 1.05 underlying/collateral.
+        let mut feed = ScopePriceFeed {
+            price: I80F48::from_num(72.81283948),
+        };
+        feed.apply_multiplier(I80F48::from_num(1.05)).unwrap();
+
+        let expected = I80F48::from_num(72.81283948) * I80F48::from_num(1.05);
+        let tolerance = expected * I80F48::from_num(0.0001);
+        assert!(feed.price >= expected - tolerance && feed.price <= expected + tolerance);
+
+        // Identity rate leaves the price unchanged.
+        let mut feed2 = ScopePriceFeed {
+            price: I80F48::from_num(1.0),
+        };
+        feed2.apply_multiplier(I80F48::ONE).unwrap();
+        assert_eq!(feed2.price, I80F48::from_num(1.0));
     }
 
     #[test]
