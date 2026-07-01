@@ -53,7 +53,7 @@ use marginfi_type_crate::{
     },
 };
 
-/// Equity (weight-1) USD value of a raw native token amount in `bank`, priced from its oracle.
+/// Equity (weight = 1) USD value of a raw native token amount in `bank`, priced from its oracle.
 fn value_of_native<'info>(
     amount_native: I80F48,
     bank: &Bank,
@@ -69,7 +69,7 @@ fn value_of_native<'info>(
     calc_value(amount_native, price, bank.get_balance_decimals(), None)
 }
 
-/// Equity (weight-1) USD value of the user's asset position in `bank`. Returns 0 if the user holds
+/// Equity (weight = 1) USD value of the user's asset position in `bank`. Returns 0 if the user holds
 /// no balance there (e.g. the source balance after a full move).
 fn bank_asset_value<'info>(
     account: &MarginfiAccount,
@@ -166,39 +166,105 @@ pub struct PlaceRebalanceOrder<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Close a rebalance order. The account authority may close their own order at any time (except
+/// mid-rebalance). Permissionlessly, anyone may close a stale order once it can no longer act — the
+/// account was closed, or it holds no position in any allowed venue. Rent goes to `fee_recipient`.
 pub fn close_rebalance_order(ctx: Context<CloseRebalanceOrder>) -> MarginfiResult {
-    let mut account = ctx.accounts.marginfi_account.load_mut()?;
-    check!(
-        !account.get_flag(ACCOUNT_IN_REBALANCE),
-        MarginfiError::IllegalAction
-    );
-    account.decrement_active_orders()?;
+    let order = ctx.accounts.rebalance_order.load()?;
+    let marginfi_account_info = ctx.accounts.marginfi_account.to_account_info();
+    let signer = ctx.accounts.authority.as_ref().map(|a| a.key());
 
-    emit!(MarginfiAccountCloseRebalanceOrderEvent {
-        header: AccountEventHeader {
-            signer: Some(ctx.accounts.authority.key()),
-            marginfi_account: ctx.accounts.marginfi_account.key(),
-            marginfi_account_authority: account.authority,
-            marginfi_group: account.group,
-        },
-        rebalance_order: ctx.accounts.rebalance_order.key(),
-    });
+    // Manual owner check: only deserialize when the account is not already closed.
+    let (authority_pk, group_pk, by_authority) =
+        if marginfi_account_info.owner.eq(&system_program::ID)
+            && marginfi_account_info.data_is_empty()
+        {
+            // The account is gone: the order is dead and anyone may reclaim it.
+            (Pubkey::default(), Pubkey::default(), false)
+        } else {
+            require_keys_eq!(
+                *marginfi_account_info.owner,
+                crate::ID,
+                MarginfiError::InternalLogicError
+            );
+            let mut data = marginfi_account_info.try_borrow_mut_data()?;
+            require!(
+                data.len() >= 8 + std::mem::size_of::<MarginfiAccount>(),
+                MarginfiError::InternalLogicError
+            );
+            let disc = &data[..8];
+            check_eq!(
+                disc,
+                MarginfiAccount::DISCRIMINATOR,
+                MarginfiError::InternalLogicError
+            );
+            let marginfi_account: &mut MarginfiAccount =
+                bytemuck::from_bytes_mut(&mut data[8..8 + std::mem::size_of::<MarginfiAccount>()]);
+
+            // The authority may close their own order anytime; anyone else may close it only once it
+            // holds no position in any allowed venue.
+            let by_authority = signer == Some(marginfi_account.authority);
+            let allowed = &order.allowed_banks[..order.allowed_bank_count as usize];
+            let has_allowed_position = marginfi_account
+                .lending_account
+                .balances
+                .iter()
+                .any(|b| b.is_active() && allowed.contains(&b.bank_pk));
+            check!(
+                by_authority || !has_allowed_position,
+                MarginfiError::LiquidatorOrderCloseNotAllowed
+            );
+            if by_authority {
+                check!(
+                    !marginfi_account.get_flag(ACCOUNT_IN_REBALANCE),
+                    MarginfiError::IllegalAction
+                );
+            }
+            marginfi_account.decrement_active_orders()?;
+            (
+                marginfi_account.authority,
+                marginfi_account.group,
+                by_authority,
+            )
+        };
+
+    let header = AccountEventHeader {
+        signer: if by_authority { signer } else { None },
+        marginfi_account: marginfi_account_info.key(),
+        marginfi_account_authority: authority_pk,
+        marginfi_group: group_pk,
+    };
+    let rebalance_order = ctx.accounts.rebalance_order.key();
+    if by_authority {
+        emit!(MarginfiAccountCloseRebalanceOrderEvent {
+            header,
+            rebalance_order,
+        });
+    } else {
+        emit!(KeeperCloseRebalanceOrderEvent {
+            header,
+            rebalance_order,
+        });
+    }
     Ok(())
 }
 
 #[derive(Accounts)]
 pub struct CloseRebalanceOrder<'info> {
+    /// CHECK: unchecked so the ix works even when the marginfi account was closed; ownership and type
+    /// are validated in the handler.
+    #[account(mut)]
+    pub marginfi_account: UncheckedAccount<'info>,
+    /// Signs to close an order that still holds a position; omitted for the permissionless close of a
+    /// dead order.
+    pub authority: Option<Signer<'info>>,
+    /// CHECK: no checks; receives the order's rent.
+    #[account(mut)]
+    pub fee_recipient: UncheckedAccount<'info>,
     #[account(
         mut,
-        has_one = authority @ MarginfiError::Unauthorized,
-    )]
-    pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
-    pub authority: Signer<'info>,
-    #[account(
-        mut,
-        close = authority,
         has_one = marginfi_account @ MarginfiError::Unauthorized,
-        has_one = authority @ MarginfiError::Unauthorized,
+        close = fee_recipient
     )]
     pub rebalance_order: AccountLoader<'info, RebalanceOrder>,
 }
@@ -269,84 +335,6 @@ pub struct UpdateRebalanceOrder<'info> {
         mut,
         has_one = marginfi_account @ MarginfiError::Unauthorized,
         has_one = authority @ MarginfiError::Unauthorized,
-    )]
-    pub rebalance_order: AccountLoader<'info, RebalanceOrder>,
-}
-
-/// Permissionless: a keeper reclaims the rent of a stale rebalance order once it can no longer act —
-/// the account was closed, or it holds no position in any allowed venue (nothing left to rebalance).
-pub fn keeper_close_rebalance_order(ctx: Context<KeeperCloseRebalanceOrder>) -> MarginfiResult {
-    let order = ctx.accounts.rebalance_order.load()?;
-    let marginfi_account_info = ctx.accounts.marginfi_account.to_account_info();
-
-    // Manual owner check: only deserialize when the account is not already closed.
-    let (authority_pk, group_pk, can_close) = if marginfi_account_info.owner.eq(&system_program::ID)
-        && marginfi_account_info.data_is_empty()
-    {
-        (Pubkey::default(), Pubkey::default(), true)
-    } else {
-        require_keys_eq!(
-            *marginfi_account_info.owner,
-            crate::ID,
-            MarginfiError::InternalLogicError
-        );
-        let mut data = marginfi_account_info.try_borrow_mut_data()?;
-        require!(
-            data.len() >= 8 + std::mem::size_of::<MarginfiAccount>(),
-            MarginfiError::InternalLogicError
-        );
-        let disc = &data[..8];
-        check_eq!(
-            disc,
-            MarginfiAccount::DISCRIMINATOR,
-            MarginfiError::InternalLogicError
-        );
-        let marginfi_account: &mut MarginfiAccount =
-            bytemuck::from_bytes_mut(&mut data[8..8 + std::mem::size_of::<MarginfiAccount>()]);
-
-        let allowed = &order.allowed_banks[..order.allowed_bank_count as usize];
-        let can_close = !marginfi_account
-            .lending_account
-            .balances
-            .iter()
-            .any(|b| b.is_active() && allowed.contains(&b.bank_pk));
-        if can_close {
-            marginfi_account.decrement_active_orders()?;
-        }
-        (
-            marginfi_account.authority,
-            marginfi_account.group,
-            can_close,
-        )
-    };
-
-    check!(can_close, MarginfiError::LiquidatorOrderCloseNotAllowed);
-
-    emit!(KeeperCloseRebalanceOrderEvent {
-        header: AccountEventHeader {
-            signer: None,
-            marginfi_account: marginfi_account_info.key(),
-            marginfi_account_authority: authority_pk,
-            marginfi_group: group_pk,
-        },
-        rebalance_order: ctx.accounts.rebalance_order.key(),
-    });
-    Ok(())
-}
-
-#[derive(Accounts)]
-pub struct KeeperCloseRebalanceOrder<'info> {
-    /// CHECK: unchecked so the ix works even when the marginfi account was closed; ownership and
-    /// type are validated in the handler.
-    #[account(mut)]
-    pub marginfi_account: UncheckedAccount<'info>,
-    /// CHECK: no checks; the keeper keeps the rent.
-    #[account(mut)]
-    pub fee_recipient: UncheckedAccount<'info>,
-    #[account(
-        mut,
-        has_one = marginfi_account @ MarginfiError::Unauthorized,
-        close = fee_recipient
     )]
     pub rebalance_order: AccountLoader<'info, RebalanceOrder>,
 }
@@ -516,7 +504,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
 
     // Remaining layout: [src venue/oracle accounts][dst venue/oracle accounts][post-move health
     // observation set]. The first two segments price the {src,dst} rate gate; the tail is the full
-    // observation set (bank+oracle per active balance, after the move) for the init-health recheck.
+    // observation set (bank+oracle per active balance, after the move) for the maint-health recheck.
     let (src_oracle, dst_oracle, health_obs) = {
         let src_bank = ctx.accounts.src_bank.load()?;
         let dst_bank = ctx.accounts.dst_bank.load()?;
@@ -558,6 +546,21 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
                 Some(b) => b.is_empty(BalanceSide::Assets),
             };
             check!(src_emptied, MarginfiError::RebalanceIncompleteMove);
+
+            // The withdraw sends tokens to the keeper's account, so `src_emptied` alone does not prove
+            // the value reached dst. Enforce conservation: post-move total value may fall below the
+            // pre-move total by at most the flat fee (keeper_fee in [0, flat_fee]; sub-unit venue
+            // rounding is the keeper's burden, not user loss).
+            let pre_total = pre_src_value
+                .checked_add(pre_dst_value)
+                .ok_or_else(math_error!())?;
+            let post_total = post_src_value
+                .checked_add(post_dst_value)
+                .ok_or_else(math_error!())?;
+            let floor = pre_total
+                .checked_sub(REBALANCE_FLAT_FEE_USD)
+                .ok_or_else(math_error!())?;
+            check!(post_total >= floor, MarginfiError::RebalanceValueLeak);
         } else {
             // Bounded order: cap the move at `amount` and require the destination to actually receive
             // it. The keeper's fee is the slice it withholds from the deposit, so a falling source
@@ -566,7 +569,9 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
             // flat fee, so the keeper cannot be paid without performing the move (checking source
             // reduction instead would let a keeper withdraw and pocket without ever depositing). The
             // target is capped at the position so an `amount` exceeding the holding cleanly degrades to
-            // a full move.
+            // a full move. The amount cap and delivery bound together enforce conservation
+            // (`post_total >= pre_total - flat_fee`), since `src_moved <= min(amount_value,
+            // pre_src_value) <= dst_gained + flat_fee`.
             let amount_value = value_of_native(
                 I80F48::from_num(order_amount),
                 &src_bank,
@@ -592,20 +597,6 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
                 MarginfiError::RebalanceIncompleteMove
             );
         }
-
-        // Value conservation: per-move user loss is bounded by EXACTLY the flat fee — no dust slack.
-        // Any sub-unit venue rounding is the keeper's burden, not extra user loss, so the move is
-        // exactly conservative: `post_total + keeper_fee == pre_total`, keeper_fee in [0, flat_fee].
-        let pre_total = pre_src_value
-            .checked_add(pre_dst_value)
-            .ok_or_else(math_error!())?;
-        let post_total = post_src_value
-            .checked_add(post_dst_value)
-            .ok_or_else(math_error!())?;
-        let floor = pre_total
-            .checked_sub(REBALANCE_FLAT_FEE_USD)
-            .ok_or_else(math_error!())?;
-        check!(post_total >= floor, MarginfiError::RebalanceValueLeak);
 
         // Per-withdraw health checks are skipped while ACCOUNT_IN_REBALANCE is set, so recompute
         // health once here over the post-move balance set. A rebalance moves an existing position

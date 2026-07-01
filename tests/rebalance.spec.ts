@@ -342,6 +342,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
       .accountsPartial({
         marginfiAccount: ownerAcc,
         authority: owner.wallet.publicKey,
+        feeRecipient: owner.wallet.publicKey,
         rebalanceOrder: order,
       })
       .instruction();
@@ -1728,6 +1729,7 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
           .accountsPartial({
             marginfiAccount: ownerAcc,
             authority: owner.wallet.publicKey,
+            feeRecipient: owner.wallet.publicKey,
             rebalanceOrder: order,
           })
           .instruction(),

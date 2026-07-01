@@ -1042,7 +1042,8 @@ impl MarginfiAccountFixture {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::CloseRebalanceOrder {
                 marginfi_account: self.key,
-                authority,
+                authority: Some(authority),
+                fee_recipient: authority,
                 rebalance_order,
             }
             .to_account_metas(Some(true)),
@@ -1238,13 +1239,14 @@ impl MarginfiAccountFixture {
     ) -> Instruction {
         Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::KeeperCloseRebalanceOrder {
+            accounts: marginfi::accounts::CloseRebalanceOrder {
                 marginfi_account: self.key,
+                authority: None,
                 fee_recipient,
                 rebalance_order,
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::MarginfiAccountKeeperCloseRebalanceOrder {}.data(),
+            data: marginfi::instruction::MarginfiAccountCloseRebalanceOrder {}.data(),
         }
     }
 

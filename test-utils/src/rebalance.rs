@@ -36,6 +36,18 @@ pub struct RebalanceFixture {
     pub oracle_metas: Vec<AccountMeta>,
 }
 
+/// Signs `ixs` with `keeper` as fee payer and processes them in one transaction.
+pub async fn process_as_keeper(
+    test_f: &TestFixture,
+    keeper: &Keypair,
+    ixs: &[Instruction],
+) -> Result<(), solana_program_test::BanksClientError> {
+    let blockhash = test_f.get_latest_blockhash().await;
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(ixs, Some(&keeper.pubkey()), &[keeper], blockhash);
+    ctx.banks_client.process_transaction(tx).await
+}
+
 pub async fn fund_keeper_for_fees(test_f: &TestFixture, keeper: &Keypair) -> anyhow::Result<()> {
     let mut ctx = test_f.context.borrow_mut();
     let rent = ctx.banks_client.get_rent().await?;
@@ -236,15 +248,7 @@ impl RebalanceFixture {
         &self,
         ixs: &[Instruction],
     ) -> Result<(), solana_program_test::BanksClientError> {
-        let blockhash = self.test_f.get_latest_blockhash().await;
-        let ctx = self.test_f.context.borrow_mut();
-        let tx = Transaction::new_signed_with_payer(
-            ixs,
-            Some(&self.keeper.pubkey()),
-            &[&self.keeper],
-            blockhash,
-        );
-        ctx.banks_client.process_transaction(tx).await
+        process_as_keeper(&self.test_f, &self.keeper, ixs).await
     }
 
     pub async fn asset_shares(&self, bank: Pubkey) -> I80F48 {
@@ -502,14 +506,6 @@ impl MultiVenueFixture {
         &self,
         ixs: &[Instruction],
     ) -> Result<(), solana_program_test::BanksClientError> {
-        let blockhash = self.test_f.get_latest_blockhash().await;
-        let ctx = self.test_f.context.borrow_mut();
-        let tx = Transaction::new_signed_with_payer(
-            ixs,
-            Some(&self.keeper.pubkey()),
-            &[&self.keeper],
-            blockhash,
-        );
-        ctx.banks_client.process_transaction(tx).await
+        process_as_keeper(&self.test_f, &self.keeper, ixs).await
     }
 }

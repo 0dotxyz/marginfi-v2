@@ -337,7 +337,9 @@ pub mod marginfi {
         )
     }
 
-    /// (user) Cancel an auto-rebalance order; rent returns to the authority.
+    /// Close an auto-rebalance order. The authority may cancel their own order at any time; anyone
+    /// may permissionlessly close a stale order once the account was closed or it no longer holds a
+    /// position in any allowed venue. Rent goes to `fee_recipient`.
     pub fn marginfi_account_close_rebalance_order(
         ctx: Context<CloseRebalanceOrder>,
     ) -> MarginfiResult {
@@ -359,14 +361,6 @@ pub mod marginfi {
         ctx: Context<'info, EndRebalance<'info>>,
     ) -> MarginfiResult {
         marginfi_account::end_rebalance(ctx)
-    }
-
-    /// (permissionless keeper) Close a stale rebalance order after the user account was closed or it
-    /// no longer holds a position in any allowed venue. Keeper keeps the rent.
-    pub fn marginfi_account_keeper_close_rebalance_order(
-        ctx: Context<KeeperCloseRebalanceOrder>,
-    ) -> MarginfiResult {
-        marginfi_account::keeper_close_rebalance_order(ctx)
     }
 
     /// (permissionless keeper) Close an existing Order after the user account was closed, or it no
