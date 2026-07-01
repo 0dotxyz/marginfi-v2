@@ -63,7 +63,7 @@ import {
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
 import { logHealthCache, processBankrunTransaction } from "./utils/tools";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./utils/litesvm";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
 import {
   CONF_INTERVAL_MULTIPLE_FLOAT,
@@ -266,7 +266,6 @@ describe("kx: Fixed Kamino price bank", () => {
     const user = users[3];
     const tx = new Transaction().add(
       await pulseBankPrice(user.mrgnBankrunProgram, {
-        group: kaminoGroup.publicKey,
         bank: fixedKaminoBank,
         remaining: [tokenAReserve],
       }),
@@ -553,7 +552,7 @@ describe("kx: Fixed Kamino price bank", () => {
       [
         [fixedKaminoBank, usdcReserve],
         [borrowBank, oracles.tokenAOracle.publicKey],
-      ].filter((group) => !group[0].equals(fixedKaminoBank))
+      ].filter((group) => !group[0].equals(fixedKaminoBank)),
     );
 
     const withdrawAllTx = new Transaction().add(
@@ -598,8 +597,9 @@ describe("kx: Fixed Kamino price bank", () => {
     assert.isAtMost(userUsdcAfter, userUsdcStart);
 
     // has_kamino clears once the last Kamino position is withdrawn
-    const userAccAfter =
-      await bankrunProgram.account.marginfiAccount.fetch(userAccount);
+    const userAccAfter = await bankrunProgram.account.marginfiAccount.fetch(
+      userAccount,
+    );
     assert.equal(userAccAfter.indexerFlags.hasKamino, 0);
   });
 });

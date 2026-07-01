@@ -19,7 +19,7 @@ use marginfi_type_crate::constants::{ASSET_TAG_JUPLEND, LIQUIDITY_VAULT_AUTHORIT
 use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
 pub fn juplend_deposit<'info>(
-    ctx: Context<'_, '_, 'info, 'info, JuplendDeposit<'info>>,
+    ctx: Context<'info, JuplendDeposit<'info>>,
     amount: u64,
 ) -> MarginfiResult {
     let common = ctx.accounts.to_common();

@@ -17,7 +17,7 @@ import {
 import { Marginfi } from "../../target/types/marginfi";
 import { Mocks } from "../../target/types/mocks";
 import { KaminoLending } from "../fixtures/kamino_lending";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./litesvm";
 import { processBankrunTransaction } from "./tools";
 
 export type Ecosystem = {
@@ -673,6 +673,8 @@ export type Validator = {
   splAuthority: PublicKey;
   /** spl pool's stake account (a PDA automatically created on init, contains the SOL held by the pool) */
   splSolPool: PublicKey;
+  /** spl pool's on-ramp stake account for liquid SOL and reward replenishment */
+  splOnRampPool: PublicKey;
   /** bank created for this validator's LST on the "main" group */
   bank: PublicKey;
 };

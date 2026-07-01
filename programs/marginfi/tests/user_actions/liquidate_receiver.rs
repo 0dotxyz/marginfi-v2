@@ -13,9 +13,9 @@ use marginfi_type_crate::{
     constants::LIQUIDATION_RECORD_SEED,
     types::{Bank, BankConfigOpt, ACCOUNT_IN_RECEIVERSHIP},
 };
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
 use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction,
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signature::Keypair,

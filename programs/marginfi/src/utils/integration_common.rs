@@ -12,7 +12,6 @@ use crate::{check, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
 use anchor_lang::solana_program::system_program;
-use anchor_lang::solana_program::sysvar::Sysvar;
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::constants::{
@@ -87,7 +86,7 @@ pub fn finalize_integration_deposit(
     )?;
 
     let balance_change_i80f48 = I80F48::from_num(balance_change);
-    bank_account.deposit_no_repay(balance_change_i80f48)?;
+    let share_amount = bank_account.deposit_no_repay(balance_change_i80f48)?;
 
     record_deposit_inflow(
         &mut bank,
@@ -115,6 +114,7 @@ pub fn finalize_integration_deposit(
         bank: bank_key,
         mint: bank.mint,
         amount: inflow_amount,
+        share_amount: share_amount.into(),
     });
 
     Ok(())
@@ -131,6 +131,7 @@ pub fn finalize_integration_withdraw<'info>(
     authority_key: Pubkey,
     marginfi_account_key: Pubkey,
     event_amount: u64,
+    share_amount: I80F48,
     withdraw_all: bool,
     remaining_accounts: &'info [AccountInfo<'info>],
     clock: &Clock,
@@ -147,6 +148,7 @@ pub fn finalize_integration_withdraw<'info>(
         bank: bank_key,
         mint: bank_mint,
         amount: event_amount,
+        share_amount: share_amount.into(),
         close_balance: withdraw_all,
     });
 

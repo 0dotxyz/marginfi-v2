@@ -34,8 +34,9 @@ import {
   processBankrunTransaction as processBankrunTx,
   logHealthCache,
   dumpAccBalances,
+  toBnFromI80,
 } from "./utils/tools";
-import { BanksTransactionResultWithMeta } from "solana-bankrun";
+import { BanksTransactionResultWithMeta } from "./utils/litesvm";
 import {
   bigNumberToWrappedI80F48,
   wrappedI80F48toBigNumber,
@@ -61,7 +62,7 @@ import {
 } from "./utils/drift-instructions";
 import { genericMultiBankTestSetup } from "./genericSetups";
 import { deriveBankWithSeed } from "./utils/pdas";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./utils/litesvm";
 import { assertBNEqual } from "./utils/genericTests";
 
 const confidenceInterval = 0.01 * CONF_INTERVAL_MULTIPLE;
@@ -372,10 +373,8 @@ describe("d09: Drift Liquidation", () => {
       liquidateeAccBefore.lendingAccount.balances.find(
         (b) => b.bankPk.equals(driftTokenABank) && b.active === 1
       );
-    const liquidateeAssetSharesBefore = new BN(
-      wrappedI80F48toBigNumber(
-        liquidateeTokenABalanceBefore.assetShares
-      ).toString()
+    const liquidateeAssetSharesBefore = toBnFromI80(
+      liquidateeTokenABalanceBefore.assetShares,
     );
 
     while (true) {

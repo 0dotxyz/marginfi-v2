@@ -114,7 +114,7 @@ pub(crate) fn deposit<'info>(
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, common.bank.key(), authority_bump);
         let cpi_ctx =
-            CpiContext::new_with_signer(protocol_accounts[10].clone(), accounts, signer_seeds);
+            CpiContext::new_with_signer(protocol_accounts[10].key(), accounts, signer_seeds);
         deposit_reserve_liquidity_and_obligation_collateral(cpi_ctx, amount)?;
     }
 
@@ -167,7 +167,7 @@ pub(crate) fn withdraw_cpi<'info>(
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, common.bank.key(), authority_bump);
         let cpi_ctx =
-            CpiContext::new_with_signer(protocol_accounts[8].clone(), accounts, signer_seeds);
+            CpiContext::new_with_signer(protocol_accounts[8].key(), accounts, signer_seeds);
         withdraw_obligation_collateral_and_redeem_reserve_collateral(cpi_ctx, collateral_amount)?;
     }
 

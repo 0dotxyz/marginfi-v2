@@ -92,6 +92,13 @@ pub const BANK_SEED_KNOWN: u64 = 1 << 8;
 /// version. False otherwise.
 pub const PYTH_PUSH_MIGRATED_DEPRECATED: u8 = 1 << 0;
 
+/// Staked-collateral oracle transition flags stored on `Bank.flags` and copied from
+/// `StakedSettings.flags` during staked-settings propagation.
+/// To be removed once SVSP update is rolled out (likely in 1.10)
+pub const STAKED_ORACLE_DISABLED: u64 = 1 << 9;
+pub const STAKED_ORACLE_PRICE_USES_ONRAMP: u64 = 1 << 10;
+pub const STAKED_ORACLE_FLAGS: u64 = STAKED_ORACLE_DISABLED | STAKED_ORACLE_PRICE_USES_ONRAMP;
+
 pub const GROUP_FLAGS: u64 = PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
     | FREEZE_SETTINGS
     | TOKENLESS_REPAYMENTS_ALLOWED
@@ -166,38 +173,39 @@ pub const MARGINFI_SPONSORED_SHARD_ID: u16 = 3301;
 /// A regular asset that can be comingled with any other regular asset or with `ASSET_TAG_SOL`
 pub const ASSET_TAG_DEFAULT: u8 = 0;
 /// Accounts with a SOL position can comingle with **either** `ASSET_TAG_DEFAULT` or
-/// `ASSET_TAG_STAKED` positions, but not both
+///   `ASSET_TAG_STAKED` positions, but not both
 pub const ASSET_TAG_SOL: u8 = 1;
 /// Staked SOL assets. Accounts with a STAKED position can only deposit other STAKED assets or SOL
-/// (`ASSET_TAG_SOL`) and can only borrow SOL (`ASSET_TAG_SOL`)
+///   (`ASSET_TAG_SOL`) and can only borrow SOL (`ASSET_TAG_SOL`)
 pub const ASSET_TAG_STAKED: u8 = 2;
 /// Kamino assets. Accounts with a KAMINO position can only deposit other KAMINO assets or regular
-/// assets (`ASSET_TAG_DEFAULT`).
+///   assets (`ASSET_TAG_DEFAULT`).
 pub const ASSET_TAG_KAMINO: u8 = 3;
 /// Drift assets. Accounts with a DRIFT position can only deposit other DRIFT assets or regular
-/// assets (`ASSET_TAG_DEFAULT`).
+///   assets (`ASSET_TAG_DEFAULT`).
 pub const ASSET_TAG_DRIFT: u8 = 4;
 /// Solend assets. Accounts with a SOLEND position can only deposit other SOLEND assets or regular
-/// assets (`ASSET_TAG_DEFAULT`).
+///   assets (`ASSET_TAG_DEFAULT`).
 pub const ASSET_TAG_SOLEND: u8 = 5;
 /// JupLend assets. Accounts with a JUPLEND position can only deposit other JUPLEND assets or regular
-/// assets (`ASSET_TAG_DEFAULT`).
+///   assets (`ASSET_TAG_DEFAULT`).
 pub const ASSET_TAG_JUPLEND: u8 = 6;
 
 /// Drift uses a fixed 9 decimal precision for all spot market scaled balances,
-/// regardless of the underlying token's decimals
+///   regardless of the underlying token's decimals
 pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
 
 /// Maximum number of integration positions (Kamino + Drift + Solend + JupLend) allowed per account. Hardcoded
-/// limit to prevent accounts from becoming unliquidatable due to CU/heap memory issues in
-/// liquidation. These integrations require 3 accounts per position for health checks (bank + oracle
-/// + reserve/spot-market), so they share the same limit.
+///   limit to prevent accounts from becoming unliquidatable due to CU/heap memory issues in
+///   liquidation. These integrations require 3 accounts per position for health checks (bank + oracle
+///   + reserve/spot-market), so they share the same limit.
+///
 /// Note: it's disabled in local integration tests so that we can measure the performance and
-/// eventually get rid of this limit altogether.
+///   eventually get rid of this limit altogether.
 pub const MAX_INTEGRATION_POSITIONS: usize = 8;
 // WARN: You can set anything here, including a discrim that's technically "wrong" for the struct
-// with that name, and prod will use that hash anyways. Don't change these hashes once a struct is
-// live in prod.
+//   with that name, and prod will use that hash anyways. Don't change these hashes once a struct is
+//   live in prod.
 pub mod discriminators {
     pub const GROUP: [u8; 8] = [182, 23, 173, 240, 151, 206, 182, 67];
     pub const BANK: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];

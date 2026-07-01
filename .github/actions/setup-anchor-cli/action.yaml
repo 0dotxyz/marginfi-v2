@@ -9,7 +9,7 @@ runs:
 
   # ─── Cache the Anchor CLI binary ────────────────────────────────────
   - name: Cache Anchor CLI
-    uses: actions/cache@v3
+    uses: actions/cache@v4
     id: cache-anchor-cli
     with:
       path: ~/.cargo/bin/anchor
@@ -18,12 +18,12 @@ runs:
   - name: Install Anchor CLI
     if: steps.cache-anchor-cli.outputs.cache-hit != 'true'
     run: |
-      cargo install --git https://github.com/coral-xyz/anchor --tag "v${{ env.ANCHOR_CLI_VERSION }}" anchor-cli --locked
+      cargo install anchor-cli --version "${{ env.ANCHOR_CLI_VERSION }}" --locked
     shell: bash
 
   # ─── Cache toml-cli if used ────────────────────────────────────────
   - name: Cache toml-cli
-    uses: actions/cache@v3
+    uses: actions/cache@v4
     id: cache-toml-cli
     with:
       path: ~/.cargo/bin/toml

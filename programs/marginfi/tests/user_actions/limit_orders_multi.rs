@@ -21,7 +21,7 @@ async fn fund_keeper_for_fees(test_f: &TestFixture, keeper: &Keypair) -> anyhow:
     let account = Account {
         lamports: min_balance + 1_000_000_000,
         data: vec![],
-        owner: solana_sdk::system_program::ID,
+        owner: solana_system_interface::program::ID,
         executable: false,
         rent_epoch: 0,
     };
@@ -487,7 +487,7 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
     // ---------------------------------------------------------------------
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
-    let assets = vec![(BankMint::Sol, 20.0), (BankMint::Fixed, 100.0)];
+    let assets = vec![(BankMint::Sol, 11.0), (BankMint::Fixed, 100.0)];
     let liabilities = vec![(BankMint::Usdc, 50.0), (BankMint::PyUSD, 50.0)];
 
     let borrower = create_account_with_positions(&test_f, &assets, &liabilities).await?;
@@ -496,14 +496,14 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
     let pyusd_bank = test_f.get_bank(&BankMint::PyUSD);
 
-    // Order on A/B with large slippage to allow big withdrawal
+    // Order on A/B with large slippage
     let order_ab = borrower
         .try_place_order(
             vec![sol_bank.key, usdc_bank.key],
             OrderTrigger::StopLoss {
                 threshold: fp!(200.0).into(),
-                // Note: the user is a silly person that sets 99.99% slippage.
-                max_slippage: slippage_bps(9_999),
+                // 9% slippage
+                max_slippage: slippage_bps(900),
             },
         )
         .await?;
@@ -550,7 +550,7 @@ async fn limit_orders_overlap_ab_reduces_a_ad_fails_end() -> anyhow::Result<()> 
         keeper_usdc_account,
         sol_bank,
         keeper_sol_account,
-        14.0,
+        5.0,
         None,
         vec![usdc_bank.key],
     )

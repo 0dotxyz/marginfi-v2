@@ -1,3 +1,5 @@
+#![allow(clippy::diverging_sub_expression)]
+
 pub mod cpi;
 pub mod macros;
 pub mod state;

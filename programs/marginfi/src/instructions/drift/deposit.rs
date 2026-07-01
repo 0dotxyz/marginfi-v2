@@ -17,7 +17,7 @@ use marginfi_type_crate::pdas::DRIFT_PROGRAM_ID;
 use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
 pub fn drift_deposit<'info>(
-    ctx: Context<'_, '_, 'info, 'info, DriftDeposit<'info>>,
+    ctx: Context<'info, DriftDeposit<'info>>,
     amount: u64,
 ) -> MarginfiResult {
     let common = ctx.accounts.to_common();

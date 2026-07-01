@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{MAX_PYTH_ORACLE_AGE, ORACLE_MIN_AGE, TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE},
-    types::{BalanceSide, BankConfig, OracleSetup, RequirementType, RiskTier},
+    types::{BankConfig, OracleSetup, RequirementType, RiskTier},
 };
 
 use crate::{
@@ -14,7 +14,6 @@ use crate::{
 
 pub trait BankConfigImpl {
     fn get_weights(&self, req_type: RequirementType) -> (I80F48, I80F48);
-    fn get_weight(&self, requirement_type: RequirementType, balance_side: BalanceSide) -> I80F48;
     fn validate(&self) -> MarginfiResult;
     fn is_deposit_limit_active(&self) -> bool;
     fn is_borrow_limit_active(&self) -> bool;
@@ -43,21 +42,6 @@ impl BankConfigImpl for BankConfig {
                 self.liability_weight_maint.into(),
             ),
             RequirementType::Equity => (I80F48::ONE, I80F48::ONE),
-        }
-    }
-
-    #[inline]
-    fn get_weight(&self, requirement_type: RequirementType, balance_side: BalanceSide) -> I80F48 {
-        match (requirement_type, balance_side) {
-            (RequirementType::Initial, BalanceSide::Assets) => self.asset_weight_init.into(),
-            (RequirementType::Initial, BalanceSide::Liabilities) => {
-                self.liability_weight_init.into()
-            }
-            (RequirementType::Maintenance, BalanceSide::Assets) => self.asset_weight_maint.into(),
-            (RequirementType::Maintenance, BalanceSide::Liabilities) => {
-                self.liability_weight_maint.into()
-            }
-            (RequirementType::Equity, _) => I80F48::ONE,
         }
     }
 
@@ -117,9 +101,9 @@ impl BankConfigImpl for BankConfig {
         }
     }
 
-    /// * lst_mint, stake_pool, sol_pool - required only if configuring
+    /// * lst_mint, stake_pool, sol_pool, pool_onramp - required only if configuring
     ///   `OracleSetup::StakedWithPythPush` on initial setup. If configuring a staked bank after
-    ///   initial setup, can be omitted
+    ///   initial setup, can be omitted.
     fn validate_oracle_setup(
         &self,
         ais: &[AccountInfo<'_>],

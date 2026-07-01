@@ -1,9 +1,5 @@
 import { BN } from "@coral-xyz/anchor";
-import {
-  LAMPORTS_PER_SOL,
-  PublicKey,
-  Transaction,
-} from "@solana/web3.js";
+import { LAMPORTS_PER_SOL, PublicKey, Transaction } from "@solana/web3.js";
 import {
   bankrunContext,
   bankRunProvider,
@@ -25,9 +21,7 @@ import {
 } from "./utils/genericTests";
 import { u64MAX_BN } from "./utils/types";
 import { getAssociatedTokenAddressSync } from "@mrgnlabs/mrgn-common";
-import {
-  depositToSinglePoolIxes,
-} from "./utils/spl-staking-utils";
+import { depositToSinglePoolIxes } from "./utils/spl-staking-utils";
 import { assert } from "chai";
 import { LST_ATA, LST_ATA_v1, STAKE_ACC, STAKE_ACC_v1 } from "./utils/mocks";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
@@ -48,7 +42,7 @@ describe("User stakes some native and creates an account", () => {
   it("(user 0) Create user stake account and stake to validator", async () => {
     let { createTx, stakeAccountKeypair } = createStakeAccount(
       users[0],
-      stake * LAMPORTS_PER_SOL
+      stake * LAMPORTS_PER_SOL,
     );
     // Note: bankrunContext.lastBlockhash only works if non-bankrun tests didn't run previously
     createTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -63,7 +57,7 @@ describe("User stakes some native and creates an account", () => {
           stake +
           " SOL (" +
           (stake * LAMPORTS_PER_SOL).toLocaleString() +
-          " in native)"
+          " in native)",
       );
     }
     users[0].accounts.set("v0_stakeAcc", user0StakeAccount);
@@ -71,7 +65,7 @@ describe("User stakes some native and creates an account", () => {
     let delegateTx = delegateStake(
       users[0],
       user0StakeAccount,
-      validators[0].voteAccount
+      validators[0].voteAccount,
     );
     delegateTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     delegateTx.sign(users[0].wallet);
@@ -83,7 +77,7 @@ describe("User stakes some native and creates an account", () => {
 
     let { epoch, slot } = await getEpochAndSlot(banksClient);
     const stakeAccountInfo = await bankRunProvider.connection.getAccountInfo(
-      user0StakeAccount
+      user0StakeAccount,
     );
     const stakeAccBefore = getStakeAccount(stakeAccountInfo.data);
     const meta = stakeAccBefore.meta;
@@ -93,7 +87,7 @@ describe("User stakes some native and creates an account", () => {
     assertKeysEqual(delegation.voterPubkey, validators[0].voteAccount);
     assertBNEqual(
       new BN(delegation.stake.toString()),
-      new BN(10 * LAMPORTS_PER_SOL).sub(rent)
+      new BN(10 * LAMPORTS_PER_SOL).sub(rent),
     );
     assertBNEqual(new BN(delegation.activationEpoch.toString()), epoch);
     assertBNEqual(new BN(delegation.deactivationEpoch.toString()), u64MAX_BN);
@@ -101,7 +95,7 @@ describe("User stakes some native and creates an account", () => {
     const stakeStatusBefore = await getStakeActivation(
       bankRunProvider.connection,
       user0StakeAccount,
-      epoch
+      epoch,
     );
     if (verbose) {
       console.log("It is now epoch: " + epoch + " slot " + slot);
@@ -111,7 +105,7 @@ describe("User stakes some native and creates an account", () => {
           " inactive " +
           stakeStatusBefore.inactive.toLocaleString() +
           " status: " +
-          stakeStatusBefore.status
+          stakeStatusBefore.status,
       );
     }
   });
@@ -130,7 +124,7 @@ describe("User stakes some native and creates an account", () => {
   const stakeAndDelegateForUser = async (
     userIndex: number,
     stakeAmount: number,
-    validatorIndex: 0 | 1
+    validatorIndex: 0 | 1,
   ) => {
     const user = users[userIndex];
     const stakeAccKey = validatorIndex === 0 ? STAKE_ACC : STAKE_ACC_v1;
@@ -138,7 +132,7 @@ describe("User stakes some native and creates an account", () => {
 
     let { createTx, stakeAccountKeypair } = createStakeAccount(
       user,
-      stakeAmount * LAMPORTS_PER_SOL
+      stakeAmount * LAMPORTS_PER_SOL,
     );
     createTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     createTx.sign(user.wallet, stakeAccountKeypair);
@@ -148,7 +142,7 @@ describe("User stakes some native and creates an account", () => {
     let delegateTx = delegateStake(
       user,
       stakeAccountKeypair.publicKey,
-      voteAccount
+      voteAccount,
     );
     delegateTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     delegateTx.sign(user.wallet);
@@ -157,23 +151,23 @@ describe("User stakes some native and creates an account", () => {
 
   it("Advance the epoch", async () => {
     let { epoch: epochBefore, slot: _slotBefore } = await getEpochAndSlot(
-      banksClient
+      banksClient,
     );
     bankrunContext.warpToEpoch(BigInt(epochBefore + 1));
 
     let { epoch: epochAfterWarp, slot: slotAfterWarp } = await getEpochAndSlot(
-      banksClient
+      banksClient,
     );
     if (verbose) {
       console.log(
-        "Warped to epoch: " + epochAfterWarp + " slot " + slotAfterWarp
+        "Warped to epoch: " + epochAfterWarp + " slot " + slotAfterWarp,
       );
     }
 
     const stakeStatusAfter = await getStakeActivation(
       bankRunProvider.connection,
       user0StakeAccount,
-      epochAfterWarp
+      epochAfterWarp,
     );
     if (verbose) {
       console.log(
@@ -182,7 +176,7 @@ describe("User stakes some native and creates an account", () => {
           " inactive " +
           stakeStatusAfter.inactive.toLocaleString() +
           " status: " +
-          stakeStatusAfter.status
+          stakeStatusAfter.status,
       );
       console.log("");
     }
@@ -205,37 +199,37 @@ describe("User stakes some native and creates an account", () => {
     }
   });
 
-  it("(user 0) Deposits " + stake + "stake to the v0 LST pool", async () => {
+  it("(user 0) Deposits " + stake + " stake to the v0 LST pool", async () => {
     const userStakeAccount = users[0].accounts.get(STAKE_ACC);
     // Note: use `findPoolMintAddress(SINGLE_POOL_PROGRAM_ID, splPool);` if mint is not known.
     const lstAta = getAssociatedTokenAddressSync(
       validators[0].splMint,
-      users[0].wallet.publicKey
+      users[0].wallet.publicKey,
     );
     users[0].accounts.set(LST_ATA, lstAta);
 
     // Note: user stake account exists before, but is closed after
     // Here we note the balance of the stake account prior
     const stakeAccountInfo = await bankRunProvider.connection.getAccountInfo(
-      userStakeAccount
+      userStakeAccount,
     );
     const stakeAccBefore = getStakeAccount(stakeAccountInfo.data);
     const rent = new BN(stakeAccBefore.meta.rentExemptReserve.toString());
     const delegationBefore = Number(
-      stakeAccBefore.stake.delegation.stake.toString()
+      stakeAccBefore.stake.delegation.stake.toString(),
     );
     assertBNEqual(
       new BN(delegationBefore),
-      new BN(10 * LAMPORTS_PER_SOL).sub(rent)
+      new BN(stake * LAMPORTS_PER_SOL).sub(rent),
     );
 
     // The spl stake pool account is already infused with 1 SOL at init
     const splStakeInfoBefore = await bankRunProvider.connection.getAccountInfo(
-      validators[0].splSolPool
+      validators[0].splSolPool,
     );
     const splStakePoolBefore = getStakeAccount(splStakeInfoBefore.data);
     const delegationSplPoolBefore = new BN(
-      splStakePoolBefore.stake.delegation.stake.toString()
+      splStakePoolBefore.stake.delegation.stake.toString(),
     );
     if (verbose) {
       console.log("pool stake before: " + delegationSplPoolBefore.toString());
@@ -248,7 +242,7 @@ describe("User stakes some native and creates an account", () => {
       users[0].wallet.publicKey,
       validators[0].splPool,
       userStakeAccount,
-      verbose
+      verbose,
     );
     tx.add(...ixes);
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -258,11 +252,11 @@ describe("User stakes some native and creates an account", () => {
     // The stake account no longer exists
     try {
       const accountInfo = await bankRunProvider.connection.getAccountInfo(
-        userStakeAccount
+        userStakeAccount,
       );
       assert.ok(
         accountInfo === null,
-        "The account should not exist, but it does."
+        "The account should not exist, but it does.",
       );
     } catch (err) {
       assert.ok(true, "The account does not exist.");
@@ -275,13 +269,13 @@ describe("User stakes some native and creates an account", () => {
     if (verbose) {
       console.log("lst after: " + lstAfter.toLocaleString());
     }
-    // LST tokens are issued 1:1 with stake because there has been zero appreciation
+    // LST tokens are issued 1:1 with deposited stake-account lamports because there has been zero appreciation.
     // Also note that LST tokens use the same decimals.
-    assert.equal(lstAfter, delegationBefore);
+    assert.equal(lstAfter, stake * LAMPORTS_PER_SOL);
 
     const splStakePool = getStakeAccount(splStakePoolInfo.data);
     const delegationSplPoolAfter = new BN(
-      splStakePool.stake.delegation.stake.toString()
+      splStakePool.stake.delegation.stake.toString(),
     );
     if (verbose) {
       console.log("pool stake after: " + delegationSplPoolAfter.toString());
@@ -289,7 +283,7 @@ describe("User stakes some native and creates an account", () => {
     // The stake pool gained all of the stake that was held in the user stake acc
     assertBNEqual(
       delegationSplPoolAfter.sub(delegationSplPoolBefore),
-      delegationBefore
+      new BN(stake * LAMPORTS_PER_SOL),
     );
   });
 
@@ -302,7 +296,7 @@ describe("User stakes some native and creates an account", () => {
       await depositForUser(1, 1);
       await depositForUser(2, 1);
       await depositForUser(3, 1);
-    }
+    },
   );
 
   const depositForUser = async (userIndex: number, validatorIndex: 0 | 1) => {
@@ -319,7 +313,7 @@ describe("User stakes some native and creates an account", () => {
       user.wallet.publicKey,
       splPool,
       user.accounts.get(stakeAccKey),
-      verbose
+      verbose,
     );
     tx.add(...ixes);
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -328,7 +322,7 @@ describe("User stakes some native and creates an account", () => {
 
     const lstAta = getAssociatedTokenAddressSync(
       splMint,
-      user.wallet.publicKey
+      user.wallet.publicKey,
     );
     user.accounts.set(lstAtaKey, lstAta);
   };

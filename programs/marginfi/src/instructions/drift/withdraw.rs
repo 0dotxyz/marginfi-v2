@@ -22,7 +22,7 @@ use marginfi_type_crate::types::{
 };
 
 pub fn drift_withdraw<'info>(
-    ctx: Context<'_, '_, 'info, 'info, DriftWithdraw<'info>>,
+    ctx: Context<'info, DriftWithdraw<'info>>,
     amount: u64,
     withdraw_all: Option<bool>,
 ) -> MarginfiResult {

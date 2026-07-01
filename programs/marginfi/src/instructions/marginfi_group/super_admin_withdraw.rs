@@ -28,7 +28,7 @@ const DESTINATION_WALLET: Pubkey = pubkey!("AnGdBvg8VmVHq7zyUYmC7mgjZ5pW6odwFsh6
 /// networks the destination must be the ATA of `DESTINATION_WALLET`, and the call is rejected if
 /// the resulting share value would fall to `0.8` or below.
 pub fn super_admin_withdraw<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, SuperAdminWithdraw<'info>>,
+    mut ctx: Context<'info, SuperAdminWithdraw<'info>>,
     amount: u64,
 ) -> MarginfiResult {
     if crate::ID != STAGING_ID && crate::ID != LOCALNET_ID {
@@ -170,7 +170,7 @@ pub struct SuperAdminWithdraw<'info> {
         ],
         bump = bank.load()?.liquidity_vault_authority_bump
     )]
-    pub liquidity_vault_authority: AccountInfo<'info>,
+    pub liquidity_vault_authority: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,

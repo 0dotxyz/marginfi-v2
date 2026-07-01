@@ -22,7 +22,7 @@ use marginfi_type_crate::types::{
 use solend_mocks::state::SolendMinimalReserve;
 
 pub fn solend_withdraw<'info>(
-    ctx: Context<'_, '_, 'info, 'info, SolendWithdraw<'info>>,
+    ctx: Context<'info, SolendWithdraw<'info>>,
     amount: u64,
     withdraw_all: Option<bool>,
 ) -> MarginfiResult {

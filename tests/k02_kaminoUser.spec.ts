@@ -13,7 +13,7 @@ import { deriveObligation, deriveUserMetadata } from "./utils/pdas";
 import { SYSTEM_PROGRAM_ID } from "@coral-xyz/anchor/dist/cjs/native/system";
 import { KAMINO_METADATA, KAMINO_OBLIGATION } from "./utils/mocks";
 import { processBankrunTransaction } from "./utils/tools";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./utils/litesvm";
 import { createMintToInstruction } from "@solana/spl-token";
 import { InitObligationArgs } from "@kamino-finance/klend-sdk/dist/@codegen/klend/types";
 

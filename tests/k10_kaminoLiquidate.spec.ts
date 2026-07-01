@@ -49,7 +49,7 @@ import {
   deriveBaseObligation,
   deriveLiquidityVaultAuthority,
 } from "./utils/pdas";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./utils/litesvm";
 
 const startingSeed: number = 6;
 const USER_ACCOUNT_THROWAWAY = "throwaway_account_k";

@@ -3,11 +3,11 @@ import {
   configureBank,
   configureBankOracle,
   groupConfigure,
-  groupInitialize,
   initBankMetadata,
   writeBankMetadata,
+  writeBankMetadataPreInit,
 } from "./utils/group-instructions";
-import { Keypair, Transaction } from "@solana/web3.js";
+import { Transaction } from "@solana/web3.js";
 import { Marginfi } from "../target/types/marginfi";
 import {
   bankKeypairUsdc,
@@ -40,7 +40,10 @@ import {
   ORACLE_SETUP_FIXED,
   TOKENLESS_REPAYMENTS_ALLOWED,
 } from "./utils/types";
-import { deriveBankAndMetadataWithSeed } from "./utils/pdas";
+import {
+  deriveBankAndMetadataWithSeed,
+  deriveBankMetadata,
+} from "./utils/pdas";
 
 let program: Program<Marginfi>;
 
@@ -354,7 +357,9 @@ describe("Lending pool configure bank", () => {
     assertBNEqual(bank.flags, FREEZE_SETTINGS + CLOSE_ENABLED_FLAG); // still frozen
   });
 
-  it("(permissionless) Init blank metadata for a seeded bank before bank init", async () => {
+  it("(permissionless) Init blank metadata for an arbitrary bank pubkey", async () => {
+    // init_bank_metadata accepts any pubkey; the caller is on the hook for the rent if the bank
+    // never materializes. write_bank_metadata is gated separately (requires init'd bank).
     const bankSeed = new BN(41);
     const { bank, metadata, metadataBump } = deriveBankAndMetadataWithSeed(
       program.programId,
@@ -365,12 +370,7 @@ describe("Lending pool configure bank", () => {
 
     await users[1].mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
-        await initBankMetadata(users[1].mrgnProgram, {
-          group: marginfiGroup.publicKey,
-          bankMint: ecosystem.usdcMint.publicKey,
-          bank,
-          bankSeed,
-        })
+        await initBankMetadata(users[1].mrgnProgram, { bank })
       )
     );
 
@@ -379,51 +379,66 @@ describe("Lending pool configure bank", () => {
     assert.equal(meta.bump, metadataBump);
   });
 
-  it("(attacker) init metadata for another group's seeded bank before bank init - should fail", async () => {
-    const attacker = users[2];
-    const attackerGroup = Keypair.generate();
+  it("(meta admin) Write metadata for canonical seeded bank before bank exists", async () => {
     const bankSeed = new BN(42);
-    const { bank } = deriveBankAndMetadataWithSeed(
+    const { bank, metadata } = deriveBankAndMetadataWithSeed(
       program.programId,
       marginfiGroup.publicKey,
       ecosystem.usdcMint.publicKey,
       bankSeed
     );
 
-    await attacker.mrgnProgram.provider.sendAndConfirm(
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
-        await groupInitialize(attacker.mrgnProgram, {
-          marginfiGroup: attackerGroup.publicKey,
-          admin: attacker.wallet.publicKey,
-        })
-      ),
-      [attackerGroup]
-    );
-
-    await attacker.mrgnProgram.provider.sendAndConfirm(
-      new Transaction().add(
-        await groupConfigure(attacker.mrgnProgram, {
-          marginfiGroup: attackerGroup.publicKey,
-          newMetadataAdmin: attacker.wallet.publicKey,
+        await groupConfigure(groupAdmin.mrgnProgram, {
+          newMetadataAdmin: users[0].wallet.publicKey,
+          marginfiGroup: marginfiGroup.publicKey,
         })
       )
     );
 
-    await expectFailedTxWithMessage(async () => {
-      await attacker.mrgnProgram.provider.sendAndConfirm(
-        new Transaction().add(
-          await initBankMetadata(attacker.mrgnProgram, {
-            group: attackerGroup.publicKey,
-            bankMint: ecosystem.usdcMint.publicKey,
-            bank,
-            bankSeed,
-          })
-        )
-      );
-    }, "ConstraintSeeds");
+    await users[1].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await initBankMetadata(users[1].mrgnProgram, { bank })
+      )
+    );
+
+    const bankAccount = await program.account.bank.fetchNullable(bank);
+    assert.isNull(bankAccount, "bank should not exist yet");
+
+    const tickerStr = "PREINIT-USDC";
+    const descStr = "Pre-init metadata";
+    const tickerUtf8 = Buffer.from(tickerStr, "utf8");
+    const descUtf8 = Buffer.from(descStr, "utf8");
+
+    await users[0].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await writeBankMetadataPreInit(users[0].mrgnProgram, {
+          group: marginfiGroup.publicKey,
+          bankMint: ecosystem.usdcMint.publicKey,
+          bankSeed,
+          metadata,
+          ticker: tickerStr,
+          description: descStr,
+        })
+      )
+    );
+
+    const meta = await program.account.bankMetadata.fetch(metadata);
+    const onchainTicker = Buffer.from(meta.ticker as number[]);
+    const onchainDesc = Buffer.from(meta.description as number[]);
+
+    assert.equal(
+      onchainTicker.subarray(0, tickerUtf8.length).toString("utf8"),
+      tickerStr
+    );
+    assert.equal(
+      onchainDesc.subarray(0, descUtf8.length).toString("utf8"),
+      descStr
+    );
   });
 
-  it("(meta admin) Update metadata for a seeded bank", async () => {
+  it("(attacker) Cannot write pre-init metadata when not the group's metadata admin", async () => {
     const bankSeed = new BN(43);
     const { bank, metadata } = deriveBankAndMetadataWithSeed(
       program.programId,
@@ -431,6 +446,63 @@ describe("Lending pool configure bank", () => {
       ecosystem.usdcMint.publicKey,
       bankSeed
     );
+
+    await users[1].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await initBankMetadata(users[1].mrgnProgram, { bank })
+      )
+    );
+
+    await expectFailedTxWithMessage(async () => {
+      await users[2].mrgnProgram.provider.sendAndConfirm(
+        new Transaction().add(
+          await writeBankMetadataPreInit(users[2].mrgnProgram, {
+            group: marginfiGroup.publicKey,
+            bankMint: ecosystem.usdcMint.publicKey,
+            bankSeed,
+            metadata,
+            ticker: "BAD",
+            description: "nope",
+          })
+        )
+      );
+    }, "ConstraintHasOne");
+  });
+
+  it("(attacker) Cannot spoof pre-init metadata write with wrong mint/seed tuple", async () => {
+    const bankSeed = new BN(44);
+    const { bank, metadata } = deriveBankAndMetadataWithSeed(
+      program.programId,
+      marginfiGroup.publicKey,
+      ecosystem.usdcMint.publicKey,
+      bankSeed
+    );
+
+    await users[1].mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await initBankMetadata(users[1].mrgnProgram, { bank })
+      )
+    );
+
+    await expectFailedTxWithMessage(async () => {
+      await users[0].mrgnProgram.provider.sendAndConfirm(
+        new Transaction().add(
+          await writeBankMetadataPreInit(users[0].mrgnProgram, {
+            group: marginfiGroup.publicKey,
+            bankMint: ecosystem.wsolMint.publicKey,
+            bankSeed,
+            metadata,
+            ticker: "BAD",
+            description: "seed mismatch",
+          })
+        )
+      );
+    }, "ConstraintSeeds");
+  });
+
+  it("(meta admin) Update metadata for an initialized bank", async () => {
+    const bank = bankKeypairUsdc.publicKey;
+    const [metadata] = deriveBankMetadata(program.programId, bank);
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
@@ -447,12 +519,7 @@ describe("Lending pool configure bank", () => {
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
-        await initBankMetadata(groupAdmin.mrgnProgram, {
-          group: marginfiGroup.publicKey,
-          bankMint: ecosystem.usdcMint.publicKey,
-          bank,
-          bankSeed,
-        })
+        await initBankMetadata(groupAdmin.mrgnProgram, { bank })
       )
     );
 
@@ -464,10 +531,6 @@ describe("Lending pool configure bank", () => {
     await users[0].mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await writeBankMetadata(users[0].mrgnProgram, {
-          group: marginfiGroup.publicKey,
-          bankMint: ecosystem.usdcMint.publicKey,
-          bank,
-          bankSeed,
           metadata,
           ticker: tickerStr,
           description: descStr,

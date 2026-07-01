@@ -24,7 +24,7 @@ use marginfi_type_crate::types::{
 };
 
 pub fn juplend_withdraw<'info>(
-    ctx: Context<'_, '_, 'info, 'info, JuplendWithdraw<'info>>,
+    ctx: Context<'info, JuplendWithdraw<'info>>,
     amount: u64,
     withdraw_all: Option<bool>,
 ) -> MarginfiResult {

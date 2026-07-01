@@ -49,13 +49,12 @@ use solana_sdk::{account::AccountSharedData, entrypoint::ProgramResult};
 
 use fixed_macro::types::I80F48;
 use lazy_static::lazy_static;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program::{hash::Hash, sysvar};
 use solana_program_test::*;
 use solana_sdk::{
     account::Account,
-    compute_budget::ComputeBudgetInstruction,
     instruction::{AccountMeta, Instruction},
-    pubkey,
     signature::Keypair,
     signer::Signer,
     transaction::Transaction,
@@ -662,9 +661,9 @@ pub const SOL_MINT_DECIMALS: u8 = 9;
 pub const MNDE_MINT_DECIMALS: u8 = 9;
 
 pub fn marginfi_entry<'info>(
-    program_id: &Pubkey,
+    program_id: &'info Pubkey,
     accounts: &'info [AccountInfo<'info>],
-    data: &[u8],
+    data: &'info [u8],
 ) -> ProgramResult {
     marginfi::entry(program_id, accounts, data)
 }

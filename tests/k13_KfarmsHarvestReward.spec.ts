@@ -49,7 +49,7 @@ import {
   assertKeysEqual,
   getTokenBalance,
 } from "./utils/genericTests";
-import { Clock, ProgramTestContext } from "solana-bankrun";
+import { Clock, ProgramTestContext } from "./utils/litesvm";
 import { FARMS_PROGRAM_ID, KLEND_PROGRAM_ID } from "./utils/types";
 import { Farms } from "./fixtures/kamino_farms";
 import farmsIdl from "../idls-complete/kamino_farms.json";
@@ -221,7 +221,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
       FARMS_PROGRAM_ID,
     );
 
-    // Extra initialization needed for rewards to accrue over time
+    // Extra initialization needed for rewards to accrue over time.
     const rewardPoints = [
       {
         tsStart: 0,

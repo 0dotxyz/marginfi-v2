@@ -121,7 +121,7 @@ pub(crate) fn deposit<'info>(
             supply_token_reserves_liquidity: protocol_accounts[4].clone(),
             rewards_rate_model: protocol_accounts[10].clone(),
         };
-        let cpi_ctx = CpiContext::new(protocol_accounts[11].clone(), accounts);
+        let cpi_ctx = CpiContext::new(protocol_accounts[11].key(), accounts);
         update_rate(cpi_ctx)?;
     }
 
@@ -161,7 +161,7 @@ pub(crate) fn deposit<'info>(
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, common.bank.key(), authority_bump);
         let cpi_ctx =
-            CpiContext::new_with_signer(protocol_accounts[11].clone(), accounts, signer_seeds);
+            CpiContext::new_with_signer(protocol_accounts[11].key(), accounts, signer_seeds);
         cpi_juplend_deposit(cpi_ctx, amount)?;
     }
 
@@ -248,13 +248,13 @@ pub(crate) fn pre_refresh<'info>(
         supply_token_reserves_liquidity: protocol_accounts[5].clone(),
         rewards_rate_model: protocol_accounts[12].clone(),
     };
-    let cpi_ctx = CpiContext::new(protocol_accounts[13].clone(), accounts);
+    let cpi_ctx = CpiContext::new(protocol_accounts[13].key(), accounts);
     update_rate(cpi_ctx)?;
     Ok(())
 }
 
 /// Protocol-specific pre-withdraw balance computation for JupLend.
-/// Returns (token_amount, shares_to_burn).
+/// Returns (token_amount, shares_to_burn, share_amount).
 pub(crate) fn pre_withdraw<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
     bank: &mut Bank,
@@ -262,7 +262,7 @@ pub(crate) fn pre_withdraw<'info>(
     bank_key: &Pubkey,
     amount: u64,
     withdraw_all: bool,
-) -> MarginfiResult<(u64, u64)> {
+) -> MarginfiResult<(u64, u64, I80F48)> {
     check!(
         protocol_accounts.len() >= WITHDRAW_ACCOUNTS,
         MarginfiError::IntegrationAccountCountMismatch
@@ -275,8 +275,8 @@ pub(crate) fn pre_withdraw<'info>(
     let mut bank_account =
         BankAccountWrapper::find(bank_key, bank, &mut marginfi_account.lending_account)?;
 
-    let (token_amount, shares_to_burn) = if withdraw_all {
-        let f_tokens_balance = bank_account.withdraw_all(in_receivership)?;
+    let (token_amount, shares_to_burn, share_amount) = if withdraw_all {
+        let (f_tokens_balance, share_amount) = bank_account.withdraw_all(in_receivership)?;
 
         let token_amount =
             expected_assets_for_redeem_from_rate(f_tokens_balance, lending.token_exchange_price)
@@ -288,18 +288,18 @@ pub(crate) fn pre_withdraw<'info>(
 
         require!(shares_to_burn <= f_tokens_balance, MarginfiError::MathError);
 
-        (token_amount, shares_to_burn)
+        (token_amount, shares_to_burn, share_amount)
     } else {
         let shares_to_burn =
             expected_shares_for_withdraw_from_rate(amount, lending.token_exchange_price)
                 .ok_or_else(|| error!(MarginfiError::MathError))?;
 
-        bank_account.withdraw(I80F48::from_num(shares_to_burn))?;
+        let share_amount = bank_account.withdraw(I80F48::from_num(shares_to_burn))?;
 
-        (amount, shares_to_burn)
+        (amount, shares_to_burn, share_amount)
     };
 
-    Ok((token_amount, shares_to_burn))
+    Ok((token_amount, shares_to_burn, share_amount))
 }
 
 /// Protocol-specific CPI for JupLend withdraw.
@@ -343,7 +343,7 @@ pub(crate) fn withdraw_cpi<'info>(
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, common.bank.key(), authority_bump);
         let cpi_ctx =
-            CpiContext::new_with_signer(protocol_accounts[13].clone(), accounts, signer_seeds);
+            CpiContext::new_with_signer(protocol_accounts[13].key(), accounts, signer_seeds);
         cpi_juplend_withdraw(cpi_ctx, token_amount)?;
     }
 
@@ -379,7 +379,7 @@ pub(crate) fn withdraw_cpi<'info>(
         };
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, common.bank.key(), authority_bump);
-        let cpi_ctx = CpiContext::new_with_signer(program, cpi_accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), cpi_accounts, signer_seeds);
         transfer_checked(cpi_ctx, received_underlying, common.mint_decimals)?;
     }
 

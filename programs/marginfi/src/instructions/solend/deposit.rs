@@ -17,7 +17,7 @@ use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_D
 use solend_mocks::state::SolendMinimalReserve;
 
 pub fn solend_deposit<'info>(
-    ctx: Context<'_, '_, 'info, 'info, SolendDeposit<'info>>,
+    ctx: Context<'info, SolendDeposit<'info>>,
     amount: u64,
 ) -> MarginfiResult {
     let common = ctx.accounts.to_common();

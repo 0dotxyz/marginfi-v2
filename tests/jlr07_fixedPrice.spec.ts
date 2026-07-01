@@ -85,7 +85,7 @@ import {
   deriveBankWithSeed,
   deriveLiquidityVaultAuthority,
 } from "./utils/pdas";
-import { ProgramTestContext } from "solana-bankrun";
+import { ProgramTestContext } from "./utils/litesvm";
 import { getJuplendPrograms } from "./utils/juplend/programs";
 import { dummyIx } from "./utils/bankrunConnection";
 
@@ -357,7 +357,6 @@ describe("jlrx: Fixed JupLend price bank", () => {
     const wrongLending = Keypair.generate().publicKey;
     const tx = new Transaction().add(
       await pulseBankPrice(user.mrgnBankrunProgram, {
-        group: juplendGroup.publicKey,
         bank: fixedJuplendBank,
         remaining: [wrongLending],
       }),

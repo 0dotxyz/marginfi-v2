@@ -82,7 +82,7 @@ pub(crate) struct CommonWithdraw<'a, 'info> {
 }
 
 pub fn integration_deposit<'info>(
-    ctx: Context<'_, '_, 'info, 'info, IntegrationDeposit<'info>>,
+    ctx: Context<'info, IntegrationDeposit<'info>>,
     amount: u64,
     op_mode: IntegrationOpMode,
 ) -> MarginfiResult {
@@ -153,7 +153,7 @@ pub(crate) fn integration_deposit_impl<'info>(
 }
 
 pub fn integration_withdraw<'info>(
-    ctx: Context<'_, '_, 'info, 'info, IntegrationWithdraw<'info>>,
+    ctx: Context<'info, IntegrationWithdraw<'info>>,
     amount: u64,
     withdraw_all: Option<bool>,
     op_mode: IntegrationOpMode,
@@ -215,7 +215,7 @@ pub(crate) fn integration_withdraw_impl<'info>(
     // For Drift: (token_amount, expected_scaled_balance_change)
     // For JupLend: (token_amount, shares_to_burn)
     // For Kamino/Solend: (collateral_amount, collateral_amount) -- same value
-    let (token_amount, balance_unit_amount) = {
+    let (token_amount, balance_unit_amount, share_amount) = {
         let mut marginfi_account = common.marginfi_account.load_mut()?;
         let mut bank = common.bank.load_mut()?;
         let group = common.group.load()?;
@@ -240,7 +240,7 @@ pub(crate) fn integration_withdraw_impl<'info>(
             I80F48::ZERO
         };
 
-        let (ca, token_amt, balance_unit) = match asset_tag {
+        let (ca, token_amt, balance_unit, share) = match asset_tag {
             ASSET_TAG_KAMINO | ASSET_TAG_SOLEND => {
                 let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
                 let mut ba = BankAccountWrapper::find(
@@ -248,31 +248,33 @@ pub(crate) fn integration_withdraw_impl<'info>(
                     &mut bank,
                     &mut marginfi_account.lending_account,
                 )?;
-                let ca = if withdraw_all {
+                let (ca, share) = if withdraw_all {
                     ba.withdraw_all(in_receivership)?
                 } else {
-                    ba.withdraw(I80F48::from_num(amount))?;
-                    amount
+                    let share = ba.withdraw(I80F48::from_num(amount))?;
+                    (amount, share)
                 };
-                (ca, ca, ca)
+                (ca, ca, ca, share)
             }
             ASSET_TAG_DRIFT => {
-                let (token_amount, expected_scaled_balance_change) = drift_handler::pre_withdraw(
-                    protocol_accounts,
-                    &mut bank,
-                    &mut marginfi_account,
-                    &bank_key,
-                    amount,
-                    withdraw_all,
-                )?;
+                let (token_amount, expected_scaled_balance_change, share) =
+                    drift_handler::pre_withdraw(
+                        protocol_accounts,
+                        &mut bank,
+                        &mut marginfi_account,
+                        &bank_key,
+                        amount,
+                        withdraw_all,
+                    )?;
                 (
                     expected_scaled_balance_change,
                     token_amount,
                     expected_scaled_balance_change,
+                    share,
                 )
             }
             ASSET_TAG_JUPLEND => {
-                let (token_amount, shares_to_burn) = juplend_handler::pre_withdraw(
+                let (token_amount, shares_to_burn, share) = juplend_handler::pre_withdraw(
                     protocol_accounts,
                     &mut bank,
                     &mut marginfi_account,
@@ -280,7 +282,7 @@ pub(crate) fn integration_withdraw_impl<'info>(
                     amount,
                     withdraw_all,
                 )?;
-                (shares_to_burn, token_amount, shares_to_burn)
+                (shares_to_burn, token_amount, shares_to_burn, share)
             }
             _ => return err!(MarginfiError::UnsupportedIntegration),
         };
@@ -320,7 +322,7 @@ pub(crate) fn integration_withdraw_impl<'info>(
         bank.update_bank_cache(&group)?;
         marginfi_account.last_update = clock.unix_timestamp as u64;
 
-        (token_amt, balance_unit)
+        (token_amt, balance_unit, share)
     };
 
     // Protocol-specific CPI + verification + transfer
@@ -370,6 +372,7 @@ pub(crate) fn integration_withdraw_impl<'info>(
         common.authority.key(),
         common.marginfi_account.key(),
         event_amount,
+        share_amount,
         withdraw_all,
         oracle_accounts,
         &clock,
@@ -385,7 +388,7 @@ fn cpi_transfer_signer_to_vault(common: &CommonDeposit, amount: u64) -> Marginfi
         authority: common.authority.to_account_info(),
         mint: common.mint.clone(),
     };
-    let cpi_ctx = CpiContext::new(common.token_program.clone(), cpi_accounts);
+    let cpi_ctx = CpiContext::new(common.token_program.key(), cpi_accounts);
     transfer_checked(cpi_ctx, amount, common.mint_decimals)?;
     Ok(())
 }
@@ -405,7 +408,7 @@ pub(crate) fn cpi_transfer_vault_to_destination(
     let signer_seeds: &[&[&[u8]]] =
         bank_signer!(BankVaultType::Liquidity, bank_key, authority_bump);
     let cpi_ctx =
-        CpiContext::new_with_signer(common.token_program.clone(), cpi_accounts, signer_seeds);
+        CpiContext::new_with_signer(common.token_program.key(), cpi_accounts, signer_seeds);
     transfer_checked(cpi_ctx, amount, common.mint_decimals)?;
     Ok(())
 }

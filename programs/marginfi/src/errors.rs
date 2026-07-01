@@ -108,8 +108,8 @@ pub enum MarginfiError {
     WrongNumberOfOracleAccounts,
     #[msg("Oracle error: wrong account keys")] // 6052
     WrongOracleAccountKeys,
-    #[msg("Vacated2")] // 6053
-    Vacated2,
+    #[msg("Stake oracles are temporarily disabled")] // 6053
+    StakeOraclesDisabled,
     #[msg("Vacated3")] // 6054
     Vacated3,
     #[msg("Oracle max confidence exceeded: try again later")] // 6055
@@ -270,6 +270,10 @@ pub enum MarginfiError {
     UseSetFixedOraclePrice,
     #[msg("Provided global fee wallet does not match group fee state cache")] // 6133
     InvalidGlobalFeeWallet,
+    #[msg("Bank has not completed one-time initialization")] // 6134
+    BankUninitialized,
+    #[msg("Max slippage exceeds the allowed cap")] // 6135
+    SlippageTooHigh,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -512,7 +516,7 @@ impl From<u32> for MarginfiError {
             6050 => MarginfiError::PythPushStalePrice,
             6051 => MarginfiError::WrongNumberOfOracleAccounts,
             6052 => MarginfiError::WrongOracleAccountKeys,
-            6053 => MarginfiError::Vacated2,
+            6053 => MarginfiError::StakeOraclesDisabled,
             6054 => MarginfiError::Vacated3,
             6055 => MarginfiError::OracleMaxConfidenceExceeded,
             6056 => MarginfiError::PythPushInsufficientVerificationLevel,
@@ -593,6 +597,7 @@ impl From<u32> for MarginfiError {
             6131 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSeq,
             6132 => MarginfiError::UseSetFixedOraclePrice,
             6133 => MarginfiError::InvalidGlobalFeeWallet,
+            6134 => MarginfiError::BankUninitialized,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,

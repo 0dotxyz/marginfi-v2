@@ -27,9 +27,7 @@ use marginfi_type_crate::{
 /// * Fails if account is less healthy than it was at start
 /// * Fails if liquidator earned too much profit (took more assets in exchange for repayment of
 ///   liabs that they were allowed)
-pub fn end_liquidation<'info>(
-    ctx: Context<'_, '_, 'info, 'info, EndLiquidation<'info>>,
-) -> MarginfiResult {
+pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     let fee_state = ctx.accounts.fee_state.load()?;
@@ -85,10 +83,8 @@ pub fn end_liquidation<'info>(
 
 /// (Permissioned) Ends a deleverage. Records the liquidation event in the user's record.
 /// * Fails if account is less healthy than it was at start
-/// Note: no fees taken.
-pub fn end_deleverage<'info>(
-    ctx: Context<'_, '_, 'info, 'info, EndDeleverage<'info>>,
-) -> MarginfiResult {
+///   Note: no fees taken.
+pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
 
@@ -223,7 +219,7 @@ pub struct EndLiquidation<'info> {
 
     /// CHECK: The fee admin's native SOL wallet, validated against fee state
     #[account(mut)]
-    pub global_fee_wallet: AccountInfo<'info>,
+    pub global_fee_wallet: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
 }
@@ -233,7 +229,7 @@ impl<'info> EndLiquidation<'info> {
         &self,
     ) -> CpiContext<'_, '_, '_, 'info, anchor_lang::system_program::Transfer<'info>> {
         CpiContext::new(
-            self.system_program.to_account_info(),
+            self.system_program.key(),
             anchor_lang::system_program::Transfer {
                 // TODO Eventually, maybe support the fee being paid by a different account
                 from: self.liquidation_receiver.to_account_info(),
@@ -255,7 +251,7 @@ pub struct EndDeleverage<'info> {
     #[account(
         mut,
         has_one = liquidation_record,
-        has_one = group,
+        has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
             let acc = marginfi_account.load()?;
             acc.get_flag(ACCOUNT_IN_RECEIVERSHIP)

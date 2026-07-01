@@ -5,7 +5,6 @@ use crate::{
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::sysvar;
 use anchor_spl::token::accessor;
 use kamino_mocks::kamino_lending::cpi::deposit_reserve_liquidity_and_obligation_collateral_v2;
 use kamino_mocks::kamino_lending::cpi::refresh_reserves_batch;
@@ -72,7 +71,7 @@ fn validate_protocol_accounts(
         MarginfiError::IntegrationAccountKeyMismatch
     );
     check!(
-        protocol_accounts[10].key() == sysvar::instructions::ID,
+        protocol_accounts[10].key() == solana_instructions_sysvar::ID,
         MarginfiError::IntegrationAccountKeyMismatch
     );
     Ok(())
@@ -110,7 +109,7 @@ fn farms_accounts<'a>(protocol_accounts: &'a [AccountInfo<'a>]) -> DepositFarmsA
 
 /// CPI: batch-refresh the reserve so its exchange rate is current before the operation.
 fn refresh_reserve(protocol_accounts: &[AccountInfo]) -> MarginfiResult {
-    let cpi_ctx = CpiContext::new(protocol_accounts[7].clone(), RefreshReservesBatch {})
+    let cpi_ctx = CpiContext::new(protocol_accounts[7].key(), RefreshReservesBatch {})
         .with_remaining_accounts(vec![
             protocol_accounts[3].clone(),
             protocol_accounts[1].clone(),
@@ -174,7 +173,7 @@ pub(crate) fn deposit<'info>(
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, common.bank.key(), authority_bump);
         let cpi_ctx =
-            CpiContext::new_with_signer(protocol_accounts[7].clone(), accounts, signer_seeds);
+            CpiContext::new_with_signer(protocol_accounts[7].key(), accounts, signer_seeds);
         deposit_reserve_liquidity_and_obligation_collateral_v2(cpi_ctx, amount)?;
     }
 
@@ -247,7 +246,7 @@ pub(crate) fn withdraw_cpi<'info>(
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, common.bank.key(), authority_bump);
         let cpi_ctx =
-            CpiContext::new_with_signer(protocol_accounts[7].clone(), accounts, signer_seeds);
+            CpiContext::new_with_signer(protocol_accounts[7].key(), accounts, signer_seeds);
         withdraw_obligation_collateral_and_redeem_reserve_collateral_v2(
             cpi_ctx,
             collateral_amount,

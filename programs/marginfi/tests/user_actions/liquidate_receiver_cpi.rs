@@ -1,6 +1,4 @@
-use anchor_lang::{
-    prelude::*, solana_program::instruction::Instruction, solana_program::sysvar, InstructionData,
-};
+use anchor_lang::{prelude::*, solana_program::instruction::Instruction, InstructionData};
 use fixed_macro::types::I80F48;
 use fixtures::{assert_custom_error, prelude::*};
 use marginfi::{errors::MarginfiError, state::marginfi_account::MarginfiAccountImpl};
@@ -124,7 +122,7 @@ async fn liquidate_start_then_cpi_start_on_different_accounts_exploit() -> anyho
         marginfi_account: liquidatee_b.key,
         liquidation_record: record_b,
         liquidation_receiver: test_f.payer(), // arbitrary receiver
-        instructions_sysvar: sysvar::instructions::id(),
+        instructions_sysvar: solana_instructions_sysvar::id(),
         marginfi_program: marginfi::ID,
     };
     let mut start_via_cpi_ix = Instruction {

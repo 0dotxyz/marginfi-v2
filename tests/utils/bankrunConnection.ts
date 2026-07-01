@@ -8,7 +8,7 @@ import {
   TransactionInstruction,
   SYSVAR_CLOCK_PUBKEY,
 } from "@solana/web3.js";
-import { BanksClient, Clock, ProgramTestContext } from "solana-bankrun";
+import { BanksClient, Clock, ProgramTestContext } from "./litesvm";
 import { BN, utils } from "@coral-xyz/anchor";
 
 /**

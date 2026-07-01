@@ -3,7 +3,7 @@ description: "Build Anchor Workspace"
 runs:
   using: "composite"
   steps:
-    # - uses: actions/cache@v2
+    # - uses: actions/cache@v4
     #   name: Cache Cargo registry + index
     #   id: cache-cargo-registry
     #   with:
@@ -15,12 +15,12 @@ runs:
     #     key: cargo-${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
 
     # - name: Cache Anchor Build
-    #   uses: actions/cache@v2
+    #   uses: actions/cache@v4
     #   id: cache-anchor-build
     #   with:
     #     path: |
     #       ./target/
-    #     key: build-${{ runner.os }}-${{env.ANCHOR_CLI_VERSION}}-${{env.ANCHOR_SHA}}-v0002-${{ hashFiles('./programs/**/**', '**/Cargo.lock') }}-workspace
+    #     key: build-${{ runner.os }}-${{env.ANCHOR_CLI_VERSION}}-${{env.SOLANA_CLI_VERSION}}-v0002-${{ hashFiles('./programs/**/**', '**/Cargo.lock') }}-workspace
 
     - run: ./scripts/build-workspace.sh
       # if: steps.cache-anchor-build.outputs.cache-hit != 'true'

@@ -5,8 +5,8 @@ use crate::{
         TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE,
     },
     types::{
-        BankOperationalState, InterestRateConfig, InterestRateConfigCompact, InterestRateConfigOpt,
-        OracleSetup, RiskTier,
+        BalanceSide, BankOperationalState, InterestRateConfig, InterestRateConfigCompact,
+        InterestRateConfigOpt, OracleSetup, RequirementType, RiskTier,
     },
 };
 
@@ -66,9 +66,9 @@ pub struct BankConfig {
     /// * `ASSET_TAG_DEFAULT` (0) - A regular asset that can be comingled with any other regular
     ///   asset or with `ASSET_TAG_SOL`
     /// * `ASSET_TAG_SOL` (1) - Accounts with a SOL position can comingle with **either**
-    /// `ASSET_TAG_DEFAULT` or `ASSET_TAG_STAKED` positions, but not both
+    ///   `ASSET_TAG_DEFAULT` or `ASSET_TAG_STAKED` positions, but not both
     /// * `ASSET_TAG_STAKED` (2) - Staked SOL assets. Accounts with a STAKED position can only
-    /// deposit other STAKED assets or SOL (`ASSET_TAG_SOL`) and can only borrow SOL
+    ///   deposit other STAKED assets or SOL (`ASSET_TAG_SOL`) and can only borrow SOL
     /// * `ASSET_TAG_KAMINO` (3) - Treated the same as `ASSET_TAG_DEFAULT`
     /// * `ASSET_TAG_DRIFT` (4) - Treated the same as `ASSET_TAG_DEFAULT`
     /// * `ASSET_TAG_SOLEND` (5) - Treated the same as `ASSET_TAG_DEFAULT`
@@ -139,6 +139,27 @@ impl Default for BankConfig {
     }
 }
 
+impl BankConfig {
+    #[inline]
+    pub fn get_weight(
+        &self,
+        requirement_type: RequirementType,
+        balance_side: BalanceSide,
+    ) -> I80F48 {
+        match (requirement_type, balance_side) {
+            (RequirementType::Initial, BalanceSide::Assets) => self.asset_weight_init.into(),
+            (RequirementType::Initial, BalanceSide::Liabilities) => {
+                self.liability_weight_init.into()
+            }
+            (RequirementType::Maintenance, BalanceSide::Assets) => self.asset_weight_maint.into(),
+            (RequirementType::Maintenance, BalanceSide::Liabilities) => {
+                self.liability_weight_maint.into()
+            }
+            (RequirementType::Equity, _) => I80F48::ONE,
+        }
+    }
+}
+
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct BankConfigOpt {
@@ -193,9 +214,9 @@ pub struct BankConfigCompact {
     /// * `ASSET_TAG_DEFAULT` (0) - A regular asset that can be comingled with any other regular
     ///   asset or with `ASSET_TAG_SOL`
     /// * `ASSET_TAG_SOL` (1) - Accounts with a SOL position can comingle with **either**
-    /// `ASSET_TAG_DEFAULT` or `ASSET_TAG_STAKED` positions, but not both
+    ///   `ASSET_TAG_DEFAULT` or `ASSET_TAG_STAKED` positions, but not both
     /// * `ASSET_TAG_STAKED` (2) - Staked SOL assets. Accounts with a STAKED position can only
-    /// deposit other STAKED assets or SOL (`ASSET_TAG_SOL`) and can only borrow SOL
+    ///   deposit other STAKED assets or SOL (`ASSET_TAG_SOL`) and can only borrow SOL
     /// * `ASSET_TAG_KAMINO` (3) - Treated the same as `ASSET_TAG_DEFAULT`
     /// * `ASSET_TAG_DRIFT` (4) - Treated the same as `ASSET_TAG_DEFAULT`
     /// * `ASSET_TAG_SOLEND` (5) - Treated the same as `ASSET_TAG_DEFAULT`

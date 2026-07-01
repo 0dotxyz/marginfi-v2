@@ -7,7 +7,7 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import { assert } from "chai";
-import { Clock } from "solana-bankrun";
+import { Clock } from "./utils/litesvm";
 
 import {
   banksClient,
@@ -43,7 +43,7 @@ import {
   makeKaminoDepositIx,
 } from "./utils/kamino-instructions";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
-import { processBankrunTransaction } from "./utils/tools";
+import { processBankrunTransaction, toBnFromI80 } from "./utils/tools";
 import { getTokenBalance, assertBNApproximately } from "./utils/genericTests";
 import { createMintToInstruction } from "@solana/spl-token";
 import { refreshPullOraclesBankrun } from "./utils/bankrun-oracles";
@@ -242,9 +242,7 @@ describe("k15: Kamino Conversion Validation", () => {
     const balance0 = marginfiAccount0.lendingAccount.balances.find(
       (b) => b.active == 1 && b.bankPk.equals(usdcBank),
     );
-    user0InitialCTokens = new BN(
-      wrappedI80F48toBigNumber(balance0.assetShares).toString(),
-    );
+    user0InitialCTokens = toBnFromI80(balance0.assetShares);
 
     assertBNApproximately(user0InitialCTokens, expectedUsdcCTokens, new BN(1));
 
@@ -306,9 +304,7 @@ describe("k15: Kamino Conversion Validation", () => {
     const balance1 = marginfiAccount1.lendingAccount.balances.find(
       (b) => b.active == 1 && b.bankPk.equals(tokenABank),
     );
-    user1InitialCTokens = new BN(
-      wrappedI80F48toBigNumber(balance1.assetShares).toString(),
-    );
+    user1InitialCTokens = toBnFromI80(balance1.assetShares);
     // ??? This sometimes fails due to clock issues
     assertBNApproximately(
       user1InitialCTokens,

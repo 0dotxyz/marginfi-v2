@@ -3,9 +3,10 @@ use fixtures::test::TestFixture;
 use marginfi_type_crate::types::MarginfiAccount;
 use solana_program_test::tokio;
 use solana_sdk::{
-    clock::Clock, instruction::Instruction, signature::Keypair, signer::Signer, system_program,
+    clock::Clock, instruction::Instruction, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
+use solana_system_interface::program as system_program;
 
 #[tokio::test]
 async fn marginfi_account_create_success() -> anyhow::Result<()> {

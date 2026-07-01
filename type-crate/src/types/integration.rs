@@ -6,6 +6,7 @@ use anchor_lang::prelude::*;
 /// Identifies which integration protocol is being used.
 /// Passed into the unified instruction so the operation type is readable from instruction args.
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[cfg_attr(feature = "anchor", borsh(use_discriminant = true))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum IntegrationOpMode {

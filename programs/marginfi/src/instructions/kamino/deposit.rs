@@ -20,7 +20,7 @@ use marginfi_type_crate::pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID};
 use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
 pub fn kamino_deposit<'info>(
-    ctx: Context<'_, '_, 'info, 'info, KaminoDeposit<'info>>,
+    ctx: Context<'info, KaminoDeposit<'info>>,
     amount: u64,
     refresh_reserve: Option<bool>,
 ) -> MarginfiResult {
@@ -150,7 +150,7 @@ pub struct KaminoDeposit<'info> {
     pub liquidity_token_program: Interface<'info, TokenInterface>,
 
     /// CHECK: validated against hardcoded program id
-    #[account(address = anchor_lang::solana_program::sysvar::instructions::ID)]
+    #[account(address = solana_instructions_sysvar::ID)]
     pub instruction_sysvar_account: UncheckedAccount<'info>,
 }
 

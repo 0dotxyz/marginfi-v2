@@ -27,7 +27,7 @@ use marginfi_type_crate::types::{
 };
 
 pub fn kamino_withdraw<'info>(
-    ctx: Context<'_, '_, 'info, 'info, KaminoWithdraw<'info>>,
+    ctx: Context<'info, KaminoWithdraw<'info>>,
     amount: u64,
     flags: Option<u8>,
 ) -> MarginfiResult {
@@ -178,7 +178,7 @@ pub struct KaminoWithdraw<'info> {
     pub liquidity_token_program: Interface<'info, TokenInterface>,
 
     /// CHECK: validated against hardcoded program id
-    #[account(address = anchor_lang::solana_program::sysvar::instructions::ID)]
+    #[account(address = solana_instructions_sysvar::ID)]
     pub instruction_sysvar_account: UncheckedAccount<'info>,
 }
 

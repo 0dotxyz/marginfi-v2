@@ -157,7 +157,7 @@ pub(crate) fn deposit<'info>(
             oracle: oracle_info,
             spot_market_vault: protocol_accounts[4].clone(),
         };
-        let cpi_ctx = CpiContext::new(protocol_accounts[5].clone(), accounts);
+        let cpi_ctx = CpiContext::new(protocol_accounts[5].key(), accounts);
         update_spot_market_cumulative_interest(cpi_ctx)?;
     }
 
@@ -181,7 +181,7 @@ pub(crate) fn deposit<'info>(
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, common.bank.key(), authority_bump);
         let mut cpi_ctx =
-            CpiContext::new_with_signer(protocol_accounts[5].clone(), accounts, signer_seeds);
+            CpiContext::new_with_signer(protocol_accounts[5].key(), accounts, signer_seeds);
 
         let mut remaining = Vec::new();
         if let Some(oracle) = optional_account(protocol_accounts.get(7)) {
@@ -221,13 +221,13 @@ pub(crate) fn pre_refresh<'info>(
         oracle: oracle_info,
         spot_market_vault: protocol_accounts[4].clone(),
     };
-    let cpi_ctx = CpiContext::new(protocol_accounts[6].clone(), accounts);
+    let cpi_ctx = CpiContext::new(protocol_accounts[6].key(), accounts);
     update_spot_market_cumulative_interest(cpi_ctx)?;
     Ok(())
 }
 
 /// Protocol-specific pre-withdraw balance computation for Drift.
-/// Returns (token_amount, expected_scaled_balance_change).
+/// Returns (token_amount, expected_scaled_balance_change, share_amount).
 pub(crate) fn pre_withdraw<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
     bank: &mut Bank,
@@ -235,7 +235,7 @@ pub(crate) fn pre_withdraw<'info>(
     bank_key: &Pubkey,
     amount: u64,
     withdraw_all: bool,
-) -> MarginfiResult<(u64, u64)> {
+) -> MarginfiResult<(u64, u64, I80F48)> {
     check!(
         protocol_accounts.len() >= WITHDRAW_ACCOUNTS,
         MarginfiError::IntegrationAccountCountMismatch
@@ -248,8 +248,8 @@ pub(crate) fn pre_withdraw<'info>(
     let mut bank_account =
         BankAccountWrapper::find(bank_key, bank, &mut marginfi_account.lending_account)?;
 
-    let (token_amount, expected_scaled_balance_change) = if withdraw_all {
-        let scaled_balance = bank_account.withdraw_all(in_receivership)?;
+    let (token_amount, expected_scaled_balance_change, share_amount) = if withdraw_all {
+        let (scaled_balance, share_amount) = bank_account.withdraw_all(in_receivership)?;
 
         let mut token_amount = spot_market_loader
             .load()?
@@ -272,7 +272,7 @@ pub(crate) fn pre_withdraw<'info>(
             MarginfiError::MathError
         );
 
-        (token_amount, expected_scaled_balance_change)
+        (token_amount, expected_scaled_balance_change, share_amount)
     } else {
         let mut scaled_decrement = spot_market_loader
             .load()?
@@ -294,12 +294,12 @@ pub(crate) fn pre_withdraw<'info>(
                 .get_scaled_balance_decrement(token_amount)?;
         }
 
-        bank_account.withdraw(I80F48::from_num(scaled_decrement))?;
+        let share_amount = bank_account.withdraw(I80F48::from_num(scaled_decrement))?;
 
-        (token_amount, scaled_decrement)
+        (token_amount, scaled_decrement, share_amount)
     };
 
-    Ok((token_amount, expected_scaled_balance_change))
+    Ok((token_amount, expected_scaled_balance_change, share_amount))
 }
 
 /// Protocol-specific CPI for Drift withdraw.
@@ -338,7 +338,7 @@ pub(crate) fn withdraw_cpi<'info>(
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, common.bank.key(), authority_bump);
         let mut cpi_ctx =
-            CpiContext::new_with_signer(protocol_accounts[6].clone(), accounts, signer_seeds);
+            CpiContext::new_with_signer(protocol_accounts[6].key(), accounts, signer_seeds);
 
         let mut remaining = Vec::new();
         if let Some(oracle) = optional_account(protocol_accounts.get(8)) {

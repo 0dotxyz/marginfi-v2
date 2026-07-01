@@ -1,7 +1,11 @@
 import { BN, Program } from "@coral-xyz/anchor";
 import { AccountMeta, PublicKey } from "@solana/web3.js";
 import { Marginfi } from "../../target/types/marginfi";
-import { deriveStakedSettings } from "./pdas";
+import {
+  deriveBankWithSeed,
+  deriveOnRampPool,
+  deriveStakedSettings,
+} from "./pdas";
 import {
   BankConfig,
   BankConfigOptRaw,
@@ -550,8 +554,8 @@ export const addBankPermissionless = (
     [Buffer.from("stake"), args.stakePool.toBuffer()],
     SINGLE_POOL_PROGRAM_ID,
   );
-
-  // Note: oracle and lst mint/pool are also passed in meta for validation
+  const [poolOnramp] = deriveOnRampPool(args.stakePool);
+  // Note: oracle, lst mint, pool stake, and on-ramp are also passed in meta for validation.
   const oracleMeta: AccountMeta = {
     pubkey: args.pythOracle,
     isSigner: false,
@@ -567,18 +571,26 @@ export const addBankPermissionless = (
     isSigner: false,
     isWritable: false,
   };
-
+  const onrampMeta: AccountMeta = {
+    pubkey: poolOnramp,
+    isSigner: false,
+    isWritable: false,
+  };
+  const [bank] = deriveBankWithSeed(
+    program.programId,
+    args.marginfiGroup,
+    lstMint,
+    args.seed,
+  );
   const ix = program.methods
     .lendingPoolAddBankPermissionless(args.seed)
     .accounts({
-      // marginfiGroup: args.marginfiGroup, // implied from stakedSettings
-      stakedSettings: settingsKey,
       feePayer: args.feePayer,
       bankMint: lstMint,
       solPool: solPool,
+      poolOnramp,
       stakePool: args.stakePool,
       validatorVoteAccount: args.validatorVoteAccount,
-      // bank: bankKey, // deriveBankWithSeed
       // globalFeeState: deriveGlobalFeeState(id),
       // globalFeeWallet: // implied from globalFeeState,
       // liquidityVaultAuthority = deriveLiquidityVaultAuthority(id, bank);
@@ -591,7 +603,48 @@ export const addBankPermissionless = (
       tokenProgram: TOKEN_PROGRAM_ID,
       // systemProgram: SystemProgram.programId,
     })
-    .remainingAccounts([oracleMeta, lstMeta, solPoolMeta])
+    .accountsPartial({
+      marginfiGroup: args.marginfiGroup,
+      stakedSettings: settingsKey,
+      bank,
+    })
+    .remainingAccounts([oracleMeta, lstMeta, solPoolMeta, onrampMeta])
+    .instruction();
+
+  return ix;
+};
+
+export const disableStakedOracles = (
+  program: Program<Marginfi>,
+  group: PublicKey,
+  admin?: PublicKey,
+) => {
+  const [settingsKey] = deriveStakedSettings(program.programId, group);
+  const ix = program.methods
+    .disableStakedOracles()
+    .accounts({
+      group,
+      stakedSettings: settingsKey,
+    })
+    .accountsPartial({ admin })
+    .instruction();
+
+  return ix;
+};
+
+export const enableStakedOracleOnramp = (
+  program: Program<Marginfi>,
+  group: PublicKey,
+  admin?: PublicKey,
+) => {
+  const [settingsKey] = deriveStakedSettings(program.programId, group);
+  const ix = program.methods
+    .enableStakedOracleOnramp()
+    .accounts({
+      group,
+      stakedSettings: settingsKey,
+    })
+    .accountsPartial({ admin })
     .instruction();
 
   return ix;
@@ -906,10 +959,7 @@ export const panicUnpausePermissionless = async (
 };
 
 type InitBankMetadataArgs = {
-  group: PublicKey;
-  bankMint: PublicKey;
   bank: PublicKey;
-  bankSeed: BN;
 };
 
 export const initBankMetadata = (
@@ -917,12 +967,9 @@ export const initBankMetadata = (
   args: InitBankMetadataArgs,
 ) => {
   const ix = program.methods
-    .initBankMetadata(args.bankSeed)
+    .initBankMetadata()
     .accounts({
-      group: args.group,
-      bankMint: args.bankMint,
-      // metadata: args.metadata, // derived from bank
-      // bank: args.bank, // derived from seeds
+      // metadata derived from bank
     })
     .accountsPartial({ bank: args.bank })
     .instruction();
@@ -958,10 +1005,6 @@ export const setFixedPrice = (
 };
 
 type WriteBankMetadataArgs = {
-  group: PublicKey;
-  bankMint: PublicKey;
-  bank: PublicKey;
-  bankSeed: BN;
   metadata: PublicKey;
   /// Pass undefined to skip. Limit 64 bytes
   ticker?: string;
@@ -1001,6 +1044,58 @@ export const writeBankMetadata = (
 
   const ix = program.methods
     .writeBankMetadata(
+      tickerBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
+      descBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
+    )
+    .accounts({
+      // group: implied
+      // bank: implied from metadata
+      // metadataAdmin: args.metadataAdmin, // implied from metadata
+      metadata: args.metadata,
+    })
+    .instruction();
+
+  return ix;
+};
+
+type WriteBankMetadataPreInitArgs = {
+  group: PublicKey;
+  bankMint: PublicKey;
+  bankSeed: BN;
+  metadata: PublicKey;
+  /// Pass undefined to skip. Limit 64 bytes
+  ticker?: string;
+  /// Pass undefined to skip. Limit 128 bytes
+  description?: string;
+};
+
+export const writeBankMetadataPreInit = (
+  program: Program<Marginfi>,
+  args: WriteBankMetadataPreInitArgs,
+) => {
+  const TICKER_CAP = 64;
+  const DESC_CAP = 128;
+
+  const tickerBuf =
+    args.ticker !== undefined ? Buffer.from(args.ticker, "utf8") : null;
+  if (tickerBuf && tickerBuf.length > TICKER_CAP) {
+    throw new Error(
+      `Ticker is ${tickerBuf.length} bytes, exceeds ${TICKER_CAP} byte cap`,
+    );
+  }
+
+  const descBuf =
+    args.description !== undefined
+      ? Buffer.from(args.description, "utf8")
+      : null;
+  if (descBuf && descBuf.length > DESC_CAP) {
+    throw new Error(
+      `Description is ${descBuf.length} bytes, exceeds ${DESC_CAP} byte cap`,
+    );
+  }
+
+  const ix = program.methods
+    .writeBankMetadataPreInit(
       args.bankSeed,
       tickerBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
       descBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
@@ -1008,8 +1103,7 @@ export const writeBankMetadata = (
     .accounts({
       group: args.group,
       bankMint: args.bankMint,
-      bank: args.bank,
-      // metadataAdmin: args.metadataAdmin, // implied from metadata
+      // bank: derived from seeds
       metadata: args.metadata,
     })
     .instruction();
@@ -1019,7 +1113,6 @@ export const writeBankMetadata = (
 
 export type UpdateGroupRateLimiterArgs = {
   marginfiGroup: PublicKey;
-  delegateFlowAdmin?: PublicKey;
   outflowUsd?: BN | null;
   inflowUsd?: BN | null;
   updateSeq: BN;
@@ -1041,8 +1134,6 @@ export const updateGroupRateLimiter = (
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
-      delegateFlowAdmin:
-        args.delegateFlowAdmin ?? (program.provider.publicKey as PublicKey),
     })
     .instruction();
   return ix;
@@ -1050,7 +1141,6 @@ export const updateGroupRateLimiter = (
 
 export type UpdateDeleverageWithdrawalsArgs = {
   marginfiGroup: PublicKey;
-  delegateFlowAdmin?: PublicKey;
   outflowUsd: number;
   updateSeq: BN;
   eventStartSlot: BN;
@@ -1070,8 +1160,6 @@ export const updateDeleverageWithdrawals = (
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
-      delegateFlowAdmin:
-        args.delegateFlowAdmin ?? (program.provider.publicKey as PublicKey),
     })
     .instruction();
   return ix;

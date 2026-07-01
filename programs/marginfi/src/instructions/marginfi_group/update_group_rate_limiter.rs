@@ -1,4 +1,8 @@
-use crate::{check, state::rate_limiter::GroupRateLimiterImpl, MarginfiError, MarginfiResult};
+use crate::{
+    check,
+    state::rate_limiter::{is_valid_rate_limit_amount, GroupRateLimiterImpl},
+    MarginfiError, MarginfiResult,
+};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::types::MarginfiGroup;
 
@@ -46,6 +50,10 @@ pub fn update_group_rate_limiter(
     );
 
     if let Some(inflow) = inflow_usd {
+        check!(
+            is_valid_rate_limit_amount(inflow),
+            MarginfiError::InvalidConfig
+        );
         group
             .rate_limiter
             .record_inflow(inflow, clock.unix_timestamp);
