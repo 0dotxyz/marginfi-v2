@@ -1,6 +1,6 @@
 use crate::{
     constants::SOLEND_PROGRAM_ID,
-    instructions::integration::{self, CommonDeposit},
+    instructions::integration::{self, impl_common_deposit},
     state::{
         marginfi_account::{
             account_not_frozen_for_authority, is_signer_authorized, MarginfiAccountImpl,
@@ -21,8 +21,8 @@ pub fn solend_deposit<'info>(
     amount: u64,
 ) -> MarginfiResult {
     let common = ctx.accounts.to_common();
-    let protocol_accounts = ctx.accounts.protocol_accounts();
-    let protocol_accounts = integration::account_info_slice(&protocol_accounts);
+    // Leaked to get a true `'info` borrow (the bump allocator never frees, so this costs nothing).
+    let protocol_accounts = ctx.accounts.protocol_accounts().leak();
     integration::integration_deposit_impl(
         &common,
         protocol_accounts,
@@ -89,11 +89,8 @@ pub struct SolendDeposit<'info> {
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
 
-    /// CHECK: validated in instruction body
-    #[account(
-        mut,
-        constraint = integration_acc_2.owner == &SOLEND_PROGRAM_ID @ MarginfiError::InvalidSolendAccount
-    )]
+    /// CHECK: ownership by the Solend program is validated in the integration handler
+    #[account(mut)]
     pub integration_acc_2: UncheckedAccount<'info>,
 
     /// CHECK: validated by the Solend program
@@ -102,10 +99,8 @@ pub struct SolendDeposit<'info> {
     /// CHECK: validated by the Solend program
     pub lending_market_authority: UncheckedAccount<'info>,
 
-    #[account(
-        mut,
-        constraint = !integration_acc_1.load()?.is_stale()? @ MarginfiError::SolendReserveStale
-    )]
+    // Reserve staleness is validated in the integration handler.
+    #[account(mut)]
     pub integration_acc_1: AccountLoader<'info, SolendMinimalReserve>,
 
     pub mint: Box<InterfaceAccount<'info, Mint>>,
@@ -139,22 +134,9 @@ pub struct SolendDeposit<'info> {
     pub token_program: Interface<'info, TokenInterface>,
 }
 
-impl<'info> SolendDeposit<'info> {
-    fn to_common(&self) -> CommonDeposit<'_, 'info> {
-        CommonDeposit {
-            group: &self.group,
-            marginfi_account: &self.marginfi_account,
-            authority: &self.authority,
-            bank: &self.bank,
-            signer_token_account: self.signer_token_account.to_account_info(),
-            liquidity_vault_authority: self.liquidity_vault_authority.to_account_info(),
-            liquidity_vault: self.liquidity_vault.to_account_info(),
-            mint: self.mint.to_account_info(),
-            mint_decimals: self.mint.decimals,
-            token_program: self.token_program.to_account_info(),
-        }
-    }
+impl_common_deposit!(SolendDeposit);
 
+impl<'info> SolendDeposit<'info> {
     fn protocol_accounts(&self) -> Vec<AccountInfo<'info>> {
         vec![
             self.integration_acc_2.to_account_info(),

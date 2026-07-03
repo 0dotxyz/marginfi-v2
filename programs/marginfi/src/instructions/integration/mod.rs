@@ -17,10 +17,11 @@ use crate::{
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
+        allows_order_execution, deposit_integration_slots, deposit_protocol_account_count,
         fetch_asset_price_for_bank_low_bias, finalize_integration_deposit,
         finalize_integration_withdraw, is_integration_asset_tag, record_withdrawal_outflow,
-        validate_bank_state, validate_integration_deposit, withdraw_protocol_account_count,
-        InstructionKind,
+        validate_bank_state, validate_integration_deposit, withdraw_integration_slots,
+        withdraw_protocol_account_count, InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -40,20 +41,6 @@ use marginfi_type_crate::types::{
 };
 
 pub use marginfi_type_crate::types::IntegrationOpMode;
-
-/// Coerces a borrowed `AccountInfo` slice to the `'info` lifetime so it can feed
-/// `integration_*_impl`, whose `AccountLoader` APIs require the borrow tied to `'info`.
-///
-/// SAFETY: callers are the per-venue wrappers, which build a `Vec<AccountInfo<'info>>` local and
-/// pass `&vec` here. The returned slice is only ever consumed by the synchronous
-/// `integration_*_impl` call that follows, and the backing `Vec` lives in the wrapper's stack
-/// frame for the whole call — so the `'info` borrow never outlives the data. The slice must not
-/// be stored beyond that call.
-pub(crate) fn account_info_slice<'info>(
-    accounts: &[AccountInfo<'info>],
-) -> &'info [AccountInfo<'info>] {
-    unsafe { std::mem::transmute::<&[AccountInfo<'info>], &'info [AccountInfo<'info>]>(accounts) }
-}
 
 pub(crate) struct CommonDeposit<'a, 'info> {
     pub group: &'a AccountLoader<'info, MarginfiGroup>,
@@ -81,20 +68,72 @@ pub(crate) struct CommonWithdraw<'a, 'info> {
     pub token_program: AccountInfo<'info>,
 }
 
+/// Amounts computed while the marginfi balance is debited, before the venue CPI runs.
+pub(crate) struct WithdrawAmounts {
+    /// Units removed from the marginfi balance: collateral tokens (Kamino/Solend), scaled
+    /// balance units (Drift), or fToken shares (JupLend).
+    pub balance_units: u64,
+    /// Native tokens expected to leave the venue. Kamino/Solend meter collateral units here
+    /// because the redeemed liquidity is only known after the CPI.
+    pub tokens: u64,
+    /// Amount reported in the withdraw event, in the venue's established convention:
+    /// collateral units for Kamino/Solend, native tokens for Drift/JupLend.
+    pub event_amount: u64,
+    pub shares: I80F48,
+}
+
+/// Weaves the named integration accounts into the venue's protocol account layout at `slots`,
+/// filling every other slot from `remaining` in order. Consumes exactly
+/// `total - slots.len()` accounts from `remaining`.
+///
+/// The assembled vec is leaked to get a true `'info` borrow (the bump allocator never frees, so
+/// this costs nothing).
+fn assemble_protocol_accounts<'info>(
+    slots: &'static [(usize, u8)],
+    total: usize,
+    integration_accounts: [Option<AccountInfo<'info>>; 3],
+    remaining: &'info [AccountInfo<'info>],
+) -> MarginfiResult<&'info [AccountInfo<'info>]> {
+    let mut assembled = Vec::with_capacity(total);
+    let mut filler = remaining.iter();
+    for slot in 0..total {
+        match slots.iter().find(|(s, _)| *s == slot) {
+            Some((_, acc_number)) => assembled.push(
+                integration_accounts[*acc_number as usize - 1]
+                    .clone()
+                    .ok_or_else(|| error!(MarginfiError::IntegrationAccountKeyMismatch))?,
+            ),
+            None => assembled.push(
+                filler
+                    .next()
+                    .ok_or_else(|| error!(MarginfiError::IntegrationAccountCountMismatch))?
+                    .clone(),
+            ),
+        }
+    }
+    Ok(assembled.leak())
+}
+
 pub fn integration_deposit<'info>(
     ctx: Context<'info, IntegrationDeposit<'info>>,
     amount: u64,
     op_mode: IntegrationOpMode,
 ) -> MarginfiResult {
+    let asset_tag = op_mode.to_asset_tag();
+    // Checked before weaving so an op_mode/bank mismatch reports precisely rather than as a
+    // layout error from the wrong venue's slot table.
+    check!(
+        ctx.accounts.bank.load()?.config.asset_tag == asset_tag,
+        MarginfiError::IntegrationOpModeMismatch
+    );
     let common = ctx.accounts.to_common();
-    let protocol_accounts = ctx.remaining_accounts;
-    integration_deposit_impl(
-        &common,
-        protocol_accounts,
-        amount,
-        Some(op_mode.to_asset_tag()),
-        false,
-    )
+    let protocol_accounts = assemble_protocol_accounts(
+        deposit_integration_slots(asset_tag),
+        deposit_protocol_account_count(asset_tag),
+        ctx.accounts.integration_accounts(),
+        ctx.remaining_accounts,
+    )?;
+    integration_deposit_impl(&common, protocol_accounts, amount, Some(asset_tag), false)
 }
 
 pub(crate) fn integration_deposit_impl<'info>(
@@ -142,9 +181,6 @@ pub(crate) fn integration_deposit_impl<'info>(
         common.marginfi_account,
         common.bank,
         common.authority.key(),
-        common.marginfi_account.key(),
-        common.bank.key(),
-        common.group.key(),
         balance_change,
         inflow_amount,
     )?;
@@ -158,15 +194,28 @@ pub fn integration_withdraw<'info>(
     withdraw_all: Option<bool>,
     op_mode: IntegrationOpMode,
 ) -> MarginfiResult {
-    let common = ctx.accounts.to_common();
     let asset_tag = op_mode.to_asset_tag();
-    let pcount = withdraw_protocol_account_count(asset_tag);
+    // Checked before weaving so an op_mode/bank mismatch reports precisely rather than as a
+    // layout error from the wrong venue's slot table.
     check!(
-        ctx.remaining_accounts.len() >= pcount,
+        ctx.accounts.bank.load()?.config.asset_tag == asset_tag,
+        MarginfiError::IntegrationOpModeMismatch
+    );
+    let common = ctx.accounts.to_common();
+    let slots = withdraw_integration_slots(asset_tag);
+    let total = withdraw_protocol_account_count(asset_tag);
+    let filler_count = total - slots.len();
+    check!(
+        ctx.remaining_accounts.len() >= filler_count,
         MarginfiError::IntegrationAccountCountMismatch
     );
-    let protocol_accounts = &ctx.remaining_accounts[..pcount];
-    let oracle_accounts = &ctx.remaining_accounts[pcount..];
+    let protocol_accounts = assemble_protocol_accounts(
+        slots,
+        total,
+        ctx.accounts.integration_accounts(),
+        &ctx.remaining_accounts[..filler_count],
+    )?;
+    let oracle_accounts = &ctx.remaining_accounts[filler_count..];
     integration_withdraw_impl(
         &common,
         protocol_accounts,
@@ -190,10 +239,7 @@ pub(crate) fn integration_withdraw_impl<'info>(
     let withdraw_all = withdraw_all.unwrap_or(false);
     let bank_key = common.bank.key();
 
-    let (bank_mint, asset_tag) = {
-        let bank = common.bank.load()?;
-        (bank.mint, bank.config.asset_tag)
-    };
+    let asset_tag = common.bank.load()?.config.asset_tag;
 
     if let Some(expected) = expected_asset_tag {
         check!(
@@ -211,11 +257,7 @@ pub(crate) fn integration_withdraw_impl<'info>(
 
     // Balance update + rate limiting + deleverage tracking
     let authority_bump: u8;
-    let collateral_amount: u64;
-    // For Drift: (token_amount, expected_scaled_balance_change)
-    // For JupLend: (token_amount, shares_to_burn)
-    // For Kamino/Solend: (collateral_amount, collateral_amount) -- same value
-    let (token_amount, balance_unit_amount, share_amount) = {
+    let amounts = {
         let mut marginfi_account = common.marginfi_account.load_mut()?;
         let mut bank = common.bank.load_mut()?;
         let group = common.group.load()?;
@@ -240,7 +282,7 @@ pub(crate) fn integration_withdraw_impl<'info>(
             I80F48::ZERO
         };
 
-        let (ca, token_amt, balance_unit, share) = match asset_tag {
+        let amounts = match asset_tag {
             ASSET_TAG_KAMINO | ASSET_TAG_SOLEND => {
                 let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
                 let mut ba = BankAccountWrapper::find(
@@ -248,51 +290,45 @@ pub(crate) fn integration_withdraw_impl<'info>(
                     &mut bank,
                     &mut marginfi_account.lending_account,
                 )?;
-                let (ca, share) = if withdraw_all {
+                let (collateral_amount, shares) = if withdraw_all {
                     ba.withdraw_all(in_receivership)?
                 } else {
-                    let share = ba.withdraw(I80F48::from_num(amount))?;
-                    (amount, share)
+                    let shares = ba.withdraw(I80F48::from_num(amount))?;
+                    (amount, shares)
                 };
-                (ca, ca, ca, share)
+                WithdrawAmounts {
+                    balance_units: collateral_amount,
+                    tokens: collateral_amount,
+                    event_amount: collateral_amount,
+                    shares,
+                }
             }
-            ASSET_TAG_DRIFT => {
-                let (token_amount, expected_scaled_balance_change, share) =
-                    drift_handler::pre_withdraw(
-                        protocol_accounts,
-                        &mut bank,
-                        &mut marginfi_account,
-                        &bank_key,
-                        amount,
-                        withdraw_all,
-                    )?;
-                (
-                    expected_scaled_balance_change,
-                    token_amount,
-                    expected_scaled_balance_change,
-                    share,
-                )
-            }
-            ASSET_TAG_JUPLEND => {
-                let (token_amount, shares_to_burn, share) = juplend_handler::pre_withdraw(
-                    protocol_accounts,
-                    &mut bank,
-                    &mut marginfi_account,
-                    &bank_key,
-                    amount,
-                    withdraw_all,
-                )?;
-                (shares_to_burn, token_amount, shares_to_burn, share)
-            }
+            ASSET_TAG_DRIFT => drift_handler::pre_withdraw(
+                protocol_accounts,
+                &mut bank,
+                &mut marginfi_account,
+                &bank_key,
+                amount,
+                withdraw_all,
+            )?,
+            ASSET_TAG_JUPLEND => juplend_handler::pre_withdraw(
+                protocol_accounts,
+                &mut bank,
+                &mut marginfi_account,
+                &bank_key,
+                amount,
+                withdraw_all,
+            )?,
             _ => return err!(MarginfiError::UnsupportedIntegration),
         };
-        collateral_amount = ca;
 
-        let rate_limit_amount = if withdraw_all { token_amt } else { amount };
+        // Metered in the venue's established convention: collateral units for Kamino/Solend,
+        // native tokens for Drift/JupLend (for a Drift partial withdraw with an off-by-one
+        // scaled-unit clamp this is strictly less than the requested `amount`).
         record_withdrawal_outflow(
             group_rate_limit_enabled,
-            rate_limit_amount,
-            balance_unit,
+            amounts.tokens,
+            amounts.balance_units,
             price,
             &mut bank,
             &group,
@@ -304,7 +340,7 @@ pub(crate) fn integration_withdraw_impl<'info>(
 
         if marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE) {
             let withdrawn_equity = calc_value(
-                I80F48::from_num(collateral_amount),
+                I80F48::from_num(amounts.balance_units),
                 price,
                 bank.get_balance_decimals(),
                 None,
@@ -322,60 +358,43 @@ pub(crate) fn integration_withdraw_impl<'info>(
         bank.update_bank_cache(&group)?;
         marginfi_account.last_update = clock.unix_timestamp as u64;
 
-        (token_amt, balance_unit, share)
+        amounts
     };
 
     // Protocol-specific CPI + verification + transfer
-    let received = match asset_tag {
+    match asset_tag {
         ASSET_TAG_KAMINO => kamino_handler::withdraw_cpi(
             protocol_accounts,
             common,
-            collateral_amount,
+            amounts.balance_units,
             authority_bump,
             refresh_reserve,
         )?,
-        ASSET_TAG_DRIFT => drift_handler::withdraw_cpi(
-            protocol_accounts,
-            common,
-            token_amount,
-            balance_unit_amount,
-            authority_bump,
-        )?,
+        ASSET_TAG_DRIFT => {
+            drift_handler::withdraw_cpi(protocol_accounts, common, &amounts, authority_bump)?
+        }
         ASSET_TAG_SOLEND => solend_handler::withdraw_cpi(
             protocol_accounts,
             common,
-            collateral_amount,
+            amounts.balance_units,
             authority_bump,
         )?,
-        ASSET_TAG_JUPLEND => juplend_handler::withdraw_cpi(
-            protocol_accounts,
-            common,
-            token_amount,
-            balance_unit_amount,
-            authority_bump,
-        )?,
+        ASSET_TAG_JUPLEND => {
+            juplend_handler::withdraw_cpi(protocol_accounts, common, &amounts, authority_bump)?
+        }
         _ => return err!(MarginfiError::UnsupportedIntegration),
-    };
-
-    let clock = Clock::get()?;
-    let event_amount = match asset_tag {
-        ASSET_TAG_KAMINO | ASSET_TAG_SOLEND => collateral_amount,
-        _ => received,
     };
 
     // Finalize: event emission, health check, price cache update
     finalize_integration_withdraw(
         common.marginfi_account,
         common.bank,
-        bank_key,
-        bank_mint,
         common.authority.key(),
-        common.marginfi_account.key(),
-        event_amount,
-        share_amount,
+        amounts.event_amount,
+        amounts.shares,
         withdraw_all,
         oracle_accounts,
-        &clock,
+        &Clock::get()?,
     )?;
 
     Ok(())
@@ -393,14 +412,17 @@ fn cpi_transfer_signer_to_vault(common: &CommonDeposit, amount: u64) -> Marginfi
     Ok(())
 }
 
-pub(crate) fn cpi_transfer_vault_to_destination(
-    common: &CommonWithdraw,
-    bank_key: Pubkey,
+/// Transfers `amount` of the bank mint from `from` (a token account owned by the bank's
+/// liquidity vault authority) to the caller's destination token account.
+pub(crate) fn cpi_transfer_to_destination<'info>(
+    common: &CommonWithdraw<'_, 'info>,
+    from: AccountInfo<'info>,
     authority_bump: u8,
     amount: u64,
 ) -> MarginfiResult {
+    let bank_key = common.bank.key();
     let cpi_accounts = TransferChecked {
-        from: common.liquidity_vault.clone(),
+        from,
         to: common.destination_token_account.clone(),
         authority: common.liquidity_vault_authority.clone(),
         mint: common.mint.clone(),
@@ -448,10 +470,33 @@ pub struct IntegrationDeposit<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
         has_one = mint @ MarginfiError::InvalidMint,
+        has_one = integration_acc_1 @ MarginfiError::IntegrationAccountKeyMismatch,
+        has_one = integration_acc_2 @ MarginfiError::IntegrationAccountKeyMismatch,
+        constraint = bank.load()?.integration_acc_3
+            == integration_acc_3.as_ref().map(|a| a.key()).unwrap_or_default()
+            @ MarginfiError::IntegrationAccountKeyMismatch,
         constraint = is_integration_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::UnsupportedIntegration
     )]
     pub bank: AccountLoader<'info, Bank>,
+
+    /// The bank's first integration account (Kamino/Solend reserve, Drift spot market,
+    /// JupLend lending).
+    /// CHECK: validated against the bank's stored key
+    #[account(mut)]
+    pub integration_acc_1: UncheckedAccount<'info>,
+
+    /// The bank's second integration account (Kamino/Solend obligation, Drift user,
+    /// JupLend fToken vault).
+    /// CHECK: validated against the bank's stored key
+    #[account(mut)]
+    pub integration_acc_2: UncheckedAccount<'info>,
+
+    /// The bank's third integration account (Drift user stats, JupLend withdraw intermediary
+    /// ATA). Omit for banks whose third slot is unset (Kamino, Solend).
+    /// CHECK: validated against the bank's stored key
+    #[account(mut)]
+    pub integration_acc_3: Option<UncheckedAccount<'info>>,
 
     #[account(mut)]
     pub signer_token_account: InterfaceAccount<'info, TokenAccount>,
@@ -472,23 +517,6 @@ pub struct IntegrationDeposit<'info> {
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
     pub token_program: Interface<'info, TokenInterface>,
-}
-
-impl<'info> IntegrationDeposit<'info> {
-    pub(crate) fn to_common(&self) -> CommonDeposit<'_, 'info> {
-        CommonDeposit {
-            group: &self.group,
-            marginfi_account: &self.marginfi_account,
-            authority: &self.authority,
-            bank: &self.bank,
-            signer_token_account: self.signer_token_account.to_account_info(),
-            liquidity_vault_authority: self.liquidity_vault_authority.to_account_info(),
-            liquidity_vault: self.liquidity_vault.to_account_info(),
-            mint: self.mint.to_account_info(),
-            mint_decimals: self.mint.decimals,
-            token_program: self.token_program.to_account_info(),
-        }
-    }
 }
 
 #[derive(Accounts)]
@@ -515,8 +543,7 @@ pub struct IntegrationWithdraw<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            // Solend disallows withdraws mid-order-execution; other venues permit it.
-            let allow_order_execution = bank.load()?.config.asset_tag != ASSET_TAG_SOLEND;
+            let allow_order_execution = allows_order_execution(bank.load()?.config.asset_tag);
             is_signer_authorized(&a, g.admin, authority.key(), true, allow_order_execution)
         } @ MarginfiError::Unauthorized
     )]
@@ -529,6 +556,11 @@ pub struct IntegrationWithdraw<'info> {
         has_one = group @ MarginfiError::InvalidGroup,
         has_one = liquidity_vault @ MarginfiError::InvalidLiquidityVault,
         has_one = mint @ MarginfiError::InvalidMint,
+        has_one = integration_acc_1 @ MarginfiError::IntegrationAccountKeyMismatch,
+        has_one = integration_acc_2 @ MarginfiError::IntegrationAccountKeyMismatch,
+        constraint = bank.load()?.integration_acc_3
+            == integration_acc_3.as_ref().map(|a| a.key()).unwrap_or_default()
+            @ MarginfiError::IntegrationAccountKeyMismatch,
         constraint = is_integration_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::UnsupportedIntegration,
         constraint = {
@@ -539,6 +571,24 @@ pub struct IntegrationWithdraw<'info> {
         } @ MarginfiError::LiquidationPremiumTooHigh
     )]
     pub bank: AccountLoader<'info, Bank>,
+
+    /// The bank's first integration account (Kamino/Solend reserve, Drift spot market,
+    /// JupLend lending).
+    /// CHECK: validated against the bank's stored key
+    #[account(mut)]
+    pub integration_acc_1: UncheckedAccount<'info>,
+
+    /// The bank's second integration account (Kamino/Solend obligation, Drift user,
+    /// JupLend fToken vault).
+    /// CHECK: validated against the bank's stored key
+    #[account(mut)]
+    pub integration_acc_2: UncheckedAccount<'info>,
+
+    /// The bank's third integration account (Drift user stats, JupLend withdraw intermediary
+    /// ATA). Omit for banks whose third slot is unset (Kamino, Solend).
+    /// CHECK: validated against the bank's stored key
+    #[account(mut)]
+    pub integration_acc_3: Option<UncheckedAccount<'info>>,
 
     #[account(mut)]
     pub destination_token_account: InterfaceAccount<'info, TokenAccount>,
@@ -561,22 +611,84 @@ pub struct IntegrationWithdraw<'info> {
     pub token_program: Interface<'info, TokenInterface>,
 }
 
-impl<'info> IntegrationWithdraw<'info> {
-    pub(crate) fn to_common(&self) -> CommonWithdraw<'_, 'info> {
-        CommonWithdraw {
-            group: &self.group,
-            marginfi_account: &self.marginfi_account,
-            authority: &self.authority,
-            bank: &self.bank,
-            destination_token_account: self.destination_token_account.to_account_info(),
-            liquidity_vault_authority: self.liquidity_vault_authority.to_account_info(),
-            liquidity_vault: self.liquidity_vault.to_account_info(),
-            mint: self.mint.to_account_info(),
-            mint_decimals: self.mint.decimals,
-            token_program: self.token_program.to_account_info(),
+/// Implements `to_common` mapping an accounts struct onto [`CommonDeposit`]. The optional second
+/// argument names the token-program field when it is not `token_program`.
+macro_rules! impl_common_deposit {
+    ($ty:ident) => {
+        impl_common_deposit!($ty, token_program);
+    };
+    ($ty:ident, $token_program:ident) => {
+        impl<'info> $ty<'info> {
+            pub(crate) fn to_common(
+                &self,
+            ) -> $crate::instructions::integration::CommonDeposit<'_, 'info> {
+                $crate::instructions::integration::CommonDeposit {
+                    group: &self.group,
+                    marginfi_account: &self.marginfi_account,
+                    authority: &self.authority,
+                    bank: &self.bank,
+                    signer_token_account: self.signer_token_account.to_account_info(),
+                    liquidity_vault_authority: self.liquidity_vault_authority.to_account_info(),
+                    liquidity_vault: self.liquidity_vault.to_account_info(),
+                    mint: self.mint.to_account_info(),
+                    mint_decimals: self.mint.decimals,
+                    token_program: self.$token_program.to_account_info(),
+                }
+            }
         }
-    }
+    };
 }
+pub(crate) use impl_common_deposit;
+
+/// Implements `to_common` mapping an accounts struct onto [`CommonWithdraw`]. The optional
+/// second and third arguments name the liquidity-vault and token-program fields when they are
+/// not `liquidity_vault` / `token_program`.
+macro_rules! impl_common_withdraw {
+    ($ty:ident) => {
+        impl_common_withdraw!($ty, liquidity_vault, token_program);
+    };
+    ($ty:ident, $liquidity_vault:ident, $token_program:ident) => {
+        impl<'info> $ty<'info> {
+            pub(crate) fn to_common(
+                &self,
+            ) -> $crate::instructions::integration::CommonWithdraw<'_, 'info> {
+                $crate::instructions::integration::CommonWithdraw {
+                    group: &self.group,
+                    marginfi_account: &self.marginfi_account,
+                    authority: &self.authority,
+                    bank: &self.bank,
+                    destination_token_account: self.destination_token_account.to_account_info(),
+                    liquidity_vault_authority: self.liquidity_vault_authority.to_account_info(),
+                    liquidity_vault: self.$liquidity_vault.to_account_info(),
+                    mint: self.mint.to_account_info(),
+                    mint_decimals: self.mint.decimals,
+                    token_program: self.$token_program.to_account_info(),
+                }
+            }
+        }
+    };
+}
+pub(crate) use impl_common_withdraw;
+
+impl_common_deposit!(IntegrationDeposit);
+impl_common_withdraw!(IntegrationWithdraw);
+
+macro_rules! impl_integration_accounts {
+    ($ty:ident) => {
+        impl<'info> $ty<'info> {
+            /// The named integration accounts, indexed by integration account number minus one.
+            fn integration_accounts(&self) -> [Option<AccountInfo<'info>>; 3] {
+                [
+                    Some(self.integration_acc_1.to_account_info()),
+                    Some(self.integration_acc_2.to_account_info()),
+                    self.integration_acc_3.as_ref().map(|a| a.to_account_info()),
+                ]
+            }
+        }
+    };
+}
+impl_integration_accounts!(IntegrationDeposit);
+impl_integration_accounts!(IntegrationWithdraw);
 
 impl Hashable for IntegrationWithdraw<'_> {
     fn get_hash() -> [u8; 8] {

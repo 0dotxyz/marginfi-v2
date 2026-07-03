@@ -440,6 +440,8 @@ pub enum MarginfiError {
     IntegrationAccountKeyMismatch, // 6602
     #[msg("Integration op_mode does not match bank asset tag")]
     IntegrationOpModeMismatch, // 6603
+    #[msg("Kamino reserve farm state requires the obligation farm user state")]
+    KaminoObligationFarmUserStateMissing, // 6604
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -683,6 +685,7 @@ impl From<u32> for MarginfiError {
             6601 => MarginfiError::IntegrationAccountCountMismatch,
             6602 => MarginfiError::IntegrationAccountKeyMismatch,
             6603 => MarginfiError::IntegrationOpModeMismatch,
+            6604 => MarginfiError::KaminoObligationFarmUserStateMissing,
 
             _ => MarginfiError::InternalLogicError,
         }

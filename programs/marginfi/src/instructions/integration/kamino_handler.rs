@@ -1,7 +1,7 @@
 use crate::{
     bank_signer, check,
     state::bank::BankVaultType,
-    utils::{assert_within_one_token, optional_account},
+    utils::{assert_within_one_token, expect_protocol_accounts, optional_account},
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -20,7 +20,7 @@ use kamino_mocks::{
 };
 use marginfi_type_crate::pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID};
 
-use super::{cpi_transfer_vault_to_destination, CommonDeposit, CommonWithdraw};
+use super::{cpi_transfer_to_destination, CommonDeposit, CommonWithdraw};
 
 /// Expected protocol_accounts layout for Kamino deposit/withdraw:
 /// 0: integration_acc_2 (obligation) - mut
@@ -39,6 +39,10 @@ use super::{cpi_transfer_vault_to_destination, CommonDeposit, CommonWithdraw};
 const MIN_REQUIRED_ACCOUNTS: usize = 11;
 pub const DEPOSIT_ACCOUNTS: usize = 13;
 pub const WITHDRAW_ACCOUNTS: usize = 13;
+/// Layout slots filled from the bank's integration accounts: (slot, integration account number).
+/// The unified instructions take these as named accounts and weave them into the layout, so
+/// callers pass only the other slots via remaining accounts.
+pub const INTEGRATION_SLOTS: &[(usize, u8)] = &[(0, 2), (3, 1)];
 
 /// Validates protocol account keys match the bank's stored integration accounts and known programs.
 fn validate_protocol_accounts(
@@ -46,35 +50,18 @@ fn validate_protocol_accounts(
     obligation_key: Pubkey,
     reserve_key: Pubkey,
 ) -> MarginfiResult {
-    check!(
-        protocol_accounts.len() >= MIN_REQUIRED_ACCOUNTS,
-        MarginfiError::IntegrationAccountCountMismatch
-    );
-    check!(
-        protocol_accounts[3].key() == reserve_key,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[0].key() == obligation_key,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[7].key() == KAMINO_PROGRAM_ID,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[8].key() == FARMS_PROGRAM_ID,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[9].key() == anchor_spl::token::spl_token::ID,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[10].key() == solana_instructions_sysvar::ID,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    Ok(())
+    expect_protocol_accounts(
+        protocol_accounts,
+        MIN_REQUIRED_ACCOUNTS,
+        &[
+            (0, obligation_key),
+            (3, reserve_key),
+            (7, KAMINO_PROGRAM_ID),
+            (8, FARMS_PROGRAM_ID),
+            (9, anchor_spl::token::spl_token::ID),
+            (10, solana_instructions_sysvar::ID),
+        ],
+    )
 }
 
 /// Validates the obligation has exactly one deposit position linked to the reserve.
@@ -194,7 +181,7 @@ pub(crate) fn withdraw_cpi<'info>(
     collateral_amount: u64,
     authority_bump: u8,
     refresh_reserve_first: bool,
-) -> MarginfiResult<u64> {
+) -> MarginfiResult {
     let bank = common.bank.load()?;
     validate_protocol_accounts(
         protocol_accounts,
@@ -269,7 +256,12 @@ pub(crate) fn withdraw_cpi<'info>(
         MarginfiError::KaminoWithdrawFailed,
     )?;
 
-    cpi_transfer_vault_to_destination(common, common.bank.key(), authority_bump, received)?;
+    cpi_transfer_to_destination(
+        common,
+        common.liquidity_vault.clone(),
+        authority_bump,
+        received,
+    )?;
 
-    Ok(received)
+    Ok(())
 }

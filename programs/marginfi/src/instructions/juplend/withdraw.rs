@@ -1,5 +1,5 @@
 use crate::{
-    instructions::integration::{self, CommonWithdraw},
+    instructions::integration::{self, impl_common_withdraw},
     ix_utils::{get_discrim_hash, Hashable},
     state::{
         marginfi_account::{
@@ -29,8 +29,8 @@ pub fn juplend_withdraw<'info>(
     withdraw_all: Option<bool>,
 ) -> MarginfiResult {
     let common = ctx.accounts.to_common();
-    let protocol_accounts = ctx.accounts.protocol_accounts();
-    let protocol_accounts = integration::account_info_slice(&protocol_accounts);
+    // Leaked to get a true `'info` borrow (the bump allocator never frees, so this costs nothing).
+    let protocol_accounts = ctx.accounts.protocol_accounts().leak();
     integration::integration_withdraw_impl(
         &common,
         protocol_accounts,
@@ -92,7 +92,7 @@ pub struct JuplendWithdraw<'info> {
     pub bank: AccountLoader<'info, Bank>,
 
     #[account(mut)]
-    pub destination_token_account: InterfaceAccount<'info, TokenAccount>,
+    pub destination_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         mut,
@@ -106,14 +106,16 @@ pub struct JuplendWithdraw<'info> {
 
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
-    #[account(mut, has_one = f_token_mint @ MarginfiError::InvalidJuplendLending)]
+    // Lending field links (f_token_mint, token reserves liquidity, supply position) are
+    // validated in the integration handler.
+    #[account(mut)]
     pub integration_acc_1: AccountLoader<'info, JuplendLending>,
 
     #[account(mut)]
     pub f_token_mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(mut)]
-    pub integration_acc_2: InterfaceAccount<'info, TokenAccount>,
+    pub integration_acc_2: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         mut,
@@ -121,25 +123,17 @@ pub struct JuplendWithdraw<'info> {
         token::authority = liquidity_vault_authority,
         token::token_program = token_program,
     )]
-    pub integration_acc_3: InterfaceAccount<'info, TokenAccount>,
+    pub integration_acc_3: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// CHECK: validated by the JupLend program
     pub lending_admin: UncheckedAccount<'info>,
 
-    /// CHECK: validated by the JupLend program
-    #[account(
-        mut,
-        constraint = supply_token_reserves_liquidity.key() == integration_acc_1.load()?.token_reserves_liquidity
-            @ MarginfiError::InvalidJuplendLending,
-    )]
+    /// CHECK: validated against the lending account in the integration handler
+    #[account(mut)]
     pub supply_token_reserves_liquidity: UncheckedAccount<'info>,
 
-    /// CHECK: validated by the JupLend program
-    #[account(
-        mut,
-        constraint = lending_supply_position_on_liquidity.key() == integration_acc_1.load()?.supply_position_on_liquidity
-            @ MarginfiError::InvalidJuplendLending,
-    )]
+    /// CHECK: validated against the lending account in the integration handler
+    #[account(mut)]
     pub lending_supply_position_on_liquidity: UncheckedAccount<'info>,
 
     /// CHECK: validated by the JupLend program
@@ -172,22 +166,11 @@ pub struct JuplendWithdraw<'info> {
     pub system_program: Program<'info, System>,
 }
 
-impl<'info> JuplendWithdraw<'info> {
-    fn to_common(&self) -> CommonWithdraw<'_, 'info> {
-        CommonWithdraw {
-            group: &self.group,
-            marginfi_account: &self.marginfi_account,
-            authority: &self.authority,
-            bank: &self.bank,
-            destination_token_account: self.destination_token_account.to_account_info(),
-            liquidity_vault_authority: self.liquidity_vault_authority.to_account_info(),
-            liquidity_vault: self.integration_acc_3.to_account_info(),
-            mint: self.mint.to_account_info(),
-            mint_decimals: self.mint.decimals,
-            token_program: self.token_program.to_account_info(),
-        }
-    }
+// JupLend withdrawals flow through the intermediary ATA (integration_acc_3), which stands in for
+// the liquidity vault in the common accounts.
+impl_common_withdraw!(JuplendWithdraw, integration_acc_3, token_program);
 
+impl<'info> JuplendWithdraw<'info> {
     fn protocol_accounts(&self) -> Vec<AccountInfo<'info>> {
         vec![
             self.integration_acc_1.to_account_info(),

@@ -4,7 +4,7 @@ use crate::{
         bank::BankVaultType,
         marginfi_account::{BankAccountWrapper, MarginfiAccountImpl},
     },
-    utils::optional_account,
+    utils::{expect_protocol_accounts, optional_account},
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -20,7 +20,7 @@ use fixed::types::I80F48;
 use marginfi_type_crate::pdas::DRIFT_PROGRAM_ID;
 use marginfi_type_crate::types::{Bank, MarginfiAccount, ACCOUNT_IN_RECEIVERSHIP};
 
-use super::{cpi_transfer_vault_to_destination, CommonDeposit, CommonWithdraw};
+use super::{cpi_transfer_to_destination, CommonDeposit, CommonWithdraw, WithdrawAmounts};
 
 /// Expected protocol_accounts layout for Drift deposit:
 /// 0: drift_state
@@ -32,12 +32,23 @@ use super::{cpi_transfer_vault_to_destination, CommonDeposit, CommonWithdraw};
 /// 6: system_program
 /// 7: drift_oracle (optional)
 pub const DEPOSIT_ACCOUNTS: usize = 8;
+/// The trailing drift_oracle slot is optional, so only the accounts before it are required.
+const DEPOSIT_REQUIRED_ACCOUNTS: usize = DEPOSIT_ACCOUNTS - 1;
+const DEPOSIT_PROGRAM_INDEX: usize = 5;
+const DEPOSIT_SYSTEM_PROGRAM_INDEX: usize = 6;
 
 /// Expected protocol_accounts layout for Drift withdraw:
 /// 0-7: same as deposit but with drift_signer at [5], drift_program at [6], system_program at [7]
 /// 8: drift_oracle (optional)
 /// 9-14: reward oracles/spot_markets/mints (optional)
 pub const WITHDRAW_ACCOUNTS: usize = 15;
+const WITHDRAW_PROGRAM_INDEX: usize = 6;
+const WITHDRAW_SYSTEM_PROGRAM_INDEX: usize = 7;
+
+/// Layout slots filled from the bank's integration accounts: (slot, integration account number).
+/// The unified instructions take these as named accounts and weave them into the layout, so
+/// callers pass only the other slots via remaining accounts.
+pub const INTEGRATION_SLOTS: &[(usize, u8)] = &[(1, 2), (2, 3), (3, 1)];
 
 /// Validates bank integration keys, drift program IDs, and spot market mint.
 fn validate_bank_keys<'info>(
@@ -48,30 +59,17 @@ fn validate_bank_keys<'info>(
     system_program_index: usize,
     mint_key: Pubkey,
 ) -> MarginfiResult {
-    check!(
-        protocol_accounts.len() >= min_count,
-        MarginfiError::IntegrationAccountCountMismatch
-    );
-    check!(
-        protocol_accounts[3].key() == bank.integration_acc_1,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[1].key() == bank.integration_acc_2,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[2].key() == bank.integration_acc_3,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[program_id_index].key() == DRIFT_PROGRAM_ID,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[system_program_index].key() == system_program::ID,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
+    expect_protocol_accounts(
+        protocol_accounts,
+        min_count,
+        &[
+            (3, bank.integration_acc_1),
+            (1, bank.integration_acc_2),
+            (2, bank.integration_acc_3),
+            (program_id_index, DRIFT_PROGRAM_ID),
+            (system_program_index, system_program::ID),
+        ],
+    )?;
 
     let spot_market_loader =
         AccountLoader::<drift_mocks::state::MinimalSpotMarket>::try_from(&protocol_accounts[3])?;
@@ -100,8 +98,8 @@ fn validate_withdraw_setup<'info>(
         protocol_accounts,
         &bank,
         WITHDRAW_ACCOUNTS,
-        6,
-        7,
+        WITHDRAW_PROGRAM_INDEX,
+        WITHDRAW_SYSTEM_PROGRAM_INDEX,
         common.mint.key(),
     )?;
     drop(bank);
@@ -134,9 +132,9 @@ pub(crate) fn deposit<'info>(
     validate_bank_keys(
         protocol_accounts,
         &bank,
-        DEPOSIT_ACCOUNTS - 1,
-        5,
-        6,
+        DEPOSIT_REQUIRED_ACCOUNTS,
+        DEPOSIT_PROGRAM_INDEX,
+        DEPOSIT_SYSTEM_PROGRAM_INDEX,
         common.mint.key(),
     )?;
     drop(bank);
@@ -227,7 +225,6 @@ pub(crate) fn pre_refresh<'info>(
 }
 
 /// Protocol-specific pre-withdraw balance computation for Drift.
-/// Returns (token_amount, expected_scaled_balance_change, share_amount).
 pub(crate) fn pre_withdraw<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
     bank: &mut Bank,
@@ -235,7 +232,7 @@ pub(crate) fn pre_withdraw<'info>(
     bank_key: &Pubkey,
     amount: u64,
     withdraw_all: bool,
-) -> MarginfiResult<(u64, u64, I80F48)> {
+) -> MarginfiResult<WithdrawAmounts> {
     check!(
         protocol_accounts.len() >= WITHDRAW_ACCOUNTS,
         MarginfiError::IntegrationAccountCountMismatch
@@ -299,24 +296,30 @@ pub(crate) fn pre_withdraw<'info>(
         (token_amount, scaled_decrement, share_amount)
     };
 
-    Ok((token_amount, expected_scaled_balance_change, share_amount))
+    Ok(WithdrawAmounts {
+        balance_units: expected_scaled_balance_change,
+        tokens: token_amount,
+        event_amount: token_amount,
+        shares: share_amount,
+    })
 }
 
 /// Protocol-specific CPI for Drift withdraw.
 pub(crate) fn withdraw_cpi<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
     common: &CommonWithdraw<'_, 'info>,
-    token_amount: u64,
-    expected_scaled_balance_change: u64,
+    amounts: &WithdrawAmounts,
     authority_bump: u8,
-) -> MarginfiResult<u64> {
+) -> MarginfiResult {
+    let token_amount = amounts.tokens;
+    let expected_scaled_balance_change = amounts.balance_units;
     let spot_market_loader =
         AccountLoader::<drift_mocks::state::MinimalSpotMarket>::try_from(&protocol_accounts[3])?;
     let user_loader = AccountLoader::<MinimalUser>::try_from(&protocol_accounts[1])?;
     let market_index = spot_market_loader.load()?.market_index;
 
     if token_amount == 0 {
-        return Ok(0);
+        return Ok(());
     }
 
     let initial_scaled_balance = user_loader.load()?.get_scaled_balance(market_index);
@@ -386,7 +389,12 @@ pub(crate) fn withdraw_cpi<'info>(
         MarginfiError::DriftScaledBalanceMismatch
     );
 
-    cpi_transfer_vault_to_destination(common, common.bank.key(), authority_bump, actual_received)?;
+    cpi_transfer_to_destination(
+        common,
+        common.liquidity_vault.clone(),
+        authority_bump,
+        actual_received,
+    )?;
 
-    Ok(actual_received)
+    Ok(())
 }

@@ -841,8 +841,16 @@ pub mod marginfi {
     // Unified integration instructions
 
     /// (user) Deposit into any integration protocol (Kamino, Drift, Solend, JupLend).
-    /// Protocol-specific accounts are passed via remaining_accounts.
-    /// `op_mode` identifies the protocol so the operation is readable from instruction args.
+    /// * amount - in the underlying liquidity token (e.g. USDC), in native decimals.
+    /// * op_mode - selects the protocol; must match the bank's asset tag.
+    ///
+    /// The bank's integration accounts are passed as the named `integration_acc_1/2/3` accounts
+    /// (mirror the bank's stored keys; omit `integration_acc_3` when the bank's third slot is
+    /// unset). `remaining_accounts` must contain the rest of the per-venue protocol layout
+    /// documented in `instructions/integration/<venue>_handler.rs`, in order, skipping the
+    /// integration-account slots; optional slots are filled with the system program. For Kamino
+    /// banks, prepend Kamino's permissionless reserve refresh instruction if the reserve may be
+    /// stale.
     pub fn integration_deposit<'info>(
         ctx: Context<'info, IntegrationDeposit<'info>>,
         amount: u64,
@@ -852,8 +860,19 @@ pub mod marginfi {
     }
 
     /// (user) Withdraw from any integration protocol (Kamino, Drift, Solend, JupLend).
-    /// Protocol-specific accounts are passed via remaining_accounts.
-    /// `op_mode` identifies the protocol so the operation is readable from instruction args.
+    /// * amount - Kamino/Solend: in collateral tokens (cTokens); Drift/JupLend: in the underlying
+    ///   token. Native decimals.
+    /// * withdraw_all - if true, withdraws the entire position and `amount` is ignored.
+    /// * op_mode - selects the protocol; must match the bank's asset tag.
+    ///
+    /// The bank's integration accounts are passed as the named `integration_acc_1/2/3` accounts
+    /// (mirror the bank's stored keys; omit `integration_acc_3` when the bank's third slot is
+    /// unset). `remaining_accounts` must contain the rest of the per-venue protocol layout
+    /// documented in `instructions/integration/<venue>_handler.rs`, in order, skipping the
+    /// integration-account slots (optional slots filled with the system program), followed by the
+    /// oracle accounts for the health check and, if enabled, group rate limiting. For Kamino
+    /// banks, prepend Kamino's permissionless reserve refresh instruction if the reserve may be
+    /// stale.
     pub fn integration_withdraw<'info>(
         ctx: Context<'info, IntegrationWithdraw<'info>>,
         amount: u64,

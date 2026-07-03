@@ -22,14 +22,34 @@ use marginfi_type_crate::types::{
     ACCOUNT_IN_RECEIVERSHIP,
 };
 
-/// Returns `Some(account)` if present and not the system program sentinel, `None` otherwise.
-/// Used by integration handlers to resolve optional protocol accounts.
-pub fn optional_account<'info>(info: Option<&AccountInfo<'info>>) -> Option<AccountInfo<'info>> {
-    info.filter(|ai| ai.key() != system_program::ID).cloned()
+// ************* VENUE POLICY
+// Per-venue behavioral differences, keyed by the bank's integration asset tag. Kept together so
+// a venue's quirks (and its eventual removal) touch a single place.
+
+/// Whether the venue permits withdrawals while the account is mid-order-execution.
+pub fn allows_order_execution(asset_tag: u8) -> bool {
+    asset_tag != ASSET_TAG_SOLEND
 }
 
-/// Returns the number of protocol accounts expected in `remaining_accounts` for a withdraw,
-/// based on the bank's `asset_tag`. This determines the split between protocol and oracle accounts.
+/// Whether the venue forbids deposits while the account is in receivership.
+pub fn blocks_deposit_in_receivership(asset_tag: u8) -> bool {
+    asset_tag == ASSET_TAG_SOLEND
+}
+
+/// Returns the total size of the venue's protocol account layout for a deposit.
+pub fn deposit_protocol_account_count(asset_tag: u8) -> usize {
+    match asset_tag {
+        ASSET_TAG_KAMINO => crate::instructions::integration::kamino_handler::DEPOSIT_ACCOUNTS,
+        ASSET_TAG_DRIFT => crate::instructions::integration::drift_handler::DEPOSIT_ACCOUNTS,
+        ASSET_TAG_SOLEND => crate::instructions::integration::solend_handler::DEPOSIT_ACCOUNTS,
+        ASSET_TAG_JUPLEND => crate::instructions::integration::juplend_handler::DEPOSIT_ACCOUNTS,
+        _ => 0,
+    }
+}
+
+/// Returns the total size of the venue's protocol account layout for a withdraw. Together with
+/// the woven integration slots, this determines the split between protocol and oracle accounts
+/// in the unified instruction's remaining accounts.
 pub fn withdraw_protocol_account_count(asset_tag: u8) -> usize {
     match asset_tag {
         ASSET_TAG_KAMINO => crate::instructions::integration::kamino_handler::WITHDRAW_ACCOUNTS,
@@ -38,6 +58,60 @@ pub fn withdraw_protocol_account_count(asset_tag: u8) -> usize {
         ASSET_TAG_JUPLEND => crate::instructions::integration::juplend_handler::WITHDRAW_ACCOUNTS,
         _ => 0,
     }
+}
+
+/// Returns the layout slots the unified deposit fills from the bank's integration accounts.
+pub fn deposit_integration_slots(asset_tag: u8) -> &'static [(usize, u8)] {
+    match asset_tag {
+        ASSET_TAG_KAMINO => crate::instructions::integration::kamino_handler::INTEGRATION_SLOTS,
+        ASSET_TAG_DRIFT => crate::instructions::integration::drift_handler::INTEGRATION_SLOTS,
+        ASSET_TAG_SOLEND => crate::instructions::integration::solend_handler::INTEGRATION_SLOTS,
+        ASSET_TAG_JUPLEND => {
+            crate::instructions::integration::juplend_handler::DEPOSIT_INTEGRATION_SLOTS
+        }
+        _ => &[],
+    }
+}
+
+/// Returns the layout slots the unified withdraw fills from the bank's integration accounts.
+pub fn withdraw_integration_slots(asset_tag: u8) -> &'static [(usize, u8)] {
+    match asset_tag {
+        ASSET_TAG_KAMINO => crate::instructions::integration::kamino_handler::INTEGRATION_SLOTS,
+        ASSET_TAG_DRIFT => crate::instructions::integration::drift_handler::INTEGRATION_SLOTS,
+        ASSET_TAG_SOLEND => crate::instructions::integration::solend_handler::INTEGRATION_SLOTS,
+        ASSET_TAG_JUPLEND => {
+            crate::instructions::integration::juplend_handler::WITHDRAW_INTEGRATION_SLOTS
+        }
+        _ => &[],
+    }
+}
+
+// ************* END VENUE POLICY
+
+/// Returns `Some(account)` if present and not the system program sentinel, `None` otherwise.
+/// Used by integration handlers to resolve optional protocol accounts.
+pub fn optional_account<'info>(info: Option<&AccountInfo<'info>>) -> Option<AccountInfo<'info>> {
+    info.filter(|ai| ai.key() != system_program::ID).cloned()
+}
+
+/// Checks that `accounts` has at least `min_count` entries and that each `(index, key)` pair in
+/// `expected_keys` matches the account at that position.
+pub fn expect_protocol_accounts(
+    accounts: &[AccountInfo],
+    min_count: usize,
+    expected_keys: &[(usize, Pubkey)],
+) -> MarginfiResult {
+    check!(
+        accounts.len() >= min_count,
+        MarginfiError::IntegrationAccountCountMismatch
+    );
+    for (index, key) in expected_keys {
+        check!(
+            accounts[*index].key() == *key,
+            MarginfiError::IntegrationAccountKeyMismatch
+        );
+    }
+    Ok(())
 }
 
 /// Pre-deposit validation shared by all integration deposits.
@@ -53,7 +127,7 @@ pub fn validate_integration_deposit(
     validate_asset_tags(&bank, &marginfi_account)?;
     validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
     check!(
-        !(bank.config.asset_tag == ASSET_TAG_SOLEND
+        !(blocks_deposit_in_receivership(bank.config.asset_tag)
             && marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP)),
         MarginfiError::AccountDisabled
     );
@@ -68,12 +142,13 @@ pub fn finalize_integration_deposit(
     marginfi_account: &AccountLoader<MarginfiAccount>,
     bank: &AccountLoader<Bank>,
     authority_key: Pubkey,
-    marginfi_account_key: Pubkey,
-    bank_key: Pubkey,
-    group_key: Pubkey,
     balance_change: u64,
     inflow_amount: u64,
 ) -> MarginfiResult {
+    let group_key = group.key();
+    let marginfi_account_key = marginfi_account.key();
+    let bank_key = bank.key();
+
     let mut bank = bank.load_mut()?;
     let mut marginfi_account = marginfi_account.load_mut()?;
     let group = group.load()?;
@@ -126,16 +201,17 @@ pub fn finalize_integration_deposit(
 pub fn finalize_integration_withdraw<'info>(
     marginfi_account: &AccountLoader<'info, MarginfiAccount>,
     bank: &AccountLoader<'info, Bank>,
-    bank_key: Pubkey,
-    bank_mint: Pubkey,
     authority_key: Pubkey,
-    marginfi_account_key: Pubkey,
     event_amount: u64,
     share_amount: I80F48,
     withdraw_all: bool,
-    remaining_accounts: &'info [AccountInfo<'info>],
+    oracle_accounts: &'info [AccountInfo<'info>],
     clock: &Clock,
 ) -> MarginfiResult {
+    let marginfi_account_key = marginfi_account.key();
+    let bank_key = bank.key();
+    let bank_mint = bank.load()?.mint;
+
     let mut marginfi_account = marginfi_account.load_mut()?;
 
     emit!(LendingAccountWithdrawEvent {
@@ -164,7 +240,7 @@ pub fn finalize_integration_withdraw<'info>(
     if !in_receivership_or_order_execution {
         check_account_init_health(
             &marginfi_account,
-            remaining_accounts,
+            oracle_accounts,
             &mut Some(&mut health_cache),
         )?;
         health_cache.program_version = PROGRAM_VERSION;
@@ -175,7 +251,7 @@ pub fn finalize_integration_withdraw<'info>(
     // Update price cache regardless of receivership status
     let mut bank = bank.load_mut()?;
     let price_for_cache =
-        fetch_unbiased_price_for_bank_cache(&bank_key, &bank, clock, remaining_accounts).ok();
+        fetch_unbiased_price_for_bank_cache(&bank_key, &bank, clock, oracle_accounts).ok();
     bank.update_cache_price(price_for_cache)?;
 
     Ok(())

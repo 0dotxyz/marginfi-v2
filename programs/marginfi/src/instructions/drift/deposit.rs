@@ -1,5 +1,5 @@
 use crate::{
-    instructions::integration::{self, CommonDeposit},
+    instructions::integration::{self, impl_common_deposit},
     state::{
         marginfi_account::{
             account_not_frozen_for_authority, is_signer_authorized, MarginfiAccountImpl,
@@ -21,8 +21,8 @@ pub fn drift_deposit<'info>(
     amount: u64,
 ) -> MarginfiResult {
     let common = ctx.accounts.to_common();
-    let protocol_accounts = ctx.accounts.protocol_accounts();
-    let protocol_accounts = integration::account_info_slice(&protocol_accounts);
+    // Leaked to get a true `'info` borrow (the bump allocator never frees, so this costs nothing).
+    let protocol_accounts = ctx.accounts.protocol_accounts().leak();
     integration::integration_deposit_impl(
         &common,
         protocol_accounts,
@@ -96,25 +96,15 @@ pub struct DriftDeposit<'info> {
     /// CHECK: validated by Drift program
     pub drift_state: UncheckedAccount<'info>,
 
-    #[account(
-        mut,
-        constraint = {
-            let user = integration_acc_2.load()?;
-            let spot_market = integration_acc_1.load()?;
-            user.validate_spot_position(spot_market.market_index).is_ok()
-        } @ MarginfiError::DriftInvalidSpotPositions
-    )]
+    // Spot position and spot market mint are validated in the integration handler.
+    #[account(mut)]
     pub integration_acc_2: AccountLoader<'info, MinimalUser>,
 
     /// CHECK: validated by Drift program
     #[account(mut)]
     pub integration_acc_3: UncheckedAccount<'info>,
 
-    #[account(
-        mut,
-        constraint = integration_acc_1.load()?.mint == mint.key()
-            @ MarginfiError::DriftSpotMarketMintMismatch
-    )]
+    #[account(mut)]
     pub integration_acc_1: AccountLoader<'info, drift_mocks::state::MinimalSpotMarket>,
 
     /// CHECK: validated by Drift program
@@ -131,22 +121,9 @@ pub struct DriftDeposit<'info> {
     pub system_program: Program<'info, System>,
 }
 
-impl<'info> DriftDeposit<'info> {
-    fn to_common(&self) -> CommonDeposit<'_, 'info> {
-        CommonDeposit {
-            group: &self.group,
-            marginfi_account: &self.marginfi_account,
-            authority: &self.authority,
-            bank: &self.bank,
-            signer_token_account: self.signer_token_account.to_account_info(),
-            liquidity_vault_authority: self.liquidity_vault_authority.to_account_info(),
-            liquidity_vault: self.liquidity_vault.to_account_info(),
-            mint: self.mint.to_account_info(),
-            mint_decimals: self.mint.decimals,
-            token_program: self.token_program.to_account_info(),
-        }
-    }
+impl_common_deposit!(DriftDeposit);
 
+impl<'info> DriftDeposit<'info> {
     fn protocol_accounts(&self) -> Vec<AccountInfo<'info>> {
         let mut accounts = vec![
             self.drift_state.to_account_info(),

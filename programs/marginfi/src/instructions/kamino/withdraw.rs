@@ -1,5 +1,6 @@
 use crate::{
-    instructions::integration::{self, CommonWithdraw},
+    check,
+    instructions::integration::{self, impl_common_withdraw},
     ix_utils::{get_discrim_hash, Hashable},
     state::{
         marginfi_account::{
@@ -35,9 +36,16 @@ pub fn kamino_withdraw<'info>(
     let flags = flags.unwrap_or(0);
     let withdraw_all = flags & 1 != 0;
     let refresh_reserve = flags & 2 != 0;
+    // `protocol_accounts` flattens the optional farm accounts positionally, so a reserve farm
+    // state without the obligation farm user state would land in the wrong slot.
+    check!(
+        ctx.accounts.obligation_farm_user_state.is_some()
+            || ctx.accounts.reserve_farm_state.is_none(),
+        MarginfiError::KaminoObligationFarmUserStateMissing
+    );
     let common = ctx.accounts.to_common();
-    let protocol_accounts = ctx.accounts.protocol_accounts();
-    let protocol_accounts = integration::account_info_slice(&protocol_accounts);
+    // Leaked to get a true `'info` borrow (the bump allocator never frees, so this costs nothing).
+    let protocol_accounts = ctx.accounts.protocol_accounts().leak();
     integration::integration_withdraw_impl(
         &common,
         protocol_accounts,
@@ -121,17 +129,9 @@ pub struct KaminoWithdraw<'info> {
     )]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
 
-    #[account(
-        mut,
-        constraint = {
-            let obligation = integration_acc_2.load()?;
-            obligation.deposits.iter().skip(1).all(|d| d.deposited_amount == 0)
-        } @ MarginfiError::InvalidObligationDepositCount,
-        constraint = {
-            let obligation = integration_acc_2.load()?;
-            obligation.deposits[0].deposit_reserve == integration_acc_1.key()
-        } @ MarginfiError::ObligationDepositReserveMismatch
-    )]
+    // Obligation shape (single deposit position linked to the reserve) is validated in the
+    // integration handler.
+    #[account(mut)]
     pub integration_acc_2: AccountLoader<'info, MinimalObligation>,
 
     /// CHECK: validated by the Kamino program
@@ -182,22 +182,9 @@ pub struct KaminoWithdraw<'info> {
     pub instruction_sysvar_account: UncheckedAccount<'info>,
 }
 
-impl<'info> KaminoWithdraw<'info> {
-    fn to_common(&self) -> CommonWithdraw<'_, 'info> {
-        CommonWithdraw {
-            group: &self.group,
-            marginfi_account: &self.marginfi_account,
-            authority: &self.authority,
-            bank: &self.bank,
-            destination_token_account: self.destination_token_account.to_account_info(),
-            liquidity_vault_authority: self.liquidity_vault_authority.to_account_info(),
-            liquidity_vault: self.liquidity_vault.to_account_info(),
-            mint: self.mint.to_account_info(),
-            mint_decimals: self.mint.decimals,
-            token_program: self.liquidity_token_program.to_account_info(),
-        }
-    }
+impl_common_withdraw!(KaminoWithdraw, liquidity_vault, liquidity_token_program);
 
+impl<'info> KaminoWithdraw<'info> {
     fn protocol_accounts(&self) -> Vec<AccountInfo<'info>> {
         let mut accounts = vec![
             self.integration_acc_2.to_account_info(),

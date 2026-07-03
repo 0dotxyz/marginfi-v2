@@ -1,5 +1,5 @@
 use crate::{
-    instructions::integration::{self, CommonWithdraw},
+    instructions::integration::{self, impl_common_withdraw},
     ix_utils::{get_discrim_hash, Hashable},
     state::{
         marginfi_account::{
@@ -27,8 +27,8 @@ pub fn drift_withdraw<'info>(
     withdraw_all: Option<bool>,
 ) -> MarginfiResult {
     let common = ctx.accounts.to_common();
-    let protocol_accounts = ctx.accounts.protocol_accounts();
-    let protocol_accounts = integration::account_info_slice(&protocol_accounts);
+    // Leaked to get a true `'info` borrow (the bump allocator never frees, so this costs nothing).
+    let protocol_accounts = ctx.accounts.protocol_accounts().leak();
     integration::integration_withdraw_impl(
         &common,
         protocol_accounts,
@@ -111,34 +111,16 @@ pub struct DriftWithdraw<'info> {
     /// CHECK: validated by Drift program
     pub drift_state: UncheckedAccount<'info>,
 
-    #[account(
-        mut,
-        constraint = {
-            let user = integration_acc_2.load()?;
-            let spot_market = integration_acc_1.load()?;
-            user.validate_spot_position(spot_market.market_index).is_ok()
-        } @ MarginfiError::DriftInvalidSpotPositions,
-        constraint = {
-            let user = integration_acc_2.load()?;
-            user.validate_reward_accounts(
-                drift_reward_spot_market.is_none(),
-                drift_reward_spot_market_2.is_none(),
-            ).is_ok()
-        } @ MarginfiError::DriftMissingRewardAccounts,
-        constraint = integration_acc_2.load()?.validate_not_bricked_by_admin_deposits().is_ok()
-            @ MarginfiError::DriftBrickedAccount
-    )]
+    // Spot position, reward accounts, bricked state, and spot market mint are validated in the
+    // integration handler.
+    #[account(mut)]
     pub integration_acc_2: AccountLoader<'info, MinimalUser>,
 
     /// CHECK: validated by Drift program
     #[account(mut)]
     pub integration_acc_3: UncheckedAccount<'info>,
 
-    #[account(
-        mut,
-        constraint = integration_acc_1.load()?.mint == mint.key()
-            @ MarginfiError::DriftSpotMarketMintMismatch
-    )]
+    #[account(mut)]
     pub integration_acc_1: AccountLoader<'info, drift_mocks::state::MinimalSpotMarket>,
 
     /// CHECK: validated by Drift program
@@ -176,23 +158,22 @@ pub struct DriftWithdraw<'info> {
     pub system_program: Program<'info, System>,
 }
 
-impl<'info> DriftWithdraw<'info> {
-    fn to_common(&self) -> CommonWithdraw<'_, 'info> {
-        CommonWithdraw {
-            group: &self.group,
-            marginfi_account: &self.marginfi_account,
-            authority: &self.authority,
-            bank: &self.bank,
-            destination_token_account: self.destination_token_account.to_account_info(),
-            liquidity_vault_authority: self.liquidity_vault_authority.to_account_info(),
-            liquidity_vault: self.liquidity_vault.to_account_info(),
-            mint: self.mint.to_account_info(),
-            mint_decimals: self.mint.decimals,
-            token_program: self.token_program.to_account_info(),
-        }
-    }
+/// Resolves an optional account to its `AccountInfo`, or the system program sentinel expected by
+/// `optional_account` when absent.
+fn opt_or<'info>(
+    opt: &Option<UncheckedAccount<'info>>,
+    sentinel: AccountInfo<'info>,
+) -> AccountInfo<'info> {
+    opt.as_ref()
+        .map(|a| a.to_account_info())
+        .unwrap_or(sentinel)
+}
 
+impl_common_withdraw!(DriftWithdraw);
+
+impl<'info> DriftWithdraw<'info> {
     fn protocol_accounts(&self) -> Vec<AccountInfo<'info>> {
+        let sentinel = self.system_program.to_account_info();
         vec![
             self.drift_state.to_account_info(),
             self.integration_acc_2.to_account_info(),
@@ -202,34 +183,13 @@ impl<'info> DriftWithdraw<'info> {
             self.drift_signer.to_account_info(),
             self.drift_program.to_account_info(),
             self.system_program.to_account_info(),
-            self.drift_oracle
-                .as_ref()
-                .map(|a| a.to_account_info())
-                .unwrap_or_else(|| self.system_program.to_account_info()),
-            self.drift_reward_oracle
-                .as_ref()
-                .map(|a| a.to_account_info())
-                .unwrap_or_else(|| self.system_program.to_account_info()),
-            self.drift_reward_oracle_2
-                .as_ref()
-                .map(|a| a.to_account_info())
-                .unwrap_or_else(|| self.system_program.to_account_info()),
-            self.drift_reward_spot_market
-                .as_ref()
-                .map(|a| a.to_account_info())
-                .unwrap_or_else(|| self.system_program.to_account_info()),
-            self.drift_reward_spot_market_2
-                .as_ref()
-                .map(|a| a.to_account_info())
-                .unwrap_or_else(|| self.system_program.to_account_info()),
-            self.drift_reward_mint
-                .as_ref()
-                .map(|a| a.to_account_info())
-                .unwrap_or_else(|| self.system_program.to_account_info()),
-            self.drift_reward_mint_2
-                .as_ref()
-                .map(|a| a.to_account_info())
-                .unwrap_or_else(|| self.system_program.to_account_info()),
+            opt_or(&self.drift_oracle, sentinel.clone()),
+            opt_or(&self.drift_reward_oracle, sentinel.clone()),
+            opt_or(&self.drift_reward_oracle_2, sentinel.clone()),
+            opt_or(&self.drift_reward_spot_market, sentinel.clone()),
+            opt_or(&self.drift_reward_spot_market_2, sentinel.clone()),
+            opt_or(&self.drift_reward_mint, sentinel.clone()),
+            opt_or(&self.drift_reward_mint_2, sentinel),
         ]
     }
 }

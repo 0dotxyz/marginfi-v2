@@ -1,7 +1,9 @@
 use crate::constants::SOLEND_PROGRAM_ID;
 use crate::{
-    bank_signer, check, state::bank::BankVaultType, utils::assert_within_one_token, MarginfiError,
-    MarginfiResult,
+    bank_signer, check,
+    state::bank::BankVaultType,
+    utils::{assert_within_one_token, expect_protocol_accounts},
+    MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::accessor;
@@ -14,7 +16,7 @@ use solend_mocks::state::{
     get_solend_obligation_deposit_amount, validate_solend_obligation, SolendMinimalReserve,
 };
 
-use super::{cpi_transfer_vault_to_destination, CommonDeposit, CommonWithdraw};
+use super::{cpi_transfer_to_destination, CommonDeposit, CommonWithdraw};
 
 /// Expected protocol_accounts layout for Solend deposit:
 /// 0: integration_acc_2 (obligation) - mut, UncheckedAccount (owner == SOLEND_PROGRAM_ID)
@@ -42,6 +44,11 @@ pub const DEPOSIT_ACCOUNTS: usize = 11;
 /// 8: solend_program
 pub const WITHDRAW_ACCOUNTS: usize = 9;
 
+/// Layout slots filled from the bank's integration accounts: (slot, integration account number).
+/// The unified instructions take these as named accounts and weave them into the layout, so
+/// callers pass only the other slots via remaining accounts.
+pub const INTEGRATION_SLOTS: &[(usize, u8)] = &[(0, 2), (3, 1)];
+
 /// Validates bank integration keys, obligation ownership, program ID, and reserve staleness.
 fn validate_solend_setup<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
@@ -49,25 +56,18 @@ fn validate_solend_setup<'info>(
     min_count: usize,
     program_id_index: usize,
 ) -> MarginfiResult<AccountLoader<'info, SolendMinimalReserve>> {
-    check!(
-        protocol_accounts.len() >= min_count,
-        MarginfiError::IntegrationAccountCountMismatch
-    );
-    check!(
-        protocol_accounts[3].key() == bank.integration_acc_1,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[0].key() == bank.integration_acc_2,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
+    expect_protocol_accounts(
+        protocol_accounts,
+        min_count,
+        &[
+            (3, bank.integration_acc_1),
+            (0, bank.integration_acc_2),
+            (program_id_index, SOLEND_PROGRAM_ID),
+        ],
+    )?;
     check!(
         protocol_accounts[0].owner == &SOLEND_PROGRAM_ID,
         MarginfiError::InvalidSolendAccount
-    );
-    check!(
-        protocol_accounts[program_id_index].key() == SOLEND_PROGRAM_ID,
-        MarginfiError::IntegrationAccountKeyMismatch
     );
     validate_solend_obligation(&protocol_accounts[0], protocol_accounts[3].key())?;
 
@@ -135,7 +135,7 @@ pub(crate) fn withdraw_cpi<'info>(
     common: &CommonWithdraw<'_, 'info>,
     collateral_amount: u64,
     authority_bump: u8,
-) -> MarginfiResult<u64> {
+) -> MarginfiResult {
     let bank = common.bank.load()?;
     let reserve_loader = validate_solend_setup(protocol_accounts, &bank, WITHDRAW_ACCOUNTS, 8)?;
     drop(bank);
@@ -190,7 +190,12 @@ pub(crate) fn withdraw_cpi<'info>(
     )?;
 
     // Transfer vault -> destination
-    cpi_transfer_vault_to_destination(common, common.bank.key(), authority_bump, received)?;
+    cpi_transfer_to_destination(
+        common,
+        common.liquidity_vault.clone(),
+        authority_bump,
+        received,
+    )?;
 
-    Ok(received)
+    Ok(())
 }

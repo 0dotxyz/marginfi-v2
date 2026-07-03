@@ -4,12 +4,13 @@ use crate::{
         bank::BankVaultType,
         marginfi_account::{BankAccountWrapper, MarginfiAccountImpl},
     },
+    utils::expect_protocol_accounts,
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::system_program;
 use anchor_spl::token::accessor;
-use anchor_spl::token_interface::{transfer_checked, TokenAccount, TransferChecked};
+use anchor_spl::token_interface::TokenAccount;
 use fixed::types::I80F48;
 use juplend_mocks::juplend_earn::cpi::accounts::{Deposit, UpdateRate, Withdraw as WithdrawCpi};
 use juplend_mocks::juplend_earn::cpi::{
@@ -21,7 +22,7 @@ use juplend_mocks::state::{
 };
 use marginfi_type_crate::types::{Bank, MarginfiAccount, ACCOUNT_IN_RECEIVERSHIP};
 
-use super::{CommonDeposit, CommonWithdraw};
+use super::{cpi_transfer_to_destination, CommonDeposit, CommonWithdraw, WithdrawAmounts};
 
 /// Expected protocol_accounts layout for JupLend deposit:
 /// 0: lending, 1: f_token_mint, 2: fToken vault, 3: lending_admin,
@@ -39,6 +40,13 @@ pub const DEPOSIT_ACCOUNTS: usize = 14;
 /// 12: rewards_rate_model, 13: juplend_program, 14: associated_token_program,
 /// 15: system_program
 pub const WITHDRAW_ACCOUNTS: usize = 16;
+
+/// Layout slots filled from the bank's integration accounts: (slot, integration account number).
+/// The unified instructions take these as named accounts and weave them into the layout, so
+/// callers pass only the other slots via remaining accounts. Deposits do not use the bank's
+/// third integration account (the withdraw intermediary ATA).
+pub const DEPOSIT_INTEGRATION_SLOTS: &[(usize, u8)] = &[(0, 1), (2, 2)];
+pub const WITHDRAW_INTEGRATION_SLOTS: &[(usize, u8)] = &[(0, 1), (2, 2), (3, 3)];
 
 /// Validates lending account fields match the expected protocol accounts.
 fn validate_lending_accounts(
@@ -68,38 +76,20 @@ pub(crate) fn deposit<'info>(
     amount: u64,
     authority_bump: u8,
 ) -> MarginfiResult<(u64, u64)> {
-    check!(
-        protocol_accounts.len() >= DEPOSIT_ACCOUNTS,
-        MarginfiError::IntegrationAccountCountMismatch
-    );
-
     let bank = common.bank.load()?;
-    check!(
-        protocol_accounts[0].key() == bank.integration_acc_1,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[2].key() == bank.integration_acc_2,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
+    expect_protocol_accounts(
+        protocol_accounts,
+        DEPOSIT_ACCOUNTS,
+        &[
+            (0, bank.integration_acc_1),
+            (2, bank.integration_acc_2),
+            (9, juplend_mocks::liquidity::ID),
+            (11, juplend_mocks::ID),
+            (12, anchor_spl::associated_token::ID),
+            (13, system_program::ID),
+        ],
+    )?;
     drop(bank);
-
-    check!(
-        protocol_accounts[9].key() == juplend_mocks::liquidity::ID,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[11].key() == juplend_mocks::ID,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[12].key() == anchor_spl::associated_token::ID,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[13].key() == system_program::ID,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
 
     let lending_loader = AccountLoader::<JuplendLending>::try_from(&protocol_accounts[0])?;
     {
@@ -183,42 +173,21 @@ pub(crate) fn pre_refresh<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
     common: &CommonWithdraw<'_, 'info>,
 ) -> MarginfiResult {
-    check!(
-        protocol_accounts.len() >= WITHDRAW_ACCOUNTS,
-        MarginfiError::IntegrationAccountCountMismatch
-    );
-
     let bank = common.bank.load()?;
-    check!(
-        protocol_accounts[0].key() == bank.integration_acc_1,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[2].key() == bank.integration_acc_2,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[3].key() == bank.integration_acc_3,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
+    expect_protocol_accounts(
+        protocol_accounts,
+        WITHDRAW_ACCOUNTS,
+        &[
+            (0, bank.integration_acc_1),
+            (2, bank.integration_acc_2),
+            (3, bank.integration_acc_3),
+            (11, juplend_mocks::liquidity::ID),
+            (13, juplend_mocks::ID),
+            (14, anchor_spl::associated_token::ID),
+            (15, system_program::ID),
+        ],
+    )?;
     drop(bank);
-
-    check!(
-        protocol_accounts[11].key() == juplend_mocks::liquidity::ID,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[13].key() == juplend_mocks::ID,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[14].key() == anchor_spl::associated_token::ID,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
-    check!(
-        protocol_accounts[15].key() == system_program::ID,
-        MarginfiError::IntegrationAccountKeyMismatch
-    );
 
     let lending_loader = AccountLoader::<JuplendLending>::try_from(&protocol_accounts[0])?;
     {
@@ -254,7 +223,6 @@ pub(crate) fn pre_refresh<'info>(
 }
 
 /// Protocol-specific pre-withdraw balance computation for JupLend.
-/// Returns (token_amount, shares_to_burn, share_amount).
 pub(crate) fn pre_withdraw<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
     bank: &mut Bank,
@@ -262,7 +230,7 @@ pub(crate) fn pre_withdraw<'info>(
     bank_key: &Pubkey,
     amount: u64,
     withdraw_all: bool,
-) -> MarginfiResult<(u64, u64, I80F48)> {
+) -> MarginfiResult<WithdrawAmounts> {
     check!(
         protocol_accounts.len() >= WITHDRAW_ACCOUNTS,
         MarginfiError::IntegrationAccountCountMismatch
@@ -299,19 +267,25 @@ pub(crate) fn pre_withdraw<'info>(
         (amount, shares_to_burn, share_amount)
     };
 
-    Ok((token_amount, shares_to_burn, share_amount))
+    Ok(WithdrawAmounts {
+        balance_units: shares_to_burn,
+        tokens: token_amount,
+        event_amount: token_amount,
+        shares: share_amount,
+    })
 }
 
 /// Protocol-specific CPI for JupLend withdraw.
 pub(crate) fn withdraw_cpi<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
     common: &CommonWithdraw<'_, 'info>,
-    token_amount: u64,
-    shares_to_burn: u64,
+    amounts: &WithdrawAmounts,
     authority_bump: u8,
-) -> MarginfiResult<u64> {
+) -> MarginfiResult {
+    let token_amount = amounts.tokens;
+    let shares_to_burn = amounts.balance_units;
     if token_amount == 0 {
-        return Ok(0);
+        return Ok(());
     }
 
     let pre_intermediary_balance = accessor::amount(&protocol_accounts[3])?;
@@ -369,19 +343,12 @@ pub(crate) fn withdraw_cpi<'info>(
     );
 
     // Transfer intermediary ATA -> destination
-    {
-        let program = common.token_program.to_account_info();
-        let cpi_accounts = TransferChecked {
-            from: protocol_accounts[3].clone(),
-            to: common.destination_token_account.to_account_info(),
-            authority: common.liquidity_vault_authority.to_account_info(),
-            mint: common.mint.to_account_info(),
-        };
-        let signer_seeds: &[&[&[u8]]] =
-            bank_signer!(BankVaultType::Liquidity, common.bank.key(), authority_bump);
-        let cpi_ctx = CpiContext::new_with_signer(program.key(), cpi_accounts, signer_seeds);
-        transfer_checked(cpi_ctx, received_underlying, common.mint_decimals)?;
-    }
+    cpi_transfer_to_destination(
+        common,
+        protocol_accounts[3].clone(),
+        authority_bump,
+        received_underlying,
+    )?;
 
-    Ok(received_underlying)
+    Ok(())
 }
