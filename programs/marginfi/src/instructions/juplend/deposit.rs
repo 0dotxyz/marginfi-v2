@@ -16,6 +16,7 @@ use anchor_spl::{
 };
 use juplend_mocks::state::Lending as JuplendLending;
 use marginfi_type_crate::constants::{ASSET_TAG_JUPLEND, LIQUIDITY_VAULT_AUTHORITY_SEED};
+use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PROGRAM_ID;
 use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
 /// Deposit into a JupLend lending pool through a marginfi account.
@@ -144,6 +145,7 @@ pub struct JuplendDeposit<'info> {
     pub liquidity: UncheckedAccount<'info>,
 
     /// CHECK: pinned to the JupLend liquidity program
+    #[account(address = JUPLEND_LIQUIDITY_PROGRAM_ID)]
     pub liquidity_program: UncheckedAccount<'info>,
 
     /// CHECK: cross-checked against integration_acc_1.rewards_rate_model
