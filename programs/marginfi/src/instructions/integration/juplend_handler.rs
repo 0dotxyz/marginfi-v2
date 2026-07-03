@@ -54,6 +54,7 @@ fn validate_lending_accounts(
     f_token_mint_key: Pubkey,
     reserves_liquidity_key: Pubkey,
     supply_position_key: Pubkey,
+    rewards_rate_model_key: Pubkey,
 ) -> MarginfiResult {
     check!(
         lending.f_token_mint == f_token_mint_key,
@@ -65,6 +66,10 @@ fn validate_lending_accounts(
     );
     check!(
         lending.supply_position_on_liquidity == supply_position_key,
+        MarginfiError::InvalidJuplendLending
+    );
+    check!(
+        lending.rewards_rate_model == rewards_rate_model_key,
         MarginfiError::InvalidJuplendLending
     );
     Ok(())
@@ -99,6 +104,7 @@ pub(crate) fn deposit<'info>(
             protocol_accounts[1].key(),
             protocol_accounts[4].key(),
             protocol_accounts[5].key(),
+            protocol_accounts[10].key(),
         )?;
     }
 
@@ -197,6 +203,7 @@ pub(crate) fn pre_refresh<'info>(
             protocol_accounts[1].key(),
             protocol_accounts[5].key(),
             protocol_accounts[6].key(),
+            protocol_accounts[12].key(),
         )?;
     }
 

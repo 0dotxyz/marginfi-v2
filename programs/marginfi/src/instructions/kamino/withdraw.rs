@@ -27,6 +27,33 @@ use marginfi_type_crate::types::{
     ACCOUNT_IN_RECEIVERSHIP,
 };
 
+/// Withdraw from a Kamino reserve through a marginfi account
+///
+/// # Important Note on Token Amounts:
+/// The `amount` parameter is specified in terms of COLLATERAL tokens, not the underlying
+/// liquidity tokens (e.g., USDC). This is important for users to understand.
+///
+/// Collateral tokens represent shares in the Kamino reserve. When withdrawing:
+///
+/// 1. The user specifies how many collateral tokens they want to withdraw.
+///
+/// 2. Kamino calculates the corresponding amount of liquidity tokens (e.g., USDC)
+///    to return based on the current exchange rate in the Kamino reserve.
+///
+/// 3. If a user wants to withdraw a specific amount of liquidity tokens, they need
+///    to calculate the required collateral tokens themselves using the reserve's current
+///    exchange rate before making the withdrawal request.
+///
+/// 4. For withdrawing an entire position, use the `withdraw_all` option instead of
+///    trying to calculate the exact amount.
+///
+/// This function performs the following steps:
+/// 1. Gets the user's asset shares and initial obligation data
+/// 2. Calculates the appropriate number of collateral tokens to withdraw
+/// 3. Performs a CPI call to Kamino to withdraw tokens
+/// 4. Verifies the obligation deposit amount was reduced correctly
+/// 5. Transfers funds to the user's account
+/// 6. Updates the marginfi account's balance to reflect the withdrawal
 pub fn kamino_withdraw<'info>(
     ctx: Context<'info, KaminoWithdraw<'info>>,
     amount: u64,
@@ -106,6 +133,8 @@ pub struct KaminoWithdraw<'info> {
     )]
     pub bank: AccountLoader<'info, Bank>,
 
+    /// Token account that will receive the withdrawn tokens. Mint/owner are validated by the
+    /// SPL transfer; the caller controls the destination.
     #[account(mut)]
     pub destination_token_account: InterfaceAccount<'info, TokenAccount>,
 
@@ -129,35 +158,43 @@ pub struct KaminoWithdraw<'info> {
     )]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
 
-    // Obligation shape (single deposit position linked to the reserve) is validated in the
-    // integration handler.
+    /// The Kamino obligation owned by liquidity_vault_authority
     #[account(mut)]
     pub integration_acc_2: AccountLoader<'info, MinimalObligation>,
 
-    /// CHECK: validated by the Kamino program
+    /// The Kamino lending market
+    /// CHECK: This is validated by the Kamino program
     pub lending_market: UncheckedAccount<'info>,
 
-    /// CHECK: validated by the Kamino program
+    /// The Kamino lending market authority
+    /// CHECK: This is validated by the Kamino program
     pub lending_market_authority: UncheckedAccount<'info>,
 
+    /// The Kamino reserve that holds liquidity
     #[account(mut)]
     pub integration_acc_1: AccountLoader<'info, MinimalReserve>,
 
+    /// The liquidity token mint (e.g., USDC)
+    /// Needs serde to get the mint decimals for transfer checked
     #[account(mut)]
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
-    /// CHECK: validated by the Kamino program
+    /// The reserve's liquidity supply account
+    /// CHECK: This is validated by the Kamino program
     #[account(mut)]
     pub reserve_liquidity_supply: UncheckedAccount<'info>,
 
-    /// CHECK: validated by the Kamino program
+    /// The reserve's collateral mint
+    /// CHECK: This is validated by the Kamino program
     #[account(mut)]
     pub reserve_collateral_mint: UncheckedAccount<'info>,
 
-    /// CHECK: validated by the Kamino program
+    /// The reserve's source for collateral tokens
+    /// CHECK: This is validated by the Kamino program
     #[account(mut)]
     pub reserve_source_collateral: UncheckedAccount<'info>,
 
+    /// Optional farms accounts for Kamino staking functionality
     /// CHECK: validated by the Kamino program
     #[account(mut)]
     pub obligation_farm_user_state: Option<UncheckedAccount<'info>>,
@@ -166,18 +203,22 @@ pub struct KaminoWithdraw<'info> {
     #[account(mut)]
     pub reserve_farm_state: Option<UncheckedAccount<'info>>,
 
-    /// CHECK: validated against hardcoded program id
+    /// CHECK: Use the cfg appropriate kamino program id
     #[account(address = KAMINO_PROGRAM_ID)]
     pub kamino_program: UncheckedAccount<'info>,
 
-    /// CHECK: validated against hardcoded program id
+    /// Farms program for Kamino staking functionality
+    /// CHECK: This is validated by the Kamino program
     #[account(address = FARMS_PROGRAM_ID)]
     pub farms_program: UncheckedAccount<'info>,
 
+    /// The token program for the collateral token
     pub collateral_token_program: Program<'info, Token>,
+    /// The token program for the liquidity token
     pub liquidity_token_program: Interface<'info, TokenInterface>,
 
-    /// CHECK: validated against hardcoded program id
+    /// Used by kamino validate CPI calls
+    /// CHECK: read‑only Instructions sysvar
     #[account(address = solana_instructions_sysvar::ID)]
     pub instruction_sysvar_account: UncheckedAccount<'info>,
 }

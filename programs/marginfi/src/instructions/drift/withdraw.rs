@@ -21,6 +21,17 @@ use marginfi_type_crate::types::{
     ACCOUNT_IN_RECEIVERSHIP,
 };
 
+/// Withdraw from a Drift spot market through a marginfi account
+///
+/// This function performs the following steps:
+/// 1. Updates spot market cumulative interest to ensure calcs are fresh
+/// 2. Calculates the scaled balance decrement for the requested token amount
+/// 3. Calls bank_account.withdraw() with the scaled amount
+/// 4. Performs CPI call to Drift to withdraw the actual token amount
+/// 5. Verifies the scaled balance decreased by the expected amount
+/// 6. Verifies the liquidity vault received the expected tokens
+/// 7. Transfers tokens from liquidity vault to user's destination account
+/// 8. Updates health cache and emits events
 pub fn drift_withdraw<'info>(
     ctx: Context<'info, DriftWithdraw<'info>>,
     amount: u64,
@@ -90,9 +101,11 @@ pub struct DriftWithdraw<'info> {
     )]
     pub bank: AccountLoader<'info, Bank>,
 
+    /// The oracle account for the asset (not needed if using oracle type QuoteAsset)
     /// CHECK: validated by Drift program
     pub drift_oracle: Option<UncheckedAccount<'info>>,
 
+    /// The bank's liquidity vault authority, which owns the Drift user account
     #[account(
         seeds = [
             LIQUIDITY_VAULT_AUTHORITY_SEED.as_bytes(),
@@ -102,52 +115,66 @@ pub struct DriftWithdraw<'info> {
     )]
     pub liquidity_vault_authority: SystemAccount<'info>,
 
+    /// Receives tokens from Drift withdrawal
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
 
+    /// Token account that will receive the withdrawn tokens
+    /// CHECK: Authority is completely unchecked, user controls destination
     #[account(mut)]
     pub destination_token_account: InterfaceAccount<'info, TokenAccount>,
 
-    /// CHECK: validated by Drift program
+    /// The Drift state account
+    /// CHECK: validated by the Drift program
     pub drift_state: UncheckedAccount<'info>,
 
-    // Spot position, reward accounts, bricked state, and spot market mint are validated in the
-    // integration handler.
+    /// The Drift user account owned by liquidity_vault_authority
     #[account(mut)]
     pub integration_acc_2: AccountLoader<'info, MinimalUser>,
 
-    /// CHECK: validated by Drift program
+    /// The Drift user stats account owned by liquidity_vault_authority
+    /// CHECK: validated by the Drift program
     #[account(mut)]
     pub integration_acc_3: UncheckedAccount<'info>,
 
+    /// The Drift spot market for this asset
     #[account(mut)]
     pub integration_acc_1: AccountLoader<'info, drift_mocks::state::MinimalSpotMarket>,
 
-    /// CHECK: validated by Drift program
+    /// The Drift spot market vault that holds tokens
+    /// CHECK: validated by the Drift program
     #[account(mut)]
     pub drift_spot_market_vault: UncheckedAccount<'info>,
 
+    /// Optional: Oracle for first reward asset (only needed if rewards exist)
     /// CHECK: validated by Drift program
     pub drift_reward_oracle: Option<UncheckedAccount<'info>>,
 
+    /// Optional: Spot market for first reward asset (only needed if rewards exist)
     /// CHECK: validated by Drift program
     pub drift_reward_spot_market: Option<UncheckedAccount<'info>>,
 
+    /// Optional: Mint for first reward asset (only needed if rewards exist)
     /// CHECK: validated by Drift program
     pub drift_reward_mint: Option<UncheckedAccount<'info>>,
 
+    /// Optional: Oracle for second reward asset (backup in case multiple rewards)
     /// CHECK: validated by Drift program
     pub drift_reward_oracle_2: Option<UncheckedAccount<'info>>,
 
+    /// Optional: Spot market for second reward asset (backup in case multiple rewards)
     /// CHECK: validated by Drift program
     pub drift_reward_spot_market_2: Option<UncheckedAccount<'info>>,
 
+    /// Optional: Mint for second reward asset (backup in case multiple rewards)
     /// CHECK: validated by Drift program
     pub drift_reward_mint_2: Option<UncheckedAccount<'info>>,
 
-    /// CHECK: validated by Drift program
+    /// The Drift signer PDA
+    /// CHECK: validated by the Drift program
     pub drift_signer: UncheckedAccount<'info>,
 
+    /// Bank's liquidity token mint
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// CHECK: validated against hardcoded program id

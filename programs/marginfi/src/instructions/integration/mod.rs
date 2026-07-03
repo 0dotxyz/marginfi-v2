@@ -498,9 +498,11 @@ pub struct IntegrationDeposit<'info> {
     #[account(mut)]
     pub integration_acc_3: Option<UncheckedAccount<'info>>,
 
+    /// Owned by authority, the source account for the token deposit
     #[account(mut)]
     pub signer_token_account: InterfaceAccount<'info, TokenAccount>,
 
+    /// The bank's liquidity vault authority, which owns the venue's position accounts
     #[account(
         mut,
         seeds = [
@@ -511,9 +513,11 @@ pub struct IntegrationDeposit<'info> {
     )]
     pub liquidity_vault_authority: SystemAccount<'info>,
 
+    /// Used as an intermediary to deposit tokens into the venue
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
 
+    /// Bank's liquidity token mint
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
     pub token_program: Interface<'info, TokenInterface>,
@@ -590,9 +594,12 @@ pub struct IntegrationWithdraw<'info> {
     #[account(mut)]
     pub integration_acc_3: Option<UncheckedAccount<'info>>,
 
+    /// Token account that will receive the withdrawn tokens. Mint/owner are validated by the
+    /// SPL transfer; the caller controls the destination.
     #[account(mut)]
     pub destination_token_account: InterfaceAccount<'info, TokenAccount>,
 
+    /// The bank's liquidity vault authority, which owns the venue's position accounts
     #[account(
         mut,
         seeds = [
@@ -603,9 +610,12 @@ pub struct IntegrationWithdraw<'info> {
     )]
     pub liquidity_vault_authority: SystemAccount<'info>,
 
+    /// Receives tokens from the venue withdrawal before they are forwarded to the destination
+    /// (JupLend routes through the intermediary ATA instead)
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
 
+    /// Bank's liquidity token mint
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
     pub token_program: Interface<'info, TokenInterface>,

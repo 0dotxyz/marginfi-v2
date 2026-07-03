@@ -20,6 +20,13 @@ use marginfi_type_crate::constants::{ASSET_TAG_KAMINO, LIQUIDITY_VAULT_AUTHORITY
 use marginfi_type_crate::pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID};
 use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
+/// Deposit into a Kamino pool through a marginfi account
+///
+/// This function performs the following steps:
+/// 1. Transfers tokens from the user's source account to the obligation owner's account
+/// 2. Deposits the tokens into Kamino through a CPI call
+/// 3. Verifies the obligation deposit amount was increased correctly
+/// 4. Updates the marginfi account's balance to reflect the deposit
 pub fn kamino_deposit<'info>(
     ctx: Context<'info, KaminoDeposit<'info>>,
     amount: u64,
@@ -86,9 +93,13 @@ pub struct KaminoDeposit<'info> {
     )]
     pub bank: AccountLoader<'info, Bank>,
 
+    /// Owned by authority, the source account for the token deposit.
+    /// CHECK: Mint and owner are checked at transfer time
     #[account(mut)]
     pub signer_token_account: InterfaceAccount<'info, TokenAccount>,
 
+    /// The bank's liquidity vault authority, which owns the Kamino obligation. Note: Kamino needs
+    /// this to be mut because `deposit` might return the rent here
     #[account(
         mut,
         seeds = [
@@ -99,11 +110,11 @@ pub struct KaminoDeposit<'info> {
     )]
     pub liquidity_vault_authority: SystemAccount<'info>,
 
+    /// Used as an intermediary to deposit token into Kamino
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
 
-    // Obligation shape (single deposit position linked to the reserve) is validated in the
-    // integration handler.
+    /// The Kamino obligation owned by liquidity_vault_authority
     #[account(mut)]
     pub integration_acc_2: AccountLoader<'info, MinimalObligation>,
 
@@ -113,27 +124,34 @@ pub struct KaminoDeposit<'info> {
     /// CHECK: validated by the Kamino program
     pub lending_market_authority: UncheckedAccount<'info>,
 
+    /// The Kamino reserve that holds liquidity
     #[account(mut)]
     pub integration_acc_1: AccountLoader<'info, MinimalReserve>,
 
+    /// Bank's liquidity token mint (e.g., USDC). Kamino calls this the `reserve_liquidity_mint`
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// CHECK: validated by the Kamino program
     #[account(mut)]
     pub reserve_liquidity_supply: UncheckedAccount<'info>,
 
+    /// The reserve's mint for tokenized representations of Kamino deposits.
     /// CHECK: validated by the Kamino program
     #[account(mut)]
     pub reserve_collateral_mint: UncheckedAccount<'info>,
 
+    /// The reserve's destination for tokenized representations of deposits. Note: the
+    /// `reserve_collateral_mint` will mint tokens directly to this account.
     /// CHECK: validated by the Kamino program
     #[account(mut)]
     pub reserve_destination_deposit_collateral: UncheckedAccount<'info>,
 
+    /// Required if the Kamino reserve has an active farm.
     /// CHECK: validated by the Kamino program
     #[account(mut)]
     pub obligation_farm_user_state: Option<UncheckedAccount<'info>>,
 
+    /// Required if the Kamino reserve has an active farm.
     /// CHECK: validated by the Kamino program
     #[account(mut)]
     pub reserve_farm_state: Option<UncheckedAccount<'info>>,
@@ -142,6 +160,7 @@ pub struct KaminoDeposit<'info> {
     #[account(address = KAMINO_PROGRAM_ID)]
     pub kamino_program: UncheckedAccount<'info>,
 
+    /// Farms program for Kamino staking functionality
     /// CHECK: validated against hardcoded program id
     #[account(address = FARMS_PROGRAM_ID)]
     pub farms_program: UncheckedAccount<'info>,

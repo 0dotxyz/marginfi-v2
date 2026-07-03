@@ -21,6 +21,33 @@ use marginfi_type_crate::types::{
 };
 use solend_mocks::state::SolendMinimalReserve;
 
+/// Withdraw from a Solend reserve through a marginfi account
+///
+/// # Important Note on Token Amounts:
+/// The `amount` parameter is specified in terms of COLLATERAL tokens (cTokens), not the
+/// underlying liquidity tokens (e.g., USDC).
+///
+/// Collateral tokens represent shares in the Solend reserve. When withdrawing:
+///
+/// 1. The user specifies how many collateral tokens they want to withdraw.
+///
+/// 2. Solend calculates the corresponding amount of liquidity tokens (e.g., USDC)
+///    to return based on the current exchange rate in the Solend reserve.
+///
+/// 3. If a user wants to withdraw a specific amount of liquidity tokens, they need
+///    to calculate the required collateral tokens themselves using the reserve's current
+///    exchange rate before making the withdrawal request.
+///
+/// 4. For withdrawing an entire position, use the `withdraw_all` option instead of
+///    trying to calculate the exact amount.
+///
+/// This function performs the following steps:
+/// 1. Gets the user's collateral balance and initial obligation data
+/// 2. Calculates the appropriate number of collateral tokens to withdraw
+/// 3. Performs a CPI call to Solend to withdraw tokens
+/// 4. Verifies the withdrawal was successful
+/// 5. Transfers funds to the user's account
+/// 6. Updates the marginfi account's balance to reflect the withdrawal
 pub fn solend_withdraw<'info>(
     ctx: Context<'info, SolendWithdraw<'info>>,
     amount: u64,
@@ -89,6 +116,8 @@ pub struct SolendWithdraw<'info> {
     )]
     pub bank: AccountLoader<'info, Bank>,
 
+    /// Token account that will receive the withdrawn tokens. Mint/owner are validated by the
+    /// SPL transfer; the caller controls the destination.
     #[account(mut)]
     pub destination_token_account: InterfaceAccount<'info, TokenAccount>,
 
@@ -105,7 +134,8 @@ pub struct SolendWithdraw<'info> {
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
 
-    /// CHECK: ownership by the Solend program is validated in the integration handler
+    /// The Solend obligation account
+    /// CHECK: Validated in the integration handler
     #[account(mut)]
     pub integration_acc_2: UncheckedAccount<'info>,
 
@@ -113,27 +143,34 @@ pub struct SolendWithdraw<'info> {
     #[account(mut)]
     pub lending_market: UncheckedAccount<'info>,
 
+    /// Derived from the lending market
     /// CHECK: validated by the Solend program
     pub lending_market_authority: UncheckedAccount<'info>,
 
-    // Reserve staleness is validated in the integration handler.
+    /// The Solend reserve that holds liquidity
     #[account(mut)]
     pub integration_acc_1: AccountLoader<'info, SolendMinimalReserve>,
 
+    /// Bank's liquidity token mint (e.g., USDC)
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
+    /// Reserve's liquidity supply SPL Token account
     /// CHECK: validated by the Solend program
     #[account(mut)]
     pub reserve_liquidity_supply: Box<InterfaceAccount<'info, TokenAccount>>,
 
+    /// The reserve's mint for cTokens
     /// CHECK: validated by the Solend program
     #[account(mut)]
     pub reserve_collateral_mint: UncheckedAccount<'info>,
 
+    /// The reserve's collateral supply account (where cTokens are stored)
     /// CHECK: validated by the Solend program
     #[account(mut)]
     pub reserve_collateral_supply: Box<InterfaceAccount<'info, TokenAccount>>,
 
+    /// The user's destination for cTokens (collateral). This is a temporary account owned by
+    /// liquidity_vault_authority that holds cTokens.
     /// CHECK: validated by the Solend program
     #[account(mut)]
     pub user_collateral: UncheckedAccount<'info>,

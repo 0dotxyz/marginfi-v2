@@ -18,6 +18,15 @@ use juplend_mocks::state::Lending as JuplendLending;
 use marginfi_type_crate::constants::{ASSET_TAG_JUPLEND, LIQUIDITY_VAULT_AUTHORITY_SEED};
 use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
+/// Deposit into a JupLend lending pool through a marginfi account.
+///
+/// Flow (program-first, exact-math):
+/// 1. CPI `update_rate` to refresh `token_exchange_price`.
+/// 2. Compute expected fTokens minted: `assets * 1e12 / token_exchange_price` (floor).
+/// 3. Transfer underlying from user -> bank liquidity vault.
+/// 4. CPI `deposit` (bank vault -> fToken vault).
+/// 5. Verify minted fTokens == expected.
+/// 6. Credit marginfi asset_shares by minted fTokens.
 pub fn juplend_deposit<'info>(
     ctx: Context<'info, JuplendDeposit<'info>>,
     amount: u64,
@@ -77,9 +86,12 @@ pub struct JuplendDeposit<'info> {
     )]
     pub bank: AccountLoader<'info, Bank>,
 
+    /// Owned by authority, the source account for the token deposit.
     #[account(mut)]
     pub signer_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
+    /// The bank's liquidity vault authority PDA (acts as signer for JupLend CPIs).
+    /// NOTE: JupLend marks the signer as writable in their deposit instruction.
     #[account(
         mut,
         seeds = [
@@ -90,30 +102,33 @@ pub struct JuplendDeposit<'info> {
     )]
     pub liquidity_vault_authority: SystemAccount<'info>,
 
+    /// Bank liquidity vault (holds underlying mint and is used as depositor_token_account).
     #[account(mut)]
     pub liquidity_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
+    /// Underlying mint.
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
-    // Lending field links (f_token_mint, token reserves liquidity, supply position) are
-    // validated in the integration handler.
+    /// JupLend lending state account.
     #[account(mut)]
     pub integration_acc_1: AccountLoader<'info, JuplendLending>,
 
+    /// JupLend fToken mint.
     #[account(mut)]
     pub f_token_mint: Box<InterfaceAccount<'info, Mint>>,
 
+    /// Bank's fToken vault (validated via has_one on bank).
     #[account(mut)]
     pub integration_acc_2: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// CHECK: validated by the JupLend program
     pub lending_admin: UncheckedAccount<'info>,
 
-    /// CHECK: validated against the lending account in the integration handler
+    /// CHECK: validated by the JupLend program
     #[account(mut)]
     pub supply_token_reserves_liquidity: UncheckedAccount<'info>,
 
-    /// CHECK: validated against the lending account in the integration handler
+    /// CHECK: validated by the JupLend program
     #[account(mut)]
     pub lending_supply_position_on_liquidity: UncheckedAccount<'info>,
 
@@ -128,10 +143,10 @@ pub struct JuplendDeposit<'info> {
     #[account(mut)]
     pub liquidity: UncheckedAccount<'info>,
 
-    /// CHECK: validated by the JupLend program
+    /// CHECK: pinned to the JupLend liquidity program
     pub liquidity_program: UncheckedAccount<'info>,
 
-    /// CHECK: validated by the JupLend program
+    /// CHECK: cross-checked against integration_acc_1.rewards_rate_model
     pub rewards_rate_model: UncheckedAccount<'info>,
 
     /// CHECK: validated against hardcoded program id

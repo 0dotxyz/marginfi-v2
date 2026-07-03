@@ -23,6 +23,16 @@ use marginfi_type_crate::types::{
     ACCOUNT_IN_RECEIVERSHIP,
 };
 
+/// Withdraw underlying tokens from a JupLend lending pool through a marginfi account.
+///
+/// Flow (program-first, exact-math):
+/// 1. CPI `update_rate` to refresh `token_exchange_price`.
+/// 2. Compute expected fTokens burned: `ceil(assets * 1e12 / token_exchange_price)`.
+/// 3. Call `bank_account.withdraw()` for the expected burned shares.
+/// 4. CPI `withdraw` (burn fTokens, receive underlying into withdraw intermediary ATA).
+/// 5. Verify received underlying == requested and burned fTokens == expected.
+/// 6. Transfer underlying from withdraw intermediary ATA -> destination token account.
+/// 7. Update health cache (unless receivership).
 pub fn juplend_withdraw<'info>(
     ctx: Context<'info, JuplendWithdraw<'info>>,
     amount: u64,
@@ -91,9 +101,13 @@ pub struct JuplendWithdraw<'info> {
     )]
     pub bank: AccountLoader<'info, Bank>,
 
+    /// Token account that will receive the underlying withdrawal.
+    /// WARN: Completely unchecked!
     #[account(mut)]
     pub destination_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
+    /// The bank's liquidity vault authority PDA (acts as signer for JupLend CPIs).
+    /// NOTE: JupLend marks the signer as writable in their withdraw instruction.
     #[account(
         mut,
         seeds = [
@@ -104,19 +118,23 @@ pub struct JuplendWithdraw<'info> {
     )]
     pub liquidity_vault_authority: SystemAccount<'info>,
 
+    /// Underlying mint.
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
-    // Lending field links (f_token_mint, token reserves liquidity, supply position) are
-    // validated in the integration handler.
+    /// JupLend lending state account.
     #[account(mut)]
     pub integration_acc_1: AccountLoader<'info, JuplendLending>,
 
+    /// JupLend fToken mint.
     #[account(mut)]
     pub f_token_mint: Box<InterfaceAccount<'info, Mint>>,
 
+    /// Bank's fToken vault (validated via has_one on bank).
     #[account(mut)]
     pub integration_acc_2: Box<InterfaceAccount<'info, TokenAccount>>,
 
+    /// Withdraw intermediary ATA (authority = liquidity_vault_authority).
+    /// This must be an ATA to satisfy JupLend's withdraw constraints.
     #[account(
         mut,
         token::mint = mint,
@@ -128,11 +146,11 @@ pub struct JuplendWithdraw<'info> {
     /// CHECK: validated by the JupLend program
     pub lending_admin: UncheckedAccount<'info>,
 
-    /// CHECK: validated against the lending account in the integration handler
+    /// CHECK: validated by the JupLend program
     #[account(mut)]
     pub supply_token_reserves_liquidity: UncheckedAccount<'info>,
 
-    /// CHECK: validated against the lending account in the integration handler
+    /// CHECK: validated by the JupLend program
     #[account(mut)]
     pub lending_supply_position_on_liquidity: UncheckedAccount<'info>,
 
@@ -143,7 +161,12 @@ pub struct JuplendWithdraw<'info> {
     #[account(mut)]
     pub vault: UncheckedAccount<'info>,
 
-    /// CHECK: not validated by JupLend, but must be mutable
+    /// JupLend claim account for liquidity_vault_authority.
+    /// TEMPORARY: Mainnet currently requires this account (passing None causes ConstraintMut errors),
+    /// but an upcoming upgrade is expected to make it truly optional. The account is never actually
+    /// validated or used - you can pass any mutable account. We create the canonical PDA for consistency.
+    /// Seeds: ["user_claim", liquidity_vault_authority, mint] on Liquidity program.
+    /// CHECK: not validated by JupLend - any mutable account works
     #[account(mut)]
     pub claim_account: UncheckedAccount<'info>,
 
@@ -151,10 +174,10 @@ pub struct JuplendWithdraw<'info> {
     #[account(mut)]
     pub liquidity: UncheckedAccount<'info>,
 
-    /// CHECK: validated by the JupLend program
+    /// CHECK: pinned to the JupLend liquidity program
     pub liquidity_program: UncheckedAccount<'info>,
 
-    /// CHECK: validated by the JupLend program
+    /// CHECK: cross-checked against integration_acc_1.rewards_rate_model
     pub rewards_rate_model: UncheckedAccount<'info>,
 
     /// CHECK: validated against hardcoded program id

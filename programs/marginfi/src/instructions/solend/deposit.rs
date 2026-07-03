@@ -16,6 +16,13 @@ use marginfi_type_crate::constants::{ASSET_TAG_SOLEND, LIQUIDITY_VAULT_AUTHORITY
 use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 use solend_mocks::state::SolendMinimalReserve;
 
+/// Deposit into a Solend reserve through a marginfi account
+///
+/// This function performs the following steps:
+/// 1. Transfers tokens from the user's source account to the liquidity vault
+/// 2. Deposits the tokens into Solend through a CPI call
+/// 3. Verifies the obligation collateral was increased correctly
+/// 4. Updates the marginfi account's balance to reflect the deposit
 pub fn solend_deposit<'info>(
     ctx: Context<'info, SolendDeposit<'info>>,
     amount: u64,
@@ -74,9 +81,11 @@ pub struct SolendDeposit<'info> {
     )]
     pub bank: AccountLoader<'info, Bank>,
 
+    /// Owned by authority, the source account for the token deposit.
     #[account(mut)]
     pub signer_token_account: InterfaceAccount<'info, TokenAccount>,
 
+    /// The bank's liquidity vault authority, which owns the Solend obligation
     #[account(
         seeds = [
             LIQUIDITY_VAULT_AUTHORITY_SEED.as_bytes(),
@@ -86,41 +95,51 @@ pub struct SolendDeposit<'info> {
     )]
     pub liquidity_vault_authority: SystemAccount<'info>,
 
+    /// Used as an intermediary to deposit tokens into Solend
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
 
-    /// CHECK: ownership by the Solend program is validated in the integration handler
+    /// The Solend obligation account
+    /// CHECK: Validated in the integration handler
     #[account(mut)]
     pub integration_acc_2: UncheckedAccount<'info>,
 
     /// CHECK: validated by the Solend program
     pub lending_market: UncheckedAccount<'info>,
 
+    /// Derived from the lending market
     /// CHECK: validated by the Solend program
     pub lending_market_authority: UncheckedAccount<'info>,
 
-    // Reserve staleness is validated in the integration handler.
+    /// The Solend reserve that holds liquidity
     #[account(mut)]
     pub integration_acc_1: AccountLoader<'info, SolendMinimalReserve>,
 
+    /// Bank's liquidity token mint (e.g., USDC)
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
+    /// Reserve's liquidity supply SPL Token account
     /// CHECK: validated by the Solend program
     #[account(mut)]
     pub reserve_liquidity_supply: Box<InterfaceAccount<'info, TokenAccount>>,
 
+    /// The reserve's mint for cTokens
     /// CHECK: validated by the Solend program
     #[account(mut)]
     pub reserve_collateral_mint: UncheckedAccount<'info>,
 
+    /// The reserve's collateral supply account (where cTokens are stored)
     /// CHECK: validated by the Solend program
     #[account(mut)]
     pub reserve_collateral_supply: Box<InterfaceAccount<'info, TokenAccount>>,
 
+    /// The user's destination for cTokens (collateral). This is a temporary account owned by
+    /// liquidity_vault_authority that will hold cTokens between deposit and obligation update.
     /// CHECK: validated by the Solend program
     #[account(mut)]
     pub user_collateral: UncheckedAccount<'info>,
 
+    /// Oracle accounts - required by Solend even if not actively used
     /// CHECK: validated by the Solend program
     pub pyth_price: UncheckedAccount<'info>,
 

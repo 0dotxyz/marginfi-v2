@@ -16,6 +16,14 @@ use marginfi_type_crate::constants::{ASSET_TAG_DRIFT, LIQUIDITY_VAULT_AUTHORITY_
 use marginfi_type_crate::pdas::DRIFT_PROGRAM_ID;
 use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
+/// Deposit into a Drift spot market through a marginfi account
+///
+/// This function performs the following steps:
+/// 1. Updates the spot market cumulative interest to ensure fresh calculations
+/// 2. Transfers tokens from the user's source account to the liquidity vault
+/// 3. Deposits the tokens into Drift through a CPI call
+/// 4. Verifies the spot position was updated correctly
+/// 5. Updates the marginfi account's balance to reflect the deposit
 pub fn drift_deposit<'info>(
     ctx: Context<'info, DriftDeposit<'info>>,
     amount: u64,
@@ -75,9 +83,11 @@ pub struct DriftDeposit<'info> {
     )]
     pub bank: AccountLoader<'info, Bank>,
 
+    /// The oracle account for the asset (not needed if using oracle type QuoteAsset)
     /// CHECK: validated by Drift program
     pub drift_oracle: Option<UncheckedAccount<'info>>,
 
+    /// The bank's liquidity vault authority, which owns the Drift user account
     #[account(
         seeds = [
             LIQUIDITY_VAULT_AUTHORITY_SEED.as_bytes(),
@@ -87,30 +97,37 @@ pub struct DriftDeposit<'info> {
     )]
     pub liquidity_vault_authority: SystemAccount<'info>,
 
+    /// Used as an intermediary to deposit tokens into Drift
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
 
+    /// Owned by authority, the source account for the token deposit
     #[account(mut)]
     pub signer_token_account: InterfaceAccount<'info, TokenAccount>,
 
-    /// CHECK: validated by Drift program
+    /// The Drift state account
+    /// CHECK: validated by the Drift program
     pub drift_state: UncheckedAccount<'info>,
 
-    // Spot position and spot market mint are validated in the integration handler.
+    /// The Drift user account owned by liquidity_vault_authority
     #[account(mut)]
     pub integration_acc_2: AccountLoader<'info, MinimalUser>,
 
-    /// CHECK: validated by Drift program
+    /// The Drift user stats account owned by liquidity_vault_authority
+    /// CHECK: validated by the Drift program
     #[account(mut)]
     pub integration_acc_3: UncheckedAccount<'info>,
 
+    /// The Drift spot market for this asset
     #[account(mut)]
     pub integration_acc_1: AccountLoader<'info, drift_mocks::state::MinimalSpotMarket>,
 
-    /// CHECK: validated by Drift program
+    /// The Drift spot market vault that will receive tokens
+    /// CHECK: validated by the Drift program
     #[account(mut)]
     pub drift_spot_market_vault: UncheckedAccount<'info>,
 
+    /// Bank's liquidity token mint
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// CHECK: validated against hardcoded program id
