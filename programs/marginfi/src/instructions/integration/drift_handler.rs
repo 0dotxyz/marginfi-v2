@@ -309,6 +309,7 @@ pub(crate) fn withdraw_cpi<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
     common: &CommonWithdraw<'_, 'info>,
     amounts: &WithdrawAmounts,
+    withdraw_all: bool,
     authority_bump: u8,
 ) -> MarginfiResult {
     let token_amount = amounts.tokens;
@@ -318,7 +319,10 @@ pub(crate) fn withdraw_cpi<'info>(
     let user_loader = AccountLoader::<MinimalUser>::try_from(&protocol_accounts[1])?;
     let market_index = spot_market_loader.load()?.market_index;
 
-    if token_amount == 0 {
+    // When withdrawing all, the remaining scaled balance can be worth less than 1 unit of the
+    // token; skip the withdrawal and leave the dust in Drift. Partial withdrawals always CPI so
+    // Drift rejects zero-amount requests.
+    if withdraw_all && token_amount == 0 {
         return Ok(());
     }
 

@@ -287,11 +287,15 @@ pub(crate) fn withdraw_cpi<'info>(
     protocol_accounts: &'info [AccountInfo<'info>],
     common: &CommonWithdraw<'_, 'info>,
     amounts: &WithdrawAmounts,
+    withdraw_all: bool,
     authority_bump: u8,
 ) -> MarginfiResult {
     let token_amount = amounts.tokens;
     let shares_to_burn = amounts.balance_units;
-    if token_amount == 0 {
+    // When withdrawing all, the remaining shares can be worth less than 1 unit of the
+    // underlying; skip the CPI and leave the dust in JupLend. Partial withdrawals always CPI so
+    // JupLend rejects zero-amount requests.
+    if withdraw_all && token_amount == 0 {
         return Ok(());
     }
 

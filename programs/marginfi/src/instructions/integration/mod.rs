@@ -370,18 +370,26 @@ pub(crate) fn integration_withdraw_impl<'info>(
             authority_bump,
             refresh_reserve,
         )?,
-        ASSET_TAG_DRIFT => {
-            drift_handler::withdraw_cpi(protocol_accounts, common, &amounts, authority_bump)?
-        }
+        ASSET_TAG_DRIFT => drift_handler::withdraw_cpi(
+            protocol_accounts,
+            common,
+            &amounts,
+            withdraw_all,
+            authority_bump,
+        )?,
         ASSET_TAG_SOLEND => solend_handler::withdraw_cpi(
             protocol_accounts,
             common,
             amounts.balance_units,
             authority_bump,
         )?,
-        ASSET_TAG_JUPLEND => {
-            juplend_handler::withdraw_cpi(protocol_accounts, common, &amounts, authority_bump)?
-        }
+        ASSET_TAG_JUPLEND => juplend_handler::withdraw_cpi(
+            protocol_accounts,
+            common,
+            &amounts,
+            withdraw_all,
+            authority_bump,
+        )?,
         _ => return err!(MarginfiError::UnsupportedIntegration),
     };
 
