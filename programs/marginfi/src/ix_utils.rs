@@ -226,6 +226,25 @@ pub fn validate_rebalance_instructions(sysvar: &AccountInfo) -> MarginfiResult {
     ];
     let ixes = load_and_validate_instructions(sysvar, Some(&allowed_programs))?;
     validate_ix_last(&ixes, &id_crate::ID, &ixd::END_REBALANCE)?;
+    // Exactly one start/end pair per sandwich: a start sets ACCOUNT_IN_REBALANCE on its account and
+    // only its paired end clears it, so a second start would leave another account's flag set past
+    // the tx, where any signer could act on it. `validate_ix_last` pins the final ix to an end but
+    // not the counts, so pin them here.
+    let count_marginfi_ix = |discrim: &[u8]| {
+        ixes.iter()
+            .filter(|ix| {
+                ix.program_id == id_crate::ID && ix.data.len() >= 8 && &ix.data[0..8] == discrim
+            })
+            .count()
+    };
+    check!(
+        count_marginfi_ix(&ixd::START_REBALANCE) == 1,
+        MarginfiError::RebalanceMalformedSandwich
+    );
+    check!(
+        count_marginfi_ix(&ixd::END_REBALANCE) == 1,
+        MarginfiError::RebalanceMalformedSandwich
+    );
     validate_ixes_exclusive(
         &ixes,
         &id_crate::ID,

@@ -79,8 +79,6 @@ pub trait RebalanceRecordImpl {
         dst_bank: Pubkey,
         pre_src_value: I80F48,
         pre_dst_value: I80F48,
-        src_rate_pre: I80F48,
-        dst_rate_pre: I80F48,
         marginfi_account: &MarginfiAccount,
     ) -> MarginfiResult;
 
@@ -99,8 +97,6 @@ impl RebalanceRecordImpl for RebalanceRecord {
         dst_bank: Pubkey,
         pre_src_value: I80F48,
         pre_dst_value: I80F48,
-        src_rate_pre: I80F48,
-        dst_rate_pre: I80F48,
         marginfi_account: &MarginfiAccount,
     ) -> MarginfiResult {
         self.order = order;
@@ -109,14 +105,10 @@ impl RebalanceRecordImpl for RebalanceRecord {
         self.dst_bank = dst_bank;
         self.pre_src_value = pre_src_value.into();
         self.pre_dst_value = pre_dst_value.into();
-        self.src_rate_pre = src_rate_pre.into();
-        self.dst_rate_pre = dst_rate_pre.into();
 
         let mut active: u8 = 0;
-        let mut inactive: u8 = 0;
         for balance in marginfi_account.lending_account.balances.iter() {
             if !balance.is_active() {
-                inactive = inactive.saturating_add(1);
                 continue;
             }
             if balance.bank_pk == src_bank || balance.bank_pk == dst_bank {
@@ -140,7 +132,6 @@ impl RebalanceRecordImpl for RebalanceRecord {
             active = active.saturating_add(1);
         }
         self.active_balance_count = active;
-        self.inactive_balance_count = inactive;
         Ok(())
     }
 

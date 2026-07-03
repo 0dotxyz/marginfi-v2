@@ -415,8 +415,6 @@ pub fn start_rebalance<'info>(ctx: Context<'info, StartRebalance<'info>>) -> Mar
             dst_key,
             pre_src_value,
             pre_dst_value,
-            src_rate,
-            dst_rate,
             &account,
         )?;
     }
@@ -547,6 +545,15 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
             };
             check!(src_emptied, MarginfiError::RebalanceIncompleteMove);
 
+            // The moved position must exceed the flat fee. A smaller position makes the conservation
+            // floor `pre_total - flat_fee` negative, which an empty-source/no-deposit move
+            // (post_total = pre_dst) clears — letting the whole sub-fee position be taken. A move
+            // that cannot cover its own fee is not worth executing.
+            check!(
+                pre_src_value > REBALANCE_FLAT_FEE_USD,
+                MarginfiError::RebalancePositionTooSmall
+            );
+
             // The withdraw sends tokens to the keeper's account, so `src_emptied` alone does not prove
             // the value reached dst. Enforce conservation: post-move total value may fall below the
             // pre-move total by at most the flat fee (keeper_fee in [0, flat_fee]; sub-unit venue
@@ -585,6 +592,13 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
                 .checked_sub(pre_dst_value)
                 .ok_or_else(math_error!())?;
             let target = amount_value.min(pre_src_value);
+            // The moved slice must exceed the flat fee. A smaller slice makes `target - flat_fee`
+            // negative, which the delivery bound below clears with zero delivery — letting the whole
+            // sub-fee slice be taken. A move that cannot cover its own fee is not worth executing.
+            check!(
+                target > REBALANCE_FLAT_FEE_USD,
+                MarginfiError::RebalancePositionTooSmall
+            );
             check!(
                 src_moved <= amount_value,
                 MarginfiError::RebalanceExceedsAmount

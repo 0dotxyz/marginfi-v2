@@ -63,29 +63,29 @@ pub struct SolendMinimalReserve {
     // sit here; the newer 3-slope fields (max_utilization_rate, super_max_borrow_rate) were appended
     // further down for backwards compatibility, not inserted inline. Offsets verified against the
     // deployed `mainnet` branch.
-    pub config_optimal_utilization_rate: u8, // 298
-    pub config_loan_to_value_ratio: u8,      // 299
-    pub config_liquidation_bonus: u8,        // 300
-    pub config_liquidation_threshold: u8,    // 301
-    pub config_min_borrow_rate: u8,          // 302
-    pub config_optimal_borrow_rate: u8,      // 303
-    pub config_max_borrow_rate: u8,          // 304
-    _gap_to_take_rate_a1: [u8; 32],          // 305..337
-    _gap_to_take_rate_a2: [u8; 29],          // 337..366
-    _gap_to_take_rate_b: [u8; 5],            // 366..371
-    pub config_protocol_take_rate: u8,       // 371
+    pub config_optimal_utilization_rate: u8,
+    pub config_loan_to_value_ratio: u8,
+    pub config_liquidation_bonus: u8,
+    pub config_liquidation_threshold: u8,
+    pub config_min_borrow_rate: u8,
+    pub config_optimal_borrow_rate: u8,
+    pub config_max_borrow_rate: u8,
+    _gap_to_take_rate_a1: [u8; 32],
+    _gap_to_take_rate_a2: [u8; 29],
+    _gap_to_take_rate_b: [u8; 5],
+    pub config_protocol_take_rate: u8,
 
-    pub liquidity_accumulated_protocol_fees_wads: [u8; 16], // 372..388
+    pub liquidity_accumulated_protocol_fees_wads: [u8; 16],
 
-    _gap_to_max_util_1: [u8; 64],          // 388..452
-    _gap_to_max_util_2: [u8; 17],          // 452..469
-    pub config_max_utilization_rate: u8,   // 469
-    pub config_super_max_borrow_rate: u64, // 470..478
-    _gap_after_super_max_1: [u8; 32],      // 478..510
-    _gap_after_super_max_2: [u8; 6],       // 510..516
-    _padding_final_64: [u8; 64],           // 516..580
-    _padding_final_32: [u8; 32],           // 580..612
-    _padding_final_6: [u8; 6],             // 612..618
+    _gap_to_max_util_1: [u8; 64],
+    _gap_to_max_util_2: [u8; 17],
+    pub config_max_utilization_rate: u8,
+    pub config_super_max_borrow_rate: u64,
+    _gap_after_super_max_1: [u8; 32],
+    _gap_after_super_max_2: [u8; 6],
+    _padding_final_64: [u8; 64],
+    _padding_final_32: [u8; 32],
+    _padding_final_6: [u8; 6],
 }
 
 const _: () = assert!(core::mem::size_of::<SolendMinimalReserve>() == 618);

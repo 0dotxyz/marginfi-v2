@@ -8,11 +8,16 @@ use bytemuck::{Pod, Zeroable};
 
 #[cfg(not(feature = "anchor"))]
 use super::Pubkey;
-use super::{ExecuteOrderBalanceRecord, WrappedI80F48};
+use super::{ExecuteOrderBalanceRecord, WrappedI80F48, MAX_LENDING_ACCOUNT_BALANCES};
 
 /// Maximum venues an auto-rebalance order may rotate across. Bounds the on-chain allowlist so the
 /// order stays a fixed-size zero-copy account.
 pub const MAX_ALLOWED_BANKS: usize = 8;
+
+/// Balances a `RebalanceRecord` snapshots: every balance except the source. The destination is also
+/// skipped when already held, but may be a fresh venue not yet in the account, so only the source is
+/// guaranteed excluded — hence `- 1`, not `- 2`.
+pub const MAX_REBALANCE_RECORD_BALANCES: usize = MAX_LENDING_ACCOUNT_BALANCES - 1;
 
 // Persistent "auto-rebalance" intent: keep one asset (`mint`) in the highest-yield venue among an
 // allowlisted set. Unlike `Order`, it is NOT consumed on execution — it persists until cancelled.
@@ -60,7 +65,7 @@ impl RebalanceOrder {
 // Transient per-execution record: created in `rebalance_start`, closed in `rebalance_end` (rent ->
 // executor). Captures the {src,dst} pre-value + a snapshot of every OTHER active balance so the end
 // instruction can prove value conservation and that untouched balances are byte-identical.
-assert_struct_size!(RebalanceRecord, 1000);
+assert_struct_size!(RebalanceRecord, 1024);
 assert_struct_align!(RebalanceRecord, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
@@ -77,13 +82,13 @@ pub struct RebalanceRecord {
     pub pre_src_value: WrappedI80F48,
     /// Equity (weight-1) USD value of the dst position at start.
     pub pre_dst_value: WrappedI80F48,
-    pub src_rate_pre: WrappedI80F48,
-    pub dst_rate_pre: WrappedI80F48,
     /// Snapshot of every non-{src,dst} active balance; end verifies these unchanged (side+shares).
-    pub balance_states: [ExecuteOrderBalanceRecord; 14],
+    /// Sized to hold every balance except the source: when the destination venue is not yet held,
+    /// only the source is excluded from the snapshot, so up to `MAX_LENDING_ACCOUNT_BALANCES - 1`
+    /// balances must fit.
+    pub balance_states: [ExecuteOrderBalanceRecord; MAX_REBALANCE_RECORD_BALANCES],
     pub active_balance_count: u8,
-    pub inactive_balance_count: u8,
-    pub _pad0: [u8; 6],
+    pub _pad0: [u8; 7],
     pub _reserved: [u8; 16],
 }
 

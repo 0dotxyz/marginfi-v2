@@ -130,6 +130,18 @@ async fn rebalance_rejects_when_end_is_not_last() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn rebalance_rejects_second_start_in_tx() -> anyhow::Result<()> {
+    // A second start_rebalance in the same tx is rejected: an end clears only its own account's
+    // ACCOUNT_IN_REBALANCE flag, so a second start would strand another account's flag set.
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let mut ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    ixs.insert(1, ixs[0].clone());
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceMalformedSandwich);
+    Ok(())
+}
+
 /// A borrowing account can rebalance: the per-withdraw health check is skipped while
 /// ACCOUNT_IN_REBALANCE is set (the account is transiently uncollateralized between the withdraw and
 /// deposit), and `end_rebalance` runs the real init-health check over the post-move balance set.

@@ -77,21 +77,24 @@ pub trait MarginfiAccountImpl {
 /// Returns `true` if the signer is authorized, `false` otherwise.
 ///
 /// Authorization rules (checked in order):
-/// 1. If `allow_receivership` is true and the (NOT signer's) account is in receivership → `true`
-/// 2. If `allow_order_execution` is true and the account is in order execution → `true`
-/// 3. If the account is frozen → `true` only if signer is the group admin
-/// 4. Otherwise → `true` only if signer is the account authority
+/// 1. If `allow_rebalance` is true and the account is in a rebalance → `true`
+/// 2. If `allow_receivership` is true and the (NOT signer's) account is in receivership → `true`
+/// 3. If `allow_order_execution` is true and the account is in order execution → `true`
+/// 4. If the account is frozen → `true` only if signer is the group admin
+/// 5. Otherwise → `true` only if signer is the account authority
 pub fn is_signer_authorized(
     marginfi_account: &MarginfiAccount,
     group_admin: Pubkey,
     signer: Pubkey,
     allow_receivership: bool,
     allow_order_execution: bool,
+    allow_rebalance: bool,
 ) -> bool {
-    // Within a rebalance sandwich, any keeper may drive withdraw/deposit between the user's
-    // same-mint banks. Bounded by the rebalance start/end value-conservation checks and the
-    // exclusive-ix allowlist (only withdraw/deposit + start/end may appear).
-    if marginfi_account.get_flag(ACCOUNT_IN_REBALANCE) {
+    // Within a rebalance sandwich, any keeper may drive the withdraw/deposit legs between the user's
+    // same-mint banks. Opt-in per caller (only the withdraw/deposit legs pass `true`) so the flag
+    // cannot authorize unrelated instructions; bounded by the rebalance start/end value-conservation
+    // checks and the exclusive-ix allowlist (only withdraw/deposit + start/end may appear).
+    if allow_rebalance && marginfi_account.get_flag(ACCOUNT_IN_REBALANCE) {
         return true;
     }
 
@@ -1110,14 +1113,16 @@ pub fn clear_liquidation_price_cache_locks<'info>(
     Ok(())
 }
 
-/// Initial health check using the heap-reuse health calculator.
+/// Health check using the heap-reuse health calculator, against `requirement_type`.
 ///
 /// - Skips risk checks when the account is in a flashloan
 /// - Enforces isolated-tier constraint
-/// - Errors if initial health is negative
-pub fn check_account_init_health<'info>(
+/// - Errors with `reject_error` if health is negative
+fn check_account_health<'info>(
     marginfi_account: &MarginfiAccount,
     remaining_ais: &'info [AccountInfo<'info>],
+    requirement_type: RequirementType,
+    reject_error: MarginfiError,
     health_cache: &mut Option<&mut HealthCache>,
 ) -> MarginfiResult {
     if marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN) {
@@ -1128,7 +1133,7 @@ pub fn check_account_init_health<'info>(
     let (assets, liabs) = get_health_components(
         marginfi_account,
         remaining_ais,
-        RequirementType::Initial,
+        requirement_type,
         health_cache,
         HealthPriceMode::Live { liq_cache: None },
     )?;
@@ -1139,44 +1144,43 @@ pub fn check_account_init_health<'info>(
     }
 
     if !healthy {
-        return err!(MarginfiError::RiskEngineInitRejected);
+        return Err(error!(reject_error));
     }
 
     check_account_risk_tiers(marginfi_account, remaining_ais)
 }
 
-/// Maintenance health check using the heap-reuse health calculator. Like
-/// [`check_account_init_health`] but against the MAINTENANCE requirement: the account need only stay
-/// non-liquidatable. Used by actions that move existing positions without opening new risk (e.g. an
-/// auto-rebalance between same-mint venues), where the stricter initial requirement does not apply.
+/// Initial health check: errors if initial health is negative.
+pub fn check_account_init_health<'info>(
+    marginfi_account: &MarginfiAccount,
+    remaining_ais: &'info [AccountInfo<'info>],
+    health_cache: &mut Option<&mut HealthCache>,
+) -> MarginfiResult {
+    check_account_health(
+        marginfi_account,
+        remaining_ais,
+        RequirementType::Initial,
+        MarginfiError::RiskEngineInitRejected,
+        health_cache,
+    )
+}
+
+/// Maintenance health check: like [`check_account_init_health`] but against the MAINTENANCE
+/// requirement, so the account need only stay non-liquidatable. Used by actions that move existing
+/// positions without opening new risk (e.g. an auto-rebalance between same-mint venues), where the
+/// stricter initial requirement does not apply.
 pub fn check_account_maint_health<'info>(
     marginfi_account: &MarginfiAccount,
     remaining_ais: &'info [AccountInfo<'info>],
     health_cache: &mut Option<&mut HealthCache>,
 ) -> MarginfiResult {
-    if marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN) {
-        // Risk checks are skipped during flashloans
-        return Ok(());
-    }
-
-    let (assets, liabs) = get_health_components(
+    check_account_health(
         marginfi_account,
         remaining_ais,
         RequirementType::Maintenance,
+        MarginfiError::WorseHealthPostExecution,
         health_cache,
-        HealthPriceMode::Live { liq_cache: None },
-    )?;
-
-    let healthy = assets >= liabs;
-    if let Some(cache) = health_cache.as_mut() {
-        cache.set_healthy(healthy);
-    }
-
-    if !healthy {
-        return err!(MarginfiError::WorseHealthPostExecution);
-    }
-
-    check_account_risk_tiers(marginfi_account, remaining_ais)
+    )
 }
 
 /// Post-liquidation invariant using the heap-reuse health calculator.

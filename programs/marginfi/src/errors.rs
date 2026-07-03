@@ -452,6 +452,10 @@ pub enum MarginfiError {
     RebalanceInvalidMinImprovement, // 6608
     #[msg("Rebalance moved more than the order's amount")]
     RebalanceExceedsAmount, // 6609
+    #[msg("Rebalance sandwich must contain exactly one start and one end instruction")]
+    RebalanceMalformedSandwich, // 6610
+    #[msg("Rebalance position value does not exceed the flat fee")]
+    RebalancePositionTooSmall, // 6611
                             // **************END AUTO-REBALANCE ERRORS
 }
 

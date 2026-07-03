@@ -525,7 +525,7 @@ pub struct LendingAccountLiquidate<'info> {
         constraint = {
             let a = liquidator_marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false)
+            is_signer_authorized(&a, g.admin, authority.key(), false, false, false)
         } @ MarginfiError::Unauthorized
     )]
     pub liquidator_marginfi_account: AccountLoader<'info, MarginfiAccount>,
