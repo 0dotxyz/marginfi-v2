@@ -127,31 +127,22 @@ export const assertI80F48Approx = (
   b: WrappedI80F48 | BN | number,
   tolerance: number = 0.000001,
 ) => {
-  // NOTE: Be careful changing this to use exact-precision, it can cause a general stallout.
-  const bigA = wrappedI80F48toBigNumber(a);
-  let bigB: BigNumber;
+  // Compares in raw scaled (2^48) bigint space via `toI80Scaled`, the same safe conversion
+  // `assertI80F48Equal` uses — it normalizes the byte-array shape and cannot produce NaN.
+  const scaledA = toI80Scaled(a);
+  const scaledB = toI80Scaled(b);
+  const scaledTolerance = toI80Scaled(tolerance);
 
-  if (typeof b === "number") {
-    bigB = new BigNumber(b);
-  } else if (b instanceof BN) {
-    bigB = integerToBigNumber(b);
-  } else if (isWrappedI80F48(b)) {
-    bigB = wrappedI80F48toBigNumber(b);
-  } else {
-    throw new Error("Unsupported type for comparison");
-  }
+  const diff = scaledA > scaledB ? scaledA - scaledB : scaledB - scaledA;
 
-  if (bigA.isNaN() || bigB.isNaN()) {
-    throw new Error("One of the values is NaN");
-  }
-
-  const diff = bigA.minus(bigB).abs();
-  const allowedDifference = new BigNumber(tolerance);
-
-  if (diff.isGreaterThan(allowedDifference)) {
+  if (diff > scaledTolerance) {
+    const display = (scaled: bigint) =>
+      new BigNumber(scaled.toString())
+        .div(new BigNumber(2).pow(48))
+        .toString();
     throw new Error(
-      `Values are not approximately equal. A: ${bigA.toString()} B: ${bigB.toString()} 
-      Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`,
+      `Values are not approximately equal. A: ${display(scaledA)} B: ${display(scaledB)}
+      Difference: ${display(diff)}, Allowed Tolerance: ${tolerance}`,
     );
   }
 };
