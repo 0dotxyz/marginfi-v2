@@ -153,10 +153,8 @@ pub fn lending_account_liquidate<'info>(
 
     liquidatee_marginfi_account.lending_account.sort_balances();
 
-    let cb_admin_liquidation = any_balance_bank_is_cb_halted(
-        &liquidatee_marginfi_account,
-        liquidatee_remaining_accounts,
-    )?;
+    let cb_admin_liquidation =
+        any_balance_bank_is_cb_halted(&liquidatee_marginfi_account, liquidatee_remaining_accounts)?;
 
     {
         let group = marginfi_group_loader.load()?;

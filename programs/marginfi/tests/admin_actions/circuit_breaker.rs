@@ -287,10 +287,7 @@ async fn cb_halt_allows_deposit_only_with_existing_balance() -> anyhow::Result<(
     let result = newcomer
         .try_bank_deposit(newcomer_acc.key, usdc_bank, 500, None)
         .await;
-    assert_custom_error!(
-        result.unwrap_err(),
-        MarginfiError::BankCircuitBreakerHalted
-    );
+    assert_custom_error!(result.unwrap_err(), MarginfiError::BankCircuitBreakerHalted);
     Ok(())
 }
 
