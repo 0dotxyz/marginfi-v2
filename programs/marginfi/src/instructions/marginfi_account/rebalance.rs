@@ -398,7 +398,10 @@ fn pay_from_fee_pool<'info>(
 /// authority, a keeper, or a third party), since the funds can only ever pay keeper tips or be
 /// withdrawn by the account authority. The first top-up also seeds the pool's rent-exempt reserve, so
 /// the pool is always rent-exempt and `amount` is the spendable tip budget added above the reserve.
-pub fn top_up_rebalance_fee_pool(ctx: Context<TopUpRebalanceFeePool>, amount: u64) -> MarginfiResult {
+pub fn top_up_rebalance_fee_pool(
+    ctx: Context<TopUpRebalanceFeePool>,
+    amount: u64,
+) -> MarginfiResult {
     let seed = if ctx.accounts.fee_pool.lamports() == 0 {
         Rent::get()?.minimum_balance(0)
     } else {
@@ -653,7 +656,10 @@ pub fn start_rebalance<'info>(
             MarginfiError::RebalanceBankNotAllowed
         );
         let bank = parsed.loader.load()?;
-        check!(bank.mint == order.mint, MarginfiError::RebalanceMintMismatch);
+        check!(
+            bank.mint == order.mint,
+            MarginfiError::RebalanceMintMismatch
+        );
         let rate = rate_of(&bank, parsed.oracles, parsed.token_reserve, &clock)?;
         let pre = bank_asset_value(&account, &parsed.key, &bank, parsed.oracles, &clock)?;
         rates.push(rate);
@@ -744,7 +750,10 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         let order = ctx.accounts.rebalance_order.load()?;
         let n = record.ref_bank_count as usize;
         (
-            record.ref_banks[..n].iter().map(|r| r.bank).collect::<Vec<_>>(),
+            record.ref_banks[..n]
+                .iter()
+                .map(|r| r.bank)
+                .collect::<Vec<_>>(),
             order.amount,
             order.keeper_tip,
         )
@@ -768,7 +777,12 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         let mut post_values: Vec<I80F48> = Vec::with_capacity(banks.len());
         for parsed in banks.iter() {
             let bank = parsed.loader.load()?;
-            post_rates.push(rate_of(&bank, parsed.oracles, parsed.token_reserve, &clock)?);
+            post_rates.push(rate_of(
+                &bank,
+                parsed.oracles,
+                parsed.token_reserve,
+                &clock,
+            )?);
             post_values.push(bank_asset_value(
                 &account,
                 &parsed.key,
@@ -792,7 +806,10 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         // conservation (each bank's delta matches its declared net flow within dust) and, with the
         // per-move improvement check, that every dollar moved to a strictly better venue.
         let (total_moved, total_source_pre) = record.reconcile(&post_values, dust)?;
-        check!(total_moved > I80F48::ZERO, MarginfiError::RebalanceIncompleteMove);
+        check!(
+            total_moved > I80F48::ZERO,
+            MarginfiError::RebalanceIncompleteMove
+        );
 
         // Per-withdraw health checks are skipped while ACCOUNT_IN_REBALANCE is set, so recompute
         // health once here over the post-move balance set. A rebalance moves an existing position

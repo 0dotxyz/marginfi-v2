@@ -197,7 +197,9 @@ impl RebalanceRecordImpl for RebalanceRecord {
             if actual > I80F48::ZERO {
                 total_moved = total_moved.checked_add(actual).ok_or_else(math_error!())?;
             } else if actual < I80F48::ZERO {
-                total_source_pre = total_source_pre.checked_add(pre).ok_or_else(math_error!())?;
+                total_source_pre = total_source_pre
+                    .checked_add(pre)
+                    .ok_or_else(math_error!())?;
             }
         }
         Ok((total_moved, total_source_pre))

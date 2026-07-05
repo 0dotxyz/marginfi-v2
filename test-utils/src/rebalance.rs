@@ -277,7 +277,10 @@ impl RebalanceFixture {
         self.user
             .try_bank_deposit(user_usdc.key, &src2, deposit, None)
             .await?;
-        self.test_f.marginfi_group.try_accrue_interest(&src2).await?;
+        self.test_f
+            .marginfi_group
+            .try_accrue_interest(&src2)
+            .await?;
 
         let payer = self.test_f.context.borrow().payer.pubkey();
         let update_ix = self
@@ -394,7 +397,15 @@ impl RebalanceFixture {
         let payer = self.test_f.context.borrow().payer.pubkey();
         let ix = self
             .user
-            .make_update_rebalance_order_ix(self.order_pda, payer, None, None, None, None, Some(tip))
+            .make_update_rebalance_order_ix(
+                self.order_pda,
+                payer,
+                None,
+                None,
+                None,
+                None,
+                Some(tip),
+            )
             .await;
         self.process_as_payer(&[ix]).await
     }

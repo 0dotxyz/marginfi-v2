@@ -362,7 +362,10 @@ async fn rebalance_conserves_value_and_pays_full_tip() -> anyhow::Result<()> {
 
     // The whole source position lands in dst; no position value is skimmed.
     let new_balance = f.asset_shares(f.dst_bank_f.key).await;
-    assert_eq!(new_balance, old_balance, "same-mint shares conserved, no skim");
+    assert_eq!(
+        new_balance, old_balance,
+        "same-mint shares conserved, no skim"
+    );
 
     // A full move earns ~the full configured tip, drawn from the pool.
     let paid = pool_before - f.lamports_of(f.fee_pool()).await;
@@ -615,7 +618,11 @@ async fn rebalance_partial_fill_pays_prorata_tip() -> anyhow::Result<()> {
 
     // 100 of a 500 target = 20% of the tip; the pro-rata floors to one lamport below tip/5.
     let paid = pool_before - f.lamports_of(f.fee_pool()).await;
-    assert_eq!(paid, tip / 5 - 1, "partial fill pays the floored 20% pro-rata tip");
+    assert_eq!(
+        paid,
+        tip / 5 - 1,
+        "partial fill pays the floored 20% pro-rata tip"
+    );
     Ok(())
 }
 
@@ -687,10 +694,21 @@ async fn rebalance_splits_across_two_destinations() -> anyhow::Result<()> {
 
     let dst1_after = f.asset_shares(f.dst_bank_f.key).await;
     let dst2_after = f.asset_shares(dst2.key).await;
-    assert_eq!(dst1_after, dst2_after, "the position split into equal halves");
-    assert_eq!(f.asset_shares(f.src_bank_f.key).await, I80F48::ZERO, "source emptied");
+    assert_eq!(
+        dst1_after, dst2_after,
+        "the position split into equal halves"
+    );
+    assert_eq!(
+        f.asset_shares(f.src_bank_f.key).await,
+        I80F48::ZERO,
+        "source emptied"
+    );
     // Value conserved across the whole set.
-    assert_eq!(dst1_after + dst2_after, old_src, "aggregate value conserved");
+    assert_eq!(
+        dst1_after + dst2_after,
+        old_src,
+        "aggregate value conserved"
+    );
     // A full move (across both banks) pays ~the full tip, once.
     let paid = pool_before - f.lamports_of(f.fee_pool()).await;
     assert_eq!(paid, tip, "full multi-dst move pays the full tip once");
@@ -806,7 +824,13 @@ async fn rebalance_kamino_to_drift_moves_the_deposit() -> anyhow::Result<()> {
         .await;
     let end_ix = f
         .user
-        .make_rebalance_end_ix(ref_banks, vec![src], order_pda, record_pda, f.keeper.pubkey())
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![src],
+            order_pda,
+            record_pda,
+            f.keeper.pubkey(),
+        )
         .await;
 
     f.process(&[
@@ -826,7 +850,10 @@ async fn rebalance_kamino_to_drift_moves_the_deposit() -> anyhow::Result<()> {
     assert_eq!(f.asset_shares(src).await, I80F48::ZERO);
     // The Drift mock bank scales shares 1000x (share value 0.001): dst holds the deposited position,
     // 100 native short of the source.
-    assert_eq!(f.asset_shares(dst).await, I80F48::from_num((VENUE_DEPOSIT_NATIVE - 100) * 1000));
+    assert_eq!(
+        f.asset_shares(dst).await,
+        I80F48::from_num((VENUE_DEPOSIT_NATIVE - 100) * 1000)
+    );
     Ok(())
 }
 
@@ -895,7 +922,13 @@ async fn rebalance_drift_to_juplend_moves_the_deposit() -> anyhow::Result<()> {
         .await;
     let end_ix = f
         .user
-        .make_rebalance_end_ix(ref_banks, vec![src], order_pda, record_pda, f.keeper.pubkey())
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![src],
+            order_pda,
+            record_pda,
+            f.keeper.pubkey(),
+        )
         .await;
 
     f.process(&[
@@ -910,7 +943,10 @@ async fn rebalance_drift_to_juplend_moves_the_deposit() -> anyhow::Result<()> {
 
     assert_eq!(f.asset_shares(src).await, I80F48::ZERO);
     // JupLend shares track native tokens 1:1: dst holds the deposit, 100 native short of the source.
-    assert_eq!(f.asset_shares(dst).await, I80F48::from_num(VENUE_DEPOSIT_NATIVE - 100));
+    assert_eq!(
+        f.asset_shares(dst).await,
+        I80F48::from_num(VENUE_DEPOSIT_NATIVE - 100)
+    );
     Ok(())
 }
 
@@ -935,17 +971,37 @@ async fn rebalance_rejects_moves_more_than_declared() -> anyhow::Result<()> {
         .await;
     let withdraw_ix = f
         .user
-        .make_withdraw_ix_with_authority(f.keeper_usdc, &f.src_bank_f, DEPOSIT_USDC, Some(true), f.keeper.pubkey())
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
         .await;
     let deposit_ix = f
         .user
-        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, DEPOSIT_USDC, None, f.keeper.pubkey())
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            DEPOSIT_USDC,
+            None,
+            f.keeper.pubkey(),
+        )
         .await;
     let end_ix = f
         .user
-        .make_rebalance_end_ix(ref_banks, vec![f.src_bank_f.key], f.order_pda, f.record_pda, f.keeper.pubkey())
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
         .await;
-    let res = f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix]).await;
+    let res = f
+        .process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
+        .await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceValueLeak);
     Ok(())
 }
@@ -975,18 +1031,38 @@ async fn rebalance_rejects_misrouted_deposit() -> anyhow::Result<()> {
         .await;
     let withdraw_ix = f
         .user
-        .make_withdraw_ix_with_authority(f.keeper_usdc, &f.src_bank_f, DEPOSIT_USDC, Some(true), f.keeper.pubkey())
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
         .await;
     // Route the ENTIRE position into dst1; dst2 declared to receive half but gets nothing.
     let deposit_ix = f
         .user
-        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, DEPOSIT_USDC, None, f.keeper.pubkey())
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            DEPOSIT_USDC,
+            None,
+            f.keeper.pubkey(),
+        )
         .await;
     let end_ix = f
         .user
-        .make_rebalance_end_ix(ref_banks, vec![f.src_bank_f.key], f.order_pda, f.record_pda, f.keeper.pubkey())
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
         .await;
-    let res = f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix]).await;
+    let res = f
+        .process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
+        .await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceValueLeak);
     Ok(())
 }
@@ -1017,17 +1093,37 @@ async fn rebalance_consolidate_rejects_source_misattribution() -> anyhow::Result
     // Actually drain only src (1000), nothing from src2; deposit 1000 into dst.
     let withdraw_ix = f
         .user
-        .make_withdraw_ix_with_authority(f.keeper_usdc, &f.src_bank_f, DEPOSIT_USDC, Some(true), f.keeper.pubkey())
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
         .await;
     let deposit_ix = f
         .user
-        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, DEPOSIT_USDC, None, f.keeper.pubkey())
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            DEPOSIT_USDC,
+            None,
+            f.keeper.pubkey(),
+        )
         .await;
     let end_ix = f
         .user
-        .make_rebalance_end_ix(ref_banks, vec![f.src_bank_f.key], f.order_pda, f.record_pda, f.keeper.pubkey())
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
         .await;
-    let res = f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix]).await;
+    let res = f
+        .process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
+        .await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceValueLeak);
     Ok(())
 }
@@ -1064,7 +1160,13 @@ async fn rebalance_consolidates_two_sources_into_one() -> anyhow::Result<()> {
         .await;
     let withdraw_src = f
         .user
-        .make_withdraw_ix_with_authority(f.keeper_usdc, &f.src_bank_f, DEPOSIT_USDC, Some(true), f.keeper.pubkey())
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
         .await;
     let withdraw_src2 = f
         .user
@@ -1072,7 +1174,13 @@ async fn rebalance_consolidates_two_sources_into_one() -> anyhow::Result<()> {
         .await;
     let deposit_dst = f
         .user
-        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, DEPOSIT_USDC + 500.0, None, f.keeper.pubkey())
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            DEPOSIT_USDC + 500.0,
+            None,
+            f.keeper.pubkey(),
+        )
         .await;
     let end_ix = f
         .user
@@ -1087,10 +1195,18 @@ async fn rebalance_consolidates_two_sources_into_one() -> anyhow::Result<()> {
     f.process(&[start_ix, withdraw_src, withdraw_src2, deposit_dst, end_ix])
         .await?;
 
-    assert_eq!(f.asset_shares(f.src_bank_f.key).await, I80F48::ZERO, "src emptied");
+    assert_eq!(
+        f.asset_shares(f.src_bank_f.key).await,
+        I80F48::ZERO,
+        "src emptied"
+    );
     assert_eq!(f.asset_shares(src2.key).await, I80F48::ZERO, "src2 emptied");
     // Both sources' value landed in dst, no skim.
-    assert_eq!(f.asset_shares(f.dst_bank_f.key).await, old_src + old_src2, "value conserved");
+    assert_eq!(
+        f.asset_shares(f.dst_bank_f.key).await,
+        old_src + old_src2,
+        "value conserved"
+    );
     // Full move relative to the summed source position -> ~full tip once.
     let paid = pool_before - f.lamports_of(f.fee_pool()).await;
     assert_eq!(paid, tip, "consolidate pays the full tip once");
@@ -1121,7 +1237,13 @@ async fn rebalance_consolidate_rejects_destination_shortfall() -> anyhow::Result
         .await;
     let withdraw_src = f
         .user
-        .make_withdraw_ix_with_authority(f.keeper_usdc, &f.src_bank_f, DEPOSIT_USDC, Some(true), f.keeper.pubkey())
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
         .await;
     let withdraw_src2 = f
         .user
@@ -1130,7 +1252,13 @@ async fn rebalance_consolidate_rejects_destination_shortfall() -> anyhow::Result
     // Deposit only 1200 of the 1500 declared — pocket 300.
     let deposit_dst = f
         .user
-        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, 1_200.0, None, f.keeper.pubkey())
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            1_200.0,
+            None,
+            f.keeper.pubkey(),
+        )
         .await;
     let end_ix = f
         .user
@@ -1188,8 +1316,14 @@ async fn rebalance_rejects_touching_unreferenced_balance() -> anyhow::Result<()>
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     // User holds a SOL deposit in the (unreferenced) SOL bank.
     let sol_bank = f.test_f.get_bank(&BankMint::Sol);
-    let user_sol = f.test_f.sol_mint.create_token_account_and_mint_to(10.0).await;
-    f.user.try_bank_deposit(user_sol.key, sol_bank, 10.0, None).await?;
+    let user_sol = f
+        .test_f
+        .sol_mint
+        .create_token_account_and_mint_to(10.0)
+        .await;
+    f.user
+        .try_bank_deposit(user_sol.key, sol_bank, 10.0, None)
+        .await?;
     let keeper_sol = f
         .test_f
         .sol_mint
@@ -1211,11 +1345,23 @@ async fn rebalance_rejects_touching_unreferenced_balance() -> anyhow::Result<()>
         .await;
     let withdraw_usdc = f
         .user
-        .make_withdraw_ix_with_authority(f.keeper_usdc, &f.src_bank_f, DEPOSIT_USDC, Some(true), f.keeper.pubkey())
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
         .await;
     let deposit_usdc = f
         .user
-        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, DEPOSIT_USDC, None, f.keeper.pubkey())
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            DEPOSIT_USDC,
+            None,
+            f.keeper.pubkey(),
+        )
         .await;
     // Loot part of the unreferenced SOL position (partial, so SOL stays active and the snapshot
     // mismatch surfaces at `verify_others_unchanged` rather than the health-obs check).
@@ -1225,7 +1371,13 @@ async fn rebalance_rejects_touching_unreferenced_balance() -> anyhow::Result<()>
         .await;
     let end_ix = f
         .user
-        .make_rebalance_end_ix(ref_banks, vec![f.src_bank_f.key], f.order_pda, f.record_pda, f.keeper.pubkey())
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
         .await;
     let res = f
         .process(&[start_ix, withdraw_usdc, deposit_usdc, steal_sol, end_ix])
@@ -1260,11 +1412,23 @@ async fn rebalance_amount_cap_sums_across_moves() -> anyhow::Result<()> {
         .await;
     let withdraw_ix = f
         .user
-        .make_withdraw_ix_with_authority(f.keeper_usdc, &f.src_bank_f, 600.0, None, f.keeper.pubkey())
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            600.0,
+            None,
+            f.keeper.pubkey(),
+        )
         .await;
     let deposit_dst1 = f
         .user
-        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, 300.0, None, f.keeper.pubkey())
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            300.0,
+            None,
+            f.keeper.pubkey(),
+        )
         .await;
     let deposit_dst2 = f
         .user
@@ -1272,7 +1436,13 @@ async fn rebalance_amount_cap_sums_across_moves() -> anyhow::Result<()> {
         .await;
     let end_ix = f
         .user
-        .make_rebalance_end_ix(ref_banks, vec![], f.order_pda, f.record_pda, f.keeper.pubkey())
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
         .await;
     let res = f
         .process(&[start_ix, withdraw_ix, deposit_dst1, deposit_dst2, end_ix])
@@ -1360,11 +1530,23 @@ async fn rebalance_end_rejects_reordered_banks() -> anyhow::Result<()> {
         .await;
     let withdraw_ix = f
         .user
-        .make_withdraw_ix_with_authority(f.keeper_usdc, &f.src_bank_f, DEPOSIT_USDC, Some(true), f.keeper.pubkey())
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
         .await;
     let deposit_ix = f
         .user
-        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, DEPOSIT_USDC, None, f.keeper.pubkey())
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            DEPOSIT_USDC,
+            None,
+            f.keeper.pubkey(),
+        )
         .await;
     // End with the referenced banks reversed vs. the record's [src, dst].
     let end_ix = f
@@ -1377,7 +1559,9 @@ async fn rebalance_end_rejects_reordered_banks() -> anyhow::Result<()> {
             f.keeper.pubkey(),
         )
         .await;
-    let res = f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix]).await;
+    let res = f
+        .process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
+        .await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::InvalidBankAccount);
     Ok(())
 }
@@ -1426,17 +1610,36 @@ async fn rebalance_bounded_move_at_cap_pays_full_tip() -> anyhow::Result<()> {
         .await;
     let withdraw_ix = f
         .user
-        .make_withdraw_ix_with_authority(f.keeper_usdc, &f.src_bank_f, 500.0, None, f.keeper.pubkey())
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            500.0,
+            None,
+            f.keeper.pubkey(),
+        )
         .await;
     let deposit_ix = f
         .user
-        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, 500.0, None, f.keeper.pubkey())
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            500.0,
+            None,
+            f.keeper.pubkey(),
+        )
         .await;
     let end_ix = f
         .user
-        .make_rebalance_end_ix(ref_banks, vec![], f.order_pda, f.record_pda, f.keeper.pubkey())
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
         .await;
-    f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix]).await?;
+    f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
+        .await?;
 
     let paid = pool_before - f.lamports_of(f.fee_pool()).await;
     assert_eq!(paid, tip, "at-cap move pays the full tip");
@@ -1461,18 +1664,38 @@ async fn rebalance_leak_just_over_dust_rejected() -> anyhow::Result<()> {
         .await;
     let withdraw_ix = f
         .user
-        .make_withdraw_ix_with_authority(f.keeper_usdc, &f.src_bank_f, DEPOSIT_USDC, Some(true), f.keeper.pubkey())
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
         .await;
     // Deposit 0.02 short of the declared 1000 — beyond the $0.01 dust tolerance.
     let deposit_ix = f
         .user
-        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, DEPOSIT_USDC - 0.02, None, f.keeper.pubkey())
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            DEPOSIT_USDC - 0.02,
+            None,
+            f.keeper.pubkey(),
+        )
         .await;
     let end_ix = f
         .user
-        .make_rebalance_end_ix(ref_banks, vec![f.src_bank_f.key], f.order_pda, f.record_pda, f.keeper.pubkey())
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
         .await;
-    let res = f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix]).await;
+    let res = f
+        .process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
+        .await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceValueLeak);
     Ok(())
 }
@@ -1496,20 +1719,42 @@ async fn rebalance_leak_just_under_dust_passes() -> anyhow::Result<()> {
         .await;
     let withdraw_ix = f
         .user
-        .make_withdraw_ix_with_authority(f.keeper_usdc, &f.src_bank_f, DEPOSIT_USDC, Some(true), f.keeper.pubkey())
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
         .await;
     // 0.005 short — within the $0.01 dust tolerance.
     let deposit_ix = f
         .user
-        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, DEPOSIT_USDC - 0.005, None, f.keeper.pubkey())
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            DEPOSIT_USDC - 0.005,
+            None,
+            f.keeper.pubkey(),
+        )
         .await;
     let end_ix = f
         .user
-        .make_rebalance_end_ix(ref_banks, vec![f.src_bank_f.key], f.order_pda, f.record_pda, f.keeper.pubkey())
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
         .await;
-    f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix]).await?;
+    f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
+        .await?;
     // dst holds the deposit: the full source minus the 0.005 USDC (5_000 native) tolerated dust.
-    assert_eq!(f.asset_shares(f.dst_bank_f.key).await, old_src - I80F48::from_num(5_000));
+    assert_eq!(
+        f.asset_shares(f.dst_bank_f.key).await,
+        old_src - I80F48::from_num(5_000)
+    );
     Ok(())
 }
 
@@ -1647,9 +1892,16 @@ async fn rebalance_tip_floors_fractional_lamport() -> anyhow::Result<()> {
         .await;
     let end_ix = f
         .user
-        .make_rebalance_end_ix(ref_banks, vec![], f.order_pda, f.record_pda, f.keeper.pubkey())
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
         .await;
-    f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix]).await?;
+    f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
+        .await?;
 
     // moved 1 of a 2 budget -> fraction 1/2 -> owed 1.5 -> floor 1.
     let paid = pool_before - f.lamports_of(f.fee_pool()).await;
@@ -1680,14 +1932,31 @@ async fn rebalance_consolidate_rejected_when_destination_makes_unhealthy() -> an
     // Drive low_dst utilization: a lender funds it, and a SEPARATE SOL-collateralized account borrows
     // from it (that SOL deposit also supplies the liquidity the user borrows against).
     let lender = f.test_f.create_marginfi_account().await;
-    let lender_usdc = f.test_f.usdc_mint.create_token_account_and_mint_to(1_000.0).await;
-    lender.try_bank_deposit(lender_usdc.key, &low_dst, 1_000.0, None).await?;
+    let lender_usdc = f
+        .test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(1_000.0)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, &low_dst, 1_000.0, None)
+        .await?;
     let borrower = f.test_f.create_marginfi_account().await;
-    let borrower_sol = f.test_f.sol_mint.create_token_account_and_mint_to(1_000.0).await;
-    borrower.try_bank_deposit(borrower_sol.key, sol_bank, 1_000.0, None).await?;
+    let borrower_sol = f
+        .test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000.0)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol.key, sol_bank, 1_000.0, None)
+        .await?;
     let borrower_usdc = f.test_f.usdc_mint.create_empty_token_account().await;
-    borrower.try_bank_borrow(borrower_usdc.key, &low_dst, 500.0).await?;
-    f.test_f.marginfi_group.try_accrue_interest(&low_dst).await?;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, &low_dst, 500.0)
+        .await?;
+    f.test_f
+        .marginfi_group
+        .try_accrue_interest(&low_dst)
+        .await?;
 
     // User borrows 60 SOL ($600) against its 1000 USDC in src: healthy at weight 1 (buffer 400).
     let user_sol = f.test_f.sol_mint.create_empty_token_account().await;
@@ -1723,15 +1992,33 @@ async fn rebalance_consolidate_rejected_when_destination_makes_unhealthy() -> an
         .await;
     let withdraw = f
         .user
-        .make_withdraw_ix_with_authority(f.keeper_usdc, &f.src_bank_f, DEPOSIT_USDC, Some(true), f.keeper.pubkey())
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
         .await;
     let deposit = f
         .user
-        .make_deposit_ix_with_authority(f.keeper_usdc, &low_dst, DEPOSIT_USDC, None, f.keeper.pubkey())
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &low_dst,
+            DEPOSIT_USDC,
+            None,
+            f.keeper.pubkey(),
+        )
         .await;
     let end_ix = f
         .user
-        .make_rebalance_end_ix(ref_banks, vec![f.src_bank_f.key], f.order_pda, f.record_pda, f.keeper.pubkey())
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
         .await;
     let res = f.process(&[start_ix, withdraw, deposit, end_ix]).await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::WorseHealthPostExecution);
@@ -1749,11 +2036,22 @@ async fn rebalance_rejects_overshoot() -> anyhow::Result<()> {
     // A SOL-collateralized borrower draws a small 50 USDC from src: start utilization ~5% (rate ~0),
     // but after the user's 1000 is drained down to the 50 borrow floor, src sits at ~100% util.
     let borrower = f.test_f.create_marginfi_account().await;
-    let borrower_sol = f.test_f.sol_mint.create_token_account_and_mint_to(1_000.0).await;
-    borrower.try_bank_deposit(borrower_sol.key, sol_bank, 1_000.0, None).await?;
+    let borrower_sol = f
+        .test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000.0)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol.key, sol_bank, 1_000.0, None)
+        .await?;
     let borrower_usdc = f.test_f.usdc_mint.create_empty_token_account().await;
-    borrower.try_bank_borrow(borrower_usdc.key, &f.src_bank_f, 50.0).await?;
-    f.test_f.marginfi_group.try_accrue_interest(&f.src_bank_f).await?;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, &f.src_bank_f, 50.0)
+        .await?;
+    f.test_f
+        .marginfi_group
+        .try_accrue_interest(&f.src_bank_f)
+        .await?;
 
     // Move the withdrawable 950 (leaving the 50 that backs the borrow) from src into dst.
     let moved = 950.0;
@@ -1771,16 +2069,34 @@ async fn rebalance_rejects_overshoot() -> anyhow::Result<()> {
         .await;
     let withdraw = f
         .user
-        .make_withdraw_ix_with_authority(f.keeper_usdc, &f.src_bank_f, moved, None, f.keeper.pubkey())
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            moved,
+            None,
+            f.keeper.pubkey(),
+        )
         .await;
     let deposit = f
         .user
-        .make_deposit_ix_with_authority(f.keeper_usdc, &f.dst_bank_f, moved, None, f.keeper.pubkey())
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            moved,
+            None,
+            f.keeper.pubkey(),
+        )
         .await;
     // src keeps its 50 remainder (active), so it stays in the observation set.
     let end_ix = f
         .user
-        .make_rebalance_end_ix(ref_banks, vec![], f.order_pda, f.record_pda, f.keeper.pubkey())
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
         .await;
     let res = f.process(&[start_ix, withdraw, deposit, end_ix]).await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceOvershoot);

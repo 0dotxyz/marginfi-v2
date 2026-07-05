@@ -1129,7 +1129,11 @@ impl MarginfiAccountFixture {
         .0
     }
 
-    pub async fn make_top_up_rebalance_fee_pool_ix(&self, payer: Pubkey, amount: u64) -> Instruction {
+    pub async fn make_top_up_rebalance_fee_pool_ix(
+        &self,
+        payer: Pubkey,
+        amount: u64,
+    ) -> Instruction {
         Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::TopUpRebalanceFeePool {
