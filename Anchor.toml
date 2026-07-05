@@ -58,6 +58,9 @@ basic-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/0
 # Emode tests (e01-e06)
 emode-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/e*.spec.ts --exit --require tests/rootHooks.ts"
 
+# Variable-borrow premium tests (vb01-vb05)
+premium-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/vb*.spec.ts --exit --require tests/rootHooks.ts"
+
 # Pyth pull tests (p01)
 pyth-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/p*.spec.ts --exit --require tests/rootHooks.ts"
 

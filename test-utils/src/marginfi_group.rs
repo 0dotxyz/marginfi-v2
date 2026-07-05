@@ -20,12 +20,13 @@ use marginfi::{
     state::bank::BankVaultType,
 };
 use marginfi_type_crate::constants::{
-    FEE_STATE_SEED, PROTOCOL_FEE_FIXED_DEFAULT, PROTOCOL_FEE_RATE_DEFAULT, STAKED_SETTINGS_SEED,
+    FEE_STATE_SEED, FEE_STATE_V2_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+    PROTOCOL_FEE_FIXED_DEFAULT, PROTOCOL_FEE_RATE_DEFAULT, STAKED_SETTINGS_SEED,
 };
 use marginfi_type_crate::types::WrappedI80F48;
 use marginfi_type_crate::types::{
     BankConfig, BankConfigCompact, BankConfigOpt, EmodeEntry, FeeState, InterestRateConfigOpt,
-    MarginfiGroup, OracleSetup, StakedSettings, MAX_EMODE_ENTRIES,
+    MarginfiGroup, OracleSetup, PremiumEntry, StakedSettings, MAX_EMODE_ENTRIES,
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
@@ -606,6 +607,223 @@ impl MarginfiGroupFixture {
         result[..entries.len()].copy_from_slice(entries);
 
         Ok(result)
+    }
+
+    /// Initialize the FeeStateV2 PDA (if needed) and copy the v1 fee state into it.
+    pub async fn try_init_and_copy_fee_state_v2(&self) -> Result<(), BanksClientError> {
+        let fee_state_v2 = Self::fee_state_v2_key();
+        let mut ixs = vec![];
+
+        let exists = {
+            let ctx = self.ctx.borrow_mut();
+            let account = ctx.banks_client.get_account(fee_state_v2).await.unwrap();
+            account.map(|a| !a.data.is_empty()).unwrap_or(false)
+        };
+        if !exists {
+            ixs.push(Instruction {
+                program_id: marginfi::ID,
+                accounts: marginfi::accounts::InitFeeStateV2 {
+                    payer: self.ctx.borrow().payer.pubkey(),
+                    fee_state_v2,
+                    system_program: system_program::id(),
+                }
+                .to_account_metas(Some(true)),
+                data: InitGlobalFeeStateV2 {}.data(),
+            });
+        }
+        ixs.push(Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::CopyFeeStateToV2 {
+                fee_state: self.fee_state,
+                fee_state_v2,
+            }
+            .to_account_metas(Some(true)),
+            data: CopyFeeStateToV2 {}.data(),
+        });
+
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
+    pub fn fee_state_v2_key() -> Pubkey {
+        Pubkey::find_program_address(&[FEE_STATE_V2_SEED.as_bytes()], &marginfi::ID).0
+    }
+
+    pub async fn try_edit_fee_state_v2_premium(
+        &self,
+        premium_wallet: Option<Pubkey>,
+    ) -> Result<(), BanksClientError> {
+        let payer = self.ctx.borrow().payer.insecure_clone();
+        self.try_edit_fee_state_v2_premium_with_signer(premium_wallet, &payer)
+            .await
+    }
+
+    pub async fn try_edit_fee_state_v2_premium_with_signer(
+        &self,
+        premium_wallet: Option<Pubkey>,
+        signer: &Keypair,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::EditFeeStateV2Premium {
+                global_fee_admin: signer.pubkey(),
+                fee_state_v2: Self::fee_state_v2_key(),
+            }
+            .to_account_metas(Some(true)),
+            data: EditFeeStateV2Premium { premium_wallet }.data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer, signer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn try_configure_group_premium(
+        &self,
+        entries: Vec<PremiumEntry>,
+    ) -> Result<(), BanksClientError> {
+        let payer = self.ctx.borrow().payer.insecure_clone();
+        self.try_configure_group_premium_with_signer(entries, &payer)
+            .await
+    }
+
+    pub async fn try_configure_group_premium_with_signer(
+        &self,
+        entries: Vec<PremiumEntry>,
+        signer: &Keypair,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolConfigureGroupPremium {
+                group: self.key,
+                emode_admin: signer.pubkey(),
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolConfigureGroupPremium { entries }.data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer, signer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn try_configure_bank_premium(
+        &self,
+        bank: &BankFixture,
+        premium_tag: u16,
+        active: bool,
+    ) -> Result<(), BanksClientError> {
+        let payer = self.ctx.borrow().payer.insecure_clone();
+        self.try_configure_bank_premium_with_signer(bank, premium_tag, active, &payer)
+            .await
+    }
+
+    pub async fn try_configure_bank_premium_with_signer(
+        &self,
+        bank: &BankFixture,
+        premium_tag: u16,
+        active: bool,
+        signer: &Keypair,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolConfigureBankPremium {
+                group: self.key,
+                emode_admin: signer.pubkey(),
+                bank: bank.key,
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolConfigureBankPremium {
+                premium_tag,
+                active,
+            }
+            .data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer, signer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Sweep realized premium from the bank's liquidity vault to `premium_ata` (the canonical
+    /// ATA of `FeeStateV2.premium_wallet` for the bank's mint).
+    pub async fn try_collect_premium_fees(
+        &self,
+        bank: &BankFixture,
+        premium_ata: Pubkey,
+    ) -> Result<(), BanksClientError> {
+        let bank_key = bank.key;
+        let (liquidity_vault_authority, _) = Pubkey::find_program_address(
+            &[
+                LIQUIDITY_VAULT_AUTHORITY_SEED.as_bytes(),
+                bank_key.as_ref(),
+            ],
+            &marginfi::ID,
+        );
+        let (liquidity_vault, _) = Pubkey::find_program_address(
+            &[LIQUIDITY_VAULT_SEED.as_bytes(), bank_key.as_ref()],
+            &marginfi::ID,
+        );
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolCollectBankPremiumFees {
+                group: self.key,
+                bank: bank_key,
+                liquidity_vault_authority,
+                liquidity_vault,
+                fee_state_v2: Self::fee_state_v2_key(),
+                premium_ata,
+                token_program: bank.get_token_program(),
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolCollectBankPremiumFees {}.data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
     }
 
     pub fn make_lending_pool_configure_bank_emode_ix(

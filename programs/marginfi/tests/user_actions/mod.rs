@@ -21,6 +21,7 @@ mod liquidate_receiver;
 mod liquidate_receiver_cpi;
 mod order;
 mod panic_mode_user_interactions;
+mod premium;
 mod repay;
 mod transfer_account_pda;
 mod withdraw;

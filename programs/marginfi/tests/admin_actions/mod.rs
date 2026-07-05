@@ -8,6 +8,7 @@ mod deleverage_withdraw_limit;
 mod freeze;
 mod interest_accrual;
 mod on_ramp_transition;
+mod premium_config;
 mod panic_mode;
 mod rate_limiter;
 mod setup_bank;

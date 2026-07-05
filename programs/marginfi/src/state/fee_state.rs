@@ -103,4 +103,21 @@ mod tests {
         assert_eq!(fee_state.placeholder1, 0);
         assert_eq!(fee_state.liquidation_flat_sol_fee, 0);
     }
+
+    /// The premium wallet must occupy exactly the first 32 bytes of what used to be
+    /// `FeeStateV2._padding1: [u8; 256]` (offset 256, right after the FeeState-mirrored fields),
+    /// so an already-initialized (zeroed) V2 account reads as unset premium config.
+    #[test]
+    fn fee_state_v2_premium_field_layout() {
+        use marginfi_type_crate::types::FeeStateV2;
+        use std::mem::{offset_of, size_of};
+
+        assert_eq!(size_of::<FeeStateV2>(), FeeState::LEN + 256);
+        assert_eq!(offset_of!(FeeStateV2, premium_wallet), 256);
+        assert_eq!(offset_of!(FeeStateV2, _padding1), 288);
+
+        // Zeroed account == premium unset (wallet default => sweeping disabled)
+        let v2: FeeStateV2 = bytemuck::Zeroable::zeroed();
+        assert_eq!(v2.premium_wallet, Pubkey::default());
+    }
 }

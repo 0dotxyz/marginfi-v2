@@ -65,7 +65,7 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     );
     assert_eq!(balance_1.bank_asset_tag, ASSET_TAG_DEFAULT);
     assert_eq!(balance_1.tag, 0);
-    assert_eq!(balance_1._pad0, [0; 4]);
+    assert_eq!(balance_1.premium_rate_snapshot, 0);
     assert_eq!(
         I80F48::from(balance_1.asset_shares),
         I80F48::from_str("1650216221.466876226897366").unwrap()
@@ -75,7 +75,7 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
         I80F48::from_str("0").unwrap()
     );
     assert_eq!(
-        I80F48::from(balance_1.emissions_outstanding),
+        I80F48::from(balance_1.premium_outstanding),
         I80F48::from_str("0").unwrap()
     );
     assert_eq!(
@@ -92,7 +92,7 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     );
     assert_eq!(balance_2.bank_asset_tag, ASSET_TAG_DEFAULT);
     assert_eq!(balance_2.tag, 0);
-    assert_eq!(balance_2._pad0, [0; 4]);
+    assert_eq!(balance_2.premium_rate_snapshot, 0);
     assert_eq!(
         I80F48::from(balance_2.asset_shares),
         I80F48::from_str("0").unwrap()
@@ -102,7 +102,7 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
         I80F48::from_str("3806372611.588862122556122").unwrap()
     );
     assert_eq!(
-        I80F48::from(balance_2.emissions_outstanding),
+        I80F48::from(balance_2.premium_outstanding),
         I80F48::from_str("0").unwrap()
     );
     assert_eq!(
@@ -145,7 +145,7 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     );
     assert_eq!(balance_1.bank_asset_tag, ASSET_TAG_DEFAULT);
     assert_eq!(balance_1.tag, 0);
-    assert_eq!(balance_1._pad0, [0; 4]);
+    assert_eq!(balance_1.premium_rate_snapshot, 0);
     assert_eq!(
         I80F48::from(balance_1.asset_shares),
         I80F48::from_str("470.952530958931234").unwrap()
@@ -155,7 +155,7 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
         I80F48::from_str("0").unwrap()
     );
     assert_eq!(
-        I80F48::from(balance_1.emissions_outstanding),
+        I80F48::from(balance_1.premium_outstanding),
         I80F48::from_str("26891413.388324654086347").unwrap()
     );
     assert_eq!(
@@ -172,7 +172,7 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     );
     assert_eq!(balance_2.bank_asset_tag, ASSET_TAG_DEFAULT);
     assert_eq!(balance_2.tag, 0);
-    assert_eq!(balance_2._pad0, [0; 4]);
+    assert_eq!(balance_2.premium_rate_snapshot, 0);
     assert_eq!(
         I80F48::from(balance_2.asset_shares),
         I80F48::from_str("0").unwrap()
@@ -182,7 +182,7 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
         I80F48::from_str("0").unwrap()
     );
     assert_eq!(
-        I80F48::from(balance_2.emissions_outstanding),
+        I80F48::from(balance_2.premium_outstanding),
         I80F48::from_str("0").unwrap()
     );
     assert_eq!(
@@ -230,7 +230,7 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     );
     assert_eq!(balance_1.bank_asset_tag, ASSET_TAG_DEFAULT);
     assert_eq!(balance_1.tag, 0);
-    assert_eq!(balance_1._pad0, [0; 4]);
+    assert_eq!(balance_1.premium_rate_snapshot, 0);
     assert_eq!(
         I80F48::from(balance_1.asset_shares),
         I80F48::from_str("0").unwrap()
@@ -240,7 +240,7 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
         I80F48::from_str("0").unwrap()
     );
     assert_eq!(
-        I80F48::from(balance_1.emissions_outstanding),
+        I80F48::from(balance_1.premium_outstanding),
         I80F48::from_str("0").unwrap()
     );
     assert_eq!(
@@ -707,7 +707,12 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     // Legacy banks pre-date the `bank_seed` field, so the bytes that now back it must read 0.
     // Together with `_padding_1`, this still covers the original 16 + 112 = 128B reserve.
     assert_eq!(bank.bank_seed, 0);
-    assert_eq!(bank._padding_1, [0u64; 13]);
+    // Mainnet fixture proof that the premium carve is migration-free: the bytes now backing the
+    // premium fields (formerly the head of `_padding_1: [u64; 13]`) read as zero.
+    assert_eq!(bank.premium_tag, 0);
+    assert_eq!(I80F48::from(bank.collected_premium_outstanding), I80F48::ZERO);
+    assert_eq!(bank.premium_activated_at, 0);
+    assert_eq!(bank._padding_1, [0u64; 9]);
 
     Ok(())
 }
