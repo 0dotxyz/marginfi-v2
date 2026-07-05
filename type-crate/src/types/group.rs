@@ -5,7 +5,10 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::{assert_struct_size, constants::discriminators};
 
-use super::{GroupRateLimiter, PanicStateCache, WrappedI80F48};
+use super::{
+    GroupRateLimiter, PanicStateCache, PremiumEntry, PremiumSettings, WrappedI80F48,
+    MAX_PREMIUM_ENTRIES,
+};
 
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
@@ -14,7 +17,7 @@ assert_struct_size!(MarginfiGroup, 1056);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
 #[cfg_attr(not(feature = "anchor"), derive(Pod, Zeroable, Copy, Clone))]
-#[derive(Default, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct MarginfiGroup {
     /// Broadly able to modify anything, and can set/remove other admins at will.
     pub admin: Pubkey,
@@ -87,13 +90,24 @@ pub struct MarginfiGroup {
     /// does not itself compromise any funds, and is merely annoying.
     pub delegate_flow_admin: Pubkey,
 
-    pub _padding_0: [[u64; 2]; 2],
-    pub _padding_1: [[u64; 2]; 32],
+    /// Header for the pairwise variable-borrow premium matrix stored in `premium_entries`.
+    pub premium_settings: PremiumSettings,
+    /// Pairwise variable-borrow premium rates, keyed by (collateral `premium_tag`, liability
+    /// `premium_tag`). Live entries occupy the first `premium_settings.entry_count` slots.
+    /// * Deliberately the LAST field: a future group-account resize can extend capacity past
+    ///   the current struct size without moving any field. Read only via `find_premium_rate`.
+    pub premium_entries: [PremiumEntry; MAX_PREMIUM_ENTRIES],
 }
 
 impl MarginfiGroup {
     pub const LEN: usize = std::mem::size_of::<MarginfiGroup>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::GROUP;
+}
+
+impl Default for MarginfiGroup {
+    fn default() -> Self {
+        Self::zeroed()
+    }
 }
 
 #[repr(C)]

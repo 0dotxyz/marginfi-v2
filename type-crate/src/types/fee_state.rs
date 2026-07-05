@@ -130,8 +130,11 @@ pub struct FeeStateV2 {
     pub order_execution_max_fee: WrappedI80F48,
     /// Can pause (not unpause) the protocol, but cannot modify any fee configuration.
     pub pause_delegate_admin: Pubkey,
+    /// Destination wallet for swept variable-borrow premium fees. Premium collected by banks is
+    /// swept (permissionlessly) to the canonical ATA of this wallet for the bank's mint.
+    pub premium_wallet: Pubkey,
     /// Extra reserved bytes for future expansions.
-    pub _padding1: [u8; 256],
+    pub _padding1: [u64; 28],
 }
 
 impl FeeStateV2 {

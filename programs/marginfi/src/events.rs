@@ -136,6 +136,9 @@ pub struct LendingPoolBankHandleBankruptcyEvent {
     pub bad_debt: f64,
     pub covered_amount: f64,
     pub socialized_amount: f64,
+    /// Uncollectable premium receivable written off with the bad debt (never socialized,
+    /// never covered by insurance, never credited to the bank).
+    pub premium_written_off: f64,
 }
 
 #[event]
@@ -205,6 +208,9 @@ pub struct LendingAccountPremiumSettledEvent {
     /// Premium moved into `bank.collected_premium_outstanding` with this repayment (tokens
     /// arrived in the liquidity vault), in native token units.
     pub premium_settled: f64,
+    /// Premium receivable written off with no tokens (tokenless risk-admin repayment), in
+    /// native token units.
+    pub premium_written_off: f64,
     /// Premium receivable still outstanding on the balance after this repayment.
     pub premium_outstanding_remaining: f64,
 }

@@ -112,6 +112,8 @@ pub struct Bank {
     /// - Bit 9 (512): `STAKED_ORACLE_DISABLED` — staked oracle pricing is temporarily disabled.
     /// - Bit 10 (1024): `STAKED_ORACLE_PRICE_USES_ONRAMP` — staked oracle pricing includes the SPL
     ///   single-pool on-ramp account in NAV.
+    /// - Bit 11 (2048): `PREMIUM_ACTIVE` — a liability-bank flag: balances borrowing from this
+    ///   bank accrue the pairwise variable-borrow premium and project it in health checks.
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.
@@ -180,7 +182,25 @@ pub struct Bank {
     /// * Otherwise the `bank_seed: u64` argument passed when creating the bank.
     /// * Use `flags & BANK_SEED_KNOWN` to verify this value has known seed provenance.
     pub bank_seed: u64,
-    pub _padding_1: [u64; 13], // 8 * 13 = 104B;
+
+    /// Tag for the group's pairwise variable-borrow premium matrix. Determines the rate other
+    /// accounts pay when this bank is offered as collateral (as `collateral_tag`) and the rate
+    /// this bank's borrowers pay (as `liability_tag`).
+    /// * 0 = untagged: never matches any premium entry.
+    pub premium_tag: u16,
+    // Pad to next 8-byte multiple
+    pub _pad3: [u8; 6],
+    /// Realized variable-borrow premium sitting in the liquidity vault, pending sweep to the
+    /// protocol premium wallet's canonical ATA for `mint`. Only incremented when premium tokens
+    /// are actually received (repay); never by mere accrual.
+    pub collected_premium_outstanding: WrappedI80F48,
+    /// Unix timestamp of the most recent inactive->active `PREMIUM_ACTIVE` transition. Premium
+    /// accrual is clamped to start no earlier than this, so toggling the flag off and back on
+    /// can never charge for (or health-project) the deactivated window.
+    /// * 0 on banks that never activated premium.
+    pub premium_activated_at: i64,
+
+    pub _padding_1: [u64; 9], // 8 * 9 = 72B;
 }
 
 impl Bank {

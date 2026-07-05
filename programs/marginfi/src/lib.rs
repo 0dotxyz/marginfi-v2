@@ -15,7 +15,7 @@ use anchor_lang::prelude::*;
 use instructions::*;
 use marginfi_type_crate::types::{
     BankConfigCompact, BankConfigOpt, EmodeEntry, InterestRateConfigOpt, OrderTrigger,
-    WrappedI80F48, MAX_EMODE_ENTRIES,
+    PremiumEntry, WrappedI80F48, MAX_EMODE_ENTRIES,
 };
 use prelude::*;
 
@@ -204,6 +204,23 @@ pub mod marginfi {
     /// emode settings from e.g. one LST to another.
     pub fn lending_pool_clone_emode(ctx: Context<LendingPoolCloneEmode>) -> MarginfiResult {
         marginfi_group::lending_pool_clone_emode(ctx)
+    }
+
+    /// (emode_admin only) Replace the group's pairwise variable-borrow premium matrix.
+    pub fn lending_pool_configure_group_premium(
+        ctx: Context<LendingPoolConfigureGroupPremium>,
+        entries: Vec<PremiumEntry>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_configure_group_premium(ctx, entries)
+    }
+
+    /// (emode_admin only) Set a bank's premium tag and toggle premium accrual for its borrowers.
+    pub fn lending_pool_configure_bank_premium(
+        ctx: Context<LendingPoolConfigureBankPremium>,
+        premium_tag: u16,
+        active: bool,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_configure_bank_premium(ctx, premium_tag, active)
     }
 
     /// (permissionless) Deposit same-bank emissions directly into liquidity vault and increase
@@ -457,6 +474,14 @@ pub mod marginfi {
         marginfi_group::lending_pool_collect_bank_fees(ctx)
     }
 
+    /// (permissionless) Sweep realized variable-borrow premium from the liquidity vault to the
+    /// canonical ATA of `FeeStateV2.premium_wallet` for the bank's mint.
+    pub fn lending_pool_collect_bank_premium_fees<'info>(
+        ctx: Context<'info, LendingPoolCollectBankPremiumFees<'info>>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_collect_bank_premium_fees(ctx)
+    }
+
     /// (admin only) Withdraw collected group fees from the fee vault.
     pub fn lending_pool_withdraw_fees<'info>(
         ctx: Context<'info, LendingPoolWithdrawFees<'info>>,
@@ -598,6 +623,14 @@ pub mod marginfi {
     /// (permissionless) Copy current FeeState values into FeeStateV2.
     pub fn copy_fee_state_to_v2(ctx: Context<CopyFeeStateToV2>) -> MarginfiResult {
         marginfi_group::copy_fee_state_to_v2(ctx)
+    }
+
+    /// (global fee admin only) Adjust the variable-borrow premium wallet on FeeStateV2.
+    pub fn edit_fee_state_v2_premium(
+        ctx: Context<EditFeeStateV2Premium>,
+        premium_wallet: Option<Pubkey>,
+    ) -> MarginfiResult {
+        marginfi_group::edit_fee_state_v2_premium(ctx, premium_wallet)
     }
 
     /// (global fee admin only) Adjust fees, admin, wallet, or pause delegate admin

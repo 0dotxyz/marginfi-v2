@@ -99,6 +99,10 @@ pub const STAKED_ORACLE_DISABLED: u64 = 1 << 9;
 pub const STAKED_ORACLE_PRICE_USES_ONRAMP: u64 = 1 << 10;
 pub const STAKED_ORACLE_FLAGS: u64 = STAKED_ORACLE_DISABLED | STAKED_ORACLE_PRICE_USES_ONRAMP;
 
+/// Liability-bank flag: balances borrowing from this bank accrue the pairwise variable-borrow
+/// premium and project it in health checks.
+pub const PREMIUM_ACTIVE: u64 = 1 << 11;
+
 pub const GROUP_FLAGS: u64 = PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
     | FREEZE_SETTINGS
     | TOKENLESS_REPAYMENTS_ALLOWED
