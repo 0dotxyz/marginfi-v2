@@ -429,7 +429,20 @@ pub enum MarginfiError {
     JuplendInitPositionDepositInsufficient, // 6511
     #[msg("Invalid Juplend withdraw intermediary ATA")]
     InvalidJuplendWithdrawIntermediaryAta, // 6512
-                                           // **************END JUPLEND ERRORS
+    // **************END JUPLEND ERRORS
+
+    // ************** BEGIN PREMIUM ERRORS (starting at 6600)
+    #[msg("Premium entry has a zero collateral or liability tag")]
+    PremiumEntryInvalid = 600, // 6600
+    #[msg("Duplicate (collateral, liability) pair in premium entries")]
+    PremiumEntryDuplicate, // 6601
+    #[msg("Too many premium entries for the group's capacity")]
+    PremiumMatrixFull, // 6602
+    #[msg("Premium ATA does not match the canonical ATA of the premium wallet")]
+    InvalidPremiumAta, // 6603
+    #[msg("Premium wallet is not configured on FeeStateV2")]
+    PremiumWalletNotSet, // 6604
+    // **************END PREMIUM ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -668,6 +681,13 @@ impl From<u32> for MarginfiError {
             6510 => MarginfiError::JuplendWithdrawFailed,
             6511 => MarginfiError::JuplendInitPositionDepositInsufficient,
             6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
+
+            // Premium-specific errors (starting at 6600)
+            6600 => MarginfiError::PremiumEntryInvalid,
+            6601 => MarginfiError::PremiumEntryDuplicate,
+            6602 => MarginfiError::PremiumMatrixFull,
+            6603 => MarginfiError::InvalidPremiumAta,
+            6604 => MarginfiError::PremiumWalletNotSet,
 
             _ => MarginfiError::InternalLogicError,
         }
