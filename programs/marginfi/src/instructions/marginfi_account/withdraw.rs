@@ -11,6 +11,7 @@ use crate::{
             is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
+        premium::{update_premium_snapshots, PremiumScratch},
         price::OraclePriceWithMultiplier,
         rate_limiter::GroupRateLimiterImpl,
     },
@@ -221,15 +222,26 @@ pub fn lending_account_withdraw<'info>(
         // Check account health, if below threshold fail transaction
         // Assuming `ctx.remaining_accounts` holds only oracle accounts
         // Uses heap-efficient health check to support accounts with up to 16 positions
+        let mut premium_scratch = PremiumScratch::default();
         check_account_init_health(
             &marginfi_account,
             ctx.remaining_accounts,
             &mut Some(&mut health_cache),
+            &mut Some(&mut premium_scratch),
         )?;
         health_cache.program_version = PROGRAM_VERSION;
 
         health_cache.set_engine_ok(true);
         marginfi_account.health_cache = health_cache;
+
+        // Claim premium at the old rates and refresh every liability's premium rate snapshot
+        // with the post-withdraw collateral mix.
+        update_premium_snapshots(
+            &mut marginfi_account,
+            &group,
+            &premium_scratch,
+            clock.unix_timestamp as u64,
+        )?;
     }
 
     // Fetch unbiased price for cache update

@@ -368,6 +368,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
             RequirementType::Maintenance,
             &mut Some(&mut health_cache),
             HealthPriceMode::Live { liq_cache: None },
+            &mut None,
         )?;
 
         let account_health = assets.checked_sub(liabs).ok_or_else(math_error!())?;

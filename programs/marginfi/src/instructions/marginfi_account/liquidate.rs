@@ -464,6 +464,7 @@ pub fn lending_account_liquidate<'info>(
         &liquidator_marginfi_account,
         liquidator_remaining_accounts,
         &mut None,
+        &mut None,
     )?;
 
     emit!(LendingAccountLiquidateEvent {

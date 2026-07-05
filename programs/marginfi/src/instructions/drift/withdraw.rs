@@ -10,6 +10,7 @@ use crate::{
             is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
+        premium::{update_premium_snapshots, PremiumScratch},
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
@@ -273,13 +274,27 @@ pub fn drift_withdraw<'info>(
         // Note: during liquidation/deleverage or order execution, we skip all health checks until
         // the end of the transaction.
         if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION) {
+            let mut premium_scratch = PremiumScratch::default();
             check_account_init_health(
                 &marginfi_account,
                 ctx.remaining_accounts,
                 &mut Some(&mut health_cache),
+                &mut Some(&mut premium_scratch),
             )?;
 
             health_cache.program_version = PROGRAM_VERSION;
+
+            // Claim premium at the old rates and refresh every liability's premium rate
+            // snapshot with the post-withdraw collateral mix.
+            {
+                let group = ctx.accounts.group.load()?;
+                update_premium_snapshots(
+                    &mut marginfi_account,
+                    &group,
+                    &premium_scratch,
+                    clock.unix_timestamp as u64,
+                )?;
+            }
             let bank_loader = &ctx.accounts.bank;
 
             let mut bank = bank_loader.load_mut()?;

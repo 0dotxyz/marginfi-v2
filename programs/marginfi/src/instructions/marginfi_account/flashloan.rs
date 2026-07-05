@@ -7,12 +7,13 @@ use crate::{
     },
     prelude::*,
     state::marginfi_account::{check_account_init_health, MarginfiAccountImpl},
+    state::premium::{update_premium_snapshots, PremiumScratch},
 };
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
     constants::ix_discriminators::END_FLASHLOAN,
     types::{
-        MarginfiAccount, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE,
+        MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_DELEVERAGE,
         ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
@@ -119,7 +120,23 @@ pub fn lending_account_end_flashloan<'info>(
 
     marginfi_account.unset_flag(ACCOUNT_IN_FLASHLOAN, false);
 
-    check_account_init_health(&marginfi_account, ctx.remaining_accounts, &mut None)?;
+    let mut premium_scratch = PremiumScratch::default();
+    check_account_init_health(
+        &marginfi_account,
+        ctx.remaining_accounts,
+        &mut None,
+        &mut Some(&mut premium_scratch),
+    )?;
+
+    // Claim premium at the old rates and refresh every liability's premium rate snapshot with
+    // the post-flashloan balances.
+    let group = ctx.accounts.group.load()?;
+    update_premium_snapshots(
+        &mut marginfi_account,
+        &group,
+        &premium_scratch,
+        Clock::get()?.unix_timestamp as u64,
+    )?;
 
     Ok(())
 }
@@ -142,6 +159,12 @@ pub struct LendingAccountEndFlashloan<'info> {
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
     pub authority: Signer<'info>,
+
+    /// Needed to read the premium matrix for snapshot recompute
+    #[account(
+        constraint = marginfi_account.load()?.group == group.key() @ MarginfiError::InvalidGroup
+    )]
+    pub group: AccountLoader<'info, MarginfiGroup>,
 }
 
 impl Hashable for LendingAccountEndFlashloan<'_> {

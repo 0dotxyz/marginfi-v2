@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::{HealthCache, HealthPriceMode, MarginfiAccount};
+use marginfi_type_crate::types::{HealthCache, HealthPriceMode, MarginfiAccount, MarginfiGroup};
 
 use crate::{
     constants::PROGRAM_VERSION,
@@ -12,6 +12,7 @@ use crate::{
         check_pre_liquidation_condition_and_get_account_health,
         compute_has_isolated_liability_flag,
     },
+    state::premium::{update_premium_snapshots, PremiumScratch},
     MarginfiError, MarginfiResult,
 };
 
@@ -37,12 +38,30 @@ pub fn lending_account_pulse_health<'info>(
     health_cache.timestamp = clock.unix_timestamp;
     health_cache.program_version = PROGRAM_VERSION;
 
-    // Check account init health using heap reuse optimization
+    // Check account init health using heap reuse optimization. Also collects the premium
+    // scratch: this permissionless ix doubles as the premium crank, materializing dormant
+    // accounts' pending premium and refreshing stale rate snapshots.
+    let mut premium_scratch = PremiumScratch::default();
     let engine_result = check_account_init_health(
         &marginfi_account,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
+        &mut Some(&mut premium_scratch),
     );
+
+    // Claim at old rates + rewrite snapshots. Self-gated: a partial health pass (e.g. an oracle
+    // failure mid-loop) leaves the scratch incomplete and this is a no-op, so a failed pulse can
+    // never write garbage rates.
+    {
+        let group = ctx.accounts.group.load()?;
+        update_premium_snapshots(
+            &mut marginfi_account,
+            &group,
+            &premium_scratch,
+            clock.unix_timestamp as u64,
+        )?;
+    }
+
     match engine_result {
         Ok(()) => {
             if health_cache.internal_err != 0 {
@@ -168,8 +187,14 @@ pub fn lending_account_pulse_health<'info>(
 
 #[derive(Accounts)]
 pub struct PulseHealth<'info> {
-    #[account(mut)]
+    #[account(
+        mut,
+        has_one = group @ MarginfiError::InvalidGroup
+    )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
+
+    /// Needed to read the premium matrix for snapshot recompute
+    pub group: AccountLoader<'info, MarginfiGroup>,
 }
 
 #[cfg(test)]
