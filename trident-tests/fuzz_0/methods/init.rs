@@ -220,6 +220,127 @@ impl FuzzTest {
             self.payer.pubkey(),
             None,
         );
+
+        // ================================================================================================
+        // Variable-borrow premium: FeeStateV2 + pairwise matrix + premium-active banks, so the
+        // regular deposit/borrow/repay/liquidate flows exercise premium accrual and settlement.
+        self.init_premium_foundation();
+    }
+
+    /// 1000% == u32::MAX (the program's `milli_to_u32` encoding).
+    fn premium_rate(percent: f64) -> u32 {
+        ((u32::MAX as f64) * (percent / 1000.0)) as u32
+    }
+
+    pub fn init_premium_foundation(&mut self) {
+        let payer = self.payer.pubkey();
+
+        // The group initializes without an emode admin; premium config is emode-admin gated.
+        let ix = types::marginfi::MarginfiGroupConfigureInstruction::data(
+            types::marginfi::MarginfiGroupConfigureInstructionData::new(
+                None,
+                Some(payer),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+        )
+        .accounts(types::marginfi::MarginfiGroupConfigureInstructionAccounts::new(
+            self.marginfi_group,
+            payer,
+        ))
+        .instruction();
+        let res = self.trident.process_transaction(&[ix], Some("set emode admin"));
+        invariant!(res.is_success());
+
+        let init_v2_ix = types::marginfi::InitGlobalFeeStateV2Instruction::data(
+            types::marginfi::InitGlobalFeeStateV2InstructionData::new(),
+        )
+        .accounts(types::marginfi::InitGlobalFeeStateV2InstructionAccounts::new(
+            payer,
+            self.fee_state_v2,
+        ))
+        .instruction();
+        let copy_ix = types::marginfi::CopyFeeStateToV2Instruction::data(
+            types::marginfi::CopyFeeStateToV2InstructionData::new(),
+        )
+        .accounts(types::marginfi::CopyFeeStateToV2InstructionAccounts::new(
+            self.fee_state,
+            self.fee_state_v2,
+        ))
+        .instruction();
+        let edit_ix = types::marginfi::EditFeeStateV2PremiumInstruction::data(
+            types::marginfi::EditFeeStateV2PremiumInstructionData::new(Some(payer)),
+        )
+        .accounts(types::marginfi::EditFeeStateV2PremiumInstructionAccounts::new(
+            payer,
+            self.fee_state_v2,
+        ))
+        .instruction();
+        let res = self
+            .trident
+            .process_transaction(&[init_v2_ix, copy_ix, edit_ix], Some("init fee state v2"));
+        invariant!(res.is_success());
+
+        // Sparse pairwise matrix over the seed banks' tags (usdc=100, eth=200, btc=300).
+        let entries = vec![
+            types::marginfi::PremiumEntry {
+                collateral_tag: 200,
+                liability_tag: 100,
+                rate: Self::premium_rate(1.0),
+            },
+            types::marginfi::PremiumEntry {
+                collateral_tag: 300,
+                liability_tag: 100,
+                rate: Self::premium_rate(2.0),
+            },
+            types::marginfi::PremiumEntry {
+                collateral_tag: 100,
+                liability_tag: 200,
+                rate: Self::premium_rate(0.5),
+            },
+        ];
+        let ix = types::marginfi::LendingPoolConfigureGroupPremiumInstruction::data(
+            types::marginfi::LendingPoolConfigureGroupPremiumInstructionData::new(entries),
+        )
+        .accounts(
+            types::marginfi::LendingPoolConfigureGroupPremiumInstructionAccounts::new(
+                self.marginfi_group,
+                payer,
+            ),
+        )
+        .instruction();
+        let res = self
+            .trident
+            .process_transaction(&[ix], Some("configure premium matrix"));
+        invariant!(res.is_success());
+
+        for (bank, tag) in [
+            (self.usdc_bank.address, 100u16),
+            (self.eth_bank.address, 200u16),
+            (self.btc_bank.address, 300u16),
+        ] {
+            let ix = types::marginfi::LendingPoolConfigureBankPremiumInstruction::data(
+                types::marginfi::LendingPoolConfigureBankPremiumInstructionData::new(tag, true),
+            )
+            .accounts(
+                types::marginfi::LendingPoolConfigureBankPremiumInstructionAccounts::new(
+                    self.marginfi_group,
+                    payer,
+                    bank,
+                ),
+            )
+            .instruction();
+            let res = self
+                .trident
+                .process_transaction(&[ix], Some("configure bank premium"));
+            invariant!(res.is_success());
+        }
     }
 
     pub fn init_global_fee_state(&mut self, payer: Pubkey, fee_state: Pubkey, msg: Option<&str>) {

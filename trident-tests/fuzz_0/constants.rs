@@ -4,6 +4,7 @@ use trident_fuzz::fuzzing::*;
 // Seeds
 // ================================================================================================
 pub const FEE_STATE_SEED: &str = "feestate";
+pub const FEE_STATE_V2_SEED: &str = "feestate_v2";
 pub const LIQUIDATION_RECORD_SEED: &str = "liq_record";
 pub const LIQUIDITY_VAULT_AUTHORITY_SEED: &str = "liquidity_vault_auth";
 pub const LIQUIDITY_VAULT_SEED: &str = "liquidity_vault";

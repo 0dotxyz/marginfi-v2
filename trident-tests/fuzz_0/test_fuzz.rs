@@ -48,6 +48,7 @@ struct FuzzTest {
     // Marginfi Group
     marginfi_group: Pubkey,
     fee_state: Pubkey,
+    fee_state_v2: Pubkey,
     // ================================================================================================
     // Liquidator accounts
     liquidator: User,
@@ -124,6 +125,12 @@ impl FuzzTest {
         let fee_state = trident
             .find_program_address(
                 &[crate::constants::FEE_STATE_SEED.as_bytes()],
+                &crate::types::marginfi::program_id(),
+            )
+            .0;
+        let fee_state_v2 = trident
+            .find_program_address(
+                &[crate::constants::FEE_STATE_V2_SEED.as_bytes()],
                 &crate::types::marginfi::program_id(),
             )
             .0;
@@ -313,6 +320,7 @@ impl FuzzTest {
             seeder,
             marginfi_group,
             fee_state,
+            fee_state_v2,
             usdc_bank,
             eth_bank,
             btc_bank,
@@ -1075,6 +1083,11 @@ impl FuzzTest {
             &banks,
             &marginfi_accounts,
         );
+
+        // Variable-borrow premium invariants: per-balance receivable sanity (non-negative,
+        // zero without a liability, bounded by the configured cap) and per-bank collected
+        // counter sanity.
+        invariants::assert_premium_invariants(&mut self.trident, &banks, &marginfi_accounts);
 
         // Transient + admin-set account-flag invariants — none of
         // `ACCOUNT_DISABLED`, `ACCOUNT_IN_FLASHLOAN`,

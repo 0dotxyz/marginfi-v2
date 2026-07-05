@@ -767,6 +767,7 @@ impl FuzzTest {
             types::marginfi::LendingAccountEndFlashloanInstructionAccounts::new(
                 user.marginfi_account,
                 user.address,
+                self.marginfi_group,
             ),
         )
         .remaining_accounts(end_remaining)
@@ -982,6 +983,7 @@ impl FuzzTest {
         )
         .accounts(types::marginfi::EndLiquidationInstructionAccounts::new(
             liquidatee_marginfi_account,
+            self.marginfi_group,
             record,
             liquidation_receiver,
             self.fee_state,
