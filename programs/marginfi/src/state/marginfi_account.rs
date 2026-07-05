@@ -1893,11 +1893,10 @@ impl<'a> BankAccountWrapper<'a> {
         let total_owed = if settle_premium && premium_outstanding > I80F48::ZERO {
             // The premium tokens arrive in the liquidity vault with this repayment; book them
             // as collected (pending sweep to the protocol premium wallet).
-            bank.collected_premium_outstanding =
-                I80F48::from(bank.collected_premium_outstanding)
-                    .checked_add(premium_outstanding)
-                    .ok_or_else(math_error!())?
-                    .into();
+            bank.collected_premium_outstanding = I80F48::from(bank.collected_premium_outstanding)
+                .checked_add(premium_outstanding)
+                .ok_or_else(math_error!())?
+                .into();
             current_liability_amount
                 .checked_add(premium_outstanding)
                 .ok_or_else(math_error!())?
@@ -2108,7 +2107,10 @@ impl<'a> BankAccountWrapper<'a> {
             // residual receivable without crediting the bank.
             let residual: I80F48 = balance.premium_outstanding.into();
             if residual > I80F48::ZERO {
-                debug!("liability flip: writing off premium receivable {}", residual);
+                debug!(
+                    "liability flip: writing off premium receivable {}",
+                    residual
+                );
                 balance.premium_outstanding = I80F48::ZERO.into();
             }
         }

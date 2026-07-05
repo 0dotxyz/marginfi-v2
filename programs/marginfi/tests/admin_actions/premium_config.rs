@@ -1,4 +1,5 @@
 use fixed::types::I80F48;
+use fixtures::marginfi_group::MarginfiGroupFixture;
 use fixtures::prelude::*;
 use marginfi::state::bank::BankImpl;
 use marginfi_type_crate::{
@@ -8,7 +9,6 @@ use marginfi_type_crate::{
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
-use fixtures::marginfi_group::MarginfiGroupFixture;
 
 fn entry(collateral_tag: u16, liability_tag: u16, percent: f64) -> PremiumEntry {
     PremiumEntry {
@@ -165,4 +165,3 @@ async fn premium_config_matrix_validation() -> anyhow::Result<()> {
 
     Ok(())
 }
-

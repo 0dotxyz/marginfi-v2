@@ -7,6 +7,7 @@ use anchor_lang::prelude::Clock;
 use anchor_spl::associated_token::get_associated_token_address_with_program_id;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
+use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{assert_eq_noise, native, prelude::*};
 use marginfi::state::bank::BankImpl;
 use marginfi_type_crate::types::{
@@ -16,7 +17,6 @@ use marginfi_type_crate::types::{
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
-use fixtures::marginfi_account::MarginfiAccountFixture;
 
 const TAG_STABLE: u16 = 100;
 const TAG_SOL: u16 = 200;
@@ -105,7 +105,10 @@ async fn setup_borrower(
         .unwrap();
 
     let borrower = test_f.create_marginfi_account().await;
-    let borrower_sol = test_f.sol_mint.create_token_account_and_mint_to(1_000).await;
+    let borrower_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
     borrower
         .try_bank_deposit(borrower_sol.key, sol_bank_f, 999, None)
         .await
@@ -273,7 +276,6 @@ async fn premium_activation_never_charges_retroactively() -> anyhow::Result<()> 
     Ok(())
 }
 
-
 #[tokio::test]
 async fn premium_partial_repay_settles_premium_first() -> anyhow::Result<()> {
     let test_f = premium_test_fixture().await;
@@ -331,10 +333,7 @@ async fn premium_repay_all_settles_and_sweep_pays_premium_wallet() -> anyhow::Re
     let (_lender, borrower, borrower_usdc_key) = setup_borrower(&test_f, 1_000.0).await;
 
     // Fund the borrower's wallet so they can cover debt + premium
-    test_f
-        .usdc_mint
-        .mint_to(&borrower_usdc_key, 1_000f64)
-        .await;
+    test_f.usdc_mint.mint_to(&borrower_usdc_key, 1_000f64).await;
     let test_f = test_f;
     let group_f = &test_f.marginfi_group;
     let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
@@ -578,8 +577,7 @@ async fn premium_deactivated_bank_writes_off_receivable_instead_of_settling() ->
     borrower.try_lending_account_pulse_health().await?;
     let account = borrower.load().await;
     assert!(
-        I80F48::from(usdc_balance(&account, &usdc_bank_f.key).premium_outstanding)
-            > I80F48::ZERO
+        I80F48::from(usdc_balance(&account, &usdc_bank_f.key).premium_outstanding) > I80F48::ZERO
     );
     group_f
         .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, false)
@@ -757,10 +755,11 @@ async fn premium_composes_with_emode() -> anyhow::Result<()> {
     mixed
         .try_bank_deposit(mixed_usdc.key, usdc_bank_f, 1_000, None)
         .await?;
-    let mixed_lst = test_f.sol_equivalent_mint.create_empty_token_account().await;
-    mixed
-        .try_bank_borrow(mixed_lst.key, lst_bank_f, 20)
-        .await?;
+    let mixed_lst = test_f
+        .sol_equivalent_mint
+        .create_empty_token_account()
+        .await;
+    mixed.try_bank_borrow(mixed_lst.key, lst_bank_f, 20).await?;
 
     let account = mixed.load().await;
     let rate = snapshot_percent(usdc_balance(&account, &lst_bank_f.key));
@@ -777,7 +776,10 @@ async fn premium_composes_with_emode() -> anyhow::Result<()> {
     borrower
         .try_bank_deposit(borrower_sol.key, sol_bank_f, 100, None)
         .await?;
-    let borrower_lst = test_f.sol_equivalent_mint.create_empty_token_account().await;
+    let borrower_lst = test_f
+        .sol_equivalent_mint
+        .create_empty_token_account()
+        .await;
     borrower
         .try_bank_borrow(borrower_lst.key, lst_bank_f, 70)
         .await?;

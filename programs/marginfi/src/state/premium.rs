@@ -314,13 +314,9 @@ mod tests {
     #[test]
     fn accrual_story6_numbers() {
         // Story 6: 50.41 debt x 1% APR x 60 days
-        let total = accrued_premium_total(
-            I80F48!(50.41),
-            rate(1.0),
-            I80F48::ZERO,
-            60 * 24 * 60 * 60,
-        )
-        .unwrap();
+        let total =
+            accrued_premium_total(I80F48!(50.41), rate(1.0), I80F48::ZERO, 60 * 24 * 60 * 60)
+                .unwrap();
         assert_approx(total, I80F48!(0.082866), I80F48!(0.0001));
     }
 

@@ -788,10 +788,7 @@ impl MarginfiGroupFixture {
     ) -> Result<(), BanksClientError> {
         let bank_key = bank.key;
         let (liquidity_vault_authority, _) = Pubkey::find_program_address(
-            &[
-                LIQUIDITY_VAULT_AUTHORITY_SEED.as_bytes(),
-                bank_key.as_ref(),
-            ],
+            &[LIQUIDITY_VAULT_AUTHORITY_SEED.as_bytes(), bank_key.as_ref()],
             &marginfi::ID,
         );
         let (liquidity_vault, _) = Pubkey::find_program_address(

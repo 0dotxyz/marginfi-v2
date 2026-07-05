@@ -710,7 +710,10 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     // Mainnet fixture proof that the premium carve is migration-free: the bytes now backing the
     // premium fields (formerly the head of `_padding_1: [u64; 13]`) read as zero.
     assert_eq!(bank.premium_tag, 0);
-    assert_eq!(I80F48::from(bank.collected_premium_outstanding), I80F48::ZERO);
+    assert_eq!(
+        I80F48::from(bank.collected_premium_outstanding),
+        I80F48::ZERO
+    );
     assert_eq!(bank.premium_activated_at, 0);
     assert_eq!(bank._padding_1, [0u64; 9]);
 

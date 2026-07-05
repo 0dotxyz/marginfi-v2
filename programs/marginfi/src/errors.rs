@@ -442,7 +442,7 @@ pub enum MarginfiError {
     InvalidPremiumAta, // 6603
     #[msg("Premium wallet is not configured on FeeStateV2")]
     PremiumWalletNotSet, // 6604
-    // **************END PREMIUM ERRORS
+                         // **************END PREMIUM ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
