@@ -15,7 +15,8 @@
 //!   keeper; the on-chain figure is the conservative base gate).
 //!
 //! Integration reserve/market accounts MUST be refreshed in the same slot by the caller
-//! (`refresh_reserve` / `update_spot_market_cumulative_interest` / JupLend `update_rate`).
+//! (`refresh_reserve` / `update_spot_market_cumulative_interest` / JupLend liquidity-program
+//! `update_exchange_price`, which refreshes the `TokenReserve` the supply rate reads).
 
 use crate::state::price::{
     load_drift_spot_market, load_juplend_lending, load_kamino_reserve, load_solend_reserve,

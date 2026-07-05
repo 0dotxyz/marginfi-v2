@@ -252,11 +252,10 @@ impl MinimalReserve {
     }
 
     pub fn is_stale(&self, current_slot: u64) -> bool {
-        // TODO Kamino executes `deposit_reserve.last_update.mark_stale()` after any deposit, so
-        // should we ignored this?
-        let _stale = self.stale == 1;
-        // Slot expired
-        self.slot < current_slot
+        // klend marks the reserve stale after any same-slot balance mutation (via
+        // `last_update.mark_stale()`), cleared only by `refresh_reserve`. That flag can be set while
+        // `slot == current_slot`, so the slot check alone would treat a stale reserve as fresh.
+        self.stale == 1 || self.slot < current_slot
     }
 }
 

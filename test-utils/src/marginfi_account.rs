@@ -17,7 +17,7 @@ use marginfi_type_crate::pdas::{
 };
 use marginfi_type_crate::types::OracleSetup;
 use marginfi_type_crate::types::{
-    Bank, FeeState, MarginfiAccount, Order, OrderTrigger, WrappedI80F48,
+    Bank, FeeState, MarginfiAccount, Order, OrderTrigger, RebalanceMove, WrappedI80F48,
 };
 use solana_commitment_config::CommitmentLevel;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -31,6 +31,42 @@ use transfer_hook::TEST_HOOK_ID;
 
 #[derive(Default, Clone)]
 pub struct MarginfiAccountConfig {}
+
+/// One bank referenced by a rebalance, for the `remaining_accounts` stream: its bank, an optional
+/// JupLend `TokenReserve`, and its oracle metas. Appended as `[bank] [token_reserve?] [oracles]`.
+/// The bank is passed writable so `start_rebalance` can accrue native banks in place.
+#[derive(Clone)]
+pub struct RebalanceBankMeta {
+    pub bank: Pubkey,
+    pub token_reserve: Option<Pubkey>,
+    pub oracles: Vec<AccountMeta>,
+}
+
+impl RebalanceBankMeta {
+    pub fn new(bank: Pubkey, oracles: Vec<AccountMeta>) -> Self {
+        Self {
+            bank,
+            token_reserve: None,
+            oracles,
+        }
+    }
+
+    pub fn with_reserve(bank: Pubkey, token_reserve: Pubkey, oracles: Vec<AccountMeta>) -> Self {
+        Self {
+            bank,
+            token_reserve: Some(token_reserve),
+            oracles,
+        }
+    }
+
+    fn append_to(&self, accounts: &mut Vec<AccountMeta>) {
+        accounts.push(AccountMeta::new(self.bank, false));
+        if let Some(tr) = self.token_reserve {
+            accounts.push(AccountMeta::new_readonly(tr, false));
+        }
+        accounts.extend(self.oracles.clone());
+    }
+}
 
 async fn ctx_parts(ctx: &Rc<RefCell<ProgramTestContext>>) -> (BanksClient, Keypair, Hash) {
     let (banks_client, payer) = {
@@ -1009,6 +1045,7 @@ impl MarginfiAccountFixture {
         min_improvement: Option<WrappedI80F48>,
         cooldown_seconds: Option<u64>,
         amount: Option<u64>,
+        keeper_tip: Option<u64>,
     ) -> Instruction {
         let group = self.load().await.group;
         Instruction {
@@ -1028,6 +1065,7 @@ impl MarginfiAccountFixture {
                 min_improvement,
                 cooldown_seconds,
                 amount,
+                keeper_tip,
             }
             .data(),
         }
@@ -1059,6 +1097,7 @@ impl MarginfiAccountFixture {
         min_improvement: Option<WrappedI80F48>,
         cooldown_seconds: Option<u64>,
         amount: Option<u64>,
+        keeper_tip: Option<u64>,
     ) -> Instruction {
         Instruction {
             program_id: marginfi::ID,
@@ -1073,58 +1112,73 @@ impl MarginfiAccountFixture {
                 min_improvement,
                 cooldown_seconds,
                 amount,
+                keeper_tip,
             }
             .data(),
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn make_rebalance_start_ix(
-        &self,
-        src_bank: Pubkey,
-        dst_bank: Pubkey,
-        rebalance_order: Pubkey,
-        rebalance_record: Pubkey,
-        executor: Pubkey,
-        fee_payer: Pubkey,
-        oracle_metas: Vec<AccountMeta>,
-    ) -> Instruction {
-        self.make_rebalance_start_ix_with_reserves(
-            src_bank,
-            dst_bank,
-            rebalance_order,
-            rebalance_record,
-            executor,
-            fee_payer,
-            None,
-            None,
-            oracle_metas,
+    pub fn rebalance_fee_pool_pda(&self) -> Pubkey {
+        Pubkey::find_program_address(
+            &[
+                marginfi_type_crate::constants::REBALANCE_FEE_POOL_SEED.as_bytes(),
+                self.key.as_ref(),
+            ],
+            &marginfi::ID,
         )
-        .await
+        .0
     }
 
-    /// Like [`make_rebalance_start_ix`] but passes the JupLend `TokenReserve` for the src/dst legs.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn make_rebalance_start_ix_with_reserves(
+    pub async fn make_top_up_rebalance_fee_pool_ix(&self, payer: Pubkey, amount: u64) -> Instruction {
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::TopUpRebalanceFeePool {
+                marginfi_account: self.key,
+                fee_pool: self.rebalance_fee_pool_pda(),
+                payer,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountTopUpRebalanceFeePool { amount }.data(),
+        }
+    }
+
+    pub async fn make_withdraw_rebalance_fee_pool_ix(
         &self,
-        src_bank: Pubkey,
-        dst_bank: Pubkey,
+        authority: Pubkey,
+        destination: Pubkey,
+        amount: u64,
+    ) -> Instruction {
+        Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::WithdrawRebalanceFeePool {
+                marginfi_account: self.key,
+                authority,
+                fee_pool: self.rebalance_fee_pool_pda(),
+                destination,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::MarginfiAccountWithdrawRebalanceFeePool { amount }.data(),
+        }
+    }
+
+    /// Build `start_rebalance`. `ref_banks` are the distinct banks the moves reference, in index
+    /// order; each goes in `remaining_accounts` as `[bank] [token_reserve?] [oracles]`. `moves`
+    /// declares the value relocations by index.
+    pub async fn make_rebalance_start_ix(
+        &self,
+        ref_banks: Vec<RebalanceBankMeta>,
+        moves: Vec<RebalanceMove>,
         rebalance_order: Pubkey,
         rebalance_record: Pubkey,
         executor: Pubkey,
         fee_payer: Pubkey,
-        src_token_reserve: Option<Pubkey>,
-        dst_token_reserve: Option<Pubkey>,
-        oracle_metas: Vec<AccountMeta>,
     ) -> Instruction {
         let group = self.load().await.group;
         let mut accounts = marginfi::accounts::StartRebalance {
             group,
             marginfi_account: self.key,
-            src_bank,
-            dst_bank,
-            src_token_reserve,
-            dst_token_reserve,
             rebalance_order,
             executor,
             rebalance_record,
@@ -1133,77 +1187,26 @@ impl MarginfiAccountFixture {
             system_program: system_program::ID,
         }
         .to_account_metas(Some(true));
-        accounts.extend(oracle_metas);
+        for b in &ref_banks {
+            b.append_to(&mut accounts);
+        }
         Instruction {
             program_id: marginfi::ID,
             accounts,
-            data: marginfi::instruction::MarginfiAccountStartRebalance {}.data(),
+            data: marginfi::instruction::MarginfiAccountStartRebalance { moves }.data(),
         }
     }
 
+    /// Build `end_rebalance`. After the referenced-bank blocks (same order as start), the post-move
+    /// health observation set is appended: all referenced banks, minus any in `emptied` (fully drained
+    /// sources that are no longer active balances).
     pub async fn make_rebalance_end_ix(
         &self,
-        src_bank: Pubkey,
-        dst_bank: Pubkey,
+        ref_banks: Vec<RebalanceBankMeta>,
+        emptied: Vec<Pubkey>,
         rebalance_order: Pubkey,
         rebalance_record: Pubkey,
         executor: Pubkey,
-        oracle_metas: Vec<AccountMeta>,
-    ) -> Instruction {
-        self.make_rebalance_end_ix_with_reserves(
-            src_bank,
-            dst_bank,
-            rebalance_order,
-            rebalance_record,
-            executor,
-            None,
-            None,
-            true,
-            oracle_metas,
-        )
-        .await
-    }
-
-    /// End-ix for a bounded (partial) rebalance: the source keeps its unmoved remainder, so it stays
-    /// active and must remain in the post-move health observation set.
-    pub async fn make_rebalance_partial_end_ix(
-        &self,
-        src_bank: Pubkey,
-        dst_bank: Pubkey,
-        rebalance_order: Pubkey,
-        rebalance_record: Pubkey,
-        executor: Pubkey,
-        oracle_metas: Vec<AccountMeta>,
-    ) -> Instruction {
-        self.make_rebalance_end_ix_with_reserves(
-            src_bank,
-            dst_bank,
-            rebalance_order,
-            rebalance_record,
-            executor,
-            None,
-            None,
-            false,
-            oracle_metas,
-        )
-        .await
-    }
-
-    /// Like [`make_rebalance_end_ix`] but passes the JupLend `TokenReserve` for the src/dst legs.
-    /// `exclude_src` drops the source from the post-move observation set (true after a full move,
-    /// when the source slot is emptied; false for a bounded move that leaves a remainder).
-    #[allow(clippy::too_many_arguments)]
-    pub async fn make_rebalance_end_ix_with_reserves(
-        &self,
-        src_bank: Pubkey,
-        dst_bank: Pubkey,
-        rebalance_order: Pubkey,
-        rebalance_record: Pubkey,
-        executor: Pubkey,
-        src_token_reserve: Option<Pubkey>,
-        dst_token_reserve: Option<Pubkey>,
-        exclude_src: bool,
-        oracle_metas: Vec<AccountMeta>,
     ) -> Instruction {
         let group = self.load().await.group;
         let mut accounts = marginfi::accounts::EndRebalance {
@@ -1212,19 +1215,15 @@ impl MarginfiAccountFixture {
             rebalance_order,
             rebalance_record,
             executor,
-            src_bank,
-            dst_bank,
-            src_token_reserve,
-            dst_token_reserve,
+            fee_pool: self.rebalance_fee_pool_pda(),
+            system_program: system_program::ID,
         }
         .to_account_metas(Some(true));
-        accounts.extend(oracle_metas);
-        // Post-move health observation set: active balances + dst, minus the src when it was emptied.
-        let exclude = if exclude_src { vec![src_bank] } else { vec![] };
-        accounts.extend(
-            self.load_observation_account_metas(vec![dst_bank], exclude)
-                .await,
-        );
+        for b in &ref_banks {
+            b.append_to(&mut accounts);
+        }
+        let include: Vec<Pubkey> = ref_banks.iter().map(|b| b.bank).collect();
+        accounts.extend(self.load_observation_account_metas(include, emptied).await);
         Instruction {
             program_id: marginfi::ID,
             accounts,

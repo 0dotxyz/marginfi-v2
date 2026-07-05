@@ -436,15 +436,15 @@ pub enum MarginfiError {
     RebalanceVenueUnsupported = 600, // 6600
     #[msg("Rebalance cooldown has not elapsed")]
     RebalanceCooldown, // 6601
-    #[msg("Rebalance did not move the full source balance")]
+    #[msg("Rebalance moved no value")]
     RebalanceIncompleteMove, // 6602
     #[msg("Rebalance destination rate not better than source by the required margin")]
     RebalanceNotImproving, // 6603
     #[msg("Rebalance overshot: destination rate no longer >= source after the move")]
     RebalanceOvershoot, // 6604
-    #[msg("Rebalance leaked value beyond the allowed fee + dust")]
+    #[msg("Rebalance leaked value beyond the allowed dust tolerance")]
     RebalanceValueLeak, // 6605
-    #[msg("Rebalance src/dst mint mismatch")]
+    #[msg("Rebalance bank mint does not match the order mint")]
     RebalanceMintMismatch, // 6606
     #[msg("Rebalance bank not in the order's allowed venue set")]
     RebalanceBankNotAllowed, // 6607
@@ -454,8 +454,6 @@ pub enum MarginfiError {
     RebalanceExceedsAmount, // 6609
     #[msg("Rebalance sandwich must contain exactly one start and one end instruction")]
     RebalanceMalformedSandwich, // 6610
-    #[msg("Rebalance position value does not exceed the flat fee")]
-    RebalancePositionTooSmall, // 6611
                             // **************END AUTO-REBALANCE ERRORS
 }
 

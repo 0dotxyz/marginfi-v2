@@ -1,12 +1,12 @@
 use crate::{
-    check, errors::MarginfiError, prelude::MarginfiResult,
+    check, errors::MarginfiError, math_error, prelude::MarginfiResult,
     state::marginfi_account::LendingAccountImpl,
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::{
-    Balance, BalanceSide, MarginfiAccount, RebalanceOrder, RebalanceRecord, WrappedI80F48,
-    MAX_ALLOWED_BANKS,
+    Balance, BalanceSide, MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord,
+    RebalanceRefBank, WrappedI80F48, MAX_ALLOWED_BANKS, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
 };
 
 pub trait RebalanceOrderImpl {
@@ -20,6 +20,7 @@ pub trait RebalanceOrderImpl {
         min_improvement: WrappedI80F48,
         cooldown_seconds: u64,
         amount: u64,
+        keeper_tip: u64,
         bump: u8,
     ) -> MarginfiResult;
 
@@ -37,6 +38,7 @@ impl RebalanceOrderImpl for RebalanceOrder {
         min_improvement: WrappedI80F48,
         cooldown_seconds: u64,
         amount: u64,
+        keeper_tip: u64,
         bump: u8,
     ) -> MarginfiResult {
         check!(
@@ -50,6 +52,7 @@ impl RebalanceOrderImpl for RebalanceOrder {
         self.min_improvement = min_improvement;
         self.cooldown_seconds = cooldown_seconds;
         self.amount = amount;
+        self.keeper_tip = keeper_tip;
         self.last_exec_timestamp = 0;
         self.bump = bump;
         Ok(())
@@ -70,48 +73,78 @@ impl RebalanceOrderImpl for RebalanceOrder {
 }
 
 pub trait RebalanceRecordImpl {
-    #[allow(clippy::too_many_arguments)]
+    /// Record every referenced bank's start value + the declared moves, and snapshot every active
+    /// balance NOT in the referenced set, so `end_rebalance` can reconcile the moves against real
+    /// value deltas, prove conservation, and prove untouched balances kept the same side and shares.
     fn initialize(
         &mut self,
         order: Pubkey,
         executor: Pubkey,
-        src_bank: Pubkey,
-        dst_bank: Pubkey,
-        pre_src_value: I80F48,
-        pre_dst_value: I80F48,
+        ref_banks: &[(Pubkey, I80F48)],
+        moves: &[RebalanceMove],
         marginfi_account: &MarginfiAccount,
     ) -> MarginfiResult;
 
-    /// Verify every snapshotted non-{src,dst} balance is unchanged (side + shares).
+    /// The declared moves, sliced to `move_count`.
+    fn active_moves(&self) -> &[RebalanceMove];
+
+    /// Reconcile the declared moves against the observed per-bank value deltas. `post_values[i]` is
+    /// the end value of `ref_banks[i]`. For every referenced bank the net declared flow (incoming
+    /// amounts minus outgoing) must equal `post - pre` within `dust`. Returns
+    /// `(total_moved, total_source_pre_value)`: the value that landed (sum of positive net deltas) and
+    /// the start position value of the net-source banks (the tip denominator for unlimited orders).
+    fn reconcile(&self, post_values: &[I80F48], dust: I80F48) -> MarginfiResult<(I80F48, I80F48)>;
+
+    /// Verify every snapshotted non-referenced balance is unchanged (side + shares).
     fn verify_others_unchanged(&self, marginfi_account: &MarginfiAccount) -> MarginfiResult;
 }
 
 impl RebalanceRecordImpl for RebalanceRecord {
-    /// Record the {src,dst} pre-move values/rates and snapshot every OTHER active balance, so
-    /// `end_rebalance` can prove value conservation and that untouched balances are byte-identical.
     fn initialize(
         &mut self,
         order: Pubkey,
         executor: Pubkey,
-        src_bank: Pubkey,
-        dst_bank: Pubkey,
-        pre_src_value: I80F48,
-        pre_dst_value: I80F48,
+        ref_banks: &[(Pubkey, I80F48)],
+        moves: &[RebalanceMove],
         marginfi_account: &MarginfiAccount,
     ) -> MarginfiResult {
+        check!(
+            !ref_banks.is_empty()
+                && ref_banks.len() <= MAX_REBALANCE_BANKS
+                && !moves.is_empty()
+                && moves.len() <= MAX_REBALANCE_MOVES,
+            MarginfiError::IllegalBalanceState
+        );
+        // Every move must reference distinct in-range banks and carry a positive amount.
+        for m in moves {
+            check!(
+                (m.src_index as usize) < ref_banks.len()
+                    && (m.dst_index as usize) < ref_banks.len()
+                    && m.src_index != m.dst_index
+                    && I80F48::from(m.amount) > I80F48::ZERO,
+                MarginfiError::IllegalBalanceState
+            );
+        }
         self.order = order;
         self.executor = executor;
-        self.src_bank = src_bank;
-        self.dst_bank = dst_bank;
-        self.pre_src_value = pre_src_value.into();
-        self.pre_dst_value = pre_dst_value.into();
+        self.ref_banks = [RebalanceRefBank::default(); MAX_REBALANCE_BANKS];
+        for (i, (bank, val)) in ref_banks.iter().enumerate() {
+            self.ref_banks[i] = RebalanceRefBank {
+                bank: *bank,
+                pre_value: (*val).into(),
+            };
+        }
+        self.ref_bank_count = ref_banks.len() as u8;
+        self.moves = [RebalanceMove::default(); MAX_REBALANCE_MOVES];
+        self.moves[..moves.len()].copy_from_slice(moves);
+        self.move_count = moves.len() as u8;
 
         let mut active: u8 = 0;
         for balance in marginfi_account.lending_account.balances.iter() {
             if !balance.is_active() {
                 continue;
             }
-            if balance.bank_pk == src_bank || balance.bank_pk == dst_bank {
+            if ref_banks.iter().any(|(b, _)| *b == balance.bank_pk) {
                 continue;
             }
             let side = balance
@@ -133,6 +166,41 @@ impl RebalanceRecordImpl for RebalanceRecord {
         }
         self.active_balance_count = active;
         Ok(())
+    }
+
+    fn active_moves(&self) -> &[RebalanceMove] {
+        &self.moves[..self.move_count as usize]
+    }
+
+    fn reconcile(&self, post_values: &[I80F48], dust: I80F48) -> MarginfiResult<(I80F48, I80F48)> {
+        let n = self.ref_bank_count as usize;
+        check!(post_values.len() == n, MarginfiError::IllegalBalanceState);
+        let mut total_moved = I80F48::ZERO;
+        let mut total_source_pre = I80F48::ZERO;
+        for (i, post) in post_values.iter().enumerate().take(n) {
+            let mut declared_net = I80F48::ZERO;
+            for m in self.active_moves() {
+                let amt = I80F48::from(m.amount);
+                if m.dst_index as usize == i {
+                    declared_net = declared_net.checked_add(amt).ok_or_else(math_error!())?;
+                }
+                if m.src_index as usize == i {
+                    declared_net = declared_net.checked_sub(amt).ok_or_else(math_error!())?;
+                }
+            }
+            let pre = I80F48::from(self.ref_banks[i].pre_value);
+            let actual = post.checked_sub(pre).ok_or_else(math_error!())?;
+            check!(
+                (declared_net.checked_sub(actual).ok_or_else(math_error!())?).abs() <= dust,
+                MarginfiError::RebalanceValueLeak
+            );
+            if actual > I80F48::ZERO {
+                total_moved = total_moved.checked_add(actual).ok_or_else(math_error!())?;
+            } else if actual < I80F48::ZERO {
+                total_source_pre = total_source_pre.checked_add(pre).ok_or_else(math_error!())?;
+            }
+        }
+        Ok((total_moved, total_source_pre))
     }
 
     fn verify_others_unchanged(&self, marginfi_account: &MarginfiAccount) -> MarginfiResult {

@@ -1,15 +1,19 @@
-//! Persistent same-mint auto-rebalance orders. A keeper moves one asset from its current bank into
-//! a higher-yield bank of the SAME mint within an allowlisted venue set, via a start/end sandwich
-//! that reuses the existing per-venue withdraw/deposit instructions (a `start_rebalance`..
-//! `end_rebalance` sandwich). The order is NOT consumed on execution — it persists until cancelled.
+//! Persistent same-mint auto-rebalance orders. A keeper relocates positions across banks of the
+//! SAME mint within an allowlisted venue set — many source and many destination banks in a single
+//! execution (up to `MAX_REBALANCE_MOVES` declared moves) — via a `start_rebalance`..`end_rebalance`
+//! sandwich that reuses the existing per-venue withdraw/deposit instructions. The order is NOT
+//! consumed on execution — it persists until cancelled.
 //!
-//! On-chain guarantees: same mint, dst in the allowed set, dst supply APR > src + min_improvement
-//! (pre-move) and dst >= src (post-move), the source moved by the order's `amount` (the full
-//! position when the order is unlimited), value conserved up to exactly the flat fee, untouched
-//! balances unchanged, account stays healthy if it borrows, and a per-order cooldown.
+//! On-chain guarantees: every referenced bank holds the order's mint and is in the allowed set; each
+//! declared move goes from a lower-rate bank to one beating it by `min_improvement` (pre-move) and
+//! not inverted after the move's own market impact (post-move); the total value moved is capped by
+//! the order's `amount` budget (uncapped when the order is unlimited); value is conserved per bank up
+//! to a small dust tolerance; snapshotted non-referenced balances keep their side and shares; the
+//! account stays healthy at the maintenance requirement if it borrows; and a per-order cooldown.
 //!
-//! Supports native, Kamino, Drift, and JupLend legs. JupLend reads its `TokenReserve` via the
-//! optional `*_token_reserve` accounts (validated against the bank's Lending state).
+//! Supports native, Kamino, Drift, and JupLend legs. Referenced banks arrive as a deduped, indexed
+//! stream in the remaining accounts; a JupLend bank's `TokenReserve` is read from that stream
+//! (validated against the bank's Lending state).
 
 use crate::{
     check, check_eq,
@@ -17,7 +21,8 @@ use crate::{
     events::{
         AccountEventHeader, KeeperCloseRebalanceOrderEvent,
         MarginfiAccountCloseRebalanceOrderEvent, MarginfiAccountPlaceRebalanceOrderEvent,
-        MarginfiAccountUpdateRebalanceOrderEvent,
+        MarginfiAccountUpdateRebalanceOrderEvent, RebalanceExecutedEvent,
+        RebalanceFeePoolTopUpEvent, RebalanceFeePoolWithdrawEvent,
     },
     ix_utils::{
         get_discrim_hash, validate_not_cpi_by_stack_height, validate_rebalance_instructions,
@@ -36,20 +41,29 @@ use crate::{
         rate::rate_of,
         rebalance::{RebalanceOrderImpl, RebalanceRecordImpl},
     },
+    utils::is_integration_asset_tag,
 };
-use anchor_lang::{prelude::*, system_program};
+use anchor_lang::{
+    prelude::*,
+    solana_program::{
+        program::{invoke, invoke_signed},
+        system_instruction,
+    },
+    system_program,
+};
 use anchor_spl::token_interface::Mint;
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        REBALANCE_DEFAULT_COOLDOWN_SECONDS, REBALANCE_DEFAULT_MIN_IMPROVEMENT,
-        REBALANCE_FLAT_FEE_USD, REBALANCE_ORDER_SEED, REBALANCE_RECORD_SEED,
+        ASSET_TAG_JUPLEND, REBALANCE_CONSERVATION_DUST_USD, REBALANCE_DEFAULT_COOLDOWN_SECONDS,
+        REBALANCE_DEFAULT_MIN_IMPROVEMENT, REBALANCE_FEE_POOL_SEED, REBALANCE_ORDER_SEED,
+        REBALANCE_RECORD_SEED,
     },
     types::{
-        BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup, OraclePriceType,
+        Bank, HealthCache, MarginfiAccount, MarginfiGroup, OraclePriceType, RebalanceMove,
         RebalanceOrder, RebalanceRecord, WrappedI80F48, ACCOUNT_IN_ORDER_EXECUTION,
-        ACCOUNT_IN_REBALANCE, ORDER_BLOCKING_FLAGS,
+        ACCOUNT_IN_REBALANCE, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES, ORDER_BLOCKING_FLAGS,
     },
 };
 
@@ -92,12 +106,15 @@ pub fn place_rebalance_order(
     min_improvement: Option<WrappedI80F48>,
     cooldown_seconds: Option<u64>,
     amount: Option<u64>,
+    keeper_tip: Option<u64>,
 ) -> MarginfiResult {
-    // User-owned policy with sensible defaults: 5% min improvement, 24h cooldown, full-position move.
+    // User-owned policy with sensible defaults: 5% min improvement, 24h cooldown, no budget cap,
+    // no keeper tip.
     let min_improvement =
         min_improvement.unwrap_or_else(|| WrappedI80F48::from(REBALANCE_DEFAULT_MIN_IMPROVEMENT));
     let cooldown_seconds = cooldown_seconds.unwrap_or(REBALANCE_DEFAULT_COOLDOWN_SECONDS);
     let amount = amount.unwrap_or(0);
+    let keeper_tip = keeper_tip.unwrap_or(0);
 
     let mut account = ctx.accounts.marginfi_account.load_mut()?;
     {
@@ -110,6 +127,7 @@ pub fn place_rebalance_order(
             min_improvement,
             cooldown_seconds,
             amount,
+            keeper_tip,
             ctx.bumps.rebalance_order,
         )?;
     }
@@ -128,6 +146,7 @@ pub fn place_rebalance_order(
         min_improvement,
         cooldown_seconds,
         amount,
+        keeper_tip,
     });
     Ok(())
 }
@@ -269,14 +288,15 @@ pub struct CloseRebalanceOrder<'info> {
     pub rebalance_order: AccountLoader<'info, RebalanceOrder>,
 }
 
-/// Modify an existing order's policy in place: venue allowlist, min improvement, and/or cooldown.
-/// `None` fields are left unchanged.
+/// Modify an existing order's policy in place: venue allowlist, min improvement, cooldown, amount
+/// budget, and/or keeper tip. `None` fields are left unchanged.
 pub fn update_rebalance_order(
     ctx: Context<UpdateRebalanceOrder>,
     allowed_banks: Option<Vec<Pubkey>>,
     min_improvement: Option<WrappedI80F48>,
     cooldown_seconds: Option<u64>,
     amount: Option<u64>,
+    keeper_tip: Option<u64>,
 ) -> MarginfiResult {
     let account = ctx.accounts.marginfi_account.load()?;
     check!(
@@ -284,7 +304,7 @@ pub fn update_rebalance_order(
         MarginfiError::IllegalAction
     );
 
-    let (allowed, min_imp, cooldown, amount) = {
+    let (allowed, min_imp, cooldown, amount, tip) = {
         let mut order = ctx.accounts.rebalance_order.load_mut()?;
         if let Some(banks) = allowed_banks {
             order.set_allowed_banks(&banks)?;
@@ -302,11 +322,15 @@ pub fn update_rebalance_order(
         if let Some(a) = amount {
             order.amount = a;
         }
+        if let Some(t) = keeper_tip {
+            order.keeper_tip = t;
+        }
         (
             order.allowed_banks[..order.allowed_bank_count as usize].to_vec(),
             order.min_improvement,
             order.cooldown_seconds,
             order.amount,
+            order.keeper_tip,
         )
     };
 
@@ -322,6 +346,7 @@ pub fn update_rebalance_order(
         min_improvement: min_imp,
         cooldown_seconds: cooldown,
         amount,
+        keeper_tip: tip,
     });
     Ok(())
 }
@@ -339,86 +364,325 @@ pub struct UpdateRebalanceOrder<'info> {
     pub rebalance_order: AccountLoader<'info, RebalanceOrder>,
 }
 
-pub fn start_rebalance<'info>(ctx: Context<'info, StartRebalance<'info>>) -> MarginfiResult {
-    let clock = Clock::get()?;
-    let src_key = ctx.accounts.src_bank.key();
-    let dst_key = ctx.accounts.dst_bank.key();
-    let remaining = ctx.remaining_accounts;
-
-    {
-        let order = ctx.accounts.rebalance_order.load()?;
-        let allowed = &order.allowed_banks[..order.allowed_bank_count as usize];
-        check!(
-            allowed.contains(&src_key) && allowed.contains(&dst_key),
-            MarginfiError::RebalanceBankNotAllowed
-        );
-        check!(
-            src_key != dst_key,
-            MarginfiError::SameAssetAndLiabilityBanks
-        );
-        check!(
-            clock.unix_timestamp as u64
-                >= order
-                    .last_exec_timestamp
-                    .checked_add(order.cooldown_seconds)
-                    .ok_or_else(math_error!())?,
-            MarginfiError::RebalanceCooldown
-        );
-        let src_bank = ctx.accounts.src_bank.load()?;
-        let dst_bank = ctx.accounts.dst_bank.load()?;
-        check!(
-            src_bank.mint == order.mint,
-            MarginfiError::RebalanceMintMismatch
-        );
-        check!(
-            dst_bank.mint == order.mint,
-            MarginfiError::RebalanceMintMismatch
-        );
+/// Transfer `amount` lamports out of a marginfi account's fee-pool PDA, which signs via its seeds.
+/// No-op for a zero amount.
+fn pay_from_fee_pool<'info>(
+    fee_pool: &SystemAccount<'info>,
+    to: &AccountInfo<'info>,
+    system_program: &Program<'info, System>,
+    marginfi_account: &Pubkey,
+    bump: u8,
+    amount: u64,
+) -> MarginfiResult {
+    if amount == 0 {
+        return Ok(());
     }
+    let ix = system_instruction::transfer(&fee_pool.key(), to.key, amount);
+    invoke_signed(
+        &ix,
+        &[
+            fee_pool.to_account_info(),
+            to.clone(),
+            system_program.to_account_info(),
+        ],
+        &[&[
+            REBALANCE_FEE_POOL_SEED.as_bytes(),
+            marginfi_account.as_ref(),
+            &[bump],
+        ]],
+    )?;
+    Ok(())
+}
 
-    let (src_oracle, dst_oracle) = {
-        let src_bank = ctx.accounts.src_bank.load()?;
-        let dst_bank = ctx.accounts.dst_bank.load()?;
-        let src_n = get_remaining_accounts_per_bank(&src_bank)?.saturating_sub(1);
-        let dst_n = get_remaining_accounts_per_bank(&dst_bank)?.saturating_sub(1);
-        require_gte!(
+/// Fund an account's rebalance fee pool. Permissionless: anyone may top up any account's pool (the
+/// authority, a keeper, or a third party), since the funds can only ever pay keeper tips or be
+/// withdrawn by the account authority. The first top-up also seeds the pool's rent-exempt reserve, so
+/// the pool is always rent-exempt and `amount` is the spendable tip budget added above the reserve.
+pub fn top_up_rebalance_fee_pool(ctx: Context<TopUpRebalanceFeePool>, amount: u64) -> MarginfiResult {
+    let seed = if ctx.accounts.fee_pool.lamports() == 0 {
+        Rent::get()?.minimum_balance(0)
+    } else {
+        0
+    };
+    let transfer = amount.checked_add(seed).ok_or_else(math_error!())?;
+    let ix = system_instruction::transfer(
+        &ctx.accounts.payer.key(),
+        &ctx.accounts.fee_pool.key(),
+        transfer,
+    );
+    invoke(
+        &ix,
+        &[
+            ctx.accounts.payer.to_account_info(),
+            ctx.accounts.fee_pool.to_account_info(),
+            ctx.accounts.system_program.to_account_info(),
+        ],
+    )?;
+    let account = ctx.accounts.marginfi_account.load()?;
+    emit!(RebalanceFeePoolTopUpEvent {
+        header: AccountEventHeader {
+            signer: Some(ctx.accounts.payer.key()),
+            marginfi_account: ctx.accounts.marginfi_account.key(),
+            marginfi_account_authority: account.authority,
+            marginfi_group: account.group,
+        },
+        fee_pool: ctx.accounts.fee_pool.key(),
+        amount,
+        new_balance: ctx.accounts.fee_pool.lamports(),
+    });
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct TopUpRebalanceFeePool<'info> {
+    pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
+    #[account(
+        mut,
+        seeds = [REBALANCE_FEE_POOL_SEED.as_bytes(), marginfi_account.key().as_ref()],
+        bump,
+    )]
+    pub fee_pool: SystemAccount<'info>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+/// Withdraw lamports from an account's rebalance fee pool back to the authority. Caps at the pool
+/// balance; only the account authority may withdraw. The pool is a rent-exempt system PDA, so a
+/// withdrawal that would leave it rent-paying (0 < balance < exempt) instead closes it and returns
+/// the full balance.
+pub fn withdraw_rebalance_fee_pool(
+    ctx: Context<WithdrawRebalanceFeePool>,
+    amount: u64,
+) -> MarginfiResult {
+    let balance = ctx.accounts.fee_pool.lamports();
+    let amount = amount.min(balance);
+    let amount = if balance.saturating_sub(amount) < Rent::get()?.minimum_balance(0) {
+        balance
+    } else {
+        amount
+    };
+    pay_from_fee_pool(
+        &ctx.accounts.fee_pool,
+        &ctx.accounts.destination.to_account_info(),
+        &ctx.accounts.system_program,
+        &ctx.accounts.marginfi_account.key(),
+        ctx.bumps.fee_pool,
+        amount,
+    )?;
+    let account = ctx.accounts.marginfi_account.load()?;
+    emit!(RebalanceFeePoolWithdrawEvent {
+        header: AccountEventHeader {
+            signer: Some(ctx.accounts.authority.key()),
+            marginfi_account: ctx.accounts.marginfi_account.key(),
+            marginfi_account_authority: account.authority,
+            marginfi_group: account.group,
+        },
+        fee_pool: ctx.accounts.fee_pool.key(),
+        amount,
+        new_balance: ctx.accounts.fee_pool.lamports(),
+    });
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct WithdrawRebalanceFeePool<'info> {
+    #[account(has_one = authority @ MarginfiError::Unauthorized)]
+    pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
+    pub authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [REBALANCE_FEE_POOL_SEED.as_bytes(), marginfi_account.key().as_ref()],
+        bump,
+    )]
+    pub fee_pool: SystemAccount<'info>,
+    /// CHECK: recipient of the withdrawn lamports.
+    #[account(mut)]
+    pub destination: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+/// A bank parsed from the rebalance remaining-accounts stream, with its pricing accounts.
+struct ParsedBank<'info> {
+    key: Pubkey,
+    loader: AccountLoader<'info, Bank>,
+    token_reserve: Option<&'info AccountInfo<'info>>,
+    oracles: &'info [AccountInfo<'info>],
+}
+
+/// Parse the referenced-bank prefix of the rebalance remaining-accounts stream: exactly `bank_count`
+/// blocks, each `[bank] [token_reserve (JupLend only)] [oracles]`, deduped (each referenced bank
+/// appears once and moves reference it by index). Returns the parsed banks and the untouched tail
+/// (empty for `start`; the post-move health observation set for `end`).
+fn parse_rebalance_banks<'info>(
+    remaining: &'info [AccountInfo<'info>],
+    group: &Pubkey,
+    bank_count: usize,
+) -> MarginfiResult<(Vec<ParsedBank<'info>>, &'info [AccountInfo<'info>])> {
+    let mut cursor = 0usize;
+    let mut banks: Vec<ParsedBank> = Vec::with_capacity(bank_count);
+    while banks.len() < bank_count {
+        require_gt!(
             remaining.len(),
-            src_n + dst_n,
+            cursor,
             MarginfiError::WrongNumberOfOracleAccounts
         );
-        (&remaining[0..src_n], &remaining[src_n..src_n + dst_n])
-    };
+        let bank_ai = &remaining[cursor];
+        // Reject a bank appearing more than once — indices must be unambiguous.
+        check!(
+            !banks.iter().any(|b| b.key == bank_ai.key()),
+            MarginfiError::SameAssetAndLiabilityBanks
+        );
+        let loader = AccountLoader::<Bank>::try_from(bank_ai)
+            .map_err(|_| error!(MarginfiError::InvalidBankAccount))?;
+        cursor += 1;
+        let (tag, oracle_n) = {
+            let b = loader.load()?;
+            require_keys_eq!(b.group, *group, MarginfiError::InvalidGroup);
+            (
+                b.config.asset_tag,
+                get_remaining_accounts_per_bank(&b)?.saturating_sub(1),
+            )
+        };
+        let token_reserve = if tag == ASSET_TAG_JUPLEND {
+            require_gt!(
+                remaining.len(),
+                cursor,
+                MarginfiError::WrongNumberOfOracleAccounts
+            );
+            let t = &remaining[cursor];
+            cursor += 1;
+            Some(t)
+        } else {
+            None
+        };
+        require_gte!(
+            remaining.len(),
+            cursor + oracle_n,
+            MarginfiError::WrongNumberOfOracleAccounts
+        );
+        let oracles = &remaining[cursor..cursor + oracle_n];
+        cursor += oracle_n;
+        banks.push(ParsedBank {
+            key: bank_ai.key(),
+            loader,
+            token_reserve,
+            oracles,
+        });
+    }
+    Ok((banks, &remaining[cursor..]))
+}
 
-    {
-        let order = ctx.accounts.rebalance_order.load()?;
-        let src_bank = ctx.accounts.src_bank.load()?;
-        let dst_bank = ctx.accounts.dst_bank.load()?;
-        let src_tr = ctx.accounts.src_token_reserve.as_deref();
-        let dst_tr = ctx.accounts.dst_token_reserve.as_deref();
-        let src_rate = rate_of(&src_bank, src_oracle, src_tr, &clock)?;
-        let dst_rate = rate_of(&dst_bank, dst_oracle, dst_tr, &clock)?;
-        let min_imp = I80F48::from(order.min_improvement);
+/// Derive the referenced-bank count from a keeper move list: the highest index used, plus one. Every
+/// referenced bank must be touched by some move, so this equals the number of banks to parse.
+fn referenced_bank_count(moves: &[RebalanceMove]) -> usize {
+    moves
+        .iter()
+        .map(|m| m.src_index.max(m.dst_index) as usize)
+        .max()
+        .map(|max_idx| max_idx + 1)
+        .unwrap_or(0)
+}
+
+/// Freshen a native bank's cached supply rate in place (accrue interest + recompute cache), so the
+/// improvement gate reads a current rate rather than a lagged one. No-op for integration banks, whose
+/// rate comes from the venue reserve (refreshed by the keeper's crank + the staleness check).
+fn accrue_native_bank(
+    parsed: &ParsedBank,
+    group: &AccountLoader<MarginfiGroup>,
+    clock: &Clock,
+) -> MarginfiResult {
+    let is_integration = { is_integration_asset_tag(parsed.loader.load()?.config.asset_tag) };
+    if is_integration {
+        return Ok(());
+    }
+    let group = group.load()?;
+    let mut bank = parsed.loader.load_mut()?;
+    bank.accrue_interest(clock.unix_timestamp, &group, parsed.key)?;
+    bank.update_bank_cache(&group)?;
+    Ok(())
+}
+
+pub fn start_rebalance<'info>(
+    ctx: Context<'info, StartRebalance<'info>>,
+    moves: Vec<RebalanceMove>,
+) -> MarginfiResult {
+    let clock = Clock::get()?;
+    let group_key = ctx.accounts.group.key();
+    let remaining = ctx.remaining_accounts;
+
+    check!(
+        !moves.is_empty() && moves.len() <= MAX_REBALANCE_MOVES,
+        MarginfiError::IllegalBalanceState
+    );
+    let bank_count = referenced_bank_count(&moves);
+    check!(
+        (2..=MAX_REBALANCE_BANKS).contains(&bank_count),
+        MarginfiError::RebalanceBankNotAllowed
+    );
+
+    let (banks, tail) = parse_rebalance_banks(remaining, &group_key, bank_count)?;
+    check!(tail.is_empty(), MarginfiError::WrongNumberOfOracleAccounts);
+
+    let order = ctx.accounts.rebalance_order.load()?;
+    check!(
+        (clock.unix_timestamp as u64)
+            >= order
+                .last_exec_timestamp
+                .checked_add(order.cooldown_seconds)
+                .ok_or_else(math_error!())?,
+        MarginfiError::RebalanceCooldown
+    );
+    let allowed = &order.allowed_banks[..order.allowed_bank_count as usize];
+    let min_imp = I80F48::from(order.min_improvement);
+
+    // Freshen native banks before reading their rates (integration banks were refreshed by the
+    // keeper's venue crank, enforced by the staleness check inside `rate_of`).
+    for parsed in banks.iter() {
+        accrue_native_bank(parsed, &ctx.accounts.group, &clock)?;
+    }
+
+    // Price every referenced bank once: validate allowlist + mint, compute its supply rate and its
+    // pre-move position value.
+    let account = ctx.accounts.marginfi_account.load()?;
+    let mut rates: Vec<I80F48> = Vec::with_capacity(banks.len());
+    let mut ref_banks: Vec<(Pubkey, I80F48)> = Vec::with_capacity(banks.len());
+    for parsed in banks.iter() {
+        check!(
+            allowed.contains(&parsed.key),
+            MarginfiError::RebalanceBankNotAllowed
+        );
+        let bank = parsed.loader.load()?;
+        check!(bank.mint == order.mint, MarginfiError::RebalanceMintMismatch);
+        let rate = rate_of(&bank, parsed.oracles, parsed.token_reserve, &clock)?;
+        let pre = bank_asset_value(&account, &parsed.key, &bank, parsed.oracles, &clock)?;
+        rates.push(rate);
+        ref_banks.push((parsed.key, pre));
+    }
+
+    // Every declared move must go from a lower-rate bank to one that beats it by the margin.
+    for m in moves.iter() {
+        let src_rate = rates[m.src_index as usize];
+        let dst_rate = rates[m.dst_index as usize];
         check!(
             dst_rate > src_rate.checked_add(min_imp).ok_or_else(math_error!())?,
             MarginfiError::RebalanceNotImproving
         );
+    }
 
-        let account = ctx.accounts.marginfi_account.load()?;
-        let pre_src_value = bank_asset_value(&account, &src_key, &src_bank, src_oracle, &clock)?;
-        let pre_dst_value = bank_asset_value(&account, &dst_key, &dst_bank, dst_oracle, &clock)?;
-
+    {
         let mut record = ctx.accounts.rebalance_record.load_init()?;
         record.initialize(
             ctx.accounts.rebalance_order.key(),
             ctx.accounts.executor.key(),
-            src_key,
-            dst_key,
-            pre_src_value,
-            pre_dst_value,
+            &ref_banks,
+            &moves,
             &account,
         )?;
     }
 
+    drop(account);
+    drop(order);
     {
         let mut account = ctx.accounts.marginfi_account.load_mut()?;
         account.set_flag(ACCOUNT_IN_REBALANCE, false);
@@ -441,14 +705,6 @@ pub struct StartRebalance<'info> {
         ) @ MarginfiError::UnexpectedOrderExecutionState,
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
-    #[account(has_one = group @ MarginfiError::InvalidGroup)]
-    pub src_bank: AccountLoader<'info, Bank>,
-    #[account(has_one = group @ MarginfiError::InvalidGroup)]
-    pub dst_bank: AccountLoader<'info, Bank>,
-    /// CHECK: JupLend src TokenReserve, validated in-handler against the Lending state; None otherwise.
-    pub src_token_reserve: Option<UncheckedAccount<'info>>,
-    /// CHECK: JupLend dst TokenReserve, validated in-handler against the Lending state; None otherwise.
-    pub dst_token_reserve: Option<UncheckedAccount<'info>>,
     #[account(has_one = marginfi_account @ MarginfiError::Unauthorized)]
     pub rebalance_order: AccountLoader<'info, RebalanceOrder>,
     /// CHECK: the keeper; gains temporary withdraw/deposit authority for the sandwich.
@@ -467,6 +723,8 @@ pub struct StartRebalance<'info> {
     #[account(address = solana_instructions_sysvar::id())]
     pub instruction_sysvar: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
+    // Referenced banks follow in remaining_accounts, one block each (deduped, indexed by the moves):
+    // [bank, (JupLend reserve), oracles]...
 }
 
 impl<'info> Hashable for StartRebalance<'info> {
@@ -478,153 +736,122 @@ impl<'info> Hashable for StartRebalance<'info> {
 pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> MarginfiResult {
     validate_not_cpi_by_stack_height()?;
     let clock = Clock::get()?;
+    let group_key = ctx.accounts.group.key();
     let remaining = ctx.remaining_accounts;
 
-    let (src_key, dst_key, pre_src_value, pre_dst_value) = {
+    let (ref_keys, order_amount, keeper_tip) = {
         let record = ctx.accounts.rebalance_record.load()?;
+        let order = ctx.accounts.rebalance_order.load()?;
+        let n = record.ref_bank_count as usize;
         (
-            record.src_bank,
-            record.dst_bank,
-            I80F48::from(record.pre_src_value),
-            I80F48::from(record.pre_dst_value),
-        )
-    };
-    require_keys_eq!(
-        ctx.accounts.src_bank.key(),
-        src_key,
-        MarginfiError::InvalidBankAccount
-    );
-    require_keys_eq!(
-        ctx.accounts.dst_bank.key(),
-        dst_key,
-        MarginfiError::InvalidBankAccount
-    );
-
-    // Remaining layout: [src venue/oracle accounts][dst venue/oracle accounts][post-move health
-    // observation set]. The first two segments price the {src,dst} rate gate; the tail is the full
-    // observation set (bank+oracle per active balance, after the move) for the maint-health recheck.
-    let (src_oracle, dst_oracle, health_obs) = {
-        let src_bank = ctx.accounts.src_bank.load()?;
-        let dst_bank = ctx.accounts.dst_bank.load()?;
-        let src_n = get_remaining_accounts_per_bank(&src_bank)?.saturating_sub(1);
-        let dst_n = get_remaining_accounts_per_bank(&dst_bank)?.saturating_sub(1);
-        require_gte!(
-            remaining.len(),
-            src_n + dst_n,
-            MarginfiError::WrongNumberOfOracleAccounts
-        );
-        (
-            &remaining[0..src_n],
-            &remaining[src_n..src_n + dst_n],
-            &remaining[src_n + dst_n..],
+            record.ref_banks[..n].iter().map(|r| r.bank).collect::<Vec<_>>(),
+            order.amount,
+            order.keeper_tip,
         )
     };
 
+    // Remaining layout: [referenced bank blocks][post-move health observation set]. Parse exactly the
+    // recorded banks (order and identity must match the record's indices); the tail is the health set.
+    let (banks, health_obs) = parse_rebalance_banks(remaining, &group_key, ref_keys.len())?;
+    for (parsed, key) in banks.iter().zip(ref_keys.iter()) {
+        require_keys_eq!(parsed.key, *key, MarginfiError::InvalidBankAccount);
+    }
+
+    let dust = REBALANCE_CONSERVATION_DUST_USD;
     let mut health_cache = HealthCache::zeroed();
-    {
-        let src_bank = ctx.accounts.src_bank.load()?;
-        let dst_bank = ctx.accounts.dst_bank.load()?;
-        let src_tr = ctx.accounts.src_token_reserve.as_deref();
-        let dst_tr = ctx.accounts.dst_token_reserve.as_deref();
-        let src_post = rate_of(&src_bank, src_oracle, src_tr, &clock)?;
-        let dst_post = rate_of(&dst_bank, dst_oracle, dst_tr, &clock)?;
-        check!(dst_post >= src_post, MarginfiError::RebalanceOvershoot);
-
+    let (value_moved, tip_paid) = {
         let account = ctx.accounts.marginfi_account.load()?;
-        let post_src_value = bank_asset_value(&account, &src_key, &src_bank, src_oracle, &clock)?;
-        let post_dst_value = bank_asset_value(&account, &dst_key, &dst_bank, dst_oracle, &clock)?;
 
-        let order_amount = ctx.accounts.rebalance_order.load()?.amount;
-        if order_amount == 0 {
-            // Unlimited order: the full source balance must move — the source asset slot must be
-            // emptied. Checked in share space via the canonical `is_empty` (asset_shares <
-            // EMPTY_BALANCE_THRESHOLD), which is oracle- and decimals-independent.
-            let src_emptied = match account.lending_account.get_balance(&src_key) {
-                None => true,
-                Some(b) => b.is_empty(BalanceSide::Assets),
-            };
-            check!(src_emptied, MarginfiError::RebalanceIncompleteMove);
-
-            // The moved position must exceed the flat fee. A smaller position makes the conservation
-            // floor `pre_total - flat_fee` negative, which an empty-source/no-deposit move
-            // (post_total = pre_dst) clears — letting the whole sub-fee position be taken. A move
-            // that cannot cover its own fee is not worth executing.
-            check!(
-                pre_src_value > REBALANCE_FLAT_FEE_USD,
-                MarginfiError::RebalancePositionTooSmall
-            );
-
-            // The withdraw sends tokens to the keeper's account, so `src_emptied` alone does not prove
-            // the value reached dst. Enforce conservation: post-move total value may fall below the
-            // pre-move total by at most the flat fee (keeper_fee in [0, flat_fee]; sub-unit venue
-            // rounding is the keeper's burden, not user loss).
-            let pre_total = pre_src_value
-                .checked_add(pre_dst_value)
-                .ok_or_else(math_error!())?;
-            let post_total = post_src_value
-                .checked_add(post_dst_value)
-                .ok_or_else(math_error!())?;
-            let floor = pre_total
-                .checked_sub(REBALANCE_FLAT_FEE_USD)
-                .ok_or_else(math_error!())?;
-            check!(post_total >= floor, MarginfiError::RebalanceValueLeak);
-        } else {
-            // Bounded order: cap the move at `amount` and require the destination to actually receive
-            // it. The keeper's fee is the slice it withholds from the deposit, so a falling source
-            // balance is not enough — value must land in dst. The upper bound caps the withdrawal at
-            // the ordered amount; the delivery bound forces dst to gain ~that amount net of at most the
-            // flat fee, so the keeper cannot be paid without performing the move (checking source
-            // reduction instead would let a keeper withdraw and pocket without ever depositing). The
-            // target is capped at the position so an `amount` exceeding the holding cleanly degrades to
-            // a full move. The amount cap and delivery bound together enforce conservation
-            // (`post_total >= pre_total - flat_fee`), since `src_moved <= min(amount_value,
-            // pre_src_value) <= dst_gained + flat_fee`.
-            let amount_value = value_of_native(
-                I80F48::from_num(order_amount),
-                &src_bank,
-                src_oracle,
+        // Price every referenced bank once: current supply rate (for the per-move overshoot check) and
+        // post-move position value (for reconciliation).
+        let mut post_rates: Vec<I80F48> = Vec::with_capacity(banks.len());
+        let mut post_values: Vec<I80F48> = Vec::with_capacity(banks.len());
+        for parsed in banks.iter() {
+            let bank = parsed.loader.load()?;
+            post_rates.push(rate_of(&bank, parsed.oracles, parsed.token_reserve, &clock)?);
+            post_values.push(bank_asset_value(
+                &account,
+                &parsed.key,
+                &bank,
+                parsed.oracles,
                 &clock,
-            )?;
-            let src_moved = pre_src_value
-                .checked_sub(post_src_value)
-                .ok_or_else(math_error!())?;
-            let dst_gained = post_dst_value
-                .checked_sub(pre_dst_value)
-                .ok_or_else(math_error!())?;
-            let target = amount_value.min(pre_src_value);
-            // The moved slice must exceed the flat fee. A smaller slice makes `target - flat_fee`
-            // negative, which the delivery bound below clears with zero delivery — letting the whole
-            // sub-fee slice be taken. A move that cannot cover its own fee is not worth executing.
+            )?);
+        }
+
+        // Every move must not have inverted its rate advantage (the destination still beats the source
+        // after the move's own market impact).
+        let record = ctx.accounts.rebalance_record.load()?;
+        for m in record.active_moves() {
             check!(
-                target > REBALANCE_FLAT_FEE_USD,
-                MarginfiError::RebalancePositionTooSmall
-            );
-            check!(
-                src_moved <= amount_value,
-                MarginfiError::RebalanceExceedsAmount
-            );
-            check!(
-                dst_gained
-                    >= target
-                        .checked_sub(REBALANCE_FLAT_FEE_USD)
-                        .ok_or_else(math_error!())?,
-                MarginfiError::RebalanceIncompleteMove
+                post_rates[m.dst_index as usize] >= post_rates[m.src_index as usize],
+                MarginfiError::RebalanceOvershoot
             );
         }
+
+        // Reconcile the declared moves against the real per-bank value deltas. This proves value
+        // conservation (each bank's delta matches its declared net flow within dust) and, with the
+        // per-move improvement check, that every dollar moved to a strictly better venue.
+        let (total_moved, total_source_pre) = record.reconcile(&post_values, dust)?;
+        check!(total_moved > I80F48::ZERO, MarginfiError::RebalanceIncompleteMove);
 
         // Per-withdraw health checks are skipped while ACCOUNT_IN_REBALANCE is set, so recompute
         // health once here over the post-move balance set. A rebalance moves an existing position
         // between same-mint venues rather than opening new risk, so the MAINTENANCE requirement
-        // applies: the account need only stay non-liquidatable, not pass the stricter initial bar. A
-        // same-mint, value-conserving move can still shift health via venue weights/oracles, emode,
-        // risk tiers, and the flat-fee skim, so a full health check is needed
+        // applies: the account need only stay non-liquidatable, not pass the stricter initial bar.
         check_account_maint_health(&account, health_obs, &mut Some(&mut health_cache))?;
         health_cache.program_version = PROGRAM_VERSION;
         health_cache.set_engine_ok(true);
 
-        let record = ctx.accounts.rebalance_record.load()?;
         record.verify_others_unchanged(&account)?;
-    }
+
+        // `order.amount` (native) is a per-execution TOTAL value budget: the move may relocate at most
+        // its value across all banks. Unlimited (0) means no cap. Priced via any referenced bank
+        // (all same-mint).
+        let amount_value = if order_amount == 0 {
+            None
+        } else {
+            let bank0 = banks[0].loader.load()?;
+            Some(value_of_native(
+                I80F48::from_num(order_amount),
+                &bank0,
+                banks[0].oracles,
+                &clock,
+            )?)
+        };
+        if let Some(cap) = amount_value {
+            check!(
+                total_moved <= cap.checked_add(dust).ok_or_else(math_error!())?,
+                MarginfiError::RebalanceExceedsAmount
+            );
+        }
+
+        // Proportional tip over a stable denominator: `keeper_tip * (moved / target)`. `target` is the
+        // order's `amount` value (stable across executions) or the full source position when unlimited.
+        // A fixed target makes the tip invariant to how the move is split across banks — fragmenting
+        // earns no more. The tip is drawn only from lamports above the pool's rent-exempt reserve, so
+        // the reserve is never paid out and the pool is never left in a rent-paying state.
+        let spendable = ctx
+            .accounts
+            .fee_pool
+            .lamports()
+            .saturating_sub(Rent::get()?.minimum_balance(0));
+        let target_value = amount_value
+            .map(|cap| cap.min(total_source_pre))
+            .unwrap_or(total_source_pre);
+        let tip_paid = if keeper_tip == 0 || target_value <= I80F48::ZERO {
+            0
+        } else {
+            let fraction = total_moved
+                .checked_div(target_value)
+                .ok_or_else(math_error!())?
+                .min(I80F48::from_num(1));
+            let owed = I80F48::from_num(keeper_tip)
+                .checked_mul(fraction)
+                .ok_or_else(math_error!())?;
+            owed.floor().to_num::<u64>().min(spendable)
+        };
+        (total_moved, tip_paid)
+    };
 
     {
         let mut account = ctx.accounts.marginfi_account.load_mut()?;
@@ -638,6 +865,33 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         let mut order = ctx.accounts.rebalance_order.load_mut()?;
         order.last_exec_timestamp = clock.unix_timestamp as u64;
     }
+
+    pay_from_fee_pool(
+        &ctx.accounts.fee_pool,
+        &ctx.accounts.executor.to_account_info(),
+        &ctx.accounts.system_program,
+        &ctx.accounts.marginfi_account.key(),
+        ctx.bumps.fee_pool,
+        tip_paid,
+    )?;
+
+    let (authority, group) = {
+        let account = ctx.accounts.marginfi_account.load()?;
+        (account.authority, account.group)
+    };
+    emit!(RebalanceExecutedEvent {
+        header: AccountEventHeader {
+            signer: Some(ctx.accounts.executor.key()),
+            marginfi_account: ctx.accounts.marginfi_account.key(),
+            marginfi_account_authority: authority,
+            marginfi_group: group,
+        },
+        rebalance_order: ctx.accounts.rebalance_order.key(),
+        executor: ctx.accounts.executor.key(),
+        bank_count: ref_keys.len() as u8,
+        value_moved: value_moved.into(),
+        tip_paid,
+    });
     Ok(())
 }
 
@@ -667,12 +921,15 @@ pub struct EndRebalance<'info> {
     )]
     pub rebalance_record: AccountLoader<'info, RebalanceRecord>,
     pub executor: Signer<'info>,
-    pub src_bank: AccountLoader<'info, Bank>,
-    pub dst_bank: AccountLoader<'info, Bank>,
-    /// CHECK: JupLend src TokenReserve, validated in-handler against the Lending state; None otherwise.
-    pub src_token_reserve: Option<UncheckedAccount<'info>>,
-    /// CHECK: JupLend dst TokenReserve, validated in-handler against the Lending state; None otherwise.
-    pub dst_token_reserve: Option<UncheckedAccount<'info>>,
+    #[account(
+        mut,
+        seeds = [REBALANCE_FEE_POOL_SEED.as_bytes(), marginfi_account.key().as_ref()],
+        bump,
+    )]
+    pub fee_pool: SystemAccount<'info>,
+    pub system_program: Program<'info, System>,
+    // Referenced banks then the health set follow in remaining_accounts:
+    // [bank, (JupLend reserve), oracles]...[bank, oracle per active balance].
 }
 
 impl<'info> Hashable for EndRebalance<'info> {

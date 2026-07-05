@@ -15,7 +15,7 @@ use anchor_lang::prelude::*;
 use instructions::*;
 use marginfi_type_crate::types::{
     BankConfigCompact, BankConfigOpt, EmodeEntry, InterestRateConfigOpt, OrderTrigger,
-    WrappedI80F48, MAX_EMODE_ENTRIES,
+    RebalanceMove, WrappedI80F48, MAX_EMODE_ENTRIES,
 };
 use prelude::*;
 
@@ -309,6 +309,7 @@ pub mod marginfi {
         min_improvement: Option<WrappedI80F48>,
         cooldown_seconds: Option<u64>,
         amount: Option<u64>,
+        keeper_tip: Option<u64>,
     ) -> MarginfiResult {
         marginfi_account::place_rebalance_order(
             ctx,
@@ -316,6 +317,7 @@ pub mod marginfi {
             min_improvement,
             cooldown_seconds,
             amount,
+            keeper_tip,
         )
     }
 
@@ -327,6 +329,7 @@ pub mod marginfi {
         min_improvement: Option<WrappedI80F48>,
         cooldown_seconds: Option<u64>,
         amount: Option<u64>,
+        keeper_tip: Option<u64>,
     ) -> MarginfiResult {
         marginfi_account::update_rebalance_order(
             ctx,
@@ -334,7 +337,24 @@ pub mod marginfi {
             min_improvement,
             cooldown_seconds,
             amount,
+            keeper_tip,
         )
+    }
+
+    /// (permissionless) Fund an account's rebalance fee pool with SOL, used to pay keeper tips.
+    pub fn marginfi_account_top_up_rebalance_fee_pool(
+        ctx: Context<TopUpRebalanceFeePool>,
+        amount: u64,
+    ) -> MarginfiResult {
+        marginfi_account::top_up_rebalance_fee_pool(ctx, amount)
+    }
+
+    /// (user) Withdraw SOL from an account's rebalance fee pool back to the authority.
+    pub fn marginfi_account_withdraw_rebalance_fee_pool(
+        ctx: Context<WithdrawRebalanceFeePool>,
+        amount: u64,
+    ) -> MarginfiResult {
+        marginfi_account::withdraw_rebalance_fee_pool(ctx, amount)
     }
 
     /// Close an auto-rebalance order. The authority may cancel their own order at any time; anyone
@@ -346,13 +366,15 @@ pub mod marginfi {
         marginfi_account::close_rebalance_order(ctx)
     }
 
-    /// (permissionless keeper) Begin an auto-rebalance. Validates same-mint, allowed venue, and
-    /// dst supply APR > src + min_improvement; opens the start/end sandwich. `end_rebalance` must be
-    /// the last ix; CPI forbidden.
+    /// (permissionless keeper) Begin an auto-rebalance. `moves` declares each value relocation as
+    /// `(src_index, dst_index, amount)` over the banks passed in remaining_accounts; validates
+    /// same-mint, allowed venues, and every move's dst APR > src + min_improvement. Opens the
+    /// start/end sandwich; `end_rebalance` must be the last ix; CPI forbidden.
     pub fn marginfi_account_start_rebalance<'info>(
         ctx: Context<'info, StartRebalance<'info>>,
+        moves: Vec<RebalanceMove>,
     ) -> MarginfiResult {
-        marginfi_account::start_rebalance(ctx)
+        marginfi_account::start_rebalance(ctx, moves)
     }
 
     /// (permissionless keeper) End an auto-rebalance. Re-checks dst >= src post-move, value

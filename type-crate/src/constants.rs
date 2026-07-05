@@ -25,6 +25,7 @@ pub const ORDER_SEED: &str = "order";
 pub const EXECUTE_ORDER_SEED: &str = "execute_order";
 pub const REBALANCE_ORDER_SEED: &str = "rebalance_order";
 pub const REBALANCE_RECORD_SEED: &str = "rebalance_record";
+pub const REBALANCE_FEE_POOL_SEED: &str = "rebalance_fee_pool";
 
 pub const METADATA_SEED: &str = "metadata";
 
@@ -79,11 +80,11 @@ pub const BANKRUPT_THRESHOLD: I80F48 = I80F48!(0.1);
 /// Comparison threshold used to account for arithmetic artifacts on balances
 pub const ZERO_AMOUNT_THRESHOLD: I80F48 = I80F48!(0.0001);
 
-/// Flat USD value a keeper may extract per auto-rebalance execution as its compensation, taken from
-/// the rebalanced asset's value (never a separate SOL fee, so rebalancing SOL doesn't drain a SOL
-/// position). Global — the same for every order. Bounds the value the keeper may skim across the
-/// `start_rebalance`..`end_rebalance` sandwich.
-pub const REBALANCE_FLAT_FEE_USD: I80F48 = I80F48!(0.50);
+/// Tolerance (USD) by which an auto-rebalance may reduce total position value, absorbing the venue
+/// withdraw/deposit round-trip rounding (a fixed handful of native units, whose USD worth varies with
+/// token decimals/price). Keeper compensation is a separate SOL tip, so position value is otherwise
+/// strictly conserved; this bounds any residual skim to a negligible, cooldown-limited amount.
+pub const REBALANCE_CONSERVATION_DUST_USD: I80F48 = I80F48!(0.01);
 
 /// Default minimum APR improvement (dst - src) an order requires to rebalance, used when the user
 /// does not set one. I80F48, 1.0 == 100%.
@@ -266,5 +267,9 @@ pub mod ix_discriminators {
     pub const KAMINO_REFRESH_OBLIGATION: [u8; 8] = [33, 132, 147, 228, 151, 192, 72, 89];
     pub const DRIFT_UPDATE_SPOT_MARKET_CUMULATIVE_INTEREST: [u8; 8] =
         [39, 166, 139, 243, 158, 165, 155, 225];
+    /// JupLend LENDING program: refreshes the `Lending` fToken account.
     pub const JUPLEND_UPDATE_RATE: [u8; 8] = [24, 225, 53, 189, 72, 212, 225, 178];
+    /// JupLend LIQUIDITY program: refreshes the Fluid `TokenReserve` exchange prices, which is the
+    /// account the supply-rate gate reads. This is the crank that clears `TokenReserve` staleness.
+    pub const JUPLEND_UPDATE_EXCHANGE_PRICE: [u8; 8] = [239, 244, 10, 248, 116, 25, 53, 150];
 }

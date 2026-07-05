@@ -55,7 +55,7 @@ import {
   deriveSpotMarketPDA,
 } from "./utils/pdas";
 import { USER_ACCOUNT } from "./utils/mocks";
-import { expectFailedTxWithError, getTokenBalance } from "./utils/genericTests";
+import { expectFailedTxWithError } from "./utils/genericTests";
 import { bnToBigIntSafe, bnToDecimalStringSafe } from "./utils/bn-utils";
 import {
   createLookupTableForInstructions,
@@ -173,8 +173,34 @@ const deriveRebalanceRecord = (programId: PublicKey, order: PublicKey) =>
     programId,
   );
 
+const REBALANCE_FEE_POOL_SEED = "rebalance_fee_pool";
+const deriveRebalanceFeePool = (
+  programId: PublicKey,
+  marginfiAccount: PublicKey,
+) =>
+  PublicKey.findProgramAddressSync(
+    [Buffer.from(REBALANCE_FEE_POOL_SEED), marginfiAccount.toBuffer()],
+    programId,
+  );
+
+/** A declared N->N move from referenced-bank `srcIndex` to `dstIndex`, of `value` USD (== UI USDC at
+ * the $1 test oracle). */
+const buildMove = (srcIndex: number, dstIndex: number, value: number) => ({
+  srcIndex,
+  dstIndex,
+  pad0: Array(6).fill(0),
+  amount: bigNumberToWrappedI80F48(value),
+});
+
 const toMeta = (keys: PublicKey[]): AccountMeta[] =>
   keys.map((pubkey) => ({ pubkey, isSigner: false, isWritable: false }));
+
+/** A referenced bank block for remaining_accounts: the bank (writable, for native accrue) + its
+ * oracle. */
+const bankBlock = (bank: PublicKey, oracle: PublicKey): AccountMeta[] => [
+  { pubkey: bank, isSigner: false, isWritable: true },
+  { pubkey: oracle, isSigner: false, isWritable: false },
+];
 
 describe("Auto-rebalance orders (native -> native)", () => {
   let program: Program<Marginfi>;
@@ -189,9 +215,13 @@ describe("Auto-rebalance orders (native -> native)", () => {
   const SRC_SEED = new BN(8_801);
   const DST_SEED = new BN(8_802);
   const SOL_SEED = new BN(8_803);
+  const SRC2_SEED = new BN(8_804);
+  const DST2_SEED = new BN(8_805);
   let srcBank: PublicKey; // src USDC bank (util 0 -> rate 0)
   let solBank: PublicKey; // borrower collateral
   let dstBank: PublicKey; // dst USDC bank (util ~50% -> rate > 0)
+  let src2Bank: PublicKey; // second src USDC bank (util 0 -> rate 0), for N->1 consolidation
+  let dst2Bank: PublicKey; // second dst USDC bank (util > 0 -> rate > 0), for 1->N splitting
 
   // users[0] = rebalancing user, users[1] = keeper, users[2] = dst lender, users[3] = borrower
   type MockUser = (typeof users)[number];
@@ -203,6 +233,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
   let ownerAcc: PublicKey;
   let lenderAcc: PublicKey;
   let borrowerAcc: PublicKey;
+  let borrower2Acc: PublicKey; // separate account so dst2's borrow stays single-liability
 
   const usdc = (n: number) => new BN(n * 10 ** ecosystem.usdcDecimals);
   const sol = (n: number) => new BN(n * 10 ** ecosystem.wsolDecimals);
@@ -214,41 +245,92 @@ describe("Auto-rebalance orders (native -> native)", () => {
   const sendKeeper = (tx: Transaction) =>
     keeper.mrgnProgram.provider.sendAndConfirm(tx);
 
-  /** Build the keeper-signed start -> withdraw -> deposit -> end sandwich. */
-  const buildSandwich = async (opts: {
-    order: PublicKey;
-    extraTrailingIx?: boolean;
-    src?: PublicKey;
-    dst?: PublicKey;
-    depositAmount?: BN;
-  }) => {
-    const src = opts.src ?? srcBank;
-    const dst = opts.dst ?? dstBank;
-    const depositAmount = opts.depositAmount ?? REBALANCE_AMOUNT;
-    const [record] = deriveRebalanceRecord(program.programId, opts.order);
-    const oracleRemaining = toMeta([usdcOracle, usdcOracle]);
-    // end_rebalance runs a real init-health check, so it also needs the post-move observation set
-    // (bank+oracle per active balance) after the [src_oracle, dst_oracle] rate accounts. After a full
-    // native->native move the only active balance is dst.
-    const endRemaining = toMeta([usdcOracle, usdcOracle, dst, usdcOracle]);
+  /** A bank's asset shares (0 if the owner holds no active balance there). */
+  const sharesOf = (acc: any, bank: PublicKey) => {
+    const bal = acc.lendingAccount.balances.find(
+      (b: any) => b.active && b.bankPk.equals(bank),
+    );
+    return bal ? wrappedI80F48toBigNumber(bal.assetShares) : new BigNumber(0);
+  };
+  const assetShares = async (bank: PublicKey) =>
+    sharesOf(await program.account.marginfiAccount.fetch(ownerAcc), bank);
 
-    const startIx = await program.methods
-      .marginfiAccountStartRebalance()
+  /** The `start_rebalance` instruction for `moves` over `refBanks` (record derived from the order). */
+  const buildStartIx = (
+    order: PublicKey,
+    moves: ReturnType<typeof buildMove>[],
+    refBanks: AccountMeta[],
+  ) => {
+    const [record] = deriveRebalanceRecord(program.programId, order);
+    return program.methods
+      .marginfiAccountStartRebalance(moves)
       .accountsPartial({
         group,
         marginfiAccount: ownerAcc,
-        srcBank: src,
-        dstBank: dst,
-        srcTokenReserve: null,
-        dstTokenReserve: null,
-        rebalanceOrder: opts.order,
+        rebalanceOrder: order,
         executor: keeper.wallet.publicKey,
         rebalanceRecord: record,
         feePayer: keeper.wallet.publicKey,
         instructionSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
       })
-      .remainingAccounts(oracleRemaining)
+      .remainingAccounts(refBanks)
       .instruction();
+  };
+
+  /** The `end_rebalance` instruction with `endRemaining` (record + fee pool derived from the order). */
+  const buildEndIx = (order: PublicKey, endRemaining: AccountMeta[]) => {
+    const [record] = deriveRebalanceRecord(program.programId, order);
+    const [feePool] = deriveRebalanceFeePool(program.programId, ownerAcc);
+    return program.methods
+      .marginfiAccountEndRebalance()
+      .accountsPartial({
+        group,
+        marginfiAccount: ownerAcc,
+        rebalanceOrder: order,
+        rebalanceRecord: record,
+        executor: keeper.wallet.publicKey,
+        feePool,
+      })
+      .remainingAccounts(endRemaining)
+      .instruction();
+  };
+
+  /**
+   * Build the keeper-signed start -> withdraw -> deposit -> end sandwich. N->N by default: the whole
+   * source position fans out across TWO destinations (a 1->2 split), so every test that runs the
+   * sandwich exercises a multi-move execution rather than a trivial one-to-one move.
+   */
+  const buildSandwich = async (opts: {
+    order: PublicKey;
+    extraTrailingIx?: boolean;
+    src?: PublicKey;
+  }) => {
+    const src = opts.src ?? srcBank;
+    const half = REBALANCE_AMOUNT.div(new BN(2));
+    // Referenced banks (indexed 0=src, 1=dst, 2=dst2): [bank, oracle] per bank.
+    const refBanks: AccountMeta[] = [
+      ...bankBlock(src, usdcOracle),
+      ...bankBlock(dstBank, usdcOracle),
+      ...bankBlock(dst2Bank, usdcOracle),
+    ];
+    // The full source position split across two destinations, half to each.
+    const moves = [
+      buildMove(0, 1, half.toNumber() / 1e6),
+      buildMove(0, 2, half.toNumber() / 1e6),
+    ];
+    // After the split only the two destinations are active; the post-move health set lists the active
+    // balances in their stored (descending pubkey) order.
+    const [hi, lo] =
+      dstBank.toBuffer().compare(dst2Bank.toBuffer()) > 0
+        ? [dstBank, dst2Bank]
+        : [dst2Bank, dstBank];
+    const endRemaining: AccountMeta[] = [
+      ...refBanks,
+      ...bankBlock(hi, usdcOracle),
+      ...bankBlock(lo, usdcOracle),
+    ];
+
+    const startIx = await buildStartIx(opts.order, moves, refBanks);
 
     const withdrawIx = await program.methods
       .lendingAccountWithdraw(new BN(0), true)
@@ -262,37 +344,35 @@ describe("Auto-rebalance orders (native -> native)", () => {
       .remainingAccounts(toMeta(composeRemainingAccounts([[src, usdcOracle]])))
       .instruction();
 
-    const depositIxn = await program.methods
-      .lendingAccountDeposit(depositAmount, false)
+    const depositIx1 = await program.methods
+      .lendingAccountDeposit(half, false)
       .accountsPartial({
         marginfiAccount: ownerAcc,
         authority: keeper.wallet.publicKey,
-        bank: dst,
+        bank: dstBank,
         signerTokenAccount: keeper.usdcAccount,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .instruction();
 
-    const endIx = await program.methods
-      .marginfiAccountEndRebalance()
+    const depositIx2 = await program.methods
+      .lendingAccountDeposit(half, false)
       .accountsPartial({
-        group,
         marginfiAccount: ownerAcc,
-        rebalanceOrder: opts.order,
-        rebalanceRecord: record,
-        executor: keeper.wallet.publicKey,
-        srcBank: src,
-        dstBank: dst,
-        srcTokenReserve: null,
-        dstTokenReserve: null,
+        authority: keeper.wallet.publicKey,
+        bank: dst2Bank,
+        signerTokenAccount: keeper.usdcAccount,
+        tokenProgram: TOKEN_PROGRAM_ID,
       })
-      .remainingAccounts(endRemaining)
       .instruction();
+
+    const endIx = await buildEndIx(opts.order, endRemaining);
 
     const tx = new Transaction()
       .add(startIx)
       .add(withdrawIx)
-      .add(depositIxn)
+      .add(depositIx1)
+      .add(depositIx2)
       .add(endIx);
     if (opts.extraTrailingIx) {
       // Token program is allowlisted, so this clears the program check but leaves end_rebalance no
@@ -314,6 +394,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
     minImprovement: number;
     cooldownSeconds: number;
     amount?: BN;
+    keeperTip?: BN;
   }) => {
     const [order] = deriveRebalanceOrder(program.programId, ownerAcc, usdcMint);
     const ix = await program.methods
@@ -322,6 +403,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
         bigNumberToWrappedI80F48(opts.minImprovement),
         new BN(opts.cooldownSeconds),
         opts.amount ?? null,
+        opts.keeperTip ?? null,
       )
       .accountsPartial({
         group,
@@ -334,6 +416,21 @@ describe("Auto-rebalance orders (native -> native)", () => {
       .instruction();
     await sendOwner(new Transaction().add(ix));
     return order;
+  };
+
+  /** Fund the account's rebalance fee pool with `lamports` SOL, for keeper tips. */
+  const topUpPool = async (lamports: number) => {
+    const [feePool] = deriveRebalanceFeePool(program.programId, ownerAcc);
+    const ix = await program.methods
+      .marginfiAccountTopUpRebalanceFeePool(new BN(lamports))
+      .accountsPartial({
+        marginfiAccount: ownerAcc,
+        feePool,
+        payer: owner.wallet.publicKey,
+      })
+      .instruction();
+    await sendOwner(new Transaction().add(ix));
+    return feePool;
   };
 
   const closeOrder = async (order: PublicKey) => {
@@ -367,6 +464,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
           : bigNumberToWrappedI80F48(opts.minImprovement),
         opts.cooldownSeconds == null ? null : new BN(opts.cooldownSeconds),
         opts.amount ?? null,
+        null,
       )
       .accountsPartial({
         marginfiAccount: ownerAcc,
@@ -377,19 +475,21 @@ describe("Auto-rebalance orders (native -> native)", () => {
     await sendOwner(new Transaction().add(ix));
   };
 
-  /** Ensure the owner holds REBALANCE_AMOUNT in src and nothing in dst. */
+  /** Empty every USDC bank the owner may hold from a prior move, then restore exactly REBALANCE_AMOUNT
+   * in src, so each test starts from a clean single-source position. */
   const resetOwnerToSrc = async () => {
-    const acc = await program.account.marginfiAccount.fetch(ownerAcc);
-    const has = (bank: PublicKey) =>
-      acc.lendingAccount.balances.find(
+    const drainBank = async (bank: PublicKey) => {
+      const acc = await program.account.marginfiAccount.fetch(ownerAcc);
+      const held = acc.lendingAccount.balances.find(
         (b: any) => b.active && b.bankPk.equals(bank),
       );
-    if (has(dstBank)) {
-      // Withdraw-all closes dst and re-sorts before the health check, so the post-withdraw
-      // observation set is only the banks that stay active (e.g. a partial-move remainder in src).
-      const remainingBanks = acc.lendingAccount.balances
-        .filter((b: any) => b.active && !b.bankPk.equals(dstBank))
-        .map((b: any) => b.bankPk as PublicKey);
+      if (!held) return;
+      // Withdraw-all closes the bank; the post-withdraw health set is the still-active banks, ordered
+      // descending by pubkey to match their stored balance slots.
+      const others = acc.lendingAccount.balances
+        .filter((b: any) => b.active && !b.bankPk.equals(bank))
+        .map((b: any) => b.bankPk as PublicKey)
+        .sort((a: PublicKey, b: PublicKey) => b.toBuffer().compare(a.toBuffer()));
       await sendOwner(
         new Transaction().add(
           await program.methods
@@ -397,33 +497,38 @@ describe("Auto-rebalance orders (native -> native)", () => {
             .accountsPartial({
               marginfiAccount: ownerAcc,
               authority: owner.wallet.publicKey,
-              bank: dstBank,
+              bank,
               destinationTokenAccount: owner.usdcAccount,
               tokenProgram: TOKEN_PROGRAM_ID,
             })
             .remainingAccounts(
               toMeta(
                 composeRemainingAccounts(
-                  remainingBanks.map((b: PublicKey) => [b, usdcOracle]),
+                  others.map((b: PublicKey) => [b, usdcOracle]),
                 ),
               ),
             )
             .instruction(),
         ),
       );
-    }
-    if (!has(srcBank)) {
-      await sendOwner(
-        new Transaction().add(
-          await depositIx(owner.mrgnProgram, {
-            marginfiAccount: ownerAcc,
-            bank: srcBank,
-            tokenAccount: owner.usdcAccount,
-            amount: REBALANCE_AMOUNT,
-          }),
-        ),
-      );
-    }
+    };
+    // Drain the destinations first, then any second source, then the primary source, so the final
+    // withdraw leaves the account empty. Strict conservation later rejects a full-move sandwich whose
+    // declared amount doesn't match a short source, so src is restored to exactly REBALANCE_AMOUNT.
+    await drainBank(dstBank);
+    await drainBank(dst2Bank);
+    await drainBank(src2Bank);
+    await drainBank(srcBank);
+    await sendOwner(
+      new Transaction().add(
+        await depositIx(owner.mrgnProgram, {
+          marginfiAccount: ownerAcc,
+          bank: srcBank,
+          tokenAccount: owner.usdcAccount,
+          amount: REBALANCE_AMOUNT,
+        }),
+      ),
+    );
   };
 
   before(async () => {
@@ -439,6 +544,8 @@ describe("Auto-rebalance orders (native -> native)", () => {
       ecosystem.wsolMint.publicKey,
       SOL_SEED,
     );
+    [src2Bank] = deriveBankWithSeed(program.programId, group, usdcMint, SRC2_SEED);
+    [dst2Bank] = deriveBankWithSeed(program.programId, group, usdcMint, DST2_SEED);
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
@@ -516,6 +623,32 @@ describe("Auto-rebalance orders (native -> native)", () => {
       ),
     );
 
+    // Second src/dst USDC banks so the suite exercises N->N (many-source, many-destination) moves.
+    const addUsdcBank = async (seed: BN, bank: PublicKey) => {
+      await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+        new Transaction().add(
+          await addBankWithSeed(groupAdmin.mrgnProgram, {
+            marginfiGroup: group,
+            feePayer: groupAdmin.wallet.publicKey,
+            bankMint: usdcMint,
+            config: defaultBankConfig(),
+            seed,
+          }),
+        ),
+      );
+      await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+        new Transaction().add(
+          await configureBankOracle(groupAdmin.mrgnProgram, {
+            bank,
+            type: ORACLE_SETUP_PYTH_PUSH,
+            oracle: usdcOracle,
+          }),
+        ),
+      );
+    };
+    await addUsdcBank(SRC2_SEED, src2Bank);
+    await addUsdcBank(DST2_SEED, dst2Bank);
+
     const mintAuth = bankrunContext.payer.publicKey;
     const fundTx = new Transaction();
     for (const u of [owner, keeper, lender, borrower]) {
@@ -552,42 +685,51 @@ describe("Auto-rebalance orders (native -> native)", () => {
     ownerAcc = await initAcc(owner);
     lenderAcc = await initAcc(lender);
     borrowerAcc = await initAcc(borrower);
+    borrower2Acc = await initAcc(borrower);
 
-    // dst utilization: lender supplies, borrower (SOL collateral) borrows ~50%
-    await lender.mrgnProgram.provider.sendAndConfirm(
-      new Transaction().add(
-        await depositIx(lender.mrgnProgram, {
-          marginfiAccount: lenderAcc,
-          bank: dstBank,
-          tokenAccount: lender.usdcAccount,
-          amount: usdc(2000),
-        }),
-      ),
-    );
-    await borrower.mrgnProgram.provider.sendAndConfirm(
-      new Transaction().add(
-        await depositIx(borrower.mrgnProgram, {
-          marginfiAccount: borrowerAcc,
-          bank: solBank,
-          tokenAccount: borrower.wsolAccount,
-          amount: sol(50),
-        }),
-      ),
-    );
-    await borrower.mrgnProgram.provider.sendAndConfirm(
-      new Transaction().add(
-        await borrowIx(borrower.mrgnProgram, {
-          marginfiAccount: borrowerAcc,
-          bank: dstBank,
-          tokenAccount: borrower.usdcAccount,
-          amount: usdc(1000),
-          remaining: composeRemainingAccounts([
-            [dstBank, usdcOracle],
-            [solBank, wsolOracle],
-          ]),
-        }),
-      ),
-    );
+    // Both dst banks carry ~50% utilization (rate > 0): a lender supplies each, and a distinct
+    // SOL-collateralized account borrows from each. src banks stay at 0 utilization (rate 0).
+    const driveDstUtilization = async (
+      dst: PublicKey,
+      borrowAcc: PublicKey,
+    ) => {
+      await lender.mrgnProgram.provider.sendAndConfirm(
+        new Transaction().add(
+          await depositIx(lender.mrgnProgram, {
+            marginfiAccount: lenderAcc,
+            bank: dst,
+            tokenAccount: lender.usdcAccount,
+            amount: usdc(2000),
+          }),
+        ),
+      );
+      await borrower.mrgnProgram.provider.sendAndConfirm(
+        new Transaction().add(
+          await depositIx(borrower.mrgnProgram, {
+            marginfiAccount: borrowAcc,
+            bank: solBank,
+            tokenAccount: borrower.wsolAccount,
+            amount: sol(25),
+          }),
+        ),
+      );
+      await borrower.mrgnProgram.provider.sendAndConfirm(
+        new Transaction().add(
+          await borrowIx(borrower.mrgnProgram, {
+            marginfiAccount: borrowAcc,
+            bank: dst,
+            tokenAccount: borrower.usdcAccount,
+            amount: usdc(1000),
+            remaining: composeRemainingAccounts([
+              [dst, usdcOracle],
+              [solBank, wsolOracle],
+            ]),
+          }),
+        ),
+      );
+    };
+    await driveDstUtilization(dstBank, borrowerAcc);
+    await driveDstUtilization(dst2Bank, borrower2Acc);
 
     await sendOwner(
       new Transaction().add(
@@ -601,9 +743,9 @@ describe("Auto-rebalance orders (native -> native)", () => {
     );
   });
 
-  it("moves the deposit src -> dst and keeps the order - happy path", async () => {
+  it("splits the source across two destinations and keeps the order - happy path", async () => {
     await resetOwnerToSrc();
-    const allowedBanks = [srcBank, dstBank];
+    const allowedBanks = [srcBank, dstBank, dst2Bank];
     const order = await placeOrder({
       allowedBanks,
       minImprovement: 0.0001,
@@ -611,25 +753,19 @@ describe("Auto-rebalance orders (native -> native)", () => {
     });
 
     const before = await program.account.marginfiAccount.fetch(ownerAcc);
-    assert.isUndefined(
-      before.lendingAccount.balances.find(
-        (b: any) => b.active && b.bankPk.equals(dstBank),
-      ),
-      "dst should be empty before the move",
-    );
+    const oldSrc = sharesOf(before, srcBank);
+    assert.equal(sharesOf(before, dstBank).toString(), "0", "dst empty before the move");
+    assert.equal(sharesOf(before, dst2Bank).toString(), "0", "dst2 empty before the move");
 
     const tx = await buildSandwich({ order });
     await sendKeeper(tx);
 
+    // The source fans out equally into both destinations; value conserved, source drained.
     const after = await program.account.marginfiAccount.fetch(ownerAcc);
-    const srcBal = after.lendingAccount.balances.find(
-      (b: any) => b.active && b.bankPk.equals(srcBank),
-    );
-    const dstBal = after.lendingAccount.balances.find(
-      (b: any) => b.active && b.bankPk.equals(dstBank),
-    );
-    assert.isUndefined(srcBal, "src should be drained after the move");
-    assert.exists(dstBal, "dst should hold the moved deposit");
+    const half = oldSrc.div(2);
+    assert.equal(sharesOf(after, srcBank).toString(), "0", "src drained after the move");
+    assert.equal(sharesOf(after, dstBank).toString(), half.toString(), "dst holds half");
+    assert.equal(sharesOf(after, dst2Bank).toString(), half.toString(), "dst2 holds half");
 
     // Order persists; record was closed back to the keeper.
     const orderAcc = await program.account.rebalanceOrder.fetch(order);
@@ -643,52 +779,131 @@ describe("Auto-rebalance orders (native -> native)", () => {
     await closeOrder(order);
   });
 
-  it("conserves value exactly minus the keeper fee", async () => {
+  it("conserves value exactly and pays the keeper a SOL tip", async () => {
     await resetOwnerToSrc();
-    const allowedBanks = [srcBank, dstBank];
+    const allowedBanks = [srcBank, dstBank, dst2Bank];
+    const tip = new BN(200_000);
     const order = await placeOrder({
       allowedBanks,
       minImprovement: 0.0001,
       cooldownSeconds: 0,
+      keeperTip: tip,
     });
-
-    const assetShares = async (bank: PublicKey) => {
-      const acc = await program.account.marginfiAccount.fetch(ownerAcc);
-      const bal = acc.lendingAccount.balances.find(
-        (b: any) => b.active && b.bankPk.equals(bank),
-      );
-      return bal
-        ? wrappedI80F48toBigNumber(bal.assetShares)
-        : new BigNumber(0);
-    };
+    const feePool = await topUpPool(5_000_000);
 
     const oldBalance = await assetShares(srcBank);
-    const keeperBefore = await getTokenBalance(bankRunProvider, keeper.usdcAccount);
+    const poolBefore = await bankRunProvider.connection.getBalance(feePool);
 
-    // Keeper skims $0.40 (within the $0.50 flat-fee cap): withdraw the full source, deposit the rest.
-    const tx = await buildSandwich({
-      order,
-      depositAmount: REBALANCE_AMOUNT.sub(usdc(0.4)),
-    });
-    await sendKeeper(tx);
+    // Honest full move: the whole source fans out across both destinations (strict conservation),
+    // keeper paid from the pool.
+    await sendKeeper(await buildSandwich({ order }));
 
-    const newBalance = await assetShares(dstBank);
-    const keeperFee =
-      (await getTokenBalance(bankRunProvider, keeper.usdcAccount)) - keeperBefore;
+    const moved = (await assetShares(dstBank)).plus(await assetShares(dst2Bank));
+    const paid = poolBefore - (await bankRunProvider.connection.getBalance(feePool));
 
-    assert.isAbove(keeperFee, 0, "keeper should have taken a fee");
+    // Value conserved to the atomic unit across the whole destination set — no skim.
     assert.equal(
-      newBalance.plus(keeperFee).toString(),
+      moved.toString(),
       oldBalance.toString(),
-      "dst position + keeper fee must equal the original src position exactly",
+      "the two destinations must sum to the original src position exactly",
     );
+    // A full move pays exactly the configured tip from the SOL pool.
+    assert.equal(paid, tip.toNumber(), "keeper is paid the full tip");
+
+    await closeOrder(order);
+  });
+
+  it("consolidates two sources into one destination (N->1)", async () => {
+    await resetOwnerToSrc();
+    // Fund a second source so the owner holds REBALANCE_AMOUNT in each of two banks.
+    await sendOwner(
+      new Transaction().add(
+        await depositIx(owner.mrgnProgram, {
+          marginfiAccount: ownerAcc,
+          bank: src2Bank,
+          tokenAccount: owner.usdcAccount,
+          amount: REBALANCE_AMOUNT,
+        }),
+      ),
+    );
+    const tip = new BN(200_000);
+    const order = await placeOrder({
+      allowedBanks: [srcBank, src2Bank, dstBank],
+      minImprovement: 0.0001,
+      cooldownSeconds: 0,
+      keeperTip: tip,
+    });
+    const feePool = await topUpPool(5_000_000);
+
+    const oldSrc = await assetShares(srcBank);
+    const oldSrc2 = await assetShares(src2Bank);
+    const poolBefore = await bankRunProvider.connection.getBalance(feePool);
+
+    // Referenced banks indexed 0=src, 1=src2, 2=dst: both sources move into the single destination.
+    const refBanks: AccountMeta[] = [
+      ...bankBlock(srcBank, usdcOracle),
+      ...bankBlock(src2Bank, usdcOracle),
+      ...bankBlock(dstBank, usdcOracle),
+    ];
+    const amt = REBALANCE_AMOUNT.toNumber() / 1e6;
+    const moves = [buildMove(0, 2, amt), buildMove(1, 2, amt)];
+
+    const startIx = await buildStartIx(order, moves, refBanks);
+    const drainSrc = async (bank: PublicKey) =>
+      program.methods
+        .lendingAccountWithdraw(new BN(0), true)
+        .accountsPartial({
+          marginfiAccount: ownerAcc,
+          authority: keeper.wallet.publicKey,
+          bank,
+          destinationTokenAccount: keeper.usdcAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .remainingAccounts(toMeta(composeRemainingAccounts([[bank, usdcOracle]])))
+        .instruction();
+    const withdraw1 = await drainSrc(srcBank);
+    const withdraw2 = await drainSrc(src2Bank);
+    const depositIxn = await program.methods
+      .lendingAccountDeposit(REBALANCE_AMOUNT.mul(new BN(2)), false)
+      .accountsPartial({
+        marginfiAccount: ownerAcc,
+        authority: keeper.wallet.publicKey,
+        bank: dstBank,
+        signerTokenAccount: keeper.usdcAccount,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .instruction();
+    const endIx = await buildEndIx(order, [
+      ...refBanks,
+      ...bankBlock(dstBank, usdcOracle),
+    ]);
+
+    await sendKeeper(
+      new Transaction()
+        .add(startIx)
+        .add(withdraw1)
+        .add(withdraw2)
+        .add(depositIxn)
+        .add(endIx),
+    );
+
+    // Both sources drained into the single destination; value conserved across the set, one tip paid.
+    assert.equal((await assetShares(srcBank)).toString(), "0", "src drained");
+    assert.equal((await assetShares(src2Bank)).toString(), "0", "src2 drained");
+    assert.equal(
+      (await assetShares(dstBank)).toString(),
+      oldSrc.plus(oldSrc2).toString(),
+      "dst holds both sources' value exactly",
+    );
+    const paid = poolBefore - (await bankRunProvider.connection.getBalance(feePool));
+    assert.equal(paid, tip.toNumber(), "one full tip for the whole consolidation");
 
     await closeOrder(order);
   });
 
   it("moves only the ordered amount on a bounded order", async () => {
     await resetOwnerToSrc();
-    const allowedBanks = [srcBank, dstBank];
+    const allowedBanks = [srcBank, dstBank, dst2Bank];
     // Order half the 1000 USDC position; the rest must stay in src.
     const order = await placeOrder({
       allowedBanks,
@@ -697,36 +912,14 @@ describe("Auto-rebalance orders (native -> native)", () => {
       amount: usdc(500),
     });
 
-    const assetShares = async (bank: PublicKey) => {
-      const acc = await program.account.marginfiAccount.fetch(ownerAcc);
-      const bal = acc.lendingAccount.balances.find(
-        (b: any) => b.active && b.bankPk.equals(bank),
-      );
-      return bal
-        ? wrappedI80F48toBigNumber(bal.assetShares)
-        : new BigNumber(0);
-    };
-
     const oldSrc = await assetShares(srcBank);
-    const [record] = deriveRebalanceRecord(program.programId, order);
+    // Referenced banks, indexed 0=src, 1=dst.
+    const refBanks: AccountMeta[] = [
+      ...bankBlock(srcBank, usdcOracle),
+      ...bankBlock(dstBank, usdcOracle),
+    ];
 
-    const startIx = await program.methods
-      .marginfiAccountStartRebalance()
-      .accountsPartial({
-        group,
-        marginfiAccount: ownerAcc,
-        srcBank,
-        dstBank,
-        srcTokenReserve: null,
-        dstTokenReserve: null,
-        rebalanceOrder: order,
-        executor: keeper.wallet.publicKey,
-        rebalanceRecord: record,
-        feePayer: keeper.wallet.publicKey,
-        instructionSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
-      })
-      .remainingAccounts(toMeta([usdcOracle, usdcOracle]))
-      .instruction();
+    const startIx = await buildStartIx(order, [buildMove(0, 1, 500)], refBanks);
 
     // Partial withdraw of exactly the ordered amount (not withdraw-all).
     const withdrawIx = await program.methods
@@ -754,31 +947,18 @@ describe("Auto-rebalance orders (native -> native)", () => {
       })
       .instruction();
 
-    // A partial move leaves src active, so the post-move observation set spans BOTH banks:
-    // [src_oracle, dst_oracle] rate accounts, then bank+oracle per active balance. The health check
-    // matches the observation set positionally against active balances in their stored (descending
-    // pubkey) slot order, so order the two banks descending here.
+    // A partial move leaves src active, so the post-move observation set spans BOTH banks. It follows
+    // the referenced-bank blocks and is matched positionally against active balances in their stored
+    // (descending pubkey) slot order, so list the two banks descending here.
     const [hi, lo] =
       srcBank.toBuffer().compare(dstBank.toBuffer()) > 0
         ? [srcBank, dstBank]
         : [dstBank, srcBank];
-    const endIx = await program.methods
-      .marginfiAccountEndRebalance()
-      .accountsPartial({
-        group,
-        marginfiAccount: ownerAcc,
-        rebalanceOrder: order,
-        rebalanceRecord: record,
-        executor: keeper.wallet.publicKey,
-        srcBank,
-        dstBank,
-        srcTokenReserve: null,
-        dstTokenReserve: null,
-      })
-      .remainingAccounts(
-        toMeta([usdcOracle, usdcOracle, hi, usdcOracle, lo, usdcOracle]),
-      )
-      .instruction();
+    const endIx = await buildEndIx(order, [
+      ...refBanks,
+      ...bankBlock(hi, usdcOracle),
+      ...bankBlock(lo, usdcOracle),
+    ]);
 
     await sendKeeper(
       new Transaction()
@@ -807,7 +987,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
 
   it("updates an order's min improvement in place - RebalanceNotImproving", async () => {
     await resetOwnerToSrc();
-    const allowedBanks = [srcBank, dstBank];
+    const allowedBanks = [srcBank, dstBank, dst2Bank];
     const order = await placeOrder({
       allowedBanks,
       minImprovement: 0.0001,
@@ -830,7 +1010,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
 
   it("rejects when dst is not improving enough - RebalanceNotImproving", async () => {
     await resetOwnerToSrc();
-    const allowedBanks = [srcBank, dstBank];
+    const allowedBanks = [srcBank, dstBank, dst2Bank];
     const order = await placeOrder({
       allowedBanks,
       minImprovement: 1.0, // require +100% APR improvement
@@ -850,7 +1030,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
 
   it("enforces the per-order cooldown - RebalanceCooldown", async () => {
     await resetOwnerToSrc();
-    const allowedBanks = [srcBank, dstBank];
+    const allowedBanks = [srcBank, dstBank, dst2Bank];
     // 24h cooldown: the first exec stamps last_exec_timestamp, so an immediate second exec (same
     // wall-clock second) is rejected.
     const order = await placeOrder({
@@ -878,7 +1058,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
 
   it("rejects a tampered instruction sandwich - end_rebalance must be last", async () => {
     await resetOwnerToSrc();
-    const allowedBanks = [srcBank, dstBank];
+    const allowedBanks = [srcBank, dstBank, dst2Bank];
     const order = await placeOrder({
       allowedBanks,
       minImprovement: 0.0001,
@@ -900,7 +1080,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
 
   it("rejects banks outside the order allowlist - RebalanceBankNotAllowed", async () => {
     await resetOwnerToSrc();
-    const allowedBanks = [srcBank, dstBank];
+    const allowedBanks = [srcBank, dstBank, dst2Bank];
     const order = await placeOrder({
       allowedBanks,
       minImprovement: 0.0001,
@@ -1706,6 +1886,7 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
             bigNumberToWrappedI80F48(0.0001),
             new BN(0),
             null,
+            null,
           )
           .accountsPartial({
             group: groupPk,
@@ -1749,31 +1930,40 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
   }) => {
     const { order, src, dst } = opts;
     const [record] = deriveRebalanceRecord(program.programId, order);
+    const [feePool] = deriveRebalanceFeePool(program.programId, ownerAcc);
 
-    const startRemaining = toMeta([...src.leg.tail, ...dst.leg.tail]);
-    // After a full move only dst is active, so the post-move health set is the dst bank tail.
-    const endRemaining = toMeta([
-      ...src.leg.tail,
-      ...dst.leg.tail,
-      ...composeRemainingAccounts([[dst.bank, ...dst.leg.tail]]),
-    ]);
+    // A referenced venue bank block: [bank, (JupLend reserve), priceOracle, venueAccount].
+    const venueBlock = (bank: PublicKey, leg: VenueLeg): AccountMeta[] => [
+      { pubkey: bank, isSigner: false, isWritable: true },
+      ...(leg.tokenReserve
+        ? [{ pubkey: leg.tokenReserve, isSigner: false, isWritable: false }]
+        : []),
+      ...toMeta(leg.tail),
+    ];
+    // Referenced banks, indexed 0=src, 1=dst.
+    const refBanks: AccountMeta[] = [
+      ...venueBlock(src.bank, src.leg),
+      ...venueBlock(dst.bank, dst.leg),
+    ];
+    const moves = [buildMove(0, 1, REBALANCE_AMOUNT.toNumber() / 1e6)];
+    // After a full move only dst is active, so the post-move health set is the dst bank block.
+    const endRemaining: AccountMeta[] = [
+      ...refBanks,
+      ...toMeta(composeRemainingAccounts([[dst.bank, ...dst.leg.tail]])),
+    ];
 
     const startIx = await program.methods
-      .marginfiAccountStartRebalance()
+      .marginfiAccountStartRebalance(moves)
       .accountsPartial({
         group: groupPk,
         marginfiAccount: ownerAcc,
-        srcBank: src.bank,
-        dstBank: dst.bank,
-        srcTokenReserve: src.leg.tokenReserve,
-        dstTokenReserve: dst.leg.tokenReserve,
         rebalanceOrder: order,
         executor: keeper.wallet.publicKey,
         rebalanceRecord: record,
         feePayer: keeper.wallet.publicKey,
         instructionSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
       })
-      .remainingAccounts(startRemaining)
+      .remainingAccounts(refBanks)
       .instruction();
 
     const endIx = await program.methods
@@ -1784,10 +1974,7 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
         rebalanceOrder: order,
         rebalanceRecord: record,
         executor: keeper.wallet.publicKey,
-        srcBank: src.bank,
-        dstBank: dst.bank,
-        srcTokenReserve: src.leg.tokenReserve,
-        dstTokenReserve: dst.leg.tokenReserve,
+        feePool,
       })
       .remainingAccounts(endRemaining)
       .instruction();
@@ -1799,6 +1986,10 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
       startIx,
       ...src.withdraw,
       dst.deposit,
+      // The withdraw/deposit legs mark the venue reserves stale, so re-refresh them before
+      // end_rebalance reads their post-move rates (the staleness check rejects a stale reserve).
+      ...src.leg.cranks,
+      ...dst.leg.cranks,
       endIx,
     ];
 

@@ -277,10 +277,13 @@ pub fn validate_rebalance_instructions(sysvar: &AccountInfo) -> MarginfiResult {
         &DRIFT_PROGRAM_ID,
         &[&ixd::DRIFT_UPDATE_SPOT_MARKET_CUMULATIVE_INTEREST],
     )?;
+    // The supply-rate gate reads the Fluid `TokenReserve`, which is refreshed by the LIQUIDITY
+    // program's `update_exchange_price`; the LENDING program's `update_rate` refreshes the separate
+    // `Lending` account. Allow each crank only on its own program.
     validate_ixes_exclusive(
         &ixes,
         &JUPLEND_LIQUIDITY_PROGRAM_ID,
-        &[&ixd::JUPLEND_UPDATE_RATE],
+        &[&ixd::JUPLEND_UPDATE_EXCHANGE_PRICE],
     )?;
     validate_ixes_exclusive(
         &ixes,
@@ -421,6 +424,10 @@ mod tests {
         assert_eq!(
             get_discrim_hash("global", "update_rate"),
             ix_discriminators::JUPLEND_UPDATE_RATE
+        );
+        assert_eq!(
+            get_discrim_hash("global", "update_exchange_price"),
+            ix_discriminators::JUPLEND_UPDATE_EXCHANGE_PRICE
         );
     }
 

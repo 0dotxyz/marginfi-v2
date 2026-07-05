@@ -1,5 +1,5 @@
 use crate::bank::BankFixture;
-use crate::marginfi_account::MarginfiAccountFixture;
+use crate::marginfi_account::{MarginfiAccountFixture, RebalanceBankMeta};
 use crate::prelude::*;
 use crate::test::TestFixture;
 use drift_mocks::state::MinimalSpotMarket;
@@ -9,7 +9,7 @@ use kamino_mocks::state::{CurvePoint, MinimalReserve};
 use marginfi_type_crate::{
     constants::{REBALANCE_ORDER_SEED, REBALANCE_RECORD_SEED},
     pdas::derive_juplend_token_reserve,
-    types::WrappedI80F48,
+    types::{RebalanceMove, WrappedI80F48},
 };
 use solana_sdk::{
     account::{Account, AccountSharedData},
@@ -62,6 +62,46 @@ pub async fn fund_keeper_for_fees(test_f: &TestFixture, keeper: &Keypair) -> any
     Ok(())
 }
 
+/// Drive `dst` to ~50% utilization (a positive supply rate): a lender funds it with 1_000 USDC and a
+/// SOL-collateralized borrower draws 500, then interest is accrued.
+pub async fn drive_dst_utilization(test_f: &TestFixture, dst: &BankFixture) -> anyhow::Result<()> {
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(1_000.0)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, dst, 1_000.0, None)
+        .await?;
+
+    let borrower = test_f.create_marginfi_account().await;
+    let borrower_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(100.0)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol.key, sol_bank_f, 100.0, None)
+        .await?;
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, dst, 500.0)
+        .await?;
+    test_f.marginfi_group.try_accrue_interest(dst).await?;
+    Ok(())
+}
+
+/// A move of `ui_value` USD (== UI USDC amount at the $1 test oracle) from `src_index` to `dst_index`
+/// (indices into the referenced-bank list).
+pub fn rebalance_move(src_index: u8, dst_index: u8, ui_value: f64) -> RebalanceMove {
+    RebalanceMove {
+        src_index,
+        dst_index,
+        _pad0: [0; 6],
+        amount: WrappedI80F48::from(I80F48::from_num(ui_value)),
+    }
+}
+
 pub async fn setup(
     min_improvement: I80F48,
     cooldown_seconds: u64,
@@ -96,37 +136,10 @@ pub async fn setup(
     user.try_bank_deposit(user_usdc.key, &src_bank_f, DEPOSIT_USDC, None)
         .await?;
 
-    // Drive dst utilization: a lender funds dst, a SOL-collateralized borrower draws ~50%.
-    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
-    let lender = test_f.create_marginfi_account().await;
-    let lender_usdc = test_f
-        .usdc_mint
-        .create_token_account_and_mint_to(1_000.0)
-        .await;
-    lender
-        .try_bank_deposit(lender_usdc.key, &dst_bank_f, 1_000.0, None)
-        .await?;
-
-    let borrower = test_f.create_marginfi_account().await;
-    let borrower_sol = test_f
-        .sol_mint
-        .create_token_account_and_mint_to(100.0)
-        .await;
-    borrower
-        .try_bank_deposit(borrower_sol.key, sol_bank_f, 100.0, None)
-        .await?;
-    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
-    borrower
-        .try_bank_borrow(borrower_usdc.key, &dst_bank_f, 500.0)
-        .await?;
-
+    drive_dst_utilization(&test_f, &dst_bank_f).await?;
     test_f
         .marginfi_group
         .try_accrue_interest(&src_bank_f)
-        .await?;
-    test_f
-        .marginfi_group
-        .try_accrue_interest(&dst_bank_f)
         .await?;
 
     let keeper = Keypair::new();
@@ -164,6 +177,7 @@ pub async fn setup(
             Some(WrappedI80F48::from(min_improvement)),
             Some(cooldown_seconds),
             None,
+            None,
         )
         .await;
     let blockhash = test_f.get_latest_blockhash().await;
@@ -196,18 +210,106 @@ pub async fn setup(
 }
 
 impl RebalanceFixture {
+    /// A referenced native-USDC bank (one oracle) for the moves stream.
+    pub fn bank_meta(&self, bank: Pubkey) -> RebalanceBankMeta {
+        RebalanceBankMeta::new(bank, vec![self.oracle_metas[0].clone()])
+    }
+
+    /// A move of `ui_value` USD (== UI USDC amount at the $1 test oracle) from `src_index` to
+    /// `dst_index` (indices into the referenced-bank list).
+    pub fn usdc_move(&self, src_index: u8, dst_index: u8, ui_value: f64) -> RebalanceMove {
+        rebalance_move(src_index, dst_index, ui_value)
+    }
+
+    /// Add a second same-mint USDC destination bank driven to ~50% utilization (so it clears the
+    /// improvement gate against the 0%-utilization source), and extend the order's allowlist to
+    /// include it. Returns its `BankFixture`.
+    pub async fn add_second_dst(&self) -> anyhow::Result<BankFixture> {
+        let dst2 = self
+            .test_f
+            .marginfi_group
+            .try_lending_pool_add_bank_with_seed(
+                &self.test_f.usdc_mint,
+                None,
+                *DEFAULT_USDC_TEST_BANK_CONFIG,
+                102,
+            )
+            .await?;
+
+        drive_dst_utilization(&self.test_f, &dst2).await?;
+
+        let payer = self.test_f.context.borrow().payer.pubkey();
+        let update_ix = self
+            .user
+            .make_update_rebalance_order_ix(
+                self.order_pda,
+                payer,
+                Some(vec![self.src_bank_f.key, self.dst_bank_f.key, dst2.key]),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await;
+        self.process_as_payer(&[update_ix]).await?;
+        Ok(dst2)
+    }
+
+    /// Add a second same-mint USDC SOURCE bank at 0% utilization (rate 0), give the user a `deposit`
+    /// position in it, and extend the order allowlist to `[src, dst, src2]`. For consolidation (N->1)
+    /// tests: the user then holds value in two low-rate sources to sweep into the higher-rate `dst`.
+    pub async fn add_second_src(&self, deposit: f64) -> anyhow::Result<BankFixture> {
+        let src2 = self
+            .test_f
+            .marginfi_group
+            .try_lending_pool_add_bank_with_seed(
+                &self.test_f.usdc_mint,
+                None,
+                *DEFAULT_USDC_TEST_BANK_CONFIG,
+                103,
+            )
+            .await?;
+        let user_usdc = self
+            .test_f
+            .usdc_mint
+            .create_token_account_and_mint_to(deposit)
+            .await;
+        self.user
+            .try_bank_deposit(user_usdc.key, &src2, deposit, None)
+            .await?;
+        self.test_f.marginfi_group.try_accrue_interest(&src2).await?;
+
+        let payer = self.test_f.context.borrow().payer.pubkey();
+        let update_ix = self
+            .user
+            .make_update_rebalance_order_ix(
+                self.order_pda,
+                payer,
+                Some(vec![self.src_bank_f.key, self.dst_bank_f.key, src2.key]),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await;
+        self.process_as_payer(&[update_ix]).await?;
+        Ok(src2)
+    }
+
     /// The keeper-signed sandwich: start -> withdraw all of `src` -> deposit into `dst` -> end.
+    /// One full-position move from referenced bank 0 (`src`) to bank 1 (`dst`).
     pub async fn build_sandwich(&self, src: Pubkey, dst: Pubkey) -> Vec<Instruction> {
+        let ref_banks = vec![self.bank_meta(src), self.bank_meta(dst)];
+        let moves = vec![self.usdc_move(0, 1, DEPOSIT_USDC)];
         let start_ix = self
             .user
             .make_rebalance_start_ix(
-                src,
-                dst,
+                ref_banks.clone(),
+                moves,
                 self.order_pda,
                 self.record_pda,
                 self.keeper.pubkey(),
                 self.keeper.pubkey(),
-                self.oracle_metas.clone(),
             )
             .await;
         let withdraw_ix = self
@@ -233,12 +335,11 @@ impl RebalanceFixture {
         let end_ix = self
             .user
             .make_rebalance_end_ix(
-                src,
-                dst,
+                ref_banks,
+                vec![src],
                 self.order_pda,
                 self.record_pda,
                 self.keeper.pubkey(),
-                self.oracle_metas.clone(),
             )
             .await;
         vec![start_ix, withdraw_ix, deposit_ix, end_ix]
@@ -261,7 +362,56 @@ impl RebalanceFixture {
             .unwrap_or(I80F48::ZERO)
     }
 
-    /// Switch the order from full-position (the default) to a bounded `amount` of native tokens.
+    pub fn fee_pool(&self) -> Pubkey {
+        self.user.rebalance_fee_pool_pda()
+    }
+
+    pub async fn lamports_of(&self, key: Pubkey) -> u64 {
+        let mut ctx = self.test_f.context.borrow_mut();
+        ctx.banks_client
+            .get_account(key)
+            .await
+            .unwrap()
+            .map(|a| a.lamports)
+            .unwrap_or(0)
+    }
+
+    pub async fn process_as_payer(
+        &self,
+        ixs: &[Instruction],
+    ) -> Result<(), solana_program_test::BanksClientError> {
+        let blockhash = self.test_f.get_latest_blockhash().await;
+        let ctx = self.test_f.context.borrow_mut();
+        let payer = ctx.payer.pubkey();
+        let tx = Transaction::new_signed_with_payer(ixs, Some(&payer), &[&ctx.payer], blockhash);
+        ctx.banks_client.process_transaction(tx).await
+    }
+
+    pub async fn set_keeper_tip(
+        &self,
+        tip: u64,
+    ) -> Result<(), solana_program_test::BanksClientError> {
+        let payer = self.test_f.context.borrow().payer.pubkey();
+        let ix = self
+            .user
+            .make_update_rebalance_order_ix(self.order_pda, payer, None, None, None, None, Some(tip))
+            .await;
+        self.process_as_payer(&[ix]).await
+    }
+
+    pub async fn top_up_pool(
+        &self,
+        amount: u64,
+    ) -> Result<(), solana_program_test::BanksClientError> {
+        let payer = self.test_f.context.borrow().payer.pubkey();
+        let ix = self
+            .user
+            .make_top_up_rebalance_fee_pool_ix(payer, amount)
+            .await;
+        self.process_as_payer(&[ix]).await
+    }
+
+    /// Switch the order from uncapped (the default) to a bounded `amount` of native tokens.
     pub async fn set_amount(
         &self,
         amount: u64,
@@ -269,26 +419,23 @@ impl RebalanceFixture {
         let payer = self.test_f.context.borrow().payer.pubkey();
         let update_ix = self
             .user
-            .make_update_rebalance_order_ix(self.order_pda, payer, None, None, None, Some(amount))
+            .make_update_rebalance_order_ix(
+                self.order_pda,
+                payer,
+                None,
+                None,
+                None,
+                Some(amount),
+                None,
+            )
             .await;
-        let blockhash = self.test_f.get_latest_blockhash().await;
-        let ctx = self.test_f.context.borrow_mut();
-        let tx = Transaction::new_signed_with_payer(
-            &[update_ix],
-            Some(&payer),
-            &[&ctx.payer],
-            blockhash,
-        );
-        ctx.banks_client.process_transaction(tx).await
+        self.process_as_payer(&[update_ix]).await
     }
 }
 
-/// The user's src-venue deposit (native units, 6-decimal USDC).
+/// The user's src-venue deposit (native units, 6-decimal USDC). The keeper redeposits this full amount
+/// into the dst venue; value is strictly conserved and the keeper is paid a separate SOL tip.
 pub const VENUE_DEPOSIT_NATIVE: u64 = 100_000_000; // 100 USDC
-/// Re-deposited into the dst venue. Slightly below the withdrawn amount so the keeper always has the
-/// funds despite per-venue share rounding; the shortfall (< 0.001 USDC) stays within the rebalance
-/// flat-fee tolerance, so value conservation still holds.
-pub const VENUE_REDEPOSIT_NATIVE: u64 = VENUE_DEPOSIT_NATIVE - 1_000;
 /// 50% borrow utilization engineered onto the Drift dst spot market: enough to make its supply rate
 /// clearly beat the 0%-utilization source while staying positive after the dst deposit grows it.
 pub const DRIFT_DST_BORROW_NUM: u128 = 1;
@@ -449,6 +596,7 @@ impl MultiVenueFixture {
                 vec![src_bank, dst_bank],
                 Some(WrappedI80F48::from(min_improvement)),
                 Some(0),
+                None,
                 None,
             )
             .await;
