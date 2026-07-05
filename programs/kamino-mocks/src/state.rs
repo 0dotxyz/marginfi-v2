@@ -252,10 +252,9 @@ impl MinimalReserve {
     }
 
     pub fn is_stale(&self, current_slot: u64) -> bool {
-        // klend marks the reserve stale after any same-slot balance mutation (via
-        // `last_update.mark_stale()`), cleared only by `refresh_reserve`. That flag can be set while
-        // `slot == current_slot`, so the slot check alone would treat a stale reserve as fresh.
-        self.stale == 1 || self.slot < current_slot
+        // Stale once the reserve's recorded slot falls behind the current slot; a `refresh_reserve`
+        // in the same slot brings it current. Keepers reading a venue rate must refresh in-tx.
+        self.slot < current_slot
     }
 }
 
