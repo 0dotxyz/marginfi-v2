@@ -207,8 +207,8 @@ describe("Transfer account authority to PDA", () => {
       assert.equal(balOld.active, balNew.active);
       assert.equal(balOld.bankAssetTag, balNew.bankAssetTag);
       assertI80F48Equal(
-        balOld.emissionsOutstanding,
-        balNew.emissionsOutstanding
+        balOld.premiumOutstanding,
+        balNew.premiumOutstanding
       );
 
       // The old account is now empty

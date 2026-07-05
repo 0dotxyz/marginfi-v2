@@ -151,7 +151,7 @@ describe("Deposit funds", () => {
     // Note: The first deposit issues shares 1:1 and the shares use the same decimals
     assertI80F48Approx(balances[0].assetShares, depositAmountA_native);
     assertI80F48Equal(balances[0].liabilityShares, 0);
-    assertI80F48Equal(balances[0].emissionsOutstanding, 0);
+    assertI80F48Equal(balances[0].premiumOutstanding, 0);
 
     let now = await getBankrunTime(bankrunContext);
     assertBNApproximately(balances[0].lastUpdate, now, 2);
@@ -199,7 +199,7 @@ describe("Deposit funds", () => {
     // Note: The first deposit issues shares 1:1 and the shares use the same decimals
     assertI80F48Approx(balances[0].assetShares, depositAmountUsdc_native);
     assertI80F48Equal(balances[0].liabilityShares, 0);
-    assertI80F48Equal(balances[0].emissionsOutstanding, 0);
+    assertI80F48Equal(balances[0].premiumOutstanding, 0);
 
     let now = await getBankrunTime(bankrunContext);
     assertBNApproximately(balances[0].lastUpdate, now, 2);
@@ -427,7 +427,7 @@ describe("Deposit funds", () => {
       depositAmountSol_native
     );
     assertI80F48Equal(balances[depositIndex].liabilityShares, 0);
-    assertI80F48Equal(balances[depositIndex].emissionsOutstanding, 0);
+    assertI80F48Equal(balances[depositIndex].premiumOutstanding, 0);
 
     let now = await getBankrunTime(bankrunContext);
     assertBNApproximately(balances[depositIndex].lastUpdate, now, 2);

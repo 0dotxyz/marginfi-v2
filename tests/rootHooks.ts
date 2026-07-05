@@ -125,6 +125,9 @@ export const driftGroup = Keypair.fromSeed(DRIFT_GROUP_SEED);
 /** Group used for solend tests */
 const SOLEND_GROUP_SEED = Buffer.from("SOLEND_GROUP_SEED_00000000000000");
 export const solendGroup = Keypair.fromSeed(SOLEND_GROUP_SEED);
+/** Group used for variable-borrow premium tests (vb*) */
+const PREMIUM_GROUP_SEED = Buffer.from("PREMIUM_GROUP_SEED_0000000000000");
+export const premiumGroup = Keypair.fromSeed(PREMIUM_GROUP_SEED);
 
 /** Bank for USDC */
 const USDC_SEED = Buffer.from("USDC_BANK_SEED_00000000000000000");
@@ -206,6 +209,15 @@ export const EMODE_MAINT_RATE_SOL_TO_LST = 0.9474; // ~19x leverage
 // LST_TO_LST: init ~5x, maint ~6.7x (well under limits)
 export const EMODE_INIT_RATE_LST_TO_LST = 0.8;
 export const EMODE_MAINT_RATE_LST_TO_LST = 0.85;
+
+/** Banks in the variable-borrow premium suite (vb*) use this base seed. */
+export const PREMIUM_SEED = 77;
+/** Premium tag for the zero-interest stable (USDC) liability bank. */
+export const PREMIUM_STABLE_TAG = 100;
+/** Premium tag for the SOL collateral bank. */
+export const PREMIUM_SOL_TAG = 200;
+/** (SOL collateral -> stable liability) premium APR (fraction) used across the suite. */
+export const PREMIUM_SOL_TO_STABLE = 0.01; // 1%
 
 export let kaminoAccounts: Map<string, PublicKey>;
 /** Kamino Market */

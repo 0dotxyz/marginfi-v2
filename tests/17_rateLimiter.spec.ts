@@ -946,6 +946,9 @@ describe("Rate limiter", () => {
       .lendingAccountEndFlashloan()
       .accounts({
         marginfiAccount: requireRateLimitAccount(),
+        // `group` has no has_one relation on end_flashloan, so Anchor's resolver cannot
+        // auto-fill it; it must be passed explicitly.
+        group: marginfiGroup.publicKey,
       })
       .remainingAccounts(endRemaining)
       .instruction();
