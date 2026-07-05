@@ -9,7 +9,8 @@ use crate::{
     prelude::*,
     state::marginfi_account::{
         any_balance_bank_is_cb_halted, check_pre_liquidation_condition_and_get_account_health,
-        get_health_components, write_liquidation_price_cache_from, MarginfiAccountImpl,
+        get_health_components, run_cb_price_gate, write_liquidation_price_cache_from,
+        MarginfiAccountImpl,
     },
 };
 use anchor_lang::prelude::*;
@@ -44,6 +45,9 @@ pub fn start_liquidation<'info>(ctx: Context<'info, StartLiquidation<'info>>) ->
         !any_balance_bank_is_cb_halted(&marginfi_account, ctx.remaining_accounts)?,
         MarginfiError::CircuitBreakerAdminOnly
     );
+    // Inline CB gate: the live prices fetched below are locked into the liquidation cache for
+    // the whole receivership and no later sub-step re-validates them.
+    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
     start_receivership(
         &mut marginfi_account,
         &mut liq_record,

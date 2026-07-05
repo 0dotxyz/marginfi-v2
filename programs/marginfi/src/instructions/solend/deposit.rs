@@ -5,8 +5,8 @@ use crate::{
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
-            LendingAccountImpl, MarginfiAccountImpl,
+            account_not_frozen_for_authority, deposit_is_halt_safe, is_signer_authorized,
+            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
     },
@@ -56,7 +56,11 @@ pub fn solend_deposit<'info>(
         authority_bump = bank.liquidity_vault_authority_bump;
 
         validate_asset_tags(&bank, &marginfi_account)?;
-        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState, true)?;
+        validate_bank_state(
+            &bank,
+            InstructionKind::FailsIfPausedOrReduceState,
+            deposit_is_halt_safe(&marginfi_account, &ctx.accounts.bank.key()),
+        )?;
 
         check!(
             !marginfi_account.get_flag(ACCOUNT_DISABLED)

@@ -7,7 +7,9 @@ use crate::{
     prelude::MarginfiError,
     state::{
         bank::{BankImpl, BankVaultType},
-        marginfi_account::{check_account_bankrupt, BankAccountWrapper, MarginfiAccountImpl},
+        marginfi_account::{
+            check_account_bankrupt, run_cb_price_gate, BankAccountWrapper, MarginfiAccountImpl,
+        },
         marginfi_group::MarginfiGroupImpl,
     },
     utils::{
@@ -49,11 +51,13 @@ pub fn lending_pool_handle_bankruptcy<'info>(
         group: marginfi_group_loader,
         ..
     } = ctx.accounts;
-    let maybe_bank_mint = {
-        let bank = bank_loader.load()?;
+    let is_admin_or_risk_admin = {
         let group = marginfi_group_loader.load()?;
         let signer = ctx.accounts.signer.key();
-        let is_admin_or_risk_admin = signer == group.risk_admin || signer == group.admin;
+        signer == group.risk_admin || signer == group.admin
+    };
+    let maybe_bank_mint = {
+        let bank = bank_loader.load()?;
         let permissionless_bad_debt_settlement =
             bank.get_flag(PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG);
 
@@ -76,6 +80,12 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     let mut health_cache = HealthCache::zeroed();
     health_cache.timestamp = clock.unix_timestamp;
     health_cache.program_version = PROGRAM_VERSION;
+
+    // Inline CB gate: the insolvency decision below values the whole portfolio at live
+    // prices with no other CB check on this path. Admins can settle in any state.
+    if !is_admin_or_risk_admin {
+        run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+    }
 
     check_account_bankrupt(
         &marginfi_account,
