@@ -601,7 +601,12 @@ fn accrue_native_bank(
     }
     let group = group.load()?;
     let mut bank = parsed.loader.load_mut()?;
-    bank.accrue_interest(clock.unix_timestamp, &group, parsed.key)?;
+    bank.accrue_interest(
+        clock.unix_timestamp,
+        &group,
+        #[cfg(not(feature = "client"))]
+        parsed.key,
+    )?;
     bank.update_bank_cache(&group)?;
     Ok(())
 }

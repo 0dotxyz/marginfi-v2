@@ -370,7 +370,7 @@ impl RebalanceFixture {
     }
 
     pub async fn lamports_of(&self, key: Pubkey) -> u64 {
-        let mut ctx = self.test_f.context.borrow_mut();
+        let ctx = self.test_f.context.borrow_mut();
         ctx.banks_client
             .get_account(key)
             .await
