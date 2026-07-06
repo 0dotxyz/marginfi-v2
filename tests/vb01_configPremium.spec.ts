@@ -34,6 +34,7 @@ import {
   MAX_PREMIUM_ENTRIES,
   newPremiumEntry,
   PREMIUM_ACTIVE,
+  premiumRateToU32,
 } from "./utils/premium-instructions";
 import {
   assertBankrunTxFailed,
@@ -263,7 +264,7 @@ describe("vb01: Configure variable-borrow premium", () => {
     const tx = new Transaction().add(
       await configGroupPremium(users[0].mrgnBankrunProgram, {
         group: premiumGroup.publicKey,
-        entries: [newPremiumEntry(1, 2, 0.01)],
+        entry: newPremiumEntry(1, 2, 0.01),
       }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -273,12 +274,12 @@ describe("vb01: Configure variable-borrow premium", () => {
     assertBankrunTxFailed(result, "0x179a");
   });
 
-  it("matrix validation: zero tag / duplicate pair / overfull rejected", async () => {
-    const submit = async (entries: ReturnType<typeof newPremiumEntry>[]) => {
+  it("matrix validation: zero tags and delete-missing rejected", async () => {
+    const submit = async (entry: ReturnType<typeof newPremiumEntry>) => {
       const tx = new Transaction().add(
         await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
           group: premiumGroup.publicKey,
-          entries,
+          entry,
         }),
       );
       tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
@@ -287,46 +288,23 @@ describe("vb01: Configure variable-borrow premium", () => {
     };
 
     // Zero collateral tag -> PremiumEntryInvalid (6600)
-    assertBankrunTxFailed(await submit([newPremiumEntry(0, 100, 0.01)]), "0x19c8");
+    assertBankrunTxFailed(await submit(newPremiumEntry(0, 100, 0.01)), "0x19c8");
     // Zero liability tag -> PremiumEntryInvalid (6600)
-    assertBankrunTxFailed(await submit([newPremiumEntry(100, 0, 0.01)]), "0x19c8");
-    // Duplicate (collateral, liability) pair -> PremiumEntryDuplicate (6601)
-    assertBankrunTxFailed(
-      await submit([newPremiumEntry(1, 2, 0.01), newPremiumEntry(1, 2, 0.02)]),
-      "0x19c9",
-    );
-
-    // 65 entries -> PremiumMatrixFull (6602)
-    const overfull = [];
-    for (let i = 1; i <= MAX_PREMIUM_ENTRIES + 1; i++) {
-      overfull.push(newPremiumEntry(i, 1000, 0.01));
-    }
-    assertBankrunTxFailed(await submit(overfull), "0x19ca");
-
-    // Same collateral vs. different liabilities is fine
-    const okTx = new Transaction().add(
-      await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
-        group: premiumGroup.publicKey,
-        entries: [newPremiumEntry(1, 2, 0.01), newPremiumEntry(1, 3, 0.02)],
-      }),
-    );
-    // processBankrunTransaction throws on failure, so a clean run proves acceptance.
-    await processBankrunTransaction(bankrunContext, okTx, [emodeAdmin.wallet]);
-    const group = await bankrunProgram.account.marginfiGroup.fetch(
-      premiumGroup.publicKey,
-    );
-    assert.equal(group.premiumSettings.entryCount, 2);
+    assertBankrunTxFailed(await submit(newPremiumEntry(100, 0, 0.01)), "0x19c8");
+    // Removing a pair that is not in the matrix -> PremiumEntryNotFound (6604)
+    assertBankrunTxFailed(await submit(newPremiumEntry(9, 9, 0)), "0x19cc");
   });
 
-  it("(emode admin) configure matrix stores entries sorted", async () => {
-    // Two entries submitted out of collateral-tag order; storage must sort ascending.
+  it("(emode admin) pairs are stored sorted regardless of add order", async () => {
+    // Two pairs added out of collateral-tag order; storage must sort ascending.
     const tx = new Transaction().add(
       await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
         group: premiumGroup.publicKey,
-        entries: [
-          newPremiumEntry(PREMIUM_SOL_TAG, PREMIUM_STABLE_TAG, 0.01),
-          newPremiumEntry(PREMIUM_STABLE_TAG, PREMIUM_SOL_TAG, 0.005),
-        ],
+        entry: newPremiumEntry(PREMIUM_SOL_TAG, PREMIUM_STABLE_TAG, 0.01),
+      }),
+      await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
+        group: premiumGroup.publicKey,
+        entry: newPremiumEntry(PREMIUM_STABLE_TAG, PREMIUM_SOL_TAG, 0.005),
       }),
     );
     await processBankrunTransaction(bankrunContext, tx, [emodeAdmin.wallet]);
@@ -341,11 +319,35 @@ describe("vb01: Configure variable-borrow premium", () => {
     assert.equal(group.premiumEntries[1].collateralTag, PREMIUM_SOL_TAG);
   });
 
-  it("(emode admin) empty matrix turns the matrix off (entryCount 0)", async () => {
+  it("(emode admin) re-config updates a pair in place; rate 0 removes it", async () => {
+    // From the previous spec the matrix is [(STABLE, SOL, 0.5%), (SOL, STABLE, 1%)]
     const tx = new Transaction().add(
       await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
         group: premiumGroup.publicKey,
-        entries: [],
+        entry: newPremiumEntry(PREMIUM_SOL_TAG, PREMIUM_STABLE_TAG, 0.02), // update
+      }),
+      await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
+        group: premiumGroup.publicKey,
+        entry: newPremiumEntry(PREMIUM_STABLE_TAG, PREMIUM_SOL_TAG, 0), // delete
+      }),
+    );
+    await processBankrunTransaction(bankrunContext, tx, [emodeAdmin.wallet]);
+
+    const group = await bankrunProgram.account.marginfiGroup.fetch(
+      premiumGroup.publicKey,
+    );
+    assert.equal(group.premiumSettings.entryCount, 1);
+    assert.equal(group.premiumEntries[0].collateralTag, PREMIUM_SOL_TAG);
+    assert.equal(group.premiumEntries[0].rate, premiumRateToU32(0.02));
+    // The vacated slot behind entryCount is zeroed
+    assert.equal(group.premiumEntries[1].collateralTag, 0);
+  });
+
+  it("(emode admin) removing the last pair turns the matrix off (entryCount 0)", async () => {
+    const tx = new Transaction().add(
+      await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
+        group: premiumGroup.publicKey,
+        entry: newPremiumEntry(PREMIUM_SOL_TAG, PREMIUM_STABLE_TAG, 0),
       }),
     );
     await processBankrunTransaction(bankrunContext, tx, [emodeAdmin.wallet]);
@@ -360,13 +362,11 @@ describe("vb01: Configure variable-borrow premium", () => {
     const tx = new Transaction().add(
       await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
         group: premiumGroup.publicKey,
-        entries: [
-          newPremiumEntry(
-            PREMIUM_SOL_TAG,
-            PREMIUM_STABLE_TAG,
-            PREMIUM_SOL_TO_STABLE,
-          ),
-        ],
+        entry: newPremiumEntry(
+          PREMIUM_SOL_TAG,
+          PREMIUM_STABLE_TAG,
+          PREMIUM_SOL_TO_STABLE,
+        ),
       }),
     );
     await processBankrunTransaction(bankrunContext, tx, [emodeAdmin.wallet]);

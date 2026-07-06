@@ -2,7 +2,7 @@ use crate::StakedSettingsEditConfig;
 use anchor_lang::prelude::*;
 use marginfi_type_crate::{
     constants::ORDER_ACTIVE_TAGS,
-    types::{BankConfigOpt, HealthCache, OrderTriggerType, PremiumEntry, WrappedI80F48},
+    types::{BankConfigOpt, HealthCache, OrderTriggerType, WrappedI80F48},
 };
 
 // Event headers
@@ -104,8 +104,10 @@ pub struct LendingPoolBankCollectFeesEvent {
 #[event]
 pub struct LendingPoolGroupPremiumConfigureEvent {
     pub header: GroupEventHeader,
-    /// The full replaced matrix (live entries only; full-replace semantics).
-    pub entries: Vec<PremiumEntry>,
+    pub collateral_tag: u16,
+    pub liability_tag: u16,
+    pub old_rate: u32,
+    pub new_rate: u32,
 }
 
 #[event]

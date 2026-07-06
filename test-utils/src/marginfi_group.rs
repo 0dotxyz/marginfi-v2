@@ -696,18 +696,19 @@ impl MarginfiGroupFixture {
         Ok(())
     }
 
+    /// Set one premium matrix pair (rate 0 = remove). For several pairs, call once per pair.
     pub async fn try_configure_group_premium(
         &self,
-        entries: Vec<PremiumEntry>,
+        entry: PremiumEntry,
     ) -> Result<(), BanksClientError> {
         let payer = self.ctx.borrow().payer.insecure_clone();
-        self.try_configure_group_premium_with_signer(entries, &payer)
+        self.try_configure_group_premium_with_signer(entry, &payer)
             .await
     }
 
     pub async fn try_configure_group_premium_with_signer(
         &self,
-        entries: Vec<PremiumEntry>,
+        entry: PremiumEntry,
         signer: &Keypair,
     ) -> Result<(), BanksClientError> {
         let ix = Instruction {
@@ -717,7 +718,12 @@ impl MarginfiGroupFixture {
                 emode_admin: signer.pubkey(),
             }
             .to_account_metas(Some(true)),
-            data: LendingPoolConfigureGroupPremium { entries }.data(),
+            data: LendingPoolConfigureGroupPremium {
+                collateral_tag: entry.collateral_tag,
+                liability_tag: entry.liability_tag,
+                rate: entry.rate,
+            }
+            .data(),
         };
         let tx = Transaction::new_signed_with_payer(
             &[ix],

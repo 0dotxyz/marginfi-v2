@@ -102,6 +102,13 @@ pub struct MarginfiGroup {
 impl MarginfiGroup {
     pub const LEN: usize = std::mem::size_of::<MarginfiGroup>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::GROUP;
+    /// Bytes reserved between the fixed struct and the tail premium entries on a resized group
+    /// account. Future fixed-size group fields are carved from this region so the premium
+    /// entries always stay last (and can keep growing).
+    pub const EXT_RESERVED_LEN: usize = 64;
+    /// Account-data offset of the first tail premium entry on a resized group account.
+    /// Accounts at the original size (`8 + LEN`) have no tail.
+    pub const PREMIUM_TAIL_OFFSET: usize = 8 + Self::LEN + Self::EXT_RESERVED_LEN;
 }
 
 impl Default for MarginfiGroup {

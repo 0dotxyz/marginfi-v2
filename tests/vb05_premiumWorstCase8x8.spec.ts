@@ -51,6 +51,7 @@ import {
 } from "./utils/types";
 import { deriveBankWithSeed } from "./utils/pdas";
 import { getBankrunBlockhash, processBankrunTransaction } from "./utils/tools";
+import { assertBankrunTxFailed } from "./utils/genericTests";
 
 // 8 collateral banks x 8 liability banks, one account with 16 active balances.
 const N = 8;
@@ -209,21 +210,38 @@ describe("vb05: Premium worst case (8x8 matrix, 16 balances)", () => {
       }
     }
     assert.equal(entries.length, 64);
-    await processBankrunTransaction(
-      bankrunContext,
-      new Transaction().add(
-        await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
-          group: group8x8.publicKey,
-          entries,
-        }),
-      ),
-      [emodeAdmin.wallet],
-    );
+    // One pair per instruction; batch 32 per tx to stay under the tx size limit.
+    for (let start = 0; start < entries.length; start += 32) {
+      const tx = new Transaction();
+      for (const entry of entries.slice(start, start + 32)) {
+        tx.add(
+          await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
+            group: group8x8.publicKey,
+            entry,
+          }),
+        );
+      }
+      await processBankrunTransaction(bankrunContext, tx, [emodeAdmin.wallet]);
+    }
 
     const group = await bankrunProgram.account.marginfiGroup.fetch(
       group8x8.publicKey,
     );
     assert.equal(group.premiumSettings.entryCount, 64);
+
+    // The matrix is full: a 65th pair -> PremiumMatrixFull (6601)
+    const overfullTx = new Transaction().add(
+      await configGroupPremium(emodeAdmin.mrgnBankrunProgram, {
+        group: group8x8.publicKey,
+        entry: newPremiumEntry(999, 999, 0.01),
+      }),
+    );
+    overfullTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    overfullTx.sign(emodeAdmin.wallet);
+    assertBankrunTxFailed(
+      await banksClient.tryProcessTransaction(overfullTx),
+      "0x19c9",
+    );
 
     // Tag every bank; liability banks are premium-active. Batch to keep tx sizes small.
     const tagIxs = [];

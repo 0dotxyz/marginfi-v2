@@ -114,20 +114,24 @@ export const editFeeStateV2Premium = (
 
 export type ConfigGroupPremiumArgs = {
   group: PublicKey;
-  /** Full-replace matrix, <= `MAX_PREMIUM_ENTRIES` entries. */
-  entries: PremiumEntry[];
+  /** One (collateral, liability) pair; `rate > 0` inserts/updates, `rate == 0` removes it. */
+  entry: PremiumEntry;
 };
 
 /**
- * (emode admin) Replace the group's pairwise premium matrix. The signer (provider wallet) must be
- * the group's `emode_admin`.
+ * (emode admin) Set one pair of the group's premium matrix (like emode, one pair per
+ * instruction). The signer (provider wallet) must be the group's `emode_admin`.
  */
 export const configGroupPremium = (
   program: Program<Marginfi>,
   args: ConfigGroupPremiumArgs,
 ) => {
   return program.methods
-    .lendingPoolConfigureGroupPremium(args.entries)
+    .lendingPoolConfigureGroupPremium(
+      args.entry.collateralTag,
+      args.entry.liabilityTag,
+      args.entry.rate,
+    )
     .accounts({
       group: args.group,
       // emodeAdmin: signer, implied from provider wallet (checked has_one against group)

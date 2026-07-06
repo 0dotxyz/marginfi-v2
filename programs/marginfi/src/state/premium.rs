@@ -272,7 +272,9 @@ mod tests {
     use super::*;
     use bytemuck::Zeroable;
     use fixed_macro::types::I80F48;
-    use marginfi_type_crate::types::{milli_to_u32, PremiumEntry, MAX_PREMIUM_ENTRIES};
+    use marginfi_type_crate::types::{
+        milli_to_u32, MarginfiGroup, PremiumEntry, MAX_PREMIUM_ENTRIES,
+    };
 
     const YEAR: u64 = 31_536_000;
     const TOL: I80F48 = I80F48!(0.000001);

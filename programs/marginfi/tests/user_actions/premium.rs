@@ -70,7 +70,7 @@ async fn premium_test_fixture() -> TestFixture {
     let group_f = &test_f.marginfi_group;
     group_f.try_init_and_copy_fee_state_v2().await.unwrap();
     group_f
-        .try_configure_group_premium(vec![entry(TAG_SOL, TAG_STABLE, 1.0)])
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
         .await
         .unwrap();
     group_f
@@ -243,7 +243,7 @@ async fn premium_activation_never_charges_retroactively() -> anyhow::Result<()> 
 
     // Risk team turns premium on
     group_f
-        .try_configure_group_premium(vec![entry(TAG_SOL, TAG_STABLE, 1.0)])
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
         .await?;
     group_f
         .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
@@ -504,7 +504,7 @@ async fn premium_snapshot_reprices_when_collateral_improves() -> anyhow::Result<
     group_f.try_init_and_copy_fee_state_v2().await?;
     // (sol -> stable) = 1%; sol_eq is untagged => 0% leg
     group_f
-        .try_configure_group_premium(vec![entry(TAG_SOL, TAG_STABLE, 1.0)])
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
         .await?;
     let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
     let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
@@ -714,10 +714,10 @@ async fn premium_composes_with_emode() -> anyhow::Result<()> {
     // Premium: independent tag space; (SOL -> LST) = 4%, (stable -> LST) = 6%.
     group_f.try_init_and_copy_fee_state_v2().await?;
     group_f
-        .try_configure_group_premium(vec![
-            entry(TAG_SOL, TAG_LST, 4.0),
-            entry(TAG_STABLE, TAG_LST, 6.0),
-        ])
+        .try_configure_group_premium(entry(TAG_SOL, TAG_LST, 4.0))
+        .await?;
+    group_f
+        .try_configure_group_premium(entry(TAG_STABLE, TAG_LST, 6.0))
         .await?;
     group_f
         .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)

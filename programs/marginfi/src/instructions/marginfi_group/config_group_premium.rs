@@ -8,51 +8,78 @@ use marginfi_type_crate::types::{
     MarginfiGroup, PremiumEntry, MAX_PREMIUM_ENTRIES, PREMIUM_TAG_EMPTY,
 };
 
-/// (emode admin only) Replace the group's pairwise variable-borrow premium matrix.
+/// (emode admin only) Set one pair of the group's variable-borrow premium matrix.
 ///
-/// Full-replace semantics: the passed entries become the entire matrix. Pass an empty vec to
-/// disable the premium matrix. Entries are stored sorted by (collateral_tag, liability_tag).
+/// `rate > 0` inserts or updates the (collateral_tag, liability_tag) pair; `rate == 0` removes
+/// it, erroring if the pair is not in the matrix so operator typos fail loudly. One pair per
+/// instruction (like emode config) keeps every matrix change independently auditable.
+/// Entries are stored sorted by (collateral_tag, liability_tag).
 pub fn lending_pool_configure_group_premium(
     ctx: Context<LendingPoolConfigureGroupPremium>,
-    entries: Vec<PremiumEntry>,
+    collateral_tag: u16,
+    liability_tag: u16,
+    rate: u32,
 ) -> MarginfiResult {
-    let mut group = ctx.accounts.group.load_mut()?;
-
+    // Zero (untagged) never matches a lookup, so storing it would create a dead entry.
     check!(
-        entries.len() <= MAX_PREMIUM_ENTRIES,
-        MarginfiError::PremiumMatrixFull
+        collateral_tag != PREMIUM_TAG_EMPTY && liability_tag != PREMIUM_TAG_EMPTY,
+        MarginfiError::PremiumEntryInvalid
     );
-    for entry in entries.iter() {
-        check!(
-            entry.collateral_tag != PREMIUM_TAG_EMPTY && entry.liability_tag != PREMIUM_TAG_EMPTY,
-            MarginfiError::PremiumEntryInvalid
-        );
-    }
-    // With at most 64 entries, the quadratic duplicate scan is trivially cheap and heap-free.
-    for (i, a) in entries.iter().enumerate() {
-        for b in entries.iter().skip(i + 1) {
-            check!(
-                (a.collateral_tag, a.liability_tag) != (b.collateral_tag, b.liability_tag),
-                MarginfiError::PremiumEntryDuplicate
-            );
+
+    let mut group = ctx.accounts.group.load_mut()?;
+    let mut count = (group.premium_settings.entry_count as usize).min(MAX_PREMIUM_ENTRIES);
+    let position = group.premium_entries[..count]
+        .binary_search_by_key(&(collateral_tag, liability_tag), |e| {
+            (e.collateral_tag, e.liability_tag)
+        });
+
+    let old_rate = if rate > 0 {
+        let entry = PremiumEntry {
+            collateral_tag,
+            liability_tag,
+            rate,
+        };
+        match position {
+            Ok(i) => {
+                let old = group.premium_entries[i].rate;
+                group.premium_entries[i] = entry;
+                old
+            }
+            Err(i) => {
+                check!(
+                    count < MAX_PREMIUM_ENTRIES,
+                    MarginfiError::PremiumMatrixFull
+                );
+                group.premium_entries[i..=count].rotate_right(1);
+                group.premium_entries[i] = entry;
+                count += 1;
+                0
+            }
         }
-    }
+    } else {
+        let Ok(i) = position else {
+            return err!(MarginfiError::PremiumEntryNotFound);
+        };
+        let old = group.premium_entries[i].rate;
+        group.premium_entries[i..count].rotate_left(1);
+        group.premium_entries[count - 1] = PremiumEntry::zeroed();
+        count -= 1;
+        old
+    };
 
-    let mut sorted_entries = [PremiumEntry::zeroed(); MAX_PREMIUM_ENTRIES];
-    sorted_entries[..entries.len()].copy_from_slice(&entries);
-    sorted_entries[..entries.len()].sort_by_key(|e| (e.collateral_tag, e.liability_tag));
-
-    group.premium_entries = sorted_entries;
-    group.premium_settings.entry_count = entries.len() as u16;
+    group.premium_settings.entry_count = count as u16;
     // Groups created before the premium feature have a zeroed capacity; configuring the matrix
     // brings them up to the current account capacity.
     group.premium_settings.entry_capacity = MAX_PREMIUM_ENTRIES as u16;
     group.premium_settings.timestamp = Clock::get()?.unix_timestamp;
 
     msg!(
-        "premium matrix set: {:?} entries: {:?}",
-        entries.len(),
-        &sorted_entries[..entries.len()]
+        "premium pair ({:?}, {:?}) rate: {:?} -> {:?} ({:?} entries)",
+        collateral_tag,
+        liability_tag,
+        old_rate,
+        rate,
+        count
     );
 
     emit!(LendingPoolGroupPremiumConfigureEvent {
@@ -60,7 +87,10 @@ pub fn lending_pool_configure_group_premium(
             marginfi_group: ctx.accounts.group.key(),
             signer: Some(ctx.accounts.emode_admin.key()),
         },
-        entries: sorted_entries[..entries.len()].to_vec(),
+        collateral_tag,
+        liability_tag,
+        old_rate,
+        new_rate: rate,
     });
 
     Ok(())

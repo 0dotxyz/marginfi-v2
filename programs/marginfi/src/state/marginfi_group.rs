@@ -259,17 +259,18 @@ impl MarginfiGroupImpl for MarginfiGroup {
 
     /// Look up the variable-borrow premium rate (milli-u32 encoding) for a (collateral tag,
     /// liability tag) pair. Missing pairs and untagged (0) banks pay no premium.
-    /// * The SOLE accessor for `premium_entries`: a future group-account resize only needs to
-    ///   extend this lookup past the current struct bounds.
+    /// * The SOLE accessor for `premium_entries`. Entries are stored sorted by
+    ///   (collateral_tag, liability_tag) — every config path preserves this.
     fn find_premium_rate(&self, collateral_tag: u16, liability_tag: u16) -> u32 {
         if collateral_tag == PREMIUM_TAG_EMPTY || liability_tag == PREMIUM_TAG_EMPTY {
             return 0;
         }
         let n = (self.premium_settings.entry_count as usize).min(MAX_PREMIUM_ENTRIES);
         self.premium_entries[..n]
-            .iter()
-            .find(|e| e.collateral_tag == collateral_tag && e.liability_tag == liability_tag)
-            .map(|e| e.rate)
+            .binary_search_by_key(&(collateral_tag, liability_tag), |e| {
+                (e.collateral_tag, e.liability_tag)
+            })
+            .map(|i| self.premium_entries[i].rate)
             .unwrap_or(0)
     }
 }

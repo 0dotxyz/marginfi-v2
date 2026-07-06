@@ -15,7 +15,7 @@ use anchor_lang::prelude::*;
 use instructions::*;
 use marginfi_type_crate::types::{
     BankConfigCompact, BankConfigOpt, EmodeEntry, InterestRateConfigOpt, OrderTrigger,
-    PremiumEntry, WrappedI80F48, MAX_EMODE_ENTRIES,
+    WrappedI80F48, MAX_EMODE_ENTRIES,
 };
 use prelude::*;
 
@@ -206,12 +206,20 @@ pub mod marginfi {
         marginfi_group::lending_pool_clone_emode(ctx)
     }
 
-    /// (emode_admin only) Replace the group's pairwise variable-borrow premium matrix.
+    /// (emode_admin only) Set one pair of the group's variable-borrow premium matrix:
+    /// `rate > 0` inserts or updates the pair, `rate == 0` removes it.
     pub fn lending_pool_configure_group_premium(
         ctx: Context<LendingPoolConfigureGroupPremium>,
-        entries: Vec<PremiumEntry>,
+        collateral_tag: u16,
+        liability_tag: u16,
+        rate: u32,
     ) -> MarginfiResult {
-        marginfi_group::lending_pool_configure_group_premium(ctx, entries)
+        marginfi_group::lending_pool_configure_group_premium(
+            ctx,
+            collateral_tag,
+            liability_tag,
+            rate,
+        )
     }
 
     /// (emode_admin only) Set a bank's premium tag and toggle premium accrual for its borrowers.

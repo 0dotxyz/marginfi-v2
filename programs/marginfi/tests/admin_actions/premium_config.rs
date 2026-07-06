@@ -1,3 +1,4 @@
+use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use fixtures::marginfi_group::MarginfiGroupFixture;
 use fixtures::prelude::*;
@@ -49,9 +50,13 @@ async fn premium_config_happy_path() -> anyhow::Result<()> {
     // Copy must not have clobbered the premium fields but did copy v1 fields
     assert_eq!(fee_state_v2.global_fee_admin, test_f.payer());
 
-    // emode admin (payer) sets the matrix; entries are stored sorted
+    // emode admin (payer) sets pairs one at a time; entries are stored sorted regardless of
+    // the order they were added in
     group_f
-        .try_configure_group_premium(vec![entry(200, 100, 1.0), entry(100, 200, 0.5)])
+        .try_configure_group_premium(entry(200, 100, 1.0))
+        .await?;
+    group_f
+        .try_configure_group_premium(entry(100, 200, 0.5))
         .await?;
 
     let group = group_f.load().await;
@@ -62,6 +67,23 @@ async fn premium_config_happy_path() -> anyhow::Result<()> {
     );
     assert_eq!(group.premium_entries[0].collateral_tag, 100);
     assert_eq!(group.premium_entries[1].collateral_tag, 200);
+
+    // Re-configuring an existing pair updates its rate in place
+    group_f
+        .try_configure_group_premium(entry(100, 200, 2.0))
+        .await?;
+    let group = group_f.load().await;
+    assert_eq!(group.premium_settings.entry_count, 2);
+    assert_eq!(group.premium_entries[0].rate, entry(100, 200, 2.0).rate);
+
+    // Rate 0 removes the pair and zeroes the vacated slot
+    group_f
+        .try_configure_group_premium(entry(100, 200, 0.0))
+        .await?;
+    let group = group_f.load().await;
+    assert_eq!(group.premium_settings.entry_count, 1);
+    assert_eq!(group.premium_entries[0].collateral_tag, 200);
+    assert_eq!(group.premium_entries[1], PremiumEntry::zeroed());
 
     // Bank premium tag + PREMIUM_ACTIVE
     let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
@@ -80,8 +102,10 @@ async fn premium_config_happy_path() -> anyhow::Result<()> {
     assert!(!usdc_bank.get_flag(PREMIUM_ACTIVE));
     assert_eq!(usdc_bank.premium_tag, 100);
 
-    // Empty matrix = matrix off (entry_count is the single source of truth)
-    group_f.try_configure_group_premium(vec![]).await?;
+    // Removing the last pair turns the matrix off (entry_count is the single source of truth)
+    group_f
+        .try_configure_group_premium(entry(200, 100, 0.0))
+        .await?;
     let group = group_f.load().await;
     assert_eq!(group.premium_settings.entry_count, 0);
 
@@ -103,7 +127,7 @@ async fn premium_config_wrong_admin_fails() -> anyhow::Result<()> {
     let intruder = Keypair::new();
 
     let res = group_f
-        .try_configure_group_premium_with_signer(vec![entry(1, 2, 1.0)], &intruder)
+        .try_configure_group_premium_with_signer(entry(1, 2, 1.0), &intruder)
         .await;
     assert!(res.is_err());
 
@@ -129,38 +153,47 @@ async fn premium_config_matrix_validation() -> anyhow::Result<()> {
 
     // Zero tags rejected
     let res = group_f
-        .try_configure_group_premium(vec![entry(0, 100, 1.0)])
+        .try_configure_group_premium(entry(0, 100, 1.0))
         .await;
     assert!(res.is_err());
     let res = group_f
-        .try_configure_group_premium(vec![entry(100, 0, 1.0)])
+        .try_configure_group_premium(entry(100, 0, 1.0))
         .await;
     assert!(res.is_err());
 
-    // Duplicate (collateral, liability) pair rejected
-    let res = group_f
-        .try_configure_group_premium(vec![entry(1, 2, 1.0), entry(1, 2, 2.0)])
-        .await;
+    // Removing a pair that is not in the matrix fails loudly
+    let res = group_f.try_configure_group_premium(entry(9, 9, 0.0)).await;
     assert!(res.is_err());
 
-    // Same collateral against different liabilities is fine
-    group_f
-        .try_configure_group_premium(vec![entry(1, 2, 1.0), entry(1, 3, 2.0)])
-        .await?;
-
-    // 65 entries rejected; exactly 64 accepted
-    let full: Vec<PremiumEntry> = (1..=MAX_PREMIUM_ENTRIES as u16)
-        .map(|i| entry(i, 1000, 1.0))
-        .collect();
-    let mut overfull = full.clone();
-    overfull.push(entry(1001, 1000, 1.0));
-    let res = group_f.try_configure_group_premium(overfull).await;
-    assert!(res.is_err());
-    group_f.try_configure_group_premium(full).await?;
+    // Fill to capacity one pair at a time; the 65th insert is rejected
+    for i in 1..=MAX_PREMIUM_ENTRIES as u16 {
+        group_f
+            .try_configure_group_premium(entry(i, 1000, 1.0))
+            .await?;
+    }
     let group = group_f.load().await;
     assert_eq!(
         group.premium_settings.entry_count,
         MAX_PREMIUM_ENTRIES as u16
+    );
+    let res = group_f
+        .try_configure_group_premium(entry(1001, 1000, 1.0))
+        .await;
+    assert!(res.is_err());
+
+    // At capacity: updating an existing pair still works, and so does removing one
+    group_f
+        .try_configure_group_premium(entry(5, 1000, 3.0))
+        .await?;
+    let group = group_f.load().await;
+    assert_eq!(group.premium_entries[4].rate, entry(5, 1000, 3.0).rate);
+    group_f
+        .try_configure_group_premium(entry(5, 1000, 0.0))
+        .await?;
+    let group = group_f.load().await;
+    assert_eq!(
+        group.premium_settings.entry_count,
+        MAX_PREMIUM_ENTRIES as u16 - 1
     );
 
     Ok(())

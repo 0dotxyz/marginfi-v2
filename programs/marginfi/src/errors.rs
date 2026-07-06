@@ -434,15 +434,15 @@ pub enum MarginfiError {
     // ************** BEGIN PREMIUM ERRORS (starting at 6600)
     #[msg("Premium entry has a zero collateral or liability tag")]
     PremiumEntryInvalid = 600, // 6600
-    #[msg("Duplicate (collateral, liability) pair in premium entries")]
-    PremiumEntryDuplicate, // 6601
     #[msg("Too many premium entries for the group's capacity")]
-    PremiumMatrixFull, // 6602
+    PremiumMatrixFull, // 6601
     #[msg("Premium ATA does not match the canonical ATA of the premium wallet")]
-    InvalidPremiumAta, // 6603
+    InvalidPremiumAta, // 6602
     #[msg("Premium wallet is not configured on FeeStateV2")]
-    PremiumWalletNotSet, // 6604
-                         // **************END PREMIUM ERRORS
+    PremiumWalletNotSet, // 6603
+    #[msg("Premium (collateral, liability) pair is not in the matrix")]
+    PremiumEntryNotFound, // 6604
+                          // **************END PREMIUM ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -684,10 +684,10 @@ impl From<u32> for MarginfiError {
 
             // Premium-specific errors (starting at 6600)
             6600 => MarginfiError::PremiumEntryInvalid,
-            6601 => MarginfiError::PremiumEntryDuplicate,
-            6602 => MarginfiError::PremiumMatrixFull,
-            6603 => MarginfiError::InvalidPremiumAta,
-            6604 => MarginfiError::PremiumWalletNotSet,
+            6601 => MarginfiError::PremiumMatrixFull,
+            6602 => MarginfiError::InvalidPremiumAta,
+            6603 => MarginfiError::PremiumWalletNotSet,
+            6604 => MarginfiError::PremiumEntryNotFound,
 
             _ => MarginfiError::InternalLogicError,
         }
