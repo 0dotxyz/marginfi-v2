@@ -11,6 +11,23 @@ remaining accounts.
 
 In some instances, you must also pack other accounts into remaining accounts.
 
+### Integration Withdrawals
+
+For `integration_withdraw`, `remaining_accounts` has two contiguous sections:
+
+1. protocol-specific integration accounts
+2. normal marginfi health/risk accounts
+
+This ordering is required. The program first consumes the protocol section based on the bank's
+`asset_tag`, then interprets the rest as health accounts.
+
+Examples:
+
+- Kamino withdraw: `[kamino protocol accounts..., health accounts...]`
+- Drift withdraw: `[drift protocol accounts..., health accounts...]`
+- Solend withdraw: `[solend protocol accounts..., health accounts...]`
+- JupLend withdraw: `[juplend protocol accounts..., health accounts...]`
+
 ### T22 Mints
 
 If the Mint for a given Bank is Token22, pack it first, before all the risk accounts.

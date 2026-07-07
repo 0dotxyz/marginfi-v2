@@ -1,39 +1,22 @@
-use crate::state::bank::BankVaultType;
-use crate::utils::record_deposit_inflow;
 use crate::{
-    bank_signer,
-    events::{AccountEventHeader, LendingAccountDepositEvent},
-    optional_account,
+    check,
+    instructions::integration::{self, impl_common_deposit},
     state::{
-        bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
-            LendingAccountImpl, MarginfiAccountImpl,
+            account_not_frozen_for_authority, is_signer_authorized, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
     },
     utils::is_kamino_asset_tag,
-    utils::{assert_within_one_token, validate_asset_tags, validate_bank_state, InstructionKind},
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::clock::Clock;
-use anchor_spl::token::Token;
-use anchor_spl::token_interface::{
-    transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
+use anchor_spl::{
+    token::Token,
+    token_interface::{Mint, TokenAccount, TokenInterface},
 };
-use fixed::types::I80F48;
-use kamino_mocks::kamino_lending::cpi::{
-    deposit_reserve_liquidity_and_obligation_collateral_v2, refresh_reserves_batch,
-};
-use kamino_mocks::{
-    kamino_lending::cpi::accounts::{
-        DepositFarmsAccounts, DepositReserveLiquidityAndObligationCollateral,
-        DepositReserveLiquidityAndObligationCollateralV2, RefreshReservesBatch,
-    },
-    state::{MinimalObligation, MinimalReserve},
-};
-use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
+use kamino_mocks::state::{MinimalObligation, MinimalReserve};
+use marginfi_type_crate::constants::{ASSET_TAG_KAMINO, LIQUIDITY_VAULT_AUTHORITY_SEED};
 use marginfi_type_crate::pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID};
 use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
@@ -49,92 +32,23 @@ pub fn kamino_deposit<'info>(
     amount: u64,
     refresh_reserve: Option<bool>,
 ) -> MarginfiResult {
-    let refresh_reserve = refresh_reserve.unwrap_or(false);
-    let authority_bump: u8;
-    {
-        let marginfi_account = ctx.accounts.marginfi_account.load()?;
-        let bank = ctx.accounts.bank.load()?;
-        authority_bump = bank.liquidity_vault_authority_bump;
-
-        validate_asset_tags(&bank, &marginfi_account)?;
-        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
-    }
-
-    // Get initial obligation data to verify deposit amount later
-    let initial_obligation_deposited_amount =
-        ctx.accounts.integration_acc_2.load()?.deposits[0].deposited_amount;
-    let expected_collateral_amount = ctx
-        .accounts
-        .integration_acc_1
-        .load()?
-        .liquidity_to_collateral(amount)?;
-
-    if refresh_reserve {
-        ctx.accounts.cpi_refresh_reserve()?;
-    }
-
-    ctx.accounts.cpi_transfer_user_to_obligation_owner(amount)?;
-    ctx.accounts.cpi_kamino_deposit(amount, authority_bump)?;
-
-    let final_obligation_deposited_amount =
-        ctx.accounts.integration_acc_2.load()?.deposits[0].deposited_amount;
-
-    // Verifying the deposit was successful by checking obligation balance increased by the correct amount
-    let obligation_collateral_change =
-        final_obligation_deposited_amount - initial_obligation_deposited_amount;
-    assert_within_one_token(
-        obligation_collateral_change,
-        expected_collateral_amount,
-        MarginfiError::KaminoDepositFailed,
-    )?;
-
-    {
-        let mut bank = ctx.accounts.bank.load_mut()?;
-        let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let group = ctx.accounts.group.load()?;
-        let clock = Clock::get()?;
-
-        let mut bank_account = BankAccountWrapper::find_or_create(
-            &ctx.accounts.bank.key(),
-            &mut bank,
-            &mut marginfi_account.lending_account,
-        )?;
-
-        // Convert deposit amount to I80F48 for calculations
-        let obligation_collateral_change_i80f48 = I80F48::from_num(obligation_collateral_change);
-        let share_amount = bank_account.deposit_no_repay(obligation_collateral_change_i80f48)?;
-
-        record_deposit_inflow(
-            &mut bank,
-            &group,
-            ctx.accounts.group.key(),
-            ctx.accounts.bank.key(),
-            marginfi_account.account_flags,
-            amount,
-            &clock,
-        )?;
-        // Update bank cache after modifying balances
-        bank.update_bank_cache(&group)?;
-
-        marginfi_account.last_update = clock.unix_timestamp as u64;
-        marginfi_account.lending_account.sort_balances();
-        marginfi_account.sync_indexer_flags();
-
-        emit!(LendingAccountDepositEvent {
-            header: AccountEventHeader {
-                signer: Some(ctx.accounts.authority.key()),
-                marginfi_account: ctx.accounts.marginfi_account.key(),
-                marginfi_account_authority: marginfi_account.authority,
-                marginfi_group: marginfi_account.group,
-            },
-            bank: ctx.accounts.bank.key(),
-            mint: bank.mint,
-            amount,
-            share_amount: share_amount.into(),
-        });
-    }
-
-    Ok(())
+    // `protocol_accounts` flattens the optional farm accounts positionally, so a reserve farm
+    // state without the obligation farm user state would land in the wrong slot.
+    check!(
+        ctx.accounts.obligation_farm_user_state.is_some()
+            || ctx.accounts.reserve_farm_state.is_none(),
+        MarginfiError::KaminoObligationFarmUserStateMissing
+    );
+    let common = ctx.accounts.to_common();
+    // Leaked to get a true `'info` borrow (the bump allocator never frees, so this costs nothing).
+    let protocol_accounts = ctx.accounts.protocol_accounts().leak();
+    integration::integration_deposit_impl(
+        &common,
+        protocol_accounts,
+        amount,
+        Some(ASSET_TAG_KAMINO),
+        refresh_reserve.unwrap_or(false),
+    )
 }
 
 #[derive(Accounts)]
@@ -200,19 +114,8 @@ pub struct KaminoDeposit<'info> {
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
 
-    #[account(
-        mut,
-        // The first deposit in the obligation is for `integration_acc_1`.
-        constraint = {
-            let obligation = integration_acc_2.load()?;
-            obligation.deposits[0].deposit_reserve == integration_acc_1.key()
-        } @ MarginfiError::ObligationDepositReserveMismatch,
-        // The rest of the obligation is always empty
-        constraint = {
-            let obligation = integration_acc_2.load()?;
-            obligation.deposits.iter().skip(1).all(|d| d.deposited_amount == 0)
-        } @ MarginfiError::InvalidObligationDepositCount
-    )]
+    /// The Kamino obligation owned by liquidity_vault_authority
+    #[account(mut)]
     pub integration_acc_2: AccountLoader<'info, MinimalObligation>,
 
     /// CHECK: validated by the Kamino program
@@ -249,7 +152,7 @@ pub struct KaminoDeposit<'info> {
     pub obligation_farm_user_state: Option<UncheckedAccount<'info>>,
 
     /// Required if the Kamino reserve has an active farm.
-    /// CHECK: validated by the Kamino program  
+    /// CHECK: validated by the Kamino program
     #[account(mut)]
     pub reserve_farm_state: Option<UncheckedAccount<'info>>,
 
@@ -270,69 +173,30 @@ pub struct KaminoDeposit<'info> {
     pub instruction_sysvar_account: UncheckedAccount<'info>,
 }
 
+impl_common_deposit!(KaminoDeposit, liquidity_token_program);
+
 impl<'info> KaminoDeposit<'info> {
-    pub fn cpi_refresh_reserve(&self) -> MarginfiResult {
-        let accounts = RefreshReservesBatch {};
-        let program = self.kamino_program.to_account_info();
-        let cpi_ctx = CpiContext::new(program.key(), accounts).with_remaining_accounts(vec![
-            self.integration_acc_1.to_account_info(),
+    fn protocol_accounts(&self) -> Vec<AccountInfo<'info>> {
+        let mut accounts = vec![
+            self.integration_acc_2.to_account_info(),
             self.lending_market.to_account_info(),
-        ]);
-        refresh_reserves_batch(cpi_ctx, true)?;
-        Ok(())
-    }
-
-    pub fn cpi_transfer_user_to_obligation_owner(&self, amount: u64) -> MarginfiResult {
-        let program = self.liquidity_token_program.to_account_info();
-        let accounts = TransferChecked {
-            from: self.signer_token_account.to_account_info(),
-            to: self.liquidity_vault.to_account_info(),
-            authority: self.authority.to_account_info(),
-            mint: self.mint.to_account_info(),
-        };
-        let cpi_ctx = CpiContext::new(program.key(), accounts);
-        let decimals = self.mint.decimals;
-        transfer_checked(cpi_ctx, amount, decimals)?;
-        Ok(())
-    }
-
-    pub fn cpi_kamino_deposit(&self, amount: u64, authority_bump: u8) -> MarginfiResult {
-        let deposit_accounts = DepositReserveLiquidityAndObligationCollateral {
-            owner: self.liquidity_vault_authority.to_account_info(),
-            obligation: self.integration_acc_2.to_account_info(),
-            lending_market: self.lending_market.to_account_info(),
-            lending_market_authority: self.lending_market_authority.to_account_info(),
-            reserve: self.integration_acc_1.to_account_info(),
-            reserve_liquidity_mint: self.mint.to_account_info(),
-            reserve_liquidity_supply: self.reserve_liquidity_supply.to_account_info(),
-            reserve_collateral_mint: self.reserve_collateral_mint.to_account_info(),
-            reserve_destination_deposit_collateral: self
-                .reserve_destination_deposit_collateral
+            self.lending_market_authority.to_account_info(),
+            self.integration_acc_1.to_account_info(),
+            self.reserve_liquidity_supply.to_account_info(),
+            self.reserve_collateral_mint.to_account_info(),
+            self.reserve_destination_deposit_collateral
                 .to_account_info(),
-            user_source_liquidity: self.liquidity_vault.to_account_info(),
-            placeholder_user_destination_collateral: None,
-            collateral_token_program: self.collateral_token_program.to_account_info(),
-            liquidity_token_program: self.liquidity_token_program.to_account_info(),
-            instruction_sysvar_account: self.instruction_sysvar_account.to_account_info(),
-        };
-
-        // --- optional “farms_accounts” group ---
-        let farms_accounts = DepositFarmsAccounts {
-            obligation_farm_user_state: optional_account!(self.obligation_farm_user_state),
-            reserve_farm_state: optional_account!(self.reserve_farm_state),
-        };
-
-        // --- wrap both groups in the outer struct ---
-        let accounts = DepositReserveLiquidityAndObligationCollateralV2 {
-            deposit_accounts,
-            deposit_farms_accounts: farms_accounts,
-            farms_program: self.farms_program.to_account_info(),
-        };
-        let program = self.kamino_program.to_account_info();
-        let signer_seeds: &[&[&[u8]]] =
-            bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
-        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
-        deposit_reserve_liquidity_and_obligation_collateral_v2(cpi_ctx, amount)?;
-        Ok(())
+            self.kamino_program.to_account_info(),
+            self.farms_program.to_account_info(),
+            self.collateral_token_program.to_account_info(),
+            self.instruction_sysvar_account.to_account_info(),
+        ];
+        if let Some(ref account) = self.obligation_farm_user_state {
+            accounts.push(account.to_account_info());
+        }
+        if let Some(ref account) = self.reserve_farm_state {
+            accounts.push(account.to_account_info());
+        }
+        accounts
     }
 }

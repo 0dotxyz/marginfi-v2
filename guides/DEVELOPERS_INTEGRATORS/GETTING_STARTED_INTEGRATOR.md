@@ -28,6 +28,53 @@ Be aware of:
 * Contact us on telegram to be added to our "Integrators" list. We will make a best effort to ping
   you at least one week before any program update goes live.
 
+## Migration: Unified Integration Interface
+
+This release adds a shared integration interface for wrapped integrations. The old
+protocol-specific user entrypoints still remain available on this branch.
+
+### Preferred shared equivalents
+
+| Old instruction | New instruction |
+|----------------|-----------------|
+| `kamino_deposit` | `integration_deposit` |
+| `kamino_withdraw` | `integration_withdraw` |
+| `drift_deposit` | `integration_deposit` |
+| `drift_withdraw` | `integration_withdraw` |
+| `solend_deposit` | `integration_deposit` |
+| `solend_withdraw` | `integration_withdraw` |
+| `juplend_deposit` | `integration_deposit` |
+| `juplend_withdraw` | `integration_withdraw` |
+
+### What integrators must change
+
+- Choose whether to keep using the protocol-specific user instructions or migrate to the shared
+  `integration_deposit` / `integration_withdraw` entrypoints.
+- Select the protocol behavior from `bank.config.asset_tag` when using the shared entrypoints.
+- For `integration_deposit`, pass the protocol-specific accounts in `remaining_accounts`.
+- For `integration_withdraw`, pass protocol-specific accounts first in `remaining_accounts`, then
+  append the usual health/risk accounts.
+- Update any discriminator allowlists or transaction inspectors if you adopt the shared withdraw
+  flow. The unified `integration_withdraw` discriminator exists, and the per-venue `*_withdraw`
+  discriminators still remain available.
+- Re-run any client-side account builders you migrate. This is not only a method rename; the
+  shared instruction uses `remaining_accounts` packing for protocol-specific accounts.
+
+### Exact account layouts
+
+The exact per-protocol account layouts are enforced by the program. The current TS helpers in this
+repo still build the per-venue instructions and are the best local reference for protocol account
+ordering:
+
+- `tests/utils/kamino-instructions.ts`
+- `tests/utils/drift-instructions.ts`
+- `tests/utils/solend-instructions.ts`
+- `tests/utils/juplend/user-instructions.ts`
+- `tests/utils/integration-account-layouts.ts`
+
+`tests/utils/integration-account-layouts.ts` records the shared protocol-account counts, but it is
+not yet the single shared builder for these flows.
+
 ## Important Instructions (click to learn more)
 
 <details>
@@ -53,12 +100,12 @@ the bank, and you attempt to deposit 10, `deposit_up_to_limit` = true will depos
 </details>
 
 <details>
-<summary> <b>kamino_deposit</b> - deposit into a Kamino Bank</summary>
+<summary> <b>integration_deposit</b> - deposit into an integration Bank (Kamino, Drift, Solend, JupLend)</summary>
 
-- Check `bank.config.asset_tag` ASSET_TAG_KAMINO (3) is allowed with this instruction. Others
-  have their own deposit instruction.
+- Check `bank.config.asset_tag` and pass the protocol-specific accounts in `remaining_accounts`.
+- Supported tags are the wrapped integration banks: Kamino (3), Drift (4), Solend (5), JupLend (6).
 - No Risk Engine check, always considered risk-free
-- `amount` is in native token (of the Kamino reserve), in native decimal, e.g. 1 SOL = 1 \* 10^9
+- `amount` is in native underlying token decimals for every supported integration deposit.
 </details>
 
 <details>
@@ -76,15 +123,17 @@ by configuring `amount` will always leave the Balance on your account, even with
 </details>
 
 <details>
-<summary> <b>kamino_withdraw</b> - withdraw from a Kamino Bank</summary>
+<summary> <b>integration_withdraw</b> - withdraw from an integration Bank (Kamino, Drift, Solend, JupLend)</summary>
 
-- Check `bank.config.asset_tag` ASSET_TAG_KAMINO (3) is allowed with this instruction. Others
-  have their own deposit instruction.
-- Requires a Risk Engine check (pass banks and oracles in remaining accounts)
+- Check `bank.config.asset_tag` and pass protocol accounts first in `remaining_accounts`, followed
+  by the usual risk-engine bank/oracle accounts.
+- Requires a Risk Engine check for the post-withdraw health validation.
+- The program splits `remaining_accounts` by protocol-specific account count, so ordering matters.
+- `amount` semantics depend on the wrapped protocol:
+  - Kamino / Solend: amount is in collateral-share units.
+  - Drift / JupLend: amount is in native underlying token units.
 - If group rate limits are enabled, the withdrawn bank and its oracle account group must still be
   present in `remaining_accounts` so the program can price the outflow in USD.
-- `amount` is in **collateral** token, which always uses native decimal. Perform a conversion
-  from liquidity -> collateral token.
 - Can fail if the Bank doesn't have enough liquidity, or the Account after the action would fail the
   risk check.
 </details>

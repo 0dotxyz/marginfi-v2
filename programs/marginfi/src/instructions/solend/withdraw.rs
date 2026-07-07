@@ -1,42 +1,25 @@
 use crate::{
-    bank_signer, check,
-    constants::{PROGRAM_VERSION, SOLEND_PROGRAM_ID},
-    events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
+    constants::SOLEND_PROGRAM_ID,
+    instructions::integration::{self, impl_common_withdraw},
+    ix_utils::{get_discrim_hash, Hashable},
     state::{
-        bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            account_not_frozen_for_authority, calc_value, check_account_init_health,
-            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            account_not_frozen_for_authority, is_signer_authorized, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        rate_limiter::GroupRateLimiterImpl,
     },
-    utils::{
-        assert_within_one_token, fetch_asset_price_for_bank_low_bias,
-        fetch_unbiased_price_for_bank_cache, is_solend_asset_tag, record_withdrawal_outflow,
-        validate_bank_state, InstructionKind,
-    },
+    utils::is_solend_asset_tag,
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::clock::Clock;
-use anchor_spl::token::accessor;
-use anchor_spl::token_interface::{
-    transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
-};
-use bytemuck::Zeroable;
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use fixed::types::I80F48;
+use marginfi_type_crate::constants::{ASSET_TAG_SOLEND, LIQUIDITY_VAULT_AUTHORITY_SEED};
 use marginfi_type_crate::types::{
-    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
+    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
+    ACCOUNT_IN_RECEIVERSHIP,
 };
-use marginfi_type_crate::{
-    constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_IN_DELEVERAGE,
-};
-use solend_mocks::cpi::accounts::WithdrawObligationCollateralAndRedeemReserveCollateral;
-use solend_mocks::cpi::withdraw_obligation_collateral_and_redeem_reserve_collateral;
-use solend_mocks::state::{
-    get_solend_obligation_deposit_amount, validate_solend_obligation, SolendMinimalReserve,
-};
+use solend_mocks::state::SolendMinimalReserve;
 
 /// Withdraw from a Solend reserve through a marginfi account
 ///
@@ -67,224 +50,21 @@ use solend_mocks::state::{
 /// 6. Updates the marginfi account's balance to reflect the withdrawal
 pub fn solend_withdraw<'info>(
     ctx: Context<'info, SolendWithdraw<'info>>,
-    amount: u64, // Collateral token amount (cTokens)
+    amount: u64,
     withdraw_all: Option<bool>,
 ) -> MarginfiResult {
-    validate_solend_obligation(
-        ctx.accounts.integration_acc_2.as_ref(),
-        ctx.accounts.integration_acc_1.key(),
-    )?;
-
-    let withdraw_all = withdraw_all.unwrap_or(false);
-    let authority_bump: u8;
-    let bank_key = ctx.accounts.bank.key();
-    let bank_mint = ctx.accounts.bank.load()?.mint;
-    let group = ctx.accounts.group.load()?;
-    let (collateral_amount, share_amount) = {
-        let mut bank = ctx.accounts.bank.load_mut()?;
-        let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let clock = Clock::get()?;
-        authority_bump = bank.liquidity_vault_authority_bump;
-
-        validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
-
-        // Fetch oracle price for rate limiting and deleverage tracking
-        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
-        let group_rate_limit_enabled = group.rate_limiter.is_enabled();
-        let price = if in_receivership || group_rate_limit_enabled {
-            let price = fetch_asset_price_for_bank_low_bias(
-                &bank_key,
-                &bank,
-                &clock,
-                ctx.remaining_accounts,
-            )?;
-
-            // Validate price is non-zero during liquidation/deleverage to prevent exploits with stale oracles
-            if in_receivership {
-                check!(price > I80F48::ZERO, MarginfiError::ZeroAssetPrice);
-            }
-
-            price
-        } else {
-            I80F48::ZERO
-        };
-
-        let mut bank_account =
-            BankAccountWrapper::find(&bank_key, &mut bank, &mut marginfi_account.lending_account)?;
-
-        let (collateral_amount, share_amount) = if withdraw_all {
-            bank_account.withdraw_all(in_receivership)?
-        } else {
-            let share_amount = bank_account.withdraw(I80F48::from_num(amount))?;
-            (amount, share_amount)
-        };
-
-        // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
-        let rate_limit_amount = if withdraw_all {
-            collateral_amount
-        } else {
-            amount
-        };
-        record_withdrawal_outflow(
-            group_rate_limit_enabled,
-            rate_limit_amount,
-            rate_limit_amount,
-            price,
-            &mut bank,
-            &group,
-            ctx.accounts.group.key(),
-            ctx.accounts.bank.key(),
-            &marginfi_account,
-            &clock,
-        )?;
-
-        // Track withdrawal limit for risk admin during deleverage
-        if marginfi_account.get_flag(ACCOUNT_IN_DELEVERAGE) {
-            let withdrawn_equity = calc_value(
-                I80F48::from_num(collateral_amount),
-                price,
-                bank.get_balance_decimals(),
-                None,
-            )?;
-            group.check_deleverage_withdraw_limit(withdrawn_equity, clock.unix_timestamp)?;
-            emit!(DeleverageWithdrawFlowEvent {
-                group: ctx.accounts.group.key(),
-                bank: ctx.accounts.bank.key(),
-                mint: bank.mint,
-                outflow_usd: withdrawn_equity.to_num(),
-                current_timestamp: clock.unix_timestamp,
-            });
-        }
-
-        (collateral_amount, share_amount)
-    };
-
-    // Get initial obligation data to verify withdrawal amount later
-    let initial_obligation_deposited_amount =
-        get_solend_obligation_deposit_amount(&ctx.accounts.integration_acc_2)?;
-
-    // Get initial values to verify successful withdrawal later
-    let pre_transfer_vault_balance =
-        accessor::amount(&ctx.accounts.liquidity_vault.to_account_info())?;
-    let expected_liquidity_amount = ctx
-        .accounts
-        .integration_acc_1
-        .load()?
-        .collateral_to_liquidity(collateral_amount)?;
-
-    ctx.accounts
-        .cpi_solend_withdraw(collateral_amount, authority_bump)?;
-
-    // Verify the obligation deposit amount decreased by the correct amount
-    let final_obligation_deposited_amount =
-        get_solend_obligation_deposit_amount(&ctx.accounts.integration_acc_2)?;
-    let obligation_collateral_change =
-        initial_obligation_deposited_amount - final_obligation_deposited_amount;
-    assert_within_one_token(
-        obligation_collateral_change,
-        collateral_amount,
-        MarginfiError::SolendWithdrawFailed,
-    )?;
-
-    let post_transfer_vault_balance =
-        accessor::amount(&ctx.accounts.liquidity_vault.to_account_info())?;
-    let received = post_transfer_vault_balance - pre_transfer_vault_balance;
-    assert_within_one_token(
-        received,
-        expected_liquidity_amount,
-        MarginfiError::SolendWithdrawFailed,
-    )?;
-
-    ctx.accounts
-        .cpi_transfer_liquidity_vault_to_destination(received, authority_bump)?;
-    {
-        let mut bank = ctx.accounts.bank.load_mut()?;
-        let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-
-        // Update bank cache after modifying balances
-        bank.update_bank_cache(&group)?;
-
-        marginfi_account.last_update = Clock::get()?.unix_timestamp as u64;
-
-        emit!(LendingAccountWithdrawEvent {
-            header: AccountEventHeader {
-                signer: Some(ctx.accounts.authority.key()),
-                marginfi_account: ctx.accounts.marginfi_account.key(),
-                marginfi_account_authority: marginfi_account.authority,
-                marginfi_group: marginfi_account.group,
-            },
-            bank: bank_key,
-            mint: bank_mint,
-            amount: collateral_amount,
-            share_amount: share_amount.into(),
-            close_balance: withdraw_all,
-        });
-
-        let mut health_cache = HealthCache::zeroed();
-        health_cache.timestamp = Clock::get()?.unix_timestamp;
-
-        marginfi_account.lending_account.sort_balances();
-        marginfi_account.sync_indexer_flags();
-
-        // SAFETY: The `bank` AccountLoader shares the same underlying account as one of the
-        // entries in `remaining_accounts` (passed for oracle/health-check lookups). The Solana
-        // runtime enforces single-writer semantics per account per instruction — if we hold a
-        // mutable borrow via `bank.load_mut()` while another code path (e.g. `check_account_init_health`)
-        // attempts to borrow the same account through `remaining_accounts`, the runtime rejects the
-        // transaction with:
-        //   "instruction tries to borrow reference for an account which is already borrowed"
-        //
-        // We must explicitly drop the mutable borrow before any code that may re-access this
-        // account through a different handle.
-        drop(bank);
-
-        let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
-
-        // Note: during liquidation, we skip all health checks until the end of the transaction,
-        // but we still update the price cache.
-        if !in_receivership {
-            // Check account health, if below threshold fail transaction
-            // Assuming `ctx.remaining_accounts` holds only oracle accounts
-            check_account_init_health(
-                &marginfi_account,
-                ctx.remaining_accounts,
-                &mut Some(&mut health_cache),
-            )?;
-            health_cache.program_version = PROGRAM_VERSION;
-
-            let bank_loader = &ctx.accounts.bank;
-            let mut bank = bank_loader.load_mut()?;
-            let clock = Clock::get()?;
-            let price_for_cache = fetch_unbiased_price_for_bank_cache(
-                &bank_loader.key(),
-                &bank,
-                &clock,
-                ctx.remaining_accounts,
-            )
-            .ok();
-
-            bank.update_cache_price(price_for_cache)?;
-
-            health_cache.set_engine_ok(true);
-            marginfi_account.health_cache = health_cache;
-        } else {
-            // Note: the caller can simply omit risk accounts since the risk check is ignored here,
-            // that case the cache doesn't update and this does nothing.
-            let mut bank = ctx.accounts.bank.load_mut()?;
-            let clock = Clock::get()?;
-            let price_for_cache = fetch_unbiased_price_for_bank_cache(
-                &bank_key,
-                &bank,
-                &clock,
-                ctx.remaining_accounts,
-            )
-            .ok();
-
-            bank.update_cache_price(price_for_cache)?;
-        }
-    }
-
-    Ok(())
+    let common = ctx.accounts.to_common();
+    // Leaked to get a true `'info` borrow (the bump allocator never frees, so this costs nothing).
+    let protocol_accounts = ctx.accounts.protocol_accounts().leak();
+    integration::integration_withdraw_impl(
+        &common,
+        protocol_accounts,
+        ctx.remaining_accounts,
+        amount,
+        withdraw_all,
+        Some(ASSET_TAG_SOLEND),
+        false,
+    )
 }
 
 #[derive(Accounts)]
@@ -292,7 +72,7 @@ pub struct SolendWithdraw<'info> {
     #[account(
         constraint = (
             !group.load()?.is_protocol_paused()
-            || marginfi_account.load()?.get_flag(ACCOUNT_IN_DELEVERAGE)
+                || marginfi_account.load()?.get_flag(ACCOUNT_IN_DELEVERAGE)
         ) @ MarginfiError::ProtocolPaused
     )]
     pub group: AccountLoader<'info, MarginfiGroup>,
@@ -327,7 +107,6 @@ pub struct SolendWithdraw<'info> {
         has_one = mint @ MarginfiError::InvalidMint,
         constraint = is_solend_asset_tag(bank.load()?.config.asset_tag)
             @ MarginfiError::WrongBankAssetTagForSolendOperation,
-        // Block withdraw of zero-weight assets during receivership - prevents unfair liquidation
         constraint = {
             let a = marginfi_account.load()?;
             let b = bank.load()?;
@@ -356,11 +135,8 @@ pub struct SolendWithdraw<'info> {
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
 
     /// The Solend obligation account
-    /// CHECK: Validated in instruction body
-    #[account(
-        mut,
-        constraint = integration_acc_2.owner == &SOLEND_PROGRAM_ID @ MarginfiError::InvalidSolendAccount
-    )]
+    /// CHECK: Validated in the integration handler
+    #[account(mut)]
     pub integration_acc_2: UncheckedAccount<'info>,
 
     /// CHECK: validated by the Solend program
@@ -372,10 +148,7 @@ pub struct SolendWithdraw<'info> {
     pub lending_market_authority: UncheckedAccount<'info>,
 
     /// The Solend reserve that holds liquidity
-    #[account(
-        mut,
-        constraint = !integration_acc_1.load()?.is_stale()? @ MarginfiError::SolendReserveStale
-    )]
+    #[account(mut)]
     pub integration_acc_1: AccountLoader<'info, SolendMinimalReserve>,
 
     /// Bank's liquidity token mint (e.g., USDC)
@@ -409,55 +182,26 @@ pub struct SolendWithdraw<'info> {
     pub token_program: Interface<'info, TokenInterface>,
 }
 
+impl_common_withdraw!(SolendWithdraw);
+
 impl<'info> SolendWithdraw<'info> {
-    pub fn cpi_solend_withdraw(
-        &self,
-        collateral_amount: u64,
-        authority_bump: u8,
-    ) -> MarginfiResult {
-        let accounts = WithdrawObligationCollateralAndRedeemReserveCollateral {
-            source_collateral_info: self.reserve_collateral_supply.to_account_info(),
-            destination_collateral_info: self.user_collateral.to_account_info(),
-            reserve_info: self.integration_acc_1.to_account_info(),
-            obligation_info: self.integration_acc_2.to_account_info(),
-            lending_market_info: self.lending_market.to_account_info(),
-            lending_market_authority_info: self.lending_market_authority.to_account_info(),
-            destination_liquidity_info: self.liquidity_vault.to_account_info(),
-            reserve_collateral_mint_info: self.reserve_collateral_mint.to_account_info(),
-            reserve_liquidity_supply_info: self.reserve_liquidity_supply.to_account_info(),
-            obligation_owner_info: self.liquidity_vault_authority.to_account_info(),
-            user_transfer_authority_info: self.liquidity_vault_authority.to_account_info(),
-            token_program_info: self.token_program.to_account_info(),
-            deposit_reserve_info: self.integration_acc_1.to_account_info(),
-        };
-        let signer_seeds: &[&[&[u8]]] =
-            bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
-
-        // Create CPI context with signer
-        let cpi_ctx =
-            CpiContext::new_with_signer(self.solend_program.key(), accounts, signer_seeds);
-        withdraw_obligation_collateral_and_redeem_reserve_collateral(cpi_ctx, collateral_amount)?;
-        Ok(())
+    fn protocol_accounts(&self) -> Vec<AccountInfo<'info>> {
+        vec![
+            self.integration_acc_2.to_account_info(),
+            self.lending_market.to_account_info(),
+            self.lending_market_authority.to_account_info(),
+            self.integration_acc_1.to_account_info(),
+            self.reserve_liquidity_supply.to_account_info(),
+            self.reserve_collateral_mint.to_account_info(),
+            self.reserve_collateral_supply.to_account_info(),
+            self.user_collateral.to_account_info(),
+            self.solend_program.to_account_info(),
+        ]
     }
+}
 
-    pub fn cpi_transfer_liquidity_vault_to_destination(
-        &self,
-        amount: u64,
-        authority_bump: u8,
-    ) -> MarginfiResult {
-        let program = self.token_program.to_account_info();
-        let accounts = TransferChecked {
-            from: self.liquidity_vault.to_account_info(),
-            to: self.destination_token_account.to_account_info(),
-            authority: self.liquidity_vault_authority.to_account_info(),
-            mint: self.mint.to_account_info(),
-        };
-        let signer_seeds: &[&[&[u8]]] =
-            bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
-
-        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
-        let decimals = self.mint.decimals;
-        transfer_checked(cpi_ctx, amount, decimals)?;
-        Ok(())
+impl Hashable for SolendWithdraw<'_> {
+    fn get_hash() -> [u8; 8] {
+        get_discrim_hash("global", "solend_withdraw")
     }
 }

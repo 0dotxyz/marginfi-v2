@@ -1,36 +1,20 @@
 use crate::{
-    bank_signer, check,
     constants::SOLEND_PROGRAM_ID,
-    events::{AccountEventHeader, LendingAccountDepositEvent},
+    instructions::integration::{self, impl_common_deposit},
     state::{
-        bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
-            LendingAccountImpl, MarginfiAccountImpl,
+            account_not_frozen_for_authority, is_signer_authorized, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
     },
-    utils::{
-        assert_within_one_token, is_solend_asset_tag, record_deposit_inflow, validate_asset_tags,
-        validate_bank_state, InstructionKind,
-    },
+    utils::is_solend_asset_tag,
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::clock::Clock;
-use anchor_spl::token_interface::{
-    transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
-};
-use fixed::types::I80F48;
-use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
-use marginfi_type_crate::types::{
-    Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_RECEIVERSHIP,
-};
-use solend_mocks::cpi::accounts::DepositReserveLiquidityAndObligationCollateral;
-use solend_mocks::cpi::deposit_reserve_liquidity_and_obligation_collateral;
-use solend_mocks::state::{
-    get_solend_obligation_deposit_amount, validate_solend_obligation, SolendMinimalReserve,
-};
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
+use marginfi_type_crate::constants::{ASSET_TAG_SOLEND, LIQUIDITY_VAULT_AUTHORITY_SEED};
+use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
+use solend_mocks::state::SolendMinimalReserve;
 
 /// Deposit into a Solend reserve through a marginfi account
 ///
@@ -43,103 +27,16 @@ pub fn solend_deposit<'info>(
     ctx: Context<'info, SolendDeposit<'info>>,
     amount: u64,
 ) -> MarginfiResult {
-    // Forced to validate here as unable to load obligation as ref in constraints
-    validate_solend_obligation(
-        ctx.accounts.integration_acc_2.as_ref(),
-        ctx.accounts.integration_acc_1.key(),
-    )?;
-
-    let authority_bump: u8;
-    {
-        let marginfi_account = ctx.accounts.marginfi_account.load()?;
-        let bank = ctx.accounts.bank.load()?;
-        authority_bump = bank.liquidity_vault_authority_bump;
-
-        validate_asset_tags(&bank, &marginfi_account)?;
-        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
-
-        check!(
-            !marginfi_account.get_flag(ACCOUNT_DISABLED)
-                && !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP),
-            MarginfiError::AccountDisabled
-        );
-    }
-
-    // Get initial obligation data to verify deposit amount later
-    let initial_obligation_deposited_amount =
-        get_solend_obligation_deposit_amount(&ctx.accounts.integration_acc_2)?;
-
-    let expected_collateral_amount = ctx
-        .accounts
-        .integration_acc_1
-        .load()?
-        .liquidity_to_collateral(amount)?;
-
-    ctx.accounts.cpi_transfer_user_to_liquidity_vault(amount)?;
-    ctx.accounts.cpi_solend_deposit(amount, authority_bump)?;
-
-    let final_obligation_deposited_amount =
-        get_solend_obligation_deposit_amount(&ctx.accounts.integration_acc_2)?;
-
-    // Verify the deposit was successful by checking obligation balance increased by correct amount
-    let obligation_collateral_change =
-        final_obligation_deposited_amount - initial_obligation_deposited_amount;
-
-    assert_within_one_token(
-        obligation_collateral_change,
-        expected_collateral_amount,
-        MarginfiError::SolendDepositFailed,
-    )?;
-
-    {
-        let mut bank = ctx.accounts.bank.load_mut()?;
-        let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let group = ctx.accounts.group.load()?;
-        let clock = Clock::get()?;
-
-        let mut bank_account = BankAccountWrapper::find_or_create(
-            &ctx.accounts.bank.key(),
-            &mut bank,
-            &mut marginfi_account.lending_account,
-        )?;
-
-        // Convert deposit amount to I80F48 for calculations
-        let obligation_collateral_change_i80f48 = I80F48::from_num(obligation_collateral_change);
-        let share_amount = bank_account.deposit_no_repay(obligation_collateral_change_i80f48)?;
-
-        // Record inflow so net-outflow windows release capacity.
-        record_deposit_inflow(
-            &mut bank,
-            &group,
-            ctx.accounts.group.key(),
-            ctx.accounts.bank.key(),
-            marginfi_account.account_flags,
-            amount,
-            &clock,
-        )?;
-
-        // Update bank cache after modifying balances
-        bank.update_bank_cache(&group)?;
-
-        marginfi_account.last_update = clock.unix_timestamp as u64;
-        marginfi_account.lending_account.sort_balances();
-        marginfi_account.sync_indexer_flags();
-
-        emit!(LendingAccountDepositEvent {
-            header: AccountEventHeader {
-                signer: Some(ctx.accounts.authority.key()),
-                marginfi_account: ctx.accounts.marginfi_account.key(),
-                marginfi_account_authority: marginfi_account.authority,
-                marginfi_group: marginfi_account.group,
-            },
-            bank: ctx.accounts.bank.key(),
-            mint: bank.mint,
-            amount,
-            share_amount: share_amount.into(),
-        });
-    }
-
-    Ok(())
+    let common = ctx.accounts.to_common();
+    // Leaked to get a true `'info` borrow (the bump allocator never frees, so this costs nothing).
+    let protocol_accounts = ctx.accounts.protocol_accounts().leak();
+    integration::integration_deposit_impl(
+        &common,
+        protocol_accounts,
+        amount,
+        Some(ASSET_TAG_SOLEND),
+        false,
+    )
 }
 
 #[derive(Accounts)]
@@ -154,6 +51,10 @@ pub struct SolendDeposit<'info> {
     #[account(
         mut,
         has_one = group @ MarginfiError::InvalidGroup,
+        constraint = {
+            let acc = marginfi_account.load()?;
+            !acc.get_flag(ACCOUNT_DISABLED)
+        } @ MarginfiError::AccountDisabled,
         constraint = {
             let a = marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())
@@ -199,11 +100,8 @@ pub struct SolendDeposit<'info> {
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
 
     /// The Solend obligation account
-    /// CHECK: Validated in instruction body
-    #[account(
-        mut,
-        constraint = integration_acc_2.owner == &SOLEND_PROGRAM_ID @ MarginfiError::InvalidSolendAccount
-    )]
+    /// CHECK: Validated in the integration handler
+    #[account(mut)]
     pub integration_acc_2: UncheckedAccount<'info>,
 
     /// CHECK: validated by the Solend program
@@ -214,10 +112,7 @@ pub struct SolendDeposit<'info> {
     pub lending_market_authority: UncheckedAccount<'info>,
 
     /// The Solend reserve that holds liquidity
-    #[account(
-        mut,
-        constraint = !integration_acc_1.load()?.is_stale()? @ MarginfiError::SolendReserveStale
-    )]
+    #[account(mut)]
     pub integration_acc_1: AccountLoader<'info, SolendMinimalReserve>,
 
     /// Bank's liquidity token mint (e.g., USDC)
@@ -247,6 +142,7 @@ pub struct SolendDeposit<'info> {
     /// Oracle accounts - required by Solend even if not actively used
     /// CHECK: validated by the Solend program
     pub pyth_price: UncheckedAccount<'info>,
+
     /// CHECK: validated by the Solend program
     pub switchboard_feed: UncheckedAccount<'info>,
 
@@ -257,45 +153,22 @@ pub struct SolendDeposit<'info> {
     pub token_program: Interface<'info, TokenInterface>,
 }
 
+impl_common_deposit!(SolendDeposit);
+
 impl<'info> SolendDeposit<'info> {
-    pub fn cpi_transfer_user_to_liquidity_vault(&self, amount: u64) -> MarginfiResult {
-        let program = self.token_program.to_account_info();
-        let accounts = TransferChecked {
-            from: self.signer_token_account.to_account_info(),
-            to: self.liquidity_vault.to_account_info(),
-            authority: self.authority.to_account_info(),
-            mint: self.mint.to_account_info(),
-        };
-        let cpi_ctx = CpiContext::new(program.key(), accounts);
-        let decimals = self.mint.decimals;
-        transfer_checked(cpi_ctx, amount, decimals)?;
-        Ok(())
-    }
-
-    pub fn cpi_solend_deposit(&self, amount: u64, authority_bump: u8) -> MarginfiResult {
-        let accounts = DepositReserveLiquidityAndObligationCollateral {
-            source_liquidity_info: self.liquidity_vault.to_account_info(),
-            user_collateral_info: self.user_collateral.to_account_info(),
-            reserve_info: self.integration_acc_1.to_account_info(),
-            reserve_liquidity_supply_info: self.reserve_liquidity_supply.to_account_info(),
-            reserve_collateral_mint_info: self.reserve_collateral_mint.to_account_info(),
-            lending_market_info: self.lending_market.to_account_info(),
-            lending_market_authority_info: self.lending_market_authority.to_account_info(),
-            destination_deposit_collateral_info: self.reserve_collateral_supply.to_account_info(),
-            obligation_info: self.integration_acc_2.to_account_info(),
-            obligation_owner_info: self.liquidity_vault_authority.to_account_info(),
-            pyth_price_info: self.pyth_price.to_account_info(),
-            switchboard_feed_info: self.switchboard_feed.to_account_info(),
-            user_transfer_authority_info: self.liquidity_vault_authority.to_account_info(),
-            token_program_info: self.token_program.to_account_info(),
-        };
-        let signer_seeds: &[&[&[u8]]] =
-            bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
-
-        // Create CPI context with signer
-        let cpi_ctx =
-            CpiContext::new_with_signer(self.solend_program.key(), accounts, signer_seeds);
-        deposit_reserve_liquidity_and_obligation_collateral(cpi_ctx, amount)?;
-        Ok(())
+    fn protocol_accounts(&self) -> Vec<AccountInfo<'info>> {
+        vec![
+            self.integration_acc_2.to_account_info(),
+            self.lending_market.to_account_info(),
+            self.lending_market_authority.to_account_info(),
+            self.integration_acc_1.to_account_info(),
+            self.reserve_liquidity_supply.to_account_info(),
+            self.reserve_collateral_mint.to_account_info(),
+            self.reserve_collateral_supply.to_account_info(),
+            self.user_collateral.to_account_info(),
+            self.pyth_price.to_account_info(),
+            self.switchboard_feed.to_account_info(),
+            self.solend_program.to_account_info(),
+        ]
     }
 }

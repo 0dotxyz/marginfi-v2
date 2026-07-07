@@ -1,6 +1,7 @@
 use anchor_lang::{InstructionData, ToAccountMetas};
 use fixtures::test::TestFixture;
 use marginfi_type_crate::types::MarginfiAccount;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::tokio;
 use solana_sdk::{
     instruction::Instruction, signature::Keypair, signer::Signer, transaction::Transaction,
@@ -366,9 +367,14 @@ async fn marginfi_account_create_pda_duplicate_fails() -> anyhow::Result<()> {
 
     assert!(res1.is_ok());
 
-    // Second transaction with same parameters should fail
+    // Second transaction with same parameters should fail. A no-op compute-budget instruction is
+    // prepended so tx2's message (and thus signature) differs from tx1's; otherwise the two txs are
+    // byte-identical and the banks server returns tx1's cached status instead of re-executing.
     let tx2 = Transaction::new_signed_with_payer(
-        &[init_marginfi_account_pda_ix],
+        &[
+            ComputeBudgetInstruction::set_compute_unit_limit(200_000),
+            init_marginfi_account_pda_ix,
+        ],
         Some(&test_f.payer()),
         &[&test_f.payer_keypair()],
         test_f.get_latest_blockhash().await,
