@@ -10,7 +10,7 @@ use super::{GroupRateLimiter, PanicStateCache, WrappedI80F48};
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
 
-assert_struct_size!(MarginfiGroup, 1056);
+assert_struct_size!(MarginfiGroup, 9248);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
 #[cfg_attr(not(feature = "anchor"), derive(Pod, Zeroable, Copy, Clone))]
@@ -89,11 +89,15 @@ pub struct MarginfiGroup {
 
     pub _padding_0: [[u64; 2]; 2],
     pub _padding_1: [[u64; 2]; 32],
+    pub _padding_2: [[u64; 32]; 32],
 }
 
 impl MarginfiGroup {
     pub const LEN: usize = std::mem::size_of::<MarginfiGroup>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::GROUP;
+    /// Struct size of the PREVIOUS (v1) group layout — the size of accounts created before
+    /// `_padding_2` existed, and a byte-identical prefix of the current layout.
+    pub const V1_LEN: usize = 1056;
 }
 
 #[repr(C)]
