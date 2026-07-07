@@ -431,9 +431,8 @@ pub enum MarginfiError {
     InvalidJuplendWithdrawIntermediaryAta, // 6512
     // **************END JUPLEND ERRORS
 
-    // Note: 6600-6604 are reserved for the variable-borrow premium feature.
     #[msg("Account is already at (or above) the target size")]
-    InvalidResize = 605, // 6605
+    InvalidResize, // 6513
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -672,7 +671,7 @@ impl From<u32> for MarginfiError {
             6510 => MarginfiError::JuplendWithdrawFailed,
             6511 => MarginfiError::JuplendInitPositionDepositInsufficient,
             6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
-            6605 => MarginfiError::InvalidResize,
+            6513 => MarginfiError::InvalidResize,
 
             _ => MarginfiError::InternalLogicError,
         }

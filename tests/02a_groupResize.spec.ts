@@ -121,7 +121,7 @@ describe("02a: Account resize (v1 -> current layout migration)", () => {
     assert.equal(feeState.key.toString(), feeStateKey.toString());
   });
 
-  it("resizing an already-current account fails (6605 InvalidResize)", async () => {
+  it("resizing an already-current account fails (6513 InvalidResize)", async () => {
     const tx = new Transaction().add(
       await resizeGroupAccount(groupAdmin.mrgnBankrunProgram, {
         group: marginfiGroup.publicKey,
@@ -132,7 +132,7 @@ describe("02a: Account resize (v1 -> current layout migration)", () => {
     tx.sign(groupAdmin.wallet);
     assertBankrunTxFailed(
       await banksClient.tryProcessTransaction(tx),
-      "0x19cd",
+      "0x1971",
     );
   });
 
