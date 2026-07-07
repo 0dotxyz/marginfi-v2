@@ -430,7 +430,6 @@ pub enum MarginfiError {
     #[msg("Invalid Juplend withdraw intermediary ATA")]
     InvalidJuplendWithdrawIntermediaryAta, // 6512
     // **************END JUPLEND ERRORS
-
     #[msg("Account is already at (or above) the target size")]
     InvalidResize, // 6513
 }
