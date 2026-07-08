@@ -1,0 +1,496 @@
+// Note: We need this test to generated borrows on Kamino so the Mrgn-held user deposits will earn
+// interest, we don't really care about the borrow logic itself.
+import { BN } from "@coral-xyz/anchor";
+import {
+  ecosystem,
+  groupAdmin,
+  kaminoAccounts,
+  MARKET,
+  TOKEN_A_RESERVE,
+  USDC_RESERVE,
+  users,
+  bankrunContext,
+  klendBankrunProgram,
+  oracles,
+  bankRunProvider,
+  banksClient,
+  verbose,
+} from "../../rootHooks";
+import {
+  SYSVAR_INSTRUCTIONS_PUBKEY,
+  Transaction,
+  PublicKey,
+} from "@solana/web3.js";
+import { KAMINO_OBLIGATION, MockUser } from "../../utils/mocks";
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  simpleRefreshObligation,
+  simpleRefreshReserve,
+  wrappedU68F60toBigNumber,
+} from "../../utils/kamino-utils";
+import { assert } from "chai";
+import { processBankrunTransaction } from "../../utils/tools";
+import { getTokenBalance } from "../../utils/genericTests";
+import { Clock, ProgramTestContext } from "../../utils/litesvm";
+import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
+import { getEpochAndSlot } from "../../utils/bankrunConnection";
+import { deriveGlobalConfig, deriveLendingMarketAuthority } from "../../utils/pdas";
+import { KLEND_PROGRAM_ID } from "../../utils/types";
+import { UpdateBorrowLimitOutsideElevationGroup } from "@kamino-finance/klend-sdk/dist/@codegen/klend/types/UpdateConfigMode";
+import { globalConfigPda } from "@kamino-finance/klend-sdk";
+import { address } from "@solana/kit";
+
+let ctx: ProgramTestContext;
+let usdcReserve: PublicKey;
+let tokenAReserve: PublicKey;
+let market: PublicKey;
+
+// Byte offset of `liquidity.cumulative_borrow_rate_bsf` within a klend Reserve account.
+// = 8 (discriminator) + 120 (Reserve header through `lending_market`) + 96 (3 pubkeys)
+//   + 8 (total_available_amount) + 16 (borrowed_amount_sf) + 16 (market_price_sf)
+//   + 8 (market_price_last_updated_ts) + 8 (mint_decimals)
+//   + 8 (deposit_limit_crossed_timestamp) + 8 (borrow_limit_crossed_timestamp).
+const CUM_BORROW_RATE_BSF_OFFSET = 296;
+
+// Read `cumulative_borrow_rate_bsf` straight from the raw account bytes as a bigint. The field is
+// a BigFractionBytes (`value: [u64; 4]`, little-endian limbs of a u256 scaled fraction). We bypass
+// Anchor's coder because its bn.js path can mis-render these large limbs (a trailing "NaN" that
+// BigInt() then rejects); reading the bytes directly is value-exact on every platform.
+const readCumBorrowRateBsf = async (reserve: PublicKey): Promise<bigint> => {
+  const acct = await banksClient.getAccount(reserve);
+  if (!acct) {
+    throw new Error(`Reserve account not found: ${reserve.toString()}`);
+  }
+  const data = Buffer.from(acct.data);
+  let value = 0n;
+  for (let i = 0; i < 4; i++) {
+    const limb = data.readBigUInt64LE(CUM_BORROW_RATE_BSF_OFFSET + i * 8);
+    value += limb << BigInt(64 * i);
+  }
+  return value;
+};
+
+describe("k08: Borrow from Kamino reserve to simulate interest accrual", () => {
+  before(async () => {
+    ctx = bankrunContext;
+    market = kaminoAccounts.get(MARKET);
+    usdcReserve = kaminoAccounts.get(USDC_RESERVE);
+    tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE);
+  });
+
+  async function getBalances(user: MockUser): Promise<{
+    userUsdcBalance: number;
+    userTokenABalance: number;
+    usdcReserveSupplyBalance: number;
+    tokenAReserveSupplyBalance: number;
+  }> {
+    const userUsdcAccount = user.usdcAccount;
+    const userTokenAAccount = user.tokenAAccount;
+
+    const [
+      usdcReserveData,
+      tokenAReserveData,
+      userUsdcBalance,
+      userTokenABalance,
+    ] = await Promise.all([
+      klendBankrunProgram.account.reserve.fetch(usdcReserve),
+      klendBankrunProgram.account.reserve.fetch(tokenAReserve),
+      getTokenBalance(bankRunProvider, userUsdcAccount),
+      getTokenBalance(bankRunProvider, userTokenAAccount),
+    ]);
+    const usdcReserveSupply = usdcReserveData.liquidity.supplyVault;
+    const tokenAReserveSupply = tokenAReserveData.liquidity.supplyVault;
+
+    const [usdcReserveSupplyBalance, tokenAReserveSupplyBalance] =
+      await Promise.all([
+        getTokenBalance(bankRunProvider, usdcReserveSupply),
+        getTokenBalance(bankRunProvider, tokenAReserveSupply),
+      ]);
+
+    return {
+      userUsdcBalance,
+      userTokenABalance,
+      usdcReserveSupplyBalance,
+      tokenAReserveSupplyBalance,
+    };
+  }
+
+  it("(user 1) Should deposit Token A to Kamino as collateral", async () => {
+    const user = users[1];
+    const initialBalances = await getBalances(user);
+    // Note: Kamino obligation direct obligation (not through marginfi)
+    const obligation = user.accounts.get(KAMINO_OBLIGATION);
+    const reserveData = await klendBankrunProgram.account.reserve.fetch(
+      tokenAReserve,
+    );
+    const tokenALiquidityMint = reserveData.liquidity.mintPubkey;
+    const tokenAReserveLiquiditySupply = reserveData.liquidity.supplyVault;
+    const tokenACollateralMint = reserveData.collateral.mintPubkey;
+    const tokenACollateralVault = reserveData.collateral.supplyVault;
+    const [lendingMarketAuthority] = deriveLendingMarketAuthority(
+      KLEND_PROGRAM_ID,
+      market,
+    );
+    const depositAmount = 200_000 * 10 ** ecosystem.tokenADecimals;
+
+    let tx = new Transaction().add(
+      await simpleRefreshReserve(
+        klendBankrunProgram,
+        tokenAReserve,
+        market,
+        oracles.tokenAOracle.publicKey,
+      ),
+      await simpleRefreshObligation(
+        klendBankrunProgram,
+        market,
+        obligation,
+        [],
+      ),
+      await klendBankrunProgram.methods
+        .depositReserveLiquidityAndObligationCollateral(new BN(depositAmount))
+        .accounts({
+          owner: user.wallet.publicKey,
+          obligation: obligation,
+          lendingMarket: market,
+          lendingMarketAuthority: lendingMarketAuthority,
+          reserve: tokenAReserve,
+          reserveLiquidityMint: tokenALiquidityMint,
+          reserveLiquiditySupply: tokenAReserveLiquiditySupply,
+          reserveCollateralMint: tokenACollateralMint,
+          reserveDestinationDepositCollateral: tokenACollateralVault,
+          userSourceLiquidity: user.tokenAAccount,
+          placeholderUserDestinationCollateral: null,
+          collateralTokenProgram: TOKEN_PROGRAM_ID,
+          liquidityTokenProgram: TOKEN_PROGRAM_ID,
+          instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
+        })
+        .instruction(),
+    );
+    await processBankrunTransaction(ctx, tx, [user.wallet]);
+
+    const postDepositBalances = await getBalances(user);
+    const userTokenADiff =
+      initialBalances.userTokenABalance - postDepositBalances.userTokenABalance;
+    const reserveTokenADiff =
+      postDepositBalances.tokenAReserveSupplyBalance -
+      initialBalances.tokenAReserveSupplyBalance;
+    const tolerance = depositAmount * 0.0001;
+    assert.approximately(userTokenADiff, depositAmount, tolerance);
+    assert.approximately(reserveTokenADiff, depositAmount, tolerance);
+  });
+
+  it("(user 1) Should borrow USDC against the Token A collateral", async () => {
+    let user = users[1];
+    const initialBalances = await getBalances(user);
+
+    const borrowReserveData = await klendBankrunProgram.account.reserve.fetch(
+      usdcReserve,
+    );
+    const usdcFeesVault = borrowReserveData.liquidity.feeVault;
+    const [lendingMarketAuthority] = deriveLendingMarketAuthority(
+      KLEND_PROGRAM_ID,
+      market,
+    );
+    // Note: Kamino obligation direct obligation (not through marginfi)
+    const obligation = user.accounts.get(KAMINO_OBLIGATION);
+    const usdcLiquidityMint = borrowReserveData.liquidity.mintPubkey;
+    const usdcLiquiditySupply = borrowReserveData.liquidity.supplyVault;
+    const borrowAmount = 800_000 * 10 ** ecosystem.usdcDecimals;
+
+    // Update the bank's borrow limit
+    const borrowLimit = new BN(1_000_000 * 10 ** ecosystem.usdcDecimals);
+    const valueBuffer = Buffer.alloc(8);
+    borrowLimit.toArrayLike(Buffer, "le", 8).copy(valueBuffer);
+
+    // See different modes here: https://github.com/Kamino-Finance/klend/blob/ea845c39e9e3aee2d0c0a49caaba969d2ee2c772/programs/klend/src/state/mod.rs#L142
+    const mode = {
+      updateBorrowLimitOutsideElevationGroup: {},
+    };
+    const [globalConfig] = deriveGlobalConfig(KLEND_PROGRAM_ID);
+
+    let elevationTx = new Transaction().add(
+      await klendBankrunProgram.methods
+        .updateReserveConfig(mode, valueBuffer, false)
+        .accounts({
+          signer: groupAdmin.wallet.publicKey,
+          reserve: usdcReserve,
+          lendingMarket: market,
+          globalConfig
+        })
+        .instruction(),
+    );
+    await processBankrunTransaction(ctx, elevationTx, [groupAdmin.wallet]);
+
+    let tx = new Transaction().add(
+      await simpleRefreshReserve(
+        klendBankrunProgram,
+        tokenAReserve,
+        market,
+        oracles.tokenAOracle.publicKey,
+      ),
+      await simpleRefreshReserve(
+        klendBankrunProgram,
+        usdcReserve,
+        market,
+        oracles.usdcOracle.publicKey,
+      ),
+      await simpleRefreshObligation(klendBankrunProgram, market, obligation, [
+        tokenAReserve,
+      ]),
+      await klendBankrunProgram.methods
+        .borrowObligationLiquidity(new BN(borrowAmount))
+        .accounts({
+          owner: user.wallet.publicKey,
+          obligation: obligation,
+          lendingMarket: market,
+          lendingMarketAuthority: lendingMarketAuthority,
+          borrowReserve: usdcReserve,
+          borrowReserveLiquidityMint: usdcLiquidityMint,
+          reserveSourceLiquidity: usdcLiquiditySupply,
+          userDestinationLiquidity: user.usdcAccount,
+          borrowReserveLiquidityFeeReceiver: usdcFeesVault, // Fee receiver
+          referrerTokenState: klendBankrunProgram.programId, // Referrer token state (using program id as a dummy)
+          tokenProgram: TOKEN_PROGRAM_ID,
+          instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
+        })
+        .instruction(),
+    );
+    await processBankrunTransaction(ctx, tx, [user.wallet]);
+
+    const postBorrowBalances = await getBalances(user);
+    const userUsdcDiff =
+      postBorrowBalances.userUsdcBalance - initialBalances.userUsdcBalance;
+    const reserveUsdcDiff =
+      initialBalances.usdcReserveSupplyBalance -
+      postBorrowBalances.usdcReserveSupplyBalance;
+    const tolerance = borrowAmount * 0.00001;
+    assert.approximately(userUsdcDiff, borrowAmount, tolerance);
+    assert.approximately(reserveUsdcDiff, borrowAmount, tolerance);
+    if (verbose) {
+      console.log(
+        "reserve supply before: " +
+          initialBalances.usdcReserveSupplyBalance +
+          " after " +
+          postBorrowBalances.usdcReserveSupplyBalance,
+      );
+    }
+  });
+
+  it("(user 2) Borrows Token A against USDC collateral", async () => {
+    let user = users[2];
+    // Note: Kamino obligation direct obligation (not through marginfi)
+    const obligation = user.accounts.get(KAMINO_OBLIGATION);
+    const [lendingMarketAuthority] = deriveLendingMarketAuthority(
+      KLEND_PROGRAM_ID,
+      market,
+    );
+    const depositAmount = 80_000_000 * 10 ** ecosystem.usdcDecimals;
+    const borrowAmount = 8_000 * 10 ** ecosystem.tokenADecimals;
+
+    // Update the token A reserve's borrow limit
+    const borrowLimit = new BN(1_000_000 * 10 ** ecosystem.usdcDecimals);
+    const valueBuffer = Buffer.alloc(8);
+    borrowLimit.toArrayLike(Buffer, "le", 8).copy(valueBuffer);
+
+    // See different modes here: https://github.com/Kamino-Finance/klend/blob/ea845c39e9e3aee2d0c0a49caaba969d2ee2c772/programs/klend/src/state/mod.rs#L142
+    const mode = {
+      updateBorrowLimitOutsideElevationGroup: {},
+    };
+    const [globalConfig] = deriveGlobalConfig(KLEND_PROGRAM_ID);
+
+    let elevationTx = new Transaction().add(
+      await klendBankrunProgram.methods
+        .updateReserveConfig(mode, valueBuffer, false)
+        .accounts({
+          signer: groupAdmin.wallet.publicKey,
+          reserve: tokenAReserve,
+          lendingMarket: market,
+          globalConfig
+        })
+        .instruction(),
+    );
+    await processBankrunTransaction(ctx, elevationTx, [groupAdmin.wallet]);
+
+    // Deposit some USDC first
+
+    const usdcReserveData = await klendBankrunProgram.account.reserve.fetch(
+      usdcReserve,
+    );
+    const usdcLiquidityMint = usdcReserveData.liquidity.mintPubkey;
+    const usdcLiquiditySupply = usdcReserveData.liquidity.supplyVault;
+    const usdcCollateralMint = usdcReserveData.collateral.mintPubkey;
+    const usdcCollateralVault = usdcReserveData.collateral.supplyVault;
+
+    let depositTx = new Transaction();
+    depositTx.add(
+      await simpleRefreshReserve(
+        klendBankrunProgram,
+        usdcReserve,
+        market,
+        oracles.usdcOracle.publicKey,
+      ),
+      await simpleRefreshObligation(klendBankrunProgram, market, obligation),
+      await klendBankrunProgram.methods
+        .depositReserveLiquidityAndObligationCollateral(new BN(depositAmount))
+        .accounts({
+          owner: user.wallet.publicKey,
+          obligation: obligation,
+          lendingMarket: market,
+          lendingMarketAuthority: lendingMarketAuthority,
+          reserve: usdcReserve,
+          reserveLiquidityMint: usdcLiquidityMint,
+          reserveLiquiditySupply: usdcLiquiditySupply,
+          reserveCollateralMint: usdcCollateralMint,
+          reserveDestinationDepositCollateral: usdcCollateralVault,
+          userSourceLiquidity: user.usdcAccount,
+          placeholderUserDestinationCollateral: null,
+          collateralTokenProgram: TOKEN_PROGRAM_ID,
+          liquidityTokenProgram: TOKEN_PROGRAM_ID,
+          instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
+        })
+        .instruction(),
+    );
+
+    await processBankrunTransaction(ctx, depositTx, [user.wallet]);
+
+    const borrowReserveData = await klendBankrunProgram.account.reserve.fetch(
+      tokenAReserve,
+    );
+    const tokenALiquidityMint = borrowReserveData.liquidity.mintPubkey;
+    const tokenALiquiditySupply = borrowReserveData.liquidity.supplyVault;
+    const tokenAFeesVault = borrowReserveData.liquidity.feeVault;
+
+    let tx = new Transaction().add(
+      await simpleRefreshReserve(
+        klendBankrunProgram,
+        usdcReserve,
+        market,
+        oracles.usdcOracle.publicKey,
+      ),
+      await simpleRefreshReserve(
+        klendBankrunProgram,
+        tokenAReserve,
+        market,
+        oracles.tokenAOracle.publicKey,
+      ),
+      await simpleRefreshObligation(klendBankrunProgram, market, obligation, [
+        usdcReserve,
+      ]),
+      await klendBankrunProgram.methods
+        .borrowObligationLiquidity(new BN(borrowAmount))
+        .accounts({
+          owner: user.wallet.publicKey,
+          obligation: obligation,
+          lendingMarket: market,
+          lendingMarketAuthority: lendingMarketAuthority,
+          borrowReserve: tokenAReserve,
+          borrowReserveLiquidityMint: tokenALiquidityMint,
+          reserveSourceLiquidity: tokenALiquiditySupply,
+          userDestinationLiquidity: user.tokenAAccount,
+          borrowReserveLiquidityFeeReceiver: tokenAFeesVault, // Fee receiver
+          referrerTokenState: klendBankrunProgram.programId, // Referrer token state (using program id as a dummy)
+          tokenProgram: TOKEN_PROGRAM_ID,
+          instructionSysvarAccount: SYSVAR_INSTRUCTIONS_PUBKEY,
+        })
+        .instruction(),
+    );
+    await processBankrunTransaction(ctx, tx, [user.wallet]);
+  });
+
+  it("Should accrue interest on USDC reserve by advancing the clock", async () => {
+    const resBefore = await klendBankrunProgram.account.reserve.fetch(
+      usdcReserve,
+    );
+    const availableBefore = resBefore.liquidity.totalAvailableAmount.toNumber();
+    const borrowedBefore = wrappedU68F60toBigNumber(
+      resBefore.liquidity.borrowedAmountSf,
+    );
+    const cumRateBefore = await readCumBorrowRateBsf(usdcReserve);
+
+    // Warp to 1 hour in the future (1 hour = 3600 seconds, at ~2.4s per slot = ~1500 slots)
+    const clock = await banksClient.getClock();
+    const timeTarget = clock.unixTimestamp + 3600n;
+    const targetUnix = BigInt(timeTarget);
+    const newClock = new Clock(
+      clock.slot, // preserve current slot
+      clock.epochStartTimestamp,
+      clock.epoch,
+      clock.leaderScheduleEpoch,
+      targetUnix,
+    );
+    bankrunContext.setClock(newClock);
+    let { epoch: _epoch, slot } = await getEpochAndSlot(banksClient);
+    const targetSlot = BigInt(slot + 1500);
+    if (verbose) {
+      console.log(
+        `Warping slot ${targetSlot}  time ${timeTarget} (~1hr later)`,
+      );
+    }
+    ctx.warpToSlot(targetSlot);
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+
+    // Capture the interest accrual from the time jump
+    let refreshTx = new Transaction().add(
+      await simpleRefreshReserve(
+        klendBankrunProgram,
+        usdcReserve,
+        market,
+        oracles.usdcOracle.publicKey,
+      ),
+    );
+    await processBankrunTransaction(
+      ctx,
+      refreshTx,
+      [groupAdmin.wallet],
+      false,
+      true,
+    );
+
+    const resAfter = await klendBankrunProgram.account.reserve.fetch(
+      usdcReserve,
+    );
+    const availableAfter = resAfter.liquidity.totalAvailableAmount.toNumber();
+    const borrowedAfter = wrappedU68F60toBigNumber(
+      resAfter.liquidity.borrowedAmountSf,
+    );
+    const cumRateAfter = await readCumBorrowRateBsf(usdcReserve);
+    const borrowedDiff = Number(borrowedAfter.minus(borrowedBefore));
+
+    if (verbose) {
+      console.log(
+        "borrowed amt before: " +
+          borrowedBefore.toString() +
+          " after " +
+          borrowedAfter.toString() +
+          " diff " +
+          borrowedDiff,
+      );
+    }
+
+    // Interest accrued over the warped hour. Kamino tracks accrual on the reserve's cumulative
+    // borrow rate and scales the outstanding borrowed amount by it.
+    // The cumulative borrow rate strictly increased (interest accrued).
+    assert(cumRateAfter > cumRateBefore);
+
+    // expectedBorrowedAfter = borrowedBefore * (cumRateAfter / cumRateBefore).
+    // Computed in bigint + double only. Feeding the ~100-digit scaled ratio through
+    // BigNumber.times here made V8's optimized bignumber.js multiply spin in an
+    // uninterruptible infinite loop on CI (node 24.15.0 linux-x64) — the silent
+    // multi-hour "Anchor LiteSVM Tests" hang. The ratio is ~1.0, so double math is
+    // exact to ~1e-16 relative, well inside the 1e-9 tolerance.
+    const RATIO_SCALE = 10n ** 30n;
+    const rateRatioScaled = (cumRateAfter * RATIO_SCALE) / cumRateBefore;
+    const expectedBorrowedAfter =
+      borrowedBefore.toNumber() *
+      (Number(rateRatioScaled) / Number(RATIO_SCALE));
+    assert.approximately(
+      borrowedAfter.toNumber(),
+      expectedBorrowedAfter,
+      expectedBorrowedAfter * 1e-9
+    );
+
+    // Available liquidity only moves on borrows/repays, not interest accrual, so it is unchanged
+    // here (this test only warps time + refreshes the reserve; it never borrows).
+    assert.equal(availableAfter, availableBefore);
+  });
+});

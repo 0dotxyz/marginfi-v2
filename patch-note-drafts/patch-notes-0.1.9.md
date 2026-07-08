@@ -1,3 +1,8 @@
+### Changes Since RC1
+
+* `group` no longer needed on flashloan/liquidation
+* SVSP upgrade flags now on `StakedSettings` instead of the `group`
+
 # Summary
 
 ## Staked Collateral / SVSP oracle upgrade
@@ -8,18 +13,21 @@ pool's **on-ramp** lamports. Note: The minimum delegation is also no longer 1 SO
 
 ### SVSP Migration Plan
 
-The migration is gated behind two new group flags and will be rolled out in three steps:
+The migration is gated behind two new staked-settings flags that are copied onto staked-bank
+`Bank.flags` and will be rolled out in three steps:
 
-1. `disable_staked_oracles` (admin) sets `DISABLE_STAKE` — all staked-bank pricing temporarily
-   panics while the rollout happens. We intend to set this state just before SVSP upgrades, for as
-   little duration as possible.
+1. `disable_staked_oracles` (admin) sets `STAKED_ORACLE_DISABLED` on `StakedSettings` (and clears
+   `STAKED_ORACLE_PRICE_USES_ONRAMP`) — once propagated to staked banks, all staked-bank pricing
+   temporarily panics while the rollout happens. We intend to set this state just before SVSP
+   upgrades, for as little duration as possible.
 
 **_Foundation updates the SVSP program_**
 
 2. Banks are backfilled with their validator vote account (now stored as a fourth oracle key)
    (`lending_pool_backfill_staked_bank_validator_vote_account`).
-3. `enable_staked_oracle_onramp` (admin) sets `ENABLE_ONRAMP` (which auto-clears `DISABLE_STAKE`),
-   switching every staked oracle to the new NAV formula.
+3. `enable_staked_oracle_onramp` (admin) sets `STAKED_ORACLE_PRICE_USES_ONRAMP` on
+   `StakedSettings` (and clears `STAKED_ORACLE_DISABLED`). Once propagated, staked banks switch to
+   the new NAV formula.
 
 The whole SVSP-transition surface is temporary and slated for removal once rollout completes (likely 1.10).
 
@@ -86,13 +94,14 @@ for legacy banks. Banks with the flag `BANK_SEED_KNOWN` have been successfully b
   (derived from the bank's validator vote account), where it was previously unused/omitted. Remember
   that all accounts can be read from the oracles_keys array.
 
-  Before the SVSP upgrade takes affect, callers may technically pass any placeholder account
+  Before the SVSP upgrade takes effect, callers may technically pass any placeholder account
   (including pubkey default) in the on-ramp account slot. The actual on-ramp account is required
-  once the group's `ENABLE_ONRAMP` flag is set. See `PACKING_RISK_ACCOUNTS.md` for more details.
+  once the bank's `STAKED_ORACLE_PRICE_USES_ONRAMP` flag is set. See `PACKING_RISK_ACCOUNTS.md`
+  for more details.
 
-  While `DISABLE_STAKE` is set, staked all pricing reverts and SVSP related txes will fail
-  regardless. Non-staked banks are unaffected. `lending_pool_add_bank_permissionless` - now requires
-  `pool_onramp`
+  While a staked bank's `STAKED_ORACLE_DISABLED` flag is set, all staked pricing reverts and SVSP
+  related txes will fail regardless. Non-staked banks are unaffected.
+  `lending_pool_add_bank_permissionless` now requires `pool_onramp`.
 
 # Breaking Changes (when group rate limits are enabled)
 
@@ -113,10 +122,6 @@ Option<u8>`** — bit 0 (`0x01`) = withdraw all, bit 1 (`0x02`) = refresh reserv
   Callers passing `Some(true)` must now pass `Some(1)`. No update is needed for most consumers
   otherwise, unless they wish to switch to the (more efficient) batch refresh.
 - `kamino_deposit`: gained a trailing `refresh_reserve: Option<bool>` arg.
-- The following instructions require the caller to pass `group` (automatically inferred for most TS
-  consumers): `marginfi_account_close_order`, `marginfi_account_set_keeper_close_flags`,
-  `lending_account_end_flashloan`, `start_liquidation`, `end_liquidation`,
-  `lending_account_pulse_health`
 
 # New Accounts
 
@@ -127,10 +132,11 @@ Option<u8>`** — bit 0 (`0x01`) = withdraw all, bit 1 (`0x02`) = refresh reserv
 
 ### Staked / SVSP (temporary, removal expected ~1.10)
 
-- `disable_staked_oracles` (admin) — sets `DISABLE_STAKE`; all staked-bank operations panic during
-  SVSP upgrade rollout.
-- `enable_staked_oracle_onramp` (admin) — sets `ENABLE_ONRAMP` (auto-clears `DISABLE_STAKE`); every
-  staked oracle switches to the single-pool NAV formula.
+- `disable_staked_oracles` (admin) — sets `STAKED_ORACLE_DISABLED` on `StakedSettings`; after
+  propagation, all staked-bank pricing panics during SVSP upgrade rollout.
+- `enable_staked_oracle_onramp` (admin) — sets `STAKED_ORACLE_PRICE_USES_ONRAMP` on
+  `StakedSettings` (auto-clears `STAKED_ORACLE_DISABLED`); after propagation, every staked oracle
+  switches to the single-pool NAV formula.
 - `lending_pool_backfill_staked_bank_validator_vote_account` (permissionless) — backfills the
   validator vote account on existing staked banks; no-op if already set.
 
@@ -153,7 +159,8 @@ Option<u8>`** — bit 0 (`0x01`) = withdraw all, bit 1 (`0x02`) = refresh reserv
   allocation for a Drift bank. The bank's `liquidity_vault_authority` PDA must be the claimant in
   Drift's merkle tree. The instruction creates the claimant/global-fee ATAs idempotently, prefunds
   the Drift distributor `ClaimStatus` rent from the payer, claims through Drift's merkle distributor,
-  and sweeps the claimed tokens to the global fee wallet's canonical ATA.
+  sweeps the claimed tokens to the global fee wallet's canonical ATA, and emits
+  `DriftClaimBadDebtEvent`.
 
 ### Fee state
 
@@ -190,17 +197,15 @@ Option<u8>`** — bit 0 (`0x01`) = withdraw all, bit 1 (`0x02`) = refresh reserv
 
 - `kamino_deposit` / `kamino_withdraw`: new `refresh_reserve` / `flags` arguments (see Breaking
   Changes).
-- `lending_account_withdraw` / kamino/drift/jupiter withdrawals: `remaining_accounts` requirement
-  when group rate limits are enabled (see Breaking Changes).
+- `lending_account_withdraw` / kamino/drift/solend/juplend withdrawals: `remaining_accounts`
+  requirement when group rate limits are enabled (see Breaking Changes).
 - Deposit / withdraw / borrow / repay events now carry `share_amount`.
 - `marginfi_account_close_order`/`marginfi_account_set_keeper_close_flags` - now requires `group`
-- `lending_account_end_flashloan` - now requires `group`
-- `lending_account_pulse_health` - now requires `group`
 - `keeper_close_order` - Marginfi account is now mutable
 
 ### Liquidators
 
-`start_liquidation`/`end_liquidation` - now requires `group`
+`start_liquidation`/`end_liquidation` - no longer requires `group`
 
 ### Pause
 
@@ -213,10 +218,10 @@ Option<u8>`** — bit 0 (`0x01`) = withdraw all, bit 1 (`0x02`) = refresh reserv
   - Last 32 reserved bytes are now `pause_delegate_admin: Pubkey` — can pause (not unpause) the
     protocol; cannot modify anything else.
 - `MarginfiGroup`
-  - `group_flags`: added bit 1 `DISABLE_STAKE` and bit 2 `ENABLE_ONRAMP` (SVSP transition).
   - `delegate_emissions_admin`: **deprecated**, no on-chain authority (kept for layout/history).
 - `Bank`
-  - `flags`: added bit 7 `IS_T22` and bit 8 `BANK_SEED_KNOWN`.
+  - `flags`: added bit 7 `IS_T22`, bit 8 `BANK_SEED_KNOWN`, bit 9
+    `STAKED_ORACLE_DISABLED`, and bit 10 `STAKED_ORACLE_PRICE_USES_ONRAMP`.
   - Added `bank_seed: u64` (consumes reserved padding) — the PDA seed for seed-derived banks; `0`
     for legacy keypair/pre-backfill banks. Validate provenance with `flags & BANK_SEED_KNOWN`.
   - `integration_acc_1` now also stores the validator vote account for staked-collateral banks.
@@ -226,6 +231,12 @@ Option<u8>`** — bit 0 (`0x01`) = withdraw all, bit 1 (`0x02`) = refresh reserv
 - `BankConfig` / `BankOperationalState`
   - `BankOperationalState`: added `Uninitialized` variant (awaiting JupLend `juplend_init_position`
     seed deposit; all ops blocked; not reachable via `lending_pool_configure_bank`).
+  - `BankOperationalState`: added `ReduceOnlyWithBorrowingPower`, which blocks the same new
+    bank-side operations as `ReduceOnly` but still lets existing collateral count toward initial
+    health for new borrows.
+- `StakedSettings`
+  - Added `flags: u64` for desired staked-bank transition flags. `propagate_staked_settings` copies
+    these bits onto `Bank.flags`, and new staked banks inherit them at creation.
 - `MarginfiAccount`
   - Added `active_orders: u8` (count of open Orders, max 255; consumes a padding byte).
   - Added `indexer_flags: IndexerFlags` (24 bytes, consumes reserved padding) — see Indexer flags
@@ -236,7 +247,7 @@ Option<u8>`** — bit 0 (`0x01`) = withdraw all, bit 1 (`0x02`) = refresh reserv
 ### Consolidates
 
 #526, #528, #532, #540, #542, #543, #545, #557, #558, #559, #561, #563, #564, #568, #569, #570,
-#573, #574, #575, #576, #578, #580, #581, #589, #591, #592, #594, #597, #598
+#573, #574, #575, #576, #578, #580, #581, #589, #591, #592, #594, #597, #598, #604, #605
 
 ### Minor bugfixes / notes
 
