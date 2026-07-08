@@ -23,7 +23,7 @@ import {
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import { assert } from "chai";
-import { Marginfi } from "../target/types/marginfi";
+import { Marginfi } from "../../../target/types/marginfi";
 import {
   bankrunContext,
   bankrunProgram,
@@ -35,49 +35,49 @@ import {
   groupAdmin,
   oracles,
   users,
-} from "./rootHooks";
+} from "../../rootHooks";
 import {
   accountInit,
   borrowIx,
   composeRemainingAccounts,
   depositIx,
-} from "./utils/user-instructions";
+} from "../../utils/user-instructions";
 import {
   addBankWithSeed,
   configureBankOracle,
   groupInitialize,
-} from "./utils/group-instructions";
-import { defaultBankConfig, ORACLE_SETUP_PYTH_PUSH } from "./utils/types";
+} from "../../utils/group-instructions";
+import { defaultBankConfig, ORACLE_SETUP_PYTH_PUSH } from "../../utils/types";
 import {
   deriveBankWithSeed,
   deriveBaseObligation,
   deriveLiquidityVaultAuthority,
   deriveSpotMarketPDA,
-} from "./utils/pdas";
-import { USER_ACCOUNT } from "./utils/mocks";
-import { expectFailedTxWithError } from "./utils/genericTests";
-import { bnToBigIntSafe, bnToDecimalStringSafe } from "./utils/bn-utils";
+} from "../../utils/pdas";
+import { USER_ACCOUNT } from "../../utils/mocks";
+import { expectFailedTxWithError } from "../../utils/genericTests";
+import { bnToBigIntSafe, bnToDecimalStringSafe } from "../../utils/bn-utils";
 import {
   createLookupTableForInstructions,
   getBankrunBlockhash,
   processBankrunTransaction,
   processBankrunV0Transaction,
   safeGetAccountInfo,
-} from "./utils/tools";
+} from "../../utils/tools";
 
 // Kamino
-import { createKaminoMarket, createReserve } from "./utils/kamino-reserve-setup";
+import { createKaminoMarket, createReserve } from "../../utils/kamino-reserve-setup";
 import {
   makeAddKaminoBankIx,
   makeInitObligationIx,
   makeKaminoDepositIx,
   makeKaminoWithdrawIx,
-} from "./utils/kamino-instructions";
+} from "../../utils/kamino-instructions";
 import {
   defaultKaminoBankConfig,
   simpleRefreshObligation,
   simpleRefreshReserve,
-} from "./utils/kamino-utils";
+} from "../../utils/kamino-utils";
 
 // Drift
 import {
@@ -85,7 +85,7 @@ import {
   makeDriftDepositIx,
   makeDriftWithdrawIx,
   makeInitDriftUserIx,
-} from "./utils/drift-instructions";
+} from "../../utils/drift-instructions";
 import {
   makeInitializeDriftIx,
   makeInitializeSpotMarketIx,
@@ -94,22 +94,22 @@ import {
   makeDepositIx as makeDriftNativeDepositIx,
   makeWithdrawIx as makeDriftNativeWithdrawIx,
   makeUpdateSpotMarketCumulativeInterestIx,
-} from "./utils/drift-sdk";
+} from "../../utils/drift-sdk";
 import {
   defaultDriftBankConfig,
   defaultSpotMarketConfig,
   quoteAssetSpotMarketConfig,
   DriftOracleSourceValues,
   getDriftStateAccount,
-} from "./utils/drift-utils";
+} from "../../utils/drift-utils";
 import {
   createBankrunPythOracleAccount,
   setPythPullOraclePrice,
-} from "./utils/bankrun-oracles";
+} from "../../utils/bankrun-oracles";
 import {
   DRIFT_ORACLE_RECEIVER_PROGRAM_ID,
   ORACLE_CONF_INTERVAL,
-} from "./utils/types";
+} from "../../utils/types";
 
 // JupLend
 import {
@@ -117,25 +117,25 @@ import {
   fetchJuplendPool,
   initJuplendGlobals,
   initJuplendPool,
-} from "./utils/juplend/jlr-pool-setup";
+} from "../../utils/juplend/jlr-pool-setup";
 import {
   addJuplendBankIx,
   makeJuplendInitPositionIx,
-} from "./utils/juplend/group-instructions";
+} from "../../utils/juplend/group-instructions";
 import {
   makeJuplendDepositIx,
   makeJuplendNativeBorrowIx,
   makeJuplendNativeLendingDepositIx,
   makeJuplendNativePreOperateIx,
-} from "./utils/juplend/user-instructions";
-import { refreshJupSimple } from "./utils/juplend/shorthand-instructions";
+} from "../../utils/juplend/user-instructions";
+import { refreshJupSimple } from "../../utils/juplend/shorthand-instructions";
 import {
   deriveJuplendGlobalKeys,
   deriveJuplendLendingPdas,
   findJuplendLiquidityBorrowPositionPda,
   findJuplendLiquiditySupplyPositionPda,
-} from "./utils/juplend/juplend-pdas";
-import { getJuplendPrograms } from "./utils/juplend/programs";
+} from "../../utils/juplend/juplend-pdas";
+import { getJuplendPrograms } from "../../utils/juplend/programs";
 import {
   DEFAULT_BORROW_CONFIG,
   DEFAULT_BORROW_CONFIG_MIN,
@@ -143,12 +143,12 @@ import {
   defaultJuplendBankConfig,
   JuplendPoolKeys,
   percent,
-} from "./utils/juplend/types";
+} from "../../utils/juplend/types";
 import {
   initJuplendProtocolPositionsIx,
   updateJuplendUserBorrowConfigIx,
   updateJuplendUserClassIx,
-} from "./utils/juplend/admin-instructions";
+} from "../../utils/juplend/admin-instructions";
 
 const REBALANCE_ORDER_SEED = "rebalance_order";
 const REBALANCE_RECORD_SEED = "rebalance_record";

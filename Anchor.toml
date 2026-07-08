@@ -43,10 +43,10 @@ wallet = "~/.config/solana/id.json"
 # (remove RUST_LOG= to see bankRun logs)
 [scripts]
 # Use like `anchor test --skip-build --skip-local-validator --skip-deploy`
-test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/basic/*.spec.ts tests/specs/drift/*.spec.ts tests/specs/emode/*.spec.ts tests/specs/juplend/*.spec.ts tests/specs/kamino/*.spec.ts tests/specs/limits/*.spec.ts tests/specs/pyth/*.spec.ts 'tests/specs/staked/s[0-9]*.spec.ts' tests/specs/solend/*.spec.ts tests/specs/bankruptcy/z0*.spec.ts tests/specs/bankruptcy/zb*.spec.ts --exit --require tests/rootHooks.ts"
+test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/basic/*.spec.ts tests/specs/drift/*.spec.ts tests/specs/emode/*.spec.ts tests/specs/juplend/*.spec.ts tests/specs/kamino/*.spec.ts tests/specs/limits/*.spec.ts tests/specs/pyth/*.spec.ts tests/specs/orders/*.spec.ts 'tests/specs/staked/s[0-9]*.spec.ts' tests/specs/solend/*.spec.ts tests/specs/bankruptcy/z0*.spec.ts tests/specs/bankruptcy/zb*.spec.ts --exit --require tests/rootHooks.ts"
 
 # All tests (for CI)
-all-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/basic/*.spec.ts tests/specs/drift/*.spec.ts tests/specs/emode/*.spec.ts tests/specs/juplend/*.spec.ts tests/specs/kamino/*.spec.ts tests/specs/limits/*.spec.ts tests/specs/pyth/*.spec.ts 'tests/specs/staked/s[0-9]*.spec.ts' tests/specs/solend/*.spec.ts tests/specs/bankruptcy/z0*.spec.ts tests/specs/bankruptcy/zb*.spec.ts --exit --require tests/rootHooks.ts"
+all-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/basic/*.spec.ts tests/specs/drift/*.spec.ts tests/specs/emode/*.spec.ts tests/specs/juplend/*.spec.ts tests/specs/kamino/*.spec.ts tests/specs/limits/*.spec.ts tests/specs/pyth/*.spec.ts tests/specs/orders/*.spec.ts 'tests/specs/staked/s[0-9]*.spec.ts' tests/specs/solend/*.spec.ts tests/specs/bankruptcy/z0*.spec.ts tests/specs/bankruptcy/zb*.spec.ts --exit --require tests/rootHooks.ts"
 
 # LiteSVM-only runner (no local validator)
 # Use: anchor run kamino-tests
