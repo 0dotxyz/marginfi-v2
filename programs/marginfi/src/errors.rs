@@ -444,7 +444,7 @@ pub enum MarginfiError {
     CircuitBreakerRequiresWarmCache, // 6603
     #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
     CircuitBreakerPriceJump, // 6604
-                             // **************END CIRCUIT BREAKER ERRORS
+    // **************END CIRCUIT BREAKER ERRORS
 
     // ************** BEGIN PREMIUM ERRORS (starting at 6610)
     #[msg("Premium entry has a zero collateral or liability tag")]
