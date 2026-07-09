@@ -5,7 +5,6 @@ import {
   PublicKey,
   Transaction,
 } from "@solana/web3.js";
-import { createTransferInstruction } from "@solana/spl-token";
 import {
   groupAdmin,
   bankrunContext,
@@ -57,12 +56,8 @@ import {
   getTokenBalance,
 } from "../../utils/genericTests";
 import { initOrUpdatePriceUpdateV2 } from "../../utils/pyth-pull-mocks";
-import {
-  dumpAccBalances,
-  dumpBankrunLogs,
-  processBankrunTransaction,
-} from "../../utils/tools";
-import { deriveInsuranceVault, deriveLiquidityVault } from "../../utils/pdas";
+import { processBankrunTransaction } from "../../utils/tools";
+import { deriveLiquidityVault } from "../../utils/pdas";
 
 const USER_ACCOUNT_THROWAWAY = "throwaway_account_zb02";
 const ONE_YEAR_IN_SECONDS = 2 * 365 * 24 * 60 * 60;
@@ -615,41 +610,19 @@ describe("Bank e2e sunset due to illiquid asset", () => {
 
   // Here the admin would fund some "claims portal" using the proceeds it secured earlier to make
   // users whole OTC. Any remaining users with lending funds, for example user 2, are purged so
-  // their now-worthless position doesn't keep the bank open. Purging moves no funds, except the
-  // purge closing the bank's last lending position sweeps whatever remains in the liquidity vault
-  // into the insurance vault, where the admin can withdraw it to fund the claims portal.
+  // their now-worthless position doesn't keep the bank open.
   it("(risk admin) Purges user 2's remaining b1 lending account", async () => {
     const user = users[2];
     const userAccount = user.accounts.get(USER_ACCOUNT_THROWAWAY);
 
     const [liqVault] = deriveLiquidityVault(bankrunProgram.programId, banks[1]);
-    const [insuranceVault] = deriveInsuranceVault(
-      bankrunProgram.programId,
-      banks[1]
-    );
-
-    // Simulate funds left over in the liquidity vault, e.g. returned by the risk admin from the
-    // proceeds secured during deleveraging.
-    const residual = 5000;
-    const fundTx = new Transaction().add(
-      createTransferInstruction(
-        riskAdmin.lstAlphaAccount,
-        liqVault,
-        riskAdmin.wallet.publicKey,
-        residual
-      )
-    );
-    await processBankrunTransaction(bankrunContext, fundTx, [riskAdmin.wallet]);
-
-    const [bankBefore, userBefore, lstBefore, liqVaultBefore, insuranceBefore] =
+    const [bankBefore, userBefore, lstBefore, liqVaultBefore] =
       await Promise.all([
         bankrunProgram.account.bank.fetch(banks[1]),
         bankrunProgram.account.marginfiAccount.fetch(userAccount),
         getTokenBalance(bankRunProvider, user.lstAlphaAccount),
         getTokenBalance(bankRunProvider, liqVault),
-        getTokenBalance(bankRunProvider, insuranceVault),
       ]);
-    assert.equal(liqVaultBefore, residual);
 
     const tx = new Transaction();
     tx.add(
@@ -660,25 +633,22 @@ describe("Bank e2e sunset due to illiquid asset", () => {
     );
     await processBankrunTransaction(bankrunContext, tx, [riskAdmin.wallet]);
 
-    const [bankAfter, userAfter, lstAfter, liqVaultAfter, insuranceAfter] =
-      await Promise.all([
-        bankrunProgram.account.bank.fetch(banks[1]),
-        bankrunProgram.account.marginfiAccount.fetch(userAccount),
-        getTokenBalance(bankRunProvider, user.lstAlphaAccount),
-        getTokenBalance(bankRunProvider, liqVault),
-        getTokenBalance(bankRunProvider, insuranceVault),
-      ]);
+    const [bankAfter, userAfter, lstAfter, liqVaultAfter] = await Promise.all([
+      bankrunProgram.account.bank.fetch(banks[1]),
+      bankrunProgram.account.marginfiAccount.fetch(userAccount),
+      getTokenBalance(bankRunProvider, user.lstAlphaAccount),
+      getTokenBalance(bankRunProvider, liqVault),
+    ]);
 
     // User gets nothing, we're out of money!
     assert.equal(lstAfter - lstBefore, 0);
+    // Liquidity vault is empty, and was empty before!
+    assert.equal(liqVaultAfter, 0);
+    assert.equal(liqVaultBefore, 0);
     // Balance closed!
     assert.equal(userBefore.lendingAccount.balances[0].active, 1);
     assert.equal(userAfter.lendingAccount.balances[0].active, 0);
-    // This purge closed the bank's last lending position, so the entire vault residual is swept
-    // into the insurance vault.
     assert.equal(bankAfter.lendingPositionCount, 0);
-    assert.equal(liqVaultAfter, 0);
-    assert.equal(insuranceAfter - insuranceBefore, residual);
     // Bank fully cleared! Before the purge, only user 2's 42 shares remained.
     assertI80F48Equal(bankBefore.totalAssetShares, new BN(42));
     assertI80F48Equal(bankAfter.totalAssetShares, 0);

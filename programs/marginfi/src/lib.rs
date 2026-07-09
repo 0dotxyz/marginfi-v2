@@ -852,11 +852,9 @@ pub mod marginfi {
     /// user anything. Only usable after all the debt has been settled on a bank in deleveraging
     /// mode, i.e. `TOKENLESS_REPAYMENTS_ALLOWED` and `TOKENLESS_REPAYMENTS_COMPLETE`. Used to clear
     /// abandoned lending positions in a now-worthless bank so it can be closed via
-    /// `lending_pool_close_bank`. The purge that closes the bank's last lending position sweeps any
-    /// funds remaining in the liquidity vault into the insurance vault, where the admin can
-    /// withdraw them to repay purged lenders off-chain.
-    pub fn purge_deleverage_balance<'info>(
-        ctx: Context<'info, LendingAccountPurgeDelevBalance<'info>>,
+    /// `lending_pool_close_bank`.
+    pub fn purge_deleverage_balance(
+        ctx: Context<LendingAccountPurgeDelevBalance>,
     ) -> MarginfiResult {
         marginfi_account::lending_account_purge_delev_balance(ctx)
     }

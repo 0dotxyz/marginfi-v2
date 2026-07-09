@@ -796,7 +796,6 @@ export const purgeDeveleragedBalance = (
     .accounts({
       marginfiAccount: args.account,
       bank: args.bank,
-      tokenProgram: TOKEN_PROGRAM_ID,
     })
     .instruction();
 

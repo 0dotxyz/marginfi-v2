@@ -1,34 +1,23 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::{
-        INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
-        TOKENLESS_REPAYMENTS_COMPLETE, ZERO_AMOUNT_THRESHOLD,
-    },
+    constants::{TOKENLESS_REPAYMENTS_COMPLETE, ZERO_AMOUNT_THRESHOLD},
     types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_IN_RECEIVERSHIP},
 };
 
 use crate::{
-    bank_signer,
     prelude::*,
     state::{
-        bank::{BankImpl, BankVaultType},
+        bank::BankImpl,
         marginfi_account::{BalanceImpl, LendingAccountImpl, MarginfiAccountImpl},
     },
-    utils,
 };
 
-pub fn lending_account_purge_delev_balance<'info>(
-    mut ctx: Context<'info, LendingAccountPurgeDelevBalance<'info>>,
+pub fn lending_account_purge_delev_balance(
+    ctx: Context<LendingAccountPurgeDelevBalance>,
 ) -> MarginfiResult {
-    let bank_key = ctx.accounts.bank.key();
+    let bank_pk = &ctx.accounts.bank.key();
     let mut bank = ctx.accounts.bank.load_mut()?;
-    let maybe_bank_mint = utils::maybe_take_bank_mint(
-        &mut ctx.remaining_accounts,
-        &bank,
-        ctx.accounts.token_program.key,
-    )?;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
     let lending_account = &mut marginfi_account.lending_account;
@@ -36,7 +25,7 @@ pub fn lending_account_purge_delev_balance<'info>(
     let balance = lending_account
         .balances
         .iter_mut()
-        .find(|balance| balance.is_active() && balance.bank_pk.eq(&bank_key))
+        .find(|balance| balance.is_active() && balance.bank_pk.eq(bank_pk))
         .ok_or_else(|| error!(MarginfiError::BankAccountNotFound))?;
 
     // Sanity check the balance is not a liability
@@ -54,28 +43,6 @@ pub fn lending_account_purge_delev_balance<'info>(
     }
     bank.decrement_lending_position_count();
     bank.change_asset_shares(-asset_shares, false)?;
-
-    // Purging moves no funds: whatever remains in the liquidity vault stays claimable by the
-    // other lenders, first-come-first-served. The purge closing the bank's last lending position
-    // sweeps the vault into the insurance vault — no on-chain claims remain at that point, and
-    // the funds would otherwise be stranded once the bank closes. The admin can withdraw the
-    // swept funds to repay purged lenders off-chain
-    if bank.lending_position_count == 0 {
-        bank.withdraw_spl_transfer(
-            ctx.accounts.liquidity_vault.amount,
-            ctx.accounts.liquidity_vault.to_account_info(),
-            ctx.accounts.insurance_vault.to_account_info(),
-            ctx.accounts.liquidity_vault_authority.to_account_info(),
-            maybe_bank_mint.as_ref(),
-            ctx.accounts.token_program.to_account_info(),
-            bank_signer!(
-                BankVaultType::Liquidity,
-                bank_key,
-                bank.liquidity_vault_authority_bump
-            ),
-            ctx.remaining_accounts,
-        )?;
-    }
 
     lending_account.sort_balances();
     marginfi_account.sync_indexer_flags();
@@ -106,36 +73,4 @@ pub struct LendingAccountPurgeDelevBalance<'info> {
             @ MarginfiError::ForbiddenIx
     )]
     pub bank: AccountLoader<'info, Bank>,
-
-    /// CHECK: Seed constraint check
-    #[account(
-        seeds = [
-            LIQUIDITY_VAULT_AUTHORITY_SEED.as_bytes(),
-            bank.key().as_ref(),
-        ],
-        bump = bank.load()?.liquidity_vault_authority_bump
-    )]
-    pub liquidity_vault_authority: UncheckedAccount<'info>,
-
-    #[account(
-        mut,
-        seeds = [
-            LIQUIDITY_VAULT_SEED.as_bytes(),
-            bank.key().as_ref(),
-        ],
-        bump = bank.load()?.liquidity_vault_bump
-    )]
-    pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
-
-    #[account(
-        mut,
-        seeds = [
-            INSURANCE_VAULT_SEED.as_bytes(),
-            bank.key().as_ref(),
-        ],
-        bump = bank.load()?.insurance_vault_bump
-    )]
-    pub insurance_vault: InterfaceAccount<'info, TokenAccount>,
-
-    pub token_program: Interface<'info, TokenInterface>,
 }
