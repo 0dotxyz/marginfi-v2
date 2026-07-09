@@ -617,11 +617,17 @@ impl BankImpl for Bank {
         set_if_some!(self.config.oracle_max_age, config.oracle_max_age);
 
         if let Some(fee_bps) = config.liquidation_liquidator_fee_bps {
-            check!(fee_bps <= MAX_LIQUIDATION_FEE_BPS, MarginfiError::InvalidConfig);
+            check!(
+                fee_bps <= MAX_LIQUIDATION_FEE_BPS,
+                MarginfiError::InvalidConfig
+            );
             self.liquidation_liquidator_fee_bps = fee_bps;
         }
         if let Some(fee_bps) = config.liquidation_insurance_fee_bps {
-            check!(fee_bps <= MAX_LIQUIDATION_FEE_BPS, MarginfiError::InvalidConfig);
+            check!(
+                fee_bps <= MAX_LIQUIDATION_FEE_BPS,
+                MarginfiError::InvalidConfig
+            );
             self.liquidation_insurance_fee_bps = fee_bps;
         }
 

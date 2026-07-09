@@ -71,7 +71,6 @@ import {
   makeDriftWithdrawIx,
   makeInitDriftUserIx,
 } from "../../utils/drift-instructions";
-import { createMintToInstruction } from "@solana/spl-token";
 
 let ctx: ProgramTestContext;
 let usdcSpotMarket: PublicKey;
