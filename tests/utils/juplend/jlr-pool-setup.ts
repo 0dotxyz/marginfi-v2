@@ -55,6 +55,11 @@ async function getTokenProgramForMint(mint: PublicKey): Promise<PublicKey> {
   );
 }
 
+async function accountExists(address: PublicKey): Promise<boolean> {
+  const info = await bankRunProvider.connection.getAccountInfo(address);
+  return info !== null;
+}
+
 export async function fetchJuplendPool(args: {
   mint: PublicKey;
   tokenProgram?: PublicKey;
@@ -125,46 +130,52 @@ export async function initJuplendGlobals(args: {
   const { liquidity, authList, lendingAdmin, lendingRewardsAdmin } =
     deriveJuplendGlobalKeys();
 
-  const initLiquidity = await initJuplendLiquidityIx(programs, {
-    signer: args.admin.publicKey,
-    authority: args.admin.publicKey,
-    revenueCollector: args.admin.publicKey,
-  });
+  if (!(await accountExists(liquidity))) {
+    const initLiquidity = await initJuplendLiquidityIx(programs, {
+      signer: args.admin.publicKey,
+      authority: args.admin.publicKey,
+      revenueCollector: args.admin.publicKey,
+    });
 
-  await processBankrunTransaction(
-    bankrunContext,
-    new Transaction().add(initLiquidity),
-    [args.admin],
-    false,
-    true,
-  );
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(initLiquidity),
+      [args.admin],
+      false,
+      true,
+    );
+  }
 
-  const initRewardsAdmin = await initJuplendLendingRewardsAdminIx(programs, {
-    signer: args.admin.publicKey,
-    authority: args.admin.publicKey,
-  });
+  if (!(await accountExists(lendingRewardsAdmin))) {
+    const initRewardsAdmin = await initJuplendLendingRewardsAdminIx(programs, {
+      signer: args.admin.publicKey,
+      authority: args.admin.publicKey,
+    });
 
-  await processBankrunTransaction(
-    bankrunContext,
-    new Transaction().add(initRewardsAdmin),
-    [args.admin],
-    false,
-    true,
-  );
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(initRewardsAdmin),
+      [args.admin],
+      false,
+      true,
+    );
+  }
 
-  const initLendingAdmin = await initJuplendLendingAdminIx(programs, {
-    authority: args.admin.publicKey,
-    adminAuthority: args.admin.publicKey,
-    rebalancer: args.admin.publicKey,
-  });
+  if (!(await accountExists(lendingAdmin))) {
+    const initLendingAdmin = await initJuplendLendingAdminIx(programs, {
+      authority: args.admin.publicKey,
+      adminAuthority: args.admin.publicKey,
+      rebalancer: args.admin.publicKey,
+    });
 
-  await processBankrunTransaction(
-    bankrunContext,
-    new Transaction().add(initLendingAdmin),
-    [args.admin],
-    false,
-    true,
-  );
+    await processBankrunTransaction(
+      bankrunContext,
+      new Transaction().add(initLendingAdmin),
+      [args.admin],
+      false,
+      true,
+    );
+  }
 
   const liquidityAcc = await programs.liquidity.account.liquidity.fetch(
     liquidity,
@@ -571,39 +582,50 @@ export async function initJuplendPool(args: {
     tokenProgram,
   });
 
-  await initJuplendLiquidityForMint({
-    admin: args.admin,
-    mint: args.mint,
-    tokenProgram,
-    rateConfig: args.rateConfig,
-    tokenConfig: args.tokenConfig,
-    programs,
-  });
+  if (!(await accountExists(keys.tokenReserve))) {
+    await initJuplendLiquidityForMint({
+      admin: args.admin,
+      mint: args.mint,
+      tokenProgram,
+      rateConfig: args.rateConfig,
+      tokenConfig: args.tokenConfig,
+      programs,
+    });
+  }
 
-  const rewardsRateModel = await initJuplendRewardsRateModel({
-    admin: args.admin,
-    mint: args.mint,
-    programs,
-  });
+  if (!(await accountExists(keys.lendingRewardsRateModel))) {
+    await initJuplendRewardsRateModel({
+      admin: args.admin,
+      mint: args.mint,
+      programs,
+    });
+  }
 
-  await initJuplendLendingForMint({
-    admin: args.admin,
-    mint: args.mint,
-    symbol: args.symbol,
-    decimals: args.decimals,
-    tokenProgram,
-    tokenReserve: keys.tokenReserve,
-    lendingRewardsRateModel: rewardsRateModel,
-    programs,
-  });
+  if (!(await accountExists(keys.lending))) {
+    await initJuplendLendingForMint({
+      admin: args.admin,
+      mint: args.mint,
+      symbol: args.symbol,
+      decimals: args.decimals,
+      tokenProgram,
+      tokenReserve: keys.tokenReserve,
+      lendingRewardsRateModel: keys.lendingRewardsRateModel,
+      programs,
+    });
+  }
 
-  await initJuplendLiquidityPositions({
-    admin: args.admin,
-    mint: args.mint,
-    tokenProgram,
-    lending: keys.lending,
-    programs,
-  });
+  if (
+    !(await accountExists(keys.supplyPositionOnLiquidity)) ||
+    !(await accountExists(keys.borrowPositionOnLiquidity))
+  ) {
+    await initJuplendLiquidityPositions({
+      admin: args.admin,
+      mint: args.mint,
+      tokenProgram,
+      lending: keys.lending,
+      programs,
+    });
+  }
 
   return keys;
 }
