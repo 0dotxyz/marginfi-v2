@@ -150,16 +150,17 @@ pub struct Bank {
     ///   the bank may safely be closed if this is zero. Will never go negative.
     pub borrowing_position_count: i32,
 
-    /// Fee (in basis points) the liquidator earns when liquidating against this bank's liability.
-    /// * 0 falls back to the default (`DEFAULT_LIQUIDATION_FEE_BPS` = 250 bps = 2.5%).
-    pub liquidation_liquidator_fee_bps: u16,
-    /// Fee (in basis points) routed to this bank's insurance fund on a liquidation against its
-    /// liability.
-    /// * 0 falls back to the default (`DEFAULT_LIQUIDATION_FEE_BPS` = 250 bps = 2.5%).
-    pub liquidation_insurance_fee_bps: u16,
+    /// Fee the liquidator earns when liquidating against this bank's liability. Decode with
+    /// `u32_to_centi` (`u32::MAX` = 100%).
+    /// * 0 falls back to the default (`DEFAULT_LIQUIDATION_FEE` = 2.5%).
+    pub liquidation_liquidator_fee: u32,
+    /// Fee routed to this bank's insurance fund on a liquidation against its liability. Decode
+    /// with `u32_to_centi` (`u32::MAX` = 100%).
+    /// * 0 falls back to the default (`DEFAULT_LIQUIDATION_FEE` = 2.5%).
+    pub liquidation_insurance_fee: u32,
 
     /// Reserved for future use
-    pub _padding_0: [u8; 12],
+    pub _padding_0: [u8; 8],
 
     /// Integration account slot 1 (default Pubkey for non-integrations).
     /// - Kamino: reserve

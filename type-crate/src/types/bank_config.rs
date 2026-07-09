@@ -213,9 +213,9 @@ pub struct BankConfigOpt {
     pub freeze_settings: Option<bool>,
     pub tokenless_repayments_allowed: Option<bool>,
 
-    /// Per-bank liquidation fees in basis points (0 => default 250 bps = 2.5%).
-    pub liquidation_liquidator_fee_bps: Option<u16>,
-    pub liquidation_insurance_fee_bps: Option<u16>,
+    /// Per-bank liquidation fees, encoded as `u32_to_centi` (`u32::MAX` = 100%; 0 => default 2.5%).
+    pub liquidation_liquidator_fee: Option<u32>,
+    pub liquidation_insurance_fee: Option<u32>,
 
     pub circuit_breaker_enabled: Option<bool>,
     pub cb_deviation_bps_tiers: Option<[u16; 3]>,

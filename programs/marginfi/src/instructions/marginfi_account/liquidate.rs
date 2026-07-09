@@ -28,18 +28,18 @@ use marginfi_type_crate::{
         LIQUIDITY_VAULT_SEED,
     },
     types::{
-        Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType, PriceBias,
-        ACCOUNT_IN_RECEIVERSHIP,
+        u32_to_centi, Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType,
+        PriceBias, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
-/// Converts a per-bank liquidation fee in basis points to an I80F48 fraction. A 0 value falls back
-/// to the `DEFAULT_LIQUIDATION_FEE` constant.
-fn liquidation_fee_fraction(bps: u16) -> I80F48 {
-    if bps == 0 {
+/// Converts a per-bank liquidation fee (`u32_to_centi` encoding, `u32::MAX` = 100%) to an I80F48
+/// fraction. A 0 value falls back to the `DEFAULT_LIQUIDATION_FEE` constant.
+fn liquidation_fee_fraction(fee: u32) -> I80F48 {
+    if fee == 0 {
         DEFAULT_LIQUIDATION_FEE // const of I80F48 type
     } else {
-        I80F48::from_num(bps) / I80F48::from_num(10_000)
+        u32_to_centi(fee)
     }
 }
 /// Instruction liquidates a position owned by a margin account that is in a unhealthy state.
@@ -278,9 +278,9 @@ pub fn lending_account_liquidate<'info>(
         };
         check!(liab_price > I80F48::ZERO, MarginfiError::ZeroLiabilityPrice);
 
-        // Liquidation fees are configured per-bank on the liability bank (0 => default 250 bps).
-        let liquidator_fee = liquidation_fee_fraction(liab_bank.liquidation_liquidator_fee_bps);
-        let insurance_fee = liquidation_fee_fraction(liab_bank.liquidation_insurance_fee_bps);
+        // Liquidation fees are configured per-bank on the liability bank (0 => default 2.5%).
+        let liquidator_fee = liquidation_fee_fraction(liab_bank.liquidation_liquidator_fee);
+        let insurance_fee = liquidation_fee_fraction(liab_bank.liquidation_insurance_fee);
         let final_discount: I80F48 = I80F48::ONE - (insurance_fee + liquidator_fee);
         let liquidator_discount: I80F48 = I80F48::ONE - liquidator_fee;
 

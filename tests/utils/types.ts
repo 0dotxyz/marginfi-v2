@@ -178,8 +178,8 @@ export const defaultBankConfigOptRaw = () => {
     freezeSettings: null,
     oracleMaxConfidence: 0,
     tokenlessRepaymentsAllowed: false,
-    liquidationLiquidatorFeeBps: 0,
-    liquidationInsuranceFeeBps: 0,
+    liquidationLiquidatorFee: 0,
+    liquidationInsuranceFee: 0,
     circuitBreakerEnabled: null,
     cbDeviationBpsTiers: null,
     cbTierDurationsSeconds: null,
@@ -211,8 +211,8 @@ export const blankBankConfigOptRaw = () => {
     permissionlessBadDebtSettlement: null,
     freezeSettings: null,
     tokenlessRepaymentsAllowed: null,
-    liquidationLiquidatorFeeBps: null,
-    liquidationInsuranceFeeBps: null,
+    liquidationLiquidatorFee: null,
+    liquidationInsuranceFee: null,
     circuitBreakerEnabled: null,
     cbDeviationBpsTiers: null,
     cbTierDurationsSeconds: null,
@@ -448,8 +448,8 @@ export type BankConfigOptRaw = {
   permissionlessBadDebtSettlement: boolean | null;
   freezeSettings: boolean | null;
   tokenlessRepaymentsAllowed: boolean | null;
-  liquidationLiquidatorFeeBps: number | null;
-  liquidationInsuranceFeeBps: number | null;
+  liquidationLiquidatorFee: number | null;
+  liquidationInsuranceFee: number | null;
 
   circuitBreakerEnabled: boolean | null;
   cbDeviationBpsTiers: [number, number, number] | null;

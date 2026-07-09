@@ -713,9 +713,9 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
 
     assert_eq!(bank.lending_position_count, 0);
     assert_eq!(bank.borrowing_position_count, 0);
-    assert_eq!(bank.liquidation_liquidator_fee_bps, 0);
-    assert_eq!(bank.liquidation_insurance_fee_bps, 0);
-    assert_eq!(bank._padding_0, [0; 12]);
+    assert_eq!(bank.liquidation_liquidator_fee, 0);
+    assert_eq!(bank.liquidation_insurance_fee, 0);
+    assert_eq!(bank._padding_0, [0; 8]);
     assert_eq!(bank.integration_acc_1, Pubkey::default());
     assert_eq!(bank.integration_acc_2, Pubkey::default());
     assert_eq!(bank.integration_acc_3, Pubkey::default());

@@ -27,17 +27,15 @@ pub const EXECUTE_ORDER_SEED: &str = "execute_order";
 
 pub const METADATA_SEED: &str = "metadata";
 
-/// Default liquidation fee in basis points, used when a bank's `liquidation_liquidator_fee_bps` /
-/// `liquidation_insurance_fee_bps` is 0. 250 bps = 2.5%, matching the historical hardcoded values.
-pub const DEFAULT_LIQUIDATION_FEE_BPS: u16 = 250;
-
-/// `DEFAULT_LIQUIDATION_FEE_BPS` as an I80F48 fraction (250 bps = 0.025)
+/// Default liquidation fee as an I80F48 fraction (2.5%), used when a bank's
+/// `liquidation_liquidator_fee` / `liquidation_insurance_fee` is 0. Matches the historical
+/// hardcoded values.
 pub const DEFAULT_LIQUIDATION_FEE: I80F48 = I80F48!(0.025);
 
-/// Maximum per-fee liquidation fee (bps) an admin may configure. Caps each of the two fees so their
-/// sum stays below 100% — otherwise the liquidatee's collateral credit (`final_discount`) would go
-/// negative.
-pub const MAX_LIQUIDATION_FEE_BPS: u16 = 5_000;
+/// Maximum per-fee liquidation fee an admin may configure, encoded like the fields it caps
+/// (`u32_to_centi`, `u32::MAX` = 100%). Caps each of the two fees at ~50% so their sum stays below
+/// 100% — otherwise the liquidatee's collateral credit (`final_discount`) would go negative.
+pub const MAX_LIQUIDATION_FEE_U32: u32 = u32::MAX / 2;
 
 pub const SECONDS_PER_YEAR: I80F48 = I80F48!(31_536_000);
 pub const DAILY_RESET_INTERVAL: i64 = 24 * 60 * 60; // 24 hours
