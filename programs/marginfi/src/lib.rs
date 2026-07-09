@@ -848,6 +848,19 @@ pub mod marginfi {
         )
     }
 
+    /// (risk admin only) Purge a user's lending balance on a bank being sunset, without paying the
+    /// user anything. Only usable after all the debt has been settled on a bank in deleveraging
+    /// mode, i.e. `TOKENLESS_REPAYMENTS_ALLOWED` and `TOKENLESS_REPAYMENTS_COMPLETE`. Used to clear
+    /// abandoned lending positions in a now-worthless bank so it can be closed via
+    /// `lending_pool_close_bank`. The purge that closes the bank's last lending position sweeps any
+    /// funds remaining in the liquidity vault into the insurance vault, where the admin can
+    /// withdraw them to repay purged lenders off-chain.
+    pub fn purge_deleverage_balance<'info>(
+        ctx: Context<'info, LendingAccountPurgeDelevBalance<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::lending_account_purge_delev_balance(ctx)
+    }
+
     /****** Kamino integration instructions *****/
 
     /// (permissionless) Initialize a Kamino obligation for a marginfi bank

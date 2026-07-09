@@ -5,6 +5,7 @@ import {
   PublicKey,
   Transaction,
 } from "@solana/web3.js";
+import { createTransferInstruction } from "@solana/spl-token";
 import {
   groupAdmin,
   bankrunContext,
@@ -18,6 +19,7 @@ import {
   verbose,
 } from "../../rootHooks";
 import {
+  closeBank,
   configureBank,
   configureDeleverageWithdrawalLimit,
   groupConfigure,
@@ -38,6 +40,7 @@ import {
   depositIx,
   endDeleverageIx,
   initLiquidationRecordIx,
+  purgeDeveleragedBalance,
   repayIx,
   startDeleverageIx,
   withdrawIx,
@@ -59,7 +62,7 @@ import {
   dumpBankrunLogs,
   processBankrunTransaction,
 } from "../../utils/tools";
-import { deriveLiquidityVault } from "../../utils/pdas";
+import { deriveInsuranceVault, deriveLiquidityVault } from "../../utils/pdas";
 
 const USER_ACCOUNT_THROWAWAY = "throwaway_account_zb02";
 const ONE_YEAR_IN_SECONDS = 2 * 365 * 24 * 60 * 60;
@@ -611,58 +614,95 @@ describe("Bank e2e sunset due to illiquid asset", () => {
   });
 
   // Here the admin would fund some "claims portal" using the proceeds it secured earlier to make
-  // users whole OTC. Any remaining users with lending funds, for example user 2, close out their
-  // leftover position with a withdraw_all on the now-empty, sunset bank (the deprecated purge ix
-  // covered the same cleanup: it released nothing and removed the balance).
-  it("(user 2) Closes remaining b1 lending account via withdraw_all", async () => {
+  // users whole OTC. Any remaining users with lending funds, for example user 2, are purged so
+  // their now-worthless position doesn't keep the bank open. Purging moves no funds, except the
+  // purge closing the bank's last lending position sweeps whatever remains in the liquidity vault
+  // into the insurance vault, where the admin can withdraw it to fund the claims portal.
+  it("(risk admin) Purges user 2's remaining b1 lending account", async () => {
     const user = users[2];
     const userAccount = user.accounts.get(USER_ACCOUNT_THROWAWAY);
 
     const [liqVault] = deriveLiquidityVault(bankrunProgram.programId, banks[1]);
-    const [bankBefore, userBefore, lstBefore, liqVaultBefore] =
+    const [insuranceVault] = deriveInsuranceVault(
+      bankrunProgram.programId,
+      banks[1]
+    );
+
+    // Simulate funds left over in the liquidity vault, e.g. returned by the risk admin from the
+    // proceeds secured during deleveraging.
+    const residual = 5000;
+    const fundTx = new Transaction().add(
+      createTransferInstruction(
+        riskAdmin.lstAlphaAccount,
+        liqVault,
+        riskAdmin.wallet.publicKey,
+        residual
+      )
+    );
+    await processBankrunTransaction(bankrunContext, fundTx, [riskAdmin.wallet]);
+
+    const [bankBefore, userBefore, lstBefore, liqVaultBefore, insuranceBefore] =
       await Promise.all([
         bankrunProgram.account.bank.fetch(banks[1]),
         bankrunProgram.account.marginfiAccount.fetch(userAccount),
         getTokenBalance(bankRunProvider, user.lstAlphaAccount),
         getTokenBalance(bankRunProvider, liqVault),
+        getTokenBalance(bankRunProvider, insuranceVault),
       ]);
+    assert.equal(liqVaultBefore, residual);
 
-    const remainingWithdraw = composeRemainingAccounts([
-      [banks[1], oracles.pythPullLst.publicKey],
-    ]);
     const tx = new Transaction();
     tx.add(
-      await withdrawIx(user.mrgnBankrunProgram, {
-        marginfiAccount: userAccount,
+      await purgeDeveleragedBalance(riskAdmin.mrgnBankrunProgram, {
+        account: userAccount,
         bank: banks[1],
-        tokenAccount: user.lstAlphaAccount,
-        remaining: remainingWithdraw,
-        amount: new BN(1),
-        withdrawAll: true,
       })
     );
-    await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
+    await processBankrunTransaction(bankrunContext, tx, [riskAdmin.wallet]);
 
-    const [bankAfter, userAfter, lstAfter, liqVaultAfter] = await Promise.all([
-      bankrunProgram.account.bank.fetch(banks[1]),
-      bankrunProgram.account.marginfiAccount.fetch(userAccount),
-      getTokenBalance(bankRunProvider, user.lstAlphaAccount),
-      getTokenBalance(bankRunProvider, liqVault),
-    ]);
+    const [bankAfter, userAfter, lstAfter, liqVaultAfter, insuranceAfter] =
+      await Promise.all([
+        bankrunProgram.account.bank.fetch(banks[1]),
+        bankrunProgram.account.marginfiAccount.fetch(userAccount),
+        getTokenBalance(bankRunProvider, user.lstAlphaAccount),
+        getTokenBalance(bankRunProvider, liqVault),
+        getTokenBalance(bankRunProvider, insuranceVault),
+      ]);
 
     // User gets nothing, we're out of money!
     assert.equal(lstAfter - lstBefore, 0);
-    // Liquidity vault is empty, and was empty before!
-    assert.equal(liqVaultAfter, 0);
-    assert.equal(liqVaultBefore, 0);
     // Balance closed!
     assert.equal(userBefore.lendingAccount.balances[0].active, 1);
     assert.equal(userAfter.lendingAccount.balances[0].active, 0);
-    // Bank fully cleared!
-    assert.ok(
-      wrappedI80F48toBigNumber(bankBefore.totalAssetShares).toNumber() > 0
-    );
+    // This purge closed the bank's last lending position, so the entire vault residual is swept
+    // into the insurance vault.
+    assert.equal(bankAfter.lendingPositionCount, 0);
+    assert.equal(liqVaultAfter, 0);
+    assert.equal(insuranceAfter - insuranceBefore, residual);
+    // Bank fully cleared! Before the purge, only user 2's 42 shares remained.
+    assertI80F48Equal(bankBefore.totalAssetShares, new BN(42));
     assertI80F48Equal(bankAfter.totalAssetShares, 0);
+  });
+
+  it("(admin) Closes the sunset bank", async () => {
+    const groupBefore = await bankrunProgram.account.marginfiGroup.fetch(
+      throwawayGroup.publicKey
+    );
+
+    const tx = new Transaction();
+    tx.add(
+      await closeBank(groupAdmin.mrgnBankrunProgram, {
+        bank: banks[1],
+      })
+    );
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
+
+    const groupAfter = await bankrunProgram.account.marginfiGroup.fetch(
+      throwawayGroup.publicKey
+    );
+    assert.equal(groupAfter.banks, groupBefore.banks - 1);
+    const bankInfo = await bankRunProvider.connection.getAccountInfo(banks[1]);
+    assert.isNull(bankInfo);
   });
 
   const deleverageTx = async (
