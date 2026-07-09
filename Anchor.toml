@@ -43,35 +43,35 @@ wallet = "~/.config/solana/id.json"
 # (remove RUST_LOG= to see bankRun logs)
 [scripts]
 # Use like `anchor test --skip-build --skip-local-validator --skip-deploy`
-test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/basic/*.spec.ts tests/specs/drift/*.spec.ts tests/specs/emode/*.spec.ts tests/specs/juplend/*.spec.ts tests/specs/kamino/*.spec.ts tests/specs/limits/*.spec.ts tests/specs/pyth/*.spec.ts 'tests/specs/staked/s[0-9]*.spec.ts' tests/specs/solend/*.spec.ts tests/specs/bankruptcy/z0*.spec.ts tests/specs/bankruptcy/zb*.spec.ts --exit --require tests/rootHooks.ts"
+test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/basic/*.spec.ts tests/specs/drift/*.spec.ts tests/d*.spec.ts tests/specs/emode/*.spec.ts tests/e*.spec.ts tests/specs/juplend/*.spec.ts tests/jlr*.spec.ts tests/specs/kamino/*.spec.ts tests/k*.spec.ts tests/specs/limits/*.spec.ts tests/m*.spec.ts tests/specs/pyth/*.spec.ts 'tests/specs/staked/s[0-9]*.spec.ts' tests/specs/solend/*.spec.ts tests/specs/bankruptcy/z0*.spec.ts tests/specs/bankruptcy/zb*.spec.ts --exit --require tests/rootHooks.ts"
 
 # All tests (for CI)
-all-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/basic/*.spec.ts tests/specs/drift/*.spec.ts tests/specs/emode/*.spec.ts tests/specs/juplend/*.spec.ts tests/specs/kamino/*.spec.ts tests/specs/limits/*.spec.ts tests/specs/pyth/*.spec.ts 'tests/specs/staked/s[0-9]*.spec.ts' tests/specs/solend/*.spec.ts tests/specs/bankruptcy/z0*.spec.ts tests/specs/bankruptcy/zb*.spec.ts --exit --require tests/rootHooks.ts"
+all-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/basic/*.spec.ts tests/specs/drift/*.spec.ts tests/d*.spec.ts tests/specs/emode/*.spec.ts tests/e*.spec.ts tests/specs/juplend/*.spec.ts tests/jlr*.spec.ts tests/specs/kamino/*.spec.ts tests/k*.spec.ts tests/specs/limits/*.spec.ts tests/m*.spec.ts tests/specs/pyth/*.spec.ts 'tests/specs/staked/s[0-9]*.spec.ts' tests/specs/solend/*.spec.ts tests/specs/bankruptcy/z0*.spec.ts tests/specs/bankruptcy/zb*.spec.ts --exit --require tests/rootHooks.ts"
 
 # LiteSVM-only runner (no local validator)
 # Use: anchor run kamino-tests
-kamino-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/kamino/k*.spec.ts --exit --require tests/rootHooks.ts"
+kamino-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/kamino/k*.spec.ts tests/k*.spec.ts --exit --require tests/rootHooks.ts"
 
 # Basic tests (01-19)
 basic-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/basic/0*.spec.ts tests/specs/basic/1*.spec.ts --exit --require tests/rootHooks.ts"
 
-# Emode tests (e01-e06)
-emode-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/emode/e*.spec.ts --exit --require tests/rootHooks.ts"
+# Emode tests (e01-e09)
+emode-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/emode/e*.spec.ts tests/e*.spec.ts --exit --require tests/rootHooks.ts"
 
 # Pyth pull tests (p01)
 pyth-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/pyth/p*.spec.ts --exit --require tests/rootHooks.ts"
 
-# Multi-limits tests (m00-m04)
-limits-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/limits/m*.spec.ts --exit --require tests/rootHooks.ts"
+# Multi-limits tests (m01-m05)
+limits-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/limits/m*.spec.ts tests/m*.spec.ts --exit --require tests/rootHooks.ts"
 
-# Drift tests (d01-d15)
-drift-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/drift/d*.spec.ts --exit --require tests/rootHooks.ts"
+# Drift tests (d01-d16)
+drift-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/drift/d*.spec.ts tests/d*.spec.ts --exit --require tests/rootHooks.ts"
 
 # Solend tests (sl01-sl09)
 solend-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/solend/sl*.spec.ts --exit --require tests/rootHooks.ts"
 
 # JupLend tests (jlr01-jlr11)
-juplend-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/juplend/jlr*.spec.ts --exit --require tests/rootHooks.ts"
+juplend-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/juplend/jlr*.spec.ts tests/jlr*.spec.ts --exit --require tests/rootHooks.ts"
 
 # Bankruptcy tests (z0*, zb*)
 bankruptcy-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/bankruptcy/z0*.spec.ts tests/specs/bankruptcy/zb*.spec.ts --exit --require tests/rootHooks.ts"

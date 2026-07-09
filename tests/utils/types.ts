@@ -48,6 +48,8 @@ export const IS_T22_FLAG = 128;
 export const BANK_SEED_KNOWN_FLAG = 256;
 export const STAKED_ORACLE_DISABLED = 1 << 9;
 export const STAKED_ORACLE_PRICE_USES_ONRAMP = 1 << 10;
+export const CIRCUIT_BREAKER_ENABLED = 1 << 11;
+export const BANK_SAME_ASSET_EMODE_ELIGIBLE_FLAG = 1 << 12;
 
 export const ASSET_TAG_DEFAULT = 0;
 export const ASSET_TAG_SOL = 1;
@@ -178,6 +180,14 @@ export const defaultBankConfigOptRaw = () => {
     tokenlessRepaymentsAllowed: false,
     liquidationLiquidatorFeeBps: 0,
     liquidationInsuranceFeeBps: 0,
+    circuitBreakerEnabled: null,
+    cbDeviationBpsTiers: null,
+    cbTierDurationsSeconds: null,
+    cbEscalationWindowMult: null,
+    cbEmaAlphaBps: null,
+    cbWindowSeconds: null,
+    cbWindowMaxUpBps: null,
+    cbWindowMaxDownBps: null,
   };
 
   return bankConfigOpt;
@@ -203,6 +213,14 @@ export const blankBankConfigOptRaw = () => {
     tokenlessRepaymentsAllowed: null,
     liquidationLiquidatorFeeBps: null,
     liquidationInsuranceFeeBps: null,
+    circuitBreakerEnabled: null,
+    cbDeviationBpsTiers: null,
+    cbTierDurationsSeconds: null,
+    cbEscalationWindowMult: null,
+    cbEmaAlphaBps: null,
+    cbWindowSeconds: null,
+    cbWindowMaxUpBps: null,
+    cbWindowMaxDownBps: null,
   };
 
   return bankConfigOpt;
@@ -432,6 +450,15 @@ export type BankConfigOptRaw = {
   tokenlessRepaymentsAllowed: boolean | null;
   liquidationLiquidatorFeeBps: number | null;
   liquidationInsuranceFeeBps: number | null;
+
+  circuitBreakerEnabled: boolean | null;
+  cbDeviationBpsTiers: [number, number, number] | null;
+  cbTierDurationsSeconds: [number, number, number] | null;
+  cbEscalationWindowMult: number | null;
+  cbEmaAlphaBps: number | null;
+  cbWindowSeconds: number | null;
+  cbWindowMaxUpBps: number | null;
+  cbWindowMaxDownBps: number | null;
 };
 
 export type StakedSettingsConfig = {

@@ -10,7 +10,7 @@ use marginfi_type_crate::{
 };
 
 /// Used to configure JupLend banks. A simplified version of `BankConfigCompact` which omits most
-/// values related to interest since JupLend banks cannot earn interest or be borrowed against.
+/// values related to interest since JupLend banks cannot earn interest or be borrowed from.
 ///
 /// Note: JupLend banks do not take an Operational State, they always start in `Uninitialized`
 /// state and are set to `Operational` via `juplend_init_position` (seed deposit + protocol fToken
@@ -108,20 +108,25 @@ impl JuplendConfigCompact {
             operational_state: BankOperationalState::Uninitialized,
             oracle_setup: self.oracle_setup,
             oracle_keys: keys,
-            _pad0: [0; 6],
+            cb_window_max_up_bps: 0,
+            cb_window_max_down_bps: 0,
+            _pad0: [0; 2],
             borrow_limit: 0, // Can't ever borrow JupLend assets
             risk_tier: self.risk_tier,
             asset_tag: ASSET_TAG_JUPLEND,
             config_flags: self.config_flags,
-            _pad1: [0; 5],
+            _pad1: [0; 1],
+            cb_window_seconds: 0,
             total_asset_value_init_limit: self.total_asset_value_init_limit,
             oracle_max_age: self.oracle_max_age,
             _padding0: [0; 2],
             oracle_max_confidence: self.oracle_max_confidence,
             fixed_price: I80F48::ZERO.into(),
-            liquidation_liquidator_fee_bps: 0,
-            liquidation_insurance_fee_bps: 0,
-            _padding1: [0; 12],
+            cb_deviation_bps_tiers: [0; 3],
+            cb_tier_durations_seconds: [0; 3],
+            cb_escalation_window_mult: 0,
+            _cb_config_pad: 0,
+            cb_ema_alpha_bps: 0,
         }
     }
 }

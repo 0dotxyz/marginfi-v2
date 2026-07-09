@@ -51,7 +51,7 @@ pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult 
         authority_bump = bank.liquidity_vault_authority_bump;
 
         validate_asset_tags(&bank, &marginfi_account)?;
-        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
+        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState, true)?;
 
         let integration_acc_1 = ctx.accounts.integration_acc_1.load()?;
         market_index = integration_acc_1.market_index;

@@ -344,6 +344,27 @@ export function estimateCollateralFromDeposit(
 }
 
 /**
+ * Estimate raw underlying liquidity redeemed for some raw collateral amount. This is the inverse
+ * of `estimateCollateralFromDeposit`.
+ * @param state
+ * @param collateralAmountRaw
+ * @returns underlying liquidity, in native decimals
+ */
+export function estimateLiquidityFromCollateral(
+  state: Reserve,
+  collateralAmountRaw: BN
+): BN {
+  const collateralRawDecimal = new Decimal(collateralAmountRaw.toString());
+  const rate = getLiquidityExchangeRate(state);
+  const liquidityTokens = collateralRawDecimal.mul(rate);
+
+  const rounded = liquidityTokens.toDecimalPlaces(0, Decimal.ROUND_FLOOR);
+  return new BN(rounded.toString());
+}
+
+// TODO when porting this to the package, let's not convert buffer -> hex -> Decimal -> BigNumber,
+// this seems straight up goofy.
+/**
  * Same thing as `wrappedI80F48toBigNumber`, but for Kamino's numbering system, which uses I68F60
  * (128-bit signed fixed-point, 60 fractional bits). Decoded exactly: the little-endian bytes are
  * assembled into a 128-bit integer, reinterpreted as two's complement, then divided by 2^60. Since

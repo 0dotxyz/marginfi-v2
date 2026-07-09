@@ -2,7 +2,9 @@ import { BN } from "@coral-xyz/anchor";
 import {
   ComputeBudgetProgram,
   Keypair,
+  LAMPORTS_PER_SOL,
   PublicKey,
+  SystemProgram,
   Transaction,
 } from "@solana/web3.js";
 import { createMintToInstruction } from "@solana/spl-token";
@@ -69,6 +71,7 @@ import {
   makeDriftWithdrawIx,
   makeInitDriftUserIx,
 } from "../../utils/drift-instructions";
+import { createMintToInstruction } from "@solana/spl-token";
 
 let ctx: ProgramTestContext;
 let usdcSpotMarket: PublicKey;
@@ -126,6 +129,12 @@ describe("d15: Fixed Drift price bank", () => {
     userAccount = accountKeypair.publicKey;
 
     const tx = new Transaction().add(
+      createMintToInstruction(
+        ecosystem.usdcMint.publicKey,
+        user.usdcAccount,
+        bankrunContext.payer.publicKey,
+        100_000 * 10 ** ecosystem.usdcDecimals,
+      ),
       await accountInit(user.mrgnBankrunProgram, {
         marginfiGroup: driftGroup.publicKey,
         marginfiAccount: userAccount,
@@ -133,7 +142,11 @@ describe("d15: Fixed Drift price bank", () => {
         feePayer: user.wallet.publicKey,
       }),
     );
-    await processBankrunTransaction(ctx, tx, [user.wallet, accountKeypair]);
+    await processBankrunTransaction(ctx, tx, [
+      user.wallet,
+      bankrunContext.payer,
+      accountKeypair,
+    ]);
   });
 
   it("(admin) add fixed Drift USDC bank + init user", async () => {
@@ -340,7 +353,7 @@ describe("d15: Fixed Drift price bank", () => {
     const spotMarket = await getSpotMarketAccount(driftBankrunProgram, 0);
     const scaledBalance = tokenAmountToScaledBalance(
       depositAmount.add(USDC_INIT_DEPOSIT_AMOUNT),
-      spotMarket
+      spotMarket,
     );
 
     assertBNApproximately(scaledBalanceAfterDeposit, scaledBalance, 1);
@@ -487,13 +500,13 @@ describe("d15: Fixed Drift price bank", () => {
     const spotMarket = await getSpotMarketAccount(driftBankrunProgram, 0);
     const scaledBalanceDiff = tokenAmountToScaledBalance(
       withdrawAmount,
-      spotMarket
+      spotMarket,
     );
 
     assertBNApproximately(
       scaledBalanceBeforeWithdraw.sub(scaledBalanceAfterWithdraw),
       scaledBalanceDiff,
-      1
+      1,
     );
   });
 
@@ -519,7 +532,7 @@ describe("d15: Fixed Drift price bank", () => {
       [
         [fixedDriftBank, usdcSpotMarket],
         [borrowBank, oracles.tokenAOracle.publicKey],
-      ].filter((group) => !group[0].equals(fixedDriftBank))
+      ].filter((group) => !group[0].equals(fixedDriftBank)),
     );
 
     const withdrawAllTx = new Transaction().add(

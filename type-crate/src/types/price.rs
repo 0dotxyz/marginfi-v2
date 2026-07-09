@@ -13,8 +13,14 @@ pub enum PriceBias {
 
 #[derive(Copy, Clone, Debug)]
 pub struct OraclePriceWithConfidence {
+    /// Spot oracle price in USD, no bias.
     pub price: I80F48,
+    /// Confidence band in absolute price units (same scale as `price`), already multiplied by
+    /// `STD_DEV_MULTIPLE` and clamped to the bank's max-confidence ceiling.
     pub confidence: I80F48,
+    /// Publisher-side timestamp (unix seconds): Pyth `publish_time` or Switchboard
+    /// `last_update_timestamp`. Zero when the adapter doesn't expose one (e.g. `Fixed`).
+    pub source_time: i64,
 }
 
 /// Temporary struct used to store prices during receivership liquidation, these price will

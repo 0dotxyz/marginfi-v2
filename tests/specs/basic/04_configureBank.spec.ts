@@ -87,6 +87,14 @@ describe("Lending pool configure bank", () => {
       tokenlessRepaymentsAllowed: true,
       liquidationLiquidatorFeeBps: 300,
       liquidationInsuranceFeeBps: 350,
+      circuitBreakerEnabled: null,
+      cbDeviationBpsTiers: null,
+      cbTierDurationsSeconds: null,
+      cbEscalationWindowMult: null,
+      cbEmaAlphaBps: null,
+      cbWindowSeconds: null,
+      cbWindowMaxUpBps: null,
+      cbWindowMaxDownBps: null,
     };
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
@@ -142,8 +150,8 @@ describe("Lending pool configure bank", () => {
     assert.deepEqual(config.riskTier, { collateral: {} }); // no change
     assert.equal(config.assetTag, ASSET_TAG_SOL);
     assertBNEqual(config.totalAssetValueInitLimit, 15000);
-    assert.equal(config.liquidationLiquidatorFeeBps, 300);
-    assert.equal(config.liquidationInsuranceFeeBps, 350);
+    assert.equal(bank.liquidationLiquidatorFeeBps, 300);
+    assert.equal(bank.liquidationInsuranceFeeBps, 350);
     assert.equal(config.oracleMaxAge, 150);
     assert.equal(config.oracleMaxConfidence, 420000);
     // Note: The CLOSE_ENABLED_FLAG is never unset
