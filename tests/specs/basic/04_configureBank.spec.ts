@@ -85,6 +85,14 @@ describe("Lending pool configure bank", () => {
       freezeSettings: null,
       oracleMaxConfidence: 420000,
       tokenlessRepaymentsAllowed: true,
+      circuitBreakerEnabled: null,
+      cbDeviationBpsTiers: null,
+      cbTierDurationsSeconds: null,
+      cbEscalationWindowMult: null,
+      cbEmaAlphaBps: null,
+      cbWindowSeconds: null,
+      cbWindowMaxUpBps: null,
+      cbWindowMaxDownBps: null,
     };
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm!(

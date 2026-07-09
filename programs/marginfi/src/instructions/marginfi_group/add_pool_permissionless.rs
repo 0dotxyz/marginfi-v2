@@ -89,10 +89,11 @@ pub fn lending_pool_add_bank_permissionless(
     };
 
     let now = Clock::get().unwrap().unix_timestamp;
+    let config = default_config.into();
 
-    *bank = Bank::new(
+    bank.init(
         ctx.accounts.marginfi_group.key(),
-        default_config.into(),
+        &config,
         bank_mint.key(),
         bank_mint.decimals,
         liquidity_vault.key(),

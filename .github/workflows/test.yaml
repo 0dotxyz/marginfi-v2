@@ -213,7 +213,7 @@ jobs:
       id: cache-cargo-fuzz
       with:
         path: ~/.cargo/bin/cargo-fuzz
-        key: cargo-fuzz-${{ runner.os }}-nightly-20250801
+        key: cargo-fuzz-${{ runner.os }}-v${{ env.CARGO_FUZZ_VERSION }}-nightly-20250801
 
     - name: Install cargo-fuzz
       if: steps.cache-cargo-fuzz.outputs.cache-hit != 'true'

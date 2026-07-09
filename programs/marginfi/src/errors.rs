@@ -429,7 +429,22 @@ pub enum MarginfiError {
     JuplendInitPositionDepositInsufficient, // 6511
     #[msg("Invalid Juplend withdraw intermediary ATA")]
     InvalidJuplendWithdrawIntermediaryAta, // 6512
-                                           // **************END JUPLEND ERRORS
+    // **************END JUPLEND ERRORS
+
+    // ************** BEGIN CIRCUIT BREAKER ERRORS (starting at 6600)
+    #[msg("Bank is halted by oracle circuit breaker")]
+    BankCircuitBreakerHalted = 600, // 6600
+    #[msg("Action requires risk admin while bank is circuit-breaker halted")]
+    CircuitBreakerAdminOnly, // 6601
+    #[msg("Invalid circuit breaker config")]
+    CircuitBreakerInvalidConfig, // 6602
+    #[msg(
+        "Circuit breaker cannot be enabled until the oracle price cache is warm (call pulse first)"
+    )]
+    CircuitBreakerRequiresWarmCache, // 6603
+    #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
+    CircuitBreakerPriceJump, // 6604
+                             // **************END CIRCUIT BREAKER ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -668,6 +683,11 @@ impl From<u32> for MarginfiError {
             6510 => MarginfiError::JuplendWithdrawFailed,
             6511 => MarginfiError::JuplendInitPositionDepositInsufficient,
             6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
+            6600 => MarginfiError::BankCircuitBreakerHalted,
+            6601 => MarginfiError::CircuitBreakerAdminOnly,
+            6602 => MarginfiError::CircuitBreakerInvalidConfig,
+            6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
+            6604 => MarginfiError::CircuitBreakerPriceJump,
 
             _ => MarginfiError::InternalLogicError,
         }
