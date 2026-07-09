@@ -59,10 +59,10 @@ pub fn lending_pool_handle_bankruptcy<'info>(
 
         if permissionless_bad_debt_settlement {
             // if permissionless, users can bankrupt reduce-only or operational banks
-            validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
+            validate_bank_state(&bank, InstructionKind::FailsInPausedState, false)?;
         } else {
-            // admin can bankrupt banks in any state
-            validate_bank_state(&bank, InstructionKind::Unrestricted)?;
+            // admin can bankrupt banks in any state (CB halt included)
+            validate_bank_state(&bank, InstructionKind::Unrestricted, true)?;
             check!(is_admin_or_risk_admin, MarginfiError::Unauthorized);
         }
 

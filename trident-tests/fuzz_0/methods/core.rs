@@ -44,6 +44,14 @@ impl FuzzTest {
             permissionless_bad_debt_settlement: None,
             freeze_settings: None,
             tokenless_repayments_allowed: None,
+            circuit_breaker_enabled: None,
+            cb_deviation_bps_tiers: None,
+            cb_tier_durations_seconds: None,
+            cb_escalation_window_mult: None,
+            cb_ema_alpha_bps: None,
+            cb_window_seconds: None,
+            cb_window_max_up_bps: None,
+            cb_window_max_down_bps: None,
         };
 
         let ix = types::marginfi::LendingPoolConfigureBankInstruction::data(

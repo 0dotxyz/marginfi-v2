@@ -8,7 +8,7 @@ use crate::ix_utils::{
 };
 use crate::state::marginfi_account::{
     account_not_frozen_for_authority, get_health_components, get_tagged_account_health_components,
-    is_signer_authorized,
+    is_signer_authorized, run_cb_price_gate,
 };
 use crate::{
     check,
@@ -388,6 +388,10 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
     };
 
     marginfi_account.health_cache = health_cache;
+
+    // Inline CB gate: order execution moves funds at oracle prices, so revert if any involved
+    // bank's live price has jumped past the breach threshold relative to its reference.
+    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
 
     check!(
         order_liab_count.eq(&0), // All order liabilities should be closed
