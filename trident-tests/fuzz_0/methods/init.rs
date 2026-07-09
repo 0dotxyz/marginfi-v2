@@ -248,6 +248,8 @@ impl FuzzTest {
                 None,
                 None,
                 None,
+                None,
+                None,
             ),
         )
         .accounts(types::marginfi::MarginfiGroupConfigureInstructionAccounts::new(

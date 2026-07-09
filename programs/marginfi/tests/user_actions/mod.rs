@@ -23,6 +23,7 @@ mod order;
 mod panic_mode_user_interactions;
 mod premium;
 mod repay;
+mod same_asset_emode;
 mod transfer_account_pda;
 mod withdraw;
 

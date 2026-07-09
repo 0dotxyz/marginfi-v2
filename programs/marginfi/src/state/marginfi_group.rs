@@ -1,4 +1,7 @@
-use crate::state::emode::{DEFAULT_INIT_MAX_EMODE_LEVERAGE, DEFAULT_MAINT_MAX_EMODE_LEVERAGE};
+use crate::state::emode::{
+    DEFAULT_INIT_MAX_EMODE_LEVERAGE, DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE,
+    DEFAULT_MAINT_MAX_EMODE_LEVERAGE, DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE,
+};
 use crate::{prelude::MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
@@ -155,6 +158,10 @@ impl MarginfiGroupImpl for MarginfiGroup {
         self.set_program_fee_enabled(true);
         self.emode_max_init_leverage = basis_to_u32(DEFAULT_INIT_MAX_EMODE_LEVERAGE);
         self.emode_max_maint_leverage = basis_to_u32(DEFAULT_MAINT_MAX_EMODE_LEVERAGE);
+        self.same_asset_emode_init_leverage =
+            basis_to_u32(DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE);
+        self.same_asset_emode_maint_leverage =
+            basis_to_u32(DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE);
         self.premium_settings.entry_capacity = MAX_PREMIUM_ENTRIES as u16;
     }
 
@@ -352,18 +359,21 @@ mod tests {
         assert_eq!(group.find_premium_rate(100, 200), 0);
     }
 
-    /// The premium fields must occupy exactly the first 24 bytes of what was
-    /// `Bank._padding_1: [u64; 13]` before 0.1.10, so pre-existing banks read as untagged,
-    /// uncapped, and with no collected premium.
+    /// The premium fields must occupy exactly the two 16-byte reserves that were
+    /// `_padding_0: [u8; 16]` (after `borrowing_position_count`) and `_pad_0: [u8; 16]`
+    /// (after `rate_limiter`) before 0.1.10, so pre-existing banks read as untagged and
+    /// with no collected premium. `bank_seed` and the circuit-breaker block stay at their
+    /// 0.1.10 positions.
     #[test]
     fn bank_premium_field_layout() {
         assert_eq!(size_of::<Bank>(), 1856);
+        assert_eq!(offset_of!(Bank, premium_tag), 1536);
+        assert_eq!(offset_of!(Bank, _pad3), 1538);
+        assert_eq!(offset_of!(Bank, premium_activated_at), 1544);
+        assert_eq!(offset_of!(Bank, collected_premium_outstanding), 1728);
         assert_eq!(offset_of!(Bank, bank_seed), 1744);
-        assert_eq!(offset_of!(Bank, premium_tag), 1752);
-        assert_eq!(offset_of!(Bank, _pad3), 1754);
-        assert_eq!(offset_of!(Bank, collected_premium_outstanding), 1760);
-        assert_eq!(offset_of!(Bank, premium_activated_at), 1776);
-        assert_eq!(offset_of!(Bank, _padding_1), 1784);
+        assert_eq!(offset_of!(Bank, cb_halt_started_at), 1752);
+        assert_eq!(offset_of!(Bank, _padding_1), 1832);
     }
 
     /// The premium fields must occupy exactly the bytes that were `_pad0: [u8; 4]` and

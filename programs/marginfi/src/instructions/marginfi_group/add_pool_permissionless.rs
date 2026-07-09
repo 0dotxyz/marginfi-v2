@@ -83,10 +83,11 @@ fn write_staked_bank(
     };
 
     let now = Clock::get()?.unix_timestamp;
+    let config = default_config.into();
 
-    *bank = Bank::new(
+    bank.init(
         group_key,
-        default_config.into(),
+        &config,
         mint,
         mint_decimals,
         liquidity_vault,

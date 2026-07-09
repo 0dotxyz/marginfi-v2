@@ -1084,6 +1084,8 @@ fn initialize_marginfi_group<'a>(
         Some(admin.key()), // risk_admin
         None,              // emode_max_init_leverage
         None,              // emode_max_maint_leverage
+        None,              // same_asset_emode_init_leverage
+        None,              // same_asset_emode_maint_leverage
     )
     .unwrap();
 
@@ -1134,9 +1136,8 @@ fn initialize_fee_state<'a>(
 mod tests {
     use anchor_lang::AnchorDeserialize;
     use fixed::types::I80F48;
-    use marginfi::state::marginfi_account::{
-        get_health_components, HealthPriceMode, RiskRequirementType,
-    };
+    use marginfi::state::marginfi_account::get_health_components;
+    use marginfi_type_crate::types::{HealthPriceMode, RequirementType};
     use marginfi_type_crate::types::MarginfiGroup;
     use pyth_solana_receiver_sdk::price_update::PriceUpdateV2;
 
@@ -1242,13 +1243,21 @@ mod tests {
             let bank_map = a.get_bank_map();
             let remaining_accounts =
                 margin_account.get_remaining_accounts(&bank_map, vec![], vec![], None);
+            let group_ai = AccountLoader::<MarginfiGroup>::try_from_unchecked(
+                &marginfi::ID,
+                &a.marginfi_group,
+            )
+            .unwrap();
+            let group = group_ai.load().unwrap();
 
             let (_assets, _liabs) = get_health_components(
                 &marginfi_account,
+                &group,
                 aisls(&remaining_accounts),
-                RiskRequirementType::Maintenance,
+                RequirementType::Maintenance,
                 &mut None,
                 HealthPriceMode::Live { liq_cache: None },
+                &mut None,
             )
             .unwrap();
         }
@@ -1301,13 +1310,21 @@ mod tests {
             let bank_map = a.get_bank_map();
             let remaining_accounts =
                 margin_account.get_remaining_accounts(&bank_map, vec![], vec![], None);
+            let group_ai = AccountLoader::<MarginfiGroup>::try_from_unchecked(
+                &marginfi::ID,
+                &a.marginfi_group,
+            )
+            .unwrap();
+            let group = group_ai.load().unwrap();
 
             let (_assets, _liabs) = get_health_components(
                 &marginfi_account,
+                &group,
                 aisls(&remaining_accounts),
-                RiskRequirementType::Maintenance,
+                RequirementType::Maintenance,
                 &mut None,
                 HealthPriceMode::Live { liq_cache: None },
+                &mut None,
             )
             .unwrap();
         }

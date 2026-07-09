@@ -120,9 +120,11 @@ pub fn lending_account_end_flashloan<'info>(
 
     marginfi_account.unset_flag(ACCOUNT_IN_FLASHLOAN, false);
 
+    let group = ctx.accounts.group.load()?;
     let mut premium_scratch = PremiumScratch::default();
     check_account_init_health(
         &marginfi_account,
+        &group,
         ctx.remaining_accounts,
         &mut None,
         &mut Some(&mut premium_scratch),
@@ -130,7 +132,6 @@ pub fn lending_account_end_flashloan<'info>(
 
     // Claim premium at the old rates and refresh every liability's premium rate snapshot with
     // the post-flashloan balances.
-    let group = ctx.accounts.group.load()?;
     update_premium_snapshots(
         &mut marginfi_account,
         &group,
@@ -145,6 +146,7 @@ pub fn lending_account_end_flashloan<'info>(
 pub struct LendingAccountEndFlashloan<'info> {
     #[account(
         mut,
+        has_one = group @ MarginfiError::InvalidGroup,
         has_one = authority @ MarginfiError::Unauthorized,
         constraint = {
             let acc = marginfi_account.load()?;
@@ -158,13 +160,13 @@ pub struct LendingAccountEndFlashloan<'info> {
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
-    pub authority: Signer<'info>,
-
-    /// Needed to read the premium matrix for snapshot recompute
+    /// Needed for the same-asset emode checks and the premium snapshot recompute
     #[account(
         constraint = marginfi_account.load()?.group == group.key() @ MarginfiError::InvalidGroup
     )]
     pub group: AccountLoader<'info, MarginfiGroup>,
+
+    pub authority: Signer<'info>,
 }
 
 impl Hashable for LendingAccountEndFlashloan<'_> {

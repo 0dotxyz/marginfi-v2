@@ -431,17 +431,32 @@ pub enum MarginfiError {
     InvalidJuplendWithdrawIntermediaryAta, // 6512
     // **************END JUPLEND ERRORS
 
-    // ************** BEGIN PREMIUM ERRORS (starting at 6600)
+    // ************** BEGIN CIRCUIT BREAKER ERRORS (starting at 6600)
+    #[msg("Bank is halted by oracle circuit breaker")]
+    BankCircuitBreakerHalted = 600, // 6600
+    #[msg("Action requires risk admin while bank is circuit-breaker halted")]
+    CircuitBreakerAdminOnly, // 6601
+    #[msg("Invalid circuit breaker config")]
+    CircuitBreakerInvalidConfig, // 6602
+    #[msg(
+        "Circuit breaker cannot be enabled until the oracle price cache is warm (call pulse first)"
+    )]
+    CircuitBreakerRequiresWarmCache, // 6603
+    #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
+    CircuitBreakerPriceJump, // 6604
+                             // **************END CIRCUIT BREAKER ERRORS
+
+    // ************** BEGIN PREMIUM ERRORS (starting at 6610)
     #[msg("Premium entry has a zero collateral or liability tag")]
-    PremiumEntryInvalid = 600, // 6600
+    PremiumEntryInvalid = 610, // 6610
     #[msg("Too many premium entries for the group's capacity")]
-    PremiumMatrixFull, // 6601
+    PremiumMatrixFull, // 6611
     #[msg("Premium ATA does not match the canonical ATA of the premium wallet")]
-    InvalidPremiumAta, // 6602
+    InvalidPremiumAta, // 6612
     #[msg("Premium wallet is not configured on FeeStateV2")]
-    PremiumWalletNotSet, // 6603
+    PremiumWalletNotSet, // 6613
     #[msg("Premium (collateral, liability) pair is not in the matrix")]
-    PremiumEntryNotFound, // 6604
+    PremiumEntryNotFound, // 6614
                           // **************END PREMIUM ERRORS
 }
 
@@ -681,13 +696,18 @@ impl From<u32> for MarginfiError {
             6510 => MarginfiError::JuplendWithdrawFailed,
             6511 => MarginfiError::JuplendInitPositionDepositInsufficient,
             6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
+            6600 => MarginfiError::BankCircuitBreakerHalted,
+            6601 => MarginfiError::CircuitBreakerAdminOnly,
+            6602 => MarginfiError::CircuitBreakerInvalidConfig,
+            6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
+            6604 => MarginfiError::CircuitBreakerPriceJump,
 
-            // Premium-specific errors (starting at 6600)
-            6600 => MarginfiError::PremiumEntryInvalid,
-            6601 => MarginfiError::PremiumMatrixFull,
-            6602 => MarginfiError::InvalidPremiumAta,
-            6603 => MarginfiError::PremiumWalletNotSet,
-            6604 => MarginfiError::PremiumEntryNotFound,
+            // Premium-specific errors (starting at 6610)
+            6610 => MarginfiError::PremiumEntryInvalid,
+            6611 => MarginfiError::PremiumMatrixFull,
+            6612 => MarginfiError::InvalidPremiumAta,
+            6613 => MarginfiError::PremiumWalletNotSet,
+            6614 => MarginfiError::PremiumEntryNotFound,
 
             _ => MarginfiError::InternalLogicError,
         }

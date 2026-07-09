@@ -8,7 +8,7 @@ use crate::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
             account_not_frozen_for_authority, check_account_init_health, is_signer_authorized,
-            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            run_cb_price_gate, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         premium::{update_premium_snapshots, PremiumScratch},
@@ -87,7 +87,7 @@ pub fn lending_account_borrow<'info>(
         let mut bank = bank_loader.load_mut()?;
 
         validate_asset_tags(&bank, &marginfi_account)?;
-        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
+        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState, false)?;
 
         let liquidity_vault_authority_bump = bank.liquidity_vault_authority_bump;
         let origination_fee_rate: I80F48 = bank
@@ -206,11 +206,15 @@ pub fn lending_account_borrow<'info>(
     let mut premium_scratch = PremiumScratch::default();
     check_account_init_health(
         &marginfi_account,
+        &group,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
         &mut Some(&mut premium_scratch),
     )?;
     health_cache.program_version = PROGRAM_VERSION;
+
+    // Revert if any involved bank's oracle price has jumped past the breach threshold.
+    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
 
     // Claim premium at the old rates and refresh every liability's premium rate snapshot with
     // the post-borrow collateral mix.

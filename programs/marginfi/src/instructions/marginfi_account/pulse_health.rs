@@ -37,6 +37,7 @@ pub fn lending_account_pulse_health<'info>(
     let mut health_cache = HealthCache::zeroed();
     health_cache.timestamp = clock.unix_timestamp;
     health_cache.program_version = PROGRAM_VERSION;
+    let group = ctx.accounts.group.load()?;
 
     // Check account init health using heap reuse optimization. Also collects the premium
     // scratch: this permissionless ix doubles as the premium crank, materializing dormant
@@ -44,6 +45,7 @@ pub fn lending_account_pulse_health<'info>(
     let mut premium_scratch = PremiumScratch::default();
     let engine_result = check_account_init_health(
         &marginfi_account,
+        &group,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
         &mut Some(&mut premium_scratch),
@@ -52,15 +54,12 @@ pub fn lending_account_pulse_health<'info>(
     // Claim at old rates + rewrite snapshots. Self-gated: a partial health pass (e.g. an oracle
     // failure mid-loop) leaves the scratch incomplete and this is a no-op, so a failed pulse can
     // never write garbage rates.
-    {
-        let group = ctx.accounts.group.load()?;
-        update_premium_snapshots(
-            &mut marginfi_account,
-            &group,
-            &premium_scratch,
-            clock.unix_timestamp as u64,
-        )?;
-    }
+    update_premium_snapshots(
+        &mut marginfi_account,
+        &group,
+        &premium_scratch,
+        clock.unix_timestamp as u64,
+    )?;
 
     match engine_result {
         Ok(()) => {
@@ -97,6 +96,7 @@ pub fn lending_account_pulse_health<'info>(
     // Check pre-liquidation condition using heap reuse optimization
     let liq_result = check_pre_liquidation_condition_and_get_account_health(
         &marginfi_account,
+        &group,
         ctx.remaining_accounts,
         None,
         &mut Some(&mut health_cache),
@@ -126,6 +126,7 @@ pub fn lending_account_pulse_health<'info>(
     // Check bankruptcy condition using heap reuse optimization
     let bankruptcy_result = check_account_bankrupt(
         &marginfi_account,
+        &group,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
     );
@@ -193,7 +194,7 @@ pub struct PulseHealth<'info> {
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
-    /// Needed to read the premium matrix for snapshot recompute
+    /// Needed for same-asset emode checks and the premium snapshot recompute
     pub group: AccountLoader<'info, MarginfiGroup>,
 }
 

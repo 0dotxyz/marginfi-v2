@@ -10,7 +10,7 @@ import { u32_MAX } from "./types";
  */
 
 /** `bank.flags` bit 11: premium accrual active for this (liability) bank. */
-export const PREMIUM_ACTIVE = 1 << 11; // 2048
+export const PREMIUM_ACTIVE = 1 << 13; // 8192
 /** Storage capacity of the group premium matrix at the current account size. */
 export const MAX_PREMIUM_ENTRIES = 64;
 

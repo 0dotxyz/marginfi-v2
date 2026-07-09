@@ -44,8 +44,8 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
 
     let (seized, seized_f64, repaid, repaid_f64) = end_receivership(
         &mut marginfi_account,
-        &mut liq_record,
         &group,
+        &mut liq_record,
         ctx.remaining_accounts,
         ignore_healthy,
     )?;
@@ -97,8 +97,8 @@ pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> Margi
     marginfi_account.unset_flag(ACCOUNT_IN_DELEVERAGE, false);
     let (_, seized_f64, _, repaid_f64) = end_receivership(
         &mut marginfi_account,
-        &mut liq_record,
         &group,
+        &mut liq_record,
         ctx.remaining_accounts,
         true,
     )?;
@@ -116,8 +116,8 @@ pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> Margi
 // Common logic for both liquidation and deleverage
 pub fn end_receivership<'info>(
     marginfi_account: &mut MarginfiAccount,
-    liq_record: &mut LiquidationRecord,
     group: &MarginfiGroup,
+    liq_record: &mut LiquidationRecord,
     remaining_ais: &'info [AccountInfo<'info>],
     ignore_healthy: bool,
 ) -> Result<(I80F48, f64, I80F48, f64)> {
@@ -131,6 +131,7 @@ pub fn end_receivership<'info>(
     let (post_health, _post_assets, _post_liabs) =
         check_pre_liquidation_condition_and_get_account_health(
             marginfi_account,
+            group,
             remaining_ais,
             None,
             &mut Some(&mut post_hc),
@@ -140,6 +141,7 @@ pub fn end_receivership<'info>(
     let mut premium_scratch = PremiumScratch::default();
     let (post_assets_equity, post_liabilities_equity) = get_health_components(
         marginfi_account,
+        group,
         remaining_ais,
         RequirementType::Equity,
         &mut Some(&mut post_hc),
