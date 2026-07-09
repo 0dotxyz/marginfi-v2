@@ -380,7 +380,7 @@ async fn execute_order_fails_pre_trigger_not_met(
 #[test_case(BankMint::Fixed, 7.0, BankMint::Usdc, 5.0, BankMint::Sol, take_profit_trigger(fp!(5.5), slippage_bps(500)), 1.1)] // Trigger the max fee check
 #[test_case(BankMint::Sol, 150.0, BankMint::Usdc, 10.0, BankMint::Fixed, take_profit_trigger(fp!(1490), slippage_bps(1)), 1.015)] // Trigger the slippage check
 #[test_case(BankMint::Fixed, 7.0, BankMint::Sol, 0.8, BankMint::Usdc, take_profit_trigger(fp!(3), slippage_bps(0)), 1.0376)] // Trigger the max fee check
-#[test_case(BankMint::Fixed, 7.0, BankMint::Usdc, 5.0, BankMint::Sol, both_trigger(fp!(5), fp!(9.0), slippage_bps(1000)), 1.2)] // Trigger the slippage check
+#[test_case(BankMint::Fixed, 7.0, BankMint::Usdc, 5.0, BankMint::Sol, both_trigger(fp!(5), fp!(9.0), slippage_bps(900)), 1.2)] // Trigger the slippage check (kept under the 10% order slippage cap)
 #[test_case(BankMint::Sol, 150.0, BankMint::Usdc, 1000.0, BankMint::Fixed, both_trigger(fp!(600), fp!(1490), slippage_bps(38)), 1.002)]
 #[test_case(BankMint::Fixed, 12.5, BankMint::Usdc, 20.0, BankMint::Sol, stop_loss_trigger(fp!(10), slippage_bps(583)), 1.0146)]
 #[test_case(BankMint::Sol, 250.0, BankMint::Usdc, 1803.0, BankMint::Fixed, stop_loss_trigger(fp!(862), slippage_bps(98)), 1.0038)]
@@ -1104,16 +1104,26 @@ async fn place_order_fail_invalid_sl_or_tp(
     Ok(())
 }
 
-#[test_case(BankMint::Fixed, 65.0, BankMint::Usdc, 5.0, take_profit_trigger(fp!(150), slippage_bps(10_000)))] // slippage must be < 100%
-#[test_case(BankMint::Fixed, 70.0, BankMint::Usdc, 50.0, stop_loss_trigger(fp!(50), slippage_bps(10_000)))] // slippage must be < 100%
-#[test_case(BankMint::Fixed, 27.0, BankMint::Usdc, 50.0, both_trigger(fp!(1), fp!(5), slippage_bps(10_000)))] // slippage must be < 100%
+// Every order (StopLoss, TakeProfit, or Both) is capped at MAX_ORDER_SLIPPAGE (~10%); anything
+// above that is rejected at placement, while slippage at or below the cap is allowed. 1099 bps
+// (10.99%) is comfortably above the 10% cap regardless of u32 encoding rounding; 900 bps (9%) is
+// comfortably below it.
+#[test_case(BankMint::Fixed, 70.0, BankMint::Usdc, 50.0, stop_loss_trigger(fp!(50), slippage_bps(1099)), true)]
+#[test_case(BankMint::Fixed, 27.0, BankMint::Usdc, 50.0, both_trigger(fp!(1), fp!(5), slippage_bps(1099)), true)]
+#[test_case(BankMint::Fixed, 65.0, BankMint::Usdc, 5.0, take_profit_trigger(fp!(150), slippage_bps(1099)), true)]
+#[test_case(BankMint::Fixed, 70.0, BankMint::Usdc, 50.0, stop_loss_trigger(fp!(50), slippage_bps(10_000)), true)] // 100%
+#[test_case(BankMint::Fixed, 27.0, BankMint::Usdc, 50.0, both_trigger(fp!(1), fp!(5), slippage_bps(10_000)), true)] // 100%
+#[test_case(BankMint::Fixed, 65.0, BankMint::Usdc, 5.0, take_profit_trigger(fp!(150), slippage_bps(10_000)), true)] // 100%
+#[test_case(BankMint::Fixed, 70.0, BankMint::Usdc, 50.0, stop_loss_trigger(fp!(50), slippage_bps(900)), false)] // under cap
+#[test_case(BankMint::Fixed, 65.0, BankMint::Usdc, 5.0, take_profit_trigger(fp!(150), slippage_bps(900)), false)] // under cap
 #[tokio::test]
-async fn place_order_fail_invalid_slippage(
+async fn place_order_slippage_cap(
     asset_mint: BankMint,
     asset_deposit: f64,
     liability_mint: BankMint,
     liability_borrow: f64,
     trigger: OrderTrigger,
+    should_fail: bool,
 ) -> anyhow::Result<()> {
     // ---------------------------------------------------------------------
     // Setup
@@ -1142,8 +1152,15 @@ async fn place_order_fail_invalid_slippage(
         .try_place_order(bank_keys.clone(), trigger)
         .await;
 
-    assert_custom_error!(result.unwrap_err(), MarginfiError::InvalidSlippage);
-    assert_active_orders(&borrower_mfi_account_f, 0).await;
+    if should_fail {
+        // Above the cap: rejected; no order PDA is created.
+        assert_custom_error!(result.unwrap_err(), MarginfiError::SlippageTooHigh);
+        assert_active_orders(&borrower_mfi_account_f, 0).await;
+    } else {
+        // At or below the cap: allowed.
+        result?;
+        assert_active_orders(&borrower_mfi_account_f, 1).await;
+    }
 
     Ok(())
 }

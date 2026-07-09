@@ -922,6 +922,9 @@ impl BankImpl for Bank {
                 x if x == BankOperationalState::ReduceOnly as u8 => {
                     BankOperationalState::ReduceOnly
                 }
+                x if x == BankOperationalState::ReduceOnlyWithBorrowingPower as u8 => {
+                    BankOperationalState::ReduceOnlyWithBorrowingPower
+                }
                 x if x == BankOperationalState::Operational as u8 => {
                     BankOperationalState::Operational
                 }
@@ -2367,6 +2370,11 @@ mod cb_tests {
         assert_eq!(
             b.cb_effective_operational_state(),
             BankOperationalState::ReduceOnly
+        );
+        b.cb_pre_break_state = BankOperationalState::ReduceOnlyWithBorrowingPower as u8;
+        assert_eq!(
+            b.cb_effective_operational_state(),
+            BankOperationalState::ReduceOnlyWithBorrowingPower
         );
         b.cb_pre_break_state = BankOperationalState::Operational as u8;
         assert_eq!(

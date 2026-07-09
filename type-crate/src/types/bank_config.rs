@@ -5,8 +5,8 @@ use crate::{
         TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE,
     },
     types::{
-        BankOperationalState, InterestRateConfig, InterestRateConfigCompact, InterestRateConfigOpt,
-        OracleSetup, RiskTier,
+        BalanceSide, BankOperationalState, InterestRateConfig, InterestRateConfigCompact,
+        InterestRateConfigOpt, OracleSetup, RequirementType, RiskTier,
     },
 };
 
@@ -158,6 +158,27 @@ impl Default for BankConfig {
             cb_escalation_window_mult: 0,
             _cb_config_pad: 0,
             cb_ema_alpha_bps: 0,
+        }
+    }
+}
+
+impl BankConfig {
+    #[inline]
+    pub fn get_weight(
+        &self,
+        requirement_type: RequirementType,
+        balance_side: BalanceSide,
+    ) -> I80F48 {
+        match (requirement_type, balance_side) {
+            (RequirementType::Initial, BalanceSide::Assets) => self.asset_weight_init.into(),
+            (RequirementType::Initial, BalanceSide::Liabilities) => {
+                self.liability_weight_init.into()
+            }
+            (RequirementType::Maintenance, BalanceSide::Assets) => self.asset_weight_maint.into(),
+            (RequirementType::Maintenance, BalanceSide::Liabilities) => {
+                self.liability_weight_maint.into()
+            }
+            (RequirementType::Equity, _) => I80F48::ONE,
         }
     }
 }

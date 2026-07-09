@@ -3,10 +3,7 @@ use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use marginfi_type_crate::types::{BankConfig, EmodeSettings, RequirementType, EMODE_ON};
 
-use crate::{
-    check, errors::MarginfiError, math_error, prelude::MarginfiResult,
-    state::bank_config::BankConfigImpl,
-};
+use crate::{check, errors::MarginfiError, math_error, prelude::MarginfiResult};
 use marginfi_type_crate::types::u32_to_basis;
 
 /// Default Maximum allowed theoretical leverage for emode configurations (initial).

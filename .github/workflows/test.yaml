@@ -197,7 +197,7 @@ jobs:
       id: cache-nightly
       with:
         path: ~/.rustup/toolchains/nightly-2025-08-01-x86_64-unknown-linux-gnu
-        key: rust-nightly-${{ runner.os }}-nightly-20250801
+        key: cargo-fuzz-${{ runner.os }}-v${{ env.CARGO_FUZZ_VERSION }}-nightly-20250801
 
     - name: Install nightly Rust + rust-src
       if: steps.cache-nightly.outputs.cache-hit != 'true'
@@ -355,15 +355,10 @@ jobs:
   # ────────────────────────────────────────────────────────────────────
   # Trident fuzz stack — two jobs (build → fuzz). Both share the same
   # `if:` guard: only PRs targeting `main` or `*-main` (and manual
-  # `workflow_dispatch`) run them. Daily PRs land on `0.1.9-main`,
+  # `workflow_dispatch`) run them. Daily PRs land on `X.X.X-main`,
   # release PRs land on `main`. Feature-branch PRs skip the trident
   # stack entirely; `push: main` skips too (the release PR already ran
   # it).
-  #
-  # Both jobs override `SOLANA_CLI_VERSION` to `3.1.13` — Trident's
-  # LiteSVM loader needs the SBF v2 binary format introduced in Solana
-  # 3.x. The rest of the workflow stays on 2.1.20 because the JupLend
-  # integration tests don't pass on 3.x yet.
   # ────────────────────────────────────────────────────────────────────
 
   trident-build:

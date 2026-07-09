@@ -251,7 +251,7 @@ pub struct EndDeleverage<'info> {
     #[account(
         mut,
         has_one = liquidation_record,
-        has_one = group,
+        has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
             let acc = marginfi_account.load()?;
             acc.get_flag(ACCOUNT_IN_RECEIVERSHIP)
