@@ -66,6 +66,14 @@ pub struct LendingPoolBankSetFixedOraclePriceEvent {
 }
 
 #[event]
+pub struct LendingPoolBankSetSameAssetEmodeEligibilityEvent {
+    pub header: GroupEventHeader,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    pub enabled: bool,
+}
+
+#[event]
 pub struct LendingPoolBankConfigureFrozenEvent {
     pub header: GroupEventHeader,
     pub bank: Pubkey,

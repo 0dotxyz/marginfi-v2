@@ -49,6 +49,7 @@ export const BANK_SEED_KNOWN_FLAG = 256;
 export const STAKED_ORACLE_DISABLED = 1 << 9;
 export const STAKED_ORACLE_PRICE_USES_ONRAMP = 1 << 10;
 export const CIRCUIT_BREAKER_ENABLED = 1 << 11;
+export const BANK_SAME_ASSET_EMODE_ELIGIBLE_FLAG = 1 << 12;
 
 export const ASSET_TAG_DEFAULT = 0;
 export const ASSET_TAG_SOL = 1;

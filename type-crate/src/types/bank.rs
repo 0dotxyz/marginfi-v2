@@ -113,6 +113,7 @@ pub struct Bank {
     /// - Bit 10 (1024): `STAKED_ORACLE_PRICE_USES_ONRAMP` — staked oracle pricing includes the SPL
     ///   single-pool on-ramp account in NAV.
     /// - Bit 11 (2048): `CIRCUIT_BREAKER_ENABLED` — oracle deviation breaker active on this bank
+    /// - Bit 12 (4096): `BANK_SAME_ASSET_EMODE_ELIGIBLE` — bank may participate in same-asset e-mode.
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.
@@ -360,5 +361,12 @@ impl OracleSetup {
             17 => Some(Self::FixedJuplend),
             _ => None,
         }
+    }
+
+    pub fn is_fixed_price(self) -> bool {
+        matches!(
+            self,
+            Self::Fixed | Self::FixedKamino | Self::FixedDrift | Self::FixedJuplend
+        )
     }
 }

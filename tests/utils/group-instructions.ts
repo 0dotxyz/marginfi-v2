@@ -4,6 +4,7 @@ import { Marginfi } from "../../target/types/marginfi";
 import {
   deriveBankWithSeed,
   deriveOnRampPool,
+  deriveSameAssetEmodeRegistry,
   deriveStakedSettings,
 } from "./pdas";
 import {
@@ -158,6 +159,8 @@ export type GroupConfigureArgs = {
   marginfiGroup: PublicKey;
   emodeMaxInitLeverage?: WrappedI80F48 | null;
   emodeMaxMaintLeverage?: WrappedI80F48 | null;
+  sameAssetEmodeInitLeverage?: WrappedI80F48 | null;
+  sameAssetEmodeMaintLeverage?: WrappedI80F48 | null;
 };
 
 export const groupConfigure = async (
@@ -176,6 +179,8 @@ export const groupConfigure = async (
   const newRiskAdmin = args.newRiskAdmin ?? group.riskAdmin;
   const emodeMaxInitLeverage = args.emodeMaxInitLeverage ?? null;
   const emodeMaxMaintLeverage = args.emodeMaxMaintLeverage ?? null;
+  const sameAssetEmodeInitLeverage = args.sameAssetEmodeInitLeverage ?? null;
+  const sameAssetEmodeMaintLeverage = args.sameAssetEmodeMaintLeverage ?? null;
 
   const ix = program.methods
     .marginfiGroupConfigure(
@@ -189,6 +194,8 @@ export const groupConfigure = async (
       newRiskAdmin,
       emodeMaxInitLeverage,
       emodeMaxMaintLeverage,
+      sameAssetEmodeInitLeverage,
+      sameAssetEmodeMaintLeverage,
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
@@ -996,6 +1003,27 @@ export const initBankMetadata = (
   return ix;
 };
 
+export type InitSameAssetEmodeRegistryArgs = {
+  group: PublicKey;
+  signer: PublicKey;
+};
+
+export const initSameAssetEmodeRegistry = (
+  program: Program<Marginfi>,
+  args: InitSameAssetEmodeRegistryArgs,
+) => {
+  const ix = program.methods
+    .lendingPoolInitSameAssetEmodeRegistry()
+    .accounts({
+      group: args.group,
+      signer: args.signer,
+      // sameAssetEmodeRegistry,
+    })
+    .instruction();
+
+  return ix;
+};
+
 export type SetFixedPriceArgs = {
   bank: PublicKey;
   price: number;
@@ -1018,6 +1046,30 @@ export const setFixedPrice = (
       bank: args.bank,
     })
     .remainingAccounts(oracleMeta)
+    .instruction();
+
+  return ix;
+};
+
+export type SetBankSameAssetEmodeEligibilityArgs = {
+  // group: PublicKey;
+  signer: PublicKey;
+  bank: PublicKey;
+  enabled: boolean;
+};
+
+export const setBankSameAssetEmodeEligibility = (
+  program: Program<Marginfi>,
+  args: SetBankSameAssetEmodeEligibilityArgs,
+) => {
+  const ix = program.methods
+    .lendingPoolSetBankSameAssetEmodeEligibility(args.enabled)
+    .accounts({
+      // group: args.group,
+      signer: args.signer,
+      bank: args.bank,
+      // sameAssetEmodeRegistry,
+    })
     .instruction();
 
   return ix;
