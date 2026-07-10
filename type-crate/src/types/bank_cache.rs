@@ -50,7 +50,8 @@ pub struct BankCache {
     /// Confidence interval reported by the oracle when last_oracle_price was fetched
     /// * Always non-negative
     /// * Zero if never updated
-    /// * Note: this value is the confidence reported by oracles, multiplied by `STD_DEV_MULTIPLE`
+    /// * Pyth: confidence * 2.12
+    /// * Switchboard: price * oracle_max_confidence / U32_MAX
     pub last_oracle_price_confidence: WrappedI80F48,
     /// Liquidation cache flags, set during receivership flow.
     /// * 1 (LIQ_CACHE_LOCKED_FLAG) - We "lock" the liquidation cache when writing to it in Start

@@ -502,12 +502,8 @@ impl OraclePriceFeedAdapter {
                     None
                 };
 
-                // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
                 price_feed.feed.result.value =
                     mul_i128_by_i80f48(price_feed.feed.result.value, multiplier)
-                        .ok_or_else(math_error!())?;
-                price_feed.feed.result.std_dev =
-                    mul_i128_by_i80f48(price_feed.feed.result.std_dev, multiplier)
                         .ok_or_else(math_error!())?;
 
                 Ok(OracleLoadContext {
@@ -611,15 +607,9 @@ impl OraclePriceFeedAdapter {
                     None
                 };
 
-                // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
+                // Adjust Switchboard value (i128 with 1e18 precision)
                 price_feed.feed.result.value = mul_div_i128(
                     price_feed.feed.result.value,
-                    numerator,
-                    SPOT_CUMULATIVE_INTEREST_PRECISION,
-                )
-                .ok_or_else(math_error!())?;
-                price_feed.feed.result.std_dev = mul_div_i128(
-                    price_feed.feed.result.std_dev,
                     numerator,
                     SPOT_CUMULATIVE_INTEREST_PRECISION,
                 )
@@ -694,12 +684,8 @@ impl OraclePriceFeedAdapter {
                     None
                 };
 
-                // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
                 price_feed.feed.result.value =
                     mul_i128_by_i80f48(price_feed.feed.result.value, multiplier)
-                        .ok_or_else(math_error!())?;
-                price_feed.feed.result.std_dev =
-                    mul_i128_by_i80f48(price_feed.feed.result.std_dev, multiplier)
                         .ok_or_else(math_error!())?;
 
                 Ok(OracleLoadContext {
@@ -924,15 +910,9 @@ impl OraclePriceFeedAdapter {
                     None
                 };
 
-                // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
+                // Adjust Switchboard value (i128 with 1e18 precision)
                 price_feed.feed.result.value = mul_div_i128(
                     price_feed.feed.result.value,
-                    numerator,
-                    EXCHANGE_PRICES_PRECISION,
-                )
-                .ok_or_else(math_error!())?;
-                price_feed.feed.result.std_dev = mul_div_i128(
-                    price_feed.feed.result.std_dev,
                     numerator,
                     EXCHANGE_PRICES_PRECISION,
                 )
@@ -1405,47 +1385,26 @@ impl SwitchboardPullPriceFeed {
     }
 
     fn get_confidence_interval(&self, oracle_max_confidence: u32) -> MarginfiResult<I80F48> {
-        let conf_interval: I80F48 = I80F48::from_num(self.feed.result.std_dev)
-            .checked_div(EXP_10_I80F48[switchboard_on_demand::PRECISION as usize])
-            .ok_or_else(math_error!())?
-            .checked_mul(STD_DEV_MULTIPLE)
-            .ok_or_else(math_error!())?;
+        // Switchboard no longer reports std_dev.
+        // oracle_max_confidence defines the confidence spread.
+        // 0 disables confidence adjustment.
+        if oracle_max_confidence == 0 {
+            return Ok(I80F48::ZERO);
+        }
 
         let price = self.get_price()?;
+        let oracle_max_confidence = I80F48::from_num(oracle_max_confidence);
 
-        // Fail the price fetch if confidence > price * oracle_max_confidence
-        let oracle_max_confidence = if oracle_max_confidence > 0 {
-            I80F48::from_num(oracle_max_confidence)
-        } else {
-            // The default max confidence is 10%
-            U32_MAX_DIV_10
-        };
-        let max_conf = price
+        let conf_interval = price
             .checked_mul(oracle_max_confidence)
             .ok_or_else(math_error!())?
             .checked_div(U32_MAX)
             .ok_or_else(math_error!())?;
-        if conf_interval > max_conf {
-            let conf_interval = conf_interval.to_num::<f64>();
-            let max_conf = max_conf.to_num::<f64>();
-            msg!("conf was {:?}, but max is {:?}", conf_interval, max_conf);
-            return err!(MarginfiError::OracleMaxConfidenceExceeded);
-        }
 
-        // Clamp confidence to 5% of the price regardless
+        // Clamp to MAX_CONF_INTERVAL (5%) of price
         let max_conf_interval = price
             .checked_mul(MAX_CONF_INTERVAL)
             .ok_or_else(math_error!())?;
-
-        assert!(
-            max_conf_interval >= I80F48::ZERO,
-            "Negative max confidence interval"
-        );
-
-        assert!(
-            conf_interval >= I80F48::ZERO,
-            "Negative confidence interval"
-        );
 
         Ok(min(conf_interval, max_conf_interval))
     }
@@ -1655,7 +1614,7 @@ impl PythPushOraclePriceFeed {
             I80F48::from_num(oracle_max_confidence)
         } else {
             // The default max confidence is 10%
-            U32_MAX_DIV_10
+            I80F48::from_num(u32::MAX / 10u32)
         };
         let max_conf = price
             .checked_mul(oracle_max_confidence)
@@ -1970,7 +1929,18 @@ mod tests {
         let feed: SwitchboardPullPriceFeed =
             SwitchboardPullPriceFeed::load_checked(&ai, current_timestamp, max_age).unwrap();
         let price: I80F48 = feed.get_price().unwrap();
-        let conf: I80F48 = feed.get_confidence_interval(0).unwrap();
+
+        let oracle_max_confidence = u32::MAX / 10;
+        let conf: I80F48 = feed.get_confidence_interval(oracle_max_confidence).unwrap();
+
+        let max_conf_interval_expected: I80F48 = price * I80F48::from_num(0.05);
+        assert!(conf <= max_conf_interval_expected);
+
+        // Confidence should be clamped to 5% since default oracle_max_confidence ~10%
+        assert_eq!(
+            conf, max_conf_interval_expected,
+            "With default oracle_max_confidence, conf should be clamped to 5% of price"
+        );
 
         let target_price: I80F48 = I80F48::from_num(155.59);
         let price_tolerance: I80F48 = target_price * I80F48::from_num(0.0001);
@@ -1978,34 +1948,29 @@ mod tests {
         let max_price: I80F48 = target_price.checked_add(price_tolerance).unwrap();
         assert!(price >= min_price && price <= max_price);
 
-        let max_conf: I80F48 = target_price * I80F48::from_num(0.05);
-        assert!(conf <= max_conf);
-
-        let exp_conf: I80F48 = I80F48::from_num(0.47);
-        let min_exp_conf: I80F48 = exp_conf - exp_conf * I80F48::from_num(0.01);
-        let max_exp_conf: I80F48 = exp_conf + exp_conf * I80F48::from_num(0.01);
-        assert!(exp_conf >= min_exp_conf && exp_conf <= max_exp_conf);
-
-        let price_bias_none: I80F48 = feed
-            .get_price_of_type(OraclePriceType::RealTime, None, 0)
+        let price_bias_none = feed
+            .get_price_of_type(OraclePriceType::RealTime, None, oracle_max_confidence)
             .unwrap();
         assert_eq!(price, price_bias_none);
 
-        let price_bias_low: I80F48 = feed
-            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), 0)
+        // Test PriceBias::Low and PriceBias::High
+        let price_low = feed
+            .get_price_of_type(
+                OraclePriceType::RealTime,
+                Some(PriceBias::Low),
+                oracle_max_confidence,
+            )
             .unwrap();
-        let target_price_low: I80F48 = target_price.checked_sub(exp_conf).unwrap();
-        let min_price: I80F48 = target_price_low.checked_sub(price_tolerance).unwrap();
-        let max_price: I80F48 = target_price_low.checked_add(price_tolerance).unwrap();
-        assert!(price_bias_low >= min_price && price_bias_low <= max_price);
+        let price_high = feed
+            .get_price_of_type(
+                OraclePriceType::RealTime,
+                Some(PriceBias::High),
+                oracle_max_confidence,
+            )
+            .unwrap();
 
-        let price_bias_high: I80F48 = feed
-            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::High), 0)
-            .unwrap();
-        let target_price_high: I80F48 = target_price.checked_add(exp_conf).unwrap();
-        let min_price: I80F48 = target_price_high.checked_sub(price_tolerance).unwrap();
-        let max_price: I80F48 = target_price_high.checked_add(price_tolerance).unwrap();
-        assert!(price_bias_high >= min_price && price_bias_high <= max_price);
+        assert_eq!(price_low, price.checked_sub(conf).unwrap());
+        assert_eq!(price_high, price.checked_add(conf).unwrap());
     }
 
     #[test]
@@ -2036,42 +2001,59 @@ mod tests {
         let feed: SwitchboardPullPriceFeed =
             SwitchboardPullPriceFeed::load_checked(&ai, current_timestamp, max_age).unwrap();
         let price: I80F48 = feed.get_price().unwrap();
-        let conf: I80F48 = feed.get_confidence_interval(0).unwrap();
+
+        let oracle_max_confidence = u32::MAX / 10;
+        let conf: I80F48 = feed.get_confidence_interval(oracle_max_confidence).unwrap();
+
+        let max_conf_interval_expected: I80F48 = price * I80F48::from_num(0.05);
+        assert!(
+            conf <= max_conf_interval_expected,
+            "Confidence {:?} should not exceed 5% of price {:?}",
+            conf.to_num::<f64>(),
+            max_conf_interval_expected.to_num::<f64>()
+        );
 
         let target_price: I80F48 = I80F48::from_num(177.351466043);
-        let price_tolerance: I80F48 = target_price * I80F48::from_num(0.0001);
+        let price_tolerance: I80F48 = target_price * I80F48::from_num(0.0001); // 0.01% tolerance
         let min_price: I80F48 = target_price.checked_sub(price_tolerance).unwrap();
         let max_price: I80F48 = target_price.checked_add(price_tolerance).unwrap();
-        assert!(price >= min_price && price <= max_price);
+        assert!(
+            price >= min_price && price <= max_price,
+            "Price {:?} outside expected range [{:?}, {:?}]",
+            price.to_num::<f64>(),
+            min_price.to_num::<f64>(),
+            max_price.to_num::<f64>()
+        );
 
-        let max_conf: I80F48 = target_price * I80F48::from_num(0.05);
-        assert!(conf <= max_conf);
-
-        let exp_conf: I80F48 = I80F48::from_num(0.0046528305);
-        let min_exp_conf: I80F48 = exp_conf - exp_conf * I80F48::from_num(0.01);
-        let max_exp_conf: I80F48 = exp_conf + exp_conf * I80F48::from_num(0.01);
-        assert!(exp_conf >= min_exp_conf && exp_conf <= max_exp_conf);
+        // Confidence should be clamped to 5% since default oracle_max_confidence ~10%
+        assert_eq!(
+            conf, max_conf_interval_expected,
+            "With default oracle_max_confidence, conf should be clamped to 5% of price"
+        );
 
         let price_bias_none: I80F48 = feed
-            .get_price_of_type(OraclePriceType::RealTime, None, 0)
+            .get_price_of_type(OraclePriceType::RealTime, None, oracle_max_confidence)
             .unwrap();
         assert_eq!(price, price_bias_none);
 
-        let price_bias_low: I80F48 = feed
-            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), 0)
+        let price_low = feed
+            .get_price_of_type(
+                OraclePriceType::RealTime,
+                Some(PriceBias::Low),
+                oracle_max_confidence,
+            )
             .unwrap();
-        let target_price_low: I80F48 = target_price.checked_sub(exp_conf).unwrap();
-        let min_price: I80F48 = target_price_low.checked_sub(price_tolerance).unwrap();
-        let max_price: I80F48 = target_price_low.checked_add(price_tolerance).unwrap();
-        assert!(price_bias_low >= min_price && price_bias_low <= max_price);
+        let price_high = feed
+            .get_price_of_type(
+                OraclePriceType::RealTime,
+                Some(PriceBias::High),
+                oracle_max_confidence,
+            )
+            .unwrap();
 
-        let price_bias_high: I80F48 = feed
-            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::High), 0)
-            .unwrap();
-        let target_price_high: I80F48 = target_price.checked_add(exp_conf).unwrap();
-        let min_price: I80F48 = target_price_high.checked_sub(price_tolerance).unwrap();
-        let max_price: I80F48 = target_price_high.checked_add(price_tolerance).unwrap();
-        assert!(price_bias_high >= min_price && price_bias_high <= max_price);
+        // Validate concrete relationship: biased prices should be exactly price ± confidence
+        assert_eq!(price_low, price.checked_sub(conf).unwrap());
+        assert_eq!(price_high, price.checked_add(conf).unwrap());
     }
 
     #[test]
