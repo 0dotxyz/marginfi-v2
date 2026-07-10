@@ -1,9 +1,9 @@
 use crate::events::{GroupEventHeader, LendingPoolBankConfigureOracleEvent};
 use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
-use crate::{MarginfiError, MarginfiResult};
+use crate::{check, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
-use marginfi_type_crate::constants::FREEZE_SETTINGS;
+use marginfi_type_crate::constants::{BANK_SAME_ASSET_EMODE_ELIGIBLE, FREEZE_SETTINGS};
 use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 
 pub fn lending_pool_configure_bank_oracle(
@@ -19,9 +19,20 @@ pub fn lending_pool_configure_bank_oracle(
     } else {
         let setup_type =
             OracleSetup::from_u8(setup).unwrap_or_else(|| panic!("unsupported oracle type"));
-        if setup_type == OracleSetup::Fixed {
-            panic!("Use set_fixed_oracle_price instead");
+        if matches!(
+            setup_type,
+            OracleSetup::Fixed
+                | OracleSetup::FixedKamino
+                | OracleSetup::FixedDrift
+                | OracleSetup::FixedJuplend
+        ) {
+            return err!(MarginfiError::UseSetFixedOraclePrice);
         }
+        check!(
+            !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE) || bank.config.oracle_keys[0] == oracle,
+            MarginfiError::BadEmodeConfig,
+            "disable same-asset e-mode eligibility before changing oracle_keys[0]"
+        );
 
         bank.config.oracle_setup = setup_type;
         bank.config.oracle_keys[0] = oracle;

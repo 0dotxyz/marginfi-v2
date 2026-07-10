@@ -12,10 +12,21 @@ import {
   PublicKey,
   StakeAuthorizationLayout,
   StakeProgram,
+  Transaction,
   TransactionInstruction,
 } from "@solana/web3.js";
 import { SINGLE_POOL_PROGRAM_ID } from "./types";
-import { ProgramTestContext } from "solana-bankrun";
+import { pulseBankPrice } from "./user-instructions";
+import {
+  bankrunContext,
+  bankrunProgram,
+  banksClient,
+  groupAdmin,
+  oracles,
+  validators,
+} from "../rootHooks";
+import { getBankrunBlockhash } from "./tools";
+import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 
 export enum SinglePoolAccountType {
   Uninitialized = 0,
@@ -51,7 +62,7 @@ export const decodeSinglePool = (buffer: Buffer) => {
   offset += 1;
 
   const voteAccountAddress = new PublicKey(
-    buffer.subarray(offset, offset + 32)
+    buffer.subarray(offset, offset + 32),
   );
   offset += 32;
 
@@ -78,13 +89,13 @@ export const depositToSinglePoolIxes = async (
   userWallet: PublicKey,
   splPool: PublicKey,
   userStakeAccount: PublicKey,
-  verbose: boolean = false
+  verbose: boolean = false,
 ) => {
   const splMint = await findPoolMintAddress(SINGLE_POOL_PROGRAM_ID, splPool);
 
   const splAuthority = await findPoolStakeAuthorityAddress(
     SINGLE_POOL_PROGRAM_ID,
-    splPool
+    splPool,
   );
 
   const ixes: TransactionInstruction[] = [];
@@ -103,8 +114,8 @@ export const depositToSinglePoolIxes = async (
         userWallet,
         lstAta,
         userWallet,
-        splMint
-      )
+        splMint,
+      ),
     );
   }
 
@@ -130,10 +141,31 @@ export const depositToSinglePoolIxes = async (
     splPool,
     userStakeAccount,
     lstAta,
-    userWallet
+    userWallet,
   );
 
   ixes.push(depositIx);
 
   return ixes;
+};
+
+export const fetchLstPriceMultiplier = async () => {
+  const pulseTx = new Transaction().add(
+    await pulseBankPrice(groupAdmin.mrgnBankrunProgram, {
+      bank: validators[0].bank,
+      remaining: [
+        oracles.wsolOracle.publicKey,
+        validators[0].splMint,
+        validators[0].splSolPool,
+        validators[0].splOnRampPool,
+      ],
+    }),
+  );
+  pulseTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+  pulseTx.sign(groupAdmin.wallet);
+
+  await banksClient.processTransaction(pulseTx);
+
+  const bank = await bankrunProgram.account.bank.fetch(validators[0].bank);
+  return wrappedI80F48toBigNumber(bank.cache.priceMultiplier).toNumber();
 };

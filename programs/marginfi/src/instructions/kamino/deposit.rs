@@ -2,7 +2,6 @@ use crate::state::bank::BankVaultType;
 use crate::utils::record_deposit_inflow;
 use crate::{
     bank_signer,
-    constants::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
     events::{AccountEventHeader, LendingAccountDepositEvent},
     optional_account,
     state::{
@@ -19,21 +18,23 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
-use anchor_lang::solana_program::sysvar::{self, Sysvar};
 use anchor_spl::token::Token;
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
 use fixed::types::I80F48;
-use kamino_mocks::kamino_lending::cpi::deposit_reserve_liquidity_and_obligation_collateral_v2;
+use kamino_mocks::kamino_lending::cpi::{
+    deposit_reserve_liquidity_and_obligation_collateral_v2, refresh_reserves_batch,
+};
 use kamino_mocks::{
     kamino_lending::cpi::accounts::{
         DepositFarmsAccounts, DepositReserveLiquidityAndObligationCollateral,
-        DepositReserveLiquidityAndObligationCollateralV2,
+        DepositReserveLiquidityAndObligationCollateralV2, RefreshReservesBatch,
     },
     state::{MinimalObligation, MinimalReserve},
 };
 use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
+use marginfi_type_crate::pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID};
 use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED};
 
 /// Deposit into a Kamino pool through a marginfi account
@@ -44,9 +45,11 @@ use marginfi_type_crate::types::{Bank, MarginfiAccount, MarginfiGroup, ACCOUNT_D
 /// 3. Verifies the obligation deposit amount was increased correctly
 /// 4. Updates the marginfi account's balance to reflect the deposit
 pub fn kamino_deposit<'info>(
-    ctx: Context<'_, '_, 'info, 'info, KaminoDeposit<'info>>,
+    ctx: Context<'info, KaminoDeposit<'info>>,
     amount: u64,
+    refresh_reserve: Option<bool>,
 ) -> MarginfiResult {
+    let refresh_reserve = refresh_reserve.unwrap_or(false);
     let authority_bump: u8;
     {
         let marginfi_account = ctx.accounts.marginfi_account.load()?;
@@ -54,7 +57,7 @@ pub fn kamino_deposit<'info>(
         authority_bump = bank.liquidity_vault_authority_bump;
 
         validate_asset_tags(&bank, &marginfi_account)?;
-        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
+        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState, true)?;
     }
 
     // Get initial obligation data to verify deposit amount later
@@ -65,6 +68,10 @@ pub fn kamino_deposit<'info>(
         .integration_acc_1
         .load()?
         .liquidity_to_collateral(amount)?;
+
+    if refresh_reserve {
+        ctx.accounts.cpi_refresh_reserve()?;
+    }
 
     ctx.accounts.cpi_transfer_user_to_obligation_owner(amount)?;
     ctx.accounts.cpi_kamino_deposit(amount, authority_bump)?;
@@ -95,7 +102,7 @@ pub fn kamino_deposit<'info>(
 
         // Convert deposit amount to I80F48 for calculations
         let obligation_collateral_change_i80f48 = I80F48::from_num(obligation_collateral_change);
-        bank_account.deposit_no_repay(obligation_collateral_change_i80f48)?;
+        let share_amount = bank_account.deposit_no_repay(obligation_collateral_change_i80f48)?;
 
         record_deposit_inflow(
             &mut bank,
@@ -111,6 +118,7 @@ pub fn kamino_deposit<'info>(
 
         marginfi_account.last_update = clock.unix_timestamp as u64;
         marginfi_account.lending_account.sort_balances();
+        marginfi_account.sync_indexer_flags();
 
         emit!(LendingAccountDepositEvent {
             header: AccountEventHeader {
@@ -122,6 +130,7 @@ pub fn kamino_deposit<'info>(
             bank: ctx.accounts.bank.key(),
             mint: bank.mint,
             amount,
+            share_amount: share_amount.into(),
         });
     }
 
@@ -257,11 +266,22 @@ pub struct KaminoDeposit<'info> {
     pub liquidity_token_program: Interface<'info, TokenInterface>,
 
     /// CHECK: validated against hardcoded program id
-    #[account(address = sysvar::instructions::ID)]
+    #[account(address = solana_instructions_sysvar::ID)]
     pub instruction_sysvar_account: UncheckedAccount<'info>,
 }
 
 impl<'info> KaminoDeposit<'info> {
+    pub fn cpi_refresh_reserve(&self) -> MarginfiResult {
+        let accounts = RefreshReservesBatch {};
+        let program = self.kamino_program.to_account_info();
+        let cpi_ctx = CpiContext::new(program.key(), accounts).with_remaining_accounts(vec![
+            self.integration_acc_1.to_account_info(),
+            self.lending_market.to_account_info(),
+        ]);
+        refresh_reserves_batch(cpi_ctx, true)?;
+        Ok(())
+    }
+
     pub fn cpi_transfer_user_to_obligation_owner(&self, amount: u64) -> MarginfiResult {
         let program = self.liquidity_token_program.to_account_info();
         let accounts = TransferChecked {
@@ -270,7 +290,7 @@ impl<'info> KaminoDeposit<'info> {
             authority: self.authority.to_account_info(),
             mint: self.mint.to_account_info(),
         };
-        let cpi_ctx = CpiContext::new(program, accounts);
+        let cpi_ctx = CpiContext::new(program.key(), accounts);
         let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())
@@ -311,7 +331,7 @@ impl<'info> KaminoDeposit<'info> {
         let program = self.kamino_program.to_account_info();
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         deposit_reserve_liquidity_and_obligation_collateral_v2(cpi_ctx, amount)?;
         Ok(())
     }

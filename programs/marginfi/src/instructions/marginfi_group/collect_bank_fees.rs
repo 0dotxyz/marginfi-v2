@@ -19,7 +19,7 @@ use marginfi_type_crate::{
 use std::cmp::min;
 
 pub fn lending_pool_collect_bank_fees<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, LendingPoolCollectBankFees<'info>>,
+    mut ctx: Context<'info, LendingPoolCollectBankFees<'info>>,
 ) -> MarginfiResult {
     let mut bank = ctx.accounts.bank.load_mut()?;
 
@@ -201,7 +201,7 @@ pub struct LendingPoolCollectBankFees<'info> {
         ],
         bump = bank.load()?.liquidity_vault_authority_bump
     )]
-    pub liquidity_vault_authority: AccountInfo<'info>,
+    pub liquidity_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         mut,
@@ -250,7 +250,7 @@ pub struct LendingPoolCollectBankFees<'info> {
 }
 
 pub fn lending_pool_withdraw_fees<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, LendingPoolWithdrawFees<'info>>,
+    mut ctx: Context<'info, LendingPoolWithdrawFees<'info>>,
     amount: u64,
 ) -> MarginfiResult {
     let LendingPoolWithdrawFees {
@@ -319,7 +319,7 @@ pub struct LendingPoolWithdrawFees<'info> {
         ],
         bump = bank.load()?.fee_vault_authority_bump
     )]
-    pub fee_vault_authority: AccountInfo<'info>,
+    pub fee_vault_authority: UncheckedAccount<'info>,
 
     /// CHECK: ⋐ ͡⋄ ω ͡⋄ ⋑
     #[account(mut)]
@@ -329,7 +329,7 @@ pub struct LendingPoolWithdrawFees<'info> {
 }
 
 pub fn lending_pool_withdraw_insurance<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, LendingPoolWithdrawInsurance<'info>>,
+    mut ctx: Context<'info, LendingPoolWithdrawInsurance<'info>>,
     amount: u64,
 ) -> MarginfiResult {
     let LendingPoolWithdrawInsurance {
@@ -399,7 +399,7 @@ pub struct LendingPoolWithdrawInsurance<'info> {
         ],
         bump = bank.load()?.insurance_vault_authority_bump
     )]
-    pub insurance_vault_authority: AccountInfo<'info>,
+    pub insurance_vault_authority: UncheckedAccount<'info>,
 
     /// CHECK: ⋐ ͡⋄ ω ͡⋄ ⋑
     #[account(mut)]
@@ -410,7 +410,7 @@ pub struct LendingPoolWithdrawInsurance<'info> {
 
 /// Fees will be withdrawn to fees_destination_account
 pub fn lending_pool_update_fees_destination_account<'info>(
-    ctx: Context<'_, '_, 'info, 'info, LendingPoolUpdateFeesDestinationAccount<'info>>,
+    ctx: Context<'info, LendingPoolUpdateFeesDestinationAccount<'info>>,
 ) -> MarginfiResult {
     let mut bank = ctx.accounts.bank.load_mut()?;
 
@@ -449,7 +449,7 @@ pub struct LendingPoolUpdateFeesDestinationAccount<'info> {
 }
 
 pub fn lending_pool_withdraw_fees_permissionless<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, LendingPoolWithdrawFeesPermissionless<'info>>,
+    mut ctx: Context<'info, LendingPoolWithdrawFeesPermissionless<'info>>,
     amount: u64,
 ) -> MarginfiResult {
     let LendingPoolWithdrawFeesPermissionless {
@@ -521,7 +521,7 @@ pub struct LendingPoolWithdrawFeesPermissionless<'info> {
         ],
         bump = bank.load()?.fee_vault_authority_bump
     )]
-    pub fee_vault_authority: AccountInfo<'info>,
+    pub fee_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         mut,

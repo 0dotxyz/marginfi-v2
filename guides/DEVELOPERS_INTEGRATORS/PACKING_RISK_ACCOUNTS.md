@@ -15,6 +15,57 @@ In some instances, you must also pack other accounts into remaining accounts.
 
 If the Mint for a given Bank is Token22, pack it first, before all the risk accounts.
 
+### Group Rate Limit Pricing
+
+If **group** rate limits are enabled, outflow instructions need one extra rule:
+
+- `lending_account_withdraw`
+- `lending_account_borrow`
+- `kamino_withdraw`
+- `drift_withdraw`
+- `solend_withdraw`
+- `juplend_withdraw`
+
+Each of those instructions must include the withdrawn or borrowed bank and its oracle account
+group in `remaining_accounts`, even when the health check would not otherwise need that bank's
+price.
+
+Why: the group rate limiter validates projected outflow in USD, so it reads the affected bank's
+price from the same contiguous `[bank, oracle_0, ..]` layout used by risk checks.
+
+This matters most for:
+
+- `withdraw_all`, where the closing bank may no longer be part of the post-instruction health set
+- low-risk withdraws that leave no liability
+- borrows where some other collateral alone is enough for health
+
+If the affected bank entry is missing, the instruction fails with `BankAccountNotFound`. If its
+oracle price cannot be read, it fails with `InvalidRateLimitPrice`.
+
+Inflow instructions such as `lending_account_deposit` and `lending_account_repay` do not need this
+extra pricing data.
+
+### Staked Collateral / SVSP
+
+`OracleSetup::StakedWithPythPush` banks always need four oracle/venue accounts after the bank:
+
+```
+[bank, pyth_push_oracle, lst_mint, sol_pool, pool_onramp]
+```
+
+Those accounts are:
+
+- `oracle_keys[0]` - SOL Pyth push oracle
+- `oracle_keys[1]` - SVSP LST mint
+- `oracle_keys[2]` - SVSP SOL pool / stake account
+- `oracle_keys[3]` - SVSP on-ramp account
+
+If `oracle_keys[3]` is still default on an older staked bank, derive the on-ramp from the bank's
+validator vote account (`integration_acc_1`). Before
+`STAKED_ORACLE_PRICE_USES_ONRAMP` is propagated to the bank, the program still expects the fourth
+account but does not price from it. Once that flag is set, the fourth account must be the correct
+on-ramp account or the instruction fails with `WrongOracleAccountKeys`.
+
 ### Liquidate Oracles
 
 For `lending_account_liquidate`, pack in the following order:
@@ -120,8 +171,9 @@ Assuming you already have the Balances and now have a list of Banks:
                         is_writable: false,
                     });
 
-                    // For Kamino setups, also push keys[1]
-                    // For Staked setup, also push keys[1] and keys[2]
+                    // For Kamino/Solend/Drift/JupLend setups, also push keys[1].
+                    // For Staked setup, also push keys[1], keys[2], and keys[3]
+                    // (or the on-ramp PDA derived from integration_acc_1 if keys[3] is default).
                 }
                 metas
             })
@@ -170,10 +222,14 @@ When closing a balance, pass the accounts needed for the instruction's risk/orac
 closing bank does not need to remain in the health-account list just because the balance is being
 closed.
 
+Exception: if group rate limits are enabled and the instruction is an outflow, still include the
+closing bank and its oracle account group so the program can price the outflow in USD.
+
 Example (withdraw all USDC when the user also has SOL + Token A balances):
 
 ```
 const remaining = composeRemainingAccounts([
+    [usdcBank, usdcOracle],
     [solBank, solOracle],
     [tokenABank, tokenAOracle],
 ]);
@@ -311,9 +367,12 @@ performing a withdraw, and ComputeBudget instructions as needed.
         kaminoIxes.push(ix);
       } else if ("stakedWithPythPush" in setup) {
         const oracle = keys[0];
+        const onramp = keys[3].equals(PublicKey.default)
+          ? deriveOnRampFromValidatorVote(bankAcc.integrationAcc1)
+          : keys[3];
         console.log(`[${i}] pyth oracle: ${oracle}`);
-        console.log(`  lst pool/mint: ${keys[1]} ${keys[2]}`);
-        activeBalances.push([bal.bankPk, oracle, keys[1], keys[2]]);
+        console.log(`  lst mint / sol pool / on-ramp: ${keys[1]} ${keys[2]} ${onramp}`);
+        activeBalances.push([bal.bankPk, oracle, keys[1], keys[2], onramp]);
       } else if ("fixed" in setup) {
         // do nothing
       } else {
@@ -326,6 +385,22 @@ performing a withdraw, and ComputeBudget instructions as needed.
 ```
 where 
 ```
+const SINGLE_POOL_PROGRAM_ID = new PublicKey(
+  "SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE"
+);
+
+export const deriveOnRampFromValidatorVote = (validatorVote: PublicKey): PublicKey => {
+  const [stakePool] = PublicKey.findProgramAddressSync(
+    [Buffer.from("pool"), validatorVote.toBuffer()],
+    SINGLE_POOL_PROGRAM_ID
+  );
+  const [poolOnramp] = PublicKey.findProgramAddressSync(
+    [Buffer.from("onramp"), stakePool.toBuffer()],
+    SINGLE_POOL_PROGRAM_ID
+  );
+  return poolOnramp;
+};
+
 export const simpleRefreshReserve = (
   program: Program<KaminoLending>,
   reserve: PublicKey,

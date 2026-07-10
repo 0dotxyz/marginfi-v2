@@ -18,8 +18,9 @@ import {
   DRIFT_ORACLE_RECEIVER_PROGRAM_ID,
   I80F48_ONE,
   ORACLE_CONF_INTERVAL,
+  OperationalStateRaw,
 } from "../utils/types";
-import { BanksClient, ProgramTestContext } from "solana-bankrun";
+import { BanksClient, ProgramTestContext } from "./litesvm";
 import {
   createBankrunPythOracleAccount,
   setPythPullOraclePrice,
@@ -43,7 +44,8 @@ import {
 import { makeInitializeSpotMarketIx, makeAdminDepositIx } from "./drift-sdk";
 import { deriveSpotMarketPDA } from "./pdas";
 import { accountInit } from "./user-instructions";
-import { processBankrunTransaction } from "./tools";
+import { processBankrunTransaction, toI80Scaled } from "./tools";
+import { bnToBigIntSafe } from "./bn-utils";
 
 // Import Drift account types using IdlAccounts - the clean Anchor-native way
 export type DriftState = IdlAccounts<Drift>["state"];
@@ -170,6 +172,9 @@ export const ZERO = new BN(0);
 export const ONE = new BN(1);
 export const TEN = new BN(10);
 export const ONE_YEAR = new BN(31536000);
+
+export const safeBN = (value: BN): BN =>
+  new BN(bnToBigIntSafe(value).toString());
 
 // Default spot market configuration
 export interface SpotMarketConfig {
@@ -314,17 +319,18 @@ export function getTokenAmount(
   spotMarket: DriftSpotMarket,
   isDeposit: boolean,
 ): BN {
+  const safeBalanceAmount = safeBN(balanceAmount);
   const precisionDecrease = TEN.pow(
     new BN(DRIFT_PRECISION_EXP - spotMarket.decimals),
   );
 
   if (isDeposit) {
-    return balanceAmount
-      .mul(spotMarket.cumulativeDepositInterest)
+    return safeBalanceAmount
+      .mul(safeBN(spotMarket.cumulativeDepositInterest))
       .div(precisionDecrease);
   } else {
     return divCeil(
-      balanceAmount.mul(spotMarket.cumulativeBorrowInterest),
+      safeBalanceAmount.mul(safeBN(spotMarket.cumulativeBorrowInterest)),
       precisionDecrease,
     );
   }
@@ -523,7 +529,10 @@ export const formatDepositAmount = (
  * @returns Formatted string with commas but no decimal places
  */
 export const formatRawAmount = (amount: BN | number | string): string => {
-  return parseInt(amount.toString()).toLocaleString("en-US");
+  const value = BN.isBN(amount)
+    ? bnToBigIntSafe(amount).toString()
+    : amount.toString();
+  return parseInt(value).toLocaleString("en-US");
 };
 
 /**
@@ -533,7 +542,8 @@ export const formatRawAmount = (amount: BN | number | string): string => {
  */
 export const hasActivePositions = (spotMarket: DriftSpotMarket): boolean => {
   return (
-    !spotMarket.depositBalance.isZero() || !spotMarket.borrowBalance.isZero()
+    !safeBN(spotMarket.depositBalance).isZero() ||
+    !safeBN(spotMarket.borrowBalance).isZero()
   );
 };
 
@@ -568,9 +578,7 @@ export const tokenAmountToScaledBalance = (
   spotMarket: DriftSpotMarket,
 ): BN => {
   const decimals = spotMarket.decimals;
-  const cumulativeInterest = new BN(
-    spotMarket.cumulativeDepositInterest.toString(),
-  );
+  const cumulativeInterest = safeBN(spotMarket.cumulativeDepositInterest);
 
   // Calculate precision increase: 10^(19 - decimals)
   const precisionIncrease = new BN(10).pow(new BN(19 - decimals));
@@ -598,14 +606,14 @@ export const scaledBalanceToTokenAmount = (
 ): BN => {
   const decimals = spotMarket.decimals;
   const cumulativeInterest = isDeposit
-    ? new BN(spotMarket.cumulativeDepositInterest.toString())
-    : new BN(spotMarket.cumulativeBorrowInterest.toString());
+    ? safeBN(spotMarket.cumulativeDepositInterest)
+    : safeBN(spotMarket.cumulativeBorrowInterest);
   if (decimals > DRIFT_PRECISION_EXP) {
     console.error("decimals > drift precision, likely invalid");
   }
 
   const precisionIncrease = TEN.pow(new BN(DRIFT_PRECISION_EXP - decimals));
-  const product = scaledBalance.mul(cumulativeInterest);
+  const product = safeBN(scaledBalance).mul(cumulativeInterest);
   const quotient = product.div(precisionIncrease);
   return quotient;
 };
@@ -616,7 +624,7 @@ export interface DriftConfigCompact {
   assetWeightMaint: WrappedI80F48;
   depositLimit: BN;
   oracleSetup: { driftPythPull: {} } | { driftSwitchboardPull: {} };
-  operationalState: { operational: {} } | { paused: {} } | { reduceOnly: {} };
+  operationalState: OperationalStateRaw;
   riskTier: { collateral: {} } | { isolated: {} };
   configFlags: number;
   totalAssetValueInitLimit: BN;
@@ -1110,13 +1118,13 @@ export const compareDriftValuations = async (
     throw new Error("No active balance found for drift bank");
   }
 
-  // Convert shares to BigNumber/BN
-  const assetSharesBigNumber = wrappedI80F48toBigNumber(balance.assetShares);
-  const liabilitySharesBigNumber = wrappedI80F48toBigNumber(
-    balance.liabilityShares,
+  // Convert shares exactly in integer space to avoid float/string precision artifacts.
+  const assetShares = new BN(
+    (toI80Scaled(balance.assetShares) >> 48n).toString(),
   );
-  const assetShares = new BN(assetSharesBigNumber.toString());
-  const liabilityShares = new BN(liabilitySharesBigNumber.toString());
+  const liabilityShares = new BN(
+    (toI80Scaled(balance.liabilityShares) >> 48n).toString(),
+  );
 
   // For Drift banks, shares are actually the scaled balance from Drift
   // MarginFi stores Drift's scaled balance directly as shares (1:1 mapping)
@@ -1266,17 +1274,18 @@ export async function assertBankBalance(
 
   assert(balance);
 
-  let shares: BigNumber;
-  if (isLiability) {
-    shares = wrappedI80F48toBigNumber(balance.liabilityShares);
-  } else {
-    shares = wrappedI80F48toBigNumber(balance.assetShares);
-  }
+  const sharesWrapped = isLiability
+    ? balance.liabilityShares
+    : balance.assetShares;
 
   if (typeof expectedBalance === "number") {
+    const shares = wrappedI80F48toBigNumber(sharesWrapped);
     assert.approximately(shares.toNumber(), expectedBalance, 1);
   } else {
-    assert.equal(shares.toString(), expectedBalance.toString());
+    const sharesScaled = toI80Scaled(sharesWrapped);
+    const sharesWholeUnits = sharesScaled >> 48n;
+    const expectedWholeUnits = bnToBigIntSafe(expectedBalance);
+    assert.equal(sharesWholeUnits.toString(), expectedWholeUnits.toString());
   }
 }
 

@@ -39,8 +39,8 @@ pub struct MarginfiGroup {
     /// Can modify the `deposit_limit`, `borrow_limit`, `total_asset_value_init_limit` but nothing
     /// else, for every bank under this group
     pub delegate_limit_admin: Pubkey,
-    /// Can modify the emissions `flags`, `emissions_rate` and `emissions_mint`, but nothing else,
-    /// for every bank under this group
+    /// DEPRECATED: currently has no on-chain authority.
+    /// Preserved in account layout for backward compatibility and historical metadata only.
     pub delegate_emissions_admin: Pubkey,
     /// When program keeper temporarily puts the program into panic mode, information about the
     /// duration of the lockup will be available here.
@@ -62,8 +62,13 @@ pub struct MarginfiGroup {
     /// Must be > emode_max_init_leverage. Range: 1-100.
     pub emode_max_maint_leverage: u32,
 
-    /// Reserved for future use
-    pub _padding: [u8; 8],
+    /// Encoded same-asset automatic emode leverage for initial margin.
+    /// Decode with `u32_to_basis`. Same-asset treatment is disabled when the decoded leverage is
+    /// less than or equal to 1 and also requires each participating bank to opt in.
+    pub same_asset_emode_init_leverage: u32,
+    /// Encoded same-asset automatic emode leverage for maintenance margin.
+    /// Decode with `u32_to_basis`. Ordering is validated in decoded space.
+    pub same_asset_emode_maint_leverage: u32,
 
     /// Rate limiter for controlling aggregate withdraw/borrow outflow across all banks.
     /// Tracks net outflow in USD.

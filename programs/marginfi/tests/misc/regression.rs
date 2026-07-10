@@ -1,6 +1,6 @@
 use std::{fs::File, io::Read, path::PathBuf, str::FromStr};
 
-use anchor_lang::solana_program::pubkey;
+use anchor_lang::pubkey;
 use anchor_lang::AccountDeserialize;
 use anyhow::bail;
 use base64::{prelude::BASE64_STANDARD, Engine};
@@ -52,9 +52,10 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(account.account_index, 0);
     assert_eq!(account.third_party_index, 0);
     assert_eq!(account.bump, 0);
-    assert_eq!(account._pad0, [0; 3]);
+    assert_eq!(account.active_orders, 0);
+    assert_eq!(account._pad0, [0u8; 2]);
     assert_eq!(account.liquidation_record, Pubkey::default());
-    assert_eq!(account._padding0, [0; 7]);
+    assert_eq!(account._padding0, [0; 4]);
 
     let balance_1 = account.lending_account.balances[0];
     assert!(balance_1.is_active());
@@ -134,7 +135,7 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     );
     assert_eq!(account.account_flags, 0);
     assert_eq!(account.last_update, 0);
-    assert_eq!(account._padding0, [0; 7]);
+    assert_eq!(account._padding0, [0; 4]);
 
     let balance_1 = account.lending_account.balances[0];
     assert!(balance_1.is_active());
@@ -217,9 +218,9 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(account.account_index, 0);
     assert_eq!(account.third_party_index, 0);
     assert_eq!(account.bump, 0);
-    assert_eq!(account._pad0, [0; 3]);
+    assert_eq!(account._pad0, [0; 2]);
     assert_eq!(account.liquidation_record, Pubkey::default());
-    assert_eq!(account._padding0, [0; 7]);
+    assert_eq!(account._padding0, [0; 4]);
 
     let balance_1 = account.lending_account.balances[0];
     assert!(!balance_1.is_active());
@@ -251,6 +252,11 @@ async fn account_field_values_reg() -> anyhow::Result<()> {
     Ok(())
 }
 
+// Fixtures were captured against the 1856-byte Bank layout. The 0.1.9 release expands the
+// BankCache (price_multiplier) and the Bank tail (bank_seed + CB state) to 1872 bytes, so the
+// stored bytes deserialize with `SizeMismatch`. Re-capture fresh fixtures after these features
+// land on-chain, then drop this ignore.
+#[ignore = "Bank layout changed (1856B -> 1872B); fixtures need to be re-captured post-deploy"]
 #[tokio::test]
 async fn bank_field_values_reg() -> anyhow::Result<()> {
     let bank_fixtures_path = "tests/fixtures/bank";
@@ -319,15 +325,15 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
         I80F48::from_str("1.2").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.optimal_utilization_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder0),
         I80F48::from_str("0.8").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.plateau_interest_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder1),
         I80F48::from_str("0.1").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.max_interest_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder2),
         I80F48::from_str("3").unwrap()
     );
     assert_eq!(
@@ -411,15 +417,15 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
         I80F48::from_str("1.5").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.optimal_utilization_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder0),
         I80F48::from_str("0.8").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.plateau_interest_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder1),
         I80F48::from_str("0.1").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.max_interest_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder2),
         I80F48::from_str("3").unwrap()
     );
     assert_eq!(
@@ -503,15 +509,15 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
         I80F48::from_str("1.1").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.optimal_utilization_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder0),
         I80F48::from_str("0.8").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.plateau_interest_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder1),
         I80F48::from_str("0.2").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.max_interest_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder2),
         I80F48::from_str("4").unwrap()
     );
     assert_eq!(
@@ -619,15 +625,15 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     );
     assert_eq!(bank.config.deposit_limit, 40000000000000);
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.optimal_utilization_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder0),
         I80F48::from_str("0.8").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.plateau_interest_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder1),
         I80F48::from_str("0.1").unwrap()
     );
     assert_eq!(
-        I80F48::from(bank.config.interest_rate_config.max_interest_rate),
+        I80F48::from(bank.config.interest_rate_config.placeholder2),
         I80F48::from_str("3").unwrap()
     );
     assert_eq!(
@@ -661,20 +667,29 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
             Pubkey::default()
         ]
     );
-    assert_eq!(bank.config._pad0, [0; 6]);
+    // Reclaimed from the former `_pad0: [u8; 6]`; legacy banks read 0 (→ CB_WINDOW_* defaults).
+    assert_eq!(bank.config.cb_window_max_up_bps, 0);
+    assert_eq!(bank.config.cb_window_max_down_bps, 0);
+    assert_eq!(bank.config._pad0, [0; 2]);
     assert_eq!(bank.config.borrow_limit, 2000000000000);
     assert_eq!(bank.config.risk_tier, RiskTier::Collateral);
     assert_eq!(bank.config.asset_tag, ASSET_TAG_DEFAULT);
     // Note: created before 0.1.4 Pyth pull migration.
     assert_eq!(bank.config.config_flags, 0);
-    assert_eq!(bank.config._pad1, [0; 5]);
+    assert_eq!(bank.config._pad1, [0; 1]);
+    // Reclaimed from the former `_pad1: [u8; 5]`; legacy banks read 0 (→ CB_WINDOW_SECONDS).
+    assert_eq!(bank.config.cb_window_seconds, 0);
     assert_eq!(bank.config.total_asset_value_init_limit, 0);
     assert_eq!(bank.config.oracle_max_age, 300);
     assert_eq!(bank.config._padding0, [0; 2]);
     // Note: legacy banks that have a 0 value here will use 10%
     assert_eq!(bank.config.oracle_max_confidence, 0);
     assert_eq!(bank.config.fixed_price, I80F48::ZERO.into());
-    assert_eq!(bank.config._padding1, [0; 16]);
+    assert_eq!(bank.config.cb_deviation_bps_tiers, [0; 3]);
+    assert_eq!(bank.config.cb_tier_durations_seconds, [0; 3]);
+    assert_eq!(bank.config.cb_escalation_window_mult, 0);
+    assert_eq!(bank.config._cb_config_pad, 0);
+    assert_eq!(bank.config.cb_ema_alpha_bps, 0);
 
     assert_eq!(
         I80F48::from(bank.emissions_rate),
@@ -703,7 +718,22 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(bank.integration_acc_2, Pubkey::default());
     assert_eq!(bank.integration_acc_3, Pubkey::default());
     assert_eq!(bank._pad_0, [0u8; 16]);
-    assert_eq!(bank._padding_1, [[0u64; 2]; 7]);
+    // Legacy banks pre-date both `bank_seed` and the CB tail fields, so all of these bytes must
+    // read 0 in the regression fixture. Together with `_padding_1`, this covers the original
+    // 16 + 112 = 128B reserve.
+    assert_eq!(bank.bank_seed, 0);
+    assert_eq!(bank.cb_halt_started_at, 0);
+    assert_eq!(bank.cb_halt_ended_at, 0);
+    assert_eq!(bank.cb_last_observed_slot, 0);
+    assert_eq!(bank.cb_tier, 0);
+    assert_eq!(bank.cb_tier3_consecutive_trips, 0);
+    assert_eq!(bank.cb_pre_break_state, 0);
+    assert_eq!(bank._cb_pad, [0u8; 5]);
+    assert_eq!(bank.cb_last_oracle_source_time, 0);
+    assert_eq!(I80F48::from(bank.cb_reference_price), I80F48::ZERO);
+    assert_eq!(I80F48::from(bank.cb_window_reference_price), I80F48::ZERO);
+    assert_eq!(bank.cb_window_started_at, 0);
+    assert_eq!(bank._padding_1, [0u64; 3]);
 
     Ok(())
 }

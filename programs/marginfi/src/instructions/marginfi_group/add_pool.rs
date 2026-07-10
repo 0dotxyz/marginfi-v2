@@ -9,8 +9,8 @@ use anchor_spl::token_interface::*;
 use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DEFAULT, ASSET_TAG_SOL, FEE_STATE_SEED, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED,
-        INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
-        LIQUIDITY_VAULT_SEED,
+        INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, IS_T22,
+        LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
     },
     types::{Bank, BankConfigCompact, FeeState, MarginfiGroup},
 };
@@ -53,10 +53,11 @@ pub fn lending_pool_add_bank(
     let insurance_vault_authority_bump = ctx.bumps.insurance_vault_authority;
     let fee_vault_bump = ctx.bumps.fee_vault;
     let fee_vault_authority_bump = ctx.bumps.fee_vault_authority;
+    let config = bank_config.into();
 
-    *bank = Bank::new(
+    bank.init(
         ctx.accounts.marginfi_group.key(),
-        bank_config.into(),
+        &config,
         bank_mint.key(),
         bank_mint.decimals,
         liquidity_vault.key(),
@@ -69,7 +70,11 @@ pub fn lending_pool_add_bank(
         insurance_vault_authority_bump,
         fee_vault_bump,
         fee_vault_authority_bump,
+        0, // legacy add_bank uses a fresh keypair, not a seeded PDA
     );
+    if bank_mint.to_account_info().owner == &anchor_spl::token_2022::ID {
+        bank.flags |= IS_T22;
+    }
 
     log_pool_info(&bank);
 
@@ -119,7 +124,7 @@ pub struct LendingPoolAddBank<'info> {
 
     /// CHECK: The fee admin's native SOL wallet, validated against fee state
     #[account(mut)]
-    pub global_fee_wallet: AccountInfo<'info>,
+    pub global_fee_wallet: UncheckedAccount<'info>,
 
     pub bank_mint: Box<InterfaceAccount<'info, Mint>>,
 
@@ -144,7 +149,7 @@ pub struct LendingPoolAddBank<'info> {
         ],
         bump
     )]
-    pub liquidity_vault_authority: AccountInfo<'info>,
+    pub liquidity_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,
@@ -167,7 +172,7 @@ pub struct LendingPoolAddBank<'info> {
         ],
         bump
     )]
-    pub insurance_vault_authority: AccountInfo<'info>,
+    pub insurance_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,
@@ -190,7 +195,7 @@ pub struct LendingPoolAddBank<'info> {
         ],
         bump
     )]
-    pub fee_vault_authority: AccountInfo<'info>,
+    pub fee_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,
@@ -214,7 +219,7 @@ impl<'info> LendingPoolAddBank<'info> {
         &self,
     ) -> CpiContext<'_, '_, '_, 'info, anchor_lang::system_program::Transfer<'info>> {
         CpiContext::new(
-            self.system_program.to_account_info(),
+            self.system_program.key(),
             anchor_lang::system_program::Transfer {
                 from: self.fee_payer.to_account_info(),
                 to: self.global_fee_wallet.to_account_info(),

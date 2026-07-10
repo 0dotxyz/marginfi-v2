@@ -10,15 +10,18 @@ use marginfi_type_crate::{
 };
 
 /// Used to configure JupLend banks. A simplified version of `BankConfigCompact` which omits most
-/// values related to interest since JupLend banks cannot earn interest or be borrowed against.
+/// values related to interest since JupLend banks cannot earn interest or be borrowed from.
 ///
-/// Note: JupLend banks do not take an Operational State, they always start in `Paused` state and
-/// are set to `Operational` via `juplend_init_position` (seed deposit + protocol fToken vault).
+/// Note: JupLend banks do not take an Operational State, they always start in `Uninitialized`
+/// state and are set to `Operational` via `juplend_init_position` (seed deposit + protocol fToken
+/// vault).
 #[derive(AnchorDeserialize, AnchorSerialize, Debug, PartialEq, Eq)]
 pub struct JuplendConfigCompact {
     pub oracle: Pubkey,
     pub asset_weight_init: WrappedI80F48,
     pub asset_weight_maint: WrappedI80F48,
+    /// Cap in **fToken units**, not underlying. As `token_exchange_price` grows, the same
+    /// cap admits more underlying — re-tune against the current rate.
     pub deposit_limit: u64,
     /// Either `JuplendPythPull` or `JuplendSwitchboardPull`
     pub oracle_setup: OracleSetup,
@@ -74,9 +77,9 @@ impl JuplendConfigCompact {
         // marginfi interest accrual.
         // Note: Some placeholder values are non-zero to handle downstream validation checks.
         let default_ir_config = InterestRateConfig {
-            optimal_utilization_rate: I80F48::ZERO.into(),
-            plateau_interest_rate: I80F48::ZERO.into(),
-            max_interest_rate: I80F48::ZERO.into(),
+            placeholder0: I80F48::ZERO.into(),
+            placeholder1: I80F48::ZERO.into(),
+            placeholder2: I80F48::ZERO.into(),
             protocol_fixed_fee_apr: I80F48::ZERO.into(),
             insurance_ir_fee: I80F48!(0.1).into(),
             zero_util_rate: 0,
@@ -101,22 +104,29 @@ impl JuplendConfigCompact {
             liability_weight_maint: I80F48!(1.25).into(), // placeholder
             deposit_limit: self.deposit_limit,
             interest_rate_config: default_ir_config,
-            // Always start Paused; only juplend_init_position can activate.
-            operational_state: BankOperationalState::Paused,
+            // Always start Uninitialized; only juplend_init_position can activate.
+            operational_state: BankOperationalState::Uninitialized,
             oracle_setup: self.oracle_setup,
             oracle_keys: keys,
-            _pad0: [0; 6],
+            cb_window_max_up_bps: 0,
+            cb_window_max_down_bps: 0,
+            _pad0: [0; 2],
             borrow_limit: 0, // Can't ever borrow JupLend assets
             risk_tier: self.risk_tier,
             asset_tag: ASSET_TAG_JUPLEND,
             config_flags: self.config_flags,
-            _pad1: [0; 5],
+            _pad1: [0; 1],
+            cb_window_seconds: 0,
             total_asset_value_init_limit: self.total_asset_value_init_limit,
             oracle_max_age: self.oracle_max_age,
             _padding0: [0; 2],
             oracle_max_confidence: self.oracle_max_confidence,
             fixed_price: I80F48::ZERO.into(),
-            _padding1: [0; 16],
+            cb_deviation_bps_tiers: [0; 3],
+            cb_tier_durations_seconds: [0; 3],
+            cb_escalation_window_mult: 0,
+            _cb_config_pad: 0,
+            cb_ema_alpha_bps: 0,
         }
     }
 }

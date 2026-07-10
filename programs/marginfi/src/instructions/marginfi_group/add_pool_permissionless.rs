@@ -1,8 +1,9 @@
 // Adds a ASSET_TAG_STAKED type bank to a group with sane defaults. Used by validators to add their
 // stake pool to a group so users can borrow SOL against it
+use super::staked_pool_utils::derive_single_pool_keys_from_vote_and_validate_owner;
 use crate::{
-    check,
-    constants::SPL_SINGLE_POOL_ID,
+    check, check_eq,
+    constants::{NATIVE_STAKE_ID, SPL_SINGLE_POOL_ID},
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{bank::BankImpl, bank_config::BankConfigImpl, marginfi_group::MarginfiGroupImpl},
@@ -13,9 +14,10 @@ use anchor_spl::token_interface::*;
 use fixed_macro::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        ASSET_TAG_STAKED, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, INSURANCE_VAULT_AUTHORITY_SEED,
-        INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
-        PYTH_PUSH_MIGRATED_DEPRECATED,
+        ASSET_TAG_STAKED, BANK_SEED_KNOWN, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED,
+        INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, IS_T22,
+        LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED, PYTH_PUSH_MIGRATED_DEPRECATED,
+        STAKED_ORACLE_FLAGS,
     },
     types::{
         make_points, Bank, BankConfigCompact, BankOperationalState, InterestRateConfig,
@@ -25,7 +27,7 @@ use marginfi_type_crate::{
 
 pub fn lending_pool_add_bank_permissionless(
     ctx: Context<LendingPoolAddBankPermissionless>,
-    _bank_seed: u64,
+    bank_seed: u64,
 ) -> MarginfiResult {
     let LendingPoolAddBankPermissionless {
         bank_mint,
@@ -35,6 +37,8 @@ pub fn lending_pool_add_bank_permissionless(
         bank: bank_loader,
         stake_pool,
         sol_pool,
+        pool_onramp,
+        validator_vote_account,
         ..
     } = ctx.accounts;
 
@@ -85,10 +89,11 @@ pub fn lending_pool_add_bank_permissionless(
     };
 
     let now = Clock::get().unwrap().unix_timestamp;
+    let config = default_config.into();
 
-    *bank = Bank::new(
+    bank.init(
         ctx.accounts.marginfi_group.key(),
-        default_config.into(),
+        &config,
         bank_mint.key(),
         bank_mint.decimals,
         liquidity_vault.key(),
@@ -101,7 +106,13 @@ pub fn lending_pool_add_bank_permissionless(
         insurance_vault_authority_bump,
         fee_vault_bump,
         fee_vault_authority_bump,
+        bank_seed,
     );
+    bank.flags |= BANK_SEED_KNOWN;
+    bank.flags |= settings.flags & STAKED_ORACLE_FLAGS;
+    if bank_mint.to_account_info().owner == &anchor_spl::token_2022::ID {
+        bank.flags |= IS_T22;
+    }
     bank.config.oracle_setup = OracleSetup::StakedWithPythPush;
     bank.config.oracle_keys[0] = settings.oracle;
 
@@ -115,12 +126,45 @@ pub fn lending_pool_add_bank_permissionless(
         stake_pool.owner == &SPL_SINGLE_POOL_ID,
         MarginfiError::StakePoolValidationFailed
     );
+    let validator_vote_account = validator_vote_account.key();
     let lst_mint = bank_mint.key();
     let stake_pool = stake_pool.key();
     let sol_pool = sol_pool.key();
-    // The mint (for supply) and stake pool (for sol balance) are recorded for price calculation
+
+    // Validate the validator vote account by proving it derives this stake pool, and in turn
+    // this mint + SOL stake pool + on-ramp PDA.
+    let (exp_stake_pool, exp_mint, exp_sol_pool, exp_onramp) =
+        derive_single_pool_keys_from_vote_and_validate_owner(
+            &ctx.accounts.validator_vote_account.to_account_info(),
+        )?;
+    check_eq!(
+        exp_stake_pool,
+        stake_pool,
+        MarginfiError::StakePoolValidationFailed
+    );
+    check_eq!(exp_mint, lst_mint, MarginfiError::StakePoolValidationFailed);
+    check_eq!(
+        exp_sol_pool,
+        sol_pool,
+        MarginfiError::StakePoolValidationFailed
+    );
+    check_eq!(
+        exp_onramp,
+        pool_onramp.key(),
+        MarginfiError::StakePoolValidationFailed
+    );
+    check!(
+        pool_onramp.owner == &NATIVE_STAKE_ID,
+        MarginfiError::StakePoolValidationFailed
+    );
+
+    // Track the validator vote account for staked-collateral metadata.
+    bank.integration_acc_1 = validator_vote_account;
+
+    // The mint, stake pool, and validated on-ramp are recorded for price calculation.
     bank.config.oracle_keys[1] = lst_mint;
     bank.config.oracle_keys[2] = sol_pool;
+    bank.config.oracle_keys[3] = exp_onramp;
     bank.config.validate_oracle_setup(
         ctx.remaining_accounts,
         Some(lst_mint),
@@ -131,7 +175,7 @@ pub fn lending_pool_add_bank_permissionless(
     emit!(LendingPoolBankCreateEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.marginfi_group.key(),
-            signer: Some(group.admin)
+            signer: Some(ctx.accounts.fee_payer.key())
         },
         bank: bank_loader.key(),
         mint: bank_mint.key(),
@@ -162,14 +206,23 @@ pub struct LendingPoolAddBankPermissionless<'info> {
     pub bank_mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// CHECK: Validated using `stake_pool`
-    pub sol_pool: AccountInfo<'info>,
+    pub sol_pool: UncheckedAccount<'info>,
+
+    /// CHECK: Validated using `stake_pool` and native stake-program ownership.
+    pub pool_onramp: UncheckedAccount<'info>,
 
     /// CHECK: We validate this is correct backwards, by deriving the PDA of the `bank_mint` using
     /// this key.
     ///
     /// If derives the same `bank_mint`, then this must be the correct stake pool for that mint, and
     /// we can subsequently use it to validate the `sol_pool`
-    pub stake_pool: AccountInfo<'info>,
+    pub stake_pool: UncheckedAccount<'info>,
+
+    /// Validator vote account for this staked bank.
+    ///
+    /// CHECK: validated in handler by enforcing vote-account owner and PDA chain:
+    /// vote -> stake_pool -> mint/stake/on-ramp.
+    pub validator_vote_account: UncheckedAccount<'info>,
 
     #[account(
         init,
@@ -192,7 +245,7 @@ pub struct LendingPoolAddBankPermissionless<'info> {
         ],
         bump
     )]
-    pub liquidity_vault_authority: AccountInfo<'info>,
+    pub liquidity_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,
@@ -215,7 +268,7 @@ pub struct LendingPoolAddBankPermissionless<'info> {
         ],
         bump
     )]
-    pub insurance_vault_authority: AccountInfo<'info>,
+    pub insurance_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,
@@ -238,7 +291,7 @@ pub struct LendingPoolAddBankPermissionless<'info> {
         ],
         bump
     )]
-    pub fee_vault_authority: AccountInfo<'info>,
+    pub fee_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         init,

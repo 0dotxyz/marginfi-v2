@@ -38,7 +38,7 @@ pub fn panic_unpause(ctx: Context<PanicUnpause>) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct PanicUnpause<'info> {
-    /// Admin of the global FeeState (can manually unpause)
+    /// Global fee admin only.
     #[account(mut)]
     pub global_fee_admin: Signer<'info>,
 

@@ -1,6 +1,69 @@
 use fixed::types::I80F48;
 
-use crate::constants::EXP_10_I80F48;
+use crate::{
+    constants::EXP_10_I80F48,
+    types::{OraclePriceType, RequirementType, MAX_LENDING_ACCOUNT_BALANCES},
+};
+
+#[derive(Copy, Clone, Debug)]
+pub enum PriceBias {
+    Low,
+    High,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct OraclePriceWithConfidence {
+    /// Spot oracle price in USD, no bias.
+    pub price: I80F48,
+    /// Confidence band in absolute price units (same scale as `price`), already multiplied by
+    /// `STD_DEV_MULTIPLE` and clamped to the bank's max-confidence ceiling.
+    pub confidence: I80F48,
+    /// Publisher-side timestamp (unix seconds): Pyth `publish_time` or Switchboard
+    /// `last_update_timestamp`. Zero when the adapter doesn't expose one (e.g. `Fixed`).
+    pub source_time: i64,
+}
+
+/// Temporary struct used to store prices during receivership liquidation, these price will
+/// ultimately populate the respective Bank's BankCache, and then be loaded at End Liqudation.
+#[derive(Default)]
+pub struct LiquidationPriceCache {
+    real_time: [Option<OraclePriceWithConfidence>; MAX_LENDING_ACCOUNT_BALANCES],
+    time_weighted: [Option<OraclePriceWithConfidence>; MAX_LENDING_ACCOUNT_BALANCES],
+}
+
+impl LiquidationPriceCache {
+    pub fn record(
+        &mut self,
+        requirement_type: RequirementType,
+        index: usize,
+        price: OraclePriceWithConfidence,
+    ) {
+        match requirement_type.get_oracle_price_type() {
+            OraclePriceType::RealTime => self.real_time[index] = Some(price),
+            OraclePriceType::TimeWeighted => self.time_weighted[index] = Some(price),
+        }
+    }
+
+    pub fn get_price(
+        &self,
+        price_type: OraclePriceType,
+        index: usize,
+    ) -> Option<OraclePriceWithConfidence> {
+        match price_type {
+            OraclePriceType::RealTime => self.real_time[index],
+            OraclePriceType::TimeWeighted => self.time_weighted[index],
+        }
+    }
+}
+
+pub enum HealthPriceMode<'a> {
+    Live {
+        liq_cache: Option<&'a mut LiquidationPriceCache>,
+    },
+    Cached,
+    #[cfg(feature = "anchor")]
+    Client(anchor_lang::prelude::Clock),
+}
 
 /// Convert an `i128` into `I80F48` only if it fits without overflow.
 #[inline]

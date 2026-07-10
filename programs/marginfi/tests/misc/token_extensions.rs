@@ -10,7 +10,10 @@ use fixtures::{
     ui_to_native,
 };
 use marginfi::state::bank::{BankImpl, BankVaultType};
-use marginfi_type_crate::types::{Bank, BankConfig, BankConfigOpt};
+use marginfi_type_crate::{
+    constants::IS_T22,
+    types::{Bank, BankConfig, BankConfigOpt},
+};
 use solana_program_test::tokio;
 use test_case::test_case;
 
@@ -127,6 +130,8 @@ async fn marginfi_account_liquidation_success_with_extension(
     // Checks
     let sol_bank: Bank = sol_bank_f.load().await;
     let usdc_t22_bank: Bank = usdc_t22_bank_f.load().await;
+    assert_eq!(usdc_t22_bank.flags & IS_T22, IS_T22);
+    assert_eq!(sol_bank.flags & IS_T22, 0);
 
     let depositor_ma = lender_mfi_account_f.load().await;
     let borrower_ma = borrower_mfi_account_f.load().await;

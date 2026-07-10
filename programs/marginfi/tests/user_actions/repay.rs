@@ -265,6 +265,8 @@ async fn marginfi_account_repay_all_success(
         let marginfi_account = user_mfi_account_f.load().await;
         let balance = marginfi_account.lending_account.get_balance(&debt_bank.key);
         assert!(balance.is_none());
+        assert_eq!(marginfi_account.indexer_flags.is_lending_only, 1);
+        assert_eq!(marginfi_account.indexer_flags.is_single_borrower, 0);
         let post_accounted_vault_balance = I80F48!(0);
 
         (post_vault_balance, post_accounted_vault_balance)

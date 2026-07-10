@@ -47,6 +47,26 @@
       "args": []
     },
     {
+      "name": "refresh_reserves_batch",
+      "discriminator": [
+        144,
+        110,
+        26,
+        103,
+        162,
+        204,
+        252,
+        147
+      ],
+      "accounts": [],
+      "args": [
+        {
+          "name": "skip_price_updates",
+          "type": "bool"
+        }
+      ]
+    },
+    {
       "name": "init_obligation",
       "discriminator": [
         251,

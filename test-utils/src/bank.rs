@@ -5,6 +5,7 @@ use crate::{
 };
 use anchor_lang::{
     prelude::{AccountMeta, Pubkey},
+    solana_program::{account_info::IntoAccountInfo, clock::Clock, instruction::Instruction},
     InstructionData, ToAccountMetas,
 };
 use fixed::types::I80F48;
@@ -12,18 +13,15 @@ use marginfi::{
     bank_authority_seed,
     state::{
         bank::BankVaultType,
-        price::{OraclePriceFeedAdapter, OraclePriceType, PriceAdapter},
+        price::{OraclePriceFeedAdapter, PriceAdapter},
     },
     utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
 };
-use marginfi_type_crate::constants::{EMISSIONS_AUTH_SEED, EMISSIONS_TOKEN_ACCOUNT_SEED};
-use marginfi_type_crate::types::{Bank, BankConfigOpt, OracleSetup};
-use solana_program::{
-    account_info::IntoAccountInfo, instruction::Instruction, sysvar::clock::Clock,
-};
+use marginfi_type_crate::types::{Bank, BankConfigOpt, OraclePriceType, OracleSetup};
+use solana_commitment_config::CommitmentLevel;
 use solana_program_test::BanksClientError;
 use solana_program_test::ProgramTestContext;
-use solana_sdk::{commitment_config::CommitmentLevel, signer::Signer, transaction::Transaction};
+use solana_sdk::{signer::Signer, transaction::Transaction};
 use std::{cell::RefCell, fmt::Debug, rc::Rc};
 
 #[derive(Clone)]
@@ -77,6 +75,7 @@ impl BankFixture {
                     .await
                     .unwrap()
                     .unwrap();
+
                 let ai = (&oracle_key, &mut oracle_account).into_account_info();
                 OraclePriceFeedAdapter::try_from_bank(&bank, &[ai], &Clock::default()).unwrap()
             }
@@ -147,6 +146,59 @@ impl BankFixture {
             &[&self.ctx.borrow().payer],
             latest_blockhash(&self.ctx).await,
         );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn try_emissions_deposit(
+        &self,
+        amount: u64,
+        funding_account: Pubkey,
+    ) -> Result<(), BanksClientError> {
+        let bank = self.load().await;
+        self.try_emissions_deposit_with_mint(amount, funding_account, bank.mint)
+            .await
+    }
+
+    pub async fn try_emissions_deposit_with_mint(
+        &self,
+        amount: u64,
+        funding_account: Pubkey,
+        mint: Pubkey,
+    ) -> Result<(), BanksClientError> {
+        let bank = self.load().await;
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolEmissionsDeposit {
+                group: bank.group,
+                bank: self.key,
+                mint,
+                emissions_funding_account: funding_account,
+                depositor: self.ctx.borrow().payer.pubkey(),
+                liquidity_vault: bank.liquidity_vault,
+                token_program: self.get_token_program(),
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::LendingPoolEmissionsDeposit { amount }.data(),
+        };
+
+        let tx = {
+            let ctx = self.ctx.borrow_mut();
+
+            Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&ctx.payer.pubkey()),
+                &[&ctx.payer],
+                ctx.banks_client.get_latest_blockhash().await.unwrap(),
+            )
+        };
 
         self.ctx
             .borrow_mut()
@@ -354,63 +406,6 @@ impl BankFixture {
             .set_account(&self.key, &bank_ai.into());
     }
 
-    pub async fn try_reclaim_emissions_vault(
-        &self,
-        emissions_mint: &MintFixture,
-        fee_state: Pubkey,
-        destination_account: Pubkey,
-    ) -> Result<(), BanksClientError> {
-        let bank = self.load().await;
-        let ctx = self.ctx.borrow_mut();
-
-        let (emissions_auth, _) = Pubkey::find_program_address(
-            &[
-                EMISSIONS_AUTH_SEED.as_bytes(),
-                self.key.as_ref(),
-                emissions_mint.key.as_ref(),
-            ],
-            &marginfi::ID,
-        );
-
-        let (emissions_vault, _) = Pubkey::find_program_address(
-            &[
-                EMISSIONS_TOKEN_ACCOUNT_SEED.as_bytes(),
-                self.key.as_ref(),
-                emissions_mint.key.as_ref(),
-            ],
-            &marginfi::ID,
-        );
-
-        let accounts = marginfi::accounts::LendingPoolReclaimEmissionsVault {
-            group: bank.group,
-            bank: self.key,
-            emissions_mint: emissions_mint.key,
-            emissions_auth,
-            emissions_vault,
-            fee_state,
-            destination_account,
-            token_program: emissions_mint.token_program,
-        }
-        .to_account_metas(Some(true));
-
-        let ix = Instruction {
-            program_id: marginfi::ID,
-            accounts,
-            data: marginfi::instruction::LendingPoolReclaimEmissionsVault {}.data(),
-        };
-
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&ctx.payer.pubkey()),
-            &[&ctx.payer],
-            ctx.banks_client.get_latest_blockhash().await.unwrap(),
-        );
-
-        ctx.banks_client
-            .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)
-            .await
-    }
-
     /// Directly mutate the bank's emissions fields in test state.
     pub async fn set_emissions(
         &self,
@@ -437,6 +432,27 @@ impl BankFixture {
         self.ctx
             .borrow_mut()
             .set_account(&self.key, &bank_ai.into());
+    }
+
+    /// Build (but do not send) a `lending_pool_clear_circuit_breaker` ix.
+    /// `authority` must be either `group.admin` or `group.risk_admin`.
+    pub async fn make_clear_circuit_breaker_ix(
+        &self,
+        authority: Pubkey,
+        reseed_reference: bool,
+    ) -> Instruction {
+        let bank = self.load().await;
+        let accounts = marginfi::accounts::LendingPoolClearCircuitBreaker {
+            group: bank.group,
+            authority,
+            bank: self.key,
+        }
+        .to_account_metas(Some(true));
+        Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: marginfi::instruction::LendingPoolClearCircuitBreaker { reseed_reference }.data(),
+        }
     }
 
     pub async fn set_asset_share_value(&self, value: I80F48) {

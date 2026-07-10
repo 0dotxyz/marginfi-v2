@@ -1,20 +1,27 @@
 use anchor_lang::{InstructionData, ToAccountMetas};
+use anchor_spl::token_2022;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
-use fixtures::{assert_custom_error, prelude::*};
+use fixtures::{assert_anchor_error, assert_custom_error, prelude::*};
 use marginfi::{
     constants::INIT_BANK_ORIGINATION_FEE_DEFAULT,
     prelude::MarginfiError,
-    state::bank::{BankImpl, BankVaultType},
+    state::{
+        bank::{BankImpl, BankVaultType},
+        emode::{
+            DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE, DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE,
+        },
+    },
 };
 use marginfi_type_crate::{
     constants::{
-        CLOSE_ENABLED_FLAG, FREEZE_SETTINGS, PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG,
+        BANK_SAME_ASSET_EMODE_ELIGIBLE, BANK_SEED_KNOWN, CLOSE_ENABLED_FLAG, FREEZE_SETTINGS,
+        IS_T22, METADATA_SEED, PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG,
         TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
-        make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt, EmodeEntry,
-        InterestRateConfigOpt, MarginfiGroup, OracleSetup, RatePoint, EMODE_ON,
+        make_points, u32_to_basis, Bank, BankCache, BankConfig, BankConfigOpt, BankMetadata,
+        EmodeEntry, InterestRateConfigOpt, MarginfiGroup, OracleSetup, RatePoint, EMODE_ON,
         INTEREST_CURVE_SEVEN_POINT,
     },
 };
@@ -24,7 +31,59 @@ use solana_sdk::{
     clock::Clock, instruction::Instruction, pubkey::Pubkey, transaction::Transaction,
 };
 use solana_sdk::{signature::Keypair, signer::Signer};
+use solana_system_interface::program as system_program;
 use test_case::test_case;
+
+fn derive_seeded_bank(group: Pubkey, mint: Pubkey, bank_seed: u64) -> Pubkey {
+    Pubkey::find_program_address(
+        &[group.as_ref(), mint.as_ref(), &bank_seed.to_le_bytes()],
+        &marginfi::ID,
+    )
+    .0
+}
+
+fn derive_bank_metadata(bank: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[METADATA_SEED.as_bytes(), bank.as_ref()], &marginfi::ID).0
+}
+
+fn make_init_bank_metadata_ix(bank: Pubkey, fee_payer: Pubkey, metadata: Pubkey) -> Instruction {
+    Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::InitBankMetadata {
+            bank,
+            fee_payer,
+            metadata,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::InitBankMetadata {}.data(),
+    }
+}
+
+fn make_write_bank_metadata_ix(
+    group: Pubkey,
+    bank: Pubkey,
+    metadata_admin: Pubkey,
+    metadata: Pubkey,
+    ticker: Option<Vec<u8>>,
+    description: Option<Vec<u8>>,
+) -> Instruction {
+    Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::WriteBankMetadata {
+            group,
+            bank,
+            metadata_admin,
+            metadata,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::WriteBankMetadata {
+            ticker,
+            description,
+        }
+        .data(),
+    }
+}
 
 #[tokio::test]
 async fn add_bank_success() -> anyhow::Result<()> {
@@ -55,6 +114,12 @@ async fn add_bank_success() -> anyhow::Result<()> {
     assert_eq!(last_update, 0);
 
     for (mint_f, bank_config) in mints {
+        let expected_is_t22 = if mint_f.token_program == token_2022::ID {
+            IS_T22
+        } else {
+            0
+        };
+
         // This is just to test that the group's last_update field is properly updated upon bank creation
         {
             let ctx = test_f.context.borrow_mut();
@@ -125,6 +190,7 @@ async fn add_bank_success() -> anyhow::Result<()> {
             integration_acc_2,
             integration_acc_3,
             _padding_1,
+            bank_seed,
             .. // ignore internal padding
         } = bank_f.load().await;
         #[rustfmt::skip]
@@ -148,7 +214,8 @@ async fn add_bank_success() -> anyhow::Result<()> {
             assert_eq!(total_liability_shares, I80F48!(0.0).into());
             assert_eq!(total_asset_shares, I80F48!(0.0).into());
             assert_eq!(config, bank_config);
-            assert_eq!(flags, CLOSE_ENABLED_FLAG);
+            assert_eq!(flags, CLOSE_ENABLED_FLAG | expected_is_t22);
+            assert_eq!(flags & IS_T22, expected_is_t22);
             assert_eq!(emissions_rate, 0);
             assert_eq!(emissions_mint, Pubkey::new_from_array([0; 32]));
             assert_eq!(emissions_remaining, I80F48!(0.0).into());
@@ -162,7 +229,9 @@ async fn add_bank_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[[u64; 2]; 7] as Default>::default());
+            assert_eq!(_padding_1, <[u64; 3] as Default>::default());
+            // legacy add_bank does not pass a seed
+            assert_eq!(bank_seed, 0);
 
             // this is the only loosely checked field
             assert!(last_update >= 0 && last_update <= 5);
@@ -211,6 +280,12 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
     ];
 
     for (mint_f, bank_config) in mints {
+        let expected_is_t22 = if mint_f.token_program == token_2022::ID {
+            IS_T22
+        } else {
+            0
+        };
+
         let fee_balance_before: u64;
         {
             let ctx = test_f.context.borrow_mut();
@@ -268,6 +343,7 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             integration_acc_2,
             integration_acc_3,
             _padding_1,
+            bank_seed,
             .. // ignore internal padding
         } = bank_f.load().await;
         #[rustfmt::skip]
@@ -291,7 +367,8 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(total_liability_shares, I80F48!(0.0).into());
             assert_eq!(total_asset_shares, I80F48!(0.0).into());
             assert_eq!(config, bank_config);
-            assert_eq!(flags, CLOSE_ENABLED_FLAG);
+            assert_eq!(flags, CLOSE_ENABLED_FLAG | expected_is_t22 | BANK_SEED_KNOWN);
+            assert_eq!(flags & IS_T22, expected_is_t22);
             assert_eq!(emissions_rate, 0);
             assert_eq!(emissions_mint, Pubkey::new_from_array([0; 32]));
             assert_eq!(emissions_remaining, I80F48!(0.0).into());
@@ -305,7 +382,9 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[[u64; 2]; 7] as Default>::default());
+            assert_eq!(_padding_1, <[u64; 3] as Default>::default());
+            // with-seed add_bank stores the seed used for PDA derivation
+            assert_eq!(bank_seed, 1200_u64);
 
             // this is the only loosely checked field
             assert!(last_update >= 0 && last_update <= 5);
@@ -326,6 +405,227 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
         let actual_fee_delta = fee_balance_after - fee_balance_before;
         assert_eq!(expected_fee_delta, actual_fee_delta);
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn backfill_is_t22_noop_for_classic_bank() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+
+    let bank = test_f
+        .marginfi_group
+        .try_lending_pool_add_bank(
+            &test_f.usdc_mint,
+            None,
+            *DEFAULT_USDC_TEST_BANK_CONFIG,
+            None,
+        )
+        .await?;
+
+    let bank_before = bank.load().await;
+    assert_eq!(bank_before.flags & IS_T22, 0);
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_backfill_bank_is_t22_flag(&bank, None)
+        .await?;
+
+    let bank_after = bank.load().await;
+    assert_eq!(bank_after.flags & IS_T22, 0);
+    assert_eq!(bank_after.flags, bank_before.flags);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn init_bank_metadata_for_pre_init_bank_success() -> anyhow::Result<()> {
+    // The bank account does not exist yet — init_bank_metadata accepts any pubkey and the caller
+    // is on the hook for the rent if the bank never materializes. write_bank_metadata is NOT
+    // tested here because it requires the bank account to exist.
+    let test_f = TestFixture::new(None).await;
+    let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
+    let bank = derive_seeded_bank(test_f.marginfi_group.key, mint_f.key, 42);
+    let metadata = derive_bank_metadata(bank);
+    let payer = test_f.context.borrow().payer.pubkey();
+
+    let init_ix = make_init_bank_metadata_ix(bank, payer, metadata);
+
+    let tx = Transaction::new_signed_with_payer(
+        &[init_ix],
+        Some(&payer),
+        &[&test_f.context.borrow().payer],
+        latest_blockhash(&test_f.context).await,
+    );
+
+    test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(tx)
+        .await?;
+
+    let metadata_state: BankMetadata = test_f.load_and_deserialize(&metadata).await;
+    assert_eq!(metadata_state.bank, bank);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn init_and_write_bank_metadata_for_existing_bank_success() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+
+    let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
+    let bank_f = test_f
+        .marginfi_group
+        .try_lending_pool_add_bank(&mint_f, None, *DEFAULT_USDC_TEST_BANK_CONFIG, None)
+        .await?;
+
+    let metadata = derive_bank_metadata(bank_f.key);
+    let payer = test_f.context.borrow().payer.pubkey();
+
+    let init_ix = make_init_bank_metadata_ix(bank_f.key, payer, metadata);
+    let write_ix = make_write_bank_metadata_ix(
+        test_f.marginfi_group.key,
+        bank_f.key,
+        payer,
+        metadata,
+        Some(b"USDC".to_vec()),
+        Some(b"USD Coin".to_vec()),
+    );
+
+    let tx = Transaction::new_signed_with_payer(
+        &[init_ix, write_ix],
+        Some(&payer),
+        &[&test_f.context.borrow().payer],
+        latest_blockhash(&test_f.context).await,
+    );
+
+    test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(tx)
+        .await?;
+
+    let metadata_state: BankMetadata = test_f.load_and_deserialize(&metadata).await;
+    assert_eq!(metadata_state.bank, bank_f.key);
+    assert_eq!(&metadata_state.ticker[..4], b"USDC");
+    assert_eq!(&metadata_state.description[..8], b"USD Coin");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn write_bank_metadata_rejects_uninitialized_bank() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+    let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
+    let bank = derive_seeded_bank(test_f.marginfi_group.key, mint_f.key, 99);
+    let metadata = derive_bank_metadata(bank);
+    let payer = test_f.context.borrow().payer.pubkey();
+
+    // init succeeds for any pubkey; write must reject because the bank account does not exist.
+    let init_ix = make_init_bank_metadata_ix(bank, payer, metadata);
+    let init_tx = Transaction::new_signed_with_payer(
+        &[init_ix],
+        Some(&payer),
+        &[&test_f.context.borrow().payer],
+        latest_blockhash(&test_f.context).await,
+    );
+    test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(init_tx)
+        .await?;
+
+    let write_ix = make_write_bank_metadata_ix(
+        test_f.marginfi_group.key,
+        bank,
+        payer,
+        metadata,
+        Some(b"BAD".to_vec()),
+        None,
+    );
+    let write_tx = Transaction::new_signed_with_payer(
+        &[write_ix],
+        Some(&payer),
+        &[&test_f.context.borrow().payer],
+        latest_blockhash(&test_f.context).await,
+    );
+
+    let res = test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(write_tx)
+        .await;
+
+    assert_anchor_error!(
+        res.unwrap_err(),
+        anchor_lang::error::ErrorCode::AccountOwnedByWrongProgram
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn write_bank_metadata_rejects_wrong_group() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+    let attacker_group = MarginfiGroupFixture::new(test_f.context.clone()).await;
+
+    let mint_f = MintFixture::new(test_f.context.clone(), None, None).await;
+    let bank_f = test_f
+        .marginfi_group
+        .try_lending_pool_add_bank(&mint_f, None, *DEFAULT_USDC_TEST_BANK_CONFIG, None)
+        .await?;
+
+    let metadata = derive_bank_metadata(bank_f.key);
+    let payer = test_f.context.borrow().payer.pubkey();
+
+    let init_ix = make_init_bank_metadata_ix(bank_f.key, payer, metadata);
+    let init_tx = Transaction::new_signed_with_payer(
+        &[init_ix],
+        Some(&payer),
+        &[&test_f.context.borrow().payer],
+        latest_blockhash(&test_f.context).await,
+    );
+    test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(init_tx)
+        .await?;
+
+    // Bank belongs to test_f.marginfi_group; write with attacker_group must fail the bank's
+    // `has_one = group` constraint.
+    let write_ix = make_write_bank_metadata_ix(
+        attacker_group.key,
+        bank_f.key,
+        payer,
+        metadata,
+        Some(b"BAD".to_vec()),
+        None,
+    );
+
+    let write_tx = Transaction::new_signed_with_payer(
+        &[write_ix],
+        Some(&payer),
+        &[&test_f.context.borrow().payer],
+        latest_blockhash(&test_f.context).await,
+    );
+
+    let res = test_f
+        .context
+        .borrow_mut()
+        .banks_client
+        .process_transaction(write_tx)
+        .await;
+
+    assert_anchor_error!(
+        res.unwrap_err(),
+        anchor_lang::error::ErrorCode::ConstraintHasOne
+    );
 
     Ok(())
 }
@@ -405,6 +705,81 @@ async fn configure_bank_to_fixed_oracle() -> anyhow::Result<()> {
     assert_eq!(bank_after.config.oracle_setup, OracleSetup::Fixed);
     assert_eq!(I80F48::from(bank_after.config.fixed_price), price_value);
     assert_eq!(bank_after.config.oracle_keys[0], Pubkey::default());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn set_same_asset_emode_eligibility_success_and_fixed_rejects() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![TestBankSetting {
+            mint: BankMint::Usdc,
+            ..Default::default()
+        }],
+        ..Default::default()
+    }))
+    .await;
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(usdc_bank, true)
+        .await?;
+    let usdc_after_enable = usdc_bank.load().await;
+    assert_eq!(
+        usdc_after_enable.flags & BANK_SAME_ASSET_EMODE_ELIGIBLE,
+        BANK_SAME_ASSET_EMODE_ELIGIBLE
+    );
+
+    let set_fixed_ix = test_f
+        .marginfi_group
+        .make_lending_pool_set_fixed_oracle_price_ix(usdc_bank, I80F48!(1).into());
+    let set_fixed_res = {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[set_fixed_ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client.process_transaction(tx).await
+    };
+    assert!(set_fixed_res.is_err());
+    assert_custom_error!(set_fixed_res.unwrap_err(), MarginfiError::BadEmodeConfig);
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(usdc_bank, false)
+        .await?;
+    let usdc_after_disable = usdc_bank.load().await;
+    assert_eq!(usdc_after_disable.flags & BANK_SAME_ASSET_EMODE_ELIGIBLE, 0);
+
+    let set_fixed_ix = test_f
+        .marginfi_group
+        .make_lending_pool_set_fixed_oracle_price_ix(usdc_bank, I80F48!(1).into());
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[set_fixed_ix],
+            Some(&ctx.payer.pubkey()),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+        );
+        ctx.banks_client.process_transaction(tx).await?;
+    }
+    let usdc_after_fixed = usdc_bank.load().await;
+    assert_eq!(usdc_after_fixed.config.oracle_setup, OracleSetup::Fixed);
+    assert_eq!(
+        I80F48::from(usdc_after_fixed.config.fixed_price),
+        I80F48!(1)
+    );
+
+    let fixed_res = test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(usdc_bank, true)
+        .await;
+    assert!(fixed_res.is_err());
+    assert_custom_error!(fixed_res.unwrap_err(), MarginfiError::BadEmodeConfig);
 
     Ok(())
 }
@@ -513,10 +888,18 @@ async fn configure_bank_success(bank_mint: BankMint) -> anyhow::Result<()> {
         permissionless_bad_debt_settlement,
         freeze_settings,
         tokenless_repayments_allowed,
+        circuit_breaker_enabled: _,
+        cb_deviation_bps_tiers: _,
+        cb_tier_durations_seconds: _,
+        cb_escalation_window_mult: _,
+        cb_ema_alpha_bps: _,
+        cb_window_seconds: _,
+        cb_window_max_up_bps: _,
+        cb_window_max_down_bps: _,
     } = &config_bank_opt;
     // Compare bank field to opt field if Some, otherwise compare to old bank field
     macro_rules! check_bank_field {
-        // Note: some nested fields (e.g. optimal_utilization_rate) don't exist on the config struct
+        // Note: some nested fields (e.g. placeholder0) don't exist on the config struct
         ($field:ident, $subfield:ident) => {
             assert_eq!(
                 bank.config.$field.$subfield,
@@ -1286,9 +1669,9 @@ async fn configure_bank_interest_only_success() -> anyhow::Result<()> {
 
     let ir_config = InterestRateConfigOpt {
         // TODO deprecate in 1.7
-        // optimal_utilization_rate: Some(I80F48::from_num(0.9).into()),
-        // plateau_interest_rate: Some(I80F48::from_num(0.5).into()),
-        // max_interest_rate: Some(I80F48::from_num(1.5).into()),
+        // placeholder0: Some(I80F48::from_num(0.9).into()),
+        // placeholder1: Some(I80F48::from_num(0.5).into()),
+        // placeholder2: Some(I80F48::from_num(1.5).into()),
         insurance_fee_fixed_apr: Some(I80F48::from_num(0.01).into()),
         insurance_ir_fee: Some(I80F48::from_num(0.02).into()),
         protocol_fixed_fee_apr: Some(I80F48::from_num(0.03).into()),
@@ -1308,20 +1691,17 @@ async fn configure_bank_interest_only_success() -> anyhow::Result<()> {
 
     // TODO deprecate in 1.7
     assert_eq!(
-        bank_after
-            .config
-            .interest_rate_config
-            .optimal_utilization_rate,
+        bank_after.config.interest_rate_config.placeholder0,
         I80F48::ZERO.into()
     );
     // TODO deprecate in 1.7
     assert_eq!(
-        bank_after.config.interest_rate_config.plateau_interest_rate,
+        bank_after.config.interest_rate_config.placeholder1,
         I80F48::ZERO.into()
     );
     // TODO deprecate in 1.7
     assert_eq!(
-        bank_after.config.interest_rate_config.max_interest_rate,
+        bank_after.config.interest_rate_config.placeholder2,
         I80F48::ZERO.into()
     );
     assert_eq!(
@@ -1577,6 +1957,204 @@ async fn configure_group_max_emode_leverage_propagates_to_bank_cache(
     };
     let res = bank.update_config(config_bank_opt2, None).await;
     assert!(res.is_ok());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn configure_group_same_asset_emode_leverage_persists_and_rejects_invalid_ordering(
+) -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let group_before = test_f.marginfi_group.load().await;
+
+    test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(99).into()),
+            Some(I80F48::from_num(100).into()),
+        )
+        .await?;
+
+    let group_after: MarginfiGroup = test_f
+        .load_and_deserialize(&test_f.marginfi_group.key)
+        .await;
+    let decoded_init = u32_to_basis(group_after.same_asset_emode_init_leverage);
+    let decoded_maint = u32_to_basis(group_after.same_asset_emode_maint_leverage);
+    assert!(
+        (decoded_init - I80F48!(99)).abs() < I80F48!(0.000001),
+        "expected ~99, got {}",
+        decoded_init
+    );
+    assert!(
+        (decoded_maint - I80F48!(100)).abs() < I80F48!(0.000001),
+        "expected ~100, got {}",
+        decoded_maint
+    );
+
+    test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(1.5).into()),
+            Some(I80F48::from_num(2.5).into()),
+        )
+        .await?;
+
+    let group_after_fractional: MarginfiGroup = test_f
+        .load_and_deserialize(&test_f.marginfi_group.key)
+        .await;
+    let decoded_fractional_init =
+        u32_to_basis(group_after_fractional.same_asset_emode_init_leverage);
+    let decoded_fractional_maint =
+        u32_to_basis(group_after_fractional.same_asset_emode_maint_leverage);
+    assert!(
+        (decoded_fractional_init - I80F48!(1.5)).abs() < I80F48!(0.000001),
+        "expected ~1.5, got {}",
+        decoded_fractional_init
+    );
+    assert!(
+        (decoded_fractional_maint - I80F48!(2.5)).abs() < I80F48!(0.000001),
+        "expected ~2.5, got {}",
+        decoded_fractional_maint
+    );
+
+    let invalid_res = test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(2.5).into()),
+            Some(I80F48::from_num(2.0).into()),
+        )
+        .await;
+
+    assert!(invalid_res.is_err());
+    assert_custom_error!(invalid_res.unwrap_err(), MarginfiError::BadEmodeConfig);
+
+    let below_min_res = test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(0).into()),
+            Some(I80F48::from_num(2).into()),
+        )
+        .await;
+
+    assert!(below_min_res.is_err());
+    assert_custom_error!(below_min_res.unwrap_err(), MarginfiError::BadEmodeConfig);
+
+    let asymmetric_disabled_res = test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(1).into()),
+            Some(I80F48::from_num(2).into()),
+        )
+        .await;
+
+    assert!(asymmetric_disabled_res.is_err());
+    assert_custom_error!(
+        asymmetric_disabled_res.unwrap_err(),
+        MarginfiError::BadEmodeConfig
+    );
+
+    test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(1).into()),
+            Some(I80F48::from_num(1).into()),
+        )
+        .await?;
+
+    let group_after_noop_floor: MarginfiGroup = test_f
+        .load_and_deserialize(&test_f.marginfi_group.key)
+        .await;
+    let decoded_floor_init = u32_to_basis(group_after_noop_floor.same_asset_emode_init_leverage);
+    let decoded_floor_maint = u32_to_basis(group_after_noop_floor.same_asset_emode_maint_leverage);
+    assert!(decoded_floor_init <= I80F48::ONE);
+    assert!(decoded_floor_maint <= I80F48::ONE);
+
+    let above_max_res = test_f
+        .marginfi_group
+        .try_update_with_same_asset_emode_leverage(
+            group_before.admin,
+            group_before.emode_admin,
+            group_before.delegate_curve_admin,
+            group_before.delegate_limit_admin,
+            group_before.delegate_emissions_admin,
+            group_before.metadata_admin,
+            group_before.risk_admin,
+            Some(I80F48::from_num(101).into()),
+            Some(I80F48::from_num(102).into()),
+        )
+        .await;
+
+    assert!(above_max_res.is_err());
+    assert_custom_error!(above_max_res.unwrap_err(), MarginfiError::BadEmodeConfig);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn initialize_group_sets_same_asset_defaults_from_explicit_group_constants(
+) -> anyhow::Result<()> {
+    let test_f = TestFixture::new(None).await;
+    let group: MarginfiGroup = test_f
+        .load_and_deserialize(&test_f.marginfi_group.key)
+        .await;
+
+    let same_asset_init = u32_to_basis(group.same_asset_emode_init_leverage);
+    let same_asset_maint = u32_to_basis(group.same_asset_emode_maint_leverage);
+
+    assert!(
+        (same_asset_init - DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE).abs() < I80F48!(0.000001),
+        "expected ~{}, got {}",
+        DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE,
+        same_asset_init
+    );
+    assert!(
+        (same_asset_maint - DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE).abs() < I80F48!(0.000001),
+        "expected ~{}, got {}",
+        DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE,
+        same_asset_maint
+    );
 
     Ok(())
 }

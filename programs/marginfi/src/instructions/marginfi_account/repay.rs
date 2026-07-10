@@ -16,7 +16,7 @@ use crate::{
     },
 };
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{clock::Clock, sysvar::Sysvar};
+use anchor_lang::solana_program::clock::Clock;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
@@ -37,7 +37,7 @@ use marginfi_type_crate::{
 ///
 /// Will error if there is no existing liability <=> depositing is not allowed.
 pub fn lending_account_repay<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, LendingAccountRepay<'info>>,
+    mut ctx: Context<'info, LendingAccountRepay<'info>>,
     amount: u64,
     repay_all: Option<bool>,
 ) -> MarginfiResult {
@@ -65,7 +65,7 @@ pub fn lending_account_repay<'info>(
     };
 
     let mut bank = bank_loader.load_mut()?;
-    validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
+    validate_bank_state(&bank, InstructionKind::FailsInPausedState, true)?;
 
     let group = marginfi_group_loader.load()?;
     bank.accrue_interest(
@@ -80,12 +80,12 @@ pub fn lending_account_repay<'info>(
     let mut bank_account =
         BankAccountWrapper::find(&bank_loader.key(), &mut bank, lending_account)?;
 
-    let repay_amount_post_fee = if repay_all {
+    let (repay_amount_post_fee, share_amount) = if repay_all {
         bank_account.repay_all(in_receivership)?
     } else {
-        bank_account.repay(I80F48::from_num(amount))?;
+        let share_amount = bank_account.repay(I80F48::from_num(amount))?;
 
-        amount
+        (amount, share_amount)
     };
     marginfi_account.last_update = clock.unix_timestamp as u64;
 
@@ -159,10 +159,12 @@ pub fn lending_account_repay<'info>(
         bank: bank_loader.key(),
         mint: bank.mint,
         amount: repay_amount_post_fee,
+        share_amount: share_amount.into(),
         close_balance: repay_all,
     });
 
     marginfi_account.lending_account.sort_balances();
+    marginfi_account.sync_indexer_flags();
 
     Ok(())
 }
@@ -209,7 +211,7 @@ pub struct LendingAccountRepay<'info> {
 
     /// CHECK: Token mint/authority are checked at transfer
     #[account(mut)]
-    pub signer_token_account: AccountInfo<'info>,
+    pub signer_token_account: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,

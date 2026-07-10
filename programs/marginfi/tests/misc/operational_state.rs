@@ -260,6 +260,85 @@ async fn marginfi_group_bank_reduce_only_deposit_failure() -> anyhow::Result<()>
 }
 
 #[tokio::test]
+async fn marginfi_group_bank_reduce_only_with_borrowing_power_counts_for_new_loans(
+) -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(0.9).into(),
+                    asset_weight_maint: I80F48!(0.95).into(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(0.8).into(),
+                    asset_weight_maint: I80F48!(0.9).into(),
+                    liability_weight_init: I80F48!(1.1).into(),
+                    liability_weight_maint: I80F48!(1.05).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+
+    let lender_mfi_account = test_f.create_marginfi_account().await;
+    let lender_token_account_sol = test_f.sol_mint.create_token_account_and_mint_to(100).await;
+    lender_mfi_account
+        .try_bank_deposit(lender_token_account_sol.key, sol_bank_f, 100, None)
+        .await?;
+
+    let borrower_mfi_account = test_f.create_marginfi_account().await;
+    let borrower_token_account_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    borrower_mfi_account
+        .try_bank_deposit(borrower_token_account_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+
+    usdc_bank_f
+        .update_config(
+            BankConfigOpt {
+                operational_state: Some(BankOperationalState::ReduceOnlyWithBorrowingPower),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let extra_lender_mfi_account = test_f.create_marginfi_account().await;
+    let extra_lender_token_account_usdc =
+        test_f.usdc_mint.create_token_account_and_mint_to(1).await;
+    let res = extra_lender_mfi_account
+        .try_bank_deposit(extra_lender_token_account_usdc.key, usdc_bank_f, 1, None)
+        .await;
+
+    assert!(res.is_err());
+    assert_custom_error!(res.unwrap_err(), MarginfiError::BankReduceOnly);
+
+    let borrower_token_account_sol = test_f.sol_mint.create_empty_token_account().await;
+    let res = borrower_mfi_account
+        .try_bank_borrow(borrower_token_account_sol.key, sol_bank_f, 1)
+        .await;
+
+    assert!(
+        res.is_ok(),
+        "ReduceOnlyWithBorrowingPower collateral should support new borrows"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn marginfi_group_bank_reduce_only_worthless_for_new_loans() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings {
         banks: vec![

@@ -4,10 +4,7 @@ use crate::{
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{calc_value, get_remaining_accounts_per_bank},
-        price::{
-            OraclePriceFeedAdapter, OraclePriceType, OraclePriceWithConfidence, PriceAdapter,
-            PriceBias,
-        },
+        price::{OraclePriceFeedAdapter, OraclePriceWithMultiplier, PriceAdapter},
         rate_limiter::{
             should_skip_rate_limit, BankRateLimiterImpl, GroupRateLimiterImpl, RateLimitWindowImpl,
         },
@@ -21,6 +18,7 @@ use anchor_spl::{
         self,
         extension::{
             transfer_fee::{TransferFee, TransferFeeConfig},
+            transfer_hook::TransferHook,
             BaseStateWithExtensions, StateWithExtensions,
         },
     },
@@ -32,7 +30,10 @@ use marginfi_type_crate::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
         ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
     },
-    types::{Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, WrappedI80F48},
+    types::{
+        Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, OraclePriceType,
+        OraclePriceWithConfidence, PriceBias, WrappedI80F48,
+    },
 };
 
 pub fn find_bank_vault_pda(bank_pk: &Pubkey, vault_type: BankVaultType) -> (Pubkey, u8) {
@@ -129,6 +130,24 @@ pub fn nonzero_fee(mint_ai: AccountInfo, epoch: u64) -> MarginfiResult<bool> {
     Ok(false)
 }
 
+/// Returns `true` if the given mint has an active transfer hook program.
+/// If the hook is present but no program is active it would return false.
+pub fn has_transfer_hook(mint_ai: AccountInfo) -> MarginfiResult<bool> {
+    if mint_ai.owner.eq(&Token::id()) {
+        return Ok(false);
+    }
+
+    let mint_data = mint_ai.try_borrow_data()?;
+    let mint = StateWithExtensions::<spl_token_2022::state::Mint>::unpack(&mint_data)?;
+
+    if let Ok(hook) = mint.get_extension::<TransferHook>() {
+        let program_id: Option<Pubkey> = Option::from(hook.program_id);
+        return Ok(program_id.is_some());
+    }
+
+    Ok(false)
+}
+
 /// Checks if first account is a mint account. If so, updates remaining_account -> &remaining_account[1..]
 ///
 /// Ok(None) if Tokenkeg
@@ -215,89 +234,17 @@ pub fn hex_to_bytes(hex: &str) -> Vec<u8> {
         .collect()
 }
 
-/// Validate that after a deposit to Bank, the users's account contains either all Default/SOL
-/// balances, or all Staked/Sol balances. Default and Staked assets cannot mix.
 pub fn validate_asset_tags(bank: &Bank, marginfi_account: &MarginfiAccount) -> MarginfiResult {
-    let mut has_default_asset = false;
-    let mut has_staked_asset = false;
-
-    let is_default_like = |asset_tag: u8| {
-        matches!(
-            asset_tag,
-            ASSET_TAG_DEFAULT
-                | ASSET_TAG_KAMINO
-                | ASSET_TAG_DRIFT
-                | ASSET_TAG_SOLEND
-                | ASSET_TAG_JUPLEND
-        )
+    if !marginfi_type_crate::types::validate_asset_tags(bank, marginfi_account) {
+        return err!(MarginfiError::AssetTagMismatch);
     };
-
-    for balance in marginfi_account.lending_account.balances.iter() {
-        if balance.is_active() {
-            match balance.bank_asset_tag {
-                ASSET_TAG_DEFAULT => has_default_asset = true,
-                ASSET_TAG_SOL => { /* Do nothing, SOL can mix with any asset type */ }
-                ASSET_TAG_STAKED => has_staked_asset = true,
-                // Kamino/Drift/Solend/JupLend assets behave like default assets
-                ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND => {
-                    has_default_asset = true
-                }
-                _ => panic!("unsupported asset tag"),
-            }
-        }
-    }
-
-    // 1. Default-like assets cannot mix with Staked assets
-    if is_default_like(bank.config.asset_tag) && has_staked_asset {
-        return err!(MarginfiError::AssetTagMismatch);
-    }
-
-    // 2. Staked SOL cannot mix with Default-like assets
-    if bank.config.asset_tag == ASSET_TAG_STAKED && has_default_asset {
-        return err!(MarginfiError::AssetTagMismatch);
-    }
-
     Ok(())
 }
 
-/// Validate that two banks are compatible based on their asset tags. See the following combinations
-/// (* is wildcard, e.g. any tag):
-///
-/// Allowed:
-/// 1) Default/Default
-/// 2) Sol/*
-/// 3) Staked/Staked
-///
-/// Forbidden:
-/// 1) Default/Staked
-///
-/// Returns an error if the two banks have mismatching asset tags according to the above.
 pub fn validate_bank_asset_tags(bank_a: &Bank, bank_b: &Bank) -> MarginfiResult {
-    let is_default_like = |asset_tag: u8| {
-        matches!(
-            asset_tag,
-            ASSET_TAG_DEFAULT
-                | ASSET_TAG_KAMINO
-                | ASSET_TAG_DRIFT
-                | ASSET_TAG_SOLEND
-                | ASSET_TAG_JUPLEND
-        )
+    if !marginfi_type_crate::types::validate_bank_asset_tags(bank_a, bank_b) {
+        return err!(MarginfiError::AssetTagMismatch);
     };
-
-    let is_bank_a_default = is_default_like(bank_a.config.asset_tag);
-    let is_bank_a_staked = bank_a.config.asset_tag == ASSET_TAG_STAKED;
-    let is_bank_b_default = is_default_like(bank_b.config.asset_tag);
-    let is_bank_b_staked = bank_b.config.asset_tag == ASSET_TAG_STAKED;
-    // Note: Sol is compatible with all other tags and doesn't matter...
-
-    // 1. Default assets cannot mix with Staked assets
-    if is_bank_a_default && is_bank_b_staked {
-        return err!(MarginfiError::AssetTagMismatch);
-    }
-    if is_bank_a_staked && is_bank_b_default {
-        return err!(MarginfiError::AssetTagMismatch);
-    }
-
     Ok(())
 }
 
@@ -315,36 +262,66 @@ pub enum InstructionKind {
 
 // TODO remove redundant checks for these elsewhere in the program (they are nested many laters deep
 // in various value delta functions)
-/// Validate the bank's state does not forbid the execution of an instruction
-pub fn validate_bank_state(bank: &Bank, kind: InstructionKind) -> MarginfiResult {
+/// Validate the bank's state does not forbid the execution of an instruction.
+///
+/// `is_halt_safe` marks an ix as allowed while the bank is under a circuit-breaker halt or in
+/// the non-expiring `CircuitBroken` end state (for example repay/deposit, a risk-free withdraw,
+/// or a caller that has already enforced risk-admin-only liquidation). Even when halt-safe, the
+/// action still obeys the bank's effective operational state — and for a `CircuitBroken` bank
+/// that is the *pre-break* state, so e.g. a bank that was `ReduceOnly` keeps deposits disabled.
+pub fn validate_bank_state(
+    bank: &Bank,
+    kind: InstructionKind,
+    is_halt_safe: bool,
+) -> MarginfiResult {
     if bank.config.operational_state == BankOperationalState::KilledByBankruptcy {
         return err!(MarginfiError::BankKilledByBankruptcy);
     }
+    // Bank exists but has not completed one-time setup (e.g. JupLend seed deposit). Block every
+    // operation until init runs.
+    if bank.config.operational_state == BankOperationalState::Uninitialized {
+        return err!(MarginfiError::BankUninitialized);
+    }
+
+    // A temporal CB halt and the non-expiring `CircuitBroken` end state both block any action
+    // that isn't halt-safe (borrows, risk-carrying withdraws).
+    let circuit_broken = bank.config.operational_state == BankOperationalState::CircuitBroken;
+    if !is_halt_safe && (circuit_broken || bank.is_cb_halted(Clock::get()?.unix_timestamp)) {
+        return err!(MarginfiError::BankCircuitBreakerHalted);
+    }
+
+    // For a `CircuitBroken` bank this resolves to the pre-break state; otherwise it is just
+    // `operational_state`.
+    let effective_state = bank.cb_effective_operational_state();
+    if effective_state == BankOperationalState::KilledByBankruptcy {
+        return err!(MarginfiError::BankKilledByBankruptcy);
+    }
+    if effective_state == BankOperationalState::Uninitialized {
+        return err!(MarginfiError::BankUninitialized);
+    }
 
     match kind {
-        InstructionKind::FailsInReduceState
-            if bank.config.operational_state == BankOperationalState::ReduceOnly =>
-        {
+        InstructionKind::FailsInReduceState if effective_state.is_reduce_only() => {
             return err!(MarginfiError::BankReduceOnly);
         }
 
-        InstructionKind::FailsInPausedState
-            if bank.config.operational_state == BankOperationalState::Paused =>
-        {
+        InstructionKind::FailsInPausedState if effective_state == BankOperationalState::Paused => {
             return err!(MarginfiError::BankPaused);
         }
 
         InstructionKind::FailsIfPausedOrReduceState
             if matches!(
-                bank.config.operational_state,
-                BankOperationalState::Paused | BankOperationalState::ReduceOnly
+                effective_state,
+                BankOperationalState::Paused
+                    | BankOperationalState::ReduceOnly
+                    | BankOperationalState::ReduceOnlyWithBorrowingPower
             ) =>
         {
-            return match bank.config.operational_state {
+            return match effective_state {
                 BankOperationalState::Paused => {
                     err!(MarginfiError::BankPaused)
                 }
-                BankOperationalState::ReduceOnly => {
+                state if state.is_reduce_only() => {
                     err!(MarginfiError::BankReduceOnly)
                 }
                 _ => unreachable!(),
@@ -360,6 +337,10 @@ pub fn wrapped_i80f48_to_f64(n: WrappedI80F48) -> f64 {
     let as_i80: I80F48 = n.into();
     let as_f64: f64 = as_i80.to_num();
     as_f64
+}
+
+pub fn i80f48_to_f64(n: I80F48) -> f64 {
+    n.to_num()
 }
 
 /// Fetch a low-biased price for a given bank from a properly structured remaining accounts slice as
@@ -386,20 +367,49 @@ pub fn fetch_asset_price_for_bank_low_bias<'info>(
 /// Fetch an unbiased oracle price (no safety bias) for a given bank.
 ///
 /// * Errors if bank not found or bank/oracles don't appear in the slice in the correct order
+pub fn fetch_unbiased_price_for_bank_with_cache<'info>(
+    bank_key: &Pubkey,
+    bank: &Bank,
+    clock: &Clock,
+    remaining_accounts: &'info [AccountInfo<'info>],
+) -> Result<(OraclePriceWithConfidence, OraclePriceWithMultiplier)> {
+    let oracle_ais = oracle_accounts_for_bank(bank_key, bank, remaining_accounts)?;
+    let prices = OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
+        bank,
+        oracle_ais,
+        clock,
+        OraclePriceType::RealTime,
+    )?;
+
+    Ok(prices)
+}
+
+/// Fetch an unbiased oracle price (no safety bias) for a given bank.
+///
+/// * Errors if bank not found or bank/oracles don't appear in the slice in the correct order
 pub fn fetch_unbiased_price_for_bank<'info>(
     bank_key: &Pubkey,
     bank: &Bank,
     clock: &Clock,
     remaining_accounts: &'info [AccountInfo<'info>],
 ) -> Result<OraclePriceWithConfidence> {
-    let oracle_ais = oracle_accounts_for_bank(bank_key, bank, remaining_accounts)?;
-    let pf = OraclePriceFeedAdapter::try_from_bank(bank, oracle_ais, clock)?;
-    let price = pf.get_price_and_confidence_of_type(
-        OraclePriceType::RealTime,
-        bank.config.oracle_max_confidence,
-    )?;
-
+    let (price, _) =
+        fetch_unbiased_price_for_bank_with_cache(bank_key, bank, clock, remaining_accounts)?;
     Ok(price)
+}
+
+/// Fetch an unbiased raw oracle price (no safety bias) plus integration multiplier for cache.
+///
+/// * Errors if bank not found or bank/oracles don't appear in the slice in the correct order
+pub fn fetch_unbiased_price_for_bank_cache<'info>(
+    bank_key: &Pubkey,
+    bank: &Bank,
+    clock: &Clock,
+    remaining_accounts: &'info [AccountInfo<'info>],
+) -> Result<OraclePriceWithMultiplier> {
+    let (_, cache_price) =
+        fetch_unbiased_price_for_bank_with_cache(bank_key, bank, clock, remaining_accounts)?;
+    Ok(cache_price)
 }
 
 /// Locate a bank's oracle information from a properly formatted slice of remaining accounts.

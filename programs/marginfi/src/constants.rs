@@ -1,9 +1,8 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::sysvar::instructions as ix_sysvar;
-use anchor_lang::solana_program::sysvar::instructions::load_instruction_at_checked;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use pyth_solana_receiver_sdk::price_update::VerificationLevel;
+use solana_instructions_sysvar::{load_current_index_checked, load_instruction_at_checked};
 
 use crate::MarginfiResult;
 
@@ -11,15 +10,13 @@ use crate::MarginfiResult;
 // 1. the constants used for testing/internal purposes
 // 2. or the ones dependant on some 3rd party crates which are not part of type-crate dependency tree
 
+// Yes, these are duplicates of the crate ID.
+pub const MAINNET_PROGRAM_ID: Pubkey = pubkey!("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA");
+pub const STAGING_ID: Pubkey = pubkey!("stag8sTKds2h4KzjUw3zKTsxbqvT4XKHdaR9X9E6Rct");
+pub const LOCALNET_ID: Pubkey = pubkey!("2jGhuVUuy3umdzByFx8sNWUAaf5vaeuDm78RDPEnhrMr");
+
 /// Mocks program ID for third-party ID restrictions
 pub const MOCKS_PROGRAM_ID: Pubkey = pubkey!("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ");
-
-pub const DRIFT_USER_SEED: &str = "user";
-pub const DRIFT_USER_STATS_SEED: &str = "user_stats";
-
-pub const JUPLEND_F_TOKEN_VAULT_SEED: &str = "f_token_vault";
-
-pub const SOLEND_OBLIGATION_SEED: &str = "solend_obligation";
 
 /// Used for the health cache to track which version of the program generated it.
 /// * 0 = invalid
@@ -67,16 +64,6 @@ pub const JUP_KEY: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4
 pub const TITAN_KEY: Pubkey = pubkey!("T1TANpTeScyeqVzzgNViGDNrkQ6qHz9KrSBS4aNXvGT");
 pub const ASSOCIATED_TOKEN_KEY: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
-// Note: We mock Kamino/Kamino Farms with the same keys on localnet
-pub const KAMINO_PROGRAM_ID: Pubkey = pubkey!("KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
-pub const FARMS_PROGRAM_ID: Pubkey = pubkey!("FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr");
-
-pub const DRIFT_PROGRAM_ID: Pubkey = pubkey!("dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH");
-
-/// Drift uses a fixed 9 decimal precision for all spot market scaled balances,
-/// regardless of the underlying token's decimals
-pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
-
 pub const SOLEND_PROGRAM_ID: Pubkey = pubkey!("So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo");
 pub const NATIVE_STAKE_ID: Pubkey = pubkey!("Stake11111111111111111111111111111111111111");
 
@@ -100,6 +87,8 @@ pub const ORDER_EXECUTION_MAX_FEE: I80F48 = I80F48!(0.05); // 5%
 pub const ORDER_INIT_FLAT_FEE_DEFAULT: u32 = 100_000;
 /// Maximum percent encoded as u32 (100% == u32::MAX)
 pub const MAX_BPS: u32 = u32::MAX;
+/// Maximum slippage allowed for any Order , encoded as a u32 percent (see `MAX_BPS`). Set to ~10%.
+pub const MAX_ORDER_SLIPPAGE: u32 = u32::MAX / 10;
 
 pub const MIN_PYTH_PUSH_VERIFICATION_LEVEL: VerificationLevel = VerificationLevel::Full;
 
@@ -173,7 +162,7 @@ pub fn is_allowed_cpi_for_third_party_id(
         }
     };
 
-    let current_ix_index = ix_sysvar::load_current_index_checked(sysvar_info)?;
+    let current_ix_index = load_current_index_checked(sysvar_info)?;
     let current_ixn = load_instruction_at_checked(current_ix_index as usize, sysvar_info)?;
 
     // If the current (top-level) instruction is *this* program, it's a direct call (not CPI) -> no

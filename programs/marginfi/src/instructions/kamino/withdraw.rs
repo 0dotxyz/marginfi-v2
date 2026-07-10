@@ -1,6 +1,6 @@
 use crate::{
     check,
-    constants::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID, PROGRAM_VERSION},
+    constants::PROGRAM_VERSION,
     events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     ix_utils::{get_discrim_hash, Hashable},
     optional_account,
@@ -8,42 +8,45 @@ use crate::{
         bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
-            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
+            MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
         assert_within_one_token, fetch_asset_price_for_bank_low_bias,
-        fetch_unbiased_price_for_bank, is_kamino_asset_tag, record_withdrawal_outflow,
+        fetch_unbiased_price_for_bank_cache, is_kamino_asset_tag, record_withdrawal_outflow,
         validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
-use anchor_lang::solana_program::sysvar::{self, Sysvar};
 use anchor_spl::token::{accessor, Token};
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
-use kamino_mocks::kamino_lending::cpi::withdraw_obligation_collateral_and_redeem_reserve_collateral_v2;
+use kamino_mocks::kamino_lending::cpi::{
+    refresh_reserves_batch, withdraw_obligation_collateral_and_redeem_reserve_collateral_v2,
+};
 use kamino_mocks::{
     kamino_lending::cpi::accounts::{
-        DepositFarmsAccounts, WithdrawObligationCollateralAndRedeemReserveCollateral,
+        DepositFarmsAccounts, RefreshReservesBatch,
+        WithdrawObligationCollateralAndRedeemReserveCollateral,
         WithdrawObligationCollateralAndRedeemReserveCollateralV2,
     },
     state::{MinimalObligation, MinimalReserve},
 };
-use marginfi_type_crate::types::{
-    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-    ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
-};
 use marginfi_type_crate::{
     constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED},
-    types::ACCOUNT_IN_DELEVERAGE,
+    pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
+    types::{
+        Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+    },
 };
 
 /// Withdraw from a Kamino reserve through a marginfi account
@@ -74,11 +77,16 @@ use marginfi_type_crate::{
 /// 5. Transfers funds to the user's account
 /// 6. Updates the marginfi account's balance to reflect the withdrawal
 pub fn kamino_withdraw<'info>(
-    ctx: Context<'_, '_, 'info, 'info, KaminoWithdraw<'info>>,
+    ctx: Context<'info, KaminoWithdraw<'info>>,
     amount: u64, // Collateral token amount
-    withdraw_all: Option<bool>,
+    flags: Option<u8>,
 ) -> MarginfiResult {
-    let withdraw_all = withdraw_all.unwrap_or(false);
+    const WITHDRAW_ALL_FLAG: u8 = 1 << 0;
+    const REFRESH_RESERVE_FLAG: u8 = 1 << 1;
+
+    let flags = flags.unwrap_or(0);
+    let withdraw_all = (flags & WITHDRAW_ALL_FLAG) != 0;
+    let refresh_reserve = (flags & REFRESH_RESERVE_FLAG) != 0;
 
     // Get initial values to verify successful withdrawal later
     let pre_transfer_vault_balance =
@@ -87,15 +95,23 @@ pub fn kamino_withdraw<'info>(
         ctx.accounts.integration_acc_2.load()?.deposits[0].deposited_amount;
 
     let collateral_amount;
+    let share_amount;
     let bank_key = ctx.accounts.bank.key();
     let bank_mint = ctx.accounts.bank.load()?.mint;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let clock = Clock::get()?;
+    let group = ctx.accounts.group.load()?;
 
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
-        let group = ctx.accounts.group.load()?;
-        validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
+        // A withdraw from an account with no liabilities is risk-free, so it stays allowed
+        // while the bank is circuit-breaker halted or `CircuitBroken`.
+        let withdraw_is_halt_safe = !marginfi_account.lending_account.has_liabilities();
+        validate_bank_state(
+            &bank,
+            InstructionKind::FailsInPausedState,
+            withdraw_is_halt_safe,
+        )?;
 
         let in_receivership_or_order_execution =
             marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
@@ -127,11 +143,11 @@ pub fn kamino_withdraw<'info>(
             &mut marginfi_account.lending_account,
         )?;
 
-        collateral_amount = if withdraw_all {
+        (collateral_amount, share_amount) = if withdraw_all {
             bank_account.withdraw_all(in_receivership)?
         } else {
-            bank_account.withdraw(I80F48::from_num(amount))?;
-            amount
+            let share_amount = bank_account.withdraw(I80F48::from_num(amount))?;
+            (amount, share_amount)
         };
 
         // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
@@ -177,6 +193,10 @@ pub fn kamino_withdraw<'info>(
         marginfi_account.last_update = clock.unix_timestamp as u64;
     }
 
+    if refresh_reserve {
+        ctx.accounts.cpi_refresh_reserve()?;
+    }
+
     let expected_liquidity_amount = ctx
         .accounts
         .integration_acc_1
@@ -216,6 +236,7 @@ pub fn kamino_withdraw<'info>(
         bank: bank_key,
         mint: bank_mint,
         amount: collateral_amount,
+        share_amount: share_amount.into(),
         close_balance: withdraw_all,
     });
 
@@ -223,6 +244,7 @@ pub fn kamino_withdraw<'info>(
     health_cache.timestamp = clock.unix_timestamp;
 
     marginfi_account.lending_account.sort_balances();
+    marginfi_account.sync_indexer_flags();
 
     let in_receivership_or_order_execution =
         marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
@@ -232,33 +254,44 @@ pub fn kamino_withdraw<'info>(
     if !in_receivership_or_order_execution {
         // Check account health, if below threshold fail transaction
         // Assuming `ctx.remaining_accounts` holds only oracle accounts
+        let group = ctx.accounts.group.load()?;
         check_account_init_health(
             &marginfi_account,
+            &group,
             ctx.remaining_accounts,
             &mut Some(&mut health_cache),
         )?;
         health_cache.program_version = PROGRAM_VERSION;
 
-        let bank_loader = &ctx.accounts.bank;
-        let mut bank = bank_loader.load_mut()?;
-        let price_for_cache = fetch_unbiased_price_for_bank(
-            &bank_loader.key(),
-            &bank,
-            &clock,
-            ctx.remaining_accounts,
-        )
-        .ok();
+        {
+            let bank_loader = &ctx.accounts.bank;
+            let mut bank = bank_loader.load_mut()?;
+            let price_for_cache = fetch_unbiased_price_for_bank_cache(
+                &bank_loader.key(),
+                &bank,
+                &clock,
+                ctx.remaining_accounts,
+            )
+            .ok();
 
-        bank.update_cache_price(price_for_cache)?;
+            bank.update_cache_price(price_for_cache)?;
+        }
 
         health_cache.set_engine_ok(true);
         marginfi_account.health_cache = health_cache;
+
+        // Inline CB gate: a risk-carrying withdraw reverts if any involved bank's live price
+        // has jumped past the breach threshold; a liability-free withdraw skips it.
+        if marginfi_account.lending_account.has_liabilities() {
+            run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+        }
     } else {
         // Note: the caller can simply omit risk accounts since the risk check is ignored here, in
         // that case the cache doesn't update and this does nothing.
         let mut bank = ctx.accounts.bank.load_mut()?;
         let price_for_cache =
-            fetch_unbiased_price_for_bank(&bank_key, &bank, &clock, ctx.remaining_accounts).ok();
+            fetch_unbiased_price_for_bank_cache(&bank_key, &bank, &clock, ctx.remaining_accounts)
+                .ok();
 
         bank.update_cache_price(price_for_cache)?;
     }
@@ -369,7 +402,6 @@ pub struct KaminoWithdraw<'info> {
 
     /// The liquidity token mint (e.g., USDC)
     /// Needs serde to get the mint decimals for transfer checked
-    /// TODO: rename to just 'mint' to make use of has_one and to be consistent with deposit
     #[account(mut)]
     pub mint: Box<InterfaceAccount<'info, Mint>>,
 
@@ -414,11 +446,22 @@ pub struct KaminoWithdraw<'info> {
 
     /// Used by kamino validate CPI calls
     /// CHECK: read‑only Instructions sysvar
-    #[account(address = sysvar::instructions::ID)]
+    #[account(address = solana_instructions_sysvar::ID)]
     pub instruction_sysvar_account: UncheckedAccount<'info>,
 }
 
 impl<'info> KaminoWithdraw<'info> {
+    pub fn cpi_refresh_reserve(&self) -> MarginfiResult {
+        let accounts = RefreshReservesBatch {};
+        let program = self.kamino_program.to_account_info();
+        let cpi_ctx = CpiContext::new(program.key(), accounts).with_remaining_accounts(vec![
+            self.integration_acc_1.to_account_info(),
+            self.lending_market.to_account_info(),
+        ]);
+        refresh_reserves_batch(cpi_ctx, true)?;
+        Ok(())
+    }
+
     pub fn cpi_kamino_withdraw(&self, collateral_amount: u64) -> MarginfiResult {
         let withdraw_accounts = WithdrawObligationCollateralAndRedeemReserveCollateral {
             collateral_token_program: self.collateral_token_program.to_account_info(),
@@ -454,7 +497,7 @@ impl<'info> KaminoWithdraw<'info> {
             &[bump],
         ];
         let signer_seeds: &[&[&[u8]]] = &[seeds];
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         withdraw_obligation_collateral_and_redeem_reserve_collateral_v2(
             cpi_ctx,
             collateral_amount,
@@ -478,7 +521,7 @@ impl<'info> KaminoWithdraw<'info> {
             &[bump],
         ];
         let signer_seeds: &[&[&[u8]]] = &[seeds];
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())

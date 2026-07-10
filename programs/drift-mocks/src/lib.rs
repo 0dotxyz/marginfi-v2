@@ -1,10 +1,16 @@
+#![allow(
+    clippy::diverging_sub_expression,
+    clippy::too_many_arguments,
+    unexpected_cfgs
+)]
+
 pub mod constants;
 pub mod macros;
 pub mod state;
 
 use anchor_lang::prelude::*;
 
-declare_id!("dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH");
+declare_id!(marginfi_type_crate::pdas::DRIFT_PROGRAM_ID);
 
 // Declare the drift program for CPI
 declare_program!(drift);

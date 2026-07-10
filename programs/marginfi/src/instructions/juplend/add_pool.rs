@@ -1,7 +1,6 @@
 // Adds a JupLend type bank to a group with sane defaults. Used to integrate with JupLend
 // allowing users to interact with JupLend lending pools through marginfi.
 use crate::{
-    constants::JUPLEND_F_TOKEN_VAULT_SEED,
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{
@@ -15,21 +14,22 @@ use anchor_spl::associated_token::get_associated_token_address_with_program_id;
 use anchor_spl::token_interface::*;
 use juplend_mocks::state::Lending as JuplendLending;
 use marginfi_type_crate::constants::{
-    FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED,
-    LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+    BANK_SEED_KNOWN, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, INSURANCE_VAULT_AUTHORITY_SEED,
+    INSURANCE_VAULT_SEED, IS_T22, JUPLEND_F_TOKEN_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
+    LIQUIDITY_VAULT_SEED,
 };
 use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
 
 /// Add a JupLend bank to the marginfi lending pool.
 ///
-/// Bank starts `Paused` because once the fToken vault exists, the bank can be interacted
+/// Bank starts `Uninitialized` because once the fToken vault exists, the bank can be interacted
 /// with even without a seed deposit. Call `juplend_init_position` to activate.
 ///
 /// Remaining accounts: 0. oracle feed, 1. JupLend `Lending` state
 pub fn lending_pool_add_bank_juplend(
     ctx: Context<LendingPoolAddBankJuplend>,
     bank_config: JuplendConfigCompact,
-    _bank_seed: u64,
+    bank_seed: u64,
 ) -> MarginfiResult {
     // Note: JupLend banks don't need to debit the flat SOL fee because these will always be
     // first-party pools owned by mrgn and never permissionless pools
@@ -64,9 +64,9 @@ pub fn lending_pool_add_bank_juplend(
     let fee_vault_bump = ctx.bumps.fee_vault;
     let fee_vault_authority_bump = ctx.bumps.fee_vault_authority;
 
-    *bank = Bank::new(
+    bank.init(
         ctx.accounts.group.key(),
-        config,
+        &config,
         bank_mint.key(),
         bank_mint.decimals,
         ctx.accounts.liquidity_vault.key(),
@@ -79,7 +79,12 @@ pub fn lending_pool_add_bank_juplend(
         insurance_vault_authority_bump,
         fee_vault_bump,
         fee_vault_authority_bump,
+        bank_seed,
     );
+    bank.flags |= BANK_SEED_KNOWN;
+    if bank_mint.to_account_info().owner == &anchor_spl::token_2022::ID {
+        bank.flags |= IS_T22;
+    }
 
     // Set JupLend-specific fields
     // - integration_acc_2: protocol fToken vault (PDA token account)

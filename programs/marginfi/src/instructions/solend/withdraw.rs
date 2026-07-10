@@ -6,14 +6,15 @@ use crate::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
-            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
+            MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
         assert_within_one_token, fetch_asset_price_for_bank_low_bias,
-        fetch_unbiased_price_for_bank, is_solend_asset_tag, record_withdrawal_outflow,
+        fetch_unbiased_price_for_bank_cache, is_solend_asset_tag, record_withdrawal_outflow,
         validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
@@ -66,7 +67,7 @@ use solend_mocks::state::{
 /// 5. Transfers funds to the user's account
 /// 6. Updates the marginfi account's balance to reflect the withdrawal
 pub fn solend_withdraw<'info>(
-    ctx: Context<'_, '_, 'info, 'info, SolendWithdraw<'info>>,
+    ctx: Context<'info, SolendWithdraw<'info>>,
     amount: u64, // Collateral token amount (cTokens)
     withdraw_all: Option<bool>,
 ) -> MarginfiResult {
@@ -79,14 +80,21 @@ pub fn solend_withdraw<'info>(
     let authority_bump: u8;
     let bank_key = ctx.accounts.bank.key();
     let bank_mint = ctx.accounts.bank.load()?.mint;
-    let collateral_amount = {
+    let group = ctx.accounts.group.load()?;
+    let (collateral_amount, share_amount) = {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let group = ctx.accounts.group.load()?;
         let clock = Clock::get()?;
         authority_bump = bank.liquidity_vault_authority_bump;
 
-        validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
+        // A withdraw from an account with no liabilities is risk-free, so it stays allowed
+        // while the bank is circuit-breaker halted or `CircuitBroken`.
+        let withdraw_is_halt_safe = !marginfi_account.lending_account.has_liabilities();
+        validate_bank_state(
+            &bank,
+            InstructionKind::FailsInPausedState,
+            withdraw_is_halt_safe,
+        )?;
 
         // Fetch oracle price for rate limiting and deleverage tracking
         let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
@@ -112,11 +120,11 @@ pub fn solend_withdraw<'info>(
         let mut bank_account =
             BankAccountWrapper::find(&bank_key, &mut bank, &mut marginfi_account.lending_account)?;
 
-        let collateral_amount = if withdraw_all {
+        let (collateral_amount, share_amount) = if withdraw_all {
             bank_account.withdraw_all(in_receivership)?
         } else {
-            bank_account.withdraw(I80F48::from_num(amount))?;
-            amount
+            let share_amount = bank_account.withdraw(I80F48::from_num(amount))?;
+            (amount, share_amount)
         };
 
         // Rate limiting tracks net outflow; skip for flashloan/liquidation/deleverage flows.
@@ -156,7 +164,7 @@ pub fn solend_withdraw<'info>(
             });
         }
 
-        collateral_amount
+        (collateral_amount, share_amount)
     };
 
     // Get initial obligation data to verify withdrawal amount later
@@ -200,10 +208,9 @@ pub fn solend_withdraw<'info>(
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
-        let group = &ctx.accounts.group.load()?;
 
         // Update bank cache after modifying balances
-        bank.update_bank_cache(group)?;
+        bank.update_bank_cache(&group)?;
 
         marginfi_account.last_update = Clock::get()?.unix_timestamp as u64;
 
@@ -217,6 +224,7 @@ pub fn solend_withdraw<'info>(
             bank: bank_key,
             mint: bank_mint,
             amount: collateral_amount,
+            share_amount: share_amount.into(),
             close_balance: withdraw_all,
         });
 
@@ -224,6 +232,7 @@ pub fn solend_withdraw<'info>(
         health_cache.timestamp = Clock::get()?.unix_timestamp;
 
         marginfi_account.lending_account.sort_balances();
+        marginfi_account.sync_indexer_flags();
 
         // SAFETY: The `bank` AccountLoader shares the same underlying account as one of the
         // entries in `remaining_accounts` (passed for oracle/health-check lookups). The Solana
@@ -246,6 +255,7 @@ pub fn solend_withdraw<'info>(
             // Assuming `ctx.remaining_accounts` holds only oracle accounts
             check_account_init_health(
                 &marginfi_account,
+                &group,
                 ctx.remaining_accounts,
                 &mut Some(&mut health_cache),
             )?;
@@ -254,7 +264,7 @@ pub fn solend_withdraw<'info>(
             let bank_loader = &ctx.accounts.bank;
             let mut bank = bank_loader.load_mut()?;
             let clock = Clock::get()?;
-            let price_for_cache = fetch_unbiased_price_for_bank(
+            let price_for_cache = fetch_unbiased_price_for_bank_cache(
                 &bank_loader.key(),
                 &bank,
                 &clock,
@@ -266,14 +276,24 @@ pub fn solend_withdraw<'info>(
 
             health_cache.set_engine_ok(true);
             marginfi_account.health_cache = health_cache;
+
+            // Inline CB gate: a risk-carrying withdraw reverts if any involved bank's live
+            // price has jumped past the breach threshold; a liability-free withdraw skips it.
+            if marginfi_account.lending_account.has_liabilities() {
+                run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+            }
         } else {
             // Note: the caller can simply omit risk accounts since the risk check is ignored here,
             // that case the cache doesn't update and this does nothing.
             let mut bank = ctx.accounts.bank.load_mut()?;
             let clock = Clock::get()?;
-            let price_for_cache =
-                fetch_unbiased_price_for_bank(&bank_key, &bank, &clock, ctx.remaining_accounts)
-                    .ok();
+            let price_for_cache = fetch_unbiased_price_for_bank_cache(
+                &bank_key,
+                &bank,
+                &clock,
+                ctx.remaining_accounts,
+            )
+            .ok();
 
             bank.update_cache_price(price_for_cache)?;
         }
@@ -429,11 +449,8 @@ impl<'info> SolendWithdraw<'info> {
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
 
         // Create CPI context with signer
-        let cpi_ctx = CpiContext::new_with_signer(
-            self.solend_program.to_account_info(),
-            accounts,
-            signer_seeds,
-        );
+        let cpi_ctx =
+            CpiContext::new_with_signer(self.solend_program.key(), accounts, signer_seeds);
         withdraw_obligation_collateral_and_redeem_reserve_collateral(cpi_ctx, collateral_amount)?;
         Ok(())
     }
@@ -453,7 +470,7 @@ impl<'info> SolendWithdraw<'info> {
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
 
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())

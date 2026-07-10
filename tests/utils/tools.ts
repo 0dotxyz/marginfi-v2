@@ -1,10 +1,11 @@
-import { BN } from "@coral-xyz/anchor";
+import { BN, IdlAccounts } from "@coral-xyz/anchor";
 import { inspect } from "util";
 import {
   BanksTransactionMeta,
   BanksTransactionResultWithMeta,
-} from "solana-bankrun";
-import { ProgramTestContext } from "solana-bankrun";
+  Clock,
+} from "./litesvm";
+import { ProgramTestContext } from "./litesvm";
 import BigNumber from "bignumber.js";
 import {
   AddressLookupTableAccount,
@@ -38,6 +39,22 @@ import {
 } from "../rootHooks";
 import { getEpochAndSlot } from "./bankrunConnection";
 import { createMintToInstruction } from "@solana/spl-token";
+import { BankrunProvider } from "./litesvm";
+import { Marginfi } from "target/types/marginfi";
+import { bnToBigIntSafe } from "./bn-utils";
+
+export {
+  addNativeAmountToI80,
+  bnToBigIntSafe,
+  divI80,
+  fromI80Scaled,
+  mulI80,
+  nativeToI80Scaled,
+  toBn,
+  toBnFromI80,
+  toI80Scaled,
+  toWrappedI80F48Safe,
+} from "./bn-utils";
 
 /**
  * Convert a human-readable amount to native token units based on decimals.
@@ -404,7 +421,7 @@ export const createLut = async (
     {
       authority: signer.publicKey,
       payer: signer.publicKey,
-      recentSlot: Math.max(0, recentSlot - 1),
+      recentSlot,
     },
   );
 
@@ -553,7 +570,13 @@ export function dumpAccBalances(
   console.table(activeBalances);
 }
 
-export const logHealthCache = (header: string, healthCache: any) => {
+type MarginfiAccount = IdlAccounts<Marginfi>["marginfiAccount"];
+type MarginfiHealthCache = MarginfiAccount["healthCache"];
+
+export const logHealthCache = (
+  header: string,
+  healthCache: MarginfiHealthCache,
+) => {
   const av = wrappedI80F48toBigNumber(healthCache.assetValue);
   const lv = wrappedI80F48toBigNumber(healthCache.liabilityValue);
   const aValMaint = wrappedI80F48toBigNumber(healthCache.assetValueMaint);
@@ -618,17 +641,6 @@ export async function getBankrunTime(ctx: ProgramTestContext): Promise<number> {
   return Number(clock.unixTimestamp);
 }
 
-/** Shorthand to convert an I80F48 to BN (rounding off decimals) */
-export const toBnFromI80 = (value: any): BN =>
-  new BN(wrappedI80F48toBigNumber(value).toFixed(0));
-
-/** Shorthand to cast BN/number/bigint as BN */
-export const toBn = (value: BN | number | bigint) => {
-  if (typeof value === "bigint") return new BN(value.toString());
-  if (typeof value === "number") return new BN(value);
-  return value;
-};
-
 /**
  * Returns the user's active asset shares for a given bank as raw BigNumber precision.
  * Returns zero when no active balance exists for that bank.
@@ -658,7 +670,7 @@ export const mintToTokenAccount = async (
     mint,
     destination,
     globalProgramAdmin.wallet.publicKey,
-    BigInt(amount.toString()),
+    bnToBigIntSafe(amount),
     [],
     TOKEN_PROGRAM_ID,
   );
@@ -732,7 +744,11 @@ export const buildHealthRemainingAccounts = async (
     }
 
     if (assetTag === ASSET_TAG_STAKED) {
-      group.push(bank.config.oracleKeys[1], bank.config.oracleKeys[2]);
+      group.push(
+        bank.config.oracleKeys[1],
+        bank.config.oracleKeys[2],
+        bank.config.oracleKeys[3],
+      );
     }
 
     groups.push(group);
@@ -752,7 +768,6 @@ export async function advanceBankrunClock(
   ctx: ProgramTestContext,
   seconds: number,
 ): Promise<number> {
-  const { Clock } = await import("solana-bankrun");
   const clock = await ctx.banksClient.getClock();
   const newClock = new Clock(
     clock.slot + BigInt(1),
@@ -776,3 +791,32 @@ export const getBankrunBlockhash = async (
 ) => {
   return (await bankrunContext.banksClient.getLatestBlockhash())[0];
 };
+
+const EMISSIONS_MINT_OFFSET = 864 + 8;
+
+/**
+ * Directly set an emissions mint on a bank account and return the previous mint
+ */
+export async function setEmissionsDirect(
+  provider: BankrunProvider,
+  bank: PublicKey,
+  emissionsMint: PublicKey,
+): Promise<PublicKey> {
+  const existing = await provider.context.banksClient.getAccount(bank);
+  if (!existing) throw new Error("Bank account not found in bankrun");
+
+  const buf = Buffer.from(existing.data);
+  const prevMint = new PublicKey(
+    buf.subarray(EMISSIONS_MINT_OFFSET, EMISSIONS_MINT_OFFSET + 32),
+  );
+
+  const emissionsSlice = emissionsMint.toBuffer();
+  emissionsSlice.copy(buf, EMISSIONS_MINT_OFFSET);
+
+  provider.context.setAccount(bank, {
+    ...existing,
+    data: buf,
+  });
+
+  return prevMint;
+}

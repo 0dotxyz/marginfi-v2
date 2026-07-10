@@ -19,7 +19,6 @@ use juplend_mocks::state::Lending as JuplendLending;
 use kamino_mocks::mock_kamino_lending_processor;
 use kamino_mocks::state::{MinimalObligation, MinimalReserve};
 use marginfi::{
-    constants::JUPLEND_F_TOKEN_VAULT_SEED,
     state::{
         bank::{BankImpl, BankVaultType},
         drift::DriftConfigCompact,
@@ -27,6 +26,16 @@ use marginfi::{
         kamino::KaminoConfigCompact,
     },
     utils::{find_bank_vault_authority_pda, find_bank_vault_pda},
+};
+use marginfi_type_crate::pdas::{
+    derive_drift_insurance_fund_vault, derive_drift_signer, derive_drift_spot_market,
+    derive_drift_spot_market_vault, derive_drift_state, derive_drift_user, derive_drift_user_stats,
+    derive_juplend_auth_list, derive_juplend_borrow_position, derive_juplend_claim_account,
+    derive_juplend_f_token_mint, derive_juplend_f_token_vault, derive_juplend_lending,
+    derive_juplend_lending_admin, derive_juplend_liquidity, derive_juplend_rate_model,
+    derive_juplend_rewards_admin, derive_juplend_rewards_rate_model,
+    derive_juplend_supply_position, derive_juplend_token_reserve, derive_kamino_base_obligation,
+    derive_kamino_lending_market_authority, derive_kamino_user_metadata,
 };
 use marginfi_type_crate::{
     constants::{MAX_ORACLE_KEYS, PYTH_PUSH_MIGRATED_DEPRECATED},
@@ -40,19 +49,19 @@ use solana_sdk::{account::AccountSharedData, entrypoint::ProgramResult};
 
 use fixed_macro::types::I80F48;
 use lazy_static::lazy_static;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program::{hash::Hash, sysvar};
 use solana_program_test::*;
 use solana_sdk::{
     account::Account,
-    compute_budget::ComputeBudgetInstruction,
     instruction::{AccountMeta, Instruction},
-    pubkey,
     signature::Keypair,
     signer::Signer,
     transaction::Transaction,
 };
 
 use anchor_lang::system_program;
+use solana_program::clock::Clock;
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc};
 
 #[derive(Default, Debug, Clone)]
@@ -488,9 +497,9 @@ lazy_static! {
     pub static ref DEFAULT_TEST_BANK_INTEREST_RATE_CONFIG: InterestRateConfig =
         InterestRateConfig {
             // TODO deprecate in 1.7
-            optimal_utilization_rate: I80F48!(0.5).into(),
-            plateau_interest_rate: I80F48!(0.6).into(),
-            max_interest_rate: I80F48!(3).into(),
+            placeholder0: I80F48!(0.5).into(),
+            placeholder1: I80F48!(0.6).into(),
+            placeholder2: I80F48!(3).into(),
 
             insurance_fee_fixed_apr: I80F48!(0).into(),
             insurance_ir_fee: I80F48!(0).into(),
@@ -519,9 +528,9 @@ lazy_static! {
 
         interest_rate_config: InterestRateConfig {
             // TODO deprecate in 1.7
-            optimal_utilization_rate: I80F48!(0).into(),
-            plateau_interest_rate: I80F48!(0).into(),
-            max_interest_rate: I80F48!(0).into(),
+            placeholder0: I80F48!(0).into(),
+            placeholder1: I80F48!(0).into(),
+            placeholder2: I80F48!(0).into(),
 
             insurance_fee_fixed_apr: I80F48!(0).into(),
             insurance_ir_fee: I80F48!(0).into(),
@@ -653,9 +662,9 @@ pub const SOL_MINT_DECIMALS: u8 = 9;
 pub const MNDE_MINT_DECIMALS: u8 = 9;
 
 pub fn marginfi_entry<'info>(
-    program_id: &Pubkey,
+    program_id: &'info Pubkey,
     accounts: &'info [AccountInfo<'info>],
-    data: &[u8],
+    data: &'info [u8],
 ) -> ProgramResult {
     marginfi::entry(program_id, accounts, data)
 }
@@ -1134,6 +1143,61 @@ impl TestFixture {
         ctx.set_account(&address, &aso);
     }
 
+    /// Overwrite the Pyth push oracle account at `address` with a new native price, confidence,
+    /// and publish_time. `prev_publish_time` is set equal to `publish_time` so the message looks
+    /// freshly published. Decimals come from the price's `exponent` (preserved from the existing
+    /// account so the bank's price math stays consistent).
+    pub async fn set_pyth_oracle_price_native(
+        &self,
+        address: Pubkey,
+        native_price: i64,
+        conf: u64,
+        publish_time: i64,
+    ) {
+        let mut ctx = self.context.borrow_mut();
+        let mut account = ctx
+            .banks_client
+            .get_account(address)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let data = account.data.as_mut_slice();
+        let mut price_update = PriceUpdateV2::deserialize(&mut &data[8..]).unwrap();
+        price_update.price_message.price = native_price;
+        price_update.price_message.conf = conf;
+        price_update.price_message.publish_time = publish_time;
+        price_update.price_message.prev_publish_time = publish_time;
+        price_update.price_message.ema_price = native_price;
+        price_update.price_message.ema_conf = conf;
+
+        let mut new_data = vec![];
+        new_data.extend_from_slice(PriceUpdateV2::DISCRIMINATOR);
+        let mut serialized = vec![];
+        price_update.serialize(&mut serialized).unwrap();
+        new_data.extend_from_slice(&serialized);
+
+        let mut aso = AccountSharedData::from(account);
+        aso.set_data_from_slice(&new_data);
+        ctx.set_account(&address, &aso);
+    }
+
+    /// Set the Clock sysvar's `slot` and `unix_timestamp` directly. Used to drive the
+    /// circuit-breaker's slot/time gates from tests without coupling them to `warp_to_slot`'s
+    /// derived time.
+    pub async fn set_clock(&self, slot: u64, unix_timestamp: i64) {
+        let mut clock: Clock = self
+            .context
+            .borrow_mut()
+            .banks_client
+            .get_sysvar()
+            .await
+            .unwrap();
+        clock.slot = slot;
+        clock.unix_timestamp = unix_timestamp;
+        self.context.borrow_mut().set_sysvar(&clock);
+    }
+
     pub async fn advance_time(&self, seconds: i64) {
         let mut clock: Clock = self
             .context
@@ -1182,84 +1246,6 @@ impl TestFixture {
         self.context.borrow_mut().last_blockhash = blockhash;
     }
 
-    fn derive_kamino_lending_market_authority(lending_market: Pubkey) -> (Pubkey, u8) {
-        Pubkey::find_program_address(
-            &[b"lma", lending_market.as_ref()],
-            &kamino_mocks::kamino_lending::ID,
-        )
-    }
-
-    fn derive_kamino_user_metadata(owner: Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"user_meta", owner.as_ref()],
-            &kamino_mocks::kamino_lending::ID,
-        )
-        .0
-    }
-
-    fn derive_kamino_base_obligation(owner: Pubkey, lending_market: Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[
-                &[0u8],
-                &[0u8],
-                owner.as_ref(),
-                lending_market.as_ref(),
-                system_program::ID.as_ref(),
-                system_program::ID.as_ref(),
-            ],
-            &kamino_mocks::kamino_lending::ID,
-        )
-        .0
-    }
-
-    fn derive_drift_state() -> Pubkey {
-        Pubkey::find_program_address(&[b"drift_state"], &drift_mocks::drift::ID).0
-    }
-
-    fn derive_drift_signer() -> Pubkey {
-        Pubkey::find_program_address(&[b"drift_signer"], &drift_mocks::drift::ID).0
-    }
-
-    fn derive_drift_spot_market(market_index: u16) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"spot_market", &market_index.to_le_bytes()],
-            &drift_mocks::drift::ID,
-        )
-        .0
-    }
-
-    fn derive_drift_spot_market_vault(market_index: u16) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"spot_market_vault", &market_index.to_le_bytes()],
-            &drift_mocks::drift::ID,
-        )
-        .0
-    }
-
-    fn derive_drift_insurance_fund_vault(market_index: u16) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"insurance_fund_vault", &market_index.to_le_bytes()],
-            &drift_mocks::drift::ID,
-        )
-        .0
-    }
-
-    fn derive_drift_user(authority: Pubkey, user_index: u16) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"user", authority.as_ref(), &user_index.to_le_bytes()],
-            &drift_mocks::drift::ID,
-        )
-        .0
-    }
-
-    fn derive_drift_user_stats(authority: Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[b"user_stats", authority.as_ref()],
-            &drift_mocks::drift::ID,
-        )
-        .0
-    }
-
     async fn process_ixs(
         ctx: Rc<RefCell<ProgramTestContext>>,
         ixs: &[Instruction],
@@ -1299,6 +1285,10 @@ impl TestFixture {
         clock.unix_timestamp = reserve.market_price_last_updated_ts as i64;
         test_f.context.borrow_mut().set_sysvar(&clock);
 
+        test_f
+            .set_pyth_oracle_timestamp(PYTH_USDC_FEED, reserve.market_price_last_updated_ts as i64)
+            .await;
+
         // Keep fixture setup simple by disabling reserve farms for these local ix tests.
         if reserve.farm_collateral != Pubkey::default() || reserve.farm_debt != Pubkey::default() {
             let mut reserve_account = test_f.try_load(&reserve_key).await.unwrap().unwrap();
@@ -1317,12 +1307,10 @@ impl TestFixture {
 
         let lending_market = reserve.lending_market;
         let (lending_market_authority, lending_market_authority_bump) =
-            Self::derive_kamino_lending_market_authority(lending_market);
+            derive_kamino_lending_market_authority(&lending_market);
         let reserve_liquidity_supply = reserve.supply_vault;
         let reserve_collateral_mint = reserve.collateral_mint_pubkey;
         let reserve_collateral_supply = reserve.collateral_supply_vault;
-        let reserve_pyth_oracle =
-            get_oracle_id_from_feed_id(PYTH_USDC_FEED).unwrap_or(PYTH_USDC_FEED);
         create_spl_mint_account_if_missing(
             test_f.context.clone(),
             reserve.mint_pubkey,
@@ -1400,7 +1388,7 @@ impl TestFixture {
         let liquidity_vault_authority =
             find_bank_vault_authority_pda(&bank_key, BankVaultType::Liquidity).0;
         let obligation =
-            Self::derive_kamino_base_obligation(liquidity_vault_authority, lending_market);
+            derive_kamino_base_obligation(&liquidity_vault_authority, &lending_market).0;
         create_system_account_if_missing(test_f.context.clone(), obligation).await;
 
         let bank_config = KaminoConfigCompact::new(
@@ -1458,7 +1446,7 @@ impl TestFixture {
             .unwrap();
 
         let init_source = reserve_mint.create_token_account_and_mint_to(1.0).await;
-        let user_metadata = Self::derive_kamino_user_metadata(liquidity_vault_authority);
+        let user_metadata = derive_kamino_user_metadata(&liquidity_vault_authority).0;
         create_system_account_if_missing(test_f.context.clone(), user_metadata).await;
 
         let init_ix = Instruction {
@@ -1478,11 +1466,6 @@ impl TestFixture {
                 reserve_liquidity_supply,
                 reserve_collateral_mint,
                 reserve_destination_deposit_collateral: reserve_collateral_supply,
-                pyth_oracle: (reserve_pyth_oracle != Pubkey::default())
-                    .then_some(reserve_pyth_oracle),
-                switchboard_price_oracle: None,
-                switchboard_twap_oracle: None,
-                scope_prices: None,
                 obligation_farm_user_state: None,
                 reserve_farm_state: None,
                 kamino_program: kamino_mocks::kamino_lending::ID,
@@ -1500,6 +1483,9 @@ impl TestFixture {
             .data(),
         };
         let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
+
+        test_f.refresh_blockhash().await;
+
         Self::process_ixs(test_f.context.clone(), &[cu_ix, init_ix])
             .await
             .unwrap();
@@ -1519,11 +1505,11 @@ impl TestFixture {
         });
         let test_f = TestFixture::new_with_t22_extension_inner(Some(settings), &[], true).await;
 
-        let drift_state = Self::derive_drift_state();
-        let drift_signer = Self::derive_drift_signer();
-        let spot_market = Self::derive_drift_spot_market(DRIFT_USDC_MARKET_INDEX);
-        let spot_market_vault = Self::derive_drift_spot_market_vault(DRIFT_USDC_MARKET_INDEX);
-        let insurance_fund_vault = Self::derive_drift_insurance_fund_vault(DRIFT_USDC_MARKET_INDEX);
+        let drift_state = derive_drift_state().0;
+        let drift_signer = derive_drift_signer().0;
+        let spot_market = derive_drift_spot_market(DRIFT_USDC_MARKET_INDEX).0;
+        let spot_market_vault = derive_drift_spot_market_vault(DRIFT_USDC_MARKET_INDEX).0;
+        let insurance_fund_vault = derive_drift_insurance_fund_vault(DRIFT_USDC_MARKET_INDEX).0;
 
         let init_drift_state_ix = Instruction {
             program_id: drift_mocks::drift::ID,
@@ -1600,8 +1586,8 @@ impl TestFixture {
 
         let liquidity_vault_authority =
             find_bank_vault_authority_pda(&bank_key, BankVaultType::Liquidity).0;
-        let drift_user = Self::derive_drift_user(liquidity_vault_authority, 0);
-        let drift_user_stats = Self::derive_drift_user_stats(liquidity_vault_authority);
+        let drift_user = derive_drift_user(&liquidity_vault_authority, 0).0;
+        let drift_user_stats = derive_drift_user_stats(&liquidity_vault_authority).0;
         create_system_account_if_missing(test_f.context.clone(), drift_user).await;
         create_system_account_if_missing(test_f.context.clone(), drift_user_stats).await;
 
@@ -1710,23 +1696,23 @@ impl TestFixture {
         let mint = test_f.usdc_mint.key;
         let token_program = spl_token::ID;
 
-        let liquidity = derive_juplend_liquidity();
-        let auth_list = derive_juplend_auth_list();
-        let token_reserve = derive_juplend_token_reserve(mint);
-        let rate_model = derive_juplend_rate_model(mint);
+        let liquidity = derive_juplend_liquidity().0;
+        let auth_list = derive_juplend_auth_list().0;
+        let token_reserve = derive_juplend_token_reserve(&mint).0;
+        let rate_model = derive_juplend_rate_model(&mint).0;
         let reserve_vault =
             get_associated_token_address_with_program_id(&liquidity, &mint, &token_program);
 
-        let lending_admin = derive_juplend_lending_admin();
-        let f_token_mint = derive_juplend_f_token_mint(mint);
-        let lending = derive_juplend_lending(mint, f_token_mint);
+        let lending_admin = derive_juplend_lending_admin().0;
+        let f_token_mint = derive_juplend_f_token_mint(&mint).0;
+        let lending = derive_juplend_lending(&mint, &f_token_mint).0;
         let metadata_account = derive_token_metadata(f_token_mint);
 
-        let rewards_admin = derive_juplend_rewards_admin();
-        let rewards_rate_model = derive_juplend_rewards_rate_model(mint);
+        let rewards_admin = derive_juplend_rewards_admin().0;
+        let rewards_rate_model = derive_juplend_rewards_rate_model(&mint).0;
 
-        let user_supply_position = derive_juplend_supply_position(mint, lending);
-        let user_borrow_position = derive_juplend_borrow_position(mint, lending);
+        let user_supply_position = derive_juplend_supply_position(&mint, &lending).0;
+        let user_borrow_position = derive_juplend_borrow_position(&mint, &lending).0;
 
         // Seed a small mint supply so Juplend borrow-config admin checks accept
         // non-zero debt ceiling values.
@@ -2066,11 +2052,7 @@ impl TestFixture {
                 fee_vault_authority: find_bank_vault_authority_pda(&bank_key, BankVaultType::Fee).0,
                 fee_vault: find_bank_vault_pda(&bank_key, BankVaultType::Fee).0,
                 f_token_mint,
-                integration_acc_2: Pubkey::find_program_address(
-                    &[JUPLEND_F_TOKEN_VAULT_SEED.as_bytes(), bank_key.as_ref()],
-                    &marginfi::ID,
-                )
-                .0,
+                integration_acc_2: derive_juplend_f_token_vault(&marginfi::ID, &bank_key).0,
                 token_program,
                 system_program: system_program::ID,
             }
@@ -2101,7 +2083,7 @@ impl TestFixture {
         )
         .await;
 
-        let claim_account = derive_juplend_claim_account(liquidity_vault_authority, mint);
+        let claim_account = derive_juplend_claim_account(&liquidity_vault_authority, &mint).0;
         let init_claim_account_ix = Instruction {
             program_id: juplend_mocks::liquidity::ID,
             accounts: juplend_liquidity::accounts::InitClaimAccount {
@@ -2409,82 +2391,6 @@ pub fn get_mint_price(mint: BankMint) -> f64 {
         | BankMint::SolEquivalent9
         | BankMint::SolEqIsolated => 10.0,
     }
-}
-
-fn derive_juplend_liquidity() -> Pubkey {
-    Pubkey::find_program_address(&[b"liquidity"], &juplend_mocks::liquidity::ID).0
-}
-
-fn derive_juplend_auth_list() -> Pubkey {
-    Pubkey::find_program_address(&[b"auth_list"], &juplend_mocks::liquidity::ID).0
-}
-
-fn derive_juplend_token_reserve(mint: Pubkey) -> Pubkey {
-    Pubkey::find_program_address(&[b"reserve", mint.as_ref()], &juplend_mocks::liquidity::ID).0
-}
-
-fn derive_juplend_rate_model(mint: Pubkey) -> Pubkey {
-    Pubkey::find_program_address(
-        &[b"rate_model", mint.as_ref()],
-        &juplend_mocks::liquidity::ID,
-    )
-    .0
-}
-
-fn derive_juplend_lending_admin() -> Pubkey {
-    Pubkey::find_program_address(&[b"lending_admin"], &juplend_mocks::ID).0
-}
-
-fn derive_juplend_f_token_mint(mint: Pubkey) -> Pubkey {
-    Pubkey::find_program_address(&[b"f_token_mint", mint.as_ref()], &juplend_mocks::ID).0
-}
-
-fn derive_juplend_lending(mint: Pubkey, f_token_mint: Pubkey) -> Pubkey {
-    Pubkey::find_program_address(
-        &[b"lending", mint.as_ref(), f_token_mint.as_ref()],
-        &juplend_mocks::ID,
-    )
-    .0
-}
-
-fn derive_juplend_supply_position(mint: Pubkey, protocol: Pubkey) -> Pubkey {
-    Pubkey::find_program_address(
-        &[b"user_supply_position", mint.as_ref(), protocol.as_ref()],
-        &juplend_mocks::liquidity::ID,
-    )
-    .0
-}
-
-fn derive_juplend_borrow_position(mint: Pubkey, protocol: Pubkey) -> Pubkey {
-    Pubkey::find_program_address(
-        &[b"user_borrow_position", mint.as_ref(), protocol.as_ref()],
-        &juplend_mocks::liquidity::ID,
-    )
-    .0
-}
-
-fn derive_juplend_rewards_admin() -> Pubkey {
-    Pubkey::find_program_address(
-        &[b"lending_rewards_admin"],
-        &juplend_mocks::lending_reward_rate_model::ID,
-    )
-    .0
-}
-
-fn derive_juplend_rewards_rate_model(mint: Pubkey) -> Pubkey {
-    Pubkey::find_program_address(
-        &[b"lending_rewards_rate_model", mint.as_ref()],
-        &juplend_mocks::lending_reward_rate_model::ID,
-    )
-    .0
-}
-
-fn derive_juplend_claim_account(user: Pubkey, mint: Pubkey) -> Pubkey {
-    Pubkey::find_program_address(
-        &[b"user_claim", user.as_ref(), mint.as_ref()],
-        &juplend_mocks::liquidity::ID,
-    )
-    .0
 }
 
 fn derive_token_metadata(mint: Pubkey) -> Pubkey {

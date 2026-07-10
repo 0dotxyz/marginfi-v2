@@ -55,17 +55,23 @@ pub struct BankCache {
     pub last_oracle_price_confidence: WrappedI80F48,
     /// Liquidation cache flags, set during receivership flow.
     /// * 1 (LIQ_CACHE_LOCKED_FLAG) - We "lock" the liquidation cache when writing to it in Start
-    /// Liquidate as an additional safeguard, if the liquidation prices stored here were to be
-    /// edited between start and end, it would completely break the risk engine. End validates that
-    /// the lock is set, panics if not, and removes it - which prevents footguns if the cache was
-    /// e.g. accidently set to default. The lock is also removed when a Balance is closed via
-    /// withdraw_all, repay_all, or close_balance, but only when the account has
-    /// ACCOUNT_IN_RECEIVERSHIP set, so that operations on unrelated accounts sharing the same
-    /// bank do not interfere with an in-progress liquidation.
+    ///   Liquidate as an additional safeguard, if the liquidation prices stored here were to be
+    ///   edited between start and end, it would completely break the risk engine. End validates that
+    ///   the lock is set, panics if not, and removes it - which prevents footguns if the cache was
+    ///   e.g. accidently set to default. The lock is also removed when a Balance is closed via
+    ///   withdraw_all, repay_all, or close_balance, but only when the account has
+    ///   ACCOUNT_IN_RECEIVERSHIP set, so that operations on unrelated accounts sharing the same
+    ///   bank do not interfere with an in-progress liquidation.
     pub liq_cache_flags: u8,
-    _padding: [u8; 23],
-    // INFO: these are duplicative of `last_oracle_price` and `last_oracle_price_timestamp` so if
-    // space is ever needed we can recycle at least two of these (32 bytes)
+    _cb_cache_pad: [u8; 7],
+    /// For integration banks, this is the exchange rate of cToken/token or similar. The "real"
+    /// price of one deposited token is `price_multiplier` * `last_oracle_price`, we split it here
+    /// for consumers who are only interested in reading the oracle price and are applying the
+    /// multiplier already elsewhere.
+    pub price_multiplier: WrappedI80F48,
+    // INFO: liquidation_price_* are duplicative of `last_oracle_price` (multiplied by
+    // `price_multiplier` when applicable) and `last_oracle_price_timestamp` so if space is ever
+    // needed we can recycle at least two of these (32 bytes).
     /// Cached real-time price for receivership liquidation.
     pub liquidation_price_rt: WrappedI80F48,
     /// Cached real-time price confidence for receivership liquidation.
@@ -85,17 +91,20 @@ impl Default for BankCache {
 impl BankCache {
     pub const LIQ_CACHE_LOCKED_FLAG: u8 = 1 << 0;
 
-    /// Reset cached rate metrics while preserving the last oracle price snapshot.
-    pub fn reset_preserving_oracle_price(&mut self) {
+    /// Reset cached rate metrics while preserving the oracle-price snapshot. Bank-level CB fields
+    /// live on `Bank` and are unaffected by this reset.
+    pub fn reset_preserving_oracle_state(&mut self) {
         let last_oracle_price = self.last_oracle_price;
         let last_oracle_price_timestamp = self.last_oracle_price_timestamp;
         let last_oracle_price_confidence = self.last_oracle_price_confidence;
+        let price_multiplier = self.price_multiplier;
 
         *self = Self::default();
 
         self.last_oracle_price = last_oracle_price;
         self.last_oracle_price_timestamp = last_oracle_price_timestamp;
         self.last_oracle_price_confidence = last_oracle_price_confidence;
+        self.price_multiplier = price_multiplier;
     }
 
     pub fn is_liquidation_price_cache_locked(&self) -> bool {

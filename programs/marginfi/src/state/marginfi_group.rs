@@ -1,4 +1,7 @@
-use crate::state::emode::{DEFAULT_INIT_MAX_EMODE_LEVERAGE, DEFAULT_MAINT_MAX_EMODE_LEVERAGE};
+use crate::state::emode::{
+    DEFAULT_INIT_MAX_EMODE_LEVERAGE, DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE,
+    DEFAULT_MAINT_MAX_EMODE_LEVERAGE, DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE,
+};
 use crate::{prelude::MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
@@ -14,6 +17,7 @@ pub trait MarginfiGroupImpl {
     fn update_curve_admin(&mut self, new_curve_admin: Pubkey);
     fn update_limit_admin(&mut self, new_limit_admin: Pubkey);
     fn update_flow_admin(&mut self, new_flow_admin: Pubkey);
+    /// DEPRECATED: updates stored emissions-admin metadata only; currently grants no authority.
     fn update_emissions_admin(&mut self, new_emissions_admin: Pubkey);
     fn update_metadata_admin(&mut self, new_metadata_admin: Pubkey);
     fn update_risk_admin(&mut self, new_risk_admin: Pubkey);
@@ -153,6 +157,10 @@ impl MarginfiGroupImpl for MarginfiGroup {
         self.set_program_fee_enabled(true);
         self.emode_max_init_leverage = basis_to_u32(DEFAULT_INIT_MAX_EMODE_LEVERAGE);
         self.emode_max_maint_leverage = basis_to_u32(DEFAULT_MAINT_MAX_EMODE_LEVERAGE);
+        self.same_asset_emode_init_leverage =
+            basis_to_u32(DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE);
+        self.same_asset_emode_maint_leverage =
+            basis_to_u32(DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE);
     }
 
     fn get_group_bank_config(&self) -> GroupBankConfig {

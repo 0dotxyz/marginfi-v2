@@ -10,8 +10,9 @@ use marginfi_type_crate::{
 };
 
 use crate::{
-    check, debug,
+    debug,
     errors::MarginfiError,
+    math_error,
     prelude::MarginfiResult,
     set_if_some,
     state::{bank_cache::ComputedInterestRates, marginfi_group::MarginfiGroupImpl},
@@ -33,9 +34,6 @@ impl InterestRateConfigImpl for InterestRateConfig {
             group_bank_config.program_fees
         );
         InterestRateCalc {
-            optimal_utilization_rate: self.optimal_utilization_rate.into(),
-            plateau_interest_rate: self.plateau_interest_rate.into(),
-            max_interest_rate: self.max_interest_rate.into(),
             insurance_fixed_fee: self.insurance_fee_fixed_apr.into(),
             insurance_rate_fee: self.insurance_ir_fee.into(),
             protocol_fixed_fee: self.protocol_fixed_fee_apr.into(),
@@ -52,7 +50,6 @@ impl InterestRateConfigImpl for InterestRateConfig {
 
     fn validate(&self) -> MarginfiResult {
         match self.curve_type {
-            // TODO deprecate in 1.7
             INTEREST_CURVE_LEGACY => self.validate_legacy()?,
             INTEREST_CURVE_SEVEN_POINT => self.validate_seven_point()?,
             _ => panic!("unsupported curve type"),
@@ -62,19 +59,8 @@ impl InterestRateConfigImpl for InterestRateConfig {
     }
 
     fn validate_legacy(&self) -> MarginfiResult {
-        let optimal_ur: I80F48 = self.optimal_utilization_rate.into();
-        let plateau_ir: I80F48 = self.plateau_interest_rate.into();
-        let max_ir: I80F48 = self.max_interest_rate.into();
-
-        check!(
-            optimal_ur > I80F48::ZERO && optimal_ur < I80F48::ONE,
-            MarginfiError::InvalidConfig
-        );
-        check!(plateau_ir > I80F48::ZERO, MarginfiError::InvalidConfig);
-        check!(max_ir > I80F48::ZERO, MarginfiError::InvalidConfig);
-        check!(plateau_ir < max_ir, MarginfiError::InvalidConfig);
-
-        Ok(())
+        msg!("Legacy interest curve type is deprecated and unsupported");
+        err!(MarginfiError::InvalidConfig)
     }
 
     /// * the rate at zero is the lowest
@@ -166,10 +152,6 @@ impl InterestRateConfigImpl for InterestRateConfig {
 #[derive(Debug, Clone)]
 /// Short for calculator
 pub struct InterestRateCalc {
-    optimal_utilization_rate: I80F48,
-    plateau_interest_rate: I80F48,
-    max_interest_rate: I80F48,
-
     // Fees
     insurance_fixed_fee: I80F48,
     insurance_rate_fee: I80F48,
@@ -193,7 +175,10 @@ impl InterestRateCalc {
     /// Rate is denominated in APR (0-).
     ///
     /// Return ComputedInterestRates
-    pub fn calc_interest_rate(&self, utilization_ratio: I80F48) -> Option<ComputedInterestRates> {
+    pub fn calc_interest_rate(
+        &self,
+        utilization_ratio: I80F48,
+    ) -> MarginfiResult<ComputedInterestRates> {
         let Fees {
             insurance_fee_rate,
             insurance_fee_fixed,
@@ -207,26 +192,37 @@ impl InterestRateCalc {
         let fee_fixed: I80F48 = insurance_fee_fixed + group_fee_fixed + protocol_fee_fixed;
 
         let base_rate_apr: I80F48 = match self.curve_type {
-            // TODO deprecate in 1.7 (change to no-op with msg warning?)
-            INTEREST_CURVE_LEGACY => self.interest_rate_curve(utilization_ratio)?,
-            INTEREST_CURVE_SEVEN_POINT => self.interest_rate_multipoint_curve(utilization_ratio)?,
+            INTEREST_CURVE_LEGACY => {
+                msg!("Legacy interest curve type is deprecated and unsupported");
+                return err!(MarginfiError::InvalidConfig);
+            }
+            INTEREST_CURVE_SEVEN_POINT => self
+                .interest_rate_multipoint_curve(utilization_ratio)
+                .ok_or_else(math_error!())?,
             _ => panic!("unsupported curve type"),
         };
 
         // Lending rate is adjusted for utilization ratio to symmetrize payments between borrowers and depositors.
-        let lending_rate_apr: I80F48 = base_rate_apr.checked_mul(utilization_ratio)?;
+        let lending_rate_apr: I80F48 = base_rate_apr
+            .checked_mul(utilization_ratio)
+            .ok_or_else(math_error!())?;
 
         // Borrowing rate is adjusted for fees.
         // borrowing_rate = base_rate + base_rate * rate_fee + total_fixed_fee_apr
         let borrowing_rate_apr: I80F48 = base_rate_apr
-            .checked_mul(I80F48::ONE.checked_add(fee_ir)?)?
-            .checked_add(fee_fixed)?;
+            .checked_mul(I80F48::ONE.checked_add(fee_ir).ok_or_else(math_error!())?)
+            .ok_or_else(math_error!())?
+            .checked_add(fee_fixed)
+            .ok_or_else(math_error!())?;
 
-        let group_fee_apr: I80F48 = calc_fee_rate(base_rate_apr, group_fee_rate, group_fee_fixed)?;
+        let group_fee_apr: I80F48 = calc_fee_rate(base_rate_apr, group_fee_rate, group_fee_fixed)
+            .ok_or_else(math_error!())?;
         let insurance_fee_apr: I80F48 =
-            calc_fee_rate(base_rate_apr, insurance_fee_rate, insurance_fee_fixed)?;
+            calc_fee_rate(base_rate_apr, insurance_fee_rate, insurance_fee_fixed)
+                .ok_or_else(math_error!())?;
         let protocol_fee_apr: I80F48 =
-            calc_fee_rate(base_rate_apr, protocol_fee_rate, protocol_fee_fixed)?;
+            calc_fee_rate(base_rate_apr, protocol_fee_rate, protocol_fee_fixed)
+                .ok_or_else(math_error!())?;
 
         assert!(lending_rate_apr >= I80F48::ZERO);
         assert!(borrowing_rate_apr >= I80F48::ZERO);
@@ -234,7 +230,7 @@ impl InterestRateCalc {
         assert!(insurance_fee_apr >= I80F48::ZERO);
         assert!(protocol_fee_apr >= I80F48::ZERO);
 
-        Some(ComputedInterestRates {
+        Ok(ComputedInterestRates {
             base_rate_apr,
             lending_rate_apr,
             borrowing_rate_apr,
@@ -242,26 +238,6 @@ impl InterestRateCalc {
             insurance_fee_apr,
             protocol_fee_apr,
         })
-    }
-
-    // TODO deprecate in 1.7
-    /// Piecewise linear interest rate function.
-    /// The curves approaches the `plateau_interest_rate` as the utilization ratio approaches the `optimal_utilization_rate`,
-    /// once the utilization ratio exceeds the `optimal_utilization_rate`, the curve approaches the `max_interest_rate`.
-    #[inline]
-    fn interest_rate_curve(&self, ur: I80F48) -> Option<I80F48> {
-        let optimal_ur: I80F48 = self.optimal_utilization_rate;
-        let plateau_ir: I80F48 = self.plateau_interest_rate;
-        let max_ir: I80F48 = self.max_interest_rate;
-
-        if ur <= optimal_ur {
-            ur.checked_div(optimal_ur)?.checked_mul(plateau_ir)
-        } else {
-            (ur - optimal_ur)
-                .checked_div(I80F48::ONE - optimal_ur)?
-                .checked_mul(max_ir - plateau_ir)?
-                .checked_add(plateau_ir)
-        }
     }
 
     /// Locates ur on a piecewise linear interest rate function with seven points:
@@ -453,9 +429,11 @@ pub fn calc_interest_rate_accrual_state_changes(
     interest_rate_calc: &InterestRateCalc,
     asset_share_value: I80F48,
     liability_share_value: I80F48,
-) -> Option<InterestRateStateChanges> {
+) -> MarginfiResult<InterestRateStateChanges> {
     // If the cache is empty, we need to calculate the interest rates
-    let utilization_rate: I80F48 = total_liabilities_amount.checked_div(total_assets_amount)?;
+    let utilization_rate: I80F48 = total_liabilities_amount
+        .checked_div(total_assets_amount)
+        .ok_or_else(math_error!())?;
     debug!(
         "Utilization rate: {}, time delta {}s",
         utilization_rate, time_delta
@@ -473,32 +451,37 @@ pub fn calc_interest_rate_accrual_state_changes(
         ..
     } = interest_rates;
 
-    Some(InterestRateStateChanges {
+    Ok(InterestRateStateChanges {
         new_asset_share_value: calc_accrued_interest_payment_per_period(
             lending_rate_apr,
             time_delta,
             asset_share_value,
-        )?,
+        )
+        .ok_or_else(math_error!())?,
         new_liability_share_value: calc_accrued_interest_payment_per_period(
             borrowing_rate_apr,
             time_delta,
             liability_share_value,
-        )?,
+        )
+        .ok_or_else(math_error!())?,
         insurance_fees_collected: calc_interest_payment_for_period(
             insurance_fee_apr,
             time_delta,
             total_liabilities_amount,
-        )?,
+        )
+        .ok_or_else(math_error!())?,
         group_fees_collected: calc_interest_payment_for_period(
             group_fee_apr,
             time_delta,
             total_liabilities_amount,
-        )?,
+        )
+        .ok_or_else(math_error!())?,
         protocol_fees_collected: calc_interest_payment_for_period(
             protocol_fee_apr,
             time_delta,
             total_liabilities_amount,
-        )?,
+        )
+        .ok_or_else(math_error!())?,
     })
 }
 
@@ -612,9 +595,6 @@ mod tests {
 
     fn sample_multipoint_calc() -> InterestRateCalc {
         InterestRateCalc {
-            optimal_utilization_rate: I80F48::ZERO,
-            plateau_interest_rate: I80F48::ZERO,
-            max_interest_rate: I80F48::ZERO,
             insurance_fixed_fee: I80F48::ZERO,
             insurance_rate_fee: I80F48::ZERO,
             protocol_fixed_fee: I80F48::ZERO,
@@ -663,6 +643,27 @@ mod tests {
     }
 
     #[test]
+    fn legacy_curve_validation_is_rejected() {
+        let config = InterestRateConfig {
+            curve_type: INTEREST_CURVE_LEGACY,
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn legacy_curve_rate_calculation_is_rejected() {
+        let config = InterestRateConfig {
+            curve_type: INTEREST_CURVE_LEGACY,
+            ..Default::default()
+        };
+        assert!(config
+            .create_interest_rate_calculator(&MarginfiGroup::default())
+            .calc_interest_rate(I80F48!(0.5))
+            .is_err());
+    }
+
+    #[test]
     /// apr: 12%
     /// time: 1 second
     /// principal: 1_000_000
@@ -680,9 +681,11 @@ mod tests {
     /// protocol_fixed_fee: 0.01
     fn ir_config_calc_interest_rate_pff_01() {
         let config = InterestRateConfig {
-            optimal_utilization_rate: I80F48!(0.6).into(),
-            plateau_interest_rate: I80F48!(0.40).into(),
             protocol_fixed_fee_apr: I80F48!(0.01).into(),
+            zero_util_rate: apr_to_u32(0.0),
+            hundred_util_rate: apr_to_u32(0.4),
+            points: make_points(&[RatePoint::new(util_to_u32(0.6), apr_to_u32(0.4))]),
+            curve_type: INTEREST_CURVE_SEVEN_POINT,
             ..Default::default()
         };
 
@@ -709,14 +712,15 @@ mod tests {
     #[test]
     /// ur: 0.5
     /// protocol_fixed_fee: 0.01
-    /// optimal_utilization_rate: 0.5
-    /// plateau_interest_rate: 0.4
+    /// seven-point curve with a point at util=0.5, rate=0.4
     fn ir_config_calc_interest_rate_pff_01_ur_05() {
         let config = InterestRateConfig {
-            optimal_utilization_rate: I80F48!(0.5).into(),
-            plateau_interest_rate: I80F48!(0.4).into(),
             protocol_fixed_fee_apr: I80F48!(0.01).into(),
             insurance_ir_fee: I80F48!(0.1).into(),
+            zero_util_rate: apr_to_u32(0.0),
+            hundred_util_rate: apr_to_u32(0.4),
+            points: make_points(&[RatePoint::new(util_to_u32(0.5), apr_to_u32(0.4))]),
+            curve_type: INTEREST_CURVE_SEVEN_POINT,
             ..Default::default()
         };
 
@@ -753,18 +757,17 @@ mod tests {
 
     /// ur: 0.8
     /// protocol_fixed_fee: 0.01
-    /// optimal_utilization_rate: 0.5
-    /// plateau_interest_rate: 0.4
-    /// max_interest_rate: 3
+    /// seven-point curve with a point at util=0.4, rate=0.4 and 100%-util rate of 3.0
     /// insurance_ir_fee: 0.1
     #[test]
     fn ir_config_calc_interest_rate_pff_01_ur_08() {
         let config = InterestRateConfig {
-            optimal_utilization_rate: I80F48!(0.4).into(),
-            plateau_interest_rate: I80F48!(0.4).into(),
             protocol_fixed_fee_apr: I80F48!(0.01).into(),
-            max_interest_rate: I80F48!(3).into(),
             insurance_ir_fee: I80F48!(0.1).into(),
+            zero_util_rate: apr_to_u32(0.0),
+            hundred_util_rate: apr_to_u32(3.0),
+            points: make_points(&[RatePoint::new(util_to_u32(0.4), apr_to_u32(0.4))]),
+            curve_type: INTEREST_CURVE_SEVEN_POINT,
             ..Default::default()
         };
 
@@ -790,11 +793,12 @@ mod tests {
     #[test]
     fn ir_accrual_failing_fuzz_test_example() -> anyhow::Result<()> {
         let ir_config = InterestRateConfig {
-            optimal_utilization_rate: I80F48!(0.4).into(),
-            plateau_interest_rate: I80F48!(0.4).into(),
             protocol_fixed_fee_apr: I80F48!(0.01).into(),
-            max_interest_rate: I80F48!(3).into(),
             insurance_ir_fee: I80F48!(0.1).into(),
+            zero_util_rate: apr_to_u32(0.0),
+            hundred_util_rate: apr_to_u32(3.0),
+            points: make_points(&[RatePoint::new(util_to_u32(0.4), apr_to_u32(0.4))]),
+            curve_type: INTEREST_CURVE_SEVEN_POINT,
             ..Default::default()
         };
 
@@ -852,11 +856,12 @@ mod tests {
     #[test]
     fn interest_rate_accrual_test_0() -> anyhow::Result<()> {
         let ir_config = InterestRateConfig {
-            optimal_utilization_rate: I80F48!(0.4).into(),
-            plateau_interest_rate: I80F48!(0.4).into(),
             protocol_fixed_fee_apr: I80F48!(0.01).into(),
-            max_interest_rate: I80F48!(3).into(),
             insurance_ir_fee: I80F48!(0.1).into(),
+            zero_util_rate: apr_to_u32(0.0),
+            hundred_util_rate: apr_to_u32(3.0),
+            points: make_points(&[RatePoint::new(util_to_u32(0.4), apr_to_u32(0.4))]),
+            curve_type: INTEREST_CURVE_SEVEN_POINT,
             ..Default::default()
         };
 
@@ -897,11 +902,12 @@ mod tests {
     #[test]
     fn interest_rate_accrual_test_0_no_protocol_fees() -> anyhow::Result<()> {
         let ir_config = InterestRateConfig {
-            optimal_utilization_rate: I80F48!(0.4).into(),
-            plateau_interest_rate: I80F48!(0.4).into(),
             protocol_fixed_fee_apr: I80F48!(0.01).into(),
-            max_interest_rate: I80F48!(3).into(),
             insurance_ir_fee: I80F48!(0.1).into(),
+            zero_util_rate: apr_to_u32(0.0),
+            hundred_util_rate: apr_to_u32(3.0),
+            points: make_points(&[RatePoint::new(util_to_u32(0.4), apr_to_u32(0.4))]),
+            curve_type: INTEREST_CURVE_SEVEN_POINT,
             ..Default::default()
         };
 
@@ -940,11 +946,12 @@ mod tests {
     #[test]
     fn test_accruing_interest() -> anyhow::Result<()> {
         let ir_config = InterestRateConfig {
-            optimal_utilization_rate: I80F48!(0.4).into(),
-            plateau_interest_rate: I80F48!(0.4).into(),
             protocol_fixed_fee_apr: I80F48!(0.01).into(),
-            max_interest_rate: I80F48!(3).into(),
             insurance_ir_fee: I80F48!(0.1).into(),
+            zero_util_rate: apr_to_u32(0.0),
+            hundred_util_rate: apr_to_u32(3.0),
+            points: make_points(&[RatePoint::new(util_to_u32(0.4), apr_to_u32(0.4))]),
+            curve_type: INTEREST_CURVE_SEVEN_POINT,
             ..Default::default()
         };
 
@@ -1188,9 +1195,6 @@ mod tests {
             .collect();
 
         InterestRateCalc {
-            optimal_utilization_rate: I80F48::ZERO,
-            plateau_interest_rate: I80F48::ZERO,
-            max_interest_rate: I80F48::ZERO,
             insurance_fixed_fee: I80F48::ZERO,
             insurance_rate_fee: I80F48::ZERO,
             protocol_fixed_fee: I80F48::ZERO,
@@ -1202,7 +1206,7 @@ mod tests {
             zero_util_rate: milli_to_u32(I80F48::from_num(zero_rate_0_to_10)),
             hundred_util_rate: milli_to_u32(I80F48::from_num(hundred_rate_0_to_10)),
             points: make_points(&pts),
-            curve_type: 0,
+            curve_type: INTEREST_CURVE_SEVEN_POINT,
         }
     }
 
