@@ -1394,23 +1394,25 @@ impl SwitchboardPullPriceFeed {
     }
 
     /// 0 disables confidence adjustment, u32::MAX (or anything exceeding `MAX_CONF_INTERVAL`) will
-    /// clamp at `MAX_CONF_INTERVAL`
+    /// clamp at `MAX_CONF_INTERVAL`.
     fn get_confidence_interval(&self, oracle_max_confidence: u32) -> MarginfiResult<I80F48> {
         if oracle_max_confidence == 0 {
             return Ok(I80F48::ZERO);
         }
 
-        let price = self.get_price()?;
-        let oracle_max_confidence = I80F48::from_num(oracle_max_confidence);
+        let price: I80F48 = self.get_price()?;
+        let oracle_max_confidence: I80F48 = I80F48::from_num(oracle_max_confidence);
 
-        let conf_interval = price
+        // Note: negative prices also create negative confidence intervals (though we not anticipate
+        // negative prices in prod)
+        let conf_interval: I80F48 = price
             .checked_mul(oracle_max_confidence)
             .ok_or_else(math_error!())?
             .checked_div(U32_MAX)
             .ok_or_else(math_error!())?;
 
         // Clamp to MAX_CONF_INTERVAL (5%) of price
-        let max_conf_interval = price
+        let max_conf_interval: I80F48 = price
             .checked_mul(MAX_CONF_INTERVAL)
             .ok_or_else(math_error!())?;
 

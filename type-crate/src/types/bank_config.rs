@@ -107,7 +107,8 @@ pub struct BankConfig {
     pub _padding0: [u8; 2],
 
     /// * A %, as u32, e.g. 100% = u32::MAX, 50% = u32::MAX/2, etc.
-    /// Oracle confidence configuration. Semantics depend on the oracle type.
+    /// 
+    /// Oracle confidence configuration. Semantics depend on the oracle type:
     /// * Pyth: Maximum allowed confidence interval. Prices exceeding this threshold are rejected.
     ///   - 0 defaults to 10%.
     /// * Switchboard: Confidence spread used for price biasing.
@@ -279,6 +280,7 @@ pub struct BankConfigCompact {
     pub oracle_max_age: u16,
 
     /// * A %, as u32, e.g. 100% = u32::MAX, 50% = u32::MAX/2, etc.
+    /// 
     /// Oracle confidence configuration. Semantics depend on the oracle type.
     /// * Pyth: Maximum allowed confidence interval. Prices exceeding this threshold are rejected.
     ///   - 0 defaults to 10%.
