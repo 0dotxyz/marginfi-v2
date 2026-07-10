@@ -44,6 +44,14 @@ impl FuzzTest {
             permissionless_bad_debt_settlement: None,
             freeze_settings: None,
             tokenless_repayments_allowed: None,
+            circuit_breaker_enabled: None,
+            cb_deviation_bps_tiers: None,
+            cb_tier_durations_seconds: None,
+            cb_escalation_window_mult: None,
+            cb_ema_alpha_bps: None,
+            cb_window_seconds: None,
+            cb_window_max_up_bps: None,
+            cb_window_max_down_bps: None,
         };
 
         let ix = types::marginfi::LendingPoolConfigureBankInstruction::data(
@@ -766,6 +774,7 @@ impl FuzzTest {
         .accounts(
             types::marginfi::LendingAccountEndFlashloanInstructionAccounts::new(
                 user.marginfi_account,
+                self.marginfi_group,
                 user.address,
             ),
         )
@@ -972,6 +981,7 @@ impl FuzzTest {
         .accounts(types::marginfi::StartLiquidationInstructionAccounts::new(
             liquidatee_marginfi_account,
             record,
+            self.marginfi_group,
             liquidation_receiver,
         ))
         .remaining_accounts(health_remaining_start)
@@ -983,6 +993,7 @@ impl FuzzTest {
         .accounts(types::marginfi::EndLiquidationInstructionAccounts::new(
             liquidatee_marginfi_account,
             record,
+            self.marginfi_group,
             liquidation_receiver,
             self.fee_state,
             global_fee_wallet,

@@ -33,6 +33,8 @@ pub mod marginfi {
     /// (admin only) Configure group admin keys and emode leverage caps. All admin keys must be
     /// provided on every call. Emode leverage caps are set if provided, otherwise the existing
     /// (non-zero) values are kept. Pass `Some(value)` to update, `None` to leave unchanged.
+    /// Same-asset emode leverage is disabled by configuring both init and maint leverage to `1`;
+    /// values below `1`, including `0`, are invalid.
     ///
     /// Note: `new_emissions_admin` is deprecated and currently has no on-chain effect.
     pub fn marginfi_group_configure(
@@ -47,6 +49,8 @@ pub mod marginfi {
         new_risk_admin: Option<Pubkey>,
         emode_max_init_leverage: Option<WrappedI80F48>,
         emode_max_maint_leverage: Option<WrappedI80F48>,
+        same_asset_emode_init_leverage: Option<WrappedI80F48>,
+        same_asset_emode_maint_leverage: Option<WrappedI80F48>,
     ) -> MarginfiResult {
         marginfi_group::configure(
             ctx,
@@ -60,6 +64,8 @@ pub mod marginfi {
             new_risk_admin,
             emode_max_init_leverage,
             emode_max_maint_leverage,
+            same_asset_emode_init_leverage,
+            same_asset_emode_maint_leverage,
         )
     }
 
@@ -174,6 +180,17 @@ pub mod marginfi {
         marginfi_group::lending_pool_force_tokenless_repay_complete(ctx)
     }
 
+    /// (admin or risk_admin) Clear an active circuit-breaker halt on a bank.
+    /// * `reseed_reference` - If true, also zero the EMA reference so the next pulse reseeds it
+    ///   from live oracle data (use when clearing because the new price level is valid and the
+    ///   pre-halt reference would cause an immediate re-halt).
+    pub fn lending_pool_clear_circuit_breaker(
+        ctx: Context<LendingPoolClearCircuitBreaker>,
+        reseed_reference: bool,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_clear_circuit_breaker(ctx, reseed_reference)
+    }
+
     /// (admin only)
     pub fn lending_pool_configure_bank_oracle(
         ctx: Context<LendingPoolConfigureBankOracle>,
@@ -189,6 +206,21 @@ pub mod marginfi {
         price: WrappedI80F48,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_set_fixed_oracle_price(ctx, price)
+    }
+
+    /// (admin or emode_admin only) Initialize the per-group same-asset e-mode registry.
+    pub fn lending_pool_init_same_asset_emode_registry(
+        ctx: Context<LendingPoolInitSameAssetEmodeRegistry>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_init_same_asset_emode_registry(ctx)
+    }
+
+    /// (admin or emode_admin only) Opt a bank in/out of same-asset e-mode participation.
+    pub fn lending_pool_set_bank_same_asset_emode_eligibility(
+        ctx: Context<LendingPoolSetBankSameAssetEmodeEligibility>,
+        enabled: bool,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_set_bank_same_asset_emode_eligibility(ctx, enabled)
     }
 
     /// (emode_admin only)

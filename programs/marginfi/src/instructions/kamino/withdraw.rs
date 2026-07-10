@@ -8,7 +8,8 @@ use crate::{
         bank::BankImpl,
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
-            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
+            MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         rate_limiter::GroupRateLimiterImpl,
@@ -103,7 +104,14 @@ pub fn kamino_withdraw<'info>(
 
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
-        validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
+        // A withdraw from an account with no liabilities is risk-free, so it stays allowed
+        // while the bank is circuit-breaker halted or `CircuitBroken`.
+        let withdraw_is_halt_safe = !marginfi_account.lending_account.has_liabilities();
+        validate_bank_state(
+            &bank,
+            InstructionKind::FailsInPausedState,
+            withdraw_is_halt_safe,
+        )?;
 
         let in_receivership_or_order_execution =
             marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
@@ -246,27 +254,37 @@ pub fn kamino_withdraw<'info>(
     if !in_receivership_or_order_execution {
         // Check account health, if below threshold fail transaction
         // Assuming `ctx.remaining_accounts` holds only oracle accounts
+        let group = ctx.accounts.group.load()?;
         check_account_init_health(
             &marginfi_account,
+            &group,
             ctx.remaining_accounts,
             &mut Some(&mut health_cache),
         )?;
         health_cache.program_version = PROGRAM_VERSION;
 
-        let bank_loader = &ctx.accounts.bank;
-        let mut bank = bank_loader.load_mut()?;
-        let price_for_cache = fetch_unbiased_price_for_bank_cache(
-            &bank_loader.key(),
-            &bank,
-            &clock,
-            ctx.remaining_accounts,
-        )
-        .ok();
+        {
+            let bank_loader = &ctx.accounts.bank;
+            let mut bank = bank_loader.load_mut()?;
+            let price_for_cache = fetch_unbiased_price_for_bank_cache(
+                &bank_loader.key(),
+                &bank,
+                &clock,
+                ctx.remaining_accounts,
+            )
+            .ok();
 
-        bank.update_cache_price(price_for_cache)?;
+            bank.update_cache_price(price_for_cache)?;
+        }
 
         health_cache.set_engine_ok(true);
         marginfi_account.health_cache = health_cache;
+
+        // Inline CB gate: a risk-carrying withdraw reverts if any involved bank's live price
+        // has jumped past the breach threshold; a liability-free withdraw skips it.
+        if marginfi_account.lending_account.has_liabilities() {
+            run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+        }
     } else {
         // Note: the caller can simply omit risk accounts since the risk check is ignored here, in
         // that case the cache doesn't update and this does nothing.
