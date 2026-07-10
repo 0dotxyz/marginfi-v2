@@ -30,16 +30,11 @@ mod tests {
     #[test]
     fn fee_state_regression() {
         // HoMNdUF3RDZDPKAARYK1mxcPFfUnPjLmpKYibZzAijev Mainnet August 1, 2025
+        // The snapshot is v1-sized (8 + V1_LEN); zero-extend to the current struct size,
+        // exactly what `resize_global_fee_state` does on-chain.
         let mut bytes = hex_to_bytes("3fe01055c124ebdcf99abe673005fd029ed4e061d83daab0145fa9c01140e8ab5e05b1aaaeef4317ab83bfce0e61a1a233632ba4cfbabf812b8023caf2be7df80972bfc9ff327540ab83bfce0e61a1a233632ba4cfbabf812b8023caf2be7df80972bfc9ff327540000000000000000080d1f008ff000000000000000000000000000000000000000000000000000000000000000000000033333333331300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
-
-        let expected_len = 8 + std::mem::size_of::<FeeState>();
-        assert_eq!(
-            bytes.len(),
-            expected_len,
-            "Buffer length mismatch: {} vs {}",
-            bytes.len(),
-            expected_len
-        );
+        assert_eq!(bytes.len(), 8 + FeeState::V1_LEN);
+        bytes.resize(8 + std::mem::size_of::<FeeState>(), 0);
 
         // Split out the discriminator and check it
         let (disc, payload) = bytes.split_at_mut(8);

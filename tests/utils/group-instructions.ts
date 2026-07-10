@@ -228,6 +228,53 @@ export const groupInitialize = (
   return ix;
 };
 
+export type ResizeGroupAccountArgs = {
+  group: PublicKey;
+  /** Funds the rent for the added account space. */
+  payer: PublicKey;
+};
+
+/**
+ * (permissionless) Resize a group account to the v2 layout size. Errors if the account is
+ * already at (or above) the target size.
+ */
+export const resizeGroupAccount = (
+  program: Program<Marginfi>,
+  args: ResizeGroupAccountArgs,
+) => {
+  return program.methods
+    .lendingPoolResizeGroupAccount()
+    .accounts({
+      group: args.group,
+      payer: args.payer,
+      // systemProgram: hard coded key
+    })
+    .instruction();
+};
+
+export type ResizeGlobalFeeStateArgs = {
+  /** Funds the rent for the added account space. */
+  payer: PublicKey;
+};
+
+/**
+ * (permissionless) Resize the fee-state account to the v2 layout size. Errors if the account
+ * is already at (or above) the target size.
+ */
+export const resizeGlobalFeeState = (
+  program: Program<Marginfi>,
+  args: ResizeGlobalFeeStateArgs,
+) => {
+  return program.methods
+    .resizeGlobalFeeState()
+    .accounts({
+      // feeState: derived from constant seed
+      payer: args.payer,
+      // systemProgram: hard coded key
+    })
+    .instruction();
+};
+
 export type ConfigureBankArgs = {
   bank: PublicKey;
   bankConfigOpt: BankConfigOptRaw;

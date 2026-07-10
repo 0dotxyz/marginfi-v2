@@ -481,6 +481,20 @@ pub mod marginfi {
         marginfi_group::lending_pool_accrue_bank_interest(ctx)
     }
 
+    /// (permissionless) Resize the group account to the v2 layout size; `payer` funds the
+    /// added rent.
+    pub fn lending_pool_resize_group_account(
+        ctx: Context<LendingPoolResizeGroupAccount>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_resize_group_account(ctx)
+    }
+
+    /// (permissionless) Resize the fee-state account to the v2 layout size; `payer` funds the
+    /// added rent.
+    pub fn resize_global_fee_state(ctx: Context<ResizeGlobalFeeState>) -> MarginfiResult {
+        marginfi_group::resize_global_fee_state(ctx)
+    }
+
     /// (permissionless) Transfer accrued fees from the liquidity vault to insurance/fee/program
     /// vaults.
     pub fn lending_pool_collect_bank_fees<'info>(
@@ -620,16 +634,6 @@ pub mod marginfi {
             liquidation_max_fee,
             order_execution_max_fee,
         )
-    }
-
-    /// (Runs once per program) Initialize the V2 fee state PDA.
-    pub fn init_global_fee_state_v2(ctx: Context<InitFeeStateV2>) -> MarginfiResult {
-        marginfi_group::initialize_fee_state_v2(ctx)
-    }
-
-    /// (permissionless) Copy current FeeState values into FeeStateV2.
-    pub fn copy_fee_state_to_v2(ctx: Context<CopyFeeStateToV2>) -> MarginfiResult {
-        marginfi_group::copy_fee_state_to_v2(ctx)
     }
 
     /// (global fee admin only) Adjust fees, admin, wallet, or pause delegate admin
