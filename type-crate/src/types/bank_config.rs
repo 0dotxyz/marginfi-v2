@@ -106,8 +106,8 @@ pub struct BankConfig {
     // pad to next 4-byte alignment to meet u32's requirements.
     pub _padding0: [u8; 2],
 
-    /// * A %, as u32, e.g. 100% = u32::MAX, 50% = u32::MAX/2, etc.
-    /// 
+    /// A %, as u32, e.g. 100% = u32::MAX, 50% = u32::MAX/2, etc.
+    ///
     /// Oracle confidence configuration. Semantics depend on the oracle type:
     /// * Pyth: Maximum allowed confidence interval. Prices exceeding this threshold are rejected.
     ///   - 0 defaults to 10%.
@@ -279,8 +279,8 @@ pub struct BankConfigCompact {
     /// Time window in seconds for the oracle price feed to be considered live.
     pub oracle_max_age: u16,
 
-    /// * A %, as u32, e.g. 100% = u32::MAX, 50% = u32::MAX/2, etc.
-    /// 
+    /// A %, as u32, e.g. 100% = u32::MAX, 50% = u32::MAX/2, etc.
+    ///
     /// Oracle confidence configuration. Semantics depend on the oracle type.
     /// * Pyth: Maximum allowed confidence interval. Prices exceeding this threshold are rejected.
     ///   - 0 defaults to 10%.
