@@ -785,6 +785,75 @@ async fn cb_halt_freezes_interest_accrual() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Disabling the breaker via `lending_pool_configure_bank` must accrue interest before it clears
+/// the halt span: otherwise `last_update` stays stale, the span is gone, and the next accrual
+/// charges the halted interval to borrowers.
+#[tokio::test]
+async fn cb_disable_mid_halt_consumes_interest_freeze() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+
+    // Open a borrow against SOL so both share values are non-zero and interest would accrue.
+    let lp = test_f.create_marginfi_account().await;
+    let lp_sol_acc = test_f.sol_mint.create_token_account_and_mint_to(100).await;
+    lp.try_bank_deposit(lp_sol_acc.key, sol_bank, 10, None)
+        .await?;
+
+    let borrower = test_f.create_marginfi_account().await;
+    let borrower_usdc_acc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_usdc_acc.key, usdc_bank, 1_000, None)
+        .await?;
+    let borrower_sol_acc = test_f.sol_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_sol_acc.key, sol_bank, 1)
+        .await?;
+
+    // Halt SOL (tier 3: span [101, 14_501]), then consume the pre-halt accrual tail with a
+    // deposit shortly into the halt so only frozen time remains ahead.
+    enable_cb_and_trip_halt(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
+    test_f.set_clock(1_200, 200).await;
+    let tail_lp_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    lp.try_bank_deposit(tail_lp_sol.key, sol_bank, 1, None)
+        .await?;
+
+    let before = sol_bank.load().await;
+    let asset_share_value_before = before.asset_share_value;
+    let liability_share_value_before = before.liability_share_value;
+    assert_eq!(before.last_update, 200);
+
+    // Advance ~1 hour, still inside the halt window, then disable the breaker.
+    let disable_time: i64 = 3_701;
+    test_f.set_clock(1_500, disable_time).await;
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                circuit_breaker_enabled: Some(false),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let after = sol_bank.load().await;
+    // The disable accrued: `last_update` advanced to the disable time. Without the pre-reset
+    // accrual it would still read 200, and the frozen [200, 3_701] would be billed later.
+    assert_eq!(after.last_update, disable_time);
+    // The whole elapsed interval was halted, so nothing was charged.
+    assert_eq!(after.asset_share_value, asset_share_value_before);
+    assert_eq!(after.liability_share_value, liability_share_value_before);
+    // Breaker state is cleared, so accrual resumes normally from here.
+    assert_eq!(after.cb_tier, 0);
+    assert_eq!(after.cb_halt_started_at, 0);
+    assert_eq!(after.cb_halt_ended_at, 0);
+    Ok(())
+}
+
 #[tokio::test]
 async fn cb_tier3_storm_forces_paused_bank_to_circuit_broken_and_restores_paused(
 ) -> anyhow::Result<()> {

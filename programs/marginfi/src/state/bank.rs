@@ -683,6 +683,8 @@ impl BankImpl for Bank {
             }
             // Disable: zero halt + dedup state so a later re-enable starts clean.
             // `cb_reference_price` is preserved; `clear_circuit_breaker` offers a reseed path.
+            // Callers must `accrue_interest` first: this drops the halt span that
+            // `cb_frozen_seconds` reads, and the frozen interval would otherwise be charged.
             if !flag && was_enabled {
                 self.reset_cb_runtime_state();
             }
