@@ -1,7 +1,12 @@
 import { BN, Program } from "@coral-xyz/anchor";
 import { AccountMeta, PublicKey } from "@solana/web3.js";
 import { Marginfi } from "../../target/types/marginfi";
-import { deriveStakedSettings } from "./pdas";
+import {
+  deriveBankWithSeed,
+  deriveOnRampPool,
+  deriveSameAssetEmodeRegistry,
+  deriveStakedSettings,
+} from "./pdas";
 import {
   BankConfig,
   BankConfigOptRaw,
@@ -154,6 +159,8 @@ export type GroupConfigureArgs = {
   marginfiGroup: PublicKey;
   emodeMaxInitLeverage?: WrappedI80F48 | null;
   emodeMaxMaintLeverage?: WrappedI80F48 | null;
+  sameAssetEmodeInitLeverage?: WrappedI80F48 | null;
+  sameAssetEmodeMaintLeverage?: WrappedI80F48 | null;
 };
 
 export const groupConfigure = async (
@@ -172,6 +179,8 @@ export const groupConfigure = async (
   const newRiskAdmin = args.newRiskAdmin ?? group.riskAdmin;
   const emodeMaxInitLeverage = args.emodeMaxInitLeverage ?? null;
   const emodeMaxMaintLeverage = args.emodeMaxMaintLeverage ?? null;
+  const sameAssetEmodeInitLeverage = args.sameAssetEmodeInitLeverage ?? null;
+  const sameAssetEmodeMaintLeverage = args.sameAssetEmodeMaintLeverage ?? null;
 
   const ix = program.methods
     .marginfiGroupConfigure(
@@ -185,6 +194,8 @@ export const groupConfigure = async (
       newRiskAdmin,
       emodeMaxInitLeverage,
       emodeMaxMaintLeverage,
+      sameAssetEmodeInitLeverage,
+      sameAssetEmodeMaintLeverage,
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
@@ -215,6 +226,53 @@ export const groupInitialize = (
     .instruction();
 
   return ix;
+};
+
+export type ResizeGroupAccountArgs = {
+  group: PublicKey;
+  /** Funds the rent for the added account space. */
+  payer: PublicKey;
+};
+
+/**
+ * (permissionless) Resize a group account to the v2 layout size. Errors if the account is
+ * already at (or above) the target size.
+ */
+export const resizeGroupAccount = (
+  program: Program<Marginfi>,
+  args: ResizeGroupAccountArgs,
+) => {
+  return program.methods
+    .lendingPoolResizeGroupAccount()
+    .accounts({
+      group: args.group,
+      payer: args.payer,
+      // systemProgram: hard coded key
+    })
+    .instruction();
+};
+
+export type ResizeGlobalFeeStateArgs = {
+  /** Funds the rent for the added account space. */
+  payer: PublicKey;
+};
+
+/**
+ * (permissionless) Resize the fee-state account to the v2 layout size. Errors if the account
+ * is already at (or above) the target size.
+ */
+export const resizeGlobalFeeState = (
+  program: Program<Marginfi>,
+  args: ResizeGlobalFeeStateArgs,
+) => {
+  return program.methods
+    .resizeGlobalFeeState()
+    .accounts({
+      // feeState: derived from constant seed
+      payer: args.payer,
+      // systemProgram: hard coded key
+    })
+    .instruction();
 };
 
 export type ConfigureBankArgs = {
@@ -550,8 +608,8 @@ export const addBankPermissionless = (
     [Buffer.from("stake"), args.stakePool.toBuffer()],
     SINGLE_POOL_PROGRAM_ID,
   );
-
-  // Note: oracle and lst mint/pool are also passed in meta for validation
+  const [poolOnramp] = deriveOnRampPool(args.stakePool);
+  // Note: oracle, lst mint, pool stake, and on-ramp are also passed in meta for validation.
   const oracleMeta: AccountMeta = {
     pubkey: args.pythOracle,
     isSigner: false,
@@ -567,18 +625,26 @@ export const addBankPermissionless = (
     isSigner: false,
     isWritable: false,
   };
-
+  const onrampMeta: AccountMeta = {
+    pubkey: poolOnramp,
+    isSigner: false,
+    isWritable: false,
+  };
+  const [bank] = deriveBankWithSeed(
+    program.programId,
+    args.marginfiGroup,
+    lstMint,
+    args.seed,
+  );
   const ix = program.methods
     .lendingPoolAddBankPermissionless(args.seed)
     .accounts({
-      // marginfiGroup: args.marginfiGroup, // implied from stakedSettings
-      stakedSettings: settingsKey,
       feePayer: args.feePayer,
       bankMint: lstMint,
       solPool: solPool,
+      poolOnramp,
       stakePool: args.stakePool,
       validatorVoteAccount: args.validatorVoteAccount,
-      // bank: bankKey, // deriveBankWithSeed
       // globalFeeState: deriveGlobalFeeState(id),
       // globalFeeWallet: // implied from globalFeeState,
       // liquidityVaultAuthority = deriveLiquidityVaultAuthority(id, bank);
@@ -591,7 +657,48 @@ export const addBankPermissionless = (
       tokenProgram: TOKEN_PROGRAM_ID,
       // systemProgram: SystemProgram.programId,
     })
-    .remainingAccounts([oracleMeta, lstMeta, solPoolMeta])
+    .accountsPartial({
+      marginfiGroup: args.marginfiGroup,
+      stakedSettings: settingsKey,
+      bank,
+    })
+    .remainingAccounts([oracleMeta, lstMeta, solPoolMeta, onrampMeta])
+    .instruction();
+
+  return ix;
+};
+
+export const disableStakedOracles = (
+  program: Program<Marginfi>,
+  group: PublicKey,
+  admin?: PublicKey,
+) => {
+  const [settingsKey] = deriveStakedSettings(program.programId, group);
+  const ix = program.methods
+    .disableStakedOracles()
+    .accounts({
+      group,
+      stakedSettings: settingsKey,
+    })
+    .accountsPartial({ admin })
+    .instruction();
+
+  return ix;
+};
+
+export const enableStakedOracleOnramp = (
+  program: Program<Marginfi>,
+  group: PublicKey,
+  admin?: PublicKey,
+) => {
+  const [settingsKey] = deriveStakedSettings(program.programId, group);
+  const ix = program.methods
+    .enableStakedOracleOnramp()
+    .accounts({
+      group,
+      stakedSettings: settingsKey,
+    })
+    .accountsPartial({ admin })
     .instruction();
 
   return ix;
@@ -848,6 +955,25 @@ export const closeBank = (program: Program<Marginfi>, args: CloseBankArgs) => {
   return ix;
 };
 
+export type ClearCircuitBreakerArgs = {
+  bank: PublicKey;
+  /** If true, also zero the EMA reference so the next pulse reseeds from live oracle data. */
+  reseedReference?: boolean;
+};
+
+export const clearCircuitBreaker = async (
+  program: Program<Marginfi>,
+  args: ClearCircuitBreakerArgs
+) => {
+  return program.methods
+    .lendingPoolClearCircuitBreaker(args.reseedReference ?? false)
+    .accounts({
+      bank: args.bank,
+      // group + riskAdmin: inferred from has_one + signer
+    })
+    .instruction();
+};
+
 export type PanicPauseArgs = {
   /** Note: when omitted, Anchor uses the provider, which works in this test suite. */
   pauseAuthority?: PublicKey;
@@ -924,6 +1050,27 @@ export const initBankMetadata = (
   return ix;
 };
 
+export type InitSameAssetEmodeRegistryArgs = {
+  group: PublicKey;
+  signer: PublicKey;
+};
+
+export const initSameAssetEmodeRegistry = (
+  program: Program<Marginfi>,
+  args: InitSameAssetEmodeRegistryArgs,
+) => {
+  const ix = program.methods
+    .lendingPoolInitSameAssetEmodeRegistry()
+    .accounts({
+      group: args.group,
+      signer: args.signer,
+      // sameAssetEmodeRegistry,
+    })
+    .instruction();
+
+  return ix;
+};
+
 export type SetFixedPriceArgs = {
   bank: PublicKey;
   price: number;
@@ -946,6 +1093,30 @@ export const setFixedPrice = (
       bank: args.bank,
     })
     .remainingAccounts(oracleMeta)
+    .instruction();
+
+  return ix;
+};
+
+export type SetBankSameAssetEmodeEligibilityArgs = {
+  // group: PublicKey;
+  signer: PublicKey;
+  bank: PublicKey;
+  enabled: boolean;
+};
+
+export const setBankSameAssetEmodeEligibility = (
+  program: Program<Marginfi>,
+  args: SetBankSameAssetEmodeEligibilityArgs,
+) => {
+  const ix = program.methods
+    .lendingPoolSetBankSameAssetEmodeEligibility(args.enabled)
+    .accounts({
+      // group: args.group,
+      signer: args.signer,
+      bank: args.bank,
+      // sameAssetEmodeRegistry,
+    })
     .instruction();
 
   return ix;
@@ -1060,7 +1231,6 @@ export const writeBankMetadataPreInit = (
 
 export type UpdateGroupRateLimiterArgs = {
   marginfiGroup: PublicKey;
-  delegateFlowAdmin?: PublicKey;
   outflowUsd?: BN | null;
   inflowUsd?: BN | null;
   updateSeq: BN;
@@ -1082,8 +1252,6 @@ export const updateGroupRateLimiter = (
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
-      delegateFlowAdmin:
-        args.delegateFlowAdmin ?? (program.provider.publicKey as PublicKey),
     })
     .instruction();
   return ix;
@@ -1091,7 +1259,6 @@ export const updateGroupRateLimiter = (
 
 export type UpdateDeleverageWithdrawalsArgs = {
   marginfiGroup: PublicKey;
-  delegateFlowAdmin?: PublicKey;
   outflowUsd: number;
   updateSeq: BN;
   eventStartSlot: BN;
@@ -1111,8 +1278,6 @@ export const updateDeleverageWithdrawals = (
     )
     .accounts({
       marginfiGroup: args.marginfiGroup,
-      delegateFlowAdmin:
-        args.delegateFlowAdmin ?? (program.provider.publicKey as PublicKey),
     })
     .instruction();
   return ix;

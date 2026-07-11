@@ -39,7 +39,7 @@ use std::cmp::{max, min};
 /// 4. Transfer the insured amount from the insurance fund.
 /// 5. Socialize the loss between lenders if any.
 pub fn lending_pool_handle_bankruptcy<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, LendingPoolHandleBankruptcy<'info>>,
+    mut ctx: Context<'info, LendingPoolHandleBankruptcy<'info>>,
 ) -> MarginfiResult {
     let LendingPoolHandleBankruptcy {
         marginfi_account: marginfi_account_loader,
@@ -59,10 +59,10 @@ pub fn lending_pool_handle_bankruptcy<'info>(
 
         if permissionless_bad_debt_settlement {
             // if permissionless, users can bankrupt reduce-only or operational banks
-            validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
+            validate_bank_state(&bank, InstructionKind::FailsInPausedState, false)?;
         } else {
-            // admin can bankrupt banks in any state
-            validate_bank_state(&bank, InstructionKind::Unrestricted)?;
+            // admin can bankrupt banks in any state (CB halt included)
+            validate_bank_state(&bank, InstructionKind::Unrestricted, true)?;
             check!(is_admin_or_risk_admin, MarginfiError::Unauthorized);
         }
 
@@ -77,8 +77,10 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     health_cache.timestamp = clock.unix_timestamp;
     health_cache.program_version = PROGRAM_VERSION;
 
+    let group = marginfi_group_loader.load()?;
     check_account_bankrupt(
         &marginfi_account,
+        &group,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
     )?;
@@ -270,7 +272,7 @@ pub struct LendingPoolHandleBankruptcy<'info> {
         ],
         bump = bank.load()?.liquidity_vault_bump
     )]
-    pub liquidity_vault: AccountInfo<'info>,
+    pub liquidity_vault: UncheckedAccount<'info>,
 
     #[account(
         mut,
@@ -290,7 +292,7 @@ pub struct LendingPoolHandleBankruptcy<'info> {
         ],
         bump = bank.load()?.insurance_vault_authority_bump
     )]
-    pub insurance_vault_authority: AccountInfo<'info>,
+    pub insurance_vault_authority: UncheckedAccount<'info>,
 
     pub token_program: Interface<'info, TokenInterface>,
 }

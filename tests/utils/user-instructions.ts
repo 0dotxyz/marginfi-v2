@@ -33,7 +33,7 @@ export type AccountInitArgs = {
  */
 export const accountInit = (
   program: Program<Marginfi>,
-  args: AccountInitArgs
+  args: AccountInitArgs,
 ) => {
   const ix = program.methods
     .marginfiAccountInitialize()
@@ -50,19 +50,17 @@ export const accountInit = (
 
 export type AccountCloseArgs = {
   marginfiAccount: PublicKey;
-  authority: PublicKey;
   feePayer: PublicKey;
 };
 
 export const accountCloseIx = (
   program: Program<Marginfi>,
-  args: AccountCloseArgs
+  args: AccountCloseArgs,
 ) => {
   return program.methods
     .marginfiAccountClose()
     .accounts({
       marginfiAccount: args.marginfiAccount,
-      authority: args.authority,
       feePayer: args.feePayer,
     })
     .instruction();
@@ -79,7 +77,7 @@ export type TransferAccountAuthorityArgs = {
 
 export const transferAccountAuthorityIx = (
   program: Program<Marginfi>,
-  args: TransferAccountAuthorityArgs
+  args: TransferAccountAuthorityArgs,
 ) => {
   const accounts: any = {
     oldMarginfiAccount: args.oldAccount,
@@ -116,7 +114,7 @@ export type SetAccountFreezeArgs = {
 
 export const setAccountFreezeIx = (
   program: Program<Marginfi>,
-  args: SetAccountFreezeArgs
+  args: SetAccountFreezeArgs,
 ) => {
   return program.methods
     .marginfiAccountSetFreeze(args.frozen)
@@ -221,7 +219,7 @@ export type WithdrawIxArgs = {
  */
 export const withdrawIx = (
   program: Program<Marginfi>,
-  args: WithdrawIxArgs
+  args: WithdrawIxArgs,
 ) => {
   const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => ({
     pubkey,
@@ -298,7 +296,7 @@ export type InitLiquidationRecordArgs = {
 
 export const initLiquidationRecordIx = (
   program: Program<Marginfi>,
-  args: InitLiquidationRecordArgs
+  args: InitLiquidationRecordArgs,
 ) => {
   return program.methods
     .marginfiAccountInitLiqRecord()
@@ -324,7 +322,7 @@ const CLOSE_LIQ_RECORD_DISCRIMINATOR = createHash("sha256")
 
 export const closeLiquidationRecordIx = (
   program: Program<Marginfi>,
-  args: CloseLiquidationRecordArgs
+  args: CloseLiquidationRecordArgs,
 ) => {
   const liquidationRecord =
     args.liquidationRecord ??
@@ -337,12 +335,14 @@ export const closeLiquidationRecordIx = (
   const methodsAny = program.methods as any;
 
   if (typeof methodsAny.marginfiAccountCloseLiqRecord === "function") {
-    return methodsAny.marginfiAccountCloseLiqRecord()
+    return methodsAny
+      .marginfiAccountCloseLiqRecord()
       .accounts(accounts)
       .instruction();
   }
   if (typeof methodsAny.marginfiAccountCloseLiquidationRecord === "function") {
-    return methodsAny.marginfiAccountCloseLiquidationRecord()
+    return methodsAny
+      .marginfiAccountCloseLiquidationRecord()
       .accounts(accounts)
       .instruction();
   }
@@ -382,7 +382,7 @@ export const closeLiquidationRecordIx = (
  */
 const toAccountMetas = (
   remaining: Array<PublicKey | AccountMeta>,
-  defaultWritable: boolean = false
+  defaultWritable: boolean = false,
 ): AccountMeta[] => {
   if (remaining.length === 0) {
     return [];
@@ -407,14 +407,18 @@ export type StartLiquidationArgs = {
 
 export const startLiquidationIx = (
   program: Program<Marginfi>,
-  args: StartLiquidationArgs
+  args: StartLiquidationArgs,
 ) => {
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
+  const [liquidationRecord] = deriveLiquidationRecord(
+    program.programId,
+    args.marginfiAccount,
+  );
   return program.methods
     .startLiquidation()
     .accounts({
       marginfiAccount: args.marginfiAccount,
-      // liquidationRecord: // implied from account
+      liquidationRecord,
       liquidationReceiver: args.liquidationReceiver,
       // instructionSysvar: // hard coded key
       // systemProgram: // hard coded key
@@ -430,15 +434,20 @@ export type EndLiquidationArgs = {
 
 export const endLiquidationIx = (
   program: Program<Marginfi>,
-  args: EndLiquidationArgs
+  args: EndLiquidationArgs,
 ) => {
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
+  const [liquidationRecord] = deriveLiquidationRecord(
+    program.programId,
+    args.marginfiAccount,
+  );
+  const liquidationReceiver = program.provider.publicKey;
   return program.methods
     .endLiquidation()
     .accounts({
       marginfiAccount: args.marginfiAccount,
-      // liquidationRecord: // implied from account
-      // liquidationRecord: // implied from record
+      liquidationRecord,
+      liquidationReceiver,
       // feeState: // static pda
       // globalFeeWallet: // implied from feeState
       // systemProgram: // hard coded key
@@ -455,13 +464,19 @@ export type StartDeleverageArgs = {
 
 export const startDeleverageIx = (
   program: Program<Marginfi>,
-  args: StartDeleverageArgs
+  args: StartDeleverageArgs,
 ) => {
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
+  const [liquidationRecord] = deriveLiquidationRecord(
+    program.programId,
+    args.marginfiAccount,
+  );
   return program.methods
     .startDeleverage()
     .accounts({
       marginfiAccount: args.marginfiAccount,
+      liquidationRecord,
+      riskAdmin: args.riskAdmin,
     })
     .remainingAccounts(oracleMeta)
     .instruction();
@@ -474,13 +489,20 @@ export type EndDeleverageArgs = {
 
 export const endDeleverageIx = (
   program: Program<Marginfi>,
-  args: EndDeleverageArgs
+  args: EndDeleverageArgs,
 ) => {
   const oracleMeta: AccountMeta[] = toAccountMetas(args.remaining, false);
+  const [liquidationRecord] = deriveLiquidationRecord(
+    program.programId,
+    args.marginfiAccount,
+  );
+  const riskAdmin = program.provider.publicKey;
   return program.methods
     .endDeleverage()
     .accounts({
       marginfiAccount: args.marginfiAccount,
+      liquidationRecord,
+      riskAdmin,
     })
     .remainingAccounts(oracleMeta)
     .instruction();
@@ -512,7 +534,7 @@ export type LiquidateIxArgs = {
  */
 export const liquidateIx = (
   program: Program<Marginfi>,
-  args: LiquidateIxArgs
+  args: LiquidateIxArgs,
 ) => {
   const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => {
     return { pubkey, isSigner: false, isWritable: false };
@@ -522,7 +544,7 @@ export const liquidateIx = (
     .lendingAccountLiquidate(
       args.amount,
       args.liquidateeAccounts,
-      args.liquidatorAccounts
+      args.liquidatorAccounts,
     )
     .accounts({
       assetBank: args.assetBankKey,
@@ -541,7 +563,6 @@ export type HealthPulseArgs = {
 };
 
 export type PulseBankPriceArgs = {
-  group: PublicKey;
   bank: PublicKey;
   remaining: PublicKey[];
 };
@@ -559,7 +580,7 @@ export type PulseBankPriceArgs = {
  */
 export const healthPulse = (
   program: Program<Marginfi>,
-  args: HealthPulseArgs
+  args: HealthPulseArgs,
 ) => {
   const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => {
     return { pubkey, isSigner: false, isWritable: false };
@@ -582,7 +603,7 @@ export const healthPulse = (
  */
 export const pulseBankPrice = (
   program: Program<Marginfi>,
-  args: PulseBankPriceArgs
+  args: PulseBankPriceArgs,
 ) => {
   const oracleMeta: AccountMeta[] = args.remaining.map((pubkey) => {
     return { pubkey, isSigner: false, isWritable: false };
@@ -615,7 +636,7 @@ export type BankAndOracles = PublicKey[]; // [bank, oracle, oracle_2...]
  *          composition
  */
 export const composeRemainingAccounts = (
-  banksAndOracles: PublicKey[][]
+  banksAndOracles: PublicKey[][],
 ): PublicKey[] => {
   banksAndOracles.sort((a, b) => {
     const A = a[0].toBytes();
@@ -637,11 +658,11 @@ export const composeRemainingAccounts = (
 /**
  * Use in place of `composeRemainingAccounts` when building Meta for Start Liquidate (marks banks as
  * mutable, which is required)
- * @param banksAndOracles 
- * @returns 
+ * @param banksAndOracles
+ * @returns
  */
 export const composeRemainingAccountsWriteableMeta = (
-  banksAndOracles: PublicKey[][]
+  banksAndOracles: PublicKey[][],
 ): AccountMeta[] => {
   banksAndOracles.sort((a, b) => {
     const A = a[0].toBytes();
@@ -659,18 +680,18 @@ export const composeRemainingAccountsWriteableMeta = (
       pubkey,
       isSigner: false,
       isWritable: idx === 0,
-    }))
+    })),
   );
 };
 
 /**
  * Use in place of `composeRemainingAccounts` when building Meta for End Liquidate (marks banks as
  * mutable and ignores/excludes all other accounts)
- * @param banksAndOracles 
- * @returns 
+ * @param banksAndOracles
+ * @returns
  */
 export const composeRemainingAccountsMetaBanksOnly = (
-  banksAndOracles: PublicKey[][]
+  banksAndOracles: PublicKey[][],
 ): AccountMeta[] => {
   banksAndOracles.sort((a, b) => {
     const A = a[0].toBytes();
@@ -709,7 +730,7 @@ export type AccountInitPdaArgs = {
  */
 export const accountInitPda = (
   program: Program<Marginfi>,
-  args: AccountInitPdaArgs
+  args: AccountInitPdaArgs,
 ) => {
   const accounts: any = {
     marginfiGroup: args.marginfiGroup,
@@ -738,7 +759,7 @@ export type TransferAccountAuthorityPdaArgs = {
 
 export const transferAccountAuthorityPdaIx = (
   program: Program<Marginfi>,
-  args: TransferAccountAuthorityPdaArgs
+  args: TransferAccountAuthorityPdaArgs,
 ) => {
   const accounts: any = {
     oldMarginfiAccount: args.oldAccount,
@@ -765,7 +786,7 @@ export type PurgeDevelerageArgs = {
 
 export const purgeDeveleragedBalance = (
   program: Program<Marginfi>,
-  args: PurgeDevelerageArgs
+  args: PurgeDevelerageArgs,
 ) => {
   const ix = program.methods
     .purgeDeleverageBalance()
@@ -785,7 +806,13 @@ export const purgeDeveleragedBalance = (
 export type OrderTriggerArgs =
   | { stopLoss: { threshold: WrappedI80F48; maxSlippage: number } }
   | { takeProfit: { threshold: WrappedI80F48; maxSlippage: number } }
-  | { both: { stopLoss: WrappedI80F48; takeProfit: WrappedI80F48; maxSlippage: number } };
+  | {
+      both: {
+        stopLoss: WrappedI80F48;
+        takeProfit: WrappedI80F48;
+        maxSlippage: number;
+      };
+    };
 
 export type PlaceOrderArgs = {
   marginfiAccount: PublicKey;
@@ -799,17 +826,18 @@ export type PlaceOrderArgs = {
 
 export const placeOrderIx = async (
   program: Program<Marginfi>,
-  args: PlaceOrderArgs
+  args: PlaceOrderArgs,
 ) => {
   const [orderPda] = deriveOrderPda(
     program.programId,
     args.marginfiAccount,
-    args.bankKeys
+    args.bankKeys,
   );
 
   const feeState = args.feeState ?? deriveGlobalFeeState(program.programId)[0];
-  const globalFeeWallet = args.globalFeeWallet
-    ?? (await program.account.feeState.fetch(feeState)).globalFeeWallet;
+  const globalFeeWallet =
+    args.globalFeeWallet ??
+    (await program.account.feeState.fetch(feeState)).globalFeeWallet;
 
   const accounts = {
     authority: args.authority,
@@ -835,7 +863,7 @@ export type CloseOrderArgs = {
 
 export const closeOrderIx = (
   program: Program<Marginfi>,
-  args: CloseOrderArgs
+  args: CloseOrderArgs,
 ) => {
   const accounts = {
     marginfiAccount: args.marginfiAccount,
@@ -858,7 +886,7 @@ export type KeeperCloseOrderArgs = {
 
 export const keeperCloseOrderIx = (
   program: Program<Marginfi>,
-  args: KeeperCloseOrderArgs
+  args: KeeperCloseOrderArgs,
 ) => {
   const accounts = {
     marginfiAccount: args.marginfiAccount,
@@ -880,7 +908,7 @@ export type SetKeeperCloseFlagsArgs = {
 
 export const setKeeperCloseFlagsIx = (
   program: Program<Marginfi>,
-  args: SetKeeperCloseFlagsArgs
+  args: SetKeeperCloseFlagsArgs,
 ) => {
   const accounts: any = {
     marginfiAccount: args.marginfiAccount,
@@ -904,7 +932,7 @@ export type StartExecuteOrderArgs = {
 
 export const startExecuteOrderIx = (
   program: Program<Marginfi>,
-  args: StartExecuteOrderArgs
+  args: StartExecuteOrderArgs,
 ) => {
   const [executeRecord] = deriveExecuteOrderPda(program.programId, args.order);
 
@@ -944,7 +972,7 @@ export type EndExecuteOrderArgs = {
 
 export const endExecuteOrderIx = (
   program: Program<Marginfi>,
-  args: EndExecuteOrderArgs
+  args: EndExecuteOrderArgs,
 ) => {
   const feeState = args.feeState ?? deriveGlobalFeeState(program.programId)[0];
   const rem: AccountMeta[] = args.remaining.map((pubkey) => ({

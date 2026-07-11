@@ -95,7 +95,11 @@ pub fn lending_pool_emissions_deposit(
     let mut bank = ctx.accounts.bank.load_mut()?;
     let group = ctx.accounts.group.load()?;
 
-    utils::validate_bank_state(&bank, utils::InstructionKind::FailsIfPausedOrReduceState)?;
+    utils::validate_bank_state(
+        &bank,
+        utils::InstructionKind::FailsIfPausedOrReduceState,
+        true,
+    )?;
 
     // Reject mints with non-zero transfer fees or active transfer hooks.
     let mint_ai = ctx.accounts.mint.to_account_info();
@@ -123,7 +127,7 @@ pub fn lending_pool_emissions_deposit(
 
     transfer_checked(
         CpiContext::new(
-            ctx.accounts.token_program.to_account_info(),
+            ctx.accounts.token_program.key(),
             TransferChecked {
                 from: ctx.accounts.emissions_funding_account.to_account_info(),
                 to: ctx.accounts.liquidity_vault.to_account_info(),
@@ -180,7 +184,7 @@ pub struct LendingPoolEmissionsDeposit<'info> {
     ///
     /// CHECK: Account provided only for funding rewards
     #[account(mut)]
-    pub emissions_funding_account: AccountInfo<'info>,
+    pub emissions_funding_account: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub depositor: Signer<'info>,

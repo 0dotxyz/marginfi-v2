@@ -8,11 +8,11 @@ use crate::{
     },
     prelude::*,
     state::marginfi_account::{
-        check_pre_liquidation_condition_and_get_account_health, get_health_components,
-        write_liquidation_price_cache_from, MarginfiAccountImpl,
+        any_balance_bank_is_cb_halted, check_pre_liquidation_condition_and_get_account_health,
+        get_health_components, write_liquidation_price_cache_from, MarginfiAccountImpl,
     },
 };
-use anchor_lang::{prelude::*, solana_program::sysvar};
+use anchor_lang::prelude::*;
 use bytemuck::Zeroable;
 use drift_mocks::drift::client::args as drift;
 use juplend_mocks::juplend_earn::client::args as juplend;
@@ -33,14 +33,21 @@ use marginfi_type_crate::{
 /// * Fails if the start liquidation instruction appears more than once in this tx.
 /// * Fails if any mrgn instruction other than start, end, withdraw, or repay (or the equivalent
 ///   from a third party integration) are used within this tx.
-pub fn start_liquidation<'info>(
-    ctx: Context<'_, '_, 'info, 'info, StartLiquidation<'info>>,
-) -> MarginfiResult {
+/// * Fails with `CircuitBreakerAdminOnly` if any bank in the account's active balances is
+///   currently CB-halted. Admins should use `start_deleverage` or `lending_account_liquidate`
+///   instead — both accept admin/risk_admin during a halt.
+pub fn start_liquidation<'info>(ctx: Context<'info, StartLiquidation<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     liq_record.liquidation_receiver = ctx.accounts.liquidation_receiver.key();
+    let group = ctx.accounts.group.load()?;
+    check!(
+        !any_balance_bank_is_cb_halted(&marginfi_account, ctx.remaining_accounts)?,
+        MarginfiError::CircuitBreakerAdminOnly
+    );
     start_receivership(
         &mut marginfi_account,
+        &group,
         &mut liq_record,
         ctx.remaining_accounts,
         false,
@@ -61,16 +68,16 @@ pub fn start_liquidation<'info>(
 /// * Fails if the start deleverage instruction appears more than once in this tx.
 /// * Fails if any mrgn instruction other than start, end, withdraw, or repay (or the equivalent
 ///   from a third party integration) are used within this tx.
-pub fn start_deleverage<'info>(
-    ctx: Context<'_, '_, 'info, 'info, StartDeleverage<'info>>,
-) -> MarginfiResult {
+pub fn start_deleverage<'info>(ctx: Context<'info, StartDeleverage<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     liq_record.liquidation_receiver = ctx.accounts.risk_admin.key();
     marginfi_account.set_flag(ACCOUNT_IN_DELEVERAGE, false);
     marginfi_account.indexer_flags.has_ever_been_deleveraged = 1;
+    let group = ctx.accounts.group.load()?;
     start_receivership(
         &mut marginfi_account,
+        &group,
         &mut liq_record,
         ctx.remaining_accounts,
         true,
@@ -88,6 +95,7 @@ pub fn start_deleverage<'info>(
 // Common logic for both liquidation and deleverage
 pub fn start_receivership<'info>(
     marginfi_account: &mut MarginfiAccount,
+    group: &MarginfiGroup,
     liq_record: &mut LiquidationRecord,
     remaining_ais: &'info [AccountInfo<'info>],
     ignore_healthy: bool,
@@ -98,6 +106,7 @@ pub fn start_receivership<'info>(
     let mut liq_price_cache = LiquidationPriceCache::default();
     let (_pre_health, assets, liabs) = check_pre_liquidation_condition_and_get_account_health(
         marginfi_account,
+        group,
         remaining_ais,
         None,
         &mut Some(&mut health_cache),
@@ -110,6 +119,7 @@ pub fn start_receivership<'info>(
     // Use heap-efficient equity calculation
     let (assets_equity, liabs_equity) = get_health_components(
         marginfi_account,
+        group,
         remaining_ais,
         RequirementType::Equity,
         &mut Some(&mut health_cache),
@@ -212,6 +222,7 @@ pub struct StartLiquidation<'info> {
     #[account(
         mut,
         has_one = liquidation_record @ MarginfiError::InvalidLiquidationRecord,
+        has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
             let acc = marginfi_account.load()?;
             !acc.get_flag(ACCOUNT_IN_RECEIVERSHIP)
@@ -227,6 +238,8 @@ pub struct StartLiquidation<'info> {
     #[account(mut)]
     pub liquidation_record: AccountLoader<'info, LiquidationRecord>,
 
+    pub group: AccountLoader<'info, MarginfiGroup>,
+
     /// This account will have the authority to withdraw/repay as if they are the user authority
     /// until the end of the tx.
     ///
@@ -235,9 +248,9 @@ pub struct StartLiquidation<'info> {
 
     /// CHECK: validated against known hard-coded sysvar key
     #[account(
-        address = sysvar::instructions::id()
+        address = solana_instructions_sysvar::id()
     )]
-    pub instruction_sysvar: AccountInfo<'info>,
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 impl Hashable for StartLiquidation<'_> {
@@ -253,7 +266,7 @@ pub struct StartDeleverage<'info> {
     #[account(
         mut,
         has_one = liquidation_record,
-        has_one = group,
+        has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
             let acc = marginfi_account.load()?;
             !acc.get_flag(ACCOUNT_IN_RECEIVERSHIP)
@@ -280,9 +293,9 @@ pub struct StartDeleverage<'info> {
 
     /// CHECK: validated against known hard-coded sysvar key
     #[account(
-        address = sysvar::instructions::id()
+        address = solana_instructions_sysvar::id()
     )]
-    pub instruction_sysvar: AccountInfo<'info>,
+    pub instruction_sysvar: UncheckedAccount<'info>,
 }
 
 impl Hashable for StartDeleverage<'_> {

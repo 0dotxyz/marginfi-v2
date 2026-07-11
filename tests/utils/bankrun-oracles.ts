@@ -5,7 +5,7 @@ import {
   Transaction,
 } from "@solana/web3.js";
 import { BN } from "@coral-xyz/anchor";
-import { BanksClient, ProgramTestContext } from "solana-bankrun";
+import { BanksClient, ProgramTestContext } from "./litesvm";
 import { Oracles } from "./mocks";
 import {
   ORACLE_CONF_INTERVAL,

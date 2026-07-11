@@ -27,9 +27,7 @@ use marginfi_type_crate::{
 /// * Fails if account is less healthy than it was at start
 /// * Fails if liquidator earned too much profit (took more assets in exchange for repayment of
 ///   liabs that they were allowed)
-pub fn end_liquidation<'info>(
-    ctx: Context<'_, '_, 'info, 'info, EndLiquidation<'info>>,
-) -> MarginfiResult {
+pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     let fee_state = ctx.accounts.fee_state.load()?;
@@ -42,8 +40,10 @@ pub fn end_liquidation<'info>(
     // below the threshold, then we can clear it regardless (or not).
     let ignore_healthy = pre_assets_equity < LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD;
 
+    let group = ctx.accounts.group.load()?;
     let (seized, seized_f64, repaid, repaid_f64) = end_receivership(
         &mut marginfi_account,
+        &group,
         &mut liq_record,
         ctx.remaining_accounts,
         ignore_healthy,
@@ -85,18 +85,18 @@ pub fn end_liquidation<'info>(
 
 /// (Permissioned) Ends a deleverage. Records the liquidation event in the user's record.
 /// * Fails if account is less healthy than it was at start
-/// Note: no fees taken.
-pub fn end_deleverage<'info>(
-    ctx: Context<'_, '_, 'info, 'info, EndDeleverage<'info>>,
-) -> MarginfiResult {
+///   Note: no fees taken.
+pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
 
     validate_not_cpi_by_stack_height()?;
 
     marginfi_account.unset_flag(ACCOUNT_IN_DELEVERAGE, false);
+    let group = ctx.accounts.group.load()?;
     let (_, seized_f64, _, repaid_f64) = end_receivership(
         &mut marginfi_account,
+        &group,
         &mut liq_record,
         ctx.remaining_accounts,
         true,
@@ -115,6 +115,7 @@ pub fn end_deleverage<'info>(
 // Common logic for both liquidation and deleverage
 pub fn end_receivership<'info>(
     marginfi_account: &mut MarginfiAccount,
+    group: &MarginfiGroup,
     liq_record: &mut LiquidationRecord,
     remaining_ais: &'info [AccountInfo<'info>],
     ignore_healthy: bool,
@@ -129,6 +130,7 @@ pub fn end_receivership<'info>(
     let (post_health, _post_assets, _post_liabs) =
         check_pre_liquidation_condition_and_get_account_health(
             marginfi_account,
+            group,
             remaining_ais,
             None,
             &mut Some(&mut post_hc),
@@ -137,6 +139,7 @@ pub fn end_receivership<'info>(
         )?;
     let (post_assets_equity, post_liabilities_equity) = get_health_components(
         marginfi_account,
+        group,
         remaining_ais,
         RequirementType::Equity,
         &mut Some(&mut post_hc),
@@ -191,6 +194,7 @@ pub struct EndLiquidation<'info> {
     #[account(
         mut,
         has_one = liquidation_record @ MarginfiError::InvalidLiquidationRecord,
+        has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
             let acc = marginfi_account.load()?;
             acc.get_flag(ACCOUNT_IN_RECEIVERSHIP)
@@ -209,6 +213,8 @@ pub struct EndLiquidation<'info> {
     )]
     pub liquidation_record: AccountLoader<'info, LiquidationRecord>,
 
+    pub group: AccountLoader<'info, MarginfiGroup>,
+
     // Note: mutable signer because it must pay the transfer fee
     #[account(mut)]
     pub liquidation_receiver: Signer<'info>,
@@ -223,7 +229,7 @@ pub struct EndLiquidation<'info> {
 
     /// CHECK: The fee admin's native SOL wallet, validated against fee state
     #[account(mut)]
-    pub global_fee_wallet: AccountInfo<'info>,
+    pub global_fee_wallet: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
 }
@@ -233,7 +239,7 @@ impl<'info> EndLiquidation<'info> {
         &self,
     ) -> CpiContext<'_, '_, '_, 'info, anchor_lang::system_program::Transfer<'info>> {
         CpiContext::new(
-            self.system_program.to_account_info(),
+            self.system_program.key(),
             anchor_lang::system_program::Transfer {
                 // TODO Eventually, maybe support the fee being paid by a different account
                 from: self.liquidation_receiver.to_account_info(),
@@ -255,7 +261,7 @@ pub struct EndDeleverage<'info> {
     #[account(
         mut,
         has_one = liquidation_record,
-        has_one = group,
+        has_one = group @ MarginfiError::InvalidGroup,
         constraint = {
             let acc = marginfi_account.load()?;
             acc.get_flag(ACCOUNT_IN_RECEIVERSHIP)

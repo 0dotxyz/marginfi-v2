@@ -6,10 +6,9 @@ on:
       - "testest-program-*"
 
 env:
-  RUST_TOOLCHAIN: 1.75.0
-  SOLANA_CLI_VERSION: 1.18.17
-  ANCHOR_CLI_VERSION: 0.30.1
-  ANCHOR_SHA: e6d7dafe12da661a36ad1b4f3b5970e8986e5321
+  RUST_TOOLCHAIN: 1.90.0
+  SOLANA_CLI_VERSION: 3.1.13
+  ANCHOR_CLI_VERSION: 1.0.2
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -17,7 +16,7 @@ jobs:
     name: Generate verifiable build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install common dependencies
         uses: ./.github/actions/setup-common/
@@ -90,19 +89,19 @@ jobs:
       #     keypair: ${{ secrets.DEPLOYER_KEYPAIR }}
 
       # - name: Upload program
-      #   uses: actions/upload-artifact@v2
+      #   uses: actions/upload-artifact@v4
       #   with:
       #     name: ${{ env.PROGRAM_LIB_NAME }}-verifiable_build-${{ github.run_id }}-${{ github.run_attempt }}
       #     path: ./target/deploy/${{ env.PROGRAM_LIB_NAME }}.so
 
       # - name: Upload IDL (json)
-      #   uses: actions/upload-artifact@v2
+      #   uses: actions/upload-artifact@v4
       #   with:
       #     name: ${{ env.PROGRAM_LIB_NAME }}-idl-${{ github.run_id }}-${{ github.run_attempt }}
       #     path: ./target/idl/${{ env.PROGRAM_LIB_NAME }}_patched.json
 
       # - name: Upload IDL (types)
-      #   uses: actions/upload-artifact@v2
+      #   uses: actions/upload-artifact@v4
       #   with:
       #     name: ${{ env.PROGRAM_LIB_NAME }}-types-${{ github.run_id }}-${{ github.run_attempt }}
       #     path: ./target/idl/${{ env.PROGRAM_LIB_NAME }}_patched.ts

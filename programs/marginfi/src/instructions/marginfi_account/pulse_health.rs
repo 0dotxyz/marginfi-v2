@@ -1,8 +1,8 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{clock::Clock, sysvar::Sysvar};
+use anchor_lang::solana_program::clock::Clock;
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::{HealthCache, HealthPriceMode, MarginfiAccount};
+use marginfi_type_crate::types::{HealthCache, HealthPriceMode, MarginfiAccount, MarginfiGroup};
 
 use crate::{
     constants::PROGRAM_VERSION,
@@ -28,7 +28,7 @@ fn has_trivial_balance(equity_assets: I80F48, equity_liabs: I80F48) -> bool {
 }
 
 pub fn lending_account_pulse_health<'info>(
-    ctx: Context<'_, '_, 'info, 'info, PulseHealth<'info>>,
+    ctx: Context<'info, PulseHealth<'info>>,
 ) -> MarginfiResult {
     let clock = Clock::get()?;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
@@ -36,10 +36,12 @@ pub fn lending_account_pulse_health<'info>(
     let mut health_cache = HealthCache::zeroed();
     health_cache.timestamp = clock.unix_timestamp;
     health_cache.program_version = PROGRAM_VERSION;
+    let group = ctx.accounts.group.load()?;
 
     // Check account init health using heap reuse optimization
     let engine_result = check_account_init_health(
         &marginfi_account,
+        &group,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
     );
@@ -78,6 +80,7 @@ pub fn lending_account_pulse_health<'info>(
     // Check pre-liquidation condition using heap reuse optimization
     let liq_result = check_pre_liquidation_condition_and_get_account_health(
         &marginfi_account,
+        &group,
         ctx.remaining_accounts,
         None,
         &mut Some(&mut health_cache),
@@ -107,6 +110,7 @@ pub fn lending_account_pulse_health<'info>(
     // Check bankruptcy condition using heap reuse optimization
     let bankruptcy_result = check_account_bankrupt(
         &marginfi_account,
+        &group,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
     );
@@ -168,8 +172,13 @@ pub fn lending_account_pulse_health<'info>(
 
 #[derive(Accounts)]
 pub struct PulseHealth<'info> {
-    #[account(mut)]
+    #[account(
+        mut,
+        has_one = group @ MarginfiError::InvalidGroup
+    )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
+
+    pub group: AccountLoader<'info, MarginfiGroup>,
 }
 
 #[cfg(test)]

@@ -31,9 +31,9 @@ export const FARMS_PROGRAM_ID = new PublicKey(
   "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr",
 );
 
-import { BankrunProvider, startAnchor } from "anchor-bankrun";
-import { BanksClient, ProgramTestContext } from "solana-bankrun";
-import type { AddedAccount, AddedProgram } from "solana-bankrun";
+import { BankrunProvider, startAnchor } from "./utils/litesvm";
+import { BanksClient, ProgramTestContext } from "./utils/litesvm";
+import type { AddedAccount, AddedProgram } from "./utils/litesvm";
 import {
   SINGLE_POOL_PROGRAM_ID,
   KLEND_PROGRAM_ID,
@@ -347,6 +347,7 @@ async function createValidatorBankrun(index: number): Promise<Validator> {
     splMint: PublicKey.default,
     splAuthority: PublicKey.default,
     splSolPool: PublicKey.default,
+    splOnRampPool: PublicKey.default,
     // Filled by staked tests after permissionless add-bank
     bank: PublicKey.default,
   };
@@ -382,10 +383,14 @@ async function createSplStakePoolBankrun(
     poolKey,
   );
   const poolStake = await findPoolStakeAddress(SINGLE_POOL_PROGRAM_ID, poolKey);
+  const [poolOnramp] = PublicKey.findProgramAddressSync(
+    [Buffer.from("onramp"), poolKey.toBuffer()],
+    SINGLE_POOL_PROGRAM_ID,
+  );
 
   if (verbose) {
     console.log(
-      `*init single-pool: pool=${poolKey.toBase58()} mint=${poolMintKey.toBase58()}`,
+      `*init single-pool: pool=${poolKey.toBase58()} mint=${poolMintKey.toBase58()} onramp=${poolOnramp.toBase58()}`,
     );
   }
 
@@ -395,6 +400,7 @@ async function createSplStakePoolBankrun(
     splMint: poolMintKey,
     splAuthority: poolAuthority,
     splSolPool: poolStake,
+    splOnRampPool: poolOnramp,
   };
 }
 
@@ -489,6 +495,7 @@ function getGenesisAccounts(): AddedAccount[] {
 
 export const mochaHooks = {
   beforeAll: async () => {
+
     // If false, you are in the wrong environment to run this, update Node or try polyfill
     console.log("Environment supports crypto: ", !!global.crypto?.subtle);
 

@@ -1,5 +1,6 @@
 use account_state::{AccountInfoCache, AccountsState};
 use anchor_lang::prelude::*;
+use anchor_lang::system_program;
 use anchor_lang::{
     accounts::{interface::Interface, interface_account::InterfaceAccount},
     prelude::{AccountInfo, AccountLoader, Context, Program, Pubkey, Rent, Signer},
@@ -25,7 +26,6 @@ use marginfi_type_crate::{
     },
 };
 use metrics::{MetricAction, Metrics};
-use solana_program::system_program;
 use std::{
     collections::HashMap,
     mem::size_of,
@@ -38,6 +38,7 @@ use user_accounts::UserAccount;
 use utils::{
     account_info_lifetime_shortener as ails, account_info_ref_lifetime_shortener as airls,
     account_info_slice_lifetime_shortener as aisls,
+    unchecked_account_info_lifetime_shortener as uails,
 };
 
 pub mod account_state;
@@ -67,7 +68,7 @@ impl<'state> MarginfiFuzzContext<'state> {
         bank_configs: &[BankAndOracleConfig],
         n_users: u8,
     ) -> Self {
-        let system_program = state.new_program(system_program::id());
+        let system_program = state.new_program(system_program::ID);
         let admin = state.new_sol_account(1_000_000, true, true);
         let fee_state_wallet = state.new_sol_account(1_000_000, true, true);
         let fee_state = initialize_fee_state(
@@ -246,19 +247,19 @@ impl<'state> MarginfiFuzzContext<'state> {
                         admin: Signer::try_from(airls(&self.owner)).unwrap(),
                         fee_payer: Signer::try_from(airls(&self.owner)).unwrap(),
                         fee_state: AccountLoader::try_from(airls(&self.fee_state)).unwrap(),
-                        global_fee_wallet: ails(self.fee_state_wallet.clone()),
+                        global_fee_wallet: uails(&self.fee_state_wallet),
                         bank_mint: Box::new(InterfaceAccount::try_from(airls(&mint)).unwrap()),
                         bank: AccountLoader::try_from_unchecked(&marginfi::ID, airls(&bank))
                             .unwrap(),
-                        liquidity_vault_authority: ails(liquidity_vault_authority.clone()),
+                        liquidity_vault_authority: uails(&liquidity_vault_authority),
                         liquidity_vault: Box::new(
                             InterfaceAccount::try_from(airls(&liquidity_vault)).unwrap(),
                         ),
-                        insurance_vault_authority: ails(insurance_vault_authority.clone()),
+                        insurance_vault_authority: uails(&insurance_vault_authority),
                         insurance_vault: Box::new(
                             InterfaceAccount::try_from(airls(&insurance_vault)).unwrap(),
                         ),
-                        fee_vault_authority: ails(fee_vault_authority.clone()),
+                        fee_vault_authority: uails(&fee_vault_authority),
                         fee_vault: Box::new(InterfaceAccount::try_from(airls(&fee_vault)).unwrap()),
                         token_program: Interface::try_from(airls(&token_program)).unwrap(),
                         system_program: Program::try_from(airls(&self.system_program)).unwrap(),
@@ -422,8 +423,8 @@ impl<'state> MarginfiFuzzContext<'state> {
                     ))?,
                     authority: Signer::try_from(airls(&self.owner))?,
                     bank: AccountLoader::try_from(airls(&bank.bank))?,
-                    signer_token_account: ails(
-                        marginfi_account.token_accounts[bank_idx.0 as usize].clone(),
+                    signer_token_account: uails(
+                        &marginfi_account.token_accounts[bank_idx.0 as usize],
                     ),
                     liquidity_vault: InterfaceAccount::try_from(airls(
                         &bank.liquidity_vault.clone(),
@@ -508,8 +509,8 @@ impl<'state> MarginfiFuzzContext<'state> {
                     ))?,
                     authority: Signer::try_from(airls(&self.owner))?,
                     bank: AccountLoader::try_from(airls(&bank.bank))?,
-                    signer_token_account: ails(
-                        marginfi_account.token_accounts[bank_idx.0 as usize].clone(),
+                    signer_token_account: uails(
+                        &marginfi_account.token_accounts[bank_idx.0 as usize],
                     ),
                     liquidity_vault: InterfaceAccount::try_from(airls(
                         &bank.liquidity_vault.clone(),
@@ -607,7 +608,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                     destination_token_account: InterfaceAccount::try_from(airls(
                         &marginfi_account.token_accounts[bank_idx.0 as usize],
                     ))?,
-                    bank_liquidity_vault_authority: ails(bank.liquidity_vault_authority.clone()),
+                    bank_liquidity_vault_authority: uails(&bank.liquidity_vault_authority),
                     liquidity_vault: InterfaceAccount::try_from(airls(&bank.liquidity_vault))?,
                 },
                 aisls(&remaining_accounts),
@@ -694,7 +695,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                     destination_token_account: InterfaceAccount::try_from(airls(
                         &marginfi_account.token_accounts[bank_idx.0 as usize],
                     ))?,
-                    bank_liquidity_vault_authority: ails(bank.liquidity_vault_authority.clone()),
+                    bank_liquidity_vault_authority: uails(&bank.liquidity_vault_authority),
                     liquidity_vault: InterfaceAccount::try_from(airls(&bank.liquidity_vault))?,
                 },
                 aisls(&remaining_accounts),
@@ -826,13 +827,11 @@ impl<'state> MarginfiFuzzContext<'state> {
                     liquidatee_marginfi_account: AccountLoader::try_from(airls(
                         &liquidatee_account.margin_account,
                     ))?,
-                    bank_liquidity_vault_authority: ails(
-                        liab_bank.liquidity_vault_authority.clone(),
-                    ),
+                    bank_liquidity_vault_authority: uails(&liab_bank.liquidity_vault_authority),
                     bank_liquidity_vault: Box::new(InterfaceAccount::try_from(airls(
                         &liab_bank.liquidity_vault,
                     ))?),
-                    bank_insurance_vault: ails(liab_bank.insurance_vault.clone()),
+                    bank_insurance_vault: uails(&liab_bank.insurance_vault),
                     token_program: Interface::try_from(airls(&liab_bank.token_program))?,
                 },
                 aisls(&remaining_accounts),
@@ -957,11 +956,11 @@ impl<'state> MarginfiFuzzContext<'state> {
                 signer: Signer::try_from(airls(&self.owner))?,
                 bank: AccountLoader::try_from(airls(&bank.bank))?,
                 marginfi_account: AccountLoader::try_from(airls(&marginfi_account.margin_account))?,
-                liquidity_vault: ails(bank.liquidity_vault.clone()),
+                liquidity_vault: uails(&bank.liquidity_vault),
                 insurance_vault: Box::new(InterfaceAccount::try_from(airls(
                     &bank.insurance_vault,
                 ))?),
-                insurance_vault_authority: ails(bank.insurance_vault_authority.clone()),
+                insurance_vault_authority: uails(&bank.insurance_vault_authority),
                 token_program: Interface::try_from(airls(&bank.token_program))?,
             },
             aisls(&remaining_accounts),
@@ -1044,25 +1043,19 @@ fn initialize_marginfi_group<'a>(
     let marginfi_group =
         state.new_owned_account(size_of::<MarginfiGroup>(), program_id, Rent::free());
 
-    marginfi::instructions::marginfi_group::initialize_group(
-        Context::new(
-            &marginfi::ID,
-            &mut marginfi::instructions::MarginfiGroupInitialize {
-                // Unchecked because we are initializing the account.
-                marginfi_group: AccountLoader::try_from_unchecked(
-                    &program_id,
-                    airls(&marginfi_group),
-                )
+    marginfi::instructions::marginfi_group::initialize_group(Context::new(
+        &marginfi::ID,
+        &mut marginfi::instructions::MarginfiGroupInitialize {
+            // Unchecked because we are initializing the account.
+            marginfi_group: AccountLoader::try_from_unchecked(&program_id, airls(&marginfi_group))
                 .unwrap(),
-                admin: Signer::try_from(airls(&admin)).unwrap(),
-                fee_state: AccountLoader::try_from_unchecked(&program_id, airls(&fee_state))
-                    .unwrap(),
-                system_program: Program::try_from(airls(&system_program)).unwrap(),
-            },
-            &[],
-            Default::default(),
-        ),
-    )
+            admin: Signer::try_from(airls(&admin)).unwrap(),
+            fee_state: AccountLoader::try_from_unchecked(&program_id, airls(&fee_state)).unwrap(),
+            system_program: Program::try_from(airls(&system_program)).unwrap(),
+        },
+        &[],
+        Default::default(),
+    ))
     .unwrap();
 
     set_discriminator::<MarginfiGroup>(marginfi_group.clone());
@@ -1077,7 +1070,6 @@ fn initialize_marginfi_group<'a>(
                 )
                 .unwrap(),
                 admin: Signer::try_from(airls(&admin)).unwrap(),
-                
             },
             &[],
             Default::default(),
@@ -1090,8 +1082,10 @@ fn initialize_marginfi_group<'a>(
         Some(admin.key()), // emissions_admin
         Some(admin.key()), // metadata_admin
         Some(admin.key()), // risk_admin
-        None,        // emode_max_init_leverage
-        None,        // emode_max_maint_leverage
+        None,              // emode_max_init_leverage
+        None,              // emode_max_maint_leverage
+        None,              // same_asset_emode_init_leverage
+        None,              // same_asset_emode_maint_leverage
     )
     .unwrap();
 
@@ -1142,9 +1136,7 @@ fn initialize_fee_state<'a>(
 mod tests {
     use anchor_lang::AnchorDeserialize;
     use fixed::types::I80F48;
-    use marginfi::state::marginfi_account::{
-        get_health_components, HealthPriceMode, RiskRequirementType,
-    };
+    use marginfi::state::marginfi_account::{get_health_components, HealthPriceMode, RiskRequirementType};
     use marginfi_type_crate::types::MarginfiGroup;
     use pyth_solana_receiver_sdk::price_update::PriceUpdateV2;
 
@@ -1250,9 +1242,16 @@ mod tests {
             let bank_map = a.get_bank_map();
             let remaining_accounts =
                 margin_account.get_remaining_accounts(&bank_map, vec![], vec![], None);
+            let group_ai = AccountLoader::<MarginfiGroup>::try_from_unchecked(
+                &marginfi::ID,
+                &a.marginfi_group,
+            )
+            .unwrap();
+            let group = group_ai.load().unwrap();
 
             let (_assets, _liabs) = get_health_components(
                 &marginfi_account,
+                &group,
                 aisls(&remaining_accounts),
                 RiskRequirementType::Maintenance,
                 &mut None,
@@ -1309,9 +1308,16 @@ mod tests {
             let bank_map = a.get_bank_map();
             let remaining_accounts =
                 margin_account.get_remaining_accounts(&bank_map, vec![], vec![], None);
+            let group_ai = AccountLoader::<MarginfiGroup>::try_from_unchecked(
+                &marginfi::ID,
+                &a.marginfi_group,
+            )
+            .unwrap();
+            let group = group_ai.load().unwrap();
 
             let (_assets, _liabs) = get_health_components(
                 &marginfi_account,
+                &group,
                 aisls(&remaining_accounts),
                 RiskRequirementType::Maintenance,
                 &mut None,

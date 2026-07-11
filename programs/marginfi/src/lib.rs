@@ -1,3 +1,5 @@
+#![allow(clippy::diverging_sub_expression, clippy::too_many_arguments)]
+
 pub mod allocator;
 pub mod constants;
 pub mod errors;
@@ -31,6 +33,8 @@ pub mod marginfi {
     /// (admin only) Configure group admin keys and emode leverage caps. All admin keys must be
     /// provided on every call. Emode leverage caps are set if provided, otherwise the existing
     /// (non-zero) values are kept. Pass `Some(value)` to update, `None` to leave unchanged.
+    /// Same-asset emode leverage is disabled by configuring both init and maint leverage to `1`;
+    /// values below `1`, including `0`, are invalid.
     ///
     /// Note: `new_emissions_admin` is deprecated and currently has no on-chain effect.
     pub fn marginfi_group_configure(
@@ -45,6 +49,8 @@ pub mod marginfi {
         new_risk_admin: Option<Pubkey>,
         emode_max_init_leverage: Option<WrappedI80F48>,
         emode_max_maint_leverage: Option<WrappedI80F48>,
+        same_asset_emode_init_leverage: Option<WrappedI80F48>,
+        same_asset_emode_maint_leverage: Option<WrappedI80F48>,
     ) -> MarginfiResult {
         marginfi_group::configure(
             ctx,
@@ -58,6 +64,8 @@ pub mod marginfi {
             new_risk_admin,
             emode_max_init_leverage,
             emode_max_maint_leverage,
+            same_asset_emode_init_leverage,
+            same_asset_emode_maint_leverage,
         )
     }
 
@@ -115,6 +123,21 @@ pub mod marginfi {
         marginfi_group::lending_pool_backfill_staked_bank_validator_vote_account(ctx)
     }
 
+    /// (admin only) Disable stake pricing, i.e. effectively forbidding all operations involving stake banks.
+    /// To be used during the rollout of the SVSP upgrade.
+    /// To be removed once SVSP update is rolled out (likely in 1.10)
+    pub fn disable_staked_oracles(ctx: Context<DisableStakedOracles>) -> MarginfiResult {
+        marginfi_group::disable_staked_oracles(ctx)
+    }
+
+    /// (admin only) Enable SPL single-pool on-ramp lamports in staked-collateral oracle pricing.
+    /// To be removed once SVSP update is rolled out (likely in 1.10)
+    /// This flips a per-group config flag so that every staked oracle uses the canonical single-pool NAV
+    /// formula.
+    pub fn enable_staked_oracle_onramp(ctx: Context<EnableStakedOracleOnramp>) -> MarginfiResult {
+        marginfi_group::enable_staked_oracle_onramp(ctx)
+    }
+
     /// (admin only) Configure bank parameters. If the bank has `FREEZE_SETTINGS`, only
     /// deposit/borrow limits are updated and all other config changes are silently ignored.
     pub fn lending_pool_configure_bank(
@@ -157,6 +180,17 @@ pub mod marginfi {
         marginfi_group::lending_pool_force_tokenless_repay_complete(ctx)
     }
 
+    /// (admin or risk_admin) Clear an active circuit-breaker halt on a bank.
+    /// * `reseed_reference` - If true, also zero the EMA reference so the next pulse reseeds it
+    ///   from live oracle data (use when clearing because the new price level is valid and the
+    ///   pre-halt reference would cause an immediate re-halt).
+    pub fn lending_pool_clear_circuit_breaker(
+        ctx: Context<LendingPoolClearCircuitBreaker>,
+        reseed_reference: bool,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_clear_circuit_breaker(ctx, reseed_reference)
+    }
+
     /// (admin only)
     pub fn lending_pool_configure_bank_oracle(
         ctx: Context<LendingPoolConfigureBankOracle>,
@@ -172,6 +206,21 @@ pub mod marginfi {
         price: WrappedI80F48,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_set_fixed_oracle_price(ctx, price)
+    }
+
+    /// (admin or emode_admin only) Initialize the per-group same-asset e-mode registry.
+    pub fn lending_pool_init_same_asset_emode_registry(
+        ctx: Context<LendingPoolInitSameAssetEmodeRegistry>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_init_same_asset_emode_registry(ctx)
+    }
+
+    /// (admin or emode_admin only) Opt a bank in/out of same-asset e-mode participation.
+    pub fn lending_pool_set_bank_same_asset_emode_eligibility(
+        ctx: Context<LendingPoolSetBankSameAssetEmodeEligibility>,
+        enabled: bool,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_set_bank_same_asset_emode_eligibility(ctx, enabled)
     }
 
     /// (emode_admin only)
@@ -202,7 +251,7 @@ pub mod marginfi {
     /// Handle bad debt of a bankrupt marginfi account for a given bank. Covers bad debt from the
     /// insurance fund and socializes any remainder among depositors.
     pub fn lending_pool_handle_bankruptcy<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingPoolHandleBankruptcy<'info>>,
+        ctx: Context<'info, LendingPoolHandleBankruptcy<'info>>,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_handle_bankruptcy(ctx)
     }
@@ -210,7 +259,7 @@ pub mod marginfi {
     /// (primary admin only) Withdraw directly from a bank liquidity vault and lower
     /// `asset_share_value` proportionally. No marginfi account is involved.
     pub fn super_admin_withdraw<'info>(
-        ctx: Context<'_, '_, 'info, 'info, SuperAdminWithdraw<'info>>,
+        ctx: Context<'info, SuperAdminWithdraw<'info>>,
         amount: u64,
     ) -> MarginfiResult {
         marginfi_group::super_admin_withdraw(ctx, amount)
@@ -219,7 +268,7 @@ pub mod marginfi {
     /// (primary admin only) Deposit directly into a bank liquidity vault and raise
     /// `asset_share_value` proportionally. No marginfi account is involved.
     pub fn super_admin_deposit<'info>(
-        ctx: Context<'_, '_, 'info, 'info, SuperAdminDeposit<'info>>,
+        ctx: Context<'info, SuperAdminDeposit<'info>>,
         amount: u64,
     ) -> MarginfiResult {
         marginfi_group::super_admin_deposit(ctx, amount)
@@ -311,7 +360,7 @@ pub mod marginfi {
     /// * Costs a small amount of rent, which is returned at the end of the tx, make sure you have
     ///   enough SOL to start the tx.
     pub fn marginfi_account_start_execute_order<'info>(
-        ctx: Context<'_, '_, 'info, 'info, StartExecuteOrder<'info>>,
+        ctx: Context<'info, StartExecuteOrder<'info>>,
     ) -> MarginfiResult {
         marginfi_account::start_execute_order(ctx)
     }
@@ -326,14 +375,14 @@ pub mod marginfi {
     /// * CPI is forbidden
     /// * Returns rent for ephemeral accounts created during `StartExecuteOrder`
     pub fn marginfi_account_end_execute_order<'info>(
-        ctx: Context<'_, '_, 'info, 'info, EndExecuteOrder<'info>>,
+        ctx: Context<'info, EndExecuteOrder<'info>>,
     ) -> MarginfiResult {
         marginfi_account::end_execute_order(ctx)
     }
     /// (account authority) Deposit assets into a bank. Accrues interest, records deposit, and
     /// transfers tokens from the signer's token account to the bank's liquidity vault.
     pub fn lending_account_deposit<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingAccountDeposit<'info>>,
+        ctx: Context<'info, LendingAccountDeposit<'info>>,
         amount: u64,
         deposit_up_to_limit: Option<bool>,
     ) -> MarginfiResult {
@@ -343,7 +392,7 @@ pub mod marginfi {
     /// (account authority, or any signer during receivership) Repay borrowed assets. Accrues
     /// interest, records repayment, and transfers tokens to the bank's liquidity vault.
     pub fn lending_account_repay<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingAccountRepay<'info>>,
+        ctx: Context<'info, LendingAccountRepay<'info>>,
         amount: u64,
         repay_all: Option<bool>,
     ) -> MarginfiResult {
@@ -355,7 +404,7 @@ pub mod marginfi {
     /// receivership). If group rate limits are enabled, `remaining_accounts` must include the
     /// withdrawn bank's oracle group for USD pricing.
     pub fn lending_account_withdraw<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingAccountWithdraw<'info>>,
+        ctx: Context<'info, LendingAccountWithdraw<'info>>,
         amount: u64,
         withdraw_all: Option<bool>,
     ) -> MarginfiResult {
@@ -367,7 +416,7 @@ pub mod marginfi {
     /// enabled, `remaining_accounts` must include the borrowed bank's oracle group for USD
     /// pricing.
     pub fn lending_account_borrow<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingAccountBorrow<'info>>,
+        ctx: Context<'info, LendingAccountBorrow<'info>>,
         amount: u64,
     ) -> MarginfiResult {
         marginfi_account::lending_account_borrow(ctx, amount)
@@ -387,7 +436,7 @@ pub mod marginfi {
     /// * `liquidatee_accounts` - number of remaining accounts for the liquidatee
     /// * `liquidator_accounts` - number of remaining accounts for the liquidator
     pub fn lending_account_liquidate<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingAccountLiquidate<'info>>,
+        ctx: Context<'info, LendingAccountLiquidate<'info>>,
         asset_amount: u64,
         liquidatee_accounts: u8,
         liquidator_accounts: u8,
@@ -411,7 +460,7 @@ pub mod marginfi {
 
     /// (account authority) End a flash loan and run the health check.
     pub fn lending_account_end_flashloan<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingAccountEndFlashloan<'info>>,
+        ctx: Context<'info, LendingAccountEndFlashloan<'info>>,
     ) -> MarginfiResult {
         marginfi_account::lending_account_end_flashloan(ctx)
     }
@@ -432,17 +481,31 @@ pub mod marginfi {
         marginfi_group::lending_pool_accrue_bank_interest(ctx)
     }
 
+    /// (permissionless) Resize the group account to the v2 layout size; `payer` funds the
+    /// added rent.
+    pub fn lending_pool_resize_group_account(
+        ctx: Context<LendingPoolResizeGroupAccount>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_resize_group_account(ctx)
+    }
+
+    /// (permissionless) Resize the fee-state account to the v2 layout size; `payer` funds the
+    /// added rent.
+    pub fn resize_global_fee_state(ctx: Context<ResizeGlobalFeeState>) -> MarginfiResult {
+        marginfi_group::resize_global_fee_state(ctx)
+    }
+
     /// (permissionless) Transfer accrued fees from the liquidity vault to insurance/fee/program
     /// vaults.
     pub fn lending_pool_collect_bank_fees<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingPoolCollectBankFees<'info>>,
+        ctx: Context<'info, LendingPoolCollectBankFees<'info>>,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_collect_bank_fees(ctx)
     }
 
     /// (admin only) Withdraw collected group fees from the fee vault.
     pub fn lending_pool_withdraw_fees<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingPoolWithdrawFees<'info>>,
+        ctx: Context<'info, LendingPoolWithdrawFees<'info>>,
         amount: u64,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_withdraw_fees(ctx, amount)
@@ -450,7 +513,7 @@ pub mod marginfi {
 
     /// (permissionless) Withdraw group fees to the pre-configured `fees_destination_account`.
     pub fn lending_pool_withdraw_fees_permissionless<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingPoolWithdrawFeesPermissionless<'info>>,
+        ctx: Context<'info, LendingPoolWithdrawFeesPermissionless<'info>>,
         amount: u64,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_withdraw_fees_permissionless(ctx, amount)
@@ -458,14 +521,14 @@ pub mod marginfi {
 
     /// (admin only) Set the destination wallet for permissionless fee withdrawals.
     pub fn lending_pool_update_fees_destination_account<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingPoolUpdateFeesDestinationAccount<'info>>,
+        ctx: Context<'info, LendingPoolUpdateFeesDestinationAccount<'info>>,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_update_fees_destination_account(ctx)
     }
 
     /// (admin only) Withdraw from the insurance vault.
     pub fn lending_pool_withdraw_insurance<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingPoolWithdrawInsurance<'info>>,
+        ctx: Context<'info, LendingPoolWithdrawInsurance<'info>>,
         amount: u64,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_withdraw_insurance(ctx, amount)
@@ -525,7 +588,7 @@ pub mod marginfi {
     /// * remaining accounts expected in the same order as borrow, etc. I.e., for each balance the
     ///   user has, pass bank and oracle: <bank1, oracle1, bank2, oracle2>
     pub fn lending_account_pulse_health<'info>(
-        ctx: Context<'_, '_, 'info, 'info, PulseHealth<'info>>,
+        ctx: Context<'info, PulseHealth<'info>>,
     ) -> MarginfiResult {
         marginfi_account::lending_account_pulse_health(ctx)
     }
@@ -533,14 +596,14 @@ pub mod marginfi {
     /// (Permissionless) Batch-sync balance-derived indexer flags for existing accounts.
     /// Pass MarginfiAccounts as writable remaining_accounts.
     pub fn sync_indexer_flags<'info>(
-        ctx: Context<'_, '_, 'info, 'info, SyncIndexerFlags<'info>>,
+        ctx: Context<'info, SyncIndexerFlags<'info>>,
     ) -> MarginfiResult {
         marginfi_account::sync_indexer_flags(ctx)
     }
 
     /// (Permissionless) Refresh the cached oracle price for a bank.
     pub fn lending_pool_pulse_bank_price_cache<'info>(
-        ctx: Context<'_, '_, 'info, 'info, LendingPoolPulseBankPriceCache<'info>>,
+        ctx: Context<'info, LendingPoolPulseBankPriceCache<'info>>,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_pulse_bank_price_cache(ctx)
     }
@@ -571,16 +634,6 @@ pub mod marginfi {
             liquidation_max_fee,
             order_execution_max_fee,
         )
-    }
-
-    /// (Runs once per program) Initialize the V2 fee state PDA.
-    pub fn init_global_fee_state_v2(ctx: Context<InitFeeStateV2>) -> MarginfiResult {
-        marginfi_group::initialize_fee_state_v2(ctx)
-    }
-
-    /// (permissionless) Copy current FeeState values into FeeStateV2.
-    pub fn copy_fee_state_to_v2(ctx: Context<CopyFeeStateToV2>) -> MarginfiResult {
-        marginfi_group::copy_fee_state_to_v2(ctx)
     }
 
     /// (global fee admin only) Adjust fees, admin, wallet, or pause delegate admin
@@ -654,31 +707,25 @@ pub mod marginfi {
     /// (permissionless) Begin receivership liquidation on an unhealthy account. Snapshots health
     /// and marks the account in receivership. Must have `end_liquidation` as the last ix in the tx.
     pub fn start_liquidation<'info>(
-        ctx: Context<'_, '_, 'info, 'info, StartLiquidation<'info>>,
+        ctx: Context<'info, StartLiquidation<'info>>,
     ) -> MarginfiResult {
         marginfi_account::start_liquidation(ctx)
     }
 
     /// (liquidation_receiver, set in start_liquidation) End receivership liquidation. Validates
     /// health improved and seized assets are within fee limits. Charges a flat SOL fee.
-    pub fn end_liquidation<'info>(
-        ctx: Context<'_, '_, 'info, 'info, EndLiquidation<'info>>,
-    ) -> MarginfiResult {
+    pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> MarginfiResult {
         marginfi_account::end_liquidation(ctx)
     }
 
     /// (risk_admin only) Begin forced deleverage on an account. Similar to start_liquidation but
     /// does not require the account to be unhealthy.
-    pub fn start_deleverage<'info>(
-        ctx: Context<'_, '_, 'info, 'info, StartDeleverage<'info>>,
-    ) -> MarginfiResult {
+    pub fn start_deleverage<'info>(ctx: Context<'info, StartDeleverage<'info>>) -> MarginfiResult {
         marginfi_account::start_deleverage(ctx)
     }
 
     /// (risk_admin only) End forced deleverage. Validates health did not worsen.
-    pub fn end_deleverage<'info>(
-        ctx: Context<'_, '_, 'info, 'info, EndDeleverage<'info>>,
-    ) -> MarginfiResult {
+    pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> MarginfiResult {
         marginfi_account::end_deleverage(ctx)
     }
 
@@ -831,7 +878,7 @@ pub mod marginfi {
     /// * amount - in the liquidity token (e.g. if there is a Kamino USDC bank, pass the amount of
     ///   USDC desired), in native decimals.
     pub fn kamino_deposit<'info>(
-        ctx: Context<'_, '_, 'info, 'info, KaminoDeposit<'info>>,
+        ctx: Context<'info, KaminoDeposit<'info>>,
         amount: u64,
         refresh_reserve: Option<bool>,
     ) -> MarginfiResult {
@@ -847,7 +894,7 @@ pub mod marginfi {
     ///   - bit 0 (`0x01`): withdraw all
     ///   - bit 1 (`0x02`): refresh reserve via batch refresh
     pub fn kamino_withdraw<'info>(
-        ctx: Context<'_, '_, 'info, 'info, KaminoWithdraw<'info>>,
+        ctx: Context<'info, KaminoWithdraw<'info>>,
         amount: u64,
         flags: Option<u8>,
     ) -> MarginfiResult {
@@ -896,10 +943,7 @@ pub mod marginfi {
 
     /// (user) Deposit into a Drift spot market through a marginfi account
     /// * amount - in the underlying token (e.g., USDC), in native decimals
-    pub fn drift_deposit<'info>(
-        ctx: Context<'_, '_, 'info, 'info, DriftDeposit<'info>>,
-        amount: u64,
-    ) -> MarginfiResult {
+    pub fn drift_deposit(ctx: Context<DriftDeposit>, amount: u64) -> MarginfiResult {
         drift::drift_deposit(ctx, amount)
     }
 
@@ -909,7 +953,7 @@ pub mod marginfi {
     ///   `remaining_accounts`
     /// * withdraw_all - if true, withdraws entire position
     pub fn drift_withdraw<'info>(
-        ctx: Context<'_, '_, 'info, 'info, DriftWithdraw<'info>>,
+        ctx: Context<'info, DriftWithdraw<'info>>,
         amount: u64,
         withdraw_all: Option<bool>,
     ) -> MarginfiResult {
@@ -920,9 +964,20 @@ pub mod marginfi {
     /// Rewards are always sent to the global fee wallet's canonical ATA.
     /// The harvest spot market must be different from the bank's main drift spot market.
     pub fn drift_harvest_reward<'info>(
-        ctx: Context<'_, '_, 'info, 'info, DriftHarvestReward<'info>>,
+        ctx: Context<'info, DriftHarvestReward<'info>>,
     ) -> MarginfiResult {
         drift::drift_harvest_reward(ctx)
+    }
+
+    /// (permissionless) Claim a Drift bad-debt portal allocation for a Drift bank.
+    /// The merkle claimant is the bank's liquidity_vault_authority PDA, and claimed tokens are
+    /// swept to the global fee wallet's canonical ATA.
+    pub fn drift_claim_bad_debt<'info>(
+        ctx: Context<'info, DriftClaimBadDebt<'info>>,
+        amount: u64,
+        proof: Vec<[u8; 32]>,
+    ) -> MarginfiResult {
+        drift::drift_claim_bad_debt(ctx, amount, proof)
     }
 
     // Solend integration instructions
@@ -949,7 +1004,7 @@ pub mod marginfi {
     /// (user) Deposit into a Solend reserve through a marginfi account
     /// * amount - in the underlying token (e.g., USDC), in native decimals
     pub fn solend_deposit<'info>(
-        ctx: Context<'_, '_, 'info, 'info, SolendDeposit<'info>>,
+        ctx: Context<'info, SolendDeposit<'info>>,
         amount: u64,
     ) -> MarginfiResult {
         solend::solend_deposit(ctx, amount)
@@ -961,7 +1016,7 @@ pub mod marginfi {
     ///   `remaining_accounts`
     /// * withdraw_all - withdraw entire position if true
     pub fn solend_withdraw<'info>(
-        ctx: Context<'_, '_, 'info, 'info, SolendWithdraw<'info>>,
+        ctx: Context<'info, SolendWithdraw<'info>>,
         amount: u64,
         withdraw_all: Option<bool>,
     ) -> MarginfiResult {
@@ -1003,7 +1058,7 @@ pub mod marginfi {
     /// * if group rate limits are enabled, include the withdrawn bank's oracle group in
     ///   `remaining_accounts`
     pub fn juplend_withdraw<'info>(
-        ctx: Context<'_, '_, 'info, 'info, JuplendWithdraw<'info>>,
+        ctx: Context<'info, JuplendWithdraw<'info>>,
         amount: u64,
         withdraw_all: Option<bool>,
     ) -> MarginfiResult {

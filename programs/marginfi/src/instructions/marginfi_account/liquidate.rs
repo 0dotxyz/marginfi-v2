@@ -2,8 +2,8 @@ use crate::events::{AccountEventHeader, LendingAccountLiquidateEvent, Liquidatio
 use crate::state::{
     bank::{BankImpl, BankVaultType},
     marginfi_account::{
-        account_not_frozen_for_authority, calc_amount, calc_value, check_account_init_health,
-        check_post_liquidation_condition_and_get_account_health,
+        account_not_frozen_for_authority, any_balance_bank_is_cb_halted, calc_amount, calc_value,
+        check_account_init_health, check_post_liquidation_condition_and_get_account_health,
         check_pre_liquidation_condition_and_get_account_health, get_remaining_accounts_per_bank,
         is_signer_authorized, LendingAccountImpl, MarginfiAccountImpl,
     },
@@ -19,10 +19,7 @@ use crate::utils::{
 };
 use crate::{bank_signer, state::marginfi_account::BankAccountWrapper};
 use crate::{check, debug, prelude::*, utils};
-use anchor_lang::{
-    prelude::*,
-    solana_program::{clock::Clock, sysvar::Sysvar},
-};
+use anchor_lang::{prelude::*, solana_program::clock::Clock};
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
@@ -100,11 +97,10 @@ use marginfi_type_crate::{
 /// - Kamino: collateral tokens (user's share in the pool)
 /// - Drift: scaled balance (Drift's internal position representation)
 /// - Solend: cTokens (collateral tokens)
-/// Liquidators must understand they are specifying how many of these position tokens
-/// to take, rather than a specific amount of the underlying asset.
-
+///   Liquidators must understand they are specifying how many of these position tokens
+///   to take, rather than a specific amount of the underlying asset.
 pub fn lending_account_liquidate<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, LendingAccountLiquidate<'info>>,
+    mut ctx: Context<'info, LendingAccountLiquidate<'info>>,
     asset_amount: u64,
     liquidatee_accounts: u8,
     liquidator_accounts: u8,
@@ -116,26 +112,8 @@ pub fn lending_account_liquidate<'info>(
         MarginfiError::SameAssetAndLiabilityBanks
     );
 
-    // Liquidators must repay debts in allowed asset types. A SOL debt can be repaid in any asset. A
-    // Staked Collateral debt must be repaid in SOL or staked collateral. A Default asset debt can
-    // be repaid in any Default asset or SOL.
-    {
-        let asset_bank = ctx.accounts.asset_bank.load()?;
-        let liab_bank = ctx.accounts.liab_bank.load()?;
-        validate_bank_asset_tags(&asset_bank, &liab_bank)?;
-        validate_bank_state(&asset_bank, InstructionKind::FailsInPausedState)?;
-        validate_bank_state(&liab_bank, InstructionKind::FailsInPausedState)?;
-
-        // Sanity check user/liquidator accounts will not contain positions with mismatching tags
-        // after liquidation.
-        // * Note: user will be repaid in liab_bank
-        let user_acc = ctx.accounts.liquidatee_marginfi_account.load()?;
-        validate_asset_tags(&liab_bank, &user_acc)?;
-        // * Note: Liquidator repays liab bank, and is paid in asset_bank.
-        let liquidator_acc = ctx.accounts.liquidator_marginfi_account.load()?;
-        validate_asset_tags(&liab_bank, &liquidator_acc)?;
-        validate_asset_tags(&asset_bank, &liquidator_acc)?;
-    } // release immutable borrow of asset_bank/liab_bank + liquidatee/liquidator user accounts
+    let clock = Clock::get()?;
+    let current_timestamp = clock.unix_timestamp;
 
     let LendingAccountLiquidate {
         liquidator_marginfi_account: liquidator_marginfi_account_loader,
@@ -146,8 +124,6 @@ pub fn lending_account_liquidate<'info>(
 
     let mut liquidator_marginfi_account = liquidator_marginfi_account_loader.load_mut()?;
     let mut liquidatee_marginfi_account = liquidatee_marginfi_account_loader.load_mut()?;
-    let clock = Clock::get()?;
-    let current_timestamp = clock.unix_timestamp;
 
     let maybe_liab_bank_mint = utils::maybe_take_bank_mint(
         &mut ctx.remaining_accounts,
@@ -177,10 +153,65 @@ pub fn lending_account_liquidate<'info>(
 
     liquidatee_marginfi_account.lending_account.sort_balances();
 
+    {
+        let group = marginfi_group_loader.load()?;
+        let cb_admin_liquidation = any_balance_bank_is_cb_halted(
+            &liquidatee_marginfi_account,
+            liquidatee_remaining_accounts,
+        )?;
+
+        // During a CB halt direct liquidation is admin-only; otherwise the standard liquidator
+        // ownership check applies.
+        let signer = ctx.accounts.authority.key();
+        if cb_admin_liquidation {
+            require!(
+                signer == group.risk_admin || signer == group.admin,
+                MarginfiError::CircuitBreakerAdminOnly
+            );
+        } else {
+            require!(
+                is_signer_authorized(
+                    &liquidator_marginfi_account,
+                    group.admin,
+                    signer,
+                    false,
+                    false
+                ),
+                MarginfiError::Unauthorized
+            );
+        }
+
+        // Liquidators must repay debts in allowed asset types. A SOL debt can be repaid in any
+        // asset. A Staked Collateral debt must be repaid in SOL or staked collateral. A Default
+        // asset debt can be repaid in any Default asset or SOL.
+        let asset_bank = ctx.accounts.asset_bank.load()?;
+        let liab_bank = ctx.accounts.liab_bank.load()?;
+        validate_bank_asset_tags(&asset_bank, &liab_bank)?;
+        validate_bank_state(
+            &asset_bank,
+            InstructionKind::FailsInPausedState,
+            cb_admin_liquidation,
+        )?;
+        validate_bank_state(
+            &liab_bank,
+            InstructionKind::FailsInPausedState,
+            cb_admin_liquidation,
+        )?;
+
+        // Sanity check user/liquidator accounts will not contain positions with mismatching tags
+        // after liquidation.
+        // * Note: user will be repaid in liab_bank
+        validate_asset_tags(&liab_bank, &liquidatee_marginfi_account)?;
+        // * Note: Liquidator repays liab bank, and is paid in asset_bank.
+        validate_asset_tags(&liab_bank, &liquidator_marginfi_account)?;
+        validate_asset_tags(&asset_bank, &liquidator_marginfi_account)?;
+    } // release immutable borrow of group/asset/liab banks
+
     let asset_bank_key = ctx.accounts.asset_bank.key();
     let liab_bank_key = ctx.accounts.liab_bank.key();
     let (pre_liquidation_health, _, _) = check_pre_liquidation_condition_and_get_account_health(
         &liquidatee_marginfi_account,
+        group,
         liquidatee_remaining_accounts,
         Some(&liab_bank_key),
         &mut None,
@@ -449,6 +480,7 @@ pub fn lending_account_liquidate<'info>(
     // Verify liquidatee liquidation post health using heap-efficient parity checks
     let post_liquidation_health = check_post_liquidation_condition_and_get_account_health(
         &liquidatee_marginfi_account,
+        group,
         liquidatee_remaining_accounts,
         &ctx.accounts.liab_bank.key(),
         pre_liquidation_health,
@@ -466,6 +498,7 @@ pub fn lending_account_liquidate<'info>(
     // Verify liquidator account health using heap-efficient version (includes isolated-tier check)
     check_account_init_health(
         &liquidator_marginfi_account,
+        group,
         liquidator_remaining_accounts,
         &mut None,
     )?;
@@ -526,11 +559,8 @@ pub struct LendingAccountLiquidate<'info> {
             let a = liquidator_marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())
         } @ MarginfiError::AccountFrozen,
-        constraint = {
-            let a = liquidator_marginfi_account.load()?;
-            let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false)
-        } @ MarginfiError::Unauthorized
+        // Signer authorization moved to the handler so the CB-halt admin path can accept
+        // group.admin / risk_admin without requiring them to own the liquidator account.
     )]
     pub liquidator_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
@@ -554,7 +584,7 @@ pub struct LendingAccountLiquidate<'info> {
         ],
         bump = liab_bank.load()?.liquidity_vault_authority_bump
     )]
-    pub bank_liquidity_vault_authority: AccountInfo<'info>,
+    pub bank_liquidity_vault_authority: UncheckedAccount<'info>,
 
     /// CHECK: Seed constraint
     #[account(
@@ -576,7 +606,7 @@ pub struct LendingAccountLiquidate<'info> {
         ],
         bump = liab_bank.load()?.insurance_vault_bump
     )]
-    pub bank_insurance_vault: AccountInfo<'info>,
+    pub bank_insurance_vault: UncheckedAccount<'info>,
 
     pub token_program: Interface<'info, TokenInterface>,
 }

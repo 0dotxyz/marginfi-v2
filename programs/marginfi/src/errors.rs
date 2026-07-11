@@ -108,8 +108,8 @@ pub enum MarginfiError {
     WrongNumberOfOracleAccounts,
     #[msg("Oracle error: wrong account keys")] // 6052
     WrongOracleAccountKeys,
-    #[msg("Vacated2")] // 6053
-    Vacated2,
+    #[msg("Stake oracles are temporarily disabled")] // 6053
+    StakeOraclesDisabled,
     #[msg("Vacated3")] // 6054
     Vacated3,
     #[msg("Oracle max confidence exceeded: try again later")] // 6055
@@ -270,6 +270,10 @@ pub enum MarginfiError {
     UseSetFixedOraclePrice,
     #[msg("Provided global fee wallet does not match group fee state cache")] // 6133
     InvalidGlobalFeeWallet,
+    #[msg("Bank has not completed one-time initialization")] // 6134
+    BankUninitialized,
+    #[msg("Max slippage exceeds the allowed cap")] // 6135
+    SlippageTooHigh,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -425,7 +429,24 @@ pub enum MarginfiError {
     JuplendInitPositionDepositInsufficient, // 6511
     #[msg("Invalid Juplend withdraw intermediary ATA")]
     InvalidJuplendWithdrawIntermediaryAta, // 6512
-                                           // **************END JUPLEND ERRORS
+    // **************END JUPLEND ERRORS
+    #[msg("Account is already at (or above) the target size")]
+    InvalidResize, // 6513
+
+    // ************** BEGIN CIRCUIT BREAKER ERRORS (starting at 6600)
+    #[msg("Bank is halted by oracle circuit breaker")]
+    BankCircuitBreakerHalted = 600, // 6600
+    #[msg("Action requires risk admin while bank is circuit-breaker halted")]
+    CircuitBreakerAdminOnly, // 6601
+    #[msg("Invalid circuit breaker config")]
+    CircuitBreakerInvalidConfig, // 6602
+    #[msg(
+        "Circuit breaker cannot be enabled until the oracle price cache is warm (call pulse first)"
+    )]
+    CircuitBreakerRequiresWarmCache, // 6603
+    #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
+    CircuitBreakerPriceJump, // 6604
+                             // **************END CIRCUIT BREAKER ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -502,7 +523,7 @@ impl From<u32> for MarginfiError {
             6050 => MarginfiError::PythPushStalePrice,
             6051 => MarginfiError::WrongNumberOfOracleAccounts,
             6052 => MarginfiError::WrongOracleAccountKeys,
-            6053 => MarginfiError::Vacated2,
+            6053 => MarginfiError::StakeOraclesDisabled,
             6054 => MarginfiError::Vacated3,
             6055 => MarginfiError::OracleMaxConfidenceExceeded,
             6056 => MarginfiError::PythPushInsufficientVerificationLevel,
@@ -583,6 +604,7 @@ impl From<u32> for MarginfiError {
             6131 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSeq,
             6132 => MarginfiError::UseSetFixedOraclePrice,
             6133 => MarginfiError::InvalidGlobalFeeWallet,
+            6134 => MarginfiError::BankUninitialized,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,
@@ -663,6 +685,12 @@ impl From<u32> for MarginfiError {
             6510 => MarginfiError::JuplendWithdrawFailed,
             6511 => MarginfiError::JuplendInitPositionDepositInsufficient,
             6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
+            6513 => MarginfiError::InvalidResize,
+            6600 => MarginfiError::BankCircuitBreakerHalted,
+            6601 => MarginfiError::CircuitBreakerAdminOnly,
+            6602 => MarginfiError::CircuitBreakerInvalidConfig,
+            6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
+            6604 => MarginfiError::CircuitBreakerPriceJump,
 
             _ => MarginfiError::InternalLogicError,
         }

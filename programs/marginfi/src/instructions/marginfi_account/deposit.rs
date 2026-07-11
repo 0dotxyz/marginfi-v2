@@ -17,7 +17,6 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
-use anchor_lang::solana_program::sysvar::Sysvar;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
@@ -32,7 +31,7 @@ use marginfi_type_crate::{
 ///
 /// Will error if there is an existing liability <=> repaying is not allowed.
 pub fn lending_account_deposit<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, LendingAccountDeposit<'info>>,
+    mut ctx: Context<'info, LendingAccountDeposit<'info>>,
     amount: u64,
     deposit_up_to_limit: Option<bool>,
 ) -> MarginfiResult {
@@ -58,7 +57,7 @@ pub fn lending_account_deposit<'info>(
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
     let group = marginfi_group_loader.load()?;
     validate_asset_tags(&bank, &marginfi_account)?;
-    validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
+    validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState, true)?;
 
     check!(
         !marginfi_account.get_flag(ACCOUNT_DISABLED)
@@ -90,7 +89,7 @@ pub fn lending_account_deposit<'info>(
         &mut marginfi_account.lending_account,
     )?;
 
-    bank_account.deposit(I80F48::from_num(deposit_amount))?;
+    let share_amount = bank_account.deposit(I80F48::from_num(deposit_amount))?;
     marginfi_account.last_update = clock.unix_timestamp as u64;
 
     record_deposit_inflow(
@@ -135,6 +134,7 @@ pub fn lending_account_deposit<'info>(
         bank: bank_loader.key(),
         mint: bank.mint,
         amount: deposit_amount,
+        share_amount: share_amount.into(),
     });
 
     marginfi_account.lending_account.sort_balances();
@@ -182,7 +182,7 @@ pub struct LendingAccountDeposit<'info> {
 
     /// CHECK: Token mint/authority are checked at transfer
     #[account(mut)]
-    pub signer_token_account: AccountInfo<'info>,
+    pub signer_token_account: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,

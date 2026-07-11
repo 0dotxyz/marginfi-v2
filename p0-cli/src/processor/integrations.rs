@@ -21,8 +21,9 @@ use {
     solana_sdk::{
         instruction::{AccountMeta, Instruction},
         pubkey::Pubkey,
-        system_program, sysvar,
+        sysvar,
     },
+    solana_system_interface::program as system_program,
     std::collections::HashMap,
 };
 

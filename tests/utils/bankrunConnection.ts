@@ -8,7 +8,7 @@ import {
   TransactionInstruction,
   SYSVAR_CLOCK_PUBKEY,
 } from "@solana/web3.js";
-import { BanksClient, Clock, ProgramTestContext } from "solana-bankrun";
+import { BanksClient, Clock, ProgramTestContext } from "./litesvm";
 import { BN, utils } from "@coral-xyz/anchor";
 
 /**
@@ -123,14 +123,22 @@ export function patchBankrunConnection(
  * @param to
  * @returns
  */
+let dummyIxNonce = 1;
+
 export function dummyIx(
   from: PublicKey,
   to: PublicKey,
 ): TransactionInstruction {
+  const lamports = dummyIxNonce;
+  dummyIxNonce += 1;
+  if (dummyIxNonce >= Number.MAX_SAFE_INTEGER) {
+    dummyIxNonce = 1;
+  }
+
   let ix = SystemProgram.transfer({
     fromPubkey: from,
     toPubkey: to,
-    lamports: Math.round(Math.random() * 123456),
+    lamports,
   });
   return ix;
 }

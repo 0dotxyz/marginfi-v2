@@ -5,8 +5,8 @@ use crate::{
         TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE,
     },
     types::{
-        BankOperationalState, InterestRateConfig, InterestRateConfigCompact, InterestRateConfigOpt,
-        OracleSetup, RiskTier,
+        BalanceSide, BankOperationalState, InterestRateConfig, InterestRateConfigCompact,
+        InterestRateConfigOpt, OracleSetup, RequirementType, RiskTier,
     },
 };
 
@@ -54,7 +54,11 @@ pub struct BankConfig {
     pub oracle_keys: [Pubkey; MAX_ORACLE_KEYS],
 
     // Note: Pubkey is aligned 1, so borrow_limit is the first aligned-8 value after deposit_limit
-    pub _pad0: [u8; 6], // Bank state (1) + Oracle Setup (1) + 6 = 8
+    /// CB long-window upward move cap in bps; `0` uses the `CB_WINDOW_MAX_UP_BPS` default.
+    pub cb_window_max_up_bps: u16,
+    /// CB long-window downward move cap in bps; `0` uses the `CB_WINDOW_MAX_DOWN_BPS` default.
+    pub cb_window_max_down_bps: u16,
+    pub _pad0: [u8; 2], // Bank state (1) + Oracle Setup (1) + 2x u16 (4) + 2 = 8
 
     /// Maximum total borrows allowed in this bank, in native token units (0 = no limit)
     pub borrow_limit: u64,
@@ -66,9 +70,9 @@ pub struct BankConfig {
     /// * `ASSET_TAG_DEFAULT` (0) - A regular asset that can be comingled with any other regular
     ///   asset or with `ASSET_TAG_SOL`
     /// * `ASSET_TAG_SOL` (1) - Accounts with a SOL position can comingle with **either**
-    /// `ASSET_TAG_DEFAULT` or `ASSET_TAG_STAKED` positions, but not both
+    ///   `ASSET_TAG_DEFAULT` or `ASSET_TAG_STAKED` positions, but not both
     /// * `ASSET_TAG_STAKED` (2) - Staked SOL assets. Accounts with a STAKED position can only
-    /// deposit other STAKED assets or SOL (`ASSET_TAG_SOL`) and can only borrow SOL
+    ///   deposit other STAKED assets or SOL (`ASSET_TAG_SOL`) and can only borrow SOL
     /// * `ASSET_TAG_KAMINO` (3) - Treated the same as `ASSET_TAG_DEFAULT`
     /// * `ASSET_TAG_DRIFT` (4) - Treated the same as `ASSET_TAG_DEFAULT`
     /// * `ASSET_TAG_SOLEND` (5) - Treated the same as `ASSET_TAG_DEFAULT`
@@ -81,7 +85,10 @@ pub struct BankConfig {
     /// * 2, 4, 8, 16, etc - reserved for future use.
     pub config_flags: u8,
 
-    pub _pad1: [u8; 5],
+    pub _pad1: [u8; 1],
+
+    /// CB long-window length in seconds; `0` uses the `CB_WINDOW_SECONDS` default.
+    pub cb_window_seconds: u32,
 
     /// USD denominated limit for calculating asset value for initialization margin requirements.
     /// Example, if total SOL deposits are equal to $1M and the limit it set to $500K, then SOL
@@ -108,7 +115,16 @@ pub struct BankConfig {
     /// Stored oracle price for `OracleSetup::Fixed`, otherwise does nothing
     pub fixed_price: WrappedI80F48,
 
-    pub _padding1: [u8; 16],
+    /// Deviation thresholds in basis points for tiers 1/2/3, strictly monotonic.
+    pub cb_deviation_bps_tiers: [u16; 3],
+    /// Halt durations in seconds for tiers 1/2/3, strictly monotonic.
+    pub cb_tier_durations_seconds: [u16; 3],
+    /// Escalation window multiplier: a re-breach within `prev_tier_duration * mult` seconds
+    /// after a halt ends ratchets to the next tier.
+    pub cb_escalation_window_mult: u8,
+    pub _cb_config_pad: u8,
+    /// EMA smoothing factor for the reference price, in basis points (e.g. 1000 = α=0.1).
+    pub cb_ema_alpha_bps: u16,
 }
 
 impl Default for BankConfig {
@@ -124,17 +140,45 @@ impl Default for BankConfig {
             operational_state: BankOperationalState::Paused,
             oracle_setup: OracleSetup::None,
             oracle_keys: [Pubkey::default(); MAX_ORACLE_KEYS],
-            _pad0: [0; 6],
+            cb_window_max_up_bps: 0,
+            cb_window_max_down_bps: 0,
+            _pad0: [0; 2],
             risk_tier: RiskTier::Isolated,
             asset_tag: ASSET_TAG_DEFAULT,
             config_flags: 0,
-            _pad1: [0; 5],
+            _pad1: [0; 1],
+            cb_window_seconds: 0,
             total_asset_value_init_limit: TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE,
             oracle_max_age: 0,
             _padding0: [0; 2],
             oracle_max_confidence: 0,
             fixed_price: I80F48::ZERO.into(),
-            _padding1: [0; 16],
+            cb_deviation_bps_tiers: [0; 3],
+            cb_tier_durations_seconds: [0; 3],
+            cb_escalation_window_mult: 0,
+            _cb_config_pad: 0,
+            cb_ema_alpha_bps: 0,
+        }
+    }
+}
+
+impl BankConfig {
+    #[inline]
+    pub fn get_weight(
+        &self,
+        requirement_type: RequirementType,
+        balance_side: BalanceSide,
+    ) -> I80F48 {
+        match (requirement_type, balance_side) {
+            (RequirementType::Initial, BalanceSide::Assets) => self.asset_weight_init.into(),
+            (RequirementType::Initial, BalanceSide::Liabilities) => {
+                self.liability_weight_init.into()
+            }
+            (RequirementType::Maintenance, BalanceSide::Assets) => self.asset_weight_maint.into(),
+            (RequirementType::Maintenance, BalanceSide::Liabilities) => {
+                self.liability_weight_maint.into()
+            }
+            (RequirementType::Equity, _) => I80F48::ONE,
         }
     }
 }
@@ -168,6 +212,15 @@ pub struct BankConfigOpt {
     pub permissionless_bad_debt_settlement: Option<bool>,
     pub freeze_settings: Option<bool>,
     pub tokenless_repayments_allowed: Option<bool>,
+
+    pub circuit_breaker_enabled: Option<bool>,
+    pub cb_deviation_bps_tiers: Option<[u16; 3]>,
+    pub cb_tier_durations_seconds: Option<[u16; 3]>,
+    pub cb_escalation_window_mult: Option<u8>,
+    pub cb_ema_alpha_bps: Option<u16>,
+    pub cb_window_seconds: Option<u32>,
+    pub cb_window_max_up_bps: Option<u16>,
+    pub cb_window_max_down_bps: Option<u16>,
 }
 
 #[repr(C)]
@@ -193,9 +246,9 @@ pub struct BankConfigCompact {
     /// * `ASSET_TAG_DEFAULT` (0) - A regular asset that can be comingled with any other regular
     ///   asset or with `ASSET_TAG_SOL`
     /// * `ASSET_TAG_SOL` (1) - Accounts with a SOL position can comingle with **either**
-    /// `ASSET_TAG_DEFAULT` or `ASSET_TAG_STAKED` positions, but not both
+    ///   `ASSET_TAG_DEFAULT` or `ASSET_TAG_STAKED` positions, but not both
     /// * `ASSET_TAG_STAKED` (2) - Staked SOL assets. Accounts with a STAKED position can only
-    /// deposit other STAKED assets or SOL (`ASSET_TAG_SOL`) and can only borrow SOL
+    ///   deposit other STAKED assets or SOL (`ASSET_TAG_SOL`) and can only borrow SOL
     /// * `ASSET_TAG_KAMINO` (3) - Treated the same as `ASSET_TAG_DEFAULT`
     /// * `ASSET_TAG_DRIFT` (4) - Treated the same as `ASSET_TAG_DEFAULT`
     /// * `ASSET_TAG_SOLEND` (5) - Treated the same as `ASSET_TAG_DEFAULT`
@@ -269,18 +322,25 @@ impl From<BankConfigCompact> for BankConfig {
             operational_state: config.operational_state,
             oracle_setup: OracleSetup::None,
             oracle_keys: keys,
-            _pad0: [0; 6],
+            cb_window_max_up_bps: 0,
+            cb_window_max_down_bps: 0,
+            _pad0: [0; 2],
             borrow_limit: config.borrow_limit,
             risk_tier: config.risk_tier,
             asset_tag: config.asset_tag,
             config_flags: config.config_flags,
-            _pad1: [0; 5],
+            _pad1: [0; 1],
+            cb_window_seconds: 0,
             total_asset_value_init_limit: config.total_asset_value_init_limit,
             oracle_max_age: config.oracle_max_age,
             _padding0: [0; 2],
             oracle_max_confidence: config.oracle_max_confidence,
             fixed_price: I80F48::ZERO.into(),
-            _padding1: [0; 16],
+            cb_deviation_bps_tiers: [0; 3],
+            cb_tier_durations_seconds: [0; 3],
+            cb_escalation_window_mult: 0,
+            _cb_config_pad: 0,
+            cb_ema_alpha_bps: 0,
         }
     }
 }

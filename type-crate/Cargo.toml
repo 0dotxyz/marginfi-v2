@@ -1,6 +1,6 @@
 [package]
 name = "marginfi-type-crate"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 publish = true
 
@@ -28,3 +28,4 @@ solana-instruction = { workspace = true }
 spl-associated-token-account = { workspace = true }
 
 anchor-lang = { workspace = true, optional = true }
+borsh = { workspace = true, optional = true }

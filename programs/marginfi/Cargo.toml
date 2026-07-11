@@ -1,6 +1,6 @@
 [package]
 name = "marginfi"
-version = "0.1.9"
+version = "0.1.10"
 description = "Borrow Lending Prime Broker"
 edition = "2021"
 
@@ -15,28 +15,36 @@ no-log-ix-name = []
 cpi = ["no-entrypoint"]
 custom-heap = []
 default = ["mainnet-beta", "custom-heap"]
-idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build", "pyth-solana-receiver-sdk/idl-build"]
 test-bpf = ["test", "debug"]
 test = []
-client = []
+client = ["solana-program"]
 debug = []
+transfer-hook = []
 mainnet-beta = ["id-crate/mainnet-beta", "marginfi-type-crate/mainnet-beta"]
 staging = ["id-crate/staging", "marginfi-type-crate/staging"]
 stagingalt = ["id-crate/stagingalt", "marginfi-type-crate/stagingalt"]
 devnet = ["id-crate/devnet", "marginfi-type-crate/devnet"]
+anchor-debug = ["anchor-lang/anchor-debug"]
+custom-panic = []
 
 [dependencies]
 id-crate = { workspace = true }
 marginfi-type-crate = { workspace = true, features = ["anchor"] }
-# solana-program = { workspace = true }
 spl-transfer-hook-interface = { workspace = true }
-# spl-tlv-account-resolution = { workspace = true }
+spl-token-2022 = { workspace = true }
+solana-program = { workspace = true, optional = true }
+solana-stake-interface = { workspace = true, features = ["borsh"] }
+solana-vote-interface = { workspace = true }
+solana-sha256-hasher = { workspace = true }
+solana-borsh = { workspace = true }
+solana-instructions-sysvar = { workspace = true }
+solana-msg = { workspace = true }
 
 anchor-lang = { workspace = true }
 anchor-spl = { workspace = true }
 
 pyth-solana-receiver-sdk = { workspace = true }
-# switchboard-solana = { workspace = true }
 switchboard-on-demand = { workspace = true }
 
 borsh = { workspace = true }
@@ -58,8 +66,10 @@ juplend-mocks = { path = "../juplend-mocks" , features = ["no-entrypoint"]}
 solana-account-decoder = { workspace = true }
 solana-cli-output = { workspace = true }
 solana-program-test = { workspace = true }
-# solana-logger = { workspace = true }
 solana-sdk = { workspace = true }
+solana-compute-budget-interface = { workspace = true }
+solana-system-interface = { workspace = true }
+solana-system-transaction = { workspace = true }
 fixtures = { workspace = true }
 mocks = { workspace = true }
 
@@ -73,3 +83,6 @@ rust_decimal = "*"
 test-case = "3.3.1"
 serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1.0.115"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

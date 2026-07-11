@@ -66,6 +66,14 @@ pub struct LendingPoolBankSetFixedOraclePriceEvent {
 }
 
 #[event]
+pub struct LendingPoolBankSetSameAssetEmodeEligibilityEvent {
+    pub header: GroupEventHeader,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    pub enabled: bool,
+}
+
+#[event]
 pub struct LendingPoolBankConfigureFrozenEvent {
     pub header: GroupEventHeader,
     pub bank: Pubkey,
@@ -112,6 +120,20 @@ pub struct LendingPoolBankHandleBankruptcyEvent {
 }
 
 #[event]
+pub struct DriftClaimBadDebtEvent {
+    pub header: GroupEventHeader,
+    pub bank: Pubkey,
+    pub claim_mint: Pubkey,
+    pub distributor: Pubkey,
+    pub claim_status: Pubkey,
+    pub liquidity_vault_authority: Pubkey,
+    pub global_fee_wallet: Pubkey,
+    pub requested_amount: u64,
+    pub received_amount: u64,
+    pub swept_amount: u64,
+}
+
+#[event]
 pub struct LendingPoolSuperAdminWithdrawEvent {
     pub header: GroupEventHeader,
     pub bank: Pubkey,
@@ -143,6 +165,7 @@ pub struct LendingAccountDepositEvent {
     pub bank: Pubkey,
     pub mint: Pubkey,
     pub amount: u64,
+    pub share_amount: WrappedI80F48,
 }
 
 #[event]
@@ -152,6 +175,7 @@ pub struct LendingAccountRepayEvent {
     pub mint: Pubkey,
     pub amount: u64,
     pub close_balance: bool,
+    pub share_amount: WrappedI80F48,
 }
 
 #[event]
@@ -160,6 +184,7 @@ pub struct LendingAccountBorrowEvent {
     pub bank: Pubkey,
     pub mint: Pubkey,
     pub amount: u64,
+    pub share_amount: WrappedI80F48,
 }
 
 #[event]
@@ -169,6 +194,7 @@ pub struct LendingAccountWithdrawEvent {
     pub mint: Pubkey,
     pub amount: u64,
     pub close_balance: bool,
+    pub share_amount: WrappedI80F48,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
@@ -295,5 +321,35 @@ pub struct DeleverageWithdrawFlowEvent {
     /// Equity-denominated outflow value in USD, rounded to integer.
     pub outflow_usd: u32,
     /// Unix timestamp when the flow was recorded
+    pub current_timestamp: i64,
+}
+
+/// Emitted when the per-bank oracle circuit breaker trips or escalates a halt.
+#[event]
+pub struct CircuitBreakerTrippedEvent {
+    pub tier: u8,
+    pub deviation_bps: u64,
+    pub halt_started_at: i64,
+    pub halt_ended_at: i64,
+}
+
+/// Admin-initiated clear via `lending_pool_clear_circuit_breaker`.
+pub const CB_CLEAR_REASON_ADMIN: u8 = 0;
+/// Escalation window elapsed without a re-breach.
+pub const CB_CLEAR_REASON_ESCALATION_EXPIRED: u8 = 1;
+
+/// Emitted when a halt is cleared (admin override or escalation-window expiry).
+#[event]
+pub struct CircuitBreakerClearedEvent {
+    pub prior_tier: u8,
+    /// One of the `CB_CLEAR_REASON_*` constants.
+    pub reason: u8,
+    pub current_timestamp: i64,
+}
+
+/// Emitted when consecutive tier-3 trips force a bank into `CircuitBroken`.
+#[event]
+pub struct CircuitBreakerAutoBrokenEvent {
+    pub consecutive_tier3_trips: u8,
     pub current_timestamp: i64,
 }
