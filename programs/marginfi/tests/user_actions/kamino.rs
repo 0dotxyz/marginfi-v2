@@ -1,7 +1,13 @@
+use anchor_lang::{InstructionData, ToAccountMetas};
 use anchor_spl::token::spl_token::error::TokenError;
 use fixtures::{assert_anchor_error, assert_custom_error, prelude::*};
-use marginfi::{assert_eq_with_tolerance, errors::MarginfiError};
+use marginfi::{
+    assert_eq_with_tolerance, errors::MarginfiError, state::rate_limiter::RateLimitWindowImpl,
+};
 use solana_program_test::*;
+use solana_sdk::{
+    clock::Clock, instruction::Instruction, signer::Signer, transaction::Transaction,
+};
 use test_case::test_case;
 
 const KAMINO_ROUNDING_TOLERANCE_NATIVE: u64 = 1;
@@ -128,6 +134,81 @@ async fn kamino_withdraw_local_instruction_call_success(
         actual_accounted_delta,
         withdraw_amount as i128,
         KAMINO_ROUNDING_TOLERANCE_NATIVE as i128
+    );
+
+    Ok(())
+}
+
+/// e2e: the bank rate limiter must debit a Kamino withdraw in underlying liquidity, not collateral
+/// shares — so it nets against the deposit inflow (which is recorded in underlying).
+#[tokio::test]
+async fn kamino_withdraw_records_underlying_on_bank_rate_limiter() -> anyhow::Result<()> {
+    let setup = TestFixture::setup_kamino_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(10_000.0).await;
+    setup
+        .test_f
+        .run_kamino_deposit(&setup.bank_f, &user, user_token.key, 5_000_000_000)
+        .await?;
+
+    // Enable a generous hourly limit so the withdraw is recorded but not blocked. The group admin
+    // is the payer (default test settings).
+    let hourly_limit = 1_000_000_000_000u64;
+    let admin = setup.test_f.payer_keypair();
+    let ix = Instruction {
+        program_id: marginfi::ID,
+        accounts: marginfi::accounts::ConfigureBankRateLimits {
+            group: setup.test_f.marginfi_group.key,
+            admin: admin.pubkey(),
+            bank: setup.bank_f.key,
+        }
+        .to_account_metas(Some(true)),
+        data: marginfi::instruction::ConfigureBankRateLimits {
+            hourly_max_outflow: Some(hourly_limit),
+            daily_max_outflow: None,
+        }
+        .data(),
+    };
+    {
+        let ctx = setup.test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&admin.pubkey()),
+            &[&admin],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        ctx.banks_client.process_transaction(tx).await?;
+    }
+
+    let withdraw_amount = 1_000_000_000u64; // collateral shares
+    let expected_underlying = setup
+        .load_reserve()
+        .await
+        .collateral_to_liquidity(withdraw_amount)?;
+    assert_ne!(
+        expected_underlying, withdraw_amount,
+        "fixture exchange rate must differ from 1 for this test to be meaningful"
+    );
+
+    setup
+        .test_f
+        .run_kamino_withdraw(
+            &setup.bank_f,
+            &user,
+            user_token.key,
+            withdraw_amount,
+            Some(false),
+        )
+        .await?;
+
+    let bank = setup.bank_f.load().await;
+    let now = {
+        let ctx = setup.test_f.context.borrow_mut();
+        ctx.banks_client.get_sysvar::<Clock>().await?.unix_timestamp
+    };
+    assert_eq_with_tolerance!(
+        bank.rate_limiter.hourly.remaining_capacity(now),
+        hourly_limit as i64 - expected_underlying as i64,
+        KAMINO_ROUNDING_TOLERANCE_NATIVE as i64
     );
 
     Ok(())

@@ -133,9 +133,15 @@ pub fn solend_withdraw<'info>(
         } else {
             amount
         };
+
+        let native_outflow = ctx
+            .accounts
+            .integration_acc_1
+            .load()?
+            .collateral_to_liquidity(rate_limit_amount)?;
         record_withdrawal_outflow(
             group_rate_limit_enabled,
-            rate_limit_amount,
+            native_outflow,
             rate_limit_amount,
             price,
             &mut bank,
