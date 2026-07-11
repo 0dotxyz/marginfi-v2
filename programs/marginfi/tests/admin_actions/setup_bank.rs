@@ -185,6 +185,8 @@ async fn add_bank_success() -> anyhow::Result<()> {
             cache,
             lending_position_count,
             borrowing_position_count,
+            liquidation_liquidator_fee,
+            liquidation_insurance_fee,
             _padding_0,
             integration_acc_1,
             integration_acc_2,
@@ -225,7 +227,9 @@ async fn add_bank_success() -> anyhow::Result<()> {
 
             assert_eq!(lending_position_count, 0);
             assert_eq!(borrowing_position_count, 0);
-            assert_eq!(_padding_0, <[u8; 16] as Default>::default());
+            assert_eq!(liquidation_liquidator_fee, 0);
+            assert_eq!(liquidation_insurance_fee, 0);
+            assert_eq!(_padding_0, <[u8; 8] as Default>::default());
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
@@ -338,6 +342,8 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             cache,
             lending_position_count,
             borrowing_position_count,
+            liquidation_liquidator_fee,
+            liquidation_insurance_fee,
             _padding_0,
             integration_acc_1,
             integration_acc_2,
@@ -378,7 +384,9 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
 
             assert_eq!(lending_position_count, 0);
             assert_eq!(borrowing_position_count, 0);
-            assert_eq!(_padding_0, <[u8; 16] as Default>::default());
+            assert_eq!(liquidation_liquidator_fee, 0);
+            assert_eq!(liquidation_insurance_fee, 0);
+            assert_eq!(_padding_0, <[u8; 8] as Default>::default());
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
@@ -888,6 +896,8 @@ async fn configure_bank_success(bank_mint: BankMint) -> anyhow::Result<()> {
         permissionless_bad_debt_settlement,
         freeze_settings,
         tokenless_repayments_allowed,
+        liquidation_liquidator_fee,
+        liquidation_insurance_fee,
         circuit_breaker_enabled: _,
         cb_deviation_bps_tiers: _,
         cb_tier_durations_seconds: _,
@@ -938,6 +948,14 @@ async fn configure_bank_success(bank_mint: BankMint) -> anyhow::Result<()> {
         check_bank_field!(total_asset_value_init_limit);
         check_bank_field!(oracle_max_age);
         check_bank_field!(oracle_max_confidence);
+        assert_eq!(
+            bank.liquidation_liquidator_fee,
+            (*liquidation_liquidator_fee).unwrap_or(old_bank.liquidation_liquidator_fee)
+        );
+        assert_eq!(
+            bank.liquidation_insurance_fee,
+            (*liquidation_insurance_fee).unwrap_or(old_bank.liquidation_insurance_fee)
+        );
 
         assert!(permissionless_bad_debt_settlement
             // If Some(...) check flag set properly
@@ -1668,10 +1686,6 @@ async fn configure_bank_interest_only_success() -> anyhow::Result<()> {
     ]);
 
     let ir_config = InterestRateConfigOpt {
-        // TODO deprecate in 1.7
-        // placeholder0: Some(I80F48::from_num(0.9).into()),
-        // placeholder1: Some(I80F48::from_num(0.5).into()),
-        // placeholder2: Some(I80F48::from_num(1.5).into()),
         insurance_fee_fixed_apr: Some(I80F48::from_num(0.01).into()),
         insurance_ir_fee: Some(I80F48::from_num(0.02).into()),
         protocol_fixed_fee_apr: Some(I80F48::from_num(0.03).into()),

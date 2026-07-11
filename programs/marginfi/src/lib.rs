@@ -649,6 +649,7 @@ pub mod marginfi {
         liquidation_max_fee: Option<WrappedI80F48>,
         order_execution_max_fee: Option<WrappedI80F48>,
         pause_delegate_admin: Option<Pubkey>,
+        account_transfer_fee: Option<u32>,
     ) -> MarginfiResult {
         marginfi_group::edit_fee_state(
             ctx,
@@ -662,6 +663,7 @@ pub mod marginfi {
             liquidation_max_fee,
             order_execution_max_fee,
             pause_delegate_admin,
+            account_transfer_fee,
         )
     }
 
@@ -850,11 +852,11 @@ pub mod marginfi {
         )
     }
 
-    // TODO deprecate and incorporate this functionality into forced-withdraw in 1.7+
-    /// (risk admin only) Purge a user's lending balance without withdrawing anything. Only usable
-    /// after all the debt has been settled on a bank in deleveraging mode, e.g. when
-    /// `TOKENLESS_REPAYMENTS_ALLOWED` and `TOKENLESS_REPAYMENTS_COMPLETE`. used to purge remaining
-    /// lending assets in a now-worthless bank before it is fully sunset.
+    /// (risk admin only) Purge a user's lending balance on a bank being sunset, without paying the
+    /// user anything. Only usable after all the debt has been settled on a bank in deleveraging
+    /// mode, i.e. `TOKENLESS_REPAYMENTS_ALLOWED` and `TOKENLESS_REPAYMENTS_COMPLETE`. Used to clear
+    /// abandoned lending positions in a now-worthless bank so it can be closed via
+    /// `lending_pool_close_bank`.
     pub fn purge_deleverage_balance(
         ctx: Context<LendingAccountPurgeDelevBalance>,
     ) -> MarginfiResult {

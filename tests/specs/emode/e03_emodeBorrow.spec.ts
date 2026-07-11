@@ -451,8 +451,4 @@ describe("Emode borrowing", () => {
       liabsExpected * 0.001
     );
   });
-
-  // TODO test against isolated bank (not yet supported in program)
-
-  // TODO moar tests....
 });

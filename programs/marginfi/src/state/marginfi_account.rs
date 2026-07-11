@@ -1224,12 +1224,6 @@ pub fn check_account_bankrupt<'info>(
     remaining_ais: &'info [AccountInfo<'info>],
     health_cache: &mut Option<&mut HealthCache>,
 ) -> MarginfiResult {
-    // TODO remove this check here and raise it to the top-level instruction
-    check!(
-        !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
-        MarginfiError::AccountInFlashloan
-    );
-
     let (equity_assets, equity_liabs) = get_health_components(
         marginfi_account,
         group,
@@ -2135,17 +2129,29 @@ impl<'a> BankAccountWrapper<'a> {
             _ => {}
         }
 
-        let asset_shares_increase = bank.get_asset_shares(asset_amount_increase)?;
-        balance.change_asset_shares(asset_shares_increase)?;
-        bank.change_asset_shares(
-            asset_shares_increase,
-            matches!(operation_type, BalanceIncreaseType::BypassDepositLimit),
-        )?;
+        // Skip the no-op share updates when a side has no movement (e.g. a pure deposit has no
+        // liability to repay, a pure repay adds no assets). The amounts are `max(_, 0)`, so `> 0`
+        // captures exactly the cases where `change_*_shares(0)` would have been a no-op.
+        let asset_shares_increase = if asset_amount_increase > I80F48::ZERO {
+            let shares = bank.get_asset_shares(asset_amount_increase)?;
+            balance.change_asset_shares(shares)?;
+            bank.change_asset_shares(
+                shares,
+                matches!(operation_type, BalanceIncreaseType::BypassDepositLimit),
+            )?;
+            shares
+        } else {
+            I80F48::ZERO
+        };
 
-        let liability_shares_decrease = bank.get_liability_shares(liability_amount_decrease)?;
-        // TODO: Use `IncreaseType` to skip certain balance updates, and save on compute.
-        balance.change_liability_shares(-liability_shares_decrease)?;
-        bank.change_liability_shares(-liability_shares_decrease, true)?;
+        let liability_shares_decrease = if liability_amount_decrease > I80F48::ZERO {
+            let shares = bank.get_liability_shares(liability_amount_decrease)?;
+            balance.change_liability_shares(-shares)?;
+            bank.change_liability_shares(-shares, true)?;
+            shares
+        } else {
+            I80F48::ZERO
+        };
 
         // Record if the balance was an asset/liability after
         let has_assets =
@@ -2229,16 +2235,29 @@ impl<'a> BankAccountWrapper<'a> {
             _ => {}
         }
 
-        let asset_shares_decrease = bank.get_asset_shares(asset_amount_decrease)?;
-        balance.change_asset_shares(-asset_shares_decrease)?;
-        bank.change_asset_shares(-asset_shares_decrease, false)?;
+        // Skip the no-op share updates when a side has no movement (e.g. a pure withdraw adds no
+        // liability, a pure borrow removes no assets). The amounts are `max(_, 0)`, so `> 0`
+        // captures exactly the cases where `change_*_shares(0)` would have been a no-op.
+        let asset_shares_decrease = if asset_amount_decrease > I80F48::ZERO {
+            let shares = bank.get_asset_shares(asset_amount_decrease)?;
+            balance.change_asset_shares(-shares)?;
+            bank.change_asset_shares(-shares, false)?;
+            shares
+        } else {
+            I80F48::ZERO
+        };
 
-        let liability_shares_increase = bank.get_liability_shares(liability_amount_increase)?;
-        balance.change_liability_shares(liability_shares_increase)?;
-        bank.change_liability_shares(
-            liability_shares_increase,
-            matches!(operation_type, BalanceDecreaseType::BypassBorrowLimit),
-        )?;
+        let liability_shares_increase = if liability_amount_increase > I80F48::ZERO {
+            let shares = bank.get_liability_shares(liability_amount_increase)?;
+            balance.change_liability_shares(shares)?;
+            bank.change_liability_shares(
+                shares,
+                matches!(operation_type, BalanceDecreaseType::BypassBorrowLimit),
+            )?;
+            shares
+        } else {
+            I80F48::ZERO
+        };
 
         // Only liquidation is allowed to bypass this check.
         if !matches!(operation_type, BalanceDecreaseType::BypassBorrowLimit) {

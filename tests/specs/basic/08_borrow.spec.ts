@@ -104,9 +104,13 @@ describe("Borrow funds", () => {
         amount: borrowAmountSol_native,
       })
     );
-    const result = await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
+    const result = await processBankrunTransaction(bankrunContext, tx, [
+      user.wallet,
+    ]);
     const events = parseMarginfiEvents(program, result.logMessages);
-    const borrowEvent = events.find((e) => e.name === "lendingAccountBorrowEvent");
+    const borrowEvent = events.find(
+      (e) => e.name === "lendingAccountBorrowEvent"
+    );
     assert.isDefined(borrowEvent, "Expected lendingAccountBorrowEvent");
 
     // Borrowing from an isolated-tier bank sets has_isolated in real time
@@ -120,7 +124,10 @@ describe("Borrow funds", () => {
       (b) => b.active && b.bankPk.equals(bankKeypairSol.publicKey)
     );
     assert.isDefined(solBalance, "Expected SOL liability balance");
-    assertI80F48Approx(borrowEvent!.data.shareAmount, solBalance!.liabilityShares);
+    assertI80F48Approx(
+      borrowEvent!.data.shareAmount,
+      solBalance!.liabilityShares
+    );
 
     // Note: this test is really simple - it only tests that it's possible to borrow funds in one isolated tier bank.
     // All specifics and detailed numbers are checked in the next test (to not repeat here).

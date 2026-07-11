@@ -265,7 +265,7 @@ export async function refreshPullOraclesBankrun(
 }
 
 /**
- * Bankrun-native version of setupPythOracles.
+ * Bankrun-native Pyth oracle setup.
  * Creates all oracle accounts via bankrun transactions and sets initial prices.
  *
  * NOTE: This uses setAccount to set oracle data, which may cause issues with warpToSlot.

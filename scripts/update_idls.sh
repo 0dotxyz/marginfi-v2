@@ -67,50 +67,12 @@ download_program_so() {
   local program_id="$1"
   local out_so="$2"
 
-  local tmp_json
-  local tmp_bin
-  local program_data_account
-
-  tmp_json="$(mktemp)"
-  tmp_bin="$(mktemp)"
-
-  solana account \
-    --output json \
+  # `solana program dump` reads the upgradeable loader's ProgramData account and writes the raw ELF
+  # executable — exactly the .so fixture we want.
+  solana program dump \
     --url "${ANCHOR_PROVIDER_URL}" \
-    "${program_id}" > "${tmp_json}"
-
-  program_data_account="$(
-python3 - <<PY "${tmp_json}"
-import json, sys
-with open(sys.argv[1]) as f:
-    print(json.load(f)["programData"])
-PY
-)"
-
-  solana account \
-    --output-file "${tmp_bin}" \
-    --url "${ANCHOR_PROVIDER_URL}" \
-    "${program_data_account}" > /dev/null
-
-python3 - <<PY "${tmp_bin}" "${out_so}"
-import sys
-
-src, dst = sys.argv[1], sys.argv[2]
-
-with open(src, "rb") as f:
-    data = f.read()
-
-# Strip upgradeable loader header
-elf = data[45:]
-
-if not elf.startswith(b"\x7fELF"):
-    raise SystemExit("Unexpected ProgramData layout")
-
-with open(dst, "wb") as f:
-    f.write(elf)
-PY
-
-  rm -f "${tmp_json}" "${tmp_bin}"
+    "${program_id}" \
+    "${out_so}"
 }
 
 process_program() {
@@ -135,9 +97,8 @@ process_program() {
   echo "Generating TS..."
   generate_ts_from_idl "${final_idl}" "${ts_file}"
 
-# TODO: test and enable
-#   echo "Downloading program .so..."
-#   download_program_so "${program_id}" "${so_file}"
+  echo "Downloading program .so..."
+  download_program_so "${program_id}" "${so_file}"
 
   echo "Generated:"
   echo "  ${final_idl}"
