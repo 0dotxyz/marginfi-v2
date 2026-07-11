@@ -1836,6 +1836,8 @@ mod tests {
                     min_slot: 0,
                     max_slot: 0,
                 },
+                #[cfg(feature = "client")]
+                feed_hash: [0; 32],
                 last_update_timestamp: 42,
             }),
         }
