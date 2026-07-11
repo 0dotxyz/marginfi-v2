@@ -729,14 +729,15 @@ async fn cb_halt_freezes_interest_accrual() -> anyhow::Result<()> {
         .try_bank_borrow(borrower_sol_acc.key, sol_bank, 1)
         .await?;
 
-    // Snapshot the SOL bank's share values before the halt.
+    // Halt and advance time inside the halt window. Then trigger accrual via a deposit (which is
+    // halt-safe and calls accrue_interest).
+    enable_cb_and_trip_halt(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
+
+    // Snapshot after the setup pulses, which are allowed to accrue before the halt is established.
     let before = sol_bank.load().await;
     let asset_share_value_before = before.asset_share_value;
     let liability_share_value_before = before.liability_share_value;
 
-    // Halt and advance time inside the halt window. Then trigger accrual via a deposit (which is
-    // halt-safe and calls accrue_interest).
-    enable_cb_and_trip_halt(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
     // Advance ~1 hour, staying well inside the tier-3 halt window. `set_clock` is used rather
     // than `advance_time` because the latter warps the slot, which lets the runtime recompute
     // the timestamp past `cb_halt_ended_at` and end the halt early.
