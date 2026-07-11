@@ -215,12 +215,6 @@ impl RebalanceFixture {
         RebalanceBankMeta::new(bank, vec![self.oracle_metas[0].clone()])
     }
 
-    /// A move of `ui_value` USD (== UI USDC amount at the $1 test oracle) from `src_index` to
-    /// `dst_index` (indices into the referenced-bank list).
-    pub fn usdc_move(&self, src_index: u8, dst_index: u8, ui_value: f64) -> RebalanceMove {
-        rebalance_move(src_index, dst_index, ui_value)
-    }
-
     /// Add a second same-mint USDC destination bank driven to ~50% utilization (so it clears the
     /// improvement gate against the 0%-utilization source), and extend the order's allowlist to
     /// include it. Returns its `BankFixture`.
@@ -303,7 +297,7 @@ impl RebalanceFixture {
     /// One full-position move from referenced bank 0 (`src`) to bank 1 (`dst`).
     pub async fn build_sandwich(&self, src: Pubkey, dst: Pubkey) -> Vec<Instruction> {
         let ref_banks = vec![self.bank_meta(src), self.bank_meta(dst)];
-        let moves = vec![self.usdc_move(0, 1, DEPOSIT_USDC)];
+        let moves = vec![rebalance_move(0, 1, DEPOSIT_USDC)];
         let start_ix = self
             .user
             .make_rebalance_start_ix(

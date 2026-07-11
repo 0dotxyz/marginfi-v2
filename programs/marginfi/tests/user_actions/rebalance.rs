@@ -115,7 +115,7 @@ async fn rebalance_rejects_bank_outside_allowlist() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             vec![f.bank_meta(outside), f.bank_meta(f.dst_bank_f.key)],
-            vec![f.usdc_move(0, 1, DEPOSIT_USDC)],
+            vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -181,7 +181,7 @@ async fn rebalance_unlimited_allows_partial_fill() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 1, half)],
+            vec![rebalance_move(0, 1, half)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -299,7 +299,7 @@ async fn rebalance_rejects_value_leak() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 1, DEPOSIT_USDC)],
+            vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -444,7 +444,7 @@ async fn rebalance_partial_amount_moves_only_that_amount() -> anyhow::Result<()>
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 1, DEPOSIT_USDC / 2.0)],
+            vec![rebalance_move(0, 1, DEPOSIT_USDC / 2.0)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -513,7 +513,7 @@ async fn rebalance_partial_rejects_over_move() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 1, DEPOSIT_USDC)],
+            vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -574,7 +574,7 @@ async fn rebalance_partial_fill_pays_prorata_tip() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 1, 100.0)],
+            vec![rebalance_move(0, 1, 100.0)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -652,7 +652,7 @@ async fn rebalance_splits_across_two_destinations() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 1, half), f.usdc_move(0, 2, half)],
+            vec![rebalance_move(0, 1, half), rebalance_move(0, 2, half)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -962,7 +962,7 @@ async fn rebalance_rejects_moves_more_than_declared() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 1, DEPOSIT_USDC / 2.0)],
+            vec![rebalance_move(0, 1, DEPOSIT_USDC / 2.0)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1022,7 +1022,7 @@ async fn rebalance_rejects_misrouted_deposit() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 1, half), f.usdc_move(0, 2, half)],
+            vec![rebalance_move(0, 1, half), rebalance_move(0, 2, half)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1083,7 +1083,7 @@ async fn rebalance_consolidate_rejects_source_misattribution() -> anyhow::Result
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 2, 600.0), f.usdc_move(1, 2, 400.0)],
+            vec![rebalance_move(0, 2, 600.0), rebalance_move(1, 2, 400.0)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1151,7 +1151,10 @@ async fn rebalance_consolidates_two_sources_into_one() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 2, DEPOSIT_USDC), f.usdc_move(1, 2, 500.0)],
+            vec![
+                rebalance_move(0, 2, DEPOSIT_USDC),
+                rebalance_move(1, 2, 500.0),
+            ],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1228,7 +1231,10 @@ async fn rebalance_consolidate_rejects_destination_shortfall() -> anyhow::Result
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 2, DEPOSIT_USDC), f.usdc_move(1, 2, 500.0)],
+            vec![
+                rebalance_move(0, 2, DEPOSIT_USDC),
+                rebalance_move(1, 2, 500.0),
+            ],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1295,7 +1301,7 @@ async fn rebalance_rejects_multi_move_when_one_not_improving() -> anyhow::Result
         .user
         .make_rebalance_start_ix(
             ref_banks,
-            vec![f.usdc_move(0, 1, half), f.usdc_move(0, 2, half)],
+            vec![rebalance_move(0, 1, half), rebalance_move(0, 2, half)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1336,7 +1342,7 @@ async fn rebalance_rejects_touching_unreferenced_balance() -> anyhow::Result<()>
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 1, DEPOSIT_USDC)],
+            vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1403,7 +1409,7 @@ async fn rebalance_amount_cap_sums_across_moves() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 1, 300.0), f.usdc_move(0, 2, 300.0)],
+            vec![rebalance_move(0, 1, 300.0), rebalance_move(0, 2, 300.0)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1459,7 +1465,7 @@ async fn rebalance_rejects_zero_amount_move() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)],
-            vec![f.usdc_move(0, 1, 0.0)],
+            vec![rebalance_move(0, 1, 0.0)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1499,7 +1505,7 @@ async fn rebalance_rejects_duplicate_referenced_bank() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.src_bank_f.key)],
-            vec![f.usdc_move(0, 1, DEPOSIT_USDC)],
+            vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1521,7 +1527,7 @@ async fn rebalance_end_rejects_reordered_banks() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             ref_banks,
-            vec![f.usdc_move(0, 1, DEPOSIT_USDC)],
+            vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1601,7 +1607,7 @@ async fn rebalance_bounded_move_at_cap_pays_full_tip() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 1, 500.0)],
+            vec![rebalance_move(0, 1, 500.0)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1655,7 +1661,7 @@ async fn rebalance_leak_just_over_dust_rejected() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 1, DEPOSIT_USDC)],
+            vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1710,7 +1716,7 @@ async fn rebalance_leak_just_under_dust_passes() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 1, DEPOSIT_USDC)],
+            vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1768,7 +1774,7 @@ async fn rebalance_rejects_single_referenced_bank() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             vec![f.bank_meta(f.src_bank_f.key)],
-            vec![f.usdc_move(0, 0, DEPOSIT_USDC)],
+            vec![rebalance_move(0, 0, DEPOSIT_USDC)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1805,7 +1811,7 @@ async fn rebalance_rejects_mint_mismatch() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             vec![f.bank_meta(sol), f.bank_meta(f.dst_bank_f.key)],
-            vec![f.usdc_move(0, 1, DEPOSIT_USDC)],
+            vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1821,7 +1827,7 @@ async fn rebalance_rejects_mint_mismatch() -> anyhow::Result<()> {
 #[tokio::test]
 async fn rebalance_rejects_too_many_moves() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
-    let moves = vec![f.usdc_move(0, 1, 1.0); 9]; // MAX is 8
+    let moves = vec![rebalance_move(0, 1, 1.0); 9]; // MAX is 8
     let start_ix = f
         .user
         .make_rebalance_start_ix(
@@ -1849,7 +1855,7 @@ async fn rebalance_rejects_missing_oracle_account() -> anyhow::Result<()> {
                 f.bank_meta(f.src_bank_f.key),
                 RebalanceBankMeta::new(f.dst_bank_f.key, vec![]), // no oracle
             ],
-            vec![f.usdc_move(0, 1, DEPOSIT_USDC)],
+            vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1875,7 +1881,7 @@ async fn rebalance_tip_floors_fractional_lamport() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 1, 1.0)],
+            vec![rebalance_move(0, 1, 1.0)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1983,7 +1989,7 @@ async fn rebalance_consolidate_rejected_when_destination_makes_unhealthy() -> an
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 1, DEPOSIT_USDC)],
+            vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -2060,7 +2066,7 @@ async fn rebalance_rejects_overshoot() -> anyhow::Result<()> {
         .user
         .make_rebalance_start_ix(
             ref_banks.clone(),
-            vec![f.usdc_move(0, 1, moved)],
+            vec![rebalance_move(0, 1, moved)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
