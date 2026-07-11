@@ -94,7 +94,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
   let withdrawIntermediaryAtaPk = PublicKey.default;
   const decimals = 10 ** ecosystem.usdcDecimals;
   const exchangePricesPrecisionBig = new BigNumber(
-    EXCHANGE_PRICES_PRECISION.toString(),
+    bnToBigIntSafe(EXCHANGE_PRICES_PRECISION).toString(),
   );
 
   let user0UsdcBeforeDeposit = new BN(0);
@@ -263,7 +263,9 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
 
   it("(admin) starts rewards - 24 USDC per day", async () => {
     const supplySharesPhase1 = await getPoolSupplyShares();
-    const supplySharesPhase1Big = new BigNumber(supplySharesPhase1.toString());
+    const supplySharesPhase1Big = new BigNumber(
+      bnToBigIntSafe(supplySharesPhase1).toString(),
+    );
     assert.isTrue(supplySharesPhase1Big.gte(user0Shares));
 
     const lendingBeforeAccrual =
@@ -341,7 +343,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
     );
     const expectedMidCacheMultiplier =
       Number(bnToBigIntSafe(exchangePriceMidAccrual)) /
-      Number(EXCHANGE_PRICES_PRECISION.toString());
+      Number(bnToBigIntSafe(EXCHANGE_PRICES_PRECISION).toString());
     assertI80F48Approx(
       bankMidAccrual.cache.priceMultiplier,
       expectedMidCacheMultiplier,
@@ -375,8 +377,12 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
     );
 
     const supplySharesPhase2 = await getPoolSupplyShares();
-    const halfWindowRewardsBig = new BigNumber(halfWindowRewards.toString());
-    const supplySharesPhase2Big = new BigNumber(supplySharesPhase2.toString());
+    const halfWindowRewardsBig = new BigNumber(
+      bnToBigIntSafe(halfWindowRewards).toString(),
+    );
+    const supplySharesPhase2Big = new BigNumber(
+      bnToBigIntSafe(supplySharesPhase2).toString(),
+    );
     const user0ExpRewardHalf2 = halfWindowRewardsBig
       .multipliedBy(user0Shares)
       .dividedBy(supplySharesPhase2Big)
@@ -542,7 +548,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
     assertBNGreaterThan(user0UsdcAfterWithdraw, user0UsdcBeforeDeposit);
 
     const expectedWithdrawnFromRate = user0Shares
-      .multipliedBy(exchangePriceAfterAccrual.toString())
+      .multipliedBy(bnToBigIntSafe(exchangePriceAfterAccrual).toString())
       .dividedBy(exchangePricesPrecisionBig)
       .toNumber();
     // Note: in native USDC decimals
