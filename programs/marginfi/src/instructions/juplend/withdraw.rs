@@ -77,10 +77,10 @@ pub fn juplend_withdraw<'info>(
     // - call `bank_account.withdraw(shares_to_burn)`
     // - CPI JupLend `withdraw` for the requested underlying `amount`
     let clock = Clock::get()?;
+    let group = ctx.accounts.group.load()?;
     let (token_amount, shares_to_burn, share_amount) = {
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;
-        let group = ctx.accounts.group.load()?;
         let lending = ctx.accounts.integration_acc_1.load()?;
 
         authority_bump = bank.liquidity_vault_authority_bump;
@@ -295,8 +295,10 @@ pub fn juplend_withdraw<'info>(
         if !in_receivership_or_order_execution {
             // Check account health, if below threshold fail transaction
             // Assuming `ctx.remaining_accounts` holds only oracle accounts
+            let group = ctx.accounts.group.load()?;
             check_account_init_health(
                 &marginfi_account,
+                &group,
                 ctx.remaining_accounts,
                 &mut Some(&mut health_cache),
             )?;

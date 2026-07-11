@@ -5,8 +5,8 @@ use crate::{
         TOTAL_ASSET_VALUE_INIT_LIMIT_INACTIVE,
     },
     types::{
-        BankOperationalState, InterestRateConfig, InterestRateConfigCompact, InterestRateConfigOpt,
-        OracleSetup, RiskTier,
+        BalanceSide, BankOperationalState, InterestRateConfig, InterestRateConfigCompact,
+        InterestRateConfigOpt, OracleSetup, RequirementType, RiskTier,
     },
 };
 
@@ -162,6 +162,27 @@ impl Default for BankConfig {
     }
 }
 
+impl BankConfig {
+    #[inline]
+    pub fn get_weight(
+        &self,
+        requirement_type: RequirementType,
+        balance_side: BalanceSide,
+    ) -> I80F48 {
+        match (requirement_type, balance_side) {
+            (RequirementType::Initial, BalanceSide::Assets) => self.asset_weight_init.into(),
+            (RequirementType::Initial, BalanceSide::Liabilities) => {
+                self.liability_weight_init.into()
+            }
+            (RequirementType::Maintenance, BalanceSide::Assets) => self.asset_weight_maint.into(),
+            (RequirementType::Maintenance, BalanceSide::Liabilities) => {
+                self.liability_weight_maint.into()
+            }
+            (RequirementType::Equity, _) => I80F48::ONE,
+        }
+    }
+}
+
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct BankConfigOpt {
@@ -191,6 +212,10 @@ pub struct BankConfigOpt {
     pub permissionless_bad_debt_settlement: Option<bool>,
     pub freeze_settings: Option<bool>,
     pub tokenless_repayments_allowed: Option<bool>,
+
+    /// Per-bank liquidation fees, encoded as `u32_to_centi` (`u32::MAX` = 100%; 0 => default 2.5%).
+    pub liquidation_liquidator_fee: Option<u32>,
+    pub liquidation_insurance_fee: Option<u32>,
 
     pub circuit_breaker_enabled: Option<bool>,
     pub cb_deviation_bps_tiers: Option<[u16; 3]>,

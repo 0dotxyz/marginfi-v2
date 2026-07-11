@@ -3,7 +3,7 @@ use crate::{
     allocator::{heap_pos, heap_restore},
     check, check_eq, debug, live, math_error,
     prelude::{MarginfiError, MarginfiResult},
-    state::{bank::BankImpl, bank_config::BankConfigImpl},
+    state::bank::BankImpl,
     utils::{is_integration_asset_tag, NumTraitsWithTolerance},
 };
 use anchor_lang::prelude::*;
@@ -11,13 +11,15 @@ use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
-        ASSET_TAG_SOLEND, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, CIRCUIT_BREAKER_ENABLED,
-        EXP_10_I80F48, MAX_INTEGRATION_POSITIONS, ORDER_ACTIVE_TAGS, ZERO_AMOUNT_THRESHOLD,
+        ASSET_TAG_SOLEND, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, BANK_SAME_ASSET_EMODE_ELIGIBLE,
+        CIRCUIT_BREAKER_ENABLED, EXP_10_I80F48, MAX_INTEGRATION_POSITIONS, ORDER_ACTIVE_TAGS,
+        ZERO_AMOUNT_THRESHOLD,
     },
     types::{
-        reconcile_emode_configs, Balance, BalanceSide, Bank, BankOperationalState, EmodeConfig,
-        HealthCache, HealthPriceMode, LendingAccount, LiquidationPriceCache, MarginfiAccount,
-        OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias, RequirementType,
+        compute_same_asset_emode_weight, reconcile_emode_configs, u32_to_basis, Balance,
+        BalanceSide, Bank, BankOperationalState, EmodeConfig, HealthCache, HealthPriceMode,
+        LendingAccount, LiquidationPriceCache, MarginfiAccount, MarginfiGroup, OraclePriceType,
+        OraclePriceWithConfidence, OracleSetup, PriceBias, ReconciledEmodeConfig, RequirementType,
         RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
         ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
@@ -34,7 +36,7 @@ use std::{
 /// - `FixedKamino`: 2 (bank + reserve)
 /// - `FixedDrift`: 2 (bank + spot market)
 /// - `FixedJuplend`: 2 (bank + lending state)
-/// - `ASSET_TAG_STAKED`: 4 (bank + oracle + lst_mint + stake_pool)
+/// - `ASSET_TAG_STAKED`: 5 (bank + oracle + lst_mint + stake_pool + onramp)
 /// - `ASSET_TAG_KAMINO` / `ASSET_TAG_DRIFT` / `ASSET_TAG_SOLEND` / `ASSET_TAG_JUPLEND`: 3 (bank + oracle + reserve)
 /// - `ASSET_TAG_DEFAULT` / `ASSET_TAG_SOL`: 2 (bank + oracle)
 pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
@@ -50,13 +52,13 @@ pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
     }
 }
 
-/// 4 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool), 2 for most others (bank, oracle), 3
+/// 5 for `ASSET_TAG_STAKED` (bank, oracle, lst mint, lst pool, onramp), 2 for most others (bank, oracle), 3
 /// for Kamino (bank, oracle, reserve), 1 for Fixed
 fn get_remaining_accounts_per_asset_tag(asset_tag: u8) -> MarginfiResult<usize> {
     match asset_tag {
         ASSET_TAG_DEFAULT | ASSET_TAG_SOL => Ok(2),
         ASSET_TAG_KAMINO | ASSET_TAG_DRIFT | ASSET_TAG_SOLEND | ASSET_TAG_JUPLEND => Ok(3),
-        ASSET_TAG_STAKED => Ok(4),
+        ASSET_TAG_STAKED => Ok(5),
         _ => err!(MarginfiError::AssetTagMismatch),
     }
 }
@@ -472,12 +474,36 @@ fn get_cached_price_with_confidence(
     }
 }
 
+fn get_same_asset_weight_for_balance(
+    balance: &Balance,
+    bank: &Bank,
+    requirement_type: RequirementType,
+    reconciled_emode_config: &ReconciledEmodeConfig,
+) -> Option<I80F48> {
+    if balance.is_empty(BalanceSide::Assets)
+        || !reconciled_emode_config.same_asset.is_enabled()
+        || bank.mint != reconciled_emode_config.same_asset.mint
+        || bank.config.oracle_keys[0] != reconciled_emode_config.same_asset.oracle_key
+        || bank.config.oracle_setup.is_fixed_price()
+        || !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE)
+        || !matches!(bank.config.risk_tier, RiskTier::Collateral)
+        || matches!(
+            (bank.config.operational_state, requirement_type),
+            (BankOperationalState::ReduceOnly, RequirementType::Initial)
+        )
+    {
+        return None;
+    }
+
+    Some(reconciled_emode_config.same_asset.asset_weight)
+}
+
 #[inline(always)]
 fn calc_weighted_asset_value_cached_standalone(
     balance: &Balance,
     bank: &Bank,
     requirement_type: RequirementType,
-    emode_config: &EmodeConfig,
+    reconciled_emode_config: &ReconciledEmodeConfig,
 ) -> MarginfiResult<(I80F48, I80F48)> {
     match bank.config.risk_tier {
         RiskTier::Collateral => {
@@ -489,22 +515,20 @@ fn calc_weighted_asset_value_cached_standalone(
                 return Ok((I80F48::ZERO, I80F48::ZERO));
             }
 
-            let mut asset_weight = if let Some(emode_entry) =
-                emode_config.find_with_tag(bank.emode.emode_tag)
-            {
-                let bank_weight = bank
-                    .config
-                    .get_weight(requirement_type, BalanceSide::Assets);
-                let emode_weight = match requirement_type {
-                    RequirementType::Initial => I80F48::from(emode_entry.asset_weight_init),
-                    RequirementType::Maintenance => I80F48::from(emode_entry.asset_weight_maint),
-                    RequirementType::Equity => I80F48::ONE,
-                };
-                max(bank_weight, emode_weight)
-            } else {
-                bank.config
-                    .get_weight(requirement_type, BalanceSide::Assets)
-            };
+            let mut asset_weight = bank
+                .config
+                .get_weight(requirement_type, BalanceSide::Assets);
+            if let Some(emode_entry) = reconciled_emode_config.find_with_tag(bank.emode.emode_tag) {
+                asset_weight = max(asset_weight, emode_entry.asset_weight);
+            }
+            if let Some(same_asset_weight) = get_same_asset_weight_for_balance(
+                balance,
+                bank,
+                requirement_type,
+                reconciled_emode_config,
+            ) {
+                asset_weight = max(asset_weight, same_asset_weight);
+            }
 
             let price_with_confidence = get_cached_price_with_confidence(bank, requirement_type);
             let lower_price = apply_price_bias(price_with_confidence, PriceBias::Low)?;
@@ -557,7 +581,7 @@ fn calc_weighted_value_cached_for_balance(
     balance: &Balance,
     bank: &Bank,
     requirement_type: RequirementType,
-    emode_config: &EmodeConfig,
+    reconciled_emode_config: &ReconciledEmodeConfig,
 ) -> MarginfiResult<(I80F48, I80F48, I80F48)> {
     match balance.get_side() {
         Some(side) => match side {
@@ -566,7 +590,7 @@ fn calc_weighted_value_cached_for_balance(
                     balance,
                     bank,
                     requirement_type,
-                    emode_config,
+                    reconciled_emode_config,
                 )?;
                 Ok((value, I80F48::ZERO, price))
             }
@@ -657,17 +681,25 @@ pub fn calc_amount(value: I80F48, price: I80F48, mint_decimals: u8) -> MarginfiR
 // Internal Helpers
 // -----------------------------------------------------------------------------
 
-/// Iterator that yields EmodeConfig for each liability balance in a lending account.
+/// Iterator that yields each liability balance's `EmodeConfig` from a lending account while
+/// folding the same-asset accumulators in a single pass. Each `EmodeConfig` is ~400 bytes, so
+/// yielding one at a time keeps peak stack usage manageable across the 16-position limit.
 ///
-/// This avoids allocating a large array of EmodeConfig on the stack by yielding
-/// one config at a time. Each EmodeConfig is ~400 bytes, so storing 16 of them
-/// would use ~6.4 KiB of stack space, which is problematic.
+/// When `same_asset_leverage` is `Some`, `next()` also tracks the shared liability mint and the
+/// running lowest liability-side weight; the post-iteration `reconcile()` folds those into the
+/// returned `ReconciledEmodeConfig`.
 struct EmodeConfigIterator<'a, 'info> {
     lending_account: &'a LendingAccount,
     remaining_ais: &'info [AccountInfo<'info>],
     balance_index: usize,
     account_index: usize,
     banks_only: bool,
+    requirement_type: RequirementType,
+    same_asset_leverage: Option<I80F48>,
+    shared_mint: Option<Pubkey>,
+    shared_oracle_key: Option<Pubkey>,
+    lowest_liab_weight: Option<I80F48>,
+    same_asset_invalid: bool,
 }
 
 impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
@@ -675,6 +707,8 @@ impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
         lending_account: &'a LendingAccount,
         remaining_ais: &'info [AccountInfo<'info>],
         banks_only: bool,
+        requirement_type: RequirementType,
+        same_asset_leverage: Option<I80F48>,
     ) -> Self {
         Self {
             lending_account,
@@ -682,14 +716,41 @@ impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
             balance_index: 0,
             account_index: 0,
             banks_only,
+            requirement_type,
+            same_asset_leverage,
+            shared_mint: None,
+            shared_oracle_key: None,
+            lowest_liab_weight: None,
+            same_asset_invalid: false,
         }
     }
+
+    /// Drives the iterator to completion via `reconcile_emode_configs`, then folds any tracked
+    /// same-asset state into the reconciled config when same-asset emode is active and all active
+    /// liabilities shared a single mint.
+    fn reconcile(mut self) -> ReconciledEmodeConfig {
+        let requirement_type = self.requirement_type;
+        let mut reconciled = reconcile_emode_configs(&mut self, requirement_type);
+        if let (Some(leverage), false, Some(mint), Some(oracle_key), Some(liab_weight)) = (
+            self.same_asset_leverage,
+            self.same_asset_invalid,
+            self.shared_mint,
+            self.shared_oracle_key,
+            self.lowest_liab_weight,
+        ) {
+            reconciled.same_asset.mint = mint;
+            reconciled.same_asset.oracle_key = oracle_key;
+            reconciled.same_asset.asset_weight =
+                compute_same_asset_emode_weight(leverage, liab_weight);
+        }
+        reconciled
+    }
 }
+
 impl<'a, 'info> Iterator for EmodeConfigIterator<'a, 'info> {
     type Item = EmodeConfig;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Find next active balance with liabilities
         while self.balance_index < self.lending_account.balances.len() {
             let balance = &self.lending_account.balances[self.balance_index];
 
@@ -698,7 +759,6 @@ impl<'a, 'info> Iterator for EmodeConfigIterator<'a, 'info> {
                 continue;
             }
 
-            // Try to load bank to get account count and emode config
             let bank_ai = self.remaining_ais.get(self.account_index)?;
             let bank_al = AccountLoader::<Bank>::try_from(bank_ai).ok()?;
             let bank = bank_al.load().ok()?;
@@ -713,16 +773,84 @@ impl<'a, 'info> Iterator for EmodeConfigIterator<'a, 'info> {
                 get_remaining_accounts_per_bank(&bank).ok()?
             };
 
-            // Advance indices
             self.account_index += num_accounts;
             self.balance_index += 1;
 
-            // Only yield emode config if this balance has liabilities
             if !balance.is_empty(BalanceSide::Liabilities) {
+                if self.same_asset_leverage.is_some() && !self.same_asset_invalid {
+                    let liab_weight = bank
+                        .config
+                        .get_weight(self.requirement_type, BalanceSide::Liabilities);
+                    if !update_reconciled_same_asset_config(
+                        &mut self.shared_mint,
+                        &mut self.shared_oracle_key,
+                        &mut self.lowest_liab_weight,
+                        &bank,
+                        bank.mint,
+                        liab_weight,
+                    ) {
+                        self.same_asset_invalid = true;
+                    }
+                }
                 return Some(bank.emode.emode_config);
             }
         }
         None
+    }
+}
+
+fn same_asset_leverage_for_requirement(
+    requirement_type: RequirementType,
+    group: &MarginfiGroup,
+) -> Option<I80F48> {
+    let leverage = match requirement_type {
+        RequirementType::Initial => u32_to_basis(group.same_asset_emode_init_leverage),
+        RequirementType::Maintenance => u32_to_basis(group.same_asset_emode_maint_leverage),
+        RequirementType::Equity => return None,
+    };
+
+    (leverage > I80F48::ONE).then_some(leverage)
+}
+
+/// Folds one liability mint/weight into the running same-asset accumulators.
+/// Returns `false` when any liability bank is ineligible, fixed-price, missing an oracle key, or
+/// diverges from a previously seen mint/oracle-key pair. Callers must stop folding on `false`.
+fn update_reconciled_same_asset_config(
+    shared_mint: &mut Option<Pubkey>,
+    shared_oracle_key: &mut Option<Pubkey>,
+    lowest_liab_weight: &mut Option<I80F48>,
+    bank: &Bank,
+    mint: Pubkey,
+    liab_weight: I80F48,
+) -> bool {
+    if !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE)
+        || bank.config.oracle_setup.is_fixed_price()
+        || bank.config.oracle_keys[0] == Pubkey::default()
+    {
+        *lowest_liab_weight = None;
+        return false;
+    }
+
+    let oracle_key = bank.config.oracle_keys[0];
+    match shared_mint {
+        Some(existing_mint)
+            if *existing_mint != mint || shared_oracle_key.as_ref() != Some(&oracle_key) =>
+        {
+            *lowest_liab_weight = None;
+            false
+        }
+        Some(_) => {
+            if lowest_liab_weight.is_none_or(|existing| liab_weight < existing) {
+                *lowest_liab_weight = Some(liab_weight);
+            }
+            true
+        }
+        None => {
+            *shared_mint = Some(mint);
+            *shared_oracle_key = Some(oracle_key);
+            *lowest_liab_weight = Some(liab_weight);
+            true
+        }
     }
 }
 
@@ -744,6 +872,7 @@ impl<'a, 'info> Iterator for EmodeConfigIterator<'a, 'info> {
 /// ## Parameters
 ///
 /// - `marginfi_account`: The account to calculate health for
+/// - `group`: The group whose same-asset auto-emode settings apply to this account
 /// - `remaining_ais`: Remaining accounts containing banks and oracles
 /// - `requirement_type`: Initial, Maintenance, or Equity requirement
 /// - `health_cache`: Optional cache to populate with results
@@ -753,6 +882,7 @@ impl<'a, 'info> Iterator for EmodeConfigIterator<'a, 'info> {
 /// (total_assets, total_liabilities) weighted according to requirement_type
 pub fn get_health_components<'info>(
     marginfi_account: &MarginfiAccount,
+    group: &MarginfiGroup,
     remaining_ais: &'info [AccountInfo<'info>],
     requirement_type: RequirementType,
     health_cache: &mut Option<&mut HealthCache>,
@@ -772,15 +902,19 @@ pub fn get_health_components<'info>(
     let lending_account = &marginfi_account.lending_account;
 
     // =========================================================================
-    // Phase 1: Load emode configuration with heap reuse
+    // Phase 1: Reconcile emode configuration (incl. same-asset) with heap reuse
     // =========================================================================
 
+    let same_asset_leverage = same_asset_leverage_for_requirement(requirement_type, group);
     let emode_checkpoint = heap_pos();
-    let reconciled_emode_config = {
-        let emode_iter = EmodeConfigIterator::new(lending_account, remaining_ais, is_cached);
-        reconcile_emode_configs(emode_iter)
-    };
-    let reconciled_emode_config: EmodeConfig = reconciled_emode_config;
+    let reconciled_emode_config = EmodeConfigIterator::new(
+        lending_account,
+        remaining_ais,
+        is_cached,
+        requirement_type,
+        same_asset_leverage,
+    )
+    .reconcile();
     heap_restore(emode_checkpoint);
 
     // =========================================================================
@@ -941,11 +1075,14 @@ pub fn get_tagged_account_health_components<'info>(
     let clock = Clock::get()?;
 
     let emode_checkpoint = heap_pos();
-    let reconciled_emode_config = {
-        let emode_iter = EmodeConfigIterator::new(lending_account, remaining_ais, false);
-        reconcile_emode_configs(emode_iter)
-    };
-    let reconciled_emode_config: EmodeConfig = reconciled_emode_config;
+    let reconciled_emode_config = EmodeConfigIterator::new(
+        lending_account,
+        remaining_ais,
+        false,
+        RequirementType::Equity,
+        None,
+    )
+    .reconcile();
     heap_restore(emode_checkpoint);
 
     let requirement_type = RequirementType::Equity;
@@ -1036,6 +1173,7 @@ pub fn get_tagged_account_health_components<'info>(
 /// Returns (account_health, assets, liabilities) if the account is liquidatable.
 pub fn check_pre_liquidation_condition_and_get_account_health<'info>(
     marginfi_account: &MarginfiAccount,
+    group: &MarginfiGroup,
     remaining_ais: &'info [AccountInfo<'info>],
     liability_bank_pk: Option<&Pubkey>,
     health_cache: &mut Option<&mut HealthCache>,
@@ -1069,6 +1207,7 @@ pub fn check_pre_liquidation_condition_and_get_account_health<'info>(
     // Get health components using heap reuse
     let (assets, liabs) = get_health_components(
         marginfi_account,
+        group,
         remaining_ais,
         RequirementType::Maintenance,
         health_cache,
@@ -1100,17 +1239,13 @@ pub fn check_pre_liquidation_condition_and_get_account_health<'info>(
 /// Uses heap reuse to process positions one at a time.
 pub fn check_account_bankrupt<'info>(
     marginfi_account: &MarginfiAccount,
+    group: &MarginfiGroup,
     remaining_ais: &'info [AccountInfo<'info>],
     health_cache: &mut Option<&mut HealthCache>,
 ) -> MarginfiResult {
-    // TODO remove this check here and raise it to the top-level instruction
-    check!(
-        !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
-        MarginfiError::AccountInFlashloan
-    );
-
     let (equity_assets, equity_liabs) = get_health_components(
         marginfi_account,
+        group,
         remaining_ais,
         RequirementType::Equity,
         health_cache,
@@ -1243,6 +1378,7 @@ pub fn clear_liquidation_price_cache_locks<'info>(
 /// - Errors if initial health is negative
 pub fn check_account_init_health<'info>(
     marginfi_account: &MarginfiAccount,
+    group: &MarginfiGroup,
     remaining_ais: &'info [AccountInfo<'info>],
     health_cache: &mut Option<&mut HealthCache>,
 ) -> MarginfiResult {
@@ -1253,6 +1389,7 @@ pub fn check_account_init_health<'info>(
 
     let (assets, liabs) = get_health_components(
         marginfi_account,
+        group,
         remaining_ais,
         RequirementType::Initial,
         health_cache,
@@ -1278,6 +1415,7 @@ pub fn check_account_init_health<'info>(
 /// - Post-maintenance health must improve relative to pre-liquidation health
 pub fn check_post_liquidation_condition_and_get_account_health<'info>(
     marginfi_account: &MarginfiAccount,
+    group: &MarginfiGroup,
     remaining_ais: &'info [AccountInfo<'info>],
     bank_pk: &Pubkey,
     pre_liquidation_health: I80F48,
@@ -1306,6 +1444,7 @@ pub fn check_post_liquidation_condition_and_get_account_health<'info>(
 
     let (assets, liabs) = get_health_components(
         marginfi_account,
+        group,
         remaining_ais,
         RequirementType::Maintenance,
         &mut None,
@@ -1342,7 +1481,7 @@ fn calc_weighted_value_for_balance(
     bank: &Bank,
     price_adapter_result: &MarginfiResult<OraclePriceFeedAdapter>,
     requirement_type: RequirementType,
-    emode_config: &EmodeConfig,
+    reconciled_emode_config: &ReconciledEmodeConfig,
     liq_cache: &mut Option<&mut LiquidationPriceCache>,
     position_index: usize,
 ) -> MarginfiResult<(I80F48, I80F48, I80F48, u32)> {
@@ -1354,7 +1493,7 @@ fn calc_weighted_value_for_balance(
                     bank,
                     price_adapter_result,
                     requirement_type,
-                    emode_config,
+                    reconciled_emode_config,
                     liq_cache,
                     position_index,
                 )?;
@@ -1383,7 +1522,7 @@ fn calc_weighted_asset_value_standalone(
     bank: &Bank,
     price_adapter_result: &MarginfiResult<OraclePriceFeedAdapter>,
     requirement_type: RequirementType,
-    emode_config: &EmodeConfig,
+    reconciled_emode_config: &ReconciledEmodeConfig,
     liq_cache: &mut Option<&mut LiquidationPriceCache>,
     position_index: usize,
 ) -> MarginfiResult<(I80F48, I80F48, u32)> {
@@ -1428,22 +1567,20 @@ fn calc_weighted_asset_value_standalone(
                 .map_err(|_| error!(MarginfiError::from(err_code)))?;
 
             // Determine asset weight (emode or bank default)
-            let mut asset_weight = if let Some(emode_entry) =
-                emode_config.find_with_tag(bank.emode.emode_tag)
-            {
-                let bank_weight = bank
-                    .config
-                    .get_weight(requirement_type, BalanceSide::Assets);
-                let emode_weight = match requirement_type {
-                    RequirementType::Initial => I80F48::from(emode_entry.asset_weight_init),
-                    RequirementType::Maintenance => I80F48::from(emode_entry.asset_weight_maint),
-                    RequirementType::Equity => I80F48::ONE,
-                };
-                max(bank_weight, emode_weight)
-            } else {
-                bank.config
-                    .get_weight(requirement_type, BalanceSide::Assets)
-            };
+            let mut asset_weight = bank
+                .config
+                .get_weight(requirement_type, BalanceSide::Assets);
+            if let Some(emode_entry) = reconciled_emode_config.find_with_tag(bank.emode.emode_tag) {
+                asset_weight = max(asset_weight, emode_entry.asset_weight);
+            }
+            if let Some(same_asset_weight) = get_same_asset_weight_for_balance(
+                balance,
+                bank,
+                requirement_type,
+                reconciled_emode_config,
+            ) {
+                asset_weight = max(asset_weight, same_asset_weight);
+            }
 
             let lower_price = if let Some(cache) = liq_cache.as_mut() {
                 let price_with_confidence = price_feed.get_price_and_confidence_of_type(
@@ -2011,17 +2148,29 @@ impl<'a> BankAccountWrapper<'a> {
             _ => {}
         }
 
-        let asset_shares_increase = bank.get_asset_shares(asset_amount_increase)?;
-        balance.change_asset_shares(asset_shares_increase)?;
-        bank.change_asset_shares(
-            asset_shares_increase,
-            matches!(operation_type, BalanceIncreaseType::BypassDepositLimit),
-        )?;
+        // Skip the no-op share updates when a side has no movement (e.g. a pure deposit has no
+        // liability to repay, a pure repay adds no assets). The amounts are `max(_, 0)`, so `> 0`
+        // captures exactly the cases where `change_*_shares(0)` would have been a no-op.
+        let asset_shares_increase = if asset_amount_increase > I80F48::ZERO {
+            let shares = bank.get_asset_shares(asset_amount_increase)?;
+            balance.change_asset_shares(shares)?;
+            bank.change_asset_shares(
+                shares,
+                matches!(operation_type, BalanceIncreaseType::BypassDepositLimit),
+            )?;
+            shares
+        } else {
+            I80F48::ZERO
+        };
 
-        let liability_shares_decrease = bank.get_liability_shares(liability_amount_decrease)?;
-        // TODO: Use `IncreaseType` to skip certain balance updates, and save on compute.
-        balance.change_liability_shares(-liability_shares_decrease)?;
-        bank.change_liability_shares(-liability_shares_decrease, true)?;
+        let liability_shares_decrease = if liability_amount_decrease > I80F48::ZERO {
+            let shares = bank.get_liability_shares(liability_amount_decrease)?;
+            balance.change_liability_shares(-shares)?;
+            bank.change_liability_shares(-shares, true)?;
+            shares
+        } else {
+            I80F48::ZERO
+        };
 
         // Record if the balance was an asset/liability after
         let has_assets =
@@ -2105,16 +2254,29 @@ impl<'a> BankAccountWrapper<'a> {
             _ => {}
         }
 
-        let asset_shares_decrease = bank.get_asset_shares(asset_amount_decrease)?;
-        balance.change_asset_shares(-asset_shares_decrease)?;
-        bank.change_asset_shares(-asset_shares_decrease, false)?;
+        // Skip the no-op share updates when a side has no movement (e.g. a pure withdraw adds no
+        // liability, a pure borrow removes no assets). The amounts are `max(_, 0)`, so `> 0`
+        // captures exactly the cases where `change_*_shares(0)` would have been a no-op.
+        let asset_shares_decrease = if asset_amount_decrease > I80F48::ZERO {
+            let shares = bank.get_asset_shares(asset_amount_decrease)?;
+            balance.change_asset_shares(-shares)?;
+            bank.change_asset_shares(-shares, false)?;
+            shares
+        } else {
+            I80F48::ZERO
+        };
 
-        let liability_shares_increase = bank.get_liability_shares(liability_amount_increase)?;
-        balance.change_liability_shares(liability_shares_increase)?;
-        bank.change_liability_shares(
-            liability_shares_increase,
-            matches!(operation_type, BalanceDecreaseType::BypassBorrowLimit),
-        )?;
+        let liability_shares_increase = if liability_amount_increase > I80F48::ZERO {
+            let shares = bank.get_liability_shares(liability_amount_increase)?;
+            balance.change_liability_shares(shares)?;
+            bank.change_liability_shares(
+                shares,
+                matches!(operation_type, BalanceDecreaseType::BypassBorrowLimit),
+            )?;
+            shares
+        } else {
+            I80F48::ZERO
+        };
 
         // Only liquidation is allowed to bypass this check.
         if !matches!(operation_type, BalanceDecreaseType::BypassBorrowLimit) {
@@ -2153,7 +2315,20 @@ impl<'a> BankAccountWrapper<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use bytemuck::Zeroable;
     use fixed_macro::types::I80F48;
+    use marginfi_type_crate::types::basis_to_u32;
+
+    fn same_asset_eligible_bank(mint: Pubkey, oracle_key: Pubkey, liab_weight: I80F48) -> Bank {
+        let mut bank = Bank::zeroed();
+        bank.mint = mint;
+        bank.config.oracle_setup = OracleSetup::PythPushOracle;
+        bank.config.oracle_keys[0] = oracle_key;
+        bank.config.liability_weight_init = liab_weight.into();
+        bank.config.liability_weight_maint = liab_weight.into();
+        bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+        bank
+    }
 
     #[test]
     fn test_calc_asset_value() {
@@ -2170,6 +2345,320 @@ mod test {
         assert_eq!(
             calc_value(I80F48!(1_000_000_000), I80F48!(10_000_000), 9, None).unwrap(),
             I80F48!(10_000_000)
+        );
+    }
+
+    #[test]
+    fn same_asset_weight_applies_to_matching_collateral_only() {
+        let mint = Pubkey::new_unique();
+        let mut bank = Bank::zeroed();
+        bank.mint = mint;
+        bank.config.risk_tier = RiskTier::Collateral;
+        bank.config.operational_state = BankOperationalState::Operational;
+        bank.config.oracle_keys[0] = Pubkey::new_unique();
+        bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+
+        let mut balance = Balance::empty_deactivated();
+        balance.set_active(true);
+        balance.asset_shares = I80F48!(1).into();
+
+        let mut reconciled = ReconciledEmodeConfig::default();
+        reconciled.same_asset.mint = mint;
+        reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
+        reconciled.same_asset.asset_weight = I80F48!(0.99);
+
+        assert_eq!(
+            get_same_asset_weight_for_balance(
+                &balance,
+                &bank,
+                RequirementType::Initial,
+                &reconciled,
+            ),
+            Some(I80F48!(0.99))
+        );
+
+        bank.mint = Pubkey::new_unique();
+        assert_eq!(
+            get_same_asset_weight_for_balance(
+                &balance,
+                &bank,
+                RequirementType::Initial,
+                &reconciled,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn same_asset_weight_respects_reduce_only_and_equity_disable_behavior() {
+        let mint = Pubkey::new_unique();
+        let mut bank = Bank::zeroed();
+        bank.mint = mint;
+        bank.config.risk_tier = RiskTier::Collateral;
+        bank.config.operational_state = BankOperationalState::ReduceOnly;
+        bank.config.oracle_keys[0] = Pubkey::new_unique();
+        bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+
+        let mut balance = Balance::empty_deactivated();
+        balance.set_active(true);
+        balance.asset_shares = I80F48!(1).into();
+
+        let mut reconciled = ReconciledEmodeConfig::default();
+        reconciled.same_asset.mint = mint;
+        reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
+        reconciled.same_asset.asset_weight = I80F48!(0.99);
+
+        assert_eq!(
+            get_same_asset_weight_for_balance(
+                &balance,
+                &bank,
+                RequirementType::Initial,
+                &reconciled,
+            ),
+            None
+        );
+        assert_eq!(
+            get_same_asset_weight_for_balance(
+                &balance,
+                &bank,
+                RequirementType::Maintenance,
+                &reconciled,
+            ),
+            Some(I80F48!(0.99))
+        );
+        assert_eq!(
+            get_same_asset_weight_for_balance(
+                &balance,
+                &bank,
+                RequirementType::Equity,
+                &ReconciledEmodeConfig::default(),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn same_asset_leverage_for_requirement_selects_enabled_non_equity_values() {
+        let group = MarginfiGroup {
+            same_asset_emode_init_leverage: basis_to_u32(I80F48::from_num(1.5)),
+            same_asset_emode_maint_leverage: basis_to_u32(I80F48::from_num(2.5)),
+            ..Default::default()
+        };
+
+        let init_leverage =
+            same_asset_leverage_for_requirement(RequirementType::Initial, &group).unwrap();
+        assert!(
+            (init_leverage - I80F48::from_num(1.5)).abs() < I80F48::from_num(0.000001),
+            "expected ~1.5, got {}",
+            init_leverage
+        );
+        let maint_leverage =
+            same_asset_leverage_for_requirement(RequirementType::Maintenance, &group).unwrap();
+        assert!(
+            (maint_leverage - I80F48::from_num(2.5)).abs() < I80F48::from_num(0.000001),
+            "expected ~2.5, got {}",
+            maint_leverage
+        );
+        assert_eq!(
+            same_asset_leverage_for_requirement(RequirementType::Equity, &group),
+            None
+        );
+        assert_eq!(
+            same_asset_leverage_for_requirement(
+                RequirementType::Initial,
+                &MarginfiGroup {
+                    same_asset_emode_init_leverage: basis_to_u32(I80F48::ONE),
+                    same_asset_emode_maint_leverage: basis_to_u32(I80F48::from_num(2.5)),
+                    ..Default::default()
+                },
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn same_asset_leverage_treats_legacy_zero_as_disabled() {
+        let group = MarginfiGroup {
+            same_asset_emode_init_leverage: 0,
+            same_asset_emode_maint_leverage: 0,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            same_asset_leverage_for_requirement(RequirementType::Initial, &group),
+            None
+        );
+    }
+
+    #[test]
+    fn same_asset_config_enables_when_all_liabilities_share_one_mint() {
+        let mint = Pubkey::new_unique();
+        let oracle_key = Pubkey::new_unique();
+        let mut shared_mint = None;
+        let mut shared_oracle_key = None;
+        let mut lowest_liab_weight = None;
+        let bank_a = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
+        let bank_b = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.05));
+
+        assert!(update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut lowest_liab_weight,
+            &bank_a,
+            bank_a.mint,
+            I80F48!(1.00),
+        ));
+        assert!(update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut lowest_liab_weight,
+            &bank_b,
+            bank_b.mint,
+            I80F48!(1.05),
+        ));
+
+        assert_eq!(shared_mint, Some(mint));
+        assert_eq!(shared_oracle_key, Some(oracle_key));
+        assert_eq!(lowest_liab_weight, Some(I80F48!(1.00)));
+        assert_eq!(
+            compute_same_asset_emode_weight(I80F48::from_num(100), lowest_liab_weight.unwrap()),
+            compute_same_asset_emode_weight(I80F48::from_num(100), I80F48!(1.00))
+        );
+    }
+
+    #[test]
+    fn same_asset_config_disables_when_liability_mints_diverge() {
+        let mint_a = Pubkey::new_unique();
+        let mint_b = Pubkey::new_unique();
+        let oracle_key = Pubkey::new_unique();
+        let mut shared_mint = None;
+        let mut shared_oracle_key = None;
+        let mut lowest_liab_weight = None;
+        let bank_a = same_asset_eligible_bank(mint_a, oracle_key, I80F48!(1.00));
+        let bank_b = same_asset_eligible_bank(mint_b, oracle_key, I80F48!(1.00));
+
+        assert!(update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut lowest_liab_weight,
+            &bank_a,
+            bank_a.mint,
+            I80F48!(1.00),
+        ));
+        assert!(!update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut lowest_liab_weight,
+            &bank_b,
+            bank_b.mint,
+            I80F48!(1.00),
+        ));
+
+        assert_eq!(shared_mint, Some(mint_a));
+        assert_eq!(lowest_liab_weight, None);
+    }
+
+    #[test]
+    fn same_asset_config_disables_when_liability_oracles_diverge() {
+        let mint = Pubkey::new_unique();
+        let mut shared_mint = None;
+        let mut shared_oracle_key = None;
+        let mut lowest_liab_weight = None;
+        let bank_a = same_asset_eligible_bank(mint, Pubkey::new_unique(), I80F48!(1.00));
+        let bank_b = same_asset_eligible_bank(mint, Pubkey::new_unique(), I80F48!(1.00));
+
+        assert!(update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut lowest_liab_weight,
+            &bank_a,
+            bank_a.mint,
+            I80F48!(1.00),
+        ));
+        assert!(!update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut lowest_liab_weight,
+            &bank_b,
+            bank_b.mint,
+            I80F48!(1.00),
+        ));
+
+        assert_eq!(shared_mint, Some(mint));
+        assert_eq!(lowest_liab_weight, None);
+    }
+
+    #[test]
+    fn same_asset_config_disables_when_liability_bank_is_not_eligible() {
+        let mint = Pubkey::new_unique();
+        let oracle_key = Pubkey::new_unique();
+        let mut shared_mint = None;
+        let mut shared_oracle_key = None;
+        let mut lowest_liab_weight = None;
+        let mut bank = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
+        bank.update_flag(false, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+
+        assert!(!update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut lowest_liab_weight,
+            &bank,
+            bank.mint,
+            I80F48!(1.00),
+        ));
+        assert_eq!(shared_mint, None);
+        assert_eq!(lowest_liab_weight, None);
+    }
+
+    #[test]
+    fn same_asset_config_uses_least_favorable_liability_weight() {
+        let mint = Pubkey::new_unique();
+        let oracle_key = Pubkey::new_unique();
+        let mut shared_mint = None;
+        let mut shared_oracle_key = None;
+        let mut lowest_liab_weight = None;
+        let bank_a = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.05));
+        let bank_b = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
+
+        assert!(update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut lowest_liab_weight,
+            &bank_a,
+            bank_a.mint,
+            I80F48!(1.05),
+        ));
+        assert!(update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut lowest_liab_weight,
+            &bank_b,
+            bank_b.mint,
+            I80F48!(1.00),
+        ));
+
+        assert_eq!(lowest_liab_weight, Some(I80F48!(1.00)));
+        assert_eq!(
+            compute_same_asset_emode_weight(I80F48::from_num(100), lowest_liab_weight.unwrap()),
+            compute_same_asset_emode_weight(I80F48::from_num(100), I80F48!(1.00))
+        );
+    }
+
+    #[test]
+    fn same_asset_requirement_decoded_leverage_at_or_below_one_is_treated_as_disabled() {
+        let group = MarginfiGroup {
+            same_asset_emode_init_leverage: basis_to_u32(I80F48::ONE),
+            same_asset_emode_maint_leverage: basis_to_u32(I80F48::ONE),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            same_asset_leverage_for_requirement(RequirementType::Initial, &group),
+            None
+        );
+        assert_eq!(
+            same_asset_leverage_for_requirement(RequirementType::Maintenance, &group),
+            None
         );
     }
 

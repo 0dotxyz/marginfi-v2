@@ -1,5 +1,5 @@
 use crate::{
-    check, check_eq, constants::MAX_BPS, errors::MarginfiError, prelude::MarginfiResult,
+    check, check_eq, constants::MAX_ORDER_SLIPPAGE, errors::MarginfiError, prelude::MarginfiResult,
     state::marginfi_account::LendingAccountImpl,
 };
 use anchor_lang::prelude::*;
@@ -19,6 +19,7 @@ pub trait OrderImpl {
         trigger: OrderTrigger,
         tags: [u16; ORDER_ACTIVE_TAGS],
         bump: u8,
+        current_timestamp: i64,
     ) -> MarginfiResult;
 }
 
@@ -29,6 +30,7 @@ impl OrderImpl for Order {
         trigger: OrderTrigger,
         tags: [u16; ORDER_ACTIVE_TAGS],
         bump: u8,
+        current_timestamp: i64,
     ) -> MarginfiResult {
         self.marginfi_account = marginfi_account;
         match trigger {
@@ -81,10 +83,17 @@ impl OrderImpl for Order {
             }
         }
 
-        check!(self.max_slippage < MAX_BPS, MarginfiError::InvalidSlippage);
+        // Orders are capped at MAX_ORDER_SLIPPAGE. Stop-loss execution is also gated by maintenance
+        // health. Take-profit execution is additionally bounded by ORDER_EXECUTION_MAX_FEE, which
+        // usually dominates the slippage constraint at this cap,
+        check!(
+            self.max_slippage <= MAX_ORDER_SLIPPAGE,
+            MarginfiError::SlippageTooHigh
+        );
 
         self.tags = tags;
         self.bump = bump;
+        self.created_at = current_timestamp;
 
         Ok(())
     }
@@ -224,7 +233,7 @@ impl ExecuteOrderRecordImpl for ExecuteOrderRecord {
         }
 
         // This implies that the inactive balances were also not touched.
-        // This check is not strictly necessary since deposits are not allowed
+        // This check is not strictly necessary since deposits & borrows are not allowed
         // during execution and the above has checked that the open balances are
         // still open and the same, but is left here as a sanity check.
         check_eq!(

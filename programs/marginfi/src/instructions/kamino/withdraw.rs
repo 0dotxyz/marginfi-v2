@@ -100,10 +100,10 @@ pub fn kamino_withdraw<'info>(
     let bank_mint = ctx.accounts.bank.load()?.mint;
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let clock = Clock::get()?;
+    let group = ctx.accounts.group.load()?;
 
     {
         let mut bank = ctx.accounts.bank.load_mut()?;
-        let group = ctx.accounts.group.load()?;
         // A withdraw from an account with no liabilities is risk-free, so it stays allowed
         // while the bank is circuit-breaker halted or `CircuitBroken`.
         let withdraw_is_halt_safe = !marginfi_account.lending_account.has_liabilities();
@@ -254,8 +254,10 @@ pub fn kamino_withdraw<'info>(
     if !in_receivership_or_order_execution {
         // Check account health, if below threshold fail transaction
         // Assuming `ctx.remaining_accounts` holds only oracle accounts
+        let group = ctx.accounts.group.load()?;
         check_account_init_health(
             &marginfi_account,
+            &group,
             ctx.remaining_accounts,
             &mut Some(&mut health_cache),
         )?;

@@ -113,7 +113,7 @@ export const makeInitializeSpotMarketIx = async (
       new BN(1), // orderTickSize
       new BN(1), // orderStepSize
       0, // ifTotalFactor
-      Array(32).fill(0), // name
+      Array(32).fill(0) // name
     )
     .accounts({
       spotMarket: spotMarketPublicKey,

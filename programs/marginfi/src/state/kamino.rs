@@ -9,7 +9,6 @@ use marginfi_type_crate::types::{
 
 /// Used to configure Kamino banks. A simplified version of `BankConfigCompact` which omits most
 /// values related to interest since Kamino banks cannot earn interest or be borrowed against.
-// TODO: Jon mentioned there are some extra options he wants to see in config, investigate later.
 #[derive(AnchorDeserialize, AnchorSerialize, Debug, PartialEq, Eq)]
 pub struct KaminoConfigCompact {
     pub oracle: Pubkey,

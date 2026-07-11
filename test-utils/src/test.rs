@@ -496,7 +496,6 @@ pub fn create_oracle_key_array(pyth_oracle: Pubkey) -> [Pubkey; MAX_ORACLE_KEYS]
 lazy_static! {
     pub static ref DEFAULT_TEST_BANK_INTEREST_RATE_CONFIG: InterestRateConfig =
         InterestRateConfig {
-            // TODO deprecate in 1.7
             placeholder0: I80F48!(0.5).into(),
             placeholder1: I80F48!(0.6).into(),
             placeholder2: I80F48!(3).into(),
@@ -527,7 +526,6 @@ lazy_static! {
         config_flags: PYTH_PUSH_MIGRATED_DEPRECATED,
 
         interest_rate_config: InterestRateConfig {
-            // TODO deprecate in 1.7
             placeholder0: I80F48!(0).into(),
             placeholder1: I80F48!(0).into(),
             placeholder2: I80F48!(0).into(),
@@ -1285,6 +1283,10 @@ impl TestFixture {
         clock.unix_timestamp = reserve.market_price_last_updated_ts as i64;
         test_f.context.borrow_mut().set_sysvar(&clock);
 
+        test_f
+            .set_pyth_oracle_timestamp(PYTH_USDC_FEED, reserve.market_price_last_updated_ts as i64)
+            .await;
+
         // Keep fixture setup simple by disabling reserve farms for these local ix tests.
         if reserve.farm_collateral != Pubkey::default() || reserve.farm_debt != Pubkey::default() {
             let mut reserve_account = test_f.try_load(&reserve_key).await.unwrap().unwrap();
@@ -1479,6 +1481,9 @@ impl TestFixture {
             .data(),
         };
         let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
+
+        test_f.refresh_blockhash().await;
+
         Self::process_ixs(test_f.context.clone(), &[cu_ix, init_ix])
             .await
             .unwrap();

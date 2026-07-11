@@ -301,9 +301,7 @@ pub fn validate_bank_state(
     }
 
     match kind {
-        InstructionKind::FailsInReduceState
-            if effective_state == BankOperationalState::ReduceOnly =>
-        {
+        InstructionKind::FailsInReduceState if effective_state.is_reduce_only() => {
             return err!(MarginfiError::BankReduceOnly);
         }
 
@@ -314,14 +312,16 @@ pub fn validate_bank_state(
         InstructionKind::FailsIfPausedOrReduceState
             if matches!(
                 effective_state,
-                BankOperationalState::Paused | BankOperationalState::ReduceOnly
+                BankOperationalState::Paused
+                    | BankOperationalState::ReduceOnly
+                    | BankOperationalState::ReduceOnlyWithBorrowingPower
             ) =>
         {
             return match effective_state {
                 BankOperationalState::Paused => {
                     err!(MarginfiError::BankPaused)
                 }
-                BankOperationalState::ReduceOnly => {
+                state if state.is_reduce_only() => {
                     err!(MarginfiError::BankReduceOnly)
                 }
                 _ => unreachable!(),
@@ -337,6 +337,10 @@ pub fn wrapped_i80f48_to_f64(n: WrappedI80F48) -> f64 {
     let as_i80: I80F48 = n.into();
     let as_f64: f64 = as_i80.to_num();
     as_f64
+}
+
+pub fn i80f48_to_f64(n: I80F48) -> f64 {
+    n.to_num()
 }
 
 /// Fetch a low-biased price for a given bank from a properly structured remaining accounts slice as

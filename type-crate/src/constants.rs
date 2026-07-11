@@ -14,8 +14,8 @@ pub const SOLEND_OBLIGATION_SEED: &str = "solend_obligation";
 pub const JUPLEND_F_TOKEN_VAULT_SEED: &str = "f_token_vault";
 
 pub const FEE_STATE_SEED: &str = "feestate";
-pub const FEE_STATE_V2_SEED: &str = "feestate_v2";
 pub const STAKED_SETTINGS_SEED: &str = "staked_settings";
+pub const SAME_ASSET_EMODE_REGISTRY_SEED: &str = "same_asset_emode_registry";
 
 pub const EMISSIONS_TOKEN_ACCOUNT_SEED: &str = "emissions_token_account_seed";
 
@@ -26,9 +26,15 @@ pub const EXECUTE_ORDER_SEED: &str = "execute_order";
 
 pub const METADATA_SEED: &str = "metadata";
 
-/// TODO: Make these variable per bank
-pub const LIQUIDATION_LIQUIDATOR_FEE: I80F48 = I80F48!(0.025);
-pub const LIQUIDATION_INSURANCE_FEE: I80F48 = I80F48!(0.025);
+/// Default liquidation fee as an I80F48 fraction (2.5%), used when a bank's
+/// `liquidation_liquidator_fee` / `liquidation_insurance_fee` is 0. Matches the historical
+/// hardcoded values.
+pub const DEFAULT_LIQUIDATION_FEE: I80F48 = I80F48!(0.025);
+
+/// Maximum per-fee liquidation fee an admin may configure, encoded like the fields it caps
+/// (`u32_to_centi`, `u32::MAX` = 100%). Caps each of the two fees at ~50% so their sum stays below
+/// 100% — otherwise the liquidatee's collateral credit (`final_discount`) would go negative.
+pub const MAX_LIQUIDATION_FEE_U32: u32 = u32::MAX / 2;
 
 pub const SECONDS_PER_YEAR: I80F48 = I80F48!(31_536_000);
 pub const DAILY_RESET_INTERVAL: i64 = 24 * 60 * 60; // 24 hours
@@ -87,18 +93,27 @@ pub const TOKENLESS_REPAYMENTS_COMPLETE: u64 = 1 << 6;
 pub const IS_T22: u64 = 1 << 7;
 /// Bank provenance bit: set when the bank is known to be seed-derived (PDA).
 pub const BANK_SEED_KNOWN: u64 = 1 << 8;
-/// Enables the per-bank oracle circuit breaker.
-pub const CIRCUIT_BREAKER_ENABLED: u64 = 1 << 9;
-
 /// True if bank created in 0.1.4 or later, or if migrated to the new oracle setup from a prior
 /// version. False otherwise.
 pub const PYTH_PUSH_MIGRATED_DEPRECATED: u8 = 1 << 0;
+
+/// Staked-collateral oracle transition flags stored on `Bank.flags` and copied from
+/// `StakedSettings.flags` during staked-settings propagation.
+/// To be removed once SVSP update is rolled out (likely in 1.10)
+pub const STAKED_ORACLE_DISABLED: u64 = 1 << 9;
+pub const STAKED_ORACLE_PRICE_USES_ONRAMP: u64 = 1 << 10;
+pub const STAKED_ORACLE_FLAGS: u64 = STAKED_ORACLE_DISABLED | STAKED_ORACLE_PRICE_USES_ONRAMP;
+/// Enables the per-bank oracle circuit breaker.
+pub const CIRCUIT_BREAKER_ENABLED: u64 = 1 << 11;
+/// Bank opt-in bit: set when same-asset e-mode may use this bank.
+pub const BANK_SAME_ASSET_EMODE_ELIGIBLE: u64 = 1 << 12;
 
 pub const GROUP_FLAGS: u64 = PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
     | FREEZE_SETTINGS
     | TOKENLESS_REPAYMENTS_ALLOWED
     | TOKENLESS_REPAYMENTS_COMPLETE
-    | CIRCUIT_BREAKER_ENABLED;
+    | CIRCUIT_BREAKER_ENABLED
+    | BANK_SAME_ASSET_EMODE_ELIGIBLE;
 
 pub const MAX_EXP_10_I80F48: usize = 24;
 pub const EXP_10_I80F48: [I80F48; MAX_EXP_10_I80F48] = [
@@ -211,6 +226,8 @@ pub mod discriminators {
     pub const LIQUIDATION_RECORD: [u8; 8] = [95, 116, 23, 132, 89, 210, 245, 162];
     pub const ORDER: [u8; 8] = [134, 173, 223, 185, 77, 86, 28, 51];
     pub const EXECUTE_ORDER_RECORD: [u8; 8] = [6, 100, 107, 60, 164, 226, 56, 97];
+    pub const BANK_METADATA: [u8; 8] = [49, 207, 31, 34, 67, 225, 169, 186];
+    pub const SAME_ASSET_EMODE_REGISTRY: [u8; 8] = [222, 21, 195, 149, 193, 72, 219, 31];
 }
 
 pub mod ix_discriminators {

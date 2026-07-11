@@ -5,11 +5,8 @@ import {
   StakeProgram,
   PublicKey,
   Connection,
-  SYSVAR_CLOCK_PUBKEY,
 } from "@solana/web3.js";
 import { MockUser } from "./mocks";
-import { BanksClient } from "./litesvm";
-import { BN } from "@coral-xyz/anchor";
 
 /**
  * Create a stake account for some user
@@ -170,6 +167,54 @@ export const getStakeAccount = function (data: Buffer): StakeAccount {
       creditsObserved,
     },
   };
+};
+
+/**
+ * Encode a StakeAccount back into account data. Exact inverse of {@link getStakeAccount}:
+ * writes every parsed field at the same offset getStakeAccount reads it from. Pass the original
+ * buffer so its length and any trailing bytes (e.g. StakeFlags) are preserved untouched.
+ * */
+export const encodeStakeAccount = function (
+  account: StakeAccount,
+  original: Buffer
+): Buffer {
+  const data = Buffer.from(original);
+  let offset = 0;
+
+  // Mirror getStakeAccount exactly: it reads the discriminant as an 8-byte value but only advances
+  // 4 (the real enum tag is 4 bytes; the upper 4 overlap rentExemptReserve). We write 8 bytes here
+  // and then let the rentExemptReserve write below overwrite that overlap, making this a true
+  // inverse.
+  data.writeBigUInt64LE(account.discriminant, offset);
+  offset += 4;
+
+  data.writeBigUInt64LE(account.meta.rentExemptReserve, offset);
+  offset += 8;
+
+  account.meta.authorized.staker.toBuffer().copy(data, offset);
+  offset += 32;
+  account.meta.authorized.withdrawer.toBuffer().copy(data, offset);
+  offset += 32;
+
+  data.writeBigUInt64LE(account.meta.lockup.unixTimestamp, offset);
+  offset += 8;
+  data.writeBigUInt64LE(account.meta.lockup.epoch, offset);
+  offset += 8;
+  account.meta.lockup.custodian.toBuffer().copy(data, offset);
+  offset += 32;
+
+  account.stake.delegation.voterPubkey.toBuffer().copy(data, offset);
+  offset += 32;
+  data.writeBigUInt64LE(account.stake.delegation.stake, offset);
+  offset += 8;
+  data.writeBigUInt64LE(account.stake.delegation.activationEpoch, offset);
+  offset += 8;
+  data.writeBigUInt64LE(account.stake.delegation.deactivationEpoch, offset);
+  offset += 8;
+
+  data.writeBigUInt64LE(account.stake.creditsObserved, offset);
+
+  return data;
 };
 
 /**

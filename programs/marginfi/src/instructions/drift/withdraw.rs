@@ -68,10 +68,10 @@ pub fn drift_withdraw<'info>(
 
     let bank_key = ctx.accounts.bank.key();
     let bank_mint = ctx.accounts.bank.load()?.mint;
+    let group = ctx.accounts.group.load()?;
     let (token_amount, expected_scaled_balance_change, share_amount) = {
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;
-        let group = ctx.accounts.group.load()?;
         authority_bump = bank.liquidity_vault_authority_bump;
 
         // A withdraw from an account with no liabilities is risk-free, so it stays allowed
@@ -281,8 +281,10 @@ pub fn drift_withdraw<'info>(
         // Note: during liquidation/deleverage or order execution, we skip all health checks until
         // the end of the transaction.
         if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION) {
+            let group = ctx.accounts.group.load()?;
             check_account_init_health(
                 &marginfi_account,
+                &group,
                 ctx.remaining_accounts,
                 &mut Some(&mut health_cache),
             )?;

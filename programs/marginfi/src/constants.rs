@@ -2,9 +2,6 @@ use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use pyth_solana_receiver_sdk::price_update::VerificationLevel;
-use solana_instructions_sysvar::{load_current_index_checked, load_instruction_at_checked};
-
-use crate::MarginfiResult;
 
 // This file should only contain the constants which couldn't be moved to type-crate:
 // 1. the constants used for testing/internal purposes
@@ -40,16 +37,8 @@ cfg_if::cfg_if! {
     }
 }
 
-// TODO update to the actual deployment key on mainnet/devnet/staging
-cfg_if::cfg_if! {
-    if #[cfg(feature = "devnet")] {
-        pub const SPL_SINGLE_POOL_ID: Pubkey = pubkey!("SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE");
-    } else if #[cfg(any(feature = "mainnet-beta", feature = "staging", feature = "stagingalt"))] {
-        pub const SPL_SINGLE_POOL_ID: Pubkey = pubkey!("SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE");
-    } else {
-        pub const SPL_SINGLE_POOL_ID: Pubkey = pubkey!("SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE");
-    }
-}
+/// The SPL single-validator stake pool program. Deployed under the same address on every cluster.
+pub const SPL_SINGLE_POOL_ID: Pubkey = pubkey!("SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE");
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "devnet")] {
@@ -87,16 +76,16 @@ pub const ORDER_EXECUTION_MAX_FEE: I80F48 = I80F48!(0.05); // 5%
 pub const ORDER_INIT_FLAT_FEE_DEFAULT: u32 = 100_000;
 /// Maximum percent encoded as u32 (100% == u32::MAX)
 pub const MAX_BPS: u32 = u32::MAX;
+/// Maximum slippage allowed for any Order , encoded as a u32 percent (see `MAX_BPS`). Set to ~10%.
+pub const MAX_ORDER_SLIPPAGE: u32 = u32::MAX / 10;
 
 pub const MIN_PYTH_PUSH_VERIFICATION_LEVEL: VerificationLevel = VerificationLevel::Full;
 
-// TODO move this to the global fee wallet eventually
-/// A nominal fee paid to the global wallet when intiating an account transfer. Primarily intended
-/// to avoid spamming account migration, which is mildly annoying to backend systems that track the
-/// state of accounts.
-/// * Should be ~ $0.50 or around that magnitude
-/// * In lamports
-pub const ACCOUNT_TRANSFER_FEE: u64 = 5_000_000;
+/// Default account-transfer fee in lamports, used when the on-chain `FeeState.account_transfer_fee`
+/// is 0 (which preserves this legacy fee for FeeStates created before that field existed). The fee
+/// is a nominal anti-spam charge (5,000,000 lamports ≈ $0.50) paid to the global fee wallet when
+/// initiating an account transfer.
+pub const DEFAULT_ACCOUNT_TRANSFER_FEE_LAMPORTS: u32 = 5_000_000;
 
 /// When creating a mrgn account using a PDA, programs that wish to specify a third_party_id must be
 /// registered here. This confers no other benefits. Creating accounts with third_party_id = 0 or
@@ -129,45 +118,3 @@ pub const THIRD_PARTY_CPI_RULES: &[(u16, Pubkey)] = &[
 ///
 /// * IDs >= PDA_FREE_THRESHOLD are "restricted": must contact us to register first.
 pub const PDA_FREE_THRESHOLD: u16 = 10_000;
-
-// TODO move to ix_utils after liquidation_remix merged into 0.1.5
-/// third_party_id > PDA_FREE_THRESHOLD are restricted, contact us to secure one.
-///
-///
-/// Returns:
-/// - Ok(true)  => it *is* a CPI from the allowed program for `third_party_id`, or uses an
-///   unrestricted seed that isn't subject to any limits.
-/// - Ok(false) => not a CPI (direct call) OR CPI from a different program that has not registered
-///   that seed.
-pub fn is_allowed_cpi_for_third_party_id(
-    sysvar_info: &AccountInfo,
-    third_party_id: u16,
-) -> MarginfiResult<bool> {
-    // Free tier: no gating at all.
-    if third_party_id < PDA_FREE_THRESHOLD {
-        return Ok(true);
-    }
-
-    // Restricted tier: must have a rule.
-    let allowed_program = match THIRD_PARTY_CPI_RULES
-        .iter()
-        .find(|(id, _)| *id == third_party_id)
-        .map(|(_, program_id)| *program_id)
-    {
-        Some(p) => p,
-        None => {
-            return Ok(false);
-        }
-    };
-
-    let current_ix_index = load_current_index_checked(sysvar_info)?;
-    let current_ixn = load_instruction_at_checked(current_ix_index as usize, sysvar_info)?;
-
-    // If the current (top-level) instruction is *this* program, it's a direct call (not CPI) -> no
-    // "third party" id allowed in the restricted zone.
-    if current_ixn.program_id == crate::ID {
-        return Ok(false);
-    }
-
-    Ok(current_ixn.program_id == allowed_program)
-}

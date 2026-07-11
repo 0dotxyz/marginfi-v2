@@ -106,7 +106,13 @@ pub fn place_order(
 
     let mut order = order_loader.load_init()?;
 
-    order.initialize(marginfi_account_key, trigger, tags, order_bump)?;
+    order.initialize(
+        marginfi_account_key,
+        trigger,
+        tags,
+        order_bump,
+        Clock::get()?.unix_timestamp,
+    )?;
     marginfi_account.increment_active_orders()?;
 
     let fee_state = fee_state_loader.load()?;
@@ -357,13 +363,14 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
     let fee_state = fee_state_loader.load()?;
 
     let mut health_cache = HealthCache::zeroed();
-
+    let group = ctx.accounts.group.load()?;
     let (
         (order_assets_in_equity, _order_liabs_in_equity, _order_asset_count, order_liab_count),
         is_healthy,
     ) = {
         let (assets, liabs) = get_health_components(
             &marginfi_account,
+            &group,
             ctx.remaining_accounts,
             RequirementType::Maintenance,
             &mut Some(&mut health_cache),

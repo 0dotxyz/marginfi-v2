@@ -44,6 +44,8 @@ impl FuzzTest {
             permissionless_bad_debt_settlement: None,
             freeze_settings: None,
             tokenless_repayments_allowed: None,
+            liquidation_liquidator_fee: None,
+            liquidation_insurance_fee: None,
             circuit_breaker_enabled: None,
             cb_deviation_bps_tiers: None,
             cb_tier_durations_seconds: None,
@@ -774,6 +776,7 @@ impl FuzzTest {
         .accounts(
             types::marginfi::LendingAccountEndFlashloanInstructionAccounts::new(
                 user.marginfi_account,
+                self.marginfi_group,
                 user.address,
             ),
         )
@@ -980,6 +983,7 @@ impl FuzzTest {
         .accounts(types::marginfi::StartLiquidationInstructionAccounts::new(
             liquidatee_marginfi_account,
             record,
+            self.marginfi_group,
             liquidation_receiver,
         ))
         .remaining_accounts(health_remaining_start)
@@ -991,9 +995,13 @@ impl FuzzTest {
         .accounts(types::marginfi::EndLiquidationInstructionAccounts::new(
             liquidatee_marginfi_account,
             record,
+            self.marginfi_group,
             liquidation_receiver,
             self.fee_state,
             global_fee_wallet,
+            // fee_payer (optional account, added in #23). Naming the receiver here keeps the default
+            // behavior: the liquidation_receiver pays the flat fee.
+            liquidation_receiver,
         ))
         .remaining_accounts(health_remaining_end)
         .instruction();

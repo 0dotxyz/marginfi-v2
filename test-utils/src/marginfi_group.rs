@@ -16,15 +16,17 @@ use marginfi::{
         LIQUIDATION_FLAT_FEE_DEFAULT, ORDER_EXECUTION_MAX_FEE, ORDER_INIT_FLAT_FEE_DEFAULT,
     },
     instruction::*,
+    instructions::marginfi_group::StakedSettingsConfig,
     state::bank::BankVaultType,
 };
 use marginfi_type_crate::constants::{
     FEE_STATE_SEED, PROTOCOL_FEE_FIXED_DEFAULT, PROTOCOL_FEE_RATE_DEFAULT,
+    SAME_ASSET_EMODE_REGISTRY_SEED, STAKED_SETTINGS_SEED,
 };
 use marginfi_type_crate::types::WrappedI80F48;
 use marginfi_type_crate::types::{
     BankConfig, BankConfigCompact, BankConfigOpt, EmodeEntry, FeeState, InterestRateConfigOpt,
-    MarginfiGroup, OracleSetup, MAX_EMODE_ENTRIES,
+    MarginfiGroup, OracleSetup, StakedSettings, MAX_EMODE_ENTRIES,
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
@@ -43,6 +45,8 @@ async fn airdrop_sol(context: &mut ProgramTestContext, key: &Pubkey, amount: u64
 pub struct MarginfiGroupFixture {
     ctx: Rc<RefCell<ProgramTestContext>>,
     pub key: Pubkey,
+    pub same_asset_emode_registry: Pubkey,
+    pub staked_settings: Pubkey,
     pub fee_state: Pubkey,
     pub fee_wallet: Pubkey,
 }
@@ -52,9 +56,20 @@ impl MarginfiGroupFixture {
         let ctx_ref = ctx.clone();
 
         let group_key = Keypair::new();
+        let (same_asset_emode_registry, _registry_bump) = Pubkey::find_program_address(
+            &[
+                SAME_ASSET_EMODE_REGISTRY_SEED.as_bytes(),
+                group_key.pubkey().as_ref(),
+            ],
+            &marginfi::ID,
+        );
         let fee_wallet_key: Pubkey;
         let (fee_state_key, _bump) =
             Pubkey::find_program_address(&[FEE_STATE_SEED.as_bytes()], &marginfi::ID);
+        let (staked_settings_key, _bump) = Pubkey::find_program_address(
+            &[STAKED_SETTINGS_SEED.as_bytes(), group_key.pubkey().as_ref()],
+            &marginfi::ID,
+        );
 
         {
             let mut ctx = ctx.borrow_mut();
@@ -93,6 +108,8 @@ impl MarginfiGroupFixture {
                     new_risk_admin: Some(admin),
                     emode_max_init_leverage: None,
                     emode_max_maint_leverage: None,
+                    same_asset_emode_init_leverage: None,
+                    same_asset_emode_maint_leverage: None,
                 }
                 .data(),
             };
@@ -161,9 +178,44 @@ impl MarginfiGroupFixture {
             }
         }
 
+        {
+            let ctx = ctx.borrow_mut();
+            let settings = StakedSettingsConfig {
+                oracle: Pubkey::default(),
+                asset_weight_init: I80F48::from_num(0.8).into(),
+                asset_weight_maint: I80F48::from_num(0.9).into(),
+                deposit_limit: 1_000_000,
+                total_asset_value_init_limit: 1_000_000,
+                oracle_max_age: 10,
+                risk_tier: marginfi_type_crate::types::RiskTier::Collateral,
+            };
+            let ix = Instruction {
+                program_id: marginfi::ID,
+                accounts: marginfi::accounts::InitStakedSettings {
+                    marginfi_group: group_key.pubkey(),
+                    admin: ctx.payer.pubkey(),
+                    fee_payer: ctx.payer.pubkey(),
+                    staked_settings: staked_settings_key,
+                    system_program: system_program::id(),
+                }
+                .to_account_metas(Some(true)),
+                data: InitStakedSettings { settings }.data(),
+            };
+
+            let tx = Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&ctx.payer.pubkey()),
+                &[&ctx.payer],
+                ctx.banks_client.get_latest_blockhash().await.unwrap(),
+            );
+            ctx.banks_client.process_transaction(tx).await.unwrap();
+        }
+
         MarginfiGroupFixture {
             ctx: ctx_ref.clone(),
             key: group_key.pubkey(),
+            same_asset_emode_registry,
+            staked_settings: staked_settings_key,
             fee_state: fee_state_key,
             fee_wallet: fee_wallet_key,
         }
@@ -424,12 +476,101 @@ impl MarginfiGroupFixture {
         }
     }
 
+    pub fn make_lending_pool_set_bank_same_asset_emode_eligibility_ix(
+        &self,
+        bank: &BankFixture,
+        enabled: bool,
+    ) -> Instruction {
+        let accounts = marginfi::accounts::LendingPoolSetBankSameAssetEmodeEligibility {
+            group: self.key,
+            signer: self.ctx.borrow().payer.pubkey(),
+            bank: bank.key,
+            same_asset_emode_registry: self.same_asset_emode_registry,
+        }
+        .to_account_metas(Some(true));
+
+        Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: LendingPoolSetBankSameAssetEmodeEligibility { enabled }.data(),
+        }
+    }
+
+    pub fn make_lending_pool_init_same_asset_emode_registry_ix(&self) -> Instruction {
+        let accounts = marginfi::accounts::LendingPoolInitSameAssetEmodeRegistry {
+            group: self.key,
+            signer: self.ctx.borrow().payer.pubkey(),
+            same_asset_emode_registry: self.same_asset_emode_registry,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(Some(true));
+
+        Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: LendingPoolInitSameAssetEmodeRegistry {}.data(),
+        }
+    }
+
+    pub async fn try_lending_pool_init_same_asset_emode_registry(
+        &self,
+    ) -> Result<(), BanksClientError> {
+        let ix = self.make_lending_pool_init_same_asset_emode_registry_ix();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn try_lending_pool_configure_bank(
         &self,
         bank: &BankFixture,
         bank_config_opt: BankConfigOpt,
     ) -> Result<(), BanksClientError> {
         let ix = self.make_lending_pool_configure_bank_ix(bank, bank_config_opt);
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn try_lending_pool_set_bank_same_asset_emode_eligibility(
+        &self,
+        bank: &BankFixture,
+        enabled: bool,
+    ) -> Result<(), BanksClientError> {
+        let registry_account = self
+            .ctx
+            .borrow_mut()
+            .banks_client
+            .get_account(self.same_asset_emode_registry)
+            .await?;
+        if registry_account.is_none() {
+            self.try_lending_pool_init_same_asset_emode_registry()
+                .await?;
+        }
+
+        let ix = self.make_lending_pool_set_bank_same_asset_emode_eligibility_ix(bank, enabled);
         let tx = Transaction::new_signed_with_payer(
             &[ix],
             Some(&self.ctx.borrow().payer.pubkey().clone()),
@@ -805,6 +946,59 @@ impl MarginfiGroupFixture {
         .await
     }
 
+    pub async fn try_update_with_same_asset_emode_leverage(
+        &self,
+        new_admin: Pubkey,
+        new_emode_admin: Pubkey,
+        new_curve_admin: Pubkey,
+        new_limit_admin: Pubkey,
+        new_emissions_admin: Pubkey,
+        new_metadata_admin: Pubkey,
+        new_risk_admin: Pubkey,
+        same_asset_emode_init_leverage: Option<WrappedI80F48>,
+        same_asset_emode_maint_leverage: Option<WrappedI80F48>,
+    ) -> Result<(), BanksClientError> {
+        let group = self.load().await;
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::MarginfiGroupConfigure {
+                marginfi_group: self.key,
+                admin: self.ctx.borrow().payer.pubkey(),
+            }
+            .to_account_metas(Some(true)),
+            data: MarginfiGroupConfigure {
+                new_admin: Some(new_admin),
+                new_emode_admin: Some(new_emode_admin),
+                new_curve_admin: Some(new_curve_admin),
+                new_limit_admin: Some(new_limit_admin),
+                new_flow_admin: Some(group.delegate_flow_admin),
+                new_emissions_admin: Some(new_emissions_admin),
+                new_metadata_admin: Some(new_metadata_admin),
+                new_risk_admin: Some(new_risk_admin),
+                emode_max_init_leverage: None,
+                emode_max_maint_leverage: None,
+                same_asset_emode_init_leverage,
+                same_asset_emode_maint_leverage,
+            }
+            .data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn try_update_with_flow_admin(
         &self,
         new_admin: Pubkey,
@@ -862,6 +1056,8 @@ impl MarginfiGroupFixture {
                 new_risk_admin: Some(new_risk_admin),
                 emode_max_init_leverage,
                 emode_max_maint_leverage,
+                same_asset_emode_init_leverage: None,
+                same_asset_emode_maint_leverage: None,
             }
             .data(),
         };
@@ -1231,6 +1427,86 @@ impl MarginfiGroupFixture {
         load_and_deserialize::<MarginfiGroup>(self.ctx.clone(), &self.key).await
     }
 
+    pub async fn load_staked_settings(&self) -> StakedSettings {
+        load_and_deserialize::<StakedSettings>(self.ctx.clone(), &self.staked_settings).await
+    }
+
+    /// Shrink the group account to the v1 (8 + struct) size, simulating a mainnet account
+    /// created before groups were allocated at the v2 size.
+    pub async fn truncate_group_account_to_v1(&self) {
+        Self::truncate_account_to(&self.ctx, self.key, 8 + MarginfiGroup::V1_LEN).await
+    }
+
+    /// Shrink the fee-state account to the v1 (8 + struct) size, simulating the mainnet
+    /// account created before it was allocated at the v2 size.
+    pub async fn truncate_fee_state_to_v1(&self) {
+        Self::truncate_account_to(&self.ctx, self.fee_state, 8 + FeeState::V1_LEN).await
+    }
+
+    async fn truncate_account_to(ctx: &Rc<RefCell<ProgramTestContext>>, key: Pubkey, len: usize) {
+        let mut ctx = ctx.borrow_mut();
+        let mut account = ctx.banks_client.get_account(key).await.unwrap().unwrap();
+        account.data.truncate(len);
+        ctx.set_account(&key, &account.into())
+    }
+
+    pub async fn try_resize_group_account(&self) -> Result<(), BanksClientError> {
+        self.try_resize_account_key(self.key).await
+    }
+
+    pub async fn try_resize_fee_state(&self) -> Result<(), BanksClientError> {
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::ResizeGlobalFeeState {
+                fee_state: self.fee_state,
+                payer: payer.pubkey(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: ResizeGlobalFeeState {}.data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer.pubkey()),
+            &[&payer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Send the group resize ix against an arbitrary account key (for negative tests).
+    pub async fn try_resize_account_key(&self, key: Pubkey) -> Result<(), BanksClientError> {
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolResizeGroupAccount {
+                group: key,
+                payer: payer.pubkey(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolResizeGroupAccount {}.data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer.pubkey()),
+            &[&payer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
     pub async fn set_protocol_fees_flag(&self, enabled: bool) {
         let mut group = self.load().await;
         let mut ctx = self.ctx.borrow_mut();
@@ -1245,7 +1521,8 @@ impl MarginfiGroupFixture {
 
         let data = bytes_of(&group);
 
-        account.data[8..].copy_from_slice(data);
+        // The account may be larger than the struct (v2 allocation); write the prefix only.
+        account.data[8..8 + data.len()].copy_from_slice(data);
 
         ctx.set_account(&self.key, &account.into())
     }
@@ -1350,6 +1627,7 @@ impl MarginfiGroupFixture {
                 liquidation_max_fee: None,
                 order_execution_max_fee: None,
                 pause_delegate_admin: Some(new_pause_delegate_admin.unwrap_or_default()),
+                account_transfer_fee: None,
             }
             .data(),
         };
@@ -1377,6 +1655,58 @@ impl MarginfiGroupFixture {
             }
             .to_account_metas(Some(true)),
             data: PropagateFeeState {}.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub async fn try_disable_staked_oracles(&self) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::DisableStakedOracles {
+                group: self.key,
+                admin: self.ctx.borrow().payer.pubkey(),
+                staked_settings: self.staked_settings,
+            }
+            .to_account_metas(Some(true)),
+            data: DisableStakedOracles {}.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub async fn try_enable_staked_oracle_onramp(&self) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::EnableStakedOracleOnramp {
+                group: self.key,
+                admin: self.ctx.borrow().payer.pubkey(),
+                staked_settings: self.staked_settings,
+            }
+            .to_account_metas(Some(true)),
+            data: EnableStakedOracleOnramp {}.data(),
         };
 
         let tx = Transaction::new_signed_with_payer(

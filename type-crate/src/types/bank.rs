@@ -1,17 +1,23 @@
+use std::cmp::max;
+
 use crate::{
     assert_struct_align, assert_struct_size,
-    constants::{discriminators, ASSET_TAG_DRIFT, DRIFT_SCALED_BALANCE_DECIMALS},
-    types::{BankCache, BankConfig},
+    constants::{
+        discriminators, ASSET_TAG_DRIFT, DRIFT_SCALED_BALANCE_DECIMALS, STAKED_ORACLE_DISABLED,
+        STAKED_ORACLE_PRICE_USES_ONRAMP,
+    },
+    types::{BalanceSide, BankCache, BankConfig, EmodeConfig, RequirementType},
 };
 
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
 
 use bytemuck::{Pod, Zeroable};
+use fixed::types::I80F48;
 
 #[cfg(not(feature = "anchor"))]
 use super::Pubkey;
-use super::{BankRateLimiter, EmodeSettings, WrappedI80F48};
+use super::{BankRateLimiter, EmodeSettings, OnRampTransition, WrappedI80F48};
 
 assert_struct_size!(Bank, 1856);
 assert_struct_align!(Bank, 8);
@@ -103,7 +109,11 @@ pub struct Bank {
     /// - Bit 8 (256): `BANK_SEED_KNOWN` — bank is known to be PDA/seed-derived. If not set, bank
     ///   may still be a PDA, but created before this flag launched (1.8 or earlier) or is a legacy
     ///   keypair-based bank.
-    /// - Bit 9 (512): `CIRCUIT_BREAKER_ENABLED` — oracle deviation breaker active on this bank
+    /// - Bit 9 (512): `STAKED_ORACLE_DISABLED` — staked oracle pricing is temporarily disabled.
+    /// - Bit 10 (1024): `STAKED_ORACLE_PRICE_USES_ONRAMP` — staked oracle pricing includes the SPL
+    ///   single-pool on-ramp account in NAV.
+    /// - Bit 11 (2048): `CIRCUIT_BREAKER_ENABLED` — oracle deviation breaker active on this bank
+    /// - Bit 12 (4096): `BANK_SAME_ASSET_EMODE_ELIGIBLE` — bank may participate in same-asset e-mode.
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.
@@ -140,8 +150,17 @@ pub struct Bank {
     ///   the bank may safely be closed if this is zero. Will never go negative.
     pub borrowing_position_count: i32,
 
+    /// Fee the liquidator earns when liquidating against this bank's liability. Decode with
+    /// `u32_to_centi` (`u32::MAX` = 100%).
+    /// * 0 falls back to the default (`DEFAULT_LIQUIDATION_FEE` = 2.5%).
+    pub liquidation_liquidator_fee: u32,
+    /// Fee routed to this bank's insurance fund on a liquidation against its liability. Decode
+    /// with `u32_to_centi` (`u32::MAX` = 100%).
+    /// * 0 falls back to the default (`DEFAULT_LIQUIDATION_FEE` = 2.5%).
+    pub liquidation_insurance_fee: u32,
+
     /// Reserved for future use
-    pub _padding_0: [u8; 16],
+    pub _padding_0: [u8; 8],
 
     /// Integration account slot 1 (default Pubkey for non-integrations).
     /// - Kamino: reserve
@@ -215,6 +234,38 @@ impl Bank {
             self.mint_decimals
         }
     }
+
+    pub fn get_asset_weight(
+        &self,
+        requirement_type: RequirementType,
+        emode_config: &EmodeConfig,
+    ) -> I80F48 {
+        if let Some(emode_entry) = emode_config.find_with_tag(self.emode.emode_tag) {
+            let bank_weight = self
+                .config
+                .get_weight(requirement_type, BalanceSide::Assets);
+            let emode_weight = match requirement_type {
+                RequirementType::Initial => I80F48::from(emode_entry.asset_weight_init),
+                RequirementType::Maintenance => I80F48::from(emode_entry.asset_weight_maint),
+                RequirementType::Equity => I80F48::ONE,
+            };
+            max(bank_weight, emode_weight)
+        } else {
+            self.config
+                .get_weight(requirement_type, BalanceSide::Assets)
+        }
+    }
+
+    // To be removed once SVSP update is rolled out (likely in 1.10)
+    pub fn on_ramp_transition(&self) -> OnRampTransition {
+        if self.flags & STAKED_ORACLE_PRICE_USES_ONRAMP != 0 {
+            OnRampTransition::OnRampEnabled
+        } else if self.flags & STAKED_ORACLE_DISABLED != 0 {
+            OnRampTransition::StakeOraclesDisabled
+        } else {
+            OnRampTransition::PreTransition
+        }
+    }
 }
 
 #[repr(u8)]
@@ -249,6 +300,8 @@ pub enum BankOperationalState {
     /// Awaiting one-time setup (JupLend `juplend_init_position` seed deposit). All operations are
     /// blocked, and the state is unreachable from `lending_pool_configure_bank`.
     Uninitialized,
+    /// Same instruction restrictions as ReduceOnly, but assets still count for initial health.
+    ReduceOnlyWithBorrowingPower,
     /// Non-expiring circuit-breaker end state, reached after repeated breaker escalation.
     /// Blocks borrows and risk-carrying withdraws and restricts liquidation to the risk admin;
     /// deposit/repay/riskless-withdraw follow the pre-break state stashed in
@@ -258,6 +311,15 @@ pub enum BankOperationalState {
 }
 unsafe impl Zeroable for BankOperationalState {}
 unsafe impl Pod for BankOperationalState {}
+
+impl BankOperationalState {
+    pub fn is_reduce_only(self) -> bool {
+        matches!(
+            self,
+            BankOperationalState::ReduceOnly | BankOperationalState::ReduceOnlyWithBorrowingPower
+        )
+    }
+}
 
 #[repr(u8)]
 #[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
@@ -308,5 +370,12 @@ impl OracleSetup {
             17 => Some(Self::FixedJuplend),
             _ => None,
         }
+    }
+
+    pub fn is_fixed_price(self) -> bool {
+        matches!(
+            self,
+            Self::Fixed | Self::FixedKamino | Self::FixedDrift | Self::FixedJuplend
+        )
     }
 }

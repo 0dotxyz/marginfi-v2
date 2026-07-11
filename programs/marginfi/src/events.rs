@@ -66,6 +66,14 @@ pub struct LendingPoolBankSetFixedOraclePriceEvent {
 }
 
 #[event]
+pub struct LendingPoolBankSetSameAssetEmodeEligibilityEvent {
+    pub header: GroupEventHeader,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    pub enabled: bool,
+}
+
+#[event]
 pub struct LendingPoolBankConfigureFrozenEvent {
     pub header: GroupEventHeader,
     pub bank: Pubkey,
@@ -109,6 +117,20 @@ pub struct LendingPoolBankHandleBankruptcyEvent {
     pub bad_debt: f64,
     pub covered_amount: f64,
     pub socialized_amount: f64,
+}
+
+#[event]
+pub struct DriftClaimBadDebtEvent {
+    pub header: GroupEventHeader,
+    pub bank: Pubkey,
+    pub claim_mint: Pubkey,
+    pub distributor: Pubkey,
+    pub claim_status: Pubkey,
+    pub liquidity_vault_authority: Pubkey,
+    pub global_fee_wallet: Pubkey,
+    pub requested_amount: u64,
+    pub received_amount: u64,
+    pub swept_amount: u64,
 }
 
 #[event]
@@ -181,6 +203,7 @@ pub struct LiquidationBalances {
     pub liquidatee_liability_balance: f64,
     pub liquidator_asset_balance: f64,
     pub liquidator_liability_balance: f64,
+    pub liquidator_liability_bank_asset_balance: f64,
 }
 
 #[event]

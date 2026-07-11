@@ -108,8 +108,8 @@ pub enum MarginfiError {
     WrongNumberOfOracleAccounts,
     #[msg("Oracle error: wrong account keys")] // 6052
     WrongOracleAccountKeys,
-    #[msg("Vacated2")] // 6053
-    Vacated2,
+    #[msg("Stake oracles are temporarily disabled")] // 6053
+    StakeOraclesDisabled,
     #[msg("Vacated3")] // 6054
     Vacated3,
     #[msg("Oracle max confidence exceeded: try again later")] // 6055
@@ -272,6 +272,8 @@ pub enum MarginfiError {
     InvalidGlobalFeeWallet,
     #[msg("Bank has not completed one-time initialization")] // 6134
     BankUninitialized,
+    #[msg("Max slippage exceeds the allowed cap")] // 6135
+    SlippageTooHigh,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -427,6 +429,8 @@ pub enum MarginfiError {
     JuplendInitPositionDepositInsufficient, // 6511
     #[msg("Invalid Juplend withdraw intermediary ATA")]
     InvalidJuplendWithdrawIntermediaryAta, // 6512
+    #[msg("Account is already at (or above) the target size")]
+    InvalidResize, // 6513
     // **************END JUPLEND ERRORS
 
     // ************** BEGIN CIRCUIT BREAKER ERRORS (starting at 6600)
@@ -519,7 +523,7 @@ impl From<u32> for MarginfiError {
             6050 => MarginfiError::PythPushStalePrice,
             6051 => MarginfiError::WrongNumberOfOracleAccounts,
             6052 => MarginfiError::WrongOracleAccountKeys,
-            6053 => MarginfiError::Vacated2,
+            6053 => MarginfiError::StakeOraclesDisabled,
             6054 => MarginfiError::Vacated3,
             6055 => MarginfiError::OracleMaxConfidenceExceeded,
             6056 => MarginfiError::PythPushInsufficientVerificationLevel,
@@ -681,6 +685,7 @@ impl From<u32> for MarginfiError {
             6510 => MarginfiError::JuplendWithdrawFailed,
             6511 => MarginfiError::JuplendInitPositionDepositInsufficient,
             6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
+            6513 => MarginfiError::InvalidResize,
             6600 => MarginfiError::BankCircuitBreakerHalted,
             6601 => MarginfiError::CircuitBreakerAdminOnly,
             6602 => MarginfiError::CircuitBreakerInvalidConfig,

@@ -62,6 +62,7 @@ pub fn lending_account_withdraw<'info>(
 
     let withdraw_all = withdraw_all.unwrap_or(false);
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
+    let group = marginfi_group_loader.load()?;
 
     {
         let maybe_bank_mint = {
@@ -71,7 +72,6 @@ pub fn lending_account_withdraw<'info>(
 
         let in_receivership_or_order_execution =
             marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
-        let group = marginfi_group_loader.load()?;
         let mut bank = bank_loader.load_mut()?;
         // A withdraw from an account with no liabilities is risk-free, so it stays allowed
         // while the bank is circuit-breaker halted or `CircuitBroken`.
@@ -229,8 +229,10 @@ pub fn lending_account_withdraw<'info>(
         // Check account health, if below threshold fail transaction
         // Assuming `ctx.remaining_accounts` holds only oracle accounts
         // Uses heap-efficient health check to support accounts with up to 16 positions
+        let group = marginfi_group_loader.load()?;
         check_account_init_health(
             &marginfi_account,
+            &group,
             ctx.remaining_accounts,
             &mut Some(&mut health_cache),
         )?;

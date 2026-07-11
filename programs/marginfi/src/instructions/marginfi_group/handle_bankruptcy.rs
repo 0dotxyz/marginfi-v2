@@ -81,6 +81,8 @@ pub fn lending_pool_handle_bankruptcy<'info>(
     health_cache.timestamp = clock.unix_timestamp;
     health_cache.program_version = PROGRAM_VERSION;
 
+    let group = marginfi_group_loader.load()?;
+
     // Inline CB gate: the insolvency decision below values the whole portfolio at live
     // prices with no other CB check on this path. Admins can settle in any state.
     if !is_admin_or_risk_admin {
@@ -89,6 +91,7 @@ pub fn lending_pool_handle_bankruptcy<'info>(
 
     check_account_bankrupt(
         &marginfi_account,
+        &group,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
     )?;
@@ -265,6 +268,7 @@ pub struct LendingPoolHandleBankruptcy<'info> {
         constraint = {
             !marginfi_account.load()?.get_flag(ACCOUNT_IN_RECEIVERSHIP)
         } @MarginfiError::UnexpectedLiquidationState,
+        // Reject bankruptcy during an open flashloan: the account may be only transiently insolvent.
         constraint = {
             !marginfi_account.load()?.get_flag(ACCOUNT_IN_FLASHLOAN)
         } @MarginfiError::AccountInFlashloan
