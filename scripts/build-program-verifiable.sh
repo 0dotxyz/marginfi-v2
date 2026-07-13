@@ -35,8 +35,7 @@ export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
 export CARGO_PROFILE_RELEASE_OPT_LEVEL=3
 export CARGO_PROFILE_RELEASE_INCREMENTAL=false
 
-base_image="solanafoundation/solana-verifiable-build:3.1.13"
-
-cmd="sudo $verify_bin build --library-name $program_lib_name --base-image $base_image -- $features"
+# The build image is pinned via [workspace.metadata.cli] in the root Cargo.toml.
+cmd="sudo $verify_bin build --library-name $program_lib_name -- $features"
 echo "Running: $cmd"
 eval "$cmd"
