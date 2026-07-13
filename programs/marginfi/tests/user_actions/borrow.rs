@@ -680,3 +680,47 @@ async fn emode_borrows() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn borrow_rejects_positive_liability_below_empty_threshold() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+
+    let lender_mfi_account_f = test_f.create_marginfi_account().await;
+    let lender_token_account_sol = test_f.sol_mint.create_token_account_and_mint_to(1).await;
+    lender_mfi_account_f
+        .try_bank_deposit(lender_token_account_sol.key, sol_bank, 1, None)
+        .await?;
+
+    sol_bank.set_liability_share_value(I80F48!(2)).await;
+
+    let borrower_mfi_account_f = test_f.create_marginfi_account().await;
+    let borrower_token_account_sol = test_f.sol_mint.create_empty_token_account().await;
+
+    let bank_before = sol_bank.load().await;
+    let total_liability_shares_before: I80F48 = bank_before.total_liability_shares.into();
+    let borrowing_position_count_before = bank_before.borrowing_position_count;
+    let borrower_token_balance_before = borrower_token_account_sol.balance().await;
+
+    let res = borrower_mfi_account_f
+        .try_bank_borrow(borrower_token_account_sol.key, sol_bank, 0.000_000_001)
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalBalanceState);
+
+    let bank_after = sol_bank.load().await;
+    assert_eq!(
+        total_liability_shares_before,
+        I80F48::from(bank_after.total_liability_shares)
+    );
+    assert_eq!(
+        borrowing_position_count_before,
+        bank_after.borrowing_position_count
+    );
+    assert_eq!(
+        borrower_token_balance_before,
+        borrower_token_account_sol.balance().await
+    );
+
+    Ok(())
+}
