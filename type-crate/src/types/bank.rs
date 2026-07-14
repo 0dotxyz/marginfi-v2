@@ -220,7 +220,12 @@ pub struct Bank {
     /// Unix-seconds when `cb_window_reference_price` was anchored.
     pub cb_window_started_at: i64,
 
-    pub _padding_1: [u64; 3], // 24B
+    /// Frozen halt seconds from halt intervals overwritten before `accrue_interest` consumed them.
+    /// Non-zero only when the breaker advances without a preceding accrual (a paused pulse); the
+    /// next accrual excludes these on top of the current halt. Zero in the common case.
+    pub cb_frozen_seconds_pending: u64,
+
+    pub _padding_1: [u64; 2],
 }
 
 impl Bank {

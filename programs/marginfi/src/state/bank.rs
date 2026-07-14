@@ -752,9 +752,13 @@ impl BankImpl for Bank {
         // interest they can no longer escape. Interest accrues only over the non-halted portion
         // of the interval: pre-halt time accrues in full, the halted span never accrues, and
         // post-halt accrual resumes from the halt's end — regardless of when accrual actually
-        // runs relative to the halt.
-        let time_delta =
-            time_delta.saturating_sub(self.cb_frozen_seconds(self.last_update, current_timestamp));
+        // runs relative to the halt. `cb_frozen_seconds` covers the recorded halt;
+        // `cb_frozen_seconds_pending` covers earlier halts a later trip overwrote before this ran.
+        let frozen_seconds = self
+            .cb_frozen_seconds_pending
+            .saturating_add(self.cb_frozen_seconds(self.last_update, current_timestamp));
+        let time_delta = time_delta.saturating_sub(frozen_seconds);
+        self.cb_frozen_seconds_pending = 0;
         self.last_update = current_timestamp;
         if time_delta == 0 {
             return Ok(());
@@ -929,9 +933,8 @@ impl BankImpl for Bank {
     /// Seconds of the recorded halt span overlapping `[from, to]`, i.e. the portion of that
     /// interval during which interest accrual is frozen. The span outlives the halt (it is only
     /// cleared by `reset_cb_runtime_state` or overwritten by the next trip) so the overlap is
-    /// still computable when accrual first runs after the halt ended. Only the most recent halt
-    /// span is recorded: if several distinct halts elapse between two accruals, only the latest
-    /// is excluded.
+    /// still computable when accrual first runs after the halt ended. Earlier spans overwritten
+    /// before accrual ran are tracked separately in `cb_frozen_seconds_pending`.
     fn cb_frozen_seconds(&self, from: i64, to: i64) -> u64 {
         if self.cb_halt_ended_at == 0 {
             return 0;
@@ -1466,6 +1469,7 @@ impl BankImpl for Bank {
         self.cb_tier = 0;
         self.cb_halt_started_at = 0;
         self.cb_halt_ended_at = 0;
+        self.cb_frozen_seconds_pending = 0;
         self.cb_tier3_consecutive_trips = 0;
         self.cb_last_observed_slot = 0;
         self.cb_last_oracle_source_time = 0;
@@ -1478,6 +1482,14 @@ impl BankImpl for Bank {
             breached_tier
         };
         let dur_sec = self.config.cb_tier_durations_seconds[(new_tier - 1) as usize] as i64;
+
+        // Bank the overwritten halt's still-unaccrued frozen span so the next accrual still
+        // excludes it. Zero when accrual preceded this trip (`last_update == now`); non-zero only
+        // when the breaker advanced without accruing, i.e. a paused pulse.
+        self.cb_frozen_seconds_pending = self
+            .cb_frozen_seconds_pending
+            .saturating_add(self.cb_frozen_seconds(self.last_update, now));
+
         self.cb_tier = new_tier;
         self.cb_halt_started_at = now;
         self.cb_halt_ended_at = now.saturating_add(dur_sec);
@@ -2474,6 +2486,55 @@ mod cb_tests {
         // Intervals entirely after or before the halt → nothing frozen.
         assert_eq!(b.cb_frozen_seconds(3_000, 4_000), 0);
         assert_eq!(b.cb_frozen_seconds(1_000, 1_500), 0);
+    }
+
+    #[test]
+    fn frozen_seconds_pending_banks_overwritten_halts_across_a_pause() {
+        // Escalation while paused advances the breaker with no accrual between trips, so each trip
+        // overwrites the prior halt interval. `pending + cb_frozen_seconds(last_update, now)` must
+        // still equal the exact union of all frozen spans, i.e. what a deferred accrual excludes.
+        let mut b = make_cb_bank();
+        b.config.operational_state = BankOperationalState::Operational;
+        let big = price(200); // +100% vs ref → tier 3.
+
+        // last_update predates the first halt, as after an in-halt deposit checkpoint. No accrual
+        // runs after this point (the pause blocks it), so it stays put across both trips.
+        b.last_update = 200;
+
+        // Seed the reference, then trip the first tier-3 halt at t=1000 (slots step by the
+        // min-gap so the dedup accepts each observation).
+        b.update_circuit_breaker(999, 999, obs(price(100))).unwrap();
+        b.update_circuit_breaker(1_000, 999 + CB_MIN_PULSE_SLOT_GAP, obs(big))
+            .unwrap();
+        assert_eq!(b.cb_tier, 3);
+        assert_eq!(b.cb_tier3_consecutive_trips, 1);
+        assert_eq!(b.cb_frozen_seconds_pending, 0);
+        let halt1_start = b.cb_halt_started_at;
+        let halt1_end = b.cb_halt_ended_at;
+        assert_eq!(halt1_start, 1_000);
+        assert_eq!(halt1_end, 1_000 + 14_400);
+
+        // Second breach one second after the first halt expires (still inside the escalation
+        // window), with no accrual in between. It escalates and overwrites the interval.
+        let t2 = halt1_end + 1;
+        b.update_circuit_breaker(t2, 999 + 2 * CB_MIN_PULSE_SLOT_GAP, obs(big))
+            .unwrap();
+        assert_eq!(b.cb_tier, 3);
+        assert_eq!(b.cb_tier3_consecutive_trips, 2); // breaker stayed live: escalation progressed.
+        let halt2_end = b.cb_halt_ended_at;
+        assert_eq!(b.cb_halt_started_at, t2);
+        assert_eq!(halt2_end, t2 + 14_400);
+
+        // Halt 1's full duration is banked (last_update precedes it); the pre-halt time is not.
+        assert_eq!(b.cb_frozen_seconds_pending, (halt1_end - halt1_start) as u64);
+
+        let now = halt2_end;
+        let frozen = b.cb_frozen_seconds_pending + b.cb_frozen_seconds(b.last_update, now);
+        let union = (halt1_end - halt1_start) + (halt2_end - t2); // the 1s gap is not frozen.
+        assert_eq!(frozen, union as u64);
+        let accruable = (now - b.last_update) as u64 - frozen;
+        // Non-frozen = [200,1000] pre-halt (800s) + [halt1_end, t2] gap (1s).
+        assert_eq!(accruable, 801);
     }
 
     // ---- Pre-break state restore -------------------------------------------------------------
