@@ -4,7 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 IDL_DIR="${REPO_ROOT}/idls"
+FULL_IDL_DIR="${REPO_ROOT}/idls-complete"
 
+LENDING_IDL_SOURCE="${FULL_IDL_DIR}/kamino_lending.json"
+FARMS_IDL_SOURCE="${FULL_IDL_DIR}/kamino_farms.json"
 LENDING_IDL="${IDL_DIR}/kamino_lending.json"
 FARMS_IDL="${IDL_DIR}/kamino_farms.json"
 
@@ -23,8 +26,8 @@ require_file() {
 }
 
 require_cmd jq
-require_file "${LENDING_IDL}"
-require_file "${FARMS_IDL}"
+require_file "${LENDING_IDL_SOURCE}"
+require_file "${FARMS_IDL_SOURCE}"
 
 tmp_lending="$(mktemp)"
 tmp_farms="$(mktemp)"
@@ -38,7 +41,6 @@ jq '
     "update_reserve_config",
     "socialize_loss_v2",
     "refresh_reserve",
-    "refresh_reserves_batch",
     "init_user_metadata",
     "init_obligation",
     "init_obligation_farms_for_reserve",
@@ -58,13 +60,8 @@ jq '
         .
       end
     )
-  | .accounts |= map(select(.name | IN(
-    "LendingMarket",
-    "Obligation",
-    "UserMetadata",
-    "Reserve"
-  )))
-' "${LENDING_IDL}" > "${tmp_lending}"
+  | .accounts = []
+' "${LENDING_IDL_SOURCE}" > "${tmp_lending}"
 
 mv "${tmp_lending}" "${LENDING_IDL}"
 
@@ -78,13 +75,8 @@ jq '
     "refresh_farm",
     "update_farm_config"
   )))
-  | .accounts |= map(select(.name | IN(
-    "FarmState",
-    "GlobalConfig",
-    "UserState",
-    "OraclePrices"
-  )))
-' "${FARMS_IDL}" > "${tmp_farms}"
+  | .accounts = []
+' "${FARMS_IDL_SOURCE}" > "${tmp_farms}"
 
 mv "${tmp_farms}" "${FARMS_IDL}"
 

@@ -1,9 +1,7 @@
 #[cfg(not(feature = "client"))]
 use crate::events::{GroupEventHeader, LendingPoolBankAccrueInterestEvent};
 use crate::{
-    check,
-    constants::DRIFT_SCALED_BALANCE_DECIMALS,
-    debug,
+    check, debug,
     errors::MarginfiError,
     math_error,
     prelude::MarginfiResult,
@@ -16,32 +14,82 @@ use crate::{
             InterestRateStateChanges,
         },
         marginfi_account::calc_value,
-        price::OraclePriceWithConfidence,
+        price::OraclePriceWithMultiplier,
     },
 };
-use anchor_lang::prelude::*;
-use anchor_lang::{
-    err,
-    prelude::{AccountInfo, CpiContext, InterfaceAccount},
-    ToAccountInfo,
-};
-use anchor_spl::{
-    token::{transfer, Transfer},
-    token_2022::spl_token_2022,
-    token_interface::Mint,
-};
+use anchor_lang::ToAccountInfo;
+use anchor_lang::{err, prelude::*};
+#[cfg(feature = "client")]
+use anchor_spl::token::spl_token;
+#[cfg(not(feature = "client"))]
+use anchor_spl::token::{transfer, Transfer};
+use anchor_spl::token_interface::Mint;
 use bytemuck::Zeroable;
 use drift_mocks::constants::scale_drift_deposit_limit;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        ASSET_TAG_DRIFT, CLOSE_ENABLED_FLAG, FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED,
-        FREEZE_SETTINGS, GROUP_FLAGS, INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED,
-        LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+        ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, CLOSE_ENABLED_FLAG, FEE_VAULT_AUTHORITY_SEED,
+        FEE_VAULT_SEED, FREEZE_SETTINGS, GROUP_FLAGS, INSURANCE_VAULT_AUTHORITY_SEED,
+        INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
         PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup},
 };
+
+#[cfg(feature = "client")]
+fn invoke_client_token_transfer<'info>(
+    token_program: &Pubkey,
+    amount: u64,
+    from: AccountInfo<'info>,
+    maybe_mint: Option<AccountInfo<'info>>,
+    to: AccountInfo<'info>,
+    authority: AccountInfo<'info>,
+    decimals: Option<u8>,
+    remaining_accounts: &[AccountInfo<'info>],
+    signer_seeds: &[&[&[u8]]],
+) -> MarginfiResult {
+    let ix = if let (Some(mint), Some(decimals)) = (maybe_mint.as_ref(), decimals) {
+        spl_token_2022::instruction::transfer_checked(
+            token_program,
+            from.key,
+            mint.key,
+            to.key,
+            authority.key,
+            &[],
+            amount,
+            decimals,
+        )?
+    } else {
+        spl_token::instruction::transfer(
+            token_program,
+            from.key,
+            to.key,
+            authority.key,
+            &[],
+            amount,
+        )?
+    };
+
+    let mut account_infos = if let Some(mint) = maybe_mint {
+        vec![from, mint, to, authority]
+    } else {
+        vec![from, to, authority]
+    };
+    account_infos.extend_from_slice(remaining_accounts);
+
+    solana_program::program::invoke_signed(&ix, &account_infos, signer_seeds)?;
+
+    Ok(())
+}
+
+#[cfg(all(not(feature = "client"), feature = "debug"))]
+fn sol_log_compute_units() {
+    #[cfg(target_os = "solana")]
+    unsafe {
+        solana_msg::syscalls::sol_log_compute_units_();
+    }
+}
 
 pub trait BankImpl {
     const LEN: usize = std::mem::size_of::<Bank>();
@@ -62,12 +110,12 @@ pub trait BankImpl {
         insurance_vault_authority_bump: u8,
         fee_vault_bump: u8,
         fee_vault_authority_bump: u8,
+        bank_seed: u64,
     ) -> Self;
     fn get_liability_amount(&self, shares: I80F48) -> MarginfiResult<I80F48>;
     fn get_asset_amount(&self, shares: I80F48) -> MarginfiResult<I80F48>;
     fn get_liability_shares(&self, value: I80F48) -> MarginfiResult<I80F48>;
     fn get_asset_shares(&self, value: I80F48) -> MarginfiResult<I80F48>;
-    fn get_balance_decimals(&self) -> u8;
     fn get_remaining_deposit_capacity(&self) -> MarginfiResult<u64>;
     fn change_asset_shares(&mut self, shares: I80F48, bypass_deposit_limit: bool)
         -> MarginfiResult;
@@ -90,7 +138,7 @@ pub trait BankImpl {
     fn update_bank_cache(&mut self, group: &MarginfiGroup) -> MarginfiResult<()>;
     fn update_cache_price(
         &mut self,
-        oracle_price: Option<OraclePriceWithConfidence>,
+        oracle_price: Option<OraclePriceWithMultiplier>,
     ) -> MarginfiResult<()>;
     fn deposit_spl_transfer<'info>(
         &self,
@@ -140,6 +188,7 @@ impl BankImpl for Bank {
         insurance_vault_authority_bump: u8,
         fee_vault_bump: u8,
         fee_vault_authority_bump: u8,
+        bank_seed: u64,
     ) -> Self {
         Self {
             mint,
@@ -174,6 +223,7 @@ impl BankImpl for Bank {
             _padding_0: [0; 16],
             integration_acc_1: Pubkey::default(),
             integration_acc_2: Pubkey::default(),
+            bank_seed,
             ..Default::default()
         }
     }
@@ -203,14 +253,6 @@ impl BankImpl for Bank {
         Ok(value
             .checked_div(self.asset_share_value.into())
             .ok_or_else(math_error!())?)
-    }
-
-    fn get_balance_decimals(&self) -> u8 {
-        if self.config.asset_tag == ASSET_TAG_DRIFT {
-            DRIFT_SCALED_BALANCE_DECIMALS
-        } else {
-            self.mint_decimals
-        }
     }
 
     fn get_remaining_deposit_capacity(&self) -> MarginfiResult<u64> {
@@ -374,8 +416,16 @@ impl BankImpl for Bank {
         set_if_some!(self.config.borrow_limit, config.borrow_limit);
 
         if let Some(new_state) = config.operational_state {
+            // JupLend banks must be activated exactly once through `juplend_init_position`.
             check!(
-                new_state != BankOperationalState::KilledByBankruptcy,
+                !(self.config.asset_tag == ASSET_TAG_JUPLEND
+                    && self.config.operational_state == BankOperationalState::Uninitialized),
+                MarginfiError::Unauthorized
+            );
+            // These states are unreachable by configuration
+            check!(
+                new_state != BankOperationalState::KilledByBankruptcy
+                    && new_state != BankOperationalState::Uninitialized,
                 MarginfiError::Unauthorized
             );
             // Log operational state change
@@ -465,7 +515,7 @@ impl BankImpl for Bank {
         #[cfg(not(feature = "client"))] bank: Pubkey,
     ) -> MarginfiResult<()> {
         #[cfg(all(not(feature = "client"), feature = "debug"))]
-        anchor_lang::solana_program::log::sol_log_compute_units();
+        sol_log_compute_units();
 
         let time_delta: u64 = (current_timestamp - self.last_update).try_into().unwrap();
         if time_delta == 0 {
@@ -511,8 +561,7 @@ impl BankImpl for Bank {
             &ir_calc,
             self.asset_share_value.into(),
             self.liability_share_value.into(),
-        )
-        .ok_or_else(math_error!())?;
+        )?;
 
         debug!("deposit share value: {}\nliability share value: {}\nfees collected: {}\ninsurance collected: {}",
             asset_share_value, liability_share_value, group_fees_collected, insurance_fees_collected);
@@ -555,7 +604,7 @@ impl BankImpl for Bank {
         #[cfg(not(feature = "client"))]
         {
             #[cfg(feature = "debug")]
-            anchor_lang::solana_program::log::sol_log_compute_units();
+            sol_log_compute_units();
 
             emit!(LendingPoolBankAccrueInterestEvent {
                 header: GroupEventHeader {
@@ -600,9 +649,7 @@ impl BankImpl for Bank {
         let utilization_rate: I80F48 = total_liabilities_amount
             .checked_div(total_assets_amount)
             .ok_or_else(math_error!())?;
-        let interest_rates = ir_calc
-            .calc_interest_rate(utilization_rate)
-            .ok_or_else(math_error!())?;
+        let interest_rates = ir_calc.calc_interest_rate(utilization_rate)?;
 
         update_interest_rates(&mut self.cache, &interest_rates);
 
@@ -620,14 +667,16 @@ impl BankImpl for Bank {
     /// * `oracle_price` - Optional oracle price (with confidence) used in this instruction (if any)
     fn update_cache_price(
         &mut self,
-        oracle_price: Option<OraclePriceWithConfidence>,
+        oracle_price: Option<OraclePriceWithMultiplier>,
     ) -> MarginfiResult<()> {
         if self.cache.is_liquidation_price_cache_locked() {
             return Ok(());
         }
-        if let Some(price_with_confidence) = oracle_price {
-            self.cache.last_oracle_price = price_with_confidence.price.into();
-            self.cache.last_oracle_price_confidence = price_with_confidence.confidence.into();
+        if let Some(price_with_multiplier) = oracle_price {
+            self.cache.last_oracle_price = price_with_multiplier.oracle_price.price.into();
+            self.cache.last_oracle_price_confidence =
+                price_with_multiplier.oracle_price.confidence.into();
+            self.cache.price_multiplier = price_with_multiplier.price_multiplier.into();
             self.cache.last_oracle_price_timestamp = Clock::get()?.unix_timestamp;
         } else {
             // no cache update, nothing...
@@ -636,6 +685,7 @@ impl BankImpl for Bank {
         Ok(())
     }
 
+    #[allow(unused_variables)]
     fn deposit_spl_transfer<'info>(
         &self,
         amount: u64,
@@ -656,6 +706,34 @@ impl BankImpl for Bank {
             amount, from.key, to.key, authority.key
         );
 
+        #[cfg(feature = "client")]
+        if let Some(mint) = maybe_mint {
+            invoke_client_token_transfer(
+                program.key,
+                amount,
+                from,
+                Some(mint.to_account_info()),
+                to,
+                authority,
+                Some(mint.decimals),
+                remaining_accounts,
+                &[],
+            )?;
+        } else {
+            invoke_client_token_transfer(
+                program.key,
+                amount,
+                from,
+                None,
+                to,
+                authority,
+                None,
+                remaining_accounts,
+                &[],
+            )?;
+        }
+
+        #[cfg(not(feature = "client"))]
         if let Some(mint) = maybe_mint {
             spl_token_2022::onchain::invoke_transfer_checked(
                 program.key,
@@ -672,7 +750,7 @@ impl BankImpl for Bank {
             #[allow(deprecated)]
             transfer(
                 CpiContext::new_with_signer(
-                    program,
+                    program.key(),
                     Transfer {
                         from,
                         to,
@@ -687,6 +765,7 @@ impl BankImpl for Bank {
         Ok(())
     }
 
+    #[allow(unused_variables)]
     fn withdraw_spl_transfer<'info>(
         &self,
         amount: u64,
@@ -703,6 +782,38 @@ impl BankImpl for Bank {
             amount, from.key, to.key, authority.key
         );
 
+        #[cfg(feature = "client")]
+        if let Some(mint) = maybe_mint {
+            invoke_client_token_transfer(
+                program.key,
+                amount,
+                from,
+                Some(mint.to_account_info()),
+                to,
+                authority,
+                Some(mint.decimals),
+                remaining_accounts,
+                signer_seeds,
+            )?;
+        } else {
+            // `transfer_checked` and `transfer` does the same thing, the additional `_checked` logic
+            // is only to assert the expected attributes by the user (mint, decimal scaling),
+            //
+            // Security of `transfer` is equal to `transfer_checked`.
+            invoke_client_token_transfer(
+                program.key,
+                amount,
+                from,
+                None,
+                to,
+                authority,
+                None,
+                remaining_accounts,
+                signer_seeds,
+            )?;
+        }
+
+        #[cfg(not(feature = "client"))]
         if let Some(mint) = maybe_mint {
             spl_token_2022::onchain::invoke_transfer_checked(
                 program.key,
@@ -723,7 +834,7 @@ impl BankImpl for Bank {
             #[allow(deprecated)]
             transfer(
                 CpiContext::new_with_signer(
-                    program,
+                    program.key(),
                     Transfer {
                         from,
                         to,

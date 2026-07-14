@@ -1,10 +1,9 @@
 name: "Setup common"
-description: "Setup common"
+description: "System deps + Rust toolchain (with rustfmt + clippy)"
 
 runs:
   using: "composite"
   steps:
-  # ─── System deps still always installed ────────────────────────────────
   - run: sudo apt-get update
     shell: bash
 
@@ -13,7 +12,7 @@ runs:
 
   # ─── Cache the Rust toolchain directory ────────────────────────────────
   - name: Cache Rust toolchain
-    uses: actions/cache@v3
+    uses: actions/cache@v4
     id: cache-rust-toolchain
     with:
       path: ~/.rustup/toolchains/${{ env.RUST_TOOLCHAIN }}-x86_64-unknown-linux-gnu

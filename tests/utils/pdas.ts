@@ -1,7 +1,7 @@
 import { BN } from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
 import { createHash } from "crypto";
-import { KLEND_PROGRAM_ID } from "./types";
+import { KLEND_PROGRAM_ID, SINGLE_POOL_PROGRAM_ID } from "./types";
 
 export const deriveLiquidityVaultAuthority = (
   programId: PublicKey,
@@ -106,36 +106,6 @@ export const deriveExecuteOrderPda = (
   );
 };
 
-export const deriveEmissionsAuth = (
-  programId: PublicKey,
-  bank: PublicKey,
-  mint: PublicKey,
-) => {
-  return PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("emissions_auth_seed", "utf-8"),
-      bank.toBuffer(),
-      mint.toBuffer(),
-    ],
-    programId,
-  );
-};
-
-export const deriveEmissionsTokenAccount = (
-  programId: PublicKey,
-  bank: PublicKey,
-  mint: PublicKey,
-) => {
-  return PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("emissions_token_account_seed", "utf-8"),
-      bank.toBuffer(),
-      mint.toBuffer(),
-    ],
-    programId,
-  );
-};
-
 export const deriveBankWithSeed = (
   programId: PublicKey,
   group: PublicKey,
@@ -146,6 +116,21 @@ export const deriveBankWithSeed = (
     [group.toBuffer(), bankMint.toBuffer(), seed.toArrayLike(Buffer, "le", 8)],
     programId,
   );
+};
+
+/**
+ * Derive the canonical bank PDA and its metadata PDA from the seeded bank inputs.
+ */
+export const deriveBankAndMetadataWithSeed = (
+  programId: PublicKey,
+  group: PublicKey,
+  bankMint: PublicKey,
+  seed: BN,
+) => {
+  const [bank, bankBump] = deriveBankWithSeed(programId, group, bankMint, seed);
+  const [metadata, metadataBump] = deriveBankMetadata(programId, bank);
+
+  return { bank, bankBump, metadata, metadataBump };
 };
 
 // ************* Below this line, not yet included in package ****************
@@ -239,10 +224,7 @@ export function deriveFeeReceiver(
   reserve: PublicKey,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [
-      Buffer.from(SEED_FEE_RECEIVER),
-      reserve.toBuffer(),
-    ],
+    [Buffer.from(SEED_FEE_RECEIVER), reserve.toBuffer()],
     programId,
   );
 }
@@ -252,10 +234,7 @@ export function deriveReserveLiquiditySupply(
   reserve: PublicKey,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [
-      Buffer.from(SEED_RESERVE_LIQ_SUPPLY),
-      reserve.toBuffer(),
-    ],
+    [Buffer.from(SEED_RESERVE_LIQ_SUPPLY), reserve.toBuffer()],
     programId,
   );
 }
@@ -265,11 +244,8 @@ export function deriveReserveCollateralMint(
   reserve: PublicKey,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [
-      Buffer.from(SEED_RESERVE_COLL_MINT),
-      reserve.toBuffer(),
-    ],
-    programId
+    [Buffer.from(SEED_RESERVE_COLL_MINT), reserve.toBuffer()],
+    programId,
   );
 }
 
@@ -278,11 +254,8 @@ export function deriveReserveCollateralSupply(
   reserve: PublicKey,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [
-      Buffer.from(SEED_RESERVE_COLL_SUPPLY),
-      reserve.toBuffer(),
-    ],
-    programId
+    [Buffer.from(SEED_RESERVE_COLL_SUPPLY), reserve.toBuffer()],
+    programId,
   );
 }
 
@@ -326,9 +299,7 @@ export function deriveShortUrl(
   );
 }
 
-export function deriveGlobalConfig(
-  programId: PublicKey,
-): [PublicKey, number] {
+export function deriveGlobalConfig(programId: PublicKey): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from(SEED_GLOBAL_CONFIG_STATE)],
     programId,
@@ -508,5 +479,55 @@ export const deriveSolendObligation = (
   return PublicKey.findProgramAddressSync(
     [Buffer.from("solend_obligation"), bank.toBuffer()],
     programId,
+  );
+};
+
+// *************** Below this line, spl-single-token **************
+
+/**
+ * SVSP stake pool that stores MEV rewards teporarily before they are merged into the main pool
+ * @param stakePool
+ * @returns
+ */
+export const deriveOnRampPool = (stakePool: PublicKey) => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("onramp"), stakePool.toBuffer()],
+    SINGLE_POOL_PROGRAM_ID,
+  );
+};
+
+/**
+ * Copy of SVSP `findPoolStakeAddress`
+ * @param stakePool
+ * @returns
+ */
+export const deriveStakePool = (stakePool: PublicKey) => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("stake"), stakePool.toBuffer()],
+    SINGLE_POOL_PROGRAM_ID,
+  );
+};
+
+/**
+ * Copy of SVSP `findPoolStakeAuthorityAddress`
+ * @param stakePool
+ * @returns
+ */
+export const deriveStakeAuthority = (stakePool: PublicKey) => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("stake_authority"), stakePool.toBuffer()],
+    SINGLE_POOL_PROGRAM_ID,
+  );
+};
+
+/**
+ * Copy of SVSP `findPoolAddress`
+ * @param stakePool
+ * @returns
+ */
+export const deriveSVSPpool = (voteAccount: PublicKey) => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("pool"), voteAccount.toBuffer()],
+    SINGLE_POOL_PROGRAM_ID,
   );
 };

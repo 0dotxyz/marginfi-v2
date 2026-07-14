@@ -1,14 +1,16 @@
 use marginfi_type_crate::types::FeeState;
 
-use crate::MarginfiResult;
+use anchor_lang::prelude::*;
 
 pub trait FeeStateImpl {
-    fn _placeholder(&self) -> MarginfiResult;
+    fn is_pause_authority(&self, signer: Pubkey) -> bool;
 }
 
 impl FeeStateImpl for FeeState {
-    fn _placeholder(&self) -> MarginfiResult {
-        Ok(())
+    fn is_pause_authority(&self, signer: Pubkey) -> bool {
+        signer == self.global_fee_admin
+            || (self.pause_delegate_admin != Pubkey::default()
+                && signer == self.pause_delegate_admin)
     }
 }
 
@@ -24,7 +26,6 @@ mod tests {
     use fixed::types::I80F48;
     use fixed_macro::types::I80F48;
     use marginfi_type_crate::constants::discriminators;
-    use std::{cell::RefCell, rc::Rc};
 
     #[test]
     fn fee_state_regression() {
@@ -49,16 +50,15 @@ mod tests {
 
         // Wrap into AccountInfo to test zero-copy deserialization
         let mut lamports = 1u64;
-        let account_info = AccountInfo {
-            key: &expected_key,
-            lamports: Rc::new(RefCell::new(&mut lamports)),
-            data: Rc::new(RefCell::new(payload)),
-            owner: &crate::ID,
-            rent_epoch: 0,
-            is_signer: false,
-            is_writable: true,
-            executable: false,
-        };
+        let account_info = AccountInfo::new(
+            &expected_key,
+            false,
+            true,
+            &mut lamports,
+            payload,
+            &crate::ID,
+            false,
+        );
 
         let binding = account_info.data.borrow();
         let fee_state: &FeeState = bytemuck::from_bytes(&binding);

@@ -1,6 +1,6 @@
 use crate::{
     bank_signer, check,
-    constants::{DRIFT_PROGRAM_ID, PROGRAM_VERSION},
+    constants::PROGRAM_VERSION,
     events::{AccountEventHeader, DeleverageWithdrawFlowEvent, LendingAccountWithdrawEvent},
     ix_utils::{get_discrim_hash, Hashable},
     state::{
@@ -13,8 +13,8 @@ use crate::{
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
-        fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank, is_drift_asset_tag,
-        record_withdrawal_outflow, validate_bank_state, InstructionKind,
+        fetch_asset_price_for_bank_low_bias, fetch_unbiased_price_for_bank_cache,
+        is_drift_asset_tag, record_withdrawal_outflow, validate_bank_state, InstructionKind,
     },
     MarginfiError, MarginfiResult,
 };
@@ -30,12 +30,15 @@ use drift_mocks::drift::cpi::accounts::{UpdateSpotMarketCumulativeInterest, With
 use drift_mocks::drift::cpi::{update_spot_market_cumulative_interest, withdraw};
 use drift_mocks::state::MinimalUser;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::{
-    Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-    ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
-};
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_IN_DELEVERAGE,
+};
+use marginfi_type_crate::{
+    pdas::DRIFT_PROGRAM_ID,
+    types::{
+        Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+    },
 };
 
 /// Withdraw from a Drift spot market through a marginfi account
@@ -50,7 +53,7 @@ use marginfi_type_crate::{
 /// 7. Transfers tokens from liquidity vault to user's destination account
 /// 8. Updates health cache and emits events
 pub fn drift_withdraw<'info>(
-    ctx: Context<'_, '_, 'info, 'info, DriftWithdraw<'info>>,
+    ctx: Context<'info, DriftWithdraw<'info>>,
     amount: u64,
     withdraw_all: Option<bool>,
 ) -> MarginfiResult {
@@ -64,10 +67,10 @@ pub fn drift_withdraw<'info>(
 
     let bank_key = ctx.accounts.bank.key();
     let bank_mint = ctx.accounts.bank.load()?.mint;
-    let (token_amount, expected_scaled_balance_change) = {
+    let group = ctx.accounts.group.load()?;
+    let (token_amount, expected_scaled_balance_change, share_amount) = {
         let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
         let mut bank = ctx.accounts.bank.load_mut()?;
-        let group = ctx.accounts.group.load()?;
         authority_bump = bank.liquidity_vault_authority_bump;
 
         validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
@@ -105,8 +108,8 @@ pub fn drift_withdraw<'info>(
             &mut marginfi_account.lending_account,
         )?;
 
-        let (token_amount, expected_scaled_balance_change) = if withdraw_all {
-            let scaled_balance = bank_account.withdraw_all(in_receivership)?;
+        let (token_amount, expected_scaled_balance_change, share_amount) = if withdraw_all {
+            let (scaled_balance, share_amount) = bank_account.withdraw_all(in_receivership)?;
 
             let mut token_amount = integration_acc_1.get_withdraw_token_amount(scaled_balance)?;
             let mut expected_scaled_balance_change =
@@ -129,7 +132,7 @@ pub fn drift_withdraw<'info>(
                 MarginfiError::MathError
             );
 
-            (token_amount, expected_scaled_balance_change)
+            (token_amount, expected_scaled_balance_change, share_amount)
         } else {
             let mut scaled_decrement = integration_acc_1.get_scaled_balance_decrement(amount)?;
             let mut token_amount = amount;
@@ -157,9 +160,9 @@ pub fn drift_withdraw<'info>(
                 scaled_decrement = integration_acc_1.get_scaled_balance_decrement(token_amount)?;
             }
 
-            bank_account.withdraw(I80F48::from_num(scaled_decrement))?;
+            let share_amount = bank_account.withdraw(I80F48::from_num(scaled_decrement))?;
 
-            (token_amount, scaled_decrement)
+            (token_amount, scaled_decrement, share_amount)
         };
 
         record_withdrawal_outflow(
@@ -198,7 +201,7 @@ pub fn drift_withdraw<'info>(
 
         marginfi_account.last_update = clock.unix_timestamp as u64;
 
-        (token_amount, expected_scaled_balance_change)
+        (token_amount, expected_scaled_balance_change, share_amount)
     };
 
     // When calling withdraw_all, it's possible that the remaining scaled balance is worth less than
@@ -257,6 +260,7 @@ pub fn drift_withdraw<'info>(
             bank: bank_key,
             mint: bank_mint,
             amount: actual_amount_received,
+            share_amount: share_amount.into(),
             close_balance: withdraw_all,
         });
 
@@ -264,6 +268,7 @@ pub fn drift_withdraw<'info>(
         health_cache.timestamp = Clock::get()?.unix_timestamp;
 
         marginfi_account.lending_account.sort_balances();
+        marginfi_account.sync_indexer_flags();
 
         // Note: during liquidation/deleverage or order execution, we skip all health checks until
         // the end of the transaction.
@@ -278,7 +283,7 @@ pub fn drift_withdraw<'info>(
             let bank_loader = &ctx.accounts.bank;
 
             let mut bank = bank_loader.load_mut()?;
-            let price_for_cache = fetch_unbiased_price_for_bank(
+            let price_for_cache = fetch_unbiased_price_for_bank_cache(
                 &bank_loader.key(),
                 &bank,
                 &clock,
@@ -292,9 +297,13 @@ pub fn drift_withdraw<'info>(
             marginfi_account.health_cache = health_cache;
         } else {
             let mut bank = ctx.accounts.bank.load_mut()?;
-            let price_for_cache =
-                fetch_unbiased_price_for_bank(&bank_key, &bank, &clock, ctx.remaining_accounts)
-                    .ok();
+            let price_for_cache = fetch_unbiased_price_for_bank_cache(
+                &bank_key,
+                &bank,
+                &clock,
+                ctx.remaining_accounts,
+            )
+            .ok();
 
             bank.update_cache_price(price_for_cache)?;
         }
@@ -471,7 +480,7 @@ impl<'info> DriftWithdraw<'info> {
         };
 
         let program = self.drift_program.to_account_info();
-        let cpi_ctx = CpiContext::new(program, accounts);
+        let cpi_ctx = CpiContext::new(program.key(), accounts);
 
         update_spot_market_cumulative_interest(cpi_ctx)?;
         Ok(())
@@ -497,7 +506,7 @@ impl<'info> DriftWithdraw<'info> {
         let program = self.drift_program.to_account_info();
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
-        let mut cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let mut cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
 
         // Construct remaining accounts in the required order for Drift:
         // 1. Oracle accounts (if provided) - main oracle first, then reward oracle
@@ -572,7 +581,7 @@ impl<'info> DriftWithdraw<'info> {
             &[bump],
         ];
         let signer_seeds: &[&[&[u8]]] = &[seeds];
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())

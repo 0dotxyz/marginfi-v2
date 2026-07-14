@@ -18,21 +18,23 @@ use anchor_spl::{
             },
         },
     },
-    token_interface::spl_pod::bytemuck::pod_get_packed_len,
 };
+use solana_commitment_config::CommitmentLevel;
+use solana_program::program_pack::{Pack, Sealed};
 use solana_program_test::ProgramTestContext;
+#[cfg(feature = "transfer-hook")]
+use solana_sdk::native_token::LAMPORTS_PER_SOL;
 use solana_sdk::{
     account::{ReadableAccount, WritableAccount},
-    commitment_config::CommitmentLevel,
     instruction::Instruction,
-    program_pack::{Pack, Sealed},
     signature::Keypair,
     signer::Signer,
-    system_instruction::create_account,
     transaction::Transaction,
 };
 #[cfg(feature = "transfer-hook")]
-use solana_sdk::{native_token::LAMPORTS_PER_SOL, system_instruction};
+use solana_system_interface::instruction as system_instruction;
+use solana_system_interface::instruction::create_account;
+use spl_pod::bytemuck::pod_get_packed_len;
 #[cfg(feature = "transfer-hook")]
 use spl_transfer_hook_interface::{
     get_extra_account_metas_address, instruction::initialize_extra_account_meta_list,
@@ -326,7 +328,7 @@ impl MintFixture {
             .await
     }
 
-    pub async fn create_token_account_and_mint_to<'a, T: Into<f64>>(
+    pub async fn create_token_account_and_mint_to<T: Into<f64>>(
         &self,
         ui_amount: T,
     ) -> TokenAccountFixture {
@@ -335,7 +337,7 @@ impl MintFixture {
             .await
     }
 
-    pub async fn create_token_account_and_mint_to_with_owner<'a, T: Into<f64>>(
+    pub async fn create_token_account_and_mint_to_with_owner<T: Into<f64>>(
         &self,
         owner: &Pubkey,
         ui_amount: T,
@@ -702,6 +704,7 @@ pub enum SupportedExtension {
     PermanentDelegate,
     TransferHook,
     TransferFee,
+    TransferFeeInactive,
 }
 
 impl SupportedExtension {
@@ -756,6 +759,17 @@ impl SupportedExtension {
             )
             .unwrap()
             }
+            Self::TransferFeeInactive => {
+                spl_token_2022::extension::transfer_fee::instruction::initialize_transfer_fee_config(
+                &token_2022::ID,
+                mint,
+                None,
+                None,
+                0,
+                0,
+            )
+            .unwrap()
+            }
         }
     }
 
@@ -765,7 +779,9 @@ impl SupportedExtension {
             SupportedExtension::InterestBearing => pod_get_packed_len::<InterestBearingConfig>(),
             SupportedExtension::PermanentDelegate => pod_get_packed_len::<PermanentDelegate>(),
             SupportedExtension::TransferHook => pod_get_packed_len::<TransferHook>(),
-            SupportedExtension::TransferFee => pod_get_packed_len::<TransferFee>(),
+            SupportedExtension::TransferFee | SupportedExtension::TransferFeeInactive => {
+                pod_get_packed_len::<TransferFee>()
+            }
         })
         .sum()
     }
@@ -776,7 +792,9 @@ impl SupportedExtension {
             SupportedExtension::InterestBearing => ExtensionType::InterestBearingConfig,
             SupportedExtension::PermanentDelegate => ExtensionType::PermanentDelegate,
             SupportedExtension::TransferHook => ExtensionType::TransferHook,
-            SupportedExtension::TransferFee => ExtensionType::TransferFeeConfig,
+            SupportedExtension::TransferFee | SupportedExtension::TransferFeeInactive => {
+                ExtensionType::TransferFeeConfig
+            }
         })
         .collect()
     }

@@ -4,10 +4,18 @@ target
 # rustfmt
 **/*.rs.bk
 
+# Trident-generated harness types — regenerated from the marginfi+mocks
+# IDLs on every CI run, and locally via `cd trident-tests && make types`.
+# Keeping it in VCS produced an "always-stale" failure mode (anchor
+# version skew → different IDL output → drift assertion failed). The
+# regen-every-time flow eliminates that.
+trident-tests/fuzz_0/types.rs
+
 # solana
 .anchor
 /scripts/test-ledger
 /scripts/VALIDATOR_OUT
+.fuzz-artifacts
 
 # TS
 **/dist/
@@ -24,6 +32,9 @@ node_modules
 .idea/
 test-ledger/
 *.profraw
+# Needed if moving to Node 24+
+# .yarnrc.yml
+install-state.gz
 
 # keypairs
 *.json

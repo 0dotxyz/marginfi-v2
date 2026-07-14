@@ -1,7 +1,7 @@
 use crate::arbitrary_helpers::TokenType;
 use anchor_lang::{
-    prelude::{AccountInfo, Pubkey, Rent, SolanaSysvar},
-    AnchorSerialize, Discriminator,
+    prelude::{AccountInfo, Pubkey, Rent},
+    system_program, AnchorSerialize, Discriminator,
 };
 use anchor_spl::token_2022::spl_token_2022::{
     self,
@@ -18,7 +18,9 @@ use marginfi_type_crate::constants::FEE_STATE_SEED;
 use pyth_solana_receiver_sdk::price_update::{PriceUpdateV2, VerificationLevel};
 use safe_transmute::transmute_to_bytes_mut;
 use solana_program::{
-    bpf_loader, program_pack::Pack, stake_history::Epoch, system_program, sysvar,
+    bpf_loader,
+    program_pack::Pack,
+    sysvar::{self, SysvarSerialize},
 };
 use solana_sdk::{signature::Keypair, signer::Signer};
 use std::mem::size_of;
@@ -61,7 +63,6 @@ impl AccountsState {
             &mut [],
             &system_program::ID,
             false,
-            Epoch::default(),
         )
     }
 
@@ -78,7 +79,6 @@ impl AccountsState {
                 self.allocate_dex_owned_account(256 + 8),
                 self.bump.alloc(program_id),
                 false,
-                Epoch::default(),
             ),
             fee_state_bump,
         )
@@ -105,7 +105,6 @@ impl AccountsState {
                     data,
                     &spl_token::ID,
                     false,
-                    Epoch::default(),
                 )
             }
             TokenType::Token22 => {
@@ -122,7 +121,6 @@ impl AccountsState {
                     data,
                     &anchor_spl::token_2022::ID,
                     false,
-                    Epoch::default(),
                 )
             }
             TokenType::Token22WithFee {
@@ -177,7 +175,6 @@ impl AccountsState {
                     data,
                     &anchor_spl::token_2022::ID,
                     false,
-                    Epoch::default(),
                 )
             }
         }
@@ -250,7 +247,6 @@ impl AccountsState {
             data,
             mint_ai.owner,
             false,
-            Epoch::default(),
         )
     }
 
@@ -259,7 +255,7 @@ impl AccountsState {
         unpadded_len: usize,
         owner_pubkey: Pubkey,
         rent: Rent,
-    ) -> AccountInfo {
+    ) -> AccountInfo<'_> {
         let data_len = unpadded_len;
         self.new_dex_owned_account_with_lamports(
             unpadded_len,
@@ -272,7 +268,7 @@ impl AccountsState {
         &self,
         key: Pubkey,
         owner_pubkey: Pubkey,
-    ) -> AccountInfo {
+    ) -> AccountInfo<'_> {
         self.new_dex_owned_blank_account_with_key(
             self.bump.alloc(key),
             self.bump.alloc(owner_pubkey),
@@ -293,7 +289,6 @@ impl AccountsState {
             self.allocate_dex_owned_account(unpadded_len),
             program_id,
             false,
-            Epoch::default(),
         )
     }
 
@@ -310,7 +305,6 @@ impl AccountsState {
             &mut [],
             program_id,
             false,
-            Epoch::default(),
         )
     }
 
@@ -322,19 +316,19 @@ impl AccountsState {
         transmute_to_bytes_mut(u64_data) as _
     }
 
-    pub fn new_spl_token_program(&self) -> AccountInfo {
+    pub fn new_spl_token_program(&self) -> AccountInfo<'_> {
         self.new_program(spl_token::id())
     }
 
-    pub fn new_system_program(&self) -> AccountInfo {
-        self.new_program(system_program::id())
+    pub fn new_system_program(&self) -> AccountInfo<'_> {
+        self.new_program(system_program::ID)
     }
 
-    pub fn new_marginfi_program(&self) -> AccountInfo {
+    pub fn new_marginfi_program(&self) -> AccountInfo<'_> {
         self.new_program(marginfi::ID)
     }
 
-    pub fn new_program(&self, pubkey: Pubkey) -> AccountInfo {
+    pub fn new_program(&self, pubkey: Pubkey) -> AccountInfo<'_> {
         AccountInfo::new(
             self.bump.alloc(pubkey),
             false,
@@ -343,7 +337,6 @@ impl AccountsState {
             &mut [],
             &bpf_loader::ID,
             true,
-            Epoch::default(),
         )
     }
 
@@ -352,7 +345,7 @@ impl AccountsState {
         rent: Rent,
         native_price: i64,
         mint_decimals: i32,
-    ) -> AccountInfo {
+    ) -> AccountInfo<'_> {
         let feed_key = *self.random_pubkey();
         let feed_id = feed_key.to_bytes();
         let price_update = PriceUpdateV2 {
@@ -393,11 +386,10 @@ impl AccountsState {
             data_ptr,
             &pyth_solana_receiver_sdk::ID,
             false,
-            Epoch::default(),
         )
     }
 
-    pub fn new_rent_sysvar_account(&self, rent: Rent) -> AccountInfo {
+    pub fn new_rent_sysvar_account(&self, rent: Rent) -> AccountInfo<'_> {
         let data = self.bump.alloc_slice_fill_copy(size_of::<Rent>(), 0u8);
         let lamports = rent.minimum_balance(data.len());
 
@@ -409,7 +401,6 @@ impl AccountsState {
             data,
             &sysvar::ID,
             false,
-            Epoch::default(),
         );
 
         rent.to_account_info(&mut account_info).unwrap();
@@ -448,7 +439,6 @@ impl AccountsState {
                 &mut [],
                 &system_program::ID,
                 false,
-                Epoch::default(),
             ),
             seed_bump,
         )

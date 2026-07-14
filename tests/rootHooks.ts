@@ -22,9 +22,7 @@ import {
 } from "@solana/web3.js";
 import fs from "fs";
 import path from "path";
-import {
-  patchBankrunConnection,
-} from "./utils/bankrunConnection";
+import { patchBankrunConnection } from "./utils/bankrunConnection";
 
 // ---------------------------------------------------------------------------
 // Kamino farms (liquidity-incentive) program
@@ -33,9 +31,9 @@ export const FARMS_PROGRAM_ID = new PublicKey(
   "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr",
 );
 
-import { BankrunProvider, startAnchor } from "anchor-bankrun";
-import { BanksClient, ProgramTestContext } from "solana-bankrun";
-import type { AddedAccount, AddedProgram } from "solana-bankrun";
+import { BankrunProvider, startAnchor } from "./utils/litesvm";
+import { BanksClient, ProgramTestContext } from "./utils/litesvm";
+import type { AddedAccount, AddedProgram } from "./utils/litesvm";
 import {
   SINGLE_POOL_PROGRAM_ID,
   KLEND_PROGRAM_ID,
@@ -60,7 +58,10 @@ import { Marginfi } from "../target/types/marginfi";
 import { Mocks } from "../target/types/mocks";
 import marginfiIdl from "../target/idl/marginfi.json";
 import mocksIdl from "../target/idl/mocks.json";
-import { setupPythOraclesBankrun } from "./utils/bankrun-oracles";
+import {
+  setupPythOraclesBankrun,
+  setupSwbOraclesBankrun,
+} from "./utils/bankrun-oracles";
 import { processBankrunTransaction } from "./utils/tools";
 
 import {
@@ -182,6 +183,14 @@ export const GAPPY4_SAMPLE = new PublicKey(
 /** The production BONK bank, with owner artificially swapped for the localnet program. */
 export const LEGACY_BANK_SAMPLE = new PublicKey(
   "DeyH7QxWvnbbaVB4zFrf4hoq7Q8z1ZT14co42BGwGtfM",
+);
+/** Real-world staked bank fixture used to test vote-account backfill. */
+export const STAKED_BACKFILL_BANK_SAMPLE = new PublicKey(
+  "8g5qG6PVygcVSXV1cJnjXaD1yhrDwcWAMQCY2wR9VuAf",
+);
+/** Vote account matching STAKED_BACKFILL_BANK_SAMPLE's single-pool PDA chain. */
+export const STAKED_BACKFILL_VOTE_SAMPLE = new PublicKey(
+  "CooLbbZy5Xmdt7DiHPQ3ss2uRXawnTXXVgpMS8E8jDzr",
 );
 /** The production group (LEGACY_BANK_SAMPLE's group) */
 export const MAINNET_GROUP = new PublicKey(
@@ -338,6 +347,7 @@ async function createValidatorBankrun(index: number): Promise<Validator> {
     splMint: PublicKey.default,
     splAuthority: PublicKey.default,
     splSolPool: PublicKey.default,
+    splOnRampPool: PublicKey.default,
     // Filled by staked tests after permissionless add-bank
     bank: PublicKey.default,
   };
@@ -373,10 +383,14 @@ async function createSplStakePoolBankrun(
     poolKey,
   );
   const poolStake = await findPoolStakeAddress(SINGLE_POOL_PROGRAM_ID, poolKey);
+  const [poolOnramp] = PublicKey.findProgramAddressSync(
+    [Buffer.from("onramp"), poolKey.toBuffer()],
+    SINGLE_POOL_PROGRAM_ID,
+  );
 
   if (verbose) {
     console.log(
-      `*init single-pool: pool=${poolKey.toBase58()} mint=${poolMintKey.toBase58()}`,
+      `*init single-pool: pool=${poolKey.toBase58()} mint=${poolMintKey.toBase58()} onramp=${poolOnramp.toBase58()}`,
     );
   }
 
@@ -386,6 +400,7 @@ async function createSplStakePoolBankrun(
     splMint: poolMintKey,
     splAuthority: poolAuthority,
     splSolPool: poolStake,
+    splOnRampPool: poolOnramp,
   };
 }
 
@@ -459,12 +474,17 @@ function getGenesisAccounts(): AddedAccount[] {
     loadJsonFixture("tests/fixtures/bonk_bank.json"),
     loadJsonFixture("tests/fixtures/cloud_bank.json"),
     loadJsonFixture("tests/fixtures/pyusd_bank.json"),
+    loadJsonFixture("tests/fixtures/pyusd_mint.json"),
+    loadJsonFixture("tests/fixtures/corvus.json"),
+    loadJsonFixture("tests/fixtures/corvus_mint.json"),
     loadJsonFixture("tests/fixtures/localnet_usdc.json"),
     loadJsonFixture("tests/fixtures/gappy_user3.json"),
     loadJsonFixture("tests/fixtures/gappy_user4.json"),
     loadJsonFixture("tests/fixtures/mainnet_group.json"),
     loadJsonFixture("tests/fixtures/sol_pyth_oracle.json"),
     loadJsonFixture("tests/fixtures/sol_pyth_price_feed.json"),
+    loadJsonFixture("tests/fixtures/mainnet_staked_backfill_bank.json"),
+    loadJsonFixture("tests/fixtures/mainnet_staked_backfill_vote_blank.json"),
     loadJsonFixture("tests/fixtures/kamino_global_config.json"),
   ];
 }
@@ -475,6 +495,7 @@ function getGenesisAccounts(): AddedAccount[] {
 
 export const mochaHooks = {
   beforeAll: async () => {
+
     // If false, you are in the wrong environment to run this, update Node or try polyfill
     console.log("Environment supports crypto: ", !!global.crypto?.subtle);
 
@@ -693,7 +714,7 @@ export const mochaHooks = {
     // -------------------------------------------------------------------------
     console.log("Creating oracles in bankrun...");
 
-    oracles = await setupPythOraclesBankrun(
+    const pythOracles = await setupPythOraclesBankrun(
       bankrunContext,
       banksClient,
       ecosystem.wsolPrice,
@@ -708,6 +729,23 @@ export const mochaHooks = {
       ecosystem.lstAlphaDecimals,
       verbose,
     );
+    const swbOracles = await setupSwbOraclesBankrun(
+      bankrunContext,
+      banksClient,
+      {
+        wsolPrice: 155.59404527,
+        wsolDecimals: ecosystem.wsolDecimals,
+        tokenAPrice: ecosystem.tokenAPrice,
+        tokenADecimals: ecosystem.tokenADecimals,
+        lstAlphaPrice: ecosystem.lstAlphaPrice,
+        lstAlphaDecimals: ecosystem.lstAlphaDecimals,
+      },
+      verbose,
+    );
+    oracles = {
+      ...pythOracles,
+      ...swbOracles,
+    };
 
     // ---------------------------------------------------------------------
     // Step 5b: Create validators + SPL single pools (staked collateral tests)

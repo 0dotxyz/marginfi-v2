@@ -8,12 +8,15 @@ pub const FEE_VAULT_AUTHORITY_SEED: &str = "fee_vault_auth";
 pub const LIQUIDITY_VAULT_SEED: &str = "liquidity_vault";
 pub const INSURANCE_VAULT_SEED: &str = "insurance_vault";
 pub const FEE_VAULT_SEED: &str = "fee_vault";
-pub const JUPLEND_F_TOKEN_VAULT_SEED: &str = "juplend_f_token_vault";
+pub const DRIFT_USER_SEED: &str = "user";
+pub const DRIFT_USER_STATS_SEED: &str = "user_stats";
+pub const SOLEND_OBLIGATION_SEED: &str = "solend_obligation";
+pub const JUPLEND_F_TOKEN_VAULT_SEED: &str = "f_token_vault";
 
 pub const FEE_STATE_SEED: &str = "feestate";
+pub const FEE_STATE_V2_SEED: &str = "feestate_v2";
 pub const STAKED_SETTINGS_SEED: &str = "staked_settings";
 
-pub const EMISSIONS_AUTH_SEED: &str = "emissions_auth_seed";
 pub const EMISSIONS_TOKEN_ACCOUNT_SEED: &str = "emissions_token_account_seed";
 
 pub const LIQUIDATION_RECORD_SEED: &str = "liq_record";
@@ -81,12 +84,21 @@ pub const FREEZE_SETTINGS: u64 = 1 << 3;
 pub const CLOSE_ENABLED_FLAG: u64 = 1 << 4;
 pub const TOKENLESS_REPAYMENTS_ALLOWED: u64 = 1 << 5;
 pub const TOKENLESS_REPAYMENTS_COMPLETE: u64 = 1 << 6;
+pub const IS_T22: u64 = 1 << 7;
+/// Bank provenance bit: set when the bank is known to be seed-derived (PDA).
+pub const BANK_SEED_KNOWN: u64 = 1 << 8;
 
 /// True if bank created in 0.1.4 or later, or if migrated to the new oracle setup from a prior
 /// version. False otherwise.
 pub const PYTH_PUSH_MIGRATED_DEPRECATED: u8 = 1 << 0;
 
-pub const EMISSION_FLAGS: u64 = EMISSIONS_FLAG_BORROW_ACTIVE | EMISSIONS_FLAG_LENDING_ACTIVE;
+/// Staked-collateral oracle transition flags stored on `Bank.flags` and copied from
+/// `StakedSettings.flags` during staked-settings propagation.
+/// To be removed once SVSP update is rolled out (likely in 1.10)
+pub const STAKED_ORACLE_DISABLED: u64 = 1 << 9;
+pub const STAKED_ORACLE_PRICE_USES_ONRAMP: u64 = 1 << 10;
+pub const STAKED_ORACLE_FLAGS: u64 = STAKED_ORACLE_DISABLED | STAKED_ORACLE_PRICE_USES_ONRAMP;
+
 pub const GROUP_FLAGS: u64 = PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
     | FREEZE_SETTINGS
     | TOKENLESS_REPAYMENTS_ALLOWED
@@ -161,34 +173,39 @@ pub const MARGINFI_SPONSORED_SHARD_ID: u16 = 3301;
 /// A regular asset that can be comingled with any other regular asset or with `ASSET_TAG_SOL`
 pub const ASSET_TAG_DEFAULT: u8 = 0;
 /// Accounts with a SOL position can comingle with **either** `ASSET_TAG_DEFAULT` or
-/// `ASSET_TAG_STAKED` positions, but not both
+///   `ASSET_TAG_STAKED` positions, but not both
 pub const ASSET_TAG_SOL: u8 = 1;
 /// Staked SOL assets. Accounts with a STAKED position can only deposit other STAKED assets or SOL
-/// (`ASSET_TAG_SOL`) and can only borrow SOL (`ASSET_TAG_SOL`)
+///   (`ASSET_TAG_SOL`) and can only borrow SOL (`ASSET_TAG_SOL`)
 pub const ASSET_TAG_STAKED: u8 = 2;
 /// Kamino assets. Accounts with a KAMINO position can only deposit other KAMINO assets or regular
-/// assets (`ASSET_TAG_DEFAULT`).
+///   assets (`ASSET_TAG_DEFAULT`).
 pub const ASSET_TAG_KAMINO: u8 = 3;
 /// Drift assets. Accounts with a DRIFT position can only deposit other DRIFT assets or regular
-/// assets (`ASSET_TAG_DEFAULT`).
+///   assets (`ASSET_TAG_DEFAULT`).
 pub const ASSET_TAG_DRIFT: u8 = 4;
 /// Solend assets. Accounts with a SOLEND position can only deposit other SOLEND assets or regular
-/// assets (`ASSET_TAG_DEFAULT`).
+///   assets (`ASSET_TAG_DEFAULT`).
 pub const ASSET_TAG_SOLEND: u8 = 5;
 /// JupLend assets. Accounts with a JUPLEND position can only deposit other JUPLEND assets or regular
-/// assets (`ASSET_TAG_DEFAULT`).
+///   assets (`ASSET_TAG_DEFAULT`).
 pub const ASSET_TAG_JUPLEND: u8 = 6;
 
+/// Drift uses a fixed 9 decimal precision for all spot market scaled balances,
+///   regardless of the underlying token's decimals
+pub const DRIFT_SCALED_BALANCE_DECIMALS: u8 = 9;
+
 /// Maximum number of integration positions (Kamino + Drift + Solend + JupLend) allowed per account. Hardcoded
-/// limit to prevent accounts from becoming unliquidatable due to CU/heap memory issues in
-/// liquidation. These integrations require 3 accounts per position for health checks (bank + oracle
-/// + reserve/spot-market), so they share the same limit.
+///   limit to prevent accounts from becoming unliquidatable due to CU/heap memory issues in
+///   liquidation. These integrations require 3 accounts per position for health checks (bank + oracle
+///   + reserve/spot-market), so they share the same limit.
+///
 /// Note: it's disabled in local integration tests so that we can measure the performance and
-/// eventually get rid of this limit altogether.
+///   eventually get rid of this limit altogether.
 pub const MAX_INTEGRATION_POSITIONS: usize = 8;
 // WARN: You can set anything here, including a discrim that's technically "wrong" for the struct
-// with that name, and prod will use that hash anyways. Don't change these hashes once a struct is
-// live in prod.
+//   with that name, and prod will use that hash anyways. Don't change these hashes once a struct is
+//   live in prod.
 pub mod discriminators {
     pub const GROUP: [u8; 8] = [182, 23, 173, 240, 151, 206, 182, 67];
     pub const BANK: [u8; 8] = [142, 49, 166, 242, 50, 66, 97, 188];

@@ -5,11 +5,8 @@ import {
   StakeProgram,
   PublicKey,
   Connection,
-  SYSVAR_CLOCK_PUBKEY,
 } from "@solana/web3.js";
 import { MockUser } from "./mocks";
-import { BanksClient } from "solana-bankrun";
-import { BN } from "@coral-xyz/anchor";
 
 /**
  * Create a stake account for some user

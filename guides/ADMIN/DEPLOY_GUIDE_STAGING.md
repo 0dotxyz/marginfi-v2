@@ -5,8 +5,8 @@ Staging is different from mainnet only in that it uses a different key. Ensure t
 ### Requirements
 
 - You have access to the staging program authority wallet (we will assume it is at `~/keys/staging-deploy.json` from here on)
-- Anchor 0.31.1
-- Solana 2.1.20
+- Anchor CLI 1.0.2
+- Agave/Solana CLI 3.1.13
 
 ## Preferred Steps
 
@@ -106,7 +106,7 @@ The Staked Collateral feature uses spl-single-pool, developed by the Solana Foun
 
 First you will need:
 
-- Agave tools 2.1.0 or later (`sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"`) and possibly `agave-install init 2.1.0`
+- Agave tools 3.1.13 (`sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.13/install)"`)
 - A wallet with at least 2 SOL (this guide will assume your wallet is at `~/keys/staging-deploy.json`). Verify the pubkey of your wallet with `solana-keygen pubkey ~/keys/staging-deploy.json` and verify you have at least 2 SOL with `solana balance -k ~/keys/staging-deploy.json`
 - An RPC provider connected to mainnet (`solana config set --url https://api.mainnet-beta.solana.com`). The solana public api is usually fine.
 

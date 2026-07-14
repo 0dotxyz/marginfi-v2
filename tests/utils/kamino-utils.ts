@@ -1,13 +1,17 @@
 import { BN, Program } from "@coral-xyz/anchor";
-import { AccountMeta, PublicKey, TransactionInstruction } from "@solana/web3.js";
+import {
+  AccountMeta,
+  PublicKey,
+  TransactionInstruction,
+} from "@solana/web3.js";
 import { KaminoLending } from "../fixtures/kamino_lending";
 import { I80F48_ONE, PYTH_PULL_MIGRATED, OperationalStateRaw } from "./types";
 import { WrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import { RiskTierRaw } from "@mrgnlabs/marginfi-client-v2";
 import { Reserve } from "@kamino-finance/klend-sdk";
 import Decimal from "decimal.js";
-import { Fraction } from "@kamino-finance/klend-sdk";
 import BigNumber from "bignumber.js";
+import { bnToBigIntSafe } from "./bn-utils";
 
 export const LENDING_MARKET_SIZE = 4656;
 export const RESERVE_SIZE = 8616;
@@ -22,11 +26,53 @@ export const INITIAL_COLLATERAL_RATE = new Decimal(INITIAL_COLLATERAL_RATIO);
 
 const I68F60_TOTAL_BYTES = 16;
 const I68F60_FRACTIONAL_BITS = 60;
+const I68F60_SCALE_BN = new BN(1).shln(I68F60_FRACTIONAL_BITS);
 const I68F60_DIVISOR = new Decimal(2).pow(I68F60_FRACTIONAL_BITS);
+const FractionDecimal = Decimal.clone({ precision: 40 });
+const I68F60_PRECISE_DIVISOR = new FractionDecimal(2).pow(
+  I68F60_FRACTIONAL_BITS,
+);
 
 export const COLLATERAL_MINT_DECIMALS = 6;
 
 export type WrappedI68F60 = { value: number[] };
+
+export const integerPriceToFractionSf = (price: number): BN => {
+  if (!Number.isSafeInteger(price) || price < 0) {
+    throw new Error(`Invalid integer price: ${price}`);
+  }
+
+  return new BN(price.toString()).mul(I68F60_SCALE_BN);
+};
+
+const decimalFromIntegerLike = (value: unknown): Decimal => {
+  if (value instanceof Decimal) return value;
+  if (BN.isBN(value)) return new Decimal(bnToBigIntSafe(value).toString());
+  if (typeof value === "bigint") return new Decimal(value.toString());
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new Error(`Invalid integer-like value: ${value}`);
+    }
+    return new Decimal(Math.trunc(value));
+  }
+
+  const asString =
+    value !== null && value !== undefined && "toString" in Object(value)
+      ? (value as { toString: () => string }).toString()
+      : String(value);
+  const integerPrefix = asString.match(/^-?\d+/);
+  if (!integerPrefix) {
+    throw new Error(`Invalid integer-like value: ${asString}`);
+  }
+  return new Decimal(integerPrefix[0]);
+};
+
+const decimalFromScaledFraction = (value: BN): Decimal =>
+  new Decimal(
+    new FractionDecimal(bnToBigIntSafe(value).toString())
+      .div(I68F60_PRECISE_DIVISOR)
+      .toString(),
+  );
 
 /**
  * Refresh a generic Kamino reserve with a legacy Pyth oracle
@@ -40,7 +86,7 @@ export const simpleRefreshReserve = (
   program: Program<KaminoLending>,
   reserve: PublicKey,
   market: PublicKey,
-  oracle: PublicKey
+  oracle: PublicKey,
 ) => {
   const ix = program.methods
     .refreshReserve()
@@ -71,7 +117,7 @@ export const simpleRefreshObligation = (
   program: Program<KaminoLending>,
   market: PublicKey,
   obligation: PublicKey,
-  remaining: PublicKey[] = []
+  remaining: PublicKey[] = [],
 ) => {
   const accMeta: AccountMeta[] = remaining.map((pubkey) => ({
     pubkey,
@@ -112,7 +158,7 @@ export type KaminoConfigCompact = {
   assetWeightMaint: WrappedI80F48;
   depositLimit: BN;
   oracleSetup: OracleSetupRawWithKamino;
-  /** Paused = 0, Operational = 1, ReduceOnly = 2 */
+  /** Paused = 0, Operational = 1, ReduceOnly = 2, ... */
   operationalState: OperationalStateRaw;
   /** Collateral = 0, Isolated = 1 */
   riskTier: RiskTierRaw;
@@ -138,7 +184,7 @@ export type KaminoConfigCompact = {
  * @returns
  */
 export const defaultKaminoBankConfig = (
-  oracle: PublicKey
+  oracle: PublicKey,
 ): KaminoConfigCompact => {
   let config: KaminoConfigCompact = {
     oracle: oracle,
@@ -163,35 +209,35 @@ export const defaultKaminoBankConfig = (
  */
 export function getBorrowedAmount(state: Reserve): Decimal {
   // borrowedAmountSf is a scaled-fraction (u128)
-  return new Fraction(state.liquidity.borrowedAmountSf).toDecimal();
+  return decimalFromScaledFraction(state.liquidity.borrowedAmountSf);
 }
 
 /**
  * @returns the available liquidity amount of the reserve in lamports
  */
 export function getLiquidityAvailableAmount(state: Reserve): Decimal {
-  return new Decimal(state.liquidity.totalAvailableAmount.toString());
+  return decimalFromIntegerLike(state.liquidity.totalAvailableAmount);
 }
 
 /**
  * @returns the total protocol fees accrued (in lamports) since last refresh
  */
 export function getAccumulatedProtocolFees(state: Reserve): Decimal {
-  return new Decimal(state.liquidity.accumulatedProtocolFeesSf.toString());
+  return decimalFromScaledFraction(state.liquidity.accumulatedProtocolFeesSf);
 }
 
 /**
  * @returns the total referrer fees accrued (in lamports) since last refresh
  */
 export function getAccumulatedReferrerFees(state: Reserve): Decimal {
-  return new Decimal(state.liquidity.accumulatedReferrerFeesSf.toString());
+  return decimalFromScaledFraction(state.liquidity.accumulatedReferrerFeesSf);
 }
 
 /**
  * @returns the total pending referrer fees (in lamports) since last refresh
  */
 export function getPendingReferrerFees(state: Reserve): Decimal {
-  return new Decimal(state.liquidity.pendingReferrerFeesSf.toString());
+  return decimalFromScaledFraction(state.liquidity.pendingReferrerFeesSf);
 }
 
 /**
@@ -213,10 +259,10 @@ export function getTotalSupply(state: Reserve): Decimal {
  * @returns
  */
 export function scaledSupplies(state: Reserve): [Decimal, Decimal] {
-  const liqMintDecimals = new Decimal(state.liquidity.mintDecimals.toString());
+  const liqMintDecimals = decimalFromIntegerLike(state.liquidity.mintDecimals);
   const totalSupplyLamports = getTotalSupply(state);
-  const mintTotalSupplyLam = new Decimal(
-    state.collateral.mintTotalSupply.toString()
+  const mintTotalSupplyLam = decimalFromIntegerLike(
+    state.collateral.mintTotalSupply,
   );
 
   const liqScale = new Decimal(10).pow(liqMintDecimals);
@@ -238,7 +284,7 @@ export function scaledSupplies(state: Reserve): [Decimal, Decimal] {
 export function scaleDecimals(
   n: Decimal,
   fromDec: number,
-  toDec: number
+  toDec: number,
 ): Decimal {
   const scaleFrom = new Decimal(10).pow(fromDec);
   const scaleTo = new Decimal(10).pow(toDec);
@@ -298,16 +344,16 @@ export function getLiquidityExchangeRate(state: Reserve): Decimal {
  */
 export function estimateCollateralFromDeposit(
   state: Reserve,
-  depositAmountRaw: BN
+  depositAmountRaw: BN,
 ): BN {
-  let depositRawDecimal = new Decimal(depositAmountRaw.toString());
+  let depositRawDecimal = decimalFromIntegerLike(depositAmountRaw);
   const rate = getCollateralExchangeRate(state);
 
   const collateralTokens = depositRawDecimal.mul(rate);
 
   // round off the fractional component
   const rounded = collateralTokens.toDecimalPlaces(0, Decimal.ROUND_FLOOR);
-  return new BN(rounded.toString());
+  return new BN(rounded.toFixed(0));
 }
 
 // TODO when porting this to the package, let's not convert buffer -> hex -> Decimal -> BigNumber,
@@ -318,10 +364,10 @@ export function estimateCollateralFromDeposit(
  * @returns
  */
 export function wrappedU68F60toBigNumber(
-  wrapped: WrappedI68F60 | BN // Note: Kamino generally encodes as BN instead of number[]
+  wrapped: WrappedI68F60 | BN, // Note: Kamino generally encodes as BN instead of number[]
 ): BigNumber {
   let bytesLE: number[];
-  if (wrapped instanceof BN) {
+  if (BN.isBN(wrapped)) {
     bytesLE = wrapped.toArray("le", I68F60_TOTAL_BYTES);
   } else {
     bytesLE = wrapped.value;
@@ -379,8 +425,7 @@ export function toWeb3Ix(ix: KitInstruction): TransactionInstruction {
         role === AccountRole.READONLY_SIGNER ||
         role === AccountRole.WRITABLE_SIGNER,
       isWritable:
-        role === AccountRole.WRITABLE ||
-        role === AccountRole.WRITABLE_SIGNER,
+        role === AccountRole.WRITABLE || role === AccountRole.WRITABLE_SIGNER,
     };
   });
 

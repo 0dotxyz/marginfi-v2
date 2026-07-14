@@ -1,11 +1,9 @@
-use anchor_lang::solana_program::sysvar::instructions::*;
 use anchor_lang::{
     prelude::*,
-    solana_program::{
-        hash::hashv,
-        instruction::{get_stack_height, Instruction, TRANSACTION_LEVEL_STACK_HEIGHT},
-    },
+    solana_program::instruction::{get_stack_height, Instruction, TRANSACTION_LEVEL_STACK_HEIGHT},
 };
+use solana_instructions_sysvar::{load_current_index_checked, load_instruction_at_checked};
+use solana_sha256_hasher::{hash, hashv};
 
 use crate::constants::COMPUTE_PROGRAM_KEY;
 use crate::{check, check_eq, MarginfiError, MarginfiResult};
@@ -25,9 +23,7 @@ pub trait Hashable {
 pub fn get_discrim_hash(namespace: &str, name: &str) -> [u8; 8] {
     let preimage = format!("{}:{}", namespace, name);
     let mut sighash = [0u8; 8];
-    sighash.copy_from_slice(
-        &anchor_lang::solana_program::hash::hash(preimage.as_bytes()).to_bytes()[..8],
-    );
+    sighash.copy_from_slice(&hash(preimage.as_bytes()).to_bytes()[..8]);
     sighash
 }
 
@@ -129,7 +125,7 @@ pub fn validate_ixes_exclusive(
         let discrim = &ix.data[0..8];
 
         // If none of the allowed hashes match, reject
-        let is_allowed = expected_hashes.iter().any(|&h| h == discrim);
+        let is_allowed = expected_hashes.contains(&discrim);
         if !is_allowed {
             msg!("Forbidden ix discrim: {:?}", discrim);
             return err!(MarginfiError::ForbiddenIx);

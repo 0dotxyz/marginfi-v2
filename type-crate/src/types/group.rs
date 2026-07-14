@@ -39,8 +39,8 @@ pub struct MarginfiGroup {
     /// Can modify the `deposit_limit`, `borrow_limit`, `total_asset_value_init_limit` but nothing
     /// else, for every bank under this group
     pub delegate_limit_admin: Pubkey,
-    /// Can modify the emissions `flags`, `emissions_rate` and `emissions_mint`, but nothing else,
-    /// for every bank under this group
+    /// DEPRECATED: currently has no on-chain authority.
+    /// Preserved in account layout for backward compatibility and historical metadata only.
     pub delegate_emissions_admin: Pubkey,
     /// When program keeper temporarily puts the program into panic mode, information about the
     /// duration of the lockup will be available here.

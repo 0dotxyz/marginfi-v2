@@ -1,15 +1,12 @@
 use crate::{
-    bank_signer,
-    constants::{SOLEND_OBLIGATION_SEED, SOLEND_PROGRAM_ID},
-    state::bank::BankVaultType,
-    utils::is_solend_asset_tag,
-    MarginfiError, MarginfiResult,
+    bank_signer, constants::SOLEND_PROGRAM_ID, state::bank::BankVaultType,
+    utils::is_solend_asset_tag, MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
-use marginfi_type_crate::constants::LIQUIDITY_VAULT_AUTHORITY_SEED;
+use marginfi_type_crate::constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, SOLEND_OBLIGATION_SEED};
 use marginfi_type_crate::types::Bank;
 use solend_mocks::cpi::accounts::{DepositReserveLiquidityAndObligationCollateral, InitObligation};
 use solend_mocks::cpi::{deposit_reserve_liquidity_and_obligation_collateral, init_obligation};
@@ -154,11 +151,8 @@ impl<'info> SolendInitObligation<'info> {
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
 
         // Create CPI context with signer
-        let cpi_ctx = CpiContext::new_with_signer(
-            self.solend_program.to_account_info(),
-            accounts,
-            signer_seeds,
-        );
+        let cpi_ctx =
+            CpiContext::new_with_signer(self.solend_program.key(), accounts, signer_seeds);
         init_obligation(cpi_ctx)?;
         Ok(())
     }
@@ -171,7 +165,7 @@ impl<'info> SolendInitObligation<'info> {
             authority: self.fee_payer.to_account_info(),
             mint: self.mint.to_account_info(),
         };
-        let cpi_ctx = CpiContext::new(program, accounts);
+        let cpi_ctx = CpiContext::new(program.key(), accounts);
         let decimals = self.mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())
@@ -198,11 +192,8 @@ impl<'info> SolendInitObligation<'info> {
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), authority_bump);
 
         // Create CPI context with signer
-        let cpi_ctx = CpiContext::new_with_signer(
-            self.solend_program.to_account_info(),
-            accounts,
-            signer_seeds,
-        );
+        let cpi_ctx =
+            CpiContext::new_with_signer(self.solend_program.key(), accounts, signer_seeds);
         deposit_reserve_liquidity_and_obligation_collateral(cpi_ctx, amount)?;
         Ok(())
     }

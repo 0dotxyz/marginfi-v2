@@ -17,7 +17,6 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::Clock;
-use anchor_lang::solana_program::sysvar::Sysvar;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
@@ -32,7 +31,7 @@ use marginfi_type_crate::{
 ///
 /// Will error if there is an existing liability <=> repaying is not allowed.
 pub fn lending_account_deposit<'info>(
-    mut ctx: Context<'_, '_, 'info, 'info, LendingAccountDeposit<'info>>,
+    mut ctx: Context<'info, LendingAccountDeposit<'info>>,
     amount: u64,
     deposit_up_to_limit: Option<bool>,
 ) -> MarginfiResult {
@@ -67,6 +66,13 @@ pub fn lending_account_deposit<'info>(
         MarginfiError::AccountDisabled
     );
 
+    bank.accrue_interest(
+        clock.unix_timestamp,
+        &group,
+        #[cfg(not(feature = "client"))]
+        bank_loader.key(),
+    )?;
+
     let deposit_amount = if deposit_up_to_limit {
         amount.min(bank.get_remaining_deposit_capacity()?)
     } else {
@@ -76,12 +82,6 @@ pub fn lending_account_deposit<'info>(
     if deposit_amount == 0 {
         return Ok(());
     }
-    bank.accrue_interest(
-        clock.unix_timestamp,
-        &group,
-        #[cfg(not(feature = "client"))]
-        bank_loader.key(),
-    )?;
 
     let mut bank_account = BankAccountWrapper::find_or_create(
         &bank_loader.key(),
@@ -89,7 +89,7 @@ pub fn lending_account_deposit<'info>(
         &mut marginfi_account.lending_account,
     )?;
 
-    bank_account.deposit(I80F48::from_num(deposit_amount))?;
+    let share_amount = bank_account.deposit(I80F48::from_num(deposit_amount))?;
     marginfi_account.last_update = clock.unix_timestamp as u64;
 
     record_deposit_inflow(
@@ -134,9 +134,11 @@ pub fn lending_account_deposit<'info>(
         bank: bank_loader.key(),
         mint: bank.mint,
         amount: deposit_amount,
+        share_amount: share_amount.into(),
     });
 
     marginfi_account.lending_account.sort_balances();
+    marginfi_account.sync_indexer_flags();
 
     Ok(())
 }
@@ -180,7 +182,7 @@ pub struct LendingAccountDeposit<'info> {
 
     /// CHECK: Token mint/authority are checked at transfer
     #[account(mut)]
-    pub signer_token_account: AccountInfo<'info>,
+    pub signer_token_account: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,

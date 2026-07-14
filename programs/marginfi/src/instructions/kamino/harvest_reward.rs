@@ -1,17 +1,18 @@
 use crate::state::bank::BankVaultType;
 use crate::{
-    bank_signer, constants::FARMS_PROGRAM_ID, optional_account, utils::is_kamino_asset_tag,
-    MarginfiError, MarginfiResult,
+    bank_signer, optional_account, utils::is_kamino_asset_tag, MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::accessor;
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
-use kamino_mocks::kamino_farms::cpi::accounts::HarvestReward;
-use kamino_mocks::kamino_farms::cpi::harvest_reward;
-use marginfi_type_crate::constants::{FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED};
-use marginfi_type_crate::types::{Bank, FeeState};
+use kamino_mocks::kamino_farms::cpi::{accounts::HarvestReward, harvest_reward};
+use marginfi_type_crate::{
+    constants::{FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED},
+    pdas::FARMS_PROGRAM_ID,
+    types::{Bank, FeeState},
+};
 
 pub fn kamino_harvest_reward(
     ctx: Context<KaminoHarvestReward>,
@@ -119,7 +120,7 @@ impl<'info> KaminoHarvestReward<'info> {
         let bump = self.bank.load()?.liquidity_vault_authority_bump;
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), bump);
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         harvest_reward(cpi_ctx, reward_index)?;
         Ok(())
     }
@@ -135,7 +136,7 @@ impl<'info> KaminoHarvestReward<'info> {
         let bump = self.bank.load()?.liquidity_vault_authority_bump;
         let signer_seeds: &[&[&[u8]]] =
             bank_signer!(BankVaultType::Liquidity, self.bank.key(), bump);
-        let cpi_ctx = CpiContext::new_with_signer(program, accounts, signer_seeds);
+        let cpi_ctx = CpiContext::new_with_signer(program.key(), accounts, signer_seeds);
         let decimals = self.reward_mint.decimals;
         transfer_checked(cpi_ctx, amount, decimals)?;
         Ok(())

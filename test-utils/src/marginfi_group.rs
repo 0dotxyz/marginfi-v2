@@ -16,22 +16,23 @@ use marginfi::{
         LIQUIDATION_FLAT_FEE_DEFAULT, ORDER_EXECUTION_MAX_FEE, ORDER_INIT_FLAT_FEE_DEFAULT,
     },
     instruction::*,
+    instructions::marginfi_group::StakedSettingsConfig,
     state::bank::BankVaultType,
 };
 use marginfi_type_crate::constants::{
-    FEE_STATE_SEED, PROTOCOL_FEE_FIXED_DEFAULT, PROTOCOL_FEE_RATE_DEFAULT,
+    FEE_STATE_SEED, PROTOCOL_FEE_FIXED_DEFAULT, PROTOCOL_FEE_RATE_DEFAULT, STAKED_SETTINGS_SEED,
 };
 use marginfi_type_crate::types::WrappedI80F48;
 use marginfi_type_crate::types::{
     BankConfig, BankConfigCompact, BankConfigOpt, EmodeEntry, FeeState, InterestRateConfigOpt,
-    MarginfiGroup, OracleSetup, MAX_EMODE_ENTRIES,
+    MarginfiGroup, OracleSetup, StakedSettings, MAX_EMODE_ENTRIES,
 };
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
-use solana_sdk::system_transaction;
 use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction, instruction::Instruction, signature::Keypair,
-    signer::Signer, transaction::Transaction,
+    instruction::Instruction, signature::Keypair, signer::Signer, transaction::Transaction,
 };
+use solana_system_transaction as system_transaction;
 use std::{cell::RefCell, mem, rc::Rc};
 
 async fn airdrop_sol(context: &mut ProgramTestContext, key: &Pubkey, amount: u64) {
@@ -43,6 +44,7 @@ async fn airdrop_sol(context: &mut ProgramTestContext, key: &Pubkey, amount: u64
 pub struct MarginfiGroupFixture {
     ctx: Rc<RefCell<ProgramTestContext>>,
     pub key: Pubkey,
+    pub staked_settings: Pubkey,
     pub fee_state: Pubkey,
     pub fee_wallet: Pubkey,
 }
@@ -55,6 +57,10 @@ impl MarginfiGroupFixture {
         let fee_wallet_key: Pubkey;
         let (fee_state_key, _bump) =
             Pubkey::find_program_address(&[FEE_STATE_SEED.as_bytes()], &marginfi::ID);
+        let (staked_settings_key, _bump) = Pubkey::find_program_address(
+            &[STAKED_SETTINGS_SEED.as_bytes(), group_key.pubkey().as_ref()],
+            &marginfi::ID,
+        );
 
         {
             let mut ctx = ctx.borrow_mut();
@@ -161,9 +167,43 @@ impl MarginfiGroupFixture {
             }
         }
 
+        {
+            let ctx = ctx.borrow_mut();
+            let settings = StakedSettingsConfig {
+                oracle: Pubkey::default(),
+                asset_weight_init: I80F48::from_num(0.8).into(),
+                asset_weight_maint: I80F48::from_num(0.9).into(),
+                deposit_limit: 1_000_000,
+                total_asset_value_init_limit: 1_000_000,
+                oracle_max_age: 10,
+                risk_tier: marginfi_type_crate::types::RiskTier::Collateral,
+            };
+            let ix = Instruction {
+                program_id: marginfi::ID,
+                accounts: marginfi::accounts::InitStakedSettings {
+                    marginfi_group: group_key.pubkey(),
+                    admin: ctx.payer.pubkey(),
+                    fee_payer: ctx.payer.pubkey(),
+                    staked_settings: staked_settings_key,
+                    system_program: system_program::id(),
+                }
+                .to_account_metas(Some(true)),
+                data: InitStakedSettings { settings }.data(),
+            };
+
+            let tx = Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&ctx.payer.pubkey()),
+                &[&ctx.payer],
+                ctx.banks_client.get_latest_blockhash().await.unwrap(),
+            );
+            ctx.banks_client.process_transaction(tx).await.unwrap();
+        }
+
         MarginfiGroupFixture {
             ctx: ctx_ref.clone(),
             key: group_key.pubkey(),
+            staked_settings: staked_settings_key,
             fee_state: fee_state_key,
             fee_wallet: fee_wallet_key,
         }
@@ -689,7 +729,7 @@ impl MarginfiGroupFixture {
         Ok(())
     }
 
-    pub async fn try_accrue_interest(&self, bank: &BankFixture) -> Result<()> {
+    pub async fn try_accrue_interest(&self, bank: &BankFixture) -> Result<(), BanksClientError> {
         let ctx = self.ctx.borrow_mut();
 
         let ix = Instruction {
@@ -709,9 +749,7 @@ impl MarginfiGroupFixture {
             ctx.banks_client.get_latest_blockhash().await.unwrap(),
         );
 
-        ctx.banks_client.process_transaction(tx).await?;
-
-        Ok(())
+        ctx.banks_client.process_transaction(tx).await
     }
 
     pub async fn try_pulse_bank_price_cache(
@@ -1049,6 +1087,36 @@ impl MarginfiGroupFixture {
         ctx.banks_client.process_transaction(tx).await
     }
 
+    pub async fn try_lending_pool_backfill_bank_is_t22_flag(
+        &self,
+        bank: &BankFixture,
+        bank_seed: Option<u64>,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolBackfillBankIsT22Flag {
+                bank: bank.key,
+                group: self.key,
+                mint: bank.mint.key,
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolBackfillBankIsT22Flag { bank_seed }.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
     pub fn make_super_admin_withdraw_ix_native(
         &self,
         bank: &BankFixture,
@@ -1200,6 +1268,10 @@ impl MarginfiGroupFixture {
         load_and_deserialize::<MarginfiGroup>(self.ctx.clone(), &self.key).await
     }
 
+    pub async fn load_staked_settings(&self) -> StakedSettings {
+        load_and_deserialize::<StakedSettings>(self.ctx.clone(), &self.staked_settings).await
+    }
+
     pub async fn set_protocol_fees_flag(&self, enabled: bool) {
         let mut group = self.load().await;
         let mut ctx = self.ctx.borrow_mut();
@@ -1220,22 +1292,36 @@ impl MarginfiGroupFixture {
     }
 
     pub async fn try_panic_pause(&self) -> Result<(), BanksClientError> {
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        self.try_panic_pause_with_authority(&payer).await
+    }
+
+    pub async fn try_panic_pause_with_authority(
+        &self,
+        pause_authority: &Keypair,
+    ) -> Result<(), BanksClientError> {
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::PanicPause {
-                global_fee_admin: self.ctx.borrow().payer.pubkey(),
+                pause_authority: pause_authority.pubkey(),
                 fee_state: self.fee_state,
             }
             .to_account_metas(Some(true)),
             data: PanicPause {}.data(),
         };
 
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&self.ctx.borrow().payer.pubkey()),
-            &[&self.ctx.borrow().payer],
-            latest_blockhash(&self.ctx).await,
-        );
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        let blockhash = latest_blockhash(&self.ctx).await;
+        let tx = if payer.pubkey() == pause_authority.pubkey() {
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash)
+        } else {
+            Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&payer.pubkey()),
+                &[&payer, pause_authority],
+                blockhash,
+            )
+        };
 
         self.ctx
             .borrow_mut()
@@ -1245,14 +1331,68 @@ impl MarginfiGroupFixture {
     }
 
     pub async fn try_panic_unpause(&self) -> Result<(), BanksClientError> {
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        self.try_panic_unpause_with_authority(&payer).await
+    }
+
+    pub async fn try_panic_unpause_with_authority(
+        &self,
+        pause_authority: &Keypair,
+    ) -> Result<(), BanksClientError> {
         let ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::PanicUnpause {
-                global_fee_admin: self.ctx.borrow().payer.pubkey(),
+                global_fee_admin: pause_authority.pubkey(),
                 fee_state: self.fee_state,
             }
             .to_account_metas(Some(true)),
             data: PanicUnpause {}.data(),
+        };
+
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        let blockhash = latest_blockhash(&self.ctx).await;
+        let tx = if payer.pubkey() == pause_authority.pubkey() {
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash)
+        } else {
+            Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&payer.pubkey()),
+                &[&payer, pause_authority],
+                blockhash,
+            )
+        };
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub async fn try_set_pause_delegate_admin(
+        &self,
+        new_pause_delegate_admin: Option<Pubkey>,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::EditFeeState {
+                global_fee_admin: self.ctx.borrow().payer.pubkey(),
+                fee_state: self.fee_state,
+            }
+            .to_account_metas(Some(true)),
+            data: EditGlobalFeeState {
+                admin: None,
+                fee_wallet: None,
+                bank_init_flat_sol_fee: None,
+                liquidation_flat_sol_fee: None,
+                order_init_flat_sol_fee: None,
+                program_fee_fixed: None,
+                program_fee_rate: None,
+                liquidation_max_fee: None,
+                order_execution_max_fee: None,
+                pause_delegate_admin: Some(new_pause_delegate_admin.unwrap_or_default()),
+            }
+            .data(),
         };
 
         let tx = Transaction::new_signed_with_payer(
@@ -1278,6 +1418,58 @@ impl MarginfiGroupFixture {
             }
             .to_account_metas(Some(true)),
             data: PropagateFeeState {}.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub async fn try_disable_staked_oracles(&self) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::DisableStakedOracles {
+                group: self.key,
+                admin: self.ctx.borrow().payer.pubkey(),
+                staked_settings: self.staked_settings,
+            }
+            .to_account_metas(Some(true)),
+            data: DisableStakedOracles {}.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub async fn try_enable_staked_oracle_onramp(&self) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::EnableStakedOracleOnramp {
+                group: self.key,
+                admin: self.ctx.borrow().payer.pubkey(),
+                staked_settings: self.staked_settings,
+            }
+            .to_account_metas(Some(true)),
+            data: EnableStakedOracleOnramp {}.data(),
         };
 
         let tx = Transaction::new_signed_with_payer(

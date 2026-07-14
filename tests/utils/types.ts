@@ -12,16 +12,16 @@ export const u32_MAX: number = 4294967295;
 /** Token account size in bytes */
 export const TOKEN_ACCOUNT_SIZE = 165;
 export const SINGLE_POOL_PROGRAM_ID = new PublicKey(
-  "SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE"
+  "SVSPxpvHdN29nkVg9rPapPNDddN5DipNLRUFhyjFThE",
 );
 export const KLEND_PROGRAM_ID = new PublicKey(
-  "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD"
+  "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD",
 );
 export const FARMS_PROGRAM_ID = new PublicKey(
-  "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr"
+  "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr",
 );
 export const DRIFT_PROGRAM_ID = new PublicKey(
-  "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH"
+  "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH",
 );
 /**
  * Drift Oracle Receiver Program ID
@@ -33,20 +33,21 @@ export const DRIFT_PROGRAM_ID = new PublicKey(
  * See: drift-protocol/protocol-v2 oracle validation (EXTERNAL_ORACLE_PROGRAM_IDS)
  */
 export const DRIFT_ORACLE_RECEIVER_PROGRAM_ID = new PublicKey(
-  "G6EoTTTgpkNBtVXo96EQp2m6uwwVh2Kt6YidjkmQqoha"
+  "G6EoTTTgpkNBtVXo96EQp2m6uwwVh2Kt6YidjkmQqoha",
 );
 export const SOLEND_PROGRAM_ID = new PublicKey(
-  "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"
+  "So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo",
 );
 
-export const EMISSIONS_FLAG_NONE = 0;
-export const EMISSIONS_FLAG_BORROW_ACTIVE = 1;
-export const EMISSIONS_FLAG_LENDING_ACTIVE = 2;
 export const PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG = 4;
 export const FREEZE_SETTINGS = 8;
 export const CLOSE_ENABLED_FLAG = 16;
 export const TOKENLESS_REPAYMENTS_ALLOWED = 32;
 export const TOKENLESS_REPAYMENTS_COMPLETE = 64;
+export const IS_T22_FLAG = 128;
+export const BANK_SEED_KNOWN_FLAG = 256;
+export const STAKED_ORACLE_DISABLED = 1 << 9;
+export const STAKED_ORACLE_PRICE_USES_ONRAMP = 1 << 10;
 
 export const ASSET_TAG_DEFAULT = 0;
 export const ASSET_TAG_SOL = 1;
@@ -65,6 +66,9 @@ export const ORACLE_SETUP_SWITCHBOARD_v2 = 2;
 export const ORACLE_SETUP_PYTH_PUSH = 3;
 export const ORACLE_SETUP_SWITCHBOARD_PULL = 4;
 export const ORACLE_SETUP_STAKED_WITH_PYTH_PUSH = 5;
+export const ORACLE_SETUP_FIXED = 8;
+export const ORACLE_SETUP_FIXED_KAMINO = 13;
+export const ORACLE_SETUP_FIXED_DRIFT = 14;
 export const ORACLE_SETUP_FIXED_JUPLEND = 17;
 
 export const HEALTH_CACHE_NONE = 0;
@@ -101,8 +105,8 @@ export const ACCOUNT_FROZEN = 1 << 6;
 export const ACCOUNT_TRANSFER_FEE = 5_000_000;
 
 export const FLAG_PAUSED = 1;
-export const PAUSE_DURATION_SECONDS = 7 * 24 * 60 * 60; // 7 days
-export const MAX_CONSECUTIVE_PAUSES = 10;
+export const PAUSE_DURATION_SECONDS = 6 * 60 * 60; // 6 hours
+export const MAX_CONSECUTIVE_PAUSES = 4;
 export const MAX_DAILY_PAUSES = 3;
 export const DAILY_RESET_INTERVAL = 24 * 60 * 60; // 24 hours
 
@@ -359,7 +363,10 @@ export type InterestRateConfigOpt1_6 = {
 export type OperationalStateRaw =
   | { paused: {} }
   | { operational: {} }
-  | { reduceOnly: {} };
+  | { reduceOnly: {} }
+  | { killedByBankruptcy: {} }
+  | { uninitialized: {} }
+  | { reduceOnlyWithBorrowingPower: {} };
 
 export type BankConfig = {
   assetWeightInit: WrappedI80F48;
@@ -371,7 +378,7 @@ export type BankConfig = {
   depositLimit: BN;
   interestRateConfig: InterestRateConfig1_6;
 
-  /** Paused = 0, Operational = 1, ReduceOnly = 2 */
+  /** Paused = 0, Operational = 1, ReduceOnly = 2, ... */
   operationalState: OperationalStateRaw;
 
   borrowLimit: BN;
@@ -399,11 +406,7 @@ export type BankConfigOptRaw = {
   totalAssetValueInitLimit: BN | null;
 
   interestRateConfig: InterestRateConfigOpt1_6 | null;
-  operationalState:
-    | { paused: {} }
-    | { operational: {} }
-    | { reduceOnly: {} }
-    | null;
+  operationalState: OperationalStateRaw | null;
 
   oracleMaxConfidence: number | null;
   oracleMaxAge: number | null;
@@ -454,7 +457,7 @@ export function newEmodeEntry(
   collateralBankEmodeTag: number,
   flags: number,
   assetWeightInit: WrappedI80F48,
-  assetWeightMaint: WrappedI80F48
+  assetWeightMaint: WrappedI80F48,
 ): EmodeEntry {
   return {
     collateralBankEmodeTag,

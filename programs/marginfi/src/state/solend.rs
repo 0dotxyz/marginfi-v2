@@ -16,6 +16,9 @@ pub struct SolendConfigCompact {
     pub oracle: Pubkey,
     pub asset_weight_init: WrappedI80F48,
     pub asset_weight_maint: WrappedI80F48,
+    /// Cap in **Solend collateral units**, not underlying. As the reserve collateral
+    /// exchange rate grows, the same cap admits more underlying — re-tune against the
+    /// current rate.
     pub deposit_limit: u64,
     /// Either `SolendPythPull` or `SolendSwitchboardPull`
     pub oracle_setup: OracleSetup,
@@ -68,9 +71,9 @@ impl SolendConfigCompact {
         // never will, thus they will earn no interest.
         // Note: Some placeholder values are non-zero to handle downstream validation checks.
         let default_ir_config = InterestRateConfig {
-            optimal_utilization_rate: I80F48::ZERO.into(),
-            plateau_interest_rate: I80F48::ZERO.into(),
-            max_interest_rate: I80F48::ZERO.into(),
+            placeholder0: I80F48::ZERO.into(),
+            placeholder1: I80F48::ZERO.into(),
+            placeholder2: I80F48::ZERO.into(),
             protocol_fixed_fee_apr: I80F48::ZERO.into(),
             insurance_ir_fee: I80F48!(0.1).into(),
             zero_util_rate: 0,

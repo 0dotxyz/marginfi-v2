@@ -1,17 +1,23 @@
+use std::cmp::max;
+
 use crate::{
     assert_struct_align, assert_struct_size,
-    constants::discriminators,
-    types::{BankCache, BankConfig},
+    constants::{
+        discriminators, ASSET_TAG_DRIFT, DRIFT_SCALED_BALANCE_DECIMALS, STAKED_ORACLE_DISABLED,
+        STAKED_ORACLE_PRICE_USES_ONRAMP,
+    },
+    types::{BalanceSide, BankCache, BankConfig, EmodeConfig, RequirementType},
 };
 
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
 
 use bytemuck::{Pod, Zeroable};
+use fixed::types::I80F48;
 
 #[cfg(not(feature = "anchor"))]
 use super::Pubkey;
-use super::{BankRateLimiter, EmodeSettings, WrappedI80F48};
+use super::{BankRateLimiter, EmodeSettings, OnRampTransition, WrappedI80F48};
 
 assert_struct_size!(Bank, 1856);
 assert_struct_align!(Bank, 8);
@@ -99,6 +105,13 @@ pub struct Bank {
     /// - Bit 4 (16): `CLOSE_ENABLED_FLAG` — bank can be closed (set at creation for banks >= 0.1.4)
     /// - Bit 5 (32): `TOKENLESS_REPAYMENTS_ALLOWED` — risk admin can repay debt without tokens
     /// - Bit 6 (64): `TOKENLESS_REPAYMENTS_COMPLETE` — all debt cleared, lender purge enabled
+    /// - Bit 7 (128): `IS_T22` — 1 if T22, 0 if token classic
+    /// - Bit 8 (256): `BANK_SEED_KNOWN` — bank is known to be PDA/seed-derived. If not set, bank
+    ///   may still be a PDA, but created before this flag launched (1.8 or earlier) or is a legacy
+    ///   keypair-based bank.
+    /// - Bit 9 (512): `STAKED_ORACLE_DISABLED` — staked oracle pricing is temporarily disabled.
+    /// - Bit 10 (1024): `STAKED_ORACLE_PRICE_USES_ONRAMP` — staked oracle pricing includes the SPL
+    ///   single-pool on-ramp account in NAV.
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.
@@ -143,6 +156,7 @@ pub struct Bank {
     /// - Drift: spot market
     /// - Solend: reserve
     /// - JupLend: lending state
+    /// - Staked Collateral: Validator vote account
     pub integration_acc_1: Pubkey,
     /// Integration account slot 2 (default Pubkey for non-integrations).
     /// - Kamino: obligation
@@ -159,13 +173,59 @@ pub struct Bank {
     /// Tracks net outflow (outflows - inflows) in native tokens.
     pub rate_limiter: BankRateLimiter,
 
-    pub _pad_0: [u8; 16],          // 16B
-    pub _padding_1: [[u64; 2]; 7], // 8 * 2 * 7 = 112B
+    pub _pad_0: [u8; 16], // 16B
+
+    /// * `0` for legacy banks created via `lending_pool_add_bank` (created via keypair, not a PDA),
+    ///   or pre-backfill banks (1.8 or earlier) where seed remains unknown.
+    /// * Otherwise the `bank_seed: u64` argument passed when creating the bank.
+    /// * Use `flags & BANK_SEED_KNOWN` to verify this value has known seed provenance.
+    pub bank_seed: u64,
+    pub _padding_1: [u64; 13], // 8 * 13 = 104B;
 }
 
 impl Bank {
     pub const LEN: usize = std::mem::size_of::<Bank>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::BANK;
+
+    pub fn get_balance_decimals(&self) -> u8 {
+        if self.config.asset_tag == ASSET_TAG_DRIFT {
+            DRIFT_SCALED_BALANCE_DECIMALS
+        } else {
+            self.mint_decimals
+        }
+    }
+
+    pub fn get_asset_weight(
+        &self,
+        requirement_type: RequirementType,
+        emode_config: &EmodeConfig,
+    ) -> I80F48 {
+        if let Some(emode_entry) = emode_config.find_with_tag(self.emode.emode_tag) {
+            let bank_weight = self
+                .config
+                .get_weight(requirement_type, BalanceSide::Assets);
+            let emode_weight = match requirement_type {
+                RequirementType::Initial => I80F48::from(emode_entry.asset_weight_init),
+                RequirementType::Maintenance => I80F48::from(emode_entry.asset_weight_maint),
+                RequirementType::Equity => I80F48::ONE,
+            };
+            max(bank_weight, emode_weight)
+        } else {
+            self.config
+                .get_weight(requirement_type, BalanceSide::Assets)
+        }
+    }
+
+    // To be removed once SVSP update is rolled out (likely in 1.10)
+    pub fn on_ramp_transition(&self) -> OnRampTransition {
+        if self.flags & STAKED_ORACLE_PRICE_USES_ONRAMP != 0 {
+            OnRampTransition::OnRampEnabled
+        } else if self.flags & STAKED_ORACLE_DISABLED != 0 {
+            OnRampTransition::StakeOraclesDisabled
+        } else {
+            OnRampTransition::PreTransition
+        }
+    }
 }
 
 #[repr(u8)]
@@ -173,14 +233,14 @@ impl Bank {
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
 pub enum RiskTier {
     #[default]
-    Collateral = 0,
+    Collateral, // 0
     /// ## Isolated Risk
     /// Assets in this tier can be borrowed only in isolation.
     /// They can't be borrowed together with other assets.
     ///
     /// For example, if users has USDC, and wants to borrow XYZ which is isolated,
     /// they can't borrow XYZ together with SOL, only XYZ alone.
-    Isolated = 1,
+    Isolated, // 1
 }
 unsafe impl Zeroable for RiskTier {}
 unsafe impl Pod for RiskTier {}
@@ -197,32 +257,46 @@ pub enum BankOperationalState {
     ReduceOnly,
     /// Bank was killed by a bankruptcy event (irrecoverable)
     KilledByBankruptcy,
+    /// Awaiting one-time setup (JupLend `juplend_init_position` seed deposit). All operations are
+    /// blocked, and the state is unreachable from `lending_pool_configure_bank`.
+    Uninitialized,
+    /// Same instruction restrictions as ReduceOnly, but assets still count for initial health.
+    ReduceOnlyWithBorrowingPower,
 }
 unsafe impl Zeroable for BankOperationalState {}
 unsafe impl Pod for BankOperationalState {}
+
+impl BankOperationalState {
+    pub fn is_reduce_only(self) -> bool {
+        matches!(
+            self,
+            BankOperationalState::ReduceOnly | BankOperationalState::ReduceOnlyWithBorrowingPower
+        )
+    }
+}
 
 #[repr(u8)]
 #[cfg_attr(feature = "anchor", derive(AnchorSerialize, AnchorDeserialize))]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum OracleSetup {
-    None = 0,
-    PythLegacy = 1,
-    SwitchboardV2 = 2,
-    PythPushOracle = 3,
-    SwitchboardPull = 4,
-    StakedWithPythPush = 5,
-    KaminoPythPush = 6,
-    KaminoSwitchboardPull = 7,
-    Fixed = 8,
-    DriftPythPull = 9,
-    DriftSwitchboardPull = 10,
-    SolendPythPull = 11,
-    SolendSwitchboardPull = 12,
-    FixedKamino = 13,
-    FixedDrift = 14,
-    JuplendPythPull = 15,
-    JuplendSwitchboardPull = 16,
-    FixedJuplend = 17,
+    None,                   // 0
+    PythLegacy,             // 1
+    SwitchboardV2,          // 2
+    PythPushOracle,         // 3
+    SwitchboardPull,        // 4
+    StakedWithPythPush,     // 5
+    KaminoPythPush,         // 6
+    KaminoSwitchboardPull,  // 7
+    Fixed,                  // 8
+    DriftPythPull,          // 9
+    DriftSwitchboardPull,   // 10
+    SolendPythPull,         // 11
+    SolendSwitchboardPull,  // 12
+    FixedKamino,            // 13
+    FixedDrift,             // 14
+    JuplendPythPull,        // 15
+    JuplendSwitchboardPull, // 16
+    FixedJuplend,           // 17
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
