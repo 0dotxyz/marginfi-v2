@@ -211,11 +211,12 @@ pub struct Bank {
     /// Publisher-side timestamp of the last counted CB observation; rejects re-reads of the same
     /// publication across multiple Solana slots. Zero when the adapter doesn't expose one.
     pub cb_last_oracle_source_time: i64,
-    /// EMA reference price used by the circuit breaker. Frozen while halted, zero until the
-    /// first observation after enable.
+    /// EMA reference price used by the circuit breaker, in the multiplier-adjusted effective-price
+    /// domain the risk engine uses. Frozen while halted, zero until the first observation after
+    /// enable.
     pub cb_reference_price: WrappedI80F48,
-    /// Long-window reference price used to catch slow oracle walking that stays below the
-    /// per-observation breaker threshold.
+    /// Long-window reference price (same multiplier-adjusted domain as `cb_reference_price`) used
+    /// to catch slow oracle walking that stays below the per-observation breaker threshold.
     pub cb_window_reference_price: WrappedI80F48,
     /// Unix-seconds when `cb_window_reference_price` was anchored.
     pub cb_window_started_at: i64,

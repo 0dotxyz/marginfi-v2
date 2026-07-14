@@ -671,13 +671,19 @@ impl BankImpl for Bank {
                     (0..=CB_ENABLE_MAX_PRICE_AGE_SECONDS).contains(&age),
                     MarginfiError::CircuitBreakerRequiresWarmCache
                 );
+                // Seed with the multiplier-adjusted price so the reference matches the effective
+                // price observations feed (see `OraclePriceWithMultiplier::cb_observation`);
+                // seeding the raw price would spuriously trip the first observation on integration
+                // banks whose multiplier differs from one.
+                let multiplier: I80F48 = self.cache.price_multiplier.into();
+                let last_adjusted = last.checked_mul(multiplier).ok_or_else(math_error!())?;
                 let ref_price: I80F48 = self.cb_reference_price.into();
                 if ref_price == I80F48::ZERO {
-                    self.cb_reference_price = last.into();
+                    self.cb_reference_price = last_adjusted.into();
                 }
                 let window_ref_price: I80F48 = self.cb_window_reference_price.into();
                 if window_ref_price == I80F48::ZERO {
-                    self.cb_window_reference_price = last.into();
+                    self.cb_window_reference_price = last_adjusted.into();
                     self.cb_window_started_at = now;
                 }
             }
@@ -919,7 +925,7 @@ impl BankImpl for Bank {
             self.update_circuit_breaker(
                 clock.unix_timestamp,
                 clock.slot,
-                price_with_multiplier.oracle_price,
+                price_with_multiplier.cb_observation()?,
             )?;
         }
 

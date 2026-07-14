@@ -9,19 +9,6 @@ use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer};
 use solana_sdk::transaction::Transaction;
 
-/// Standard circuit-breaker config used across these tests: 5%/10%/25% deviation tiers with
-/// 10m/1h/4h halt durations.
-fn cb_config() -> BankConfigOpt {
-    BankConfigOpt {
-        circuit_breaker_enabled: Some(true),
-        cb_deviation_bps_tiers: Some([500, 1000, 2500]),
-        cb_tier_durations_seconds: Some([600, 3600, 14400]),
-        cb_escalation_window_mult: Some(2),
-        cb_ema_alpha_bps: Some(1000),
-        ..Default::default()
-    }
-}
-
 /// Warms `bank`'s price cache, enables the circuit breaker on it, then trips it into an active
 /// halt by pulsing a large oracle spike — driving the halt entirely through real instructions.
 /// Afterward `feed` is restored to `base_native` and every standard feed is refreshed to the
@@ -43,7 +30,7 @@ async fn enable_cb_and_trip_halt(
         .try_pulse_bank_price_cache(bank)
         .await?;
 
-    bank.update_config(cb_config(), None).await?;
+    bank.update_config(standard_cb_config(), None).await?;
 
     // A single +100% spike trips a halt on the first breaching pulse.
     let trip_time = warm_time + 1;
@@ -85,7 +72,7 @@ async fn enable_cb_and_trip_tier3_storm(
         .try_pulse_bank_price_cache(bank)
         .await?;
 
-    bank.update_config(cb_config(), None).await?;
+    bank.update_config(standard_cb_config(), None).await?;
     if let Some(operational_state) = pre_break_state {
         bank.update_config(
             BankConfigOpt {
