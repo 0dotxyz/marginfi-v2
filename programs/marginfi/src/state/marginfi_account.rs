@@ -279,11 +279,10 @@ impl MarginfiAccountImpl for MarginfiAccount {
         let is_in_flashloan = self.get_flag(ACCOUNT_IN_FLASHLOAN);
         let is_in_receivership = self.get_flag(ACCOUNT_IN_RECEIVERSHIP);
         let is_frozen = self.get_flag(ACCOUNT_FROZEN);
-        let only_has_empty_balances = self
-            .lending_account
-            .balances
-            .iter()
-            .all(|balance| balance.get_side().is_none());
+        let only_has_empty_balances = self.lending_account.balances.iter().all(|balance| {
+            let liability_shares: I80F48 = balance.liability_shares.into();
+            balance.get_side().is_none() && liability_shares <= I80F48::ZERO
+        });
 
         !is_disabled
             && only_has_empty_balances

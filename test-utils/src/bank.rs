@@ -472,6 +472,24 @@ impl BankFixture {
             .borrow_mut()
             .set_account(&self.key, &bank_ai.into());
     }
+
+    pub async fn set_liability_share_value(&self, value: I80F48) {
+        let mut bank_ai = self
+            .ctx
+            .borrow_mut()
+            .banks_client
+            .get_account(self.key)
+            .await
+            .unwrap()
+            .unwrap();
+        let bank = bytemuck::from_bytes_mut::<Bank>(&mut bank_ai.data.as_mut_slice()[8..]);
+
+        bank.liability_share_value = value.into();
+
+        self.ctx
+            .borrow_mut()
+            .set_account(&self.key, &bank_ai.into());
+    }
 }
 
 impl Debug for BankFixture {
