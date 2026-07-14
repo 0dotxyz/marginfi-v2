@@ -2526,7 +2526,10 @@ mod cb_tests {
         assert_eq!(halt2_end, t2 + 14_400);
 
         // Halt 1's full duration is banked (last_update precedes it); the pre-halt time is not.
-        assert_eq!(b.cb_frozen_seconds_pending, (halt1_end - halt1_start) as u64);
+        assert_eq!(
+            b.cb_frozen_seconds_pending,
+            (halt1_end - halt1_start) as u64
+        );
 
         let now = halt2_end;
         let frozen = b.cb_frozen_seconds_pending + b.cb_frozen_seconds(b.last_update, now);
