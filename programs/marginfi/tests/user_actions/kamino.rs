@@ -244,7 +244,10 @@ async fn kamino_cb_enable_seeds_multiplier_adjusted_reference() -> anyhow::Resul
     let warmed = setup.bank_f.load().await;
     let raw_price: I80F48 = warmed.cache.last_oracle_price.into();
     let multiplier: I80F48 = warmed.cache.price_multiplier.into();
-    assert!(raw_price > I80F48::ZERO, "cache should be warm after withdraw");
+    assert!(
+        raw_price > I80F48::ZERO,
+        "cache should be warm after withdraw"
+    );
     assert_ne!(
         multiplier,
         I80F48::ONE,
@@ -252,7 +255,10 @@ async fn kamino_cb_enable_seeds_multiplier_adjusted_reference() -> anyhow::Resul
     );
 
     // Enable the breaker; the reference must be the effective (multiplier-adjusted) price.
-    setup.bank_f.update_config(standard_cb_config(), None).await?;
+    setup
+        .bank_f
+        .update_config(standard_cb_config(), None)
+        .await?;
 
     let enabled = setup.bank_f.load().await;
     let seeded_ref: I80F48 = enabled.cb_reference_price.into();

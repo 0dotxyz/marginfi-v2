@@ -235,8 +235,9 @@ async fn juplend_cb_enable_seeds_multiplier_adjusted_reference() -> anyhow::Resu
     // raw base, making the seed check below able to distinguish adjusted from raw.
     {
         let mut account = setup.test_f.try_load(&setup.lending).await?.unwrap();
-        let lending =
-            bytemuck::from_bytes_mut::<Lending>(&mut account.data[8..8 + std::mem::size_of::<Lending>()]);
+        let lending = bytemuck::from_bytes_mut::<Lending>(
+            &mut account.data[8..8 + std::mem::size_of::<Lending>()],
+        );
         lending.token_exchange_price = (EXCHANGE_PRICES_PRECISION * 3 / 2) as u64;
         setup
             .test_f
@@ -261,7 +262,10 @@ async fn juplend_cb_enable_seeds_multiplier_adjusted_reference() -> anyhow::Resu
     let warmed = setup.bank_f.load().await;
     let raw_price: I80F48 = warmed.cache.last_oracle_price.into();
     let multiplier: I80F48 = warmed.cache.price_multiplier.into();
-    assert!(raw_price > I80F48::ZERO, "cache should be warm after withdraw");
+    assert!(
+        raw_price > I80F48::ZERO,
+        "cache should be warm after withdraw"
+    );
     assert_ne!(
         multiplier,
         I80F48::ONE,
@@ -269,7 +273,10 @@ async fn juplend_cb_enable_seeds_multiplier_adjusted_reference() -> anyhow::Resu
     );
 
     // Enable the breaker; the reference must be the effective (multiplier-adjusted) price.
-    setup.bank_f.update_config(standard_cb_config(), None).await?;
+    setup
+        .bank_f
+        .update_config(standard_cb_config(), None)
+        .await?;
 
     let enabled = setup.bank_f.load().await;
     let seeded_ref: I80F48 = enabled.cb_reference_price.into();

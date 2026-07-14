@@ -1,14 +1,12 @@
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48 as fp;
+use fixtures::test::{PYTH_SOL_FEED, PYTH_USDC_FEED};
 use fixtures::{
     assert_anchor_error, assert_custom_error, bank::BankFixture,
     marginfi_account::MarginfiAccountFixture, prelude::*,
 };
-use fixtures::test::{PYTH_SOL_FEED, PYTH_USDC_FEED};
 use marginfi::prelude::MarginfiError;
-use marginfi_type_crate::types::{
-    centi_to_u32, u32_to_centi, OrderTrigger, WrappedI80F48,
-};
+use marginfi_type_crate::types::{centi_to_u32, u32_to_centi, OrderTrigger, WrappedI80F48};
 use solana_program_test::tokio;
 use solana_sdk::{
     account::Account,
@@ -1706,7 +1704,9 @@ async fn start_execute_order_gates_breaching_tagged_liability() -> anyhow::Resul
         .marginfi_group
         .try_pulse_bank_price_cache(liability_bank_f)
         .await?;
-    liability_bank_f.update_config(standard_cb_config(), None).await?;
+    liability_bank_f
+        .update_config(standard_cb_config(), None)
+        .await?;
 
     // Move the liability's live oracle 10% past the reference (tier-0 is 5%). No pulse, so the bank
     // is not halted; the breach is only visible to the live price gate. Keep the asset oracle fresh
