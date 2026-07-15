@@ -75,12 +75,10 @@ decide if they tolerate the associated risk, and the inclusion of these extensio
 
 ### Staked Collateral Price Confidence
 
-Confidence bands on Staked Collateral oracles are currently priced incorrectly, slightly
-over-valuing Staked Collateral positions. Because Staked Collateral positions can only borrow SOL,
-they will never be liquidated unless the SOL borrow sustains above the native stake yield for a long
-period of time (weeks to months). Even if they are modestly over-valued during times of low SOL
-price confidence, these Staked Collateral positions would still be liquidated well before they went
-underwater. We have marked this Info/Low and expect a fix in ~1.9 (roughly mid June).
+Fixed in 1.9
+
+Previously: confidence bands on Staked Collateral oracles were not priced incorrectly, slightly
+over-valuing Staked Collateral positions.
 
 ### Flashloans May Not Affect Rate Limits
 
@@ -211,3 +209,84 @@ flow control is bypassable due to this issue, the bank is no worse off than if i
 disabled, no griefing, loss of funds, etc is enabled from this bug alone. Only integration banks are
 affected (not native P0 banks), a similar bug affecting P0 banks would still be in scope. This will
 be resolved in an upcoming update with low priority.
+
+
+### Drift Bugs (Post April 1 Hack)
+
+Because Drift (now Velocity) does not anticipate restarting the now-suspended Drift program and will
+instead launch at a new address, issues in the current Drift implementation are out of scope (issues
+that currently affect production are always in scope, but note that all Drift banks are in a
+non-operational state). Once Velocity deploys the new program and makes it public, we will update
+our integration accordingly, and the bounty becomes valid again as soon as the first new Velocity
+bank is opened in production.
+
+### Zero-weight Assets can be Seized in Classic Liquidation
+
+In classic liquidation, the liquidator can seize assets with zero weight, which some may consider
+unusual since they are "worthless" as collateral. From a solvency perspective, this is a non-issue,
+since the liquidator must repay a real debt with non-zero liability weight, and in doing so improves
+the platform's solvency. In most instances, this is a good economic outcome for the user being
+liquidated too, as the liquidator must still repay asset_value * (1 - fee) in debt, but regardless,
+liquidation is more concerned with solvency of the platform. Issues when liquidating assets with
+zero (or negligible) weight are only in scope if they affect platform solvency.
+
+Note that receivership liquidation cannot capture zero-weight assets, because it does not tie the
+proportion of assets seized to the amount repaid like classic liquidation does, and this can lead to
+more unfavorable outcomes for the user.
+
+### Zero-weight Assets can be Seized in Orders
+
+When a user places an Order with an Isolated bank (which are considered "worthless" as collateral):
+the keeper taking the entire amount would be in line with our expectation. Here if the user is
+lending $100 A (not isolated), lending $X B (not isolated) and borrowing $50 C (not isolated), then
+places a B/C SL at $50, we expect the keeper will immediately fill if X > 50, and decline to fill if
+X < 50. Isolated assets often have no valid price due to lack of market liquidity, so essentially
+the user is letting the Keeper decide X. Unlike liquidation and deleverage, this is strictly opt-in.
+We agree that the vast majority of the time this is a bad idea and users should not do this.
+
+
+### Bad Fixed Price Settings
+
+Though it is a bad idea, is is valid for the administrator can set a "Fixed" price of 0, which
+carries various risk implications. For banks P0 administers and chooses to sunset by giving them a
+"Fixed" price, we typically set a nominal price like 10^-6, and set the weights to 0 instead.
+Likewise, the administrator setting a foolish price that deviates from the market price is out of
+scope.
+
+
+### Liquidation of Small-Value Accounts is Unfair
+
+The ability to fully liquidate accounts worth **less than $5 net** (capturing unlimited profit) is a
+design decision to encourage our liquidators to index and close out low-value accounts. We have
+thousands of accounts on mainnet, many of which hold only a small value. Liquidators (like
+ourselves) have significant expenses, such as gRPC. To optimize costs, some liquidators might chose
+to observe only high-value accounts, which creates protocol risk when many low-value accounts that
+are not being observed could go under. For example, liquidators might not hit accounts where their
+profit would otherwise be denominated by the tx fee. This profit incentive encourages liquidators to
+continue to index and process low-value accounts, and while it is somewhat unfair to the user, the
+maximum loss is $5, which can trivially be avoided by simply depositing more than $5.
+
+### Receivership Liquidation uses Equity Weight and TWAP Price
+
+The premium liquidators can collect is TWAP based, since Equity pricing uses the TWAP. This is
+intentional: we already cap the receiver's Spot profit by requiring them to improve health. As a
+result, there is a profit and incentive implication for liquidators when the TWAP differs from the
+Spot price. 
+
+Liquidators must realize their gains at market price. In a market where the spot price is N and the
+EMA is N * k (where k > 1), the liquidator cannot be confident they can actually redeem the token at
+N, and should therefore be allowed to claim "more" relative to the spot price. Likewise if k<1, the
+liquidator should be confident they can redeem the asset for N, and can claim less. Here they may
+wait for TWAP to stabilize if they cannot realize a profit at N, which is expected in a down market,
+and it becomes a race to see which liquidator can indeed profit at the actual redeemable price
+(closer to N * k). The inverse is true for liabilities as well.
+
+The "max fee" is intentionally represented in Equity terms for the above reasons. 
+
+### Permissionless Fee Collection is Dangerous With T22 Fees
+
+Administrators should take caution with T22 assets that have a transfer fee enabled. This can cause
+various edge cases such as permissionless fee extraction rounding down, which allows a troll to spam
+small-value fee collections that collect less fees than expected. Currently, there are no T22 assets
+with fees in prod, and no plan to add any (as no asset with market traction has such fees), so there
+is no plan to fix edge cases related to T22 transfer fees.
