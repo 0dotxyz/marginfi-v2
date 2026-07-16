@@ -458,6 +458,8 @@ pub enum MarginfiError {
     RebalanceSettleTooEarly, // 6611
     #[msg("Every referenced rebalance bank must be the source or destination of at least one move")]
     RebalanceUnreferencedBank, // 6612
+    #[msg("Rebalance deposit/withdraw legs must all act on the rebalanced marginfi account")]
+    RebalanceForeignAccountLeg, // 6613
                              // **************END AUTO-REBALANCE ERRORS
 }
 

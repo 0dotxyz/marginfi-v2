@@ -7,6 +7,7 @@ use fixtures::{
         DRIFT_DST_BORROW_DEN, DRIFT_DST_BORROW_NUM, VENUE_DEPOSIT_NATIVE,
     },
 };
+use fixtures::marginfi_account::MarginfiAccountFixture;
 use marginfi::prelude::MarginfiError;
 use marginfi_type_crate::{
     pdas::derive_juplend_token_reserve,
@@ -1139,6 +1140,34 @@ async fn rebalance_rejects_unreferenced_bank() -> anyhow::Result<()> {
         .await;
     let res = f.process(&[start_ix]).await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceUnreferencedBank);
+    Ok(())
+}
+
+/// A keeper cannot smuggle a deposit/withdraw leg on a FOREIGN marginfi account into the sandwich to
+/// move a bank's utilization (and so the rate gate). Every leg must act on the rebalanced account, and
+/// the validator rejects the foreign leg at start before it can run.
+#[tokio::test]
+async fn rebalance_rejects_foreign_account_leg() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let foreign = MarginfiAccountFixture::new_with_authority(
+        f.test_f.context.clone(),
+        &f.test_f.marginfi_group.key,
+        &f.keeper,
+    )
+    .await;
+    let mut ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    let foreign_leg = foreign
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            DEPOSIT_USDC / 2.0,
+            None,
+            f.keeper.pubkey(),
+        )
+        .await;
+    ixs.insert(1, foreign_leg);
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceForeignAccountLeg);
     Ok(())
 }
 

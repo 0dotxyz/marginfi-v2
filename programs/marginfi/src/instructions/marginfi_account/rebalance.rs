@@ -734,7 +734,10 @@ pub fn start_rebalance<'info>(
         let mut account = ctx.accounts.marginfi_account.load_mut()?;
         account.set_flag(ACCOUNT_IN_REBALANCE, false);
     }
-    validate_rebalance_instructions(&ctx.accounts.instruction_sysvar)?;
+    validate_rebalance_instructions(
+        &ctx.accounts.instruction_sysvar,
+        &ctx.accounts.marginfi_account.key(),
+    )?;
     Ok(())
 }
 

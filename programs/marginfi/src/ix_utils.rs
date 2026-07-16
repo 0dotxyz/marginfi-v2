@@ -212,7 +212,10 @@ pub fn load_and_validate_instructions(
 /// Forbidding the venues' deposit/borrow/withdraw ops here is what stops an attacker-keeper from
 /// spiking a venue's utilization-derived supply rate inside the sandwich to pass the improvement gate
 /// and farm fees.
-pub fn validate_rebalance_instructions(sysvar: &AccountInfo) -> MarginfiResult {
+pub fn validate_rebalance_instructions(
+    sysvar: &AccountInfo,
+    marginfi_account: &Pubkey,
+) -> MarginfiResult {
     let allowed_programs = [
         id_crate::ID,
         COMPUTE_PROGRAM_KEY,
@@ -226,6 +229,33 @@ pub fn validate_rebalance_instructions(sysvar: &AccountInfo) -> MarginfiResult {
     ];
     let ixes = load_and_validate_instructions(sysvar, Some(&allowed_programs))?;
     validate_ix_last(&ixes, &id_crate::ID, &ixd::END_REBALANCE)?;
+
+    // Bind every deposit/withdraw leg to the account being rebalanced. The supply-rate gate reads
+    // utilization, so a leg on a FOREIGN account (the attacker's own deposit) could spike a bank's rate
+    // to pass the gate and restore it before end, all with allowed discriminators. `marginfi_account`
+    // is meta index 1 (group, marginfi_account, authority, ...) on every native and venue leg.
+    const MOVE_LEG_DISCRIMS: [[u8; 8]; 8] = [
+        ixd::LENDING_ACCOUNT_WITHDRAW,
+        ixd::LENDING_ACCOUNT_DEPOSIT,
+        ixd::KAMINO_WITHDRAW,
+        ixd::KAMINO_DEPOSIT,
+        ixd::DRIFT_WITHDRAW,
+        ixd::DRIFT_DEPOSIT,
+        ixd::JUPLEND_WITHDRAW,
+        ixd::JUPLEND_DEPOSIT,
+    ];
+    for ix in ixes.iter() {
+        if ix.program_id != id_crate::ID || ix.data.len() < 8 {
+            continue;
+        }
+        let discrim = &ix.data[0..8];
+        if MOVE_LEG_DISCRIMS.iter().any(|d| &d[..] == discrim) {
+            check!(
+                ix.accounts.len() > 1 && ix.accounts[1].pubkey == *marginfi_account,
+                MarginfiError::RebalanceForeignAccountLeg
+            );
+        }
+    }
     // Exactly one start/end pair per sandwich: a start sets ACCOUNT_IN_REBALANCE on its account and
     // only its paired end clears it, so a second start would leave another account's flag set past
     // the tx, where any signer could act on it. `validate_ix_last` pins the final ix to an end but
