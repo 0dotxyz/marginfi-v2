@@ -2,6 +2,7 @@ import { BN, Program } from "@coral-xyz/anchor";
 import { AccountMeta, PublicKey, Transaction } from "@solana/web3.js";
 import {
   addBank,
+  addBankWithSeed,
   backfillBankIsT22Flag,
   configureBankOracle,
 } from "../../utils/group-instructions";
@@ -336,7 +337,6 @@ describe("Lending pool add bank (add bank to group)", () => {
   });
 
   it("Decodes a mainnet bank configured before manual padding", async () => {
-    // mainnet program ID
     const id = new PublicKey("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA");
     const group = new PublicKey("4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8");
 
@@ -563,6 +563,45 @@ describe("Lending pool add bank (add bank to group)", () => {
     assertBNEqual(bbAfter.bankSeed, 0);
     assert.equal(bbAfter.flags.toNumber() & BANK_SEED_KNOWN_FLAG, 0);
   });
-});
 
-// TODO add bank with seed
+  it("(admin) Add bank with an explicit seed - happy path", async () => {
+    const seed = new BN(7);
+    const [bankKey] = deriveBankWithSeed(
+      program.programId,
+      marginfiGroup.publicKey,
+      ecosystem.usdcMint.publicKey,
+      seed
+    );
+
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await addBankWithSeed(groupAdmin.mrgnProgram, {
+          marginfiGroup: marginfiGroup.publicKey,
+          feePayer: groupAdmin.wallet.publicKey,
+          bankMint: ecosystem.usdcMint.publicKey,
+          config: defaultBankConfig(),
+          seed,
+        })
+      )
+    );
+
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm(
+      new Transaction().add(
+        await configureBankOracle(groupAdmin.mrgnProgram, {
+          bank: bankKey,
+          type: ORACLE_SETUP_PYTH_PUSH,
+          oracle: oracles.usdcOracle.publicKey,
+        })
+      )
+    );
+
+    // The bank lives at the seed-derived PDA and records its seed + the known-seed flag.
+    const bank = await program.account.bank.fetch(bankKey);
+    assertKeysEqual(bank.mint, ecosystem.usdcMint.publicKey);
+    assertBNEqual(bank.bankSeed, seed);
+    assert.equal(
+      bank.flags.toNumber() & BANK_SEED_KNOWN_FLAG,
+      BANK_SEED_KNOWN_FLAG
+    );
+  });
+});

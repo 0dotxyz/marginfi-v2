@@ -862,7 +862,12 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         // health once here over the post-move balance set. A rebalance moves an existing position
         // between same-mint venues rather than opening new risk, so the MAINTENANCE requirement
         // applies: the account need only stay non-liquidatable, not pass the stricter initial bar.
-        check_account_maint_health(&account, health_obs, &mut Some(&mut health_cache))?;
+        check_account_maint_health(
+            &account,
+            &*ctx.accounts.group.load()?,
+            health_obs,
+            &mut Some(&mut health_cache),
+        )?;
         health_cache.program_version = PROGRAM_VERSION;
         health_cache.set_engine_ok(true);
 

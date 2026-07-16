@@ -430,36 +430,53 @@ pub enum MarginfiError {
     #[msg("Invalid Juplend withdraw intermediary ATA")]
     InvalidJuplendWithdrawIntermediaryAta, // 6512
     // **************END JUPLEND ERRORS
+    #[msg("Account is already at (or above) the target size")]
+    InvalidResize, // 6513
+
+    // ************** BEGIN CIRCUIT BREAKER ERRORS (starting at 6600)
+    #[msg("Bank is halted by oracle circuit breaker")]
+    BankCircuitBreakerHalted = 600, // 6600
+    #[msg("Action requires risk admin while bank is circuit-breaker halted")]
+    CircuitBreakerAdminOnly, // 6601
+    #[msg("Invalid circuit breaker config")]
+    CircuitBreakerInvalidConfig, // 6602
+    #[msg(
+        "Circuit breaker cannot be enabled until the oracle price cache is warm (call pulse first)"
+    )]
+    CircuitBreakerRequiresWarmCache, // 6603
+    #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
+    CircuitBreakerPriceJump, // 6604
+    // **************END CIRCUIT BREAKER ERRORS
 
     // **************BEGIN AUTO-REBALANCE ERRORS
     #[msg("Rebalance venue not supported for on-chain rate verification")]
-    RebalanceVenueUnsupported = 600, // 6600
+    RebalanceVenueUnsupported, // 6605
     #[msg("Rebalance cooldown has not elapsed")]
-    RebalanceCooldown, // 6601
+    RebalanceCooldown, // 6606
     #[msg("Rebalance moved no value")]
-    RebalanceIncompleteMove, // 6602
+    RebalanceIncompleteMove, // 6607
     #[msg("Rebalance destination rate not better than source by the required margin")]
-    RebalanceNotImproving, // 6603
+    RebalanceNotImproving, // 6608
     #[msg("Rebalance overshot: destination rate no longer >= source after the move")]
-    RebalanceOvershoot, // 6604
+    RebalanceOvershoot, // 6609
     #[msg("Rebalance leaked value beyond the allowed dust tolerance")]
-    RebalanceValueLeak, // 6605
+    RebalanceValueLeak, // 6610
     #[msg("Rebalance bank mint does not match the order mint")]
-    RebalanceMintMismatch, // 6606
+    RebalanceMintMismatch, // 6611
     #[msg("Rebalance bank not in the order's allowed venue set")]
-    RebalanceBankNotAllowed, // 6607
+    RebalanceBankNotAllowed, // 6612
     #[msg("Rebalance min improvement must be non-negative")]
-    RebalanceInvalidMinImprovement, // 6608
+    RebalanceInvalidMinImprovement, // 6613
     #[msg("Rebalance moved more than the order's amount")]
-    RebalanceExceedsAmount, // 6609
+    RebalanceExceedsAmount, // 6614
     #[msg("Rebalance sandwich must contain exactly one start and one end instruction")]
-    RebalanceMalformedSandwich, // 6610
+    RebalanceMalformedSandwich, // 6615
     #[msg("Rebalance tip cannot be settled until the settlement delay has elapsed")]
-    RebalanceSettleTooEarly, // 6611
+    RebalanceSettleTooEarly, // 6616
     #[msg("Every referenced rebalance bank must be the source or destination of at least one move")]
-    RebalanceUnreferencedBank, // 6612
+    RebalanceUnreferencedBank, // 6617
     #[msg("Rebalance deposit/withdraw legs must all act on the rebalanced marginfi account")]
-    RebalanceForeignAccountLeg, // 6613
+    RebalanceForeignAccountLeg, // 6618
                              // **************END AUTO-REBALANCE ERRORS
 }
 
@@ -699,6 +716,12 @@ impl From<u32> for MarginfiError {
             6510 => MarginfiError::JuplendWithdrawFailed,
             6511 => MarginfiError::JuplendInitPositionDepositInsufficient,
             6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
+            6513 => MarginfiError::InvalidResize,
+            6600 => MarginfiError::BankCircuitBreakerHalted,
+            6601 => MarginfiError::CircuitBreakerAdminOnly,
+            6602 => MarginfiError::CircuitBreakerInvalidConfig,
+            6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
+            6604 => MarginfiError::CircuitBreakerPriceJump,
 
             _ => MarginfiError::InternalLogicError,
         }

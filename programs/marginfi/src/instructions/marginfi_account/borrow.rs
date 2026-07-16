@@ -8,7 +8,7 @@ use crate::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
             account_not_frozen_for_authority, check_account_init_health, is_signer_authorized,
-            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            run_cb_price_gate, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         rate_limiter::GroupRateLimiterImpl,
@@ -24,7 +24,9 @@ use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, TOKENLESS_REPAYMENTS_ALLOWED},
+    constants::{
+        EMPTY_BALANCE_THRESHOLD, LIQUIDITY_VAULT_AUTHORITY_SEED, TOKENLESS_REPAYMENTS_ALLOWED,
+    },
     types::{
         Bank, HealthCache, MarginfiAccount, MarginfiGroup, RiskTier, ACCOUNT_DISABLED,
         ACCOUNT_IN_RECEIVERSHIP,
@@ -86,7 +88,7 @@ pub fn lending_account_borrow<'info>(
         let mut bank = bank_loader.load_mut()?;
 
         validate_asset_tags(&bank, &marginfi_account)?;
-        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState)?;
+        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState, false)?;
 
         let liquidity_vault_authority_bump = bank.liquidity_vault_authority_bump;
         let origination_fee_rate: I80F48 = bank
@@ -127,6 +129,14 @@ pub fn lending_account_borrow<'info>(
             origination_fee_u64 = 0;
             share_amount = bank_account.borrow(I80F48::from_num(amount_pre_fee))?;
         }
+
+        let resulting_liability_shares: I80F48 = bank_account.balance.liability_shares.into();
+        check!(
+            resulting_liability_shares <= I80F48::ZERO
+                || resulting_liability_shares >= EMPTY_BALANCE_THRESHOLD,
+            MarginfiError::IllegalBalanceState,
+            "Borrow would leave positive liability shares below the empty balance threshold"
+        );
 
         marginfi_account.last_update = clock.unix_timestamp as u64;
 
@@ -204,10 +214,14 @@ pub fn lending_account_borrow<'info>(
     // Assuming `ctx.remaining_accounts` holds only oracle accounts
     check_account_init_health(
         &marginfi_account,
+        &group,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
     )?;
     health_cache.program_version = PROGRAM_VERSION;
+
+    // Revert if any involved bank's oracle price has jumped past the breach threshold.
+    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
 
     let bank_pk = ctx.accounts.bank.key();
     let mut bank = ctx.accounts.bank.load_mut()?;

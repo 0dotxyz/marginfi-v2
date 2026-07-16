@@ -18,6 +18,7 @@ import {
   verbose,
 } from "../../rootHooks";
 import {
+  closeBank,
   configureBank,
   configureDeleverageWithdrawalLimit,
   groupConfigure,
@@ -55,11 +56,7 @@ import {
   getTokenBalance,
 } from "../../utils/genericTests";
 import { initOrUpdatePriceUpdateV2 } from "../../utils/pyth-pull-mocks";
-import {
-  dumpAccBalances,
-  dumpBankrunLogs,
-  processBankrunTransaction,
-} from "../../utils/tools";
+import { processBankrunTransaction } from "../../utils/tools";
 import { deriveLiquidityVault } from "../../utils/pdas";
 
 const USER_ACCOUNT_THROWAWAY = "throwaway_account_zb02";
@@ -591,7 +588,10 @@ describe("Bank e2e sunset due to illiquid asset", () => {
     const sharesAfter = wrappedI80F48toBigNumber(bankAfter.totalAssetShares);
     if (verbose) {
       console.log(
-        "asset shares before: " + sharesBefore.toString() + " after " + sharesAfter.toString()
+        "asset shares before: " +
+          sharesBefore.toString() +
+          " after " +
+          sharesAfter.toString()
       );
       console.log("user before: " + lstBefore + " after: " + lstAfter);
     }
@@ -609,12 +609,9 @@ describe("Bank e2e sunset due to illiquid asset", () => {
   });
 
   // Here the admin would fund some "claims portal" using the proceeds it secured earlier to make
-  // users whole OTC. Any remaining users with lending funds, for example user 2, will be purged so
-  // they don't have this position in their accounts.
-
-  // User 2 could also withdraw here, but if they don't bother, we would do this to simply close
-  // their balance, simplifying bookkeeping.
-  it("(risk admin) Purge user 2's remaining b1 lending account", async () => {
+  // users whole OTC. Any remaining users with lending funds, for example user 2, are purged so
+  // their now-worthless position doesn't keep the bank open.
+  it("(risk admin) Purges user 2's remaining b1 lending account", async () => {
     const user = users[2];
     const userAccount = user.accounts.get(USER_ACCOUNT_THROWAWAY);
 
@@ -651,11 +648,31 @@ describe("Bank e2e sunset due to illiquid asset", () => {
     // Balance closed!
     assert.equal(userBefore.lendingAccount.balances[0].active, 1);
     assert.equal(userAfter.lendingAccount.balances[0].active, 0);
-    // Bank fully cleared!
-    assert.ok(
-      wrappedI80F48toBigNumber(bankBefore.totalAssetShares).toNumber() > 0
-    );
+    assert.equal(bankAfter.lendingPositionCount, 0);
+    // Bank fully cleared! Before the purge, only user 2's 42 shares remained.
+    assertI80F48Equal(bankBefore.totalAssetShares, new BN(42));
     assertI80F48Equal(bankAfter.totalAssetShares, 0);
+  });
+
+  it("(admin) Closes the sunset bank", async () => {
+    const groupBefore = await bankrunProgram.account.marginfiGroup.fetch(
+      throwawayGroup.publicKey
+    );
+
+    const tx = new Transaction();
+    tx.add(
+      await closeBank(groupAdmin.mrgnBankrunProgram, {
+        bank: banks[1],
+      })
+    );
+    await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
+
+    const groupAfter = await bankrunProgram.account.marginfiGroup.fetch(
+      throwawayGroup.publicKey
+    );
+    assert.equal(groupAfter.banks, groupBefore.banks - 1);
+    const bankInfo = await bankRunProvider.connection.getAccountInfo(banks[1]);
+    assert.isNull(bankInfo);
   });
 
   const deleverageTx = async (
