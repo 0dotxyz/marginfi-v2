@@ -6,10 +6,11 @@
 //!
 //! On-chain guarantees: every referenced bank holds the order's mint and is in the allowed set; each
 //! declared move goes from a lower-rate bank to one beating it by `min_improvement` (pre-move) and
-//! not inverted after the move's own market impact (post-move); the total value moved is capped by
-//! the order's `amount` budget (uncapped when the order is unlimited); value is conserved per bank up
-//! to a small dust tolerance; snapshotted non-referenced balances keep their side and shares; the
-//! account stays healthy at the maintenance requirement if it borrows; and a per-order cooldown.
+//! not inverted after the move's own market impact (post-move); the total tokens moved are capped by
+//! the order's `amount` budget (uncapped when the order is unlimited); token principal is conserved
+//! per bank up to a small dust tolerance; snapshotted non-referenced balances keep their side and
+//! shares; the account stays healthy at the maintenance requirement if it borrows; and a per-order
+//! cooldown.
 //!
 //! Supports native, Kamino, Drift, and JupLend legs. Referenced banks arrive as a deduped, indexed
 //! stream in the remaining accounts; a JupLend bank's `TokenReserve` is read from that stream
@@ -37,7 +38,7 @@ use crate::{
             LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
-        price::{OraclePriceFeedAdapter, PriceAdapter},
+        price::OraclePriceFeedAdapter,
         rate::rate_of,
         rebalance::{RebalanceOrderImpl, RebalanceRecordImpl},
     },
@@ -56,7 +57,7 @@ use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        ASSET_TAG_JUPLEND, REBALANCE_CONSERVATION_DUST_USD, REBALANCE_DEFAULT_COOLDOWN_SECONDS,
+        ASSET_TAG_JUPLEND, REBALANCE_CONSERVATION_DUST, REBALANCE_DEFAULT_COOLDOWN_SECONDS,
         REBALANCE_DEFAULT_MIN_IMPROVEMENT, REBALANCE_FEE_POOL_SEED, REBALANCE_ORDER_SEED,
         REBALANCE_RECORD_SEED, REBALANCE_SETTLE_DELAY_MAX_SECONDS,
         REBALANCE_SETTLE_DELAY_MIN_SECONDS,
@@ -68,20 +69,36 @@ use marginfi_type_crate::{
     },
 };
 
-/// Equity (weight = 1) USD value of a raw native token amount in `bank`, priced from its oracle.
-fn value_of_native<'info>(
+/// The bank's venue exchange-rate multiplier at `clock` (Kamino cToken rate, Drift cumulative
+/// interest, JupLend exchange price; 1 for native banks), read from its configured oracle/venue
+/// accounts. The oracle spot price is read too but intentionally discarded here.
+fn venue_multiplier<'info>(
+    bank: &Bank,
+    oracle_ais: &'info [AccountInfo<'info>],
+    clock: &Clock,
+) -> MarginfiResult<I80F48> {
+    let (_, priced) = OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
+        bank,
+        oracle_ais,
+        clock,
+        OraclePriceType::RealTime,
+    )?;
+    Ok(priced.price_multiplier)
+}
+
+/// Underlying-token amount (whole-token UI units) of a raw native token amount in `bank`:
+/// `native × venue_multiplier`, EXCLUDING the oracle price. Every referenced bank holds the SAME mint,
+/// so conservation is proven on token principal, not USD value. This is immune to per-bank oracle
+/// divergence: a keeper cannot skim tokens by moving them between same-mint banks whose oracles
+/// disagree, because price never enters the count. The oracle price is used only by the health check.
+fn underlying_of<'info>(
     amount_native: I80F48,
     bank: &Bank,
     oracle_ais: &'info [AccountInfo<'info>],
     clock: &Clock,
 ) -> MarginfiResult<I80F48> {
-    let adapter = OraclePriceFeedAdapter::try_from_bank(bank, oracle_ais, clock)?;
-    let price = adapter.get_price_of_type(
-        OraclePriceType::RealTime,
-        None,
-        bank.config.oracle_max_confidence,
-    )?;
-    calc_value(amount_native, price, bank.get_balance_decimals(), None)
+    let multiplier = venue_multiplier(bank, oracle_ais, clock)?;
+    calc_value(amount_native, multiplier, bank.get_balance_decimals(), None)
 }
 
 /// Monotonic per-share yield index for `bank`: `asset_share_value` times the venue exchange-rate
@@ -96,20 +113,14 @@ fn yield_index_of<'info>(
     oracle_ais: &'info [AccountInfo<'info>],
     clock: &Clock,
 ) -> MarginfiResult<I80F48> {
-    let (_, priced) = OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
-        bank,
-        oracle_ais,
-        clock,
-        OraclePriceType::RealTime,
-    )?;
     Ok(I80F48::from(bank.asset_share_value)
-        .checked_mul(priced.price_multiplier)
+        .checked_mul(venue_multiplier(bank, oracle_ais, clock)?)
         .ok_or_else(math_error!())?)
 }
 
-/// Equity (weight = 1) USD value of the user's asset position in `bank`. Returns 0 if the user holds
-/// no balance there (e.g. the source balance after a full move).
-fn bank_asset_value<'info>(
+/// Underlying-token amount (whole-token UI units) of the user's asset position in `bank`. Returns 0 if
+/// the user holds no balance there (e.g. the source balance after a full move).
+fn bank_underlying<'info>(
     account: &MarginfiAccount,
     bank_key: &Pubkey,
     bank: &Bank,
@@ -121,7 +132,7 @@ fn bank_asset_value<'info>(
         None => return Ok(I80F48::ZERO),
     };
     let amount = bank.get_asset_amount(balance.asset_shares.into())?;
-    value_of_native(amount, bank, oracle_ais, clock)
+    underlying_of(amount, bank, oracle_ais, clock)
 }
 
 pub fn place_rebalance_order(
@@ -674,8 +685,9 @@ pub fn start_rebalance<'info>(
         accrue_native_bank(parsed, &ctx.accounts.group, &clock)?;
     }
 
-    // Price every referenced bank once: validate allowlist + mint, compute its supply rate and its
-    // pre-move position value.
+    // All referenced banks hold the same mint, so conservation is proven on token principal (the
+    // underlying-token count), independent of any per-bank oracle price. Snapshot each bank's pre-move
+    // underlying amount after it clears the allowlist + mint checks.
     let account = ctx.accounts.marginfi_account.load()?;
     let mut rates: Vec<I80F48> = Vec::with_capacity(banks.len());
     let mut ref_banks: Vec<(Pubkey, I80F48)> = Vec::with_capacity(banks.len());
@@ -690,7 +702,7 @@ pub fn start_rebalance<'info>(
             MarginfiError::RebalanceMintMismatch
         );
         let rate = rate_of(&bank, parsed.oracles, parsed.token_reserve, &clock)?;
-        let pre = bank_asset_value(&account, &parsed.key, &bank, parsed.oracles, &clock)?;
+        let pre = bank_underlying(&account, &parsed.key, &bank, parsed.oracles, &clock)?;
         rates.push(rate);
         ref_banks.push((parsed.key, pre));
     }
@@ -795,16 +807,16 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         require_keys_eq!(parsed.key, *key, MarginfiError::InvalidBankAccount);
     }
 
-    let dust = REBALANCE_CONSERVATION_DUST_USD;
+    let dust = REBALANCE_CONSERVATION_DUST;
     let mut health_cache = HealthCache::zeroed();
     let (value_moved, tip_pending, move_yield_indices) = {
         let account = ctx.accounts.marginfi_account.load()?;
 
-        // Price every referenced bank once: current supply rate (for the per-move overshoot check),
-        // post-move position value (for reconciliation), and the yield index (recorded so settlement
-        // can measure realized yield since the move).
+        // Measure every referenced bank once: current supply rate (for the per-move overshoot check),
+        // post-move underlying-token amount (for the token-principal reconciliation), and the yield
+        // index (recorded so settlement can measure realized yield since the move).
         let mut post_rates: Vec<I80F48> = Vec::with_capacity(banks.len());
-        let mut post_values: Vec<I80F48> = Vec::with_capacity(banks.len());
+        let mut post_underlying: Vec<I80F48> = Vec::with_capacity(banks.len());
         let mut yield_indices: Vec<I80F48> = Vec::with_capacity(banks.len());
         for parsed in banks.iter() {
             let bank = parsed.loader.load()?;
@@ -814,7 +826,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
                 parsed.token_reserve,
                 &clock,
             )?);
-            post_values.push(bank_asset_value(
+            post_underlying.push(bank_underlying(
                 &account,
                 &parsed.key,
                 &bank,
@@ -834,10 +846,10 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
             );
         }
 
-        // Reconcile the declared moves against the real per-bank value deltas. This proves value
-        // conservation (each bank's delta matches its declared net flow within dust) and, with the
-        // per-move improvement check, that every dollar moved to a strictly better venue.
-        let (total_moved, total_source_pre) = record.reconcile(&post_values, dust)?;
+        // Reconcile the declared moves against the real per-bank underlying-token deltas. This proves
+        // token-principal conservation (each bank's delta matches its declared net flow within dust) and,
+        // with the per-move improvement check, that every token moved to a strictly better venue.
+        let (total_moved, total_source_pre) = record.reconcile(&post_underlying, dust)?;
         check!(
             total_moved > I80F48::ZERO,
             MarginfiError::RebalanceIncompleteMove
@@ -853,38 +865,38 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
 
         record.verify_others_unchanged(&account)?;
 
-        // `order.amount` (native) is a per-execution TOTAL value budget: the move may relocate at most
-        // its value across all banks. Unlimited (0) means no cap. Priced via any referenced bank
-        // (all same-mint).
-        let amount_value = if order_amount == 0 {
+        // `order.amount` (native) is a per-execution token budget: the move may relocate at most this
+        // many underlying tokens across all banks. Unlimited (0) means no cap. All banks share the mint,
+        // so the budget is simply the raw amount in whole-token (UI) units.
+        let amount_budget = if order_amount == 0 {
             None
         } else {
-            let bank0 = banks[0].loader.load()?;
-            Some(value_of_native(
+            let decimals = banks[0].loader.load()?.get_balance_decimals();
+            Some(calc_value(
                 I80F48::from_num(order_amount),
-                &bank0,
-                banks[0].oracles,
-                &clock,
+                I80F48::ONE,
+                decimals,
+                None,
             )?)
         };
-        if let Some(cap) = amount_value {
+        if let Some(cap) = amount_budget {
             check!(
                 total_moved <= cap.checked_add(dust).ok_or_else(math_error!())?,
                 MarginfiError::RebalanceExceedsAmount
             );
         }
 
-        // Proportional tip over a stable denominator: `keeper_tip * (moved / target)`. `target` is the
-        // order's `amount` value (stable across executions) or the full source position when unlimited.
-        // A fixed target makes the tip invariant to how the move is split across banks — fragmenting
-        // earns no more. The tip is drawn only from lamports above the pool's rent-exempt reserve, so
-        // the reserve is never paid out and the pool is never left in a rent-paying state.
+        // Proportional tip over a stable denominator: `keeper_tip * (moved / target)`, all in tokens.
+        // `target` is the order's `amount` budget (stable across executions) or the full source position
+        // when unlimited. A fixed target makes the tip invariant to how the move is split across banks,
+        // so fragmenting earns no more. The tip is drawn only from lamports above the pool's rent-exempt
+        // reserve, so the reserve is never paid out and the pool is never left in a rent-paying state.
         let spendable = ctx
             .accounts
             .fee_pool
             .lamports()
             .saturating_sub(Rent::get()?.minimum_balance(0));
-        let target_value = amount_value
+        let target_value = amount_budget
             .map(|cap| cap.min(total_source_pre))
             .unwrap_or(total_source_pre);
         let tip_paid = if keeper_tip == 0 || target_value <= I80F48::ZERO {

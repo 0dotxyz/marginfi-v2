@@ -52,8 +52,8 @@ pub struct RebalanceOrder {
     pub min_improvement: WrappedI80F48,
     /// Minimum wall-clock seconds between executions (anti-ping-pong cooldown).
     pub cooldown_seconds: u64,
-    /// Per-execution total value budget: each execution may relocate at most this much native-token
-    /// value (priced in USD) summed across all referenced banks. `0` means no cap (unlimited).
+    /// Per-execution token budget: each execution may relocate at most this many underlying tokens
+    /// (raw native units of the shared mint) summed across all referenced banks. `0` means no cap.
     pub amount: u64,
     /// Unix timestamp (seconds) of the last successful rebalance.
     pub last_exec_timestamp: u64,
@@ -63,7 +63,7 @@ pub struct RebalanceOrder {
     pub allowed_bank_count: u8,
     pub _pad0: [u8; 6],
     /// Lamport tip a keeper earns for relocating the order's full target, paid proportionally to the
-    /// value actually moved and drawn from the account's rebalance fee pool. 0 = no tip.
+    /// tokens actually moved and drawn from the account's rebalance fee pool. 0 = no tip.
     pub keeper_tip: u64,
 }
 
@@ -72,8 +72,8 @@ impl RebalanceOrder {
     pub const DISCRIMINATOR: [u8; 8] = discriminators::REBALANCE_ORDER;
 }
 
-// A bank referenced by a rebalance execution, with its equity (weight-1) USD value at start.
-// `end_rebalance` recomputes the post value and reconciles the delta against the declared moves.
+// A bank referenced by a rebalance execution, with the user's underlying-token amount at start.
+// `end_rebalance` recomputes the post amount and reconciles the delta against the declared moves.
 assert_struct_size!(RebalanceRefBank, 48);
 assert_struct_align!(RebalanceRefBank, 8);
 #[repr(C)]
@@ -81,14 +81,14 @@ assert_struct_align!(RebalanceRefBank, 8);
 #[derive(Default, Debug, PartialEq, Eq, Pod, Zeroable, Copy, Clone)]
 pub struct RebalanceRefBank {
     pub bank: Pubkey,
-    pub pre_value: WrappedI80F48,
+    pub pre_underlying: WrappedI80F48,
 }
 
-// A declared value move from `src_index` to `dst_index` (indices into `RebalanceRecord.ref_banks`),
-// of `amount` equity USD value. The keeper declares these; `start_rebalance` requires each move's
+// A declared token move from `src_index` to `dst_index` (indices into `RebalanceRecord.ref_banks`),
+// of `amount` underlying tokens. The keeper declares these; `start_rebalance` requires each move's
 // destination rate to beat its source by the order's margin, and `end_rebalance` re-checks the
 // destination is not worse after market impact and reconciles the amounts against the observed
-// per-bank value deltas.
+// per-bank token deltas.
 assert_struct_size!(RebalanceMove, 24);
 assert_struct_align!(RebalanceMove, 8);
 #[repr(C)]
@@ -103,9 +103,9 @@ pub struct RebalanceMove {
 
 // Per-execution record: created in `start_rebalance`, persists past `end_rebalance` (which escrows
 // the keeper tip into it), and is closed in `settle_rebalance_tip`. Captures every referenced bank's
-// start value, the declared moves, a snapshot of every OTHER active balance, and the move-time yield
-// index per bank, so end can reconcile/prove conservation and settle can pay the tip only if the
-// destinations realized more yield than the sources over the settlement window.
+// start underlying-token amount, the declared moves, a snapshot of every OTHER active balance, and the
+// move-time yield index per bank, so end can reconcile/prove token conservation and settle can pay the
+// tip only if the destinations realized more yield than the sources over the settlement window.
 assert_struct_size!(RebalanceRecord, 1632);
 assert_struct_align!(RebalanceRecord, 8);
 #[repr(C)]
@@ -115,9 +115,9 @@ assert_struct_align!(RebalanceRecord, 8);
 pub struct RebalanceRecord {
     pub order: Pubkey,
     pub executor: Pubkey,
-    /// The distinct banks this execution touches (first `ref_bank_count` entries), with start values.
+    /// The distinct banks this execution touches (first `ref_bank_count` entries), with start amounts.
     pub ref_banks: [RebalanceRefBank; MAX_REBALANCE_BANKS],
-    /// The declared value moves (first `move_count` entries), referencing `ref_banks` by index.
+    /// The declared token moves (first `move_count` entries), referencing `ref_banks` by index.
     pub moves: [RebalanceMove; MAX_REBALANCE_MOVES],
     /// Snapshot of every active balance NOT in the referenced set; end verifies these unchanged.
     pub balance_states: [ExecuteOrderBalanceRecord; MAX_REBALANCE_RECORD_BALANCES],

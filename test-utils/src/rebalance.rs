@@ -353,6 +353,60 @@ impl RebalanceFixture {
         vec![start_ix, withdraw_ix, deposit_ix, end_ix]
     }
 
+    /// Like `build_sandwich` but deposits only `deposit_ui` into `dst` while still withdrawing the full
+    /// source and declaring the full move: the keeper pockets the shortfall. Conservation must reject it.
+    pub async fn build_skim_sandwich(
+        &self,
+        src: Pubkey,
+        dst: Pubkey,
+        deposit_ui: f64,
+    ) -> Vec<Instruction> {
+        let ref_banks = vec![self.bank_meta(src), self.bank_meta(dst)];
+        let moves = vec![rebalance_move(0, 1, DEPOSIT_USDC)];
+        let start_ix = self
+            .user
+            .make_rebalance_start_ix(
+                ref_banks.clone(),
+                moves,
+                self.order_pda,
+                self.record_pda,
+                self.keeper.pubkey(),
+                self.keeper.pubkey(),
+            )
+            .await;
+        let withdraw_ix = self
+            .user
+            .make_withdraw_ix_with_authority(
+                self.keeper_usdc,
+                &self.src_bank_f,
+                DEPOSIT_USDC,
+                Some(true),
+                self.keeper.pubkey(),
+            )
+            .await;
+        let deposit_ix = self
+            .user
+            .make_deposit_ix_with_authority(
+                self.keeper_usdc,
+                &self.dst_bank_f,
+                deposit_ui,
+                None,
+                self.keeper.pubkey(),
+            )
+            .await;
+        let end_ix = self
+            .user
+            .make_rebalance_end_ix(
+                ref_banks,
+                vec![src],
+                self.order_pda,
+                self.record_pda,
+                self.keeper.pubkey(),
+            )
+            .await;
+        vec![start_ix, withdraw_ix, deposit_ix, end_ix]
+    }
+
     pub async fn process(
         &self,
         ixs: &[Instruction],

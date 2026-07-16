@@ -73,9 +73,9 @@ impl RebalanceOrderImpl for RebalanceOrder {
 }
 
 pub trait RebalanceRecordImpl {
-    /// Record every referenced bank's start value + the declared moves, and snapshot every active
-    /// balance NOT in the referenced set, so `end_rebalance` can reconcile the moves against real
-    /// value deltas, prove conservation, and prove untouched balances kept the same side and shares.
+    /// Record every referenced bank's start underlying-token amount + the declared moves, and snapshot
+    /// every active balance NOT in the referenced set, so `end_rebalance` can reconcile the moves
+    /// against real token deltas, prove conservation, and prove untouched balances kept side and shares.
     fn initialize(
         &mut self,
         order: Pubkey,
@@ -88,12 +88,16 @@ pub trait RebalanceRecordImpl {
     /// The declared moves, sliced to `move_count`.
     fn active_moves(&self) -> &[RebalanceMove];
 
-    /// Reconcile the declared moves against the observed per-bank value deltas. `post_values[i]` is
-    /// the end value of `ref_banks[i]`. For every referenced bank the net declared flow (incoming
-    /// amounts minus outgoing) must equal `post - pre` within `dust`. Returns
-    /// `(total_moved, total_source_pre_value)`: the value that landed (sum of positive net deltas) and
-    /// the start position value of the net-source banks (the tip denominator for unlimited orders).
-    fn reconcile(&self, post_values: &[I80F48], dust: I80F48) -> MarginfiResult<(I80F48, I80F48)>;
+    /// Reconcile the declared moves against the observed per-bank underlying-token deltas.
+    /// `post_underlying[i]` is the end token amount of `ref_banks[i]`. For every referenced bank the net
+    /// declared flow (incoming amounts minus outgoing) must equal `post - pre` within `dust`. Returns
+    /// `(total_moved, total_source_pre)`: the tokens that landed (sum of positive net deltas) and the
+    /// start token amount of the net-source banks (the tip denominator for unlimited orders).
+    fn reconcile(
+        &self,
+        post_underlying: &[I80F48],
+        dust: I80F48,
+    ) -> MarginfiResult<(I80F48, I80F48)>;
 
     /// Verify every snapshotted non-referenced balance is unchanged (side + shares).
     fn verify_others_unchanged(&self, marginfi_account: &MarginfiAccount) -> MarginfiResult;
@@ -131,7 +135,7 @@ impl RebalanceRecordImpl for RebalanceRecord {
         for (i, (bank, val)) in ref_banks.iter().enumerate() {
             self.ref_banks[i] = RebalanceRefBank {
                 bank: *bank,
-                pre_value: (*val).into(),
+                pre_underlying: (*val).into(),
             };
         }
         self.ref_bank_count = ref_banks.len() as u8;
@@ -172,12 +176,19 @@ impl RebalanceRecordImpl for RebalanceRecord {
         &self.moves[..self.move_count as usize]
     }
 
-    fn reconcile(&self, post_values: &[I80F48], dust: I80F48) -> MarginfiResult<(I80F48, I80F48)> {
+    fn reconcile(
+        &self,
+        post_underlying: &[I80F48],
+        dust: I80F48,
+    ) -> MarginfiResult<(I80F48, I80F48)> {
         let n = self.ref_bank_count as usize;
-        check!(post_values.len() == n, MarginfiError::IllegalBalanceState);
+        check!(
+            post_underlying.len() == n,
+            MarginfiError::IllegalBalanceState
+        );
         let mut total_moved = I80F48::ZERO;
         let mut total_source_pre = I80F48::ZERO;
-        for (i, post) in post_values.iter().enumerate().take(n) {
+        for (i, post) in post_underlying.iter().enumerate().take(n) {
             let mut declared_net = I80F48::ZERO;
             for m in self.active_moves() {
                 let amt = I80F48::from(m.amount);
@@ -188,7 +199,7 @@ impl RebalanceRecordImpl for RebalanceRecord {
                     declared_net = declared_net.checked_sub(amt).ok_or_else(math_error!())?;
                 }
             }
-            let pre = I80F48::from(self.ref_banks[i].pre_value);
+            let pre = I80F48::from(self.ref_banks[i].pre_underlying);
             let actual = post.checked_sub(pre).ok_or_else(math_error!())?;
             check!(
                 (declared_net.checked_sub(actual).ok_or_else(math_error!())?).abs() <= dust,

@@ -1100,6 +1100,20 @@ async fn rebalance_rejects_moves_more_than_declared() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A keeper withdraws the full source but deposits only half into the destination, pocketing the rest.
+/// Conservation is proven on underlying token count, so the missing tokens surface as a per-bank
+/// shortfall regardless of any oracle price: the skim cannot be masked by divergent same-mint oracles.
+#[tokio::test]
+async fn rebalance_rejects_principal_skim() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let ixs = f
+        .build_skim_sandwich(f.src_bank_f.key, f.dst_bank_f.key, DEPOSIT_USDC / 2.0)
+        .await;
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceValueLeak);
+    Ok(())
+}
+
 /// A move declared as a split across two destinations cannot be routed entirely into one: per-bank
 /// reconciliation catches the misattribution (dst1 over, dst2 under).
 #[tokio::test]
