@@ -454,7 +454,9 @@ pub enum MarginfiError {
     RebalanceExceedsAmount, // 6609
     #[msg("Rebalance sandwich must contain exactly one start and one end instruction")]
     RebalanceMalformedSandwich, // 6610
-                                // **************END AUTO-REBALANCE ERRORS
+    #[msg("Rebalance tip cannot be settled until the settlement delay has elapsed")]
+    RebalanceSettleTooEarly, // 6611
+                             // **************END AUTO-REBALANCE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {

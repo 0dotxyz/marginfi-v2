@@ -316,6 +316,17 @@ pub struct RebalanceExecutedEvent {
 }
 
 #[event]
+pub struct RebalanceTipSettledEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+    pub executor: Pubkey,
+    /// Whether the destinations realized at least the sources' yield over the settlement window.
+    pub realized: bool,
+    /// Tip paid to the keeper (0 if not realized; the escrow was refunded to the fee pool).
+    pub tip_paid: u64,
+}
+
+#[event]
 pub struct AdminCloseAccountEvent {
     pub header: AccountEventHeader,
     pub global_fee_wallet: Pubkey,

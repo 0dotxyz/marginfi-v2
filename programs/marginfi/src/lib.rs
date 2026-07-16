@@ -378,11 +378,22 @@ pub mod marginfi {
     }
 
     /// (permissionless keeper) End an auto-rebalance. Re-checks dst >= src post-move, value
-    /// conservation, untouched balances, and health; the order persists.
+    /// conservation, untouched balances, and health; the order persists. The keeper tip is escrowed
+    /// into the record and paid later via `settle_rebalance_tip`.
     pub fn marginfi_account_end_rebalance<'info>(
         ctx: Context<'info, EndRebalance<'info>>,
     ) -> MarginfiResult {
         marginfi_account::end_rebalance(ctx)
+    }
+
+    /// (permissionless) Settle a rebalance's escrowed keeper tip after the settlement delay. Pays the
+    /// recorded keeper only if the destinations realized more yield than the sources over the window
+    /// (defeats cross-tx rate manipulation); otherwise refunds the tip to the fee pool. Closes the
+    /// record.
+    pub fn marginfi_account_settle_rebalance_tip<'info>(
+        ctx: Context<'info, SettleRebalanceTip<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::settle_rebalance_tip(ctx)
     }
 
     /// (permissionless keeper) Close an existing Order after the user account was closed, or it no

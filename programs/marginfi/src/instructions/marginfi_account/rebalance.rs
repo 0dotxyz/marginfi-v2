@@ -22,7 +22,7 @@ use crate::{
         AccountEventHeader, KeeperCloseRebalanceOrderEvent,
         MarginfiAccountCloseRebalanceOrderEvent, MarginfiAccountPlaceRebalanceOrderEvent,
         MarginfiAccountUpdateRebalanceOrderEvent, RebalanceExecutedEvent,
-        RebalanceFeePoolTopUpEvent, RebalanceFeePoolWithdrawEvent,
+        RebalanceFeePoolTopUpEvent, RebalanceFeePoolWithdrawEvent, RebalanceTipSettledEvent,
     },
     ix_utils::{
         get_discrim_hash, validate_not_cpi_by_stack_height, validate_rebalance_instructions,
@@ -58,7 +58,8 @@ use marginfi_type_crate::{
     constants::{
         ASSET_TAG_JUPLEND, REBALANCE_CONSERVATION_DUST_USD, REBALANCE_DEFAULT_COOLDOWN_SECONDS,
         REBALANCE_DEFAULT_MIN_IMPROVEMENT, REBALANCE_FEE_POOL_SEED, REBALANCE_ORDER_SEED,
-        REBALANCE_RECORD_SEED,
+        REBALANCE_RECORD_SEED, REBALANCE_SETTLE_DELAY_MAX_SECONDS,
+        REBALANCE_SETTLE_DELAY_MIN_SECONDS,
     },
     types::{
         Bank, HealthCache, MarginfiAccount, MarginfiGroup, OraclePriceType, RebalanceMove,
@@ -81,6 +82,29 @@ fn value_of_native<'info>(
         bank.config.oracle_max_confidence,
     )?;
     calc_value(amount_native, price, bank.get_balance_decimals(), None)
+}
+
+/// Monotonic per-share yield index for `bank`: `asset_share_value` times the venue exchange-rate
+/// multiplier, excluding the oracle spot price. Native banks accrue via `asset_share_value`
+/// (multiplier 1); integration banks accrue via the venue multiplier (Kamino cToken rate, Drift
+/// cumulative interest, JupLend exchange price), all monotonic. The growth of this index over a
+/// window is the realized supply yield a depositor earned, which `settle_rebalance_tip` compares
+/// across banks. Because it is an accrued integral, not a spot rate, a single-tx rate spike cannot
+/// move it.
+fn yield_index_of<'info>(
+    bank: &Bank,
+    oracle_ais: &'info [AccountInfo<'info>],
+    clock: &Clock,
+) -> MarginfiResult<I80F48> {
+    let (_, priced) = OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
+        bank,
+        oracle_ais,
+        clock,
+        OraclePriceType::RealTime,
+    )?;
+    Ok(I80F48::from(bank.asset_share_value)
+        .checked_mul(priced.price_multiplier)
+        .ok_or_else(math_error!())?)
 }
 
 /// Equity (weight = 1) USD value of the user's asset position in `bank`. Returns 0 if the user holds
@@ -773,13 +797,15 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
 
     let dust = REBALANCE_CONSERVATION_DUST_USD;
     let mut health_cache = HealthCache::zeroed();
-    let (value_moved, tip_paid) = {
+    let (value_moved, tip_pending, move_yield_indices) = {
         let account = ctx.accounts.marginfi_account.load()?;
 
-        // Price every referenced bank once: current supply rate (for the per-move overshoot check) and
-        // post-move position value (for reconciliation).
+        // Price every referenced bank once: current supply rate (for the per-move overshoot check),
+        // post-move position value (for reconciliation), and the yield index (recorded so settlement
+        // can measure realized yield since the move).
         let mut post_rates: Vec<I80F48> = Vec::with_capacity(banks.len());
         let mut post_values: Vec<I80F48> = Vec::with_capacity(banks.len());
+        let mut yield_indices: Vec<I80F48> = Vec::with_capacity(banks.len());
         for parsed in banks.iter() {
             let bank = parsed.loader.load()?;
             post_rates.push(rate_of(
@@ -795,6 +821,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
                 parsed.oracles,
                 &clock,
             )?);
+            yield_indices.push(yield_index_of(&bank, parsed.oracles, &clock)?);
         }
 
         // Every move must not have inverted its rate advantage (the destination still beats the source
@@ -872,9 +899,22 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
                 .ok_or_else(math_error!())?;
             owed.floor().to_num::<u64>().min(spendable)
         };
-        (total_moved, tip_paid)
+        (total_moved, tip_paid, yield_indices)
     };
 
+    // Record the move-time yield indices, the timestamp, and the tip. The tip is NOT paid here: it is
+    // escrowed into the record and released later by `settle_rebalance_tip` only if the destinations
+    // realized more yield than the sources over the settlement window. This defeats cross-transaction
+    // (Jito bundle) rate manipulation, where a transient rate spike qualifies the move and is reverted
+    // in the same bundle: the spike leaves no realized yield, so the tip is never paid.
+    {
+        let mut record = ctx.accounts.rebalance_record.load_mut()?;
+        for (i, idx) in move_yield_indices.iter().enumerate() {
+            record.move_yield_index[i] = (*idx).into();
+        }
+        record.move_timestamp = clock.unix_timestamp as u64;
+        record.pending_tip = tip_pending;
+    }
     {
         let mut account = ctx.accounts.marginfi_account.load_mut()?;
         account.health_cache = health_cache;
@@ -888,13 +928,15 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         order.last_exec_timestamp = clock.unix_timestamp as u64;
     }
 
+    // Escrow the tip out of the fee pool into the record so a later pool withdrawal can't strip the
+    // keeper's earned tip before settlement.
     pay_from_fee_pool(
         &ctx.accounts.fee_pool,
-        &ctx.accounts.executor.to_account_info(),
+        &ctx.accounts.rebalance_record.to_account_info(),
         &ctx.accounts.system_program,
         &ctx.accounts.marginfi_account.key(),
         ctx.bumps.fee_pool,
-        tip_paid,
+        tip_pending,
     )?;
 
     let (authority, group) = {
@@ -912,7 +954,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         executor: ctx.accounts.executor.key(),
         bank_count: ref_keys.len() as u8,
         value_moved: value_moved.into(),
-        tip_paid,
+        tip_paid: tip_pending,
     });
     Ok(())
 }
@@ -934,9 +976,10 @@ pub struct EndRebalance<'info> {
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
     #[account(mut, has_one = marginfi_account @ MarginfiError::Unauthorized)]
     pub rebalance_order: AccountLoader<'info, RebalanceOrder>,
+    // NOT closed here: the record persists (holding the escrowed tip + move-time yield indices) until
+    // `settle_rebalance_tip` pays or refunds the tip and closes it.
     #[account(
         mut,
-        close = executor,
         has_one = executor @ MarginfiError::Unauthorized,
         constraint = rebalance_record.load()?.order == rebalance_order.key()
             @ MarginfiError::Unauthorized,
@@ -957,5 +1000,170 @@ pub struct EndRebalance<'info> {
 impl<'info> Hashable for EndRebalance<'info> {
     fn get_hash() -> [u8; 8] {
         get_discrim_hash("global", "marginfi_account_end_rebalance")
+    }
+}
+
+/// (permissionless) Settle a rebalance's escrowed keeper tip after the settlement delay. Measures the
+/// realized supply yield each referenced bank earned since the move (current yield index vs the
+/// recorded move-time index) and pays the escrowed tip to the recorded executor only if every move's
+/// destination out-yielded its source; otherwise the tip is refunded to the fee pool. Either way the
+/// record is closed (its rent goes to the caller, compensating the tx and unblocking the order for the
+/// next rebalance). Anyone may call it; the tip always goes to the recorded keeper, not the caller.
+pub fn settle_rebalance_tip<'info>(
+    ctx: Context<'info, SettleRebalanceTip<'info>>,
+) -> MarginfiResult {
+    let clock = Clock::get()?;
+    let group_key = ctx.accounts.group.key();
+    let remaining = ctx.remaining_accounts;
+
+    let (ref_keys, move_ts, pending_tip, move_indices) = {
+        let record = ctx.accounts.rebalance_record.load()?;
+        let n = record.ref_bank_count as usize;
+        (
+            record.ref_banks[..n]
+                .iter()
+                .map(|r| r.bank)
+                .collect::<Vec<_>>(),
+            record.move_timestamp,
+            record.pending_tip,
+            record.move_yield_index[..n]
+                .iter()
+                .map(|w| I80F48::from(*w))
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    // The settlement window tracks the order's cooldown (clamped), so the record is settleable by the
+    // time the cooldown allows the next rebalance and never blocks it, while staying above a spike and
+    // bounding how long the keeper waits.
+    let settle_delay = ctx.accounts.rebalance_order.load()?.cooldown_seconds.clamp(
+        REBALANCE_SETTLE_DELAY_MIN_SECONDS,
+        REBALANCE_SETTLE_DELAY_MAX_SECONDS,
+    );
+    check!(
+        (clock.unix_timestamp as u64)
+            >= move_ts
+                .checked_add(settle_delay)
+                .ok_or_else(math_error!())?,
+        MarginfiError::RebalanceSettleTooEarly
+    );
+
+    let (banks, _tail) = parse_rebalance_banks(remaining, &group_key, ref_keys.len())?;
+    for (parsed, key) in banks.iter().zip(ref_keys.iter()) {
+        require_keys_eq!(parsed.key, *key, MarginfiError::InvalidBankAccount);
+    }
+
+    // Bring native banks' `asset_share_value` current so the realized-yield read reflects interest
+    // accrued over the whole window (integration multipliers are refreshed by the caller's venue crank
+    // and staleness-checked in `yield_index_of`).
+    for parsed in banks.iter() {
+        accrue_native_bank(parsed, &ctx.accounts.group, &clock)?;
+    }
+
+    let mut current_indices: Vec<I80F48> = Vec::with_capacity(banks.len());
+    for parsed in banks.iter() {
+        let bank = parsed.loader.load()?;
+        current_indices.push(yield_index_of(&bank, parsed.oracles, &clock)?);
+    }
+
+    // A move realized its intended improvement iff the destination's index grew strictly more than
+    // the source's over the window: `cur[dst]/move[dst] > cur[src]/move[src]`. Cross-multiplied to
+    // avoid division (all indices are positive). A transient rate spike leaves no index growth, and a
+    // move to a merely-equal venue realizes no benefit, so both fail here and pay nothing.
+    let realized = {
+        let record = ctx.accounts.rebalance_record.load()?;
+        let mut ok = true;
+        for m in record.active_moves() {
+            let (s, d) = (m.src_index as usize, m.dst_index as usize);
+            let lhs = current_indices[d]
+                .checked_mul(move_indices[s])
+                .ok_or_else(math_error!())?;
+            let rhs = current_indices[s]
+                .checked_mul(move_indices[d])
+                .ok_or_else(math_error!())?;
+            if lhs <= rhs {
+                ok = false;
+                break;
+            }
+        }
+        ok
+    };
+
+    // Release the escrowed tip: to the keeper if the move realized yield, else back to the fee pool.
+    // The record is program-owned, so move lamports directly; Anchor's `close` returns the base rent
+    // to the caller afterward.
+    let record_ai = ctx.accounts.rebalance_record.to_account_info();
+    let dest_ai = if realized {
+        ctx.accounts.executor.to_account_info()
+    } else {
+        ctx.accounts.fee_pool.to_account_info()
+    };
+    if pending_tip > 0 {
+        **record_ai.try_borrow_mut_lamports()? = record_ai
+            .lamports()
+            .checked_sub(pending_tip)
+            .ok_or_else(math_error!())?;
+        **dest_ai.try_borrow_mut_lamports()? = dest_ai
+            .lamports()
+            .checked_add(pending_tip)
+            .ok_or_else(math_error!())?;
+    }
+
+    let (authority, group) = {
+        let account = ctx.accounts.marginfi_account.load()?;
+        (account.authority, account.group)
+    };
+    emit!(RebalanceTipSettledEvent {
+        header: AccountEventHeader {
+            signer: Some(ctx.accounts.caller.key()),
+            marginfi_account: ctx.accounts.marginfi_account.key(),
+            marginfi_account_authority: authority,
+            marginfi_group: group,
+        },
+        rebalance_order: ctx.accounts.rebalance_order.key(),
+        executor: ctx.accounts.executor.key(),
+        realized,
+        tip_paid: if realized { pending_tip } else { 0 },
+    });
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct SettleRebalanceTip<'info> {
+    pub group: AccountLoader<'info, MarginfiGroup>,
+    #[account(has_one = group @ MarginfiError::InvalidGroup)]
+    pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
+    #[account(has_one = marginfi_account @ MarginfiError::Unauthorized)]
+    pub rebalance_order: AccountLoader<'info, RebalanceOrder>,
+    #[account(
+        mut,
+        close = caller,
+        constraint = rebalance_record.load()?.order == rebalance_order.key()
+            @ MarginfiError::Unauthorized,
+    )]
+    pub rebalance_record: AccountLoader<'info, RebalanceRecord>,
+    /// CHECK: the recorded keeper; receives the tip. Validated to equal `record.executor`.
+    #[account(
+        mut,
+        constraint = executor.key() == rebalance_record.load()?.executor
+            @ MarginfiError::Unauthorized,
+    )]
+    pub executor: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [REBALANCE_FEE_POOL_SEED.as_bytes(), marginfi_account.key().as_ref()],
+        bump,
+    )]
+    pub fee_pool: SystemAccount<'info>,
+    /// The permissionless caller; pays the tx and receives the record's rent.
+    #[account(mut)]
+    pub caller: Signer<'info>,
+    // Referenced banks follow in remaining_accounts (same layout as start/end):
+    // [bank, (JupLend reserve), oracles]...
+}
+
+impl<'info> Hashable for SettleRebalanceTip<'info> {
+    fn get_hash() -> [u8; 8] {
+        get_discrim_hash("global", "marginfi_account_settle_rebalance_tip")
     }
 }

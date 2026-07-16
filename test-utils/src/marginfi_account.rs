@@ -1235,6 +1235,35 @@ impl MarginfiAccountFixture {
         }
     }
 
+    pub async fn make_rebalance_settle_ix(
+        &self,
+        ref_banks: Vec<RebalanceBankMeta>,
+        rebalance_order: Pubkey,
+        rebalance_record: Pubkey,
+        executor: Pubkey,
+        caller: Pubkey,
+    ) -> Instruction {
+        let group = self.load().await.group;
+        let mut accounts = marginfi::accounts::SettleRebalanceTip {
+            group,
+            marginfi_account: self.key,
+            rebalance_order,
+            rebalance_record,
+            executor,
+            fee_pool: self.rebalance_fee_pool_pda(),
+            caller,
+        }
+        .to_account_metas(Some(true));
+        for b in &ref_banks {
+            b.append_to(&mut accounts);
+        }
+        Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: marginfi::instruction::MarginfiAccountSettleRebalanceTip {}.data(),
+        }
+    }
+
     pub async fn make_keeper_close_rebalance_order_ix(
         &self,
         rebalance_order: Pubkey,

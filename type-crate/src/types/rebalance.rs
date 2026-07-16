@@ -101,11 +101,12 @@ pub struct RebalanceMove {
     pub amount: WrappedI80F48,
 }
 
-// Transient per-execution record: created in `start_rebalance`, closed in `end_rebalance` (rent ->
-// executor). Captures every referenced bank's start value, the declared moves, and a snapshot of every
-// OTHER active balance, so end can reconcile the moves against real deltas, prove value conservation,
-// and prove untouched balances kept the same side and shares.
-assert_struct_size!(RebalanceRecord, 1504);
+// Per-execution record: created in `start_rebalance`, persists past `end_rebalance` (which escrows
+// the keeper tip into it), and is closed in `settle_rebalance_tip`. Captures every referenced bank's
+// start value, the declared moves, a snapshot of every OTHER active balance, and the move-time yield
+// index per bank, so end can reconcile/prove conservation and settle can pay the tip only if the
+// destinations realized more yield than the sources over the settlement window.
+assert_struct_size!(RebalanceRecord, 1632);
 assert_struct_align!(RebalanceRecord, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
@@ -120,11 +121,20 @@ pub struct RebalanceRecord {
     pub moves: [RebalanceMove; MAX_REBALANCE_MOVES],
     /// Snapshot of every active balance NOT in the referenced set; end verifies these unchanged.
     pub balance_states: [ExecuteOrderBalanceRecord; MAX_REBALANCE_RECORD_BALANCES],
+    /// Per-referenced-bank yield index (`asset_share_value` × venue multiplier) captured at
+    /// `end_rebalance`. `settle_rebalance_tip` compares current indices against these to require the
+    /// destinations actually out-yielded the sources over the settlement window.
+    pub move_yield_index: [WrappedI80F48; MAX_REBALANCE_BANKS],
+    /// Unix seconds when the move completed (`end_rebalance`); the settlement window opens
+    /// `cooldown_seconds.clamp(SETTLE_DELAY_MIN, SETTLE_DELAY_MAX)` after this.
+    pub move_timestamp: u64,
+    /// Keeper tip escrowed into this record at `end_rebalance`, paid to `executor` on a realized
+    /// settlement or refunded to the fee pool otherwise (lamports).
+    pub pending_tip: u64,
     pub ref_bank_count: u8,
     pub move_count: u8,
     pub active_balance_count: u8,
     pub _pad0: [u8; 5],
-    pub _reserved: [u8; 16],
 }
 
 impl RebalanceRecord {

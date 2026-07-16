@@ -93,6 +93,17 @@ pub const REBALANCE_DEFAULT_MIN_IMPROVEMENT: I80F48 = I80F48!(0.05);
 /// Default seconds between executions, used when the user does not set a cooldown (24 hours).
 pub const REBALANCE_DEFAULT_COOLDOWN_SECONDS: u64 = 86_400;
 
+/// Delay before a rebalance keeper tip can be settled, derived per order as
+/// `cooldown_seconds.clamp(MIN, MAX)`. The tip is not paid at `end_rebalance`; a later
+/// `settle_rebalance_tip` pays it only if the destinations actually out-yielded the sources over
+/// this window (realized yield, from each bank's share value times venue multiplier), which
+/// defeats cross-transaction (bundle) rate manipulation. Tracking the cooldown means the record is
+/// settleable by the time the cooldown allows the next rebalance, so a pending settlement never
+/// blocks re-rebalancing for any `cooldown >= MIN`. `MIN` keeps the window well above a single-slot
+/// spike; `MAX` bounds how long a keeper waits for the tip on long-cooldown orders.
+pub const REBALANCE_SETTLE_DELAY_MIN_SECONDS: u64 = 600; // 10 minutes
+pub const REBALANCE_SETTLE_DELAY_MAX_SECONDS: u64 = 3_600; // 1 hour
+
 pub const EMISSIONS_FLAG_BORROW_ACTIVE: u64 = 1 << 0;
 pub const EMISSIONS_FLAG_LENDING_ACTIVE: u64 = 1 << 1;
 pub const PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG: u64 = 1 << 2;

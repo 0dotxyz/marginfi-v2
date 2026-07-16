@@ -2,6 +2,7 @@ use crate::bank::BankFixture;
 use crate::marginfi_account::{MarginfiAccountFixture, RebalanceBankMeta};
 use crate::prelude::*;
 use crate::test::TestFixture;
+use anchor_lang::prelude::Clock;
 use drift_mocks::state::MinimalSpotMarket;
 use fixed::types::I80F48;
 use juplend_mocks::state::TokenReserve;
@@ -9,7 +10,7 @@ use kamino_mocks::state::{CurvePoint, MinimalReserve};
 use marginfi_type_crate::{
     constants::{REBALANCE_ORDER_SEED, REBALANCE_RECORD_SEED},
     pdas::derive_juplend_token_reserve,
-    types::{RebalanceMove, WrappedI80F48},
+    types::{RebalanceMove, RebalanceRecord, WrappedI80F48},
 };
 use solana_sdk::{
     account::{Account, AccountSharedData},
@@ -62,9 +63,14 @@ pub async fn fund_keeper_for_fees(test_f: &TestFixture, keeper: &Keypair) -> any
     Ok(())
 }
 
-/// Drive `dst` to ~50% utilization (a positive supply rate): a lender funds it with 1_000 USDC and a
-/// SOL-collateralized borrower draws 500, then interest is accrued.
-pub async fn drive_dst_utilization(test_f: &TestFixture, dst: &BankFixture) -> anyhow::Result<()> {
+/// Fund `bank` with 1_000 USDC of lender liquidity and draw `borrow_ui` against `sol_collateral_ui`
+/// SOL collateral, then accrue, giving the bank a supply rate set by the resulting utilization.
+pub async fn drive_utilization(
+    test_f: &TestFixture,
+    bank: &BankFixture,
+    borrow_ui: f64,
+    sol_collateral_ui: f64,
+) -> anyhow::Result<()> {
     let sol_bank_f = test_f.get_bank(&BankMint::Sol);
     let lender = test_f.create_marginfi_account().await;
     let lender_usdc = test_f
@@ -72,23 +78,28 @@ pub async fn drive_dst_utilization(test_f: &TestFixture, dst: &BankFixture) -> a
         .create_token_account_and_mint_to(1_000.0)
         .await;
     lender
-        .try_bank_deposit(lender_usdc.key, dst, 1_000.0, None)
+        .try_bank_deposit(lender_usdc.key, bank, 1_000.0, None)
         .await?;
 
     let borrower = test_f.create_marginfi_account().await;
     let borrower_sol = test_f
         .sol_mint
-        .create_token_account_and_mint_to(100.0)
+        .create_token_account_and_mint_to(sol_collateral_ui)
         .await;
     borrower
-        .try_bank_deposit(borrower_sol.key, sol_bank_f, 100.0, None)
+        .try_bank_deposit(borrower_sol.key, sol_bank_f, sol_collateral_ui, None)
         .await?;
     let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
     borrower
-        .try_bank_borrow(borrower_usdc.key, dst, 500.0)
+        .try_bank_borrow(borrower_usdc.key, bank, borrow_ui)
         .await?;
-    test_f.marginfi_group.try_accrue_interest(dst).await?;
+    test_f.marginfi_group.try_accrue_interest(bank).await?;
     Ok(())
+}
+
+/// Drive `dst` to ~50% utilization (a positive supply rate).
+pub async fn drive_dst_utilization(test_f: &TestFixture, dst: &BankFixture) -> anyhow::Result<()> {
+    drive_utilization(test_f, dst, 500.0, 100.0).await
 }
 
 /// A move of `ui_value` USD (== UI USDC amount at the $1 test oracle) from `src_index` to `dst_index`
@@ -349,6 +360,49 @@ impl RebalanceFixture {
         process_as_keeper(&self.test_f, &self.keeper, ixs).await
     }
 
+    /// The keeper-signed `settle_rebalance_tip` ix for the standard `[src, dst]` referenced set.
+    pub async fn build_settle(&self, src: Pubkey, dst: Pubkey) -> Instruction {
+        let ref_banks = vec![self.bank_meta(src), self.bank_meta(dst)];
+        self.user
+            .make_rebalance_settle_ix(
+                ref_banks,
+                self.order_pda,
+                self.record_pda,
+                self.keeper.pubkey(),
+                self.keeper.pubkey(),
+            )
+            .await
+    }
+
+    /// Pin the clock's unix timestamp to `now` and refresh the native oracle to match.
+    pub async fn pin_clock(&self, now: i64) {
+        {
+            let ctx = self.test_f.context.borrow_mut();
+            let mut clock: Clock = ctx.banks_client.get_sysvar().await.unwrap();
+            clock.unix_timestamp = now;
+            ctx.set_sysvar(&clock);
+        }
+        self.test_f
+            .set_pyth_oracle_timestamp(self.oracle_metas[0].pubkey, now)
+            .await;
+    }
+
+    /// Advance the pinned clock by `secs` and refresh the native oracle timestamp so its price stays
+    /// fresh for post-advance reads.
+    pub async fn advance_clock(&self, secs: i64) {
+        let now = {
+            let ctx = self.test_f.context.borrow_mut();
+            let mut clock: Clock = ctx.banks_client.get_sysvar().await.unwrap();
+            clock.unix_timestamp = clock.unix_timestamp.saturating_add(secs);
+            let now = clock.unix_timestamp;
+            ctx.set_sysvar(&clock);
+            now
+        };
+        self.test_f
+            .set_pyth_oracle_timestamp(self.oracle_metas[0].pubkey, now)
+            .await;
+    }
+
     pub async fn asset_shares(&self, bank: Pubkey) -> I80F48 {
         let acct = self.user.load().await;
         acct.lending_account
@@ -371,6 +425,21 @@ impl RebalanceFixture {
             .unwrap()
             .map(|a| a.lamports)
             .unwrap_or(0)
+    }
+
+    /// The keeper tip escrowed into the record at `end_rebalance`, read from chain.
+    pub async fn record_pending_tip(&self) -> u64 {
+        let ctx = self.test_f.context.borrow_mut();
+        let acc = ctx
+            .banks_client
+            .get_account(self.record_pda)
+            .await
+            .unwrap()
+            .unwrap();
+        bytemuck::from_bytes::<RebalanceRecord>(
+            &acc.data[8..8 + core::mem::size_of::<RebalanceRecord>()],
+        )
+        .pending_tip
     }
 
     pub async fn process_as_payer(

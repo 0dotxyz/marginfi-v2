@@ -1,11 +1,10 @@
-use anchor_lang::prelude::Clock;
 use fixed::types::I80F48;
 use fixtures::{
     assert_custom_error,
     prelude::*,
     rebalance::{
-        rebalance_move, setup, setup_multi_venue_fixture, DEPOSIT_USDC, DRIFT_DST_BORROW_DEN,
-        DRIFT_DST_BORROW_NUM, VENUE_DEPOSIT_NATIVE,
+        drive_utilization, rebalance_move, setup, setup_multi_venue_fixture, DEPOSIT_USDC,
+        DRIFT_DST_BORROW_DEN, DRIFT_DST_BORROW_NUM, VENUE_DEPOSIT_NATIVE,
     },
 };
 use marginfi::prelude::MarginfiError;
@@ -45,28 +44,123 @@ async fn rebalance_rejects_when_not_improving() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn rebalance_enforces_cooldown() -> anyhow::Result<()> {
-    // The harness pins `unix_timestamp`. Pin it to a fixed `now` (refreshing the oracle to match so
-    // its price stays fresh) so the first execution clears the 10s cooldown and stamps
-    // `last_exec_timestamp = now`. The clock does not advance between txs, so the immediate second
-    // execution is rejected by the cooldown gate (checked before any oracle access).
-    let f = setup(I80F48::from_num(0.0001), 10).await?;
-    let now = 1_000i64;
-    {
-        let ctx = f.test_f.context.borrow_mut();
-        let mut clock: Clock = ctx.banks_client.get_sysvar().await?;
-        clock.unix_timestamp = now;
-        ctx.set_sysvar(&clock);
-    }
-    f.test_f
-        .set_pyth_oracle_timestamp(f.oracle_metas[0].pubkey, now)
-        .await;
+    // Cooldown (2h) exceeds the settle-delay cap (1h), so the first execution's record can be settled
+    // (unblocking the order for a re-run) while the cooldown still blocks a second rebalance.
+    let f = setup(I80F48::from_num(0.0001), 7_200).await?;
+    let base = 10_000i64; // >= cooldown so the first execution clears the gate
+    f.pin_clock(base).await;
 
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
     f.process(&ixs).await?;
 
+    // Settle the first execution after its (clamped) 1h settle delay to close the record.
+    f.advance_clock(3_601).await;
+    let settle = f.build_settle(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&[settle]).await?;
+
+    // A second rebalance is still inside the 2h cooldown (only ~1h elapsed) and is rejected.
     let ixs2 = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
     let res = f.process(&ixs2).await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceCooldown);
+    Ok(())
+}
+
+/// The keeper tip is escrowed at `end_rebalance` and paid at settlement only when the destination
+/// realized more yield than the source over the window. Here the idle source (rate 0) is out-yielded
+/// by the borrow-carrying destination, so the escrow is paid to the keeper (the pool is not refunded).
+#[tokio::test]
+async fn rebalance_settle_pays_keeper_on_realized_yield() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let tip = 200_000u64;
+    f.set_keeper_tip(tip).await?;
+    f.top_up_pool(5_000_000).await?;
+    f.pin_clock(1_000).await;
+
+    let pool_before = f.lamports_of(f.fee_pool()).await;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+    // The escrow that left the pool equals the tip the record will settle.
+    let pool_after_end = f.lamports_of(f.fee_pool()).await;
+    let pending_tip = f.record_pending_tip().await;
+    assert_eq!(
+        pool_before - pool_after_end,
+        pending_tip,
+        "escrow out of the pool equals the record's pending tip"
+    );
+
+    f.advance_clock(601).await; // settle delay = clamp(0, 600, 3600) = 600
+    let settle = f.build_settle(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&[settle]).await?;
+
+    assert_eq!(
+        f.lamports_of(f.fee_pool()).await,
+        pool_after_end,
+        "realized settlement pays the keeper, leaving the pool untouched"
+    );
+    assert_eq!(
+        f.lamports_of(f.record_pda).await,
+        0,
+        "record closed after settlement"
+    );
+    Ok(())
+}
+
+/// When the move did not realize its promised improvement (here the source is driven to out-yield the
+/// destination over the window, standing in for a manipulated advantage that did not hold), settlement
+/// refunds the escrowed tip to the fee pool instead of paying the keeper.
+#[tokio::test]
+async fn rebalance_settle_refunds_pool_when_not_realized() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let tip = 200_000u64;
+    f.set_keeper_tip(tip).await?;
+    f.top_up_pool(5_000_000).await?;
+    f.pin_clock(1_000).await;
+
+    let pool_before = f.lamports_of(f.fee_pool()).await;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+    let pool_after_end = f.lamports_of(f.fee_pool()).await;
+    assert_eq!(
+        pool_before - pool_after_end,
+        f.record_pending_tip().await,
+        "escrow out of the pool equals the record's pending tip"
+    );
+
+    // Drive the source to a decisively higher utilization (~90%) than the destination (~25% after the
+    // move diluted its deposit), so the source out-yields the destination over the window. The
+    // driver's borrower posts SOL collateral, so refresh the SOL oracle to the pinned clock first.
+    f.test_f
+        .set_pyth_oracle_timestamp(PYTH_SOL_FEED, 1_000)
+        .await;
+    drive_utilization(&f.test_f, &f.src_bank_f, 900.0, 300.0).await?;
+
+    f.advance_clock(601).await;
+    let settle = f.build_settle(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&[settle]).await?;
+
+    assert_eq!(
+        f.lamports_of(f.fee_pool()).await,
+        pool_before,
+        "unrealized settlement refunds the full escrow, restoring the pool"
+    );
+    assert_eq!(f.lamports_of(f.record_pda).await, 0, "record closed");
+    Ok(())
+}
+
+/// Settlement is rejected before the settle delay elapses.
+#[tokio::test]
+async fn rebalance_settle_rejects_before_delay() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.set_keeper_tip(200_000).await?;
+    f.pin_clock(1_000).await;
+
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+
+    // No clock advance: the settle delay has not elapsed.
+    let settle = f.build_settle(f.src_bank_f.key, f.dst_bank_f.key).await;
+    let res = f.process(&[settle]).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceSettleTooEarly);
     Ok(())
 }
 

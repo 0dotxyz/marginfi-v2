@@ -5,6 +5,7 @@ import {
   ComputeBudgetProgram,
   Keypair,
   PublicKey,
+  SystemProgram,
   SYSVAR_INSTRUCTIONS_PUBKEY,
   Transaction,
   TransactionInstruction,
@@ -104,8 +105,10 @@ import {
 } from "../../utils/drift-utils";
 import {
   createBankrunPythOracleAccount,
+  refreshPullOraclesBankrun,
   setPythPullOraclePrice,
 } from "../../utils/bankrun-oracles";
+import { advanceOneHour } from "../../utils/bankrunConnection";
 import {
   DRIFT_ORACLE_RECEIVER_PROGRAM_ID,
   ORACLE_CONF_INTERVAL,
@@ -172,6 +175,19 @@ const deriveRebalanceRecord = (programId: PublicKey, order: PublicKey) =>
     [Buffer.from(REBALANCE_RECORD_SEED), order.toBuffer()],
     programId,
   );
+
+// Test-only cleanup: zero the per-order record PDA. The record now survives end_rebalance (its tip is
+// settled separately), and every test in a describe shares one deterministic order/record PDA, so a
+// leftover record from a prior test would block the next start_rebalance's init.
+const clearRecordAccount = (record: PublicKey) => {
+  bankrunContext.setAccount(record, {
+    lamports: 0,
+    data: Buffer.alloc(0),
+    owner: SystemProgram.programId,
+    executable: false,
+    rentEpoch: 0,
+  });
+};
 
 const REBALANCE_FEE_POOL_SEED = "rebalance_fee_pool";
 const deriveRebalanceFeePool = (
@@ -293,6 +309,41 @@ describe("Auto-rebalance orders (native -> native)", () => {
       })
       .remainingAccounts(endRemaining)
       .instruction();
+  };
+
+  /** The `settle_rebalance_tip` instruction over `refBanks` (record + fee pool derived from order). */
+  const buildSettleIx = (order: PublicKey, refBanks: AccountMeta[]) => {
+    const [record] = deriveRebalanceRecord(program.programId, order);
+    const [feePool] = deriveRebalanceFeePool(program.programId, ownerAcc);
+    return program.methods
+      .marginfiAccountSettleRebalanceTip()
+      .accountsPartial({
+        group,
+        marginfiAccount: ownerAcc,
+        rebalanceOrder: order,
+        rebalanceRecord: record,
+        executor: keeper.wallet.publicKey,
+        feePool,
+        caller: keeper.wallet.publicKey,
+      })
+      .remainingAccounts(refBanks)
+      .instruction();
+  };
+
+  /** The referenced-bank block for the standard [src, dst, dst2] set (writable banks + oracle). */
+  const standardRefBanks = (src: PublicKey = srcBank): AccountMeta[] => [
+    ...bankBlock(src, usdcOracle),
+    ...bankBlock(dstBank, usdcOracle),
+    ...bankBlock(dst2Bank, usdcOracle),
+  ];
+
+  /** Advance past the settle delay, refresh oracles, then settle the escrowed tip. */
+  const settleStandard = async (order: PublicKey, src: PublicKey = srcBank) => {
+    await advanceOneHour(banksClient, bankrunContext);
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+    await sendKeeper(
+      new Transaction().add(await buildSettleIx(order, standardRefBanks(src))),
+    );
   };
 
   /**
@@ -743,6 +794,11 @@ describe("Auto-rebalance orders (native -> native)", () => {
     );
   });
 
+  beforeEach(() => {
+    const [order] = deriveRebalanceOrder(program.programId, ownerAcc, usdcMint);
+    clearRecordAccount(deriveRebalanceRecord(program.programId, order)[0]);
+  });
+
   it("splits the source across two destinations and keeps the order - happy path", async () => {
     await resetOwnerToSrc();
     const allowedBanks = [srcBank, dstBank, dst2Bank];
@@ -767,13 +823,19 @@ describe("Auto-rebalance orders (native -> native)", () => {
     assert.equal(sharesOf(after, dstBank).toString(), half.toString(), "dst holds half");
     assert.equal(sharesOf(after, dst2Bank).toString(), half.toString(), "dst2 holds half");
 
-    // Order persists; record was closed back to the keeper.
+    // Order persists; the per-execution record survives end (settled separately) with no tip escrowed.
     const orderAcc = await program.account.rebalanceOrder.fetch(order);
     assert.ok(orderAcc.marginfiAccount.equals(ownerAcc));
     const [record] = deriveRebalanceRecord(program.programId, order);
-    assert.isNull(
-      await program.provider.connection.getAccountInfo(record),
-      "record should be closed",
+    const recordAcc = await program.account.rebalanceRecord.fetch(record);
+    assert.ok(
+      recordAcc.order.equals(order),
+      "record persists after end, awaiting settlement",
+    );
+    assert.equal(
+      recordAcc.pendingTip.toNumber(),
+      0,
+      "no tip escrowed for a tip-free order",
     );
 
     await closeOrder(order);
@@ -794,21 +856,22 @@ describe("Auto-rebalance orders (native -> native)", () => {
     const oldBalance = await assetShares(srcBank);
     const poolBefore = await bankRunProvider.connection.getBalance(feePool);
 
-    // Honest full move: the whole source fans out across both destinations (strict conservation),
-    // keeper paid from the pool.
+    // Honest full move: the whole source fans out across both destinations (strict conservation). The
+    // full tip is escrowed out of the pool at end, pending settlement.
     await sendKeeper(await buildSandwich({ order }));
 
     const moved = (await assetShares(dstBank)).plus(await assetShares(dst2Bank));
-    const paid = poolBefore - (await bankRunProvider.connection.getBalance(feePool));
+    const escrowed =
+      poolBefore - (await bankRunProvider.connection.getBalance(feePool));
 
-    // Value conserved to the atomic unit across the whole destination set — no skim.
+    // Value conserved to the atomic unit across the whole destination set, no skim.
     assert.equal(
       moved.toString(),
       oldBalance.toString(),
       "the two destinations must sum to the original src position exactly",
     );
-    // A full move pays exactly the configured tip from the SOL pool.
-    assert.equal(paid, tip.toNumber(), "keeper is paid the full tip");
+    // A full move escrows exactly the configured tip out of the SOL pool.
+    assert.equal(escrowed, tip.toNumber(), "the full tip is escrowed at end");
 
     await closeOrder(order);
   });
@@ -887,7 +950,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
         .add(endIx),
     );
 
-    // Both sources drained into the single destination; value conserved across the set, one tip paid.
+    // Both sources drained into the single destination; value conserved across the set, one tip escrowed.
     assert.equal((await assetShares(srcBank)).toString(), "0", "src drained");
     assert.equal((await assetShares(src2Bank)).toString(), "0", "src2 drained");
     assert.equal(
@@ -895,8 +958,13 @@ describe("Auto-rebalance orders (native -> native)", () => {
       oldSrc.plus(oldSrc2).toString(),
       "dst holds both sources' value exactly",
     );
-    const paid = poolBefore - (await bankRunProvider.connection.getBalance(feePool));
-    assert.equal(paid, tip.toNumber(), "one full tip for the whole consolidation");
+    const escrowed =
+      poolBefore - (await bankRunProvider.connection.getBalance(feePool));
+    assert.equal(
+      escrowed,
+      tip.toNumber(),
+      "one full tip escrowed for the whole consolidation",
+    );
 
     await closeOrder(order);
   });
@@ -1031,8 +1099,8 @@ describe("Auto-rebalance orders (native -> native)", () => {
   it("enforces the per-order cooldown - RebalanceCooldown", async () => {
     await resetOwnerToSrc();
     const allowedBanks = [srcBank, dstBank, dst2Bank];
-    // 24h cooldown: the first exec stamps last_exec_timestamp, so an immediate second exec (same
-    // wall-clock second) is rejected.
+    // 24h cooldown exceeds the 1h settle-delay cap, so the first execution's record can be settled to
+    // unblock the order while the cooldown still rejects a second execution.
     const order = await placeOrder({
       allowedBanks,
       minImprovement: 0.0001,
@@ -1041,10 +1109,11 @@ describe("Auto-rebalance orders (native -> native)", () => {
 
     // First execution succeeds and stamps last_exec_timestamp.
     await sendKeeper(await buildSandwich({ order }));
+    // Settle the escrowed tip (advances ~1h) to close the record so a re-run is structurally possible.
+    await settleStandard(order);
 
-    // Move it back to src so a second execution is structurally possible.
+    // Move it back to src, then the cooldown (still hours away) rejects a second execution.
     await resetOwnerToSrc();
-
     await expectFailedTxWithError(
       async () => {
         await sendKeeper(await buildSandwich({ order }));
@@ -1053,6 +1122,74 @@ describe("Auto-rebalance orders (native -> native)", () => {
       6601,
     );
 
+    await closeOrder(order);
+  });
+
+  it("settle_rebalance_tip pays the keeper when the move realized yield", async () => {
+    await resetOwnerToSrc();
+    const tip = new BN(200_000);
+    const order = await placeOrder({
+      allowedBanks: [srcBank, dstBank, dst2Bank],
+      minImprovement: 0.0001,
+      cooldownSeconds: 0,
+      keeperTip: tip,
+    });
+    const feePool = await topUpPool(5_000_000);
+
+    const poolBefore = await bankRunProvider.connection.getBalance(feePool);
+    await sendKeeper(await buildSandwich({ order }));
+    // The escrow that left the pool at end equals the tip the record will settle (not paid yet).
+    const poolAfterEnd = await bankRunProvider.connection.getBalance(feePool);
+    const [record] = deriveRebalanceRecord(program.programId, order);
+    const pendingTip = (
+      await program.account.rebalanceRecord.fetch(record)
+    ).pendingTip.toNumber();
+    assert.equal(
+      poolBefore - poolAfterEnd,
+      pendingTip,
+      "escrow out of the pool equals the record's pending tip",
+    );
+
+    // The idle source is out-yielded by the borrow-carrying destinations, so settlement pays the
+    // keeper and does not refund the pool; the record is closed.
+    await settleStandard(order);
+    assert.equal(
+      await bankRunProvider.connection.getBalance(feePool),
+      poolAfterEnd,
+      "realized settlement pays the keeper, leaving the pool untouched",
+    );
+    assert.isNull(
+      await safeGetAccountInfo(bankRunProvider.connection, record),
+      "record closed after settlement",
+    );
+
+    await closeOrder(order);
+  });
+
+  it("settle_rebalance_tip is rejected before the settle delay - RebalanceSettleTooEarly", async () => {
+    await resetOwnerToSrc();
+    const order = await placeOrder({
+      allowedBanks: [srcBank, dstBank, dst2Bank],
+      minImprovement: 0.0001,
+      cooldownSeconds: 0,
+      keeperTip: new BN(200_000),
+    });
+    await topUpPool(5_000_000);
+    await sendKeeper(await buildSandwich({ order }));
+
+    // No clock advance: the settle delay has not elapsed.
+    await expectFailedTxWithError(
+      async () => {
+        await sendKeeper(
+          new Transaction().add(await buildSettleIx(order, standardRefBanks())),
+        );
+      },
+      "RebalanceSettleTooEarly",
+      6611,
+    );
+
+    // Settle properly to unblock, then clean up.
+    await settleStandard(order);
     await closeOrder(order);
   });
 
@@ -2094,9 +2231,10 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
     const orderAcc = await program.account.rebalanceOrder.fetch(order);
     assert.ok(orderAcc.marginfiAccount.equals(ownerAcc), "order persists");
     const [record] = deriveRebalanceRecord(program.programId, order);
-    assert.isNull(
-      await safeGetAccountInfo(program.provider.connection, record),
-      "record closed",
+    const recordAcc = await program.account.rebalanceRecord.fetch(record);
+    assert.ok(
+      recordAcc.order.equals(order),
+      "record persists after end, awaiting settlement",
     );
 
     await closeOrder(order);
