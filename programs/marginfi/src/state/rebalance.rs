@@ -120,6 +120,7 @@ impl RebalanceRecordImpl for RebalanceRecord {
             MarginfiError::IllegalBalanceState
         );
         // Every move must reference distinct in-range banks and carry a positive amount.
+        let mut referenced = [false; MAX_REBALANCE_BANKS];
         for m in moves {
             check!(
                 (m.src_index as usize) < ref_banks.len()
@@ -128,7 +129,15 @@ impl RebalanceRecordImpl for RebalanceRecord {
                     && I80F48::from(m.amount) > I80F48::ZERO,
                 MarginfiError::IllegalBalanceState
             );
+            referenced[m.src_index as usize] = true;
+            referenced[m.dst_index as usize] = true;
         }
+        // Reject any parsed bank that no move touches: an unused decoy bank contributes nothing to a
+        // relocation yet would be priced and stored, so it must not be in the referenced set.
+        check!(
+            referenced[..ref_banks.len()].iter().all(|&r| r),
+            MarginfiError::RebalanceUnreferencedBank
+        );
         self.order = order;
         self.executor = executor;
         self.ref_banks = [RebalanceRefBank::default(); MAX_REBALANCE_BANKS];

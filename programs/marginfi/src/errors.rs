@@ -456,6 +456,8 @@ pub enum MarginfiError {
     RebalanceMalformedSandwich, // 6610
     #[msg("Rebalance tip cannot be settled until the settlement delay has elapsed")]
     RebalanceSettleTooEarly, // 6611
+    #[msg("Every referenced rebalance bank must be the source or destination of at least one move")]
+    RebalanceUnreferencedBank, // 6612
                              // **************END AUTO-REBALANCE ERRORS
 }
 

@@ -1114,6 +1114,34 @@ async fn rebalance_rejects_principal_skim() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A keeper references an unused decoy bank at index 0 and declares only `src -> dst` (indices 1 -> 2).
+/// The decoy participates in no move, so `start_rebalance` rejects it rather than parsing and storing a
+/// bank that contributes nothing to the relocation.
+#[tokio::test]
+async fn rebalance_rejects_unreferenced_bank() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let decoy = f.add_second_dst().await?;
+    let ref_banks = vec![
+        f.bank_meta(decoy.key),
+        f.bank_meta(f.src_bank_f.key),
+        f.bank_meta(f.dst_bank_f.key),
+    ];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks,
+            vec![rebalance_move(1, 2, DEPOSIT_USDC)],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f.process(&[start_ix]).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceUnreferencedBank);
+    Ok(())
+}
+
 /// A move declared as a split across two destinations cannot be routed entirely into one: per-bank
 /// reconciliation catches the misattribution (dst1 over, dst2 under).
 #[tokio::test]
