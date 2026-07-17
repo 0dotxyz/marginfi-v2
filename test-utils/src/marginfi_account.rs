@@ -1544,6 +1544,7 @@ impl MarginfiAccountFixture {
                 marginfi_account: self.key,
                 authority: payer.pubkey(),
                 fee_payer: payer.pubkey(),
+                rebalance_fee_pool: self.rebalance_fee_pool_pda(),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::MarginfiAccountClose {}.data(),
