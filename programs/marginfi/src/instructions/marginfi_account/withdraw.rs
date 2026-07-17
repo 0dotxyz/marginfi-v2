@@ -226,9 +226,7 @@ pub fn lending_account_withdraw<'info>(
 
     // Note: during receivership, order execution, and rebalance, we skip the per-withdraw health
     // check; the wrapping instruction re-checks account health once at the end of the transaction.
-    if !marginfi_account
-        .get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE)
-    {
+    if !marginfi_account.defers_health_to_end_instruction() {
         // Check account health, if below threshold fail transaction
         // Assuming `ctx.remaining_accounts` holds only oracle accounts
         // Uses heap-efficient health check to support accounts with up to 16 positions

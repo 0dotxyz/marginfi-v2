@@ -278,9 +278,9 @@ pub fn drift_withdraw<'info>(
         marginfi_account.lending_account.sort_balances();
         marginfi_account.sync_indexer_flags();
 
-        // Note: during liquidation/deleverage or order execution, we skip all health checks until
-        // the end of the transaction.
-        if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION) {
+        // Note: during liquidation/deleverage, order execution, or rebalance, we skip all health
+        // checks until the end of the transaction.
+        if !marginfi_account.defers_health_to_end_instruction() {
             let group = ctx.accounts.group.load()?;
             check_account_init_health(
                 &marginfi_account,

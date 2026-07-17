@@ -68,6 +68,7 @@ pub trait MarginfiAccountImpl {
     fn set_flag(&mut self, flag: u64, msg: bool);
     fn unset_flag(&mut self, flag: u64, msg: bool);
     fn get_flag(&self, flag: u64) -> bool;
+    fn defers_health_to_end_instruction(&self) -> bool;
     fn increment_active_orders(&mut self) -> MarginfiResult;
     fn decrement_active_orders(&mut self) -> MarginfiResult;
     fn can_be_closed(&self) -> bool;
@@ -259,6 +260,12 @@ impl MarginfiAccountImpl for MarginfiAccount {
 
     fn get_flag(&self, flag: u64) -> bool {
         self.account_flags & flag != 0
+    }
+
+    /// True while an outer instruction defers the account's health check to the end of the
+    /// transaction: receivership, order execution, and auto-rebalance.
+    fn defers_health_to_end_instruction(&self) -> bool {
+        self.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE)
     }
 
     fn increment_active_orders(&mut self) -> MarginfiResult {
