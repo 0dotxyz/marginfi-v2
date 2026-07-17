@@ -799,7 +799,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
     let group_key = ctx.accounts.group.key();
     let remaining = ctx.remaining_accounts;
 
-    let (ref_keys, order_amount, keeper_tip) = {
+    let (ref_keys, order_amount, keeper_tip, settle_delay) = {
         let record = ctx.accounts.rebalance_record.load()?;
         let order = ctx.accounts.rebalance_order.load()?;
         let n = record.ref_bank_count as usize;
@@ -810,6 +810,10 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
                 .collect::<Vec<_>>(),
             order.amount,
             order.keeper_tip,
+            order.cooldown_seconds.clamp(
+                REBALANCE_SETTLE_DELAY_MIN_SECONDS,
+                REBALANCE_SETTLE_DELAY_MAX_SECONDS,
+            ),
         )
     };
 
@@ -944,6 +948,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         }
         record.move_timestamp = clock.unix_timestamp as u64;
         record.pending_tip = tip_pending;
+        record.settle_delay = settle_delay;
     }
     {
         let mut account = ctx.accounts.marginfi_account.load_mut()?;
@@ -1046,7 +1051,7 @@ pub fn settle_rebalance_tip<'info>(
     let group_key = ctx.accounts.group.key();
     let remaining = ctx.remaining_accounts;
 
-    let (ref_keys, move_ts, pending_tip, move_indices) = {
+    let (ref_keys, move_ts, pending_tip, move_indices, settle_delay) = {
         let record = ctx.accounts.rebalance_record.load()?;
         let n = record.ref_bank_count as usize;
         (
@@ -1060,16 +1065,10 @@ pub fn settle_rebalance_tip<'info>(
                 .iter()
                 .map(|w| I80F48::from(*w))
                 .collect::<Vec<_>>(),
+            record.settle_delay,
         )
     };
 
-    // The settlement window tracks the order's cooldown (clamped), so the record is settleable by the
-    // time the cooldown allows the next rebalance and never blocks it, while staying above a spike and
-    // bounding how long the keeper waits.
-    let settle_delay = ctx.accounts.rebalance_order.load()?.cooldown_seconds.clamp(
-        REBALANCE_SETTLE_DELAY_MIN_SECONDS,
-        REBALANCE_SETTLE_DELAY_MAX_SECONDS,
-    );
     check!(
         (clock.unix_timestamp as u64)
             >= move_ts

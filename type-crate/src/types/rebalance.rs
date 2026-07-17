@@ -28,7 +28,7 @@ pub const MAX_REBALANCE_MOVES: usize = 8;
 pub const MAX_REBALANCE_RECORD_BALANCES: usize = MAX_LENDING_ACCOUNT_BALANCES - 1;
 
 // Persistent "auto-rebalance" intent: keep one asset (`mint`) in the highest-yield venue among an
-// allowlisted set. Unlike `Order`, it is NOT consumed on execution — it persists until cancelled.
+// allowlisted set. Unlike `Order`, it is NOT consumed on execution; it persists until cancelled.
 // PDA: [REBALANCE_ORDER_SEED, marginfi_account, mint] -> at most one per (account, asset).
 assert_struct_size!(RebalanceOrder, 408);
 assert_struct_align!(RebalanceOrder, 8);
@@ -106,7 +106,7 @@ pub struct RebalanceMove {
 // start underlying-token amount, the declared moves, a snapshot of every OTHER active balance, and the
 // move-time yield index per bank, so end can reconcile/prove token conservation and settle can pay the
 // tip only if the destinations realized more yield than the sources over the settlement window.
-assert_struct_size!(RebalanceRecord, 1632);
+assert_struct_size!(RebalanceRecord, 1640);
 assert_struct_align!(RebalanceRecord, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
@@ -126,11 +126,14 @@ pub struct RebalanceRecord {
     /// destinations actually out-yielded the sources over the settlement window.
     pub move_yield_index: [WrappedI80F48; MAX_REBALANCE_BANKS],
     /// Unix seconds when the move completed (`end_rebalance`); the settlement window opens
-    /// `cooldown_seconds.clamp(SETTLE_DELAY_MIN, SETTLE_DELAY_MAX)` after this.
+    /// `move_timestamp + settle_delay`.
     pub move_timestamp: u64,
     /// Keeper tip escrowed into this record at `end_rebalance`, paid to `executor` on a realized
     /// settlement or refunded to the fee pool otherwise (lamports).
     pub pending_tip: u64,
+    /// Settlement delay in seconds, captured at `end_rebalance` from the order's cooldown at move
+    /// time (clamped to [SETTLE_DELAY_MIN, SETTLE_DELAY_MAX]);
+    pub settle_delay: u64,
     pub ref_bank_count: u8,
     pub move_count: u8,
     pub active_balance_count: u8,
