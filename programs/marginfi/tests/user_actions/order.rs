@@ -1,11 +1,14 @@
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48 as fp;
+use fixtures::test::{PYTH_PYUSD_FEED, PYTH_SOL_FEED, PYTH_USDC_FEED};
 use fixtures::{
     assert_anchor_error, assert_custom_error, bank::BankFixture,
     marginfi_account::MarginfiAccountFixture, prelude::*,
 };
 use marginfi::prelude::MarginfiError;
-use marginfi_type_crate::types::{centi_to_u32, u32_to_centi, OrderTrigger, WrappedI80F48};
+use marginfi_type_crate::types::{
+    centi_to_u32, u32_to_centi, BankConfigOpt, OrderTrigger, WrappedI80F48,
+};
 use solana_program_test::tokio;
 use solana_sdk::{
     account::Account,
@@ -1658,5 +1661,123 @@ async fn keeper_close_order_success_after_set_flags(
     );
     assert_active_orders(&borrower_mfi_account_f, 0).await;
 
+    Ok(())
+}
+
+/// A circuit-breaker-enabled bank that the keeper repays and closes mid-execution is invisible to
+/// the end-side price gate, which only scans still-active balances. `start_execute_order` must
+/// therefore run the gate over the full pre-execution set: with a tagged SOL liability bank breached
+/// past its first tier, the whole execution reverts up front, before the liability is repaid and any
+/// collateral moves.
+#[tokio::test]
+async fn execute_order_start_gate_rejects_breached_liability_bank() -> anyhow::Result<()> {
+    let (
+        test_f,
+        borrower_mfi_account_f,
+        asset_mint,
+        liability_mint,
+        _uninvolved_mint,
+        order_pda,
+        keeper,
+        keeper_liab_account,
+        keeper_asset_account,
+        _keeper_uninvolved_account,
+    ) = setup_execution_fixture_with_params(
+        BankMint::Usdc,
+        300.0,
+        BankMint::Sol,
+        10.0,
+        BankMint::Fixed,
+        stop_loss_trigger(fp!(250), 0),
+    )
+    .await?;
+
+    let asset_bank_f = test_f.get_bank(&asset_mint);
+    let liability_bank_f = test_f.get_bank(&liability_mint);
+
+    // Warm the SOL liability bank's cache and enable the breaker so its reference seeds at $10, then
+    // push the live price to $11: a 1000 bps jump past the 500 bps first tier.
+    let base_native: i64 = 10_000_000_000;
+    let warm_time: i64 = 100;
+    let warm_slot: u64 = 1_000;
+    test_f
+        .set_pyth_oracle_price_native(PYTH_SOL_FEED, base_native, 0, warm_time)
+        .await;
+    test_f.set_clock(warm_slot, warm_time).await;
+    test_f
+        .marginfi_group
+        .try_pulse_bank_price_cache(&liability_bank_f)
+        .await?;
+    liability_bank_f
+        .update_config(
+            BankConfigOpt {
+                circuit_breaker_enabled: Some(true),
+                cb_deviation_bps_tiers: Some([500, 1000, 2500]),
+                cb_tier_durations_seconds: Some([600, 3600, 14400]),
+                cb_escalation_window_mult: Some(2),
+                cb_ema_alpha_bps: Some(1000),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let breach_time = warm_time + 1;
+    test_f.set_clock(warm_slot + 10, breach_time).await;
+    test_f
+        .set_pyth_oracle_price_native(PYTH_SOL_FEED, 11_000_000_000, 0, breach_time)
+        .await;
+    for refreshed in [PYTH_SOL_FEED, PYTH_USDC_FEED, PYTH_PYUSD_FEED] {
+        test_f
+            .set_pyth_oracle_timestamp(refreshed, breach_time)
+            .await;
+    }
+
+    // The exploit sequence: start, repay the entire SOL liability (which would hide it from the
+    // end-side gate), withdraw collateral, end. The start gate rejects the whole transaction.
+    let (start_ix, execute_record) = borrower_mfi_account_f
+        .make_start_execute_ix(order_pda, keeper.pubkey())
+        .await;
+    let repay_ix = borrower_mfi_account_f
+        .make_repay_ix_with_authority(
+            keeper_liab_account,
+            &liability_bank_f,
+            0.0,
+            Some(true),
+            keeper.pubkey(),
+        )
+        .await;
+    let withdraw_ix = borrower_mfi_account_f
+        .make_withdraw_ix_with_authority(
+            keeper_asset_account,
+            &asset_bank_f,
+            50.0,
+            None,
+            keeper.pubkey(),
+        )
+        .await;
+    let end_ix = borrower_mfi_account_f
+        .make_end_execute_ix(
+            order_pda,
+            execute_record,
+            keeper.pubkey(),
+            keeper.pubkey(),
+            vec![liability_bank_f.key],
+        )
+        .await;
+
+    let blockhash = test_f.get_latest_blockhash().await;
+    let ctx = test_f.context.borrow_mut();
+    let tx = Transaction::new_signed_with_payer(
+        &[start_ix, repay_ix, withdraw_ix, end_ix],
+        Some(&keeper.pubkey()),
+        &[&keeper],
+        blockhash,
+    );
+    let result = ctx.banks_client.process_transaction(tx).await;
+    assert_custom_error!(result.unwrap_err(), MarginfiError::CircuitBreakerPriceJump);
+    drop(ctx);
+
+    assert_active_orders(&borrower_mfi_account_f, 1).await;
     Ok(())
 }
