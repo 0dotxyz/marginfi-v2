@@ -57,7 +57,7 @@ pub fn current_supply_apr<'info>(
 }
 
 /// Current supply APR for `bank` (I80F48, 1.0 == 100%), via [`current_supply_apr`] (dispatched on
-/// `asset_tag`). The integration venue is the LAST remaining oracle account — the price oracle, if
+/// `asset_tag`). The integration venue is the LAST remaining oracle account: the price oracle, if
 /// any, precedes it, so `oracle_ais.last()` works for fixed and live-oracle variants alike; native
 /// banks have none. `token_reserve` is JupLend's `TokenReserve`.
 pub fn rate_of<'info>(
@@ -139,7 +139,7 @@ fn juplend_supply_apr<'info>(
     Ok(reserve.supply_rate().ok_or_else(math_error!())?)
 }
 
-/// Every supply-rate path must return I80F48 in the same units — `1.0 == 100%` — so the rebalance
+/// Every supply-rate path must return I80F48 in the same units (`1.0 == 100%`), so the rebalance
 /// order can rank a native bank's rate directly against any integration bank's rate. For each target
 /// percentage this builds the equivalent per-venue config and asserts every venue reports the SAME
 /// percentage.
@@ -224,11 +224,6 @@ mod unit_consistency {
 
     #[test]
     fn percentage_is_identical_across_all_venues() {
-        // Native stores its rate as a u32 on a 0..1000% scale, so its percentage is quantized to the
-        // nearest ~2.3e-9; the integration venues compute through exact fixed-point paths and must be
-        // bit-for-bit equal.
-        let native_quantization = I80F48::from_num(1e-6);
-
         for target_bps in [500u32, 1_000, 2_500, 5_000] {
             let expected = I80F48::from_num(target_bps) / I80F48::from_num(10_000u32);
             let (native, kamino, drift, solend, juplend) = venue_rates(target_bps);
@@ -239,11 +234,10 @@ mod unit_consistency {
             assert_eq!(solend, kamino, "solend != kamino at {target_bps}bps");
             assert_eq!(juplend, kamino, "juplend != kamino at {target_bps}bps");
 
-            // Native matches that same percentage within its u32 quantization.
-            assert!(
-                (native - kamino).abs() < native_quantization,
-                "native {native} != {kamino} at {target_bps}bps"
-            );
+            // Native stores its rate as a u32 on a 0..1000% scale. Its exact value is that same
+            // quantization round-trip, so assert against the stored-value round-trip, not the input.
+            let native_quantized = u32_to_milli(milli_to_u32(expected));
+            assert_eq!(native, native_quantized, "native at {target_bps}bps");
         }
     }
 }
