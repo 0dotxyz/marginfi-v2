@@ -1,4 +1,5 @@
 use fixed::types::I80F48;
+use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{
     assert_custom_error,
     prelude::*,
@@ -7,7 +8,6 @@ use fixtures::{
         DRIFT_DST_BORROW_DEN, DRIFT_DST_BORROW_NUM, VENUE_DEPOSIT_NATIVE,
     },
 };
-use fixtures::marginfi_account::MarginfiAccountFixture;
 use marginfi::prelude::MarginfiError;
 use marginfi_type_crate::{
     pdas::derive_juplend_token_reserve,
