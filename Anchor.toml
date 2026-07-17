@@ -45,8 +45,14 @@ wallet = "~/.config/solana/id.json"
 # Use like `anchor test --skip-build --skip-local-validator --skip-deploy`
 test = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/basic/*.spec.ts tests/specs/drift/*.spec.ts tests/d*.spec.ts tests/specs/emode/*.spec.ts tests/e*.spec.ts tests/specs/juplend/*.spec.ts tests/jlr*.spec.ts tests/specs/kamino/*.spec.ts tests/k*.spec.ts tests/specs/limits/*.spec.ts tests/m*.spec.ts tests/specs/pyth/*.spec.ts tests/specs/orders/*.spec.ts 'tests/specs/staked/s[0-9]*.spec.ts' tests/specs/solend/*.spec.ts tests/specs/bankruptcy/z0*.spec.ts tests/specs/bankruptcy/zb*.spec.ts --exit --require tests/rootHooks.ts"
 
-# All tests (for CI)
-all-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/basic/*.spec.ts tests/specs/drift/*.spec.ts tests/d*.spec.ts tests/specs/emode/*.spec.ts tests/e*.spec.ts tests/specs/juplend/*.spec.ts tests/jlr*.spec.ts tests/specs/kamino/*.spec.ts tests/k*.spec.ts tests/specs/limits/*.spec.ts tests/m*.spec.ts tests/specs/pyth/*.spec.ts tests/specs/orders/*.spec.ts 'tests/specs/staked/s[0-9]*.spec.ts' tests/specs/solend/*.spec.ts tests/specs/bankruptcy/z0*.spec.ts tests/specs/bankruptcy/zb*.spec.ts --exit --require tests/rootHooks.ts"
+# All tests (for CI). The orders specs run in a second mocha process (after the &&): they share the
+# seeded-Math.random ecosystem, and their extra draws would shift the sequence enough to tip the
+# kfarms reward-tally mock (k14) over its overflow boundary if run in the same process. A fresh
+# process re-seeds the RNG, so both suites stay reproducible under one `anchor run all-tests`.
+all-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/basic/*.spec.ts tests/specs/drift/*.spec.ts tests/d*.spec.ts tests/specs/emode/*.spec.ts tests/e*.spec.ts tests/specs/juplend/*.spec.ts tests/jlr*.spec.ts tests/specs/kamino/*.spec.ts tests/k*.spec.ts tests/specs/limits/*.spec.ts tests/m*.spec.ts tests/specs/pyth/*.spec.ts 'tests/specs/staked/s[0-9]*.spec.ts' tests/specs/solend/*.spec.ts tests/specs/bankruptcy/z0*.spec.ts tests/specs/bankruptcy/zb*.spec.ts --exit --require tests/rootHooks.ts && RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/orders/*.spec.ts --exit --require tests/rootHooks.ts"
+
+# Auto-rebalance order tests, run standalone (also run as the second stage of all-tests).
+orders-tests = "RUST_LOG= yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/specs/orders/*.spec.ts --exit --require tests/rootHooks.ts"
 
 # LiteSVM-only runner (no local validator)
 # Use: anchor run kamino-tests
