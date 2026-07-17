@@ -197,6 +197,7 @@ impl RebalanceRecordImpl for RebalanceRecord {
         );
         let mut total_moved = I80F48::ZERO;
         let mut total_source_pre = I80F48::ZERO;
+        let mut total_actual = I80F48::ZERO;
         for (i, post) in post_underlying.iter().enumerate().take(n) {
             let mut declared_net = I80F48::ZERO;
             for m in self.active_moves() {
@@ -214,6 +215,7 @@ impl RebalanceRecordImpl for RebalanceRecord {
                 (declared_net.checked_sub(actual).ok_or_else(math_error!())?).abs() <= dust,
                 MarginfiError::RebalanceValueLeak
             );
+            total_actual = total_actual.checked_add(actual).ok_or_else(math_error!())?;
             if actual > I80F48::ZERO {
                 total_moved = total_moved.checked_add(actual).ok_or_else(math_error!())?;
             } else if actual < I80F48::ZERO {
@@ -222,6 +224,8 @@ impl RebalanceRecordImpl for RebalanceRecord {
                     .ok_or_else(math_error!())?;
             }
         }
+
+        check!(total_actual >= -dust, MarginfiError::RebalanceValueLeak);
         Ok((total_moved, total_source_pre))
     }
 
