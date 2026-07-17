@@ -473,11 +473,15 @@ pub enum MarginfiError {
     RebalanceMalformedSandwich, // 6615
     #[msg("Rebalance tip cannot be settled until the settlement delay has elapsed")]
     RebalanceSettleTooEarly, // 6616
-    #[msg("Every referenced rebalance bank must be the source or destination of at least one move")]
+    #[msg(
+        "Every referenced rebalance bank must be the source or destination of at least one move"
+    )]
     RebalanceUnreferencedBank, // 6617
     #[msg("Rebalance deposit/withdraw legs must all act on the rebalanced marginfi account")]
     RebalanceForeignAccountLeg, // 6618
-                             // **************END AUTO-REBALANCE ERRORS
+    #[msg("Cannot close a rebalance order while its record still holds an unsettled tip")]
+    RebalanceRecordPending, // 6619
+                            // **************END AUTO-REBALANCE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {

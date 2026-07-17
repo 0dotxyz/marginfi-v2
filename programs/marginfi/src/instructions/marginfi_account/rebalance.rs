@@ -1,8 +1,8 @@
 //! Persistent same-mint auto-rebalance orders. A keeper relocates positions across banks of the
-//! SAME mint within an allowlisted venue set — many source and many destination banks in a single
-//! execution (up to `MAX_REBALANCE_MOVES` declared moves) — via a `start_rebalance`..`end_rebalance`
+//! SAME mint within an allowlisted venue set (many source and many destination banks in a single
+//! execution, up to `MAX_REBALANCE_MOVES` declared moves) via a `start_rebalance`..`end_rebalance`
 //! sandwich that reuses the existing per-venue withdraw/deposit instructions. The order is NOT
-//! consumed on execution — it persists until cancelled.
+//! consumed on execution; it persists until cancelled.
 //!
 //! On-chain guarantees: every referenced bank holds the order's mint and is in the allowed set; each
 //! declared move goes from a lower-rate bank to one beating it by `min_improvement` (pre-move) and
@@ -221,9 +221,13 @@ pub struct PlaceRebalanceOrder<'info> {
 }
 
 /// Close a rebalance order. The account authority may close their own order at any time (except
-/// mid-rebalance). Permissionlessly, anyone may close a stale order once it can no longer act — the
+/// mid-rebalance). Permissionlessly, anyone may close a stale order once it can no longer act: the
 /// account was closed, or it holds no position in any allowed venue. Rent goes to `fee_recipient`.
 pub fn close_rebalance_order(ctx: Context<CloseRebalanceOrder>) -> MarginfiResult {
+    check!(
+        ctx.accounts.rebalance_record.data_is_empty(),
+        MarginfiError::RebalanceRecordPending
+    );
     let order = ctx.accounts.rebalance_order.load()?;
     let marginfi_account_info = ctx.accounts.marginfi_account.to_account_info();
     let signer = ctx.accounts.authority.as_ref().map(|a| a.key());
@@ -321,6 +325,12 @@ pub struct CloseRebalanceOrder<'info> {
         close = fee_recipient
     )]
     pub rebalance_order: AccountLoader<'info, RebalanceOrder>,
+    /// CHECK: the order's rebalance record PDA.
+    #[account(
+        seeds = [REBALANCE_RECORD_SEED.as_bytes(), rebalance_order.key().as_ref()],
+        bump,
+    )]
+    pub rebalance_record: UncheckedAccount<'info>,
 }
 
 /// Modify an existing order's policy in place: venue allowlist, min improvement, cooldown, amount
@@ -566,7 +576,7 @@ fn parse_rebalance_banks<'info>(
             MarginfiError::WrongNumberOfOracleAccounts
         );
         let bank_ai = &remaining[cursor];
-        // Reject a bank appearing more than once — indices must be unambiguous.
+        // Reject a bank appearing more than once: indices must be unambiguous.
         check!(
             !banks.iter().any(|b| b.key == bank_ai.key()),
             MarginfiError::SameAssetAndLiabilityBanks

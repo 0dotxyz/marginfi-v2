@@ -1117,6 +1117,7 @@ impl MarginfiAccountFixture {
                 authority: Some(authority),
                 fee_recipient: authority,
                 rebalance_order,
+                rebalance_record: Self::rebalance_record_pda(rebalance_order),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::MarginfiAccountCloseRebalanceOrder {}.data(),
@@ -1157,6 +1158,17 @@ impl MarginfiAccountFixture {
             &[
                 marginfi_type_crate::constants::REBALANCE_FEE_POOL_SEED.as_bytes(),
                 self.key.as_ref(),
+            ],
+            &marginfi::ID,
+        )
+        .0
+    }
+
+    pub fn rebalance_record_pda(rebalance_order: Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[
+                marginfi_type_crate::constants::REBALANCE_RECORD_SEED.as_bytes(),
+                rebalance_order.as_ref(),
             ],
             &marginfi::ID,
         )
@@ -1310,6 +1322,7 @@ impl MarginfiAccountFixture {
                 authority: None,
                 fee_recipient,
                 rebalance_order,
+                rebalance_record: Self::rebalance_record_pda(rebalance_order),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::MarginfiAccountCloseRebalanceOrder {}.data(),

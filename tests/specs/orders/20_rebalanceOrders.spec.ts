@@ -485,6 +485,9 @@ describe("Auto-rebalance orders (native -> native)", () => {
   };
 
   const closeOrder = async (order: PublicKey) => {
+    // A record left by a prior rebalance blocks close until its tip is settled; in production
+    // settle_rebalance_tip empties it. Simulate that here so unrelated tests can tidy up their order.
+    clearRecordAccount(deriveRebalanceRecord(program.programId, order)[0]);
     const ix = await program.methods
       .marginfiAccountCloseRebalanceOrder()
       .accountsPartial({
@@ -2040,6 +2043,9 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
   };
 
   const closeOrder = async (order: PublicKey) => {
+    // A record left by a prior rebalance blocks close until its tip is settled; in production
+    // settle_rebalance_tip empties it. Simulate that here so unrelated tests can tidy up their order.
+    clearRecordAccount(deriveRebalanceRecord(program.programId, order)[0]);
     await sendOwner(
       new Transaction().add(
         await program.methods

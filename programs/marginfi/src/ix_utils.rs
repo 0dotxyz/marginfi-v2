@@ -209,7 +209,7 @@ pub fn load_and_validate_instructions(
 }
 
 /// Tx-structure sandwich for rebalance: the end instruction must be last, start must be top-level
-/// (not CPI), and only an allowlisted set of instructions may appear — the marginfi
+/// (not CPI), and only an allowlisted set of instructions may appear: the marginfi
 /// rebalance/withdraw/deposit legs, plus each venue program's (non-mutating) refresh/crank ixs ONLY.
 /// Forbidding the venues' deposit/borrow/withdraw ops here is what stops an attacker-keeper from
 /// spiking a venue's utilization-derived supply rate inside the sandwich to pass the improvement gate
@@ -294,7 +294,7 @@ pub fn validate_rebalance_instructions(
         ],
     )?;
     // Venue programs may appear ONLY as their refresh/crank ixs (which recompute at current
-    // utilization without changing it). Any other venue ix — deposit/borrow/withdraw — is rejected,
+    // utilization without changing it). Any other venue ix (deposit/borrow/withdraw) is rejected,
     // closing the in-sandwich rate-manipulation path.
     validate_ixes_exclusive(
         &ixes,
@@ -536,15 +536,15 @@ mod tests {
     /// (`target/idl/marginfi.json`). The tests above pin them against the in-code hash; this pins
     /// them against the client-facing IDL too, so renaming an account/instruction in the program
     /// (which changes its IDL name + discriminator) trips this instead of silently shipping a
-    /// breaking change. Requires a fresh IDL — run `anchor build -p marginfi` first.
+    /// breaking change. Requires a fresh IDL: run `anchor build -p marginfi` first.
     #[test]
     fn check_discrims_match_idl() {
         let idl_path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../target/idl/marginfi.json"
         );
-        // The IDL is a build artifact (`anchor build -p marginfi`). When it's absent — e.g. the
-        // plain `cargo test --lib` job that never runs anchor build — skip rather than fail; the
+        // The IDL is a build artifact (`anchor build -p marginfi`). When it's absent (e.g. the
+        // plain `cargo test --lib` job that never runs anchor build) skip rather than fail; the
         // check still runs locally and in any job that builds the IDL first.
         let idl_str = match std::fs::read_to_string(idl_path) {
             Ok(s) => s,
