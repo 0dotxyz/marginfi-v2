@@ -10,7 +10,7 @@ use crate::{assert_struct_align, assert_struct_size};
 
 #[cfg(not(feature = "anchor"))]
 use super::Pubkey;
-use super::{RequirementType, WrappedI80F48};
+use super::{OracleFeedFamily, RequirementType, WrappedI80F48};
 
 pub const EMODE_ON: u64 = 1;
 
@@ -153,12 +153,15 @@ pub struct ReconciledEmodeEntry {
 pub struct ReconciledSameAssetConfig {
     pub mint: Pubkey,
     pub oracle_key: Pubkey,
+    /// Feed family shared by all liability banks; collateral banks must match it to receive the
+    /// same-asset weight. `None` disables the config.
+    pub feed_family: Option<OracleFeedFamily>,
     pub asset_weight: I80F48,
 }
 
 impl ReconciledSameAssetConfig {
     pub fn is_enabled(&self) -> bool {
-        self.mint != Pubkey::default()
+        self.mint != Pubkey::default() && self.feed_family.is_some()
     }
 }
 

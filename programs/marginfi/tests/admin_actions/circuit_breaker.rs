@@ -100,6 +100,14 @@ async fn enable_cb_and_trip_tier3_storm(
     for _ in 0..3 {
         clock_time += 1;
         clock_slot += 10;
+        // Warp before setting the clock: each pulse transaction is byte-identical to the last, so
+        // without a fresh blockhash BanksClient signature-dedupes it into the cached result and the
+        // breaker never escalates. `set_clock` still dictates the slot/time the breaker observes.
+        test_f
+            .context
+            .borrow_mut()
+            .warp_to_slot(clock_slot)
+            .unwrap();
         test_f.set_clock(clock_slot, clock_time).await;
         test_f
             .set_pyth_oracle_price_native(feed, base_native.saturating_mul(2), 0, clock_time)

@@ -18,9 +18,9 @@ use marginfi_type_crate::{
     types::{
         compute_same_asset_emode_weight, reconcile_emode_configs, u32_to_basis, Balance,
         BalanceSide, Bank, BankOperationalState, EmodeConfig, HealthCache, HealthPriceMode,
-        LendingAccount, LiquidationPriceCache, MarginfiAccount, MarginfiGroup, OraclePriceType,
-        OraclePriceWithConfidence, OracleSetup, PriceBias, ReconciledEmodeConfig, RequirementType,
-        RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
+        LendingAccount, LiquidationPriceCache, MarginfiAccount, MarginfiGroup, OracleFeedFamily,
+        OraclePriceType, OraclePriceWithConfidence, OracleSetup, PriceBias, ReconciledEmodeConfig,
+        RequirementType, RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
         ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
@@ -464,7 +464,7 @@ fn get_same_asset_weight_for_balance(
         || !reconciled_emode_config.same_asset.is_enabled()
         || bank.mint != reconciled_emode_config.same_asset.mint
         || bank.config.oracle_keys[0] != reconciled_emode_config.same_asset.oracle_key
-        || bank.config.oracle_setup.is_fixed_price()
+        || bank.config.oracle_setup.feed_family() != reconciled_emode_config.same_asset.feed_family
         || !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE)
         || !matches!(bank.config.risk_tier, RiskTier::Collateral)
         || matches!(
@@ -678,6 +678,7 @@ struct EmodeConfigIterator<'a, 'info> {
     same_asset_leverage: Option<I80F48>,
     shared_mint: Option<Pubkey>,
     shared_oracle_key: Option<Pubkey>,
+    shared_feed_family: Option<OracleFeedFamily>,
     lowest_liab_weight: Option<I80F48>,
     same_asset_invalid: bool,
 }
@@ -700,6 +701,7 @@ impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
             same_asset_leverage,
             shared_mint: None,
             shared_oracle_key: None,
+            shared_feed_family: None,
             lowest_liab_weight: None,
             same_asset_invalid: false,
         }
@@ -711,15 +713,24 @@ impl<'a, 'info> EmodeConfigIterator<'a, 'info> {
     fn reconcile(mut self) -> ReconciledEmodeConfig {
         let requirement_type = self.requirement_type;
         let mut reconciled = reconcile_emode_configs(&mut self, requirement_type);
-        if let (Some(leverage), false, Some(mint), Some(oracle_key), Some(liab_weight)) = (
+        if let (
+            Some(leverage),
+            false,
+            Some(mint),
+            Some(oracle_key),
+            Some(feed_family),
+            Some(liab_weight),
+        ) = (
             self.same_asset_leverage,
             self.same_asset_invalid,
             self.shared_mint,
             self.shared_oracle_key,
+            self.shared_feed_family,
             self.lowest_liab_weight,
         ) {
             reconciled.same_asset.mint = mint;
             reconciled.same_asset.oracle_key = oracle_key;
+            reconciled.same_asset.feed_family = Some(feed_family);
             reconciled.same_asset.asset_weight =
                 compute_same_asset_emode_weight(leverage, liab_weight);
         }
@@ -764,6 +775,7 @@ impl<'a, 'info> Iterator for EmodeConfigIterator<'a, 'info> {
                     if !update_reconciled_same_asset_config(
                         &mut self.shared_mint,
                         &mut self.shared_oracle_key,
+                        &mut self.shared_feed_family,
                         &mut self.lowest_liab_weight,
                         &bank,
                         bank.mint,
@@ -793,20 +805,26 @@ fn same_asset_leverage_for_requirement(
 }
 
 /// Folds one liability mint/weight into the running same-asset accumulators.
-/// Returns `false` when any liability bank is ineligible, fixed-price, missing an oracle key, or
-/// diverges from a previously seen mint/oracle-key pair. Callers must stop folding on `false`.
+/// Returns `false` when any liability bank is ineligible, lacks a feed family (fixed-price,
+/// deprecated, or unset oracle setup), is missing an oracle key, or diverges from a previously
+/// seen mint/oracle-key/feed-family triple. Callers must stop folding on `false`.
 fn update_reconciled_same_asset_config(
     shared_mint: &mut Option<Pubkey>,
     shared_oracle_key: &mut Option<Pubkey>,
+    shared_feed_family: &mut Option<OracleFeedFamily>,
     lowest_liab_weight: &mut Option<I80F48>,
     bank: &Bank,
     mint: Pubkey,
     liab_weight: I80F48,
 ) -> bool {
-    if !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE)
-        || bank.config.oracle_setup.is_fixed_price()
-        || bank.config.oracle_keys[0] == Pubkey::default()
-    {
+    let feed_family = match bank.config.oracle_setup.feed_family() {
+        Some(family) if bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE) => family,
+        _ => {
+            *lowest_liab_weight = None;
+            return false;
+        }
+    };
+    if bank.config.oracle_keys[0] == Pubkey::default() {
         *lowest_liab_weight = None;
         return false;
     }
@@ -814,7 +832,9 @@ fn update_reconciled_same_asset_config(
     let oracle_key = bank.config.oracle_keys[0];
     match shared_mint {
         Some(existing_mint)
-            if *existing_mint != mint || shared_oracle_key.as_ref() != Some(&oracle_key) =>
+            if *existing_mint != mint
+                || shared_oracle_key.as_ref() != Some(&oracle_key)
+                || shared_feed_family.as_ref() != Some(&feed_family) =>
         {
             *lowest_liab_weight = None;
             false
@@ -828,6 +848,7 @@ fn update_reconciled_same_asset_config(
         None => {
             *shared_mint = Some(mint);
             *shared_oracle_key = Some(oracle_key);
+            *shared_feed_family = Some(feed_family);
             *lowest_liab_weight = Some(liab_weight);
             true
         }
@@ -2335,6 +2356,7 @@ mod test {
         bank.mint = mint;
         bank.config.risk_tier = RiskTier::Collateral;
         bank.config.operational_state = BankOperationalState::Operational;
+        bank.config.oracle_setup = OracleSetup::PythPushOracle;
         bank.config.oracle_keys[0] = Pubkey::new_unique();
         bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
 
@@ -2345,6 +2367,7 @@ mod test {
         let mut reconciled = ReconciledEmodeConfig::default();
         reconciled.same_asset.mint = mint;
         reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
+        reconciled.same_asset.feed_family = Some(OracleFeedFamily::PythPush);
         reconciled.same_asset.asset_weight = I80F48!(0.99);
 
         assert_eq!(
@@ -2370,12 +2393,13 @@ mod test {
     }
 
     #[test]
-    fn same_asset_weight_respects_reduce_only_and_equity_disable_behavior() {
+    fn same_asset_weight_requires_matching_feed_family() {
         let mint = Pubkey::new_unique();
         let mut bank = Bank::zeroed();
         bank.mint = mint;
         bank.config.risk_tier = RiskTier::Collateral;
-        bank.config.operational_state = BankOperationalState::ReduceOnly;
+        bank.config.operational_state = BankOperationalState::Operational;
+        bank.config.oracle_setup = OracleSetup::KaminoPythPush;
         bank.config.oracle_keys[0] = Pubkey::new_unique();
         bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
 
@@ -2386,6 +2410,93 @@ mod test {
         let mut reconciled = ReconciledEmodeConfig::default();
         reconciled.same_asset.mint = mint;
         reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
+        reconciled.same_asset.feed_family = Some(OracleFeedFamily::PythPush);
+        reconciled.same_asset.asset_weight = I80F48!(0.99);
+
+        // Integration setups in the same feed family qualify (kToken collateral vs native debt).
+        assert_eq!(
+            get_same_asset_weight_for_balance(
+                &balance,
+                &bank,
+                RequirementType::Initial,
+                &reconciled,
+            ),
+            Some(I80F48!(0.99))
+        );
+
+        bank.config.oracle_setup = OracleSetup::SwitchboardPull;
+        assert_eq!(
+            get_same_asset_weight_for_balance(
+                &balance,
+                &bank,
+                RequirementType::Initial,
+                &reconciled,
+            ),
+            None
+        );
+
+        bank.config.oracle_setup = OracleSetup::Fixed;
+        assert_eq!(
+            get_same_asset_weight_for_balance(
+                &balance,
+                &bank,
+                RequirementType::Initial,
+                &reconciled,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn same_asset_weight_disabled_when_reconciled_family_missing() {
+        let mint = Pubkey::new_unique();
+        let mut bank = Bank::zeroed();
+        bank.mint = mint;
+        bank.config.risk_tier = RiskTier::Collateral;
+        bank.config.operational_state = BankOperationalState::Operational;
+        bank.config.oracle_setup = OracleSetup::PythPushOracle;
+        bank.config.oracle_keys[0] = Pubkey::new_unique();
+        bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+
+        let mut balance = Balance::empty_deactivated();
+        balance.set_active(true);
+        balance.asset_shares = I80F48!(1).into();
+
+        let mut reconciled = ReconciledEmodeConfig::default();
+        reconciled.same_asset.mint = mint;
+        reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
+        reconciled.same_asset.asset_weight = I80F48!(0.99);
+
+        assert_eq!(
+            get_same_asset_weight_for_balance(
+                &balance,
+                &bank,
+                RequirementType::Initial,
+                &reconciled,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn same_asset_weight_respects_reduce_only_and_equity_disable_behavior() {
+        let mint = Pubkey::new_unique();
+        let mut bank = Bank::zeroed();
+        bank.mint = mint;
+        bank.config.risk_tier = RiskTier::Collateral;
+        bank.config.operational_state = BankOperationalState::ReduceOnly;
+        bank.config.oracle_setup = OracleSetup::PythPushOracle;
+        bank.config.oracle_keys[0] = Pubkey::new_unique();
+        bank.update_flag(true, BANK_SAME_ASSET_EMODE_ELIGIBLE);
+
+        let mut balance = Balance::empty_deactivated();
+        balance.set_active(true);
+        balance.asset_shares = I80F48!(1).into();
+
+        let mut reconciled = ReconciledEmodeConfig::default();
+        reconciled.same_asset.mint = mint;
+        reconciled.same_asset.oracle_key = bank.config.oracle_keys[0];
+        reconciled.same_asset.feed_family = Some(OracleFeedFamily::PythPush);
         reconciled.same_asset.asset_weight = I80F48!(0.99);
 
         assert_eq!(
@@ -2476,6 +2587,7 @@ mod test {
         let oracle_key = Pubkey::new_unique();
         let mut shared_mint = None;
         let mut shared_oracle_key = None;
+        let mut shared_feed_family = None;
         let mut lowest_liab_weight = None;
         let bank_a = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
         let bank_b = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.05));
@@ -2483,6 +2595,7 @@ mod test {
         assert!(update_reconciled_same_asset_config(
             &mut shared_mint,
             &mut shared_oracle_key,
+            &mut shared_feed_family,
             &mut lowest_liab_weight,
             &bank_a,
             bank_a.mint,
@@ -2491,6 +2604,7 @@ mod test {
         assert!(update_reconciled_same_asset_config(
             &mut shared_mint,
             &mut shared_oracle_key,
+            &mut shared_feed_family,
             &mut lowest_liab_weight,
             &bank_b,
             bank_b.mint,
@@ -2513,6 +2627,7 @@ mod test {
         let oracle_key = Pubkey::new_unique();
         let mut shared_mint = None;
         let mut shared_oracle_key = None;
+        let mut shared_feed_family = None;
         let mut lowest_liab_weight = None;
         let bank_a = same_asset_eligible_bank(mint_a, oracle_key, I80F48!(1.00));
         let bank_b = same_asset_eligible_bank(mint_b, oracle_key, I80F48!(1.00));
@@ -2520,6 +2635,7 @@ mod test {
         assert!(update_reconciled_same_asset_config(
             &mut shared_mint,
             &mut shared_oracle_key,
+            &mut shared_feed_family,
             &mut lowest_liab_weight,
             &bank_a,
             bank_a.mint,
@@ -2528,6 +2644,7 @@ mod test {
         assert!(!update_reconciled_same_asset_config(
             &mut shared_mint,
             &mut shared_oracle_key,
+            &mut shared_feed_family,
             &mut lowest_liab_weight,
             &bank_b,
             bank_b.mint,
@@ -2543,6 +2660,7 @@ mod test {
         let mint = Pubkey::new_unique();
         let mut shared_mint = None;
         let mut shared_oracle_key = None;
+        let mut shared_feed_family = None;
         let mut lowest_liab_weight = None;
         let bank_a = same_asset_eligible_bank(mint, Pubkey::new_unique(), I80F48!(1.00));
         let bank_b = same_asset_eligible_bank(mint, Pubkey::new_unique(), I80F48!(1.00));
@@ -2550,6 +2668,7 @@ mod test {
         assert!(update_reconciled_same_asset_config(
             &mut shared_mint,
             &mut shared_oracle_key,
+            &mut shared_feed_family,
             &mut lowest_liab_weight,
             &bank_a,
             bank_a.mint,
@@ -2558,6 +2677,7 @@ mod test {
         assert!(!update_reconciled_same_asset_config(
             &mut shared_mint,
             &mut shared_oracle_key,
+            &mut shared_feed_family,
             &mut lowest_liab_weight,
             &bank_b,
             bank_b.mint,
@@ -2569,11 +2689,72 @@ mod test {
     }
 
     #[test]
+    fn same_asset_config_disables_when_liability_feed_families_diverge() {
+        let mint = Pubkey::new_unique();
+        let oracle_key = Pubkey::new_unique();
+        let mut shared_mint = None;
+        let mut shared_oracle_key = None;
+        let mut shared_feed_family = None;
+        let mut lowest_liab_weight = None;
+        let bank_a = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
+        let mut bank_b = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
+        bank_b.config.oracle_setup = OracleSetup::SwitchboardPull;
+
+        assert!(update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut shared_feed_family,
+            &mut lowest_liab_weight,
+            &bank_a,
+            bank_a.mint,
+            I80F48!(1.00),
+        ));
+        assert!(!update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut shared_feed_family,
+            &mut lowest_liab_weight,
+            &bank_b,
+            bank_b.mint,
+            I80F48!(1.00),
+        ));
+
+        assert_eq!(shared_feed_family, Some(OracleFeedFamily::PythPush));
+        assert_eq!(lowest_liab_weight, None);
+    }
+
+    #[test]
+    fn same_asset_config_disables_when_liability_setup_has_no_feed_family() {
+        let mint = Pubkey::new_unique();
+        let oracle_key = Pubkey::new_unique();
+        let mut shared_mint = None;
+        let mut shared_oracle_key = None;
+        let mut shared_feed_family = None;
+        let mut lowest_liab_weight = None;
+        let mut bank = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
+        bank.config.oracle_setup = OracleSetup::Fixed;
+
+        assert!(!update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut shared_feed_family,
+            &mut lowest_liab_weight,
+            &bank,
+            bank.mint,
+            I80F48!(1.00),
+        ));
+        assert_eq!(shared_mint, None);
+        assert_eq!(shared_feed_family, None);
+        assert_eq!(lowest_liab_weight, None);
+    }
+
+    #[test]
     fn same_asset_config_disables_when_liability_bank_is_not_eligible() {
         let mint = Pubkey::new_unique();
         let oracle_key = Pubkey::new_unique();
         let mut shared_mint = None;
         let mut shared_oracle_key = None;
+        let mut shared_feed_family = None;
         let mut lowest_liab_weight = None;
         let mut bank = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
         bank.update_flag(false, BANK_SAME_ASSET_EMODE_ELIGIBLE);
@@ -2581,6 +2762,7 @@ mod test {
         assert!(!update_reconciled_same_asset_config(
             &mut shared_mint,
             &mut shared_oracle_key,
+            &mut shared_feed_family,
             &mut lowest_liab_weight,
             &bank,
             bank.mint,
@@ -2596,6 +2778,7 @@ mod test {
         let oracle_key = Pubkey::new_unique();
         let mut shared_mint = None;
         let mut shared_oracle_key = None;
+        let mut shared_feed_family = None;
         let mut lowest_liab_weight = None;
         let bank_a = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.05));
         let bank_b = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
@@ -2603,6 +2786,7 @@ mod test {
         assert!(update_reconciled_same_asset_config(
             &mut shared_mint,
             &mut shared_oracle_key,
+            &mut shared_feed_family,
             &mut lowest_liab_weight,
             &bank_a,
             bank_a.mint,
@@ -2611,6 +2795,7 @@ mod test {
         assert!(update_reconciled_same_asset_config(
             &mut shared_mint,
             &mut shared_oracle_key,
+            &mut shared_feed_family,
             &mut lowest_liab_weight,
             &bank_b,
             bank_b.mint,
