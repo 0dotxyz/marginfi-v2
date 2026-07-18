@@ -421,7 +421,7 @@ pub mod marginfi {
     /// (permissionless) Settle a rebalance's escrowed keeper tip after the settlement delay. Pays the
     /// recorded keeper only if the destinations realized more yield than the sources over the window
     /// (defeats cross-tx rate manipulation); otherwise refunds the tip to the fee pool. Closes the
-    /// record.
+    /// record, returning its rent to the recorded keeper.
     pub fn marginfi_account_settle_rebalance_tip<'info>(
         ctx: Context<'info, SettleRebalanceTip<'info>>,
     ) -> MarginfiResult {

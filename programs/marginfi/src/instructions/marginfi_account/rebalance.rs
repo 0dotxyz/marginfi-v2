@@ -15,6 +15,12 @@
 //! Supports native, Kamino, Drift, and JupLend legs. Referenced banks arrive as a deduped, indexed
 //! stream in the remaining accounts; a JupLend bank's `TokenReserve` is read from that stream
 //! (validated against the bank's Lending state).
+//!
+//! Residual risk (accepted): the sandwich forbids in-transaction rate manipulation, but a Jito
+//! bundle can spike a destination's utilization-derived rate in a PRIOR transaction, pass both rate
+//! gates, and unwind afterwards, so the move itself can be induced. The tip settlement makes this
+//! profitless (a transient spike realizes no yield, so the tip is refunded), leaving only unpaid
+//! griefing bounded by the per-order cooldown and the conservation dust.
 
 use crate::{
     check, check_eq,
@@ -1082,8 +1088,9 @@ impl<'info> Hashable for EndRebalance<'info> {
 /// realized supply yield each referenced bank earned since the move (current yield index vs the
 /// recorded move-time index) and pays the escrowed tip to the recorded executor only if every move's
 /// destination out-yielded its source; otherwise the tip is refunded to the fee pool. Either way the
-/// record is closed (its rent goes to the caller, compensating the tx and unblocking the order for the
-/// next rebalance). Anyone may call it; the tip always goes to the recorded keeper, not the caller.
+/// record is closed and its rent returns to the recorded executor, who fronted it at
+/// `start_rebalance`. Anyone may call it; both the tip and the rent always go to the recorded
+/// keeper, not the caller.
 pub fn settle_rebalance_tip<'info>(
     ctx: Context<'info, SettleRebalanceTip<'info>>,
 ) -> MarginfiResult {
@@ -1160,7 +1167,7 @@ pub fn settle_rebalance_tip<'info>(
 
     // Release the escrowed tip: to the keeper if the move realized yield, else back to the fee pool.
     // The record is program-owned, so move lamports directly; Anchor's `close` returns the base rent
-    // to the caller afterward.
+    // to the recorded executor afterward.
     let record_ai = ctx.accounts.rebalance_record.to_account_info();
     let dest_ai = if realized {
         ctx.accounts.executor.to_account_info()
@@ -1206,12 +1213,13 @@ pub struct SettleRebalanceTip<'info> {
     pub rebalance_order: AccountLoader<'info, RebalanceOrder>,
     #[account(
         mut,
-        close = caller,
+        close = executor,
         constraint = rebalance_record.load()?.order == rebalance_order.key()
             @ MarginfiError::Unauthorized,
     )]
     pub rebalance_record: AccountLoader<'info, RebalanceRecord>,
-    /// CHECK: the recorded keeper; receives the tip. Validated to equal `record.executor`.
+    /// CHECK: the recorded keeper; receives the tip and the record's rent. Validated to equal
+    /// `record.executor`.
     #[account(
         mut,
         constraint = executor.key() == rebalance_record.load()?.executor
@@ -1224,7 +1232,7 @@ pub struct SettleRebalanceTip<'info> {
         bump,
     )]
     pub fee_pool: SystemAccount<'info>,
-    /// The permissionless caller; pays the tx and receives the record's rent.
+    /// The permissionless caller; pays the tx.
     #[account(mut)]
     pub caller: Signer<'info>,
     // Referenced banks follow in remaining_accounts (same layout as start/end):

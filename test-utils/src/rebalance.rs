@@ -416,6 +416,12 @@ impl RebalanceFixture {
 
     /// The keeper-signed `settle_rebalance_tip` ix for the standard `[src, dst]` referenced set.
     pub async fn build_settle(&self, src: Pubkey, dst: Pubkey) -> Instruction {
+        self.build_settle_as(src, dst, self.keeper.pubkey()).await
+    }
+
+    /// `settle_rebalance_tip` with an explicit `caller`, so tests can settle from a third party and
+    /// assert the tip and record rent still reach the recorded executor.
+    pub async fn build_settle_as(&self, src: Pubkey, dst: Pubkey, caller: Pubkey) -> Instruction {
         let ref_banks = vec![self.bank_meta(src), self.bank_meta(dst)];
         self.user
             .make_rebalance_settle_ix(
@@ -423,7 +429,7 @@ impl RebalanceFixture {
                 self.order_pda,
                 self.record_pda,
                 self.keeper.pubkey(),
-                self.keeper.pubkey(),
+                caller,
             )
             .await
     }

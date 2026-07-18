@@ -10,12 +10,17 @@ use fixtures::{
 };
 use marginfi::prelude::MarginfiError;
 use marginfi_type_crate::{
-    pdas::derive_juplend_token_reserve,
-    types::{BankConfig, WrappedI80F48},
+    constants::REBALANCE_ORDER_SEED,
+    pdas::{derive_juplend_token_reserve, KAMINO_PROGRAM_ID},
+    types::{BankConfig, BankConfigOpt, WrappedI80F48},
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::tokio;
-use solana_sdk::{signature::Signer, transaction::Transaction};
+use solana_sdk::{
+    account::Account, instruction::Instruction, pubkey::Pubkey, signature::Signer,
+    transaction::Transaction,
+};
+use solana_system_interface::instruction as system_instruction;
 
 /// The per-venue deposit (`VENUE_DEPOSIT_NATIVE`, 100 USDC of 6-decimal native) as USD value, at the
 /// $1 test oracle.
@@ -90,8 +95,13 @@ async fn rebalance_settle_pays_keeper_on_realized_yield() -> anyhow::Result<()> 
     );
 
     f.advance_clock(601).await; // settle delay = clamp(0, 600, 3600) = 600
-    let settle = f.build_settle(f.src_bank_f.key, f.dst_bank_f.key).await;
-    f.process(&[settle]).await?;
+    let record_lamports = f.lamports_of(f.record_pda).await;
+    let keeper_before = f.lamports_of(f.keeper.pubkey()).await;
+    let payer = f.test_f.context.borrow().payer.pubkey();
+    let settle = f
+        .build_settle_as(f.src_bank_f.key, f.dst_bank_f.key, payer)
+        .await;
+    f.process_as_payer(&[settle]).await?;
 
     assert_eq!(
         f.lamports_of(f.fee_pool()).await,
@@ -102,6 +112,11 @@ async fn rebalance_settle_pays_keeper_on_realized_yield() -> anyhow::Result<()> 
         f.lamports_of(f.record_pda).await,
         0,
         "record closed after settlement"
+    );
+    assert_eq!(
+        f.lamports_of(f.keeper.pubkey()).await - keeper_before,
+        record_lamports,
+        "executor receives the escrowed tip plus the record rent"
     );
     Ok(())
 }
@@ -136,8 +151,14 @@ async fn rebalance_settle_refunds_pool_when_not_realized() -> anyhow::Result<()>
     drive_utilization(&f.test_f, &f.src_bank_f, 900.0, 300.0).await?;
 
     f.advance_clock(601).await;
-    let settle = f.build_settle(f.src_bank_f.key, f.dst_bank_f.key).await;
-    f.process(&[settle]).await?;
+    let record_lamports = f.lamports_of(f.record_pda).await;
+    let pending_tip = f.record_pending_tip().await;
+    let keeper_before = f.lamports_of(f.keeper.pubkey()).await;
+    let payer = f.test_f.context.borrow().payer.pubkey();
+    let settle = f
+        .build_settle_as(f.src_bank_f.key, f.dst_bank_f.key, payer)
+        .await;
+    f.process_as_payer(&[settle]).await?;
 
     assert_eq!(
         f.lamports_of(f.fee_pool()).await,
@@ -145,6 +166,11 @@ async fn rebalance_settle_refunds_pool_when_not_realized() -> anyhow::Result<()>
         "unrealized settlement refunds the full escrow, restoring the pool"
     );
     assert_eq!(f.lamports_of(f.record_pda).await, 0, "record closed");
+    assert_eq!(
+        f.lamports_of(f.keeper.pubkey()).await - keeper_before,
+        record_lamports - pending_tip,
+        "executor gets back only the record rent; the tip returned to the pool"
+    );
     Ok(())
 }
 
@@ -2271,5 +2297,458 @@ async fn rebalance_rejects_overshoot() -> anyhow::Result<()> {
         .await;
     let res = f.process(&[start_ix, withdraw, deposit, end_ix]).await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceOvershoot);
+    Ok(())
+}
+
+/// A partial fee-pool withdrawal that leaves at least the rent-exempt reserve pays out exactly the
+/// requested amount; a follow-up that would strand the pool below rent-exemption instead closes it
+/// and returns the full remaining balance.
+#[tokio::test]
+async fn rebalance_fee_pool_withdraw_partial_then_rent_clamp() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let rent_floor = solana_sdk::rent::Rent::default().minimum_balance(0);
+    f.top_up_pool(2_000_000).await?;
+    assert_eq!(f.lamports_of(f.fee_pool()).await, rent_floor + 2_000_000);
+
+    let payer = f.test_f.context.borrow().payer.pubkey();
+
+    let recipient = Pubkey::new_unique();
+    let seeded = Account {
+        lamports: rent_floor,
+        data: vec![],
+        owner: solana_system_interface::program::ID,
+        executable: false,
+        rent_epoch: 0,
+    };
+    f.test_f
+        .context
+        .borrow_mut()
+        .set_account(&recipient, &seeded.into());
+
+    let withdraw_ix = f
+        .user
+        .make_withdraw_rebalance_fee_pool_ix(payer, recipient, 500_000)
+        .await;
+    f.process_as_payer(&[withdraw_ix]).await?;
+    assert_eq!(f.lamports_of(f.fee_pool()).await, rent_floor + 1_500_000);
+    assert_eq!(f.lamports_of(recipient).await, rent_floor + 500_000);
+
+    let clamp_ix = f
+        .user
+        .make_withdraw_rebalance_fee_pool_ix(payer, recipient, 1_500_001)
+        .await;
+    f.process_as_payer(&[clamp_ix]).await?;
+    assert_eq!(f.lamports_of(f.fee_pool()).await, 0);
+    assert_eq!(
+        f.lamports_of(recipient).await,
+        2 * rent_floor + 2_000_000,
+        "seed + partial 500k + clamped remainder (reserve included)"
+    );
+    Ok(())
+}
+
+/// A dust pre-send to the fee-pool PDA (below the rent-exempt reserve) must not let a top-up skip
+/// seeding the reserve: the top-up covers the shortfall so the pool ends rent-exempt with exactly the
+/// topped-up amount spendable above the reserve, never left rent-paying.
+#[tokio::test]
+async fn rebalance_fee_pool_topup_seeds_reserve_after_dust_presend() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let rent_floor = solana_sdk::rent::Rent::default().minimum_balance(0);
+
+    let dust = Account {
+        lamports: 1,
+        data: vec![],
+        owner: solana_system_interface::program::ID,
+        executable: false,
+        rent_epoch: 0,
+    };
+    f.test_f
+        .context
+        .borrow_mut()
+        .set_account(&f.fee_pool(), &dust.into());
+
+    f.top_up_pool(1_000_000).await?;
+
+    assert_eq!(f.lamports_of(f.fee_pool()).await, rent_floor + 1_000_000);
+    Ok(())
+}
+
+/// While an executed rebalance's record awaits settlement, even the authority cannot close the order
+/// (the record escrows the keeper tip); after settlement the close succeeds and the account's active
+/// order count returns to zero.
+#[tokio::test]
+async fn rebalance_close_blocked_while_record_pending() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.pin_clock(1_000).await;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+
+    let payer = f.test_f.context.borrow().payer.pubkey();
+    let close_ix = f
+        .user
+        .make_close_rebalance_order_ix(f.order_pda, payer)
+        .await;
+    let res = f.process_as_payer(&[close_ix.clone()]).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceRecordPending);
+
+    f.advance_clock(601).await;
+    let settle = f.build_settle(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&[settle]).await?;
+    f.process_as_payer(&[close_ix]).await?;
+    assert_eq!(f.lamports_of(f.order_pda).await, 0, "order closed");
+    assert_eq!(f.user.load().await.active_orders, 0);
+    Ok(())
+}
+
+/// A non-authority may not close an order whose account still holds a position in an allowed venue.
+#[tokio::test]
+async fn rebalance_keeper_close_rejected_while_position_held() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let close_ix = f
+        .user
+        .make_keeper_close_rebalance_order_ix(f.order_pda, f.keeper.pubkey())
+        .await;
+    let res = f.process(&[close_ix]).await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::LiquidatorOrderCloseNotAllowed
+    );
+    Ok(())
+}
+
+/// Once the marginfi account itself is gone (system-owned and empty), the order is dead and anyone
+/// may reclaim it; the order's full rent goes to the closer's chosen recipient. The closed-account
+/// state is written directly since both account-close paths require zero active orders.
+#[tokio::test]
+async fn rebalance_keeper_close_after_account_closed() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let closed = Account {
+        lamports: 1_000_000,
+        data: vec![],
+        owner: solana_system_interface::program::ID,
+        executable: false,
+        rent_epoch: 0,
+    };
+    f.test_f
+        .context
+        .borrow_mut()
+        .set_account(&f.user.key, &closed.into());
+
+    let order_rent = f.lamports_of(f.order_pda).await;
+    let recipient = Pubkey::new_unique();
+    let close_ix = f
+        .user
+        .make_keeper_close_rebalance_order_ix(f.order_pda, recipient)
+        .await;
+    f.process(&[close_ix]).await?;
+    assert_eq!(f.lamports_of(f.order_pda).await, 0, "order closed");
+    assert_eq!(f.lamports_of(recipient).await, order_rent);
+    Ok(())
+}
+
+/// The circuit-breaker price gate deferred by the sandwich's withdraw legs re-arms at
+/// `end_rebalance`: with a liability on the account and the liability bank's live price jumped past
+/// the breaker's first deviation tier, the whole rebalance reverts.
+#[tokio::test]
+async fn rebalance_end_cb_gate_rejects_price_jump() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let sol_bank = f.test_f.get_bank(&BankMint::Sol);
+    let user_sol = f.test_f.sol_mint.create_empty_token_account().await;
+    f.user.try_bank_borrow(user_sol.key, sol_bank, 10.0).await?;
+
+    // Warm the SOL bank's price cache at $10 and enable the breaker (reference seeds at $10).
+    let warm_time: i64 = 100;
+    let warm_slot: u64 = 1_000;
+    f.test_f
+        .set_pyth_oracle_price_native(PYTH_SOL_FEED, 10_000_000_000, 0, warm_time)
+        .await;
+    f.test_f.set_clock(warm_slot, warm_time).await;
+    f.test_f
+        .marginfi_group
+        .try_pulse_bank_price_cache(sol_bank)
+        .await?;
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                circuit_breaker_enabled: Some(true),
+                cb_deviation_bps_tiers: Some([500, 1000, 2500]),
+                cb_tier_durations_seconds: Some([600, 3600, 14400]),
+                cb_escalation_window_mult: Some(2),
+                cb_ema_alpha_bps: Some(1000),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    // Jump SOL to $11: a 1000 bps move past the 500 bps first tier.
+    let breach_time = warm_time + 1;
+    f.test_f.set_clock(warm_slot + 10, breach_time).await;
+    f.test_f
+        .set_pyth_oracle_price_native(PYTH_SOL_FEED, 11_000_000_000, 0, breach_time)
+        .await;
+    f.test_f
+        .set_pyth_oracle_timestamp(PYTH_USDC_FEED, breach_time)
+        .await;
+
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::CircuitBreakerPriceJump);
+    Ok(())
+}
+
+/// A venue program inside the sandwich may only appear as its refresh cranks: any other Kamino
+/// discriminator is rejected. The forbidden ix never executes (start's introspection rejects the
+/// whole transaction first), so it needs no valid accounts.
+#[tokio::test]
+async fn rebalance_rejects_forbidden_venue_ix_in_sandwich() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let mut ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    ixs.insert(
+        1,
+        Instruction {
+            program_id: KAMINO_PROGRAM_ID,
+            accounts: vec![],
+            data: vec![9; 8],
+        },
+    );
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::ForbiddenIx);
+    Ok(())
+}
+
+/// Any program outside the sandwich allowlist is rejected outright; a plain system transfer is
+/// enough to trip it.
+#[tokio::test]
+async fn rebalance_rejects_program_outside_allowlist() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let mut ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    ixs.insert(
+        1,
+        system_instruction::transfer(&f.keeper.pubkey(), &f.keeper.pubkey(), 1),
+    );
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::ForbiddenIx);
+    Ok(())
+}
+
+/// Exactly one `end_rebalance` may appear in the sandwich transaction: a duplicate end (even ahead of
+/// the final one) is rejected.
+#[tokio::test]
+async fn rebalance_rejects_second_end_in_tx() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    let extra_end = ixs.last().unwrap().clone();
+    let mut ixs = ixs;
+    ixs.insert(3, extra_end);
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceMalformedSandwich);
+    Ok(())
+}
+
+/// A sandwich that moves nothing is rejected: a declared move under the dust floor with no legs
+/// passes per-bank reconciliation (|declared| <= dust) but fails the moved-something requirement.
+#[tokio::test]
+async fn rebalance_rejects_no_op_move() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, 0.0000005)],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f.process(&[start_ix, end_ix]).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceIncompleteMove);
+    Ok(())
+}
+
+/// Placing an order requires an existing position in at least one allowed bank.
+#[tokio::test]
+async fn rebalance_place_requires_allowlist_position() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let empty_user = f.test_f.create_marginfi_account().await;
+    let order_pda = Pubkey::find_program_address(
+        &[
+            REBALANCE_ORDER_SEED.as_bytes(),
+            empty_user.key.as_ref(),
+            f.test_f.usdc_mint.key.as_ref(),
+        ],
+        &marginfi::ID,
+    )
+    .0;
+    let payer = f.test_f.context.borrow().payer.pubkey();
+    let place_ix = empty_user
+        .make_place_rebalance_order_ix(
+            f.test_f.usdc_mint.key,
+            order_pda,
+            payer,
+            payer,
+            vec![f.src_bank_f.key, f.dst_bank_f.key],
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+    let res = f.process_as_payer(&[place_ix]).await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::RebalanceNoAllowlistPosition
+    );
+    Ok(())
+}
+
+/// Updating an order to an allowlist the account holds no position in is rejected.
+#[tokio::test]
+async fn rebalance_update_requires_allowlist_position() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let payer = f.test_f.context.borrow().payer.pubkey();
+    let update_ix = f
+        .user
+        .make_update_rebalance_order_ix(
+            f.order_pda,
+            payer,
+            Some(vec![f.dst_bank_f.key, Pubkey::new_unique()]),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+    let res = f.process_as_payer(&[update_ix]).await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::RebalanceNoAllowlistPosition
+    );
+    Ok(())
+}
+
+/// The allowlist must hold between 2 and MAX_ALLOWED_BANKS (8) entries; both bounds reject.
+#[tokio::test]
+async fn rebalance_place_rejects_allowlist_count_bounds() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let user2 = f.test_f.create_marginfi_account().await;
+    let user2_usdc = f
+        .test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(10.0)
+        .await;
+    user2
+        .try_bank_deposit(user2_usdc.key, &f.src_bank_f, 10.0, None)
+        .await?;
+    let order_pda = Pubkey::find_program_address(
+        &[
+            REBALANCE_ORDER_SEED.as_bytes(),
+            user2.key.as_ref(),
+            f.test_f.usdc_mint.key.as_ref(),
+        ],
+        &marginfi::ID,
+    )
+    .0;
+    let payer = f.test_f.context.borrow().payer.pubkey();
+
+    let too_few = user2
+        .make_place_rebalance_order_ix(
+            f.test_f.usdc_mint.key,
+            order_pda,
+            payer,
+            payer,
+            vec![f.src_bank_f.key],
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+    let res = f.process_as_payer(&[too_few]).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::InvalidBalanceCount);
+
+    let mut nine = vec![f.src_bank_f.key];
+    nine.extend((0..8).map(|_| Pubkey::new_unique()));
+    let too_many = user2
+        .make_place_rebalance_order_ix(
+            f.test_f.usdc_mint.key,
+            order_pda,
+            payer,
+            payer,
+            nine,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+    let res = f.process_as_payer(&[too_many]).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::InvalidBalanceCount);
+    Ok(())
+}
+
+/// A JupLend referenced bank's `TokenReserve` must be the one its Lending state points at: passing a
+/// decoy account (here the Lending account itself) is rejected at the start-side rate read.
+#[tokio::test]
+async fn rebalance_rejects_decoy_juplend_reserve() -> anyhow::Result<()> {
+    let f = setup_multi_venue_fixture().await?;
+    let src = f.drift_bank.key;
+    let dst = f.juplend_bank.key;
+
+    let user_token = f.mint.create_token_account_and_mint_to(1_000.0).await;
+    f.test_f
+        .run_drift_deposit(&f.drift_bank, &f.user, user_token.key, VENUE_DEPOSIT_NATIVE)
+        .await?;
+    f.set_juplend_rate_high().await;
+    let (order_pda, record_pda) = f.place_order(src, dst, I80F48::from_num(0.0001)).await?;
+
+    let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit(2_000_000);
+    let drift_crank = f
+        .user
+        .make_drift_update_spot_market_cumulative_interest_ix(&f.drift_bank)
+        .await;
+    let decoy = f.juplend_bank.load().await.integration_acc_1;
+    let ref_banks = vec![
+        RebalanceBankMeta::new(src, f.drift_slice().await),
+        RebalanceBankMeta::with_reserve(dst, decoy, f.juplend_slice().await),
+    ];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, VENUE_DEPOSIT_VALUE)],
+            order_pda,
+            record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![src],
+            order_pda,
+            record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f.process(&[cu_ix, drift_crank, start_ix, end_ix]).await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::JuplendLendingValidationFailed
+    );
     Ok(())
 }

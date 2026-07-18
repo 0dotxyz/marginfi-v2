@@ -680,5 +680,31 @@ mod tests {
             "end_deleverage",
             ix_discriminators::END_DELEVERAGE,
         );
+        check(
+            &idl_ixs,
+            "marginfi_account_start_rebalance",
+            ix_discriminators::START_REBALANCE,
+        );
+        check(
+            &idl_ixs,
+            "marginfi_account_end_rebalance",
+            ix_discriminators::END_REBALANCE,
+        );
+        check(
+            &idl_ixs,
+            "lending_account_deposit",
+            ix_discriminators::LENDING_ACCOUNT_DEPOSIT,
+        );
+        check(
+            &idl_ixs,
+            "kamino_deposit",
+            ix_discriminators::KAMINO_DEPOSIT,
+        );
+        check(&idl_ixs, "drift_deposit", ix_discriminators::DRIFT_DEPOSIT);
+        check(
+            &idl_ixs,
+            "juplend_deposit",
+            ix_discriminators::JUPLEND_DEPOSIT,
+        );
     }
 }

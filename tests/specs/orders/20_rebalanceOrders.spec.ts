@@ -56,7 +56,10 @@ import {
   deriveSpotMarketPDA,
 } from "../../utils/pdas";
 import { USER_ACCOUNT } from "../../utils/mocks";
-import { expectFailedTxWithError } from "../../utils/genericTests";
+import {
+  expectFailedTxWithError,
+  getTokenBalance,
+} from "../../utils/genericTests";
 import { bnToBigIntSafe, bnToDecimalStringSafe } from "../../utils/bn-utils";
 import {
   createLookupTableForInstructions,
@@ -102,6 +105,7 @@ import {
   quoteAssetSpotMarketConfig,
   DriftOracleSourceValues,
   getDriftStateAccount,
+  tokenAmountToScaledBalance,
 } from "../../utils/drift-utils";
 import {
   createBankrunPythOracleAccount,
@@ -133,6 +137,7 @@ import {
 } from "../../utils/juplend/user-instructions";
 import { refreshJupSimple } from "../../utils/juplend/shorthand-instructions";
 import {
+  deriveJuplendFTokenVault,
   deriveJuplendGlobalKeys,
   deriveJuplendLendingPdas,
   findJuplendLiquidityBorrowPositionPda,
@@ -2232,7 +2237,21 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
     });
 
     assert.isUndefined(await getBalance(kaminoBank), "src drained after move");
-    assert.exists(await getBalance(driftBank), "dst holds the moved deposit");
+    // The clock is frozen after the sandwich, so this cumulative deposit interest is the one the
+    // deposit leg used.
+    const spotMarket =
+      await driftBankrunProgram.account.spotMarket.fetch(driftMMarket);
+    const expectedDriftShares = tokenAmountToScaledBalance(
+      REBALANCE_AMOUNT,
+      spotMarket,
+    );
+    assert.equal(
+      wrappedI80F48toBigNumber(
+        (await getBalance(driftBank)).assetShares,
+      ).toFixed(0),
+      expectedDriftShares.toString(),
+      "dst holds exactly the moved amount as drift scaled balance",
+    );
 
     const orderAcc = await program.account.rebalanceOrder.fetch(order);
     assert.ok(orderAcc.marginfiAccount.equals(ownerAcc), "order persists");
@@ -2265,6 +2284,12 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
     assert.isUndefined(await getBalance(juplendBank), "dst empty before move");
     assert.exists(await getBalance(driftBank), "src funded before move");
 
+    const [fTokenVault] = deriveJuplendFTokenVault(
+      program.programId,
+      juplendBank,
+    );
+    const fTokensBefore = await getTokenBalance(bankRunProvider, fTokenVault);
+
     await runSandwich({
       order,
       src: {
@@ -2284,7 +2309,16 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
     });
 
     assert.isUndefined(await getBalance(driftBank), "src drained after move");
-    assert.exists(await getBalance(juplendBank), "dst holds the moved deposit");
+    const mintedShares =
+      (await getTokenBalance(bankRunProvider, fTokenVault)) - fTokensBefore;
+    assert.isAbove(mintedShares, 0, "the deposit minted fTokens");
+    assert.equal(
+      wrappedI80F48toBigNumber(
+        (await getBalance(juplendBank)).assetShares,
+      ).toFixed(0),
+      mintedShares.toString(),
+      "dst shares equal the fTokens minted by the move",
+    );
 
     const orderAcc = await program.account.rebalanceOrder.fetch(order);
     assert.ok(orderAcc.marginfiAccount.equals(ownerAcc), "order persists");
