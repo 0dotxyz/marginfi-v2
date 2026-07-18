@@ -481,7 +481,9 @@ pub enum MarginfiError {
     RebalanceForeignAccountLeg, // 6618
     #[msg("Cannot close a rebalance order while its record still holds an unsettled tip")]
     RebalanceRecordPending, // 6619
-                            // **************END AUTO-REBALANCE ERRORS
+    #[msg("Rebalance order requires an active balance in at least one allowed bank")]
+    RebalanceNoAllowlistPosition, // 6620
+                                  // **************END AUTO-REBALANCE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -726,6 +728,22 @@ impl From<u32> for MarginfiError {
             6602 => MarginfiError::CircuitBreakerInvalidConfig,
             6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
             6604 => MarginfiError::CircuitBreakerPriceJump,
+            6605 => MarginfiError::RebalanceVenueUnsupported,
+            6606 => MarginfiError::RebalanceCooldown,
+            6607 => MarginfiError::RebalanceIncompleteMove,
+            6608 => MarginfiError::RebalanceNotImproving,
+            6609 => MarginfiError::RebalanceOvershoot,
+            6610 => MarginfiError::RebalanceValueLeak,
+            6611 => MarginfiError::RebalanceMintMismatch,
+            6612 => MarginfiError::RebalanceBankNotAllowed,
+            6613 => MarginfiError::RebalanceInvalidMinImprovement,
+            6614 => MarginfiError::RebalanceExceedsAmount,
+            6615 => MarginfiError::RebalanceMalformedSandwich,
+            6616 => MarginfiError::RebalanceSettleTooEarly,
+            6617 => MarginfiError::RebalanceUnreferencedBank,
+            6618 => MarginfiError::RebalanceForeignAccountLeg,
+            6619 => MarginfiError::RebalanceRecordPending,
+            6620 => MarginfiError::RebalanceNoAllowlistPosition,
 
             _ => MarginfiError::InternalLogicError,
         }

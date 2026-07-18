@@ -35,7 +35,7 @@ use juplend_mocks::state::{
 use marginfi_type_crate::pdas::JUPLEND_LIQUIDITY_PROGRAM_ID;
 use marginfi_type_crate::types::{
     Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-    ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+    ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
 };
 use marginfi_type_crate::{
     constants::LIQUIDITY_VAULT_AUTHORITY_SEED, types::ACCOUNT_IN_DELEVERAGE,
@@ -94,8 +94,8 @@ pub fn juplend_withdraw<'info>(
         )?;
 
         // Fetch oracle price for rate limiting and deleverage tracking
-        let in_receivership_or_order_execution =
-            marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
+        let in_receivership_or_order_execution = marginfi_account
+            .get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE);
         // When group rate limiter is enabled, oracle is required
         let group_rate_limit_enabled = group.rate_limiter.is_enabled();
         let price = if in_receivership_or_order_execution || group_rate_limit_enabled {

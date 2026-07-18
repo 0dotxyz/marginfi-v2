@@ -45,7 +45,7 @@ use marginfi_type_crate::{
     pdas::{FARMS_PROGRAM_ID, KAMINO_PROGRAM_ID},
     types::{
         Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -113,8 +113,8 @@ pub fn kamino_withdraw<'info>(
             withdraw_is_halt_safe,
         )?;
 
-        let in_receivership_or_order_execution =
-            marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
+        let in_receivership_or_order_execution = marginfi_account
+            .get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE);
         // Fetch oracle price for rate limiting and deleverage tracking
         // When group rate limiter is enabled, oracle is required
         let group_rate_limit_enabled = group.rate_limiter.is_enabled();

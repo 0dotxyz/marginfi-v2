@@ -281,13 +281,7 @@ impl MarginfiAccountImpl for MarginfiAccount {
     }
 
     fn decrement_active_orders(&mut self) -> MarginfiResult {
-        // Note: Sanity check, expected to be unreachable
-        check!(
-            self.active_orders > 0,
-            MarginfiError::IllegalAction,
-            "No active orders to close"
-        );
-        self.active_orders -= 1;
+        self.active_orders = self.active_orders.saturating_sub(1);
         Ok(())
     }
 

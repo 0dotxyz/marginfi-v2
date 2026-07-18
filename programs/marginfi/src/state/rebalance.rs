@@ -4,6 +4,9 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
+use marginfi_type_crate::constants::{
+    REBALANCE_CONSERVATION_DUST_FLOOR, REBALANCE_CONSERVATION_DUST_RATE,
+};
 use marginfi_type_crate::types::{
     Balance, BalanceSide, MarginfiAccount, RebalanceMove, RebalanceOrder, RebalanceRecord,
     RebalanceRefBank, WrappedI80F48, MAX_ALLOWED_BANKS, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES,
@@ -88,16 +91,18 @@ pub trait RebalanceRecordImpl {
     /// The declared moves, sliced to `move_count`.
     fn active_moves(&self) -> &[RebalanceMove];
 
+    /// The tolerance for this rebalance's conservation checks: the declared move total scaled by
+    /// `REBALANCE_CONSERVATION_DUST_RATE`, floored at `REBALANCE_CONSERVATION_DUST_FLOOR`.
+    fn conservation_dust(&self) -> MarginfiResult<I80F48>;
+
     /// Reconcile the declared moves against the observed per-bank underlying-token deltas.
     /// `post_underlying[i]` is the end token amount of `ref_banks[i]`. For every referenced bank the net
-    /// declared flow (incoming amounts minus outgoing) must equal `post - pre` within `dust`. Returns
-    /// `(total_moved, total_source_pre)`: the tokens that landed (sum of positive net deltas) and the
-    /// start token amount of the net-source banks (the tip denominator for unlimited orders).
-    fn reconcile(
-        &self,
-        post_underlying: &[I80F48],
-        dust: I80F48,
-    ) -> MarginfiResult<(I80F48, I80F48)>;
+    /// declared flow (incoming amounts minus outgoing) must equal `post - pre` within the conservation
+    /// dust. Returns `(total_moved, total_ref_pre, dust)`: the tokens that landed (sum of positive net
+    /// deltas), the start token amount summed across ALL referenced banks (the tip denominator, stable
+    /// against how the keeper splits the move across banks), and the tolerance applied (reused by the
+    /// caller's budget-cap cushion).
+    fn reconcile(&self, post_underlying: &[I80F48]) -> MarginfiResult<(I80F48, I80F48, I80F48)>;
 
     /// Verify every snapshotted non-referenced balance is unchanged (side + shares).
     fn verify_others_unchanged(&self, marginfi_account: &MarginfiAccount) -> MarginfiResult;
@@ -185,18 +190,28 @@ impl RebalanceRecordImpl for RebalanceRecord {
         &self.moves[..self.move_count as usize]
     }
 
-    fn reconcile(
-        &self,
-        post_underlying: &[I80F48],
-        dust: I80F48,
-    ) -> MarginfiResult<(I80F48, I80F48)> {
+    fn conservation_dust(&self) -> MarginfiResult<I80F48> {
+        let mut declared_total = I80F48::ZERO;
+        for m in self.active_moves() {
+            declared_total = declared_total
+                .checked_add(I80F48::from(m.amount))
+                .ok_or_else(math_error!())?;
+        }
+        let relative = declared_total
+            .checked_mul(REBALANCE_CONSERVATION_DUST_RATE)
+            .ok_or_else(math_error!())?;
+        Ok(relative.max(REBALANCE_CONSERVATION_DUST_FLOOR))
+    }
+
+    fn reconcile(&self, post_underlying: &[I80F48]) -> MarginfiResult<(I80F48, I80F48, I80F48)> {
         let n = self.ref_bank_count as usize;
         check!(
             post_underlying.len() == n,
             MarginfiError::IllegalBalanceState
         );
+        let dust = self.conservation_dust()?;
         let mut total_moved = I80F48::ZERO;
-        let mut total_source_pre = I80F48::ZERO;
+        let mut total_ref_pre = I80F48::ZERO;
         let mut total_actual = I80F48::ZERO;
         for (i, post) in post_underlying.iter().enumerate().take(n) {
             let mut declared_net = I80F48::ZERO;
@@ -216,17 +231,14 @@ impl RebalanceRecordImpl for RebalanceRecord {
                 MarginfiError::RebalanceValueLeak
             );
             total_actual = total_actual.checked_add(actual).ok_or_else(math_error!())?;
+            total_ref_pre = total_ref_pre.checked_add(pre).ok_or_else(math_error!())?;
             if actual > I80F48::ZERO {
                 total_moved = total_moved.checked_add(actual).ok_or_else(math_error!())?;
-            } else if actual < I80F48::ZERO {
-                total_source_pre = total_source_pre
-                    .checked_add(pre)
-                    .ok_or_else(math_error!())?;
             }
         }
 
         check!(total_actual >= -dust, MarginfiError::RebalanceValueLeak);
-        Ok((total_moved, total_source_pre))
+        Ok((total_moved, total_ref_pre, dust))
     }
 
     fn verify_others_unchanged(&self, marginfi_account: &MarginfiAccount) -> MarginfiResult {

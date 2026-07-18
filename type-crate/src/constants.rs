@@ -86,12 +86,19 @@ pub const BANKRUPT_THRESHOLD: I80F48 = I80F48!(0.1);
 /// Comparison threshold used to account for arithmetic artifacts on balances
 pub const ZERO_AMOUNT_THRESHOLD: I80F48 = I80F48!(0.0001);
 
-/// Tolerance (whole tokens, UI units) by which an auto-rebalance may reduce the position's total
-/// underlying-token count, absorbing the venue withdraw/deposit round-trip rounding. All referenced
-/// banks share one mint, so conservation is measured in token principal (oracle-price independent);
-/// keeper compensation is a separate SOL tip, so principal is otherwise strictly conserved and this
-/// bounds any residual skim to a negligible, cooldown-limited amount.
-pub const REBALANCE_CONSERVATION_DUST: I80F48 = I80F48!(0.01);
+/// Relative tolerance by which an auto-rebalance may reduce the position's total underlying-token
+/// count, applied to the declared move total, absorbing the venue withdraw/deposit round-trip
+/// rounding. Expressed as a fraction so the bound scales with the size and precision of the mint
+/// being moved: a flat whole-token tolerance would be negligible on a stablecoin yet worth hundreds
+/// of dollars on a high-value 8-decimal mint. All referenced banks share one mint, so conservation
+/// is measured in token principal (oracle-price independent); keeper compensation is a separate SOL
+/// tip, so principal is otherwise strictly conserved and this bounds any residual skim to a
+/// negligible, cooldown-limited amount.
+pub const REBALANCE_CONSERVATION_DUST_RATE: I80F48 = I80F48!(0.00001);
+
+/// Absolute floor (whole tokens, UI units) for the conservation tolerance, covering fixed-point
+/// rounding on moves too small for the relative rate to exceed it.
+pub const REBALANCE_CONSERVATION_DUST_FLOOR: I80F48 = I80F48!(0.000001);
 
 /// Default minimum APR improvement (dst - src) an order requires to rebalance, used when the user
 /// does not set one. I80F48, 1.0 == 100%.

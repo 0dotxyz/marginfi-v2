@@ -35,7 +35,7 @@ use crate::{
         bank::BankImpl,
         marginfi_account::{
             calc_value, check_account_maint_health, get_remaining_accounts_per_bank,
-            LendingAccountImpl, MarginfiAccountImpl,
+            run_cb_price_gate, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         price::OraclePriceFeedAdapter,
@@ -57,10 +57,9 @@ use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        ASSET_TAG_JUPLEND, REBALANCE_CONSERVATION_DUST, REBALANCE_DEFAULT_COOLDOWN_SECONDS,
-        REBALANCE_DEFAULT_MIN_IMPROVEMENT, REBALANCE_FEE_POOL_SEED, REBALANCE_ORDER_SEED,
-        REBALANCE_RECORD_SEED, REBALANCE_SETTLE_DELAY_MAX_SECONDS,
-        REBALANCE_SETTLE_DELAY_MIN_SECONDS,
+        ASSET_TAG_JUPLEND, REBALANCE_DEFAULT_COOLDOWN_SECONDS, REBALANCE_DEFAULT_MIN_IMPROVEMENT,
+        REBALANCE_FEE_POOL_SEED, REBALANCE_ORDER_SEED, REBALANCE_RECORD_SEED,
+        REBALANCE_SETTLE_DELAY_MAX_SECONDS, REBALANCE_SETTLE_DELAY_MIN_SECONDS,
     },
     types::{
         Bank, HealthCache, MarginfiAccount, MarginfiGroup, OraclePriceType, RebalanceMove,
@@ -152,6 +151,19 @@ pub fn place_rebalance_order(
     let keeper_tip = keeper_tip.unwrap_or(0);
 
     let mut account = ctx.accounts.marginfi_account.load_mut()?;
+    // A rebalance order must be placed against an existing position: require at least one active
+    // balance in an allowed bank. This keeps the order tied to a real position (a full move still
+    // leaves the balance at the destination), so a later "no allowed position" state is a genuine
+    // exit rather than a pre-deposit gap, and permissionless close on that state cannot grief a user
+    // who simply has not deposited yet.
+    check!(
+        account
+            .lending_account
+            .balances
+            .iter()
+            .any(|b| b.is_active() && allowed_banks.contains(&b.bank_pk)),
+        MarginfiError::RebalanceNoAllowlistPosition
+    );
     {
         let mut order = ctx.accounts.rebalance_order.load_init()?;
         order.initialize(
@@ -352,6 +364,16 @@ pub fn update_rebalance_order(
     let (allowed, min_imp, cooldown, amount, tip) = {
         let mut order = ctx.accounts.rebalance_order.load_mut()?;
         if let Some(banks) = allowed_banks {
+            // Same invariant as placement: the new allowlist must contain a bank the account holds a
+            // position in, so an update can't leave the order pointing at venues with no position.
+            check!(
+                account
+                    .lending_account
+                    .balances
+                    .iter()
+                    .any(|b| b.is_active() && banks.contains(&b.bank_pk)),
+                MarginfiError::RebalanceNoAllowlistPosition
+            );
             order.set_allowed_banks(&banks)?;
         }
         if let Some(mi) = min_improvement {
@@ -447,11 +469,12 @@ pub fn top_up_rebalance_fee_pool(
     ctx: Context<TopUpRebalanceFeePool>,
     amount: u64,
 ) -> MarginfiResult {
-    let seed = if ctx.accounts.fee_pool.lamports() == 0 {
-        Rent::get()?.minimum_balance(0)
-    } else {
-        0
-    };
+    // Top the pool up to its rent-exempt reserve, then add `amount`. Seeding the shortfall (not just
+    // when the balance is 0) means a dust transfer pre-sent to the PDA can't skip the reserve and
+    // leave the pool rent-paying, which would zero out `spendable` and make it reap-eligible.
+    let seed = Rent::get()?
+        .minimum_balance(0)
+        .saturating_sub(ctx.accounts.fee_pool.lamports());
     let transfer = amount.checked_add(seed).ok_or_else(math_error!())?;
     let ix = system_instruction::transfer(
         &ctx.accounts.payer.key(),
@@ -802,6 +825,14 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
     let (ref_keys, order_amount, keeper_tip, settle_delay) = {
         let record = ctx.accounts.rebalance_record.load()?;
         let order = ctx.accounts.rebalance_order.load()?;
+        // A record is finalized (move_timestamp set) exactly once. Exactly one start runs per
+        // transaction and any record from a prior transaction is already finalized or closed, so this
+        // forces `end` to finalize only the fresh record its paired `start` just created, binding the
+        // sandwich and blocking a start(order_A) + end(order_B) tip re-escrow.
+        check!(
+            record.move_timestamp == 0,
+            MarginfiError::RebalanceMalformedSandwich
+        );
         let n = record.ref_bank_count as usize;
         (
             record.ref_banks[..n]
@@ -824,7 +855,6 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         require_keys_eq!(parsed.key, *key, MarginfiError::InvalidBankAccount);
     }
 
-    let dust = REBALANCE_CONSERVATION_DUST;
     let mut health_cache = HealthCache::zeroed();
     let (value_moved, tip_pending, move_yield_indices) = {
         let account = ctx.accounts.marginfi_account.load()?;
@@ -866,7 +896,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         // Reconcile the declared moves against the real per-bank underlying-token deltas. This proves
         // token-principal conservation (each bank's delta matches its declared net flow within dust) and,
         // with the per-move improvement check, that every token moved to a strictly better venue.
-        let (total_moved, total_source_pre) = record.reconcile(&post_underlying, dust)?;
+        let (total_moved, total_ref_pre, dust) = record.reconcile(&post_underlying)?;
         check!(
             total_moved > I80F48::ZERO,
             MarginfiError::RebalanceIncompleteMove
@@ -885,6 +915,14 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         health_cache.program_version = PROGRAM_VERSION;
         health_cache.set_engine_ok(true);
 
+        // Re-arm the circuit-breaker price gate the per-leg withdraws skipped while deferring: a
+        // risk-carrying rebalance reverts if any post-move bank's live price has jumped past the
+        // breach threshold. A liability-free rebalance is price-independent (conservation is token
+        // principal), so it skips the gate, matching the withdraw leg.
+        if account.lending_account.has_liabilities() {
+            run_cb_price_gate(&account, health_obs)?;
+        }
+
         record.verify_others_unchanged(&account)?;
 
         // `order.amount` (native) is a per-execution token budget: the move may relocate at most this
@@ -893,7 +931,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         let amount_budget = if order_amount == 0 {
             None
         } else {
-            let decimals = banks[0].loader.load()?.get_balance_decimals();
+            let decimals = banks[0].loader.load()?.mint_decimals;
             Some(calc_value(
                 I80F48::from_num(order_amount),
                 I80F48::ONE,
@@ -909,18 +947,20 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         }
 
         // Proportional tip over a stable denominator: `keeper_tip * (moved / target)`, all in tokens.
-        // `target` is the order's `amount` budget (stable across executions) or the full source position
-        // when unlimited. A fixed target makes the tip invariant to how the move is split across banks,
-        // so fragmenting earns no more. The tip is drawn only from lamports above the pool's rent-exempt
-        // reserve, so the reserve is never paid out and the pool is never left in a rent-paying state.
+        // `target` is the order's `amount` budget (stable across executions) or the full referenced
+        // position when unlimited. Denominating over every referenced bank's start amount (not just the
+        // banks the keeper drained) keeps the tip invariant to how the move is split, so fragmenting or
+        // draining a single small source earns no more. The tip is drawn only from lamports above the
+        // pool's rent-exempt reserve, so the reserve is never paid out and the pool is never left in a
+        // rent-paying state.
         let spendable = ctx
             .accounts
             .fee_pool
             .lamports()
             .saturating_sub(Rent::get()?.minimum_balance(0));
         let target_value = amount_budget
-            .map(|cap| cap.min(total_source_pre))
-            .unwrap_or(total_source_pre);
+            .map(|cap| cap.min(total_ref_pre))
+            .unwrap_or(total_ref_pre);
         let tip_paid = if keeper_tip == 0 || target_value <= I80F48::ZERO {
             0
         } else {
