@@ -805,9 +805,10 @@ fn same_asset_leverage_for_requirement(
 }
 
 /// Folds one liability mint/weight into the running same-asset accumulators.
-/// Returns `false` when any liability bank is ineligible, lacks a feed family (fixed-price,
-/// deprecated, or unset oracle setup), is missing an oracle key, or diverges from a previously
-/// seen mint/oracle-key/feed-family triple. Callers must stop folding on `false`.
+/// Returns `false` when any liability bank is ineligible, uses an integration pricing setup,
+/// lacks a feed family (fixed-price, deprecated, or unset oracle setup), is missing an oracle
+/// key, or diverges from a previously seen mint/oracle-key/feed-family triple. Callers must stop
+/// folding on `false`.
 fn update_reconciled_same_asset_config(
     shared_mint: &mut Option<Pubkey>,
     shared_oracle_key: &mut Option<Pubkey>,
@@ -817,6 +818,20 @@ fn update_reconciled_same_asset_config(
     mint: Pubkey,
     liab_weight: I80F48,
 ) -> bool {
+    // Same-asset e-mode deliberately allows integration banks on the collateral side: their
+    // exchange-rate multiplier represents redemption-value risk. They must never establish the
+    // liability side, however, because that would make independently moving multipliers appear
+    // price-equivalent. Do not rely on `asset_tag` here; it is an admin-configurable field.
+    if !matches!(
+        bank.config.oracle_setup,
+        OracleSetup::PythPushOracle
+            | OracleSetup::SwitchboardPull
+            | OracleSetup::StakedWithPythPush
+    ) {
+        *lowest_liab_weight = None;
+        return false;
+    }
+
     let feed_family = match bank.config.oracle_setup.feed_family() {
         Some(family) if bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE) => family,
         _ => {
@@ -2733,6 +2748,31 @@ mod test {
         let mut lowest_liab_weight = None;
         let mut bank = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
         bank.config.oracle_setup = OracleSetup::Fixed;
+
+        assert!(!update_reconciled_same_asset_config(
+            &mut shared_mint,
+            &mut shared_oracle_key,
+            &mut shared_feed_family,
+            &mut lowest_liab_weight,
+            &bank,
+            bank.mint,
+            I80F48!(1.00),
+        ));
+        assert_eq!(shared_mint, None);
+        assert_eq!(shared_feed_family, None);
+        assert_eq!(lowest_liab_weight, None);
+    }
+
+    #[test]
+    fn same_asset_config_disables_when_liability_uses_integration_setup() {
+        let mint = Pubkey::new_unique();
+        let oracle_key = Pubkey::new_unique();
+        let mut shared_mint = None;
+        let mut shared_oracle_key = None;
+        let mut shared_feed_family = None;
+        let mut lowest_liab_weight = None;
+        let mut bank = same_asset_eligible_bank(mint, oracle_key, I80F48!(1.00));
+        bank.config.oracle_setup = OracleSetup::KaminoPythPush;
 
         assert!(!update_reconciled_same_asset_config(
             &mut shared_mint,
