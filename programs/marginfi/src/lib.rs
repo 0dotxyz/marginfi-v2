@@ -298,6 +298,15 @@ pub mod marginfi {
         marginfi_account::close_liquidation_record(ctx)
     }
 
+    /// (permissionless) Tag an unhealthy account's liquidation record, growing the allowed
+    /// liquidation premium over time. Calling it on an account that is healthy again clears its
+    /// existing tag.
+    pub fn marginfi_account_tag_liq_record<'info>(
+        ctx: Context<'info, TagLiquidationRecord<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::tag_liquidation_record(ctx)
+    }
+
     /// The same as `marginfi_account_initialize`, except the created marginfi account uses a PDA
     /// (Program Derived Address)
     ///

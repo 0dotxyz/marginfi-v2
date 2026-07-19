@@ -69,6 +69,13 @@ pub const LIQUIDATION_BONUS_FEE_MINIMUM: I80F48 = I80F48!(0.05);
 /// of liquidation bonus, etc) if it has net assets worth less than this amount in dollars. This
 /// roughly covers the fee to open a liquidation record plus a little extra.
 pub const LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD: I80F48 = I80F48!(5);
+/// Time after an account is tagged before the allowed liquidation premium starts to grow.
+pub const LIQUIDATION_TAG_DELAY_SECS: i64 = 60 * 60; // 1 hour
+/// Time after tagging at which the premium reaches `LIQUIDATION_TAG_MAX_PREMIUM`, growing
+/// linearly from `LIQUIDATION_TAG_DELAY_SECS`.
+pub const LIQUIDATION_TAG_FULL_PREMIUM_SECS: i64 = 7 * 24 * 60 * 60; // 1 week
+/// Maximum liquidation premium reachable via tag growth (1 = 100%).
+pub const LIQUIDATION_TAG_MAX_PREMIUM: I80F48 = I80F48!(1);
 /// Maximum order execution fee as a percent of the order size
 /// * This value is used together with the slippage set by the user.
 pub const ORDER_EXECUTION_MAX_FEE: I80F48 = I80F48!(0.05); // 5%

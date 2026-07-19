@@ -22,12 +22,21 @@ const INACTIVITY_PERIOD_SECS: i64 = 60 * 24 * 60 * 60;
 /// Conditions:
 /// - The marginfi account must NOT be in receivership or deleverage
 ///   (no active liquidation in progress)
+/// - The record must not be tagged (see `tag_liquidation_record`)
 /// - The record must match the account's `liquidation_record` field
 /// - The record must be inactive for at least 60 days (derived from the most
 ///   recent `LiquidationEntry.timestamp`), OR never have been liquidated at all
 ///   (all entry timestamps are zero).
 pub fn close_liquidation_record(ctx: Context<CloseLiquidationRecord>) -> MarginfiResult {
     let record = ctx.accounts.liquidation_record.load()?;
+
+    // A tagged record cannot be closed: closing would erase the premium-growth tag and let an
+    // unhealthy account restart the growth clock at will.
+    check!(
+        record.tagged_at == 0,
+        MarginfiError::IllegalAction,
+        "Cannot close a liquidation record while it is tagged"
+    );
 
     let last_activity = record
         .entries

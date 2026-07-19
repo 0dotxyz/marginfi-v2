@@ -292,6 +292,13 @@ pub struct DeleverageEvent {
     pub deleveragee_liability_repaid: f64,
 }
 
+#[event]
+pub struct LiquidationTagEvent {
+    pub marginfi_account: Pubkey,
+    /// 0 when the tag was cleared
+    pub tagged_at: i64,
+}
+
 // Rate limit events
 
 /// Emitted when a bank-level inflow or outflow is recorded.

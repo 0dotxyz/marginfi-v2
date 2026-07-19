@@ -475,7 +475,7 @@ impl FuzzTest {
     }
     // ================================================================================================
     // Deposit - USDC
-    #[flow(weight = 7)]
+    #[flow(weight = 6)]
     fn flow1(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
         let user = self.get_random_user();
@@ -491,7 +491,7 @@ impl FuzzTest {
 
     // ================================================================================================
     // Withdraw - USDC
-    #[flow(weight = 10)]
+    #[flow(weight = 9)]
     fn flow2(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
         let user = self.get_random_user();
@@ -506,7 +506,7 @@ impl FuzzTest {
     }
     // ================================================================================================
     // Borrow - ETH
-    #[flow(weight = 11)]
+    #[flow(weight = 10)]
     fn flow3(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
         let user = self.get_random_user();
@@ -521,7 +521,7 @@ impl FuzzTest {
     }
     // ================================================================================================
     // Repay - ETH
-    #[flow(weight = 12)]
+    #[flow(weight = 11)]
     fn flow4(&mut self) {
         let amount: u64 = self.trident.random_log_uniform();
         let user = self.get_random_user();
@@ -895,6 +895,50 @@ impl FuzzTest {
             ),
         );
         self.scale_pyth_push_oracle_prices(&eth_oracle, denominator, numerator);
+    }
+
+    // ================================================================================================
+    // Tag liquidation record — permissionless premium-growth tag.
+    // Half the calls first crash the ETH oracle so the target is
+    // actually unhealthy (tag sets), then revert the price; the other
+    // half fire at baseline prices, where the target is usually
+    // healthy (HealthyAccount rejection, or clearing a tag left by an
+    // earlier crash-path call). A set tag intentionally persists past
+    // the flow so later liquidation flows run against a grown premium
+    // cap and exercise the tag-reset rules.
+    #[flow(weight = 3)]
+    fn flow_tag_liq_record(&mut self) {
+        let user = self.get_random_user();
+        if coin_toss!(self) {
+            let eth_oracle = constants::WETH_PYTH_PUSH;
+            let numerator: i64 = self.trident.random_from_range(1000..=1_000_000);
+            self.scale_pyth_push_oracle_prices(&eth_oracle, numerator, 1);
+            self.marginfi_account_tag_liq_record(
+                user.marginfi_account,
+                Some(format!("Tag liquidation record (crashed oracle): {}", user.name).as_str()),
+            );
+            self.scale_pyth_push_oracle_prices(&eth_oracle, 1, numerator);
+        } else {
+            self.marginfi_account_tag_liq_record(
+                user.marginfi_account,
+                Some(format!("Tag liquidation record: {}", user.name).as_str()),
+            );
+        }
+    }
+
+    // ================================================================================================
+    // Close + re-init the liquidation record. Exercises the
+    // tagged-record close guard (close must fail while tagged); a
+    // successful close is immediately followed by a re-init so every
+    // user keeps a record, an assumption baked into the legacy-
+    // liquidate and receivership helpers.
+    #[flow(weight = 1)]
+    fn flow_close_liq_record(&mut self) {
+        let user = self.get_random_user();
+        self.marginfi_account_close_liq_record_and_reinit(
+            user.marginfi_account,
+            Some(format!("Close+reinit liquidation record: {}", user.name).as_str()),
+        );
     }
 
     // ================================================================================================

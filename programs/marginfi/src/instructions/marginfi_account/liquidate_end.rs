@@ -4,9 +4,12 @@ use crate::{
     events::{DeleverageEvent, LiquidationReceiverEvent},
     ix_utils::{get_discrim_hash, validate_not_cpi_by_stack_height, Hashable},
     prelude::*,
-    state::marginfi_account::{
-        check_pre_liquidation_condition_and_get_account_health,
-        clear_liquidation_price_cache_locks, get_health_components, MarginfiAccountImpl,
+    state::{
+        liquidation_record::tag_adjusted_premium,
+        marginfi_account::{
+            check_pre_liquidation_condition_and_get_account_health,
+            clear_liquidation_price_cache_locks, get_health_components, MarginfiAccountImpl,
+        },
     },
 };
 use anchor_lang::prelude::*;
@@ -36,28 +39,31 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
 
     let pre_assets_equity: I80F48 = liq_record.cache.asset_value_equity.into();
 
-    // Note: We guarantee that liquidation improves health to at most 0, unless the account's net value is
-    // below the threshold, then we can clear it regardless (or not).
-    let ignore_healthy = pre_assets_equity < LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD;
+    // Note: We guarantee that liquidation improves health to at most 0, unless the account's net
+    // value is below the threshold: such dust accounts may be fully cleared (ending healthy) and
+    // skip the premium cap, since a partial liquidation isn't worth the fees.
+    let is_dust_closeout = pre_assets_equity < LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD;
 
     let group = ctx.accounts.group.load()?;
+    // Read before `end_receivership` resets the tag
+    let tagged_at = liq_record.tagged_at;
     let (seized, seized_f64, repaid, repaid_f64) = end_receivership(
         &mut marginfi_account,
         &group,
         &mut liq_record,
         ctx.remaining_accounts,
-        ignore_healthy,
+        is_dust_closeout,
     )?;
 
-    // Liquidator's allowed fee cannot go lower than the bonus fee minimum
+    // Liquidator's allowed fee cannot go lower than the bonus fee minimum, and grows over time
+    // once the account has been tagged.
     let fee_state_max_fee: I80F48 = fee_state.liquidation_max_fee.into();
-    let max_fee: I80F48 = I80F48::max(
-        I80F48!(1) + fee_state_max_fee,
-        I80F48!(1) + LIQUIDATION_BONUS_FEE_MINIMUM,
-    );
+    let base_premium = I80F48::max(fee_state_max_fee, LIQUIDATION_BONUS_FEE_MINIMUM);
+    let premium = tag_adjusted_premium(base_premium, tagged_at, Clock::get()?.unix_timestamp);
+    let max_fee: I80F48 = I80F48!(1) + premium;
 
     // Ensure seized asset‐value ≤ N% of repaid liability‐value, where N = 100% + the bonus fee
-    if !ignore_healthy {
+    if !is_dust_closeout {
         check!(
             seized <= repaid * max_fee,
             MarginfiError::LiquidationPremiumTooHigh
@@ -162,9 +168,13 @@ pub fn end_receivership<'info>(
     let seized: I80F48 = pre_assets_equity - post_assets_equity;
     let repaid: I80F48 = pre_liabs_equity - post_liabilities_equity;
 
-    // clear receivership
+    // Clear receivership. Any completed liquidation that repays debt resets the tag, matching
+    // the tag's one-shot incentive model.
     marginfi_account.unset_flag(ACCOUNT_IN_RECEIVERSHIP, false);
     liq_record.liquidation_receiver = Pubkey::default();
+    if repaid > I80F48::ZERO {
+        liq_record.tagged_at = 0;
+    }
 
     let seized_f64 = seized.to_num::<f64>();
     let repaid_f64 = repaid.to_num::<f64>();

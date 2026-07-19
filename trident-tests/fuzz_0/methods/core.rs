@@ -883,6 +883,10 @@ impl FuzzTest {
         let liab_layout = self.bank_layout(liab_bank.address);
         let liab_mint_data = self.trident.get_account(&liab_bank.currency.mint);
         let liab_token_program = *liab_mint_data.owner();
+        // Every harness user gets a liquidation record at init, and the ix requires the record
+        // whenever one is registered on the liquidatee.
+        let liquidatee_record = self.liquidation_record_pda(liquidatee_marginfi_account);
+        let tagged_at_before = invariants::read_tagged_at(&mut self.trident, liquidatee_record);
         let (remaining_accounts, liquidatee_accounts, liquidator_accounts) = self
             .remaining_accounts_for_liquidation(
                 asset_bank.address,
@@ -920,6 +924,7 @@ impl FuzzTest {
                 liab_layout.liquidity_vault,
                 liab_layout.insurance_vault,
                 liab_token_program,
+                liquidatee_record,
             ),
         )
         .remaining_accounts(remaining_accounts)
@@ -941,6 +946,12 @@ impl FuzzTest {
             invariants::assert_liquidation_success_share_invariants(&snap, &after, asset_amount);
             invariants::assert_balances_packed(&mut self.trident, liquidator_marginfi_account);
             invariants::assert_balances_packed(&mut self.trident, liquidatee_marginfi_account);
+            invariants::assert_tag_cleared_or_unchanged(
+                &mut self.trident,
+                liquidatee_record,
+                tagged_at_before,
+                "legacy liquidation",
+            );
             self.bump_accrue(&[asset_bank.address, liab_bank.address]);
 
             // Couple the bankruptcy ix to every successful liquidation, the
@@ -973,6 +984,7 @@ impl FuzzTest {
         msg: Option<&str>,
     ) {
         let record = self.liquidation_record_pda(liquidatee_marginfi_account);
+        let tagged_at_before = invariants::read_tagged_at(&mut self.trident, record);
         let liq_banks = self.get_marginfi_account_banks(liquidatee_marginfi_account, None);
         let health_remaining_start = self.remaining_accounts_for_bank_risk_only(liq_banks.clone());
         let health_remaining_end = self.remaining_accounts_for_bank_risk_banks_only(liq_banks);
@@ -1015,8 +1027,95 @@ impl FuzzTest {
                 &mut self.trident,
                 liquidatee_marginfi_account,
                 record,
+                tagged_at_before,
             );
             invariants::assert_balances_packed(&mut self.trident, liquidatee_marginfi_account);
+        }
+    }
+
+    /// Submit `MarginfiAccountTagLiqRecord` (permissionless premium-growth tag) for the given
+    /// account. On success the tag must have toggled: set when it was clear (account unhealthy),
+    /// cleared when it was set (account healthy again / no liabilities). On failure the record
+    /// must be unchanged.
+    pub fn marginfi_account_tag_liq_record(&mut self, marginfi_account: Pubkey, msg: Option<&str>) {
+        let record = self.liquidation_record_pda(marginfi_account);
+        let banks = self.get_marginfi_account_banks(marginfi_account, None);
+        let remaining_accounts = self.remaining_accounts_for_bank_risk_only(banks);
+        let tagged_at_before = invariants::read_tagged_at(&mut self.trident, record);
+
+        let ix = types::marginfi::MarginfiAccountTagLiqRecordInstruction::data(
+            types::marginfi::MarginfiAccountTagLiqRecordInstructionData::new(),
+        )
+        .accounts(
+            types::marginfi::MarginfiAccountTagLiqRecordInstructionAccounts::new(
+                marginfi_account,
+                record,
+                self.marginfi_group,
+            ),
+        )
+        .remaining_accounts(remaining_accounts)
+        .instruction();
+
+        let res = self.trident.process_transaction(&[ix], msg);
+        let tagged_at_after = invariants::read_tagged_at(&mut self.trident, record);
+        if res.is_success() {
+            invariant!(
+                (tagged_at_before == 0) != (tagged_at_after == 0),
+                "tag ix success must toggle tagged_at. before: {}, after: {}",
+                tagged_at_before,
+                tagged_at_after
+            );
+        } else {
+            invariant!(
+                tagged_at_after == tagged_at_before,
+                "failed tag ix must leave tagged_at unchanged. before: {}, after: {}",
+                tagged_at_before,
+                tagged_at_after
+            );
+        }
+    }
+
+    /// Attempt `MarginfiAccountCloseLiqRecord` for the account, then re-init the record on
+    /// success so the harness assumption (every user has a record) keeps holding. Close must
+    /// fail while the record is tagged.
+    pub fn marginfi_account_close_liq_record_and_reinit(
+        &mut self,
+        marginfi_account: Pubkey,
+        msg: Option<&str>,
+    ) {
+        let record = self.liquidation_record_pda(marginfi_account);
+        let tagged_at_before = invariants::read_tagged_at(&mut self.trident, record);
+
+        let ix = types::marginfi::MarginfiAccountCloseLiqRecordInstruction::data(
+            types::marginfi::MarginfiAccountCloseLiqRecordInstructionData::new(),
+        )
+        .accounts(
+            types::marginfi::MarginfiAccountCloseLiqRecordInstructionAccounts::new(
+                marginfi_account,
+                record,
+                self.payer.pubkey(),
+            ),
+        )
+        .instruction();
+
+        let res = self.trident.process_transaction(&[ix], msg);
+        if res.is_success() {
+            invariant!(
+                tagged_at_before == 0,
+                "close_liq_record must fail while the record is tagged. tagged_at was: {}",
+                tagged_at_before
+            );
+            self.marginfi_account_init_liquidation_record(
+                marginfi_account,
+                self.payer.pubkey(),
+                Some("Re-init liquidation record after close"),
+            );
+        } else {
+            invariant!(
+                invariants::read_tagged_at(&mut self.trident, record) == tagged_at_before,
+                "failed close must leave the record unchanged. tagged_at was: {}",
+                tagged_at_before
+            );
         }
     }
 

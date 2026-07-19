@@ -17,6 +17,7 @@ mod pulse_health;
 mod purge_delev_balance;
 mod repay;
 mod sync_indexer_flags;
+mod tag_liquid_record;
 mod transfer_account;
 mod withdraw;
 
@@ -39,5 +40,6 @@ pub use pulse_health::*;
 pub use purge_delev_balance::*;
 pub use repay::*;
 pub use sync_indexer_flags::*;
+pub use tag_liquid_record::*;
 pub use transfer_account::*;
 pub use withdraw::*;
