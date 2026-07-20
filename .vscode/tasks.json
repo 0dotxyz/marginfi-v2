@@ -74,9 +74,99 @@
             }
         },
         {
-            "label": "Run Fuzz Tests",
+            "label": "Run Lint",
             "type": "shell",
-            "command": "cargo fmt && ./scripts/lint.sh && cd programs/marginfi/fuzz && python3 ./generate_corpus.py && cargo +nightly-2025-08-01 fuzz run lend --strip-dead-code --no-cfg-fuzzing -- -max_total_time=300",
+            "command": "./scripts/lint.sh",
+            "problemMatcher": [],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            }
+        },
+        {
+            "label": "Run Unit Tests",
+            "type": "shell",
+            "command": "cargo test --lib",
+            "problemMatcher": [],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            }
+        },
+        {
+            "label": "Build Trident Fuzz (compile check)",
+            "type": "shell",
+            "command": "command -v trident >/dev/null || cargo install trident-cli --version 0.13.0-rc.4; cd trident-tests && make types && cargo check",
+            "problemMatcher": [],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            }
+        },
+        {
+            "label": "Run Trident Fuzz",
+            "type": "shell",
+            "command": "command -v trident >/dev/null || cargo install trident-cli --version 0.13.0-rc.4; cd trident-tests && make types && make build && trident fuzz run fuzz_0 -e invariants",
+            "problemMatcher": [],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            }
+        },
+        {
+            "label": "Build Fuzz (libfuzzer, compile check)",
+            "type": "shell",
+            "command": "cd programs/marginfi/fuzz && cargo +nightly-2025-08-01 fuzz build lend --strip-dead-code --no-cfg-fuzzing",
+            "problemMatcher": [],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": true
+            }
+        },
+        {
+            "label": "Run Fuzz Tests (libfuzzer)",
+            "type": "shell",
+            "command": "cargo fmt && ./scripts/lint.sh && cd programs/marginfi/fuzz && python3 ./generate_corpus.py && cargo +nightly-2025-08-01 fuzz run lend --strip-dead-code --no-cfg-fuzzing -- -max_total_time=60 -max_len=4096",
             "problemMatcher": [],
             "group": {
                 "kind": "test",

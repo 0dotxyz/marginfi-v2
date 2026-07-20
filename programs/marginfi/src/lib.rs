@@ -481,6 +481,20 @@ pub mod marginfi {
         marginfi_group::lending_pool_accrue_bank_interest(ctx)
     }
 
+    /// (permissionless) Resize the group account to the v2 layout size; `payer` funds the
+    /// added rent.
+    pub fn lending_pool_resize_group_account(
+        ctx: Context<LendingPoolResizeGroupAccount>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_resize_group_account(ctx)
+    }
+
+    /// (permissionless) Resize the fee-state account to the v2 layout size; `payer` funds the
+    /// added rent.
+    pub fn resize_global_fee_state(ctx: Context<ResizeGlobalFeeState>) -> MarginfiResult {
+        marginfi_group::resize_global_fee_state(ctx)
+    }
+
     /// (permissionless) Transfer accrued fees from the liquidity vault to insurance/fee/program
     /// vaults.
     pub fn lending_pool_collect_bank_fees<'info>(
@@ -622,16 +636,6 @@ pub mod marginfi {
         )
     }
 
-    /// (Runs once per program) Initialize the V2 fee state PDA.
-    pub fn init_global_fee_state_v2(ctx: Context<InitFeeStateV2>) -> MarginfiResult {
-        marginfi_group::initialize_fee_state_v2(ctx)
-    }
-
-    /// (permissionless) Copy current FeeState values into FeeStateV2.
-    pub fn copy_fee_state_to_v2(ctx: Context<CopyFeeStateToV2>) -> MarginfiResult {
-        marginfi_group::copy_fee_state_to_v2(ctx)
-    }
-
     /// (global fee admin only) Adjust fees, admin, wallet, or pause delegate admin
     pub fn edit_global_fee_state(
         ctx: Context<EditFeeState>,
@@ -645,6 +649,7 @@ pub mod marginfi {
         liquidation_max_fee: Option<WrappedI80F48>,
         order_execution_max_fee: Option<WrappedI80F48>,
         pause_delegate_admin: Option<Pubkey>,
+        account_transfer_fee: Option<u32>,
     ) -> MarginfiResult {
         marginfi_group::edit_fee_state(
             ctx,
@@ -658,6 +663,7 @@ pub mod marginfi {
             liquidation_max_fee,
             order_execution_max_fee,
             pause_delegate_admin,
+            account_transfer_fee,
         )
     }
 
@@ -846,11 +852,11 @@ pub mod marginfi {
         )
     }
 
-    // TODO deprecate and incorporate this functionality into forced-withdraw in 1.7+
-    /// (risk admin only) Purge a user's lending balance without withdrawing anything. Only usable
-    /// after all the debt has been settled on a bank in deleveraging mode, e.g. when
-    /// `TOKENLESS_REPAYMENTS_ALLOWED` and `TOKENLESS_REPAYMENTS_COMPLETE`. used to purge remaining
-    /// lending assets in a now-worthless bank before it is fully sunset.
+    /// (risk admin only) Purge a user's lending balance on a bank being sunset, without paying the
+    /// user anything. Only usable after all the debt has been settled on a bank in deleveraging
+    /// mode, i.e. `TOKENLESS_REPAYMENTS_ALLOWED` and `TOKENLESS_REPAYMENTS_COMPLETE`. Used to clear
+    /// abandoned lending positions in a now-worthless bank so it can be closed via
+    /// `lending_pool_close_bank`.
     pub fn purge_deleverage_balance(
         ctx: Context<LendingAccountPurgeDelevBalance>,
     ) -> MarginfiResult {

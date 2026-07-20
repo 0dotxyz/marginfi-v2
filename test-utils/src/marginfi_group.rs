@@ -1428,6 +1428,82 @@ impl MarginfiGroupFixture {
         load_and_deserialize::<StakedSettings>(self.ctx.clone(), &self.staked_settings).await
     }
 
+    /// Shrink the group account to the v1 (8 + struct) size, simulating a mainnet account
+    /// created before groups were allocated at the v2 size.
+    pub async fn truncate_group_account_to_v1(&self) {
+        Self::truncate_account_to(&self.ctx, self.key, 8 + MarginfiGroup::V1_LEN).await
+    }
+
+    /// Shrink the fee-state account to the v1 (8 + struct) size, simulating the mainnet
+    /// account created before it was allocated at the v2 size.
+    pub async fn truncate_fee_state_to_v1(&self) {
+        Self::truncate_account_to(&self.ctx, self.fee_state, 8 + FeeState::V1_LEN).await
+    }
+
+    async fn truncate_account_to(ctx: &Rc<RefCell<ProgramTestContext>>, key: Pubkey, len: usize) {
+        let mut ctx = ctx.borrow_mut();
+        let mut account = ctx.banks_client.get_account(key).await.unwrap().unwrap();
+        account.data.truncate(len);
+        ctx.set_account(&key, &account.into())
+    }
+
+    pub async fn try_resize_group_account(&self) -> Result<(), BanksClientError> {
+        self.try_resize_account_key(self.key).await
+    }
+
+    pub async fn try_resize_fee_state(&self) -> Result<(), BanksClientError> {
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::ResizeGlobalFeeState {
+                fee_state: self.fee_state,
+                payer: payer.pubkey(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: ResizeGlobalFeeState {}.data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer.pubkey()),
+            &[&payer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Send the group resize ix against an arbitrary account key (for negative tests).
+    pub async fn try_resize_account_key(&self, key: Pubkey) -> Result<(), BanksClientError> {
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolResizeGroupAccount {
+                group: key,
+                payer: payer.pubkey(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolResizeGroupAccount {}.data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer.pubkey()),
+            &[&payer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
     pub async fn set_protocol_fees_flag(&self, enabled: bool) {
         let mut group = self.load().await;
         let mut ctx = self.ctx.borrow_mut();
@@ -1442,7 +1518,8 @@ impl MarginfiGroupFixture {
 
         let data = bytes_of(&group);
 
-        account.data[8..].copy_from_slice(data);
+        // The account may be larger than the struct (v2 allocation); write the prefix only.
+        account.data[8..8 + data.len()].copy_from_slice(data);
 
         ctx.set_account(&self.key, &account.into())
     }
@@ -1547,6 +1624,7 @@ impl MarginfiGroupFixture {
                 liquidation_max_fee: None,
                 order_execution_max_fee: None,
                 pause_delegate_admin: Some(new_pause_delegate_admin.unwrap_or_default()),
+                account_transfer_fee: None,
             }
             .data(),
         };

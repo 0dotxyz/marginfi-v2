@@ -72,6 +72,23 @@ import {
   SinglePoolProgram,
 } from "@solana/spl-single-pool-classic";
 
+// Several specs (d10, k14, k17a, m02, sl06) drive state-affecting choices — clock advances of up
+// to a week per iteration, deposit sizes, operation order — through Math.random. The accumulated
+// clock drift varies by multiple days between runs, which made CI failures (kfarms reward-tally
+// overflow, accrual divergence) irreproducible locally. Seed Math.random once, globally, so every
+// run replays the identical sequence. mulberry32 keeps the uniform [0, 1) contract.
+const mulberry32 = (seed: number) => {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+};
+Math.random = mulberry32(0x6d72676e); // "mrgn"
+
 export const ecosystem: Ecosystem = getGenericEcosystem();
 export let oracles: Oracles = undefined;
 /** Show various information about accounts and tests */
@@ -219,7 +236,6 @@ export const KAMINO_USDC_BANK = "kamino_usdc_bank";
 /** mrgn Token A bank trading on `TOKEN_A_RESERVE` (the reserve for ecosystem.tokenAMint) */
 export const KAMINO_TOKEN_A_BANK = "kamino_tokenA_bank";
 
-// TODO: This should really be an object with defined fields not a dict
 export let driftAccounts: Map<string, PublicKey>;
 /** Drift USDC Spot Market */
 export const DRIFT_USDC_SPOT_MARKET = "drift_usdc_spot_market";
@@ -495,7 +511,6 @@ function getGenesisAccounts(): AddedAccount[] {
 
 export const mochaHooks = {
   beforeAll: async () => {
-
     // If false, you are in the wrong environment to run this, update Node or try polyfill
     console.log("Environment supports crypto: ", !!global.crypto?.subtle);
 

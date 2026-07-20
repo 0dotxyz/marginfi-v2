@@ -454,7 +454,6 @@ export async function refreshOracles(
   await Promise.all(tasks);
 }
 
-// TODO use this in roothooks instead of the custom implementation...
 /**
  * Refreshes any oracle in Oracles that is EXACTLY NAMED *Pull with *OracleFeed to the same
  * price/conf/etc it currently has but the given slot/time

@@ -7,7 +7,7 @@ import {
 import { KaminoLending } from "../fixtures/kamino_lending";
 import { I80F48_ONE, PYTH_PULL_MIGRATED, OperationalStateRaw } from "./types";
 import { WrappedI80F48 } from "@mrgnlabs/mrgn-common";
-import { RiskTierRaw } from "@mrgnlabs/marginfi-client-v2";
+import { OracleSetupRaw, RiskTierRaw } from "@mrgnlabs/marginfi-client-v2";
 import { Reserve } from "@kamino-finance/klend-sdk";
 import Decimal from "decimal.js";
 import BigNumber from "bignumber.js";
@@ -27,7 +27,6 @@ export const INITIAL_COLLATERAL_RATE = new Decimal(INITIAL_COLLATERAL_RATIO);
 const I68F60_TOTAL_BYTES = 16;
 const I68F60_FRACTIONAL_BITS = 60;
 const I68F60_SCALE_BN = new BN(1).shln(I68F60_FRACTIONAL_BITS);
-const I68F60_DIVISOR = new Decimal(2).pow(I68F60_FRACTIONAL_BITS);
 const FractionDecimal = Decimal.clone({ precision: 40 });
 const I68F60_PRECISE_DIVISOR = new FractionDecimal(2).pow(
   I68F60_FRACTIONAL_BITS,
@@ -137,18 +136,6 @@ export const simpleRefreshObligation = (
   return ix;
 };
 
-// TODO remove when package updates
-/** `OracleSetupRaw` with `kaminoPythPush` and `kaminoSwitchboardPull` */
-export type OracleSetupRawWithKamino =
-  | { none: {} }
-  | { pythLegacy: {} }
-  | { switchboardV2: {} }
-  | { pythPushOracle: {} }
-  | { switchboardPull: {} }
-  | { stakedWithPythPush: {} }
-  | { kaminoPythPush: {} }
-  | { kaminoSwitchboardPull: {} };
-
 /**
  * Kamino bank configuration type for direct integration
  */
@@ -157,7 +144,7 @@ export type KaminoConfigCompact = {
   assetWeightInit: WrappedI80F48;
   assetWeightMaint: WrappedI80F48;
   depositLimit: BN;
-  oracleSetup: OracleSetupRawWithKamino;
+  oracleSetup: OracleSetupRaw;
   /** Paused = 0, Operational = 1, ReduceOnly = 2, ... */
   operationalState: OperationalStateRaw;
   /** Collateral = 0, Isolated = 1 */
@@ -378,12 +365,15 @@ export function estimateLiquidityFromCollateral(
 // TODO when porting this to the package, let's not convert buffer -> hex -> Decimal -> BigNumber,
 // this seems straight up goofy.
 /**
- * Same thing as `wrappedI80F48toBigNumber`, but for Kamino's numbering system, which uses U68F60.
+ * Same thing as `wrappedI80F48toBigNumber`, but for Kamino's numbering system, which uses I68F60
+ * (128-bit signed fixed-point, 60 fractional bits). Decoded exactly: the little-endian bytes are
+ * assembled into a 128-bit integer, reinterpreted as two's complement, then divided by 2^60. Since
+ * the divisor is a power of two the quotient terminates, so the result carries no rounding error.
  * @param wrapped
  * @returns
  */
 export function wrappedU68F60toBigNumber(
-  wrapped: WrappedI68F60 | BN, // Note: Kamino generally encodes as BN instead of number[]
+  wrapped: WrappedI68F60 | BN // Note: Kamino generally encodes as BN instead of number[]
 ): BigNumber {
   let bytesLE: number[];
   if (BN.isBN(wrapped)) {
@@ -396,22 +386,29 @@ export function wrappedU68F60toBigNumber(
     throw new Error(`Expected a ${I68F60_TOTAL_BYTES}-byte buffer`);
   }
 
-  // convert little-endian → big-endian
-  const bytesBE = [...bytesLE].reverse();
-
-  // detect sign (high bit of first byte), flip bits if negative
-  let sign = "";
-  if (bytesBE[0] & 0x80) {
-    sign = "-";
-    for (let i = 0; i < bytesBE.length; i++) {
-      bytesBE[i] = ~bytesBE[i] & 0xff;
-    }
+  // Assemble the little-endian bytes into a 128-bit unsigned integer.
+  let raw = 0n;
+  for (let i = bytesLE.length - 1; i >= 0; i--) {
+    raw = (raw << 8n) | BigInt(bytesLE[i] & 0xff);
   }
 
-  const hex =
-    sign + "0x" + bytesBE.map((b) => b.toString(16).padStart(2, "0")).join("");
-  const dec = new Decimal(hex).dividedBy(I68F60_DIVISOR);
-  return new BigNumber(dec.toString());
+  // Reinterpret as signed two's complement.
+  const totalBits = BigInt(I68F60_TOTAL_BYTES * 8);
+  if (raw >> (totalBits - 1n)) {
+    raw -= 1n << totalBits;
+  }
+
+  // value = raw / 2^FRACTIONAL_BITS, computed exactly: 1/2^n == 5^n / 10^n, so scale the magnitude
+  // by 5^n and place the decimal point n digits from the right (no rounding).
+  const negative = raw < 0n;
+  const scaled = (negative ? -raw : raw) * 5n ** BigInt(I68F60_FRACTIONAL_BITS);
+  const digits = scaled.toString().padStart(I68F60_FRACTIONAL_BITS + 1, "0");
+  const point = digits.length - I68F60_FRACTIONAL_BITS;
+  const intPart = digits.slice(0, point);
+  const fracPart = digits.slice(point).replace(/0+$/, "");
+  return new BigNumber(
+    (negative ? "-" : "") + intPart + (fracPart ? "." + fracPart : "")
+  );
 }
 
 type KitAccountMeta = {

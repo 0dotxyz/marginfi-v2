@@ -75,7 +75,7 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
     for (let i = 0; i < NUM_KAMINO_BANKS_FOR_TESTING; i++) {
       // Create Kamino market
       const market = await createKaminoMarket(
-        Array(32).fill(0), // USD quote currency
+        Array(32).fill(0) // USD quote currency
       );
 
       // Create Kamino reserve

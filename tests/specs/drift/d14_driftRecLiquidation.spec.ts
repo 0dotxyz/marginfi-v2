@@ -2,9 +2,12 @@ import { BN } from "@coral-xyz/anchor";
 import {
   ComputeBudgetProgram,
   AccountMeta,
+  AddressLookupTableAccount,
   Keypair,
   PublicKey,
   Transaction,
+  TransactionMessage,
+  VersionedTransaction,
 } from "@solana/web3.js";
 import { createMintToInstruction } from "@solana/spl-token";
 import {
@@ -21,9 +24,20 @@ import {
   DRIFT_TOKEN_A_PULL_FEED,
   DRIFT_TOKEN_A_PULL_ORACLE,
   DRIFT_TOKEN_A_SPOT_MARKET,
+  klendBankrunProgram,
+  kaminoAccounts,
+  farmAccounts,
+  MARKET,
+  TOKEN_A_RESERVE,
+  A_FARM_STATE,
+  FARMS_PROGRAM_ID,
 } from "../../rootHooks";
 import { genericMultiBankTestSetup } from "../../genericSetups";
-import { processBankrunTransaction } from "../../utils/tools";
+import {
+  createLut,
+  getBankrunBlockhash,
+  processBankrunTransaction,
+} from "../../utils/tools";
 import {
   makeAddDriftBankIx,
   makeInitDriftUserIx,
@@ -35,10 +49,21 @@ import {
   TOKEN_A_MARKET_INDEX,
   refreshDriftOracles,
 } from "../../utils/drift-utils";
-import { deriveBankWithSeed } from "../../utils/pdas";
 import {
-  refreshPullOraclesBankrun,
-} from "../../utils/bankrun-oracles";
+  deriveBankWithSeed,
+  deriveBaseObligation,
+  deriveLiquidityVaultAuthority,
+} from "../../utils/pdas";
+import {
+  makeKaminoDepositIx,
+  makeKaminoWithdrawIx,
+} from "../../utils/kamino-instructions";
+import {
+  simpleRefreshObligation,
+  simpleRefreshReserve,
+} from "../../utils/kamino-utils";
+import { ensureMultiSuiteIntegrationsSetup } from "../../utils/multi-limits-setup";
+import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
 import { makeUpdateSpotMarketCumulativeInterestIx } from "../../utils/drift-sdk";
 import {
   borrowIx,
@@ -196,8 +221,7 @@ describe("d14: Drift rec liquidation", () => {
     const remaining = composeRemainingAccounts(remainingAccounts);
     remainingStartMeta =
       composeRemainingAccountsWriteableMeta(remainingAccounts);
-    remainingEndMeta =
-      composeRemainingAccountsMetaBanksOnly(remainingAccounts);
+    remainingEndMeta = composeRemainingAccountsMetaBanksOnly(remainingAccounts);
 
     const fundTokenATx = new Transaction().add(
       createMintToInstruction(
@@ -475,5 +499,3 @@ describe("d14: Drift rec liquidation", () => {
     );
   });
 });
-
-// TODO same for mixed-balances including Kamino

@@ -542,10 +542,9 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     assertWithdrawAllDeltas(beforeWithdrawAll, afterWithdrawAll);
 
     // has_juplend clears once the last Juplend position is withdrawn
-    const user1AccAfterAll =
-      await bankrunProgram.account.marginfiAccount.fetch(
-        activeMarginfiAccountPk,
-      );
+    const user1AccAfterAll = await bankrunProgram.account.marginfiAccount.fetch(
+      activeMarginfiAccountPk
+    );
     assert.equal(user1AccAfterAll.indexerFlags.hasJuplend, 0);
   });
 
@@ -576,7 +575,7 @@ describe("jlr04: JupLend withdraws (bankrun)", () => {
     assertI80F48Approx(
       afterWithdrawAll.cachePriceMultiplier,
       expectedAfterMultiplier,
-      expectedAfterMultiplier / 10000, // .001%
+      expectedAfterMultiplier / 10000 // .001%
     );
     assert(
       wrappedI80F48toBigNumber(afterWithdrawAll.cachePriceMultiplier).gte(

@@ -24,15 +24,24 @@ use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        INSURANCE_VAULT_SEED, LIQUIDATION_INSURANCE_FEE, LIQUIDATION_LIQUIDATOR_FEE,
-        LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+        DEFAULT_LIQUIDATION_FEE, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
+        LIQUIDITY_VAULT_SEED,
     },
     types::{
-        Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType, PriceBias,
-        ACCOUNT_IN_RECEIVERSHIP,
+        u32_to_centi, Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType,
+        PriceBias, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
+/// Converts a per-bank liquidation fee (`u32_to_centi` encoding, `u32::MAX` = 100%) to an I80F48
+/// fraction. A 0 value falls back to the `DEFAULT_LIQUIDATION_FEE` constant.
+fn liquidation_fee_fraction(fee: u32) -> I80F48 {
+    if fee == 0 {
+        DEFAULT_LIQUIDATION_FEE // const of I80F48 type
+    } else {
+        u32_to_centi(fee)
+    }
+}
 /// Instruction liquidates a position owned by a margin account that is in a unhealthy state.
 /// The liquidator can purchase discounted collateral from the unhealthy account, in exchange for paying its debt.
 ///
@@ -269,9 +278,11 @@ pub fn lending_account_liquidate<'info>(
         };
         check!(liab_price > I80F48::ZERO, MarginfiError::ZeroLiabilityPrice);
 
-        let final_discount: I80F48 =
-            I80F48::ONE - (LIQUIDATION_INSURANCE_FEE + LIQUIDATION_LIQUIDATOR_FEE);
-        let liquidator_discount: I80F48 = I80F48::ONE - LIQUIDATION_LIQUIDATOR_FEE;
+        // Liquidation fees are configured per-bank on the liability bank (0 => default 2.5%).
+        let liquidator_fee = liquidation_fee_fraction(liab_bank.liquidation_liquidator_fee);
+        let insurance_fee = liquidation_fee_fraction(liab_bank.liquidation_insurance_fee);
+        let final_discount: I80F48 = I80F48::ONE - (insurance_fee + liquidator_fee);
+        let liquidator_discount: I80F48 = I80F48::ONE - liquidator_fee;
 
         // Quantity of liability to be paid off by liquidator
         let liab_amount_liquidator: I80F48 = calc_amount(
@@ -311,18 +322,28 @@ pub fn lending_account_liquidate<'info>(
         );
 
         // Liquidator pays off liability (by gaining the liability on their books)
-        let (liquidator_liability_pre_balance, liquidator_liability_post_balance) = {
+        let (
+            liquidator_liability_pre_balance,
+            liquidator_liability_post_balance,
+            liquidator_liab_bank_asset_pre_balance,
+            liquidator_liab_bank_asset_post_balance,
+        ) = {
             let mut bank_account = BankAccountWrapper::find_or_create(
                 &liab_bank_key,
                 &mut liab_bank,
                 &mut liquidator_marginfi_account.lending_account,
             )?;
 
-            // TODO: in edge cases, the liquidator starts/ends with ASSETS,
-            // and this value (which will ultimately be emitted in the event) is useless.
+            // When the liquidator already holds the liability bank as a deposit, the asset side
+            // moves instead of the liability side (the deposit is drawn down by
+            // `withdraw_ignore_borrow_cap` before any liability is taken on), so capture both. The
+            // asset balances are emitted as `liquidator_liability_bank_asset_balance`.
             let pre_balance: I80F48 = bank_account
                 .bank
                 .get_liability_amount(bank_account.balance.liability_shares.into())?;
+            let asset_pre_balance: I80F48 = bank_account
+                .bank
+                .get_asset_amount(bank_account.balance.asset_shares.into())?;
 
             // Liquidator will withdraw the collateral (if any) and then borrow the remainder (if any). Ignores the utilization ratio check.
             bank_account.withdraw_ignore_borrow_cap(liab_amount_liquidator)?;
@@ -330,8 +351,16 @@ pub fn lending_account_liquidate<'info>(
             let post_balance: I80F48 = bank_account
                 .bank
                 .get_liability_amount(bank_account.balance.liability_shares.into())?;
+            let asset_post_balance: I80F48 = bank_account
+                .bank
+                .get_asset_amount(bank_account.balance.asset_shares.into())?;
 
-            (pre_balance, post_balance)
+            (
+                pre_balance,
+                post_balance,
+                asset_pre_balance,
+                asset_post_balance,
+            )
         };
 
         // Liquidatee pays off `asset_quantity` amount of collateral
@@ -459,12 +488,16 @@ pub fn lending_account_liquidate<'info>(
                 liquidatee_liability_balance: liquidatee_liability_pre_balance.to_num::<f64>(),
                 liquidator_asset_balance: liquidator_asset_pre_balance.to_num::<f64>(),
                 liquidator_liability_balance: liquidator_liability_pre_balance.to_num::<f64>(),
+                liquidator_liability_bank_asset_balance: liquidator_liab_bank_asset_pre_balance
+                    .to_num::<f64>(),
             },
             LiquidationBalances {
                 liquidatee_asset_balance: liquidatee_asset_post_balance.to_num::<f64>(),
                 liquidatee_liability_balance: liquidatee_liability_post_balance.to_num::<f64>(),
                 liquidator_asset_balance: liquidator_asset_post_balance.to_num::<f64>(),
                 liquidator_liability_balance: liquidator_liability_post_balance.to_num::<f64>(),
+                liquidator_liability_bank_asset_balance: liquidator_liab_bank_asset_post_balance
+                    .to_num::<f64>(),
             },
         )
     };
@@ -486,7 +519,9 @@ pub fn lending_account_liquidate<'info>(
         pre_liquidation_health,
     )?;
 
-    // TODO consider if health cache update here is worth blowing the extra CU
+    // Note: the liquidatee's post-liquidation health is computed above but intentionally not
+    // persisted to its health cache here. Writing it would add CU to the hot liquidation path for a
+    // value any consumer can refresh on demand via `lending_account_pulse_health`.
 
     liquidatee_marginfi_account
         .indexer_flags
