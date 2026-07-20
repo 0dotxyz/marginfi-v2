@@ -38,7 +38,7 @@ use marginfi_type_crate::{
     pdas::DRIFT_PROGRAM_ID,
     types::{
         Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -84,8 +84,8 @@ pub fn drift_withdraw<'info>(
         )?;
 
         // Fetch oracle price for rate limiting and deleverage tracking
-        let in_receivership_or_order_execution =
-            marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
+        let in_receivership_or_order_execution = marginfi_account
+            .get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE);
         // When group rate limiter is enabled, oracle is required
         let group_rate_limit_enabled = group.rate_limiter.is_enabled();
         let price = if in_receivership_or_order_execution || group_rate_limit_enabled {
@@ -278,9 +278,9 @@ pub fn drift_withdraw<'info>(
         marginfi_account.lending_account.sort_balances();
         marginfi_account.sync_indexer_flags();
 
-        // Note: during liquidation/deleverage or order execution, we skip all health checks until
-        // the end of the transaction.
-        if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION) {
+        // Note: during liquidation/deleverage, order execution, or rebalance, we skip all health
+        // checks until the end of the transaction.
+        if !marginfi_account.defers_health_to_end_instruction() {
             let group = ctx.accounts.group.load()?;
             check_account_init_health(
                 &marginfi_account,
@@ -354,7 +354,7 @@ pub struct DriftWithdraw<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), true, true)
+            is_signer_authorized(&a, g.admin, authority.key(), true, true, true)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

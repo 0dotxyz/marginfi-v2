@@ -32,7 +32,7 @@ use marginfi_type_crate::{
     constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, TOKENLESS_REPAYMENTS_COMPLETE},
     types::{
         Bank, HealthCache, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_DELEVERAGE,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -62,7 +62,6 @@ pub fn lending_account_withdraw<'info>(
 
     let withdraw_all = withdraw_all.unwrap_or(false);
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
-    let group = marginfi_group_loader.load()?;
 
     {
         let maybe_bank_mint = {
@@ -70,8 +69,9 @@ pub fn lending_account_withdraw<'info>(
             utils::maybe_take_bank_mint(&mut ctx.remaining_accounts, &bank, token_program.key)?
         };
 
-        let in_receivership_or_order_execution =
-            marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
+        let in_receivership_or_order_execution = marginfi_account
+            .get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE);
+        let group = marginfi_group_loader.load()?;
         let mut bank = bank_loader.load_mut()?;
         // A withdraw from an account with no liabilities is risk-free, so it stays allowed
         // while the bank is circuit-breaker halted or `CircuitBroken`.
@@ -224,8 +224,9 @@ pub fn lending_account_withdraw<'info>(
     let maybe_price: Option<OraclePriceWithMultiplier>;
     let bank_pk = bank_loader.key();
 
-    // Note: during receivership and order execution, we skip all health checks until the end of the transaction.
-    if !marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION) {
+    // Note: during receivership, order execution, and rebalance, we skip the per-withdraw health
+    // check; the wrapping instruction re-checks account health once at the end of the transaction.
+    if !marginfi_account.defers_health_to_end_instruction() {
         // Check account health, if below threshold fail transaction
         // Assuming `ctx.remaining_accounts` holds only oracle accounts
         // Uses heap-efficient health check to support accounts with up to 16 positions
@@ -287,7 +288,7 @@ pub struct LendingAccountWithdraw<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), true, true)
+            is_signer_authorized(&a, g.admin, authority.key(), true, true, true)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

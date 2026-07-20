@@ -15,7 +15,7 @@ use anchor_lang::prelude::*;
 use instructions::*;
 use marginfi_type_crate::types::{
     BankConfigCompact, BankConfigOpt, EmodeEntry, InterestRateConfigOpt, OrderTrigger,
-    WrappedI80F48, MAX_EMODE_ENTRIES,
+    RebalanceMove, WrappedI80F48, MAX_EMODE_ENTRIES,
 };
 use prelude::*;
 
@@ -331,6 +331,101 @@ pub mod marginfi {
     /// (user) Close an existing Order, returning rent to the user
     pub fn marginfi_account_close_order(ctx: Context<CloseOrder>) -> MarginfiResult {
         marginfi_account::close_order(ctx)
+    }
+
+    /// (user) Create a persistent same-mint auto-rebalance order: keep `mint` in the highest-yield
+    /// bank among `allowed_banks`. Persists until cancelled.
+    pub fn marginfi_account_place_rebalance_order(
+        ctx: Context<PlaceRebalanceOrder>,
+        allowed_banks: Vec<Pubkey>,
+        min_improvement: Option<WrappedI80F48>,
+        cooldown_seconds: Option<u64>,
+        amount: Option<u64>,
+        keeper_tip: Option<u64>,
+    ) -> MarginfiResult {
+        marginfi_account::place_rebalance_order(
+            ctx,
+            allowed_banks,
+            min_improvement,
+            cooldown_seconds,
+            amount,
+            keeper_tip,
+        )
+    }
+
+    /// (user) Update an existing auto-rebalance order's allowlist and/or policy in place; `None`
+    /// fields are left unchanged.
+    pub fn marginfi_account_update_rebalance_order(
+        ctx: Context<UpdateRebalanceOrder>,
+        allowed_banks: Option<Vec<Pubkey>>,
+        min_improvement: Option<WrappedI80F48>,
+        cooldown_seconds: Option<u64>,
+        amount: Option<u64>,
+        keeper_tip: Option<u64>,
+    ) -> MarginfiResult {
+        marginfi_account::update_rebalance_order(
+            ctx,
+            allowed_banks,
+            min_improvement,
+            cooldown_seconds,
+            amount,
+            keeper_tip,
+        )
+    }
+
+    /// (permissionless) Fund an account's rebalance fee pool with SOL, used to pay keeper tips.
+    pub fn marginfi_account_top_up_rebalance_fee_pool(
+        ctx: Context<TopUpRebalanceFeePool>,
+        amount: u64,
+    ) -> MarginfiResult {
+        marginfi_account::top_up_rebalance_fee_pool(ctx, amount)
+    }
+
+    /// (user) Withdraw SOL from an account's rebalance fee pool back to the authority.
+    pub fn marginfi_account_withdraw_rebalance_fee_pool(
+        ctx: Context<WithdrawRebalanceFeePool>,
+        amount: u64,
+    ) -> MarginfiResult {
+        marginfi_account::withdraw_rebalance_fee_pool(ctx, amount)
+    }
+
+    /// Close an auto-rebalance order. The authority may cancel their own order at any time; anyone
+    /// may permissionlessly close a stale order once the account was closed or it no longer holds a
+    /// position in any allowed venue. Rent goes to `fee_recipient`.
+    pub fn marginfi_account_close_rebalance_order(
+        ctx: Context<CloseRebalanceOrder>,
+    ) -> MarginfiResult {
+        marginfi_account::close_rebalance_order(ctx)
+    }
+
+    /// (permissionless keeper) Begin an auto-rebalance. `moves` declares each value relocation as
+    /// `(src_index, dst_index, amount)` over the banks passed in remaining_accounts; validates
+    /// same-mint, allowed venues, and every move's dst APR > src + min_improvement. Opens the
+    /// start/end sandwich; `end_rebalance` must be the last ix; CPI forbidden.
+    pub fn marginfi_account_start_rebalance<'info>(
+        ctx: Context<'info, StartRebalance<'info>>,
+        moves: Vec<RebalanceMove>,
+    ) -> MarginfiResult {
+        marginfi_account::start_rebalance(ctx, moves)
+    }
+
+    /// (permissionless keeper) End an auto-rebalance. Re-checks dst >= src post-move, value
+    /// conservation, untouched balances, and health; the order persists. The keeper tip is escrowed
+    /// into the record and paid later via `settle_rebalance_tip`.
+    pub fn marginfi_account_end_rebalance<'info>(
+        ctx: Context<'info, EndRebalance<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::end_rebalance(ctx)
+    }
+
+    /// (permissionless) Settle a rebalance's escrowed keeper tip after the settlement delay. Pays the
+    /// recorded keeper only if the destinations realized more yield than the sources over the window
+    /// (defeats cross-tx rate manipulation); otherwise refunds the tip to the fee pool. Closes the
+    /// record, returning its rent to the recorded keeper.
+    pub fn marginfi_account_settle_rebalance_tip<'info>(
+        ctx: Context<'info, SettleRebalanceTip<'info>>,
+    ) -> MarginfiResult {
+        marginfi_account::settle_rebalance_tip(ctx)
     }
 
     /// (permissionless keeper) Close an existing Order after the user account was closed, or it no

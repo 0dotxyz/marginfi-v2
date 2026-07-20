@@ -446,7 +446,44 @@ pub enum MarginfiError {
     CircuitBreakerRequiresWarmCache, // 6603
     #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
     CircuitBreakerPriceJump, // 6604
-                             // **************END CIRCUIT BREAKER ERRORS
+    // **************END CIRCUIT BREAKER ERRORS
+
+    // **************BEGIN AUTO-REBALANCE ERRORS
+    #[msg("Rebalance venue not supported for on-chain rate verification")]
+    RebalanceVenueUnsupported, // 6605
+    #[msg("Rebalance cooldown has not elapsed")]
+    RebalanceCooldown, // 6606
+    #[msg("Rebalance moved no value")]
+    RebalanceIncompleteMove, // 6607
+    #[msg("Rebalance destination rate not better than source by the required margin")]
+    RebalanceNotImproving, // 6608
+    #[msg("Rebalance overshot: destination rate no longer >= source after the move")]
+    RebalanceOvershoot, // 6609
+    #[msg("Rebalance leaked value beyond the allowed dust tolerance")]
+    RebalanceValueLeak, // 6610
+    #[msg("Rebalance bank mint does not match the order mint")]
+    RebalanceMintMismatch, // 6611
+    #[msg("Rebalance bank not in the order's allowed venue set")]
+    RebalanceBankNotAllowed, // 6612
+    #[msg("Rebalance min improvement must be non-negative")]
+    RebalanceInvalidMinImprovement, // 6613
+    #[msg("Rebalance moved more than the order's amount")]
+    RebalanceExceedsAmount, // 6614
+    #[msg("Rebalance sandwich must contain exactly one start and one end instruction")]
+    RebalanceMalformedSandwich, // 6615
+    #[msg("Rebalance tip cannot be settled until the settlement delay has elapsed")]
+    RebalanceSettleTooEarly, // 6616
+    #[msg(
+        "Every referenced rebalance bank must be the source or destination of at least one move"
+    )]
+    RebalanceUnreferencedBank, // 6617
+    #[msg("Rebalance deposit/withdraw legs must all act on the rebalanced marginfi account")]
+    RebalanceForeignAccountLeg, // 6618
+    #[msg("Cannot close a rebalance order while its record still holds an unsettled tip")]
+    RebalanceRecordPending, // 6619
+    #[msg("Rebalance order requires an active balance in at least one allowed bank")]
+    RebalanceNoAllowlistPosition, // 6620
+                                  // **************END AUTO-REBALANCE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -691,6 +728,22 @@ impl From<u32> for MarginfiError {
             6602 => MarginfiError::CircuitBreakerInvalidConfig,
             6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
             6604 => MarginfiError::CircuitBreakerPriceJump,
+            6605 => MarginfiError::RebalanceVenueUnsupported,
+            6606 => MarginfiError::RebalanceCooldown,
+            6607 => MarginfiError::RebalanceIncompleteMove,
+            6608 => MarginfiError::RebalanceNotImproving,
+            6609 => MarginfiError::RebalanceOvershoot,
+            6610 => MarginfiError::RebalanceValueLeak,
+            6611 => MarginfiError::RebalanceMintMismatch,
+            6612 => MarginfiError::RebalanceBankNotAllowed,
+            6613 => MarginfiError::RebalanceInvalidMinImprovement,
+            6614 => MarginfiError::RebalanceExceedsAmount,
+            6615 => MarginfiError::RebalanceMalformedSandwich,
+            6616 => MarginfiError::RebalanceSettleTooEarly,
+            6617 => MarginfiError::RebalanceUnreferencedBank,
+            6618 => MarginfiError::RebalanceForeignAccountLeg,
+            6619 => MarginfiError::RebalanceRecordPending,
+            6620 => MarginfiError::RebalanceNoAllowlistPosition,
 
             _ => MarginfiError::InternalLogicError,
         }

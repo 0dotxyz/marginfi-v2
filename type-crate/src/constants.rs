@@ -23,6 +23,9 @@ pub const LIQUIDATION_RECORD_SEED: &str = "liq_record";
 pub const MARGINFI_ACCOUNT_SEED: &str = "marginfi_account";
 pub const ORDER_SEED: &str = "order";
 pub const EXECUTE_ORDER_SEED: &str = "execute_order";
+pub const REBALANCE_ORDER_SEED: &str = "rebalance_order";
+pub const REBALANCE_RECORD_SEED: &str = "rebalance_record";
+pub const REBALANCE_FEE_POOL_SEED: &str = "rebalance_fee_pool";
 
 pub const METADATA_SEED: &str = "metadata";
 
@@ -80,6 +83,38 @@ pub const BANKRUPT_THRESHOLD: I80F48 = I80F48!(0.1);
 
 /// Comparison threshold used to account for arithmetic artifacts on balances
 pub const ZERO_AMOUNT_THRESHOLD: I80F48 = I80F48!(0.0001);
+
+/// Relative tolerance by which an auto-rebalance may reduce the position's total underlying-token
+/// count, applied to the declared move total, absorbing the venue withdraw/deposit round-trip
+/// rounding. Expressed as a fraction so the bound scales with the size and precision of the mint
+/// being moved: a flat whole-token tolerance would be negligible on a stablecoin yet worth hundreds
+/// of dollars on a high-value 8-decimal mint. All referenced banks share one mint, so conservation
+/// is measured in token principal (oracle-price independent); keeper compensation is a separate SOL
+/// tip, so principal is otherwise strictly conserved and this bounds any residual skim to a
+/// negligible, cooldown-limited amount.
+pub const REBALANCE_CONSERVATION_DUST_RATE: I80F48 = I80F48!(0.00001);
+
+/// Absolute floor (whole tokens, UI units) for the conservation tolerance, covering fixed-point
+/// rounding on moves too small for the relative rate to exceed it.
+pub const REBALANCE_CONSERVATION_DUST_FLOOR: I80F48 = I80F48!(0.000001);
+
+/// Default minimum APR improvement (dst - src) an order requires to rebalance, used when the user
+/// does not set one. I80F48, 1.0 == 100%.
+pub const REBALANCE_DEFAULT_MIN_IMPROVEMENT: I80F48 = I80F48!(0.05);
+
+/// Default seconds between executions, used when the user does not set a cooldown (24 hours).
+pub const REBALANCE_DEFAULT_COOLDOWN_SECONDS: u64 = 86_400;
+
+/// Delay before a rebalance keeper tip can be settled, derived per order as
+/// `cooldown_seconds.clamp(MIN, MAX)`. The tip is not paid at `end_rebalance`; a later
+/// `settle_rebalance_tip` pays it only if the destinations actually out-yielded the sources over
+/// this window (realized yield, from each bank's share value times venue multiplier), which
+/// defeats cross-transaction (bundle) rate manipulation. Tracking the cooldown means the record is
+/// settleable by the time the cooldown allows the next rebalance, so a pending settlement never
+/// blocks re-rebalancing for any `cooldown >= MIN`. `MIN` keeps the window well above a single-slot
+/// spike; `MAX` bounds how long a keeper waits for the tip on long-cooldown orders.
+pub const REBALANCE_SETTLE_DELAY_MIN_SECONDS: u64 = 600; // 10 minutes
+pub const REBALANCE_SETTLE_DELAY_MAX_SECONDS: u64 = 3_600; // 1 hour
 
 pub const EMISSIONS_FLAG_BORROW_ACTIVE: u64 = 1 << 0;
 pub const EMISSIONS_FLAG_LENDING_ACTIVE: u64 = 1 << 1;
@@ -224,6 +259,8 @@ pub mod discriminators {
     pub const LIQUIDATION_RECORD: [u8; 8] = [95, 116, 23, 132, 89, 210, 245, 162];
     pub const ORDER: [u8; 8] = [134, 173, 223, 185, 77, 86, 28, 51];
     pub const EXECUTE_ORDER_RECORD: [u8; 8] = [6, 100, 107, 60, 164, 226, 56, 97];
+    pub const REBALANCE_ORDER: [u8; 8] = [51, 5, 186, 251, 144, 119, 75, 197];
+    pub const REBALANCE_RECORD: [u8; 8] = [190, 69, 228, 114, 34, 217, 70, 102];
     pub const BANK_METADATA: [u8; 8] = [49, 207, 31, 34, 67, 225, 169, 186];
     pub const SAME_ASSET_EMODE_REGISTRY: [u8; 8] = [222, 21, 195, 149, 193, 72, 219, 31];
 }
@@ -243,4 +280,26 @@ pub mod ix_discriminators {
     pub const END_FLASHLOAN: [u8; 8] = [105, 124, 201, 106, 153, 2, 8, 156];
     pub const START_DELEVERAGE: [u8; 8] = [10, 138, 10, 57, 40, 232, 182, 193];
     pub const END_DELEVERAGE: [u8; 8] = [114, 14, 250, 143, 252, 104, 214, 209];
+    pub const START_REBALANCE: [u8; 8] = [251, 122, 91, 161, 219, 98, 5, 236];
+    pub const END_REBALANCE: [u8; 8] = [47, 225, 163, 216, 213, 214, 225, 155];
+    pub const LENDING_ACCOUNT_DEPOSIT: [u8; 8] = [171, 94, 235, 103, 82, 64, 212, 140];
+    pub const KAMINO_DEPOSIT: [u8; 8] = [237, 8, 188, 187, 115, 99, 49, 85];
+    pub const DRIFT_DEPOSIT: [u8; 8] = [252, 63, 250, 201, 98, 55, 130, 12];
+    pub const JUPLEND_DEPOSIT: [u8; 8] = [114, 11, 218, 81, 183, 165, 143, 255];
+
+    // Foreign venue crank/refresh instructions that a keeper may include top-level inside a rebalance
+    // sandwich. These recompute/accrue venue state at the CURRENT utilization (they do not change it),
+    // so unlike the venues' deposit/borrow/withdraw ops they cannot be used to manipulate the supply
+    // rate the rebalance gate reads. Anchor discriminators: `sha256("global:<fn>")[..8]` of the
+    // respective venue program's instruction. NOTE: the per-venue sets are confirmed for Kamino/Drift;
+    // the JupLend set should be re-confirmed when a JupLend-leg rebalance integration test exists.
+    pub const KAMINO_REFRESH_RESERVE: [u8; 8] = [2, 218, 138, 235, 79, 201, 25, 102];
+    pub const KAMINO_REFRESH_OBLIGATION: [u8; 8] = [33, 132, 147, 228, 151, 192, 72, 89];
+    pub const DRIFT_UPDATE_SPOT_MARKET_CUMULATIVE_INTEREST: [u8; 8] =
+        [39, 166, 139, 243, 158, 165, 155, 225];
+    /// JupLend LENDING program: refreshes the `Lending` fToken account.
+    pub const JUPLEND_UPDATE_RATE: [u8; 8] = [24, 225, 53, 189, 72, 212, 225, 178];
+    /// JupLend LIQUIDITY program: refreshes the Fluid `TokenReserve` exchange prices, which is the
+    /// account the supply-rate gate reads. This is the crank that clears `TokenReserve` staleness.
+    pub const JUPLEND_UPDATE_EXCHANGE_PRICE: [u8; 8] = [239, 244, 10, 248, 116, 25, 53, 150];
 }

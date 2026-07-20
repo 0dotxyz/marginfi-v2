@@ -155,7 +155,7 @@ pub struct DriftDeposit<'info> {
         constraint = {
             let a = marginfi_account.load()?;
             let g = group.load()?;
-            is_signer_authorized(&a, g.admin, authority.key(), false, false)
+            is_signer_authorized(&a, g.admin, authority.key(), false, false, true)
         } @ MarginfiError::Unauthorized
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,

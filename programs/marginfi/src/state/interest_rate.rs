@@ -642,6 +642,86 @@ mod tests {
         assert_eq_with_tolerance!(base_rate_apr, I80F48!(0.125), I80F48!(0.0001));
     }
 
+    /// The auto-rebalance order compares integration supply APRs against native bank rates, so they
+    /// must share a basis. The native lender APR is `base_rate(util) * util`; each integration's is
+    /// `borrow_rate(util) * util * (1 - cut)`. Configure all three with the SAME linear curve
+    /// (slope `m`) and a zero protocol cut: every venue must then yield the same `m * util^2`,
+    /// proving the cross-venue comparison is apples-to-apples.
+    #[test]
+    fn integration_supply_rates_share_basis_with_native_lending_rate() {
+        use drift_mocks::state::drift_deposit_rate_from_parts;
+        use kamino_mocks::state::{kamino_supply_apr_from_parts, CurvePoint};
+
+        let m = 0.40_f64; // 40% APR at 100% utilization
+
+        // Native marginfi: linear base-rate curve (0,0)->(100%, m), zero fees.
+        let native = InterestRateConfig {
+            zero_util_rate: apr_to_u32(0.0),
+            hundred_util_rate: apr_to_u32(m),
+            points: make_points(&[]),
+            curve_type: INTEREST_CURVE_SEVEN_POINT,
+            ..Default::default()
+        }
+        .create_interest_rate_calculator(&MarginfiGroup::default());
+
+        // Kamino: linear borrow curve borrow(u) = m*u over 11 evenly spaced points.
+        let m_bps = (m * 10_000.0) as u32;
+        let mut k_points = [CurvePoint {
+            utilization_rate_bps: 0,
+            borrow_rate_bps: 0,
+        }; 11];
+        for (i, p) in k_points.iter_mut().enumerate() {
+            p.utilization_rate_bps = i as u32 * 1000;
+            p.borrow_rate_bps = i as u32 * m_bps / 10;
+        }
+
+        for &u in &[0.1_f64, 0.25, 0.5, 0.75, 0.9] {
+            let expected = m * u * u;
+
+            let native_lending = native
+                .calc_interest_rate(I80F48::from_num(u))
+                .unwrap()
+                .lending_rate_apr
+                .to_num::<f64>();
+
+            // util = borrowed / total_supply = u, zero take rate.
+            let kamino = kamino_supply_apr_from_parts(
+                I80F48::from_num(1000.0),
+                I80F48::from_num(1000.0 * u),
+                &k_points,
+                0,
+            )
+            .unwrap()
+            .to_num::<f64>();
+
+            // optimal_utilization = 100% keeps the curve linear (util <= optimal always);
+            // optimal_borrow_rate = m, zero insurance factor.
+            let drift = drift_deposit_rate_from_parts(
+                1_000_000,
+                (1_000_000.0 * u) as u128,
+                1_000_000,
+                (m * 1_000_000.0) as u128,
+                1_000_000,
+                0,
+            )
+            .unwrap()
+            .to_num::<f64>();
+
+            assert!(
+                (native_lending - expected).abs() < 1e-3,
+                "native {native_lending} vs {expected} @ u={u}"
+            );
+            assert!(
+                (kamino - expected).abs() < 1e-3,
+                "kamino {kamino} vs {expected} @ u={u}"
+            );
+            assert!(
+                (drift - expected).abs() < 1e-3,
+                "drift {drift} vs {expected} @ u={u}"
+            );
+        }
+    }
+
     #[test]
     fn legacy_curve_validation_is_rejected() {
         let config = InterestRateConfig {

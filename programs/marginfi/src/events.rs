@@ -264,6 +264,78 @@ pub struct SetKeeperCloseFlagsEvent {
 }
 
 #[event]
+pub struct MarginfiAccountPlaceRebalanceOrderEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+    pub mint: Pubkey,
+    pub allowed_banks: Vec<Pubkey>,
+    pub min_improvement: WrappedI80F48,
+    pub cooldown_seconds: u64,
+    pub amount: u64,
+    pub keeper_tip: u64,
+}
+
+#[event]
+pub struct MarginfiAccountUpdateRebalanceOrderEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+    pub allowed_banks: Vec<Pubkey>,
+    pub min_improvement: WrappedI80F48,
+    pub cooldown_seconds: u64,
+    pub amount: u64,
+    pub keeper_tip: u64,
+}
+
+#[event]
+pub struct MarginfiAccountCloseRebalanceOrderEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+}
+
+#[event]
+pub struct KeeperCloseRebalanceOrderEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+}
+
+#[event]
+pub struct RebalanceFeePoolTopUpEvent {
+    pub header: AccountEventHeader,
+    pub fee_pool: Pubkey,
+    pub amount: u64,
+    pub new_balance: u64,
+}
+
+#[event]
+pub struct RebalanceFeePoolWithdrawEvent {
+    pub header: AccountEventHeader,
+    pub fee_pool: Pubkey,
+    pub amount: u64,
+    pub new_balance: u64,
+}
+
+#[event]
+pub struct RebalanceExecutedEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+    pub executor: Pubkey,
+    pub bank_count: u8,
+    pub value_moved: WrappedI80F48,
+    pub tip_paid: u64,
+}
+
+#[event]
+pub struct RebalanceTipSettledEvent {
+    pub header: AccountEventHeader,
+    pub rebalance_order: Pubkey,
+    pub executor: Pubkey,
+    /// Whether the destinations realized at least the sources' yield over the settlement window.
+    pub realized: bool,
+    /// Tip paid to the keeper (0 if not realized; the escrow was refunded to the fee pool).
+    pub tip_paid: u64,
+}
+
+#[event]
 pub struct AdminCloseAccountEvent {
     pub header: AccountEventHeader,
     pub global_fee_wallet: Pubkey,

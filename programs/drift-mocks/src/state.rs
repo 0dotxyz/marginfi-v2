@@ -1,6 +1,7 @@
 use crate::{assert_struct_align, assert_struct_size, constants::*, math_error, DriftMocksError};
 use anchor_lang::prelude::*;
 use bytemuck::{Pod, Zeroable};
+use fixed::types::I80F48;
 
 // Account discriminators from Drift IDL
 pub const SPOT_MARKET_DISCRIMINATOR: [u8; 8] = [100, 177, 8, 107, 168, 65, 65, 39];
@@ -45,11 +46,32 @@ pub enum SpotBalanceType {
 unsafe impl Zeroable for SpotBalanceType {}
 unsafe impl Pod for SpotBalanceType {}
 
+assert_struct_size!(InsuranceFund, 112);
+assert_struct_align!(InsuranceFund, 8);
+/// Mirrors Drift's `SpotMarket.insurance_fund` field-for-field (`struct InsuranceFund`). u128 fields
+/// are stored as raw bytes to preserve 8-byte alignment.
+/// https://github.com/drift-labs/protocol-v2/blob/master/programs/drift/src/state/spot_market.rs#L689-L702
+#[zero_copy]
+#[repr(C)]
+#[derive(Default)]
+pub struct InsuranceFund {
+    pub vault: Pubkey,
+    pub total_shares: [u8; 16],
+    pub user_shares: [u8; 16],
+    pub shares_base: [u8; 16],
+    pub unstaking_period: i64,
+    pub last_revenue_settle_ts: i64,
+    pub revenue_settle_period: i64,
+    /// Percentage of interest taken by the insurance fund (PERCENTAGE_PRECISION = 1e6).
+    pub total_factor: u32,
+    pub user_factor: u32,
+}
+
 assert_struct_size!(MinimalSpotMarket, 768);
 assert_struct_align!(MinimalSpotMarket, 8);
 /// Minimal representation of Drift's SpotMarket account
 /// Only includes the fields we actually need for marginfi integration
-/// https://github.com/drift-labs/protocol-v2/tree/master/programs/drift/src/state/spot_market.rs#L35
+/// https://github.com/drift-labs/protocol-v2/blob/master/programs/drift/src/state/spot_market.rs#L33-L211
 #[account(zero_copy, discriminator = &SPOT_MARKET_DISCRIMINATOR)]
 #[repr(C)]
 #[derive(Default)]
@@ -63,8 +85,15 @@ pub struct MinimalSpotMarket {
     /// The vault used to store the market's deposits
     pub vault: Pubkey,
 
-    pub _padding1: [[u64; 4]; 9],
-    pub _padding2: [u8; 8],
+    /// SpotMarket fields between `vault` and `insurance_fund`; unused by marginfi, sized to match
+    /// upstream.
+    pub name: [u8; 32],
+    pub historical_oracle_data: [u64; 6],
+    pub historical_index_data: [u64; 5],
+    pub revenue_pool: [u64; 3],
+    pub spot_fee_pool: [u64; 3],
+    pub insurance_fund: InsuranceFund,
+    pub total_spot_fee: [u64; 2],
 
     /// All the fields we need for testing (stored as raw bytes for simplicity)
     pub deposit_balance: [u8; 16], // u128 in Drift
@@ -78,7 +107,13 @@ pub struct MinimalSpotMarket {
     /// Offset: 568 bytes from start of struct (including discriminator)
     pub last_interest_ts: u64,
 
-    pub _padding4: [u64; 13],
+    pub _padding4: [u64; 11],
+    pub _padding4b: [u8; 4],
+    /// Drift spot interest-rate curve params (`SpotMarket`), precision 1e6.
+    /// https://github.com/drift-labs/protocol-v2/blob/master/programs/drift/src/state/spot_market.rs#L149-L160
+    pub optimal_utilization: u32,
+    pub optimal_borrow_rate: u32,
+    pub max_borrow_rate: u32,
 
     pub decimals: u32,
     pub market_index: u16,
@@ -170,9 +205,9 @@ pub struct MinimalUserStats {
 
 // Implementation methods for MinimalSpotMarket
 impl MinimalSpotMarket {
-    /// Core scaled balance calculation used by both increment and decrement.
-    /// See `get_spot_balance` function on Drift program.
-    /// https://github.com/drift-labs/protocol-v2/blob/master/programs/drift/src/math/spot_balance.rs#L16
+    /// Core scaled balance calculation used by both increment and decrement. Mirrors Drift's
+    /// `get_spot_balance`:
+    /// https://github.com/drift-labs/protocol-v2/blob/master/programs/drift/src/math/spot_balance.rs#L16-L38
     ///
     /// # Parameters
     /// * `amount` - Token amount in native mint precision
@@ -208,7 +243,9 @@ impl MinimalSpotMarket {
         self.get_scaled_balance(amount, false)
     }
 
-    /// Convert scaled balance back to token amount for withdrawals
+    /// Convert scaled balance back to token amount for withdrawals. Mirrors the `Deposit` branch of
+    /// Drift's `get_token_amount`:
+    /// https://github.com/drift-labs/protocol-v2/blob/master/programs/drift/src/math/spot_balance.rs#L40-L62
     ///
     /// # Parameters
     /// * `scaled_balance` - Balance in Drift's internal scaled units (SPOT_BALANCE_PRECISION = 10^9)
@@ -216,7 +253,6 @@ impl MinimalSpotMarket {
     /// # Returns
     /// * Token amount in native mint precision (mint_decimals)
     pub fn get_withdraw_token_amount(&self, scaled_balance: u64) -> Result<u64> {
-        // See `get_token_amount` function on drift
         let precision_increase = get_precision_increase(self.decimals)?;
 
         let cumulative_interest = u128::from_le_bytes(self.cumulative_deposit_interest);
@@ -246,6 +282,150 @@ impl MinimalSpotMarket {
     pub fn is_stale(&self, current_timestamp: i64) -> bool {
         (self.last_interest_ts as i64) < current_timestamp
     }
+}
+
+/// Drift's above-optimal borrow-curve `(utilization_bp, weight)` segments; `weights_divisor` == 1000.
+/// Mirrors `INTEREST_RATE_SEGMENT_AND_WEIGHTS`:
+/// https://github.com/drift-labs/protocol-v2/blob/master/programs/drift/src/math/constants.rs#L236-L243
+const INTEREST_RATE_SEGMENT_AND_WEIGHTS: [(u128, u128); 6] = [
+    (850_000, 50),
+    (900_000, 100),
+    (950_000, 150),
+    (990_000, 200),
+    (995_000, 250),
+    (1_000_000, 250),
+];
+
+impl MinimalSpotMarket {
+    /// Net Drift deposit (supply) APR (I80F48, 1.0 == 100%), net of the insurance-fund cut. Reads the
+    /// market's stored balances and rate curve; the caller must ensure it was refreshed this slot
+    /// (see [`MinimalSpotMarket::is_stale`]). Returns `None` on overflow. Mirrors `get_token_amount`
+    /// then `calculate_utilization`/`calculate_borrow_rate`/`calculate_deposit_rate`:
+    /// https://github.com/drift-labs/protocol-v2/blob/master/programs/drift/src/math/spot_balance.rs#L40-L62
+    pub fn deposit_rate(&self) -> Option<I80F48> {
+        // `get_token_amount`: balance * cumulative_interest / 10^(19 - decimals).
+        let precision_decrease = get_precision_increase(self.decimals).ok()?;
+        let token_amount = |balance: [u8; 16], cumulative_interest: [u8; 16]| -> Option<u128> {
+            u128::from_le_bytes(balance)
+                .checked_mul(u128::from_le_bytes(cumulative_interest))?
+                .checked_div(precision_decrease)
+        };
+        let deposit_token_amount =
+            token_amount(self.deposit_balance, self.cumulative_deposit_interest)?;
+        let borrow_token_amount =
+            token_amount(self.borrow_balance, self.cumulative_borrow_interest)?;
+        drift_deposit_rate_from_parts(
+            deposit_token_amount,
+            borrow_token_amount,
+            self.optimal_utilization as u128,
+            self.optimal_borrow_rate as u128,
+            self.max_borrow_rate as u128,
+            self.insurance_fund.total_factor as u128,
+        )
+    }
+}
+
+/// Mirrors Drift's `calculate_utilization`: `borrow * SPOT_UTILIZATION_PRECISION / deposit`, with
+/// both-zero -> 0 and borrows-without-deposits -> max utilization.
+/// https://github.com/drift-labs/protocol-v2/blob/master/programs/drift/src/math/spot_balance.rs#L93-L110
+pub fn calculate_utilization(deposit_token_amount: u128, borrow_token_amount: u128) -> u128 {
+    borrow_token_amount
+        .saturating_mul(PERCENTAGE_PRECISION)
+        .checked_div(deposit_token_amount)
+        .unwrap_or({
+            if deposit_token_amount == 0 && borrow_token_amount == 0 {
+                0
+            } else {
+                // borrows without deposits -> maximum utilization
+                PERCENTAGE_PRECISION
+            }
+        })
+}
+
+/// Mirrors Drift's `calculate_borrow_rate`: linear `slope` up to `optimal_utilization`, then the
+/// weighted above-optimal segments. `None` only when `utilization <= optimal_utilization == 0`.
+///
+/// Divergence: upstream floors the result at `get_min_borrow_rate()`; `MinimalSpotMarket` omits
+/// `min_borrow_rate`, so this drops the `min_rate` floor.
+/// https://github.com/drift-labs/protocol-v2/blob/master/programs/drift/src/math/spot_balance.rs#L182-L229
+pub fn calculate_borrow_rate(
+    utilization: u128,
+    optimal_utilization: u128,
+    optimal_borrow_rate: u128,
+    max_borrow_rate: u128,
+) -> Option<u128> {
+    let weights_divisor = 1000;
+
+    if utilization <= optimal_utilization {
+        let slope = optimal_borrow_rate
+            .saturating_mul(PERCENTAGE_PRECISION)
+            .checked_div(optimal_utilization)?;
+        return Some(utilization.saturating_mul(slope) / PERCENTAGE_PRECISION);
+    }
+
+    let total_extra_rate = max_borrow_rate.saturating_sub(optimal_borrow_rate);
+    let mut rate = optimal_borrow_rate;
+    let mut prev_util = optimal_utilization;
+
+    for (bp, weight) in INTEREST_RATE_SEGMENT_AND_WEIGHTS {
+        let segment_start = prev_util;
+        let segment_end = bp;
+        let segment_range = segment_end.saturating_sub(segment_start);
+        let segment_rate_total = total_extra_rate.saturating_mul(weight) / weights_divisor;
+
+        if utilization <= segment_end {
+            let partial_util = utilization.saturating_sub(segment_start);
+            let partial_rate = segment_rate_total
+                .saturating_mul(partial_util)
+                .checked_div(segment_range)?;
+            rate = rate.saturating_add(partial_rate);
+            break;
+        } else {
+            rate = rate.saturating_add(segment_rate_total);
+            prev_util = segment_end;
+        }
+    }
+
+    Some(rate)
+}
+
+/// Mirrors Drift's `calculate_deposit_rate`:
+/// `borrow_rate * (PERCENTAGE_PRECISION - total_factor) * utilization / SPOT_UTILIZATION_PRECISION / PERCENTAGE_PRECISION`.
+/// https://github.com/drift-labs/protocol-v2/blob/master/programs/drift/src/math/spot_balance.rs#L231-L242
+pub fn calculate_deposit_rate(
+    borrow_rate: u128,
+    utilization: u128,
+    total_factor: u128,
+) -> Option<u128> {
+    Some(
+        borrow_rate
+            .checked_mul(PERCENTAGE_PRECISION.saturating_sub(total_factor))?
+            .checked_mul(utilization)?
+            / PERCENTAGE_PRECISION
+            / PERCENTAGE_PRECISION,
+    )
+}
+
+/// Net Drift deposit (supply) rate as I80F48 (1.0 == 100%) from market parts, decoupled from account
+/// loading for unit testing and off-chain reuse. Composes `calculate_utilization` ->
+/// `calculate_borrow_rate` -> `calculate_deposit_rate`. Rates and `total_factor` are 1e6 units.
+pub fn drift_deposit_rate_from_parts(
+    deposit_token_amount: u128,
+    borrow_token_amount: u128,
+    optimal_utilization: u128,
+    optimal_borrow_rate: u128,
+    max_borrow_rate: u128,
+    total_factor: u128,
+) -> Option<I80F48> {
+    let utilization = calculate_utilization(deposit_token_amount, borrow_token_amount);
+    let borrow_rate = calculate_borrow_rate(
+        utilization,
+        optimal_utilization,
+        optimal_borrow_rate,
+        max_borrow_rate,
+    )?;
+    let deposit_rate = calculate_deposit_rate(borrow_rate, utilization, total_factor)?;
+    Some(I80F48::from_num(deposit_rate) / I80F48::from_num(PERCENTAGE_PRECISION))
 }
 
 impl MinimalUser {
@@ -392,5 +572,60 @@ impl MinimalUser {
             }
         }
         Err(DriftMocksError::NoAdminDeposit.into())
+    }
+}
+
+#[cfg(test)]
+mod rate_tests {
+    use super::*;
+
+    fn approx(actual: I80F48, expected: f64) {
+        let a = actual.to_num::<f64>();
+        assert!((a - expected).abs() < 1e-5, "got {a}, expected {expected}");
+    }
+
+    #[test]
+    fn deposit_rate_below_optimal() {
+        // util 0.5 (< optimal 0.8): borrow = 0.5 * (0.10 / 0.8) = 0.0625;
+        // supply = 0.0625 * 0.5 * (1 - 0.10) = 0.028125.
+        let r = drift_deposit_rate_from_parts(1000, 500, 800_000, 100_000, 1_000_000, 100_000);
+        approx(r.unwrap(), 0.028125);
+    }
+
+    #[test]
+    fn deposit_rate_above_optimal_uses_segments() {
+        // util 0.9 (> optimal 0.8) walks the weighted segments to borrow = 0.235;
+        // supply = 0.235 * 0.9 * (1 - 0) = 0.2115.
+        let r = drift_deposit_rate_from_parts(1000, 900, 800_000, 100_000, 1_000_000, 0);
+        approx(r.unwrap(), 0.2115);
+    }
+
+    #[test]
+    fn deposit_rate_zero_optimal_utilization_is_none() {
+        // Matches upstream: the `slope` div only fails when utilization <= optimal == 0, i.e. no
+        // borrows. (With borrows present, utilization > 0 takes the above-optimal segment path.)
+        assert!(drift_deposit_rate_from_parts(1000, 0, 0, 100_000, 1_000_000, 0).is_none());
+    }
+
+    /// The `deposit_rate()` method (decodes `[u8;16]` balances via `get_token_amount`) must agree
+    /// with `drift_deposit_rate_from_parts` fed the hand-derived token amounts.
+    #[test]
+    fn deposit_rate_method_matches_from_parts() {
+        // decimals=6 -> get_token_amount divides by 10^(19-6)=1e13.
+        // deposit: 1e9 * 1e10 / 1e13 = 1e6 ; borrow: 5e8 * 1e10 / 1e13 = 5e5.
+        let mut m = MinimalSpotMarket::default();
+        m.deposit_balance = 1_000_000_000u128.to_le_bytes();
+        m.borrow_balance = 500_000_000u128.to_le_bytes();
+        m.cumulative_deposit_interest = 10_000_000_000u128.to_le_bytes();
+        m.cumulative_borrow_interest = 10_000_000_000u128.to_le_bytes();
+        m.decimals = 6;
+        m.optimal_utilization = 800_000;
+        m.optimal_borrow_rate = 100_000;
+        m.max_borrow_rate = 1_000_000;
+        m.insurance_fund.total_factor = 100_000;
+        assert_eq!(
+            m.deposit_rate(),
+            drift_deposit_rate_from_parts(1_000_000, 500_000, 800_000, 100_000, 1_000_000, 100_000)
+        );
     }
 }

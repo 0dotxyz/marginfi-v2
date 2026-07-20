@@ -19,7 +19,7 @@ use {
     fixed::types::I80F48,
     marginfi::state::bank::BankVaultType,
     marginfi_type_crate::{
-        constants::MARGINFI_ACCOUNT_SEED,
+        constants::{MARGINFI_ACCOUNT_SEED, REBALANCE_FEE_POOL_SEED},
         types::{
             Bank, FeeState, LiquidationRecord, MarginfiAccount, Order, OrderTrigger,
             ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION,
@@ -650,6 +650,14 @@ pub fn marginfi_account_close(profile: &Profile, config: &Config) -> Result<()> 
             marginfi_account: marginfi_account_pk,
             authority,
             fee_payer: config.explicit_fee_payer(),
+            rebalance_fee_pool: Pubkey::find_program_address(
+                &[
+                    REBALANCE_FEE_POOL_SEED.as_bytes(),
+                    marginfi_account_pk.as_ref(),
+                ],
+                &config.program_id,
+            )
+            .0,
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::MarginfiAccountClose.data(),

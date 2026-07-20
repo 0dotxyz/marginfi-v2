@@ -184,6 +184,7 @@ pub fn lending_account_liquidate<'info>(
                     group.admin,
                     signer,
                     false,
+                    false,
                     false
                 ),
                 MarginfiError::Unauthorized

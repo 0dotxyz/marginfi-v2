@@ -21,7 +21,7 @@ use marginfi_type_crate::{
         LendingAccount, LiquidationPriceCache, MarginfiAccount, MarginfiGroup, OraclePriceType,
         OraclePriceWithConfidence, OracleSetup, PriceBias, ReconciledEmodeConfig, RequirementType,
         RiskTier, ACCOUNT_DISABLED, ACCOUNT_FROZEN, ACCOUNT_IN_FLASHLOAN,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_REBALANCE, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 use std::{
@@ -68,6 +68,7 @@ pub trait MarginfiAccountImpl {
     fn set_flag(&mut self, flag: u64, msg: bool);
     fn unset_flag(&mut self, flag: u64, msg: bool);
     fn get_flag(&self, flag: u64) -> bool;
+    fn defers_health_to_end_instruction(&self) -> bool;
     fn increment_active_orders(&mut self) -> MarginfiResult;
     fn decrement_active_orders(&mut self) -> MarginfiResult;
     fn can_be_closed(&self) -> bool;
@@ -79,17 +80,27 @@ pub trait MarginfiAccountImpl {
 /// Returns `true` if the signer is authorized, `false` otherwise.
 ///
 /// Authorization rules (checked in order):
-/// 1. If `allow_receivership` is true and the (NOT signer's) account is in receivership → `true`
-/// 2. If `allow_order_execution` is true and the account is in order execution → `true`
-/// 3. If the account is frozen → `true` only if signer is the group admin
-/// 4. Otherwise → `true` only if signer is the account authority
+/// 1. If `allow_rebalance` is true and the account is in a rebalance → `true`
+/// 2. If `allow_receivership` is true and the (NOT signer's) account is in receivership → `true`
+/// 3. If `allow_order_execution` is true and the account is in order execution → `true`
+/// 4. If the account is frozen → `true` only if signer is the group admin
+/// 5. Otherwise → `true` only if signer is the account authority
 pub fn is_signer_authorized(
     marginfi_account: &MarginfiAccount,
     group_admin: Pubkey,
     signer: Pubkey,
     allow_receivership: bool,
     allow_order_execution: bool,
+    allow_rebalance: bool,
 ) -> bool {
+    // Within a rebalance sandwich, any keeper may drive the withdraw/deposit legs between the user's
+    // same-mint banks. Opt-in per caller (only the withdraw/deposit legs pass `true`) so the flag
+    // cannot authorize unrelated instructions; bounded by the rebalance start/end value-conservation
+    // checks and the exclusive-ix allowlist (only withdraw/deposit + start/end may appear).
+    if allow_rebalance && marginfi_account.get_flag(ACCOUNT_IN_REBALANCE) {
+        return true;
+    }
+
     if allow_receivership && marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP) {
         return marginfi_account.authority != signer; // forbidden to take receivership of your own account
     }
@@ -251,6 +262,12 @@ impl MarginfiAccountImpl for MarginfiAccount {
         self.account_flags & flag != 0
     }
 
+    /// True while an outer instruction defers the account's health check to the end of the
+    /// transaction: receivership, order execution, and auto-rebalance.
+    fn defers_health_to_end_instruction(&self) -> bool {
+        self.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION | ACCOUNT_IN_REBALANCE)
+    }
+
     fn increment_active_orders(&mut self) -> MarginfiResult {
         // Note: Sanity check, expected to be unreachable, as this vastly exceeds max theoretical
         // orders one account can open.
@@ -264,13 +281,7 @@ impl MarginfiAccountImpl for MarginfiAccount {
     }
 
     fn decrement_active_orders(&mut self) -> MarginfiResult {
-        // Note: Sanity check, expected to be unreachable
-        check!(
-            self.active_orders > 0,
-            MarginfiError::IllegalAction,
-            "No active orders to close"
-        );
-        self.active_orders -= 1;
+        self.active_orders = self.active_orders.saturating_sub(1);
         Ok(())
     }
 
@@ -1351,15 +1362,17 @@ pub fn clear_liquidation_price_cache_locks<'info>(
     Ok(())
 }
 
-/// Initial health check using the heap-reuse health calculator.
+/// Health check using the heap-reuse health calculator, against `requirement_type`.
 ///
 /// - Skips risk checks when the account is in a flashloan
 /// - Enforces isolated-tier constraint
-/// - Errors if initial health is negative
-pub fn check_account_init_health<'info>(
+/// - Errors with `reject_error` if health is negative
+fn check_account_health<'info>(
     marginfi_account: &MarginfiAccount,
     group: &MarginfiGroup,
     remaining_ais: &'info [AccountInfo<'info>],
+    requirement_type: RequirementType,
+    reject_error: MarginfiError,
     health_cache: &mut Option<&mut HealthCache>,
 ) -> MarginfiResult {
     if marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN) {
@@ -1371,7 +1384,7 @@ pub fn check_account_init_health<'info>(
         marginfi_account,
         group,
         remaining_ais,
-        RequirementType::Initial,
+        requirement_type,
         health_cache,
         HealthPriceMode::Live { liq_cache: None },
     )?;
@@ -1382,10 +1395,47 @@ pub fn check_account_init_health<'info>(
     }
 
     if !healthy {
-        return err!(MarginfiError::RiskEngineInitRejected);
+        return Err(error!(reject_error));
     }
 
     check_account_risk_tiers(marginfi_account, remaining_ais)
+}
+
+/// Initial health check: errors if initial health is negative.
+pub fn check_account_init_health<'info>(
+    marginfi_account: &MarginfiAccount,
+    group: &MarginfiGroup,
+    remaining_ais: &'info [AccountInfo<'info>],
+    health_cache: &mut Option<&mut HealthCache>,
+) -> MarginfiResult {
+    check_account_health(
+        marginfi_account,
+        group,
+        remaining_ais,
+        RequirementType::Initial,
+        MarginfiError::RiskEngineInitRejected,
+        health_cache,
+    )
+}
+
+/// Maintenance health check: like [`check_account_init_health`] but against the MAINTENANCE
+/// requirement, so the account need only stay non-liquidatable. Used by actions that move existing
+/// positions without opening new risk (e.g. an auto-rebalance between same-mint venues), where the
+/// stricter initial requirement does not apply.
+pub fn check_account_maint_health<'info>(
+    marginfi_account: &MarginfiAccount,
+    group: &MarginfiGroup,
+    remaining_ais: &'info [AccountInfo<'info>],
+    health_cache: &mut Option<&mut HealthCache>,
+) -> MarginfiResult {
+    check_account_health(
+        marginfi_account,
+        group,
+        remaining_ais,
+        RequirementType::Maintenance,
+        MarginfiError::WorseHealthPostExecution,
+        health_cache,
+    )
 }
 
 /// Post-liquidation invariant using the heap-reuse health calculator.
