@@ -2239,6 +2239,12 @@ impl<'a> BankAccountWrapper<'a> {
         // captures exactly the cases where `change_*_shares(0)` would have been a no-op.
         let asset_shares_decrease = if asset_amount_decrease > I80F48::ZERO {
             let shares = bank.get_asset_shares(asset_amount_decrease)?;
+            // If asset share value > 2^48, this prevents a 1-satoshi withdraw from trunctuating.
+            check!(
+                shares > I80F48::ZERO,
+                MarginfiError::IllegalBalanceState,
+                "Withdraw would transfer assets without burning shares"
+            );
             balance.change_asset_shares(-shares)?;
             bank.change_asset_shares(-shares, false)?;
             shares
@@ -2719,6 +2725,21 @@ mod test {
                 bank_total_liability_shares_before,
                 "WithdrawOnly leaked dust into bank.total_liability_shares"
             );
+        }
+
+        #[test]
+        fn withdraw_rejects_positive_amount_with_zero_asset_shares_burned() {
+            let asset_share_value = I80F48::from_num((1u64 << 48) + 1);
+            let (mut bank, mut balance) =
+                make_bank_and_balance(asset_share_value, I80F48::ONE, I80F48::ONE, I80F48::ZERO);
+
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+
+            let err = wrapper.withdraw(I80F48::ONE).unwrap_err();
+            assert_eq!(err, MarginfiError::IllegalBalanceState.into());
         }
 
         /// `repay` on a bank with fractional `liability_share_value`. Choose
