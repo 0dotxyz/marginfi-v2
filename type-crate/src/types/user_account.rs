@@ -291,8 +291,9 @@ pub struct Balance {
     /// A tag may also have a non-zero value while having no orders.
     pub tag: u16,
     /// Collateral-weighted variable-borrow premium APR snapshot for this liability position,
-    /// encoded like interest-curve points via `milli_to_u32` (0-1000%). Recomputed on every
-    /// health-checked interaction and by `lending_account_pulse_health`. 0 = no premium.
+    /// encoded like interest-curve points via `milli_to_u32` (0-1000%). Recomputed by every
+    /// oracle-carrying ix (borrow, withdraw, liquidation, order end, `pulse_health`) but not
+    /// deposit/repay, which carry no oracles. 0 = no premium.
     pub premium_rate_snapshot: u32,
     /// The user's asset (deposit) shares in the bank. Multiply by `bank.asset_share_value` for
     /// the token amount.

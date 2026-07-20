@@ -11,8 +11,8 @@ use fixtures::marginfi_account::MarginfiAccountFixture;
 use fixtures::{assert_eq_noise, native, prelude::*};
 use marginfi::state::bank::BankImpl;
 use marginfi_type_crate::types::{
-    make_points, milli_to_u32, u32_to_milli, Balance, BankConfig, InterestRateConfig,
-    MarginfiAccount, PremiumEntry,
+    make_points, milli_to_u32, u32_to_milli, Balance, BankConfig, BankConfigOpt,
+    InterestRateConfig, MarginfiAccount, PremiumEntry,
 };
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
@@ -123,6 +123,15 @@ async fn setup_borrower(
 }
 
 async fn advance_clock(test_f: &TestFixture, seconds: i64) {
+    advance_clock_with_feeds(
+        test_f,
+        seconds,
+        &[PYTH_USDC_FEED, PYTH_SOL_FEED, PYTH_SOL_EQUIVALENT_FEED],
+    )
+    .await;
+}
+
+async fn advance_clock_with_feeds(test_f: &TestFixture, seconds: i64, feeds: &[Pubkey]) {
     let new_timestamp = {
         let ctx = test_f.context.borrow_mut();
         let mut clock: Clock = ctx.banks_client.get_sysvar().await.unwrap();
@@ -131,8 +140,8 @@ async fn advance_clock(test_f: &TestFixture, seconds: i64) {
         clock.unix_timestamp
     };
     // Keep the mock oracles fresh so health checks (and the premium crank) don't hit staleness
-    for feed in [PYTH_USDC_FEED, PYTH_SOL_FEED, PYTH_SOL_EQUIVALENT_FEED] {
-        test_f.set_pyth_oracle_timestamp(feed, new_timestamp).await;
+    for feed in feeds {
+        test_f.set_pyth_oracle_timestamp(*feed, new_timestamp).await;
     }
 }
 
@@ -803,6 +812,644 @@ async fn premium_composes_with_emode() -> anyhow::Result<()> {
         "premium must erode the emode-leveraged position to liquidatable: {} vs {}",
         liabs_maint,
         assets_maint
+    );
+
+    Ok(())
+}
+
+/// Direct liquidation must refresh premium snapshots on BOTH accounts: the liquidator's
+/// newly-created liability weights against their post-liquidation collateral (instead of the
+/// default 0%), and the liquidatee re-weights against what remains after seizure.
+#[tokio::test]
+async fn premium_direct_liquidation_refreshes_snapshots() -> anyhow::Result<()> {
+    let mut test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    // (sol -> stable) = 1%; sol_eq stays untagged => 0% leg
+    group_f.try_init_and_copy_fee_state_v2().await?;
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)
+        .await?;
+
+    // USDC liquidity
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+
+    // Liquidatee: equal USD of tagged SOL + untagged SolEq -> weighted 0.5% on the USDC debt
+    let liquidatee = test_f.create_marginfi_account().await;
+    let liquidatee_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    liquidatee
+        .try_bank_deposit(liquidatee_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let liquidatee_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    liquidatee
+        .try_bank_deposit(liquidatee_sol_eq.key, sol_eq_bank_f, 999, None)
+        .await?;
+    let liquidatee_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    liquidatee
+        .try_bank_borrow(liquidatee_usdc.key, usdc_bank_f, 1_000)
+        .await?;
+    let account = liquidatee.load().await;
+    assert!((snapshot_percent(usdc_balance(&account, &usdc_bank_f.key)) - 0.5).abs() < 0.001);
+
+    // Liquidator: all-SOL collateral (their weighted rate on any stable debt is the full 1%)
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidator_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(8_000)
+        .await;
+    liquidator
+        .try_bank_deposit(liquidator_sol.key, sol_bank_f, 8_000, None)
+        .await?;
+
+    // Synthetically crush the collateral weights so the liquidatee is liquidatable
+    for mint in [BankMint::Sol, BankMint::SolEquivalent] {
+        test_f
+            .get_bank_mut(&mint)
+            .update_config(
+                BankConfigOpt {
+                    asset_weight_init: Some(I80F48!(0.01).into()),
+                    asset_weight_maint: Some(I80F48!(0.02).into()),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await?;
+    }
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+
+    // Seize 50 SOL ($500) against the USDC debt
+    liquidator
+        .try_liquidate(&liquidatee, sol_bank_f, 50, usdc_bank_f)
+        .await?;
+
+    // Liquidator: brand-new USDC liability must carry the weighted rate of their collateral
+    // (all tagged SOL -> the full 1% pair rate), not the 0% a fresh balance starts with.
+    let liquidator_account = liquidator.load().await;
+    let liquidator_rate = snapshot_percent(usdc_balance(&liquidator_account, &usdc_bank_f.key));
+    assert!(
+        (liquidator_rate - 1.0).abs() < 0.001,
+        "liquidator snapshot {} != 1.0%",
+        liquidator_rate
+    );
+
+    // Liquidatee: tagged SOL dropped 999 -> 949 while untagged SolEq kept 999, so the weighted
+    // rate re-weights from 0.5% to 949/(949+999) = ~0.4872%.
+    let liquidatee_account = liquidatee.load().await;
+    let liquidatee_rate = snapshot_percent(usdc_balance(&liquidatee_account, &usdc_bank_f.key));
+    let expected = 949.0 / (949.0 + 999.0);
+    assert!(
+        (liquidatee_rate - expected).abs() < 0.001,
+        "liquidatee snapshot {} != {}",
+        liquidatee_rate,
+        expected
+    );
+
+    Ok(())
+}
+
+/// Order execution must re-weight surviving liabilities: the end-of-order health pass owns the
+/// snapshot refresh that withdraw deferred while ACCOUNT_IN_ORDER_EXECUTION was set.
+#[tokio::test]
+async fn premium_order_execution_reweights_surviving_liability() -> anyhow::Result<()> {
+    use marginfi_type_crate::types::{OrderTrigger, WrappedI80F48};
+    use solana_sdk::{account::Account, transaction::Transaction};
+
+    // USDC: surviving premium-active debt. PyUSD: order debt (closed by the keeper).
+    // SOL: tagged order collateral. SolEq: untagged (0% leg) bystander collateral.
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::PyUSD,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_PYUSD_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock_with_feeds(
+        &test_f,
+        1_700_000_000,
+        &[
+            PYTH_USDC_FEED,
+            PYTH_PYUSD_FEED,
+            PYTH_SOL_FEED,
+            PYTH_SOL_EQUIVALENT_FEED,
+        ],
+    )
+    .await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let pyusd_bank_f = test_f.get_bank(&BankMint::PyUSD);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    // (sol -> stable) = 1%; sol_eq and pyusd stay untagged
+    group_f.try_init_and_copy_fee_state_v2().await?;
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)
+        .await?;
+
+    // USDC + PyUSD liquidity
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(10_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 10_000, None)
+        .await?;
+    let lender_pyusd = test_f
+        .pyusd_mint
+        .create_token_account_and_mint_to(10_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_pyusd.key, pyusd_bank_f, 10_000, None)
+        .await?;
+
+    // User: $1000 tagged SOL + $1000 untagged SolEq; 100 USDC surviving debt at 0.5%, plus
+    // 50 PyUSD debt the order will close.
+    let user = test_f.create_marginfi_account().await;
+    let user_sol = test_f.sol_mint.create_token_account_and_mint_to(101).await;
+    user.try_bank_deposit(user_sol.key, sol_bank_f, 100, None)
+        .await?;
+    let user_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(101)
+        .await;
+    user.try_bank_deposit(user_sol_eq.key, sol_eq_bank_f, 100, None)
+        .await?;
+    let user_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    user.try_bank_borrow(user_usdc.key, usdc_bank_f, 100)
+        .await?;
+    let user_pyusd = test_f.pyusd_mint.create_empty_token_account().await;
+    user.try_bank_borrow(user_pyusd.key, pyusd_bank_f, 50)
+        .await?;
+
+    let account = user.load().await;
+    assert!((snapshot_percent(usdc_balance(&account, &usdc_bank_f.key)) - 0.5).abs() < 0.001);
+
+    // A year of accrual at the 0.5% snapshot before the keeper executes
+    advance_clock_with_feeds(
+        &test_f,
+        YEAR,
+        &[
+            PYTH_USDC_FEED,
+            PYTH_PYUSD_FEED,
+            PYTH_SOL_FEED,
+            PYTH_SOL_EQUIVALENT_FEED,
+        ],
+    )
+    .await;
+
+    // Take-profit order on (SOL asset, PyUSD debt), instantly eligible: order net is
+    // $1000 - $50 = $950 >= the $100 threshold.
+    let order_pda = user
+        .try_place_order(
+            vec![sol_bank_f.key, pyusd_bank_f.key],
+            OrderTrigger::TakeProfit {
+                threshold: WrappedI80F48::from(I80F48!(100)),
+                max_slippage: 0,
+            },
+        )
+        .await?;
+
+    // Keeper wallet + token accounts
+    let keeper = Keypair::new();
+    {
+        let mut ctx = test_f.context.borrow_mut();
+        let rent = ctx.banks_client.get_rent().await?;
+        let account = Account {
+            lamports: rent.minimum_balance(0) + 1_000_000_000,
+            data: vec![],
+            owner: solana_system_interface::program::ID,
+            executable: false,
+            rent_epoch: 0,
+        };
+        ctx.set_account(&keeper.pubkey(), &account.into());
+    }
+    let keeper_pyusd = test_f
+        .pyusd_mint
+        .create_token_account_and_mint_to_with_owner(&keeper.pubkey(), 500.0)
+        .await
+        .key;
+    let keeper_sol = test_f
+        .sol_mint
+        .create_empty_token_account_with_owner(&keeper.pubkey())
+        .await
+        .key;
+
+    // Execute: repay all 50 PyUSD, withdraw the matching 5 SOL ($50)
+    let (start_ix, execute_record) = user.make_start_execute_ix(order_pda, keeper.pubkey()).await;
+    let repay_ix = user
+        .make_repay_ix_with_authority(keeper_pyusd, pyusd_bank_f, 0.0, Some(true), keeper.pubkey())
+        .await;
+    let withdraw_ix = user
+        .make_withdraw_ix_with_authority(keeper_sol, sol_bank_f, 5.0, None, keeper.pubkey())
+        .await;
+    let end_ix = user
+        .make_end_execute_ix(
+            order_pda,
+            execute_record,
+            keeper.pubkey(),
+            keeper.pubkey(),
+            vec![pyusd_bank_f.key],
+        )
+        .await;
+    {
+        let ctx = test_f.context.borrow_mut();
+        let tx = Transaction::new_signed_with_payer(
+            &[start_ix, repay_ix, withdraw_ix, end_ix],
+            Some(&keeper.pubkey()),
+            &[&keeper],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+        ctx.banks_client.process_transaction(tx).await?;
+    }
+
+    // Surviving USDC debt re-weights: tagged SOL dropped 100 -> 95 against 100 untagged SolEq,
+    // so 950/(950+1000) = ~0.4872% (pre-fix it kept the stale 0.5%).
+    let account = user.load().await;
+    let rate = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
+    let expected = 950.0 / (950.0 + 1000.0);
+    assert!(
+        (rate - expected).abs() < 0.001,
+        "surviving snapshot {} != {}",
+        rate,
+        expected
+    );
+    // end_execute claimed the elapsed year at the OLD 0.5% rate before re-weighting:
+    // 100 USDC x 0.5% x 1yr = 0.5 USDC, not the lower post-order rate.
+    assert_eq_noise!(
+        I80F48::from(usdc_balance(&account, &usdc_bank_f.key).premium_outstanding),
+        I80F48::from(native!(0.5, "USDC", f64)),
+        I80F48!(50)
+    );
+
+    Ok(())
+}
+
+/// A liquidation that seizes the UNTAGGED collateral leg must (a) claim the elapsed window at
+/// the OLD lower rate — never retroactively at the new one — and (b) re-weight the survivor
+/// mix UPWARD, since the remaining collateral is now more premium-heavy. This is the
+/// undercharge direction a stale snapshot would get wrong.
+#[tokio::test]
+async fn premium_liquidation_claims_at_old_rate_and_seizing_untagged_raises_rate(
+) -> anyhow::Result<()> {
+    let mut test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    // (sol -> stable) = 1%; sol_eq stays untagged => 0% leg
+    group_f.try_init_and_copy_fee_state_v2().await?;
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)
+        .await?;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+
+    // Liquidatee: equal USD of tagged SOL + untagged SolEq -> 0.5% on the 1000 USDC debt
+    let liquidatee = test_f.create_marginfi_account().await;
+    let liquidatee_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    liquidatee
+        .try_bank_deposit(liquidatee_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let liquidatee_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    liquidatee
+        .try_bank_deposit(liquidatee_sol_eq.key, sol_eq_bank_f, 999, None)
+        .await?;
+    let liquidatee_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    liquidatee
+        .try_bank_borrow(liquidatee_usdc.key, usdc_bank_f, 1_000)
+        .await?;
+
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidator_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(8_000)
+        .await;
+    liquidator
+        .try_bank_deposit(liquidator_sol.key, sol_bank_f, 8_000, None)
+        .await?;
+
+    // A year of accrual at the 0.5% snapshot before anything changes
+    advance_clock(&test_f, YEAR).await;
+
+    // Synthetically crush the collateral weights so the liquidatee is liquidatable
+    for mint in [BankMint::Sol, BankMint::SolEquivalent] {
+        test_f
+            .get_bank_mut(&mint)
+            .update_config(
+                BankConfigOpt {
+                    asset_weight_init: Some(I80F48!(0.01).into()),
+                    asset_weight_maint: Some(I80F48!(0.02).into()),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await?;
+    }
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    // Seize 50 UNTAGGED SolEq ($500) against the USDC debt
+    liquidator
+        .try_liquidate(&liquidatee, sol_eq_bank_f, 50, usdc_bank_f)
+        .await?;
+
+    let account = liquidatee.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    // The elapsed year was charged at the OLD 0.5% rate: 1000 USDC x 0.5% x 1yr = 5 USDC —
+    // NOT at the higher post-liquidation rate.
+    assert_eq_noise!(
+        I80F48::from(balance.premium_outstanding),
+        I80F48::from(native!(5, "USDC")),
+        I80F48!(50)
+    );
+    // Untagged SolEq shrank 999 -> 949 while tagged SOL kept 999: the weighted rate RISES
+    // from 0.5% to 999/(999+949) = ~0.5128%.
+    let rate = snapshot_percent(balance);
+    let expected = 999.0 / (999.0 + 949.0);
+    assert!(
+        (rate - expected).abs() < 0.001,
+        "liquidatee snapshot {} != {}",
+        rate,
+        expected
+    );
+
+    Ok(())
+}
+
+/// Seizure also changes the LIQUIDATOR's collateral mix, so their pre-existing debt must
+/// re-weight: an all-untagged liquidator gains tagged collateral and their 0% snapshot turns
+/// nonzero — while the pre-liquidation window stays free (claimed at the old 0% rate).
+#[tokio::test]
+async fn premium_liquidation_reweights_liquidator_existing_debt() -> anyhow::Result<()> {
+    let mut test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    // (sol -> stable) = 1%; sol_eq stays untagged => 0% leg
+    group_f.try_init_and_copy_fee_state_v2().await?;
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)
+        .await?;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+
+    // Liquidatee: all-tagged SOL collateral -> the full 1% on the 1000 USDC debt
+    let liquidatee = test_f.create_marginfi_account().await;
+    let liquidatee_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    liquidatee
+        .try_bank_deposit(liquidatee_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let liquidatee_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    liquidatee
+        .try_bank_borrow(liquidatee_usdc.key, usdc_bank_f, 1_000)
+        .await?;
+
+    // Liquidator: all-UNTAGGED SolEq collateral, so their existing 100 USDC debt is at 0%
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidator_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(500)
+        .await;
+    liquidator
+        .try_bank_deposit(liquidator_sol_eq.key, sol_eq_bank_f, 500, None)
+        .await?;
+    let liquidator_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    liquidator
+        .try_bank_borrow(liquidator_usdc.key, usdc_bank_f, 100)
+        .await?;
+    let account = liquidator.load().await;
+    assert_eq!(
+        usdc_balance(&account, &usdc_bank_f.key).premium_rate_snapshot,
+        0
+    );
+
+    // A year passes at the liquidator's 0% snapshot
+    advance_clock(&test_f, YEAR).await;
+
+    // Crush ONLY the liquidatee's collateral (SOL); the liquidator's SolEq keeps weight 1
+    test_f
+        .get_bank_mut(&BankMint::Sol)
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.01).into()),
+                asset_weight_maint: Some(I80F48!(0.02).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+
+    // Seize 50 tagged SOL ($500) against the USDC debt
+    liquidator
+        .try_liquidate(&liquidatee, sol_bank_f, 50, usdc_bank_f)
+        .await?;
+
+    // Liquidator: $5000 untagged SolEq + $500 seized tagged SOL -> 500/5500 of the 1% pair
+    let account = liquidator.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    let rate = snapshot_percent(balance);
+    let expected = 500.0 / 5500.0;
+    assert!(
+        (rate - expected).abs() < 0.001,
+        "liquidator snapshot {} != {}",
+        rate,
+        expected
+    );
+    // The pre-liquidation year was at rate 0: nothing may be charged retroactively
+    assert_eq!(I80F48::from(balance.premium_outstanding), I80F48::ZERO);
+
+    // Liquidatee stays all-tagged: snapshot holds at 1%, and the elapsed year was claimed at
+    // that rate (1000 USDC x 1% x 1yr = 10 USDC)
+    let account = liquidatee.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    let rate = snapshot_percent(balance);
+    assert!((rate - 1.0).abs() < 0.001, "liquidatee snapshot {}", rate);
+    assert_eq_noise!(
+        I80F48::from(balance.premium_outstanding),
+        I80F48::from(native!(10, "USDC")),
+        I80F48!(50)
     );
 
     Ok(())

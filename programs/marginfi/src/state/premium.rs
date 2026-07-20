@@ -21,6 +21,13 @@
 //!    `bank.collected_premium_outstanding` is credited there and swept later to the protocol
 //!    premium wallet. Bankruptcy / tokenless repayment / liability→asset flips write the
 //!    receivable off without crediting the bank.
+//!
+//! ## Accepted approximations
+//!
+//! * **Deposit/repay staleness** — no oracles, so they claim at the old rate but can't
+//!   re-weight; the stale rate persists until the next refreshing ix or `pulse_health`.
+//! * **Crank-order variance** — [`claim_premium`] uses the liability amount at claim time,
+//!   so claiming before vs. after interest accrual differs by a second-order term.
 
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;

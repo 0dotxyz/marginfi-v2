@@ -1525,6 +1525,7 @@ pub fn check_post_liquidation_condition_and_get_account_health<'info>(
     remaining_ais: &'info [AccountInfo<'info>],
     bank_pk: &Pubkey,
     pre_liquidation_health: I80F48,
+    premium_scratch: &mut Option<&mut PremiumScratch>,
 ) -> MarginfiResult<I80F48> {
     check!(
         !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
@@ -1555,7 +1556,7 @@ pub fn check_post_liquidation_condition_and_get_account_health<'info>(
         RequirementType::Maintenance,
         &mut None,
         HealthPriceMode::Live { liq_cache: None },
-        &mut None,
+        premium_scratch,
     )?;
 
     let account_health = assets.checked_sub(liabs).ok_or_else(math_error!())?;

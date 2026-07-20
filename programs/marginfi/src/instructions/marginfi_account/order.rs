@@ -10,6 +10,7 @@ use crate::state::marginfi_account::{
     account_not_frozen_for_authority, get_health_components, get_tagged_account_health_components,
     is_signer_authorized, run_cb_price_gate,
 };
+use crate::state::premium::{update_premium_snapshots, PremiumScratch};
 use crate::{
     check,
     prelude::*,
@@ -358,6 +359,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
 
     let mut health_cache = HealthCache::zeroed();
     let group = ctx.accounts.group.load()?;
+    let mut premium_scratch = PremiumScratch::default();
     let (
         (order_assets_in_equity, _order_liabs_in_equity, _order_asset_count, order_liab_count),
         is_healthy,
@@ -369,7 +371,7 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
             RequirementType::Maintenance,
             &mut Some(&mut health_cache),
             HealthPriceMode::Live { liq_cache: None },
-            &mut None,
+            &mut Some(&mut premium_scratch),
         )?;
 
         let account_health = assets.checked_sub(liabs).ok_or_else(math_error!())?;
@@ -507,6 +509,16 @@ pub fn end_execute_order<'info>(ctx: Context<'info, EndExecuteOrder<'info>>) -> 
     // 1) Is still above or equal to the trigger price (in equity terms).
     // 2) Did not make the account less healthy and if at all we did, the account is
     //    still healthy overall.
+
+    // Withdraw defers its snapshot refresh while ACCOUNT_IN_ORDER_EXECUTION is set, so this
+    // handler owns it: claim at old rates and re-weight surviving liabilities against the
+    // post-order collateral mix.
+    update_premium_snapshots(
+        &mut marginfi_account,
+        &group,
+        &premium_scratch,
+        Clock::get()?.unix_timestamp as u64,
+    )?;
 
     marginfi_account.unset_flag(ACCOUNT_IN_ORDER_EXECUTION, false);
     marginfi_account.decrement_active_orders()?;

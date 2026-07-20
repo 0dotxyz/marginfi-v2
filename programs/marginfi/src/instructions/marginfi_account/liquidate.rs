@@ -7,6 +7,7 @@ use crate::state::{
         check_pre_liquidation_condition_and_get_account_health, get_remaining_accounts_per_bank,
         is_signer_authorized, LendingAccountImpl, MarginfiAccountImpl,
     },
+    premium::{update_premium_snapshots, PremiumScratch},
     {
         marginfi_group::MarginfiGroupImpl,
         price::{OraclePriceFeedAdapter, PriceAdapter},
@@ -477,13 +478,26 @@ pub fn lending_account_liquidate<'info>(
     let liquidator_remaining_accounts =
         &ctx.remaining_accounts[liquidator_accounts_starting_pos..liquidatee_accounts_starting_pos];
 
-    // Verify liquidatee liquidation post health using heap-efficient parity checks
+    // Verify liquidatee liquidation post health using heap-efficient parity checks.
+    // NB: a single scratch slot serves both accounts (reset in between) — two live scratches
+    // overflow the 4096-byte SBF stack frame.
+    let mut premium_scratch = PremiumScratch::default();
     let post_liquidation_health = check_post_liquidation_condition_and_get_account_health(
         &liquidatee_marginfi_account,
         group,
         liquidatee_remaining_accounts,
         &ctx.accounts.liab_bank.key(),
         pre_liquidation_health,
+        &mut Some(&mut premium_scratch),
+    )?;
+
+    // Claim at old rates and re-weight the liquidatee's premium snapshots against the
+    // post-liquidation collateral mix (seized collateral no longer counts).
+    update_premium_snapshots(
+        &mut liquidatee_marginfi_account,
+        group,
+        &premium_scratch,
+        clock.unix_timestamp as u64,
     )?;
 
     // TODO consider if health cache update here is worth blowing the extra CU
@@ -496,12 +510,22 @@ pub fn lending_account_liquidate<'info>(
     liquidator_marginfi_account.sync_indexer_flags();
 
     // Verify liquidator account health using heap-efficient version (includes isolated-tier check)
+    premium_scratch = PremiumScratch::default();
     check_account_init_health(
         &liquidator_marginfi_account,
         group,
         liquidator_remaining_accounts,
         &mut None,
-        &mut None,
+        &mut Some(&mut premium_scratch),
+    )?;
+
+    // The liquidator may have just opened a liability leg (snapshot 0 at creation): weight it
+    // against their post-liquidation collateral mix, including the seized collateral.
+    update_premium_snapshots(
+        &mut liquidator_marginfi_account,
+        group,
+        &premium_scratch,
+        clock.unix_timestamp as u64,
     )?;
 
     emit!(LendingAccountLiquidateEvent {
