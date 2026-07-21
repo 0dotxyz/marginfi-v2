@@ -5,9 +5,8 @@ use anchor_lang::prelude::*;
 
 use crate::{assert_struct_align, assert_struct_size};
 
-/// Maximum pairwise premium entries storable in the group account without a resize. A future
-/// group-account resize can store more entries past the struct (see
-/// `MarginfiGroup::PREMIUM_TAIL_OFFSET` for the reserved layout) and raise
+/// Maximum pairwise premium entries storable in `MarginfiGroup.premium_entries`. Future
+/// capacity growth carves from the group's `_padding_2` region and raises
 /// `PremiumSettings.entry_capacity`.
 pub const MAX_PREMIUM_ENTRIES: usize = 64;
 /// A `premium_tag` of 0 is untagged: it never matches any premium entry.

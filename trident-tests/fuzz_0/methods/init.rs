@@ -222,7 +222,7 @@ impl FuzzTest {
         );
 
         // ================================================================================================
-        // Variable-borrow premium: FeeStateV2 + pairwise matrix + premium-active banks, so the
+        // Variable-borrow premium: premium wallet + pairwise matrix + premium-active banks, so the
         // regular deposit/borrow/repay/liquidate flows exercise premium accrual and settlement.
         self.init_premium_foundation();
     }
@@ -260,33 +260,17 @@ impl FuzzTest {
         let res = self.trident.process_transaction(&[ix], Some("set emode admin"));
         invariant!(res.is_success());
 
-        let init_v2_ix = types::marginfi::InitGlobalFeeStateV2Instruction::data(
-            types::marginfi::InitGlobalFeeStateV2InstructionData::new(),
+        let edit_ix = types::marginfi::EditFeeStatePremiumInstruction::data(
+            types::marginfi::EditFeeStatePremiumInstructionData::new(Some(payer)),
         )
-        .accounts(types::marginfi::InitGlobalFeeStateV2InstructionAccounts::new(
+        .accounts(types::marginfi::EditFeeStatePremiumInstructionAccounts::new(
             payer,
-            self.fee_state_v2,
-        ))
-        .instruction();
-        let copy_ix = types::marginfi::CopyFeeStateToV2Instruction::data(
-            types::marginfi::CopyFeeStateToV2InstructionData::new(),
-        )
-        .accounts(types::marginfi::CopyFeeStateToV2InstructionAccounts::new(
             self.fee_state,
-            self.fee_state_v2,
-        ))
-        .instruction();
-        let edit_ix = types::marginfi::EditFeeStateV2PremiumInstruction::data(
-            types::marginfi::EditFeeStateV2PremiumInstructionData::new(Some(payer)),
-        )
-        .accounts(types::marginfi::EditFeeStateV2PremiumInstructionAccounts::new(
-            payer,
-            self.fee_state_v2,
         ))
         .instruction();
         let res = self
             .trident
-            .process_transaction(&[init_v2_ix, copy_ix, edit_ix], Some("init fee state v2"));
+            .process_transaction(&[edit_ix], Some("set premium wallet"));
         invariant!(res.is_success());
 
         // Sparse pairwise matrix over the seed banks' tags (usdc=100, eth=200, btc=300),

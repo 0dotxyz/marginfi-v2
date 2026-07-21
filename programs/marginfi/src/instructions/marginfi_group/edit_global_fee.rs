@@ -19,6 +19,7 @@ pub fn edit_fee_state(
     liquidation_max_fee: Option<WrappedI80F48>,
     order_execution_max_fee: Option<WrappedI80F48>,
     pause_delegate_admin: Option<Pubkey>,
+    account_transfer_fee: Option<u32>,
 ) -> Result<()> {
     let mut fee_state = ctx.accounts.fee_state.load_mut()?;
     if let Some(admin) = admin {
@@ -100,6 +101,14 @@ pub fn edit_fee_state(
             pause_delegate_admin
         );
         fee_state.pause_delegate_admin = pause_delegate_admin;
+    }
+    if let Some(account_transfer_fee) = account_transfer_fee {
+        msg!(
+            "Updating account_transfer_fee: {:?} -> {:?}",
+            fee_state.account_transfer_fee,
+            account_transfer_fee
+        );
+        fee_state.account_transfer_fee = account_transfer_fee;
     }
 
     Ok(())

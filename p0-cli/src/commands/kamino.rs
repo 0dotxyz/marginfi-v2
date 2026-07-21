@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use kamino_mocks::state::MinimalReserve;
 use marginfi::state::bank::BankVaultType;
 use marginfi_type_crate::{
     pdas::{
@@ -11,7 +10,7 @@ use marginfi_type_crate::{
         derive_kamino_reserve_liquidity_supply, derive_kamino_rewards_treasury_vault,
         derive_kamino_rewards_vault, derive_kamino_user_metadata, derive_kamino_user_state,
     },
-    types::{Bank, OracleSetup},
+    types::Bank,
 };
 use solana_sdk::pubkey::Pubkey;
 
@@ -19,7 +18,7 @@ use super::require_field;
 use crate::config::{Config, GlobalOptions};
 use crate::configs;
 use crate::processor;
-use crate::utils::find_bank_vault_authority_pda;
+use crate::utils::{find_bank_vault_authority_pda, get_oracle_setup, load_kamino_reserve};
 
 /// Kamino integration commands (user / permissionless).
 #[derive(Debug, Parser)]
@@ -33,8 +32,6 @@ pub enum KaminoCommand {
         bank_pk: Option<Pubkey>,
         #[clap(long, help = "Native amount for seed deposit (minimum 10)")]
         amount: Option<u64>,
-        #[clap(long, help = "Override the reserve oracle used for derivation")]
-        reserve_oracle: Option<Pubkey>,
     },
     /// Deposit into a Kamino reserve via marginfi
     Deposit {
@@ -85,9 +82,6 @@ struct KaminoDerivedAccounts {
     reserve_destination_deposit_collateral: Pubkey,
     reserve_source_collateral: Pubkey,
     user_metadata: Pubkey,
-    pyth_oracle: Option<Pubkey>,
-    switchboard_price_oracle: Option<Pubkey>,
-    switchboard_twap_oracle: Option<Pubkey>,
     scope_prices: Option<Pubkey>,
     obligation_farm_user_state: Option<Pubkey>,
     reserve_farm_state: Option<Pubkey>,
@@ -103,61 +97,38 @@ struct KaminoHarvestDerivedAccounts {
     scope_prices: Option<Pubkey>,
 }
 
-fn derive_kamino_accounts(
-    config: &Config,
-    bank_pk: Pubkey,
-    reserve_oracle_override: Option<Pubkey>,
-) -> Result<KaminoDerivedAccounts> {
+fn derive_kamino_accounts(config: &Config, bank_pk: Pubkey) -> Result<KaminoDerivedAccounts> {
     let rpc = config.mfi_program.rpc();
     let bank = config.mfi_program.account::<Bank>(bank_pk)?;
-    let reserve = bank.integration_acc_1;
-    let reserve_data = rpc.get_account_data(&reserve)?;
-    let reserve_size = std::mem::size_of::<MinimalReserve>();
-    if reserve_data.len() < 8 + reserve_size {
-        anyhow::bail!(
-            "Kamino reserve account {} data too small ({} bytes)",
-            reserve,
-            reserve_data.len()
-        );
-    }
-    let reserve_state: &MinimalReserve = bytemuck::from_bytes(&reserve_data[8..8 + reserve_size]);
+    let reserve_pk = bank.integration_acc_1;
+    let reserve_state = load_kamino_reserve(&rpc, reserve_pk)?;
+    let reserve = &reserve_state;
 
     let (liquidity_vault_authority, _) =
         find_bank_vault_authority_pda(&bank_pk, BankVaultType::Liquidity, &config.program_id);
     let (lending_market_authority, _) =
-        derive_kamino_lending_market_authority(&reserve_state.lending_market);
-    let (reserve_liquidity_supply, _) = derive_kamino_reserve_liquidity_supply(&reserve);
-    let (reserve_collateral_mint, _) = derive_kamino_reserve_collateral_mint(&reserve);
+        derive_kamino_lending_market_authority(&reserve.lending_market);
+    let (reserve_liquidity_supply, _) = derive_kamino_reserve_liquidity_supply(&reserve_pk);
+    let (reserve_collateral_mint, _) = derive_kamino_reserve_collateral_mint(&reserve_pk);
     let (reserve_destination_deposit_collateral, _) =
-        derive_kamino_reserve_collateral_supply(&reserve);
+        derive_kamino_reserve_collateral_supply(&reserve_pk);
     let (user_metadata, _) = derive_kamino_user_metadata(&liquidity_vault_authority);
 
-    let reserve_farm_state = (reserve_state.farm_collateral != Pubkey::default())
-        .then_some(reserve_state.farm_collateral);
+    let reserve_farm_state =
+        (reserve.farm_collateral != Pubkey::default()).then_some(reserve.farm_collateral);
     let obligation_farm_user_state = reserve_farm_state
         .map(|farm_state| derive_kamino_user_state(&farm_state, &bank.integration_acc_2).0);
 
-    let reserve_oracle =
-        reserve_oracle_override
-            .or((bank.config.oracle_keys[0] != Pubkey::default())
-                .then_some(bank.config.oracle_keys[0]));
-    let (pyth_oracle, scope_prices) = match bank.config.oracle_setup {
-        OracleSetup::KaminoPythPush => (reserve_oracle, None),
-        OracleSetup::KaminoSwitchboardPull => (None, reserve_oracle),
-        _ => (None, None),
-    };
+    let (_, _, _, scope_prices) = get_oracle_setup(&reserve_state);
 
     Ok(KaminoDerivedAccounts {
-        lending_market: reserve_state.lending_market,
+        lending_market: reserve.lending_market,
         lending_market_authority,
         reserve_liquidity_supply,
         reserve_collateral_mint,
         reserve_destination_deposit_collateral,
-        reserve_source_collateral: reserve_state.collateral_supply_vault,
+        reserve_source_collateral: reserve.collateral.supply_vault,
         user_metadata,
-        pyth_oracle,
-        switchboard_price_oracle: None,
-        switchboard_twap_oracle: None,
         scope_prices,
         obligation_farm_user_state,
         reserve_farm_state,
@@ -171,7 +142,7 @@ fn derive_kamino_harvest_reward_accounts(
     reward_mint: Pubkey,
 ) -> Result<KaminoHarvestDerivedAccounts> {
     let bank = config.mfi_program.account::<Bank>(bank_pk)?;
-    let derived = derive_kamino_accounts(config, bank_pk, None)?;
+    let derived = derive_kamino_accounts(config, bank_pk)?;
     let farm_state = derived
         .reserve_farm_state
         .context("Kamino reserve has no farm state; rewards are not initialized for this bank")?;
@@ -245,24 +216,18 @@ pub fn dispatch(subcmd: KaminoCommand, global_options: &GlobalOptions) -> Result
             config: config_path,
             bank_pk,
             amount,
-            reserve_oracle,
             ..
         } => {
-            let (bank_pk, amount, reserve_oracle) = if let Some(path) = config_path {
+            let (bank_pk, amount) = if let Some(path) = config_path {
                 let c: configs::KaminoInitObligationConfig = configs::load_config(&path)?;
-                (
-                    configs::parse_pubkey(&c.bank_pk)?,
-                    c.amount,
-                    configs::parse_optional_pubkey(&c.reserve_oracle)?,
-                )
+                (configs::parse_pubkey(&c.bank_pk)?, c.amount)
             } else {
                 (
                     require_field!(bank_pk, "bank-pk"),
                     require_field!(amount, "amount"),
-                    reserve_oracle,
                 )
             };
-            let derived = derive_kamino_accounts(&config, bank_pk, reserve_oracle)?;
+            let derived = derive_kamino_accounts(&config, bank_pk)?;
             processor::integrations::kamino_init_obligation(
                 &profile,
                 &config,
@@ -274,10 +239,6 @@ pub fn dispatch(subcmd: KaminoCommand, global_options: &GlobalOptions) -> Result
                 derived.reserve_collateral_mint,
                 derived.reserve_destination_deposit_collateral,
                 derived.user_metadata,
-                derived.pyth_oracle,
-                derived.switchboard_price_oracle,
-                derived.switchboard_twap_oracle,
-                derived.scope_prices,
                 derived.obligation_farm_user_state,
                 derived.reserve_farm_state,
             )
@@ -297,7 +258,7 @@ pub fn dispatch(subcmd: KaminoCommand, global_options: &GlobalOptions) -> Result
                     require_field!(ui_amount, "ui-amount"),
                 )
             };
-            let derived = derive_kamino_accounts(&config, bank_pk, None)?;
+            let derived = derive_kamino_accounts(&config, bank_pk)?;
             processor::integrations::kamino_deposit(
                 &profile,
                 &config,
@@ -333,7 +294,7 @@ pub fn dispatch(subcmd: KaminoCommand, global_options: &GlobalOptions) -> Result
                     withdraw_all,
                 )
             };
-            let derived = derive_kamino_accounts(&config, bank_pk, None)?;
+            let derived = derive_kamino_accounts(&config, bank_pk)?;
             processor::integrations::kamino_withdraw(
                 &profile,
                 &config,

@@ -48,7 +48,6 @@ struct FuzzTest {
     // Marginfi Group
     marginfi_group: Pubkey,
     fee_state: Pubkey,
-    fee_state_v2: Pubkey,
     // ================================================================================================
     // Liquidator accounts
     liquidator: User,
@@ -128,13 +127,6 @@ impl FuzzTest {
                 &crate::types::marginfi::program_id(),
             )
             .0;
-        let fee_state_v2 = trident
-            .find_program_address(
-                &[crate::constants::FEE_STATE_V2_SEED.as_bytes()],
-                &crate::types::marginfi::program_id(),
-            )
-            .0;
-
         // ================================================================================================
         // Banks
         let usdc_bank = FuzzTestBank {
@@ -320,7 +312,6 @@ impl FuzzTest {
             seeder,
             marginfi_group,
             fee_state,
-            fee_state_v2,
             usdc_bank,
             eth_bank,
             btc_bank,

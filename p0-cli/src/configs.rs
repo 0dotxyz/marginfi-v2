@@ -8,7 +8,6 @@ use std::path::Path;
 pub struct KaminoInitObligationConfig {
     pub bank_pk: String,
     pub amount: u64,
-    pub reserve_oracle: Option<String>,
 }
 
 /// JSON config for `kamino deposit --config <path>`.
@@ -96,8 +95,7 @@ impl KaminoInitObligationConfig {
     pub fn example_json() -> &'static str {
         r#"{
   "bank_pk": "<BANK_PUBKEY>",
-  "amount": 10,
-  "reserve_oracle": null
+  "amount": 10
 }"#
     }
 }

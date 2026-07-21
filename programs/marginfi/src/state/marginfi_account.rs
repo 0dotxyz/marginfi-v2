@@ -283,11 +283,10 @@ impl MarginfiAccountImpl for MarginfiAccount {
         let is_in_flashloan = self.get_flag(ACCOUNT_IN_FLASHLOAN);
         let is_in_receivership = self.get_flag(ACCOUNT_IN_RECEIVERSHIP);
         let is_frozen = self.get_flag(ACCOUNT_FROZEN);
-        let only_has_empty_balances = self
-            .lending_account
-            .balances
-            .iter()
-            .all(|balance| balance.get_side().is_none());
+        let only_has_empty_balances = self.lending_account.balances.iter().all(|balance| {
+            let liability_shares: I80F48 = balance.liability_shares.into();
+            balance.get_side().is_none() && liability_shares <= I80F48::ZERO
+        });
 
         !is_disabled
             && only_has_empty_balances
@@ -1340,12 +1339,6 @@ pub fn check_account_bankrupt<'info>(
     remaining_ais: &'info [AccountInfo<'info>],
     health_cache: &mut Option<&mut HealthCache>,
 ) -> MarginfiResult {
-    // TODO remove this check here and raise it to the top-level instruction
-    check!(
-        !marginfi_account.get_flag(ACCOUNT_IN_FLASHLOAN),
-        MarginfiError::AccountInFlashloan
-    );
-
     let (equity_assets, equity_liabs) = get_health_components(
         marginfi_account,
         group,
@@ -2357,17 +2350,29 @@ impl<'a> BankAccountWrapper<'a> {
             _ => {}
         }
 
-        let asset_shares_increase = bank.get_asset_shares(asset_amount_increase)?;
-        balance.change_asset_shares(asset_shares_increase)?;
-        bank.change_asset_shares(
-            asset_shares_increase,
-            matches!(operation_type, BalanceIncreaseType::BypassDepositLimit),
-        )?;
+        // Skip the no-op share updates when a side has no movement (e.g. a pure deposit has no
+        // liability to repay, a pure repay adds no assets). The amounts are `max(_, 0)`, so `> 0`
+        // captures exactly the cases where `change_*_shares(0)` would have been a no-op.
+        let asset_shares_increase = if asset_amount_increase > I80F48::ZERO {
+            let shares = bank.get_asset_shares(asset_amount_increase)?;
+            balance.change_asset_shares(shares)?;
+            bank.change_asset_shares(
+                shares,
+                matches!(operation_type, BalanceIncreaseType::BypassDepositLimit),
+            )?;
+            shares
+        } else {
+            I80F48::ZERO
+        };
 
-        let liability_shares_decrease = bank.get_liability_shares(liability_amount_decrease)?;
-        // TODO: Use `IncreaseType` to skip certain balance updates, and save on compute.
-        balance.change_liability_shares(-liability_shares_decrease)?;
-        bank.change_liability_shares(-liability_shares_decrease, true)?;
+        let liability_shares_decrease = if liability_amount_decrease > I80F48::ZERO {
+            let shares = bank.get_liability_shares(liability_amount_decrease)?;
+            balance.change_liability_shares(-shares)?;
+            bank.change_liability_shares(-shares, true)?;
+            shares
+        } else {
+            I80F48::ZERO
+        };
 
         // Record if the balance was an asset/liability after
         let has_assets =
@@ -2478,16 +2483,35 @@ impl<'a> BankAccountWrapper<'a> {
             _ => {}
         }
 
-        let asset_shares_decrease = bank.get_asset_shares(asset_amount_decrease)?;
-        balance.change_asset_shares(-asset_shares_decrease)?;
-        bank.change_asset_shares(-asset_shares_decrease, false)?;
+        // Skip the no-op share updates when a side has no movement (e.g. a pure withdraw adds no
+        // liability, a pure borrow removes no assets). The amounts are `max(_, 0)`, so `> 0`
+        // captures exactly the cases where `change_*_shares(0)` would have been a no-op.
+        let asset_shares_decrease = if asset_amount_decrease > I80F48::ZERO {
+            let shares = bank.get_asset_shares(asset_amount_decrease)?;
+            // If asset share value > 2^48, this prevents a 1-satoshi withdraw from trunctuating.
+            check!(
+                shares > I80F48::ZERO,
+                MarginfiError::IllegalBalanceState,
+                "Withdraw would transfer assets without burning shares"
+            );
+            balance.change_asset_shares(-shares)?;
+            bank.change_asset_shares(-shares, false)?;
+            shares
+        } else {
+            I80F48::ZERO
+        };
 
-        let liability_shares_increase = bank.get_liability_shares(liability_amount_increase)?;
-        balance.change_liability_shares(liability_shares_increase)?;
-        bank.change_liability_shares(
-            liability_shares_increase,
-            matches!(operation_type, BalanceDecreaseType::BypassBorrowLimit),
-        )?;
+        let liability_shares_increase = if liability_amount_increase > I80F48::ZERO {
+            let shares = bank.get_liability_shares(liability_amount_increase)?;
+            balance.change_liability_shares(shares)?;
+            bank.change_liability_shares(
+                shares,
+                matches!(operation_type, BalanceDecreaseType::BypassBorrowLimit),
+            )?;
+            shares
+        } else {
+            I80F48::ZERO
+        };
 
         // Only liquidation is allowed to bypass this check.
         if !matches!(operation_type, BalanceDecreaseType::BypassBorrowLimit) {
@@ -2950,6 +2974,21 @@ mod test {
                 bank_total_liability_shares_before,
                 "WithdrawOnly leaked dust into bank.total_liability_shares"
             );
+        }
+
+        #[test]
+        fn withdraw_rejects_positive_amount_with_zero_asset_shares_burned() {
+            let asset_share_value = I80F48::from_num((1u64 << 48) + 1);
+            let (mut bank, mut balance) =
+                make_bank_and_balance(asset_share_value, I80F48::ONE, I80F48::ONE, I80F48::ZERO);
+
+            let mut wrapper = BankAccountWrapper {
+                balance: &mut balance,
+                bank: &mut bank,
+            };
+
+            let err = wrapper.withdraw(I80F48::ONE).unwrap_err();
+            assert_eq!(err, MarginfiError::IllegalBalanceState.into());
         }
 
         /// `repay` on a bank with fractional `liability_share_value`. Choose

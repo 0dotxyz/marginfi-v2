@@ -152,18 +152,17 @@ pub struct Bank {
     ///   the bank may safely be closed if this is zero. Will never go negative.
     pub borrowing_position_count: i32,
 
-    /// Tag for the group's pairwise variable-borrow premium matrix. Determines the rate other
-    /// accounts pay when this bank is offered as collateral (as `collateral_tag`) and the rate
-    /// this bank's borrowers pay (as `liability_tag`).
-    /// * 0 = untagged: never matches any premium entry.
-    pub premium_tag: u16,
-    // Pad to next 8-byte multiple
-    pub _pad3: [u8; 6],
-    /// Unix timestamp of the most recent inactive->active `PREMIUM_ACTIVE` transition. Premium
-    /// accrual is clamped to start no earlier than this, so toggling the flag off and back on
-    /// can never charge for (or health-project) the deactivated window.
-    /// * 0 on banks that never activated premium.
-    pub premium_activated_at: i64,
+    /// Fee the liquidator earns when liquidating against this bank's liability. Decode with
+    /// `u32_to_centi` (`u32::MAX` = 100%).
+    /// * 0 falls back to the default (`DEFAULT_LIQUIDATION_FEE` = 2.5%).
+    pub liquidation_liquidator_fee: u32,
+    /// Fee routed to this bank's insurance fund on a liquidation against its liability. Decode
+    /// with `u32_to_centi` (`u32::MAX` = 100%).
+    /// * 0 falls back to the default (`DEFAULT_LIQUIDATION_FEE` = 2.5%).
+    pub liquidation_insurance_fee: u32,
+
+    /// Reserved for future use
+    pub _padding_0: [u8; 8],
 
     /// Integration account slot 1 (default Pubkey for non-integrations).
     /// - Kamino: reserve
@@ -226,7 +225,20 @@ pub struct Bank {
     /// Unix-seconds when `cb_window_reference_price` was anchored.
     pub cb_window_started_at: i64,
 
-    pub _padding_1: [u64; 3], // 24B
+    /// Tag for the group's pairwise variable-borrow premium matrix. Determines the rate other
+    /// accounts pay when this bank is offered as collateral (as `collateral_tag`) and the rate
+    /// this bank's borrowers pay (as `liability_tag`).
+    /// * 0 = untagged: never matches any premium entry.
+    pub premium_tag: u16,
+    // Pad to next 8-byte multiple
+    pub _pad3: [u8; 6],
+    /// Unix timestamp of the most recent inactive->active `PREMIUM_ACTIVE` transition. Premium
+    /// accrual is clamped to start no earlier than this, so toggling the flag off and back on
+    /// can never charge for (or health-project) the deactivated window.
+    /// * 0 on banks that never activated premium.
+    pub premium_activated_at: i64,
+
+    pub _padding_1: [u64; 1], // 8B
 }
 
 impl Bank {

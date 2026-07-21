@@ -117,7 +117,38 @@ async fn automatic_interest_payments() -> anyhow::Result<()> {
         I80F48::from(native!(1011.761, "SOL", f64)),
         native!(0.0002, "SOL", f64)
     );
-    // TODO: check health is sane
+    // A full year was warped forward above, leaving the mock oracles stale. Refresh them to the
+    // current clock before pulsing, otherwise the risk engine rejects on oracle staleness.
+    let now_ts = {
+        let ctx = test_f.context.borrow_mut();
+        let clock: Clock = ctx.banks_client.get_sysvar().await?;
+        clock.unix_timestamp
+    };
+    test_f
+        .set_pyth_oracle_timestamp(PYTH_SOL_FEED, now_ts)
+        .await;
+    test_f
+        .set_pyth_oracle_timestamp(PYTH_USDC_FEED, now_ts)
+        .await;
+
+    // Pulse the risk engine and verify the borrower is in a sane, healthy state: it holds ~1000
+    // USDC of collateral against only the residual SOL interest as a liability.
+    borrower_mfi_account_f
+        .try_lending_account_pulse_health()
+        .await?;
+    let health_cache = borrower_mfi_account_f.load().await.health_cache;
+    assert!(
+        health_cache.is_engine_ok(),
+        "risk engine should not have errored"
+    );
+    assert!(health_cache.is_oracle_ok(), "oracles should be valid");
+    assert!(health_cache.is_healthy(), "account should be healthy");
+    let asset_value: I80F48 = health_cache.asset_value.into();
+    let liability_value: I80F48 = health_cache.liability_value.into();
+    assert!(
+        asset_value > liability_value,
+        "init-weighted assets ({asset_value}) should exceed liabilities ({liability_value})"
+    );
 
     Ok(())
 }

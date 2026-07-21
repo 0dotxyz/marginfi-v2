@@ -430,6 +430,8 @@ pub enum MarginfiError {
     #[msg("Invalid Juplend withdraw intermediary ATA")]
     InvalidJuplendWithdrawIntermediaryAta, // 6512
     // **************END JUPLEND ERRORS
+    #[msg("Account is already at (or above) the target size")]
+    InvalidResize, // 6513
 
     // ************** BEGIN CIRCUIT BREAKER ERRORS (starting at 6600)
     #[msg("Bank is halted by oracle circuit breaker")]
@@ -453,7 +455,7 @@ pub enum MarginfiError {
     PremiumMatrixFull, // 6611
     #[msg("Premium ATA does not match the canonical ATA of the premium wallet")]
     InvalidPremiumAta, // 6612
-    #[msg("Premium wallet is not configured on FeeStateV2")]
+    #[msg("Premium wallet is not configured on the fee state")]
     PremiumWalletNotSet, // 6613
     #[msg("Premium (collateral, liability) pair is not in the matrix")]
     PremiumEntryNotFound, // 6614
@@ -696,6 +698,7 @@ impl From<u32> for MarginfiError {
             6510 => MarginfiError::JuplendWithdrawFailed,
             6511 => MarginfiError::JuplendInitPositionDepositInsufficient,
             6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
+            6513 => MarginfiError::InvalidResize,
             6600 => MarginfiError::BankCircuitBreakerHalted,
             6601 => MarginfiError::CircuitBreakerAdminOnly,
             6602 => MarginfiError::CircuitBreakerInvalidConfig,

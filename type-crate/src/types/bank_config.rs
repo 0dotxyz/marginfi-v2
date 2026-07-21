@@ -106,10 +106,15 @@ pub struct BankConfig {
     // pad to next 4-byte alignment to meet u32's requirements.
     pub _padding0: [u8; 2],
 
-    /// From 0-100%, if the confidence exceeds this value, the oracle is considered invalid. Note:
-    /// the confidence adjustment is capped at 5% regardless of this value.
-    /// * 0 falls back to using the default 10% instead, i.e., U32_MAX_DIV_10
-    /// * A %, as u32, e.g. 100% = u32::MAX, 50% = u32::MAX/2, etc.
+    /// A %, as u32, e.g. 100% = u32::MAX, 50% = u32::MAX/2, etc.
+    ///
+    /// Oracle confidence configuration. Semantics depend on the oracle type:
+    /// * Pyth: Maximum allowed confidence interval. Prices exceeding this threshold are rejected.
+    ///   - 0 defaults to 10%.
+    /// * Switchboard: Confidence spread used for price biasing.
+    ///   - 0 disables confidence adjustment.
+    ///   - Non-zero: confidence = price * oracle_max_confidence / U32_MAX.
+    ///   - Clamped to MAX_CONF_INTERVAL (5% of price).
     pub oracle_max_confidence: u32,
 
     /// Stored oracle price for `OracleSetup::Fixed`, otherwise does nothing
@@ -213,6 +218,10 @@ pub struct BankConfigOpt {
     pub freeze_settings: Option<bool>,
     pub tokenless_repayments_allowed: Option<bool>,
 
+    /// Per-bank liquidation fees, encoded as `u32_to_centi` (`u32::MAX` = 100%; 0 => default 2.5%).
+    pub liquidation_liquidator_fee: Option<u32>,
+    pub liquidation_insurance_fee: Option<u32>,
+
     pub circuit_breaker_enabled: Option<bool>,
     pub cb_deviation_bps_tiers: Option<[u16; 3]>,
     pub cb_tier_durations_seconds: Option<[u16; 3]>,
@@ -274,10 +283,15 @@ pub struct BankConfigCompact {
     /// Time window in seconds for the oracle price feed to be considered live.
     pub oracle_max_age: u16,
 
-    /// From 0-100%, if the confidence exceeds this value, the oracle is considered invalid. Note:
-    /// the confidence adjustment is capped at 5% regardless of this value.
-    /// * 0% = use the default (10%)
-    /// * A %, as u32, e.g. 100% = u32::MAX, 50% = u32::MAX/2, etc.
+    /// A %, as u32, e.g. 100% = u32::MAX, 50% = u32::MAX/2, etc.
+    ///
+    /// Oracle confidence configuration. Semantics depend on the oracle type.
+    /// * Pyth: Maximum allowed confidence interval. Prices exceeding this threshold are rejected.
+    ///   - 0 defaults to 10%.
+    /// * Switchboard: Confidence spread used for price biasing.
+    ///   - 0 disables confidence adjustment.
+    ///   - Non-zero: confidence = price * oracle_max_confidence / U32_MAX.
+    ///   - Clamped to MAX_CONF_INTERVAL (5% of price).
     pub oracle_max_confidence: u32,
 }
 

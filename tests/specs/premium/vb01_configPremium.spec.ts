@@ -27,10 +27,7 @@ import {
 import {
   configBankPremium,
   configGroupPremium,
-  copyFeeStateToV2,
-  deriveFeeStateV2,
-  editFeeStateV2Premium,
-  initGlobalFeeStateV2,
+  editFeeStatePremium,
   MAX_PREMIUM_ENTRIES,
   newPremiumEntry,
   PREMIUM_ACTIVE,
@@ -49,7 +46,7 @@ import {
   makeRatePoints,
   ORACLE_SETUP_PYTH_PUSH,
 } from "../../utils/types";
-import { deriveBankWithSeed } from "../../utils/pdas";
+import { deriveBankWithSeed, deriveGlobalFeeState } from "../../utils/pdas";
 import { getBankrunBlockhash, processBankrunTransaction } from "../../utils/tools";
 
 // Bank seeds for the premium suite. Re-derived (not exported) by every vb* spec.
@@ -209,28 +206,16 @@ describe("vb01: Configure variable-borrow premium", () => {
     }
   });
 
-  it("(global fee admin) init + copy FeeStateV2", async () => {
-    const tx = new Transaction().add(
-      await initGlobalFeeStateV2(globalProgramAdmin.mrgnBankrunProgram, {
-        payer: globalProgramAdmin.wallet.publicKey,
-      }),
-      await copyFeeStateToV2(globalProgramAdmin.mrgnBankrunProgram),
-    );
-    await processBankrunTransaction(bankrunContext, tx, [
-      globalProgramAdmin.wallet,
-    ]);
-
-    const [feeStateV2Key] = deriveFeeStateV2(bankrunProgram.programId);
-    const feeStateV2 =
-      await bankrunProgram.account.feeStateV2.fetch(feeStateV2Key);
-    // Copy pulled the v1 admin over and left the premium fields at their defaults.
-    assertKeysEqual(feeStateV2.globalFeeAdmin, globalProgramAdmin.wallet.publicKey);
-    assertKeysEqual(feeStateV2.premiumWallet, PublicKey.default);
+  it("fee state starts with no premium wallet", async () => {
+    const [feeStateKey] = deriveGlobalFeeState(bankrunProgram.programId);
+    const feeState = await bankrunProgram.account.feeState.fetch(feeStateKey);
+    assertKeysEqual(feeState.globalFeeAdmin, globalProgramAdmin.wallet.publicKey);
+    assertKeysEqual(feeState.premiumWallet, PublicKey.default);
   });
 
-  it("(non-admin) edit FeeStateV2 premium fails", async () => {
+  it("(non-admin) edit fee state premium fails", async () => {
     const tx = new Transaction().add(
-      await editFeeStateV2Premium(users[0].mrgnBankrunProgram, {
+      await editFeeStatePremium(users[0].mrgnBankrunProgram, {
         admin: users[0].wallet.publicKey,
         premiumWallet: PublicKey.unique(),
       }),
@@ -245,7 +230,7 @@ describe("vb01: Configure variable-borrow premium", () => {
   it("(global fee admin) sets premium wallet", async () => {
     const premiumWallet = PublicKey.unique();
     const tx = new Transaction().add(
-      await editFeeStateV2Premium(globalProgramAdmin.mrgnBankrunProgram, {
+      await editFeeStatePremium(globalProgramAdmin.mrgnBankrunProgram, {
         admin: globalProgramAdmin.wallet.publicKey,
         premiumWallet,
       }),
@@ -254,10 +239,9 @@ describe("vb01: Configure variable-borrow premium", () => {
       globalProgramAdmin.wallet,
     ]);
 
-    const [feeStateV2Key] = deriveFeeStateV2(bankrunProgram.programId);
-    const feeStateV2 =
-      await bankrunProgram.account.feeStateV2.fetch(feeStateV2Key);
-    assertKeysEqual(feeStateV2.premiumWallet, premiumWallet);
+    const [feeStateKey] = deriveGlobalFeeState(bankrunProgram.programId);
+    const feeState = await bankrunProgram.account.feeState.fetch(feeStateKey);
+    assertKeysEqual(feeState.premiumWallet, premiumWallet);
   });
 
   it("(non-emode-admin) configure matrix fails", async () => {

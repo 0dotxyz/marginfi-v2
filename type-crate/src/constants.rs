@@ -14,7 +14,6 @@ pub const SOLEND_OBLIGATION_SEED: &str = "solend_obligation";
 pub const JUPLEND_F_TOKEN_VAULT_SEED: &str = "f_token_vault";
 
 pub const FEE_STATE_SEED: &str = "feestate";
-pub const FEE_STATE_V2_SEED: &str = "feestate_v2";
 pub const STAKED_SETTINGS_SEED: &str = "staked_settings";
 pub const SAME_ASSET_EMODE_REGISTRY_SEED: &str = "same_asset_emode_registry";
 
@@ -27,9 +26,15 @@ pub const EXECUTE_ORDER_SEED: &str = "execute_order";
 
 pub const METADATA_SEED: &str = "metadata";
 
-/// TODO: Make these variable per bank
-pub const LIQUIDATION_LIQUIDATOR_FEE: I80F48 = I80F48!(0.025);
-pub const LIQUIDATION_INSURANCE_FEE: I80F48 = I80F48!(0.025);
+/// Default liquidation fee as an I80F48 fraction (2.5%), used when a bank's
+/// `liquidation_liquidator_fee` / `liquidation_insurance_fee` is 0. Matches the historical
+/// hardcoded values.
+pub const DEFAULT_LIQUIDATION_FEE: I80F48 = I80F48!(0.025);
+
+/// Maximum per-fee liquidation fee an admin may configure, encoded like the fields it caps
+/// (`u32_to_centi`, `u32::MAX` = 100%). Caps each of the two fees at ~50% so their sum stays below
+/// 100% — otherwise the liquidatee's collateral credit (`final_discount`) would go negative.
+pub const MAX_LIQUIDATION_FEE_U32: u32 = u32::MAX / 2;
 
 pub const SECONDS_PER_YEAR: I80F48 = I80F48!(31_536_000);
 pub const DAILY_RESET_INTERVAL: i64 = 24 * 60 * 60; // 24 hours
@@ -53,8 +58,6 @@ pub const ORDER_TAG_PADDING: usize = 32;
 ///
 /// https://docs.pyth.network/price-feeds/best-practices#confidence-intervals
 pub const CONF_INTERVAL_MULTIPLE: I80F48 = I80F48!(2.12);
-/// Range that contains 95% price data distribution in a normal distribution
-pub const STD_DEV_MULTIPLE: I80F48 = I80F48!(1.96);
 /// Maximum confidence interval allowed
 pub const MAX_CONF_INTERVAL: I80F48 = I80F48!(0.05);
 
@@ -225,6 +228,7 @@ pub mod discriminators {
     pub const LIQUIDATION_RECORD: [u8; 8] = [95, 116, 23, 132, 89, 210, 245, 162];
     pub const ORDER: [u8; 8] = [134, 173, 223, 185, 77, 86, 28, 51];
     pub const EXECUTE_ORDER_RECORD: [u8; 8] = [6, 100, 107, 60, 164, 226, 56, 97];
+    pub const BANK_METADATA: [u8; 8] = [49, 207, 31, 34, 67, 225, 169, 186];
     pub const SAME_ASSET_EMODE_REGISTRY: [u8; 8] = [222, 21, 195, 149, 193, 72, 219, 31];
 }
 

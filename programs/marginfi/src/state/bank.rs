@@ -32,7 +32,7 @@ use marginfi_type_crate::{
         ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, CIRCUIT_BREAKER_ENABLED, CLOSE_ENABLED_FLAG,
         FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, FREEZE_SETTINGS, GROUP_FLAGS,
         INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
-        LIQUIDITY_VAULT_SEED, PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG,
+        LIQUIDITY_VAULT_SEED, MAX_LIQUIDATION_FEE_U32, PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG,
         TOKENLESS_REPAYMENTS_ALLOWED,
     },
     types::{
@@ -317,6 +317,9 @@ impl BankImpl for Bank {
             fees_destination_account: Pubkey::default(),
             lending_position_count: 0,
             borrowing_position_count: 0,
+            liquidation_liquidator_fee: 0,
+            liquidation_insurance_fee: 0,
+            _padding_0: [0; 8],
             premium_tag: 0,
             _pad3: [0; 6],
             premium_activated_at: 0,
@@ -364,6 +367,8 @@ impl BankImpl for Bank {
         self.config = *config;
         self.flags = CLOSE_ENABLED_FLAG;
         self.bank_seed = bank_seed;
+        self.liquidation_liquidator_fee = 0;
+        self.liquidation_insurance_fee = 0;
     }
 
     fn get_liability_amount(&self, shares: I80F48) -> MarginfiResult<I80F48> {
@@ -613,6 +618,15 @@ impl BankImpl for Bank {
         );
 
         set_if_some!(self.config.oracle_max_age, config.oracle_max_age);
+
+        if let Some(fee) = config.liquidation_liquidator_fee {
+            check!(fee <= MAX_LIQUIDATION_FEE_U32, MarginfiError::InvalidConfig);
+            self.liquidation_liquidator_fee = fee;
+        }
+        if let Some(fee) = config.liquidation_insurance_fee {
+            check!(fee <= MAX_LIQUIDATION_FEE_U32, MarginfiError::InvalidConfig);
+            self.liquidation_insurance_fee = fee;
+        }
 
         if let Some(flag) = config.permissionless_bad_debt_settlement {
             msg!(

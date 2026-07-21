@@ -29,7 +29,7 @@ import {
 } from "../../utils/user-instructions";
 import {
   collectBankPremiumFees,
-  editFeeStateV2Premium,
+  editFeeStatePremium,
 } from "../../utils/premium-instructions";
 import { assertI80F48Approx, getTokenBalance } from "../../utils/genericTests";
 import { deriveBankWithSeed } from "../../utils/pdas";
@@ -213,7 +213,7 @@ describe("vb03: Premium accrual, repay settlement, sweep", () => {
     );
     const payer = bankrunContext.payer;
     let tx = new Transaction().add(
-      await editFeeStateV2Premium(globalProgramAdmin.mrgnBankrunProgram, {
+      await editFeeStatePremium(globalProgramAdmin.mrgnBankrunProgram, {
         admin: globalProgramAdmin.wallet.publicKey,
         premiumWallet: premiumWallet.publicKey,
       }),

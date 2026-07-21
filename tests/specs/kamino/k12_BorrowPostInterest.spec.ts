@@ -14,6 +14,7 @@ import {
   users,
   verbose,
   bankrunContext,
+  banksClient,
   bankrunProgram,
   klendBankrunProgram,
   THROWAWAY_GROUP_SEED_K10,
@@ -23,8 +24,10 @@ import {
 import {
   borrowIx,
   healthPulse,
+  pulseBankPrice,
   composeRemainingAccounts,
 } from "../../utils/user-instructions";
+import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
 import {
   deriveBankWithSeed,
   deriveBaseObligation,
@@ -38,6 +41,7 @@ import { assert } from "chai";
 import {
   assertBankrunTxFailed,
   assertI80F48Approx,
+  assertI80F48Equal,
 } from "../../utils/genericTests";
 import {
   defaultKaminoBankConfig,
@@ -54,8 +58,15 @@ import {
   makeInitObligationIx,
   makeKaminoDepositIx,
 } from "../../utils/kamino-instructions";
-import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "../../utils/types";
+import {
+  CONF_INTERVAL_MULTIPLE,
+  HEALTH_CACHE_ENGINE_OK,
+  HEALTH_CACHE_HEALTHY,
+  HEALTH_CACHE_ORACLE_OK,
+  ORACLE_CONF_INTERVAL,
+} from "../../utils/types";
 import { BalanceRaw } from "@mrgnlabs/marginfi-client-v2";
+import { Clock } from "../../utils/litesvm";
 
 describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
   const startingSeed = 6;
@@ -300,7 +311,6 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
     assertI80F48Approx(cachedMultiplier, expectedMultiplier, 0.0001);
     assert(expectedMultiplier > 1);
     assert(wrappedI80F48toBigNumber(cachedMultiplier).gt(1));
-    // TODO repeat the above for the token A test below
   });
 
   it("(user 2) Deposit without refreshing - fails for staleness", async () => {
@@ -442,7 +452,6 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
     logHealthCache("user cache before: ", accBefore.healthCache);
 
     let tx = new Transaction().add(
-      // TODO show that this fails when reserves are stale
       await borrowIx(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         bank,
@@ -484,7 +493,29 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
       borrowAmount.toNumber() + borrowAmount.toNumber() * originationFee;
     assert.equal(actual, expected);
 
-    // TODO assert health cache info, etc
+    // The health pulse in the same tx refreshes the cache: the borrow must leave
+    // the account healthy, with the engine/oracles ok, and the new debt has to
+    // show up as additional liability value.
+    const cacheBefore = accBefore.healthCache;
+    const cacheAfter = accAfter.healthCache;
+    assert.isTrue((cacheAfter.flags & HEALTH_CACHE_HEALTHY) !== 0);
+    assert.isTrue((cacheAfter.flags & HEALTH_CACHE_ENGINE_OK) !== 0);
+    assert.isTrue((cacheAfter.flags & HEALTH_CACHE_ORACLE_OK) !== 0);
+
+    const assetMaintAfter = wrappedI80F48toBigNumber(
+      cacheAfter.assetValueMaint
+    ).toNumber();
+    const liabMaintAfter = wrappedI80F48toBigNumber(
+      cacheAfter.liabilityValueMaint
+    ).toNumber();
+    // Healthy => weighted assets still cover weighted liabilities.
+    assert.isAbove(assetMaintAfter, liabMaintAfter);
+
+    // The fresh borrow strictly increased the (maint-weighted) liability value.
+    const liabMaintBefore = wrappedI80F48toBigNumber(
+      cacheBefore.liabilityValueMaint
+    ).toNumber();
+    assert.isAbove(liabMaintAfter, liabMaintBefore);
   });
 
   /*
@@ -546,5 +577,114 @@ describe("k12: Borrow Tests (Recycles mrgn banks from k10)", () => {
       }),
     );
     await processBankrunTx(bankrunContext, tx, [user.wallet]);
+  });
+
+  it("(user 2) Borrow fails when the Kamino collateral reserve is stale", async () => {
+    const user = users[2];
+    const bank = banks[0];
+    const userAccount = user.accounts.get(USER_ACCOUNT_THROWAWAY);
+
+    const currentClock = await banksClient.getClock();
+    bankrunContext.setClock(
+      new Clock(
+        currentClock.slot + 1n,
+        0n,
+        currentClock.epoch,
+        0n,
+        currentClock.unixTimestamp + 1n
+      )
+    );
+
+    // Borrow WITHOUT a simpleRefreshReserve on the Kamino collateral reserves in the same tx.
+    const tx = new Transaction().add(
+      await borrowIx(user.mrgnBankrunProgram, {
+        marginfiAccount: userAccount,
+        bank,
+        tokenAccount: user.lstAlphaAccount,
+        remaining: composeRemainingAccounts([
+          [kaminoUsdcBank, oracles.usdcOracle.publicKey, usdcReserve],
+          [kaminoTokenABank, oracles.tokenAOracle.publicKey, tokenAReserve],
+          [bank, oracles.pythPullLst.publicKey],
+        ]),
+        // Nominal amount: a fresh-reserve borrow of this size succeeds (see prior tests), so the
+        // failure here is attributable solely to the stale reserve.
+        amount: new BN(0.00001 * 10 ** ecosystem.lstAlphaDecimals),
+      })
+    );
+
+    const result = await processBankrunTx(
+      bankrunContext,
+      tx,
+      [user.wallet],
+      true, // trySend: capture the failure instead of throwing
+      false // dumpLogOnFail
+    );
+
+    // ReserveStale.
+    assertBankrunTxFailed(result, 6009);
+  });
+
+  it("(admin) token A bank price cache reflects oracle price + accrued interest", async () => {
+    const market = kaminoAccounts.get(MARKET);
+
+    // Deposit/borrow update the interest cache but not the price cache, so it's still zeroed:
+    {
+      const before = await bankrunProgram.account.bank.fetch(kaminoTokenABank);
+      assertI80F48Equal(before.cache.lastOraclePrice, 0);
+      assertI80F48Equal(before.cache.priceMultiplier, 0);
+    }
+
+    // Runs last: pulsing refreshes the token A reserve, which would otherwise defeat the staleness
+    // test above.
+    await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
+    await processBankrunTx(
+      bankrunContext,
+      new Transaction().add(
+        await simpleRefreshReserve(
+          klendBankrunProgram,
+          tokenAReserve,
+          market,
+          oracles.tokenAOracle.publicKey
+        ),
+        await simpleRefreshObligation(
+          klendBankrunProgram,
+          market,
+          kaminoTokenAObligation,
+          [tokenAReserve]
+        ),
+        await pulseBankPrice(groupAdmin.mrgnBankrunProgram, {
+          group: throwawayGroup.publicKey,
+          bank: kaminoTokenABank,
+          remaining: [oracles.tokenAOracle.publicKey, tokenAReserve],
+        })
+      ),
+      [groupAdmin.wallet]
+    );
+
+    const [kaminoBank, reserve] = await Promise.all([
+      bankrunProgram.account.bank.fetch(kaminoTokenABank),
+      klendBankrunProgram.account.reserve.fetch(tokenAReserve),
+    ]);
+    const expectedMultiplier = Number(
+      getLiquidityExchangeRate(reserve as any).toString()
+    );
+    assertI80F48Approx(
+      kaminoBank.cache.lastOraclePrice,
+      oracles.tokenAPrice,
+      0.000001
+    );
+    // Confidence is the raw oracle confidence, independent of the exchange-rate multiplier.
+    assertI80F48Approx(
+      kaminoBank.cache.lastOraclePriceConfidence,
+      oracles.tokenAPrice * ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE,
+      0.02
+    );
+    assertI80F48Approx(
+      kaminoBank.cache.priceMultiplier,
+      expectedMultiplier,
+      0.0001
+    );
+    assert(expectedMultiplier > 1);
+    assert(wrappedI80F48toBigNumber(kaminoBank.cache.priceMultiplier).gt(1));
   });
 });

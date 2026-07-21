@@ -713,6 +713,9 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
 
     assert_eq!(bank.lending_position_count, 0);
     assert_eq!(bank.borrowing_position_count, 0);
+    assert_eq!(bank.liquidation_liquidator_fee, 0);
+    assert_eq!(bank.liquidation_insurance_fee, 0);
+    assert_eq!(bank._padding_0, [0; 8]);
     assert_eq!(bank._pad3, [0u8; 6]);
     assert_eq!(bank.integration_acc_1, Pubkey::default());
     assert_eq!(bank.integration_acc_2, Pubkey::default());
@@ -740,7 +743,7 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(I80F48::from(bank.cb_reference_price), I80F48::ZERO);
     assert_eq!(I80F48::from(bank.cb_window_reference_price), I80F48::ZERO);
     assert_eq!(bank.cb_window_started_at, 0);
-    assert_eq!(bank._padding_1, [0u64; 3]);
+    assert_eq!(bank._padding_1, [0u64; 1]);
 
     Ok(())
 }

@@ -30,16 +30,11 @@ mod tests {
     #[test]
     fn fee_state_regression() {
         // HoMNdUF3RDZDPKAARYK1mxcPFfUnPjLmpKYibZzAijev Mainnet August 1, 2025
+        // The snapshot is v1-sized (8 + V1_LEN); zero-extend to the current struct size,
+        // exactly what `resize_global_fee_state` does on-chain.
         let mut bytes = hex_to_bytes("3fe01055c124ebdcf99abe673005fd029ed4e061d83daab0145fa9c01140e8ab5e05b1aaaeef4317ab83bfce0e61a1a233632ba4cfbabf812b8023caf2be7df80972bfc9ff327540ab83bfce0e61a1a233632ba4cfbabf812b8023caf2be7df80972bfc9ff327540000000000000000080d1f008ff000000000000000000000000000000000000000000000000000000000000000000000033333333331300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
-
-        let expected_len = 8 + std::mem::size_of::<FeeState>();
-        assert_eq!(
-            bytes.len(),
-            expected_len,
-            "Buffer length mismatch: {} vs {}",
-            bytes.len(),
-            expected_len
-        );
+        assert_eq!(bytes.len(), 8 + FeeState::V1_LEN);
+        bytes.resize(8 + std::mem::size_of::<FeeState>(), 0);
 
         // Split out the discriminator and check it
         let (disc, payload) = bytes.split_at_mut(8);
@@ -71,7 +66,7 @@ mod tests {
         let admin = pubkey!("CYXEgwbPHu2f9cY3mcUkinzDoDcsSan7myh1uBvYRbEw");
         assert_eq!(fee_state.global_fee_admin, admin); // the MS
         assert_eq!(fee_state.global_fee_wallet, admin); // MS was also wallet at this time
-        assert_eq!(fee_state.placeholder0, 0);
+        assert_eq!(fee_state.account_transfer_fee, 0);
         assert_eq!(fee_state.bank_init_flat_sol_fee, 150000000);
 
         // 3) Percentage-based fees: with tolerance
@@ -104,20 +99,18 @@ mod tests {
         assert_eq!(fee_state.liquidation_flat_sol_fee, 0);
     }
 
-    /// The premium wallet must occupy exactly the first 32 bytes of what used to be
-    /// `FeeStateV2._padding1: [u8; 256]` (offset 256, right after the FeeState-mirrored fields),
-    /// so an already-initialized (zeroed) V2 account reads as unset premium config.
+    /// The premium wallet must occupy exactly the first 32 bytes of the region past `V1_LEN`
+    /// (offset 256), so a v1-sized account grown by `resize_global_fee_state` (zero-filled)
+    /// reads as unset premium config.
     #[test]
-    fn fee_state_v2_premium_field_layout() {
-        use marginfi_type_crate::types::FeeStateV2;
-        use std::mem::{offset_of, size_of};
+    fn fee_state_premium_field_layout() {
+        use std::mem::offset_of;
 
-        assert_eq!(size_of::<FeeStateV2>(), FeeState::LEN + 256);
-        assert_eq!(offset_of!(FeeStateV2, premium_wallet), 256);
-        assert_eq!(offset_of!(FeeStateV2, _padding1), 288);
+        assert_eq!(offset_of!(FeeState, premium_wallet), FeeState::V1_LEN);
+        assert_eq!(offset_of!(FeeState, _reserved0), FeeState::V1_LEN + 32);
 
-        // Zeroed account == premium unset (wallet default => sweeping disabled)
-        let v2: FeeStateV2 = bytemuck::Zeroable::zeroed();
-        assert_eq!(v2.premium_wallet, Pubkey::default());
+        // Zeroed region == premium unset (wallet default => sweeping disabled)
+        let fee_state: FeeState = bytemuck::Zeroable::zeroed();
+        assert_eq!(fee_state.premium_wallet, Pubkey::default());
     }
 }

@@ -6,7 +6,7 @@ import { u32_MAX } from "./types";
 
 /**
  * Variable-borrow premium test helpers: PDA derivation, rate encoding, and instruction builders
- * for the FeeStateV2 / group-matrix / bank-premium / sweep instructions.
+ * for the fee-state / group-matrix / bank-premium / sweep instructions.
  */
 
 /** `bank.flags` bit 11: premium accrual active for this (liability) bank. */
@@ -52,62 +52,25 @@ export const newPremiumEntry = (
   rate: premiumRateToU32(rateFraction),
 });
 
-export const deriveFeeStateV2 = (programId: PublicKey) => {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("feestate_v2", "utf-8")],
-    programId,
-  );
-};
-
-/**
- * (global fee admin) Create the FeeStateV2 PDA. `payer` also becomes the rent payer and must sign.
- */
-export const initGlobalFeeStateV2 = (
-  program: Program<Marginfi>,
-  args: { payer: PublicKey },
-) => {
-  return program.methods
-    .initGlobalFeeStateV2()
-    .accounts({
-      payer: args.payer,
-      // feeStateV2: derived from constant seed
-      // systemProgram: hard coded key
-    })
-    .instruction();
-};
-
-/**
- * (permissionless) Copy the v1 fee-state fields into FeeStateV2. Leaves the premium fields intact.
- */
-export const copyFeeStateToV2 = (program: Program<Marginfi>) => {
-  return program.methods
-    .copyFeeStateToV2()
-    .accounts({
-      // feeState: derived from constant seed
-      // feeStateV2: derived from constant seed
-    })
-    .instruction();
-};
-
-export type EditFeeStateV2PremiumArgs = {
-  /** Signer; must match `FeeStateV2.global_fee_admin`. */
+export type EditFeeStatePremiumArgs = {
+  /** Signer; must match `FeeState.global_fee_admin`. */
   admin: PublicKey;
   /** undefined = leave unchanged. */
   premiumWallet?: PublicKey;
 };
 
 /**
- * (global fee admin) Set the premium sweep wallet on FeeStateV2.
+ * (global fee admin) Set the premium sweep wallet on the fee state.
  */
-export const editFeeStateV2Premium = (
+export const editFeeStatePremium = (
   program: Program<Marginfi>,
-  args: EditFeeStateV2PremiumArgs,
+  args: EditFeeStatePremiumArgs,
 ) => {
   return program.methods
-    .editFeeStateV2Premium(args.premiumWallet ?? null)
+    .editFeeStatePremium(args.premiumWallet ?? null)
     .accounts({
       globalFeeAdmin: args.admin,
-      // feeStateV2: derived from constant seed
+      // feeState: derived from constant seed
     })
     .instruction();
 };
@@ -165,7 +128,7 @@ export const configBankPremium = (
 
 export type CollectBankPremiumFeesArgs = {
   bank: PublicKey;
-  /** Canonical ATA of `FeeStateV2.premium_wallet` for the bank's mint. Must already exist. */
+  /** Canonical ATA of `FeeState.premium_wallet` for the bank's mint. Must already exist. */
   premiumAta: PublicKey;
 };
 
@@ -183,7 +146,7 @@ export const collectBankPremiumFees = (
       // group: implied from bank
       bank: args.bank,
       // liquidityVaultAuthority / liquidityVault: pdas from bank
-      // feeStateV2: derived from constant seed
+      // feeState: derived from constant seed
       premiumAta: args.premiumAta,
       tokenProgram: TOKEN_PROGRAM_ID,
     })

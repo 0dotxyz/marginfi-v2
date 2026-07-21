@@ -228,6 +228,53 @@ export const groupInitialize = (
   return ix;
 };
 
+export type ResizeGroupAccountArgs = {
+  group: PublicKey;
+  /** Funds the rent for the added account space. */
+  payer: PublicKey;
+};
+
+/**
+ * (permissionless) Resize a group account to the v2 layout size. Errors if the account is
+ * already at (or above) the target size.
+ */
+export const resizeGroupAccount = (
+  program: Program<Marginfi>,
+  args: ResizeGroupAccountArgs,
+) => {
+  return program.methods
+    .lendingPoolResizeGroupAccount()
+    .accounts({
+      group: args.group,
+      payer: args.payer,
+      // systemProgram: hard coded key
+    })
+    .instruction();
+};
+
+export type ResizeGlobalFeeStateArgs = {
+  /** Funds the rent for the added account space. */
+  payer: PublicKey;
+};
+
+/**
+ * (permissionless) Resize the fee-state account to the v2 layout size. Errors if the account
+ * is already at (or above) the target size.
+ */
+export const resizeGlobalFeeState = (
+  program: Program<Marginfi>,
+  args: ResizeGlobalFeeStateArgs,
+) => {
+  return program.methods
+    .resizeGlobalFeeState()
+    .accounts({
+      // feeState: derived from constant seed
+      payer: args.payer,
+      // systemProgram: hard coded key
+    })
+    .instruction();
+};
+
 export type ConfigureBankArgs = {
   bank: PublicKey;
   bankConfigOpt: BankConfigOptRaw;
@@ -399,9 +446,10 @@ export type EditGlobalFeeStateArgs = {
   liquidationMaxFee?: WrappedI80F48 | null;
   orderExecutionMaxFee?: WrappedI80F48 | null;
   pauseDelegateAdmin?: PublicKey | null; // undefined = no-op, null = clear
+  accountTransferFee?: number | null; // u32, in lamports; 0 => use default
 };
 
-// TODO add test for this
+// Covered by e05_panicMode "(fee admin) edits all global fee fields and restores them".
 export const editGlobalFeeState = (
   program: Program<Marginfi>,
   args: EditGlobalFeeStateArgs,
@@ -423,6 +471,7 @@ export const editGlobalFeeState = (
       args.liquidationMaxFee ?? null,
       args.orderExecutionMaxFee ?? null,
       pauseDelegateAdminArg,
+      args.accountTransferFee ?? null
     )
     .accounts({
       globalFeeAdmin: args.admin,
@@ -1116,7 +1165,7 @@ export const writeBankMetadata = (
   const ix = program.methods
     .writeBankMetadata(
       tickerBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
-      descBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
+      descBuf // Option<Vec<u8>> -> Some(Buffer) | None(null)
     )
     .accounts({
       // group: implied
@@ -1169,7 +1218,7 @@ export const writeBankMetadataPreInit = (
     .writeBankMetadataPreInit(
       args.bankSeed,
       tickerBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
-      descBuf, // Option<Vec<u8>> -> Some(Buffer) | None(null)
+      descBuf // Option<Vec<u8>> -> Some(Buffer) | None(null)
     )
     .accounts({
       group: args.group,

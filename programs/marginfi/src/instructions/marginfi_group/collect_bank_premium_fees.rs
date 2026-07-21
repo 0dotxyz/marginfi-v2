@@ -8,13 +8,13 @@ use anchor_spl::associated_token::get_associated_token_address_with_program_id;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::{FEE_STATE_V2_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED},
-    types::{Bank, FeeStateV2, MarginfiGroup},
+    constants::{FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED},
+    types::{Bank, FeeState, MarginfiGroup},
 };
 use std::cmp::min;
 
 /// (Permissionless) Sweep realized variable-borrow premium from the bank's liquidity vault to
-/// the canonical ATA of `FeeStateV2.premium_wallet` for the bank's mint.
+/// the canonical ATA of `FeeState.premium_wallet` for the bank's mint.
 ///
 /// `collected_premium_outstanding` only ever counts premium that arrived as real repayment
 /// tokens, so the sweep never takes lenders' liquidity; the `min` with the vault balance is
@@ -26,7 +26,7 @@ pub fn lending_pool_collect_bank_premium_fees<'info>(
 
     // Validate the premium ata is correct
     {
-        let premium_wallet = &ctx.accounts.fee_state_v2.load()?.premium_wallet;
+        let premium_wallet = &ctx.accounts.fee_state.load()?.premium_wallet;
         check!(
             premium_wallet != &Pubkey::default(),
             MarginfiError::PremiumWalletNotSet
@@ -126,14 +126,14 @@ pub struct LendingPoolCollectBankPremiumFees<'info> {
     )]
     pub liquidity_vault: InterfaceAccount<'info, TokenAccount>,
 
-    // Note: there is just one FeeStateV2 per program, so no further check is required.
+    // Note: there is just one FeeState per program, so no further check is required.
     #[account(
-        seeds = [FEE_STATE_V2_SEED.as_bytes()],
+        seeds = [FEE_STATE_SEED.as_bytes()],
         bump,
     )]
-    pub fee_state_v2: AccountLoader<'info, FeeStateV2>,
+    pub fee_state: AccountLoader<'info, FeeState>,
 
-    /// Canonical ATA of the `FeeStateV2.premium_wallet` for the mint used by this bank
+    /// Canonical ATA of the `FeeState.premium_wallet` for the mint used by this bank
     /// (validated in handler). Must already exist.
     #[account(mut)]
     pub premium_ata: InterfaceAccount<'info, TokenAccount>,

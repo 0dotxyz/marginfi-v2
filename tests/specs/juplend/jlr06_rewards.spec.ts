@@ -345,7 +345,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
     assertI80F48Approx(
       bankMidAccrual.cache.priceMultiplier,
       expectedMidCacheMultiplier,
-      expectedMidCacheMultiplier / 10000, // .001%
+      expectedMidCacheMultiplier / 10000 // .001%
     );
     cacheMultiplierMidAccrual = wrappedI80F48toBigNumber(
       bankMidAccrual.cache.priceMultiplier,
@@ -471,7 +471,7 @@ describe("jlr06: Juplend rewards on wrapped deposits (bankrun)", () => {
     assertI80F48Approx(
       bankAfterAccrual.cache.priceMultiplier,
       expectedAfterCacheMultiplier,
-      expectedAfterCacheMultiplier / 10000, // .001%
+      expectedAfterCacheMultiplier / 10000 // .001%
     );
     const cacheMultiplierAfterAccrual = wrappedI80F48toBigNumber(
       bankAfterAccrual.cache.priceMultiplier,

@@ -20,7 +20,7 @@ use marginfi::{
     state::bank::BankVaultType,
 };
 use marginfi_type_crate::constants::{
-    FEE_STATE_SEED, FEE_STATE_V2_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+    FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
     PROTOCOL_FEE_FIXED_DEFAULT, PROTOCOL_FEE_RATE_DEFAULT, SAME_ASSET_EMODE_REGISTRY_SEED,
     STAKED_SETTINGS_SEED,
 };
@@ -710,78 +710,28 @@ impl MarginfiGroupFixture {
         Ok(result)
     }
 
-    /// Initialize the FeeStateV2 PDA (if needed) and copy the v1 fee state into it.
-    pub async fn try_init_and_copy_fee_state_v2(&self) -> Result<(), BanksClientError> {
-        let fee_state_v2 = Self::fee_state_v2_key();
-        let mut ixs = vec![];
-
-        let exists = {
-            let ctx = self.ctx.borrow_mut();
-            let account = ctx.banks_client.get_account(fee_state_v2).await.unwrap();
-            account.map(|a| !a.data.is_empty()).unwrap_or(false)
-        };
-        if !exists {
-            ixs.push(Instruction {
-                program_id: marginfi::ID,
-                accounts: marginfi::accounts::InitFeeStateV2 {
-                    payer: self.ctx.borrow().payer.pubkey(),
-                    fee_state_v2,
-                    system_program: system_program::id(),
-                }
-                .to_account_metas(Some(true)),
-                data: InitGlobalFeeStateV2 {}.data(),
-            });
-        }
-        ixs.push(Instruction {
-            program_id: marginfi::ID,
-            accounts: marginfi::accounts::CopyFeeStateToV2 {
-                fee_state: self.fee_state,
-                fee_state_v2,
-            }
-            .to_account_metas(Some(true)),
-            data: CopyFeeStateToV2 {}.data(),
-        });
-
-        let tx = Transaction::new_signed_with_payer(
-            &ixs,
-            Some(&self.ctx.borrow().payer.pubkey().clone()),
-            &[&self.ctx.borrow().payer],
-            latest_blockhash(&self.ctx).await,
-        );
-        self.ctx
-            .borrow_mut()
-            .banks_client
-            .process_transaction(tx)
-            .await?;
-        Ok(())
-    }
-
-    pub fn fee_state_v2_key() -> Pubkey {
-        Pubkey::find_program_address(&[FEE_STATE_V2_SEED.as_bytes()], &marginfi::ID).0
-    }
-
-    pub async fn try_edit_fee_state_v2_premium(
+    pub async fn try_edit_fee_state_premium(
         &self,
         premium_wallet: Option<Pubkey>,
     ) -> Result<(), BanksClientError> {
         let payer = self.ctx.borrow().payer.insecure_clone();
-        self.try_edit_fee_state_v2_premium_with_signer(premium_wallet, &payer)
+        self.try_edit_fee_state_premium_with_signer(premium_wallet, &payer)
             .await
     }
 
-    pub async fn try_edit_fee_state_v2_premium_with_signer(
+    pub async fn try_edit_fee_state_premium_with_signer(
         &self,
         premium_wallet: Option<Pubkey>,
         signer: &Keypair,
     ) -> Result<(), BanksClientError> {
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::EditFeeStateV2Premium {
+            accounts: marginfi::accounts::EditFeeStatePremium {
                 global_fee_admin: signer.pubkey(),
-                fee_state_v2: Self::fee_state_v2_key(),
+                fee_state: self.fee_state,
             }
             .to_account_metas(Some(true)),
-            data: EditFeeStateV2Premium { premium_wallet }.data(),
+            data: EditFeeStatePremium { premium_wallet }.data(),
         };
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -887,7 +837,7 @@ impl MarginfiGroupFixture {
     }
 
     /// Sweep realized premium from the bank's liquidity vault to `premium_ata` (the canonical
-    /// ATA of `FeeStateV2.premium_wallet` for the bank's mint).
+    /// ATA of `FeeState.premium_wallet` for the bank's mint).
     pub async fn try_collect_premium_fees(
         &self,
         bank: &BankFixture,
@@ -909,7 +859,7 @@ impl MarginfiGroupFixture {
                 bank: bank_key,
                 liquidity_vault_authority,
                 liquidity_vault,
-                fee_state_v2: Self::fee_state_v2_key(),
+                fee_state: self.fee_state,
                 premium_ata,
                 token_program: bank.get_token_program(),
             }
@@ -1649,6 +1599,82 @@ impl MarginfiGroupFixture {
         load_and_deserialize::<StakedSettings>(self.ctx.clone(), &self.staked_settings).await
     }
 
+    /// Shrink the group account to the v1 (8 + struct) size, simulating a mainnet account
+    /// created before groups were allocated at the v2 size.
+    pub async fn truncate_group_account_to_v1(&self) {
+        Self::truncate_account_to(&self.ctx, self.key, 8 + MarginfiGroup::V1_LEN).await
+    }
+
+    /// Shrink the fee-state account to the v1 (8 + struct) size, simulating the mainnet
+    /// account created before it was allocated at the v2 size.
+    pub async fn truncate_fee_state_to_v1(&self) {
+        Self::truncate_account_to(&self.ctx, self.fee_state, 8 + FeeState::V1_LEN).await
+    }
+
+    async fn truncate_account_to(ctx: &Rc<RefCell<ProgramTestContext>>, key: Pubkey, len: usize) {
+        let mut ctx = ctx.borrow_mut();
+        let mut account = ctx.banks_client.get_account(key).await.unwrap().unwrap();
+        account.data.truncate(len);
+        ctx.set_account(&key, &account.into())
+    }
+
+    pub async fn try_resize_group_account(&self) -> Result<(), BanksClientError> {
+        self.try_resize_account_key(self.key).await
+    }
+
+    pub async fn try_resize_fee_state(&self) -> Result<(), BanksClientError> {
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::ResizeGlobalFeeState {
+                fee_state: self.fee_state,
+                payer: payer.pubkey(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: ResizeGlobalFeeState {}.data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer.pubkey()),
+            &[&payer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Send the group resize ix against an arbitrary account key (for negative tests).
+    pub async fn try_resize_account_key(&self, key: Pubkey) -> Result<(), BanksClientError> {
+        let payer = clone_keypair(&self.ctx.borrow().payer);
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolResizeGroupAccount {
+                group: key,
+                payer: payer.pubkey(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolResizeGroupAccount {}.data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer.pubkey()),
+            &[&payer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
     pub async fn set_protocol_fees_flag(&self, enabled: bool) {
         let mut group = self.load().await;
         let mut ctx = self.ctx.borrow_mut();
@@ -1663,7 +1689,8 @@ impl MarginfiGroupFixture {
 
         let data = bytes_of(&group);
 
-        account.data[8..].copy_from_slice(data);
+        // The account may be larger than the struct (v2 allocation); write the prefix only.
+        account.data[8..8 + data.len()].copy_from_slice(data);
 
         ctx.set_account(&self.key, &account.into())
     }
@@ -1768,6 +1795,7 @@ impl MarginfiGroupFixture {
                 liquidation_max_fee: None,
                 order_execution_max_fee: None,
                 pause_delegate_admin: Some(new_pause_delegate_admin.unwrap_or_default()),
+                account_transfer_fee: None,
             }
             .data(),
         };

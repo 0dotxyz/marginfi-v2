@@ -25,15 +25,24 @@ use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        INSURANCE_VAULT_SEED, LIQUIDATION_INSURANCE_FEE, LIQUIDATION_LIQUIDATOR_FEE,
-        LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+        DEFAULT_LIQUIDATION_FEE, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
+        LIQUIDITY_VAULT_SEED,
     },
     types::{
-        Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType, PriceBias,
-        ACCOUNT_IN_RECEIVERSHIP,
+        u32_to_centi, Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType,
+        PriceBias, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
+/// Converts a per-bank liquidation fee (`u32_to_centi` encoding, `u32::MAX` = 100%) to an I80F48
+/// fraction. A 0 value falls back to the `DEFAULT_LIQUIDATION_FEE` constant.
+fn liquidation_fee_fraction(fee: u32) -> I80F48 {
+    if fee == 0 {
+        DEFAULT_LIQUIDATION_FEE // const of I80F48 type
+    } else {
+        u32_to_centi(fee)
+    }
+}
 /// Instruction liquidates a position owned by a margin account that is in a unhealthy state.
 /// The liquidator can purchase discounted collateral from the unhealthy account, in exchange for paying its debt.
 ///
@@ -270,9 +279,11 @@ pub fn lending_account_liquidate<'info>(
         };
         check!(liab_price > I80F48::ZERO, MarginfiError::ZeroLiabilityPrice);
 
-        let final_discount: I80F48 =
-            I80F48::ONE - (LIQUIDATION_INSURANCE_FEE + LIQUIDATION_LIQUIDATOR_FEE);
-        let liquidator_discount: I80F48 = I80F48::ONE - LIQUIDATION_LIQUIDATOR_FEE;
+        // Liquidation fees are configured per-bank on the liability bank (0 => default 2.5%).
+        let liquidator_fee = liquidation_fee_fraction(liab_bank.liquidation_liquidator_fee);
+        let insurance_fee = liquidation_fee_fraction(liab_bank.liquidation_insurance_fee);
+        let final_discount: I80F48 = I80F48::ONE - (insurance_fee + liquidator_fee);
+        let liquidator_discount: I80F48 = I80F48::ONE - liquidator_fee;
 
         // Quantity of liability to be paid off by liquidator
         let liab_amount_liquidator: I80F48 = calc_amount(
@@ -312,18 +323,28 @@ pub fn lending_account_liquidate<'info>(
         );
 
         // Liquidator pays off liability (by gaining the liability on their books)
-        let (liquidator_liability_pre_balance, liquidator_liability_post_balance) = {
+        let (
+            liquidator_liability_pre_balance,
+            liquidator_liability_post_balance,
+            liquidator_liab_bank_asset_pre_balance,
+            liquidator_liab_bank_asset_post_balance,
+        ) = {
             let mut bank_account = BankAccountWrapper::find_or_create(
                 &liab_bank_key,
                 &mut liab_bank,
                 &mut liquidator_marginfi_account.lending_account,
             )?;
 
-            // TODO: in edge cases, the liquidator starts/ends with ASSETS,
-            // and this value (which will ultimately be emitted in the event) is useless.
+            // When the liquidator already holds the liability bank as a deposit, the asset side
+            // moves instead of the liability side (the deposit is drawn down by
+            // `withdraw_ignore_borrow_cap` before any liability is taken on), so capture both. The
+            // asset balances are emitted as `liquidator_liability_bank_asset_balance`.
             let pre_balance: I80F48 = bank_account
                 .bank
                 .get_liability_amount(bank_account.balance.liability_shares.into())?;
+            let asset_pre_balance: I80F48 = bank_account
+                .bank
+                .get_asset_amount(bank_account.balance.asset_shares.into())?;
 
             // Liquidator will withdraw the collateral (if any) and then borrow the remainder (if any). Ignores the utilization ratio check.
             bank_account.withdraw_ignore_borrow_cap(liab_amount_liquidator)?;
@@ -331,8 +352,16 @@ pub fn lending_account_liquidate<'info>(
             let post_balance: I80F48 = bank_account
                 .bank
                 .get_liability_amount(bank_account.balance.liability_shares.into())?;
+            let asset_post_balance: I80F48 = bank_account
+                .bank
+                .get_asset_amount(bank_account.balance.asset_shares.into())?;
 
-            (pre_balance, post_balance)
+            (
+                pre_balance,
+                post_balance,
+                asset_pre_balance,
+                asset_post_balance,
+            )
         };
 
         // Liquidatee pays off `asset_quantity` amount of collateral
@@ -460,12 +489,16 @@ pub fn lending_account_liquidate<'info>(
                 liquidatee_liability_balance: liquidatee_liability_pre_balance.to_num::<f64>(),
                 liquidator_asset_balance: liquidator_asset_pre_balance.to_num::<f64>(),
                 liquidator_liability_balance: liquidator_liability_pre_balance.to_num::<f64>(),
+                liquidator_liability_bank_asset_balance: liquidator_liab_bank_asset_pre_balance
+                    .to_num::<f64>(),
             },
             LiquidationBalances {
                 liquidatee_asset_balance: liquidatee_asset_post_balance.to_num::<f64>(),
                 liquidatee_liability_balance: liquidatee_liability_post_balance.to_num::<f64>(),
                 liquidator_asset_balance: liquidator_asset_post_balance.to_num::<f64>(),
                 liquidator_liability_balance: liquidator_liability_post_balance.to_num::<f64>(),
+                liquidator_liability_bank_asset_balance: liquidator_liab_bank_asset_post_balance
+                    .to_num::<f64>(),
             },
         )
     };
@@ -478,29 +511,21 @@ pub fn lending_account_liquidate<'info>(
     let liquidator_remaining_accounts =
         &ctx.remaining_accounts[liquidator_accounts_starting_pos..liquidatee_accounts_starting_pos];
 
-    // Verify liquidatee liquidation post health using heap-efficient parity checks.
-    // NB: a single scratch slot serves both accounts (reset in between) — two live scratches
-    // overflow the 4096-byte SBF stack frame.
-    let mut premium_scratch = PremiumScratch::default();
-    let post_liquidation_health = check_post_liquidation_condition_and_get_account_health(
-        &liquidatee_marginfi_account,
+    // Verify liquidatee liquidation post health using heap-efficient parity checks, then claim
+    // at old rates and re-weight the liquidatee's premium snapshots against the
+    // post-liquidation collateral mix (seized collateral no longer counts).
+    let post_liquidation_health = check_liquidatee_health_and_refresh_premium(
+        &mut liquidatee_marginfi_account,
         group,
         liquidatee_remaining_accounts,
         &ctx.accounts.liab_bank.key(),
         pre_liquidation_health,
-        &mut Some(&mut premium_scratch),
-    )?;
-
-    // Claim at old rates and re-weight the liquidatee's premium snapshots against the
-    // post-liquidation collateral mix (seized collateral no longer counts).
-    update_premium_snapshots(
-        &mut liquidatee_marginfi_account,
-        group,
-        &premium_scratch,
         clock.unix_timestamp as u64,
     )?;
 
-    // TODO consider if health cache update here is worth blowing the extra CU
+    // Note: the liquidatee's post-liquidation health is computed above but intentionally not
+    // persisted to its health cache here. Writing it would add CU to the hot liquidation path for a
+    // value any consumer can refresh on demand via `lending_account_pulse_health`.
 
     liquidatee_marginfi_account
         .indexer_flags
@@ -509,22 +534,13 @@ pub fn lending_account_liquidate<'info>(
     liquidator_marginfi_account.lending_account.sort_balances();
     liquidator_marginfi_account.sync_indexer_flags();
 
-    // Verify liquidator account health using heap-efficient version (includes isolated-tier check)
-    premium_scratch = PremiumScratch::default();
-    check_account_init_health(
-        &liquidator_marginfi_account,
-        group,
-        liquidator_remaining_accounts,
-        &mut None,
-        &mut Some(&mut premium_scratch),
-    )?;
-
-    // The liquidator may have just opened a liability leg (snapshot 0 at creation): weight it
-    // against their post-liquidation collateral mix, including the seized collateral.
-    update_premium_snapshots(
+    // Verify liquidator account health using heap-efficient version (includes isolated-tier
+    // check). The liquidator may have just opened a liability leg (snapshot 0 at creation):
+    // weight it against their post-liquidation collateral mix, including the seized collateral.
+    check_liquidator_health_and_refresh_premium(
         &mut liquidator_marginfi_account,
         group,
-        &premium_scratch,
+        liquidator_remaining_accounts,
         clock.unix_timestamp as u64,
     )?;
 
@@ -547,6 +563,52 @@ pub fn lending_account_liquidate<'info>(
         post_balances,
     });
 
+    Ok(())
+}
+
+/// Post-liquidation health check + premium snapshot refresh for the liquidatee.
+/// * `#[inline(never)]`: keeps the ~1.2KB `PremiumScratch` in its own SBF stack frame — inlined
+///   into the handler it overflows the 4096-byte frame ("overwrites values in the frame").
+#[inline(never)]
+fn check_liquidatee_health_and_refresh_premium<'info>(
+    liquidatee_marginfi_account: &mut MarginfiAccount,
+    group: &MarginfiGroup,
+    liquidatee_remaining_accounts: &'info [AccountInfo<'info>],
+    liab_bank_pk: &Pubkey,
+    pre_liquidation_health: I80F48,
+    now: u64,
+) -> MarginfiResult<I80F48> {
+    let mut premium_scratch = PremiumScratch::default();
+    let post_liquidation_health = check_post_liquidation_condition_and_get_account_health(
+        liquidatee_marginfi_account,
+        group,
+        liquidatee_remaining_accounts,
+        liab_bank_pk,
+        pre_liquidation_health,
+        &mut Some(&mut premium_scratch),
+    )?;
+    update_premium_snapshots(liquidatee_marginfi_account, group, &premium_scratch, now)?;
+    Ok(post_liquidation_health)
+}
+
+/// Init health check + premium snapshot refresh for the liquidator. See
+/// [`check_liquidatee_health_and_refresh_premium`] for the `#[inline(never)]` rationale.
+#[inline(never)]
+fn check_liquidator_health_and_refresh_premium<'info>(
+    liquidator_marginfi_account: &mut MarginfiAccount,
+    group: &MarginfiGroup,
+    liquidator_remaining_accounts: &'info [AccountInfo<'info>],
+    now: u64,
+) -> MarginfiResult {
+    let mut premium_scratch = PremiumScratch::default();
+    check_account_init_health(
+        liquidator_marginfi_account,
+        group,
+        liquidator_remaining_accounts,
+        &mut None,
+        &mut Some(&mut premium_scratch),
+    )?;
+    update_premium_snapshots(liquidator_marginfi_account, group, &premium_scratch, now)?;
     Ok(())
 }
 

@@ -13,10 +13,7 @@ use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION}
 use kamino_mocks::state::MinimalReserve;
 use marginfi_type_crate::types::OnRampTransition;
 use marginfi_type_crate::{
-    constants::{
-        CONF_INTERVAL_MULTIPLE, EXP_10_I80F48, MAX_CONF_INTERVAL, STD_DEV_MULTIPLE, U32_MAX,
-        U32_MAX_DIV_10,
-    },
+    constants::{CONF_INTERVAL_MULTIPLE, EXP_10_I80F48, MAX_CONF_INTERVAL, U32_MAX},
     pdas::derive_staked_onramp_from_vote,
     types::{
         mul_div_i128, mul_div_i64, mul_div_u64, mul_i128_by_i80f48, mul_i64_by_i80f48,
@@ -497,17 +494,16 @@ impl OraclePriceFeedAdapter {
                     max_age,
                 )?;
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
-                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                    Some(price_feed.get_price_and_confidence_of_type(
+                        price_type,
+                        bank_config.oracle_max_confidence,
+                    )?)
                 } else {
                     None
                 };
 
-                // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
                 price_feed.feed.result.value =
                     mul_i128_by_i80f48(price_feed.feed.result.value, multiplier)
-                        .ok_or_else(math_error!())?;
-                price_feed.feed.result.std_dev =
-                    mul_i128_by_i80f48(price_feed.feed.result.std_dev, multiplier)
                         .ok_or_else(math_error!())?;
 
                 Ok(OracleLoadContext {
@@ -606,20 +602,17 @@ impl OraclePriceFeedAdapter {
                     max_age,
                 )?;
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
-                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                    Some(price_feed.get_price_and_confidence_of_type(
+                        price_type,
+                        bank_config.oracle_max_confidence,
+                    )?)
                 } else {
                     None
                 };
 
-                // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
+                // Adjust Switchboard value (i128 with 1e18 precision)
                 price_feed.feed.result.value = mul_div_i128(
                     price_feed.feed.result.value,
-                    numerator,
-                    SPOT_CUMULATIVE_INTEREST_PRECISION,
-                )
-                .ok_or_else(math_error!())?;
-                price_feed.feed.result.std_dev = mul_div_i128(
-                    price_feed.feed.result.std_dev,
                     numerator,
                     SPOT_CUMULATIVE_INTEREST_PRECISION,
                 )
@@ -689,17 +682,16 @@ impl OraclePriceFeedAdapter {
                     max_age,
                 )?;
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
-                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                    Some(price_feed.get_price_and_confidence_of_type(
+                        price_type,
+                        bank_config.oracle_max_confidence,
+                    )?)
                 } else {
                     None
                 };
 
-                // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
                 price_feed.feed.result.value =
                     mul_i128_by_i80f48(price_feed.feed.result.value, multiplier)
-                        .ok_or_else(math_error!())?;
-                price_feed.feed.result.std_dev =
-                    mul_i128_by_i80f48(price_feed.feed.result.std_dev, multiplier)
                         .ok_or_else(math_error!())?;
 
                 Ok(OracleLoadContext {
@@ -919,20 +911,17 @@ impl OraclePriceFeedAdapter {
                     max_age,
                 )?;
                 let cache_raw_price = if let Some(price_type) = cache_price_type {
-                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                    Some(price_feed.get_price_and_confidence_of_type(
+                        price_type,
+                        bank_config.oracle_max_confidence,
+                    )?)
                 } else {
                     None
                 };
 
-                // Adjust Switchboard value & std_dev (i128 with 1e18 precision)
+                // Adjust Switchboard value (i128 with 1e18 precision)
                 price_feed.feed.result.value = mul_div_i128(
                     price_feed.feed.result.value,
-                    numerator,
-                    EXCHANGE_PRICES_PRECISION,
-                )
-                .ok_or_else(math_error!())?;
-                price_feed.feed.result.std_dev = mul_div_i128(
-                    price_feed.feed.result.std_dev,
                     numerator,
                     EXCHANGE_PRICES_PRECISION,
                 )
@@ -1362,14 +1351,9 @@ impl SwitchboardPullPriceFeed {
             MarginfiError::SwitchboardWrongAccountOwner
         );
 
-        let feed: PullFeedAccountData = parse_swb_ignore_alignment(ai_data)?;
-        let lite_feed = LitePullFeedAccountData::from(&feed);
-        // TODO restore when swb fixes alignment issue in crate.
-        // let feed = PullFeedAccountData::parse(ai_data)
-        //     .map_err(|_| MarginfiError::SwitchboardInvalidAccount)?;
+        let (lite_feed, last_updated) = load_swb_lite_feed(ai_data)?;
 
         // Check staleness
-        let last_updated = feed.last_update_timestamp;
         if current_timestamp.saturating_sub(last_updated) > max_age as i64 {
             return err!(MarginfiError::SwitchboardStalePrice);
         }
@@ -1387,10 +1371,7 @@ impl SwitchboardPullPriceFeed {
             MarginfiError::SwitchboardWrongAccountOwner
         );
 
-        let _feed = parse_swb_ignore_alignment(ai_data)?;
-        // TODO restore when swb fixes alignment issue in crate.
-        // PullFeedAccountData::parse(ai_data)
-        //     .map_err(|_| MarginfiError::SwitchboardInvalidAccount)?;
+        load_swb_lite_feed(ai_data)?;
 
         Ok(())
     }
@@ -1404,48 +1385,28 @@ impl SwitchboardPullPriceFeed {
         Ok(price)
     }
 
+    /// 0 disables confidence adjustment, u32::MAX (or anything exceeding `MAX_CONF_INTERVAL`) will
+    /// clamp at `MAX_CONF_INTERVAL`.
     fn get_confidence_interval(&self, oracle_max_confidence: u32) -> MarginfiResult<I80F48> {
-        let conf_interval: I80F48 = I80F48::from_num(self.feed.result.std_dev)
-            .checked_div(EXP_10_I80F48[switchboard_on_demand::PRECISION as usize])
-            .ok_or_else(math_error!())?
-            .checked_mul(STD_DEV_MULTIPLE)
-            .ok_or_else(math_error!())?;
+        if oracle_max_confidence == 0 {
+            return Ok(I80F48::ZERO);
+        }
 
-        let price = self.get_price()?;
+        let price: I80F48 = self.get_price()?;
+        let oracle_max_confidence: I80F48 = I80F48::from_num(oracle_max_confidence);
 
-        // Fail the price fetch if confidence > price * oracle_max_confidence
-        let oracle_max_confidence = if oracle_max_confidence > 0 {
-            I80F48::from_num(oracle_max_confidence)
-        } else {
-            // The default max confidence is 10%
-            U32_MAX_DIV_10
-        };
-        let max_conf = price
+        // Note: negative prices also create negative confidence intervals (though we not anticipate
+        // negative prices in prod)
+        let conf_interval: I80F48 = price
             .checked_mul(oracle_max_confidence)
             .ok_or_else(math_error!())?
             .checked_div(U32_MAX)
             .ok_or_else(math_error!())?;
-        if conf_interval > max_conf {
-            let conf_interval = conf_interval.to_num::<f64>();
-            let max_conf = max_conf.to_num::<f64>();
-            msg!("conf was {:?}, but max is {:?}", conf_interval, max_conf);
-            return err!(MarginfiError::OracleMaxConfidenceExceeded);
-        }
 
-        // Clamp confidence to 5% of the price regardless
-        let max_conf_interval = price
+        // Clamp to MAX_CONF_INTERVAL (5%) of price
+        let max_conf_interval: I80F48 = price
             .checked_mul(MAX_CONF_INTERVAL)
             .ok_or_else(math_error!())?;
-
-        assert!(
-            max_conf_interval >= I80F48::ZERO,
-            "Negative max confidence interval"
-        );
-
-        assert!(
-            conf_interval >= I80F48::ZERO,
-            "Negative confidence interval"
-        );
 
         Ok(min(conf_interval, max_conf_interval))
     }
@@ -1482,8 +1443,8 @@ impl PriceAdapter for SwitchboardPullPriceFeed {
         price_type: OraclePriceType,
         oracle_max_confidence: u32,
     ) -> MarginfiResult<OraclePriceWithConfidence> {
-        let confidence_interval = self.get_confidence_interval(oracle_max_confidence)?;
-        let price = self.get_price_of_type(price_type, None, oracle_max_confidence)?;
+        let confidence_interval: I80F48 = self.get_confidence_interval(oracle_max_confidence)?;
+        let price: I80F48 = self.get_price_of_type(price_type, None, oracle_max_confidence)?;
 
         Ok(OraclePriceWithConfidence {
             price,
@@ -1493,12 +1454,49 @@ impl PriceAdapter for SwitchboardPullPriceFeed {
     }
 }
 
-// TODO remove when swb fixes the alignment issue in their crate
-// (TargetAlignmentGreaterAndInputNotAligned) when bytemuck::from_bytes executes on any local system
-// (including bpf next-test) where the struct is "properly" aligned 16
-/// The same as PullFeedAccountData::parse but completely ignores input alignment.
+/// Parse a Switchboard pull feed into the lite form we retain, plus its `last_update_timestamp`
+/// (for the caller's staleness check).
+///
+/// `PullFeedAccountData` is ~3.2 KB and its 16-byte alignment comes from the `i128` fields in
+/// `CurrentResult`/`OracleSubmission`. The two targets disagree on that alignment, so we parse
+/// differently per target:
+///
+/// * On-chain (`target_os = "solana"`): `i128` is 8-byte aligned (the SBF data layout has no
+///   `i128:128` entry, so it inherits `i64`'s 8-byte alignment), and account data sits at an
+///   8-aligned offset, so upstream's zero-copy `PullFeedAccountData::parse` succeeds. We use it to
+///   avoid copying ~3.2 KB onto the 4 KB BPF stack on every price read.
+/// * Off-chain (host / `client`): native `i128` is 16-byte aligned, so the data at offset 8 is
+///   misaligned and `parse`'s `bytemuck::try_from_bytes` fails with `AccountDeserializeError`. We
+///   copy via `parse_swb_ignore_alignment` (`try_pod_read_unaligned`), which has no alignment
+///   requirement.
+///
+/// Verified alignment-sensitive upstream through switchboard-sdk `main` and the pinned rev f1a570a
+/// (2026-06-01) — `parse` still returns a `Ref` via `try_from_bytes`, so the off-chain copy stays.
+fn load_swb_lite_feed(data: Ref<&mut [u8]>) -> MarginfiResult<(LitePullFeedAccountData, i64)> {
+    #[cfg(target_os = "solana")]
+    {
+        let feed = PullFeedAccountData::parse(data)
+            .map_err(|_| MarginfiError::SwitchboardInvalidAccount)?;
+        Ok((
+            LitePullFeedAccountData::from(&*feed),
+            feed.last_update_timestamp,
+        ))
+    }
+    #[cfg(not(target_os = "solana"))]
+    {
+        let feed = parse_swb_ignore_alignment(data)?;
+        Ok((
+            LitePullFeedAccountData::from(&feed),
+            feed.last_update_timestamp,
+        ))
+    }
+}
+
+/// The same as PullFeedAccountData::parse but completely ignores input alignment by copying the
+/// bytes (`try_pod_read_unaligned`). Used off-chain, where native `i128` alignment (16) makes the
+/// zero-copy reference cast fail — see [`load_swb_lite_feed`]. Also reused by tests/clients.
 pub fn parse_swb_ignore_alignment(data: Ref<&mut [u8]>) -> MarginfiResult<PullFeedAccountData> {
-    if data.len() < 8 {
+    if data.len() < 8 + std::mem::size_of::<PullFeedAccountData>() {
         return err!(MarginfiError::SwitchboardInvalidAccount);
     }
 
@@ -1655,7 +1653,7 @@ impl PythPushOraclePriceFeed {
             I80F48::from_num(oracle_max_confidence)
         } else {
             // The default max confidence is 10%
-            U32_MAX_DIV_10
+            I80F48::from_num(u32::MAX / 10u32)
         };
         let max_conf = price
             .checked_mul(oracle_max_confidence)
@@ -1849,6 +1847,86 @@ mod tests {
         AccountInfo::new(key, false, false, lamports, data, owner, false)
     }
 
+    fn test_switchboard_pull_feed(value: i128) -> SwitchboardPullPriceFeed {
+        SwitchboardPullPriceFeed {
+            feed: Box::new(LitePullFeedAccountData {
+                result: CurrentResult {
+                    value,
+                    // Deliberately non-zero to prove confidence no longer reads Switchboard std_dev.
+                    std_dev: value / 2,
+                    mean: value,
+                    range: 0,
+                    min_value: value,
+                    max_value: value,
+                    num_samples: 1,
+                    submission_idx: 0,
+                    padding1: [0; 6],
+                    slot: 0,
+                    min_slot: 0,
+                    max_slot: 0,
+                },
+                #[cfg(feature = "client")]
+                feed_hash: [0; 32],
+                last_update_timestamp: 42,
+            }),
+        }
+    }
+
+    #[test]
+    fn swb_pull_confidence_uses_oracle_max_confidence() {
+        let feed = test_switchboard_pull_feed(100_000_000_000_000_000_000);
+        let price = feed.get_price().unwrap();
+        assert_eq!(price, I80F48::from_num(100));
+
+        let no_conf = feed
+            .get_price_and_confidence_of_type(OraclePriceType::RealTime, 0)
+            .unwrap();
+        assert_eq!(no_conf.confidence, I80F48::ZERO);
+        assert_eq!(
+            feed.get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), 0)
+                .unwrap(),
+            price
+        );
+        assert_eq!(
+            feed.get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::High), 0)
+                .unwrap(),
+            price
+        );
+
+        let one_percent = u32::MAX / 100;
+        let configured_conf = feed
+            .get_price_and_confidence_of_type(OraclePriceType::RealTime, one_percent)
+            .unwrap()
+            .confidence;
+        let expected_conf = price
+            .checked_mul(I80F48::from_num(one_percent))
+            .unwrap()
+            .checked_div(U32_MAX)
+            .unwrap();
+        assert_eq!(configured_conf, expected_conf);
+        assert_eq!(
+            feed.get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), one_percent)
+                .unwrap(),
+            price.checked_sub(configured_conf).unwrap()
+        );
+        assert_eq!(
+            feed.get_price_of_type(
+                OraclePriceType::RealTime,
+                Some(PriceBias::High),
+                one_percent
+            )
+            .unwrap(),
+            price.checked_add(configured_conf).unwrap()
+        );
+
+        // Note: Previously, invoking the function like this meant capping the confidence at u32::MAX
+        let capped_conf = feed
+            .get_price_and_confidence_of_type(OraclePriceType::RealTime, u32::MAX)
+            .unwrap()
+            .confidence;
+        assert_eq!(capped_conf, price.checked_mul(MAX_CONF_INTERVAL).unwrap());
+    }
+
     fn serialized_stake_account(delegated_stake: u64) -> Vec<u8> {
         borsh::to_vec(&StakeStateV2::Stake(
             Meta {
@@ -1970,7 +2048,18 @@ mod tests {
         let feed: SwitchboardPullPriceFeed =
             SwitchboardPullPriceFeed::load_checked(&ai, current_timestamp, max_age).unwrap();
         let price: I80F48 = feed.get_price().unwrap();
-        let conf: I80F48 = feed.get_confidence_interval(0).unwrap();
+
+        let oracle_max_confidence = u32::MAX / 10;
+        let conf: I80F48 = feed.get_confidence_interval(oracle_max_confidence).unwrap();
+
+        let max_conf_interval_expected: I80F48 = price * I80F48::from_num(0.05);
+        assert!(conf <= max_conf_interval_expected);
+
+        // Confidence should be clamped to 5% since default oracle_max_confidence ~10%
+        assert_eq!(
+            conf, max_conf_interval_expected,
+            "With default oracle_max_confidence, conf should be clamped to 5% of price"
+        );
 
         let target_price: I80F48 = I80F48::from_num(155.59);
         let price_tolerance: I80F48 = target_price * I80F48::from_num(0.0001);
@@ -1978,34 +2067,29 @@ mod tests {
         let max_price: I80F48 = target_price.checked_add(price_tolerance).unwrap();
         assert!(price >= min_price && price <= max_price);
 
-        let max_conf: I80F48 = target_price * I80F48::from_num(0.05);
-        assert!(conf <= max_conf);
-
-        let exp_conf: I80F48 = I80F48::from_num(0.47);
-        let min_exp_conf: I80F48 = exp_conf - exp_conf * I80F48::from_num(0.01);
-        let max_exp_conf: I80F48 = exp_conf + exp_conf * I80F48::from_num(0.01);
-        assert!(exp_conf >= min_exp_conf && exp_conf <= max_exp_conf);
-
-        let price_bias_none: I80F48 = feed
-            .get_price_of_type(OraclePriceType::RealTime, None, 0)
+        let price_bias_none = feed
+            .get_price_of_type(OraclePriceType::RealTime, None, oracle_max_confidence)
             .unwrap();
         assert_eq!(price, price_bias_none);
 
-        let price_bias_low: I80F48 = feed
-            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), 0)
+        // Test PriceBias::Low and PriceBias::High
+        let price_low = feed
+            .get_price_of_type(
+                OraclePriceType::RealTime,
+                Some(PriceBias::Low),
+                oracle_max_confidence,
+            )
             .unwrap();
-        let target_price_low: I80F48 = target_price.checked_sub(exp_conf).unwrap();
-        let min_price: I80F48 = target_price_low.checked_sub(price_tolerance).unwrap();
-        let max_price: I80F48 = target_price_low.checked_add(price_tolerance).unwrap();
-        assert!(price_bias_low >= min_price && price_bias_low <= max_price);
+        let price_high = feed
+            .get_price_of_type(
+                OraclePriceType::RealTime,
+                Some(PriceBias::High),
+                oracle_max_confidence,
+            )
+            .unwrap();
 
-        let price_bias_high: I80F48 = feed
-            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::High), 0)
-            .unwrap();
-        let target_price_high: I80F48 = target_price.checked_add(exp_conf).unwrap();
-        let min_price: I80F48 = target_price_high.checked_sub(price_tolerance).unwrap();
-        let max_price: I80F48 = target_price_high.checked_add(price_tolerance).unwrap();
-        assert!(price_bias_high >= min_price && price_bias_high <= max_price);
+        assert_eq!(price_low, price.checked_sub(conf).unwrap());
+        assert_eq!(price_high, price.checked_add(conf).unwrap());
     }
 
     #[test]
@@ -2036,42 +2120,59 @@ mod tests {
         let feed: SwitchboardPullPriceFeed =
             SwitchboardPullPriceFeed::load_checked(&ai, current_timestamp, max_age).unwrap();
         let price: I80F48 = feed.get_price().unwrap();
-        let conf: I80F48 = feed.get_confidence_interval(0).unwrap();
+
+        let oracle_max_confidence = u32::MAX / 10;
+        let conf: I80F48 = feed.get_confidence_interval(oracle_max_confidence).unwrap();
+
+        let max_conf_interval_expected: I80F48 = price * I80F48::from_num(0.05);
+        assert!(
+            conf <= max_conf_interval_expected,
+            "Confidence {:?} should not exceed 5% of price {:?}",
+            conf.to_num::<f64>(),
+            max_conf_interval_expected.to_num::<f64>()
+        );
 
         let target_price: I80F48 = I80F48::from_num(177.351466043);
-        let price_tolerance: I80F48 = target_price * I80F48::from_num(0.0001);
+        let price_tolerance: I80F48 = target_price * I80F48::from_num(0.0001); // 0.01% tolerance
         let min_price: I80F48 = target_price.checked_sub(price_tolerance).unwrap();
         let max_price: I80F48 = target_price.checked_add(price_tolerance).unwrap();
-        assert!(price >= min_price && price <= max_price);
+        assert!(
+            price >= min_price && price <= max_price,
+            "Price {:?} outside expected range [{:?}, {:?}]",
+            price.to_num::<f64>(),
+            min_price.to_num::<f64>(),
+            max_price.to_num::<f64>()
+        );
 
-        let max_conf: I80F48 = target_price * I80F48::from_num(0.05);
-        assert!(conf <= max_conf);
-
-        let exp_conf: I80F48 = I80F48::from_num(0.0046528305);
-        let min_exp_conf: I80F48 = exp_conf - exp_conf * I80F48::from_num(0.01);
-        let max_exp_conf: I80F48 = exp_conf + exp_conf * I80F48::from_num(0.01);
-        assert!(exp_conf >= min_exp_conf && exp_conf <= max_exp_conf);
+        // Confidence should be clamped to 5% since default oracle_max_confidence ~10%
+        assert_eq!(
+            conf, max_conf_interval_expected,
+            "With default oracle_max_confidence, conf should be clamped to 5% of price"
+        );
 
         let price_bias_none: I80F48 = feed
-            .get_price_of_type(OraclePriceType::RealTime, None, 0)
+            .get_price_of_type(OraclePriceType::RealTime, None, oracle_max_confidence)
             .unwrap();
         assert_eq!(price, price_bias_none);
 
-        let price_bias_low: I80F48 = feed
-            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::Low), 0)
+        let price_low = feed
+            .get_price_of_type(
+                OraclePriceType::RealTime,
+                Some(PriceBias::Low),
+                oracle_max_confidence,
+            )
             .unwrap();
-        let target_price_low: I80F48 = target_price.checked_sub(exp_conf).unwrap();
-        let min_price: I80F48 = target_price_low.checked_sub(price_tolerance).unwrap();
-        let max_price: I80F48 = target_price_low.checked_add(price_tolerance).unwrap();
-        assert!(price_bias_low >= min_price && price_bias_low <= max_price);
+        let price_high = feed
+            .get_price_of_type(
+                OraclePriceType::RealTime,
+                Some(PriceBias::High),
+                oracle_max_confidence,
+            )
+            .unwrap();
 
-        let price_bias_high: I80F48 = feed
-            .get_price_of_type(OraclePriceType::RealTime, Some(PriceBias::High), 0)
-            .unwrap();
-        let target_price_high: I80F48 = target_price.checked_add(exp_conf).unwrap();
-        let min_price: I80F48 = target_price_high.checked_sub(price_tolerance).unwrap();
-        let max_price: I80F48 = target_price_high.checked_add(price_tolerance).unwrap();
-        assert!(price_bias_high >= min_price && price_bias_high <= max_price);
+        // Validate concrete relationship: biased prices should be exactly price ± confidence
+        assert_eq!(price_low, price.checked_sub(conf).unwrap());
+        assert_eq!(price_high, price.checked_add(conf).unwrap());
     }
 
     #[test]

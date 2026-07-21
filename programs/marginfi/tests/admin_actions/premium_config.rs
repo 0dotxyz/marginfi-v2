@@ -1,11 +1,10 @@
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
-use fixtures::marginfi_group::MarginfiGroupFixture;
 use fixtures::prelude::*;
 use marginfi::state::bank::BankImpl;
 use marginfi_type_crate::{
     constants::PREMIUM_ACTIVE,
-    types::{milli_to_u32, FeeStateV2, PremiumEntry, MAX_PREMIUM_ENTRIES},
+    types::{milli_to_u32, FeeState, PremiumEntry, MAX_PREMIUM_ENTRIES},
 };
 use pretty_assertions::assert_eq;
 use solana_program_test::*;
@@ -19,8 +18,8 @@ fn entry(collateral_tag: u16, liability_tag: u16, percent: f64) -> PremiumEntry 
     }
 }
 
-async fn load_fee_state_v2(test_f: &TestFixture) -> FeeStateV2 {
-    let key = MarginfiGroupFixture::fee_state_v2_key();
+async fn load_fee_state(test_f: &TestFixture) -> FeeState {
+    let key = test_f.marginfi_group.fee_state;
     let account = test_f
         .context
         .borrow_mut()
@@ -29,7 +28,7 @@ async fn load_fee_state_v2(test_f: &TestFixture) -> FeeStateV2 {
         .await
         .unwrap()
         .unwrap();
-    *bytemuck::from_bytes::<FeeStateV2>(&account.data[8..])
+    *bytemuck::from_bytes::<FeeState>(&account.data[8..])
 }
 
 #[tokio::test]
@@ -37,18 +36,16 @@ async fn premium_config_happy_path() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let group_f = &test_f.marginfi_group;
 
-    group_f.try_init_and_copy_fee_state_v2().await?;
-
     // Global fee admin (payer) sets the premium wallet
     let premium_wallet = Keypair::new().pubkey();
     group_f
-        .try_edit_fee_state_v2_premium(Some(premium_wallet))
+        .try_edit_fee_state_premium(Some(premium_wallet))
         .await?;
 
-    let fee_state_v2 = load_fee_state_v2(&test_f).await;
-    assert_eq!(fee_state_v2.premium_wallet, premium_wallet);
-    // Copy must not have clobbered the premium fields but did copy v1 fields
-    assert_eq!(fee_state_v2.global_fee_admin, test_f.payer());
+    let fee_state = load_fee_state(&test_f).await;
+    assert_eq!(fee_state.premium_wallet, premium_wallet);
+    // Editing the premium wallet must not clobber the v1 fields
+    assert_eq!(fee_state.global_fee_admin, test_f.payer());
 
     // emode admin (payer) sets pairs one at a time; entries are stored sorted regardless of
     // the order they were added in
@@ -109,12 +106,6 @@ async fn premium_config_happy_path() -> anyhow::Result<()> {
     let group = group_f.load().await;
     assert_eq!(group.premium_settings.entry_count, 0);
 
-    // The PERMISSIONLESS copy must never clobber the premium fields: re-running it after the
-    // wallet was set has to leave the wallet intact (it assigns only the named v1 fields).
-    group_f.try_init_and_copy_fee_state_v2().await?;
-    let fee_state_v2 = load_fee_state_v2(&test_f).await;
-    assert_eq!(fee_state_v2.premium_wallet, premium_wallet);
-
     Ok(())
 }
 
@@ -122,8 +113,6 @@ async fn premium_config_happy_path() -> anyhow::Result<()> {
 async fn premium_config_wrong_admin_fails() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let group_f = &test_f.marginfi_group;
-    group_f.try_init_and_copy_fee_state_v2().await?;
-
     let intruder = Keypair::new();
 
     let res = group_f
@@ -138,7 +127,7 @@ async fn premium_config_wrong_admin_fails() -> anyhow::Result<()> {
     assert!(res.is_err());
 
     let res = group_f
-        .try_edit_fee_state_v2_premium_with_signer(Some(Pubkey::new_unique()), &intruder)
+        .try_edit_fee_state_premium_with_signer(Some(Pubkey::new_unique()), &intruder)
         .await;
     assert!(res.is_err());
 
@@ -149,8 +138,6 @@ async fn premium_config_wrong_admin_fails() -> anyhow::Result<()> {
 async fn premium_config_matrix_validation() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
     let group_f = &test_f.marginfi_group;
-    group_f.try_init_and_copy_fee_state_v2().await?;
-
     // Zero tags rejected
     let res = group_f
         .try_configure_group_premium(entry(0, 100, 1.0))

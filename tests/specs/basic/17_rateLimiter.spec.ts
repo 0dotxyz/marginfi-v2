@@ -101,14 +101,16 @@ function parseRateLimitFlowEvents(
  * In production, the admin would use oracle prices to convert native amounts to USD.
  * For testing with USDC ($1 = 1 USDC), native amount / 10^decimals = USD value.
  */
-function aggregateFlowEvents(
-  events: RateLimitFlowEvent[],
-): { totalOutflowUsd: number; totalInflowUsd: number } {
+function aggregateFlowEvents(events: RateLimitFlowEvent[]): {
+  totalOutflowUsd: number;
+  totalInflowUsd: number;
+} {
   let totalOutflowUsd = 0;
   let totalInflowUsd = 0;
 
   for (const event of events) {
-    const usdValue = event.nativeAmount.toNumber() / Math.pow(10, event.mintDecimals);
+    const usdValue =
+      event.nativeAmount.toNumber() / Math.pow(10, event.mintDecimals);
     if (event.flowDirection === 0) {
       totalOutflowUsd += usdValue;
     } else {
@@ -269,7 +271,9 @@ describe("Rate limiter", () => {
   /**
    * Borrow USDC and return parsed RateLimitFlowEvents from the transaction logs
    */
-  const borrowUsdcWithEvents = async (amount: BN): Promise<RateLimitFlowEvent[]> => {
+  const borrowUsdcWithEvents = async (
+    amount: BN
+  ): Promise<RateLimitFlowEvent[]> => {
     const prog = userProgram();
     const tx = new Transaction().add(
       dummyIx(prog.provider.publicKey, users[0].wallet.publicKey),
@@ -281,11 +285,9 @@ describe("Rate limiter", () => {
         amount,
       }),
     );
-    const result = await processBankrunTransaction(
-      bankrunContext,
-      tx,
-      [rateLimitUser.wallet],
-    );
+    const result = await processBankrunTransaction(bankrunContext, tx, [
+      rateLimitUser.wallet,
+    ]);
     return parseRateLimitFlowEvents(prog, result.logMessages);
   };
 
@@ -311,7 +313,9 @@ describe("Rate limiter", () => {
   /**
    * Repay USDC and return parsed RateLimitFlowEvents from the transaction logs
    */
-  const repayUsdcWithEvents = async (amount: BN): Promise<RateLimitFlowEvent[]> => {
+  const repayUsdcWithEvents = async (
+    amount: BN
+  ): Promise<RateLimitFlowEvent[]> => {
     const prog = userProgram();
     const tx = new Transaction().add(
       dummyIx(prog.provider.publicKey, users[0].wallet.publicKey),
@@ -323,11 +327,9 @@ describe("Rate limiter", () => {
         amount,
       }),
     );
-    const result = await processBankrunTransaction(
-      bankrunContext,
-      tx,
-      [rateLimitUser.wallet],
-    );
+    const result = await processBankrunTransaction(bankrunContext, tx, [
+      rateLimitUser.wallet,
+    ]);
     return parseRateLimitFlowEvents(prog, result.logMessages);
   };
 
@@ -339,7 +341,9 @@ describe("Rate limiter", () => {
       marginfiGroup.publicKey,
     );
     const updateSeq = groupState.rateLimiterLastAdminUpdateSeq.add(new BN(1));
-    const eventStartSlot = groupState.rateLimiterLastAdminUpdateSlot.add(new BN(1));
+    const eventStartSlot = groupState.rateLimiterLastAdminUpdateSlot.add(
+      new BN(1)
+    );
     let eventEndSlot = await getCurrentBankrunSlot();
 
     // Strict slot progression requires start > last_slot and start <= end.
@@ -571,7 +575,10 @@ describe("Rate limiter", () => {
     assert.equal(borrowEvents[0].flowDirection, 0, "Expected outflow (0)");
     assertBNEqual(borrowEvents[0].nativeAmount, usdcNative(5));
     assert.equal(borrowEvents[0].mintDecimals, 6, "USDC has 6 decimals");
-    assert.ok(borrowEvents[0].currentTimestamp.toNumber() > 0, "Timestamp should be set");
+    assert.ok(
+      borrowEvents[0].currentTimestamp.toNumber() > 0,
+      "Timestamp should be set"
+    );
 
     // Admin aggregates events and updates group rate limiter (simulating off-chain flow)
     const { totalOutflowUsd } = aggregateFlowEvents(borrowEvents);
@@ -596,7 +603,11 @@ describe("Rate limiter", () => {
     // Repay 3 USDC and capture events
     const repayEvents = await repayUsdcWithEvents(usdcNative(3));
 
-    assert.equal(repayEvents.length, 1, "Expected 1 RateLimitFlowEvent for repay");
+    assert.equal(
+      repayEvents.length,
+      1,
+      "Expected 1 RateLimitFlowEvent for repay"
+    );
     assert.equal(repayEvents[0].flowDirection, 1, "Expected inflow (1)");
     assertBNEqual(repayEvents[0].nativeAmount, usdcNative(3));
 

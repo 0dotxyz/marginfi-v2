@@ -160,7 +160,12 @@ describe("k03: Deposit to Kamino reserve", () => {
         .instruction(),
     );
 
-    const result = await processBankrunTransaction(ctx, tx, [user.wallet], true);
+    const result = await processBankrunTransaction(
+      ctx,
+      tx,
+      [user.wallet],
+      true
+    );
     // Kamino Error Code: InvalidAmount. Error Number: 6003.
     assertBankrunTxFailed(result, 6003);
   });

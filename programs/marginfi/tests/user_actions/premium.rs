@@ -68,7 +68,6 @@ async fn premium_test_fixture() -> TestFixture {
     advance_clock(&test_f, 1_700_000_000).await;
 
     let group_f = &test_f.marginfi_group;
-    group_f.try_init_and_copy_fee_state_v2().await.unwrap();
     group_f
         .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
         .await
@@ -242,7 +241,6 @@ async fn premium_activation_never_charges_retroactively() -> anyhow::Result<()> 
     .await;
     advance_clock(&test_f, 1_700_000_000).await;
     let group_f = &test_f.marginfi_group;
-    group_f.try_init_and_copy_fee_state_v2().await?;
     let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
 
     let (_lender, borrower, _) = setup_borrower(&test_f, 1_000.0).await;
@@ -386,7 +384,7 @@ async fn premium_repay_all_settles_and_sweep_pays_premium_wallet() -> anyhow::Re
     // Sweep to the premium wallet's canonical ATA (permissionless)
     let premium_wallet = Keypair::new().pubkey();
     group_f
-        .try_edit_fee_state_v2_premium(Some(premium_wallet))
+        .try_edit_fee_state_premium(Some(premium_wallet))
         .await?;
     let premium_ata = TokenAccountFixture::new_from_ata(
         test_f.context.clone(),
@@ -433,7 +431,7 @@ async fn premium_sweep_without_realized_premium_transfers_nothing() -> anyhow::R
 
     let premium_wallet = Keypair::new().pubkey();
     group_f
-        .try_edit_fee_state_v2_premium(Some(premium_wallet))
+        .try_edit_fee_state_premium(Some(premium_wallet))
         .await?;
     let premium_ata = TokenAccountFixture::new_from_ata(
         test_f.context.clone(),
@@ -467,7 +465,7 @@ async fn premium_sweep_requires_canonical_ata_and_configured_wallet() -> anyhow:
     // Configured wallet, but a non-canonical destination -> InvalidPremiumAta
     let premium_wallet = Keypair::new().pubkey();
     group_f
-        .try_edit_fee_state_v2_premium(Some(premium_wallet))
+        .try_edit_fee_state_premium(Some(premium_wallet))
         .await?;
     let res = group_f
         .try_collect_premium_fees(usdc_bank_f, random_ata.key)
@@ -510,7 +508,6 @@ async fn premium_snapshot_reprices_when_collateral_improves() -> anyhow::Result<
     .await;
     advance_clock(&test_f, 1_700_000_000).await;
     let group_f = &test_f.marginfi_group;
-    group_f.try_init_and_copy_fee_state_v2().await?;
     // (sol -> stable) = 1%; sol_eq is untagged => 0% leg
     group_f
         .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
@@ -721,7 +718,6 @@ async fn premium_composes_with_emode() -> anyhow::Result<()> {
         .await?;
 
     // Premium: independent tag space; (SOL -> LST) = 4%, (stable -> LST) = 6%.
-    group_f.try_init_and_copy_fee_state_v2().await?;
     group_f
         .try_configure_group_premium(entry(TAG_SOL, TAG_LST, 4.0))
         .await?;
@@ -857,7 +853,6 @@ async fn premium_direct_liquidation_refreshes_snapshots() -> anyhow::Result<()> 
     let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
 
     // (sol -> stable) = 1%; sol_eq stays untagged => 0% leg
-    group_f.try_init_and_copy_fee_state_v2().await?;
     group_f
         .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
         .await?;
@@ -1020,7 +1015,6 @@ async fn premium_order_execution_reweights_surviving_liability() -> anyhow::Resu
     let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
 
     // (sol -> stable) = 1%; sol_eq and pyusd stay untagged
-    group_f.try_init_and_copy_fee_state_v2().await?;
     group_f
         .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
         .await?;
@@ -1212,7 +1206,6 @@ async fn premium_liquidation_claims_at_old_rate_and_seizing_untagged_raises_rate
     let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
 
     // (sol -> stable) = 1%; sol_eq stays untagged => 0% leg
-    group_f.try_init_and_copy_fee_state_v2().await?;
     group_f
         .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
         .await?;
@@ -1350,7 +1343,6 @@ async fn premium_liquidation_reweights_liquidator_existing_debt() -> anyhow::Res
     let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
 
     // (sol -> stable) = 1%; sol_eq stays untagged => 0% leg
-    group_f.try_init_and_copy_fee_state_v2().await?;
     group_f
         .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
         .await?;

@@ -330,9 +330,12 @@ mod tests {
     fn group_premium_field_layout() {
         use std::mem::align_of;
 
-        assert_eq!(size_of::<MarginfiGroup>(), 1056);
+        assert_eq!(size_of::<MarginfiGroup>(), 9248);
         assert_eq!(offset_of!(MarginfiGroup, premium_settings), 512);
         assert_eq!(offset_of!(MarginfiGroup, premium_entries), 544);
+        // Premium fields fill the v1 layout exactly (former `_padding_0`/`_padding_1`);
+        // `_padding_2` (the 0.1.10 resize region) starts at the v1 struct end.
+        assert_eq!(offset_of!(MarginfiGroup, _padding_2), MarginfiGroup::V1_LEN);
 
         // PremiumSettings internals: 8 + 2 + 2 + 4 + 16 = 32, 8-aligned, no implicit padding
         // (Pod derive would reject implicit padding at compile time; these pin the EXPLICIT
@@ -346,7 +349,7 @@ mod tests {
         assert_eq!(offset_of!(PremiumSettings, _reserved0), 16);
 
         // PremiumEntry: 2 + 2 + 4 = 8, 4-aligned; the array of 64 fills exactly the old
-        // `_padding_1` region (544 + 512 = 1056, the struct end).
+        // `_padding_1` region (544 + 512 = 1056, the v1 struct end).
         assert_eq!(size_of::<PremiumEntry>(), 8);
         assert_eq!(align_of::<PremiumEntry>(), 4);
         assert_eq!(offset_of!(PremiumEntry, collateral_tag), 0);
@@ -359,21 +362,25 @@ mod tests {
         assert_eq!(group.find_premium_rate(100, 200), 0);
     }
 
-    /// The premium fields must occupy exactly the two 16-byte reserves that were
-    /// `_padding_0: [u8; 16]` (after `borrowing_position_count`) and `_pad_0: [u8; 16]`
-    /// (after `rate_limiter`) before 0.1.10, so pre-existing banks read as untagged and
-    /// with no collected premium. `bank_seed` and the circuit-breaker block stay at their
-    /// 0.1.10 positions.
+    /// The premium fields must occupy exactly zero-padding reserves of the pre-premium
+    /// layout, so pre-existing banks read as untagged and with no collected premium:
+    /// `collected_premium_outstanding` takes the former `_pad_0: [u8; 16]` (after
+    /// `rate_limiter`), and `premium_tag`/`premium_activated_at` take the first 16 bytes of
+    /// the former `_padding_1: [u64; 3]` tail (the liquidation-fee fields own the former
+    /// `_padding_0` after `borrowing_position_count`). `bank_seed` and the circuit-breaker
+    /// block stay at their 0.1.10 positions.
     #[test]
     fn bank_premium_field_layout() {
         assert_eq!(size_of::<Bank>(), 1856);
-        assert_eq!(offset_of!(Bank, premium_tag), 1536);
-        assert_eq!(offset_of!(Bank, _pad3), 1538);
-        assert_eq!(offset_of!(Bank, premium_activated_at), 1544);
+        assert_eq!(offset_of!(Bank, liquidation_liquidator_fee), 1536);
+        assert_eq!(offset_of!(Bank, liquidation_insurance_fee), 1540);
         assert_eq!(offset_of!(Bank, collected_premium_outstanding), 1728);
         assert_eq!(offset_of!(Bank, bank_seed), 1744);
         assert_eq!(offset_of!(Bank, cb_halt_started_at), 1752);
-        assert_eq!(offset_of!(Bank, _padding_1), 1832);
+        assert_eq!(offset_of!(Bank, premium_tag), 1832);
+        assert_eq!(offset_of!(Bank, _pad3), 1834);
+        assert_eq!(offset_of!(Bank, premium_activated_at), 1840);
+        assert_eq!(offset_of!(Bank, _padding_1), 1848);
     }
 
     /// The premium fields must occupy exactly the bytes that were `_pad0: [u8; 4]` and

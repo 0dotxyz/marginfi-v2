@@ -13,7 +13,7 @@ use super::{
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
 
-assert_struct_size!(MarginfiGroup, 1056);
+assert_struct_size!(MarginfiGroup, 9248);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
 #[cfg_attr(not(feature = "anchor"), derive(Pod, Zeroable, Copy, Clone))]
@@ -96,24 +96,22 @@ pub struct MarginfiGroup {
     pub delegate_flow_admin: Pubkey,
 
     /// Header for the pairwise variable-borrow premium matrix stored in `premium_entries`.
+    /// Occupies the former `_padding_0`/`_padding_1` region of the v1 layout, so v1 accounts
+    /// resize to a zeroed header (matrix off).
     pub premium_settings: PremiumSettings,
     /// Pairwise variable-borrow premium rates, keyed by (collateral `premium_tag`, liability
     /// `premium_tag`). Live entries occupy the first `premium_settings.entry_count` slots.
-    /// * Deliberately the LAST field: a future group-account resize can extend capacity past
-    ///   the current struct size without moving any field. Read only via `find_premium_rate`.
+    /// Read only via `find_premium_rate`. Future capacity growth carves from `_padding_2`.
     pub premium_entries: [PremiumEntry; MAX_PREMIUM_ENTRIES],
+    pub _padding_2: [[u64; 32]; 32],
 }
 
 impl MarginfiGroup {
     pub const LEN: usize = std::mem::size_of::<MarginfiGroup>();
     pub const DISCRIMINATOR: [u8; 8] = discriminators::GROUP;
-    /// Bytes reserved between the fixed struct and the tail premium entries on a resized group
-    /// account. Future fixed-size group fields are carved from this region so the premium
-    /// entries always stay last (and can keep growing).
-    pub const EXT_RESERVED_LEN: usize = 64;
-    /// Account-data offset of the first tail premium entry on a resized group account.
-    /// Accounts at the original size (`8 + LEN`) have no tail.
-    pub const PREMIUM_TAIL_OFFSET: usize = 8 + Self::LEN + Self::EXT_RESERVED_LEN;
+    /// Struct size of the PREVIOUS (v1) group layout — the size of accounts created before
+    /// `_padding_2` existed, and a byte-identical prefix of the current layout.
+    pub const V1_LEN: usize = 1056;
 }
 
 impl Default for MarginfiGroup {

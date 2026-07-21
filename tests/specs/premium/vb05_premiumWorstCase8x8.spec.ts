@@ -14,7 +14,6 @@ import {
   banksClient,
   ecosystem,
   emodeAdmin,
-  globalProgramAdmin,
   groupAdmin,
   oracles,
   users,
@@ -35,9 +34,6 @@ import {
 import {
   configBankPremium,
   configGroupPremium,
-  copyFeeStateToV2,
-  deriveFeeStateV2,
-  initGlobalFeeStateV2,
   newPremiumEntry,
   u32ToPremiumRate,
 } from "../../utils/premium-instructions";
@@ -134,7 +130,7 @@ describe("vb05: Premium worst case (8x8 matrix, 16 balances)", () => {
     return bankKey;
   };
 
-  it("init group + FeeStateV2, fund LST", async () => {
+  it("init group, fund LST", async () => {
     // Group + emode admin
     let tx = new Transaction().add(
       await groupInitialize(groupAdmin.mrgnBankrunProgram, {
@@ -153,21 +149,6 @@ describe("vb05: Premium worst case (8x8 matrix, 16 balances)", () => {
       }),
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
-
-    // FeeStateV2 is global: init+copy only if a prior vb spec hasn't already.
-    const [feeStateV2Key] = deriveFeeStateV2(bankrunProgram.programId);
-    const existing = await banksClient.getAccount(feeStateV2Key);
-    if (!existing) {
-      tx = new Transaction().add(
-        await initGlobalFeeStateV2(globalProgramAdmin.mrgnBankrunProgram, {
-          payer: globalProgramAdmin.wallet.publicKey,
-        }),
-        await copyFeeStateToV2(globalProgramAdmin.mrgnBankrunProgram),
-      );
-      await processBankrunTransaction(bankrunContext, tx, [
-        globalProgramAdmin.wallet,
-      ]);
-    }
 
     // Fund borrower + lender with LST.
     const payer = bankrunContext.payer;
