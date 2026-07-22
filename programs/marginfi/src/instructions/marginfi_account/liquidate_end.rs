@@ -218,15 +218,14 @@ pub struct EndLiquidation<'info> {
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
-    /// Needed to read the premium matrix for snapshot recompute
-    pub group: AccountLoader<'info, MarginfiGroup>,
-
     /// The associated liquidation record PDA for the given `marginfi_account`
     #[account(
         mut,
         has_one = liquidation_receiver @ MarginfiError::InvalidLiquidationReceiver
     )]
     pub liquidation_record: AccountLoader<'info, LiquidationRecord>,
+
+    pub group: AccountLoader<'info, MarginfiGroup>,
 
     // Note: mutable signer because it must pay the transfer fee
     #[account(mut)]
