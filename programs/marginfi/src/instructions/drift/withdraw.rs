@@ -294,6 +294,12 @@ pub fn drift_withdraw<'info>(
 
             health_cache.program_version = PROGRAM_VERSION;
 
+            // Withdrawing shifts collateral; revert if a stale oracle leaves the rate unpriceable.
+            check!(
+                !premium_scratch.refresh_unavailable(),
+                MarginfiError::PremiumSnapshotUnavailable
+            );
+
             // Claim premium at the old rates and refresh every liability's premium rate
             // snapshot with the post-withdraw collateral mix.
             update_premium_snapshots(

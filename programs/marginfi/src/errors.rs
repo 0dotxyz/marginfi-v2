@@ -459,7 +459,11 @@ pub enum MarginfiError {
     PremiumWalletNotSet, // 6613
     #[msg("Premium (collateral, liability) pair is not in the matrix")]
     PremiumEntryNotFound, // 6614
-                          // **************END PREMIUM ERRORS
+    #[msg(
+        "Premium rate cannot be computed (a collateral oracle failed); retry with valid oracles"
+    )]
+    PremiumSnapshotUnavailable, // 6615
+                                // **************END PREMIUM ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -711,6 +715,7 @@ impl From<u32> for MarginfiError {
             6612 => MarginfiError::InvalidPremiumAta,
             6613 => MarginfiError::PremiumWalletNotSet,
             6614 => MarginfiError::PremiumEntryNotFound,
+            6615 => MarginfiError::PremiumSnapshotUnavailable,
 
             _ => MarginfiError::InternalLogicError,
         }

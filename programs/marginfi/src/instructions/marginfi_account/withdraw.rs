@@ -250,6 +250,12 @@ pub fn lending_account_withdraw<'info>(
             run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
         }
 
+        // Withdrawing shifts collateral; revert if a stale oracle leaves the rate unpriceable.
+        check!(
+            !premium_scratch.refresh_unavailable(),
+            MarginfiError::PremiumSnapshotUnavailable
+        );
+
         // Claim premium at the old rates and refresh every liability's premium rate snapshot
         // with the post-withdraw collateral mix.
         update_premium_snapshots(

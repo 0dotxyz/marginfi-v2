@@ -16,8 +16,8 @@ use marginfi_type_crate::{
     constants::{
         ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
         ASSET_TAG_SOLEND, ASSET_TAG_STAKED, BANKRUPT_THRESHOLD, BANK_SAME_ASSET_EMODE_ELIGIBLE,
-        CIRCUIT_BREAKER_ENABLED, EXP_10_I80F48, MAX_INTEGRATION_POSITIONS, ORDER_ACTIVE_TAGS,
-        PREMIUM_ACTIVE, ZERO_AMOUNT_THRESHOLD,
+        CIRCUIT_BREAKER_ENABLED, EMPTY_BALANCE_THRESHOLD, EXP_10_I80F48, MAX_INTEGRATION_POSITIONS,
+        ORDER_ACTIVE_TAGS, PREMIUM_ACTIVE, ZERO_AMOUNT_THRESHOLD,
     },
     types::{
         compute_same_asset_emode_weight, reconcile_emode_configs, u32_to_basis, Balance,
@@ -1116,9 +1116,12 @@ pub fn get_health_components<'info>(
         heap_restore(heap_checkpoint);
     }
 
-    // Snapshot writes are gated on a fully-successful pass over every balance.
-    if let Some(scratch) = premium_scratch.as_mut() {
-        scratch.complete = true;
+    // Only complete if every balance priced cleanly, so a refresh can't be written from a pass
+    // that dropped a stale leg (isolated/ReduceOnly value to zero without an err_code).
+    if first_err_index == NO_INDEX_FOUND {
+        if let Some(scratch) = premium_scratch.as_mut() {
+            scratch.complete = true;
+        }
     }
 
     // Update health cache totals
@@ -2391,16 +2394,13 @@ impl<'a> BankAccountWrapper<'a> {
         }
         if had_liabs && !has_liabs {
             bank.decrement_borrowing_position_count();
-            // Liability cleared with no tokens (legacy liquidation flips): write off any
-            // residual receivable without crediting the bank.
-            let residual: I80F48 = balance.premium_outstanding.into();
-            if residual > I80F48::ZERO {
-                debug!(
-                    "liability flip: writing off premium receivable {}",
-                    residual
-                );
-                balance.premium_outstanding = I80F48::ZERO.into();
-            }
+        }
+        // Below EMPTY_BALANCE_THRESHOLD health treats the liability as empty, so clear the
+        // premium too — otherwise a book-transfer that leaves dust (liquidation) strands a
+        // receivable that health never projects.
+        if had_liabs && I80F48::from(balance.liability_shares) < EMPTY_BALANCE_THRESHOLD {
+            balance.premium_outstanding = I80F48::ZERO.into();
+            balance.premium_rate_snapshot = 0;
         }
 
         let share_amount = match operation_type {

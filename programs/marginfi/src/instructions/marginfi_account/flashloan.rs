@@ -130,6 +130,12 @@ pub fn lending_account_end_flashloan<'info>(
         &mut Some(&mut premium_scratch),
     )?;
 
+    // Enforce borrow's deferred gate: revert if new premium debt can't be priced here.
+    check!(
+        !premium_scratch.refresh_unavailable(),
+        MarginfiError::PremiumSnapshotUnavailable
+    );
+
     // Claim premium at the old rates and refresh every liability's premium rate snapshot with
     // the post-flashloan balances.
     update_premium_snapshots(

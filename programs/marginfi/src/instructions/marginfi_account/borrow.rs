@@ -223,6 +223,13 @@ pub fn lending_account_borrow<'info>(
     )?;
     health_cache.program_version = PROGRAM_VERSION;
 
+    // New debt needs a real rate: revert if a stale oracle left the premium pass unpriceable
+    // (in a flashloan the scratch is empty and this passes; flashloan-end re-checks).
+    check!(
+        !premium_scratch.refresh_unavailable(),
+        MarginfiError::PremiumSnapshotUnavailable
+    );
+
     // Revert if any involved bank's oracle price has jumped past the breach threshold.
     run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
 

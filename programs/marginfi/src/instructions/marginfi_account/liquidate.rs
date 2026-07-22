@@ -608,6 +608,12 @@ fn check_liquidator_health_and_refresh_premium<'info>(
         &mut None,
         &mut Some(&mut premium_scratch),
     )?;
+    // Assumed debt needs a real rate: revert if a stale oracle left it unpriceable (the
+    // liquidatee's Maintenance pass hard-fails first, so it needs no gate).
+    check!(
+        !premium_scratch.refresh_unavailable(),
+        MarginfiError::PremiumSnapshotUnavailable
+    );
     update_premium_snapshots(liquidator_marginfi_account, group, &premium_scratch, now)?;
     Ok(())
 }

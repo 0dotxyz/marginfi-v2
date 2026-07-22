@@ -8,7 +8,7 @@ use anchor_spl::associated_token::get_associated_token_address_with_program_id;
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
 use fixtures::marginfi_account::MarginfiAccountFixture;
-use fixtures::{assert_eq_noise, native, prelude::*};
+use fixtures::{assert_custom_error, assert_eq_noise, native, prelude::*};
 use marginfi::state::bank::BankImpl;
 use marginfi_type_crate::types::{
     make_points, milli_to_u32, u32_to_milli, Balance, BankConfig, BankConfigOpt,
@@ -1443,6 +1443,725 @@ async fn premium_liquidation_reweights_liquidator_existing_debt() -> anyhow::Res
         I80F48::from(native!(10, "USDC")),
         I80F48!(50)
     );
+
+    Ok(())
+}
+
+/// A pulse during an oracle outage must NOT rewrite snapshots. Under `Initial` requirements the
+/// health loop soft-skips a failed collateral oracle (values the leg at 0 and records
+/// `internal_err`); writing rates from that pass would exclude the tagged leg — letting a
+/// borrower zero their own premium by pulsing while the risky collateral's oracle is stale.
+#[tokio::test]
+async fn premium_pulse_with_stale_collateral_oracle_never_rewrites_snapshots() -> anyhow::Result<()>
+{
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    // (sol -> stable) = 1%; sol_eq stays untagged => 0% leg
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)
+        .await?;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+
+    // Borrower: equal USD of tagged SOL + untagged SolEq -> 0.5% on the 1000 USDC debt
+    let borrower = test_f.create_marginfi_account().await;
+    let borrower_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let borrower_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol_eq.key, sol_eq_bank_f, 999, None)
+        .await?;
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, usdc_bank_f, 1_000)
+        .await?;
+
+    let account = borrower.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    assert!((snapshot_percent(balance) - 0.5).abs() < 0.001);
+    let last_update_at_borrow = balance.last_update;
+
+    // An hour passes and the tagged SOL oracle goes stale (only the other feeds refresh)
+    advance_clock_with_feeds(&test_f, 3_600, &[PYTH_USDC_FEED, PYTH_SOL_EQUIVALENT_FEED]).await;
+
+    // The pulse itself succeeds (asset-side oracle failures soft-skip under Initial), but the
+    // snapshot pass must be a full no-op: rate NOT re-weighted to 0%, accrual clock untouched.
+    borrower.try_lending_account_pulse_health().await?;
+    let account = borrower.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    let rate = snapshot_percent(balance);
+    assert!(
+        (rate - 0.5).abs() < 0.001,
+        "stale-oracle pulse rewrote snapshot to {}%",
+        rate
+    );
+    assert_eq!(balance.last_update, last_update_at_borrow);
+
+    // Once the oracle is fresh again the pulse works normally: same mix -> same 0.5%, and the
+    // FULL elapsed window (both hours) bills at that rate in one claim.
+    advance_clock(&test_f, 3_600).await;
+    borrower.try_lending_account_pulse_health().await?;
+    let account = borrower.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    assert!((snapshot_percent(balance) - 0.5).abs() < 0.001);
+    assert!(balance.last_update > last_update_at_borrow);
+    let expected = I80F48::from(native!(1_000, "USDC"))
+        * I80F48!(0.005)
+        * I80F48::from_num(7_200.0 / (365.0 * 24.0 * 60.0 * 60.0));
+    assert_eq_noise!(
+        I80F48::from(balance.premium_outstanding),
+        expected,
+        I80F48!(50)
+    );
+
+    Ok(())
+}
+
+/// Debt origination during an oracle outage must revert, not open at 0%: with the snapshot
+/// pass gated off (incomplete scratch), a fresh premium-active borrow would otherwise keep its
+/// initial 0% snapshot for the whole outage.
+#[tokio::test]
+async fn premium_borrow_rejected_when_collateral_oracle_stale() -> anyhow::Result<()> {
+    use marginfi::errors::MarginfiError;
+
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)
+        .await?;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+
+    // Borrower: tagged SOL + plenty of untagged SolEq (health passes even with SOL skipped)
+    let borrower = test_f.create_marginfi_account().await;
+    let borrower_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let borrower_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol_eq.key, sol_eq_bank_f, 999, None)
+        .await?;
+
+    // The tagged SOL oracle goes stale; the health check would soft-skip it and still pass on
+    // the $9,990 of untagged SolEq — but the premium rate is then unpriceable.
+    advance_clock_with_feeds(&test_f, 3_600, &[PYTH_USDC_FEED, PYTH_SOL_EQUIVALENT_FEED]).await;
+
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    let res = borrower
+        .try_bank_borrow(borrower_usdc.key, usdc_bank_f, 100)
+        .await;
+    assert!(res.is_err(), "borrow must revert during the oracle outage");
+    assert_custom_error!(res.unwrap_err(), MarginfiError::PremiumSnapshotUnavailable);
+
+    // Once the oracle is fresh the same borrow succeeds and snapshots at the weighted 0.5%
+    advance_clock(&test_f, 60).await;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, usdc_bank_f, 100)
+        .await?;
+    let account = borrower.load().await;
+    let rate = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
+    assert!((rate - 0.5).abs() < 0.001, "snapshot {} != 0.5%", rate);
+
+    Ok(())
+}
+
+/// Clearing a liability without closing the balance (exact-amount repay, liquidation flips)
+/// must clear the rate snapshot too: a re-borrow on the still-active balance would otherwise
+/// accrue premium across the entire debt-free gap at the stale rate.
+#[tokio::test]
+async fn premium_reopened_liability_pays_nothing_for_debt_free_gap() -> anyhow::Result<()> {
+    let test_f = premium_test_fixture().await;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let (_lender, borrower, borrower_usdc) = setup_borrower(&test_f, 1_000.0).await;
+
+    let account = borrower.load().await;
+    assert!((snapshot_percent(usdc_balance(&account, &usdc_bank_f.key)) - 1.0).abs() < 0.0001);
+
+    // Exact-amount repay (NOT repay_all): clears the debt but keeps the balance slot active
+    borrower
+        .try_bank_repay(borrower_usdc, usdc_bank_f, 1_000, Some(false))
+        .await?;
+    let account = borrower.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    assert!(balance.is_empty(marginfi_type_crate::types::BalanceSide::Liabilities));
+    assert_eq!(
+        balance.premium_rate_snapshot, 0,
+        "cleared liability kept a stale snapshot"
+    );
+
+    // A debt-free year passes, then the borrower reopens on the same balance slot
+    advance_clock(&test_f, YEAR).await;
+    borrower
+        .try_bank_borrow(borrower_usdc, usdc_bank_f, 500)
+        .await?;
+
+    let account = borrower.load().await;
+    let balance = usdc_balance(&account, &usdc_bank_f.key);
+    // Nothing may accrue for the gap (pre-fix: 500 x 1% x 1yr = 5 USDC charged retroactively)
+    assert_eq!(
+        I80F48::from(balance.premium_outstanding),
+        I80F48::ZERO,
+        "debt-free gap was charged retroactively"
+    );
+    // The new debt reprices normally going forward
+    assert!((snapshot_percent(balance) - 1.0).abs() < 0.0001);
+
+    Ok(())
+}
+
+/// Withdrawing collateral during an oracle outage must revert, not silently keep a stale rate:
+/// the Initial-health pass soft-skips the failed collateral, so a borrower could otherwise
+/// remove a leg (or just freeze a favorable snapshot) while premium-active debt survives.
+#[tokio::test]
+async fn premium_withdraw_rejected_when_collateral_oracle_stale() -> anyhow::Result<()> {
+    use marginfi::errors::MarginfiError;
+
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)
+        .await?;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+
+    let borrower = test_f.create_marginfi_account().await;
+    let borrower_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let borrower_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol_eq.key, sol_eq_bank_f, 999, None)
+        .await?;
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, usdc_bank_f, 1_000)
+        .await?;
+
+    // Tagged SOL oracle goes stale; the withdraw would soft-skip it and still pass on the
+    // untagged SolEq — but the premium rate is then unpriceable.
+    advance_clock_with_feeds(&test_f, 3_600, &[PYTH_USDC_FEED, PYTH_SOL_EQUIVALENT_FEED]).await;
+
+    let res = borrower
+        .try_bank_withdraw(borrower_sol_eq.key, sol_eq_bank_f, 10, None)
+        .await;
+    assert!(
+        res.is_err(),
+        "withdraw must revert during the oracle outage"
+    );
+    assert_custom_error!(res.unwrap_err(), MarginfiError::PremiumSnapshotUnavailable);
+
+    // Fresh oracles: the same withdraw succeeds and reprices the surviving debt normally.
+    advance_clock(&test_f, 60).await;
+    borrower
+        .try_bank_withdraw(borrower_sol_eq.key, sol_eq_bank_f, 10, None)
+        .await?;
+    let account = borrower.load().await;
+    let rate = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
+    assert!((rate - 0.5).abs() < 0.01, "snapshot {} not ~0.5%", rate);
+
+    Ok(())
+}
+
+/// The end-of-flashloan health pass owns the premium refresh for debt originated inside the
+/// flashloan (borrow defers its own gate while ACCOUNT_IN_FLASHLOAN is set). An unpriceable
+/// pass there must revert, not leave the new liability at its 0% snapshot.
+#[tokio::test]
+async fn premium_flashloan_end_rejected_when_collateral_oracle_stale() -> anyhow::Result<()> {
+    use marginfi::errors::MarginfiError;
+
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)
+        .await?;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+
+    let borrower = test_f.create_marginfi_account().await;
+    let borrower_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let borrower_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol_eq.key, sol_eq_bank_f, 999, None)
+        .await?;
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+
+    // A single borrow of premium-active USDC, wrapped in a flashloan: the borrow defers health
+    // (and its premium gate); the end-flashloan pass must catch the unpriceable refresh.
+    let borrow_ix = borrower
+        .make_bank_borrow_ix(borrower_usdc.key, usdc_bank_f, 100)
+        .await;
+
+    advance_clock_with_feeds(&test_f, 3_600, &[PYTH_USDC_FEED, PYTH_SOL_EQUIVALENT_FEED]).await;
+
+    let res = borrower
+        .try_flashloan(vec![borrow_ix.clone()], vec![], vec![usdc_bank_f.key], None)
+        .await;
+    assert!(res.is_err(), "flashloan end must revert during the outage");
+    assert_custom_error!(res.unwrap_err(), MarginfiError::PremiumSnapshotUnavailable);
+
+    // Fresh oracles: the same flashloan closes and the new debt is priced at the weighted rate.
+    advance_clock(&test_f, 60).await;
+    let borrow_ix = borrower
+        .make_bank_borrow_ix(borrower_usdc.key, usdc_bank_f, 100)
+        .await;
+    borrower
+        .try_flashloan(vec![borrow_ix], vec![], vec![usdc_bank_f.key], None)
+        .await?;
+    let account = borrower.load().await;
+    let rate = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
+    assert!((rate - 0.5).abs() < 0.001, "snapshot {} != 0.5%", rate);
+
+    Ok(())
+}
+
+/// A liquidator that assumes debt during a collateral-oracle outage must revert: its
+/// Initial-health refresh soft-skips the failed oracle, and leaving the newly-assumed liability
+/// at a mispriced (possibly 0%) snapshot is the manipulation the gate blocks. The liquidator
+/// keeps a fresh PyUSD leg so Initial health still passes with the staled SolEq skipped.
+#[tokio::test]
+async fn premium_liquidation_rejected_when_liquidator_collateral_oracle_stale() -> anyhow::Result<()>
+{
+    use marginfi::errors::MarginfiError;
+
+    let mut test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::PyUSD,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_PYUSD_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock_with_feeds(
+        &test_f,
+        1_700_000_000,
+        &[
+            PYTH_USDC_FEED,
+            PYTH_SOL_FEED,
+            PYTH_SOL_EQUIVALENT_FEED,
+            PYTH_PYUSD_FEED,
+        ],
+    )
+    .await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+    let pyusd_bank_f = test_f.get_bank(&BankMint::PyUSD);
+
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)
+        .await?;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+
+    // Liquidatee: all-tagged SOL collateral, borrows USDC (will be crushed to liquidatable)
+    let liquidatee = test_f.create_marginfi_account().await;
+    let liquidatee_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    liquidatee
+        .try_bank_deposit(liquidatee_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let liquidatee_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    liquidatee
+        .try_bank_borrow(liquidatee_usdc.key, usdc_bank_f, 1_000)
+        .await?;
+
+    // Liquidator: fresh PyUSD (keeps Initial health positive) + untagged SolEq (staled below)
+    let liquidator = test_f.create_marginfi_account().await;
+    let liquidator_pyusd = test_f
+        .pyusd_mint
+        .create_token_account_and_mint_to(10_000)
+        .await;
+    liquidator
+        .try_bank_deposit(liquidator_pyusd.key, pyusd_bank_f, 9_999, None)
+        .await?;
+    let liquidator_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    liquidator
+        .try_bank_deposit(liquidator_sol_eq.key, sol_eq_bank_f, 999, None)
+        .await?;
+
+    // Crush the liquidatee's SOL weight so they're liquidatable
+    test_f
+        .get_bank_mut(&BankMint::Sol)
+        .update_config(
+            BankConfigOpt {
+                asset_weight_init: Some(I80F48!(0.01).into()),
+                asset_weight_maint: Some(I80F48!(0.02).into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+
+    // Only the liquidator's untagged SolEq oracle goes stale. Its Initial-health check
+    // soft-skips it (PyUSD keeps health positive), but the assumed USDC debt cannot be
+    // premium-priced against an incomplete collateral pass -> revert.
+    advance_clock_with_feeds(
+        &test_f,
+        3_600,
+        &[PYTH_USDC_FEED, PYTH_SOL_FEED, PYTH_PYUSD_FEED],
+    )
+    .await;
+
+    let res = liquidator
+        .try_liquidate(&liquidatee, sol_bank_f, 50, usdc_bank_f)
+        .await;
+    assert!(res.is_err(), "liquidation must revert during the outage");
+    assert_custom_error!(res.unwrap_err(), MarginfiError::PremiumSnapshotUnavailable);
+
+    Ok(())
+}
+
+/// Complement to the reject tests: with the SAME incomplete pass (stale collateral oracle),
+/// a withdraw must SUCCEED when the account's only debt is on a premium-INACTIVE bank — the
+/// `refresh_unavailable` gate filters on `premium_active`, so inactive-only debt never blocks.
+#[tokio::test]
+async fn premium_withdraw_allowed_when_stale_oracle_but_debt_is_inactive() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![
+            TestBankSetting {
+                mint: BankMint::Usdc,
+                config: Some(BankConfig {
+                    interest_rate_config: zero_interest_config(),
+                    ..*DEFAULT_USDC_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::Sol,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_TEST_BANK_CONFIG
+                }),
+            },
+            TestBankSetting {
+                mint: BankMint::SolEquivalent,
+                config: Some(BankConfig {
+                    asset_weight_init: I80F48!(1).into(),
+                    ..*DEFAULT_SOL_EQUIVALENT_TEST_BANK_CONFIG
+                }),
+            },
+        ],
+        protocol_fees: false,
+    }))
+    .await;
+    advance_clock(&test_f, 1_700_000_000).await;
+
+    let group_f = &test_f.marginfi_group;
+    let usdc_bank_f = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank_f = test_f.get_bank(&BankMint::Sol);
+    let sol_eq_bank_f = test_f.get_bank(&BankMint::SolEquivalent);
+
+    group_f
+        .try_configure_group_premium(entry(TAG_SOL, TAG_STABLE, 1.0))
+        .await?;
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, true)
+        .await?;
+    group_f
+        .try_configure_bank_premium(sol_bank_f, TAG_SOL, true)
+        .await?;
+
+    let lender = test_f.create_marginfi_account().await;
+    let lender_usdc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(100_000)
+        .await;
+    lender
+        .try_bank_deposit(lender_usdc.key, usdc_bank_f, 100_000, None)
+        .await?;
+
+    let borrower = test_f.create_marginfi_account().await;
+    let borrower_sol = test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol.key, sol_bank_f, 999, None)
+        .await?;
+    let borrower_sol_eq = test_f
+        .sol_equivalent_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol_eq.key, sol_eq_bank_f, 999, None)
+        .await?;
+    let borrower_usdc = test_f.usdc_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, usdc_bank_f, 1_000)
+        .await?;
+
+    // Deactivate USDC premium: the borrower's only liability is now on an inactive bank, so the
+    // health pass records it with `premium_active: false`.
+    group_f
+        .try_configure_bank_premium(usdc_bank_f, TAG_STABLE, false)
+        .await?;
+
+    // Same outage as the reject test: the tagged SOL oracle goes stale (incomplete pass).
+    advance_clock_with_feeds(&test_f, 3_600, &[PYTH_USDC_FEED, PYTH_SOL_EQUIVALENT_FEED]).await;
+
+    // With no premium-ACTIVE liability, the gate does not trip: the withdraw succeeds.
+    borrower
+        .try_bank_withdraw(borrower_sol_eq.key, sol_eq_bank_f, 10, None)
+        .await?;
 
     Ok(())
 }

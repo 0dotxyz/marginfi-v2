@@ -98,6 +98,21 @@ impl PremiumScratch {
             self.count += 1;
         }
     }
+
+    /// Incomplete pass + premium-active debt: refreshing here would drop the stale leg and skew
+    /// the rate, so debt-changing handlers revert (passive ones just skip).
+    pub fn refresh_unavailable(&self) -> bool {
+        !self.complete
+            && self.entries[..self.count].iter().any(|e| {
+                matches!(
+                    e,
+                    PremiumScratchEntry::Liability {
+                        premium_active: true,
+                        ..
+                    }
+                )
+            })
+    }
 }
 
 /// Total recognized premium for a position: already-materialized `outstanding` plus simple
@@ -662,5 +677,57 @@ mod tests {
 
         update_premium_snapshots(&mut account, &group, &scratch, 1_000).unwrap();
         assert_eq!(account.lending_account.balances[0].premium_rate_snapshot, 0);
+    }
+
+    // ---------------- refresh_unavailable (the debt-origination gate) ----------------
+
+    fn inactive_liab_entry(bank_pk: Pubkey, amount: f64, tag: u16) -> PremiumScratchEntry {
+        PremiumScratchEntry::Liability {
+            bank_pk,
+            premium_tag: tag,
+            liability_amount: I80F48::from_num(amount),
+            activated_at: 0,
+            premium_active: false,
+        }
+    }
+
+    #[test]
+    fn refresh_unavailable_only_blocks_incomplete_pass_with_active_liability() {
+        let pk = Pubkey::new_unique();
+
+        // Incomplete pass + a premium-active liability => refresh needed but untrustworthy.
+        let mut s = PremiumScratch::default();
+        s.push(asset_entry(100.0, 200));
+        s.push(liab_entry(pk, 50.0, 100));
+        assert!(!s.complete);
+        assert!(
+            s.refresh_unavailable(),
+            "must block: active debt, incomplete pass"
+        );
+
+        // Same incomplete pass, but the only liability is on a premium-INACTIVE bank: nothing
+        // to mis-price (it gets written off regardless), so the gate must NOT block.
+        let mut s = PremiumScratch::default();
+        s.push(asset_entry(100.0, 200));
+        s.push(inactive_liab_entry(pk, 50.0, 100));
+        assert!(
+            !s.refresh_unavailable(),
+            "inactive-only debt must not block"
+        );
+
+        // Incomplete pass with no liability at all (pure collateral): nothing to refresh.
+        let mut s = PremiumScratch::default();
+        s.push(asset_entry(100.0, 200));
+        assert!(!s.refresh_unavailable(), "no debt must not block");
+
+        // A COMPLETE pass is always trustworthy, even with active debt.
+        let mut s = PremiumScratch::default();
+        s.push(asset_entry(100.0, 200));
+        s.push(liab_entry(pk, 50.0, 100));
+        s.complete = true;
+        assert!(!s.refresh_unavailable(), "complete pass must never block");
+
+        // Default (empty, incomplete) scratch: no entries, no block.
+        assert!(!PremiumScratch::default().refresh_unavailable());
     }
 }
