@@ -1,12 +1,12 @@
-# Project Zero: Built on the Marginfi v2 Program
+# Project 0 (P0): Built on the Marginfi v2 Program
 
-This is a general overview of the Project Zero ecosystem and key features. Want the latest details
+This is a general overview of the Project 0 ecosystem and key features. Want the latest details
 for developers, emode, fees, bankruptcies, liquidation, etc? Check the [guides
 folder](./guides)!
 
 ## Overview
 
-The Marginfi program is a decentralized borrow-lending platform that enables undercollateralized
+The P0 program is a decentralized borrow-lending platform that enables undercollateralized
 lending against a variety of assets, including cryptocurrencies such as SOL, USDC, USDT, etc,
 natively staked SOL, Liquid Staking Tokens (LST), and even lending positions on other platforms such
 as Kamino.
@@ -63,7 +63,7 @@ as Kamino.
 
 ```
 ┌────────────┐       ┌───────────┐       ┌──────────┐
-│ Marginfi   |       │           │       │          │
+│ P0         |       │           │       │          │
 │ Group      │1─────n│ Bank      │1─────a│ Oracle   │
 │            │       │           │       │          │
 └────────────┘       └───────────┘       └──────────┘
@@ -199,7 +199,7 @@ flag to the instruction to close the balance in full AFTER interest.
 
 ## Risk Engine
 
-To maintain account health, Marginfi uses a deterministic risk engine that ensures that borrowing
+To maintain account health, P0 uses a deterministic risk engine that ensures that borrowing
 and lending activities are within acceptable risk parameters. If a user's account falls below the
 minimum required health factor, they may be subject to liquidation to protect the integrity of the
 lending pool and other users' accounts.
