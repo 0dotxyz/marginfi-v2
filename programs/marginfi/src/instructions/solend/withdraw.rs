@@ -266,12 +266,6 @@ pub fn solend_withdraw<'info>(
 
             // Claim premium at the old rates and refresh every liability's premium rate
             // snapshot with the post-withdraw collateral mix.
-            //
-            // Withdrawing shifts collateral; revert if a stale oracle leaves the rate unpriceable.
-            check!(
-                !premium_scratch.refresh_unavailable(),
-                MarginfiError::PremiumSnapshotUnavailable
-            );
             {
                 let group = ctx.accounts.group.load()?;
                 update_premium_snapshots(

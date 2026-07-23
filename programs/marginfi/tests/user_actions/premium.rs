@@ -1714,13 +1714,12 @@ async fn premium_reopened_liability_pays_nothing_for_debt_free_gap() -> anyhow::
     Ok(())
 }
 
-/// Withdrawing collateral during an oracle outage must revert, not silently keep a stale rate:
-/// the Initial-health pass soft-skips the failed collateral, so a borrower could otherwise
-/// remove a leg (or just freeze a favorable snapshot) while premium-active debt survives.
+/// Withdrawing during an oracle outage is NOT blocked: the premium refresh no-ops on the
+/// incomplete pass and the old rate persists (re-priced later by pulse). Blocking would let a
+/// dead-oracle collateral freeze a healthy withdraw; keeping a stale rate is safe since premium
+/// is still charged and projected.
 #[tokio::test]
-async fn premium_withdraw_rejected_when_collateral_oracle_stale() -> anyhow::Result<()> {
-    use marginfi::errors::MarginfiError;
-
+async fn premium_withdraw_keeps_old_rate_when_collateral_oracle_stale() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings {
         banks: vec![
             TestBankSetting {
@@ -1794,24 +1793,31 @@ async fn premium_withdraw_rejected_when_collateral_oracle_stale() -> anyhow::Res
         .try_bank_borrow(borrower_usdc.key, usdc_bank_f, 1_000)
         .await?;
 
-    // Tagged SOL oracle goes stale; the withdraw would soft-skip it and still pass on the
-    // untagged SolEq — but the premium rate is then unpriceable.
+    let account = borrower.load().await;
+    let rate_before = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
+    assert!((rate_before - 0.5).abs() < 0.001);
+
+    // Tagged SOL oracle goes stale; the withdraw soft-skips it and still passes on the untagged
+    // SolEq. The premium refresh can't run (incomplete pass), but the withdraw is NOT blocked.
     advance_clock_with_feeds(&test_f, 3_600, &[PYTH_USDC_FEED, PYTH_SOL_EQUIVALENT_FEED]).await;
 
-    let res = borrower
-        .try_bank_withdraw(borrower_sol_eq.key, sol_eq_bank_f, 10, None)
-        .await;
-    assert!(
-        res.is_err(),
-        "withdraw must revert during the oracle outage"
-    );
-    assert_custom_error!(res.unwrap_err(), MarginfiError::PremiumSnapshotUnavailable);
-
-    // Fresh oracles: the same withdraw succeeds and reprices the surviving debt normally.
-    advance_clock(&test_f, 60).await;
     borrower
         .try_bank_withdraw(borrower_sol_eq.key, sol_eq_bank_f, 10, None)
         .await?;
+
+    // The snapshot is untouched (old rate kept, not zeroed) — premium keeps being charged.
+    let account = borrower.load().await;
+    let rate_after = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
+    assert!(
+        (rate_after - rate_before).abs() < 1e-9,
+        "rate should be unchanged: {} -> {}",
+        rate_before,
+        rate_after
+    );
+
+    // Once oracles are fresh, a pulse re-prices normally against the post-withdraw mix.
+    advance_clock(&test_f, 60).await;
+    borrower.try_lending_account_pulse_health().await?;
     let account = borrower.load().await;
     let rate = snapshot_percent(usdc_balance(&account, &usdc_bank_f.key));
     assert!((rate - 0.5).abs() < 0.01, "snapshot {} not ~0.5%", rate);
@@ -1925,15 +1931,13 @@ async fn premium_flashloan_end_rejected_when_collateral_oracle_stale() -> anyhow
     Ok(())
 }
 
-/// A liquidator that assumes debt during a collateral-oracle outage must revert: its
-/// Initial-health refresh soft-skips the failed oracle, and leaving the newly-assumed liability
-/// at a mispriced (possibly 0%) snapshot is the manipulation the gate blocks. The liquidator
-/// keeps a fresh PyUSD leg so Initial health still passes with the staled SolEq skipped.
+/// A liquidation is NOT blocked when a liquidator collateral oracle is stale: liveness wins.
+/// The premium refresh no-ops (the liquidator's assumed debt keeps its default/prior rate until
+/// a pulse), but the liquidation itself succeeds. The liquidator keeps a fresh PyUSD leg so its
+/// Initial health still passes with the staled SolEq skipped.
 #[tokio::test]
-async fn premium_liquidation_rejected_when_liquidator_collateral_oracle_stale() -> anyhow::Result<()>
-{
-    use marginfi::errors::MarginfiError;
-
+async fn premium_liquidation_not_blocked_when_liquidator_collateral_oracle_stale(
+) -> anyhow::Result<()> {
     let mut test_f = TestFixture::new(Some(TestSettings {
         banks: vec![
             TestBankSetting {
@@ -2053,8 +2057,8 @@ async fn premium_liquidation_rejected_when_liquidator_collateral_oracle_stale() 
     let sol_bank_f = test_f.get_bank(&BankMint::Sol);
 
     // Only the liquidator's untagged SolEq oracle goes stale. Its Initial-health check
-    // soft-skips it (PyUSD keeps health positive), but the assumed USDC debt cannot be
-    // premium-priced against an incomplete collateral pass -> revert.
+    // soft-skips it (PyUSD keeps health positive); the premium refresh can't run, but the
+    // liquidation must still go through.
     advance_clock_with_feeds(
         &test_f,
         3_600,
@@ -2062,11 +2066,9 @@ async fn premium_liquidation_rejected_when_liquidator_collateral_oracle_stale() 
     )
     .await;
 
-    let res = liquidator
+    liquidator
         .try_liquidate(&liquidatee, sol_bank_f, 50, usdc_bank_f)
-        .await;
-    assert!(res.is_err(), "liquidation must revert during the outage");
-    assert_custom_error!(res.unwrap_err(), MarginfiError::PremiumSnapshotUnavailable);
+        .await?;
 
     Ok(())
 }
