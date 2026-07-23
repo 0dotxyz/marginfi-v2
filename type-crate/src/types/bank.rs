@@ -297,6 +297,9 @@ pub enum OracleSetup {
     JuplendPythPull,        // 15
     JuplendSwitchboardPull, // 16
     FixedJuplend,           // 17
+    PythMSOL,               // 18
+    KaminoMSOL,             // 19
+    JuplendMSOL,            // 20
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
@@ -322,6 +325,9 @@ impl OracleSetup {
             15 => Some(Self::JuplendPythPull),
             16 => Some(Self::JuplendSwitchboardPull),
             17 => Some(Self::FixedJuplend),
+            18 => Some(Self::PythMSOL),
+            19 => Some(Self::KaminoMSOL),
+            20 => Some(Self::JuplendMSOL),
             _ => None,
         }
     }

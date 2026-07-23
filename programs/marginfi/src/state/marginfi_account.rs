@@ -46,6 +46,14 @@ pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
         OracleSetup::FixedDrift => Ok(2),
         // Fixed + JupLend: bank + lending state (no oracle)
         OracleSetup::FixedJuplend => Ok(2),
+        // PythMSOL: bank + Pyth + Marinade State
+        OracleSetup::PythMSOL => Ok(3),
+        // KaminoMSOL / JuplendMSOL: bank + Pyth + reserve/lending + Marinade State
+        OracleSetup::KaminoMSOL | OracleSetup::JuplendMSOL => Ok(4),
+        // PythLST: bank + Pyth + SPL StakePool
+        OracleSetup::PythLST => Ok(3),
+        // KaminoLST / JuplendLST: bank + Pyth + reserve/lending + SPL StakePool
+        OracleSetup::KaminoLST | OracleSetup::JuplendLST => Ok(4),
         _ => get_remaining_accounts_per_asset_tag(bank.config.asset_tag),
     }
 }

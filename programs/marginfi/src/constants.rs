@@ -67,6 +67,16 @@ pub const ASSOCIATED_TOKEN_KEY: Pubkey = pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH
 pub const SOLEND_PROGRAM_ID: Pubkey = pubkey!("So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo");
 pub const NATIVE_STAKE_ID: Pubkey = pubkey!("Stake11111111111111111111111111111111111111");
 
+/// SPL Stake Pool programs whose `StakePool` account exposes an LST/SOL exchange rate as
+/// `total_lamports / pool_token_supply`. Used to validate the pool account for `*LST` oracle setups.
+/// Vanilla SPL Stake Pool (JitoSOL, bSOL, ...).
+pub const SPL_STAKE_POOL_ID: Pubkey = pubkey!("SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy");
+/// Sanctum's SPL Stake Pool fork (bbSOL, ...).
+pub const SANCTUM_SPL_STAKE_POOL_ID: Pubkey = pubkey!("SP12tWFxD9oJsVWNavTTBZvMbA6gkAmxtVgxdqvyvhY");
+/// Sanctum's multi-validator SPL Stake Pool fork.
+pub const SANCTUM_SPL_MULTI_STAKE_POOL_ID: Pubkey =
+    pubkey!("SPMBzsVUuoHA4Jm6KunbsotaahvVikZs1JyTW6iJvbn");
+
 /// The default fee, in native SOL in native decimals (i.e. lamports) used in testing
 pub const INIT_BANK_ORIGINATION_FEE_DEFAULT: u32 = 10000;
 /// The default fee, in native SOL in native decimals (i.e. lamports) used in testing

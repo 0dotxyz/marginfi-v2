@@ -1074,12 +1074,37 @@ impl MarginfiAccountFixture {
                     });
                 }
 
-                if should_include_integration_observation_meta(bank) {
-                    metas.push(AccountMeta {
-                        pubkey: bank.integration_acc_1,
-                        is_signer: false,
-                        is_writable: false,
-                    });
+                // PythMSOL carries the Marinade State at oracle_keys[1]; the integration variants
+                // carry the reserve/lending at oracle_keys[1] and the Marinade State at oracle_keys[2].
+                match bank.config.oracle_setup {
+                    OracleSetup::PythMSOL => {
+                        metas.push(AccountMeta {
+                            pubkey: bank.config.oracle_keys[1],
+                            is_signer: false,
+                            is_writable: false,
+                        });
+                    }
+                    OracleSetup::KaminoMSOL | OracleSetup::JuplendMSOL => {
+                        metas.push(AccountMeta {
+                            pubkey: bank.config.oracle_keys[1],
+                            is_signer: false,
+                            is_writable: false,
+                        });
+                        metas.push(AccountMeta {
+                            pubkey: bank.config.oracle_keys[2],
+                            is_signer: false,
+                            is_writable: false,
+                        });
+                    }
+                    _ => {
+                        if should_include_integration_observation_meta(bank) {
+                            metas.push(AccountMeta {
+                                pubkey: bank.integration_acc_1,
+                                is_signer: false,
+                                is_writable: false,
+                            });
+                        }
+                    }
                 }
                 metas
             })

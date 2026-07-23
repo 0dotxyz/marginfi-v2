@@ -11,6 +11,7 @@ use enum_dispatch::enum_dispatch;
 use fixed::types::I80F48;
 use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION};
 use kamino_mocks::state::MinimalReserve;
+use marinade_mocks::state::{MinimalMarinadeState, MSOL_PRICE_PRECISION};
 use marginfi_type_crate::types::OnRampTransition;
 use marginfi_type_crate::{
     constants::{
@@ -254,6 +255,47 @@ fn juplend_price_multiplier(lending: &JuplendLending) -> MarginfiResult<I80F48> 
     Ok(I80F48::from_num(lending.token_exchange_price)
         .checked_div(I80F48::from_num(EXCHANGE_PRICES_PRECISION))
         .ok_or_else(math_error!())?)
+}
+
+/// Loads Marinade's `State` account (owner + discriminator verified by `AccountLoader`) after
+/// checking it matches the configured `oracle_keys[key_index]`.
+fn load_marinade_state<'info>(
+    bank_config: &BankConfig,
+    state_info: &'info AccountInfo<'info>,
+    key_index: usize,
+) -> MarginfiResult<AccountLoader<'info, MinimalMarinadeState>> {
+    require_keys_eq!(
+        *state_info.key,
+        bank_config.oracle_keys[key_index],
+        MarginfiError::MarinadeStateValidationFailed
+    );
+
+    // Verifies owner (Marinade program) + discriminator automatically
+    let state_loader: AccountLoader<MinimalMarinadeState> = AccountLoader::try_from(state_info)
+        .map_err(|_| MarginfiError::MarinadeStateValidationFailed)?;
+    Ok(state_loader)
+}
+
+/// mSOL/SOL exchange rate = `msol_price / 2^32` (Marinade's cached rate; monotonic up).
+fn marinade_price_multiplier(state: &MinimalMarinadeState) -> MarginfiResult<I80F48> {
+    Ok(I80F48::from_num(state.msol_price())
+        .checked_div(I80F48::from_num(MSOL_PRICE_PRECISION))
+        .ok_or_else(math_error!())?)
+}
+
+/// Applies an `I80F48` exchange-rate multiplier to a Pyth push feed's price/ema and their
+/// confidences, in place. Mirrors the mutation done by the Kamino/Solend integration arms.
+fn apply_i80f48_multiplier(
+    feed: &mut PythPushOraclePriceFeed,
+    multiplier: I80F48,
+) -> MarginfiResult<()> {
+    feed.price.price = mul_i64_by_i80f48(feed.price.price, multiplier).ok_or_else(math_error!())?;
+    feed.ema_price.price =
+        mul_i64_by_i80f48(feed.ema_price.price, multiplier).ok_or_else(math_error!())?;
+    feed.price.conf = mul_u64_by_i80f48(feed.price.conf, multiplier).ok_or_else(math_error!())?;
+    feed.ema_price.conf =
+        mul_u64_by_i80f48(feed.ema_price.conf, multiplier).ok_or_else(math_error!())?;
+    Ok(())
 }
 
 fn solend_price_multiplier(reserve: &SolendMinimalReserve) -> MarginfiResult<I80F48> {
@@ -940,6 +982,117 @@ impl OraclePriceFeedAdapter {
                     cache_multiplier: multiplier,
                 })
             }
+            OracleSetup::PythMSOL => {
+                // (1) Pyth oracle (SOL/USD) and (2) Marinade State (for the mSOL/SOL rate).
+                // The deposited token is mSOL, so its price is mSOL/USD = SOL/USD * msolRate.
+                check!(ais.len() == 2, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let account_info = &ais[0];
+                let state_info = &ais[1];
+
+                check_primary_oracle_key(bank_config, account_info)?;
+
+                let state_loader = load_marinade_state(bank_config, state_info, 1)?;
+                let state = state_loader.load()?;
+                let msol_rate = marinade_price_multiplier(&state)?;
+
+                let mut price_feed =
+                    PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
+
+                // Bake the mSOL/SOL rate into the price -> feed now represents mSOL/USD.
+                apply_i80f48_multiplier(&mut price_feed, msol_rate)?;
+
+                // Cache the underlying (mSOL/USD) price; a plain mSOL bank has no wrapper multiplier.
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
+
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: I80F48::ONE,
+                })
+            }
+            OracleSetup::KaminoMSOL => {
+                // (1) Pyth (SOL/USD), (2) Kamino reserve (exchange rate), (3) Marinade State (mSOL/SOL rate)
+                check!(ais.len() == 3, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let account_info = &ais[0];
+                let reserve_info = &ais[1];
+                let state_info = &ais[2];
+
+                check_primary_oracle_key(bank_config, account_info)?;
+
+                let reserve_loader = load_kamino_reserve(bank_config, reserve_info)?;
+                let reserve = reserve_loader.load()?;
+                ensure_kamino_reserve_fresh(&reserve, clock)?;
+                let kamino_rate = kamino_price_multiplier(&reserve)?;
+
+                let state_loader = load_marinade_state(bank_config, state_info, 2)?;
+                let state = state_loader.load()?;
+                let msol_rate = marinade_price_multiplier(&state)?;
+
+                let mut price_feed =
+                    PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
+
+                // Apply the mSOL/SOL rate first so the cached raw price is the mSOL/USD price.
+                apply_i80f48_multiplier(&mut price_feed, msol_rate)?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
+
+                // Then apply the Kamino exchange rate to reach the deposited-token price.
+                apply_i80f48_multiplier(&mut price_feed, kamino_rate)?;
+
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: kamino_rate,
+                })
+            }
+            OracleSetup::JuplendMSOL => {
+                // (1) Pyth (SOL/USD), (2) JupLend Lending (exchange rate), (3) Marinade State (mSOL/SOL rate)
+                check!(ais.len() == 3, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let account_info = &ais[0];
+                let lending_info = &ais[1];
+                let state_info = &ais[2];
+
+                check_primary_oracle_key(bank_config, account_info)?;
+
+                let lending_loader = load_juplend_lending(bank_config, lending_info)?;
+                let lending = lending_loader.load()?;
+                ensure_juplend_lending_fresh(&lending, clock)?;
+                let juplend_rate = juplend_price_multiplier(&lending)?;
+
+                let state_loader = load_marinade_state(bank_config, state_info, 2)?;
+                let state = state_loader.load()?;
+                let msol_rate = marinade_price_multiplier(&state)?;
+
+                let mut price_feed =
+                    PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
+
+                // Apply the mSOL/SOL rate first so the cached raw price is the mSOL/USD price.
+                apply_i80f48_multiplier(&mut price_feed, msol_rate)?;
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
+
+                // Then apply the JupLend exchange rate to reach the deposited-token price.
+                apply_i80f48_multiplier(&mut price_feed, juplend_rate)?;
+
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: juplend_rate,
+                })
+            }
         }
     }
 
@@ -1306,6 +1459,70 @@ impl OraclePriceFeedAdapter {
                     oracle_ais[1].key(),
                     bank_config.oracle_keys[1],
                     MarginfiError::JuplendLendingValidationFailed
+                );
+                Ok(())
+            }
+            OracleSetup::PythMSOL => {
+                // (1) Pyth (SOL/USD), (2) Marinade State (mSOL/SOL rate)
+                require_eq!(
+                    oracle_ais.len(),
+                    2,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
+                load_price_update_v2_checked(&oracle_ais[0])?;
+
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::MarinadeStateValidationFailed
+                );
+                Ok(())
+            }
+            OracleSetup::KaminoMSOL => {
+                // (1) Pyth (SOL/USD), (2) Kamino reserve, (3) Marinade State
+                require_eq!(
+                    oracle_ais.len(),
+                    3,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
+                load_price_update_v2_checked(&oracle_ais[0])?;
+
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::KaminoReserveValidationFailed
+                );
+                require_keys_eq!(
+                    *oracle_ais[2].key,
+                    bank_config.oracle_keys[2],
+                    MarginfiError::MarinadeStateValidationFailed
+                );
+                Ok(())
+            }
+            OracleSetup::JuplendMSOL => {
+                // (1) Pyth (SOL/USD), (2) JupLend Lending, (3) Marinade State
+                require_eq!(
+                    oracle_ais.len(),
+                    3,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
+                load_price_update_v2_checked(&oracle_ais[0])?;
+
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::JuplendLendingValidationFailed
+                );
+                require_keys_eq!(
+                    *oracle_ais[2].key,
+                    bank_config.oracle_keys[2],
+                    MarginfiError::MarinadeStateValidationFailed
                 );
                 Ok(())
             }
@@ -1839,6 +2056,32 @@ mod tests {
         owner: &'a Pubkey,
     ) -> AccountInfo<'a> {
         AccountInfo::new(key, false, false, lamports, data, owner, false)
+    }
+
+    #[test]
+    fn marinade_msol_multiplier_matches_expected() {
+        use bytemuck::Zeroable;
+        // Live mainnet value observed on-chain (State 8szGkuLT...): msol_price = 5_992_546_810.
+        let mut state = MinimalMarinadeState::zeroed();
+        state.msol_price = 5_992_546_810;
+
+        let rate = marinade_price_multiplier(&state).unwrap();
+        let expected =
+            I80F48::from_num(5_992_546_810u64) / I80F48::from_num(MSOL_PRICE_PRECISION);
+        assert_eq!(rate, expected);
+        // Sanity: mSOL/SOL ~= 1.39524853, i.e. within a plausible band.
+        assert!(rate > I80F48::from_num(1.39) && rate < I80F48::from_num(1.40));
+    }
+
+    #[test]
+    fn marinade_state_msol_price_offset_is_512() {
+        // With the 8-byte Anchor discriminator stripped, msol_price must sit at struct offset 504
+        // (absolute offset 512). Round-trip raw bytes to prove the padding math.
+        let mut raw = [0u8; core::mem::size_of::<MinimalMarinadeState>()];
+        assert_eq!(raw.len(), 512);
+        raw[504..512].copy_from_slice(&5_992_546_810u64.to_le_bytes());
+        let parsed: &MinimalMarinadeState = bytemuck::from_bytes(&raw);
+        assert_eq!(parsed.msol_price(), 5_992_546_810);
     }
 
     fn serialized_stake_account(delegated_stake: u64) -> Vec<u8> {

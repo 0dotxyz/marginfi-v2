@@ -3754,6 +3754,7 @@ dependencies = [
  "kamino-mocks",
  "lazy_static",
  "marginfi-type-crate",
+ "marinade-mocks",
  "mocks",
  "pretty_assertions",
  "pyth-solana-receiver-sdk",
@@ -3797,6 +3798,15 @@ dependencies = [
  "id-crate",
  "solana-instruction",
  "spl-associated-token-account",
+ "static_assertions",
+]
+
+[[package]]
+name = "marinade-mocks"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "bytemuck",
  "static_assertions",
 ]
 

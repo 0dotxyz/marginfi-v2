@@ -1,0 +1,21 @@
+[package]
+name = "marinade-mocks"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "marinade_mocks"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+anchor-debug = ["anchor-lang/anchor-debug"]
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = { workspace = true }
+bytemuck = { workspace = true }

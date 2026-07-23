@@ -467,6 +467,16 @@ impl FuzzTest {
             OracleSetup::None | OracleSetup::PythLegacy | OracleSetup::SwitchboardV2 => {
                 vec![bank.config.oracle_keys[0]]
             }
+
+            OracleSetup::PythMSOL => {
+                vec![bank.config.oracle_keys[0], bank.config.oracle_keys[1]]
+            }
+
+            OracleSetup::KaminoMSOL | OracleSetup::JuplendMSOL => vec![
+                bank.config.oracle_keys[0],
+                bank.config.oracle_keys[1],
+                bank.config.oracle_keys[2],
+            ],
         }
     }
 

@@ -429,7 +429,12 @@ pub enum MarginfiError {
     JuplendInitPositionDepositInsufficient, // 6511
     #[msg("Invalid Juplend withdraw intermediary ATA")]
     InvalidJuplendWithdrawIntermediaryAta, // 6512
-                                           // **************END JUPLEND ERRORS
+    // **************END JUPLEND ERRORS
+
+    // ************** BEGIN MARINADE ERRORS (starting at 6600)
+    #[msg("Marinade state validation failed")]
+    MarinadeStateValidationFailed = 600, // 6600
+                                         // **************END MARINADE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -668,6 +673,8 @@ impl From<u32> for MarginfiError {
             6510 => MarginfiError::JuplendWithdrawFailed,
             6511 => MarginfiError::JuplendInitPositionDepositInsufficient,
             6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
+
+            6600 => MarginfiError::MarinadeStateValidationFailed,
 
             _ => MarginfiError::InternalLogicError,
         }
