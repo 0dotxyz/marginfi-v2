@@ -73,6 +73,7 @@ export const genericMultiBankTestSetup = async (
   numberOfKaminoBanks: number = 0,
   numberOfDriftBanks: number = 0,
   oracleMode: "pyth" | "switchboard" = "pyth",
+  oracleMaxConfidence?: number,
 ): Promise<{
   banks: PublicKey[];
   kaminoBanks: PublicKey[];
@@ -122,6 +123,7 @@ export const genericMultiBankTestSetup = async (
           isWritable: false,
         },
         oracleMode,
+        oracleMaxConfidence,
         seed: new BN(seed),
         verboseMessage: verbose ? `*init LST #${seed}:` : undefined,
       });
@@ -357,6 +359,7 @@ async function addGenericBank(
     oracle: PublicKey;
     oracleMeta: AccountMeta;
     oracleMode?: "pyth" | "switchboard";
+    oracleMaxConfidence?: number;
     // Function to adjust the seed (for example, seed.addn(1))
     seed: BN;
     verboseMessage: string;
@@ -368,6 +371,7 @@ async function addGenericBank(
     oracle,
     oracleMeta,
     oracleMode = "pyth",
+    oracleMaxConfidence,
     seed,
     verboseMessage,
   } = options;
@@ -382,6 +386,9 @@ async function addGenericBank(
   // We don't want origination fees messing with debt here
   config.interestRateConfig.protocolOriginationFee = I80F48_ZERO;
   config.interestRateConfig.points = makeRatePoints([0.8], [0.2]);
+  if (oracleMaxConfidence !== undefined) {
+    config.oracleMaxConfidence = oracleMaxConfidence;
+  }
   if (assetTag) {
     config.assetTag = assetTag;
   }
