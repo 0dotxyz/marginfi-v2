@@ -229,32 +229,41 @@ impl MarginfiAccountFixture {
             // If t22 with transfer hook, add remaining accounts
             let banks_client = self.ctx.borrow().banks_client.clone();
             let fetch_account_data_fn = move |key| {
-                let mut banks_client = banks_client.clone();
+                let banks_client = banks_client.clone();
                 async move {
                     banks_client
                         .get_account(key)
                         .await
                         .map(|acc| acc.map(|a| a.data))
+                        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
                 }
             };
             let payer = self.ctx.borrow().payer.pubkey();
             if bank.mint.token_program == anchor_spl::token_2022::ID {
-                // TODO: do that only if hook exists
-                println!(
-                    "[TODO] Adding extra account metas for execute for mint {:?}",
-                    bank.mint.key
-                );
-                let _ = spl_transfer_hook_interface::offchain::add_extra_account_metas_for_execute(
-                    &mut ix,
-                    &TEST_HOOK_ID,
-                    &funding_account,
-                    &bank.mint.key,
-                    &bank.get_vault(BankVaultType::Liquidity).0,
-                    &payer,
-                    ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
-                    fetch_account_data_fn,
-                )
-                .await;
+                use anchor_spl::token_2022::spl_token_2022::extension::{
+                    transfer_hook::TransferHook, BaseStateWithExtensions,
+                };
+                // Only add the hook's extra account metas when the mint actually has a transfer hook.
+                let has_transfer_hook = bank
+                    .mint
+                    .load_state()
+                    .await
+                    .get_extension::<TransferHook>()
+                    .is_ok();
+                if has_transfer_hook {
+                    let _ =
+                        spl_transfer_hook_interface::offchain::add_extra_account_metas_for_execute(
+                            &mut ix,
+                            &TEST_HOOK_ID,
+                            &funding_account,
+                            &bank.mint.key,
+                            &bank.get_vault(BankVaultType::Liquidity).0,
+                            &payer,
+                            ui_to_native!(ui_amount.into(), bank.mint.mint.decimals),
+                            fetch_account_data_fn,
+                        )
+                        .await;
+                }
             }
         }
 
@@ -564,12 +573,13 @@ impl MarginfiAccountFixture {
         if bank.mint.token_program == anchor_spl::token_2022::ID {
             let banks_client = self.ctx.borrow().banks_client.clone();
             let fetch_account_data_fn = move |key| {
-                let mut banks_client = banks_client.clone();
+                let banks_client = banks_client.clone();
                 async move {
                     banks_client
                         .get_account(key)
                         .await
                         .map(|acc| acc.map(|a| a.data))
+                        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
                 }
             };
 
@@ -752,6 +762,24 @@ impl MarginfiAccountFixture {
         asset_ui_amount: T,
         liab_bank_fixture: &BankFixture,
     ) -> std::result::Result<(), BanksClientError> {
+        self.try_liquidate_with_authority(
+            liquidatee,
+            asset_bank_fixture,
+            asset_ui_amount,
+            liab_bank_fixture,
+            &self.ctx.borrow().payer.insecure_clone(),
+        )
+        .await
+    }
+
+    pub async fn try_liquidate_with_authority<T: Into<f64> + Copy>(
+        &self,
+        liquidatee: &MarginfiAccountFixture,
+        asset_bank_fixture: &BankFixture,
+        asset_ui_amount: T,
+        liab_bank_fixture: &BankFixture,
+        authority: &Keypair,
+    ) -> std::result::Result<(), BanksClientError> {
         let marginfi_account = self.load().await;
 
         let asset_bank = asset_bank_fixture.load().await;
@@ -762,7 +790,7 @@ impl MarginfiAccountFixture {
             asset_bank: asset_bank_fixture.key,
             liab_bank: liab_bank_fixture.key,
             liquidator_marginfi_account: self.key,
-            authority: self.ctx.borrow().payer.pubkey(),
+            authority: authority.pubkey(),
             liquidatee_marginfi_account: liquidatee.key,
             bank_liquidity_vault_authority: liab_bank_fixture
                 .get_vault_authority(BankVaultType::Liquidity)
@@ -827,6 +855,7 @@ impl MarginfiAccountFixture {
                     .get_account(key)
                     .await
                     .map(|acc| acc.map(|a| a.data))
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
             };
 
             let _ = spl_transfer_hook_interface::offchain::add_extra_account_metas_for_execute(
@@ -848,10 +877,14 @@ impl MarginfiAccountFixture {
         let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_400_000);
 
         let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
+        let mut signers: Vec<&Keypair> = vec![&payer];
+        if authority.pubkey() != payer.pubkey() {
+            signers.push(authority);
+        }
         let tx = Transaction::new_signed_with_payer(
             &[compute_budget_ix, ix],
             Some(&payer.pubkey()),
-            &[&payer],
+            &signers,
             blockhash,
         );
 
@@ -943,6 +976,7 @@ impl MarginfiAccountFixture {
     ) -> Instruction {
         let mut account_metas = marginfi::accounts::LendingAccountEndFlashloan {
             marginfi_account: self.key,
+            group: self.load().await.group,
             authority: self.ctx.borrow().payer.pubkey(),
         }
         .to_account_metas(Some(true));
@@ -1122,6 +1156,10 @@ impl MarginfiAccountFixture {
         let signer = signer_keypair.unwrap_or_else(|| ctx.payer.insecure_clone());
         let fee_payer = fee_payer_keypair.unwrap_or_else(|| ctx.payer.insecure_clone());
 
+        let (fee_state, _) = Pubkey::find_program_address(
+            &[marginfi_type_crate::constants::FEE_STATE_SEED.as_bytes()],
+            &marginfi::ID,
+        );
         let transfer_account_ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::TransferToNewAccount {
@@ -1132,6 +1170,7 @@ impl MarginfiAccountFixture {
                 fee_payer: fee_payer.pubkey(),
                 new_authority,
                 global_fee_wallet,
+                fee_state,
                 system_program: system_program::ID,
             }
             .to_account_metas(None),
@@ -1260,6 +1299,7 @@ impl MarginfiAccountFixture {
                 marginfi_account: self.key,
                 liquidation_record,
                 liquidation_receiver,
+                group: self.load().await.group,
                 instruction_sysvar: solana_instructions_sysvar::id(),
             }
             .to_account_metas(Some(true)),
@@ -1287,9 +1327,11 @@ impl MarginfiAccountFixture {
                 marginfi_account: self.key,
                 liquidation_record,
                 liquidation_receiver,
+                group: self.load().await.group,
                 fee_state,
                 global_fee_wallet,
                 system_program: system_program::ID,
+                fee_payer: None,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::EndLiquidation {}.data(),
@@ -1836,6 +1878,7 @@ impl MarginfiAccountFixture {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::PulseHealth {
                 marginfi_account: self.key,
+                group: self.load().await.group,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::LendingAccountPulseHealth {}.data(),
@@ -1846,8 +1889,13 @@ impl MarginfiAccountFixture {
             .extend_from_slice(&self.load_observation_account_metas(vec![], vec![]).await);
 
         let (banks_client, payer, blockhash) = ctx_parts(&self.ctx).await;
-        let tx =
-            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
+        let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(1_400_000);
+        let tx = Transaction::new_signed_with_payer(
+            &[compute_budget_ix, ix],
+            Some(&payer.pubkey()),
+            &[&payer],
+            blockhash,
+        );
 
         banks_client
             .process_transaction_with_preflight_and_commitment(tx, CommitmentLevel::Confirmed)

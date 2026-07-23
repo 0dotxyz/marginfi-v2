@@ -32,7 +32,8 @@ in it. This approach requires no account and no collateral: you can start liquid
 dollars (as long as you have SOL to pay gas fees).
 
 Maximum profits are higher with receivership liquidation, up to 10% as of November 2025, where
-classic only nets a 2.5% profit. The maximum profit is defined as:
+classic only nets the liability bank's configured liquidator fee (2.5% by default). The maximum
+profit is defined as:
 
 ```
 Seized <= Repaid * (1 + max_fee)

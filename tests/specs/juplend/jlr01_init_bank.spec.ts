@@ -966,11 +966,12 @@ describe("jlr01: JupLend init banks/pools (bankrun)", () => {
     }
 
     const recentSlot = Number(await banksClient.getSlot());
-    const [createLutIx, lookupTable] = AddressLookupTableProgram.createLookupTable({
-      authority: groupAdmin.wallet.publicKey,
-      payer: groupAdmin.wallet.publicKey,
-      recentSlot,
-    });
+    const [createLutIx, lookupTable] =
+      AddressLookupTableProgram.createLookupTable({
+        authority: groupAdmin.wallet.publicKey,
+        payer: groupAdmin.wallet.publicKey,
+        recentSlot,
+      });
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(createLutIx),

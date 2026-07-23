@@ -30,8 +30,16 @@ import {
   processBankrunTransaction as processBankrunTx,
   logHealthCache,
 } from "../../utils/tools";
-import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
-import { blankBankConfigOptRaw } from "../../utils/types";
+import {
+  bigNumberToWrappedI80F48,
+  wrappedI80F48toBigNumber,
+} from "@mrgnlabs/mrgn-common";
+import { assert } from "chai";
+import {
+  blankBankConfigOptRaw,
+  CONF_INTERVAL_MULTIPLE,
+  ORACLE_CONF_INTERVAL,
+} from "../../utils/types";
 import { configureBank } from "../../utils/group-instructions";
 import {
   defaultKaminoBankConfig,
@@ -358,7 +366,44 @@ describe("k10: Kamino Liquidation", () => {
       logHealthCache("user 0 cache post-liquidate ", cacheAfter);
     }
 
-    // TODO assert asset balances
+    // The liquidation seizes the liquidatee's Kamino collateral (asset = kaminoUsdcBank) and pays
+    // down their bank[0] debt, so both their asset and liability share counts shrink.
+    const collBefore = liquidateeAcc.lendingAccount.balances.find(
+      (b) => b.bankPk.equals(kaminoUsdcBank) && b.active === 1
+    )!;
+    const collAfter = accAfter.lendingAccount.balances.find(
+      (b) => b.bankPk.equals(kaminoUsdcBank) && b.active === 1
+    )!;
+    assert.approximately(
+      wrappedI80F48toBigNumber(collBefore.assetShares)
+        .minus(wrappedI80F48toBigNumber(collAfter.assetShares))
+        .toNumber(),
+      liquidateAmount.toNumber(),
+      liquidateAmount.toNumber() * 0.0001
+    );
+    const debtBefore = liquidateeAcc.lendingAccount.balances.find(
+      (b) => b.bankPk.equals(banks[0]) && b.active === 1
+    )!;
+    const debtAfter = accAfter.lendingAccount.balances.find(
+      (b) => b.bankPk.equals(banks[0]) && b.active === 1
+    )!;
+    // The debt repaid follows the liquidation math: the seized collateral value (low-bias asset,
+    // minus the 2.5% + 2.5% liquidator/insurance fees) buys down the LST debt at its high-bias price.
+    const conf = ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
+    const seizedUsdc =
+      liquidateAmount.toNumber() / 10 ** ecosystem.usdcDecimals;
+    const debtValueReduced =
+      seizedUsdc * ecosystem.usdcPrice * (1 - conf) * (1 - 0.05);
+    const expectedDebtSharesDelta =
+      (debtValueReduced / (ecosystem.lstAlphaPrice * (1 + conf))) *
+      10 ** ecosystem.lstAlphaDecimals;
+    assert.approximately(
+      wrappedI80F48toBigNumber(debtBefore.liabilityShares)
+        .minus(wrappedI80F48toBigNumber(debtAfter.liabilityShares))
+        .toNumber(),
+      expectedDebtSharesDelta,
+      expectedDebtSharesDelta * 0.03
+    );
   });
 
   it("(admin) restore bank 0 default liability ratios", async () => {
@@ -373,5 +418,7 @@ describe("k10: Kamino Liquidation", () => {
     await processBankrunTx(ctx, tx, [groupAdmin.wallet]);
   });
 
-  // TODO test OOM limits at max accounts
+  // Note: the max-accounts (16-balance) OOM / worst-case compute scenario is covered end-to-end by
+  // sl08_16BanksStressTest.spec.ts (8 Solend deposits + 1 borrow, and 1 Solend deposit + 15 borrows,
+  // each with a health calc over all 16 slots), so it isn't duplicated here.
 });
