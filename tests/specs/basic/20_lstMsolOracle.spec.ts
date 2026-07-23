@@ -1,6 +1,7 @@
 import { Program } from "@coral-xyz/anchor";
 import {
   Keypair,
+  LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
   Transaction,
@@ -21,6 +22,7 @@ import {
   oracles,
 } from "../../rootHooks";
 import {
+  assertI80F48Approx,
   assertKeysEqual,
   expectFailedTxWithError,
 } from "../../utils/genericTests";
@@ -47,10 +49,26 @@ const JUPSOL_POOL = new PublicKey(
 );
 const MSOL_PRICE_PRECISION = 2 ** 32;
 
+// Mirrors `MinimalStakePool` in price.rs
+const decodeStakePool = (data: Uint8Array) => {
+  const buf = Buffer.from(data);
+  return {
+    totalLamports: buf.readBigUInt64LE(258),
+    poolTokenSupply: buf.readBigUInt64LE(266),
+  };
+};
+
+// Mirrors `MinimalMarinadeState` in marinade-mocks
+const decodeMarinadeState = (data: Uint8Array) => ({
+  msolPrice: Buffer.from(data).readBigUInt64LE(512),
+});
+
 const lstGroup = Keypair.generate();
 const lstBank = Keypair.generate();
 
 let program: Program<Marginfi>;
+/** SOL/USD as the program reports it, captured from a plain Pyth pulse. */
+let baseSolPrice: number;
 
 describe("LST / mSOL internal oracle setups", () => {
   before(async () => {
@@ -89,19 +107,20 @@ describe("LST / mSOL internal oracle setups", () => {
         }),
       ),
     );
-  });
 
-  const readU64 = (data: Uint8Array, offset: number) =>
-    Buffer.from(data).readBigUInt64LE(offset);
+    const base = await pulseCache([]);
+    baseSolPrice = wrappedI80F48toBigNumber(base.lastOraclePrice).toNumber();
+  });
 
   const stakePoolRate = async (pool: PublicKey) => {
     const acc = await banksClient.getAccount(pool);
-    return Number(readU64(acc!.data, 258)) / Number(readU64(acc!.data, 266));
+    const { totalLamports, poolTokenSupply } = decodeStakePool(acc!.data);
+    return Number(totalLamports) / Number(poolTokenSupply);
   };
 
   const marinadeRate = async (state: PublicKey) => {
     const acc = await banksClient.getAccount(state);
-    return Number(readU64(acc!.data, 512)) / MSOL_PRICE_PRECISION;
+    return Number(decodeMarinadeState(acc!.data).msolPrice) / MSOL_PRICE_PRECISION;
   };
 
   const setOracle = async (type: number, remaining: PublicKey[]) => {
@@ -116,7 +135,7 @@ describe("LST / mSOL internal oracle setups", () => {
     );
   };
 
-  const pulseAndRead = async (multiplierAccounts: PublicKey[]) => {
+  const pulseCache = async (multiplierAccounts: PublicKey[]) => {
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
     await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
       new Transaction().add(
@@ -126,13 +145,7 @@ describe("LST / mSOL internal oracle setups", () => {
         }),
       ),
     );
-    const bank = await program.account.bank.fetch(lstBank.publicKey);
-    return {
-      price: wrappedI80F48toBigNumber(bank.cache.lastOraclePrice).toNumber(),
-      multiplier: wrappedI80F48toBigNumber(
-        bank.cache.priceMultiplier,
-      ).toNumber(),
-    };
+    return (await program.account.bank.fetch(lstBank.publicKey)).cache;
   };
 
   it("(admin) configures PythLST - happy path", async () => {
@@ -183,45 +196,51 @@ describe("LST / mSOL internal oracle setups", () => {
   it("prices bSOL via PythLST (vanilla SPL owner)", async () => {
     await setOracle(ORACLE_SETUP_PYTH_LST, [BSOL_POOL]);
     const rate = await stakePoolRate(BSOL_POOL);
-    const { price, multiplier } = await pulseAndRead([BSOL_POOL]);
-    const expected = oracles.wsolPrice * rate;
-    assert.approximately(price, expected, expected * 0.02);
-    assert.approximately(multiplier, 1, 0.0001);
+    const cache = await pulseCache([BSOL_POOL]);
+    // Rate is baked into the price; the wrapper multiplier stays 1.
+    assertI80F48Approx(cache.lastOraclePrice, baseSolPrice * rate);
+    assertI80F48Approx(cache.priceMultiplier, 1);
   });
 
   it("prices a Sanctum-SPL LST via PythLST", async () => {
     await setOracle(ORACLE_SETUP_PYTH_LST, [SANCTUM_SPL_POOL]);
     const rate = await stakePoolRate(SANCTUM_SPL_POOL);
-    const { price } = await pulseAndRead([SANCTUM_SPL_POOL]);
-    const expected = oracles.wsolPrice * rate;
-    assert.approximately(price, expected, expected * 0.02);
+    const cache = await pulseCache([SANCTUM_SPL_POOL]);
+    assertI80F48Approx(cache.lastOraclePrice, baseSolPrice * rate);
   });
 
   it("prices jupSOL (Sanctum-Multi owner) via PythLST", async () => {
     await setOracle(ORACLE_SETUP_PYTH_LST, [JUPSOL_POOL]);
     const rate = await stakePoolRate(JUPSOL_POOL);
-    const { price } = await pulseAndRead([JUPSOL_POOL]);
-    const expected = oracles.wsolPrice * rate;
-    assert.approximately(price, expected, expected * 0.02);
+    const cache = await pulseCache([JUPSOL_POOL]);
+    assertI80F48Approx(cache.lastOraclePrice, baseSolPrice * rate);
   });
 
   it("prices mSOL via PythMSOL", async () => {
     await setOracle(ORACLE_SETUP_PYTH_MSOL, [MSOL_STATE]);
     const rate = await marinadeRate(MSOL_STATE);
-    const { price, multiplier } = await pulseAndRead([MSOL_STATE]);
-    const expected = oracles.wsolPrice * rate;
-    assert.approximately(price, expected, expected * 0.02);
-    assert.approximately(multiplier, 1, 0.0001);
+    const cache = await pulseCache([MSOL_STATE]);
+    assertI80F48Approx(cache.lastOraclePrice, baseSolPrice * rate);
+    assertI80F48Approx(cache.priceMultiplier, 1);
   });
 
-  it("PythLST price tracks pool appreciation", async () => {
+  it("PythLST tracks pool appreciation", async () => {
     await setOracle(ORACLE_SETUP_PYTH_LST, [SANCTUM_SPL_POOL]);
-    const before = await pulseAndRead([SANCTUM_SPL_POOL]);
+    const { poolTokenSupply } = decodeStakePool(
+      (await banksClient.getAccount(SANCTUM_SPL_POOL))!.data,
+    );
+    const before = wrappedI80F48toBigNumber(
+      (await pulseCache([SANCTUM_SPL_POOL])).lastOraclePrice,
+    ).toNumber();
 
-    // Bump total_lamports by 10%, leaving supply untouched
+    // Simulate rewards: add 777 SOL of backing lamports, leaving the supply untouched.
+    const addedLamports = 777 * LAMPORTS_PER_SOL;
     const acc = await banksClient.getAccount(SANCTUM_SPL_POOL);
     const data = Buffer.from(acc!.data);
-    data.writeBigUInt64LE((readU64(data, 258) * 110n) / 100n, 258);
+    data.writeBigUInt64LE(
+      decodeStakePool(data).totalLamports + BigInt(addedLamports),
+      258,
+    );
     bankrunContext.setAccount(SANCTUM_SPL_POOL, {
       lamports: acc!.lamports,
       data,
@@ -230,8 +249,11 @@ describe("LST / mSOL internal oracle setups", () => {
       rentEpoch: acc!.rentEpoch,
     });
 
-    const after = await pulseAndRead([SANCTUM_SPL_POOL]);
-    assert.isAbove(after.price, before.price);
+    // Price rises by exactly baseSolPrice * addedLamports / supply.
+    const expectedGain =
+      (baseSolPrice * addedLamports) / Number(poolTokenSupply);
+    const after = await pulseCache([SANCTUM_SPL_POOL]);
+    assertI80F48Approx(after.lastOraclePrice, before + expectedGain);
   });
 
   it("(admin) tries to price PythLST with a wrong-owner pool - fails", async () => {
@@ -246,7 +268,7 @@ describe("LST / mSOL internal oracle setups", () => {
     });
     await expectFailedTxWithError(
       async () => {
-        await pulseAndRead([JUPSOL_POOL]);
+        await pulseCache([JUPSOL_POOL]);
       },
       "StakePoolValidationFailed",
       6048,
