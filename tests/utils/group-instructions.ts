@@ -288,24 +288,25 @@ export type ConfigureBankOracleArgs = {
   bank: PublicKey;
   type: number;
   oracle: PublicKey;
+  // Extra oracle accounts appended after the primary feed, e.g. the Marinade State / SPL StakePool
+  // for the mSOL/LST setups. Omit for single-oracle setups.
+  remaining?: PublicKey[];
 };
 
 export const configureBankOracle = (
   program: Program<Marginfi>,
   args: ConfigureBankOracleArgs,
 ) => {
-  const oracleMeta: AccountMeta = {
-    pubkey: args.oracle,
-    isSigner: false,
-    isWritable: false,
-  };
+  const metas: AccountMeta[] = [args.oracle, ...(args.remaining ?? [])].map(
+    (pubkey) => ({ pubkey, isSigner: false, isWritable: false }),
+  );
 
   const ix = program.methods
     .lendingPoolConfigureBankOracle(args.type, args.oracle)
     .accounts({
       bank: args.bank,
     })
-    .remainingAccounts([oracleMeta])
+    .remainingAccounts(metas)
     .instruction();
   return ix;
 };

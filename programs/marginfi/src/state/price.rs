@@ -12,7 +12,7 @@ use enum_dispatch::enum_dispatch;
 use fixed::types::I80F48;
 use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION};
 use kamino_mocks::state::MinimalReserve;
-use marinade_mocks::state::{MinimalMarinadeState, MSOL_PRICE_PRECISION};
+use marinade_mocks::state::{MinimalMarinadeState, MSOL_PRICE_PRECISION, STATE_DISCRIMINATOR};
 use marginfi_type_crate::types::OnRampTransition;
 use marginfi_type_crate::{
     constants::{
@@ -258,8 +258,6 @@ fn juplend_price_multiplier(lending: &JuplendLending) -> MarginfiResult<I80F48> 
         .ok_or_else(math_error!())?)
 }
 
-/// Loads Marinade's `State` account (owner + discriminator verified by `AccountLoader`) after
-/// checking it matches the configured `oracle_keys[key_index]`.
 fn load_marinade_state<'info>(
     bank_config: &BankConfig,
     state_info: &'info AccountInfo<'info>,
@@ -271,27 +269,23 @@ fn load_marinade_state<'info>(
         MarginfiError::MarinadeStateValidationFailed
     );
 
-    // Verifies owner (Marinade program) + discriminator automatically
     let state_loader: AccountLoader<MinimalMarinadeState> = AccountLoader::try_from(state_info)
         .map_err(|_| MarginfiError::MarinadeStateValidationFailed)?;
     Ok(state_loader)
 }
 
-/// mSOL/SOL exchange rate = `msol_price / 2^32` (Marinade's cached rate; monotonic up).
+/// mSOL/SOL exchange rate = `msol_price / 2^32` (Marinade's cached rate).
 fn marinade_price_multiplier(state: &MinimalMarinadeState) -> MarginfiResult<I80F48> {
     Ok(I80F48::from_num(state.msol_price())
         .checked_div(I80F48::from_num(MSOL_PRICE_PRECISION))
         .ok_or_else(math_error!())?)
 }
 
-/// Minimal borsh view of an SPL `StakePool`, declaring only the fixed-size fields up to the two we
-/// need (`total_lamports` / `pool_token_supply`). Deserialization stops after the last declared
-/// field, so trailing bytes (fees, Sanctum-fork extras) are ignored — keeping this tolerant across
-/// the vanilla SPL Stake Pool program and Sanctum's SPL / SPL-Multi forks. Unlike Marinade, an SPL
-/// `StakePool` has no 8-byte Anchor discriminator: its `account_type` enum (1 = StakePool) sits at
-/// byte 0, so we deserialize from the start rather than via `AccountLoader`.
+/// Minimal borsh view of an SPL `StakePool`: the fixed-size prefix up to `total_lamports` /
+/// `pool_token_supply`. Trailing bytes are ignored; `account_type` (1 = StakePool) sits at byte 0
+/// rather than an 8-byte discriminator, so it deserializes from the start.
 #[derive(AnchorDeserialize)]
-#[allow(dead_code)] // fields before the two we read exist only to advance the borsh cursor
+#[allow(dead_code)] // fields before the two we read only advance the borsh cursor
 struct MinimalStakePool {
     account_type: u8,
     manager: Pubkey,
@@ -303,15 +297,11 @@ struct MinimalStakePool {
     pool_mint: Pubkey,
     manager_fee_account: Pubkey,
     token_program_id: Pubkey,
-    /// Total SOL under management, in lamports.
     total_lamports: u64,
-    /// Pool token (LST) supply.
     pool_token_supply: u64,
 }
 
-/// LST/SOL exchange rate of an SPL stake pool = `total_lamports / pool_token_supply`, read from the
-/// `StakePool` account keyed to `oracle_keys[key_index]`. Accepts the vanilla SPL Stake Pool program
-/// and Sanctum's SPL / SPL-Multi forks.
+/// Accepts the vanilla SPL Stake Pool program and Sanctum's SPL / SPL-Multi forks.
 fn stake_pool_price_multiplier(
     bank_config: &BankConfig,
     stake_pool_info: &AccountInfo,
@@ -343,6 +333,28 @@ fn stake_pool_price_multiplier(
     Ok(I80F48::from_num(pool.total_lamports)
         .checked_div(I80F48::from_num(pool.pool_token_supply))
         .ok_or_else(math_error!())?)
+}
+
+fn validate_marinade_state_account(
+    bank_config: &BankConfig,
+    info: &AccountInfo,
+    key_index: usize,
+) -> MarginfiResult {
+    require_keys_eq!(
+        *info.key,
+        bank_config.oracle_keys[key_index],
+        MarginfiError::MarinadeStateValidationFailed
+    );
+    check!(
+        info.owner == &marinade_mocks::ID,
+        MarginfiError::MarinadeStateValidationFailed
+    );
+    let data = info.try_borrow_data()?;
+    check!(
+        data.len() >= 8 && data[..8] == STATE_DISCRIMINATOR,
+        MarginfiError::MarinadeStateValidationFailed
+    );
+    Ok(())
 }
 
 /// Applies an `I80F48` exchange-rate multiplier to a Pyth push feed's price/ema and their
@@ -1639,11 +1651,7 @@ impl OraclePriceFeedAdapter {
                 check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 load_price_update_v2_checked(&oracle_ais[0])?;
 
-                require_keys_eq!(
-                    *oracle_ais[1].key,
-                    bank_config.oracle_keys[1],
-                    MarginfiError::MarinadeStateValidationFailed
-                );
+                validate_marinade_state_account(bank_config, &oracle_ais[1], 1)?;
                 Ok(())
             }
             OracleSetup::KaminoMSOL => {
@@ -1662,11 +1670,7 @@ impl OraclePriceFeedAdapter {
                     bank_config.oracle_keys[1],
                     MarginfiError::KaminoReserveValidationFailed
                 );
-                require_keys_eq!(
-                    *oracle_ais[2].key,
-                    bank_config.oracle_keys[2],
-                    MarginfiError::MarinadeStateValidationFailed
-                );
+                validate_marinade_state_account(bank_config, &oracle_ais[2], 2)?;
                 Ok(())
             }
             OracleSetup::JuplendMSOL => {
@@ -1685,11 +1689,7 @@ impl OraclePriceFeedAdapter {
                     bank_config.oracle_keys[1],
                     MarginfiError::JuplendLendingValidationFailed
                 );
-                require_keys_eq!(
-                    *oracle_ais[2].key,
-                    bank_config.oracle_keys[2],
-                    MarginfiError::MarinadeStateValidationFailed
-                );
+                validate_marinade_state_account(bank_config, &oracle_ais[2], 2)?;
                 Ok(())
             }
             OracleSetup::PythLST => {
@@ -1703,11 +1703,7 @@ impl OraclePriceFeedAdapter {
                 check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 load_price_update_v2_checked(&oracle_ais[0])?;
 
-                require_keys_eq!(
-                    *oracle_ais[1].key,
-                    bank_config.oracle_keys[1],
-                    MarginfiError::StakePoolValidationFailed
-                );
+                stake_pool_price_multiplier(bank_config, &oracle_ais[1], 1)?;
                 Ok(())
             }
             OracleSetup::KaminoLST => {
@@ -1726,11 +1722,7 @@ impl OraclePriceFeedAdapter {
                     bank_config.oracle_keys[1],
                     MarginfiError::KaminoReserveValidationFailed
                 );
-                require_keys_eq!(
-                    *oracle_ais[2].key,
-                    bank_config.oracle_keys[2],
-                    MarginfiError::StakePoolValidationFailed
-                );
+                stake_pool_price_multiplier(bank_config, &oracle_ais[2], 2)?;
                 Ok(())
             }
             OracleSetup::JuplendLST => {
@@ -1749,11 +1741,7 @@ impl OraclePriceFeedAdapter {
                     bank_config.oracle_keys[1],
                     MarginfiError::JuplendLendingValidationFailed
                 );
-                require_keys_eq!(
-                    *oracle_ais[2].key,
-                    bank_config.oracle_keys[2],
-                    MarginfiError::StakePoolValidationFailed
-                );
+                stake_pool_price_multiplier(bank_config, &oracle_ais[2], 2)?;
                 Ok(())
             }
         }

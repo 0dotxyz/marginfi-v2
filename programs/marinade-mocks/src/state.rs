@@ -8,12 +8,8 @@ pub const STATE_DISCRIMINATOR: [u8; 8] = [216, 146, 107, 94, 104, 75, 182, 177];
 /// Denominator for Marinade's cached `msol_price`: `msol_to_sol = msol_price / 2^32`.
 pub const MSOL_PRICE_PRECISION: u128 = 1 << 32;
 
-/// Minimal zero-copy view of Marinade's `State`, exposing only the cached `msol_price` at absolute
-/// byte offset 512 (504 bytes past the 8-byte discriminator). `AccountLoader` reads
-/// `data[8 .. 8 + size_of::<Self>()]`, so the padding places `msol_price` at exactly offset 512.
-///
-/// Pins Marinade's layout (like the other `*-mocks` readers). The 504-byte prefix is split into
-/// `bytemuck`-Pod array sizes since `[u8; 504]` is not `Pod` without `min_const_generics`.
+/// Minimal zero-copy view of Marinade's `State`: the cached `msol_price` at byte offset 512 (504
+/// past the 8-byte discriminator). Padding is split into `bytemuck`-Pod array sizes.
 #[account(zero_copy, discriminator = &STATE_DISCRIMINATOR)]
 #[repr(C, packed)]
 pub struct MinimalMarinadeState {
