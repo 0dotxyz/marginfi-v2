@@ -3807,6 +3807,7 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "bytemuck",
+ "marginfi-type-crate",
  "static_assertions",
 ]
 

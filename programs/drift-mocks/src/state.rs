@@ -1,5 +1,6 @@
-use crate::{assert_struct_align, assert_struct_size, constants::*, math_error, DriftMocksError};
+use crate::{constants::*, math_error, DriftMocksError};
 use anchor_lang::prelude::*;
+use marginfi_type_crate::{assert_struct_align, assert_struct_size};
 use bytemuck::{Pod, Zeroable};
 
 // Account discriminators from Drift IDL

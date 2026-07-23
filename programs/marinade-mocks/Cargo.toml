@@ -19,3 +19,5 @@ idl-build = ["anchor-lang/idl-build"]
 [dependencies]
 anchor-lang = { workspace = true }
 bytemuck = { workspace = true }
+static_assertions = { workspace = true }
+marginfi-type-crate = { workspace = true, features = ["anchor"] }

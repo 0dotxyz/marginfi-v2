@@ -1074,17 +1074,21 @@ impl MarginfiAccountFixture {
                     });
                 }
 
-                // PythMSOL carries the Marinade State at oracle_keys[1]; the integration variants
-                // carry the reserve/lending at oracle_keys[1] and the Marinade State at oracle_keys[2].
+                // Non-integration mSOL/LST setups carry the rate account (Marinade State / SPL StakePool)
+                // at oracle_keys[1]; the integration variants carry the reserve/lending at oracle_keys[1]
+                // and the rate account at oracle_keys[2].
                 match bank.config.oracle_setup {
-                    OracleSetup::PythMSOL => {
+                    OracleSetup::PythMSOL | OracleSetup::PythLST => {
                         metas.push(AccountMeta {
                             pubkey: bank.config.oracle_keys[1],
                             is_signer: false,
                             is_writable: false,
                         });
                     }
-                    OracleSetup::KaminoMSOL | OracleSetup::JuplendMSOL => {
+                    OracleSetup::KaminoMSOL
+                    | OracleSetup::JuplendMSOL
+                    | OracleSetup::KaminoLST
+                    | OracleSetup::JuplendLST => {
                         metas.push(AccountMeta {
                             pubkey: bank.config.oracle_keys[1],
                             is_signer: false,

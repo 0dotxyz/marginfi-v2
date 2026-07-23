@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use marginfi_type_crate::assert_struct_size;
 
 // Anchor discriminator for Marinade's `State`, sha256("account:State")[0..8]. Verified against the
 // live mainnet State account 8szGkuLTAux9XMgZ2vtY39jVSowEcpBfFfD8hXSEqdGC.
@@ -26,7 +27,7 @@ pub struct MinimalMarinadeState {
     pub msol_price: u64,
 }
 
-const _: () = assert!(core::mem::size_of::<MinimalMarinadeState>() == 512);
+assert_struct_size!(MinimalMarinadeState, 512);
 
 impl MinimalMarinadeState {
     /// `msol_price` read by value (packed-safe).
