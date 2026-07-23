@@ -2030,7 +2030,7 @@ impl<'a> BankAccountWrapper<'a> {
     ///
     /// Closing tolerates dust on the opposite side:
     /// * A liability might still have dust asset shares. Pass what is leftover in
-    /// `insurance_fee_amount` so the shares are not orphaned but rather added to insurance.
+    ///   `insurance_fee_amount` so the shares are not orphaned but rather added to insurance.
     /// * Assets that still have a dust-liability will transform those dust shares into bad debt.
     fn close_balance_internal(
         &mut self,
@@ -2062,7 +2062,7 @@ impl<'a> BankAccountWrapper<'a> {
                     .into();
         }
 
-        // Note: deposit limits only apply to positive share changes, so it doesn't matter here. 
+        // Note: deposit limits only apply to positive share changes, so it doesn't matter here.
         bank.change_asset_shares(-asset_shares, false)?;
         // Liability-side dust = bad debt the borrower never repaid. Decrementing
         // here makes the loss explicit instead of leaving phantom shares in
