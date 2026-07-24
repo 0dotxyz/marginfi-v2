@@ -21,11 +21,7 @@ import {
   assertKeysEqual,
   expectFailedTxWithError,
 } from "../../utils/genericTests";
-import {
-  defaultBankConfig,
-  ORACLE_SETUP_PTSOL,
-  ORACLE_SETUP_PYTH_PUSH,
-} from "../../utils/types";
+import { defaultBankConfig, ORACLE_SETUP_PYTH_PUSH } from "../../utils/types";
 import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
 import { getBankrunTime } from "../../utils/tools";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
@@ -34,7 +30,7 @@ import { assert } from "chai";
 const EXPONENT_PROGRAM = new PublicKey(
   "ExponentnaRg3CQbW6dqQNZKXp7gtZ9DGMp1cwC4HAS7",
 );
-// Real mainnet Exponent vault (already past maturity -> price pinned at par)
+// Real mainnet Exponent vault (validates as a genuine vault regardless of the test clock)
 const REAL_VAULT = new PublicKey("9YbaicMsXrtupkpD72pdWBfU6R7EJfSByw75sEpDM1uH");
 const VAULT_DISCRIMINATOR = Buffer.from([211, 8, 232, 43, 2, 152, 117, 119]);
 
@@ -103,22 +99,12 @@ describe("PT-SOL internal oracle setup", () => {
       rentEpoch: 0,
     });
 
-  const configurePtsol = async () => {
-    const ix = await configureBankOracle(groupAdmin.mrgnProgram, {
-      bank: ptBank.publicKey,
-      type: ORACLE_SETUP_PTSOL,
-      oracle: oracles.wsolOracle.publicKey,
-    });
-    return groupAdmin.mrgnProgram.provider.sendAndConfirm!(
-      new Transaction().add(ix),
-    );
-  };
-
-  const setStartPrice = async (price: number, vault: PublicKey) => {
+  // Self-contained PT-SOL setup: [Pyth SOL/USD, Exponent vault] + start price.
+  const setPtsol = async (price: number, vault: PublicKey) => {
     const ix = await setFixedPrice(groupAdmin.mrgnProgram, {
       bank: ptBank.publicKey,
       price,
-      remaining: [vault],
+      remaining: [oracles.wsolOracle.publicKey, vault],
     });
     return groupAdmin.mrgnProgram.provider.sendAndConfirm!(
       new Transaction().add(ix),
@@ -138,34 +124,29 @@ describe("PT-SOL internal oracle setup", () => {
     return (await program.account.bank.fetch(ptBank.publicKey)).cache;
   };
 
-  it("(admin) configures PTSOL - happy path", async () => {
-    await configurePtsol();
+  it("(admin) sets up PTSOL (setup + start price + vault) - happy path", async () => {
+    await setPtsol(0.9, REAL_VAULT);
     const { config } = await program.account.bank.fetch(ptBank.publicKey);
     assert.deepEqual(config.oracleSetup, { ptsol: {} });
     assertKeysEqual(config.oracleKeys[0], oracles.wsolOracle.publicKey);
-  });
-
-  it("(admin) sets the PT start price + vault - happy path", async () => {
-    await setStartPrice(0.9, REAL_VAULT);
-    const { config } = await program.account.bank.fetch(ptBank.publicKey);
-    assertI80F48Approx(config.fixedPrice, 0.9);
     assertKeysEqual(config.oracleKeys[1], REAL_VAULT);
+    assertI80F48Approx(config.fixedPrice, 0.9);
   });
 
-  it("(admin) tries to set the PT price - fails with a non-vault account", async () => {
+  it("(admin) tries to set up PTSOL - fails with a non-vault account", async () => {
     await expectFailedTxWithError(
       async () => {
-        await setStartPrice(0.9, Keypair.generate().publicKey);
+        await setPtsol(0.9, Keypair.generate().publicKey);
       },
       "ExponentVaultValidationFailed",
       6601,
     );
   });
 
-  it("(admin) tries to set the PT price - fails with a start price above par", async () => {
+  it("(admin) tries to set up PTSOL - fails with a start price above par", async () => {
     await expectFailedTxWithError(
       async () => {
-        await setStartPrice(1.5, REAL_VAULT);
+        await setPtsol(1.5, REAL_VAULT);
       },
       "InvalidPtStartPrice",
       6602,
@@ -176,7 +157,7 @@ describe("PT-SOL internal oracle setup", () => {
     const now = await getBankrunTime(bankrunContext);
     const vault = Keypair.generate().publicKey;
     setVault(vault, makeVault(now - 10_000, 5_000)); // maturity = now - 5000, already past
-    await setStartPrice(0.9, vault);
+    await setPtsol(0.9, vault);
 
     const cache = await pulseCache([vault]);
     // At/after maturity -> multiplier is exactly 1, so PT price == SOL price.
@@ -188,7 +169,7 @@ describe("PT-SOL internal oracle setup", () => {
     const now = await getBankrunTime(bankrunContext);
     const vault = Keypair.generate().publicKey;
     setVault(vault, makeVault(now + 100_000, 1_000));
-    await setStartPrice(0.85, vault);
+    await setPtsol(0.85, vault);
 
     const cache = await pulseCache([vault]);
     // now < start_ts -> multiplier clamps to start_price 0.85
@@ -202,7 +183,7 @@ describe("PT-SOL internal oracle setup", () => {
     const startPrice = 0.8;
     const vault = Keypair.generate().publicKey;
     setVault(vault, makeVault(startTs, duration));
-    await setStartPrice(startPrice, vault);
+    await setPtsol(startPrice, vault);
 
     const cache = await pulseCache([vault]);
     const at = await getBankrunTime(bankrunContext);

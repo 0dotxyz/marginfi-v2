@@ -59,7 +59,7 @@ pub struct LendingPoolBankConfigureOracleEvent {
 }
 
 #[event]
-pub struct LendingPoolBankSetFixedOraclePriceEvent {
+pub struct LendingPoolBankSetOraclePriceEvent {
     pub header: GroupEventHeader,
     pub bank: Pubkey,
     pub price: WrappedI80F48,

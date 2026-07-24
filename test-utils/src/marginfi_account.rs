@@ -1112,7 +1112,7 @@ impl MarginfiAccountFixture {
                 // at oracle_keys[1]; the integration variants carry the reserve/lending at oracle_keys[1]
                 // and the rate account at oracle_keys[2].
                 match bank.config.oracle_setup {
-                    OracleSetup::PythMSOL | OracleSetup::PythLST => {
+                    OracleSetup::PythMSOL | OracleSetup::PythLST | OracleSetup::PTSOL => {
                         metas.push(AccountMeta {
                             pubkey: bank.config.oracle_keys[1],
                             is_signer: false,

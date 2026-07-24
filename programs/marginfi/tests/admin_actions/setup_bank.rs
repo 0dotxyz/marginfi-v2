@@ -687,13 +687,13 @@ async fn configure_bank_to_fixed_oracle() -> anyhow::Result<()> {
         let ctx = test_f.context.borrow_mut();
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingPoolSetFixedOraclePrice {
+            accounts: marginfi::accounts::LendingPoolSetOraclePrice {
                 group: test_f.marginfi_group.key,
                 admin: ctx.payer.pubkey(),
                 bank: bank_f.key,
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingPoolSetFixedOraclePrice {
+            data: marginfi::instruction::LendingPoolSetOraclePrice {
                 price: price_wrapped,
             }
             .data(),
@@ -741,7 +741,7 @@ async fn set_same_asset_emode_eligibility_success_and_fixed_rejects() -> anyhow:
 
     let set_fixed_ix = test_f
         .marginfi_group
-        .make_lending_pool_set_fixed_oracle_price_ix(usdc_bank, I80F48!(1).into());
+        .make_lending_pool_set_oracle_price_ix(usdc_bank, I80F48!(1).into());
     let set_fixed_res = {
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
@@ -764,7 +764,7 @@ async fn set_same_asset_emode_eligibility_success_and_fixed_rejects() -> anyhow:
 
     let set_fixed_ix = test_f
         .marginfi_group
-        .make_lending_pool_set_fixed_oracle_price_ix(usdc_bank, I80F48!(1).into());
+        .make_lending_pool_set_oracle_price_ix(usdc_bank, I80F48!(1).into());
     {
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
@@ -815,13 +815,13 @@ async fn update_fixed_bank_price() -> anyhow::Result<()> {
         let ctx = test_f.context.borrow();
         let ix = Instruction {
             program_id: marginfi::ID,
-            accounts: marginfi::accounts::LendingPoolSetFixedOraclePrice {
+            accounts: marginfi::accounts::LendingPoolSetOraclePrice {
                 group: test_f.marginfi_group.key,
                 admin: ctx.payer.pubkey(),
                 bank: bank_f.key,
             }
             .to_account_metas(Some(true)),
-            data: marginfi::instruction::LendingPoolSetFixedOraclePrice {
+            data: marginfi::instruction::LendingPoolSetOraclePrice {
                 price: new_price_wrapped,
             }
             .data(),

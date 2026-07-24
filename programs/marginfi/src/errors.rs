@@ -266,8 +266,8 @@ pub enum MarginfiError {
     DeleverageWithdrawalUpdateOutOfOrderSlot,
     #[msg("Deleverage withdrawal admin update sequence is out of order")] // 6131
     DeleverageWithdrawalUpdateOutOfOrderSeq,
-    #[msg("Use set_fixed_oracle_price instead")] // 6132
-    UseSetFixedOraclePrice,
+    #[msg("Use set_oracle_price instead")] // 6132
+    UseSetOraclePrice,
     #[msg("Provided global fee wallet does not match group fee state cache")] // 6133
     InvalidGlobalFeeWallet,
     #[msg("Bank has not completed one-time initialization")] // 6134
@@ -614,7 +614,7 @@ impl From<u32> for MarginfiError {
             6129 => MarginfiError::DeleverageWithdrawalUpdateStale,
             6130 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSlot,
             6131 => MarginfiError::DeleverageWithdrawalUpdateOutOfOrderSeq,
-            6132 => MarginfiError::UseSetFixedOraclePrice,
+            6132 => MarginfiError::UseSetOraclePrice,
             6133 => MarginfiError::InvalidGlobalFeeWallet,
             6134 => MarginfiError::BankUninitialized,
 

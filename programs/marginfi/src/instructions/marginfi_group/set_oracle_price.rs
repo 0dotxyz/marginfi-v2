@@ -1,4 +1,4 @@
-use crate::events::{GroupEventHeader, LendingPoolBankSetFixedOraclePriceEvent};
+use crate::events::{GroupEventHeader, LendingPoolBankSetOraclePriceEvent};
 use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
 use crate::{check, errors::MarginfiError, MarginfiResult};
@@ -12,8 +12,8 @@ use marginfi_type_crate::{
     types::{Bank, MarginfiGroup, OracleSetup, WrappedI80F48},
 };
 
-pub fn lending_pool_set_fixed_oracle_price(
-    ctx: Context<LendingPoolSetFixedOraclePrice>,
+pub fn lending_pool_set_oracle_price(
+    ctx: Context<LendingPoolSetOraclePrice>,
     price: WrappedI80F48,
 ) -> MarginfiResult {
     let mut bank = ctx.accounts.bank.load_mut()?;
@@ -28,35 +28,6 @@ pub fn lending_pool_set_fixed_oracle_price(
         "disable same-asset e-mode eligibility before setting a fixed price"
     );
 
-    // PT-SOL banks: set the linear-pricing start price and (re)validate + store the Exponent vault.
-    // The bank must already be configured to PTSOL via configure_bank_oracle (Pyth SOL/USD feed in
-    // oracle_keys[0]); the vault is passed as the sole remaining account.
-    if bank.config.oracle_setup == OracleSetup::PTSOL {
-        let price_i80: I80F48 = price.into();
-        check!(
-            price_i80 > I80F48::ZERO && price_i80 <= I80F48::ONE,
-            MarginfiError::InvalidPtStartPrice
-        );
-        check!(
-            ctx.remaining_accounts.len() == 1,
-            MarginfiError::WrongNumberOfOracleAccounts
-        );
-        let vault_ai = &ctx.remaining_accounts[0];
-        crate::state::price::check_exponent_vault(vault_ai)?;
-        bank.config.oracle_keys[1] = vault_ai.key();
-        bank.config.fixed_price = price;
-
-        emit!(LendingPoolBankSetFixedOraclePriceEvent {
-            header: GroupEventHeader {
-                marginfi_group: ctx.accounts.group.key(),
-                signer: Some(*ctx.accounts.admin.key),
-            },
-            bank: ctx.accounts.bank.key(),
-            price,
-        });
-        return Ok(());
-    }
-
     // Technically there is nothing wrong with allowing this on staked banks, but since they can
     // always inherit settings by propagation, this would be silly. There's also no reason we'd want
     // to do this anyways.
@@ -65,7 +36,28 @@ pub fn lending_pool_set_fixed_oracle_price(
         return err!(MarginfiError::Unauthorized);
     }
 
-    bank.config.oracle_setup = if bank.config.asset_tag == ASSET_TAG_KAMINO {
+    let price_i80: I80F48 = price.into();
+
+    // A vault passed as a second remaining account signals a self-contained PT-SOL setup, whose
+    // oracle accounts are [Pyth SOL/USD, Exponent vault]. A plain fixed price passes no accounts.
+    let is_ptsol = ctx.remaining_accounts.len() == 2;
+
+    if is_ptsol {
+        // For PT the fixed price is the linear-pricing start price, which lives in (0, 1].
+        check!(
+            price_i80 > I80F48::ZERO && price_i80 <= I80F48::ONE,
+            MarginfiError::InvalidPtStartPrice
+        );
+    } else {
+        check!(
+            price_i80 >= I80F48::ZERO,
+            MarginfiError::FixedOraclePriceNegative
+        );
+    }
+
+    bank.config.oracle_setup = if is_ptsol {
+        OracleSetup::PTSOL
+    } else if bank.config.asset_tag == ASSET_TAG_KAMINO {
         OracleSetup::FixedKamino
     } else if bank.config.asset_tag == ASSET_TAG_DRIFT {
         OracleSetup::FixedDrift
@@ -75,26 +67,23 @@ pub fn lending_pool_set_fixed_oracle_price(
         OracleSetup::Fixed
     };
 
-    // Note: We leave the other keys in place to make it easier to restore Kamino/Staked/etc banks
-    // to their original state. This can leave fixed banks in a somewhat awkward-looking state where
-    // oracles[0] is empty and other slots are not.
-    bank.config.oracle_keys[0] = Pubkey::default();
-
-    let price_i80: I80F48 = price.into();
-    let price_f64 = price_i80.to_num::<f64>();
-    msg!("price: {:?}", price_f64);
-
-    check!(
-        price_i80 >= I80F48::ZERO,
-        MarginfiError::FixedOraclePriceNegative
-    );
+    if is_ptsol {
+        // [0] Pyth SOL/USD feed, [1] Exponent vault
+        bank.config.oracle_keys[0] = ctx.remaining_accounts[0].key();
+        bank.config.oracle_keys[1] = ctx.remaining_accounts[1].key();
+    } else {
+        // Note: We leave the other keys in place to make it easier to restore Kamino/Staked/etc
+        // banks to their original state. This can leave fixed banks in a somewhat awkward-looking
+        // state where oracles[0] is empty and other slots are not.
+        bank.config.oracle_keys[0] = Pubkey::default();
+    }
 
     bank.config.fixed_price = price;
 
     bank.config
         .validate_oracle_setup(ctx.remaining_accounts, None, None, None)?;
 
-    emit!(LendingPoolBankSetFixedOraclePriceEvent {
+    emit!(LendingPoolBankSetOraclePriceEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.group.key(),
             signer: Some(*ctx.accounts.admin.key),
@@ -107,7 +96,7 @@ pub fn lending_pool_set_fixed_oracle_price(
 }
 
 #[derive(Accounts)]
-pub struct LendingPoolSetFixedOraclePrice<'info> {
+pub struct LendingPoolSetOraclePrice<'info> {
     #[account(
         has_one = admin
     )]

@@ -1832,16 +1832,22 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::PTSOL => {
-                // (0) Pyth (SOL/USD). The Exponent vault (oracle_keys[1]) is set and validated
-                // separately via set_fixed_oracle_price.
+                // (0) Pyth (SOL/USD), (1) Exponent vault
                 require_eq!(
                     oracle_ais.len(),
-                    1,
+                    2,
                     MarginfiError::WrongNumberOfOracleAccounts
                 );
 
                 check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 load_price_update_v2_checked(&oracle_ais[0])?;
+
+                require_keys_eq!(
+                    *oracle_ais[1].key,
+                    bank_config.oracle_keys[1],
+                    MarginfiError::ExponentVaultValidationFailed
+                );
+                check_exponent_vault(&oracle_ais[1])?;
                 Ok(())
             }
         }

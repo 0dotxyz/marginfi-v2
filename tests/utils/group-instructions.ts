@@ -1089,7 +1089,7 @@ export const setFixedPrice = (
   });
 
   const ix = program.methods
-    .lendingPoolSetFixedOraclePrice(bigNumberToWrappedI80F48(args.price))
+    .lendingPoolSetOraclePrice(bigNumberToWrappedI80F48(args.price))
     .accounts({
       // group: // implied from bank
       // admin: // implied from group

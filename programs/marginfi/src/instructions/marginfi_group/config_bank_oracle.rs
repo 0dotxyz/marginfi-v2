@@ -25,8 +25,9 @@ pub fn lending_pool_configure_bank_oracle(
                 | OracleSetup::FixedKamino
                 | OracleSetup::FixedDrift
                 | OracleSetup::FixedJuplend
+                | OracleSetup::PTSOL
         ) {
-            return err!(MarginfiError::UseSetFixedOraclePrice);
+            return err!(MarginfiError::UseSetOraclePrice);
         }
         check!(
             !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE) || bank.config.oracle_keys[0] == oracle,
