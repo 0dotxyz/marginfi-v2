@@ -1,6 +1,6 @@
 use crate::{
     check,
-    events::{AccountEventHeader, LendingAccountRepayEvent},
+    events::{AccountEventHeader, LendingAccountPremiumSettledEvent, LendingAccountRepayEvent},
     ix_utils::{get_discrim_hash, Hashable},
     prelude::{MarginfiError, MarginfiResult},
     state::{
@@ -76,17 +76,45 @@ pub fn lending_account_repay<'info>(
     )?;
 
     let in_receivership = marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP);
+
+    // Tokenless repayments skip the transfer entirely: the premium receivable is written off
+    // instead of settled, since no tokens back it.
+    let tokenless_repayment = authority.key() == group.risk_admin
+        && bank.get_flag(TOKENLESS_REPAYMENTS_ALLOWED)
+        && repay_all;
+
     let lending_account = &mut marginfi_account.lending_account;
     let mut bank_account =
         BankAccountWrapper::find(&bank_loader.key(), &mut bank, lending_account)?;
 
+    let premium_collected_before: I80F48 = bank_account.bank.collected_premium_outstanding.into();
+    // Materialize pending premium up front (idempotent — later claims in the same ix see
+    // elapsed 0) so the receivable is measurable for the settlement event.
+    bank_account.claim_premium()?;
+    let premium_outstanding_before: I80F48 = bank_account.balance.premium_outstanding.into();
     let (repay_amount_post_fee, share_amount) = if repay_all {
-        bank_account.repay_all(in_receivership)?
+        bank_account.repay_all(in_receivership, !tokenless_repayment)?
     } else {
-        let share_amount = bank_account.repay(I80F48::from_num(amount))?;
+        // Premium settles before principal: take it out of the repaid amount and repay the
+        // remainder against the base debt.
+        let premium_settled = bank_account.settle_premium(I80F48::from_num(amount))?;
+        let principal = I80F48::from_num(amount)
+            .checked_sub(premium_settled)
+            .ok_or_else(crate::math_error!())?;
+        let share_amount = bank_account.repay(principal)?;
 
         (amount, share_amount)
     };
+    let premium_settled: I80F48 = I80F48::from(bank_account.bank.collected_premium_outstanding)
+        .checked_sub(premium_collected_before)
+        .ok_or_else(crate::math_error!())?;
+    // A tokenless repay_all clears the receivable with no tokens: report it as written off.
+    let premium_written_off: I80F48 = if tokenless_repayment {
+        premium_outstanding_before
+    } else {
+        I80F48::ZERO
+    };
+    let premium_outstanding_remaining: I80F48 = bank_account.balance.premium_outstanding.into();
     marginfi_account.last_update = clock.unix_timestamp as u64;
 
     // Record inflow so net-outflow windows release capacity.
@@ -162,6 +190,22 @@ pub fn lending_account_repay<'info>(
         share_amount: share_amount.into(),
         close_balance: repay_all,
     });
+
+    if premium_settled > I80F48::ZERO || premium_written_off > I80F48::ZERO {
+        emit!(LendingAccountPremiumSettledEvent {
+            header: AccountEventHeader {
+                signer: Some(ctx.accounts.authority.key()),
+                marginfi_account: marginfi_account_loader.key(),
+                marginfi_account_authority: marginfi_account.authority,
+                marginfi_group: marginfi_account.group,
+            },
+            bank: bank_loader.key(),
+            mint: bank.mint,
+            premium_settled: premium_settled.to_num(),
+            premium_written_off: premium_written_off.to_num(),
+            premium_outstanding_remaining: premium_outstanding_remaining.to_num(),
+        });
+    }
 
     marginfi_account.lending_account.sort_balances();
     marginfi_account.sync_indexer_flags();

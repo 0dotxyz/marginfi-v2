@@ -114,6 +114,8 @@ pub struct Bank {
     ///   single-pool on-ramp account in NAV.
     /// - Bit 11 (2048): `CIRCUIT_BREAKER_ENABLED` — oracle deviation breaker active on this bank
     /// - Bit 12 (4096): `BANK_SAME_ASSET_EMODE_ELIGIBLE` — bank may participate in same-asset e-mode.
+    /// - Bit 13 (8192): `PREMIUM_ACTIVE` — a liability-bank flag: balances borrowing from this
+    ///   bank accrue the pairwise variable-borrow premium and project it in health checks.
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.
@@ -184,7 +186,10 @@ pub struct Bank {
     /// Tracks net outflow (outflows - inflows) in native tokens.
     pub rate_limiter: BankRateLimiter,
 
-    pub _pad_0: [u8; 16], // 16B
+    /// Realized variable-borrow premium sitting in the liquidity vault, pending sweep to the
+    /// protocol premium wallet's canonical ATA for `mint`. Only incremented when premium tokens
+    /// are actually received (repay); never by mere accrual.
+    pub collected_premium_outstanding: WrappedI80F48, // 16B
 
     /// * `0` for legacy banks created via `lending_pool_add_bank` (created via keypair, not a PDA),
     ///   or pre-backfill banks (1.8 or earlier) where seed remains unknown.
@@ -220,7 +225,20 @@ pub struct Bank {
     /// Unix-seconds when `cb_window_reference_price` was anchored.
     pub cb_window_started_at: i64,
 
-    pub _padding_1: [u64; 3], // 24B
+    /// Tag for the group's pairwise variable-borrow premium matrix. Determines the rate other
+    /// accounts pay when this bank is offered as collateral (as `collateral_tag`) and the rate
+    /// this bank's borrowers pay (as `liability_tag`).
+    /// * 0 = untagged: never matches any premium entry.
+    pub premium_tag: u16,
+    // Pad to next 8-byte multiple
+    pub _pad3: [u8; 6],
+    /// Unix timestamp of the most recent inactive->active `PREMIUM_ACTIVE` transition. Premium
+    /// accrual is clamped to start no earlier than this, so toggling the flag off and back on
+    /// can never charge for (or health-project) the deactivated window.
+    /// * 0 on banks that never activated premium.
+    pub premium_activated_at: i64,
+
+    pub _padding_1: [u64; 1], // 8B
 }
 
 impl Bank {

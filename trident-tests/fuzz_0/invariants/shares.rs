@@ -12,6 +12,7 @@ pub struct BankShareSnapshot {
     pub had_active_balance: bool,
     pub asset_shares: [u8; 16],
     pub liability_shares: [u8; 16],
+    pub premium_outstanding: [u8; 16],
 }
 
 pub fn marginfi_bank_share_snapshot(
@@ -28,6 +29,7 @@ pub fn marginfi_bank_share_snapshot(
                 had_active_balance: true,
                 asset_shares: b.asset_shares.value,
                 liability_shares: b.liability_shares.value,
+                premium_outstanding: b.premium_outstanding.value,
             };
         }
     }
@@ -35,6 +37,7 @@ pub fn marginfi_bank_share_snapshot(
         had_active_balance: false,
         asset_shares: [0u8; 16],
         liability_shares: [0u8; 16],
+        premium_outstanding: [0u8; 16],
     }
 }
 
@@ -43,7 +46,12 @@ fn assert_zero_amount_find_or_create_shares_ok(
     after: &BankShareSnapshot,
     op: &'static str,
 ) {
-    if before == after {
+    // Note: any touch of an existing liability balance claims premium (materializing pending
+    // interest into the receivable), so the receivable is deliberately NOT compared here.
+    if before.had_active_balance == after.had_active_balance
+        && before.asset_shares == after.asset_shares
+        && before.liability_shares == after.liability_shares
+    {
         return;
     }
     invariant!(
@@ -315,8 +323,12 @@ pub fn assert_repay_success_share_invariants(
     amount: u64,
 ) {
     if amount == 0 {
+        // Note: a zero-amount repay still claims premium (materializing pending interest into
+        // the receivable), so only the share fields are compared.
         invariant!(
-            before == after,
+            before.had_active_balance == after.had_active_balance
+                && before.asset_shares == after.asset_shares
+                && before.liability_shares == after.liability_shares,
             "repay shares: zero amount should not change lending shares. before: {:?}, after: {:?}",
             before,
             after
@@ -341,13 +353,18 @@ pub fn assert_repay_success_share_invariants(
         a1
     );
     if after.had_active_balance {
+        // Premium settles BEFORE principal: a repay smaller than the premium receivable leaves
+        // liability shares untouched and only moves the receivable (which the claim that runs in
+        // the same ix may simultaneously top up with newly-materialized pending premium).
+        let premium_moved = before.premium_outstanding != after.premium_outstanding;
         invariant!(
-            l1.cmp(&l0) == Ordering::Less,
-            "repay shares: liability shares must decrease when balance stays open. amount: {}, liability before: {}, after: {}, cmp: {:?}",
+            l1.cmp(&l0) == Ordering::Less || premium_moved,
+            "repay shares: liability shares must decrease (or the premium receivable must move) when balance stays open. amount: {}, liability before: {}, after: {}, premium before: {}, after: {}",
             amount,
             l0,
             l1,
-            l1.cmp(&l0)
+            i80_from_share_bytes(&before.premium_outstanding),
+            i80_from_share_bytes(&after.premium_outstanding)
         );
     } else {
         invariant!(

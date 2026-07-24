@@ -20,13 +20,14 @@ use marginfi::{
     state::bank::BankVaultType,
 };
 use marginfi_type_crate::constants::{
-    FEE_STATE_SEED, PROTOCOL_FEE_FIXED_DEFAULT, PROTOCOL_FEE_RATE_DEFAULT,
-    SAME_ASSET_EMODE_REGISTRY_SEED, STAKED_SETTINGS_SEED,
+    FEE_STATE_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
+    PROTOCOL_FEE_FIXED_DEFAULT, PROTOCOL_FEE_RATE_DEFAULT, SAME_ASSET_EMODE_REGISTRY_SEED,
+    STAKED_SETTINGS_SEED,
 };
 use marginfi_type_crate::types::WrappedI80F48;
 use marginfi_type_crate::types::{
     BankConfig, BankConfigCompact, BankConfigOpt, EmodeEntry, FeeState, InterestRateConfigOpt,
-    MarginfiGroup, OracleSetup, StakedSettings, MAX_EMODE_ENTRIES,
+    MarginfiGroup, OracleSetup, PremiumEntry, StakedSettings, MAX_EMODE_ENTRIES,
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_program_test::*;
@@ -707,6 +708,176 @@ impl MarginfiGroupFixture {
         result[..entries.len()].copy_from_slice(entries);
 
         Ok(result)
+    }
+
+    pub async fn try_edit_fee_state_premium(
+        &self,
+        premium_wallet: Option<Pubkey>,
+    ) -> Result<(), BanksClientError> {
+        let payer = self.ctx.borrow().payer.insecure_clone();
+        self.try_edit_fee_state_premium_with_signer(premium_wallet, &payer)
+            .await
+    }
+
+    pub async fn try_edit_fee_state_premium_with_signer(
+        &self,
+        premium_wallet: Option<Pubkey>,
+        signer: &Keypair,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::EditFeeStatePremium {
+                global_fee_admin: signer.pubkey(),
+                fee_state: self.fee_state,
+            }
+            .to_account_metas(Some(true)),
+            data: EditFeeStatePremium { premium_wallet }.data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer, signer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Set one premium matrix pair (rate 0 = remove). For several pairs, call once per pair.
+    pub async fn try_configure_group_premium(
+        &self,
+        entry: PremiumEntry,
+    ) -> Result<(), BanksClientError> {
+        let payer = self.ctx.borrow().payer.insecure_clone();
+        self.try_configure_group_premium_with_signer(entry, &payer)
+            .await
+    }
+
+    pub async fn try_configure_group_premium_with_signer(
+        &self,
+        entry: PremiumEntry,
+        signer: &Keypair,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolConfigureGroupPremium {
+                group: self.key,
+                emode_admin: signer.pubkey(),
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolConfigureGroupPremium {
+                collateral_tag: entry.collateral_tag,
+                liability_tag: entry.liability_tag,
+                rate: entry.rate,
+            }
+            .data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer, signer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn try_configure_bank_premium(
+        &self,
+        bank: &BankFixture,
+        premium_tag: u16,
+        active: bool,
+    ) -> Result<(), BanksClientError> {
+        let payer = self.ctx.borrow().payer.insecure_clone();
+        self.try_configure_bank_premium_with_signer(bank, premium_tag, active, &payer)
+            .await
+    }
+
+    pub async fn try_configure_bank_premium_with_signer(
+        &self,
+        bank: &BankFixture,
+        premium_tag: u16,
+        active: bool,
+        signer: &Keypair,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolConfigureBankPremium {
+                group: self.key,
+                emode_admin: signer.pubkey(),
+                bank: bank.key,
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolConfigureBankPremium {
+                premium_tag,
+                active,
+            }
+            .data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer, signer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Sweep realized premium from the bank's liquidity vault to `premium_ata` (the canonical
+    /// ATA of `FeeState.premium_wallet` for the bank's mint).
+    pub async fn try_collect_premium_fees(
+        &self,
+        bank: &BankFixture,
+        premium_ata: Pubkey,
+    ) -> Result<(), BanksClientError> {
+        let bank_key = bank.key;
+        let (liquidity_vault_authority, _) = Pubkey::find_program_address(
+            &[LIQUIDITY_VAULT_AUTHORITY_SEED.as_bytes(), bank_key.as_ref()],
+            &marginfi::ID,
+        );
+        let (liquidity_vault, _) = Pubkey::find_program_address(
+            &[LIQUIDITY_VAULT_SEED.as_bytes(), bank_key.as_ref()],
+            &marginfi::ID,
+        );
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolCollectBankPremiumFees {
+                group: self.key,
+                bank: bank_key,
+                liquidity_vault_authority,
+                liquidity_vault,
+                fee_state: self.fee_state,
+                premium_ata,
+                token_program: bank.get_token_program(),
+            }
+            .to_account_metas(Some(true)),
+            data: LendingPoolCollectBankPremiumFees {}.data(),
+        };
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.ctx.borrow().payer.pubkey().clone()),
+            &[&self.ctx.borrow().payer],
+            latest_blockhash(&self.ctx).await,
+        );
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+        Ok(())
     }
 
     pub fn make_lending_pool_configure_bank_emode_ix(

@@ -106,6 +106,10 @@ pub const CIRCUIT_BREAKER_ENABLED: u64 = 1 << 11;
 /// Bank opt-in bit: set when same-asset e-mode may use this bank.
 pub const BANK_SAME_ASSET_EMODE_ELIGIBLE: u64 = 1 << 12;
 
+/// Liability-bank flag: balances borrowing from this bank accrue the pairwise variable-borrow
+/// premium and project it in health checks.
+pub const PREMIUM_ACTIVE: u64 = 1 << 13;
+
 pub const GROUP_FLAGS: u64 = PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG
     | FREEZE_SETTINGS
     | TOKENLESS_REPAYMENTS_ALLOWED

@@ -110,6 +110,35 @@ pub struct LendingPoolBankCollectFeesEvent {
 }
 
 #[event]
+pub struct LendingPoolGroupPremiumConfigureEvent {
+    pub header: GroupEventHeader,
+    pub collateral_tag: u16,
+    pub liability_tag: u16,
+    pub old_rate: u32,
+    pub new_rate: u32,
+}
+
+#[event]
+pub struct LendingPoolBankPremiumConfigureEvent {
+    pub header: GroupEventHeader,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    pub premium_tag: u16,
+    pub active: bool,
+}
+
+#[event]
+pub struct LendingPoolPremiumFeesCollectedEvent {
+    pub header: GroupEventHeader,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    /// Realized premium swept from the liquidity vault to the premium wallet ATA this call.
+    pub premium_collected: f64,
+    /// Realized premium still awaiting sweep after this call.
+    pub premium_outstanding: f64,
+}
+
+#[event]
 pub struct LendingPoolBankHandleBankruptcyEvent {
     pub header: AccountEventHeader,
     pub bank: Pubkey,
@@ -117,6 +146,9 @@ pub struct LendingPoolBankHandleBankruptcyEvent {
     pub bad_debt: f64,
     pub covered_amount: f64,
     pub socialized_amount: f64,
+    /// Uncollectable premium receivable written off with the bad debt (never socialized,
+    /// never covered by insurance, never credited to the bank).
+    pub premium_written_off: f64,
 }
 
 #[event]
@@ -176,6 +208,21 @@ pub struct LendingAccountRepayEvent {
     pub amount: u64,
     pub close_balance: bool,
     pub share_amount: WrappedI80F48,
+}
+
+#[event]
+pub struct LendingAccountPremiumSettledEvent {
+    pub header: AccountEventHeader,
+    pub bank: Pubkey,
+    pub mint: Pubkey,
+    /// Premium moved into `bank.collected_premium_outstanding` with this repayment (tokens
+    /// arrived in the liquidity vault), in native token units.
+    pub premium_settled: f64,
+    /// Premium receivable written off with no tokens (tokenless risk-admin repayment), in
+    /// native token units.
+    pub premium_written_off: f64,
+    /// Premium receivable still outstanding on the balance after this repayment.
+    pub premium_outstanding_remaining: f64,
 }
 
 #[event]

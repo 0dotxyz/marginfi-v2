@@ -57,7 +57,10 @@ pub fn assert_bank_solvency(trident: &mut Trident, bank_pk: Pubkey, tolerance: I
 
     let outstanding_fees = from_wrapped(bank.collected_group_fees_outstanding.value)
         + from_wrapped(bank.collected_insurance_fees_outstanding.value)
-        + from_wrapped(bank.collected_program_fees_outstanding.value);
+        + from_wrapped(bank.collected_program_fees_outstanding.value)
+        // Realized variable-borrow premium arrives in the vault with repayments but is not
+        // part of the deposits-minus-liabilities book; it pends sweep like the other fees.
+        + from_wrapped(bank.collected_premium_outstanding.value);
 
     let vault_balance = I80F48::from_num(token_balance(trident, bank.liquidity_vault));
     let net_vault = vault_balance - outstanding_fees;

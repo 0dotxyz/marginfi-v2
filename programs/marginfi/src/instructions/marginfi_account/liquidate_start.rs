@@ -126,6 +126,7 @@ pub fn start_receivership<'info>(
         HealthPriceMode::Live {
             liq_cache: Some(&mut liq_price_cache),
         },
+        &mut None,
     )?;
 
     write_liquidation_price_cache_from(marginfi_account, remaining_ais, &liq_price_cache)?;

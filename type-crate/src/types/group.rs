@@ -5,7 +5,10 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::{assert_struct_size, constants::discriminators};
 
-use super::{GroupRateLimiter, PanicStateCache, WrappedI80F48};
+use super::{
+    GroupRateLimiter, PanicStateCache, PremiumEntry, PremiumSettings, WrappedI80F48,
+    MAX_PREMIUM_ENTRIES,
+};
 
 #[cfg(feature = "anchor")]
 use anchor_lang::prelude::*;
@@ -14,7 +17,7 @@ assert_struct_size!(MarginfiGroup, 9248);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
 #[cfg_attr(not(feature = "anchor"), derive(Pod, Zeroable, Copy, Clone))]
-#[derive(Default, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct MarginfiGroup {
     /// Broadly able to modify anything, and can set/remove other admins at will.
     pub admin: Pubkey,
@@ -92,8 +95,14 @@ pub struct MarginfiGroup {
     /// does not itself compromise any funds, and is merely annoying.
     pub delegate_flow_admin: Pubkey,
 
-    pub _padding_0: [[u64; 2]; 2],
-    pub _padding_1: [[u64; 2]; 32],
+    /// Header for the pairwise variable-borrow premium matrix stored in `premium_entries`.
+    /// Occupies the former `_padding_0`/`_padding_1` region of the v1 layout, so v1 accounts
+    /// resize to a zeroed header (matrix off).
+    pub premium_settings: PremiumSettings,
+    /// Pairwise variable-borrow premium rates, keyed by (collateral `premium_tag`, liability
+    /// `premium_tag`). Live entries occupy the first `premium_settings.entry_count` slots.
+    /// Read only via `find_premium_rate`. Future capacity growth carves from `_padding_2`.
+    pub premium_entries: [PremiumEntry; MAX_PREMIUM_ENTRIES],
     pub _padding_2: [[u64; 32]; 32],
 }
 
@@ -103,6 +112,12 @@ impl MarginfiGroup {
     /// Struct size of the PREVIOUS (v1) group layout — the size of accounts created before
     /// `_padding_2` existed, and a byte-identical prefix of the current layout.
     pub const V1_LEN: usize = 1056;
+}
+
+impl Default for MarginfiGroup {
+    fn default() -> Self {
+        Self::zeroed()
+    }
 }
 
 #[repr(C)]

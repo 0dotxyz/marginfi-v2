@@ -5,7 +5,7 @@ use crate::state::emode::{
 use crate::{prelude::MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
-use marginfi_type_crate::types::basis_to_u32;
+use marginfi_type_crate::types::{basis_to_u32, MAX_PREMIUM_ENTRIES, PREMIUM_TAG_EMPTY};
 use marginfi_type_crate::{constants::DAILY_RESET_INTERVAL, types::MarginfiGroup};
 use std::fmt::Debug;
 
@@ -38,6 +38,7 @@ pub trait MarginfiGroupImpl {
         withdrawn_equity: I80F48,
         current_timestamp: i64,
     ) -> MarginfiResult;
+    fn find_premium_rate(&self, collateral_tag: u16, liability_tag: u16) -> u32;
 }
 
 impl MarginfiGroupImpl for MarginfiGroup {
@@ -161,6 +162,7 @@ impl MarginfiGroupImpl for MarginfiGroup {
             basis_to_u32(DEFAULT_INIT_MAX_SAME_ASSET_EMODE_LEVERAGE);
         self.same_asset_emode_maint_leverage =
             basis_to_u32(DEFAULT_MAINT_MAX_SAME_ASSET_EMODE_LEVERAGE);
+        self.premium_settings.entry_capacity = MAX_PREMIUM_ENTRIES as u16;
     }
 
     fn get_group_bank_config(&self) -> GroupBankConfig {
@@ -261,6 +263,23 @@ impl MarginfiGroupImpl for MarginfiGroup {
 
         Ok(())
     }
+
+    /// Look up the variable-borrow premium rate (milli-u32 encoding) for a (collateral tag,
+    /// liability tag) pair. Missing pairs and untagged (0) banks pay no premium.
+    /// * The SOLE accessor for `premium_entries`. Entries are stored sorted by
+    ///   (collateral_tag, liability_tag) — every config path preserves this.
+    fn find_premium_rate(&self, collateral_tag: u16, liability_tag: u16) -> u32 {
+        if collateral_tag == PREMIUM_TAG_EMPTY || liability_tag == PREMIUM_TAG_EMPTY {
+            return 0;
+        }
+        let n = (self.premium_settings.entry_count as usize).min(MAX_PREMIUM_ENTRIES);
+        self.premium_entries[..n]
+            .binary_search_by_key(&(collateral_tag, liability_tag), |e| {
+                (e.collateral_tag, e.liability_tag)
+            })
+            .map(|i| self.premium_entries[i].rate)
+            .unwrap_or(0)
+    }
 }
 
 trait MarginfiGroupDeleverageLimitExt {
@@ -295,4 +314,130 @@ impl MarginfiGroupDeleverageLimitExt for MarginfiGroup {
 #[derive(Clone, Debug)]
 pub struct GroupBankConfig {
     pub program_fees: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytemuck::Zeroable;
+    use marginfi_type_crate::types::{Balance, Bank, PremiumEntry, PremiumSettings};
+    use std::mem::{offset_of, size_of};
+
+    /// The premium matrix must occupy exactly the bytes that were `_padding_0` (32B) and
+    /// `_padding_1` (512B, last field) before 0.1.10, so pre-existing groups read as an empty
+    /// matrix (count 0, flags 0).
+    #[test]
+    fn group_premium_field_layout() {
+        use std::mem::align_of;
+
+        assert_eq!(size_of::<MarginfiGroup>(), 9248);
+        assert_eq!(offset_of!(MarginfiGroup, premium_settings), 512);
+        assert_eq!(offset_of!(MarginfiGroup, premium_entries), 544);
+        // Premium fields fill the v1 layout exactly (former `_padding_0`/`_padding_1`);
+        // `_padding_2` (the 0.1.10 resize region) starts at the v1 struct end.
+        assert_eq!(offset_of!(MarginfiGroup, _padding_2), MarginfiGroup::V1_LEN);
+
+        // PremiumSettings internals: 8 + 2 + 2 + 4 + 16 = 32, 8-aligned, no implicit padding
+        // (Pod derive would reject implicit padding at compile time; these pin the EXPLICIT
+        // pad placement so a future field reorder trips a test, not mainnet).
+        assert_eq!(size_of::<PremiumSettings>(), 32);
+        assert_eq!(align_of::<PremiumSettings>(), 8);
+        assert_eq!(offset_of!(PremiumSettings, timestamp), 0);
+        assert_eq!(offset_of!(PremiumSettings, entry_count), 8);
+        assert_eq!(offset_of!(PremiumSettings, entry_capacity), 10);
+        assert_eq!(offset_of!(PremiumSettings, _pad0), 12);
+        assert_eq!(offset_of!(PremiumSettings, _reserved0), 16);
+
+        // PremiumEntry: 2 + 2 + 4 = 8, 4-aligned; the array of 64 fills exactly the old
+        // `_padding_1` region (544 + 512 = 1056, the v1 struct end).
+        assert_eq!(size_of::<PremiumEntry>(), 8);
+        assert_eq!(align_of::<PremiumEntry>(), 4);
+        assert_eq!(offset_of!(PremiumEntry, collateral_tag), 0);
+        assert_eq!(offset_of!(PremiumEntry, liability_tag), 2);
+        assert_eq!(offset_of!(PremiumEntry, rate), 4);
+
+        // Zeroed (= any pre-0.1.10 mainnet group) reads as matrix off.
+        let group = MarginfiGroup::zeroed();
+        assert_eq!(group.premium_settings.entry_count, 0);
+        assert_eq!(group.find_premium_rate(100, 200), 0);
+    }
+
+    /// The premium fields must occupy exactly zero-padding reserves of the pre-premium
+    /// layout, so pre-existing banks read as untagged and with no collected premium:
+    /// `collected_premium_outstanding` takes the former `_pad_0: [u8; 16]` (after
+    /// `rate_limiter`), and `premium_tag`/`premium_activated_at` take the first 16 bytes of
+    /// the former `_padding_1: [u64; 3]` tail (the liquidation-fee fields own the former
+    /// `_padding_0` after `borrowing_position_count`). `bank_seed` and the circuit-breaker
+    /// block stay at their 0.1.10 positions.
+    #[test]
+    fn bank_premium_field_layout() {
+        assert_eq!(size_of::<Bank>(), 1856);
+        assert_eq!(offset_of!(Bank, liquidation_liquidator_fee), 1536);
+        assert_eq!(offset_of!(Bank, liquidation_insurance_fee), 1540);
+        assert_eq!(offset_of!(Bank, collected_premium_outstanding), 1728);
+        assert_eq!(offset_of!(Bank, bank_seed), 1744);
+        assert_eq!(offset_of!(Bank, cb_halt_started_at), 1752);
+        assert_eq!(offset_of!(Bank, premium_tag), 1832);
+        assert_eq!(offset_of!(Bank, _pad3), 1834);
+        assert_eq!(offset_of!(Bank, premium_activated_at), 1840);
+        assert_eq!(offset_of!(Bank, _padding_1), 1848);
+    }
+
+    /// The premium fields must occupy exactly the bytes that were `_pad0: [u8; 4]` and
+    /// `emissions_outstanding` before 0.1.10 — both zeroed on-chain by the emissions wind-down
+    /// migration, so pre-existing balances read as rate 0 / nothing outstanding. (As
+    /// defense-in-depth the engine additionally honors `premium_outstanding` only on
+    /// `PREMIUM_ACTIVE` banks.)
+    #[test]
+    fn balance_premium_field_layout() {
+        assert_eq!(size_of::<Balance>(), 104);
+        assert_eq!(offset_of!(Balance, premium_rate_snapshot), 36);
+        assert_eq!(offset_of!(Balance, premium_outstanding), 72);
+        assert_eq!(offset_of!(Balance, last_update), 88);
+    }
+
+    fn group_with_entries(entries: &[(u16, u16, u32)]) -> MarginfiGroup {
+        let mut group = MarginfiGroup::zeroed();
+        for (i, (c, l, r)) in entries.iter().enumerate() {
+            group.premium_entries[i] = PremiumEntry {
+                collateral_tag: *c,
+                liability_tag: *l,
+                rate: *r,
+            };
+        }
+        group.premium_settings.entry_count = entries.len() as u16;
+        group
+    }
+
+    #[test]
+    fn find_premium_rate_hit_and_miss() {
+        let group = group_with_entries(&[(100, 200, 7), (100, 300, 9), (150, 200, 11)]);
+        assert_eq!(group.find_premium_rate(100, 200), 7);
+        assert_eq!(group.find_premium_rate(100, 300), 9);
+        assert_eq!(group.find_premium_rate(150, 200), 11);
+        // Missing pair defaults to 0
+        assert_eq!(group.find_premium_rate(150, 300), 0);
+        assert_eq!(group.find_premium_rate(999, 999), 0);
+    }
+
+    #[test]
+    fn find_premium_rate_tag_zero_never_matches() {
+        // A pathological entry with tag 0 (rejected by config validation, but belt-and-braces)
+        let group = group_with_entries(&[(0, 200, 7), (100, 0, 9)]);
+        assert_eq!(group.find_premium_rate(0, 200), 0);
+        assert_eq!(group.find_premium_rate(100, 0), 0);
+        assert_eq!(group.find_premium_rate(0, 0), 0);
+    }
+
+    #[test]
+    fn find_premium_rate_respects_count() {
+        let mut group = group_with_entries(&[(100, 200, 7), (100, 300, 9)]);
+        // Entries past entry_count are ignored
+        group.premium_settings.entry_count = 1;
+        assert_eq!(group.find_premium_rate(100, 300), 0);
+        assert_eq!(group.find_premium_rate(100, 200), 7);
+        // count 0 => matrix off => everything is 0
+        group.premium_settings.entry_count = 0;
+        assert_eq!(group.find_premium_rate(100, 200), 0);
+    }
 }

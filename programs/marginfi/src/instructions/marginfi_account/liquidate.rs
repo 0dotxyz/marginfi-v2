@@ -7,6 +7,7 @@ use crate::state::{
         check_pre_liquidation_condition_and_get_account_health, get_remaining_accounts_per_bank,
         is_signer_authorized, LendingAccountImpl, MarginfiAccountImpl,
     },
+    premium::{update_premium_snapshots, PremiumScratch},
     {
         marginfi_group::MarginfiGroupImpl,
         price::{OraclePriceFeedAdapter, PriceAdapter},
@@ -510,13 +511,16 @@ pub fn lending_account_liquidate<'info>(
     let liquidator_remaining_accounts =
         &ctx.remaining_accounts[liquidator_accounts_starting_pos..liquidatee_accounts_starting_pos];
 
-    // Verify liquidatee liquidation post health using heap-efficient parity checks
-    let post_liquidation_health = check_post_liquidation_condition_and_get_account_health(
-        &liquidatee_marginfi_account,
+    // Verify liquidatee liquidation post health using heap-efficient parity checks, then claim
+    // at old rates and re-weight the liquidatee's premium snapshots against the
+    // post-liquidation collateral mix (seized collateral no longer counts).
+    let post_liquidation_health = check_liquidatee_health_and_refresh_premium(
+        &mut liquidatee_marginfi_account,
         group,
         liquidatee_remaining_accounts,
         &ctx.accounts.liab_bank.key(),
         pre_liquidation_health,
+        clock.unix_timestamp as u64,
     )?;
 
     // Note: the liquidatee's post-liquidation health is computed above but intentionally not
@@ -530,12 +534,14 @@ pub fn lending_account_liquidate<'info>(
     liquidator_marginfi_account.lending_account.sort_balances();
     liquidator_marginfi_account.sync_indexer_flags();
 
-    // Verify liquidator account health using heap-efficient version (includes isolated-tier check)
-    check_account_init_health(
-        &liquidator_marginfi_account,
+    // Verify liquidator account health using heap-efficient version (includes isolated-tier
+    // check). The liquidator may have just opened a liability leg (snapshot 0 at creation):
+    // weight it against their post-liquidation collateral mix, including the seized collateral.
+    check_liquidator_health_and_refresh_premium(
+        &mut liquidator_marginfi_account,
         group,
         liquidator_remaining_accounts,
-        &mut None,
+        clock.unix_timestamp as u64,
     )?;
 
     emit!(LendingAccountLiquidateEvent {
@@ -557,6 +563,52 @@ pub fn lending_account_liquidate<'info>(
         post_balances,
     });
 
+    Ok(())
+}
+
+/// Post-liquidation health check + premium snapshot refresh for the liquidatee.
+/// * `#[inline(never)]`: keeps the ~1.2KB `PremiumScratch` in its own SBF stack frame — inlined
+///   into the handler it overflows the 4096-byte frame ("overwrites values in the frame").
+#[inline(never)]
+fn check_liquidatee_health_and_refresh_premium<'info>(
+    liquidatee_marginfi_account: &mut MarginfiAccount,
+    group: &MarginfiGroup,
+    liquidatee_remaining_accounts: &'info [AccountInfo<'info>],
+    liab_bank_pk: &Pubkey,
+    pre_liquidation_health: I80F48,
+    now: u64,
+) -> MarginfiResult<I80F48> {
+    let mut premium_scratch = PremiumScratch::default();
+    let post_liquidation_health = check_post_liquidation_condition_and_get_account_health(
+        liquidatee_marginfi_account,
+        group,
+        liquidatee_remaining_accounts,
+        liab_bank_pk,
+        pre_liquidation_health,
+        &mut Some(&mut premium_scratch),
+    )?;
+    update_premium_snapshots(liquidatee_marginfi_account, group, &premium_scratch, now)?;
+    Ok(post_liquidation_health)
+}
+
+/// Init health check + premium snapshot refresh for the liquidator. See
+/// [`check_liquidatee_health_and_refresh_premium`] for the `#[inline(never)]` rationale.
+#[inline(never)]
+fn check_liquidator_health_and_refresh_premium<'info>(
+    liquidator_marginfi_account: &mut MarginfiAccount,
+    group: &MarginfiGroup,
+    liquidator_remaining_accounts: &'info [AccountInfo<'info>],
+    now: u64,
+) -> MarginfiResult {
+    let mut premium_scratch = PremiumScratch::default();
+    check_account_init_health(
+        liquidator_marginfi_account,
+        group,
+        liquidator_remaining_accounts,
+        &mut None,
+        &mut Some(&mut premium_scratch),
+    )?;
+    update_premium_snapshots(liquidator_marginfi_account, group, &premium_scratch, now)?;
     Ok(())
 }
 

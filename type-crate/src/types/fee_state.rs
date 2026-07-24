@@ -68,11 +68,15 @@ pub struct FeeState {
     pub order_execution_max_fee: WrappedI80F48,
     /// Can pause (not unpause) the protocol, but cannot modify any fee configuration.
     pub pause_delegate_admin: Pubkey,
-    /// Reserved for future use (e.g. the variable-borrow premium settings). Accounts created
-    /// before the struct grew to this size are v1-sized (`8 + V1_LEN` bytes) and must be
-    /// grown via `resize_global_fee_state` before this program version can load them; the new
-    /// bytes are zero-filled.
-    pub _reserved0: [u64; 32],
+    /// Destination wallet for swept variable-borrow premium fees. Premium collected by banks is
+    /// swept (permissionlessly) to the canonical ATA of this wallet for the bank's mint.
+    /// * `Pubkey::default()` = unset (sweeps are rejected until the fee admin configures it),
+    ///   which is what v1-sized accounts hold after `resize_global_fee_state` zero-fills them.
+    pub premium_wallet: Pubkey,
+    /// Reserved for future use. Accounts created before the struct grew to this size are
+    /// v1-sized (`8 + V1_LEN` bytes) and must be grown via `resize_global_fee_state` before
+    /// this program version can load them; the new bytes are zero-filled.
+    pub _reserved0: [u64; 28],
 }
 
 impl FeeState {

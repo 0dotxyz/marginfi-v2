@@ -12,6 +12,7 @@ use crate::{
         check_pre_liquidation_condition_and_get_account_health,
         compute_has_isolated_liability_flag,
     },
+    state::premium::{update_premium_snapshots, PremiumScratch},
     MarginfiError, MarginfiResult,
 };
 
@@ -38,13 +39,28 @@ pub fn lending_account_pulse_health<'info>(
     health_cache.program_version = PROGRAM_VERSION;
     let group = ctx.accounts.group.load()?;
 
-    // Check account init health using heap reuse optimization
+    // Check account init health using heap reuse optimization. Also collects the premium
+    // scratch: this permissionless ix doubles as the premium crank, materializing dormant
+    // accounts' pending premium and refreshing stale rate snapshots.
+    let mut premium_scratch = PremiumScratch::default();
     let engine_result = check_account_init_health(
         &marginfi_account,
         &group,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
+        &mut Some(&mut premium_scratch),
     );
+
+    // Claim at old rates + rewrite snapshots. Self-gated: a partial health pass (e.g. an oracle
+    // failure mid-loop) leaves the scratch incomplete and this is a no-op, so a failed pulse can
+    // never write garbage rates.
+    update_premium_snapshots(
+        &mut marginfi_account,
+        &group,
+        &premium_scratch,
+        clock.unix_timestamp as u64,
+    )?;
+
     match engine_result {
         Ok(()) => {
             if health_cache.internal_err != 0 {
@@ -178,6 +194,7 @@ pub struct PulseHealth<'info> {
     )]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
+    /// Needed for same-asset emode checks and the premium snapshot recompute
     pub group: AccountLoader<'info, MarginfiGroup>,
 }
 

@@ -11,6 +11,7 @@ use crate::{
             run_cb_price_gate, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
+        premium::{update_premium_snapshots, PremiumScratch},
         rate_limiter::GroupRateLimiterImpl,
     },
     utils::{
@@ -212,16 +213,34 @@ pub fn lending_account_borrow<'info>(
 
     // Check account health, if below threshold fail transaction
     // Assuming `ctx.remaining_accounts` holds only oracle accounts
+    let mut premium_scratch = PremiumScratch::default();
     check_account_init_health(
         &marginfi_account,
         &group,
         ctx.remaining_accounts,
         &mut Some(&mut health_cache),
+        &mut Some(&mut premium_scratch),
     )?;
     health_cache.program_version = PROGRAM_VERSION;
 
+    // New debt needs a real rate: revert if a stale oracle left the premium pass unpriceable
+    // (in a flashloan the scratch is empty and this passes; flashloan-end re-checks).
+    check!(
+        !premium_scratch.refresh_unavailable(),
+        MarginfiError::PremiumSnapshotUnavailable
+    );
+
     // Revert if any involved bank's oracle price has jumped past the breach threshold.
     run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+
+    // Claim premium at the old rates and refresh every liability's premium rate snapshot with
+    // the post-borrow collateral mix.
+    update_premium_snapshots(
+        &mut marginfi_account,
+        &group,
+        &premium_scratch,
+        clock.unix_timestamp as u64,
+    )?;
 
     let bank_pk = ctx.accounts.bank.key();
     let mut bank = ctx.accounts.bank.load_mut()?;

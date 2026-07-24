@@ -238,6 +238,31 @@ pub mod marginfi {
         marginfi_group::lending_pool_clone_emode(ctx)
     }
 
+    /// (emode_admin only) Set one pair of the group's variable-borrow premium matrix:
+    /// `rate > 0` inserts or updates the pair, `rate == 0` removes it.
+    pub fn lending_pool_configure_group_premium(
+        ctx: Context<LendingPoolConfigureGroupPremium>,
+        collateral_tag: u16,
+        liability_tag: u16,
+        rate: u32,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_configure_group_premium(
+            ctx,
+            collateral_tag,
+            liability_tag,
+            rate,
+        )
+    }
+
+    /// (emode_admin only) Set a bank's premium tag and toggle premium accrual for its borrowers.
+    pub fn lending_pool_configure_bank_premium(
+        ctx: Context<LendingPoolConfigureBankPremium>,
+        premium_tag: u16,
+        active: bool,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_configure_bank_premium(ctx, premium_tag, active)
+    }
+
     /// (permissionless) Deposit same-bank emissions directly into liquidity vault and increase
     /// depositors' value via `asset_share_value`.
     pub fn lending_pool_emissions_deposit(
@@ -503,6 +528,14 @@ pub mod marginfi {
         marginfi_group::lending_pool_collect_bank_fees(ctx)
     }
 
+    /// (permissionless) Sweep realized variable-borrow premium from the liquidity vault to the
+    /// canonical ATA of `FeeState.premium_wallet` for the bank's mint.
+    pub fn lending_pool_collect_bank_premium_fees<'info>(
+        ctx: Context<'info, LendingPoolCollectBankPremiumFees<'info>>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_collect_bank_premium_fees(ctx)
+    }
+
     /// (admin only) Withdraw collected group fees from the fee vault.
     pub fn lending_pool_withdraw_fees<'info>(
         ctx: Context<'info, LendingPoolWithdrawFees<'info>>,
@@ -634,6 +667,14 @@ pub mod marginfi {
             liquidation_max_fee,
             order_execution_max_fee,
         )
+    }
+
+    /// (global fee admin only) Adjust the variable-borrow premium wallet on the fee state.
+    pub fn edit_fee_state_premium(
+        ctx: Context<EditFeeStatePremium>,
+        premium_wallet: Option<Pubkey>,
+    ) -> MarginfiResult {
+        marginfi_group::edit_fee_state_premium(ctx, premium_wallet)
     }
 
     /// (global fee admin only) Adjust fees, admin, wallet, or pause delegate admin

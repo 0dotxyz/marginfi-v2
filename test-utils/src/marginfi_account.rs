@@ -974,9 +974,10 @@ impl MarginfiAccountFixture {
         include_banks: Vec<Pubkey>,
         exclude_banks: Vec<Pubkey>,
     ) -> Instruction {
+        let group = self.load().await.group;
         let mut account_metas = marginfi::accounts::LendingAccountEndFlashloan {
             marginfi_account: self.key,
-            group: self.load().await.group,
+            group,
             authority: self.ctx.borrow().payer.pubkey(),
         }
         .to_account_metas(Some(true));
@@ -1321,13 +1322,14 @@ impl MarginfiAccountFixture {
         global_fee_wallet: Pubkey,
         exclude_banks: Vec<Pubkey>,
     ) -> Instruction {
+        let group = self.load().await.group;
         let mut ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::EndLiquidation {
                 marginfi_account: self.key,
+                group,
                 liquidation_record,
                 liquidation_receiver,
-                group: self.load().await.group,
                 fee_state,
                 global_fee_wallet,
                 system_program: system_program::ID,
@@ -1874,11 +1876,12 @@ impl MarginfiAccountFixture {
     pub async fn try_lending_account_pulse_health(
         &self,
     ) -> std::result::Result<(), BanksClientError> {
+        let group = self.load().await.group;
         let mut ix = Instruction {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::PulseHealth {
                 marginfi_account: self.key,
-                group: self.load().await.group,
+                group,
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::LendingAccountPulseHealth {}.data(),

@@ -12,6 +12,7 @@ pub mod marginfi_account;
 pub mod marginfi_group;
 pub mod order;
 pub mod panic_state;
+pub mod premium;
 pub mod price;
 pub mod rate_limiter;
 pub mod solend;

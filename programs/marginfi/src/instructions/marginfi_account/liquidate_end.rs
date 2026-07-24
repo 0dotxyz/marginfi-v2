@@ -8,6 +8,7 @@ use crate::{
         check_pre_liquidation_condition_and_get_account_health,
         clear_liquidation_price_cache_locks, get_health_components, MarginfiAccountImpl,
     },
+    state::premium::{update_premium_snapshots, PremiumScratch},
 };
 use anchor_lang::prelude::*;
 use bytemuck::Zeroable;
@@ -31,6 +32,7 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
     let fee_state = ctx.accounts.fee_state.load()?;
+    let group = ctx.accounts.group.load()?;
 
     validate_not_cpi_by_stack_height()?;
 
@@ -40,7 +42,6 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
     // below the threshold, then we can clear it regardless (or not).
     let ignore_healthy = pre_assets_equity < LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD;
 
-    let group = ctx.accounts.group.load()?;
     let (seized, seized_f64, repaid, repaid_f64) = end_receivership(
         &mut marginfi_account,
         &group,
@@ -89,11 +90,11 @@ pub fn end_liquidation<'info>(ctx: Context<'info, EndLiquidation<'info>>) -> Mar
 pub fn end_deleverage<'info>(ctx: Context<'info, EndDeleverage<'info>>) -> MarginfiResult {
     let mut marginfi_account = ctx.accounts.marginfi_account.load_mut()?;
     let mut liq_record = ctx.accounts.liquidation_record.load_mut()?;
+    let group = ctx.accounts.group.load()?;
 
     validate_not_cpi_by_stack_height()?;
 
     marginfi_account.unset_flag(ACCOUNT_IN_DELEVERAGE, false);
-    let group = ctx.accounts.group.load()?;
     let (_, seized_f64, _, repaid_f64) = end_receivership(
         &mut marginfi_account,
         &group,
@@ -137,6 +138,7 @@ pub fn end_receivership<'info>(
             HealthPriceMode::Cached,
             ignore_healthy,
         )?;
+    let mut premium_scratch = PremiumScratch::default();
     let (post_assets_equity, post_liabilities_equity) = get_health_components(
         marginfi_account,
         group,
@@ -144,10 +146,20 @@ pub fn end_receivership<'info>(
         RequirementType::Equity,
         &mut Some(&mut post_hc),
         HealthPriceMode::Cached,
+        &mut Some(&mut premium_scratch),
     )?;
 
     clear_liquidation_price_cache_locks(marginfi_account, remaining_ais)?;
     marginfi_account.health_cache = post_hc;
+
+    // Claim premium at the old rates and refresh every liability's premium rate snapshot with
+    // the post-liquidation collateral mix (cached prices).
+    update_premium_snapshots(
+        marginfi_account,
+        group,
+        &premium_scratch,
+        Clock::get()?.unix_timestamp as u64,
+    )?;
 
     // health must not get worse
     if pre_health > post_health {

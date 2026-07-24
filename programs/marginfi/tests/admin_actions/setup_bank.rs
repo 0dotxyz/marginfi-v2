@@ -191,6 +191,9 @@ async fn add_bank_success() -> anyhow::Result<()> {
             integration_acc_1,
             integration_acc_2,
             integration_acc_3,
+            premium_tag,
+            collected_premium_outstanding,
+            premium_activated_at,
             _padding_1,
             bank_seed,
             .. // ignore internal padding
@@ -233,7 +236,10 @@ async fn add_bank_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[u64; 3] as Default>::default());
+            assert_eq!(premium_tag, 0);
+            assert_eq!(collected_premium_outstanding, I80F48!(0.0).into());
+            assert_eq!(premium_activated_at, 0);
+            assert_eq!(_padding_1, <[u64; 1] as Default>::default());
             // legacy add_bank does not pass a seed
             assert_eq!(bank_seed, 0);
 
@@ -348,6 +354,9 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             integration_acc_1,
             integration_acc_2,
             integration_acc_3,
+            premium_tag,
+            collected_premium_outstanding,
+            premium_activated_at,
             _padding_1,
             bank_seed,
             .. // ignore internal padding
@@ -390,7 +399,10 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(integration_acc_1, Pubkey::default());
             assert_eq!(integration_acc_2, Pubkey::default());
             assert_eq!(integration_acc_3, Pubkey::default());
-            assert_eq!(_padding_1, <[u64; 3] as Default>::default());
+            assert_eq!(premium_tag, 0);
+            assert_eq!(collected_premium_outstanding, I80F48!(0.0).into());
+            assert_eq!(premium_activated_at, 0);
+            assert_eq!(_padding_1, <[u64; 1] as Default>::default());
             // with-seed add_bank stores the seed used for PDA derivation
             assert_eq!(bank_seed, 1200_u64);
 
