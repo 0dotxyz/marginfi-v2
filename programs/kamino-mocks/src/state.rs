@@ -1,5 +1,6 @@
-use crate::{assert_struct_align, assert_struct_size, math_error, KaminoMocksError};
+use crate::{math_error, KaminoMocksError};
 use anchor_lang::prelude::*;
+use marginfi_type_crate::{assert_struct_align, assert_struct_size};
 use fixed::types::I80F48;
 use marginfi_type_crate::types::price::{
     collateral_to_liquidity_from_scaled, convert_decimals as shared_convert_decimals,

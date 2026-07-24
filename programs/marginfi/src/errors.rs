@@ -447,6 +447,18 @@ pub enum MarginfiError {
     #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
     CircuitBreakerPriceJump, // 6604
                              // **************END CIRCUIT BREAKER ERRORS
+
+    // ************** BEGIN MARINADE ERRORS (starting at 6700)
+    #[msg("Marinade state validation failed")]
+    MarinadeStateValidationFailed = 700, // 6700
+    // **************END MARINADE ERRORS
+
+    // ************** BEGIN EXPONENT ERRORS (starting at 6701)
+    #[msg("Exponent vault validation failed")]
+    ExponentVaultValidationFailed = 701, // 6701
+    #[msg("PT start price must be in (0, 1]")]
+    InvalidPtStartPrice = 702, // 6702
+                               // **************END EXPONENT ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -691,6 +703,10 @@ impl From<u32> for MarginfiError {
             6602 => MarginfiError::CircuitBreakerInvalidConfig,
             6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
             6604 => MarginfiError::CircuitBreakerPriceJump,
+
+            6700 => MarginfiError::MarinadeStateValidationFailed,
+            6701 => MarginfiError::ExponentVaultValidationFailed,
+            6702 => MarginfiError::InvalidPtStartPrice,
 
             _ => MarginfiError::InternalLogicError,
         }

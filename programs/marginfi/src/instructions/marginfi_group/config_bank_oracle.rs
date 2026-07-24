@@ -37,6 +37,30 @@ pub fn lending_pool_configure_bank_oracle(
         bank.config.oracle_setup = setup_type;
         bank.config.oracle_keys[0] = oracle;
 
+        // mSOL / LST setups carry multiplier oracle key (Marinade State / SPL StakePool) beyond the primary feed, populated here from
+        // remaining_accounts (validated immediately below):
+        match setup_type {
+            OracleSetup::PythMSOL | OracleSetup::PythLST => {
+                require!(
+                    ctx.remaining_accounts.len() == 2,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+                bank.config.oracle_keys[1] = ctx.remaining_accounts[1].key();
+            }
+            OracleSetup::KaminoMSOL
+            | OracleSetup::JuplendMSOL
+            | OracleSetup::KaminoLST
+            | OracleSetup::JuplendLST => {
+                require!(
+                    ctx.remaining_accounts.len() == 3,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+                // Note: integration oracle is not set here to ensure it's only assigned on the bank creation.
+                bank.config.oracle_keys[2] = ctx.remaining_accounts[2].key();
+            }
+            _ => {}
+        }
+
         msg!(
             "setting oracle to type: {:?} key: {:?}",
             bank.config.oracle_setup,

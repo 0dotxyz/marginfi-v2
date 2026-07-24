@@ -1108,12 +1108,41 @@ impl MarginfiAccountFixture {
                     });
                 }
 
-                if should_include_integration_observation_meta(bank) {
-                    metas.push(AccountMeta {
-                        pubkey: bank.integration_acc_1,
-                        is_signer: false,
-                        is_writable: false,
-                    });
+                // Non-integration mSOL/LST setups carry the rate account (Marinade State / SPL StakePool)
+                // at oracle_keys[1]; the integration variants carry the reserve/lending at oracle_keys[1]
+                // and the rate account at oracle_keys[2].
+                match bank.config.oracle_setup {
+                    OracleSetup::PythMSOL | OracleSetup::PythLST => {
+                        metas.push(AccountMeta {
+                            pubkey: bank.config.oracle_keys[1],
+                            is_signer: false,
+                            is_writable: false,
+                        });
+                    }
+                    OracleSetup::KaminoMSOL
+                    | OracleSetup::JuplendMSOL
+                    | OracleSetup::KaminoLST
+                    | OracleSetup::JuplendLST => {
+                        metas.push(AccountMeta {
+                            pubkey: bank.config.oracle_keys[1],
+                            is_signer: false,
+                            is_writable: false,
+                        });
+                        metas.push(AccountMeta {
+                            pubkey: bank.config.oracle_keys[2],
+                            is_signer: false,
+                            is_writable: false,
+                        });
+                    }
+                    _ => {
+                        if should_include_integration_observation_meta(bank) {
+                            metas.push(AccountMeta {
+                                pubkey: bank.integration_acc_1,
+                                is_signer: false,
+                                is_writable: false,
+                            });
+                        }
+                    }
                 }
                 metas
             })
