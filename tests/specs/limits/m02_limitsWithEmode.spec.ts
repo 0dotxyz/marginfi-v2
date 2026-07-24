@@ -66,27 +66,69 @@ import {
   assertKeyDefault,
   assertKeysEqual,
 } from "../../utils/genericTests";
-import { setupSwitchboardPullOracleFromTemplate } from "../../utils/bankrun-oracles";
 
 const startingSeed: number = 299;
 const LIQ_CACHE_LOCKED_FLAG = 1;
-/** marginfi program `STD_DEV_MULTIPLE` (price.rs confidence scaling for Switchboard). */
-const STD_DEV_MULTIPLE = 1.96;
+const U32_MAX = 0xffffffff;
+const MAX_CONF_INTERVAL = 0.05;
+const LEGACY_CONFIDENCE_SPREAD = ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
+const LEGACY_SWITCHBOARD_ORACLE_MAX_CONFIDENCE = Math.round(
+  U32_MAX * LEGACY_CONFIDENCE_SPREAD
+);
 
 async function getCurrentBankrunSlot(): Promise<BN> {
   const clock = await bankrunContext.banksClient.getClock();
   return new BN(clock.slot.toString());
 }
 
-const ORACLE_MODES: Array<"pyth" | "switchboard"> = ["pyth", "switchboard"];
+const oracleConfidenceSpread = (
+  oracleMode: "pyth" | "switchboard",
+  oracleMaxConfidence?: number
+) => {
+  if (oracleMode === "pyth") {
+    return LEGACY_CONFIDENCE_SPREAD;
+  }
+  if (oracleMaxConfidence === undefined || oracleMaxConfidence === 0) {
+    return 0;
+  }
+  return Math.min(oracleMaxConfidence / U32_MAX, MAX_CONF_INTERVAL);
+};
 
-ORACLE_MODES.forEach((oracleMode) => {
-  const groupBuff = Buffer.from(
-    oracleMode === "switchboard"
-      ? "MARGINFI_GROUP_SEED_1234000M2swb"
-      : "MARGINFI_GROUP_SEED_1234000M2pyt"
+const ORACLE_CASES: Array<{
+  label: string;
+  oracleMode: "pyth" | "switchboard";
+  groupSeed: string;
+  accountName: string;
+  oracleMaxConfidence?: number;
+}> = [
+  {
+    label: "pyth",
+    oracleMode: "pyth",
+    groupSeed: "MARGINFI_GROUP_SEED_1234000M2pyt",
+    accountName: "throwaway_account3_pyth",
+  },
+  {
+    label: "switchboard",
+    oracleMode: "switchboard",
+    groupSeed: "MARGINFI_GROUP_SEED_1234000M2swb",
+    accountName: "throwaway_account3_switchboard",
+  },
+  {
+    label: "switchboard, oracle_max_confidence = legacy std_dev spread",
+    oracleMode: "switchboard",
+    groupSeed: "MARGINFI_GROUP_SEED_1234000M2leg",
+    accountName: "throwaway_account3_switchboard_legacy",
+    oracleMaxConfidence: LEGACY_SWITCHBOARD_ORACLE_MAX_CONFIDENCE,
+  },
+];
+
+ORACLE_CASES.forEach(({ label, oracleMode, groupSeed, accountName, oracleMaxConfidence }) => {
+  const groupBuff = Buffer.from(groupSeed);
+  const USER_ACCOUNT_THROWAWAY = accountName;
+  const confidenceSpread = oracleConfidenceSpread(
+    oracleMode,
+    oracleMaxConfidence
   );
-  const USER_ACCOUNT_THROWAWAY = `throwaway_account3_${oracleMode}`;
   // All banks here are regular LST banks, so one getter covers every oracle ref.
   const getLstOraclePk = () =>
     oracleMode === "switchboard"
@@ -98,28 +140,8 @@ ORACLE_MODES.forEach((oracleMode) => {
   let remainingAccounts: PublicKey[][] = [];
   let lookupTable: PublicKey;
 
-  describe(`m02: Limits on number of accounts, with emode in effect [${oracleMode}]`, () => {
+  describe(`m02: Limits on number of accounts, with emode in effect [${label}]`, () => {
     it("init group, init banks, and fund banks", async () => {
-      // In switchboard mode, align the LST oracle's std_dev so the program's
-      // confidence band (std_dev * STD_DEV_MULTIPLE) equals the Pyth band
-      // (price * ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE). This keeps every
-      // seized/repaid assertion below valid in both oracle modes unchanged.
-      if (oracleMode === "switchboard") {
-        await setupSwitchboardPullOracleFromTemplate(
-          bankrunContext,
-          banksClient,
-          oracles.lstAlphaOracleSwb,
-          {
-            price: ecosystem.lstAlphaPrice,
-            stdDev:
-              (ecosystem.lstAlphaPrice *
-                ORACLE_CONF_INTERVAL *
-                CONF_INTERVAL_MULTIPLE) /
-              STD_DEV_MULTIPLE,
-          }
-        );
-      }
-
       const result = await genericMultiBankTestSetup(
         MAX_BALANCES,
         USER_ACCOUNT_THROWAWAY,
@@ -127,7 +149,8 @@ ORACLE_MODES.forEach((oracleMode) => {
         startingSeed,
         0,
         0,
-        oracleMode
+        oracleMode,
+        oracleMaxConfidence
       );
       banks = result.banks;
       throwawayGroup = result.throwawayGroup;
@@ -287,6 +310,7 @@ ORACLE_MODES.forEach((oracleMode) => {
       let config = defaultBankConfigOptRaw();
       config.liabilityWeightInit = bigNumberToWrappedI80F48(210); // 21000%
       config.liabilityWeightMaint = bigNumberToWrappedI80F48(200); // 20000%
+      config.oracleMaxConfidence = oracleMaxConfidence ?? 0;
 
       let tx = new Transaction().add(
         await configureBank(groupAdmin.mrgnBankrunProgram, {
@@ -485,7 +509,8 @@ ORACLE_MODES.forEach((oracleMode) => {
       const entry = recordAfter.entries[3];
       assert(entry.timestamp.toNumber() > 0);
 
-      // Note: asset seized and liability repaid are scaled to the oracle confidence adjustment
+      // Pyth applies the oracle confidence band. Switchboard only applies one when
+      // oracleMaxConfidence is explicitly configured.
       const seized = bytesToF64(entry.assetAmountSeized);
       const repaid = bytesToF64(entry.liabAmountRepaid);
       if (verbose) {
@@ -494,18 +519,10 @@ ORACLE_MODES.forEach((oracleMode) => {
         console.log("theoretical profit: " + (seized - repaid));
       }
       const expectedAssets =
-        0.105 * oracles.lstAlphaPrice -
-        0.105 *
-          oracles.lstAlphaPrice *
-          ORACLE_CONF_INTERVAL *
-          CONF_INTERVAL_MULTIPLE;
+        0.105 * oracles.lstAlphaPrice * (1 - confidenceSpread);
       assert.approximately(seized, expectedAssets, 0.001);
       const expectedLiabs =
-        0.1 * oracles.lstAlphaPrice +
-        0.1 *
-          oracles.lstAlphaPrice *
-          ORACLE_CONF_INTERVAL *
-          CONF_INTERVAL_MULTIPLE;
+        0.1 * oracles.lstAlphaPrice * (1 + confidenceSpread);
       assert.approximately(repaid, expectedLiabs, 0.001);
 
       // other slots (0-2) should still be zero
@@ -605,7 +622,8 @@ ORACLE_MODES.forEach((oracleMode) => {
       const entry = recordAfter.entries[3];
       assert(entry.timestamp.toNumber() > 0);
 
-      // Note: asset seized and liability repaid are scaled to the oracle confidence adjustment
+      // Pyth applies the oracle confidence band. Switchboard only applies one when
+      // oracleMaxConfidence is explicitly configured.
       const seized = bytesToF64(entry.assetAmountSeized);
       const repaid = bytesToF64(entry.liabAmountRepaid);
       if (verbose) {
@@ -614,18 +632,10 @@ ORACLE_MODES.forEach((oracleMode) => {
         console.log("theoretical profit: " + (seized - repaid));
       }
       const expectedAssets =
-        1.0 * oracles.lstAlphaPrice -
-        1.0 *
-          oracles.lstAlphaPrice *
-          ORACLE_CONF_INTERVAL *
-          CONF_INTERVAL_MULTIPLE;
+        1.0 * oracles.lstAlphaPrice * (1 - confidenceSpread);
       assert.approximately(seized, expectedAssets, 0.001);
       const expectedLiabs =
-        1.0 * oracles.lstAlphaPrice +
-        1.0 *
-          oracles.lstAlphaPrice *
-          ORACLE_CONF_INTERVAL *
-          CONF_INTERVAL_MULTIPLE;
+        1.0 * oracles.lstAlphaPrice * (1 + confidenceSpread);
       assert.approximately(repaid, expectedLiabs, 0.001);
 
       // the first two slots (0-1) should still be zero
@@ -637,6 +647,7 @@ ORACLE_MODES.forEach((oracleMode) => {
     it("(admin) Allows tokenless repayments for banks 3 & 4", async () => {
       let config = defaultBankConfigOptRaw();
       config.tokenlessRepaymentsAllowed = true;
+      config.oracleMaxConfidence = oracleMaxConfidence ?? 0;
 
       let tx = new Transaction();
       for (const i of [3, 4]) {
@@ -731,7 +742,8 @@ ORACLE_MODES.forEach((oracleMode) => {
       const entry = recordAfter.entries[3];
       assert(entry.timestamp.toNumber() > 0);
 
-      // Note: asset seized and liability repaid are scaled to the oracle confidence adjustment
+      // Pyth applies the oracle confidence band. Switchboard only applies one when
+      // oracleMaxConfidence is explicitly configured.
       const seized = bytesToF64(entry.assetAmountSeized);
       const repaid = bytesToF64(entry.liabAmountRepaid);
       if (verbose) {
@@ -740,18 +752,10 @@ ORACLE_MODES.forEach((oracleMode) => {
         console.log("theoretical profit: " + (seized - repaid));
       }
       const expectedAssets =
-        1.0 * oracles.lstAlphaPrice -
-        1.0 *
-          oracles.lstAlphaPrice *
-          ORACLE_CONF_INTERVAL *
-          CONF_INTERVAL_MULTIPLE;
+        1.0 * oracles.lstAlphaPrice * (1 - confidenceSpread);
       assert.approximately(seized, expectedAssets, 0.001);
       const expectedLiabs =
-        1.0 * oracles.lstAlphaPrice +
-        1.0 *
-          oracles.lstAlphaPrice *
-          ORACLE_CONF_INTERVAL *
-          CONF_INTERVAL_MULTIPLE;
+        1.0 * oracles.lstAlphaPrice * (1 + confidenceSpread);
       assert.approximately(repaid, expectedLiabs, 0.001);
 
       // the first slot (0) should still be zero
@@ -973,32 +977,27 @@ ORACLE_MODES.forEach((oracleMode) => {
       const entry = recordAfter.entries[3];
       assert(entry.timestamp.toNumber() > 0);
 
-      // Note: we did the same liquidation twice: they should be identical, but not quite! The fixed
-      // oracle doesn't have a confidence applied, so here we have seized using the raw price with no
-      // confidence adjustments. (Of course, the raw amount seized is actually the same)
+      // Note: we did the same liquidation twice. Fixed oracles always have zero confidence, so this
+      // round records raw USD values; the previous round only differs when the oracle case had a
+      // nonzero confidence spread.
       const t = 0.00000001;
       const assetsActual = bytesToF64(entry.assetAmountSeized);
-      const assetsExpected =
-        assetsActual -
-        assetsActual * ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
+      const assetsExpected = assetsActual * (1 - confidenceSpread);
       assert.approximately(
         assetsExpected,
         bytesToF64(oldEntry.assetAmountSeized),
         t
       );
 
-      // Same for liabilities, we sorta repaid less (in $) because the confidence interval didn't
-      // apply here. But again, the actual amount repaid, in token, is unchanged.
+      // Same for liabilities. The actual amount repaid in token is unchanged.
       const liabActual = bytesToF64(entry.liabAmountRepaid);
-      const liabExpected =
-        liabActual + liabActual * ORACLE_CONF_INTERVAL * CONF_INTERVAL_MULTIPLE;
+      const liabExpected = liabActual * (1 + confidenceSpread);
       assert.approximately(
         liabExpected,
         bytesToF64(oldEntry.liabAmountRepaid),
         t
       );
 
-      // Note: asset seized and liability repaid are scaled to the oracle confidence adjustment
       const seized = bytesToF64(entry.assetAmountSeized);
       const repaid = bytesToF64(entry.liabAmountRepaid);
       if (verbose) {
@@ -1118,18 +1117,5 @@ ORACLE_MODES.forEach((oracleMode) => {
       const liqCacheFlags = Number(bankAccount.cache.liqCacheFlags);
       assert.equal(liqCacheFlags & LIQ_CACHE_LOCKED_FLAG, 0);
     };
-
-    after(async () => {
-      // Restore the shared switchboard LST oracle to its template std_dev so
-      // later switchboard suites aren't affected by our confidence alignment.
-      if (oracleMode === "switchboard") {
-        await setupSwitchboardPullOracleFromTemplate(
-          bankrunContext,
-          banksClient,
-          oracles.lstAlphaOracleSwb,
-          { price: ecosystem.lstAlphaPrice }
-        );
-      }
-    });
   });
 });
