@@ -12,6 +12,7 @@ use enum_dispatch::enum_dispatch;
 use fixed::types::I80F48;
 use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION};
 use kamino_mocks::state::MinimalReserve;
+use exponent_mocks::state::{MinimalExponentVault, VAULT_DISCRIMINATOR};
 use marinade_mocks::state::{MinimalMarinadeState, MSOL_PRICE_PRECISION, STATE_DISCRIMINATOR};
 use marginfi_type_crate::types::OnRampTransition;
 use marginfi_type_crate::{
@@ -355,6 +356,66 @@ fn validate_marinade_state_account(
         MarginfiError::MarinadeStateValidationFailed
     );
     Ok(())
+}
+
+fn load_exponent_vault<'info>(
+    bank_config: &BankConfig,
+    vault_info: &'info AccountInfo<'info>,
+    key_index: usize,
+) -> MarginfiResult<AccountLoader<'info, MinimalExponentVault>> {
+    require_keys_eq!(
+        *vault_info.key,
+        bank_config.oracle_keys[key_index],
+        MarginfiError::ExponentVaultValidationFailed
+    );
+    let loader: AccountLoader<MinimalExponentVault> = AccountLoader::try_from(vault_info)
+        .map_err(|_| MarginfiError::ExponentVaultValidationFailed)?;
+    Ok(loader)
+}
+
+pub(crate) fn check_exponent_vault(info: &AccountInfo) -> MarginfiResult {
+    check!(
+        info.owner == &exponent_mocks::ID,
+        MarginfiError::ExponentVaultValidationFailed
+    );
+    let data = info.try_borrow_data()?;
+    check!(
+        data.len() >= 8 && data[..8] == VAULT_DISCRIMINATOR,
+        MarginfiError::ExponentVaultValidationFailed
+    );
+    Ok(())
+}
+
+/// PT/SOL multiplier: linear accretion from `start_price` to par (1.0) over the vault's
+/// `[start_ts, start_ts + duration]`, clamped at both ends.
+fn pt_sol_multiplier(
+    vault: &MinimalExponentVault,
+    clock: &Clock,
+    start_price: I80F48,
+) -> MarginfiResult<I80F48> {
+    let start_ts = vault.start_ts() as i64;
+    let maturity = start_ts
+        .checked_add(vault.duration() as i64)
+        .ok_or_else(math_error!())?;
+    let now = clock.unix_timestamp;
+
+    if now <= start_ts {
+        return Ok(start_price);
+    }
+    if now >= maturity {
+        return Ok(I80F48::ONE);
+    }
+
+    // start_price + (1 - start_price) * (now - start_ts) / (maturity - start_ts)
+    let progress = I80F48::from_num(now - start_ts)
+        .checked_div(I80F48::from_num(maturity - start_ts))
+        .ok_or_else(math_error!())?;
+    let gain = I80F48::ONE
+        .checked_sub(start_price)
+        .ok_or_else(math_error!())?
+        .checked_mul(progress)
+        .ok_or_else(math_error!())?;
+    Ok(start_price.checked_add(gain).ok_or_else(math_error!())?)
 }
 
 /// Applies an `I80F48` exchange-rate multiplier to a Pyth push feed's price/ema and their
@@ -1271,6 +1332,39 @@ impl OraclePriceFeedAdapter {
                     cache_multiplier: juplend_rate,
                 })
             }
+            OracleSetup::PTSOL => {
+                // (0) Pyth (SOL/USD), (1) Exponent vault (for the PT linear rate)
+                check!(ais.len() == 2, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let account_info = &ais[0];
+                let vault_info = &ais[1];
+
+                check_primary_oracle_key(bank_config, account_info)?;
+
+                let vault_loader = load_exponent_vault(bank_config, vault_info, 1)?;
+                let vault = vault_loader.load()?;
+                let start_price: I80F48 = bank.config.fixed_price.into();
+                let pt_rate = pt_sol_multiplier(&vault, clock, start_price)?;
+
+                let mut price_feed =
+                    PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
+
+                // Bake the PT/SOL rate into the price -> feed now represents PT/USD.
+                apply_i80f48_multiplier(&mut price_feed, pt_rate)?;
+
+                // Cache the underlying (PT/USD) price; a plain PT bank has no wrapper multiplier.
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(price_feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
+
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: I80F48::ONE,
+                })
+            }
         }
     }
 
@@ -1742,6 +1836,19 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::JuplendLendingValidationFailed
                 );
                 stake_pool_price_multiplier(bank_config, &oracle_ais[2], 2)?;
+                Ok(())
+            }
+            OracleSetup::PTSOL => {
+                // (0) Pyth (SOL/USD). The Exponent vault (oracle_keys[1]) is set and validated
+                // separately via set_fixed_oracle_price.
+                require_eq!(
+                    oracle_ais.len(),
+                    1,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+
+                check_primary_oracle_key(bank_config, &oracle_ais[0])?;
+                load_price_update_v2_checked(&oracle_ais[0])?;
                 Ok(())
             }
         }
@@ -2325,6 +2432,36 @@ mod tests {
         let expected = I80F48::from_num(total_lamports) / I80F48::from_num(pool_token_supply);
         assert_eq!(rate, expected);
         assert!(rate > I80F48::from_num(1.29) && rate < I80F48::from_num(1.30));
+    }
+
+    #[test]
+    fn pt_sol_multiplier_lerps_to_par() {
+        use bytemuck::Zeroable;
+        let mut vault = MinimalExponentVault::zeroed();
+        vault.start_ts = 1_000;
+        vault.duration = 1_000; // maturity = 2_000
+        let start_price = I80F48::from_num(0.8);
+        let at = |ts: i64| Clock {
+            unix_timestamp: ts,
+            ..Clock::default()
+        };
+
+        // Before start -> start_price; at/after maturity -> par (1.0)
+        assert_eq!(
+            pt_sol_multiplier(&vault, &at(500), start_price).unwrap(),
+            start_price
+        );
+        assert_eq!(
+            pt_sol_multiplier(&vault, &at(2_000), start_price).unwrap(),
+            I80F48::ONE
+        );
+        assert_eq!(
+            pt_sol_multiplier(&vault, &at(9_999), start_price).unwrap(),
+            I80F48::ONE
+        );
+        // Halfway through -> midpoint between 0.8 and 1.0 = 0.9
+        let mid = pt_sol_multiplier(&vault, &at(1_500), start_price).unwrap();
+        assert!((mid - I80F48::from_num(0.9)).abs() < I80F48::from_num(1e-9));
     }
 
     fn serialized_stake_account(delegated_stake: u64) -> Vec<u8> {

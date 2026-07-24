@@ -490,6 +490,7 @@ function getGenesisAccounts(): AddedAccount[] {
     loadJsonFixture("tests/fixtures/bsol_stake_pool.json"),
     loadJsonFixture("tests/fixtures/sanctum_spl_stake_pool.json"),
     loadJsonFixture("tests/fixtures/jupsol_stake_pool.json"),
+    loadJsonFixture("tests/fixtures/exponent_pt_vault.json"),
   ];
 }
 

@@ -22,6 +22,35 @@ pub fn lending_pool_set_fixed_oracle_price(
         panic!("cannot change oracle settings on frozen banks");
     }
 
+    // PT-SOL banks: set the linear-pricing start price and (re)validate + store the Exponent vault.
+    // The bank must already be configured to PTSOL via configure_bank_oracle (Pyth SOL/USD feed in
+    // oracle_keys[0]); the vault is passed as the sole remaining account.
+    if bank.config.oracle_setup == OracleSetup::PTSOL {
+        let price_i80: I80F48 = price.into();
+        check!(
+            price_i80 > I80F48::ZERO && price_i80 <= I80F48::ONE,
+            MarginfiError::InvalidPtStartPrice
+        );
+        check!(
+            ctx.remaining_accounts.len() == 1,
+            MarginfiError::WrongNumberOfOracleAccounts
+        );
+        let vault_ai = &ctx.remaining_accounts[0];
+        crate::state::price::check_exponent_vault(vault_ai)?;
+        bank.config.oracle_keys[1] = vault_ai.key();
+        bank.config.fixed_price = price;
+
+        emit!(LendingPoolBankSetFixedOraclePriceEvent {
+            header: GroupEventHeader {
+                marginfi_group: ctx.accounts.group.key(),
+                signer: Some(*ctx.accounts.admin.key),
+            },
+            bank: ctx.accounts.bank.key(),
+            price,
+        });
+        return Ok(());
+    }
+
     // Technically there is nothing wrong with allowing this on staked banks, but since they can
     // always inherit settings by propagation, this would be silly. There's also no reason we'd want
     // to do this anyways.

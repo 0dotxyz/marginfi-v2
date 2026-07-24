@@ -62,6 +62,7 @@ drift-mocks = { path = "../drift-mocks" , features = ["no-entrypoint"]}
 solend-mocks = { path = "../solend-mocks" , features = ["no-entrypoint"]}
 juplend-mocks = { path = "../juplend-mocks" , features = ["no-entrypoint"]}
 marinade-mocks = { path = "../marinade-mocks" , features = ["no-entrypoint"]}
+exponent-mocks = { path = "../exponent-mocks" , features = ["no-entrypoint"]}
 
 [dev-dependencies]
 solana-account-decoder = { workspace = true }

@@ -78,6 +78,7 @@ export const ORACLE_SETUP_JUPLEND_MSOL = 20;
 export const ORACLE_SETUP_PYTH_LST = 21;
 export const ORACLE_SETUP_KAMINO_LST = 22;
 export const ORACLE_SETUP_JUPLEND_LST = 23;
+export const ORACLE_SETUP_PTSOL = 24;
 
 export const HEALTH_CACHE_NONE = 0;
 export const HEALTH_CACHE_HEALTHY = 1;

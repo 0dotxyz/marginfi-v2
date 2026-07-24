@@ -434,7 +434,14 @@ pub enum MarginfiError {
     // ************** BEGIN MARINADE ERRORS (starting at 6600)
     #[msg("Marinade state validation failed")]
     MarinadeStateValidationFailed = 600, // 6600
-                                         // **************END MARINADE ERRORS
+    // **************END MARINADE ERRORS
+
+    // ************** BEGIN EXPONENT ERRORS (starting at 6601)
+    #[msg("Exponent vault validation failed")]
+    ExponentVaultValidationFailed = 601, // 6601
+    #[msg("PT start price must be in (0, 1]")]
+    InvalidPtStartPrice = 602, // 6602
+                               // **************END EXPONENT ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -675,6 +682,8 @@ impl From<u32> for MarginfiError {
             6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
 
             6600 => MarginfiError::MarinadeStateValidationFailed,
+            6601 => MarginfiError::ExponentVaultValidationFailed,
+            6602 => MarginfiError::InvalidPtStartPrice,
 
             _ => MarginfiError::InternalLogicError,
         }

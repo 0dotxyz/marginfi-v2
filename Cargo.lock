@@ -2398,6 +2398,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "exponent-mocks"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "bytemuck",
+ "marginfi-type-crate",
+ "static_assertions",
+]
+
+[[package]]
 name = "fast-math"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3746,6 +3756,7 @@ dependencies = [
  "cfg-if",
  "drift-mocks",
  "enum_dispatch",
+ "exponent-mocks",
  "fixed",
  "fixed-macro",
  "futures",

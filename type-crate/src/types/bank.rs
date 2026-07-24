@@ -303,6 +303,7 @@ pub enum OracleSetup {
     PythLST,                // 21
     KaminoLST,              // 22
     JuplendLST,             // 23
+    PTSOL,                  // 24
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
@@ -334,6 +335,7 @@ impl OracleSetup {
             21 => Some(Self::PythLST),
             22 => Some(Self::KaminoLST),
             23 => Some(Self::JuplendLST),
+            24 => Some(Self::PTSOL),
             _ => None,
         }
     }
