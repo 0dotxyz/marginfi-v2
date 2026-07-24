@@ -378,4 +378,87 @@ impl OracleSetup {
             Self::Fixed | Self::FixedKamino | Self::FixedDrift | Self::FixedJuplend
         )
     }
+
+    /// Base feed semantics for `oracle_keys[0]`. Setups in the same family read that key as the
+    /// same kind of feed account (integration setups additionally apply an exchange-rate
+    /// multiplier), so two banks sharing a family and `oracle_keys[0]` price from the same source.
+    /// Returns `None` for fixed-price, deprecated, and unset setups.
+    pub fn feed_family(self) -> Option<OracleFeedFamily> {
+        match self {
+            Self::PythPushOracle
+            | Self::KaminoPythPush
+            | Self::DriftPythPull
+            | Self::SolendPythPull
+            | Self::JuplendPythPull => Some(OracleFeedFamily::PythPush),
+            // Staked reads `oracle_keys[0]` as a proxy for the pool's underlying asset and derives
+            // the mint's price from the stake-pool multiplier, so it is not price-equivalent to a
+            // setup that reads that same key as the mint's own price.
+            Self::StakedWithPythPush => Some(OracleFeedFamily::StakedPythPush),
+            Self::SwitchboardPull
+            | Self::KaminoSwitchboardPull
+            | Self::DriftSwitchboardPull
+            | Self::SolendSwitchboardPull
+            | Self::JuplendSwitchboardPull => Some(OracleFeedFamily::SwitchboardPull),
+            Self::None
+            | Self::PythLegacy
+            | Self::SwitchboardV2
+            | Self::Fixed
+            | Self::FixedKamino
+            | Self::FixedDrift
+            | Self::FixedJuplend => None,
+        }
+    }
+}
+
+/// The kind of feed account an `OracleSetup` reads from `oracle_keys[0]`.
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub enum OracleFeedFamily {
+    PythPush,
+    StakedPythPush,
+    SwitchboardPull,
+}
+
+#[cfg(test)]
+mod feed_family_tests {
+    use super::*;
+
+    /// Integration setups read `oracle_keys[0]` as the same feed the native bank does, so they stay
+    /// price-equivalent to it. Staked derives the mint's price from a pool multiplier over a proxy
+    /// feed, so it forms its own family and cannot pair with a bank reading that key directly.
+    #[test]
+    fn feed_family_groups_integrations_with_native_and_isolates_staked() {
+        assert_eq!(
+            OracleSetup::KaminoPythPush.feed_family(),
+            OracleSetup::PythPushOracle.feed_family()
+        );
+        assert_eq!(
+            OracleSetup::JuplendSwitchboardPull.feed_family(),
+            OracleSetup::SwitchboardPull.feed_family()
+        );
+        assert_ne!(
+            OracleSetup::PythPushOracle.feed_family(),
+            OracleSetup::SwitchboardPull.feed_family()
+        );
+
+        assert_eq!(
+            OracleSetup::StakedWithPythPush.feed_family(),
+            Some(OracleFeedFamily::StakedPythPush)
+        );
+        assert_ne!(
+            OracleSetup::StakedWithPythPush.feed_family(),
+            OracleSetup::PythPushOracle.feed_family()
+        );
+
+        for setup in [
+            OracleSetup::None,
+            OracleSetup::PythLegacy,
+            OracleSetup::SwitchboardV2,
+            OracleSetup::Fixed,
+            OracleSetup::FixedKamino,
+            OracleSetup::FixedDrift,
+            OracleSetup::FixedJuplend,
+        ] {
+            assert_eq!(setup.feed_family(), None);
+        }
+    }
 }
