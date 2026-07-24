@@ -1,7 +1,10 @@
 use anchor_spl::token::spl_token::error::TokenError;
+use fixed::types::I80F48;
 use fixtures::{assert_anchor_error, assert_custom_error, prelude::*};
+use juplend_mocks::state::{Lending, EXCHANGE_PRICES_PRECISION};
 use marginfi::{assert_eq_with_tolerance, errors::MarginfiError};
 use solana_program_test::*;
+use solana_sdk::account::AccountSharedData;
 use test_case::test_case;
 
 const JUPLEND_ROUNDING_TOLERANCE_NATIVE: i128 = 30;
@@ -211,5 +214,72 @@ async fn juplend_withdraw_local_instruction_call_failure_oversized_amount(
         "marginfi accounted balance should be unchanged on oversized withdraw failure"
     );
 
+    Ok(())
+}
+
+/// The circuit breaker tracks the multiplier-adjusted effective price on integration banks: for a
+/// JupLend bank the risk price is base_oracle_price x the token exchange price. Enabling the
+/// breaker must seed the reference at that adjusted price, not the raw base, or an integration
+/// bank with a non-unit multiplier would spuriously trip on its first observation.
+#[tokio::test]
+async fn juplend_cb_enable_seeds_multiplier_adjusted_reference() -> anyhow::Result<()> {
+    let setup = TestFixture::setup_juplend_bank(None).await;
+    let (user, user_token) = setup.create_user_with_liquidity(500.0).await;
+
+    setup
+        .test_f
+        .run_juplend_deposit(&setup.bank_f, &user, user_token.key, 100_000_000)
+        .await?;
+
+    // Force a non-unit token exchange rate so the effective price (base x rate) differs from the
+    // raw base, making the seed check below able to distinguish adjusted from raw.
+    {
+        let mut account = setup.test_f.try_load(&setup.lending).await?.unwrap();
+        let lending = bytemuck::from_bytes_mut::<Lending>(
+            &mut account.data[8..8 + std::mem::size_of::<Lending>()],
+        );
+        lending.token_exchange_price = (EXCHANGE_PRICES_PRECISION * 3 / 2) as u64;
+        setup
+            .test_f
+            .context
+            .borrow_mut()
+            .set_account(&setup.lending, &AccountSharedData::from(account));
+    }
+
+    // The JupLend withdraw path warms the bank cache with the raw base price and the token
+    // exchange-rate multiplier (deposit only refreshes interest rates).
+    setup
+        .test_f
+        .run_juplend_withdraw(
+            &setup.bank_f,
+            &user,
+            user_token.key,
+            10_000_000,
+            Some(false),
+        )
+        .await?;
+
+    let warmed = setup.bank_f.load().await;
+    let raw_price: I80F48 = warmed.cache.last_oracle_price.into();
+    let multiplier: I80F48 = warmed.cache.price_multiplier.into();
+    assert!(
+        raw_price > I80F48::ZERO,
+        "cache should be warm after withdraw"
+    );
+    assert_ne!(
+        multiplier,
+        I80F48::ONE,
+        "the JupLend lending state must produce a non-unit multiplier for this test to be meaningful"
+    );
+
+    // Enable the breaker; the reference must be the effective (multiplier-adjusted) price.
+    setup
+        .bank_f
+        .update_config(standard_cb_config(), None)
+        .await?;
+
+    let enabled = setup.bank_f.load().await;
+    let seeded_ref: I80F48 = enabled.cb_reference_price.into();
+    assert_eq!(seeded_ref, raw_price * multiplier);
     Ok(())
 }

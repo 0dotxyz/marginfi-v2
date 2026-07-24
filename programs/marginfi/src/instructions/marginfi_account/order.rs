@@ -302,6 +302,10 @@ pub fn start_execute_order<'info>(ctx: Context<'info, StartExecuteOrder<'info>>)
         MarginfiError::LendingAccountBalanceNotFound
     );
 
+    // Also gate at start: the order can close a tagged balance before the end gate runs, so a bank
+    // whose breaching price sets the trigger must be caught here while it's still active.
+    run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+
     let net = order_assets_in_equity
         .checked_sub(order_liabs_in_equity)
         .ok_or_else(math_error!())?;

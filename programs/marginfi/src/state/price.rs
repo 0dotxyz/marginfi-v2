@@ -43,6 +43,29 @@ pub struct OraclePriceWithMultiplier {
     pub price_multiplier: I80F48,
 }
 
+impl OraclePriceWithMultiplier {
+    /// The effective price the circuit breaker must track: the base oracle price scaled by the
+    /// integration exchange-rate multiplier, matching the price the risk engine values positions
+    /// at. Feeding only the raw base price leaves the breaker blind to an abrupt multiplier move
+    /// (e.g. a manipulated Kamino/Drift reserve ratio) that shifts the effective risk price while
+    /// the base stays flat. Confidence scales with the same multiplier to keep it price-relative.
+    pub fn cb_observation(&self) -> MarginfiResult<OraclePriceWithConfidence> {
+        Ok(OraclePriceWithConfidence {
+            price: self
+                .oracle_price
+                .price
+                .checked_mul(self.price_multiplier)
+                .ok_or_else(math_error!())?,
+            confidence: self
+                .oracle_price
+                .confidence
+                .checked_mul(self.price_multiplier)
+                .ok_or_else(math_error!())?,
+            source_time: self.oracle_price.source_time,
+        })
+    }
+}
+
 #[enum_dispatch]
 pub trait PriceAdapter {
     fn get_price_and_confidence_of_type(
@@ -1837,6 +1860,36 @@ mod tests {
         stake_flags::StakeFlags,
         state::{Authorized, Delegation, Lockup, Meta, Stake, StakeStateV2},
     };
+
+    #[test]
+    fn cb_observation_applies_multiplier_to_price_and_confidence() {
+        let base = OraclePriceWithConfidence {
+            price: I80F48::from_num(100),
+            confidence: I80F48::from_num(2),
+            source_time: 42,
+        };
+
+        // A multiplier scales price and confidence by the same factor; source_time is untouched.
+        let scaled = OraclePriceWithMultiplier {
+            oracle_price: base,
+            price_multiplier: I80F48::from_num(1.5),
+        }
+        .cb_observation()
+        .unwrap();
+        assert_eq!(scaled.price, I80F48::from_num(150));
+        assert_eq!(scaled.confidence, I80F48::from_num(3));
+        assert_eq!(scaled.source_time, 42);
+
+        // A unit multiplier (non-integration banks) is the identity.
+        let identity = OraclePriceWithMultiplier {
+            oracle_price: base,
+            price_multiplier: I80F48::ONE,
+        }
+        .cb_observation()
+        .unwrap();
+        assert_eq!(identity.price, base.price);
+        assert_eq!(identity.confidence, base.confidence);
+    }
 
     fn test_account_info<'a>(
         key: &'a Pubkey,

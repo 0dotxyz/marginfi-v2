@@ -429,9 +429,9 @@ pub enum MarginfiError {
     JuplendInitPositionDepositInsufficient, // 6511
     #[msg("Invalid Juplend withdraw intermediary ATA")]
     InvalidJuplendWithdrawIntermediaryAta, // 6512
-    // **************END JUPLEND ERRORS
     #[msg("Account is already at (or above) the target size")]
     InvalidResize, // 6513
+    // **************END JUPLEND ERRORS
 
     // ************** BEGIN CIRCUIT BREAKER ERRORS (starting at 6600)
     #[msg("Bank is halted by oracle circuit breaker")]

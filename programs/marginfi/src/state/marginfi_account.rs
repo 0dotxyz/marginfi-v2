@@ -160,10 +160,30 @@ pub fn any_balance_bank_is_cb_halted<'info>(
     Ok(false)
 }
 
+/// A deposit is halt-safe only when the account already holds an active balance in the bank.
+/// Opening a new balance during a halt would let a liquidatable borrower dust-deposit into an
+/// unrelated halted bank, flipping `any_balance_bank_is_cb_halted` and forcing liquidation of
+/// the account into the admin-only path.
+pub fn deposit_is_halt_safe(marginfi_account: &MarginfiAccount, bank_pk: &Pubkey) -> bool {
+    marginfi_account
+        .lending_account
+        .get_balance_index(bank_pk)
+        .is_ok()
+}
+
 /// Runs the inline circuit-breaker price gate (`BankImpl::cb_price_gate`) for every CB-enabled
 /// bank backing an active balance on `marginfi_account`. Pure read — reverts with
-/// `CircuitBreakerPriceJump` if any such bank's live oracle price has jumped past the breach
-/// threshold. Non-CB banks are skipped, so the common case pays no extra oracle reads.
+/// `BankCircuitBreakerHalted` if any such bank is currently halted or `CircuitBroken` (a halted
+/// bank's price has already been deemed unsafe, so it cannot back a risk-carrying action), or
+/// with `CircuitBreakerPriceJump` if any such bank's live oracle price has jumped past the
+/// breach threshold. Non-CB banks are skipped, so the common case pays no extra oracle reads.
+///
+/// Policy (deliberate fail-safe): the gate blocks risk-increasing actions (borrow, risk-carrying
+/// withdraw, order execution, and the liquidator's own leg) on any price breach, whether the move
+/// is oracle manipulation or genuine volatility, since the breaker cannot distinguish them and
+/// erring toward a halt protects solvency. Risk-reducing / risk-neutral actions are intentionally
+/// NOT gated so users can always de-risk during a breach: deposits and repayments run no gate, and
+/// a liability-free withdraw is treated as halt-safe.
 ///
 /// `remaining_ais` must be the standard bank+oracle layout used by the health computation.
 pub fn run_cb_price_gate<'info>(
@@ -189,6 +209,12 @@ pub fn run_cb_price_gate<'info>(
             MarginfiError::InvalidBankAccount
         );
 
+        check!(
+            !bank.is_cb_halted(clock.unix_timestamp)
+                && bank.config.operational_state != BankOperationalState::CircuitBroken,
+            MarginfiError::BankCircuitBreakerHalted
+        );
+
         let num_accounts = get_remaining_accounts_per_bank(&bank)?;
 
         if bank.get_flag(CIRCUIT_BREAKER_ENABLED) {
@@ -200,7 +226,8 @@ pub fn run_cb_price_gate<'info>(
                 MarginfiError::WrongNumberOfOracleAccounts
             );
             let oracle_ais = &remaining_ais[oracle_start..oracle_end];
-            // The breaker reference tracks the raw (un-multiplied) oracle price.
+            // The breaker tracks the multiplier-adjusted price (see `cb_observation`), so the gate
+            // must compare against the same effective price.
             let (_, cache_price) =
                 OraclePriceFeedAdapter::get_price_and_confidence_and_cache_of_type(
                     &bank,
@@ -208,7 +235,7 @@ pub fn run_cb_price_gate<'info>(
                     &clock,
                     OraclePriceType::RealTime,
                 )?;
-            bank.cb_price_gate(cache_price.oracle_price)?;
+            bank.cb_price_gate(cache_price.cb_observation()?)?;
         }
 
         account_index = account_index.saturating_add(num_accounts);

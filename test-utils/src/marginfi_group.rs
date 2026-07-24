@@ -871,7 +871,7 @@ impl MarginfiGroupFixture {
             accounts.push(AccountMeta::new_readonly(oracle_key, false));
         }
 
-        let ctx = self.ctx.borrow_mut();
+        let mut ctx = self.ctx.borrow_mut();
 
         let ix = Instruction {
             program_id: marginfi::ID,
@@ -879,11 +879,14 @@ impl MarginfiGroupFixture {
             data: LendingPoolPulseBankPriceCache {}.data(),
         };
 
+        // Consecutive pulses build byte-identical messages; a forced-fresh blockhash keeps
+        // their signatures distinct so the banks server doesn't dedup them as replays.
+        let blockhash = ctx.get_new_latest_blockhash().await.unwrap();
         let tx = Transaction::new_signed_with_payer(
             &[ix],
             Some(&ctx.payer.pubkey().clone()),
             &[&ctx.payer],
-            ctx.banks_client.get_latest_blockhash().await.unwrap(),
+            blockhash,
         );
 
         ctx.banks_client.process_transaction(tx).await

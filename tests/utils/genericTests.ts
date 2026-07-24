@@ -149,7 +149,7 @@ export const assertI80F48Approx = (
 
   if (diff.isGreaterThan(allowedDifference)) {
     throw new Error(
-      `Values are not approximately equal. A: ${bigA.toString()} B: ${bigB.toString()} 
+      `Values are not approximately equal. A: ${bigA.toString()} B: ${bigB.toString()}
       Difference: ${diff.toString()}, Allowed Tolerance: ${tolerance}`,
     );
   }

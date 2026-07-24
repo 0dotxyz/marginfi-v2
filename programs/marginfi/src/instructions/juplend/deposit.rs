@@ -4,8 +4,8 @@ use crate::{
     state::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
-            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
-            LendingAccountImpl, MarginfiAccountImpl,
+            account_not_frozen_for_authority, deposit_is_halt_safe, is_signer_authorized,
+            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
     },
@@ -46,7 +46,11 @@ pub fn juplend_deposit(ctx: Context<JuplendDeposit>, amount: u64) -> MarginfiRes
         authority_bump = bank.liquidity_vault_authority_bump;
 
         validate_asset_tags(&bank, &marginfi_account)?;
-        validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState, true)?;
+        validate_bank_state(
+            &bank,
+            InstructionKind::FailsIfPausedOrReduceState,
+            deposit_is_halt_safe(&marginfi_account, &ctx.accounts.bank.key()),
+        )?;
     }
 
     // Refresh the exchange price (interest/rewards) for this slot.

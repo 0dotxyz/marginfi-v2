@@ -14,8 +14,9 @@ pub fn lending_pool_pulse_bank_price_cache<'info>(
     let mut bank = ctx.accounts.bank.load_mut()?;
     let group = &ctx.accounts.group.load()?;
 
-    // Interest accrual is halted while the protocol is paused (matching
-    // lending_pool_accrue_bank_interest), but the price cache still refreshes.
+    // Accrual is halted while paused (matching lending_pool_accrue_bank_interest), but the price
+    // cache and circuit breaker still advance so a sustained deviation keeps escalating. The
+    // breaker banks any overwritten halt's frozen span (trip_cb_halt) for the deferred accrual.
     if !group.is_protocol_paused() {
         bank.accrue_interest(
             clock.unix_timestamp,

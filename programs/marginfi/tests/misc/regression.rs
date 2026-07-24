@@ -735,7 +735,8 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(I80F48::from(bank.cb_reference_price), I80F48::ZERO);
     assert_eq!(I80F48::from(bank.cb_window_reference_price), I80F48::ZERO);
     assert_eq!(bank.cb_window_started_at, 0);
-    assert_eq!(bank._padding_1, [0u64; 3]);
+    assert_eq!(bank.cb_frozen_seconds_pending, 0);
+    assert_eq!(bank._padding_1, [0u64; 2]);
 
     Ok(())
 }

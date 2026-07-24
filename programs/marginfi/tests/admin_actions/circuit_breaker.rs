@@ -9,19 +9,6 @@ use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer};
 use solana_sdk::transaction::Transaction;
 
-/// Standard circuit-breaker config used across these tests: 5%/10%/25% deviation tiers with
-/// 10m/1h/4h halt durations.
-fn cb_config() -> BankConfigOpt {
-    BankConfigOpt {
-        circuit_breaker_enabled: Some(true),
-        cb_deviation_bps_tiers: Some([500, 1000, 2500]),
-        cb_tier_durations_seconds: Some([600, 3600, 14400]),
-        cb_escalation_window_mult: Some(2),
-        cb_ema_alpha_bps: Some(1000),
-        ..Default::default()
-    }
-}
-
 /// Warms `bank`'s price cache, enables the circuit breaker on it, then trips it into an active
 /// halt by pulsing a large oracle spike — driving the halt entirely through real instructions.
 /// Afterward `feed` is restored to `base_native` and every standard feed is refreshed to the
@@ -43,7 +30,7 @@ async fn enable_cb_and_trip_halt(
         .try_pulse_bank_price_cache(bank)
         .await?;
 
-    bank.update_config(cb_config(), None).await?;
+    bank.update_config(standard_cb_config(), None).await?;
 
     // A single +100% spike trips a halt on the first breaching pulse.
     let trip_time = warm_time + 1;
@@ -85,7 +72,7 @@ async fn enable_cb_and_trip_tier3_storm(
         .try_pulse_bank_price_cache(bank)
         .await?;
 
-    bank.update_config(cb_config(), None).await?;
+    bank.update_config(standard_cb_config(), None).await?;
     if let Some(operational_state) = pre_break_state {
         bank.update_config(
             BankConfigOpt {
@@ -251,23 +238,43 @@ async fn cb_halt_allows_repay_on_halted_bank() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Deposit into a halted bank must succeed.
+/// Deposit into a halted bank succeeds only for an account that already holds a balance there.
+/// A first deposit (opening a new balance) is rejected: it would let a liquidatable borrower
+/// dust-deposit into an unrelated halted bank to force liquidation of the account into the
+/// admin-only path.
 #[tokio::test]
-async fn cb_halt_allows_deposit_on_halted_bank() -> anyhow::Result<()> {
+async fn cb_halt_allows_deposit_only_with_existing_balance() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
 
     let usdc_bank = test_f.get_bank(&BankMint::Usdc);
-    let depositor = test_f.create_marginfi_account().await;
-    let token_acc = test_f
+
+    // This depositor holds a USDC balance from before the halt...
+    let existing = test_f.create_marginfi_account().await;
+    let existing_acc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    existing
+        .try_bank_deposit(existing_acc.key, usdc_bank, 500, None)
+        .await?;
+
+    // ...this one does not.
+    let newcomer = test_f.create_marginfi_account().await;
+    let newcomer_acc = test_f
         .usdc_mint
         .create_token_account_and_mint_to(1_000)
         .await;
 
     enable_cb_and_trip_halt(&test_f, usdc_bank, PYTH_USDC_FEED, 1_000_000).await?;
 
-    depositor
-        .try_bank_deposit(token_acc.key, usdc_bank, 500, None)
+    existing
+        .try_bank_deposit(existing_acc.key, usdc_bank, 500, None)
         .await?;
+
+    let result = newcomer
+        .try_bank_deposit(newcomer_acc.key, usdc_bank, 500, None)
+        .await;
+    assert_custom_error!(result.unwrap_err(), MarginfiError::BankCircuitBreakerHalted);
     Ok(())
 }
 
@@ -699,10 +706,13 @@ async fn cb_enable_fails_on_stale_cache() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// During a halt, `accrue_interest` must advance `last_update` without compounding share values.
-/// If interest kept accruing, lenders who can still deposit would silently benefit while borrowers
-/// who can't borrow/withdraw kept paying — a free trade for whoever notices first. Asserts that
-/// share values are byte-identical before and after a halt-spanning accrual call.
+/// During a halt, `accrue_interest` must not compound share values for the halted span. If
+/// interest kept accruing, lenders who can still deposit would silently benefit while borrowers
+/// who can't borrow/withdraw kept paying — a free trade for whoever notices first. Interest
+/// pending from *before* the halt still accrues (the freeze covers exactly
+/// `[cb_halt_started_at, cb_halt_ended_at]`), so the pre-halt tail is consumed by a first
+/// accrual and the share values are then asserted byte-identical across a second, fully
+/// in-halt accrual.
 #[tokio::test]
 async fn cb_halt_freezes_interest_accrual() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
@@ -729,18 +739,22 @@ async fn cb_halt_freezes_interest_accrual() -> anyhow::Result<()> {
         .try_bank_borrow(borrower_sol_acc.key, sol_bank, 1)
         .await?;
 
-    // Halt and advance time inside the halt window. Then trigger accrual via a deposit (which is
-    // halt-safe and calls accrue_interest).
+    // Halt (tier 3: span [101, 14_501]), then consume the pre-halt accrual tail with a deposit
+    // (halt-safe for an existing balance, and calls accrue_interest) shortly into the halt.
     enable_cb_and_trip_halt(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
+    test_f.set_clock(1_200, 200).await;
+    let tail_lp_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    lp.try_bank_deposit(tail_lp_sol.key, sol_bank, 1, None)
+        .await?;
 
-    // Snapshot after the setup pulses, which are allowed to accrue before the halt is established.
+    // Snapshot the SOL bank's share values now that only frozen time remains ahead.
     let before = sol_bank.load().await;
     let asset_share_value_before = before.asset_share_value;
     let liability_share_value_before = before.liability_share_value;
 
-    // Advance ~1 hour, staying well inside the tier-3 halt window. `set_clock` is used rather
-    // than `advance_time` because the latter warps the slot, which lets the runtime recompute
-    // the timestamp past `cb_halt_ended_at` and end the halt early.
+    // Advance ~1 hour, staying well inside the tier-3 halt window, and accrue again. `set_clock`
+    // is used rather than `advance_time` because the latter warps the slot, which lets the
+    // runtime recompute the timestamp past `cb_halt_ended_at` and end the halt early.
     test_f.set_clock(1_500, 3_701).await;
     let extra_lp_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
     lp.try_bank_deposit(extra_lp_sol.key, sol_bank, 1, None)
@@ -755,6 +769,75 @@ async fn cb_halt_freezes_interest_accrual() -> anyhow::Result<()> {
         after.liability_share_value, liability_share_value_before,
         "liability_share_value must not advance during a CB halt"
     );
+    Ok(())
+}
+
+/// Disabling the breaker via `lending_pool_configure_bank` must accrue interest before it clears
+/// the halt span: otherwise `last_update` stays stale, the span is gone, and the next accrual
+/// charges the halted interval to borrowers.
+#[tokio::test]
+async fn cb_disable_mid_halt_consumes_interest_freeze() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+
+    // Open a borrow against SOL so both share values are non-zero and interest would accrue.
+    let lp = test_f.create_marginfi_account().await;
+    let lp_sol_acc = test_f.sol_mint.create_token_account_and_mint_to(100).await;
+    lp.try_bank_deposit(lp_sol_acc.key, sol_bank, 10, None)
+        .await?;
+
+    let borrower = test_f.create_marginfi_account().await;
+    let borrower_usdc_acc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_usdc_acc.key, usdc_bank, 1_000, None)
+        .await?;
+    let borrower_sol_acc = test_f.sol_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_sol_acc.key, sol_bank, 1)
+        .await?;
+
+    // Halt SOL (tier 3: span [101, 14_501]), then consume the pre-halt accrual tail with a
+    // deposit shortly into the halt so only frozen time remains ahead.
+    enable_cb_and_trip_halt(&test_f, sol_bank, PYTH_SOL_FEED, 10_000_000_000).await?;
+    test_f.set_clock(1_200, 200).await;
+    let tail_lp_sol = test_f.sol_mint.create_token_account_and_mint_to(10).await;
+    lp.try_bank_deposit(tail_lp_sol.key, sol_bank, 1, None)
+        .await?;
+
+    let before = sol_bank.load().await;
+    let asset_share_value_before = before.asset_share_value;
+    let liability_share_value_before = before.liability_share_value;
+    assert_eq!(before.last_update, 200);
+
+    // Advance ~1 hour, still inside the halt window, then disable the breaker.
+    let disable_time: i64 = 3_701;
+    test_f.set_clock(1_500, disable_time).await;
+    sol_bank
+        .update_config(
+            BankConfigOpt {
+                circuit_breaker_enabled: Some(false),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let after = sol_bank.load().await;
+    // The disable accrued: `last_update` advanced to the disable time. Without the pre-reset
+    // accrual it would still read 200, and the frozen [200, 3_701] would be billed later.
+    assert_eq!(after.last_update, disable_time);
+    // The whole elapsed interval was halted, so nothing was charged.
+    assert_eq!(after.asset_share_value, asset_share_value_before);
+    assert_eq!(after.liability_share_value, liability_share_value_before);
+    // Breaker state is cleared, so accrual resumes normally from here.
+    assert_eq!(after.cb_tier, 0);
+    assert_eq!(after.cb_halt_started_at, 0);
+    assert_eq!(after.cb_halt_ended_at, 0);
     Ok(())
 }
 
@@ -912,5 +995,55 @@ async fn clear_circuit_breaker_accepts_either_authority() -> anyhow::Result<()> 
     }
     let cleared = sol_bank.load().await;
     assert_eq!(cleared.cb_tier, 0);
+    Ok(())
+}
+
+/// A paused price pulse must keep driving the breaker (so a sustained deviation still escalates)
+/// yet not charge borrowers for the frozen span of a halt it overwrites: the overwritten halt's
+/// seconds are banked into `cb_frozen_seconds_pending` for the deferred accrual to exclude.
+#[tokio::test]
+async fn paused_pulse_escalates_cb_and_banks_frozen_span() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let base_native: i64 = 10_000_000_000;
+
+    // Trip a real tier-3 halt on the SOL bank: records [101, 14501], last_update = 101.
+    enable_cb_and_trip_halt(&test_f, sol_bank, PYTH_SOL_FEED, base_native).await?;
+    let tripped = sol_bank.load().await;
+    assert_eq!(tripped.cb_tier, 3);
+    assert_eq!(tripped.cb_halt_started_at, 101);
+    assert_eq!(tripped.cb_halt_ended_at, 14_501);
+    assert_eq!(tripped.cb_tier3_consecutive_trips, 1);
+    assert_eq!(tripped.cb_frozen_seconds_pending, 0);
+
+    // Pause the protocol (and propagate the pause into the group cache that `is_protocol_paused`
+    // reads), then pulse a fresh threshold breach after the first halt has expired.
+    test_f.marginfi_group.try_panic_pause().await?;
+    test_f.marginfi_group.try_propagate_fee_state().await?;
+
+    let second_trip_time: i64 = 14_502; // strictly after cb_halt_ended_at so detection re-arms.
+    test_f.set_clock(1_020, second_trip_time).await;
+    test_f
+        .set_pyth_oracle_price_native(
+            PYTH_SOL_FEED,
+            base_native.saturating_mul(2),
+            0,
+            second_trip_time,
+        )
+        .await;
+    test_f
+        .marginfi_group
+        .try_pulse_bank_price_cache(sol_bank)
+        .await?;
+
+    let after = sol_bank.load().await;
+    // Breaker stayed live: the halt interval advanced and the storm counter escalated.
+    assert_eq!(after.cb_halt_started_at, second_trip_time);
+    assert_eq!(after.cb_halt_ended_at, second_trip_time + 14_400);
+    assert_eq!(after.cb_tier, 3);
+    assert_eq!(after.cb_tier3_consecutive_trips, 2);
+    // The overwritten halt's frozen span (101 → 14501) is banked for the next accrual to exclude.
+    assert_eq!(after.cb_frozen_seconds_pending, 14_400);
+
     Ok(())
 }
