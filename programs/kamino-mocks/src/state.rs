@@ -189,11 +189,27 @@ impl MinimalReserve {
             - pending_referrer_fees
     }
 
+    /// Returns true if this reserve has not been refreshed in `current_slot`.
+    ///
+    /// We call this on-chain (in `ensure_kamino_reserve_fresh`) to require that a Kamino
+    /// reserve was refreshed in the current slot before it trusts the reserve's collateral
+    /// exchange rate when pricing a Kamino bank.
+    ///
+    /// Kamino itself treats a reserve as stale in two cases: its `last_update.slot` is older than
+    /// the current slot, OR its `last_update.stale` flag is set. Kamino sets that flag after every
+    /// operation that mutates the reserve (deposit, withdraw, borrow, repay). This check looks at
+    /// ONLY the slot and intentionally ignores the `stale` flag, because of the order of events in
+    /// a marginfi instruction that touches a Kamino position (e.g. withdraw):
+    ///   1. refresh the reserve   -> sets `slot = current`, accrues interest, clears `stale`
+    ///   2. CPI into Kamino       -> Kamino sets `stale = true` again as part of the deposit/withdraw
+    ///   3. read the exchange rate -> happens during marginfi's post-operation health check
+    ///
+    /// At step 3 the reserve has `stale = true` but `slot == current`. The exchange rate does not
+    /// change within a slot once the reserve has been refreshed (interest accrues per slot, and a
+    /// same-slot deposit/withdraw does not move the rate), so "refreshed in this slot" is the only
+    /// property we need. If this function also failed on the `stale` flag, step 3 would
+    /// always fail
     pub fn is_stale(&self, current_slot: u64) -> bool {
-        // TODO Kamino executes `deposit_reserve.last_update.mark_stale()` after any deposit, so
-        // should we ignored this?
-        let _stale = self.stale == 1;
-        // Slot expired
         self.slot < current_slot
     }
 }

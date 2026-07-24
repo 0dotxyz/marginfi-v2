@@ -33,6 +33,8 @@ pub mod marginfi {
     /// (admin only) Configure group admin keys and emode leverage caps. All admin keys must be
     /// provided on every call. Emode leverage caps are set if provided, otherwise the existing
     /// (non-zero) values are kept. Pass `Some(value)` to update, `None` to leave unchanged.
+    /// Same-asset emode leverage is disabled by configuring both init and maint leverage to `1`;
+    /// values below `1`, including `0`, are invalid.
     ///
     /// Note: `new_emissions_admin` is deprecated and currently has no on-chain effect.
     pub fn marginfi_group_configure(
@@ -47,6 +49,8 @@ pub mod marginfi {
         new_risk_admin: Option<Pubkey>,
         emode_max_init_leverage: Option<WrappedI80F48>,
         emode_max_maint_leverage: Option<WrappedI80F48>,
+        same_asset_emode_init_leverage: Option<WrappedI80F48>,
+        same_asset_emode_maint_leverage: Option<WrappedI80F48>,
     ) -> MarginfiResult {
         marginfi_group::configure(
             ctx,
@@ -60,6 +64,8 @@ pub mod marginfi {
             new_risk_admin,
             emode_max_init_leverage,
             emode_max_maint_leverage,
+            same_asset_emode_init_leverage,
+            same_asset_emode_maint_leverage,
         )
     }
 
@@ -174,6 +180,17 @@ pub mod marginfi {
         marginfi_group::lending_pool_force_tokenless_repay_complete(ctx)
     }
 
+    /// (admin or risk_admin) Clear an active circuit-breaker halt on a bank.
+    /// * `reseed_reference` - If true, also zero the EMA reference so the next pulse reseeds it
+    ///   from live oracle data (use when clearing because the new price level is valid and the
+    ///   pre-halt reference would cause an immediate re-halt).
+    pub fn lending_pool_clear_circuit_breaker(
+        ctx: Context<LendingPoolClearCircuitBreaker>,
+        reseed_reference: bool,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_clear_circuit_breaker(ctx, reseed_reference)
+    }
+
     /// (admin only)
     pub fn lending_pool_configure_bank_oracle(
         ctx: Context<LendingPoolConfigureBankOracle>,
@@ -189,6 +206,21 @@ pub mod marginfi {
         price: WrappedI80F48,
     ) -> MarginfiResult {
         marginfi_group::lending_pool_set_fixed_oracle_price(ctx, price)
+    }
+
+    /// (admin or emode_admin only) Initialize the per-group same-asset e-mode registry.
+    pub fn lending_pool_init_same_asset_emode_registry(
+        ctx: Context<LendingPoolInitSameAssetEmodeRegistry>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_init_same_asset_emode_registry(ctx)
+    }
+
+    /// (admin or emode_admin only) Opt a bank in/out of same-asset e-mode participation.
+    pub fn lending_pool_set_bank_same_asset_emode_eligibility(
+        ctx: Context<LendingPoolSetBankSameAssetEmodeEligibility>,
+        enabled: bool,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_set_bank_same_asset_emode_eligibility(ctx, enabled)
     }
 
     /// (emode_admin only)
@@ -449,6 +481,20 @@ pub mod marginfi {
         marginfi_group::lending_pool_accrue_bank_interest(ctx)
     }
 
+    /// (permissionless) Resize the group account to the v2 layout size; `payer` funds the
+    /// added rent.
+    pub fn lending_pool_resize_group_account(
+        ctx: Context<LendingPoolResizeGroupAccount>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_resize_group_account(ctx)
+    }
+
+    /// (permissionless) Resize the fee-state account to the v2 layout size; `payer` funds the
+    /// added rent.
+    pub fn resize_global_fee_state(ctx: Context<ResizeGlobalFeeState>) -> MarginfiResult {
+        marginfi_group::resize_global_fee_state(ctx)
+    }
+
     /// (permissionless) Transfer accrued fees from the liquidity vault to insurance/fee/program
     /// vaults.
     pub fn lending_pool_collect_bank_fees<'info>(
@@ -590,16 +636,6 @@ pub mod marginfi {
         )
     }
 
-    /// (Runs once per program) Initialize the V2 fee state PDA.
-    pub fn init_global_fee_state_v2(ctx: Context<InitFeeStateV2>) -> MarginfiResult {
-        marginfi_group::initialize_fee_state_v2(ctx)
-    }
-
-    /// (permissionless) Copy current FeeState values into FeeStateV2.
-    pub fn copy_fee_state_to_v2(ctx: Context<CopyFeeStateToV2>) -> MarginfiResult {
-        marginfi_group::copy_fee_state_to_v2(ctx)
-    }
-
     /// (global fee admin only) Adjust fees, admin, wallet, or pause delegate admin
     pub fn edit_global_fee_state(
         ctx: Context<EditFeeState>,
@@ -613,6 +649,7 @@ pub mod marginfi {
         liquidation_max_fee: Option<WrappedI80F48>,
         order_execution_max_fee: Option<WrappedI80F48>,
         pause_delegate_admin: Option<Pubkey>,
+        account_transfer_fee: Option<u32>,
     ) -> MarginfiResult {
         marginfi_group::edit_fee_state(
             ctx,
@@ -626,6 +663,7 @@ pub mod marginfi {
             liquidation_max_fee,
             order_execution_max_fee,
             pause_delegate_admin,
+            account_transfer_fee,
         )
     }
 
@@ -814,11 +852,11 @@ pub mod marginfi {
         )
     }
 
-    // TODO deprecate and incorporate this functionality into forced-withdraw in 1.7+
-    /// (risk admin only) Purge a user's lending balance without withdrawing anything. Only usable
-    /// after all the debt has been settled on a bank in deleveraging mode, e.g. when
-    /// `TOKENLESS_REPAYMENTS_ALLOWED` and `TOKENLESS_REPAYMENTS_COMPLETE`. used to purge remaining
-    /// lending assets in a now-worthless bank before it is fully sunset.
+    /// (risk admin only) Purge a user's lending balance on a bank being sunset, without paying the
+    /// user anything. Only usable after all the debt has been settled on a bank in deleveraging
+    /// mode, i.e. `TOKENLESS_REPAYMENTS_ALLOWED` and `TOKENLESS_REPAYMENTS_COMPLETE`. Used to clear
+    /// abandoned lending positions in a now-worthless bank so it can be closed via
+    /// `lending_pool_close_bank`.
     pub fn purge_deleverage_balance(
         ctx: Context<LendingAccountPurgeDelevBalance>,
     ) -> MarginfiResult {

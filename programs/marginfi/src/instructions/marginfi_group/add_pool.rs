@@ -53,10 +53,11 @@ pub fn lending_pool_add_bank(
     let insurance_vault_authority_bump = ctx.bumps.insurance_vault_authority;
     let fee_vault_bump = ctx.bumps.fee_vault;
     let fee_vault_authority_bump = ctx.bumps.fee_vault_authority;
+    let config = bank_config.into();
 
-    *bank = Bank::new(
+    bank.init(
         ctx.accounts.marginfi_group.key(),
-        bank_config.into(),
+        &config,
         bank_mint.key(),
         bank_mint.decimals,
         liquidity_vault.key(),

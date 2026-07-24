@@ -40,7 +40,6 @@ pub const WBTC_MINT_AUTHORITY: Pubkey = pubkey!("8qAJSTfLJH7MWDMDGTNEFCijHXHmd5g
 // ================================================================================================
 pub const KLEND: Pubkey = pubkey!("KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD");
 pub const KFARMS: Pubkey = pubkey!("FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr");
-pub const LIQUIDITY_PROGRAM: Pubkey = pubkey!("jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC");
 // ================================================================================================
 // KAMINO ACCOUNTS
 // ================================================================================================

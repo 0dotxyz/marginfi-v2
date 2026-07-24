@@ -29,13 +29,80 @@ use drift_mocks::constants::scale_drift_deposit_limit;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, CLOSE_ENABLED_FLAG, FEE_VAULT_AUTHORITY_SEED,
-        FEE_VAULT_SEED, FREEZE_SETTINGS, GROUP_FLAGS, INSURANCE_VAULT_AUTHORITY_SEED,
-        INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED, LIQUIDITY_VAULT_SEED,
-        PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG, TOKENLESS_REPAYMENTS_ALLOWED,
+        ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, CIRCUIT_BREAKER_ENABLED, CLOSE_ENABLED_FLAG,
+        FEE_VAULT_AUTHORITY_SEED, FEE_VAULT_SEED, FREEZE_SETTINGS, GROUP_FLAGS,
+        INSURANCE_VAULT_AUTHORITY_SEED, INSURANCE_VAULT_SEED, LIQUIDITY_VAULT_AUTHORITY_SEED,
+        LIQUIDITY_VAULT_SEED, MAX_LIQUIDATION_FEE_U32, PERMISSIONLESS_BAD_DEBT_SETTLEMENT_FLAG,
+        TOKENLESS_REPAYMENTS_ALLOWED,
     },
-    types::{Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup},
+    types::{
+        Bank, BankConfig, BankConfigOpt, BankOperationalState, EmodeSettings, MarginfiGroup,
+        OraclePriceWithConfidence,
+    },
 };
+
+/// Minimum Solana-slot gap between counted CB pulses. Rate-limits how fast the EMA can be
+/// nudged and how fast the breach counter can accumulate.
+pub const CB_MIN_PULSE_SLOT_GAP: u64 = 2;
+
+/// Floor for the EMA reference used in deviation math. Below this, reseed instead of dividing.
+pub const CB_MIN_REF_PRICE: I80F48 = I80F48::from_bits(1 << 20);
+
+/// Consecutive tier-3 trips before the bank is forced to `CircuitBroken`.
+pub const CB_MAX_TIER3_BEFORE_CIRCUIT_BREAK: u8 = 3;
+
+/// Maximum age (seconds) of `cache.last_oracle_price_timestamp` accepted when enabling CB.
+/// Forces admin to bundle a fresh pulse with `configure_bank` so the EMA can't be seeded
+/// from an attacker-controlled stale price.
+pub const CB_ENABLE_MAX_PRICE_AGE_SECONDS: i64 = 30;
+
+/// Per-pulse cap on EMA reference movement, in basis points of the current reference. Bounds
+/// how fast a sustained attacker can reanchor the EMA even at maximum α.
+pub const CB_MAX_EMA_SHIFT_BPS_PER_PULSE: u64 = 500;
+
+/// Defaults for the long-window cap that catches slow oracle walking under the per-observation
+/// threshold. Each is overridable per-bank via the matching `BankConfig::cb_window_*` field; a
+/// configured value of `0` falls back to the default here.
+pub const CB_WINDOW_SECONDS: i64 = 4 * 60 * 60;
+pub const CB_WINDOW_MAX_UP_BPS: u64 = 2_000;
+pub const CB_WINDOW_MAX_DOWN_BPS: u64 = 4_000;
+
+fn cb_confidence_adjusted_deviation_bps(
+    current: I80F48,
+    reference: I80F48,
+    confidence: I80F48,
+) -> u64 {
+    let effective_delta =
+        ((current - reference).abs() - confidence.max(I80F48::ZERO)).max(I80F48::ZERO);
+    cb_deviation_bps(effective_delta, reference)
+}
+
+fn cb_deviation_bps(delta: I80F48, reference: I80F48) -> u64 {
+    (delta * I80F48::from_num(10_000u64) / reference).to_num::<u64>()
+}
+
+/// Returns the configured long-window parameter, or `default` when it is `0` (unset). Lets banks
+/// override `CB_WINDOW_*` while keeping the documented defaults for banks that don't set them.
+#[inline]
+fn cb_window_or_default(configured: u64, default: u64) -> u64 {
+    if configured == 0 {
+        default
+    } else {
+        configured
+    }
+}
+
+fn cb_tier_for_deviation(tiers: &[u16; 3], deviation_bps: u64) -> u8 {
+    if tiers[2] > 0 && deviation_bps >= tiers[2] as u64 {
+        3
+    } else if tiers[1] > 0 && deviation_bps >= tiers[1] as u64 {
+        2
+    } else if tiers[0] > 0 && deviation_bps >= tiers[0] as u64 {
+        1
+    } else {
+        0
+    }
+}
 
 #[cfg(feature = "client")]
 fn invoke_client_token_transfer<'info>(
@@ -112,6 +179,25 @@ pub trait BankImpl {
         fee_vault_authority_bump: u8,
         bank_seed: u64,
     ) -> Self;
+    #[allow(clippy::too_many_arguments)]
+    fn init(
+        &mut self,
+        marginfi_group_pk: Pubkey,
+        config: &BankConfig,
+        mint: Pubkey,
+        mint_decimals: u8,
+        liquidity_vault: Pubkey,
+        insurance_vault: Pubkey,
+        fee_vault: Pubkey,
+        current_timestamp: i64,
+        liquidity_vault_bump: u8,
+        liquidity_vault_authority_bump: u8,
+        insurance_vault_bump: u8,
+        insurance_vault_authority_bump: u8,
+        fee_vault_bump: u8,
+        fee_vault_authority_bump: u8,
+        bank_seed: u64,
+    );
     fn get_liability_amount(&self, shares: I80F48) -> MarginfiResult<I80F48>;
     fn get_asset_amount(&self, shares: I80F48) -> MarginfiResult<I80F48>;
     fn get_liability_shares(&self, value: I80F48) -> MarginfiResult<I80F48>;
@@ -140,6 +226,17 @@ pub trait BankImpl {
         &mut self,
         oracle_price: Option<OraclePriceWithMultiplier>,
     ) -> MarginfiResult<()>;
+    fn is_cb_halted(&self, now: i64) -> bool;
+    fn cb_price_gate(&self, oracle: OraclePriceWithConfidence) -> MarginfiResult<()>;
+    fn cb_effective_operational_state(&self) -> BankOperationalState;
+    fn update_circuit_breaker(
+        &mut self,
+        now: i64,
+        slot: u64,
+        oracle: OraclePriceWithConfidence,
+    ) -> MarginfiResult<()>;
+    fn reset_cb_runtime_state(&mut self);
+    fn trip_cb_halt(&mut self, now: i64, deviation_bps: u64, breached_tier: u8);
     fn deposit_spl_transfer<'info>(
         &self,
         amount: u64,
@@ -220,12 +317,55 @@ impl BankImpl for Bank {
             fees_destination_account: Pubkey::default(),
             lending_position_count: 0,
             borrowing_position_count: 0,
-            _padding_0: [0; 16],
+            liquidation_liquidator_fee: 0,
+            liquidation_insurance_fee: 0,
+            _padding_0: [0; 8],
             integration_acc_1: Pubkey::default(),
             integration_acc_2: Pubkey::default(),
             bank_seed,
             ..Default::default()
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn init(
+        &mut self,
+        marginfi_group_pk: Pubkey,
+        config: &BankConfig,
+        mint: Pubkey,
+        mint_decimals: u8,
+        liquidity_vault: Pubkey,
+        insurance_vault: Pubkey,
+        fee_vault: Pubkey,
+        current_timestamp: i64,
+        liquidity_vault_bump: u8,
+        liquidity_vault_authority_bump: u8,
+        insurance_vault_bump: u8,
+        insurance_vault_authority_bump: u8,
+        fee_vault_bump: u8,
+        fee_vault_authority_bump: u8,
+        bank_seed: u64,
+    ) {
+        self.mint = mint;
+        self.mint_decimals = mint_decimals;
+        self.group = marginfi_group_pk;
+        self.asset_share_value = I80F48::ONE.into();
+        self.liability_share_value = I80F48::ONE.into();
+        self.liquidity_vault = liquidity_vault;
+        self.liquidity_vault_bump = liquidity_vault_bump;
+        self.liquidity_vault_authority_bump = liquidity_vault_authority_bump;
+        self.insurance_vault = insurance_vault;
+        self.insurance_vault_bump = insurance_vault_bump;
+        self.insurance_vault_authority_bump = insurance_vault_authority_bump;
+        self.fee_vault = fee_vault;
+        self.fee_vault_bump = fee_vault_bump;
+        self.fee_vault_authority_bump = fee_vault_authority_bump;
+        self.last_update = current_timestamp;
+        self.config = *config;
+        self.flags = CLOSE_ENABLED_FLAG;
+        self.bank_seed = bank_seed;
+        self.liquidation_liquidator_fee = 0;
+        self.liquidation_insurance_fee = 0;
     }
 
     fn get_liability_amount(&self, shares: I80F48) -> MarginfiResult<I80F48> {
@@ -422,11 +562,20 @@ impl BankImpl for Bank {
                     && self.config.operational_state == BankOperationalState::Uninitialized),
                 MarginfiError::Unauthorized
             );
-            // These states are unreachable by configuration
+            // `KilledByBankruptcy`, `Uninitialized`, and `CircuitBroken` are not admin-settable:
+            // the first is terminal, JupLend activation is one-time, and the breaker controls
+            // `CircuitBroken`.
             check!(
                 new_state != BankOperationalState::KilledByBankruptcy
-                    && new_state != BankOperationalState::Uninitialized,
+                    && new_state != BankOperationalState::Uninitialized
+                    && new_state != BankOperationalState::CircuitBroken,
                 MarginfiError::Unauthorized
+            );
+            // A circuit-broken bank only leaves that state via `clear_circuit_breaker`, which
+            // restores the pre-break state and resets the breaker atomically.
+            check!(
+                self.config.operational_state != BankOperationalState::CircuitBroken,
+                MarginfiError::BankCircuitBreakerHalted
             );
             // Log operational state change
             let old_state = self.config.operational_state;
@@ -467,6 +616,15 @@ impl BankImpl for Bank {
 
         set_if_some!(self.config.oracle_max_age, config.oracle_max_age);
 
+        if let Some(fee) = config.liquidation_liquidator_fee {
+            check!(fee <= MAX_LIQUIDATION_FEE_U32, MarginfiError::InvalidConfig);
+            self.liquidation_liquidator_fee = fee;
+        }
+        if let Some(fee) = config.liquidation_insurance_fee {
+            check!(fee <= MAX_LIQUIDATION_FEE_U32, MarginfiError::InvalidConfig);
+            self.liquidation_insurance_fee = fee;
+        }
+
         if let Some(flag) = config.permissionless_bad_debt_settlement {
             msg!(
                 "setting bad debt settlement: {:?}",
@@ -491,7 +649,71 @@ impl BankImpl for Bank {
             self.update_flag(flag, TOKENLESS_REPAYMENTS_ALLOWED);
         }
 
+        if let Some(flag) = config.circuit_breaker_enabled {
+            msg!("setting circuit breaker enabled: {:?}", flag);
+            let was_enabled = self.get_flag(CIRCUIT_BREAKER_ENABLED);
+            // Seed the EMA reference from the cached oracle price (must be non-zero and recent):
+            // a warm-cache sanity gate that also stops an attacker sandwiching the enable tx to
+            // pick the seed. NOT a defense against sustained manipulation — if the feed is
+            // already compromised, so is the cache. CB is meant to be enabled proactively under
+            // normal conditions; `clear_circuit_breaker` reseeds the reference if it ever ends
+            // up anchored badly.
+            if flag && !was_enabled {
+                let last: I80F48 = self.cache.last_oracle_price.into();
+                check!(
+                    last > I80F48::ZERO,
+                    MarginfiError::CircuitBreakerRequiresWarmCache
+                );
+                let now = Clock::get()?.unix_timestamp;
+                let age = now.saturating_sub(self.cache.last_oracle_price_timestamp);
+                check!(
+                    (0..=CB_ENABLE_MAX_PRICE_AGE_SECONDS).contains(&age),
+                    MarginfiError::CircuitBreakerRequiresWarmCache
+                );
+                let ref_price: I80F48 = self.cb_reference_price.into();
+                if ref_price == I80F48::ZERO {
+                    self.cb_reference_price = last.into();
+                }
+                let window_ref_price: I80F48 = self.cb_window_reference_price.into();
+                if window_ref_price == I80F48::ZERO {
+                    self.cb_window_reference_price = last.into();
+                    self.cb_window_started_at = now;
+                }
+            }
+            // Disable: zero halt + dedup state so a later re-enable starts clean.
+            // `cb_reference_price` is preserved; `clear_circuit_breaker` offers a reseed path.
+            if !flag && was_enabled {
+                self.reset_cb_runtime_state();
+            }
+            self.update_flag(flag, CIRCUIT_BREAKER_ENABLED);
+        }
+        set_if_some!(
+            self.config.cb_deviation_bps_tiers,
+            config.cb_deviation_bps_tiers
+        );
+        set_if_some!(
+            self.config.cb_tier_durations_seconds,
+            config.cb_tier_durations_seconds
+        );
+        set_if_some!(
+            self.config.cb_escalation_window_mult,
+            config.cb_escalation_window_mult
+        );
+        set_if_some!(self.config.cb_ema_alpha_bps, config.cb_ema_alpha_bps);
+        set_if_some!(self.config.cb_window_seconds, config.cb_window_seconds);
+        set_if_some!(
+            self.config.cb_window_max_up_bps,
+            config.cb_window_max_up_bps
+        );
+        set_if_some!(
+            self.config.cb_window_max_down_bps,
+            config.cb_window_max_down_bps
+        );
+
         self.config.validate()?;
+        if self.get_flag(CIRCUIT_BREAKER_ENABLED) {
+            self.config.validate_circuit_breaker()?;
+        }
 
         Ok(())
     }
@@ -519,6 +741,15 @@ impl BankImpl for Bank {
 
         let time_delta: u64 = (current_timestamp - self.last_update).try_into().unwrap();
         if time_delta == 0 {
+            return Ok(());
+        }
+
+        // Freeze interest accrual during a halt. Deposit/repay remain open while borrow/withdraw
+        // are blocked, so unfrozen accrual would let new depositors free-ride on borrower
+        // interest they can no longer escape. Advance `last_update` so post-halt accrual starts
+        // from the current point instead of catching up on the frozen interval.
+        if self.is_cb_halted(current_timestamp) {
+            self.last_update = current_timestamp;
             return Ok(());
         }
 
@@ -637,7 +868,7 @@ impl BankImpl for Bank {
             self.get_liability_amount(self.total_liability_shares.into())?;
 
         if (total_assets_amount == I80F48::ZERO) || (total_liabilities_amount == I80F48::ZERO) {
-            self.cache.reset_preserving_oracle_price();
+            self.cache.reset_preserving_oracle_state();
             return Ok(());
         }
 
@@ -658,13 +889,10 @@ impl BankImpl for Bank {
         Ok(())
     }
 
-    /// Updates bank cache with the last used oracle price.
-    ///
-    /// Should be called in instructions that consume a bank's price to record the last-used value.
-    ///
-    /// # Arguments
-    /// * `group` - The marginfi group
-    /// * `oracle_price` - Optional oracle price (with confidence) used in this instruction (if any)
+    /// Records the live oracle price on the cache and feeds it into the circuit breaker.
+    /// Called from every path that consumes a fresh oracle reading (borrow/withdraw/liquidate,
+    /// adapter integrations, and the explicit pulse crank); CB dedup makes redundant calls a
+    /// no-op so callers don't need to coordinate.
     fn update_cache_price(
         &mut self,
         oracle_price: Option<OraclePriceWithMultiplier>,
@@ -673,14 +901,280 @@ impl BankImpl for Bank {
             return Ok(());
         }
         if let Some(price_with_multiplier) = oracle_price {
+            let clock = Clock::get()?;
             self.cache.last_oracle_price = price_with_multiplier.oracle_price.price.into();
             self.cache.last_oracle_price_confidence =
                 price_with_multiplier.oracle_price.confidence.into();
             self.cache.price_multiplier = price_with_multiplier.price_multiplier.into();
-            self.cache.last_oracle_price_timestamp = Clock::get()?.unix_timestamp;
-        } else {
-            // no cache update, nothing...
+            self.cache.last_oracle_price_timestamp = clock.unix_timestamp;
+            self.update_circuit_breaker(
+                clock.unix_timestamp,
+                clock.slot,
+                price_with_multiplier.oracle_price,
+            )?;
         }
+
+        Ok(())
+    }
+
+    fn is_cb_halted(&self, now: i64) -> bool {
+        self.get_flag(CIRCUIT_BREAKER_ENABLED) && self.cb_tier > 0 && now < self.cb_halt_ended_at
+    }
+
+    /// The operational state whose deposit/repay/withdraw rules currently apply. For a
+    /// `CircuitBroken` bank this is the pre-break state (`cb_pre_break_state`) — so e.g. a bank
+    /// that was `ReduceOnly` before breaking does not silently re-enable deposits. For any
+    /// other bank it is just `operational_state`.
+    fn cb_effective_operational_state(&self) -> BankOperationalState {
+        if self.config.operational_state == BankOperationalState::CircuitBroken {
+            match self.cb_pre_break_state {
+                x if x == BankOperationalState::KilledByBankruptcy as u8 => {
+                    BankOperationalState::KilledByBankruptcy
+                }
+                x if x == BankOperationalState::Paused as u8 => BankOperationalState::Paused,
+                x if x == BankOperationalState::ReduceOnly as u8 => {
+                    BankOperationalState::ReduceOnly
+                }
+                x if x == BankOperationalState::ReduceOnlyWithBorrowingPower as u8 => {
+                    BankOperationalState::ReduceOnlyWithBorrowingPower
+                }
+                x if x == BankOperationalState::Operational as u8 => {
+                    BankOperationalState::Operational
+                }
+                x if x == BankOperationalState::Uninitialized as u8 => {
+                    BankOperationalState::Uninitialized
+                }
+                _ => BankOperationalState::Operational,
+            }
+        } else {
+            self.config.operational_state
+        }
+    }
+
+    /// Read-only guard that rejects the current instruction when the live oracle price deviates
+    /// from `cb_reference_price` by at least the first breach tier (`cb_deviation_bps_tiers[0]`).
+    ///
+    /// A pure read — it never updates the reference or halt state, so callers can run it for
+    /// every involved bank without those banks being writable. No-op when the breaker is
+    /// disabled or the reference is not yet seeded. The deviation math mirrors
+    /// `update_circuit_breaker` so both agree on what counts as a breach.
+    fn cb_price_gate(&self, oracle: OraclePriceWithConfidence) -> MarginfiResult<()> {
+        if !self.get_flag(CIRCUIT_BREAKER_ENABLED) {
+            return Ok(());
+        }
+        // Without a usable reference there is nothing to compare against. The breaker seeds it
+        // at enable-time (warm-cache gate) or on its first observation, so this only skips
+        // genuinely cold banks.
+        let ref_price: I80F48 = self.cb_reference_price.into();
+        if ref_price <= CB_MIN_REF_PRICE {
+            return Ok(());
+        }
+        let threshold = self.config.cb_deviation_bps_tiers[0];
+        if threshold == 0 {
+            return Ok(());
+        }
+
+        let deviation_bps =
+            cb_confidence_adjusted_deviation_bps(oracle.price, ref_price, oracle.confidence);
+
+        if deviation_bps >= threshold as u64 {
+            msg!(
+                "CB price gate tripped: deviation {} bps >= threshold {} bps",
+                deviation_bps,
+                threshold
+            );
+            return err!(MarginfiError::CircuitBreakerPriceJump);
+        }
+        Ok(())
+    }
+
+    /// Observe an oracle price and update the circuit breaker.
+    ///
+    /// Tier 0 (Operational): the first counted breach halts the bank at the breached tier. Halt
+    /// lasts for the tier's duration, then enters an escalation window of
+    /// `duration * escalation_mult` where any re-breach bumps to the next tier (capped at 3). A
+    /// clean escalation window returns the bank to tier 0.
+    ///
+    /// Pulses are deduped by Solana slot, by `CB_MIN_PULSE_SLOT_GAP`, and by oracle publish-time;
+    /// confidence is subtracted from raw delta before tier comparison. The breaker also checks a
+    /// fixed long-window anchor to catch slow oracle walking under the per-observation threshold.
+    /// After `CB_MAX_TIER3_BEFORE_CIRCUIT_BREAK` consecutive tier-3 trips the bank is forced to
+    /// `CircuitBroken`.
+    fn update_circuit_breaker(
+        &mut self,
+        now: i64,
+        slot: u64,
+        oracle: OraclePriceWithConfidence,
+    ) -> MarginfiResult<()> {
+        if !self.get_flag(CIRCUIT_BREAKER_ENABLED) {
+            return Ok(());
+        }
+
+        // `CircuitBroken` is the non-expiring end state — the breaker stays frozen (no
+        // detection, no EMA, no escalation expiry) until an admin clears it.
+        if self.config.operational_state == BankOperationalState::CircuitBroken {
+            return Ok(());
+        }
+
+        // Halted: freeze detection and EMA until the tier timer expires.
+        if self.cb_tier > 0 && now < self.cb_halt_ended_at {
+            return Ok(());
+        }
+
+        if self.cb_tier > 0 {
+            let tier_dur =
+                self.config.cb_tier_durations_seconds[(self.cb_tier - 1) as usize] as i64;
+            let escalation_deadline = self.cb_halt_ended_at.saturating_add(
+                tier_dur.saturating_mul(self.config.cb_escalation_window_mult as i64),
+            );
+            // Escalation window expired without a re-breach: fall back to operational.
+            if now >= escalation_deadline {
+                let prior_tier = self.cb_tier;
+                self.cb_tier = 0;
+                self.cb_halt_started_at = 0;
+                self.cb_halt_ended_at = 0;
+                self.cb_tier3_consecutive_trips = 0;
+
+                #[cfg(not(test))]
+                emit!(crate::events::CircuitBreakerClearedEvent {
+                    prior_tier,
+                    reason: crate::events::CB_CLEAR_REASON_ESCALATION_EXPIRED,
+                    current_timestamp: now,
+                });
+                #[cfg(test)]
+                let _ = prior_tier;
+            }
+        }
+
+        let mut ref_price: I80F48 = self.cb_reference_price.into();
+        let current = oracle.price;
+
+        // First-ever observation: seed the EMA and record dedup cursors. Normally already seeded
+        // at enable-time, but this path also covers banks that were never pulsed before enable.
+        if ref_price == I80F48::ZERO {
+            self.cb_reference_price = current.into();
+            self.cb_window_reference_price = current.into();
+            self.cb_window_started_at = now;
+            self.cb_last_observed_slot = slot;
+            if oracle.source_time != 0 {
+                self.cb_last_oracle_source_time = oracle.source_time;
+            }
+            return Ok(());
+        }
+
+        // Dedup gates: same-slot replay, min-slot-gap rate limit, then strictly-advancing oracle
+        // publish-time (skipped when the adapter reports `source_time == 0`, e.g. Fixed feeds).
+        if slot
+            < self
+                .cb_last_observed_slot
+                .saturating_add(CB_MIN_PULSE_SLOT_GAP)
+        {
+            return Ok(());
+        }
+        if oracle.source_time != 0 && oracle.source_time <= self.cb_last_oracle_source_time {
+            return Ok(());
+        }
+        self.cb_last_observed_slot = slot;
+        if oracle.source_time != 0 {
+            self.cb_last_oracle_source_time = oracle.source_time;
+        }
+
+        // Guard against a corrupted/decayed reference: reseed and defer detection rather than
+        // dividing by a near-zero value and producing a megabps deviation.
+        if ref_price <= CB_MIN_REF_PRICE {
+            self.cb_reference_price = current.into();
+            self.cb_window_reference_price = current.into();
+            self.cb_window_started_at = now;
+            return Ok(());
+        }
+
+        let confidence = oracle.confidence.max(I80F48::ZERO);
+        let deviation_bps = cb_confidence_adjusted_deviation_bps(current, ref_price, confidence);
+        let tiers = &self.config.cb_deviation_bps_tiers;
+
+        let mut window_ref_price: I80F48 = self.cb_window_reference_price.into();
+        if window_ref_price == I80F48::ZERO || window_ref_price <= CB_MIN_REF_PRICE {
+            self.cb_window_reference_price = ref_price.into();
+            self.cb_window_started_at = now;
+            window_ref_price = ref_price;
+        }
+        if self.cb_window_started_at == 0 {
+            self.cb_window_started_at = now;
+        }
+        let window_seconds = cb_window_or_default(
+            self.config.cb_window_seconds as u64,
+            CB_WINDOW_SECONDS as u64,
+        ) as i64;
+        let window_max_up_bps = cb_window_or_default(
+            self.config.cb_window_max_up_bps as u64,
+            CB_WINDOW_MAX_UP_BPS,
+        );
+        let window_max_down_bps = cb_window_or_default(
+            self.config.cb_window_max_down_bps as u64,
+            CB_WINDOW_MAX_DOWN_BPS,
+        );
+        let window_expired = now >= self.cb_window_started_at.saturating_add(window_seconds);
+
+        let up_delta = (current - window_ref_price - confidence).max(I80F48::ZERO);
+        let down_delta = (window_ref_price - current - confidence).max(I80F48::ZERO);
+        let window_up_bps = cb_deviation_bps(up_delta, window_ref_price);
+        let window_down_bps = cb_deviation_bps(down_delta, window_ref_price);
+        let window_deviation_bps = window_up_bps.max(window_down_bps);
+
+        if window_up_bps >= window_max_up_bps || window_down_bps >= window_max_down_bps {
+            let breached = cb_tier_for_deviation(tiers, window_deviation_bps).max(1);
+            msg!(
+                "CB long-window cap tripped: up {} bps / down {} bps",
+                window_up_bps,
+                window_down_bps
+            );
+            self.trip_cb_halt(now, window_deviation_bps, breached);
+
+            // A breach that lands *after* the window has already elapsed is the accumulation of
+            // a full window of slow drift, not a single jump. Leaving the anchor pinned to the
+            // old value would make every subsequent pulse at the new price re-breach and ratchet
+            // the tier up, even though the price has stopped moving. Instead creep the anchor to
+            // the cap edge and restart the window, so the bank can settle after a single halt.
+            // This still trips here, and still bounds an attacker to one cap-sized move per
+            // window with the per-pulse tiers unchanged, so it grants no extra leeway.
+            if window_expired {
+                let capped = if window_up_bps >= window_max_up_bps {
+                    window_ref_price
+                        * (I80F48::ONE
+                            + I80F48::from_num(window_max_up_bps) / I80F48::from_num(10_000u64))
+                } else {
+                    window_ref_price
+                        * (I80F48::ONE
+                            - I80F48::from_num(window_max_down_bps) / I80F48::from_num(10_000u64))
+                };
+                self.cb_window_reference_price = capped.into();
+                self.cb_window_started_at = now;
+            }
+            return Ok(());
+        }
+
+        let breached: u8 = cb_tier_for_deviation(tiers, deviation_bps);
+
+        if breached > 0 {
+            self.trip_cb_halt(now, deviation_bps, breached);
+            return Ok(());
+        }
+
+        if window_expired {
+            self.cb_window_reference_price = current.into();
+            self.cb_window_started_at = now;
+        }
+
+        // Clean observation: advance the EMA reference. The per-pulse shift is clipped so a
+        // high-α config can't reanchor the reference in a handful of attacker-controlled
+        // publications.
+        let alpha = I80F48::from_num(self.config.cb_ema_alpha_bps) / I80F48::from_num(10_000u64);
+        let new_ref = alpha * current + (I80F48::ONE - alpha) * ref_price;
+        let max_shift = ref_price * I80F48::from_num(CB_MAX_EMA_SHIFT_BPS_PER_PULSE)
+            / I80F48::from_num(10_000u64);
+        let clipped_shift = (new_ref - ref_price).max(-max_shift).min(max_shift);
+        ref_price += clipped_shift;
+        self.cb_reference_price = ref_price.into();
 
         Ok(())
     }
@@ -918,6 +1412,60 @@ impl BankImpl for Bank {
     fn decrement_borrowing_position_count(&mut self) {
         self.borrowing_position_count = self.borrowing_position_count.saturating_sub(1);
     }
+
+    fn reset_cb_runtime_state(&mut self) {
+        // If the breaker escalated the bank into the non-expiring `CircuitBroken` end state,
+        // restore the operational state it held beforehand (a no-op otherwise).
+        self.config.operational_state = self.cb_effective_operational_state();
+        self.cb_tier = 0;
+        self.cb_halt_started_at = 0;
+        self.cb_halt_ended_at = 0;
+        self.cb_tier3_consecutive_trips = 0;
+        self.cb_last_observed_slot = 0;
+        self.cb_last_oracle_source_time = 0;
+    }
+
+    fn trip_cb_halt(&mut self, now: i64, deviation_bps: u64, breached_tier: u8) {
+        let new_tier = if self.cb_tier > 0 {
+            (self.cb_tier + 1).min(3)
+        } else {
+            breached_tier
+        };
+        let dur_sec = self.config.cb_tier_durations_seconds[(new_tier - 1) as usize] as i64;
+        self.cb_tier = new_tier;
+        self.cb_halt_started_at = now;
+        self.cb_halt_ended_at = now.saturating_add(dur_sec);
+        msg!("CB halt tier {} duration {}s", new_tier, dur_sec);
+        #[cfg(not(test))]
+        emit!(crate::events::CircuitBreakerTrippedEvent {
+            tier: new_tier,
+            deviation_bps,
+            halt_started_at: now,
+            halt_ended_at: self.cb_halt_ended_at,
+        });
+        #[cfg(test)]
+        let _ = deviation_bps;
+
+        if new_tier == 3 {
+            self.cb_tier3_consecutive_trips = self.cb_tier3_consecutive_trips.saturating_add(1);
+            if self.cb_tier3_consecutive_trips >= CB_MAX_TIER3_BEFORE_CIRCUIT_BREAK {
+                if self.config.operational_state == BankOperationalState::CircuitBroken {
+                    return;
+                }
+                self.cb_pre_break_state = self.config.operational_state as u8;
+                self.config.operational_state = BankOperationalState::CircuitBroken;
+                msg!(
+                    "CB storm: {} consecutive tier-3 trips → bank forced CircuitBroken",
+                    self.cb_tier3_consecutive_trips
+                );
+                #[cfg(not(test))]
+                emit!(crate::events::CircuitBreakerAutoBrokenEvent {
+                    consecutive_tier3_trips: self.cb_tier3_consecutive_trips,
+                    current_timestamp: now,
+                });
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -942,5 +1490,965 @@ impl BankVaultType {
             BankVaultType::Insurance => INSURANCE_VAULT_AUTHORITY_SEED.as_bytes(),
             BankVaultType::Fee => FEE_VAULT_AUTHORITY_SEED.as_bytes(),
         }
+    }
+}
+
+#[cfg(test)]
+mod cb_tests {
+    use super::*;
+    use bytemuck::Zeroable;
+    use marginfi_type_crate::types::OraclePriceWithConfidence;
+
+    fn make_cb_bank() -> Bank {
+        let mut b = Bank::zeroed();
+        b.flags |= CIRCUIT_BREAKER_ENABLED;
+        b.config.cb_deviation_bps_tiers = [500, 1000, 2500]; // 5% / 10% / 25%
+        b.config.cb_tier_durations_seconds = [600, 3600, 14400]; // 10m / 1h / 4h
+        b.config.cb_escalation_window_mult = 2;
+        b.config.cb_ema_alpha_bps = 1000; // α = 0.1
+        b
+    }
+
+    fn price(n: u32) -> I80F48 {
+        I80F48::from_num(n)
+    }
+
+    fn price_f(n: f64) -> I80F48 {
+        I80F48::from_num(n)
+    }
+
+    /// Observation with zero confidence and `source_time = 0` (skips oracle-source dedup).
+    fn obs(p: I80F48) -> OraclePriceWithConfidence {
+        OraclePriceWithConfidence {
+            price: p,
+            confidence: I80F48::ZERO,
+            source_time: 0,
+        }
+    }
+
+    /// Feed observations on distinct slots starting at `start_slot`, stepping by
+    /// `CB_MIN_PULSE_SLOT_GAP` so each call passes the slot-gap rate limit.
+    fn feed(b: &mut Bank, now: i64, start_slot: u64, prices: &[I80F48]) {
+        for (i, p) in prices.iter().enumerate() {
+            let step = (i as u64) * CB_MIN_PULSE_SLOT_GAP;
+            b.update_circuit_breaker(now + i as i64, start_slot + step, obs(*p))
+                .unwrap();
+        }
+    }
+
+    fn trip_tier3_storm(b: &mut Bank) {
+        let big = price(200);
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        b.update_circuit_breaker(1_001, 1_002, obs(big)).unwrap();
+        let halt_ended_1 = b.cb_halt_ended_at;
+        b.update_circuit_breaker(halt_ended_1 + 1, 1_004, obs(big))
+            .unwrap();
+        let halt_ended_2 = b.cb_halt_ended_at;
+        b.update_circuit_breaker(halt_ended_2 + 1, 1_006, obs(big))
+            .unwrap();
+    }
+
+    #[test]
+    fn disabled_is_noop() {
+        let mut b = Bank::zeroed(); // flag off
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        assert_eq!(b.cb_reference_price, I80F48::ZERO.into());
+        assert_eq!(b.cb_tier, 0);
+    }
+
+    #[test]
+    fn first_observation_seeds_reference() {
+        let mut b = make_cb_bank();
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        assert_eq!(I80F48::from(b.cb_reference_price), price(100));
+        assert_eq!(I80F48::from(b.cb_window_reference_price), price(100));
+        assert_eq!(b.cb_window_started_at, 1_000);
+        assert_eq!(b.cb_tier, 0);
+        assert_eq!(b.cb_last_observed_slot, 1_000);
+    }
+
+    #[test]
+    fn clean_reads_update_ema() {
+        let mut b = make_cb_bank();
+        feed(&mut b, 1_000, 1_000, &[price(100), price(101)]);
+        // α=0.1: ref = 0.1 * 101 + 0.9 * 100 = 100.1
+        let r: I80F48 = b.cb_reference_price.into();
+        assert!((r - I80F48::from_num(100.1)).abs() < I80F48::from_num(0.001));
+        assert_eq!(b.cb_tier, 0);
+    }
+
+    #[test]
+    fn first_breach_trips_halt_immediately() {
+        // The new model trips on the *first* breaching observation — there is no sustained-
+        // observation wait. A single 10% spike vs ref=100 is 1000 bps → tier 2, so the bank
+        // halts at tier 2 on that one pulse.
+        let mut b = make_cb_bank();
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 0);
+
+        b.update_circuit_breaker(1_001, 1_002, obs(price(110)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 2);
+        // Tier-2 duration = 60m → halt_ended_at = now + 3600.
+        assert_eq!(b.cb_halt_started_at, 1_001);
+        assert_eq!(b.cb_halt_ended_at, 1_001 + 60 * 60);
+        assert!(b.is_cb_halted(1_001));
+        // Tier-2 trip does not count toward the tier-3 storm counter.
+        assert_eq!(b.cb_tier3_consecutive_trips, 0);
+    }
+
+    #[test]
+    fn trip_tier_matches_breach_magnitude() {
+        // The trip tier when starting from tier 0 is exactly the tier of the breaching
+        // observation. A first observation big enough to clear the tier-3 threshold (>=2500
+        // bps) trips straight to tier 3.
+        let mut b = make_cb_bank();
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+
+        // 200 vs ref=100 → 10000 bps → tier 3.
+        b.update_circuit_breaker(1_001, 1_002, obs(price(200)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 3);
+        // First tier-3 trip → storm counter starts at 1.
+        assert_eq!(b.cb_tier3_consecutive_trips, 1);
+        // Tier-3 duration = 4h.
+        assert_eq!(b.cb_halt_ended_at, 1_001 + 240 * 60);
+    }
+
+    #[test]
+    fn slow_staircase_trips_long_window_cap() {
+        let mut b = make_cb_bank();
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+
+        for step in 1..200 {
+            b.update_circuit_breaker(
+                1_000 + step as i64,
+                1_000 + step * CB_MIN_PULSE_SLOT_GAP,
+                obs(price_f(100.0 + step as f64 / 10.0)),
+            )
+            .unwrap();
+            assert_eq!(b.cb_tier, 0);
+        }
+
+        b.update_circuit_breaker(
+            1_200,
+            1_000 + 200 * CB_MIN_PULSE_SLOT_GAP,
+            obs(price_f(120.0)),
+        )
+        .unwrap();
+        assert_eq!(b.cb_tier, 2);
+        assert_eq!(b.cb_halt_started_at, 1_200);
+    }
+
+    #[test]
+    fn clean_expired_window_rolls_anchor_forward() {
+        let mut b = make_cb_bank();
+        b.config.cb_deviation_bps_tiers = [5_000, 6_000, 7_000];
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+
+        b.update_circuit_breaker(
+            1_000 + CB_WINDOW_SECONDS + 1,
+            1_000 + CB_MIN_PULSE_SLOT_GAP,
+            obs(price(110)),
+        )
+        .unwrap();
+
+        assert_eq!(b.cb_tier, 0);
+        assert_eq!(I80F48::from(b.cb_window_reference_price), price(110));
+        assert_eq!(b.cb_window_started_at, 1_000 + CB_WINDOW_SECONDS + 1);
+    }
+
+    #[test]
+    fn expired_window_breach_creeps_anchor_to_cap_and_recovers() {
+        let mut b = make_cb_bank();
+        // Per-pulse tiers set high so only the long-window cap (20% up) can trip here.
+        b.config.cb_deviation_bps_tiers = [5_000, 6_000, 7_000];
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+
+        // Window already elapsed; price is 121 = +21% vs the anchor of 100, past the 20% up cap.
+        let t_breach = 1_000 + CB_WINDOW_SECONDS + 1;
+        b.update_circuit_breaker(t_breach, 1_000 + CB_MIN_PULSE_SLOT_GAP, obs(price(121)))
+            .unwrap();
+
+        // It still trips, but the anchor creeps up to the cap edge (100 * 1.20 = 120) and the
+        // window restarts from the breach.
+        assert_eq!(b.cb_tier, 1);
+        let anchor: I80F48 = b.cb_window_reference_price.into();
+        assert!((anchor - price(120)).abs() < I80F48::from_num(0.001));
+        assert_eq!(b.cb_window_started_at, t_breach);
+
+        // After the tier-1 halt expires, the price holding at 121 is only ~0.8% above the new
+        // 120 anchor, so it does not re-breach the long window — the tier does not escalate.
+        let after_halt = b.cb_halt_ended_at + 1;
+        b.update_circuit_breaker(
+            after_halt,
+            1_000 + 2 * CB_MIN_PULSE_SLOT_GAP,
+            obs(price(121)),
+        )
+        .unwrap();
+        assert_eq!(b.cb_tier, 1);
+    }
+
+    #[test]
+    fn configured_window_cap_overrides_default() {
+        let mut b = make_cb_bank();
+        // Per-pulse tiers high so only the long-window cap can trip; tighten the up cap to 10%
+        // (default is 20% / CB_WINDOW_MAX_UP_BPS).
+        b.config.cb_deviation_bps_tiers = [5_000, 6_000, 7_000];
+        b.config.cb_window_max_up_bps = 1_000;
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+
+        // +12%: over the configured 10% cap, under the 20% default. Trips because the override
+        // is in force.
+        b.update_circuit_breaker(1_001, 1_002, obs(price(112)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 1);
+    }
+
+    #[test]
+    fn configured_window_seconds_overrides_default() {
+        let mut b = make_cb_bank();
+        b.config.cb_deviation_bps_tiers = [5_000, 6_000, 7_000];
+        b.config.cb_window_seconds = 100; // default is 4h
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+
+        // 101s later the configured 100s window has elapsed, so a clean read rolls the anchor
+        // forward to the current price rather than holding the stale anchor for 4h.
+        b.update_circuit_breaker(1_101, 1_002, obs(price(105)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 0);
+        let anchor: I80F48 = b.cb_window_reference_price.into();
+        assert!((anchor - price(105)).abs() < I80F48::from_num(0.001));
+        assert_eq!(b.cb_window_started_at, 1_101);
+    }
+
+    #[test]
+    fn same_slot_replay_is_deduped() {
+        // Spamming the pulse in a single slot must not trip more than once: only the first
+        // observation in a slot is processed, and a halt freezes everything after.
+        let mut b = make_cb_bank();
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        // All three of these are in slot 1_002 — the first trips a tier-2 halt, the rest are
+        // deduped and also frozen by the halt.
+        b.update_circuit_breaker(1_001, 1_002, obs(price(110)))
+            .unwrap();
+        b.update_circuit_breaker(1_001, 1_002, obs(price(110)))
+            .unwrap();
+        b.update_circuit_breaker(1_001, 1_002, obs(price(110)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 2);
+        assert_eq!(b.cb_halt_started_at, 1_001);
+    }
+
+    #[test]
+    fn same_slot_replay_before_breach_is_deduped() {
+        // A clean observation replayed in one slot updates the EMA exactly once.
+        let mut b = make_cb_bank();
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        b.update_circuit_breaker(1_001, 1_002, obs(price(101)))
+            .unwrap();
+        b.update_circuit_breaker(1_001, 1_002, obs(price(101)))
+            .unwrap();
+        // EMA advanced once: 0.1*101 + 0.9*100 = 100.1.
+        let r: I80F48 = b.cb_reference_price.into();
+        assert!((r - I80F48::from_num(100.1)).abs() < I80F48::from_num(0.001));
+        assert_eq!(b.cb_tier, 0);
+    }
+
+    #[test]
+    fn sub_min_gap_pulses_are_rate_limited() {
+        // Pulses inside the min-slot-gap window must be dropped, even if the price would breach.
+        let mut b = make_cb_bank();
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        // Slot 1_001 is within the min-gap (≥ 1_000 + CB_MIN_PULSE_SLOT_GAP = 1_002), so a breach
+        // observation here is silently dropped — no trip.
+        b.update_circuit_breaker(1_001, 1_001, obs(price(130)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 0);
+    }
+
+    #[test]
+    fn stale_publish_does_not_trip_across_slots() {
+        // A single stale Pyth publication replayed across many Solana slots must not trip the
+        // halt — otherwise an attacker could spam `pulse` to act on one stale reading. The
+        // strictly-advancing source-time dedup drops every replay (same `source_time` as the
+        // seed), so detection never runs on the stale price.
+        let mut b = make_cb_bank();
+        b.update_circuit_breaker(
+            1_000,
+            1_000,
+            OraclePriceWithConfidence {
+                price: price(100),
+                confidence: I80F48::ZERO,
+                source_time: 500, // seed with publish-time 500
+            },
+        )
+        .unwrap();
+        // 4 pulses, distinct Solana slots past the min gap, but same oracle source_time as the
+        // seed → all dropped by the source-time dedup → no trip.
+        for i in 1..=4 {
+            b.update_circuit_breaker(
+                1_000 + i,
+                1_000 + (i as u64) * CB_MIN_PULSE_SLOT_GAP,
+                OraclePriceWithConfidence {
+                    price: price(130),
+                    confidence: I80F48::ZERO,
+                    source_time: 500, // identical stale publish
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(b.cb_tier, 0);
+        assert_eq!(b.cb_halt_started_at, 0);
+    }
+
+    #[test]
+    fn clean_read_updates_ema_without_tripping() {
+        // A below-tier-0 observation never trips; it advances the EMA and leaves tier at 0.
+        let mut b = make_cb_bank();
+        feed(&mut b, 1_000, 1_000, &[price(100), price(101)]);
+        assert_eq!(b.cb_tier, 0);
+        b.update_circuit_breaker(1_002, 1_000 + 2 * CB_MIN_PULSE_SLOT_GAP, obs(price(102)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 0);
+        // ref: 100 → 100.1 → 100.29.
+        let r: I80F48 = b.cb_reference_price.into();
+        assert!((r - I80F48::from_num(100.29)).abs() < I80F48::from_num(0.001));
+    }
+
+    #[test]
+    fn halt_freezes_detection_and_ema() {
+        let mut b = make_cb_bank();
+        b.cb_tier = 1;
+        b.cb_halt_started_at = 1_000;
+        b.cb_halt_ended_at = 1_600; // 10 min later
+        b.cb_reference_price = price(100).into();
+        // Any read during halt is a no-op
+        b.update_circuit_breaker(1_100, 1_100, obs(price(50)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 1);
+        assert_eq!(I80F48::from(b.cb_reference_price), price(100));
+    }
+
+    #[test]
+    fn escalation_window_bumps_tier() {
+        let mut b = make_cb_bank();
+        b.cb_tier = 1;
+        b.cb_halt_started_at = 1_000;
+        b.cb_halt_ended_at = 1_600;
+        b.cb_reference_price = price(100).into();
+        // Escalation window = 600 * 2 = 1200 → deadline = 2800. Now = 1_700 (in window).
+        // A single re-breach inside the window escalates tier 1 → 2.
+        b.update_circuit_breaker(1_700, 1_700, obs(price(110)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 2);
+    }
+
+    #[test]
+    fn escalation_window_expiry_resets_tier_and_halt_timestamps() {
+        let mut b = make_cb_bank();
+        b.cb_tier = 1;
+        b.cb_halt_started_at = 1_000;
+        b.cb_halt_ended_at = 1_600;
+        b.cb_reference_price = price(100).into();
+        // Deadline = 2800. A clean read past that resets tier and zeros halt timestamps.
+        b.update_circuit_breaker(3_000, 3_000, obs(price(100)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 0);
+        assert_eq!(b.cb_halt_started_at, 0);
+        assert_eq!(b.cb_halt_ended_at, 0);
+    }
+
+    #[test]
+    fn tier_capped_at_three() {
+        let mut b = make_cb_bank();
+        b.cb_tier = 3;
+        b.cb_halt_started_at = 1_000;
+        b.cb_halt_ended_at = 1_600;
+        b.cb_reference_price = price(100).into();
+        // Still inside escalation window for tier 3 (240m * 2 = 480m → way past 1_700).
+        // A re-breach escalates `(3 + 1).min(3) = 3`.
+        b.update_circuit_breaker(1_700, 1_700, obs(price(200)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 3);
+    }
+
+    #[test]
+    fn confidence_absorbs_noise() {
+        // 5% move with a 5% confidence band → effective delta 0, no breach.
+        let mut b = make_cb_bank();
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        b.update_circuit_breaker(
+            1_001,
+            1_000 + CB_MIN_PULSE_SLOT_GAP,
+            OraclePriceWithConfidence {
+                price: price(105),
+                confidence: I80F48::from_num(5), // 5% of 100
+                source_time: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(b.cb_tier, 0);
+    }
+
+    #[test]
+    fn confidence_does_not_hide_real_breach() {
+        // 20% move with a 5% confidence band → effective delta 15% → still trips tier 2 threshold.
+        let mut b = make_cb_bank();
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        b.update_circuit_breaker(
+            1_001,
+            1_000 + CB_MIN_PULSE_SLOT_GAP,
+            OraclePriceWithConfidence {
+                price: price(120),
+                confidence: I80F48::from_num(5),
+                source_time: 0,
+            },
+        )
+        .unwrap();
+        // Effective deviation = 15% = 1500 bps → tier 2.
+        assert_eq!(b.cb_tier, 2);
+        assert!(b.is_cb_halted(1_001));
+    }
+
+    #[test]
+    fn is_cb_halted_respects_flag_tier_and_time() {
+        let mut b = make_cb_bank();
+        assert!(!b.is_cb_halted(1_000)); // tier 0
+        b.cb_tier = 1;
+        b.cb_halt_ended_at = 2_000;
+        assert!(b.is_cb_halted(1_500));
+        assert!(!b.is_cb_halted(2_500)); // past ended_at
+        b.flags &= !CIRCUIT_BREAKER_ENABLED;
+        assert!(!b.is_cb_halted(1_500)); // flag off
+    }
+
+    #[test]
+    fn advancing_source_time_trips_breach() {
+        // A strictly-advancing oracle source_time on a fresh slot must be accepted by the dedup
+        // gate, so the breaching observation trips a halt.
+        let mut b = make_cb_bank();
+        b.update_circuit_breaker(
+            1_000,
+            1_000,
+            OraclePriceWithConfidence {
+                price: price(100),
+                confidence: I80F48::ZERO,
+                source_time: 500,
+            },
+        )
+        .unwrap();
+        b.update_circuit_breaker(
+            1_001,
+            1_000 + CB_MIN_PULSE_SLOT_GAP,
+            OraclePriceWithConfidence {
+                price: price(110), // 10% spike → tier 2 (1000 bps)
+                confidence: I80F48::ZERO,
+                source_time: 501, // strictly advances
+            },
+        )
+        .unwrap();
+        assert_eq!(b.cb_tier, 2);
+        assert_eq!(b.cb_last_oracle_source_time, 501);
+    }
+
+    #[test]
+    fn negative_confidence_clamped_to_zero() {
+        // Below-tier-1 delta (4%) with a *negative* confidence: an unclamped subtraction would
+        // inflate effective delta to 5% and cross tier 1 (500 bps). The clamp at
+        // `oracle.confidence.max(I80F48::ZERO)` keeps effective delta at the raw 4%, no breach.
+        let mut b = make_cb_bank();
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        b.update_circuit_breaker(
+            1_001,
+            1_000 + CB_MIN_PULSE_SLOT_GAP,
+            OraclePriceWithConfidence {
+                price: price(104),
+                confidence: I80F48::from_num(-1),
+                source_time: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(b.cb_tier, 0);
+    }
+
+    #[test]
+    fn near_zero_ref_price_reseeds_without_tripping() {
+        // If the cached reference somehow decayed below `CB_MIN_REF_PRICE`, the next pulse must
+        // reseed from the live observation rather than divide and produce a megabps deviation that
+        // would falsely trip the halt. The reseed branch returns before detection.
+        let mut b = make_cb_bank();
+        // Below CB_MIN_REF_PRICE (1<<20 bits) but above zero, to skip the first-observation seed
+        // branch and hit the near-zero guard instead.
+        b.cb_reference_price = I80F48::from_bits(1).into();
+        b.cb_last_observed_slot = 1_000; // so the dedup gate passes for slot >= 1_002
+        b.update_circuit_breaker(2_000, 1_002, obs(price(500)))
+            .unwrap();
+        assert_eq!(I80F48::from(b.cb_reference_price), price(500));
+        assert_eq!(b.cb_tier, 0);
+    }
+
+    #[test]
+    fn tier3_storm_promotes_to_circuit_broken() {
+        // After `CB_MAX_TIER3_BEFORE_CIRCUIT_BREAK` (= 3) consecutive tier-3 trips with no clean
+        // escalation window in between, the bank must enter the non-expiring
+        // `CircuitBroken` end state so a sustained attacker can't keep it halted indefinitely.
+        // Each trip now happens on a single pulse.
+        let mut b = make_cb_bank();
+        b.config.operational_state = BankOperationalState::Operational;
+
+        let big = price(200); // 100% spike vs ref=100 → tier 3 (>=2500 bps).
+
+        // ---- Trip 1: seed at 100, then one tier-3 breach.
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        b.update_circuit_breaker(1_001, 1_002, obs(big)).unwrap();
+        assert_eq!(b.cb_tier, 3);
+        assert_eq!(b.cb_tier3_consecutive_trips, 1);
+        let halt_ended_1 = b.cb_halt_ended_at;
+        assert_eq!(halt_ended_1, 1_001 + 240 * 60); // tier-3 duration = 4h
+        assert_eq!(
+            b.config.operational_state,
+            BankOperationalState::Operational
+        );
+
+        // ---- Trip 2: resume after the halt expires but inside the escalation window
+        // (mult=2 → 8h). One breaching pulse escalates `(3 + 1).min(3) = 3`.
+        b.update_circuit_breaker(halt_ended_1 + 1, 1_004, obs(big))
+            .unwrap();
+        assert_eq!(b.cb_tier, 3);
+        assert_eq!(b.cb_tier3_consecutive_trips, 2);
+        let halt_ended_2 = b.cb_halt_ended_at;
+        assert_eq!(
+            b.config.operational_state,
+            BankOperationalState::Operational
+        );
+
+        // ---- Trip 3: crosses `CB_MAX_TIER3_BEFORE_CIRCUIT_BREAK` and triggers the storm brake.
+        b.update_circuit_breaker(halt_ended_2 + 1, 1_006, obs(big))
+            .unwrap();
+        assert_eq!(b.cb_tier, 3);
+        assert_eq!(
+            b.cb_tier3_consecutive_trips,
+            CB_MAX_TIER3_BEFORE_CIRCUIT_BREAK
+        );
+        assert_eq!(
+            b.config.operational_state,
+            BankOperationalState::CircuitBroken
+        );
+        // The prior operational state is stashed for `clear_circuit_breaker` to restore.
+        assert_eq!(
+            b.cb_pre_break_state,
+            BankOperationalState::Operational as u8
+        );
+    }
+
+    #[test]
+    fn two_consecutive_tier3_trips_do_not_force_break() {
+        // Boundary case: the storm brake must fire only at `CB_MAX_TIER3_BEFORE_CIRCUIT_BREAK` (= 3),
+        // not earlier. After two trips the bank stays operational.
+        let mut b = make_cb_bank();
+        b.config.operational_state = BankOperationalState::Operational;
+        let big = price(200);
+
+        // Trip 1
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        b.update_circuit_breaker(1_001, 1_002, obs(big)).unwrap();
+        let halt_ended_1 = b.cb_halt_ended_at;
+        assert_eq!(b.cb_tier3_consecutive_trips, 1);
+
+        // Trip 2 inside the escalation window — counter reaches 2, brake must not fire yet.
+        b.update_circuit_breaker(halt_ended_1 + 1, 1_004, obs(big))
+            .unwrap();
+        assert_eq!(b.cb_tier3_consecutive_trips, 2);
+        assert_eq!(
+            b.config.operational_state,
+            BankOperationalState::Operational
+        );
+    }
+
+    #[test]
+    fn clean_escalation_expiry_resets_storm_counter() {
+        // A clean escalation-window expiry must zero the tier-3 storm counter. Without this,
+        // widely-spaced attacks could accrue toward the brake threshold over time without ever
+        // sustaining pressure on the bank.
+        let mut b = make_cb_bank();
+        let big = price(200);
+
+        // One tier-3 trip → counter = 1.
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        b.update_circuit_breaker(1_001, 1_002, obs(big)).unwrap();
+        assert_eq!(b.cb_tier, 3);
+        assert_eq!(b.cb_tier3_consecutive_trips, 1);
+
+        // Tier-3 dur = 240m, esc_mult = 2 → escalation_deadline = halt_ended_at + 28800.
+        let escalation_deadline = b.cb_halt_ended_at + (240 * 60) * 2;
+
+        // Clean read past the escalation deadline triggers the expiry branch: tier→0, halt
+        // timestamps→0, AND tier3_consecutive_trips→0.
+        b.update_circuit_breaker(escalation_deadline + 1, 1_010, obs(price(100)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 0);
+        assert_eq!(b.cb_halt_started_at, 0);
+        assert_eq!(b.cb_halt_ended_at, 0);
+        assert_eq!(b.cb_tier3_consecutive_trips, 0);
+    }
+
+    #[test]
+    fn escalates_through_full_tier_ladder() {
+        // Drives a pulse sequence across three phases (operational → tier 1 → tier 2 → tier 3)
+        // to verify the escalation rule `(cb_tier + 1).min(3)` ratchets the tier on each
+        // re-breach inside the escalation window. Each trip is a single breaching pulse.
+        let mut b = make_cb_bank();
+
+        // ---- Phase 1: trip to tier 1 from operational. price=107 keeps deviation in
+        // [500, 1000) bps so `breached` is exactly 1, and tier-from-trip-when-tier-was-zero is
+        // `breached`.
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        b.update_circuit_breaker(1_001, 1_002, obs(price(107)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 1);
+        // Tier-1 duration = 10m → halt_ended_at = 1001 + 600.
+        let halt_ended_1 = b.cb_halt_ended_at;
+        assert_eq!(halt_ended_1, 1_001 + 10 * 60);
+
+        // ---- Phase 2: re-breach in escalation window → tier 2. Tier-1 escalation deadline =
+        // halt_ended_at + tier_dur(600) * mult(2) = halt_ended_1 + 1200; the pulse below stays
+        // strictly before that.
+        b.update_circuit_breaker(halt_ended_1 + 1, 1_004, obs(price(110)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 2);
+        // Tier-2 duration = 60m → halt_ended_at extends by 3600s from the trip pulse time.
+        let halt_ended_2 = b.cb_halt_ended_at;
+        assert_eq!(halt_ended_2, halt_ended_1 + 1 + 60 * 60);
+
+        // ---- Phase 3: re-breach in tier-2 escalation window → tier 3. Tier-2 escalation
+        // deadline = halt_ended_2 + tier_dur(3600) * mult(2) = halt_ended_2 + 7200.
+        b.update_circuit_breaker(halt_ended_2 + 1, 1_006, obs(price(120)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 3);
+        assert_eq!(b.cb_halt_ended_at, halt_ended_2 + 1 + 240 * 60);
+        // First tier-3 trip → storm counter starts at 1.
+        assert_eq!(b.cb_tier3_consecutive_trips, 1);
+    }
+
+    #[test]
+    fn clean_window_recovery_then_fresh_breach_starts_at_tier_one() {
+        // After a tier-1 trip and a clean escalation-window expiry, the next breach must trip to
+        // tier 1 again — not tier 2. The clean expiry resets `cb_tier` to 0, which routes the
+        // next trip through the from-operational branch (`new_tier = breached`) instead of the
+        // from-escalation branch (`new_tier = (cb_tier + 1).min(3)`).
+        let mut b = make_cb_bank();
+
+        // Tier-1 trip.
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        b.update_circuit_breaker(1_001, 1_002, obs(price(107)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 1);
+
+        // Clean expiry: now > halt_ended_at + tier_dur(600) * mult(2).
+        let clean_window_end = b.cb_halt_ended_at + (10 * 60) * 2;
+        b.update_circuit_breaker(clean_window_end + 1, 1_004, obs(price(100)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 0);
+
+        // Fresh breach → tier 1 (not tier 2). price=107 keeps deviation in [500, 1000) bps.
+        b.update_circuit_breaker(clean_window_end + 2, 1_006, obs(price(107)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 1);
+    }
+
+    #[test]
+    fn storm_brake_escalates_reduce_only_to_circuit_broken() {
+        // A bank already in `ReduceOnly` (e.g. admin-set) must escalate to `CircuitBroken` once
+        // the storm threshold is crossed, and stash `ReduceOnly` as the pre-break state.
+        let mut b = make_cb_bank();
+        b.config.operational_state = BankOperationalState::ReduceOnly;
+        trip_tier3_storm(&mut b);
+
+        assert_eq!(
+            b.cb_tier3_consecutive_trips,
+            CB_MAX_TIER3_BEFORE_CIRCUIT_BREAK
+        );
+        assert_eq!(
+            b.config.operational_state,
+            BankOperationalState::CircuitBroken
+        );
+        assert_eq!(b.cb_pre_break_state, BankOperationalState::ReduceOnly as u8);
+    }
+
+    #[test]
+    fn storm_brake_escalates_paused_to_circuit_broken() {
+        let mut b = make_cb_bank();
+        b.config.operational_state = BankOperationalState::Paused;
+        trip_tier3_storm(&mut b);
+
+        assert_eq!(
+            b.config.operational_state,
+            BankOperationalState::CircuitBroken
+        );
+        assert_eq!(b.cb_pre_break_state, BankOperationalState::Paused as u8);
+
+        b.reset_cb_runtime_state();
+        assert_eq!(b.config.operational_state, BankOperationalState::Paused);
+    }
+
+    #[test]
+    fn storm_brake_records_killed_by_bankruptcy_before_circuit_breaking() {
+        let mut b = make_cb_bank();
+        b.config.operational_state = BankOperationalState::KilledByBankruptcy;
+        trip_tier3_storm(&mut b);
+
+        assert_eq!(
+            b.cb_tier3_consecutive_trips,
+            CB_MAX_TIER3_BEFORE_CIRCUIT_BREAK
+        );
+        assert_eq!(
+            b.config.operational_state,
+            BankOperationalState::CircuitBroken
+        );
+        assert_eq!(
+            b.cb_pre_break_state,
+            BankOperationalState::KilledByBankruptcy as u8
+        );
+
+        b.reset_cb_runtime_state();
+        assert_eq!(
+            b.config.operational_state,
+            BankOperationalState::KilledByBankruptcy
+        );
+    }
+
+    #[test]
+    fn circuit_broken_bank_is_full_noop() {
+        // A `CircuitBroken` bank freezes the breaker entirely: no detection, no EMA, no
+        // escalation expiry — until an admin clears it.
+        let mut b = make_cb_bank();
+        b.config.operational_state = BankOperationalState::CircuitBroken;
+        b.cb_tier = 3;
+        b.cb_halt_started_at = 1_000;
+        b.cb_halt_ended_at = 2_000;
+        b.cb_reference_price = price(100).into();
+        // A wild observation, well past any escalation deadline, changes nothing.
+        b.update_circuit_breaker(9_999_999, 9_999_999, obs(price(1)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 3);
+        assert_eq!(b.cb_halt_ended_at, 2_000);
+        assert_eq!(I80F48::from(b.cb_reference_price), price(100));
+        assert_eq!(
+            b.config.operational_state,
+            BankOperationalState::CircuitBroken
+        );
+    }
+
+    #[test]
+    fn ema_shift_clip_caps_per_pulse_movement() {
+        // A clean 10× spike with α=0.1 would shift the EMA by 0.1 × 900 = 90 absolute units in
+        // one pulse without the cap. But 900% deviation breaches tier 3 long before the EMA
+        // path is reached, so use a *high-confidence* observation: a 1000-unit price with a
+        // 999-unit confidence band has effective deviation 1% — below tier 0 — so it takes the
+        // clean EMA path. With CB_MAX_EMA_SHIFT_BPS_PER_PULSE = 500 (5%) the shift is clipped to
+        // ref_price * 0.05 = 5.
+        let mut b = make_cb_bank();
+        b.config.cb_ema_alpha_bps = 1000; // α = 0.1
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        b.update_circuit_breaker(
+            1_001,
+            1_002,
+            OraclePriceWithConfidence {
+                price: price(1_000),
+                confidence: I80F48::from_num(899), // effective delta = 900 - 899 = 1 unit
+                source_time: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(b.cb_tier, 0);
+        let r: I80F48 = b.cb_reference_price.into();
+        // ref starts at 100, raw EMA target 0.1*1000 + 0.9*100 = 190, shift clipped to
+        // 100 * 0.05 = 5 → ref = 105 after one pulse.
+        assert!(
+            r <= I80F48::from_num(105) + I80F48::from_num(0.001),
+            "EMA shifted further than the per-pulse cap allows: {}",
+            r
+        );
+        assert!(
+            r >= I80F48::from_num(105) - I80F48::from_num(0.001),
+            "EMA shift was clipped below the cap: {}",
+            r
+        );
+    }
+
+    // ---- Inline price gate (`cb_price_gate`) -------------------------------------------------
+
+    #[test]
+    fn price_gate_passes_below_tier_zero_threshold() {
+        // A deviation strictly below `cb_deviation_bps_tiers[0]` (500 bps) does not trip the gate.
+        let mut b = make_cb_bank();
+        b.cb_reference_price = price(100).into();
+        // 4% deviation → 400 bps < 500.
+        assert!(b.cb_price_gate(obs(price(104))).is_ok());
+    }
+
+    #[test]
+    fn price_gate_trips_at_tier_zero_threshold() {
+        // A deviation at/above `cb_deviation_bps_tiers[0]` (500 bps) fails the current action
+        // with `CircuitBreakerPriceJump`, even before any halt is tripped.
+        let mut b = make_cb_bank();
+        b.cb_reference_price = price(100).into();
+        // 5% deviation → exactly 500 bps.
+        let err = b.cb_price_gate(obs(price(105))).unwrap_err();
+        assert_eq!(err, error!(MarginfiError::CircuitBreakerPriceJump));
+        // A larger jump also trips.
+        assert!(b.cb_price_gate(obs(price(200))).is_err());
+    }
+
+    #[test]
+    fn price_gate_noop_when_cb_disabled() {
+        // With the flag off the gate is a pure no-op regardless of how far the price moved.
+        let mut b = make_cb_bank();
+        b.flags &= !CIRCUIT_BREAKER_ENABLED;
+        b.cb_reference_price = price(100).into();
+        assert!(b.cb_price_gate(obs(price(1_000))).is_ok());
+    }
+
+    #[test]
+    fn price_gate_noop_when_reference_unseeded() {
+        // Without a usable reference there is nothing to compare against — a cold bank passes.
+        let mut b = make_cb_bank();
+        // Reference left at zero (cold). Also exercise the near-zero guard.
+        assert!(b.cb_price_gate(obs(price(1_000))).is_ok());
+        b.cb_reference_price = I80F48::from_bits(1).into(); // <= CB_MIN_REF_PRICE
+        assert!(b.cb_price_gate(obs(price(1_000))).is_ok());
+    }
+
+    #[test]
+    fn price_gate_subtracts_confidence() {
+        // Confidence is subtracted from the raw delta so a wide-band feed doesn't trip on noise.
+        let mut b = make_cb_bank();
+        b.cb_reference_price = price(100).into();
+        // Raw delta 6% but a 2% confidence band → effective 4% < 500 bps → passes.
+        assert!(b
+            .cb_price_gate(OraclePriceWithConfidence {
+                price: price(106),
+                confidence: I80F48::from_num(2),
+                source_time: 0,
+            })
+            .is_ok());
+        // Raw delta 8% with a 2% band → effective 6% >= 500 bps → trips.
+        assert!(b
+            .cb_price_gate(OraclePriceWithConfidence {
+                price: price(108),
+                confidence: I80F48::from_num(2),
+                source_time: 0,
+            })
+            .is_err());
+    }
+
+    // ---- Pre-break state restore -------------------------------------------------------------
+
+    #[test]
+    fn cb_effective_operational_state_resolves_pre_break() {
+        // For a non-`CircuitBroken` bank the effective state is just `operational_state`.
+        let mut b = make_cb_bank();
+        b.config.operational_state = BankOperationalState::ReduceOnly;
+        assert_eq!(
+            b.cb_effective_operational_state(),
+            BankOperationalState::ReduceOnly
+        );
+
+        // For a `CircuitBroken` bank it resolves to the stashed pre-break state.
+        b.config.operational_state = BankOperationalState::CircuitBroken;
+        b.cb_pre_break_state = BankOperationalState::ReduceOnly as u8;
+        assert_eq!(
+            b.cb_effective_operational_state(),
+            BankOperationalState::ReduceOnly
+        );
+        b.cb_pre_break_state = BankOperationalState::ReduceOnlyWithBorrowingPower as u8;
+        assert_eq!(
+            b.cb_effective_operational_state(),
+            BankOperationalState::ReduceOnlyWithBorrowingPower
+        );
+        b.cb_pre_break_state = BankOperationalState::Operational as u8;
+        assert_eq!(
+            b.cb_effective_operational_state(),
+            BankOperationalState::Operational
+        );
+        b.cb_pre_break_state = BankOperationalState::Paused as u8;
+        assert_eq!(
+            b.cb_effective_operational_state(),
+            BankOperationalState::Paused
+        );
+        b.cb_pre_break_state = BankOperationalState::KilledByBankruptcy as u8;
+        assert_eq!(
+            b.cb_effective_operational_state(),
+            BankOperationalState::KilledByBankruptcy
+        );
+    }
+
+    #[test]
+    fn reset_cb_runtime_state_restores_pre_break_state() {
+        // After a storm forces a bank to `CircuitBroken`, `reset_cb_runtime_state` (used by
+        // `clear_circuit_breaker`) must restore the operational state it held beforehand and
+        // zero every runtime field.
+        let mut b = make_cb_bank();
+        b.config.operational_state = BankOperationalState::ReduceOnly;
+        trip_tier3_storm(&mut b);
+        assert_eq!(
+            b.config.operational_state,
+            BankOperationalState::CircuitBroken
+        );
+
+        b.reset_cb_runtime_state();
+        // Operational state restored to the pre-break value.
+        assert_eq!(b.config.operational_state, BankOperationalState::ReduceOnly);
+        // All runtime fields zeroed.
+        assert_eq!(b.cb_tier, 0);
+        assert_eq!(b.cb_halt_started_at, 0);
+        assert_eq!(b.cb_halt_ended_at, 0);
+        assert_eq!(b.cb_tier3_consecutive_trips, 0);
+        assert_eq!(b.cb_last_observed_slot, 0);
+        assert_eq!(b.cb_last_oracle_source_time, 0);
+    }
+
+    #[test]
+    fn reset_cb_runtime_state_leaves_non_broken_state_unchanged() {
+        // For a bank that never entered `CircuitBroken`, `reset_cb_runtime_state` only clears
+        // runtime fields — the operational state is left as-is.
+        let mut b = make_cb_bank();
+        b.config.operational_state = BankOperationalState::Operational;
+        b.update_circuit_breaker(1_000, 1_000, obs(price(100)))
+            .unwrap();
+        b.update_circuit_breaker(1_001, 1_002, obs(price(110)))
+            .unwrap();
+        assert_eq!(b.cb_tier, 2);
+
+        b.reset_cb_runtime_state();
+        assert_eq!(
+            b.config.operational_state,
+            BankOperationalState::Operational
+        );
+        assert_eq!(b.cb_tier, 0);
+        assert_eq!(b.cb_halt_ended_at, 0);
     }
 }

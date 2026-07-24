@@ -645,7 +645,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
     // Try to use a destination ATA owned by groupAdmin instead of globalProgramAdmin
     const wrongDestinationAta = getAssociatedTokenAddressSync(
       rewardMint,
-      groupAdmin.wallet.publicKey, // Wrong owner - should be globalProgramAdmin
+      groupAdmin.wallet.publicKey // Wrong owner - should be globalProgramAdmin
     );
 
     const tx = new Transaction().add(
@@ -685,7 +685,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
           farmVaultsAuthority,
           scopePrices: null,
         },
-        new BN(0), // reward_index = 0 (first reward)
+        new BN(0) // reward_index = 0 (first reward)
       ),
     );
 
@@ -771,7 +771,7 @@ describe("k13: Kamino Farms Harvest Reward", () => {
           farmVaultsAuthority,
           scopePrices: null,
         },
-        new BN(0), // reward_index = 0 (first reward)
+        new BN(0) // reward_index = 0 (first reward)
       ),
     );
 
@@ -792,7 +792,4 @@ describe("k13: Kamino Farms Harvest Reward", () => {
       "Should have harvested some rewards from the farm",
     );
   });
-
-  // TODO approximate whatever our mechanism will be to distribute these rewards to margin users and
-  // test that the distribution is approximately fair.
 });

@@ -76,7 +76,9 @@ impl AccountsState {
                 false,
                 true,
                 self.bump.alloc(9999999),
-                self.allocate_dex_owned_account(256 + 8),
+                self.allocate_dex_owned_account(
+                    std::mem::size_of::<marginfi_type_crate::types::FeeState>() + 8,
+                ),
                 self.bump.alloc(program_id),
                 false,
             ),

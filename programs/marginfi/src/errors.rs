@@ -430,17 +430,34 @@ pub enum MarginfiError {
     #[msg("Invalid Juplend withdraw intermediary ATA")]
     InvalidJuplendWithdrawIntermediaryAta, // 6512
     // **************END JUPLEND ERRORS
+    #[msg("Account is already at (or above) the target size")]
+    InvalidResize, // 6513
 
-    // ************** BEGIN MARINADE ERRORS (starting at 6600)
+    // ************** BEGIN CIRCUIT BREAKER ERRORS (starting at 6600)
+    #[msg("Bank is halted by oracle circuit breaker")]
+    BankCircuitBreakerHalted = 600, // 6600
+    #[msg("Action requires risk admin while bank is circuit-breaker halted")]
+    CircuitBreakerAdminOnly, // 6601
+    #[msg("Invalid circuit breaker config")]
+    CircuitBreakerInvalidConfig, // 6602
+    #[msg(
+        "Circuit breaker cannot be enabled until the oracle price cache is warm (call pulse first)"
+    )]
+    CircuitBreakerRequiresWarmCache, // 6603
+    #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
+    CircuitBreakerPriceJump, // 6604
+                             // **************END CIRCUIT BREAKER ERRORS
+
+    // ************** BEGIN MARINADE ERRORS (starting at 6700)
     #[msg("Marinade state validation failed")]
-    MarinadeStateValidationFailed = 600, // 6600
+    MarinadeStateValidationFailed = 700, // 6700
     // **************END MARINADE ERRORS
 
-    // ************** BEGIN EXPONENT ERRORS (starting at 6601)
+    // ************** BEGIN EXPONENT ERRORS (starting at 6701)
     #[msg("Exponent vault validation failed")]
-    ExponentVaultValidationFailed = 601, // 6601
+    ExponentVaultValidationFailed = 701, // 6701
     #[msg("PT start price must be in (0, 1]")]
-    InvalidPtStartPrice = 602, // 6602
+    InvalidPtStartPrice = 702, // 6702
                                // **************END EXPONENT ERRORS
 }
 
@@ -680,10 +697,16 @@ impl From<u32> for MarginfiError {
             6510 => MarginfiError::JuplendWithdrawFailed,
             6511 => MarginfiError::JuplendInitPositionDepositInsufficient,
             6512 => MarginfiError::InvalidJuplendWithdrawIntermediaryAta,
+            6513 => MarginfiError::InvalidResize,
+            6600 => MarginfiError::BankCircuitBreakerHalted,
+            6601 => MarginfiError::CircuitBreakerAdminOnly,
+            6602 => MarginfiError::CircuitBreakerInvalidConfig,
+            6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
+            6604 => MarginfiError::CircuitBreakerPriceJump,
 
-            6600 => MarginfiError::MarinadeStateValidationFailed,
-            6601 => MarginfiError::ExponentVaultValidationFailed,
-            6602 => MarginfiError::InvalidPtStartPrice,
+            6700 => MarginfiError::MarinadeStateValidationFailed,
+            6701 => MarginfiError::ExponentVaultValidationFailed,
+            6702 => MarginfiError::InvalidPtStartPrice,
 
             _ => MarginfiError::InternalLogicError,
         }

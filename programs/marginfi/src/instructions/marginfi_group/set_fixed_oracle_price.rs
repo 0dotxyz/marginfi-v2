@@ -8,7 +8,7 @@ use marginfi_type_crate::constants::{
     ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_STAKED,
 };
 use marginfi_type_crate::{
-    constants::FREEZE_SETTINGS,
+    constants::{BANK_SAME_ASSET_EMODE_ELIGIBLE, FREEZE_SETTINGS},
     types::{Bank, MarginfiGroup, OracleSetup, WrappedI80F48},
 };
 
@@ -21,6 +21,12 @@ pub fn lending_pool_set_fixed_oracle_price(
     if bank.get_flag(FREEZE_SETTINGS) {
         panic!("cannot change oracle settings on frozen banks");
     }
+
+    check!(
+        !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE),
+        MarginfiError::BadEmodeConfig,
+        "disable same-asset e-mode eligibility before setting a fixed price"
+    );
 
     // PT-SOL banks: set the linear-pricing start price and (re)validate + store the Exponent vault.
     // The bank must already be configured to PTSOL via configure_bank_oracle (Pyth SOL/USD feed in

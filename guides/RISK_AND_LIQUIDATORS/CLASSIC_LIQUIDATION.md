@@ -6,9 +6,11 @@ Try Receivership Liquidation instead: the process is simpler, and the potential 
 
 Classic liquidation uses the `lending_account_liquidate` instruction. To execute this kind of liquidation, the liquidator must have their own lending Account. The target, also called the "liquidatee", must be unhealthy. The liquidator will assume part of one of the liquidatee's assets, and in exchange, will also take on some of the liquidatee's debt in one of their liabilities.
 
-If a liquidator reclaims \$A asset, they only have to assume (1-0.025)\*A in B liabilities. The liquidator keeps this 2.5% premium.
+If a liquidator reclaims \$A asset, they only have to assume (1-`liquidator_fee`)\*A in B liabilities. The liquidator keeps this premium.
 
-The liquidatee only receives a repayment on their B debt of (1-0.025-0.025)\*A, the additional 2.5% goes to insurance funds.
+The liquidatee only receives a repayment on their B debt of (1-`liquidator_fee`-`insurance_fee`)\*A, the additional `insurance_fee` goes to insurance funds.
+
+Both `liquidator_fee` and `insurance_fee` are read from the **B (liability) bank**'s config (`liquidation_liquidator_fee_bps` / `liquidation_insurance_fee_bps`), each defaulting to 2.5% when left at `0`. So at the defaults a liquidator keeps a 2.5% premium and another 2.5% goes to insurance, but a bank can be configured to charge more or less per side (capped at 50% each).
 
 ### Common FAQs
 

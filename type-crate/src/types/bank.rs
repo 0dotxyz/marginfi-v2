@@ -112,6 +112,8 @@ pub struct Bank {
     /// - Bit 9 (512): `STAKED_ORACLE_DISABLED` — staked oracle pricing is temporarily disabled.
     /// - Bit 10 (1024): `STAKED_ORACLE_PRICE_USES_ONRAMP` — staked oracle pricing includes the SPL
     ///   single-pool on-ramp account in NAV.
+    /// - Bit 11 (2048): `CIRCUIT_BREAKER_ENABLED` — oracle deviation breaker active on this bank
+    /// - Bit 12 (4096): `BANK_SAME_ASSET_EMODE_ELIGIBLE` — bank may participate in same-asset e-mode.
     pub flags: u64,
     /// Emissions APR. Number of emitted tokens (emissions_mint) per 1e(bank.mint_decimal) tokens
     /// (bank mint) (native amount) per 1 YEAR.
@@ -148,8 +150,17 @@ pub struct Bank {
     ///   the bank may safely be closed if this is zero. Will never go negative.
     pub borrowing_position_count: i32,
 
+    /// Fee the liquidator earns when liquidating against this bank's liability. Decode with
+    /// `u32_to_centi` (`u32::MAX` = 100%).
+    /// * 0 falls back to the default (`DEFAULT_LIQUIDATION_FEE` = 2.5%).
+    pub liquidation_liquidator_fee: u32,
+    /// Fee routed to this bank's insurance fund on a liquidation against its liability. Decode
+    /// with `u32_to_centi` (`u32::MAX` = 100%).
+    /// * 0 falls back to the default (`DEFAULT_LIQUIDATION_FEE` = 2.5%).
+    pub liquidation_insurance_fee: u32,
+
     /// Reserved for future use
-    pub _padding_0: [u8; 16],
+    pub _padding_0: [u8; 8],
 
     /// Integration account slot 1 (default Pubkey for non-integrations).
     /// - Kamino: reserve
@@ -180,7 +191,36 @@ pub struct Bank {
     /// * Otherwise the `bank_seed: u64` argument passed when creating the bank.
     /// * Use `flags & BANK_SEED_KNOWN` to verify this value has known seed provenance.
     pub bank_seed: u64,
-    pub _padding_1: [u64; 13], // 8 * 13 = 104B;
+    /// Unix-seconds when the current halt started, zero if not halted.
+    pub cb_halt_started_at: i64,
+    /// Unix-seconds when the current halt's tier duration ends. Tier stays sticky past this for
+    /// the escalation window; a fresh breach within the window ratchets to the next tier.
+    pub cb_halt_ended_at: i64,
+    /// 0 = operational, 1..=3 = escalating halt severity.
+    pub cb_tier: u8,
+    /// Consecutive tier-3 trips with no clean escalation-window between them. Hitting
+    /// `CB_MAX_TIER3_BEFORE_CIRCUIT_BREAK` forces the bank to `CircuitBroken`.
+    pub cb_tier3_consecutive_trips: u8,
+    /// `BankOperationalState` (as `u8`) the bank held before the breaker forced it to
+    /// `CircuitBroken`. Restored by `clear_circuit_breaker`. Meaningless unless
+    /// `operational_state == CircuitBroken`.
+    pub cb_pre_break_state: u8,
+    pub _cb_pad: [u8; 5],
+    /// Solana slot of the last counted CB observation; used for slot-level dedup.
+    pub cb_last_observed_slot: u64,
+    /// Publisher-side timestamp of the last counted CB observation; rejects re-reads of the same
+    /// publication across multiple Solana slots. Zero when the adapter doesn't expose one.
+    pub cb_last_oracle_source_time: i64,
+    /// EMA reference price used by the circuit breaker. Frozen while halted, zero until the
+    /// first observation after enable.
+    pub cb_reference_price: WrappedI80F48,
+    /// Long-window reference price used to catch slow oracle walking that stays below the
+    /// per-observation breaker threshold.
+    pub cb_window_reference_price: WrappedI80F48,
+    /// Unix-seconds when `cb_window_reference_price` was anchored.
+    pub cb_window_started_at: i64,
+
+    pub _padding_1: [u64; 3], // 24B
 }
 
 impl Bank {
@@ -262,6 +302,12 @@ pub enum BankOperationalState {
     Uninitialized,
     /// Same instruction restrictions as ReduceOnly, but assets still count for initial health.
     ReduceOnlyWithBorrowingPower,
+    /// Non-expiring circuit-breaker end state, reached after repeated breaker escalation.
+    /// Blocks borrows and risk-carrying withdraws and restricts liquidation to the risk admin;
+    /// deposit/repay/riskless-withdraw follow the pre-break state stashed in
+    /// `Bank.cb_pre_break_state`. Set only by the breaker, never by an admin. Cleared only by
+    /// `clear_circuit_breaker`, which restores the pre-break state.
+    CircuitBroken,
 }
 unsafe impl Zeroable for BankOperationalState {}
 unsafe impl Pod for BankOperationalState {}
@@ -338,5 +384,12 @@ impl OracleSetup {
             24 => Some(Self::PTSOL),
             _ => None,
         }
+    }
+
+    pub fn is_fixed_price(self) -> bool {
+        matches!(
+            self,
+            Self::Fixed | Self::FixedKamino | Self::FixedDrift | Self::FixedJuplend
+        )
     }
 }

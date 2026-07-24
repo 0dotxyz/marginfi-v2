@@ -8,7 +8,8 @@ use crate::{
         bank::{BankImpl, BankVaultType},
         marginfi_account::{
             account_not_frozen_for_authority, calc_value, check_account_init_health,
-            is_signer_authorized, BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
+            is_signer_authorized, run_cb_price_gate, BankAccountWrapper, LendingAccountImpl,
+            MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
         price::OraclePriceWithMultiplier,
@@ -72,7 +73,14 @@ pub fn lending_account_withdraw<'info>(
         let in_receivership_or_order_execution =
             marginfi_account.get_flag(ACCOUNT_IN_RECEIVERSHIP | ACCOUNT_IN_ORDER_EXECUTION);
         let mut bank = bank_loader.load_mut()?;
-        validate_bank_state(&bank, InstructionKind::FailsInPausedState)?;
+        // A withdraw from an account with no liabilities is risk-free, so it stays allowed
+        // while the bank is circuit-breaker halted or `CircuitBroken`.
+        let withdraw_is_halt_safe = !marginfi_account.lending_account.has_liabilities();
+        validate_bank_state(
+            &bank,
+            InstructionKind::FailsInPausedState,
+            withdraw_is_halt_safe,
+        )?;
 
         // Fetch oracle price for rate limiting and deleverage tracking
         // When group rate limiter is enabled, oracle is required
@@ -221,8 +229,10 @@ pub fn lending_account_withdraw<'info>(
         // Check account health, if below threshold fail transaction
         // Assuming `ctx.remaining_accounts` holds only oracle accounts
         // Uses heap-efficient health check to support accounts with up to 16 positions
+        let group = marginfi_group_loader.load()?;
         check_account_init_health(
             &marginfi_account,
+            &group,
             ctx.remaining_accounts,
             &mut Some(&mut health_cache),
         )?;
@@ -230,6 +240,13 @@ pub fn lending_account_withdraw<'info>(
 
         health_cache.set_engine_ok(true);
         marginfi_account.health_cache = health_cache;
+
+        // Inline CB gate: a risk-carrying withdraw (account carries a liability) reverts if
+        // any involved bank's live price has jumped past the breach threshold. A
+        // liability-free withdraw is risk-free and skips the gate.
+        if marginfi_account.lending_account.has_liabilities() {
+            run_cb_price_gate(&marginfi_account, ctx.remaining_accounts)?;
+        }
     }
 
     // Fetch unbiased price for cache update

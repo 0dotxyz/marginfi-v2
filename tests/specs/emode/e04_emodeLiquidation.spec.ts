@@ -15,6 +15,7 @@ import {
   EMODE_SEED,
   emodeAdmin,
   emodeGroup,
+  groupAdmin,
   oracles,
   users,
   verbose,
@@ -40,7 +41,7 @@ import {
   repayIx,
   composeRemainingAccounts,
 } from "../../utils/user-instructions";
-import { configBankEmode } from "../../utils/group-instructions";
+import { configBankEmode, groupConfigure } from "../../utils/group-instructions";
 import { bytesToF64, getBankrunBlockhash, logHealthCache } from "../../utils/tools";
 import { assert } from "chai";
 import { dummyIx } from "../../utils/bankrunConnection";
@@ -93,6 +94,19 @@ describe("Emode liquidation", () => {
       ecosystem.usdcMint.publicKey,
       seed.addn(1)
     );
+
+    // These suites cover classic eMode math; disable same-asset leverage explicitly so the
+    // tests are not affected
+    const tx = new Transaction().add(
+      await groupConfigure(groupAdmin.mrgnBankrunProgram, {
+        marginfiGroup: emodeGroup.publicKey,
+        sameAssetEmodeInitLeverage: bigNumberToWrappedI80F48(1),
+        sameAssetEmodeMaintLeverage: bigNumberToWrappedI80F48(1),
+      })
+    );
+    tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
+    tx.sign(groupAdmin.wallet);
+    await banksClient.processTransaction(tx);
   });
 
   it("(user 2 aka liquidator) Deposits SOL and USDC to operate as a liquidator", async () => {
@@ -254,7 +268,13 @@ describe("Emode liquidation", () => {
   // instead of $150, the "actual" price of the collateral for liquidation purposes is $146.82
   // (150 * (1 - 1 * 0.0212))
 
-  // TODO look into above, is this a footgun with assets that have broad confidence bands?
+  // This confidence-interval discount is bounded, so a broad-band oracle can't run the collateral
+  // price away toward zero. `get_confidence_interval` (price.rs, both the Pyth and Switchboard
+  // adapters) caps the discount at MAX_CONF_INTERVAL = 5% of price via `min(conf, price * 0.05)`,
+  // and if the raw confidence exceeds the bank's `oracle_max_confidence` (default 10%) the read
+  // fails safe with OracleMaxConfidenceExceeded instead of returning a wildly discounted price. So
+  // a broad-band asset degrades gracefully: at most a 5% maint discount, and beyond the configured
+  // max it becomes temporarily unpriceable (txns revert) — the safe failure mode, tunable per bank.
 
   // * SOL is worth $146.82 (see above for confidence discount)
   // * Liquidator will claim .1 sol worth ~= $14.682 (this is really $15 with conf discount)

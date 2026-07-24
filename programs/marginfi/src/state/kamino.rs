@@ -9,7 +9,6 @@ use marginfi_type_crate::types::{
 
 /// Used to configure Kamino banks. A simplified version of `BankConfigCompact` which omits most
 /// values related to interest since Kamino banks cannot earn interest or be borrowed against.
-// TODO: Jon mentioned there are some extra options he wants to see in config, investigate later.
 #[derive(AnchorDeserialize, AnchorSerialize, Debug, PartialEq, Eq)]
 pub struct KaminoConfigCompact {
     pub oracle: Pubkey,
@@ -101,18 +100,25 @@ impl KaminoConfigCompact {
             operational_state: self.operational_state,
             oracle_setup: self.oracle_setup,
             oracle_keys: keys,
-            _pad0: [0; 6],
+            cb_window_max_up_bps: 0,
+            cb_window_max_down_bps: 0,
+            _pad0: [0; 2],
             borrow_limit: 0, // Can't ever borrow kamino assets
             risk_tier: self.risk_tier,
             asset_tag: ASSET_TAG_KAMINO,
             config_flags: self.config_flags,
-            _pad1: [0; 5],
+            _pad1: [0; 1],
+            cb_window_seconds: 0,
             total_asset_value_init_limit: self.total_asset_value_init_limit,
             oracle_max_age: self.oracle_max_age,
             _padding0: [0; 2],
             oracle_max_confidence: self.oracle_max_confidence,
             fixed_price: I80F48::ZERO.into(),
-            _padding1: [0; 16],
+            cb_deviation_bps_tiers: [0; 3],
+            cb_tier_durations_seconds: [0; 3],
+            cb_escalation_window_mult: 0,
+            _cb_config_pad: 0,
+            cb_ema_alpha_bps: 0,
         }
     }
 }

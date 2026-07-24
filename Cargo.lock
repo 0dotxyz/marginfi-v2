@@ -3743,7 +3743,7 @@ dependencies = [
 
 [[package]]
 name = "marginfi"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
@@ -3798,7 +3798,7 @@ dependencies = [
 
 [[package]]
 name = "marginfi-type-crate"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anchor-lang",
  "borsh",
@@ -3940,6 +3940,8 @@ dependencies = [
  "anchor-spl",
  "bytemuck",
  "marginfi",
+ "marginfi-type-crate",
+ "solana-program",
  "static_assertions",
 ]
 
