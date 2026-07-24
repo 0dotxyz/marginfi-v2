@@ -570,6 +570,9 @@ pub fn marginfi_account_liquidate(
             bank_liquidity_vault: liability_bank.liquidity_vault,
             bank_insurance_vault: liability_bank.insurance_vault,
             token_program,
+            liquidatee_liquidation_record: (liquidatee_marginfi_account.liquidation_record
+                != Pubkey::default())
+            .then_some(liquidatee_marginfi_account.liquidation_record),
         }
         .to_account_metas(Some(true)),
         data: marginfi::instruction::LendingAccountLiquidate {

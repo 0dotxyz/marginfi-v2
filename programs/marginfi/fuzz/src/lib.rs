@@ -832,6 +832,8 @@ impl<'state> MarginfiFuzzContext<'state> {
                     ))?),
                     bank_insurance_vault: uails(&liab_bank.insurance_vault),
                     token_program: Interface::try_from(airls(&liab_bank.token_program))?,
+                    // Fuzz fixtures do not initialize liquidation records.
+                    liquidatee_liquidation_record: None,
                 },
                 aisls(&remaining_accounts),
                 Default::default(),

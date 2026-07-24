@@ -28,8 +28,8 @@ use marginfi_type_crate::{
         LIQUIDITY_VAULT_SEED,
     },
     types::{
-        u32_to_centi, Bank, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType,
-        PriceBias, ACCOUNT_IN_RECEIVERSHIP,
+        u32_to_centi, Bank, HealthPriceMode, LiquidationRecord, MarginfiAccount, MarginfiGroup,
+        OraclePriceType, PriceBias, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -250,7 +250,7 @@ pub fn lending_account_liquidate<'info>(
 
     // ##Accounting changes##
 
-    let (pre_balances, post_balances) = {
+    let (pre_balances, post_balances, repaid_value) = {
         let asset_amount: I80F48 = I80F48::from_num(asset_amount);
 
         let mut asset_bank = ctx.accounts.asset_bank.load_mut()?;
@@ -306,6 +306,15 @@ pub fn lending_account_liquidate<'info>(
             )?,
             liab_price,
             liab_bank.get_balance_decimals(),
+        )?;
+
+        // Dollar value of the debt actually repaid, used to decide whether the liquidation
+        // resets the record's premium-growth tag
+        let repaid_value: I80F48 = calc_value(
+            liab_amount_final,
+            liab_price,
+            liab_bank.get_balance_decimals(),
+            None,
         )?;
 
         // Insurance fund fee
@@ -499,8 +508,29 @@ pub fn lending_account_liquidate<'info>(
                 liquidator_liability_bank_asset_balance: liquidator_liab_bank_asset_post_balance
                     .to_num::<f64>(),
             },
+            repaid_value,
         )
     };
+
+    // The liquidatee's liquidation record must be supplied whenever one is registered; the
+    // completed liquidation resets its premium-growth tag once it repays debt.
+    match ctx.accounts.liquidatee_liquidation_record.as_ref() {
+        Some(record_loader) => {
+            check!(
+                record_loader.key() == liquidatee_marginfi_account.liquidation_record,
+                MarginfiError::InvalidLiquidationRecord
+            );
+            if repaid_value > I80F48::ZERO {
+                record_loader.load_mut()?.tagged_at = 0;
+            }
+        }
+        None => {
+            check!(
+                liquidatee_marginfi_account.liquidation_record == Pubkey::default(),
+                MarginfiError::InvalidLiquidationRecord
+            );
+        }
+    }
 
     // ## Risk checks ##
     let liquidator_remaining_acc_len = liquidator_accounts as usize;
@@ -644,4 +674,10 @@ pub struct LendingAccountLiquidate<'info> {
     pub bank_insurance_vault: UncheckedAccount<'info>,
 
     pub token_program: Interface<'info, TokenInterface>,
+
+    /// The liquidatee's liquidation record. Required whenever the liquidatee has one registered
+    /// (`liquidatee_marginfi_account.liquidation_record` is set); the completed liquidation may
+    /// reset its premium-growth tag.
+    #[account(mut)]
+    pub liquidatee_liquidation_record: Option<AccountLoader<'info, LiquidationRecord>>,
 }

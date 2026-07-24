@@ -41,9 +41,14 @@ pub struct LiquidationRecord {
     pub entries: [LiquidationEntry; 4],
     pub cache: LiquidationCache,
 
+    /// Unix timestamp when the account was tagged as unhealthy, growing the allowed liquidation
+    /// premium over time. Reset to 0 when a liquidation/deleverage completes or the tag is
+    /// cleared after the account regains health.
+    /// * 0 if not tagged
+    pub tagged_at: i64,
+
     _reserved0: [u8; 64],
     _reserved2: [u8; 16],
-    _reserved3: [u8; 8],
 }
 
 /// Used to record key details of the last few liquidation events on the account
@@ -117,9 +122,9 @@ impl Default for LiquidationRecord {
             liquidation_receiver: Pubkey::default(),
             entries: [LiquidationEntry::default(); 4],
             cache: LiquidationCache::default(),
+            tagged_at: 0,
             _reserved0: [0u8; 64],
             _reserved2: [0u8; 16],
-            _reserved3: [0u8; 8],
         }
     }
 }
