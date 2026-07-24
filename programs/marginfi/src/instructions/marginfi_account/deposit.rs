@@ -5,8 +5,8 @@ use crate::{
     state::{
         bank::BankImpl,
         marginfi_account::{
-            account_not_frozen_for_authority, is_signer_authorized, BankAccountWrapper,
-            LendingAccountImpl, MarginfiAccountImpl,
+            account_not_frozen_for_authority, deposit_is_halt_safe, is_signer_authorized,
+            BankAccountWrapper, LendingAccountImpl, MarginfiAccountImpl,
         },
         marginfi_group::MarginfiGroupImpl,
     },
@@ -57,7 +57,11 @@ pub fn lending_account_deposit<'info>(
     let mut marginfi_account = marginfi_account_loader.load_mut()?;
     let group = marginfi_group_loader.load()?;
     validate_asset_tags(&bank, &marginfi_account)?;
-    validate_bank_state(&bank, InstructionKind::FailsIfPausedOrReduceState, true)?;
+    validate_bank_state(
+        &bank,
+        InstructionKind::FailsIfPausedOrReduceState,
+        deposit_is_halt_safe(&marginfi_account, &bank_loader.key()),
+    )?;
 
     check!(
         !marginfi_account.get_flag(ACCOUNT_DISABLED)

@@ -5,7 +5,7 @@ use crate::state::{
         account_not_frozen_for_authority, any_balance_bank_is_cb_halted, calc_amount, calc_value,
         check_account_init_health, check_post_liquidation_condition_and_get_account_health,
         check_pre_liquidation_condition_and_get_account_health, get_remaining_accounts_per_bank,
-        is_signer_authorized, LendingAccountImpl, MarginfiAccountImpl,
+        is_signer_authorized, run_cb_price_gate, LendingAccountImpl, MarginfiAccountImpl,
     },
     {
         marginfi_group::MarginfiGroupImpl,
@@ -162,12 +162,11 @@ pub fn lending_account_liquidate<'info>(
 
     liquidatee_marginfi_account.lending_account.sort_balances();
 
+    let cb_admin_liquidation =
+        any_balance_bank_is_cb_halted(&liquidatee_marginfi_account, liquidatee_remaining_accounts)?;
+
     {
         let group = marginfi_group_loader.load()?;
-        let cb_admin_liquidation = any_balance_bank_is_cb_halted(
-            &liquidatee_marginfi_account,
-            liquidatee_remaining_accounts,
-        )?;
 
         // During a CB halt direct liquidation is admin-only; otherwise the standard liquidator
         // ownership check applies.
@@ -178,6 +177,10 @@ pub fn lending_account_liquidate<'info>(
                 MarginfiError::CircuitBreakerAdminOnly
             );
         } else {
+            // Inline CB gate: the liquidation math below consumes live oracle prices and
+            // `update_cache_price` trips the breaker without reverting, so a breach must
+            // revert here first. Admins liquidate through a breach via the branch above.
+            run_cb_price_gate(&liquidatee_marginfi_account, liquidatee_remaining_accounts)?;
             require!(
                 is_signer_authorized(
                     &liquidator_marginfi_account,
@@ -537,6 +540,12 @@ pub fn lending_account_liquidate<'info>(
         liquidator_remaining_accounts,
         &mut None,
     )?;
+
+    // The liquidator takes on the liability at live prices, so their account is subject to the
+    // same gate as a borrow.
+    if !cb_admin_liquidation {
+        run_cb_price_gate(&liquidator_marginfi_account, liquidator_remaining_accounts)?;
+    }
 
     emit!(LendingAccountLiquidateEvent {
         header: AccountEventHeader {

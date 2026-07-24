@@ -90,7 +90,8 @@ const decimalToI80Scaled = (value: number): bigint => {
   const scaled = new BigNumber(value.toString())
     .times(new BigNumber(2).pow(Number(I80F48_FRACTIONAL_BITS)))
     .integerValue(BigNumber.ROUND_HALF_UP);
-  return BigInt(scaled.toString());
+  // `toFixed` never uses exponential notation, which `BigInt()` cannot parse.
+  return BigInt(scaled.toFixed(0));
 };
 
 export const toI80Scaled = (value: I80F48Like): bigint => {
