@@ -3,7 +3,10 @@ use crate::{
     constants::{LOCALNET_ID, MAINNET_PROGRAM_ID, STAGING_ID},
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
-    state::{bank::BankImpl, marginfi_group::MarginfiGroupImpl},
+    state::{
+        bank::BankImpl,
+        marginfi_group::{assert_bank_admin_authorized, MarginfiGroupImpl},
+    },
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -29,6 +32,10 @@ pub fn lending_pool_clone_bank(
     if crate::ID == MAINNET_PROGRAM_ID || *ctx.program_id == MAINNET_PROGRAM_ID {
         panic!("clone bank cannot run on mainnet deployment");
     }
+
+    let marginfi_group = ctx.accounts.marginfi_group.load()?;
+    assert_bank_admin_authorized(&marginfi_group, ctx.accounts.bank_admin.key)?;
+    drop(marginfi_group);
 
     // Note: We don't bother to pay the flat init fee, this ix only runs on staging.
 
@@ -135,7 +142,7 @@ pub fn lending_pool_clone_bank(
     emit!(LendingPoolBankCreateEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.marginfi_group.key(),
-            signer: Some(*ctx.accounts.admin.key)
+            signer: Some(*ctx.accounts.bank_admin.key)
         },
         bank: ctx.accounts.bank.key(),
         mint: ctx.accounts.bank_mint.key(),
@@ -147,14 +154,11 @@ pub fn lending_pool_clone_bank(
 #[derive(Accounts)]
 #[instruction(bank_seed: u64)]
 pub struct LendingPoolCloneBank<'info> {
-    #[account(
-        mut,
-        has_one = admin @ MarginfiError::Unauthorized
-    )]
+    #[account(mut)]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
     #[account(mut)]
-    pub admin: Signer<'info>,
+    pub bank_admin: Signer<'info>,
 
     #[account(mut)]
     pub fee_payer: Signer<'info>,

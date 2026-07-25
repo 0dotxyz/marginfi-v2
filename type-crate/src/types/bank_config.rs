@@ -223,6 +223,72 @@ pub struct BankConfigOpt {
     pub cb_window_max_down_bps: Option<u16>,
 }
 
+impl BankConfigOpt {
+    pub fn has_governance_fields(&self) -> bool {
+        self.classify().0
+    }
+
+    pub fn has_admin_only_fields_excluding_operational_state(&self) -> bool {
+        self.classify().1
+    }
+
+    fn classify(&self) -> (bool /* governance */, bool /* admin_only */) {
+        let BankConfigOpt {
+            asset_weight_init,
+            asset_weight_maint,
+            liability_weight_init,
+            liability_weight_maint,
+            risk_tier,
+            asset_tag,
+            oracle_max_confidence,
+            oracle_max_age,
+            deposit_limit,
+            borrow_limit,
+            total_asset_value_init_limit,
+            interest_rate_config,
+            permissionless_bad_debt_settlement,
+            freeze_settings,
+            tokenless_repayments_allowed,
+            circuit_breaker_enabled,
+            cb_deviation_bps_tiers,
+            cb_tier_durations_seconds,
+            cb_escalation_window_mult,
+            cb_ema_alpha_bps,
+            cb_window_seconds,
+            cb_window_max_up_bps,
+            cb_window_max_down_bps,
+            operational_state: _,
+        } = self;
+
+        let governance = asset_weight_init.is_some()
+            || asset_weight_maint.is_some()
+            || liability_weight_init.is_some()
+            || liability_weight_maint.is_some()
+            || risk_tier.is_some()
+            || asset_tag.is_some()
+            || oracle_max_confidence.is_some()
+            || oracle_max_age.is_some();
+
+        let admin_only = deposit_limit.is_some()
+            || borrow_limit.is_some()
+            || total_asset_value_init_limit.is_some()
+            || interest_rate_config.is_some()
+            || permissionless_bad_debt_settlement.is_some()
+            || freeze_settings.is_some()
+            || tokenless_repayments_allowed.is_some()
+            || circuit_breaker_enabled.is_some()
+            || cb_deviation_bps_tiers.is_some()
+            || cb_tier_durations_seconds.is_some()
+            || cb_escalation_window_mult.is_some()
+            || cb_ema_alpha_bps.is_some()
+            || cb_window_seconds.is_some()
+            || cb_window_max_up_bps.is_some()
+            || cb_window_max_down_bps.is_some();
+
+        (governance, admin_only)
+    }
+}
+
 #[repr(C)]
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Debug, PartialEq, Eq)]

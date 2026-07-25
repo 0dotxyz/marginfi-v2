@@ -11,9 +11,15 @@ use marginfi_type_crate::{
 
 pub fn lending_pool_close_bank(ctx: Context<LendingPoolCloseBank>) -> MarginfiResult {
     let mut group = ctx.accounts.group.load_mut()?;
-    // Note: Groups created prior to 0.1.2 have a non-authoritative count here, so subtraction
-    // without saturation could reduce the count below zero.
+
+    require_eq!(
+        group.admin,
+        *ctx.accounts.admin.key,
+        MarginfiError::Unauthorized
+    );
+
     group.banks = group.banks.saturating_sub(1);
+    drop(group);
 
     let bank = ctx.accounts.bank.load()?;
 
@@ -42,17 +48,12 @@ pub fn lending_pool_close_bank(ctx: Context<LendingPoolCloseBank>) -> MarginfiRe
 
     drop(bank);
 
-    // Bank will now be closed by anchor
-
     Ok(())
 }
 
 #[derive(Accounts)]
 pub struct LendingPoolCloseBank<'info> {
-    #[account(
-        mut,
-        has_one = admin @ MarginfiError::Unauthorized,
-    )]
+    #[account(mut)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
     #[account(

@@ -69,6 +69,13 @@ pub mod marginfi {
         )
     }
 
+    pub fn marginfi_group_set_bank_admin(
+        ctx: Context<SetBankAdmin>,
+        new_bank_admin: Pubkey,
+    ) -> MarginfiResult {
+        marginfi_group::set_bank_admin(ctx, new_bank_admin)
+    }
+
     /// (admin only) Add a new bank to the lending pool
     pub fn lending_pool_add_bank(
         ctx: Context<LendingPoolAddBank>,

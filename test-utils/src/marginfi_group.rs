@@ -244,7 +244,7 @@ impl MarginfiGroupFixture {
 
         let accounts = marginfi::accounts::LendingPoolAddBank {
             marginfi_group: self.key,
-            admin: self.ctx.borrow().payer.pubkey(),
+            bank_admin: self.ctx.borrow().payer.pubkey(),
             fee_payer: self.ctx.borrow().payer.pubkey(),
             fee_state: self.fee_state,
             global_fee_wallet: self.fee_wallet,
@@ -351,7 +351,7 @@ impl MarginfiGroupFixture {
 
         let accounts = marginfi::accounts::LendingPoolAddBankWithSeed {
             marginfi_group: self.key,
-            admin: self.ctx.borrow().payer.pubkey(),
+            bank_admin: self.ctx.borrow().payer.pubkey(),
             fee_payer: self.ctx.borrow().payer.pubkey(),
             fee_state: self.fee_state,
             global_fee_wallet: self.fee_wallet,
@@ -420,7 +420,7 @@ impl MarginfiGroupFixture {
         let accounts = marginfi::accounts::LendingPoolConfigureBank {
             bank: bank.key,
             group: self.key,
-            admin: self.ctx.borrow().payer.pubkey(),
+            signer: self.ctx.borrow().payer.pubkey(),
         }
         .to_account_metas(Some(true));
 
@@ -441,7 +441,7 @@ impl MarginfiGroupFixture {
         let mut accounts = marginfi::accounts::LendingPoolConfigureBankOracle {
             bank: bank.key,
             group: self.key,
-            admin: self.ctx.borrow().payer.pubkey(),
+            bank_admin: self.ctx.borrow().payer.pubkey(),
         }
         .to_account_metas(Some(true));
 
@@ -464,7 +464,7 @@ impl MarginfiGroupFixture {
     ) -> Instruction {
         let accounts = marginfi::accounts::LendingPoolSetFixedOraclePrice {
             group: self.key,
-            admin: self.ctx.borrow().payer.pubkey(),
+            bank_admin: self.ctx.borrow().payer.pubkey(),
             bank: bank.key,
         }
         .to_account_metas(Some(true));
@@ -1712,6 +1712,244 @@ impl MarginfiGroupFixture {
             latest_blockhash(&self.ctx).await,
         );
 
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub async fn try_set_bank_admin(&self, new_bank_admin: &Keypair) -> Result<()> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::SetBankAdmin {
+                marginfi_group: self.key,
+                bank_admin: self.ctx.borrow().payer.pubkey(),
+            }
+            .to_account_metas(Some(true)),
+            data: MarginfiGroupSetBankAdmin {
+                new_bank_admin: new_bank_admin.pubkey(),
+            }
+            .data(),
+        };
+
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer_pubkey),
+            &[&ctx.payer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn try_set_bank_admin_with_signer(
+        &self,
+        signer: &Keypair,
+        new_bank_admin: Pubkey,
+    ) -> Result<()> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::SetBankAdmin {
+                marginfi_group: self.key,
+                bank_admin: signer.pubkey(),
+            }
+            .to_account_metas(Some(true)),
+            data: MarginfiGroupSetBankAdmin { new_bank_admin }.data(),
+        };
+
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer_pubkey),
+            &[&ctx.payer, signer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn try_lending_pool_add_bank_with_signer(
+        &self,
+        signer: &Keypair,
+        mint: &MintFixture,
+        bank_config: BankConfigCompact,
+    ) -> Result<BankFixture> {
+        let bank_key = Keypair::new();
+
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+
+        // Create BankFixture to properly derive vault accounts
+        let bank_fixture = BankFixture::new(self.ctx.clone(), bank_key.pubkey(), mint, None);
+
+        let accounts = marginfi::accounts::LendingPoolAddBank {
+            marginfi_group: self.key,
+            bank_admin: signer.pubkey(),
+            fee_payer: payer_pubkey,
+            fee_state: self.fee_state,
+            global_fee_wallet: self.fee_wallet,
+            bank_mint: mint.key,
+            bank: bank_key.pubkey(),
+            liquidity_vault_authority: bank_fixture.get_vault_authority(BankVaultType::Liquidity).0,
+            liquidity_vault: bank_fixture.get_vault(BankVaultType::Liquidity).0,
+            insurance_vault_authority: bank_fixture.get_vault_authority(BankVaultType::Insurance).0,
+            insurance_vault: bank_fixture.get_vault(BankVaultType::Insurance).0,
+            fee_vault_authority: bank_fixture.get_vault_authority(BankVaultType::Fee).0,
+            fee_vault: bank_fixture.get_vault(BankVaultType::Fee).0,
+            token_program: mint.token_program,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(Some(true));
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: marginfi::instruction::LendingPoolAddBank { bank_config }.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer_pubkey),
+            &[&ctx.payer, signer, &bank_key],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await?;
+
+        Ok(bank_fixture)
+    }
+
+    pub async fn try_lending_pool_configure_bank_oracle_with_signer(
+        &self,
+        signer: &Keypair,
+        bank: &BankFixture,
+        setup: u8,
+        oracle: Pubkey,
+    ) -> Result<(), BanksClientError> {
+        let accounts = marginfi::accounts::LendingPoolConfigureBankOracle {
+            group: self.key,
+            bank_admin: signer.pubkey(),
+            bank: bank.key,
+        }
+        .to_account_metas(Some(true));
+
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: marginfi::instruction::LendingPoolConfigureBankOracle { setup, oracle }.data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer_pubkey),
+            &[&ctx.payer, signer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub async fn try_lending_pool_set_fixed_oracle_price_with_signer(
+        &self,
+        signer: &Keypair,
+        bank: &BankFixture,
+        price: marginfi_type_crate::types::WrappedI80F48,
+    ) -> Result<(), BanksClientError> {
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts: marginfi::accounts::LendingPoolSetFixedOraclePrice {
+                group: self.key,
+                bank_admin: signer.pubkey(),
+                bank: bank.key,
+            }
+            .to_account_metas(Some(true)),
+            data: marginfi::instruction::LendingPoolSetFixedOraclePrice { price }.data(),
+        };
+
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer_pubkey),
+            &[&ctx.payer, signer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+
+        drop(ctx);
+        self.ctx
+            .borrow_mut()
+            .banks_client
+            .process_transaction(tx)
+            .await
+    }
+
+    pub async fn try_lending_pool_configure_bank_with_signer(
+        &self,
+        signer: &Keypair,
+        bank: &BankFixture,
+        bank_config: marginfi_type_crate::types::BankConfigOpt,
+    ) -> Result<(), BanksClientError> {
+        let accounts = marginfi::accounts::LendingPoolConfigureBank {
+            group: self.key,
+            signer: signer.pubkey(),
+            bank: bank.key,
+        }
+        .to_account_metas(Some(true));
+
+        let ctx = self.ctx.borrow();
+        let payer_pubkey = ctx.payer.pubkey();
+
+        let ix = Instruction {
+            program_id: marginfi::ID,
+            accounts,
+            data: marginfi::instruction::LendingPoolConfigureBank {
+                bank_config_opt: bank_config,
+            }
+            .data(),
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer_pubkey),
+            &[&ctx.payer, signer],
+            ctx.banks_client.get_latest_blockhash().await?,
+        );
+
+        drop(ctx);
         self.ctx
             .borrow_mut()
             .banks_client

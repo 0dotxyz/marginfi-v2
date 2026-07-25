@@ -1,5 +1,6 @@
 mod account_transfer;
 mod actions_during_pause;
+mod bank_admin_authorization;
 mod bankruptcy;
 mod bankruptcy_auth;
 mod circuit_breaker;

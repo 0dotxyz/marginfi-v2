@@ -92,7 +92,8 @@ pub struct MarginfiGroup {
     /// does not itself compromise any funds, and is merely annoying.
     pub delegate_flow_admin: Pubkey,
 
-    pub _padding_0: [[u64; 2]; 2],
+    pub bank_admin: Pubkey,
+
     pub _padding_1: [[u64; 2]; 32],
     pub _padding_2: [[u64; 32]; 32],
 }

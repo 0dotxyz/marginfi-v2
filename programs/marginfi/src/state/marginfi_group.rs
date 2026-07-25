@@ -21,11 +21,13 @@ pub trait MarginfiGroupImpl {
     fn update_emissions_admin(&mut self, new_emissions_admin: Pubkey);
     fn update_metadata_admin(&mut self, new_metadata_admin: Pubkey);
     fn update_risk_admin(&mut self, new_risk_admin: Pubkey);
+    fn update_bank_admin(&mut self, new_bank_admin: Pubkey);
     fn set_initial_configuration(&mut self, admin_pk: Pubkey);
     fn get_group_bank_config(&self) -> GroupBankConfig;
     fn set_program_fee_enabled(&mut self, fee_enabled: bool);
     fn program_fees_enabled(&self) -> bool;
     fn is_admin_or_limit_admin(&self, signer: Pubkey) -> bool;
+    fn bank_admin_or_fallback(&self) -> Pubkey;
     fn add_bank(&mut self) -> MarginfiResult;
     fn is_protocol_paused(&self) -> bool;
     fn update_withdrawn_equity(
@@ -148,12 +150,27 @@ impl MarginfiGroupImpl for MarginfiGroup {
         }
     }
 
+    fn update_bank_admin(&mut self, new_bank_admin: Pubkey) {
+        if self.bank_admin == new_bank_admin {
+            msg!("No change to bank admin: {:?}", new_bank_admin);
+            // do nothing
+        } else {
+            msg!(
+                "Set bank admin from {:?} to {:?}",
+                self.bank_admin,
+                new_bank_admin
+            );
+            self.bank_admin = new_bank_admin;
+        }
+    }
+
     /// Set the group parameters when initializing a group.
     /// This should be called only when the group is first initialized.
     #[allow(clippy::too_many_arguments)]
     fn set_initial_configuration(&mut self, admin_pk: Pubkey) {
         self.admin = admin_pk;
         self.delegate_flow_admin = admin_pk;
+        self.bank_admin = admin_pk;
         self.set_program_fee_enabled(true);
         self.emode_max_init_leverage = basis_to_u32(DEFAULT_INIT_MAX_EMODE_LEVERAGE);
         self.emode_max_maint_leverage = basis_to_u32(DEFAULT_MAINT_MAX_EMODE_LEVERAGE);
@@ -184,6 +201,14 @@ impl MarginfiGroupImpl for MarginfiGroup {
 
     fn is_admin_or_limit_admin(&self, signer: Pubkey) -> bool {
         signer == self.admin || signer == self.delegate_limit_admin
+    }
+
+    fn bank_admin_or_fallback(&self) -> Pubkey {
+        if self.bank_admin == Pubkey::default() {
+            self.admin
+        } else {
+            self.bank_admin
+        }
     }
 
     // Increment the bank count by 1. If you managed to create 16,000 banks, congrats, does
@@ -261,6 +286,15 @@ impl MarginfiGroupImpl for MarginfiGroup {
 
         Ok(())
     }
+}
+
+pub fn assert_bank_admin_authorized(group: &MarginfiGroup, signer: &Pubkey) -> MarginfiResult {
+    require_eq!(
+        group.bank_admin_or_fallback(),
+        *signer,
+        MarginfiError::Unauthorized
+    );
+    Ok(())
 }
 
 trait MarginfiGroupDeleverageLimitExt {

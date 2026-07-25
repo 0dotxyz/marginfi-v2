@@ -274,6 +274,12 @@ pub enum MarginfiError {
     BankUninitialized,
     #[msg("Max slippage exceeds the allowed cap")] // 6135
     SlippageTooHigh,
+    #[msg("Cannot mix governance-controlled and admin-controlled bank config fields in one call; split into separate lending_pool_configure_bank instructions")]
+    // 6136
+    MixedBankConfigAuthority,
+    #[msg("Bank admin cannot be set to the default pubkey (all zeros); this would silently restore admin authority")]
+    // 6137
+    InvalidBankAdmin,
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]

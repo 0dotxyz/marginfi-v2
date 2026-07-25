@@ -17,11 +17,70 @@ use marginfi_type_crate::{
     types::{Bank, BankConfigOpt, MarginfiGroup},
 };
 
+fn assert_bank_config_authority(
+    group: &MarginfiGroup,
+    signer: &Pubkey,
+    bank_config: &BankConfigOpt,
+    current_operational_state: marginfi_type_crate::types::BankOperationalState,
+) -> MarginfiResult {
+    let has_admin_only = bank_config.has_admin_only_fields_excluding_operational_state();
+    let has_governance = bank_config.has_governance_fields();
+    let has_operational_state = bank_config.operational_state.is_some();
+
+    let category_count = [has_admin_only, has_governance, has_operational_state]
+        .iter()
+        .filter(|b| **b)
+        .count();
+
+    if category_count > 1 {
+        return Err(error!(MarginfiError::MixedBankConfigAuthority));
+    }
+
+    if has_operational_state {
+        let new_state = bank_config.operational_state.unwrap();
+        let is_transitioning_to_operational = current_operational_state
+            != marginfi_type_crate::types::BankOperationalState::Operational
+            && new_state == marginfi_type_crate::types::BankOperationalState::Operational;
+
+        if is_transitioning_to_operational {
+            require_eq!(
+                group.bank_admin_or_fallback(),
+                *signer,
+                MarginfiError::Unauthorized
+            );
+        } else {
+            require_eq!(group.admin, *signer, MarginfiError::Unauthorized);
+        }
+    } else if has_governance {
+        require_eq!(
+            group.bank_admin_or_fallback(),
+            *signer,
+            MarginfiError::Unauthorized
+        );
+    } else if has_admin_only {
+        require_eq!(group.admin, *signer, MarginfiError::Unauthorized);
+    } else {
+        require_eq!(group.admin, *signer, MarginfiError::Unauthorized);
+    }
+
+    Ok(())
+}
+
 pub fn lending_pool_configure_bank(
     ctx: Context<LendingPoolConfigureBank>,
     bank_config: BankConfigOpt,
 ) -> MarginfiResult {
     let mut bank = ctx.accounts.bank.load_mut()?;
+    let group = ctx.accounts.group.load()?;
+
+    let current_operational_state = bank.config.operational_state;
+
+    assert_bank_config_authority(
+        &group,
+        ctx.accounts.signer.key,
+        &bank_config,
+        current_operational_state,
+    )?;
 
     // If settings are frozen, you can only update the deposit and borrow limits, everything else is ignored.
     if bank.get_flag(FREEZE_SETTINGS) {
@@ -32,7 +91,7 @@ pub fn lending_pool_configure_bank(
         emit!(LendingPoolBankConfigureFrozenEvent {
             header: GroupEventHeader {
                 marginfi_group: ctx.accounts.group.key(),
-                signer: Some(*ctx.accounts.admin.key)
+                signer: Some(*ctx.accounts.signer.key)
             },
             bank: ctx.accounts.bank.key(),
             mint: bank.mint,
@@ -44,7 +103,6 @@ pub fn lending_pool_configure_bank(
         bank.configure(&bank_config)?;
         msg!("Bank configured!");
 
-        let group = ctx.accounts.group.load()?;
         bank.emode.validate_entries_with_liability_weights(
             &bank.config,
             group.emode_max_init_leverage,
@@ -54,7 +112,7 @@ pub fn lending_pool_configure_bank(
         emit!(LendingPoolBankConfigureEvent {
             header: GroupEventHeader {
                 marginfi_group: ctx.accounts.group.key(),
-                signer: Some(*ctx.accounts.admin.key)
+                signer: Some(*ctx.accounts.signer.key)
             },
             bank: ctx.accounts.bank.key(),
             mint: bank.mint,
@@ -67,12 +125,9 @@ pub fn lending_pool_configure_bank(
 
 #[derive(Accounts)]
 pub struct LendingPoolConfigureBank<'info> {
-    #[account(
-        has_one = admin @ MarginfiError::Unauthorized,
-    )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub signer: Signer<'info>,
 
     #[account(
         mut,
