@@ -178,6 +178,8 @@ export const defaultBankConfigOptRaw = () => {
     freezeSettings: null,
     oracleMaxConfidence: 0,
     tokenlessRepaymentsAllowed: false,
+    liquidationLiquidatorFee: 0,
+    liquidationInsuranceFee: 0,
     circuitBreakerEnabled: null,
     cbDeviationBpsTiers: null,
     cbTierDurationsSeconds: null,
@@ -209,6 +211,8 @@ export const blankBankConfigOptRaw = () => {
     permissionlessBadDebtSettlement: null,
     freezeSettings: null,
     tokenlessRepaymentsAllowed: null,
+    liquidationLiquidatorFee: null,
+    liquidationInsuranceFee: null,
     circuitBreakerEnabled: null,
     cbDeviationBpsTiers: null,
     cbTierDurationsSeconds: null,
@@ -276,8 +280,14 @@ export const makeRatePoint = (util: number, apr: number) => {
   return point;
 };
 
-// TODO validation here could be more robust. E.g. zero < all. hundred > all. no gaps, etc. In
-// principle this is low-priority since the program already validates this properly.
+// Mirrors the program's seven-point curve validation (interest_rate.rs
+// `validate_seven_point`) so a malformed test curve fails here with a clear
+// message instead of as an opaque InvalidConfig (0x...) at the add-bank /
+// configure-bank instruction. The zero- and hundred-util rates live in separate
+// fields, so these checks only cover the intermediate points: each must have
+// util strictly inside (0, 1), util must strictly ascend, and rate must be
+// non-decreasing. A zero-util entry is rejected because the program treats it as
+// trailing padding and forbids any non-zero util after it (a "hole").
 export const makeRatePoints = (util: number[], apr: number[]) => {
   // Validate input lengths
   if (util.length > 5 || apr.length > 5) {
@@ -287,16 +297,23 @@ export const makeRatePoints = (util: number[], apr: number[]) => {
     throw new Error("must be one rate per util.");
   }
 
-  // Validate that utils are in ascending order
-  for (let i = 1; i < util.length; i++) {
-    if (util[i] == 0) {
-      continue;
+  // Validate each point's range and the ordering between consecutive points.
+  for (let i = 0; i < util.length; i++) {
+    if (util[i] <= 0 || util[i] >= 1) {
+      throw new Error(
+        `makeRatePoints: point ${i} util must be in (0, 1), got ${util[i]} ` +
+          "(the zero- and hundred-util rates are configured separately)"
+      );
     }
-    if (util[i] < util[i - 1]) {
-      throw new Error("makeRatePoints: util values must be in ascending order");
-    }
-    if (apr[i] <= apr[i - 1]) {
-      throw new Error("makeRatePoints: apr values must be in ascending order");
+    if (i > 0) {
+      if (util[i] <= util[i - 1]) {
+        throw new Error(
+          "makeRatePoints: util values must be strictly ascending"
+        );
+      }
+      if (apr[i] < apr[i - 1]) {
+        throw new Error("makeRatePoints: apr values must be non-decreasing");
+      }
     }
   }
 
@@ -431,6 +448,8 @@ export type BankConfigOptRaw = {
   permissionlessBadDebtSettlement: boolean | null;
   freezeSettings: boolean | null;
   tokenlessRepaymentsAllowed: boolean | null;
+  liquidationLiquidatorFee: number | null;
+  liquidationInsuranceFee: number | null;
 
   circuitBreakerEnabled: boolean | null;
   cbDeviationBpsTiers: [number, number, number] | null;

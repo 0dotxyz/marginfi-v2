@@ -7,6 +7,7 @@ import {
   SystemProgram,
   Transaction,
 } from "@solana/web3.js";
+import { createMintToInstruction } from "@solana/spl-token";
 import {
   bankrunContext,
   bankrunProgram,
@@ -70,7 +71,6 @@ import {
   makeDriftWithdrawIx,
   makeInitDriftUserIx,
 } from "../../utils/drift-instructions";
-import { createMintToInstruction } from "@solana/spl-token";
 
 let ctx: ProgramTestContext;
 let usdcSpotMarket: PublicKey;
@@ -92,6 +92,34 @@ describe("d15: Fixed Drift price bank", () => {
     ctx = bankrunContext;
     usdcSpotMarket = driftAccounts.get(DRIFT_USDC_SPOT_MARKET);
     tokenASpotMarket = driftAccounts.get(DRIFT_TOKEN_A_SPOT_MARKET);
+
+    // user 3's token accounts are funded by the basic specs (03/07), which don't
+    // run in the standalone drift slice. Top up any shortfall so this suite can
+    // run on its own; a no-op in the full suite (all assertions here are
+    // diff-based, so extra balance is harmless).
+    const payer = bankrunContext.payer;
+    const fundIfShort = async (
+      account: PublicKey,
+      mint: PublicKey,
+      min: number
+    ) => {
+      const balance = await getTokenBalance(bankRunProvider, account);
+      if (balance >= min) return;
+      const tx = new Transaction().add(
+        createMintToInstruction(mint, account, payer.publicKey, min - balance)
+      );
+      await processBankrunTransaction(ctx, tx, [payer]);
+    };
+    await fundIfShort(
+      users[3].usdcAccount,
+      ecosystem.usdcMint.publicKey,
+      2_000 * 10 ** ecosystem.usdcDecimals
+    );
+    await fundIfShort(
+      users[3].tokenAAccount,
+      ecosystem.tokenAMint.publicKey,
+      100 * 10 ** ecosystem.tokenADecimals
+    );
   });
 
   it("(user 3) initialize marginfi account for main group", async () => {

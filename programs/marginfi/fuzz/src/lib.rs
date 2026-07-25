@@ -533,7 +533,6 @@ impl<'state> MarginfiFuzzContext<'state> {
                 vec![
                     MarginfiError::NoLiabilityFound.into(),
                     MarginfiError::OperationRepayOnly.into(),
-                    // TODO: maybe change
                     MarginfiError::BankAccountNotFound.into(),
                     MarginfiError::AccountDisabled.into(),
                 ]

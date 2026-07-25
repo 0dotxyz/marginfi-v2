@@ -1,7 +1,8 @@
 use crate::{
     check, check_eq,
-    constants::{is_allowed_cpi_for_third_party_id, ACCOUNT_TRANSFER_FEE},
+    constants::DEFAULT_ACCOUNT_TRANSFER_FEE_LAMPORTS,
     events::{AccountEventHeader, MarginfiAccountTransferToNewAccount},
+    ix_utils::is_allowed_cpi_for_third_party_id,
     prelude::*,
     state::{
         marginfi_account::{
@@ -13,10 +14,10 @@ use crate::{
 use anchor_lang::prelude::*;
 use bytemuck::Zeroable;
 use marginfi_type_crate::{
-    constants::MARGINFI_ACCOUNT_SEED,
+    constants::{FEE_STATE_SEED, MARGINFI_ACCOUNT_SEED},
     types::{
-        LendingAccount, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED, ACCOUNT_IN_FLASHLOAN,
-        ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
+        FeeState, LendingAccount, MarginfiAccount, MarginfiGroup, ACCOUNT_DISABLED,
+        ACCOUNT_IN_FLASHLOAN, ACCOUNT_IN_ORDER_EXECUTION, ACCOUNT_IN_RECEIVERSHIP,
     },
 };
 
@@ -56,7 +57,13 @@ pub fn transfer_to_new_account(ctx: Context<TransferToNewAccount>) -> MarginfiRe
         group.fee_state_cache.global_fee_wallet,
         MarginfiError::InvalidFeeAta
     );
-    anchor_lang::system_program::transfer(ctx.accounts.transfer_fee(), ACCOUNT_TRANSFER_FEE)?;
+    // Fee amount (in lamports) is configured on the FeeState (0 => use the default, preserving the
+    // legacy fee).
+    let fee_lamports = match ctx.accounts.fee_state.load()?.account_transfer_fee {
+        0 => DEFAULT_ACCOUNT_TRANSFER_FEE_LAMPORTS,
+        fee => fee,
+    } as u64;
+    anchor_lang::system_program::transfer(ctx.accounts.transfer_fee(), fee_lamports)?;
 
     let mut old_account = ctx.accounts.old_marginfi_account.load_mut()?;
 
@@ -162,6 +169,13 @@ pub struct TransferToNewAccount<'info> {
     #[account(mut)]
     pub global_fee_wallet: UncheckedAccount<'info>,
 
+    // Note: there is just one FeeState per program. Read here for the configurable transfer fee.
+    #[account(
+        seeds = [FEE_STATE_SEED.as_bytes()],
+        bump,
+    )]
+    pub fee_state: AccountLoader<'info, FeeState>,
+
     pub system_program: Program<'info, System>,
 }
 
@@ -191,7 +205,13 @@ pub fn transfer_to_new_account_pda(
         group.fee_state_cache.global_fee_wallet,
         MarginfiError::InvalidFeeAta
     );
-    anchor_lang::system_program::transfer(ctx.accounts.transfer_fee(), ACCOUNT_TRANSFER_FEE)?;
+    // Fee amount (in lamports) is configured on the FeeState (0 => use the default, preserving the
+    // legacy fee).
+    let fee_lamports = match ctx.accounts.fee_state.load()?.account_transfer_fee {
+        0 => DEFAULT_ACCOUNT_TRANSFER_FEE_LAMPORTS,
+        fee => fee,
+    } as u64;
+    anchor_lang::system_program::transfer(ctx.accounts.transfer_fee(), fee_lamports)?;
 
     let mut old_account = ctx.accounts.old_marginfi_account.load_mut()?;
 
@@ -315,6 +335,13 @@ pub struct TransferToNewAccountPda<'info> {
     /// CHECK: Validated against group fee state cache
     #[account(mut)]
     pub global_fee_wallet: UncheckedAccount<'info>,
+
+    // Note: there is just one FeeState per program. Read here for the configurable transfer fee.
+    #[account(
+        seeds = [FEE_STATE_SEED.as_bytes()],
+        bump,
+    )]
+    pub fee_state: AccountLoader<'info, FeeState>,
 
     /// Instructions sysvar for CPI validation
     /// CHECK: Standard sysvar account

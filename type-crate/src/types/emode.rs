@@ -239,6 +239,22 @@ fn projected_asset_weight(entry: &EmodeEntry, requirement_type: RequirementType)
 /// - Result when reconciling `Maintenance`
 /// * tag | projected asset weight
 /// * 101    75
+///
+/// # Compute cost
+///
+/// `N` is how many configs get merged. In the risk engine that's the number of emode liability
+/// balances the borrower has. Each merged config adds roughly 1.5k compute units:
+///
+/// | N (configs) | compute units |
+/// |-------------|---------------|
+/// | 1           | ~2,700        |
+/// | 2           | ~4,200        |
+/// | 5           | ~8,900        |
+/// | 10          | ~16,600       |
+///
+/// (Measured worst case: every config packed with the maximum MAX_EMODE_ENTRIES entries, all sharing
+/// tags so none drop out during the merge — real inputs are smaller.) At the typical small N it's a
+/// tiny slice of the health check's CU budget.
 pub fn reconcile_emode_configs<I>(
     configs: I,
     requirement_type: RequirementType,

@@ -39,6 +39,7 @@ import {
   makeRatePoints,
   ORACLE_SETUP_FIXED,
   TOKENLESS_REPAYMENTS_ALLOWED,
+  u32_MAX,
 } from "../../utils/types";
 import {
   deriveBankAndMetadataWithSeed,
@@ -85,6 +86,8 @@ describe("Lending pool configure bank", () => {
       freezeSettings: null,
       oracleMaxConfidence: 420000,
       tokenlessRepaymentsAllowed: true,
+      liquidationLiquidatorFee: Math.floor(u32_MAX * 0.03), // 3%
+      liquidationInsuranceFee: Math.floor(u32_MAX * 0.035), // 3.5%
       circuitBreakerEnabled: null,
       cbDeviationBpsTiers: null,
       cbTierDurationsSeconds: null,
@@ -148,6 +151,8 @@ describe("Lending pool configure bank", () => {
     assert.deepEqual(config.riskTier, { collateral: {} }); // no change
     assert.equal(config.assetTag, ASSET_TAG_SOL);
     assertBNEqual(config.totalAssetValueInitLimit, 15000);
+    assert.equal(bank.liquidationLiquidatorFee, Math.floor(u32_MAX * 0.03));
+    assert.equal(bank.liquidationInsuranceFee, Math.floor(u32_MAX * 0.035));
     assert.equal(config.oracleMaxAge, 150);
     assert.equal(config.oracleMaxConfidence, 420000);
     // Note: The CLOSE_ENABLED_FLAG is never unset

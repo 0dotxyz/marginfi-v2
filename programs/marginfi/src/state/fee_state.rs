@@ -66,7 +66,7 @@ mod tests {
         let admin = pubkey!("CYXEgwbPHu2f9cY3mcUkinzDoDcsSan7myh1uBvYRbEw");
         assert_eq!(fee_state.global_fee_admin, admin); // the MS
         assert_eq!(fee_state.global_fee_wallet, admin); // MS was also wallet at this time
-        assert_eq!(fee_state.placeholder0, 0);
+        assert_eq!(fee_state.account_transfer_fee, 0);
         assert_eq!(fee_state.bank_init_flat_sol_fee, 150000000);
 
         // 3) Percentage-based fees: with tolerance

@@ -232,17 +232,26 @@ pub struct EndLiquidation<'info> {
     pub global_fee_wallet: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
+
+    /// Optional separate payer for the flat liquidation fee. When provided it must sign and pays the
+    /// fee; when omitted, the `liquidation_receiver` pays (the default).
+    #[account(mut)]
+    pub fee_payer: Option<Signer<'info>>,
 }
 
 impl<'info> EndLiquidation<'info> {
     fn transfer_flat_fee(
         &self,
     ) -> CpiContext<'_, '_, '_, 'info, anchor_lang::system_program::Transfer<'info>> {
+        // The flat fee is paid by `fee_payer` when supplied, otherwise by the liquidation receiver.
+        let from = match &self.fee_payer {
+            Some(fee_payer) => fee_payer.to_account_info(),
+            None => self.liquidation_receiver.to_account_info(),
+        };
         CpiContext::new(
             self.system_program.key(),
             anchor_lang::system_program::Transfer {
-                // TODO Eventually, maybe support the fee being paid by a different account
-                from: self.liquidation_receiver.to_account_info(),
+                from,
                 to: self.global_fee_wallet.to_account_info(),
             },
         )

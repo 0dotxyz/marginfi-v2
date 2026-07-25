@@ -1,7 +1,5 @@
 import { BN } from "@coral-xyz/anchor";
-import {
-  Transaction,
-} from "@solana/web3.js";
+import { Transaction } from "@solana/web3.js";
 import {
   ecosystem,
   kaminoAccounts,
@@ -20,12 +18,17 @@ import {
   simpleRefreshReserve,
 } from "../../utils/kamino-utils";
 import { assert } from "chai";
+import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import { MockUser, USER_ACCOUNT_K } from "../../utils/mocks";
 import { processBankrunTransaction } from "../../utils/tools";
 import { ProgramTestContext } from "../../utils/litesvm";
 import { makeKaminoWithdrawIx } from "../../utils/kamino-instructions";
 import { composeRemainingAccounts } from "../../utils/user-instructions";
-import { assertBNApproximately, getTokenBalance, assertBankrunTxFailed } from "../../utils/genericTests";
+import {
+  assertBNApproximately,
+  getTokenBalance,
+  assertBankrunTxFailed,
+} from "../../utils/genericTests";
 
 let ctx: ProgramTestContext;
 
@@ -53,6 +56,12 @@ describe("k07: Kamino Withdraw Tests", () => {
       bankRunProvider,
       user.usdcAccount
     );
+    const marginfiAccountBefore =
+      await bankrunProgram.account.marginfiAccount.fetch(marginfiAccount);
+    const kaminoBalanceBefore =
+      marginfiAccountBefore.lendingAccount.balances.find(
+        (b) => b.bankPk.equals(bank) && b.active === 1
+      )!;
 
     console.log(
       `Executing withdrawal of ${
@@ -120,8 +129,16 @@ describe("k07: Kamino Withdraw Tests", () => {
         (b) => b.bankPk.equals(bank) && b.active === 1
       );
 
-      // TODO assert balances
       assert.equal(kaminoBankBalance.active, 1);
+      // The Kamino bank position shrinks by ~the partial withdrawal amount (collateral ≈ liquidity
+      // at this fresh reserve's ~1:1 exchange rate).
+      assert.approximately(
+        wrappedI80F48toBigNumber(kaminoBalanceBefore.assetShares)
+          .minus(wrappedI80F48toBigNumber(kaminoBankBalance.assetShares))
+          .toNumber(),
+        withdrawAmt.toNumber(),
+        withdrawAmt.toNumber() * 0.0001
+      );
       // has_kamino persists across a partial withdraw
       assert.equal(marginfiAccountData.indexerFlags.hasKamino, 1);
     }
@@ -143,7 +160,9 @@ describe("k07: Kamino Withdraw Tests", () => {
     const obligation = kaminoAccounts.get(`${bankKey}_OBLIGATION`);
 
     // Try to withdraw an extremely large amount (10 million USDC)
-    const excessiveWithdrawAmount = new BN(10_000_000 * 10 ** ecosystem.usdcDecimals);
+    const excessiveWithdrawAmount = new BN(
+      10_000_000 * 10 ** ecosystem.usdcDecimals
+    );
 
     let tx = new Transaction().add(
       await simpleRefreshReserve(
@@ -176,7 +195,13 @@ describe("k07: Kamino Withdraw Tests", () => {
       )
     );
 
-    let result = await processBankrunTransaction(ctx, tx, [user.wallet], true, true);
+    let result = await processBankrunTransaction(
+      ctx,
+      tx,
+      [user.wallet],
+      true,
+      true
+    );
     // OperationWithdrawOnly error code 6020
     assertBankrunTxFailed(result, 6020);
   });

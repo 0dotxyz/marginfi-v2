@@ -106,7 +106,13 @@ pub fn place_order(
 
     let mut order = order_loader.load_init()?;
 
-    order.initialize(marginfi_account_key, trigger, tags, order_bump)?;
+    order.initialize(
+        marginfi_account_key,
+        trigger,
+        tags,
+        order_bump,
+        Clock::get()?.unix_timestamp,
+    )?;
     marginfi_account.increment_active_orders()?;
 
     let fee_state = fee_state_loader.load()?;

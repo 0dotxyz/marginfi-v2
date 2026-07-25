@@ -76,7 +76,10 @@ const MAX_U64 = 18_446_744_073_709_551_615n;
 
 const normalizeRentEpoch = (rentEpoch: number | bigint): bigint => {
   if (typeof rentEpoch === "bigint") return rentEpoch;
-  if (!Number.isSafeInteger(rentEpoch) && rentEpoch >= Number.MAX_SAFE_INTEGER) {
+  if (
+    !Number.isSafeInteger(rentEpoch) &&
+    rentEpoch >= Number.MAX_SAFE_INTEGER
+  ) {
     return MAX_U64;
   }
   return BigInt(rentEpoch);
@@ -125,10 +128,9 @@ const throwFailedTransaction = (
   failed: FailedTransactionMetadata,
   tx: Transaction | VersionedTransaction,
 ): never => {
-  const transactionMessage = [
-    failed.err().toString(),
-    failed.toString(),
-  ].join("\n");
+  const transactionMessage = [failed.err().toString(), failed.toString()].join(
+    "\n"
+  );
   throw new SendTransactionError({
     action: "send",
     signature: txSignature(tx),
@@ -201,10 +203,7 @@ export class BanksClient {
 export class ProgramTestContext {
   readonly banksClient: BanksClient;
 
-  constructor(
-    readonly svm: LiteSVM,
-    readonly payer: Keypair,
-  ) {
+  constructor(readonly svm: LiteSVM, readonly payer: Keypair) {
     this.banksClient = new BanksClient(svm);
   }
 
@@ -287,7 +286,9 @@ export async function startAnchor(
   const payer = Keypair.generate();
   const airdropResult = svm.airdrop(payer.publicKey, PAYER_LAMPORTS);
   if (airdropResult instanceof FailedTransactionMetadata) {
-    throw new Error(`LiteSVM payer airdrop failed: ${airdropResult.toString()}`);
+    throw new Error(
+      `LiteSVM payer airdrop failed: ${airdropResult.toString()}`
+    );
   }
 
   for (const program of dedupePrograms([...LOCAL_PROGRAMS, ...programs])) {

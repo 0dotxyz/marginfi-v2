@@ -24,7 +24,9 @@ use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::{LIQUIDITY_VAULT_AUTHORITY_SEED, TOKENLESS_REPAYMENTS_ALLOWED},
+    constants::{
+        EMPTY_BALANCE_THRESHOLD, LIQUIDITY_VAULT_AUTHORITY_SEED, TOKENLESS_REPAYMENTS_ALLOWED,
+    },
     types::{
         Bank, HealthCache, MarginfiAccount, MarginfiGroup, RiskTier, ACCOUNT_DISABLED,
         ACCOUNT_IN_RECEIVERSHIP,
@@ -127,6 +129,14 @@ pub fn lending_account_borrow<'info>(
             origination_fee_u64 = 0;
             share_amount = bank_account.borrow(I80F48::from_num(amount_pre_fee))?;
         }
+
+        let resulting_liability_shares: I80F48 = bank_account.balance.liability_shares.into();
+        check!(
+            resulting_liability_shares <= I80F48::ZERO
+                || resulting_liability_shares >= EMPTY_BALANCE_THRESHOLD,
+            MarginfiError::IllegalBalanceState,
+            "Borrow would leave positive liability shares below the empty balance threshold"
+        );
 
         marginfi_account.last_update = clock.unix_timestamp as u64;
 

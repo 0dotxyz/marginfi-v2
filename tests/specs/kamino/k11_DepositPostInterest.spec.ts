@@ -252,10 +252,7 @@ describe("k11: Kamino Deposit Tests After Interest Accrues", () => {
     );
     // No interest accumulates on Kamino banks, so the asset share value is always 1, and the
     // relationship between collateral tokens and shares is always 1:1
-    assertI80F48Equal(
-      bankAfter.totalAssetShares,
-      expectedTotalAssetShares,
-    );
+    assertI80F48Equal(bankAfter.totalAssetShares, expectedTotalAssetShares);
     assertI80F48Equal(bankAfter.assetShareValue, 1);
     assertI80F48Equal(bankAfter.collectedInsuranceFeesOutstanding, 0);
     assertI80F48Equal(bankAfter.collectedGroupFeesOutstanding, 0);
@@ -533,10 +530,7 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
       (b: BalanceRaw) => b.bankPk.equals(bank) && b.active === 1,
     );
     assert.equal(balanceAfter.active, 1);
-    assertI80F48Equal(
-      balanceAfter.assetShares,
-      expectedBalanceShares,
-    );
+    assertI80F48Equal(balanceAfter.assetShares, expectedBalanceShares);
     assertBNEqual(
       resAfter.liquidity.totalAvailableAmount,
       resBefore.liquidity.totalAvailableAmount.add(amount),
@@ -558,10 +552,7 @@ describe("k11a: Kamino Token A Deposit Tests After Interest Accrues", () => {
       bankBefore.totalAssetShares,
       expectedCollateral,
     );
-    assertI80F48Equal(
-      bankAfter.totalAssetShares,
-      expectedTotalAssetShares,
-    );
+    assertI80F48Equal(bankAfter.totalAssetShares, expectedTotalAssetShares);
     assertI80F48Equal(bankAfter.assetShareValue, 1);
     assertI80F48Equal(bankAfter.collectedInsuranceFeesOutstanding, 0);
     assertI80F48Equal(bankAfter.collectedGroupFeesOutstanding, 0);

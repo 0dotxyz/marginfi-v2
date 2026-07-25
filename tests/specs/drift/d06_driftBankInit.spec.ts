@@ -146,7 +146,9 @@ describe("d06: Init Drift banks", () => {
     assertI80F48Equal(config.assetWeightMaint, 1);
     // deposit_limit is stored in native decimals for Drift banks
     // Input: 100M USDC in native decimals = 100_000_000 * 10^usdcDecimals
-    const inputDepositLimit = new BN(100_000_000).mul(new BN(10 ** ecosystem.usdcDecimals));
+    const inputDepositLimit = new BN(100_000_000).mul(
+      new BN(10 ** ecosystem.usdcDecimals)
+    );
     assertBNEqual(config.depositLimit, inputDepositLimit);
 
     assert.deepEqual(config.operationalState, { operational: {} });

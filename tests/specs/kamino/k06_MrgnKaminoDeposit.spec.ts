@@ -226,10 +226,7 @@ describe("k06: Kamino Deposit Tests", () => {
     );
     // No interest accumulates on Kamino banks, so the asset share value is always 1, and the
     // relationship between collateral tokens and shares is always 1:1
-    assertI80F48Equal(
-      bankAfter.totalAssetShares,
-      expectedTotalAssetShares,
-    );
+    assertI80F48Equal(bankAfter.totalAssetShares, expectedTotalAssetShares);
     assertI80F48Equal(bankAfter.assetShareValue, 1);
     assertI80F48Equal(bankAfter.collectedInsuranceFeesOutstanding, 0);
     assertI80F48Equal(bankAfter.collectedGroupFeesOutstanding, 0);
@@ -292,8 +289,8 @@ describe("k06: Kamino Deposit Tests", () => {
       depositAfterRefresh.marketValueSf,
     ).toNumber();
     const expectedValue =
-      depositAfterRefresh.depositedAmount.toNumber() /
-      10 ** ecosystem.usdcDecimals *
+      (depositAfterRefresh.depositedAmount.toNumber() /
+        10 ** ecosystem.usdcDecimals) *
       oracles.usdcPrice;
     assert.approximately(
       marketValueAfter,

@@ -65,8 +65,7 @@ export const assertBNGreaterThan = (
 
   if (!(aB > bB)) {
     throw new Error(
-      message ||
-        `Expected ${aB.toString()} to be greater than ${bB.toString()}`,
+      message || `Expected ${aB.toString()} to be greater than ${bB.toString()}`
     );
   }
 };

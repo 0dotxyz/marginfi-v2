@@ -6,17 +6,18 @@ use {
         utils::{
             build_kamino_refresh_obligation_ix, build_kamino_refresh_reserve_ix,
             derive_juplend_cpi_accounts, find_bank_vault_authority_pda, find_fee_state_pda,
-            load_observation_account_metas, load_observation_account_metas_close_last, send_tx,
-            EXP_10_I80F48,
+            get_oracle_setup, load_kamino_reserve, load_observation_account_metas,
+            load_observation_account_metas_close_last, send_tx, EXP_10_I80F48,
         },
     },
     anchor_client::anchor_lang::{InstructionData, ToAccountMetas},
     anyhow::Result,
     fixed::types::I80F48,
+    kamino_mocks::kamino_lending_complete::accounts::Reserve as KaminoReserve,
     marginfi::state::bank::BankVaultType,
     marginfi_type_crate::{
         pdas::{DRIFT_PROGRAM_ID, FARMS_PROGRAM_ID, JUPLEND_LENDING_PROGRAM_ID, KAMINO_PROGRAM_ID},
-        types::{Bank, MarginfiAccount, OracleSetup},
+        types::{Bank, MarginfiAccount},
     },
     solana_sdk::{
         instruction::{AccountMeta, Instruction},
@@ -27,27 +28,15 @@ use {
     std::collections::HashMap,
 };
 
-fn kamino_refresh_oracle_accounts(
-    bank: &Bank,
-) -> (
-    Option<Pubkey>,
-    Option<Pubkey>,
-    Option<Pubkey>,
-    Option<Pubkey>,
-) {
-    let keys = &bank.config.oracle_keys;
-    match bank.config.oracle_setup {
-        OracleSetup::KaminoPythPush => (Some(keys[0]), None, None, None),
-        OracleSetup::KaminoSwitchboardPull => (None, None, None, Some(keys[0])),
-        _ => (None, None, None, None),
-    }
-}
-
 /// Build the pair of Kamino refresh instructions (refreshReserve + refreshObligation)
 /// that must be prepended before any Kamino deposit or withdraw.
-fn build_kamino_refresh_ixs(bank: &Bank, lending_market: Pubkey) -> Vec<Instruction> {
+fn build_kamino_refresh_ixs(
+    bank: &Bank,
+    lending_market: Pubkey,
+    reserve_state: &KaminoReserve,
+) -> Vec<Instruction> {
     let (pyth_oracle, switchboard_price, switchboard_twap, scope_prices) =
-        kamino_refresh_oracle_accounts(bank);
+        get_oracle_setup(reserve_state);
     let reserve = bank.integration_acc_1;
     let obligation = bank.integration_acc_2;
 
@@ -114,10 +103,6 @@ fn build_kamino_init_obligation_ix(
     reserve_collateral_mint: Pubkey,
     reserve_destination_deposit_collateral: Pubkey,
     user_metadata: Pubkey,
-    _pyth_oracle: Option<Pubkey>,
-    _switchboard_price_oracle: Option<Pubkey>,
-    _switchboard_twap_oracle: Option<Pubkey>,
-    _scope_prices: Option<Pubkey>,
     obligation_farm_user_state: Option<Pubkey>,
     reserve_farm_state: Option<Pubkey>,
     signer_token_account: Pubkey,
@@ -259,10 +244,6 @@ pub fn kamino_init_obligation(
     reserve_collateral_mint: Pubkey,
     reserve_destination_deposit_collateral: Pubkey,
     user_metadata: Pubkey,
-    pyth_oracle: Option<Pubkey>,
-    switchboard_price_oracle: Option<Pubkey>,
-    switchboard_twap_oracle: Option<Pubkey>,
-    scope_prices: Option<Pubkey>,
     obligation_farm_user_state: Option<Pubkey>,
     reserve_farm_state: Option<Pubkey>,
 ) -> Result<()> {
@@ -292,10 +273,6 @@ pub fn kamino_init_obligation(
         reserve_collateral_mint,
         reserve_destination_deposit_collateral,
         user_metadata,
-        pyth_oracle,
-        switchboard_price_oracle,
-        switchboard_twap_oracle,
-        scope_prices,
         obligation_farm_user_state,
         reserve_farm_state,
         user_ata,
@@ -388,7 +365,8 @@ pub fn kamino_deposit(
     };
 
     // Prepend Kamino refresh instructions to ensure reserve/obligation are non-stale
-    let mut ixs = build_kamino_refresh_ixs(&bank, lending_market);
+    let reserve_state = load_kamino_reserve(&rpc_client, bank.integration_acc_1)?;
+    let mut ixs = build_kamino_refresh_ixs(&bank, lending_market, &reserve_state);
     ixs.push(ix);
 
     let signing_keypairs = config.get_signers(false);
@@ -492,7 +470,8 @@ pub fn kamino_withdraw(
     let create_ata_ix = build_signer_ata_ix(config, &authority, &bank.mint, &token_program);
 
     // Prepend Kamino refresh instructions to ensure reserve/obligation are non-stale
-    let mut ixs = build_kamino_refresh_ixs(&bank, lending_market);
+    let reserve_state = load_kamino_reserve(&rpc_client, bank.integration_acc_1)?;
+    let mut ixs = build_kamino_refresh_ixs(&bank, lending_market, &reserve_state);
     ixs.push(create_ata_ix);
     ixs.push(ix);
 
@@ -1093,4 +1072,91 @@ pub fn juplend_withdraw(
     println!("JupLend withdraw successful: {sig}");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a minimal Kamino bank whose marginfi oracle (`oracle_keys[0]`) is deliberately
+    /// distinct from anything on the reserve, so the refresh ix can only be correct if it ignores
+    /// the bank oracle and reads the reserve's own `token_info`.
+    fn kamino_bank(reserve: Pubkey, obligation: Pubkey, marginfi_oracle: Pubkey) -> Bank {
+        let mut bank: Bank = unsafe { std::mem::zeroed() };
+        bank.integration_acc_1 = reserve;
+        bank.integration_acc_2 = obligation;
+        bank.config.oracle_keys[0] = marginfi_oracle;
+        bank
+    }
+
+    // `build_kamino_refresh_reserve_ix` account layout:
+    // [reserve, lending_market, pyth, switchboard_price, switchboard_twap, scope]
+    const PYTH_SLOT: usize = 2;
+    const SWITCHBOARD_PRICE_SLOT: usize = 3;
+
+    #[test]
+    fn kamino_pyth_refresh_uses_reserve_oracle_not_marginfi_oracle() {
+        let marginfi_oracle = Pubkey::new_unique();
+        let reserve_pyth_oracle = Pubkey::new_unique();
+        let reserve_pk = Pubkey::new_unique();
+        let lending_market = Pubkey::new_unique();
+
+        let mut reserve: KaminoReserve = unsafe { std::mem::zeroed() };
+        reserve.config.token_info.pyth_configuration.price = reserve_pyth_oracle;
+
+        let bank = kamino_bank(reserve_pk, Pubkey::new_unique(), marginfi_oracle);
+        let ixs = build_kamino_refresh_ixs(&bank, lending_market, &reserve);
+
+        assert_eq!(ixs.len(), 2);
+        assert_eq!(ixs[0].accounts[0].pubkey, reserve_pk);
+        assert_eq!(ixs[0].accounts[1].pubkey, lending_market);
+        // The refresh must use the reserve's own oracle, never the marginfi bank oracle.
+        assert_eq!(ixs[0].accounts[PYTH_SLOT].pubkey, reserve_pyth_oracle);
+        assert_ne!(ixs[0].accounts[PYTH_SLOT].pubkey, marginfi_oracle);
+    }
+
+    #[test]
+    fn kamino_switchboard_refresh_uses_reserve_oracle_not_marginfi_oracle() {
+        let marginfi_oracle = Pubkey::new_unique();
+        let reserve_switchboard_oracle = Pubkey::new_unique();
+        let reserve_pk = Pubkey::new_unique();
+        let lending_market = Pubkey::new_unique();
+
+        let mut reserve: KaminoReserve = unsafe { std::mem::zeroed() };
+        reserve
+            .config
+            .token_info
+            .switchboard_configuration
+            .price_aggregator = reserve_switchboard_oracle;
+
+        let bank = kamino_bank(reserve_pk, Pubkey::new_unique(), marginfi_oracle);
+        let ixs = build_kamino_refresh_ixs(&bank, lending_market, &reserve);
+
+        assert_eq!(
+            ixs[0].accounts[SWITCHBOARD_PRICE_SLOT].pubkey,
+            reserve_switchboard_oracle
+        );
+        assert_ne!(
+            ixs[0].accounts[SWITCHBOARD_PRICE_SLOT].pubkey,
+            marginfi_oracle
+        );
+    }
+
+    #[test]
+    fn kamino_refresh_never_reads_bank_oracle_keys() {
+        // With no oracle on the reserve, every oracle slot falls back to the KAMINO_PROGRAM_ID
+        // placeholder — proving the refresh ignores `bank.config.oracle_keys` entirely.
+        let marginfi_oracle = Pubkey::new_unique();
+        let reserve_pk = Pubkey::new_unique();
+        let lending_market = Pubkey::new_unique();
+
+        let reserve: KaminoReserve = unsafe { std::mem::zeroed() };
+        let bank = kamino_bank(reserve_pk, Pubkey::new_unique(), marginfi_oracle);
+        let ixs = build_kamino_refresh_ixs(&bank, lending_market, &reserve);
+
+        for slot in PYTH_SLOT..=5 {
+            assert_eq!(ixs[0].accounts[slot].pubkey, KAMINO_PROGRAM_ID);
+            assert_ne!(ixs[0].accounts[slot].pubkey, marginfi_oracle);
+        }
+    }
 }

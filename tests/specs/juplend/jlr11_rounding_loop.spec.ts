@@ -6,7 +6,12 @@ import {
 } from "@solana/spl-token";
 import { assert } from "chai";
 import { Clock } from "../../utils/litesvm";
-import { Keypair, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
+import {
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+} from "@solana/web3.js";
 
 import {
   bankRunProvider,
@@ -144,9 +149,7 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
 
     return {
       tokenExchangePrice: bnToBigIntSafe(lending.tokenExchangePrice),
-      liquidityExchangePrice: bnToBigIntSafe(
-        lending.liquidityExchangePrice,
-      ),
+      liquidityExchangePrice: bnToBigIntSafe(lending.liquidityExchangePrice),
     };
   };
 
@@ -366,8 +369,12 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
 
   it("loops tiny deposit/withdraw-all cycles and applies a consistent rounding loss per cycle with stable prices", async () => {
     const beforePrices = await fetchExchangePrices();
-    const bankBefore = await bankrunProgram.account.bank.fetch(juplendUsdcBankPk);
-    const userStart = BigInt(await getTokenBalance(bankRunProvider, user.usdcAccount));
+    const bankBefore = await bankrunProgram.account.bank.fetch(
+      juplendUsdcBankPk
+    );
+    const userStart = BigInt(
+      await getTokenBalance(bankRunProvider, user.usdcAccount)
+    );
 
     for (let i = 0; i < LOOP_ITERATIONS; i++) {
       const cycleStart = BigInt(
@@ -418,7 +425,9 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
         true,
       );
 
-      const cycleEnd = BigInt(await getTokenBalance(bankRunProvider, user.usdcAccount));
+      const cycleEnd = BigInt(
+        await getTokenBalance(bankRunProvider, user.usdcAccount)
+      );
       const cycleLoss = cycleStart - cycleEnd;
       assert.equal(
         cycleLoss.toString(),
@@ -434,13 +443,17 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
         `cycle ${i} should redeem exact floor(shares*price/1e12)`,
       );
 
-      const marginfiAccount = await bankrunProgram.account.marginfiAccount.fetch(
-        roundingUserMarginfiAccount.publicKey,
-      );
+      const marginfiAccount =
+        await bankrunProgram.account.marginfiAccount.fetch(
+          roundingUserMarginfiAccount.publicKey
+        );
       const activeBalance = marginfiAccount.lendingAccount.balances.find(
         (b) => b.active && b.bankPk.equals(juplendUsdcBankPk),
       );
-      assert.isUndefined(activeBalance, `cycle ${i} should close the bank balance`);
+      assert.isUndefined(
+        activeBalance,
+        `cycle ${i} should close the bank balance`
+      );
 
       const pricesNow = await fetchExchangePrices();
       assert.equal(
@@ -455,7 +468,9 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
       );
     }
 
-    const userEnd = BigInt(await getTokenBalance(bankRunProvider, user.usdcAccount));
+    const userEnd = BigInt(
+      await getTokenBalance(bankRunProvider, user.usdcAccount)
+    );
     const expectedTotalLoss = BigInt(LOOP_ITERATIONS) * perLoopExpectedLoss;
     assert.equal(
       (userStart - userEnd).toString(),
@@ -463,7 +478,9 @@ describe("jlr11: JupLend rounding loop (bankrun)", () => {
       "total rounding loss should be exactly per-cycle loss times iteration count",
     );
 
-    const bankAfter = await bankrunProgram.account.bank.fetch(juplendUsdcBankPk);
+    const bankAfter = await bankrunProgram.account.bank.fetch(
+      juplendUsdcBankPk
+    );
     assert.equal(
       bankAfter.assetShareValue.toString(),
       bankBefore.assetShareValue.toString(),

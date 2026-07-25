@@ -122,10 +122,7 @@ describe("k05: Init Kamino banks", () => {
 
     assertKeysEqual(config.oracleKeys[0], oracles.usdcOracle.publicKey);
 
-    assertBNEqual(
-      bank.flags,
-      CLOSE_ENABLED_FLAG + BANK_SEED_KNOWN_FLAG
-    );
+    assertBNEqual(bank.flags, CLOSE_ENABLED_FLAG + BANK_SEED_KNOWN_FLAG);
 
     // Note: this doesn't work if we've warped the banks clock
     // let lastUpdate = bank.lastUpdate.toNumber();
