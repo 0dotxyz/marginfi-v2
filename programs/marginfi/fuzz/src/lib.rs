@@ -244,7 +244,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                     &mut marginfi::instructions::LendingPoolAddBank {
                         marginfi_group: AccountLoader::try_from(airls(&self.marginfi_group))
                             .unwrap(),
-                        admin: Signer::try_from(airls(&self.owner)).unwrap(),
+                        bank_admin: Signer::try_from(airls(&self.owner)).unwrap(),
                         fee_payer: Signer::try_from(airls(&self.owner)).unwrap(),
                         fee_state: AccountLoader::try_from(airls(&self.fee_state)).unwrap(),
                         global_fee_wallet: uails(&self.fee_state_wallet),
@@ -316,7 +316,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                     &marginfi::ID,
                     &mut marginfi::instructions::LendingPoolConfigureBankOracle {
                         group: AccountLoader::try_from(airls(&self.marginfi_group)).unwrap(),
-                        admin: Signer::try_from(airls(&self.owner)).unwrap(),
+                        bank_admin: Signer::try_from(airls(&self.owner)).unwrap(),
                         bank: AccountLoader::try_from_unchecked(&marginfi::ID, airls(&bank))
                             .unwrap(),
                     },
@@ -1135,7 +1135,9 @@ fn initialize_fee_state<'a>(
 mod tests {
     use anchor_lang::AnchorDeserialize;
     use fixed::types::I80F48;
-    use marginfi::state::marginfi_account::{get_health_components, HealthPriceMode, RiskRequirementType};
+    use marginfi::state::marginfi_account::{
+        get_health_components, HealthPriceMode, RiskRequirementType,
+    };
     use marginfi_type_crate::types::MarginfiGroup;
     use pyth_solana_receiver_sdk::price_update::PriceUpdateV2;
 
