@@ -267,6 +267,8 @@ impl BankConfigOpt {
             cb_window_max_up_bps,
             cb_window_max_down_bps,
             operational_state: _,
+            liquidation_liquidator_fee: _,
+            liquidation_insurance_fee: _,
         } = self;
 
         let governance = asset_weight_init.is_some()
