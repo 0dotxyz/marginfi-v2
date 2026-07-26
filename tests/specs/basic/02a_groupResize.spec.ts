@@ -15,7 +15,10 @@ import {
   users,
 } from "../../rootHooks";
 import { assertBankrunTxFailed } from "../../utils/genericTests";
-import { getBankrunBlockhash, processBankrunTransaction } from "../../utils/tools";
+import {
+  getBankrunBlockhash,
+  processBankrunTransaction,
+} from "../../utils/tools";
 
 /** Current group layout size (8-byte discriminator + MarginfiGroup::LEN) */
 const GROUP_ACCOUNT_LEN = 8 + 9248;
@@ -55,7 +58,7 @@ describe("02a: Account resize (v1 -> current layout migration)", () => {
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         newAdmin: null,
         marginfiGroup: marginfiGroup.publicKey,
-      }),
+      })
     );
     brickedTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     brickedTx.sign(groupAdmin.wallet);
@@ -67,7 +70,7 @@ describe("02a: Account resize (v1 -> current layout migration)", () => {
       await resizeGroupAccount(users[0].mrgnBankrunProgram, {
         group: marginfiGroup.publicKey,
         payer: users[0].wallet.publicKey,
-      }),
+      })
     );
     await processBankrunTransaction(bankrunContext, tx, [users[0].wallet]);
 
@@ -76,15 +79,15 @@ describe("02a: Account resize (v1 -> current layout migration)", () => {
     // v1 prefix byte-identical, growth zero-filled
     assert.deepEqual(
       Buffer.from(after.data).subarray(0, GROUP_V1_ACCOUNT_LEN),
-      v1Data,
+      v1Data
     );
     assert.isTrue(
       Buffer.from(after.data)
         .subarray(GROUP_V1_ACCOUNT_LEN)
-        .every((b) => b === 0),
+        .every((b) => b === 0)
     );
     const groupAfter = await bankrunProgram.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey,
+      marginfiGroup.publicKey
     );
     assert.equal(groupAfter.admin.toString(), adminBefore.toString());
   });
@@ -94,14 +97,14 @@ describe("02a: Account resize (v1 -> current layout migration)", () => {
     const account = await banksClient.getAccount(feeStateKey);
     const v1Data = Buffer.from(account.data).subarray(
       0,
-      FEE_STATE_V1_ACCOUNT_LEN,
+      FEE_STATE_V1_ACCOUNT_LEN
     );
     bankrunContext.setAccount(feeStateKey, { ...account, data: v1Data });
 
     const tx = new Transaction().add(
       await resizeGlobalFeeState(users[0].mrgnBankrunProgram, {
         payer: users[0].wallet.publicKey,
-      }),
+      })
     );
     await processBankrunTransaction(bankrunContext, tx, [users[0].wallet]);
 
@@ -109,12 +112,12 @@ describe("02a: Account resize (v1 -> current layout migration)", () => {
     assert.equal(after.data.length, FEE_STATE_ACCOUNT_LEN);
     assert.deepEqual(
       Buffer.from(after.data).subarray(0, FEE_STATE_V1_ACCOUNT_LEN),
-      v1Data,
+      v1Data
     );
     assert.isTrue(
       Buffer.from(after.data)
         .subarray(FEE_STATE_V1_ACCOUNT_LEN)
-        .every((b) => b === 0),
+        .every((b) => b === 0)
     );
     // The anchor client decodes it again post-resize
     const feeState = await bankrunProgram.account.feeState.fetch(feeStateKey);
@@ -126,13 +129,13 @@ describe("02a: Account resize (v1 -> current layout migration)", () => {
       await resizeGroupAccount(groupAdmin.mrgnBankrunProgram, {
         group: marginfiGroup.publicKey,
         payer: groupAdmin.wallet.publicKey,
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
     assertBankrunTxFailed(
       await banksClient.tryProcessTransaction(tx),
-      "0x1971",
+      "0x1971"
     );
   });
 
@@ -142,7 +145,7 @@ describe("02a: Account resize (v1 -> current layout migration)", () => {
       await resizeGroupAccount(groupAdmin.mrgnBankrunProgram, {
         group: bogus.publicKey,
         payer: groupAdmin.wallet.publicKey,
-      }),
+      })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);

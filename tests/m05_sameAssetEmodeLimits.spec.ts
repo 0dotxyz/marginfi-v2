@@ -190,7 +190,10 @@ async function openMaxPositions(
 ): Promise<void> {
   const DEPOSITS_PER_TX = 4;
   for (let i = 0; i < NUM_COLLATERAL_BANKS; i += DEPOSITS_PER_TX) {
-    const chunk = banks.slice(i, Math.min(i + DEPOSITS_PER_TX, NUM_COLLATERAL_BANKS));
+    const chunk = banks.slice(
+      i,
+      Math.min(i + DEPOSITS_PER_TX, NUM_COLLATERAL_BANKS)
+    );
     const tx = new Transaction();
     for (const bank of chunk) {
       tx.add(
@@ -286,7 +289,9 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
           seed,
         })
       );
-      await processBankrunTransaction(bankrunContext, addTx, [groupAdmin.wallet]);
+      await processBankrunTransaction(bankrunContext, addTx, [
+        groupAdmin.wallet,
+      ]);
       banks.push(bankPk);
       allBankPairs.push([bankPk, oracles.usdcOracle.publicKey]);
       if (verbose) console.log(`*init USDC bank #${i}: ${bankPk}`);
@@ -301,7 +306,9 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
           oracle: oracles.usdcOracle.publicKey,
         })
       );
-      await processBankrunTransaction(bankrunContext, oracleTx, [groupAdmin.wallet]);
+      await processBankrunTransaction(bankrunContext, oracleTx, [
+        groupAdmin.wallet,
+      ]);
     }
 
     await enableSameAssetEmodeForBanks({
@@ -315,8 +322,14 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
     await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 
     // Init user accounts in the throwawayGroup.
-    const userKeys = [USER_LIQUIDATEE, USER_LIQUIDATOR, USER_DELEVERAGEE, USER_BAD_DEBT];
-    for (let i = 0; i < users.length; i++) { // users.length = 4
+    const userKeys = [
+      USER_LIQUIDATEE,
+      USER_LIQUIDATOR,
+      USER_DELEVERAGEE,
+      USER_BAD_DEBT,
+    ];
+    for (let i = 0; i < users.length; i++) {
+      // users.length = 4
       const accountKeypair = Keypair.generate();
       users[i].accounts.set(userKeys[i], accountKeypair.publicKey);
       const initTx = new Transaction().add(
@@ -375,7 +388,10 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
     const SEED_PER_TX = 4;
     const liabilityBanks = banks.slice(NUM_COLLATERAL_BANKS);
     for (let i = 0; i < liabilityBanks.length; i += SEED_PER_TX) {
-      const chunk = liabilityBanks.slice(i, Math.min(i + SEED_PER_TX, liabilityBanks.length));
+      const chunk = liabilityBanks.slice(
+        i,
+        Math.min(i + SEED_PER_TX, liabilityBanks.length)
+      );
       const seedTx = new Transaction();
       for (const bank of chunk) {
         seedTx.add(
@@ -388,7 +404,9 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
           })
         );
       }
-      await processBankrunTransaction(bankrunContext, seedTx, [groupAdmin.wallet]);
+      await processBankrunTransaction(bankrunContext, seedTx, [
+        groupAdmin.wallet,
+      ]);
     }
 
     // Build the shared LUT for all 16 bank+oracle pairs.
@@ -409,7 +427,10 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
 
     // The total borrow is split evenly across 8 liability banks; the last bank absorbs
     // the integer-division remainder so the sum is exact.
-    const borrowAmounts = splitBorrowAcrossBanks(LIQUIDATION_BORROW_TOTAL, NUM_LIABILITY_BANKS);
+    const borrowAmounts = splitBorrowAcrossBanks(
+      LIQUIDATION_BORROW_TOTAL,
+      NUM_LIABILITY_BANKS
+    );
 
     // Liquidatee opens 8 deposits + 8 borrows (MAX_BALANCES positions total).
     // The final borrow call exercises the risk engine across all 16 active balances with
@@ -438,8 +459,13 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
       })
     );
     await processBankrunTransaction(bankrunContext, tx, [liquidatee.wallet]);
-    let account = await bankrunProgram.account.marginfiAccount.fetch(liquidateeAccount);
-    assert.ok((account.healthCache.flags & HEALTH_CACHE_HEALTHY) !== 0, "should be healthy before tightening");
+    let account = await bankrunProgram.account.marginfiAccount.fetch(
+      liquidateeAccount
+    );
+    assert.ok(
+      (account.healthCache.flags & HEALTH_CACHE_HEALTHY) !== 0,
+      "should be healthy before tightening"
+    );
     assert.ok((account.healthCache.flags & HEALTH_CACHE_ENGINE_OK) !== 0);
     assert.ok((account.healthCache.flags & HEALTH_CACHE_ORACLE_OK) !== 0);
 
@@ -449,8 +475,12 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
     tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
-        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(TIGHTENED_INIT_LEVERAGE),
-        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(TIGHTENED_MAINT_LEVERAGE),
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(
+          TIGHTENED_INIT_LEVERAGE
+        ),
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(
+          TIGHTENED_MAINT_LEVERAGE
+        ),
       }),
       dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey)
     );
@@ -459,10 +489,15 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
     await warpToNextBankrunSlot(bankrunContext); // This is to help with blockhash errors.
 
     // Liquidate banks[0] (asset) against banks[8].
-    const liquidatorRemaining = await buildHealthRemainingAccounts(liquidatorAccount, {
-      includedBankPks: [banks[0], banks[NUM_COLLATERAL_BANKS]],
-    });
-    const liquidateeRemaining = await buildHealthRemainingAccounts(liquidateeAccount);
+    const liquidatorRemaining = await buildHealthRemainingAccounts(
+      liquidatorAccount,
+      {
+        includedBankPks: [banks[0], banks[NUM_COLLATERAL_BANKS]],
+      }
+    );
+    const liquidateeRemaining = await buildHealthRemainingAccounts(
+      liquidateeAccount
+    );
 
     const liquidateTx = new Transaction().add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 2_000_000 }),
@@ -488,7 +523,6 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
       lutAccount
     );
     await banksClient.processTransaction(versionedLiquidateTx);
-    
   });
 
   it("(admin) same-asset deleverage can improve a tightened MAX_BALANCES P0/P0 position", async () => {
@@ -504,9 +538,14 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
       }),
       dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey)
     );
-    await processBankrunTransaction(bankrunContext, resetTx, [groupAdmin.wallet]);
+    await processBankrunTransaction(bankrunContext, resetTx, [
+      groupAdmin.wallet,
+    ]);
 
-    const borrowAmounts = splitBorrowAcrossBanks(LIQUIDATION_BORROW_TOTAL, NUM_LIABILITY_BANKS);
+    const borrowAmounts = splitBorrowAcrossBanks(
+      LIQUIDATION_BORROW_TOTAL,
+      NUM_LIABILITY_BANKS
+    );
 
     await openMaxPositions(deleveragee, deleverageeAccount, borrowAmounts);
 
@@ -519,15 +558,24 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
       })
     );
     await processBankrunTransaction(bankrunContext, tx, [deleveragee.wallet]);
-    let account = await bankrunProgram.account.marginfiAccount.fetch(deleverageeAccount);
-    assert.ok((account.healthCache.flags & HEALTH_CACHE_HEALTHY) !== 0, "should be healthy before tightening");
+    let account = await bankrunProgram.account.marginfiAccount.fetch(
+      deleverageeAccount
+    );
+    assert.ok(
+      (account.healthCache.flags & HEALTH_CACHE_HEALTHY) !== 0,
+      "should be healthy before tightening"
+    );
 
     // Tighten to 18x/19x to make the position maintenance-underwater.
     tx = new Transaction().add(
       await groupConfigure(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
-        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(TIGHTENED_INIT_LEVERAGE),
-        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(TIGHTENED_MAINT_LEVERAGE),
+        sameAssetEmodeInitLeverage: toWrappedI80F48Safe(
+          TIGHTENED_INIT_LEVERAGE
+        ),
+        sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(
+          TIGHTENED_MAINT_LEVERAGE
+        ),
       }),
       dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey)
     );
@@ -599,13 +647,18 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
       }),
       dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey)
     );
-    await processBankrunTransaction(bankrunContext, resetTx, [groupAdmin.wallet]);    
+    await processBankrunTransaction(bankrunContext, resetTx, [
+      groupAdmin.wallet,
+    ]);
 
     // The borrow is sized between the pre-haircut 20x init boundary and the post-haircut 21x maint
     // boundary (haircut 199/200 on each collateral bank). The position is accepted before the haircut
     // and becomes maintenance-underwater only after all 8 collateral banks are haircutted, while
     // remaining equity-solvent throughout.
-    const borrowAmounts = splitBorrowAcrossBanks(BAD_DEBT_BORROW_TOTAL, NUM_LIABILITY_BANKS);
+    const borrowAmounts = splitBorrowAcrossBanks(
+      BAD_DEBT_BORROW_TOTAL,
+      NUM_LIABILITY_BANKS
+    );
     await openMaxPositions(badDebtUser, badDebtAccount, borrowAmounts);
 
     // Pulse health and record the pre-haircut equity asset value for the survivability assertion.
@@ -617,7 +670,9 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
       })
     );
     await processBankrunTransaction(bankrunContext, tx, [badDebtUser.wallet]);
-    let account = await bankrunProgram.account.marginfiAccount.fetch(badDebtAccount);
+    let account = await bankrunProgram.account.marginfiAccount.fetch(
+      badDebtAccount
+    );
     const originalAssetValueEquity = wrappedI80F48toBigNumber(
       account.healthCache.assetValueEquity
     );
@@ -652,7 +707,9 @@ describe("m05: Same-asset emode limits (MAX_BALANCES positions)", () => {
       })
     );
     await processBankrunTransaction(bankrunContext, tx, [badDebtUser.wallet]);
-    account = await bankrunProgram.account.marginfiAccount.fetch(badDebtAccount);
+    account = await bankrunProgram.account.marginfiAccount.fetch(
+      badDebtAccount
+    );
 
     // The account must be maintenance-underwater (eligible for deleverage) yet remain
     // equity-solvent (bankruptcy is not possible) and the equity-to-maint buffer must be

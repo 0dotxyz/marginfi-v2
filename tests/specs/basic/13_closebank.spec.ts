@@ -22,7 +22,10 @@ import {
 } from "../../utils/user-instructions";
 import { deriveBankWithSeed } from "../../utils/pdas";
 import { assert } from "chai";
-import { assertBNEqual, expectFailedTxWithError } from "../../utils/genericTests";
+import {
+  assertBNEqual,
+  expectFailedTxWithError,
+} from "../../utils/genericTests";
 import { closeBank } from "../../utils/group-instructions";
 import { USER_ACCOUNT } from "../../utils/mocks";
 import { dumpAccBalances } from "../../utils/tools";

@@ -29,7 +29,11 @@ import {
   DRIFT_TOKEN_A_SPOT_MARKET,
 } from "../../rootHooks";
 import { configureBank } from "../../utils/group-instructions";
-import { defaultBankConfigOptRaw, blankBankConfigOptRaw, MAX_BALANCES } from "../../utils/types";
+import {
+  defaultBankConfigOptRaw,
+  blankBankConfigOptRaw,
+  MAX_BALANCES,
+} from "../../utils/types";
 import {
   borrowIx,
   closeLiquidationRecordIx,
@@ -64,7 +68,10 @@ import {
   makeDriftDepositIx,
   makeDriftWithdrawIx,
 } from "../../utils/drift-instructions";
-import { TOKEN_A_MARKET_INDEX, refreshDriftOracles } from "../../utils/drift-utils";
+import {
+  TOKEN_A_MARKET_INDEX,
+  refreshDriftOracles,
+} from "../../utils/drift-utils";
 import { makeUpdateSpotMarketCumulativeInterestIx } from "../../utils/drift-sdk";
 import { makeJuplendDepositIx } from "../../utils/juplend/user-instructions";
 import {
@@ -109,7 +116,7 @@ const SCENARIOS: Array<{
 
 function groupSeedForScenario(index: number): Buffer {
   return Buffer.from(
-    `MARGINFI_GROUP_SEED_12340000M3${index.toString().padStart(2, "0")}`,
+    `MARGINFI_GROUP_SEED_12340000M3${index.toString().padStart(2, "0")}`
   );
 }
 
@@ -121,7 +128,7 @@ function scenarioName(
   oracleMode: "pyth" | "switchboard",
   kaminoDeposits: number,
   driftDeposits: number,
-  juplendDeposits: number,
+  juplendDeposits: number
 ) {
   return `m03: Limits [${oracleMode}] (Kamino=${kaminoDeposits}, Drift=${driftDeposits}, Juplend=${juplendDeposits}, RegularDebt=${P0_BORROWS})`;
 }
@@ -146,7 +153,7 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
       );
       const USER_ACCOUNT_THROWAWAY = userAccountNameForScenario(
         scenarioIndex,
-        oracleMode,
+        oracleMode
       );
 
       describe(
@@ -366,18 +373,18 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
               new BN(Number(clock.slot)),
               Number(clock.unixTimestamp),
               bankrunContext,
-              false,
+              false
             );
             if (oracleMode === "switchboard") {
               await refreshSwitchboardPullOracleBankrun(
                 bankrunContext,
                 banksClient,
-                oracles.tokenAOracleSwb.publicKey,
+                oracles.tokenAOracleSwb.publicKey
               );
               await refreshSwitchboardPullOracleBankrun(
                 bankrunContext,
                 banksClient,
-                oracles.lstAlphaOracleSwb.publicKey,
+                oracles.lstAlphaOracleSwb.publicKey
               );
             }
           };
@@ -724,7 +731,7 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
                 tokenAccount: user.lstAlphaAccount,
                 remaining: liquidateeRemainingAccounts,
                 amount: borrowLstAmount,
-              }),
+              })
             );
 
             await processBankrunTransaction(
@@ -732,7 +739,7 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
               tx,
               [user.wallet],
               false,
-              true,
+              true
             );
           });
 
@@ -745,7 +752,7 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
               await configureBank(groupAdmin.mrgnBankrunProgram, {
                 bank: banks[0],
                 bankConfigOpt: config,
-              }),
+              })
             );
 
             await processBankrunTransaction(bankrunContext, tx, [
@@ -865,7 +872,7 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
             );
             const receiverInstructions = await buildReceivershipInstructions(
               liquidator,
-              liquidateeAccount,
+              liquidateeAccount
             );
             const lutAddresses: PublicKey[] = [];
             const seen = new Set<string>();
@@ -906,7 +913,7 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
             );
             const [liqRecordPk] = deriveLiquidationRecord(
               bankrunProgram.programId,
-              liquidateeAccount,
+              liquidateeAccount
             );
 
             const accountBefore =
@@ -1051,8 +1058,8 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
               // passed, log nothing...
             }
           });
-        },
+        }
       );
-    },
+    }
   );
 });

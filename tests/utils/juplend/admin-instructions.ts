@@ -20,7 +20,7 @@ export type InitJuplendLiquidityArgs = {
 
 export const initJuplendLiquidityIx = (
   programs: JuplendPrograms,
-  args: InitJuplendLiquidityArgs,
+  args: InitJuplendLiquidityArgs
 ) => {
   return programs.liquidity.methods
     .initLiquidity(args.authority, args.revenueCollector)
@@ -38,12 +38,12 @@ export type InitJuplendLendingRewardsAdminArgs = {
 
 export const initJuplendLendingRewardsAdminIx = (
   programs: JuplendPrograms,
-  args: InitJuplendLendingRewardsAdminArgs,
+  args: InitJuplendLendingRewardsAdminArgs
 ) => {
   return programs.rewards.methods
     .initLendingRewardsAdmin(
       args.authority,
-      args.lendingProgram ?? JUPLEND_LENDING_PROGRAM_ID,
+      args.lendingProgram ?? JUPLEND_LENDING_PROGRAM_ID
     )
     .accounts({
       signer: args.signer,
@@ -60,13 +60,13 @@ export type InitJuplendLendingAdminArgs = {
 
 export const initJuplendLendingAdminIx = (
   programs: JuplendPrograms,
-  args: InitJuplendLendingAdminArgs,
+  args: InitJuplendLendingAdminArgs
 ) => {
   return programs.lending.methods
     .initLendingAdmin(
       args.liquidityProgram ?? JUPLEND_LIQUIDITY_PROGRAM_ID,
       args.adminAuthority,
-      args.rebalancer,
+      args.rebalancer
     )
     .accounts({
       authority: args.authority,
@@ -84,7 +84,7 @@ export type InitJuplendProtocolPositionsArgs = {
 
 export const initJuplendProtocolPositionsIx = (
   programs: JuplendPrograms,
-  args: InitJuplendProtocolPositionsArgs,
+  args: InitJuplendProtocolPositionsArgs
 ) => {
   return programs.liquidity.methods
     .initNewProtocol(args.supplyMint, args.borrowMint, args.protocol)
@@ -103,7 +103,7 @@ export type UpdateJuplendUserClassArgs = {
 
 export const updateJuplendUserClassIx = (
   programs: JuplendPrograms,
-  args: UpdateJuplendUserClassArgs,
+  args: UpdateJuplendUserClassArgs
 ) => {
   return programs.liquidity.methods
     .updateUserClass(args.entries)
@@ -127,7 +127,7 @@ export type UpdateJuplendUserBorrowConfigArgs = {
 
 export const updateJuplendUserBorrowConfigIx = (
   programs: JuplendPrograms,
-  args: UpdateJuplendUserBorrowConfigArgs,
+  args: UpdateJuplendUserBorrowConfigArgs
 ) => {
   return programs.liquidity.methods
     .updateUserBorrowConfig({
@@ -168,7 +168,7 @@ export type InitJuplendClaimAccountArgs = {
  */
 export const initJuplendClaimAccountIx = (
   programs: JuplendPrograms,
-  args: InitJuplendClaimAccountArgs,
+  args: InitJuplendClaimAccountArgs
 ) => {
   return programs.liquidity.methods
     .initClaimAccount(args.mint, args.accountFor)
@@ -193,14 +193,14 @@ export type StartJuplendRewardsArgs = {
 
 export const startJuplendRewardsIx = (
   programs: JuplendPrograms,
-  args: StartJuplendRewardsArgs,
+  args: StartJuplendRewardsArgs
 ) => {
   return programs.rewards.methods
     .startRewards(
       args.rewardAmount,
       args.duration,
       args.startTime ?? new BN(0),
-      args.startTvl ?? new BN(0),
+      args.startTvl ?? new BN(0)
     )
     .accounts({
       authority: args.authority,
@@ -223,7 +223,7 @@ export type StopJuplendRewardsArgs = {
 
 export const stopJuplendRewardsIx = (
   programs: JuplendPrograms,
-  args: StopJuplendRewardsArgs,
+  args: StopJuplendRewardsArgs
 ) => {
   return programs.rewards.methods
     .stopRewards()

@@ -33,15 +33,15 @@ export const getJuplendPrograms = (): JuplendPrograms => {
   return {
     liquidity: new Program<JuplendLiquidityIdl>(
       liquidityIdlWithAddress as JuplendLiquidityIdl,
-      bankRunProvider,
+      bankRunProvider
     ),
     lending: new Program<JuplendLendingIdl>(
       lendingIdlWithAddress as JuplendLendingIdl,
-      bankRunProvider,
+      bankRunProvider
     ),
     rewards: new Program<JuplendRewardsIdl>(
       rewardsIdlWithAddress as JuplendRewardsIdl,
-      bankRunProvider,
+      bankRunProvider
     ),
   };
 };

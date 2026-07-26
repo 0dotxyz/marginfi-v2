@@ -181,7 +181,7 @@ describe("d07: Drift Deposit Tests", () => {
     // user 1's first deposit into the USDC bank: asset shares minted == scaled balance
     assertI80F48Equal(
       depositEvent!.data.shareAmount,
-      amount.mul(USDC_SCALING_FACTOR),
+      amount.mul(USDC_SCALING_FACTOR)
     );
 
     const driftUserAfter = await getDriftUserAccount(

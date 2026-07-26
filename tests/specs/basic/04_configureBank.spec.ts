@@ -84,8 +84,8 @@ describe("Lending pool configure bank", () => {
     adminConfig.totalAssetValueInitLimit = new BN(15000);
     adminConfig.interestRateConfig = interestRateConfig;
     adminConfig.tokenlessRepaymentsAllowed = true;
-    adminConfig.liquidationLiquidatorFee = Math.floor(u32_MAX * 0.03); 
-    adminConfig.liquidationInsuranceFee = Math.floor(u32_MAX * 0.035); 
+    adminConfig.liquidationLiquidatorFee = Math.floor(u32_MAX * 0.03);
+    adminConfig.liquidationInsuranceFee = Math.floor(u32_MAX * 0.035);
 
     const operationalConfig = blankBankConfigOptRaw();
     operationalConfig.operationalState = {
@@ -176,7 +176,7 @@ describe("Lending pool configure bank", () => {
     const { riskConfig, adminConfig, operationalConfig } = splitBankConfig(
       defaultBankConfigOptRaw()
     );
-    
+
     await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
       new Transaction()
         .add(

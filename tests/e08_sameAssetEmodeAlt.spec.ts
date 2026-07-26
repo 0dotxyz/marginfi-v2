@@ -93,7 +93,9 @@ function fixedSeed(label: string): Buffer {
 }
 
 function uiToNative(ui: number, decimals: number): BN {
-  return new BN(new Decimal(ui).times(new Decimal(10).pow(decimals)).toFixed(0));
+  return new BN(
+    new Decimal(ui).times(new Decimal(10).pow(decimals)).toFixed(0)
+  );
 }
 
 function healthFromCache(cache: {
@@ -103,21 +105,28 @@ function healthFromCache(cache: {
   liabilityValueMaint: WrappedI80F48;
 }): HealthPair {
   const init = wrappedI80F48toBigNumber(cache.assetValue).minus(
-    wrappedI80F48toBigNumber(cache.liabilityValue),
+    wrappedI80F48toBigNumber(cache.liabilityValue)
   );
   const maint = wrappedI80F48toBigNumber(cache.assetValueMaint).minus(
-    wrappedI80F48toBigNumber(cache.liabilityValueMaint),
+    wrappedI80F48toBigNumber(cache.liabilityValueMaint)
   );
 
   return { init, maint };
 }
 
-async function createNativeAlphaBank(group: PublicKey, seed: BN): Promise<PublicKey> {
+async function createNativeAlphaBank(
+  group: PublicKey,
+  seed: BN
+): Promise<PublicKey> {
   const config = defaultBankConfig();
   config.assetWeightInit = bigNumberToWrappedI80F48(NATIVE_ASSET_WEIGHT_INIT);
   config.assetWeightMaint = bigNumberToWrappedI80F48(NATIVE_ASSET_WEIGHT_MAINT);
-  config.liabilityWeightInit = bigNumberToWrappedI80F48(NATIVE_LIAB_WEIGHT_INIT);
-  config.liabilityWeightMain = bigNumberToWrappedI80F48(NATIVE_LIAB_WEIGHT_MAINT);
+  config.liabilityWeightInit = bigNumberToWrappedI80F48(
+    NATIVE_LIAB_WEIGHT_INIT
+  );
+  config.liabilityWeightMain = bigNumberToWrappedI80F48(
+    NATIVE_LIAB_WEIGHT_MAINT
+  );
   config.interestRateConfig.protocolOriginationFee = I80F48_ZERO;
 
   const addIx = addBankWithSeed(groupAdmin.mrgnBankrunProgram, {
@@ -128,12 +137,17 @@ async function createNativeAlphaBank(group: PublicKey, seed: BN): Promise<Public
     seed,
   });
 
-  const [bank] = deriveBankWithSeed(bankrunProgram.programId, group, ecosystem.tokenAMint.publicKey, seed);
+  const [bank] = deriveBankWithSeed(
+    bankrunProgram.programId,
+    group,
+    ecosystem.tokenAMint.publicKey,
+    seed
+  );
 
   await processBankrunTransaction(
     bankrunContext,
     new Transaction().add(await addIx),
-    [groupAdmin.wallet],
+    [groupAdmin.wallet]
   );
 
   const oracleIx = configureBankOracle(groupAdmin.mrgnBankrunProgram, {
@@ -145,13 +159,17 @@ async function createNativeAlphaBank(group: PublicKey, seed: BN): Promise<Public
   await processBankrunTransaction(
     bankrunContext,
     new Transaction().add(await oracleIx),
-    [groupAdmin.wallet],
+    [groupAdmin.wallet]
   );
 
   return bank;
 }
 
-async function setAssetWeights(bank: PublicKey, initWeight: number, maintWeight: number) {
+async function setAssetWeights(
+  bank: PublicKey,
+  initWeight: number,
+  maintWeight: number
+) {
   const config = blankBankConfigOptRaw();
   config.assetWeightInit = bigNumberToWrappedI80F48(initWeight);
   config.assetWeightMaint = bigNumberToWrappedI80F48(maintWeight);
@@ -164,11 +182,15 @@ async function setAssetWeights(bank: PublicKey, initWeight: number, maintWeight:
   await processBankrunTransaction(
     bankrunContext,
     new Transaction().add(await ix),
-    [groupAdmin.wallet],
+    [groupAdmin.wallet]
   );
 }
 
-async function setSameAssetLeverage(group: PublicKey, initLeverage: number, maintLeverage: number) {
+async function setSameAssetLeverage(
+  group: PublicKey,
+  initLeverage: number,
+  maintLeverage: number
+) {
   const ix = await groupConfigure(groupAdmin.mrgnBankrunProgram, {
     marginfiGroup: group,
     sameAssetEmodeInitLeverage: toWrappedI80F48Safe(initLeverage),
@@ -179,17 +201,25 @@ async function setSameAssetLeverage(group: PublicKey, initLeverage: number, main
     bankrunContext,
     new Transaction().add(
       ix,
-      dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey),
+      dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey)
     ),
-    [groupAdmin.wallet],
+    [groupAdmin.wallet]
   );
 }
 
-async function refreshScenarioOracles(kind: IntegrationKind, juplendPool: JuplendPoolKeys | null) {
+async function refreshScenarioOracles(
+  kind: IntegrationKind,
+  juplendPool: JuplendPoolKeys | null
+) {
   await refreshPullOraclesBankrun(oracles, bankrunContext, banksClient);
 
   if (kind === "drift") {
-    await refreshDriftOracles(oracles, driftAccounts, bankrunContext, banksClient);
+    await refreshDriftOracles(
+      oracles,
+      driftAccounts,
+      bankrunContext,
+      banksClient
+    );
   }
 
   if (kind === "juplend") {
@@ -200,26 +230,30 @@ async function refreshScenarioOracles(kind: IntegrationKind, juplendPool: Juplen
         await refreshJupSimple(juplendPrograms.lending, {
           pool: juplendPool!,
         }),
-        dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey),
+        dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey)
       ),
-      [groupAdmin.wallet],
+      [groupAdmin.wallet]
     );
   }
 }
 
-async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: number) {
+async function runIntegrationScenario(
+  kind: IntegrationKind,
+  scenarioIndex: number
+) {
   const userAccountName = `e08_same_asset_${kind}_${scenarioIndex}`;
   const groupSeed = fixedSeed(`e08_${kind}_${scenarioIndex}`);
   const startingSeed = 8_800 + scenarioIndex * 100;
 
-  const { throwawayGroup, kaminoBanks, driftBanks } = await genericMultiBankTestSetup(
-    0,
-    userAccountName,
-    groupSeed,
-    startingSeed,
-    kind === "kamino" ? 1 : 0,
-    kind === "drift" ? 1 : 0,
-  );
+  const { throwawayGroup, kaminoBanks, driftBanks } =
+    await genericMultiBankTestSetup(
+      0,
+      userAccountName,
+      groupSeed,
+      startingSeed,
+      kind === "kamino" ? 1 : 0,
+      kind === "drift" ? 1 : 0
+    );
 
   let integrationBank: PublicKey;
   let integrationRemainingTail: PublicKey | undefined;
@@ -242,7 +276,10 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
     integrationRemainingTail = driftAccounts.get(DRIFT_TOKEN_A_SPOT_MARKET)!;
   }
 
-  const nativeBank = await createNativeAlphaBank(throwawayGroup.publicKey, new BN(startingSeed + 90));
+  const nativeBank = await createNativeAlphaBank(
+    throwawayGroup.publicKey,
+    new BN(startingSeed + 90)
+  );
   await enableSameAssetEmodeForBanks({
     program: groupAdmin.mrgnBankrunProgram,
     bankrunContext,
@@ -252,9 +289,17 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
   });
 
   if (kind !== "kamino") {
-    await setAssetWeights(integrationBank, NATIVE_ASSET_WEIGHT_INIT, NATIVE_ASSET_WEIGHT_MAINT);
+    await setAssetWeights(
+      integrationBank,
+      NATIVE_ASSET_WEIGHT_INIT,
+      NATIVE_ASSET_WEIGHT_MAINT
+    );
   }
-  await setSameAssetLeverage(throwawayGroup.publicKey, SAME_ASSET_DISABLED, SAME_ASSET_DISABLED);
+  await setSameAssetLeverage(
+    throwawayGroup.publicKey,
+    SAME_ASSET_DISABLED,
+    SAME_ASSET_DISABLED
+  );
 
   await refreshScenarioOracles(kind, juplendPool);
 
@@ -271,9 +316,9 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
         tokenAccount: groupAdmin.tokenAAccount,
         amount: uiToNative(200, ecosystem.tokenADecimals),
         depositUpToLimit: false,
-      }),
+      })
     ),
-    [groupAdmin.wallet],
+    [groupAdmin.wallet]
   );
 
   if (kind === "kamino") {
@@ -281,11 +326,17 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
     const tokenAReserve = kaminoAccounts.get(TOKEN_A_RESERVE)!;
     const reserveFarmState = farmAccounts.get(A_FARM_STATE)!;
 
-    const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(bankrunProgram.programId, integrationBank);
-    const [obligation] = deriveBaseObligation(lendingVaultAuthority, lendingMarket);
+    const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
+      bankrunProgram.programId,
+      integrationBank
+    );
+    const [obligation] = deriveBaseObligation(
+      lendingVaultAuthority,
+      lendingMarket
+    );
     const [obligationFarmUserState] = PublicKey.findProgramAddressSync(
       [Buffer.from("user"), reserveFarmState.toBuffer(), obligation.toBuffer()],
-      FARMS_PROGRAM_ID,
+      FARMS_PROGRAM_ID
     );
 
     const refreshBatchIx = await klendBankrunProgram.methods
@@ -301,9 +352,9 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
         bankrunContext,
         new Transaction().add(
           ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 }),
-          refreshBatchIx,
+          refreshBatchIx
         ),
-        [user.wallet],
+        [user.wallet]
       );
     } catch (e) {
       throw new Error(`kamino refresh_reserves_batch failed: ${String(e)}`);
@@ -323,9 +374,9 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
         bankrunContext,
         new Transaction().add(
           ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 }),
-          refreshObligationIx,
+          refreshObligationIx
         ),
-        [user.wallet],
+        [user.wallet]
       );
     } catch (e) {
       throw new Error(`kamino refresh_obligation failed: ${String(e)}`);
@@ -348,10 +399,10 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
               obligationFarmUserState,
             },
             uiToNative(COLLATERAL_UI, ecosystem.tokenADecimals),
-            false,
-          ),
+            false
+          )
         ),
-        [user.wallet],
+        [user.wallet]
       );
     } catch (e) {
       throw new Error(`kamino deposit failed: ${String(e)}`);
@@ -360,7 +411,7 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
     await setAssetWeights(
       integrationBank,
       NATIVE_ASSET_WEIGHT_INIT,
-      NATIVE_ASSET_WEIGHT_MAINT,
+      NATIVE_ASSET_WEIGHT_MAINT
     );
   } else if (kind === "drift") {
     await processBankrunTransaction(
@@ -375,10 +426,10 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
             driftOracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE)!,
           },
           uiToNative(COLLATERAL_UI, ecosystem.tokenADecimals),
-          TOKEN_A_MARKET_INDEX,
-        ),
+          TOKEN_A_MARKET_INDEX
+        )
       ),
-      [user.wallet],
+      [user.wallet]
     );
   } else {
     await processBankrunTransaction(
@@ -390,14 +441,18 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
           bank: integrationBank,
           pool: juplendPool!,
           amount: uiToNative(COLLATERAL_UI, ecosystem.tokenADecimals),
-        }),
+        })
       ),
-      [user.wallet],
+      [user.wallet]
     );
   }
 
   const remaining = composeRemainingAccounts([
-    [integrationBank, oracles.tokenAOracle.publicKey, integrationRemainingTail!],
+    [
+      integrationBank,
+      oracles.tokenAOracle.publicKey,
+      integrationRemainingTail!,
+    ],
     [nativeBank, oracles.tokenAOracle.publicKey],
   ]);
 
@@ -411,9 +466,9 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
         tokenAccount: user.tokenAAccount,
         remaining,
         amount: uiToNative(BORROW_UI_BEFORE_ENABLE, ecosystem.tokenADecimals),
-      }),
+      })
     ),
-    [user.wallet],
+    [user.wallet]
   );
 
   await refreshScenarioOracles(kind, juplendPool);
@@ -423,18 +478,20 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         remaining,
-      }),
+      })
     ),
-    [user.wallet],
+    [user.wallet]
   );
 
-  const beforeAcc = await bankrunProgram.account.marginfiAccount.fetch(userAccount);
+  const beforeAcc = await bankrunProgram.account.marginfiAccount.fetch(
+    userAccount
+  );
   const before = healthFromCache(beforeAcc.healthCache);
 
   await setSameAssetLeverage(
     throwawayGroup.publicKey,
     SAME_ASSET_ENABLED_INIT_LEVERAGE,
-    SAME_ASSET_ENABLED_MAINT_LEVERAGE,
+    SAME_ASSET_ENABLED_MAINT_LEVERAGE
   );
 
   await refreshScenarioOracles(kind, juplendPool);
@@ -447,9 +504,9 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
         tokenAccount: user.tokenAAccount,
         remaining,
         amount: uiToNative(BORROW_UI_AFTER_ENABLE, ecosystem.tokenADecimals),
-      }),
+      })
     ),
-    [user.wallet],
+    [user.wallet]
   );
 
   await refreshScenarioOracles(kind, juplendPool);
@@ -459,12 +516,14 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount: userAccount,
         remaining,
-      }),
+      })
     ),
-    [user.wallet],
+    [user.wallet]
   );
 
-  const afterAcc = await bankrunProgram.account.marginfiAccount.fetch(userAccount);
+  const afterAcc = await bankrunProgram.account.marginfiAccount.fetch(
+    userAccount
+  );
   const after = healthFromCache(afterAcc.healthCache);
   const price = ecosystem.tokenAPrice;
   const totalBorrowUi = BORROW_UI_BEFORE_ENABLE + BORROW_UI_AFTER_ENABLE;
@@ -473,38 +532,95 @@ async function runIntegrationScenario(kind: IntegrationKind, scenarioIndex: numb
   const sameAssetMaintWeight =
     NATIVE_LIAB_WEIGHT_MAINT * (1 - 1 / SAME_ASSET_ENABLED_MAINT_LEVERAGE);
 
-  const expectedBeforeAssetInit = COLLATERAL_UI * price * NATIVE_ASSET_WEIGHT_INIT;
-  const expectedBeforeLiabInit = BORROW_UI_BEFORE_ENABLE * price * NATIVE_LIAB_WEIGHT_INIT;
-  const expectedBeforeAssetMaint = COLLATERAL_UI * price * NATIVE_ASSET_WEIGHT_MAINT;
-  const expectedBeforeLiabMaint = BORROW_UI_BEFORE_ENABLE * price * NATIVE_LIAB_WEIGHT_MAINT;
+  const expectedBeforeAssetInit =
+    COLLATERAL_UI * price * NATIVE_ASSET_WEIGHT_INIT;
+  const expectedBeforeLiabInit =
+    BORROW_UI_BEFORE_ENABLE * price * NATIVE_LIAB_WEIGHT_INIT;
+  const expectedBeforeAssetMaint =
+    COLLATERAL_UI * price * NATIVE_ASSET_WEIGHT_MAINT;
+  const expectedBeforeLiabMaint =
+    BORROW_UI_BEFORE_ENABLE * price * NATIVE_LIAB_WEIGHT_MAINT;
 
   const expectedAfterAssetInit = COLLATERAL_UI * price * sameAssetInitWeight;
   const expectedAfterLiabInit = totalBorrowUi * price * NATIVE_LIAB_WEIGHT_INIT;
   const expectedAfterAssetMaint = COLLATERAL_UI * price * sameAssetMaintWeight;
-  const expectedAfterLiabMaint = totalBorrowUi * price * NATIVE_LIAB_WEIGHT_MAINT;
+  const expectedAfterLiabMaint =
+    totalBorrowUi * price * NATIVE_LIAB_WEIGHT_MAINT;
 
   const valueTolerance = 8;
   const healthTolerance = 12;
 
-  assertI80F48Approx(beforeAcc.healthCache.assetValue, expectedBeforeAssetInit, valueTolerance);
-  assertI80F48Approx(beforeAcc.healthCache.liabilityValue, expectedBeforeLiabInit, valueTolerance);
-  assertI80F48Approx(beforeAcc.healthCache.assetValueMaint, expectedBeforeAssetMaint, valueTolerance);
-  assertI80F48Approx(beforeAcc.healthCache.liabilityValueMaint, expectedBeforeLiabMaint, valueTolerance);
+  assertI80F48Approx(
+    beforeAcc.healthCache.assetValue,
+    expectedBeforeAssetInit,
+    valueTolerance
+  );
+  assertI80F48Approx(
+    beforeAcc.healthCache.liabilityValue,
+    expectedBeforeLiabInit,
+    valueTolerance
+  );
+  assertI80F48Approx(
+    beforeAcc.healthCache.assetValueMaint,
+    expectedBeforeAssetMaint,
+    valueTolerance
+  );
+  assertI80F48Approx(
+    beforeAcc.healthCache.liabilityValueMaint,
+    expectedBeforeLiabMaint,
+    valueTolerance
+  );
 
-  assertI80F48Approx(afterAcc.healthCache.assetValue, expectedAfterAssetInit, valueTolerance);
-  assertI80F48Approx(afterAcc.healthCache.liabilityValue, expectedAfterLiabInit, valueTolerance);
-  assertI80F48Approx(afterAcc.healthCache.assetValueMaint, expectedAfterAssetMaint, valueTolerance);
-  assertI80F48Approx(afterAcc.healthCache.liabilityValueMaint, expectedAfterLiabMaint, valueTolerance);
+  assertI80F48Approx(
+    afterAcc.healthCache.assetValue,
+    expectedAfterAssetInit,
+    valueTolerance
+  );
+  assertI80F48Approx(
+    afterAcc.healthCache.liabilityValue,
+    expectedAfterLiabInit,
+    valueTolerance
+  );
+  assertI80F48Approx(
+    afterAcc.healthCache.assetValueMaint,
+    expectedAfterAssetMaint,
+    valueTolerance
+  );
+  assertI80F48Approx(
+    afterAcc.healthCache.liabilityValueMaint,
+    expectedAfterLiabMaint,
+    valueTolerance
+  );
 
-  const expectedBeforeInitHealth = expectedBeforeAssetInit - expectedBeforeLiabInit;
-  const expectedBeforeMaintHealth = expectedBeforeAssetMaint - expectedBeforeLiabMaint;
-  const expectedAfterInitHealth = expectedAfterAssetInit - expectedAfterLiabInit;
-  const expectedAfterMaintHealth = expectedAfterAssetMaint - expectedAfterLiabMaint;
+  const expectedBeforeInitHealth =
+    expectedBeforeAssetInit - expectedBeforeLiabInit;
+  const expectedBeforeMaintHealth =
+    expectedBeforeAssetMaint - expectedBeforeLiabMaint;
+  const expectedAfterInitHealth =
+    expectedAfterAssetInit - expectedAfterLiabInit;
+  const expectedAfterMaintHealth =
+    expectedAfterAssetMaint - expectedAfterLiabMaint;
 
-  assert.approximately(before.init.toNumber(), expectedBeforeInitHealth, healthTolerance);
-  assert.approximately(before.maint.toNumber(), expectedBeforeMaintHealth, healthTolerance);
-  assert.approximately(after.init.toNumber(), expectedAfterInitHealth, healthTolerance);
-  assert.approximately(after.maint.toNumber(), expectedAfterMaintHealth, healthTolerance);
+  assert.approximately(
+    before.init.toNumber(),
+    expectedBeforeInitHealth,
+    healthTolerance
+  );
+  assert.approximately(
+    before.maint.toNumber(),
+    expectedBeforeMaintHealth,
+    healthTolerance
+  );
+  assert.approximately(
+    after.init.toNumber(),
+    expectedAfterInitHealth,
+    healthTolerance
+  );
+  assert.approximately(
+    after.maint.toNumber(),
+    expectedAfterMaintHealth,
+    healthTolerance
+  );
 }
 
 describe("e08 same-asset emode with integration collateral", () => {

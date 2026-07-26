@@ -115,13 +115,13 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
     await refreshSwitchboardPullOracleBankrun(
       bankrunContext,
       banksClient,
-      oracles.wsolOracleSwb.publicKey,
+      oracles.wsolOracleSwb.publicKey
     );
   };
 
   const pulseHealth = async (
     user: (typeof users)[number],
-    marginfiAccountPk: PublicKey,
+    marginfiAccountPk: PublicKey
   ) => {
     await refreshAllOracles();
     const remaining = await buildHealthRemainingAccounts(marginfiAccountPk);
@@ -137,11 +137,11 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
           pool: jupUsdcPool,
         }),
         pulseIx,
-        dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
+        dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey)
       ),
       [user.wallet],
       false,
-      true,
+      true
     );
 
     return bankrunProgram.account.marginfiAccount.fetch(marginfiAccountPk);
@@ -149,7 +149,7 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
 
   const netHealth = (healthCache: MarginfiHealthCache) =>
     wrappedI80F48toBigNumber(healthCache.assetValue).minus(
-      wrappedI80F48toBigNumber(healthCache.liabilityValue),
+      wrappedI80F48toBigNumber(healthCache.liabilityValue)
     );
 
   const uiAmount = (native: BN, decimals: number): number =>
@@ -160,10 +160,10 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
   const priceForBank = (
     marginfiAccount: MarginfiAccount,
     bankPk: PublicKey,
-    errLabel: string,
+    errLabel: string
   ): number => {
     const idx = marginfiAccount.lendingAccount.balances.findIndex(
-      (b: MarginfiBalance) => b.active && b.bankPk.equals(bankPk),
+      (b: MarginfiBalance) => b.active && b.bankPk.equals(bankPk)
     );
     assert.isAtLeast(idx, 0, `${errLabel}: missing active bank balance`);
     return bytesToF64(marginfiAccount.healthCache.prices[idx]);
@@ -175,7 +175,7 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
 
     groupPk = juplendAccounts.get(JUPLEND_STATE_KEYS.jlr01Group);
     regularTokenBBankPk = juplendAccounts.get(
-      JUPLEND_STATE_KEYS.jlr01RegularBankTokenB,
+      JUPLEND_STATE_KEYS.jlr01RegularBankTokenB
     );
 
     const switchboardAddresses = deriveJuplendMrgnAddresses({
@@ -188,7 +188,7 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
 
     const switchboardConfig = defaultJuplendBankConfig(
       oracles.wsolOracleSwb.publicKey,
-      ecosystem.usdcDecimals,
+      ecosystem.usdcDecimals
     );
     switchboardConfig.oracleSetup = { juplendSwitchboardPull: {} };
     switchboardConfig.oracleMaxAge = 300;
@@ -210,7 +210,7 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
       new Transaction().add(addBankIx),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const initPositionIx = await makeJuplendInitPositionIx(
@@ -221,7 +221,7 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
         bank: switchboardJupBankPk,
         pool: jupUsdcPool,
         seedDepositAmount: usdc(1),
-      },
+      }
     );
 
     await processBankrunTransaction(
@@ -229,7 +229,7 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
       new Transaction().add(initPositionIx),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const createWithdrawIntermediaryAtaIx =
@@ -238,7 +238,7 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
         switchboardAddresses.withdrawIntermediaryAta,
         switchboardAddresses.liquidityVaultAuthority,
         jupUsdcPool.mint,
-        jupUsdcPool.tokenProgram,
+        jupUsdcPool.tokenProgram
       );
     const initClaimIx = await initJuplendClaimAccountIx(getJuplendPrograms(), {
       signer: groupAdmin.wallet.publicKey,
@@ -251,12 +251,12 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
       new Transaction().add(createWithdrawIntermediaryAtaIx, initClaimIx),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     juplendAccounts.set(
       JUPLEND_STATE_KEYS.jlr08BankUsdcSwitchboard,
-      switchboardJupBankPk,
+      switchboardJupBankPk
     );
 
     const [initBorrowerIx, initLiquidatorIx] = await Promise.all([
@@ -279,25 +279,25 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
       new Transaction().add(initBorrowerIx),
       [borrower.wallet, borrowerMarginfiAccount],
       false,
-      true,
+      true
     );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(initLiquidatorIx),
       [liquidator.wallet, liquidatorMarginfiAccount],
       false,
-      true,
+      true
     );
 
     await mintToTokenAccount(
       ecosystem.usdcMint.publicKey,
       borrower.usdcAccount,
-      USER_DEPOSIT_USDC.mul(new BN(2)),
+      USER_DEPOSIT_USDC.mul(new BN(2))
     );
     await mintToTokenAccount(
       ecosystem.tokenBMint.publicKey,
       liquidator.tokenBAccount,
-      LIQUIDATOR_DEPOSIT_TOKEN_B.mul(new BN(2)),
+      LIQUIDATOR_DEPOSIT_TOKEN_B.mul(new BN(2))
     );
   });
 
@@ -317,19 +317,19 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
       new Transaction().add(depositIx),
       [borrower.wallet],
       false,
-      true,
+      true
     );
 
     const accountAfterPulse = await pulseHealth(
       borrower,
-      borrowerMarginfiAccount.publicKey,
+      borrowerMarginfiAccount.publicKey
     );
     const healthCache = accountAfterPulse.healthCache;
     assert.ok((healthCache.flags & HEALTH_CACHE_HEALTHY) !== 0);
     assert.ok((healthCache.flags & HEALTH_CACHE_ENGINE_OK) !== 0);
     assert.ok((healthCache.flags & HEALTH_CACHE_ORACLE_OK) !== 0);
     const balanceIdx = accountAfterPulse.lendingAccount.balances.findIndex(
-      (b: MarginfiBalance) => b.active && b.bankPk.equals(switchboardJupBankPk),
+      (b: MarginfiBalance) => b.active && b.bankPk.equals(switchboardJupBankPk)
     );
     assert.isAtLeast(balanceIdx, 0, "missing active switchboard jup balance");
 
@@ -343,13 +343,13 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
       EXCHANGE_PRICES_PRECISION;
     const expectedSwitchboardPrice = oracles.wsolPriceSwb * exchange;
     const assetWeight = wrappedI80F48toBigNumber(
-      switchboardBank.config.assetWeightInit,
+      switchboardBank.config.assetWeightInit
     ).toNumber();
 
     assert.approximately(
       pulsePrice,
       expectedSwitchboardPrice,
-      expectedSwitchboardPrice * 0.005,
+      expectedSwitchboardPrice * 0.005
     );
 
     const expectedAssetValue =
@@ -357,12 +357,12 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
       expectedSwitchboardPrice *
       assetWeight;
     const actualAssetValue = wrappedI80F48toBigNumber(
-      healthCache.assetValue,
+      healthCache.assetValue
     ).toNumber();
     assert.approximately(
       actualAssetValue,
       expectedAssetValue,
-      expectedAssetValue * 0.005,
+      expectedAssetValue * 0.005
     );
   });
 
@@ -379,7 +379,7 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
       new Transaction().add(depositTokenBIx),
       [liquidator.wallet],
       false,
-      true,
+      true
     );
   });
 
@@ -387,7 +387,7 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
     await refreshAllOracles();
 
     const withdrawRemaining = await buildHealthRemainingAccounts(
-      borrowerMarginfiAccount.publicKey,
+      borrowerMarginfiAccount.publicKey
     );
     const withdrawIx = await makeJuplendWithdrawSimpleIx(
       borrower.mrgnBankrunProgram!,
@@ -398,25 +398,25 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
         pool: jupUsdcPool,
         amount: USER_WITHDRAW_USDC,
         remainingAccounts: withdrawRemaining,
-      },
+      }
     );
 
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(
         withdrawIx,
-        dummyIx(borrower.wallet.publicKey, groupAdmin.wallet.publicKey),
+        dummyIx(borrower.wallet.publicKey, groupAdmin.wallet.publicKey)
       ),
       [borrower.wallet],
       false,
-      true,
+      true
     );
 
     const borrowRemaining = await buildHealthRemainingAccounts(
       borrowerMarginfiAccount.publicKey,
       {
         includedBankPks: [regularTokenBBankPk],
-      },
+      }
     );
     const borrowTokenBIx = await borrowIx(borrower.mrgnBankrunProgram!, {
       marginfiAccount: borrowerMarginfiAccount.publicKey,
@@ -433,15 +433,15 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
           pool: jupUsdcPool,
         }),
         borrowTokenBIx,
-        dummyIx(borrower.wallet.publicKey, groupAdmin.wallet.publicKey),
+        dummyIx(borrower.wallet.publicKey, groupAdmin.wallet.publicKey)
       ),
       [borrower.wallet],
       false,
-      true,
+      true
     );
 
     const repayRemaining = await buildHealthRemainingAccounts(
-      borrowerMarginfiAccount.publicKey,
+      borrowerMarginfiAccount.publicKey
     );
     const repayTokenBIx = await repayIx(borrower.mrgnBankrunProgram!, {
       marginfiAccount: borrowerMarginfiAccount.publicKey,
@@ -458,27 +458,27 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
           pool: jupUsdcPool,
         }),
         repayTokenBIx,
-        dummyIx(borrower.wallet.publicKey, groupAdmin.wallet.publicKey),
+        dummyIx(borrower.wallet.publicKey, groupAdmin.wallet.publicKey)
       ),
       [borrower.wallet],
       false,
-      true,
+      true
     );
 
     const accountAfterPulse = await pulseHealth(
       borrower,
-      borrowerMarginfiAccount.publicKey,
+      borrowerMarginfiAccount.publicKey
     );
     const net = netHealth(accountAfterPulse.healthCache);
     const switchboardPrice = priceForBank(
       accountAfterPulse,
       switchboardJupBankPk,
-      "pre-reweight switchboard price",
+      "pre-reweight switchboard price"
     );
     const tokenBPrice = priceForBank(
       accountAfterPulse,
       regularTokenBBankPk,
-      "pre-reweight tokenB price",
+      "pre-reweight tokenB price"
     );
 
     const [switchboardBank, tokenBBank, lending] = await Promise.all([
@@ -496,22 +496,22 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
     assert.approximately(
       switchboardPrice,
       expectedSwitchboardPrice,
-      expectedSwitchboardPrice * 0.005,
+      expectedSwitchboardPrice * 0.005
     );
     assert.approximately(
       tokenBPrice,
       expectedTokenBPrice,
-      expectedTokenBPrice * 0.002,
+      expectedTokenBPrice * 0.002
     );
 
     const assetWeight = wrappedI80F48toBigNumber(
-      switchboardBank.config.assetWeightInit,
+      switchboardBank.config.assetWeightInit
     ).toNumber();
     const liabilityWeight = wrappedI80F48toBigNumber(
-      tokenBBank.config.liabilityWeightInit,
+      tokenBBank.config.liabilityWeightInit
     ).toNumber();
     const originationFee = wrappedI80F48toBigNumber(
-      tokenBBank.config.interestRateConfig.protocolOriginationFee,
+      tokenBBank.config.interestRateConfig.protocolOriginationFee
     ).toNumber();
 
     const expectedAssetValue =
@@ -527,26 +527,26 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
       liabilityWeight;
 
     const actualAssetValue = wrappedI80F48toBigNumber(
-      accountAfterPulse.healthCache.assetValue,
+      accountAfterPulse.healthCache.assetValue
     ).toNumber();
     const actualLiabilityValue = wrappedI80F48toBigNumber(
-      accountAfterPulse.healthCache.liabilityValue,
+      accountAfterPulse.healthCache.liabilityValue
     ).toNumber();
 
     assert.approximately(
       actualAssetValue,
       expectedAssetValue,
-      expectedAssetValue * 0.002,
+      expectedAssetValue * 0.002
     );
     assert.approximately(
       actualLiabilityValue,
       expectedLiabilityValue,
-      expectedLiabilityValue * 0.002,
+      expectedLiabilityValue * 0.002
     );
     assert.approximately(
       net.toNumber(),
       expectedAssetValue - expectedLiabilityValue,
-      Math.abs(expectedAssetValue - expectedLiabilityValue) * 0.003,
+      Math.abs(expectedAssetValue - expectedLiabilityValue) * 0.003
     );
     assert.ok(net.gt(0), "borrower should still be healthy before reweight");
 
@@ -557,15 +557,15 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
 
   it("(liquidator) liquidates borrower after TokenB liability reweight", async () => {
     const liabBankBefore = await bankrunProgram.account.bank.fetch(
-      regularTokenBBankPk,
+      regularTokenBBankPk
     );
 
     const reweightConfig = blankBankConfigOptRaw();
     reweightConfig.liabilityWeightInit = bigNumberToWrappedI80F48(
-      REWEIGHTED_LIAB_WEIGHT,
+      REWEIGHTED_LIAB_WEIGHT
     );
     reweightConfig.liabilityWeightMaint = bigNumberToWrappedI80F48(
-      REWEIGHTED_LIAB_WEIGHT,
+      REWEIGHTED_LIAB_WEIGHT
     );
 
     const reweightIx = await configureBank(groupAdmin.mrgnBankrunProgram!, {
@@ -577,22 +577,22 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
       new Transaction().add(reweightIx),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const accountBeforeLiq = await pulseHealth(
       borrower,
-      borrowerMarginfiAccount.publicKey,
+      borrowerMarginfiAccount.publicKey
     );
     const netBeforeLiq = netHealth(accountBeforeLiq.healthCache);
     const assetBeforeLiqValue = wrappedI80F48toBigNumber(
-      accountBeforeLiq.healthCache.assetValue,
+      accountBeforeLiq.healthCache.assetValue
     ).toNumber();
     const liabilityBeforeLiqValue = wrappedI80F48toBigNumber(
-      accountBeforeLiq.healthCache.liabilityValue,
+      accountBeforeLiq.healthCache.liabilityValue
     ).toNumber();
     const liabWeightBefore = wrappedI80F48toBigNumber(
-      liabBankBefore.config.liabilityWeightInit,
+      liabBankBefore.config.liabilityWeightInit
     ).toNumber();
     const expectedLiabilityAfterReweight =
       preReweightLiabilityValue * (REWEIGHTED_LIAB_WEIGHT / liabWeightBefore);
@@ -600,25 +600,25 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
     assert.approximately(
       assetBeforeLiqValue,
       preReweightAssetValue,
-      preReweightAssetValue * 0.002,
+      preReweightAssetValue * 0.002
     );
     assert.approximately(
       liabilityBeforeLiqValue,
       expectedLiabilityAfterReweight,
-      expectedLiabilityAfterReweight * 0.003,
+      expectedLiabilityAfterReweight * 0.003
     );
     assert.approximately(
       netBeforeLiq.toNumber(),
       preReweightAssetValue - expectedLiabilityAfterReweight,
-      Math.abs(preReweightAssetValue - expectedLiabilityAfterReweight) * 0.004,
+      Math.abs(preReweightAssetValue - expectedLiabilityAfterReweight) * 0.004
     );
     assert.ok(
       preReweightNetValue > 0,
-      "borrower must be healthy before reweight-induced liquidation",
+      "borrower must be healthy before reweight-induced liquidation"
     );
     assert.ok(
       netBeforeLiq.lt(0),
-      "borrower should be unhealthy after reweight",
+      "borrower should be unhealthy after reweight"
     );
 
     const [assetBank, liabBank] = await Promise.all([
@@ -630,10 +630,10 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
       liquidatorMarginfiAccount.publicKey,
       {
         includedBankPks: [switchboardJupBankPk],
-      },
+      }
     );
     const liquidateeRemaining = await buildHealthRemainingAccounts(
-      borrowerMarginfiAccount.publicKey,
+      borrowerMarginfiAccount.publicKey
     );
 
     const liqOracleAccounts: PublicKey[] = [
@@ -666,35 +666,35 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
           pool: jupUsdcPool,
         }),
         liqIx,
-        dummyIx(liquidator.wallet.publicKey, groupAdmin.wallet.publicKey),
+        dummyIx(liquidator.wallet.publicKey, groupAdmin.wallet.publicKey)
       ),
       [liquidator.wallet],
       false,
-      true,
+      true
     );
 
     const accountAfterLiq = await pulseHealth(
       borrower,
-      borrowerMarginfiAccount.publicKey,
+      borrowerMarginfiAccount.publicKey
     );
     const assetAfterLiqValue = wrappedI80F48toBigNumber(
-      accountAfterLiq.healthCache.assetValue,
+      accountAfterLiq.healthCache.assetValue
     ).toNumber();
     const liabilityAfterLiqValue = wrappedI80F48toBigNumber(
-      accountAfterLiq.healthCache.liabilityValue,
+      accountAfterLiq.healthCache.liabilityValue
     ).toNumber();
     const netAfterLiq = netHealth(accountAfterLiq.healthCache);
     assert.ok(
       assetAfterLiqValue < assetBeforeLiqValue,
-      "liquidation should seize some collateral from borrower",
+      "liquidation should seize some collateral from borrower"
     );
     assert.ok(
       liabilityAfterLiqValue < liabilityBeforeLiqValue,
-      "liquidation should repay some borrower liability",
+      "liquidation should repay some borrower liability"
     );
     assert.ok(
       netAfterLiq.gt(netBeforeLiq),
-      "liquidation should improve net health",
+      "liquidation should improve net health"
     );
 
     const restoreConfig = blankBankConfigOptRaw();
@@ -711,7 +711,7 @@ describe("jlr08: Switchboard JupLend flow (bankrun)", () => {
       new Transaction().add(restoreIx),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
   });
 });

@@ -12,7 +12,10 @@ import {
   users,
   validators,
 } from "../../rootHooks";
-import { assertBankrunTxFailed, assertKeysEqual } from "../../utils/genericTests";
+import {
+  assertBankrunTxFailed,
+  assertKeysEqual,
+} from "../../utils/genericTests";
 import { assert } from "chai";
 import { accountInit, depositIx } from "../../utils/user-instructions";
 import { LST_ATA, USER_ACCOUNT } from "../../utils/mocks";

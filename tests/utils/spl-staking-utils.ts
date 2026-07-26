@@ -62,7 +62,7 @@ export const decodeSinglePool = (buffer: Buffer) => {
   offset += 1;
 
   const voteAccountAddress = new PublicKey(
-    buffer.subarray(offset, offset + 32),
+    buffer.subarray(offset, offset + 32)
   );
   offset += 32;
 
@@ -89,13 +89,13 @@ export const depositToSinglePoolIxes = async (
   userWallet: PublicKey,
   splPool: PublicKey,
   userStakeAccount: PublicKey,
-  verbose: boolean = false,
+  verbose: boolean = false
 ) => {
   const splMint = await findPoolMintAddress(SINGLE_POOL_PROGRAM_ID, splPool);
 
   const splAuthority = await findPoolStakeAuthorityAddress(
     SINGLE_POOL_PROGRAM_ID,
-    splPool,
+    splPool
   );
 
   const ixes: TransactionInstruction[] = [];
@@ -114,8 +114,8 @@ export const depositToSinglePoolIxes = async (
         userWallet,
         lstAta,
         userWallet,
-        splMint,
-      ),
+        splMint
+      )
     );
   }
 
@@ -141,7 +141,7 @@ export const depositToSinglePoolIxes = async (
     splPool,
     userStakeAccount,
     lstAta,
-    userWallet,
+    userWallet
   );
 
   ixes.push(depositIx);
@@ -159,7 +159,7 @@ export const fetchLstPriceMultiplier = async () => {
         validators[0].splSolPool,
         validators[0].splOnRampPool,
       ],
-    }),
+    })
   );
   pulseTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
   pulseTx.sign(groupAdmin.wallet);

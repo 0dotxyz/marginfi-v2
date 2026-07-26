@@ -7,10 +7,7 @@ import {
   Transaction,
 } from "@solana/web3.js";
 import { assert } from "chai";
-import {
-  configureBank,
-  groupConfigure,
-} from "./utils/group-instructions";
+import { configureBank, groupConfigure } from "./utils/group-instructions";
 import {
   bankrunContext,
   bankrunProgram,
@@ -45,10 +42,7 @@ import {
   healthPulse,
   withdrawIx,
 } from "./utils/user-instructions";
-import {
-  mintToTokenAccount,
-  processBankrunTransaction,
-} from "./utils/tools";
+import { mintToTokenAccount, processBankrunTransaction } from "./utils/tools";
 import {
   assertSameAssetBadDebtSurvivability,
   computeSameAssetBoundaryBorrowNative,
@@ -275,15 +269,14 @@ describe("Same-asset emode safety", () => {
     assert.ok((preAcc.healthCache.flags & HEALTH_CACHE_HEALTHY) !== 0);
     const preBoostRatio = toDecimal(
       wrappedI80F48toBigNumber(preAcc.healthCache.assetValueMaint)
-    ).div(toDecimal(wrappedI80F48toBigNumber(preAcc.healthCache.assetValueEquity)));
+    ).div(
+      toDecimal(wrappedI80F48toBigNumber(preAcc.healthCache.assetValueEquity))
+    );
     const expectedPreBoostRatio = new Decimal(DEFAULT_MAINT_LEVERAGE - 1).div(
       DEFAULT_MAINT_LEVERAGE
     );
     assert.isTrue(
-      preBoostRatio
-        .minus(expectedPreBoostRatio)
-        .abs()
-        .lt(new Decimal(0.0001)),
+      preBoostRatio.minus(expectedPreBoostRatio).abs().lt(new Decimal(0.0001)),
       `pre-borrow maint/equity should equal ${expectedPreBoostRatio.toFixed()}; got ${preBoostRatio.toFixed()}`
     );
 
@@ -591,14 +584,17 @@ describe("Same-asset emode safety", () => {
       );
 
       // On-chain liability_value carries the upper-oracle factor; compare in matching units.
-      const accAfterLoop =
-        await bankrunProgram.account.marginfiAccount.fetch(account);
+      const accAfterLoop = await bankrunProgram.account.marginfiAccount.fetch(
+        account
+      );
       const liabValueUi = toDecimal(
         wrappedI80F48toBigNumber(accAfterLoop.healthCache.liabilityValue)
       ).div(ecosystem.usdcPrice);
       assert.isTrue(
         liabValueUi.lt(realizedMaxBorrowUi.times(upper)),
-        `on-chain liability_value ${liabValueUi.toFixed()} exceeded cap-in-value-units ${realizedMaxBorrowUi.times(upper).toFixed()}`
+        `on-chain liability_value ${liabValueUi.toFixed()} exceeded cap-in-value-units ${realizedMaxBorrowUi
+          .times(upper)
+          .toFixed()}`
       );
 
       // 1 USDC unambiguously overshoots the ≤0.5 USDC remaining headroom.
@@ -676,9 +672,7 @@ describe("Same-asset emode safety", () => {
     const expectedUsdcContribution = usdcUi
       .times(ecosystem.usdcPrice)
       .times(lowerOracle)
-      .times(
-        new Decimal(DEFAULT_INIT_LEVERAGE - 1).div(DEFAULT_INIT_LEVERAGE)
-      );
+      .times(new Decimal(DEFAULT_INIT_LEVERAGE - 1).div(DEFAULT_INIT_LEVERAGE));
     const expectedSolContribution = solUi
       .times(ecosystem.wsolPrice)
       .times(lowerOracle)
@@ -690,9 +684,7 @@ describe("Same-asset emode safety", () => {
     const counterfactualSolContribution = solUi
       .times(ecosystem.wsolPrice)
       .times(lowerOracle)
-      .times(
-        new Decimal(DEFAULT_INIT_LEVERAGE - 1).div(DEFAULT_INIT_LEVERAGE)
-      );
+      .times(new Decimal(DEFAULT_INIT_LEVERAGE - 1).div(DEFAULT_INIT_LEVERAGE));
     const counterfactualAssetValue = expectedUsdcContribution.plus(
       counterfactualSolContribution
     );
@@ -848,7 +840,9 @@ describe("Same-asset emode safety", () => {
       DEFAULT_MAINT_LEVERAGE
     );
     const boostRatioTolerance = new Decimal(0.0001);
-    const preBoostRatio = toDecimal(preAssetMaint).div(toDecimal(preAssetEquity));
+    const preBoostRatio = toDecimal(preAssetMaint).div(
+      toDecimal(preAssetEquity)
+    );
     assert.isTrue(
       preBoostRatio.minus(expectedBoostRatio).abs().lt(boostRatioTolerance),
       `pre-haircut maint/equity should equal ${expectedBoostRatio.toFixed()}; got ${preBoostRatio.toFixed()}`
@@ -893,7 +887,9 @@ describe("Same-asset emode safety", () => {
       // Equity shrinks by exactly the haircut factor (199/200).
       const expectedEquityRatio = new Decimal(199).div(200);
       const equityRatioTolerance = new Decimal(0.0001);
-      const equityRatio = toDecimal(postAssetEquity).div(toDecimal(preAssetEquity));
+      const equityRatio = toDecimal(postAssetEquity).div(
+        toDecimal(preAssetEquity)
+      );
       assert.isTrue(
         equityRatio.minus(expectedEquityRatio).abs().lt(equityRatioTolerance),
         `equity value should reflect the 50bp haircut exactly (${expectedEquityRatio.toFixed()}); got ${equityRatio.toFixed()}`

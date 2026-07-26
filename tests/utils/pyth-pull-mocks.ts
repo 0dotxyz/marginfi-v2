@@ -130,7 +130,7 @@ export function decodePriceUpdateV2(base64Data: string): PriceUpdateV2 {
 export async function debugPrintOracleData(
   banksClient: BanksClient,
   oracleAccount: PublicKey,
-  oracleName: string = "Oracle",
+  oracleName: string = "Oracle"
 ) {
   const account = await banksClient.getAccount(oracleAccount);
   if (!account) {
@@ -140,7 +140,7 @@ export async function debugPrintOracleData(
   }
 
   const oracleData = decodePriceUpdateV2(
-    Buffer.from(account.data).toString("base64"),
+    Buffer.from(account.data).toString("base64")
   );
   const price = oracleData.price_message.price.toNumber();
   const conf = oracleData.price_message.conf.toNumber();
@@ -174,7 +174,7 @@ export async function debugPrintOracleData(
 export async function debugPrintBankConfig(
   program: Program<Marginfi>,
   bankPubkey: PublicKey,
-  bankName: string = "Bank",
+  bankName: string = "Bank"
 ) {
   try {
     const bank = await program.account.bank.fetch(bankPubkey);
@@ -192,7 +192,7 @@ export async function debugPrintBankConfig(
     // Bank type specific fields
     console.log(`Asset Tag: ${bank.config.assetTag}`);
     console.log(
-      `Operational State: ${JSON.stringify(bank.config.operationalState)}`,
+      `Operational State: ${JSON.stringify(bank.config.operationalState)}`
     );
 
     // Check which type of bank it is
@@ -209,7 +209,7 @@ export async function debugPrintBankConfig(
           : isKamino
           ? "Kamino"
           : "Regular"
-      }`,
+      }`
     );
 
     if (isKamino) {
@@ -269,7 +269,7 @@ export async function initOrUpdatePriceUpdateV2(
   oracleKeypair?: Keypair,
   bankrunContext?: ProgramTestContext,
   verbose: boolean = false,
-  publishTime?: number,
+  publishTime?: number
 ) {
   const space = 134;
   // Compute publish times.
@@ -280,7 +280,7 @@ export async function initOrUpdatePriceUpdateV2(
         "publish price to " +
           existingAccount.publicKey.toString() +
           " at: " +
-          now,
+          now
       );
     } else {
       console.log("publish price to a new feed at " + now);
@@ -352,7 +352,7 @@ export async function initOrUpdatePriceUpdateV2(
       existingAccount,
       0,
       buf,
-      bankrunContext,
+      bankrunContext
     );
     return existingAccount;
   } else {
@@ -361,7 +361,7 @@ export async function initOrUpdatePriceUpdateV2(
       space,
       wallet,
       oracleKeypair,
-      bankrunContext,
+      bankrunContext
     );
     await storeMockAccount(
       mockProgram,
@@ -369,7 +369,7 @@ export async function initOrUpdatePriceUpdateV2(
       account,
       0,
       buf,
-      bankrunContext,
+      bankrunContext
     );
     return account;
   }
@@ -390,7 +390,7 @@ export async function refreshOracles(
   slot: BN,
   publishTime: number,
   bankrunContext?: ProgramTestContext,
-  verbose: boolean = false,
+  verbose: boolean = false
 ) {
   // Discover all "*OracleFeed" "*Pull" "*Price" "*Decimals" entries
   const feeds = (Object.keys(oracles) as Array<keyof Oracles>)
@@ -430,7 +430,7 @@ export async function refreshOracles(
     ({ base, feedId, account, price, conf, emaPrice, emaConf, exponent }) => {
       if (verbose) {
         console.log(
-          `[batchUpdate] ${base}: price=${price.toString()}, conf=${conf.toString()}, slot=${slot.toString()}, exp=${exponent}`,
+          `[batchUpdate] ${base}: price=${price.toString()}, conf=${conf.toString()}, slot=${slot.toString()}, exp=${exponent}`
         );
       }
       return initOrUpdatePriceUpdateV2(
@@ -446,9 +446,9 @@ export async function refreshOracles(
         undefined,
         bankrunContext,
         verbose,
-        publishTime,
+        publishTime
       );
-    },
+    }
   );
 
   await Promise.all(tasks);
@@ -472,7 +472,7 @@ export async function refreshPullOracles(
   slot: BN,
   publishTime: number,
   bankrunContext?: ProgramTestContext,
-  verbose: boolean = false,
+  verbose: boolean = false
 ) {
   const feeds: Array<{
     base: string;
@@ -574,7 +574,7 @@ export async function refreshPullOracles(
     ({ base, feedId, account, price, conf, emaPrice, emaConf, exponent }) => {
       if (verbose) {
         console.log(
-          `[batchUpdate] ${base}: price=${price.toString()}, conf=${conf.toString()}, slot=${slot.toString()}, exp=${exponent}`,
+          `[batchUpdate] ${base}: price=${price.toString()}, conf=${conf.toString()}, slot=${slot.toString()}, exp=${exponent}`
         );
       }
       return initOrUpdatePriceUpdateV2(
@@ -588,9 +588,9 @@ export async function refreshPullOracles(
         undefined,
         bankrunContext,
         verbose,
-        publishTime,
+        publishTime
       );
-    },
+    }
   );
 
   await Promise.all(tasks);

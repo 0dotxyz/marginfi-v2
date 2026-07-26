@@ -42,7 +42,10 @@ import {
   getSpotMarketAccount,
 } from "../../utils/drift-utils";
 import { composeRemainingAccounts } from "../../utils/user-instructions";
-import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "../../utils/types";
+import {
+  CONF_INTERVAL_MULTIPLE,
+  ORACLE_CONF_INTERVAL,
+} from "../../utils/types";
 
 describe("d08: Drift Withdraw Tests", () => {
   let driftUsdcBank: PublicKey;

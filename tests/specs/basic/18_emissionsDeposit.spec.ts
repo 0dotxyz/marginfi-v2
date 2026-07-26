@@ -30,7 +30,10 @@ import {
   users,
 } from "../../rootHooks";
 import { assert } from "chai";
-import { getTokenBalance, expectFailedTxWithError } from "../../utils/genericTests";
+import {
+  getTokenBalance,
+  expectFailedTxWithError,
+} from "../../utils/genericTests";
 import { deriveLiquidityVault } from "../../utils/pdas";
 import {
   configureBank,
@@ -40,7 +43,10 @@ import {
   panicUnpause,
   propagateFeeState,
 } from "../../utils/group-instructions";
-import { setEmissionsDirect, processBankrunTransaction } from "../../utils/tools";
+import {
+  setEmissionsDirect,
+  processBankrunTransaction,
+} from "../../utils/tools";
 import {
   blankBankConfigOptRaw,
   defaultBankConfig,
@@ -66,7 +72,7 @@ function assertSameBankDeposit(
   shareValueAfter: { value: number[] },
   liquidityVaultBefore: number,
   liquidityVaultAfter: number,
-  emissionsDepositAmount: number,
+  emissionsDepositAmount: number
 ) {
   const beforeVal = wrappedI80F48toBigNumber(shareValueBefore).toNumber();
   const totalDeposited =
@@ -74,18 +80,18 @@ function assertSameBankDeposit(
   assert.equal(
     wrappedI80F48toBigNumber(sharesAfter).toString(),
     wrappedI80F48toBigNumber(sharesBefore).toString(),
-    "total asset shares should be unchanged",
+    "total asset shares should be unchanged"
   );
   // Should be roughly equal. If at all interest accrual happens, time barely passes between
   // this and the last one.
   assert.approximately(
     wrappedI80F48toBigNumber(shareValueAfter).toNumber(),
     beforeVal * (1 + emissionsDepositAmount / totalDeposited),
-    beforeVal * 10 ** -10,
+    beforeVal * 10 ** -10
   );
   assert.equal(
     liquidityVaultAfter - liquidityVaultBefore,
-    emissionsDepositAmount,
+    emissionsDepositAmount
   );
 }
 
@@ -106,7 +112,7 @@ describe("Same-bank deposit", () => {
     emissionsMint = await setEmissionsDirect(
       provider,
       bankKeypairA.publicKey,
-      bank.mint,
+      bank.mint
     );
   });
 
@@ -120,7 +126,7 @@ describe("Same-bank deposit", () => {
     const depositorAmount = 50;
     const fundingAta = getAssociatedTokenAddressSync(
       ecosystem.tokenAMint.publicKey,
-      depositor,
+      depositor
     );
 
     let fundTx = new Transaction();
@@ -129,8 +135,8 @@ describe("Same-bank deposit", () => {
         ecosystem.tokenAMint.publicKey,
         fundingAta,
         depositor,
-        BigInt(depositorAmount * 10 ** ecosystem.tokenADecimals),
-      ),
+        BigInt(depositorAmount * 10 ** ecosystem.tokenADecimals)
+      )
     );
     await provider.sendAndConfirm(fundTx);
 
@@ -142,11 +148,11 @@ describe("Same-bank deposit", () => {
     ];
     const [liquidityVault] = deriveLiquidityVault(
       program.programId,
-      bankKeypairA.publicKey,
+      bankKeypairA.publicKey
     );
     const liquidityVaultBefore = await getTokenBalance(
       provider,
-      liquidityVault,
+      liquidityVault
     );
 
     // Emissions deposit of 50 Token A from bankrun payer into liquidity vault
@@ -179,7 +185,7 @@ describe("Same-bank deposit", () => {
       shareValueAfter,
       liquidityVaultBefore,
       liquidityVaultAfter,
-      emissionsDepositAmount,
+      emissionsDepositAmount
     );
   });
 
@@ -187,7 +193,7 @@ describe("Same-bank deposit", () => {
     state:
       | { paused: undefined }
       | { operational: undefined }
-      | { reduceOnly: undefined },
+      | { reduceOnly: undefined }
   ) => {
     const cfg = blankBankConfigOptRaw();
     cfg.operationalState = state;
@@ -197,8 +203,8 @@ describe("Same-bank deposit", () => {
         await configureBank(groupAdmin.mrgnProgram, {
           bank: bankKeypairA.publicKey,
           bankConfigOpt: cfg,
-        }),
-      ),
+        })
+      )
     );
   };
 
@@ -211,7 +217,7 @@ describe("Same-bank deposit", () => {
       controlIx,
       await propagateFeeState(globalProgramAdmin.mrgnProgram, {
         group: marginfiGroup.publicKey,
-      }),
+      })
     );
     await globalProgramAdmin.mrgnProgram.provider.sendAndConfirm(tx);
   };
@@ -225,7 +231,7 @@ describe("Same-bank deposit", () => {
       mint: bank.mint,
       fundingAccount: getAssociatedTokenAddressSync(
         ecosystem.tokenAMint.publicKey,
-        depositor,
+        depositor
       ),
       depositor,
       liquidityVault: bank.liquidityVault,
@@ -237,12 +243,12 @@ describe("Same-bank deposit", () => {
         await provider.sendAndConfirm(
           new Transaction().add(
             ix,
-            dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey),
-          ),
+            dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey)
+          )
         );
       },
       "BankPaused",
-      6016,
+      6016
     );
   });
 
@@ -255,7 +261,7 @@ describe("Same-bank deposit", () => {
       mint: bank.mint,
       fundingAccount: getAssociatedTokenAddressSync(
         ecosystem.tokenAMint.publicKey,
-        depositor,
+        depositor
       ),
       depositor,
       liquidityVault: bank.liquidityVault,
@@ -266,12 +272,12 @@ describe("Same-bank deposit", () => {
         await provider.sendAndConfirm(
           new Transaction().add(
             ix,
-            dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey),
-          ),
+            dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey)
+          )
         );
       },
       "BankReduceOnly",
-      6017,
+      6017
     );
   });
 
@@ -281,12 +287,12 @@ describe("Same-bank deposit", () => {
       provider.context,
       provider.wallet.payer,
       9,
-      emissionsMint,
+      emissionsMint
     );
     await setEmissionsDirect(
       provider,
       bankKeypairA.publicKey,
-      emissionsMint.publicKey,
+      emissionsMint.publicKey
     );
 
     await setBankState({ operational: undefined });
@@ -300,7 +306,7 @@ describe("Same-bank deposit", () => {
         mint: bank.emissionsMint,
         emissionsFundingAccount: getAssociatedTokenAddressSync(
           emissionsMint.publicKey,
-          depositor,
+          depositor
         ),
         depositor,
         liquidityVault: bank.liquidityVault,
@@ -313,12 +319,12 @@ describe("Same-bank deposit", () => {
         await provider.sendAndConfirm(
           new Transaction().add(
             ix,
-            dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey),
-          ),
+            dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey)
+          )
         );
       },
       "InvalidEmissionsMint",
-      6097,
+      6097
     );
   });
 
@@ -329,13 +335,13 @@ describe("Same-bank deposit", () => {
     const previousEmissionsMint = await setEmissionsDirect(
       provider,
       bankKeypairA.publicKey,
-      legacyEmissionsMint,
+      legacyEmissionsMint
     );
 
     try {
       const fundingAccount = getAssociatedTokenAddressSync(
         ecosystem.tokenAMint.publicKey,
-        depositor,
+        depositor
       );
       const amount = new BN(5);
       await provider.sendAndConfirm(
@@ -344,9 +350,9 @@ describe("Same-bank deposit", () => {
             ecosystem.tokenAMint.publicKey,
             fundingAccount,
             depositor,
-            BigInt(amount.toNumber()),
-          ),
-        ),
+            BigInt(amount.toNumber())
+          )
+        )
       );
 
       const ix = await lendingPoolEmissionsDeposit(program, {
@@ -360,14 +366,14 @@ describe("Same-bank deposit", () => {
       await provider.sendAndConfirm(
         new Transaction().add(
           ix,
-          dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey),
-        ),
+          dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey)
+        )
       );
     } finally {
       await setEmissionsDirect(
         provider,
         bankKeypairA.publicKey,
-        previousEmissionsMint,
+        previousEmissionsMint
       );
     }
   });
@@ -394,12 +400,12 @@ describe("Same-bank deposit", () => {
         await provider.sendAndConfirm(
           new Transaction().add(
             ix,
-            dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey),
-          ),
+            dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey)
+          )
         );
       },
       "InvalidLiquidityVault",
-      6094,
+      6094
     );
   });
 
@@ -422,12 +428,12 @@ describe("Same-bank deposit", () => {
           await provider.sendAndConfirm(
             new Transaction().add(
               ix,
-              dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey),
-            ),
+              dummyIx(provider.wallet.publicKey, users[0].wallet.publicKey)
+            )
           );
         },
         "ProtocolPaused",
-        6080,
+        6080
       );
     } finally {
       await setProtocolPaused(false);
@@ -453,7 +459,7 @@ describe("Same-bank deposit - T22", () => {
       transferFee?: { feeBasisPoints: number; maxFee: bigint };
       transferHook?: { hookProgramId: PublicKey };
       freezeAuthority?: PublicKey;
-    },
+    }
   ) => {
     const extensions: ExtensionType[] = [];
     if (opts?.transferFee) extensions.push(ExtensionType.TransferFeeConfig);
@@ -461,7 +467,7 @@ describe("Same-bank deposit - T22", () => {
 
     const mintLen = getMintLen(extensions);
     const rent = await provider.connection.getMinimumBalanceForRentExemption(
-      mintLen,
+      mintLen
     );
     const payer = bankrunContext.payer.publicKey;
 
@@ -473,7 +479,7 @@ describe("Same-bank deposit - T22", () => {
         space: mintLen,
         lamports: rent,
         programId: TOKEN_2022_PROGRAM_ID,
-      }),
+      })
     );
     if (opts?.transferFee) {
       tx.add(
@@ -483,8 +489,8 @@ describe("Same-bank deposit - T22", () => {
           payer,
           opts.transferFee.feeBasisPoints,
           opts.transferFee.maxFee,
-          TOKEN_2022_PROGRAM_ID,
-        ),
+          TOKEN_2022_PROGRAM_ID
+        )
       );
     }
     if (opts?.transferHook) {
@@ -493,8 +499,8 @@ describe("Same-bank deposit - T22", () => {
           mintKeypair.publicKey,
           payer,
           opts.transferHook.hookProgramId,
-          TOKEN_2022_PROGRAM_ID,
-        ),
+          TOKEN_2022_PROGRAM_ID
+        )
       );
     }
     tx.add(
@@ -503,8 +509,8 @@ describe("Same-bank deposit - T22", () => {
         decimals,
         payer,
         opts?.freezeAuthority ?? null,
-        TOKEN_2022_PROGRAM_ID,
-      ),
+        TOKEN_2022_PROGRAM_ID
+      )
     );
 
     await processBankrunTransaction(bankrunContext, tx, [
@@ -531,9 +537,9 @@ describe("Same-bank deposit - T22", () => {
             bankAdmin: groupAdmin.wallet.publicKey,
             tokenProgram: TOKEN_2022_PROGRAM_ID,
           })
-          .instruction(),
+          .instruction()
       ),
-      [bank],
+      [bank]
     );
   };
 
@@ -555,13 +561,13 @@ describe("Same-bank deposit - T22", () => {
       bankrunContext,
       banksClient,
       t22Feed,
-      PYTH_RECEIVER_PROGRAM_ID,
+      PYTH_RECEIVER_PROGRAM_ID
     );
     await createBankrunPythOracleAccount(
       bankrunContext,
       banksClient,
       t22Oracle,
-      PYTH_RECEIVER_PROGRAM_ID,
+      PYTH_RECEIVER_PROGRAM_ID
     );
     await setPythPullOraclePrice(
       bankrunContext,
@@ -571,7 +577,7 @@ describe("Same-bank deposit - T22", () => {
       1.0,
       T22_DECIMALS,
       ORACLE_CONF_INTERVAL,
-      PYTH_RECEIVER_PROGRAM_ID,
+      PYTH_RECEIVER_PROGRAM_ID
     );
     await addT22Bank(t22Mint, t22BankKeypair);
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
@@ -580,15 +586,15 @@ describe("Same-bank deposit - T22", () => {
           bank: t22BankKeypair.publicKey,
           type: ORACLE_SETUP_PYTH_PUSH,
           oracle: t22Oracle.publicKey,
-        }),
-      ),
+        })
+      )
     );
 
     const ata = getAssociatedTokenAddressSync(
       t22Mint.publicKey,
       depositor,
       false,
-      TOKEN_2022_PROGRAM_ID,
+      TOKEN_2022_PROGRAM_ID
     );
     await provider.sendAndConfirm(
       new Transaction().add(
@@ -597,7 +603,7 @@ describe("Same-bank deposit - T22", () => {
           ata,
           depositor,
           t22Mint.publicKey,
-          TOKEN_2022_PROGRAM_ID,
+          TOKEN_2022_PROGRAM_ID
         ),
         createMintToInstruction(
           t22Mint.publicKey,
@@ -605,9 +611,9 @@ describe("Same-bank deposit - T22", () => {
           depositor,
           BigInt(200 * 10 ** T22_DECIMALS),
           [],
-          TOKEN_2022_PROGRAM_ID,
-        ),
-      ),
+          TOKEN_2022_PROGRAM_ID
+        )
+      )
     );
 
     const userAccountKeypair = Keypair.generate();
@@ -618,9 +624,9 @@ describe("Same-bank deposit - T22", () => {
           marginfiAccount: userAccountKeypair.publicKey,
           authority: depositor,
           feePayer: depositor,
-        }),
+        })
       ),
-      [userAccountKeypair],
+      [userAccountKeypair]
     );
     await provider.sendAndConfirm(
       new Transaction().add(
@@ -635,13 +641,13 @@ describe("Same-bank deposit - T22", () => {
           .remainingAccounts([
             { pubkey: t22Mint.publicKey, isSigner: false, isWritable: false },
           ])
-          .instruction(),
-      ),
+          .instruction()
+      )
     );
     await setEmissionsDirect(
       provider,
       t22BankKeypair.publicKey,
-      t22Mint.publicKey,
+      t22Mint.publicKey
     );
 
     const bankKey = t22BankKeypair.publicKey;
@@ -655,7 +661,7 @@ describe("Same-bank deposit - T22", () => {
     const [liquidityVault] = deriveLiquidityVault(program.programId, bankKey);
     const liquidityVaultBefore = await getTokenBalance(
       provider,
-      liquidityVault,
+      liquidityVault
     );
 
     const depositorAmount = 50;
@@ -688,7 +694,7 @@ describe("Same-bank deposit - T22", () => {
       shareValueAfter,
       liquidityVaultBefore,
       liquidityVaultAfter,
-      emissionsDepositAmount,
+      emissionsDepositAmount
     );
   });
 
@@ -710,7 +716,7 @@ describe("Same-bank deposit - T22", () => {
           feeMint.publicKey,
           depositor,
           false,
-          TOKEN_2022_PROGRAM_ID,
+          TOKEN_2022_PROGRAM_ID
         ),
         tokenProgram: TOKEN_2022_PROGRAM_ID,
       })
@@ -721,7 +727,7 @@ describe("Same-bank deposit - T22", () => {
         await provider.sendAndConfirm(new Transaction().add(ix));
       },
       "InvalidTransfer",
-      6004,
+      6004
     );
   });
 
@@ -743,7 +749,7 @@ describe("Same-bank deposit - T22", () => {
           hookMint.publicKey,
           depositor,
           false,
-          TOKEN_2022_PROGRAM_ID,
+          TOKEN_2022_PROGRAM_ID
         ),
         tokenProgram: TOKEN_2022_PROGRAM_ID,
       })
@@ -754,7 +760,7 @@ describe("Same-bank deposit - T22", () => {
         await provider.sendAndConfirm(new Transaction().add(ix));
       },
       "InvalidTransfer",
-      6004,
+      6004
     );
   });
 
@@ -768,7 +774,7 @@ describe("Same-bank deposit - T22", () => {
       emptyMint.publicKey,
       depositor,
       false,
-      TOKEN_2022_PROGRAM_ID,
+      TOKEN_2022_PROGRAM_ID
     );
     await provider.sendAndConfirm(
       new Transaction().add(
@@ -777,7 +783,7 @@ describe("Same-bank deposit - T22", () => {
           emptyFundingAta,
           depositor,
           emptyMint.publicKey,
-          TOKEN_2022_PROGRAM_ID,
+          TOKEN_2022_PROGRAM_ID
         ),
         createMintToInstruction(
           emptyMint.publicKey,
@@ -785,9 +791,9 @@ describe("Same-bank deposit - T22", () => {
           depositor,
           BigInt(1),
           [],
-          TOKEN_2022_PROGRAM_ID,
-        ),
-      ),
+          TOKEN_2022_PROGRAM_ID
+        )
+      )
     );
 
     const ix = await program.methods
@@ -805,7 +811,7 @@ describe("Same-bank deposit - T22", () => {
         await provider.sendAndConfirm(new Transaction().add(ix));
       },
       "EmissionsUpdateError",
-      6034,
+      6034
     );
   });
 });

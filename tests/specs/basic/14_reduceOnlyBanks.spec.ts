@@ -51,9 +51,9 @@ describe("Reduce-Only Bank Tests", () => {
           marginfiAccount: user0AccountKeypair.publicKey,
           authority: users[0].wallet.publicKey,
           feePayer: users[0].wallet.publicKey,
-        }),
+        })
       ),
-      [user0AccountKeypair],
+      [user0AccountKeypair]
     );
 
     const user1AccountKeypair = Keypair.generate();
@@ -65,9 +65,9 @@ describe("Reduce-Only Bank Tests", () => {
           marginfiAccount: user1AccountKeypair.publicKey,
           authority: users[1].wallet.publicKey,
           feePayer: users[1].wallet.publicKey,
-        }),
+        })
       ),
-      [user1AccountKeypair],
+      [user1AccountKeypair]
     );
   });
 
@@ -86,8 +86,8 @@ describe("Reduce-Only Bank Tests", () => {
               return cfg;
             })(),
             group: marginfiGroup.publicKey,
-          }),
-        ),
+          })
+        )
       );
 
       let bank = await program.account.bank.fetch(bankKey);
@@ -104,8 +104,8 @@ describe("Reduce-Only Bank Tests", () => {
               return cfg;
             })(),
             group: marginfiGroup.publicKey,
-          }),
-        ),
+          })
+        )
       );
     } finally {
       // Ensure cleanup even if test fails
@@ -120,8 +120,8 @@ describe("Reduce-Only Bank Tests", () => {
               return cfg;
             })(),
             group: marginfiGroup.publicKey,
-          }),
-        ),
+          })
+        )
       );
     }
   });
@@ -138,18 +138,18 @@ describe("Reduce-Only Bank Tests", () => {
           marginfiAccount: userAccount,
           authority: user.wallet.publicKey,
           feePayer: user.wallet.publicKey,
-        }),
+        })
       ),
-      [userAccountKeypair],
+      [userAccountKeypair]
     );
 
     const depositAmountTokenA = 0.5;
     const depositAmountTokenA_native = new BN(
-      depositAmountTokenA * 10 ** ecosystem.tokenADecimals,
+      depositAmountTokenA * 10 ** ecosystem.tokenADecimals
     );
     const borrowAmountUsdc = 1;
     const borrowAmountUsdc_native = new BN(
-      borrowAmountUsdc * 10 ** ecosystem.usdcDecimals,
+      borrowAmountUsdc * 10 ** ecosystem.usdcDecimals
     );
 
     try {
@@ -161,8 +161,8 @@ describe("Reduce-Only Bank Tests", () => {
             tokenAccount: user.tokenAAccount,
             amount: depositAmountTokenA_native,
             depositUpToLimit: false,
-          }),
-        ),
+          })
+        )
       );
 
       await user.mrgnProgram.provider.sendAndConfirm!(
@@ -172,15 +172,15 @@ describe("Reduce-Only Bank Tests", () => {
             remaining: composeRemainingAccounts([
               [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
             ]),
-          }),
-        ),
+          })
+        )
       );
 
       const accBefore = await program.account.marginfiAccount.fetch(
-        userAccount,
+        userAccount
       );
       const assetValueBefore = wrappedI80F48toBigNumber(
-        accBefore.healthCache.assetValue,
+        accBefore.healthCache.assetValue
       ).toNumber();
 
       await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
@@ -189,12 +189,14 @@ describe("Reduce-Only Bank Tests", () => {
             bank: bankKeypairA.publicKey,
             bankConfigOpt: (() => {
               const cfg = blankBankConfigOptRaw();
-              cfg.operationalState = { reduceOnlyWithBorrowingPower: undefined };
+              cfg.operationalState = {
+                reduceOnlyWithBorrowingPower: undefined,
+              };
               return cfg;
             })(),
             group: marginfiGroup.publicKey,
-          }),
-        ),
+          })
+        )
       );
 
       await user.mrgnProgram.provider.sendAndConfirm!(
@@ -205,19 +207,19 @@ describe("Reduce-Only Bank Tests", () => {
             remaining: composeRemainingAccounts([
               [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
             ]),
-          }),
-        ),
+          })
+        )
       );
 
       const accAfter = await program.account.marginfiAccount.fetch(userAccount);
       const assetValueAfter = wrappedI80F48toBigNumber(
-        accAfter.healthCache.assetValue,
+        accAfter.healthCache.assetValue
       ).toNumber();
 
       assert.equal(
         assetValueAfter,
         assetValueBefore,
-        "Initial asset value must not be discounted by this state",
+        "Initial asset value must not be discounted by this state"
       );
 
       await expectFailedTxWithError(
@@ -230,12 +232,12 @@ describe("Reduce-Only Bank Tests", () => {
                 tokenAccount: user.tokenAAccount,
                 amount: new BN(1),
                 depositUpToLimit: false,
-              }),
-            ),
+              })
+            )
           );
         },
         "BankReduceOnly",
-        6017,
+        6017
       );
 
       await user.mrgnProgram.provider.sendAndConfirm!(
@@ -249,8 +251,8 @@ describe("Reduce-Only Bank Tests", () => {
               [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
             ]),
             amount: borrowAmountUsdc_native,
-          }),
-        ),
+          })
+        )
       );
     } finally {
       await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
@@ -263,8 +265,8 @@ describe("Reduce-Only Bank Tests", () => {
               return cfg;
             })(),
             group: marginfiGroup.publicKey,
-          }),
-        ),
+          })
+        )
       );
     }
   });
@@ -275,7 +277,7 @@ describe("Reduce-Only Bank Tests", () => {
 
     const depositAmountTokenA = 0.5;
     const depositAmountTokenA_native = new BN(
-      depositAmountTokenA * 10 ** ecosystem.tokenADecimals,
+      depositAmountTokenA * 10 ** ecosystem.tokenADecimals
     );
 
     try {
@@ -287,8 +289,8 @@ describe("Reduce-Only Bank Tests", () => {
             tokenAccount: user.tokenAAccount,
             amount: depositAmountTokenA_native,
             depositUpToLimit: false,
-          }),
-        ),
+          })
+        )
       );
 
       // Health pulse BEFORE configuring bank to ReduceOnly
@@ -299,12 +301,12 @@ describe("Reduce-Only Bank Tests", () => {
             remaining: composeRemainingAccounts([
               [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
             ]),
-          }),
-        ),
+          })
+        )
       );
 
       const accBefore = await program.account.marginfiAccount.fetch(
-        userAccount,
+        userAccount
       );
       const cacheBefore = accBefore.healthCache;
       const assetValueBefore = wrappedI80F48toBigNumber(cacheBefore.assetValue);
@@ -314,7 +316,7 @@ describe("Reduce-Only Bank Tests", () => {
       const adjustedAssetPrice = oracles.tokenAPrice * (1.0 - confidence);
       const bankA = await program.account.bank.fetch(bankKeypairA.publicKey);
       const assetWeightInit = wrappedI80F48toBigNumber(
-        bankA.config.assetWeightInit,
+        bankA.config.assetWeightInit
       ).toNumber();
       const expectedAssetValue =
         depositAmountTokenA * adjustedAssetPrice * assetWeightInit;
@@ -324,7 +326,7 @@ describe("Reduce-Only Bank Tests", () => {
         assetValueBefore.toNumber(),
         expectedAssetValue,
         0.01,
-        "Asset value should match expected calculation before ReduceOnly",
+        "Asset value should match expected calculation before ReduceOnly"
       );
 
       await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
@@ -336,8 +338,8 @@ describe("Reduce-Only Bank Tests", () => {
               cfg.operationalState = { reduceOnly: undefined };
               return cfg;
             })(),
-          }),
-        ),
+          })
+        )
       );
 
       // Health pulse AFTER configuring bank to ReduceOnly
@@ -349,8 +351,8 @@ describe("Reduce-Only Bank Tests", () => {
             remaining: composeRemainingAccounts([
               [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
             ]),
-          }),
-        ),
+          })
+        )
       );
 
       const accAfter = await program.account.marginfiAccount.fetch(userAccount);
@@ -362,7 +364,7 @@ describe("Reduce-Only Bank Tests", () => {
       assert.equal(
         assetValueAfter.toNumber(),
         0,
-        "Asset value should be 0 after ReduceOnly",
+        "Asset value should be 0 after ReduceOnly"
       );
 
       // Verify assetValueMaint is unchanged
@@ -371,7 +373,7 @@ describe("Reduce-Only Bank Tests", () => {
       // User tries to borrow USDC using ReduceOnly Token A as collateral
       const borrowAmountUsdc = 10;
       const borrowAmountUsdc_native = new BN(
-        borrowAmountUsdc * 10 ** ecosystem.usdcDecimals,
+        borrowAmountUsdc * 10 ** ecosystem.usdcDecimals
       );
 
       await expectFailedTxWithError(
@@ -387,12 +389,12 @@ describe("Reduce-Only Bank Tests", () => {
                   [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
                 ]),
                 amount: borrowAmountUsdc_native,
-              }),
-            ),
+              })
+            )
           );
         },
         "RiskEngineInitRejected",
-        6006,
+        6006
       );
     } finally {
       // Restore Token A bank to Operational for cleanup
@@ -406,8 +408,8 @@ describe("Reduce-Only Bank Tests", () => {
               return cfg;
             })(),
             group: marginfiGroup.publicKey,
-          }),
-        ),
+          })
+        )
       );
 
       // Withdraw all Token A.
@@ -418,7 +420,7 @@ describe("Reduce-Only Bank Tests", () => {
             [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
             [bankKeypairA.publicKey, oracles.tokenAOracle.publicKey],
             [bankKeypairSol.publicKey, oracles.wsolOracle.publicKey],
-          ].filter((group) => !group[0].equals(bankKeypairA.publicKey)),
+          ].filter((group) => !group[0].equals(bankKeypairA.publicKey))
         );
         await user.mrgnProgram.provider.sendAndConfirm!(
           new Transaction().add(
@@ -429,8 +431,8 @@ describe("Reduce-Only Bank Tests", () => {
               remaining,
               amount: depositAmountTokenA_native,
               withdrawAll: true,
-            }),
-          ),
+            })
+          )
         );
       } catch (e) {
         console.log("Cleanup withdrawal failed: ", e);
@@ -444,7 +446,7 @@ describe("Reduce-Only Bank Tests", () => {
 
     const depositAmountTokenA = 0.5;
     const depositAmountTokenA_native = new BN(
-      depositAmountTokenA * 10 ** ecosystem.tokenADecimals,
+      depositAmountTokenA * 10 ** ecosystem.tokenADecimals
     );
 
     try {
@@ -456,13 +458,13 @@ describe("Reduce-Only Bank Tests", () => {
             tokenAccount: user.tokenAAccount,
             amount: depositAmountTokenA_native,
             depositUpToLimit: false,
-          }),
-        ),
+          })
+        )
       );
 
       const borrowAmountUsdc = 1;
       const borrowAmountUsdc_native = new BN(
-        borrowAmountUsdc * 10 ** ecosystem.usdcDecimals,
+        borrowAmountUsdc * 10 ** ecosystem.usdcDecimals
       );
 
       await user.mrgnProgram.provider.sendAndConfirm!(
@@ -476,8 +478,8 @@ describe("Reduce-Only Bank Tests", () => {
               [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
             ]),
             amount: borrowAmountUsdc_native,
-          }),
-        ),
+          })
+        )
       );
 
       await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
@@ -490,8 +492,8 @@ describe("Reduce-Only Bank Tests", () => {
               return cfg;
             })(),
             group: marginfiGroup.publicKey,
-          }),
-        ),
+          })
+        )
       );
 
       await expectFailedTxWithError(
@@ -507,37 +509,37 @@ describe("Reduce-Only Bank Tests", () => {
                   [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
                 ]),
                 amount: borrowAmountUsdc_native,
-              }),
-            ),
+              })
+            )
           );
         },
         "RiskEngineInitRejected",
-        6006,
+        6006
       );
 
       const userAccData = await program.account.marginfiAccount.fetch(
-        userAccount,
+        userAccount
       );
       const balances = userAccData.lendingAccount.balances;
 
       const tokenABalanceIdx = balances.findIndex((b) =>
-        b.bankPk.equals(bankKeypairA.publicKey),
+        b.bankPk.equals(bankKeypairA.publicKey)
       );
       assert.notEqual(tokenABalanceIdx, -1, "Token A balance should exist");
       assert.equal(
         balances[tokenABalanceIdx].active,
         1,
-        "Token A balance should be active",
+        "Token A balance should be active"
       );
 
       const usdcBalanceIdx = balances.findIndex((b) =>
-        b.bankPk.equals(bankKeypairUsdc.publicKey),
+        b.bankPk.equals(bankKeypairUsdc.publicKey)
       );
       assert.notEqual(usdcBalanceIdx, -1, "USDC balance should exist");
       assert.equal(
         balances[usdcBalanceIdx].active,
         1,
-        "USDC balance should be active",
+        "USDC balance should be active"
       );
     } finally {
       await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
@@ -550,8 +552,8 @@ describe("Reduce-Only Bank Tests", () => {
               return cfg;
             })(),
             group: marginfiGroup.publicKey,
-          }),
-        ),
+          })
+        )
       );
     }
   });
@@ -562,11 +564,11 @@ describe("Reduce-Only Bank Tests", () => {
 
     const depositAmountSol = 0.05; // 0.05 SOL * $150 = $7.50
     const depositAmountSol_native = new BN(
-      depositAmountSol * 10 ** ecosystem.wsolDecimals,
+      depositAmountSol * 10 ** ecosystem.wsolDecimals
     );
     const depositAmountTokenA = 0.2; // 0.2 Token A * $10 = $2
     const depositAmountTokenA_native = new BN(
-      depositAmountTokenA * 10 ** ecosystem.tokenADecimals,
+      depositAmountTokenA * 10 ** ecosystem.tokenADecimals
     );
 
     try {
@@ -578,8 +580,8 @@ describe("Reduce-Only Bank Tests", () => {
             tokenAccount: user.wsolAccount,
             amount: depositAmountSol_native,
             depositUpToLimit: false,
-          }),
-        ),
+          })
+        )
       );
 
       await user.mrgnProgram.provider.sendAndConfirm!(
@@ -590,8 +592,8 @@ describe("Reduce-Only Bank Tests", () => {
             tokenAccount: user.tokenAAccount,
             amount: depositAmountTokenA_native,
             depositUpToLimit: false,
-          }),
-        ),
+          })
+        )
       );
 
       await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
@@ -604,13 +606,13 @@ describe("Reduce-Only Bank Tests", () => {
               return cfg;
             })(),
             group: marginfiGroup.publicKey,
-          }),
-        ),
+          })
+        )
       );
 
       const borrowAmountUsdc = 5;
       const borrowAmountUsdc_native = new BN(
-        borrowAmountUsdc * 10 ** ecosystem.usdcDecimals,
+        borrowAmountUsdc * 10 ** ecosystem.usdcDecimals
       );
 
       await expectFailedTxWithError(
@@ -627,26 +629,26 @@ describe("Reduce-Only Bank Tests", () => {
                   [bankKeypairUsdc.publicKey, oracles.usdcOracle.publicKey],
                 ]),
                 amount: borrowAmountUsdc_native,
-              }),
-            ),
+              })
+            )
           );
         },
         "RiskEngineInitRejected",
-        6006,
+        6006
       );
 
       // Verify account has both balances
       const userAccData = await program.account.marginfiAccount.fetch(
-        userAccount,
+        userAccount
       );
       const balances = userAccData.lendingAccount.balances;
 
       // Should have SOL (ReduceOnly) and Token A (Operational)
       const solBalanceIdx = balances.findIndex((b) =>
-        b.bankPk.equals(bankKeypairSol.publicKey),
+        b.bankPk.equals(bankKeypairSol.publicKey)
       );
       const tokenABalanceIdx = balances.findIndex((b) =>
-        b.bankPk.equals(bankKeypairA.publicKey),
+        b.bankPk.equals(bankKeypairA.publicKey)
       );
 
       assert.notEqual(solBalanceIdx, -1, "SOL balance should exist");
@@ -662,8 +664,8 @@ describe("Reduce-Only Bank Tests", () => {
               return cfg;
             })(),
             group: marginfiGroup.publicKey,
-          }),
-        ),
+          })
+        )
       );
     }
   });

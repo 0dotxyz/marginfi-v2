@@ -219,7 +219,7 @@ describe("jlr08: JupLend same-asset emode", () => {
           sameAssetEmodeInitLeverage: toWrappedI80F48Safe(initLeverage),
           sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(maintLeverage),
         }),
-        dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey),
+        dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey)
       ),
       [groupAdmin.wallet]
     );
@@ -304,7 +304,7 @@ describe("jlr08: JupLend same-asset emode", () => {
           marginfiAccount,
           remaining: composeRemainingAccounts(remainingGroups),
         }),
-        dummyIx(user.wallet.publicKey, user.wallet.publicKey),
+        dummyIx(user.wallet.publicKey, user.wallet.publicKey)
       ),
       [user.wallet]
     );

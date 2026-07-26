@@ -32,7 +32,7 @@ export type JuplendDepositAccounts = {
  */
 export const makeJuplendDepositIx = async (
   program: Program<Marginfi>,
-  accounts: JuplendDepositAccounts,
+  accounts: JuplendDepositAccounts
 ): Promise<TransactionInstruction> => {
   return program.methods
     .juplendDeposit(accounts.amount)
@@ -79,14 +79,14 @@ export type JuplendWithdrawAccounts = {
  */
 export const makeJuplendWithdrawIx = async (
   program: Program<Marginfi>,
-  accounts: JuplendWithdrawAccounts,
+  accounts: JuplendWithdrawAccounts
 ): Promise<TransactionInstruction> => {
   const remaining: AccountMeta[] = (accounts.remainingAccounts ?? []).map(
     (pubkey) => ({
       pubkey,
       isSigner: false,
       isWritable: false,
-    }),
+    })
   );
 
   return program.methods
@@ -129,7 +129,7 @@ export type JuplendNativeLendingDepositAccounts = {
  */
 export const makeJuplendNativeLendingDepositIx = async (
   program: Program<JuplendLendingIdl>,
-  accounts: JuplendNativeLendingDepositAccounts,
+  accounts: JuplendNativeLendingDepositAccounts
 ): Promise<TransactionInstruction> => {
   return program.methods
     .deposit(accounts.assets)
@@ -170,7 +170,7 @@ export type JuplendNativePreOperateAccounts = {
  */
 export const makeJuplendNativePreOperateIx = async (
   program: Program<JuplendLiquidityIdl>,
-  accounts: JuplendNativePreOperateAccounts,
+  accounts: JuplendNativePreOperateAccounts
 ): Promise<TransactionInstruction> => {
   return program.methods
     .preOperate(accounts.mint)
@@ -206,7 +206,7 @@ export type JuplendNativeBorrowAccounts = {
  */
 export const makeJuplendNativeBorrowIx = async (
   program: Program<JuplendLiquidityIdl>,
-  accounts: JuplendNativeBorrowAccounts,
+  accounts: JuplendNativeBorrowAccounts
 ): Promise<TransactionInstruction> => {
   return program.methods
     .operate(
@@ -214,7 +214,7 @@ export const makeJuplendNativeBorrowIx = async (
       accounts.borrowAmount,
       accounts.protocol,
       accounts.borrowTo,
-      { direct: {} },
+      { direct: {} }
     )
     .accounts({
       liquidity: accounts.pool.liquidity,
@@ -248,7 +248,7 @@ export type JuplendNativeUpdateRateAccounts = {
  */
 export const makeJuplendNativeUpdateRateIx = async (
   program: Program<JuplendLendingIdl>,
-  accounts: JuplendNativeUpdateRateAccounts,
+  accounts: JuplendNativeUpdateRateAccounts
 ): Promise<TransactionInstruction> => {
   return program.methods
     .updateRate()

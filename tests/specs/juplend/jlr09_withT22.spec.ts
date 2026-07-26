@@ -136,7 +136,7 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       globalProgramAdmin.wallet.publicKey,
       bnToBigIntSafe(amount),
       [],
-      TOKEN_2022_PROGRAM_ID,
+      TOKEN_2022_PROGRAM_ID
     );
 
     await processBankrunTransaction(
@@ -144,13 +144,13 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       new Transaction().add(ix),
       [globalProgramAdmin.wallet],
       false,
-      true,
+      true
     );
   };
 
   const pulseHealthFor = async (
     user: (typeof users)[number],
-    marginfiAccountPk: PublicKey,
+    marginfiAccountPk: PublicKey
   ) => {
     await refreshAllOracles();
 
@@ -167,11 +167,11 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
           pool: t22Pool,
         }),
         pulseIx,
-        dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey),
+        dummyIx(user.wallet.publicKey, groupAdmin.wallet.publicKey)
       ),
       [user.wallet],
       false,
-      true,
+      true
     );
 
     return bankrunProgram.account.marginfiAccount.fetch(marginfiAccountPk);
@@ -179,7 +179,7 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
 
   const netHealth = (healthCache: MarginfiHealthCacheRaw) =>
     wrappedI80F48toBigNumber(healthCache.assetValue).minus(
-      wrappedI80F48toBigNumber(healthCache.liabilityValue),
+      wrappedI80F48toBigNumber(healthCache.liabilityValue)
     );
 
   before(async () => {
@@ -188,7 +188,7 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
 
     groupPk = requireStateKey(JUPLEND_STATE_KEYS.jlr01Group);
     regularTokenBBankPk = requireStateKey(
-      JUPLEND_STATE_KEYS.jlr01RegularBankTokenB,
+      JUPLEND_STATE_KEYS.jlr01RegularBankTokenB
     );
 
     const mintLen = getMintLen([]);
@@ -208,27 +208,27 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       T22_DECIMALS,
       globalProgramAdmin.wallet.publicKey,
       globalProgramAdmin.wallet.publicKey,
-      TOKEN_2022_PROGRAM_ID,
+      TOKEN_2022_PROGRAM_ID
     );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(createMintIx, initMintIx),
       [globalProgramAdmin.wallet, t22Mint],
       false,
-      true,
+      true
     );
 
     adminT22Ata = getAssociatedTokenAddressSync(
       t22Mint.publicKey,
       groupAdmin.wallet.publicKey,
       false,
-      TOKEN_2022_PROGRAM_ID,
+      TOKEN_2022_PROGRAM_ID
     );
     borrowerT22Ata = getAssociatedTokenAddressSync(
       t22Mint.publicKey,
       borrower.wallet.publicKey,
       false,
-      TOKEN_2022_PROGRAM_ID,
+      TOKEN_2022_PROGRAM_ID
     );
     const createAtasIx = [
       createAssociatedTokenAccountIdempotentInstruction(
@@ -236,14 +236,14 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
         adminT22Ata,
         groupAdmin.wallet.publicKey,
         t22Mint.publicKey,
-        TOKEN_2022_PROGRAM_ID,
+        TOKEN_2022_PROGRAM_ID
       ),
       createAssociatedTokenAccountIdempotentInstruction(
         globalProgramAdmin.wallet.publicKey,
         borrowerT22Ata,
         borrower.wallet.publicKey,
         t22Mint.publicKey,
-        TOKEN_2022_PROGRAM_ID,
+        TOKEN_2022_PROGRAM_ID
       ),
     ];
     await processBankrunTransaction(
@@ -251,7 +251,7 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       new Transaction().add(...createAtasIx),
       [globalProgramAdmin.wallet],
       false,
-      true,
+      true
     );
 
     await mintT22(adminT22Ata, t22(2_000));
@@ -286,7 +286,7 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
 
     const t22Config = defaultJuplendBankConfig(
       oracles.tokenAOracle.publicKey,
-      T22_DECIMALS,
+      T22_DECIMALS
     );
     const addBankIx = await addJuplendBankIx(groupAdmin.mrgnBankrunProgram!, {
       group: groupPk,
@@ -304,7 +304,7 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       new Transaction().add(addBankIx),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const initPositionIx = await makeJuplendInitPositionIx(
@@ -316,14 +316,14 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
         pool: t22Pool,
         seedDepositAmount: t22(1),
         tokenProgram: TOKEN_2022_PROGRAM_ID,
-      },
+      }
     );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(initPositionIx),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const createWithdrawIntermediaryAtaIx =
@@ -332,7 +332,7 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
         t22Addresses.withdrawIntermediaryAta,
         t22Addresses.liquidityVaultAuthority,
         t22Mint.publicKey,
-        TOKEN_2022_PROGRAM_ID,
+        TOKEN_2022_PROGRAM_ID
       );
     const initClaimIx = await initJuplendClaimAccountIx(getJuplendPrograms(), {
       signer: groupAdmin.wallet.publicKey,
@@ -345,7 +345,7 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       new Transaction().add(createWithdrawIntermediaryAtaIx, initClaimIx),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     juplendAccounts.set(
@@ -372,20 +372,20 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       new Transaction().add(initBorrowerIx),
       [borrower.wallet, borrowerMarginfiAccount],
       false,
-      true,
+      true
     );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(initLiquidatorIx),
       [liquidator.wallet, liquidatorMarginfiAccount],
       false,
-      true,
+      true
     );
 
     await mintToTokenAccount(
       ecosystem.tokenBMint.publicKey,
       liquidator.tokenBAccount,
-      LIQUIDATOR_DEPOSIT_TOKEN_B.mul(new BN(2)),
+      LIQUIDATOR_DEPOSIT_TOKEN_B.mul(new BN(2))
     );
   });
 
@@ -405,12 +405,12 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       new Transaction().add(depositIx),
       [borrower.wallet],
       false,
-      true,
+      true
     );
 
     const accountAfterPulse = await pulseHealthFor(
       borrower,
-      borrowerMarginfiAccount.publicKey,
+      borrowerMarginfiAccount.publicKey
     );
     const flags = accountAfterPulse.healthCache.flags;
     assert.ok((flags & HEALTH_CACHE_HEALTHY) !== 0);
@@ -430,7 +430,7 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       new Transaction().add(depositTokenBIx),
       [liquidator.wallet],
       false,
-      true,
+      true
     );
   });
 
@@ -438,7 +438,7 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
     await refreshAllOracles();
 
     const withdrawRemaining = await buildHealthRemainingAccounts(
-      borrowerMarginfiAccount.publicKey,
+      borrowerMarginfiAccount.publicKey
     );
     const withdrawIx = await makeJuplendWithdrawSimpleIx(
       borrower.mrgnBankrunProgram!,
@@ -450,22 +450,22 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
         amount: USER_WITHDRAW_T22,
         remainingAccounts: withdrawRemaining,
         tokenProgram: TOKEN_2022_PROGRAM_ID,
-      },
+      }
     );
     await processBankrunTransaction(
       bankrunContext,
       new Transaction().add(
         withdrawIx,
-        dummyIx(borrower.wallet.publicKey, groupAdmin.wallet.publicKey),
+        dummyIx(borrower.wallet.publicKey, groupAdmin.wallet.publicKey)
       ),
       [borrower.wallet],
       false,
-      true,
+      true
     );
 
     const borrowRemaining = await buildHealthRemainingAccounts(
       borrowerMarginfiAccount.publicKey,
-      { includedBankPks: [regularTokenBBankPk] },
+      { includedBankPks: [regularTokenBBankPk] }
     );
     const borrowTokenBIx = await borrowIx(borrower.mrgnBankrunProgram!, {
       marginfiAccount: borrowerMarginfiAccount.publicKey,
@@ -479,15 +479,15 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       new Transaction().add(
         await refreshJupSimple(getJuplendPrograms().lending, { pool: t22Pool }),
         borrowTokenBIx,
-        dummyIx(borrower.wallet.publicKey, groupAdmin.wallet.publicKey),
+        dummyIx(borrower.wallet.publicKey, groupAdmin.wallet.publicKey)
       ),
       [borrower.wallet],
       false,
-      true,
+      true
     );
 
     const repayRemaining = await buildHealthRemainingAccounts(
-      borrowerMarginfiAccount.publicKey,
+      borrowerMarginfiAccount.publicKey
     );
     const repayTokenBIx = await repayIx(borrower.mrgnBankrunProgram!, {
       marginfiAccount: borrowerMarginfiAccount.publicKey,
@@ -501,34 +501,34 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       new Transaction().add(
         await refreshJupSimple(getJuplendPrograms().lending, { pool: t22Pool }),
         repayTokenBIx,
-        dummyIx(borrower.wallet.publicKey, groupAdmin.wallet.publicKey),
+        dummyIx(borrower.wallet.publicKey, groupAdmin.wallet.publicKey)
       ),
       [borrower.wallet],
       false,
-      true,
+      true
     );
 
     const accountAfterPulse = await pulseHealthFor(
       borrower,
-      borrowerMarginfiAccount.publicKey,
+      borrowerMarginfiAccount.publicKey
     );
     assert.ok(
       netHealth(accountAfterPulse.healthCache).gt(0),
-      "borrower should be healthy before liability reweight",
+      "borrower should be healthy before liability reweight"
     );
   });
 
   it("(liquidator) liquidates borrower after TokenB liability reweight", async () => {
     const liabBankBefore = await bankrunProgram.account.bank.fetch(
-      regularTokenBBankPk,
+      regularTokenBBankPk
     );
 
     const reweightConfig = blankBankConfigOptRaw();
     reweightConfig.liabilityWeightInit = bigNumberToWrappedI80F48(
-      REWEIGHTED_LIAB_WEIGHT,
+      REWEIGHTED_LIAB_WEIGHT
     );
     reweightConfig.liabilityWeightMaint = bigNumberToWrappedI80F48(
-      REWEIGHTED_LIAB_WEIGHT,
+      REWEIGHTED_LIAB_WEIGHT
     );
     const reweightIx = await configureBank(groupAdmin.mrgnBankrunProgram!, {
       bank: regularTokenBBankPk,
@@ -539,12 +539,12 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       new Transaction().add(reweightIx),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
 
     const accountBeforeLiq = await pulseHealthFor(
       borrower,
-      borrowerMarginfiAccount.publicKey,
+      borrowerMarginfiAccount.publicKey
     );
     const netBeforeLiq = netHealth(accountBeforeLiq.healthCache);
     assert.ok(
@@ -558,10 +558,10 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
     ]);
     const liquidatorRemaining = await buildHealthRemainingAccounts(
       liquidatorMarginfiAccount.publicKey,
-      { includedBankPks: [t22JuplendBankPk] },
+      { includedBankPks: [t22JuplendBankPk] }
     );
     const liquidateeRemaining = await buildHealthRemainingAccounts(
-      borrowerMarginfiAccount.publicKey,
+      borrowerMarginfiAccount.publicKey
     );
     const liqOracleAccounts: PublicKey[] = [
       assetBank.config.oracleKeys[0],
@@ -591,21 +591,21 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
         ComputeBudgetProgram.setComputeUnitLimit({ units: 500_000 }),
         await refreshJupSimple(getJuplendPrograms().lending, { pool: t22Pool }),
         liqIx,
-        dummyIx(liquidator.wallet.publicKey, groupAdmin.wallet.publicKey),
+        dummyIx(liquidator.wallet.publicKey, groupAdmin.wallet.publicKey)
       ),
       [liquidator.wallet],
       false,
-      true,
+      true
     );
 
     const accountAfterLiq = await pulseHealthFor(
       borrower,
-      borrowerMarginfiAccount.publicKey,
+      borrowerMarginfiAccount.publicKey
     );
     const netAfterLiq = netHealth(accountAfterLiq.healthCache);
     assert.ok(
       netAfterLiq.gt(netBeforeLiq),
-      "liquidation should improve borrower net health",
+      "liquidation should improve borrower net health"
     );
 
     const restoreConfig = blankBankConfigOptRaw();
@@ -622,7 +622,7 @@ describe("jlr09: Token-2022 JupLend flow (bankrun)", () => {
       new Transaction().add(restoreIx),
       [groupAdmin.wallet],
       false,
-      true,
+      true
     );
   });
 });

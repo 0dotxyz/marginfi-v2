@@ -12,7 +12,10 @@ import {
   groupAdmin,
 } from "../../rootHooks";
 import { assertBankrunTxFailed } from "../../utils/genericTests";
-import { configBankEmode, groupConfigure } from "../../utils/group-instructions";
+import {
+  configBankEmode,
+  groupConfigure,
+} from "../../utils/group-instructions";
 import {
   EMODE_APPLIES_TO_ISOLATED,
   EMODE_LST_TAG,
