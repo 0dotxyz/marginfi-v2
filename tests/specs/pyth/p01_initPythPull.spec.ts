@@ -99,7 +99,7 @@ describe("Pyth pull oracles in localnet", () => {
         .accountsPartial({
           group: throwawayGroup.publicKey,
           bank: bankKey,
-          admin: groupAdmin.wallet.publicKey,
+          bankAdmin: groupAdmin.wallet.publicKey,
         })
         .remainingAccounts([oracleMeta])
         .instruction(),
@@ -149,7 +149,7 @@ describe("Pyth pull oracles in localnet", () => {
         .accountsPartial({
           group: throwawayGroup.publicKey,
           bank: bankKey,
-          admin: groupAdmin.wallet.publicKey,
+          bankAdmin: groupAdmin.wallet.publicKey,
         })
         .remainingAccounts([oracleMeta])
         .instruction(),

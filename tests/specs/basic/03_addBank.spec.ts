@@ -37,12 +37,10 @@ import {
   BANK_SEED_KNOWN_FLAG,
   CLOSE_ENABLED_FLAG,
   defaultBankConfig,
-  IS_T22_FLAG,
   INTEREST_CURVE_SEVEN_POINT,
   makeRatePoints,
   ORACLE_SETUP_PYTH_PUSH,
   PYTH_PULL_MIGRATED,
-  utilToU32,
 } from "../../utils/types";
 import {
   deriveBankWithSeed,
@@ -256,7 +254,7 @@ describe("Lending pool add bank (add bank to group)", () => {
       .accountsPartial({
         group: marginfiGroup.publicKey,
         bank: bankKey,
-        admin: groupAdmin.wallet.publicKey,
+        bankAdmin: groupAdmin.wallet.publicKey,
       })
       .remainingAccounts([oracleMeta])
       .instruction();
@@ -310,7 +308,7 @@ describe("Lending pool add bank (add bank to group)", () => {
       .accountsPartial({
         group: marginfiGroup.publicKey,
         bank: bankKey,
-        admin: groupAdmin.wallet.publicKey,
+        bankAdmin: groupAdmin.wallet.publicKey,
       })
       .remainingAccounts([oracleMeta])
       .instruction();

@@ -211,7 +211,7 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
         )
         .accountsPartial({
           group: kaminoGroup.publicKey,
-          admin: groupAdmin.wallet.publicKey,
+          bankAdmin: groupAdmin.wallet.publicKey,
           bank: bankKey,
         })
         .remainingAccounts([
@@ -370,7 +370,7 @@ describe("k17: Limits test - 8 Kamino + 7 regular TOKEN_A deposits, liquidation 
       .accountsPartial({
         group: kaminoGroup.publicKey,
         bank: bankKey,
-        admin: groupAdmin.wallet.publicKey,
+        bankAdmin: groupAdmin.wallet.publicKey,
       })
       .remainingAccounts([
         {

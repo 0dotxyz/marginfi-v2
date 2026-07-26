@@ -181,7 +181,7 @@ describe("Init e-mode enabled group and banks", () => {
       .accountsPartial({
         group: emodeGroup.publicKey,
         bank: bankKey,
-        admin: groupAdmin.wallet.publicKey,
+        bankAdmin: groupAdmin.wallet.publicKey,
       })
       .remainingAccounts([oracleMeta])
       .instruction();

@@ -61,7 +61,7 @@ describe("Close bank", () => {
           .accountsPartial({
             group: marginfiGroup.publicKey,
             bank: bankKey,
-            admin: groupAdmin.wallet.publicKey,
+            bankAdmin: groupAdmin.wallet.publicKey,
           })
           .remainingAccounts([
             {

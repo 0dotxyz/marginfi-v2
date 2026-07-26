@@ -16,7 +16,7 @@ import {
 } from "../../rootHooks";
 import { configureBank, setFixedPrice } from "../../utils/group-instructions";
 import { assert } from "chai";
-import { defaultBankConfigOptRaw, MAX_BALANCES } from "../../utils/types";
+import { defaultBankConfigOptRaw, blankBankConfigOptRaw, MAX_BALANCES } from "../../utils/types";
 import {
   borrowIx,
   composeRemainingAccounts,
@@ -186,7 +186,7 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
     });
 
     it("(admin) vastly increase last bank liability ratio to make user 0 unhealthy", async () => {
-      let config = defaultBankConfigOptRaw();
+      let config = blankBankConfigOptRaw();
       config.liabilityWeightInit = bigNumberToWrappedI80F48(210); // 21000%
       config.liabilityWeightMaint = bigNumberToWrappedI80F48(200); // 20000%
 
@@ -436,8 +436,9 @@ ORACLE_MODES.forEach((oracleMode, oracleModeIndex) => {
 
     it("(admin) sets user's main liability to be near-worthless through a fixed price", async () => {
       // Note: we maxed the borrow limit in the previous test, raise it to enable some more borrows
-      let config = defaultBankConfigOptRaw();
-      config.borrowLimit = config.borrowLimit.muln(2);
+      let config = blankBankConfigOptRaw();
+      const defaultConfig = defaultBankConfigOptRaw();
+      config.borrowLimit = defaultConfig.borrowLimit.muln(2);
 
       let tx = new Transaction().add(
         await setFixedPrice(groupAdmin.mrgnBankrunProgram, {

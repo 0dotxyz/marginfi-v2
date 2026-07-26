@@ -17,6 +17,7 @@ import { expectFailedTxWithError } from "../../utils/genericTests";
 import { assert } from "chai";
 import {
   CONF_INTERVAL_MULTIPLE,
+  blankBankConfigOptRaw,
   defaultBankConfigOptRaw,
   ORACLE_CONF_INTERVAL,
 } from "../../utils/types";
@@ -79,12 +80,12 @@ describe("Reduce-Only Bank Tests", () => {
         new Transaction().add(
           await configureBank(groupAdmin.mrgnProgram, {
             bank: bankKey,
-            bankConfigOpt: {
-              ...defaultBankConfigOptRaw(),
-              operationalState: {
-                reduceOnly: undefined,
-              },
-            },
+            bankConfigOpt: (() => {
+              const cfg = blankBankConfigOptRaw();
+              cfg.operationalState = { reduceOnly: undefined };
+              return cfg;
+            })(),
+            group: marginfiGroup.publicKey,
           }),
         ),
       );
@@ -97,12 +98,12 @@ describe("Reduce-Only Bank Tests", () => {
         new Transaction().add(
           await configureBank(groupAdmin.mrgnProgram, {
             bank: bankKey,
-            bankConfigOpt: {
-              ...defaultBankConfigOptRaw(),
-              operationalState: {
-                operational: undefined,
-              },
-            },
+            bankConfigOpt: (() => {
+              const cfg = blankBankConfigOptRaw();
+              cfg.operationalState = { operational: undefined };
+              return cfg;
+            })(),
+            group: marginfiGroup.publicKey,
           }),
         ),
       );
@@ -113,12 +114,12 @@ describe("Reduce-Only Bank Tests", () => {
           dummyIx(groupAdmin.wallet.publicKey, users[1].wallet.publicKey),
           await configureBank(groupAdmin.mrgnProgram, {
             bank: bankKey,
-            bankConfigOpt: {
-              ...defaultBankConfigOptRaw(),
-              operationalState: {
-                operational: undefined,
-              },
-            },
+            bankConfigOpt: (() => {
+              const cfg = blankBankConfigOptRaw();
+              cfg.operationalState = { operational: undefined };
+              return cfg;
+            })(),
+            group: marginfiGroup.publicKey,
           }),
         ),
       );
@@ -186,12 +187,12 @@ describe("Reduce-Only Bank Tests", () => {
         new Transaction().add(
           await configureBank(groupAdmin.mrgnProgram, {
             bank: bankKeypairA.publicKey,
-            bankConfigOpt: {
-              ...defaultBankConfigOptRaw(),
-              operationalState: {
-                reduceOnlyWithBorrowingPower: undefined,
-              },
-            },
+            bankConfigOpt: (() => {
+              const cfg = blankBankConfigOptRaw();
+              cfg.operationalState = { reduceOnlyWithBorrowingPower: undefined };
+              return cfg;
+            })(),
+            group: marginfiGroup.publicKey,
           }),
         ),
       );
@@ -256,12 +257,12 @@ describe("Reduce-Only Bank Tests", () => {
         new Transaction().add(
           await configureBank(groupAdmin.mrgnProgram, {
             bank: bankKeypairA.publicKey,
-            bankConfigOpt: {
-              ...defaultBankConfigOptRaw(),
-              operationalState: {
-                operational: undefined,
-              },
-            },
+            bankConfigOpt: (() => {
+              const cfg = blankBankConfigOptRaw();
+              cfg.operationalState = { operational: undefined };
+              return cfg;
+            })(),
+            group: marginfiGroup.publicKey,
           }),
         ),
       );
@@ -330,12 +331,11 @@ describe("Reduce-Only Bank Tests", () => {
         new Transaction().add(
           await configureBank(groupAdmin.mrgnProgram, {
             bank: bankKeypairA.publicKey,
-            bankConfigOpt: {
-              ...defaultBankConfigOptRaw(),
-              operationalState: {
-                reduceOnly: undefined,
-              },
-            },
+            bankConfigOpt: (() => {
+              const cfg = blankBankConfigOptRaw();
+              cfg.operationalState = { reduceOnly: undefined };
+              return cfg;
+            })(),
           }),
         ),
       );
@@ -400,12 +400,12 @@ describe("Reduce-Only Bank Tests", () => {
         new Transaction().add(
           await configureBank(groupAdmin.mrgnProgram, {
             bank: bankKeypairA.publicKey,
-            bankConfigOpt: {
-              ...defaultBankConfigOptRaw(),
-              operationalState: {
-                operational: undefined,
-              },
-            },
+            bankConfigOpt: (() => {
+              const cfg = blankBankConfigOptRaw();
+              cfg.operationalState = { operational: undefined };
+              return cfg;
+            })(),
+            group: marginfiGroup.publicKey,
           }),
         ),
       );
@@ -484,12 +484,12 @@ describe("Reduce-Only Bank Tests", () => {
         new Transaction().add(
           await configureBank(groupAdmin.mrgnProgram, {
             bank: bankKeypairA.publicKey,
-            bankConfigOpt: {
-              ...defaultBankConfigOptRaw(),
-              operationalState: {
-                reduceOnly: undefined,
-              },
-            },
+            bankConfigOpt: (() => {
+              const cfg = blankBankConfigOptRaw();
+              cfg.operationalState = { reduceOnly: undefined };
+              return cfg;
+            })(),
+            group: marginfiGroup.publicKey,
           }),
         ),
       );
@@ -544,12 +544,12 @@ describe("Reduce-Only Bank Tests", () => {
         new Transaction().add(
           await configureBank(groupAdmin.mrgnProgram, {
             bank: bankKeypairA.publicKey,
-            bankConfigOpt: {
-              ...defaultBankConfigOptRaw(),
-              operationalState: {
-                operational: undefined,
-              },
-            },
+            bankConfigOpt: (() => {
+              const cfg = blankBankConfigOptRaw();
+              cfg.operationalState = { operational: undefined };
+              return cfg;
+            })(),
+            group: marginfiGroup.publicKey,
           }),
         ),
       );
@@ -598,12 +598,12 @@ describe("Reduce-Only Bank Tests", () => {
         new Transaction().add(
           await configureBank(groupAdmin.mrgnProgram, {
             bank: bankKeypairSol.publicKey,
-            bankConfigOpt: {
-              ...defaultBankConfigOptRaw(),
-              operationalState: {
-                reduceOnly: undefined,
-              },
-            },
+            bankConfigOpt: (() => {
+              const cfg = blankBankConfigOptRaw();
+              cfg.operationalState = { reduceOnly: undefined };
+              return cfg;
+            })(),
+            group: marginfiGroup.publicKey,
           }),
         ),
       );
@@ -656,12 +656,12 @@ describe("Reduce-Only Bank Tests", () => {
         new Transaction().add(
           await configureBank(groupAdmin.mrgnProgram, {
             bank: bankKeypairSol.publicKey,
-            bankConfigOpt: {
-              ...defaultBankConfigOptRaw(),
-              operationalState: {
-                operational: undefined,
-              },
-            },
+            bankConfigOpt: (() => {
+              const cfg = blankBankConfigOptRaw();
+              cfg.operationalState = { operational: undefined };
+              return cfg;
+            })(),
+            group: marginfiGroup.publicKey,
           }),
         ),
       );

@@ -216,7 +216,7 @@ describe("k18: 16 Kamino position liquidation test", () => {
       .accountsPartial({
         group: kaminoGroup.publicKey,
         bank: bankKey,
-        admin: groupAdmin.wallet.publicKey,
+        bankAdmin: groupAdmin.wallet.publicKey,
       })
       .remainingAccounts([
         {

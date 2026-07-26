@@ -20,12 +20,14 @@ import { USER_ACCOUNT } from "../../utils/mocks";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import {
   CONF_INTERVAL_MULTIPLE,
+  blankBankConfigOptRaw,
   defaultBankConfigOptRaw,
   HEALTH_CACHE_ENGINE_OK,
   HEALTH_CACHE_HEALTHY,
   HEALTH_CACHE_ORACLE_OK,
   HEALTH_CACHE_PROGRAM_VERSION_0_1_5,
   ORACLE_CONF_INTERVAL,
+  splitBankConfig,
 } from "../../utils/types";
 import { configureBank } from "../../utils/group-instructions";
 import { bytesToF64, getBankrunTime } from "../../utils/tools";
@@ -287,14 +289,30 @@ describe("Health pulse", () => {
   });
 
   it("(admin) restore the default config to Token A bank", async () => {
-    let config = defaultBankConfigOptRaw();
+    const { riskConfig, adminConfig, operationalConfig } = splitBankConfig(
+      defaultBankConfigOptRaw()
+    );
+    
     await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
-      new Transaction().add(
-        await configureBank(groupAdmin.mrgnProgram, {
-          bank: bankKeypairA.publicKey,
-          bankConfigOpt: config,
-        })
-      )
+      new Transaction()
+        .add(
+          await configureBank(groupAdmin.mrgnProgram, {
+            bank: bankKeypairA.publicKey,
+            bankConfigOpt: riskConfig,
+          })
+        )
+        .add(
+          await configureBank(groupAdmin.mrgnProgram, {
+            bank: bankKeypairA.publicKey,
+            bankConfigOpt: adminConfig,
+          })
+        )
+        .add(
+          await configureBank(groupAdmin.mrgnProgram, {
+            bank: bankKeypairA.publicKey,
+            bankConfigOpt: operationalConfig,
+          })
+        )
     );
   });
 
