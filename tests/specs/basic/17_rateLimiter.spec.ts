@@ -76,7 +76,7 @@ type RateLimitFlowEvent = {
 
 function parseRateLimitFlowEvents(
   program: Program<Marginfi>,
-  logMessages: string[]
+  logMessages: string[],
 ): RateLimitFlowEvent[] {
   const events: RateLimitFlowEvent[] = [];
   const DATA_PREFIX = "Program data: ";
@@ -151,9 +151,9 @@ describe("Rate limiter", () => {
             marginfiAccount: accountKeypair.publicKey,
             authority: rateLimitUser.wallet.publicKey,
             feePayer: rateLimitUser.wallet.publicKey,
-          })
+          }),
         ),
-        [accountKeypair]
+        [accountKeypair],
       );
     } else {
       const existing = rateLimitUser.accounts.get(RATE_LIMIT_ACCOUNT);
@@ -174,9 +174,9 @@ describe("Rate limiter", () => {
             marginfiAccount: accountKeypair.publicKey,
             authority: rateLimitUser.wallet.publicKey,
             feePayer: rateLimitUser.wallet.publicKey,
-          })
+          }),
         ),
-        [accountKeypair]
+        [accountKeypair],
       );
     } else {
       const existing = rateLimitUser.accounts.get(WITHDRAW_ACCOUNT);
@@ -206,8 +206,8 @@ describe("Rate limiter", () => {
           bankConfigOpt: tokenACapConfig,
           group: marginfiGroup.publicKey,
           signer: groupAdmin.wallet.publicKey,
-        })
-      )
+        }),
+      ),
     );
 
     // Deposit Token A collateral to rate limit account (for borrow tests)
@@ -219,8 +219,8 @@ describe("Rate limiter", () => {
           tokenAccount: rateLimitUser.tokenAAccount,
           amount: tokenANative(5),
           depositUpToLimit: false,
-        })
-      )
+        }),
+      ),
     );
 
     // Deposit USDC collateral to withdraw account (for withdraw tests)
@@ -232,8 +232,8 @@ describe("Rate limiter", () => {
           tokenAccount: rateLimitUser.usdcAccount,
           amount: usdcNative(20),
           depositUpToLimit: false,
-        })
-      )
+        }),
+      ),
     );
   });
 
@@ -267,8 +267,8 @@ describe("Rate limiter", () => {
           tokenAccount: rateLimitUser.usdcAccount,
           remaining: usdcRemainingAccounts(),
           amount,
-        })
-      )
+        }),
+      ),
     );
   };
 
@@ -287,7 +287,7 @@ describe("Rate limiter", () => {
         tokenAccount: rateLimitUser.usdcAccount,
         remaining: usdcRemainingAccounts(),
         amount,
-      })
+      }),
     );
     const result = await processBankrunTransaction(bankrunContext, tx, [
       rateLimitUser.wallet,
@@ -309,8 +309,8 @@ describe("Rate limiter", () => {
           tokenAccount: rateLimitUser.usdcAccount,
           remaining: usdcRemainingAccounts(),
           amount,
-        })
-      )
+        }),
+      ),
     );
   };
 
@@ -329,7 +329,7 @@ describe("Rate limiter", () => {
         tokenAccount: rateLimitUser.usdcAccount,
         remaining: usdcRemainingAccounts(),
         amount,
-      })
+      }),
     );
     const result = await processBankrunTransaction(bankrunContext, tx, [
       rateLimitUser.wallet,
@@ -342,7 +342,7 @@ describe("Rate limiter", () => {
     inflowUsd?: BN;
   }) => {
     const groupState = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey
+      marginfiGroup.publicKey,
     );
     const updateSeq = groupState.rateLimiterLastAdminUpdateSeq.add(new BN(1));
     const eventStartSlot = groupState.rateLimiterLastAdminUpdateSlot.add(
@@ -366,8 +366,8 @@ describe("Rate limiter", () => {
           updateSeq,
           eventStartSlot,
           eventEndSlot,
-        })
-      )
+        }),
+      ),
     );
   };
 
@@ -394,8 +394,8 @@ describe("Rate limiter", () => {
           marginfiGroup: marginfiGroup.publicKey,
           hourlyMaxOutflowUsd: args.groupHourly ?? null,
           dailyMaxOutflowUsd: args.groupDaily ?? null,
-        })
-      )
+        }),
+      ),
     );
   };
 
@@ -404,7 +404,7 @@ describe("Rate limiter", () => {
    */
   const advanceClock = async (
     seconds: number,
-    refreshOracles: boolean
+    refreshOracles: boolean,
   ): Promise<void> => {
     await advanceBankrunClock(bankrunContext, seconds);
 
@@ -433,7 +433,7 @@ describe("Rate limiter", () => {
     assertBNEqual(bank.rateLimiter.daily.maxOutflow, usdcNative(100));
     assertBNEqual(
       bank.rateLimiter.hourly.windowDuration,
-      HOURLY_WINDOW_SECONDS
+      HOURLY_WINDOW_SECONDS,
     );
     assertBNEqual(bank.rateLimiter.daily.windowDuration, DAILY_WINDOW_SECONDS);
     assertBNApproximately(bank.rateLimiter.hourly.windowStart, now, 2);
@@ -446,7 +446,7 @@ describe("Rate limiter", () => {
     assertBNEqual(group.rateLimiter.daily.maxOutflow, 200);
     assertBNEqual(
       group.rateLimiter.hourly.windowDuration,
-      HOURLY_WINDOW_SECONDS
+      HOURLY_WINDOW_SECONDS,
     );
     assertBNEqual(group.rateLimiter.daily.windowDuration, DAILY_WINDOW_SECONDS);
     assertBNApproximately(group.rateLimiter.hourly.windowStart, now, 2);
@@ -475,7 +475,7 @@ describe("Rate limiter", () => {
 
   it("(admin) rejects overlapping admin update slot ranges", async () => {
     const groupState = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey
+      marginfiGroup.publicKey,
     );
 
     const updateSeq = groupState.rateLimiterLastAdminUpdateSeq.add(new BN(1));
@@ -493,12 +493,12 @@ describe("Rate limiter", () => {
               updateSeq,
               eventStartSlot,
               eventEndSlot,
-            })
-          )
+            }),
+          ),
         );
       },
       "GroupRateLimiterUpdateOutOfOrderSlot",
-      6124
+      6124,
     );
   });
 
@@ -515,11 +515,11 @@ describe("Rate limiter", () => {
     await borrowUsdc(bankHourlyLimit);
 
     const bankAfterBorrow = await program.account.bank.fetch(
-      bankKeypairUsdc.publicKey
+      bankKeypairUsdc.publicKey,
     );
     assertBNEqual(
       bankAfterBorrow.rateLimiter.hourly.curWindowOutflow,
-      bankHourlyLimit
+      bankHourlyLimit,
     );
 
     await expectFailedTxWithMessage(async () => {
@@ -543,8 +543,8 @@ describe("Rate limiter", () => {
           tokenAccount: rateLimitUser.usdcAccount,
           remaining: usdcOnlyRemainingAccounts(),
           amount: usdcNative(1),
-        })
-      )
+        }),
+      ),
     );
 
     await expectFailedTxWithMessage(async () => {
@@ -556,8 +556,8 @@ describe("Rate limiter", () => {
             tokenAccount: rateLimitUser.usdcAccount,
             remaining: usdcOnlyRemainingAccounts(),
             amount: usdcNative(2),
-          })
-        )
+          }),
+        ),
       );
     }, "Bank hourly rate limit exceeded");
   });
@@ -591,7 +591,7 @@ describe("Rate limiter", () => {
     await adminUpdateGroupRateLimiter({ outflowUsd: new BN(totalOutflowUsd) });
 
     const groupAfterUpdate = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey
+      marginfiGroup.publicKey,
     );
     assertBNEqual(groupAfterUpdate.rateLimiter.hourly.curWindowOutflow, 5);
 
@@ -601,7 +601,7 @@ describe("Rate limiter", () => {
         await borrowUsdc(usdcNative(8));
       },
       "GroupHourlyRateLimitExceeded",
-      6117
+      6117,
     );
 
     // Repay 3 USDC and capture events
@@ -622,7 +622,7 @@ describe("Rate limiter", () => {
     await adminUpdateGroupRateLimiter({ inflowUsd: new BN(totalInflowUsd) });
 
     const groupAfterInflow = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey
+      marginfiGroup.publicKey,
     );
     assertBNEqual(groupAfterInflow.rateLimiter.hourly.curWindowOutflow, 2);
 
@@ -646,7 +646,7 @@ describe("Rate limiter", () => {
     await borrowUsdc(bankDailyLimit);
 
     const bankAfter = await program.account.bank.fetch(
-      bankKeypairUsdc.publicKey
+      bankKeypairUsdc.publicKey,
     );
     assertBNEqual(bankAfter.rateLimiter.daily.curWindowOutflow, bankDailyLimit);
 
@@ -676,7 +676,7 @@ describe("Rate limiter", () => {
     await adminUpdateGroupRateLimiter({ outflowUsd: new BN(totalOutflowUsd) });
 
     const groupAfter = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey
+      marginfiGroup.publicKey,
     );
     assertBNEqual(groupAfter.rateLimiter.daily.curWindowOutflow, 3);
 
@@ -706,8 +706,8 @@ describe("Rate limiter", () => {
           tokenAccount: rateLimitUser.usdcAccount,
           amount: usdcNative(1),
           depositUpToLimit: false,
-        })
-      )
+        }),
+      ),
     );
 
     // Withdraw 2 USDC (outflow)
@@ -719,8 +719,8 @@ describe("Rate limiter", () => {
           tokenAccount: rateLimitUser.usdcAccount,
           remaining: usdcOnlyRemainingAccounts(),
           amount: usdcNative(2),
-        })
-      )
+        }),
+      ),
     );
 
     const bank = await program.account.bank.fetch(bankKeypairUsdc.publicKey);
@@ -770,7 +770,7 @@ describe("Rate limiter", () => {
     });
 
     const groupBefore = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey
+      marginfiGroup.publicKey,
     );
     const outflowBefore =
       groupBefore.rateLimiter.hourly.curWindowOutflow.toNumber();
@@ -779,23 +779,23 @@ describe("Rate limiter", () => {
     await borrowUsdc(usdcNative(5));
 
     const groupAfterBorrow = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey
+      marginfiGroup.publicKey,
     );
     // Group rate limiter should NOT have changed (it's read-only during user instructions)
     assertBNEqual(
       groupAfterBorrow.rateLimiter.hourly.curWindowOutflow,
-      outflowBefore
+      outflowBefore,
     );
 
     // Repay 5 USDC - group state should also remain unchanged
     await repayUsdc(usdcNative(5));
 
     const groupAfterRepay = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey
+      marginfiGroup.publicKey,
     );
     assertBNEqual(
       groupAfterRepay.rateLimiter.hourly.curWindowOutflow,
-      outflowBefore
+      outflowBefore,
     );
   });
 
@@ -837,7 +837,7 @@ describe("Rate limiter", () => {
 
     // Group state should still be unchanged (read-only during user instructions)
     const groupBeforeAdmin = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey
+      marginfiGroup.publicKey,
     );
     assertBNEqual(groupBeforeAdmin.rateLimiter.hourly.curWindowOutflow, 0);
 
@@ -849,7 +849,7 @@ describe("Rate limiter", () => {
 
     // Net outflow = 6 - 1 = 5
     const groupAfterAdmin = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey
+      marginfiGroup.publicKey,
     );
     assertBNEqual(groupAfterAdmin.rateLimiter.hourly.curWindowOutflow, 5);
 
@@ -864,7 +864,7 @@ describe("Rate limiter", () => {
     });
 
     const groupAfterBatch2 = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey
+      marginfiGroup.publicKey,
     );
     // 5 (previous) + 2 (new) = 7
     assertBNEqual(groupAfterBatch2.rateLimiter.hourly.curWindowOutflow, 7);
@@ -875,7 +875,7 @@ describe("Rate limiter", () => {
         await borrowUsdc(usdcNative(4));
       },
       "GroupHourlyRateLimitExceeded",
-      6117
+      6117,
     );
 
     // Repay what we borrowed to keep the account healthy for subsequent tests
@@ -912,11 +912,11 @@ describe("Rate limiter", () => {
     await borrowUsdc(bankHourlyLimit);
 
     const bankAfter = await program.account.bank.fetch(
-      bankKeypairUsdc.publicKey
+      bankKeypairUsdc.publicKey,
     );
     assertBNEqual(
       bankAfter.rateLimiter.hourly.curWindowOutflow,
-      bankHourlyLimit
+      bankHourlyLimit,
     );
     assertBNEqual(bankAfter.rateLimiter.hourly.prevWindowOutflow, 0);
   });
@@ -966,14 +966,14 @@ describe("Rate limiter", () => {
       .instruction();
 
     await prog.provider.sendAndConfirm(
-      new Transaction().add(startIx, borrowIxLocal, endIx)
+      new Transaction().add(startIx, borrowIxLocal, endIx),
     );
 
     const bank = await program.account.bank.fetch(bankKeypairUsdc.publicKey);
     assert.ok(
       bank.rateLimiter.hourly.curWindowOutflow.toNumber() <=
         bankHourlyLimit.toNumber() * 10,
-      "Rate limiter should not have excessive outflow after flashloan"
+      "Rate limiter should not have excessive outflow after flashloan",
     );
   });
 });

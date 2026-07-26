@@ -24,10 +24,7 @@ import {
   SOLEND_TOKEN_A_RESERVE,
 } from "../../rootHooks";
 import { processBankrunTransaction, toBnFromI80 } from "../../utils/tools";
-import {
-  getTokenBalance,
-  assertBNApproximately,
-} from "../../utils/genericTests";
+import { getTokenBalance, assertBNApproximately } from "../../utils/genericTests";
 import { accountInit } from "../../utils/user-instructions";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import BigNumber from "bignumber.js";

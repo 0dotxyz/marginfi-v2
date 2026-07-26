@@ -23,7 +23,7 @@ export type RefreshJupSimpleArgs = {
  */
 export const refreshJupSimple = (
   program: Program<JuplendLendingIdl>,
-  args: RefreshJupSimpleArgs
+  args: RefreshJupSimpleArgs,
 ): Promise<TransactionInstruction> => {
   return makeJuplendNativeUpdateRateIx(program, {
     lending: args.pool.lending,
@@ -49,15 +49,15 @@ export type JuplendWithdrawSimpleArgs = {
  */
 export const makeJuplendWithdrawSimpleIx = (
   program: Program<Marginfi>,
-  args: JuplendWithdrawSimpleArgs
+  args: JuplendWithdrawSimpleArgs,
 ): Promise<TransactionInstruction> => {
   const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
     program.programId,
-    args.bank
+    args.bank,
   );
   const [claimAccount] = findJuplendClaimAccountPda(
     liquidityVaultAuthority,
-    args.pool.mint
+    args.pool.mint,
   );
 
   return makeJuplendWithdrawIx(program, {

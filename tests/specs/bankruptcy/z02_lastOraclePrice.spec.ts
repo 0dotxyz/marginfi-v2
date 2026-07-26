@@ -30,10 +30,7 @@ import {
   u64MAX_BN,
 } from "../../utils/types";
 import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
-import {
-  assertI80F48Approx,
-  assertI80F48Equal,
-} from "../../utils/genericTests";
+import { assertI80F48Approx, assertI80F48Equal } from "../../utils/genericTests";
 import { getBankrunBlockhash } from "../../utils/tools";
 
 type MarginfiBankAccount = IdlAccounts<Marginfi>["bank"];

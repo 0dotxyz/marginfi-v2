@@ -41,10 +41,7 @@ import {
   bigNumberToWrappedI80F48,
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
-import {
-  blankBankConfigOptRaw,
-  CONF_INTERVAL_MULTIPLE,
-} from "../../utils/types";
+import { blankBankConfigOptRaw, CONF_INTERVAL_MULTIPLE } from "../../utils/types";
 import { configureBank } from "../../utils/group-instructions";
 import {
   defaultDriftBankConfig,
@@ -377,7 +374,7 @@ describe("d09: Drift Liquidation", () => {
         (b) => b.bankPk.equals(driftTokenABank) && b.active === 1
       );
     const liquidateeAssetSharesBefore = toBnFromI80(
-      liquidateeTokenABalanceBefore.assetShares
+      liquidateeTokenABalanceBefore.assetShares,
     );
 
     while (true) {

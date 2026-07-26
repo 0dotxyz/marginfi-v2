@@ -41,15 +41,8 @@ import {
   repayIx,
   composeRemainingAccounts,
 } from "../../utils/user-instructions";
-import {
-  configBankEmode,
-  groupConfigure,
-} from "../../utils/group-instructions";
-import {
-  bytesToF64,
-  getBankrunBlockhash,
-  logHealthCache,
-} from "../../utils/tools";
+import { configBankEmode, groupConfigure } from "../../utils/group-instructions";
+import { bytesToF64, getBankrunBlockhash, logHealthCache } from "../../utils/tools";
 import { assert } from "chai";
 import { dummyIx } from "../../utils/bankrunConnection";
 

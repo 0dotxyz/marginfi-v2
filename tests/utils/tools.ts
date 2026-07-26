@@ -74,31 +74,31 @@ function processSignedBankrunTransaction(
   bankrunContext: ProgramTestContext,
   tx: Transaction | VersionedTransaction,
   trySend: true,
-  dumpLogOnFail?: boolean
+  dumpLogOnFail?: boolean,
 ): Promise<BanksTransactionResultWithMeta>;
 function processSignedBankrunTransaction(
   bankrunContext: ProgramTestContext,
   tx: Transaction | VersionedTransaction,
   trySend?: false,
-  dumpLogOnFail?: boolean
+  dumpLogOnFail?: boolean,
 ): Promise<BanksTransactionMeta>;
 function processSignedBankrunTransaction(
   bankrunContext: ProgramTestContext,
   tx: Transaction | VersionedTransaction,
   trySend: boolean,
-  dumpLogOnFail?: boolean
+  dumpLogOnFail?: boolean,
 ): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta>;
 async function processSignedBankrunTransaction(
   bankrunContext: ProgramTestContext,
   tx: Transaction | VersionedTransaction,
   trySend: boolean = false,
-  dumpLogOnFail: boolean = false
+  dumpLogOnFail: boolean = false,
 ): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta> {
   const bankrunTx = tx;
 
   if (trySend) {
     const result = await bankrunContext.banksClient.tryProcessTransaction(
-      bankrunTx
+      bankrunTx,
     );
     if (dumpLogOnFail && result.result) {
       const dumped = dumpBankrunLogs(result);
@@ -110,7 +110,7 @@ async function processSignedBankrunTransaction(
         } catch (diagnosticError) {
           console.log(
             "[bankrun] trySend fallback simulateTransaction failed:",
-            diagnosticError
+            diagnosticError,
           );
         }
       }
@@ -125,7 +125,7 @@ async function processSignedBankrunTransaction(
     if (dumpLogOnFail) {
       console.log(
         "[bankrun] processTransaction threw:",
-        error instanceof Error ? error.message : error
+        error instanceof Error ? error.message : error,
       );
       let dumped = false;
       try {
@@ -135,7 +135,7 @@ async function processSignedBankrunTransaction(
       } catch (diagnosticError) {
         console.log(
           "[bankrun] simulateTransaction for diagnostics failed:",
-          diagnosticError
+          diagnosticError,
         );
       }
       if (!dumped) {
@@ -146,7 +146,7 @@ async function processSignedBankrunTransaction(
         } catch (diagnosticError) {
           console.log(
             "[bankrun] tryProcessTransaction for diagnostics failed:",
-            diagnosticError
+            diagnosticError,
           );
         }
       }
@@ -169,28 +169,28 @@ export function processBankrunTransaction(
   tx: Transaction,
   signers: Keypair[],
   trySend: true,
-  dumpLogOnFail?: boolean
+  dumpLogOnFail?: boolean,
 ): Promise<BanksTransactionResultWithMeta>;
 export function processBankrunTransaction(
   bankrunContext: ProgramTestContext,
   tx: Transaction,
   signers: Keypair[],
   trySend?: false,
-  dumpLogOnFail?: boolean
+  dumpLogOnFail?: boolean,
 ): Promise<BanksTransactionMeta>;
 export function processBankrunTransaction(
   bankrunContext: ProgramTestContext,
   tx: Transaction,
   signers: Keypair[],
   trySend?: boolean,
-  dumpLogOnFail?: boolean
+  dumpLogOnFail?: boolean,
 ): Promise<BanksTransactionMeta>;
 export async function processBankrunTransaction(
   bankrunContext: ProgramTestContext,
   tx: Transaction,
   signers: Keypair[],
   trySend: boolean = false,
-  dumpLogOnFail: boolean = false
+  dumpLogOnFail: boolean = false,
 ): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta> {
   tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
   tx.sign(...signers);
@@ -198,7 +198,7 @@ export async function processBankrunTransaction(
     bankrunContext,
     tx,
     trySend,
-    dumpLogOnFail
+    dumpLogOnFail,
   );
 }
 
@@ -216,28 +216,28 @@ export function processBankrunV0Transaction(
   tx: VersionedTransaction,
   signers: Keypair[],
   trySend: true,
-  dumpLogOnFail?: boolean
+  dumpLogOnFail?: boolean,
 ): Promise<BanksTransactionResultWithMeta>;
 export function processBankrunV0Transaction(
   bankrunContext: ProgramTestContext,
   tx: VersionedTransaction,
   signers: Keypair[],
   trySend?: false,
-  dumpLogOnFail?: boolean
+  dumpLogOnFail?: boolean,
 ): Promise<BanksTransactionMeta>;
 export function processBankrunV0Transaction(
   bankrunContext: ProgramTestContext,
   tx: VersionedTransaction,
   signers: Keypair[],
   trySend?: boolean,
-  dumpLogOnFail?: boolean
+  dumpLogOnFail?: boolean,
 ): Promise<BanksTransactionMeta>;
 export async function processBankrunV0Transaction(
   bankrunContext: ProgramTestContext,
   tx: VersionedTransaction,
   signers: Keypair[],
   trySend: boolean = false,
-  dumpLogOnFail: boolean = false
+  dumpLogOnFail: boolean = false,
 ): Promise<BanksTransactionResultWithMeta | BanksTransactionMeta> {
   if (signers.length > 0) {
     tx.sign(signers);
@@ -246,7 +246,7 @@ export async function processBankrunV0Transaction(
     bankrunContext,
     tx,
     trySend,
-    dumpLogOnFail
+    dumpLogOnFail,
   );
 }
 
@@ -261,7 +261,7 @@ export const printBufferGroups = (
   buffer: Buffer,
   groupLength: number,
   totalLength: number,
-  skipEmptyRows: boolean = true
+  skipEmptyRows: boolean = true,
 ) => {
   // Print the column headers
   let columnHeader = "        |";
@@ -368,7 +368,7 @@ export const dumpBankrunLogs = (result: any): boolean => {
   console.log(
     `[bankrun] no logMessages available (status=${status}, meta=${
       result?.meta === null ? "null" : typeof result?.meta
-    })`
+    })`,
   );
   if (txResult !== undefined) {
     console.log("[bankrun] tx result:", txResult);
@@ -378,7 +378,7 @@ export const dumpBankrunLogs = (result: any): boolean => {
   }
   console.log(
     "[bankrun] raw result preview:",
-    inspect(result, { depth: 4, colors: false, maxArrayLength: 50 })
+    inspect(result, { depth: 4, colors: false, maxArrayLength: 50 }),
   );
   return false;
 };
@@ -391,7 +391,7 @@ export const dumpBankrunLogs = (result: any): boolean => {
  */
 export const createLookupTableForInstructions = async (
   signer: Keypair,
-  instructions: TransactionInstruction[]
+  instructions: TransactionInstruction[],
 ): Promise<AddressLookupTableAccount> => {
   const addresses: PublicKey[] = [];
   const seen = new Set<string>();
@@ -414,7 +414,7 @@ export const createLookupTableForInstructions = async (
 
 export const createLut = async (
   signer: Keypair,
-  addresses: PublicKey[]
+  addresses: PublicKey[],
 ): Promise<AddressLookupTableAccount> => {
   const recentSlot = Number(await banksClient.getSlot());
   const [createLutIx, lutAddress] = AddressLookupTableProgram.createLookupTable(
@@ -422,7 +422,7 @@ export const createLut = async (
       authority: signer.publicKey,
       payer: signer.publicKey,
       recentSlot,
-    }
+    },
   );
 
   const createLutTx = new Transaction().add(createLutIx);
@@ -438,7 +438,7 @@ export const createLut = async (
         payer: signer.publicKey,
         lookupTable: lutAddress,
         addresses: addresses.slice(i, i + CHUNK_SIZE),
-      })
+      }),
     );
     extendTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     extendTx.sign(signer);
@@ -488,7 +488,7 @@ export function bytesToF64(bytes: Uint8Array | number[]): number {
  */
 export const safeGetAccountInfo = async (
   connection: any,
-  publicKey: PublicKey
+  publicKey: PublicKey,
 ): Promise<AccountInfo<Buffer> | null> => {
   try {
     return await connection.getAccountInfo(publicKey);
@@ -507,7 +507,7 @@ export const safeGetAccountInfo = async (
  */
 export function formatPriceWithDecimals(
   price: bigint,
-  exponent: number
+  exponent: number,
 ): string {
   const powerFactor = Math.pow(10, Math.abs(exponent));
   const priceNumber = Number(price);
@@ -527,7 +527,7 @@ export function formatPriceWithDecimals(
  */
 export function dumpAccBalances(
   account: MarginfiAccountRaw,
-  bankValueMap = {}
+  bankValueMap = {},
 ) {
   const balances = account.lendingAccount.balances;
   const activeBalances = [];
@@ -575,7 +575,7 @@ type MarginfiHealthCache = MarginfiAccount["healthCache"];
 
 export const logHealthCache = (
   header: string,
-  healthCache: MarginfiHealthCache
+  healthCache: MarginfiHealthCache,
 ) => {
   const av = wrappedI80F48toBigNumber(healthCache.assetValue);
   const lv = wrappedI80F48toBigNumber(healthCache.liabilityValue);
@@ -647,13 +647,13 @@ export async function getBankrunTime(ctx: ProgramTestContext): Promise<number> {
  */
 export const getUserAssetShares = async (
   marginfiAccountPk: PublicKey,
-  bankPk: PublicKey
+  bankPk: PublicKey,
 ): Promise<BigNumber> => {
   const marginfiAccount = await bankrunProgram.account.marginfiAccount.fetch(
-    marginfiAccountPk
+    marginfiAccountPk,
   );
   const userBalance = marginfiAccount.lendingAccount.balances.find(
-    (b: any) => b.active && b.bankPk.equals(bankPk)
+    (b: any) => b.active && b.bankPk.equals(bankPk),
   );
   return userBalance
     ? wrappedI80F48toBigNumber(userBalance.assetShares)
@@ -664,7 +664,7 @@ export const getUserAssetShares = async (
 export const mintToTokenAccount = async (
   mint: PublicKey,
   destination: PublicKey,
-  amount: BN
+  amount: BN,
 ) => {
   const ix = createMintToInstruction(
     mint,
@@ -672,7 +672,7 @@ export const mintToTokenAccount = async (
     globalProgramAdmin.wallet.publicKey,
     bnToBigIntSafe(amount),
     [],
-    TOKEN_PROGRAM_ID
+    TOKEN_PROGRAM_ID,
   );
 
   await processBankrunTransaction(
@@ -680,7 +680,7 @@ export const mintToTokenAccount = async (
     new Transaction().add(ix),
     [globalProgramAdmin.wallet],
     false,
-    true
+    true,
   );
 };
 
@@ -697,19 +697,19 @@ export const buildHealthRemainingAccounts = async (
   options: {
     excludedBankPks?: PublicKey[];
     includedBankPks?: PublicKey[];
-  } = {}
+  } = {},
 ): Promise<PublicKey[]> => {
   const excludedBankPks = options.excludedBankPks ?? [];
   const includedBankPks = options.includedBankPks ?? [];
 
   const marginfiAccount = await bankrunProgram.account.marginfiAccount.fetch(
-    marginfiAccountPk
+    marginfiAccountPk,
   );
   const activeBankPks = marginfiAccount.lendingAccount.balances
     .filter((b: any) => b.active)
     .filter(
       (b: any) =>
-        !excludedBankPks.some((excludedPk) => excludedPk.equals(b.bankPk))
+        !excludedBankPks.some((excludedPk) => excludedPk.equals(b.bankPk)),
     )
     .map((b: any) => b.bankPk as PublicKey);
 
@@ -724,7 +724,7 @@ export const buildHealthRemainingAccounts = async (
   }
 
   const banks = await Promise.all(
-    bankPks.map((bankPk) => bankrunProgram.account.bank.fetch(bankPk))
+    bankPks.map((bankPk) => bankrunProgram.account.bank.fetch(bankPk)),
   );
 
   const groups: PublicKey[][] = [];
@@ -747,7 +747,7 @@ export const buildHealthRemainingAccounts = async (
       group.push(
         bank.config.oracleKeys[1],
         bank.config.oracleKeys[2],
-        bank.config.oracleKeys[3]
+        bank.config.oracleKeys[3],
       );
     }
 
@@ -766,7 +766,7 @@ export const buildHealthRemainingAccounts = async (
  */
 export async function advanceBankrunClock(
   ctx: ProgramTestContext,
-  seconds: number
+  seconds: number,
 ): Promise<number> {
   const clock = await ctx.banksClient.getClock();
   const newClock = new Clock(
@@ -774,7 +774,7 @@ export async function advanceBankrunClock(
     clock.epochStartTimestamp,
     clock.epoch,
     clock.leaderScheduleEpoch,
-    clock.unixTimestamp + BigInt(seconds)
+    clock.unixTimestamp + BigInt(seconds),
   );
   ctx.setClock(newClock);
   return Number(newClock.unixTimestamp);
@@ -787,7 +787,7 @@ export async function advanceBankrunClock(
  * @returns
  */
 export const getBankrunBlockhash = async (
-  bankrunContext: ProgramTestContext
+  bankrunContext: ProgramTestContext,
 ) => {
   return (await bankrunContext.banksClient.getLatestBlockhash())[0];
 };
@@ -800,14 +800,14 @@ const EMISSIONS_MINT_OFFSET = 864 + 8;
 export async function setEmissionsDirect(
   provider: BankrunProvider,
   bank: PublicKey,
-  emissionsMint: PublicKey
+  emissionsMint: PublicKey,
 ): Promise<PublicKey> {
   const existing = await provider.context.banksClient.getAccount(bank);
   if (!existing) throw new Error("Bank account not found in bankrun");
 
   const buf = Buffer.from(existing.data);
   const prevMint = new PublicKey(
-    buf.subarray(EMISSIONS_MINT_OFFSET, EMISSIONS_MINT_OFFSET + 32)
+    buf.subarray(EMISSIONS_MINT_OFFSET, EMISSIONS_MINT_OFFSET + 32),
   );
 
   const emissionsSlice = emissionsMint.toBuffer();

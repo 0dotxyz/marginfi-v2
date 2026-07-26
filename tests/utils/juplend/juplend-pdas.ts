@@ -18,19 +18,19 @@ import {
 import type { JuplendPoolKeys } from "./types";
 
 export const JUPLEND_LENDING_PROGRAM_ID = new PublicKey(
-  "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9"
+  "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9",
 );
 
 export const JUPLEND_LIQUIDITY_PROGRAM_ID = new PublicKey(
-  "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC"
+  "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC",
 );
 
 export const JUPLEND_EARN_REWARDS_PROGRAM_ID = new PublicKey(
-  "jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar"
+  "jup7TthsMgcR9Y3L277b8Eo9uboVSmu1utkuXHNUKar",
 );
 
 export const TOKEN_METADATA_PROGRAM_ID = new PublicKey(
-  "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+  "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s",
 );
 
 export const JUPLEND_LIQUIDITY_AUTH_LIST_SEED = "auth_list";
@@ -58,32 +58,32 @@ export type JuplendGlobalKeys = {
 };
 
 export function findJuplendLendingAdminPda(
-  lendingProgramId: PublicKey = JUPLEND_LENDING_PROGRAM_ID
+  lendingProgramId: PublicKey = JUPLEND_LENDING_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("lending_admin")],
-    lendingProgramId
+    lendingProgramId,
   );
 }
 
 export function findJuplendFTokenMintPda(
   underlyingMint: PublicKey,
-  lendingProgramId: PublicKey = JUPLEND_LENDING_PROGRAM_ID
+  lendingProgramId: PublicKey = JUPLEND_LENDING_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("f_token_mint"), underlyingMint.toBuffer()],
-    lendingProgramId
+    lendingProgramId,
   );
 }
 
 export function findJuplendLendingPda(
   underlyingMint: PublicKey,
   fTokenMint: PublicKey,
-  lendingProgramId: PublicKey = JUPLEND_LENDING_PROGRAM_ID
+  lendingProgramId: PublicKey = JUPLEND_LENDING_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("lending"), underlyingMint.toBuffer(), fTokenMint.toBuffer()],
-    lendingProgramId
+    lendingProgramId,
   );
 }
 
@@ -98,18 +98,18 @@ export type JuplendLendingPdas = {
 
 export function deriveJuplendLendingPdas(
   underlyingMint: PublicKey,
-  lendingProgramId: PublicKey = JUPLEND_LENDING_PROGRAM_ID
+  lendingProgramId: PublicKey = JUPLEND_LENDING_PROGRAM_ID,
 ): JuplendLendingPdas {
   const [lendingAdmin, lendingAdminBump] =
     findJuplendLendingAdminPda(lendingProgramId);
   const [fTokenMint, fTokenMintBump] = findJuplendFTokenMintPda(
     underlyingMint,
-    lendingProgramId
+    lendingProgramId,
   );
   const [lending, lendingBump] = findJuplendLendingPda(
     underlyingMint,
     fTokenMint,
-    lendingProgramId
+    lendingProgramId,
   );
 
   return {
@@ -123,47 +123,47 @@ export function deriveJuplendLendingPdas(
 }
 
 export function findJuplendLiquidityPda(
-  liquidityProgramId: PublicKey = JUPLEND_LIQUIDITY_PROGRAM_ID
+  liquidityProgramId: PublicKey = JUPLEND_LIQUIDITY_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("liquidity")],
-    liquidityProgramId
+    liquidityProgramId,
   );
 }
 
 export function findJuplendLiquidityAuthListPda(
-  liquidityProgramId: PublicKey = JUPLEND_LIQUIDITY_PROGRAM_ID
+  liquidityProgramId: PublicKey = JUPLEND_LIQUIDITY_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from(JUPLEND_LIQUIDITY_AUTH_LIST_SEED)],
-    liquidityProgramId
+    liquidityProgramId,
   );
 }
 
 export function findJuplendLiquidityTokenReservePda(
   underlyingMint: PublicKey,
-  liquidityProgramId: PublicKey = JUPLEND_LIQUIDITY_PROGRAM_ID
+  liquidityProgramId: PublicKey = JUPLEND_LIQUIDITY_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("reserve"), underlyingMint.toBuffer()],
-    liquidityProgramId
+    liquidityProgramId,
   );
 }
 
 export function findJuplendLiquidityRateModelPda(
   underlyingMint: PublicKey,
-  liquidityProgramId: PublicKey = JUPLEND_LIQUIDITY_PROGRAM_ID
+  liquidityProgramId: PublicKey = JUPLEND_LIQUIDITY_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("rate_model"), underlyingMint.toBuffer()],
-    liquidityProgramId
+    liquidityProgramId,
   );
 }
 
 export function findJuplendLiquiditySupplyPositionPda(
   underlyingMint: PublicKey,
   lendingPda: PublicKey,
-  liquidityProgramId: PublicKey = JUPLEND_LIQUIDITY_PROGRAM_ID
+  liquidityProgramId: PublicKey = JUPLEND_LIQUIDITY_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [
@@ -171,14 +171,14 @@ export function findJuplendLiquiditySupplyPositionPda(
       underlyingMint.toBuffer(),
       lendingPda.toBuffer(),
     ],
-    liquidityProgramId
+    liquidityProgramId,
   );
 }
 
 export function findJuplendLiquidityBorrowPositionPda(
   underlyingMint: PublicKey,
   lendingPda: PublicKey,
-  liquidityProgramId: PublicKey = JUPLEND_LIQUIDITY_PROGRAM_ID
+  liquidityProgramId: PublicKey = JUPLEND_LIQUIDITY_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [
@@ -186,26 +186,26 @@ export function findJuplendLiquidityBorrowPositionPda(
       underlyingMint.toBuffer(),
       lendingPda.toBuffer(),
     ],
-    liquidityProgramId
+    liquidityProgramId,
   );
 }
 
 export function deriveJuplendLiquidityVaultAta(
   underlyingMint: PublicKey,
   liquidityPda: PublicKey,
-  tokenProgramId: PublicKey = TOKEN_PROGRAM_ID
+  tokenProgramId: PublicKey = TOKEN_PROGRAM_ID,
 ): PublicKey {
   return getAssociatedTokenAddressSync(
     underlyingMint,
     liquidityPda,
     true,
     tokenProgramId,
-    ASSOCIATED_TOKEN_PROGRAM_ID
+    ASSOCIATED_TOKEN_PROGRAM_ID,
   );
 }
 
 export function findJuplendTokenMetadataPda(
-  mint: PublicKey
+  mint: PublicKey,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [
@@ -213,47 +213,47 @@ export function findJuplendTokenMetadataPda(
       TOKEN_METADATA_PROGRAM_ID.toBuffer(),
       mint.toBuffer(),
     ],
-    TOKEN_METADATA_PROGRAM_ID
+    TOKEN_METADATA_PROGRAM_ID,
   );
 }
 
 export function findJuplendLendingRewardsAdminPda(
-  rewardsProgramId: PublicKey = JUPLEND_EARN_REWARDS_PROGRAM_ID
+  rewardsProgramId: PublicKey = JUPLEND_EARN_REWARDS_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from(JUPLEND_LENDING_REWARDS_ADMIN_SEED)],
-    rewardsProgramId
+    rewardsProgramId,
   );
 }
 
 export function findJuplendRewardsRateModelPdaBestEffort(
   underlyingMint: PublicKey,
-  rewardsProgramId: PublicKey = JUPLEND_EARN_REWARDS_PROGRAM_ID
+  rewardsProgramId: PublicKey = JUPLEND_EARN_REWARDS_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("lending_rewards_rate_model"), underlyingMint.toBuffer()],
-    rewardsProgramId
+    rewardsProgramId,
   );
 }
 
 export function findJuplendClaimAccountPda(
   user: PublicKey,
   mint: PublicKey,
-  liquidityProgramId: PublicKey = JUPLEND_LIQUIDITY_PROGRAM_ID
+  liquidityProgramId: PublicKey = JUPLEND_LIQUIDITY_PROGRAM_ID,
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("user_claim"), user.toBuffer(), mint.toBuffer()],
-    liquidityProgramId
+    liquidityProgramId,
   );
 }
 
 export const deriveJuplendFTokenVault = (
   programId: PublicKey,
-  bank: PublicKey
+  bank: PublicKey,
 ) => {
   return PublicKey.findProgramAddressSync(
     [Buffer.from(JUPLEND_F_TOKEN_VAULT_SEED, "utf-8"), bank.toBuffer()],
-    programId
+    programId,
   );
 };
 
@@ -278,7 +278,7 @@ export const deriveJuplendGlobalKeys = (args?: {
 };
 
 export const deriveJuplendPoolKeys = (
-  args: JuplendPoolKeysArgs
+  args: JuplendPoolKeysArgs,
 ): JuplendPoolKeys => {
   const liquidityProgramId =
     args.liquidityProgramId ?? JUPLEND_LIQUIDITY_PROGRAM_ID;
@@ -291,21 +291,21 @@ export const deriveJuplendPoolKeys = (
   const [authList] = findJuplendLiquidityAuthListPda(liquidityProgramId);
   const [tokenReserve] = findJuplendLiquidityTokenReservePda(
     args.mint,
-    liquidityProgramId
+    liquidityProgramId,
   );
   const [rateModel] = findJuplendLiquidityRateModelPda(
     args.mint,
-    liquidityProgramId
+    liquidityProgramId,
   );
   const vault = deriveJuplendLiquidityVaultAta(
     args.mint,
     liquidity,
-    tokenProgram
+    tokenProgram,
   );
 
   const { fTokenMint, lending, lendingAdmin } = deriveJuplendLendingPdas(
     args.mint,
-    lendingProgramId
+    lendingProgramId,
   );
   const [fTokenMetadata] = findJuplendTokenMetadataPda(fTokenMint);
 
@@ -313,32 +313,32 @@ export const deriveJuplendPoolKeys = (
     findJuplendLendingRewardsAdminPda(rewardsProgramId);
   const [lendingRewardsRateModel] = findJuplendRewardsRateModelPdaBestEffort(
     args.mint,
-    rewardsProgramId
+    rewardsProgramId,
   );
 
   const [supplyPositionOnLiquidity] = findJuplendLiquiditySupplyPositionPda(
     args.mint,
     lending,
-    liquidityProgramId
+    liquidityProgramId,
   );
   const [borrowPositionOnLiquidity] = findJuplendLiquidityBorrowPositionPda(
     args.mint,
     lending,
-    liquidityProgramId
+    liquidityProgramId,
   );
 
   let withdrawIntermediaryAta: PublicKey | undefined;
   if (args.mrgnProgramId && args.bank) {
     const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
       args.mrgnProgramId,
-      args.bank
+      args.bank,
     );
     withdrawIntermediaryAta = getAssociatedTokenAddressSync(
       args.mint,
       liquidityVaultAuthority,
       true,
       tokenProgram,
-      ASSOCIATED_TOKEN_PROGRAM_ID
+      ASSOCIATED_TOKEN_PROGRAM_ID,
     );
   }
 
@@ -386,7 +386,7 @@ export type JuplendMrgnAddresses = {
   feeVault: PublicKey;
   /** Marginfi PDA token account that holds Jup fTokens for this bank.
    * * Note: Unlike Kamino and Drift, which issue only ctokens, Juplend issues a second tier of
-   *   token called ftokens, which sit in this vault. Consider these like "shares".
+   *   token called ftokens, which sit in this vault. Consider these like "shares". 
    * * Generally 1:1 with the bank's shares (excluding the initial nominal deposit)
    */
   fTokenVault: PublicKey;
@@ -403,17 +403,17 @@ export type DeriveJuplendMrgnAddressesArgs = {
 };
 
 export function deriveJuplendMrgnAddresses(
-  args: DeriveJuplendMrgnAddressesArgs
+  args: DeriveJuplendMrgnAddressesArgs,
 ): JuplendMrgnAddresses {
   const [bank] = deriveBankWithSeed(
     args.mrgnProgramId,
     args.group,
     args.bankMint,
-    args.bankSeed
+    args.bankSeed,
   );
   const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
     args.mrgnProgramId,
-    bank
+    bank,
   );
   const [liquidityVault] = deriveLiquidityVault(args.mrgnProgramId, bank);
   const withdrawIntermediaryAta = getAssociatedTokenAddressSync(
@@ -421,12 +421,12 @@ export function deriveJuplendMrgnAddresses(
     liquidityVaultAuthority,
     true,
     args.tokenProgram ?? TOKEN_PROGRAM_ID,
-    ASSOCIATED_TOKEN_PROGRAM_ID
+    ASSOCIATED_TOKEN_PROGRAM_ID,
   );
 
   const [insuranceVaultAuthority] = deriveInsuranceVaultAuthority(
     args.mrgnProgramId,
-    bank
+    bank,
   );
   const [insuranceVault] = deriveInsuranceVault(args.mrgnProgramId, bank);
 
@@ -437,7 +437,7 @@ export function deriveJuplendMrgnAddresses(
 
   const [claimAccount] = findJuplendClaimAccountPda(
     liquidityVaultAuthority,
-    args.bankMint
+    args.bankMint,
   );
 
   return {

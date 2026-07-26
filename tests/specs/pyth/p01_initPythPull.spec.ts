@@ -16,10 +16,7 @@ import {
   assertI80F48Approx,
   assertKeysEqual,
 } from "../../utils/genericTests";
-import {
-  addBankWithSeed,
-  groupInitialize,
-} from "../../utils/group-instructions";
+import { addBankWithSeed, groupInitialize } from "../../utils/group-instructions";
 import { assert } from "chai";
 import {
   defaultBankConfig,
@@ -34,11 +31,7 @@ import {
 import { deriveBankWithSeed } from "../../utils/pdas";
 import { createMintToInstruction } from "@solana/spl-token";
 import { USER_ACCOUNT } from "../../utils/mocks";
-import {
-  accountInit,
-  depositIx,
-  healthPulse,
-} from "../../utils/user-instructions";
+import { accountInit, depositIx, healthPulse } from "../../utils/user-instructions";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
 import {
   bytesToF64,
@@ -58,14 +51,14 @@ describe("Pyth pull oracles in localnet", () => {
       await groupInitialize(groupAdmin.mrgnBankrunProgram, {
         marginfiGroup: throwawayGroup.publicKey,
         admin: groupAdmin.wallet.publicKey,
-      })
+      }),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet, throwawayGroup);
     await banksClient.processTransaction(tx);
 
     let group = await bankrunProgram.account.marginfiGroup.fetch(
-      throwawayGroup.publicKey
+      throwawayGroup.publicKey,
     );
     assertKeysEqual(group.admin, groupAdmin.wallet.publicKey);
     if (verbose) {
@@ -81,7 +74,7 @@ describe("Pyth pull oracles in localnet", () => {
       bankrunProgram.programId,
       throwawayGroup.publicKey,
       ecosystem.lstAlphaMint.publicKey,
-      seed
+      seed,
     );
     const oracleMeta: AccountMeta = {
       pubkey: PYTH_ORACLE_FEED_SAMPLE,
@@ -101,7 +94,7 @@ describe("Pyth pull oracles in localnet", () => {
       await groupAdmin.mrgnProgram.methods
         .lendingPoolConfigureBankOracle(
           ORACLE_SETUP_PYTH_PUSH,
-          PYTH_ORACLE_FEED_SAMPLE
+          PYTH_ORACLE_FEED_SAMPLE,
         )
         .accountsPartial({
           group: throwawayGroup.publicKey,
@@ -109,7 +102,7 @@ describe("Pyth pull oracles in localnet", () => {
           bankAdmin: groupAdmin.wallet.publicKey,
         })
         .remainingAccounts([oracleMeta])
-        .instruction()
+        .instruction(),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
@@ -131,7 +124,7 @@ describe("Pyth pull oracles in localnet", () => {
       bankrunProgram.programId,
       throwawayGroup.publicKey,
       ecosystem.lstAlphaMint.publicKey,
-      seed
+      seed,
     );
     const oracleMeta: AccountMeta = {
       pubkey: oracles.pythPullLst.publicKey,
@@ -151,7 +144,7 @@ describe("Pyth pull oracles in localnet", () => {
       await groupAdmin.mrgnProgram.methods
         .lendingPoolConfigureBankOracle(
           ORACLE_SETUP_PYTH_PUSH,
-          oracles.pythPullLst.publicKey
+          oracles.pythPullLst.publicKey,
         )
         .accountsPartial({
           group: throwawayGroup.publicKey,
@@ -159,7 +152,7 @@ describe("Pyth pull oracles in localnet", () => {
           bankAdmin: groupAdmin.wallet.publicKey,
         })
         .remainingAccounts([oracleMeta])
-        .instruction()
+        .instruction(),
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
@@ -190,7 +183,7 @@ describe("Pyth pull oracles in localnet", () => {
           marginfiAccount: userAccount,
           authority: user.wallet.publicKey,
           feePayer: user.wallet.publicKey,
-        })
+        }),
       );
       accountInitTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
       accountInitTx.sign(user.wallet, userAccKeypair);
@@ -205,8 +198,8 @@ describe("Pyth pull oracles in localnet", () => {
         ecosystem.lstAlphaMint.publicKey,
         user.lstAlphaAccount,
         wallet.publicKey,
-        20 * 10 ** ecosystem.lstAlphaDecimals
-      )
+        20 * 10 ** ecosystem.lstAlphaDecimals,
+      ),
     );
     fundUserTx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     fundUserTx.sign(wallet.payer);
@@ -223,7 +216,7 @@ describe("Pyth pull oracles in localnet", () => {
       bankrunProgram.programId,
       throwawayGroup.publicKey,
       ecosystem.lstAlphaMint.publicKey,
-      seed
+      seed,
     );
 
     let depositTx = new Transaction().add(
@@ -238,7 +231,7 @@ describe("Pyth pull oracles in localnet", () => {
       await healthPulse(user.mrgnBankrunProgram, {
         marginfiAccount: userAcc,
         remaining: [bankKey, oracles.pythPullLst.publicKey],
-      })
+      }),
     );
 
     await processBankrunTransaction(
@@ -246,7 +239,7 @@ describe("Pyth pull oracles in localnet", () => {
       depositTx,
       [user.wallet],
       false,
-      true
+      true,
     );
 
     const acc = await bankrunProgram.account.marginfiAccount.fetch(userAcc);
@@ -255,23 +248,23 @@ describe("Pyth pull oracles in localnet", () => {
       console.log(
         "Shares: " +
           wrappedI80F48toBigNumber(
-            acc.lendingAccount.balances[0].assetShares
-          ).toNumber()
+            acc.lendingAccount.balances[0].assetShares,
+          ).toNumber(),
       );
       console.log("price actual: " + bytesToF64(cache.prices[0]));
       console.log(
         "assets actual: " +
-          wrappedI80F48toBigNumber(cache.assetValue).toNumber()
+          wrappedI80F48toBigNumber(cache.assetValue).toNumber(),
       );
     }
 
     assertI80F48Approx(
       acc.lendingAccount.balances[0].assetShares,
-      depositAmount * 10 ** ecosystem.lstAlphaDecimals
+      depositAmount * 10 ** ecosystem.lstAlphaDecimals,
     );
     assert.equal(
       cache.flags,
-      HEALTH_CACHE_HEALTHY + HEALTH_CACHE_ENGINE_OK + HEALTH_CACHE_ORACLE_OK
+      HEALTH_CACHE_HEALTHY + HEALTH_CACHE_ENGINE_OK + HEALTH_CACHE_ORACLE_OK,
     );
     const priceExpected =
       oracles.lstAlphaPrice *

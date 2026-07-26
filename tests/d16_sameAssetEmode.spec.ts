@@ -199,7 +199,7 @@ describe("d16: Drift same-asset emode", () => {
           sameAssetEmodeInitLeverage: toWrappedI80F48Safe(initLeverage),
           sameAssetEmodeMaintLeverage: toWrappedI80F48Safe(maintLeverage),
         }),
-        dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey)
+        dummyIx(groupAdmin.wallet.publicKey, groupAdmin.wallet.publicKey),
       ),
       [groupAdmin.wallet]
     );
@@ -280,7 +280,7 @@ describe("d16: Drift same-asset emode", () => {
           marginfiAccount,
           remaining: composeRemainingAccounts(remainingGroups),
         }),
-        dummyIx(user.wallet.publicKey, user.wallet.publicKey)
+        dummyIx(user.wallet.publicKey, user.wallet.publicKey),
       ),
       [user.wallet]
     );
@@ -916,7 +916,7 @@ describe("d16: Drift same-asset emode", () => {
       label: "Drift/P0 same-asset pre-haircut setup",
       requireMaintenanceUnderwater: false,
     });
-    let restoreAssetShareValue: () => Promise<void> = async () => {};
+    let restoreAssetShareValue: () => Promise<void> = async () => { };
 
     try {
       restoreAssetShareValue = await setAssetShareValueHaircut(

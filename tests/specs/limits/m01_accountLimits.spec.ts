@@ -16,11 +16,7 @@ import {
 } from "../../rootHooks";
 import { configureBank, setFixedPrice } from "../../utils/group-instructions";
 import { assert } from "chai";
-import {
-  defaultBankConfigOptRaw,
-  blankBankConfigOptRaw,
-  MAX_BALANCES,
-} from "../../utils/types";
+import { defaultBankConfigOptRaw, blankBankConfigOptRaw, MAX_BALANCES } from "../../utils/types";
 import {
   borrowIx,
   composeRemainingAccounts,

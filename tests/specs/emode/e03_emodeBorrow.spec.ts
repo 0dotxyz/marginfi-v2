@@ -18,10 +18,7 @@ import {
   assertBankrunTxFailed,
   assertI80F48Approx,
 } from "../../utils/genericTests";
-import {
-  CONF_INTERVAL_MULTIPLE,
-  ORACLE_CONF_INTERVAL,
-} from "../../utils/types";
+import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "../../utils/types";
 import { deriveBankWithSeed } from "../../utils/pdas";
 import {
   bigNumberToWrappedI80F48,

@@ -292,7 +292,7 @@ describe("Health pulse", () => {
     const { riskConfig, adminConfig, operationalConfig } = splitBankConfig(
       defaultBankConfigOptRaw()
     );
-
+    
     await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
       new Transaction()
         .add(

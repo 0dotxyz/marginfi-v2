@@ -37,10 +37,7 @@ import { makeSolendRefreshReserveIx } from "../../utils/solend-sdk";
 import { SOLEND_NULL_PUBKEY } from "../../utils/solend-utils";
 import { createMintToInstruction } from "@solana/spl-token";
 import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
-import {
-  CONF_INTERVAL_MULTIPLE,
-  ORACLE_CONF_INTERVAL,
-} from "../../utils/types";
+import { CONF_INTERVAL_MULTIPLE, ORACLE_CONF_INTERVAL } from "../../utils/types";
 
 describe("sl06: Solend - Marginfi Deposits & Withdrawals", () => {
   let userA: MockUser;

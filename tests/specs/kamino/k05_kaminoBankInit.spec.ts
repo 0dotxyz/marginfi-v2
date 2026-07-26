@@ -80,7 +80,7 @@ describe("k05: Init Kamino banks", () => {
       mrgnID,
       kaminoGroup.publicKey,
       ecosystem.usdcMint.publicKey,
-      seed
+      seed,
     );
 
     const tx = new Transaction().add(
@@ -97,8 +97,8 @@ describe("k05: Init Kamino banks", () => {
         {
           config: defaultConfig,
           seed: seed,
-        }
-      )
+        },
+      ),
     );
     await processBankrunTransaction(ctx, tx, [groupAdmin.wallet]);
 
@@ -108,7 +108,7 @@ describe("k05: Init Kamino banks", () => {
     }
 
     const group = await bankrunProgram.account.marginfiGroup.fetch(
-      kaminoGroup.publicKey
+      kaminoGroup.publicKey,
     );
     assert.equal(group.banks, 1);
 
@@ -150,7 +150,7 @@ describe("k05: Init Kamino banks", () => {
     assertKeysEqual(bank.integrationAcc1, usdcReserve);
     const [liquidityVaultAuthority] = deriveLiquidityVaultAuthority(
       mrgnID,
-      bankKey
+      bankKey,
     );
     const [obligation] = deriveBaseObligation(liquidityVaultAuthority, market);
     assertKeysEqual(bank.integrationAcc2, obligation);
@@ -161,7 +161,7 @@ describe("k05: Init Kamino banks", () => {
 
     // Compare against the underlying Kamino reserve
     const usdcReserveData = await klendBankrunProgram.account.reserve.fetch(
-      usdcReserve
+      usdcReserve,
     );
     assertKeysEqual(usdcReserveData.liquidity.mintPubkey, bank.mint);
     assertBNEqual(usdcReserveData.liquidity.mintDecimals, bank.mintDecimals);
@@ -181,8 +181,8 @@ describe("k05: Init Kamino banks", () => {
           lendingMarket: market,
           reserve: tokenAReserve, // wrong
         },
-        new BN(999)
-      )
+        new BN(999),
+      ),
     );
     let result1 = await processBankrunTransaction(ctx, tx1, [usr.wallet], true);
     // Generic ConstraintTokenMint
@@ -214,7 +214,7 @@ describe("k05: Init Kamino banks", () => {
 
     const userUsdcBefore = await getTokenBalance(
       bankRunProvider,
-      user.usdcAccount
+      user.usdcAccount,
     );
 
     let tx = new Transaction().add(
@@ -230,8 +230,8 @@ describe("k05: Init Kamino banks", () => {
           lendingMarket: market,
           reserve: usdcReserve,
         },
-        new BN(nominalAmount)
-      )
+        new BN(nominalAmount),
+      ),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
 
@@ -260,20 +260,20 @@ describe("k05: Init Kamino banks", () => {
         klendBankrunProgram,
         usdcReserve,
         market,
-        oracles.usdcOracle.publicKey
+        oracles.usdcOracle.publicKey,
       ),
       await simpleRefreshObligation(klendBankrunProgram, market, obligation, [
         usdcReserve,
-      ])
+      ]),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
     let obAfterRefresh = await klendBankrunProgram.account.obligation.fetch(
-      obligation
+      obligation,
     );
     // Note: Now we see the expected value (USDC = $1 so 500 = $(500/10^decimals))
     assertU68F60Approx(
       obAfterRefresh.deposits[0].marketValueSf,
-      nominalAmount / 10 ** ecosystem.usdcDecimals
+      nominalAmount / 10 ** ecosystem.usdcDecimals,
     );
 
     // User was debited the norminal fee to keep the obligation open.
@@ -288,7 +288,7 @@ describe("k05: Init Kamino banks", () => {
       mrgnID,
       kaminoGroup.publicKey,
       ecosystem.tokenAMint.publicKey,
-      seed
+      seed,
     );
 
     const tx = new Transaction().add(
@@ -305,8 +305,8 @@ describe("k05: Init Kamino banks", () => {
         {
           config: defaultConfig,
           seed: seed,
-        }
-      )
+        },
+      ),
     );
     await processBankrunTransaction(ctx, tx, [user.wallet]);
     kaminoAccounts.set(KAMINO_TOKEN_A_BANK, tokenABankKey);
@@ -322,31 +322,31 @@ describe("k05: Init Kamino banks", () => {
           lendingMarket: market,
           reserve: tokenAReserve,
         },
-        new BN(nominalAmount)
-      )
+        new BN(nominalAmount),
+      ),
     );
     await processBankrunTransaction(ctx, initObligationTx, [user.wallet]);
 
     // Store the Token A bank obligation (same as USDC bank pattern)
     const [tokenAAuthority] = deriveLiquidityVaultAuthority(
       mrgnID,
-      tokenABankKey
+      tokenABankKey,
     );
     const [tokenAUserMetadata] = deriveUserMetadata(
       KLEND_PROGRAM_ID,
-      tokenAAuthority
+      tokenAAuthority,
     );
     const [tokenAObligation] = deriveBaseObligation(tokenAAuthority, market);
 
     const tokenABankKey_str = tokenABankKey.toString();
     kaminoAccounts.set(
       `${tokenABankKey_str}_LIQUIDITY_VAULT_AUTHORITY`,
-      tokenAAuthority
+      tokenAAuthority,
     );
     kaminoAccounts.set(`${tokenABankKey_str}_OBLIGATION`, tokenAObligation);
     kaminoAccounts.set(
       `${tokenABankKey_str}_USER_METADATA`,
-      tokenAUserMetadata
+      tokenAUserMetadata,
     );
   });
 
@@ -369,8 +369,8 @@ describe("k05: Init Kamino banks", () => {
         {
           config: defaultConfig,
           seed: throwawaySeed,
-        }
-      )
+        },
+      ),
     );
     let result = await processBankrunTransaction(ctx, tx, [user.wallet], true);
     // Unauthorized
@@ -396,8 +396,8 @@ describe("k05: Init Kamino banks", () => {
         {
           config: defaultConfig,
           seed: throwawaySeed,
-        }
-      )
+        },
+      ),
     );
     let result1 = await processBankrunTransaction(ctx, tx1, [usr.wallet], true);
     // KaminoReserveMintAddressMismatch
@@ -417,8 +417,8 @@ describe("k05: Init Kamino banks", () => {
         {
           config: defaultConfig,
           seed: throwawaySeed,
-        }
-      )
+        },
+      ),
     );
     let result2 = await processBankrunTransaction(ctx, tx2, [usr.wallet], true);
     // KaminoReserveMintAddressMismatch
@@ -446,8 +446,8 @@ describe("k05: Init Kamino banks", () => {
         {
           config: config1,
           seed: throwawaySeed,
-        }
-      )
+        },
+      ),
     );
     let result1 = await processBankrunTransaction(ctx, tx1, [usr.wallet], true);
     // KaminoInvalidOracleSetup
@@ -470,8 +470,8 @@ describe("k05: Init Kamino banks", () => {
         {
           config: config2,
           seed: throwawaySeed,
-        }
-      )
+        },
+      ),
     );
     let result2 = await processBankrunTransaction(ctx, tx2, [usr.wallet], true);
     // KaminoReserveMintAddressMismatch

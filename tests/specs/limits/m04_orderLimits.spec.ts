@@ -74,10 +74,7 @@ import {
   deriveOrderPda,
 } from "../../utils/pdas";
 import { assert } from "chai";
-import {
-  TOKEN_A_MARKET_INDEX,
-  refreshDriftOracles,
-} from "../../utils/drift-utils";
+import { TOKEN_A_MARKET_INDEX, refreshDriftOracles } from "../../utils/drift-utils";
 import {
   bigNumberToWrappedI80F48,
   wrappedI80F48toBigNumber,
@@ -108,7 +105,7 @@ const SCENARIOS: Array<{
 
 function groupSeedForScenario(index: number): Buffer {
   return Buffer.from(
-    `MARGINFI_GROUP_SEED_12340000M4${index.toString().padStart(2, "0")}`
+    `MARGINFI_GROUP_SEED_12340000M4${index.toString().padStart(2, "0")}`,
   );
 }
 
@@ -119,7 +116,7 @@ function userAccountNameForScenario(index: number): string {
 function scenarioName(
   kaminoDeposits: number,
   driftDeposits: number,
-  juplendDeposits: number
+  juplendDeposits: number,
 ) {
   return `m04: Order limits (Kamino=${kaminoDeposits}, Drift=${driftDeposits}, Juplend=${juplendDeposits})`;
 }
@@ -131,7 +128,7 @@ SCENARIOS.forEach(
       throw new Error(
         `Invalid scenario: Kamino=${kaminoDeposits}, Drift=${driftDeposits}, Juplend=${juplendDeposits} must total ${
           MAX_BALANCES - 1
-        }.`
+        }.`,
       );
     }
     const groupBuff = groupSeedForScenario(scenarioIndex);
@@ -203,7 +200,7 @@ SCENARIOS.forEach(
           repayInstruction: TransactionInstruction,
           withdrawInstruction: TransactionInstruction,
           endIx: TransactionInstruction,
-          preIxs: TransactionInstruction[] = []
+          preIxs: TransactionInstruction[] = [],
         ): Promise<VersionedTransaction> => {
           const blockhash = await getBankrunBlockhash(bankrunContext);
           const messageV0 = new TransactionMessage({
@@ -226,7 +223,7 @@ SCENARIOS.forEach(
         const buildHealthPulseTx = async (
           signer: MockUser,
           remaining: PublicKey[],
-          refreshIxs: TransactionInstruction[] = []
+          refreshIxs: TransactionInstruction[] = [],
         ): Promise<VersionedTransaction> => {
           const pulseIx = await healthPulse(signer.mrgnBankrunProgram, {
             marginfiAccount: userAccount,
@@ -258,20 +255,20 @@ SCENARIOS.forEach(
                 klendBankrunProgram,
                 tokenAReserve,
                 lendingMarket,
-                oracles.tokenAOracle.publicKey
-              )
+                oracles.tokenAOracle.publicKey,
+              ),
             );
           }
           if (juplendBanks.length > 0) {
             if (!juplendPool || !juplendPrograms) {
               throw new Error(
-                "Juplend refresh requested without Juplend setup"
+                "Juplend refresh requested without Juplend setup",
               );
             }
             ixs.push(
               await refreshJupSimple(juplendPrograms.lending, {
                 pool: juplendPool,
-              })
+              }),
             );
           }
           return ixs;
@@ -287,21 +284,21 @@ SCENARIOS.forEach(
             new BN(Number(clock.slot)),
             Number(clock.unixTimestamp),
             bankrunContext,
-            false
+            false,
           );
           if (driftBanks.length > 0) {
             await refreshDriftOracles(
               oracles,
               driftAccounts,
               bankrunContext,
-              banksClient
+              banksClient,
             );
           }
         };
 
         // Sending all together causes transaction size problems
         const pulseOrderHealth = async (
-          remaining: PublicKey[]
+          remaining: PublicKey[],
         ): Promise<void> => {
           const refreshIxs = await buildIntegrationRefreshIxs();
           if (refreshIxs.length > 0) {
@@ -311,7 +308,7 @@ SCENARIOS.forEach(
               refreshTx,
               [user.wallet],
               false,
-              true
+              true,
             );
           }
 
@@ -321,14 +318,14 @@ SCENARIOS.forEach(
           });
           const pulseTx = new Transaction().add(
             ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-            pulseIx
+            pulseIx,
           );
           await processBankrunTransaction(
             bankrunContext,
             pulseTx,
             [user.wallet],
             false,
-            true
+            true,
           );
         };
 
@@ -339,7 +336,7 @@ SCENARIOS.forEach(
             groupBuff,
             startingSeed,
             kaminoDeposits,
-            driftDeposits
+            driftDeposits,
           );
           banks = result.banks;
           kaminoBanks = result.kaminoBanks;
@@ -368,13 +365,13 @@ SCENARIOS.forEach(
 
         it("(admin) Seeds liquidity in all banks", async () => {
           const marginfiAccount = groupAdmin.accounts.get(
-            USER_ACCOUNT_THROWAWAY
+            USER_ACCOUNT_THROWAWAY,
           );
           const depositLstAmount = new BN(
-            10 * 10 ** ecosystem.lstAlphaDecimals
+            10 * 10 ** ecosystem.lstAlphaDecimals,
           );
           const depositTokenAAmount = new BN(
-            100 * 10 ** ecosystem.tokenADecimals
+            100 * 10 ** ecosystem.tokenADecimals,
           );
 
           for (const bank of banks) {
@@ -385,7 +382,7 @@ SCENARIOS.forEach(
                 tokenAccount: groupAdmin.lstAlphaAccount,
                 amount: depositLstAmount,
                 depositUpToLimit: false,
-              })
+              }),
             );
             await processBankrunTransaction(bankrunContext, tx, [
               groupAdmin.wallet,
@@ -395,11 +392,11 @@ SCENARIOS.forEach(
           for (const bank of kaminoBanks) {
             const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
               bankrunProgram.programId,
-              bank
+              bank,
             );
             const [obligation] = deriveBaseObligation(
               lendingVaultAuthority,
-              lendingMarket
+              lendingMarket,
             );
             const obligationFarmUserState = reserveFarmState
               ? PublicKey.findProgramAddressSync(
@@ -408,7 +405,7 @@ SCENARIOS.forEach(
                     reserveFarmState.toBuffer(),
                     obligation.toBuffer(),
                   ],
-                  FARMS_PROGRAM_ID
+                  FARMS_PROGRAM_ID,
                 )[0]
               : null;
 
@@ -417,13 +414,13 @@ SCENARIOS.forEach(
                 klendBankrunProgram,
                 tokenAReserve,
                 lendingMarket,
-                oracles.tokenAOracle.publicKey
+                oracles.tokenAOracle.publicKey,
               ),
               await simpleRefreshObligation(
                 klendBankrunProgram,
                 lendingMarket,
                 obligation,
-                [tokenAReserve]
+                [tokenAReserve],
               ),
               await makeKaminoDepositIx(
                 groupAdmin.mrgnBankrunProgram,
@@ -436,8 +433,8 @@ SCENARIOS.forEach(
                   obligationFarmUserState,
                   reserveFarmState: reserveFarmState ?? null,
                 },
-                depositTokenAAmount
-              )
+                depositTokenAAmount,
+              ),
             );
             await processBankrunTransaction(bankrunContext, tx, [
               groupAdmin.wallet,
@@ -455,15 +452,15 @@ SCENARIOS.forEach(
                   driftOracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE),
                 },
                 depositTokenAAmount,
-                TOKEN_A_MARKET_INDEX
-              )
+                TOKEN_A_MARKET_INDEX,
+              ),
             );
             await processBankrunTransaction(
               bankrunContext,
               tx,
               [groupAdmin.wallet],
               false,
-              true
+              true,
             );
           }
 
@@ -478,7 +475,7 @@ SCENARIOS.forEach(
                 bank,
                 pool: juplendPool,
                 amount: depositTokenAAmount,
-              })
+              }),
             );
             await processBankrunTransaction(bankrunContext, tx, [
               groupAdmin.wallet,
@@ -488,18 +485,18 @@ SCENARIOS.forEach(
 
         it("(user 0) Deposits to all integration banks and borrows from a regular bank", async () => {
           const depositTokenAAmount = new BN(
-            10 * 10 ** ecosystem.tokenADecimals
+            10 * 10 ** ecosystem.tokenADecimals,
           );
           const borrowLstAmount = new BN(1 * 10 ** ecosystem.lstAlphaDecimals);
 
           for (const bank of kaminoBanks) {
             const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
               bankrunProgram.programId,
-              bank
+              bank,
             );
             const [obligation] = deriveBaseObligation(
               lendingVaultAuthority,
-              lendingMarket
+              lendingMarket,
             );
             const obligationFarmUserState = reserveFarmState
               ? PublicKey.findProgramAddressSync(
@@ -508,7 +505,7 @@ SCENARIOS.forEach(
                     reserveFarmState.toBuffer(),
                     obligation.toBuffer(),
                   ],
-                  FARMS_PROGRAM_ID
+                  FARMS_PROGRAM_ID,
                 )[0]
               : null;
 
@@ -517,13 +514,13 @@ SCENARIOS.forEach(
                 klendBankrunProgram,
                 tokenAReserve,
                 lendingMarket,
-                oracles.tokenAOracle.publicKey
+                oracles.tokenAOracle.publicKey,
               ),
               await simpleRefreshObligation(
                 klendBankrunProgram,
                 lendingMarket,
                 obligation,
-                [tokenAReserve]
+                [tokenAReserve],
               ),
               await makeKaminoDepositIx(
                 user.mrgnBankrunProgram,
@@ -536,8 +533,8 @@ SCENARIOS.forEach(
                   obligationFarmUserState,
                   reserveFarmState: reserveFarmState ?? null,
                 },
-                depositTokenAAmount
-              )
+                depositTokenAAmount,
+              ),
             );
 
             await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
@@ -554,8 +551,8 @@ SCENARIOS.forEach(
                   driftOracle: driftAccounts.get(DRIFT_TOKEN_A_PULL_ORACLE),
                 },
                 depositTokenAAmount,
-                TOKEN_A_MARKET_INDEX
-              )
+                TOKEN_A_MARKET_INDEX,
+              ),
             );
             await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
           }
@@ -571,7 +568,7 @@ SCENARIOS.forEach(
                 bank,
                 pool: juplendPool,
                 amount: depositTokenAAmount,
-              })
+              }),
             );
             await processBankrunTransaction(bankrunContext, tx, [user.wallet]);
           }
@@ -587,7 +584,7 @@ SCENARIOS.forEach(
               tokenAccount: user.lstAlphaAccount,
               remaining: remainingAccounts,
               amount: borrowLstAmount,
-            })
+            }),
           );
 
           await processBankrunTransaction(
@@ -595,18 +592,18 @@ SCENARIOS.forEach(
             tx,
             [user.wallet],
             false,
-            true
+            true,
           );
 
           const accAfter = await bankrunProgram.account.marginfiAccount.fetch(
-            userAccount
+            userAccount,
           );
           const activeBalances = accAfter.lendingAccount.balances.filter(
-            (b: any) => b.active === 1
+            (b: any) => b.active === 1,
           );
           assert.equal(
             activeBalances.length,
-            1 + kaminoBanks.length + driftBanks.length + juplendBanks.length
+            1 + kaminoBanks.length + driftBanks.length + juplendBanks.length,
           );
         });
 
@@ -641,21 +638,21 @@ SCENARIOS.forEach(
           [orderPk] = deriveOrderPda(
             user.mrgnBankrunProgram.programId,
             userAccount,
-            [assetBank, banks[0]]
+            [assetBank, banks[0]],
           );
         });
 
         it("fails to execute before oracle update, then succeeds after price changes", async () => {
           const [executeRecordPk] = deriveExecuteOrderPda(
             user.mrgnBankrunProgram.programId,
-            orderPk
+            orderPk,
           );
 
           const remainingGroupsPostRepay = remainingGroups.filter(
-            (group) => !group[0].equals(banks[0])
+            (group) => !group[0].equals(banks[0]),
           );
           const remainingAccountsPostRepay = composeRemainingAccounts(
-            remainingGroupsPostRepay
+            remainingGroupsPostRepay,
           );
 
           const startIx = await startExecuteOrderIx(user.mrgnBankrunProgram, {
@@ -685,11 +682,11 @@ SCENARIOS.forEach(
           if (assetIntegration === "kamino") {
             const [lendingVaultAuthority] = deriveLiquidityVaultAuthority(
               bankrunProgram.programId,
-              assetBank
+              assetBank,
             );
             const [obligation] = deriveBaseObligation(
               lendingVaultAuthority,
-              lendingMarket
+              lendingMarket,
             );
             const obligationFarmUserState = reserveFarmState
               ? PublicKey.findProgramAddressSync(
@@ -698,7 +695,7 @@ SCENARIOS.forEach(
                     reserveFarmState.toBuffer(),
                     obligation.toBuffer(),
                   ],
-                  FARMS_PROGRAM_ID
+                  FARMS_PROGRAM_ID,
                 )[0]
               : null;
 
@@ -707,14 +704,14 @@ SCENARIOS.forEach(
                 klendBankrunProgram,
                 tokenAReserve,
                 lendingMarket,
-                oracles.tokenAOracle.publicKey
+                oracles.tokenAOracle.publicKey,
               ),
               await simpleRefreshObligation(
                 klendBankrunProgram,
                 lendingMarket,
                 obligation,
-                [tokenAReserve]
-              )
+                [tokenAReserve],
+              ),
             );
 
             withdrawInstruction = await makeKaminoWithdrawIx(
@@ -734,7 +731,7 @@ SCENARIOS.forEach(
                 amount: withdrawAmount,
                 isWithdrawAll: false,
                 remaining: withdrawRemaining,
-              }
+              },
             );
           } else if (assetIntegration === "drift") {
             withdrawInstruction = await makeDriftWithdrawIx(
@@ -750,18 +747,18 @@ SCENARIOS.forEach(
                 withdrawAll: false,
                 remaining: withdrawRemaining,
               },
-              driftBankrunProgram
+              driftBankrunProgram,
             );
           } else {
             if (!juplendPool || !juplendPrograms) {
               throw new Error(
-                "Juplend withdraw requested without Juplend setup"
+                "Juplend withdraw requested without Juplend setup",
               );
             }
             preIxs.push(
               await refreshJupSimple(juplendPrograms.lending, {
                 pool: juplendPool,
-              })
+              }),
             );
             withdrawInstruction = await makeJuplendWithdrawSimpleIx(
               user.mrgnBankrunProgram,
@@ -773,7 +770,7 @@ SCENARIOS.forEach(
                 amount: withdrawAmount,
                 withdrawAll: false,
                 remainingAccounts: withdrawRemaining,
-              }
+              },
             );
           }
 
@@ -829,7 +826,7 @@ SCENARIOS.forEach(
             repayInstruction,
             withdrawInstruction,
             endIx,
-            preIxs
+            preIxs,
           );
           const failResult = await banksClient.tryProcessTransaction(failTx);
           assertBankrunTxFailed(failResult, 6107);
@@ -842,14 +839,14 @@ SCENARIOS.forEach(
           {
             await pulseOrderHealth(remainingAccounts);
             const acc = await bankrunProgram.account.marginfiAccount.fetch(
-              userAccount
+              userAccount,
             );
             const cache = acc.healthCache;
             assetValueBefore = wrappedI80F48toBigNumber(
-              cache.assetValue
+              cache.assetValue,
             ).toNumber();
             liabilityValueBefore = wrappedI80F48toBigNumber(
-              cache.liabilityValue
+              cache.liabilityValue,
             ).toNumber();
             netValueBefore = assetValueBefore - liabilityValueBefore;
           }
@@ -861,14 +858,14 @@ SCENARIOS.forEach(
             repayInstruction,
             withdrawInstruction,
             endIx,
-            preIxs
+            preIxs,
           );
           await processBankrunV0Transaction(
             bankrunContext,
             successTx,
             [user.wallet],
             false,
-            true
+            true,
           );
 
           {
@@ -879,10 +876,10 @@ SCENARIOS.forEach(
             await bankrunProgram.account.marginfiAccount.fetch(userAccount);
           const cacheAfter = accountAfter.healthCache;
           const assetValueAfter = wrappedI80F48toBigNumber(
-            cacheAfter.assetValue
+            cacheAfter.assetValue,
           ).toNumber();
           const liabilityValueAfter = wrappedI80F48toBigNumber(
-            cacheAfter.liabilityValue
+            cacheAfter.liabilityValue,
           ).toNumber();
           const netValueAfter = assetValueAfter - liabilityValueAfter;
 
@@ -896,34 +893,34 @@ SCENARIOS.forEach(
 
           assert.ok(
             netValueAfter <= netValueBefore + netIncreaseTolerance,
-            `net value increased (b=${netValueBefore}, a=${netValueAfter}, t=${netIncreaseTolerance})`
+            `net value increased (b=${netValueBefore}, a=${netValueAfter}, t=${netIncreaseTolerance})`,
           );
           assert.ok(
             netValueAfter >= netLowerBound,
-            "net value should not drop beyond allowed slippage"
+            "net value should not drop beyond allowed slippage",
           );
           assert.ok(
             liabilityValueAfter <= 0.01,
-            "liability should be fully repaid"
+            "liability should be fully repaid",
           );
           if (assetIntegration !== "juplend") {
             assert.ok(
               assetDecrease >= liabDecrease - 0.01,
-              "asset decrease should be at least liability decrease"
+              "asset decrease should be at least liability decrease",
             );
             assert.ok(
               assetDecrease - liabDecrease <=
                 netValueBefore * maxSlippageFrac + 1,
-              "keeper profit should be bounded by slippage"
+              "keeper profit should be bounded by slippage",
             );
             assert.ok(
               Math.abs(netDecrease - (assetDecrease - liabDecrease)) <= 1,
-              "net decrease should match keeper profit (within tolerance)"
+              "net decrease should match keeper profit (within tolerance)",
             );
           }
           // The liability and the order itself are both closed
           const liabBalance = accountAfter.lendingAccount.balances.find(
-            (b: any) => b.bankPk && b.bankPk.equals(banks[0])
+            (b: any) => b.bankPk && b.bankPk.equals(banks[0]),
           );
           assert.isUndefined(liabBalance);
 
@@ -935,7 +932,7 @@ SCENARIOS.forEach(
           oracles.tokenAPrice = 10;
           await refreshAllOracleFeeds();
         });
-      }
+      },
     );
-  }
+  },
 );

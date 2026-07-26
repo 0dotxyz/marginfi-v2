@@ -20,10 +20,7 @@ import {
   users,
 } from "../../rootHooks";
 import { groupConfigure } from "../../utils/group-instructions";
-import {
-  assertBankrunTxFailed,
-  getTokenBalance,
-} from "../../utils/genericTests";
+import { assertBankrunTxFailed, getTokenBalance } from "../../utils/genericTests";
 import {
   composeRemainingAccounts,
   composeRemainingAccountsMetaBanksOnly,

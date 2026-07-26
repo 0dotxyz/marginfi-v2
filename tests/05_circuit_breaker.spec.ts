@@ -11,7 +11,10 @@ import {
   oracles,
   users,
 } from "./rootHooks";
-import { assertBankrunTxFailed, assertBNEqual } from "./utils/genericTests";
+import {
+  assertBankrunTxFailed,
+  assertBNEqual,
+} from "./utils/genericTests";
 import {
   BankConfigOptRaw,
   blankBankConfigOptRaw,
@@ -69,9 +72,7 @@ describe("Circuit breaker config + admin clear", () => {
     // Group's risk_admin defaults to Pubkey::default() at init. Set it to groupAdmin so the
     // clear-halt ix accepts it as an authority. (admin is also accepted, but the spike test
     // below explicitly exercises the risk_admin path.) Idempotent if already set.
-    const group = await program.account.marginfiGroup.fetch(
-      marginfiGroup.publicKey
-    );
+    const group = await program.account.marginfiGroup.fetch(marginfiGroup.publicKey);
     if (!group.riskAdmin.equals(groupAdmin.wallet.publicKey)) {
       const tx = new Transaction().add(
         await groupConfigure(groupAdmin.mrgnBankrunProgram, {
@@ -175,8 +176,7 @@ describe("Circuit breaker config + admin clear", () => {
 
     const bank = await program.account.bank.fetch(bankKey);
     assert.equal(
-      (Number(bank.flags) & CIRCUIT_BREAKER_ENABLED) ===
-        CIRCUIT_BREAKER_ENABLED,
+      (Number(bank.flags) & CIRCUIT_BREAKER_ENABLED) === CIRCUIT_BREAKER_ENABLED,
       true,
       "CIRCUIT_BREAKER_ENABLED should be set"
     );
@@ -204,9 +204,7 @@ describe("Circuit breaker config + admin clear", () => {
   it("(risk_admin) clear_circuit_breaker - happy path (no active halt is a no-op)", async () => {
     // The group's risk_admin defaults to groupAdmin in rootHooks setup (no separate risk_admin set).
     const tx = new Transaction().add(
-      await clearCircuitBreaker(groupAdmin.mrgnBankrunProgram, {
-        bank: bankKey,
-      })
+      await clearCircuitBreaker(groupAdmin.mrgnBankrunProgram, { bank: bankKey })
     );
     tx.recentBlockhash = await getBankrunBlockhash(bankrunContext);
     tx.sign(groupAdmin.wallet);
@@ -233,7 +231,7 @@ describe("Circuit breaker config + admin clear", () => {
         post.epochStartTimestamp,
         post.epoch,
         post.leaderScheduleEpoch,
-        post.unixTimestamp + 1n
+        post.unixTimestamp + 1n,
       )
     );
     await setPythPullOraclePrice(
@@ -243,7 +241,7 @@ describe("Circuit breaker config + admin clear", () => {
       oracles.wsolOracleFeed.publicKey,
       uiPrice,
       ecosystem.wsolDecimals,
-      0 // confidence interval — keep at 0 so the CB sees the full raw delta
+      0, // confidence interval — keep at 0 so the CB sees the full raw delta
     );
     const tx = new Transaction().add(
       await pulseBankPrice(bankrunProgram, {
@@ -269,11 +267,7 @@ describe("Circuit breaker config + admin clear", () => {
     // ---- Stage 1: one $162 pulse → first-breach tier-1 trip.
     await spikePriceAndPulse(162);
     const afterTrip1 = await bankrunProgram.account.bank.fetch(bankKey);
-    assert.equal(
-      afterTrip1.cbTier,
-      1,
-      "a $162 pulse must trip tier 1 on first breach"
-    );
+    assert.equal(afterTrip1.cbTier, 1, "a $162 pulse must trip tier 1 on first breach");
     const haltEnded1 = afterTrip1.cbHaltEndedAt.toNumber();
     assert.isAbove(haltEnded1, 0);
 
@@ -291,7 +285,7 @@ describe("Circuit breaker config + admin clear", () => {
           post.epochStartTimestamp,
           post.epoch,
           post.leaderScheduleEpoch,
-          BigInt(haltEnded1 + 10)
+          BigInt(haltEnded1 + 10),
         )
       );
     }

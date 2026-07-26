@@ -43,7 +43,7 @@ describe("Close account requires liquidation record closed", () => {
     const marginfiAccountPk = marginfiAccount.publicKey;
     const [liqRecordPk] = deriveLiquidationRecord(
       program.programId,
-      marginfiAccountPk
+      marginfiAccountPk,
     );
 
     await processBankrunTransaction(
@@ -52,9 +52,9 @@ describe("Close account requires liquidation record closed", () => {
         await groupInitialize(user.mrgnBankrunProgram, {
           marginfiGroup: group.publicKey,
           admin: user.wallet.publicKey,
-        })
+        }),
       ),
-      [user.wallet, group]
+      [user.wallet, group],
     );
 
     await processBankrunTransaction(
@@ -65,9 +65,9 @@ describe("Close account requires liquidation record closed", () => {
           marginfiAccount: marginfiAccountPk,
           authority: user.wallet.publicKey,
           feePayer: user.wallet.publicKey,
-        })
+        }),
       ),
-      [user.wallet, marginfiAccount]
+      [user.wallet, marginfiAccount],
     );
 
     await processBankrunTransaction(
@@ -76,13 +76,13 @@ describe("Close account requires liquidation record closed", () => {
         await initLiquidationRecordIx(user.mrgnBankrunProgram, {
           marginfiAccount: marginfiAccountPk,
           feePayer: user.wallet.publicKey,
-        })
+        }),
       ),
-      [user.wallet]
+      [user.wallet],
     );
 
     const accountAfterInit = await program.account.marginfiAccount.fetch(
-      marginfiAccountPk
+      marginfiAccountPk,
     );
     assertKeysEqual(accountAfterInit.liquidationRecord, liqRecordPk);
 
@@ -93,10 +93,10 @@ describe("Close account requires liquidation record closed", () => {
           marginfiAccount: marginfiAccountPk,
           authority: user.wallet.publicKey,
           feePayer: user.wallet.publicKey,
-        })
+        }),
       ),
       [user.wallet],
-      true
+      true,
     );
     assertBankrunTxFailed(closeBeforeRecordResult, 6043); // IllegalAction
 
@@ -117,9 +117,9 @@ describe("Close account requires liquidation record closed", () => {
           marginfiAccount: marginfiAccountPk,
           authority: user.wallet.publicKey,
           feePayer: user.wallet.publicKey,
-        })
+        }),
       ),
-      [user.wallet]
+      [user.wallet],
     );
 
     const accountAfterClose = await banksClient.getAccount(marginfiAccountPk);
@@ -138,9 +138,9 @@ describe("Close account requires liquidation record closed", () => {
         await groupInitialize(user.mrgnBankrunProgram, {
           marginfiGroup: group.publicKey,
           admin: user.wallet.publicKey,
-        })
+        }),
       ),
-      [user.wallet, group]
+      [user.wallet, group],
     );
 
     await processBankrunTransaction(
@@ -151,13 +151,13 @@ describe("Close account requires liquidation record closed", () => {
           marginfiAccount: marginfiAccountPk,
           authority: user.wallet.publicKey,
           feePayer: user.wallet.publicKey,
-        })
+        }),
       ),
-      [user.wallet, marginfiAccount]
+      [user.wallet, marginfiAccount],
     );
 
     const accountBeforeClose = await program.account.marginfiAccount.fetch(
-      marginfiAccountPk
+      marginfiAccountPk,
     );
     assertKeyDefault(accountBeforeClose.liquidationRecord);
 
@@ -168,9 +168,9 @@ describe("Close account requires liquidation record closed", () => {
           marginfiAccount: marginfiAccountPk,
           authority: user.wallet.publicKey,
           feePayer: user.wallet.publicKey,
-        })
+        }),
       ),
-      [user.wallet]
+      [user.wallet],
     );
 
     const accountAfterClose = await banksClient.getAccount(marginfiAccountPk);

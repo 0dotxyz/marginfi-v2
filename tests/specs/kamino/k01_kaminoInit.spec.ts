@@ -47,11 +47,11 @@ describe("k01: Init Kamino instance", () => {
     }
 
     const marketAcc: LendingMarket = LendingMarket.decode(
-      (await bankRunProvider.connection.getAccountInfo(lendingMarket)).data
+      (await bankRunProvider.connection.getAccountInfo(lendingMarket)).data,
     );
     assert.equal(
       marketAcc.lendingMarketOwner.toString(),
-      groupAdmin.wallet.publicKey.toString()
+      groupAdmin.wallet.publicKey.toString(),
     );
   });
 
@@ -62,8 +62,8 @@ describe("k01: Init Kamino instance", () => {
         ecosystem.usdcMint.publicKey,
         groupAdmin.usdcAccount,
         globalProgramAdmin.wallet.publicKey,
-        1000 * 10 ** ecosystem.usdcDecimals
-      )
+        1000 * 10 ** ecosystem.usdcDecimals,
+      ),
     );
     await processBankrunTransaction(ctx, tx, [globalProgramAdmin.wallet]);
 
@@ -77,7 +77,7 @@ describe("k01: Init Kamino instance", () => {
       // instead of Pyth, or any other spoof of Pyth with the same account structure, so be wary!
       // Using Pyth Pull oracle instead of legacy Pyth oracle
       oracles.usdcOracle.publicKey,
-      groupAdmin.usdcAccount
+      groupAdmin.usdcAccount,
     );
   });
 
@@ -88,8 +88,8 @@ describe("k01: Init Kamino instance", () => {
         ecosystem.tokenAMint.publicKey,
         groupAdmin.tokenAAccount,
         globalProgramAdmin.wallet.publicKey,
-        1000 * 10 ** ecosystem.tokenADecimals
-      )
+        1000 * 10 ** ecosystem.tokenADecimals,
+      ),
     );
     await processBankrunTransaction(ctx, tx, [globalProgramAdmin.wallet]);
 
@@ -101,7 +101,7 @@ describe("k01: Init Kamino instance", () => {
       ecosystem.tokenADecimals,
       // Using Pyth Pull oracle instead of legacy Pyth oracle
       oracles.tokenAOracle.publicKey,
-      groupAdmin.tokenAAccount
+      groupAdmin.tokenAAccount,
     );
   });
 
@@ -114,14 +114,14 @@ describe("k01: Init Kamino instance", () => {
         klendBankrunProgram,
         reserveKey,
         marketKey,
-        oracles.usdcOracle.publicKey
-      )
+        oracles.usdcOracle.publicKey,
+      ),
     );
 
     await processBankrunTransaction(ctx, tx, [users[0].wallet]);
 
     const reserveAcc: Reserve = Reserve.decode(
-      (await bankRunProvider.connection.getAccountInfo(reserveKey)).data
+      (await bankRunProvider.connection.getAccountInfo(reserveKey)).data,
     );
 
     // Note: prices are stored as scaled fraction (multiply price by 2^60)
@@ -129,7 +129,7 @@ describe("k01: Init Kamino instance", () => {
     assertBNApproximately(
       reserveAcc.liquidity.marketPriceSf,
       integerPriceToFractionSf(oracles.usdcPrice),
-      100_000
+      100_000,
     );
   });
 
@@ -142,13 +142,13 @@ describe("k01: Init Kamino instance", () => {
         klendBankrunProgram,
         reserveKey,
         marketKey,
-        oracles.tokenAOracle.publicKey
-      )
+        oracles.tokenAOracle.publicKey,
+      ),
     );
     await processBankrunTransaction(ctx, tx, [groupAdmin.wallet]);
 
     const reserveAcc: Reserve = Reserve.decode(
-      (await bankRunProvider.connection.getAccountInfo(reserveKey)).data
+      (await bankRunProvider.connection.getAccountInfo(reserveKey)).data,
     );
 
     // Note: prices are stored as scaled fraction (multiply price by 2^60)
@@ -156,7 +156,7 @@ describe("k01: Init Kamino instance", () => {
     assertBNApproximately(
       reserveAcc.liquidity.marketPriceSf,
       integerPriceToFractionSf(oracles.tokenAPrice),
-      100_000
+      100_000,
     );
   });
 });

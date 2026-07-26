@@ -41,10 +41,7 @@ import {
 import { USER_ACCOUNT } from "../../utils/mocks";
 import { createMintToInstruction } from "@solana/spl-token";
 import { deriveBankWithSeed, deriveLiquidityVault } from "../../utils/pdas";
-import {
-  addBankWithSeed,
-  groupInitialize,
-} from "../../utils/group-instructions";
+import { addBankWithSeed, groupInitialize } from "../../utils/group-instructions";
 import {
   defaultBankConfig,
   ORACLE_SETUP_PYTH_PUSH,

@@ -31,11 +31,7 @@ import {
   bigNumberToWrappedI80F48,
   wrappedI80F48toBigNumber,
 } from "@mrgnlabs/mrgn-common";
-import {
-  CONF_INTERVAL_MULTIPLE,
-  blankBankConfigOptRaw,
-  defaultBankConfigOptRaw,
-} from "../../utils/types";
+import { CONF_INTERVAL_MULTIPLE, blankBankConfigOptRaw, defaultBankConfigOptRaw } from "../../utils/types";
 import { configureBank } from "../../utils/group-instructions";
 import { getBankrunTime } from "../../utils/tools";
 

@@ -27,9 +27,7 @@ const isBnLike = (value: unknown): value is BN =>
     "toArray" in value &&
     "isNeg" in value);
 
-const toDecimal = (
-  value: BN | BigNumber | Decimal | number | string
-): Decimal => {
+const toDecimal = (value: BN | BigNumber | Decimal | number | string): Decimal => {
   if (isBnLike(value)) {
     return new Decimal(bnToDecimalStringSafe(value));
   }
@@ -39,10 +37,10 @@ const toDecimal = (
 
 const toSafeNumber = (
   value: BN | BigNumber | Decimal | number | string,
-  label: string
+  label: string,
 ) => {
   const out = Number(
-    isBnLike(value) ? bnToDecimalStringSafe(value) : value.toString()
+    isBnLike(value) ? bnToDecimalStringSafe(value) : value.toString(),
   );
   if (!Number.isFinite(out)) {
     throw new Error(`Invalid ${label}: ${value.toString()}`);
@@ -75,10 +73,10 @@ export type HealthCacheSnapshot = {
 
 export const getNetHealth = (cache: HealthCacheSnapshot) => {
   const init = wrappedI80F48toBigNumber(cache.assetValue).minus(
-    wrappedI80F48toBigNumber(cache.liabilityValue)
+    wrappedI80F48toBigNumber(cache.liabilityValue),
   );
   const maint = wrappedI80F48toBigNumber(cache.assetValueMaint).minus(
-    wrappedI80F48toBigNumber(cache.liabilityValueMaint)
+    wrappedI80F48toBigNumber(cache.liabilityValueMaint),
   );
   return { init, maint };
 };
@@ -98,17 +96,17 @@ export const enableSameAssetEmodeForBanks = async ({
 }) => {
   const [sameAssetEmodeRegistry] = deriveSameAssetEmodeRegistry(
     program.programId,
-    group
+    group,
   );
   const registryAccount = await bankrunContext.banksClient.getAccount(
-    sameAssetEmodeRegistry
+    sameAssetEmodeRegistry,
   );
   if (!registryAccount) {
     const initTx = new Transaction().add(
       await initSameAssetEmodeRegistry(program, {
         group,
         signer: signer.publicKey,
-      })
+      }),
     );
     await processBankrunTransaction(bankrunContext, initTx, [signer]);
   }
@@ -121,7 +119,7 @@ export const enableSameAssetEmodeForBanks = async ({
         signer: signer.publicKey,
         bank,
         enabled: true,
-      })
+      }),
     );
   }
   await processBankrunTransaction(bankrunContext, tx, [signer]);
@@ -162,7 +160,9 @@ export const computeSameAssetBoundaryBorrowNative = ({
   const collateralUi =
     toSafeNumber(collateralNative, "collateral native") /
     10 ** collateralDecimals;
-  const haircutFactor = haircut ? haircut.numerator / haircut.denominator : 1;
+  const haircutFactor = haircut
+    ? haircut.numerator / haircut.denominator
+    : 1;
   const requirementCollateralUi = collateralUi * haircutFactor;
   const liabilityScale = 10 ** liabilityDecimals;
   const liabilityWithFeeFactor = 1 + liabilityOriginationFeeRate;
@@ -185,7 +185,7 @@ export const computeSameAssetBoundaryBorrowNative = ({
   const effectiveLiabilityUi =
     tightenedRequirementBoundaryUi + boundaryGapUi * effectiveGapPosition;
   const borrowNativeNumber = Math.floor(
-    (effectiveLiabilityUi / liabilityWithFeeFactor) * liabilityScale
+    (effectiveLiabilityUi / liabilityWithFeeFactor) * liabilityScale,
   );
   if (!Number.isSafeInteger(borrowNativeNumber) || borrowNativeNumber < 0) {
     throw new Error(`Unsafe borrow native: ${borrowNativeNumber}`);
@@ -197,11 +197,11 @@ export const computeSameAssetBoundaryBorrowNative = ({
 
   assert.isTrue(
     liabilityUi > tightenedRequirementBoundaryUi,
-    `fee-adjusted liability ${liabilityUi} should stay above the ${requirementLabel} boundary ${tightenedRequirementBoundaryUi}`
+    `fee-adjusted liability ${liabilityUi} should stay above the ${requirementLabel} boundary ${tightenedRequirementBoundaryUi}`,
   );
   assert.isTrue(
     liabilityUi < healthyInitBoundaryUi,
-    `fee-adjusted liability ${liabilityUi} should stay below the healthy init boundary ${healthyInitBoundaryUi}`
+    `fee-adjusted liability ${liabilityUi} should stay below the healthy init boundary ${healthyInitBoundaryUi}`,
   );
 
   return borrowNative;
@@ -226,14 +226,14 @@ export const assertSameAssetBadDebtSurvivability = ({
   requireMaintenanceUnderwater?: boolean;
 }) => {
   const assetValueEquity = wrappedI80F48toBigNumber(
-    healthCache.assetValueEquity
+    healthCache.assetValueEquity,
   );
   const assetValueMaint = wrappedI80F48toBigNumber(healthCache.assetValueMaint);
   const liabilityValueEquity = wrappedI80F48toBigNumber(
-    healthCache.liabilityValueEquity
+    healthCache.liabilityValueEquity,
   );
   const liabilityValueMaint = wrappedI80F48toBigNumber(
-    healthCache.liabilityValueMaint
+    healthCache.liabilityValueMaint,
   );
   const minBuffer = originalAssetValueEquity.times(0.005); // 50bps
   const assetBuffer = assetValueEquity.minus(assetValueMaint);
@@ -242,21 +242,21 @@ export const assertSameAssetBadDebtSurvivability = ({
 
   assert.isTrue(
     assetBuffer.gte(minBuffer),
-    `${label}: equity-to-maint asset buffer ${assetBuffer.toFixed()} should be at least 50bp of original equity assets ${minBuffer.toFixed()}`
+    `${label}: equity-to-maint asset buffer ${assetBuffer.toFixed()} should be at least 50bp of original equity assets ${minBuffer.toFixed()}`,
   );
   assert.isTrue(
     equityHealth.gt(0),
-    `${label}: account should remain equity-solvent after the haircut`
+    `${label}: account should remain equity-solvent after the haircut`,
   );
   if (requireMaintenanceUnderwater) {
     assert.isTrue(
       maintHealth.lt(0),
-      `${label}: account should be maintenance-underwater after the haircut`
+      `${label}: account should be maintenance-underwater after the haircut`,
     );
   } else {
     assert.isTrue(
       maintHealth.gt(0),
-      `${label}: account should remain maintenance-healthy before the haircut`
+      `${label}: account should remain maintenance-healthy before the haircut`,
     );
   }
 
@@ -273,7 +273,7 @@ export const setAssetShareValueHaircut = async (
   bankrunContext: ProgramTestContext,
   bank: PublicKey,
   numerator: number,
-  denominator: number
+  denominator: number,
 ) => {
   const ASSET_SHARE_VALUE_OFFSET = 80;
   const I80F48_BYTES = 16;
@@ -286,20 +286,18 @@ export const setAssetShareValueHaircut = async (
   const originalAssetShareValueBytes = Buffer.from(
     originalData.subarray(
       ASSET_SHARE_VALUE_OFFSET,
-      ASSET_SHARE_VALUE_OFFSET + I80F48_BYTES
-    )
+      ASSET_SHARE_VALUE_OFFSET + I80F48_BYTES,
+    ),
   );
   const updatedAssetShareValue = bigNumberToWrappedI80F48(
-    new Decimal(
-      wrappedI80F48toBigNumber(bankAccount.assetShareValue).toString()
-    )
+    new Decimal(wrappedI80F48toBigNumber(bankAccount.assetShareValue).toString())
       .times(numerator)
       .div(denominator)
-      .toString()
+      .toString(),
   );
   Buffer.from(updatedAssetShareValue.value).copy(
     originalData,
-    ASSET_SHARE_VALUE_OFFSET
+    ASSET_SHARE_VALUE_OFFSET,
   );
   bankrunContext.setAccount(bank, {
     ...existingAccount,
@@ -321,7 +319,7 @@ export const setAssetShareValueHaircut = async (
 };
 
 export const warpToNextBankrunSlot = async (
-  bankrunContext: ProgramTestContext
+  bankrunContext: ProgramTestContext,
 ) => {
   const clock = await bankrunContext.banksClient.getClock();
   bankrunContext.warpToSlot(clock.slot + BigInt(1));
