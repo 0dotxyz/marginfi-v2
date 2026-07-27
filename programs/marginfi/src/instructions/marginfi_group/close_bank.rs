@@ -8,9 +8,8 @@ use marginfi_type_crate::{
     constants::{CLOSE_ENABLED_FLAG, ZERO_AMOUNT_THRESHOLD},
     types::{Bank, MarginfiGroup},
 };
-
 pub fn lending_pool_close_bank(ctx: Context<LendingPoolCloseBank>) -> MarginfiResult {
-    let mut group = ctx.accounts.group.load_mut()?;
+    let mut group = ctx.accounts.marginfi_group.load_mut()?;
 
     require_eq!(
         group.admin,
@@ -22,6 +21,12 @@ pub fn lending_pool_close_bank(ctx: Context<LendingPoolCloseBank>) -> MarginfiRe
     drop(group);
 
     let bank = ctx.accounts.bank.load()?;
+
+    require_eq!(
+        bank.group,
+        ctx.accounts.marginfi_group.key(),
+        MarginfiError::InvalidGroup
+    );
 
     // banks created prior to 0.1.4 can never be closed because we cannot guarantee an accurate
     // position count for those banks.
@@ -54,11 +59,9 @@ pub fn lending_pool_close_bank(ctx: Context<LendingPoolCloseBank>) -> MarginfiRe
 #[derive(Accounts)]
 pub struct LendingPoolCloseBank<'info> {
     #[account(mut)]
-    pub group: AccountLoader<'info, MarginfiGroup>,
-
+    pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
     #[account(
         mut,
-        has_one = group @ MarginfiError::InvalidGroup,
         close = admin
     )]
     pub bank: AccountLoader<'info, Bank>,

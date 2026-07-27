@@ -1,7 +1,7 @@
 use crate::events::{GroupEventHeader, LendingPoolBankConfigureOracleEvent};
 use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
-use crate::state::marginfi_group::assert_bank_admin_authorized;
+use crate::state::marginfi_group::MarginfiGroupImpl;
 use crate::{check, MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::constants::{BANK_SAME_ASSET_EMODE_ELIGIBLE, FREEZE_SETTINGS};
@@ -13,9 +13,7 @@ pub fn lending_pool_configure_bank_oracle(
     oracle: Pubkey,
 ) -> MarginfiResult {
     let group = ctx.accounts.group.load()?;
-
-    assert_bank_admin_authorized(&group, ctx.accounts.bank_admin.key)?;
-
+    group.require_bank_admin(*ctx.accounts.bank_admin.key)?;
     drop(group);
 
     let mut bank = ctx.accounts.bank.load_mut()?;

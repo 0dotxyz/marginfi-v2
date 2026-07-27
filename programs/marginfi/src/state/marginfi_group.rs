@@ -40,6 +40,9 @@ pub trait MarginfiGroupImpl {
         withdrawn_equity: I80F48,
         current_timestamp: i64,
     ) -> MarginfiResult;
+    fn require_admin(&self, signer: Pubkey) -> MarginfiResult;
+    fn require_bank_admin(&self, signer: Pubkey) -> MarginfiResult;
+    fn rotate_bank_admin(&mut self, new_bank_admin: Pubkey, signer: Pubkey) -> MarginfiResult;
 }
 
 impl MarginfiGroupImpl for MarginfiGroup {
@@ -286,15 +289,34 @@ impl MarginfiGroupImpl for MarginfiGroup {
 
         Ok(())
     }
+
+    fn require_admin(&self, signer: Pubkey) -> MarginfiResult {
+        require_eq!(self.admin, signer, MarginfiError::Unauthorized);
+        Ok(())
+    }
+
+    fn require_bank_admin(&self, signer: Pubkey) -> MarginfiResult {
+        require_eq!(
+            self.bank_admin_or_fallback(),
+            signer,
+            MarginfiError::Unauthorized
+        );
+        Ok(())
+    }
+
+    fn rotate_bank_admin(&mut self, new_bank_admin: Pubkey, signer: Pubkey) -> MarginfiResult {
+        require_eq!(
+            self.bank_admin_or_fallback(),
+            signer,
+            MarginfiError::Unauthorized
+        );
+        self.update_bank_admin(new_bank_admin);
+        Ok(())
+    }
 }
 
-pub fn assert_bank_admin_authorized(group: &MarginfiGroup, signer: &Pubkey) -> MarginfiResult {
-    require_eq!(
-        group.bank_admin_or_fallback(),
-        *signer,
-        MarginfiError::Unauthorized
-    );
-    Ok(())
+pub fn assert_bank_admin_authorized(group: &MarginfiGroup, signer: Pubkey) -> MarginfiResult {
+    group.require_bank_admin(signer)
 }
 
 trait MarginfiGroupDeleverageLimitExt {

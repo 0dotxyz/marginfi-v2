@@ -39,6 +39,10 @@ pub fn lending_pool_add_bank_drift(
         ..
     } = ctx.accounts;
 
+    let group = ctx.accounts.group.load()?;
+    group.require_bank_admin(*ctx.accounts.bank_admin.key)?;
+    drop(group);
+
     let mut bank = bank_loader.load_init()?;
     let mut group = ctx.accounts.group.load_mut()?;
     let spot_market_key = spot_market_loader.key();
@@ -116,13 +120,10 @@ pub fn lending_pool_add_bank_drift(
 #[derive(Accounts)]
 #[instruction(bank_config: DriftConfigCompact, bank_seed: u64)]
 pub struct LendingPoolAddBankDrift<'info> {
-    #[account(
-        mut,
-        has_one = admin @ MarginfiError::Unauthorized
-    )]
+    #[account(mut)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub bank_admin: Signer<'info>,
 
     #[account(mut)]
     pub fee_payer: Signer<'info>,

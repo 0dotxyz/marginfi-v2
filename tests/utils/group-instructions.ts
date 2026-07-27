@@ -961,16 +961,18 @@ export const handleBankruptcy = (
 };
 
 export type CloseBankArgs = {
+  marginfiGroup: PublicKey;
   bank: PublicKey;
+  admin: PublicKey;
 };
 
 export const closeBank = (program: Program<Marginfi>, args: CloseBankArgs) => {
   const ix = program.methods
     .lendingPoolCloseBank()
     .accounts({
-      // group: args.group, // implied from bank
+      marginfiGroup: args.marginfiGroup,
       bank: args.bank,
-      // admin: args.admin, // implied from group
+      admin: args.admin,
     })
     .instruction();
   return ix;

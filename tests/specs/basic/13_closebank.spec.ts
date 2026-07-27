@@ -101,7 +101,9 @@ describe("Close bank", () => {
         await groupAdmin.mrgnProgram.provider.sendAndConfirm(
           new Transaction().add(
             await closeBank(groupAdmin.mrgnProgram, {
+              marginfiGroup: marginfiGroup.publicKey,
               bank: bankKey,
+              admin: groupAdmin.wallet.publicKey,
             })
           )
         );
@@ -148,7 +150,9 @@ describe("Close bank", () => {
     await groupAdmin.mrgnProgram.provider.sendAndConfirm(
       new Transaction().add(
         await closeBank(groupAdmin.mrgnProgram, {
+          marginfiGroup: marginfiGroup.publicKey,
           bank: bankKey,
+          admin: groupAdmin.wallet.publicKey,
         })
       )
     );

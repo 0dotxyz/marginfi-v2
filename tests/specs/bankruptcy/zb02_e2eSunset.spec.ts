@@ -671,7 +671,9 @@ describe("Bank e2e sunset due to illiquid asset", () => {
     const tx = new Transaction();
     tx.add(
       await closeBank(groupAdmin.mrgnBankrunProgram, {
+        marginfiGroup: throwawayGroup.publicKey,
         bank: banks[1],
+        admin: groupAdmin.wallet.publicKey,
       })
     );
     await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);

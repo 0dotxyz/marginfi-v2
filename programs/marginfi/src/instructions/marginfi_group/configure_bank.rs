@@ -14,7 +14,7 @@ use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::FREEZE_SETTINGS,
-    types::{Bank, BankConfigOpt, MarginfiGroup},
+    types::{Bank, BankConfigOpt, MarginfiGroup, RequiredAuthority},
 };
 
 fn assert_bank_config_authority(
@@ -23,47 +23,36 @@ fn assert_bank_config_authority(
     bank_config: &BankConfigOpt,
     current_operational_state: marginfi_type_crate::types::BankOperationalState,
 ) -> MarginfiResult {
-    let has_admin_only = bank_config.has_admin_only_fields_excluding_operational_state();
-    let has_governance = bank_config.has_governance_fields();
-    let has_operational_state = bank_config.operational_state.is_some();
+    let authority = bank_config.required_authority();
 
-    let category_count = [has_admin_only, has_governance, has_operational_state]
-        .iter()
-        .filter(|b| **b)
-        .count();
-
-    if category_count > 1 {
-        return Err(error!(MarginfiError::MixedBankConfigAuthority));
-    }
-
-    if has_operational_state {
-        let new_state = bank_config.operational_state.unwrap();
-        let is_transitioning_to_operational = current_operational_state
-            != marginfi_type_crate::types::BankOperationalState::Operational
-            && new_state == marginfi_type_crate::types::BankOperationalState::Operational;
-
-        if is_transitioning_to_operational {
-            require_eq!(
-                group.bank_admin_or_fallback(),
-                *signer,
-                MarginfiError::Unauthorized
-            );
-        } else {
-            require_eq!(group.admin, *signer, MarginfiError::Unauthorized);
+    match authority {
+        RequiredAuthority::None => {
+            group.require_admin(*signer)?;
+            Ok(())
         }
-    } else if has_governance {
-        require_eq!(
-            group.bank_admin_or_fallback(),
-            *signer,
-            MarginfiError::Unauthorized
-        );
-    } else if has_admin_only {
-        require_eq!(group.admin, *signer, MarginfiError::Unauthorized);
-    } else {
-        require_eq!(group.admin, *signer, MarginfiError::Unauthorized);
-    }
+        RequiredAuthority::Mixed => Err(error!(MarginfiError::MixedBankConfigAuthority)),
+        RequiredAuthority::OperationalState => {
+            let new_state = bank_config.operational_state.unwrap();
+            let is_transitioning_to_operational = current_operational_state
+                != marginfi_type_crate::types::BankOperationalState::Operational
+                && new_state == marginfi_type_crate::types::BankOperationalState::Operational;
 
-    Ok(())
+            if is_transitioning_to_operational {
+                group.require_bank_admin(*signer)?;
+            } else {
+                group.require_admin(*signer)?;
+            }
+            Ok(())
+        }
+        RequiredAuthority::Governance => {
+            group.require_bank_admin(*signer)?;
+            Ok(())
+        }
+        RequiredAuthority::AdminOnly => {
+            group.require_admin(*signer)?;
+            Ok(())
+        }
+    }
 }
 
 pub fn lending_pool_configure_bank(
