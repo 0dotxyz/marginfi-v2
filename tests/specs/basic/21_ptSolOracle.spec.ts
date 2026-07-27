@@ -191,4 +191,63 @@ describe("PT-SOL internal oracle setup", () => {
     const expectedMult = startPrice + (1 - startPrice) * progress;
     assertI80F48Approx(cache.lastOraclePrice, baseSolPrice * expectedMult);
   });
+
+  // --- PT-hyUSD: same Exponent lerp, but no base feed (hyUSD ~= $1, so the rate is the price) ---
+  const setPthyusd = async (price: number, vault: PublicKey) => {
+    const ix = await setFixedPrice(groupAdmin.mrgnProgram, {
+      bank: ptBank.publicKey,
+      price,
+      remaining: [vault], // vault only -> PT-hyUSD
+    });
+    return groupAdmin.mrgnProgram.provider.sendAndConfirm!(
+      new Transaction().add(ix),
+    );
+  };
+
+  const pulseHyusd = async (vault: PublicKey) => {
+    await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
+      new Transaction().add(
+        await pulseBankPrice(groupAdmin.mrgnProgram, {
+          bank: ptBank.publicKey,
+          remaining: [vault],
+        }),
+      ),
+    );
+    return (await program.account.bank.fetch(ptBank.publicKey)).cache;
+  };
+
+  it("(admin) sets up PTHYUSD (vault only) - happy path", async () => {
+    await setPthyusd(0.95, REAL_VAULT);
+    const { config } = await program.account.bank.fetch(ptBank.publicKey);
+    assert.deepEqual(config.oracleSetup, { pthyusd: {} });
+    assertKeysEqual(config.oracleKeys[0], REAL_VAULT);
+    assertI80F48Approx(config.fixedPrice, 0.95);
+  });
+
+  it("(admin) tries to set up PTHYUSD - fails with a start price above par", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setPthyusd(1.5, REAL_VAULT);
+      },
+      "InvalidPtStartPrice",
+      6602,
+    );
+  });
+
+  it("prices a matured PT-hyUSD vault at par ($1)", async () => {
+    const now = await getBankrunTime(bankrunContext);
+    const vault = Keypair.generate().publicKey;
+    setVault(vault, makeVault(now - 10_000, 5_000));
+    await setPthyusd(0.9, vault);
+    // The lerp value is the USD price directly; past maturity -> par.
+    assertI80F48Approx((await pulseHyusd(vault)).lastOraclePrice, 1.0);
+  });
+
+  it("prices a not-yet-started PT-hyUSD vault at the start price", async () => {
+    const now = await getBankrunTime(bankrunContext);
+    const vault = Keypair.generate().publicKey;
+    setVault(vault, makeVault(now + 100_000, 1_000));
+    await setPthyusd(0.85, vault);
+    assertI80F48Approx((await pulseHyusd(vault)).lastOraclePrice, 0.85);
+  });
 });

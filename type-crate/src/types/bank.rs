@@ -350,6 +350,7 @@ pub enum OracleSetup {
     KaminoLST,              // 22
     JuplendLST,             // 23
     PTSOL,                  // 24
+    PTHYUSD,                // 25
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
@@ -382,6 +383,7 @@ impl OracleSetup {
             22 => Some(Self::KaminoLST),
             23 => Some(Self::JuplendLST),
             24 => Some(Self::PTSOL),
+            25 => Some(Self::PTHYUSD),
             _ => None,
         }
     }

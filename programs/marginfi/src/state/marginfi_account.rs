@@ -58,6 +58,8 @@ pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
         OracleSetup::KaminoLST | OracleSetup::JuplendLST => Ok(4),
         // PTSOL: bank + Pyth + Exponent vault
         OracleSetup::PTSOL => Ok(3),
+        // PTHYUSD: bank + Exponent vault (no base feed; hyUSD ~= $1)
+        OracleSetup::PTHYUSD => Ok(2),
         _ => get_remaining_accounts_per_asset_tag(bank.config.asset_tag),
     }
 }

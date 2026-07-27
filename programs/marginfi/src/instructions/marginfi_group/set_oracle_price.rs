@@ -38,11 +38,14 @@ pub fn lending_pool_set_oracle_price(
 
     let price_i80: I80F48 = price.into();
 
-    // A vault passed as a second remaining account signals a self-contained PT-SOL setup, whose
-    // oracle accounts are [Pyth SOL/USD, Exponent vault]. A plain fixed price passes no accounts.
+    // Two accounts ([Pyth SOL/USD, vault]) signal PTSOL; a single Exponent-owned vault signals
+    // PT-hyUSD (hyUSD ~= $1, no base feed). A plain fixed price passes no accounts; the Fixed*
+    // integrations pass a single non-vault (reserve/lending) account.
     let is_ptsol = ctx.remaining_accounts.len() == 2;
+    let is_pthyusd = ctx.remaining_accounts.len() == 1
+        && ctx.remaining_accounts[0].owner == &exponent_mocks::ID;
 
-    if is_ptsol {
+    if is_ptsol || is_pthyusd {
         // For PT the fixed price is the linear-pricing start price, which lives in (0, 1].
         check!(
             price_i80 > I80F48::ZERO && price_i80 <= I80F48::ONE,
@@ -57,6 +60,8 @@ pub fn lending_pool_set_oracle_price(
 
     bank.config.oracle_setup = if is_ptsol {
         OracleSetup::PTSOL
+    } else if is_pthyusd {
+        OracleSetup::PTHYUSD
     } else if bank.config.asset_tag == ASSET_TAG_KAMINO {
         OracleSetup::FixedKamino
     } else if bank.config.asset_tag == ASSET_TAG_DRIFT {
@@ -71,6 +76,9 @@ pub fn lending_pool_set_oracle_price(
         // [0] Pyth SOL/USD feed, [1] Exponent vault
         bank.config.oracle_keys[0] = ctx.remaining_accounts[0].key();
         bank.config.oracle_keys[1] = ctx.remaining_accounts[1].key();
+    } else if is_pthyusd {
+        // [0] Exponent vault (no base feed)
+        bank.config.oracle_keys[0] = ctx.remaining_accounts[0].key();
     } else {
         // Note: We leave the other keys in place to make it easier to restore Kamino/Staked/etc
         // banks to their original state. This can leave fixed banks in a somewhat awkward-looking

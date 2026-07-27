@@ -26,6 +26,7 @@ pub fn lending_pool_configure_bank_oracle(
                 | OracleSetup::FixedDrift
                 | OracleSetup::FixedJuplend
                 | OracleSetup::PTSOL
+                | OracleSetup::PTHYUSD
         ) {
             return err!(MarginfiError::UseSetOraclePrice);
         }

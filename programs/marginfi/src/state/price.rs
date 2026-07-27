@@ -387,9 +387,9 @@ pub(crate) fn check_exponent_vault(info: &AccountInfo) -> MarginfiResult {
     Ok(())
 }
 
-/// PT/SOL multiplier: linear accretion from `start_price` to par (1.0) over the vault's
+/// PT linear rate: accretion from `start_price` to par (1.0) over the vault's
 /// `[start_ts, start_ts + duration]`, clamped at both ends.
-fn pt_sol_multiplier(
+fn pt_linear_multiplier(
     vault: &MinimalExponentVault,
     clock: &Clock,
     start_price: I80F48,
@@ -1340,7 +1340,7 @@ impl OraclePriceFeedAdapter {
                 let vault_loader = load_exponent_vault(bank_config, vault_info, 1)?;
                 let vault = vault_loader.load()?;
                 let start_price: I80F48 = bank.config.fixed_price.into();
-                let pt_rate = pt_sol_multiplier(&vault, clock, start_price)?;
+                let pt_rate = pt_linear_multiplier(&vault, clock, start_price)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
@@ -1357,6 +1357,29 @@ impl OraclePriceFeedAdapter {
 
                 Ok(OracleLoadContext {
                     adjusted_price_feed: OraclePriceFeedAdapter::PythPushOracle(price_feed),
+                    cache_raw_price,
+                    cache_multiplier: I80F48::ONE,
+                })
+            }
+            OracleSetup::PTHYUSD => {
+                // (0) Exponent vault only. hyUSD ~= $1, so the PT linear rate is the USD price
+                // directly (a time-varying fixed feed), with no base oracle to multiply.
+                check!(ais.len() == 1, MarginfiError::WrongNumberOfOracleAccounts);
+
+                let vault_loader = load_exponent_vault(bank_config, &ais[0], 0)?;
+                let vault = vault_loader.load()?;
+                let start_price: I80F48 = bank.config.fixed_price.into();
+                let pt_price = pt_linear_multiplier(&vault, clock, start_price)?;
+
+                let feed = FixedPriceFeed { price: pt_price };
+                let cache_raw_price = if let Some(price_type) = cache_price_type {
+                    Some(feed.get_price_and_confidence_of_type(price_type, u32::MAX)?)
+                } else {
+                    None
+                };
+
+                Ok(OracleLoadContext {
+                    adjusted_price_feed: OraclePriceFeedAdapter::Fixed(feed),
                     cache_raw_price,
                     cache_multiplier: I80F48::ONE,
                 })
@@ -1851,6 +1874,21 @@ impl OraclePriceFeedAdapter {
                     MarginfiError::ExponentVaultValidationFailed
                 );
                 check_exponent_vault(&oracle_ais[1])?;
+                Ok(())
+            }
+            OracleSetup::PTHYUSD => {
+                // (0) Exponent vault only; no base price feed (hyUSD ~= $1).
+                require_eq!(
+                    oracle_ais.len(),
+                    1,
+                    MarginfiError::WrongNumberOfOracleAccounts
+                );
+                require_keys_eq!(
+                    *oracle_ais[0].key,
+                    bank_config.oracle_keys[0],
+                    MarginfiError::ExponentVaultValidationFailed
+                );
+                check_exponent_vault(&oracle_ais[0])?;
                 Ok(())
             }
         }
@@ -2529,7 +2567,7 @@ mod tests {
     }
 
     #[test]
-    fn pt_sol_multiplier_lerps_to_par() {
+    fn pt_linear_multiplier_lerps_to_par() {
         use bytemuck::Zeroable;
         let mut vault = MinimalExponentVault::zeroed();
         vault.start_ts = 1_000;
@@ -2542,19 +2580,19 @@ mod tests {
 
         // Before start -> start_price; at/after maturity -> par (1.0)
         assert_eq!(
-            pt_sol_multiplier(&vault, &at(500), start_price).unwrap(),
+            pt_linear_multiplier(&vault, &at(500), start_price).unwrap(),
             start_price
         );
         assert_eq!(
-            pt_sol_multiplier(&vault, &at(2_000), start_price).unwrap(),
+            pt_linear_multiplier(&vault, &at(2_000), start_price).unwrap(),
             I80F48::ONE
         );
         assert_eq!(
-            pt_sol_multiplier(&vault, &at(9_999), start_price).unwrap(),
+            pt_linear_multiplier(&vault, &at(9_999), start_price).unwrap(),
             I80F48::ONE
         );
         // Halfway through -> midpoint between 0.8 and 1.0 = 0.9
-        let mid = pt_sol_multiplier(&vault, &at(1_500), start_price).unwrap();
+        let mid = pt_linear_multiplier(&vault, &at(1_500), start_price).unwrap();
         assert!((mid - I80F48::from_num(0.9)).abs() < I80F48::from_num(1e-9));
     }
 
