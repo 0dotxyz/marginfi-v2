@@ -321,7 +321,8 @@ pub struct RebalanceExecutedEvent {
     pub executor: Pubkey,
     pub bank_count: u8,
     pub value_moved: WrappedI80F48,
-    pub tip_paid: u64,
+    /// Lamports escrowed into the rebalance record, released later by `settle_rebalance_tip`.
+    pub tip_escrowed: u64,
 }
 
 #[event]
@@ -329,9 +330,10 @@ pub struct RebalanceTipSettledEvent {
     pub header: AccountEventHeader,
     pub rebalance_order: Pubkey,
     pub executor: Pubkey,
-    /// Whether the destinations realized at least the sources' yield over the settlement window.
+    /// Whether every move's destination out-yielded its source over the settlement window.
     pub realized: bool,
-    /// Tip paid to the keeper (0 if not realized; the escrow was refunded to the fee pool).
+    /// Lamports the executor received. Nonzero without `realized` when the escrow was forfeited
+    /// because the fee pool had been drained below its rent-exempt reserve.
     pub tip_paid: u64,
 }
 

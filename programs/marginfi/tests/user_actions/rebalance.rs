@@ -174,6 +174,62 @@ async fn rebalance_settle_refunds_pool_when_not_realized() -> anyhow::Result<()>
     Ok(())
 }
 
+/// Draining the fee pool between `end_rebalance` and settlement forfeits an unrealized escrow to the
+/// executor: a drained pool cannot be credited without being left rent-paying, which the runtime
+/// rejects outright and which would otherwise block the record from ever closing.
+#[tokio::test]
+async fn rebalance_settle_forfeits_escrow_when_pool_drained() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let rent_floor = solana_sdk::rent::Rent::default().minimum_balance(0);
+    // A tip below the rent-exempt floor: refunding it alone cannot make the pool rent-exempt.
+    let tip = 200_000u64;
+    assert!(tip < rent_floor);
+    f.set_keeper_tip(tip).await?;
+    f.top_up_pool(5_000_000).await?;
+    f.pin_clock(1_000).await;
+
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+    let pending_tip = f.record_pending_tip().await;
+    assert!(pending_tip > 0 && pending_tip < rent_floor);
+
+    let payer = f.test_f.context.borrow().payer.pubkey();
+    let recipient = Pubkey::new_unique();
+    let drain_ix = f
+        .user
+        .make_withdraw_rebalance_fee_pool_ix(payer, recipient, u64::MAX)
+        .await;
+    f.process_as_payer(&[drain_ix]).await?;
+    assert_eq!(f.lamports_of(f.fee_pool()).await, 0);
+
+    // Make the source out-yield the destination so settlement takes the refund branch.
+    f.test_f
+        .set_pyth_oracle_timestamp(PYTH_SOL_FEED, 1_000)
+        .await;
+    drive_utilization(&f.test_f, &f.src_bank_f, 900.0, 300.0).await?;
+    f.advance_clock(601).await;
+
+    let record_lamports = f.lamports_of(f.record_pda).await;
+    let keeper_before = f.lamports_of(f.keeper.pubkey()).await;
+    let settle = f
+        .build_settle_as(f.src_bank_f.key, f.dst_bank_f.key, payer)
+        .await;
+    f.process_as_payer(&[settle]).await?;
+
+    assert_eq!(
+        f.lamports_of(f.fee_pool()).await,
+        0,
+        "the drained pool is never credited, so it stays closed"
+    );
+    assert_eq!(f.lamports_of(f.record_pda).await, 0, "record closed");
+    assert_eq!(
+        f.lamports_of(f.keeper.pubkey()).await - keeper_before,
+        record_lamports,
+        "executor gets the record rent plus the forfeited escrow"
+    );
+    Ok(())
+}
+
 /// Settlement is rejected before the settle delay elapses.
 #[tokio::test]
 async fn rebalance_settle_rejects_before_delay() -> anyhow::Result<()> {
@@ -1634,7 +1690,7 @@ async fn rebalance_rejects_injected_unreferenced_balance() -> anyhow::Result<()>
         .user
         .make_deposit_ix_with_authority(keeper_sol, sol_bank, 1.0, None, f.keeper.pubkey())
         .await;
-    // The keeper observes the injected bank, exactly as they must for the health check to resolve.
+    // The injected bank must be observed for the health check to resolve.
     let end_ix = f
         .user
         .make_rebalance_end_ix_observing(

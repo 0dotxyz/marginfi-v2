@@ -76,7 +76,8 @@ use marginfi_type_crate::{
 
 /// The bank's venue exchange-rate multiplier at `clock` (Kamino cToken rate, Drift cumulative
 /// interest, JupLend exchange price; 1 for native banks), read from its configured oracle/venue
-/// accounts. The oracle spot price is read too but intentionally discarded here.
+/// accounts. The spot price itself is discarded, but reading it applies the bank's staleness and
+/// confidence gates, so every rebalance step blocks while the oracle is untrustworthy.
 fn venue_multiplier<'info>(
     bank: &Bank,
     oracle_ais: &'info [AccountInfo<'info>],
@@ -909,9 +910,8 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         );
 
         // Per-withdraw health checks are skipped while ACCOUNT_IN_REBALANCE is set, so recompute
-        // health once here over the post-move balance set. A rebalance moves an existing position
-        // between same-mint venues rather than opening new risk, so the MAINTENANCE requirement
-        // applies: the account need only stay non-liquidatable, not pass the stricter initial bar.
+        // health once here over the post-move balance set. The bar is MAINTENANCE, so a move may
+        // reduce initial-weighted collateral as long as the account stays non-liquidatable.
         check_account_maint_health(
             &account,
             &*ctx.accounts.group.load()?,
@@ -1035,7 +1035,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         executor: ctx.accounts.executor.key(),
         bank_count: ref_keys.len() as u8,
         value_moved: value_moved.into(),
-        tip_paid: tip_pending,
+        tip_escrowed: tip_pending,
     });
     Ok(())
 }
@@ -1087,10 +1087,10 @@ impl<'info> Hashable for EndRebalance<'info> {
 /// (permissionless) Settle a rebalance's escrowed keeper tip after the settlement delay. Measures the
 /// realized supply yield each referenced bank earned since the move (current yield index vs the
 /// recorded move-time index) and pays the escrowed tip to the recorded executor only if every move's
-/// destination out-yielded its source; otherwise the tip is refunded to the fee pool. Either way the
-/// record is closed and its rent returns to the recorded executor, who fronted it at
-/// `start_rebalance`. Anyone may call it; both the tip and the rent always go to the recorded
-/// keeper, not the caller.
+/// destination out-yielded its source; otherwise the tip is refunded to the fee pool, or forfeited to
+/// the executor when the pool was drained below its rent-exempt reserve. Either way the record is
+/// closed and its rent returns to the recorded executor, who fronted it at `start_rebalance`. Anyone
+/// may call it; both the tip and the rent always go to the recorded keeper, not the caller.
 pub fn settle_rebalance_tip<'info>(
     ctx: Context<'info, SettleRebalanceTip<'info>>,
 ) -> MarginfiResult {
@@ -1169,10 +1169,14 @@ pub fn settle_rebalance_tip<'info>(
     // The record is program-owned, so move lamports directly; Anchor's `close` returns the base rent
     // to the recorded executor afterward.
     let record_ai = ctx.accounts.rebalance_record.to_account_info();
-    let dest_ai = if realized {
-        ctx.accounts.executor.to_account_info()
-    } else {
+    // The pool is credited only while it is already rent-exempt. An authority who drained it between
+    // the move and settlement forfeits the refund to the executor, since crediting a drained pool
+    // would leave it rent-paying and the runtime rejects that outright.
+    let refunded = !realized && ctx.accounts.fee_pool.lamports() >= Rent::get()?.minimum_balance(0);
+    let dest_ai = if refunded {
         ctx.accounts.fee_pool.to_account_info()
+    } else {
+        ctx.accounts.executor.to_account_info()
     };
     if pending_tip > 0 {
         **record_ai.try_borrow_mut_lamports()? = record_ai
@@ -1199,7 +1203,7 @@ pub fn settle_rebalance_tip<'info>(
         rebalance_order: ctx.accounts.rebalance_order.key(),
         executor: ctx.accounts.executor.key(),
         realized,
-        tip_paid: if realized { pending_tip } else { 0 },
+        tip_paid: if refunded { 0 } else { pending_tip },
     });
     Ok(())
 }
