@@ -104,7 +104,8 @@ pub trait RebalanceRecordImpl {
     /// caller's budget-cap cushion).
     fn reconcile(&self, post_underlying: &[I80F48]) -> MarginfiResult<(I80F48, I80F48, I80F48)>;
 
-    /// Verify every snapshotted non-referenced balance is unchanged (side + shares).
+    /// Verify the non-referenced balance set is exactly what it was at start: every snapshotted
+    /// balance still holds its side and shares, and no balance outside the referenced set was added.
     fn verify_others_unchanged(&self, marginfi_account: &MarginfiAccount) -> MarginfiResult;
 }
 
@@ -242,6 +243,20 @@ impl RebalanceRecordImpl for RebalanceRecord {
     }
 
     fn verify_others_unchanged(&self, marginfi_account: &MarginfiAccount) -> MarginfiResult {
+        // A balance added mid-sandwich occupies no snapshot slot, so the loop below cannot see it.
+        // Any signer may run the deposit legs, and no leg is bound to a referenced bank.
+        let ref_banks = &self.ref_banks[..self.ref_bank_count as usize];
+        let untracked = marginfi_account
+            .lending_account
+            .balances
+            .iter()
+            .filter(|b| b.is_active() && !ref_banks.iter().any(|r| r.bank == b.bank_pk))
+            .count();
+        check!(
+            untracked == self.active_balance_count as usize,
+            MarginfiError::RebalanceUntrackedBalance
+        );
+
         for rec in self.balance_states[..self.active_balance_count as usize].iter() {
             let idx = marginfi_account
                 .lending_account

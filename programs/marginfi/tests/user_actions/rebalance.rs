@@ -1583,6 +1583,76 @@ async fn rebalance_rejects_touching_unreferenced_balance() -> anyhow::Result<()>
     Ok(())
 }
 
+/// The move is honest, but the keeper also aims a deposit of their own tokens at a bank the
+/// rebalance never referenced, consuming a balance slot and attaching that bank's oracle to every
+/// later maintenance check. Only the untracked-balance count catches this.
+#[tokio::test]
+async fn rebalance_rejects_injected_unreferenced_balance() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    // The user holds no SOL position: the SOL balance appears only inside the sandwich.
+    let sol_bank = f.test_f.get_bank(&BankMint::Sol);
+    let keeper_sol = f
+        .test_f
+        .sol_mint
+        .create_token_account_and_mint_to_with_owner(&f.keeper.pubkey(), 10.0)
+        .await
+        .key;
+
+    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_usdc = f
+        .user
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_usdc = f
+        .user
+        .make_deposit_ix_with_authority(
+            f.keeper_usdc,
+            &f.dst_bank_f,
+            DEPOSIT_USDC,
+            None,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let inject_sol = f
+        .user
+        .make_deposit_ix_with_authority(keeper_sol, sol_bank, 1.0, None, f.keeper.pubkey())
+        .await;
+    // The keeper observes the injected bank, exactly as they must for the health check to resolve.
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix_observing(
+            ref_banks,
+            vec![f.src_bank_f.key],
+            vec![sol_bank.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f
+        .process(&[start_ix, withdraw_usdc, deposit_usdc, inject_sol, end_ix])
+        .await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceUntrackedBalance);
+    Ok(())
+}
+
 /// `order.amount` is a TOTAL-value budget across all moves: two sub-cap moves that sum past it are
 /// rejected.
 #[tokio::test]

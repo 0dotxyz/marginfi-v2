@@ -1258,6 +1258,28 @@ impl MarginfiAccountFixture {
         rebalance_record: Pubkey,
         executor: Pubkey,
     ) -> Instruction {
+        self.make_rebalance_end_ix_observing(
+            ref_banks,
+            emptied,
+            vec![],
+            rebalance_order,
+            rebalance_record,
+            executor,
+        )
+        .await
+    }
+
+    /// [`Self::make_rebalance_end_ix`], plus `extra_observed` banks forced into the health
+    /// observation set, which is otherwise derived from the account's state at build time.
+    pub async fn make_rebalance_end_ix_observing(
+        &self,
+        ref_banks: Vec<RebalanceBankMeta>,
+        emptied: Vec<Pubkey>,
+        extra_observed: Vec<Pubkey>,
+        rebalance_order: Pubkey,
+        rebalance_record: Pubkey,
+        executor: Pubkey,
+    ) -> Instruction {
         let group = self.load().await.group;
         let mut accounts = marginfi::accounts::EndRebalance {
             group,
@@ -1272,7 +1294,11 @@ impl MarginfiAccountFixture {
         for b in &ref_banks {
             b.append_to(&mut accounts);
         }
-        let include: Vec<Pubkey> = ref_banks.iter().map(|b| b.bank).collect();
+        let include: Vec<Pubkey> = ref_banks
+            .iter()
+            .map(|b| b.bank)
+            .chain(extra_observed)
+            .collect();
         accounts.extend(self.load_observation_account_metas(include, emptied).await);
         Instruction {
             program_id: marginfi::ID,

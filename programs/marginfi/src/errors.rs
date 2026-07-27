@@ -483,7 +483,9 @@ pub enum MarginfiError {
     RebalanceRecordPending, // 6619
     #[msg("Rebalance order requires an active balance in at least one allowed bank")]
     RebalanceNoAllowlistPosition, // 6620
-                                  // **************END AUTO-REBALANCE ERRORS
+    #[msg("Rebalance opened a balance outside the referenced bank set")]
+    RebalanceUntrackedBalance, // 6621
+                               // **************END AUTO-REBALANCE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -744,6 +746,7 @@ impl From<u32> for MarginfiError {
             6618 => MarginfiError::RebalanceForeignAccountLeg,
             6619 => MarginfiError::RebalanceRecordPending,
             6620 => MarginfiError::RebalanceNoAllowlistPosition,
+            6621 => MarginfiError::RebalanceUntrackedBalance,
 
             _ => MarginfiError::InternalLogicError,
         }
