@@ -42,8 +42,8 @@ pub fn lending_pool_set_oracle_price(
     // PT-hyUSD (hyUSD ~= $1, no base feed). A plain fixed price passes no accounts; the Fixed*
     // integrations pass a single non-vault (reserve/lending) account.
     let is_ptsol = ctx.remaining_accounts.len() == 2;
-    let is_pthyusd = ctx.remaining_accounts.len() == 1
-        && ctx.remaining_accounts[0].owner == &exponent_mocks::ID;
+    let is_pthyusd =
+        ctx.remaining_accounts.len() == 1 && ctx.remaining_accounts[0].owner == &exponent_mocks::ID;
 
     if is_ptsol || is_pthyusd {
         // For PT the fixed price is the linear-pricing start price, which lives in (0, 1].
