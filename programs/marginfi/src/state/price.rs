@@ -1,5 +1,6 @@
 use crate::constants::{
-    MIN_PYTH_PUSH_VERIFICATION_LEVEL, NATIVE_STAKE_ID, SPL_SINGLE_POOL_ID, SWITCHBOARD_PULL_ID,
+    MIN_PYTH_PUSH_VERIFICATION_LEVEL, NATIVE_STAKE_ID, SPL_SINGLE_POOL_ID,
+    SVSP_PHANTOM_TOKEN_AMOUNT, SWITCHBOARD_PULL_ID,
 };
 use crate::state::bank_config::BankConfigImpl;
 use crate::{check, check_eq, debug, math_error, prelude::*};
@@ -356,7 +357,8 @@ impl OraclePriceFeedAdapter {
                 let lst_supply = lst_mint.supply;
                 check!(lst_supply > 0, MarginfiError::ZeroSupplyInStakePool);
 
-                let (sol_pool_adjusted_balance, effective_supply) = match bank.on_ramp_transition() {
+                let (sol_pool_adjusted_balance, effective_supply) = match bank.on_ramp_transition()
+                {
                     OnRampTransition::OnRampEnabled => {
                         let expected_onramp = expected_staked_onramp(bank)?;
                         if ais[3].key != &expected_onramp {
