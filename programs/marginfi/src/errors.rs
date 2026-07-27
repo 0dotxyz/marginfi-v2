@@ -452,7 +452,7 @@ pub enum MarginfiError {
     CircuitBreakerRequiresWarmCache, // 6603
     #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
     CircuitBreakerPriceJump, // 6604
-    // **************END CIRCUIT BREAKER ERRORS
+                             // **************END CIRCUIT BREAKER ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
