@@ -468,7 +468,7 @@ impl FuzzTest {
                 vec![bank.config.oracle_keys[0]]
             }
 
-            OracleSetup::PythMSOL | OracleSetup::PythLST => {
+            OracleSetup::PythMSOL | OracleSetup::PythLST | OracleSetup::PTSOL => {
                 vec![bank.config.oracle_keys[0], bank.config.oracle_keys[1]]
             }
 

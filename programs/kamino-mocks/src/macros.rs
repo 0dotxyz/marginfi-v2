@@ -1,4 +1,3 @@
-
 #[macro_export]
 macro_rules! math_error {
     () => {{

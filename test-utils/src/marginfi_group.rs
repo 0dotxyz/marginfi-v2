@@ -287,10 +287,7 @@ impl MarginfiGroupFixture {
             let price: I80F48 = fixed_price.unwrap();
             println!("mint: {:?} price {:?}", bank_mint, price);
 
-            self.make_lending_pool_set_oracle_price_ix(
-                &bank_fixture,
-                fixed_price.unwrap().into(),
-            )
+            self.make_lending_pool_set_oracle_price_ix(&bank_fixture, fixed_price.unwrap().into())
         } else {
             self.make_lending_pool_configure_bank_oracle_ix(
                 &bank_fixture,

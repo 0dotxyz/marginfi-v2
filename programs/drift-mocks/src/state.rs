@@ -1,7 +1,7 @@
 use crate::{constants::*, math_error, DriftMocksError};
 use anchor_lang::prelude::*;
-use marginfi_type_crate::{assert_struct_align, assert_struct_size};
 use bytemuck::{Pod, Zeroable};
+use marginfi_type_crate::{assert_struct_align, assert_struct_size};
 
 // Account discriminators from Drift IDL
 pub const SPOT_MARKET_DISCRIMINATOR: [u8; 8] = [100, 177, 8, 107, 168, 65, 65, 39];

@@ -61,7 +61,8 @@ pub const NATIVE_STAKE_ID: Pubkey = pubkey!("Stake111111111111111111111111111111
 /// Vanilla SPL Stake Pool (JitoSOL, bSOL, ...).
 pub const SPL_STAKE_POOL_ID: Pubkey = pubkey!("SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy");
 /// Sanctum's SPL Stake Pool fork (bbSOL, ...).
-pub const SANCTUM_SPL_STAKE_POOL_ID: Pubkey = pubkey!("SP12tWFxD9oJsVWNavTTBZvMbA6gkAmxtVgxdqvyvhY");
+pub const SANCTUM_SPL_STAKE_POOL_ID: Pubkey =
+    pubkey!("SP12tWFxD9oJsVWNavTTBZvMbA6gkAmxtVgxdqvyvhY");
 /// Sanctum's multi-validator SPL Stake Pool fork.
 pub const SANCTUM_SPL_MULTI_STAKE_POOL_ID: Pubkey =
     pubkey!("SPMBzsVUuoHA4Jm6KunbsotaahvVikZs1JyTW6iJvbn");

@@ -9,11 +9,10 @@ use anchor_spl::token::{Mint, ID as SPL_TOKEN_PROGRAM_ID};
 use drift_mocks::constants::SPOT_CUMULATIVE_INTEREST_PRECISION;
 use drift_mocks::state::MinimalSpotMarket;
 use enum_dispatch::enum_dispatch;
+use exponent_mocks::state::{MinimalExponentVault, VAULT_DISCRIMINATOR};
 use fixed::types::I80F48;
 use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION};
 use kamino_mocks::state::MinimalReserve;
-use exponent_mocks::state::{MinimalExponentVault, VAULT_DISCRIMINATOR};
-use marinade_mocks::state::{MinimalMarinadeState, MSOL_PRICE_PRECISION, STATE_DISCRIMINATOR};
 use marginfi_type_crate::types::OnRampTransition;
 use marginfi_type_crate::{
     constants::{CONF_INTERVAL_MULTIPLE, EXP_10_I80F48, MAX_CONF_INTERVAL, U32_MAX},
@@ -24,6 +23,7 @@ use marginfi_type_crate::{
         OracleSetup, PriceBias,
     },
 };
+use marinade_mocks::state::{MinimalMarinadeState, MSOL_PRICE_PRECISION, STATE_DISCRIMINATOR};
 use pyth_solana_receiver_sdk::{
     price_update::{self, FeedId, PriceUpdateV2},
     PYTH_PUSH_ORACLE_ID,
@@ -323,7 +323,10 @@ fn stake_pool_price_multiplier(
     let data = stake_pool_info.try_borrow_data()?;
     let pool = try_from_slice_unchecked::<MinimalStakePool>(&data)
         .map_err(|_| MarginfiError::StakePoolValidationFailed)?;
-    check!(pool.account_type == 1, MarginfiError::StakePoolValidationFailed);
+    check!(
+        pool.account_type == 1,
+        MarginfiError::StakePoolValidationFailed
+    );
     check!(
         pool.pool_token_supply > 0,
         MarginfiError::ZeroSupplyInStakePool
@@ -2483,8 +2486,7 @@ mod tests {
         state.msol_price = 5_992_546_810;
 
         let rate = marinade_price_multiplier(&state).unwrap();
-        let expected =
-            I80F48::from_num(5_992_546_810u64) / I80F48::from_num(MSOL_PRICE_PRECISION);
+        let expected = I80F48::from_num(5_992_546_810u64) / I80F48::from_num(MSOL_PRICE_PRECISION);
         assert_eq!(rate, expected);
         // Sanity: mSOL/SOL ~= 1.39524853, i.e. within a plausible band.
         assert!(rate > I80F48::from_num(1.39) && rate < I80F48::from_num(1.40));

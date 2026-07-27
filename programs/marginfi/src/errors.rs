@@ -274,6 +274,12 @@ pub enum MarginfiError {
     BankUninitialized,
     #[msg("Max slippage exceeds the allowed cap")] // 6135
     SlippageTooHigh,
+    #[msg("Marinade state validation failed")]
+    MarinadeStateValidationFailed, // 6136
+    #[msg("Exponent vault validation failed")]
+    ExponentVaultValidationFailed, // 6137
+    #[msg("PT start price must be in (0, 1]")]
+    InvalidPtStartPrice, // 6138
 
     // ************** BEGIN KAMINO ERRORS (starting at 6200)
     #[msg("Wrong asset tag for standard instructions, expected DEFAULT, SOL, or STAKED asset tag")]
@@ -446,19 +452,7 @@ pub enum MarginfiError {
     CircuitBreakerRequiresWarmCache, // 6603
     #[msg("Oracle price deviates too far from the circuit breaker reference; action rejected")]
     CircuitBreakerPriceJump, // 6604
-                             // **************END CIRCUIT BREAKER ERRORS
-
-    // ************** BEGIN MARINADE ERRORS (starting at 6700)
-    #[msg("Marinade state validation failed")]
-    MarinadeStateValidationFailed = 700, // 6700
-    // **************END MARINADE ERRORS
-
-    // ************** BEGIN EXPONENT ERRORS (starting at 6701)
-    #[msg("Exponent vault validation failed")]
-    ExponentVaultValidationFailed = 701, // 6701
-    #[msg("PT start price must be in (0, 1]")]
-    InvalidPtStartPrice = 702, // 6702
-                               // **************END EXPONENT ERRORS
+    // **************END CIRCUIT BREAKER ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -617,6 +611,9 @@ impl From<u32> for MarginfiError {
             6132 => MarginfiError::UseSetOraclePrice,
             6133 => MarginfiError::InvalidGlobalFeeWallet,
             6134 => MarginfiError::BankUninitialized,
+            6136 => MarginfiError::MarinadeStateValidationFailed,
+            6137 => MarginfiError::ExponentVaultValidationFailed,
+            6138 => MarginfiError::InvalidPtStartPrice,
 
             // Kamino-specific errors (starting at 6200)
             6200 => MarginfiError::WrongAssetTagForStandardInstructions,
@@ -703,10 +700,6 @@ impl From<u32> for MarginfiError {
             6602 => MarginfiError::CircuitBreakerInvalidConfig,
             6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
             6604 => MarginfiError::CircuitBreakerPriceJump,
-
-            6700 => MarginfiError::MarinadeStateValidationFailed,
-            6701 => MarginfiError::ExponentVaultValidationFailed,
-            6702 => MarginfiError::InvalidPtStartPrice,
 
             _ => MarginfiError::InternalLogicError,
         }
