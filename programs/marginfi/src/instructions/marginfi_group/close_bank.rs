@@ -9,18 +9,14 @@ use marginfi_type_crate::{
     types::{Bank, MarginfiGroup},
 };
 pub fn lending_pool_close_bank(ctx: Context<LendingPoolCloseBank>) -> MarginfiResult {
-    let mut group = ctx.accounts.marginfi_group.load_mut()?;
+    let bank = ctx.accounts.bank.load()?;
+    let group = ctx.accounts.marginfi_group.load()?;
 
     require_eq!(
         group.admin,
         *ctx.accounts.admin.key,
         MarginfiError::Unauthorized
     );
-
-    group.banks = group.banks.saturating_sub(1);
-    drop(group);
-
-    let bank = ctx.accounts.bank.load()?;
 
     require_eq!(
         bank.group,
@@ -52,6 +48,10 @@ pub fn lending_pool_close_bank(ctx: Context<LendingPoolCloseBank>) -> MarginfiRe
     );
 
     drop(bank);
+    drop(group);
+
+    let mut group = ctx.accounts.marginfi_group.load_mut()?;
+    group.banks = group.banks.saturating_sub(1);
 
     Ok(())
 }

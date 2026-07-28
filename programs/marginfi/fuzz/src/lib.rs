@@ -55,7 +55,8 @@ pub struct MarginfiFuzzContext<'info> {
     pub fee_state_wallet: AccountInfo<'info>,
     pub banks: Vec<BankAccounts<'info>>,
     pub marginfi_accounts: Vec<UserAccount<'info>>,
-    pub owner: AccountInfo<'info>,
+    pub admin: AccountInfo<'info>,
+    pub bank_admin: AccountInfo<'info>,
     pub system_program: AccountInfo<'info>,
     pub last_sysvar_current_timestamp: RwLock<u64>,
     pub metrics: Arc<RwLock<Metrics>>,
@@ -70,6 +71,7 @@ impl<'state> MarginfiFuzzContext<'state> {
     ) -> Self {
         let system_program = state.new_program(system_program::ID);
         let admin = state.new_sol_account(1_000_000, true, true);
+        let bank_admin = state.new_sol_account(1_000_000, true, true);
         let fee_state_wallet = state.new_sol_account(1_000_000, true, true);
         let fee_state = initialize_fee_state(
             state,
@@ -89,7 +91,8 @@ impl<'state> MarginfiFuzzContext<'state> {
             fee_state,
             fee_state_wallet,
             banks: vec![],
-            owner: admin,
+            admin: admin.clone(),
+            bank_admin,
             system_program,
             marginfi_accounts: vec![],
             last_sysvar_current_timestamp: RwLock::new(
@@ -244,8 +247,8 @@ impl<'state> MarginfiFuzzContext<'state> {
                     &mut marginfi::instructions::LendingPoolAddBank {
                         marginfi_group: AccountLoader::try_from(airls(&self.marginfi_group))
                             .unwrap(),
-                        bank_admin: Signer::try_from(airls(&self.owner)).unwrap(),
-                        fee_payer: Signer::try_from(airls(&self.owner)).unwrap(),
+                        bank_admin: Signer::try_from(airls(&self.bank_admin)).unwrap(),
+                        fee_payer: Signer::try_from(airls(&self.admin)).unwrap(),
                         fee_state: AccountLoader::try_from(airls(&self.fee_state)).unwrap(),
                         global_fee_wallet: uails(&self.fee_state_wallet),
                         bank_mint: Box::new(InterfaceAccount::try_from(airls(&mint)).unwrap()),
@@ -316,7 +319,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                     &marginfi::ID,
                     &mut marginfi::instructions::LendingPoolConfigureBankOracle {
                         group: AccountLoader::try_from(airls(&self.marginfi_group)).unwrap(),
-                        bank_admin: Signer::try_from(airls(&self.owner)).unwrap(),
+                        bank_admin: Signer::try_from(airls(&self.bank_admin)).unwrap(),
                         bank: AccountLoader::try_from_unchecked(&marginfi::ID, airls(&bank))
                             .unwrap(),
                     },

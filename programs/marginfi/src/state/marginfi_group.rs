@@ -315,10 +315,6 @@ impl MarginfiGroupImpl for MarginfiGroup {
     }
 }
 
-pub fn assert_bank_admin_authorized(group: &MarginfiGroup, signer: Pubkey) -> MarginfiResult {
-    group.require_bank_admin(signer)
-}
-
 trait MarginfiGroupDeleverageLimitExt {
     fn projected_deleverage_withdrawn_today(
         &self,

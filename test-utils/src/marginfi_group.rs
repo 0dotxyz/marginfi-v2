@@ -1725,7 +1725,7 @@ impl MarginfiGroupFixture {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::SetBankAdmin {
                 marginfi_group: self.key,
-                admin: self.ctx.borrow().payer.pubkey(),
+                signer: self.ctx.borrow().payer.pubkey(),
             }
             .to_account_metas(Some(true)),
             data: MarginfiGroupSetBankAdmin {
@@ -1763,7 +1763,7 @@ impl MarginfiGroupFixture {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::SetBankAdmin {
                 marginfi_group: self.key,
-                admin: signer.pubkey(),
+                signer: signer.pubkey(),
             }
             .to_account_metas(Some(true)),
             data: MarginfiGroupSetBankAdmin { new_bank_admin }.data(),
