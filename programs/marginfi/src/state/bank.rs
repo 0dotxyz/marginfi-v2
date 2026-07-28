@@ -227,6 +227,7 @@ pub trait BankImpl {
         oracle_price: Option<OraclePriceWithMultiplier>,
     ) -> MarginfiResult<()>;
     fn is_cb_halted(&self, now: i64) -> bool;
+    fn cb_frozen_seconds(&self, from: i64, to: i64) -> u64;
     fn cb_price_gate(&self, oracle: OraclePriceWithConfidence) -> MarginfiResult<()>;
     fn cb_effective_operational_state(&self) -> BankOperationalState;
     fn update_circuit_breaker(
@@ -682,6 +683,8 @@ impl BankImpl for Bank {
             }
             // Disable: zero halt + dedup state so a later re-enable starts clean.
             // `cb_reference_price` is preserved; `clear_circuit_breaker` offers a reseed path.
+            // Callers must `accrue_interest` first: this drops the halt span that
+            // `cb_frozen_seconds` reads, and the frozen interval would otherwise be charged.
             if !flag && was_enabled {
                 self.reset_cb_runtime_state();
             }
@@ -746,17 +749,19 @@ impl BankImpl for Bank {
 
         // Freeze interest accrual during a halt. Deposit/repay remain open while borrow/withdraw
         // are blocked, so unfrozen accrual would let new depositors free-ride on borrower
-        // interest they can no longer escape. Advance `last_update` so post-halt accrual starts
-        // from the current point instead of catching up on the frozen interval.
-        if self.is_cb_halted(current_timestamp) {
-            self.last_update = current_timestamp;
+        // interest they can no longer escape. Interest accrues only over the non-halted portion
+        // of the interval: pre-halt time accrues in full, the halted span never accrues, and
+        // post-halt accrual resumes from the halt's end — regardless of when accrual actually
+        // runs relative to the halt.
+        let time_delta =
+            time_delta.saturating_sub(self.cb_frozen_seconds(self.last_update, current_timestamp));
+        self.last_update = current_timestamp;
+        if time_delta == 0 {
             return Ok(());
         }
 
         let total_assets = self.get_asset_amount(self.total_asset_shares.into())?;
         let total_liabilities = self.get_liability_amount(self.total_liability_shares.into())?;
-
-        self.last_update = current_timestamp;
 
         if (total_assets == I80F48::ZERO) || (total_liabilities == I80F48::ZERO) {
             #[cfg(not(feature = "client"))]
@@ -921,6 +926,21 @@ impl BankImpl for Bank {
         self.get_flag(CIRCUIT_BREAKER_ENABLED) && self.cb_tier > 0 && now < self.cb_halt_ended_at
     }
 
+    /// Seconds of the recorded halt span overlapping `[from, to]`, i.e. the portion of that
+    /// interval during which interest accrual is frozen. The span outlives the halt (it is only
+    /// cleared by `reset_cb_runtime_state` or overwritten by the next trip) so the overlap is
+    /// still computable when accrual first runs after the halt ended. Only the most recent halt
+    /// span is recorded: if several distinct halts elapse between two accruals, only the latest
+    /// is excluded.
+    fn cb_frozen_seconds(&self, from: i64, to: i64) -> u64 {
+        if self.cb_halt_ended_at == 0 {
+            return 0;
+        }
+        let overlap_start = self.cb_halt_started_at.max(from);
+        let overlap_end = self.cb_halt_ended_at.min(to);
+        overlap_end.saturating_sub(overlap_start).max(0) as u64
+    }
+
     /// The operational state whose deposit/repay/withdraw rules currently apply. For a
     /// `CircuitBroken` bank this is the pre-break state (`cb_pre_break_state`) — so e.g. a bank
     /// that was `ReduceOnly` before breaking does not silently re-enable deposits. For any
@@ -952,38 +972,63 @@ impl BankImpl for Bank {
     }
 
     /// Read-only guard that rejects the current instruction when the live oracle price deviates
-    /// from `cb_reference_price` by at least the first breach tier (`cb_deviation_bps_tiers[0]`).
+    /// from `cb_reference_price` by at least the first breach tier (`cb_deviation_bps_tiers[0]`),
+    /// or from `cb_window_reference_price` by at least the long-window caps. The long-window
+    /// check catches a "slow-walk" manipulation where the EMA tracks the drifting price and the
+    /// per-pulse deviation stays small.
     ///
     /// A pure read — it never updates the reference or halt state, so callers can run it for
     /// every involved bank without those banks being writable. No-op when the breaker is
-    /// disabled or the reference is not yet seeded. The deviation math mirrors
+    /// disabled or the references are not yet seeded. The deviation math mirrors
     /// `update_circuit_breaker` so both agree on what counts as a breach.
     fn cb_price_gate(&self, oracle: OraclePriceWithConfidence) -> MarginfiResult<()> {
         if !self.get_flag(CIRCUIT_BREAKER_ENABLED) {
             return Ok(());
         }
-        // Without a usable reference there is nothing to compare against. The breaker seeds it
-        // at enable-time (warm-cache gate) or on its first observation, so this only skips
-        // genuinely cold banks.
+        let confidence = oracle.confidence.max(I80F48::ZERO);
+
+        // Without a usable reference there is nothing to compare against. The breaker seeds
+        // references at enable-time (warm-cache gate) or on the first observation, so this only
+        // skips genuinely cold banks.
         let ref_price: I80F48 = self.cb_reference_price.into();
-        if ref_price <= CB_MIN_REF_PRICE {
-            return Ok(());
-        }
         let threshold = self.config.cb_deviation_bps_tiers[0];
-        if threshold == 0 {
-            return Ok(());
+        if ref_price > CB_MIN_REF_PRICE && threshold > 0 {
+            let deviation_bps =
+                cb_confidence_adjusted_deviation_bps(oracle.price, ref_price, confidence);
+
+            if deviation_bps >= threshold as u64 {
+                msg!(
+                    "CB price gate tripped: deviation {} bps >= threshold {} bps",
+                    deviation_bps,
+                    threshold
+                );
+                return err!(MarginfiError::CircuitBreakerPriceJump);
+            }
         }
 
-        let deviation_bps =
-            cb_confidence_adjusted_deviation_bps(oracle.price, ref_price, oracle.confidence);
-
-        if deviation_bps >= threshold as u64 {
-            msg!(
-                "CB price gate tripped: deviation {} bps >= threshold {} bps",
-                deviation_bps,
-                threshold
+        let window_ref_price: I80F48 = self.cb_window_reference_price.into();
+        if window_ref_price > CB_MIN_REF_PRICE {
+            let window_max_up_bps = cb_window_or_default(
+                self.config.cb_window_max_up_bps as u64,
+                CB_WINDOW_MAX_UP_BPS,
             );
-            return err!(MarginfiError::CircuitBreakerPriceJump);
+            let window_max_down_bps = cb_window_or_default(
+                self.config.cb_window_max_down_bps as u64,
+                CB_WINDOW_MAX_DOWN_BPS,
+            );
+            let up_delta = (oracle.price - window_ref_price - confidence).max(I80F48::ZERO);
+            let down_delta = (window_ref_price - oracle.price - confidence).max(I80F48::ZERO);
+            let window_up_bps = cb_deviation_bps(up_delta, window_ref_price);
+            let window_down_bps = cb_deviation_bps(down_delta, window_ref_price);
+
+            if window_up_bps >= window_max_up_bps || window_down_bps >= window_max_down_bps {
+                msg!(
+                    "CB price gate long-window tripped: up {} bps / down {} bps",
+                    window_up_bps,
+                    window_down_bps
+                );
+                return err!(MarginfiError::CircuitBreakerPriceJump);
+            }
         }
         Ok(())
     }
@@ -1027,12 +1072,13 @@ impl BankImpl for Bank {
             let escalation_deadline = self.cb_halt_ended_at.saturating_add(
                 tier_dur.saturating_mul(self.config.cb_escalation_window_mult as i64),
             );
-            // Escalation window expired without a re-breach: fall back to operational.
+            // Escalation window expired without a re-breach: fall back to operational. The
+            // halt-span timestamps are kept (all halt logic gates on `cb_tier > 0`) so
+            // `accrue_interest` can still exclude the halted span even when this clear runs —
+            // e.g. via a pulse — before any accrual happened after the halt.
             if now >= escalation_deadline {
                 let prior_tier = self.cb_tier;
                 self.cb_tier = 0;
-                self.cb_halt_started_at = 0;
-                self.cb_halt_ended_at = 0;
                 self.cb_tier3_consecutive_trips = 0;
 
                 #[cfg(not(test))]
@@ -1858,18 +1904,21 @@ mod cb_tests {
     }
 
     #[test]
-    fn escalation_window_expiry_resets_tier_and_halt_timestamps() {
+    fn escalation_window_expiry_resets_tier_and_keeps_halt_timestamps() {
         let mut b = make_cb_bank();
         b.cb_tier = 1;
         b.cb_halt_started_at = 1_000;
         b.cb_halt_ended_at = 1_600;
         b.cb_reference_price = price(100).into();
-        // Deadline = 2800. A clean read past that resets tier and zeros halt timestamps.
+        // Deadline = 2800. A clean read past that resets the tier. The halt-span timestamps
+        // are preserved so `accrue_interest` can still exclude the halted span even when this
+        // clear runs before any post-halt accrual.
         b.update_circuit_breaker(3_000, 3_000, obs(price(100)))
             .unwrap();
         assert_eq!(b.cb_tier, 0);
-        assert_eq!(b.cb_halt_started_at, 0);
-        assert_eq!(b.cb_halt_ended_at, 0);
+        assert!(!b.is_cb_halted(3_000));
+        assert_eq!(b.cb_halt_started_at, 1_000);
+        assert_eq!(b.cb_halt_ended_at, 1_600);
     }
 
     #[test]
@@ -2102,13 +2151,12 @@ mod cb_tests {
         // Tier-3 dur = 240m, esc_mult = 2 → escalation_deadline = halt_ended_at + 28800.
         let escalation_deadline = b.cb_halt_ended_at + (240 * 60) * 2;
 
-        // Clean read past the escalation deadline triggers the expiry branch: tier→0, halt
-        // timestamps→0, AND tier3_consecutive_trips→0.
+        // Clean read past the escalation deadline triggers the expiry branch: tier→0 AND
+        // tier3_consecutive_trips→0 (halt-span timestamps are preserved for accrual).
         b.update_circuit_breaker(escalation_deadline + 1, 1_010, obs(price(100)))
             .unwrap();
         assert_eq!(b.cb_tier, 0);
-        assert_eq!(b.cb_halt_started_at, 0);
-        assert_eq!(b.cb_halt_ended_at, 0);
+        assert!(!b.is_cb_halted(escalation_deadline + 1));
         assert_eq!(b.cb_tier3_consecutive_trips, 0);
     }
 
@@ -2363,6 +2411,69 @@ mod cb_tests {
                 source_time: 0,
             })
             .is_err());
+    }
+
+    #[test]
+    fn price_gate_trips_on_long_window_deviation() {
+        // A slow-walked price keeps the EMA reference close to spot (per-pulse deviation is
+        // small) while drifting far from the long-window anchor — the gate must still trip.
+        let mut b = make_cb_bank();
+        b.cb_window_reference_price = price(100).into();
+        // 19% above the anchor < default 20% cap (CB_WINDOW_MAX_UP_BPS) → passes.
+        b.cb_reference_price = price(119).into();
+        assert!(b.cb_price_gate(obs(price(119))).is_ok());
+        // 20% above the anchor >= the cap → trips even though the EMA deviation is 0 bps.
+        b.cb_reference_price = price(120).into();
+        let err = b.cb_price_gate(obs(price(120))).unwrap_err();
+        assert_eq!(err, error!(MarginfiError::CircuitBreakerPriceJump));
+    }
+
+    #[test]
+    fn price_gate_long_window_down_direction() {
+        // The down cap (default 40%, CB_WINDOW_MAX_DOWN_BPS) is enforced independently.
+        let mut b = make_cb_bank();
+        b.cb_window_reference_price = price(100).into();
+        // 39% below the anchor → passes.
+        b.cb_reference_price = price(61).into();
+        assert!(b.cb_price_gate(obs(price(61))).is_ok());
+        // 40% below the anchor → trips.
+        b.cb_reference_price = price(60).into();
+        let err = b.cb_price_gate(obs(price(60))).unwrap_err();
+        assert_eq!(err, error!(MarginfiError::CircuitBreakerPriceJump));
+    }
+
+    // Interest-freeze overlap (`cb_frozen_seconds`)
+
+    #[test]
+    fn frozen_seconds_zero_without_recorded_halt() {
+        let b = make_cb_bank();
+        assert_eq!(b.cb_frozen_seconds(0, 10_000), 0);
+    }
+
+    #[test]
+    fn frozen_seconds_covers_full_halt_between_accruals() {
+        // No accrual ran during the halt: the whole halted span is excluded from the interval,
+        // so a post-halt accrual charges only the pre-halt and post-halt time.
+        let mut b = make_cb_bank();
+        b.cb_halt_started_at = 2_000;
+        b.cb_halt_ended_at = 3_000;
+        assert_eq!(b.cb_frozen_seconds(1_000, 4_000), 1_000);
+    }
+
+    #[test]
+    fn frozen_seconds_clips_to_interval() {
+        let mut b = make_cb_bank();
+        b.cb_halt_started_at = 2_000;
+        b.cb_halt_ended_at = 3_000;
+        // Last accrual mid-halt: only the frozen tail is excluded post-halt.
+        assert_eq!(b.cb_frozen_seconds(2_500, 4_000), 500);
+        // Interval fully inside the halt → fully frozen.
+        assert_eq!(b.cb_frozen_seconds(2_100, 2_600), 500);
+        // First in-halt accrual after a pulse-tripped halt: the pre-halt tail still accrues.
+        assert_eq!(b.cb_frozen_seconds(1_000, 2_500), 500);
+        // Intervals entirely after or before the halt → nothing frozen.
+        assert_eq!(b.cb_frozen_seconds(3_000, 4_000), 0);
+        assert_eq!(b.cb_frozen_seconds(1_000, 1_500), 0);
     }
 
     // ---- Pre-break state restore -------------------------------------------------------------
