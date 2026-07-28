@@ -365,10 +365,11 @@ mod tests {
     /// The premium fields must occupy exactly zero-padding reserves of the pre-premium
     /// layout, so pre-existing banks read as untagged and with no collected premium:
     /// `collected_premium_outstanding` takes the former `_pad_0: [u8; 16]` (after
-    /// `rate_limiter`), and `premium_tag`/`premium_activated_at` take the first 16 bytes of
-    /// the former `_padding_1: [u64; 3]` tail (the liquidation-fee fields own the former
-    /// `_padding_0` after `borrowing_position_count`). `bank_seed` and the circuit-breaker
-    /// block stay at their 0.1.10 positions.
+    /// `rate_limiter`). `cb_frozen_seconds_pending` takes the first 8 bytes of the former
+    /// `_padding_1: [u64; 3]` tail, as introduced in 0.1.10; `premium_tag` and
+    /// `premium_activated_at` take its remaining 16 bytes. The liquidation-fee fields own the
+    /// former `_padding_0` after `borrowing_position_count`, while `bank_seed` and the rest of
+    /// the circuit-breaker block stay at their 0.1.10 positions.
     #[test]
     fn bank_premium_field_layout() {
         assert_eq!(size_of::<Bank>(), 1856);
@@ -377,10 +378,10 @@ mod tests {
         assert_eq!(offset_of!(Bank, collected_premium_outstanding), 1728);
         assert_eq!(offset_of!(Bank, bank_seed), 1744);
         assert_eq!(offset_of!(Bank, cb_halt_started_at), 1752);
-        assert_eq!(offset_of!(Bank, premium_tag), 1832);
-        assert_eq!(offset_of!(Bank, _pad3), 1834);
-        assert_eq!(offset_of!(Bank, premium_activated_at), 1840);
-        assert_eq!(offset_of!(Bank, _padding_1), 1848);
+        assert_eq!(offset_of!(Bank, cb_frozen_seconds_pending), 1832);
+        assert_eq!(offset_of!(Bank, premium_tag), 1840);
+        assert_eq!(offset_of!(Bank, _pad3), 1842);
+        assert_eq!(offset_of!(Bank, premium_activated_at), 1848);
     }
 
     /// The premium fields must occupy exactly the bytes that were `_pad0: [u8; 4]` and

@@ -194,7 +194,7 @@ async fn add_bank_success() -> anyhow::Result<()> {
             premium_tag,
             collected_premium_outstanding,
             premium_activated_at,
-            _padding_1,
+            cb_frozen_seconds_pending,
             bank_seed,
             .. // ignore internal padding
         } = bank_f.load().await;
@@ -239,7 +239,7 @@ async fn add_bank_success() -> anyhow::Result<()> {
             assert_eq!(premium_tag, 0);
             assert_eq!(collected_premium_outstanding, I80F48!(0.0).into());
             assert_eq!(premium_activated_at, 0);
-            assert_eq!(_padding_1, <[u64; 1] as Default>::default());
+            assert_eq!(cb_frozen_seconds_pending, 0);
             // legacy add_bank does not pass a seed
             assert_eq!(bank_seed, 0);
 
@@ -357,7 +357,7 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             premium_tag,
             collected_premium_outstanding,
             premium_activated_at,
-            _padding_1,
+            cb_frozen_seconds_pending,
             bank_seed,
             .. // ignore internal padding
         } = bank_f.load().await;
@@ -402,7 +402,7 @@ async fn add_bank_with_seed_success() -> anyhow::Result<()> {
             assert_eq!(premium_tag, 0);
             assert_eq!(collected_premium_outstanding, I80F48!(0.0).into());
             assert_eq!(premium_activated_at, 0);
-            assert_eq!(_padding_1, <[u64; 1] as Default>::default());
+            assert_eq!(cb_frozen_seconds_pending, 0);
             // with-seed add_bank stores the seed used for PDA derivation
             assert_eq!(bank_seed, 1200_u64);
 
@@ -777,6 +777,9 @@ async fn set_same_asset_emode_eligibility_success_and_fixed_rejects() -> anyhow:
     let set_fixed_ix = test_f
         .marginfi_group
         .make_lending_pool_set_fixed_oracle_price_ix(usdc_bank, I80F48!(1).into());
+    // Warp a slot first: this transaction is byte-identical to the earlier rejected set-fixed, and
+    // with the same blockhash it would be signature-deduped by BanksClient into that cached failure.
+    test_f.context.borrow_mut().warp_to_slot(100).unwrap();
     {
         let ctx = test_f.context.borrow_mut();
         let tx = Transaction::new_signed_with_payer(
@@ -800,6 +803,101 @@ async fn set_same_asset_emode_eligibility_success_and_fixed_rejects() -> anyhow:
         .await;
     assert!(fixed_res.is_err());
     assert_custom_error!(fixed_res.unwrap_err(), MarginfiError::BadEmodeConfig);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn configure_bank_oracle_pinned_while_same_asset_eligible() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings {
+        banks: vec![TestBankSetting {
+            mint: BankMint::Usdc,
+            ..Default::default()
+        }],
+        ..Default::default()
+    }))
+    .await;
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(usdc_bank, true)
+        .await?;
+
+    let process_ix = |ix: Instruction| {
+        let ctx = test_f.context.clone();
+        async move {
+            let ctx = ctx.borrow_mut();
+            let tx = Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&ctx.payer.pubkey()),
+                &[&ctx.payer],
+                ctx.banks_client.get_latest_blockhash().await.unwrap(),
+            );
+            ctx.banks_client.process_transaction(tx).await
+        }
+    };
+
+    let setup_change_ix = test_f
+        .marginfi_group
+        .make_lending_pool_configure_bank_oracle_ix(
+            usdc_bank,
+            OracleSetup::SwitchboardPull as u8,
+            PYTH_USDC_FEED,
+            None,
+        );
+    let setup_change_res = process_ix(setup_change_ix).await;
+    assert!(setup_change_res.is_err());
+    assert_custom_error!(setup_change_res.unwrap_err(), MarginfiError::BadEmodeConfig);
+
+    let key_change_ix = test_f
+        .marginfi_group
+        .make_lending_pool_configure_bank_oracle_ix(
+            usdc_bank,
+            OracleSetup::PythPushOracle as u8,
+            PYTH_SOL_FEED,
+            None,
+        );
+    let key_change_res = process_ix(key_change_ix).await;
+    assert!(key_change_res.is_err());
+    assert_custom_error!(key_change_res.unwrap_err(), MarginfiError::BadEmodeConfig);
+
+    let unchanged_ix = test_f
+        .marginfi_group
+        .make_lending_pool_configure_bank_oracle_ix(
+            usdc_bank,
+            OracleSetup::PythPushOracle as u8,
+            PYTH_USDC_FEED,
+            None,
+        );
+    process_ix(unchanged_ix).await?;
+    let bank_unchanged = usdc_bank.load().await;
+    assert_eq!(
+        bank_unchanged.config.oracle_setup,
+        OracleSetup::PythPushOracle
+    );
+    assert_eq!(bank_unchanged.config.oracle_keys[0], PYTH_USDC_FEED);
+
+    test_f
+        .marginfi_group
+        .try_lending_pool_set_bank_same_asset_emode_eligibility(usdc_bank, false)
+        .await?;
+
+    let after_disable_ix = test_f
+        .marginfi_group
+        .make_lending_pool_configure_bank_oracle_ix(
+            usdc_bank,
+            OracleSetup::PythPushOracle as u8,
+            PYTH_SOL_FEED,
+            None,
+        );
+    // Warp a slot first: this transaction is byte-identical to the rejected key change above, and
+    // with the same blockhash it would be signature-deduped by BanksClient into that cached failure.
+    test_f.context.borrow_mut().warp_to_slot(100).unwrap();
+    process_ix(after_disable_ix).await?;
+    let bank_after = usdc_bank.load().await;
+    assert_eq!(bank_after.config.oracle_setup, OracleSetup::PythPushOracle);
+    assert_eq!(bank_after.config.oracle_keys[0], PYTH_SOL_FEED);
 
     Ok(())
 }

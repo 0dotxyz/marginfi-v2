@@ -721,8 +721,7 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(bank.integration_acc_2, Pubkey::default());
     assert_eq!(bank.integration_acc_3, Pubkey::default());
     // Legacy banks pre-date both `bank_seed` and the CB tail fields, so all of these bytes must
-    // read 0 in the regression fixture. Together with `_padding_1`, this covers the original
-    // 16 + 112 = 128B reserve.
+    // read 0 in the regression fixture. This covers the original 16 + 112 = 128B reserve.
     assert_eq!(bank.bank_seed, 0);
     // Mainnet fixture proof that the premium carve is migration-free: the bytes now backing
     // the premium fields (formerly reserved padding) read as zero.
@@ -743,7 +742,7 @@ async fn bank_field_values_reg() -> anyhow::Result<()> {
     assert_eq!(I80F48::from(bank.cb_reference_price), I80F48::ZERO);
     assert_eq!(I80F48::from(bank.cb_window_reference_price), I80F48::ZERO);
     assert_eq!(bank.cb_window_started_at, 0);
-    assert_eq!(bank._padding_1, [0u64; 1]);
+    assert_eq!(bank.cb_frozen_seconds_pending, 0);
 
     Ok(())
 }

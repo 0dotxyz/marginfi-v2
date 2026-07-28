@@ -13,7 +13,7 @@ use anchor_spl::token_2022::{transfer_checked, TransferChecked};
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::FREEZE_SETTINGS,
+    constants::{CIRCUIT_BREAKER_ENABLED, FREEZE_SETTINGS},
     types::{Bank, BankConfigOpt, MarginfiGroup},
 };
 
@@ -40,6 +40,20 @@ pub fn lending_pool_configure_bank(
             borrow_limit: bank.config.borrow_limit,
         });
     } else {
+        // Disabling the breaker clears the halt span that `accrue_interest` uses to skip the
+        // frozen interval, so accrue first: otherwise the next accrual charges the halted time.
+        if bank_config.circuit_breaker_enabled == Some(false)
+            && bank.get_flag(CIRCUIT_BREAKER_ENABLED)
+        {
+            let group = ctx.accounts.group.load()?;
+            bank.accrue_interest(
+                Clock::get()?.unix_timestamp,
+                &group,
+                #[cfg(not(feature = "client"))]
+                ctx.accounts.bank.key(),
+            )?;
+        }
+
         // Settings are not frozen, everything updates
         bank.configure(&bank_config)?;
         msg!("Bank configured!");
