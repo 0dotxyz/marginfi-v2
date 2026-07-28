@@ -9,19 +9,6 @@ use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer};
 use solana_sdk::transaction::Transaction;
 
-/// Standard circuit-breaker config used across these tests: 5%/10%/25% deviation tiers with
-/// 10m/1h/4h halt durations.
-fn cb_config() -> BankConfigOpt {
-    BankConfigOpt {
-        circuit_breaker_enabled: Some(true),
-        cb_deviation_bps_tiers: Some([500, 1000, 2500]),
-        cb_tier_durations_seconds: Some([600, 3600, 14400]),
-        cb_escalation_window_mult: Some(2),
-        cb_ema_alpha_bps: Some(1000),
-        ..Default::default()
-    }
-}
-
 /// Warms `bank`'s price cache, enables the circuit breaker on it, then trips it into an active
 /// halt by pulsing a large oracle spike — driving the halt entirely through real instructions.
 /// Afterward `feed` is restored to `base_native` and every standard feed is refreshed to the
@@ -43,7 +30,7 @@ async fn enable_cb_and_trip_halt(
         .try_pulse_bank_price_cache(bank)
         .await?;
 
-    bank.update_config(cb_config(), None).await?;
+    bank.update_config(standard_cb_config(), None).await?;
 
     // A single +100% spike trips a halt on the first breaching pulse.
     let trip_time = warm_time + 1;
@@ -85,7 +72,7 @@ async fn enable_cb_and_trip_tier3_storm(
         .try_pulse_bank_price_cache(bank)
         .await?;
 
-    bank.update_config(cb_config(), None).await?;
+    bank.update_config(standard_cb_config(), None).await?;
     if let Some(operational_state) = pre_break_state {
         bank.update_config(
             BankConfigOpt {
@@ -1008,5 +995,55 @@ async fn clear_circuit_breaker_accepts_either_authority() -> anyhow::Result<()> 
     }
     let cleared = sol_bank.load().await;
     assert_eq!(cleared.cb_tier, 0);
+    Ok(())
+}
+
+/// A paused price pulse must keep driving the breaker (so a sustained deviation still escalates)
+/// yet not charge borrowers for the frozen span of a halt it overwrites: the overwritten halt's
+/// seconds are banked into `cb_frozen_seconds_pending` for the deferred accrual to exclude.
+#[tokio::test]
+async fn paused_pulse_escalates_cb_and_banks_frozen_span() -> anyhow::Result<()> {
+    let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let sol_bank = test_f.get_bank(&BankMint::Sol);
+    let base_native: i64 = 10_000_000_000;
+
+    // Trip a real tier-3 halt on the SOL bank: records [101, 14501], last_update = 101.
+    enable_cb_and_trip_halt(&test_f, sol_bank, PYTH_SOL_FEED, base_native).await?;
+    let tripped = sol_bank.load().await;
+    assert_eq!(tripped.cb_tier, 3);
+    assert_eq!(tripped.cb_halt_started_at, 101);
+    assert_eq!(tripped.cb_halt_ended_at, 14_501);
+    assert_eq!(tripped.cb_tier3_consecutive_trips, 1);
+    assert_eq!(tripped.cb_frozen_seconds_pending, 0);
+
+    // Pause the protocol (and propagate the pause into the group cache that `is_protocol_paused`
+    // reads), then pulse a fresh threshold breach after the first halt has expired.
+    test_f.marginfi_group.try_panic_pause().await?;
+    test_f.marginfi_group.try_propagate_fee_state().await?;
+
+    let second_trip_time: i64 = 14_502; // strictly after cb_halt_ended_at so detection re-arms.
+    test_f.set_clock(1_020, second_trip_time).await;
+    test_f
+        .set_pyth_oracle_price_native(
+            PYTH_SOL_FEED,
+            base_native.saturating_mul(2),
+            0,
+            second_trip_time,
+        )
+        .await;
+    test_f
+        .marginfi_group
+        .try_pulse_bank_price_cache(sol_bank)
+        .await?;
+
+    let after = sol_bank.load().await;
+    // Breaker stayed live: the halt interval advanced and the storm counter escalated.
+    assert_eq!(after.cb_halt_started_at, second_trip_time);
+    assert_eq!(after.cb_halt_ended_at, second_trip_time + 14_400);
+    assert_eq!(after.cb_tier, 3);
+    assert_eq!(after.cb_tier3_consecutive_trips, 2);
+    // The overwritten halt's frozen span (101 → 14501) is banked for the next accrual to exclude.
+    assert_eq!(after.cb_frozen_seconds_pending, 14_400);
+
     Ok(())
 }
