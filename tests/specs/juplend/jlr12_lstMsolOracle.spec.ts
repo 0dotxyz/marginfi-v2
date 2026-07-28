@@ -16,6 +16,7 @@ import {
   ORACLE_SETUP_JUPLEND_LST,
   ORACLE_SETUP_JUPLEND_MSOL,
   ORACLE_SETUP_JUPLEND_PYTH_PULL,
+  ORACLE_SETUP_KAMINO_LST,
 } from "../../utils/types";
 import { JUPLEND_STATE_KEYS } from "../../utils/juplend/test-state";
 import { assert } from "chai";
@@ -77,7 +78,20 @@ describe("JupLend LST / mSOL oracle setups", () => {
     assertKeysEqual(config.oracleKeys[2], MSOL_STATE);
   });
 
-  it("(admin) tries to configure JuplendLST - fails with wrong number of accounts", async () => {
+  it("(admin) tries to configure JuplendLST with wrong oracle setup - fails", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setOracle(ORACLE_SETUP_KAMINO_LST, oracles.wsolOracle.publicKey, [
+          lending,
+          BSOL_POOL,
+        ]);
+      },
+      "InvalidOracleSetup",
+      6025,
+    );
+  });
+
+  it("(admin) tries to configure JuplendLST with wrong number of accounts - fails", async () => {
     await expectFailedTxWithError(
       async () => {
         await setOracle(
@@ -91,7 +105,7 @@ describe("JupLend LST / mSOL oracle setups", () => {
     );
   });
 
-  it("(admin) tries to configure JuplendLST - fails with a mismatched lending account", async () => {
+  it("(admin) tries to configure JuplendLST with a mismatched lending account - fails", async () => {
     await expectFailedTxWithError(
       async () => {
         await setOracle(
@@ -105,7 +119,7 @@ describe("JupLend LST / mSOL oracle setups", () => {
     );
   });
 
-  it("(admin) tries to configure JuplendLST - fails with a non-stake-pool account", async () => {
+  it("(admin) tries to configure JuplendLST with a non-stake-pool account - fails", async () => {
     await expectFailedTxWithError(
       async () => {
         await setOracle(

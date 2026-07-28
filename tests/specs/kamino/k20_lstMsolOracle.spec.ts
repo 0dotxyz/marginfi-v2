@@ -14,6 +14,7 @@ import {
   expectFailedTxWithError,
 } from "../../utils/genericTests";
 import {
+  ORACLE_SETUP_JUPLEND_LST,
   ORACLE_SETUP_KAMINO_LST,
   ORACLE_SETUP_KAMINO_MSOL,
 } from "../../utils/types";
@@ -77,7 +78,21 @@ describe("Kamino LST / mSOL oracle setups", () => {
     assertKeysEqual(config.oracleKeys[2], MSOL_STATE);
   });
 
-  it("(admin) tries to configure KaminoLST - fails with wrong number of accounts", async () => {
+  it("(admin) tries to configure KaminoLST with wrong oracle setup - fails", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setOracle(
+          ORACLE_SETUP_JUPLEND_LST,
+          oracles.wsolOracle.publicKey,
+          [reserve, BSOL_POOL],
+        );
+      },
+      "InvalidOracleSetup",
+      6025,
+    );
+  });
+
+  it("(admin) tries to configure KaminoLST with wrong number of accounts - fails", async () => {
     await expectFailedTxWithError(
       async () => {
         await setOracle(ORACLE_SETUP_KAMINO_LST, oracles.wsolOracle.publicKey, [
@@ -89,7 +104,7 @@ describe("Kamino LST / mSOL oracle setups", () => {
     );
   });
 
-  it("(admin) tries to configure KaminoLST - fails with a mismatched reserve", async () => {
+  it("(admin) tries to configure KaminoLST with a mismatched reserve - fails", async () => {
     await expectFailedTxWithError(
       async () => {
         await setOracle(ORACLE_SETUP_KAMINO_LST, oracles.wsolOracle.publicKey, [
@@ -102,7 +117,7 @@ describe("Kamino LST / mSOL oracle setups", () => {
     );
   });
 
-  it("(admin) tries to configure KaminoLST - fails with a non-stake-pool account", async () => {
+  it("(admin) tries to configure KaminoLST with a non-stake-pool account - fails", async () => {
     await expectFailedTxWithError(
       async () => {
         await setOracle(ORACLE_SETUP_KAMINO_LST, oracles.wsolOracle.publicKey, [

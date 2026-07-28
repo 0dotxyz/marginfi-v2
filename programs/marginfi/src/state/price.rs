@@ -13,6 +13,10 @@ use exponent_mocks::state::{MinimalExponentVault, VAULT_DISCRIMINATOR};
 use fixed::types::I80F48;
 use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION};
 use kamino_mocks::state::MinimalReserve;
+use marginfi_type_crate::constants::{
+    ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
+    ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
+};
 use marginfi_type_crate::types::OnRampTransition;
 use marginfi_type_crate::{
     constants::{CONF_INTERVAL_MULTIPLE, EXP_10_I80F48, MAX_CONF_INTERVAL, U32_MAX},
@@ -1442,6 +1446,11 @@ impl OraclePriceFeedAdapter {
         match bank_config.oracle_setup {
             OracleSetup::None => Err(MarginfiError::OracleNotSetup.into()),
             OracleSetup::KaminoPythPush => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_KAMINO,
+                    MarginfiError::InvalidOracleSetup
+                );
                 require_eq!(
                     oracle_ais.len(),
                     2,
@@ -1460,6 +1469,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::KaminoSwitchboardPull => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_KAMINO,
+                    MarginfiError::InvalidOracleSetup
+                );
                 require_eq!(
                     oracle_ais.len(),
                     2,
@@ -1485,6 +1499,11 @@ impl OraclePriceFeedAdapter {
             }
             OracleSetup::PythPushOracle => {
                 check!(
+                    bank_config.asset_tag == ASSET_TAG_DEFAULT
+                        || bank_config.asset_tag == ASSET_TAG_SOL,
+                    MarginfiError::InvalidOracleSetup
+                );
+                check!(
                     oracle_ais.len() == 1,
                     MarginfiError::WrongNumberOfOracleAccounts
                 );
@@ -1494,6 +1513,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::SwitchboardPull => {
+                check!(
+                    bank_config.asset_tag == ASSET_TAG_DEFAULT
+                        || bank_config.asset_tag == ASSET_TAG_SOL,
+                    MarginfiError::InvalidOracleSetup
+                );
                 check!(
                     oracle_ais.len() == 1,
                     MarginfiError::WrongNumberOfOracleAccounts
@@ -1505,6 +1529,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::StakedWithPythPush => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_STAKED,
+                    MarginfiError::InvalidOracleSetup
+                );
                 if let (Some(lst_mint), Some(stake_pool), Some(sol_pool)) =
                     (lst_mint, stake_pool, sol_pool)
                 {
@@ -1582,6 +1611,11 @@ impl OraclePriceFeedAdapter {
                 }
             }
             OracleSetup::Fixed => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_DEFAULT,
+                    MarginfiError::InvalidOracleSetup
+                );
                 check!(
                     oracle_ais.is_empty(),
                     MarginfiError::WrongNumberOfOracleAccounts
@@ -1589,6 +1623,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::DriftPythPull => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_DRIFT,
+                    MarginfiError::InvalidOracleSetup
+                );
                 require_eq!(
                     oracle_ais.len(),
                     2,
@@ -1607,6 +1646,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::DriftSwitchboardPull => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_DRIFT,
+                    MarginfiError::InvalidOracleSetup
+                );
                 require_eq!(
                     oracle_ais.len(),
                     2,
@@ -1625,6 +1669,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::SolendPythPull => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_SOLEND,
+                    MarginfiError::InvalidOracleSetup
+                );
                 require_eq!(
                     oracle_ais.len(),
                     2,
@@ -1643,6 +1692,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::SolendSwitchboardPull => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_SOLEND,
+                    MarginfiError::InvalidOracleSetup
+                );
                 require_eq!(
                     oracle_ais.len(),
                     2,
@@ -1661,6 +1715,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::FixedDrift => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_DRIFT,
+                    MarginfiError::InvalidOracleSetup
+                );
                 // Fixed base price with Drift spot market exchange rate
                 require_eq!(
                     oracle_ais.len(),
@@ -1676,6 +1735,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::FixedKamino => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_KAMINO,
+                    MarginfiError::InvalidOracleSetup
+                );
                 // Fixed base price with Kamino reserve exchange rate
                 require_eq!(
                     oracle_ais.len(),
@@ -1691,6 +1755,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::FixedJuplend => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_JUPLEND,
+                    MarginfiError::InvalidOracleSetup
+                );
                 // Fixed base price with JupLend Lending exchange rate
                 require_eq!(
                     oracle_ais.len(),
@@ -1707,6 +1776,11 @@ impl OraclePriceFeedAdapter {
             }
 
             OracleSetup::JuplendPythPull => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_JUPLEND,
+                    MarginfiError::InvalidOracleSetup
+                );
                 require_eq!(
                     oracle_ais.len(),
                     2,
@@ -1731,6 +1805,11 @@ impl OraclePriceFeedAdapter {
             }
 
             OracleSetup::JuplendSwitchboardPull => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_JUPLEND,
+                    MarginfiError::InvalidOracleSetup
+                );
                 require_eq!(
                     oracle_ais.len(),
                     2,
@@ -1754,6 +1833,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::PythMSOL => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_DEFAULT,
+                    MarginfiError::InvalidOracleSetup
+                );
                 // (0) Pyth (SOL/USD), (1) Marinade State (mSOL/SOL rate)
                 require_eq!(
                     oracle_ais.len(),
@@ -1768,6 +1852,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::KaminoMSOL => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_KAMINO,
+                    MarginfiError::InvalidOracleSetup
+                );
                 // (0) Pyth (SOL/USD), (1) Kamino reserve, (2) Marinade State
                 require_eq!(
                     oracle_ais.len(),
@@ -1787,6 +1876,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::JuplendMSOL => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_JUPLEND,
+                    MarginfiError::InvalidOracleSetup
+                );
                 // (0) Pyth (SOL/USD), (1) JupLend Lending, (2) Marinade State
                 require_eq!(
                     oracle_ais.len(),
@@ -1806,6 +1900,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::PythLST => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_DEFAULT,
+                    MarginfiError::InvalidOracleSetup
+                );
                 // (0) Pyth (SOL/USD), (1) SPL StakePool
                 require_eq!(
                     oracle_ais.len(),
@@ -1820,6 +1919,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::KaminoLST => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_KAMINO,
+                    MarginfiError::InvalidOracleSetup
+                );
                 // (0) Pyth (SOL/USD), (1) Kamino reserve, (2) SPL StakePool
                 require_eq!(
                     oracle_ais.len(),
@@ -1839,6 +1943,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::JuplendLST => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_JUPLEND,
+                    MarginfiError::InvalidOracleSetup
+                );
                 // (0) Pyth (SOL/USD), (1) JupLend Lending, (2) SPL StakePool
                 require_eq!(
                     oracle_ais.len(),
@@ -1858,6 +1967,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::PTSOL => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_DEFAULT,
+                    MarginfiError::InvalidOracleSetup
+                );
                 // (0) Pyth (SOL/USD), (1) Exponent vault
                 require_eq!(
                     oracle_ais.len(),
@@ -1877,6 +1991,11 @@ impl OraclePriceFeedAdapter {
                 Ok(())
             }
             OracleSetup::PTHYUSD => {
+                check_eq!(
+                    bank_config.asset_tag,
+                    ASSET_TAG_DEFAULT,
+                    MarginfiError::InvalidOracleSetup
+                );
                 // (0) Exponent vault only; no base price feed (hyUSD ~= $1).
                 require_eq!(
                     oracle_ais.len(),
