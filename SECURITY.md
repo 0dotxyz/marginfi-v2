@@ -47,6 +47,12 @@ A number of attacks are out of scope for the bug bounty, including but not limit
 10. Denial of service, or automated testing of services that generate significant traffic.
 
 
+## Credits
+
+Thank you to the following individuals for bug reports:
+
+* https://github.com/mySebbe for identifying a bug where debts below the zero threshold can remain on the books after a borrow, enabling the extraction of assets where 1 satoshi/lamport/atom is worth more than ~1/10 of the Solana tx fee. 
+
 ## Known Issues and Scope Clarifications
 
 ### Solend Not Supported in ....
@@ -290,3 +296,10 @@ various edge cases such as permissionless fee extraction rounding down, which al
 small-value fee collections that collect less fees than expected. Currently, there are no T22 assets
 with fees in prod, and no plan to add any (as no asset with market traction has such fees), so there
 is no plan to fix edge cases related to T22 transfer fees.
+
+### Bankruptcy Ignores Uncollected Fees
+
+When bankrupting a bank, insurance typically offsets losses, but uncollected insurance does not. The
+admin must remember to run `collect_bank_fees` before bankrupting a bank, and failing to do so can
+result in the bank becoming KILLED_BY_BANKRUPTCY slightly before expectations. Because bankruptcy is
+rare, and `collect_bank_fees` is permissionless, we categorize this as WONTFIX.
