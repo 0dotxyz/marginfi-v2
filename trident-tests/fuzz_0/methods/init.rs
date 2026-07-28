@@ -439,7 +439,7 @@ impl FuzzTest {
     fn risk_accounts_for_bank(bank: &Bank) -> Vec<Pubkey> {
         match bank.config.oracle_setup {
             OracleSetup::Fixed => vec![],
-            OracleSetup::PythPushOracle | OracleSetup::SwitchboardPull => {
+            OracleSetup::PythPushOracle | OracleSetup::SwitchboardPull | OracleSetup::PTHYUSD => {
                 vec![bank.config.oracle_keys[0]]
             }
 
