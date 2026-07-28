@@ -13,7 +13,8 @@ use marginfi_type_crate::{
 /// Opt a bank in or out of same-asset e-mode participation.
 ///
 /// This records local bank intent. The risk engine still requires every participating liability
-/// and collateral bank to be eligible and to share the same mint and `oracle_keys[0]`.
+/// and collateral bank to be eligible and to share the same mint, `oracle_keys[0]`, and oracle
+/// feed family.
 pub fn lending_pool_set_bank_same_asset_emode_eligibility(
     ctx: Context<LendingPoolSetBankSameAssetEmodeEligibility>,
     enabled: bool,
@@ -31,9 +32,9 @@ pub fn lending_pool_set_bank_same_asset_emode_eligibility(
 
     if enabled {
         check!(
-            !bank.config.oracle_setup.is_fixed_price(),
+            bank.config.oracle_setup.feed_family().is_some(),
             MarginfiError::BadEmodeConfig,
-            "fixed-price banks cannot be same-asset e-mode eligible"
+            "same-asset e-mode requires a Pyth push or Switchboard pull based oracle setup"
         );
         check!(
             bank.config.oracle_keys[0] != Pubkey::default(),
