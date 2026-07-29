@@ -348,3 +348,12 @@ impl MarginfiGroupDeleverageLimitExt for MarginfiGroup {
 pub struct GroupBankConfig {
     pub program_fees: bool,
 }
+
+pub fn authorize_bank_admin<'info>(
+    group: &AccountLoader<'info, MarginfiGroup>,
+    signer: &Signer<'info>,
+) -> MarginfiResult {
+    let group_data = group.load()?;
+    group_data.require_bank_admin(signer.key())?;
+    Ok(())
+}

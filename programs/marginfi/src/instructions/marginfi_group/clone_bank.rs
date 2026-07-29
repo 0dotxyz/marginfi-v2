@@ -3,7 +3,10 @@ use crate::{
     constants::{LOCALNET_ID, MAINNET_PROGRAM_ID, STAGING_ID},
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
-    state::{bank::BankImpl, marginfi_group::MarginfiGroupImpl},
+    state::{
+        bank::BankImpl,
+        marginfi_group::{authorize_bank_admin, MarginfiGroupImpl},
+    },
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -30,9 +33,7 @@ pub fn lending_pool_clone_bank(
         panic!("clone bank cannot run on mainnet deployment");
     }
 
-    let marginfi_group = ctx.accounts.marginfi_group.load()?;
-    marginfi_group.require_bank_admin(*ctx.accounts.bank_admin.key)?;
-    drop(marginfi_group);
+    authorize_bank_admin(&ctx.accounts.marginfi_group, &ctx.accounts.bank_admin)?;
 
     // Note: We don't bother to pay the flat init fee, this ix only runs on staging.
 

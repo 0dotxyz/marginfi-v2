@@ -4,8 +4,10 @@ use crate::{
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{
-        bank::BankImpl, bank_config::BankConfigImpl, drift::DriftConfigCompact,
-        marginfi_group::MarginfiGroupImpl,
+        bank::BankImpl,
+        bank_config::BankConfigImpl,
+        drift::DriftConfigCompact,
+        marginfi_group::{authorize_bank_admin, MarginfiGroupImpl},
     },
     MarginfiError, MarginfiResult,
 };
@@ -39,9 +41,7 @@ pub fn lending_pool_add_bank_drift(
         ..
     } = ctx.accounts;
 
-    let group = ctx.accounts.group.load()?;
-    group.require_bank_admin(*ctx.accounts.bank_admin.key)?;
-    drop(group);
+    authorize_bank_admin(&ctx.accounts.group, &ctx.accounts.bank_admin)?;
 
     let mut bank = bank_loader.load_init()?;
     let mut group = ctx.accounts.group.load_mut()?;

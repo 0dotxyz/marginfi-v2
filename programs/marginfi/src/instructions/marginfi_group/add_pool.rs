@@ -1,7 +1,11 @@
 use crate::{
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
-    state::{bank::BankImpl, bank_config::BankConfigImpl, marginfi_group::MarginfiGroupImpl},
+    state::{
+        bank::BankImpl,
+        bank_config::BankConfigImpl,
+        marginfi_group::{authorize_bank_admin, MarginfiGroupImpl},
+    },
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -22,9 +26,7 @@ pub fn lending_pool_add_bank(
     ctx: Context<LendingPoolAddBank>,
     bank_config: BankConfigCompact,
 ) -> MarginfiResult {
-    let group = ctx.accounts.marginfi_group.load()?;
-    group.require_bank_admin(*ctx.accounts.bank_admin.key)?;
-    drop(group);
+    authorize_bank_admin(&ctx.accounts.marginfi_group, &ctx.accounts.bank_admin)?;
 
     // Transfer the flat sol init fee to the global fee wallet
     let fee_state = ctx.accounts.fee_state.load()?;

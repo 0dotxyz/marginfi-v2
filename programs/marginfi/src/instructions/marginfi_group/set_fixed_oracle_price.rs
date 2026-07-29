@@ -1,8 +1,9 @@
 use crate::events::{GroupEventHeader, LendingPoolBankSetFixedOraclePriceEvent};
 use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
-use crate::state::marginfi_group::MarginfiGroupImpl;
-use crate::{check, errors::MarginfiError, MarginfiResult};
+use crate::{
+    check, errors::MarginfiError, state::marginfi_group::authorize_bank_admin, MarginfiResult,
+};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::constants::{
@@ -17,9 +18,7 @@ pub fn lending_pool_set_fixed_oracle_price(
     ctx: Context<LendingPoolSetFixedOraclePrice>,
     price: WrappedI80F48,
 ) -> MarginfiResult {
-    let group = ctx.accounts.group.load()?;
-    group.require_bank_admin(*ctx.accounts.bank_admin.key)?;
-    drop(group);
+    authorize_bank_admin(&ctx.accounts.group, &ctx.accounts.bank_admin)?;
 
     let mut bank = ctx.accounts.bank.load_mut()?;
 
