@@ -194,7 +194,7 @@ pub enum RequiredAuthority {
     None,
     Governance,
     AdminOnly,
-    OperationalState,
+    OperationalStateChange(BankOperationalState),
     Mixed,
 }
 
@@ -290,7 +290,10 @@ impl BankConfigOpt {
             0 => RequiredAuthority::None,
             1 => {
                 if operational_state {
-                    RequiredAuthority::OperationalState
+                    let target = self
+                        .operational_state
+                        .expect("operational_state checked above");
+                    RequiredAuthority::OperationalStateChange(target)
                 } else if governance {
                     RequiredAuthority::Governance
                 } else {
@@ -306,8 +309,8 @@ impl BankConfigOpt {
             RequiredAuthority::None => (false, false),
             RequiredAuthority::Governance => (true, false),
             RequiredAuthority::AdminOnly => (false, true),
-            RequiredAuthority::OperationalState => (false, false),
-            RequiredAuthority::Mixed => (true, true), // Both set to indicate error
+            RequiredAuthority::OperationalStateChange(_) => (false, false),
+            RequiredAuthority::Mixed => (true, true),
         }
     }
 }

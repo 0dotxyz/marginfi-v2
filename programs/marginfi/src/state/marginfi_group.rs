@@ -6,7 +6,10 @@ use crate::{prelude::MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::basis_to_u32;
-use marginfi_type_crate::{constants::DAILY_RESET_INTERVAL, types::MarginfiGroup};
+use marginfi_type_crate::{
+    constants::DAILY_RESET_INTERVAL,
+    types::{BankOperationalState, MarginfiGroup, RequiredAuthority},
+};
 use std::fmt::Debug;
 
 pub const PROGRAM_FEES_ENABLED: u64 = 1;
@@ -356,4 +359,40 @@ pub fn authorize_bank_admin<'info>(
     let group_data = group.load()?;
     group_data.require_bank_admin(signer.key())?;
     Ok(())
+}
+
+pub trait RequiredAuthorityExt {
+    fn authorize(
+        &self,
+        group: &MarginfiGroup,
+        signer: &Pubkey,
+        current_state: BankOperationalState,
+    ) -> MarginfiResult;
+}
+
+impl RequiredAuthorityExt for RequiredAuthority {
+    fn authorize(
+        &self,
+        group: &MarginfiGroup,
+        signer: &Pubkey,
+        current_state: BankOperationalState,
+    ) -> MarginfiResult {
+        match self {
+            RequiredAuthority::None => group.require_admin(*signer),
+            RequiredAuthority::Mixed => Err(error!(MarginfiError::MixedBankConfigAuthority)),
+            RequiredAuthority::OperationalStateChange(target_state) => {
+                let is_transitioning_to_operational = current_state
+                    != BankOperationalState::Operational
+                    && *target_state == BankOperationalState::Operational;
+
+                if is_transitioning_to_operational {
+                    group.require_bank_admin(*signer)
+                } else {
+                    group.require_admin(*signer)
+                }
+            }
+            RequiredAuthority::Governance => group.require_bank_admin(*signer),
+            RequiredAuthority::AdminOnly => group.require_admin(*signer),
+        }
+    }
 }

@@ -4,7 +4,7 @@ use crate::events::{
 use crate::prelude::MarginfiError;
 use crate::state::bank::BankImpl;
 use crate::state::emode::EmodeSettingsImpl;
-use crate::state::marginfi_group::MarginfiGroupImpl;
+use crate::state::marginfi_group::{MarginfiGroupImpl, RequiredAuthorityExt};
 use crate::utils::is_marginfi_asset_tag;
 use crate::MarginfiResult;
 use crate::{check, math_error, utils};
@@ -13,46 +13,19 @@ use anchor_spl::token_2022::{transfer_checked, TransferChecked};
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::{CIRCUIT_BREAKER_ENABLED, FREEZE_SETTINGS},
-    types::{Bank, BankConfigOpt, MarginfiGroup, RequiredAuthority},
+    constants::FREEZE_SETTINGS,
+    types::{Bank, BankConfigOpt, BankOperationalState, MarginfiGroup},
 };
 
 fn assert_bank_config_authority(
     group: &MarginfiGroup,
     signer: &Pubkey,
     bank_config: &BankConfigOpt,
-    current_operational_state: marginfi_type_crate::types::BankOperationalState,
+    current_operational_state: BankOperationalState,
 ) -> MarginfiResult {
-    let authority = bank_config.required_authority();
-
-    match authority {
-        RequiredAuthority::None => {
-            group.require_admin(*signer)?;
-            Ok(())
-        }
-        RequiredAuthority::Mixed => Err(error!(MarginfiError::MixedBankConfigAuthority)),
-        RequiredAuthority::OperationalState => {
-            let new_state = bank_config.operational_state.unwrap();
-            let is_transitioning_to_operational = current_operational_state
-                != marginfi_type_crate::types::BankOperationalState::Operational
-                && new_state == marginfi_type_crate::types::BankOperationalState::Operational;
-
-            if is_transitioning_to_operational {
-                group.require_bank_admin(*signer)?;
-            } else {
-                group.require_admin(*signer)?;
-            }
-            Ok(())
-        }
-        RequiredAuthority::Governance => {
-            group.require_bank_admin(*signer)?;
-            Ok(())
-        }
-        RequiredAuthority::AdminOnly => {
-            group.require_admin(*signer)?;
-            Ok(())
-        }
-    }
+    bank_config
+        .required_authority()
+        .authorize(group, signer, current_operational_state)
 }
 
 pub fn lending_pool_configure_bank(

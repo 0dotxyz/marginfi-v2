@@ -364,8 +364,8 @@ impl<'state> MarginfiFuzzContext<'state> {
                     &marginfi::ID,
                     airls(&marginfi_account),
                 )?,
-                authority: Signer::try_from(airls(&self.owner))?,
-                fee_payer: Signer::try_from(airls(&self.owner))?,
+                authority: Signer::try_from(airls(&self.admin))?,
+                fee_payer: Signer::try_from(airls(&self.admin))?,
                 system_program: Program::try_from(airls(&self.system_program))?,
             },
             &[],
@@ -377,7 +377,7 @@ impl<'state> MarginfiFuzzContext<'state> {
             .map(|token| {
                 state.new_token_account(
                     token.clone(),
-                    self.owner.key,
+                    self.admin.key,
                     100_000_000_000_000_000,
                     rent.clone(),
                 )
@@ -424,7 +424,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                     marginfi_account: AccountLoader::try_from(airls(
                         &marginfi_account.margin_account,
                     ))?,
-                    authority: Signer::try_from(airls(&self.owner))?,
+                    authority: Signer::try_from(airls(&self.admin))?,
                     bank: AccountLoader::try_from(airls(&bank.bank))?,
                     signer_token_account: uails(
                         &marginfi_account.token_accounts[bank_idx.0 as usize],
@@ -510,7 +510,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                     marginfi_account: AccountLoader::try_from(airls(
                         &marginfi_account.margin_account,
                     ))?,
-                    authority: Signer::try_from(airls(&self.owner))?,
+                    authority: Signer::try_from(airls(&self.admin))?,
                     bank: AccountLoader::try_from(airls(&bank.bank))?,
                     signer_token_account: uails(
                         &marginfi_account.token_accounts[bank_idx.0 as usize],
@@ -604,7 +604,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                     marginfi_account: AccountLoader::try_from(airls(
                         &marginfi_account.margin_account,
                     ))?,
-                    authority: Signer::try_from(airls(&self.owner))?,
+                    authority: Signer::try_from(airls(&self.admin))?,
                     bank: AccountLoader::try_from(airls(&bank.bank))?,
                     token_program: Interface::try_from(airls(&bank.token_program))?,
                     destination_token_account: InterfaceAccount::try_from(airls(
@@ -691,7 +691,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                     marginfi_account: AccountLoader::try_from(airls(
                         &marginfi_account.margin_account,
                     ))?,
-                    authority: Signer::try_from(airls(&self.owner))?,
+                    authority: Signer::try_from(airls(&self.admin))?,
                     bank: AccountLoader::try_from(airls(&bank.bank))?,
                     token_program: Interface::try_from(airls(&bank.token_program))?,
                     destination_token_account: InterfaceAccount::try_from(airls(
@@ -825,7 +825,7 @@ impl<'state> MarginfiFuzzContext<'state> {
                     liquidator_marginfi_account: AccountLoader::try_from(airls(
                         &liquidator_account.margin_account,
                     ))?,
-                    authority: Signer::try_from(airls(&self.owner))?,
+                    authority: Signer::try_from(airls(&self.admin))?,
                     liquidatee_marginfi_account: AccountLoader::try_from(airls(
                         &liquidatee_account.margin_account,
                     ))?,
@@ -955,7 +955,7 @@ impl<'state> MarginfiFuzzContext<'state> {
             &marginfi::ID,
             &mut marginfi::instructions::LendingPoolHandleBankruptcy {
                 group: AccountLoader::try_from(airls(&self.marginfi_group))?,
-                signer: Signer::try_from(airls(&self.owner))?,
+                signer: Signer::try_from(airls(&self.admin))?,
                 bank: AccountLoader::try_from(airls(&bank.bank))?,
                 marginfi_account: AccountLoader::try_from(airls(&marginfi_account.margin_account))?,
                 liquidity_vault: uails(&bank.liquidity_vault),
