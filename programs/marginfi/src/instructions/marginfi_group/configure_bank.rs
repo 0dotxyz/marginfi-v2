@@ -13,7 +13,7 @@ use anchor_spl::token_2022::{transfer_checked, TransferChecked};
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
-    constants::FREEZE_SETTINGS,
+    constants::{CIRCUIT_BREAKER_ENABLED, FREEZE_SETTINGS},
     types::{Bank, BankConfigOpt, MarginfiGroup, RequiredAuthority},
 };
 
