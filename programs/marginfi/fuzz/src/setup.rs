@@ -1,24 +1,14 @@
 use anchor_lang::prelude::*;
-use anchor_lang::{
-    accounts::interface_account::InterfaceAccount,
-    prelude::{AccountInfo, AccountLoader, Context, Program, Rent, Signer},
-    Discriminator,
-};
-use fixed::types::I80F48;
+use anchor_lang::prelude::{AccountInfo, AccountLoader, Context, Program, Rent, Signer};
 use fixed_macro::types::I80F48;
-use marginfi::instructions::LendingPoolAddBankBumps;
 use marginfi_type_crate::types::{
-    Bank, BankConfigCompact, BankOperationalState, FeeState, InterestRateConfig, MarginfiGroup,
-    RiskTier,
+    FeeState, MarginfiGroup,
 };
 use std::mem::size_of;
 
 use crate::{
     account_state::AccountsState,
-    utils::{
-        account_info_ref_lifetime_shortener as airls,
-        unchecked_account_info_lifetime_shortener as uails,
-    },
+    utils::account_info_ref_lifetime_shortener as airls,
 };
 use marginfi_type_crate::types::MarginfiAccount;
 

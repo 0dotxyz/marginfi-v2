@@ -4,7 +4,7 @@ use anchor_lang::system_program;
 use anchor_lang::{
     accounts::{interface::Interface, interface_account::InterfaceAccount},
     prelude::{AccountInfo, AccountLoader, Context, Program, Pubkey, Rent, Signer},
-    Discriminator, Key,
+    Key,
 };
 use anchor_spl::token_2022::spl_token_2022::error::TokenError;
 use arbitrary_helpers::{
@@ -13,16 +13,16 @@ use arbitrary_helpers::{
 use bank_accounts::{get_bank_map, BankAccounts};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
-use marginfi::{errors::MarginfiError, instructions::LendingPoolAddBankBumps};
-use marginfi::{instructions::LendingPoolConfigureBankOracleBumps, state::bank::BankVaultType};
+use marginfi::{errors::MarginfiError, instructions::LendingPoolAddBankBumps, state::bank::BankVaultType};
+use marginfi::{instructions::LendingPoolConfigureBankOracleBumps};
 use marginfi_type_crate::types::{
     centi_to_u32, make_points, milli_to_u32, RatePoint, INTEREST_CURVE_SEVEN_POINT,
 };
 use marginfi_type_crate::{
     constants::FEE_STATE_SEED,
     types::{
-        Bank, BankConfigCompact, BankOperationalState, FeeState, InterestRateConfig,
-        MarginfiAccount, MarginfiGroup, RiskTier,
+        Bank, BankConfigCompact, BankOperationalState, InterestRateConfig,
+        MarginfiAccount, RiskTier,
     },
 };
 use metrics::{MetricAction, Metrics};
