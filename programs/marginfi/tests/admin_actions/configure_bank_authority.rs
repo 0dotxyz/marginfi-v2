@@ -1,6 +1,7 @@
 use fixed_macro::types::I80F48;
 use fixtures::prelude::*;
 use marginfi_type_crate::types::BankConfigOpt;
+use solana_sdk::signature::Signer;
 
 #[tokio::test]
 async fn configure_bank_authority_split() -> anyhow::Result<()> {
