@@ -25,7 +25,16 @@ pub fn lending_pool_clear_circuit_breaker(
         );
     }
 
+    let now = Clock::get()?.unix_timestamp;
     let mut bank = ctx.accounts.bank.load_mut()?;
+    // Consume the interest freeze while the halt span is still recorded: accruing here
+    // excludes the halted time (up to now) and restarts accrual from the clear.
+    bank.accrue_interest(
+        now,
+        &*ctx.accounts.group.load()?,
+        #[cfg(not(feature = "client"))]
+        ctx.accounts.bank.key(),
+    )?;
     let prior_tier = bank.cb_tier;
     bank.reset_cb_runtime_state();
     if reseed_reference {
@@ -37,7 +46,7 @@ pub fn lending_pool_clear_circuit_breaker(
     emit!(CircuitBreakerClearedEvent {
         prior_tier,
         reason: CB_CLEAR_REASON_ADMIN,
-        current_timestamp: Clock::get()?.unix_timestamp,
+        current_timestamp: now,
     });
     Ok(())
 }
