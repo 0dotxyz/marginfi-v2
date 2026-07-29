@@ -6,6 +6,7 @@ use anchor_spl::token::spl_token;
 use anchor_spl::token_2022::spl_token_2022::extension::transfer_fee::MAX_FEE_BASIS_POINTS;
 use marginfi::constants::SWITCHBOARD_PULL_ID;
 use marginfi_type_crate::constants::{EXECUTE_ORDER_SEED, ORDER_SEED};
+use marginfi_type_crate::types::BankConfigOpt;
 use pyth_solana_receiver_sdk::{
     price_update::{FeedId, PriceFeedMessage, PriceUpdateV2, VerificationLevel},
     PYTH_PUSH_ORACLE_ID,
@@ -504,4 +505,17 @@ pub fn find_execute_order_pda(order: &Pubkey) -> (Pubkey, u8) {
         &[EXECUTE_ORDER_SEED.as_bytes(), order.as_ref()],
         &marginfi::ID,
     )
+}
+
+/// Standard circuit-breaker config used across the CB tests: 5%/10%/25% deviation tiers with
+/// 10m/1h/4h halt durations.
+pub fn standard_cb_config() -> BankConfigOpt {
+    BankConfigOpt {
+        circuit_breaker_enabled: Some(true),
+        cb_deviation_bps_tiers: Some([500, 1000, 2500]),
+        cb_tier_durations_seconds: Some([600, 3600, 14400]),
+        cb_escalation_window_mult: Some(2),
+        cb_ema_alpha_bps: Some(1000),
+        ..Default::default()
+    }
 }
