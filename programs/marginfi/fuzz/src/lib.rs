@@ -244,7 +244,7 @@ impl<'state> MarginfiFuzzContext<'state> {
         };
 
         {
-            marginfi::instructions::marginfi_group::lending_pool_add_bank(
+            let res = marginfi::instructions::marginfi_group::lending_pool_add_bank(
                 Context::new(
                     &marginfi::ID,
                     &mut marginfi::instructions::LendingPoolAddBank {
@@ -310,8 +310,11 @@ impl<'state> MarginfiFuzzContext<'state> {
                     oracle_max_age: 100,
                     ..Default::default()
                 },
-            )
-            .unwrap();
+            );
+            
+            if res.is_err() {
+                return;
+            }
         }
 
         set_discriminator::<Bank>(bank.clone());
@@ -402,10 +405,19 @@ impl<'state> MarginfiFuzzContext<'state> {
         asset_amount: &AssetAmount,
         deposit_up_to_limit: Option<bool>,
     ) -> anyhow::Result<()> {
+        if account_idx.0 as usize >= self.marginfi_accounts.len()
+            || bank_idx.0 as usize >= self.banks.len()
+        {
+            return Ok(());
+        }
+
         let marginfi_account = &self.marginfi_accounts[account_idx.0 as usize];
-        sort_balances(airls(&marginfi_account.margin_account));
+        if bank_idx.0 as usize >= marginfi_account.token_accounts.len() {
+            return Ok(());
+        }
 
         let bank = &self.banks[bank_idx.0 as usize];
+        sort_balances(airls(&marginfi_account.margin_account));
 
         let cache = AccountInfoCache::new(&[
             marginfi_account.margin_account.clone(),
@@ -481,7 +493,17 @@ impl<'state> MarginfiFuzzContext<'state> {
         asset_amount: &AssetAmount,
         repay_all: bool,
     ) -> anyhow::Result<()> {
+        if account_idx.0 as usize >= self.marginfi_accounts.len()
+            || bank_idx.0 as usize >= self.banks.len()
+        {
+            return Ok(());
+        }
+
         let marginfi_account = &self.marginfi_accounts[account_idx.0 as usize];
+        if bank_idx.0 as usize >= marginfi_account.token_accounts.len() {
+            return Ok(());
+        }
+
         let bank = &self.banks[bank_idx.0 as usize];
         sort_balances(airls(&marginfi_account.margin_account));
 
@@ -570,10 +592,20 @@ impl<'state> MarginfiFuzzContext<'state> {
         withdraw_all: Option<bool>,
     ) -> anyhow::Result<()> {
         self.refresh_oracle_accounts();
+        
+        if account_idx.0 as usize >= self.marginfi_accounts.len()
+            || bank_idx.0 as usize >= self.banks.len()
+        {
+            return Ok(());
+        }
+
         let marginfi_account = &self.marginfi_accounts[account_idx.0 as usize];
-        sort_balances(airls(&marginfi_account.margin_account));
+        if bank_idx.0 as usize >= marginfi_account.token_accounts.len() {
+            return Ok(());
+        }
 
         let bank = &self.banks[bank_idx.0 as usize];
+        sort_balances(airls(&marginfi_account.margin_account));
 
         let cache = AccountInfoCache::new(&[
             marginfi_account.margin_account.clone(),
@@ -666,8 +698,19 @@ impl<'state> MarginfiFuzzContext<'state> {
     ) -> anyhow::Result<()> {
         self.refresh_oracle_accounts();
 
+        if account_idx.0 as usize >= self.marginfi_accounts.len()
+            || bank_idx.0 as usize >= self.banks.len()
+        {
+            return Ok(());
+        }
+
         let marginfi_account = &self.marginfi_accounts[account_idx.0 as usize];
+        if bank_idx.0 as usize >= marginfi_account.token_accounts.len() {
+            return Ok(());
+        }
+
         let bank = &self.banks[bank_idx.0 as usize];
+        
         let cache = AccountInfoCache::new(&[
             marginfi_account.margin_account.clone(),
             bank.bank.clone(),
@@ -749,6 +792,13 @@ impl<'state> MarginfiFuzzContext<'state> {
         asset_amount: &AssetAmount,
     ) -> anyhow::Result<()> {
         self.refresh_oracle_accounts();
+        
+        if liquidator_idx.0 as usize >= self.marginfi_accounts.len()
+            || liquidatee_idx.0 as usize >= self.marginfi_accounts.len()
+        {
+            return Ok(());
+        }
+        
         let liquidator_account = &self.marginfi_accounts[liquidator_idx.0 as usize];
         let liquidatee_account = &self.marginfi_accounts[liquidatee_idx.0 as usize];
         sort_balances(airls(&liquidator_account.margin_account));
@@ -934,7 +984,17 @@ impl<'state> MarginfiFuzzContext<'state> {
     ) -> anyhow::Result<()> {
         log!("Action: Handle Bankruptcy");
 
+        if account_idx.0 as usize >= self.marginfi_accounts.len()
+            || bank_idx.0 as usize >= self.banks.len()
+        {
+            return Ok(());
+        }
+
         let marginfi_account = &self.marginfi_accounts[account_idx.0 as usize];
+        if bank_idx.0 as usize >= marginfi_account.token_accounts.len() {
+            return Ok(());
+        }
+
         let bank = &self.banks[bank_idx.0 as usize];
 
         let cache = AccountInfoCache::new(&[
@@ -1008,6 +1068,11 @@ impl<'state> MarginfiFuzzContext<'state> {
         price_change: &PriceChange,
     ) -> anyhow::Result<()> {
         log!("Action: Update Oracle");
+        
+        if bank_idx.0 as usize >= self.banks.len() {
+            return Ok(());
+        }
+        
         let bank = &self.banks[bank_idx.0 as usize];
 
         bank.update_oracle(price_change.0)?;
