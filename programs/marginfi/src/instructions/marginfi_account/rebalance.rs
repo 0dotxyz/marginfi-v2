@@ -75,8 +75,8 @@ use marginfi_type_crate::{
         REBALANCE_SETTLE_DELAY_MAX_SECONDS, REBALANCE_SETTLE_DELAY_MIN_SECONDS,
     },
     types::{
-        Bank, HealthCache, MarginfiAccount, MarginfiGroup, OraclePriceType, RebalanceMove,
-        RebalanceOrder, RebalanceRecord, WrappedI80F48, ACCOUNT_IN_ORDER_EXECUTION,
+        BalanceSide, Bank, HealthCache, MarginfiAccount, MarginfiGroup, OraclePriceType,
+        RebalanceMove, RebalanceOrder, RebalanceRecord, WrappedI80F48, ACCOUNT_IN_ORDER_EXECUTION,
         ACCOUNT_IN_REBALANCE, MAX_REBALANCE_BANKS, MAX_REBALANCE_MOVES, ORDER_BLOCKING_FLAGS,
     },
 };
@@ -201,17 +201,15 @@ pub fn place_rebalance_order(
     let keeper_tip = keeper_tip.unwrap_or(0);
 
     let mut account = ctx.accounts.marginfi_account.load_mut()?;
-    // A rebalance order must be placed against an existing position: require at least one active
-    // balance in an allowed bank. This keeps the order tied to a real position (a full move still
-    // leaves the balance at the destination), so a later "no allowed position" state is a genuine
-    // exit rather than a pre-deposit gap, and permissionless close on that state cannot grief a user
-    // who simply has not deposited yet.
+    // A rebalance order must be placed against a deposit in an allowed bank, which is what a move
+    // relocates. A later "no allowed position" state is then a genuine exit rather than a pre-deposit
+    // gap, so permissionless close on that state cannot grief a user who has not deposited yet.
     check!(
-        account
-            .lending_account
-            .balances
-            .iter()
-            .any(|b| b.is_active() && allowed_banks.contains(&b.bank_pk)),
+        account.lending_account.balances.iter().any(|b| {
+            b.is_active()
+                && allowed_banks.contains(&b.bank_pk)
+                && matches!(b.get_side(), Some(BalanceSide::Assets))
+        }),
         MarginfiError::RebalanceNoAllowlistPosition
     );
     {
@@ -405,13 +403,13 @@ pub fn update_rebalance_order(
         let mut order = ctx.accounts.rebalance_order.load_mut()?;
         if let Some(banks) = allowed_banks {
             // Same invariant as placement: the new allowlist must contain a bank the account holds a
-            // position in, so an update can't leave the order pointing at venues with no position.
+            // deposit in, so an update can't leave the order pointing at venues with nothing to move.
             check!(
-                account
-                    .lending_account
-                    .balances
-                    .iter()
-                    .any(|b| b.is_active() && banks.contains(&b.bank_pk)),
+                account.lending_account.balances.iter().any(|b| {
+                    b.is_active()
+                        && banks.contains(&b.bank_pk)
+                        && matches!(b.get_side(), Some(BalanceSide::Assets))
+                }),
                 MarginfiError::RebalanceNoAllowlistPosition
             );
             order.set_allowed_banks(&banks)?;
@@ -1278,12 +1276,9 @@ pub fn settle_rebalance_tip<'info>(
     // Bring native banks' `asset_share_value` current so the realized-yield read reflects interest
     // accrued over the whole window (integration multipliers are refreshed by the caller's venue crank
     // and staleness-checked in `yield_index_of`).
-    for parsed in banks.iter() {
-        accrue_native_bank(parsed, &ctx.accounts.group, &clock)?;
-    }
-
     let mut current_indices: Vec<I80F48> = Vec::with_capacity(banks.len());
     for parsed in banks.iter() {
+        accrue_native_bank(parsed, &ctx.accounts.group, &clock)?;
         let bank = parsed.loader.load()?;
         current_indices.push(yield_index_of(&bank, parsed.oracles, &clock)?);
     }

@@ -475,7 +475,7 @@ pub enum MarginfiError {
     RebalanceSettleTooEarly, // 6711
     #[msg("Rebalance deposit/withdraw legs must all act on the rebalanced marginfi account")]
     RebalanceForeignAccountLeg, // 6712
-    #[msg("Rebalance order requires an active balance in at least one allowed bank")]
+    #[msg("Rebalance order requires a deposit in at least one allowed bank")]
     RebalanceNoAllowlistPosition, // 6713
     #[msg("Rebalance opened a balance outside the referenced bank set")]
     RebalanceUntrackedBalance, // 6714

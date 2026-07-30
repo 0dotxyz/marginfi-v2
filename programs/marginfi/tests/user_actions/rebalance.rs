@@ -2953,6 +2953,57 @@ async fn rebalance_place_requires_allowlist_position() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A liability in an allowed bank is not a position a rebalance can move, so placement is rejected.
+#[tokio::test]
+async fn rebalance_place_rejects_a_liability_only_position() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let borrower = f.test_f.create_marginfi_account().await;
+    let sol_bank = f.test_f.get_bank(&BankMint::Sol);
+    let borrower_sol = f
+        .test_f
+        .sol_mint
+        .create_token_account_and_mint_to(1_000.0)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_sol.key, sol_bank, 1_000.0, None)
+        .await?;
+    // The only balance in an allowed bank is a borrow, not a deposit.
+    let borrower_usdc = f.test_f.usdc_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_usdc.key, &f.src_bank_f, 100.0)
+        .await?;
+
+    let order_pda = Pubkey::find_program_address(
+        &[
+            REBALANCE_ORDER_SEED.as_bytes(),
+            borrower.key.as_ref(),
+            f.test_f.usdc_mint.key.as_ref(),
+        ],
+        &marginfi::ID,
+    )
+    .0;
+    let payer = f.test_f.context.borrow().payer.pubkey();
+    let place_ix = borrower
+        .make_place_rebalance_order_ix(
+            f.test_f.usdc_mint.key,
+            order_pda,
+            payer,
+            payer,
+            vec![f.src_bank_f.key, f.dst_bank_f.key],
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+    let res = f.process_as_payer(&[place_ix]).await;
+    assert_custom_error!(
+        res.unwrap_err(),
+        MarginfiError::RebalanceNoAllowlistPosition
+    );
+    Ok(())
+}
+
 /// Updating an order to an allowlist the account holds no position in is rejected.
 #[tokio::test]
 async fn rebalance_update_requires_allowlist_position() -> anyhow::Result<()> {
