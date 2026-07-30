@@ -273,7 +273,7 @@ async fn cb_halt_allows_deposit_on_halted_bank() -> anyhow::Result<()> {
 
 /// Direct liquidation must become admin/risk-admin-only when the liquidatee has any active halted
 /// bank in their portfolio, even if the liquidation itself settles through a different,
-/// non-halted asset/liability pair.
+/// non-halted asset/liability pair. The admins must still own the liquidator account.
 #[tokio::test]
 async fn cb_halt_on_other_balance_blocks_non_admin_direct_liquidation() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
@@ -351,6 +351,13 @@ async fn cb_halt_on_other_balance_blocks_non_admin_direct_liquidation() -> anyho
         .try_liquidate_with_authority(&liquidatee, usdc_bank, 100, sol_bank, &liquidator_authority)
         .await;
     assert_custom_error!(result.unwrap_err(), MarginfiError::CircuitBreakerAdminOnly);
+
+    // The admin clears the CB gate but does not own the liquidator account, so ownership still binds.
+    let admin = test_f.context.borrow().payer.insecure_clone();
+    let result = liquidator
+        .try_liquidate_with_authority(&liquidatee, usdc_bank, 100, sol_bank, &admin)
+        .await;
+    assert_custom_error!(result.unwrap_err(), MarginfiError::Unauthorized);
     Ok(())
 }
 

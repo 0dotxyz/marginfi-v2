@@ -1092,7 +1092,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
         await sendKeeper(await buildSandwich({ order }));
       },
       "RebalanceNotImproving",
-      6608,
+      6703,
     );
 
     await closeOrder(order);
@@ -1112,7 +1112,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
         await sendKeeper(await buildSandwich({ order }));
       },
       "RebalanceNotImproving",
-      6608,
+      6703,
     );
 
     await closeOrder(order);
@@ -1138,7 +1138,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
         await sendKeeper(await buildSandwich({ order }));
       },
       "RebalanceCooldown",
-      6606,
+      6701,
     );
 
     await closeOrder(order);
@@ -1208,7 +1208,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
         );
       },
       "RebalanceSettleTooEarly",
-      6616,
+      6711,
     );
 
     // Settle properly to unblock, then clean up.
@@ -1253,7 +1253,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
         await sendKeeper(await buildSandwich({ order, src: solBank }));
       },
       "RebalanceBankNotAllowed",
-      6612,
+      6707,
     );
 
     await closeOrder(order);

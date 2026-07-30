@@ -448,41 +448,41 @@ pub enum MarginfiError {
     CircuitBreakerPriceJump, // 6604
     // **************END CIRCUIT BREAKER ERRORS
 
-    // **************BEGIN AUTO-REBALANCE ERRORS
+    // ************** BEGIN AUTO-REBALANCE ERRORS (starting at 6700)
     #[msg("Rebalance venue not supported for on-chain rate verification")]
-    RebalanceVenueUnsupported, // 6605
+    RebalanceVenueUnsupported = 700, // 6700
     #[msg("Rebalance cooldown has not elapsed")]
-    RebalanceCooldown, // 6606
+    RebalanceCooldown, // 6701
     #[msg("Rebalance moved no value")]
-    RebalanceIncompleteMove, // 6607
+    RebalanceIncompleteMove, // 6702
     #[msg("Rebalance destination rate not better than source by the required margin")]
-    RebalanceNotImproving, // 6608
+    RebalanceNotImproving, // 6703
     #[msg("Rebalance improvement did not survive the move's own market impact")]
-    RebalanceOvershoot, // 6609
+    RebalanceOvershoot, // 6704
     #[msg("Rebalance leaked value beyond the allowed dust tolerance")]
-    RebalanceValueLeak, // 6610
+    RebalanceValueLeak, // 6705
     #[msg("Rebalance bank mint does not match the order mint")]
-    RebalanceMintMismatch, // 6611
+    RebalanceMintMismatch, // 6706
     #[msg("Rebalance bank not in the order's allowed venue set")]
-    RebalanceBankNotAllowed, // 6612
+    RebalanceBankNotAllowed, // 6707
     #[msg("Rebalance min improvement must be non-negative")]
-    RebalanceInvalidMinImprovement, // 6613
+    RebalanceInvalidMinImprovement, // 6708
     #[msg("Rebalance moved more than the order's amount")]
-    RebalanceExceedsAmount, // 6614
+    RebalanceExceedsAmount, // 6709
     #[msg("Rebalance sandwich must contain exactly one start and one end instruction")]
-    RebalanceMalformedSandwich, // 6615
+    RebalanceMalformedSandwich, // 6710
     #[msg("Rebalance tip cannot be settled until the settlement delay has elapsed")]
-    RebalanceSettleTooEarly, // 6616
+    RebalanceSettleTooEarly, // 6711
     #[msg("Rebalance deposit/withdraw legs must all act on the rebalanced marginfi account")]
-    RebalanceForeignAccountLeg, // 6617
+    RebalanceForeignAccountLeg, // 6712
     #[msg("Rebalance order requires an active balance in at least one allowed bank")]
-    RebalanceNoAllowlistPosition, // 6618
+    RebalanceNoAllowlistPosition, // 6713
     #[msg("Rebalance opened a balance outside the referenced bank set")]
-    RebalanceUntrackedBalance, // 6619
+    RebalanceUntrackedBalance, // 6714
     #[msg("Rebalance passed over a higher-rate bank that still has deposit capacity")]
-    RebalanceNotBestVenue, // 6620
+    RebalanceNotBestVenue, // 6715
     #[msg("Rebalance execution sequence does not match the account's next value")]
-    RebalanceStaleExecutionSeq, // 6621
+    RebalanceStaleExecutionSeq, // 6716
                                 // **************END AUTO-REBALANCE ERRORS
 }
 
@@ -728,23 +728,23 @@ impl From<u32> for MarginfiError {
             6602 => MarginfiError::CircuitBreakerInvalidConfig,
             6603 => MarginfiError::CircuitBreakerRequiresWarmCache,
             6604 => MarginfiError::CircuitBreakerPriceJump,
-            6605 => MarginfiError::RebalanceVenueUnsupported,
-            6606 => MarginfiError::RebalanceCooldown,
-            6607 => MarginfiError::RebalanceIncompleteMove,
-            6608 => MarginfiError::RebalanceNotImproving,
-            6609 => MarginfiError::RebalanceOvershoot,
-            6610 => MarginfiError::RebalanceValueLeak,
-            6611 => MarginfiError::RebalanceMintMismatch,
-            6612 => MarginfiError::RebalanceBankNotAllowed,
-            6613 => MarginfiError::RebalanceInvalidMinImprovement,
-            6614 => MarginfiError::RebalanceExceedsAmount,
-            6615 => MarginfiError::RebalanceMalformedSandwich,
-            6616 => MarginfiError::RebalanceSettleTooEarly,
-            6617 => MarginfiError::RebalanceForeignAccountLeg,
-            6618 => MarginfiError::RebalanceNoAllowlistPosition,
-            6619 => MarginfiError::RebalanceUntrackedBalance,
-            6620 => MarginfiError::RebalanceNotBestVenue,
-            6621 => MarginfiError::RebalanceStaleExecutionSeq,
+            6700 => MarginfiError::RebalanceVenueUnsupported,
+            6701 => MarginfiError::RebalanceCooldown,
+            6702 => MarginfiError::RebalanceIncompleteMove,
+            6703 => MarginfiError::RebalanceNotImproving,
+            6704 => MarginfiError::RebalanceOvershoot,
+            6705 => MarginfiError::RebalanceValueLeak,
+            6706 => MarginfiError::RebalanceMintMismatch,
+            6707 => MarginfiError::RebalanceBankNotAllowed,
+            6708 => MarginfiError::RebalanceInvalidMinImprovement,
+            6709 => MarginfiError::RebalanceExceedsAmount,
+            6710 => MarginfiError::RebalanceMalformedSandwich,
+            6711 => MarginfiError::RebalanceSettleTooEarly,
+            6712 => MarginfiError::RebalanceForeignAccountLeg,
+            6713 => MarginfiError::RebalanceNoAllowlistPosition,
+            6714 => MarginfiError::RebalanceUntrackedBalance,
+            6715 => MarginfiError::RebalanceNotBestVenue,
+            6716 => MarginfiError::RebalanceStaleExecutionSeq,
 
             _ => MarginfiError::InternalLogicError,
         }

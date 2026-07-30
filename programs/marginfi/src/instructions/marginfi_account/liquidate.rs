@@ -169,25 +169,12 @@ pub fn lending_account_liquidate<'info>(
             liquidatee_remaining_accounts,
         )?;
 
-        // During a CB halt direct liquidation is admin-only; otherwise the standard liquidator
-        // ownership check applies.
+        // A CB halt restricts direct liquidation to the admins on top of the ownership check.
         let signer = ctx.accounts.authority.key();
         if cb_admin_liquidation {
             require!(
                 signer == group.risk_admin || signer == group.admin,
                 MarginfiError::CircuitBreakerAdminOnly
-            );
-        } else {
-            require!(
-                is_signer_authorized(
-                    &liquidator_marginfi_account,
-                    group.admin,
-                    signer,
-                    false,
-                    false,
-                    false
-                ),
-                MarginfiError::Unauthorized
             );
         }
 
@@ -595,8 +582,10 @@ pub struct LendingAccountLiquidate<'info> {
             let a = liquidator_marginfi_account.load()?;
             account_not_frozen_for_authority(&a, authority.key())
         } @ MarginfiError::AccountFrozen,
-        // Signer authorization moved to the handler so the CB-halt admin path can accept
-        // group.admin / risk_admin without requiring them to own the liquidator account.
+        constraint = {
+            let a = liquidator_marginfi_account.load()?;
+            is_signer_authorized(&a, group.load()?.admin, authority.key(), false, false, false)
+        } @ MarginfiError::Unauthorized,
     )]
     pub liquidator_marginfi_account: AccountLoader<'info, MarginfiAccount>,
 
