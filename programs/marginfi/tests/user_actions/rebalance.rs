@@ -50,8 +50,7 @@ async fn rebalance_rejects_when_not_improving() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn rebalance_enforces_cooldown() -> anyhow::Result<()> {
-    // Cooldown (2h) exceeds the settle-delay cap (1h), so the first execution's record can be settled
-    // (unblocking the order for a re-run) while the cooldown still blocks a second rebalance.
+    // The untipped record closes at end, so the 2h cooldown is the only thing standing in the way.
     let f = setup(I80F48::from_num(0.0001), 7_200).await?;
     let base = 10_000i64; // >= cooldown so the first execution clears the gate
     f.pin_clock(base).await;
@@ -59,12 +58,8 @@ async fn rebalance_enforces_cooldown() -> anyhow::Result<()> {
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
     f.process(&ixs).await?;
 
-    // Settle the first execution after its (clamped) 1h settle delay to close the record.
-    f.advance_clock(3_601).await;
-    let settle = f.build_settle(f.src_bank_f.key, f.dst_bank_f.key).await;
-    f.process(&[settle]).await?;
-
     // A second rebalance is still inside the 2h cooldown (only ~1h elapsed) and is rejected.
+    f.advance_clock(3_601).await;
     let ixs2 = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
     let res = f.process(&ixs2).await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceCooldown);
@@ -235,6 +230,7 @@ async fn rebalance_settle_forfeits_escrow_when_pool_drained() -> anyhow::Result<
 async fn rebalance_settle_rejects_before_delay() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     f.set_keeper_tip(200_000).await?;
+    f.top_up_pool(5_000_000).await?;
     f.pin_clock(1_000).await;
 
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
@@ -293,6 +289,7 @@ async fn rebalance_rejects_bank_outside_allowlist() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             vec![f.bank_meta(outside), f.bank_meta(f.dst_bank_f.key)],
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -359,6 +356,7 @@ async fn rebalance_unlimited_allows_partial_fill() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, half)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -477,6 +475,7 @@ async fn rebalance_rejects_value_leak() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -622,6 +621,7 @@ async fn rebalance_partial_amount_moves_only_that_amount() -> anyhow::Result<()>
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, DEPOSIT_USDC / 2.0)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -691,6 +691,7 @@ async fn rebalance_partial_rejects_over_move() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -752,6 +753,7 @@ async fn rebalance_partial_fill_pays_prorata_tip() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, 100.0)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -830,6 +832,7 @@ async fn rebalance_splits_across_two_destinations() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, half), rebalance_move(0, 2, half)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -968,6 +971,7 @@ async fn rebalance_kamino_to_drift_moves_the_deposit() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks.clone(),
             moves,
+            0,
             order_pda,
             record_pda,
             f.keeper.pubkey(),
@@ -1073,6 +1077,7 @@ async fn rebalance_drift_to_juplend_moves_the_deposit() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, VENUE_DEPOSIT_VALUE)],
+            0,
             order_pda,
             record_pda,
             f.keeper.pubkey(),
@@ -1144,6 +1149,7 @@ async fn rebalance_rejects_moves_more_than_declared() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, DEPOSIT_USDC / 2.0)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1213,6 +1219,7 @@ async fn rebalance_rejects_omitting_an_allowlisted_bank() -> anyhow::Result<()> 
         .make_rebalance_start_ix(
             ref_banks,
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1243,6 +1250,7 @@ async fn rebalance_rejects_a_move_to_less_than_the_best_venue() -> anyhow::Resul
         .make_rebalance_start_ix(
             ref_banks,
             vec![rebalance_move(0, 2, DEPOSIT_USDC)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1299,6 +1307,7 @@ async fn rebalance_rejects_misrouted_deposit() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, half), rebalance_move(0, 2, half)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1360,6 +1369,7 @@ async fn rebalance_consolidate_rejects_source_misattribution() -> anyhow::Result
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 2, 600.0), rebalance_move(1, 2, 400.0)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1431,6 +1441,7 @@ async fn rebalance_consolidates_two_sources_into_one() -> anyhow::Result<()> {
                 rebalance_move(0, 2, DEPOSIT_USDC),
                 rebalance_move(1, 2, 500.0),
             ],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1511,6 +1522,7 @@ async fn rebalance_consolidate_rejects_destination_shortfall() -> anyhow::Result
                 rebalance_move(0, 2, DEPOSIT_USDC),
                 rebalance_move(1, 2, 500.0),
             ],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1578,6 +1590,7 @@ async fn rebalance_rejects_multi_move_when_one_not_improving() -> anyhow::Result
         .make_rebalance_start_ix(
             ref_banks,
             vec![rebalance_move(0, 1, half), rebalance_move(0, 2, half)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1619,6 +1632,7 @@ async fn rebalance_rejects_touching_unreferenced_balance() -> anyhow::Result<()>
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1689,6 +1703,7 @@ async fn rebalance_rejects_injected_unreferenced_balance() -> anyhow::Result<()>
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1758,6 +1773,7 @@ async fn rebalance_rejects_passing_over_a_higher_rate_bank() -> anyhow::Result<(
         .make_rebalance_start_ix(
             ref_banks,
             vec![rebalance_move(0, 1, half), rebalance_move(0, 2, half)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1799,6 +1815,7 @@ async fn rebalance_allows_overflow_past_a_full_higher_rate_bank() -> anyhow::Res
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 2, DEPOSIT_USDC)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1865,6 +1882,7 @@ async fn rebalance_amount_cap_sums_across_moves() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, 300.0), rebalance_move(0, 2, 300.0)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1921,6 +1939,7 @@ async fn rebalance_rejects_zero_amount_move() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)],
             vec![rebalance_move(0, 1, 0.0)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1941,6 +1960,7 @@ async fn rebalance_rejects_empty_moves() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)],
             vec![],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1949,6 +1969,30 @@ async fn rebalance_rejects_empty_moves() -> anyhow::Result<()> {
         .await;
     let res = f.process(&[start_ix]).await;
     assert_custom_error!(res.unwrap_err(), MarginfiError::IllegalBalanceState);
+    Ok(())
+}
+
+/// A sequence the account has already consumed is rejected.
+#[tokio::test]
+async fn rebalance_rejects_stale_execution_seq() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)],
+            vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            0,
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f.process(&[start_ix]).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceStaleExecutionSeq);
     Ok(())
 }
 
@@ -1961,6 +2005,7 @@ async fn rebalance_rejects_duplicate_referenced_bank() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.src_bank_f.key)],
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1983,6 +2028,7 @@ async fn rebalance_end_rejects_reordered_banks() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks,
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -2063,6 +2109,7 @@ async fn rebalance_bounded_move_at_cap_pays_full_tip() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, 500.0)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -2117,6 +2164,7 @@ async fn rebalance_leak_just_over_dust_rejected() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -2172,6 +2220,7 @@ async fn rebalance_leak_just_under_dust_passes() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -2251,6 +2300,7 @@ async fn rebalance_rejects_mint_mismatch() -> anyhow::Result<()> {
                 f.bank_meta(sol),
             ],
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -2272,6 +2322,7 @@ async fn rebalance_rejects_too_many_moves() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)],
             moves,
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -2295,6 +2346,7 @@ async fn rebalance_rejects_missing_oracle_account() -> anyhow::Result<()> {
                 RebalanceBankMeta::new(f.dst_bank_f.key, vec![]), // no oracle
             ],
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -2321,6 +2373,7 @@ async fn rebalance_tip_floors_fractional_lamport() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, 1.0)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -2429,6 +2482,7 @@ async fn rebalance_consolidate_rejected_when_destination_makes_unhealthy() -> an
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -2517,6 +2571,7 @@ async fn rebalance_allows_a_move_that_spikes_the_drained_source() -> anyhow::Res
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, moved)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -2637,12 +2692,33 @@ async fn rebalance_fee_pool_topup_seeds_reserve_after_dust_presend() -> anyhow::
     Ok(())
 }
 
-/// While an executed rebalance's record awaits settlement, even the authority cannot close the order
-/// (the record escrows the keeper tip); after settlement the close succeeds and the account's active
-/// order count returns to zero.
+/// An untipped execution escrows nothing, so the record closes at `end_rebalance` and the authority
+/// can close the order immediately.
 #[tokio::test]
-async fn rebalance_close_blocked_while_record_pending() -> anyhow::Result<()> {
+async fn rebalance_untipped_execution_closes_its_record() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.pin_clock(1_000).await;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    f.process(&ixs).await?;
+    assert_eq!(f.lamports_of(f.record_pda).await, 0, "record closed at end");
+
+    let payer = f.test_f.context.borrow().payer.pubkey();
+    let close_ix = f
+        .user
+        .make_close_rebalance_order_ix(f.order_pda, payer)
+        .await;
+    f.process_as_payer(&[close_ix]).await?;
+    assert_eq!(f.lamports_of(f.order_pda).await, 0, "order closed");
+    Ok(())
+}
+
+/// The authority cancels while a tip is still escrowed; the orphaned record settles afterwards and
+/// the order count returns to zero.
+#[tokio::test]
+async fn rebalance_close_allowed_while_tip_unsettled() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    f.set_keeper_tip(200_000).await?;
+    f.top_up_pool(5_000_000).await?;
     f.pin_clock(1_000).await;
     let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
     f.process(&ixs).await?;
@@ -2652,13 +2728,11 @@ async fn rebalance_close_blocked_while_record_pending() -> anyhow::Result<()> {
         .user
         .make_close_rebalance_order_ix(f.order_pda, payer)
         .await;
-    let res = f.process_as_payer(&[close_ix.clone()]).await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceRecordPending);
+    f.process_as_payer(&[close_ix]).await?;
 
     f.advance_clock(601).await;
     let settle = f.build_settle(f.src_bank_f.key, f.dst_bank_f.key).await;
     f.process(&[settle]).await?;
-    f.process_as_payer(&[close_ix]).await?;
     assert_eq!(f.lamports_of(f.order_pda).await, 0, "order closed");
     assert_eq!(f.user.load().await.active_orders, 0);
     Ok(())
@@ -2821,6 +2895,7 @@ async fn rebalance_rejects_no_op_move() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, 0.0000005)],
+            0,
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -2994,6 +3069,7 @@ async fn rebalance_rejects_decoy_juplend_reserve() -> anyhow::Result<()> {
         .make_rebalance_start_ix(
             ref_banks.clone(),
             vec![rebalance_move(0, 1, VENUE_DEPOSIT_VALUE)],
+            0,
             order_pda,
             record_pda,
             f.keeper.pubkey(),

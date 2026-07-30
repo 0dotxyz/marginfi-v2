@@ -19,6 +19,9 @@
 //! oracles. Every venue account is bound to the bank's own state. `settle_rebalance_tip` reads only
 //! yield indices and so omits the reward accounts.
 //!
+//! A tipped execution escrows the tip in the record until `settle_rebalance_tip`; an untipped one
+//! closes the record at `end_rebalance`. The record's lifetime is independent of the order's.
+//!
 //! Residual risk (accepted): the sandwich forbids in-transaction rate manipulation, but a Jito
 //! bundle can spike a destination's utilization-derived rate in a PRIOR transaction, pass both rate
 //! gates, and unwind afterwards, so the move itself can be induced. The tip settlement makes this
@@ -283,10 +286,6 @@ pub struct PlaceRebalanceOrder<'info> {
 /// mid-rebalance). Permissionlessly, anyone may close a stale order once it can no longer act: the
 /// account was closed, or it holds no position in any allowed venue. Rent goes to `fee_recipient`.
 pub fn close_rebalance_order(ctx: Context<CloseRebalanceOrder>) -> MarginfiResult {
-    check!(
-        ctx.accounts.rebalance_record.data_is_empty(),
-        MarginfiError::RebalanceRecordPending
-    );
     let order = ctx.accounts.rebalance_order.load()?;
     let marginfi_account_info = ctx.accounts.marginfi_account.to_account_info();
     let signer = ctx.accounts.authority.as_ref().map(|a| a.key());
@@ -384,12 +383,6 @@ pub struct CloseRebalanceOrder<'info> {
         close = fee_recipient
     )]
     pub rebalance_order: AccountLoader<'info, RebalanceOrder>,
-    /// CHECK: the order's rebalance record PDA.
-    #[account(
-        seeds = [REBALANCE_RECORD_SEED.as_bytes(), rebalance_order.key().as_ref()],
-        bump,
-    )]
-    pub rebalance_record: UncheckedAccount<'info>,
 }
 
 /// Modify an existing order's policy in place: venue allowlist, min improvement, cooldown, amount
@@ -752,7 +745,17 @@ fn accrue_native_bank(
 pub fn start_rebalance<'info>(
     ctx: Context<'info, StartRebalance<'info>>,
     moves: Vec<RebalanceMove>,
+    execution_seq: u64,
 ) -> MarginfiResult {
+    {
+        let mut account = ctx.accounts.marginfi_account.load_mut()?;
+        check_eq!(
+            execution_seq,
+            account.rebalance_execution_seq,
+            MarginfiError::RebalanceStaleExecutionSeq
+        );
+        account.rebalance_execution_seq = execution_seq.checked_add(1).ok_or_else(math_error!())?;
+    }
     let clock = Clock::get()?;
     let group_key = ctx.accounts.group.key();
     let remaining = ctx.remaining_accounts;
@@ -883,6 +886,7 @@ pub fn start_rebalance<'info>(
         let mut record = ctx.accounts.rebalance_record.load_init()?;
         record.initialize(
             ctx.accounts.rebalance_order.key(),
+            ctx.accounts.marginfi_account.key(),
             ctx.accounts.executor.key(),
             &ref_banks,
             &rates,
@@ -905,6 +909,7 @@ pub fn start_rebalance<'info>(
 }
 
 #[derive(Accounts)]
+#[instruction(moves: Vec<RebalanceMove>, execution_seq: u64)]
 pub struct StartRebalance<'info> {
     #[account(
         constraint = !group.load()?.is_protocol_paused() @ MarginfiError::ProtocolPaused
@@ -926,7 +931,11 @@ pub struct StartRebalance<'info> {
         init,
         payer = fee_payer,
         space = 8 + RebalanceRecord::LEN,
-        seeds = [REBALANCE_RECORD_SEED.as_bytes(), rebalance_order.key().as_ref()],
+        seeds = [
+            REBALANCE_RECORD_SEED.as_bytes(),
+            marginfi_account.key().as_ref(),
+            &execution_seq.to_le_bytes(),
+        ],
         bump,
     )]
     pub rebalance_record: AccountLoader<'info, RebalanceRecord>,
@@ -1149,6 +1158,12 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         tip_pending,
     )?;
 
+    if tip_pending == 0 {
+        ctx.accounts
+            .rebalance_record
+            .close(ctx.accounts.executor.to_account_info())?;
+    }
+
     let (authority, group) = {
         let account = ctx.accounts.marginfi_account.load()?;
         (account.authority, account.group)
@@ -1186,8 +1201,8 @@ pub struct EndRebalance<'info> {
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
     #[account(mut, has_one = marginfi_account @ MarginfiError::Unauthorized)]
     pub rebalance_order: AccountLoader<'info, RebalanceOrder>,
-    // NOT closed here: the record persists (holding the escrowed tip + move-time yield indices) until
-    // `settle_rebalance_tip` pays or refunds the tip and closes it.
+    // Closed here only when nothing is escrowed; otherwise it holds the tip and the move-time yield
+    // indices until `settle_rebalance_tip`.
     #[account(
         mut,
         has_one = executor @ MarginfiError::Unauthorized,
@@ -1195,6 +1210,7 @@ pub struct EndRebalance<'info> {
             @ MarginfiError::Unauthorized,
     )]
     pub rebalance_record: AccountLoader<'info, RebalanceRecord>,
+    #[account(mut)]
     pub executor: Signer<'info>,
     #[account(
         mut,
@@ -1227,7 +1243,7 @@ pub fn settle_rebalance_tip<'info>(
     let group_key = ctx.accounts.group.key();
     let remaining = ctx.remaining_accounts;
 
-    let (ref_keys, move_ts, pending_tip, move_indices, settle_delay) = {
+    let (ref_keys, move_ts, pending_tip, move_indices, settle_delay, order_key) = {
         let record = ctx.accounts.rebalance_record.load()?;
         let n = record.ref_bank_count as usize;
         (
@@ -1242,6 +1258,7 @@ pub fn settle_rebalance_tip<'info>(
                 .map(|w| I80F48::from(*w))
                 .collect::<Vec<_>>(),
             record.settle_delay,
+            record.order,
         )
     };
 
@@ -1329,7 +1346,7 @@ pub fn settle_rebalance_tip<'info>(
             marginfi_account_authority: authority,
             marginfi_group: group,
         },
-        rebalance_order: ctx.accounts.rebalance_order.key(),
+        rebalance_order: order_key,
         executor: ctx.accounts.executor.key(),
         realized,
         tip_paid: if refunded { 0 } else { pending_tip },
@@ -1342,13 +1359,10 @@ pub struct SettleRebalanceTip<'info> {
     pub group: AccountLoader<'info, MarginfiGroup>,
     #[account(has_one = group @ MarginfiError::InvalidGroup)]
     pub marginfi_account: AccountLoader<'info, MarginfiAccount>,
-    #[account(has_one = marginfi_account @ MarginfiError::Unauthorized)]
-    pub rebalance_order: AccountLoader<'info, RebalanceOrder>,
     #[account(
         mut,
         close = executor,
-        constraint = rebalance_record.load()?.order == rebalance_order.key()
-            @ MarginfiError::Unauthorized,
+        has_one = marginfi_account @ MarginfiError::Unauthorized,
     )]
     pub rebalance_record: AccountLoader<'info, RebalanceRecord>,
     /// CHECK: the recorded keeper; receives the tip and the record's rent. Validated to equal

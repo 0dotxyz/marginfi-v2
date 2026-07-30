@@ -106,7 +106,7 @@ pub struct RebalanceMove {
 // start underlying-token amount, the declared moves, a snapshot of every OTHER active balance, and the
 // move-time yield index per bank, so end can reconcile/prove token conservation and settle can pay the
 // tip only if the destinations realized more yield than the sources over the settlement window.
-assert_struct_size!(RebalanceRecord, 1768);
+assert_struct_size!(RebalanceRecord, 1800);
 assert_struct_align!(RebalanceRecord, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
@@ -114,6 +114,9 @@ assert_struct_align!(RebalanceRecord, 8);
 #[derive(Debug)]
 pub struct RebalanceRecord {
     pub order: Pubkey,
+    /// The account the record belongs to; `settle_rebalance_tip` pays from and refunds to this
+    /// account's fee pool.
+    pub marginfi_account: Pubkey,
     pub executor: Pubkey,
     /// The distinct banks this execution touches (first `ref_bank_count` entries), with start amounts.
     pub ref_banks: [RebalanceRefBank; MAX_REBALANCE_BANKS],

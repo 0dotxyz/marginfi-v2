@@ -1133,7 +1133,6 @@ impl MarginfiAccountFixture {
                 authority: Some(authority),
                 fee_recipient: authority,
                 rebalance_order,
-                rebalance_record: Self::rebalance_record_pda(rebalance_order),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::MarginfiAccountCloseRebalanceOrder {}.data(),
@@ -1174,17 +1173,6 @@ impl MarginfiAccountFixture {
             &[
                 marginfi_type_crate::constants::REBALANCE_FEE_POOL_SEED.as_bytes(),
                 self.key.as_ref(),
-            ],
-            &marginfi::ID,
-        )
-        .0
-    }
-
-    pub fn rebalance_record_pda(rebalance_order: Pubkey) -> Pubkey {
-        Pubkey::find_program_address(
-            &[
-                marginfi_type_crate::constants::REBALANCE_RECORD_SEED.as_bytes(),
-                rebalance_order.as_ref(),
             ],
             &marginfi::ID,
         )
@@ -1235,6 +1223,7 @@ impl MarginfiAccountFixture {
         &self,
         ref_banks: Vec<RebalanceBankMeta>,
         moves: Vec<RebalanceMove>,
+        execution_seq: u64,
         rebalance_order: Pubkey,
         rebalance_record: Pubkey,
         executor: Pubkey,
@@ -1258,7 +1247,11 @@ impl MarginfiAccountFixture {
         Instruction {
             program_id: marginfi::ID,
             accounts,
-            data: marginfi::instruction::MarginfiAccountStartRebalance { moves }.data(),
+            data: marginfi::instruction::MarginfiAccountStartRebalance {
+                moves,
+                execution_seq,
+            }
+            .data(),
         }
     }
 
@@ -1325,7 +1318,6 @@ impl MarginfiAccountFixture {
     pub async fn make_rebalance_settle_ix(
         &self,
         ref_banks: Vec<RebalanceBankMeta>,
-        rebalance_order: Pubkey,
         rebalance_record: Pubkey,
         executor: Pubkey,
         caller: Pubkey,
@@ -1334,7 +1326,6 @@ impl MarginfiAccountFixture {
         let mut accounts = marginfi::accounts::SettleRebalanceTip {
             group,
             marginfi_account: self.key,
-            rebalance_order,
             rebalance_record,
             executor,
             fee_pool: self.rebalance_fee_pool_pda(),
@@ -1363,7 +1354,6 @@ impl MarginfiAccountFixture {
                 authority: None,
                 fee_recipient,
                 rebalance_order,
-                rebalance_record: Self::rebalance_record_pda(rebalance_order),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::MarginfiAccountCloseRebalanceOrder {}.data(),

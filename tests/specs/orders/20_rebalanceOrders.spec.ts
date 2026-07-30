@@ -5,7 +5,6 @@ import {
   ComputeBudgetProgram,
   Keypair,
   PublicKey,
-  SystemProgram,
   SYSVAR_INSTRUCTIONS_PUBKEY,
   Transaction,
   TransactionInstruction,
@@ -175,24 +174,36 @@ const deriveRebalanceOrder = (
     programId,
   );
 
-const deriveRebalanceRecord = (programId: PublicKey, order: PublicKey) =>
+const deriveRebalanceRecord = (
+  programId: PublicKey,
+  marginfiAccount: PublicKey,
+  seq: bigint,
+) =>
   PublicKey.findProgramAddressSync(
-    [Buffer.from(REBALANCE_RECORD_SEED), order.toBuffer()],
+    [
+      Buffer.from(REBALANCE_RECORD_SEED),
+      marginfiAccount.toBuffer(),
+      new BN(seq.toString()).toArrayLike(Buffer, "le", 8),
+    ],
     programId,
   );
 
-// Test-only cleanup: zero the per-order record PDA. The record now survives end_rebalance (its tip is
-// settled separately), and every test in a describe shares one deterministic order/record PDA, so a
-// leftover record from a prior test would block the next start_rebalance's init.
-const clearRecordAccount = (record: PublicKey) => {
-  bankrunContext.setAccount(record, {
-    lamports: 0,
-    data: Buffer.alloc(0),
-    owner: SystemProgram.programId,
-    executable: false,
-    rentEpoch: 0,
-  });
-};
+/** The account's next execution sequence, which seeds this execution's record. */
+const nextSeqOf = async (
+  program: Program<Marginfi>,
+  marginfiAccount: PublicKey,
+): Promise<bigint> =>
+  BigInt(
+    (
+      await program.account.marginfiAccount.fetch(marginfiAccount)
+    ).rebalanceExecutionSeq.toString(),
+  );
+
+/** The sequence `start_rebalance` last consumed, i.e. the most recent execution's record. */
+const lastSeqOf = async (
+  program: Program<Marginfi>,
+  marginfiAccount: PublicKey,
+): Promise<bigint> => (await nextSeqOf(program, marginfiAccount)) - 1n;
 
 const REBALANCE_FEE_POOL_SEED = "rebalance_fee_pool";
 const deriveRebalanceFeePool = (
@@ -276,15 +287,19 @@ describe("Auto-rebalance orders (native -> native)", () => {
   const assetShares = async (bank: PublicKey) =>
     sharesOf(await program.account.marginfiAccount.fetch(ownerAcc), bank);
 
-  /** The `start_rebalance` instruction for `moves` over `refBanks` (record derived from the order). */
-  const buildStartIx = (
+  const nextSeq = () => nextSeqOf(program, ownerAcc);
+  const lastSeq = () => lastSeqOf(program, ownerAcc);
+
+  /** The `start_rebalance` instruction for `moves` over `refBanks`, at the account's next sequence. */
+  const buildStartIx = async (
     order: PublicKey,
     moves: ReturnType<typeof buildMove>[],
     refBanks: AccountMeta[],
   ) => {
-    const [record] = deriveRebalanceRecord(program.programId, order);
+    const seq = await nextSeq();
+    const [record] = deriveRebalanceRecord(program.programId, ownerAcc, seq);
     return program.methods
-      .marginfiAccountStartRebalance(moves)
+      .marginfiAccountStartRebalance(moves, new BN(seq.toString()))
       .accountsPartial({
         group,
         marginfiAccount: ownerAcc,
@@ -298,9 +313,13 @@ describe("Auto-rebalance orders (native -> native)", () => {
       .instruction();
   };
 
-  /** The `end_rebalance` instruction with `endRemaining` (record + fee pool derived from the order). */
-  const buildEndIx = (order: PublicKey, endRemaining: AccountMeta[]) => {
-    const [record] = deriveRebalanceRecord(program.programId, order);
+  /** The `end_rebalance` instruction with `endRemaining`, for the account's current record. */
+  const buildEndIx = async (order: PublicKey, endRemaining: AccountMeta[]) => {
+    const [record] = deriveRebalanceRecord(
+      program.programId,
+      ownerAcc,
+      await nextSeq(),
+    );
     const [feePool] = deriveRebalanceFeePool(program.programId, ownerAcc);
     return program.methods
       .marginfiAccountEndRebalance()
@@ -316,9 +335,13 @@ describe("Auto-rebalance orders (native -> native)", () => {
       .instruction();
   };
 
-  /** The `settle_rebalance_tip` instruction over `refBanks` (record + fee pool derived from order). */
-  const buildSettleIx = (order: PublicKey, refBanks: AccountMeta[]) => {
-    const [record] = deriveRebalanceRecord(program.programId, order);
+  /** The `settle_rebalance_tip` instruction over `refBanks`, for the last execution's record. */
+  const buildSettleIx = async (order: PublicKey, refBanks: AccountMeta[]) => {
+    const [record] = deriveRebalanceRecord(
+      program.programId,
+      ownerAcc,
+      await lastSeq(),
+    );
     const [feePool] = deriveRebalanceFeePool(program.programId, ownerAcc);
     return program.methods
       .marginfiAccountSettleRebalanceTip()
@@ -490,9 +513,6 @@ describe("Auto-rebalance orders (native -> native)", () => {
   };
 
   const closeOrder = async (order: PublicKey) => {
-    // A record left by a prior rebalance blocks close until its tip is settled; in production
-    // settle_rebalance_tip empties it. Simulate that here so unrelated tests can tidy up their order.
-    clearRecordAccount(deriveRebalanceRecord(program.programId, order)[0]);
     const ix = await program.methods
       .marginfiAccountCloseRebalanceOrder()
       .accountsPartial({
@@ -802,11 +822,6 @@ describe("Auto-rebalance orders (native -> native)", () => {
     );
   });
 
-  beforeEach(() => {
-    const [order] = deriveRebalanceOrder(program.programId, ownerAcc, usdcMint);
-    clearRecordAccount(deriveRebalanceRecord(program.programId, order)[0]);
-  });
-
   it("splits the source across two destinations and keeps the order - happy path", async () => {
     await resetOwnerToSrc();
     const allowedBanks = [srcBank, dstBank, dst2Bank];
@@ -831,19 +846,17 @@ describe("Auto-rebalance orders (native -> native)", () => {
     assert.equal(sharesOf(after, dstBank).toString(), half.toString(), "dst holds half");
     assert.equal(sharesOf(after, dst2Bank).toString(), half.toString(), "dst2 holds half");
 
-    // Order persists; the per-execution record survives end (settled separately) with no tip escrowed.
+    // Order persists; a tip-free execution escrows nothing, so its record closes at end.
     const orderAcc = await program.account.rebalanceOrder.fetch(order);
     assert.ok(orderAcc.marginfiAccount.equals(ownerAcc));
-    const [record] = deriveRebalanceRecord(program.programId, order);
-    const recordAcc = await program.account.rebalanceRecord.fetch(record);
-    assert.ok(
-      recordAcc.order.equals(order),
-      "record persists after end, awaiting settlement",
+    const [record] = deriveRebalanceRecord(
+      program.programId,
+      ownerAcc,
+      await lastSeq(),
     );
-    assert.equal(
-      recordAcc.pendingTip.toNumber(),
-      0,
-      "no tip escrowed for a tip-free order",
+    assert.isNull(
+      await safeGetAccountInfo(bankRunProvider.connection, record),
+      "tip-free record closed at end",
     );
 
     await closeOrder(order);
@@ -1108,8 +1121,7 @@ describe("Auto-rebalance orders (native -> native)", () => {
   it("enforces the per-order cooldown - RebalanceCooldown", async () => {
     await resetOwnerToSrc();
     const allowedBanks = [srcBank, dstBank, dst2Bank];
-    // 24h cooldown exceeds the 1h settle-delay cap, so the first execution's record can be settled to
-    // unblock the order while the cooldown still rejects a second execution.
+    // The tip-free record closes at end, so the 24h cooldown is all that rejects a second execution.
     const order = await placeOrder({
       allowedBanks,
       minImprovement: 0.0001,
@@ -1118,8 +1130,6 @@ describe("Auto-rebalance orders (native -> native)", () => {
 
     // First execution succeeds and stamps last_exec_timestamp.
     await sendKeeper(await buildSandwich({ order }));
-    // Settle the escrowed tip (advances ~1h) to close the record so a re-run is structurally possible.
-    await settleStandard(order);
 
     // Move it back to src, then the cooldown (still hours away) rejects a second execution.
     await resetOwnerToSrc();
@@ -1149,7 +1159,11 @@ describe("Auto-rebalance orders (native -> native)", () => {
     await sendKeeper(await buildSandwich({ order }));
     // The escrow that left the pool at end equals the tip the record will settle (not paid yet).
     const poolAfterEnd = await bankRunProvider.connection.getBalance(feePool);
-    const [record] = deriveRebalanceRecord(program.programId, order);
+    const [record] = deriveRebalanceRecord(
+      program.programId,
+      ownerAcc,
+      await lastSeq(),
+    );
     const pendingTip = (
       await program.account.rebalanceRecord.fetch(record)
     ).pendingTip.toNumber();
@@ -2051,9 +2065,6 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
   };
 
   const closeOrder = async (order: PublicKey) => {
-    // A record left by a prior rebalance blocks close until its tip is settled; in production
-    // settle_rebalance_tip empties it. Simulate that here so unrelated tests can tidy up their order.
-    clearRecordAccount(deriveRebalanceRecord(program.programId, order)[0]);
     await sendOwner(
       new Transaction().add(
         await program.methods
@@ -2069,6 +2080,9 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
     );
   };
 
+  const nextSeq = () => nextSeqOf(program, ownerAcc);
+  const lastSeq = () => lastSeqOf(program, ownerAcc);
+
   /**
    * Build and execute the keeper sandwich: cranks -> start -> src withdraw -> dst deposit -> end.
    * Packed into a v0 transaction + lookup table because the two full venue account sets exceed the
@@ -2080,7 +2094,8 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
     dst: { bank: PublicKey; leg: VenueLeg; deposit: TransactionInstruction };
   }) => {
     const { order, src, dst } = opts;
-    const [record] = deriveRebalanceRecord(program.programId, order);
+    const seq = await nextSeq();
+    const [record] = deriveRebalanceRecord(program.programId, ownerAcc, seq);
     const [feePool] = deriveRebalanceFeePool(program.programId, ownerAcc);
 
     // A referenced venue bank block: [bank, (JupLend reserve), rewards..., priceOracle, venueAccount].
@@ -2105,7 +2120,7 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
     ];
 
     const startIx = await program.methods
-      .marginfiAccountStartRebalance(moves)
+      .marginfiAccountStartRebalance(moves, new BN(seq.toString()))
       .accountsPartial({
         group: groupPk,
         marginfiAccount: ownerAcc,
@@ -2269,11 +2284,14 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
 
     const orderAcc = await program.account.rebalanceOrder.fetch(order);
     assert.ok(orderAcc.marginfiAccount.equals(ownerAcc), "order persists");
-    const [record] = deriveRebalanceRecord(program.programId, order);
-    const recordAcc = await program.account.rebalanceRecord.fetch(record);
-    assert.ok(
-      recordAcc.order.equals(order),
-      "record persists after end, awaiting settlement",
+    const [record] = deriveRebalanceRecord(
+      program.programId,
+      ownerAcc,
+      await lastSeq(),
+    );
+    assert.isNull(
+      await safeGetAccountInfo(bankRunProvider.connection, record),
+      "tip-free record closed at end",
     );
 
     await closeOrder(order);

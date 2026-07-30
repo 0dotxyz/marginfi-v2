@@ -405,8 +405,9 @@ pub mod marginfi {
     pub fn marginfi_account_start_rebalance<'info>(
         ctx: Context<'info, StartRebalance<'info>>,
         moves: Vec<RebalanceMove>,
+        execution_seq: u64,
     ) -> MarginfiResult {
-        marginfi_account::start_rebalance(ctx, moves)
+        marginfi_account::start_rebalance(ctx, moves, execution_seq)
     }
 
     /// (permissionless keeper) End an auto-rebalance. Re-checks dst >= src post-move, value

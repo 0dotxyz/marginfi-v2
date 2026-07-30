@@ -82,7 +82,9 @@ pub struct MarginfiAccount {
     ///   also charge the user if they are opening a risky position on the front end.
     pub liquidation_record: Pubkey,
     pub indexer_flags: IndexerFlags,
-    pub _padding0: [u64; 4],
+    /// Monotonic counter. seeding each rebalance execution's `RebalanceRecord`.
+    pub rebalance_execution_seq: u64,
+    pub _padding0: [u64; 3],
 }
 
 impl MarginfiAccount {

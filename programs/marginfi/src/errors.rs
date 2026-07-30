@@ -475,15 +475,15 @@ pub enum MarginfiError {
     RebalanceSettleTooEarly, // 6616
     #[msg("Rebalance deposit/withdraw legs must all act on the rebalanced marginfi account")]
     RebalanceForeignAccountLeg, // 6617
-    #[msg("Cannot close a rebalance order while its record still holds an unsettled tip")]
-    RebalanceRecordPending, // 6618
     #[msg("Rebalance order requires an active balance in at least one allowed bank")]
-    RebalanceNoAllowlistPosition, // 6619
+    RebalanceNoAllowlistPosition, // 6618
     #[msg("Rebalance opened a balance outside the referenced bank set")]
-    RebalanceUntrackedBalance, // 6620
+    RebalanceUntrackedBalance, // 6619
     #[msg("Rebalance passed over a higher-rate bank that still has deposit capacity")]
-    RebalanceNotBestVenue, // 6621
-                           // **************END AUTO-REBALANCE ERRORS
+    RebalanceNotBestVenue, // 6620
+    #[msg("Rebalance execution sequence does not match the account's next value")]
+    RebalanceStaleExecutionSeq, // 6621
+                                // **************END AUTO-REBALANCE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -741,10 +741,10 @@ impl From<u32> for MarginfiError {
             6615 => MarginfiError::RebalanceMalformedSandwich,
             6616 => MarginfiError::RebalanceSettleTooEarly,
             6617 => MarginfiError::RebalanceForeignAccountLeg,
-            6618 => MarginfiError::RebalanceRecordPending,
-            6619 => MarginfiError::RebalanceNoAllowlistPosition,
-            6620 => MarginfiError::RebalanceUntrackedBalance,
-            6621 => MarginfiError::RebalanceNotBestVenue,
+            6618 => MarginfiError::RebalanceNoAllowlistPosition,
+            6619 => MarginfiError::RebalanceUntrackedBalance,
+            6620 => MarginfiError::RebalanceNotBestVenue,
+            6621 => MarginfiError::RebalanceStaleExecutionSeq,
 
             _ => MarginfiError::InternalLogicError,
         }

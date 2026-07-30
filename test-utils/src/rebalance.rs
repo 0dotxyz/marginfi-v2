@@ -104,6 +104,19 @@ pub async fn drive_utilization(
     Ok(())
 }
 
+/// The `RebalanceRecord` PDA for the account's execution sequence `seq`.
+pub fn record_pda_at(marginfi_account: Pubkey, seq: u64) -> Pubkey {
+    Pubkey::find_program_address(
+        &[
+            REBALANCE_RECORD_SEED.as_bytes(),
+            marginfi_account.as_ref(),
+            &seq.to_le_bytes(),
+        ],
+        &marginfi::ID,
+    )
+    .0
+}
+
 /// Drive `dst` to ~50% utilization (a positive supply rate).
 pub async fn drive_dst_utilization(test_f: &TestFixture, dst: &BankFixture) -> anyhow::Result<()> {
     drive_utilization(test_f, dst, 500.0, 100.0).await
@@ -178,11 +191,7 @@ pub async fn setup(
         &marginfi::ID,
     )
     .0;
-    let record_pda = Pubkey::find_program_address(
-        &[REBALANCE_RECORD_SEED.as_bytes(), order_pda.as_ref()],
-        &marginfi::ID,
-    )
-    .0;
+    let record_pda = record_pda_at(user.key, 0);
 
     let payer = test_f.context.borrow().payer.pubkey();
     let place_ix = user
@@ -314,6 +323,8 @@ impl RebalanceFixture {
     /// The keeper-signed sandwich: start -> withdraw all of `src` -> deposit into `dst` -> end.
     /// One full-position move from referenced bank 0 (`src`) to bank 1 (`dst`).
     pub async fn build_sandwich(&self, src: Pubkey, dst: Pubkey) -> Vec<Instruction> {
+        let execution_seq = self.user.load().await.rebalance_execution_seq;
+        let record_pda = record_pda_at(self.user.key, execution_seq);
         let ref_banks = vec![self.bank_meta(src), self.bank_meta(dst)];
         let moves = vec![rebalance_move(0, 1, DEPOSIT_USDC)];
         let start_ix = self
@@ -321,8 +332,9 @@ impl RebalanceFixture {
             .make_rebalance_start_ix(
                 ref_banks.clone(),
                 moves,
+                execution_seq,
                 self.order_pda,
-                self.record_pda,
+                record_pda,
                 self.keeper.pubkey(),
                 self.keeper.pubkey(),
             )
@@ -353,7 +365,7 @@ impl RebalanceFixture {
                 ref_banks,
                 vec![src],
                 self.order_pda,
-                self.record_pda,
+                record_pda,
                 self.keeper.pubkey(),
             )
             .await;
@@ -368,6 +380,8 @@ impl RebalanceFixture {
         dst: Pubkey,
         deposit_ui: f64,
     ) -> Vec<Instruction> {
+        let execution_seq = self.user.load().await.rebalance_execution_seq;
+        let record_pda = record_pda_at(self.user.key, execution_seq);
         let ref_banks = vec![self.bank_meta(src), self.bank_meta(dst)];
         let moves = vec![rebalance_move(0, 1, DEPOSIT_USDC)];
         let start_ix = self
@@ -375,8 +389,9 @@ impl RebalanceFixture {
             .make_rebalance_start_ix(
                 ref_banks.clone(),
                 moves,
+                execution_seq,
                 self.order_pda,
-                self.record_pda,
+                record_pda,
                 self.keeper.pubkey(),
                 self.keeper.pubkey(),
             )
@@ -407,7 +422,7 @@ impl RebalanceFixture {
                 ref_banks,
                 vec![src],
                 self.order_pda,
-                self.record_pda,
+                record_pda,
                 self.keeper.pubkey(),
             )
             .await;
@@ -430,11 +445,11 @@ impl RebalanceFixture {
     /// assert the tip and record rent still reach the recorded executor.
     pub async fn build_settle_as(&self, src: Pubkey, dst: Pubkey, caller: Pubkey) -> Instruction {
         let ref_banks = vec![self.bank_meta(src), self.bank_meta(dst)];
+        let seq = self.user.load().await.rebalance_execution_seq - 1;
         self.user
             .make_rebalance_settle_ix(
                 ref_banks,
-                self.order_pda,
-                self.record_pda,
+                record_pda_at(self.user.key, seq),
                 self.keeper.pubkey(),
                 caller,
             )
@@ -799,11 +814,7 @@ impl MultiVenueFixture {
             &marginfi::ID,
         )
         .0;
-        let record_pda = Pubkey::find_program_address(
-            &[REBALANCE_RECORD_SEED.as_bytes(), order_pda.as_ref()],
-            &marginfi::ID,
-        )
-        .0;
+        let record_pda = record_pda_at(self.user.key, 0);
 
         let payer = self.test_f.context.borrow().payer.pubkey();
         let place_ix = self

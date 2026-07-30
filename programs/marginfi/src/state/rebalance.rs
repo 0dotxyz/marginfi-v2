@@ -84,6 +84,7 @@ pub trait RebalanceRecordImpl {
     fn initialize(
         &mut self,
         order: Pubkey,
+        marginfi_account_key: Pubkey,
         executor: Pubkey,
         ref_banks: &[(Pubkey, I80F48)],
         pre_rates: &[I80F48],
@@ -116,6 +117,7 @@ impl RebalanceRecordImpl for RebalanceRecord {
     fn initialize(
         &mut self,
         order: Pubkey,
+        marginfi_account_key: Pubkey,
         executor: Pubkey,
         ref_banks: &[(Pubkey, I80F48)],
         pre_rates: &[I80F48],
@@ -144,6 +146,7 @@ impl RebalanceRecordImpl for RebalanceRecord {
             );
         }
         self.order = order;
+        self.marginfi_account = marginfi_account_key;
         self.executor = executor;
         self.ref_banks = [RebalanceRefBank::default(); MAX_REBALANCE_BANKS];
         for (i, (bank, val)) in ref_banks.iter().enumerate() {
