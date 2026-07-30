@@ -106,7 +106,7 @@ pub struct RebalanceMove {
 // start underlying-token amount, the declared moves, a snapshot of every OTHER active balance, and the
 // move-time yield index per bank, so end can reconcile/prove token conservation and settle can pay the
 // tip only if the destinations realized more yield than the sources over the settlement window.
-assert_struct_size!(RebalanceRecord, 1640);
+assert_struct_size!(RebalanceRecord, 1768);
 assert_struct_align!(RebalanceRecord, 8);
 #[repr(C)]
 #[cfg_attr(feature = "anchor", account(zero_copy))]
@@ -121,6 +121,9 @@ pub struct RebalanceRecord {
     pub moves: [RebalanceMove; MAX_REBALANCE_MOVES],
     /// Snapshot of every active balance NOT in the referenced set; end verifies these unchanged.
     pub balance_states: [ExecuteOrderBalanceRecord; MAX_REBALANCE_RECORD_BALANCES],
+    /// Per-referenced-bank supply rate captured at `start_rebalance`, before the move. `end_rebalance`
+    /// requires each move's post-deposit destination rate to still beat its source's rate from here.
+    pub pre_rate: [WrappedI80F48; MAX_REBALANCE_BANKS],
     /// Per-referenced-bank yield index (`asset_share_value` × venue multiplier) captured at
     /// `end_rebalance`. `settle_rebalance_tip` compares current indices against these to require the
     /// destinations actually out-yielded the sources over the settlement window.

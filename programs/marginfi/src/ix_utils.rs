@@ -309,7 +309,7 @@ pub fn validate_rebalance_instructions(
         &DRIFT_PROGRAM_ID,
         &[&ixd::DRIFT_UPDATE_SPOT_MARKET_CUMULATIVE_INTEREST],
     )?;
-    // The supply-rate gate reads the Fluid `TokenReserve`, which is refreshed by the LIQUIDITY
+    // The supply-rate gate reads the JupLend `TokenReserve`, which is refreshed by the LIQUIDITY
     // program's `update_exchange_price`; the LENDING program's `update_rate` refreshes the separate
     // `Lending` account. Allow each crank only on its own program.
     validate_ixes_exclusive(

@@ -939,6 +939,9 @@ async fn rebalance_kamino_to_drift_moves_the_deposit() -> anyhow::Result<()> {
         .await?;
 
     f.set_kamino_rate_zero().await;
+    // Seed depth so the arriving tokens do not collapse the destination's own utilization.
+    f.seed_drift_liquidity(VENUE_DEPOSIT_NATIVE * 100).await?;
+
     f.set_drift_borrow_utilization(DRIFT_DST_BORROW_NUM, DRIFT_DST_BORROW_DEN)
         .await;
 
@@ -955,7 +958,7 @@ async fn rebalance_kamino_to_drift_moves_the_deposit() -> anyhow::Result<()> {
         .make_drift_update_spot_market_cumulative_interest_ix(&f.drift_bank)
         .await;
     let ref_banks = vec![
-        RebalanceBankMeta::new(src, f.kamino_slice().await),
+        RebalanceBankMeta::new(src, f.kamino_slice().await).with_rewards(f.kamino_rewards().await),
         RebalanceBankMeta::new(dst, f.drift_slice().await),
     ];
     let moves = vec![rebalance_move(0, 1, VENUE_DEPOSIT_VALUE)];
@@ -1061,7 +1064,8 @@ async fn rebalance_drift_to_juplend_moves_the_deposit() -> anyhow::Result<()> {
     let juplend_reserve = derive_juplend_token_reserve(&f.mint.key).0;
     let ref_banks = vec![
         RebalanceBankMeta::new(src, f.drift_slice().await),
-        RebalanceBankMeta::with_reserve(dst, juplend_reserve, f.juplend_slice().await),
+        RebalanceBankMeta::with_reserve(dst, juplend_reserve, f.juplend_slice().await)
+            .with_rewards(f.juplend_rewards().await),
     ];
 
     let start_ix = f
@@ -1197,23 +1201,18 @@ async fn rebalance_rejects_principal_skim() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A keeper references an unused decoy bank at index 0 and declares only `src -> dst` (indices 1 -> 2).
-/// The decoy participates in no move, so `start_rebalance` rejects it rather than parsing and storing a
-/// bank that contributes nothing to the relocation.
+/// A keeper supplies only the two banks its move touches, leaving the third allowlisted bank out of
+/// the account stream. The parsed set is sized from the allowlist, so the short stream is rejected.
 #[tokio::test]
-async fn rebalance_rejects_unreferenced_bank() -> anyhow::Result<()> {
+async fn rebalance_rejects_omitting_an_allowlisted_bank() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
-    let decoy = f.add_second_dst().await?;
-    let ref_banks = vec![
-        f.bank_meta(decoy.key),
-        f.bank_meta(f.src_bank_f.key),
-        f.bank_meta(f.dst_bank_f.key),
-    ];
+    f.add_second_dst().await?;
+    let ref_banks = vec![f.bank_meta(f.src_bank_f.key), f.bank_meta(f.dst_bank_f.key)];
     let start_ix = f
         .user
         .make_rebalance_start_ix(
             ref_banks,
-            vec![rebalance_move(1, 2, DEPOSIT_USDC)],
+            vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             f.order_pda,
             f.record_pda,
             f.keeper.pubkey(),
@@ -1221,7 +1220,37 @@ async fn rebalance_rejects_unreferenced_bank() -> anyhow::Result<()> {
         )
         .await;
     let res = f.process(&[start_ix]).await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceUnreferencedBank);
+    assert_custom_error!(res.unwrap_err(), MarginfiError::WrongNumberOfOracleAccounts);
+    Ok(())
+}
+
+/// A single move into a merely-better bank is rejected while a strictly higher-rate allowlisted bank
+/// still has capacity.
+#[tokio::test]
+async fn rebalance_rejects_a_move_to_less_than_the_best_venue() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let dst2 = f.add_second_dst().await?;
+    // Dilute the second destination so the first strictly dominates it.
+    drive_utilization(&f.test_f, &dst2, 400.0, 200.0).await?;
+
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key),
+        f.bank_meta(f.dst_bank_f.key),
+        f.bank_meta(dst2.key),
+    ];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks,
+            vec![rebalance_move(0, 2, DEPOSIT_USDC)],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f.process(&[start_ix]).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotBestVenue);
     Ok(())
 }
 
@@ -1709,6 +1738,115 @@ async fn rebalance_rejects_injected_unreferenced_balance() -> anyhow::Result<()>
     Ok(())
 }
 
+/// Two destinations at different rates cannot both receive: the leg into the lower-rate bank is
+/// rejected while the higher-rate one still has deposit capacity.
+#[tokio::test]
+async fn rebalance_rejects_passing_over_a_higher_rate_bank() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let dst2 = f.add_second_dst().await?;
+    // Separate the two destinations' rates so one strictly dominates.
+    drive_utilization(&f.test_f, &dst2, 400.0, 200.0).await?;
+
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key),
+        f.bank_meta(f.dst_bank_f.key),
+        f.bank_meta(dst2.key),
+    ];
+    let half = DEPOSIT_USDC / 2.0;
+    let split = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks,
+            vec![rebalance_move(0, 1, half), rebalance_move(0, 2, half)],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let res = f.process(&[split]).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceNotBestVenue);
+    Ok(())
+}
+
+/// The dominant destination has no headroom left, so the move routes past it into the lower-rate
+/// bank.
+#[tokio::test]
+async fn rebalance_allows_overflow_past_a_full_higher_rate_bank() -> anyhow::Result<()> {
+    let f = setup(I80F48::from_num(0.0001), 0).await?;
+    let dst2 = f.add_second_dst().await?;
+    // Dilute the second destination so the first strictly dominates it on rate.
+    drive_utilization(&f.test_f, &dst2, 400.0, 200.0).await?;
+    // Cap the dominant destination under its current assets, leaving it zero headroom.
+    f.dst_bank_f
+        .update_config(
+            BankConfigOpt {
+                deposit_limit: Some(1),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+
+    let old_src = f.asset_shares(f.src_bank_f.key).await;
+    let ref_banks = vec![
+        f.bank_meta(f.src_bank_f.key),
+        f.bank_meta(f.dst_bank_f.key),
+        f.bank_meta(dst2.key),
+    ];
+    let start_ix = f
+        .user
+        .make_rebalance_start_ix(
+            ref_banks.clone(),
+            vec![rebalance_move(0, 2, DEPOSIT_USDC)],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let withdraw_ix = f
+        .user
+        .make_withdraw_ix_with_authority(
+            f.keeper_usdc,
+            &f.src_bank_f,
+            DEPOSIT_USDC,
+            Some(true),
+            f.keeper.pubkey(),
+        )
+        .await;
+    let deposit_ix = f
+        .user
+        .make_deposit_ix_with_authority(f.keeper_usdc, &dst2, DEPOSIT_USDC, None, f.keeper.pubkey())
+        .await;
+    // Only the overflow bank is active afterwards: the source is drained and the capped bank was
+    // never funded, so both drop from the health observation set.
+    let end_ix = f
+        .user
+        .make_rebalance_end_ix(
+            ref_banks,
+            vec![f.src_bank_f.key, f.dst_bank_f.key],
+            f.order_pda,
+            f.record_pda,
+            f.keeper.pubkey(),
+        )
+        .await;
+    f.process(&[start_ix, withdraw_ix, deposit_ix, end_ix])
+        .await?;
+
+    assert_eq!(
+        f.asset_shares(f.src_bank_f.key).await,
+        I80F48::ZERO,
+        "source emptied"
+    );
+    assert_eq!(
+        f.asset_shares(dst2.key).await,
+        old_src,
+        "the whole position landed in the overflow bank"
+    );
+    Ok(())
+}
+
 /// `order.amount` is a TOTAL-value budget across all moves: two sub-cap moves that sum past it are
 /// rejected.
 #[tokio::test]
@@ -2083,26 +2221,6 @@ async fn rebalance_leak_just_under_dust_passes() -> anyhow::Result<()> {
 
 // N->N coverage: structural guards + tip rounding
 
-/// Fewer than 2 referenced banks is rejected up front.
-#[tokio::test]
-async fn rebalance_rejects_single_referenced_bank() -> anyhow::Result<()> {
-    let f = setup(I80F48::from_num(0.0001), 0).await?;
-    let start_ix = f
-        .user
-        .make_rebalance_start_ix(
-            vec![f.bank_meta(f.src_bank_f.key)],
-            vec![rebalance_move(0, 0, DEPOSIT_USDC)],
-            f.order_pda,
-            f.record_pda,
-            f.keeper.pubkey(),
-            f.keeper.pubkey(),
-        )
-        .await;
-    let res = f.process(&[start_ix]).await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceBankNotAllowed);
-    Ok(())
-}
-
 /// A referenced bank of a different mint than the order is rejected.
 #[tokio::test]
 async fn rebalance_rejects_mint_mismatch() -> anyhow::Result<()> {
@@ -2127,7 +2245,11 @@ async fn rebalance_rejects_mint_mismatch() -> anyhow::Result<()> {
     let start_ix = f
         .user
         .make_rebalance_start_ix(
-            vec![f.bank_meta(sol), f.bank_meta(f.dst_bank_f.key)],
+            vec![
+                f.bank_meta(f.src_bank_f.key),
+                f.bank_meta(f.dst_bank_f.key),
+                f.bank_meta(sol),
+            ],
             vec![rebalance_move(0, 1, DEPOSIT_USDC)],
             f.order_pda,
             f.record_pda,
@@ -2291,7 +2413,7 @@ async fn rebalance_consolidate_rejected_when_destination_makes_unhealthy() -> an
         .make_update_rebalance_order_ix(
             f.order_pda,
             payer,
-            Some(vec![f.src_bank_f.key, f.dst_bank_f.key, low_dst.key]),
+            Some(vec![f.src_bank_f.key, low_dst.key]),
             None,
             None,
             None,
@@ -2348,12 +2470,23 @@ async fn rebalance_consolidate_rejected_when_destination_makes_unhealthy() -> an
     Ok(())
 }
 
-/// A move that clears the start gate but whose own market impact inverts the rate advantage is
-/// rejected at end. src carries a small borrow, so draining it to the borrow floor spikes its
-/// utilization (rate ~3%) above the destination, which the inflow drops. The only RebalanceOvershoot
-/// coverage.
+/// A native bank's cached rate ignores the incoming deposit, so the start gate reads the destination
+/// undiluted and the end gate is what catches a move whose own deposit erases the advantage.
 #[tokio::test]
-async fn rebalance_rejects_overshoot() -> anyhow::Result<()> {
+async fn rebalance_rejects_a_move_whose_deposit_erases_the_improvement() -> anyhow::Result<()> {
+    // dst stands at util 0.5 (lending rate 0.300) and clears 0 + 0.1 at start. The arriving 1000
+    // halves its utilization to 0.25 (lending rate 0.075), which no longer clears the margin.
+    let f = setup(I80F48::from_num(0.1), 0).await?;
+    let ixs = f.build_sandwich(f.src_bank_f.key, f.dst_bank_f.key).await;
+    let res = f.process(&ixs).await;
+    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceOvershoot);
+    Ok(())
+}
+
+/// Draining src to its borrow floor spikes src's utilization above the destination's rate, and the
+/// move is accepted: the rate gate reads the source before the move.
+#[tokio::test]
+async fn rebalance_allows_a_move_that_spikes_the_drained_source() -> anyhow::Result<()> {
     let f = setup(I80F48::from_num(0.0001), 0).await?;
     let sol_bank = f.test_f.get_bank(&BankMint::Sol);
     // A SOL-collateralized borrower draws a small 50 USDC from src: start utilization ~5% (rate ~0),
@@ -2421,8 +2554,13 @@ async fn rebalance_rejects_overshoot() -> anyhow::Result<()> {
             f.keeper.pubkey(),
         )
         .await;
-    let res = f.process(&[start_ix, withdraw, deposit, end_ix]).await;
-    assert_custom_error!(res.unwrap_err(), MarginfiError::RebalanceOvershoot);
+    let old_src = f.asset_shares(f.src_bank_f.key).await;
+    f.process(&[start_ix, withdraw, deposit, end_ix]).await?;
+    assert_eq!(
+        f.asset_shares(f.dst_bank_f.key).await,
+        old_src - f.asset_shares(f.src_bank_f.key).await,
+        "the moved shares landed in the destination"
+    );
     Ok(())
 }
 
@@ -2848,7 +2986,8 @@ async fn rebalance_rejects_decoy_juplend_reserve() -> anyhow::Result<()> {
     let decoy = f.juplend_bank.load().await.integration_acc_1;
     let ref_banks = vec![
         RebalanceBankMeta::new(src, f.drift_slice().await),
-        RebalanceBankMeta::with_reserve(dst, decoy, f.juplend_slice().await),
+        RebalanceBankMeta::with_reserve(dst, decoy, f.juplend_slice().await)
+            .with_rewards(f.juplend_rewards().await),
     ];
     let start_ix = f
         .user

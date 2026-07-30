@@ -3,15 +3,22 @@ use crate::marginfi_account::{MarginfiAccountFixture, RebalanceBankMeta};
 use crate::prelude::*;
 use crate::test::TestFixture;
 use anchor_lang::prelude::Clock;
+use anchor_lang::{system_program, InstructionData, ToAccountMetas};
+use drift_mocks::drift::client as drift;
 use drift_mocks::state::MinimalSpotMarket;
 use fixed::types::I80F48;
-use juplend_mocks::state::TokenReserve;
+use juplend_mocks::state::{Lending, TokenReserve};
 use kamino_mocks::state::{CurvePoint, MinimalReserve};
+use marginfi_type_crate::pdas::{
+    derive_drift_spot_market_vault, derive_drift_state, derive_drift_user, derive_drift_user_stats,
+    DRIFT_PROGRAM_ID,
+};
 use marginfi_type_crate::{
     constants::{REBALANCE_ORDER_SEED, REBALANCE_RECORD_SEED},
     pdas::derive_juplend_token_reserve,
     types::{RebalanceMove, RebalanceRecord, WrappedI80F48},
 };
+use solana_sdk::sysvar;
 use solana_sdk::{
     account::{Account, AccountSharedData},
     instruction::{AccountMeta, Instruction},
@@ -648,10 +655,89 @@ impl MultiVenueFixture {
             .set_account(&reserve_key, &AccountSharedData::from(acct));
     }
 
-    /// Drives the Drift dst spot market to a non-trivial borrow utilization by writing only the borrow
-    /// side (`borrow_balance`/`cumulative_borrow_interest` mirror the deposit side scaled by
-    /// `num/den`), so its supply rate clearly beats the 0%-utilization source. Touching only the
-    /// borrow side leaves the deposit-side accounting the venue deposit leg relies on untouched.
+    /// Deposits `amount_native` into the Drift dst spot market through a native Drift lender,
+    /// raising the market's `deposit_balance`.
+    pub async fn seed_drift_liquidity(&self, amount_native: u64) -> anyhow::Result<()> {
+        let bank_state = self.drift_bank.load().await;
+        let spot_market: MinimalSpotMarket =
+            load_and_deserialize(self.test_f.context.clone(), &bank_state.integration_acc_1).await;
+        let lender = self.test_f.payer();
+        let user = derive_drift_user(&lender, 0).0;
+        let user_stats = derive_drift_user_stats(&lender).0;
+        let state = derive_drift_state().0;
+        let source = self
+            .mint
+            .create_token_account_and_mint_to(amount_native as f64 / 1_000_000.0)
+            .await;
+
+        let ix = |accounts: Vec<AccountMeta>, data: Vec<u8>| Instruction {
+            program_id: DRIFT_PROGRAM_ID,
+            accounts,
+            data,
+        };
+        let mut ixs = vec![
+            ix(
+                drift::accounts::InitializeUserStats {
+                    user_stats,
+                    state,
+                    authority: lender,
+                    payer: lender,
+                    rent: sysvar::rent::ID,
+                    system_program: system_program::ID,
+                }
+                .to_account_metas(Some(true)),
+                drift::args::InitializeUserStats {}.data(),
+            ),
+            ix(
+                drift::accounts::InitializeUser {
+                    user,
+                    user_stats,
+                    state,
+                    authority: lender,
+                    payer: lender,
+                    rent: sysvar::rent::ID,
+                    system_program: system_program::ID,
+                }
+                .to_account_metas(Some(true)),
+                drift::args::InitializeUser {
+                    sub_account_id: 0,
+                    name: [0u8; 32],
+                }
+                .data(),
+            ),
+            ix(
+                drift::accounts::Deposit {
+                    state,
+                    user,
+                    user_stats,
+                    authority: lender,
+                    spot_market_vault: derive_drift_spot_market_vault(spot_market.market_index).0,
+                    user_token_account: source.key,
+                    token_program: self.mint.token_program,
+                }
+                .to_account_metas(Some(true)),
+                drift::args::Deposit {
+                    market_index: spot_market.market_index,
+                    amount: amount_native,
+                    reduce_only: false,
+                }
+                .data(),
+            ),
+        ];
+        // Drift loads its risk maps from the remaining accounts (oracles first, then writable spot
+        // markets); the deposited market must appear there or it resolves against an empty map.
+        if let Some(last) = ixs.last_mut() {
+            last.accounts
+                .push(AccountMeta::new(bank_state.integration_acc_1, false));
+        }
+        let blockhash = self.test_f.get_latest_blockhash().await;
+        let ctx = self.test_f.context.borrow_mut();
+        let payer = ctx.payer.pubkey();
+        let tx = Transaction::new_signed_with_payer(&ixs, Some(&payer), &[&ctx.payer], blockhash);
+        ctx.banks_client.process_transaction(tx).await?;
+        Ok(())
+    }
+
     pub async fn set_drift_borrow_utilization(&self, num: u128, den: u128) {
         let spot_market_key = self.drift_bank.load().await.integration_acc_1;
         let ts = self.test_f.get_clock().await.unix_timestamp;
@@ -782,6 +868,22 @@ impl MultiVenueFixture {
             AccountMeta::new_readonly(self.oracle, false),
             AccountMeta::new_readonly(self.juplend_bank.load().await.integration_acc_1, false),
         ]
+    }
+
+    /// Kamino's reward accounts for start/end: its reserve's `LendingMarket`.
+    pub async fn kamino_rewards(&self) -> Vec<Pubkey> {
+        let reserve_key = self.kamino_bank.load().await.integration_acc_1;
+        let reserve =
+            load_and_deserialize::<MinimalReserve>(self.test_f.context.clone(), &reserve_key).await;
+        vec![reserve.lending_market]
+    }
+
+    /// JupLend's reward accounts for start/end: `[rewards_rate_model, f_token_mint]`.
+    pub async fn juplend_rewards(&self) -> Vec<Pubkey> {
+        let lending_key = self.juplend_bank.load().await.integration_acc_1;
+        let lending =
+            load_and_deserialize::<Lending>(self.test_f.context.clone(), &lending_key).await;
+        vec![lending.rewards_rate_model, lending.f_token_mint]
     }
 
     pub async fn process(

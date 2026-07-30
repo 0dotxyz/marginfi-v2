@@ -8,10 +8,11 @@
 //!
 //! - Native marginfi banks: read the cached `lending_rate` (net by construction; fees fall on
 //!   borrowers). Must be fresh (crank `accrue_bank_interest`/`update_bank_cache` first).
-//! - Kamino: `borrow_apr(util) * util * (1 - protocol_take_rate)`.
+//! - Kamino: `borrow_apr(util) * util * (1 - protocol_take_rate)`, rescaled from klend's slot-year
+//!   to a wall-clock year at measured chain pacing.
 //! - Drift: `borrow_apr(util) * util * (1 - insurance_fund.total_factor)`.
 //! - Solend: `borrow_apr(util) * util * (1 - protocol_take_rate)` (3-slope borrow curve).
-//! - JupLend: the Fluid liquidity-layer supply rate (rewards APR is layered on OFF-CHAIN by the
+//! - JupLend: the liquidity-layer supply rate (rewards APR is layered on OFF-CHAIN by the
 //!   keeper; the on-chain figure is the conservative base gate).
 //!
 //! Integration reserve/market accounts MUST be refreshed in the same slot by the caller
@@ -23,55 +24,203 @@ use crate::state::price::{
 };
 use crate::{check, math_error, prelude::*, utils::is_integration_asset_tag};
 use anchor_lang::prelude::*;
+use anchor_spl::token_interface::Mint;
+use drift_mocks::state::MinimalSpotMarket;
 use fixed::types::I80F48;
-use juplend_mocks::state::TokenReserve;
+use juplend_mocks::state::{LendingRewardsRateModel, TokenReserve, EXCHANGE_PRICES_PRECISION};
+use kamino_mocks::state::{MinimalLendingMarket, KLEND_SLOTS_PER_SECOND};
 use marginfi_type_crate::constants::{
     ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
     ASSET_TAG_SOLEND, ASSET_TAG_STAKED,
 };
 use marginfi_type_crate::types::{u32_to_milli, Bank, BankConfig};
 
+/// Accounts a venue needs beyond its rate-bearing account to price its reward emissions, each bound
+/// to the bank's own venue state. Callers that need only the base rate pass the default.
+#[derive(Default, Clone, Copy)]
+pub struct RewardsAccounts<'info> {
+    /// Kamino: the reserve's `LendingMarket`, which caps the emission APR.
+    pub lending_market: Option<&'info AccountInfo<'info>>,
+    /// JupLend: the `LendingRewardsRateModel` the bank's `Lending` references.
+    pub rewards_model: Option<&'info AccountInfo<'info>>,
+    /// JupLend: the fToken mint, whose supply is the rewards denominator.
+    pub ftoken_mint: Option<&'info AccountInfo<'info>>,
+}
+
 /// Supply APR (I80F48, 1.0 == 100%) for `bank`, dispatched on `asset_tag` (the canonical integration
 /// identifier, consistent with the `is_*_asset_tag` checks used across deposit/withdraw). `venue` is
 /// the rate-bearing account (`None` for native, which prices from the bank cache); `token_reserve`
-/// is JupLend's Fluid `TokenReserve` (`None` otherwise). Unknown tags fail rather than default to
+/// is JupLend's `TokenReserve` (`None` otherwise). Unknown tags fail rather than default to
 /// native. The caller refreshes the venue this slot and locates it (see `rate_of`).
 pub fn current_supply_apr<'info>(
     bank: &Bank,
     venue: Option<&'info AccountInfo<'info>>,
     token_reserve: Option<&AccountInfo>,
+    rewards: RewardsAccounts<'info>,
+    extra_native: u64,
     clock: &Clock,
 ) -> MarginfiResult<I80F48> {
     let tag = bank.config.asset_tag;
     if matches!(tag, ASSET_TAG_DEFAULT | ASSET_TAG_SOL | ASSET_TAG_STAKED) {
+        // Native banks price from the stored cache, so `extra_native` does not change the rate.
         return Ok(u32_to_milli(bank.cache.lending_rate));
     }
     let venue = venue.ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
     match tag {
-        ASSET_TAG_KAMINO => kamino_supply_apr(&bank.config, venue, clock),
-        ASSET_TAG_DRIFT => drift_supply_apr(&bank.config, venue, clock),
-        ASSET_TAG_SOLEND => solend_supply_apr(&bank.config, venue),
-        ASSET_TAG_JUPLEND => juplend_supply_apr(&bank.config, venue, token_reserve, clock),
+        ASSET_TAG_KAMINO => kamino_supply_apr(&bank.config, venue, rewards, extra_native, clock),
+        ASSET_TAG_DRIFT => drift_supply_apr(&bank.config, venue, extra_native, clock),
+        ASSET_TAG_SOLEND => solend_supply_apr(&bank.config, venue, extra_native),
+        ASSET_TAG_JUPLEND => juplend_supply_apr(
+            &bank.config,
+            venue,
+            token_reserve,
+            rewards,
+            extra_native,
+            clock,
+        ),
         _ => err!(MarginfiError::InvalidOracleSetup),
     }
 }
 
+/// Rejects a stale Drift market. Drift stamps `last_interest_ts` only while interest accrues, so a
+/// market with no borrows is exempt; its rate is zero.
+fn check_drift_market_fresh(market: &MinimalSpotMarket, clock: &Clock) -> MarginfiResult {
+    check!(
+        !market.is_stale(clock.unix_timestamp) || market.has_no_borrows(),
+        MarginfiError::DriftSpotMarketStale
+    );
+    Ok(())
+}
+
+/// The bank's rate-bearing venue account within `oracle_ais`: the LAST one, since the price oracle,
+/// if any, precedes it. Works for fixed and live-oracle variants alike; native banks have none.
+fn venue_ai<'info>(
+    bank: &Bank,
+    oracle_ais: &'info [AccountInfo<'info>],
+) -> Option<&'info AccountInfo<'info>> {
+    if is_integration_asset_tag(bank.config.asset_tag) {
+        oracle_ais.last()
+    } else {
+        None
+    }
+}
+
+/// Supply APR for `bank` as it would read after `extra_native` NATIVE tokens are supplied to it,
+/// diluting utilization. Pass `0` for the current rate.
+pub fn rate_at<'info>(
+    bank: &Bank,
+    oracle_ais: &'info [AccountInfo<'info>],
+    token_reserve: Option<&AccountInfo>,
+    rewards: RewardsAccounts<'info>,
+    extra_native: u64,
+    clock: &Clock,
+) -> MarginfiResult<I80F48> {
+    current_supply_apr(
+        bank,
+        venue_ai(bank, oracle_ais),
+        token_reserve,
+        rewards,
+        extra_native,
+        clock,
+    )
+}
+
 /// Current supply APR for `bank` (I80F48, 1.0 == 100%), via [`current_supply_apr`] (dispatched on
-/// `asset_tag`). The integration venue is the LAST remaining oracle account: the price oracle, if
-/// any, precedes it, so `oracle_ais.last()` works for fixed and live-oracle variants alike; native
-/// banks have none. `token_reserve` is JupLend's `TokenReserve`.
+/// `asset_tag`). `token_reserve` is JupLend's `TokenReserve`.
 pub fn rate_of<'info>(
     bank: &Bank,
     oracle_ais: &'info [AccountInfo<'info>],
     token_reserve: Option<&AccountInfo>,
+    rewards: RewardsAccounts<'info>,
     clock: &Clock,
 ) -> MarginfiResult<I80F48> {
-    let venue = if is_integration_asset_tag(bank.config.asset_tag) {
-        oracle_ais.last()
-    } else {
-        None
+    current_supply_apr(
+        bank,
+        venue_ai(bank, oracle_ais),
+        token_reserve,
+        rewards,
+        0,
+        clock,
+    )
+}
+
+/// Tokens the bank's underlying venue can still accept, in NATIVE units of the bank's mint; `None`
+/// when the venue has no cap to read. A `Some(n)` bounds a deposit but does not guarantee it lands.
+pub fn venue_remaining_capacity<'info>(
+    bank: &Bank,
+    oracle_ais: &'info [AccountInfo<'info>],
+    clock: &Clock,
+) -> MarginfiResult<Option<u64>> {
+    let tag = bank.config.asset_tag;
+    if !is_integration_asset_tag(tag) {
+        return Ok(None);
+    }
+    let venue = venue_ai(bank, oracle_ais).ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
+    match tag {
+        ASSET_TAG_KAMINO => {
+            let loader = load_kamino_reserve(&bank.config, venue)?;
+            let r = loader.load()?;
+            check!(!r.is_stale(clock.slot), MarginfiError::ReserveStale);
+            Ok(Some(r.remaining_deposit_capacity()))
+        }
+        ASSET_TAG_DRIFT => {
+            let loader = load_drift_spot_market(&bank.config, venue)?;
+            let m = loader.load()?;
+            check_drift_market_fresh(&m, clock)?;
+            Ok(Some(
+                m.remaining_deposit_capacity().ok_or_else(math_error!())?,
+            ))
+        }
+        ASSET_TAG_SOLEND => {
+            let loader = load_solend_reserve(&bank.config, venue)?;
+            let r = loader.load()?;
+            check!(!r.is_stale()?, MarginfiError::SolendReserveStale);
+            Ok(Some(r.remaining_deposit_capacity()?))
+        }
+        // JupLend has no supply cap
+        ASSET_TAG_JUPLEND => Ok(None),
+        _ => err!(MarginfiError::InvalidOracleSetup),
+    }
+}
+
+/// Shortest elapsed slice of an epoch that yields a usable pacing sample.
+const SLOT_PACING_MIN_SAMPLE_SECONDS: i64 = 3_600;
+/// Bounds a real chain has ever paced within; outside them the sample is treated as unusable.
+const SLOT_PACING_MIN_PER_SECOND: u8 = 1;
+const SLOT_PACING_MAX_PER_SECOND: u8 = 4;
+
+/// Slots per second over a `seconds`-long sample, or `None` when the sample is too short to be
+/// meaningful or paces outside anything a live chain produces.
+fn slots_per_second_from(slots: u64, seconds: i64) -> Option<I80F48> {
+    if seconds < SLOT_PACING_MIN_SAMPLE_SECONDS {
+        return None;
+    }
+    let measured = I80F48::from_num(slots).checked_div(I80F48::from_num(seconds))?;
+    (I80F48::from_num(SLOT_PACING_MIN_PER_SECOND)..=I80F48::from_num(SLOT_PACING_MAX_PER_SECOND))
+        .contains(&measured)
+        .then_some(measured)
+}
+
+/// Real slots per second over the elapsed part of the current epoch, for venues that denominate
+/// their rate in slots. Falls back to klend's own convention when the sample is unusable.
+fn measured_slots_per_second(clock: &Clock) -> I80F48 {
+    let nominal = I80F48::from_num(KLEND_SLOTS_PER_SECOND);
+    let Ok(schedule) = EpochSchedule::get() else {
+        return nominal;
     };
-    current_supply_apr(bank, venue, token_reserve, clock)
+    let Some(slots) = clock
+        .slot
+        .checked_sub(schedule.get_first_slot_in_epoch(clock.epoch))
+    else {
+        return nominal;
+    };
+    slots_per_second_from(
+        slots,
+        clock
+            .unix_timestamp
+            .saturating_sub(clock.epoch_start_timestamp),
+    )
+    .unwrap_or(nominal)
 }
 
 // The venue account is supplied by a permissionless keeper, so it must be tied to the bank: these
@@ -80,53 +229,81 @@ pub fn rate_of<'info>(
 fn kamino_supply_apr<'info>(
     bank_config: &BankConfig,
     reserve_ai: &'info AccountInfo<'info>,
+    rewards: RewardsAccounts<'info>,
+    extra_native: u64,
     clock: &Clock,
 ) -> MarginfiResult<I80F48> {
     let loader = load_kamino_reserve(bank_config, reserve_ai)?;
     let r = loader.load()?;
     check!(!r.is_stale(clock.slot), MarginfiError::ReserveStale);
-    Ok(r.supply_apr().ok_or_else(math_error!())?)
+    let extra = I80F48::from_num(extra_native);
+    let slots_per_second = measured_slots_per_second(clock);
+    let base = r
+        .supply_apr_at(extra, slots_per_second)
+        .ok_or_else(math_error!())?;
+
+    // Reward emissions land in the reserve's available liquidity, raising the cToken exchange rate,
+    // so they add to the interest rate on the same base.
+    let market_ai = rewards
+        .lending_market
+        .ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
+    require_keys_eq!(
+        *market_ai.key,
+        r.lending_market,
+        MarginfiError::InvalidBankAccount
+    );
+    let market = AccountLoader::<MinimalLendingMarket>::try_from(market_ai)
+        .map_err(|_| error!(MarginfiError::InvalidBankAccount))?;
+    let max_apr_bps = market.load()?.reserve_rewards_max_apr_bps;
+    let rewards_apr = r
+        .rewards_apr_at(max_apr_bps, extra, slots_per_second)
+        .ok_or_else(math_error!())?;
+    Ok(base.checked_add(rewards_apr).ok_or_else(math_error!())?)
 }
 
 fn drift_supply_apr<'info>(
     bank_config: &BankConfig,
     spot_ai: &'info AccountInfo<'info>,
+    extra_native: u64,
     clock: &Clock,
 ) -> MarginfiResult<I80F48> {
     let loader = load_drift_spot_market(bank_config, spot_ai)?;
     let m = loader.load()?;
-    check!(
-        !m.is_stale(clock.unix_timestamp),
-        MarginfiError::DriftSpotMarketStale
-    );
-    Ok(m.deposit_rate().ok_or_else(math_error!())?)
+    check_drift_market_fresh(&m, clock)?;
+    Ok(m.deposit_rate_at(u128::from(extra_native))
+        .ok_or_else(math_error!())?)
 }
 
 // `SolendMinimalReserve::is_stale` reads the clock itself (slot-based), so no `clock` is needed here.
 fn solend_supply_apr<'info>(
     bank_config: &BankConfig,
     reserve_ai: &'info AccountInfo<'info>,
+    extra_native: u64,
 ) -> MarginfiResult<I80F48> {
     let loader = load_solend_reserve(bank_config, reserve_ai)?;
     let r = loader.load()?;
     check!(!r.is_stale()?, MarginfiError::SolendReserveStale);
-    Ok(r.supply_rate().ok_or_else(math_error!())?)
+    Ok(r.supply_rate_at(I80F48::from_num(extra_native))
+        .ok_or_else(math_error!())?)
 }
 
 /// JupLend liquidity-layer supply rate. `lending_ai` is the bank's Lending account (the venue,
-/// validated against `bank_config.oracle_keys[1]`); `token_reserve` is the Fluid `TokenReserve` it
+/// validated against `bank_config.oracle_keys[1]`); `token_reserve` is the JupLend `TokenReserve` it
 /// references, validated here against `lending.token_reserves_liquidity` before its rate is read.
 fn juplend_supply_apr<'info>(
     bank_config: &BankConfig,
     lending_ai: &'info AccountInfo<'info>,
     token_reserve: Option<&AccountInfo>,
+    rewards: RewardsAccounts<'info>,
+    extra_native: u64,
     clock: &Clock,
 ) -> MarginfiResult<I80F48> {
     let tr = token_reserve.ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
     let loader = load_juplend_lending(bank_config, lending_ai)?;
+    let lending = *loader.load()?;
     require_keys_eq!(
         *tr.key,
-        loader.load()?.token_reserves_liquidity,
+        lending.token_reserves_liquidity,
         MarginfiError::JuplendLendingValidationFailed
     );
 
@@ -136,7 +313,50 @@ fn juplend_supply_apr<'info>(
         !reserve.is_stale(clock.unix_timestamp),
         MarginfiError::JuplendLendingStale
     );
-    Ok(reserve.supply_rate().ok_or_else(math_error!())?)
+    let base = reserve
+        .supply_rate_at(extra_native)
+        .ok_or_else(math_error!())?;
+
+    // The bank holds fTokens, whose price grows by the liquidity-layer return plus the reward
+    // schedule; upstream adds the two before applying them.
+    let model_ai = rewards
+        .rewards_model
+        .ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
+    require_keys_eq!(
+        *model_ai.key,
+        lending.rewards_rate_model,
+        MarginfiError::JuplendLendingValidationFailed
+    );
+    let mint_ai = rewards
+        .ftoken_mint
+        .ok_or(MarginfiError::WrongNumberOfOracleAccounts)?;
+    require_keys_eq!(
+        *mint_ai.key,
+        lending.f_token_mint,
+        MarginfiError::JuplendLendingValidationFailed
+    );
+
+    let model = LendingRewardsRateModel::from_account_data(&model_ai.try_borrow_data()?)
+        .ok_or(error!(MarginfiError::JuplendLendingValidationFailed))?;
+    let ftoken_supply = InterfaceAccount::<Mint>::try_from(mint_ai)
+        .map_err(|_| error!(MarginfiError::JuplendLendingValidationFailed))?
+        .supply;
+    let total_assets = u128::from(lending.token_exchange_price)
+        .checked_mul(u128::from(ftoken_supply))
+        .ok_or_else(math_error!())?
+        .checked_div(EXCHANGE_PRICES_PRECISION)
+        .ok_or_else(math_error!())?;
+    // Emissions are shared over post-deposit TVL; the arriving tokens are in the mint's units,
+    // which is what `total_assets` counts.
+    let rewards_apr = model
+        .rewards_apr(
+            total_assets
+                .checked_add(u128::from(extra_native))
+                .ok_or_else(math_error!())?,
+            clock.unix_timestamp as u64,
+        )
+        .ok_or_else(math_error!())?;
+    Ok(base.checked_add(rewards_apr).ok_or_else(math_error!())?)
 }
 
 /// Every supply-rate path must return I80F48 in the same units (`1.0 == 100%`), so the rebalance
@@ -147,7 +367,7 @@ fn juplend_supply_apr<'info>(
 mod unit_consistency {
     use drift_mocks::state::drift_deposit_rate_from_parts;
     use juplend_mocks::state::juplend_supply_rate_from_parts;
-    use kamino_mocks::state::{kamino_supply_apr_from_parts, CurvePoint};
+    use kamino_mocks::state::{kamino_supply_apr_from_parts, CurvePoint, KLEND_SLOTS_PER_SECOND};
     use marginfi_type_crate::types::{milli_to_u32, u32_to_milli};
     use solend_mocks::state::solend_supply_rate_from_parts;
 
@@ -162,7 +382,8 @@ mod unit_consistency {
         // Native: the bank cache stores the lending rate as a u32 on a 0..1000% scale.
         let native = u32_to_milli(milli_to_u32(pct));
 
-        // Kamino: a flat borrow curve at `target_bps`, evaluated at 100% utilization with no cut.
+        // Kamino: a flat borrow curve at `target_bps`, evaluated at 100% utilization with no cut,
+        // priced at klend's own pacing.
         let mut points = [CurvePoint {
             utilization_rate_bps: 0,
             borrow_rate_bps: target_bps,
@@ -175,6 +396,7 @@ mod unit_consistency {
             I80F48::from_num(1), // borrowed -> 100% utilization
             &points,
             0, // protocol_take_rate_pct
+            I80F48::from_num(KLEND_SLOTS_PER_SECOND),
         )
         .unwrap();
 
@@ -187,13 +409,15 @@ mod unit_consistency {
             1_000_000,    // optimal_utilization (100%)
             rate_1e6,     // optimal_borrow_rate
             rate_1e6 * 2, // max_borrow_rate (not reached below optimal)
+            0,            // min_borrow_rate (no floor)
             0,            // insurance total_factor
         )
         .unwrap();
 
         // Solend: I80F48 ratios. At util == optimal_util, borrow_rate == optimal_borrow_rate; no cut.
         let solend = solend_supply_rate_from_parts(
-            I80F48::from_num(1), // utilization
+            I80F48::from_num(1), // curve_utilization
+            I80F48::from_num(1), // supply_utilization
             I80F48::from_num(1), // optimal_utilization
             I80F48::from_num(1), // max_utilization
             I80F48::ZERO,        // min_borrow_rate
@@ -239,5 +463,32 @@ mod unit_consistency {
             let native_quantized = u32_to_milli(milli_to_u32(expected));
             assert_eq!(native, native_quantized, "native at {target_bps}bps");
         }
+    }
+}
+
+/// Pacing samples accepted for converting slot-denominated rates.
+#[cfg(test)]
+mod slot_pacing {
+    use super::*;
+
+    #[test]
+    fn only_a_live_looking_sample_yields_a_pacing() {
+        // 400ms slots over the minimum one-hour window.
+        assert_eq!(
+            slots_per_second_from(9_000, 3_600).unwrap(),
+            I80F48::from_num(2.5)
+        );
+        assert!(slots_per_second_from(9_000, 3_599).is_none());
+        // The bounds themselves are usable; a hair outside either is not.
+        assert_eq!(
+            slots_per_second_from(3_600, 3_600).unwrap(),
+            I80F48::from_num(SLOT_PACING_MIN_PER_SECOND)
+        );
+        assert_eq!(
+            slots_per_second_from(14_400, 3_600).unwrap(),
+            I80F48::from_num(SLOT_PACING_MAX_PER_SECOND)
+        );
+        assert!(slots_per_second_from(3_599, 3_600).is_none());
+        assert!(slots_per_second_from(14_401, 3_600).is_none());
     }
 }

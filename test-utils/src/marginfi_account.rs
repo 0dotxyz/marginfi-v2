@@ -33,12 +33,13 @@ use transfer_hook::TEST_HOOK_ID;
 pub struct MarginfiAccountConfig {}
 
 /// One bank referenced by a rebalance, for the `remaining_accounts` stream: its bank, an optional
-/// JupLend `TokenReserve`, and its oracle metas. Appended as `[bank] [token_reserve?] [oracles]`.
+/// JupLend `TokenReserve`, rewards, and oracle metas: `[bank] [token_reserve?] [rewards] [oracles]`.
 /// The bank is passed writable so `start_rebalance` can accrue native banks in place.
 #[derive(Clone)]
 pub struct RebalanceBankMeta {
     pub bank: Pubkey,
     pub token_reserve: Option<Pubkey>,
+    pub rewards: Vec<Pubkey>,
     pub oracles: Vec<AccountMeta>,
 }
 
@@ -47,14 +48,26 @@ impl RebalanceBankMeta {
         Self {
             bank,
             token_reserve: None,
+            rewards: vec![],
             oracles,
         }
+    }
+
+    pub fn with_rewards(mut self, rewards: Vec<Pubkey>) -> Self {
+        self.rewards = rewards;
+        self
+    }
+
+    pub fn without_rewards(mut self) -> Self {
+        self.rewards.clear();
+        self
     }
 
     pub fn with_reserve(bank: Pubkey, token_reserve: Pubkey, oracles: Vec<AccountMeta>) -> Self {
         Self {
             bank,
             token_reserve: Some(token_reserve),
+            rewards: vec![],
             oracles,
         }
     }
@@ -63,6 +76,9 @@ impl RebalanceBankMeta {
         accounts.push(AccountMeta::new(self.bank, false));
         if let Some(tr) = self.token_reserve {
             accounts.push(AccountMeta::new_readonly(tr, false));
+        }
+        for r in &self.rewards {
+            accounts.push(AccountMeta::new_readonly(*r, false));
         }
         accounts.extend(self.oracles.clone());
     }
@@ -1213,9 +1229,8 @@ impl MarginfiAccountFixture {
         }
     }
 
-    /// Build `start_rebalance`. `ref_banks` are the distinct banks the moves reference, in index
-    /// order; each goes in `remaining_accounts` as `[bank] [token_reserve?] [oracles]`. `moves`
-    /// declares the value relocations by index.
+    /// Build `start_rebalance`. `ref_banks` are the order's allowlisted banks in index order, each
+    /// going in `remaining_accounts` as `[bank] [token_reserve?] [rewards] [oracles]`.
     pub async fn make_rebalance_start_ix(
         &self,
         ref_banks: Vec<RebalanceBankMeta>,

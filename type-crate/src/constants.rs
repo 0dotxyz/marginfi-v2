@@ -301,7 +301,7 @@ pub mod ix_discriminators {
         [39, 166, 139, 243, 158, 165, 155, 225];
     /// JupLend LENDING program: refreshes the `Lending` fToken account.
     pub const JUPLEND_UPDATE_RATE: [u8; 8] = [24, 225, 53, 189, 72, 212, 225, 178];
-    /// JupLend LIQUIDITY program: refreshes the Fluid `TokenReserve` exchange prices, which is the
+    /// JupLend LIQUIDITY program: refreshes the `TokenReserve` exchange prices, which is the
     /// account the supply-rate gate reads. This is the crank that clears `TokenReserve` staleness.
     pub const JUPLEND_UPDATE_EXCHANGE_PRICE: [u8; 8] = [239, 244, 10, 248, 116, 25, 53, 150];
 }

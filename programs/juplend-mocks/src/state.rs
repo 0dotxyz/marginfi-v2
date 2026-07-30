@@ -7,6 +7,7 @@ pub const LENDING_DISCRIMINATOR: [u8; 8] = [135, 199, 82, 16, 249, 131, 182, 241
 
 // Anchor discriminator = sha256("account:TokenReserve")[0..8].
 pub const TOKEN_RESERVE_DISCRIMINATOR: [u8; 8] = [21, 18, 59, 135, 120, 20, 31, 12];
+pub const REWARDS_RATE_MODEL_DISCRIMINATOR: [u8; 8] = [166, 72, 71, 131, 172, 74, 166, 181];
 
 /// Precision used for exchange prices in JupLend (1e12).
 ///
@@ -239,8 +240,8 @@ impl TokenReserve {
         (self.last_update_timestamp as i64) < current_timestamp
     }
 
-    /// Decode a `TokenReserve` from raw Fluid account data: an 8-byte Anchor discriminator followed by
-    /// the packed body. Because the struct is `#[repr(C, packed)]` (matching Fluid's exact byte layout)
+    /// Decode a `TokenReserve` from raw JupLend account data: an 8-byte Anchor discriminator followed by
+    /// the packed body. Because the struct is `#[repr(C, packed)]` (matching JupLend's exact byte layout)
     /// it can't be borrowed zero-copy via `AccountLoader`, so the body is copied out with an unaligned
     /// read. Returns `None` on a length or discriminator mismatch.
     pub fn from_account_data(data: &[u8]) -> Option<Self> {
@@ -251,19 +252,68 @@ impl TokenReserve {
         bytemuck::try_pod_read_unaligned(&data[8..8 + LEN]).ok()
     }
 
-    /// Fluid liquidity-layer supply rate (I80F48, 1.0 == 100%) from the lagged stored fields. The
+    /// JupLend liquidity-layer supply rate (I80F48, 1.0 == 100%) from the lagged stored fields. The
     /// caller must ensure the reserve was refreshed this slot (see [`TokenReserve::is_stale`]).
     /// Yields zero for an uninitialized reserve and `None` on overflow. Mirrors the supply branch of
     /// `TokenReserve::calculate_exchange_prices`:
     /// https://github.com/Instadapp/fluid-solana-programs/blob/master/programs/liquidity/src/state/token_reserve.rs#L362-L539
     pub fn supply_rate(&self) -> Option<I80F48> {
+        self.supply_rate_at(0)
+    }
+
+    /// Utilization (1e2 scale, 100% == 10_000) after `extra` native tokens are supplied. Both sides
+    /// are scaled by their exchange price, and `extra` is converted to the raw shares it mints.
+    fn utilization_at(&self, extra: u64) -> Option<u128> {
+        let sep = u128::from(self.supply_exchange_price);
+        let bep = u128::from(self.borrow_exchange_price);
+        if sep == 0 || bep == 0 {
+            return None;
+        }
+        let extra_raw = u128::from(extra)
+            .checked_mul(EXCHANGE_PRICES_PRECISION)?
+            .checked_div(sep)?;
+        let scaled_supply = u128::from(self.total_supply_with_interest)
+            .checked_add(extra_raw)?
+            .checked_mul(sep)?
+            .checked_add(
+                u128::from(self.total_supply_interest_free)
+                    .checked_mul(EXCHANGE_PRICES_PRECISION)?,
+            )?;
+        if scaled_supply == 0 {
+            return Some(0);
+        }
+        let scaled_borrow = u128::from(self.total_borrow_with_interest)
+            .checked_mul(bep)?
+            .checked_add(
+                u128::from(self.total_borrow_interest_free)
+                    .checked_mul(EXCHANGE_PRICES_PRECISION)?,
+            )?;
+        scaled_borrow
+            .checked_mul(FOUR_DECIMALS)?
+            .checked_div(scaled_supply)
+    }
+
+    /// [`TokenReserve::supply_rate`] as it would read after `extra` native tokens were supplied.
+    /// Holds the stored `borrow_rate` fixed, modelling only utilization dilution: an upper bound.
+    pub fn supply_rate_at(&self, extra: u64) -> Option<I80F48> {
+        // The stored utilization is authoritative when nothing is added.
+        let utilization = if extra == 0 {
+            u128::from(self.last_utilization)
+        } else {
+            self.utilization_at(extra)?
+        };
         juplend_supply_rate_from_parts(
             u128::from(self.borrow_rate),
             u128::from(self.fee_on_interest),
-            u128::from(self.last_utilization),
+            utilization,
             u128::from(self.supply_exchange_price),
             u128::from(self.borrow_exchange_price),
-            u128::from(self.total_supply_with_interest),
+            u128::from(self.total_supply_with_interest).saturating_add(
+                u128::from(extra)
+                    .saturating_mul(EXCHANGE_PRICES_PRECISION)
+                    .checked_div(u128::from(self.supply_exchange_price))
+                    .unwrap_or(0),
+            ),
             u128::from(self.total_supply_interest_free),
             u128::from(self.total_borrow_with_interest),
             u128::from(self.total_borrow_interest_free),
@@ -271,12 +321,77 @@ impl TokenReserve {
     }
 }
 
-/// Fluid liquidity-layer scale constants: `FOUR_DECIMALS` (1e4) and
+const _: () = assert!(core::mem::size_of::<LendingRewardsRateModel>() == 81);
+
+/// Minimal mirror of JupLend's `LendingRewardsRateModel`, the reward schedule whose emissions grow
+/// `Lending.token_exchange_price` alongside the liquidity-layer supply return.
+/// https://github.com/Instadapp/fluid-solana-programs/blob/master/programs/lendingRewardRateModel/src/state/state.rs#L19-L44
+#[zero_copy]
+#[repr(C, packed)]
+pub struct LendingRewardsRateModel {
+    pub mint: Pubkey,
+    /// TVL below which the rewards rate is zero.
+    pub start_tvl: u64,
+    pub duration: u64,
+    pub start_time: u64,
+    /// Annualized reward for the current phase, in native mint units.
+    pub yearly_reward: u64,
+    pub next_duration: u64,
+    pub next_reward_amount: u64,
+    pub bump: u8,
+}
+
+/// Reward rates are `1e14`-scaled, and clamp at 50%.
+const REWARDS_RATE_PRECISION: u128 = 100_000_000_000_000;
+const MAX_REWARDS_RATE: u128 = 50_000_000_000_000;
+const SECONDS_PER_YEAR: u128 = 31_536_000;
+
+impl LendingRewardsRateModel {
+    pub fn from_account_data(data: &[u8]) -> Option<Self> {
+        const LEN: usize = core::mem::size_of::<LendingRewardsRateModel>();
+        if data.len() < 8 + LEN || data[..8] != REWARDS_RATE_MODEL_DISCRIMINATOR {
+            return None;
+        }
+        bytemuck::try_pod_read_unaligned(&data[8..8 + LEN]).ok()
+    }
+
+    /// Reward APR (I80F48, 1.0 == 100%) earned by fToken holders at `now`, given the lending's
+    /// `total_assets` in native mint units. Zero outside a live phase or below `start_tvl`. The two
+    /// phases are disjoint (the next one starts when the current ends), so at most one is live.
+    /// https://github.com/Instadapp/fluid-solana-programs/blob/master/programs/lendingRewardRateModel/src/state/state.rs#L58-L108
+    pub fn rewards_apr(&self, total_assets: u128, now: u64) -> Option<I80F48> {
+        let (start_time, duration, start_tvl) = (self.start_time, self.duration, self.start_tvl);
+        if total_assets == 0 || total_assets < u128::from(start_tvl) {
+            return Some(I80F48::ZERO);
+        }
+        let end = start_time.checked_add(duration)?;
+        let yearly = if start_time > 0 && now >= start_time && now < end {
+            u128::from(self.yearly_reward)
+        } else {
+            let (next_duration, next_amount) = (self.next_duration, self.next_reward_amount);
+            let next_end = end.checked_add(next_duration)?;
+            if next_amount > 0 && next_duration > 0 && now > end && now < next_end {
+                u128::from(next_amount)
+                    .checked_mul(SECONDS_PER_YEAR)?
+                    .checked_div(u128::from(next_duration))?
+            } else {
+                return Some(I80F48::ZERO);
+            }
+        };
+        let rate = yearly
+            .checked_mul(REWARDS_RATE_PRECISION)?
+            .checked_div(total_assets)?
+            .min(MAX_REWARDS_RATE);
+        I80F48::checked_from_num(rate)?.checked_div(I80F48::from_num(REWARDS_RATE_PRECISION))
+    }
+}
+
+/// JupLend liquidity-layer scale constants: `FOUR_DECIMALS` (1e4) and
 /// `EXCHANGE_PRICE_RATE_OUTPUT_DECIMALS` (1e17).
 const FOUR_DECIMALS: u128 = 10_000;
 const EXCHANGE_PRICE_RATE_OUTPUT_DECIMALS: u128 = 100_000_000_000_000_000;
 
-/// Mirrors Fluid `get_with_interest_vs_free_ratio`: the smaller-over-larger ratio scaled to
+/// Mirrors JupLend `get_with_interest_vs_free_ratio`: the smaller-over-larger ratio scaled to
 /// `FOUR_DECIMALS`.
 /// https://github.com/Instadapp/fluid-solana-programs/blob/master/programs/liquidity/src/state/token_reserve.rs#L67-L94
 fn get_with_interest_vs_free_ratio(with_interest: u128, interest_free: u128) -> u128 {
@@ -346,7 +461,7 @@ pub fn juplend_supply_rate_from_parts(
             - borrow_ratio * EXCHANGE_PRICE_RATE_OUTPUT_DECIMALS / (FOUR_DECIMALS + borrow_ratio)
     };
 
-    // safe_multiply_divide(ratio_supply_yield, borrow_ratio, E17), then * FOUR_DECIMALS / E17. Fluid
+    // safe_multiply_divide(ratio_supply_yield, borrow_ratio, E17), then * FOUR_DECIMALS / E17. JupLend
     // uses u256 here; we checked-mul in u128 (None on overflow is fine for a ranking signal).
     ratio_supply_yield = ratio_supply_yield.checked_mul(borrow_ratio)?
         / EXCHANGE_PRICE_RATE_OUTPUT_DECIMALS
@@ -364,9 +479,78 @@ pub fn juplend_supply_rate_from_parts(
 mod rate_tests {
     use super::*;
 
-    fn approx(actual: I80F48, expected: f64) {
-        let a = actual.to_num::<f64>();
-        assert!((a - expected).abs() < 1e-5, "got {a}, expected {expected}");
+    /// Utilization scales both sides by their exchange price and counts an arriving deposit as the
+    /// raw shares it mints.
+    #[test]
+    fn utilization_scales_by_exchange_prices() {
+        use bytemuck::Zeroable;
+        let mut r = TokenReserve::zeroed();
+        r.supply_exchange_price = 1_030_000_000_000; // 1.03e12
+        r.borrow_exchange_price = 1_070_000_000_000; // 1.07e12
+        r.total_supply_with_interest = 400_000_000_000_000;
+        r.total_borrow_with_interest = 321_783_551_401_869;
+        // scaled: borrow*bep*1e4 / (supply*sep) == 8356 (1e2 scale), matching upstream's formula.
+        assert_eq!(r.utilization_at(0).unwrap(), 8356);
+        // One native unit mints floor(1 * 1e12 / sep) == 0 shares, so utilization must not move.
+        assert_eq!(r.utilization_at(1).unwrap(), 8356);
+    }
+
+    /// A real deposit dilutes utilization: `extra` converts to the raw shares it mints at the supply
+    /// exchange price before entering the scaled ratio.
+    #[test]
+    fn utilization_at_dilutes_by_native_deposit() {
+        use bytemuck::Zeroable;
+        let mut r = TokenReserve::zeroed();
+        r.supply_exchange_price = 1_250_000_000_000; // 1.25e12
+        r.borrow_exchange_price = 1_500_000_000_000; // 1.50e12
+        r.total_supply_with_interest = 500_000_000_000_000;
+        r.total_borrow_with_interest = 400_000_000_000_000;
+        // scaled 600_000 borrow over 625_000 supply == 96%.
+        assert_eq!(r.utilization_at(0).unwrap(), 9_600);
+        // 100_000 tokens (9 dp) mint 80_000 * 1e9 shares, lifting scaled supply to 725_000.
+        assert_eq!(r.utilization_at(100_000_000_000_000).unwrap(), 8_275);
+    }
+
+    /// Emissions are live only strictly inside a phase, floor at `start_tvl`, and clamp at 50%.
+    #[test]
+    fn rewards_apr_across_phases_and_clamp() {
+        use bytemuck::Zeroable;
+        let mut m = LendingRewardsRateModel::zeroed();
+        m.start_tvl = 10_000_000_000_000;
+        m.start_time = 1_750_000_000;
+        m.duration = 7_776_000;
+        m.yearly_reward = 2_000_000_000_000;
+        m.next_duration = 7_884_000;
+        m.next_reward_amount = 500_000_000_000;
+        let end = m.start_time + m.duration;
+        let assets = 64_000_000_000_000u128;
+        // 2e12 yearly over 64e12 assets.
+        assert_eq!(
+            m.rewards_apr(assets, m.start_time + 86_400).unwrap(),
+            I80F48::from_num(1u32) / I80F48::from_num(32u32)
+        );
+        // The next phase annualizes 500_000 over a quarter to the same 2e12.
+        assert_eq!(
+            m.rewards_apr(assets, end + 1).unwrap(),
+            I80F48::from_num(1u32) / I80F48::from_num(32u32)
+        );
+        // Both phases are strict, so the seam between them pays nothing.
+        assert_eq!(m.rewards_apr(assets, end).unwrap(), I80F48::ZERO);
+        assert_eq!(
+            m.rewards_apr(u128::from(m.start_tvl) - 1, m.start_time + 86_400)
+                .unwrap(),
+            I80F48::ZERO
+        );
+        // A yearly reward equal to TVL would pay 100%, above the clamp.
+        let mut c = LendingRewardsRateModel::zeroed();
+        c.start_time = m.start_time;
+        c.duration = m.duration;
+        c.yearly_reward = 1_000_000_000_000;
+        assert_eq!(
+            c.rewards_apr(1_000_000_000_000, c.start_time + 86_400)
+                .unwrap(),
+            I80F48::from_num(0.5)
+        );
     }
 
     #[test]
@@ -384,7 +568,8 @@ mod rate_tests {
             100_000_000_000,
             0,
         );
-        approx(r.unwrap(), 0.033244);
+        // 442 * 8357 * 9000 = 33_244_146_000 at 1e12 scale; floor(that * 2^48 / 1e12).
+        assert_eq!(r.unwrap(), I80F48::from_bits(9_357_395_221_115));
     }
 
     #[test]

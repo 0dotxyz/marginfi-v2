@@ -457,7 +457,7 @@ pub enum MarginfiError {
     RebalanceIncompleteMove, // 6607
     #[msg("Rebalance destination rate not better than source by the required margin")]
     RebalanceNotImproving, // 6608
-    #[msg("Rebalance overshot: destination rate no longer >= source after the move")]
+    #[msg("Rebalance improvement did not survive the move's own market impact")]
     RebalanceOvershoot, // 6609
     #[msg("Rebalance leaked value beyond the allowed dust tolerance")]
     RebalanceValueLeak, // 6610
@@ -473,19 +473,17 @@ pub enum MarginfiError {
     RebalanceMalformedSandwich, // 6615
     #[msg("Rebalance tip cannot be settled until the settlement delay has elapsed")]
     RebalanceSettleTooEarly, // 6616
-    #[msg(
-        "Every referenced rebalance bank must be the source or destination of at least one move"
-    )]
-    RebalanceUnreferencedBank, // 6617
     #[msg("Rebalance deposit/withdraw legs must all act on the rebalanced marginfi account")]
-    RebalanceForeignAccountLeg, // 6618
+    RebalanceForeignAccountLeg, // 6617
     #[msg("Cannot close a rebalance order while its record still holds an unsettled tip")]
-    RebalanceRecordPending, // 6619
+    RebalanceRecordPending, // 6618
     #[msg("Rebalance order requires an active balance in at least one allowed bank")]
-    RebalanceNoAllowlistPosition, // 6620
+    RebalanceNoAllowlistPosition, // 6619
     #[msg("Rebalance opened a balance outside the referenced bank set")]
-    RebalanceUntrackedBalance, // 6621
-                               // **************END AUTO-REBALANCE ERRORS
+    RebalanceUntrackedBalance, // 6620
+    #[msg("Rebalance passed over a higher-rate bank that still has deposit capacity")]
+    RebalanceNotBestVenue, // 6621
+                           // **************END AUTO-REBALANCE ERRORS
 }
 
 impl From<MarginfiError> for ProgramError {
@@ -742,11 +740,11 @@ impl From<u32> for MarginfiError {
             6614 => MarginfiError::RebalanceExceedsAmount,
             6615 => MarginfiError::RebalanceMalformedSandwich,
             6616 => MarginfiError::RebalanceSettleTooEarly,
-            6617 => MarginfiError::RebalanceUnreferencedBank,
-            6618 => MarginfiError::RebalanceForeignAccountLeg,
-            6619 => MarginfiError::RebalanceRecordPending,
-            6620 => MarginfiError::RebalanceNoAllowlistPosition,
-            6621 => MarginfiError::RebalanceUntrackedBalance,
+            6617 => MarginfiError::RebalanceForeignAccountLeg,
+            6618 => MarginfiError::RebalanceRecordPending,
+            6619 => MarginfiError::RebalanceNoAllowlistPosition,
+            6620 => MarginfiError::RebalanceUntrackedBalance,
+            6621 => MarginfiError::RebalanceNotBestVenue,
 
             _ => MarginfiError::InternalLogicError,
         }

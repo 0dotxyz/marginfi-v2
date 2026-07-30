@@ -70,22 +70,22 @@ pub struct SolendMinimalReserve {
     pub config_min_borrow_rate: u8,
     pub config_optimal_borrow_rate: u8,
     pub config_max_borrow_rate: u8,
-    _gap_to_take_rate_a1: [u8; 32],
-    _gap_to_take_rate_a2: [u8; 29],
-    _gap_to_take_rate_b: [u8; 5],
+    // `config.fees` (borrow_fee_wad, flash_loan_fee_wad, host_fee_percentage) precedes the limits.
+    _padding1: [u8; 17],
+    /// Total liquidity ceiling in native mint units; `u64::MAX` is unlimited.
+    pub config_deposit_limit: u64,
+    _padding2: [u8; 32],
+    _padding3: [u8; 9],
     pub config_protocol_take_rate: u8,
 
     pub liquidity_accumulated_protocol_fees_wads: [u8; 16],
 
-    _gap_to_max_util_1: [u8; 64],
-    _gap_to_max_util_2: [u8; 17],
+    _padding4: [u8; 64],
+    _padding5: [u8; 17],
     pub config_max_utilization_rate: u8,
     pub config_super_max_borrow_rate: u64,
-    _gap_after_super_max_1: [u8; 32],
-    _gap_after_super_max_2: [u8; 6],
-    _padding_final_64: [u8; 64],
-    _padding_final_32: [u8; 32],
-    _padding_final_6: [u8; 6],
+    _padding6: [u8; 128],
+    _padding7: [u8; 12],
 }
 
 const _: () = assert!(core::mem::size_of::<SolendMinimalReserve>() == 618);
@@ -132,6 +132,21 @@ impl SolendMinimalReserve {
         Ok(available + borrowed - fees)
     }
 
+    /// Liquidity the reserve still accepts, in native mint units; `u64::MAX` when uncapped. Solend
+    /// rejects on `floor(total_supply + amount) > deposit_limit`, so depositing exactly this is
+    /// accepted.
+    pub fn remaining_deposit_capacity(&self) -> Result<u64> {
+        let limit = self.config_deposit_limit;
+        if limit == u64::MAX {
+            return Ok(u64::MAX);
+        }
+        let ceiling = I80F48::from_num(limit);
+        // Clamping to the limit keeps the conversion exact and maps a corrupt negative supply to zero.
+        let headroom =
+            (ceiling - self.calculate_total_liquidity()?.floor()).clamp(I80F48::ZERO, ceiling);
+        Ok(headroom.checked_to_num::<u64>().unwrap_or(0))
+    }
+
     /// Check if reserve is stale. Mirrors Solend `LastUpdate::is_stale`; with
     /// `STALE_AFTER_SLOTS_ELAPSED` == 1, `last_update_slot < slot` is equivalent (but drops upstream's
     /// explicit `stale` flag):
@@ -157,15 +172,31 @@ impl SolendMinimalReserve {
     /// or a degenerate config. Mirrors `Reserve::current_borrow_rate` netted by `protocol_take_rate`:
     /// https://github.com/solendprotocol/solana-program-library/blob/master/token-lending/sdk/src/state/reserve.rs#L222-L270
     pub fn supply_rate(&self) -> Option<I80F48> {
-        let total_supply = self.calculate_total_liquidity().ok()?;
-        if total_supply <= I80F48::ZERO {
+        self.supply_rate_at(I80F48::ZERO)
+    }
+
+    /// [`SolendMinimalReserve::supply_rate`] as it would read after `extra` native tokens were
+    /// supplied, which dilutes both utilizations.
+    pub fn supply_rate_at(&self, extra: I80F48) -> Option<I80F48> {
+        let total_supply = self.calculate_total_liquidity().ok()?.checked_add(extra)?;
+        // An empty reserve lends at 0%, as upstream's `utilization_rate` early-returns zero; a
+        // negative supply is a corrupt read.
+        if total_supply < I80F48::ZERO {
             return None;
         }
+        if total_supply == I80F48::ZERO {
+            return Some(I80F48::ZERO);
+        }
         let borrowed = decimal_to_i80f48(self.liquidity_borrowed_amount_wads).ok()?;
-        let utilization = borrowed.checked_div(total_supply)?;
+        // The borrow curve uses `borrowed / (borrowed + available)`; the lender's share of that
+        // interest uses `borrowed / total_supply`, which nets off protocol fees.
+        let available = I80F48::from_num(self.liquidity_available_amount).checked_add(extra)?;
+        let curve_utilization = borrowed.checked_div(borrowed.checked_add(available)?)?;
+        let supply_utilization = borrowed.checked_div(total_supply)?;
         let pct = |x: u8| I80F48::from_num(x) / I80F48::from_num(100u8);
         solend_supply_rate_from_parts(
-            utilization,
+            curve_utilization,
+            supply_utilization,
             pct(self.config_optimal_utilization_rate),
             pct(self.config_max_utilization_rate),
             pct(self.config_min_borrow_rate),
@@ -220,7 +251,8 @@ pub fn solend_borrow_rate_from_parts(
 /// Pure Solend net supply rate: `borrow_rate(util) * util * (1 - protocol_take_rate)`.
 #[allow(clippy::too_many_arguments)]
 pub fn solend_supply_rate_from_parts(
-    utilization: I80F48,
+    curve_utilization: I80F48,
+    supply_utilization: I80F48,
     optimal_utilization: I80F48,
     max_utilization: I80F48,
     min_borrow_rate: I80F48,
@@ -230,7 +262,7 @@ pub fn solend_supply_rate_from_parts(
     protocol_take_rate: I80F48,
 ) -> Option<I80F48> {
     let borrow_rate = solend_borrow_rate_from_parts(
-        utilization,
+        curve_utilization,
         optimal_utilization,
         max_utilization,
         min_borrow_rate,
@@ -239,7 +271,7 @@ pub fn solend_supply_rate_from_parts(
         super_max_borrow_rate,
     )?;
     borrow_rate
-        .checked_mul(utilization)?
+        .checked_mul(supply_utilization)?
         .checked_mul(I80F48::ONE.checked_sub(protocol_take_rate)?)
 }
 
@@ -533,62 +565,83 @@ impl CollateralExchangeRate {
 }
 
 #[cfg(test)]
+mod capacity_tests {
+    use super::*;
+    use bytemuck::Zeroable;
+
+    fn reserve(limit: u64, available: u64) -> SolendMinimalReserve {
+        let mut r = SolendMinimalReserve::zeroed();
+        r.config_deposit_limit = limit;
+        r.liquidity_available_amount = available;
+        r
+    }
+
+    #[test]
+    fn capacity_is_the_exact_headroom_to_the_limit() {
+        assert_eq!(
+            reserve(1_000, 900).remaining_deposit_capacity().unwrap(),
+            100
+        );
+        assert_eq!(
+            reserve(1_000, 1_000).remaining_deposit_capacity().unwrap(),
+            0
+        );
+        assert_eq!(
+            reserve(1_000, 1_200).remaining_deposit_capacity().unwrap(),
+            0
+        );
+        assert_eq!(
+            reserve(u64::MAX, 900).remaining_deposit_capacity().unwrap(),
+            u64::MAX
+        );
+    }
+}
+
+#[cfg(test)]
 mod rate_tests {
     use super::*;
 
-    fn approx(actual: I80F48, expected: f64) {
-        let a = actual.to_num::<f64>();
-        assert!((a - expected).abs() < 1e-6, "got {a}, expected {expected}");
-    }
-
     #[test]
     fn supply_rate_below_optimal() {
-        // util 0.5 (< optimal 0.8): borrow = 0.05 + (0.5/0.8)*(0.20-0.05) = 0.14375;
-        // supply = 0.14375 * 0.5 * (1 - 0.10) = 0.0646875.
+        // util 0.375 (< optimal 0.75): borrow = 0.125 + (0.375/0.75)*(0.375-0.125) = 0.25;
+        // supply = 0.25 * 0.375 * (1 - 0.25) = 0.0703125.
         let f = |x: f64| I80F48::from_num(x);
         let r = solend_supply_rate_from_parts(
-            f(0.5),
-            f(0.8),
-            f(0.9),
-            f(0.05),
-            f(0.20),
-            f(0.50),
-            f(2.0),
-            f(0.10),
+            f(0.375),
+            f(0.375),
+            f(0.75),
+            f(0.875),
+            f(0.125),
+            f(0.375),
+            f(0.75),
+            f(3.0),
+            f(0.25),
         );
-        approx(r.unwrap(), 0.0646875);
+        assert_eq!(
+            r.unwrap(),
+            I80F48::from_num(9u32) / I80F48::from_num(128u32)
+        );
     }
 
-    /// The `supply_rate()` method (decodes the WAD `borrowed_amount_wads`, sums total_supply, reads
-    /// the carved-out config bytes) must agree with `solend_supply_rate_from_parts`.
+    /// `supply_rate()` decodes the WAD `borrowed_amount_wads`, sums total_supply, and reads the
+    /// carved-out config bytes as whole percents.
     #[test]
-    fn supply_rate_method_matches_from_parts() {
+    fn supply_rate_method_decodes_wads_and_config() {
         use bytemuck::Zeroable;
-        // available 500 + borrowed 500 - 0 fees -> total_supply 1000; util = 0.5.
+        // The config bytes are whole percents, so every rate here is a multiple of 25% to stay
+        // exactly representable. available 750 + borrowed 250 -> total_supply 1000, util 0.25,
+        // below the 0.5 kink: borrow = 0.25 + (0.25/0.5)*(0.75-0.25) = 0.5; supply = 0.5*0.25*0.5.
         let wad = |x: u128| (x * 1_000_000_000_000_000_000u128).to_le_bytes();
         let mut r = SolendMinimalReserve::zeroed();
-        r.liquidity_available_amount = 500;
-        r.liquidity_borrowed_amount_wads = wad(500);
-        r.config_optimal_utilization_rate = 80;
-        r.config_max_utilization_rate = 90;
-        r.config_min_borrow_rate = 5;
-        r.config_optimal_borrow_rate = 20;
-        r.config_max_borrow_rate = 50;
-        r.config_super_max_borrow_rate = 200;
-        r.config_protocol_take_rate = 10;
-        let pct = |x: u8| I80F48::from_num(x) / I80F48::from_num(100u8);
-        assert_eq!(
-            r.supply_rate(),
-            solend_supply_rate_from_parts(
-                I80F48::from_num(0.5),
-                pct(80),
-                pct(90),
-                pct(5),
-                pct(20),
-                pct(50),
-                I80F48::from_num(200) / I80F48::from_num(100u64),
-                pct(10),
-            )
-        );
+        r.liquidity_available_amount = 750;
+        r.liquidity_borrowed_amount_wads = wad(250);
+        r.config_optimal_utilization_rate = 50;
+        r.config_max_utilization_rate = 75;
+        r.config_min_borrow_rate = 25;
+        r.config_optimal_borrow_rate = 75;
+        r.config_max_borrow_rate = 100;
+        r.config_super_max_borrow_rate = 300;
+        r.config_protocol_take_rate = 50;
+        assert_eq!(r.supply_rate().unwrap(), I80F48::from_num(0.0625));
     }
 }

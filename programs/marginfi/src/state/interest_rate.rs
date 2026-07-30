@@ -646,13 +646,18 @@ mod tests {
     /// must share a basis. The native lender APR is `base_rate(util) * util`; each integration's is
     /// `borrow_rate(util) * util * (1 - cut)`. Configure all three with the SAME linear curve
     /// (slope `m`) and a zero protocol cut: every venue must then yield the same `m * util^2`,
-    /// proving the cross-venue comparison is apples-to-apples.
+    /// proving the cross-venue comparison is apples-to-apples. Kamino denominates against a
+    /// slot-year, so its figure carries the wall-clock scalar for the pacing it is priced at.
     #[test]
     fn integration_supply_rates_share_basis_with_native_lending_rate() {
         use drift_mocks::state::drift_deposit_rate_from_parts;
-        use kamino_mocks::state::{kamino_supply_apr_from_parts, CurvePoint};
+        use kamino_mocks::state::{
+            kamino_supply_apr_from_parts, CurvePoint, KLEND_SLOTS_PER_SECOND,
+        };
 
         let m = 0.40_f64; // 40% APR at 100% utilization
+        let pace = 2.5_f64;
+        let kamino_scalar = pace / KLEND_SLOTS_PER_SECOND as f64;
 
         // Native marginfi: linear base-rate curve (0,0)->(100%, m), zero fees.
         let native = InterestRateConfig {
@@ -690,6 +695,7 @@ mod tests {
                 I80F48::from_num(1000.0 * u),
                 &k_points,
                 0,
+                I80F48::from_num(pace),
             )
             .unwrap()
             .to_num::<f64>();
@@ -703,6 +709,7 @@ mod tests {
                 (m * 1_000_000.0) as u128,
                 1_000_000,
                 0,
+                0,
             )
             .unwrap()
             .to_num::<f64>();
@@ -711,9 +718,10 @@ mod tests {
                 (native_lending - expected).abs() < 1e-3,
                 "native {native_lending} vs {expected} @ u={u}"
             );
+            let kamino_expected = expected * kamino_scalar;
             assert!(
-                (kamino - expected).abs() < 1e-3,
-                "kamino {kamino} vs {expected} @ u={u}"
+                (kamino - kamino_expected).abs() < 1e-3,
+                "kamino {kamino} vs {kamino_expected} @ u={u}"
             );
             assert!(
                 (drift - expected).abs() < 1e-3,

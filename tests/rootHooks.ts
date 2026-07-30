@@ -463,7 +463,7 @@ const extraPrograms: AddedProgram[] = [
     name: "solend",
     programId: new PublicKey("So1endDq2YkqhipRh3WViPa8hdiSpxWy6z3Z6tMCpAo"),
   },
-  // JupLend (Fluid) programs
+  // JupLend programs
   {
     name: "juplend_lending",
     programId: new PublicKey("jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9"),

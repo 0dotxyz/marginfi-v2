@@ -8,6 +8,7 @@ use marginfi_type_crate::types::price::{
 
 // Constants for account discriminators
 pub const RESERVE_DISCRIMINATOR: [u8; 8] = [43, 242, 204, 202, 26, 247, 59, 127];
+pub const LENDING_MARKET_DISCRIMINATOR: [u8; 8] = [246, 114, 50, 98, 72, 157, 28, 120];
 pub const OBLIGATION_DISCRIMINATOR: [u8; 8] = [168, 206, 141, 106, 88, 76, 172, 167];
 
 /// Mirrors Kamino's `CurvePoint` (`BorrowRateCurve` point). bps: 10_000 = 100%.
@@ -30,7 +31,7 @@ pub struct BorrowRateCurve {
 assert_struct_size!(CurvePoint, 8);
 assert_struct_size!(BorrowRateCurve, 88);
 assert_struct_size!(ReserveConfig, 952);
-assert_struct_align!(ReserveConfig, 4);
+assert_struct_align!(ReserveConfig, 8);
 /// Mirrors Kamino's `ReserveConfig` through `borrow_rate_curve`; the remaining trailing fields are
 /// grouped as `_rest`. Total size matches Kamino's `RESERVE_CONFIG_SIZE` (952).
 /// https://github.com/Kamino-Finance/klend/blob/master/programs/klend/src/state/reserve.rs#L1573-L1602
@@ -44,17 +45,24 @@ pub struct ReserveConfig {
     pub block_ctoken_usage: u8,
     pub early_repay_remaining_interest_pct: u8,
     pub emergency_mode: u8,
-    pub _reserved_1: [u8; 4],
+    pub _padding1: [u8; 4],
     pub protocol_order_execution_fee_pct: u8,
     /// Percentage of interest taken by the protocol (0..100). Read as `from_percent(pct)`.
-    /// https://github.com/Kamino-Finance/klend/blob/master/programs/klend/src/state/reserve.rs#L1578
     pub protocol_take_rate_pct: u8,
-    pub _gap_to_curve_a: [u8; 48],
-    pub _gap_to_curve_b: [u8; 1],
+    pub _padding2: [u8; 48],
+    pub _padding3: [u8; 1],
     pub borrow_rate_curve: BorrowRateCurve,
-    pub _rest_1: [u8; 512],
-    pub _rest_2: [u8; 256],
-    pub _rest_3: [u8; 32],
+    pub borrow_factor_pct: u64,
+    /// Total liquidity ceiling in native mint units; `u64::MAX` is unlimited.
+    pub deposit_limit: u64,
+    pub borrow_limit: u64,
+    pub _padding4: [u8; 512],
+    pub _padding5: [u8; 128],
+    pub _padding6: [u8; 96],
+    pub _padding7: [u8; 24],
+    /// Reward tokens emitted per slot, native mint units.
+    pub rewards_amount_per_slot: u64,
+    pub _padding8: [u8; 8],
 }
 
 assert_struct_size!(MinimalReserve, 8616);
@@ -132,16 +140,18 @@ pub struct MinimalReserve {
     pub absolute_referral_rate_sf: [u8; 16],
     /// Token or Token22. If token22, note that Kamino does not support all Token22 extensions.
     pub token_program: Pubkey,
+    /// Undistributed reward tokens, native mint units. `distribute_rewards` moves these into
+    /// `available_amount`, raising the cToken exchange rate.
+    pub rewards_amount_available: u64,
     // Padding to completion of ReserveLiquidity
-    padding2_part1: [u8; 256],
-    padding2_part2: [u8; 128],
-    padding2_part3: [u8; 24],
-    padding3: [u8; 512],
+    _padding1: [u8; 512],
+    _padding2: [u8; 256],
+    _padding3: [u8; 128],
+    _padding4: [u8; 16],
     // end of reserve liquidity
-    padding_part1: [u8; 512],
-    padding_part2: [u8; 512],
-    padding_part3: [u8; 128],
-    padding_part4: [u8; 48],
+    _padding5: [u8; 1024],
+    _padding6: [u8; 128],
+    _padding7: [u8; 48],
 
     // ReserveCollateral section
     /// Mints collateral tokens
@@ -155,26 +165,35 @@ pub struct MinimalReserve {
     /// * A PDA
     pub collateral_supply_vault: Pubkey,
 
-    padding1_reserve_collateral: [u8; 512],
-    padding2_reserve_collateral: [u8; 512],
+    _padding8: [u8; 1024],
 
-    _pre_config_1: [u8; 512],
-    _pre_config_2: [u8; 512],
-    _pre_config_3: [u8; 128],
-    _pre_config_4: [u8; 48],
+    _padding9: [u8; 1024],
+    _padding10: [u8; 128],
+    _padding11: [u8; 48],
     pub config: ReserveConfig,
-    _post_config_1: [u8; 512],
-    _post_config_2: [u8; 512],
-    _post_config_3: [u8; 512],
-    _post_config_4: [u8; 256],
-    _post_config_5: [u8; 128],
-    _post_config_6: [u8; 24],
-    padding4_part2: [u8; 512],
-    padding4_part3: [u8; 256],
-    padding4_part4: [u8; 64],
-    padding4_part5: [u8; 32],
-    padding4_part6: [u8; 8],
+    _padding12: [u8; 2048],
+    _padding13: [u8; 512],
+    _padding14: [u8; 256],
 }
+
+/// Kamino's `LendingMarket`, mirrored only as far as `reserve_rewards_max_apr_bps`, which caps
+/// every reserve's rewards emission. Size matches klend's `LENDING_MARKET_SIZE`.
+/// https://github.com/Kamino-Finance/klend/blob/master/programs/klend/src/state/lending_market.rs#L230
+#[account(zero_copy, discriminator = &LENDING_MARKET_DISCRIMINATOR)]
+#[repr(C)]
+pub struct MinimalLendingMarket {
+    _padding1: [u8; 2048],
+    _padding2: [u8; 1024],
+    _padding3: [u8; 256],
+    _padding4: [u8; 22],
+    /// Ceiling on the APR a reserve may emit as rewards, in bps.
+    pub reserve_rewards_max_apr_bps: u16,
+    _padding5: [u8; 1024],
+    _padding6: [u8; 256],
+    _padding7: [u8; 24],
+}
+
+const _: () = assert!(core::mem::size_of::<MinimalLendingMarket>() == 4656);
 
 // Notable Kamino naming conventions:
 // * `mint_total_supply` aka `total_col` - total amount of collateral tokens that exist
@@ -293,24 +312,126 @@ impl MinimalReserve {
     /// slot (see [`MinimalReserve::is_stale`]). Returns `None` on zero supply or overflow. Mirrors
     /// klend's net-supply derivation:
     /// https://github.com/Kamino-Finance/klend/blob/master/programs/klend/src/state/reserve.rs#L559
-    pub fn supply_apr(&self) -> Option<I80F48> {
+    pub fn supply_apr(&self, slots_per_second: I80F48) -> Option<I80F48> {
+        self.supply_apr_at(I80F48::ZERO, slots_per_second)
+    }
+
+    /// [`MinimalReserve::supply_apr`] as it would read after `extra` native tokens were supplied,
+    /// which dilutes utilization.
+    pub fn supply_apr_at(&self, extra: I80F48, slots_per_second: I80F48) -> Option<I80F48> {
         kamino_supply_apr_from_parts(
-            self.calculate_total_supply_i80f48(),
+            self.calculate_total_supply_i80f48().checked_add(extra)?,
             self.borrowed_amount_sf(),
             &self.config.borrow_rate_curve.points,
             self.config.protocol_take_rate_pct,
+            slots_per_second,
         )
     }
+
+    /// Reward-token APR accruing to cToken holders (I80F48, 1.0 == 100%), additive with
+    /// [`MinimalReserve::supply_apr`]. `max_apr_bps` comes from the reserve's `LendingMarket`.
+    /// https://github.com/Kamino-Finance/klend/blob/master/programs/klend/src/state/reserve.rs#L586-L643
+    pub fn rewards_apr(&self, max_apr_bps: u16, slots_per_second: I80F48) -> Option<I80F48> {
+        self.rewards_apr_at(max_apr_bps, I80F48::ZERO, slots_per_second)
+    }
+
+    /// [`MinimalReserve::rewards_apr`] after `extra` native tokens were supplied; emissions are
+    /// shared over a larger base, so this too dilutes.
+    pub fn rewards_apr_at(
+        &self,
+        max_apr_bps: u16,
+        extra: I80F48,
+        slots_per_second: I80F48,
+    ) -> Option<I80F48> {
+        kamino_rewards_apr_from_parts(
+            self.calculate_total_supply_i80f48().checked_add(extra)?,
+            self.config.rewards_amount_per_slot,
+            self.rewards_amount_available,
+            self.mint_total_supply,
+            max_apr_bps,
+            slots_per_second,
+        )
+    }
+
+    /// Liquidity the reserve still accepts, in native mint units; `u64::MAX` when uncapped.
+    /// https://github.com/Kamino-Finance/klend/blob/master/programs/klend/src/lending_market/lending_operations.rs#L144-L158
+    pub fn remaining_deposit_capacity(&self) -> u64 {
+        // `deposit_reserve_liquidity_and_obligation_collateral` rejects Obsolete (1) and emergency
+        // mode; Hidden (2) and `block_ctoken_usage` do not gate it.
+        if self.config.status == 1 || self.config.emergency_mode != 0 {
+            return 0;
+        }
+        let limit = self.config.deposit_limit;
+        if limit == u64::MAX {
+            return u64::MAX;
+        }
+        let ceiling = I80F48::from_num(limit);
+        let headroom =
+            (ceiling - self.calculate_total_supply_i80f48()).clamp(I80F48::ZERO, ceiling);
+        headroom.floor().checked_to_num::<u64>().unwrap_or(0)
+    }
+}
+
+/// Kamino slots-per-year, at klend's fixed 2-slots-per-second convention.
+const KAMINO_SLOTS_PER_YEAR: u128 = 63_072_000;
+
+/// The slots-per-second [`KAMINO_SLOTS_PER_YEAR`] is built on.
+pub const KLEND_SLOTS_PER_SECOND: u8 = 2;
+
+/// Scales a klend rate from its slot-denominated year to a wall-clock year: klend divides by
+/// [`KAMINO_SLOTS_PER_YEAR`] but accrues over real elapsed slots.
+fn wall_clock_scalar(slots_per_second: I80F48) -> Option<I80F48> {
+    slots_per_second.checked_div(I80F48::from_num(KLEND_SLOTS_PER_SECOND))
+}
+
+/// Pure reward-APR computation from reserve parts, decoupled from account loading for unit testing
+/// and off-chain reuse. Mirrors `distribute_rewards`: the per-slot emission, capped by the market's
+/// APR ceiling and by the remaining reward balance, annualized over the supply base. Returns `None`
+/// on arithmetic failure, and zero when rewards are unconfigured.
+///
+/// The cap is kept fractional where klend floors it against elapsed slots, so this reads slightly
+/// high for a reserve refreshed every slot.
+pub fn kamino_rewards_apr_from_parts(
+    total_supply: I80F48,
+    rewards_amount_per_slot: u64,
+    rewards_amount_available: u64,
+    mint_total_supply: u64,
+    max_apr_bps: u16,
+    slots_per_second: I80F48,
+) -> Option<I80F48> {
+    if max_apr_bps == 0
+        || rewards_amount_per_slot == 0
+        || rewards_amount_available == 0
+        || mint_total_supply == 0
+        || total_supply <= I80F48::ZERO
+    {
+        return Some(I80F48::ZERO);
+    }
+
+    let slots_per_year = I80F48::from_num(KAMINO_SLOTS_PER_YEAR);
+    let cap_per_slot = total_supply
+        .checked_mul(I80F48::from_num(max_apr_bps))?
+        .checked_div(I80F48::from_num(10_000u32).checked_mul(slots_per_year)?)?;
+    let per_slot = I80F48::from_num(rewards_amount_per_slot)
+        .min(cap_per_slot)
+        .min(I80F48::from_num(rewards_amount_available));
+    per_slot
+        .checked_mul(slots_per_year)?
+        .checked_div(total_supply)?
+        .checked_mul(wall_clock_scalar(slots_per_second)?)
 }
 
 /// Pure net-supply-APR computation from reserve parts, decoupled from account loading for unit
 /// testing and off-chain reuse. `total_supply`/`borrowed` are dimensionless I80F48 token units;
-/// `take_rate_pct` is 0..100. Returns `None` on zero supply or arithmetic overflow.
+/// `take_rate_pct` is 0..100; `slots_per_second` is real chain pacing, which converts klend's
+/// slot-denominated year into the wall-clock rate a depositor realizes. Returns `None` on zero
+/// supply or arithmetic overflow.
 pub fn kamino_supply_apr_from_parts(
     total_supply: I80F48,
     borrowed: I80F48,
     points: &[CurvePoint; 11],
     take_rate_pct: u8,
+    slots_per_second: I80F48,
 ) -> Option<I80F48> {
     if total_supply <= I80F48::ZERO {
         return None;
@@ -321,7 +442,8 @@ pub fn kamino_supply_apr_from_parts(
     let protocol_take_rate = I80F48::from_num(take_rate_pct) / I80F48::from_num(100u8);
     borrow_rate
         .checked_mul(utilization)?
-        .checked_mul(I80F48::ONE - protocol_take_rate)
+        .checked_mul(I80F48::ONE - protocol_take_rate)?
+        .checked_mul(wall_clock_scalar(slots_per_second)?)
 }
 
 /// klend `Fraction::from_bps`: bps / 10_000.
@@ -429,10 +551,7 @@ pub struct MinimalObligation {
 
     // Rest of the struct padded out to match size, split into smaller chunks
     // because bytemuck::Zeroable is not implemented for arrays larger than 512 bytes
-    padding_part1: [u8; 512],
-    padding_part2: [u8; 512],
-    padding_part3: [u8; 512],
-    padding_part4: [u8; 512],
+    _padding1: [u8; 2048],
     padding_part5a: [u8; 64],
     padding_part5c: [u8; 24],
 }
@@ -482,8 +601,83 @@ pub fn convert_decimals(n: I80F48, from_dec: u8, to_dec: u8) -> Result<I80F48> {
 // workspace configuration.
 
 #[cfg(test)]
+mod capacity_tests {
+    use super::*;
+    use bytemuck::Zeroable;
+
+    fn reserve(limit: u64, available: u64) -> MinimalReserve {
+        let mut r = MinimalReserve::zeroed();
+        r.config.deposit_limit = limit;
+        r.available_amount = available;
+        r
+    }
+
+    #[test]
+    fn capacity_is_the_exact_headroom_to_the_limit() {
+        assert_eq!(reserve(1_000, 900).remaining_deposit_capacity(), 100);
+        assert_eq!(reserve(1_000, 1_000).remaining_deposit_capacity(), 0);
+        assert_eq!(reserve(1_000, 1_200).remaining_deposit_capacity(), 0);
+        assert_eq!(
+            reserve(u64::MAX, 900).remaining_deposit_capacity(),
+            u64::MAX
+        );
+    }
+
+    /// A reserve that rejects every deposit is full whatever its limit says; Hidden (2) and
+    /// `block_ctoken_usage` are not such states.
+    #[test]
+    fn blocked_reserves_report_no_capacity() {
+        let mut obsolete = reserve(1_000, 0);
+        obsolete.config.status = 1;
+        assert_eq!(obsolete.remaining_deposit_capacity(), 0);
+
+        let mut emergency = reserve(1_000, 0);
+        emergency.config.emergency_mode = 1;
+        assert_eq!(emergency.remaining_deposit_capacity(), 0);
+
+        let mut hidden = reserve(1_000, 0);
+        hidden.config.status = 2;
+        assert_eq!(hidden.remaining_deposit_capacity(), 1_000);
+
+        let mut ctoken_blocked = reserve(1_000, 0);
+        ctoken_blocked.config.block_ctoken_usage = 1;
+        assert_eq!(ctoken_blocked.remaining_deposit_capacity(), 1_000);
+    }
+}
+
+#[cfg(test)]
 mod rate_tests {
     use super::*;
+
+    /// Rewards are annualized from the per-slot emission and bounded by both the market's APR cap
+    /// and the remaining reward balance.
+    #[test]
+    fn rewards_apr_is_bounded_by_cap_and_balance() {
+        let supply = I80F48::from_num(63_072_000u64); // 1 token/slot == 100% APR on this base
+        assert_eq!(
+            kamino_rewards_apr_from_parts(supply, 1, u64::MAX, 1, 20_000, klend_pace()).unwrap(),
+            I80F48::ONE
+        );
+        // The market cap binds first: 625 bps == 6.25%.
+        assert_eq!(
+            kamino_rewards_apr_from_parts(supply, 1, u64::MAX, 1, 625, klend_pace()).unwrap(),
+            I80F48::from_num(0.0625)
+        );
+        // Unconfigured rewards contribute nothing.
+        assert_eq!(
+            kamino_rewards_apr_from_parts(supply, 0, u64::MAX, 1, 20_000, klend_pace()).unwrap(),
+            I80F48::ZERO
+        );
+        assert_eq!(
+            kamino_rewards_apr_from_parts(supply, 1, 0, 1, 20_000, klend_pace()).unwrap(),
+            I80F48::ZERO
+        );
+    }
+
+    /// klend's own pacing convention, at which the wall-clock scalar is exactly 1.
+    fn klend_pace() -> I80F48 {
+        I80F48::from_num(KLEND_SLOTS_PER_SECOND)
+    }
 
     fn cp(util_bps: u32, rate_bps: u32) -> CurvePoint {
         CurvePoint {
@@ -502,72 +696,94 @@ mod rate_tests {
         pts
     }
 
-    fn approx(actual: I80F48, expected: f64) {
-        let a = actual.to_num::<f64>();
-        assert!((a - expected).abs() < 1e-5, "got {a}, expected {expected}");
-    }
-
     #[test]
     fn curve_endpoints_and_interpolation() {
-        let pts = linear_curve(3040); // (0,0)..(100%, 30.4%)
-        approx(
+        let pts = linear_curve(5000); // (0,0)..(100%, 50%)
+        assert_eq!(
             get_borrow_rate_from_points(&pts, I80F48::ZERO).unwrap(),
-            0.0,
+            I80F48::ZERO
         );
-        approx(
+        assert_eq!(
             get_borrow_rate_from_points(&pts, I80F48::ONE).unwrap(),
-            0.304,
+            I80F48::from_num(0.5)
         );
-        approx(
+        assert_eq!(
             get_borrow_rate_from_points(&pts, I80F48::from_num(0.5)).unwrap(),
-            0.152,
+            I80F48::from_num(0.25)
         );
-        // 45% lands between sampled points and must interpolate to exactly 0.45 * 0.304.
-        approx(
-            get_borrow_rate_from_points(&pts, I80F48::from_num(0.45)).unwrap(),
-            0.1368,
+        // 56.25% falls inside the [50%, 60%] segment and interpolates to 0.25 + 0.0625 * 0.5.
+        assert_eq!(
+            get_borrow_rate_from_points(&pts, I80F48::from_num(0.5625)).unwrap(),
+            I80F48::from_num(0.28125)
         );
     }
 
     #[test]
     fn supply_apr_nets_the_take_rate() {
-        let pts = linear_curve(3040);
-        // util 0.5 -> borrow 0.152; supply = 0.152 * 0.5 * (1 - 0.10) = 0.0684.
-        let r =
-            kamino_supply_apr_from_parts(I80F48::from_num(1000), I80F48::from_num(500), &pts, 10);
-        approx(r.unwrap(), 0.0684);
+        let pts = linear_curve(5000);
+        // util 0.5 -> borrow 0.25; supply = 0.25 * 0.5 * (1 - 0.25) = 0.09375.
+        let r = kamino_supply_apr_from_parts(
+            I80F48::from_num(1000),
+            I80F48::from_num(500),
+            &pts,
+            25,
+            klend_pace(),
+        );
+        assert_eq!(r.unwrap(), I80F48::from_num(0.09375));
     }
 
     #[test]
     fn supply_apr_zero_supply_is_none() {
         let pts = linear_curve(3040);
-        assert!(
-            kamino_supply_apr_from_parts(I80F48::ZERO, I80F48::from_num(500), &pts, 10).is_none()
+        assert!(kamino_supply_apr_from_parts(
+            I80F48::ZERO,
+            I80F48::from_num(500),
+            &pts,
+            10,
+            klend_pace()
+        )
+        .is_none());
+    }
+
+    /// klend prices per slot against a year fixed at two slots per second but accrues over real
+    /// slots, so both legs scale by actual pacing. At 2.5 slots/s a depositor realizes 1.25x.
+    #[test]
+    fn rates_scale_with_real_chain_pacing() {
+        let pace = I80F48::from_num(2.5);
+        // util 0.5 -> borrow 0.25; supply = 0.25 * 0.5 = 0.125 at klend's own pacing.
+        let pts = linear_curve(5000);
+        let (supply, borrowed) = (I80F48::from_num(1000), I80F48::from_num(500));
+        assert_eq!(
+            kamino_supply_apr_from_parts(supply, borrowed, &pts, 0, klend_pace()).unwrap(),
+            I80F48::from_num(0.125)
+        );
+        assert_eq!(
+            kamino_supply_apr_from_parts(supply, borrowed, &pts, 0, pace).unwrap(),
+            I80F48::from_num(0.15625)
+        );
+        // 1 token/slot over a 63_072_000 base is 100% at klend's pacing.
+        let base = I80F48::from_num(63_072_000u64);
+        assert_eq!(
+            kamino_rewards_apr_from_parts(base, 1, u64::MAX, 1, 20_000, pace).unwrap(),
+            I80F48::from_num(1.25)
         );
     }
 
-    /// The `supply_apr()` method (decodes the U68F60 `borrowed_amount_sf` and sums
-    /// `calculate_total_supply_i80f48`) must agree with `kamino_supply_apr_from_parts` fed the
-    /// hand-derived total_supply / borrowed.
+    /// `supply_apr()` decodes the U68F60 `borrowed_amount_sf` and nets the three fee balances out of
+    /// `calculate_total_supply_i80f48` before pricing the curve.
     #[test]
-    fn supply_apr_method_matches_from_parts() {
+    fn supply_apr_method_decodes_fees_and_balances() {
         use bytemuck::Zeroable;
-        // available 1000 + borrowed 500 - 0 fees -> total_supply 1500; protocol take 10%.
+        // available 1200 + borrowed 1000 - 200 fees -> total_supply 2000, util 0.5; take 25%.
         let to_u68f60 = |x: u128| (x << 60).to_le_bytes();
         let mut r = MinimalReserve::zeroed();
-        r.available_amount = 1000;
-        r.borrowed_amount_sf = to_u68f60(500);
-        r.config.protocol_take_rate_pct = 10;
-        r.config.borrow_rate_curve.points = linear_curve(3040);
-        let points = r.config.borrow_rate_curve.points;
-        assert_eq!(
-            r.supply_apr(),
-            kamino_supply_apr_from_parts(
-                I80F48::from_num(1500),
-                I80F48::from_num(500),
-                &points,
-                10
-            )
-        );
+        r.available_amount = 1200;
+        r.borrowed_amount_sf = to_u68f60(1000);
+        r.accumulated_protocol_fees_sf = to_u68f60(100);
+        r.accumulated_referrer_fees_sf = to_u68f60(60);
+        r.pending_referrer_fees_sf = to_u68f60(40);
+        r.config.protocol_take_rate_pct = 25;
+        r.config.borrow_rate_curve.points = linear_curve(5000);
+        assert_eq!(r.supply_apr(klend_pace()), Some(I80F48::from_num(0.09375)));
     }
 }

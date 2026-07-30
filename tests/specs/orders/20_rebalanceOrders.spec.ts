@@ -989,10 +989,11 @@ describe("Auto-rebalance orders (native -> native)", () => {
     });
 
     const oldSrc = await assetShares(srcBank);
-    // Referenced banks, indexed 0=src, 1=dst.
+    // The whole allowlist is priced, so every allowed bank is referenced: 0=src, 1=dst, 2=dst2.
     const refBanks: AccountMeta[] = [
       ...bankBlock(srcBank, usdcOracle),
       ...bankBlock(dstBank, usdcOracle),
+      ...bankBlock(dst2Bank, usdcOracle),
     ];
 
     const startIx = await buildStartIx(order, [buildMove(0, 1, 500)], refBanks);
@@ -1251,8 +1252,10 @@ type VenueLeg = {
   cranks: TransactionInstruction[];
   /** The bank's rate/health tail: [priceOracle, venueAccount]. */
   tail: PublicKey[];
-  /** JupLend Fluid TokenReserve for the start/end ix arg; null for Kamino/Drift. */
+  /** JupLend TokenReserve for the start/end ix arg; null for Kamino/Drift. */
   tokenReserve: PublicKey | null;
+  /** Venue accounts the supply rate needs to price reward emissions; empty when the venue has none. */
+  rewards: PublicKey[];
 };
 
 describe("Auto-rebalance orders (venue -> venue)", () => {
@@ -2080,12 +2083,13 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
     const [record] = deriveRebalanceRecord(program.programId, order);
     const [feePool] = deriveRebalanceFeePool(program.programId, ownerAcc);
 
-    // A referenced venue bank block: [bank, (JupLend reserve), priceOracle, venueAccount].
+    // A referenced venue bank block: [bank, (JupLend reserve), rewards..., priceOracle, venueAccount].
     const venueBlock = (bank: PublicKey, leg: VenueLeg): AccountMeta[] => [
       { pubkey: bank, isSigner: false, isWritable: true },
       ...(leg.tokenReserve
         ? [{ pubkey: leg.tokenReserve, isSigner: false, isWritable: false }]
         : []),
+      ...toMeta(leg.rewards),
       ...toMeta(leg.tail),
     ];
     // Referenced banks, indexed 0=src, 1=dst.
@@ -2226,12 +2230,22 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
       order,
       src: {
         bank: kaminoBank,
-        leg: { cranks: await kaminoCranks(), tail: kaminoTail(), tokenReserve: null },
+        leg: {
+          cranks: await kaminoCranks(),
+          tail: kaminoTail(),
+          tokenReserve: null,
+          rewards: [kaminoMarket],
+        },
         withdraw: await kaminoSrcWithdraw(),
       },
       dst: {
         bank: driftBank,
-        leg: { cranks: await driftCranks(), tail: driftTail(), tokenReserve: null },
+        leg: {
+          cranks: await driftCranks(),
+          tail: driftTail(),
+          tokenReserve: null,
+          rewards: [],
+        },
         deposit: await driftDstDeposit(),
       },
     });
@@ -2294,7 +2308,12 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
       order,
       src: {
         bank: driftBank,
-        leg: { cranks: await driftCranks(), tail: driftTail(), tokenReserve: null },
+        leg: {
+          cranks: await driftCranks(),
+          tail: driftTail(),
+          tokenReserve: null,
+          rewards: [],
+        },
         withdraw: await driftSrcWithdraw(),
       },
       dst: {
@@ -2303,6 +2322,7 @@ describe("Auto-rebalance orders (venue -> venue)", () => {
           cranks: await juplendCranks(),
           tail: juplendTail(),
           tokenReserve: juplendPool.tokenReserve,
+          rewards: [juplendPool.lendingRewardsRateModel, juplendPool.fTokenMint],
         },
         deposit: await juplendDstDeposit(),
       },

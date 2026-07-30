@@ -79,11 +79,14 @@ pub trait RebalanceRecordImpl {
     /// Record every referenced bank's start underlying-token amount + the declared moves, and snapshot
     /// every active balance NOT in the referenced set, so `end_rebalance` can reconcile the moves
     /// against real token deltas, prove conservation, and prove untouched balances kept side and shares.
+    /// The referenced set is the order's whole allowlist, so a bank no move touches is still recorded
+    /// and must come back with a zero net delta.
     fn initialize(
         &mut self,
         order: Pubkey,
         executor: Pubkey,
         ref_banks: &[(Pubkey, I80F48)],
+        pre_rates: &[I80F48],
         moves: &[RebalanceMove],
         marginfi_account: &MarginfiAccount,
     ) -> MarginfiResult;
@@ -115,9 +118,14 @@ impl RebalanceRecordImpl for RebalanceRecord {
         order: Pubkey,
         executor: Pubkey,
         ref_banks: &[(Pubkey, I80F48)],
+        pre_rates: &[I80F48],
         moves: &[RebalanceMove],
         marginfi_account: &MarginfiAccount,
     ) -> MarginfiResult {
+        check!(
+            pre_rates.len() == ref_banks.len(),
+            MarginfiError::IllegalBalanceState
+        );
         check!(
             !ref_banks.is_empty()
                 && ref_banks.len() <= MAX_REBALANCE_BANKS
@@ -126,7 +134,6 @@ impl RebalanceRecordImpl for RebalanceRecord {
             MarginfiError::IllegalBalanceState
         );
         // Every move must reference distinct in-range banks and carry a positive amount.
-        let mut referenced = [false; MAX_REBALANCE_BANKS];
         for m in moves {
             check!(
                 (m.src_index as usize) < ref_banks.len()
@@ -135,15 +142,7 @@ impl RebalanceRecordImpl for RebalanceRecord {
                     && I80F48::from(m.amount) > I80F48::ZERO,
                 MarginfiError::IllegalBalanceState
             );
-            referenced[m.src_index as usize] = true;
-            referenced[m.dst_index as usize] = true;
         }
-        // Reject any parsed bank that no move touches: an unused decoy bank contributes nothing to a
-        // relocation yet would be priced and stored, so it must not be in the referenced set.
-        check!(
-            referenced[..ref_banks.len()].iter().all(|&r| r),
-            MarginfiError::RebalanceUnreferencedBank
-        );
         self.order = order;
         self.executor = executor;
         self.ref_banks = [RebalanceRefBank::default(); MAX_REBALANCE_BANKS];
@@ -154,6 +153,10 @@ impl RebalanceRecordImpl for RebalanceRecord {
             };
         }
         self.ref_bank_count = ref_banks.len() as u8;
+        self.pre_rate = [WrappedI80F48::default(); MAX_REBALANCE_BANKS];
+        for (slot, rate) in self.pre_rate.iter_mut().zip(pre_rates.iter()) {
+            *slot = (*rate).into();
+        }
         self.moves = [RebalanceMove::default(); MAX_REBALANCE_MOVES];
         self.moves[..moves.len()].copy_from_slice(moves);
         self.move_count = moves.len() as u8;

@@ -6,15 +6,18 @@
 //!
 //! On-chain guarantees: every referenced bank holds the order's mint and is in the allowed set; each
 //! declared move goes from a lower-rate bank to one beating it by `min_improvement` (pre-move) and
-//! not inverted after the move's own market impact (post-move); the total tokens moved are capped by
-//! the order's `amount` budget (uncapped when the order is unlimited); token principal is conserved
-//! per bank up to a small dust tolerance; snapshotted non-referenced balances keep their side and
-//! shares; the account stays healthy at the maintenance requirement if it borrows; and a per-order
-//! cooldown.
+//! not inverted after the move's own market impact (post-move); no move passes over a higher-rate
+//! referenced bank that still has deposit capacity, measured as the tighter of the bank's own limit
+//! and its venue's; the total tokens moved are capped by the order's `amount` budget (uncapped when
+//! the order is unlimited); token principal is conserved per bank up to a small dust tolerance; the
+//! non-referenced balance set is unchanged, neither altered nor added to; the account stays healthy
+//! at the maintenance requirement if it borrows; and a per-order cooldown.
 //!
-//! Supports native, Kamino, Drift, and JupLend legs. Referenced banks arrive as a deduped, indexed
-//! stream in the remaining accounts; a JupLend bank's `TokenReserve` is read from that stream
-//! (validated against the bank's Lending state).
+//! Supports native, Kamino, Drift, and JupLend legs; Solend banks are rate-visible but have no move
+//! legs and are rejected up front. Referenced banks arrive as a deduped, indexed stream in the
+//! remaining accounts, each block being the bank, then the venue accounts its rate needs, then its
+//! oracles. Every venue account is bound to the bank's own state. `settle_rebalance_tip` reads only
+//! yield indices and so omits the reward accounts.
 //!
 //! Residual risk (accepted): the sandwich forbids in-transaction rate manipulation, but a Jito
 //! bundle can spike a destination's utilization-derived rate in a PRIOR transaction, pass both rate
@@ -45,7 +48,7 @@ use crate::{
         },
         marginfi_group::MarginfiGroupImpl,
         price::OraclePriceFeedAdapter,
-        rate::rate_of,
+        rate::{self, rate_at, rate_of, RewardsAccounts},
         rebalance::{RebalanceOrderImpl, RebalanceRecordImpl},
     },
     utils::is_integration_asset_tag,
@@ -63,7 +66,8 @@ use bytemuck::Zeroable;
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{
-        ASSET_TAG_JUPLEND, REBALANCE_DEFAULT_COOLDOWN_SECONDS, REBALANCE_DEFAULT_MIN_IMPROVEMENT,
+        ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOLEND, EXP_10_I80F48,
+        REBALANCE_DEFAULT_COOLDOWN_SECONDS, REBALANCE_DEFAULT_MIN_IMPROVEMENT,
         REBALANCE_FEE_POOL_SEED, REBALANCE_ORDER_SEED, REBALANCE_RECORD_SEED,
         REBALANCE_SETTLE_DELAY_MAX_SECONDS, REBALANCE_SETTLE_DELAY_MIN_SECONDS,
     },
@@ -122,6 +126,42 @@ fn yield_index_of<'info>(
     Ok(I80F48::from(bank.asset_share_value)
         .checked_mul(venue_multiplier(bank, oracle_ais, clock)?)
         .ok_or_else(math_error!())?)
+}
+
+/// Tokens a rebalance may still deliver into `bank`, in whole-token UI units (the units of
+/// `RebalanceMove.amount`): the tighter of marginfi's `deposit_limit` headroom and the venue's.
+fn deposit_capacity_of<'info>(
+    bank: &Bank,
+    oracle_ais: &'info [AccountInfo<'info>],
+    clock: &Clock,
+) -> MarginfiResult<I80F48> {
+    // marginfi's headroom is in bank-accounting units (cTokens, Drift scaled balance, fTokens), so it
+    // converts through the venue multiplier; the venue's is already in native units of the mint.
+    let own = match bank.get_remaining_deposit_capacity()? {
+        u64::MAX => I80F48::MAX,
+        native => underlying_of(I80F48::from_num(native), bank, oracle_ais, clock)?,
+    };
+    let venue = match rate::venue_remaining_capacity(bank, oracle_ais, clock)? {
+        Some(u64::MAX) | None => I80F48::MAX,
+        Some(native) => calc_value(
+            I80F48::from_num(native),
+            I80F48::ONE,
+            bank.mint_decimals,
+            None,
+        )?,
+    };
+    Ok(own.min(venue))
+}
+
+/// A whole-token UI amount as raw native units of the mint, the form venue rate models take. Inverse
+/// of the scaling `underlying_of` applies.
+fn to_native(mint_decimals: u8, amount: WrappedI80F48) -> MarginfiResult<u64> {
+    I80F48::from(amount)
+        .checked_mul(EXP_10_I80F48[mint_decimals as usize])
+        .ok_or_else(math_error!())?
+        .checked_to_num::<u64>()
+        .ok_or_else(math_error!())
+        .map_err(Into::into)
 }
 
 /// Underlying-token amount (whole-token UI units) of the user's asset position in `bank`. Returns 0 if
@@ -585,17 +625,19 @@ struct ParsedBank<'info> {
     key: Pubkey,
     loader: AccountLoader<'info, Bank>,
     token_reserve: Option<&'info AccountInfo<'info>>,
+    rewards: RewardsAccounts<'info>,
     oracles: &'info [AccountInfo<'info>],
 }
 
 /// Parse the referenced-bank prefix of the rebalance remaining-accounts stream: exactly `bank_count`
-/// blocks, each `[bank] [token_reserve (JupLend only)] [oracles]`, deduped (each referenced bank
+/// blocks, each `[bank] [token_reserve (JupLend only)] [rewards] [oracles]`, deduped (each bank
 /// appears once and moves reference it by index). Returns the parsed banks and the untouched tail
 /// (empty for `start`; the post-move health observation set for `end`).
 fn parse_rebalance_banks<'info>(
     remaining: &'info [AccountInfo<'info>],
     group: &Pubkey,
     bank_count: usize,
+    with_rewards: bool,
 ) -> MarginfiResult<(Vec<ParsedBank<'info>>, &'info [AccountInfo<'info>])> {
     let mut cursor = 0usize;
     let mut banks: Vec<ParsedBank> = Vec::with_capacity(bank_count);
@@ -622,17 +664,38 @@ fn parse_rebalance_banks<'info>(
                 get_remaining_accounts_per_bank(&b)?.saturating_sub(1),
             )
         };
-        let token_reserve = if tag == ASSET_TAG_JUPLEND {
+        // Venue extras precede the oracles: JupLend's `TokenReserve`, then the reward accounts each
+        // venue needs to price its emissions (omitted for callers that only read yield indices).
+        let take = |cursor: &mut usize| -> MarginfiResult<&'info AccountInfo<'info>> {
             require_gt!(
                 remaining.len(),
-                cursor,
+                *cursor,
                 MarginfiError::WrongNumberOfOracleAccounts
             );
-            let t = &remaining[cursor];
-            cursor += 1;
-            Some(t)
+            let ai = &remaining[*cursor];
+            *cursor += 1;
+            Ok(ai)
+        };
+        let token_reserve = if tag == ASSET_TAG_JUPLEND {
+            Some(take(&mut cursor)?)
         } else {
             None
+        };
+        let rewards = if with_rewards {
+            match tag {
+                ASSET_TAG_KAMINO => RewardsAccounts {
+                    lending_market: Some(take(&mut cursor)?),
+                    ..Default::default()
+                },
+                ASSET_TAG_JUPLEND => RewardsAccounts {
+                    rewards_model: Some(take(&mut cursor)?),
+                    ftoken_mint: Some(take(&mut cursor)?),
+                    ..Default::default()
+                },
+                _ => RewardsAccounts::default(),
+            }
+        } else {
+            RewardsAccounts::default()
         };
         require_gte!(
             remaining.len(),
@@ -645,14 +708,14 @@ fn parse_rebalance_banks<'info>(
             key: bank_ai.key(),
             loader,
             token_reserve,
+            rewards,
             oracles,
         });
     }
     Ok((banks, &remaining[cursor..]))
 }
 
-/// Derive the referenced-bank count from a keeper move list: the highest index used, plus one. Every
-/// referenced bank must be touched by some move, so this equals the number of banks to parse.
+/// The highest bank index a keeper move list references, plus one.
 fn referenced_bank_count(moves: &[RebalanceMove]) -> usize {
     moves
         .iter()
@@ -698,15 +761,6 @@ pub fn start_rebalance<'info>(
         !moves.is_empty() && moves.len() <= MAX_REBALANCE_MOVES,
         MarginfiError::IllegalBalanceState
     );
-    let bank_count = referenced_bank_count(&moves);
-    check!(
-        (2..=MAX_REBALANCE_BANKS).contains(&bank_count),
-        MarginfiError::RebalanceBankNotAllowed
-    );
-
-    let (banks, tail) = parse_rebalance_banks(remaining, &group_key, bank_count)?;
-    check!(tail.is_empty(), MarginfiError::WrongNumberOfOracleAccounts);
-
     let order = ctx.accounts.rebalance_order.load()?;
     check!(
         (clock.unix_timestamp as u64)
@@ -716,8 +770,18 @@ pub fn start_rebalance<'info>(
                 .ok_or_else(math_error!())?,
         MarginfiError::RebalanceCooldown
     );
-    let allowed = &order.allowed_banks[..order.allowed_bank_count as usize];
+    // The parsed set is the order's whole allowlist, not only the banks the moves touch.
+    let bank_count = order.allowed_bank_count as usize;
+    check!(
+        (2..=MAX_REBALANCE_BANKS).contains(&bank_count)
+            && referenced_bank_count(&moves) <= bank_count,
+        MarginfiError::RebalanceBankNotAllowed
+    );
+    let allowed = &order.allowed_banks[..bank_count];
     let min_imp = I80F48::from(order.min_improvement);
+
+    let (banks, tail) = parse_rebalance_banks(remaining, &group_key, bank_count, true)?;
+    check!(tail.is_empty(), MarginfiError::WrongNumberOfOracleAccounts);
 
     // Freshen native banks before reading their rates (integration banks were refreshed by the
     // keeper's venue crank, enforced by the staleness check inside `rate_of`).
@@ -730,8 +794,11 @@ pub fn start_rebalance<'info>(
     // underlying amount after it clears the allowlist + mint checks.
     let account = ctx.accounts.marginfi_account.load()?;
     let mut rates: Vec<I80F48> = Vec::with_capacity(banks.len());
+    let mut capacity: Vec<I80F48> = Vec::with_capacity(banks.len());
     let mut ref_banks: Vec<(Pubkey, I80F48)> = Vec::with_capacity(banks.len());
     for parsed in banks.iter() {
+        // `parse_rebalance_banks` rejects duplicates and yields exactly `allowed.len()` banks, so
+        // membership here makes the parsed set the allowlist exactly.
         check!(
             allowed.contains(&parsed.key),
             MarginfiError::RebalanceBankNotAllowed
@@ -741,20 +808,75 @@ pub fn start_rebalance<'info>(
             bank.mint == order.mint,
             MarginfiError::RebalanceMintMismatch
         );
-        let rate = rate_of(&bank, parsed.oracles, parsed.token_reserve, &clock)?;
+        check!(
+            bank.config.asset_tag != ASSET_TAG_SOLEND,
+            MarginfiError::RebalanceVenueUnsupported
+        );
+        let rate = rate_of(
+            &bank,
+            parsed.oracles,
+            parsed.token_reserve,
+            parsed.rewards,
+            &clock,
+        )?;
         let pre = bank_underlying(&account, &parsed.key, &bank, parsed.oracles, &clock)?;
         rates.push(rate);
+        capacity.push(deposit_capacity_of(&bank, parsed.oracles, &clock)?);
         ref_banks.push((parsed.key, pre));
     }
 
-    // Every declared move must go from a lower-rate bank to one that beats it by the margin.
+    // Tokens each bank receives across all declared moves.
+    let mut inflow = vec![I80F48::ZERO; banks.len()];
     for m in moves.iter() {
-        let src_rate = rates[m.src_index as usize];
-        let dst_rate = rates[m.dst_index as usize];
+        let d = m.dst_index as usize;
+        inflow[d] = inflow[d]
+            .checked_add(I80F48::from(m.amount))
+            .ok_or_else(math_error!())?;
+    }
+
+    // Destination rates are evaluated after the move's own deposit, every candidate at the same amount.
+    for m in moves.iter() {
+        let d = m.dst_index as usize;
+        let dst = &banks[d];
+        let (amount_native, dst_rate) = {
+            let bank = dst.loader.load()?;
+            let amount_native = to_native(bank.mint_decimals, m.amount)?;
+            let rate = rate_at(
+                &bank,
+                dst.oracles,
+                dst.token_reserve,
+                dst.rewards,
+                amount_native,
+                &clock,
+            )?;
+            (amount_native, rate)
+        };
+        // The destination must beat the source, as the source stands today, by the margin.
         check!(
-            dst_rate > src_rate.checked_add(min_imp).ok_or_else(math_error!())?,
+            dst_rate
+                > rates[m.src_index as usize]
+                    .checked_add(min_imp)
+                    .ok_or_else(math_error!())?,
             MarginfiError::RebalanceNotImproving
         );
+        // Banks this execution has already filled to their deposit capacity are skipped; no other
+        // bank may beat the destination at the same deposit amount.
+        for i in 0..banks.len() {
+            if i == d || inflow[i] >= capacity[i] {
+                continue;
+            }
+            let other = &banks[i];
+            let other_bank = other.loader.load()?;
+            let candidate = rate_at(
+                &other_bank,
+                other.oracles,
+                other.token_reserve,
+                other.rewards,
+                amount_native,
+                &clock,
+            )?;
+            check!(candidate <= dst_rate, MarginfiError::RebalanceNotBestVenue);
+        }
     }
 
     {
@@ -763,6 +885,7 @@ pub fn start_rebalance<'info>(
             ctx.accounts.rebalance_order.key(),
             ctx.accounts.executor.key(),
             &ref_banks,
+            &rates,
             &moves,
             &account,
         )?;
@@ -829,7 +952,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
     let group_key = ctx.accounts.group.key();
     let remaining = ctx.remaining_accounts;
 
-    let (ref_keys, order_amount, keeper_tip, settle_delay) = {
+    let (ref_keys, order_amount, keeper_tip, settle_delay, min_imp) = {
         let record = ctx.accounts.rebalance_record.load()?;
         let order = ctx.accounts.rebalance_order.load()?;
         // A record is finalized (move_timestamp set) exactly once. Exactly one start runs per
@@ -852,12 +975,13 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
                 REBALANCE_SETTLE_DELAY_MIN_SECONDS,
                 REBALANCE_SETTLE_DELAY_MAX_SECONDS,
             ),
+            I80F48::from(order.min_improvement),
         )
     };
 
     // Remaining layout: [referenced bank blocks][post-move health observation set]. Parse exactly the
     // recorded banks (order and identity must match the record's indices); the tail is the health set.
-    let (banks, health_obs) = parse_rebalance_banks(remaining, &group_key, ref_keys.len())?;
+    let (banks, health_obs) = parse_rebalance_banks(remaining, &group_key, ref_keys.len(), true)?;
     for (parsed, key) in banks.iter().zip(ref_keys.iter()) {
         require_keys_eq!(parsed.key, *key, MarginfiError::InvalidBankAccount);
     }
@@ -878,6 +1002,7 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
                 &bank,
                 parsed.oracles,
                 parsed.token_reserve,
+                parsed.rewards,
                 &clock,
             )?);
             post_underlying.push(bank_underlying(
@@ -894,8 +1019,12 @@ pub fn end_rebalance<'info>(ctx: Context<'info, EndRebalance<'info>>) -> Marginf
         // after the move's own market impact).
         let record = ctx.accounts.rebalance_record.load()?;
         for m in record.active_moves() {
+            // The destination is measured AFTER its own deposit diluted it; the source is the rate it
+            // stood at before the move.
+            let pre_src = I80F48::from(record.pre_rate[m.src_index as usize]);
             check!(
-                post_rates[m.dst_index as usize] >= post_rates[m.src_index as usize],
+                post_rates[m.dst_index as usize]
+                    > pre_src.checked_add(min_imp).ok_or_else(math_error!())?,
                 MarginfiError::RebalanceOvershoot
             );
         }
@@ -1124,7 +1253,7 @@ pub fn settle_rebalance_tip<'info>(
         MarginfiError::RebalanceSettleTooEarly
     );
 
-    let (banks, _tail) = parse_rebalance_banks(remaining, &group_key, ref_keys.len())?;
+    let (banks, _tail) = parse_rebalance_banks(remaining, &group_key, ref_keys.len(), false)?;
     for (parsed, key) in banks.iter().zip(ref_keys.iter()) {
         require_keys_eq!(parsed.key, *key, MarginfiError::InvalidBankAccount);
     }
