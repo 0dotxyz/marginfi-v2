@@ -12,18 +12,6 @@ pub fn lending_pool_close_bank(ctx: Context<LendingPoolCloseBank>) -> MarginfiRe
     let bank = ctx.accounts.bank.load()?;
     let group = ctx.accounts.marginfi_group.load()?;
 
-    require_eq!(
-        group.admin,
-        *ctx.accounts.admin.key,
-        MarginfiError::Unauthorized
-    );
-
-    require_eq!(
-        bank.group,
-        ctx.accounts.marginfi_group.key(),
-        MarginfiError::InvalidGroup
-    );
-
     // banks created prior to 0.1.4 can never be closed because we cannot guarantee an accurate
     // position count for those banks.
     check!(
@@ -62,10 +50,11 @@ pub struct LendingPoolCloseBank<'info> {
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
     #[account(
         mut,
-        close = admin
+        close = admin,
+        constraint = bank.load()?.group == marginfi_group.key() @ MarginfiError::InvalidGroup
     )]
     pub bank: AccountLoader<'info, Bank>,
 
-    #[account(mut)]
+    #[account(mut, constraint = marginfi_group.load()?.admin == admin.key() @ MarginfiError::Unauthorized)]
     pub admin: Signer<'info>,
 }

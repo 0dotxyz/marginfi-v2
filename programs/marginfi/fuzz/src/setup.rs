@@ -1,15 +1,10 @@
 use anchor_lang::prelude::*;
 use anchor_lang::prelude::{AccountInfo, AccountLoader, Context, Program, Rent, Signer};
 use fixed_macro::types::I80F48;
-use marginfi_type_crate::types::{
-    FeeState, MarginfiGroup,
-};
+use marginfi_type_crate::types::{FeeState, MarginfiGroup};
 use std::mem::size_of;
 
-use crate::{
-    account_state::AccountsState,
-    utils::account_info_ref_lifetime_shortener as airls,
-};
+use crate::{account_state::AccountsState, utils::account_info_ref_lifetime_shortener as airls};
 use marginfi_type_crate::types::MarginfiAccount;
 
 pub fn sort_balances<'a>(marginfi_account_ai: &'a AccountInfo<'a>) {
@@ -35,6 +30,7 @@ pub fn set_discriminator<T: Discriminator>(ai: AccountInfo) {
 pub fn initialize_marginfi_group<'a>(
     state: &'a AccountsState,
     admin: AccountInfo<'a>,
+    bank_admin: AccountInfo<'a>,
     fee_state: AccountInfo<'a>,
     system_program: AccountInfo<'a>,
 ) -> AccountInfo<'a> {
@@ -84,6 +80,24 @@ pub fn initialize_marginfi_group<'a>(
         None,
         None,
         None,
+    )
+    .unwrap();
+
+    marginfi::instructions::marginfi_group::set_bank_admin(
+        Context::new(
+            &marginfi::ID,
+            &mut marginfi::instructions::SetBankAdmin {
+                marginfi_group: AccountLoader::try_from_unchecked(
+                    &program_id,
+                    airls(&marginfi_group),
+                )
+                .unwrap(),
+                signer: Signer::try_from(airls(&admin)).unwrap(),
+            },
+            &[],
+            Default::default(),
+        ),
+        bank_admin.key(),
     )
     .unwrap();
 

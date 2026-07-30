@@ -698,12 +698,16 @@ export const disableStakedOracles = (
   group: PublicKey,
   admin?: PublicKey,
 ) => {
+  const [stakedSettingsKey] = deriveStakedSettings(
+    program.programId,
+    group,
+  );
   const ix = program.methods
     .disableStakedOracles()
     .accounts({
       group,
     })
-    .accountsPartial({ admin })
+    .accountsPartial({ admin, stakedSettings: stakedSettingsKey })
     .instruction();
 
   return ix;
@@ -714,12 +718,16 @@ export const enableStakedOracleOnramp = (
   group: PublicKey,
   admin?: PublicKey,
 ) => {
+  const [stakedSettingsKey] = deriveStakedSettings(
+    program.programId,
+    group,
+  );
   const ix = program.methods
     .enableStakedOracleOnramp()
     .accounts({
       group,
     })
-    .accountsPartial({ admin })
+    .accountsPartial({ admin, stakedSettings: stakedSettingsKey })
     .instruction();
 
   return ix;

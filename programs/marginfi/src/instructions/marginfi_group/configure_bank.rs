@@ -14,19 +14,8 @@ use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use fixed::types::I80F48;
 use marginfi_type_crate::{
     constants::{CIRCUIT_BREAKER_ENABLED, FREEZE_SETTINGS},
-    types::{Bank, BankConfigOpt, BankOperationalState, MarginfiGroup},
+    types::{Bank, BankConfigOpt, MarginfiGroup},
 };
-
-fn assert_bank_config_authority(
-    group: &MarginfiGroup,
-    signer: &Pubkey,
-    bank_config: &BankConfigOpt,
-    current_operational_state: BankOperationalState,
-) -> MarginfiResult {
-    bank_config
-        .required_authority()
-        .authorize(group, signer, current_operational_state)
-}
 
 pub fn lending_pool_configure_bank(
     ctx: Context<LendingPoolConfigureBank>,
@@ -37,10 +26,9 @@ pub fn lending_pool_configure_bank(
 
     let current_operational_state = bank.config.operational_state;
 
-    assert_bank_config_authority(
+    bank_config.required_authority().authorize(
         &group,
         ctx.accounts.signer.key,
-        &bank_config,
         current_operational_state,
     )?;
 

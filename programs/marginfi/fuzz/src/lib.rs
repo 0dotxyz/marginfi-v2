@@ -13,16 +13,18 @@ use arbitrary_helpers::{
 use bank_accounts::{get_bank_map, BankAccounts};
 use fixed::types::I80F48;
 use fixed_macro::types::I80F48;
-use marginfi::{errors::MarginfiError, instructions::LendingPoolAddBankBumps, state::bank::BankVaultType};
-use marginfi::{instructions::LendingPoolConfigureBankOracleBumps};
+use marginfi::instructions::LendingPoolConfigureBankOracleBumps;
+use marginfi::{
+    errors::MarginfiError, instructions::LendingPoolAddBankBumps, state::bank::BankVaultType,
+};
 use marginfi_type_crate::types::{
     centi_to_u32, make_points, milli_to_u32, RatePoint, INTEREST_CURVE_SEVEN_POINT,
 };
 use marginfi_type_crate::{
     constants::FEE_STATE_SEED,
     types::{
-        Bank, BankConfigCompact, BankOperationalState, InterestRateConfig,
-        MarginfiAccount, RiskTier,
+        Bank, BankConfigCompact, BankOperationalState, InterestRateConfig, MarginfiAccount,
+        RiskTier,
     },
 };
 use metrics::{MetricAction, Metrics};
@@ -85,6 +87,7 @@ impl<'state> MarginfiFuzzContext<'state> {
         let marginfi_group = initialize_marginfi_group(
             state,
             admin.clone(),
+            bank_admin.clone(),
             fee_state.clone(),
             system_program.clone(),
         );
@@ -244,7 +247,7 @@ impl<'state> MarginfiFuzzContext<'state> {
         };
 
         {
-            let res = marginfi::instructions::marginfi_group::lending_pool_add_bank(
+            marginfi::instructions::marginfi_group::lending_pool_add_bank(
                 Context::new(
                     &marginfi::ID,
                     &mut marginfi::instructions::LendingPoolAddBank {
@@ -310,13 +313,9 @@ impl<'state> MarginfiFuzzContext<'state> {
                     oracle_max_age: 100,
                     ..Default::default()
                 },
-            );
-            
-            if res.is_err() {
-                return;
-            }
+            )
+            .unwrap();
         }
-
         set_discriminator::<Bank>(bank.clone());
 
         {
@@ -592,7 +591,7 @@ impl<'state> MarginfiFuzzContext<'state> {
         withdraw_all: Option<bool>,
     ) -> anyhow::Result<()> {
         self.refresh_oracle_accounts();
-        
+
         if account_idx.0 as usize >= self.marginfi_accounts.len()
             || bank_idx.0 as usize >= self.banks.len()
         {
@@ -710,7 +709,7 @@ impl<'state> MarginfiFuzzContext<'state> {
         }
 
         let bank = &self.banks[bank_idx.0 as usize];
-        
+
         let cache = AccountInfoCache::new(&[
             marginfi_account.margin_account.clone(),
             bank.bank.clone(),
@@ -792,13 +791,13 @@ impl<'state> MarginfiFuzzContext<'state> {
         asset_amount: &AssetAmount,
     ) -> anyhow::Result<()> {
         self.refresh_oracle_accounts();
-        
+
         if liquidator_idx.0 as usize >= self.marginfi_accounts.len()
             || liquidatee_idx.0 as usize >= self.marginfi_accounts.len()
         {
             return Ok(());
         }
-        
+
         let liquidator_account = &self.marginfi_accounts[liquidator_idx.0 as usize];
         let liquidatee_account = &self.marginfi_accounts[liquidatee_idx.0 as usize];
         sort_balances(airls(&liquidator_account.margin_account));
@@ -1068,11 +1067,11 @@ impl<'state> MarginfiFuzzContext<'state> {
         price_change: &PriceChange,
     ) -> anyhow::Result<()> {
         log!("Action: Update Oracle");
-        
+
         if bank_idx.0 as usize >= self.banks.len() {
             return Ok(());
         }
-        
+
         let bank = &self.banks[bank_idx.0 as usize];
 
         bank.update_oracle(price_change.0)?;
