@@ -535,8 +535,13 @@ pub mod marginfi {
     }
 
     /// (admin only) Close a bank. Requires CLOSE_ENABLED_FLAG and zero positions/shares.
-    pub fn lending_pool_close_bank(ctx: Context<LendingPoolCloseBank>) -> MarginfiResult {
-        marginfi_group::lending_pool_close_bank(ctx)
+    /// Pass `force_close = Some(true)` to bypass the CLOSE_ENABLED_FLAG and open-position checks
+    /// (zero-shares/emissions are still required).
+    pub fn lending_pool_close_bank(
+        ctx: Context<LendingPoolCloseBank>,
+        force_close: Option<bool>,
+    ) -> MarginfiResult {
+        marginfi_group::lending_pool_close_bank(ctx, force_close)
     }
 
     /// (account authority) Transfer all positions to a new account under a new authority. The old
