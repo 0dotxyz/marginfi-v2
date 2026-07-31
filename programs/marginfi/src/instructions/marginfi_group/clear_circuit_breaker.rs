@@ -36,7 +36,7 @@ pub fn lending_pool_clear_circuit_breaker(
         ctx.accounts.bank.key(),
     )?;
     let prior_tier = bank.cb_tier;
-    bank.reset_cb_runtime_state();
+    bank.reset_cb_runtime_state(now);
     if reseed_reference {
         bank.cb_reference_price = WrappedI80F48::from(I80F48::ZERO);
         bank.cb_window_reference_price = WrappedI80F48::from(I80F48::ZERO);
