@@ -6,6 +6,7 @@ use crate::state::lst_stake_price::{
     expected_staked_onramp, legacy_staked_pool_delegated_value, load_exponent_vault,
     load_marinade_state, marinade_price_multiplier, pt_linear_multiplier,
     stake_pool_price_multiplier, staked_pool_net_asset_value, validate_marinade_state_account,
+    validate_stake_pool_account,
 };
 use crate::{check, check_eq, debug, math_error, prelude::*};
 use anchor_lang::prelude::*;
@@ -1050,7 +1051,7 @@ impl OraclePriceFeedAdapter {
 
                 check_primary_oracle_key(bank_config, account_info)?;
 
-                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 1, None)?;
+                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 1)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
@@ -1086,7 +1087,7 @@ impl OraclePriceFeedAdapter {
                 ensure_kamino_reserve_fresh(&reserve, clock)?;
                 let kamino_rate = kamino_price_multiplier(&reserve)?;
 
-                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 2, None)?;
+                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 2)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
@@ -1123,7 +1124,7 @@ impl OraclePriceFeedAdapter {
                 ensure_juplend_lending_fresh(&lending, clock)?;
                 let juplend_rate = juplend_price_multiplier(&lending)?;
 
-                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 2, None)?;
+                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 2)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
@@ -1664,7 +1665,7 @@ impl OraclePriceFeedAdapter {
                 check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 load_price_update_v2_checked(&oracle_ais[0])?;
 
-                validate_marinade_state_account(bank_config, &oracle_ais[1], 1, Some(bank_mint))?;
+                validate_marinade_state_account(bank_config, &oracle_ais[1], 1, bank_mint)?;
                 Ok(())
             }
             OracleSetup::KaminoMSOL => {
@@ -1688,7 +1689,7 @@ impl OraclePriceFeedAdapter {
                     bank_config.oracle_keys[1],
                     MarginfiError::KaminoReserveValidationFailed
                 );
-                validate_marinade_state_account(bank_config, &oracle_ais[2], 2, Some(bank_mint))?;
+                validate_marinade_state_account(bank_config, &oracle_ais[2], 2, bank_mint)?;
                 Ok(())
             }
             OracleSetup::JuplendMSOL => {
@@ -1712,7 +1713,7 @@ impl OraclePriceFeedAdapter {
                     bank_config.oracle_keys[1],
                     MarginfiError::JuplendLendingValidationFailed
                 );
-                validate_marinade_state_account(bank_config, &oracle_ais[2], 2, Some(bank_mint))?;
+                validate_marinade_state_account(bank_config, &oracle_ais[2], 2, bank_mint)?;
                 Ok(())
             }
             OracleSetup::PythLST => {
@@ -1731,7 +1732,7 @@ impl OraclePriceFeedAdapter {
                 check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 load_price_update_v2_checked(&oracle_ais[0])?;
 
-                stake_pool_price_multiplier(bank_config, &oracle_ais[1], 1, Some(bank_mint))?;
+                validate_stake_pool_account(bank_config, &oracle_ais[1], 1, bank_mint)?;
                 Ok(())
             }
             OracleSetup::KaminoLST => {
@@ -1755,7 +1756,7 @@ impl OraclePriceFeedAdapter {
                     bank_config.oracle_keys[1],
                     MarginfiError::KaminoReserveValidationFailed
                 );
-                stake_pool_price_multiplier(bank_config, &oracle_ais[2], 2, Some(bank_mint))?;
+                validate_stake_pool_account(bank_config, &oracle_ais[2], 2, bank_mint)?;
                 Ok(())
             }
             OracleSetup::JuplendLST => {
@@ -1779,7 +1780,7 @@ impl OraclePriceFeedAdapter {
                     bank_config.oracle_keys[1],
                     MarginfiError::JuplendLendingValidationFailed
                 );
-                stake_pool_price_multiplier(bank_config, &oracle_ais[2], 2, Some(bank_mint))?;
+                validate_stake_pool_account(bank_config, &oracle_ais[2], 2, bank_mint)?;
                 Ok(())
             }
             OracleSetup::PTPyth => {
@@ -1798,10 +1799,6 @@ impl OraclePriceFeedAdapter {
                 check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 load_price_update_v2_checked(&oracle_ais[0])?;
 
-                // Constructing the loader validates the key, owner, and discriminator. The vault is
-                // assigned via `set_oracle_price` as an untyped account (unlike the Kamino/etc
-                // reserves, which Anchor validates as typed accounts at bank creation), so this is
-                // its assignment-time validation.
                 load_exponent_vault(bank_config, &oracle_ais[1], 1)?;
                 Ok(())
             }
@@ -1817,7 +1814,6 @@ impl OraclePriceFeedAdapter {
                     1,
                     MarginfiError::WrongNumberOfOracleAccounts
                 );
-                // See PTPyth: the loader validates key + owner + discriminator at assignment time.
                 load_exponent_vault(bank_config, &oracle_ais[0], 0)?;
                 Ok(())
             }
@@ -2523,7 +2519,7 @@ mod tests {
         let mut config = BankConfig::zeroed();
         config.oracle_keys[1] = key;
 
-        let rate = stake_pool_price_multiplier(&config, &ai, 1, None).unwrap();
+        let rate = stake_pool_price_multiplier(&config, &ai, 1).unwrap();
         let expected = I80F48::from_num(total_lamports) / I80F48::from_num(pool_token_supply);
         assert_eq!(rate, expected);
         assert!(rate > I80F48::from_num(1.29) && rate < I80F48::from_num(1.30));

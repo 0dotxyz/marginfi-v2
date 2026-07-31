@@ -56,26 +56,32 @@ describe("JupLend LST / mSOL oracle setups", () => {
     );
   };
 
-  it("(admin) configures JuplendLST - happy path", async () => {
-    await setOracle(ORACLE_SETUP_JUPLEND_LST, oracles.wsolOracle.publicKey, [
-      lending,
-      BSOL_POOL,
-    ]);
-    const { config } = await program.account.bank.fetch(bank);
-    assert.deepEqual(config.oracleSetup, { juplendLst: {} });
-    assertKeysEqual(config.oracleKeys[0], oracles.wsolOracle.publicKey);
-    assertKeysEqual(config.oracleKeys[1], lending); // lending preserved, not rewritten
-    assertKeysEqual(config.oracleKeys[2], BSOL_POOL);
+  // This is a USDC bank, so a bSOL stake pool / mSOL State is a mint mismatch, which config
+  // validation rejects.
+  it("(admin) tries to configure JuplendLST with a stake pool for the wrong mint - fails", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setOracle(ORACLE_SETUP_JUPLEND_LST, oracles.wsolOracle.publicKey, [
+          lending,
+          BSOL_POOL,
+        ]);
+      },
+      "StakePoolValidationFailed",
+      6048,
+    );
   });
 
-  it("(admin) configures JuplendMSOL - happy path", async () => {
-    await setOracle(ORACLE_SETUP_JUPLEND_MSOL, oracles.wsolOracle.publicKey, [
-      lending,
-      MSOL_STATE,
-    ]);
-    const { config } = await program.account.bank.fetch(bank);
-    assert.deepEqual(config.oracleSetup, { juplendMsol: {} });
-    assertKeysEqual(config.oracleKeys[2], MSOL_STATE);
+  it("(admin) tries to configure JuplendMSOL with a State for the wrong mint - fails", async () => {
+    await expectFailedTxWithError(
+      async () => {
+        await setOracle(ORACLE_SETUP_JUPLEND_MSOL, oracles.wsolOracle.publicKey, [
+          lending,
+          MSOL_STATE,
+        ]);
+      },
+      "MarinadeStateValidationFailed",
+      6136,
+    );
   });
 
   it("(admin) tries to configure JuplendLST with wrong oracle setup - fails", async () => {

@@ -108,9 +108,32 @@ describe("LST / mSOL internal oracle setups", () => {
       ),
     );
 
+    // Config validation requires the pricing account's mint to equal the bank's mint. The bank
+    // holds wsol while the fixtures mint their own LSTs, so point each fixture's embedded mint at
+    // the bank's. `pool_mint` sits at byte 162 of an SPL StakePool; `msol_mint` is Marinade State's
+    // first field (byte 8, past the disc).
+    await patchMint(BSOL_POOL, 162);
+    await patchMint(SANCTUM_SPL_POOL, 162);
+    await patchMint(JUPSOL_POOL, 162);
+    await patchMint(MSOL_STATE, 8);
+
     const base = await pulseCache([]);
     baseSolPrice = wrappedI80F48toBigNumber(base.lastOraclePrice).toNumber();
   });
+
+  // Overwrite the mint pubkey embedded at `offset` in a pricing account with the bank's mint.
+  const patchMint = async (account: PublicKey, offset: number) => {
+    const acc = await banksClient.getAccount(account);
+    const data = Buffer.from(acc!.data);
+    ecosystem.wsolMint.publicKey.toBuffer().copy(data, offset);
+    bankrunContext.setAccount(account, {
+      lamports: acc!.lamports,
+      data,
+      owner: acc!.owner,
+      executable: acc!.executable,
+      rentEpoch: acc!.rentEpoch,
+    });
+  };
 
   const stakePoolRate = async (pool: PublicKey) => {
     const acc = await banksClient.getAccount(pool);

@@ -123,19 +123,13 @@ struct MinimalStakePool {
     pool_token_supply: u64,
 }
 
-/// Accepts the vanilla SPL Stake Pool program and Sanctum's SPL / SPL-Multi forks.
-///
-/// When `expected_mint` is `Some`, the pool's `pool_mint` must match it. Pass the bank's own mint
-/// at config-validation time so a stake pool for the wrong LST can't be attached: the bank's mint
-/// is the LST for both direct (`PythLST`) and venue (`KaminoLST`/`JuplendLST`) setups, since a
-/// venue bank's mint is its reserve/lending *liquidity* mint, which is that same LST. Pass `None`
-/// only in the pricing hot path, where the key was already validated at config time.
-pub(crate) fn stake_pool_price_multiplier(
+/// Parses and validates the *identity* of an SPL / Sanctum stake pool — key, owner (vanilla SPL or
+/// Sanctum's SPL / SPL-Multi forks), and StakePool account type — and returns the decoded view.
+fn load_stake_pool(
     bank_config: &BankConfig,
     stake_pool_info: &AccountInfo,
     key_index: usize,
-    expected_mint: Option<Pubkey>,
-) -> MarginfiResult<I80F48> {
+) -> MarginfiResult<MinimalStakePool> {
     require_keys_eq!(
         *stake_pool_info.key,
         bank_config.oracle_keys[key_index],
@@ -157,13 +151,31 @@ pub(crate) fn stake_pool_price_multiplier(
         pool.account_type == 1,
         MarginfiError::StakePoolValidationFailed
     );
-    if let Some(mint) = expected_mint {
-        check_eq!(
-            pool.pool_mint,
-            mint,
-            MarginfiError::StakePoolValidationFailed
-        );
-    }
+    Ok(pool)
+}
+
+pub(crate) fn validate_stake_pool_account(
+    bank_config: &BankConfig,
+    stake_pool_info: &AccountInfo,
+    key_index: usize,
+    bank_mint: Pubkey,
+) -> MarginfiResult {
+    let pool = load_stake_pool(bank_config, stake_pool_info, key_index)?;
+    check_eq!(
+        pool.pool_mint,
+        bank_mint,
+        MarginfiError::StakePoolValidationFailed
+    );
+    Ok(())
+}
+
+/// Pricing: LST/SOL exchange rate = `total_lamports / pool_token_supply`, with sanity bounds.
+pub(crate) fn stake_pool_price_multiplier(
+    bank_config: &BankConfig,
+    stake_pool_info: &AccountInfo,
+    key_index: usize,
+) -> MarginfiResult<I80F48> {
+    let pool = load_stake_pool(bank_config, stake_pool_info, key_index)?;
     check!(
         pool.pool_token_supply > 0,
         MarginfiError::ZeroSupplyInStakePool
@@ -179,25 +191,19 @@ pub(crate) fn stake_pool_price_multiplier(
     Ok(rate)
 }
 
-/// When `expected_mint` is `Some`, the State's `msol_mint` must match it. Pass the bank's own mint
-/// at config-validation time for both the direct (`PythMSOL`) and venue (`KaminoMSOL`/`JuplendMSOL`)
-/// setups — in all of them the bank's mint is mSOL (a venue bank's mint is its liquidity mint).
-/// Pass `None` only in the pricing hot path.
 pub(crate) fn validate_marinade_state_account<'info>(
     bank_config: &BankConfig,
     info: &'info AccountInfo<'info>,
     key_index: usize,
-    expected_mint: Option<Pubkey>,
+    bank_mint: Pubkey,
 ) -> MarginfiResult {
     // Constructing the loader validates the key, owner, and discriminator.
     let state_loader = load_marinade_state(bank_config, info, key_index)?;
-    if let Some(mint) = expected_mint {
-        check_eq!(
-            state_loader.load()?.msol_mint(),
-            mint,
-            MarginfiError::MarinadeStateValidationFailed
-        );
-    }
+    check_eq!(
+        state_loader.load()?.msol_mint(),
+        bank_mint,
+        MarginfiError::MarinadeStateValidationFailed
+    );
     Ok(())
 }
 
