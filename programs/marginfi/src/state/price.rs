@@ -1,15 +1,18 @@
 use crate::constants::{
-    MIN_PYTH_PUSH_VERIFICATION_LEVEL, NATIVE_STAKE_ID, SANCTUM_SPL_MULTI_STAKE_POOL_ID,
-    SANCTUM_SPL_STAKE_POOL_ID, SPL_SINGLE_POOL_ID, SPL_STAKE_POOL_ID, SWITCHBOARD_PULL_ID,
+    MIN_PYTH_PUSH_VERIFICATION_LEVEL, NATIVE_STAKE_ID, SPL_SINGLE_POOL_ID, SWITCHBOARD_PULL_ID,
 };
 use crate::state::bank_config::BankConfigImpl;
+use crate::state::lst_stake_price::{
+    expected_staked_onramp, legacy_staked_pool_delegated_value, load_exponent_vault,
+    load_marinade_state, marinade_price_multiplier, pt_linear_multiplier,
+    stake_pool_price_multiplier, staked_pool_net_asset_value, validate_marinade_state_account,
+};
 use crate::{check, check_eq, debug, math_error, prelude::*};
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, ID as SPL_TOKEN_PROGRAM_ID};
 use drift_mocks::constants::SPOT_CUMULATIVE_INTEREST_PRECISION;
 use drift_mocks::state::MinimalSpotMarket;
 use enum_dispatch::enum_dispatch;
-use exponent_mocks::state::{MinimalExponentVault, VAULT_DISCRIMINATOR};
 use fixed::types::I80F48;
 use juplend_mocks::state::{Lending as JuplendLending, EXCHANGE_PRICES_PRECISION};
 use kamino_mocks::state::MinimalReserve;
@@ -20,20 +23,16 @@ use marginfi_type_crate::constants::{
 use marginfi_type_crate::types::OnRampTransition;
 use marginfi_type_crate::{
     constants::{CONF_INTERVAL_MULTIPLE, EXP_10_I80F48, MAX_CONF_INTERVAL, U32_MAX},
-    pdas::derive_staked_onramp_from_vote,
     types::{
         mul_div_i128, mul_div_i64, mul_div_u64, mul_i128_by_i80f48, mul_i64_by_i80f48,
         mul_u64_by_i80f48, Bank, BankConfig, OraclePriceType, OraclePriceWithConfidence,
         OracleSetup, PriceBias,
     },
 };
-use marinade_mocks::state::{MinimalMarinadeState, MSOL_PRICE_PRECISION, STATE_DISCRIMINATOR};
 use pyth_solana_receiver_sdk::{
     price_update::{self, FeedId, PriceUpdateV2},
     PYTH_PUSH_ORACLE_ID,
 };
-use solana_borsh::v1::try_from_slice_unchecked;
-use solana_stake_interface::state::StakeStateV2;
 use solend_mocks::state::SolendMinimalReserve;
 use std::{cell::Ref, cmp::min};
 use switchboard_on_demand::{CurrentResult, Discriminator, PullFeedAccountData};
@@ -116,53 +115,6 @@ fn check_primary_oracle_key(
         MarginfiError::WrongOracleAccountKeys
     );
     Ok(())
-}
-
-fn expected_staked_onramp(bank: &Bank) -> MarginfiResult<Pubkey> {
-    if bank.config.oracle_keys[3] != Pubkey::default() {
-        return Ok(bank.config.oracle_keys[3]);
-    }
-
-    check!(
-        bank.integration_acc_1 != Pubkey::default(),
-        MarginfiError::StakePoolValidationFailed
-    );
-
-    Ok(derive_staked_onramp_from_vote(bank.integration_acc_1))
-}
-
-fn staked_pool_net_asset_value(
-    pool_stake_info: &AccountInfo,
-    pool_onramp_info: &AccountInfo,
-    rent: &Rent,
-) -> MarginfiResult<u64> {
-    let pool_rent_exempt_reserve = rent.minimum_balance(pool_stake_info.data_len());
-    let onramp_rent_exempt_reserve = rent.minimum_balance(pool_onramp_info.data_len());
-
-    let main_stake_value = pool_stake_info
-        .lamports()
-        .saturating_sub(pool_rent_exempt_reserve);
-    let onramp_value = pool_onramp_info
-        .lamports()
-        .saturating_sub(onramp_rent_exempt_reserve);
-
-    Ok(main_stake_value.saturating_add(onramp_value))
-}
-
-// To be removed once SVSP update is rolled out (likely in 1.10)
-fn legacy_staked_pool_delegated_value(pool_stake_info: &AccountInfo) -> MarginfiResult<u64> {
-    let stake_state = try_from_slice_unchecked::<StakeStateV2>(&pool_stake_info.data.borrow())?;
-    let (_, stake) = match stake_state {
-        StakeStateV2::Stake(meta, stake, _) => (meta, stake),
-        _ => return err!(MarginfiError::StakePoolValidationFailed),
-    };
-
-    // Legacy pricing subtracts single-pool's initial non-refundable 1 SOL bootstrap stake.
-    Ok(stake
-        .delegation
-        .stake
-        .checked_sub(1_000_000_000)
-        .ok_or_else(math_error!())?)
 }
 
 fn load_kamino_reserve<'info>(
@@ -282,168 +234,6 @@ fn juplend_price_multiplier(lending: &JuplendLending) -> MarginfiResult<I80F48> 
     Ok(I80F48::from_num(lending.token_exchange_price)
         .checked_div(I80F48::from_num(EXCHANGE_PRICES_PRECISION))
         .ok_or_else(math_error!())?)
-}
-
-fn load_marinade_state<'info>(
-    bank_config: &BankConfig,
-    state_info: &'info AccountInfo<'info>,
-    key_index: usize,
-) -> MarginfiResult<AccountLoader<'info, MinimalMarinadeState>> {
-    require_keys_eq!(
-        *state_info.key,
-        bank_config.oracle_keys[key_index],
-        MarginfiError::MarinadeStateValidationFailed
-    );
-
-    let state_loader: AccountLoader<MinimalMarinadeState> = AccountLoader::try_from(state_info)
-        .map_err(|_| MarginfiError::MarinadeStateValidationFailed)?;
-    Ok(state_loader)
-}
-
-/// mSOL/SOL exchange rate = `msol_price / 2^32` (Marinade's cached rate).
-fn marinade_price_multiplier(state: &MinimalMarinadeState) -> MarginfiResult<I80F48> {
-    Ok(I80F48::from_num(state.msol_price())
-        .checked_div(I80F48::from_num(MSOL_PRICE_PRECISION))
-        .ok_or_else(math_error!())?)
-}
-
-/// Minimal borsh view of an SPL `StakePool`: the fixed-size prefix up to `total_lamports` /
-/// `pool_token_supply`. Trailing bytes are ignored; `account_type` (1 = StakePool) sits at byte 0
-/// rather than an 8-byte discriminator, so it deserializes from the start.
-#[derive(AnchorDeserialize)]
-#[allow(dead_code)] // fields before the two we read only advance the borsh cursor
-struct MinimalStakePool {
-    account_type: u8,
-    manager: Pubkey,
-    staker: Pubkey,
-    stake_deposit_authority: Pubkey,
-    stake_withdraw_bump_seed: u8,
-    validator_list: Pubkey,
-    reserve_stake: Pubkey,
-    pool_mint: Pubkey,
-    manager_fee_account: Pubkey,
-    token_program_id: Pubkey,
-    total_lamports: u64,
-    pool_token_supply: u64,
-}
-
-/// Accepts the vanilla SPL Stake Pool program and Sanctum's SPL / SPL-Multi forks.
-fn stake_pool_price_multiplier(
-    bank_config: &BankConfig,
-    stake_pool_info: &AccountInfo,
-    key_index: usize,
-) -> MarginfiResult<I80F48> {
-    require_keys_eq!(
-        *stake_pool_info.key,
-        bank_config.oracle_keys[key_index],
-        MarginfiError::StakePoolValidationFailed
-    );
-
-    let owner = stake_pool_info.owner;
-    check!(
-        owner == &SPL_STAKE_POOL_ID
-            || owner == &SANCTUM_SPL_STAKE_POOL_ID
-            || owner == &SANCTUM_SPL_MULTI_STAKE_POOL_ID,
-        MarginfiError::StakePoolValidationFailed
-    );
-
-    let data = stake_pool_info.try_borrow_data()?;
-    let pool = try_from_slice_unchecked::<MinimalStakePool>(&data)
-        .map_err(|_| MarginfiError::StakePoolValidationFailed)?;
-    check!(
-        pool.account_type == 1,
-        MarginfiError::StakePoolValidationFailed
-    );
-    check!(
-        pool.pool_token_supply > 0,
-        MarginfiError::ZeroSupplyInStakePool
-    );
-
-    Ok(I80F48::from_num(pool.total_lamports)
-        .checked_div(I80F48::from_num(pool.pool_token_supply))
-        .ok_or_else(math_error!())?)
-}
-
-fn validate_marinade_state_account(
-    bank_config: &BankConfig,
-    info: &AccountInfo,
-    key_index: usize,
-) -> MarginfiResult {
-    require_keys_eq!(
-        *info.key,
-        bank_config.oracle_keys[key_index],
-        MarginfiError::MarinadeStateValidationFailed
-    );
-    check!(
-        info.owner == &marinade_mocks::ID,
-        MarginfiError::MarinadeStateValidationFailed
-    );
-    let data = info.try_borrow_data()?;
-    check!(
-        data.len() >= 8 && data[..8] == STATE_DISCRIMINATOR,
-        MarginfiError::MarinadeStateValidationFailed
-    );
-    Ok(())
-}
-
-fn load_exponent_vault<'info>(
-    bank_config: &BankConfig,
-    vault_info: &'info AccountInfo<'info>,
-    key_index: usize,
-) -> MarginfiResult<AccountLoader<'info, MinimalExponentVault>> {
-    require_keys_eq!(
-        *vault_info.key,
-        bank_config.oracle_keys[key_index],
-        MarginfiError::ExponentVaultValidationFailed
-    );
-    let loader: AccountLoader<MinimalExponentVault> = AccountLoader::try_from(vault_info)
-        .map_err(|_| MarginfiError::ExponentVaultValidationFailed)?;
-    Ok(loader)
-}
-
-pub(crate) fn check_exponent_vault(info: &AccountInfo) -> MarginfiResult {
-    check!(
-        info.owner == &exponent_mocks::ID,
-        MarginfiError::ExponentVaultValidationFailed
-    );
-    let data = info.try_borrow_data()?;
-    check!(
-        data.len() >= 8 && data[..8] == VAULT_DISCRIMINATOR,
-        MarginfiError::ExponentVaultValidationFailed
-    );
-    Ok(())
-}
-
-/// PT linear rate: accretion from `start_price` to par (1.0) over the vault's
-/// `[start_ts, start_ts + duration]`, clamped at both ends.
-fn pt_linear_multiplier(
-    vault: &MinimalExponentVault,
-    clock: &Clock,
-    start_price: I80F48,
-) -> MarginfiResult<I80F48> {
-    let start_ts = vault.start_ts() as i64;
-    let maturity = start_ts
-        .checked_add(vault.duration() as i64)
-        .ok_or_else(math_error!())?;
-    let now = clock.unix_timestamp;
-
-    if now <= start_ts {
-        return Ok(start_price);
-    }
-    if now >= maturity {
-        return Ok(I80F48::ONE);
-    }
-
-    // start_price + (1 - start_price) * (now - start_ts) / (maturity - start_ts)
-    let progress = I80F48::from_num(now - start_ts)
-        .checked_div(I80F48::from_num(maturity - start_ts))
-        .ok_or_else(math_error!())?;
-    let gain = I80F48::ONE
-        .checked_sub(start_price)
-        .ok_or_else(math_error!())?
-        .checked_mul(progress)
-        .ok_or_else(math_error!())?;
-    Ok(start_price.checked_add(gain).ok_or_else(math_error!())?)
 }
 
 /// Applies an `I80F48` exchange-rate multiplier to a Pyth push feed's price/ema and their
@@ -1260,7 +1050,7 @@ impl OraclePriceFeedAdapter {
 
                 check_primary_oracle_key(bank_config, account_info)?;
 
-                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 1)?;
+                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 1, None)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
@@ -1296,7 +1086,7 @@ impl OraclePriceFeedAdapter {
                 ensure_kamino_reserve_fresh(&reserve, clock)?;
                 let kamino_rate = kamino_price_multiplier(&reserve)?;
 
-                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 2)?;
+                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 2, None)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
@@ -1333,7 +1123,7 @@ impl OraclePriceFeedAdapter {
                 ensure_juplend_lending_fresh(&lending, clock)?;
                 let juplend_rate = juplend_price_multiplier(&lending)?;
 
-                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 2)?;
+                let lst_rate = stake_pool_price_multiplier(bank_config, stake_pool_info, 2, None)?;
 
                 let mut price_feed =
                     PythPushOraclePriceFeed::load_checked(account_info, clock, max_age)?;
@@ -1355,7 +1145,7 @@ impl OraclePriceFeedAdapter {
                     cache_multiplier: juplend_rate,
                 })
             }
-            OracleSetup::PTSOL => {
+            OracleSetup::PTPyth => {
                 // (0) Pyth (SOL/USD), (1) Exponent vault (for the PT linear rate)
                 check!(ais.len() == 2, MarginfiError::WrongNumberOfOracleAccounts);
 
@@ -1388,7 +1178,7 @@ impl OraclePriceFeedAdapter {
                     cache_multiplier: I80F48::ONE,
                 })
             }
-            OracleSetup::PTHYUSD => {
+            OracleSetup::PTFixed => {
                 // (0) Exponent vault only. hyUSD ~= $1, so the PT linear rate is the USD price
                 // directly (a time-varying fixed feed), with no base oracle to multiply.
                 check!(ais.len() == 1, MarginfiError::WrongNumberOfOracleAccounts);
@@ -1456,12 +1246,15 @@ impl OraclePriceFeedAdapter {
         Ok(cache_price)
     }
 
+    /// * bank_mint - the bank's deposited-token mint, cross-checked against the pricing account for
+    ///   direct LST/mSOL setups (`PythLST` / `PythMSOL`) to reject a mismatched stake pool / State.
     /// * lst_mint, stake_pool, sol_pool, pool_onramp - required only if configuring
     ///   `OracleSetup::StakedWithPythPush` initially. Subsequent validations of staked banks can
     ///   omit these.
-    pub fn validate_bank_config(
+    pub fn validate_bank_config<'info>(
         bank_config: &BankConfig,
-        oracle_ais: &[AccountInfo<'_>],
+        bank_mint: Pubkey,
+        oracle_ais: &'info [AccountInfo<'info>],
         lst_mint: Option<Pubkey>,
         stake_pool: Option<Pubkey>,
         sol_pool: Option<Pubkey>,
@@ -1871,7 +1664,7 @@ impl OraclePriceFeedAdapter {
                 check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 load_price_update_v2_checked(&oracle_ais[0])?;
 
-                validate_marinade_state_account(bank_config, &oracle_ais[1], 1)?;
+                validate_marinade_state_account(bank_config, &oracle_ais[1], 1, Some(bank_mint))?;
                 Ok(())
             }
             OracleSetup::KaminoMSOL => {
@@ -1895,7 +1688,7 @@ impl OraclePriceFeedAdapter {
                     bank_config.oracle_keys[1],
                     MarginfiError::KaminoReserveValidationFailed
                 );
-                validate_marinade_state_account(bank_config, &oracle_ais[2], 2)?;
+                validate_marinade_state_account(bank_config, &oracle_ais[2], 2, Some(bank_mint))?;
                 Ok(())
             }
             OracleSetup::JuplendMSOL => {
@@ -1919,7 +1712,7 @@ impl OraclePriceFeedAdapter {
                     bank_config.oracle_keys[1],
                     MarginfiError::JuplendLendingValidationFailed
                 );
-                validate_marinade_state_account(bank_config, &oracle_ais[2], 2)?;
+                validate_marinade_state_account(bank_config, &oracle_ais[2], 2, Some(bank_mint))?;
                 Ok(())
             }
             OracleSetup::PythLST => {
@@ -1938,7 +1731,7 @@ impl OraclePriceFeedAdapter {
                 check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 load_price_update_v2_checked(&oracle_ais[0])?;
 
-                stake_pool_price_multiplier(bank_config, &oracle_ais[1], 1)?;
+                stake_pool_price_multiplier(bank_config, &oracle_ais[1], 1, Some(bank_mint))?;
                 Ok(())
             }
             OracleSetup::KaminoLST => {
@@ -1962,7 +1755,7 @@ impl OraclePriceFeedAdapter {
                     bank_config.oracle_keys[1],
                     MarginfiError::KaminoReserveValidationFailed
                 );
-                stake_pool_price_multiplier(bank_config, &oracle_ais[2], 2)?;
+                stake_pool_price_multiplier(bank_config, &oracle_ais[2], 2, Some(bank_mint))?;
                 Ok(())
             }
             OracleSetup::JuplendLST => {
@@ -1986,10 +1779,10 @@ impl OraclePriceFeedAdapter {
                     bank_config.oracle_keys[1],
                     MarginfiError::JuplendLendingValidationFailed
                 );
-                stake_pool_price_multiplier(bank_config, &oracle_ais[2], 2)?;
+                stake_pool_price_multiplier(bank_config, &oracle_ais[2], 2, Some(bank_mint))?;
                 Ok(())
             }
-            OracleSetup::PTSOL => {
+            OracleSetup::PTPyth => {
                 check_eq!(
                     bank_config.asset_tag,
                     ASSET_TAG_DEFAULT,
@@ -2005,15 +1798,14 @@ impl OraclePriceFeedAdapter {
                 check_primary_oracle_key(bank_config, &oracle_ais[0])?;
                 load_price_update_v2_checked(&oracle_ais[0])?;
 
-                require_keys_eq!(
-                    *oracle_ais[1].key,
-                    bank_config.oracle_keys[1],
-                    MarginfiError::ExponentVaultValidationFailed
-                );
-                check_exponent_vault(&oracle_ais[1])?;
+                // Constructing the loader validates the key, owner, and discriminator. The vault is
+                // assigned via `set_oracle_price` as an untyped account (unlike the Kamino/etc
+                // reserves, which Anchor validates as typed accounts at bank creation), so this is
+                // its assignment-time validation.
+                load_exponent_vault(bank_config, &oracle_ais[1], 1)?;
                 Ok(())
             }
-            OracleSetup::PTHYUSD => {
+            OracleSetup::PTFixed => {
                 check_eq!(
                     bank_config.asset_tag,
                     ASSET_TAG_DEFAULT,
@@ -2025,12 +1817,8 @@ impl OraclePriceFeedAdapter {
                     1,
                     MarginfiError::WrongNumberOfOracleAccounts
                 );
-                require_keys_eq!(
-                    *oracle_ais[0].key,
-                    bank_config.oracle_keys[0],
-                    MarginfiError::ExponentVaultValidationFailed
-                );
-                check_exponent_vault(&oracle_ais[0])?;
+                // See PTPyth: the loader validates key + owner + discriminator at assignment time.
+                load_exponent_vault(bank_config, &oracle_ais[0], 0)?;
                 Ok(())
             }
         }
@@ -2563,7 +2351,10 @@ mod tests {
 
     use super::*;
 
+    use crate::constants::SPL_STAKE_POOL_ID;
     use anchor_lang::solana_program::account_info::AccountInfo;
+    use exponent_mocks::state::MinimalExponentVault;
+    use marinade_mocks::state::{MinimalMarinadeState, MSOL_PRICE_PRECISION};
     use solana_stake_interface::{
         stake_flags::StakeFlags,
         state::{Authorized, Delegation, Lockup, Meta, Stake, StakeStateV2},
@@ -2732,7 +2523,7 @@ mod tests {
         let mut config = BankConfig::zeroed();
         config.oracle_keys[1] = key;
 
-        let rate = stake_pool_price_multiplier(&config, &ai, 1).unwrap();
+        let rate = stake_pool_price_multiplier(&config, &ai, 1, None).unwrap();
         let expected = I80F48::from_num(total_lamports) / I80F48::from_num(pool_token_supply);
         assert_eq!(rate, expected);
         assert!(rate > I80F48::from_num(1.29) && rate < I80F48::from_num(1.30));

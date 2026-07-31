@@ -355,8 +355,8 @@ pub enum OracleSetup {
     PythLST,                // 21
     KaminoLST,              // 22
     JuplendLST,             // 23
-    PTSOL,                  // 24
-    PTHYUSD,                // 25
+    PTPyth,                  // 24
+    PTFixed,                // 25
 }
 unsafe impl Zeroable for OracleSetup {}
 unsafe impl Pod for OracleSetup {}
@@ -388,8 +388,8 @@ impl OracleSetup {
             21 => Some(Self::PythLST),
             22 => Some(Self::KaminoLST),
             23 => Some(Self::JuplendLST),
-            24 => Some(Self::PTSOL),
-            25 => Some(Self::PTHYUSD),
+            24 => Some(Self::PTPyth),
+            25 => Some(Self::PTFixed),
             _ => None,
         }
     }
@@ -418,7 +418,7 @@ impl OracleSetup {
             | Self::PythLST
             | Self::KaminoLST
             | Self::JuplendLST
-            | Self::PTSOL => Some(OracleFeedFamily::PythPush),
+            | Self::PTPyth => Some(OracleFeedFamily::PythPush),
             // Staked reads `oracle_keys[0]` as a proxy for the pool's underlying asset and derives
             // the mint's price from the stake-pool multiplier, so it is not price-equivalent to a
             // setup that reads that same key as the mint's own price.
@@ -435,7 +435,7 @@ impl OracleSetup {
             | Self::FixedKamino
             | Self::FixedDrift
             | Self::FixedJuplend
-            | Self::PTHYUSD => None,
+            | Self::PTFixed => None,
         }
     }
 }
@@ -472,7 +472,7 @@ mod feed_family_tests {
             OracleSetup::PythLST,
             OracleSetup::KaminoLST,
             OracleSetup::JuplendLST,
-            OracleSetup::PTSOL,
+            OracleSetup::PTPyth,
         ] {
             assert_eq!(setup.feed_family(), Some(OracleFeedFamily::PythPush));
         }
@@ -498,7 +498,7 @@ mod feed_family_tests {
             OracleSetup::FixedKamino,
             OracleSetup::FixedDrift,
             OracleSetup::FixedJuplend,
-            OracleSetup::PTHYUSD,
+            OracleSetup::PTFixed,
         ] {
             assert_eq!(setup.feed_family(), None);
         }

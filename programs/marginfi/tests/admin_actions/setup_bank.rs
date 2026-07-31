@@ -695,6 +695,7 @@ async fn configure_bank_to_fixed_oracle() -> anyhow::Result<()> {
             .to_account_metas(Some(true)),
             data: marginfi::instruction::LendingPoolSetOraclePrice {
                 price: price_wrapped,
+                setup: OracleSetup::Fixed as u8,
             }
             .data(),
         };
@@ -921,6 +922,7 @@ async fn update_fixed_bank_price() -> anyhow::Result<()> {
             .to_account_metas(Some(true)),
             data: marginfi::instruction::LendingPoolSetOraclePrice {
                 price: new_price_wrapped,
+                setup: OracleSetup::Fixed as u8,
             }
             .data(),
         };

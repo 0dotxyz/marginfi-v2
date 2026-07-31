@@ -25,8 +25,8 @@ pub fn lending_pool_configure_bank_oracle(
                 | OracleSetup::FixedKamino
                 | OracleSetup::FixedDrift
                 | OracleSetup::FixedJuplend
-                | OracleSetup::PTSOL
-                | OracleSetup::PTHYUSD
+                | OracleSetup::PTPyth
+                | OracleSetup::PTFixed
         ) {
             return err!(MarginfiError::UseSetOraclePrice);
         }
@@ -72,7 +72,7 @@ pub fn lending_pool_configure_bank_oracle(
         );
 
         bank.config
-            .validate_oracle_setup(ctx.remaining_accounts, None, None, None)?;
+            .validate_oracle_setup(bank.mint, ctx.remaining_accounts, None, None, None)?;
 
         emit!(LendingPoolBankConfigureOracleEvent {
             header: GroupEventHeader {

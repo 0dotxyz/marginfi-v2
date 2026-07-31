@@ -429,7 +429,7 @@ pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
         | OracleSetup::SwitchboardV2
         | OracleSetup::PythPushOracle
         | OracleSetup::SwitchboardPull
-        | OracleSetup::PTHYUSD => vec![keys[0]],
+        | OracleSetup::PTFixed => vec![keys[0]],
         OracleSetup::KaminoPythPush
         | OracleSetup::KaminoSwitchboardPull
         | OracleSetup::DriftPythPull
@@ -439,7 +439,7 @@ pub fn bank_observation_keys(bank: &Bank) -> Vec<Pubkey> {
         | OracleSetup::JuplendPythPull
         | OracleSetup::JuplendSwitchboardPull => vec![keys[0], keys[1]],
         // Pyth + Marinade State / SPL StakePool / Exponent vault
-        OracleSetup::PythMSOL | OracleSetup::PythLST | OracleSetup::PTSOL => {
+        OracleSetup::PythMSOL | OracleSetup::PythLST | OracleSetup::PTPyth => {
             vec![keys[0], keys[1]]
         }
         // Pyth + reserve/lending + Marinade State / SPL StakePool

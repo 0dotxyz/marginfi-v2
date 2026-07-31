@@ -271,37 +271,31 @@ impl InterestRateCalc {
     /// Given two points (start_x, start_y) and (end_x, end_y), and a target x between start_x and
     /// end_x, linearly interpolates y at the given x.
     ///
-    /// * returns start_y if end_x <= start_x or target < start_x
-    /// * returns end_y if target > end_x
+    /// * returns start_y if end_x <= start_x or target <= start_x
+    /// * returns end_y if target >= end_x
     /// * None if end_y < start_y. Note: this means curves where the rate decreases as the
     ///   utilization goes up are unsupported, though there's no reason you would generally want to
     ///   do that anyways.
     #[inline]
-    fn lerp(
+    pub(crate) fn lerp(
         start_x: I80F48,
         start_y: I80F48,
         end_x: I80F48,
         end_y: I80F48,
         target_x: I80F48,
     ) -> Option<I80F48> {
-        if end_x <= start_x {
+        if end_x <= start_x || target_x <= start_x {
             return Some(start_y);
         }
-        if target_x < start_x {
-            return None;
-        }
-        if target_x > end_x {
-            return None;
+        if target_x >= end_x {
+            return Some(end_y);
         }
         if end_y < start_y {
             return None;
         }
 
+        // Safe: start_x < end_x
         let delta_x: I80F48 = end_x - start_x;
-        if delta_x.is_zero() {
-            return Some(start_y);
-        }
-
         // Safe: start_x < target_x
         let offset: I80F48 = target_x - start_x;
         // Safe: delta_x nonzero
@@ -1044,8 +1038,8 @@ mod tests {
     }
 
     #[test]
-    fn lerp_none_when_target_before_start() {
-        // target_x < start_x
+    fn lerp_clamps_target_before_start_to_start_y() {
+        // target_x < start_x => clamp to start_y
         let out = InterestRateCalc::lerp(
             I80F48!(0.2),
             I80F48!(1.5),
@@ -1053,12 +1047,12 @@ mod tests {
             I80F48!(3.0),
             I80F48!(0.1),
         );
-        assert!(out.is_none());
+        assert_eq!(out, Some(I80F48!(1.5)));
     }
 
     #[test]
-    fn lerp_none_when_target_after_end() {
-        // target_x > end_x
+    fn lerp_clamps_target_after_end_to_end_y() {
+        // target_x > end_x => clamp to end_y
         let out = InterestRateCalc::lerp(
             I80F48!(0.0),
             I80F48!(0.0),
@@ -1066,7 +1060,7 @@ mod tests {
             I80F48!(4.0),
             I80F48!(1.5),
         );
-        assert!(out.is_none());
+        assert_eq!(out, Some(I80F48!(4.0)));
     }
 
     // NOTE: we don't support decreasing curves because that would be silly for our use-case. There

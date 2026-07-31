@@ -189,7 +189,7 @@ describe("LST / mSOL internal oracle setups", () => {
         await setOracle(ORACLE_SETUP_PYTH_MSOL, [BSOL_POOL]);
       },
       "MarinadeStateValidationFailed",
-      6600,
+      6136,
     );
   });
 

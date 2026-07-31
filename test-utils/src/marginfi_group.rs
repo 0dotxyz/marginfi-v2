@@ -469,7 +469,11 @@ impl MarginfiGroupFixture {
         Instruction {
             program_id: marginfi::ID,
             accounts,
-            data: LendingPoolSetOraclePrice { price }.data(),
+            data: LendingPoolSetOraclePrice {
+                price,
+                setup: OracleSetup::Fixed as u8,
+            }
+            .data(),
         }
     }
 

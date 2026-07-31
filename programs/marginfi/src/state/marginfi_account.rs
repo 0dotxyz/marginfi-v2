@@ -56,10 +56,10 @@ pub fn get_remaining_accounts_per_bank(bank: &Bank) -> MarginfiResult<usize> {
         OracleSetup::PythLST => Ok(3),
         // KaminoLST / JuplendLST: bank + Pyth + reserve/lending + SPL StakePool
         OracleSetup::KaminoLST | OracleSetup::JuplendLST => Ok(4),
-        // PTSOL: bank + Pyth + Exponent vault
-        OracleSetup::PTSOL => Ok(3),
-        // PTHYUSD: bank + Exponent vault (no base feed; hyUSD ~= $1)
-        OracleSetup::PTHYUSD => Ok(2),
+        // PTPyth: bank + Pyth + Exponent vault
+        OracleSetup::PTPyth => Ok(3),
+        // PTFixed: bank + Exponent vault (no base feed, i.e. the token is assumed to be ~= $1)
+        OracleSetup::PTFixed => Ok(2),
         _ => get_remaining_accounts_per_asset_tag(bank.config.asset_tag),
     }
 }

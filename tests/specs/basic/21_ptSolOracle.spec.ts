@@ -21,7 +21,12 @@ import {
   assertKeysEqual,
   expectFailedTxWithError,
 } from "../../utils/genericTests";
-import { defaultBankConfig, ORACLE_SETUP_PYTH_PUSH } from "../../utils/types";
+import {
+  defaultBankConfig,
+  ORACLE_SETUP_PT_FIXED,
+  ORACLE_SETUP_PT_PYTH,
+  ORACLE_SETUP_PYTH_PUSH,
+} from "../../utils/types";
 import { refreshPullOraclesBankrun } from "../../utils/bankrun-oracles";
 import { getBankrunTime } from "../../utils/tools";
 import { wrappedI80F48toBigNumber } from "@mrgnlabs/mrgn-common";
@@ -104,6 +109,7 @@ describe("PT-SOL internal oracle setup", () => {
     const ix = await setFixedPrice(groupAdmin.mrgnProgram, {
       bank: ptBank.publicKey,
       price,
+      setup: ORACLE_SETUP_PT_PYTH,
       remaining: [oracles.wsolOracle.publicKey, vault],
     });
     return groupAdmin.mrgnProgram.provider.sendAndConfirm!(
@@ -124,32 +130,32 @@ describe("PT-SOL internal oracle setup", () => {
     return (await program.account.bank.fetch(ptBank.publicKey)).cache;
   };
 
-  it("(admin) sets up PTSOL (setup + start price + vault) - happy path", async () => {
+  it("(admin) sets up PTPyth (setup + start price + vault) - happy path", async () => {
     await setPtsol(0.9, REAL_VAULT);
     const { config } = await program.account.bank.fetch(ptBank.publicKey);
-    assert.deepEqual(config.oracleSetup, { ptsol: {} });
+    assert.deepEqual(config.oracleSetup, { ptPyth: {} });
     assertKeysEqual(config.oracleKeys[0], oracles.wsolOracle.publicKey);
     assertKeysEqual(config.oracleKeys[1], REAL_VAULT);
     assertI80F48Approx(config.fixedPrice, 0.9);
   });
 
-  it("(admin) tries to set up PTSOL - fails with a non-vault account", async () => {
+  it("(admin) tries to set up PTPyth - fails with a non-vault account", async () => {
     await expectFailedTxWithError(
       async () => {
         await setPtsol(0.9, Keypair.generate().publicKey);
       },
       "ExponentVaultValidationFailed",
-      6601,
+      6137,
     );
   });
 
-  it("(admin) tries to set up PTSOL - fails with a start price above par", async () => {
+  it("(admin) tries to set up PTPyth - fails with a start price above par", async () => {
     await expectFailedTxWithError(
       async () => {
         await setPtsol(1.5, REAL_VAULT);
       },
       "InvalidPtStartPrice",
-      6602,
+      6138,
     );
   });
 
@@ -197,7 +203,8 @@ describe("PT-SOL internal oracle setup", () => {
     const ix = await setFixedPrice(groupAdmin.mrgnProgram, {
       bank: ptBank.publicKey,
       price,
-      remaining: [vault], // vault only -> PT-hyUSD
+      setup: ORACLE_SETUP_PT_FIXED,
+      remaining: [vault], // vault only -> PT-Fixed ($1 base)
     });
     return groupAdmin.mrgnProgram.provider.sendAndConfirm!(
       new Transaction().add(ix),
@@ -216,21 +223,21 @@ describe("PT-SOL internal oracle setup", () => {
     return (await program.account.bank.fetch(ptBank.publicKey)).cache;
   };
 
-  it("(admin) sets up PTHYUSD (vault only) - happy path", async () => {
+  it("(admin) sets up PTFixed (vault only) - happy path", async () => {
     await setPthyusd(0.95, REAL_VAULT);
     const { config } = await program.account.bank.fetch(ptBank.publicKey);
-    assert.deepEqual(config.oracleSetup, { pthyusd: {} });
+    assert.deepEqual(config.oracleSetup, { ptFixed: {} });
     assertKeysEqual(config.oracleKeys[0], REAL_VAULT);
     assertI80F48Approx(config.fixedPrice, 0.95);
   });
 
-  it("(admin) tries to set up PTHYUSD - fails with a start price above par", async () => {
+  it("(admin) tries to set up PTFixed - fails with a start price above par", async () => {
     await expectFailedTxWithError(
       async () => {
         await setPthyusd(1.5, REAL_VAULT);
       },
       "InvalidPtStartPrice",
-      6602,
+      6138,
     );
   });
 
