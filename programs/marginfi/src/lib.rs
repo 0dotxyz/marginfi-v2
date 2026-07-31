@@ -534,9 +534,20 @@ pub mod marginfi {
         marginfi_group::lending_pool_withdraw_insurance(ctx, amount)
     }
 
-    /// (admin only) Close a bank. Requires CLOSE_ENABLED_FLAG and zero positions/shares.
+    /// (admin only) Close a bank. Requires CLOSE_ENABLED_FLAG and zero positions/shares. 
+    /// 
     /// Pass `force_close = Some(true)` to bypass the CLOSE_ENABLED_FLAG and open-position checks
-    /// (zero-shares/emissions are still required).
+    /// (zero-shares/emissions are still required). Forcing a bank closed is **VERY DANGEROUS**.
+    /// Only do it if a Bank was fundamentally broken in some way. The admin **MUST ENSURE** that: 
+    /// 
+    /// * **NO USER** has a Balance in this bank (zero-shares on the bank  is not sufficient to
+    ///   guarantee this, a user can have a zero-share Balance, this could brick their account.)
+    /// * fee and insurance vault balances are withdrawn (unless you don't care if they are lost
+    ///   **FOREVER**).
+    /// * all three vault token-account balances are zero (or you don't care if anything remaining
+    ///   is lost **FOREVER**), including the liquidity vault
+    /// * all three outstanding-fee fields are zero (or you don't care if anything remaining is lost
+    ///   **FOREVER**)
     pub fn lending_pool_close_bank(
         ctx: Context<LendingPoolCloseBank>,
         force_close: Option<bool>,
