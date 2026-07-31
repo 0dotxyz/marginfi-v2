@@ -198,10 +198,14 @@ describe("Rate limiter", () => {
         await configureBank(groupAdmin.mrgnProgram, {
           bank: bankKeypairUsdc.publicKey,
           bankConfigOpt: usdcCapConfig,
+          group: marginfiGroup.publicKey,
+          signer: groupAdmin.wallet.publicKey,
         }),
         await configureBank(groupAdmin.mrgnProgram, {
           bank: bankKeypairA.publicKey,
           bankConfigOpt: tokenACapConfig,
+          group: marginfiGroup.publicKey,
+          signer: groupAdmin.wallet.publicKey,
         }),
       ),
     );

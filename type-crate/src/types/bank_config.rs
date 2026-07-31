@@ -189,6 +189,16 @@ impl BankConfig {
 }
 
 #[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequiredAuthority {
+    None,
+    Governance,
+    AdminOnly,
+    OperationalStateChange(BankOperationalState),
+    Mixed,
+}
+
+#[cfg_attr(feature = "anchor", derive(AnchorDeserialize, AnchorSerialize))]
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct BankConfigOpt {
     pub asset_weight_init: Option<WrappedI80F48>,
@@ -230,6 +240,79 @@ pub struct BankConfigOpt {
     pub cb_window_seconds: Option<u32>,
     pub cb_window_max_up_bps: Option<u16>,
     pub cb_window_max_down_bps: Option<u16>,
+}
+
+impl BankConfigOpt {
+    pub fn has_governance_fields(&self) -> bool {
+        self.classify().0
+    }
+
+    pub fn has_admin_only_fields_excluding_operational_state(&self) -> bool {
+        self.classify().1
+    }
+
+    pub fn required_authority(&self) -> RequiredAuthority {
+        let governance = self.asset_weight_init.is_some()
+            || self.asset_weight_maint.is_some()
+            || self.liability_weight_init.is_some()
+            || self.liability_weight_maint.is_some()
+            || self.risk_tier.is_some()
+            || self.asset_tag.is_some()
+            || self.oracle_max_confidence.is_some()
+            || self.oracle_max_age.is_some();
+
+        let admin_only = self.deposit_limit.is_some()
+            || self.borrow_limit.is_some()
+            || self.total_asset_value_init_limit.is_some()
+            || self.interest_rate_config.is_some()
+            || self.permissionless_bad_debt_settlement.is_some()
+            || self.freeze_settings.is_some()
+            || self.tokenless_repayments_allowed.is_some()
+            || self.circuit_breaker_enabled.is_some()
+            || self.cb_deviation_bps_tiers.is_some()
+            || self.cb_tier_durations_seconds.is_some()
+            || self.cb_escalation_window_mult.is_some()
+            || self.cb_ema_alpha_bps.is_some()
+            || self.cb_window_seconds.is_some()
+            || self.cb_window_max_up_bps.is_some()
+            || self.cb_window_max_down_bps.is_some()
+            || self.liquidation_liquidator_fee.is_some()
+            || self.liquidation_insurance_fee.is_some();
+
+        let operational_state = self.operational_state.is_some();
+
+        let category_count = [governance, admin_only, operational_state]
+            .iter()
+            .filter(|b| **b)
+            .count();
+
+        match category_count {
+            0 => RequiredAuthority::None,
+            1 => {
+                if operational_state {
+                    let target = self
+                        .operational_state
+                        .expect("operational_state checked above");
+                    RequiredAuthority::OperationalStateChange(target)
+                } else if governance {
+                    RequiredAuthority::Governance
+                } else {
+                    RequiredAuthority::AdminOnly
+                }
+            }
+            _ => RequiredAuthority::Mixed,
+        }
+    }
+
+    fn classify(&self) -> (bool /* governance */, bool /* admin_only */) {
+        match self.required_authority() {
+            RequiredAuthority::None => (false, false),
+            RequiredAuthority::Governance => (true, false),
+            RequiredAuthority::AdminOnly => (false, true),
+            RequiredAuthority::OperationalStateChange(_) => (false, false),
+            RequiredAuthority::Mixed => (true, true),
+        }
+    }
 }
 
 #[repr(C)]

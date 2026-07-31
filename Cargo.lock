@@ -3782,6 +3782,7 @@ dependencies = [
  "switchboard-on-demand",
  "test-case",
  "test-utilities",
+ "tokio",
 ]
 
 [[package]]

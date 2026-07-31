@@ -528,6 +528,7 @@ describe("Same-bank deposit - T22", () => {
             feePayer: groupAdmin.wallet.publicKey,
             bankMint: mint.publicKey,
             bank: bank.publicKey,
+            bankAdmin: groupAdmin.wallet.publicKey,
             tokenProgram: TOKEN_2022_PROGRAM_ID,
           })
           .instruction(),

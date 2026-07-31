@@ -8,14 +8,9 @@ use marginfi_type_crate::{
     constants::{CLOSE_ENABLED_FLAG, ZERO_AMOUNT_THRESHOLD},
     types::{Bank, MarginfiGroup},
 };
-
 pub fn lending_pool_close_bank(ctx: Context<LendingPoolCloseBank>) -> MarginfiResult {
-    let mut group = ctx.accounts.group.load_mut()?;
-    // Note: Groups created prior to 0.1.2 have a non-authoritative count here, so subtraction
-    // without saturation could reduce the count below zero.
-    group.banks = group.banks.saturating_sub(1);
-
     let bank = ctx.accounts.bank.load()?;
+    let group = ctx.accounts.marginfi_group.load()?;
 
     // banks created prior to 0.1.4 can never be closed because we cannot guarantee an accurate
     // position count for those banks.
@@ -41,27 +36,25 @@ pub fn lending_pool_close_bank(ctx: Context<LendingPoolCloseBank>) -> MarginfiRe
     );
 
     drop(bank);
+    drop(group);
 
-    // Bank will now be closed by anchor
+    let mut group = ctx.accounts.marginfi_group.load_mut()?;
+    group.banks = group.banks.saturating_sub(1);
 
     Ok(())
 }
 
 #[derive(Accounts)]
 pub struct LendingPoolCloseBank<'info> {
+    #[account(mut)]
+    pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
     #[account(
         mut,
-        has_one = admin @ MarginfiError::Unauthorized,
-    )]
-    pub group: AccountLoader<'info, MarginfiGroup>,
-
-    #[account(
-        mut,
-        has_one = group @ MarginfiError::InvalidGroup,
-        close = admin
+        close = admin,
+        constraint = bank.load()?.group == marginfi_group.key() @ MarginfiError::InvalidGroup
     )]
     pub bank: AccountLoader<'info, Bank>,
 
-    #[account(mut)]
+    #[account(mut, constraint = marginfi_group.load()?.admin == admin.key() @ MarginfiError::Unauthorized)]
     pub admin: Signer<'info>,
 }

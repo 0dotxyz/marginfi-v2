@@ -30,6 +30,7 @@ import {
 import { assert } from "chai";
 import {
   CONF_INTERVAL_MULTIPLE,
+  blankBankConfigOptRaw,
   defaultBankConfigOptRaw,
   MAX_BALANCES,
   newEmodeEntry,
@@ -307,10 +308,10 @@ ORACLE_CASES.forEach(({ label, oracleMode, groupSeed, accountName, oracleMaxConf
     });
 
     it("(admin) Vastly increases last bank liability ratio to make user 0 unhealthy", async () => {
-      let config = defaultBankConfigOptRaw();
+      let config = blankBankConfigOptRaw();
       config.liabilityWeightInit = bigNumberToWrappedI80F48(210); // 21000%
       config.liabilityWeightMaint = bigNumberToWrappedI80F48(200); // 20000%
-      config.oracleMaxConfidence = oracleMaxConfidence ?? 0;
+      config.oracleMaxConfidence = oracleMaxConfidence ?? null;
 
       let tx = new Transaction().add(
         await configureBank(groupAdmin.mrgnBankrunProgram, {
@@ -645,18 +646,28 @@ ORACLE_CASES.forEach(({ label, oracleMode, groupSeed, accountName, oracleMaxConf
     });
 
     it("(admin) Allows tokenless repayments for banks 3 & 4", async () => {
-      let config = defaultBankConfigOptRaw();
-      config.tokenlessRepaymentsAllowed = true;
-      config.oracleMaxConfidence = oracleMaxConfidence ?? 0;
+      let adminConfig = blankBankConfigOptRaw();
+      adminConfig.tokenlessRepaymentsAllowed = true;
+
+      let governanceConfig = blankBankConfigOptRaw();
+      governanceConfig.oracleMaxConfidence = oracleMaxConfidence ?? null;
 
       let tx = new Transaction();
       for (const i of [3, 4]) {
         tx.add(
           await configureBank(groupAdmin.mrgnBankrunProgram, {
             bank: banks[i],
-            bankConfigOpt: config,
+            bankConfigOpt: adminConfig,
           })
         );
+        if (oracleMaxConfidence !== null && oracleMaxConfidence !== undefined) {
+          tx.add(
+            await configureBank(groupAdmin.mrgnBankrunProgram, {
+              bank: banks[i],
+              bankConfigOpt: governanceConfig,
+            })
+          );
+        }
       }
       await processBankrunTransaction(bankrunContext, tx, [groupAdmin.wallet]);
     });

@@ -1,7 +1,11 @@
 use crate::{
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
-    state::{bank::BankImpl, bank_config::BankConfigImpl, marginfi_group::MarginfiGroupImpl},
+    state::{
+        bank::BankImpl,
+        bank_config::BankConfigImpl,
+        marginfi_group::{authorize_bank_admin, MarginfiGroupImpl},
+    },
     MarginfiError, MarginfiResult,
 };
 use anchor_lang::prelude::*;
@@ -22,6 +26,8 @@ pub fn lending_pool_add_bank(
     ctx: Context<LendingPoolAddBank>,
     bank_config: BankConfigCompact,
 ) -> MarginfiResult {
+    authorize_bank_admin(&ctx.accounts.marginfi_group, &ctx.accounts.bank_admin)?;
+
     // Transfer the flat sol init fee to the global fee wallet
     let fee_state = ctx.accounts.fee_state.load()?;
     let bank_init_flat_sol_fee = fee_state.bank_init_flat_sol_fee;
@@ -86,7 +92,7 @@ pub fn lending_pool_add_bank(
     emit!(LendingPoolBankCreateEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.marginfi_group.key(),
-            signer: Some(*ctx.accounts.admin.key)
+            signer: Some(*ctx.accounts.bank_admin.key)
         },
         bank: bank_loader.key(),
         mint: bank_mint.key(),
@@ -102,13 +108,10 @@ pub fn lending_pool_add_bank(
 #[derive(Accounts)]
 #[instruction(bank_config: BankConfigCompact)]
 pub struct LendingPoolAddBank<'info> {
-    #[account(
-        mut,
-        has_one = admin @ MarginfiError::Unauthorized
-    )]
+    #[account(mut)]
     pub marginfi_group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub bank_admin: Signer<'info>,
 
     /// Pays to init accounts and pays `fee_state.bank_init_flat_sol_fee` lamports to the protocol
     #[account(mut)]

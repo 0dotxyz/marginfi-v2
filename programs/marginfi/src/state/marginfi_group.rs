@@ -6,7 +6,10 @@ use crate::{prelude::MarginfiError, MarginfiResult};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::types::basis_to_u32;
-use marginfi_type_crate::{constants::DAILY_RESET_INTERVAL, types::MarginfiGroup};
+use marginfi_type_crate::{
+    constants::DAILY_RESET_INTERVAL,
+    types::{BankOperationalState, MarginfiGroup, RequiredAuthority},
+};
 use std::fmt::Debug;
 
 pub const PROGRAM_FEES_ENABLED: u64 = 1;
@@ -21,11 +24,13 @@ pub trait MarginfiGroupImpl {
     fn update_emissions_admin(&mut self, new_emissions_admin: Pubkey);
     fn update_metadata_admin(&mut self, new_metadata_admin: Pubkey);
     fn update_risk_admin(&mut self, new_risk_admin: Pubkey);
+    fn update_bank_admin(&mut self, new_bank_admin: Pubkey);
     fn set_initial_configuration(&mut self, admin_pk: Pubkey);
     fn get_group_bank_config(&self) -> GroupBankConfig;
     fn set_program_fee_enabled(&mut self, fee_enabled: bool);
     fn program_fees_enabled(&self) -> bool;
     fn is_admin_or_limit_admin(&self, signer: Pubkey) -> bool;
+    fn bank_admin_or_fallback(&self) -> Pubkey;
     fn add_bank(&mut self) -> MarginfiResult;
     fn is_protocol_paused(&self) -> bool;
     fn update_withdrawn_equity(
@@ -38,6 +43,9 @@ pub trait MarginfiGroupImpl {
         withdrawn_equity: I80F48,
         current_timestamp: i64,
     ) -> MarginfiResult;
+    fn require_admin(&self, signer: Pubkey) -> MarginfiResult;
+    fn require_bank_admin(&self, signer: Pubkey) -> MarginfiResult;
+    fn rotate_bank_admin(&mut self, new_bank_admin: Pubkey, signer: Pubkey) -> MarginfiResult;
 }
 
 impl MarginfiGroupImpl for MarginfiGroup {
@@ -148,12 +156,27 @@ impl MarginfiGroupImpl for MarginfiGroup {
         }
     }
 
+    fn update_bank_admin(&mut self, new_bank_admin: Pubkey) {
+        if self.bank_admin == new_bank_admin {
+            msg!("No change to bank admin: {:?}", new_bank_admin);
+            // do nothing
+        } else {
+            msg!(
+                "Set bank admin from {:?} to {:?}",
+                self.bank_admin,
+                new_bank_admin
+            );
+            self.bank_admin = new_bank_admin;
+        }
+    }
+
     /// Set the group parameters when initializing a group.
     /// This should be called only when the group is first initialized.
     #[allow(clippy::too_many_arguments)]
     fn set_initial_configuration(&mut self, admin_pk: Pubkey) {
         self.admin = admin_pk;
         self.delegate_flow_admin = admin_pk;
+        self.bank_admin = admin_pk;
         self.set_program_fee_enabled(true);
         self.emode_max_init_leverage = basis_to_u32(DEFAULT_INIT_MAX_EMODE_LEVERAGE);
         self.emode_max_maint_leverage = basis_to_u32(DEFAULT_MAINT_MAX_EMODE_LEVERAGE);
@@ -184,6 +207,14 @@ impl MarginfiGroupImpl for MarginfiGroup {
 
     fn is_admin_or_limit_admin(&self, signer: Pubkey) -> bool {
         signer == self.admin || signer == self.delegate_limit_admin
+    }
+
+    fn bank_admin_or_fallback(&self) -> Pubkey {
+        if self.bank_admin == Pubkey::default() {
+            self.admin
+        } else {
+            self.bank_admin
+        }
     }
 
     // Increment the bank count by 1. If you managed to create 16,000 banks, congrats, does
@@ -261,6 +292,30 @@ impl MarginfiGroupImpl for MarginfiGroup {
 
         Ok(())
     }
+
+    fn require_admin(&self, signer: Pubkey) -> MarginfiResult {
+        require_eq!(self.admin, signer, MarginfiError::Unauthorized);
+        Ok(())
+    }
+
+    fn require_bank_admin(&self, signer: Pubkey) -> MarginfiResult {
+        require_eq!(
+            self.bank_admin_or_fallback(),
+            signer,
+            MarginfiError::Unauthorized
+        );
+        Ok(())
+    }
+
+    fn rotate_bank_admin(&mut self, new_bank_admin: Pubkey, signer: Pubkey) -> MarginfiResult {
+        require_eq!(
+            self.bank_admin_or_fallback(),
+            signer,
+            MarginfiError::Unauthorized
+        );
+        self.update_bank_admin(new_bank_admin);
+        Ok(())
+    }
 }
 
 trait MarginfiGroupDeleverageLimitExt {
@@ -295,4 +350,49 @@ impl MarginfiGroupDeleverageLimitExt for MarginfiGroup {
 #[derive(Clone, Debug)]
 pub struct GroupBankConfig {
     pub program_fees: bool,
+}
+
+pub fn authorize_bank_admin<'info>(
+    group: &AccountLoader<'info, MarginfiGroup>,
+    signer: &Signer<'info>,
+) -> MarginfiResult {
+    let group_data = group.load()?;
+    group_data.require_bank_admin(signer.key())?;
+    Ok(())
+}
+
+pub trait RequiredAuthorityExt {
+    fn authorize(
+        &self,
+        group: &MarginfiGroup,
+        signer: &Pubkey,
+        current_state: BankOperationalState,
+    ) -> MarginfiResult;
+}
+
+impl RequiredAuthorityExt for RequiredAuthority {
+    fn authorize(
+        &self,
+        group: &MarginfiGroup,
+        signer: &Pubkey,
+        current_state: BankOperationalState,
+    ) -> MarginfiResult {
+        match self {
+            RequiredAuthority::None => group.require_admin(*signer),
+            RequiredAuthority::Mixed => Err(error!(MarginfiError::MixedBankConfigAuthority)),
+            RequiredAuthority::OperationalStateChange(target_state) => {
+                let is_transitioning_to_operational = current_state
+                    != BankOperationalState::Operational
+                    && *target_state == BankOperationalState::Operational;
+
+                if is_transitioning_to_operational {
+                    group.require_bank_admin(*signer)
+                } else {
+                    group.require_admin(*signer)
+                }
+            }
+            RequiredAuthority::Governance => group.require_bank_admin(*signer),
+            RequiredAuthority::AdminOnly => group.require_admin(*signer),
+        }
+    }
 }

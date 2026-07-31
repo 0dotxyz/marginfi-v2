@@ -1,5 +1,5 @@
-import { BN, Program } from "@coral-xyz/anchor";
-import { AccountMeta, PublicKey } from "@solana/web3.js";
+import { BN, Program, AnchorProvider } from "@coral-xyz/anchor";
+import { AccountMeta, PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { Marginfi } from "../../target/types/marginfi";
 import {
   deriveBankWithSeed,
@@ -10,6 +10,7 @@ import {
 import {
   BankConfig,
   BankConfigOptRaw,
+  blankBankConfigOptRaw,
   EmodeEntry,
   I80F48_ZERO,
   MAX_EMODE_ENTRIES,
@@ -278,19 +279,30 @@ export const resizeGlobalFeeState = (
 export type ConfigureBankArgs = {
   bank: PublicKey;
   bankConfigOpt: BankConfigOptRaw;
+  group?: PublicKey;
+  signer?: PublicKey;
 };
+
 
 export const configureBank = (
   program: Program<Marginfi>,
   args: ConfigureBankArgs,
-) => {
-  const ix = program.methods
+): Promise<TransactionInstruction> => {
+  const signer = args.signer || (program.provider as AnchorProvider).wallet.publicKey;
+  
+  const accounts: Record<string, PublicKey> = {
+    bank: args.bank,
+    signer,
+  };
+  
+  if (args.group) {
+    accounts.group = args.group;
+  }
+
+  return program.methods
     .lendingPoolConfigureBank(args.bankConfigOpt)
-    .accounts({
-      bank: args.bank,
-    })
+    .accounts(accounts)
     .instruction();
-  return ix;
 };
 
 export type ConfigureBankRateLimitsArgs = {
@@ -342,6 +354,8 @@ export type ConfigureBankOracleArgs = {
   bank: PublicKey;
   type: number;
   oracle: PublicKey;
+  group?: PublicKey;
+  bankAdmin?: PublicKey;
 };
 
 export const configureBankOracle = (
@@ -354,11 +368,20 @@ export const configureBankOracle = (
     isWritable: false,
   };
 
+  const bankAdmin = args.bankAdmin || (program.provider as AnchorProvider).wallet.publicKey;
+  
+  const accounts: Record<string, PublicKey> = {
+    bank: args.bank,
+    bankAdmin,
+  };
+
+  if (args.group) {
+    accounts.group = args.group;
+  }
+
   const ix = program.methods
     .lendingPoolConfigureBankOracle(args.type, args.oracle)
-    .accounts({
-      bank: args.bank,
-    })
+    .accounts(accounts)
     .remainingAccounts([oracleMeta])
     .instruction();
   return ix;
@@ -675,14 +698,16 @@ export const disableStakedOracles = (
   group: PublicKey,
   admin?: PublicKey,
 ) => {
-  const [settingsKey] = deriveStakedSettings(program.programId, group);
+  const [stakedSettingsKey] = deriveStakedSettings(
+    program.programId,
+    group,
+  );
   const ix = program.methods
     .disableStakedOracles()
     .accounts({
       group,
-      stakedSettings: settingsKey,
     })
-    .accountsPartial({ admin })
+    .accountsPartial({ admin, stakedSettings: stakedSettingsKey })
     .instruction();
 
   return ix;
@@ -693,14 +718,16 @@ export const enableStakedOracleOnramp = (
   group: PublicKey,
   admin?: PublicKey,
 ) => {
-  const [settingsKey] = deriveStakedSettings(program.programId, group);
+  const [stakedSettingsKey] = deriveStakedSettings(
+    program.programId,
+    group,
+  );
   const ix = program.methods
     .enableStakedOracleOnramp()
     .accounts({
       group,
-      stakedSettings: settingsKey,
     })
-    .accountsPartial({ admin })
+    .accountsPartial({ admin, stakedSettings: stakedSettingsKey })
     .instruction();
 
   return ix;
@@ -942,16 +969,18 @@ export const handleBankruptcy = (
 };
 
 export type CloseBankArgs = {
+  marginfiGroup: PublicKey;
   bank: PublicKey;
+  admin: PublicKey;
 };
 
 export const closeBank = (program: Program<Marginfi>, args: CloseBankArgs) => {
   const ix = program.methods
     .lendingPoolCloseBank()
     .accounts({
-      // group: args.group, // implied from bank
+      marginfiGroup: args.marginfiGroup,
       bank: args.bank,
-      // admin: args.admin, // implied from group
+      admin: args.admin,
     })
     .instruction();
   return ix;
@@ -1076,6 +1105,8 @@ export const initSameAssetEmodeRegistry = (
 export type SetFixedPriceArgs = {
   bank: PublicKey;
   price: number;
+  group?: PublicKey;
+  bankAdmin?: PublicKey;
   remaining?: PublicKey[];
 };
 
@@ -1087,13 +1118,20 @@ export const setFixedPrice = (
     return { pubkey, isSigner: false, isWritable: false };
   });
 
+  const bankAdmin = args.bankAdmin || (program.provider as AnchorProvider).wallet.publicKey;
+  
+  const accounts: Record<string, PublicKey> = {
+    bank: args.bank,
+    bankAdmin,
+  };
+  
+  if (args.group) {
+    accounts.group = args.group;
+  }
+
   const ix = program.methods
     .lendingPoolSetFixedOraclePrice(bigNumberToWrappedI80F48(args.price))
-    .accounts({
-      // group: // implied from bank
-      // admin: // implied from group
-      bank: args.bank,
-    })
+    .accounts(accounts)
     .remainingAccounts(oracleMeta)
     .instruction();
 

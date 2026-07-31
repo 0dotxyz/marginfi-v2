@@ -31,6 +31,7 @@ import { bigNumberToWrappedI80F48 } from "@mrgnlabs/mrgn-common";
 import {
   aprToU32,
   ASSET_TAG_SOL,
+  blankBankConfigOptRaw,
   BankConfigOptRaw,
   CLOSE_ENABLED_FLAG,
   defaultBankConfigOptRaw,
@@ -38,6 +39,7 @@ import {
   InterestRateConfigOpt1_6,
   makeRatePoints,
   ORACLE_SETUP_FIXED,
+  splitBankConfig,
   TOKENLESS_REPAYMENTS_ALLOWED,
   u32_MAX,
 } from "../../utils/types";
@@ -67,44 +69,52 @@ describe("Lending pool configure bank", () => {
       points: expPoints,
     };
 
-    let bankConfigOpt: BankConfigOptRaw = {
-      assetWeightInit: bigNumberToWrappedI80F48(0.6),
-      assetWeightMaint: bigNumberToWrappedI80F48(0.7),
-      liabilityWeightInit: bigNumberToWrappedI80F48(1.9),
-      liabilityWeightMaint: bigNumberToWrappedI80F48(1.8),
-      depositLimit: new BN(5000),
-      borrowLimit: new BN(10000),
-      riskTier: null,
-      assetTag: ASSET_TAG_SOL,
-      totalAssetValueInitLimit: new BN(15000),
-      interestRateConfig: interestRateConfig,
-      operationalState: {
-        paused: undefined,
-      },
-      oracleMaxAge: 150,
-      permissionlessBadDebtSettlement: null,
-      freezeSettings: null,
-      oracleMaxConfidence: 420000,
-      tokenlessRepaymentsAllowed: true,
-      liquidationLiquidatorFee: Math.floor(u32_MAX * 0.03), // 3%
-      liquidationInsuranceFee: Math.floor(u32_MAX * 0.035), // 3.5%
-      circuitBreakerEnabled: null,
-      cbDeviationBpsTiers: null,
-      cbTierDurationsSeconds: null,
-      cbEscalationWindowMult: null,
-      cbEmaAlphaBps: null,
-      cbWindowSeconds: null,
-      cbWindowMaxUpBps: null,
-      cbWindowMaxDownBps: null,
+    const riskConfig = blankBankConfigOptRaw();
+    riskConfig.assetWeightInit = bigNumberToWrappedI80F48(0.6);
+    riskConfig.assetWeightMaint = bigNumberToWrappedI80F48(0.7);
+    riskConfig.liabilityWeightInit = bigNumberToWrappedI80F48(1.9);
+    riskConfig.liabilityWeightMaint = bigNumberToWrappedI80F48(1.8);
+    riskConfig.assetTag = ASSET_TAG_SOL;
+    riskConfig.oracleMaxAge = 150;
+    riskConfig.oracleMaxConfidence = 420000;
+
+    const adminConfig = blankBankConfigOptRaw();
+    adminConfig.depositLimit = new BN(5000);
+    adminConfig.borrowLimit = new BN(10000);
+    adminConfig.totalAssetValueInitLimit = new BN(15000);
+    adminConfig.interestRateConfig = interestRateConfig;
+    adminConfig.tokenlessRepaymentsAllowed = true;
+    adminConfig.liquidationLiquidatorFee = Math.floor(u32_MAX * 0.03); 
+    adminConfig.liquidationInsuranceFee = Math.floor(u32_MAX * 0.035); 
+
+    const operationalConfig = blankBankConfigOptRaw();
+    operationalConfig.operationalState = {
+      paused: undefined,
     };
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
-      new Transaction().add(
-        await configureBank(groupAdmin.mrgnProgram, {
-          bank: bankKey,
-          bankConfigOpt: bankConfigOpt,
-        })
-      )
+      new Transaction()
+        .add(
+          await configureBank(groupAdmin.mrgnProgram, {
+            bank: bankKey,
+            bankConfigOpt: riskConfig,
+            group: marginfiGroup.publicKey,
+          })
+        )
+        .add(
+          await configureBank(groupAdmin.mrgnProgram, {
+            bank: bankKey,
+            bankConfigOpt: adminConfig,
+            group: marginfiGroup.publicKey,
+          })
+        )
+        .add(
+          await configureBank(groupAdmin.mrgnProgram, {
+            bank: bankKey,
+            bankConfigOpt: operationalConfig,
+            group: marginfiGroup.publicKey,
+          })
+        )
     );
 
     const bank = await program.account.bank.fetch(bankKey);
@@ -163,13 +173,36 @@ describe("Lending pool configure bank", () => {
   });
 
   it("(admin) Restore default settings to bank (USDC)", async () => {
+    const { riskConfig, adminConfig, operationalConfig } = splitBankConfig(
+      defaultBankConfigOptRaw()
+    );
+    
     await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
-      new Transaction().add(
-        await configureBank(groupAdmin.mrgnProgram, {
-          bank: bankKeypairUsdc.publicKey,
-          bankConfigOpt: defaultBankConfigOptRaw(),
-        })
-      )
+      new Transaction()
+        .add(
+          await configureBank(groupAdmin.mrgnProgram, {
+            bank: bankKeypairUsdc.publicKey,
+            bankConfigOpt: riskConfig,
+            group: marginfiGroup.publicKey,
+            signer: groupAdmin.wallet.publicKey,
+          })
+        )
+        .add(
+          await configureBank(groupAdmin.mrgnProgram, {
+            bank: bankKeypairUsdc.publicKey,
+            bankConfigOpt: adminConfig,
+            group: marginfiGroup.publicKey,
+            signer: groupAdmin.wallet.publicKey,
+          })
+        )
+        .add(
+          await configureBank(groupAdmin.mrgnProgram, {
+            bank: bankKeypairUsdc.publicKey,
+            bankConfigOpt: operationalConfig,
+            group: marginfiGroup.publicKey,
+            signer: groupAdmin.wallet.publicKey,
+          })
+        )
     );
   });
 
@@ -310,13 +343,15 @@ describe("Lending pool configure bank", () => {
   });
 
   it("(admin) Freeze USDC settings so they cannot be changed again (USDC)", async () => {
-    let config = defaultBankConfigOptRaw();
+    let config = blankBankConfigOptRaw();
     config.freezeSettings = true;
     await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
       new Transaction().add(
         await configureBank(groupAdmin.mrgnProgram, {
           bank: bankKeypairUsdc.publicKey,
           bankConfigOpt: config,
+          group: marginfiGroup.publicKey,
+          signer: groupAdmin.wallet.publicKey,
         })
       )
     );
@@ -342,21 +377,19 @@ describe("Lending pool configure bank", () => {
   });
 
   it("(admin) Update settings after a freeze - only deposit/borrow caps update", async () => {
-    let configNew = defaultBankConfigOptRaw();
+    let configNew = blankBankConfigOptRaw();
     const newDepositLimit = new BN(2_000_000_000);
     const newBorrowLimit = new BN(3_000_000_000);
     configNew.depositLimit = newDepositLimit;
     configNew.borrowLimit = newBorrowLimit;
-
-    // These will be ignored...
-    configNew.oracleMaxAge = 42;
-    configNew.freezeSettings = false;
 
     await groupAdmin.mrgnProgram.provider.sendAndConfirm!(
       new Transaction().add(
         await configureBank(groupAdmin.mrgnProgram, {
           bank: bankKeypairUsdc.publicKey,
           bankConfigOpt: configNew,
+          group: marginfiGroup.publicKey,
+          signer: groupAdmin.wallet.publicKey,
         })
       )
     );

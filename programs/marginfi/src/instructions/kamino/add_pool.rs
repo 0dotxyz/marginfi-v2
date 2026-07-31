@@ -4,8 +4,10 @@ use crate::{
     events::{GroupEventHeader, LendingPoolBankCreateEvent},
     log_pool_info,
     state::{
-        bank::BankImpl, bank_config::BankConfigImpl, kamino::KaminoConfigCompact,
-        marginfi_group::MarginfiGroupImpl,
+        bank::BankImpl,
+        bank_config::BankConfigImpl,
+        kamino::KaminoConfigCompact,
+        marginfi_group::{authorize_bank_admin, MarginfiGroupImpl},
     },
     MarginfiError, MarginfiResult,
 };
@@ -37,6 +39,8 @@ pub fn lending_pool_add_bank_kamino(
         integration_acc_2: obligation_account,
         ..
     } = ctx.accounts;
+
+    authorize_bank_admin(&ctx.accounts.group, &ctx.accounts.bank_admin)?;
 
     let mut bank = bank_loader.load_init()?;
     let mut group = ctx.accounts.group.load_mut()?;
@@ -109,13 +113,10 @@ pub fn lending_pool_add_bank_kamino(
 #[derive(Accounts)]
 #[instruction(bank_config: KaminoConfigCompact, bank_seed: u64)]
 pub struct LendingPoolAddBankKamino<'info> {
-    #[account(
-        mut,
-        has_one = admin @ MarginfiError::Unauthorized
-    )]
+    #[account(mut)]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub bank_admin: Signer<'info>,
 
     #[account(mut)]
     pub fee_payer: Signer<'info>,

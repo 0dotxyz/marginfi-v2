@@ -1,7 +1,9 @@
 use crate::events::{GroupEventHeader, LendingPoolBankSetFixedOraclePriceEvent};
 use crate::state::bank::BankImpl;
 use crate::state::bank_config::BankConfigImpl;
-use crate::{check, errors::MarginfiError, MarginfiResult};
+use crate::{
+    check, errors::MarginfiError, state::marginfi_group::authorize_bank_admin, MarginfiResult,
+};
 use anchor_lang::prelude::*;
 use fixed::types::I80F48;
 use marginfi_type_crate::constants::{
@@ -16,6 +18,8 @@ pub fn lending_pool_set_fixed_oracle_price(
     ctx: Context<LendingPoolSetFixedOraclePrice>,
     price: WrappedI80F48,
 ) -> MarginfiResult {
+    authorize_bank_admin(&ctx.accounts.group, &ctx.accounts.bank_admin)?;
+
     let mut bank = ctx.accounts.bank.load_mut()?;
 
     if bank.get_flag(FREEZE_SETTINGS) {
@@ -68,7 +72,7 @@ pub fn lending_pool_set_fixed_oracle_price(
     emit!(LendingPoolBankSetFixedOraclePriceEvent {
         header: GroupEventHeader {
             marginfi_group: ctx.accounts.group.key(),
-            signer: Some(*ctx.accounts.admin.key),
+            signer: Some(*ctx.accounts.bank_admin.key),
         },
         bank: ctx.accounts.bank.key(),
         price,
@@ -79,12 +83,9 @@ pub fn lending_pool_set_fixed_oracle_price(
 
 #[derive(Accounts)]
 pub struct LendingPoolSetFixedOraclePrice<'info> {
-    #[account(
-        has_one = admin
-    )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub bank_admin: Signer<'info>,
 
     #[account(
         mut,

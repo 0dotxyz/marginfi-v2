@@ -4,7 +4,7 @@ use crate::events::{
 use crate::prelude::MarginfiError;
 use crate::state::bank::BankImpl;
 use crate::state::emode::EmodeSettingsImpl;
-use crate::state::marginfi_group::MarginfiGroupImpl;
+use crate::state::marginfi_group::{MarginfiGroupImpl, RequiredAuthorityExt};
 use crate::utils::is_marginfi_asset_tag;
 use crate::MarginfiResult;
 use crate::{check, math_error, utils};
@@ -22,6 +22,15 @@ pub fn lending_pool_configure_bank(
     bank_config: BankConfigOpt,
 ) -> MarginfiResult {
     let mut bank = ctx.accounts.bank.load_mut()?;
+    let group = ctx.accounts.group.load()?;
+
+    let current_operational_state = bank.config.operational_state;
+
+    bank_config.required_authority().authorize(
+        &group,
+        ctx.accounts.signer.key,
+        current_operational_state,
+    )?;
 
     // If settings are frozen, you can only update the deposit and borrow limits, everything else is ignored.
     if bank.get_flag(FREEZE_SETTINGS) {
@@ -32,7 +41,7 @@ pub fn lending_pool_configure_bank(
         emit!(LendingPoolBankConfigureFrozenEvent {
             header: GroupEventHeader {
                 marginfi_group: ctx.accounts.group.key(),
-                signer: Some(*ctx.accounts.admin.key)
+                signer: Some(*ctx.accounts.signer.key)
             },
             bank: ctx.accounts.bank.key(),
             mint: bank.mint,
@@ -58,7 +67,6 @@ pub fn lending_pool_configure_bank(
         bank.configure(&bank_config)?;
         msg!("Bank configured!");
 
-        let group = ctx.accounts.group.load()?;
         bank.emode.validate_entries_with_liability_weights(
             &bank.config,
             group.emode_max_init_leverage,
@@ -68,7 +76,7 @@ pub fn lending_pool_configure_bank(
         emit!(LendingPoolBankConfigureEvent {
             header: GroupEventHeader {
                 marginfi_group: ctx.accounts.group.key(),
-                signer: Some(*ctx.accounts.admin.key)
+                signer: Some(*ctx.accounts.signer.key)
             },
             bank: ctx.accounts.bank.key(),
             mint: bank.mint,
@@ -81,12 +89,9 @@ pub fn lending_pool_configure_bank(
 
 #[derive(Accounts)]
 pub struct LendingPoolConfigureBank<'info> {
-    #[account(
-        has_one = admin @ MarginfiError::Unauthorized,
-    )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub signer: Signer<'info>,
 
     #[account(
         mut,

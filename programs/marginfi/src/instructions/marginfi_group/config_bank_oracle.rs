@@ -1,7 +1,11 @@
-use crate::events::{GroupEventHeader, LendingPoolBankConfigureOracleEvent};
-use crate::state::bank::BankImpl;
-use crate::state::bank_config::BankConfigImpl;
-use crate::{check, MarginfiError, MarginfiResult};
+use crate::{
+    check,
+    events::{GroupEventHeader, LendingPoolBankConfigureOracleEvent},
+    state::bank::BankImpl,
+    state::bank_config::BankConfigImpl,
+    state::marginfi_group::authorize_bank_admin,
+    MarginfiError, MarginfiResult,
+};
 use anchor_lang::prelude::*;
 use marginfi_type_crate::constants::{BANK_SAME_ASSET_EMODE_ELIGIBLE, FREEZE_SETTINGS};
 use marginfi_type_crate::types::{Bank, MarginfiGroup, OracleSetup};
@@ -11,6 +15,8 @@ pub fn lending_pool_configure_bank_oracle(
     setup: u8,
     oracle: Pubkey,
 ) -> MarginfiResult {
+    authorize_bank_admin(&ctx.accounts.group, &ctx.accounts.bank_admin)?;
+
     let mut bank = ctx.accounts.bank.load_mut()?;
 
     // If settings are frozen, you can only update the deposit and borrow limits, so this ix will fail
@@ -51,7 +57,7 @@ pub fn lending_pool_configure_bank_oracle(
         emit!(LendingPoolBankConfigureOracleEvent {
             header: GroupEventHeader {
                 marginfi_group: ctx.accounts.group.key(),
-                signer: Some(*ctx.accounts.admin.key)
+                signer: Some(*ctx.accounts.bank_admin.key)
             },
             bank: ctx.accounts.bank.key(),
             oracle_setup: setup,
@@ -64,12 +70,9 @@ pub fn lending_pool_configure_bank_oracle(
 
 #[derive(Accounts)]
 pub struct LendingPoolConfigureBankOracle<'info> {
-    #[account(
-        has_one = admin @ MarginfiError::Unauthorized
-    )]
     pub group: AccountLoader<'info, MarginfiGroup>,
 
-    pub admin: Signer<'info>,
+    pub bank_admin: Signer<'info>,
 
     #[account(
         mut,

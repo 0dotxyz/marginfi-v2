@@ -689,7 +689,7 @@ async fn configure_bank_to_fixed_oracle() -> anyhow::Result<()> {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::LendingPoolSetFixedOraclePrice {
                 group: test_f.marginfi_group.key,
-                admin: ctx.payer.pubkey(),
+                bank_admin: ctx.payer.pubkey(),
                 bank: bank_f.key,
             }
             .to_account_metas(Some(true)),
@@ -915,7 +915,7 @@ async fn update_fixed_bank_price() -> anyhow::Result<()> {
             program_id: marginfi::ID,
             accounts: marginfi::accounts::LendingPoolSetFixedOraclePrice {
                 group: test_f.marginfi_group.key,
-                admin: ctx.payer.pubkey(),
+                bank_admin: ctx.payer.pubkey(),
                 bank: bank_f.key,
             }
             .to_account_metas(Some(true)),
