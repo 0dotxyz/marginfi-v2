@@ -1012,8 +1012,29 @@ async fn clear_circuit_breaker_accepts_either_authority() -> anyhow::Result<()> 
 #[tokio::test]
 async fn paused_pulse_escalates_cb_and_banks_frozen_span() -> anyhow::Result<()> {
     let test_f = TestFixture::new(Some(TestSettings::all_banks_payer_not_admin())).await;
+    let usdc_bank = test_f.get_bank(&BankMint::Usdc);
     let sol_bank = test_f.get_bank(&BankMint::Sol);
     let base_native: i64 = 10_000_000_000;
+
+    // Fund the SOL bank and open a liability against it so the deferred accrual has both assets
+    // and liabilities and therefore records `interest_accumulated_for`.
+    let lp = test_f.create_marginfi_account().await;
+    let lp_sol_acc = test_f.sol_mint.create_token_account_and_mint_to(100).await;
+    lp.try_bank_deposit(lp_sol_acc.key, sol_bank, 10, None)
+        .await?;
+
+    let borrower = test_f.create_marginfi_account().await;
+    let borrower_usdc_acc = test_f
+        .usdc_mint
+        .create_token_account_and_mint_to(1_000)
+        .await;
+    borrower
+        .try_bank_deposit(borrower_usdc_acc.key, usdc_bank, 1_000, None)
+        .await?;
+    let borrower_sol_acc = test_f.sol_mint.create_empty_token_account().await;
+    borrower
+        .try_bank_borrow(borrower_sol_acc.key, sol_bank, 1)
+        .await?;
 
     // Trip a real tier-3 halt on the SOL bank: records [101, 14501], last_update = 101.
     enable_cb_and_trip_halt(&test_f, sol_bank, PYTH_SOL_FEED, base_native).await?;
@@ -1052,6 +1073,20 @@ async fn paused_pulse_escalates_cb_and_banks_frozen_span() -> anyhow::Result<()>
     assert_eq!(after.cb_tier3_consecutive_trips, 2);
     // The overwritten halt's frozen span (101 → 14501) is banked for the next accrual to exclude.
     assert_eq!(after.cb_frozen_seconds_pending, 14_400);
+    assert_eq!(after.last_update, 101);
+
+    // Resume one second after the second halt expires and accrue. Of the 28_802 seconds since
+    // `last_update`, both halts (14_400 each) are frozen, leaving only the two one-second gaps
+    // between them and after the second: [14_501, 14_502] and [28_902, 28_903].
+    let resume_time = after.cb_halt_ended_at + 1;
+    test_f.set_clock(1_040, resume_time).await;
+    test_f.marginfi_group.try_panic_unpause().await?;
+    test_f.marginfi_group.try_accrue_interest(sol_bank).await?;
+
+    let accrued = sol_bank.load().await;
+    assert_eq!(accrued.cache.interest_accumulated_for, 2);
+    assert_eq!(accrued.cb_frozen_seconds_pending, 0);
+    assert_eq!(accrued.last_update, resume_time);
 
     Ok(())
 }
