@@ -2,13 +2,14 @@
 mod tests {
     use std::{i64, u64};
 
+    use crate::state::rate_limiter::{BankRateLimiterImpl, RateLimitWindowImpl};
     use bytemuck::Zeroable;
     use fixed::types::I80F48;
     use kamino_mocks::state::{u68f60_to_i80f48, MinimalReserve};
     use marginfi_type_crate::types::price::{
         mul_i128_by_i80f48, mul_i64_by_i80f48, mul_u64_by_i80f48,
     };
-
+    use marginfi_type_crate::types::BankRateLimiter;
     const FRAC_BITS_DIFF: u32 = 60 - 48;
 
     // Exact overflow threshold helpers
@@ -348,6 +349,22 @@ mod tests {
         // and back: 50 liquidity -> 50 * (200/1000) = 50 * 0.2 = 10 collateral
         let col = r.liquidity_to_collateral(50).unwrap();
         assert_eq!(col, 10);
+    }
+
+    #[test]
+    fn withdraw_rate_limit_records_underlying_not_collateral_shares() {
+        let reserve = generic_reserve(1000, 6, 500);
+        let native_outflow = reserve.collateral_to_liquidity(50).unwrap();
+        assert_eq!(native_outflow, 100);
+
+        let t0 = 1_000;
+        let mut limiter = BankRateLimiter::default();
+        limiter.configure_hourly(100, t0);
+        limiter.record_inflow(100, t0);
+        assert_eq!(limiter.hourly.remaining_capacity(t0), 200);
+
+        limiter.try_record_outflow(native_outflow, t0).unwrap();
+        assert_eq!(limiter.hourly.remaining_capacity(t0), 100);
     }
 
     #[test]
